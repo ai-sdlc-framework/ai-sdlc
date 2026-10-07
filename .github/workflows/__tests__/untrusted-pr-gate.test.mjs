@@ -151,28 +151,57 @@ describe('AISDLC-381 fork-PR safety: guard #1 — workflow logic uses target mai
   });
 });
 
-describe('AISDLC-381 fork-PR safety: guard #2 — fork content sandboxed in pr-content/', () => {
-  it('all fork-content checkouts use path: pr-content and persist-credentials: false', () => {
-    const checkouts = checkoutSteps(wf);
-    const forkCheckouts = checkouts.filter(
-      (c) =>
-        typeof c.ref === 'string' && (c.ref.includes('head_sha') || c.ref.includes('head.sha')),
-    );
-    assert.ok(
-      forkCheckouts.length > 0,
-      `${WORKFLOW_NAME} must have at least one fork-HEAD checkout for PR content`,
-    );
-    for (const c of forkCheckouts) {
-      assert.equal(
-        c.path,
-        'pr-content',
-        `fork-data checkout MUST use path: pr-content (sandboxed subdirectory)`,
+// AISDLC-704.6: the fork head is never checked out. `pr-content/` is a
+// job-created git directory that receives base + head git OBJECTS via fetch.
+const FETCH_STEP_RE = /Fetch fork PR git objects into data-only pr-content/;
+function fetchSteps() {
+  return allSteps(wf).filter(({ step }) => FETCH_STEP_RE.test(String(step.name ?? '')));
+}
+
+describe('AISDLC-704.6 fork-PR safety: guard #2 — fork head is never checked out', () => {
+  it('no actions/checkout pins the PR head, targets a fork repo, or writes pr-content/', () => {
+    for (const { jobId, step } of allSteps(wf)) {
+      if (typeof step.uses === 'string' && step.uses.startsWith('actions/checkout@')) {
+        const w = step.with ?? {};
+        assert.equal(w.ref, undefined, `job '${jobId}': checkout must not pin a ref`);
+        assert.equal(w.repository, undefined, `job '${jobId}': checkout must not target a fork`);
+        assert.equal(w.path, undefined, `job '${jobId}': no sandbox-path checkout`);
+        assert.equal(w['allow-unsafe-pr-checkout'], undefined, `job '${jobId}'`);
+      }
+    }
+  });
+
+  it('both the gate job and the sandbox job fetch fork objects into pr-content/', () => {
+    const jobs = fetchSteps().map(({ jobId }) => jobId);
+    assert.deepEqual(jobs.sort(), ['classify-and-gate', 'sandbox-and-review']);
+  });
+
+  it('fetch steps bind repos/shas through env and validate them (no inline expressions)', () => {
+    for (const { jobId, step } of fetchSteps()) {
+      const run = String(step.run);
+      assert.equal(step.env.HEAD_SHA, '${{ github.event.pull_request.head.sha }}');
+      assert.equal(step.env.BASE_SHA, '${{ github.event.pull_request.base.sha }}');
+      assert.equal(step.env.HEAD_REPO_FULL, '${{ github.event.pull_request.head.repo.full_name }}');
+      assert.equal(step.env.BASE_REPO_FULL, '${{ github.repository }}');
+      assert.ok(!/\$\{\{/.test(run), `job '${jobId}': run: must not interpolate expressions`);
+      assert.ok(run.includes('=~ ^[0-9a-f]{40}$'), `job '${jobId}': shas must be hex-validated`);
+      assert.ok(
+        run.includes('"$HEAD_REPO_FULL" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$'),
+        `job '${jobId}': head repo name must be pattern-validated`,
       );
-      assert.equal(
-        c.persistCredentials,
-        false,
-        `fork-data checkout MUST disable persist-credentials so fork code never sees a token`,
+      assert.ok(
+        run.indexOf('unexpected sha') < run.indexOf('git init'),
+        `job '${jobId}': validation must precede any fetch`,
       );
+    }
+  });
+
+  it('fetches objects only: git init + fetch, never a working-tree checkout or clone', () => {
+    for (const { jobId, step } of fetchSteps()) {
+      const run = String(step.run);
+      assert.match(run, /git init --quiet pr-content/, `job '${jobId}'`);
+      assert.match(run, /git -C pr-content fetch --no-tags/, `job '${jobId}'`);
+      assert.doesNotMatch(run, /\bgit\s+(-C\s+\S+\s+)?(checkout|clone|switch|pull|merge)\b/);
     }
   });
 });
@@ -877,37 +906,17 @@ describe('Permissions — minimum needed; no contents:write (fork-PR safety guar
   });
 });
 
-// ── Bug A fix: fetch-depth:0 on pr-content checkouts ─────────────────────────
+// ── Bug A fix: full history in pr-content (AISDLC-704.6: via fetch, not checkout) ──
 
-describe('Bug A fix — pr-content checkouts use fetch-depth: 0', () => {
-  it('all pr-content checkouts have fetch-depth: 0', () => {
-    // Both classify-and-gate and sandbox-and-review jobs check out pr-content.
-    // Without fetch-depth: 0, the depth-1 clone lacks the base SHA and HEAD~1,
-    // so the Stage-1 diff is empty and the gate fail-closes on every untrusted PR.
-    const prContentCheckouts = [];
-    for (const [jobId, job] of Object.entries(wf.jobs ?? {})) {
-      for (const step of job.steps ?? []) {
-        if (
-          typeof step.uses === 'string' &&
-          step.uses.startsWith('actions/checkout@') &&
-          step.with?.path === 'pr-content'
-        ) {
-          prContentCheckouts.push({ jobId, step });
-        }
-      }
-    }
-    assert.ok(
-      prContentCheckouts.length >= 2,
-      `${WORKFLOW_NAME} must have at least two pr-content checkouts (one per job that uses the fork diff)`,
-    );
-    for (const { jobId, step } of prContentCheckouts) {
-      const fetchDepth = step.with?.['fetch-depth'];
-      // YAML may parse 0 as number 0; accept either form
-      assert.ok(
-        fetchDepth === 0 || fetchDepth === '0',
-        `pr-content checkout in job '${jobId}' MUST have fetch-depth: 0 so the shallow ` +
-          `clone contains the base SHA needed for git diff BASE..HEAD (Bug A fix)`,
-      );
+describe('Bug A fix — pr-content has base + head history without a checkout', () => {
+  it('no --depth / --shallow limits on the fetches (base SHA + merge-base must resolve)', () => {
+    const steps = fetchSteps();
+    assert.equal(steps.length, 2);
+    for (const { jobId, step } of steps) {
+      const run = String(step.run);
+      assert.doesNotMatch(run, /--depth|--shallow/, `job '${jobId}' must fetch full history`);
+      assert.match(run, /refs\/remotes\/base\/tip/, `job '${jobId}' must fetch the base SHA`);
+      assert.match(run, /refs\/remotes\/head\/tip/, `job '${jobId}' must fetch the head SHA`);
     }
   });
 });
@@ -1086,46 +1095,9 @@ describe('Artifact handoff contract — upload name matches download name', () =
 
 // ── AISDLC-592: actions/checkout v7 fork-PR checkout regression fix ─────────
 
-describe('AISDLC-592 — fork-content checkouts opt into allow-unsafe-pr-checkout', () => {
-  it('every fork-HEAD checkout (path: pr-content) sets allow-unsafe-pr-checkout: true', () => {
-    // actions/checkout v7.0.1 hard-refuses `ref: <fork head sha>` under
-    // pull_request_target unless this flag is set (observed on PR #998).
-    // Fork-PR safety guards #1/#2/#3 (sandboxed path, no persisted credentials,
-    // no execution from pr-content/) make opting into this flag acceptable.
-    const forkCheckouts = allSteps(wf).filter(
-      ({ step }) =>
-        typeof step.uses === 'string' &&
-        step.uses.startsWith('actions/checkout@') &&
-        step.with?.path === 'pr-content',
-    );
-    assert.ok(
-      forkCheckouts.length >= 2,
-      `${WORKFLOW_NAME} must have at least two fork-content checkouts (AISDLC-592 regression coverage)`,
-    );
-    for (const { jobId, step } of forkCheckouts) {
-      assert.equal(
-        step.with?.['allow-unsafe-pr-checkout'],
-        true,
-        `job '${jobId}' fork-content checkout MUST set allow-unsafe-pr-checkout: true ` +
-          `(AISDLC-592) — without it actions/checkout v7 refuses the checkout entirely`,
-      );
-      // Regression guard: the flag must not weaken the existing safety guards.
-      assert.equal(
-        step.with?.['persist-credentials'],
-        false,
-        `job '${jobId}' fork-content checkout must still set persist-credentials: false ` +
-          `alongside allow-unsafe-pr-checkout: true (AISDLC-592 must not weaken guard #2)`,
-      );
-    }
-  });
-
-  it('workflow documents the AISDLC-592 rationale near allow-unsafe-pr-checkout', () => {
-    assert.match(
-      raw,
-      /AISDLC-592/,
-      `${WORKFLOW_NAME} must reference AISDLC-592 in inline comments explaining the ` +
-        `allow-unsafe-pr-checkout opt-in`,
-    );
+describe('AISDLC-592 / AISDLC-704.6 — no fork-head checkout, so no allow-unsafe-pr-checkout opt-in', () => {
+  it('allow-unsafe-pr-checkout is not used anywhere in the workflow', () => {
+    assert.doesNotMatch(raw.replace(/^\s*#.*$/gm, ''), /allow-unsafe-pr-checkout/);
   });
 });
 

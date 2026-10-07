@@ -7,7 +7,7 @@
  * Merkle verification. The CI verifier's `v6ResolveLeavesForEnvelope` prefers
  * this per-patch-id file over the shared `transcript-leaves.jsonl` fallback.
  *
- * Before AISDLC-445 the `Stage fork envelope for verifier (DATA-ONLY copy)`
+ * Before AISDLC-445 the `Stage fork envelope for verifier (DATA-ONLY API fetch)`
  * step only copied the singular `.ai-sdlc/transcript-leaves.jsonl` (the legacy
  * shared file) — it did NOT propagate the per-patch-id directory. The verifier
  * therefore fell back to the shared file, which carries stale leaves from
@@ -24,9 +24,10 @@
  *
  * The fix has two parts:
  *
- * 1. pull_request_target path: loop over `pr-content/.ai-sdlc/transcript-leaves/*.jsonl`,
- *    validate each filename against `^[0-9a-f]{40}\.jsonl$` (path-traversal guard),
- *    and copy validated files to `.ai-sdlc/transcript-leaves/<basename>`.
+ * 1. pull_request_target path: list `.ai-sdlc/transcript-leaves` at the fork head via
+ *    the contents API (AISDLC-704.6: no fork checkout), validate each filename
+ *    against `^[0-9a-f]{40}\.jsonl$` (path-traversal guard), and write validated
+ *    files to `.ai-sdlc/transcript-leaves/<basename>`.
  *
  * 2. merge_group path: add `git checkout "$HEAD_SHA" -- '.ai-sdlc/transcript-leaves/'`
  *    alongside the existing `transcript-leaves.jsonl` checkout.
@@ -60,7 +61,7 @@ function loadYaml(name) {
 }
 
 /**
- * Locate the `Stage fork envelope for verifier (DATA-ONLY copy)` step in
+ * Locate the `Stage fork envelope for verifier (DATA-ONLY API fetch)` step in
  * verify-attestation.yml and return it (or null if absent).
  */
 function findStageStep(wf) {
@@ -77,21 +78,26 @@ describe('AISDLC-445: verify-attestation.yml stages per-patch-id transcript-leav
     const step = findStageStep(wf);
     assert.ok(
       step,
-      'verify-attestation.yml must declare a "Stage fork envelope for verifier (DATA-ONLY copy)" step',
+      'verify-attestation.yml must declare a "Stage fork envelope for verifier (DATA-ONLY API fetch)" step',
     );
   });
 
-  it('pull_request_target path: loops over pr-content/.ai-sdlc/transcript-leaves/*.jsonl', () => {
-    // The per-patch-id staging loop must iterate over
-    // `pr-content/.ai-sdlc/transcript-leaves/*.jsonl` to pick up each
-    // <patch-id>.jsonl file emitted by AISDLC-421.
+  it('pull_request_target path: lists .ai-sdlc/transcript-leaves via the contents API', () => {
+    // The per-patch-id staging must enumerate the fork's
+    // `.ai-sdlc/transcript-leaves` directory (AISDLC-421 <patch-id>.jsonl files)
+    // through the contents API, never a checkout.
     const wf = loadYaml('verify-attestation.yml');
     const step = findStageStep(wf);
     const run = String(step?.run ?? '');
     assert.match(
       run,
-      /pr-content\/\.ai-sdlc\/transcript-leaves\/\*\.jsonl/,
-      'Stage step must loop over pr-content/.ai-sdlc/transcript-leaves/*.jsonl (AISDLC-445 per-patch-id directory)',
+      /repos\/\$\{HEAD_REPO_FULL\}\/contents\/\$\{rdir\}\?ref=\$\{HEAD_SHA\}/,
+      'Stage step must list directories via gh api repos/${HEAD_REPO_FULL}/contents/<dir>?ref=${HEAD_SHA}',
+    );
+    assert.match(
+      run,
+      /fetch_dir "\.ai-sdlc\/transcript-leaves" "\.ai-sdlc\/transcript-leaves"/,
+      'Stage step must fetch the per-patch-id transcript-leaves directory (AISDLC-445)',
     );
   });
 
@@ -123,18 +129,15 @@ describe('AISDLC-445: verify-attestation.yml stages per-patch-id transcript-leav
     );
   });
 
-  it('pull_request_target path: guards the loop with a directory existence check', () => {
-    // The per-patch-id directory may not exist on PRs that use the legacy
-    // shared-file path (pre-AISDLC-421). The loop MUST be guarded by
-    // `[ -d "pr-content/.ai-sdlc/transcript-leaves" ]` so it does not fail
-    // when the directory is absent.
+  it('pull_request_target path: an absent directory is non-fatal', () => {
+    // The directory may not exist on legacy PRs (pre-AISDLC-421): the listing
+    // call must tolerate failure (`|| true`) instead of aborting under set -e.
     const wf = loadYaml('verify-attestation.yml');
-    const step = findStageStep(wf);
-    const run = String(step?.run ?? '');
+    const run = String(findStageStep(wf)?.run ?? '');
     assert.match(
       run,
-      /-d\s+["']?pr-content\/\.ai-sdlc\/transcript-leaves["']?/,
-      'Stage step must guard the per-patch-id loop with `[ -d pr-content/.ai-sdlc/transcript-leaves ]`',
+      /--jq '\.\[\] \| select\(\.type == "file"\) \| \.name' 2>\/dev\/null \|\| true/,
+      'directory listing must be graceful when the directory is absent',
     );
   });
 
@@ -186,7 +189,7 @@ describe('AISDLC-445: verify-attestation.yml stages per-patch-id transcript-leav
 
   it('DATA-ONLY contract preserved: per-patch-id leaves are never executed', () => {
     // The fork-PR safety pattern (AISDLC-381) requires that files from
-    // `pr-content/` are read as data only — never executed by node, bash,
+    // the fork are fetched as data only — never executed by node, bash,
     // pnpm, or any interpreter.  Assert that no `run:` step in the workflow
     // invokes `node`, `bash`, or `sh` against `.ai-sdlc/transcript-leaves/`.
     const wf = loadYaml('verify-attestation.yml');
@@ -221,9 +224,59 @@ describe('AISDLC-445: verify-attestation.yml stages per-patch-id transcript-leav
     const run = String(step?.run ?? '');
     assert.match(
       run,
-      /pr-content\/\.ai-sdlc\/transcript-leaves\.jsonl/,
-      'Stage step must still copy pr-content/.ai-sdlc/transcript-leaves.jsonl (legacy shared-file fallback for pre-AISDLC-421 PRs)',
+      /contents\/\.ai-sdlc\/transcript-leaves\.jsonl\?ref=\$\{HEAD_SHA\}/,
+      'Stage step must still fetch .ai-sdlc/transcript-leaves.jsonl (legacy shared-file fallback for pre-AISDLC-421 PRs)',
     );
+  });
+});
+
+describe('AISDLC-704.6: verify job never checks out the fork head (DangerousWorkflow class)', () => {
+  const wf = loadYaml('verify-attestation.yml');
+  const steps = wf.jobs.verify.steps ?? [];
+  const stage = findStageStep(wf);
+  const stageRun = String(stage?.run ?? '');
+
+  it('has no checkout of the PR head sha, fork repository, or pr-content path', () => {
+    for (const st of steps) {
+      if (typeof st.uses === 'string' && st.uses.startsWith('actions/checkout@')) {
+        assert.equal(st.with?.ref, undefined, 'checkout must not pin a ref');
+        assert.equal(st.with?.repository, undefined, 'checkout must not target a fork repository');
+        assert.equal(st.with?.path, undefined, 'no sandbox path checkout');
+        assert.equal(st.with?.['allow-unsafe-pr-checkout'], undefined);
+      }
+    }
+    assert.ok(!/pr-content/.test(stageRun), 'stage step must not read from pr-content/');
+  });
+
+  it('binds head repo + base repo through step env, not inline expressions', () => {
+    assert.equal(stage.env.HEAD_REPO_FULL, '${{ github.event.pull_request.head.repo.full_name }}');
+    assert.equal(stage.env.BASE_REPO_FULL, '${{ github.repository }}');
+    assert.ok(!/\$\{\{/.test(stageRun), 'stage run: block must contain no ${{ }} expressions');
+  });
+
+  it('hex-validates the head sha and pattern-validates the head repo before any fetch', () => {
+    assert.match(stageRun, /\*\[!0-9a-f\]\*\|""\)/);
+    assert.ok(stageRun.includes('"$HEAD_REPO_FULL" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$'));
+    const validateIdx = stageRun.indexOf('unexpected head sha');
+    const fetchIdx = stageRun.indexOf('fetch_dir ".ai-sdlc/attestations"');
+    assert.ok(validateIdx !== -1 && fetchIdx > validateIdx, 'validation precedes the first fetch');
+  });
+
+  it('stages envelopes with the strict <40hex>[.v6].dsse.json filename guard', () => {
+    assert.match(stageRun, /\^\[0-9a-f\]\{40\}\(\\\.v6\)\?\\\.dsse\\\.json\$/);
+  });
+
+  it('no run: block anywhere interpolates github.event.* (bound via env)', () => {
+    for (const job of Object.values(wf.jobs)) {
+      for (const st of job.steps ?? []) {
+        if (typeof st.run === 'string') {
+          assert.ok(
+            !/\$\{\{\s*github\.event\./.test(st.run),
+            `step '${st.name ?? ''}': bind github.event.* to env: instead`,
+          );
+        }
+      }
+    }
   });
 });
 

@@ -1367,38 +1367,29 @@ WRONG (executes fork code with target's secrets):
     ref: ${{ github.event.pull_request.head.sha }}  # fork content
 ```
 
-#### Guard 2 — Fork PR content is read as DATA only, via a sandboxed checkout
+#### Guard 2 — Fork PR content is read as DATA only, never checked out
 
-When the workflow legitimately needs fork content (e.g. the
+Do NOT `actions/checkout` the fork PR head in a `pull_request_target` job
+(Scorecard DangerousWorkflow class; AISDLC-704, AISDLC-704.6). When the
+workflow legitimately needs fork content (e.g. the
 `.ai-sdlc/attestations/<sha>.dsse.json` envelope that the verifier reads
-as JSON), do a SECOND `actions/checkout@v4` with `path: pr-content` so
-the fork tree lands in a sandboxed subdirectory. Subsequent steps:
+as JSON), fetch it as data:
 
-- READ files from `pr-content/` (e.g. `cp -- pr-content/.ai-sdlc/attestations/<sha>.dsse.json .ai-sdlc/attestations/`)
-- DIFF git objects fetched from the fork SHA (e.g. `git diff <base>...<head>`)
-- Read PR metadata via `gh api .../pulls/<N>/...` (target-context API)
+- Files: `gh api -H "Accept: application/vnd.github.raw" "repos/${HEAD_REPO_FULL}/contents/<path>?ref=${HEAD_SHA}"`,
+  written straight to the path the verifier reads. List directories with the
+  same endpoint and filter names against a strict regex (path-traversal guard).
+- Git objects (for `git diff <base>...<head>`): `git init pr-content` then
+  `git -C pr-content fetch --no-tags https://github.com/${REPO}.git +${SHA}:refs/remotes/...`
+  (objects only, no working tree).
+- PR metadata via `gh api .../pulls/<N>/...` (target-context API).
+
+Bind `HEAD_REPO_FULL` / `HEAD_SHA` through step `env:` (never `${{ }}` inside
+`run:`), hex-validate the SHA and pattern-validate the repo name before use.
 
 NEVER `cd pr-content/`, `pushd pr-content/`, `node pr-content/<script>`,
 `bash pr-content/<script>`, `./pr-content/<script>`, set
-`working-directory: pr-content`, etc. The sandbox is a DATA source, not
-an execution target.
-
-CORRECT (sandboxed fork checkout for envelope read):
-
-```yaml
-- name: Checkout fork PR HEAD into sandboxed pr-content/ (DATA-ONLY)
-  uses: actions/checkout@v4
-  with:
-    fetch-depth: 0
-    ref: ${{ github.event.pull_request.head.sha }}
-    path: pr-content
-    persist-credentials: false   # token never lives in the sandbox
-```
-
-The `persist-credentials: false` is load-bearing: it prevents `git`
-operations from any step that subsequently runs in `pr-content/` from
-authenticating as the workflow's token. Even if guard 3 fails (someone
-adds a `cd pr-content/`), at least the fork code can't talk to the API.
+`working-directory: pr-content`, etc. Fetched fork data is a DATA source,
+not an execution target.
 
 #### Guard 3 — NEVER `pnpm install` / `pnpm build` / script execution against `pr-content/`
 

@@ -27,9 +27,12 @@ name: Untrusted-Contributor PR Verification Gate
 #    the BASE branch tip). All scripts and pipeline-cli CLIs execute from
 #    main's checkout — NEVER from fork content.
 #
-# 2. Fork PR content is checked out into a sandboxed `pr-content/`
-#    subdirectory for READ-ONLY DATA access. The diff is computed from git
-#    objects; no fork-controlled shell or Node code is executed.
+# 2. The fork PR head is NEVER checked out (AISDLC-704.6). A job-created,
+#    empty `pr-content/` git directory receives the base + head git OBJECTS
+#    via `git fetch` (head repo / SHAs bound through step `env:`, SHAs
+#    hex-validated, repo name pattern-validated). The diff is computed from
+#    those objects; no working tree is populated and no fork-controlled
+#    shell or Node code is executed.
 #
 # 3. NEVER `pnpm install` / `pnpm build` / script execution from `pr-content/`.
 #    Trust-classification and AST-gate CLIs run from main's checkout only.
@@ -87,30 +90,35 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: 'Checkout fork PR content into sandboxed pr-content/ (data only — fork-PR safety guard #2)'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: pr-content
-          persist-credentials: false
-          # Bug A fix: fetch-depth: 0 so the depth-1 clone has the base SHA and HEAD~1
-          # for the Stage-1 diff computation (git diff BASE..HEAD in pr-content/).
-          # Without this, the shallow clone has neither ref, the diff is empty, and
-          # the gate fail-closes on every untrusted PR with no real signal.
-          fetch-depth: 0
-          # AISDLC-592: actions/checkout v7.0.1 added a hard refusal for checking out
-          # a fork PR's head SHA under `pull_request_target` (see
-          # https://gh.io/securely-using-pull_request_target) unless this flag is set.
-          # This is acceptable ONLY because fork-PR safety guards #1 and #2 already
-          # contain the risk the refusal exists to prevent: (1) this checkout writes
-          # into the sandboxed `pr-content/` subdirectory, never the job's default
-          # working directory that the trusted workflow scripts run from; (2)
-          # `persist-credentials: false` means no token is ever exposed to fork
-          # content; (3) no script under `pr-content/` is ever executed by this job
-          # (guard #3, enforced by the hermetic test suite) — it is read as
-          # diff/AST-gate DATA only via `git -C pr-content diff`. Opting into this
-          # flag does not weaken the existing trust boundary.
-          allow-unsafe-pr-checkout: true
+      - name: 'Fetch fork PR git objects into data-only pr-content/ (no checkout — fork-PR safety guard #2)'
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_REPO_FULL: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO_FULL: ${{ github.repository }}
+        run: |
+          # AISDLC-704.6: the fork head is NEVER checked out in this
+          # pull_request_target job (Scorecard DangerousWorkflow class, same fix
+          # as AISDLC-704 for ai-sdlc-review.yml). The Stage-1 diff is computed from git objects only.
+          # `pr-content/` is an empty, job-created git directory that receives
+          # git OBJECTS only (base + head commits, full history so merge-base
+          # resolves); no working tree is populated and no credential is
+          # persisted. The head repo and SHAs are bound through step env (never
+          # interpolated into this script) and validated before use.
+          set -euo pipefail
+          for sha in "$HEAD_SHA" "$BASE_SHA"; do
+            if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::unexpected sha"; exit 1
+            fi
+          done
+          if ! [[ "$HEAD_REPO_FULL" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::unexpected head repository name"; exit 1
+          fi
+          git init --quiet pr-content
+          git -C pr-content fetch --no-tags --quiet \
+            "https://github.com/${BASE_REPO_FULL}.git" "+${BASE_SHA}:refs/remotes/base/tip"
+          git -C pr-content fetch --no-tags --quiet \
+            "https://github.com/${HEAD_REPO_FULL}.git" "+${HEAD_SHA}:refs/remotes/head/tip"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -197,11 +205,10 @@ jobs:
         run: |
           # Stage 1: run the AST gate on the PR diff.
           # Diff is computed from git objects — no fork code executed (fork-PR safety guard #2).
-          # pr-content/ was checked out read-only; we compute the diff via git.
+          # pr-content/ holds fetched git objects only (no checkout); we compute the diff via git.
           # CRITICAL fix #1: feed changed paths to CLI via stdin (pipe), NOT via process
-          # substitution (<(echo "$DIFF")) which produces a /dev/fd/<N> arg that the CLI
+          # substitution (a /dev/fd process-substitution argument) which produces a /dev/fd/<N> arg that the CLI
           # ignores — the CLI reads changed paths from stdin, not from --changed-files flag.
-          git -C pr-content fetch --unshallow 2>/dev/null || true
           CHANGED_FILES=$(git -C pr-content diff "$PR_BASE_SHA".."$PR_HEAD_SHA" --name-only 2>/dev/null || \
                           git -C pr-content diff HEAD~1..HEAD --name-only 2>/dev/null || echo "")
 
@@ -325,21 +332,35 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: 'Checkout fork PR content into sandboxed pr-content/ (data only — fork-PR safety guard #2)'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: pr-content
-          persist-credentials: false
-          # Bug A fix: fetch-depth: 0 so the depth-1 clone has the base SHA
-          # for sandbox differential testing (git checkout baseSha in container).
-          # Without this the shallow clone lacks the base commit reference.
-          fetch-depth: 0
-          # AISDLC-592: see the identical `allow-unsafe-pr-checkout: true` comment
-          # on the classify-and-gate job's pr-content checkout above — same
-          # rationale applies verbatim here (guards #1/#2/#3 unchanged; the
-          # mounted diff is read-only sandbox data, never executed).
-          allow-unsafe-pr-checkout: true
+      - name: 'Fetch fork PR git objects into data-only pr-content/ (no checkout — fork-PR safety guard #2)'
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_REPO_FULL: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO_FULL: ${{ github.repository }}
+        run: |
+          # AISDLC-704.6: the fork head is NEVER checked out in this
+          # pull_request_target job (Scorecard DangerousWorkflow class, same fix
+          # as AISDLC-704 for ai-sdlc-review.yml). The sandbox differential test reads the diff from git objects only.
+          # `pr-content/` is an empty, job-created git directory that receives
+          # git OBJECTS only (base + head commits, full history so merge-base
+          # resolves); no working tree is populated and no credential is
+          # persisted. The head repo and SHAs are bound through step env (never
+          # interpolated into this script) and validated before use.
+          set -euo pipefail
+          for sha in "$HEAD_SHA" "$BASE_SHA"; do
+            if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::unexpected sha"; exit 1
+            fi
+          done
+          if ! [[ "$HEAD_REPO_FULL" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::unexpected head repository name"; exit 1
+          fi
+          git init --quiet pr-content
+          git -C pr-content fetch --no-tags --quiet \
+            "https://github.com/${BASE_REPO_FULL}.git" "+${BASE_SHA}:refs/remotes/base/tip"
+          git -C pr-content fetch --no-tags --quiet \
+            "https://github.com/${HEAD_REPO_FULL}.git" "+${HEAD_SHA}:refs/remotes/head/tip"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
