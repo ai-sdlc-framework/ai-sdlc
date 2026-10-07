@@ -127,3 +127,19 @@ test('untrusted-pr-gate.yml governance-boundary job is unflagged, base-checkout,
   const env = job.steps.find((s) => s.env?.PR_CHANGED_FILES)?.env;
   assert.match(env.PR_CHANGED_FILES, /github\.event\.pull_request\.changed_files/);
 });
+
+// AISDLC-730: the issue workflow runs the Orchestrator class path (not executePipeline), so the
+// pipeline-side producer never applies; the job-level signal is the only mark. Assert it holds
+// for the execute step and that no step downgrades it.
+test('ai-sdlc.yml agent job runs dogfood execute --issue with the untrusted signal in force', () => {
+  const doc = yaml.load(readFileSync(join(WORKFLOWS, 'ai-sdlc.yml'), 'utf8'));
+  const job = doc.jobs.agent;
+  assert.equal(String(job.env?.AI_SDLC_UNTRUSTED_RUN), '1');
+  const exec = job.steps.find((s) => /dogfood execute --issue/.test(String(s.run ?? '')));
+  assert.ok(exec, 'agent job runs `dogfood execute --issue`');
+  for (const s of job.steps) {
+    const v = s.env?.AI_SDLC_UNTRUSTED_RUN;
+    assert.ok(v === undefined || String(v) === '1', 'no step downgrades the untrusted signal');
+    assert.ok(!(MARKER in (s.env ?? {})), `${MARKER} is never set in the agent job`);
+  }
+});

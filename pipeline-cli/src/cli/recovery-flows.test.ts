@@ -12,7 +12,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { cleanupTmpProject, makeTmpProject, writeTaskFile } from '../__test-helpers/make-task.js';
@@ -1140,6 +1140,91 @@ describe('runReworkPr', () => {
     expect(result.prUrl).toBe('https://github.com/owner/repo/pull/42');
     expect(result.iterations).toBeGreaterThan(0);
     expect(result.finalVerdict?.decision).toBe('APPROVED');
+  });
+
+  it('AISDLC-730: rework spawns carry the untrusted env and the worktree gets the marker', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-273', title: 'test task' });
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-273');
+    mkdirSync(join(worktreePath, '.git'), { recursive: true });
+    const base = makeApprovingSpawner();
+    const envs: Array<Record<string, string> | undefined> = [];
+    const markerSeen: string[] = [];
+    const markerFile = join(worktreePath, '.git', 'ai-sdlc-untrusted');
+    const spawner = {
+      spawn: (o: Parameters<typeof base.spawn>[0]) => (
+        envs.push(o.env),
+        existsSync(markerFile) && markerSeen.push(readFileSync(markerFile, 'utf8')),
+        base.spawn(o)
+      ),
+      spawnParallel: (os: Parameters<typeof base.spawnParallel>[0]) => (
+        os.forEach((o) => envs.push(o.env)),
+        base.spawnParallel(os)
+      ),
+    };
+    const runner = new FakeRunner()
+      .on(
+        /^gh pr view.*headRefName,title,url,isDraft/,
+        ok(
+          JSON.stringify({
+            headRefName: 'ai-sdlc/aisdlc-273-test-task',
+            title: 'test task',
+            url: 'https://github.com/owner/repo/pull/42',
+            isDraft: true,
+          }),
+        ),
+      )
+      .on(/^gh pr view.*comments/, ok(JSON.stringify({ comments: [] })))
+      .on(/^git diff/, ok('--- diff content ---\n'))
+      .on(/^git log/, ok(''))
+      .on(/^git push --force-with-lease/, ok())
+      .on(/^gh pr ready/, ok())
+      .toRunner();
+    await runReworkPr({
+      prNumber: 42,
+      workDir: tmp,
+      spawner,
+      runner,
+      logger: silentLogger(),
+      maxReworkIterations: 1,
+    });
+    expect(envs.length).toBeGreaterThan(0);
+    for (const e of envs) {
+      expect(e?.AI_SDLC_UNTRUSTED_RUN).toBe('1');
+      expect(e?.AI_SDLC_UNTRUSTED_REASON).toBe('rework-pr source');
+    }
+    expect(markerSeen[0]).toContain('rework-pr source');
+    // AISDLC-730: removed when the run ends
+    expect(existsSync(markerFile)).toBe(false);
+  });
+
+  it('AISDLC-730: rework removes the marker when the run throws', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-273', title: 'test task' });
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-273');
+    mkdirSync(join(worktreePath, '.git'), { recursive: true });
+    const spawner = {
+      spawn: () => Promise.reject(new Error('spawn exploded')),
+      spawnParallel: () => Promise.reject(new Error('spawn exploded')),
+    };
+    const runner = new FakeRunner()
+      .on(
+        /^gh pr view.*headRefName,title,url,isDraft/,
+        ok(
+          JSON.stringify({
+            headRefName: 'ai-sdlc/aisdlc-273-test-task',
+            title: 'test task',
+            url: 'https://github.com/owner/repo/pull/42',
+            isDraft: true,
+          }),
+        ),
+      )
+      .on(/^gh pr view.*comments/, ok(JSON.stringify({ comments: [] })))
+      .on(/^git diff/, ok('--- diff content ---\n'))
+      .on(/^git log/, ok(''))
+      .toRunner();
+    await expect(
+      runReworkPr({ prNumber: 42, workDir: tmp, spawner, runner, logger: silentLogger() }),
+    ).rejects.toThrow('spawn exploded');
+    expect(existsSync(join(worktreePath, '.git', 'ai-sdlc-untrusted'))).toBe(false);
   });
 
   // PR #489 round-1 test review (MAJOR): the iteration-cap exhaustion path

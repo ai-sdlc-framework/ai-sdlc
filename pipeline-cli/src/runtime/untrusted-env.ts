@@ -12,6 +12,8 @@
  * spawners such as `ShellClaudePSpawner`.
  */
 
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { SpawnOpts, SubagentResult, SubagentSpawner } from '../types.js';
 
 export const UNTRUSTED_SPAWN_ENV: Readonly<Record<string, string>> = Object.freeze({
@@ -19,16 +21,70 @@ export const UNTRUSTED_SPAWN_ENV: Readonly<Record<string, string>> = Object.free
   AI_SDLC_UNTRUSTED_REASON: 'gh-issue source',
 });
 
-function mark(o: SpawnOpts): SpawnOpts {
+function markWith(reason: string): (o: SpawnOpts) => SpawnOpts {
   // The untrusted keys are applied LAST so a caller-supplied env cannot downgrade them.
-  return { ...o, env: { ...(o.env ?? {}), ...UNTRUSTED_SPAWN_ENV } };
+  return (o) => ({
+    ...o,
+    env: { ...(o.env ?? {}), ...UNTRUSTED_SPAWN_ENV, AI_SDLC_UNTRUSTED_REASON: reason },
+  });
 }
 
 /** Wrap a spawner so every spawn carries the untrusted-run signal. */
-export function withUntrustedEnv(inner: SubagentSpawner): SubagentSpawner {
+export function withUntrustedEnv(
+  inner: SubagentSpawner,
+  reason: string = UNTRUSTED_SPAWN_ENV.AI_SDLC_UNTRUSTED_REASON,
+): SubagentSpawner {
+  const mark = markWith(reason);
   return {
     spawn: (o: SpawnOpts): Promise<SubagentResult> => inner.spawn(mark(o)),
     spawnParallel: (os: SpawnOpts[]): Promise<SubagentResult[]> =>
       inner.spawnParallel(os.map(mark)),
   };
+}
+
+/**
+ * AISDLC-730 — file marker that survives a child agent clearing its environment.
+ * Lives in the worktree's git dir (never in the working tree, so it is never
+ * committed). Mirrored by UNTRUSTED_MARKER_FILE in
+ * ai-sdlc-plugin/hooks/lib/governance-resolver.js, which re-derives it by
+ * walking up from the hook's cwd.
+ */
+export const UNTRUSTED_MARKER_FILE = 'ai-sdlc-untrusted';
+
+/** Resolve the git dir of a checkout (`.git` dir, or the target of a `.git` gitdir file). */
+function resolveGitDir(worktreePath: string): string | null {
+  const dotGit = join(worktreePath, '.git');
+  if (!existsSync(dotGit)) return null;
+  if (statSync(dotGit).isDirectory()) return dotGit;
+  const m = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, 'utf8'));
+  if (!m) return null;
+  const target = m[1].trim();
+  return isAbsolute(target) ? target : resolve(dirname(dotGit), target);
+}
+
+/**
+ * Persist the untrusted marker for a worktree. Returns the marker path, or
+ * null when the worktree has no resolvable git dir (the env signal still applies).
+ */
+export function writeUntrustedMarker(worktreePath: string, reason: string): string | null {
+  const gitDir = resolveGitDir(worktreePath);
+  if (!gitDir) return null;
+  const file = join(gitDir, UNTRUSTED_MARKER_FILE);
+  writeFileSync(file, `${reason}\n`, 'utf8');
+  return file;
+}
+
+/**
+ * AISDLC-730 — remove the untrusted marker. Called by the pipeline process (not
+ * subject to the hook) when an untrusted run ends, and when a trusted run starts
+ * in the same worktree, so a stale marker can never lock out a trusted session.
+ * Returns true when a marker was removed, false when there was none (or no git dir).
+ */
+export function clearUntrustedMarker(worktreePath: string): boolean {
+  const gitDir = resolveGitDir(worktreePath);
+  if (!gitDir) return false;
+  const file = join(gitDir, UNTRUSTED_MARKER_FILE);
+  if (!existsSync(file)) return false;
+  rmSync(file, { force: true });
+  return true;
 }

@@ -1960,3 +1960,96 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-720 round 2)', () 
     assert.equal(i.status, 0);
   });
 });
+
+// ── AISDLC-730 — untrusted marker file survives a child agent clearing its env ──
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-730: untrusted marker)', () => {
+  let repo;
+  let wtGitDir;
+  const yamlPath = () => join(repo, '.ai-sdlc', 'agent-role.yaml');
+  // An environment with every signal cleared, as a `claude -p` child with a wiped env would have.
+  const CLEARED = { AI_SDLC_UNTRUSTED_RUN: '', AI_SDLC_UNTRUSTED_REASON: '', GITHUB_ACTIONS: '' };
+
+  before(() => {
+    repo = join(tmpdir(), `enforce-blocked-730-${Date.now()}`);
+    mkdirSync(join(repo, '.ai-sdlc'), { recursive: true });
+    writeFileSync(yamlPath(), 'role: coding-agent\nblockedActions: []\n');
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    // A linked-worktree-shaped checkout: `.git` is a file pointing at a git dir elsewhere.
+    wtGitDir = join(repo, 'gitdirs', 'wt');
+    mkdirSync(wtGitDir, { recursive: true });
+  });
+  after(() => rmSync(repo, { recursive: true, force: true }));
+
+  const call = (tool, input, cwd, env = CLEARED) =>
+    runHookRaw(JSON.stringify({ tool_name: tool, tool_input: input, cwd }), {
+      CLAUDE_PROJECT_DIR: repo,
+      ...env,
+    });
+
+  it('marker present + environment cleared: protected writes are still refused', () => {
+    writeFileSync(join(wtGitDir, 'ai-sdlc-untrusted'), 'gh-issue source\n');
+    const wt = join(repo, 'wt');
+    mkdirSync(join(wt, 'sub'), { recursive: true });
+    writeFileSync(join(wt, '.git'), `gitdir: ${wtGitDir}\n`);
+    for (const tool of ['Write', 'Edit', 'MultiEdit']) {
+      const r = call(tool, { file_path: join(wt, '.ai-sdlc', 'agent-role.yaml') }, join(wt, 'sub'));
+      assert.ok(isDenied(r), tool);
+      assert.match(
+        JSON.parse(r.output).hookSpecificOutput.permissionDecisionReason,
+        /gh-issue source/,
+      );
+    }
+    assert.ok(isDenied(call('Bash', { command: 'echo x > .ai-sdlc/agent-role.yaml' }, wt)));
+    assert.ok(
+      !isDenied(call('Write', { file_path: join(wt, 'src', 'a.ts') }, wt)),
+      'other paths ok',
+    );
+  });
+
+  it('an untrusted run cannot delete or rewrite the marker itself', () => {
+    const wt = join(repo, 'wt');
+    const marker = join(wtGitDir, 'ai-sdlc-untrusted');
+    assert.ok(isDenied(call('Write', { file_path: marker }, wt)));
+    assert.ok(isDenied(call('Bash', { command: `rm ${marker}` }, wt)));
+    assert.ok(isDenied(call('Bash', { command: 'rm -f ../gitdirs/wt/ai-sdlc-untrusted' }, wt)));
+  });
+
+  it('AISDLC-730: a nested .git created inside the marked checkout does not hide the marker', () => {
+    const wt = join(repo, 'wt');
+    const nested = join(wt, 'nested');
+    mkdirSync(join(nested, '.git'), { recursive: true });
+    assert.ok(isDenied(call('Write', { file_path: join(wt, '.ai-sdlc', 'x.yaml') }, nested)));
+  });
+
+  it('AISDLC-730: an untrusted run cannot write, replace or create a .git entry or worktree admin dir', () => {
+    const wt = join(repo, 'wt');
+    assert.ok(isDenied(call('Write', { file_path: join(wt, '.git') }, wt)));
+    assert.ok(isDenied(call('Edit', { file_path: join(wt, 'x', '.git') }, wt)));
+    assert.ok(
+      isDenied(call('Write', { file_path: join(repo, '.git', 'worktrees', 'w', 'gitdir') }, wt)),
+    );
+    assert.ok(isDenied(call('Bash', { command: 'echo "gitdir: /nonexistent" > .git' }, wt)));
+    assert.ok(isDenied(call('Bash', { command: 'rm -f .git' }, wt)));
+    assert.ok(isDenied(call('Bash', { command: 'mv .git .git.bak' }, wt)));
+    assert.ok(isDenied(call('Bash', { command: 'rm -rf ../.git/worktrees/wt' }, wt)));
+    assert.ok(isDenied(call('Bash', { command: 'mv ../gitdirs/wt/ai-sdlc-unt* /tmp/x' }, wt)));
+    assert.ok(isDenied(call('Bash', { command: 'rm ../gitdirs/wt/ai-sdlc-unt?usted' }, wt)));
+    // ordinary git use and unrelated files stay allowed
+    assert.ok(!isDenied(call('Bash', { command: 'git status && ls .git' }, wt)));
+    assert.ok(!isDenied(call('Bash', { command: 'git remote add o https://x/y.git' }, wt)));
+    assert.ok(!isDenied(call('Write', { file_path: join(wt, 'repo.github', 'a.ts') }, wt)));
+  });
+
+  it('regression: a trusted local session (no signal, no marker) edits .ai-sdlc with zero prompts', () => {
+    const trusted = join(repo, 'trusted');
+    mkdirSync(join(trusted, '.git'), { recursive: true });
+    for (const tool of ['Write', 'Edit', 'MultiEdit']) {
+      const r = call(tool, { file_path: yamlPath() }, trusted);
+      assert.equal(r.exitCode, 0);
+      assert.equal(r.output, '', `${tool} produces no deny and no ask`);
+    }
+    const sh = call('Bash', { command: 'echo x >> .ai-sdlc/reviews/aisdlc-730.jsonl' }, trusted);
+    assert.equal(sh.output, '');
+  });
+});

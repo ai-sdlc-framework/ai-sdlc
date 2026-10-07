@@ -59,6 +59,9 @@
 
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
+
 const STRICT_DEFAULTS = Object.freeze({
   allowMerge: 'never',
   // AISDLC-710: boolean view of the `leaseOnOwnBranch` default (see resolveForcePushMode).
@@ -454,6 +457,11 @@ function renderSubagentHardRules(resolved) {
  *     no signal. Until the workflow half sets the marker on trusted jobs
  *     (post-AISDLC-721), every CI run is untrusted for protected-path writes.
  *
+ * 3. (AISDLC-730) a marker file `<gitdir>/ai-sdlc-untrusted` exists for ANY checkout
+ *    enclosing `cwd` (every `.git` up to the filesystem root). Checked first and independent of the environment, so a child
+ *    agent that clears its env is still untrusted. The marker lives outside the
+ *    working tree and the hook refuses an untrusted run's writes to it.
+ *
  * A local run with no signal stays internal (trusted by default, no prompts).
  *
  * @param {Record<string,string|undefined>} [env]
@@ -472,7 +480,109 @@ function isTruthy(v) {
   return n !== '' && !FALSY.includes(n);
 }
 
-function isUntrustedRun(env = process.env) {
+// AISDLC-730: marker file the producer (pipeline-cli/src/runtime/untrusted-env.ts,
+// UNTRUSTED_MARKER_FILE) writes into the worktree's git dir. It lives outside the
+// process environment, so a descendant that clears its env is still untrusted.
+const UNTRUSTED_MARKER_FILE = 'ai-sdlc-untrusted';
+
+/**
+ * Read `<gitDir>/ai-sdlc-untrusted`. Returns the reason string when present,
+ * null when absent; any other read error fails closed (treated as marked).
+ */
+function readMarker(gitDir) {
+  try {
+    return fs.readFileSync(path.join(gitDir, UNTRUSTED_MARKER_FILE), 'utf8').trim() || 'marker';
+  } catch (e) {
+    return e && e.code === 'ENOENT' ? null : 'untrusted marker unreadable (fail closed)';
+  }
+}
+
+/**
+ * Collect markers from EVERY enclosing `.git` from `startDir` up to the filesystem
+ * root (not only the nearest one: the run can create or overwrite the nearest `.git`,
+ * e.g. `git init x && cd x`). Returns the first marker reason found, else null.
+ *
+ * A `.git` pointer file whose gitdir is missing or not a directory is treated as
+ * INCONCLUSIVE, never as untrusted by itself (a broken pointer in an ordinary trusted
+ * checkout must not lock that session out). Instead the marker is recovered through
+ * git's own back-pointer: each enclosing repo's `.git/worktrees/<id>/gitdir` names the
+ * worktree `.git` file it belongs to, so a worktree whose pointer was overwritten still
+ * resolves to its admin dir and marker. Residual: a worktree outside every enclosing
+ * repo with an overwritten pointer cannot be recovered (best-effort; see governance docs).
+ */
+function findUntrustedMarker(startDir) {
+  if (!startDir) return null;
+  let cur = path.resolve(startDir);
+  const enclosingGitDirs = [];
+  const brokenPointers = [];
+  for (;;) {
+    const dotGit = path.join(cur, '.git');
+    try {
+      const st = fs.statSync(dotGit);
+      let gitDir = null;
+      if (st.isDirectory()) {
+        gitDir = dotGit;
+        enclosingGitDirs.push(dotGit);
+      } else {
+        const m = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dotGit, 'utf8'));
+        if (m) {
+          const target = path.resolve(cur, m[1].trim());
+          let ok = false;
+          try {
+            ok = fs.statSync(target).isDirectory();
+          } catch (e) {
+            if (!e || (e.code !== 'ENOENT' && e.code !== 'ENOTDIR')) {
+              return 'untrusted marker lookup failed (fail closed)';
+            }
+          }
+          if (ok) gitDir = target;
+          else brokenPointers.push(dotGit);
+        } else {
+          brokenPointers.push(dotGit);
+        }
+      }
+      if (gitDir) {
+        const marker = readMarker(gitDir);
+        if (marker !== null) return marker;
+      }
+    } catch (e) {
+      if (!e || (e.code !== 'ENOENT' && e.code !== 'ENOTDIR')) {
+        return 'untrusted marker lookup failed (fail closed)';
+      }
+    }
+    const parent = path.dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+  }
+  for (const broken of brokenPointers) {
+    for (const gd of enclosingGitDirs) {
+      const wtRoot = path.join(gd, 'worktrees');
+      let ids = [];
+      try {
+        ids = fs.readdirSync(wtRoot);
+      } catch {
+        continue;
+      }
+      for (const id of ids) {
+        try {
+          const back = fs.readFileSync(path.join(wtRoot, id, 'gitdir'), 'utf8').trim();
+          if (path.resolve(back) !== broken) continue;
+        } catch {
+          continue;
+        }
+        const marker = readMarker(path.join(wtRoot, id));
+        if (marker !== null) return marker;
+      }
+    }
+  }
+  return null;
+}
+
+function isUntrustedRun(env = process.env, cwd = null) {
+  const marker = findUntrustedMarker(cwd);
+  if (marker !== null) {
+    return { untrusted: true, reason: `untrusted marker file: ${marker}` };
+  }
   const raw = norm(env && env.AI_SDLC_UNTRUSTED_RUN);
   // Fail closed: any non-empty value that is not explicitly falsy is untrusted.
   if (raw !== '' && !FALSY.includes(raw)) {
@@ -491,6 +601,8 @@ function isUntrustedRun(env = process.env) {
 
 module.exports = {
   isUntrustedRun,
+  findUntrustedMarker,
+  UNTRUSTED_MARKER_FILE,
   STRICT_DEFAULTS,
   parseGovernanceBlock,
   resolveGovernance,
