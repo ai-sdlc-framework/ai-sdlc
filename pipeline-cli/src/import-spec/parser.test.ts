@@ -125,3 +125,102 @@ describe('parseTasksMd — unknown schema', () => {
     expect(result.entries).toEqual([]);
   });
 });
+
+// Reference copies of the pre-AISDLC-704.1 single-regex matchers. They pin the
+// behaviour the linear rewrite must keep; they are only ever run on short lines.
+const OLD_HEADING_RE = /^###[ \t]+(T-\d+)[ \t]*[—\-:]?[ \t]*(.+)$/;
+const OLD_CHECKBOX_RE = /^-[ \t]*\[[ x]\][ \t]*(T-\d+)[ \t]*[—\-:]?[ \t]*(.+)$/i;
+const OLD_AC_LINE_RE = /^[ \t]*(?:-[ \t]*)?AC:[ \t]*(.+)$/i;
+
+const sampleLines = [
+  '### T-001 — Build the thing',
+  '### T-42 - Title',
+  '###\tT-7:\tTabbed',
+  '### T-5:Tight',
+  '### T-5',
+  '### T-5 ',
+  '### T-5 —',
+  '### T-12',
+  '### T-1 title\r',
+  '###T-1 no space',
+  '#### T-1 deeper',
+  '- [ ] T-001 — Build',
+  '- [x] T-2 - Done',
+  '- [X] t-3: Upper',
+  '-[ ]T-4 packed',
+  '- [ ] T-9',
+  '- [ ] T-9  ',
+  '- [y] T-1 bad box',
+  'AC: first',
+  '  - AC: indented',
+  '-AC:tight',
+  'ac:\tlower',
+  'AC:',
+  'AC: ',
+  'AC: has\rcr',
+  'AC first',
+  '',
+  'plain prose',
+];
+
+describe('parser — linear matchers keep the old regex behaviour (AISDLC-704.1)', () => {
+  it.each(sampleLines)('heading, checkbox and AC detection agree for %j', (line) => {
+    const oldHeading = OLD_HEADING_RE.exec(line);
+    const oldCheckbox = OLD_CHECKBOX_RE.exec(line);
+    const oldAc = OLD_AC_LINE_RE.exec(line);
+
+    const headingSrc = `${line}\nbody`;
+    const parsedHeading = parseTasksMd(`### T-000 seed\n${line}`);
+    // Schema detection sees the seed heading first; entry parsing sees `line`.
+    const headingEntries = parsedHeading.entries.filter((e) => e.taskId !== 'T-000');
+    if (oldHeading) {
+      expect(headingEntries[0]).toMatchObject({
+        taskId: oldHeading[1],
+        title: oldHeading[2].trim(),
+      });
+    } else {
+      expect(headingEntries).toHaveLength(0);
+    }
+
+    const parsedCheckbox = parseTasksMd(`- [ ] T-000 seed\n${line}`);
+    const checkboxEntries = parsedCheckbox.entries.filter((e) => e.taskId !== 'T-000');
+    if (oldCheckbox) {
+      expect(checkboxEntries[0]).toMatchObject({
+        taskId: oldCheckbox[1],
+        title: oldCheckbox[2].trim(),
+      });
+    } else {
+      expect(checkboxEntries).toHaveLength(0);
+    }
+
+    const acEntries = parseTasksMd(`### T-000 seed\n${line}`).entries;
+    const acs = acEntries.find((e) => e.taskId === 'T-000')?.acceptanceCriteria ?? [];
+    if (oldAc && !oldHeading) {
+      expect(acs).toEqual([oldAc[1].trim()]);
+    } else if (!oldHeading) {
+      expect(acs).toEqual([]);
+    }
+
+    expect(detectSchema(headingSrc)).toBe(
+      oldHeading ? 'v0.8-headings' : oldCheckbox ? 'v0.7-checkboxes' : 'unknown',
+    );
+  });
+
+  it('stays fast on tab-run inputs that made the old regexes polynomial', () => {
+    const tabs = '\t'.repeat(50_000);
+    const inputs = [
+      `###\tT-0${tabs}`,
+      `###\tT-0${tabs}\r`,
+      `- [ ] T-0${tabs}\r`,
+      `### T-1 title\n-${tabs}AC:${tabs}\r`,
+      `### T-1 title\nAC:${tabs}\r`,
+      `${tabs}AC:${tabs}\r`,
+    ];
+    const started = Date.now();
+    for (const input of inputs) {
+      detectSchema(input);
+      parseTasksMd(input);
+    }
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+});
