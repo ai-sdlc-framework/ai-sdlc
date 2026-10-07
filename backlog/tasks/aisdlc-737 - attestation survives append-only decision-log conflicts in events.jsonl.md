@@ -25,7 +25,7 @@ A same-file conflict in the append-only decision log `.ai-sdlc/_decisions/events
 
 Fix direction: exclude that file from the attestation subject, or merge by append in the patch-scoped verifier so an append-only conflict resolved by keeping both sides does not change the content hash.
 
-Sequencing: after AISDLC-719 (decision log append conflicts), which this builds on.
+Sequencing: builds on the decision-log append-conflict fix listed under dependencies.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

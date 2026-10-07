@@ -24,7 +24,7 @@ The Governance boundary check from AISDLC-720.1 and the CI untrusted-run signal 
 
 Also folds in the known follow-ups from PR #1229 (the AISDLC-720.1 boundary check): (1) check-name collision: a fork can define a job with the same name, so publish the result as a unique commit-status context or add it to the ai-sdlc/pr-ready rollup; (2) race between the event's changed_files and the files API: use the compare API or re-read against head.sha; (3) the boundary script and other trusted-context scripts do not cover themselves in the governance path list; (4) the hook does not deny Bash writes to $GITHUB_ENV, and read-only COLLABORATORs count as trusted.
 
-Sequencing: after AISDLC-733.
+Sequencing: lands after the pre-push gate follow-up listed under dependencies.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
