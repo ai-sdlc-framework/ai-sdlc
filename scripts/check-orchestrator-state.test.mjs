@@ -346,15 +346,63 @@ describe('check-orchestrator-state.sh', () => {
     sh(`git -C "${sibling}" push -q origin main`);
   }
 
-  it('[AISDLC-708] stale index under a current HEAD is reported with the path count and not reset', () => {
-    advanceOrigin('adv-stale', { 'a.txt': 'a\n', 'b.txt': 'b\n' });
-    // Reproduce the desync: move HEAD alone (what post-rewrite's update-ref did).
+  it('[AISDLC-750] provable stale index is healed with read-tree and logged with both SHAs', () => {
+    advanceOrigin('adv-heal', { 'a.txt': 'a\n', 'b.txt': 'b\n' });
+    sh(`git -C "${env.local}" fetch -q origin main`);
+    const old = sh(`git -C "${env.local}" rev-parse HEAD`);
+    sh(`git -C "${env.local}" update-ref refs/heads/main origin/main`);
+    const head = sh(`git -C "${env.local}" rev-parse HEAD`);
+    assert.ok(sh(`git -C "${env.local}" status --porcelain`).length > 0);
+    const r = runScript(env.local);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /stale index detected/);
+    assert.ok(r.stdout.includes(old) && r.stdout.includes(head), r.stdout);
+    assert.equal(sh(`git -C "${env.local}" status --porcelain`), '');
+    assert.equal(sh(`cat "${join(env.local, 'a.txt')}"`), 'a');
+  });
+
+  it('[AISDLC-750] stale index plus a real unstaged edit is still refused (no local loss)', () => {
+    advanceOrigin('adv-noheal', { 'a.txt': 'a\n' });
     sh(`git -C "${env.local}" fetch -q origin main`);
     sh(`git -C "${env.local}" update-ref refs/heads/main origin/main`);
+    writeFileSync(join(env.local, 'README.md'), 'my unsaved edit\n');
+    const r = runScript(env.local);
+    assert.equal(r.status, 0, r.stderr);
+    assert.doesNotMatch(r.stdout, /healed parent/);
+    assert.match(r.stdout, /differs from HEAD/);
+    assert.equal(sh(`cat "${join(env.local, 'README.md')}"`), 'my unsaved edit');
+  });
+
+  it('[AISDLC-750] repoints every worktree post-rewrite shim at the main checkout hook', () => {
+    mkdirSync(join(env.local, '.husky'), { recursive: true });
+    writeFileSync(join(env.local, '.husky', 'post-rewrite'), '#!/usr/bin/env bash\nexit 0\n');
+    sh(`git -C "${env.local}" add .husky && git -C "${env.local}" commit -q -m hook`);
+    sh(`git -C "${env.local}" push -q origin main`);
+    const wt = join(env.root, 'wt');
+    sh(`git -C "${env.local}" worktree add -q -b feat "${wt}"`);
+    mkdirSync(join(wt, '.husky', '_'), { recursive: true });
+    writeFileSync(join(wt, '.husky', '_', 'post-rewrite'), 'old shim\n');
+    const r = runScript(env.local);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /repointed post-rewrite shim/);
+    const shim = sh(`cat "${join(wt, '.husky', '_', 'post-rewrite')}"`);
+    assert.match(shim, /AISDLC-750 proxy/);
+    assert.ok(shim.includes(join(env.local, '.husky', 'post-rewrite')));
+    // Idempotent: second run logs nothing.
+    assert.doesNotMatch(runScript(env.local).stdout, /repointed/);
+  });
+
+  it('[AISDLC-708] stale index under a current HEAD is reported with the path count and not reset', () => {
+    advanceOrigin('adv-stale', { 'a.txt': 'a\n', 'b.txt': 'b\n' });
+    // Reproduce the desync: move HEAD alone (what post-rewrite's update-ref did),
+    // with a real unstaged edit so the state is not provably ours (AISDLC-750).
+    sh(`git -C "${env.local}" fetch -q origin main`);
+    sh(`git -C "${env.local}" update-ref refs/heads/main origin/main`);
+    writeFileSync(join(env.local, 'README.md'), 'edited\n');
     assert.match(sh(`git -C "${env.local}" status --porcelain`), /^D {2}a\.txt/m);
     const r = runScript(env.local);
     assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /index\/working tree differs from HEAD in 2 path\(s\)/);
+    assert.match(r.stdout, /index\/working tree differs from HEAD in 3 path\(s\)/);
     assert.match(r.stdout, /reset --hard origin\/main/);
     // Not auto-reset: still divergent.
     assert.ok(sh(`git -C "${env.local}" status --porcelain`).length > 0);

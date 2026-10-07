@@ -39,6 +39,17 @@ for wt in .worktrees/*/; do
   fi
 done
 echo "Swept $REMOVED merged worktree(s)."
+
+# AISDLC-750: list surviving worktrees whose post-rewrite hook predates the parent-guard
+# fix (neither the tracked copy nor the husky shim carries the AISDLC-750 marker). Such a
+# worktree can move the parent's refs/heads/main alone on rebase. Report only; running
+# scripts/check-orchestrator-state.sh repoints each shim at the main checkout hook.
+for wt in .worktrees/*/; do
+  [ -f "${wt}.husky/post-rewrite" ] || continue
+  if ! grep -q 'AISDLC-750' "${wt}.husky/post-rewrite" "${wt}.husky/_/post-rewrite" 2>/dev/null; then
+    echo "STALE post-rewrite hook (predates AISDLC-750 fix): $wt"
+  fi
+done
 ```
 
 ## Mode 2 — Force-remove a specific task's worktree
