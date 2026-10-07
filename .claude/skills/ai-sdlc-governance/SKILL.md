@@ -8,7 +8,7 @@ autoContext: true
 
 ## Critical Rules — NEVER violate these
 
-1. **NEVER merge any pull request.** Do not run `gh pr merge`, `git merge` into main, or any merge operation. Only create or update PRs. The human merges.
+1. **Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command.** Do not run `git merge` into main or any other merge operation.
 2. **Dismiss PR reviews only with documented reason.** You may dismiss reviews when they failed due to infrastructure issues (e.g., API credit exhaustion) or when findings are documented false positives. Always include a clear explanation in the dismissal message. Prefer updating `.ai-sdlc/review-policy.md` for recurring false positives.
 3. **NEVER close issues or PRs.** Do not run `gh pr close` or `gh issue close`. The human decides what to close.
 4. **NEVER plain force push.** Do not run `git push --force` or `git push -f`. A `--force-with-lease` push of your own task branch after a rebase is allowed by default (`allowForcePush: leaseOnOwnBranch`); do it without asking the operator, and never to `main`/`master`/protected branches.
@@ -68,12 +68,12 @@ If blocked at any step, say which step you're stuck on and why.
 - After pushing, tell the user the PR is ready for their review
 - If CI fails or reviews request changes, fix the issues and push again
 - Use `/fix-pr <number>` to automatically gather and fix PR issues
-- NEVER merge — always wait for the human
+- Merge only through the sanctioned path, per `governance.allowMerge` (`cli-merge-if-eligible`)
 
 ## Review Policy
 
 When review agents post findings:
-- **APPROVE with suggestions/minors** → PR is ready for human merge
+- **APPROVE with suggestions/minors** → PR is ready for merge per `governance.allowMerge`
 - **CHANGES_REQUESTED with critical/major** → fix the real issues, push again
 - **False positives** → update `.ai-sdlc/review-policy.md` with better calibration, don't dismiss reviews
 

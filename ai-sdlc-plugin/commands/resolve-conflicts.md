@@ -25,7 +25,7 @@ same architecture pattern as `/ai-sdlc rebase` and `/ai-sdlc execute`.
 
 ## Hard rules (NEVER violate)
 
-1. **Never merge a PR.** Do not run `gh pr merge` in any form (the hook
+1. **Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command.** Do not run `gh pr merge` in any form (the hook
    denies it, `--auto` included). The re-arm path the agent owns is
    `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind backlog --arm`,
    which applies the repo's merge policy and trust checks before

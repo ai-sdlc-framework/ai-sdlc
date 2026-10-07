@@ -92,10 +92,12 @@ unused `_var` parameters").
 If you suppress a finding because it matches a policy rule, say so
 explicitly — `(suppressed by .ai-sdlc/review-policy.md: <rule>)`.
 
-## Step 5 — Never merge
+## Step 5 — Never merge directly
 
-Do **not** run `gh pr merge` regardless of verdict. The skill reports;
-humans merge. This is a hard rule from CLAUDE.md.
+Do **not** run `gh pr merge` regardless of verdict. The skill reports.
+Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`,
+rendered into the session hard rules; when it permits merging, the only
+path is `cli-merge-if-eligible`; never run the raw merge command.
 
 ## Notes
 

@@ -76,4 +76,4 @@ After pushing, report:
 - What was identified as a false positive (and if the review policy was updated)
 - What the user needs to review
 
-**IMPORTANT: Do NOT merge the PR. Only fix and push. The human merges.**
+**IMPORTANT: Do NOT run the raw merge command. Only fix and push. Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`; when it permits merging, the only path is `cli-merge-if-eligible`.**

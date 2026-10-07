@@ -150,7 +150,7 @@ You may also run the Definition-of-Ready check by hand on a task file you change
 
 ## Hard rules (NEVER violate)
 
-1. **Never merge a PR.** Do not run `gh pr merge` under any circumstance.
+1. **Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command.** Do not run `gh pr merge` under any circumstance.
 2. **Never force-push without a lease.** No `git push --force` / `-f`. **`--force-with-lease` IS permitted (allowed by default via `allowForcePush: leaseOnOwnBranch`, no operator prompt) and IS REQUIRED after the mandatory rebase-before-push step** (see Definition of Done) — the rebase changes the SHA, so a lease-protected force-push is the only way to update the remote without clobbering concurrent work. `--force` (no lease) is still forbidden.
 3. **Never close PRs or issues.** No `gh pr close`, `gh issue close`.
 4. **Never delete branches.** No `git branch -D` / `-d`.

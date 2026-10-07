@@ -93,7 +93,7 @@ What's left for the operator is the thin layer of human judgment the system genu
 | Code reviewer | Review agents review code (testing, critic, security) |
 | Product manager | PPA prioritizes work |
 | SRE / DevOps | Orchestrator + adapters manage infrastructure |
-| Maintainer | Per project policy, only humans merge PRs — but the operator does NOT merge either; engineers/maintainers do |
+| Maintainer | Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`; when it permits merging, the only path is `cli-merge-if-eligible`; the operator does NOT merge either; engineers/maintainers or the gated helper do |
 | Customer support | Separate function |
 
 ## Daily, weekly, monthly cadence

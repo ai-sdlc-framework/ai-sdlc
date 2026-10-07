@@ -72,7 +72,7 @@ Present a clear status summary:
 - **Next action** — what needs to happen next:
   - CI failing → "run `/fix-pr <N>`"
   - Reviews requesting changes → "run `/fix-pr <N>`" or "address review findings"
-  - All green → "ready for human merge"
+  - All green → "ready for merge per `governance.allowMerge`"
   - Backlog task in `Done` but file still in `backlog/tasks/` → "run `mcp__plugin_ai-sdlc_ai-sdlc__task_complete` to archive (drop-in replacement that preserves unknown frontmatter keys, AISDLC-73)"
 
 ## Notes

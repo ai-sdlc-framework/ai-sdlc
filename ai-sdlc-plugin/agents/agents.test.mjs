@@ -257,7 +257,10 @@ describe('agent definition tool restrictions', () => {
     const body = readFileSync(join(__dirname, 'developer.md'), 'utf-8');
     // SubagentStart hook also injects these, but embedding them in the agent
     // prompt is belt-and-braces in case the hook ever fails to fire.
-    assert.ok(body.includes('Never merge'), 'embed never-merge rule');
+    assert.ok(
+      body.includes('Merging follows `governance.allowMerge`'),
+      'embed config-driven merge rule',
+    );
     assert.ok(body.includes('Never force-push'), 'embed never-force-push rule');
     assert.ok(
       body.includes('Edit governance config (`.ai-sdlc/**`) only when the task names'),

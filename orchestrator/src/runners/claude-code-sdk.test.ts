@@ -115,9 +115,10 @@ describe('buildGovernancePrompt', () => {
     expect(prompt).not.toContain('Tests required');
   });
 
-  it('always includes the "never merge" governance line', () => {
+  it('always includes the config-driven merge governance line', () => {
     const prompt = buildGovernancePrompt(makeCtx());
-    expect(prompt).toContain('NEVER merge PRs');
+    expect(prompt).toContain('Merging follows `governance.allowMerge`');
+    expect(prompt).not.toMatch(/only humans merge/i);
   });
 
   it('omits blocked paths line when none exist', () => {

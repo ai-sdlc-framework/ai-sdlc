@@ -27,7 +27,7 @@ command body runs in the main Claude Code session which DOES have
 
 ## Hard rules (NEVER violate)
 
-1. **Never merge a PR.** Do not run `gh pr merge`.
+1. **Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command.** Do not run `gh pr merge`.
 2. **Never force-push with plain `--force` / `-f`.** Always use
    `--force-with-lease` (mirrors agent-role.yaml block list).
 3. **Never push to `main` or `master`.** Refuse early.
@@ -339,7 +339,7 @@ Print a tight summary:
 
 ## What this command DOES NOT do (intentional)
 
-- **Never runs `gh pr merge`.** Only humans merge.
+- **Never runs the raw merge command.** Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`; when it permits merging, the only path is `cli-merge-if-eligible`.
 - **Never runs `git push --force` / `-f`.** Only `--force-with-lease`.
 - **Never pushes to `main`/`master`.** Hard refused at Step 1 + Step 6.
 - **Never auto-resolves modify-vs-delete or semantic conflicts.** Those

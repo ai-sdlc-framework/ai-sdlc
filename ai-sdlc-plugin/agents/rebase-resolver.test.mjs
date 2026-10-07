@@ -117,7 +117,8 @@ describe('rebase-resolver frontmatter', () => {
 
 describe('rebase-resolver body — hard rules', () => {
   it('forbids `gh pr merge`', () => {
-    assert.match(body, /Never merge a PR/i);
+    assert.match(body, /Merging follows `governance\.allowMerge`/);
+    assert.match(body, /never run the raw merge command/);
     assert.match(body, /gh pr merge/);
   });
 

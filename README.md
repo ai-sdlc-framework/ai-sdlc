@@ -114,7 +114,7 @@ Canonical execution paths (when working inside a Claude Code session):
 
 Rules of thumb to internalize before pushing code:
 
-- **Never merge PRs.** Only humans do. `gh pr merge` is off-limits.
+- **Merging follows `governance.allowMerge`** in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command.
 - **Always rebase** feature branches onto main. Never merge main in.
 - **Pattern C**: the parent working tree is read-only. All code work happens in `.worktrees/<task-id>/`. `/ai-sdlc execute` sets this up automatically.
 - **Attestation is required** on `main`. Code PRs that touch source must carry a DSSE envelope signed by the reviewer chain. Docs-only PRs bypass.

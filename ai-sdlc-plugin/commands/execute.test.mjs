@@ -306,7 +306,8 @@ describe('/ai-sdlc execute body — pipeline lives inline (AISDLC-98)', () => {
   });
 
   it('explicitly forbids gh pr merge', () => {
-    assert.match(cmdBody, /Never (merge any PR|runs `gh pr merge`)/i);
+    assert.match(cmdBody, /never run the raw merge command/i);
+    assert.match(cmdBody, /Do not run `gh pr merge` directly/);
   });
 
   it('explicitly forbids git push --force', () => {
@@ -326,7 +327,11 @@ describe('/ai-sdlc execute body — pipeline lives inline (AISDLC-98)', () => {
     // developer + reviewers also embed — belt-and-braces in case a future
     // edit drops one. Hard Rule 7 (CI-skip token rule, AISDLC-88) is
     // asserted by the dedicated AISDLC-88 tests below.
-    assert.match(cmdBody, /Never merge any PR/i, 'must embed never-merge rule');
+    assert.match(
+      cmdBody,
+      /Merging follows `governance\.allowMerge`/,
+      'must embed config-driven merge rule',
+    );
     assert.match(cmdBody, /Never force-push/i, 'must embed never-force-push rule');
     assert.match(
       cmdBody,

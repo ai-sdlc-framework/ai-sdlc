@@ -154,7 +154,9 @@ ai-sdlc/ci-conflict-resolver: failure shape '<shape>' not auto-resolvable, opera
 
 The agent enforces these defensively at every step:
 
-1. Never merge a PR, and never run a raw `gh pr merge` in any form (the
+1. Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`,
+   rendered into the session hard rules; when it permits merging, the only
+   path is `cli-merge-if-eligible`. Never run a raw `gh pr merge` in any form (the
    PreToolUse hook denies it, `--auto` included). Re-attaching the
    auto-merge request goes through
    `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind backlog --arm`,

@@ -7,7 +7,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, readdirSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -55,7 +55,9 @@ describe('render-governance-hard-rules.mjs', () => {
 
   it('renders the lease force-push default (AISDLC-710), strict everything else, with no governance section', () => {
     const output = run(strictDir);
-    assert.match(output, /Never merge PRs/);
+    assert.match(output, /configuration forbids agent merges/);
+    assert.match(output, /governance\.allowMerge: never/);
+    assert.doesNotMatch(output, /only humans merge/i);
     assert.doesNotMatch(output, /Never force-push/);
     assert.match(output, /Force-push is allowed per repo policy/);
     assert.match(output, /allowForcePush: leaseOnOwnBranch/);
@@ -82,12 +84,39 @@ describe('render-governance-hard-rules.mjs', () => {
 
   it('renders the onGreenClean merge text when the policy opts in', () => {
     const output = run(greenDir);
-    assert.match(output, /allowed once ALL required CI checks are green/);
-    assert.doesNotMatch(output, /Never merge PRs \(`gh pr merge`\)/);
+    assert.match(output, /cli-merge-if-eligible\.mjs <pr> --source-kind backlog \[--arm\]/);
+    assert.doesNotMatch(output, /forbids agent merges/);
+    assert.doesNotMatch(output, /only humans merge|human to merge|human to click merge/i);
   });
 
   it('fails closed to strict defaults when agent-role.yaml is entirely absent', () => {
     const output = run(noConfigDir);
-    assert.match(output, /Never merge PRs/);
+    assert.match(output, /configuration forbids agent merges/);
   });
+});
+
+// AISDLC-753: merge policy follows governance.allowMerge; no plugin prompt may
+// hard-code a humans-only merge rule.
+describe('plugin command and agent bodies do not hard-code a humans-only merge rule', () => {
+  const pluginRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const banned =
+    /only humans? merges?|human to merge|human to click merge|requires a human to merge/i;
+
+  for (const dir of ['commands', 'agents', 'skills']) {
+    const root = join(pluginRoot, dir);
+    const files = [];
+    const walk = (d) => {
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        const full = join(d, e.name);
+        if (e.isDirectory()) walk(full);
+        else if (e.name.endsWith('.md')) files.push(full);
+      }
+    };
+    walk(root);
+    for (const f of files) {
+      it(`${dir}/${f.slice(root.length + 1)} has no humans-only merge sentence`, () => {
+        assert.doesNotMatch(readFileSync(f, 'utf-8'), banned);
+      });
+    }
+  }
 });

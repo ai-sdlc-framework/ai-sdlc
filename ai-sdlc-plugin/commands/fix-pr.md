@@ -96,10 +96,12 @@ Present:
 - Local verification status (build / test / lint / format)
 - What the human still needs to review
 
-## Step 7 — Never merge
+## Step 7 — Never merge directly
 
-Do **not** run `gh pr merge`. The skill fixes and surfaces; humans merge.
-This is a hard rule from CLAUDE.md.
+Do **not** run `gh pr merge`. The skill fixes and surfaces. Merging follows
+`governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the
+session hard rules; when it permits merging, the only path is
+`cli-merge-if-eligible`; never run the raw merge command.
 
 ## Notes
 

@@ -68,7 +68,10 @@ export function buildGovernancePrompt(ctx: AgentContext): string {
     lines.push('Tests required: every new module must have tests.');
   }
   lines.push('');
-  lines.push('**NEVER merge PRs. Only humans merge.**');
+  lines.push(
+    '**Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; ' +
+      'when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command.**',
+  );
 
   return lines.join('\n');
 }

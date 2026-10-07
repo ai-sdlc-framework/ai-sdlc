@@ -168,12 +168,30 @@ describe('resolveGovernanceFromYaml', () => {
 });
 
 describe('renderSessionStartHardRules', () => {
-  it('renders the strict three-line banner by default', () => {
+  it('renders the never-merge banner by default, naming the configuration key', () => {
     const text = renderSessionStartHardRules({ ...STRICT_DEFAULTS, allowForcePush: false });
-    assert.equal(
+    const lines = text.split('\n');
+    assert.equal(lines.length, 3);
+    assert.match(lines[0], /this repository's configuration forbids agent merges/);
+    assert.match(lines[0], /governance\.allowMerge: never/);
+    assert.match(lines[0], /\.ai-sdlc\/agent-role\.yaml/);
+    assert.doesNotMatch(text, /only humans merge/i);
+    assert.equal(lines[1], '**NEVER close issues or PRs.**');
+    assert.equal(lines[2], '**NEVER force push.**');
+  });
+
+  it('renders the helper path under onGreenClean with no humans-only sentence (AISDLC-753)', () => {
+    const text = renderSessionStartHardRules({
+      ...STRICT_DEFAULTS,
+      allowForcePush: false,
+      allowMerge: 'onGreenClean',
+    });
+    assert.match(
       text,
-      '**NEVER merge PRs. Only humans merge.**\n**NEVER close issues or PRs.**\n**NEVER force push.**',
+      /node pipeline-cli\/bin\/cli-merge-if-eligible\.mjs <pr> --source-kind backlog \[--arm\]/,
     );
+    assert.doesNotMatch(text, /only humans merge|human to merge|human to click merge/i);
+    assert.doesNotMatch(text, /forbids agent merges/);
   });
 
   it('softens the merge line under onGreenClean', () => {
@@ -184,6 +202,7 @@ describe('renderSessionStartHardRules', () => {
     });
     assert.match(text, /mergeStateStatus == CLEAN/);
     assert.doesNotMatch(text, /NEVER merge PRs/);
+    assert.doesNotMatch(text, /forbids agent merges/);
     // Other two lines stay strict.
     assert.match(text, /NEVER close issues or PRs/);
     assert.match(text, /NEVER force push/);
@@ -193,7 +212,9 @@ describe('renderSessionStartHardRules', () => {
 describe('renderSubagentHardRules', () => {
   it('renders the strict five-bullet list by default', () => {
     const text = renderSubagentHardRules({ ...STRICT_DEFAULTS, allowForcePush: false });
-    assert.match(text, /Never merge PRs/);
+    assert.match(text, /configuration forbids agent merges/);
+    assert.match(text, /governance\.allowMerge: never/);
+    assert.doesNotMatch(text, /only humans merge/i);
     assert.match(text, /Never force-push/);
     assert.match(text, /Never close PRs or issues/);
     assert.match(text, /Never delete branches/);
@@ -207,7 +228,9 @@ describe('renderSubagentHardRules', () => {
       allowMerge: 'onGreenClean',
     });
     assert.match(text, /mergeStateStatus == CLEAN/);
-    assert.doesNotMatch(text, /Never merge PRs/);
+    assert.match(text, /cli-merge-if-eligible\.mjs <pr> --source-kind backlog \[--arm\]/);
+    assert.doesNotMatch(text, /forbids agent merges/);
+    assert.doesNotMatch(text, /only humans merge/i);
     assert.match(text, /Never force-push/);
     assert.match(text, /Never close PRs or issues/);
     assert.match(text, /Never delete branches/);

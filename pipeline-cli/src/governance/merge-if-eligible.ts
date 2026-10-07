@@ -907,9 +907,8 @@ export function evaluateMergeEligibility(ctx: MergeEligibilityContext): MergeEli
     return {
       eligible: false,
       reason:
-        `governance policy allowMerge="${ctx.policy.allowMerge}" — refusing all agent-initiated ` +
-        'merges (strict default requires a human to click merge; set governance.allowMerge: ' +
-        'onGreenClean in .ai-sdlc/agent-role.yaml to opt in)',
+        `this repository's governance.allowMerge is ${ctx.policy.allowMerge}; ` +
+        'set onGreenClean in .ai-sdlc/agent-role.yaml to permit agent merges',
     };
   }
 

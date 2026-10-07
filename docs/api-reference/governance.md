@@ -27,7 +27,7 @@ metadata:
 spec:
   constraints:
     blockedActions:
-      - 'gh pr merge*'        # Only humans merge
+      - 'gh pr merge*'        # Raw merge skips the gate; use cli-merge-if-eligible (see governance.allowMerge)
       - 'git merge*'          # No merging into main
       - 'git push --force*'   # No force push
       - 'git push -f*'        # No force push (short flag)
@@ -66,11 +66,15 @@ Internal sessions (the operator's own agents, run by `/ai-sdlc execute` and the 
 ## Per-repo governance hard-rules (RFC-0048 Phase 1)
 
 `spec.governance` (sibling to `spec.constraints`) is the single per-repo source
-of truth for the injected governance hard-rule TEXT — "NEVER merge PRs", "NEVER
+of truth for the injected governance hard-rule TEXT — the merge rule, "NEVER
 force push", etc. — that Claude Code sessions and subagents see in their
-SessionStart/SubagentStart banners. All keys are optional; an ABSENT
-`governance` section resolves to strict defaults, reproducing the historical
-injected text byte-for-byte, with ONE exception: `allowForcePush` defaults to
+SessionStart/SubagentStart banners. The merge rule is rendered from the
+resolved `allowMerge` value only: `onGreenClean` names the
+`cli-merge-if-eligible` helper path, `never` says this repository's
+configuration forbids agent merges and names the key. `never` is a configurable
+value (and the schema default), not a project rule. The raw merge command stays
+blocked under both values. All keys are optional; an ABSENT
+`governance` section resolves to strict defaults, with ONE exception: `allowForcePush` defaults to
 `leaseOnOwnBranch` (see "Velocity impact" below):
 
 ```yaml
