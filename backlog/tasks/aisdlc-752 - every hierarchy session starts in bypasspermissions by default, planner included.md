@@ -18,7 +18,6 @@ references:
   - pipeline-cli/src/hierarchy/index.ts
   - docs/operations/cli-hierarchy.md
   - docs/operations/parallel-dispatch.md
-  - ai-sdlc-plugin/commands/hierarchy.md
   - ai-sdlc-plugin/commands/planner.md
 priority: high
 dispatchable: true
