@@ -20,7 +20,7 @@ name: AI-SDLC Verify Review Attestation
 # branch's checkout by default — NOT the PR's HEAD. To verify the
 # attestation we must read the fork's `.ai-sdlc/attestations/<sha>.dsse.json`
 # and diff fork PR HEAD vs base; the envelope + leaves are fetched as DATA
-# through the GitHub contents API (AISDLC-704.6: the fork head is never
+# through git objects (AISDLC-704.6: the fork head is never
 # checked out) and are NEVER executed.
 #
 # ── 5-point safety guard (AISDLC-381 — see docs/operations/operator-runbook.md
@@ -36,8 +36,9 @@ name: AI-SDLC Verify Review Attestation
 # 2. The fork PR head is NEVER checked out (AISDLC-704.6, same pattern as
 #    AISDLC-704 for ai-sdlc-review.yml; avoids the Scorecard
 #    DangerousWorkflow alert class). The envelopes, `transcript-leaves.jsonl`
-#    and `transcript-leaves/` are fetched as DATA through
-#    `gh api repos/${HEAD_REPO_FULL}/contents/<path>?ref=${HEAD_SHA}` with the
+#    and `transcript-leaves/` are read as DATA from fetched git objects
+#    (`git ls-tree` + `git show`, regular blobs only, via
+#    scripts/stage-attestation-data.sh) with the
 #    head repo and SHA bound through step `env:` (never interpolated into a
 #    `run:` block), the SHA hex-validated and the repo name pattern-validated.
 #    Files are written straight to the paths the verifier reads and are
@@ -213,8 +214,8 @@ jobs:
           fetch-depth: 0
 
       # AISDLC-381 Safety guard #2 (AISDLC-704.6 revision): the fork head is
-      # NEVER checked out. Fetch the DSSE envelope(s) as DATA via the GitHub
-      # contents API into main's working tree, so the verifier
+      # NEVER checked out. Read the DSSE envelope(s) as DATA from fetched git
+      # objects (git ls-tree / git show) into main's working tree, so the verifier
       # (running from main's scripts/verify-attestation.mjs) can resolve
       # `.ai-sdlc/attestations/<head-sha>.dsse.json` at the expected path.
       # We use `cp -- <src> <dst>` (no `-r`, no globs that could expand
@@ -257,80 +258,41 @@ jobs:
             git checkout "$HEAD_SHA" -- '.ai-sdlc/transcript-leaves/' 2>/dev/null || true
             echo "[verify-attestation] merge_group: surfaced .ai-sdlc/attestations + transcript-leaves.jsonl + transcript-leaves/ from $HEAD_SHA (if present)"
           else
-            # pull_request_target: fetch the envelope(s) via the contents API.
+            # pull_request_target: the head commit is fetched into main's git
+            # store as DATA, then the envelope(s) + transcript leaves are
+            # materialised with `git ls-tree` / `git show` by
+            # scripts/stage-attestation-data.sh (from MAIN's checkout; no fork
+            # checkout, no contents-API loop, no 1000-entry listing cap, and a
+            # failed fetch fails the step instead of staging a partial set).
             # The fork MAY not have an envelope (e.g. pushed without
             # /ai-sdlc execute) -- expected; the verifier then reports `no
             # envelope present at <sha>` and the status poster posts FAILURE.
-            case "$HEAD_SHA" in
-              *[!0-9a-f]*|"") echo "::error::unexpected head sha"; exit 1 ;;
-            esac
+            if ! [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::unexpected head sha"; exit 1
+            fi
             if ! [[ "$HEAD_REPO_FULL" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
               echo "::error::unexpected head repository name"; exit 1
             fi
-            # fetch_dir <remote-dir> <local-dir> <filename-regex>: list the
-            # remote directory at HEAD_SHA, then fetch each matching file raw.
-            # The strict filename regex is the path-traversal guard (a hostile
-            # fork cannot smuggle `../x` past it); signature verification by
-            # the downstream verifier remains the trust boundary.
-            fetch_dir() {
-              local rdir="$1" ldir="$2" re="$3" count=0 names name
-              names=$(gh api "repos/${HEAD_REPO_FULL}/contents/${rdir}?ref=${HEAD_SHA}" \
-                --jq '.[] | select(.type == "file") | .name' 2>/dev/null || true)
-              while IFS= read -r name; do
-                [ -n "$name" ] || continue
-                if [[ "$name" =~ $re ]]; then
-                  mkdir -p "$ldir"
-                  if gh api -H "Accept: application/vnd.github.raw" \
-                      "repos/${HEAD_REPO_FULL}/contents/${rdir}/${name}?ref=${HEAD_SHA}" \
-                      > "${ldir}/${name}.tmp" 2>/dev/null; then
-                    mv -- "${ldir}/${name}.tmp" "${ldir}/${name}"
-                    count=$((count + 1))
-                  else
-                    rm -f -- "${ldir}/${name}.tmp"
-                  fi
-                fi
-              done <<< "$names"
-              echo "$count"
-            }
-            mkdir -p .ai-sdlc/attestations
-            # AISDLC-395: stage EVERY envelope matching <40hex>[.v6].dsse.json,
-            # not just the one named after HEAD_SHA (the envelope is named after
-            # the dev commit's SHA while PR HEAD is the later chore commit).
-            STAGED=$(fetch_dir ".ai-sdlc/attestations" ".ai-sdlc/attestations" '^[0-9a-f]{40}(\.v6)?\.dsse\.json$')
-            echo "[verify-attestation] staged $STAGED envelope(s) from fork PR via contents API"
-            if [ "$STAGED" = "0" ]; then
-              echo "[verify-attestation] no envelopes in .ai-sdlc/attestations at fork head — verifier will report missing"
+            if ! [[ "$BASE_REPO_FULL" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+              echo "::error::unexpected base repository name"; exit 1
             fi
-            # AISDLC-383.4: legacy shared transcript-leaves.jsonl for v6 Merkle
-            # verification (DATA-ONLY; parsed as JSON records by the verifier).
-            if gh api -H "Accept: application/vnd.github.raw" \
-                "repos/${HEAD_REPO_FULL}/contents/.ai-sdlc/transcript-leaves.jsonl?ref=${HEAD_SHA}" \
-                > ".ai-sdlc/transcript-leaves.jsonl.tmp" 2>/dev/null; then
-              mv -- ".ai-sdlc/transcript-leaves.jsonl.tmp" ".ai-sdlc/transcript-leaves.jsonl"
-              echo "[verify-attestation] staged transcript-leaves.jsonl from fork PR"
-            else
-              rm -f -- ".ai-sdlc/transcript-leaves.jsonl.tmp"
-            fi
-            # AISDLC-445: per-patch-id transcript-leaves/<40hex>.jsonl files
-            # (AISDLC-421 primary path). Without them the verifier falls back to
-            # the shared file, which may carry stale leaves and produce a
-            # misleading "rootSignature did not match" error.
-            LEAVES_STAGED=$(fetch_dir ".ai-sdlc/transcript-leaves" ".ai-sdlc/transcript-leaves" '^[0-9a-f]{40}\.jsonl$')
-            if [ "$LEAVES_STAGED" != "0" ]; then
-              echo "[verify-attestation] staged $LEAVES_STAGED per-patch-id transcript-leaves file(s) from fork PR"
-            fi
-            # Fetch the fork HEAD SHA into main's git store so the
-            # verifier's `git diff <base>...<head>` operations resolve.
-            # The fork's clone URL is resolved via a target-context API
-            # call. The fetch refspec is SHA-anchored (`+${HEAD_SHA}:...`)
-            # so a malicious fork cannot influence which ref is fetched
-            # under what local name (the SHA is server-validated).
-            if [ -n "${HEAD_REPO_FULL:-}" ] && [ "$HEAD_REPO_FULL" != "$BASE_REPO_FULL" ]; then
-              FORK_URL=$(gh api "repos/${HEAD_REPO_FULL}" --jq '.clone_url' 2>/dev/null || echo "")
-              if [ -n "$FORK_URL" ]; then
-                git fetch --no-tags "$FORK_URL" "+${HEAD_SHA}:refs/remotes/fork/${HEAD_SHA}" 2>/dev/null || true
+            # The fetch refspec is SHA-anchored (`+${HEAD_SHA}:...`) so a
+            # malicious fork cannot influence which ref is fetched under what
+            # local name. The fetch uses unauthenticated https and therefore
+            # assumes the head repository is public (forks of this public repo
+            # are); no credential is passed or persisted. Same-repo heads are
+            # normally already reachable via fetch-depth: 0.
+            if [ "$HEAD_REPO_FULL" != "$BASE_REPO_FULL" ]; then
+              if ! git fetch --no-tags "https://github.com/${HEAD_REPO_FULL}.git" \
+                  "+${HEAD_SHA}:refs/remotes/fork/${HEAD_SHA}"; then
+                echo "::error::failed to fetch head ${HEAD_SHA} from ${HEAD_REPO_FULL}"; exit 1
+              fi
+            elif ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+              if ! git fetch --no-tags origin "+${HEAD_SHA}:refs/remotes/fork/${HEAD_SHA}"; then
+                echo "::error::failed to fetch head ${HEAD_SHA} from origin"; exit 1
               fi
             fi
+            bash scripts/stage-attestation-data.sh
           fi
 
       # AISDLC-214: short-circuit on docs-only changesets.

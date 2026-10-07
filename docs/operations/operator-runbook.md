@@ -1375,9 +1375,13 @@ workflow legitimately needs fork content (e.g. the
 `.ai-sdlc/attestations/<sha>.dsse.json` envelope that the verifier reads
 as JSON), fetch it as data:
 
-- Files: `gh api -H "Accept: application/vnd.github.raw" "repos/${HEAD_REPO_FULL}/contents/<path>?ref=${HEAD_SHA}"`,
-  written straight to the path the verifier reads. List directories with the
-  same endpoint and filter names against a strict regex (path-traversal guard).
+- Files: fetch the head commit objects into the local git store (SHA-anchored
+  refspec; a failed fetch must fail the step), enumerate with
+  `git ls-tree -z <sha> -- <dir>/`, keep only regular blobs (mode
+  100644/100755) whose names match a strict regex (path-traversal guard), and
+  materialise with `git show <sha>:<path>`. See `scripts/stage-attestation-data.sh`.
+  Avoid the contents API for bulk staging: it costs one call per file and
+  lists at most 1000 entries per directory.
 - Git objects (for `git diff <base>...<head>`): `git init pr-content` then
   `git -C pr-content fetch --no-tags https://github.com/${REPO}.git +${SHA}:refs/remotes/...`
   (objects only, no working tree).

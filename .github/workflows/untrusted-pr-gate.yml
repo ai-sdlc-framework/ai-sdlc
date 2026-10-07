@@ -105,6 +105,8 @@ jobs:
           # resolves); no working tree is populated and no credential is
           # persisted. The head repo and SHAs are bound through step env (never
           # interpolated into this script) and validated before use.
+          # The fetch below uses unauthenticated https and assumes a public repo
+          # (forks of this public repo are public); no credential is persisted.
           set -euo pipefail
           for sha in "$HEAD_SHA" "$BASE_SHA"; do
             if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
@@ -209,8 +211,13 @@ jobs:
           # CRITICAL fix #1: feed changed paths to CLI via stdin (pipe), NOT via process
           # substitution (a /dev/fd process-substitution argument) which produces a /dev/fd/<N> arg that the CLI
           # ignores — the CLI reads changed paths from stdin, not from --changed-files flag.
-          CHANGED_FILES=$(git -C pr-content diff "$PR_BASE_SHA".."$PR_HEAD_SHA" --name-only 2>/dev/null || \
-                          git -C pr-content diff HEAD~1..HEAD --name-only 2>/dev/null || echo "")
+          # pr-content is a headless repo (no HEAD), so the only valid diff is
+          # base..head. Fail closed if it cannot be computed: an empty list would
+          # otherwise read as "no protected paths touched".
+          if ! CHANGED_FILES=$(git -C pr-content diff "$PR_BASE_SHA".."$PR_HEAD_SHA" --name-only); then
+            echo "::error::could not compute the PR diff from fetched git objects"
+            exit 1
+          fi
 
           # Pipe the changed file list to stdin; capture only stdout for JSON parsing.
           AST_OUTPUT=$(printf '%s\n' "$CHANGED_FILES" | node pipeline-cli/bin/cli-ucvg.mjs ast-gate \
@@ -347,6 +354,8 @@ jobs:
           # resolves); no working tree is populated and no credential is
           # persisted. The head repo and SHAs are bound through step env (never
           # interpolated into this script) and validated before use.
+          # The fetch below uses unauthenticated https and assumes a public repo
+          # (forks of this public repo are public); no credential is persisted.
           set -euo pipefail
           for sha in "$HEAD_SHA" "$BASE_SHA"; do
             if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
