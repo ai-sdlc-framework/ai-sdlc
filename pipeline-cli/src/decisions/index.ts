@@ -40,3 +40,4 @@ export * from './fatigue.js';
 export * from './timebox.js';
 export * from './research-subagent.js';
 export * from './notebook-summary.js';
+export * from './remote-persist.js';

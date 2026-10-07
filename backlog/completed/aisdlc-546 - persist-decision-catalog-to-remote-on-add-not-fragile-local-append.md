@@ -3,7 +3,7 @@ id: AISDLC-546
 title: >-
   fix(decisions): persist Decision Catalog to the remote on `cli-decisions add`
   so Pattern-C parent resets can't wipe un-synced decisions (number reuse)
-status: To Do
+status: Done
 assignee: []
 labels:
   - bug

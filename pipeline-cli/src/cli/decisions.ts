@@ -55,7 +55,6 @@ import {
   makeTimeboxExtendedEvent,
   mirrorSubstrateEntry,
   msRemainingUntil,
-  nextDecisionId,
   notebookSummariesDisabledMessage,
   parseTimebox,
   projectDecision,
@@ -106,6 +105,11 @@ import {
   fallbackWeakensControl,
   type GovernanceChange,
 } from '../decisions/governance-fallback.js';
+import {
+  assertDecisionIdFree,
+  nextDecisionIdDurable,
+  persistDecisionLog,
+} from '../decisions/remote-persist.js';
 import { renderOperatorDigestMarkdown, runOperatorDigest } from '../decisions/operator-digest.js';
 import { readCorpus, recordOperatorOverride } from '../classifier/substrate/index.js';
 import { createJudgmentRunner } from '../judgment/runner.js';
@@ -828,7 +832,16 @@ export function buildDecisionsCli(): Argv {
         }
 
         const decisionId =
-          typeof argv.id === 'string' && argv.id ? String(argv.id) : nextDecisionId({ workDir });
+          typeof argv.id === 'string' && argv.id
+            ? String(argv.id)
+            : nextDecisionIdDurable({ workDir });
+        if (typeof argv.id === 'string' && argv.id) {
+          try {
+            assertDecisionIdFree(decisionId, { workDir });
+          } catch (err) {
+            fail((err as Error).message);
+          }
+        }
 
         // RFC-0035 AISDLC-447 — when --timebox is set, compute expiry from
         // the SAME `now` we'll stamp on the event so the two derived fields
@@ -874,6 +887,7 @@ export function buildDecisionsCli(): Argv {
         });
 
         const path = appendDecisionEvent(event, { workDir });
+        persistDecisionLog({ workDir });
         const decision = projectDecision(decisionId, { workDir });
 
         if (String(argv.format) === 'json') {
@@ -1016,7 +1030,7 @@ export function buildDecisionsCli(): Argv {
         const resumeBlock = `taskId: ${taskId}\nsourceWorktree: ${sourceWorktree}`;
         const body = userBody ? `${resumeBlock}\n\n${userBody}` : resumeBlock;
 
-        const decisionId = nextDecisionId({ workDir });
+        const decisionId = nextDecisionIdDurable({ workDir });
         const event = makeDecisionOpenedEvent({
           decisionId,
           source: 'subagent-escalation',
@@ -1030,6 +1044,7 @@ export function buildDecisionsCli(): Argv {
         });
 
         const path = appendDecisionEvent(event, { workDir });
+        persistDecisionLog({ workDir });
 
         if (String(argv.format) === 'json') {
           emit({
@@ -1721,6 +1736,7 @@ export function buildDecisionsCli(): Argv {
           ...(typeof argv.by === 'string' ? { by: String(argv.by) } : {}),
         });
         appendDecisionEvent(evt, { workDir });
+        persistDecisionLog({ workDir });
 
         if (String(argv.format) === 'json') {
           emit({ ok: true, decisionId: id, chosenOptionId: optionId });

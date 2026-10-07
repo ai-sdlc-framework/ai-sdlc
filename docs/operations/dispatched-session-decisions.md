@@ -93,6 +93,33 @@ git log --oneline -5
 
 If commits exist: the developer subagent's earlier work is preserved. Re-dispatching will resume from where it left off, with the decision now answered.
 
+## Durable persistence (AISDLC-546)
+
+`cli-decisions add`, `escalate` and `answer` no longer rely on the fragile local append alone. After
+appending to `.ai-sdlc/_decisions/events.jsonl`, the CLI builds a commit with git plumbing (temporary
+index; your working tree, index and HEAD are untouched) containing `origin/main` plus the merged ledger,
+and pushes it to the dedicated branch `ai-sdlc/decisions-sync` (a draft PR is opened best-effort via
+`gh`). No manual sync step is needed, and a Pattern-C parent `git reset --hard origin/main` cannot lose
+the decision.
+
+- Numbering is `max(local ledger, origin/main ledger, ai-sdlc/decisions-sync ledger) + 1` after a fetch,
+  so a freed DEC-NNNN is never reissued; an explicit `--id` that is already consumed remotely is refused.
+- Offline / no `origin` / no `gh`: a warning goes to stderr, the exit code is unchanged and the local
+  append is kept (the next successful `add`/`answer` pushes everything).
+- Opt out (tests, air-gapped use): `AI_SDLC_DECISIONS_NO_REMOTE_PERSIST=1`.
+- The sync push is a programmatic `--no-verify` lease-protected force push to a hard-coded,
+  non-configurable dedicated ref (`ai-sdlc/decisions-sync`). This is a documented exception for a
+  machine-generated, attestation-exempt commit, not a general pattern for other pushes.
+- Untrusted runs (`AI_SDLC_UNTRUSTED_RUN`, or GitHub Actions without `AI_SDLC_INTERNAL_RUN`, read from
+  the process environment only) do not persist: a warning is printed and the local append is kept, so
+  untrusted input cannot ride into the review-exempt sync PR.
+- Each ledger line is validated before the union merge; invalid lines are dropped with a warning.
+- Because merging only adds lines, removing a bad record requires cleaning the sync branch AND every
+  local ledger (and `origin/main` if it already landed); cleaning one copy alone lets the others
+  restore it.
+- Merging the sync PR lands the ledger on `main`. Manual ledger syncing is retired; use it only as a
+  fallback when the warning above appeared and the remote stayed unreachable.
+
 ## Feature flag gate
 
 All `cli-decisions escalate` calls are gated on `AI_SDLC_DECISION_CATALOG` (default-ON since AISDLC-392).
