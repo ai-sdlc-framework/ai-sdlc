@@ -23,6 +23,23 @@
 # clean. If the operator (or a tool) has uncommitted modifications, abort
 # with a clear warning and let them resolve manually.
 #
+# AISDLC-750 additions:
+#   4. Provable stale-index self-heal. When HEAD moved alone (a bare update-ref),
+#      the index and working tree still hold an ancestor's tree. If `git write-tree`
+#      equals the tree of a commit within the last 200 of HEAD, nothing is unstaged,
+#      and HEAD is current or behind origin/main, every staged "change" is explained
+#      by that commit and `git read-tree -u -m <match> HEAD` loses nothing. Otherwise
+#      the existing refuse/warn behaviour stays.
+#   5. Parent independence from worktree hook copies. Git runs post-rewrite from the
+#      worktree doing the rebase, so a worktree whose branch predates the guard fix
+#      would still move the parent's refs/heads/main alone. CHOICE (a): on every run
+#      this script rewrites the GENERATED, gitignored husky shim
+#      `<worktree>/.husky/_/post-rewrite` in every registered worktree to exec the main
+#      checkout's `.husky/post-rewrite`, logging each rewrite. The tracked
+#      `.husky/post-rewrite` is deliberately NOT touched: editing it would leave the
+#      worktree with a dirty tracked file that blocks `git rebase`. `pnpm run prepare`
+#      regenerates the shim, so this re-applies on the next Step 0.
+#
 # Skip with: AI_SDLC_SKIP_ORCHESTRATOR_STATE_CHECK=1
 
 set -euo pipefail
@@ -67,6 +84,25 @@ fi
 if ! git rev-parse refs/heads/main >/dev/null 2>&1; then
   echo "[orchestrator-state] skipping: local refs/heads/main not present — likely a shallow CI clone"
   exit 0
+fi
+
+# AISDLC-750 (5): repoint every worktree's generated post-rewrite shim at the main
+# checkout's hook so a stale worktree copy cannot desync the parent. Non-fatal.
+PARENT_REWRITE_HOOK="${PARENT_ROOT}/.husky/post-rewrite"
+if [ -f "$PARENT_REWRITE_HOOK" ]; then
+  PROXY_BODY=$(printf '#!/usr/bin/env sh\n# AISDLC-750 proxy: run the main checkout post-rewrite guard, not this worktree copy\nexec bash "%s" "$@"\n' "$PARENT_REWRITE_HOOK")
+  while IFS= read -r wt_line; do
+    case "$wt_line" in worktree\ *) ;; *) continue ;; esac
+    wt_path="${wt_line#worktree }"
+    [ "$wt_path" = "$PARENT_ROOT" ] && continue
+    shim="${wt_path}/.husky/_/post-rewrite"
+    [ -d "${wt_path}/.husky/_" ] || continue
+    if [ "$(cat "$shim" 2>/dev/null)" != "$PROXY_BODY" ]; then
+      if printf '%s\n' "$PROXY_BODY" > "$shim" 2>/dev/null && chmod +x "$shim" 2>/dev/null; then
+        echo "[orchestrator-state] repointed post-rewrite shim in worktree ${wt_path} at the main checkout hook (AISDLC-750)"
+      fi
+    fi
+  done < <(git worktree list --porcelain 2>/dev/null || true)
 fi
 
 # 1a. AISDLC-358: Pattern-C contract — parent MUST be on main.
@@ -126,6 +162,28 @@ HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
 if [ -z "$ORIGIN_MAIN" ]; then
   echo "[orchestrator-state] WARN: cannot resolve origin/main; skipping sync"
   exit 0
+fi
+
+# AISDLC-750 (4): provable stale-index self-heal (see header). Only when HEAD is
+# current or behind origin/main and the index differs from HEAD.
+if [ -n "$HEAD_SHA" ] && ! git diff --cached --quiet HEAD 2>/dev/null \
+  && git merge-base --is-ancestor "$HEAD_SHA" "$ORIGIN_MAIN" 2>/dev/null \
+  && git diff --quiet 2>/dev/null; then
+  INDEX_TREE=$(git write-tree 2>/dev/null || echo "")
+  STALE_MATCH=""
+  if [ -n "$INDEX_TREE" ]; then
+    while read -r cand cand_tree; do
+      if [ "$cand_tree" = "$INDEX_TREE" ]; then STALE_MATCH="$cand"; break; fi
+    done < <(git log -n 200 --format='%H %T' HEAD 2>/dev/null || true)
+  fi
+  if [ -n "$STALE_MATCH" ]; then
+    echo "[orchestrator-state] stale index detected: index/tree equal ${STALE_MATCH:0:8}, HEAD is ${HEAD_SHA:0:8}; healing with read-tree"
+    if git read-tree -u -m "$STALE_MATCH" HEAD 2>/dev/null; then
+      echo "[orchestrator-state] healed parent index/working tree: ${STALE_MATCH} -> ${HEAD_SHA}"
+    else
+      echo "[orchestrator-state] WARN: read-tree heal failed; recover manually: git -C \"${PARENT_ROOT}\" read-tree -u -m ${STALE_MATCH} HEAD"
+    fi
+  fi
 fi
 
 # AISDLC-708: the index/working tree can differ from HEAD even when HEAD is

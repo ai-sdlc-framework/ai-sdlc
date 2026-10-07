@@ -1068,6 +1068,43 @@ export function fixWorktreeHooks(ctx: DoctorRunContext): DoctorFixResult {
   };
 }
 
+/** AISDLC-750: marker the post-rewrite guard fix (and the proxy shim) carries. */
+const POST_REWRITE_FIX_MARKER = 'AISDLC-750';
+
+/** Worktrees whose post-rewrite hook (tracked copy and husky shim) predates the AISDLC-750 fix. */
+function findWorktreesWithStaleRewriteHook(ctx: DoctorRunContext): string[] {
+  const root = join(ctx.projectDir, '.worktrees');
+  return ctx.adapters
+    .listDir(root)
+    .map((name) => join(root, name))
+    .filter((wt) => {
+      const copy = ctx.adapters.readFile(join(wt, '.husky', 'post-rewrite'));
+      if (copy === null) return false; // no hook in this worktree: nothing runs
+      const shim = ctx.adapters.readFile(join(wt, '.husky', '_', 'post-rewrite')) ?? '';
+      return !copy.includes(POST_REWRITE_FIX_MARKER) && !shim.includes(POST_REWRITE_FIX_MARKER);
+    });
+}
+
+/**
+ * Git runs `post-rewrite` from the worktree doing the rebase, so a worktree whose copy
+ * predates the AISDLC-750 fix can still move the parent's `refs/heads/main` alone.
+ * `check-orchestrator-state.sh` (Step 0) repoints each worktree's generated husky shim
+ * at the main checkout's hook; this reports the ones not yet repointed.
+ */
+export function checkWorktreeRewriteHooks(ctx: DoctorRunContext): DoctorCheckResult[] {
+  const affected = findWorktreesWithStaleRewriteHook(ctx);
+  if (affected.length === 0) return [];
+  return [
+    {
+      id: 'worktree-rewrite-hooks',
+      severity: 'warn',
+      title: `${affected.length} worktree(s) carry a post-rewrite hook that predates the parent-guard fix: ${affected.map((wt) => basename(wt)).join(', ')}`,
+      remediation: `bash ${join(ctx.projectDir, 'scripts', 'check-orchestrator-state.sh')} (repoints every worktree's .husky/_/post-rewrite at the main checkout's hook)`,
+      anonymizableEvidence: { affectedCount: affected.length },
+    },
+  ];
+}
+
 // ── Parent checkout state (AISDLC-708) ──────────────────────────────────
 
 /** Tracked paths whose index or working-tree content differs from HEAD, unique and sorted. */
@@ -1086,6 +1123,35 @@ function readDivergedPaths(ctx: DoctorRunContext): string[] {
     for (const line of r.stdout.split('\n')) if (line.trim() !== '') paths.add(line.trim());
   }
   return [...paths].sort();
+}
+
+/**
+ * AISDLC-750: the provable stale-index state. The index tree equals the tree of an
+ * ancestor of HEAD within the last 200 commits and nothing is unstaged, so the
+ * "changes" are only HEAD having moved alone (a bare `update-ref`). Returns that
+ * ancestor so the recovery is exact; `null` when the state is not provable.
+ */
+function findProvableStaleIndexCommit(ctx: DoctorRunContext): string | null {
+  const unstaged = ctx.adapters.runCommand('git', ['-C', ctx.projectDir, 'diff', '--name-only']);
+  if (unstaged.exitCode !== 0 || unstaged.stdout.trim() !== '') return null;
+  const tree = ctx.adapters.runCommand('git', ['-C', ctx.projectDir, 'write-tree']);
+  const indexTree = tree.stdout.trim();
+  if (tree.exitCode !== 0 || indexTree === '') return null;
+  const log = ctx.adapters.runCommand('git', [
+    '-C',
+    ctx.projectDir,
+    'log',
+    '-n',
+    '200',
+    '--format=%H %T',
+    'HEAD',
+  ]);
+  if (log.exitCode !== 0) return null;
+  for (const line of log.stdout.split('\n')) {
+    const [commit, commitTree] = line.trim().split(' ');
+    if (commit && commitTree === indexTree) return commit;
+  }
+  return null;
 }
 
 /**
@@ -1109,6 +1175,18 @@ export function checkParentCheckoutState(ctx: DoctorRunContext): DoctorCheckResu
   const paths = readDivergedPaths(ctx);
   if (paths.length === 0) return [];
   const shown = paths.slice(0, 5).join(', ');
+  const staleCommit = findProvableStaleIndexCommit(ctx);
+  if (staleCommit !== null) {
+    return [
+      {
+        id: 'parent-checkout-state',
+        severity: 'fail',
+        title: `parent checkout is stale: HEAD moved alone and the index/working tree still hold the tree of ${staleCommit.slice(0, 8)} (${paths.length} path(s) show as changed: ${shown}${paths.length > 5 ? ', ...' : ''})`,
+        remediation: `git -C ${ctx.projectDir} read-tree -u -m ${staleCommit} HEAD`,
+        anonymizableEvidence: { divergedPathCount: paths.length, provableStaleIndex: true },
+      },
+    ];
+  }
   return [
     {
       id: 'parent-checkout-state',
@@ -1407,6 +1485,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     description:
       'Orchestrator parent checkout on main whose index or working tree differs from HEAD, with the path count (AISDLC-708).',
     run: checkParentCheckoutState,
+  },
+  {
+    id: 'worktree-rewrite-hooks',
+    description:
+      'Worktrees whose post-rewrite hook predates the parent-on-main guard fix and can desync the parent checkout (AISDLC-750).',
+    run: checkWorktreeRewriteHooks,
   },
   {
     id: 'force-push-policy',

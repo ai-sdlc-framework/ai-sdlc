@@ -56,6 +56,17 @@ describe('.husky/post-rewrite (AISDLC-708)', () => {
     return execFileSync('bash', [HOOK, 'rebase'], { cwd: wt, encoding: 'utf8' });
   }
 
+  // AISDLC-750: git exports GIT_DIR to hooks; in a linked worktree it points at
+  // <common>/worktrees/<name>, which defeats `git -C <parent>` probes.
+  function runHookWithGitDir() {
+    const gitDir = sh(`git -C "${wt}" rev-parse --absolute-git-dir`);
+    return execFileSync('bash', [HOOK, 'rebase'], {
+      cwd: wt,
+      encoding: 'utf8',
+      env: { ...process.env, GIT_DIR: gitDir },
+    });
+  }
+
   afterEach(() => rmSync(root, { recursive: true, force: true }));
 
   it('AISDLC-708 reproduction: never leaves a main-checked-out parent with HEAD ahead of index/tree', () => {
@@ -84,5 +95,22 @@ describe('.husky/post-rewrite (AISDLC-708)', () => {
     const before = sh(`git -C "${parent}" rev-parse refs/heads/main`);
     runHook();
     assert.equal(sh(`git -C "${parent}" rev-parse refs/heads/main`), before);
+  });
+
+  it('AISDLC-750: parent on main stays untouched when GIT_DIR is exported from a linked worktree', () => {
+    setup('main');
+    const before = sh(`git -C "${parent}" rev-parse refs/heads/main`);
+    runHookWithGitDir();
+    assert.equal(sh(`git -C "${parent}" rev-parse refs/heads/main`), before);
+    assert.equal(sh(`git -C "${parent}" status --porcelain`), '');
+  });
+
+  it('AISDLC-750: fast-forward still happens with GIT_DIR exported when parent is on another branch', () => {
+    setup('other');
+    runHookWithGitDir();
+    assert.equal(
+      sh(`git -C "${parent}" rev-parse refs/heads/main`),
+      sh(`git -C "${parent}" rev-parse refs/remotes/origin/main`),
+    );
   });
 });

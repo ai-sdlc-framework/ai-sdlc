@@ -2,7 +2,7 @@
 id: AISDLC-750
 title: >-
   parent main checkout self-heals the provable stale-index state and the post-rewrite guard survives stale worktree hook copies
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-06'
 labels:
@@ -39,8 +39,8 @@ Fix:
 
 ## Acceptance Criteria
 
-- [ ] Running `.husky/post-rewrite rebase` from a linked worktree with `GIT_DIR` exported as git exports it, while the parent has `main` checked out, leaves the parent's `refs/heads/main`, index and working tree untouched, covered by a hermetic test; with the parent on another branch the fast-forward still happens.
-- [ ] A parent checkout whose index and working tree equal an ancestor commit's tree, with no unstaged edits, is healed automatically by Step 0 with a logged `read-tree` recovery, and a fixture with a genuine unstaged edit is still refused with the existing warning.
-- [ ] A rebase in a worktree carrying the pre-fix `post-rewrite` copy can no longer move the parent `refs/heads/main` alone, verified by a test or a documented manual check against a worktree with the old hook.
-- [ ] `/ai-sdlc doctor` reports the stale-index state red with the recovery command, and the cleanup sweep lists worktrees whose hook copy predates the fix.
-- [ ] Parity tests cover the new Step 0 branches and the full test suite passes apart from the 14 pre-existing pipeline-cli failures (verify-runtime, bin-invocation, TUI timeouts), which are disclosed in the PR body.
+- [x] Running `.husky/post-rewrite rebase` from a linked worktree with `GIT_DIR` exported as git exports it, while the parent has `main` checked out, leaves the parent's `refs/heads/main`, index and working tree untouched, covered by a hermetic test; with the parent on another branch the fast-forward still happens.
+- [x] A parent checkout whose index and working tree equal an ancestor commit's tree, with no unstaged edits, is healed automatically by Step 0 with a logged `read-tree` recovery, and a fixture with a genuine unstaged edit is still refused with the existing warning.
+- [x] A rebase in a worktree carrying the pre-fix `post-rewrite` copy can no longer move the parent `refs/heads/main` alone, verified by a test or a documented manual check against a worktree with the old hook.
+- [x] `/ai-sdlc doctor` reports the stale-index state red with the recovery command, and the cleanup sweep lists worktrees whose hook copy predates the fix.
+- [x] Parity tests cover the new Step 0 branches and the full test suite passes apart from the 14 pre-existing pipeline-cli failures (verify-runtime, bin-invocation, TUI timeouts), which are disclosed in the PR body.

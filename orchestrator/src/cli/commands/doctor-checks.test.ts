@@ -48,6 +48,7 @@ import {
   checkRuntimeGitignore,
   checkWorktreeHooks,
   checkParentCheckoutState,
+  checkWorktreeRewriteHooks,
   fixWorktreeHooks,
   checkForcePushPolicy,
   readForcePushPolicy,
@@ -1683,5 +1684,83 @@ describe('parent-checkout-state check', () => {
     const c = DOCTOR_CHECKS.find((x) => x.id === 'parent-checkout-state');
     expect(c).toBeDefined();
     expect(c?.fix).toBeUndefined();
+  });
+});
+
+// ── AISDLC-750: stale index + worktree hook copies ───────────────────
+
+describe('parent-checkout-state provable stale index (AISDLC-750)', () => {
+  function staleAdapters(opts: { unstaged?: string; indexTree: string; log: string }) {
+    return makeAdapters({
+      runCommand: (cmd, args) => {
+        if (cmd !== 'git') return { stdout: '', exitCode: 1 };
+        if (args.includes('symbolic-ref')) return { stdout: 'main\n', exitCode: 0 };
+        if (args.includes('write-tree')) return { stdout: `${opts.indexTree}\n`, exitCode: 0 };
+        if (args.includes('log')) return { stdout: opts.log, exitCode: 0 };
+        if (args.includes('--cached')) return { stdout: 'a.ts\n', exitCode: 0 };
+        return { stdout: opts.unstaged ?? '', exitCode: 0 };
+      },
+    });
+  }
+
+  it('is red and prints the exact read-tree recovery when the index equals an ancestor tree', () => {
+    const results = checkParentCheckoutState(
+      makeCtx(staleAdapters({ indexTree: 't2', log: 'c1 t1\nc2 t2\n' })),
+    );
+    expect(results[0].severity).toBe('fail');
+    expect(results[0].remediation).toContain('read-tree -u -m c2 HEAD');
+  });
+
+  it('stays a warning when there are unstaged edits', () => {
+    const results = checkParentCheckoutState(
+      makeCtx(staleAdapters({ unstaged: 'a.ts\n', indexTree: 't2', log: 'c2 t2\n' })),
+    );
+    expect(results[0].severity).toBe('warn');
+  });
+
+  it('stays a warning when no ancestor tree matches the index', () => {
+    const results = checkParentCheckoutState(
+      makeCtx(staleAdapters({ indexTree: 'tx', log: 'c1 t1\n' })),
+    );
+    expect(results[0].severity).toBe('warn');
+  });
+});
+
+describe('worktree-rewrite-hooks check (AISDLC-750)', () => {
+  function hookAdapters(files: Record<string, string>) {
+    return makeAdapters({
+      listDir: () => ['wt-old', 'wt-new', 'wt-none'],
+      readFile: (p) => {
+        for (const [k, v] of Object.entries(files)) if (p.endsWith(k)) return v;
+        return null;
+      },
+    });
+  }
+
+  it('reports worktrees whose hook copy lacks the fix marker', () => {
+    const results = checkWorktreeRewriteHooks(
+      makeCtx(
+        hookAdapters({
+          'wt-old/.husky/post-rewrite': '#!/bin/bash\nold\n',
+          'wt-new/.husky/post-rewrite': '# AISDLC-750\n',
+        }),
+      ),
+    );
+    expect(results).toHaveLength(1);
+    expect(results[0].title).toContain('wt-old');
+    expect(results[0].title).not.toContain('wt-new');
+    expect(results[0].title).not.toContain('wt-none');
+  });
+
+  it('accepts a worktree whose husky shim was repointed at the main hook', () => {
+    const results = checkWorktreeRewriteHooks(
+      makeCtx(
+        hookAdapters({
+          'wt-old/.husky/post-rewrite': 'old\n',
+          'wt-old/.husky/_/post-rewrite': '# AISDLC-750 proxy\n',
+        }),
+      ),
+    );
+    expect(results).toEqual([]);
   });
 });

@@ -25,9 +25,19 @@ if [ "${1:-}" != "rebase" ]; then
   exit 0
 fi
 
+# AISDLC-750: git exports GIT_DIR (and friends) to hooks, and inside a linked
+# worktree GIT_DIR points at <common>/worktrees/<name>. `git -C <parent>` does
+# NOT override an exported GIT_DIR, so every parent probe below would answer
+# with the WORKTREE's branch and the parent-on-main guard would never fire.
+# Resolve the common dir first, then clear the hook environment.
+GIT_COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null || echo "")
+if [ -n "$GIT_COMMON_DIR" ]; then
+  GIT_COMMON_DIR=$(cd "$GIT_COMMON_DIR" 2>/dev/null && pwd || echo "")
+fi
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+
 # Resolve the parent (orchestrator) repo. git-common-dir is always the parent's
 # .git when invoked from inside a worktree.
-GIT_COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null || echo "")
 if [ -z "$GIT_COMMON_DIR" ]; then
   exit 0
 fi
