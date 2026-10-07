@@ -36,7 +36,11 @@ export type UsageLike = {
 
 export const EMPTY_TOTALS: Totals = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 };
 
-/** Read the three thresholds from userConfig options; fall back to defaults when invalid or unordered. */
+/**
+ * Read the three thresholds from userConfig options. All-or-nothing: an
+ * invalid field falls back to its own default, but if the resulting trio is
+ * not ordered amber <= hot <= red, every override is discarded.
+ */
 export function resolveThresholds(options: Record<string, unknown> | undefined): Thresholds {
   const num = (v: unknown, d: number) =>
     typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : d;
@@ -46,6 +50,56 @@ export function resolveThresholds(options: Record<string, unknown> | undefined):
     red: num(options?.redAtPercent, DEFAULT_THRESHOLDS.red),
   };
   return t.amber <= t.hot && t.hot <= t.red ? t : { ...DEFAULT_THRESHOLDS };
+}
+
+/**
+ * "Hand off, then clear" state. `armed`: the handoff prompt was submitted and
+ * its own turn has not started yet. `running`: that turn started with `turnId`.
+ */
+export type HandoffState =
+  | { phase: 'idle' }
+  | { phase: 'armed' }
+  | { phase: 'running'; turnId: string };
+
+export type HandoffEvent =
+  | { kind: 'submit' }
+  | { kind: 'turn.start'; turnId: string; text: string }
+  | { kind: 'turn.complete'; turnId: string; reason: string; agentId?: string }
+  | { kind: 'reset' };
+
+export const IDLE_HANDOFF: HandoffState = { phase: 'idle' };
+
+/**
+ * Pure transition for the hand-off flow. The clear fires only when the
+ * handoff prompt's own turn ends with an answer: an earlier in-flight turn
+ * completing while armed is ignored, and a handoff turn that ends any other
+ * way (aborted, refusal, error) disarms without clearing.
+ */
+export function handoffStep(
+  state: HandoffState,
+  event: HandoffEvent,
+  handoffText: string,
+): { state: HandoffState; clear: boolean } {
+  switch (event.kind) {
+    case 'submit':
+      return { state: { phase: 'armed' }, clear: false };
+    case 'reset':
+      return { state: IDLE_HANDOFF, clear: false };
+    case 'turn.start':
+      if (state.phase === 'armed' && event.text === handoffText) {
+        return { state: { phase: 'running', turnId: event.turnId }, clear: false };
+      }
+      return { state, clear: false };
+    case 'turn.complete':
+      if (
+        state.phase !== 'running' ||
+        event.agentId !== undefined ||
+        event.turnId !== state.turnId
+      ) {
+        return { state, clear: false };
+      }
+      return { state: IDLE_HANDOFF, clear: event.reason === 'answer' };
+  }
 }
 
 /** Share of the window in use, as a percentage; null when it cannot be computed. */

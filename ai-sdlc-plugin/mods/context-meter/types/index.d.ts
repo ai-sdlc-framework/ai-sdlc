@@ -5,6 +5,11 @@ export type Totals = {
   output: number;
 };
 
+export type HandoffState =
+  | { phase: 'idle' }
+  | { phase: 'armed' }
+  | { phase: 'running'; turnId: string };
+
 export type MeterAction = 'compact' | 'clear' | 'handoff';
 
 declare module 'claude-code' {
@@ -12,7 +17,8 @@ declare module 'claude-code' {
     'context-meter': {
       totals: Totals;
       confirm: MeterAction | null;
-      clearAfterHandoff: boolean;
+      handoff: HandoffState;
+      note: string | null;
     };
   }
 }

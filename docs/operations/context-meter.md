@@ -33,15 +33,18 @@ The pure logic is tested by `pnpm test:context-meter` (part of `pnpm test`).
   price ratios (cache write 1.25x, cache read 0.1x, output 5x). A relative gauge, not
   dollars. When the host keeps a cost ledger the band also shows its figure (`$x.xx`).
 - **Actions**: `Compact` runs `/compact`, `Clear` runs `/clear`, `Hand off + clear` asks the
-  session to write its dated handoff memory file, then runs `/clear` once that turn ends
-  with an answer. Each asks once inline in the band (`Run /clear? Yes / Cancel`), never a
+  session to write its dated handoff memory file, then runs `/clear` only when that
+  handoff prompt's own turn ends with an answer (an earlier in-flight turn finishing, or a
+  handoff turn that is aborted or errors, never clears). A failed action shows a one-line
+  note in the band; a pending confirmation is dropped at the next turn end or `/clear`. Each asks once inline in the band (`Run /clear? Yes / Cancel`), never a
   modal prompt.
 
 ## Thresholds
 
 Set in the mod's config (`/config`, or settings `pluginConfigs`): `amberAtPercent` (10),
 `hotAtPercent` (13), `redAtPercent` (15). Defaults live in one place,
-`DEFAULT_THRESHOLDS` in `hooks/meter.ts`. Unordered or invalid values fall back to the defaults.
+`DEFAULT_THRESHOLDS` in `hooks/meter.ts`. An invalid field falls back to its own default; if the resulting trio is not ordered
+`amber <= hot <= red`, all overrides are discarded (all-or-nothing).
 
 ## Degradation
 
