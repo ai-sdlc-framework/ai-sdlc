@@ -53,6 +53,7 @@ import {
   type FeatureSelection,
   type WizardFlags,
 } from './init-features.js';
+import { REVIEW_POLICY_INIT_LINE } from './doctor-checks.js';
 import {
   CALIBRATION_YAML_STUB,
   EMBEDDING_CONFIG_YAML_STUB,
@@ -824,6 +825,7 @@ export const initCommand = new Command('init')
       await runWizardStage(projectDir, flags);
 
       console.log(`Run 'ai-sdlc health' to verify your configuration.`);
+      console.log(REVIEW_POLICY_INIT_LINE);
     } else {
       // Single-repo mode (original behavior)
       initProject(projectDir, configDirName, dryRun, '', { pipelineYaml, tier });
@@ -853,6 +855,7 @@ export const initCommand = new Command('init')
       await runWizardStage(projectDir, flags);
 
       console.log(`Run 'ai-sdlc health' to verify your configuration.`);
+      console.log(REVIEW_POLICY_INIT_LINE);
     }
   });
 

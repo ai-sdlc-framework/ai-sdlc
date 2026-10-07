@@ -2,7 +2,7 @@
 id: AISDLC-746
 title: >-
   document the attestation-based review policy for adopters and the OpenSSF questionnaire
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-06'
 labels:
@@ -30,7 +30,7 @@ Write a short policy page under `docs/operations` covering: what counts as a rev
 
 ## Acceptance Criteria
 
-- [ ] The review policy page exists under `docs/operations` and covers review definition, nonce-bound transcripts, the v6 envelope, adopter verification and human override.
-- [ ] The page is linked from README, SECURITY and CONTRIBUTING as appropriate.
-- [ ] `ai-sdlc init` output and `ai-sdlc doctor` name the policy page.
-- [ ] One test covers the doctor and init text.
+- [x] The review policy page exists under `docs/operations` and covers review definition, nonce-bound transcripts, the v6 envelope, adopter verification and human override.
+- [x] The page is linked from README, SECURITY and CONTRIBUTING as appropriate.
+- [x] `ai-sdlc init` output and `ai-sdlc doctor` name the policy page.
+- [x] One test covers the doctor and init text.
