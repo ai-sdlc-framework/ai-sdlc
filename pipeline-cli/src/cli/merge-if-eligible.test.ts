@@ -188,7 +188,7 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
     expect(msg).toBe('process.exit(1)');
     const parsed = JSON.parse(out.join(''));
     expect(parsed.ok).toBe(false);
-    expect(parsed.reason).toMatch(/allowMerge="never"/);
+    expect(parsed.reason).toMatch(/governance\.allowMerge is never/);
     expect(fake.calls).toHaveLength(1);
   });
 

@@ -55,7 +55,7 @@ export const GOVERNANCE_SURFACES: ReadonlyArray<{ name: string; pattern: RegExp 
   {
     name: 'merge and role restrictions',
     pattern:
-      /allowForcePush|blockedActions|blocked[-\s]actions|merge restrictions?|role restrictions?|only humans merge/i,
+      /allowForcePush|blockedActions|blocked[-\s]actions|allowMerge|merge restrictions?|role restrictions?/i,
   },
 ];
 

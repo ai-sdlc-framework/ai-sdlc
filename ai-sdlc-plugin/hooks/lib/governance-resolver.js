@@ -24,6 +24,10 @@
  *     allowBranchDelete: bool             # default: false
  *     allowResetHard: bool                # default: false
  *
+ * `allowMerge: never` is one configurable value (and the schema default), not a
+ * project rule: a repository may set `onGreenClean`, and the rendered merge text
+ * follows the resolved value only.
+ *
  * An ABSENT `governance` section resolves to the defaults below. Every default is
  * strict EXCEPT `allowForcePush`, which defaults to `leaseOnOwnBranch`
  * (AISDLC-710): rebasing a task branch and lease-pushing it is the framework's
@@ -347,15 +351,25 @@ function resolveGovernanceFromYaml(yamlText) {
 // ── Render helpers — shared text so session-start and subagent-start never
 // drift from each other or from the resolved policy. ─────────────────────
 
+// The merge rule text is derived ONLY from the resolved `allowMerge` value
+// (`never` is one configured value, not a project rule). Under both values the
+// raw merge subcommand (every form, `--auto` included) and the API/curl merge
+// routes stay blocked by enforce-blocked-actions.js because they skip the
+// cli-merge-if-eligible gate.
 const ONGREENCLEAN_MERGE_TEXT =
-  '**Merge:** allowed once ALL required CI checks are green AND `mergeStateStatus == CLEAN`, ' +
-  'but only for trusted-tier (internal backlog) work items — external GitHub-sourced work still ' +
-  'requires a human to merge (`.ai-sdlc/agent-role.yaml` governance: `allowMerge: onGreenClean`).';
+  "**Merge:** this repository's `.ai-sdlc/agent-role.yaml` sets `governance.allowMerge: onGreenClean`. " +
+  'Merges and auto-merge arming go ONLY through ' +
+  '`node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind backlog [--arm]`, ' +
+  'once all required checks are green, `mergeStateStatus == CLEAN` and the source is trusted. ' +
+  'Never run the raw merge subcommand directly (any form, `--auto` included).';
 
-const STRICT_MERGE_TEXT = '**NEVER merge PRs. Only humans merge.**';
+const NEVER_MERGE_TEXT =
+  "**Merge:** this repository's configuration forbids agent merges " +
+  '(`.ai-sdlc/agent-role.yaml` `governance.allowMerge: never`; set `onGreenClean` to permit them). ' +
+  'Never run the raw merge subcommand directly (any form, `--auto` included).';
 
 function renderMergeRuleText(resolved) {
-  return resolved.allowMerge === 'onGreenClean' ? ONGREENCLEAN_MERGE_TEXT : STRICT_MERGE_TEXT;
+  return resolved.allowMerge === 'onGreenClean' ? ONGREENCLEAN_MERGE_TEXT : NEVER_MERGE_TEXT;
 }
 
 function renderClosePrIssueRuleText(resolved) {
@@ -405,8 +419,8 @@ function renderResetHardRuleText(resolved) {
 /**
  * Renders the three hard-rule lines used in the SessionStart governance
  * banner (`session-start.js`). Kept to the historical three rules
- * (merge/close/force-push) that this banner has always surfaced, so the
- * strict-default output stays byte-identical to pre-AISDLC-601 text.
+ * (merge/close/force-push) that this banner has always surfaced; the merge
+ * line is rendered from the resolved `allowMerge` value only.
  */
 function renderSessionStartHardRules(resolved) {
   return [
@@ -421,10 +435,7 @@ function renderSessionStartHardRules(resolved) {
  * SubagentStart governance banner (`subagent-start.js`).
  */
 function renderSubagentHardRules(resolved) {
-  const mergeLine =
-    resolved.allowMerge === 'onGreenClean'
-      ? `- ${ONGREENCLEAN_MERGE_TEXT}`
-      : '- **Never merge PRs** (`gh pr merge`)';
+  const mergeLine = `- ${renderMergeRuleText(resolved)}`;
   const forcePushLine = resolved.allowForcePush
     ? `- ${renderForcePushRuleText(resolved)}`
     : '- **Never force-push** (`git push --force`/`-f`)';

@@ -20,6 +20,11 @@ spec:
   # the blockedActions entries below remain in force for every other form.
   governance:
     allowForcePush: leaseOnOwnBranch
+    # AISDLC-753: this repository permits agent merges through the gated helper
+    # (cli-merge-if-eligible: green + CLEAN + trusted source + author on the list).
+    allowMerge: onGreenClean
+    mergeAuthors:
+      - deefactorial
     operational:
       - rebase-own-branch
       - lease-push-own-branch

@@ -757,7 +757,7 @@ describe('enablement: allowMerge or allowReleaseMerge (DEC-0050 ruling b)', () =
         allowReleaseMerge: true,
       });
       expect(r.eligible, sourceKind).toBe(false);
-      expect(r.reason).toMatch(/allowMerge="never"/);
+      expect(r.reason).toMatch(/governance\.allowMerge is never/);
     }
     // the grant only counts for a VERIFIED release kind
     const ok = evaluateMergeEligibility({
@@ -788,7 +788,7 @@ describe('enablement: allowMerge or allowReleaseMerge (DEC-0050 ruling b)', () =
       policyYaml: yaml,
     });
     expect(r.eligibility.eligible).toBe(false);
-    expect(r.eligibility.reason).toMatch(/allowMerge="never"/);
+    expect(r.eligibility.reason).toMatch(/governance\.allowMerge is never/);
   });
 });
 

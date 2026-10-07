@@ -100,7 +100,7 @@ describe('ai-sdlc-plugin session-start hook', () => {
     assert.ok(ctx.includes('coding-agent'), 'should include the role');
     assert.ok(ctx.includes('Fix bugs'), 'should include the goal');
     assert.ok(ctx.includes('gh pr merge'), 'should list blocked actions');
-    assert.ok(ctx.includes('NEVER merge PRs'), 'should include merge warning');
+    assert.ok(ctx.includes('forbids agent merges'), 'should include merge warning');
   });
 
   it('includes blocked paths in context', () => {
@@ -160,10 +160,12 @@ describe('ai-sdlc-plugin session-start hook', () => {
       rmSync(tempDirGovMalformed, { recursive: true, force: true });
     });
 
-    it('strict-by-default (no governance section) matches the historical exact banner text', () => {
+    it('schema-default (no governance section) renders the configuration-forbids merge banner', () => {
       const result = runHook(tempDirWithConfig);
       const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
-      assert.ok(ctx.includes('**NEVER merge PRs. Only humans merge.**'));
+      assert.ok(ctx.includes("this repository's configuration forbids agent merges"));
+      assert.ok(ctx.includes('governance.allowMerge: never'));
+      assert.ok(!/only humans merge/i.test(ctx));
       assert.ok(ctx.includes('**NEVER close issues or PRs.**'));
       assert.ok(ctx.includes('**NEVER force push.**'));
     });
@@ -172,7 +174,9 @@ describe('ai-sdlc-plugin session-start hook', () => {
       const result = runHook(tempDirGovOnGreenClean);
       const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
       assert.ok(ctx.includes('mergeStateStatus == CLEAN'), 'softened merge text present');
-      assert.ok(!ctx.includes('NEVER merge PRs'), 'strict merge text must not also appear');
+      assert.ok(ctx.includes('cli-merge-if-eligible.mjs <pr> --source-kind backlog [--arm]'));
+      assert.ok(!ctx.includes('forbids agent merges'), 'never text must not also appear');
+      assert.ok(!/only humans merge/i.test(ctx));
       // Other two rules remain strict.
       assert.ok(ctx.includes('**NEVER close issues or PRs.**'));
       assert.ok(ctx.includes('**NEVER force push.**'));
@@ -181,14 +185,14 @@ describe('ai-sdlc-plugin session-start hook', () => {
     it('explicit granular allowMerge: never overrides the operator-trusted preset', () => {
       const result = runHook(tempDirGovPreset);
       const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
-      assert.ok(ctx.includes('**NEVER merge PRs. Only humans merge.**'));
+      assert.ok(ctx.includes('forbids agent merges'));
       assert.ok(!ctx.includes('mergeStateStatus == CLEAN'));
     });
 
     it('fails closed to strict on malformed allowMerge value and unknown preset name', () => {
       const result = runHook(tempDirGovMalformed);
       const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
-      assert.ok(ctx.includes('**NEVER merge PRs. Only humans merge.**'));
+      assert.ok(ctx.includes('forbids agent merges'));
       assert.ok(!ctx.includes('mergeStateStatus == CLEAN'));
     });
   });

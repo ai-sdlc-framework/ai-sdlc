@@ -33,7 +33,7 @@ escalates the rest.
 
 ## Hard rules (NEVER violate)
 
-1. **Never merge a PR.** No `gh pr merge`.
+1. **Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command.** No `gh pr merge`.
 2. **Force-push uses `--force-with-lease` ONLY.** Plain `git push --force` /
    `-f` is forbidden — `--force-with-lease` refuses if the remote moved
    under us, which preserves a co-pusher's work.

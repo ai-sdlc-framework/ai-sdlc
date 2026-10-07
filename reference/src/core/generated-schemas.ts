@@ -421,7 +421,7 @@ export const agentRoleSchema = {
           type: 'string',
           enum: ['never', 'onGreenClean'],
           description:
-            'Whether agents may merge PRs. `never` (default) = only humans merge. `onGreenClean` = merge allowed once all required checks are green AND mergeStateStatus == CLEAN, for trusted-tier (internal backlog) work only.',
+            'Whether agents may merge PRs. `never` (default) = agents do not merge; it is a configurable value, not a project rule. `onGreenClean` = merge allowed once all required checks are green AND mergeStateStatus == CLEAN, for trusted-tier (internal backlog) work only.',
         },
         allowForcePush: {
           oneOf: [{ type: 'boolean' }, { type: 'string', enum: ['never', 'leaseOnOwnBranch'] }],

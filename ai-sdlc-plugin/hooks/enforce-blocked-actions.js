@@ -149,7 +149,8 @@ const agentRolePath = join(projectDir, '.ai-sdlc', 'agent-role.yaml');
 let blockedActions = [];
 let blockedPaths = [];
 // AISDLC-602: resolved governance policy, used by the merge-governance check
-// below. Fails closed to STRICT_DEFAULTS (allowMerge: 'never') on any parse
+// below. Falls back to STRICT_DEFAULTS (the schema default, allowMerge: 'never',
+// which is a configurable value rather than a project rule) on any parse
 // error or absent agent-role.yaml — mirrors the trust-boundary contract
 // documented in governance-resolver.js (resolved from the trusted on-disk
 // project root, never PR-tree content).

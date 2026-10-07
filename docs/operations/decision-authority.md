@@ -56,7 +56,7 @@ Only class (c) waits on a human, and only for legal, money, credentials or the o
 
 Guardrails and hooks are never bypassed, whatever the class. This protocol grants no merge rights to executors, changes no hook enforcement, and does not widen who may merge. When a sanctioned path does not exist, the right action is to file a task for it, not to route around the hook.
 
-The "only humans merge" rule in `CLAUDE.md` has one documented exception, the release-please rolling PR, which an authorized session may land only through the sanctioned release path filed as AISDLC-702. That path is not yet shipped, and the exception covers no other PR.
+Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command. The release-please rolling PR lands only through the sanctioned release path (`--source-kind release`, AISDLC-702) on an explicit operator instruction.
 
 ## Rubric in autonomous mode
 

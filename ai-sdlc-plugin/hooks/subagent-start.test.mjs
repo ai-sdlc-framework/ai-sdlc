@@ -79,7 +79,7 @@ describe('ai-sdlc-plugin subagent-start hook', () => {
     const ctx = parsed.hookSpecificOutput?.additionalContext;
     assert.ok(ctx, 'should have additionalContext');
     assert.ok(ctx.includes('AI-SDLC Governance (subagent context)'), 'subagent header');
-    assert.ok(ctx.includes('Never merge PRs'), 'merge hard rule');
+    assert.ok(ctx.includes('forbids agent merges'), 'merge hard rule');
     assert.ok(ctx.includes('Never force-push'), 'force-push hard rule');
     assert.ok(ctx.includes('Never close PRs or issues'), 'close hard rule');
   });
@@ -162,7 +162,8 @@ describe('ai-sdlc-plugin subagent-start hook', () => {
     it('strict-by-default (no governance section) matches historical exact bullet text', () => {
       const result = runHook(tempDirWithConfig);
       const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
-      assert.ok(ctx.includes('**Never merge PRs** (`gh pr merge`)'));
+      assert.ok(ctx.includes("this repository's configuration forbids agent merges"));
+      assert.ok(!/only humans merge/i.test(ctx));
       assert.ok(ctx.includes('**Never force-push** (`git push --force`/`-f`)'));
       assert.ok(ctx.includes('**Never close PRs or issues** (`gh pr close`, `gh issue close`)'));
       assert.ok(ctx.includes('**Never delete branches** (`git branch -D`/`-d`)'));
@@ -177,7 +178,9 @@ describe('ai-sdlc-plugin subagent-start hook', () => {
       const result = runHook(tempDirGovOnGreenClean);
       const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
       assert.ok(ctx.includes('mergeStateStatus == CLEAN'));
-      assert.ok(!ctx.includes('Never merge PRs'));
+      assert.ok(ctx.includes('cli-merge-if-eligible.mjs <pr> --source-kind backlog [--arm]'));
+      assert.ok(!/only humans merge/i.test(ctx));
+      assert.ok(!ctx.includes('forbids agent merges'));
       assert.ok(ctx.includes('Never force-push'));
       assert.ok(ctx.includes('Never close PRs or issues'));
       assert.ok(ctx.includes('Never delete branches'));
@@ -187,14 +190,15 @@ describe('ai-sdlc-plugin subagent-start hook', () => {
     it('explicit granular allowMerge: never overrides the operator-trusted preset', () => {
       const result = runHook(tempDirGovPreset);
       const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
-      assert.ok(ctx.includes('Never merge PRs'));
+      assert.ok(ctx.includes('forbids agent merges'));
+      assert.ok(ctx.includes('governance.allowMerge: never'));
       assert.ok(!ctx.includes('mergeStateStatus == CLEAN'));
     });
 
     it('fails closed to strict on malformed allowMerge value and unknown preset name', () => {
       const result = runHook(tempDirGovMalformed);
       const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
-      assert.ok(ctx.includes('Never merge PRs'));
+      assert.ok(ctx.includes('forbids agent merges'));
       assert.ok(!ctx.includes('mergeStateStatus == CLEAN'));
     });
   });

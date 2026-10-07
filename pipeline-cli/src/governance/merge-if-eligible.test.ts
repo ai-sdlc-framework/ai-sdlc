@@ -214,7 +214,10 @@ describe('evaluateMergeEligibility', () => {
       requiredChecks: [{ name: 'ci', state: 'SUCCESS' }],
     });
     expect(result.eligible).toBe(false);
-    expect(result.reason).toMatch(/allowMerge="never"/);
+    expect(result.reason).toMatch(/governance\.allowMerge is never/);
+    // AISDLC-753: names the key and the file, not a human-merge rule.
+    expect(result.reason).toContain('set onGreenClean in .ai-sdlc/agent-role.yaml');
+    expect(result.reason).not.toMatch(/human/i);
   });
 
   it('AC2 — merges when green + CLEAN + trusted under onGreenClean', () => {
@@ -1066,7 +1069,7 @@ describe('verified main root + policy read from git', () => {
       runner,
     });
     expect(result.eligibility.eligible).toBe(false);
-    expect(result.eligibility.reason).toMatch(/allowMerge="never"/);
+    expect(result.eligibility.reason).toMatch(/governance\.allowMerge is never/);
     expect(calls).toHaveLength(2); // main ref + API policy read; no git, no PR read
     expect(calls[0].command).toBe('gh');
   });
@@ -1144,7 +1147,7 @@ describe('verified main root + policy read from git', () => {
       });
     expect((await run()).eligibility.reason).toMatch(/could not read the PR/);
     policy = NEVER_YAML;
-    expect((await run()).eligibility.reason).toMatch(/allowMerge="never"/);
+    expect((await run()).eligibility.reason).toMatch(/governance\.allowMerge is never/);
   });
 });
 

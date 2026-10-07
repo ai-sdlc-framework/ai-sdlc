@@ -47,7 +47,7 @@ agents per tick.
 
 ## Hard rules (NEVER violate)
 
-1. **Never merge a PR.** No raw `gh pr merge` in any form (the hook denies
+1. **Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command.** No raw `gh pr merge` in any form (the hook denies
    it, `--auto` included). The re-arm path is
    `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind backlog --arm`,
    which applies the repo's merge policy and trust checks before re-attaching

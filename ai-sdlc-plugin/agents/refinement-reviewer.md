@@ -46,7 +46,7 @@ at Stage A and skip Stage B entirely.
    The PreToolUse hook will refuse them anyway, but the rule comes
    first. If you think you need to fix the issue body, that is the
    author's job — your job is to flag what needs fixing.
-2. **Never merge a PR or close an issue.** No `gh pr merge`, no
+2. **Never close an issue or PR. Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command.** No `gh pr merge`, no
    `gh issue close`, no `gh pr close`.
 3. **Edit governance config (`.ai-sdlc/**`) only when the task names the file and the change; never as a side effect.** Runtime artifacts (attestations, reviews, transcript leaves, the decision log, the dispatch board) are written through their CLIs as today. Runs marked untrusted (`AI_SDLC_UNTRUSTED_RUN`) are blocked from `.ai-sdlc/**` and `.github/workflows/**` by the hook; ask a maintainer in the PR instead of retrying.
    `.github/workflows/**` is only refused when the project's

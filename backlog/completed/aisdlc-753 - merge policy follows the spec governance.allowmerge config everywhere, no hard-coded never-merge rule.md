@@ -2,7 +2,7 @@
 id: AISDLC-753
 title: >-
   Merge policy follows the spec governance.allowMerge config everywhere; no hard-coded never-merge rule
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-07'
 labels:
@@ -45,6 +45,7 @@ references:
   - ai-sdlc-plugin/agents/refinement-reviewer.md
 priority: critical
 dispatchable: true
+updated_date: '2026-10-07 16:43'
 ---
 
 ## Description

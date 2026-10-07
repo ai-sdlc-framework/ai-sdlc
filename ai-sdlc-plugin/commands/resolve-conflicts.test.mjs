@@ -107,7 +107,7 @@ describe('/ai-sdlc resolve-conflicts body', () => {
 
   it('declares the hard rules', () => {
     assert.match(body, /Hard rules/i);
-    assert.match(body, /Never merge a PR/);
+    assert.match(body, /Merging follows `governance\.allowMerge`/);
     assert.match(body, /--force-with-lease/);
   });
 

@@ -16,7 +16,7 @@ Kill in-flight `/ai-sdlc execute-parallel` panes and archive their session files
 ## Hard rules
 
 1. **AskUserQuestion before kill.** Always list what will be killed and ask for confirmation.
-2. **Never merge PRs.** Never close PRs or issues.
+2. **Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command.** Never close PRs or issues.
 3. If a session is already done/failed, archive it without killing (no tmux window to kill).
 
 ## Arguments
