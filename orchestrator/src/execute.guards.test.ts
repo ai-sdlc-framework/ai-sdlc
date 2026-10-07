@@ -171,7 +171,8 @@ describe('Guard #1 — git fetch degrades gracefully when no origin remote', () 
     // Override: fetch fails with "no such remote", all other calls succeed.
     (execFileMockRef as unknown as ReturnType<typeof vi.fn>).mockImplementation(
       (_cmd: string, args: string[], _opts: unknown, cb?: unknown) => {
-        const isFetch = Array.isArray(args) && args[0] === 'fetch' && args[1] === 'origin';
+        const isFetch =
+          Array.isArray(args) && args[0] === 'fetch' && args[1] === '--' && args[2] === 'origin';
         if (typeof cb === 'function') {
           if (isFetch) {
             const err = Object.assign(new Error('git: no such remote'), {
@@ -218,7 +219,8 @@ describe('Guard #1 — git fetch degrades gracefully when no origin remote', () 
   it('rethrows fetch errors that are NOT "no remote" errors (e.g. auth failures)', async () => {
     (execFileMockRef as unknown as ReturnType<typeof vi.fn>).mockImplementation(
       (_cmd: string, args: string[], _opts: unknown, cb?: unknown) => {
-        const isFetch = Array.isArray(args) && args[0] === 'fetch' && args[1] === 'origin';
+        const isFetch =
+          Array.isArray(args) && args[0] === 'fetch' && args[1] === '--' && args[2] === 'origin';
         if (typeof cb === 'function') {
           if (isFetch) {
             const err = Object.assign(new Error('fatal: authentication required'), {
@@ -259,7 +261,8 @@ describe('Guard #1 — git fetch degrades gracefully when no origin remote', () 
     // config error that must propagate, not be silently skipped.
     (execFileMockRef as unknown as ReturnType<typeof vi.fn>).mockImplementation(
       (_cmd: string, args: string[], _opts: unknown, cb?: unknown) => {
-        const isFetch = Array.isArray(args) && args[0] === 'fetch' && args[1] === 'origin';
+        const isFetch =
+          Array.isArray(args) && args[0] === 'fetch' && args[1] === '--' && args[2] === 'origin';
         if (typeof cb === 'function') {
           if (isFetch) {
             const err = Object.assign(new Error('remote: Repository not found.'), {

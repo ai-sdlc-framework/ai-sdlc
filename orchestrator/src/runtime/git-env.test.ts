@@ -20,7 +20,7 @@ import { mkdtemp, mkdir, rm, writeFile, readFile, realpath } from 'node:fs/promi
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cleanGitEnv, gitExecFile } from './git-env.js';
+import { cleanGitEnv, gitExecFile, assertNoTransportCommandArgs } from './git-env.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -153,5 +153,19 @@ describe('gitExecFile (regression: AISDLC-72)', () => {
     });
     // macOS resolves /var → /private/var via symlink, so compare realpaths.
     expect(await realpath(stdout.trim())).toBe(await realpath(repo));
+  });
+});
+
+describe('assertNoTransportCommandArgs', () => {
+  it('rejects --upload-pack / --receive-pack / --exec arguments', () => {
+    expect(() => assertNoTransportCommandArgs(['fetch', '--upload-pack=evil'])).toThrow(/security/);
+    expect(() => assertNoTransportCommandArgs(['push', '--receive-pack', 'x'])).toThrow(/security/);
+    expect(() => assertNoTransportCommandArgs(['fetch', '--exec=x'])).toThrow(/security/);
+  });
+  it('allows ordinary arguments', () => {
+    expect(() => assertNoTransportCommandArgs(['fetch', '--', 'origin', 'main'])).not.toThrow();
+  });
+  it('gitExecFile refuses before spawning git', async () => {
+    await expect(gitExecFile(['fetch', '--upload-pack=evil'])).rejects.toThrow(/security/);
   });
 });

@@ -200,7 +200,7 @@ describe('lateRebase', () => {
   // AC7(a): clean rebase — origin/main is already ancestor → noop
   it('(a) returns ok=true when origin/main is already ancestor of HEAD', async () => {
     const fake = new FakeRunner()
-      .on(/^git fetch origin main/, ok())
+      .on(/^git fetch -- origin main/, ok())
       // merge-base --is-ancestor exits 0 → already ancestor
       .on(/^git merge-base --is-ancestor/, ok());
 
@@ -228,7 +228,7 @@ describe('lateRebase', () => {
     );
 
     const fake = new FakeRunner()
-      .on(/^git fetch origin main/, ok())
+      .on(/^git fetch -- origin main/, ok())
       // merge-base --is-ancestor exits 1 → NOT ancestor (needs rebase)
       .on(/^git merge-base --is-ancestor/, fail('', 1))
       // First rebase attempt → fails with conflicts
@@ -257,7 +257,7 @@ describe('lateRebase', () => {
   // resolvedFiles is empty when clean rebase (no conflict, just fast-forward)
   it('returns resolvedFiles=[] when rebase is clean with no conflicts', async () => {
     const fake = new FakeRunner()
-      .on(/^git fetch origin main/, ok())
+      .on(/^git fetch -- origin main/, ok())
       .on(/^git merge-base --is-ancestor/, fail('', 1))
       // Rebase succeeds cleanly (no conflicts at all)
       .on(/^git rebase origin\/main$/, ok());
@@ -278,7 +278,7 @@ describe('lateRebase', () => {
     );
 
     const fake = new FakeRunner()
-      .on(/^git fetch origin main/, ok())
+      .on(/^git fetch -- origin main/, ok())
       .on(/^git merge-base --is-ancestor/, fail('', 1))
       .on(/^git rebase origin\/main$/, fail('CONFLICT (content): Merge conflict in service.ts', 1))
       .on(/^git status --porcelain/, ok('UU service.ts\n'))
@@ -300,7 +300,7 @@ describe('lateRebase', () => {
 
   it('returns ok=false when git fetch fails', async () => {
     const fake = new FakeRunner().on(
-      /^git fetch origin main/,
+      /^git fetch -- origin main/,
       fail('fatal: unable to connect to origin', 1),
     );
 
@@ -314,7 +314,7 @@ describe('lateRebase', () => {
 
   it('respects maxAttempts cap and returns failure after cap', async () => {
     const fake = new FakeRunner()
-      .on(/^git fetch origin main/, ok())
+      .on(/^git fetch -- origin main/, ok())
       .on(/^git merge-base --is-ancestor/, fail('', 1))
       // Every rebase attempt fails with CHANGELOG conflict
       .on(/^git rebase origin\/main$/, fail('CONFLICT: Merge conflict in CHANGELOG.md', 1))
@@ -338,11 +338,23 @@ describe('lateRebase', () => {
     expect(result.reason).toMatch(/iteration cap/);
   });
 
+  it('rejects a targetBranch starting with "-" without invoking git (injection guard)', async () => {
+    const fake = new FakeRunner();
+    const result = await lateRebase({
+      worktreePath: tmp,
+      runner: fake.toRunner(),
+      targetBranch: '--upload-pack=touch /tmp/pwned',
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/must not start with '-'/);
+    expect(fake.calls).toEqual([]);
+  });
+
   // AISDLC-606 — targetBranch option: fetch + ancestor-check + rebase must
   // all use the passed branch instead of a hardcoded `main`.
   it('fetches + rebases onto origin/<targetBranch> when configured (develop-based repo)', async () => {
     const fake = new FakeRunner()
-      .on(/^git fetch origin develop/, ok())
+      .on(/^git fetch -- origin develop/, ok())
       .on(/^git merge-base --is-ancestor origin\/develop HEAD/, ok());
 
     const result = await lateRebase({
@@ -353,7 +365,7 @@ describe('lateRebase', () => {
 
     expect(result.ok).toBe(true);
     const fetchCalls = fake.calls.filter((c) => c.command === 'git' && c.args[0] === 'fetch');
-    expect(fetchCalls.map((c) => c.args)).toEqual([['fetch', 'origin', 'develop']]);
+    expect(fetchCalls.map((c) => c.args)).toEqual([['fetch', '--', 'origin', 'develop']]);
     // Confirm it never touched origin/main
     const mainCalls = fake.calls.filter((c) => c.args.includes('origin/main'));
     expect(mainCalls).toEqual([]);
@@ -361,7 +373,7 @@ describe('lateRebase', () => {
 
   it('actually rebases onto origin/<targetBranch> (not origin/main) when conflicts are present', async () => {
     const fake = new FakeRunner()
-      .on(/^git fetch origin develop/, ok())
+      .on(/^git fetch -- origin develop/, ok())
       .on(/^git merge-base --is-ancestor origin\/develop HEAD/, fail('', 1))
       .on(/^git rebase origin\/develop$/, ok());
 
@@ -425,7 +437,7 @@ describe('Step 11 — pushAndPr with late-rebase (AISDLC-232)', () => {
 
     const fake = new FakeRunner()
       // late-rebase: fetch ok, already ancestor → noop
-      .on(/^git fetch origin main/, ok())
+      .on(/^git fetch -- origin main/, ok())
       .on(/^git merge-base --is-ancestor/, ok())
       // push
       .on(/^git push -u origin/, ok())
@@ -458,7 +470,7 @@ describe('Step 11 — pushAndPr with late-rebase (AISDLC-232)', () => {
     const { pushAndPr } = await import('./11-push-and-pr.js');
 
     const fake = new FakeRunner()
-      .on(/^git fetch origin develop/, ok())
+      .on(/^git fetch -- origin develop/, ok())
       .on(/^git merge-base --is-ancestor origin\/develop HEAD/, ok())
       .on(/^git push -u origin/, ok())
       .on(/^gh pr create/, ok('https://github.com/x/y/pull/42\n'));
@@ -494,7 +506,7 @@ describe('Step 11 — pushAndPr with late-rebase (AISDLC-232)', () => {
 
     const fake = new FakeRunner()
       // late-rebase: fetch ok, NOT ancestor
-      .on(/^git fetch origin main/, ok())
+      .on(/^git fetch -- origin main/, ok())
       .on(/^git merge-base --is-ancestor/, fail('', 1))
       // rebase fails
       .on(/^git rebase origin\/main$/, fail('CONFLICT in semantic.ts', 1))
@@ -542,7 +554,7 @@ describe('Step 11 — pushAndPr with late-rebase (AISDLC-232)', () => {
 
     const fake = new FakeRunner()
       // late-rebase: NOT ancestor → rebase needed
-      .on(/^git fetch origin main/, ok())
+      .on(/^git fetch -- origin main/, ok())
       .on(/^git merge-base --is-ancestor/, fail('', 1))
       .on(/^git rebase origin\/main$/, fail('CONFLICT in CHANGELOG.md', 1))
       .on(/^git status --porcelain/, ok('UU CHANGELOG.md\n'))
@@ -612,7 +624,7 @@ describe('Step 11 — pushAndPr with late-rebase (AISDLC-232)', () => {
     delete process.env.CLAUDE_PLUGIN_ROOT;
 
     const fake = new FakeRunner()
-      .on(/^git fetch origin main/, ok())
+      .on(/^git fetch -- origin main/, ok())
       .on(/^git merge-base --is-ancestor/, fail('', 1))
       .on(/^git rebase origin\/main$/, fail('CONFLICT in CHANGELOG.md', 1))
       .on(/^git status --porcelain/, ok('UU CHANGELOG.md\n'))
