@@ -2,7 +2,7 @@
 id: AISDLC-612
 title: Document the requiredTier independence-policy knob for adopters (MED-4)
 status: To Do
-priority: medium
+priority: high
 labels:
   - docs
   - adopter-facing
@@ -32,6 +32,8 @@ shipped the `requiredTier` policy engine. The enforcement knob exists:
   main-session dispatch (coordinator holds the key) tops out at `none`/`attested`
   by design — a coordinator cannot self-certify independence (the anchor must be
   a distinct identity the verifier re-derives; see RFC-0047).
+
+Priority raised 2026-10-07: local-trades re-implemented this gate as a stdout parser (LT-715) because the knob is undocumented.
 
 ## Scope (docs only)
 
