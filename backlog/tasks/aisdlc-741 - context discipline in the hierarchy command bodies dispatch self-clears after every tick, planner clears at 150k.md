@@ -19,7 +19,7 @@ references:
   - ai-sdlc-plugin/commands/executor.md
   - pipeline-cli/src/hierarchy/clear.ts
   - pipeline-cli/src/cli/hierarchy.ts
-  - docs/operations/session-hierarchy.md
+  - docs/operations/parallel-dispatch.md
 priority: high
 dispatchable: true
 ---
@@ -41,6 +41,6 @@ Out of scope: changing the tick cadence, moving dispatch to another model, execu
 - [ ] `planner.md` gains a "Context ceiling" section: hand off (write the dated handoff memory file) and `/clear` when the status line's context indicator reaches 15% of the window (150k tokens), without exception; keep the handoff file current as rulings happen, not at the end; never run review rounds or orchestration loops in the planner context when they can be delegated.
 - [ ] `executor.md` says in one sentence that the executor runs exactly one task per context and waits to be cleared (already the behaviour; make it explicit).
 - [ ] The command tests (`operator-dispatch.test.mjs`, `planner.test.mjs`) assert the new sections (self-clear or `clear --self`, handoff read, "Context ceiling", 150k).
-- [ ] The hierarchy operations doc (`docs/operations/session-hierarchy.md`, or the nearest existing hierarchy doc; search docs/ for "operator-dispatch") describes the per-tick clear and the planner ceiling in one short paragraph each.
+- [ ] The hierarchy operations doc (`docs/operations/parallel-dispatch.md`) describes the per-tick clear and the planner ceiling in one short paragraph each.
 - [ ] Velocity impact paragraph in the PR body.
 <!-- SECTION:DESCRIPTION:END -->

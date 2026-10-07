@@ -12,10 +12,8 @@ labels:
   - dx
 dependencies: []
 references:
-  - the plugin-authoring skill (Claude Code mods, hot-reloading plugin of function hooks)
   - ai-sdlc-plugin/hooks/
   - ai-sdlc-plugin/.claude-plugin/plugin.json
-  - .claude/memory/feedback_one_task_per_context.md
   - docs/operations/
 priority: medium
 dispatchable: true
@@ -32,7 +30,7 @@ Velocity impact: zero prompts on the happy path; the operator and the session se
 
 Sequencing: ship for the planner session first; dispatch and executor sessions can reuse it later.
 
-Out of scope: automatic clearing without an action, changes to the hierarchy CLI, any server-side usage API.
+Out of scope: automatic clearing without an action, changes to the hierarchy CLI, any server-side usage API. Standing rule from the operator's memory (feedback_one_task_per_context): executors run one task per context and are cleared afterwards; the planner hands off and clears at 150k tokens.
 
 ## Acceptance Criteria
 - [ ] A mod under the plugin (or a documented location the plugin-authoring skill prescribes) renders a live band or status line in the planner session with: context tokens and % of window, a colour-stepped progress bar (green under 10%, amber 10% to 15%, red at or above 15%), and session totals for input, cache-write, cache-read and output tokens with an approximate cost weight.
