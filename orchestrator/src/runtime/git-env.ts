@@ -47,6 +47,20 @@ export function cleanGitEnv(): NodeJS.ProcessEnv {
 }
 
 /**
+ * Reject git arguments that would make git run an arbitrary command
+ * (`--upload-pack` / `--receive-pack` / `-u` style transport overrides).
+ * Defense against second-order command-line injection when an argument
+ * derives from library input (CodeQL js/second-order-command-line-injection).
+ */
+export function assertNoTransportCommandArgs(args: readonly string[]): void {
+  for (const a of args) {
+    if (/^--(upload-pack|receive-pack|exec)(=|$)/.test(a)) {
+      throw new Error(`[security] refusing git argument that runs a command: ${JSON.stringify(a)}`);
+    }
+  }
+}
+
+/**
  * Promisified `execFile('git', args, opts)` wrapper that strips the git
  * context env vars before invocation. Use whenever the caller passes
  * `cwd` (i.e. running git in a directory other than the parent process's
@@ -60,6 +74,7 @@ export async function gitExecFile(
   args: string[],
   opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
 ): Promise<{ stdout: string; stderr: string }> {
+  assertNoTransportCommandArgs(args);
   const env = opts.env ?? cleanGitEnv();
   const { stdout, stderr } = await execFileAsync('git', args, { ...opts, env });
   return { stdout, stderr };

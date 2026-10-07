@@ -336,9 +336,20 @@ export async function lateRebase(opts: LateRebaseOptions): Promise<LateRebaseRes
   // explicitly are byte-identical to pre-AISDLC-606 behavior.
   const targetBranch = opts.targetBranch ?? 'main';
   const remoteRef = `origin/${targetBranch}`;
+  // Second-order injection guard (CodeQL js/second-order-command-line-injection):
+  // a branch name starting with '-' would be parsed by git as an option.
+  if (targetBranch.startsWith('-')) {
+    return {
+      ok: false,
+      conflictingFiles: [],
+      reason: `invalid target branch ${JSON.stringify(targetBranch)}: must not start with '-'`,
+      rebaseAttempts: 0,
+      resolvedFiles: [],
+    };
+  }
 
   // Step 1 — fetch origin <targetBranch>
-  const fetchResult = await runner('git', ['fetch', 'origin', targetBranch], {
+  const fetchResult = await runner('git', ['fetch', '--', 'origin', targetBranch], {
     cwd,
     allowFailure: true,
     timeout: 30_000,

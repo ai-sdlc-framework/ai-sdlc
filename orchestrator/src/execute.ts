@@ -558,7 +558,7 @@ export async function pushBranchWithRebase(
 
   // Fetch + rebase + retry. If the rebase fails, surface a clear error.
   try {
-    await execFileAsync('git', ['fetch', 'origin', branchName], { cwd: workDir, env });
+    await execFileAsync('git', ['fetch', '--', 'origin', branchName], { cwd: workDir, env });
     await execFileAsync('git', ['rebase', `origin/${branchName}`], { cwd: workDir, env });
   } catch (rebaseErr) {
     // Abort the partial rebase so the worktree isn't left in a half-merged state.
@@ -794,7 +794,7 @@ async function executePipelineBody(
   // MUST use `-b` to create it in one step.
   let localOnlyMode = false;
   try {
-    await execFileAsync('git', ['fetch', 'origin', branchName], {
+    await execFileAsync('git', ['fetch', '--', 'origin', branchName], {
       cwd: workDir,
       env: cleanGitEnv(),
     });
