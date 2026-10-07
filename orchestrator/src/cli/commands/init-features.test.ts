@@ -17,7 +17,6 @@
 
 import { ADOPTER_TEMPLATE_POSTS_APPROVAL, templatePostsApproval } from './init-templates.js';
 import { buildWizardFlags } from './init.js';
-import { buildBranchProtectionBody } from './branch-protection-shared.js';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -849,11 +848,11 @@ describe('applyBranchProtection', () => {
   });
 
   it.each([
-    [false, 0, 'not yet enabled'],
-    [true, 1, '1 approving review'],
+    [false, 'does not yet post the approving review'],
+    [true, 'verify-attestation.yml posts the approving review'],
   ])(
-    'AISDLC-748 200 path, templatePostsApproval=%s: requires %i approving reviews',
-    async (flag, count, phrase) => {
+    'AISDLC-748 200 path, templatePostsApproval=%s: always requires 1 approving review',
+    async (flag, phrase) => {
       const { state, adapters } = makeStub({
         runResponses: new Map([
           ['gh repo view', { stdout: 'owner/repo\n', exitCode: 0 }],
@@ -865,7 +864,8 @@ describe('applyBranchProtection', () => {
         const result = await applyBranchProtection(projectDir, baseFlags, adapters, flag);
         expect(result.mode).toBe('server');
         const body = JSON.parse(result.bodyJson);
-        expect(body.required_pull_request_reviews.required_approving_review_count).toBe(count);
+        expect(body.required_pull_request_reviews.required_approving_review_count).toBe(1);
+        expect(body.required_status_checks.contexts).toEqual(['ai-sdlc/pr-ready', 'codecov/patch']);
         expect(body.required_status_checks.contexts).toContain('ai-sdlc/pr-ready');
         const out = state.log.join('\n');
         expect(out).toContain(phrase);
@@ -940,9 +940,7 @@ describe('applyBranchProtection', () => {
       // the implementation writes it via writeFileSync (not through the
       // adapter). Reads it back to ensure no path corruption.
       const written = readFileSync(tmpPathArg, 'utf-8');
-      expect(JSON.parse(written)).toEqual(
-        buildBranchProtectionBody(ADOPTER_TEMPLATE_POSTS_APPROVAL),
-      );
+      expect(JSON.parse(written)).toEqual(RECOMMENDED_BRANCH_PROTECTION_BODY);
     } finally {
       rmSync(projectDir, { recursive: true, force: true });
     }

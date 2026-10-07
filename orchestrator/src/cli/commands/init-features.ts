@@ -48,7 +48,6 @@ import {
 import {
   CLIENT_SIDE_ONLY_MESSAGE,
   RECOMMENDED_BRANCH_PROTECTION_BODY,
-  buildBranchProtectionBody,
   isBranchProtectionUnavailable,
   resolveOwnerRepoSlug,
 } from './branch-protection-shared.js';
@@ -1871,7 +1870,7 @@ export async function applyBranchProtection(
   adapters: Pick<FeatureAdapters, 'runCommand' | 'log'>,
   templatePostsApproval: boolean = ADOPTER_TEMPLATE_POSTS_APPROVAL,
 ): Promise<BranchProtectionResult> {
-  const bodyJson = JSON.stringify(buildBranchProtectionBody(templatePostsApproval), null, 2);
+  const bodyJson = JSON.stringify(RECOMMENDED_BRANCH_PROTECTION_BODY, null, 2);
 
   if (flags.dryRun) {
     adapters.log('');
@@ -1931,10 +1930,12 @@ export async function applyBranchProtection(
     adapters.log(
       '  installed: cli-merge-if-eligible refuses unless attestation verifies and checks are green;',
     );
+    adapters.log('             the hook keeps blocking direct agent merges.');
     adapters.log(
-      '             the hook keeps blocking direct agent merges. The approving-review requirement is not',
+      templatePostsApproval
+        ? '             verify-attestation.yml posts the approving review once server-side protection is available.'
+        : '             The adopter verify-attestation template does not yet post the approving review.',
     );
-    adapters.log('             yet enabled: the adopter template does not post an approval yet.');
     adapters.log(`  ${CLIENT_SIDE_ONLY_MESSAGE} (ai-sdlc doctor reports this as an error).`);
     adapters.log('  opt out with: --no-branch-protection');
     return { applied: false, bodyJson, mode: 'client-side' };
@@ -1948,23 +1949,21 @@ export async function applyBranchProtection(
   }
 
   adapters.log(`  applied branch protection to ${slug}:main (server-side enforcement)`);
+  adapters.log(
+    '  installed: required checks ai-sdlc/pr-ready, codecov/patch + 1 approving review (DEC-0014).',
+  );
   if (templatePostsApproval) {
-    adapters.log(
-      '  installed: required checks ai-sdlc/pr-ready, codecov/patch + 1 approving review;',
-    );
     adapters.log(
       '             verify-attestation.yml posts the approving review once the attestation verifies.',
     );
   } else {
     adapters.log(
-      '  installed: required checks ai-sdlc/pr-ready, codecov/patch (0 required approving reviews).',
+      '             The adopter verify-attestation template does not yet post the approving review,',
     );
     adapters.log(
-      '             The approving-review requirement is not yet enabled: the adopter verify-attestation',
+      '             so a non-admin merge waits on a human review (or an admin bypass) until the',
     );
-    adapters.log(
-      '             template does not post an approval yet, so requiring one would block all merges.',
-    );
+    adapters.log('             template ships the approve job.');
   }
   adapters.log('  opt out with: --no-branch-protection');
   return { applied: true, bodyJson, mode: 'server' };

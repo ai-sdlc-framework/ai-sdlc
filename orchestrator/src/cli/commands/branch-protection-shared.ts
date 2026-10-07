@@ -79,21 +79,6 @@ export const RECOMMENDED_BRANCH_PROTECTION_BODY = {
 };
 
 /**
- * Branch-protection body for init. The approving-review requirement is
- * included only when the scaffolded workflow actually posts the approval
- * (AISDLC-748); otherwise adopters could never merge.
- */
-export function buildBranchProtectionBody(requireApprovingReview: boolean) {
-  return {
-    ...RECOMMENDED_BRANCH_PROTECTION_BODY,
-    required_pull_request_reviews: {
-      ...RECOMMENDED_BRANCH_PROTECTION_BODY.required_pull_request_reviews,
-      required_approving_review_count: requireApprovingReview ? 1 : 0,
-    },
-  };
-}
-
-/**
  * True when `gh api` output from a branch-protection call indicates the
  * API is unavailable for this repo (HTTP 403: GitHub Free private repo
  * without branch protection). AISDLC-748 / DEC-0014: detected at runtime,
