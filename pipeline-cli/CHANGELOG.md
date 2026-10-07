@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.29.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.28.0...pipeline-cli-v0.29.0) (2026-10-06)
+
+
+### Features
+
+* **ci:** mark untrusted workflow jobs and lint INTERNAL_RUN placement (AISDLC-720.1) ([#1229](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1229)) ([fe6c699](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fe6c699dbd65860b7d00d2c4bcba445dfce68e01))
+
+
+### Bug Fixes
+
+* **orchestrator:** eliminate attestation re-sign races (AISDLC-543) ([#1234](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1234)) ([04416a7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/04416a70cb83a81ab53b0c60afc60799a6500f41))
+* **orchestrator:** idempotent leaf re-emit, signer task env fallback, bounded verify (AISDLC-734) ([#1226](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1226)) ([7839425](https://github.com/ai-sdlc-framework/ai-sdlc/commit/783942530119bb73f02f9dcf6c25f814877af849))
+* **orchestrator:** write prettier-formatted envelope JSON (AISDLC-732) ([#1219](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1219)) ([912a91c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/912a91c2165860913d6b5037365bce325531482e))
+* **security:** fix critical DangerousWorkflow alerts and triage code-scanning backlog (AISDLC-704) [supersedes [#1223](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1223)] ([#1232](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1232)) ([1ea76c1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1ea76c17e77f692b0320dd5f989c5c8958913a20))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.29.0
+
 ## [0.28.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.27.0...pipeline-cli-v0.28.0) (2026-10-05)
 
 

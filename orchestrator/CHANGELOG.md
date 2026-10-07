@@ -5,6 +5,21 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.29.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.28.0...orchestrator-v0.29.0) (2026-10-06)
+
+
+### Bug Fixes
+
+* **orchestrator:** stop post-rewrite desyncing the parent checkout (AISDLC-708) ([#1233](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1233)) ([b698b0b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b698b0b62b13eb35eb175cead697a745741d309c))
+* **security:** fix critical DangerousWorkflow alerts and triage code-scanning backlog (AISDLC-704) [supersedes [#1223](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1223)] ([#1232](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1232)) ([1ea76c1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1ea76c17e77f692b0320dd5f989c5c8958913a20))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.29.0
+
 ## [0.28.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.27.0...orchestrator-v0.28.0) (2026-10-05)
 
 
