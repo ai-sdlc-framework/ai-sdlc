@@ -1,7 +1,8 @@
 ---
 name: execute-parallel
 description: >-
-  Spawn N concurrent /ai-sdlc execute sessions in tmux panes (max 5). Reads the
+  SUPERSEDED by cli-hierarchy (RFC-0051); use `cli-hierarchy up` and see
+  docs/operations/cli-hierarchy.md. Spawn N concurrent /ai-sdlc execute sessions in tmux panes (max 5). Reads the
   dispatch-ready frontier, presents top N candidates, asks operator to confirm,
   then fires one tmux window per task. Coordination via
   .ai-sdlc/dispatch/sessions/. Resource-gated: refuses if available memory <

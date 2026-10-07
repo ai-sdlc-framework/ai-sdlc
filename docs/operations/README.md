@@ -22,6 +22,19 @@ The orchestrator runs a continuous reconciliation loop over your backlog, dispat
 
 ---
 
+### Session Hierarchy
+
+A planner, a dispatch session and up to five executors, each in its own tmux session, started and managed with `cli-hierarchy`.
+
+| Runbook | Description |
+|---------|-------------|
+| [`cli-hierarchy.md`](cli-hierarchy.md) | `cli-hierarchy` reference: all eleven subcommands and the `up` options, roster file, operating cycle (brief, tick, clear), restart rule, troubleshooting |
+| [`parallel-dispatch.md`](parallel-dispatch.md) | Shared runbook for the hierarchy (executor loop, dispatch loop, liveness reaper, cancel back-channel); `/ai-sdlc execute-parallel` is superseded |
+
+**RFC:** [`spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md`](../../spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md)
+
+---
+
 ### Cross-Harness Review
 
 Claude and Codex review each other's work. Bidirectional coverage with harness-tagged DSSE envelopes and independence enforcement.
