@@ -82,6 +82,8 @@ Every field in a Substrate Contract must carry `identityClass: "core"` or `ident
 
 Getting `identityClass` wrong in the `core` direction causes false-positive Soul pivots — a similarity-threshold adjustment triggers full re-scoring at 100x the cost. Getting it wrong in the `evolving` direction misses actual Soul pivots. The canonical taxonomy lives in `orchestrator/src/substrate/identity-class.ts`.
 
+**Cross-layer exemption.** The substrate taxonomy defaults an undeclared `identityClass` to `core`, because there the class decides whether a change triggers rescoring and the conservative choice is full rescoring. The DID compiler (`orchestrator/src/sa-scoring/did-compiler.ts`) deliberately defaults to `evolving` instead: in the compiler the class is a similarity weight (`core` counts 2x), and weight 1 is the neutral choice for unlabeled data. The compiler emits one warning per unlabeled field, naming it, so the gap is visible without changing any score.
+
 Novel fields not yet in the taxonomy default to `"core"` (conservative). Promotion to `"evolving"` requires an RFC amendment with Design + Engineering sign-off.
 
 ---

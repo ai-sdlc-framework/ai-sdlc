@@ -168,34 +168,61 @@ export function hashDidSpec(did: DesignIntentDocument): string {
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-function ic(input: { identityClass?: IdentityClass } | undefined): IdentityClass {
+/**
+ * Collects the paths of fields whose `identityClass` was undeclared (and not
+ * inherited), so the compiler can warn once per field. The compiler default is
+ * `evolving` (similarity weight 1, neutral for unlabeled data); the substrate
+ * contract taxonomy defaults to `core`. See docs/concepts/substrate-contract.md.
+ */
+type UnlabeledSink = Set<string>;
+
+function ic(
+  input: { identityClass?: IdentityClass } | undefined,
+  path: string,
+  sink: UnlabeledSink,
+): IdentityClass {
+  if (input?.identityClass === undefined) sink.add(path);
   return input?.identityClass ?? 'evolving';
 }
 
-function compileScopeEntry(term: ScopeTerm): CompiledScopeEntry {
+function inherited(
+  own: IdentityClass | undefined,
+  fallback: IdentityClass | undefined,
+  path: string,
+  sink: UnlabeledSink,
+): IdentityClass {
+  if (own === undefined && fallback === undefined) sink.add(path);
+  return own ?? fallback ?? 'evolving';
+}
+
+function compileScopeEntry(term: ScopeTerm, path: string, sink: UnlabeledSink): CompiledScopeEntry {
   return {
     label: term.label,
     synonyms: term.synonyms ? Array.from(new Set(term.synonyms)) : [],
-    identityClass: ic(term),
+    identityClass: ic(term, `${path}.${term.label}`, sink),
   };
 }
 
-function compileConstraint(c: Constraint): CompiledConstraintRule {
+function compileConstraint(c: Constraint, sink: UnlabeledSink): CompiledConstraintRule {
   return {
     id: c.id,
     concept: c.concept,
     relationship: c.relationship,
     detectionPatterns: [...c.detectionPatterns],
-    identityClass: ic(c),
+    identityClass: ic(c, `soulPurpose.constraints.${c.id}`, sink),
   };
 }
 
-function compileAntiPattern(a: AntiPattern): CompiledAntiPattern {
+function compileAntiPattern(
+  a: AntiPattern,
+  path: string,
+  sink: UnlabeledSink,
+): CompiledAntiPattern {
   return {
     id: a.id,
     label: a.label,
     detectionPatterns: [...a.detectionPatterns],
-    identityClass: ic(a),
+    identityClass: ic(a, `${path}.${a.id}`, sink),
   };
 }
 
@@ -213,29 +240,38 @@ function buildBm25Document(
 
 export function compileDid(did: DesignIntentDocument): CompiledDid {
   const spec = did.spec;
+  const unlabeled: UnlabeledSink = new Set();
 
   // 1. Scope lists
   const scopeLists: CompiledScopeLists = {
-    inScope: (spec.soulPurpose.scopeBoundaries?.inScope ?? []).map(compileScopeEntry),
-    outOfScope: (spec.soulPurpose.scopeBoundaries?.outOfScope ?? []).map(compileScopeEntry),
+    inScope: (spec.soulPurpose.scopeBoundaries?.inScope ?? []).map((t) =>
+      compileScopeEntry(t, 'soulPurpose.scopeBoundaries.inScope', unlabeled),
+    ),
+    outOfScope: (spec.soulPurpose.scopeBoundaries?.outOfScope ?? []).map((t) =>
+      compileScopeEntry(t, 'soulPurpose.scopeBoundaries.outOfScope', unlabeled),
+    ),
   };
 
   // 2. Constraint rules
-  const constraintRules: CompiledConstraintRule[] = (spec.soulPurpose.constraints ?? []).map(
-    compileConstraint,
+  const constraintRules: CompiledConstraintRule[] = (spec.soulPurpose.constraints ?? []).map((c) =>
+    compileConstraint(c, unlabeled),
   );
 
   // 3. Anti-pattern lists
   const productAntiPatterns: CompiledAntiPattern[] = (spec.soulPurpose.antiPatterns ?? []).map(
-    compileAntiPattern,
+    (a) => compileAntiPattern(a, 'soulPurpose.antiPatterns', unlabeled),
   );
   const perPrinciple: Record<string, CompiledAntiPattern[]> = {};
   for (const p of spec.soulPurpose.designPrinciples) {
-    perPrinciple[p.id] = (p.antiPatterns ?? []).map(compileAntiPattern);
+    perPrinciple[p.id] = (p.antiPatterns ?? []).map((a) =>
+      compileAntiPattern(a, `soulPurpose.designPrinciples.${p.id}.antiPatterns`, unlabeled),
+    );
   }
-  const voiceAntiPatterns = (spec.brandIdentity?.voiceAntiPatterns ?? []).map(compileAntiPattern);
+  const voiceAntiPatterns = (spec.brandIdentity?.voiceAntiPatterns ?? []).map((a) =>
+    compileAntiPattern(a, 'brandIdentity.voiceAntiPatterns', unlabeled),
+  );
   const visualAntiPatterns = (spec.brandIdentity?.visualIdentity?.visualAntiPatterns ?? []).map(
-    compileAntiPattern,
+    (a) => compileAntiPattern(a, 'brandIdentity.visualIdentity.visualAntiPatterns', unlabeled),
   );
 
   const antiPatternLists: CompiledAntiPatternLists = {
@@ -256,12 +292,17 @@ export function compileDid(did: DesignIntentDocument): CompiledDid {
         operator: sig.operator,
         scope: sig.scope,
         sourcePrinciple: principle.id,
-        identityClass: sig.identityClass ?? principle.identityClass ?? 'evolving',
+        identityClass: inherited(
+          sig.identityClass,
+          principle.identityClass,
+          `soulPurpose.designPrinciples.${principle.id}.measurableSignals.${sig.id}`,
+          unlabeled,
+        ),
       });
     }
   }
   for (const vc of spec.brandIdentity?.visualIdentity?.visualConstraints ?? []) {
-    measurableSignals.push(compileVisualConstraintSignal(vc));
+    measurableSignals.push(compileVisualConstraintSignal(vc, unlabeled));
   }
 
   // 5. SA-1 BM25 corpus (mission + experientialTargets)
@@ -269,7 +310,7 @@ export function compileDid(did: DesignIntentDocument): CompiledDid {
   const missionDoc = buildBm25Document(
     'mission',
     spec.soulPurpose.mission.value,
-    ic(spec.soulPurpose.mission),
+    ic(spec.soulPurpose.mission, 'soulPurpose.mission', unlabeled),
   );
   if (missionDoc) bm25Docs.push(missionDoc);
   for (const [name, target] of Object.entries(spec.experientialTargets ?? {})) {
@@ -277,7 +318,7 @@ export function compileDid(did: DesignIntentDocument): CompiledDid {
     const doc = buildBm25Document(
       `experientialTargets.${name}`,
       JSON.stringify(target),
-      ic(target),
+      ic(target, `experientialTargets.${name}`, unlabeled),
     );
     if (doc) bm25Docs.push(doc);
   }
@@ -287,7 +328,13 @@ export function compileDid(did: DesignIntentDocument): CompiledDid {
   // 6. SA-2 principle corpora
   const principleCorpora: PrincipleCorpora = {};
   for (const principle of spec.soulPurpose.designPrinciples) {
-    principleCorpora[principle.id] = buildPrincipleCorpus(principle);
+    principleCorpora[principle.id] = buildPrincipleCorpus(principle, unlabeled);
+  }
+
+  for (const path of unlabeled) {
+    console.warn(
+      `[did-compiler] ${path}: identityClass is undeclared; defaulting to 'evolving' (similarity weight 1)`,
+    );
   }
 
   return {
@@ -303,19 +350,22 @@ export function compileDid(did: DesignIntentDocument): CompiledDid {
   };
 }
 
-function compileVisualConstraintSignal(vc: VisualConstraint): CompiledMeasurableSignal {
+function compileVisualConstraintSignal(
+  vc: VisualConstraint,
+  sink: UnlabeledSink,
+): CompiledMeasurableSignal {
   return {
     id: vc.id,
     metric: vc.rule.metric,
     threshold: vc.rule.threshold,
     operator: vc.rule.operator,
     sourceVisual: vc.id,
-    identityClass: ic(vc),
+    identityClass: ic(vc, `brandIdentity.visualIdentity.visualConstraints.${vc.id}`, sink),
   };
 }
 
-function buildPrincipleCorpus(principle: DesignPrinciple): Bm25Corpus {
-  const pic = principle.identityClass ?? 'evolving';
+function buildPrincipleCorpus(principle: DesignPrinciple, sink: UnlabeledSink): Bm25Corpus {
+  const pic = ic(principle, `soulPurpose.designPrinciples.${principle.id}`, sink);
   const docs: Bm25Document[] = [];
   const nameDoc = buildBm25Document(`${principle.id}.name`, principle.name, pic);
   if (nameDoc) docs.push(nameDoc);

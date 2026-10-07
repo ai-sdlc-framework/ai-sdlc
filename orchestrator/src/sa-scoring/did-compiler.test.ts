@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import type { DesignIntentDocument } from '@ai-sdlc/reference';
 import { StateStore } from '../state/store.js';
@@ -376,5 +376,36 @@ describe('State-store round-trip (AC #5)', () => {
     const byHash = store.getDidCompiledArtifactByHash(compiled.didName, compiled.sourceHash);
     expect(byHash).toBeDefined();
     expect(byHash!.sourceHash).toBe(compiled.sourceHash);
+  });
+});
+
+describe('compileDid — unlabeled identityClass warnings (AISDLC-749)', () => {
+  it('warns once per unlabeled field, naming it, and keeps the evolving default', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const did = makeMinimalDid();
+      did.spec.soulPurpose.constraints = [
+        { id: 'c1', concept: 'x', relationship: 'never', detectionPatterns: ['a'] },
+        { id: 'c2', concept: 'y', relationship: 'never', detectionPatterns: ['b'] },
+      ] as never;
+      const compiled = compileDid(did);
+      const messages = warn.mock.calls.map((c) => String(c[0]));
+      expect(messages).toHaveLength(2);
+      expect(messages[0]).toContain('soulPurpose.constraints.c1');
+      expect(messages[1]).toContain('soulPurpose.constraints.c2');
+      expect(compiled.constraintRules.every((c) => c.identityClass === 'evolving')).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('does not warn when every field is labeled or inherits a class', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      compileDid(makeMinimalDid());
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
