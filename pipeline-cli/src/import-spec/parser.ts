@@ -51,16 +51,67 @@ export interface ParseTasksMdResult {
   entries: SpecKitTaskEntry[];
 }
 
-// Horizontal-whitespace classes ([ \t]) instead of \s so optional-whitespace
-// groups cannot overlap newline-anchored alternatives — avoids polynomial
-// backtracking on adversarial imported specs (CodeQL js/polynomial-redos).
-// Trailing title/AC text uses a greedy (.+)$ (linear) rather than the lazy
-// (.+?)\s*$ form, whose lazy-capture-then-optional-trailing-whitespace overlap
-// is also polynomial. Callers .trim() the captured group to preserve the
-// prior trailing-strip behaviour.
-const HEADING_RE = /^###[ \t]+(T-\d+)[ \t]*[—\-:]?[ \t]*(.+)$/;
-const CHECKBOX_RE = /^-[ \t]*\[[ x]\][ \t]*(T-\d+)[ \t]*[—\-:]?[ \t]*(.+)$/i;
-const AC_LINE_RE = /^[ \t]*(?:-[ \t]*)?AC:[ \t]*(.+)$/i;
+// Each line shape is matched in two linear passes: an anchored prefix regex
+// whose quantifiers cannot overlap, then a hand-rolled tail scan. The earlier
+// single-regex form (`[ \t]*(.+)$`) let the optional whitespace and the title
+// both consume tabs, which is polynomial backtracking on adversarial imported
+// specs (CodeQL js/polynomial-redos). Callers .trim() captured text, as before.
+const HEADING_PREFIX_RE = /^###[ \t]+(T-\d+)/;
+const CHECKBOX_PREFIX_RE = /^-[ \t]*\[[ x]\][ \t]*(T-\d+)/i;
+const AC_PREFIX_RE = /^[ \t]*(?:-[ \t]*)?AC:/i;
+// `.` in the former regexes did not match these, so a line carrying one never matched.
+const LINE_TERMINATOR_RE = /[\r\u2028\u2029]/;
+
+function skipBlanks(line: string, from: number): number {
+  let i = from;
+  while (i < line.length && (line[i] === ' ' || line[i] === '\t')) i += 1;
+  return i;
+}
+
+/**
+ * Capture the text after `pos`: blanks, then (when `withSeparator`) one
+ * optional `—`, `-` or `:`, then blanks, then the rest of the line. When
+ * nothing is left, the last consumed character becomes the capture, as the
+ * backtracking regex did. Returns '' when `pos` is the end of the line, and null
+ * when the tail holds a line terminator (the old regex never matched those).
+ */
+function captureTail(line: string, pos: number, withSeparator: boolean): string | null {
+  let i = skipBlanks(line, pos);
+  if (withSeparator && i < line.length && '—-:'.includes(line[i])) {
+    i = skipBlanks(line, i + 1);
+  }
+  const rest = line.slice(i);
+  if (LINE_TERMINATOR_RE.test(rest)) return null;
+  if (rest.length > 0) return rest;
+  return line.length > pos ? line.slice(-1) : '';
+}
+
+interface TaskLineMatch {
+  taskId: string;
+  title: string;
+}
+
+function matchTaskLine(prefixRe: RegExp, line: string): TaskLineMatch | null {
+  const prefix = prefixRe.exec(line);
+  if (!prefix) return null;
+  const title = captureTail(line, prefix[0].length, true);
+  if (title === null) return null;
+  if (title !== '') return { taskId: prefix[1], title };
+  // Nothing follows the id: the old regex gave its last digit back as the title.
+  if (/\d{2}$/.test(prefix[1])) {
+    return { taskId: prefix[1].slice(0, -1), title: prefix[1].slice(-1) };
+  }
+  return null;
+}
+
+const matchHeading = (line: string): TaskLineMatch | null => matchTaskLine(HEADING_PREFIX_RE, line);
+const matchCheckbox = (line: string): TaskLineMatch | null =>
+  matchTaskLine(CHECKBOX_PREFIX_RE, line);
+
+function matchAcLine(line: string): string | null {
+  const prefix = AC_PREFIX_RE.exec(line);
+  return prefix ? captureTail(line, prefix[0].length, false) || null : null;
+}
 const TASKS_SECTION_RE = /^##\s+Tasks\s*$/i;
 
 /**
@@ -71,8 +122,8 @@ const TASKS_SECTION_RE = /^##\s+Tasks\s*$/i;
 export function detectSchema(source: string): SpecKitSchemaVersion {
   const lines = source.split('\n');
   for (const line of lines) {
-    if (HEADING_RE.test(line)) return 'v0.8-headings';
-    if (CHECKBOX_RE.test(line)) return 'v0.7-checkboxes';
+    if (matchHeading(line)) return 'v0.8-headings';
+    if (matchCheckbox(line)) return 'v0.7-checkboxes';
   }
   return 'unknown';
 }
@@ -117,12 +168,12 @@ function parseHeadings(lines: string[], startIdx: number): SpecKitTaskEntry[] {
 
   for (let i = startIdx; i < lines.length; i += 1) {
     const line = lines[i];
-    const headingMatch = HEADING_RE.exec(line);
+    const headingMatch = matchHeading(line);
     if (headingMatch) {
       flush();
       current = {
-        taskId: headingMatch[1],
-        title: headingMatch[2].trim(),
+        taskId: headingMatch.taskId,
+        title: headingMatch.title.trim(),
         body: '',
         acceptanceCriteria: [],
       };
@@ -134,9 +185,9 @@ function parseHeadings(lines: string[], startIdx: number): SpecKitTaskEntry[] {
       continue;
     }
     if (current) {
-      const acMatch = AC_LINE_RE.exec(line);
+      const acMatch = matchAcLine(line);
       if (acMatch) {
-        current.acceptanceCriteria.push(acMatch[1].trim());
+        current.acceptanceCriteria.push(acMatch.trim());
       } else {
         current.body += line + '\n';
       }
@@ -159,12 +210,12 @@ function parseCheckboxes(lines: string[], startIdx: number): SpecKitTaskEntry[] 
 
   for (let i = startIdx; i < lines.length; i += 1) {
     const line = lines[i];
-    const cbMatch = CHECKBOX_RE.exec(line);
+    const cbMatch = matchCheckbox(line);
     if (cbMatch) {
       flush();
       current = {
-        taskId: cbMatch[1],
-        title: cbMatch[2].trim(),
+        taskId: cbMatch.taskId,
+        title: cbMatch.title.trim(),
         body: '',
         acceptanceCriteria: [],
       };
@@ -175,9 +226,9 @@ function parseCheckboxes(lines: string[], startIdx: number): SpecKitTaskEntry[] 
       continue;
     }
     if (current) {
-      const acMatch = AC_LINE_RE.exec(line);
+      const acMatch = matchAcLine(line);
       if (acMatch) {
-        current.acceptanceCriteria.push(acMatch[1].trim());
+        current.acceptanceCriteria.push(acMatch.trim());
       } else if (line.trim().length > 0) {
         current.body += line.trim() + '\n';
       }
