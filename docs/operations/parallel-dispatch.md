@@ -245,6 +245,11 @@ cat .ai-sdlc/dispatch/sessions/aisdlc-462.session.json
 
 ## Watching the agents
 
+Drive the hierarchy from Claude Code with `/ai-sdlc hierarchy <command>` (the documented
+entry point; see the [`cli-hierarchy` reference](cli-hierarchy.md)). The bare binary,
+`node pipeline-cli/bin/cli-hierarchy.mjs <command>` from the repository root, is the
+fallback, and the `cli-hierarchy ...` examples below use it for brevity.
+
 `cli-hierarchy up` starts the planner, the dispatch session and the executors as
 **one detached tmux session per agent**. The tmux session name, its window name and
 the agent name are the same, qualified with the project (`<project>-planner`,
