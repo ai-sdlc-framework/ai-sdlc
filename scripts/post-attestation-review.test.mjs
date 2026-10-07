@@ -32,6 +32,15 @@ function fakeApi(reviews = [], opts = {}) {
 const base = { repo: REPO, repoHead: REPO, headSha: SHA1, status: 'valid', reason: 'ok' };
 
 describe('postAttestationReview', () => {
+  it('does not approve a qualified (soft-fail or spot-check) verification', async () => {
+    for (const reason of ['ok (soft-fail: transcript-leaves.jsonl missing)', 'ok (spot-check)']) {
+      const api = fakeApi();
+      const r = await postAttestationReview({ ...base, reason, api });
+      assert.equal(r.action, 'skipped');
+      assert.equal(api.calls.created.length, 0);
+    }
+  });
+
   it('approves on a verified envelope', async () => {
     const api = fakeApi();
     const r = await postAttestationReview({ ...base, api });

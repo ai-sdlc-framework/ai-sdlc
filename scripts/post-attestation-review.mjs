@@ -69,6 +69,14 @@ export async function postAttestationReview({
   if (status !== 'valid') {
     return { action: 'skipped', reason: `verification status is '${status || ''}'`, dismissed: 0 };
   }
+  // A soft-fail or spot-check "valid" skipped the Merkle proof: not a full verification.
+  if (/soft-fail|spot-check/i.test(reason || '')) {
+    return {
+      action: 'skipped',
+      reason: 'qualified verification (soft-fail or spot-check)',
+      dismissed: 0,
+    };
+  }
   if (!repoHead || repoHead !== repo) {
     return { action: 'skipped', reason: 'fork or unknown head repo', dismissed: 0 };
   }
