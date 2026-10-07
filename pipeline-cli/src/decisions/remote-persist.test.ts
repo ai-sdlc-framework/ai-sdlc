@@ -2,19 +2,17 @@
  * AISDLC-546 — hermetic tests: a local bare repo is `origin`; `gh` is injected (no network).
  */
 import { execFileSync } from 'node:child_process';
-import {
-  appendFileSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { appendDecisionEvent, makeDecisionOpenedEvent, resolveEventLogPath } from './event-log.js';
+import {
+  appendDecisionEvent,
+  makeDecisionOpenedEvent,
+  makeOperatorAnsweredEvent,
+  resolveEventLogPath,
+} from './event-log.js';
 import {
   assertDecisionIdFree,
   DECISIONS_SYNC_BRANCH,
@@ -35,11 +33,12 @@ let root: string;
 let origin: string;
 let parent: string;
 const ghCalls: string[][] = [];
+let openPrUrl = '';
 const runner: GitRunner = (cmd, args, opts) => {
   if (cmd === 'gh') {
     ghCalls.push(args);
     return args[1] === 'list'
-      ? { status: 0, stdout: '', stderr: '' }
+      ? { status: 0, stdout: openPrUrl, stderr: '' }
       : { status: 0, stdout: 'https://example.invalid/pull/1\n', stderr: '' };
   }
   return defaultRunner(cmd, args, opts);
@@ -61,6 +60,7 @@ function addDec(workDir: string, id: string): void {
 
 beforeEach(() => {
   ghCalls.length = 0;
+  openPrUrl = '';
   delete process.env.AI_SDLC_DECISIONS_NO_REMOTE_PERSIST;
   root = mkdtempSync(join(tmpdir(), 'dec-persist-'));
   origin = join(root, 'origin.git');
@@ -111,9 +111,52 @@ describe('persistDecisionLog (AISDLC-546)', () => {
     );
     expect(remote).toContain('DEC-0001');
     expect(remote).toContain('DEC-0002');
-    // answer-style append persists the same way
-    appendFileSync(resolveEventLogPath(parent), '');
+  });
+
+  it('reuses the open sync PR instead of creating another', () => {
+    openPrUrl = 'https://example.invalid/pull/77\n';
+    addDec(parent, 'DEC-0001');
+    const r = persistDecisionLog({ workDir: parent, runner });
+    expect(r.prUrl).toBe('https://example.invalid/pull/77');
+    expect(ghCalls.some((a) => a[0] === 'pr' && a[1] === 'create')).toBe(false);
+  });
+
+  it('answer-style append lands on the sync branch', () => {
+    addDec(parent, 'DEC-0001');
+    persistDecisionLog({ workDir: parent, runner });
+    appendDecisionEvent(
+      makeOperatorAnsweredEvent({ decisionId: 'DEC-0001', chosenOptionId: 'a', by: 'op@test' }),
+      { workDir: parent },
+    );
     expect(persistDecisionLog({ workDir: parent, runner }).persisted).toBe(true);
+    const remote = git(
+      parent,
+      'show',
+      `origin/${DECISIONS_SYNC_BRANCH}:.ai-sdlc/_decisions/events.jsonl`,
+    );
+    expect(remote).toContain('operator-answered');
+  });
+
+  it('recovers after the sync PR merged and its branch was deleted on origin', () => {
+    addDec(parent, 'DEC-0001');
+    expect(persistDecisionLog({ workDir: parent, runner }).persisted).toBe(true);
+    // Merge: fast-forward main to the sync branch, then delete the remote sync branch.
+    git(parent, 'push', 'origin', `origin/${DECISIONS_SYNC_BRANCH}:refs/heads/main`);
+    // Delete inside the bare repo so the parent's tracking ref is NOT pruned (stale).
+    git(origin, 'update-ref', '-d', `refs/heads/${DECISIONS_SYNC_BRANCH}`);
+    // Stale tracking ref still present locally (no --prune).
+    expect(git(parent, 'rev-parse', '--verify', `origin/${DECISIONS_SYNC_BRANCH}`)).toBeTruthy();
+
+    addDec(parent, 'DEC-0002');
+    const r = persistDecisionLog({ workDir: parent, runner });
+    expect(r.persisted).toBe(true);
+    const remote = git(
+      parent,
+      'show',
+      `origin/${DECISIONS_SYNC_BRANCH}:.ai-sdlc/_decisions/events.jsonl`,
+    );
+    expect(remote).toContain('DEC-0001');
+    expect(remote).toContain('DEC-0002');
   });
 
   it('numbering takes max of origin/main and local ledgers', () => {

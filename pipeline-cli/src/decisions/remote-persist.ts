@@ -115,12 +115,21 @@ function showRef(ctx: Ctx, ref: string): string[] {
 function fetchRefs(ctx: Ctx): boolean {
   // Best-effort; the sync branch may not exist yet (that fetch failing is normal).
   const main = ctx.run('git', ['fetch', '--quiet', 'origin', 'main']);
-  ctx.run('git', [
+  const syncRef = `refs/remotes/origin/${DECISIONS_SYNC_BRANCH}`;
+  const sync = ctx.run('git', [
     'fetch',
     '--quiet',
     'origin',
-    `+refs/heads/${DECISIONS_SYNC_BRANCH}:refs/remotes/origin/${DECISIONS_SYNC_BRANCH}`,
+    `+refs/heads/${DECISIONS_SYNC_BRANCH}:${syncRef}`,
   ]);
+  if (sync.status !== 0) {
+    // The sync PR may have merged and its branch been deleted: a stale tracking ref would
+    // otherwise become the push lease and be rejected forever. Confirm absence, then drop it.
+    const remote = ctx.run('git', ['ls-remote', '--heads', 'origin', DECISIONS_SYNC_BRANCH]);
+    if (remote.status === 0 && remote.stdout.trim() === '') {
+      ctx.run('git', ['update-ref', '-d', syncRef]);
+    }
+  }
   return main.status === 0;
 }
 
