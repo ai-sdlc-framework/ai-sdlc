@@ -1949,12 +1949,16 @@ export async function applyBranchProtection(
 
   adapters.log(`  applied branch protection to ${slug}:main (server-side enforcement)`);
   if (templatePostsApproval) {
-    adapters.log('  installed: required check ai-sdlc/pr-ready + 1 approving review;');
+    adapters.log(
+      '  installed: required checks ai-sdlc/pr-ready, codecov/patch + 1 approving review;',
+    );
     adapters.log(
       '             verify-attestation.yml posts the approving review once the attestation verifies.',
     );
   } else {
-    adapters.log('  installed: required check ai-sdlc/pr-ready (0 required approving reviews).');
+    adapters.log(
+      '  installed: required checks ai-sdlc/pr-ready, codecov/patch (0 required approving reviews).',
+    );
     adapters.log(
       '             The approving-review requirement is not yet enabled: the adopter verify-attestation',
     );
@@ -2064,8 +2068,20 @@ export function renderNextSteps(
 
   if (selection.branchProtection) {
     if (result.branchProtection?.applied) {
-      lines.push(`${stepN}. Branch protection on \`main\` was updated.`);
+      lines.push(`${stepN}. Branch protection on \`main\` was updated (server-side enforcement).`);
       lines.push('     Required checks: ai-sdlc/pr-ready, codecov/patch');
+      lines.push('     Opt out with: --no-branch-protection');
+    } else if (result.branchProtection?.mode === 'client-side') {
+      lines.push(`${stepN}. Branch protection is unavailable for this repo (HTTP 403).`);
+      lines.push(
+        '     Chosen path: client-side enforcement (cli-merge-if-eligible + governance hook).',
+      );
+      lines.push(
+        '     The server cannot block a manual merge; `ai-sdlc doctor` reports this as an error.',
+      );
+      lines.push('     Opt out with: --no-branch-protection');
+      lines.push('     After making the repo public or upgrading the plan, re-run:');
+      lines.push('     ai-sdlc init --add branch-protection');
     } else if (result.branchProtection?.error) {
       lines.push(`${stepN}. Branch protection was NOT applied:`);
       lines.push(`     ${result.branchProtection.error}`);
