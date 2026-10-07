@@ -6,11 +6,28 @@ It replaces `/ai-sdlc execute-parallel` (see [`parallel-dispatch.md`](parallel-d
 which keeps the shared runbook material: the executor loop, the dispatch loop, liveness
 and the cancel back-channel). RFC: [RFC-0051](../../spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md).
 
-Invoke it from the repository root:
+The documented entry point is the plugin command, which runs `cli-hierarchy` from the
+resolved pipeline-cli bin (works from an installed plugin, not only the dogfood repo):
+
+```text
+/ai-sdlc hierarchy <command> [options]
+```
+
+It passes `up`, `status`, `attach`, `terminals`, `brief` and `down` through unchanged,
+with these differences: `attach` and `up --attach` print the shell command to run (a
+Claude Code session cannot switch your terminal); `down` with no `--role` asks you to
+confirm first; `clear`, `tick`, `route-decision`, `check-sender` and `check-repo` are
+refused (they belong to the dispatch and executor loop bodies); with no arguments it
+prints `--help` plus a common-recipes block.
+
+The fallback is the bare binary, from the repository root:
 
 ```bash
 node pipeline-cli/bin/cli-hierarchy.mjs <command> [options]
 ```
+
+The examples below use the bare `cli-hierarchy` name for brevity; the plugin form takes
+the same commands and options.
 
 Source of truth: `pipeline-cli/src/cli/hierarchy.ts` (the command table and `--help`) and
 `pipeline-cli/src/hierarchy/*`. A test (`pipeline-cli/src/hierarchy/docs-parity.test.ts`)
