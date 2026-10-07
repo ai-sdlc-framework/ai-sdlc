@@ -63,4 +63,4 @@ The Verify attestation workflow now has an `approve` job that submits an APPROVE
 ## Follow-up
 - declined: a verifier-emitted `schemaVersion` output so the job can require v6 (touches the blocked verifier driver; legacy-schema envelopes can currently be approved)
 - declined: dismissing the bot's old approval when a later head fails verification (merge stays blocked by the failing status; the "Dismiss stale approvals" branch setting covers it, documented behaviour wording is slightly broad in quality-gate.md)
-- AC 5 (Scorecard Code-Review observation) is a post-merge item, pending
+- declined: AC 5 (Scorecard Code-Review observation) can only be read after merge; it is recorded in the PR body as pending post-merge
