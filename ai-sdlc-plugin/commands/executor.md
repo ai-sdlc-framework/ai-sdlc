@@ -302,7 +302,7 @@ own output.
 
 ## Step 6 - Stop and wait
 
-Stop. Do not claim another task and do not schedule a wake-up. The dispatch session
+Stop. You run exactly one task per context and wait to be cleared. Do not claim another task and do not schedule a wake-up. The dispatch session
 clears this session's context when it sees the verdict and then issues
 `/ai-sdlc executor` again; the next turn starts there with an empty context, and the
 role block injected at session start tells you what you are.

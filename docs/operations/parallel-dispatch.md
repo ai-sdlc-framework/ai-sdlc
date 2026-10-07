@@ -867,6 +867,23 @@ sent and the executor printed its identity line again within the settle time, an
 degraded clear shows up in `doctor`; check the executor's window with
 `cli-hierarchy status`.
 
+### Per-tick self-clear
+
+The dispatch session clears its own context after every tick so each tick starts from
+the context floor. The last step of a tick refreshes the handoff file
+(`operator-dispatch-handoff.md` in the auto-memory directory) when the queue, standing
+rules or open-PR list changed, then runs `cli-hierarchy clear --self [--resume-after <seconds>]`.
+That command resolves the session's own pane from its roster entry, refuses any caller
+that is not the dispatch session, and has a detached process type `/clear` and then
+`/ai-sdlc operator-dispatch` 60 seconds later. With `TMUX_PANE` unset it falls back to a
+60 second `ScheduleWakeup` without a clear.
+
+### Planner context ceiling
+
+The planner hands off and clears at 15% of the window (150k tokens), without exception.
+It keeps its handoff file current as rulings happen and delegates review rounds and
+orchestration loops instead of running them in its own context.
+
 ### Events
 
 `HierarchySessionStarted` (from `cli-hierarchy up`), `ExecutorContextCleared`,

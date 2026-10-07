@@ -58,6 +58,7 @@ import {
   checkDispatchCaller,
   checkOwnWorktreeForOperator,
   clearExecutor,
+  clearSelf,
   createGitRunner,
   createStreamEmitter,
   createSystemRunner,
@@ -145,6 +146,9 @@ Options for down:
 
 Usage for clear:
   cli-hierarchy clear <executor-name> [--settle-ms <n>]
+  cli-hierarchy clear --self [--resume-after <seconds>]
+  --self schedules the dispatch session's own pane (from its roster entry) to receive
+  /clear after 20 s and /ai-sdlc operator-dispatch --resume-after seconds later (default 60).
   Sends /clear to the executor's pane, waits for the settle time (default 8000 ms),
   then sends /ai-sdlc executor. Refuses an executor that holds an inflight task.
   Meant for the dispatch session only. A mistake guard refuses any other caller, a human
@@ -377,6 +381,20 @@ export async function runHierarchyCli(
         if (!caller.ok) {
           process.stderr.write(`${caller.reason}\n`);
           return 1;
+        }
+        if (flags.self === 'true') {
+          const resumeAfter = intFlag(flags, 'resume-after');
+          if (resumeAfter === null) return 2;
+          const result = clearSelf(
+            {
+              self: caller.name,
+              ...(resumeAfter === undefined ? {} : { resumeAfterSeconds: resumeAfter }),
+              ...(deps.env.TMUX_PANE ? { callerPane: deps.env.TMUX_PANE } : {}),
+            },
+            { run: deps.run, boardDir: deps.boardDir, log: deps.log },
+          );
+          deps.log(JSON.stringify(result));
+          return 0;
         }
         const executor = firstPositional(argv);
         if (!executor) {

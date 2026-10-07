@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { claimNext, writeManifest } from '../dispatch/board.js';
 import type { DispatchManifest } from '../dispatch/types.js';
-import { clearExecutor, HIERARCHY_CLEAR_CAPABILITY, type ClearDeps } from './clear.js';
+import { clearExecutor, clearSelf, HIERARCHY_CLEAR_CAPABILITY, type ClearDeps } from './clear.js';
 import type { HierarchyEvent } from './emit.js';
 import { writeRoster } from './roster.js';
 import type { CommandRunner, Roster, RosterEntry } from './types.js';
@@ -367,5 +367,83 @@ describe('clearExecutor', () => {
       deps({ log: (l) => lines.push(l) }),
     );
     expect(lines[1]).toContain('did not report back');
+  });
+});
+
+describe('clearSelf', () => {
+  const dispatch = (over: Partial<RosterEntry> = {}): RosterEntry =>
+    entry({
+      role: 'operator-dispatch',
+      name: 'operator-dispatch',
+      tmuxWindow: 'operator-dispatch',
+      paneId: '%3',
+      ...over,
+    });
+  let spawned: { file: string; args: readonly string[] }[];
+  const selfDeps = () => ({
+    run: (file: string, args: readonly string[]) => {
+      calls.push({ file, args: [...args] });
+      const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
+      if (args[0] === 'list-windows') return ok('operator-dispatch\nexecutor-alpha\n');
+      if (args[0] === 'display-message') return ok('%3\n');
+      return ok();
+    },
+    boardDir: board,
+    spawnDetached: (file: string, args: readonly string[]) => {
+      spawned.push({ file, args });
+    },
+  });
+  beforeEach(() => {
+    spawned = [];
+    seedRoster(entry(), dispatch());
+  });
+
+  it('schedules /clear then the resume command on the caller own roster pane', () => {
+    const r = clearSelf({ self: 'operator-dispatch', resumeAfterSeconds: 45 }, selfDeps());
+    expect(r).toMatchObject({ self: 'operator-dispatch', paneId: '%3', resumeAfterSeconds: 45 });
+    expect(spawned).toHaveLength(1);
+    const a = spawned[0]!.args;
+    expect(spawned[0]!.file).toBe('sh');
+    // lead delay, pane, /clear, resume delay, resume command, all as arguments
+    expect(a.slice(3)).toEqual(['20', '%3', '/clear', '45', '/ai-sdlc operator-dispatch']);
+    expect(a[1]).toMatch(/send-keys -t "\$2" -l -- "\$3".*sleep "\$4".*"\$5"/);
+    // nothing is typed synchronously
+    expect(sends()).toHaveLength(0);
+  });
+
+  it('refuses a caller that is not the dispatch session', () => {
+    expect(() => clearSelf({ self: 'executor-alpha' }, selfDeps())).toThrow(
+      /not the dispatch session/,
+    );
+    expect(spawned).toHaveLength(0);
+  });
+
+  it('refuses when TMUX_PANE is not the roster pane', () => {
+    expect(() => clearSelf({ self: 'operator-dispatch', callerPane: '%9' }, selfDeps())).toThrow(
+      /not the roster pane/,
+    );
+    expect(spawned).toHaveLength(0);
+  });
+
+  it('refuses a stopped session, a bad pane id and a bad delay', () => {
+    seedRoster(dispatch({ status: 'starting' }));
+    expect(() => clearSelf({ self: 'operator-dispatch' }, selfDeps())).toThrow(/not running/);
+    seedRoster(dispatch({ paneId: '' }));
+    expect(() => clearSelf({ self: 'operator-dispatch' }, selfDeps())).toThrow(/pane id/);
+    seedRoster(dispatch());
+    expect(() =>
+      clearSelf({ self: 'operator-dispatch', resumeAfterSeconds: -1 }, selfDeps()),
+    ).toThrow(/whole number/);
+    expect(spawned).toHaveLength(0);
+  });
+
+  it('refuses a pane tmux no longer attributes to the window', () => {
+    const d = selfDeps();
+    const run = (file: string, args: readonly string[]) =>
+      args[0] === 'display-message'
+        ? { status: 0, stdout: '%99\n', stderr: '' }
+        : d.run(file, args);
+    expect(() => clearSelf({ self: 'operator-dispatch' }, { ...d, run })).toThrow(/stale/);
+    expect(spawned).toHaveLength(0);
   });
 });

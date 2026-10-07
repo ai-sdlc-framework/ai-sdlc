@@ -90,6 +90,19 @@ describe('operator-dispatch command', () => {
     assert.match(body, /Route `design`/);
   });
 
+  it('reads the handoff file before the tick and self-clears after it', () => {
+    assert.match(body, /## Step 1\.5 - Read the handoff file/);
+    assert.match(body, /operator-dispatch-handoff\.md/);
+    assert.ok(body.indexOf('Step 1.5') < body.indexOf('## Step 2 - Run one wake-up'));
+    assert.match(body, /cli-hierarchy\.mjs" clear --self --resume-after 60/);
+    assert.match(body, /Do not call `ScheduleWakeup` on this path/);
+  });
+
+  it('falls back to ScheduleWakeup only when TMUX_PANE is unset', () => {
+    assert.match(body, /\$\{TMUX_PANE:-\}/);
+    assert.match(body, /Only when `TMUX_PANE` is unset/);
+  });
+
   it('wakes itself up again and stops', () => {
     assert.match(body, /ScheduleWakeup/);
     assert.match(body, /\/ai-sdlc operator-dispatch/);

@@ -41,6 +41,11 @@ export {
 } from './brief-notify.js';
 export {
   clearExecutor,
+  clearSelf,
+  DISPATCH_RESUME_COMMAND,
+  type ClearSelfDeps,
+  type ClearSelfOptions,
+  type ClearSelfResult,
   DEFAULT_POLL_INTERVAL_MS,
   DEFAULT_SETTLE_MS,
   HIERARCHY_CLEAR_CAPABILITY,

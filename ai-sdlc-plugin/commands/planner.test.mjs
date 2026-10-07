@@ -92,3 +92,12 @@ describe('planner peer binding', () => {
     assert.ok(match[2].indexOf('check-repo') < match[2].indexOf('cli-hierarchy.mjs" status'));
   });
 });
+
+describe('planner context ceiling', () => {
+  it('hands off and clears at 150k tokens', () => {
+    assert.match(match[2], /## Context ceiling/);
+    assert.match(match[2], /150k tokens/);
+    assert.match(match[2], /15% of the\s+window/);
+    assert.match(match[2], /without exception/);
+  });
+});

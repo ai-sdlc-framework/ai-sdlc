@@ -19,6 +19,7 @@
  * and the executor reported back within the settle time, `degraded` otherwise.
  */
 
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 
 import { reportCapabilityOutcome } from '@ai-sdlc/reference';
@@ -206,4 +207,114 @@ export async function clearExecutor(opts: ClearOptions, deps: ClearDeps): Promis
     `cleared '${name}'${resumed ? '' : ' (it did not report back within the settle time)'}`,
   );
   return { executor: name, paneId: entry.paneId, resumed, settleMs };
+}
+
+/** Default wait before `/clear` is typed, so the calling turn can end first. */
+export const SELF_CLEAR_LEAD_SECONDS = 20;
+/** Default wait between `/clear` and the resume command. */
+export const SELF_CLEAR_RESUME_SECONDS = 60;
+/** The command the dispatch session re-issues after its own clear. */
+export const DISPATCH_RESUME_COMMAND = '/ai-sdlc operator-dispatch';
+
+/** Starts a process that outlives the caller; injectable for tests. */
+export type DetachedSpawner = (file: string, args: readonly string[]) => void;
+
+/** Production spawner: argv only, no shell of ours, detached, output discarded. */
+export const defaultSpawnDetached: DetachedSpawner = (file, args) => {
+  const child = spawn(file, [...args], { detached: true, stdio: 'ignore' });
+  child.unref();
+};
+
+/** Collaborators of {@link clearSelf}. */
+export interface ClearSelfDeps {
+  run: CommandRunner;
+  boardDir: string;
+  spawnDetached?: DetachedSpawner;
+  log?: (line: string) => void;
+}
+
+/** Inputs of {@link clearSelf}. */
+export interface ClearSelfOptions {
+  /** Roster name of the calling session, already proven to be the dispatch session. */
+  self: string;
+  /** Seconds between `/clear` and the resume command (default 60). */
+  resumeAfterSeconds?: number;
+  /** Seconds before `/clear` is typed (default 20). */
+  leadSeconds?: number;
+  /** The `TMUX_PANE` of the calling process; when set it must equal the roster pane. */
+  callerPane?: string;
+}
+
+/** What {@link clearSelf} scheduled. */
+export interface ClearSelfResult {
+  self: string;
+  paneId: string;
+  leadSeconds: number;
+  resumeAfterSeconds: number;
+}
+
+/**
+ * Schedule the dispatch session to clear its own context and resume its loop.
+ * Only the pane the calling session's own roster entry names is ever typed into.
+ * The keystrokes are delivered by a detached process after a lead delay, because
+ * `/clear` typed while this turn runs would only be queued behind it.
+ * @throws, scheduling nothing, when the entry is not a running dispatch session,
+ *   its pane or window cannot be confirmed, or `TMUX_PANE` names another pane.
+ */
+export function clearSelf(opts: ClearSelfOptions, deps: ClearSelfDeps): ClearSelfResult {
+  const name = opts.self;
+  if (typeof name !== 'string' || !EXECUTOR_NAME_RE.test(name)) {
+    throw new Error(`'${String(name)}' is not a valid session name`);
+  }
+  const resumeAfterSeconds = opts.resumeAfterSeconds ?? SELF_CLEAR_RESUME_SECONDS;
+  const leadSeconds = opts.leadSeconds ?? SELF_CLEAR_LEAD_SECONDS;
+  for (const [label, v] of [
+    ['resume delay', resumeAfterSeconds],
+    ['lead delay', leadSeconds],
+  ] as const) {
+    if (!Number.isInteger(v) || v < 0 || v > 3600) {
+      throw new Error(`the ${label} must be a whole number of seconds from 0 to 3600`);
+    }
+  }
+  const { roster } = readRosterChecked(deps.boardDir);
+  const entry = roster.sessions.find((e) => e.name === name && e.role === 'operator-dispatch');
+  if (!entry) throw new Error(`'${name}' is not the dispatch session in the roster`);
+  if (entry.status !== 'running') {
+    throw new Error(`'${name}' is not running (status ${entry.status})`);
+  }
+  const unsafe = unsafeEntryReason(entry);
+  if (unsafe) throw new Error(`refusing to clear '${name}': it ${unsafe}`);
+  if (!PANE_ID_RE.test(entry.paneId)) {
+    throw new Error(`refusing to clear '${name}': the roster has no valid pane id`);
+  }
+  if (opts.callerPane !== undefined && opts.callerPane !== '' && opts.callerPane !== entry.paneId) {
+    throw new Error(
+      `refusing to clear '${name}': TMUX_PANE ${opts.callerPane} is not the roster pane ${entry.paneId}`,
+    );
+  }
+  const unowned = ownershipRefusal(deps.run, entry);
+  if (unowned) throw new Error(`refusing to clear '${name}': ${unowned}`);
+  if (!listWindows(deps.run, entry.tmuxSession).includes(entry.tmuxWindow)) {
+    throw new Error(`the window for '${name}' is not open`);
+  }
+  const target = resolveSendTarget(deps.run, entry.tmuxSession, entry.tmuxWindow, entry.paneId);
+
+  // Every value is passed as an argument, never interpolated into the script.
+  const script =
+    'sleep "$1"; tmux send-keys -t "$2" -l -- "$3"; tmux send-keys -t "$2" Enter; ' +
+    'sleep "$4"; tmux send-keys -t "$2" -l -- "$5"; tmux send-keys -t "$2" Enter';
+  (deps.spawnDetached ?? defaultSpawnDetached)('sh', [
+    '-c',
+    script,
+    'sh',
+    String(leadSeconds),
+    target,
+    '/clear',
+    String(resumeAfterSeconds),
+    DISPATCH_RESUME_COMMAND,
+  ]);
+  deps.log?.(
+    `scheduled '${name}' to clear in ${leadSeconds}s and resume ${resumeAfterSeconds}s later`,
+  );
+  return { self: name, paneId: entry.paneId, leadSeconds, resumeAfterSeconds };
 }
