@@ -673,7 +673,7 @@ Layout: `<repoRoot>/.ai-sdlc/ucvg/reports/<prNumber>.unsigned.json`. Both the sa
 ### Security properties
 
 - **Fork-PR safety guard #1:** Workflow logic executes from `main` checkout (no `ref:` on first `actions/checkout`). Fork-controlled code never runs in the workflow runner.
-- **Fork-PR safety guard #2:** PR content is checked out into `pr-content/` (read-only data) for diff computation only.
+- **Fork-PR safety guard #2:** PR head content is never checked out; base + head git objects are fetched into a job-created `pr-content/` git directory (no working tree) for diff computation only (AISDLC-704.6).
 - **Fork-PR safety guard #3:** `pnpm install`/`build` only run from the `main` checkout.
 - **Fork-PR safety guard #4:** No fork-provided actions (`uses:`). All pinned to vetted publishers by commit SHA.
 - **Fork-PR safety guard #5:** Signing key secret only present in `clean-room-sign` job — never in `sandbox-and-review` or `classify-and-gate` jobs.

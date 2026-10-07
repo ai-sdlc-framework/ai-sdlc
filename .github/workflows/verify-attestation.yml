@@ -19,8 +19,9 @@ name: AI-SDLC Verify Review Attestation
 # write permissions even for fork PRs, but it runs against the BASE
 # branch's checkout by default — NOT the PR's HEAD. To verify the
 # attestation we must read the fork's `.ai-sdlc/attestations/<sha>.dsse.json`
-# and diff fork PR HEAD vs base; those are read as DATA only into a
-# sandboxed `pr-content/` path that is NEVER executed.
+# and diff fork PR HEAD vs base; the envelope + leaves are fetched as DATA
+# through git objects (AISDLC-704.6: the fork head is never
+# checked out) and are NEVER executed.
 #
 # ── 5-point safety guard (AISDLC-381 — see docs/operations/operator-runbook.md
 #    § Fork-PR workflow safety pattern) ────────────────────────────────
@@ -32,16 +33,19 @@ name: AI-SDLC Verify Review Attestation
 #    the orchestrator runtime needed for envelope parsing, and
 #    `pnpm-lock.yaml`. Fork code is NEVER the source of these scripts.
 #
-# 2. Fork PR content is checked out SEPARATELY into a sandboxed
-#    `pr-content/` subdirectory (a second `actions/checkout@v4` with
-#    `ref: ${{ github.event.pull_request.head.sha }}` and `path: pr-content`).
-#    The workflow reads files from `pr-content/.ai-sdlc/attestations/*.dsse.json`
-#    and does `git -C pr-content/ diff` operations on it — both DATA-only
-#    reads. The sandbox is NEVER added to PATH, never npm-installed,
-#    and no script from it is invoked with `run:` / `node`.
+# 2. The fork PR head is NEVER checked out (AISDLC-704.6, same pattern as
+#    AISDLC-704 for ai-sdlc-review.yml; avoids the Scorecard
+#    DangerousWorkflow alert class). The envelopes, `transcript-leaves.jsonl`
+#    and `transcript-leaves/` are read as DATA from fetched git objects
+#    (`git ls-tree` + `git show`, regular blobs only, via
+#    scripts/stage-attestation-data.sh) with the
+#    head repo and SHA bound through step `env:` (never interpolated into a
+#    `run:` block), the SHA hex-validated and the repo name pattern-validated.
+#    Files are written straight to the paths the verifier reads and are
+#    parsed as JSON only; none is ever executed.
 #
-# 3. NEVER `pnpm install` / `pnpm build` / script execution from the
-#    `pr-content/` sandbox. The verifier runs from main's checkout only;
+# 3. NEVER `pnpm install` / `pnpm build` / script execution from fork
+#    content. The verifier runs from main's checkout only;
 #    `pnpm install --frozen-lockfile` reads `pnpm-lock.yaml` from main.
 #
 # 4. NEVER use fork-provided actions. Every `uses:` here references a
@@ -52,10 +56,8 @@ name: AI-SDLC Verify Review Attestation
 # 5. Secrets: `${{ github.token }}` is used for the status POST and gh
 #    API calls. No signing keys, NPM tokens, AI_SDLC_PAT, or other
 #    privileged credentials are piped into any step that consumes
-#    fork-controlled input. The `pr-content/` sandbox never sees any
-#    secret env var (the gh-API steps that need github.token operate
-#    on data extracted from pr-content/ into shell strings — they
-#    never `cd pr-content/` or execute from there).
+#    fork-controlled input. Fork data is only ever written as plain files
+#    that the verifier parses as JSON.
 #
 # AISDLC-193: this workflow posts the `ai-sdlc/attestation` commit status
 # again (success when verifier returns valid; failure when invalid with
@@ -180,14 +182,22 @@ jobs:
       # merge_group  → github.event.merge_group.{head,base}_sha
       - name: Resolve subject SHA + base SHA from event payload
         id: resolve
+        # AISDLC-704.6: event data is bound through env, never interpolated
+        # into the script body.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          if [ "${{ github.event_name }}" = "merge_group" ]; then
-            echo "head_sha=${{ github.event.merge_group.head_sha }}" >> "$GITHUB_OUTPUT"
-            echo "base_sha=${{ github.event.merge_group.base_sha }}" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" = "merge_group" ]; then
+            echo "head_sha=${MG_HEAD_SHA}" >> "$GITHUB_OUTPUT"
+            echo "base_sha=${MG_BASE_SHA}" >> "$GITHUB_OUTPUT"
             echo "is_merge_group=true" >> "$GITHUB_OUTPUT"
           else
-            echo "head_sha=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
-            echo "base_sha=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+            echo "head_sha=${PR_HEAD_SHA}" >> "$GITHUB_OUTPUT"
+            echo "base_sha=${PR_BASE_SHA}" >> "$GITHUB_OUTPUT"
             echo "is_merge_group=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -203,42 +213,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      # AISDLC-381 Safety guard #2: checkout the fork PR's HEAD into a
-      # SANDBOXED subdirectory `pr-content/` for READ-ONLY DATA access
-      # (the DSSE envelope file + the git tree we need to diff against
-      # main). NO step below ever `cd`s into pr-content/, runs npm/pnpm
-      # install/build from it, or invokes any script from it — see the
-      # safety guards on every subsequent step.
-      - name: Checkout fork PR HEAD into sandboxed pr-content/ (DATA-ONLY)
-        if: github.event_name != 'merge_group'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # AISDLC-381 iter-2 MAJOR fix: explicit `repository:` arg.
-          # Under pull_request_target, actions/checkout defaults to the
-          # TARGET repo — for a real fork PR, the fork-only head SHA is
-          # unreachable from the target, so the checkout fails before the
-          # verifier ever runs. Pin the repository to the PR head's
-          # full_name (which equals github.repository for same-repo PRs,
-          # so the same step works for both same-repo and fork PRs).
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          fetch-depth: 0
-          ref: ${{ steps.resolve.outputs.head_sha }}
-          path: pr-content
-          # `persist-credentials: false` so the auth token from this
-          # checkout never lives inside the sandbox. The outer checkout
-          # (main) keeps credentials for the gh api status POST below.
-          persist-credentials: false
-          # AISDLC-592: actions/checkout v7.0.1 added a hard refusal for checking
-          # out a fork PR's head SHA under `pull_request_target` (see
-          # https://gh.io/securely-using-pull_request_target) unless this flag is
-          # set. Acceptable here because AISDLC-381 safety guards #1/#2 above
-          # already contain the risk: this checkout is DATA-only, lands solely in
-          # the sandboxed `pr-content/` subdirectory, never persists credentials,
-          # and no fork-controlled script from it is ever executed by this job.
-          allow-unsafe-pr-checkout: true
-
-      # AISDLC-381 Safety guard #2 (continued): copy ONLY the DSSE envelope
-      # file from the fork sandbox into main's working tree, so the verifier
+      # AISDLC-381 Safety guard #2 (AISDLC-704.6 revision): the fork head is
+      # NEVER checked out. Read the DSSE envelope(s) as DATA from fetched git
+      # objects (git ls-tree / git show) into main's working tree, so the verifier
       # (running from main's scripts/verify-attestation.mjs) can resolve
       # `.ai-sdlc/attestations/<head-sha>.dsse.json` at the expected path.
       # We use `cp -- <src> <dst>` (no `-r`, no globs that could expand
@@ -252,12 +229,13 @@ jobs:
       # repo — already reachable from the main checkout's fetch-depth: 0;
       # no extra fetch needed. We just need to surface the envelope from
       # that queue ref into the working tree via `git checkout <sha> -- path`.
-      - name: Stage fork envelope for verifier (DATA-ONLY copy)
+      - name: Stage fork envelope for verifier (DATA-ONLY API fetch)
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
           IS_MERGE_GROUP: ${{ steps.resolve.outputs.is_merge_group }}
           HEAD_REPO_FULL: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO_FULL: ${{ github.repository }}
         run: |
           set -euo pipefail
           if [ "$IS_MERGE_GROUP" = "true" ]; then
@@ -280,93 +258,41 @@ jobs:
             git checkout "$HEAD_SHA" -- '.ai-sdlc/transcript-leaves/' 2>/dev/null || true
             echo "[verify-attestation] merge_group: surfaced .ai-sdlc/attestations + transcript-leaves.jsonl + transcript-leaves/ from $HEAD_SHA (if present)"
           else
-            # pull_request_target: copy the envelope from the sandboxed
-            # pr-content/ checkout. The sandbox MAY not have an envelope
-            # (e.g. fork PR pushed without /ai-sdlc execute) — that's
-            # expected; the verifier will report `no envelope present at
-            # <sha>` and the status poster below will post FAILURE.
-            mkdir -p .ai-sdlc/attestations
-            STAGED=0
-            # AISDLC-395 root-cause fix: copy EVERY envelope in pr-content/.ai-sdlc/attestations/
-            # whose filename matches the strict <40hex>[.v6].dsse.json pattern, NOT just the
-            # one named after $HEAD_SHA.
-            #
-            # The HEAD_SHA-only copy was the root cause of PR #616's apparent v4-kick:
-            # when /ai-sdlc execute Step 10 signs an envelope on top of the dev commit
-            # then adds it via a separate `chore: sign attestation` commit, the envelope
-            # filename is the DEV commit's SHA (the sign target) — NOT the chore commit's
-            # SHA (which is what GitHub reports as PR HEAD). The single-file copy silently
-            # skipped it, the verifier walked only main's historical envelopes, and the
-            # closest-match heuristic surfaced an irrelevant v4 mismatch.
-            #
-            # Filename validation (<40hex>[.v6].dsse.json) is the path-traversal guard —
-            # a malicious fork PR cannot smuggle e.g. `../../etc/passwd.dsse.json` past
-            # the regex. Signature verification by the downstream verifier remains the
-            # trust boundary; bulk-copying overwrites is safe because envelopes are
-            # content-addressed and any forged content would fail signature check.
-            if [ -d "pr-content/.ai-sdlc/attestations" ]; then
-              for envfile in pr-content/.ai-sdlc/attestations/*.dsse.json; do
-                [ -f "$envfile" ] || continue
-                basename="${envfile##*/}"
-                # Strict pattern match: 40 lowercase hex + optional .v6 + .dsse.json.
-                if [[ "$basename" =~ ^[0-9a-f]{40}(\.v6)?\.dsse\.json$ ]]; then
-                  cp -- "$envfile" ".ai-sdlc/attestations/$basename"
-                  STAGED=$((STAGED + 1))
-                fi
-              done
-              echo "[verify-attestation] staged $STAGED envelope(s) from pr-content/"
+            # pull_request_target: the head commit is fetched into main's git
+            # store as DATA, then the envelope(s) + transcript leaves are
+            # materialised with `git ls-tree` / `git show` by
+            # scripts/stage-attestation-data.sh (from MAIN's checkout; no fork
+            # checkout, no contents-API loop, no 1000-entry listing cap, and a
+            # failed fetch fails the step instead of staging a partial set).
+            # The fork MAY not have an envelope (e.g. pushed without
+            # /ai-sdlc execute) -- expected; the verifier then reports `no
+            # envelope present at <sha>` and the status poster posts FAILURE.
+            if ! [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::unexpected head sha"; exit 1
             fi
-            if [ "$STAGED" = "0" ]; then
-              echo "[verify-attestation] no envelopes in pr-content/.ai-sdlc/attestations/ — verifier will report missing"
+            if ! [[ "$HEAD_REPO_FULL" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+              echo "::error::unexpected head repository name"; exit 1
             fi
-            # AISDLC-383.4: stage transcript-leaves.jsonl from fork PR content
-            # for v6 Merkle verification. This is DATA-ONLY — the file is
-            # read by the verifier (running from main's scripts/) as a JSON
-            # record source; it is never executed or loaded as a script.
-            if [ -f "pr-content/.ai-sdlc/transcript-leaves.jsonl" ]; then
-              mkdir -p .ai-sdlc
-              cp -- "pr-content/.ai-sdlc/transcript-leaves.jsonl" \
-                    ".ai-sdlc/transcript-leaves.jsonl"
-              echo "[verify-attestation] staged transcript-leaves.jsonl from fork PR"
+            if ! [[ "$BASE_REPO_FULL" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+              echo "::error::unexpected base repository name"; exit 1
             fi
-            # AISDLC-445: stage per-patch-id transcript-leaves/<patch-id>.jsonl files
-            # from the fork PR content (AISDLC-421 primary path). Without this, the
-            # verifier's v6ResolveLeavesForEnvelope falls back to the shared
-            # transcript-leaves.jsonl which may carry stale leaves from a prior PR,
-            # causing a Merkle root mismatch and misleading "rootSignature did not
-            # match any trusted reviewer pubkey" error even when the envelope is valid.
-            #
-            # Filename validation (<40hex>.jsonl) is the path-traversal guard —
-            # a malicious fork PR cannot smuggle e.g. `../../etc/passwd.jsonl` past
-            # the regex. This is DATA-ONLY: files are read by the verifier
-            # (running from main's scripts/) as JSON record sources; they are
-            # never executed or loaded as scripts.
-            if [ -d "pr-content/.ai-sdlc/transcript-leaves" ]; then
-              mkdir -p .ai-sdlc/transcript-leaves
-              LEAVES_STAGED=0
-              for leaffile in pr-content/.ai-sdlc/transcript-leaves/*.jsonl; do
-                [ -f "$leaffile" ] || continue
-                basename="${leaffile##*/}"
-                # Strict pattern match: 40 lowercase hex + .jsonl only.
-                if [[ "$basename" =~ ^[0-9a-f]{40}\.jsonl$ ]]; then
-                  cp -- "$leaffile" ".ai-sdlc/transcript-leaves/$basename"
-                  LEAVES_STAGED=$((LEAVES_STAGED + 1))
-                fi
-              done
-              echo "[verify-attestation] staged $LEAVES_STAGED per-patch-id transcript-leaves file(s) from pr-content/"
-            fi
-            # Fetch the fork HEAD SHA into main's git store so the
-            # verifier's `git diff <base>...<head>` operations resolve.
-            # The fork's clone URL is resolved via a target-context API
-            # call. The fetch refspec is SHA-anchored (`+${HEAD_SHA}:...`)
-            # so a malicious fork cannot influence which ref is fetched
-            # under what local name (the SHA is server-validated).
-            if [ -n "${HEAD_REPO_FULL:-}" ] && [ "$HEAD_REPO_FULL" != "${{ github.repository }}" ]; then
-              FORK_URL=$(gh api "repos/${HEAD_REPO_FULL}" --jq '.clone_url' 2>/dev/null || echo "")
-              if [ -n "$FORK_URL" ]; then
-                git fetch --no-tags "$FORK_URL" "+${HEAD_SHA}:refs/remotes/fork/${HEAD_SHA}" 2>/dev/null || true
+            # The fetch refspec is SHA-anchored (`+${HEAD_SHA}:...`) so a
+            # malicious fork cannot influence which ref is fetched under what
+            # local name. The fetch uses unauthenticated https and therefore
+            # assumes the head repository is public (forks of this public repo
+            # are); no credential is passed or persisted. Same-repo heads are
+            # normally already reachable via fetch-depth: 0.
+            if [ "$HEAD_REPO_FULL" != "$BASE_REPO_FULL" ]; then
+              if ! git fetch --no-tags "https://github.com/${HEAD_REPO_FULL}.git" \
+                  "+${HEAD_SHA}:refs/remotes/fork/${HEAD_SHA}"; then
+                echo "::error::failed to fetch head ${HEAD_SHA} from ${HEAD_REPO_FULL}"; exit 1
+              fi
+            elif ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+              if ! git fetch --no-tags origin "+${HEAD_SHA}:refs/remotes/fork/${HEAD_SHA}"; then
+                echo "::error::failed to fetch head ${HEAD_SHA} from origin"; exit 1
               fi
             fi
+            bash scripts/stage-attestation-data.sh
           fi
 
       # AISDLC-214: short-circuit on docs-only changesets.
@@ -397,7 +323,7 @@ jobs:
       #
       # AISDLC-381 Safety: the script `scripts/is-docs-only-changeset.mjs` is
       # executed from MAIN's checkout (cwd is the main checkout root), NOT
-      # from `pr-content/`. The `git diff` operates against the base SHA
+      # from fork content. The `git diff` operates against the base SHA
       # and head SHA — both of which were fetched into the main repo above.
       - name: Detect docs-only changeset
         id: docs_only
