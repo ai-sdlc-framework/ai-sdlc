@@ -2,7 +2,7 @@
 id: AISDLC-664.1
 title: >-
   RFC-0051: cli-hierarchy reference page in operations docs and mark execute-parallel as superseded
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 updated_date: '2026-10-06'
