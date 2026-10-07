@@ -31,7 +31,7 @@ export const INSTALL_HINT =
 
 export const RECIPES = `
 Common recipes (run as /ai-sdlc hierarchy <...>):
-  up --executors 1 --no-planner   start one executor slot with the dispatch session
+  up --executors 1                start planner, dispatch and one executor slot
   status                          watch the sessions
   down, then up                   restart after a plugin upgrade`;
 

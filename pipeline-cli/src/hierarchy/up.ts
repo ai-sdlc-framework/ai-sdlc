@@ -56,9 +56,9 @@ export interface UpOptions {
    * unqualified role names are already running for a different project.
    */
   project?: string;
-  /** Overrides the planner permission mode; otherwise the operator's own setting is used. */
+  /** Overrides the planner permission mode; otherwise the planner starts in bypassPermissions. */
   plannerPermissionMode?: string;
-  /** Allow a planner that would start in bypassPermissions mode. */
+  /** Deprecated no-op (AISDLC-752): every session now starts in bypassPermissions. */
   allowPlannerBypass?: boolean;
 }
 
@@ -84,8 +84,8 @@ interface PlannedSession {
 
 const BYPASS_MODE = 'bypassPermissions';
 
-/** Permission mode used for the planner when the operator has none configured. */
-export const FALLBACK_PLANNER_MODE = 'default';
+/** Permission mode the planner starts in unless `--planner-permission-mode` overrides it. */
+export const DEFAULT_PLANNER_MODE = BYPASS_MODE;
 
 /** Build the `claude` command line for one session. */
 export function buildClaudeCommand(
@@ -220,11 +220,18 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
   assertProject(project);
 
   const settings = readSettingsView(deps.settingsFiles);
-  const plannerMode = opts.plannerPermissionMode ?? settings.defaultMode ?? FALLBACK_PLANNER_MODE;
+  // The operator's own `defaultMode` setting does not feed the planner mode: the
+  // hierarchy is an unattended fleet and its mode is a hierarchy decision.
+  const plannerMode = opts.plannerPermissionMode ?? DEFAULT_PLANNER_MODE;
   const planned = plan(opts, project, count, plannerMode);
   for (const s of planned) assertSessionName(s.name);
 
   const warnings: string[] = [];
+  if (opts.allowPlannerBypass) {
+    deps.log(
+      'deprecated: --allow-planner-bypass has no effect; every session, the planner included, starts in bypassPermissions by default',
+    );
+  }
 
   // An old-layout roster (windows in one shared session) is never mixed with the new
   // layout: refuse before starting anything or writing the roster.
@@ -281,14 +288,7 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
   }
 
   const plannerToStart = toStart.find((s) => s.role === 'planner');
-  if (plannerToStart) {
-    assertPermissionMode(plannerToStart.permissionMode);
-    if (plannerToStart.permissionMode === BYPASS_MODE && !opts.allowPlannerBypass) {
-      throw new Error(
-        `the planner would start in ${BYPASS_MODE} mode (from the settings in force or --planner-permission-mode); refusing. The planner is the operator-facing tier and should keep its approval prompts. Pass --allow-planner-bypass to start it anyway, or set a different defaultMode.`,
-      );
-    }
-  }
+  if (plannerToStart) assertPermissionMode(plannerToStart.permissionMode);
 
   if (toStart.length > 0) {
     const foreign = findForeignSessions(
