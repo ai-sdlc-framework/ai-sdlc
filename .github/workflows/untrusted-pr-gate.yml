@@ -905,14 +905,20 @@ jobs:
             });
 
   # ────────────────────────────────────────────────────────────────────────────
-  # AISDLC-720.1: governance boundary. NOT behind the UCVG feature flag and NOT
-  # classified by trusted-reviewers.yaml: derived only from GitHub facts (fork
-  # flag + author_association). Fails a PR from a fork, or from an author who is
-  # not OWNER/MEMBER/COLLABORATOR, that changes governance config or workflows.
+  # AISDLC-720.1 / AISDLC-740: governance boundary. NOT behind the UCVG feature
+  # flag and NOT classified by trusted-reviewers.yaml: derived only from GitHub
+  # facts. Trust is keyed on whether the head repo is a fork of the base repo
+  # (head.repo.full_name != base.repo.full_name), NOT on author_association
+  # (GitHub reported a maintainer as CONTRIBUTOR on a same-repo PR). Fails a PR
+  # from a fork that changes governance config or workflows.
   # Runs under pull_request_target so the logic comes from main, not the PR; the
-  # changed-file list is read from the API and no PR content is checked out.
-  # Configure the check name `Governance boundary` as a required status check
-  # (branch protection is an operator-side setting, not edited here).
+  # changed-file list is read via the compare API pinned to head.sha and no PR
+  # content is checked out.
+  # The result is ALSO published as the unique commit-status context
+  # `ai-sdlc/governance-boundary` (a fork can define a job with the same name as
+  # `Governance boundary`, so the job name is not a trustworthy required check).
+  # This check is NOT a required status; branch protection is an operator-side
+  # setting, not edited here.
   # ────────────────────────────────────────────────────────────────────────────
   governance-boundary:
     name: Governance boundary
@@ -920,6 +926,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      statuses: write
     env:
       AI_SDLC_UNTRUSTED_RUN: '1'
     steps:
@@ -928,22 +935,48 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: List changed files from the API
+      - name: List changed files at head.sha from the compare API
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          # Race guard (AISDLC-740): re-read the live PR and require it still points at the
+          # event's head.sha; the file count and list are both read against that sha, not
+          # from the event payload's changed_files.
+          LIVE=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq '[.head.sha, .changed_files] | @tsv')
+          LIVE_HEAD=${LIVE%%$'\t'*}
+          LIVE_COUNT=${LIVE##*$'\t'}
+          if [ "$LIVE_HEAD" != "$HEAD_SHA" ]; then
+            echo "::error::PR head moved from ${HEAD_SHA} to ${LIVE_HEAD} while checking; a newer run will re-evaluate."
+            exit 1
+          fi
+          echo "$LIVE_COUNT" > "${RUNNER_TEMP}/changed-count.txt"
           # One row per line: filename[TAB previous_filename]. A failed API call fails the step.
-          gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" \
-            --jq '.[] | [.filename, (.previous_filename // empty)] | join("\t")' > "${RUNNER_TEMP}/changed-files.txt"
+          gh api --paginate "repos/${REPO}/compare/${BASE_SHA}...${HEAD_SHA}" \
+            --jq '.files[] | [.filename, (.previous_filename // empty)] | join("\t")' > "${RUNNER_TEMP}/changed-files.txt"
 
       - name: Enforce governance boundary
+        id: enforce
         env:
-          PR_IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
-          PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
-          PR_AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
-          PR_AUTHOR_LOGIN: ${{ github.event.pull_request.user.login }}
-          PR_AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
-        run: node scripts/check-governance-boundary.mjs --files "${RUNNER_TEMP}/changed-files.txt"
+          PR_IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name }}
+        run: |
+          PR_CHANGED_FILES=$(cat "${RUNNER_TEMP}/changed-count.txt") \
+            node scripts/check-governance-boundary.mjs --files "${RUNNER_TEMP}/changed-files.txt"
+
+      - name: Publish unique commit-status context
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          OUTCOME: ${{ steps.enforce.outcome }}
+        run: |
+          STATE=failure
+          DESC='Governance boundary failed: a fork changes governance config or workflows'
+          if [ "$OUTCOME" = "success" ]; then STATE=success; DESC='Governance boundary: ok'; fi
+          gh api "repos/${REPO}/statuses/${HEAD_SHA}" -f state="$STATE" \
+            -f context='ai-sdlc/governance-boundary' -f description="$DESC"

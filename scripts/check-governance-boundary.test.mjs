@@ -15,40 +15,39 @@ const gov = ['.ai-sdlc/agent-role.yaml'];
 const wf = ['.github/workflows/ci.yml'];
 
 test('fork changing governance config fails with maintainer message', () => {
-  const r = ev({ isFork: true, authorAssociation: 'OWNER', changedFiles: gov });
+  const r = ev({ isFork: true, changedFiles: gov });
   assert.equal(r.ok, false);
   assert.match(r.message, /maintainer must make that change/);
-  assert.match(r.message, /CONTRIBUTOR or NONE/);
-  assert.match(r.message, /re-push/);
 });
 test('fork changing workflows fails', () => {
   assert.equal(ev({ isFork: true, changedFiles: wf }).ok, false);
 });
-test('outside author (CONTRIBUTOR/NONE) same-repo fails', () => {
-  assert.equal(ev({ isFork: false, authorAssociation: 'CONTRIBUTOR', changedFiles: wf }).ok, false);
-  assert.equal(ev({ isFork: false, authorAssociation: '', changedFiles: gov }).ok, false);
-});
-test('internal OWNER/MEMBER/COLLABORATOR same-repo passes', () => {
-  for (const a of ['OWNER', 'MEMBER', 'COLLABORATOR'])
+test('AISDLC-740: same-repo head is trusted regardless of author association', () => {
+  for (const a of ['OWNER', 'MEMBER', 'COLLABORATOR', 'CONTRIBUTOR', 'NONE', ''])
     assert.equal(
       ev({ isFork: false, authorAssociation: a, changedFiles: [...gov, ...wf] }).ok,
       true,
+      a,
     );
 });
-test('fork or outside author not touching governance passes', () => {
+test('AISDLC-740: fork is untrusted even for an OWNER', () => {
+  assert.equal(ev({ isFork: true, authorAssociation: 'OWNER', changedFiles: gov }).ok, false);
+});
+test('fork not touching governance passes', () => {
   assert.equal(
     ev({ isFork: true, changedFiles: ['src/a.ts', '.ai-sdlc/attestations/x.json'] }).ok,
     true,
   );
-  assert.equal(
-    ev({ isFork: false, authorAssociation: 'NONE', changedFiles: ['README.md'] }).ok,
-    true,
-  );
 });
-test('dependabot same-repo workflow bump passes; spoofed fork does not', () => {
-  const base = { authorLogin: 'dependabot[bot]', authorType: 'Bot', changedFiles: wf };
-  assert.equal(ev({ ...base, isFork: false, authorAssociation: 'NONE' }).ok, true);
-  assert.equal(ev({ ...base, isFork: true }).ok, false);
+
+test('AISDLC-740: boundary script and trusted-context scripts cover themselves', () => {
+  for (const p of [
+    'scripts/check-governance-boundary.mjs',
+    'scripts/is-docs-only-changeset.mjs',
+    'scripts/check-pr-patch-coverage.mjs',
+    'scripts/post-attestation-review.mjs',
+  ])
+    assert.equal(isGovernancePath(p), true, p);
 });
 
 test('newly covered paths are governance; ordinary source and artifacts are not', () => {
@@ -129,18 +128,17 @@ test('main(): count gate, fork default, rename column, trusted pass', () => {
       PR_AUTHOR_ASSOCIATION: 'OWNER',
     });
     assert.equal(d.code, 1);
-    // rename out of a governance path is caught through previous_filename
+    // rename out of a governance path is caught through previous_filename (fork)
     const r = run(['docs/x.md\t.ai-sdlc/agent-role.yaml'], {
       PR_CHANGED_FILES: '1',
-      PR_AUTHOR_ASSOCIATION: 'NONE',
-      PR_IS_FORK: 'false',
+      PR_IS_FORK: 'true',
     });
     assert.equal(r.code, 1);
-    // trusted internal author passes
+    // same-repo head passes even when GitHub reports the author as CONTRIBUTOR
     const ok = run(['.github/workflows/ci.yml'], {
       PR_CHANGED_FILES: '1',
       PR_IS_FORK: 'false',
-      PR_AUTHOR_ASSOCIATION: 'MEMBER',
+      PR_AUTHOR_ASSOCIATION: 'CONTRIBUTOR',
     });
     assert.equal(ok.code, 0);
     assert.deepEqual(ok.out, ['governance boundary: ok']);

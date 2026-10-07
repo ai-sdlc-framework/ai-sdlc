@@ -587,7 +587,7 @@ jobs:
           #
           # Trust criteria (either gate is sufficient):
           #   - login == "github-actions" (workflow-authored markers)
-          #   - authorAssociation in {OWNER, MEMBER, COLLABORATOR}
+          #   - authorAssociation in {OWNER, MEMBER} (AISDLC-740: COLLABORATOR may be read-only)
           #     (push-access humans — they could write the marker via the
           #     workflow itself; honoring their direct comment is no escalation)
           #
@@ -608,7 +608,6 @@ jobs:
                   .author.login == "github-actions"
                   or .authorAssociation == "OWNER"
                   or .authorAssociation == "MEMBER"
-                  or .authorAssociation == "COLLABORATOR"
                 )
               | {
                   authorLogin: .author.login,
@@ -1458,7 +1457,7 @@ jobs:
               'github-actions',
               'github-actions[bot]',
             ]);
-            const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+            const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER']);
             const isTrustedComment = (c) => {
               const login = c.user && c.user.login;
               const assoc = c.author_association;
