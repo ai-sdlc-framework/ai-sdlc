@@ -29,14 +29,14 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@ai-sdlc/reference": "workspace:*",
     "@ai-sdlc/orchestrator": "workspace:*",
+    "@ai-sdlc/reference": "workspace:*",
     "yaml": "^2.9.1"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^4.1.9",
+    "@vitest/coverage-v8": "^4.1.11",
     "typescript": "^6.0.3",
     "vite": "^6.0.0",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.11"
   }
 }
