@@ -75,6 +75,20 @@ export const RECOMMENDED_BRANCH_PROTECTION_BODY = {
   allow_deletions: false,
 };
 
+/**
+ * True when `gh api` output from a branch-protection call indicates the
+ * API is unavailable for this repo (HTTP 403: GitHub Free private repo
+ * without branch protection). AISDLC-748 / DEC-0014: detected at runtime,
+ * never by guessing the plan.
+ */
+export function isBranchProtectionUnavailable(output: string): boolean {
+  return /\b403\b|upgrade to github pro|forbidden/i.test(output);
+}
+
+/** Exact doctor wording for the client-side-only enforcement finding. */
+export const CLIENT_SIDE_ONLY_MESSAGE =
+  'enforcement: client-side only; the server cannot block a manual merge';
+
 export interface BranchProtectionCheck {
   /**
    * Whether the check actually ran (i.e. `gh` was available, on PATH,
@@ -89,6 +103,11 @@ export interface BranchProtectionCheck {
   requiresPrReady: boolean;
   /** `required_status_checks.contexts` includes `ai-sdlc/attestation` directly (AISDLC-388 misconfiguration). */
   requiresAttestationDirectly: boolean;
+  /**
+   * The branch-protection API returned 403 (GitHub Free private repo):
+   * the server cannot enforce, only the client-side merge gate applies.
+   */
+  apiUnavailable?: boolean;
   /** Reason the check could not run, or that the API call failed. */
   error?: string;
 }
@@ -121,6 +140,7 @@ export function fetchBranchProtectionStatus(adapters: RunCommandAdapter): Branch
       requiresApprovingReview: false,
       requiresPrReady: false,
       requiresAttestationDirectly: false,
+      apiUnavailable: isBranchProtectionUnavailable(protection.stdout),
       error: `gh api repos/${resolved.slug}/branches/main/protection failed (branch protection likely not configured)`,
     };
   }

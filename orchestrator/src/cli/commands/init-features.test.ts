@@ -759,6 +759,51 @@ describe('applyBranchProtection', () => {
     expect(result.error).toContain('not authenticated');
   });
 
+  it('AISDLC-748 path 1: 200 applies server-side protection and names the opt-out', async () => {
+    const { state, adapters } = makeStub({
+      runResponses: new Map([
+        ['gh repo view', { stdout: 'owner/repo\n', exitCode: 0 }],
+        ['gh api', { stdout: '{}', exitCode: 0 }],
+      ]),
+    });
+    const projectDir = mkdtempSync(join(tmpdir(), 'init-bp200-'));
+    try {
+      const result = await applyBranchProtection(projectDir, baseFlags, adapters);
+      expect(result.applied).toBe(true);
+      expect(result.mode).toBe('server');
+      const out = state.log.join('\n');
+      expect(out).toContain('server-side enforcement');
+      expect(out).toContain('--no-branch-protection');
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('AISDLC-748 path 2: 403 falls back to client-side enforcement without an error', async () => {
+    const { state, adapters } = makeStub({
+      runResponses: new Map([
+        ['gh repo view', { stdout: 'owner/repo\n', exitCode: 0 }],
+        [
+          'gh api',
+          { stdout: 'HTTP 403: Upgrade to GitHub Pro or make this repository public', exitCode: 1 },
+        ],
+      ]),
+    });
+    const projectDir = mkdtempSync(join(tmpdir(), 'init-bp403-'));
+    try {
+      const result = await applyBranchProtection(projectDir, baseFlags, adapters);
+      expect(result.applied).toBe(false);
+      expect(result.error).toBeUndefined();
+      expect(result.mode).toBe('client-side');
+      const out = state.log.join('\n');
+      expect(out).toContain('client-side enforcement');
+      expect(out).toContain('cli-merge-if-eligible');
+      expect(out).toContain('--no-branch-protection');
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
   it('round-2 MAJOR fix: handles projectDir with a literal space without word-splitting', async () => {
     // Reviewer flagged that the prior `execSync(\`${cmd} ${args.join(' ')}\`)`
     // form ran the command through `/bin/sh -c`, which word-splits on

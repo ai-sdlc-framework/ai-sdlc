@@ -43,6 +43,7 @@
  */
 
 import { readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
+import { CLIENT_SIDE_ONLY_MESSAGE } from './branch-protection-shared.js';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import {
@@ -547,6 +548,17 @@ export function checkAttestationGovernanceCheck(ctx: DoctorRunContext): DoctorCh
     artifactsPresent: gov.artifactsPresent,
     branchProtectionChecked: gov.branchProtection.checked,
   };
+
+  if (gov.artifactsPresent && gov.branchProtection.apiUnavailable) {
+    return {
+      id: 'attestation-governance',
+      severity: 'fail',
+      title: CLIENT_SIDE_ONLY_MESSAGE,
+      remediation:
+        'Branch protection is unavailable (HTTP 403, GitHub Free private repo). Merge only through cli-merge-if-eligible, or make the repo public / upgrade the plan and run `ai-sdlc init --add branch-protection`.',
+      anonymizableEvidence: { ...evidence, enforcement: 'client-side' },
+    };
+  }
 
   if (gov.branchProtection.requiresAttestationDirectly) {
     return {
