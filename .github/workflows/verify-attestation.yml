@@ -135,7 +135,7 @@ on:
   # trigger here. See docs/operations/merge-without-queue.md.
 
 concurrency:
-  group: verify-attestation-${{ github.event.pull_request.number || github.sha }}
+  group: verify-attestation-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 permissions:
@@ -746,11 +746,15 @@ jobs:
 
   # AISDLC-747 (DEC-0065): register a verified attestation as an APPROVE
   # pull-request review. Separate job so `pull-requests: write` is held ONLY
-  # here (least privilege). Runs only when the verifier reported `valid`, the
-  # event is a PR event, and the PR head repo == base repo (never forks).
-  # Needs the repo setting "Allow GitHub Actions to create and approve pull
-  # requests"; a 403 fails the job naming that setting. No fork content is
-  # checked out and no PR code is executed: the script comes from base main.
+  # here (least privilege). Runs only on `pull_request_target` (never on
+  # `pull_request`, where the default checkout is the PR merge ref and the
+  # verifier and review script would be PR-controlled), only when the verifier
+  # reported `valid`, and only when the PR head repo == base repo (never forks).
+  # The checkout is explicitly the default branch with no persisted credentials,
+  # so the script is base-branch code, never PR content. Needs the repo setting
+  # "Allow GitHub Actions to create and approve pull requests"; a 403 fails the
+  # job naming that setting. The concurrency group includes the event name so a
+  # pull_request run cannot cancel this pull_request_target run.
   approve:
     name: Approve verified attestation
     needs: verify
@@ -758,13 +762,16 @@ jobs:
     if: >-
       needs.verify.result == 'success' &&
       needs.verify.outputs.status == 'valid' &&
-      github.event_name != 'merge_group' &&
+      github.event_name == 'pull_request_target' &&
       github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: read
       pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
       - name: Post approving review
         env:
           GH_TOKEN: ${{ github.token }}
@@ -774,4 +781,11 @@ jobs:
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           STATUS: ${{ needs.verify.outputs.status }}
           REASON: ${{ needs.verify.outputs.reason }}
-        run: node scripts/post-attestation-review.mjs
+        run: |
+          # Bootstrap: the script does not exist on the default branch until the
+          # PR that introduces it merges; skip rather than fail until then.
+          if [ ! -f scripts/post-attestation-review.mjs ]; then
+            echo "::notice::scripts/post-attestation-review.mjs not on the default branch yet; skipping approving review (bootstrap)"
+            exit 0
+          fi
+          node scripts/post-attestation-review.mjs

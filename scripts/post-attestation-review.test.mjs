@@ -29,6 +29,8 @@ function fakeApi(reviews = [], opts = {}) {
   };
 }
 
+const HUMAN = { login: 'someone' };
+const BOT = { login: 'github-actions[bot]' };
 const base = { repo: REPO, repoHead: REPO, headSha: SHA1, status: 'valid', reason: 'ok' };
 
 describe('postAttestationReview', () => {
@@ -71,7 +73,7 @@ describe('postAttestationReview', () => {
 
   it('is idempotent per head SHA', async () => {
     const api = fakeApi([
-      { id: 1, state: 'APPROVED', commit_id: SHA1, body: `${REVIEW_MARKER} x` },
+      { id: 1, user: BOT, state: 'APPROVED', commit_id: SHA1, body: `${REVIEW_MARKER} x` },
     ]);
     const r = await postAttestationReview({ ...base, api });
     assert.equal(r.action, 'skipped');
@@ -81,9 +83,9 @@ describe('postAttestationReview', () => {
 
   it('dismisses stale own approvals and posts a new one', async () => {
     const api = fakeApi([
-      { id: 1, state: 'APPROVED', commit_id: SHA2, body: `${REVIEW_MARKER} old` },
-      { id: 2, state: 'APPROVED', commit_id: SHA2, body: 'human approval' },
-      { id: 3, state: 'DISMISSED', commit_id: SHA2, body: `${REVIEW_MARKER} older` },
+      { id: 1, user: BOT, state: 'APPROVED', commit_id: SHA2, body: `${REVIEW_MARKER} old` },
+      { id: 2, user: HUMAN, state: 'APPROVED', commit_id: SHA2, body: 'human approval' },
+      { id: 3, user: BOT, state: 'DISMISSED', commit_id: SHA2, body: `${REVIEW_MARKER} older` },
     ]);
     const r = await postAttestationReview({ ...base, api });
     assert.equal(r.action, 'approved');
@@ -92,6 +94,18 @@ describe('postAttestationReview', () => {
       api.calls.dismissed.map((d) => d.id),
       [1],
     );
+    assert.equal(api.calls.created.length, 1);
+  });
+
+  it('ignores a non-bot review carrying the marker (no dismissal, not the current approval)', async () => {
+    const api = fakeApi([
+      { id: 7, user: HUMAN, state: 'APPROVED', commit_id: SHA2, body: `${REVIEW_MARKER} forged` },
+      { id: 8, user: HUMAN, state: 'APPROVED', commit_id: SHA1, body: `${REVIEW_MARKER} forged` },
+    ]);
+    const r = await postAttestationReview({ ...base, api });
+    assert.equal(r.action, 'approved');
+    assert.equal(r.dismissed, 0);
+    assert.equal(api.calls.dismissed.length, 0);
     assert.equal(api.calls.created.length, 1);
   });
 
@@ -104,9 +118,12 @@ describe('postAttestationReview', () => {
   });
 
   it('tolerates 422 when dismissing an already dismissed review', async () => {
-    const api = fakeApi([{ id: 1, state: 'APPROVED', commit_id: SHA2, body: REVIEW_MARKER }], {
-      dismissError: new ApiError('gone', 422),
-    });
+    const api = fakeApi(
+      [{ id: 1, user: BOT, state: 'APPROVED', commit_id: SHA2, body: REVIEW_MARKER }],
+      {
+        dismissError: new ApiError('gone', 422),
+      },
+    );
     const r = await postAttestationReview({ ...base, api });
     assert.equal(r.action, 'approved');
   });
@@ -116,6 +133,7 @@ describe('postAttestationReview', () => {
     assert.ok(body.includes('/.ai-sdlc/attestations'));
     assert.ok(body.includes('/.ai-sdlc/transcript-leaves'));
     assert.ok(body.includes('good'));
+    assert.ok(!/v6|Merkle/.test(body));
   });
 });
 

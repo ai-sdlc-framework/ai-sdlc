@@ -3,11 +3,12 @@
  * post-attestation-review.mjs (AISDLC-747, DEC-0065)
  *
  * Submits an APPROVE pull-request review from the Actions token once the
- * Verify attestation job has verified a v6 envelope, so GitHub, Scorecard and
+ * Verify attestation job has verified an attestation envelope, so GitHub, Scorecard and
  * adopters see "reviewed" and not only a commit status.
  *
  * Behaviour:
  *  - Idempotent per head SHA: an own approval already on the head SHA is kept.
+ *  - "Own" means authored by github-actions[bot] AND carrying the body marker.
  *  - Stale own approvals (other commit) are dismissed before posting.
  *  - A 403 fails loudly naming the repo setting "Allow GitHub Actions to
  *    create and approve pull requests".
@@ -22,6 +23,8 @@ import { pathToFileURL } from 'node:url';
 
 export const REVIEW_MARKER = '<!-- ai-sdlc-attestation-review -->';
 
+export const BOT_LOGIN = 'github-actions[bot]';
+
 export const SETTING_NAME = 'Allow GitHub Actions to create and approve pull requests';
 
 export class ApiError extends Error {
@@ -34,7 +37,7 @@ export class ApiError extends Error {
 
 export function buildReviewBody({ repo, headSha, reason }) {
   const base = `https://github.com/${repo}/tree/${headSha}`;
-  const summary = (reason || 'valid envelope at HEAD').trim();
+  const summary = (reason || 'valid envelope at HEAD').replace(/\s+/g, ' ').trim();
   return [
     REVIEW_MARKER,
     `AI-SDLC attestation verified for \`${headSha.slice(0, 12)}\`.`,
@@ -44,12 +47,16 @@ export function buildReviewBody({ repo, headSha, reason }) {
     `- Envelope: ${base}/.ai-sdlc/attestations`,
     `- Nonce-bound transcripts: ${base}/.ai-sdlc/transcript-leaves`,
     '',
-    'Posted by the Verify attestation workflow. The v6 envelope signature and Merkle transcript verified against the trusted reviewer keys.',
+    'Posted by the Verify attestation workflow. The attestation envelope verified against the trusted reviewer keys.',
   ].join('\n');
 }
 
 function isOwn(review) {
-  return typeof review.body === 'string' && review.body.includes(REVIEW_MARKER);
+  return (
+    review.user?.login === BOT_LOGIN &&
+    typeof review.body === 'string' &&
+    review.body.includes(REVIEW_MARKER)
+  );
 }
 
 /**
@@ -85,7 +92,6 @@ export async function postAttestationReview({
   }
 
   const own = (await api.listReviews()).filter(isOwn);
-  const current = own.find((r) => r.state === 'APPROVED' && r.commit_id === headSha);
   const stale = own.filter((r) => r.state === 'APPROVED' && r.commit_id !== headSha);
 
   let dismissed = 0;
@@ -105,7 +111,9 @@ export async function postAttestationReview({
     }
   }
 
-  if (current) {
+  // Re-list immediately before posting to narrow the duplicate-approval window.
+  const fresh = (await api.listReviews()).filter(isOwn);
+  if (fresh.some((r) => r.state === 'APPROVED' && r.commit_id === headSha)) {
     return { action: 'skipped', reason: 'already approved at this head SHA', dismissed };
   }
 
