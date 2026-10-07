@@ -2,7 +2,7 @@
 id: AISDLC-751
 title: >-
   /ai-sdlc hierarchy plugin command wraps cli-hierarchy so the session hierarchy is driven from Claude Code
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-06'
 labels:
@@ -41,8 +41,8 @@ Update `docs/operations/parallel-dispatch.md` (and the cli-hierarchy reference p
 
 ## Acceptance Criteria
 
-- [ ] `/ai-sdlc hierarchy status` and `/ai-sdlc hierarchy up --executors 1 --no-planner` run the bundled `cli-hierarchy` from an installed plugin (not only in the dogfood repo) and print its output unchanged.
-- [ ] `clear`, `tick`, `route-decision`, `check-sender` and `check-repo` are refused with the one-line explanation; `down` without `--role` asks for confirmation first; `attach` prints the shell command to run.
-- [ ] No arguments prints the CLI help plus the common-recipes block; a repo without pipeline-cli prints the install hint used by `/ai-sdlc doctor`.
-- [ ] Command test covers pass-through, refusals, help path and missing bin; docs name the plugin form as the entry point.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` and `pnpm dark-code:check` pass apart from the 14 pre-existing pipeline-cli failures (verify-runtime, bin-invocation, TUI timeouts), disclosed in the PR body.
+- [x] `/ai-sdlc hierarchy status` and `/ai-sdlc hierarchy up --executors 1 --no-planner` run the bundled `cli-hierarchy` from an installed plugin (not only in the dogfood repo) and print its output unchanged.
+- [x] `clear`, `tick`, `route-decision`, `check-sender` and `check-repo` are refused with the one-line explanation; `down` without `--role` asks for confirmation first; `attach` prints the shell command to run.
+- [x] No arguments prints the CLI help plus the common-recipes block; a repo without pipeline-cli prints the install hint used by `/ai-sdlc doctor`.
+- [x] Command test covers pass-through, refusals, help path and missing bin; docs name the plugin form as the entry point.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` and `pnpm dark-code:check` pass apart from the 14 pre-existing pipeline-cli failures (verify-runtime, bin-invocation, TUI timeouts), disclosed in the PR body.
