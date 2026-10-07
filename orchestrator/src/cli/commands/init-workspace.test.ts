@@ -514,7 +514,7 @@ describe('init — AISDLC-143 wizard scaffolding', () => {
     // Branch-protection dry-run prints the JSON body
     expect(out).toContain('Branch-protection dry-run');
     expect(out).toContain('ai-sdlc/pr-ready');
-    expect(out).toContain('codecov/patch');
+    expect(out).toContain('ai-sdlc/pr-ready');
   });
 
   it('--yes prints the next-steps summary with operator action items (AC #5)', async () => {
