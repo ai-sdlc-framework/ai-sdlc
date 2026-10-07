@@ -28,7 +28,7 @@ export const DECISIONS_POLL_INTERVAL_MS = 15_000;
 // ── Public types ──────────────────────────────────────────────────────────────
 
 export interface UseDecisionsPendingOpts {
-  /** Work directory (used to locate `.ai-sdlc/_decisions/events.jsonl`). */
+  /** Work directory (used to locate `.ai-sdlc/_decisions/events/`). */
   workDir?: string;
   /** Poll cadence override (tests). */
   intervalMs?: number;
