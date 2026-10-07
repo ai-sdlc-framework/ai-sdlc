@@ -360,3 +360,12 @@ The `ai-sdlc init` interactive wizard (planned in AISDLC-140 sub-5) will scaffol
 - [Pants blog: Skipping GitHub Actions jobs without breaking branch protection](https://blog.pantsbuild.org/skipping-github-actions-jobs-without-breaking-branch-protection/) — canonical writeup of the same pattern applied to docs-only PRs
 - [Mergify: Monorepo CI](https://mergify.com/blog/monorepo-ci-for-github-actions-run-exactly-the-tests-you-need-nothing-more/) — productized version of the pattern
 - [GitHub docs: Troubleshooting required status checks](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks) — official acknowledgement of the path-filter deadlock
+
+## Approving review on a verified attestation (AISDLC-747, DEC-0065)
+
+When the v6 envelope verifies, the `Approve verified attestation` job in `verify-attestation.yml` submits an APPROVE pull-request review from the Actions token (body: verdict summary plus links to the envelope and the nonce-bound transcripts), so GitHub, Scorecard and adopters see "reviewed" and not only the `ai-sdlc/attestation` commit status. Logic lives in `scripts/post-attestation-review.mjs` (hermetic tests in `scripts/post-attestation-review.test.mjs`).
+
+- **Operator setting required:** Settings > Actions > General > Workflow permissions > enable "Allow GitHub Actions to create and approve pull requests". If it is off, the API returns 403 and the job fails loudly with an error naming that setting.
+- **Never approves** when verification is not `valid`, on drafts, on merge_group events, or for fork PRs (head repo must equal base repo).
+- **Idempotent per head SHA:** a rerun does not re-approve the same SHA; when the head changes, the workflow's own stale approval is dismissed before a new one is posted. Reviews are recognised by a hidden marker in the body, so human reviews are never touched.
+- **Least privilege:** `pull-requests: write` is granted only to the `approve` job; the `verify` job keeps `pull-requests: read`.

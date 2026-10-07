@@ -145,6 +145,11 @@ jobs:
   verify:
     name: Verify attestation
     runs-on: ubuntu-latest
+    # AISDLC-747: expose the verifier result so the separate `approve` job
+    # (the only job holding pull-requests: write) can gate on it.
+    outputs:
+      status: ${{ steps.verify.outputs.status }}
+      reason: ${{ steps.verify.outputs.reason }}
     # AISDLC-218: skip draft PRs (envelope only signed after `gh pr ready`).
     # release-please PRs are NOT skipped at job level — they need a posted
     # `ai-sdlc/attestation` status (branch-protection required check) so the
@@ -738,3 +743,35 @@ jobs:
             -f description="$DESC" \
             ${PR_URL:+-f target_url="$PR_URL"}
           echo "Posted ai-sdlc/attestation: $STATE on $HEAD_SHA"
+
+  # AISDLC-747 (DEC-0065): register a verified attestation as an APPROVE
+  # pull-request review. Separate job so `pull-requests: write` is held ONLY
+  # here (least privilege). Runs only when the verifier reported `valid`, the
+  # event is a PR event, and the PR head repo == base repo (never forks).
+  # Needs the repo setting "Allow GitHub Actions to create and approve pull
+  # requests"; a 403 fails the job naming that setting. No fork content is
+  # checked out and no PR code is executed: the script comes from base main.
+  approve:
+    name: Approve verified attestation
+    needs: verify
+    runs-on: ubuntu-latest
+    if: >-
+      needs.verify.result == 'success' &&
+      needs.verify.outputs.status == 'valid' &&
+      github.event_name != 'merge_group' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Post approving review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          STATUS: ${{ needs.verify.outputs.status }}
+          REASON: ${{ needs.verify.outputs.reason }}
+        run: node scripts/post-attestation-review.mjs

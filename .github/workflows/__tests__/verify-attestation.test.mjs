@@ -226,3 +226,41 @@ describe('AISDLC-445: verify-attestation.yml stages per-patch-id transcript-leav
     );
   });
 });
+
+describe('AISDLC-747: approve job posts an approving review on a verified envelope', () => {
+  const wf = loadYaml('verify-attestation.yml');
+  const job = wf.jobs.approve;
+
+  it('declares an approve job that needs verify', () => {
+    assert.ok(job, 'approve job must exist');
+    assert.equal(job.needs, 'verify');
+  });
+
+  it('holds pull-requests: write only on the approve job', () => {
+    assert.equal(job.permissions['pull-requests'], 'write');
+    assert.equal(wf.permissions['pull-requests'], undefined);
+    assert.notEqual(wf.jobs.verify.permissions['pull-requests'], 'write');
+  });
+
+  it('gates on verify success, valid status, non-merge_group, and same-repo head', () => {
+    const cond = String(job.if);
+    assert.match(cond, /needs\.verify\.result == 'success'/);
+    assert.match(cond, /needs\.verify\.outputs\.status == 'valid'/);
+    assert.match(cond, /github\.event_name != 'merge_group'/);
+    assert.match(cond, /head\.repo\.full_name == github\.repository/);
+  });
+
+  it('verify job exposes status and reason outputs', () => {
+    assert.ok(wf.jobs.verify.outputs.status);
+    assert.ok(wf.jobs.verify.outputs.reason);
+  });
+
+  it('runs the script from base checkout and never checks out PR content', () => {
+    const steps = job.steps;
+    assert.ok(steps.some((s) => /post-attestation-review\.mjs/.test(String(s.run ?? ''))));
+    for (const s of steps) {
+      assert.equal(s.with?.ref, undefined, 'approve job must not check out a PR ref');
+      assert.equal(s.with?.['allow-unsafe-pr-checkout'], undefined);
+    }
+  });
+});
