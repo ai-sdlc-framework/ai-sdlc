@@ -165,6 +165,28 @@ describe('executeFixCI()', () => {
     );
   });
 
+  it('skipPush leaves the fix local: no push call and no success comment', async () => {
+    const { execFile } = await import('node:child_process');
+    const runner = makeMockRunner();
+    const logger = makeSilentLogger();
+
+    await executeFixCI(100, 5555, {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/test-repo',
+      runner,
+      logger,
+      _prComments: [],
+      _ciLogs: 'Error: lint failed',
+      auditLog: makeMockAuditLog(),
+      skipPush: true,
+    });
+
+    expect(runner.run).toHaveBeenCalled();
+    const pushed = vi.mocked(execFile).mock.calls.some((c) => (c[1] as string[])?.[0] === 'push');
+    expect(pushed).toBe(false);
+    expect(logger.stage).not.toHaveBeenCalledWith('push');
+  });
+
   it('aborts at max retries without calling runner', async () => {
     const runner = makeMockRunner();
     const auditLog = makeMockAuditLog();

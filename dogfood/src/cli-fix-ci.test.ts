@@ -100,6 +100,23 @@ describe('cli-fix-ci.ts', () => {
     );
   });
 
+  it('passes skipPush when AI_SDLC_FIX_CI_SKIP_PUSH=1 (AISDLC-704.5)', async () => {
+    process.argv = ['node', 'cli-fix-ci.ts', '--pr', '42', '--run-id', '12345'];
+    process.env.AI_SDLC_FIX_CI_SKIP_PUSH = '1';
+    try {
+      await import('./cli-fix-ci.js');
+      await new Promise((r) => setTimeout(r, 50));
+      const { executeFixCI } = await import('@ai-sdlc/orchestrator');
+      expect(executeFixCI).toHaveBeenCalledWith(
+        42,
+        12345,
+        expect.objectContaining({ skipPush: true }),
+      );
+    } finally {
+      delete process.env.AI_SDLC_FIX_CI_SKIP_PUSH;
+    }
+  });
+
   it('handles executeFixCI rejection gracefully', async () => {
     const { executeFixCI } = await import('@ai-sdlc/orchestrator');
     vi.mocked(executeFixCI).mockRejectedValueOnce(new Error('CI fix failed'));
