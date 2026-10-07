@@ -91,7 +91,9 @@ jobs:
         if: steps.pr.outputs.number
         with:
           node-version: 22
-          cache: pnpm
+          # No `cache: pnpm`: this job runs PR code as the same user as the trusted
+          # install, so a saved store could carry PR content into the default
+          # branch's cache scope (AISDLC-704.5).
 
       - run: pnpm install --frozen-lockfile
         if: steps.pr.outputs.number
@@ -104,9 +106,9 @@ jobs:
       # --ignore-scripts: PR-controlled lifecycle scripts (preinstall/prepare)
       # never run. --ignore-pnpmfile: a PR-controlled .pnpmfile.cjs is code that
       # pnpm would otherwise load, so it is skipped too. The runner file-command
-      # variables are unset so nothing started here can append to the env or
-      # PATH of later steps, and the store is private to pr-work so the cache
-      # that setup-node saves for the trusted install cannot carry PR content.
+      # variables are unset as hygiene (not isolation: PR code runs as the same
+      # user and can still reach this job's other steps; the real boundary is
+      # that this job holds no write PAT), and the store is private to pr-work.
       - name: Install PR worktree dependencies
         if: steps.pr.outputs.number
         working-directory: pr-work
@@ -170,14 +172,14 @@ jobs:
         run: |
           set -euo pipefail
           BASE="refs/remotes/origin/${HEAD_BRANCH}"
-          COUNT=$(git -C pr-work rev-list --count "${BASE}..HEAD")
+          COUNT=$(git -C pr-work -c core.fsmonitor= -c core.hooksPath=/dev/null rev-list --count "${BASE}..HEAD")
           if [ "$COUNT" -eq 0 ]; then
             echo "No new commits to push."
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           mkdir -p fix-bundle
-          git -C pr-work bundle create "$GITHUB_WORKSPACE/fix-bundle/fix.bundle" "${BASE}..HEAD"
+          git -C pr-work -c core.fsmonitor= -c core.hooksPath=/dev/null bundle create "$GITHUB_WORKSPACE/fix-bundle/fix.bundle" "${BASE}..HEAD"
           echo "has_changes=true" >> "$GITHUB_OUTPUT"
 
       - name: Upload fix bundle
@@ -247,11 +249,11 @@ jobs:
           # Fetching never runs hooks; the push below disables them explicitly.
           git "${GIT_AUTH[@]}" fetch --no-tags origin "+refs/heads/${HEAD_BRANCH}:refs/remotes/origin/${HEAD_BRANCH}"
           git bundle verify fix-bundle/fix.bundle
-          git fetch --no-tags fix-bundle/fix.bundle "HEAD:refs/fix/incoming"
+          git -c transfer.fsckObjects=true fetch --no-tags fix-bundle/fix.bundle "HEAD:refs/fix/incoming"
           # Must fast-forward the branch exactly as the agent saw it.
           git merge-base --is-ancestor "refs/remotes/origin/${HEAD_BRANCH}" refs/fix/incoming
-          if git diff --name-only "refs/remotes/origin/${HEAD_BRANCH}" refs/fix/incoming | grep -E '^\.github/'; then
-            echo "::error::fix touches .github/; refusing to push"
+          if git diff --no-renames --name-only "refs/remotes/origin/${HEAD_BRANCH}" refs/fix/incoming | grep -E '^(\.github|\.husky|\.ai-sdlc)/'; then
+            echo "::error::fix touches .github/, .husky/ or .ai-sdlc/; refusing to push"
             exit 1
           fi
           git -c core.hooksPath=/dev/null "${GIT_AUTH[@]}" push --no-verify origin "refs/fix/incoming:refs/heads/${HEAD_BRANCH}"

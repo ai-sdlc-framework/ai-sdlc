@@ -540,6 +540,15 @@ describe('AISDLC-704.5: fix-ci is split into an unprivileged agent job and a pri
     assert.match(push.run, /-c core\.hooksPath=\/dev\/null/);
     assert.match(push.run, /--no-verify/);
     assert.match(push.run, /merge-base --is-ancestor/);
+    assert.match(push.run, /bundle verify/);
+    assert.match(push.run, /transfer\.fsckObjects=true/);
+    assert.match(push.run, /diff --no-renames --name-only/);
+    assert.match(push.run, /\\\.github/);
+  });
+
+  it('the agent job does not save a pnpm cache after running PR code', () => {
+    const node = agentSteps.find((x) => (x.uses ?? '').startsWith('actions/setup-node@'));
+    assert.equal(node.with.cache, undefined);
   });
 
   it('the push job never installs, builds or runs PR code', () => {
