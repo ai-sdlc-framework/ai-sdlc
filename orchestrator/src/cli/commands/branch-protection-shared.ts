@@ -17,7 +17,10 @@
  */
 
 export interface RunCommandAdapter {
-  runCommand: (cmd: string, args: string[]) => { stdout: string; exitCode: number };
+  runCommand: (
+    cmd: string,
+    args: string[],
+  ) => { stdout: string; exitCode: number; stderr?: string };
 }
 
 export interface OwnerRepoResolution {
@@ -83,12 +86,6 @@ export const RECOMMENDED_BRANCH_PROTECTION_BODY = {
 export function buildBranchProtectionBody(requireApprovingReview: boolean) {
   return {
     ...RECOMMENDED_BRANCH_PROTECTION_BODY,
-    required_status_checks: {
-      ...RECOMMENDED_BRANCH_PROTECTION_BODY.required_status_checks,
-      contexts: requireApprovingReview
-        ? RECOMMENDED_BRANCH_PROTECTION_BODY.required_status_checks.contexts
-        : ['ai-sdlc/pr-ready'],
-    },
     required_pull_request_reviews: {
       ...RECOMMENDED_BRANCH_PROTECTION_BODY.required_pull_request_reviews,
       required_approving_review_count: requireApprovingReview ? 1 : 0,
@@ -102,8 +99,8 @@ export function buildBranchProtectionBody(requireApprovingReview: boolean) {
  * without branch protection). AISDLC-748 / DEC-0014: detected at runtime,
  * never by guessing the plan.
  */
-export function isBranchProtectionUnavailable(output: string): boolean {
-  return /\b403\b|upgrade to github pro|forbidden/i.test(output);
+export function isBranchProtectionUnavailable(stdout: string, stderr = ''): boolean {
+  return /HTTP 403|\(HTTP 403\)|upgrade to github (pro|team)/i.test(`${stdout}\n${stderr}`);
 }
 
 /** Exact doctor wording for the client-side-only enforcement finding. */
@@ -161,7 +158,7 @@ export function fetchBranchProtectionStatus(adapters: RunCommandAdapter): Branch
       requiresApprovingReview: false,
       requiresPrReady: false,
       requiresAttestationDirectly: false,
-      apiUnavailable: isBranchProtectionUnavailable(protection.stdout),
+      apiUnavailable: isBranchProtectionUnavailable(protection.stdout, protection.stderr),
       error: `gh api repos/${resolved.slug}/branches/main/protection failed (branch protection likely not configured)`,
     };
   }

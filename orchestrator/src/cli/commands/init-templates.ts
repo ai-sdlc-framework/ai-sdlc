@@ -216,7 +216,11 @@ jobs:
  * requires an approving review in branch protection only when this is true;
  * otherwise adopters would be locked out of merging.
  */
-export const ADOPTER_TEMPLATE_POSTS_APPROVAL: boolean = /^ {2}approve:\s*$/m.test(
+export function templatePostsApproval(template: string): boolean {
+  return /^ {2}approve:\s*$/m.test(template);
+}
+
+export const ADOPTER_TEMPLATE_POSTS_APPROVAL: boolean = templatePostsApproval(
   VERIFY_ATTESTATION_WORKFLOW,
 );
 

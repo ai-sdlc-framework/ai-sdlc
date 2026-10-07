@@ -15,7 +15,8 @@
  * complementary instead of duplicative.
  */
 
-import { ADOPTER_TEMPLATE_POSTS_APPROVAL } from './init-templates.js';
+import { ADOPTER_TEMPLATE_POSTS_APPROVAL, templatePostsApproval } from './init-templates.js';
+import { buildWizardFlags } from './init.js';
 import { buildBranchProtectionBody } from './branch-protection-shared.js';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -730,8 +731,7 @@ describe('applyBranchProtection', () => {
     const result = await applyBranchProtection('/proj', { ...baseFlags, dryRun: true }, adapters);
     expect(result.applied).toBe(false);
     expect(result.bodyJson).toContain('"ai-sdlc/pr-ready"');
-    expect(result.bodyJson).toContain('"ai-sdlc/pr-ready"');
-    expect(result.bodyJson).not.toContain('codecov/patch');
+    expect(result.bodyJson).toContain('"codecov/patch"');
     // `gh` should NOT have been invoked in dry-run.
     expect(state.runCommandCalls.length).toBe(0);
     // The JSON must have been logged.
@@ -809,6 +809,43 @@ describe('applyBranchProtection', () => {
 
   it('AISDLC-748: adopter template currently ships no verifying approver', () => {
     expect(ADOPTER_TEMPLATE_POSTS_APPROVAL).toBe(false);
+  });
+
+  it('AISDLC-748: derivation flips true on a template containing an approve: job', () => {
+    const without = 'jobs:\n  verify:\n    runs-on: ubuntu-latest\n';
+    const withApprove = `${without}  approve:\n    needs: verify\n    runs-on: ubuntu-latest\n`;
+    expect(templatePostsApproval(without)).toBe(false);
+    expect(templatePostsApproval(withApprove)).toBe(true);
+  });
+
+  it('AISDLC-748: --no-branch-protection makes no gh api call and logs the skip', async () => {
+    const { state, adapters } = makeStub();
+    const result = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, branchProtection: true },
+      { ...baseFlags, noBranchProtection: true },
+      adapters,
+    );
+    expect(result.branchProtection).toBeUndefined();
+    expect(state.runCommandCalls.filter((c) => c.cmd === 'gh')).toEqual([]);
+    expect(state.log.join('\n')).toContain('skip branch protection (--no-branch-protection)');
+  });
+
+  it('AISDLC-748: next-steps for client-side mode names the path and the opt-out', () => {
+    const { adapters } = makeStub();
+    const out = renderNextSteps(
+      { ...NO_FEATURES, branchProtection: true },
+      {
+        created: [],
+        skipped: [],
+        wouldCreate: [],
+        branchProtection: { applied: false, bodyJson: '{}', mode: 'client-side' },
+      },
+      adapters,
+    );
+    expect(out).toContain('client-side enforcement');
+    expect(out).toContain('--no-branch-protection');
+    expect(out).not.toContain('dry-run');
   });
 
   it.each([
@@ -1541,5 +1578,16 @@ describe('AISDLC-555 round-1 security review — hook installation', () => {
       adapters,
     );
     expect(state.log.some((l) => l.includes('never be reached'))).toBe(false);
+  });
+});
+
+describe('buildWizardFlags --no-branch-protection (AISDLC-748)', () => {
+  it('sets noBranchProtection when commander yields branchProtection:false', () => {
+    expect(buildWizardFlags({ branchProtection: false }).noBranchProtection).toBe(true);
+  });
+
+  it('leaves noBranchProtection false when the option is omitted', () => {
+    expect(buildWizardFlags({}).noBranchProtection).toBe(false);
+    expect(buildWizardFlags({ branchProtection: true }).noBranchProtection).toBe(false);
   });
 });
