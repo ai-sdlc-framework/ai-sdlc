@@ -726,6 +726,51 @@ describe('checkAttestationGovernanceCheck', () => {
     expect(result.severity).toBe('fail');
     expect(result.title).toContain('ai-sdlc/attestation');
   });
+
+  it('fails with the client-side-only finding when the protection API returns 403 (AISDLC-748)', () => {
+    const result = checkAttestationGovernanceCheck(
+      makeCtx(
+        makeAdapters({
+          exists: (p) => p.includes('trusted-reviewers.yaml'),
+          runCommand: (cmd, args) => {
+            if (args[0] === 'repo') return { stdout: 'acme/widgets', exitCode: 0 };
+            if (args[0] === 'api') {
+              return {
+                stdout: 'HTTP 403: Upgrade to GitHub Pro or make this repository public',
+                exitCode: 1,
+              };
+            }
+            return { stdout: '', exitCode: 1 };
+          },
+        }),
+      ),
+    );
+    expect(result.severity).toBe('fail');
+    expect(result.title).toBe(
+      'enforcement: client-side only; the server cannot block a manual merge',
+    );
+  });
+
+  it('passes on the server-side path (200 with approving review + pr-ready) (AISDLC-748)', () => {
+    const result = checkAttestationGovernanceCheck(
+      makeCtx(
+        makeAdapters({
+          exists: (p) => p.includes('trusted-reviewers.yaml'),
+          runCommand: (cmd, args) => {
+            if (args[0] === 'repo') return { stdout: 'acme/widgets', exitCode: 0 };
+            return {
+              stdout: JSON.stringify({
+                required_pull_request_reviews: { required_approving_review_count: 1 },
+                required_status_checks: { contexts: ['ai-sdlc/pr-ready'] },
+              }),
+              exitCode: 0,
+            };
+          },
+        }),
+      ),
+    );
+    expect(result.severity).toBe('pass');
+  });
 });
 
 // ── checkMarketplaceCatalogDrift (check 11) ───────────────────────────
