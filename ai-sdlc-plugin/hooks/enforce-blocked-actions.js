@@ -87,6 +87,13 @@ const {
 } = require('./lib/governance-resolver');
 const { evaluateLeasePush, hasForcePushOption } = require('./lib/lease-push-guard');
 const {
+  commandRunsGhPrMerge,
+  splitShellSegments: splitMergeSegments,
+  stripInertHeredocBodies,
+  segmentIsApiCapable,
+  segmentConsumesStdinAsCode,
+} = require('./lib/merge-matcher');
+const {
   runGit: gitOut,
   probeRef,
   readPolicyText,
@@ -557,8 +564,8 @@ function enforceBash(command) {
  * through the generic `blockedActions` pattern matching in enforceBash().
  */
 function enforceMergeGovernance(trimmed) {
-  for (const segment of splitShellSegments(trimmed)) {
-    if (!segmentInvokesGhPrMerge(segment)) continue;
+  // AISDLC-605: only a command that RUNS the merge is denied (see lib/merge-matcher.js).
+  if (commandRunsGhPrMerge(trimmed)) {
     deny(
       `raw 'gh pr merge' (including 'gh pr merge --auto') is not a permitted merge path ` +
         `(resolved governance allowMerge="${resolvedGovernance.allowMerge}"). Merges go through ` +
@@ -598,21 +605,26 @@ function enforceMergeGovernance(trimmed) {
  * text that merely mentions such a path stay allowed.
  */
 function enforceApiMergeGovernance(command) {
-  const text = normalizeForApiMerge(command);
-  const mergePath = /(?:^|[/\s])pulls\/[^\s/]*\/merge(?![A-Za-z0-9_.-])/i;
-  const mergeMutation = /\b(?:mergePullRequest|enablePullRequestAutoMerge)\b/i;
-  if (!mergePath.test(text) && !mergeMutation.test(text)) return;
-  // Network/interpreter tool as a standalone word (also when path-qualified
-  // or wrapped by sh -c / xargs / env / sudo).
-  const tool =
-    /(^|[\s;&|(<>`=:/])(gh|curl|wget|http|https|xh|httpie|python[0-9.]*|node|nodejs|deno|bun|ruby|perl|php|bash|sh|zsh|eval|xargs|env|sudo|exec|nohup|time)(?=$|[\s;&|)<>`])/i;
-  if (!tool.test(text)) return;
-  deny(
-    `merging a PR through the GitHub API ('.../pulls/<n>/merge' or the mergePullRequest ` +
-      `mutation) is not a permitted merge path under any governance allowMerge value. ` +
-      `Merges must go through 'node pipeline-cli/bin/cli-merge-if-eligible.mjs', which ` +
-      `enforces the real eligibility gate, and arming auto-merge goes through the same helper with --arm.`,
-  );
+  // AISDLC-605: judge each segment on its own, and only when its command word can
+  // send an API request (or wraps one). An echo/grep/heredoc that merely quotes
+  // the path is not a merge call.
+  const segments = splitMergeSegments(stripInertHeredocBodies(command));
+  // A pipe stage that runs its stdin as code (`echo <path> | xargs gh api`) can be fed the
+  // path by an earlier stage, so judge the whole command text (fail closed).
+  const pipedCode = segments.length > 1 && segments.some(segmentConsumesStdinAsCode);
+  for (const segment of pipedCode ? [segments.join(' ; ')] : segments) {
+    if (!pipedCode && !segmentIsApiCapable(segment)) continue;
+    const text = normalizeForApiMerge(segment);
+    const mergePath = /(?:^|[/\s])pulls\/[^\s/]*\/merge(?![A-Za-z0-9_.-])/i;
+    const mergeMutation = /\b(?:mergePullRequest|enablePullRequestAutoMerge)\b/i;
+    if (!mergePath.test(text) && !mergeMutation.test(text)) continue;
+    deny(
+      `merging a PR through the GitHub API ('.../pulls/<n>/merge' or the mergePullRequest ` +
+        `mutation) is not a permitted merge path under any governance allowMerge value. ` +
+        `Merges must go through 'node pipeline-cli/bin/cli-merge-if-eligible.mjs', which ` +
+        `enforces the real eligibility gate, and arming auto-merge goes through the same helper with --arm.`,
+    );
+  }
 }
 
 /**
@@ -664,14 +676,6 @@ function stripCommentAndQuotes(segment) {
   // arm — fail-closed).
   const noComment = segment.replace(/#.*$/, '');
   return noComment.replace(/['"]/g, '');
-}
-
-/**
- * True when a segment invokes `gh pr merge` (quote-tolerant, case-insensitive).
- * Strips quotes first so `gh "pr" merge` / `gh 'pr' merge` are detected.
- */
-function segmentInvokesGhPrMerge(segment) {
-  return /\bgh\s+pr\s+merge\b/i.test(stripCommentAndQuotes(segment));
 }
 
 // ── No-bare-stash governance (AISDLC-611) ────────────────────────────
@@ -1034,6 +1038,11 @@ function enforceWriteEdit(filePath) {
     return;
   }
 
+  // AISDLC-605: scratch space (session scratch dir, OS temp dirs) is allowed by
+  // default. Never inside the project root (main checkout / other worktrees) and
+  // never inside a git repository (sibling repos), so confinement is unchanged.
+  if (isScratchPath(absPath, projectAbs)) return;
+
   // Path is OUTSIDE the agent's home — only allowed if the active task's
   // permittedExternalPaths covers it. This applies uniformly whether the
   // target is a loose file or itself a sibling git repository (AISDLC-567
@@ -1066,6 +1075,86 @@ function enforceWriteEdit(filePath) {
         `active task's permittedExternalPaths (${allowed.join(', ')}).`,
     );
   }
+}
+
+/** Directories that count as scratch space: OS temp dirs and the session scratch dir. */
+function scratchRoots() {
+  const roots = new Set();
+  const add = (p) => {
+    if (!p || typeof p !== 'string' || !isAbsolute(p)) return;
+    const abs = resolve(p);
+    // Never treat the filesystem root, or a path that is itself a home dir, as scratch.
+    if (abs === resolve(sep) || abs.split(sep).filter(Boolean).length < 1) return;
+    roots.add(abs);
+    try {
+      roots.add(realpathSync(abs));
+    } catch {
+      /* not created yet */
+    }
+  };
+  add(require('os').tmpdir());
+  add(process.env.TMPDIR);
+  add(process.env.TEMP);
+  add(process.env.TMP);
+  add(process.env.CLAUDE_SCRATCHPAD_DIR);
+  if (process.platform !== 'win32') {
+    add('/tmp');
+    add('/private/tmp');
+    add('/var/tmp');
+  }
+  return [...roots];
+}
+
+/**
+ * True when `absPath` is under a scratch root, is NOT inside the project root
+ * (the main checkout and its `.worktrees/`), and is NOT inside a git repository
+ * nested below the scratch root (a sibling repo that merely lives in a temp dir).
+ */
+function isScratchPath(absPath, projectAbs) {
+  let real = absPath;
+  try {
+    real = realpathDeepest(absPath);
+  } catch {
+    /* use the lexical path */
+  }
+  const under = (p, root) => p === root || p.startsWith(root + sep);
+  const projectReal = (() => {
+    try {
+      return realpathSync(projectAbs);
+    } catch {
+      return projectAbs;
+    }
+  })();
+  // The main checkout owning this worktree (project root may itself be `<main>/.worktrees/<id>`).
+  const mainRoots = new Set([projectAbs, projectReal]);
+  for (const p of [projectAbs, projectReal]) {
+    const i = p.split(sep).indexOf('.worktrees');
+    if (i > 0) mainRoots.add(p.split(sep).slice(0, i).join(sep) || sep);
+  }
+  for (const candidate of new Set([absPath, real])) {
+    if ([...mainRoots].some((r) => under(candidate, r))) return false;
+    // Any path inside a `.worktrees/` directory is another worktree: never scratch.
+    if (candidate.split(sep).includes('.worktrees')) return false;
+  }
+  for (const root of scratchRoots()) {
+    for (const candidate of new Set([absPath, real])) {
+      if (candidate === root || !under(candidate, root)) continue;
+      // Walk up from the target to (not including) the scratch root looking for a git repo.
+      let dir = dirname(candidate);
+      let inRepo = false;
+      while (under(dir, root) && dir !== root) {
+        if (existsSync(join(dir, '.git'))) {
+          inRepo = true;
+          break;
+        }
+        const parent = dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+      }
+      if (!inRepo) return true;
+    }
+  }
+  return false;
 }
 
 /**
