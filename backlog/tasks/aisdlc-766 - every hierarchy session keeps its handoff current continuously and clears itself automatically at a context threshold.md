@@ -36,7 +36,7 @@ Scope:
 5. `docs/operations/cli-hierarchy.md` documents the thresholds, the handoff files and the resume contract.
 6. Hermetic tests cover handoff write and read and the threshold trigger.
 
-Related: AISDLC-741, AISDLC-743, AISDLC-759, AISDLC-760 (idle paths).
+Related: AISDLC-741, AISDLC-743.
 
 Velocity impact (DEC-0048): removes a manual step and an operator wait; adds no gate.
 
