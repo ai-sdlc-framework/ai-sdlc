@@ -31,7 +31,7 @@ The ai-sdlc-io dispatch session (Opus, 690k context) spent $1,320 of API weight 
 2. The no-TMUX_PANE fallback must still clear: document how, or refuse to run without tmux.
 3. Fold identity, handoff-file read and mark-ready-after-CodeQL into the tick so operator-dispatch.md shrinks below 120 lines.
 
-Sequencing: none.
+Sequencing: none. Model: per DEC-0068 the `--dispatch-model` default in cli-hierarchy up changes from opus to sonnet with this task, and to haiku once the tick is one deterministic call.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
