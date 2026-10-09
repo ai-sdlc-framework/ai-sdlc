@@ -74,6 +74,7 @@ function giveKey(): void {
 /** Default happy-path script. Register failing handlers BEFORE calling this (first match wins). */
 function scriptShip(): void {
   const r = h.runner;
+  r.on(/^git diff --cached --quiet/, fail('', 1)); // something is staged
   r.on(/gh pr list --head/, ok('[]'));
   r.on(/gh pr create/, ok(`${PR}\n`));
   r.on(/rev-parse HEAD/, ok('headsha\n'));
@@ -240,6 +241,28 @@ describe('shipTask: approved path', () => {
     });
     expect(cmds().some((c) => /--force|\s-f(\s|$)/.test(c))).toBe(false);
     expect(cmds().some((c) => RAW_MERGE.test(c))).toBe(false);
+  });
+
+  it('exports iteration count + harness note to the Step 10.6 signer too', async () => {
+    scriptShip();
+    await shipTask(h.ctx, state);
+    const sign = h.runner.calls.find((c) =>
+      /sign-attestation-if-consumer\.sh/.test(c.args.join(' ')),
+    )!;
+    expect(sign.opts?.env).toMatchObject({
+      AI_SDLC_ITERATION_COUNT: '2',
+      AI_SDLC_HARNESS_NOTE: '',
+    });
+  });
+
+  it('skips the chore commit when nothing is staged (task file already pre-moved)', async () => {
+    giveKey();
+    h.runner.on(/^git diff --cached --quiet/, ok(''));
+    scriptShip();
+    const res = await shipTask(h.ctx, state);
+    expect(res).toMatchObject({ action: 'done' });
+    expect(indexOfCall(/^git commit/)).toBe(-1);
+    expect(indexOfCall(/^git push/)).toBeGreaterThan(-1);
   });
 
   it('puts the classifier decision line and the draft flag in the PR', async () => {

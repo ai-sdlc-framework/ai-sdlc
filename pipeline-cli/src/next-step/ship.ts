@@ -217,6 +217,10 @@ async function shipInner(
     return stop(state, 'aborted', 'ship called before a developer pass and a review verdict exist');
   const needsHuman = state.needsHumanAttention;
 
+  const pushEnv = {
+    AI_SDLC_ITERATION_COUNT: String(state.iteration),
+    AI_SDLC_HARNESS_NOTE: verdict.harnessNote,
+  };
   if (!needsHuman) {
     // Step 10 — refuse early when the contributor has no signing key (the hook would fail loudly).
     if (!ctx.exists(join(ctx.homeDir, '.ai-sdlc', 'signing-key.pem'))) {
@@ -256,11 +260,19 @@ async function shipInner(
       cwd: wt,
       allowFailure: true,
     });
-    const commit = await runner('git', ['commit', '-m', choreCommitMessage(state.taskId)], {
+    const staged = await runner('git', ['diff', '--cached', '--quiet'], {
       cwd: wt,
       allowFailure: true,
-      timeout: 300_000,
     });
+    // Exit 0 means nothing staged (task file was pre-moved): skip the commit.
+    const commit =
+      staged.code === 0
+        ? { code: 0, stdout: '', stderr: '' }
+        : await runner('git', ['commit', '-m', choreCommitMessage(state.taskId)], {
+            cwd: wt,
+            allowFailure: true,
+            timeout: 300_000,
+          });
     if (commit.code !== 0) {
       return stop(
         state,
@@ -273,7 +285,7 @@ async function shipInner(
     const sign = await runner(
       'bash',
       [join(ctx.pluginScriptsDir, 'sign-attestation-if-consumer.sh')],
-      { cwd: wt, allowFailure: true, timeout: 600_000 },
+      { cwd: wt, allowFailure: true, timeout: 600_000, env: pushEnv },
     );
     if (sign.code !== 0) {
       return stop(
@@ -285,10 +297,6 @@ async function shipInner(
   }
 
   // Step 11a — push. The pre-push hook may sign, commit the envelope and exit 1 once.
-  const pushEnv = {
-    AI_SDLC_ITERATION_COUNT: String(state.iteration),
-    AI_SDLC_HARNESS_NOTE: verdict.harnessNote,
-  };
   let pushRc = 1;
   let pushErr = '';
   for (let attempt = 0; attempt < PUSH_ATTEMPTS; attempt += 1) {
