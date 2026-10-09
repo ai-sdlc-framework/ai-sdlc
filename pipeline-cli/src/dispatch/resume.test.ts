@@ -387,6 +387,27 @@ describe('cli-dispatch resume and claim', () => {
     expect(parsed.resumeFeedback).toContain('pull request #7');
   });
 
+  it('records the caller roster name as resumedBy when --worker is omitted', async () => {
+    finish('AISDLC-822');
+    const r = await cli([
+      'resume',
+      '--board-dir',
+      board,
+      '--task-id',
+      'AISDLC-822',
+      '--note',
+      'raise coverage',
+      '--work-dir',
+      root,
+    ]);
+    expect(r.exit).toBe(0);
+    const queued = JSON.parse(
+      readFileSync(path.join(board, 'queue', 'AISDLC-822.dispatch.json'), 'utf-8'),
+    ) as DispatchManifest;
+    // The documented command omits --worker: resumedBy must be the roster name, not a pid label.
+    expect(queued.resume?.resumedBy).toBe('operator-dispatch');
+  });
+
   it('reads the note from a file', async () => {
     finish('AISDLC-821');
     const noteFile = path.join(root, 'note.txt');

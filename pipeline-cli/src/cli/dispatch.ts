@@ -1107,7 +1107,7 @@ export async function runDispatchCli(
               findings: flags['finding'] ? [flags['finding']] : [],
             },
             {
-              resumedBy: flags['worker'] ?? `dispatch-${process.pid}`,
+              resumedBy: caller.name,
               resolveBaseSha: () => flags['base-sha'] ?? resolveBaseSha(workDir),
               resolveTaskFile: (id) => findTaskFile(workDir, id),
             },
