@@ -26,7 +26,7 @@ dispatchable: true
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Implement the RFC-0053 OQ-7 resolution. `knowledge.dataRoomRoot` configures an optional raw root, possibly a sibling repository, indexed read-only at `scope: protected` with authority from document kind (signed documents canonical at 0.95, decks and plans 0.7 to 0.85). The PreToolUse hook denies writes under that root unless the active task's `permittedExternalPaths` names it. Facts taken from a document are captured as `protected` entries in the protected root with a citation to the source. One index spans both roots, partitioned by scope, and the protected partition is excluded from any export or sharing path by scope alone.
 
-Sequencing: depends on AISDLC-773, AISDLC-775 in `dependencies:`.
+Sequencing: listed in `dependencies:` (AISDLC-773, AISDLC-775).
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

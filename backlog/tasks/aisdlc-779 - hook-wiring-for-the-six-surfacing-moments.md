@@ -27,7 +27,7 @@ dispatchable: true
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Wire the RFC-0053 surfacing protocol into the plugin hooks. Register `UserPromptSubmit`, `PreToolUse` and `PostToolUse` (tool touch), `SubagentStart` (task claim), `SessionStart` and `PreCompact` for the context engine. The plugin today registers SessionStart, SubagentStart, PreToolUse, PostToolUse and Stop. Each hook extracts a key (message text, file path or command, task body, compaction summary), calls `cli-context query --session <id> --budget N --min-score S`, and injects the slice as data with citations, never as instructions. The decision-point moment is delivered by the DoR gate task and is out of scope here.
 
-Sequencing: depends on AISDLC-775 in `dependencies:`.
+Sequencing: listed in `dependencies:` (AISDLC-775).
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

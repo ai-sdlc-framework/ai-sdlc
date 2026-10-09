@@ -24,7 +24,7 @@ dispatchable: true
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Ingest external signals into the priority score, as the RFC-0053 human surface and RFC-0008 describe. Define an adapter interface for support, CRM, analytics and roadmap exports that turns each signal into a knowledge entry with source and observed date, and feeds those entries into the PPA priority computation as inputs. Ship the interface and one fixture adapter that reads a CSV export; real adapters per source are follow-ups owned by adopters.
 
-Sequencing: depends on AISDLC-774 in `dependencies:`.
+Sequencing: listed in `dependencies:` (AISDLC-774).
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

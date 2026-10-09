@@ -27,7 +27,7 @@ dispatchable: true
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Define `.ai-sdlc/context-profiles.yaml`, as resolved by OQ-8. A profile sets enabled moments, per-moment token budget, relevance floor, trunks in scope and a cap of maximum injections per N turns. Role is the primary key and model alias a secondary override. Ship the role defaults: planner all moments at the largest budgets; operator-dispatch session start, task claim and compaction; executors session start and task claim at small budgets plus per-tool on governance-bearing paths; reviewers task claim only; haiku relays session start only. Validate the file. Defaults change only through a decision record backed by the cache-versus-JIT report, asymmetric as in RFC-0050 Part B: adding a moment or raising a budget needs evidence, removing or lowering is automatic.
 
-Sequencing: depends on AISDLC-779, AISDLC-780 in `dependencies:`.
+Sequencing: listed in `dependencies:` (AISDLC-779, AISDLC-780).
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

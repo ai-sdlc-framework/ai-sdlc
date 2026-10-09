@@ -25,7 +25,7 @@ dispatchable: true
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Build the RFC-0053 session load ledger. A per-session jsonl file (for example `.ai-sdlc/context/sessions/<session-id>.jsonl`) records entry id, content hash, moment and injected tokens for every injection. `cli-context query --session` subtracts the ledger inside the query, so an entry is loaded once per session unless its content hash changed; a changed entry is injected again and the ledger notes the supersession. The ledger resets on `/clear` and is rebuilt from the compaction summary on `PreCompact`. CLAUDE.md and the memory index are pre-marked as loaded. Writes take a lock so concurrent hooks do not corrupt the file.
 
-Sequencing: depends on AISDLC-775 in `dependencies:`.
+Sequencing: listed in `dependencies:` (AISDLC-775).
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

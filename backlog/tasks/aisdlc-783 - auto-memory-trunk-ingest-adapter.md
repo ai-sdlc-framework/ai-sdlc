@@ -25,7 +25,7 @@ dispatchable: true
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Ingest the Claude auto-memory folder as a `memory` trunk, as resolved by OQ-6. The folder keeps its file format and remains the harness's write target. Each note becomes an entry at `scope: protected` with authority from the note type (`user` and `feedback` map to `specialist` with the operator as source, `project` and `reference` to `inferred`) and the note file as the citation. The memory dream (AISDLC-729) stays the hygiene pass for that folder and its folder swap triggers a re-ingest under the lock AISDLC-729 specifies. Harness recall stays on, and the load-once ledger marks a note loaded whenever either path surfaces it.
 
-Sequencing: depends on AISDLC-774, AISDLC-780 in `dependencies:`.
+Sequencing: listed in `dependencies:` (AISDLC-774, AISDLC-780).
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

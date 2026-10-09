@@ -25,7 +25,7 @@ dispatchable: true
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Deliver the decision-point moment of the RFC-0053 surfacing protocol. Before dispatch, the DoR gate asks retrieval for open questions and contradictions on the task's references and routes each one through the Decision Catalog (RFC-0035) with `cli-decisions`, to the person who can answer. Each routed question emits an event. The engine blocks nothing itself: routing follows the existing upstream-OQ gate behavior and `blocked.reason` override.
 
-Sequencing: depends on AISDLC-775 in `dependencies:`.
+Sequencing: listed in `dependencies:` (AISDLC-775).
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

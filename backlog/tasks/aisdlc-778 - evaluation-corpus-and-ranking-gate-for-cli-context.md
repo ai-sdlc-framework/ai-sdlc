@@ -25,7 +25,7 @@ dispatchable: true
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Build the RFC-0053 evaluation corpus and ranking gate, as resolved by OQ-5. A hand-authored golden set of questions with relevance judgments is the regression gate. `cli-context eval` scores a run with recall at 5, MRR and nDCG. A transcript miner writes mined questions to an evaluator-only quarantine directory (never a prompt to an agent), scrubbed and de-duplicated, refreshed on a schedule. A synthetic generator produces questions from entries to fill coverage gaps. A CI job fails when golden recall at 5 is below `evaluation.goldenRecallAt5` (0.8) or regresses by more than `evaluation.maxRegressionPoints` (2) against the previous release. Both keys are configuration changed only through a decision record. A golden question whose entry no longer exists retires. A hook exposes the production citation rate from the load ledger as a report-only signal.
 
-Sequencing: depends on AISDLC-775 in `dependencies:`.
+Sequencing: listed in `dependencies:` (AISDLC-775).
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

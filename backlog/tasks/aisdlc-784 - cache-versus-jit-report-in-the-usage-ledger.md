@@ -26,7 +26,7 @@ dispatchable: true
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Add the RFC-0053 cache-versus-JIT report to the RFC-0050 usage ledger. Per session and per role it reports injected tokens by moment (from the load ledger), the share of injections later cited or acted on, and the cache-read tokens of the same sessions. A weekly check flags a profile whose change raised net tokens over the week. The report is the evidence for profile default changes under the asymmetric rule. This task instruments the trade and does not assume just-in-time loading is cheaper.
 
-Sequencing: depends on AISDLC-780 in `dependencies:`.
+Sequencing: listed in `dependencies:` (AISDLC-780).
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

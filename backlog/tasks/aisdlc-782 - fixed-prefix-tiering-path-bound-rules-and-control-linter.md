@@ -28,7 +28,7 @@ dispatchable: true
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Implement the RFC-0053 OQ-4 resolution as a structural rule. The fixed prefix is governance controls rendered from `spec.governance` configuration (RFC-0048), the role and task frame, and pointers, under `prefix.maxBytes` (10240). Path-bound CLAUDE.md sections move to `.claude/rules/*.md` with `paths:` frontmatter, which the harness loads deterministically. Explanatory, historical and rationale sections are ingested as knowledge entries. A linter refuses a control-shaped sentence (never, must, refuse, only) outside the prefix unless it is also rendered from configuration. Supersedes the one-time diet in AISDLC-742 and absorbs the fixed-prefix work in AISDLC-651.2; AISDLC-742 is listed in `dependencies:` so whichever lands first stays consistent.
 
-Sequencing: depends on AISDLC-773, AISDLC-742 in `dependencies:`.
+Sequencing: listed in `dependencies:` (AISDLC-773, AISDLC-742).
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

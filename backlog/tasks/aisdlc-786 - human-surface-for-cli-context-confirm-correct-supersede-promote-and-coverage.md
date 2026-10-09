@@ -23,7 +23,7 @@ dispatchable: true
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Build the RFC-0053 human surface. `cli-context` gains `confirm`, `correct`, `supersede` and `promote` subcommands that apply the OQ-3 rules: confirm moves confidence 30 percent toward the new value and never changes authority, supersede links the old entry and keeps it, and `canonical` promotion requires a human. A coverage score (required x 0.6 + enriching x 0.25 + count x 0.15) maps to blocked, draft or ready and is presented as a gap list. A plain-text dashboard prints the gaps and the staleness queue.
 
-Sequencing: depends on AISDLC-776 in `dependencies:`.
+Sequencing: listed in `dependencies:` (AISDLC-776).
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
