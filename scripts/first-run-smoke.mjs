@@ -119,12 +119,19 @@ export function manifestProblems(pluginDir) {
 
 // ── Smoke run ───────────────────────────────────────────────────────────
 
+const STEP_TIMEOUT_MS = 120_000;
+
 function fail(msg) {
   throw new Error(msg);
 }
 
 function sh(cmd, args, opts) {
-  return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts });
+  return execFileSync(cmd, args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: STEP_TIMEOUT_MS,
+    ...opts,
+  });
 }
 
 function buildSandbox() {
@@ -208,7 +215,13 @@ function makeRunners(ctx) {
   const { pluginSrc, marketplace, sb } = ctx;
   const aiSdlc = join(ROOT, 'orchestrator', 'dist', 'cli', 'index.js');
   const node = (args, extra = {}) =>
-    spawnSync(process.execPath, args, { cwd: sb.work, env: sb.env, encoding: 'utf8', ...extra });
+    spawnSync(process.execPath, args, {
+      cwd: sb.work,
+      env: sb.env,
+      encoding: 'utf8',
+      timeout: STEP_TIMEOUT_MS,
+      ...extra,
+    });
 
   return [
     {
@@ -360,7 +373,9 @@ export function runSmoke() {
     for (const step of steps) {
       const runner = runners.find((r) => r.match.test(step));
       console.log(`[first-run-smoke] ${step}`);
+      const t0 = Date.now();
       runner.run(runner.match.exec(step));
+      console.log(`[first-run-smoke]   (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
     }
     const elapsed = Date.now() - started;
     if (elapsed > BUDGET_MS)

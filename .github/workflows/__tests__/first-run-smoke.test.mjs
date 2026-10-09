@@ -72,4 +72,29 @@ describe('ci.yml first-run-smoke job (AISDLC-771)', () => {
       assert.match(wf.jobs[name].if, /event_name != 'schedule'/, `${name} must skip on schedule`);
     }
   });
+
+  it('every if: expression in ci.yml has balanced parentheses', () => {
+    const exprs = [];
+    for (const [name, j] of Object.entries(wf.jobs)) {
+      if (typeof j.if === 'string') exprs.push([`job ${name}`, j.if]);
+      for (const [i, s] of (j.steps ?? []).entries()) {
+        if (typeof s.if === 'string') exprs.push([`job ${name} step ${i}`, s.if]);
+      }
+    }
+    assert.ok(exprs.length > 0);
+    for (const [where, expr] of exprs) {
+      let depth = 0;
+      for (const ch of expr) {
+        if (ch === '(') depth++;
+        if (ch === ')') depth--;
+        assert.ok(depth >= 0, `${where}: unmatched ')' in: ${expr}`);
+      }
+      assert.equal(depth, 0, `${where}: unbalanced parentheses in: ${expr}`);
+    }
+  });
+
+  it('scheduled runs use a concurrency group separate from push runs', () => {
+    assert.match(wf.concurrency.group, /event_name == 'schedule'/);
+    assert.match(wf.concurrency.group, /github\.ref/);
+  });
 });
