@@ -102,7 +102,8 @@ function countMarker(run: CommandRunner, target: string, name: string): number {
   );
 }
 
-function holdsInflight(boardDir: string, name: string): string | undefined {
+/** The task the named session holds inflight, or undefined. */
+export function holdsInflight(boardDir: string, name: string): string | undefined {
   for (const item of listInflight(boardDir)) {
     if (item.workerId === name || readInflightManifest(boardDir, item.taskId)?.workerId === name) {
       return item.taskId;
@@ -226,6 +227,8 @@ export const SELF_CLEAR_RESUME_SECONDS = 60;
 export const DISPATCH_RESUME_COMMAND = '/ai-sdlc operator-dispatch';
 /** The command an idle executor re-issues after its own clear. */
 export const EXECUTOR_RESUME_COMMAND = '/ai-sdlc executor';
+/** The command the planner re-issues after its own clear. */
+export const PLANNER_RESUME_COMMAND = '/ai-sdlc:planner';
 
 /** Starts a process that outlives the caller; injectable for tests. */
 export type DetachedSpawner = (file: string, args: readonly string[]) => void;
@@ -249,7 +252,7 @@ export interface ClearSelfOptions {
   /** Roster name of the calling session, already proven to be a session of `role`. */
   self: string;
   /** Role of the calling session (default the dispatch session). */
-  role?: 'operator-dispatch' | 'executor';
+  role?: 'operator-dispatch' | 'executor' | 'planner';
   /** Seconds between `/clear` and the resume command (default 60). */
   resumeAfterSeconds?: number;
   /** Seconds before `/clear` is typed (default 20). */
@@ -273,7 +276,7 @@ export interface ClearSelfResult {
 }
 
 /**
- * Schedule the dispatch session (or an idle executor) to clear its own context and resume its loop.
+ * Schedule the dispatch session, the planner or an idle executor to clear its own context and resume its loop.
  * Only the pane the calling session's own roster entry names is ever typed into.
  * The keystrokes are delivered by a detached process after a lead delay, because
  * `/clear` typed while this turn runs would only be queued behind it.
@@ -300,7 +303,7 @@ export function clearSelf(opts: ClearSelfOptions, deps: ClearSelfDeps): ClearSel
   const entry = roster.sessions.find((e) => e.name === name && e.role === role);
   if (!entry) {
     throw new Error(
-      `'${name}' is not ${role === 'executor' ? 'an executor' : 'the dispatch session'} in the roster`,
+      `'${name}' is not ${role === 'executor' ? 'an executor' : role === 'planner' ? 'the planner' : 'the dispatch session'} in the roster`,
     );
   }
   if (entry.status !== 'running') {
@@ -350,7 +353,11 @@ export function clearSelf(opts: ClearSelfOptions, deps: ClearSelfDeps): ClearSel
     target,
     '/clear',
     String(resumeAfterSeconds),
-    role === 'executor' ? EXECUTOR_RESUME_COMMAND : DISPATCH_RESUME_COMMAND,
+    role === 'executor'
+      ? EXECUTOR_RESUME_COMMAND
+      : role === 'planner'
+        ? PLANNER_RESUME_COMMAND
+        : DISPATCH_RESUME_COMMAND,
     ...(watchDir ? [watchDir] : []),
   ]);
   deps.log?.(
