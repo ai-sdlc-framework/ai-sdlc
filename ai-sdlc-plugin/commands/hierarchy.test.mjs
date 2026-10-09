@@ -45,9 +45,9 @@ describe('hierarchy dispatch script', () => {
   it('passes arguments through unchanged', () => {
     const bin = fakeBin();
     try {
-      const r = capture(['up', '--executors', '1', '--no-planner'], { PIPELINE_CLI_BIN: bin });
+      const r = capture(['up', '--executors', '1'], { PIPELINE_CLI_BIN: bin });
       assert.equal(r.code, 0);
-      assert.equal(r.out, 'ARGS:["up","--executors","1","--no-planner"]');
+      assert.equal(r.out, 'ARGS:["up","--executors","1"]');
     } finally {
       rmSync(bin, { recursive: true });
     }
@@ -80,7 +80,7 @@ describe('hierarchy dispatch script', () => {
       const r = capture([], { PIPELINE_CLI_BIN: bin });
       assert.equal(r.code, 0);
       assert.match(r.out, /FAKE HELP[\s\S]*Common recipes/);
-      assert.match(r.out, /up --executors 1 --no-planner/);
+      assert.match(r.out, /up --executors 1/);
       assert.match(r.out, /status/);
       assert.match(r.out, /down, then up/);
     } finally {

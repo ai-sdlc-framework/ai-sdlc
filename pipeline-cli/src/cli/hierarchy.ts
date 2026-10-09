@@ -118,7 +118,10 @@ Options for up:
                            value, when sessions with the same role names already run
                            for another project on this machine.
   --attach                 Show the planner (or the dispatch session) when done
-  --allow-planner-bypass   Allow the planner to start in bypassPermissions mode
+  --planner-permission-mode <m>
+                           Planner permission mode (default bypassPermissions, like the
+                           other sessions); pass default for a prompting planner
+  --allow-planner-bypass   Deprecated, no effect: every session starts in bypassPermissions
 
 Options for status:
   --json                   Print machine-readable output
@@ -317,6 +320,9 @@ export async function runHierarchyCli(
             ...(flags.project === undefined
               ? {}
               : { project: flags.project === 'true' ? '' : flags.project }),
+            ...(flags['planner-permission-mode'] === undefined
+              ? {}
+              : { plannerPermissionMode: flags['planner-permission-mode'] }),
             allowPlannerBypass: flags['allow-planner-bypass'] === 'true',
           },
           deps,

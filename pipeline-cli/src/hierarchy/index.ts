@@ -198,7 +198,7 @@ export {
 } from './types.js';
 export {
   buildClaudeCommand,
-  FALLBACK_PLANNER_MODE,
+  DEFAULT_PLANNER_MODE,
   findForeignSessions,
   hierarchyUp,
   type UpOptions,

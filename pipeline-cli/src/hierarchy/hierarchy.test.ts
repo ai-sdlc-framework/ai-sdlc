@@ -319,7 +319,7 @@ describe('hierarchy up', () => {
       Q('executor-beta'),
     ]);
     expect(newWindowCommands()).toEqual([
-      `'claude' --name '${Q('planner')}' --model 'fable' --permission-mode 'acceptEdits' '/ai-sdlc planner'`,
+      `'claude' --name '${Q('planner')}' --model 'fable' --permission-mode 'bypassPermissions' '/ai-sdlc planner'`,
       `'claude' --name '${Q('operator-dispatch')}' --model 'opus' --permission-mode 'bypassPermissions' '/ai-sdlc operator-dispatch'`,
       `'claude' --name '${Q('executor-alpha')}' --model 'sonnet' --permission-mode 'bypassPermissions' '/ai-sdlc executor'`,
       `'claude' --name '${Q('executor-beta')}' --model 'sonnet' --permission-mode 'bypassPermissions' '/ai-sdlc executor'`,
@@ -414,12 +414,6 @@ describe('hierarchy up', () => {
     // '-s' only appears as new-session's session-name flag, never with set-option.
     expect(globals.every((c) => c.args[0] === 'new-session')).toBe(true);
     expect(fake.calls.some((c) => c.args[0] === 'set-option' && c.args.includes('-g'))).toBe(false);
-  });
-
-  it('falls back to the default permission mode for the planner when none is configured', async () => {
-    writeSettings({ crossSessionInbound: 'accept' });
-    await hierarchyUp({ ...baseOpts, executors: 0 }, deps);
-    expect(newWindowCommands()[0]).toContain("--permission-mode 'default'");
   });
 
   it('honours an explicit planner permission mode and --no-planner', async () => {
@@ -1239,27 +1233,55 @@ describe('hierarchy down on an old single-session roster', () => {
   });
 });
 
-describe('planner bypass guard', () => {
-  it('refuses a bypassPermissions planner without the flag, allows it with the flag', async () => {
-    writeSettings({
-      crossSessionInbound: 'accept',
-      permissions: { defaultMode: 'bypassPermissions' },
-    });
-    await expect(hierarchyUp(baseOpts, deps)).rejects.toThrow(/allow-planner-bypass/);
-    expect(newWindowCommands()).toEqual([]);
-    const r = await hierarchyUp({ ...baseOpts, allowPlannerBypass: true }, deps);
-    expect(r.started[0]?.permissionMode).toBe('bypassPermissions');
+describe('planner permission mode (AISDLC-752)', () => {
+  const modeOf = (cmd: string | undefined) => /--permission-mode '([^']*)'/.exec(cmd ?? '')?.[1];
+
+  it('starts every role in bypassPermissions by default', async () => {
+    const r = await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    expect(r.started.map((e) => [e.role, e.permissionMode])).toEqual([
+      ['planner', 'bypassPermissions'],
+      ['operator-dispatch', 'bypassPermissions'],
+      ['executor', 'bypassPermissions'],
+    ]);
+    const cmds = newWindowCommands();
+    expect(cmds).toHaveLength(3);
+    for (const c of cmds) expect(c).toContain("--permission-mode 'bypassPermissions'");
   });
 
-  it('does not check the planner mode when no planner will be started', async () => {
-    await hierarchyUp({ ...baseOpts, executors: 0 }, deps);
-    writeSettings({
-      crossSessionInbound: 'accept',
-      permissions: { defaultMode: 'bypassPermissions' },
-    });
+  it('changes only the planner line under --planner-permission-mode', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1, plannerPermissionMode: 'default' }, deps);
+    expect(newWindowCommands().map(modeOf)).toEqual([
+      'default',
+      'bypassPermissions',
+      'bypassPermissions',
+    ]);
+  });
+
+  it('buildClaudeCommand carries the mode it is given for each role', () => {
+    for (const role of ['planner', 'operator-dispatch', 'executor'] as const) {
+      expect(
+        buildClaudeCommand('claude', {
+          role,
+          name: 'x',
+          model: 'm',
+          permissionMode: 'bypassPermissions',
+          prompt: 'p',
+        }),
+      ).toContain("--permission-mode 'bypassPermissions'");
+    }
+  });
+
+  it.each(['plan', 'default'])('ignores a settings defaultMode of %s', async (mode) => {
+    writeSettings({ crossSessionInbound: 'accept', permissions: { defaultMode: mode } });
     const r = await hierarchyUp({ ...baseOpts, executors: 0 }, deps);
-    expect(r.existing.map((e) => e.name)).toContain(Q('planner'));
-    expect(r.started).toEqual([]);
+    expect(r.started[0]?.permissionMode).toBe('bypassPermissions');
+    expect(newWindowCommands()[0]).toContain("--permission-mode 'bypassPermissions'");
+  });
+
+  it('accepts --allow-planner-bypass as a no-op with a deprecation line', async () => {
+    const r = await hierarchyUp({ ...baseOpts, executors: 0, allowPlannerBypass: true }, deps);
+    expect(r.started[0]?.permissionMode).toBe('bypassPermissions');
+    expect(logs.some((l) => /deprecated: --allow-planner-bypass/.test(l))).toBe(true);
   });
 });
 
