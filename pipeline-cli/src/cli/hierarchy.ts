@@ -18,6 +18,8 @@
  *     session about it.
  *   - `down [--role <name-or-role>]` — end sessions, return their inflight
  *     manifests to `queue/`, close their windows, update the roster.
+ *   - `executor-start [--wait <sec>]` — an executor's identity, repository check and a
+ *     blocking claim in one call; prints `{taskId|null, ...}`.
  *   - `clear <executor-name> [--settle-ms <n>]` — empty an executor's context:
  *     `/clear`, wait, then `/ai-sdlc executor`. Refuses an executor that holds
  *     an inflight task.
@@ -61,6 +63,9 @@ import {
   clearSelf,
   createGitRunner,
   createStreamEmitter,
+  createSystemIdentity,
+  executorStart,
+  resolveCaller,
   createSystemRunner,
   createTmuxBriefSender,
   generateBrief,
@@ -104,6 +109,7 @@ Commands:
   clear      Empty an executor's context between tasks and restart its loop
   tick       One wake-up of the dispatch loop (ingest, verdict watch, playbook, reports)
   route-decision  Record that a decision was routed to a tier
+  executor-start  Executor identity, repository check and a blocking claim, as one call
   check-sender    Exit 0 only when a message sender is this roster's dispatch session
   check-repo      Exit 0 only when the working directory is this roster's repository
 
@@ -147,11 +153,13 @@ Options for down:
 Usage for clear:
   cli-hierarchy clear <executor-name> [--settle-ms <n>]
   cli-hierarchy clear --self [--resume-after <seconds>]
-  --self schedules the dispatch session's own pane (from its roster entry) to receive
-  /clear after 20 s and /ai-sdlc operator-dispatch --resume-after seconds later (default 60).
+  --self schedules the calling session's own pane (from its roster entry) to receive
+  /clear after 20 s and then, --resume-after seconds later (default 60), the resume command:
+  /ai-sdlc operator-dispatch for the dispatch session, /ai-sdlc executor for an idle
+  executor (which is refused while it holds an inflight task).
   Sends /clear to the executor's pane, waits for the settle time (default 8000 ms),
   then sends /ai-sdlc executor. Refuses an executor that holds an inflight task.
-  Meant for the dispatch session only. A mistake guard refuses any other caller, a human
+  clear <executor-name> is for the dispatch session only. A mistake guard refuses any other caller, a human
   at a plain shell included; it is not authentication and a same-user session can defeat
   it. Outside the hierarchy, use tmux directly.
 
@@ -161,6 +169,12 @@ Options for tick:
   --settle-ms <n>          Settle time used for clears (default 8000)
   --retry-limit <n>        Re-queues allowed per failed task (default 2; a larger value is refused)
   --work-dir <path>        Repository root (default the current directory)
+
+Options for executor-start:
+  --wait <seconds>         How long to block waiting for a task (default 1500). Prints the
+                           identity line, then one JSON line: {name, project, dispatch,
+                           taskId|null, manifest?}. Exit 1 when this is not an executor
+                           session or the working directory is not the project's repository.
 
 Options for check-sender:
   --sender-pid <n>         Pid the harness reports for the sender
@@ -377,6 +391,28 @@ export async function runHierarchyCli(
         return result.refused.length > 0 ? 1 : 0;
       }
       case 'clear': {
+        // An idle executor may clear itself; any other `--self` caller is the dispatch session.
+        const executorSelf =
+          flags.self === 'true'
+            ? resolveCaller(
+                extras.identity ?? createSystemIdentity(deps.boardDir, extras.processLookup),
+              )
+            : null;
+        if (executorSelf?.role === 'executor') {
+          const resumeAfter = intFlag(flags, 'resume-after');
+          if (resumeAfter === null) return 2;
+          const result = clearSelf(
+            {
+              self: executorSelf.name,
+              role: 'executor',
+              ...(resumeAfter === undefined ? {} : { resumeAfterSeconds: resumeAfter }),
+              ...(deps.env.TMUX_PANE ? { callerPane: deps.env.TMUX_PANE } : {}),
+            },
+            { run: deps.run, boardDir: deps.boardDir, log: deps.log },
+          );
+          deps.log(JSON.stringify(result));
+          return 0;
+        }
         const caller = dispatchCaller('clear');
         if (!caller.ok) {
           process.stderr.write(`${caller.reason}\n`);
@@ -487,6 +523,30 @@ export async function runHierarchyCli(
         });
         deps.log(JSON.stringify(result));
         return 0;
+      }
+      case 'executor-start': {
+        const waitSec = intFlag(flags, 'wait');
+        if (waitSec === null) return 2;
+        try {
+          const result = await executorStart(
+            {
+              boardDir: deps.boardDir,
+              cwd: deps.cwd,
+              ...(waitSec === undefined ? {} : { waitSec }),
+            },
+            {
+              identity:
+                extras.identity ?? createSystemIdentity(deps.boardDir, extras.processLookup),
+              ...(extras.repoGit ? { repoGit: extras.repoGit } : {}),
+              log: deps.log,
+            },
+          );
+          deps.log(JSON.stringify(result));
+          return 0;
+        } catch (err) {
+          process.stderr.write(`cli-hierarchy executor-start: ${(err as Error).message}\n`);
+          return 1;
+        }
       }
       case 'check-sender': {
         const pid = intFlag(flags, 'sender-pid');

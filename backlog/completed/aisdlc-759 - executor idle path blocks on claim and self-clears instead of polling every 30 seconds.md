@@ -2,7 +2,7 @@
 id: AISDLC-759
 title: >-
   Executor idle path blocks on claim and self-clears instead of polling every 30 seconds
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-08'
 labels:
@@ -40,9 +40,9 @@ Sequencing: none. Related: AISDLC-738; AISDLC-764 reuses the executor-start wrap
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] AC-1: An idle executor makes zero LLM calls while blocked.
-- [ ] AC-2: An enqueue wakes a blocked executor within 5 s.
-- [ ] AC-3: Idle context after a clear is at the floor.
-- [ ] AC-4: executor.md is below 150 lines.
-- [ ] AC-5: New and existing tests pass.
+- [x] AC-1: An idle executor makes zero LLM calls while blocked.
+- [x] AC-2: An enqueue wakes a blocked executor within 5 s.
+- [x] AC-3: Idle context after a clear is at the floor.
+- [x] AC-4: executor.md is below 150 lines.
+- [x] AC-5: New and existing tests pass.
 <!-- AC:END -->

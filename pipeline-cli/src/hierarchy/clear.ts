@@ -86,11 +86,20 @@ function reportBackMarker(name: string): string {
   return `[executor] I am '${name}'`;
 }
 
+const EXECUTOR_START_MARKER = 'cli-hierarchy.mjs executor-start';
+
 /** How many times the marker is visible in the pane right now (0 when the pane cannot be read). */
 function countMarker(run: CommandRunner, target: string, name: string): number {
   const r = run('tmux', ['capture-pane', '-p', '-t', target]);
   if (r.status !== 0) return 0;
-  return r.stdout.split(reportBackMarker(name)).length - 1;
+  // A restarted executor shows its identity line, or the `executor-start` call it is
+  // blocked in (that call prints nothing until it returns).
+  return (
+    r.stdout.split(reportBackMarker(name)).length -
+    1 +
+    r.stdout.split(EXECUTOR_START_MARKER).length -
+    1
+  );
 }
 
 function holdsInflight(boardDir: string, name: string): string | undefined {
@@ -215,6 +224,8 @@ export const SELF_CLEAR_LEAD_SECONDS = 20;
 export const SELF_CLEAR_RESUME_SECONDS = 60;
 /** The command the dispatch session re-issues after its own clear. */
 export const DISPATCH_RESUME_COMMAND = '/ai-sdlc operator-dispatch';
+/** The command an idle executor re-issues after its own clear. */
+export const EXECUTOR_RESUME_COMMAND = '/ai-sdlc executor';
 
 /** Starts a process that outlives the caller; injectable for tests. */
 export type DetachedSpawner = (file: string, args: readonly string[]) => void;
@@ -235,8 +246,10 @@ export interface ClearSelfDeps {
 
 /** Inputs of {@link clearSelf}. */
 export interface ClearSelfOptions {
-  /** Roster name of the calling session, already proven to be the dispatch session. */
+  /** Roster name of the calling session, already proven to be a session of `role`. */
   self: string;
+  /** Role of the calling session (default the dispatch session). */
+  role?: 'operator-dispatch' | 'executor';
   /** Seconds between `/clear` and the resume command (default 60). */
   resumeAfterSeconds?: number;
   /** Seconds before `/clear` is typed (default 20). */
@@ -254,7 +267,7 @@ export interface ClearSelfResult {
 }
 
 /**
- * Schedule the dispatch session to clear its own context and resume its loop.
+ * Schedule the dispatch session (or an idle executor) to clear its own context and resume its loop.
  * Only the pane the calling session's own roster entry names is ever typed into.
  * The keystrokes are delivered by a detached process after a lead delay, because
  * `/clear` typed while this turn runs would only be queued behind it.
@@ -277,8 +290,13 @@ export function clearSelf(opts: ClearSelfOptions, deps: ClearSelfDeps): ClearSel
     }
   }
   const { roster } = readRosterChecked(deps.boardDir);
-  const entry = roster.sessions.find((e) => e.name === name && e.role === 'operator-dispatch');
-  if (!entry) throw new Error(`'${name}' is not the dispatch session in the roster`);
+  const role = opts.role ?? 'operator-dispatch';
+  const entry = roster.sessions.find((e) => e.name === name && e.role === role);
+  if (!entry) {
+    throw new Error(
+      `'${name}' is not ${role === 'executor' ? 'an executor' : 'the dispatch session'} in the roster`,
+    );
+  }
   if (entry.status !== 'running') {
     throw new Error(`'${name}' is not running (status ${entry.status})`);
   }
@@ -291,6 +309,12 @@ export function clearSelf(opts: ClearSelfOptions, deps: ClearSelfDeps): ClearSel
     throw new Error(
       `refusing to clear '${name}': TMUX_PANE ${opts.callerPane} is not the roster pane ${entry.paneId}`,
     );
+  }
+  if (role === 'executor') {
+    const held = holdsInflight(deps.boardDir, name);
+    if (held) {
+      throw new Error(`refusing to clear '${name}': it holds ${held}, which is still inflight`);
+    }
   }
   const unowned = ownershipRefusal(deps.run, entry);
   if (unowned) throw new Error(`refusing to clear '${name}': ${unowned}`);
@@ -311,7 +335,7 @@ export function clearSelf(opts: ClearSelfOptions, deps: ClearSelfDeps): ClearSel
     target,
     '/clear',
     String(resumeAfterSeconds),
-    DISPATCH_RESUME_COMMAND,
+    role === 'executor' ? EXECUTOR_RESUME_COMMAND : DISPATCH_RESUME_COMMAND,
   ]);
   deps.log?.(
     `scheduled '${name}' to clear in ${leadSeconds}s and resume ${resumeAfterSeconds}s later`,

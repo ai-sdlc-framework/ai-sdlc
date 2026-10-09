@@ -130,6 +130,23 @@ describe('clearExecutor', () => {
     expect(result).toMatchObject({ executor: 'executor-alpha', paneId: '%7', resumed: true });
   });
 
+  it('counts a restarted executor blocked in executor-start as reported back', async () => {
+    resumes = false;
+    const base = run;
+    const blockedRun: CommandRunner = (file, args) => {
+      const literal = args[args.indexOf('--') + 1];
+      if (args[0] === 'send-keys' && args.includes('-l') && literal === '/ai-sdlc executor') {
+        screen += 'Bash(node cli-hierarchy.mjs executor-start --wait 1500)\n';
+      }
+      return base(file, args);
+    };
+    const result = await clearExecutor(
+      { executor: 'executor-alpha', settleMs: 500 },
+      deps({ run: blockedRun }),
+    );
+    expect(result.resumed).toBe(true);
+  });
+
   it('never sends keys to another pane', async () => {
     await clearExecutor({ executor: 'executor-alpha', settleMs: 0 }, deps());
     for (const c of sends()) expect(c.args[2]).toBe('%7');
@@ -445,5 +462,42 @@ describe('clearSelf', () => {
         : d.run(file, args);
     expect(() => clearSelf({ self: 'operator-dispatch' }, { ...d, run })).toThrow(/stale/);
     expect(spawned).toHaveLength(0);
+  });
+
+  describe('as an idle executor', () => {
+    const executorDeps = () => {
+      const d = selfDeps();
+      const run = (file: string, args: readonly string[]) =>
+        args[0] === 'display-message'
+          ? { status: 0, stdout: '%7\n', stderr: '' }
+          : d.run(file, args);
+      return { ...d, run };
+    };
+
+    it('schedules /clear then /ai-sdlc executor on its own pane', () => {
+      const r = clearSelf(
+        { self: 'executor-alpha', role: 'executor', resumeAfterSeconds: 30 },
+        executorDeps(),
+      );
+      expect(r).toMatchObject({ self: 'executor-alpha', paneId: '%7', resumeAfterSeconds: 30 });
+      expect(spawned[0]!.args.slice(3)).toEqual(['20', '%7', '/clear', '30', '/ai-sdlc executor']);
+      expect(sends()).toHaveLength(0);
+    });
+
+    it('refuses an executor that holds an inflight task', () => {
+      writeManifest(board, mkManifest('AISDLC-5'));
+      claimNext(board, 'in-session-agent', undefined, { workerId: 'executor-alpha' });
+      expect(() => clearSelf({ self: 'executor-alpha', role: 'executor' }, executorDeps())).toThrow(
+        /holds AISDLC-5, which is still inflight/,
+      );
+      expect(spawned).toHaveLength(0);
+    });
+
+    it('refuses a name that is not an executor in the roster', () => {
+      expect(() =>
+        clearSelf({ self: 'operator-dispatch', role: 'executor' }, executorDeps()),
+      ).toThrow(/not an executor/);
+      expect(spawned).toHaveLength(0);
+    });
   });
 });

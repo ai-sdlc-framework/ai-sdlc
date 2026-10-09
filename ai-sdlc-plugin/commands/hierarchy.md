@@ -24,7 +24,7 @@ scripts directory and forwards the arguments.
 - `up`, `status`, `terminals`, `brief`, `down` run as given.
 - `attach <name>` and `up --attach` cannot switch your terminal from inside Claude
   Code: the script prints the exact shell command to run instead.
-- `clear`, `tick`, `route-decision`, `check-sender`, `check-repo` are refused with a
+- `clear`, `tick`, `route-decision`, `check-sender`, `check-repo`, `executor-start` are refused with a
   one-line explanation: they belong to the dispatch and executor loop bodies.
 - No arguments prints `cli-hierarchy --help` followed by a common-recipes block.
 - If the pipeline-cli bin cannot be found, the same install hint as

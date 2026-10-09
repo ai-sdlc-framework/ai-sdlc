@@ -19,6 +19,8 @@
  *     `claude-p-shell` manifest emission per session.
  */
 
+export { claimWithWait, DEFAULT_CLAIM_POLL_MS, type ClaimWaitOptions } from './claim-wait.js';
+
 export {
   checkEligibility,
   claimNext,

@@ -9,11 +9,12 @@
  * Subcommands:
  *
  *   - `peek` — print queue/inflight/done/failed counts as JSON.
- *   - `claim --worker-kind <kind> [--worker <name>]` — atomic claim of the
+ *   - `claim --worker-kind <kind> [--worker <name>] [--wait <sec>]` — atomic claim of the
  *     next eligible manifest. Prints the manifest JSON on stdout when a
  *     claim succeeds; prints `{"claimed":false}` and exits 0 when the queue
  *     has no eligible manifest. (Empty-queue is NOT an error — it's the
- *     hibernate signal for the Worker loop.)
+ *     hibernate signal for the Worker loop.) With `--wait <sec>` it blocks,
+ *     with no model calls, until a manifest is claimed or the wait lapses.
  *   - `collect-verdicts [--include-failed]` — print all done/+failed/
  *     verdicts as a JSON array, oldest first.
  *   - `write-verdict --task-id <id> --outcome <enum> [--worker <name>] [other
@@ -125,6 +126,7 @@ import process from 'node:process';
 
 import {
   claimNext,
+  claimWithWait,
   collectVerdicts,
   DEFAULT_BOARD_DIR,
   enqueueTasks,
@@ -320,12 +322,25 @@ export async function runDispatchCli(
         process.stderr.write('cli-dispatch claim: --worker needs a non-empty name\n');
         return 2;
       }
-      const result = claimNext(
-        boardDir,
-        kind as WorkerKind,
-        undefined,
-        workerId === undefined ? {} : { workerId },
-      );
+      const waitRaw = flags['wait'];
+      if (waitRaw !== undefined && !/^[0-9]+$/.test(waitRaw)) {
+        process.stderr.write(
+          `cli-dispatch claim: --wait must be a whole number of seconds (got '${waitRaw}')\n`,
+        );
+        return 2;
+      }
+      const result =
+        waitRaw === undefined
+          ? claimNext(
+              boardDir,
+              kind as WorkerKind,
+              undefined,
+              workerId === undefined ? {} : { workerId },
+            )
+          : await claimWithWait(boardDir, kind as WorkerKind, {
+              waitSec: Number.parseInt(waitRaw, 10),
+              ...(workerId === undefined ? {} : { workerId }),
+            });
       if (!result.claimed) {
         out({ claimed: false });
         return 0;
@@ -1081,7 +1096,7 @@ Usage:
 
 Subcommands:
   peek
-  claim --worker-kind {in-session-agent|claude-p-shell} [--worker <name>]
+  claim --worker-kind {in-session-agent|claude-p-shell} [--worker <name>] [--wait <sec>]
   collect-verdicts [--include-failed]
   write-verdict --task-id <id> --outcome <enum> [--worker <name>; required for executors]
                 [--commit-sha <s>]

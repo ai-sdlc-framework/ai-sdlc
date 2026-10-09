@@ -23,7 +23,7 @@ spec:
     quotaBackoffSec: 600 # OQ-7 base cool-down on 429
     quotaBackoffMaxSec: 3600 # OQ-7 exponential ceiling
     quotaBackoffMultiplier: 2 # OQ-7 doubling per consecutive 429
-    emptyQueueHibernateSec: 30 # Hibernate when queue empty
+    emptyQueueHibernateSec: 1800 # Hibernate when queue empty
 
   # Phase 2 forward-compat — Workers ignore this until claude-p-shell ships.
   claudePShell:

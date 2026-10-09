@@ -601,10 +601,11 @@ One pass of the loop:
 2. **Claim.** `cli-dispatch claim --worker-kind in-session-agent --worker <name>`
    moves the next eligible manifest to `inflight/` with `workerId` equal to the
    roster name. That equality is what lets `cli-hierarchy status` and `down` join an
-   inflight task to its session. When nothing is eligible, the executor schedules a
-   wake-up on the empty-queue interval (30 seconds, or
-   `spec.inSessionAgent.emptyQueueHibernateSec` from the dispatch config) and tries
-   again.
+   inflight task to its session. When nothing is eligible, the executor blocks on
+   the board (`cli-hierarchy executor-start`, up to 1,500 s, no model calls
+   while it waits); if still nothing is eligible it clears its own context and restarts
+   (`cli-hierarchy clear --self --resume-after 30`), or, with no tmux pane to clear, schedules a
+   wake-up after `spec.inSessionAgent.emptyQueueHibernateSec` (default 1800 seconds).
 3. **Execute.** It runs `/ai-sdlc execute <task-id>` with the task id and no other
    argument. The pipeline is not modified for executors.
 4. **Report.** `cli-dispatch complete --task-id <id> --outcome <outcome>
