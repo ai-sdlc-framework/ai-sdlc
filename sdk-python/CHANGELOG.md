@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-python-v0.2.0...sdk-python-v0.2.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* hash-pin PyPI build deps and drop identity replace (AISDLC-704.4) ([#1266](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1266)) ([92e6e25](https://github.com/ai-sdlc-framework/ai-sdlc/commit/92e6e25b4633d622b1339d960453c7a48163c58e))
+
 ## [0.2.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-python-v0.1.1...sdk-python-v0.2.0) (2026-03-24)
 
 

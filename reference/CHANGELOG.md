@@ -1,5 +1,21 @@
 # @ai-sdlc/reference
 
+## [0.30.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.29.0...reference-v0.30.0) (2026-10-09)
+
+
+### Features
+
+* add mark-ready-after-codeql to dispatch operational authority (AISDLC-736) ([#1264](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1264)) ([afed0d8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/afed0d87c6556e16d18e0b83bfcaa5a650c63113))
+* executor idle path blocks on claim and self-clears (AISDLC-759) ([#1287](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1287)) ([92e1d1b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/92e1d1bf2c1bf449f7d90dd100ec3434883e349b))
+* merge policy follows governance.allowMerge everywhere (AISDLC-753) ([#1258](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1258)) ([39e37d7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/39e37d762986f8b1a15ad0526dbce09cc9f3876e))
+* **orchestrator:** resume a done task with feedback, wake idle executors (AISDLC-738) ([#1295](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1295)) ([23643ec](https://github.com/ai-sdlc-framework/ai-sdlc/commit/23643ec973e35d4d36bd666994229b9ba097018b))
+
+
+### Bug Fixes
+
+* clear known dependency vulnerabilities reported by Scorecard (AISDLC-745) ([#1273](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1273)) ([5b7a40e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5b7a40e501c802a400b47b508ce65b204f6454c1))
+* **pipeline-cli:** usage pane bad-ledger-line test pins the clock (AISDLC-767) ([#1282](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1282)) ([22aa377](https://github.com/ai-sdlc-framework/ai-sdlc/commit/22aa377e17b1b7a62deb712e34e04ba3a87b36ba))
+
 ## [0.29.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.28.0...reference-v0.29.0) (2026-10-06)
 
 

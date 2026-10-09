@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.30.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.29.0...pipeline-cli-v0.30.0) (2026-10-09)
+
+
+### Features
+
+* add mark-ready-after-codeql to dispatch operational authority (AISDLC-736) ([#1264](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1264)) ([afed0d8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/afed0d87c6556e16d18e0b83bfcaa5a650c63113))
+* clock discipline lint rule, test convention and reviewer check (AISDLC-769) ([#1288](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1288)) ([6c9ccd8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/6c9ccd832bee37c179f6e638e3b29b53a9da0034))
+* context discipline in the hierarchy command bodies: dispatch self-clears after every tick, planner clears at 150k (AISDLC-741) ([#1246](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1246)) ([347d48a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/347d48a50d988d8575099e7d94a1416312e02a13))
+* executor idle path blocks on claim and self-clears (AISDLC-759) ([#1287](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1287)) ([92e1d1b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/92e1d1bf2c1bf449f7d90dd100ec3434883e349b))
+* merge policy follows governance.allowMerge everywhere (AISDLC-753) ([#1258](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1258)) ([39e37d7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/39e37d762986f8b1a15ad0526dbce09cc9f3876e))
+* **orchestrator:** dispatch idle hibernation and self-clear on every wake path (AISDLC-760) ([#1290](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1290)) ([3cafb1d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3cafb1db115593d131a18a84e486e8a9f6c66848))
+* **orchestrator:** resume a done task with feedback, wake idle executors (AISDLC-738) ([#1295](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1295)) ([23643ec](https://github.com/ai-sdlc-framework/ai-sdlc/commit/23643ec973e35d4d36bd666994229b9ba097018b))
+
+
+### Bug Fixes
+
+* clear known dependency vulnerabilities reported by Scorecard (AISDLC-745) ([#1273](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1273)) ([5b7a40e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5b7a40e501c802a400b47b508ce65b204f6454c1))
+* harden git fetch against option injection in three sites (AISDLC-704.3) ([#1263](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1263)) ([4400224](https://github.com/ai-sdlc-framework/ai-sdlc/commit/44002247ffebd833a389b58121d6672d1c7b3d1f))
+* hash-pin PyPI build deps and drop identity replace (AISDLC-704.4) ([#1266](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1266)) ([92e6e25](https://github.com/ai-sdlc-framework/ai-sdlc/commit/92e6e25b4633d622b1339d960453c7a48163c58e))
+* linear-time spec-kit parser matching, no polynomial ReDoS (AISDLC-704.1) ([#1262](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1262)) ([04c7ccc](https://github.com/ai-sdlc-framework/ai-sdlc/commit/04c7ccca96e202c9ab1af05e8692d9d04be4afda))
+* **orchestrator:** dor-evaluate feeds frontmatter dependencies to Gate 7 (AISDLC-758) ([#1300](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1300)) ([481581b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/481581be80aa899d68c8db3031c7456df3a52904))
+* **orchestrator:** persist Decision Catalog to the remote on add/answer/escalate (AISDLC-546) ([#1236](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1236)) ([11c9de3](https://github.com/ai-sdlc-framework/ai-sdlc/commit/11c9de3d2d52d1bab7256771b7930b0372ea45f2))
+* **orchestrator:** untrusted-run marker survives child agents, all outside paths (AISDLC-730) ([#1235](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1235)) ([cc00c7e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cc00c7ea5a314428b15bed6916c20b7d8e4fe0f0))
+* **pipeline-cli:** usage pane bad-ledger-line test pins the clock (AISDLC-767) ([#1282](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1282)) ([22aa377](https://github.com/ai-sdlc-framework/ai-sdlc/commit/22aa377e17b1b7a62deb712e34e04ba3a87b36ba))
+* task-from-file tick works for a task file not on main (AISDLC-770) ([#1289](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1289)) ([4628da1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4628da13d36820da97fff92d57f4d3af141362af))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.30.0
+
 ## [0.29.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.28.0...pipeline-cli-v0.29.0) (2026-10-06)
 
 

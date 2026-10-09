@@ -5,6 +5,29 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.25.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.24.0...ai-sdlc-plugin-v0.25.0) (2026-10-09)
+
+
+### Features
+
+* /ai-sdlc hierarchy plugin command wraps cli-hierarchy (AISDLC-751) ([#1256](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1256)) ([c4ad39a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c4ad39a109ffc490073a0520eadb24a0063d9a64))
+* add mark-ready-after-codeql to dispatch operational authority (AISDLC-736) ([#1264](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1264)) ([afed0d8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/afed0d87c6556e16d18e0b83bfcaa5a650c63113))
+* clock discipline lint rule, test convention and reviewer check (AISDLC-769) ([#1288](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1288)) ([6c9ccd8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/6c9ccd832bee37c179f6e638e3b29b53a9da0034))
+* context discipline in the hierarchy command bodies: dispatch self-clears after every tick, planner clears at 150k (AISDLC-741) ([#1246](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1246)) ([347d48a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/347d48a50d988d8575099e7d94a1416312e02a13))
+* executor idle path blocks on claim and self-clears (AISDLC-759) ([#1287](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1287)) ([92e1d1b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/92e1d1bf2c1bf449f7d90dd100ec3434883e349b))
+* merge policy follows governance.allowMerge everywhere (AISDLC-753) ([#1258](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1258)) ([39e37d7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/39e37d762986f8b1a15ad0526dbce09cc9f3876e))
+* **orchestrator:** dispatch idle hibernation and self-clear on every wake path (AISDLC-760) ([#1290](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1290)) ([3cafb1d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3cafb1db115593d131a18a84e486e8a9f6c66848))
+* **orchestrator:** resume a done task with feedback, wake idle executors (AISDLC-738) ([#1295](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1295)) ([23643ec](https://github.com/ai-sdlc-framework/ai-sdlc/commit/23643ec973e35d4d36bd666994229b9ba097018b))
+
+
+### Bug Fixes
+
+* **ci:** key governance boundary on fork vs same-repo head (AISDLC-740) ([#1267](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1267)) ([3a48a6d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3a48a6d9b0fc55d15d0deb3b266b16e08363ed63))
+* **ci:** parent stale-index self-heal and post-rewrite guard survives GIT_DIR and stale hook copies (AISDLC-750) ([#1253](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1253)) ([e9b6c41](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e9b6c417c65489a217c63184272cd5d1b0f46c1b))
+* clear known dependency vulnerabilities reported by Scorecard (AISDLC-745) ([#1273](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1273)) ([5b7a40e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5b7a40e501c802a400b47b508ce65b204f6454c1))
+* **orchestrator:** derive review-policy banner from inspected enforcement state (AISDLC-561) ([#1294](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1294)) ([112ec2a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/112ec2aa611fe2ab2355d0d8b48811c0391371a5))
+* **orchestrator:** untrusted-run marker survives child agents, all outside paths (AISDLC-730) ([#1235](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1235)) ([cc00c7e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cc00c7ea5a314428b15bed6916c20b7d8e4fe0f0))
+
 ## [0.24.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.23.0...ai-sdlc-plugin-v0.24.0) (2026-10-06)
 
 

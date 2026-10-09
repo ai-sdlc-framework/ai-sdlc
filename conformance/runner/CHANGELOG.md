@@ -1,5 +1,20 @@
 # @ai-sdlc/conformance
 
+## [0.30.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/conformance/runner-v0.29.0...conformance/runner-v0.30.0) (2026-10-09)
+
+
+### Bug Fixes
+
+* clear known dependency vulnerabilities reported by Scorecard (AISDLC-745) ([#1273](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1273)) ([5b7a40e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5b7a40e501c802a400b47b508ce65b204f6454c1))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/orchestrator bumped to 0.30.0
+    * @ai-sdlc/reference bumped to 0.30.0
+
 ## [0.29.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/conformance/runner-v0.28.0...conformance/runner-v0.29.0) (2026-10-06)
 
 
