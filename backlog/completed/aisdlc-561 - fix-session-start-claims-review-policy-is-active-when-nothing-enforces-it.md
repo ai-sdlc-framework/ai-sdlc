@@ -3,7 +3,7 @@ id: AISDLC-561
 title: >-
   fix(hooks): stop telling every agent the review policy is "active" when
   nothing enforces it, and make the reviewer set explicit
-status: To Do
+status: Done
 assignee: []
 labels:
   - adoption
@@ -18,6 +18,7 @@ references:
   - ai-sdlc-plugin/agents/code-reviewer.md
   - ai-sdlc-plugin/agents/security-reviewer.md
   - ai-sdlc-plugin/agents/test-reviewer.md
+updated_date: '2026-10-09 19:02'
 ---
 
 ## Description
@@ -63,15 +64,15 @@ Raised to critical 2026-10-09: first-run defect in the public-relations push win
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] #1 With enforcement absent, the session banner does NOT assert the policy
+- [x] #1 With enforcement absent, the session banner does NOT assert the policy
       is active, and states what is missing
-- [ ] #2 With enforcement present, the banner says so — the two cases are
+- [x] #2 With enforcement present, the banner says so — the two cases are
       distinguishable to a reader
-- [ ] #3 The wording is computed from inspected state, not from file existence
-- [ ] #4 The reviewer set (default vs opt-in, and how to enable) is stated
+- [x] #3 The wording is computed from inspected state, not from file existence
+- [x] #4 The reviewer set (default vs opt-in, and how to enable) is stated
       where an adopter encounters it, not only in framework docs
-- [ ] #5 Hermetic tests cover both banner states and are mutation-sensitive
-- [ ] #6 Verified in a repo outside this monorepo
+- [x] #5 Hermetic tests cover both banner states and are mutation-sensitive
+- [x] #6 Verified in a repo outside this monorepo
 <!-- SECTION:ACCEPTANCE:END -->
 
 ## Implementation Notes
@@ -85,3 +86,31 @@ Note for whoever picks this up: `session-start.js` is being modified by PR #962
 (AISDLC-557) — credential redaction and a module-local error capture. Rebase
 rather than branching from an older main.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+## Summary
+The SessionStart review-policy banner now derives its wording from `ai-sdlc doctor`'s attestation-governance check instead of from the policy file existing. It reports ENFORCED, AVAILABLE but NOT ENFORCED (naming what is missing and the fix), or AVAILABLE but not confirmed, and always states the reviewer set (default vs opt-in and how to enable).
+
+## Changes
+- `ai-sdlc-plugin/hooks/session-start.js` (modified): uses the banner helper
+- `ai-sdlc-plugin/hooks/lib/review-policy-banner.js` (new): runs `ai-sdlc doctor --only attestation-governance`, classifies output, renders banner
+- `ai-sdlc-plugin/hooks/review-policy-banner.test.mjs` (new): hermetic, mutation-sensitive tests for all three states
+- `orchestrator/src/cli/commands/doctor.ts` (modified): new `--only <id>` option
+- `orchestrator/src/cli/commands/doctor.test.ts` (modified): tests for `--only`
+
+## Design decisions
+- **Single source of truth**: the hook shells out to the doctor check rather than reimplementing it; missing CLI, 6s timeout or bad output yields "not confirmed", never "active".
+- **Cost**: session start can take up to 6s (the check may call `gh`) when the policy file exists.
+- **Commit scope** is `orchestrator` because commitlint rejects `hooks`.
+
+## Verification
+- `pnpm build` — passed
+- `pnpm test` — passed (40 plugin hook tests, 158 doctor tests, orchestrator 5024, dark-code:check)
+- `pnpm lint` — clean
+- `pnpm format:check` — clean
+- AC6 checked in a temp git repo outside the monorepo with the real built CLI.
+- 3 reviews approved (Claude-native code/test reviewers after Codex quota exhaustion; security on opus)
+
+## Follow-up
+- declined: `doctor --only X --fix` still runs all fixes (minor, flagged by two reviewers; the hook never passes --fix)
