@@ -281,7 +281,9 @@ cli-hierarchy executor-start [--wait <seconds>]
 
 Prints the `[executor] I am '<name>'` identity line, then one JSON line
 `{"name", "project", "dispatch", "taskId": "<id>"|null, "manifest": {...}}`. `--wait` defaults to
-1500. Exit `1` when the session is not an executor or the working directory is not the project's
+1500. Because that exceeds the Bash tool's 600 s foreground cap, the executor runs it with the Bash
+tool's `run_in_background: true`, stops its turn, and reads the JSON when the completion
+notification re-invokes the session. Exit `1` when the session is not an executor or the working directory is not the project's
 repository.
 
 **Idle path.** When `taskId` is `null` the executor runs `cli-hierarchy clear --self --resume-after 30`

@@ -29,23 +29,47 @@ export interface ClaimWaitOptions {
   nowMs?: () => number;
 }
 
-/** Resolve after `ms`, or earlier when `queueDir` changes. Never rejects. */
-function waitForChange(queueDir: string, ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    let watcher: ReturnType<typeof watch> | undefined;
-    const done = (): void => {
-      clearTimeout(timer);
-      watcher?.close();
-      resolve();
-    };
-    const timer = setTimeout(done, ms);
-    try {
-      watcher = watch(queueDir, { persistent: true }, done);
-      watcher.on('error', done);
-    } catch {
-      /* no watch support here: the poll floor still wakes us */
-    }
-  });
+/**
+ * One watcher on `queueDir`, opened before the first claim attempt and reused for the
+ * whole wait: a change that lands after a claim attempt (or while no wait is pending)
+ * is remembered and wakes the next wait at once.
+ */
+function openQueueWatch(queueDir: string): {
+  wait: (ms: number) => Promise<void>;
+  close: () => void;
+} {
+  let changed = false;
+  let wake: (() => void) | undefined;
+  let watcher: ReturnType<typeof watch> | undefined;
+  const signal = (): void => {
+    changed = true;
+    wake?.();
+  };
+  try {
+    watcher = watch(queueDir, { persistent: true }, signal);
+    watcher.on('error', signal);
+  } catch {
+    /* no watch support here: the poll floor still wakes us */
+  }
+  return {
+    wait: (ms) =>
+      new Promise<void>((resolve) => {
+        if (changed) {
+          changed = false;
+          resolve();
+          return;
+        }
+        const timer = setTimeout(done, ms);
+        function done(): void {
+          clearTimeout(timer);
+          wake = undefined;
+          changed = false;
+          resolve();
+        }
+        wake = done;
+      }),
+    close: () => watcher?.close(),
+  };
 }
 
 /**
@@ -66,12 +90,18 @@ export async function claimWithWait(
   const pollMs = opts.pollMs ?? DEFAULT_CLAIM_POLL_MS;
   const deadline = nowMs() + opts.waitSec * 1000;
   const queueDir = path.join(boardDir, 'queue');
-  for (;;) {
-    const result = claim(boardDir, workerKind, opts.workerId);
-    if (result.claimed) return result;
-    const remaining = deadline - nowMs();
-    if (remaining <= 0) return result;
-    if (!existsSync(queueDir)) ensureBoardDirs(boardDir);
-    await waitForChange(queueDir, Math.min(pollMs, remaining));
+  if (!existsSync(queueDir)) ensureBoardDirs(boardDir);
+  // Watch first, then claim: an enqueue between a failed claim and the wait is not missed.
+  const queueWatch = openQueueWatch(queueDir);
+  try {
+    for (;;) {
+      const result = claim(boardDir, workerKind, opts.workerId);
+      if (result.claimed) return result;
+      const remaining = deadline - nowMs();
+      if (remaining <= 0) return result;
+      await queueWatch.wait(Math.min(pollMs, remaining));
+    }
+  } finally {
+    queueWatch.close();
   }
 }

@@ -2,14 +2,14 @@
  * Hermetic tests for the blocking claim: real temp-dir boards, no LLM, no network.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { runDispatchCli } from '../cli/dispatch.js';
-import { ensureBoardDirs, writeManifest } from './board.js';
+import { claimNext, ensureBoardDirs, writeManifest } from './board.js';
 import { claimWithWait } from './claim-wait.js';
 import type { DispatchManifest } from './types.js';
 
@@ -44,10 +44,40 @@ describe('claimWithWait', () => {
   });
 
   it('returns claimed:false only after the wait lapses', async () => {
-    const t0 = Date.now();
-    const r = await claimWithWait(board, 'in-session-agent', { waitSec: 1, pollMs: 100 });
+    let now = 1_000_000;
+    let attempts = 0;
+    const r = await claimWithWait(board, 'in-session-agent', {
+      waitSec: 1,
+      pollMs: 100,
+      nowMs: () => now,
+      claim: () => {
+        attempts += 1;
+        now += 100; // each pass advances the injected clock one poll
+        return { claimed: false };
+      },
+    });
     expect(r.claimed).toBe(false);
-    expect(Date.now() - t0).toBeGreaterThanOrEqual(900);
+    expect(attempts).toBeGreaterThanOrEqual(10);
+  });
+
+  it('catches an enqueue that lands between a failed claim and the wait', async () => {
+    let attempts = 0;
+    const r = await claimWithWait(board, 'in-session-agent', {
+      waitSec: 60,
+      workerId: 'w1',
+      pollMs: 60_000,
+      claim: (dir, kind, workerId) => {
+        attempts += 1;
+        if (attempts === 1) {
+          // First attempt finds nothing; the manifest arrives right after it.
+          queueMicrotask(() => writeManifest(board, mkManifest('AISDLC-9')));
+          return { claimed: false };
+        }
+        return claimNext(dir, kind, undefined, workerId === undefined ? {} : { workerId });
+      },
+    });
+    expect(r.claimed).toBe(true);
+    expect(r.manifest?.taskId).toBe('AISDLC-9');
   });
 
   it('claims a manifest already queued without waiting', async () => {
@@ -148,5 +178,23 @@ describe('cli-dispatch claim --wait', () => {
       '1',
     ]);
     expect(JSON.parse(r.out)).toEqual({ claimed: false });
+  });
+});
+
+describe('emptyQueueHibernateSec default', () => {
+  const repoRoot = path.resolve(__dirname, '../../..');
+
+  it('is 1800 in the schema and the example config', () => {
+    const schema = JSON.parse(
+      readFileSync(path.join(repoRoot, 'spec/schemas/dispatch-config.v1.schema.json'), 'utf8'),
+    );
+    expect(
+      schema.properties.spec.properties.inSessionAgent.properties.emptyQueueHibernateSec.default,
+    ).toBe(1800);
+    const yaml = readFileSync(
+      path.join(repoRoot, 'spec/examples/dispatch-configs/default-in-session-agent.yaml'),
+      'utf8',
+    );
+    expect(yaml).toMatch(/emptyQueueHibernateSec: 1800\b/);
   });
 });

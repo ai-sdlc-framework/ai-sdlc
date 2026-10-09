@@ -147,6 +147,23 @@ describe('clearExecutor', () => {
     expect(result.resumed).toBe(true);
   });
 
+  it('does not count a bare mention of executor-start (no --wait) as reported back', async () => {
+    resumes = false;
+    const base = run;
+    const mentionRun: CommandRunner = (file, args) => {
+      const literal = args[args.indexOf('--') + 1];
+      if (args[0] === 'send-keys' && args.includes('-l') && literal === '/ai-sdlc executor') {
+        screen += 'reading about cli-hierarchy.mjs executor-start in the docs\n';
+      }
+      return base(file, args);
+    };
+    const result = await clearExecutor(
+      { executor: 'executor-alpha', settleMs: 500 },
+      deps({ run: mentionRun }),
+    );
+    expect(result.resumed).toBe(false);
+  });
+
   it('never sends keys to another pane', async () => {
     await clearExecutor({ executor: 'executor-alpha', settleMs: 0 }, deps());
     for (const c of sends()) expect(c.args[2]).toBe('%7');

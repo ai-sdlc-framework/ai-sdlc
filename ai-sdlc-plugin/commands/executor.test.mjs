@@ -31,6 +31,8 @@ describe('executor command', () => {
 
   it('starts with one executor-start call that blocks on the board', () => {
     assert.match(body, /cli-hierarchy\.mjs" executor-start[^\n]*--wait 1500/);
+    assert.match(body, /run_in_background: true/);
+    assert.match(body, /600 s foreground\s+cap/);
     assert.match(body, /collision suffix/);
     assert.match(body, /with no model calls/);
     assert.doesNotMatch(body, /hierarchy\.json/);

@@ -605,7 +605,7 @@ One pass of the loop:
    the board (`cli-hierarchy executor-start`, up to 1,500 s, no model calls
    while it waits); if still nothing is eligible it clears its own context and restarts
    (`cli-hierarchy clear --self --resume-after 30`), or, with no tmux pane to clear, schedules a
-   wake-up after `spec.inSessionAgent.emptyQueueHibernateSec` (default 1800 seconds).
+   wake-up after `spec.inSessionAgent.emptyQueueHibernateSec` (default 1800 seconds; this default intentionally applies to Pattern Z Workers running `/ai-sdlc dispatch-worker` too).
 3. **Execute.** It runs `/ai-sdlc execute <task-id>` with the task id and no other
    argument. The pipeline is not modified for executors.
 4. **Report.** `cli-dispatch complete --task-id <id> --outcome <outcome>

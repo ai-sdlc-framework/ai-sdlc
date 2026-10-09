@@ -86,7 +86,8 @@ function reportBackMarker(name: string): string {
   return `[executor] I am '${name}'`;
 }
 
-const EXECUTOR_START_MARKER = 'cli-hierarchy.mjs executor-start';
+// The real invocation carries `--wait`; a bare mention of the command does not count.
+const EXECUTOR_START_MARKER = /cli-hierarchy\.mjs"?\s+executor-start\b[^\n]*--wait\b/g;
 
 /** How many times the marker is visible in the pane right now (0 when the pane cannot be read). */
 function countMarker(run: CommandRunner, target: string, name: string): number {
@@ -97,8 +98,7 @@ function countMarker(run: CommandRunner, target: string, name: string): number {
   return (
     r.stdout.split(reportBackMarker(name)).length -
     1 +
-    r.stdout.split(EXECUTOR_START_MARKER).length -
-    1
+    (r.stdout.match(EXECUTOR_START_MARKER)?.length ?? 0)
   );
 }
 
