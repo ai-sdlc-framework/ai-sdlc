@@ -10,7 +10,7 @@ labels:
   - attestation
   - onboarding
   - ci:no-issue-required
-priority: high
+priority: critical
 dependencies:
   - AISDLC-560
 references:
@@ -56,6 +56,8 @@ question nobody was prompted to answer.
   fix.
 - Make the reviewer set explicit at the point an adopter will see it: which
   reviewers run by default, which are opt-in, and how to enable them.
+
+Raised to critical 2026-10-09: first-run defect in the public-relations push window (see AISDLC-771).
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
