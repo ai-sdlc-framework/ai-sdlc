@@ -6,6 +6,9 @@ import { UsagePane, USAGE_EMPTY_TEXT, USAGE_ERROR_TEXT, USAGE_PANE_HEADING } fro
 import type { UsagePaneData } from '../../usage/pane-data.js';
 import type { ReportRow } from '../../usage/report.js';
 
+/** Fixed clock for tests that write fixed-timestamp ledger files, so the read window always covers them. */
+const PINNED_NOW = new Date('2026-09-10T12:00:00.000Z');
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -307,7 +310,9 @@ describe('UsagePane', () => {
         { dir },
       );
       appendFileSync(join(dir, ledgerFileForTs(ts)), 'null\n');
-      const { lastFrame } = render(<UsagePane deps={{ usageDir: dir, priceRows: [] }} />);
+      const { lastFrame } = render(
+        <UsagePane deps={{ usageDir: dir, priceRows: [], now: () => PINNED_NOW }} />,
+      );
       const f = await waitForFrame(lastFrame, (x) => !x.includes('Loading usage'));
       expect(f).toContain(USAGE_ERROR_TEXT.slice(0, 30));
       expect(f).not.toContain(dir);
@@ -328,7 +333,9 @@ describe('UsagePane', () => {
       mkdirSync(dir);
       chmodSync(dir, 0o000);
       try {
-        const { lastFrame } = render(<UsagePane deps={{ usageDir: dir, priceRows: [] }} />);
+        const { lastFrame } = render(
+          <UsagePane deps={{ usageDir: dir, priceRows: [], now: () => PINNED_NOW }} />,
+        );
         const f = await waitForFrame(lastFrame, (x) => !x.includes('Loading usage'));
         expect(f).toContain(USAGE_ERROR_TEXT.slice(0, 30));
         expect(f).not.toContain('EACCES');
