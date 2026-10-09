@@ -1,0 +1,77 @@
+# Reusable, base-only attestation verification for CONSUMER repos (AISDLC-757).
+#
+# One-line consumer usage (the caller MUST be triggered by `pull_request_target`
+# so the gate definition always comes from the base branch):
+#
+#   on:
+#     pull_request_target:
+#       branches: [main]
+#   permissions:
+#     contents: read
+#   jobs:
+#     verify-attestation:
+#       uses: ai-sdlc-framework/ai-sdlc/.github/workflows/consumer-verify-attestation.yml@<pinned-sha>
+#
+# Trust model: only the BASE sha is checked out (persist-credentials false,
+# contents: read). The PR head is fetched as git objects, never checked out, and
+# only the envelope + transcript leaves are copied in as untrusted data by
+# materialize-head-data.mjs. The trust root (.ai-sdlc/trusted-reviewers.yaml and
+# the independence policy) stays the base copy; the classifier, `cli-attestation
+# verify` and `cli-attestation independence-policy` run from trusted tooling
+# (the ai-sdlc tools checkout and npm-installed runtime), never from the head.
+# PR-derived values reach scripts only through `env:`.
+name: consumer-verify-attestation
+
+on:
+  workflow_call:
+    inputs:
+      pipeline-cli-version:
+        description: Version floor for @ai-sdlc/pipeline-cli and @ai-sdlc/orchestrator (x.y.z, installed as ^x.y.z).
+        type: string
+        required: false
+        default: '0.29.0'
+      required-independence-tier:
+        description: Floor (none|attested|isolated) for the base independence-policy.yaml requiredTier.
+        type: string
+        required: false
+        default: none
+      ai-sdlc-ref:
+        description: Ref of the ai-sdlc repository supplying the base-only tooling. Pin to a full commit SHA.
+        type: string
+        required: false
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  verify-attestation:
+    name: Verify attestation (base-only)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out BASE sha only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Check out trusted ai-sdlc tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ai-sdlc-framework/ai-sdlc
+          ref: ${{ inputs.ai-sdlc-ref }}
+          path: _ai-sdlc-tools
+          persist-credentials: false
+
+      - name: Verify attestation against base trust roots
+        uses: ./_ai-sdlc-tools/.github/actions/verify-attestation-base
+        with:
+          base-sha: ${{ github.event.pull_request.base.sha }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          head-repository: ${{ github.event.pull_request.head.repo.full_name }}
+          github-token: ${{ github.token }}
+          pipeline-cli-version: ${{ inputs.pipeline-cli-version }}
+          required-independence-tier: ${{ inputs.required-independence-tier }}
