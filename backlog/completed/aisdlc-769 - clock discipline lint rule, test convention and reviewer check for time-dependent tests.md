@@ -2,7 +2,7 @@
 id: AISDLC-769
 title: >-
   Clock discipline: lint rule, test convention and reviewer check for time-dependent tests
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-09'
 labels:
