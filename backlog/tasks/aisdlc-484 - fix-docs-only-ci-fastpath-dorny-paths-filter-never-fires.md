@@ -13,7 +13,7 @@ labels:
   - cost
   - performance
 dependencies: []
-priority: medium
+priority: high
 ---
 
 ## Description
