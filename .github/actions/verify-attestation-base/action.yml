@@ -1,0 +1,143 @@
+name: Verify attestation (base-only)
+description: >-
+  Verifies a PR's AI-SDLC review attestation using ONLY base-branch trust
+  roots and trusted tooling. Run it from a `pull_request_target` workflow after
+  checking out the BASE sha (persist-credentials: false, contents: read). The
+  PR head is fetched as git objects and only the envelope and transcript leaves
+  are copied in, as untrusted data (AISDLC-757).
+inputs:
+  base-sha:
+    description: Base commit SHA (must equal the current checkout HEAD).
+    required: true
+  head-sha:
+    description: PR head commit SHA from the event payload.
+    required: true
+  head-repository:
+    description: Head repository full name (owner/repo); differs from the base repo for forks.
+    required: true
+  github-token:
+    description: Read-only token used to fetch head objects (private repos).
+    required: false
+    default: ''
+  pipeline-cli-version:
+    description: Version floor for @ai-sdlc/pipeline-cli and @ai-sdlc/orchestrator (installed as ^<version>).
+    required: false
+    default: '0.29.0'
+  required-independence-tier:
+    description: >-
+      Floor for the base policy's requiredTier (none|attested|isolated). The
+      tier itself is enforced by `cli-attestation independence-policy` against
+      the consumer's .ai-sdlc/independence-policy.yaml.
+    required: false
+    default: none
+runs:
+  using: composite
+  steps:
+    - name: Check base checkout and validate inputs
+      shell: bash
+      env:
+        BASE_SHA: ${{ inputs.base-sha }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        HEAD_REPO: ${{ inputs.head-repository }}
+        CLI_VERSION: ${{ inputs.pipeline-cli-version }}
+        TIER_FLOOR: ${{ inputs.required-independence-tier }}
+        NODE_OPTIONS: ''
+      run: |
+        set -euo pipefail
+        [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::base-sha must be 40 hex"; exit 1; }
+        [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be 40 hex"; exit 1; }
+        [[ "$HEAD_REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || { echo "::error::invalid head-repository"; exit 1; }
+        [[ "$CLI_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::pipeline-cli-version must be x.y.z"; exit 1; }
+        [[ "$TIER_FLOOR" =~ ^(none|attested|isolated)$ ]] || { echo "::error::required-independence-tier must be none|attested|isolated"; exit 1; }
+        [ "$(git rev-parse HEAD)" = "$BASE_SHA" ] || { echo "::error::checkout HEAD is not the base sha"; exit 1; }
+
+    - name: Fetch head objects (no checkout)
+      shell: bash
+      env:
+        HEAD_SHA: ${{ inputs.head-sha }}
+        HEAD_REPO: ${{ inputs.head-repository }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        NODE_OPTIONS: ''
+      run: |
+        set -euo pipefail
+        auth=()
+        if [ -n "$GH_TOKEN" ]; then
+          auth=(-c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')")
+        fi
+        git "${auth[@]}" fetch --no-tags --no-recurse-submodules "https://github.com/${HEAD_REPO}.git" "$HEAD_SHA"
+        [ "$(git rev-parse FETCH_HEAD)" = "$HEAD_SHA" ] || { echo "::error::fetched sha differs from event head sha"; exit 1; }
+        git cat-file -e "${HEAD_SHA}^{commit}"
+
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: 22
+
+    - name: Install trusted verifier runtime (outside the checkout)
+      id: runtime
+      shell: bash
+      env:
+        CLI_VERSION: ${{ inputs.pipeline-cli-version }}
+        NODE_OPTIONS: ''
+      run: |
+        set -euo pipefail
+        home="$RUNNER_TEMP/ai-sdlc-verifier"
+        mkdir -p "$home"
+        cd "$home"
+        npm init -y >/dev/null
+        npm install --no-save --ignore-scripts "@ai-sdlc/orchestrator@^${CLI_VERSION}" "@ai-sdlc/pipeline-cli@^${CLI_VERSION}"
+        echo "home=$home" >> "$GITHUB_OUTPUT"
+
+    - name: Classify changeset (base copy of the docs-only classifier)
+      id: classify
+      shell: bash
+      env:
+        BASE_SHA: ${{ inputs.base-sha }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        ACTION_PATH: ${{ github.action_path }}
+        NODE_OPTIONS: ''
+      run: |
+        set -euo pipefail
+        exempt=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | node "$ACTION_PATH/../../../scripts/is-docs-only-changeset.mjs")
+        echo "exempt=$exempt" >> "$GITHUB_OUTPUT"
+
+    - name: Materialize head attestation data (untrusted data only)
+      if: steps.classify.outputs.exempt != 'true'
+      shell: bash
+      env:
+        HEAD_SHA: ${{ inputs.head-sha }}
+        ACTION_PATH: ${{ github.action_path }}
+        NODE_OPTIONS: ''
+      run: node "$ACTION_PATH/materialize-head-data.mjs" --repo-root . --head-sha "$HEAD_SHA"
+
+    - name: Check independence-policy floor (base policy)
+      if: steps.classify.outputs.exempt != 'true'
+      shell: bash
+      env:
+        TIER_FLOOR: ${{ inputs.required-independence-tier }}
+        ACTION_PATH: ${{ github.action_path }}
+        NODE_OPTIONS: ''
+      run: node "$ACTION_PATH/check-policy-floor.mjs" --repo-root . --floor "$TIER_FLOOR"
+
+    - name: Verify attestation
+      if: steps.classify.outputs.exempt != 'true'
+      shell: bash
+      env:
+        BASE_SHA: ${{ inputs.base-sha }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        VERIFIER_HOME: ${{ steps.runtime.outputs.home }}
+        NODE_OPTIONS: ''
+      run: |
+        node "$VERIFIER_HOME/node_modules/@ai-sdlc/pipeline-cli/bin/cli-attestation.mjs" verify \
+          --head "$HEAD_SHA" --base "$BASE_SHA"
+
+    - name: Enforce independence policy
+      if: steps.classify.outputs.exempt != 'true'
+      shell: bash
+      env:
+        BASE_SHA: ${{ inputs.base-sha }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        VERIFIER_HOME: ${{ steps.runtime.outputs.home }}
+        NODE_OPTIONS: ''
+      run: |
+        node "$VERIFIER_HOME/node_modules/@ai-sdlc/pipeline-cli/bin/cli-attestation.mjs" independence-policy \
+          --head "$HEAD_SHA" --base "$BASE_SHA"
