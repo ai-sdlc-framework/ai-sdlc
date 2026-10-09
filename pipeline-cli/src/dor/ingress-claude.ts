@@ -119,6 +119,16 @@ function readdirOrEmpty(dir: string): string[] {
 }
 
 /**
+ * Declared-dependency refs (frontmatter `dependencies:` + `references:`) for
+ * Gate 7. Shared by `refineBacklogTask()` and the `dor-evaluate --body-file`
+ * CLI path so both feed the gate identically (AISDLC-758). Returns [] when
+ * the raw text has no frontmatter.
+ */
+export function declaredDependencyRefsFromFrontmatter(frontmatter: string): string[] {
+  return extractDeclaredDependencyRefs(frontmatter);
+}
+
+/**
  * Strip Backlog.md frontmatter to get just the task body. The DoR rubric
  * scores the body, not the YAML preamble. Returns the input unchanged if
  * no frontmatter is present.
@@ -206,7 +216,7 @@ export async function refineBacklogTask(
   // an always-empty list because nothing ever populated a declared-deps
   // field from frontmatter. Feed the task's `dependencies:` + `references:`
   // lists in so a body reference to an already-declared dependency passes.
-  const declaredDependencyRefs = extractDeclaredDependencyRefs(frontmatter);
+  const declaredDependencyRefs = declaredDependencyRefsFromFrontmatter(frontmatter);
   if (declaredDependencyRefs.length > 0) input.declaredDependencyRefs = declaredDependencyRefs;
 
   // Phase 4 (RFC-0011 §6.4 + AISDLC-115.5) — resolve the auto-pass match

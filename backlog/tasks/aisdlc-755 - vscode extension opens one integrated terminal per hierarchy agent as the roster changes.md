@@ -22,8 +22,6 @@ references:
   - release-please-config.json
 priority: medium
 dispatchable: true
-blocked:
-  reason: "Gate 7 CI path (dor-evaluate --body-file) ignores frontmatter dependencies and flags the declared AISDLC-754 sequencing sentence; override until AISDLC-758 lands"
 ---
 
 ## Description
