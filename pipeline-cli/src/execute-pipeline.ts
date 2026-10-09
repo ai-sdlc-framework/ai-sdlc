@@ -32,6 +32,8 @@ import {
 } from './steps/index.js';
 import { existsSync, unlinkSync } from 'node:fs';
 import { defaultRunner } from './runtime/exec.js';
+import { formatResumeFeedback, readResumeFeedback } from './dispatch/resume.js';
+import { join } from 'node:path';
 import {
   clearUntrustedMarker,
   withUntrustedEnv,
@@ -48,6 +50,11 @@ import {
   type ReviewerVerdict,
   type TaskSpec,
 } from './types.js';
+
+/** The dispatch board of the checkout the pipeline runs from. */
+function dispatchBoardDir(workDir: string): string {
+  return process.env.AI_SDLC_DISPATCH_BOARD_DIR ?? join(workDir, '.ai-sdlc', 'dispatch');
+}
 
 export async function executePipeline(opts: PipelineOptions): Promise<PipelineResult> {
   const logger = opts.logger ?? DEFAULT_LOGGER;
@@ -131,6 +138,20 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     task = validation.task;
   }
 
+  // AISDLC-738 — a finished task sent back for another round carries its
+  // feedback on the claimed board manifest; an explicit option wins.
+  const resume =
+    opts.resume ??
+    (() => {
+      const fb = readResumeFeedback(dispatchBoardDir(opts.workDir), opts.taskId);
+      return fb
+        ? {
+            feedback: formatResumeFeedback(fb),
+            ...(fb.prNumber !== undefined ? { prNumber: fb.prNumber } : {}),
+          }
+        : undefined;
+    })();
+
   // Step 2
   logger.progress('02-compute-branch', 'computing branch name');
   const branch = await computeBranchName({ taskId: opts.taskId, task, workDir: opts.workDir });
@@ -185,6 +206,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       worktreePath: branch.worktreePath,
       workDir: opts.workDir,
       runner: opts.runner,
+      ...(resume ? { resume: true } : {}),
       // AISDLC-224 — propagate autonomousMode so Step 3 can self-heal
       // stale branches in the orchestrator path (default false → manual path
       // unchanged).
@@ -267,6 +289,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       // AISDLC-393 — `'gh-issue'` skips the frontmatter patch (no file on disk)
       // but still writes the per-worktree sentinel the PreToolUse hook needs.
       sourceKind,
+      ...(resume ? { resume: true } : {}),
       // AISDLC-393 (round 2, AC-2 fix) — pass the inline spec so Step 4 can
       // materialise the synthetic task file the PreToolUse hook reads to
       // resolve `permittedExternalPaths`. Without this the hook returns
@@ -287,6 +310,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       worktreePath: branch.worktreePath,
       iteration: 1,
       sourceKind: opts.sourceKind,
+      ...(resume ? { resumeFeedback: resume.feedback } : {}),
     });
 
     // Step 5b — spawn developer (LLM)
@@ -440,6 +464,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       // signs the attestation envelope + commits it as a chore so push lands
       // a valid envelope at HEAD.
       sourceKind,
+      ...(resume ? { resume: true } : {}),
     });
 
     // AISDLC-393 (round 2, AC-2 fix) — explicit pre-push synthetic-file
@@ -485,6 +510,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
         ? { groundingAnnotations: initialVerdict.groundingAnnotations }
         : {}),
       runner: opts.runner,
+      ...(resume ? { resume: true } : {}),
       // AISDLC-393 — `'gh-issue'` formats the PR title with `(closes #N)` and
       // prepends `Closes #N` to the body so the issue auto-closes on merge.
       sourceKind,

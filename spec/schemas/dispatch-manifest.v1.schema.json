@@ -147,6 +147,21 @@
       "type": "string",
       "minLength": 1,
       "description": "The claiming session's roster name, recorded verbatim when the manifest is claimed. In a hierarchy it equals the roster name exactly, collision suffix included."
+    },
+    "resume": {
+      "type": "object",
+      "description": "Present when a finished task is sent back for another round. The executor reads it before running the task and the pipeline re-enters the task's existing worktree and branch.",
+      "required": ["note", "resumedAt", "resumedBy"],
+      "properties": {
+        "note": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "prNumber": { "type": "integer", "minimum": 1 },
+        "failingChecks": { "type": "array", "items": { "type": "string" }, "maxItems": 20 },
+        "findings": { "type": "array", "items": { "type": "string" }, "maxItems": 20 },
+        "resumedAt": { "type": "string", "format": "date-time" },
+        "resumedBy": { "type": "string", "minLength": 1 },
+        "priorOutcome": { "type": "string" }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

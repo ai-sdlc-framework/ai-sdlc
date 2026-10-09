@@ -12,6 +12,7 @@
 
 import { readInflightManifest, TASK_ID_RE, writeVerdict } from './board.js';
 import { snapshotFailedManifest } from './requeue.js';
+import { snapshotDoneManifest } from './resume.js';
 import type { DispatchVerdict, VerdictOutcome } from './types.js';
 import { isValidCause, isValidDecisionId, MAX_DECISION_IDS, oneLine } from './verdict-fields.js';
 
@@ -165,6 +166,8 @@ export function completeTask(boardDir: string, opts: CompleteOptions): CompleteR
   // The verdict removes the inflight manifest on a failure; keep a copy so the
   // task can be queued again by id.
   if (state === 'failed') snapshotFailedManifest(boardDir, inflight);
+  // A finished task may be sent back for another round, which needs its manifest.
+  else if (opts.outcome === 'success') snapshotDoneManifest(boardDir, inflight);
   const verdictPath = writeVerdict(boardDir, verdict);
   return { verdictPath, state, verdict };
 }

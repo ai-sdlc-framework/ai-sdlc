@@ -24,7 +24,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
-import { findTaskFile, parseTaskFile } from './01-validate.js';
+import { findTaskFile, isTaskFileCompleted, parseTaskFile } from './01-validate.js';
 import { patchFrontmatterStatus } from './04-flip-status.js';
 import { completeTaskAtomically } from '../cli/complete-task.js';
 import type { FinalizeTaskOptions, FinalizeTaskResult } from '../types.js';
@@ -58,6 +58,12 @@ export interface FinalizeStepOptions extends FinalizeTaskOptions {
    * still built so the orchestrator's PR-body composition has it.
    */
   sourceKind?: 'backlog' | 'gh-issue';
+  /**
+   * AISDLC-738 — resumed task: when the task file is already in the worktree's
+   * `backlog/completed/`, skip the Done flip and move (they landed with the
+   * first PR); attestation signing and the chore commit still run.
+   */
+  resume?: boolean;
 }
 
 /**
@@ -135,7 +141,9 @@ export async function finalizeTask(opts: FinalizeStepOptions): Promise<FinalizeT
   // `Closes #N` in the PR body. We still build the final summary above and
   // proceed to attestation signing + chore commit below so the signed
   // envelope lands at HEAD before push.
-  if (opts.sourceKind !== 'gh-issue') {
+  const alreadyCompleted =
+    opts.resume === true && isTaskFileCompleted(opts.taskId, opts.worktreePath);
+  if (opts.sourceKind !== 'gh-issue' && !alreadyCompleted) {
     // 1. Flip status to Done in the on-disk task file (key-preserving patch).
     // Prefer the worktree-local copy (that's what gets committed in the chore
     // commit). Fall back to the project workDir for environments where the

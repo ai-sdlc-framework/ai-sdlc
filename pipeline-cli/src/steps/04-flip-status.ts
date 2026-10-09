@@ -32,7 +32,7 @@
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { findTaskFile } from './01-validate.js';
+import { findTaskFile, isTaskFileCompleted } from './01-validate.js';
 import type { BeginTaskResult, TaskSpec } from '../types.js';
 
 export interface BeginTaskOptions {
@@ -82,6 +82,13 @@ export interface BeginTaskOptions {
    * has no external-write capability, matching the legacy behaviour.
    */
   taskSpec?: TaskSpec;
+  /**
+   * AISDLC-738 — the task is being resumed. When its file is already in the
+   * worktree's `backlog/completed/` (the Done move landed with the first PR),
+   * there is nothing to flip and the parent checkout's copy is left alone.
+   * The `.active-task` sentinel is written either way.
+   */
+  resume?: boolean;
 }
 
 /**
@@ -177,7 +184,9 @@ export async function beginTask(opts: BeginTaskOptions): Promise<BeginTaskResult
   // patch entirely. The sentinel write below still fires unchanged — the
   // PreToolUse hook resolves `permittedExternalPaths` from the spec's
   // frontmatter regardless of where the spec came from.
-  if (opts.sourceKind !== 'gh-issue') {
+  const alreadyCompleted =
+    opts.resume === true && isTaskFileCompleted(opts.taskId, opts.worktreePath);
+  if (opts.sourceKind !== 'gh-issue' && !alreadyCompleted) {
     // AISDLC-199 — prefer the worktree-local copy (the fresh Step 3 checkout
     // from origin/main). Falls back to the parent `workDir` so the standalone
     // `pipeline-cli begin-task` CLI subcommand and tests that don't pre-stage

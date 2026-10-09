@@ -29,6 +29,11 @@ export interface BuildDeveloperPromptOptions {
   iteration?: number;
   /** Source of the work; only an explicit `backlog` is eligible for model exploration. */
   sourceKind?: 'backlog' | 'gh-issue';
+  /**
+   * AISDLC-738 — feedback for a resumed task (PR number, failing checks,
+   * reviewer findings). Injected into the prompt on every iteration.
+   */
+  resumeFeedback?: string;
   /** Artifacts directory for the assignment log (defaults to $ARTIFACTS_DIR). */
   artifactsDir?: string;
 }
@@ -55,6 +60,12 @@ export async function buildDeveloperPrompt(
         `Address every finding above and re-run all four verifications before committing.\n`
       : '';
 
+  const resumeBlock = opts.resumeFeedback
+    ? `\n\n## Resumed task: feedback to address\n\n${opts.resumeFeedback}\n\n` +
+      `The branch already holds the earlier work. Fix what the feedback names, re-run all four ` +
+      `verifications, and commit on top of the existing commits.\n`
+    : '';
+
   const prompt =
     `You are implementing backlog task ${opts.taskId} in worktree ${opts.worktreePath}.\n\n` +
     `## Task title\n${opts.task.title}\n\n` +
@@ -69,6 +80,7 @@ export async function buildDeveloperPrompt(
     `<body>\n\n` +
     `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\n\n` +
     `## Branch\nYou are on branch \`${opts.branch}\` checked out at \`${opts.worktreePath}\`.\n` +
+    resumeBlock +
     feedbackBlock +
     `\nReturn the JSON shape documented in your agent definition.\n`;
 

@@ -86,6 +86,14 @@ export interface SetupWorktreeOptions {
    * concurrent worktree ops.
    */
   mutexOpts?: WithWorktreeMutexOptions;
+  /**
+   * AISDLC-738 — re-enter the task's existing worktree and branch (a finished
+   * task sent back for another round). Reuses the worktree when present,
+   * otherwise re-adds it from the local branch or from `origin/<branch>`; it
+   * never creates the branch from `origin/main` and throws when the branch
+   * exists nowhere.
+   */
+  resume?: boolean;
   /** AISDLC-693 — filesystem reads for the hooks check; tests inject a fake. */
   hooksCheckFs?: HooksCheckFs;
   /** AISDLC-693 — active Node version for the engine-failure message (default `process.version`). */
@@ -422,8 +430,86 @@ async function attemptAutoCleanup(
   return { retried: true, addResult: retryResult };
 }
 
+/**
+ * AISDLC-738 — Step 3 for a resumed task: reuse the existing worktree, or
+ * recreate it from the task's own branch (local, else `origin/<branch>`).
+ */
+async function resumeWorktree(
+  runner: Runner,
+  opts: SetupWorktreeOptions,
+): Promise<SetupWorktreeResult> {
+  const headSha = async (): Promise<string> => {
+    const r = await runner('git', ['-C', opts.worktreePath, 'rev-parse', 'HEAD'], {
+      allowFailure: true,
+    });
+    return r.code === 0 ? r.stdout.trim() : '';
+  };
+  if (existsSync(join(opts.worktreePath, '.git'))) {
+    const head = await runner(
+      'git',
+      ['-C', opts.worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD'],
+      { allowFailure: true },
+    );
+    const current = head.stdout.trim();
+    if (head.code !== 0 || current !== opts.branch) {
+      throw new Error(
+        `Step 3 resume for ${opts.taskId}: the worktree at ${opts.worktreePath} is on '${current || 'an unknown ref'}', not '${opts.branch}'`,
+      );
+    }
+    return { branch: opts.branch, worktreePath: opts.worktreePath, baseSha: await headSha() };
+  }
+  const hasRef = async (ref: string): Promise<boolean> =>
+    (
+      await runner('git', ['rev-parse', '--verify', '--quiet', ref], {
+        cwd: opts.workDir,
+        allowFailure: true,
+      })
+    ).code === 0;
+  let addArgs: string[];
+  if (await hasRef(`refs/heads/${opts.branch}`)) {
+    addArgs = ['worktree', 'add', opts.worktreePath, opts.branch];
+  } else if (await hasRef(`refs/remotes/origin/${opts.branch}`)) {
+    addArgs = ['worktree', 'add', opts.worktreePath, '-b', opts.branch, `origin/${opts.branch}`];
+  } else {
+    throw new Error(
+      `Step 3 resume for ${opts.taskId}: branch '${opts.branch}' exists neither locally nor on origin, ` +
+        `so there is nothing to resume. Run a normal \`/ai-sdlc execute ${opts.taskId}\` instead.`,
+    );
+  }
+  const added = await runner('git', addArgs, { cwd: opts.workDir, allowFailure: true });
+  if (added.code !== 0) {
+    throw new Error(
+      `git worktree add failed while resuming '${opts.branch}': ${added.stderr.trim() || 'unknown error'}`,
+    );
+  }
+  return { branch: opts.branch, worktreePath: opts.worktreePath, baseSha: await headSha() };
+}
+
 export async function setupWorktree(opts: SetupWorktreeOptions): Promise<SetupWorktreeResult> {
   const runner = opts.runner ?? defaultRunner;
+
+  if (opts.resume) {
+    if (!opts.skipFetch) {
+      await runner('git', ['fetch', 'origin', opts.branch], {
+        cwd: opts.workDir,
+        timeout: 30_000,
+        allowFailure: true,
+      });
+    }
+    mkdirSync(join(opts.workDir, '.worktrees'), { recursive: true });
+    const resumed = await withWorktreeMutex(() => resumeWorktree(runner, opts), opts.mutexOpts);
+    const resumedHooks = await ensureWorktreeHooks({
+      runner,
+      workDir: opts.workDir,
+      worktreePath: opts.worktreePath,
+      fs: opts.hooksCheckFs,
+      activeNodeVersion: opts.activeNodeVersion,
+    });
+    if (resumedHooks.status === 'missing') {
+      throw new Error(`Step 3 refused to continue for ${opts.taskId}: ${resumedHooks.message}`);
+    }
+    return resumed;
+  }
 
   if (!opts.skipFetch) {
     // git fetch does NOT touch .git/config — no mutex needed here.

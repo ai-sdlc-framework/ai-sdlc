@@ -111,6 +111,15 @@ export interface PipelineOptions {
    */
   taskFilePathOverride?: string;
   /**
+   * AISDLC-738 — set when the task is a finished one sent back for another
+   * round. Step 3 re-enters the existing worktree and branch (never creating
+   * one from `origin/main`), Step 5 injects `feedback` into the developer
+   * prompt, and Step 11 lease-pushes and updates the existing PR instead of
+   * opening a new one. When omitted, the pipeline reads it from the claimed
+   * dispatch-board manifest of this task, if there is one.
+   */
+  resume?: { feedback: string; prNumber?: number };
+  /**
    * AISDLC-393 — inline `TaskSpec` used to bypass Step 1's `findTaskFile`
    * lookup. When provided, the pipeline treats this spec as the source of
    * truth and skips reading any backlog task file. Combined with
@@ -573,6 +582,12 @@ export interface PushAndPrOptions {
    * Used to format `(closes #N)` in the title and `Closes #N` in the body.
    */
   issueNumber?: number;
+  /**
+   * AISDLC-738 — the task is being resumed: push with `--force-with-lease` to
+   * `refs/heads/<branch>` (the late rebase changes the SHA) and, when an open
+   * PR exists for the branch, return its URL instead of creating a new PR.
+   */
+  resume?: boolean;
   /** Advisory `dev.ac-coverage` result for the "Judgment notes (advisory)" PR-body section. */
   acCoverage?: AcCoverageResult;
   /** Advisory grounding annotations for the same section (falls back to `verdict.groundingAnnotations`). */

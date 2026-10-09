@@ -42,6 +42,7 @@ import {
   resolveTargetBranch,
 } from './02-compute-branch.js';
 import { lateRebase } from './11-late-rebase.js';
+import { detectDraftPrForBranch } from './03-setup-worktree.js';
 import { composeJudgmentNotes } from '../judgment/agent-output-checks.js';
 import { writeEvent, type WriteEventOpts } from '../orchestrator/events.js';
 
@@ -258,8 +259,13 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
     }
   }
 
-  // 1. Push -u origin <branch>. NEVER force.
-  const pushResult = await runner('git', ['push', '-u', 'origin', opts.branch], {
+  // 1. Push -u origin <branch>. NEVER a bare force. A resumed task already has
+  //    commits on origin and the late rebase changed their SHAs, so it pushes
+  //    with a lease on its own branch only (AISDLC-738).
+  const pushArgs = opts.resume
+    ? ['push', '-u', '--force-with-lease', 'origin', `HEAD:refs/heads/${opts.branch}`]
+    : ['push', '-u', 'origin', opts.branch];
+  const pushResult = await runner('git', pushArgs, {
     cwd: opts.worktreePath,
     allowFailure: true,
   });
@@ -270,6 +276,12 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
         `but that's destructive — confirm with the operator first`
       : `git push failed: ${stderr || pushResult.stdout.trim() || 'unknown error'}`;
     return { pushed: false, prUrl: null, reason };
+  }
+
+  // 1b. A resumed task updates its existing PR: the push above already did.
+  if (opts.resume) {
+    const existing = await detectDraftPrForBranch(runner, opts.worktreePath, opts.branch);
+    if (existing) return { pushed: true, prUrl: existing.prUrl || null };
   }
 
   // 2. gh pr create
