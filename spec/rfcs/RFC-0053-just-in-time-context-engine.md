@@ -1,8 +1,8 @@
 ---
 id: RFC-0053
 title: Just-In-Time Context Engine (Decision Context Engine)
-status: Draft
-lifecycle: Draft
+status: Approved
+lifecycle: Signed Off
 author: 'Dominique Legault'
 created: 2026-10-09
 updated: 2026-10-09
@@ -14,9 +14,13 @@ requiresDocs: []
 
 # RFC-0053: Just-In-Time Context Engine (Decision Context Engine)
 
-**Status:** Draft (2026-10-09). 3 of 8 Open Questions resolved (OQ-1 to OQ-3, operator
-rubric, 2026-10-09); OQ-4 to OQ-8 remain open for the operator walkthrough. No
-sign-off has been given.
+**Status:** Signed Off (2026-10-09). 8 of 8 Open Questions resolved by operator rubric,
+2026-10-09: scope-split two roots; local SQLite adapter; inferred-only writes with
+verifier or human promotion; tiered prefix (controls fixed, path rules conditional, the
+rest just-in-time); layered evaluation corpus with a golden gate; auto-memory indexed as
+a trunk in place; data room as a read-only root with captured facts as protected entries;
+triggers narrow by role and widened by evidence. Engineering and Operator have signed;
+Product and Design are pending.
 
 ## Summary
 
@@ -153,6 +157,23 @@ starts populated and stays current without double entry:
 - Auto-memory notes.
 - Backlog tasks.
 
+Auto-memory (OQ-6) is indexed as a `memory` trunk at `scope: protected` without moving
+the files: `user` and `feedback` notes map to `specialist` with the operator as source,
+`project` and `reference` notes to `inferred`, and the note file is the citation. The
+memory folder remains the harness's write target and AISDLC-729's dream remains its
+hygiene pass, with a re-ingest after each folder swap.
+
+The data room (OQ-7) is a separate raw root, `knowledge.dataRoomRoot`, indexed
+read-only at `scope: protected` with authority from document kind. Writes under it are
+denied unless the active task's `permittedExternalPaths` names it. Capture writes
+entries, not documents: facts taken from a document become `protected` entries in the
+protected root with a citation to the source.
+
+The fixed prefix (OQ-4) holds governance controls rendered from configuration, the role
+and task frame, and pointers, under `prefix.maxBytes`. Path-bound rules live in
+`.claude/rules/*.md` with `paths:` frontmatter, which the harness loads
+deterministically. Explanatory and historical text becomes entries.
+
 Hygiene is part of the layer: supersede instead of delete, staleness by decay,
 contradiction detection raised as Decision Catalog items.
 
@@ -177,16 +198,19 @@ with reciprocal rank fusion. The entries on disk stay the source of truth, and
 `cli-context index` rebuilds the file from them. An enterprise adapter
 (Elasticsearch, a vector store, a graph database) sits behind the same interface.
 
-An evaluation set of real agent questions, mined from transcripts and treated as
-untrusted text, is scored for precision so ranking is evidence, not assumption
-(OQ-5).
+Ranking is scored against a layered evaluation corpus (OQ-5). A hand-authored golden
+set with relevance judgments gates: recall at 5 of at least 0.8 and no regression
+beyond 2 points per release. Questions mined from transcripts (untrusted text,
+quarantined as evaluator-only data) and synthetic questions generated from entries
+report and do not gate. The load ledger's citation rate is the complementary online
+signal.
 
 ### C. Surfacing protocol
 
 Six moments and a compaction rule:
 
-1. **Session start** (`SessionStart` hook). A budgeted slice replaces or supplements
-   the fixed prefix (OQ-4).
+1. **Session start** (`SessionStart` hook). A budgeted slice rides beside a fixed prefix
+   that holds only controls, the role and task frame, and pointers (OQ-4).
 2. **Task claim** (`SubagentStart` hook, Step 5 developer prompt). Entries relevant to
    the task's references and body are injected.
 3. **Every operator message** (`UserPromptSubmit` hook). The message text is the
@@ -245,9 +269,13 @@ injections per N turns. Proposed defaults by role:
   "this file is governed by DEC-n" and little else.
 - **Reviewers:** task claim only, because the diff is their context.
 
-A profile may also key on the model alias; haiku relays get nothing beyond session
-start. Profiles are configuration, not governance controls: a smaller profile never
-removes a hard rule. Which defaults ship is OQ-8.
+Role is the primary key; the model alias is a secondary override, because model
+assignment moves under roles. Haiku relays get nothing beyond session start. Compaction
+is on wherever session start is. Profiles are configuration, not governance controls: a
+smaller profile never removes a hard rule, because every control stays in the fixed
+prefix (OQ-4). Defaults change only through a decision record backed by the
+cache-versus-JIT report, asymmetric as in RFC-0050 Part B: adding a moment or raising a
+budget needs evidence, removing or lowering is automatic (OQ-8).
 
 #### Prompt cache versus just-in-time context
 
@@ -282,6 +310,34 @@ measured.
 - `retrieval.adapter: sqlite | enterprise` (default `sqlite`)
 - `retrieval.indexPath` (default under `.ai-sdlc/`, gitignored)
 - `promotion.proofKinds` (subset of the closed vocabulary the ontology declares)
+- `evaluation.goldenRecallAt5: 0.8` (NEW, walkthrough 2026-10-09)
+- `evaluation.maxRegressionPoints: 2` (NEW, walkthrough 2026-10-09)
+- `knowledge.dataRoomRoot` (optional, unset by default; NEW, walkthrough 2026-10-09)
+- `prefix.maxBytes: 10240` (NEW, walkthrough 2026-10-09)
+
+`.ai-sdlc/context-profiles.yaml` sketch (NEW, walkthrough 2026-10-09). Role is the
+primary key and model alias is secondary. Budgets are tokens per injection.
+
+```yaml
+# NEW (walkthrough 2026-10-09)
+profiles:
+  planner:
+    moments: [sessionStart, taskClaim, userPrompt, toolTouch, decisionPoint, compaction]
+    budget: { sessionStart: 3000, taskClaim: 3000, userPrompt: 1500, toolTouch: 800, compaction: 3000 }
+    minScore: 0.4
+    maxInjectionsPerNTurns: { n: 5, max: 3 }
+  operator-dispatch:
+    moments: [sessionStart, taskClaim, compaction]
+  executor:
+    moments: [sessionStart, taskClaim, toolTouch]
+    budget: { sessionStart: 1000, taskClaim: 1500, toolTouch: 500 }
+    toolTouchPaths: governance-bearing   # per-tool only on governance paths
+  reviewer:
+    moments: [taskClaim]
+  relay:                                  # haiku relays
+    moments: [sessionStart]
+modelOverrides: {}                        # secondary key, by alias
+```
 
 ### Human surface
 
@@ -291,7 +347,7 @@ as inputs. Token savings are measured through the RFC-0050 usage ledger.
 
 ## Phases
 
-Phase 1 tasks (AISDLC-773 to AISDLC-777) are filed; later phases are filed after their dependencies resolve.
+Phase 1 tasks (AISDLC-773 to AISDLC-777) and phase 2 to 4 tasks (AISDLC-778 to AISDLC-788) are filed.
 
 1. **Knowledge store, ingest adapters, ported capture and hygiene skills.**
 2. **Retrieval, `cli-context query`, evaluation set.** Includes the content hash on
@@ -319,7 +375,7 @@ Phase 1 tasks (AISDLC-773 to AISDLC-777) are filed; later phases are filed after
 - Knowledge entries are data, never instructions, in every prompt that carries them.
 - Agent-written entries are capped at `inferred` with a re-verify note.
 - Governance rules currently in CLAUDE.md are controls. Moving them into a retrieved
-  slice is a weakening question (OQ-4) and must not happen by default.
+  slice is a weakening, so OQ-4 keeps every control in the fixed prefix.
 - Data-room content (client documents) is `protected` scope. It never leaves the
   operator machine and never enters a PR body.
 - Transcript-mined evaluation questions are untrusted text.
@@ -343,8 +399,7 @@ Required by DEC-0048.
 
 ## Open Questions
 
-OQ-1 to OQ-3 resolved 2026-10-09; OQ-4 to OQ-8 open. Each is written as problem,
-options and considerations, for the operator walkthrough.
+All 8 Open Questions resolved 2026-10-09 by operator rubric.
 
 **OQ-1 - Where does the store live?**
 *Problem:* location decides visibility, review and trust, and data-room content
@@ -386,12 +441,16 @@ sits beside a shrunken version of them.
 retrieved slice is a weakening question. Retrieval can miss; a control that was not
 retrieved did not apply. Savings are larger under (a).
 
+**Resolution (2026-10-09, full rubric): Tiered. Controls stay in the fixed prefix; path-bound rules load conditionally; everything else arrives just-in-time.** The fixed prefix is defined by what it may contain, not by size: governance controls rendered from `spec.governance` configuration (RFC-0048), the role and task frame, and pointers, with a target under 10 KB. Rules that bind to files move to `.claude/rules/*.md` with `paths:` frontmatter, which the harness loads deterministically when a matching file is in play, so they never depend on ranking. Explanation, history, rationale and the memory index become knowledge-store content with trunk and decay, surfaced by the six moments. A linter refuses a control-shaped sentence (never, must, refuse, only) outside the prefix unless it is also rendered from configuration. AISDLC-742 and AISDLC-651.2 become this structural rule rather than one-time diets; savings are measured through the cache-versus-JIT report, not assumed. Industry research: prompt caching makes the prefix cheap within a window and expensive at every cache write (subagent start, clear), which continuous clearing multiplies; Claude Code's `.claude/rules/` with `paths:` and `@` imports are a deterministic conditional layer; Cursor, Copilot and Aider converged on a small always-on file plus scoped rule files and none rely on retrieval for rules; RFC-0048 already moved hard rules into configuration rendered by hooks. Counter-argument: "explanatory paragraphs such as the attestation three-way lockstep exist because the short rule was not enough; moved to retrieval, the next agent breaks the lockstep before the engine surfaces the warning." Rebuttal: that paragraph is bound to three named files, exactly what a `paths:` rule loads the moment one is opened; topic-bound rationale is where a 64 KB always-on file already fails by being skimmed, and a ranked slice at the moment of the edit is more likely to be read. Selected over replacing the prefix because a control that depends on retrieval is not a control, over supplementing an unchanged prefix because it saves nothing, and over a deterministic-only scheme because topic-bound rationale has no path trigger.
+
 **OQ-5 - What is the evaluation corpus and who owns the bar?**
 *Problem:* ranking must be measured against real questions.
 *Options:* (a) mined from transcripts (real, untrusted); (b) hand-authored golden
 questions; (c) both.
 *Considerations:* mined questions reflect real use but are untrusted text and can
 drift; golden questions are stable but narrow. Someone must own the pass threshold.
+
+**Resolution (2026-10-09, full rubric): Layered corpus; a hand-authored golden set gates, mined and synthetic sets report.** A hand-authored golden set of questions with relevance judgments is the regression gate: recall at 5 of at least 0.8 to pass and no regression beyond 2 points per release, both as configuration (`evaluation.goldenRecallAt5`, `evaluation.maxRegressionPoints`) changed only through a decision record, following RFC-0050's weekly routing decision. Questions mined from session transcripts are quarantined as evaluator-only data (never a prompt to an agent), scrubbed, de-duplicated and refreshed on a schedule; they report and do not gate, and a mined question that fails is a candidate for the golden set. Synthetic questions generated from entries fill coverage gaps. A golden question whose entry no longer exists retires. The production citation rate from the load ledger (an injected entry later cited or acted on) is the complementary signal, not the gate. Industry research: TREC-style fixed collections with relevance judgments and recall, MRR and nDCG; RAG evaluation practice (RAGAS, BEIR, provider cookbooks) layering golden and synthetic sets; this repository's RFC-0050 bar and asymmetric change rule, RFC-0052's 50-PR shadow window, and AISDLC-729's treatment of transcript-mined content as proposals. Counter-argument: "golden sets rot; six months in every run passes against a codebase that no longer exists while the real questions have moved; only mining tracks reality." Rebuttal: rot is handled by the promotion path from mined failures, the retirement rule, and the production citation rate; noise in the gate cannot be handled at all, because a moving threshold is no threshold. Selected over mined-only because a regression gate must be stable, over golden-only because authored questions miss the unimagined failure, and over an online-only signal because a measure that lags weeks cannot gate a merge.
 
 **OQ-6 - Is auto-memory one trunk or a separate store?**
 *Problem:* the Claude auto-memory folder overlaps the knowledge layer.
@@ -400,11 +459,15 @@ hygiene pass; (b) it stays separate behind a bridge.
 *Considerations:* unification removes a store and a hygiene process; separation
 keeps Claude Code's own memory behavior untouched.
 
+**Resolution (2026-10-09, full rubric): Auto-memory is indexed as a trunk and stored where it is.** The memory folder keeps its file format and remains the harness's write target; the engine ingests every note as an entry in a `memory` trunk at `scope: protected`, with authority from the note type (`user` and `feedback` notes map to `specialist` with the operator as source, `project` and `reference` to `inferred`) and the note file as the citation. AISDLC-729's dream stays the hygiene pass for that folder, and its folder swap triggers a re-ingest under the lock 729 specifies. Harness recall stays on; the load-once ledger marks a note as loaded whenever either path surfaces it, so the memory index can leave the fixed prefix as OQ-4 requires without duplicate injection. Disabling harness recall is revisited only when the cache-versus-JIT report shows it adds nothing over the engine's ranking. Industry research: the managed-agents dream design and agent-memory systems (MemGPT, Letta, Mem0) keep episodic memory separate from declarative knowledge at the storage level while one retriever reads both; the kit's routing table distinguishes owner-stated facts from captured knowledge by authority and source, which is the same mapping. Counter-argument: "two systems surfacing the same note is the duplication the operator asked to eliminate; either the engine owns memory or the harness does." Rebuttal: the ledger is the accountability mechanism and records who surfaced what; the report will show whether harness recall adds anything, which is the evidence a write-only design needs first. Selected over full unification because the harness write path and free-form note writing are worth keeping, over a bridge because nothing else would surface memory outside the prefix, and over write-only memory because a working recall path should be turned off on evidence, not before it.
+
 **OQ-7 - Is the client data room a trunk or a separate root?**
 *Problem:* data-room documents, SOPs and sources are `protected` content.
 *Options:* (a) a trunk of this engine; (b) a separate content root indexed read-only.
 *Considerations:* a trunk reuses the schema and hygiene; a separate root keeps client
 material out of the engine's write paths and out of any shared store.
+
+**Resolution (2026-10-09, full rubric): The data room is a separate raw root indexed read-only; what is captured from it becomes protected entries.** Documents, SOPs and sources live in an optional configured root (`knowledge.dataRoomRoot`, possibly a sibling repository), indexed read-only at `scope: protected` with authority from document kind as the kit prescribes (signed documents canonical at 0.95, decks and plans 0.7 to 0.85). The PreToolUse hook denies writes under that root unless the active task's `permittedExternalPaths` names it, reusing the shipped allowlist. Capture writes entries, not documents: facts taken from a document become `protected` entries in the protected root from OQ-1, with a citation to the source, under the full schema, hygiene and decay. One index spans both, partitioned by scope, so the protected partition is excluded from any export or sharing path by scope alone. Industry research: virtual data rooms (Intralinks, Datasite) are read-only with access audit and nothing written back; enterprise search (Glean, Elastic Workplace Search) indexes roots it does not own and keeps derived indexes disposable; the kit's own split of raw `sources/` from captured `knowledge/` with a `cite`. Counter-argument: "read-only indexing still copies client text into an index file and into agent context; if client material must never leave the room, never indexing is the only honest answer." Rebuttal: the index is on the same machine as the room, gitignored and partitioned by scope, and agent context is where the material must go for the engine to be worth anything; the control is that nothing derived from protected content reaches a tracked root or a PR body, not that the content is never read. Selected over ingesting documents as entries because documents and entries are different objects with different write rules, over an unindexed room because it solves nothing, and over a separate index because one query must span client knowledge and project decisions.
 
 **OQ-8 - Trigger policy and profile defaults**
 *Problem:* which moments fire by default, for which roles, at what budgets and
@@ -422,6 +485,8 @@ automatic). Open whether profile edits are governance-adjacent (they change what
 agents see but remove no control) and so stay class (a). The planner recommends (b);
 the question stays open.
 
+**Resolution (2026-10-09, full rubric): Narrow by role, widen by evidence.** Session start and task claim are on for every role; the per-message and per-tool moments are on by default only for the planner profile and opt-in elsewhere, except that executors have per-tool on for governance-bearing paths; compaction is on wherever session start is. Every moment has a per-role token budget, relevance floor and a per-N-turns cap. Defaults: planner all moments at the largest budgets; operator-dispatch session start, task claim and compaction; executors session start and task claim at small budgets plus per-tool on governance paths; reviewers task claim only; haiku relays session start only. Model alias is a secondary key in the profile schema, never the primary one, because DEC-0041 and DEC-0068 move roles between models. Defaults change only through a decision record backed by the cache-versus-JIT report, asymmetric as in RFC-0050 Part B: adding a moment or raising a budget needs evidence, removing or lowering is automatic. Profile edits are class (a): they change what agents see and remove no control, since OQ-4 keeps every control in the fixed prefix regardless of profile. Industry research: feature-flag practice (ship narrow, measure, widen); this repository's RFC-0049 shadow default, RFC-0050 asymmetric routing and RFC-0052 shadow window; the 2026-10-08 audit placing idle loop sessions at 69 percent of spend and the planner at 2 percent. Counter-argument: "executors are where context failures cost real money; a developer that does not know the patch-id lockstep ships a broken PR and a fix round pays for it; starving the executor profile optimizes the cheap thing." Rebuttal: path-bound governance knowledge is covered by OQ-4's deterministic rules loading and by the executor's per-tool moment on governance paths, both on by default; what is withheld is per-message retrieval, and an executor's messages are task body and tool output, not questions; if the report shows preventable fix rounds, the asymmetric rule widens the profile by decision record. Selected over all-on because paying for an unmeasured ranking in the highest-volume roles precedes the evidence, over opt-in-everywhere because an engine nobody turns on produces no evidence (the dark-code gate exists for that failure), and over alias-keyed profiles because role predicts benefit and model assignment moves under roles.
+
 ## References
 
 - `forge-data-room-kit/` (private, gitignored; prior art only, no content copied).
@@ -434,8 +499,8 @@ the question stays open.
 
 | Role | Owner | Status |
 | --- | --- | --- |
-| Engineering | Dominique Legault | ⏸ Pending |
-| Operator | Dominique Legault | ⏸ Pending |
+| Engineering | Dominique Legault | ✅ Signed (all 8 OQs resolved via full rubric; 2026-10-09) |
+| Operator | Dominique Legault | ✅ Signed (all 8 OQs resolved via full rubric; 2026-10-09) |
 | Product | Alex | ⏸ Pending |
 | Design | Morgan | ⏸ Pending |
 
@@ -446,3 +511,4 @@ the question stays open.
 | 2026-10-09 | Initial Draft. 7 Open Questions, none resolved. Trigger: planner design brief. |
 | 2026-10-09 | Surfacing protocol: six moments, compaction, load-once ledger, role/model profiles, cache-vs-JIT measurement; OQ-8 added (open) |
 | 2026-10-09 | OQ-1, OQ-2, OQ-3 resolved via operator rubric (scope-split roots; SQLite adapter; inferred-only writes with verifier/human promotion); phase-1 tasks AISDLC-773 to AISDLC-777 filed |
+| 2026-10-09 | OQ-4..8 resolved via operator rubric (tiered prefix; layered eval corpus; memory as indexed trunk; data room read-only root; narrow-by-role triggers); Engineering + Operator signed; lifecycle Draft → Signed Off; phase 2-4 tasks AISDLC-778..788 |
