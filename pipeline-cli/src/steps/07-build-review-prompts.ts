@@ -59,6 +59,12 @@ export interface BuildReviewPromptsOptions {
   /** Artifacts directory for the assignment log (defaults to $ARTIFACTS_DIR). */
   artifactsDir?: string;
   /**
+   * Diff text embedded in the reviewer prompts in place of the full PR diff
+   * (AISDLC-762: the incremental-review `delta-only` branch). Selection,
+   * judgment and the file list still use the full diff.
+   */
+  promptDiff?: string;
+  /**
    * Set false to resolve models without writing the assignment log or reporting
    * the routing capability (offline replay must leave no trace).
    */
@@ -242,7 +248,7 @@ export async function buildReviewPrompts(
         title: opts.task.title,
         description: opts.task.description,
         acList,
-        diff,
+        diff: opts.promptDiff ?? diff,
         changedFiles,
         branch: opts.branch,
         policy,

@@ -20,6 +20,7 @@
  *   push-and-pr           — Step 11
  *   sibling-prs           — Step 12
  *   cleanup-task          — Step 13
+ *   next-step             — AISDLC-762 state machine over Steps 0-15 (one instruction per call)
  *
  * All commands return JSON on stdout. Errors return non-zero exit + JSON on stderr.
  *
@@ -29,6 +30,7 @@
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { executeCommand } from './execute.js';
+import { nextStepCommand } from './next-step.js';
 import { aggregateVerdicts } from '../steps/08-aggregate-verdicts.js';
 import { evaluateIssue, type IssueInput } from '../dor/index.js';
 import { runStageACorpus } from '../dor/corpus.js';
@@ -123,6 +125,8 @@ export function buildCli(): Argv {
       // appears at the top of `--help` (yargs lists subcommands in
       // registration order). Composes Steps 0-13 via `executePipeline()`.
       .command(executeCommand())
+      // AISDLC-762 — next-step state machine driving the /ai-sdlc execute slash body.
+      .command(nextStepCommand())
       // AISDLC-418 — reconcile sub-tick (orchestrator-tick Steps 3.3-3.8).
       // Single bash call that wraps salvage transcripts + emit leaves +
       // sign attestation + force-push chore + flip draft→ready + arm
