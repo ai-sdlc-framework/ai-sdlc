@@ -14,8 +14,9 @@ requiresDocs: []
 
 # RFC-0053: Just-In-Time Context Engine (Decision Context Engine)
 
-**Status:** Draft (2026-10-09). All 8 Open Questions are unresolved and wait for an
-operator walkthrough. No sign-off has been given.
+**Status:** Draft (2026-10-09). 3 of 8 Open Questions resolved (OQ-1 to OQ-3, operator
+rubric, 2026-10-09); OQ-4 to OQ-8 remain open for the operator walkthrough. No
+sign-off has been given.
 
 ## Summary
 
@@ -126,9 +127,21 @@ Three layers.
 ### A. Knowledge layer
 
 The entry schema above, stored as files under `.ai-sdlc/knowledge/<trunk>/<topic>.md`
-(location is OQ-1). Trunks are engineering domains: systems, products, customers,
+(location resolved by OQ-1). Trunks are engineering domains: systems, products, customers,
 decisions, people, process. Every entry has a trunk, a type and relations. An ontology
 file declares the entry types and the relations allowed between them.
+
+Two roots, one index (OQ-1). Entries with scope `internal` or `universal` live in the
+tracked root `.ai-sdlc/knowledge/`. Entries with scope `protected` live in the
+gitignored root `.ai-sdlc/knowledge-protected/` (or a sibling path configured per
+adopter) and never enter the repository or a PR body. The write path routes on
+`scope`, and one retrieval index spans both roots.
+
+Authority and promotion (OQ-3). Agents write at `authority: inferred` only, with a
+confidence cap of 0.85 and a `reverify:` note. A framework verifier (code, not a
+model) may promote an entry to `specialist` when it re-runs an attached proof from the
+closed vocabulary declared in the ontology and the proof holds. `canonical` requires a
+human. Promotion, supersession and refutation are events in the knowledge log.
 
 Ingest adapters project what ai-sdlc already structures into entries, so the engine
 starts populated and stays current without double entry:
@@ -156,8 +169,13 @@ The result is a ranked slice that fits a stated token budget, each entry with it
 citation, effective confidence and freshness. Every response carries entry ids and
 content hashes. `cli-context query` takes `--session <id>`, so the session load
 ledger (section C) is subtracted inside the query and the caller never has to filter
-repeats itself. The substrate is OQ-2; the adapter
-boundary exists either way.
+repeats itself. The default substrate
+(OQ-2) is a local SQLite file behind a `RetrievalIndex` adapter: an FTS5 table for
+keyword search with BM25 ranking, a vector table fed through the RFC-0019 provider
+adapter, and an edges table for typed relations queried with recursive CTEs, fused
+with reciprocal rank fusion. The entries on disk stay the source of truth, and
+`cli-context index` rebuilds the file from them. An enterprise adapter
+(Elasticsearch, a vector store, a graph database) sits behind the same interface.
 
 An evaluation set of real agent questions, mined from transcripts and treated as
 untrusted text, is scored for precision so ranking is evidence, not assumption
@@ -255,6 +273,16 @@ model for turning that into evidence-based profile defaults. This RFC does not a
 that just-in-time loading is cheaper. It instruments the trade so the answer is
 measured.
 
+### Configuration
+
+`.ai-sdlc/context.yaml` keys (NEW, walkthrough 2026-10-09):
+
+- `knowledge.trackedRoot` (default `.ai-sdlc/knowledge`)
+- `knowledge.protectedRoot` (default `.ai-sdlc/knowledge-protected`)
+- `retrieval.adapter: sqlite | enterprise` (default `sqlite`)
+- `retrieval.indexPath` (default under `.ai-sdlc/`, gitignored)
+- `promotion.proofKinds` (subset of the closed vocabulary the ontology declares)
+
 ### Human surface
 
 Query, confirm, correct and supersede entries. A coverage dashboard presented as a gap
@@ -263,7 +291,7 @@ as inputs. Token savings are measured through the RFC-0050 usage ledger.
 
 ## Phases
 
-Tasks are filed later, not in this PR.
+Phase 1 tasks (AISDLC-773 to AISDLC-777) are filed; later phases are filed after their dependencies resolve.
 
 1. **Knowledge store, ingest adapters, ported capture and hygiene skills.**
 2. **Retrieval, `cli-context query`, evaluation set.** Includes the content hash on
@@ -315,8 +343,8 @@ Required by DEC-0048.
 
 ## Open Questions
 
-All unresolved. Each is written as problem, options and considerations, for the
-operator walkthrough.
+OQ-1 to OQ-3 resolved 2026-10-09; OQ-4 to OQ-8 open. Each is written as problem,
+options and considerations, for the operator walkthrough.
 
 **OQ-1 - Where does the store live?**
 *Problem:* location decides visibility, review and trust, and data-room content
@@ -328,6 +356,8 @@ adopters; (b) a private sibling repo, which is the kit's default ("keep it priva
 the repo; a sibling repo protects client material but loses PR review in this repo;
 a service adds infrastructure and an availability dependency.
 
+**Resolution (2026-10-09, full rubric): Scope decides location, two roots, one index.** Entries with scope `internal` or `universal` live in the tracked root `.ai-sdlc/knowledge/<trunk>/<topic>.md`, reviewed and versioned like every other file. Entries with scope `protected` (client and data-room material) live in a gitignored root `.ai-sdlc/knowledge-protected/` by default, or in a sibling path configured per adopter; they never enter the repository or a PR body. One retrieval index spans both roots. The write path routes on `scope`; a CI check refuses a `protected` entry in the tracked root and the pre-push chain refuses a PR body that cites one; a classification heuristic (source path under a data-room root, client identifiers) flags likely mis-scoped entries. Industry research: Architecture Decision Records (Nygard, adr-tools, AWS guidance) and docs-as-code systems (Backstage TechDocs) keep engineering knowledge in-repo and treat private material as a separate repository with its own access control; this repository already splits the same way (tracked `_decisions/events.jsonl`, gitignored `transcripts/` and `state.db`); services (Glean, Confluence) would put a network call on every hook. Counter-argument: "two roots is the step that gets skipped; a client fact written at `internal` scope to avoid friction is now in the repo; a single private repo cannot leak." Rebuttal: a single private repo moves the risk rather than removing it, strands shared engineering knowledge away from the code it describes and removes PR review; mis-scoping is a classification error the check catches. Selected over all-in-repo because committing client material is unacceptable, over a private sibling repo because review and co-location are the point for engineering knowledge, and over a service because the hot path must not depend on the network.
+
 **OQ-2 - What is the retrieval substrate?**
 *Problem:* the index must serve keyword, vector and relation queries.
 *Options:* (a) files plus a local index (SQLite FTS5 and a vector table), zero
@@ -337,12 +367,16 @@ consulting offering describes.
 portable; the heavier stack scales and reuses consulting assets but adds operations
 burden for adopters.
 
+**Resolution (2026-10-09, full rubric): A local SQLite index behind a `RetrievalIndex` adapter.** The default substrate is one SQLite file under `.ai-sdlc/` (gitignored like `state.db`), holding an FTS5 table for keyword search with BM25 ranking, a vector table fed through the RFC-0019 embedding provider adapter, and an edges table for typed relations queried with recursive CTEs; keyword and vector results are fused with reciprocal rank fusion. The entries on disk remain the source of truth; `cli-context index` rebuilds the file from them, so deleting it loses nothing. The enterprise stack (Elasticsearch, a vector store, a graph database) is a second adapter behind the same interface, delivered where a client corpus justifies it; graphify's `graph.json` is an ingest source for relations, not the substrate. Shipped substrate: RFC-0019 chose JSONL vector storage in its own OQ-1 and named an escape hatch at about 100K entries or 250 ms p95; `better-sqlite3` is already a dependency of three packages; `.ai-sdlc/state.db` already exists as a gitignored local SQLite store. Industry research: SQLite FTS5 and `sqlite-vec` serve keyword and brute-force vector search in-process to the low hundreds of thousands of vectors; reciprocal rank fusion (Cormack et al.; Elastic, Weaviate, Vespa) combines BM25 and vector scores without weight tuning; the enterprise stacks exist for corpora of millions across many systems. Counter-argument: "the offering sells Elasticsearch, RAG and a knowledge graph; shipping SQLite undercuts the pitch and the enterprise adapter is never dogfooded." Rebuttal: the pitch is the outcome, not the vendor list; the adapter boundary lets one codebase serve both; the enterprise adapter is dogfooded in the engagement where such a corpus exists; three services on a stargazer's first run contradicts the first-run goal. Selected over extending the JSONL store because per-message retrieval runs hundreds of times a session and needs indexed lookup, over the enterprise stack by default because the default must run on a laptop with nothing installed, and over graphify as engine because it models code structure, not entries with confidence and decay.
+
 **OQ-3 - Who may write, and at what authority?**
 *Problem:* an engine that retrieves its own unverified output can poison itself.
 *Options:* (a) agents write only at `inferred` with a re-verify note, and humans
 promote; (b) agents may also promote when they attach proof from running code.
 *Considerations:* (a) is safer and slower; (b) is faster and needs a definition of
 acceptable proof and a way to audit promotions.
+
+**Resolution (2026-10-09, full rubric): Agents write at `inferred` only; a deterministic verifier or a human promotes.** Every agent-written entry carries `authority: inferred`, a confidence cap of 0.85 and a `reverify:` note. Promotion to `specialist` is allowed when a framework verifier (code, not a model) re-runs an attached proof from a closed vocabulary declared in the ontology and it holds: a test id that passes from the committed tree, a decision record id present on `main`, a path present in the tracked tree, a command from an allowlisted set whose output matches. Arbitrary commands are not in the vocabulary. `canonical` requires a human, through the human surface or a PR to the tracked root. Promotion, supersession and refutation are events in the knowledge log; `cli-context audit` lists every promotion with its proof. Re-observation moves confidence 30 percent toward the new value and never changes authority. Industry research: Wikipedia's sourcing model (authority from the cited source, not the editor), SLSA and in-toto provenance (trust set by producer and attestation, never self-declared), this repository's RFC-0046 independence tiers and the decision catalog's rule that `--by` is a claim, and the stored-prompt-injection literature (OWASP LLM01) that AISDLC-729 already applies to transcript-mined memories. Counter-argument: "a verifier that re-runs a proof chosen by the writer is option C with extra steps; the agent picks a command whose output it controls." Rebuttal: the vocabulary is closed, each form resolves against repository state the writer cannot forge at write time, and anything outside it stays `inferred` until a person promotes it; this is the same boundary RFC-0046 draws between `attested` and `isolated`. Selected over human-only promotion because an all-human queue reproduces the hygiene debt the kit documents, over agent self-promotion with proof because self-authored proof is the forgeability this repository has already paid to close once, and over consensus promotion because agents sharing training and prompts give correlated, not independent, observations.
 
 **OQ-4 - What happens to the fixed prefix?**
 *Problem:* the session-start slice either replaces CLAUDE.md and the memory index or
@@ -411,3 +445,4 @@ the question stays open.
 | --- | --- |
 | 2026-10-09 | Initial Draft. 7 Open Questions, none resolved. Trigger: planner design brief. |
 | 2026-10-09 | Surfacing protocol: six moments, compaction, load-once ledger, role/model profiles, cache-vs-JIT measurement; OQ-8 added (open) |
+| 2026-10-09 | OQ-1, OQ-2, OQ-3 resolved via operator rubric (scope-split roots; SQLite adapter; inferred-only writes with verifier/human promotion); phase-1 tasks AISDLC-773 to AISDLC-777 filed |
