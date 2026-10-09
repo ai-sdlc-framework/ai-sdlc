@@ -140,7 +140,7 @@
   },
   "dependencies": {
     "@ai-sdlc/reference": "workspace:*",
-    "ink": "^6.0.0",
+    "ink": "^8.0.0",
     "js-yaml": "^4.2.0",
     "react": "^19.3.0",
     "yargs": "^18.1.0",
