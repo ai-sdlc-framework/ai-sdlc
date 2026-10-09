@@ -20,6 +20,11 @@ name: Main Health Monitor
 on:
   push:
     branches: [main]
+  # AISDLC-768: daily run with no push, so a test that rots with the calendar
+  # (clock-dependent fixtures) is caught the day it breaks, not at the next
+  # unrelated push. Scheduled runs check out the default-branch head.
+  schedule:
+    - cron: '0 6 * * *'
   # No pull_request trigger — this is a post-merge health check, not a PR gate.
 
 # AC-3: cancel-in-progress: false — every main push gets its own health check.
@@ -46,7 +51,6 @@ jobs:
     outputs:
       test_status: ${{ steps.test-outcome.outputs.status }}
       commit_sha: ${{ github.sha }}
-      commit_message: ${{ github.event.head_commit.message }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -138,12 +142,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMMIT_SHA: ${{ github.sha }}
-          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          EVENT_NAME: ${{ github.event_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           SHORT_SHA="${COMMIT_SHA:0:8}"
           TITLE="[main-health] main is RED at ${SHORT_SHA}"
+          # head_commit is empty on schedule events; read the subject from the
+          # checked-out main head instead (AISDLC-768).
+          COMMIT_MSG="$(git log -1 --format=%s)"
 
           # Check if an open issue with this title already exists to avoid duplicates.
           # (Two quick successive pushes could race — idempotent check prevents noise.)
@@ -165,7 +172,7 @@ jobs:
 
           ## What failed
 
-          The full test suite failed on push to main. This indicates a merge-skew regression: individual PRs were green, but their combined effect breaks the suite.
+          The full test suite failed on ${EVENT_NAME} run against main. This indicates a merge-skew regression: individual PRs were green, but their combined effect breaks the suite.
 
           Check the [CI run](${RUN_URL}) for the specific failing test names and stack traces.
 
@@ -193,8 +200,39 @@ jobs:
           - AISDLC-406 — this monitoring workflow
           "
 
-          gh issue create \
+          fail_issue() {
+            echo "::error::main-health: could not file the red-main issue: $1"
+            {
+              echo "## main-health alert FAILED to file an issue"
+              echo ""
+              echo "Reason: $1"
+              echo ""
+              echo "Main is RED at ${SHORT_SHA}. See ${RUN_URL} and file the issue by hand."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
+
+          # AISDLC-768: labels are created here so a fresh repo never breaks the
+          # alert (the monitor silently never filed an issue before this).
+          # `--force` makes creation idempotent. If creation is refused, the
+          # issue is filed without labels rather than not at all.
+          LABEL_ARGS=()
+          if gh label create "ci" --color "0e8a16" --description "CI and workflow health" --force \
+            && gh label create "main-red" --color "b60205" --description "main branch is red" --force; then
+            LABEL_ARGS=(--label "ci,main-red")
+          else
+            echo "::warning::label creation refused; filing issue without labels"
+          fi
+
+          if ! gh issue create \
             --title "${TITLE}" \
             --body "${BODY}" \
             --assignee "deefactorial" \
-            --label "ci,main-red"
+            "${LABEL_ARGS[@]}"; then
+            echo "::warning::issue creation with labels failed; retrying without labels"
+            gh issue create \
+              --title "${TITLE}" \
+              --body "${BODY}" \
+              --assignee "deefactorial" \
+              || fail_issue "gh issue create failed (with and without labels)"
+          fi
