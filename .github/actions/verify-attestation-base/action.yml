@@ -20,7 +20,7 @@ inputs:
     required: false
     default: ''
   pipeline-cli-version:
-    description: Version floor for @ai-sdlc/pipeline-cli and @ai-sdlc/orchestrator (installed as ^<version>).
+    description: Exact version of @ai-sdlc/pipeline-cli and @ai-sdlc/orchestrator to install (x.y.z, exact pin, no range).
     required: false
     default: '0.29.0'
   required-independence-tier:
@@ -84,7 +84,7 @@ runs:
         mkdir -p "$home"
         cd "$home"
         npm init -y >/dev/null
-        npm install --no-save --ignore-scripts "@ai-sdlc/orchestrator@^${CLI_VERSION}" "@ai-sdlc/pipeline-cli@^${CLI_VERSION}"
+        npm install --no-save --save-exact --ignore-scripts "@ai-sdlc/orchestrator@${CLI_VERSION}" "@ai-sdlc/pipeline-cli@${CLI_VERSION}"
         echo "home=$home" >> "$GITHUB_OUTPUT"
 
     - name: Classify changeset (base copy of the docs-only classifier)
@@ -97,7 +97,9 @@ runs:
         NODE_OPTIONS: ''
       run: |
         set -euo pipefail
-        exempt=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | node "$ACTION_PATH/../../../scripts/is-docs-only-changeset.mjs")
+        # Merge-base (three-dot) diff, renames disabled so a rename out of a
+        # non-docs path lists BOTH paths; NUL-delimited, unquoted path output.
+        exempt=$(git -c core.quotePath=false diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" | tr '\0' '\n' | node "$ACTION_PATH/../../../scripts/is-docs-only-changeset.mjs")
         echo "exempt=$exempt" >> "$GITHUB_OUTPUT"
 
     - name: Materialize head attestation data (untrusted data only)

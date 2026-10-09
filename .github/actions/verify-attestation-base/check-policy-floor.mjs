@@ -40,7 +40,10 @@ const isMain =
   process.argv[1] != null && new URL(import.meta.url).pathname === resolve(process.argv[1]);
 if (isMain) {
   const argv = process.argv.slice(2);
-  const get = (k) => argv[argv.indexOf(`--${k}`) + 1];
+  const get = (k) => {
+    const i = argv.indexOf(`--${k}`);
+    return i >= 0 ? argv[i + 1] : undefined;
+  };
   const policyPath = join(resolve(get('repo-root') ?? '.'), '.ai-sdlc', 'independence-policy.yaml');
   const policyText = existsSync(policyPath) ? readFileSync(policyPath, 'utf8') : null;
   const res = checkFloor({ policyText, floor: get('floor') ?? 'none' });

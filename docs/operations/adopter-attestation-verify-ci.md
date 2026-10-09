@@ -29,12 +29,29 @@ permissions:
 jobs:
   verify-attestation:
     uses: ai-sdlc-framework/ai-sdlc/.github/workflows/consumer-verify-attestation.yml@<pinned-commit-sha>
+    with:
+      ai-sdlc-ref: <pinned-commit-sha> # the SAME 40-hex SHA as above
 ```
 
-Optional inputs: `pipeline-cli-version` (version floor for the installed
-`@ai-sdlc/pipeline-cli` / `@ai-sdlc/orchestrator`, default `0.29.0`),
-`required-independence-tier` (`none|attested|isolated`, a floor on your base
-policy's `requiredTier`), and `ai-sdlc-ref` (pin to a full commit SHA).
+Pin the SHA in **both** places: the `uses:` ref pins the workflow, and
+`ai-sdlc-ref` pins the tooling (action, materialize script, policy-floor check,
+docs-only classifier) checked out beside it. `ai-sdlc-ref` is required, has no
+default, and the job fails closed unless it is a full 40-hex commit SHA. The job
+also fails first unless the caller is triggered by `pull_request_target`.
+
+Optional inputs: `pipeline-cli-version` (an **exact pin**, `x.y.z`, of the
+installed `@ai-sdlc/pipeline-cli` / `@ai-sdlc/orchestrator`, default `0.29.0`;
+no caret or range is applied) and `required-independence-tier`
+(`none|attested|isolated`, a floor on your base policy's `requiredTier`).
+
+**Docs-only exemption set.** Consumers inherit ai-sdlc's docs-only exemption
+(`scripts/is-docs-only-changeset.mjs` from the pinned tooling): a PR whose every
+changed path is a root `*.md` (including `CLAUDE.md` and `AGENTS.md`), under
+`docs/`, `spec/rfcs/`, `backlog/tasks/`, `backlog/completed/`,
+`.ai-sdlc/_decisions/`, or an envelope file skips verification. The changed-path
+list is the merge-base diff with rename detection off, so renaming a source or
+workflow file into `docs/` still counts as touching the source path. Consumers
+cannot supply narrower patterns today.
 
 What it does, in order: checks out the **base** sha only (`persist-credentials:
 false`, `contents: read`); fetches the head as git objects without checking it
