@@ -38,6 +38,7 @@ import type { DispatchVerdict } from '../dispatch/types.js';
 import { sanitizeVerdict } from '../dispatch/verdict-fields.js';
 import { parseBrief, type ParsedBrief } from './brief-format.js';
 import type { ClearResult } from './clear.js';
+import type { MarkReadyReport } from './mark-ready.js';
 import type { PlaybookOutcome } from './playbook.js';
 import { readRosterChecked } from './roster.js';
 
@@ -45,6 +46,16 @@ import { readRosterChecked } from './roster.js';
 export const LOOP_STATE_FILENAME = 'operator-dispatch.state.json';
 /** Default spacing of planner progress reports. */
 export const DEFAULT_REPORT_EVERY_MS = 15 * 60 * 1000;
+
+/** Seconds until the next wake when a brief or a verdict was handled this tick. */
+export const WAKE_PENDING_SEC = 30;
+/** Seconds until the next wake when work is queued or inflight; a new verdict wakes the session sooner. */
+export const WAKE_ACTIVE_SEC = 300;
+/** Seconds until the next wake when the board is empty and nothing is inflight. */
+export const WAKE_IDLE_SEC = 1800;
+
+/** Why the session should wake after `nextWakeSec`. */
+export type WakeReason = 'pending' | 'active' | 'idle';
 
 /** What the loop remembers between ticks. */
 export interface LoopState {
@@ -140,6 +151,34 @@ export interface TickResult {
   /** Failures the playbook could not fix; the skill messages the planner with each. */
   escalations: { taskId: string; message: string }[];
   reports: PlannerReport[];
+  /** Seconds the session should sleep before the next wake-up (30, 300 or 1800). */
+  nextWakeSec: number;
+  wakeReason: WakeReason;
+  /** Present when the `mark-ready-after-codeql` action is granted and a hook was supplied. */
+  markReady?: MarkReadyReport;
+}
+
+/**
+ * How long the session may sleep. Work handled this tick, or a brief the board
+ * refused, wakes it soon; queued or inflight work is watched at a slower rate (a new
+ * brief or verdict file wakes it sooner); an empty board with nothing inflight sleeps
+ * the longest, so an idle session costs at most two model calls an hour.
+ */
+export function computeNextWake(
+  boardDir: string,
+  result: Pick<TickResult, 'ingested' | 'ingestErrors' | 'verdicts' | 'escalations' | 'reports'>,
+  markReady?: MarkReadyReport,
+): { nextWakeSec: number; wakeReason: WakeReason } {
+  const handled =
+    result.ingested.length > 0 ||
+    result.ingestErrors.length > 0 ||
+    result.verdicts.length > 0 ||
+    result.escalations.length > 0 ||
+    (markReady !== undefined && markReady.readied.length + markReady.failedAnalyze.length > 0);
+  if (handled) return { nextWakeSec: WAKE_PENDING_SEC, wakeReason: 'pending' };
+  const c = peekQueue(boardDir);
+  if (c.queued + c.inflight > 0) return { nextWakeSec: WAKE_ACTIVE_SEC, wakeReason: 'active' };
+  return { nextWakeSec: WAKE_IDLE_SEC, wakeReason: 'idle' };
 }
 
 /** Collaborators of {@link runDispatchTick}; every one is injected in tests. */
@@ -157,6 +196,8 @@ export interface LoopDeps {
   /** Actions the policy grants the dispatch role. */
   operational: ReadonlySet<string>;
   reportEveryMs?: number;
+  /** Marks CodeQL-clean drafts ready; called only when `mark-ready-after-codeql` is granted. */
+  markReady?: () => MarkReadyReport;
 }
 
 function ingestBriefs(
@@ -320,5 +361,10 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   const watch = await watchVerdicts(deps, state);
   const reports = buildReports(deps, state, watch.verdicts.length);
   saveState(deps.boardDir, state);
-  return { ...ingest, ...watch, reports };
+  const markReady =
+    deps.markReady && deps.operational.has('mark-ready-after-codeql')
+      ? deps.markReady()
+      : undefined;
+  const wake = computeNextWake(deps.boardDir, { ...ingest, ...watch, reports }, markReady);
+  return { ...ingest, ...watch, reports, ...wake, ...(markReady ? { markReady } : {}) };
 }

@@ -60,6 +60,11 @@ export {
   LOOP_STATE_FILENAME,
   readLoopState,
   runDispatchTick,
+  computeNextWake,
+  WAKE_ACTIVE_SEC,
+  WAKE_IDLE_SEC,
+  WAKE_PENDING_SEC,
+  type WakeReason,
   type ClearReport,
   type LoopDeps,
   type LoopState,
@@ -67,6 +72,7 @@ export {
   type TickResult,
   type VerdictReport,
 } from './dispatch-loop.js';
+export { markReadyAfterCodeql, type MarkReadyReport } from './mark-ready.js';
 export { hierarchyDown, type DownOutcome, type DownResult } from './down.js';
 export {
   checkDispatchCaller,

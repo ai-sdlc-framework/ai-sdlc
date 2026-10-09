@@ -30,6 +30,9 @@ import {
   LOOP_STATE_FILENAME,
   readLoopState,
   runDispatchTick,
+  WAKE_ACTIVE_SEC,
+  WAKE_IDLE_SEC,
+  WAKE_PENDING_SEC,
   type LoopDeps,
 } from './dispatch-loop.js';
 import type { PlaybookOutcome } from './playbook.js';
@@ -519,5 +522,72 @@ describe('hand-written verdict files', () => {
     const result = await runDispatchTick(deps());
     expect(result.verdicts[0]!.rejectedFields).toBeUndefined();
     expect(result.verdicts[0]!.decisionIds).toEqual(['DEC-0001']);
+  });
+});
+
+describe('nextWakeSec (idle hibernation)', () => {
+  it('sleeps 1800 s on an empty board with nothing inflight', async () => {
+    const r = await runDispatchTick(deps());
+    expect(r.nextWakeSec).toBe(WAKE_IDLE_SEC);
+    expect(WAKE_IDLE_SEC).toBe(1800);
+    expect(r.wakeReason).toBe('idle');
+    // at most two model calls per 30 minutes while idle
+    expect((30 * 60) / r.nextWakeSec).toBeLessThanOrEqual(2);
+  });
+
+  it('wakes in 30 s when a brief was ingested', async () => {
+    writeBrief('b1.md', ['AISDLC-1']);
+    const r = await runDispatchTick(deps());
+    expect(r.nextWakeSec).toBe(WAKE_PENDING_SEC);
+    expect(WAKE_PENDING_SEC).toBe(30);
+    expect(r.wakeReason).toBe('pending');
+  });
+
+  it('wakes in 30 s when a verdict was handled', async () => {
+    verdict('AISDLC-7');
+    const r = await runDispatchTick(deps());
+    expect(r.verdicts).toHaveLength(1);
+    expect(r.nextWakeSec).toBe(30);
+  });
+
+  it('wakes in 30 s when the board refused a brief', async () => {
+    writeBrief('bad.md', ['AISDLC-1']);
+    enqueueImpl = () => {
+      throw new Error('refused');
+    };
+    const r = await runDispatchTick(deps());
+    expect(r.ingestErrors).toHaveLength(1);
+    expect(r.nextWakeSec).toBe(30);
+  });
+
+  it('goes back to the idle interval on the next quiet tick', async () => {
+    writeBrief('b1.md', ['AISDLC-1']);
+    enqueueImpl = () => [];
+    await runDispatchTick(deps());
+    const quiet = await runDispatchTick(deps());
+    expect(quiet.nextWakeSec).toBe(WAKE_IDLE_SEC);
+  });
+
+  it('uses the working interval while a task is queued', async () => {
+    enqueueTasks(board, [{ taskId: 'AISDLC-9' } as EnqueueEntry], {
+      baseSha: 'a'.repeat(40),
+      dispatchedBy: 'operator-dispatch',
+      resolveTaskFile: (id) => `backlog/tasks/${id.toLowerCase()}.md`,
+    });
+    const r = await runDispatchTick(deps());
+    expect(r.nextWakeSec).toBe(WAKE_ACTIVE_SEC);
+    expect(r.wakeReason).toBe('active');
+  });
+
+  it('wakes in 30 s after marking a draft ready, and only when the action is granted', async () => {
+    const markReady = () => ({ readied: [5], skipped: [], failedAnalyze: [] });
+    const granted = await runDispatchTick(
+      deps({ markReady, operational: new Set([...GRANTS, 'mark-ready-after-codeql']) }),
+    );
+    expect(granted.markReady?.readied).toEqual([5]);
+    expect(granted.nextWakeSec).toBe(30);
+    const denied = await runDispatchTick(deps({ markReady }));
+    expect(denied.markReady).toBeUndefined();
+    expect(denied.nextWakeSec).toBe(WAKE_IDLE_SEC);
   });
 });

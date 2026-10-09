@@ -6,16 +6,10 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { createRequire } from 'node:module';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const require = createRequire(import.meta.url);
-const { SAFE_NAME } = require('../hooks/lib/hierarchy-role.js');
 const dir = dirname(fileURLToPath(import.meta.url));
 const raw = readFileSync(join(dir, 'operator-dispatch.md'), 'utf-8');
 const match = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
@@ -28,26 +22,34 @@ describe('operator-dispatch command', () => {
     assert.match(match[1], /^description: /m);
   });
 
-  it('reads the roster for its own name and the planner name', () => {
-    assert.match(body, /hierarchy\.json/);
-    assert.match(body, /self\.role !== 'operator-dispatch'/);
-    assert.match(body, /s\.role === 'planner'/);
+  it('is shorter than 120 lines (the identity, handoff and mark-ready work lives in tick)', () => {
+    assert.ok(
+      raw.trimEnd().split('\n').length < 120,
+      `operator-dispatch.md has ${raw.trimEnd().split('\n').length} lines`,
+    );
+    assert.doesNotMatch(body, /hierarchy\.json/);
   });
 
-  it('runs one wake-up through the hierarchy tick under its roster name', () => {
-    assert.match(body, /cli-hierarchy\.mjs" tick[\s\S]*--worker "\$MY_NAME"/);
+  it('takes its name and the planner name from the tick output, not a roster script', () => {
+    assert.match(body, /`identity\.name`/);
+    assert.match(body, /`identity\.planner`/);
+    assert.match(body, /`handoff`/);
+    assert.match(body, /`markReady`/);
+  });
+
+  it('runs one wake-up through the hierarchy tick', () => {
+    assert.match(body, /cli-hierarchy\.mjs" tick --board-dir "\$BOARD_DIR"/);
   });
 
   it('states exactly what tick checks: the caller own identity, not --worker', () => {
     assert.match(body, /checks who is calling, not what `--worker` says/);
-    assert.match(body, /unless that session has the\s+`operator-dispatch` role/);
-    assert.match(body, /must also equal\s+the caller's own roster name/);
-    assert.doesNotMatch(body, /when `--worker` is not the running\s+dispatch session/);
+    assert.match(body, /has\s+the `operator-dispatch` role/);
+    assert.match(body, /must equal the\s+caller's own roster name/);
     assert.doesNotMatch(body, /AISDLC-\d+/);
   });
 
   it('quotes decision-id placeholders in every command and says ids are validated', () => {
-    assert.match(body, /Decision ids are validated before they reach you/);
+    assert.match(body, /Ids are validated before they reach you/);
     assert.doesNotMatch(body, /[^"]<decision-id>[^"]/);
     assert.match(body, /show "<decision-id>"/);
     assert.match(body, /answer "<decision-id>" "<option-id>"/);
@@ -55,27 +57,21 @@ describe('operator-dispatch command', () => {
   });
 
   it('ingests briefs through the enqueue mapping and marks each ingested once', () => {
-    assert.match(body, /briefs\//);
-    assert.match(body, /enqueue --from-brief/);
-    assert.match(body, /marked ingested/);
+    assert.match(body, /`ingested`/);
+    assert.match(body, /marked ingested|marked\s+ingested/);
     assert.match(body, /never enqueues it again/);
   });
 
   it('watches done/ and failed/ verdicts and clears the executor that produced each', () => {
     assert.match(body, /`done\/` or `failed\/`/);
-    assert.match(body, /clear/);
+    assert.match(body, /`clear` result/);
     assert.match(body, /listed once/);
   });
 
-  it('describes every playbook step and the gate on the operational list', () => {
-    assert.match(body, /## The unblocking playbook/);
-    assert.match(body, /--force-with-lease/);
-    assert.match(body, /origin\/main/);
-    assert.match(body, /empty commit/);
-    assert.match(body, /cli-dispatch requeue --task-id "<task-id>"/);
-    assert.match(body, /Escalates to the planner/);
+  it('states that the playbook runs inside tick under the operational list', () => {
+    assert.match(body, /playbook[\s\S]*already\s+ran inside `tick`/);
     assert.match(body, /operational list/);
-    assert.match(body, /recorded as an\s+event/);
+    assert.match(body, /recorded as an event/);
   });
 
   it('reports to the planner with SendMessage and never to an executor', () => {
@@ -90,22 +86,17 @@ describe('operator-dispatch command', () => {
     assert.match(body, /Route `design`/);
   });
 
-  it('reads the handoff file before the tick and self-clears after it', () => {
-    assert.match(body, /## Step 1\.5 - Read the handoff file/);
-    assert.match(body, /operator-dispatch-handoff\.md/);
-    assert.ok(body.indexOf('Step 1.5') < body.indexOf('## Step 2 - Run one wake-up'));
-    assert.match(body, /cli-hierarchy\.mjs" clear --self --resume-after 60/);
-    assert.match(body, /Do not call `ScheduleWakeup` on this path/);
+  it('self-clears after every wake-up with the resume delay the tick chose', () => {
+    assert.match(body, /## Step 5 - Self-clear and sleep/);
+    assert.match(body, /nextWakeSec/);
+    assert.match(body, /clear --self --resume-after "\$NEXT_WAKE_SEC"/);
+    assert.match(body, /Never `ScheduleWakeup`/);
   });
 
-  it('falls back to ScheduleWakeup only when TMUX_PANE is unset', () => {
-    assert.match(body, /\$\{TMUX_PANE:-\}/);
-    assert.match(body, /Only when `TMUX_PANE` is unset/);
-  });
-
-  it('wakes itself up again and stops', () => {
-    assert.match(body, /ScheduleWakeup/);
-    assert.match(body, /\/ai-sdlc operator-dispatch/);
+  it('refuses to loop without tmux instead of falling back to ScheduleWakeup', () => {
+    assert.match(body, /Without tmux the command refuses/);
+    assert.match(body, /do not loop/);
+    assert.doesNotMatch(body, /falling back to ScheduleWakeup/);
   });
 
   it('states the hard rules plainly', () => {
@@ -161,95 +152,12 @@ describe('operator-dispatch peer binding and decision authority', () => {
     assert.match(body, /decision record on `main`/);
     assert.match(body, /authored by the planner role, is sufficient authority/);
     assert.match(body, /decide-and-proceed and \(b\) timeboxed/);
-    assert.match(body, /do not ask\s+for the operator's direct word/);
+    assert.match(body, /do not ask for the operator's direct\s+word/);
   });
 
   it('does not treat a relayed chat message as authority, and keeps class (c) with the operator', () => {
     assert.match(body, /A chat message relayed by another\s+session is never authority on its own/);
-    assert.match(body, /class \(c\) operator-only items still need\s+the operator/);
-    assert.match(body, /permission-laundering rules are unchanged/);
-  });
-});
-
-describe('operator-dispatch identity script', () => {
-  const start = body.indexOf('IDENTITY=$(');
-  const end = body.indexOf('echo "[operator-dispatch] I am');
-  const block = body.slice(start, end);
-
-  it('uses the same name filter as the session-start hook', () => {
-    // The script sits inside a double-quoted shell string, so `$` is written `\$`.
-    assert.ok(block.includes(SAFE_NAME.source.replace(/\$/g, () => '\\$')));
-    assert.match(block, /ROLES = \['executor', 'operator-dispatch', 'planner'\]/);
-    assert.match(block, /s\.status === 'running'/);
-  });
-
-  /** Run the block as a child of a process named `parentName`; roster pid 'SELF' is that process. */
-  function runBlock(sessions, parentName) {
-    const tmp = mkdtempSync(join(tmpdir(), 'dispatch-identity-'));
-    try {
-      const parent = join(tmp, parentName);
-      symlinkSync(process.execPath, parent);
-      const wrapper = join(tmp, 'wrapper.mjs');
-      writeFileSync(
-        wrapper,
-        `import { spawnSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
-const [tmp, raw, script] = process.argv.slice(2);
-const sessions = JSON.parse(raw).map((s) => (s.pid === 'SELF' ? { ...s, pid: process.pid } : s));
-writeFileSync(tmp + '/hierarchy.json', JSON.stringify({ schemaVersion: 'v1', sessions }));
-const r = spawnSync('bash', ['-c', script], { env: { ...process.env, BOARD_DIR: tmp }, encoding: 'utf-8' });
-process.stdout.write(JSON.stringify({ status: r.status, out: r.stdout }));
-`,
-      );
-      const script = `${block}\nprintf '%s' "$IDENTITY"`;
-      return JSON.parse(
-        execFileSync(parent, [wrapper, tmp, JSON.stringify(sessions), script], {
-          encoding: 'utf-8',
-          timeout: 20000,
-        }),
-      );
-    } finally {
-      rmSync(tmp, { recursive: true, force: true });
-    }
-  }
-
-  const row = (role, name, pid, status = 'running') => ({ role, name, pid, status });
-
-  it('resolves a running dispatch session under a claude process, with the planner name', () => {
-    const res = runBlock(
-      [row('planner', 'planner', 999999991), row('operator-dispatch', 'dispatch-a', 'SELF')],
-      'claude',
-    );
-    assert.equal(res.status, 0);
-    assert.deepEqual(JSON.parse(res.out), { name: 'dispatch-a', planner: 'planner' });
-  });
-
-  it('reports an empty planner name when the roster has no planner', () => {
-    const res = runBlock([row('operator-dispatch', 'operator-dispatch', 'SELF')], 'claude');
-    assert.equal(res.status, 0);
-    assert.deepEqual(JSON.parse(res.out), { name: 'operator-dispatch', planner: '' });
-  });
-
-  it('keeps a collision suffix exactly as the roster has it', () => {
-    const res = runBlock([row('operator-dispatch', 'operator-dispatch-2', 'SELF')], 'claude');
-    assert.equal(JSON.parse(res.out).name, 'operator-dispatch-2');
-  });
-
-  it('refuses a stale entry, a non-claude process and an unsafe name', () => {
-    assert.notEqual(
-      runBlock([row('operator-dispatch', 'dispatch-a', 'SELF', 'stopped')], 'claude').status,
-      0,
-    );
-    assert.notEqual(runBlock([row('operator-dispatch', 'dispatch-a', 'SELF')], 'zsh').status, 0);
-    assert.notEqual(
-      runBlock([row('operator-dispatch', 'bad name\n### x', 'SELF')], 'claude').status,
-      0,
-    );
-    assert.notEqual(runBlock([row('wizard', 'dispatch-a', 'SELF')], 'claude').status, 0);
-  });
-
-  it('refuses a session whose nearest match is not the dispatch session', () => {
-    assert.notEqual(runBlock([row('executor', 'executor-a', 'SELF')], 'claude').status, 0);
-    assert.notEqual(runBlock([row('planner', 'planner', 'SELF')], 'claude').status, 0);
+    assert.match(body, /class \(c\)\s+operator-only items still need the operator/);
+    assert.match(body, /permission-laundering\s+rules\s+are\s+unchanged/);
   });
 });

@@ -256,6 +256,12 @@ export interface ClearSelfOptions {
   leadSeconds?: number;
   /** The `TMUX_PANE` of the calling process; when set it must equal the roster pane. */
   callerPane?: string;
+  /**
+   * Board directory to watch. When set, the resume command is typed as soon as a file
+   * newer than this call appears in `briefs/`, `done/` or `failed/`, instead of after
+   * the full resume delay (which then acts as the upper bound).
+   */
+  wakeOnBoardDir?: string;
 }
 
 /** What {@link clearSelf} scheduled. */
@@ -323,10 +329,19 @@ export function clearSelf(opts: ClearSelfOptions, deps: ClearSelfDeps): ClearSel
   }
   const target = resolveSendTarget(deps.run, entry.tmuxSession, entry.tmuxWindow, entry.paneId);
 
-  // Every value is passed as an argument, never interpolated into the script.
+  // Every value is passed as an argument, never interpolated into the script. The marker
+  // is made before the lead delay, so a file written while this turn ends still wakes us.
+  const watchDir = opts.wakeOnBoardDir;
+  const wait = watchDir
+    ? 'sleep 5; i=0; while [ "$i" -lt "$4" ]; do ' +
+      'if [ -n "$(find "$6/briefs" "$6/done" "$6/failed" -type f -newer "$m" 2>/dev/null | head -n 1)" ]; ' +
+      'then break; fi; sleep 2; i=$((i+2)); done; rm -f "$m"; '
+    : 'sleep "$4"; ';
   const script =
+    (watchDir ? 'm=$(mktemp) || exit 1; ' : '') +
     'sleep "$1"; tmux send-keys -t "$2" -l -- "$3"; tmux send-keys -t "$2" Enter; ' +
-    'sleep "$4"; tmux send-keys -t "$2" -l -- "$5"; tmux send-keys -t "$2" Enter';
+    wait +
+    'tmux send-keys -t "$2" -l -- "$5"; tmux send-keys -t "$2" Enter';
   (deps.spawnDetached ?? defaultSpawnDetached)('sh', [
     '-c',
     script,
@@ -336,6 +351,7 @@ export function clearSelf(opts: ClearSelfOptions, deps: ClearSelfDeps): ClearSel
     '/clear',
     String(resumeAfterSeconds),
     role === 'executor' ? EXECUTOR_RESUME_COMMAND : DISPATCH_RESUME_COMMAND,
+    ...(watchDir ? [watchDir] : []),
   ]);
   deps.log?.(
     `scheduled '${name}' to clear in ${leadSeconds}s and resume ${resumeAfterSeconds}s later`,

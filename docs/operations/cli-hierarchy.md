@@ -44,11 +44,11 @@ reads the real `--help` output and fails when this page omits a command or optio
 
 ## Roles and naming
 
-| Role       | Roster name                       | Purpose                                                                                 |
-| ---------- | --------------------------------- | --------------------------------------------------------------------------------------- |
-| planner    | `planner`                         | Operator-facing tier. Plans, files tasks and decisions. Keeps its approval prompts.     |
-| dispatch   | `operator-dispatch`               | Ingests briefs, queues tasks, watches verdicts, clears executors, reports to the planner. |
-| executors  | `executor-alpha` .. `executor-epsilon` | Each claims one task at a time from the board and runs `/ai-sdlc execute`.         |
+| Role      | Roster name                            | Purpose                                                                                   |
+| --------- | -------------------------------------- | ----------------------------------------------------------------------------------------- |
+| planner   | `planner`                              | Operator-facing tier. Plans, files tasks and decisions. Keeps its approval prompts.       |
+| dispatch  | `operator-dispatch`                    | Ingests briefs, queues tasks, watches verdicts, clears executors, reports to the planner. |
+| executors | `executor-alpha` .. `executor-epsilon` | Each claims one task at a time from the board and runs `/ai-sdlc execute`.                |
 
 Each agent runs in its own detached tmux session. The session name equals the window name
 equals the agent name, so two terminals can show two agents at once.
@@ -66,33 +66,33 @@ repository's roster only.
 All state lives under the dispatch board directory, `.ai-sdlc/dispatch/` by default
 (`--board-dir <path>` on any command overrides it).
 
-| Path                                    | Contents                                                                                                   |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `.ai-sdlc/dispatch/hierarchy.json`      | The roster (written atomically, validated against `spec/schemas/hierarchy-roster.v1.schema.json`).          |
-| `.ai-sdlc/dispatch/queue/`              | Manifests waiting to be claimed.                                                                           |
-| `.ai-sdlc/dispatch/inflight/`           | Manifests claimed by a worker (`workerId` equals the roster name), plus heartbeats.                        |
-| `.ai-sdlc/dispatch/done/`               | Verdicts for tasks that finished with `success` or `iterate-needed`.                                       |
-| `.ai-sdlc/dispatch/failed/`             | Diagnostics and verdicts for every other outcome.                                                          |
-| `.ai-sdlc/dispatch/blocked/`            | Manifests parked while they wait on a decision.                                                            |
-| `.ai-sdlc/dispatch/briefs/`             | Dispatch briefs written by `brief`.                                                                        |
+| Path                               | Contents                                                                                           |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `.ai-sdlc/dispatch/hierarchy.json` | The roster (written atomically, validated against `spec/schemas/hierarchy-roster.v1.schema.json`). |
+| `.ai-sdlc/dispatch/queue/`         | Manifests waiting to be claimed.                                                                   |
+| `.ai-sdlc/dispatch/inflight/`      | Manifests claimed by a worker (`workerId` equals the roster name), plus heartbeats.                |
+| `.ai-sdlc/dispatch/done/`          | Verdicts for tasks that finished with `success` or `iterate-needed`.                               |
+| `.ai-sdlc/dispatch/failed/`        | Diagnostics and verdicts for every other outcome.                                                  |
+| `.ai-sdlc/dispatch/blocked/`       | Manifests parked while they wait on a decision.                                                    |
+| `.ai-sdlc/dispatch/briefs/`        | Dispatch briefs written by `brief`.                                                                |
 
 ### Roster shape
 
 `hierarchy.json` is `{ "schemaVersion": "v1", "sessions": [ ... ] }`. Each session entry has:
 
-| Field            | Meaning                                                                             |
-| ---------------- | ----------------------------------------------------------------------------------- |
-| `role`           | `planner`, `operator-dispatch` or `executor`.                                       |
-| `project`        | The project the name is qualified with.                                             |
-| `name`           | The name the harness registered (normally equal to `tmuxSession`).                  |
-| `tmuxSession`    | tmux session name; equal to `tmuxWindow`.                                           |
-| `tmuxWindow`     | tmux window name.                                                                   |
-| `paneId`         | tmux pane id (`%N`); keystrokes are sent only to this pane.                         |
-| `pid`            | Process id used to identify the session from its process tree.                      |
-| `model`          | Model the session was started with.                                                 |
-| `permissionMode` | Permission mode it was started with.                                                |
-| `startedAt`      | ISO timestamp.                                                                      |
-| `status`         | `starting` or `running`.                                                            |
+| Field            | Meaning                                                            |
+| ---------------- | ------------------------------------------------------------------ |
+| `role`           | `planner`, `operator-dispatch` or `executor`.                      |
+| `project`        | The project the name is qualified with.                            |
+| `name`           | The name the harness registered (normally equal to `tmuxSession`). |
+| `tmuxSession`    | tmux session name; equal to `tmuxWindow`.                          |
+| `tmuxWindow`     | tmux window name.                                                  |
+| `paneId`         | tmux pane id (`%N`); keystrokes are sent only to this pane.        |
+| `pid`            | Process id used to identify the session from its process tree.     |
+| `model`          | Model the session was started with.                                |
+| `permissionMode` | Permission mode it was started with.                               |
+| `startedAt`      | ISO timestamp.                                                     |
+| `status`         | `starting` or `running`.                                           |
 
 ## Commands
 
@@ -112,16 +112,16 @@ cli-hierarchy up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
                  [--attach] [--allow-planner-bypass]
 ```
 
-| Option                   | Meaning                                                                                             |
-| ------------------------ | --------------------------------------------------------------------------------------------------- |
-| `--executors <n>`        | Number of executors, 0 to 5 (default 5).                                                            |
-| `--planner-model <m>`    | Planner model (default `fable`).                                                                    |
-| `--dispatch-model <m>`   | Dispatch model (default `opus`).                                                                    |
-| `--executor-model <m>`   | Executor model (default `sonnet`).                                                                  |
-| `--no-planner`           | Do not start a planner.                                                                             |
-| `--project <name>`       | Project the names are qualified with (default the repository basename).                             |
-| `--attach`               | Show the planner (or the dispatch session when there is none) when done.                            |
-| `--allow-planner-bypass` | Allow the planner to start in `bypassPermissions` mode (refused by default).                        |
+| Option                   | Meaning                                                                      |
+| ------------------------ | ---------------------------------------------------------------------------- |
+| `--executors <n>`        | Number of executors, 0 to 5 (default 5).                                     |
+| `--planner-model <m>`    | Planner model (default `fable`).                                             |
+| `--dispatch-model <m>`   | Dispatch model (default `sonnet`).                                           |
+| `--executor-model <m>`   | Executor model (default `sonnet`).                                           |
+| `--no-planner`           | Do not start a planner.                                                      |
+| `--project <name>`       | Project the names are qualified with (default the repository basename).      |
+| `--attach`               | Show the planner (or the dispatch session when there is none) when done.     |
+| `--allow-planner-bypass` | Allow the planner to start in `bypassPermissions` mode (refused by default). |
 
 The planner starts in the permission mode from the operator's settings (falling back to
 `default`); dispatch and executors start in `bypassPermissions`.
@@ -190,12 +190,12 @@ Generate a VS Code `tasks.json` with one dedicated terminal per agent, each runn
 cli-hierarchy terminals --vscode [--out <dir>] [--force] [--print]
 ```
 
-| Option         | Meaning                                                      |
-| -------------- | ------------------------------------------------------------ |
-| `--vscode`     | Required; the only supported target (without it, exit 2).    |
-| `--out <dir>`  | Output directory (default `./.vscode`).                      |
-| `--force`      | Replace an existing `tasks.json`.                            |
-| `--print`      | Print the JSON to stdout instead of writing a file.          |
+| Option        | Meaning                                                   |
+| ------------- | --------------------------------------------------------- |
+| `--vscode`    | Required; the only supported target (without it, exit 2). |
+| `--out <dir>` | Output directory (default `./.vscode`).                   |
+| `--force`     | Replace an existing `tasks.json`.                         |
+| `--print`     | Print the JSON to stdout instead of writing a file.       |
 
 Writes `<out>/tasks.json` atomically; refuses an existing file without `--force`. Exit `0`,
 or `1` on a refusal.
@@ -209,13 +209,13 @@ the dispatch session about it.
 cli-hierarchy brief --tasks <id,...> | --rfc <RFC-NNNN> [--out <path>] [--force] [--notify]
 ```
 
-| Option              | Meaning                                                                                       |
-| ------------------- | --------------------------------------------------------------------------------------------- |
-| `--tasks <id,...>`  | Task ids to include.                                                                          |
-| `--rfc <RFC-NNNN>`  | Include every open task that references the RFC.                                              |
-| `--out <path>`      | Output file (default `.ai-sdlc/dispatch/briefs/<slug>.md`).                                   |
-| `--force`           | Replace an existing brief.                                                                    |
-| `--notify`          | Message the dispatch session that the brief is ready; an existing brief is kept as edited.    |
+| Option             | Meaning                                                                                    |
+| ------------------ | ------------------------------------------------------------------------------------------ |
+| `--tasks <id,...>` | Task ids to include.                                                                       |
+| `--rfc <RFC-NNNN>` | Include every open task that references the RFC.                                           |
+| `--out <path>`     | Output file (default `.ai-sdlc/dispatch/briefs/<slug>.md`).                                |
+| `--force`          | Replace an existing brief.                                                                 |
+| `--notify`         | Message the dispatch session that the brief is ready; an existing brief is kept as edited. |
 
 Prints `wrote <file>` or `kept existing <file>`, then `notified '<dispatch name>'` with
 `--notify`. Exit `0`, `1` on a refusal (unknown task, brief exists without `--force`, no
@@ -256,7 +256,7 @@ cli-hierarchy clear --self [--resume-after <seconds>]
 | -------------------------- | --------------------------------------------------------------------------------------------- |
 | `--settle-ms <n>`          | Wait between the two keystrokes (default 8000).                                               |
 | `--self`                   | Schedule the calling session's own pane to receive `/clear`, then `/ai-sdlc operator-dispatch` (dispatch session) or `/ai-sdlc executor` (an idle executor). |
-| `--resume-after <seconds>` | With `--self`: delay before the resume command (default 60); `/clear` is typed after 20 s.     |
+| `--resume-after <seconds>` | With `--self`: upper bound on the delay before the resume command (default 60); a new brief or verdict file wakes it sooner; `/clear` is typed after 20 s. Refused when `TMUX_PANE` is unset. |
 
 `clear <executor>` is a dispatch-session command; `clear --self` is also open to an executor
 that holds no inflight task, which is how an idle executor returns to the context floor.
@@ -303,17 +303,22 @@ cli-hierarchy tick [--worker <dispatch-name>] [--report-every-ms <n>] [--settle-
                    [--retry-limit <n>] [--work-dir <path>]
 ```
 
-| Option                   | Meaning                                                                              |
-| ------------------------ | ------------------------------------------------------------------------------------ |
-| `--worker <name>`        | Optional; when given it must equal the calling session's own roster name.            |
-| `--report-every-ms <n>`  | Spacing of progress reports (default 900000).                                        |
-| `--settle-ms <n>`        | Settle time used for clears (default 8000).                                          |
-| `--retry-limit <n>`      | Re-queues allowed per failed task (default 2; a larger value is refused).            |
-| `--work-dir <path>`      | Repository root (default the current directory).                                     |
+| Option                  | Meaning                                                                   |
+| ----------------------- | ------------------------------------------------------------------------- |
+| `--worker <name>`       | Optional; when given it must equal the calling session's own roster name. |
+| `--report-every-ms <n>` | Spacing of progress reports (default 900000).                             |
+| `--settle-ms <n>`       | Settle time used for clears (default 8000).                               |
+| `--retry-limit <n>`     | Re-queues allowed per failed task (default 2; a larger value is refused). |
+| `--work-dir <path>`     | Repository root (default the current directory).                          |
 
 Dispatch-session command, guarded like `clear`. Effects: moves manifests into `queue/`,
 requeues failed tasks within the retry limit, clears executors whose tasks reached a
-verdict. Exit `0`; `1` on a guard refusal; `2` on a malformed number or a retry limit above
+verdict, and flips CodeQL-clean drafts ready when `mark-ready-after-codeql` is granted.
+The JSON also carries the caller's `identity` (`name`, `planner`), the `handoff` file text,
+`selfClear` (whether `TMUX_PANE` is set) and `nextWakeSec`/`wakeReason`: 30 when a brief or
+verdict was handled, 300 when work is queued or inflight, 1800 when the board is empty and
+nothing is inflight. The session sleeps that long (a new brief or verdict file wakes it
+early), so an idle board costs at most two model calls an hour. Exit `0`; `1` on a guard refusal; `2` on a malformed number or a retry limit above
 the cap.
 
 ### `route-decision`
@@ -325,13 +330,13 @@ cli-hierarchy route-decision --decision-id <id> --route operational|design --to 
                              [--task-id <id>] [--worker <name>]
 ```
 
-| Option               | Meaning                                                        |
-| -------------------- | -------------------------------------------------------------- |
-| `--decision-id <id>` | Decision Catalog id (`DEC-0000`).                              |
-| `--route <name>`     | `operational` or `design`.                                     |
-| `--to <name>`        | Session name or role that now owns the decision.               |
-| `--task-id <id>`     | Task the decision belongs to (optional).                       |
-| `--worker <name>`    | Optional; must equal the calling session's own roster name.    |
+| Option               | Meaning                                                     |
+| -------------------- | ----------------------------------------------------------- |
+| `--decision-id <id>` | Decision Catalog id (`DEC-0000`).                           |
+| `--route <name>`     | `operational` or `design`.                                  |
+| `--to <name>`        | Session name or role that now owns the decision.            |
+| `--task-id <id>`     | Task the decision belongs to (optional).                    |
+| `--worker <name>`    | Optional; must equal the calling session's own roster name. |
 
 Dispatch-session command, guarded like `clear`. Prints `{ok, decisionId, route, routedTo}`.
 Exit `0`, `1` on a guard refusal, `2` on a missing or invalid argument.
@@ -376,7 +381,8 @@ The cycle is **brief, tick, clear**:
 
 Self-clear rule: **one task per executor context**, and **the dispatch session clears itself
 after every tick** (`clear --self`, refreshing its handoff file first), so every tick starts
-from the context floor. The planner clears at 150k tokens of context.
+from the context floor. The self-clear needs tmux (`TMUX_PANE`); a dispatch session outside
+tmux is refused by `clear --self` and stops rather than polling with a growing context. The planner clears at 150k tokens of context.
 
 How `clear` interacts with an executor's loop: the executor's loop ends after it reports a
 verdict (step "Stop" in [The executor loop](parallel-dispatch.md#the-executor-loop)); `clear`

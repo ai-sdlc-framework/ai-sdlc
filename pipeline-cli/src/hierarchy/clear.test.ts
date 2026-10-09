@@ -445,6 +445,26 @@ describe('clearSelf', () => {
     expect(sends()).toHaveLength(0);
   });
 
+  it('wakes early on a new brief or verdict file when given the board to watch', () => {
+    clearSelf(
+      { self: 'operator-dispatch', resumeAfterSeconds: 1800, wakeOnBoardDir: '/board' },
+      selfDeps(),
+    );
+    const a = spawned[0]!.args;
+    expect(a.slice(3)).toEqual([
+      '20',
+      '%3',
+      '/clear',
+      '1800',
+      '/ai-sdlc operator-dispatch',
+      '/board',
+    ]);
+    // the marker is made before the lead delay; the wait ends on a newer file in the board
+    expect(a[1]).toMatch(/^m=\$\(mktemp\)/);
+    expect(a[1]).toMatch(/find "\$6\/briefs" "\$6\/done" "\$6\/failed" -type f -newer "\$m"/);
+    expect(a[1]).toMatch(/-lt "\$4"/);
+  });
+
   it('refuses a caller that is not the dispatch session', () => {
     expect(() => clearSelf({ self: 'executor-alpha' }, selfDeps())).toThrow(
       /not the dispatch session/,
