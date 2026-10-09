@@ -555,7 +555,7 @@ export async function setupWorktree(opts: SetupWorktreeOptions): Promise<SetupWo
   if (opts.resume) {
     assertSafeResumeBranch(opts.taskId, opts.branch);
     if (!opts.skipFetch) {
-      await runner('git', ['fetch', 'origin', opts.branch], {
+      await runner('git', ['fetch', 'origin', '--', opts.branch], {
         cwd: opts.workDir,
         timeout: 30_000,
         allowFailure: true,

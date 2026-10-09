@@ -55,13 +55,24 @@ describe('Step 3 resume', () => {
     expect(fake.calls.find((c) => c.args[0] === 'fetch')?.args).toEqual([
       'fetch',
       'origin',
+      '--',
       BRANCH,
     ]);
   });
 
   it('rejects an option-shaped branch before any git call', async () => {
     const fake = new FakeRunner();
-    for (const branch of ['--upload-pack=touch /tmp/x', '-x', 'a..b', 'a.lock', 'a b']) {
+    for (const branch of [
+      '--upload-pack=touch /tmp/x',
+      '-x',
+      'a..b',
+      'a.lock',
+      'a b',
+      '/abs',
+      'a//b',
+      'a/',
+      'a.',
+    ]) {
       await expect(setupWorktree({ ...base(), branch, runner: fake.toRunner() })).rejects.toThrow(
         /refusing branch name/,
       );
