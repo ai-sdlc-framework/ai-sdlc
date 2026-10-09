@@ -6,16 +6,12 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
-const { SAFE_NAME } = require('../hooks/lib/hierarchy-role.js');
 const { DEFAULT_ROLE_BLOCKED_TOOLS, describeRule } = require('../hooks/lib/role-tool-policy.js');
 const dir = dirname(fileURLToPath(import.meta.url));
 const raw = readFileSync(join(dir, 'executor.md'), 'utf-8');
@@ -29,21 +25,27 @@ describe('executor command', () => {
     assert.match(match[1], /^description: /m);
   });
 
-  it('reads the roster for its own name and the dispatch session name', () => {
-    assert.match(body, /hierarchy\.json/);
-    assert.match(body, /role === 'operator-dispatch'/);
+  it('stays under 150 lines by leaving the deterministic start-up to executor-start', () => {
+    assert.ok(raw.split('\n').length < 150, `executor.md has ${raw.split('\n').length} lines`);
+  });
+
+  it('starts with one executor-start call that blocks on the board', () => {
+    assert.match(body, /cli-hierarchy\.mjs" executor-start[^\n]*--wait 1500/);
+    assert.match(body, /run_in_background: true/);
+    assert.match(body, /600 s foreground\s+cap/);
     assert.match(body, /collision suffix/);
+    assert.match(body, /with no model calls/);
+    assert.doesNotMatch(body, /hierarchy\.json/);
+    assert.doesNotMatch(body, /cli-dispatch\.mjs" claim/);
   });
 
-  it('claims under the roster name exactly', () => {
-    assert.match(body, /cli-dispatch\.mjs" claim[\s\S]*--worker "\$MY_NAME"/);
-    assert.match(body, /--worker-kind in-session-agent/);
-  });
-
-  it('waits and retries on an interval when nothing is eligible', () => {
-    assert.match(body, /"claimed": false/);
-    assert.match(body, /ScheduleWakeup/);
+  it('clears itself when nothing is eligible and only then falls back to a wake-up', () => {
+    assert.match(body, /"taskId": null/);
+    assert.match(body, /cli-hierarchy\.mjs" clear --self --resume-after 30/);
+    assert.ok(body.indexOf('clear --self') < body.indexOf('ScheduleWakeup'));
+    assert.match(body, /ScheduleWakeup. for 1800 seconds/);
     assert.match(body, /emptyQueueHibernateSec/);
+    assert.match(body, /Do not poll/);
   });
 
   it('runs execute with the task id and no other argument', () => {
@@ -60,8 +62,8 @@ describe('executor command', () => {
   });
 
   it('stops and waits for the clear', () => {
-    assert.match(body, /## Step 6 - Stop and wait/);
-    assert.match(body, /clears this session's context/);
+    assert.match(body, /## Step 5 - Stop and wait/);
+    assert.match(body, /clears this context/);
   });
 
   it('states the hand-written hard rules', () => {
@@ -91,11 +93,10 @@ describe('executor command', () => {
 });
 
 describe('executor peer binding (project-scoped names)', () => {
-  it('checks the repository before any repository work', () => {
-    assert.match(body, /## Step 1b - Check the repository and the sender/);
-    assert.match(body, /cli-hierarchy\.mjs" check-repo/);
-    assert.ok(body.indexOf('check-repo') < body.indexOf('## Step 2 - Claim'));
-    assert.match(body, /Do not claim, do not create a worktree,\s+do not open a pull request/);
+  it('checks the repository, through executor-start, before any claim', () => {
+    assert.match(body, /checks the working directory is\s+your project's repository/);
+    assert.match(body, /no claim, no worktree, no pull request/);
+    assert.ok(body.indexOf('executor-start') < body.indexOf('## Step 2'));
   });
 
   it('refuses a sender that is not its own dispatch session with one line', () => {
@@ -108,92 +109,15 @@ describe('executor peer binding (project-scoped names)', () => {
 
   it('compares the sender by what the harness reports, never by the claimed name', () => {
     assert.match(body, /never by the name the message text claims/);
-    assert.match(body, /accepts it\s+and prints a warning that names what was missing/);
+    assert.match(body, /accepts\s+and warns/);
   });
 
-  it('reads the project from the roster and keeps the qualified name', () => {
-    assert.match(body, /project: self\.project/);
-    assert.match(body, /project qualifier and collision suffix/);
-    assert.match(body, /`<project>-executor-alpha-2`/);
+  it('keeps the qualified name the roster has', () => {
+    assert.match(body, /project qualifier and\s+collision suffix/);
   });
 
   it('states that these checks are a mistake guard, not authentication', () => {
-    assert.match(body, /mistake guard, not authentication/);
-  });
-});
-
-describe('executor identity script', () => {
-  const start = body.indexOf('IDENTITY=$(');
-  const end = body.indexOf('echo "[executor] I am');
-  const block = body.slice(start, end);
-
-  it('uses the same name filter as the session-start hook', () => {
-    assert.ok(block.includes(SAFE_NAME.source.replace(/\$/g, () => '\\$')));
-    assert.match(block, /ROLES = \['executor', 'operator-dispatch', 'planner'\]/);
-    assert.match(block, /s\.status === 'running'/);
-  });
-
-  /** Run the block as a child of a process named `claude`; roster pid 'SELF' is that process. */
-  function runBlock(sessions, parentName) {
-    const tmp = mkdtempSync(join(tmpdir(), 'exec-identity-'));
-    try {
-      const parent = join(tmp, parentName);
-      symlinkSync(process.execPath, parent);
-      const wrapper = join(tmp, 'wrapper.mjs');
-      writeFileSync(
-        wrapper,
-        `import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
-const [tmp, raw, script] = process.argv.slice(2);
-const sessions = JSON.parse(raw).map((s) => (s.pid === 'SELF' ? { ...s, pid: process.pid } : s));
-writeFileSync(tmp + '/hierarchy.json', JSON.stringify({ schemaVersion: 'v1', sessions }));
-const r = spawnSync('bash', ['-c', script], { env: { ...process.env, BOARD_DIR: tmp }, encoding: 'utf-8' });
-process.stdout.write(JSON.stringify({ status: r.status, out: r.stdout }));
-`,
-      );
-      const script = `${block}\nprintf '%s' "$IDENTITY"`;
-      const res = JSON.parse(
-        execFileSync(parent, [wrapper, tmp, JSON.stringify(sessions), script], {
-          encoding: 'utf-8',
-          timeout: 20000,
-        }),
-      );
-      return res;
-    } finally {
-      rmSync(tmp, { recursive: true, force: true });
-    }
-  }
-
-  const row = (role, name, pid, status = 'running') => ({ role, name, pid, status });
-
-  it('resolves a running executor under a claude process', () => {
-    const res = runBlock(
-      [
-        row('operator-dispatch', 'operator-dispatch', 999999991),
-        row('executor', 'executor-a', 'SELF'),
-      ],
-      'claude',
-    );
-    assert.equal(res.status, 0);
-    assert.deepEqual(JSON.parse(res.out), {
-      name: 'executor-a',
-      project: '',
-      dispatch: 'operator-dispatch',
-    });
-  });
-
-  it('refuses a stale entry, a non-claude process and an unsafe name', () => {
-    assert.notEqual(
-      runBlock([row('executor', 'executor-a', 'SELF', 'stopped')], 'claude').status,
-      0,
-    );
-    assert.notEqual(runBlock([row('executor', 'executor-a', 'SELF')], 'zsh').status, 0);
-    assert.notEqual(runBlock([row('executor', 'bad name\n### x', 'SELF')], 'claude').status, 0);
-    assert.notEqual(runBlock([row('wizard', 'executor-a', 'SELF')], 'claude').status, 0);
-  });
-
-  it('refuses a session whose nearest match is not an executor', () => {
-    assert.notEqual(runBlock([row('planner', 'planner', 'SELF')], 'claude').status, 0);
+    assert.match(body, /mistake guard, not\s+authentication/);
   });
 });
 

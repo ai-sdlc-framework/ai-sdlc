@@ -16,8 +16,8 @@ resolved pipeline-cli bin (works from an installed plugin, not only the dogfood 
 It passes `up`, `status`, `attach`, `terminals`, `brief` and `down` through unchanged,
 with these differences: `attach` and `up --attach` print the shell command to run (a
 Claude Code session cannot switch your terminal); `down` with no `--role` asks you to
-confirm first; `clear`, `tick`, `route-decision`, `check-sender` and `check-repo` are
-refused (they belong to the dispatch and executor loop bodies); with no arguments it
+confirm first; `clear`, `tick`, `route-decision`, `check-sender`, `check-repo` and
+`executor-start` are refused (they belong to the dispatch and executor loop bodies); with no arguments it
 prints `--help` plus a common-recipes block.
 
 The fallback is the bare binary, from the repository root:
@@ -255,16 +255,42 @@ cli-hierarchy clear --self [--resume-after <seconds>]
 | Option                     | Meaning                                                                                       |
 | -------------------------- | --------------------------------------------------------------------------------------------- |
 | `--settle-ms <n>`          | Wait between the two keystrokes (default 8000).                                               |
-| `--self`                   | Schedule the dispatch session's own pane to receive `/clear`, then `/ai-sdlc operator-dispatch`. |
+| `--self`                   | Schedule the calling session's own pane to receive `/clear`, then `/ai-sdlc operator-dispatch` (dispatch session) or `/ai-sdlc executor` (an idle executor). |
 | `--resume-after <seconds>` | With `--self`: delay before the resume command (default 60); `/clear` is typed after 20 s.     |
 
-Dispatch-session command: a mistake guard resolves the caller from the process tree and the
+`clear <executor>` is a dispatch-session command; `clear --self` is also open to an executor
+that holds no inflight task, which is how an idle executor returns to the context floor.
+A mistake guard resolves the caller from the process tree and the
 roster and exits 1 for anyone else (not authentication). `clear <executor>` refuses an
 executor that holds an inflight task, is not a running executor, or lacks the ownership
 marker, and sends keys only to the pane the roster names. Prints a JSON result and records
 an `ExecutorContextCleared` event. After a clear the plugin's `SessionStart` hook
 re-injects the role, so the executor's loop resumes with no re-briefing. Exit `0`, `1` on a
 refusal, `2` on a malformed number or missing name.
+
+### `executor-start`
+
+An executor's whole start-up in one call that costs no model calls while it waits: roster
+identity (the calling session must be a running executor), the `check-repo` test, then a
+blocking claim (`cli-dispatch claim --wait`, which wakes on a change to `queue/` and re-checks
+every 2 s).
+
+```bash
+cli-hierarchy executor-start [--wait <seconds>]
+```
+
+Prints the `[executor] I am '<name>'` identity line, then one JSON line
+`{"name", "project", "dispatch", "taskId": "<id>"|null, "manifest": {...}}`. `--wait` defaults to
+1500. Because that exceeds the Bash tool's 600 s foreground cap, the executor runs it with the Bash
+tool's `run_in_background: true`, stops its turn, and reads the JSON when the completion
+notification re-invokes the session. Exit `1` when the session is not an executor or the working directory is not the project's
+repository.
+
+**Idle path.** When `taskId` is `null` the executor runs `cli-hierarchy clear --self --resume-after 30`
+and stops; 20 s later its context is cleared and `/ai-sdlc executor` restarts it from the
+context floor, so an idle executor costs one short turn per ~25 minutes rather than a poll
+every 30 s on a large context. With no tmux pane to clear it falls back to `ScheduleWakeup`
+after `spec.inSessionAgent.emptyQueueHibernateSec` (default 1800 seconds).
 
 ### `tick`
 

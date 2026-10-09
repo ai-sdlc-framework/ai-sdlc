@@ -43,6 +43,7 @@ export {
   clearExecutor,
   clearSelf,
   DISPATCH_RESUME_COMMAND,
+  EXECUTOR_RESUME_COMMAND,
   type ClearSelfDeps,
   type ClearSelfOptions,
   type ClearSelfResult,
@@ -108,6 +109,14 @@ export {
   type OperationalAction,
   type OperationalPolicy,
 } from './operational.js';
+export {
+  DEFAULT_EMPTY_QUEUE_HIBERNATE_SEC,
+  DEFAULT_EXECUTOR_WAIT_SEC,
+  executorStart,
+  type ExecutorStartDeps,
+  type ExecutorStartOptions,
+  type ExecutorStartResult,
+} from './executor-start.js';
 export {
   createSystemIdentity,
   isClaudeCommand,

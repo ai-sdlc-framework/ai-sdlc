@@ -32,7 +32,7 @@ The operator opens **one or more** sibling Claude Code sessions and fires
 3. Write the verdict to `done/` (success) or `failed/` (diagnostic).
 4. `ScheduleWakeup` for the next tick.
 
-When the queue is empty the session hibernates for ~30 seconds (configurable
+When the queue is empty the session hibernates for ~30 minutes (1800 s, configurable
 via `.ai-sdlc/dispatch-config.yaml` `spec.inSessionAgent.emptyQueueHibernateSec`)
 before re-polling — this avoids burning subscription tokens on busy-waits.
 
@@ -187,7 +187,7 @@ fi
 Parse the JSON:
 
 - `{"claimed": false}` → no eligible manifest in the queue. **Hibernate**
-  via `ScheduleWakeup(30s)` (or per the configured
+  via `ScheduleWakeup(1800s)` (or per the configured
   `emptyQueueHibernateSec`). Exit this tick.
 - `{"claimed": true, "manifestPath": "...", "manifest": {...}}` → continue
   to Step 3.
@@ -391,7 +391,7 @@ over claude-p-shell Workers (which poll at 15s per their config), keeping
 work on the subscription-quota path.
 
 When the queue is empty (Step 2 `claimed: false`), the Worker uses the
-slower `emptyQueueHibernateSec` cadence (30s default) to avoid spamming
+slower `emptyQueueHibernateSec` cadence (1800 s default) to avoid spamming
 the filesystem with empty polls.
 
 ---

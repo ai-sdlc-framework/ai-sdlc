@@ -3751,7 +3751,7 @@ export const dispatchConfigV1Schema = {
             emptyQueueHibernateSec: {
               type: 'integer',
               minimum: 1,
-              default: 30,
+              default: 1800,
               description:
                 'Seconds the in-session-agent Worker waits before re-polling when the queue is empty. Distinct from pollIntervalSec, which applies when work is being claimed.',
             },

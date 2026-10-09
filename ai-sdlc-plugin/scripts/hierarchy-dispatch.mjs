@@ -24,7 +24,14 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-export const REFUSED = ['clear', 'tick', 'route-decision', 'check-sender', 'check-repo'];
+export const REFUSED = [
+  'clear',
+  'tick',
+  'route-decision',
+  'check-sender',
+  'check-repo',
+  'executor-start',
+];
 
 export const INSTALL_HINT =
   'ai-sdlc hierarchy: could not locate the pipeline-cli bin. Run `ai-sdlc-plugin/scripts/install-runtime-deps.sh` (or, in the dogfood monorepo, `pnpm --filter @ai-sdlc/pipeline-cli build`) and retry.';

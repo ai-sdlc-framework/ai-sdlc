@@ -65,7 +65,14 @@ describe('hierarchy dispatch script', () => {
   });
 
   it('refuses every loop-body subcommand with a one-line explanation', () => {
-    assert.deepEqual(REFUSED, ['clear', 'tick', 'route-decision', 'check-sender', 'check-repo']);
+    assert.deepEqual(REFUSED, [
+      'clear',
+      'tick',
+      'route-decision',
+      'check-sender',
+      'check-repo',
+      'executor-start',
+    ]);
     for (const sub of REFUSED) {
       const r = capture([sub, 'x'], { PIPELINE_CLI_BIN: '/nonexistent' });
       assert.equal(r.code, 2, sub);
