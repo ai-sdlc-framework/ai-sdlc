@@ -6,6 +6,7 @@ import {
   findInvisibleDependencies,
 } from './gate-7-deps.js';
 import type { IssueInput } from '../types.js';
+import { declaredDependencyRefsFromFrontmatter, stripFrontmatter } from '../ingress-claude.js';
 
 function input(body: string, references?: string[]): IssueInput {
   return { source: 'backlog', id: 'AISDLC-1', title: 't', body, references };
@@ -299,5 +300,43 @@ describe('Gate 7 declaredDependencyRefs — real reproductions', () => {
     // A '#' not preceded by whitespace is NOT a YAML comment — keep it.
     const hashInValue = ['---', 'references:', '  - docs/a#b.md', '---'].join('\n');
     expect(extractFrontmatterListField(hashInValue, 'references')).toEqual(['docs/a#b.md']);
+  });
+});
+
+// AISDLC-758 — the `dor-evaluate --body-file` CI path receives the whole task
+// file (frontmatter included) and must feed declared deps to Gate 7 exactly
+// like refineBacklogTask() does.
+describe('dor-evaluate path: frontmatter dependencies reach Gate 7 (AISDLC-758)', () => {
+  const taskFile = (deps: string[]) =>
+    [
+      '---',
+      'id: AISDLC-755',
+      'dependencies:',
+      ...deps.map((d) => `  - ${d}`),
+      '---',
+      '',
+      'Sequencing: start this after AISDLC-754 merges.',
+      '',
+    ].join('\n');
+
+  const run = (raw: string) => {
+    const declared = declaredDependencyRefsFromFrontmatter(stripFrontmatter(raw).frontmatter);
+    const input: IssueInput = {
+      source: 'backlog',
+      id: 'AISDLC-755',
+      title: 't',
+      body: raw,
+      workDir: '/tmp',
+      ...(declared.length > 0 ? { declaredDependencyRefs: declared } : {}),
+    };
+    return evaluateGate7(input);
+  };
+
+  it('passes when the prose reference is declared in frontmatter', () => {
+    expect(run(taskFile(['AISDLC-754'])).verdict).toBe('pass');
+  });
+
+  it('still fails when the prose reference is not declared', () => {
+    expect(run(taskFile(['AISDLC-999'])).verdict).toBe('fail');
   });
 });

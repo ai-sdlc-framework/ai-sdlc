@@ -32,7 +32,11 @@ import { executeCommand } from './execute.js';
 import { aggregateVerdicts } from '../steps/08-aggregate-verdicts.js';
 import { evaluateIssue, type IssueInput } from '../dor/index.js';
 import { runStageACorpus } from '../dor/corpus.js';
-import { refineBacklogTask } from '../dor/ingress-claude.js';
+import {
+  refineBacklogTask,
+  stripFrontmatter,
+  declaredDependencyRefsFromFrontmatter,
+} from '../dor/ingress-claude.js';
 import { decideStaleness } from '../dor/staleness.js';
 import { loadDorConfig } from '../dor/dor-config.js';
 import { appendCalibrationEntry } from '../dor/calibration-log.js';
@@ -821,6 +825,14 @@ export function buildCli(): Argv {
             body,
             workDir: argv['work-dir'] as string,
           };
+          // AISDLC-758 — mirror refineBacklogTask(): feed frontmatter
+          // dependencies/references to Gate 7 on the backlog CI path.
+          if (input.source === 'backlog') {
+            const declared = declaredDependencyRefsFromFrontmatter(
+              stripFrontmatter(body).frontmatter,
+            );
+            if (declared.length > 0) input.declaredDependencyRefs = declared;
+          }
           const verdict = await evaluateIssue(input, { hermetic: argv.hermetic as boolean });
           // AISDLC-161: persist a calibration entry on EVERY evaluation so the
           // GitHub Action ingress (`dor-ingress.yml`) accumulates a corpus the
