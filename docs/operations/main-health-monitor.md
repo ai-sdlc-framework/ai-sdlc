@@ -8,7 +8,7 @@
 
 ## TL;DR
 
-A GitHub Actions workflow fires on every push to `main` and runs the full test suite. If any test fails, it automatically creates a GitHub issue titled `[main-health] main is RED at <commit>` assigned to `@deefactorial`. When you see this issue, use the triage steps below to bisect which PR introduced the regression.
+A GitHub Actions workflow fires on every push to `main` and daily at 06:00 UTC, and runs the full test suite. If any test fails, it automatically creates a GitHub issue titled `[main-health] main is RED at <commit>` assigned to `@deefactorial`. When you see this issue, use the triage steps below to bisect which PR introduced the regression.
 
 ---
 
@@ -28,7 +28,7 @@ Each individual PR had green CI. Their combination broke `main`. This workflow p
 
 ```
 1. PR merges into main (auto-merge squash, AISDLC-400)
-2. main-health-monitor.yml triggers on push to main
+2. main-health-monitor.yml triggers on push to main (or the daily 06:00 UTC schedule)
 3. Full test suite runs (pnpm -r test + workflow YAML tests)
 4. If all green → workflow completes silently (no issue created)
 5. If any failure:
@@ -43,13 +43,21 @@ The issue is the primary notification mechanism. GitHub sends an email/notificat
 
 ---
 
+## Scheduled run and label behaviour (AISDLC-768)
+
+The workflow also runs on a daily `schedule` (06:00 UTC) against the current `main` head, so a test that rots with the calendar (clock-dependent fixtures) turns red without waiting for an unrelated push. On scheduled runs `github.event.head_commit` is empty, so the alert job reads the commit subject from the checked-out head with `git log -1 --format=%s`. The open-issue dedupe check means a still-red main yields one issue, not one per day.
+
+The alert step creates its labels (`ci`, `main-red`) with `gh label create --force` before `gh issue create`. If label creation is refused it files the issue without labels. If the issue itself cannot be filed, the job writes the reason to `$GITHUB_STEP_SUMMARY`, emits `::error::`, and exits non-zero, so a silent failure to page is impossible. `.github/workflows/__tests__/main-health-monitor.test.mjs` fails when any `--label` value is neither created by the workflow nor listed in `.github/workflows/label-manifest.json`.
+
+---
+
 ## Relationship to other CI workflows
 
 | Workflow | Trigger | Scope | Purpose |
 |---|---|---|---|
 | `ai-sdlc-gate.yml` | PR events (push/sync/ready) | Per-PR, affected packages | **Pre-merge gate** — blocks merge until green |
 | `ci.yml` | PR + push to main | Per-PR: affected pkgs; push: full | General CI (build, test, lint, coverage) |
-| `main-health-monitor.yml` | Push to main only | **Always full suite** | **Post-merge skew detector** — alerts when merge combination breaks main |
+| `main-health-monitor.yml` | Push to main + daily 06:00 UTC | **Always full suite** | **Post-merge skew detector** — alerts when merge combination breaks main |
 
 Key distinction: `main-health-monitor.yml` always runs the full test suite (`pnpm -r test`), not affected-package filtered. This is intentional — merge-skew failures are cross-package by definition; affected-package CI would miss them.
 
