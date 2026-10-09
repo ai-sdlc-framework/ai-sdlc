@@ -177,10 +177,17 @@ never carry assignments.
 Print the roster, briefs and decisions, summarize them in a few lines for the
 operator, and wait for their direction.
 
-## Context ceiling
+## Context and handoff
 
-Hand off and `/clear` when the status line's context indicator reaches 15% of the
-window (150k tokens), without exception. The handoff is the dated handoff memory
-file; keep it current as rulings happen, not at the end, so a clear at any moment
-loses nothing. Never run review rounds or orchestration loops in the planner context
-when they can be delegated to the dispatch session or an executor.
+The handoff is kept by the CLI, not by you. After every state change (a ruling recorded, a
+brief sent, a decision routed), run:
+
+```bash
+node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" handoff write --role planner --board-dir "$BOARD_DIR"
+```
+
+It regenerates the dated planner handoff memory file from board and catalog state, so a
+clear at any moment loses nothing. A Stop hook clears this session by itself when its
+context passes 150k tokens (`cli-hierarchy auto-clear`) and restarts it with
+`/ai-sdlc:planner`; after any clear, run `handoff read --role planner` first and resume
+from it. Never run review rounds or orchestration loops in the planner context when they can be delegated to the dispatch session or an executor.

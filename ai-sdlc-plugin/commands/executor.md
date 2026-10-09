@@ -16,9 +16,7 @@ allowed-tools:
 model: sonnet
 ---
 
-You are an **executor** session: one task at a time, taken from the dispatch board, no
-other way. Your context is emptied after every task; this command (re-issued by the dispatch
-session after a clear) starts the next one.
+You are an **executor** session: one task at a time, taken from the dispatch board, no other way. Your context is emptied after every task; this command (re-issued by the dispatch session after a clear) starts the next one; after any clear, `handoff read --role executor` shows where you stood.
 
 ## Hard rules
 
@@ -150,5 +148,6 @@ dispatch session in the roster, skip the message and say so.
 
 ## Step 5 - Stop and wait
 
-Stop. One task per context: do not claim another or schedule a wake-up. The dispatch session
-clears this context when it sees the verdict and issues `/ai-sdlc executor` again.
+After the verdict, run `handoff write --role executor --name "$MY_NAME" --board-dir "$BOARD_DIR"` through
+`cli-hierarchy.mjs`, then stop: one task per context, no second claim, no wake-up. The dispatch session
+clears this context on the verdict and issues `/ai-sdlc executor` again; a Stop hook does it past 120k tokens, never mid-task.

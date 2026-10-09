@@ -63,7 +63,7 @@ role, in the main checkout) and otherwise exits non-zero. On a non-zero exit sto
 a name. The JSON holds:
 
 - `identity.name` (`$MY_NAME`) and `identity.planner` (`$PLANNER_NAME`, empty when none).
-- `handoff`: handoff file text; when anything changed, refresh `.claude/memory/operator-dispatch-handoff.md`.
+- `handoff`: this session's handoff, regenerated from board and catalog state at the end of the tick (what `cli-hierarchy.mjs handoff read --role operator-dispatch` returns after a clear); nothing to write by hand.
 - `ingested`, `ingestErrors`: each new brief once. Tell the planner about an error.
 - `verdicts`: each new verdict once, with the executor `clear` result (`degraded`: check
   `cli-hierarchy status`) and validated `decisionIds`; a `blocked` one awaits Step 4.
@@ -115,5 +115,5 @@ node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" clear --self --resume-after "$NEXT_WA
 
 A detached process types `/clear` about 20 seconds later and `/ai-sdlc operator-dispatch`
 after `nextWakeSec` (30 busy, 300 working, 1800 empty), sooner when a brief or verdict lands.
-End the turn with one line saying so. Never `ScheduleWakeup`. Without tmux (`TMUX_PANE`
+End the turn with one line saying so. A Stop hook also clears this session past 120k tokens. Never `ScheduleWakeup`. Without tmux (`TMUX_PANE`
 unset) the command refuses: stop, tell the operator to restart with `cli-hierarchy up`.

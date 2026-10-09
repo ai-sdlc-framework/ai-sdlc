@@ -501,6 +501,29 @@ describe('clearSelf', () => {
     expect(spawned).toHaveLength(0);
   });
 
+  describe('as the planner', () => {
+    it('schedules /clear then /ai-sdlc:planner on its own pane', () => {
+      seedRoster(
+        entry({ role: 'planner', name: 'planner', tmuxWindow: 'planner', paneId: '%5' }),
+        dispatch(),
+      );
+      const d = selfDeps();
+      const run = (file: string, args: readonly string[]) => {
+        calls.push({ file, args: [...args] });
+        const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
+        if (args[0] === 'list-windows') return ok('planner\n');
+        if (args[0] === 'display-message') return ok('%5\n');
+        return ok();
+      };
+      const r = clearSelf(
+        { self: 'planner', role: 'planner', resumeAfterSeconds: 30 },
+        { ...d, run },
+      );
+      expect(r).toMatchObject({ self: 'planner', paneId: '%5' });
+      expect(spawned[0]!.args.slice(3)).toEqual(['20', '%5', '/clear', '30', '/ai-sdlc:planner']);
+    });
+  });
+
   describe('as an idle executor', () => {
     const executorDeps = () => {
       const d = selfDeps();
