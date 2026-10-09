@@ -23,6 +23,8 @@ export default tseslint.config(
       '.github/workflows/__tests__/',
       '.claude/hooks/',
       'ai-sdlc-plugin/hooks/',
+      // AISDLC-743: Claude Code mods compile in the host against its own `claude-code` types (not in any tsconfig).
+      'ai-sdlc-plugin/mods/',
       'ai-sdlc-plugin/agents/',
       'ai-sdlc-plugin/commands/',
       '**/coverage/',

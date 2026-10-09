@@ -1,0 +1,28 @@
+{
+  "name": "context-meter",
+  "version": "0.1.0",
+  "description": "Live context meter for the planner session: context size, colour-stepped bar, session token totals, and compact / clear / hand-off actions (AISDLC-743)",
+  "author": { "name": "AI-SDLC Framework", "url": "https://ai-sdlc.io" },
+  "license": "Apache-2.0",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "amberAtPercent": {
+      "type": "number",
+      "title": "Amber at (% of window)",
+      "description": "Bar turns amber at or above this share of the context window.",
+      "default": 10
+    },
+    "hotAtPercent": {
+      "type": "number",
+      "title": "Wrap-up warning at (% of window)",
+      "description": "The band tells you to hand off soon at or above this share.",
+      "default": 13
+    },
+    "redAtPercent": {
+      "type": "number",
+      "title": "Red / clearing level (% of window)",
+      "description": "Bar turns red at or above this share; 15% of a 1M window is the 150k ceiling.",
+      "default": 15
+    }
+  }
+}
