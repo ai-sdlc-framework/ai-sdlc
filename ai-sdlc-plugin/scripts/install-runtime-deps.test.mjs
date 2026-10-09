@@ -482,6 +482,38 @@ describe('plugin manifests — hook event registration must not drift (AISDLC-57
   });
 });
 
+describe('plugin manifests — every shared key must match (AISDLC-558)', () => {
+  // Which manifest is authoritative (AISDLC-558 evidence):
+  //   - Claude Code's marketplace/plugin loader reads
+  //     `<plugin>/.claude-plugin/plugin.json` (the documented location); the
+  //     installed cache copies under ~/.claude/plugins/cache/ai-sdlc-local/
+  //     carry it.
+  //   - install-runtime-deps.sh and hooks/check-plugin-version.js read the
+  //     top-level `plugin.json` / `.claude-plugin/plugin.json` respectively.
+  // Both are consumed in production, so neither can be deleted; the structural
+  // guard is that the two files are identical key-for-key (hooks, mcpServers,
+  // userConfig, runtimeDependencies, version, ...), not runtimeDependencies alone.
+  const pluginRoot = join(__dirname, '..');
+  const topLevel = JSON.parse(readFileSync(join(pluginRoot, 'plugin.json'), 'utf-8'));
+  const canonical = JSON.parse(
+    readFileSync(join(pluginRoot, '.claude-plugin', 'plugin.json'), 'utf-8'),
+  );
+
+  it('declares the same set of top-level keys', () => {
+    assert.deepEqual(Object.keys(canonical).sort(), Object.keys(topLevel).sort());
+  });
+
+  for (const key of new Set([...Object.keys(topLevel), ...Object.keys(canonical)])) {
+    it(`"${key}" is identical in both manifests`, () => {
+      assert.deepEqual(
+        canonical[key],
+        topLevel[key],
+        `ai-sdlc-plugin/plugin.json and ai-sdlc-plugin/.claude-plugin/plugin.json drifted on "${key}"`,
+      );
+    });
+  }
+});
+
 describe('install-runtime-deps.sh — script exists and is executable', () => {
   it('script file exists', () => {
     assert.ok(existsSync(SCRIPT), `${SCRIPT} must exist`);
