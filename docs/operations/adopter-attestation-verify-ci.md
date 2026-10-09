@@ -13,6 +13,73 @@ installed in CI for other reasons** (in which case
 `ai-sdlc-plugin/scripts/verify-attestation.mjs` also works and calls the exact
 same verification code — see "Alternative: plugin-installed recipe" below).
 
+## Recommended: one-line reusable workflow (AISDLC-757)
+
+Add this to your repo and you are done. The workflow verifies the PR's
+envelope against the **base branch's** trust roots, so a PR cannot edit the gate
+it is judged by:
+
+```yaml
+name: verify-attestation
+on:
+  pull_request_target: # REQUIRED: the gate definition must come from the base branch
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verify-attestation:
+    uses: ai-sdlc-framework/ai-sdlc/.github/workflows/consumer-verify-attestation.yml@<pinned-commit-sha>
+    with:
+      ai-sdlc-ref: <pinned-commit-sha> # the SAME 40-hex SHA as above
+```
+
+Pin the SHA in **both** places: the `uses:` ref pins the workflow, and
+`ai-sdlc-ref` pins the tooling (action, materialize script, policy-floor check,
+docs-only classifier) checked out beside it. `ai-sdlc-ref` is required, has no
+default, and the job fails closed unless it is a full 40-hex commit SHA. The job
+also fails first unless the caller is triggered by `pull_request_target`.
+
+Optional inputs: `pipeline-cli-version` (an **exact pin**, `x.y.z`, of the
+installed `@ai-sdlc/pipeline-cli` / `@ai-sdlc/orchestrator`, default `0.29.0`;
+no caret or range is applied) and `required-independence-tier`
+(`none|attested|isolated`, a floor on your base policy's `requiredTier`).
+
+**Docs-only exemption set.** Consumers inherit ai-sdlc's docs-only exemption
+(`scripts/is-docs-only-changeset.mjs` from the pinned tooling): a PR whose every
+changed path is a root `*.md` (including `CLAUDE.md` and `AGENTS.md`), under
+`docs/`, `spec/rfcs/`, `backlog/tasks/`, `backlog/completed/`,
+`.ai-sdlc/_decisions/`, or an envelope file skips verification. The changed-path
+list is the merge-base diff with rename detection off, so renaming a source or
+workflow file into `docs/` still counts as touching the source path. Consumers
+cannot supply narrower patterns today.
+
+What it does, in order: checks out the **base** sha only (`persist-credentials:
+false`, `contents: read`); fetches the head as git objects without checking it
+out and fails closed if the fetched sha differs from the event head sha; copies
+only the envelope and transcript leaves from head, as untrusted data, through
+`materialize-head-data.mjs` (refuses symlinks and path escapes); keeps
+`.ai-sdlc/trusted-reviewers.yaml` and the policy files from base; and runs the
+docs-only classifier, `cli-attestation verify` and `cli-attestation
+independence-policy` from trusted tooling, never from the PR. PR values reach
+scripts only through `env:`.
+
+**Independence enforcement.** `cli-attestation independence-policy` is the
+consumer-CI entrypoint for independence enforcement: it runs the same verifier
+as `verify`, then compares the envelope's tier with `requiredTier` in your
+`.ai-sdlc/independence-policy.yaml`. Do not parse `verify` stdout and do not
+write a bespoke tier-comparison script; the exit code is the gate.
+
+If you cannot use `workflow_call` (for example you need extra steps in the same
+job), use the composite action
+`ai-sdlc-framework/ai-sdlc/.github/actions/verify-attestation-base@<sha>` after
+your own base-sha checkout; it takes the same inputs plus `base-sha`,
+`head-sha`, `head-repository` and `github-token`.
+
+The rest of this page documents the hand-written job, which is the **fallback**
+for cases neither the workflow nor the action fits. Note it runs under
+`pull_request` and therefore lets the PR edit its own gate unless you replicate
+the base-only hardening above.
+
 ## Trust boundary — read this before wiring the recipe
 
 The verifier's job is to decide whether **untrusted PR content** should be
@@ -70,7 +137,7 @@ don't rely on PR-committed runtime" rule from AISDLC-566/570.
    (or the legacy v5/v4/v3 filename shapes) — produced by
    `sign-attestation.mjs` per the AISDLC-554 recipe.
 
-## GitHub Actions recipe (plugin-less, AISDLC-575)
+## Fallback: hand-written GitHub Actions job (plugin-less, AISDLC-575)
 
 ```yaml
 name: verify-attestation

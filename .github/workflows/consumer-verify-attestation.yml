@@ -1,0 +1,88 @@
+# Reusable, base-only attestation verification for CONSUMER repos (AISDLC-757).
+#
+# One-line consumer usage (the caller MUST be triggered by `pull_request_target`
+# so the gate definition always comes from the base branch):
+#
+#   on:
+#     pull_request_target:
+#       branches: [main]
+#   permissions:
+#     contents: read
+#   jobs:
+#     verify-attestation:
+#       uses: ai-sdlc-framework/ai-sdlc/.github/workflows/consumer-verify-attestation.yml@<pinned-sha>
+#       with:
+#         ai-sdlc-ref: <same-pinned-sha>
+#
+# Trust model: only the BASE sha is checked out (persist-credentials false,
+# contents: read). The PR head is fetched as git objects, never checked out, and
+# only the envelope + transcript leaves are copied in as untrusted data by
+# materialize-head-data.mjs. The trust root (.ai-sdlc/trusted-reviewers.yaml and
+# the independence policy) stays the base copy; the classifier, `cli-attestation
+# verify` and `cli-attestation independence-policy` run from trusted tooling
+# (the ai-sdlc tools checkout and npm-installed runtime), never from the head.
+# PR-derived values reach scripts only through `env:`.
+name: consumer-verify-attestation
+
+on:
+  workflow_call:
+    inputs:
+      pipeline-cli-version:
+        description: Exact version (x.y.z, no range) of @ai-sdlc/pipeline-cli and @ai-sdlc/orchestrator to install.
+        type: string
+        required: false
+        default: '0.29.0'
+      required-independence-tier:
+        description: Floor (none|attested|isolated) for the base independence-policy.yaml requiredTier.
+        type: string
+        required: false
+        default: none
+      ai-sdlc-ref:
+        description: Full 40-hex commit SHA of the ai-sdlc repository supplying the base-only tooling (no mutable refs). Use the same SHA as in the workflow `uses:` ref.
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify-attestation:
+    name: Verify attestation (base-only)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Require pull_request_target and a pinned tooling SHA
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TOOLS_REF: ${{ inputs.ai-sdlc-ref }}
+        run: |
+          set -euo pipefail
+          [ "$EVENT_NAME" = "pull_request_target" ] || { echo "::error::must be triggered by pull_request_target (got $EVENT_NAME)"; exit 1; }
+          [[ "$TOOLS_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::ai-sdlc-ref must be a full 40-hex commit SHA"; exit 1; }
+
+      - name: Check out BASE sha only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Check out trusted ai-sdlc tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ai-sdlc-framework/ai-sdlc
+          ref: ${{ inputs.ai-sdlc-ref }}
+          path: _ai-sdlc-tools
+          persist-credentials: false
+
+      - name: Verify attestation against base trust roots
+        uses: ./_ai-sdlc-tools/.github/actions/verify-attestation-base
+        with:
+          base-sha: ${{ github.event.pull_request.base.sha }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          head-repository: ${{ github.event.pull_request.head.repo.full_name }}
+          github-token: ${{ github.token }}
+          pipeline-cli-version: ${{ inputs.pipeline-cli-version }}
+          required-independence-tier: ${{ inputs.required-independence-tier }}
