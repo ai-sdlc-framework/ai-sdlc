@@ -46,6 +46,7 @@
  * not authentication; a session running as the same user can defeat it.
  */
 
+import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -78,6 +79,7 @@ import {
   hierarchyTerminals,
   hierarchyUp,
   loadOperationalPolicy,
+  markReadyAfterCodeql,
   checkDispatchSender,
   checkRepoMatch,
   readRosterChecked,
@@ -116,7 +118,7 @@ Commands:
 Options for up:
   --executors <n>          Number of executors, 0 to 5 (default 5)
   --planner-model <m>      Planner model (default fable)
-  --dispatch-model <m>     Dispatch model (default opus)
+  --dispatch-model <m>     Dispatch model (default sonnet)
   --executor-model <m>     Executor model (default sonnet)
   --no-planner             Do not start a planner
   --project <name>         Project the session names are qualified with: <project>-<role>
@@ -154,9 +156,10 @@ Usage for clear:
   cli-hierarchy clear <executor-name> [--settle-ms <n>]
   cli-hierarchy clear --self [--resume-after <seconds>]
   --self schedules the calling session's own pane (from its roster entry) to receive
-  /clear after 20 s and then, --resume-after seconds later (default 60), the resume command:
-  /ai-sdlc operator-dispatch for the dispatch session, /ai-sdlc executor for an idle
-  executor (which is refused while it holds an inflight task).
+  /clear after 20 s and then, --resume-after seconds later (default 60) or sooner when a new
+  brief or verdict file lands on the board, the resume command: /ai-sdlc operator-dispatch
+  for the dispatch session, /ai-sdlc executor for an idle executor (which is refused while it
+  holds an inflight task). Refuses without TMUX_PANE.
   Sends /clear to the executor's pane, waits for the settle time (default 8000 ms),
   then sends /ai-sdlc executor. Refuses an executor that holds an inflight task.
   clear <executor-name> is for the dispatch session only. A mistake guard refuses any other caller, a human
@@ -191,6 +194,41 @@ Options for route-decision:
 Common options:
   --board-dir <path>       Dispatch board directory (default ${DEFAULT_BOARD_DIR})
 `;
+
+/** Largest handoff file `tick` hands back, in characters. */
+const HANDOFF_MAX_CHARS = 8000;
+
+/** The dispatch handoff file in the project's auto-memory directory, or undefined when absent. */
+function readHandoff(repoRoot: string): string | undefined {
+  try {
+    const text = readFileSync(
+      path.join(repoRoot, '.claude', 'memory', 'operator-dispatch-handoff.md'),
+      'utf-8',
+    );
+    return text.length > HANDOFF_MAX_CHARS
+      ? `${text.slice(0, HANDOFF_MAX_CHARS)}\n[truncated]`
+      : text;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether this session can clear itself. The clear is typed into a tmux pane, so a session
+ * outside tmux cannot do it; it must stop instead of polling with a growing context.
+ */
+export function selfClearAvailability(env: NodeJS.ProcessEnv): {
+  available: boolean;
+  reason?: string;
+} {
+  if (env.TMUX_PANE) return { available: true };
+  return {
+    available: false,
+    reason:
+      'TMUX_PANE is unset, so this session cannot clear itself. Start the dispatch session with ' +
+      '`cli-hierarchy up` (it runs in tmux). Without tmux, stop after this tick instead of looping.',
+  };
+}
 
 /** Parse an optional whole-number flag; null (after writing an error) when malformed. */
 function intFlag(flags: Record<string, string>, name: string): number | undefined | null {
@@ -284,6 +322,8 @@ export async function runHierarchyCli(
     repoGit?: GitRunner;
     /** Replaces the board enqueue (tests). */
     enqueue?: (entries: EnqueueEntry[]) => string[];
+    /** Replaces the `gh` runner the mark-ready pass uses (tests). */
+    ghRun?: CommandRunner;
   } = {},
 ): Promise<number> {
   const { subcommand, flags } = parseArgv(argv);
@@ -324,7 +364,7 @@ export async function runHierarchyCli(
           {
             executors: flags.executors ?? '5',
             plannerModel: flags['planner-model'] ?? 'fable',
-            dispatchModel: flags['dispatch-model'] ?? 'opus',
+            dispatchModel: flags['dispatch-model'] ?? 'sonnet',
             executorModel: flags['executor-model'] ?? 'sonnet',
             noPlanner: flags['no-planner'] === 'true',
             attach: flags.attach === 'true',
@@ -421,11 +461,17 @@ export async function runHierarchyCli(
         if (flags.self === 'true') {
           const resumeAfter = intFlag(flags, 'resume-after');
           if (resumeAfter === null) return 2;
+          const availability = selfClearAvailability(deps.env);
+          if (!availability.available) {
+            process.stderr.write(`cli-hierarchy clear --self: ${availability.reason}\n`);
+            return 1;
+          }
           const result = clearSelf(
             {
               self: caller.name,
               ...(resumeAfter === undefined ? {} : { resumeAfterSeconds: resumeAfter }),
               ...(deps.env.TMUX_PANE ? { callerPane: deps.env.TMUX_PANE } : {}),
+              wakeOnBoardDir: deps.boardDir,
             },
             { run: deps.run, boardDir: deps.boardDir, log: deps.log },
           );
@@ -519,9 +565,20 @@ export async function runHierarchyCli(
               workerId: worker,
             }),
           operational,
+          markReady: () => markReadyAfterCodeql(extras.ghRun ?? deps.run, repoRoot),
           ...(reportEveryMs === undefined ? {} : { reportEveryMs }),
         });
-        deps.log(JSON.stringify(result));
+        const planner = readRosterChecked(deps.boardDir).roster.sessions.find(
+          (e) => e.role === 'planner' && e.status === 'running',
+        );
+        deps.log(
+          JSON.stringify({
+            ...result,
+            identity: { name: worker, planner: planner?.name ?? '' },
+            handoff: readHandoff(repoRoot),
+            selfClear: selfClearAvailability(deps.env),
+          }),
+        );
         return 0;
       }
       case 'executor-start': {

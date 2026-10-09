@@ -474,6 +474,69 @@ describe('clear, tick and route-decision', () => {
     expect(boardListing()).toEqual(before);
   });
 
+  describe('idle hibernation and self-clear (no tmux)', () => {
+    it('tick reports identity, handoff, selfClear and the wake interval', async () => {
+      seedBoardWithBrief();
+      vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      mkdirSync(path.join(tmp, '.claude', 'memory'), { recursive: true });
+      writeFileSync(
+        path.join(tmp, '.claude', 'memory', 'operator-dispatch-handoff.md'),
+        'queue: 1',
+      );
+      const code = await runHierarchyCli(
+        ['tick', '--worker', 'operator-dispatch', '--work-dir', tmp],
+        overrides({ env: {} }),
+        {
+          identity: asCaller('operator-dispatch'),
+          lease,
+          operational: new Set<string>(),
+          enqueue: () => [],
+        },
+      );
+      expect(code).toBe(0);
+      const out = JSON.parse(logs.at(-1) as string);
+      expect(out.identity).toEqual({ name: 'operator-dispatch', planner: 'planner' });
+      expect(out.handoff).toBe('queue: 1');
+      expect(out.nextWakeSec).toBe(30);
+      expect(out.selfClear.available).toBe(false);
+      expect(out.selfClear.reason).toContain('cli-hierarchy up');
+    });
+
+    it('an empty board answers nextWakeSec 1800', async () => {
+      seedBoardWithBrief();
+      rmSync(path.join(tmp, 'dispatch', 'briefs'), { recursive: true, force: true });
+      vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      const code = await runHierarchyCli(
+        ['tick', '--worker', 'operator-dispatch', '--work-dir', tmp],
+        overrides({ env: { TMUX_PANE: '%1' } }),
+        {
+          identity: asCaller('operator-dispatch'),
+          lease,
+          operational: new Set<string>(),
+          enqueue: () => [],
+        },
+      );
+      expect(code).toBe(0);
+      const out = JSON.parse(logs.at(-1) as string);
+      expect(out.nextWakeSec).toBe(1800);
+      expect(out.selfClear.available).toBe(true);
+      expect(out.handoff).toBeUndefined();
+    });
+
+    it('clear --self refuses without TMUX_PANE and schedules nothing', async () => {
+      seedBoardWithBrief();
+      const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      const code = await runHierarchyCli(
+        ['clear', '--self', '--worker', 'operator-dispatch'],
+        overrides({ env: {} }),
+        { identity: asCaller('operator-dispatch') },
+      );
+      expect(code).toBe(1);
+      expect(String(err.mock.calls.at(-1)?.[0])).toContain('TMUX_PANE is unset');
+      expect(calls).toEqual([]);
+    });
+  });
+
   describe('board and repository location', () => {
     const located = (boardDir: string, root: string) => ({
       ...dispatchCaller,
