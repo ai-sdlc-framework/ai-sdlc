@@ -41,8 +41,8 @@ Sequencing: none. AISDLC-767 ships the immediate fix; this task prevents the cla
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] AC-1: `pnpm lint` fails on a new direct `Date.now()` in `src/**` outside the seam and passes on the baseline.
-- [ ] AC-2: The baseline file can only shrink; a test asserts this.
-- [ ] AC-3: The test-reviewer agent flags a fixed-timestamp test without a fixed clock, shown by a fixture in the agent's tests.
-- [ ] AC-4: New and existing tests pass.
+- [x] AC-1: `pnpm lint` fails on a new direct `Date.now()` in `src/**` outside the seam and passes on the baseline.
+- [x] AC-2: The baseline file can only shrink; a test asserts this.
+- [x] AC-3: The test-reviewer agent flags a fixed-timestamp test without a fixed clock, shown by a fixture in the agent's tests.
+- [x] AC-4: New and existing tests pass.
 <!-- AC:END -->
