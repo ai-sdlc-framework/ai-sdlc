@@ -164,7 +164,9 @@ export function composeBody(opts: PushAndPrOptions): string {
       ? opts.developerReturn.filesChanged.map((f) => `- ${f}`).join('\n')
       : '- (none)';
 
-  const reviewer = opts.verdict.verdicts.find((v) => v.agentId === 'code-reviewer');
+  const reviewer = opts.verdict.verdicts.find(
+    (v) => v.agentId === 'code-reviewer' || v.agentId === 'code-reviewer-codex',
+  );
   const reviewBlock = reviewer
     ? `\n<details>\n<summary>Code reviewer verdict</summary>\n\n${
         reviewer.summary ?? '(no summary)'

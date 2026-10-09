@@ -192,16 +192,27 @@ describe('update_session_state single-source-of-truth', () => {
     );
   });
 
-  it('execute.md sources the canonical lib rather than inlining the function body', () => {
-    // Verify the single-source-of-truth contract holds for execute.md too:
-    // it must reference the lib path and must NOT inline update_session_state() { ... }.
-    const executeCmd = readFileSync(path.join(__dirname, '..', 'commands', 'execute.md'), 'utf8');
-    assert.match(
-      executeCmd,
-      /lib\/update-session-state\.sh/,
-      'execute.md must source scripts/lib/update-session-state.sh (AISDLC-464)',
+  it('the execute pipeline uses the canonical lib rather than inlining the function body', () => {
+    // AISDLC-762: the heartbeat call moved from the execute.md prose into the
+    // next-step TypeScript (pipeline-cli/src/next-step/session.ts). The
+    // single-source-of-truth contract still holds: that module must delegate to
+    // scripts/lib/update-session-state.sh and must NOT re-implement the function,
+    // and the command body must not inline it either.
+    const session = readFileSync(
+      path.join(__dirname, '..', '..', 'pipeline-cli', 'src', 'next-step', 'session.ts'),
+      'utf8',
     );
-    // The inline function declaration must be gone — the lib replaces it.
+    assert.match(
+      session,
+      /lib\/update-session-state\.sh/,
+      'next-step/session.ts must source scripts/lib/update-session-state.sh (AISDLC-464)',
+    );
+    assert.match(session, /update_session_state "\$2" "\$3"/, 'must call the shell function');
+    assert.ok(
+      !/currentStep\s*=\s*step/.test(session),
+      'next-step/session.ts must NOT re-implement the heartbeat write (AISDLC-464)',
+    );
+    const executeCmd = readFileSync(path.join(__dirname, '..', 'commands', 'execute.md'), 'utf8');
     assert.ok(
       !/^update_session_state\(\)\s*\{/m.test(executeCmd),
       'execute.md must NOT inline the update_session_state function body (AISDLC-464)',

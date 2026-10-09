@@ -395,6 +395,46 @@ cli-usage allotment [--window weekly]  # implied allotment per snapshot, with pr
 
 **Health.** A successful ingest reports the `usage.ingest` capability as live and a failed one as degraded with a reason. `ai-sdlc doctor` shows the time of the last successful ingest.
 
+## `next-step` — the state machine behind `/ai-sdlc execute` (AISDLC-762)
+
+`/ai-sdlc execute` used to be a 2,000-line prose recipe the model followed one shell block
+at a time (about 160 LLM round-trips per task). It is now a loop over one subcommand that runs
+every deterministic step itself and returns ONE small JSON instruction, only when an LLM
+action is needed:
+
+```bash
+STATE="${TMPDIR:-/tmp}/ai-sdlc-next-step/AISDLC-762.json"
+node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs next-step --task AISDLC-762 --state "$STATE" --fresh
+# ...perform the instruction, then report the result with the `reply` command it printed:
+#   <reply> <<'AISDLC_RESULT'
+#   <the agent's final message, verbatim>
+#   AISDLC_RESULT
+```
+
+| `action` | The session does | Then reports |
+| --- | --- | --- |
+| `spawn-developer` | one `developer` Agent call with `promptFile` | the agent's final message |
+| `spawn-reviewers` | one parallel message of reviewer Agent calls, one per `reviewers[]` entry | `{"reviewers":[{agent, agentId, approved, findings, summary}]}` |
+| `fix-report` | corrects ONLY its last report (no respawn); at most twice | the corrected report |
+| `done` | prints the summary (PR exists; a `needs-human-attention` PR stays a draft) | nothing |
+| `stop` | prints `reason` (exit code 1) | nothing |
+
+Between instructions the CLI does Steps 0-5 (orchestrator-state check, sweep, parent sync, validation,
+dependency preflight, worktree + hooks check, status flip + sentinel, developer prompt),
+**review-prepare** (reviewer set, classifier gate, incremental-review gate, agent and model routing,
+diff-binding nonce, prompt files), **review-finalize** (coordinator-side transcript persistence,
+one transcript leaf per reviewer, aggregation), the iteration loop (max 2 developer passes, then
+open the PR for a human), the pre-sign rebase and conditional re-review (Step 10.5), and the
+close-out (task Done, verdicts file, chore commit, consumer signing, push, DRAFT PR, marker,
+sibling PRs, `gh pr ready`, sentinel cleanup). `gh:<n>` / `#<n>` / `<n>` run the whole GH-issue
+composite inside the same call. The state file makes every call idempotent: calling again without a
+result re-emits the pending instruction, and a finished run replays its terminal instruction.
+
+A normal run costs 3 `next-step` calls (7 in the worst case), against the 15 allowed by the task.
+Code: `src/next-step/{args,session,init,review-prepare,review-finalize,ship,task-done,gh-issue,next-step}.ts`
+and `src/cli/next-step.ts`; tests sit beside each file. The slash body is
+`ai-sdlc-plugin/commands/execute.md` (about 120 lines).
+
 ## Quickstart — Tier 1 (slash command body)
 
 The `/ai-sdlc execute` slash command body (in `ai-sdlc-plugin/commands/execute.md`)
@@ -544,8 +584,16 @@ pipeline-cli/
     │   ├── 11-push-and-pr.ts       # Step 11 — push + gh pr create
     │   ├── 12-sibling-prs.ts       # Step 12 — cross-repo sibling PRs
     │   └── 13-cleanup.ts           # Step 13 — sentinel cleanup
+    ├── next-step/                  # AISDLC-762 — state machine behind /ai-sdlc execute
+    │   ├── next-step.ts            # the machine: one instruction per call
+    │   ├── init.ts                 # Steps 0-5 (worktree, sentinel, developer prompt)
+    │   ├── review-prepare.ts       # classifier + incremental gates, routing, nonce, prompt files
+    │   ├── review-finalize.ts      # transcript persistence, leaf emission, aggregation
+    │   ├── ship.ts                 # 10.5 rebase, Done, sign, push, DRAFT PR, ready, cleanup
+    │   └── ...                     # args, session, task-done, gh-issue
     └── cli/
-        └── index.ts                # yargs subcommand router
+        ├── index.ts                # yargs subcommand router
+        └── next-step.ts            # `next-step` subcommand wrapper
 ```
 
 ## Step contracts

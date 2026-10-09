@@ -6,7 +6,8 @@
 #
 # This is the SINGLE SOURCE OF TRUTH for the heartbeat function. It is sourced
 # by:
-#   - ai-sdlc-plugin/commands/execute.md (Step 1 preamble — before first call site)
+#   - pipeline-cli/src/next-step/session.ts (the /ai-sdlc execute pipeline, AISDLC-762;
+#     it shells out to this function so the heartbeat has one implementation)
 #   - ai-sdlc-plugin/scripts/heartbeat.test.mjs (hermetic test)
 # so the test exercises the real function body and catches drift (AISDLC-464).
 update_session_state() {
