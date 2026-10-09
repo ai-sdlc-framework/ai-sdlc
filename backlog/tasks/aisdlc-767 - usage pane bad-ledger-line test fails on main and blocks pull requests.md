@@ -45,8 +45,8 @@ Sequencing: none. Unblocks every code PR until fixed.
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] AC-1: The test passes on clean main locally and in CI, 3 consecutive runs each.
-- [ ] AC-2: The reader's behaviour for a non-object JSON line is stated in a test with the chosen contract.
-- [ ] AC-3: The pane shows USAGE_ERROR_TEXT for every input the reader rejects, and no raw error text or path.
-- [ ] AC-4: New and existing tests pass.
+- [x] AC-1: The test passes on clean main locally and in CI, 3 consecutive runs each.
+- [x] AC-2: The reader's behaviour for a non-object JSON line is stated in a test with the chosen contract.
+- [x] AC-3: The pane shows USAGE_ERROR_TEXT for every input the reader rejects, and no raw error text or path.
+- [x] AC-4: New and existing tests pass.
 <!-- AC:END -->

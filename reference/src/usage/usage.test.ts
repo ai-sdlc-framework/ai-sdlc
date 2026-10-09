@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
 import {
+  appendFileSync,
   chmodSync,
   statSync,
   existsSync,
@@ -420,6 +421,20 @@ describe('recordModelCall', () => {
 });
 
 describe('readModelCalls', () => {
+  it('skips a line that is not JSON but throws on a JSON line that is not an object', async () => {
+    const d = mkdtempSync(join(tmpdir(), 'usage-ledger-badline-'));
+    try {
+      appendModelCalls([rec('a')], { dir: d });
+      const file = join(d, readdirSync(d).find((f) => /^ledger-.*\.jsonl$/.test(f)) as string);
+      appendFileSync(file, 'not json\n');
+      expect((await collect({}, d)).map((r) => r.callId)).toEqual(['a']);
+      appendFileSync(file, 'null\n');
+      await expect(collect({}, d)).rejects.toBeInstanceOf(TypeError);
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
   beforeEach(() => {
     appendModelCalls(
       [
