@@ -18,8 +18,6 @@ references:
   - spec/rfcs/RFC-0046-attested-reviewer-independence.md
 priority: high
 dispatchable: true
-blocked:
-  reason: "RFC-0053 OQ-4 to OQ-8 open; phase 1 depends only on OQ-1 to OQ-3, resolved 2026-10-09 by operator rubric"
 ---
 
 ## Description
