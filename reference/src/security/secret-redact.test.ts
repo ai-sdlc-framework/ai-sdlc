@@ -296,7 +296,9 @@ describe('ReDoS: changed regexes stay linear on adversarial input', () => {
     const quadratic = (n: number): void => {
       /\s+$/.test(' '.repeat(n) + 'x');
     };
-    expect(growthRatio(quadratic, 3_000)).toBeGreaterThan(LINEAR_GROWTH_LIMIT);
+    // Contention that lands on every t(n) rep drags the ratio toward linear; a smaller
+    // input with more reps keeps the same runtime and makes that far less likely.
+    expect(growthRatio(quadratic, 1_500, 10)).toBeGreaterThan(LINEAR_GROWTH_LIMIT);
   });
 
   // Formerly: 'handles 200k-char secret/whitespace/bracket/backtick runs' (absolute 5000 ms bound).
