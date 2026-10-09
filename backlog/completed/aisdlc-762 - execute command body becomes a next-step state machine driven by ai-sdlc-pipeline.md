@@ -2,7 +2,7 @@
 id: AISDLC-762
 title: >-
   Execute command body becomes a next-step state machine driven by ai-sdlc-pipeline.md
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-08'
 labels:
@@ -16,6 +16,7 @@ references:
   - pipeline-cli/README.md
 priority: high
 dispatchable: true
+updated_date: '2026-10-09 22:54'
 ---
 
 ## Description
