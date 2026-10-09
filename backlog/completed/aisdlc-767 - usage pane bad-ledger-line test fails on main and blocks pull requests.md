@@ -2,7 +2,7 @@
 id: AISDLC-767
 title: >-
   Usage pane bad-ledger-line test fails on main and blocks pull requests
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-09'
 labels:
