@@ -2,7 +2,7 @@
 id: AISDLC-771
 title: >-
   fresh-repo first-run smoke test: install, init, doctor and one task end to end in CI
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-09'
 labels:

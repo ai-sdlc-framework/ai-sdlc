@@ -13,6 +13,11 @@ on:
     # original 2-CI-runs-per-draft-PR problem.
     types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
+  # AISDLC-771: nightly fresh-repo first-run smoke (install, init, doctor, one
+  # task). Only the `first-run-smoke` job runs on this event; every other job
+  # is guarded with `github.event_name != 'schedule'`.
+  schedule:
+    - cron: '17 5 * * *'
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -37,6 +42,7 @@ jobs:
     outputs:
       python: ${{ steps.filter.outputs.python || steps.fallback.outputs.python }}
       go: ${{ steps.filter.outputs.go || steps.fallback.outputs.go }}
+      first_run: ${{ steps.filter.outputs.first_run || steps.fallback.outputs.first_run || steps.schedule.outputs.first_run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # On merge_group, the queue head ref is ephemeral and gets deleted by
@@ -49,9 +55,15 @@ jobs:
         run: |
           echo "python=true" >> "$GITHUB_OUTPUT"
           echo "go=true" >> "$GITHUB_OUTPUT"
+          echo "first_run=true" >> "$GITHUB_OUTPUT"
+      # AISDLC-771: the nightly schedule has no diff to filter; it runs only the
+      # first-run smoke job, so set just that output (python/go stay unset).
+      - id: schedule
+        if: github.event_name == 'schedule'
+        run: echo "first_run=true" >> "$GITHUB_OUTPUT"
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
-        if: github.event_name != 'merge_group'
+        if: github.event_name != 'merge_group' && github.event_name != 'schedule'
         with:
           filters: |
             python:
@@ -60,11 +72,18 @@ jobs:
             go:
               - 'sdk-go/**'
               - 'conformance/**'
+            first_run:
+              - 'ai-sdlc-plugin/**'
+              - 'pipeline-cli/**'
+              - 'reference/**'
+              - 'orchestrator/**'
+              - 'README.md'
+              - 'scripts/first-run-smoke*'
 
   lint:
     name: Lint & Format
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -115,7 +134,7 @@ jobs:
     name: Backlog Drift
     runs-on: ubuntu-latest
     # AISDLC-218: skip on draft PRs.
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -166,7 +185,7 @@ jobs:
     name: Build & Test (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
     # AISDLC-218: skip on draft PRs.
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     strategy:
       matrix:
         # AISDLC-368: dropped Node 20 to halve Build & Test wall time.
@@ -236,6 +255,35 @@ jobs:
         run: pnpm -r test
       - run: pnpm validate-schemas
 
+  first-run-smoke:
+    # AISDLC-771: plays an adopter's first hour against a throwaway repo and an
+    # isolated HOME, offline: install the plugin from this checkout's marketplace
+    # manifest, `ai-sdlc init`, `ai-sdlc doctor` (zero errors), file one toy task,
+    # run it through the Step 0-13 pipeline with the mock spawner to a committed
+    # branch. Catches first-run regressions (AISDLC-558 manifest drift, AISDLC-561)
+    # that unit tests inside each package cannot. Steps come from the README
+    # "Getting started" block, so the README and this job cannot drift apart.
+    name: First-run smoke (fresh repo)
+    needs: changes
+    if: needs.changes.outputs.first_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build (orchestrator, pipeline-cli, reference)
+        run: |
+          pnpm --filter "@ai-sdlc/orchestrator..." \
+               --filter "@ai-sdlc/pipeline-cli..." \
+               build
+      - name: First-run smoke
+        run: node scripts/first-run-smoke.mjs
+
   test-python:
     name: Test Python SDK (${{ matrix.python-version }})
     needs: changes
@@ -278,7 +326,7 @@ jobs:
     name: Coverage
     runs-on: ubuntu-latest
     # AISDLC-218: skip on draft PRs.
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -337,9 +385,10 @@ jobs:
     # Only run on push to main (not PRs from forks, which lack secrets)
     # AISDLC-218: AND in the draft guard so integration is skipped on draft PRs.
     if: >-
+      github.event_name != 'schedule' &&
       (github.event_name == 'push' || github.event_name == 'merge_group' ||
        github.event.pull_request.head.repo.full_name == github.repository) &&
-      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false))
     permissions:
       contents: read
       issues: read
@@ -362,7 +411,7 @@ jobs:
   ci-ok:
     name: CI OK
     if: always()
-    needs: [lint, build-and-test, test-python, test-go, backlog-drift]
+    needs: [lint, build-and-test, test-python, test-go, backlog-drift, first-run-smoke]
     runs-on: ubuntu-latest
     steps:
       - run: |
@@ -372,7 +421,7 @@ jobs:
           # gate runs in `backlog-drift` above; failure of that job now
           # blocks `ci-ok` and therefore blocks merges via the standard
           # required-checks chain.
-          results=("${{ needs.lint.result }}" "${{ needs.build-and-test.result }}" "${{ needs.test-python.result }}" "${{ needs.test-go.result }}" "${{ needs.backlog-drift.result }}")
+          results=("${{ needs.lint.result }}" "${{ needs.build-and-test.result }}" "${{ needs.test-python.result }}" "${{ needs.test-go.result }}" "${{ needs.backlog-drift.result }}" "${{ needs.first-run-smoke.result }}")
           for result in "${results[@]}"; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
               echo "CI failed: found job with result '$result'"
