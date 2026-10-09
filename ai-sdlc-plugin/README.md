@@ -20,9 +20,9 @@ Run inside Claude Code sessions. Spawned by `/ai-sdlc execute` Step 7b.
 
 | Agent | Model | Description |
 |-------|-------|-------------|
-| `code-reviewer` | inherit | Code quality review: bugs, logic errors, conventions |
-| `test-reviewer` | inherit | Test coverage review: existence, quality, edge cases |
-| `security-reviewer` | inherit | Security review: OWASP vulnerabilities, injection, secret exposure |
+| `code-reviewer` | sonnet | Code quality review: bugs, logic errors, conventions |
+| `test-reviewer` | sonnet | Test coverage review: existence, quality, edge cases |
+| `security-reviewer` | opus | Security review: OWASP vulnerabilities, injection, secret exposure |
 
 ### Reviewers — Codex variants (cross-harness)
 

@@ -5,7 +5,7 @@ argument-hint: <slug> [--title <title>] [--author <name>] [--rfc-dir <path>] [--
 allowed-tools:
   - Read
   - Bash
-model: inherit
+model: haiku
 ---
 
 Scaffold a new adopter RFC from the canonical `framework-rfc.md`

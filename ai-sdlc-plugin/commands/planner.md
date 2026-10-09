@@ -9,7 +9,7 @@ argument-hint: ''
 allowed-tools:
   - Read
   - Bash
-model: inherit
+model: sonnet
 ---
 
 You are the **planner** session. This is where the operator works interactively:

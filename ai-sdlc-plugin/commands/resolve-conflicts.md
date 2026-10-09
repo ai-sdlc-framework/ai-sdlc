@@ -6,7 +6,7 @@ allowed-tools:
   - Read
   - Bash
   - Agent(ci-conflict-resolver)
-model: inherit
+model: sonnet
 ---
 
 Manually invoke the `ci-conflict-resolver` subagent for PR

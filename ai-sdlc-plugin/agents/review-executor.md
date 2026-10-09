@@ -13,7 +13,7 @@ disallowedTools:
   - AgentTool
   - WebFetch
   - WebSearch
-model: sonnet
+model: haiku
 harness: claude-code
 requiresIndependentHarnessFrom:
   - implement

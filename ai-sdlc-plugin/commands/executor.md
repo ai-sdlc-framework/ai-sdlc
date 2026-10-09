@@ -16,7 +16,7 @@ allowed-tools:
   - Bash
   - SendMessage
   - Skill
-model: inherit
+model: sonnet
 ---
 
 You are an **executor** session. You work one task at a time, taken from the

@@ -18,7 +18,7 @@ allowed-tools:
   - Read
   - Bash
   - Agent(developer)
-model: inherit
+model: sonnet
 ---
 
 Run one in-session-agent **Worker** tick (RFC-0041 §4.3.1).

@@ -8,7 +8,7 @@ tools:
 disallowedTools:
   - Edit
   - AgentTool
-model: inherit
+model: sonnet
 harness: codex
 requiresIndependentHarnessFrom:
   - implement

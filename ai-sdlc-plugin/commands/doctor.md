@@ -2,7 +2,7 @@
 name: doctor
 description: Audit this project's ai-sdlc configuration health — plugin/pin versions, manifest agreement, attestation governance, and more. Read-only by default; --fix applies the safe/mechanical subset.
 allowed-tools: Bash
-model: inherit
+model: haiku
 ---
 
 Run `ai-sdlc doctor` — the config-health audit described in

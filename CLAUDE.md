@@ -138,8 +138,12 @@ Agents whose role is read-only (exploration, audit, refinement review) MUST NOT 
 
 Agent frontmatter pins model by role to prevent session-model bleed (Opus inheritance was the root cause of a 26%-weekly-budget incident on 2026-05-30):
 
-- `developer`, `code-reviewer`, `test-reviewer` → **sonnet** (cost-efficient for mechanical tasks)
+- `developer`, `code-reviewer`, `test-reviewer`, `correctness-reviewer` → **sonnet** (cost-efficient for mechanical tasks)
+- `rebase-resolver`, `ci-conflict-resolver`, `refinement-reviewer`, `code-reviewer-codex`, `test-reviewer-codex` → **sonnet**
+- `review-executor`, `review-executor-codex` (review probes) → **haiku**
 - `security-reviewer` → **opus** (reasoning-heavy; the one role where Opus pays for itself)
+- Commands pin too (AISDLC-761): relay/status commands (`version`, `doctor`, `hierarchy`, `cleanup`, `pipeline-status`, `triage`, `import-spec`, `rfc-init`, `init-signing-key`, `execute-parallel-status`, `execute-parallel-cleanup`) → **haiku**; orchestration/session-driving commands (`execute`, `orchestrator-tick`, `dispatch-worker`, `executor`, `operator-dispatch`, `planner`, `execute-parallel`, `fix-pr`, `review-pr`, `detect-patterns`, `rebase`, `resolve-conflicts`) → **sonnet**.
+- No command or agent may carry `model: inherit` or omit `model:`; `ai-sdlc-plugin/commands/model-pins.test.mjs` (`pnpm test:plugin-model-pins-gate`) enforces it.
 
 On dispatch paths (`/ai-sdlc execute`, `/ai-sdlc orchestrator-tick`), code-review and test-review SHOULD be routed to the `-codex` variants (`code-reviewer-codex` / `test-reviewer-codex`) by default — Codex plan billing is zero Claude usage. Security review stays on the Claude-native `security-reviewer` at opus. Mechanical work (sign, reconcile, rebase) MUST NOT be wrapped in subagents.
 

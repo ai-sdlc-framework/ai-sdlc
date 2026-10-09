@@ -3,7 +3,7 @@ name: hierarchy
 description: Drive the session hierarchy (planner, dispatch, executors) from Claude Code by running `cli-hierarchy <subcommand>` from the resolved pipeline-cli bin. Pass-through for up, status, attach, terminals, brief, down.
 argument-hint: '<up|status|attach|terminals|brief|down> [options]'
 allowed-tools: Bash
-model: inherit
+model: haiku
 ---
 
 Run `cli-hierarchy $ARGUMENTS` (reference:

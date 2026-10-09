@@ -2,6 +2,7 @@
 name: detect-patterns
 description: Analyze tool call history to detect repetitive workflow patterns and propose automations
 argument-hint: [--since YYYY-MM-DD] [--min-confidence 0.6]
+model: sonnet
 ---
 
 Detect repetitive workflow patterns from Claude Code session history and propose automations.

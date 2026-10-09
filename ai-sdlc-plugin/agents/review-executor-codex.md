@@ -11,7 +11,7 @@ disallowedTools:
   - AgentTool
   - WebFetch
   - WebSearch
-model: inherit
+model: haiku
 harness: codex
 requiresIndependentHarnessFrom:
   - implement

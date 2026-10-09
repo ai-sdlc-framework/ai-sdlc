@@ -11,7 +11,7 @@ argument-hint: "[--count N] [--tasks AISDLC-N,AISDLC-M,...]"
 allowed-tools:
   - Read
   - Bash
-model: inherit
+model: sonnet
 ---
 
 Spawn N concurrent `/ai-sdlc execute` sessions in tmux panes (AISDLC-462).

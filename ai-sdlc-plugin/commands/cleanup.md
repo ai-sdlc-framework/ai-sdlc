@@ -3,7 +3,7 @@ name: cleanup
 description: Remove worktrees under .worktrees/ — defaults to merged-PR sweep, or pass a task-id to force-remove a specific one.
 argument-hint: '[<task-id>]'
 allowed-tools: Bash, Read
-model: inherit
+model: haiku
 ---
 
 Companion to `/ai-sdlc execute`. Two modes:

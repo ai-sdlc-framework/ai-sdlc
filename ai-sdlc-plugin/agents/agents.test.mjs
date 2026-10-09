@@ -79,7 +79,7 @@ function parseFrontmatter(filePath) {
 //
 // AISDLC-247: code-reviewer-codex.md + test-reviewer-codex.md added as
 // cross-harness Codex reviewer variants. They share the core invariants
-// (Read, AgentTool disallowed, model: inherit) but differ from the Claude
+// (Read, AgentTool disallowed, model pinned) but differ from the Claude
 // variants in harness (codex) and tools (Bash instead of Grep/Glob).
 const agentFiles = [
   'code-reviewer.md',
@@ -185,14 +185,18 @@ describe('agent definition tool restrictions', () => {
     // AISDLC cost control: pin models by role to prevent session-model bleed.
     // Opus session-model inheritance was the root cause of a 26%-weekly-budget
     // incident (2026-05-30). Security stays on Opus (reasoning-heavy); all
-    // other cost-sensitive roles use Sonnet. Utility agents (rebase, cleanup,
-    // conflict resolution) inherit from the spawning session.
+    // other cost-sensitive roles use Sonnet; review probes use Haiku.
+    // No agent inherits (AISDLC-761).
     const sonnetRoles = [
       'developer.md',
       'code-reviewer.md',
       'test-reviewer.md',
       'correctness-reviewer.md',
-      'review-executor.md',
+      'rebase-resolver.md',
+      'refinement-reviewer.md',
+      'code-reviewer-codex.md',
+      'test-reviewer-codex.md',
+      'ci-conflict-resolver.md',
     ];
     for (const file of sonnetRoles) {
       assert.equal(
@@ -206,21 +210,9 @@ describe('agent definition tool restrictions', () => {
       'opus',
       'security-reviewer must use opus (reasoning-heavy; earns its cost)',
     );
-    // Utility and codex agents inherit from the spawning session (no pinning needed)
-    const inheritRoles = [
-      'rebase-resolver.md',
-      'refinement-reviewer.md',
-      'code-reviewer-codex.md',
-      'test-reviewer-codex.md',
-      'ci-conflict-resolver.md',
-      'review-executor-codex.md',
-    ];
-    for (const file of inheritRoles) {
-      assert.equal(
-        agents[file].model,
-        'inherit',
-        `${file} should inherit model — utility/codex agent, no cost-split needed`,
-      );
+    // Review probes (executor relays) are pinned to haiku (AISDLC-761)
+    for (const file of ['review-executor.md', 'review-executor-codex.md']) {
+      assert.equal(agents[file].model, 'haiku', `${file} must pin model to haiku`);
     }
   });
 
@@ -639,8 +631,8 @@ describe('review-executor: read-only, tool-restricted probe executor (staged rev
     }
   });
 
-  it('review-executor.md pins model sonnet and the claude-code harness', () => {
-    assert.equal(agents['review-executor.md'].model, 'sonnet');
+  it('review-executor.md pins model haiku and the claude-code harness', () => {
+    assert.equal(agents['review-executor.md'].model, 'haiku');
     assert.equal(agents['review-executor.md'].harness, 'claude-code');
   });
 

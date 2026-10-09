@@ -3,6 +3,7 @@ name: pipeline-status
 description: Show AI-SDLC pipeline status for the current branch or a specific issue/task
 argument-hint: [issue-id]
 allowed-tools: Read, Bash, mcp__backlog__task_view
+model: haiku
 ---
 
 Show the current AI-SDLC pipeline status. Auto-detects the issue

@@ -5,7 +5,7 @@ argument-hint: --from <path-to-spec-kit-feature>
 allowed-tools:
   - Read
   - Bash
-model: inherit
+model: haiku
 ---
 
 Import a spec-kit feature into the AI-SDLC backlog. The spec-kit `tasks.md`

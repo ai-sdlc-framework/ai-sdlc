@@ -45,8 +45,8 @@ describe('/ai-sdlc cleanup frontmatter', () => {
     assert.equal(frontmatter['allowed-tools'], 'Bash, Read');
   });
 
-  it('inherits model from session', () => {
-    assert.equal(frontmatter.model, 'inherit');
+  it('pins the haiku model (AISDLC-761)', () => {
+    assert.equal(frontmatter.model, 'haiku');
   });
 });
 

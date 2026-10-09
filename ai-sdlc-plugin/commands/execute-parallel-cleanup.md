@@ -8,7 +8,7 @@ argument-hint: "[--all | AISDLC-N,AISDLC-M,...]"
 allowed-tools:
   - Read
   - Bash
-model: inherit
+model: haiku
 ---
 
 Kill in-flight `/ai-sdlc execute-parallel` panes and archive their session files (AISDLC-462).

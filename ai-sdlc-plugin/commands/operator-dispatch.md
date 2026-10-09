@@ -12,7 +12,7 @@ allowed-tools:
   - Read
   - Bash
   - SendMessage
-model: inherit
+model: sonnet
 ---
 
 You are the **dispatch** session. You own throughput: you turn briefs into work
