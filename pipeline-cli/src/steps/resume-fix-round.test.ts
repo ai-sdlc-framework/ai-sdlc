@@ -59,6 +59,16 @@ describe('Step 3 resume', () => {
     ]);
   });
 
+  it('rejects an option-shaped branch before any git call', async () => {
+    const fake = new FakeRunner();
+    for (const branch of ['--upload-pack=touch /tmp/x', '-x', 'a..b', 'a.lock', 'a b']) {
+      await expect(setupWorktree({ ...base(), branch, runner: fake.toRunner() })).rejects.toThrow(
+        /refusing branch name/,
+      );
+    }
+    expect(fake.calls).toHaveLength(0);
+  });
+
   it('refuses a worktree sitting on another branch', async () => {
     mkdirSync(wt(), { recursive: true });
     writeFileSync(join(wt(), '.git'), 'gitdir: x');

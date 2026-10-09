@@ -527,10 +527,33 @@ async function resumeWorktree(
   };
 }
 
+/**
+ * AISDLC-738 — a resumed branch name flows into `git fetch` / `git worktree add`
+ * as a positional argument, so a value shaped like an option (`--upload-pack=<cmd>`)
+ * would be parsed by git as one. Allow only plain ref-name characters, and refuse
+ * a leading '-', '..', '//', and a trailing '/', '.' or '.lock'.
+ */
+function assertSafeResumeBranch(taskId: string, branch: string): void {
+  const safe =
+    /^[A-Za-z0-9._/-]+$/.test(branch) &&
+    !branch.startsWith('-') &&
+    !branch.startsWith('/') &&
+    !branch.includes('..') &&
+    !branch.includes('//') &&
+    !/[/.]$/.test(branch) &&
+    !branch.endsWith('.lock');
+  if (!safe) {
+    throw new Error(
+      `Step 3 resume for ${taskId}: refusing branch name '${branch}'; it is not a plain git ref name`,
+    );
+  }
+}
+
 export async function setupWorktree(opts: SetupWorktreeOptions): Promise<SetupWorktreeResult> {
   const runner = opts.runner ?? defaultRunner;
 
   if (opts.resume) {
+    assertSafeResumeBranch(opts.taskId, opts.branch);
     if (!opts.skipFetch) {
       await runner('git', ['fetch', 'origin', opts.branch], {
         cwd: opts.workDir,
