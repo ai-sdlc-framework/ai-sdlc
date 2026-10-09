@@ -83,6 +83,32 @@ export interface DispatchManifest {
    * In a hierarchy it equals the roster `name` exactly, collision suffix included.
    */
   workerId?: string;
+  /**
+   * Set when a finished task is sent back for another round (AISDLC-738). The
+   * executor reads it before running the task and the pipeline re-enters the
+   * task's existing worktree and branch instead of creating new ones.
+   */
+  resume?: ResumeFeedback;
+}
+
+/** Feedback attached to a manifest that resumes a finished task. */
+export interface ResumeFeedback {
+  /** What the executor must do in this round. */
+  note: string;
+  /** Pull request to update, when one exists. */
+  prNumber?: number;
+  /** Names of the checks that failed. */
+  failingChecks?: string[];
+  /** Reviewer findings to address. */
+  findings?: string[];
+  /** ISO-8601 time the task was resumed. */
+  resumedAt: string;
+  /** Who resumed it (audit only). */
+  resumedBy: string;
+  /** Outcome the previous round ended with. */
+  priorOutcome?: string;
+  /** True when the manifest was rebuilt and its branch name inferred, not recorded. */
+  branchGuessed?: boolean;
 }
 
 /**

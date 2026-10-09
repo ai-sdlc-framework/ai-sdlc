@@ -105,6 +105,49 @@ describe('executorStart', () => {
     expect(lines[0]).toContain("[executor] I am 'proj-executor-alpha'");
   });
 
+  it('prints the feedback note of a resumed task before the task runs (AISDLC-738)', async () => {
+    writeManifest(board, {
+      ...mkManifest('AISDLC-9'),
+      resume: {
+        note: 'coverage is 78 percent, raise it to 80',
+        prNumber: 1290,
+        failingChecks: ['ai-sdlc/pr-ready'],
+        findings: ['major: missing test for the empty queue'],
+        resumedAt: '2026-10-09T12:00:00.000Z',
+        resumedBy: 'proj-operator-dispatch',
+      },
+    });
+    const lines: string[] = [];
+    const r = await executorStart(
+      { boardDir: board, cwd: tmp, waitSec: 5 },
+      {
+        identity: identityFor('executor', 'proj-executor-alpha'),
+        repoGit: gitAt(tmp),
+        log: (l) => lines.push(l),
+      },
+    );
+    expect(r.taskId).toBe('AISDLC-9');
+    const block = lines.find((l) => l.includes('RESUMED TASK'));
+    expect(block).toContain('AISDLC-9');
+    expect(block).toContain('coverage is 78 percent');
+    expect(block).toContain('ai-sdlc/pr-ready');
+    expect(block).toContain('1290');
+  });
+
+  it('prints no resume block for a task without feedback', async () => {
+    writeManifest(board, mkManifest('AISDLC-9'));
+    const lines: string[] = [];
+    await executorStart(
+      { boardDir: board, cwd: tmp, waitSec: 5 },
+      {
+        identity: identityFor('executor', 'proj-executor-alpha'),
+        repoGit: gitAt(tmp),
+        log: (l) => lines.push(l),
+      },
+    );
+    expect(lines.some((l) => l.includes('RESUMED TASK'))).toBe(false);
+  });
+
   it('returns taskId null when the wait lapses with nothing eligible', async () => {
     const r = await executorStart(
       { boardDir: board, cwd: tmp, waitSec: 0 },

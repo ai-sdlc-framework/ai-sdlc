@@ -111,6 +111,22 @@ export interface PipelineOptions {
    */
   taskFilePathOverride?: string;
   /**
+   * AISDLC-738 — set when the task is a finished one sent back for another
+   * round. Step 3 re-enters the existing worktree and branch (never creating
+   * one from `origin/main`), Step 5 injects `feedback` into the developer
+   * prompt, and Step 11 lease-pushes and updates the existing PR instead of
+   * opening a new one. When omitted, the pipeline reads it from the claimed
+   * dispatch-board manifest of this task, if there is one.
+   */
+  resume?: { feedback: string; prNumber?: number };
+  /**
+   * AISDLC-738 — replaces the roster and process lookups that identify this
+   * session when a manifest-derived resume is authorised (tests).
+   */
+  resumeIdentity?: import('./hierarchy/caller-identity.js').IdentityDeps;
+  /** AISDLC-738 — replaces the trusted-policy lookup for the resume lease push (tests). */
+  resumeLeasePolicy?: ResumeLeasePolicy;
+  /**
    * AISDLC-393 — inline `TaskSpec` used to bypass Step 1's `findTaskFile`
    * lookup. When provided, the pipeline treats this spec as the source of
    * truth and skips reading any backlog task file. Combined with
@@ -304,6 +320,11 @@ export interface SetupWorktreeResult {
   branch: string;
   worktreePath: string;
   baseSha: string;
+  /**
+   * AISDLC-738 — resume only: the SHA of `origin/<branch>` recorded right after
+   * Step 3's fetch. Step 11 leases its push against exactly this value.
+   */
+  remoteSha?: string;
 }
 
 // ── Step 4 — Begin task ──────────────────────────────────────────────
@@ -549,6 +570,16 @@ export interface FinalizeTaskResult {
 
 // ── Step 11 — Push and PR ────────────────────────────────────────────
 
+/** The rules a resume lease push must satisfy; see Step 11. */
+export interface ResumeLeasePolicy {
+  /** The trusted policy's `allowForcePush`; the push is refused unless `leaseOnOwnBranch`. */
+  forcePushMode: 'never' | 'leaseOnOwnBranch';
+  /** The trusted policy's extra protected branch names. */
+  protectedBranches: readonly string[];
+  /** Null when the worktree is a genuine one of this repository, else the reason it is not. */
+  ownWorktree: (worktreePath: string) => string | null;
+}
+
 export interface PushAndPrOptions {
   taskId: string;
   workDir: string;
@@ -573,6 +604,24 @@ export interface PushAndPrOptions {
    * Used to format `(closes #N)` in the title and `Closes #N` in the body.
    */
   issueNumber?: number;
+  /**
+   * AISDLC-738 — the task is being resumed: push with `--force-with-lease` to
+   * `refs/heads/<branch>` (the late rebase changes the SHA) and, when an open
+   * PR exists for the branch, return its URL instead of creating a new PR.
+   */
+  resume?: boolean;
+  /**
+   * AISDLC-738 — resume only: the `origin/<branch>` SHA Step 3 recorded. The
+   * push leases against it (`--force-with-lease=refs/heads/<branch>:<sha>`), so
+   * a `git fetch` made mid-run cannot widen the lease. A resume push without it
+   * is refused.
+   */
+  resumeRemoteSha?: string;
+  /**
+   * AISDLC-738 — replaces the trusted-policy lookup and the worktree check that
+   * gate the resume lease push (tests).
+   */
+  resumeLeasePolicy?: ResumeLeasePolicy;
   /** Advisory `dev.ac-coverage` result for the "Judgment notes (advisory)" PR-body section. */
   acCoverage?: AcCoverageResult;
   /** Advisory grounding annotations for the same section (falls back to `verdict.groundingAnnotations`). */

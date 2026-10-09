@@ -52,6 +52,23 @@ export function findTaskFile(taskId: string, workDir: string): string | null {
 }
 
 /**
+ * AISDLC-738 — true when the task file lives in `<workDir>/backlog/completed/`
+ * and not in `backlog/tasks/`: a finished task that is being resumed already
+ * carries its Done move on its branch.
+ */
+export function isTaskFileCompleted(taskId: string, workDir: string): boolean {
+  if (findTaskFile(taskId, workDir)) return false;
+  const dir = join(workDir, 'backlog', 'completed');
+  if (!existsSync(dir)) return false;
+  try {
+    const prefix = `${taskId.toLowerCase()} -`;
+    return readdirSync(dir).some((name) => name.toLowerCase().startsWith(prefix));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Parse a backlog task file into a TaskSpec. Tolerant of unknown frontmatter
  * keys — those are kept on the raw body text but not surfaced on TaskSpec.
  */

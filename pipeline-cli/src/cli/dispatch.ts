@@ -61,6 +61,18 @@
  *     not in failed/, has no saved manifest, is already active, or is past the
  *     retry limit.
  *
+ *   - `resume --task-id <id> --note <text> [--pr <number>] [--failing-checks <a,b>]
+ *     [--finding <text>]` (or `--note-file <path>`) — send a finished task back to
+ *     queue/ with a feedback note on its manifest (AISDLC-738). The next claim
+ *     prints the note, and `/ai-sdlc execute` re-enters the task's existing worktree
+ *     and branch and updates its pull request. Same caller check and `requeue`
+ *     grant as `requeue`. Exits 1, changing nothing, when the task is not finished.
+ *
+ *   - `idle-backoff [--work-dir <path>]` — print `{"sleepSec":n}`, how long an
+ *     idle executor waits before its next `claim`: the dispatch config's
+ *     `emptyQueueHibernateSec` (default 30) clamped to 5..60, so a new manifest is
+ *     claimed within a minute (AISDLC-738).
+ *
  * Executor loop (RFC-0051 section 5):
  *
  *   - `complete --task-id <id> --outcome <enum> --worker <name> [--pr <number>]
@@ -120,7 +132,8 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -130,10 +143,14 @@ import {
   collectVerdicts,
   DEFAULT_BOARD_DIR,
   enqueueTasks,
+  formatResumeFeedback,
+  idleBackoffSec,
+  MAX_NOTE_CHARS,
   listBoard,
   listResumeSignals,
   peekQueue,
   probeIterationBudget,
+  readEmptyQueueHibernateSec,
   readInflightManifest,
   readResumeSignal,
   releaseInflight,
@@ -141,6 +158,7 @@ import {
   requeueFailed,
   requeueStaleInflight,
   removeVerdict,
+  resumeDone,
   TASK_ID_RE,
   sweepStaleHeartbeats,
   unblockManifest,
@@ -187,6 +205,41 @@ import {
   updatePassiveTickState,
   writePassiveTickState,
 } from '../orchestrator/stale-cache-reverify.js';
+
+/**
+ * Read a feedback note from a file under the board directory or the temp
+ * directory; anything else, a non-regular file, or one larger than the note limit
+ * (4 bytes per character at most) is refused with a reason.
+ */
+function readNoteFile(file: string, boardDir: string): { note: string } | { error: string } {
+  try {
+    const real = realpathSync(path.resolve(file));
+    const roots = [boardDir, os.tmpdir()].map((r) => {
+      try {
+        return realpathSync(r);
+      } catch {
+        return path.resolve(r);
+      }
+    });
+    if (
+      !roots.some((r) => real === r || real.startsWith(r.endsWith(path.sep) ? r : r + path.sep))
+    ) {
+      return {
+        error: `--note-file must be under the board directory or ${os.tmpdir()}; write the note there, or pass it with --note`,
+      };
+    }
+    const st = statSync(real);
+    if (!st.isFile()) return { error: '--note-file is not a regular file' };
+    if (st.size > MAX_NOTE_CHARS * 4) {
+      return {
+        error: `--note-file is larger than the ${MAX_NOTE_CHARS}-character note limit; shorten the note`,
+      };
+    }
+    return { note: readFileSync(real, 'utf-8') };
+  } catch {
+    return { error: '--note-file could not be read' };
+  }
+}
 
 /** Parse an optional integer flag. Returns null (after writing an error) when malformed. */
 function intFlag(flags: Record<string, string>, name: string): number | undefined | null {
@@ -349,6 +402,9 @@ export async function runDispatchCli(
         claimed: true,
         manifestPath: result.manifestPath,
         manifest: result.manifest,
+        ...(result.manifest?.resume
+          ? { resumeFeedback: formatResumeFeedback(result.manifest.resume) }
+          : {}),
       });
       return 0;
     }
@@ -975,6 +1031,92 @@ export async function runDispatchCli(
       } catch (err) {
         process.stderr.write(
           `cli-dispatch requeue: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+        return 1;
+      }
+    }
+
+    case 'idle-backoff': {
+      // How long an idle executor sleeps before the next claim: never more than a minute.
+      out({
+        sleepSec: idleBackoffSec(
+          readEmptyQueueHibernateSec(path.resolve(flags['work-dir'] ?? '.')),
+        ),
+      });
+      return 0;
+    }
+
+    case 'resume': {
+      const taskId = requireFlag(flags, 'task-id');
+      if (!TASK_ID_RE.test(taskId)) {
+        process.stderr.write(`cli-dispatch resume: '${taskId}' is not a valid task id\n`);
+        return 2;
+      }
+      let note = flags['note'] ?? '';
+      if (flags['note'] === undefined && flags['note-file']) {
+        const read = readNoteFile(flags['note-file'], boardDir);
+        if ('error' in read) {
+          process.stderr.write(`cli-dispatch resume: ${read.error}\n`);
+          return 2;
+        }
+        note = read.note;
+      }
+      if (!note || note === 'true') {
+        process.stderr.write(
+          'cli-dispatch resume: --note <text> (or --note-file <path>) is required\n',
+        );
+        return 2;
+      }
+      const prNumber = intFlag(flags, 'pr');
+      if (prNumber === null) return 2;
+      const cwd = deps.cwd ?? process.cwd();
+      const caller = checkDispatchCaller({
+        label: 'cli-dispatch resume',
+        cwd,
+        boardDir,
+        workDir: flags['work-dir'],
+        worker: flags['worker'],
+        identity: deps.identity,
+        trustedBoard: deps.trustedBoard,
+        installDir: deps.installDir,
+      });
+      if (!caller.ok) {
+        process.stderr.write(`${caller.reason}\n`);
+        return 1;
+      }
+      // Sending a finished task back is a kind of requeue: the same grant applies.
+      const granted = deps.operational ?? loadOperational(cwd, cwd);
+      if (!granted.has('requeue')) {
+        process.stderr.write(
+          'cli-dispatch resume: refused; the repository policy does not grant requeue to the dispatch session. ' +
+            'Raise it with `cli-decisions escalate` so the decision is recorded and routed\n',
+        );
+        return 1;
+      }
+      const workDir = path.resolve(flags['work-dir'] ?? '.');
+      try {
+        out({
+          ok: true,
+          ...resumeDone(
+            boardDir,
+            taskId,
+            {
+              note,
+              ...(prNumber !== undefined ? { prNumber } : {}),
+              failingChecks: splitIdList(flags['failing-checks']),
+              findings: flags['finding'] ? [flags['finding']] : [],
+            },
+            {
+              resumedBy: caller.name,
+              resolveBaseSha: () => flags['base-sha'] ?? resolveBaseSha(workDir),
+              resolveTaskFile: (id) => findTaskFile(workDir, id),
+            },
+          ),
+        });
+        return 0;
+      } catch (err) {
+        process.stderr.write(
+          `cli-dispatch resume: ${err instanceof Error ? err.message : String(err)}\n`,
         );
         return 1;
       }

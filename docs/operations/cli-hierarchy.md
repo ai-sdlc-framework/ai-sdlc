@@ -430,3 +430,26 @@ means the tmux window is closed; `starting` means the harness has not registered
 session; `unknown` means it is open but absent from the registry. `inflightTask` names the
 task the session's heartbeat holds; an executor with `idle` and no `inflightTask` is ready
 to claim. `board.queued` of 0 with all executors idle means the queue is drained.
+
+## Sending a finished task back (resume)
+
+A task in `done/` whose pull request later goes red (a coverage shortfall, a stale
+attestation after a rebase, reviewer findings) goes back to an executor, not to a second
+`/ai-sdlc execute` and not to a push from the dispatch session: the hook binds a push to
+the task's own worktree, which only its executor holds.
+
+```bash
+node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" resume --board-dir "$BOARD_DIR" \
+  --task-id "<task-id>" --pr "<number>" --failing-checks "<check,check>" \
+  --note "<what the executor must fix>" [--finding "<reviewer finding>"]
+```
+
+It needs the same `requeue` grant as `requeue` and runs only from the dispatch session. The
+task returns to `queue/` with the note on its manifest and is claimed like any other task
+(an idle executor claims it within a minute). `executor-start` prints the note before the
+task runs; the pipeline then re-enters the existing worktree and branch (never `origin/main`),
+re-writes `.active-task`, injects the note into the developer prompt, re-runs the reviewers,
+re-signs the attestation, lease-pushes from that worktree and updates the existing pull
+request. The command exits 1, changing nothing, when the task is not in `done/`.
+`cli-dispatch idle-backoff` prints the sleep (5 to 60 seconds) an executor without a tmux
+pane uses when the queue is empty.

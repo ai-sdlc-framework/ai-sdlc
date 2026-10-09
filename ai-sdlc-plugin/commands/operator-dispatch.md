@@ -70,7 +70,7 @@ a name. The JSON holds:
 - `escalations`, `reports`: failures the playbook (already run inside `tick`, gated by the
   operational list) could not fix, and progress lines. Send each to the planner (Step 3).
 - `markReady`: `readied` flipped after clean CodeQL, `failedAnalyze` go back to an executor
-  as a fix round, `skipped` are listed for the operator.
+  as a fix round, `skipped` are listed for the operator. A finished task whose pull request goes red returns to its executor, not to a push from here: `cli-dispatch.mjs resume --board-dir "$BOARD_DIR" --task-id <id> --pr <n> --note "<fix>"` (docs/operations/cli-hierarchy.md).
 - `nextWakeSec`, `selfClear`: Step 5.
 
 ## Step 3 - Tell the planner

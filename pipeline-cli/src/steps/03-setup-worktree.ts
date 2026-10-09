@@ -19,6 +19,7 @@
 import { execSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
+import { checkOwnWorktreeForOperator } from '../hierarchy/lease-policy.js';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { withWorktreeMutex, type WithWorktreeMutexOptions } from '../runtime/worktree-mutex.js';
 import type { SetupWorktreeResult } from '../types.js';
@@ -86,6 +87,22 @@ export interface SetupWorktreeOptions {
    * concurrent worktree ops.
    */
   mutexOpts?: WithWorktreeMutexOptions;
+  /**
+   * AISDLC-738 — re-enter the task's existing worktree and branch (a finished
+   * task sent back for another round). Reuses the worktree when present,
+   * otherwise re-adds it from the local branch or from `origin/<branch>`; it
+   * never creates the branch from `origin/main` and throws when the branch
+   * exists nowhere.
+   */
+  resume?: boolean;
+  /** AISDLC-738 — the resume manifest was rebuilt and its branch name inferred; the error says so. */
+  branchGuessed?: boolean;
+  /**
+   * AISDLC-738 — checks an existing worktree before a resume reuses it. Returns
+   * null when it is a genuine registered worktree of this repository, else the
+   * reason it is not. Defaults to `checkOwnWorktreeForOperator(workDir, worktree)`.
+   */
+  ownWorktreeCheck?: (worktreePath: string) => string | null;
   /** AISDLC-693 — filesystem reads for the hooks check; tests inject a fake. */
   hooksCheckFs?: HooksCheckFs;
   /** AISDLC-693 — active Node version for the engine-failure message (default `process.version`). */
@@ -422,8 +439,142 @@ async function attemptAutoCleanup(
   return { retried: true, addResult: retryResult };
 }
 
+/**
+ * AISDLC-738 — Step 3 for a resumed task: reuse the existing worktree, or
+ * recreate it from the task's own branch (local, else `origin/<branch>`).
+ */
+async function resumeWorktree(
+  runner: Runner,
+  opts: SetupWorktreeOptions,
+): Promise<SetupWorktreeResult> {
+  // The SHA of origin/<branch> as of Step 3's fetch; Step 11 leases its push against it.
+  const remoteSha = async (): Promise<{ remoteSha?: string }> => {
+    const r = await runner(
+      'git',
+      ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${opts.branch}`],
+      { cwd: opts.workDir, allowFailure: true },
+    );
+    const sha = r.stdout.trim();
+    return r.code === 0 && /^[0-9a-f]{7,64}$/i.test(sha) ? { remoteSha: sha } : {};
+  };
+  const headSha = async (): Promise<string> => {
+    const r = await runner('git', ['-C', opts.worktreePath, 'rev-parse', 'HEAD'], {
+      allowFailure: true,
+    });
+    return r.code === 0 ? r.stdout.trim() : '';
+  };
+  if (existsSync(join(opts.worktreePath, '.git'))) {
+    const notOwn = (
+      opts.ownWorktreeCheck ?? ((wt: string) => checkOwnWorktreeForOperator(opts.workDir, wt))
+    )(opts.worktreePath);
+    if (notOwn) {
+      throw new Error(
+        `Step 3 resume for ${opts.taskId}: ${opts.worktreePath} is not a registered worktree of this repository (${notOwn}); ` +
+          `it is not reused. Remove or move it, or run \`/ai-sdlc cleanup ${opts.taskId}\`, then resume again`,
+      );
+    }
+    const head = await runner(
+      'git',
+      ['-C', opts.worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD'],
+      { allowFailure: true },
+    );
+    const current = head.stdout.trim();
+    if (head.code !== 0 || current !== opts.branch) {
+      throw new Error(
+        `Step 3 resume for ${opts.taskId}: the worktree at ${opts.worktreePath} is on '${current || 'an unknown ref'}', not '${opts.branch}'`,
+      );
+    }
+    return {
+      branch: opts.branch,
+      worktreePath: opts.worktreePath,
+      baseSha: await headSha(),
+      ...(await remoteSha()),
+    };
+  }
+  const hasRef = async (ref: string): Promise<boolean> =>
+    (
+      await runner('git', ['rev-parse', '--verify', '--quiet', ref], {
+        cwd: opts.workDir,
+        allowFailure: true,
+      })
+    ).code === 0;
+  let addArgs: string[];
+  if (await hasRef(`refs/heads/${opts.branch}`)) {
+    addArgs = ['worktree', 'add', opts.worktreePath, opts.branch];
+  } else if (await hasRef(`refs/remotes/origin/${opts.branch}`)) {
+    addArgs = ['worktree', 'add', opts.worktreePath, '-b', opts.branch, `origin/${opts.branch}`];
+  } else {
+    throw new Error(
+      `Step 3 resume for ${opts.taskId}: branch '${opts.branch}' exists neither locally nor on origin, ` +
+        `so there is nothing to resume` +
+        (opts.branchGuessed
+          ? ` (the branch name was a guess: the task's manifest was rebuilt and its verdict recorded no pushed branch)`
+          : '') +
+        `. Run a normal \`/ai-sdlc execute ${opts.taskId}\` instead.`,
+    );
+  }
+  const added = await runner('git', addArgs, { cwd: opts.workDir, allowFailure: true });
+  if (added.code !== 0) {
+    throw new Error(
+      `git worktree add failed while resuming '${opts.branch}': ${added.stderr.trim() || 'unknown error'}`,
+    );
+  }
+  return {
+    branch: opts.branch,
+    worktreePath: opts.worktreePath,
+    baseSha: await headSha(),
+    ...(await remoteSha()),
+  };
+}
+
+/**
+ * AISDLC-738 — a resumed branch name flows into `git fetch` / `git worktree add`
+ * as a positional argument, so a value shaped like an option (`--upload-pack=<cmd>`)
+ * would be parsed by git as one. Allow only plain ref-name characters, and refuse
+ * a leading '-', '..', '//', and a trailing '/', '.' or '.lock'.
+ */
+function assertSafeResumeBranch(taskId: string, branch: string): void {
+  const safe =
+    /^[A-Za-z0-9._/-]+$/.test(branch) &&
+    !branch.startsWith('-') &&
+    !branch.startsWith('/') &&
+    !branch.includes('..') &&
+    !branch.includes('//') &&
+    !/[/.]$/.test(branch) &&
+    !branch.endsWith('.lock');
+  if (!safe) {
+    throw new Error(
+      `Step 3 resume for ${taskId}: refusing branch name '${branch}'; it is not a plain git ref name`,
+    );
+  }
+}
+
 export async function setupWorktree(opts: SetupWorktreeOptions): Promise<SetupWorktreeResult> {
   const runner = opts.runner ?? defaultRunner;
+
+  if (opts.resume) {
+    assertSafeResumeBranch(opts.taskId, opts.branch);
+    if (!opts.skipFetch) {
+      await runner('git', ['fetch', 'origin', '--', opts.branch], {
+        cwd: opts.workDir,
+        timeout: 30_000,
+        allowFailure: true,
+      });
+    }
+    mkdirSync(join(opts.workDir, '.worktrees'), { recursive: true });
+    const resumed = await withWorktreeMutex(() => resumeWorktree(runner, opts), opts.mutexOpts);
+    const resumedHooks = await ensureWorktreeHooks({
+      runner,
+      workDir: opts.workDir,
+      worktreePath: opts.worktreePath,
+      fs: opts.hooksCheckFs,
+      activeNodeVersion: opts.activeNodeVersion,
+    });
+    if (resumedHooks.status === 'missing') {
+      throw new Error(`Step 3 refused to continue for ${opts.taskId}: ${resumedHooks.message}`);
+    }
+    return resumed;
+  }
 
   if (!opts.skipFetch) {
     // git fetch does NOT touch .git/config — no mutex needed here.

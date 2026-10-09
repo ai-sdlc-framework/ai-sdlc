@@ -716,6 +716,8 @@ mkdir -p .worktrees
 git worktree add "$WORKTREE_PATH" -b "$BRANCH" origin/main
 ```
 
+**Resumed task.** When the claimed dispatch-board manifest of this task carries a `resume` block (see `cli-dispatch resume`), do not run the commands above. The branch and worktree already exist: reuse `$WORKTREE_PATH` when it is there, otherwise `git worktree add "$WORKTREE_PATH" "$BRANCH"` (local branch) or `git worktree add "$WORKTREE_PATH" -b "$BRANCH" "origin/$BRANCH"`, never from `origin/main`. Step 4 still re-writes the sentinel, Step 5 appends the `resume` note, failing checks and findings to the developer prompt, and Step 11 lease-pushes from the task worktree (`--force-with-lease` to `HEAD:refs/heads/$BRANCH` only) and updates the existing PR instead of running `gh pr create`. `executePipeline()` does all of this itself.
+
 If `git worktree add` fails because the branch already exists, the operator's prior run left state. Tell them: "Worktree branch `$BRANCH` already exists. Run `/ai-sdlc cleanup $TASK_ID` first, or pick a different task." Then stop.
 
 **Hooks check (AISDLC-693).** A worktree with no git hooks directory runs no pre-commit, commit-msg or pre-push gate, silently. The shell commands above do not install dependencies (the TypeScript Step 3 does, with scripts enabled), so install with install scripts enabled (never disable them) and, before the first commit, confirm the hooks directory exists:
