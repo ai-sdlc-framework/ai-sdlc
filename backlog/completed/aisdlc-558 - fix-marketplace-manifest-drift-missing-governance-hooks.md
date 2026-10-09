@@ -3,7 +3,7 @@ id: AISDLC-558
 title: >-
   fix(plugin): reconcile .claude-plugin/plugin.json with plugin.json — the
   marketplace manifest is missing two governance hooks
-status: To Do
+status: Done
 assignee: []
 labels:
   - adoption
@@ -72,14 +72,14 @@ Raised to critical 2026-10-09: first-run defect in the public-relations push win
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] #1 The manifest the marketplace installer reads is identified, with
+- [x] #1 The manifest the marketplace installer reads is identified, with
       evidence, and documented
-- [ ] #2 Adopters receive the `SubagentStart` hook and the `Write|Edit`
+- [x] #2 Adopters receive the `SubagentStart` hook and the `Write|Edit`
       write-policy hook, verified on a marketplace-style install rather than
       inferred from the file contents
-- [ ] #3 Drift is prevented structurally (generation or deletion), or by a
+- [x] #3 Drift is prevented structurally (generation or deletion), or by a
       test covering every shared key rather than `runtimeDependencies` alone
-- [ ] #4 If adopters have been running without these hooks, the impact window
+- [x] #4 If adopters have been running without these hooks, the impact window
       is stated plainly in the PR body
 <!-- SECTION:ACCEPTANCE:END -->
 
@@ -91,3 +91,26 @@ bump had been applied to only one of the two manifests. The dependency half is
 fixed and tested there; this task covers the hooks half and the underlying
 duplication that allowed both to drift.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+The hooks drift described here was already fixed on main by AISDLC-571 (#988); both plugin manifests are byte-identical today. This task adds a whole-manifest guard so no key (hooks, mcpServers, userConfig, runtimeDependencies, version, ...) can drift again, and records which manifest each consumer reads.
+
+## Changes
+- `ai-sdlc-plugin/scripts/install-runtime-deps.test.mjs` (modified): new describe block deep-comparing every top-level key of `plugin.json` and `.claude-plugin/plugin.json`, plus key-set equality.
+
+## Design decisions
+- **Keep both manifests, guard by test**: Claude Code's loader reads `.claude-plugin/plugin.json`; `install-runtime-deps.sh` reads the top-level `plugin.json`; neither can be deleted. A full-key test makes drift fail CI.
+- Installed cache copies 0.17.0 through 0.24.0 carry both hooks (SubagentStart, PreToolUse Write|Edit) in both manifests; 0.7.0 and 0.8.1 lacked them in `.claude-plugin/plugin.json`, which is the adopter impact window.
+
+## Verification
+- `pnpm build` — clean
+- `pnpm test` — passed (install-runtime-deps tests: 48 pass)
+- `pnpm lint` — clean
+- `pnpm format:check` — clean for changed files
+
+## Follow-up
+(none)
+<!-- SECTION:FINAL_SUMMARY:END -->
