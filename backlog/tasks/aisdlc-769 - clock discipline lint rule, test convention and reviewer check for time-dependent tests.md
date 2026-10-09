@@ -11,7 +11,7 @@ labels:
   - governance
 dependencies: []
 references:
-  - eslint.config.js
+  - eslint.config.mjs
   - pipeline-cli/src/usage/pane-data.ts
   - pipeline-cli/src/tui/panes/usage.test.tsx
   - ai-sdlc-plugin/agents/test-reviewer.md
