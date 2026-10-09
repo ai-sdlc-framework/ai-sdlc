@@ -126,6 +126,7 @@ The transcript file at `.ai-sdlc/transcripts/<task-id>/test-reviewer.jsonl` is g
 2. **Check test quality** — tests should assert meaningful behavior, not just check truthiness
 3. **Check edge cases** — boundary conditions, error paths, empty inputs
 4. **Check test naming** — descriptive names that explain what's being tested
+5. **Check clock discipline** — a test that fixes a timestamp and does not fix the clock is a **major** finding (it passes until the calendar moves past the timestamp, then fails with no code change; AISDLC-769). Heuristic: the test contains an ISO-timestamp literal (`'20\d\d-\d\d-\d\dT'`) and none of `useFakeTimers`, `withFixedClock`, `setSystemTime`, or an injected `now`/clock dependency. Convention: `docs/contributing/testing-clock-discipline.md`.
 
 ## Important Rules
 

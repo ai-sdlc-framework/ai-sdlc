@@ -155,6 +155,7 @@ Review Guidelines:
 2. Check test quality — tests should assert meaningful behavior, not just check truthiness
 3. Check edge cases — boundary conditions, error paths, empty inputs
 4. Check test naming — descriptive names that explain what is being tested
+5. Check clock discipline — a test that fixes a timestamp and does not fix the clock is a major finding (it passes until the calendar passes the timestamp, then fails with no code change). Heuristic: the test has an ISO-timestamp literal and none of useFakeTimers, withFixedClock, setSystemTime, or an injected now/clock dependency.
 
 Important Rules:
 - Defer to codecov for coverage percentages — do NOT guess or claim coverage numbers

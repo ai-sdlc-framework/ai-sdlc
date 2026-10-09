@@ -717,3 +717,30 @@ describe('review-executor: read-only, tool-restricted probe executor (staged rev
     }
   });
 });
+
+// AISDLC-769: clock-discipline check in the test reviewers, shown by fixtures.
+describe('test-reviewer clock discipline (AISDLC-769)', () => {
+  const FIXED_TS = /['"`]20\d\d-\d\d-\d\dT/;
+  const CLOCK_FIX = /useFakeTimers|withFixedClock|setSystemTime|\bnow\s*[:=(]|setClock/;
+  // The heuristic the reviewer prompt documents, applied mechanically.
+  const flagged = (src) => FIXED_TS.test(src) && !CLOCK_FIX.test(src);
+  const fixture = (name) => readFileSync(join(__dirname, '__fixtures__', name), 'utf-8');
+
+  for (const file of ['test-reviewer.md', 'test-reviewer-codex.md']) {
+    it(`${file} carries the fixed-timestamp-without-fixed-clock major finding`, () => {
+      const body = readFileSync(join(__dirname, file), 'utf-8');
+      assert.match(
+        body,
+        /fixes a timestamp and does not fix the clock is a \*{0,2}major\*{0,2} finding/,
+      );
+    });
+  }
+
+  it('flags a fixed-timestamp test that does not fix the clock', () => {
+    assert.equal(flagged(fixture('fixed-timestamp-no-clock.test.ts.txt')), true);
+  });
+
+  it('does not flag a fixed-timestamp test that fixes the clock', () => {
+    assert.equal(flagged(fixture('fixed-timestamp-with-clock.test.ts.txt')), false);
+  });
+});

@@ -5,9 +5,11 @@ import { Box } from 'ink';
 import { UsagePane, USAGE_EMPTY_TEXT, USAGE_ERROR_TEXT, USAGE_PANE_HEADING } from './usage.js';
 import type { UsagePaneData } from '../../usage/pane-data.js';
 import type { ReportRow } from '../../usage/report.js';
+import { withFixedClock } from '../../__test-helpers/with-fixed-clock.js';
 
 /** Fixed clock for tests that write fixed-timestamp ledger files, so the read window always covers them. */
-const PINNED_NOW = new Date('2026-09-10T12:00:00.000Z');
+const PINNED_ISO = '2026-09-10T12:00:00.000Z';
+const PINNED_NOW = new Date(PINNED_ISO);
 
 afterEach(() => {
   cleanup();
@@ -283,44 +285,47 @@ describe('UsagePane', () => {
     unmount();
   });
 
-  it('shows only the fixed error line when the real reader meets a bad ledger line', async () => {
-    const { mkdtempSync, rmSync, appendFileSync } = await import('node:fs');
-    const { tmpdir } = await import('node:os');
-    const { join } = await import('node:path');
-    const { appendModelCalls, ledgerFileForTs } = await import('@ai-sdlc/reference');
-    const dir = mkdtempSync(join(tmpdir(), 'usage-pane-bad-'));
-    try {
-      const ts = '2026-09-10T11:00:00.000Z';
-      appendModelCalls(
-        [
-          {
-            schemaVersion: 'v1',
-            callId: 'c1',
-            ts,
-            harness: 'claude-code',
-            provider: 'anthropic',
-            model: 'm',
-            tokens: { input: 1, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 1 },
-            billingPool: 'unknown',
-            sessionId: 's',
-            agentRole: 'r',
-            scope: 'other',
-          },
-        ],
-        { dir },
-      );
-      appendFileSync(join(dir, ledgerFileForTs(ts)), 'null\n');
-      const { lastFrame } = render(
-        <UsagePane deps={{ usageDir: dir, priceRows: [], now: () => PINNED_NOW }} />,
-      );
-      const f = await waitForFrame(lastFrame, (x) => !x.includes('Loading usage'));
-      expect(f).toContain(USAGE_ERROR_TEXT.slice(0, 30));
-      expect(f).not.toContain(dir);
-      expect(f).not.toContain('TypeError');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  }, 15_000);
+  it(
+    'shows only the fixed error line when the real reader meets a bad ledger line',
+    async () =>
+      withFixedClock(PINNED_ISO, async () => {
+        const { mkdtempSync, rmSync, appendFileSync } = await import('node:fs');
+        const { tmpdir } = await import('node:os');
+        const { join } = await import('node:path');
+        const { appendModelCalls, ledgerFileForTs } = await import('@ai-sdlc/reference');
+        const dir = mkdtempSync(join(tmpdir(), 'usage-pane-bad-'));
+        try {
+          const ts = '2026-09-10T11:00:00.000Z';
+          appendModelCalls(
+            [
+              {
+                schemaVersion: 'v1',
+                callId: 'c1',
+                ts,
+                harness: 'claude-code',
+                provider: 'anthropic',
+                model: 'm',
+                tokens: { input: 1, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 1 },
+                billingPool: 'unknown',
+                sessionId: 's',
+                agentRole: 'r',
+                scope: 'other',
+              },
+            ],
+            { dir },
+          );
+          appendFileSync(join(dir, ledgerFileForTs(ts)), 'null\n');
+          const { lastFrame } = render(<UsagePane deps={{ usageDir: dir, priceRows: [] }} />);
+          const f = await waitForFrame(lastFrame, (x) => !x.includes('Loading usage'));
+          expect(f).toContain(USAGE_ERROR_TEXT.slice(0, 30));
+          expect(f).not.toContain(dir);
+          expect(f).not.toContain('TypeError');
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }),
+    15_000,
+  );
 
   it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
     'shows only the fixed error line for an unreadable usage directory',
