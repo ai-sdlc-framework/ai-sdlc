@@ -1049,17 +1049,20 @@ when YOU are picking the next task by hand.
 ### The flow
 
 ```bash
-# 1. Create the task file under a worktree-local path. The simplest shape:
-#    one worktree per task, file lives under `.worktrees/<id>/backlog/tasks/`.
-mkdir -p .worktrees/aisdlc-NNN/backlog/tasks
-$EDITOR .worktrees/aisdlc-NNN/backlog/tasks/aisdlc-NNN\ -\ <slug>.md
+# 1. Write the task file anywhere OUTSIDE the worktree (a scratch dir or the
+#    parent checkout, uncommitted). The tick creates the worktree from
+#    origin/main, so do NOT pre-create `.worktrees/aisdlc-NNN/`.
+mkdir -p /tmp/aisdlc-NNN
+$EDITOR /tmp/aisdlc-NNN/aisdlc-NNN\ -\ <slug>.md
 
-# 2. Dispatch a developer subagent against the worktree-local file.
+# 2. Dispatch a developer subagent against that file.
 #    The orchestrator bypasses the frontier query and the §4.3 admission
 #    filter chain (you already chose the task; the dependency graph
-#    hasn't observed the file yet).
+#    hasn't observed the file yet). Step 3 copies the file into the fresh
+#    worktree at `backlog/tasks/` and Step 4 flips its status there
+#    (AISDLC-770).
 cli-orchestrator tick \
-  --task-from-file .worktrees/aisdlc-NNN/backlog/tasks/aisdlc-NNN\ -\ <slug>.md
+  --task-from-file /tmp/aisdlc-NNN/aisdlc-NNN\ -\ <slug>.md
 
 # 3. The dev subagent works in the same `.worktrees/aisdlc-NNN/`,
 #    implements the task, commits BOTH the task file and the implementation,

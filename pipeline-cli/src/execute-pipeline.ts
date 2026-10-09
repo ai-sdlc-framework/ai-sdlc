@@ -177,6 +177,9 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     // Step 3
     logger.progress('03-setup-worktree', `creating worktree at ${branch.worktreePath}`);
     await setupWorktree({
+      ...(opts.taskFilePathOverride !== undefined
+        ? { taskFilePathOverride: opts.taskFilePathOverride }
+        : {}),
       taskId: opts.taskId,
       branch: branch.branch,
       worktreePath: branch.worktreePath,
@@ -255,6 +258,9 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     // edits land on worktree, not parent') for the proof.
     logger.progress('04-flip-status', 'flipping status to In Progress + writing sentinel');
     const beginResult = await beginTask({
+      ...(opts.taskFilePathOverride !== undefined
+        ? { taskFilePathOverride: opts.taskFilePathOverride }
+        : {}),
       taskId: opts.taskId,
       worktreePath: branch.worktreePath,
       workDir: opts.workDir,
