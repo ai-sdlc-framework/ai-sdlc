@@ -2,7 +2,7 @@
 id: AISDLC-761
 title: >-
   Pin a model on every plugin command and agent; haiku for relays and review probes
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-08'
 labels:
