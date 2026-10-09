@@ -310,6 +310,34 @@ describe('doctorCommand — CLI action (end-to-end via the command builder, AISD
     logSpy.mockRestore();
   });
 
+  it('--only runs just the named check (AISDLC-561)', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const program = buildProgram(() => baseAdapters());
+    await program.parseAsync(['--format', 'json', 'doctor', '--only', 'attestation-governance'], {
+      from: 'user',
+    });
+
+    const parsed = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(parsed.results.map((r: { id: string }) => r.id)).toEqual(['attestation-governance']);
+
+    logSpy.mockRestore();
+  });
+
+  it('--only with an unknown id exits 2 and prints nothing to stdout', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const program = buildProgram(() => baseAdapters());
+    await program.parseAsync(['--format', 'json', 'doctor', '--only', 'nope'], { from: 'user' });
+
+    expect(process.exitCode).toBe(2);
+    expect(logSpy).not.toHaveBeenCalled();
+
+    logSpy.mockRestore();
+    errSpy.mockRestore();
+  });
+
   it('--strict promotes warn-only results to a non-zero exit', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
