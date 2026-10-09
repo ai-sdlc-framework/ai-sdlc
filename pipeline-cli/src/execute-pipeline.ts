@@ -32,7 +32,7 @@ import {
 } from './steps/index.js';
 import { existsSync, unlinkSync } from 'node:fs';
 import { defaultRunner } from './runtime/exec.js';
-import { formatResumeFeedback, readResumeFeedback } from './dispatch/resume.js';
+import { authoriseResume, formatResumeFeedback } from './dispatch/resume.js';
 import { join } from 'node:path';
 import {
   clearUntrustedMarker,
@@ -139,18 +139,30 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
   }
 
   // AISDLC-738 — a finished task sent back for another round carries its
-  // feedback on the claimed board manifest; an explicit option wins.
-  const resume =
-    opts.resume ??
-    (() => {
-      const fb = readResumeFeedback(dispatchBoardDir(opts.workDir), opts.taskId);
-      return fb
-        ? {
-            feedback: formatResumeFeedback(fb),
-            ...(fb.prNumber !== undefined ? { prNumber: fb.prNumber } : {}),
-          }
-        : undefined;
-    })();
+  // feedback on the claimed board manifest; an explicit option wins. A block on
+  // the manifest only starts resume mode when the dispatch session left it and,
+  // when this session can be identified, it is the one that claimed the task.
+  let resume: { feedback: string; prNumber?: number; branchGuessed?: boolean } | undefined =
+    opts.resume;
+  if (!resume) {
+    const authority = authoriseResume(
+      dispatchBoardDir(opts.workDir),
+      opts.taskId,
+      opts.resumeIdentity,
+    );
+    if (authority && !authority.ok) {
+      return abort(opts, '', '', null, authority.reason);
+    }
+    if (authority) {
+      resume = {
+        feedback: formatResumeFeedback(authority.feedback),
+        ...(authority.feedback.prNumber !== undefined
+          ? { prNumber: authority.feedback.prNumber }
+          : {}),
+        ...(authority.feedback.branchGuessed ? { branchGuessed: true } : {}),
+      };
+    }
+  }
 
   // Step 2
   logger.progress('02-compute-branch', 'computing branch name');
@@ -197,7 +209,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
   try {
     // Step 3
     logger.progress('03-setup-worktree', `creating worktree at ${branch.worktreePath}`);
-    await setupWorktree({
+    const setup = await setupWorktree({
       ...(opts.taskFilePathOverride !== undefined
         ? { taskFilePathOverride: opts.taskFilePathOverride }
         : {}),
@@ -207,6 +219,10 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       workDir: opts.workDir,
       runner: opts.runner,
       ...(resume ? { resume: true } : {}),
+      ...(resume?.branchGuessed ? { branchGuessed: true } : {}),
+      ...(resume && opts.resumeLeasePolicy
+        ? { ownWorktreeCheck: opts.resumeLeasePolicy.ownWorktree }
+        : {}),
       // AISDLC-224 — propagate autonomousMode so Step 3 can self-heal
       // stale branches in the orchestrator path (default false → manual path
       // unchanged).
@@ -511,6 +527,8 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
         : {}),
       runner: opts.runner,
       ...(resume ? { resume: true } : {}),
+      ...(resume && setup.remoteSha ? { resumeRemoteSha: setup.remoteSha } : {}),
+      ...(resume && opts.resumeLeasePolicy ? { resumeLeasePolicy: opts.resumeLeasePolicy } : {}),
       // AISDLC-393 — `'gh-issue'` formats the PR title with `(closes #N)` and
       // prepends `Closes #N` to the body so the issue auto-closes on merge.
       sourceKind,

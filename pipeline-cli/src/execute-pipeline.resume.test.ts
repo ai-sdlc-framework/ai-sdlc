@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { claimNext, writeManifest } from './dispatch/board.js';
+import type { IdentityDeps } from './hierarchy/caller-identity.js';
 import { completeTask } from './dispatch/complete.js';
 import { resumeDone } from './dispatch/resume.js';
 import { executePipeline } from './execute-pipeline.js';
@@ -44,7 +45,92 @@ const approved = (type: 'code-reviewer' | 'test-reviewer' | 'security-reviewer')
   durationMs: 0,
 });
 
+const dispatchSession = {
+  name: 'dispatch',
+  role: 'operator-dispatch',
+  pid: 400,
+  status: 'running',
+};
+const executorSession = { name: 'exec', role: 'executor', pid: 401, status: 'running' };
+const identity = (sessions = [dispatchSession, executorSession], startPid = 500): IdentityDeps => ({
+  readSessions: () => sessions,
+  parentPid: (pid) => (pid === 500 ? 401 : null),
+  comm: (pid) => (pid === 401 ? 'claude' : 'zsh'),
+  startPid,
+});
+const ALLOW = {
+  forcePushMode: 'leaseOnOwnBranch' as const,
+  protectedBranches: [] as string[],
+  ownWorktree: () => null,
+};
+
 describe('executePipeline on a resumed task', () => {
+  async function arrange(resumedBy = 'dispatch'): Promise<{
+    branch: string;
+    wt: string;
+    taskPath: string;
+  }> {
+    const taskPath = writeTaskFile(tmp, {
+      id: 'AISDLC-100',
+      title: 'resume demo',
+      status: 'In Progress',
+      acceptanceCriteria: ['ship it'],
+    });
+    const v = await validateTask({ taskId: 'AISDLC-100', workDir: tmp });
+    const branch = await computeBranchName({ taskId: 'AISDLC-100', task: v.task!, workDir: tmp });
+    const wt = join(tmp, '.worktrees', 'aisdlc-100');
+    mkdirSync(join(wt, 'backlog', 'completed'), { recursive: true });
+    writeFileSync(join(wt, '.git'), 'gitdir: x');
+    const board = join(tmp, '.ai-sdlc', 'dispatch');
+    writeManifest(board, {
+      schemaVersion: 'v1',
+      taskId: 'AISDLC-100',
+      branch: branch.branch,
+      worktree: '.worktrees/aisdlc-100',
+      baseSha: 'abc',
+      workerKind: 'in-session-agent',
+      dispatchedAt: '2026-10-09T00:00:00Z',
+      dispatchedBy: 't',
+      spec: { taskFile: 'x', verifyCommands: [] },
+    });
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'exec' });
+    completeTask(board, { taskId: 'AISDLC-100', outcome: 'success', workerId: 'exec' });
+    resumeDone(board, 'AISDLC-100', { note: 'again' }, { resumedBy });
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'exec' });
+    return { branch: branch.branch, wt, taskPath };
+  }
+
+  it('refuses to enter resume mode when the block was not left by a dispatch session', async () => {
+    await arrange('mallory');
+    const runner = new FakeRunner();
+    const result = await executePipeline({
+      taskId: 'AISDLC-100',
+      workDir: tmp,
+      spawner: new MockSpawner({}),
+      runner: runner.toRunner(),
+      resumeIdentity: identity(),
+      resumeLeasePolicy: ALLOW,
+    });
+    expect(result.outcome).toBe('aborted');
+    expect(result.notes).toMatch(/not a dispatch session in the roster/);
+    expect(runner.calls.some((c) => c.args[0] === 'push' || c.args[0] === 'worktree')).toBe(false);
+  });
+
+  it('refuses when another session claimed the resumed manifest', async () => {
+    await arrange();
+    const runner = new FakeRunner();
+    const result = await executePipeline({
+      taskId: 'AISDLC-100',
+      workDir: tmp,
+      spawner: new MockSpawner({}),
+      runner: runner.toRunner(),
+      resumeIdentity: identity([dispatchSession, { ...executorSession, name: 'exec-other' }]),
+      resumeLeasePolicy: ALLOW,
+    });
+    expect(result.outcome).toBe('aborted');
+    expect(result.notes).toMatch(/claimed by 'exec', not by this session \('exec-other'\)/);
+  });
+
   it('reuses the worktree, carries the feedback, and updates the existing PR', async () => {
     const taskPath = writeTaskFile(tmp, {
       id: 'AISDLC-100',
@@ -104,6 +190,7 @@ describe('executePipeline on a resumed task', () => {
       .on(/^git fetch/, ok())
       .on(/rev-parse --abbrev-ref HEAD/, ok(`${branch.branch}\n`))
       .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
+      .on(/refs\/remotes\/origin\/ai-sdlc/, ok('abcdef0123456789abcdef0123456789abcdef01\n'))
       .on(
         /^gh pr list/,
         ok(JSON.stringify([{ number: 55, isDraft: true, url: 'https://github.com/o/r/pull/55' }])),
@@ -123,6 +210,8 @@ describe('executePipeline on a resumed task', () => {
       runner: runner.toRunner(),
       skipFinalizeCommit: true,
       maxReviewIterations: 2,
+      resumeIdentity: identity(),
+      resumeLeasePolicy: ALLOW,
     });
 
     // AC5: existing worktree and branch, never created from origin/main.
@@ -135,7 +224,9 @@ describe('executePipeline on a resumed task', () => {
     // AC5: the existing PR is updated through a lease push, no new PR.
     expect(result.prUrl).toBe('https://github.com/o/r/pull/55');
     expect(runner.calls.some((c) => c.command === 'gh' && c.args[1] === 'create')).toBe(false);
-    expect(runner.calls.find((c) => c.args[0] === 'push')?.args).toContain('--force-with-lease');
+    expect(runner.calls.find((c) => c.args[0] === 'push')?.args).toContain(
+      `--force-with-lease=refs/heads/${branch.branch}:abcdef0123456789abcdef0123456789abcdef01`,
+    );
     // AC6: the feedback is in the developer prompt.
     expect(prompts).toHaveLength(1);
     expect(prompts[0]).toContain('Coverage is below 80 percent');

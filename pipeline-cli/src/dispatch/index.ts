@@ -121,12 +121,14 @@ export type { CompleteOptions, CompleteResult } from './complete.js';
 export { FAILED_MANIFEST_SUFFIX, requeueFailed, snapshotFailedManifest } from './requeue.js';
 export type { RequeueFailedOptions, RequeueFailedResult } from './requeue.js';
 export {
+  authoriseResume,
   formatResumeFeedback,
+  MAX_NOTE_CHARS,
   readResumeFeedback,
   resumeDone,
   snapshotDoneManifest,
 } from './resume.js';
-export type { ResumeDoneOptions, ResumeInput, ResumeResult } from './resume.js';
+export type { ResumeAuthority, ResumeDoneOptions, ResumeInput, ResumeResult } from './resume.js';
 export {
   IDLE_BACKOFF_MAX_SEC,
   idleBackoffSec,

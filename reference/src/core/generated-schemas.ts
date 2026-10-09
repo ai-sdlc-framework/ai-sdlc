@@ -3994,6 +3994,7 @@ export const dispatchManifestV1Schema = {
         resumedAt: { type: 'string', format: 'date-time' },
         resumedBy: { type: 'string', minLength: 1 },
         priorOutcome: { type: 'string' },
+        branchGuessed: { type: 'boolean' },
       },
       additionalProperties: false,
     },

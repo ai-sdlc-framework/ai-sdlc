@@ -19,6 +19,7 @@
 import { execSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
+import { checkOwnWorktreeForOperator } from '../hierarchy/lease-policy.js';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { withWorktreeMutex, type WithWorktreeMutexOptions } from '../runtime/worktree-mutex.js';
 import type { SetupWorktreeResult } from '../types.js';
@@ -94,6 +95,14 @@ export interface SetupWorktreeOptions {
    * exists nowhere.
    */
   resume?: boolean;
+  /** AISDLC-738 — the resume manifest was rebuilt and its branch name inferred; the error says so. */
+  branchGuessed?: boolean;
+  /**
+   * AISDLC-738 — checks an existing worktree before a resume reuses it. Returns
+   * null when it is a genuine registered worktree of this repository, else the
+   * reason it is not. Defaults to `checkOwnWorktreeForOperator(workDir, worktree)`.
+   */
+  ownWorktreeCheck?: (worktreePath: string) => string | null;
   /** AISDLC-693 — filesystem reads for the hooks check; tests inject a fake. */
   hooksCheckFs?: HooksCheckFs;
   /** AISDLC-693 — active Node version for the engine-failure message (default `process.version`). */
@@ -438,6 +447,16 @@ async function resumeWorktree(
   runner: Runner,
   opts: SetupWorktreeOptions,
 ): Promise<SetupWorktreeResult> {
+  // The SHA of origin/<branch> as of Step 3's fetch; Step 11 leases its push against it.
+  const remoteSha = async (): Promise<{ remoteSha?: string }> => {
+    const r = await runner(
+      'git',
+      ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${opts.branch}`],
+      { cwd: opts.workDir, allowFailure: true },
+    );
+    const sha = r.stdout.trim();
+    return r.code === 0 && /^[0-9a-f]{7,64}$/i.test(sha) ? { remoteSha: sha } : {};
+  };
   const headSha = async (): Promise<string> => {
     const r = await runner('git', ['-C', opts.worktreePath, 'rev-parse', 'HEAD'], {
       allowFailure: true,
@@ -445,6 +464,15 @@ async function resumeWorktree(
     return r.code === 0 ? r.stdout.trim() : '';
   };
   if (existsSync(join(opts.worktreePath, '.git'))) {
+    const notOwn = (
+      opts.ownWorktreeCheck ?? ((wt: string) => checkOwnWorktreeForOperator(opts.workDir, wt))
+    )(opts.worktreePath);
+    if (notOwn) {
+      throw new Error(
+        `Step 3 resume for ${opts.taskId}: ${opts.worktreePath} is not a registered worktree of this repository (${notOwn}); ` +
+          `it is not reused. Remove or move it, or run \`/ai-sdlc cleanup ${opts.taskId}\`, then resume again`,
+      );
+    }
     const head = await runner(
       'git',
       ['-C', opts.worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD'],
@@ -456,7 +484,12 @@ async function resumeWorktree(
         `Step 3 resume for ${opts.taskId}: the worktree at ${opts.worktreePath} is on '${current || 'an unknown ref'}', not '${opts.branch}'`,
       );
     }
-    return { branch: opts.branch, worktreePath: opts.worktreePath, baseSha: await headSha() };
+    return {
+      branch: opts.branch,
+      worktreePath: opts.worktreePath,
+      baseSha: await headSha(),
+      ...(await remoteSha()),
+    };
   }
   const hasRef = async (ref: string): Promise<boolean> =>
     (
@@ -473,7 +506,11 @@ async function resumeWorktree(
   } else {
     throw new Error(
       `Step 3 resume for ${opts.taskId}: branch '${opts.branch}' exists neither locally nor on origin, ` +
-        `so there is nothing to resume. Run a normal \`/ai-sdlc execute ${opts.taskId}\` instead.`,
+        `so there is nothing to resume` +
+        (opts.branchGuessed
+          ? ` (the branch name was a guess: the task's manifest was rebuilt and its verdict recorded no pushed branch)`
+          : '') +
+        `. Run a normal \`/ai-sdlc execute ${opts.taskId}\` instead.`,
     );
   }
   const added = await runner('git', addArgs, { cwd: opts.workDir, allowFailure: true });
@@ -482,7 +519,12 @@ async function resumeWorktree(
       `git worktree add failed while resuming '${opts.branch}': ${added.stderr.trim() || 'unknown error'}`,
     );
   }
-  return { branch: opts.branch, worktreePath: opts.worktreePath, baseSha: await headSha() };
+  return {
+    branch: opts.branch,
+    worktreePath: opts.worktreePath,
+    baseSha: await headSha(),
+    ...(await remoteSha()),
+  };
 }
 
 export async function setupWorktree(opts: SetupWorktreeOptions): Promise<SetupWorktreeResult> {

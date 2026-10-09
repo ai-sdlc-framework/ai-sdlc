@@ -132,7 +132,8 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -144,6 +145,7 @@ import {
   enqueueTasks,
   formatResumeFeedback,
   idleBackoffSec,
+  MAX_NOTE_CHARS,
   listBoard,
   listResumeSignals,
   peekQueue,
@@ -204,12 +206,38 @@ import {
   writePassiveTickState,
 } from '../orchestrator/stale-cache-reverify.js';
 
-/** Read a feedback note from a file; an unreadable file yields an empty note (the caller refuses). */
-function readNoteFile(file: string): string {
+/**
+ * Read a feedback note from a file under the board directory or the temp
+ * directory; anything else, a non-regular file, or one larger than the note limit
+ * (4 bytes per character at most) is refused with a reason.
+ */
+function readNoteFile(file: string, boardDir: string): { note: string } | { error: string } {
   try {
-    return readFileSync(path.resolve(file), 'utf-8');
+    const real = realpathSync(path.resolve(file));
+    const roots = [boardDir, os.tmpdir()].map((r) => {
+      try {
+        return realpathSync(r);
+      } catch {
+        return path.resolve(r);
+      }
+    });
+    if (
+      !roots.some((r) => real === r || real.startsWith(r.endsWith(path.sep) ? r : r + path.sep))
+    ) {
+      return {
+        error: `--note-file must be under the board directory or ${os.tmpdir()}; write the note there, or pass it with --note`,
+      };
+    }
+    const st = statSync(real);
+    if (!st.isFile()) return { error: '--note-file is not a regular file' };
+    if (st.size > MAX_NOTE_CHARS * 4) {
+      return {
+        error: `--note-file is larger than the ${MAX_NOTE_CHARS}-character note limit; shorten the note`,
+      };
+    }
+    return { note: readFileSync(real, 'utf-8') };
   } catch {
-    return '';
+    return { error: '--note-file could not be read' };
   }
 }
 
@@ -1024,7 +1052,15 @@ export async function runDispatchCli(
         process.stderr.write(`cli-dispatch resume: '${taskId}' is not a valid task id\n`);
         return 2;
       }
-      const note = flags['note'] ?? (flags['note-file'] ? readNoteFile(flags['note-file']) : '');
+      let note = flags['note'] ?? '';
+      if (flags['note'] === undefined && flags['note-file']) {
+        const read = readNoteFile(flags['note-file'], boardDir);
+        if ('error' in read) {
+          process.stderr.write(`cli-dispatch resume: ${read.error}\n`);
+          return 2;
+        }
+        note = read.note;
+      }
       if (!note || note === 'true') {
         process.stderr.write(
           'cli-dispatch resume: --note <text> (or --note-file <path>) is required\n',

@@ -166,8 +166,9 @@ export function completeTask(boardDir: string, opts: CompleteOptions): CompleteR
   // The verdict removes the inflight manifest on a failure; keep a copy so the
   // task can be queued again by id.
   if (state === 'failed') snapshotFailedManifest(boardDir, inflight);
-  // A finished task may be sent back for another round, which needs its manifest.
-  else if (opts.outcome === 'success') snapshotDoneManifest(boardDir, inflight);
   const verdictPath = writeVerdict(boardDir, verdict);
+  // A finished task may be sent back for another round, which needs its manifest;
+  // written after the verdict, so a snapshot never exists for a task with no verdict.
+  if (state !== 'failed' && opts.outcome === 'success') snapshotDoneManifest(boardDir, inflight);
   return { verdictPath, state, verdict };
 }

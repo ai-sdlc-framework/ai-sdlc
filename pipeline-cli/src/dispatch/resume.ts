@@ -18,6 +18,11 @@ import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'nod
 import path from 'node:path';
 
 import { now } from '../clock.js';
+import {
+  createSystemIdentity,
+  resolveCaller,
+  type IdentityDeps,
+} from '../hierarchy/caller-identity.js';
 import { ensureBoardDirs, readInflightManifest, TASK_ID_RE, writeManifest } from './board.js';
 import { DEFAULT_VERIFY_COMMANDS } from './enqueue.js';
 import type { DispatchManifest, DispatchVerdict, ResumeFeedback } from './types.js';
@@ -25,7 +30,8 @@ import { oneLine } from './verdict-fields.js';
 
 /** Filename suffix of the manifest copy kept in `done/`. */
 export const DONE_MANIFEST_SUFFIX = '.manifest.json';
-const MAX_NOTE_CHARS = 4000;
+/** Longest feedback note, in characters. */
+export const MAX_NOTE_CHARS = 4000;
 const MAX_LIST_ITEMS = 20;
 const MAX_ITEM_CHARS = 200;
 
@@ -148,6 +154,7 @@ export function resumeDone(
   const snapshotFile = path.join(doneDir, `${taskId}${DONE_MANIFEST_SUFFIX}`);
   const saved = existsSync(snapshotFile) ? readJson<DispatchManifest>(snapshotFile) : undefined;
   let base: DispatchManifest;
+  let branchGuessed = false;
   if (saved && saved.taskId === taskId) {
     base = saved;
   } else {
@@ -159,6 +166,7 @@ export function resumeDone(
       );
     }
     const lower = taskId.toLowerCase();
+    branchGuessed = !verdict?.pushedBranch;
     base = {
       schemaVersion: 'v1',
       taskId,
@@ -181,6 +189,7 @@ export function resumeDone(
     resumedAt: (opts.now ?? now)().toISOString(),
     resumedBy: oneLine(opts.resumedBy, 80) || 'dispatch',
     ...(verdict ? { priorOutcome: verdict.outcome } : {}),
+    ...(branchGuessed ? { branchGuessed: true } : {}),
   };
   const next: DispatchManifest = { ...base, resume };
   delete next.workerId;
@@ -192,21 +201,42 @@ export function resumeDone(
   return { taskId, queuePath, resume };
 }
 
+/**
+ * Remove ANSI escape sequences and control characters from text that came from a
+ * manifest; newlines are kept, tabs become spaces.
+ */
+export function stripControl(text: string): string {
+  return (
+    String(text ?? '')
+      // CSI, OSC and two-character escape sequences.
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?/g, '')
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b./g, '')
+      .replace(/\r\n?/g, '\n')
+      .replace(/\t/g, ' ')
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\x00-\x09\x0b-\x1f\x7f-\x9f]/g, '')
+  );
+}
+
 /** The text the executor prints and the developer prompt carries. */
 export function formatResumeFeedback(resume: ResumeFeedback): string {
   const lines = [
-    `This task was finished earlier and is being resumed for another round (by ${resume.resumedBy}).`,
+    `This task was finished earlier and is being resumed for another round (by ${stripControl(resume.resumedBy)}).`,
     resume.prNumber !== undefined
       ? `Update the existing pull request #${resume.prNumber}; do not open a new one.`
       : 'Update the existing branch; do not create a new one.',
     '',
-    resume.note,
+    stripControl(resume.note),
   ];
   if (resume.failingChecks && resume.failingChecks.length > 0) {
-    lines.push('', 'Failing checks:', ...resume.failingChecks.map((c) => `- ${c}`));
+    lines.push('', 'Failing checks:', ...resume.failingChecks.map((c) => `- ${stripControl(c)}`));
   }
   if (resume.findings && resume.findings.length > 0) {
-    lines.push('', 'Reviewer findings:', ...resume.findings.map((f) => `- ${f}`));
+    lines.push('', 'Reviewer findings:', ...resume.findings.map((f) => `- ${stripControl(f)}`));
   }
   return lines.join('\n');
 }
@@ -217,4 +247,58 @@ export function readResumeFeedback(boardDir: string, taskId: string): ResumeFeed
   const inflight = readInflightManifest(boardDir, taskId);
   if (inflight?.resume) return inflight.resume;
   return undefined;
+}
+
+/** The outcome of {@link authoriseResume}. */
+export type ResumeAuthority =
+  | { ok: true; feedback: ResumeFeedback }
+  | { ok: false; reason: string };
+
+/**
+ * Decide whether the resume block on a task's claimed manifest may start resume
+ * mode (worktree re-entry, lease push). Nothing is refused when the manifest has
+ * no block. With one, two things must hold:
+ *  - `resumedBy` names a dispatch-role (`operator-dispatch`) session in the roster
+ *    of the board, so a block written by anyone else is not honoured;
+ *  - when this session can be identified from the roster and the process tree, the
+ *    manifest was claimed by it (`workerId` equals its roster name). When the session
+ *    cannot be identified, this second check is skipped.
+ */
+export function authoriseResume(
+  boardDir: string,
+  taskId: string,
+  identity: IdentityDeps = createSystemIdentity(boardDir),
+): ResumeAuthority | undefined {
+  if (!TASK_ID_RE.test(taskId)) return undefined;
+  const manifest = readInflightManifest(boardDir, taskId);
+  const feedback = manifest?.resume;
+  if (!manifest || !feedback) return undefined;
+  const next = 'ask the dispatch session to run `cli-dispatch resume` again';
+  let sessions: ReturnType<IdentityDeps['readSessions']>;
+  try {
+    sessions = identity.readSessions();
+  } catch {
+    sessions = [];
+  }
+  const issuer = sessions.find(
+    (s) => s && s.name === feedback.resumedBy && s.role === 'operator-dispatch',
+  );
+  if (!issuer) {
+    return {
+      ok: false,
+      reason:
+        `${taskId}: the resume feedback was left by '${oneLine(feedback.resumedBy, 80)}', which is not a ` +
+        `dispatch session in the roster; resume mode is not entered. Run a normal execute, or ${next}`,
+    };
+  }
+  const me = resolveCaller(identity);
+  if (me && manifest.workerId !== me.name) {
+    return {
+      ok: false,
+      reason:
+        `${taskId}: the resumed manifest was claimed by '${oneLine(manifest.workerId ?? '', 80)}', not by ` +
+        `this session ('${me.name}'); resume mode is not entered. Claim the task again from this session, or ${next}`,
+    };
+  }
+  return { ok: true, feedback };
 }

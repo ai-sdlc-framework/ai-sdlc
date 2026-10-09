@@ -29,6 +29,8 @@
 
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { checkOwnWorktreeForOperator, isProtectedBranch } from '../hierarchy/lease-policy.js';
+import { loadOperationalPolicy } from '../hierarchy/operational.js';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import {
   DEFAULT_LOGGER,
@@ -190,8 +192,69 @@ export function composeBody(opts: PushAndPrOptions): string {
   );
 }
 
+/**
+ * AISDLC-738 — the resume push is a lease push made from a child process, where
+ * the PreToolUse hook never looks, so the same rules are applied here: the trusted
+ * policy must allow `leaseOnOwnBranch`, the branch must not be protected, and the
+ * worktree must be a genuine registered one of this repository. Returns the
+ * refusal (naming the config key or next step), or null when the push may go ahead.
+ */
+export function checkResumeLeasePush(
+  opts: Pick<
+    PushAndPrStepOptions,
+    'workDir' | 'worktreePath' | 'branch' | 'resumeRemoteSha' | 'resumeLeasePolicy'
+  >,
+): string | null {
+  let policy = opts.resumeLeasePolicy;
+  if (!policy) {
+    const trusted = loadOperationalPolicy(opts.workDir, opts.workDir);
+    policy = {
+      forcePushMode: trusted.forcePushMode,
+      protectedBranches: trusted.protectedBranches,
+      ownWorktree: (worktree) => checkOwnWorktreeForOperator(opts.workDir, worktree),
+    };
+  }
+  if (policy.forcePushMode !== 'leaseOnOwnBranch') {
+    return (
+      `resume push to '${opts.branch}' refused: the trusted policy does not allow a lease push ` +
+      `(spec.governance.allowForcePush in .ai-sdlc/agent-role.yaml on the main checkout must be ` +
+      `'leaseOnOwnBranch', the default when unset). Set it, or ask the dispatch session to push the branch`
+    );
+  }
+  if (
+    !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(opts.branch) ||
+    opts.branch.includes('..') ||
+    isProtectedBranch(opts.branch, policy.protectedBranches)
+  ) {
+    return (
+      `resume push refused: '${opts.branch}' is a protected or malformed branch name ` +
+      `(spec.governance.protectedBranches and the built-in protected list); a resumed task pushes only its own task branch`
+    );
+  }
+  const notOwn = policy.ownWorktree(opts.worktreePath);
+  if (notOwn) {
+    return (
+      `resume push refused: ${opts.worktreePath} is not this task's registered worktree of the main checkout (${notOwn}); ` +
+      `run the resume from the task's own .worktrees/<task-id> worktree`
+    );
+  }
+  if (!opts.resumeRemoteSha || !/^[0-9a-f]{7,64}$/i.test(opts.resumeRemoteSha)) {
+    return (
+      `resume push refused: origin/${opts.branch} was not recorded at Step 3, so the lease has no expected value; ` +
+      `run a normal \`/ai-sdlc execute\` if the branch was never pushed`
+    );
+  }
+  return null;
+}
+
 export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrResult> {
   const runner = opts.runner ?? defaultRunner;
+
+  // 0-pre. AISDLC-738 — refuse an unsafe resume lease push before anything is rebased.
+  if (opts.resume) {
+    const refusal = checkResumeLeasePush(opts);
+    if (refusal) return { pushed: false, prUrl: null, reason: refusal };
+  }
 
   // 0. AISDLC-232 — Late-rebase: fetch + rebase origin/main before pushing.
   //    This catches conflicts that accumulated while the dev ran (Steps 5-10
@@ -261,9 +324,16 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
 
   // 1. Push -u origin <branch>. NEVER a bare force. A resumed task already has
   //    commits on origin and the late rebase changed their SHAs, so it pushes
-  //    with a lease on its own branch only (AISDLC-738).
+  //    with a lease on its own branch only, expecting the origin/<branch> SHA that
+  //    Step 3 recorded, so a mid-run fetch cannot widen the lease (AISDLC-738).
   const pushArgs = opts.resume
-    ? ['push', '-u', '--force-with-lease', 'origin', `HEAD:refs/heads/${opts.branch}`]
+    ? [
+        'push',
+        '-u',
+        `--force-with-lease=refs/heads/${opts.branch}:${opts.resumeRemoteSha}`,
+        'origin',
+        `HEAD:refs/heads/${opts.branch}`,
+      ]
     : ['push', '-u', 'origin', opts.branch];
   const pushResult = await runner('git', pushArgs, {
     cwd: opts.worktreePath,
