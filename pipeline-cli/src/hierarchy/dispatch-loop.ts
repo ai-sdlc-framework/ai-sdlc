@@ -159,7 +159,9 @@ export interface TickResult {
 }
 
 /**
- * How long the session may sleep. Work handled this tick, or a brief the board
+ * How long the session may sleep. `markReady.failedAnalyze` is deliberately not counted
+ * as handled work: it is a standing condition that repeats every tick until fixed, so
+ * counting it would pin the 30s wake and break the idle budget. Work handled this tick, or a brief the board
  * refused, wakes it soon; queued or inflight work is watched at a slower rate (a new
  * brief or verdict file wakes it sooner); an empty board with nothing inflight sleeps
  * the longest, so an idle session costs at most two model calls an hour.
@@ -174,7 +176,7 @@ export function computeNextWake(
     result.ingestErrors.length > 0 ||
     result.verdicts.length > 0 ||
     result.escalations.length > 0 ||
-    (markReady !== undefined && markReady.readied.length + markReady.failedAnalyze.length > 0);
+    (markReady !== undefined && markReady.readied.length > 0);
   if (handled) return { nextWakeSec: WAKE_PENDING_SEC, wakeReason: 'pending' };
   const c = peekQueue(boardDir);
   if (c.queued + c.inflight > 0) return { nextWakeSec: WAKE_ACTIVE_SEC, wakeReason: 'active' };

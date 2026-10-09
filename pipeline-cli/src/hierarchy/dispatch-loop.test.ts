@@ -26,6 +26,7 @@ import { renderBriefBlock, type BriefEntry } from './brief-format.js';
 import type { ClearResult } from './clear.js';
 import {
   briefToEnqueueEntries,
+  computeNextWake,
   DEFAULT_REPORT_EVERY_MS,
   LOOP_STATE_FILENAME,
   readLoopState,
@@ -589,5 +590,26 @@ describe('nextWakeSec (idle hibernation)', () => {
     const denied = await runDispatchTick(deps({ markReady }));
     expect(denied.markReady).toBeUndefined();
     expect(denied.nextWakeSec).toBe(WAKE_IDLE_SEC);
+  });
+
+  it('does not pin the 30 s wake on a standing failed Analyze job', async () => {
+    const markReady = () => ({ readied: [], skipped: [], failedAnalyze: [7] });
+    const r = await runDispatchTick(
+      deps({ markReady, operational: new Set([...GRANTS, 'mark-ready-after-codeql']) }),
+    );
+    expect(r.markReady?.failedAnalyze).toEqual([7]);
+    expect(r.nextWakeSec).toBe(WAKE_IDLE_SEC);
+    expect(r.wakeReason).toBe('idle');
+  });
+
+  it('wakes in 30 s when the playbook escalated a failure', async () => {
+    const result = computeNextWake(board, {
+      ingested: [],
+      ingestErrors: [],
+      verdicts: [],
+      escalations: [{ taskId: 'AISDLC-3', message: 'needs a human' }],
+      reports: [],
+    });
+    expect(result).toEqual({ nextWakeSec: WAKE_PENDING_SEC, wakeReason: 'pending' });
   });
 });

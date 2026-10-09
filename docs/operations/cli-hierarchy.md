@@ -116,7 +116,7 @@ cli-hierarchy up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
 | ------------------------ | ---------------------------------------------------------------------------- |
 | `--executors <n>`        | Number of executors, 0 to 5 (default 5).                                     |
 | `--planner-model <m>`    | Planner model (default `fable`).                                             |
-| `--dispatch-model <m>`   | Dispatch model (default `sonnet`).                                           |
+| `--dispatch-model <m>`   | Dispatch model (default `sonnet`, per DEC-0068).                             |
 | `--executor-model <m>`   | Executor model (default `sonnet`).                                           |
 | `--no-planner`           | Do not start a planner.                                                      |
 | `--project <name>`       | Project the names are qualified with (default the repository basename).      |
@@ -318,7 +318,9 @@ The JSON also carries the caller's `identity` (`name`, `planner`), the `handoff`
 `selfClear` (whether `TMUX_PANE` is set) and `nextWakeSec`/`wakeReason`: 30 when a brief or
 verdict was handled, 300 when work is queued or inflight, 1800 when the board is empty and
 nothing is inflight. The session sleeps that long (a new brief or verdict file wakes it
-early), so an idle board costs at most two model calls an hour. Exit `0`; `1` on a guard refusal; `2` on a malformed number or a retry limit above
+early), so an idle board costs at most two model calls an hour. A draft PR whose CodeQL
+run is still pending waits up to the idle interval (1800 s) before mark-ready flips it, and
+a standing failed Analyze job does not shorten the sleep. Exit `0`; `1` on a guard refusal; `2` on a malformed number or a retry limit above
 the cap.
 
 ### `route-decision`
