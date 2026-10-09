@@ -69,21 +69,15 @@ If it fails with an unknown-command error, the installed `@ai-sdlc/pipeline-cli`
 
 ### `spawn-developer`
 
-Read `promptFile`. Spawn ONE `Agent` with `subagent_type: developer`, `prompt` = the file's contents verbatim, and `model` only if the instruction carries one. Its cwd is `cwd` (the worktree); the PreToolUse hook resolves `permittedExternalPaths` from the worktree's `.active-task`. Then report the agent's final message, unmodified, with the instruction's `reply` command:
-
-```bash
-<reply command from the instruction> <<'AISDLC_RESULT'
-<the developer agent's final message, verbatim>
-AISDLC_RESULT
-```
+Read `promptFile`. Spawn ONE `Agent` with `subagent_type: developer`, `prompt` = the file's contents verbatim, and `model` only if the instruction carries one. Its cwd is `cwd` (the worktree); the PreToolUse hook resolves `permittedExternalPaths` from the worktree's `.active-task`. Then report the agent's final message, unmodified: write it verbatim to a scratch file with the `Write` tool (never paste agent output into a shell command or heredoc), and run the instruction's `reply` command with its trailing `--result -` replaced by `--result <that file>`.
 
 ### `spawn-reviewers`
 
-For EVERY entry of `reviewers`, spawn an `Agent` with `subagent_type` = `agent`, `prompt` = the contents of its `promptFile` verbatim (it already carries the diff-binding nonce marker; never edit or drop it), and `model` only if the entry has one. Issue ALL of them in a single message so they run in parallel, and note the `agentId` the Agent tool returns for each. Then report one JSON document shaped like `replyShape` (`agent`, that reviewer's `agentId`, `approved`, `findings[]` with `severity` of `critical|major|minor|suggestion`, `summary`), taken from each reviewer's own verdict, using the same `reply` heredoc. Never invent or soften a verdict: a reviewer that returned no parseable verdict is reported `approved: false`. The CLI persists transcripts, emits the transcript leaves, aggregates, iterates (max 2 developer passes), rebases and re-reviews when needed, signs, pushes, opens the DRAFT PR and flips it ready.
+For EVERY entry of `reviewers`, spawn an `Agent` with `subagent_type` = `agent`, `prompt` = the contents of its `promptFile` verbatim (it already carries the diff-binding nonce marker; never edit or drop it), and `model` only if the entry has one. Issue ALL of them in a single message so they run in parallel, and note the `agentId` the Agent tool returns for each. Then report one JSON document shaped like `replyShape` (`agent`, that reviewer's `agentId`, `approved`, `findings[]` with `severity` of `critical|major|minor|suggestion`, `summary`), taken from each reviewer's own verdict, written to a scratch file and sent with the same `reply` command and `--result <file>`. Never invent or soften a verdict: a reviewer that returned no parseable verdict is reported `approved: false`. The CLI persists transcripts, emits the transcript leaves, aggregates, iterates (max 2 developer passes), rebases and re-reviews when needed, signs, pushes, opens the DRAFT PR and flips it ready.
 
 ### `fix-report`
 
-Your last reviewer report could not be used (not JSON, or a reviewer's `agentId` was missing); `reason` says which. Nothing irreversible happened and the reviewers already ran: correct ONLY the report (use the `agentId` values the Agent tool returned) and send it again with the same `reply` heredoc. Do NOT spawn the reviewers again. After two corrections the run stops.
+Your last reviewer report could not be used (not JSON, or a reviewer's `agentId` was missing); `reason` says which. Nothing irreversible happened and the reviewers already ran: correct ONLY the report (use the `agentId` values the Agent tool returned) and send it again with the same `reply` command and `--result <file>`. Do NOT spawn the reviewers again. After two corrections the run stops.
 
 ### `done`
 
@@ -93,7 +87,7 @@ The PR exists. Print the summary below and stop. `outcome: needs-human-attention
 
 Print `reason` (it names the next step: a worktree preserved at `worktreePath`, `/ai-sdlc cleanup <task-id>`, a rebase to resolve by hand, a missing signing key and `/ai-sdlc init-signing-key`, ...) and stop. Do not retry blindly, do not work around a refusal, and never resolve a rebase conflict yourself.
 
-If you ever need the pending instruction again, run the same `reply` command with `</dev/null` as its input: an empty result re-emits it. Orchestration budget: a normal run is 3-7 `next-step` calls plus the agents (AC-2 allows 15).
+If you ever need the pending instruction again, run the same `reply` command as-is with `</dev/null` as its input: an empty result re-emits it. Orchestration budget: a normal run is 3-7 `next-step` calls plus the agents (AC-2 allows 15).
 
 ## Summary and return value
 

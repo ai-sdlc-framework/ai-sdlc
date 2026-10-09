@@ -671,6 +671,32 @@ describe('failures in the collaborators stop the run', () => {
     });
   });
 
+  it.each(['prepareReview', 'finalizeReview'] as const)(
+    'a throw from %s still drops the sentinel, reverts status and stops',
+    async (which) => {
+      const d = {
+        ...deps(),
+        [which]: async () => {
+          throw new Error('boom from ' + which);
+        },
+      } as NextStepDeps;
+      const first = await nextStep(ctx, { task: 'AISDLC-900' }, d);
+      expect(first.instruction.action).toBe('spawn-developer');
+      let last: Awaited<ReturnType<typeof nextStep>>;
+      if (which === 'finalizeReview') {
+        const rev = await nextStep(ctx, { task: 'AISDLC-900', result: DEV_JSON }, d);
+        expect(rev.instruction.action).toBe('spawn-reviewers');
+        last = await nextStep(ctx, { task: 'AISDLC-900', result: reviewersJson() }, d);
+      } else {
+        last = await nextStep(ctx, { task: 'AISDLC-900', result: DEV_JSON }, d);
+      }
+      expect(last.exitCode).toBe(1);
+      expect(last.instruction).toMatchObject({ action: 'stop', reason: `boom from ${which}` });
+      expect(existsSync(join(worktree, '.active-task'))).toBe(false);
+      expect(persisted().phase).toBe('aborted');
+    },
+  );
+
   it('stops when review-finalize fails (e.g. no agent id)', async () => {
     const d = {
       ...deps(),

@@ -10,15 +10,16 @@
  * @module next-step/init
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { computeBranchName } from '../steps/02-compute-branch.js';
 import { setupWorktree } from '../steps/03-setup-worktree.js';
-import { beginTask } from '../steps/04-flip-status.js';
+import { beginTask, patchFrontmatterStatus } from '../steps/04-flip-status.js';
+import { cleanupTask } from '../steps/13-cleanup.js';
 import { buildDeveloperPrompt } from '../steps/05-build-dev-prompt.js';
 import { sweepMergedWorktrees } from '../steps/00-sweep.js';
 import { pruneStaleParentDebris, syncParentUntrackedFiles } from '../steps/00-5-sync-parent.js';
-import { validateTask } from '../steps/01-validate.js';
+import { findTaskFile, validateTask } from '../steps/01-validate.js';
 import type { NextStepContext } from './types.js';
 import type { TaskSpec } from '../types.js';
 
@@ -120,16 +121,23 @@ export async function initTask(
   });
   await beginTask({ taskId, worktreePath: branch.worktreePath, workDir, sourceKind: 'backlog' });
 
-  // Step 5 — developer prompt, iteration 1.
-  const built = await buildDeveloperPrompt({
-    taskId,
-    task,
-    branch: branch.branch,
-    worktreePath: branch.worktreePath,
-    iteration: 1,
-    sourceKind: 'backlog',
-  });
-  const promptFile = writeRunFile(ctx, 'developer-prompt-1.md', built.prompt);
+  let built: Awaited<ReturnType<typeof buildDeveloperPrompt>>;
+  let promptFile: string;
+  try {
+    // Step 5 — developer prompt, iteration 1.
+    built = await buildDeveloperPrompt({
+      taskId,
+      task,
+      branch: branch.branch,
+      worktreePath: branch.worktreePath,
+      iteration: 1,
+      sourceKind: 'backlog',
+    });
+    promptFile = writeRunFile(ctx, 'developer-prompt-1.md', built.prompt);
+  } catch (err) {
+    await rollbackBegun(taskId, task, branch.worktreePath);
+    throw err;
+  }
   return {
     ok: true,
     branch: branch.branch,
@@ -139,4 +147,25 @@ export async function initTask(
     promptFile,
     ...(built.model && built.modelArm !== 'default' ? { model: built.model } : {}),
   };
+}
+
+/** The task began (status flipped, sentinel written) but prompt building threw: undo both. */
+async function rollbackBegun(taskId: string, task: TaskSpec, worktreePath: string): Promise<void> {
+  try {
+    const file = findTaskFile(taskId, worktreePath);
+    if (file) {
+      writeFileSync(
+        file,
+        patchFrontmatterStatus(readFileSync(file, 'utf8'), statusOf(task)),
+        'utf8',
+      );
+    }
+  } catch {
+    // best effort; the sentinel removal below is the load-bearing part
+  }
+  try {
+    await cleanupTask({ taskId, worktreePath });
+  } catch {
+    // best effort
+  }
 }

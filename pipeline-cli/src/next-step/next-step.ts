@@ -150,6 +150,19 @@ class Machine {
   ) {}
 
   async run(input: NextStepInput): Promise<Instruction> {
+    try {
+      return await this.runInner(input);
+    } catch (err) {
+      // A throw after the task began must still drop the sentinel and revert status.
+      const state = this.state;
+      if (state === null || state.phase === 'aborted' || state.phase === 'done') throw err;
+      const reason = err instanceof Error ? err.message : String(err);
+      await this.rollbackStatus(state);
+      return this.fail(state, 'aborted', reason);
+    }
+  }
+
+  private async runInner(input: NextStepInput): Promise<Instruction> {
     const existing = readState(this.ctx.statePath);
     if (existing === null) return this.start(input.task);
 

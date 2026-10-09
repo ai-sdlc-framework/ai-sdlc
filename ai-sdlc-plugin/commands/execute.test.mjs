@@ -143,8 +143,9 @@ describe('/ai-sdlc execute body is a thin next-step loop (AISDLC-762)', () => {
     }
   });
 
-  it('reports results back through the instruction reply command with a quoted heredoc', () => {
-    assert.match(cmdBody, /<reply command from the instruction> <<'AISDLC_RESULT'/);
+  it('reports results back through the instruction reply command via a scratch file, never a heredoc', () => {
+    assert.match(cmdBody, /--result <that file>/);
+    assert.doesNotMatch(cmdBody, /AISDLC_RESULT/);
     assert.match(cmdBody, /`reply` command/);
     assert.match(cmdBody, /<\/dev\/null/, 'must say how to re-read the pending instruction');
   });
