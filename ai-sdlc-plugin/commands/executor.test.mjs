@@ -43,7 +43,9 @@ describe('executor command', () => {
     assert.match(body, /"taskId": null/);
     assert.match(body, /cli-hierarchy\.mjs" clear --self --resume-after 30/);
     assert.ok(body.indexOf('clear --self') < body.indexOf('ScheduleWakeup'));
-    assert.match(body, /ScheduleWakeup. for 1800 seconds/);
+    assert.match(body, /idle-backoff/);
+    assert.match(body, /sleepSec/);
+    assert.match(body, /RESUMED TASK/);
     assert.match(body, /emptyQueueHibernateSec/);
     assert.match(body, /Do not poll/);
   });

@@ -14,6 +14,7 @@
  */
 
 import { claimWithWait } from '../dispatch/claim-wait.js';
+import { formatResumeFeedback } from '../dispatch/resume.js';
 import type { DispatchManifest } from '../dispatch/types.js';
 import { resolveCaller, type IdentityDeps } from './caller-identity.js';
 import { checkRepoMatch, rosterProject } from './peer-guard.js';
@@ -87,6 +88,13 @@ export async function executorStart(
     waitSec: opts.waitSec ?? DEFAULT_EXECUTOR_WAIT_SEC,
     workerId: self.name,
   });
+  // A resumed task (AISDLC-738) carries a feedback note: surface it before the
+  // executor runs the task, ahead of the final JSON line.
+  if (result.claimed && result.manifest?.resume) {
+    deps.log?.(
+      `[executor] RESUMED TASK ${result.manifest.taskId} - feedback to address:\n${formatResumeFeedback(result.manifest.resume)}`,
+    );
+  }
   return {
     name: self.name,
     project: project.project,

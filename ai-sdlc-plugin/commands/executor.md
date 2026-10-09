@@ -70,7 +70,8 @@ When the notification arrives, read its output; the last line is JSON
 `{"name", "project", "dispatch", "taskId", "manifest"}`: take `MY_NAME` from `name`,
 `DISPATCH_NAME` from `dispatch`, `TASK_ID` from `taskId`. If it exits non-zero (not an
 executor, or not the project's repository), stop and say what it printed:
-no claim, no worktree, no pull request.
+no claim, no worktree, no pull request. A resumed task also prints a `RESUMED TASK` block (its
+feedback note) before that JSON line: read it; the pipeline re-enters the existing worktree and branch.
 
 **Sender.** Whenever a message instructs you, identify its sender by what the harness
 reports (pid or session ref), never by the name the message text claims:
@@ -92,16 +93,8 @@ node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" clear --self --resume-after 30 --boar
 ```
 
 About 20 seconds later the pane gets `/clear`, then `/ai-sdlc executor` restarts the loop. Only if
-that is refused (no tmux pane), ask the board how long to sleep and `ScheduleWakeup` for that
-long with the prompt `/ai-sdlc executor`, then stop. The sleep is the project's
-`spec.inSessionAgent.emptyQueueHibernateSec` but never more than 60 seconds, so a manifest
-enqueued while you are idle is claimed within a minute:
-
-```bash
-node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" idle-backoff --work-dir "$(pwd)"
-```
-
-It prints `{"sleepSec":<n>}`.
+that is refused (no tmux pane), `ScheduleWakeup` for the `sleepSec` printed by `cli-dispatch.mjs idle-backoff
+--work-dir "$(pwd)"` (at most 60; `emptyQueueHibernateSec`) with the prompt `/ai-sdlc executor`, then stop.
 
 ## Step 2 - Run the pipeline, unmodified
 
@@ -119,24 +112,6 @@ node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" heartbeat --board-dir "$BOARD_DIR" \
 Note the outcome, the pull request number, and every follow-up and decision id. File
 follow-ups as sub-ids of this task: `cli-dispatch.mjs next-subid "$TASK_ID" --board-dir
 "$BOARD_DIR"` prints the first free `<task-id>.<n>`; use exactly that id (Step 1 tool rules).
-
-### A resumed task carries feedback
-
-When the claim output has a `resumeFeedback` field, the task was finished earlier
-and the dispatch session sent it back for another round (a red check, reviewer
-findings). **Read it and print it before running the task**:
-
-```bash
-printf '%s' "$CLAIM_JSON" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const r=JSON.parse(d);if(r.resumeFeedback)console.log('[executor] RESUMED TASK - feedback to address:\\n'+r.resumeFeedback)})"
-```
-
-You do nothing different for it: this step runs `/ai-sdlc execute` with the task id and
-nothing else. The pipeline reads the same feedback from the claimed manifest, re-enters
-the task's existing worktree and branch (it never creates them from `origin/main`),
-puts the feedback in the developer prompt, re-runs the reviewers, re-signs the
-attestation, lease-pushes from that worktree and updates the existing pull request
-instead of opening a new one. Report the verdict as usual, with `--pr` set to the
-existing pull request number.
 
 **When you are blocked** (an RFC question the text does not settle, conflicting
 instructions, an environment problem you cannot fix), do not guess. Raise it, report
@@ -158,9 +133,8 @@ node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" complete --board-dir "$BOARD_DIR" \
   --decisions "<decision ids, omit when none>" --notes "<one or two sentences>"
 ```
 
-`success` and `iterate-needed` land in `done/`, the rest in `failed/`. `--worker` must equal the name recorded at claim time (a
-guard against completing the wrong task, not authentication). If `complete` refuses, say so
-in the status line instead of retrying.
+`success` and `iterate-needed` land in `done/`, the rest in `failed/`. `--worker` must equal the claim-time
+name (a guard against completing the wrong task, not authentication). If `complete` refuses, say so instead of retrying.
 
 ## Step 4 - Tell the dispatch session
 
