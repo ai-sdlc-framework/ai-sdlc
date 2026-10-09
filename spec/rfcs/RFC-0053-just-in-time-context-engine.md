@@ -14,7 +14,7 @@ requiresDocs: []
 
 # RFC-0053: Just-In-Time Context Engine (Decision Context Engine)
 
-**Status:** Draft (2026-10-09). All 7 Open Questions are unresolved and wait for an
+**Status:** Draft (2026-10-09). All 8 Open Questions are unresolved and wait for an
 operator walkthrough. No sign-off has been given.
 
 ## Summary
@@ -22,8 +22,9 @@ operator walkthrough. No sign-off has been given.
 Agents in this repository get their context from five stores and pay for most of it up
 front. This RFC proposes a context engine that holds knowledge as scored, dated,
 cited entries with typed relations, retrieves a ranked and budgeted slice at the
-moment of need, and surfaces that slice at four moments: session start, task claim,
-decision point (the Definition-of-Ready gate) and explicit query. The knowledge model
+moment of need, and surfaces that slice at six moments plus a compaction rule: session start, task claim,
+every operator message, every tool touch, decision point (the Definition-of-Ready
+gate) and explicit query. The knowledge model
 is borrowed from the operator's private data-room kit. Retrieval is new: the kit is
 files and grep, and this engine adds a hybrid index (keyword, embeddings, relation
 traversal) behind one `cli-context query` surface, with an evaluation set so ranking
@@ -152,7 +153,10 @@ A hybrid index behind one `cli-context query` surface:
   the head of a `supersedes` chain).
 
 The result is a ranked slice that fits a stated token budget, each entry with its
-citation, effective confidence and freshness. The substrate is OQ-2; the adapter
+citation, effective confidence and freshness. Every response carries entry ids and
+content hashes. `cli-context query` takes `--session <id>`, so the session load
+ledger (section C) is subtracted inside the query and the caller never has to filter
+repeats itself. The substrate is OQ-2; the adapter
 boundary exists either way.
 
 An evaluation set of real agent questions, mined from transcripts and treated as
@@ -161,16 +165,95 @@ untrusted text, is scored for precision so ranking is evidence, not assumption
 
 ### C. Surfacing protocol
 
-Four moments:
+Six moments and a compaction rule:
 
-1. **Session start.** A budgeted slice replaces or supplements the fixed prefix
-   (OQ-4).
-2. **Task claim.** Entries relevant to the task's references are injected into the
-   Step 5 developer prompt.
-3. **Decision point.** The DoR gate (RFC-0011) asks retrieval for open questions and
+1. **Session start** (`SessionStart` hook). A budgeted slice replaces or supplements
+   the fixed prefix (OQ-4).
+2. **Task claim** (`SubagentStart` hook, Step 5 developer prompt). Entries relevant to
+   the task's references and body are injected.
+3. **Every operator message** (`UserPromptSubmit` hook). The message text is the
+   retrieval key. The top entries above a relevance floor, with citations, ride in as
+   additional context. This is the mid-conversation surface for long planner sessions.
+4. **Every tool touch** (`PreToolUse` and `PostToolUse` hooks). The file path or
+   command is the key, for example "you are editing trusted-policy.js; DEC-0038 and
+   AISDLC-756 govern it".
+5. **Decision point.** The DoR gate (RFC-0011) asks retrieval for open questions and
    contradictions before dispatch and routes them, through RFC-0035, to the person who
    can answer.
-4. **Explicit query** by a human or an agent.
+6. **Explicit query** (`cli-context query`) by a human or an agent.
+
+**Compaction** (`PreCompact` hook). The plugin does not register this hook today; it
+registers SessionStart, SubagentStart, PreToolUse, PostToolUse and Stop. After a
+compaction the slice that mattered is gone, so the engine re-runs the session-start
+retrieval against the compaction summary. This is where AISDLC-766's continuous
+handoff and the engine meet.
+
+All hook-driven moments share one shape. The hook fires and extracts a key. It calls
+`cli-context query --budget N --min-score S --session <id>`. It injects the slice as
+data with citations, never as instructions. Decay does the pruning: entries that are
+retrieved and confirmed get fresher, and entries that never match age out of the slice
+without hand pruning.
+
+#### Session load ledger (load once)
+
+The engine keeps a per-session ledger of which entries (by id and content hash) have
+already been injected into this session's context, and at which moment. Every
+retrieval subtracts the ledger before injecting, so an entry is loaded once per
+session unless its content hash changed. When it changed, the new version is injected
+and the ledger notes the supersession.
+
+The ledger lives beside the session (for example
+`.ai-sdlc/context/sessions/<session-id>.jsonl`; the exact location is an
+implementation detail). It is reset on `/clear` and rebuilt from the compaction
+summary on `PreCompact`: entries whose text survives the summary stay marked loaded,
+and the rest are eligible again. The ledger also records injected token counts per
+entry per moment, so the usage ledger (RFC-0050) can attribute context cost.
+CLAUDE.md and the memory index count as pre-loaded entries in the ledger, so the
+engine never re-injects what the harness already loaded.
+
+#### Role and model profiles
+
+Surfacing is configured per role as a profile in `.ai-sdlc/context-profiles.yaml`
+(schema to be fixed in Phase 3). A profile sets which moments are enabled, the
+per-moment token budget, the relevance floor, the trunks in scope and the maximum
+injections per N turns. Proposed defaults by role:
+
+- **Planner:** every moment on, with the largest budgets, because it reasons across
+  RFCs, decisions and history.
+- **Operator-dispatch:** session start, task claim and compaction on; per-message and
+  per-tool off, because it runs a fixed loop.
+- **Executors:** session start and task claim on at small budgets, per-message off,
+  per-tool on only for governance-bearing paths. The developer subagent benefits from
+  "this file is governed by DEC-n" and little else.
+- **Reviewers:** task claim only, because the diff is their context.
+
+A profile may also key on the model alias; haiku relays get nothing beyond session
+start. Profiles are configuration, not governance controls: a smaller profile never
+removes a hard rule. Which defaults ship is OQ-8.
+
+#### Prompt cache versus just-in-time context
+
+The fixed prefix (CLAUDE.md, memory index, governance block) is paid once per cache
+window and then read from cache at a fraction of the price. Everything the engine
+injects mid-conversation is new input that is not cached until the next turn. It
+invalidates nothing, but it adds to every later turn's cache read. Continuous clearing
+(AISDLC-766) and per-task executor contexts (one task per context) shift weight from
+the cache layer to just-in-time loading, because each fresh context pays its slice
+again.
+
+The engine therefore reports, per session and per role:
+
+- injected tokens by moment;
+- the share of injections later cited or acted on (a tool touch on a cited path, a
+  decision referencing an entry);
+- the cache-read tokens of the same sessions, from the RFC-0050 ledger.
+
+With these the operator can see whether a profile's injections cost more than the
+prefix bytes they displaced. A profile change that raises net tokens over a week is
+flagged in the usage report. The routing-table mechanism of RFC-0050 Part B is the
+model for turning that into evidence-based profile defaults. This RFC does not assume
+that just-in-time loading is cheaper. It instruments the trade so the answer is
+measured.
 
 ### Human surface
 
@@ -183,9 +266,12 @@ as inputs. Token savings are measured through the RFC-0050 usage ledger.
 Tasks are filed later, not in this PR.
 
 1. **Knowledge store, ingest adapters, ported capture and hygiene skills.**
-2. **Retrieval, `cli-context query`, evaluation set.**
-3. **Surfacing protocol** (session start, task claim, DoR feed). Absorbs AISDLC-651.2
-   and AISDLC-729 as durable mechanisms.
+2. **Retrieval, `cli-context query`, evaluation set.** Includes the content hash on
+   every entry.
+3. **Surfacing protocol.** Hook wiring for the six moments, the `PreCompact`
+   registration, the session load ledger, the `context-profiles.yaml` schema with the
+   role defaults above, and the cache-versus-JIT report. Absorbs AISDLC-651.2 and
+   AISDLC-729 as durable mechanisms.
 4. **Human surface, coverage dashboard, external signal ingestion into the PPA.**
 
 ## Relationships
@@ -217,7 +303,11 @@ Required by DEC-0048.
 - **Expected gain:** a smaller per-turn fixed prefix (today about 14k tokens of
   CLAUDE.md per subagent start) and fewer mid-task escalations, because answers are
   retrieved before work starts.
-- **Cost:** index maintenance, and one more store to keep honest.
+- **Cost:** index maintenance, and one more store to keep honest. Per-message and
+  per-tool retrieval fire often (a 300-turn dispatch loop is 300 queries), so the
+  profile defaults keep those moments off for loop roles, and the Stop-hook budget
+  rules and the usage ledger see every injection. The load-once ledger bounds repeat
+  cost.
 - **Gate behavior:** the engine blocks nothing. It is not a governance control, so it
   adds no step to any merge or push path.
 - **Measurement:** token savings through the RFC-0050 usage ledger, retrieval precision
@@ -282,6 +372,22 @@ keeps Claude Code's own memory behavior untouched.
 *Considerations:* a trunk reuses the schema and hygiene; a separate root keeps client
 material out of the engine's write paths and out of any shared store.
 
+**OQ-8 - Trigger policy and profile defaults**
+*Problem:* which moments fire by default, for which roles, at what budgets and
+relevance floor, and who may change a profile.
+*Options:* (a) all six moments on for every role, with a relevance floor and a
+per-N-turns cap; (b) session start and task claim on for every role, with per-message
+and per-tool on by default only for the planner profile and opt-in for others (the
+planner-authored default above); (c) opt-in everywhere, so nothing fires until a
+profile enables it.
+*Considerations:* planner sessions benefit most from mid-conversation surfacing, while
+loop roles (dispatch, executors) pay the most per enabled moment. The cache-versus-JIT
+report is the evidence that should settle the defaults after a measured window,
+mirroring RFC-0050's asymmetric routing changes (cheaper needs evidence, safer is
+automatic). Open whether profile edits are governance-adjacent (they change what
+agents see but remove no control) and so stay class (a). The planner recommends (b);
+the question stays open.
+
 ## References
 
 - `forge-data-room-kit/` (private, gitignored; prior art only, no content copied).
@@ -304,3 +410,4 @@ material out of the engine's write paths and out of any shared store.
 | Date | Change |
 | --- | --- |
 | 2026-10-09 | Initial Draft. 7 Open Questions, none resolved. Trigger: planner design brief. |
+| 2026-10-09 | Surfacing protocol: six moments, compaction, load-once ledger, role/model profiles, cache-vs-JIT measurement; OQ-8 added (open) |
