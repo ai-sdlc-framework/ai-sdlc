@@ -17,7 +17,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -49,6 +49,7 @@ function loadYaml(path) {
 const triggers = (w) => w.on ?? w.true;
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
+const GUARD_STEP = 'Require pull_request_target and a pinned tooling SHA';
 const GATE_STEPS = {
   'Classify changeset (base copy of the docs-only classifier)':
     /\$ACTION_PATH\/\.\.\/\.\.\/\.\.\/scripts\/is-docs-only-changeset\.mjs/,
@@ -75,7 +76,20 @@ function auditGate(workflow, action) {
   if (workflow.permissions?.contents !== 'read')
     v.push('workflow permissions.contents must be read');
 
-  const checkout = wfSteps[0];
+  const gateIdx = wfSteps.findIndex((s) => s.name === GUARD_STEP);
+  const checkoutIdx = wfSteps.findIndex((s) => s.uses?.startsWith('actions/checkout@'));
+  if (gateIdx !== 0) v.push('event/ref guard must be the first step');
+  const guard = wfSteps[gateIdx];
+  if (
+    guard &&
+    !(
+      /"\$EVENT_NAME" = "pull_request_target"/.test(guard.run ?? '') &&
+      /\[0-9a-f\]\{40\}/.test(guard.run ?? '')
+    )
+  )
+    v.push('guard step does not enforce pull_request_target and 40-hex tooling ref');
+  const checkout = wfSteps[checkoutIdx];
+  if (checkoutIdx !== 1) v.push('base checkout must directly follow the guard');
   if (!checkout?.uses?.startsWith('actions/checkout@')) v.push('first step must be checkout');
   else {
     if (checkout.with?.ref !== '${{ github.event.pull_request.base.sha }}')
@@ -135,9 +149,43 @@ describe('consumer-verify-attestation: shipped files (AC-1, AC-3)', () => {
   });
   it('is callable with a single uses: line (all inputs optional)', () => {
     const inputs = triggers(workflow).workflow_call.inputs;
-    for (const [k, def] of Object.entries(inputs)) assert.notEqual(def.required, true, k);
+    for (const [k, def] of Object.entries(inputs))
+      if (k !== 'ai-sdlc-ref') assert.notEqual(def.required, true, k);
     assert.ok(inputs['pipeline-cli-version']);
     assert.ok(inputs['required-independence-tier']);
+  });
+  it('requires a pinned ai-sdlc-ref with no mutable default (fails closed on non-SHA)', () => {
+    const def = triggers(workflow).workflow_call.inputs['ai-sdlc-ref'];
+    assert.equal(def.required, true);
+    assert.equal(def.default, undefined);
+    const guard = workflow.jobs['verify-attestation'].steps[0];
+    assert.equal(guard.env.TOOLS_REF, '${{ inputs.ai-sdlc-ref }}');
+    const run = (ref, ev = 'pull_request_target') =>
+      spawnSync('bash', ['-c', guard.run], {
+        env: { ...process.env, TOOLS_REF: ref, EVENT_NAME: ev },
+        encoding: 'utf8',
+      }).status;
+    assert.equal(run('a'.repeat(40)), 0);
+    assert.notEqual(run('main'), 0);
+    assert.notEqual(run('a'.repeat(39)), 0);
+    assert.notEqual(run('A'.repeat(40)), 0);
+    assert.notEqual(run(''), 0);
+  });
+  it('fails first when not triggered by pull_request_target', () => {
+    const guard = workflow.jobs['verify-attestation'].steps[0];
+    for (const ev of ['pull_request', 'push', 'workflow_dispatch']) {
+      const r = spawnSync('bash', ['-c', guard.run], {
+        env: { ...process.env, TOOLS_REF: 'a'.repeat(40), EVENT_NAME: ev },
+        encoding: 'utf8',
+      });
+      assert.notEqual(r.status, 0, ev);
+      assert.match(r.stdout, /pull_request_target/);
+    }
+  });
+  it('pins the verifier runtime exactly (no caret range)', () => {
+    const run = stepOf(action, 'Install trusted verifier runtime (outside the checkout)').run;
+    assert.doesNotMatch(run, /@\^/);
+    assert.match(run, /--save-exact/);
   });
   it('delegates to the composite action and passes PR values only via with:', () => {
     const step = workflow.jobs['verify-attestation'].steps.find((s) =>
@@ -206,12 +254,12 @@ describe('consumer-verify-attestation: tamper cases go red (AC-2)', () => {
     assert.ok(
       mutate(
         (a, w) =>
-          (w.jobs['verify-attestation'].steps[0].with.ref =
+          (w.jobs['verify-attestation'].steps[1].with.ref =
             '${{ github.event.pull_request.head.sha }}'),
       ).length > 0,
     );
     assert.ok(
-      mutate((a, w) => (w.jobs['verify-attestation'].steps[0].with['persist-credentials'] = true))
+      mutate((a, w) => (w.jobs['verify-attestation'].steps[1].with['persist-credentials'] = true))
         .length > 0,
     );
   });
@@ -338,7 +386,76 @@ describe('materialize-head-data.mjs', () => {
   });
 });
 
+describe('classifier step: changed-path computation (AISDLC-757 round 2)', () => {
+  const run = stepOf(action, 'Classify changeset (base copy of the docs-only classifier)').run;
+  function classify(setup) {
+    const dir = mkdtempSync(join(tmpdir(), 'cls-'));
+    try {
+      git(dir, 'init', '-q', '-b', 'main');
+      mkdirSync(join(dir, 'src'));
+      mkdirSync(join(dir, 'docs'));
+      writeFileSync(join(dir, 'src/foo.ts'), 'export const foo = 1;\n'.repeat(20));
+      writeFileSync(join(dir, 'docs/a.md'), 'a\n');
+      git(dir, 'add', '-A');
+      git(dir, 'commit', '-q', '-m', 'init');
+      const fork = git(dir, 'rev-parse', 'HEAD');
+      git(dir, 'checkout', '-q', '-b', 'pr');
+      setup.pr(dir);
+      git(dir, 'add', '-A');
+      git(dir, 'commit', '-q', '-m', 'pr');
+      const head = git(dir, 'rev-parse', 'HEAD');
+      git(dir, 'checkout', '-q', 'main');
+      setup.base?.(dir);
+      git(dir, 'add', '-A');
+      git(dir, 'commit', '-q', '--allow-empty', '-m', 'base moved');
+      const base = git(dir, 'rev-parse', 'HEAD');
+      assert.notEqual(base, fork);
+      const out = join(dir, 'gh-output');
+      writeFileSync(out, '');
+      execFileSync('bash', ['-c', run], {
+        cwd: dir,
+        env: {
+          ...process.env,
+          BASE_SHA: base,
+          HEAD_SHA: head,
+          ACTION_PATH: ACTION_DIR,
+          GITHUB_OUTPUT: out,
+        },
+      });
+      return readFileSync(out, 'utf8').trim();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  it('a rename from src/ into docs/ is NOT exempt', () => {
+    const out = classify({
+      pr: (d) => {
+        git(d, 'mv', 'src/foo.ts', 'docs/foo.ts');
+      },
+    });
+    assert.equal(out, 'exempt=false');
+  });
+  it('a docs-only PR is exempt even when the base moved ahead with source changes', () => {
+    const out = classify({
+      pr: (d) => writeFileSync(join(d, 'docs/b.md'), 'b\n'),
+      base: (d) => writeFileSync(join(d, 'src/other.ts'), 'x\n'),
+    });
+    assert.equal(out, 'exempt=true');
+  });
+  it('a source change is not exempt', () => {
+    const out = classify({ pr: (d) => writeFileSync(join(d, 'src/foo.ts'), 'changed\n') });
+    assert.equal(out, 'exempt=false');
+  });
+});
+
 describe('check-policy-floor.mjs', () => {
+  it('CLI treats a missing --floor flag as the default, not argv[0]', () => {
+    const r = spawnSync('node', [join(ACTION_DIR, 'check-policy-floor.mjs')], {
+      encoding: 'utf8',
+      cwd: tmpdir(),
+    });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  });
   it('passes when base policy meets the floor and fails when below', () => {
     assert.equal(
       checkFloor({ policyText: 'requiredTier: attested\n', floor: 'attested' }).ok,
@@ -366,5 +483,8 @@ describe('docs (AC-4)', () => {
     assert.ok(reusable > 0 && fallback > reusable);
     assert.match(doc, /pull_request_target/);
     assert.match(doc, /independence-policy/);
+    assert.match(doc, /ai-sdlc-ref: <pinned-commit-sha>/);
+    assert.match(doc, /exact pin/);
+    assert.match(doc, /docs-only exemption/i);
   });
 });

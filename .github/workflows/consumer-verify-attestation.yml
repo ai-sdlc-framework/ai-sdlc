@@ -11,6 +11,8 @@
 #   jobs:
 #     verify-attestation:
 #       uses: ai-sdlc-framework/ai-sdlc/.github/workflows/consumer-verify-attestation.yml@<pinned-sha>
+#       with:
+#         ai-sdlc-ref: <same-pinned-sha>
 #
 # Trust model: only the BASE sha is checked out (persist-credentials false,
 # contents: read). The PR head is fetched as git objects, never checked out, and
@@ -26,7 +28,7 @@ on:
   workflow_call:
     inputs:
       pipeline-cli-version:
-        description: Version floor for @ai-sdlc/pipeline-cli and @ai-sdlc/orchestrator (x.y.z, installed as ^x.y.z).
+        description: Exact version (x.y.z, no range) of @ai-sdlc/pipeline-cli and @ai-sdlc/orchestrator to install.
         type: string
         required: false
         default: '0.29.0'
@@ -36,10 +38,9 @@ on:
         required: false
         default: none
       ai-sdlc-ref:
-        description: Ref of the ai-sdlc repository supplying the base-only tooling. Pin to a full commit SHA.
+        description: Full 40-hex commit SHA of the ai-sdlc repository supplying the base-only tooling (no mutable refs). Use the same SHA as in the workflow `uses:` ref.
         type: string
-        required: false
-        default: main
+        required: true
 
 permissions:
   contents: read
@@ -51,6 +52,16 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Require pull_request_target and a pinned tooling SHA
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TOOLS_REF: ${{ inputs.ai-sdlc-ref }}
+        run: |
+          set -euo pipefail
+          [ "$EVENT_NAME" = "pull_request_target" ] || { echo "::error::must be triggered by pull_request_target (got $EVENT_NAME)"; exit 1; }
+          [[ "$TOOLS_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::ai-sdlc-ref must be a full 40-hex commit SHA"; exit 1; }
+
       - name: Check out BASE sha only
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
