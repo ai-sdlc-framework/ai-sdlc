@@ -70,7 +70,7 @@ Declarative resources for the whole lifecycle: `Pipeline`, `Decision`, `AgentRol
 
 ---
 
-## Quick start
+## Getting started
 
 ```bash
 # 1. Install the Claude Code plugin (recommended)
@@ -81,7 +81,10 @@ Declarative resources for the whole lifecycle: `Pipeline`, `Decision`, `AgentRol
 # 2. Scaffold your repository
 ai-sdlc init
 
-# 3. Dispatch your first task
+# 3. Check the install and configuration are healthy
+ai-sdlc doctor
+
+# 4. Dispatch your first task
 /ai-sdlc execute AISDLC-42
 ```
 
