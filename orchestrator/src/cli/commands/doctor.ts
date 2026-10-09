@@ -40,6 +40,7 @@ import { formatOutput } from '../formatters/index.js';
 import { fetchBranchProtectionStatus } from './branch-protection-shared.js';
 import { cleanGitEnv } from '../../runtime/git-env.js';
 import {
+  DOCTOR_CHECKS,
   buildProductionCheckAdapters,
   runDoctorChecks,
   runDoctorFixes,
@@ -332,13 +333,17 @@ export function createDoctorCommand(
     .description(
       "Audit this project's ai-sdlc configuration health: plugin/pin versions, manifest agreement, attestation governance, and more",
     )
+    .option(
+      '--only <id>',
+      'run only the check with this id (e.g. attestation-governance); used by the SessionStart hook (AISDLC-561)',
+    )
     .option('--fix', 'apply the safe/mechanical auto-fixes, then re-report', false)
     .option(
       '--strict',
       'exit non-zero on warn severity too (default: only fail exits non-zero)',
       false,
     )
-    .action(async (opts: { fix?: boolean; strict?: boolean }, cmd) => {
+    .action(async (opts: { fix?: boolean; strict?: boolean; only?: string }, cmd) => {
       const globalOpts = cmd.parent?.opts() ?? {};
       const format = globalOpts.format ?? 'table';
       const projectDir = process.cwd();
@@ -353,7 +358,13 @@ export function createDoctorCommand(
         }
       }
 
-      const results = runDoctorChecks(ctx);
+      const selected = opts.only ? DOCTOR_CHECKS.filter((c) => c.id === opts.only) : DOCTOR_CHECKS;
+      if (opts.only && selected.length === 0) {
+        console.error(`Unknown doctor check id: ${opts.only}`);
+        process.exitCode = 2;
+        return;
+      }
+      const results = runDoctorChecks(ctx, selected);
       const summary = summarizeDoctorResults(results);
       const install = resolvePluginInstall(ctx);
 

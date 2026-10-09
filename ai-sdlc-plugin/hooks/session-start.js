@@ -17,6 +17,7 @@ const {
   renderSessionStartHardRules,
 } = require('./lib/governance-resolver');
 const { bannerGovernance } = require('./lib/trusted-policy');
+const { detectEnforcement, renderReviewPolicyBanner } = require('./lib/review-policy-banner');
 const { buildHierarchyRoleBlock, ancestorPids } = require('./lib/hierarchy-role');
 
 // ── Read stdin ───────────────────────────────────────────────────────
@@ -386,8 +387,11 @@ try {
 let reviewPolicySummary = '';
 const reviewPolicyPath = join(projectDir, '.ai-sdlc', 'review-policy.md');
 if (existsSync(reviewPolicyPath)) {
-  reviewPolicySummary =
-    '\nReview policy is active at .ai-sdlc/review-policy.md — consult it before reviewing code.';
+  // AISDLC-561: wording comes from inspected enforcement state, not file existence.
+  reviewPolicySummary = renderReviewPolicyBanner(
+    true,
+    detectEnforcement(projectDir, { bin: process.env.AI_SDLC_DOCTOR_BIN }),
+  );
 }
 
 // ── Build governance context ─────────────────────────────────────────
