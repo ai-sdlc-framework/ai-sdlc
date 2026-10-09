@@ -3,7 +3,7 @@ name: init-signing-key
 description: Generate this contributor's ed25519 signing key for review attestations. Run once per machine before /ai-sdlc execute.
 argument-hint: '[--force]'
 allowed-tools: Bash, Read
-model: inherit
+model: haiku
 ---
 
 Generate a per-machine ed25519 signing key used by `/ai-sdlc execute` Step 10

@@ -8,7 +8,7 @@ argument-hint: ""
 allowed-tools:
   - Read
   - Bash
-model: inherit
+model: haiku
 ---
 
 Show the live status of all `/ai-sdlc execute-parallel` sessions (AISDLC-462).

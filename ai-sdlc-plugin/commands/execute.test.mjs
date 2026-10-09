@@ -80,8 +80,8 @@ describe('/ai-sdlc execute frontmatter', () => {
     assert.match(frontmatter['argument-hint'], /task-id/, 'should reference task-id');
   });
 
-  it('inherits the model from the spawning session', () => {
-    assert.equal(frontmatter.model, 'inherit');
+  it('pins the sonnet model (AISDLC-761)', () => {
+    assert.equal(frontmatter.model, 'sonnet');
   });
 
   it('declares Agent(<allowlist>) restricted to the four spawnable subagents (AISDLC-98)', () => {

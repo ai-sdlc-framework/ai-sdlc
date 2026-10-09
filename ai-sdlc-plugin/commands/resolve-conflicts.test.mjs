@@ -56,8 +56,8 @@ describe('/ai-sdlc resolve-conflicts frontmatter', () => {
     assert.match(frontmatter['argument-hint'], /pr-number/);
   });
 
-  it('inherits model from session', () => {
-    assert.equal(frontmatter.model, 'inherit');
+  it('pins the sonnet model (AISDLC-761)', () => {
+    assert.equal(frontmatter.model, 'sonnet');
   });
 
   it('declares Agent(ci-conflict-resolver) — single subagent allowlist', () => {

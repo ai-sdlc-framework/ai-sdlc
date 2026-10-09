@@ -58,8 +58,8 @@ describe('/ai-sdlc init-signing-key frontmatter', () => {
     assert.equal(frontmatter['allowed-tools'], 'Bash, Read');
   });
 
-  it('inherits the model from the orchestrating session', () => {
-    assert.equal(frontmatter.model, 'inherit');
+  it('pins the haiku model (AISDLC-761)', () => {
+    assert.equal(frontmatter.model, 'haiku');
   });
 });
 

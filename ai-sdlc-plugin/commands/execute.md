@@ -11,7 +11,7 @@ allowed-tools:
   - mcp__backlog__task_view
   - mcp__plugin_ai-sdlc_ai-sdlc__task_edit
   - mcp__plugin_ai-sdlc_ai-sdlc__task_complete
-model: inherit
+model: sonnet
 ---
 
 Execute work item `$ARGUMENTS` end-to-end. `$ARGUMENTS` is either a backlog task ID (e.g. `AISDLC-393`, `INGEST-42`) or a GitHub issue (`612`, `#612`, or explicit `gh:612`) — see [Argument forms](#argument-forms-aisdlc-393) below. The Step 0-15 pipeline below runs inline in the main Claude Code session — worktree creation, developer subagent fan-out, 3 parallel reviewer subagents, attestation signing, PR open.

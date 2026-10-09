@@ -17,7 +17,7 @@ allowed-tools:
   - Read
   - Bash
   - Agent(developer, code-reviewer, test-reviewer, security-reviewer)
-model: inherit
+model: sonnet
 ---
 
 Run one autonomous orchestrator tick in the current Claude Code session as

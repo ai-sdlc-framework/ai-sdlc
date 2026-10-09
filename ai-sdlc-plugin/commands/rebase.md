@@ -6,7 +6,7 @@ allowed-tools:
   - Read
   - Bash
   - Agent(rebase-resolver)
-model: inherit
+model: sonnet
 ---
 
 Rebase PR #$ARGUMENTS onto latest `origin/main` by spawning the

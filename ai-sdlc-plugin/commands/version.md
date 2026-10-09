@@ -2,7 +2,7 @@
 name: version
 description: Show installed vs latest ai-sdlc plugin version. Bypasses the 24h SessionStart cache.
 allowed-tools: Bash
-model: inherit
+model: haiku
 ---
 
 Show the installed ai-sdlc plugin version, the latest published version on

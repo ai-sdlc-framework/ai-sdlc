@@ -64,8 +64,8 @@ describe('rebase-resolver frontmatter', () => {
     assert.match(frontmatter.description, /[Ee]scalat/);
   });
 
-  it('inherits model from spawning session', () => {
-    assert.equal(frontmatter.model, 'inherit');
+  it('pins the sonnet model (AISDLC-761)', () => {
+    assert.equal(frontmatter.model, 'sonnet');
   });
 
   it('runs on claude-code harness (no codex requirement)', () => {

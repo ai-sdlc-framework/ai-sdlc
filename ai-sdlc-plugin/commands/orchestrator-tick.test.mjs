@@ -109,8 +109,8 @@ describe('/ai-sdlc orchestrator-tick frontmatter', () => {
     assert.ok(Array.isArray(tools) && tools.includes('Read'), 'Read must be in allowed-tools');
   });
 
-  it('uses inherit model (same session model as main Claude Code session)', () => {
-    assert.equal(frontmatter.model, 'inherit');
+  it('pins the sonnet model (AISDLC-761)', () => {
+    assert.equal(frontmatter.model, 'sonnet');
   });
 });
 

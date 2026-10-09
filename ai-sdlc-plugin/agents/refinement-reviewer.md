@@ -11,7 +11,7 @@ disallowedTools:
   - AgentTool
   - Edit
   - Write
-model: inherit
+model: sonnet
 harness: claude-code
 ---
 
