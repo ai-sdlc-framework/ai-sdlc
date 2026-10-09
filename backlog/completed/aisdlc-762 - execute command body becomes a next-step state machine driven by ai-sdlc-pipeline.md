@@ -16,7 +16,7 @@ references:
   - pipeline-cli/README.md
 priority: high
 dispatchable: true
-updated_date: '2026-10-09 22:54'
+updated_date: '2026-10-09 23:42'
 ---
 
 ## Description
@@ -38,8 +38,32 @@ Sequencing: none, but AISDLC-761 is cheaper to land first (related: AISDLC-761).
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] AC-1: execute.md is 250 lines or fewer.
-- [ ] AC-2: One task run makes 15 or fewer orchestration LLM calls plus the agents.
-- [ ] AC-3: Step tests cover the state machine.
-- [ ] AC-4: Attestation and governance behaviour are unchanged; existing verify tests pass.
+- [x] AC-1: execute.md is 250 lines or fewer.
+- [x] AC-2: One task run makes 15 or fewer orchestration LLM calls plus the agents.
+- [x] AC-3: Step tests cover the state machine.
+- [x] AC-4: Attestation and governance behaviour are unchanged; existing verify tests pass.
 <!-- AC:END -->
+
+## Final Summary
+
+## Summary
+Added `ai-sdlc-pipeline next-step`, a TypeScript state machine that runs the deterministic Steps 0-15 (validate, worktree, review-prepare/finalize wrappers, rebase, signing, push, draft PR, ready, cleanup) and returns one JSON instruction only when an agent call is needed. `execute.md` shrank from 2,041 to ~122 lines and is now a loop over it.
+
+## Changes
+- `pipeline-cli/src/next-step/*` (new): state machine, init, review-prepare, review-finalize, ship, task-done, gh-issue, session, args, types.
+- `pipeline-cli/src/cli/next-step.ts`, `cli/index.ts` (new/modified): CLI wiring.
+- `ai-sdlc-plugin/commands/execute.md` (modified): short loop body; agent output passed via `--result <file>`.
+- Tests: `next-step/*.test.ts`, `execute.test.mjs`, `heartbeat.test.mjs`.
+
+## Design decisions
+- **Governance in code**: hard rules stay in execute.md; ship.ts never force-pushes or merges (tested).
+- **Round-2 fixes**: Step 10.6 signer receives iteration/harness env; throws route through fail() with sentinel cleanup; empty staged diff skips chore commit; heredoc end-marker removed.
+
+## Verification
+- `pnpm build` — clean
+- `pnpm test` — next-step vitest 182/182; two pre-existing plugin command tests fail on untouched files
+- `pnpm lint` — clean
+- `pnpm format:check` — clean
+
+## Follow-up
+declined: raise plugin runtimeDependencies floor for @ai-sdlc/pipeline-cli once a release containing `next-step` exists (version comes from release-please).
