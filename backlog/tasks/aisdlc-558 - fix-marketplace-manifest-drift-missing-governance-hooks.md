@@ -10,7 +10,7 @@ labels:
   - plugin
   - governance
   - ci:no-issue-required
-priority: high
+priority: critical
 dependencies:
   - AISDLC-554
 references:
@@ -65,6 +65,8 @@ today.
   than merely tested for.
 - If both must exist, extend the AISDLC-554 sync test to cover `hooks`,
   `mcpServers`, and `userConfig` — not just `runtimeDependencies`.
+
+Raised to critical 2026-10-09: first-run defect in the public-relations push window (see AISDLC-771).
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
