@@ -70,29 +70,8 @@ a name. The JSON holds:
 - `escalations`, `reports`: failures the playbook (already run inside `tick`, gated by the
   operational list) could not fix, and progress lines. Send each to the planner (Step 3).
 - `markReady`: `readied` flipped after clean CodeQL, `failedAnalyze` go back to an executor
-  as a fix round, `skipped` are listed for the operator.
+  as a fix round, `skipped` are listed for the operator. A finished task whose pull request goes red returns to its executor, not to a push from here: `cli-dispatch.mjs resume --board-dir "$BOARD_DIR" --task-id <id> --pr <n> --note "<fix>"` (docs/operations/cli-hierarchy.md).
 - `nextWakeSec`, `selfClear`: Step 5.
-
-### Sending a finished task back (resume)
-
-A task in `done/` whose pull request later goes red (a coverage shortfall, a stale
-attestation after a rebase, reviewer findings) goes back to an executor, not to a
-second `/ai-sdlc execute` and not to a push from this session (the hook binds a push
-to the task's own worktree, which only its executor holds):
-
-```bash
-node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" resume --board-dir "$BOARD_DIR" \
-  --task-id "<task-id>" --pr "<number>" --failing-checks "<check,check>" \
-  --note "<what the executor must fix>" [--finding "<reviewer finding>"]
-```
-
-It needs the same `requeue` grant as `requeue`. The task returns to `queue/` with the
-note on its manifest and is claimed like any other task (an idle executor claims it
-within a minute). The executor prints the note before running, the pipeline re-enters
-the existing worktree and branch, injects the note into the developer prompt, re-runs
-the reviewers, re-signs the attestation, lease-pushes from that worktree and updates
-the existing pull request. It exits 1, changing nothing, when the task is not in
-`done/`.
 
 ## Step 3 - Tell the planner
 
