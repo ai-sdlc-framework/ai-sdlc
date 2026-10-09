@@ -14,6 +14,7 @@ import {
   type ModelCallRecord,
   type PriceRow,
 } from '@ai-sdlc/reference';
+import { now as clockNow } from '../clock.js';
 import { allSnapshots } from './commands.js';
 import { buildUsageReport, type ReportRow } from './report.js';
 import {
@@ -140,7 +141,7 @@ async function readNeeded(
 
 /** Load everything the pane shows. Throws on an unreadable ledger; the pane catches it. */
 export async function loadUsagePaneData(deps: UsagePaneDeps = {}): Promise<UsagePaneData> {
-  const now = (deps.now?.() ?? new Date()).getTime();
+  const now = (deps.now?.() ?? clockNow()).getTime();
   const config = (deps.loadConfig ?? loadUsageConfig)({
     dir: deps.usageDir,
     // The pane never shells out: skip the base-ref read, use machine config or defaults.

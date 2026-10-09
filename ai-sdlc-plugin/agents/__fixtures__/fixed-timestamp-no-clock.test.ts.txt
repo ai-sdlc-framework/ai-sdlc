@@ -1,0 +1,9 @@
+// Fixture for the test-reviewer clock-discipline check (AISDLC-769).
+// Writes a fixed timestamp but never fixes the clock: this MUST be a major finding.
+import { it, expect } from 'vitest';
+import { loadWindow } from './load-window.js';
+
+it('loads the window for the September ledger', () => {
+  writeLedger({ ts: '2026-09-10T11:00:00.000Z' });
+  expect(loadWindow().rows).toHaveLength(1);
+});
