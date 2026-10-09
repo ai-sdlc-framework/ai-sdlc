@@ -17,8 +17,8 @@
  */
 
 import { execSync } from 'node:child_process';
-import { mkdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { withWorktreeMutex, type WithWorktreeMutexOptions } from '../runtime/worktree-mutex.js';
 import type { SetupWorktreeResult } from '../types.js';
@@ -32,6 +32,12 @@ function isFlagEnabled(value: string | undefined): boolean {
 }
 
 export interface SetupWorktreeOptions {
+  /**
+   * AISDLC-770 — `--task-from-file` path. The file is not on main, so the
+   * fresh `origin/main` worktree does not hold it; Step 3 copies it to
+   * `<worktree>/backlog/tasks/<basename>` (no-op when already there).
+   */
+  taskFilePathOverride?: string;
   taskId: string;
   branch: string;
   worktreePath: string;
@@ -491,6 +497,14 @@ export async function setupWorktree(opts: SetupWorktreeOptions): Promise<SetupWo
   });
   if (hooks.status === 'missing') {
     throw new Error(`Step 3 refused to continue for ${opts.taskId}: ${hooks.message}`);
+  }
+  if (opts.taskFilePathOverride && existsSync(opts.taskFilePathOverride)) {
+    const destDir = join(opts.worktreePath, 'backlog', 'tasks');
+    const dest = join(destDir, basename(opts.taskFilePathOverride));
+    if (resolve(opts.taskFilePathOverride) !== resolve(dest)) {
+      mkdirSync(destDir, { recursive: true });
+      copyFileSync(opts.taskFilePathOverride, dest);
+    }
   }
   return created;
 }

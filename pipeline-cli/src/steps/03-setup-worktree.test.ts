@@ -3,7 +3,7 @@ import { setupWorktree } from './03-setup-worktree.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
 import { FakeRunner, fail, ok } from '../__test-helpers/fake-runner.js';
 import { join } from 'node:path';
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import type { OrchestratorEvent } from '../orchestrator/events.js';
 import type { ExecResult } from '../runtime/exec.js';
 
@@ -62,6 +62,31 @@ describe('Step 3 — setupWorktree', () => {
         runner: fake.toRunner(),
       }),
     ).rejects.toThrow(/branch already exists|cleanup AISDLC-3/);
+  });
+});
+
+describe('Step 3 — taskFilePathOverride (AISDLC-770)', () => {
+  it('copies an off-main task file into the fresh worktree', async () => {
+    const scratch = join(tmp, 'scratch');
+    mkdirSync(scratch, { recursive: true });
+    const src = join(scratch, 'aisdlc-770 - off-main.md');
+    writeFileSync(src, '---\nid: AISDLC-770\n---\n', 'utf8');
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-770');
+    const fake = new FakeRunner()
+      .on(/^git fetch origin main/, ok())
+      .on(/^git worktree add/, ok())
+      .on(/^git -C .+ rev-parse HEAD/, ok('abc\n'));
+    await setupWorktree({
+      taskId: 'AISDLC-770',
+      branch: 'b770',
+      worktreePath,
+      workDir: tmp,
+      runner: fake.toRunner(),
+      taskFilePathOverride: src,
+    });
+    expect(existsSync(join(worktreePath, 'backlog', 'tasks', 'aisdlc-770 - off-main.md'))).toBe(
+      true,
+    );
   });
 });
 

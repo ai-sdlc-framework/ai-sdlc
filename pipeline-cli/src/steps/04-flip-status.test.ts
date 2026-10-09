@@ -300,3 +300,24 @@ describe('Step 4 — beginTask', () => {
     expect(readFileSync(parentPath, 'utf8')).toContain('status: In Progress');
   });
 });
+
+describe('Step 4 — taskFilePathOverride (AISDLC-770)', () => {
+  it('copies a task file that is not on main into the worktree and patches the copy', async () => {
+    const scratch = join(tmp, 'scratch');
+    mkdirSync(scratch, { recursive: true });
+    const src = join(scratch, 'aisdlc-770 - off-main.md');
+    writeFileSync(src, '---\nid: AISDLC-770\nstatus: To Do\n---\n\nbody\n', 'utf8');
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-770');
+    mkdirSync(worktreePath, { recursive: true });
+    await beginTask({
+      taskId: 'AISDLC-770',
+      worktreePath,
+      workDir: tmp,
+      taskFilePathOverride: src,
+    });
+    const copy = join(worktreePath, 'backlog', 'tasks', 'aisdlc-770 - off-main.md');
+    expect(existsSync(copy)).toBe(true);
+    expect(readFileSync(copy, 'utf8')).toContain('status: In Progress');
+    expect(readFileSync(src, 'utf8')).toContain('status: To Do');
+  });
+});

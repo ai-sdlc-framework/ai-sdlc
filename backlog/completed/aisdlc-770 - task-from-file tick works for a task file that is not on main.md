@@ -2,7 +2,7 @@
 id: AISDLC-770
 title: >-
   task-from-file tick works for a task file that is not on main
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-09'
 labels:
@@ -39,8 +39,8 @@ Sequencing: none.
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] AC-1: `tick --task-from-file` on a file absent from main reaches Step 5 with the file present in the worktree.
-- [ ] AC-2: The frontier path without the flag is unchanged, covered by the existing tests.
-- [ ] AC-3: The runbook procedure works as written.
-- [ ] AC-4: New and existing tests pass.
+- [x] AC-1: `tick --task-from-file` on a file absent from main reaches Step 5 with the file present in the worktree.
+- [x] AC-2: The frontier path without the flag is unchanged, covered by the existing tests.
+- [x] AC-3: The runbook procedure works as written.
+- [x] AC-4: New and existing tests pass.
 <!-- AC:END -->

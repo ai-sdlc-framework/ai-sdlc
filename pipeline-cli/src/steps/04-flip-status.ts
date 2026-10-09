@@ -30,12 +30,18 @@
  * @module steps/04-flip-status
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { findTaskFile } from './01-validate.js';
 import type { BeginTaskResult, TaskSpec } from '../types.js';
 
 export interface BeginTaskOptions {
+  /**
+   * AISDLC-770 — `--task-from-file` path. When the worktree holds no copy of
+   * the task (file is not on main), Step 4 copies this file into
+   * `<worktree>/backlog/tasks/` and patches that copy.
+   */
+  taskFilePathOverride?: string;
   taskId: string;
   worktreePath: string;
   workDir: string;
@@ -177,8 +183,14 @@ export async function beginTask(opts: BeginTaskOptions): Promise<BeginTaskResult
     // `pipeline-cli begin-task` CLI subcommand and tests that don't pre-stage
     // a worktree task file still work. Mirrors the same fallback chain Step 10
     // finalize already uses, so both lifecycle edits land on the same file.
-    const taskFile =
-      findTaskFile(opts.taskId, opts.worktreePath) ?? findTaskFile(opts.taskId, opts.workDir);
+    let worktreeCopy = findTaskFile(opts.taskId, opts.worktreePath);
+    if (!worktreeCopy && opts.taskFilePathOverride && existsSync(opts.taskFilePathOverride)) {
+      const destDir = join(opts.worktreePath, 'backlog', 'tasks');
+      mkdirSync(destDir, { recursive: true });
+      worktreeCopy = join(destDir, basename(opts.taskFilePathOverride));
+      copyFileSync(opts.taskFilePathOverride, worktreeCopy);
+    }
+    const taskFile = worktreeCopy ?? findTaskFile(opts.taskId, opts.workDir);
     if (!taskFile) {
       throw new Error(
         `Step 4 begin-task: no task file found for ${opts.taskId} under ${opts.worktreePath} or ${opts.workDir}`,
