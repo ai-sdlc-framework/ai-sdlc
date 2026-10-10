@@ -1404,6 +1404,62 @@ export function checkJudgmentLayer(ctx: DoctorRunContext): DoctorCheckResult[] {
   return results;
 }
 
+// ── Untracked review ledgers (AISDLC-793) ───────────────────────────────
+
+/**
+ * The reviews ledger (`.ai-sdlc/reviews/<task-id>.jsonl`) is a committed artifact
+ * that belongs in the task's PR. An untracked one in the main checkout is residue
+ * from a writer that ran with the parent as its repo root; it blocks fast-forward
+ * pulls when the same file later lands on main. Warns with the files and task ids.
+ */
+export function checkUntrackedReviewLedgers(ctx: DoctorRunContext): DoctorCheckResult {
+  const r = ctx.adapters.runCommand('git', [
+    '-C',
+    ctx.projectDir,
+    'ls-files',
+    '--others',
+    '--exclude-standard',
+    '--',
+    '.ai-sdlc/reviews/',
+  ]);
+  const files =
+    r.exitCode === 0
+      ? r.stdout
+          .split('\n')
+          .map((l) => l.trim())
+          .filter((l) => l.endsWith('.jsonl'))
+      : [];
+  if (files.length === 0) {
+    return {
+      id: 'untracked-review-ledgers',
+      severity: 'pass',
+      title: 'no untracked review ledgers in the main checkout',
+    };
+  }
+  const taskIds = files.map((f) => basename(f, '.jsonl'));
+  return {
+    id: 'untracked-review-ledgers',
+    severity: 'warn',
+    title: `${files.length} untracked review ledger(s) in the main checkout: ${files.join(', ')} (tasks: ${taskIds.join(', ')})`,
+    remediation:
+      'Each ledger is a per-file decision: commit it in a chore PR, or delete it. `ai-sdlc doctor --fix` leaves them alone. See "Untracked ledgers in the main checkout" in docs/operations/transcript-management.md.',
+    anonymizableEvidence: { untrackedCount: files.length },
+  };
+}
+
+/** `--fix` never touches ledgers: commit-or-delete is a decision per file. */
+export function fixUntrackedReviewLedgers(ctx: DoctorRunContext): DoctorFixResult {
+  const found = checkUntrackedReviewLedgers(ctx);
+  return {
+    id: 'untracked-review-ledgers',
+    applied: false,
+    detail:
+      found.severity === 'pass'
+        ? 'no untracked review ledgers'
+        : 'left untracked review ledgers alone (commit in a chore PR or delete each one by hand)',
+  };
+}
+
 // ── Registry ──────────────────────────────────────────────────────────────
 
 /**
@@ -1491,6 +1547,13 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     description:
       'Worktrees whose post-rewrite hook predates the parent-on-main guard fix and can desync the parent checkout (AISDLC-750).',
     run: checkWorktreeRewriteHooks,
+  },
+  {
+    id: 'untracked-review-ledgers',
+    description:
+      'Untracked .ai-sdlc/reviews/*.jsonl ledgers left in the main checkout by a writer that ran from the parent (AISDLC-793).',
+    run: checkUntrackedReviewLedgers,
+    fix: fixUntrackedReviewLedgers,
   },
   {
     id: 'force-push-policy',

@@ -244,6 +244,14 @@ attestation patch-id / Merkle-root computation in lockstep across
 — see `patch-id-exclusion-lockstep.test.ts`. Appending a ledger record never
 perturbs the signed content identity.
 
+### Where the ledger is written (AISDLC-793)
+
+The ledger belongs in the task's PR, so `cli-attestation emit-leaf` never writes it into the main checkout. When the repo root (`--repo-root`, `REPO_ROOT`, or the cwd) is a Pattern C parent (`<root>/.worktrees/` exists and holds a directory), the write is routed to `<root>/.worktrees/<task-id-lower>/`, else to the worktree whose `.active-task` sentinel names the task. If neither resolves, the command fails with an error naming the task id, the attempted path and `--repo-root`; pass `--repo-root <worktree path>`. A repo without `.worktrees/` is unaffected.
+
+### Untracked ledgers in the main checkout
+
+`ai-sdlc doctor` check `untracked-review-ledgers` warns when `.ai-sdlc/reviews/*.jsonl` files are untracked in the main checkout (residue from before the routing above). They block fast-forward pulls once the same file lands on main. Decide per file: commit it in a chore PR, or delete it. `--fix` leaves them alone.
+
 ### Running the analysis
 
 `cli-reviews analyze` reads the ledger and reports per-role metrics:

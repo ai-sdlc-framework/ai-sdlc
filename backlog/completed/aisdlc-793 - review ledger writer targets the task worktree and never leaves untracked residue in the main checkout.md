@@ -2,7 +2,7 @@
 id: AISDLC-793
 title: >-
   Review ledger writer resolves the task worktree and refuses to write into the main checkout, so reviews never leave untracked .ai-sdlc/reviews residue on main
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-10'
 labels:
@@ -36,13 +36,13 @@ Add an `ai-sdlc doctor` check (`orchestrator/src/cli/commands/doctor-checks.ts`)
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] `appendReviewLedgerRecord` never creates or appends a file under `<parent>/.ai-sdlc/reviews/` when `<parent>/.worktrees/` exists and is non-empty; it writes to the resolved task worktree, or throws an error that names the task id, the attempted path and `--repo-root`.
-- [ ] Resolution order is `<parent>/.worktrees/<task-id-lower>/` first, then a worktree whose `.active-task` sentinel matches the task id; the resolver is exported and unit-tested in `reviews-ledger.test.ts` with a temp directory that models a Pattern C parent (worktree present, sentinel-only, and neither).
-- [ ] Behaviour in a repo without `.worktrees/` is unchanged, covered by an existing or new test.
-- [ ] `cli-attestation emit-leaf` run from the main checkout without `--repo-root` for a task that has a worktree appends to that worktree's ledger; a hermetic CLI test asserts the parent's `.ai-sdlc/reviews/` stays empty.
-- [ ] `ai-sdlc doctor` gains the `untracked-review-ledgers` check with a test in `doctor-checks.test.ts` covering zero and several untracked ledgers; `--fix` leaves them alone and says so.
-- [ ] `docs/operations/transcript-management.md` reviews-ledger section documents the routing rule, the refusal, and what to do with ledgers the doctor check reports.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] `appendReviewLedgerRecord` never creates or appends a file under `<parent>/.ai-sdlc/reviews/` when `<parent>/.worktrees/` exists and is non-empty; it writes to the resolved task worktree, or throws an error that names the task id, the attempted path and `--repo-root`.
+- [x] Resolution order is `<parent>/.worktrees/<task-id-lower>/` first, then a worktree whose `.active-task` sentinel matches the task id; the resolver is exported and unit-tested in `reviews-ledger.test.ts` with a temp directory that models a Pattern C parent (worktree present, sentinel-only, and neither).
+- [x] Behaviour in a repo without `.worktrees/` is unchanged, covered by an existing or new test.
+- [x] `cli-attestation emit-leaf` run from the main checkout without `--repo-root` for a task that has a worktree appends to that worktree's ledger; a hermetic CLI test asserts the parent's `.ai-sdlc/reviews/` stays empty.
+- [x] `ai-sdlc doctor` gains the `untracked-review-ledgers` check with a test in `doctor-checks.test.ts` covering zero and several untracked ledgers; `--fix` leaves them alone and says so.
+- [x] `docs/operations/transcript-management.md` reviews-ledger section documents the routing rule, the refusal, and what to do with ledgers the doctor check reports.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 <!-- AC:END -->
 
 ## Notes
