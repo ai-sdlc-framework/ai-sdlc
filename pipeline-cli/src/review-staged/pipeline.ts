@@ -58,6 +58,8 @@ import { groundFindings, uncoveredHunkIds } from '../review-synth/ground.js';
 import { buildPlannerPrompt, buildSynthesizerPrompt } from '../review-synth/prompts.js';
 import type { StagedVerdict } from '../review-synth/types.js';
 import { validateStagedVerdict } from '../review-synth/verdict.js';
+import { assertSeal, computeSeal } from './seal.js';
+import { isHighRisk } from '../review-plan/baseline.js';
 import { StagedProbeSpawner } from './probe-spawner.js';
 import {
   RUN_FILES,
@@ -130,6 +132,8 @@ export type PrepareStagedReviewResult =
       plannerPromptPath: string;
       baselineVersion: string;
       baselineProbes: number;
+      /** Carry this into `plan`; it binds the control files written by prepare. */
+      seal: string;
     }
   | {
       ok: false;
@@ -286,6 +290,7 @@ export async function prepareStagedReview(
     plannerPromptPath,
     baselineVersion: baseline.version,
     baselineProbes: baseline.probes.length,
+    seal: await computeSeal(runDir, 'prepare'),
   };
 }
 
@@ -328,11 +333,20 @@ export interface PlanStagedReviewOpts {
   plannerOutput: string | undefined;
   /** 1 for the first output, 2 for the re-request. A rejected second attempt uses the fallback. */
   attempt: 1 | 2;
+  /** The seal `prepare` printed. */
+  seal: string | undefined;
   now?: () => Date;
 }
 
 export type PlanStagedReviewResult =
-  | { status: 'planned'; source: 'planner' | 'fallback'; probes: number; rejections: Rejection[] }
+  | {
+      status: 'planned';
+      source: 'planner' | 'fallback';
+      probes: number;
+      rejections: Rejection[];
+      /** Carry this into `execute`. */
+      seal: string;
+    }
   | { status: 'retry'; rejections: Rejection[]; retryNote: string };
 
 /** Pull the JSON object out of a model's final message, tolerating a code fence. */
@@ -370,6 +384,7 @@ export async function planStagedReview(
   opts: PlanStagedReviewOpts,
 ): Promise<PlanStagedReviewResult> {
   const runDir = stagedRunDir(opts.artifactsDir, opts.taskId);
+  await assertSeal(runDir, 'prepare', opts.seal);
   const task = await readRunJson<StoredTask>(runDir, RUN_FILES.task);
   const base = { taskId: task.taskId, sourceKind: task.sourceKind };
   const riskMap = await readRunJson<ReviewRiskMap>(runDir, RUN_FILES.riskMap);
@@ -397,7 +412,13 @@ export async function planStagedReview(
         },
         opts.now,
       );
-      return { status: 'planned', source: 'planner', probes: plan.probes.length, rejections: [] };
+      return {
+        status: 'planned',
+        source: 'planner',
+        probes: plan.probes.length,
+        rejections: [],
+        seal: await computeSeal(runDir, 'plan'),
+      };
     }
     rejections = checked.rejections;
   }
@@ -421,7 +442,13 @@ export async function planStagedReview(
     { status: 'planned', planSource: 'fallback', plannerAttempts: 2, planRejections: rejections },
     opts.now,
   );
-  return { status: 'planned', source: 'fallback', probes: fallbackPlan.probes.length, rejections };
+  return {
+    status: 'planned',
+    source: 'fallback',
+    probes: fallbackPlan.probes.length,
+    rejections,
+    seal: await computeSeal(runDir, 'plan'),
+  };
 }
 
 // ── 3. execute ───────────────────────────────────────────────────────────
@@ -429,6 +456,8 @@ export async function planStagedReview(
 export interface ExecuteStagedReviewOpts {
   taskId: string;
   artifactsDir: string;
+  /** The seal `plan` printed. */
+  seal: string | undefined;
   /** The model from the `review-executor` routing cell. Executor default when omitted. */
   executorModel?: string;
   /** Production adapters by default. */
@@ -445,6 +474,8 @@ export interface ExecuteStagedReviewResult {
   probes: ProbeCounts;
   /** Probe transcripts that were written, one per probe that ran a model. */
   transcripts: number;
+  /** Carry this into `synth-prompt` and `finalize`. */
+  seal: string;
 }
 
 export function countProbes(bundle: EvidenceBundle): ProbeCounts {
@@ -490,6 +521,7 @@ export async function executeStagedReview(
   opts: ExecuteStagedReviewOpts,
 ): Promise<ExecuteStagedReviewResult> {
   const runDir = stagedRunDir(opts.artifactsDir, opts.taskId);
+  await assertSeal(runDir, 'plan', opts.seal);
   const task = await readRunJson<StoredTask>(runDir, RUN_FILES.task);
   const base = { taskId: task.taskId, sourceKind: task.sourceKind };
   const plan = await readRunJson<ReviewPlan>(runDir, RUN_FILES.plan);
@@ -553,7 +585,12 @@ export async function executeStagedReview(
   await writeRunJson(runDir, RUN_FILES.executeLeaves, written);
   const probes = countProbes(bundle);
   await updateDispatchRecord(runDir, base, { status: 'executed', probes }, opts.now);
-  return { evidencePath, probes, transcripts: written.length };
+  return {
+    evidencePath,
+    probes,
+    transcripts: written.length,
+    seal: await computeSeal(runDir, 'execute'),
+  };
 }
 
 // ── 4. synthesizer prompt ────────────────────────────────────────────────
@@ -561,8 +598,11 @@ export async function executeStagedReview(
 export async function synthesizerPromptForRun(opts: {
   taskId: string;
   artifactsDir: string;
+  /** The seal `execute` printed. */
+  seal: string | undefined;
 }): Promise<{ promptPath: string }> {
   const runDir = stagedRunDir(opts.artifactsDir, opts.taskId);
+  await assertSeal(runDir, 'execute', opts.seal);
   const task = await readRunJson<StoredTask>(runDir, RUN_FILES.task);
   const riskMap = await readRunJson<ReviewRiskMap>(runDir, RUN_FILES.riskMap);
   const plan = await readRunJson<ReviewPlan>(runDir, RUN_FILES.plan);
@@ -582,6 +622,8 @@ export async function synthesizerPromptForRun(opts: {
 export interface FinalizeStagedReviewOpts {
   taskId: string;
   artifactsDir: string;
+  /** The seal `execute` printed. */
+  seal: string | undefined;
   /** The synthesizer's final message. */
   synthesizerOutput: string | undefined;
   /** Models the planner and synthesizer ran on, recorded on their leaves. */
@@ -607,11 +649,13 @@ export async function finalizeStagedReview(
   opts: FinalizeStagedReviewOpts,
 ): Promise<FinalizeStagedReviewResult> {
   const runDir = stagedRunDir(opts.artifactsDir, opts.taskId);
+  await assertSeal(runDir, 'execute', opts.seal);
   const task = await readRunJson<StoredTask>(runDir, RUN_FILES.task);
   const base = { taskId: task.taskId, sourceKind: task.sourceKind };
   const riskMap = await readRunJson<ReviewRiskMap>(runDir, RUN_FILES.riskMap);
   const plan = await readRunJson<ReviewPlan>(runDir, RUN_FILES.plan);
   const evidence = await readRunJson<EvidenceBundle>(runDir, RUN_FILES.evidence);
+  const config = await readRunJson<StagedReviewConfig>(runDir, RUN_FILES.config);
 
   const parsed = extractJsonObject(opts.synthesizerOutput);
   const shape = validateStagedVerdict(parsed);
@@ -635,6 +679,41 @@ export async function finalizeStagedReview(
     return { ok: false, reason: 'invalid-verdict', rejections, fallbackSet: 'three' };
   }
 
+  // Fail closed: a verdict that rests on no evidence, or that leaves a high-risk hunk with
+  // no probe evidence, is not a review of this change. The existing set handles it.
+  const probeCounts = countProbes(evidence);
+  const uncoveredAll = uncoveredHunkIds(
+    riskMap.hunks.map((h) => h.id),
+    plan.probes,
+    evidence,
+  );
+  const uncoveredHigh = riskMap.hunks
+    .filter((h) => uncoveredAll.includes(h.id) && isHighRisk(h, config.riskThreshold))
+    .map((h) => h.id);
+  if (probeCounts.ok === 0 || uncoveredHigh.length > 0) {
+    const detail =
+      probeCounts.ok === 0
+        ? 'no probe returned evidence, so the verdict rests on nothing'
+        : `high-risk hunk(s) have no probe evidence: ${uncoveredHigh.slice(0, 10).join(', ')}`;
+    const rejections: Rejection[] = [
+      { reason: 'unreviewable-input', detail: `${detail}; use the existing reviewer set` },
+    ];
+    await updateDispatchRecord(
+      runDir,
+      base,
+      {
+        status: 'fallback',
+        fallbackSet: 'three',
+        reason: 'insufficient-evidence',
+        rejections,
+        probes: probeCounts,
+        uncoveredHunks: uncoveredAll,
+      },
+      opts.now,
+    );
+    return { ok: false, reason: 'insufficient-evidence', rejections, fallbackSet: 'three' };
+  }
+
   const grounded = groundFindings(parsed as StagedVerdict, evidence);
   const kept = grounded.verdict;
   const blocking = kept.findings.some((f) => f.severity === 'critical' || f.severity === 'major');
@@ -646,11 +725,7 @@ export async function finalizeStagedReview(
     promptInjectionDetected:
       kept.promptInjectionDetected || riskMap.injectionScreen.status === 'suspicious',
   };
-  const uncovered = uncoveredHunkIds(
-    riskMap.hunks.map((h) => h.id),
-    plan.probes,
-    evidence,
-  );
+  const uncovered = uncoveredAll;
   const reviewerVerdict = toReviewerVerdict(verdict, uncovered);
 
   const verdictPath = await writeRunJson(runDir, RUN_FILES.verdict, verdict);

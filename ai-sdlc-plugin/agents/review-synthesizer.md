@@ -5,10 +5,10 @@ tools:
   - Read
   - Grep
   - Glob
-  - Write
 disallowedTools:
   - Bash
   - Edit
+  - Write
   - AgentTool
 model: opus
 harness: claude-code
@@ -22,7 +22,7 @@ Your frontmatter default is `opus`. This stage should run on the strongest avail
 
 ## Hard rules
 
-- Read-only. You have no shell and no edit tool. `Write` exists only to record your transcript under `.ai-sdlc/transcripts/`; never write anywhere else.
+- Read-only. You have no shell, no edit tool and no Write tool. You change nothing on disk: the coordinator saves your final message and persists your transcript. The review's run state is integrity-sealed, and an agent that could write it would be a way to rewrite the evidence you judge.
 - Your inputs are bounded and in the prompt: the risk map, the plan, the evidence bundle (its `entries`, one per probe), the acceptance criteria and the injection-screen result. Do not read files to find evidence the probes did not return. A claim with no probe behind it is not a finding.
 - Every finding MUST carry `evidence`: at least one `{ "probeId": ..., "excerpt": ... }` naming a probe id from the evidence bundle. An `excerpt` is optional, but when you give one it must be quoted verbatim from that probe's own evidence: its observations, excerpts, command output or answer text. A finding whose evidence names no probe in the bundle, names a refused, failed or skipped probe, or quotes text the probe did not return is removed before aggregation and counted as dropped.
 - An evidence entry has one of four statuses: `ok`, `failed`, `refused` or `skipped`. Only an `ok` entry that actually holds evidence (an observation, an excerpt, command output or an answer) produced evidence; an `ok` entry with none is listed as a probe without evidence and is a gap too. A refused entry lists `refusals` (a reason and a target for each); a skipped entry carries a `skippedReason`. A hunk whose only probes were refused, failed, skipped or empty is UNCOVERED, never reviewed. A refused baseline probe is a gap, not a pass. An entry marked truncated was cut at a byte budget, so its absence of evidence is not proof of absence. The prompt lists the uncovered hunks (computed by code). Name each one as uncovered in your summary and never describe it as clean or reviewed. The absence of a finding on an uncovered hunk is not assurance.
@@ -41,37 +41,11 @@ Diff-derived content appears between `<<<UNTRUSTED_PR_DIFF>>>` and `<<<END_UNTRU
 
 ## Bounded inputs and truncation
 
-Inputs are truncated by risk-map rank, never by position: when a budget is spent, the evidence and plan entries for the lowest-ranked hunks are the ones left out. The prompt ends with a `TRUNCATION RECORD` block listing what was kept and what was omitted. Copy that block verbatim into your transcript (see below) so the truncation is on record. You cannot cite a probe whose evidence was omitted.
+Inputs are truncated by risk-map rank, never by position: when a budget is spent, the evidence and plan entries for the lowest-ranked hunks are the ones left out. The prompt ends with a `TRUNCATION RECORD` block listing what was kept and what was omitted. Copy that block into your final message (see Transcript) so the truncation is on record. You cannot cite a probe whose evidence was omitted.
 
-## Transcript Capture (MANDATORY)
+## Transcript
 
-You have no Bash tool (read-only trust boundary). Use the Write tool to emit transcript events.
-
-**The review ALWAYS proceeds.** A shared `UNKNOWN/` transcript directory is forbidden, because two unrelated runs writing the same path would overwrite each other's evidence. Missing attribution does not mean refusal; it means writing to a UNIQUE per-run directory.
-
-**Step 0 - Initialize transcript**
-
-Use the Read tool on `.active-task` to get `TASK_ID`.
-
-- **If the file exists and its trimmed content is non-empty**, use that as `TASK_ID`.
-- **Otherwise** synthesize a unique unattributed id of the form `UNKNOWN-review-synthesizer-<ISO-8601-timestamp-with-colons-stripped>` (for example `2026-09-18T14:03:55.123Z` becomes `2026-09-18T140355.123Z`) and continue with it.
-
-Use the Write tool to create (or append to) `.ai-sdlc/transcripts/<TASK_ID>/review-synthesizer.jsonl` with a single JSONL line:
-
-```
-{"role":"user","content":"[transcript-init] review-synthesizer prompt received for task <TASK_ID>","timestamp":"<ISO-8601-timestamp>","event":"prompt-received"}
-```
-
-**Step END - Record truncation and append the verdict**
-
-After forming your verdict JSON, append two events. Because Write overwrites rather than appends, read the existing file first and write the full updated content with the new lines added. Escape `"` as `\"`, newlines as `\n` and backslashes as `\\` in every `content` field; each line must be valid JSON.
-
-```
-{"role":"assistant","content":"<the TRUNCATION RECORD block, verbatim, JSON-string-escaped>","timestamp":"<ISO-8601-timestamp>","event":"truncation-recorded"}
-{"role":"assistant","content":"<your summary, JSON-string-escaped>","timestamp":"<ISO-8601-timestamp>","event":"verdict-formed"}
-```
-
-The transcript file is gitignored (local disk, 90-day retention default). Only the wrapper events above are captured: intermediate tool calls are not.
+You write no transcript file. The coordinator persists your harness-captured transcript after you return. Copy the `TRUNCATION RECORD` block from the prompt into the `summary` field of your final message so the truncation is on record.
 
 ## Remits
 

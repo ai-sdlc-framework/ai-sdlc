@@ -33,6 +33,7 @@ import {
   synthesizerPromptForRun,
   countProbes,
 } from './pipeline.js';
+import { computeSeal, StagedIntegrityError } from './seal.js';
 import { RUN_FILES, readDispatchRecord, readRunJson, stagedRunDir } from './run-store.js';
 import type { LeafManifestEntry } from './leaves.js';
 
@@ -46,6 +47,8 @@ const TASK = 'AISDLC-676';
 interface Fixture {
   repo: string;
   artifacts: string;
+  /** The seal of the latest phase that ran, as the coordinator would carry it. */
+  seal?: string;
 }
 
 /** A repo whose HEAD is one commit past `origin/main`, changing source and a test. */
@@ -76,7 +79,7 @@ function makeFixture(opts: { extraFile?: string } = {}): Fixture {
 const criteria = ['b is exported', 'b is tested'];
 
 async function prepare(f: Fixture, over: Record<string, unknown> = {}) {
-  return prepareStagedReview({
+  const r = await prepareStagedReview({
     taskId: TASK,
     worktreePath: f.repo,
     sourceKind: 'backlog',
@@ -86,6 +89,8 @@ async function prepare(f: Fixture, over: Record<string, unknown> = {}) {
     readBaseConfig: () => null,
     ...over,
   });
+  if (r.ok) f.seal = r.seal;
+  return r;
 }
 
 const okEvidence = JSON.stringify({
@@ -128,17 +133,21 @@ async function throughExecute(f: Fixture) {
     artifactsDir: f.artifacts,
     plannerOutput: planOut,
     attempt: 1,
+    seal: f.seal,
   });
+  if (planned.status === 'planned') f.seal = planned.seal;
   const { spawner, calls } = recordingSpawner();
   const executed = await executeStagedReview({
     taskId: TASK,
     artifactsDir: f.artifacts,
+    seal: f.seal,
     executorModel: 'haiku',
     spawner,
     hooks: {
       runCommand: async () => ({ exitStatus: 0, output: 'ok', truncated: false, timedOut: false }),
     },
   });
+  f.seal = executed.seal;
   return { prep, baseline, planned, executed, calls, spawner };
 }
 
@@ -254,7 +263,13 @@ describe('planStagedReview', () => {
     return { f, prep, baseline, valid };
   }
   const plan = (f: Fixture, plannerOutput: string | undefined, attempt: 1 | 2) =>
-    planStagedReview({ taskId: TASK, artifactsDir: f.artifacts, plannerOutput, attempt });
+    planStagedReview({
+      taskId: TASK,
+      artifactsDir: f.artifacts,
+      plannerOutput,
+      attempt,
+      seal: f.seal,
+    });
 
   it('accepts a plan that carries the whole baseline, even inside a code fence', async () => {
     const { f, prep, valid } = await prepared();
@@ -393,13 +408,22 @@ describe('executeStagedReview', () => {
         probes: baseline.probes,
       }),
       attempt: 1,
+      seal: f.seal,
+    }).then((r) => {
+      if (r.status === 'planned') f.seal = r.seal;
     });
     // Mark the stored task as untrusted work, as if it came from another source.
     const taskPath = join(prep.runDir, RUN_FILES.task);
     const stored = JSON.parse(readFileSync(taskPath, 'utf8'));
     writeFileSync(taskPath, JSON.stringify({ ...stored, sourceKind: 'gh-issue' }));
     const { spawner } = recordingSpawner();
-    await executeStagedReview({ taskId: TASK, artifactsDir: f.artifacts, spawner });
+    // Re-seal as the coordinator would after a legitimate change, so only the task kind differs.
+    await executeStagedReview({
+      taskId: TASK,
+      artifactsDir: f.artifacts,
+      spawner,
+      seal: await computeSeal(prep.runDir, 'plan'),
+    });
     const evidence = await readRunJson<EvidenceBundle>(prep.runDir, RUN_FILES.evidence);
     expect(evidence.entries.find((e) => e.probeId === 'tests-run')).toMatchObject({
       status: 'refused',
@@ -421,6 +445,9 @@ describe('executeStagedReview', () => {
         probes: baseline.probes,
       }),
       attempt: 1,
+      seal: f.seal,
+    }).then((r) => {
+      if (r.status === 'planned') f.seal = r.seal;
     });
     const seen: string[] = [];
     const codexLike: ProbeSpawner = {
@@ -435,6 +462,7 @@ describe('executeStagedReview', () => {
       taskId: TASK,
       artifactsDir: f.artifacts,
       spawner: codexLike,
+      seal: f.seal,
       codexAvailable: true,
       hooks: {
         runCommand: async () => ({
@@ -473,6 +501,7 @@ describe('synthesizer prompt and finalize', () => {
     finalizeStagedReview({
       taskId: TASK,
       artifactsDir: f.artifacts,
+      seal: f.seal,
       synthesizerOutput: typeof out === 'string' ? out : JSON.stringify(out),
       ...extra,
     });
@@ -482,6 +511,7 @@ describe('synthesizer prompt and finalize', () => {
     const { promptPath } = await synthesizerPromptForRun({
       taskId: TASK,
       artifactsDir: f.artifacts,
+      seal: f.seal,
     });
     const text = readFileSync(promptPath, 'utf8');
     expect(text).toContain(okProbe.probeId);
@@ -587,6 +617,87 @@ describe('synthesizer prompt and finalize', () => {
     }
   });
 
+  it('falls back instead of approving when every probe failed', async () => {
+    const f = makeFixture();
+    const prep = await prepare(f);
+    if (!prep.ok) throw new Error('prepare failed');
+    const baseline = await readRunJson<Baseline>(prep.runDir, RUN_FILES.baseline);
+    const planned = await planStagedReview({
+      taskId: TASK,
+      artifactsDir: f.artifacts,
+      seal: f.seal,
+      attempt: 1,
+      plannerOutput: JSON.stringify({
+        schemaVersion: 1,
+        baselineVersion: baseline.version,
+        probes: baseline.probes,
+      }),
+    });
+    if (planned.status !== 'planned') throw new Error('plan failed');
+    const failing: ProbeSpawner = {
+      enforcesFileScope: { 'claude-code': true, codex: false },
+      honoursEmptyToolList: { 'claude-code': true, codex: false },
+      async spawnProbe() {
+        return { status: 'error', output: '' };
+      },
+    };
+    const executed = await executeStagedReview({
+      taskId: TASK,
+      artifactsDir: f.artifacts,
+      seal: planned.seal,
+      spawner: failing,
+    });
+    expect(executed.probes.ok).toBe(0);
+    f.seal = executed.seal;
+    const r = await finalize(f, verdict());
+    expect(r).toMatchObject({
+      ok: false,
+      reason: 'insufficient-evidence',
+      fallbackSet: 'three',
+    });
+    expect(await readDispatchRecord(runDirOf(f))).toMatchObject({
+      status: 'fallback',
+      reason: 'insufficient-evidence',
+    });
+  });
+
+  it('falls back when a high-risk hunk has no probe evidence', async () => {
+    const { f } = await evidenceFixture();
+    const mapPath = join(runDirOf(f), RUN_FILES.riskMap);
+    const map = JSON.parse(readFileSync(mapPath, 'utf8')) as ReviewRiskMap;
+    // A hunk no plan probe covers, and that is above the threshold.
+    const extra = { ...map.hunks[0]!, id: 'uncovered-hunk', riskScore: 1, judged: true };
+    writeFileSync(mapPath, JSON.stringify({ ...map, hunks: [...map.hunks, extra] }));
+    f.seal = await computeSeal(runDirOf(f), 'execute');
+    const r = await finalize(f, verdict());
+    expect(r).toMatchObject({ ok: false, reason: 'insufficient-evidence' });
+  });
+
+  it('refuses to run any sealed phase on changed or missing state', async () => {
+    const { f } = await evidenceFixture();
+    const cfgPath = join(runDirOf(f), RUN_FILES.config);
+    writeFileSync(cfgPath, readFileSync(cfgPath, 'utf8') + ' ');
+    await expect(finalize(f, verdict())).rejects.toBeInstanceOf(StagedIntegrityError);
+    await expect(
+      synthesizerPromptForRun({ taskId: TASK, artifactsDir: f.artifacts, seal: f.seal }),
+    ).rejects.toBeInstanceOf(StagedIntegrityError);
+    await expect(
+      synthesizerPromptForRun({ taskId: TASK, artifactsDir: f.artifacts, seal: undefined }),
+    ).rejects.toBeInstanceOf(StagedIntegrityError);
+    await expect(
+      executeStagedReview({ taskId: TASK, artifactsDir: f.artifacts, seal: 'bogus' }),
+    ).rejects.toBeInstanceOf(StagedIntegrityError);
+    await expect(
+      planStagedReview({
+        taskId: TASK,
+        artifactsDir: f.artifacts,
+        seal: 'bogus',
+        attempt: 1,
+        plannerOutput: '{}',
+      }),
+    ).rejects.toBeInstanceOf(StagedIntegrityError);
+  });
+
   it('carries a suspicious injection screen onto the verdict', async () => {
     const { f } = await evidenceFixture();
     const mapPath = join(runDirOf(f), RUN_FILES.riskMap);
@@ -595,6 +706,8 @@ describe('synthesizer prompt and finalize', () => {
       mapPath,
       JSON.stringify({ ...map, injectionScreen: { status: 'suspicious', findings: ['x'] } }),
     );
+    // Re-seal as the coordinator would after a legitimate change to the screen result.
+    f.seal = await computeSeal(runDirOf(f), 'execute');
     const r = await finalize(f, verdict({ promptInjectionDetected: false }));
     if (!r.ok) throw new Error('finalize failed');
     expect(r.verdict.promptInjectionDetected).toBe(true);

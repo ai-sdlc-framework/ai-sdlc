@@ -214,6 +214,47 @@ describe('a stage is never null or empty', () => {
   });
 });
 
+describe('a stage leaf is held to its role', () => {
+  it('rejects a plan or execute leaf that approves or carries findings', () => {
+    const cases: Partial<TranscriptLeaf>[] = [
+      { stage: 'plan', verdictApproved: true },
+      { stage: 'execute', findings: { critical: 0, major: 1, minor: 0, suggestion: 0 } },
+    ];
+    cases.forEach((c, i) => {
+      const patchId = String(i + 1)
+        .repeat(40)
+        .replace(/[^0-9a-f]/g, 'd');
+      write(patchId, [leaf(c)]);
+      const result = verify(sign(patchId), patchId);
+      expect(result.status).toBe('invalid');
+      expect(result.reason).toMatch(/must carry verdictApproved=false and zero findings/);
+    });
+  });
+
+  it('rejects a stage on a leaf that is not from the staged review', () => {
+    const patchId = 'e1'.repeat(20);
+    write(patchId, [
+      leaf({ stage: 'synthesize', reviewerName: 'code-reviewer', verdictApproved: true }),
+    ]);
+    const result = verify(sign(patchId), patchId);
+    expect(result.status).toBe('invalid');
+    expect(result.reason).toMatch(/only reviewer 'staged-review' may carry a stage/);
+  });
+
+  it('still accepts a synthesize leaf that approves, and a leaf with no stage', () => {
+    const patchId = 'f1'.repeat(20);
+    write(patchId, [
+      leaf({ stage: 'synthesize', verdictApproved: true, independenceTier: 'attested' }),
+      leaf({
+        reviewerName: 'security-reviewer',
+        verdictApproved: true,
+        transcriptHash: '9'.repeat(64),
+      }),
+    ]);
+    expect(verify(sign(patchId), patchId).status).toBe('valid');
+  });
+});
+
 describe('the set tier is its weakest leaf', () => {
   it('all leaves attested gives attested', () => {
     const patchId = 'a'.repeat(40);

@@ -1036,6 +1036,8 @@ export function verifyV6Envelope({
 
   /** Stages of the staged review that run a model and so produce a leaf. */
   const V6_LEAF_STAGES = ['plan', 'execute', 'synthesize'];
+  /** The only reviewer name a staged leaf may carry. */
+  const V6_STAGED_REVIEWER = 'staged-review';
 
   const HEX64 = /^[0-9a-f]{64}$/i;
   const HEX40 = /^[0-9a-f]{40}$/i;
@@ -1367,6 +1369,32 @@ export function verifyV6Envelope({
         status: 'invalid',
         reason: `v6: leaf[${logicalLeafIndex}] (${leafSummary.reviewerName}) stage mismatch — envelope claims ${JSON.stringify(leafSummary.stage ?? null)} but on-disk leaf is ${JSON.stringify(onDiskLeaf.stage ?? null)}`,
       };
+    }
+
+    // Defense in depth for a staged leaf. The stage is Merkle-proved, so these are
+    // checked on the on-disk leaf. A leaf that names a stage must come from the staged
+    // review itself, and only the synthesize leaf may carry a verdict: a plan or execute
+    // leaf holds no findings and approves nothing, whatever a writer put in it.
+    if (onDiskLeaf.stage !== undefined) {
+      if (onDiskLeaf.reviewerName !== V6_STAGED_REVIEWER) {
+        return {
+          status: 'invalid',
+          reason: `v6: leaf[${logicalLeafIndex}] (${onDiskLeaf.reviewerName}) names stage '${onDiskLeaf.stage}' but only reviewer '${V6_STAGED_REVIEWER}' may carry a stage`,
+        };
+      }
+      if (onDiskLeaf.stage === 'plan' || onDiskLeaf.stage === 'execute') {
+        const f = onDiskLeaf.findings ?? {};
+        const findingTotal = ['critical', 'major', 'minor', 'suggestion'].reduce(
+          (n, k) => n + (typeof f[k] === 'number' ? f[k] : 0),
+          0,
+        );
+        if (onDiskLeaf.verdictApproved !== false || findingTotal !== 0) {
+          return {
+            status: 'invalid',
+            reason: `v6: leaf[${logicalLeafIndex}] (${onDiskLeaf.reviewerName}) is a '${onDiskLeaf.stage}' stage leaf and must carry verdictApproved=false and zero findings`,
+          };
+        }
+      }
     }
 
     // Compute the leaf hash from the on-disk leaf (the authoritative source).

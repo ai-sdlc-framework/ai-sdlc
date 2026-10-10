@@ -82,6 +82,13 @@ async function run(
   return JSON.parse(out.join('')) as Record<string, unknown>;
 }
 
+const prepArgs = (f: { repo: string; artifacts: string }) => [
+  'prepare',
+  ...common(f),
+  '--source-kind',
+  'backlog',
+];
+
 const common = (f: { repo: string; artifacts: string }) => [
   '--task-id',
   TASK,
@@ -108,7 +115,7 @@ const spawner: ProbeSpawner = {
 describe('cli-staged-review', () => {
   it('walks prepare, plan, execute, synth-prompt, finalize and status', async () => {
     const f = makeRepo();
-    const prep = await run(['prepare', ...common(f)]);
+    const prep = await run(prepArgs(f));
     expect(prep.ok).toBe(true);
     const runDir = prep.runDir as string;
     expect(readFileSync(prep.plannerPromptPath as string, 'utf8')).toContain('b is exported');
@@ -126,13 +133,22 @@ describe('cli-staged-review', () => {
         probes: baseline.probes,
       }),
     );
-    const planned = await run(['plan', ...common(f), '--planner-output', plannerOut]);
+    const planned = await run([
+      'plan',
+      ...common(f),
+      '--seal',
+      prep.seal as string,
+      '--planner-output',
+      plannerOut,
+    ]);
     expect(planned).toMatchObject({ status: 'planned', source: 'planner' });
 
-    const executed = await run(['execute', ...common(f)], { spawner });
+    const executed = await run(['execute', ...common(f), '--seal', planned.seal as string], {
+      spawner,
+    });
     expect((executed.probes as { total: number }).total).toBe(baseline.probes.length);
 
-    const synth = await run(['synth-prompt', ...common(f)]);
+    const synth = await run(['synth-prompt', ...common(f), '--seal', executed.seal as string]);
     expect(existsSync(synth.promptPath as string)).toBe(true);
 
     const synthOut = join(f.repo, 'synth.txt');
@@ -148,6 +164,8 @@ describe('cli-staged-review', () => {
     const done = await run([
       'finalize',
       ...common(f),
+      '--seal',
+      executed.seal as string,
       '--synthesizer-output',
       synthOut,
       '--planner-model',
@@ -169,19 +187,50 @@ describe('cli-staged-review', () => {
 
   it('asks for a corrected plan, then falls back, from the command line', async () => {
     const f = makeRepo();
-    await run(['prepare', ...common(f)]);
+    const prep = await run(prepArgs(f));
+    const seal = ['--seal', prep.seal as string];
     const bad = join(f.repo, 'planner.txt');
     writeFileSync(bad, '{"schemaVersion":1,"baselineVersion":"1","probes":[]}');
-    expect((await run(['plan', ...common(f), '--planner-output', bad])).status).toBe('retry');
+    expect((await run(['plan', ...common(f), ...seal, '--planner-output', bad])).status).toBe(
+      'retry',
+    );
     expect(
-      await run(['plan', ...common(f), '--planner-output', bad, '--attempt', '2']),
+      await run(['plan', ...common(f), ...seal, '--planner-output', bad, '--attempt', '2']),
     ).toMatchObject({ status: 'planned', source: 'fallback' });
     // A missing planner file counts as a rejected attempt, not a crash.
     const absent = join(f.repo, 'absent.txt');
-    expect((await run(['plan', ...common(f), '--planner-output', absent])).status).toBe('retry');
+    expect((await run(['plan', ...common(f), ...seal, '--planner-output', absent])).status).toBe(
+      'retry',
+    );
     expect(
-      (await run(['plan', ...common(f), '--planner-output', absent, '--attempt', '2'])).status,
+      (await run(['plan', ...common(f), ...seal, '--planner-output', absent, '--attempt', '2']))
+        .status,
     ).toBe('planned');
+  });
+
+  it('requires the source kind and a seal on every later phase', async () => {
+    const f = makeRepo();
+    await expect(run(['prepare', ...common(f)])).rejects.toThrow();
+    await expect(run(['plan', ...common(f)])).rejects.toThrow();
+  });
+
+  it('falls back to the existing set when the run state no longer matches its seal', async () => {
+    const f = makeRepo();
+    const prep = await run(prepArgs(f));
+    const cfgPath = join(prep.runDir as string, 'config.json');
+    const cfg = JSON.parse(readFileSync(cfgPath, 'utf8')) as { commandAllowlist: string[] };
+    // What a prompt-injected agent with a write tool could do: widen the command allowlist.
+    writeFileSync(
+      cfgPath,
+      JSON.stringify({ ...cfg, commandAllowlist: [...cfg.commandAllowlist, 'curl x'] }),
+    );
+    const r = await run(['plan', ...common(f), '--seal', prep.seal as string]);
+    expect(r).toMatchObject({ ok: false, reason: 'integrity-check-failed', fallbackSet: 'three' });
+    expect(await run(['status', ...common(f)])).toMatchObject({
+      status: 'fallback',
+      fallbackSet: 'three',
+      reason: 'integrity-check-failed',
+    });
   });
 
   it('answers fallback for gh-issue work and records it', async () => {
@@ -196,7 +245,7 @@ describe('cli-staged-review', () => {
 
   it('answers fallback when the task cannot be read', async () => {
     const f = makeRepo(false);
-    const r = await run(['prepare', ...common(f)]);
+    const r = await run(prepArgs(f));
     expect(r).toMatchObject({ ok: false, reason: 'task-unreadable', fallbackSet: 'three' });
   });
 
@@ -205,7 +254,7 @@ describe('cli-staged-review', () => {
     expect(await run(['status', ...common(f)])).toEqual({ status: 'none' });
     const diffFile = join(f.repo, 'x.diff');
     writeFileSync(diffFile, '   ');
-    expect(await run(['prepare', ...common(f), '--diff-file', diffFile])).toMatchObject({
+    expect(await run([...prepArgs(f), '--diff-file', diffFile])).toMatchObject({
       ok: false,
       reason: 'diff-unavailable',
     });

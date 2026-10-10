@@ -762,25 +762,22 @@ describe('staged review: review-planner and review-synthesizer', () => {
     }
   });
 
-  it('are read-only: no Bash and no Edit available, Write only for transcripts', () => {
+  it('are read-only: no Bash, Edit or Write, so they cannot rewrite the sealed run state', () => {
     for (const file of stagedFiles) {
       const { tools, disallowedTools } = agents[file];
-      assert.deepEqual(tools, ['Read', 'Grep', 'Glob', 'Write']);
-      for (const t of ['Bash', 'Edit', 'AgentTool']) {
+      assert.deepEqual(tools, ['Read', 'Grep', 'Glob']);
+      for (const t of ['Bash', 'Edit', 'Write', 'AgentTool']) {
         assert.ok(disallowedTools.includes(t), `${file} must disallow ${t}`);
       }
-      assert.ok(body(file).includes('.ai-sdlc/transcripts/'), `${file} writes transcripts only`);
     }
   });
 
-  it('declare mandatory transcript capture with an init step and a truncation record', () => {
+  it('write no transcript themselves: the coordinator persists it', () => {
     for (const file of stagedFiles) {
       const text = body(file);
-      assert.ok(text.includes('## Transcript Capture (MANDATORY)'), `${file} capture section`);
-      assert.ok(text.includes('prompt-received'), `${file} init event`);
-      assert.ok(text.includes('truncation-recorded'), `${file} truncation event`);
-      assert.ok(text.includes('UNKNOWN-'), `${file} unique unattributed id`);
-      assert.ok(text.includes('TRUNCATION RECORD'), `${file} truncation block`);
+      assert.ok(!text.includes('## Transcript Capture (MANDATORY)'), `${file} no capture section`);
+      assert.ok(!text.includes('Use the Write tool'), `${file} never asks for Write`);
+      assert.ok(text.includes('The coordinator persists'), `${file} says who persists`);
     }
   });
 

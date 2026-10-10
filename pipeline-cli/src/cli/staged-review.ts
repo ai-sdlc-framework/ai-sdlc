@@ -37,6 +37,7 @@ import {
   prepareStagedReview,
   readDispatchRecord,
   recordStagedFallback,
+  StagedIntegrityError,
   stagedRunDir,
   synthesizerPromptForRun,
 } from '../review-staged/index.js';
@@ -51,6 +52,42 @@ function readOptional(path: string | undefined): string | undefined {
     return readFileSync(resolve(path), 'utf8');
   } catch {
     return undefined;
+  }
+}
+
+/** The seal the previous phase printed. Required: a phase never runs on unverified state. */
+function sealed(y: Argv): Argv {
+  return y.option('seal', {
+    type: 'string',
+    demandOption: true,
+    describe: 'The seal the previous phase printed. The run state must still match it.',
+  });
+}
+
+/**
+ * Run one sealed phase. A seal mismatch means the run state was changed after it was
+ * written, so the staged review answers `ok: false` and the existing set handles the change.
+ */
+async function guarded(
+  args: Record<string, unknown>,
+  artifactsDir: string,
+  phase: () => Promise<unknown>,
+): Promise<void> {
+  try {
+    emitJson(await phase());
+  } catch (err) {
+    if (!(err instanceof StagedIntegrityError)) throw err;
+    const taskId = args['task-id'] as string;
+    const record = await readDispatchRecord(stagedRunDir(artifactsDir, taskId));
+    emitJson(
+      await recordStagedFallback({
+        taskId,
+        sourceKind: record?.sourceKind ?? 'backlog',
+        artifactsDir,
+        reason: err.reason,
+        detail: err.message,
+      }),
+    );
   }
 }
 
@@ -103,7 +140,8 @@ export function buildStagedReviewCli(
           .option('source-kind', {
             type: 'string',
             choices: ['backlog', 'gh-issue'] as const,
-            default: 'backlog',
+            // No default: an omitted kind must fail closed, never read as trusted backlog work.
+            demandOption: true,
             describe: 'Kind of the work item. Only backlog work may use the staged set.',
           })
           .option('base-ref', {
@@ -165,7 +203,7 @@ export function buildStagedReviewCli(
       'plan',
       "Validate the planner's plan. Answers `retry` once with the reasons, then uses the fallback plan.",
       (y: Argv) =>
-        common(y)
+        sealed(common(y))
           .option('planner-output', {
             type: 'string',
             describe:
@@ -174,19 +212,21 @@ export function buildStagedReviewCli(
           .option('attempt', { type: 'number', choices: [1, 2], default: 1 }),
       async (args) => {
         const { artifactsDir } = dirs(args);
-        const result = await planStagedReview({
-          taskId: args['task-id'] as string,
-          artifactsDir,
-          plannerOutput: readOptional(args['planner-output'] as string | undefined),
-          attempt: (args['attempt'] as number) === 2 ? 2 : 1,
-        });
-        emitJson(result);
+        await guarded(args, artifactsDir, () =>
+          planStagedReview({
+            taskId: args['task-id'] as string,
+            artifactsDir,
+            seal: args['seal'] as string,
+            plannerOutput: readOptional(args['planner-output'] as string | undefined),
+            attempt: (args['attempt'] as number) === 2 ? 2 : 1,
+          }),
+        );
       },
     )
     .command(
       'execute',
       'Run the plan: probes on read-only, tool-restricted executors, and write the evidence.',
-      (y: Argv) => common(y),
+      (y: Argv) => sealed(common(y)),
       async (args) => {
         const { workDir, artifactsDir } = dirs(args);
         const taskId = args['task-id'] as string;
@@ -203,23 +243,29 @@ export function buildStagedReviewCli(
             ? { sourceKind: record.sourceKind }
             : {}),
         });
-        const result = await executeStagedReview({
-          taskId,
-          artifactsDir,
-          ...(routed.model ? { executorModel: routed.model } : {}),
-          ...(deps.spawner ? { spawner: deps.spawner } : {}),
-        });
-        emitJson(result);
+        await guarded(args, artifactsDir, () =>
+          executeStagedReview({
+            taskId,
+            artifactsDir,
+            seal: args['seal'] as string,
+            ...(routed.model ? { executorModel: routed.model } : {}),
+            ...(deps.spawner ? { spawner: deps.spawner } : {}),
+          }),
+        );
       },
     )
     .command(
       'synth-prompt',
       "Write the synthesizer's prompt from the risk map, plan and evidence.",
-      (y: Argv) => common(y),
+      (y: Argv) => sealed(common(y)),
       async (args) => {
         const { artifactsDir } = dirs(args);
-        emitJson(
-          await synthesizerPromptForRun({ taskId: args['task-id'] as string, artifactsDir }),
+        await guarded(args, artifactsDir, () =>
+          synthesizerPromptForRun({
+            taskId: args['task-id'] as string,
+            artifactsDir,
+            seal: args['seal'] as string,
+          }),
         );
       },
     )
@@ -227,7 +273,7 @@ export function buildStagedReviewCli(
       'finalize',
       "Validate and ground the synthesizer's verdict; write the verdict and the leaf manifest.",
       (y: Argv) =>
-        common(y)
+        sealed(common(y))
           .option('synthesizer-output', {
             type: 'string',
             describe: "File holding the synthesizer's final message.",
@@ -239,16 +285,18 @@ export function buildStagedReviewCli(
           }),
       async (args) => {
         const { artifactsDir } = dirs(args);
-        const result = await finalizeStagedReview({
-          taskId: args['task-id'] as string,
-          artifactsDir,
-          synthesizerOutput: readOptional(args['synthesizer-output'] as string | undefined),
-          ...(args['planner-model'] ? { plannerModel: args['planner-model'] as string } : {}),
-          ...(args['synthesizer-model']
-            ? { synthesizerModel: args['synthesizer-model'] as string }
-            : {}),
-        });
-        emitJson(result);
+        await guarded(args, artifactsDir, () =>
+          finalizeStagedReview({
+            taskId: args['task-id'] as string,
+            artifactsDir,
+            seal: args['seal'] as string,
+            synthesizerOutput: readOptional(args['synthesizer-output'] as string | undefined),
+            ...(args['planner-model'] ? { plannerModel: args['planner-model'] as string } : {}),
+            ...(args['synthesizer-model']
+              ? { synthesizerModel: args['synthesizer-model'] as string }
+              : {}),
+          }),
+        );
       },
     )
     .command(
