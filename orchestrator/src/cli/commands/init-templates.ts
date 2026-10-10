@@ -203,7 +203,8 @@ jobs:
       status: \${{ steps.verify.outputs.status }}
       reason: \${{ steps.verify.outputs.reason }}
     env:
-      # Exact version of the verifier installed from npm. Bump deliberately.
+      # Exact version of the verifier installed from npm. Must be a PUBLISHED
+      # version of both packages; bump it as part of the release procedure.
       AI_SDLC_CLI_VERSION: '0.31.0'
     steps:
       - name: Resolve subject SHA + base SHA from event payload
@@ -239,9 +240,15 @@ jobs:
         env:
           HEAD_SHA: \${{ steps.resolve.outputs.head_sha }}
           HEAD_REPO: \${{ steps.resolve.outputs.head_repo }}
+          GH_TOKEN: \${{ github.token }}
         run: |
           set -euo pipefail
-          git fetch --no-tags --no-recurse-submodules "https://github.com/$HEAD_REPO.git" "$HEAD_SHA"
+          # Authenticate the fetch (private repos) without persisting the token
+          # in the repo config: it is passed per-invocation via an extraheader.
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\\n')"
+          echo "::add-mask::$auth"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \\
+            fetch --no-tags --no-recurse-submodules "https://github.com/$HEAD_REPO.git" "$HEAD_SHA"
           [ "$(git rev-parse FETCH_HEAD)" = "$HEAD_SHA" ]
           for p in .ai-sdlc/attestations .ai-sdlc/transcript-leaves .ai-sdlc/transcript-leaves.jsonl; do
             if git cat-file -e "$HEAD_SHA:$p" 2>/dev/null; then

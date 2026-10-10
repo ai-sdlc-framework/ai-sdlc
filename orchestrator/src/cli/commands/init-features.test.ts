@@ -22,6 +22,7 @@ import {
 } from './init-templates.js';
 import { buildWizardFlags } from './init.js';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { parse as parseYaml } from 'yaml';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -832,6 +833,49 @@ describe('applyBranchProtection', () => {
     expect(verify).toContain('persist-credentials: false');
     expect(verify).toContain('status: ');
     expect(verify).toContain('reason: ');
+  });
+
+  it('AISDLC-748.1: fetch step authenticates via a per-invocation extraheader', () => {
+    const t = VERIFY_ATTESTATION_WORKFLOW;
+    const fetchStep = t.slice(t.indexOf('Fetch head objects'), t.indexOf('actions/setup-node'));
+    expect(fetchStep).toContain('GH_TOKEN: ${{ github.token }}');
+    expect(fetchStep).toContain('http.https://github.com/.extraheader=AUTHORIZATION: basic');
+    expect(fetchStep).toContain('x-access-token');
+    expect(fetchStep).not.toContain('base64 -w');
+    expect(fetchStep).not.toContain('git config');
+  });
+
+  it('AISDLC-748.1: triggers use pull_request_target only, with read-only default permissions', () => {
+    const doc = parseYaml(VERIFY_ATTESTATION_WORKFLOW) as {
+      on: Record<string, unknown>;
+      permissions: Record<string, string>;
+    };
+    expect(Object.keys(doc.on)).toContain('pull_request_target');
+    expect(Object.keys(doc.on)).not.toContain('pull_request');
+    expect(doc.permissions).toEqual({ contents: 'read' });
+  });
+
+  it('AISDLC-748.1: parsed jobs structure and approve guards', () => {
+    const doc = parseYaml(VERIFY_ATTESTATION_WORKFLOW) as {
+      jobs: Record<
+        string,
+        {
+          needs?: string;
+          if?: string;
+          permissions: Record<string, string>;
+          steps: { run?: string }[];
+        }
+      >;
+    };
+    const { verify, approve } = doc.jobs;
+    expect(verify.permissions).toEqual({ contents: 'read' });
+    expect(approve.needs).toBe('verify');
+    expect(approve.permissions).toEqual({ contents: 'read', 'pull-requests': 'write' });
+    expect(approve.if).toContain('github.event.pull_request.draft == false');
+    expect(approve.if).toContain("needs.verify.result == 'success'");
+    const script = approve.steps.map((s) => s.run ?? '').join('\n');
+    expect(script).toContain('soft-fail|spot-check');
+    expect(script).toContain('[0-9a-f]{40}');
   });
 
   it('AISDLC-748: derivation flips true on a template containing an approve: job', () => {
