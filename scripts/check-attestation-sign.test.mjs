@@ -1149,7 +1149,7 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     assert.match(newSubject, /chore: auto-sign attestation for AISDLC-472/);
   });
 
-  it('AISDLC-274: hook removes stale envelope + signs fresh after queue-rebase simulation', () => {
+  it('AISDLC-274/739: hook restores committed envelope (not deleted) + signs fresh after queue-rebase simulation', () => {
     // Simulates the rebase-stale case: there is an envelope file in
     // .ai-sdlc/attestations/ from a prior sign cycle, but its filename SHA
     // is NOT HEAD~1 (the rebase shifted the parent SHA). The hook must
@@ -1203,11 +1203,16 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
       1,
       `expected 1 (signed fresh after rebase), got ${r.status}: stderr=${r.stderr}`,
     );
-    // Must report stale envelope removal.
-    assert.match(r.stderr, /stale envelope/i, `expected stale-envelope message: ${r.stderr}`);
-
-    // Stale envelope must be gone.
-    assert.equal(existsSync(staleEnvPath), false, 'stale envelope must be removed before new sign');
+    // AISDLC-739: a committed envelope is restored via git checkout, not deleted.
+    assert.match(r.stderr, /restored committed envelope/i, `expected restore message: ${r.stderr}`);
+    assert.equal(existsSync(staleEnvPath), true, 'committed envelope must stay in working copy');
+    assert.equal(
+      git(['status', '--porcelain', '--', '.ai-sdlc/attestations/'], root)
+        .split('\n')
+        .some((l) => /^\s*D /.test(l)),
+      false,
+      'committed envelope must not show as a working-copy deletion',
+    );
     // A new envelope must exist in the attestations directory after the sign cycle.
     // AISDLC-475 Fix B: the fake signer now writes the patch-id-named file (not the
     // SHA-named file), so we check for ANY v6 envelope instead of the specific SHA.

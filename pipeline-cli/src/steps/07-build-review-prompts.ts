@@ -37,6 +37,8 @@ import type { EvaluateJudgmentContext } from '@ai-sdlc/reference';
 import { resolveModel } from '../routing/resolve-model.js';
 import { routingArtifactsDir, routingRecordable } from '../routing/artifacts-dir.js';
 import { taskClassOf } from '../routing/task-class.js';
+import { generateNonce } from '../attestation/merkle.js';
+import { nonceMarkerLiteral } from '../attestation/harness-transcript.js';
 import { diffHeaderPaths } from '../classifier/diff-header.js';
 
 export interface BuildReviewPromptsOptions {
@@ -207,6 +209,17 @@ export async function buildReviewPrompts(
     })
   ).reviewers;
 
+  // AISDLC-739: one diff-binding nonce per build, bound to the head SHA and embedded in
+  // every prompt so a reviewer run outside the executor is bound by the same value
+  // that `emit-leaf --nonce` consumes.
+  const headResult = await runner('git', ['rev-parse', 'HEAD'], {
+    cwd: opts.worktreePath,
+    allowFailure: true,
+  });
+  const headSha = headResult.code === 0 ? headResult.stdout.trim() : '';
+  const nonce = generateNonce(headSha);
+  const nonceMarker = nonceMarkerLiteral(nonce);
+
   const taskClass = taskClassOf(opts.task.rawBody);
   const prompts: ReviewPrompt[] = reviewers.map((reviewer) => {
     const routed = resolveModel({
@@ -234,11 +247,12 @@ export async function buildReviewPrompts(
         branch: opts.branch,
         policy,
         harnessNote,
+        nonceMarker,
       }),
     };
   });
 
-  return { prompts, diff, changedFiles, harnessNote, diffUnavailable };
+  return { prompts, diff, changedFiles, harnessNote, diffUnavailable, nonce, headSha };
 }
 
 /** Paths git reports as binary (`-\t-\t<path>`) in `--numstat -z --no-renames` output. */
@@ -293,6 +307,7 @@ interface PromptInputs {
   branch: string;
   policy: string;
   harnessNote: string;
+  nonceMarker: string;
 }
 
 function buildPrompt(reviewer: ReviewerType, inputs: PromptInputs): string {
@@ -314,6 +329,7 @@ function buildPrompt(reviewer: ReviewerType, inputs: PromptInputs): string {
     policyBlock +
     harnessBlock +
     `\n## Diff\n\n\`\`\`diff\n${inputs.diff}\n\`\`\`\n\n` +
-    `Return a verdict JSON: { approved: boolean, findings: [...], summary: string }.\n`
+    `Return a verdict JSON: { approved: boolean, findings: [...], summary: string }.\n\n` +
+    `${inputs.nonceMarker}\n`
   );
 }
