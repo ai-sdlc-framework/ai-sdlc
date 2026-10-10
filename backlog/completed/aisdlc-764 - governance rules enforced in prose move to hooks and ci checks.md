@@ -2,7 +2,7 @@
 id: AISDLC-764
 title: >-
   Governance rules enforced in prose move to hooks and ci checks
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-08'
 labels:
