@@ -435,6 +435,45 @@ describe('check-pr-patch-coverage — skip on 0 changed code files', () => {
     assert.deepEqual(parsed.changedCodeFiles, []);
   });
 
+  it('exits 0 when only .github/actions/<name>/*.mjs changed (AISDLC-757)', () => {
+    // Composite-action helper scripts are tested under node --test via
+    // subprocess/dynamic import; vitest never instruments them.
+    const base = commitFile(repo, 'README.md', '# x\n', 'init');
+    const head = commitFile(
+      repo,
+      '.github/actions/verify-attestation-base/check-policy-floor.mjs',
+      ['export function check() {', '  return 1;', '}'].join('\n') + '\n',
+      'feat: add composite action helper',
+    );
+    const r = runGate(repo, { base, head, json: true });
+    assert.equal(
+      r.status,
+      0,
+      `expected exit 0 for action helper mjs, got ${r.status}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`,
+    );
+    const parsed = JSON.parse(r.stdout);
+    assert.equal(parsed.reason, 'no-instrumentable-changes');
+    assert.deepEqual(parsed.changedCodeFiles, []);
+  });
+
+  for (const notExcluded of [
+    '.github/lib/foo.mjs',
+    '.github/actions/verify-attestation-base/nested/foo.mjs',
+  ]) {
+    it(`does NOT exclude ${notExcluded} from the gate (AISDLC-757)`, () => {
+      const base = commitFile(repo, 'README.md', '# x\n', 'init');
+      const head = commitFile(
+        repo,
+        notExcluded,
+        ['export function f() {', '  return 1;', '}'].join('\n') + '\n',
+        'feat: add script',
+      );
+      const r = runGate(repo, { base, head, json: true });
+      assert.notEqual(r.status, 0, `expected failure\nstdout: ${r.stdout}`);
+      assert.match(r.stdout + r.stderr, new RegExp(notExcluded.replace(/\./g, '\\.')));
+    });
+  }
+
   it('exits 0 when only docs/examples/**.ts changed (AISDLC-428)', () => {
     // docs/examples/** are reference scaffolds for adopters (e.g. RFC-0036
     // BYO-translator examples). Exercised via copy-paste into adopter
