@@ -38,6 +38,8 @@
  * @module decisions/stage-b
  */
 
+import { reportCapabilityOutcome } from '@ai-sdlc/reference';
+import { resolveJudgmentArtifactsDir } from '../judgment/context.js';
 import {
   brandBaseline,
   type BaselineStageAOutput,
@@ -511,6 +513,18 @@ export interface StageBInput {
    * Absent means both stay at the constant 0.5.
    */
   signals?: LlmConfidenceSignals;
+  /** Where the capability state is recorded. Defaults like the rest of pipeline-cli. */
+  artifactsDir?: string;
+}
+
+const STAGE_B_SIGNALS_CAPABILITY = 'decisions.stage-b-signals';
+
+/** Record whether the Stage B signals were judged (live) or the 0.5 constants (degraded). */
+function reportSignals(signals: LlmConfidenceSignals | undefined, artifactsDir?: string): void {
+  reportCapabilityOutcome(STAGE_B_SIGNALS_CAPABILITY, signals ? 'live' : 'degraded', {
+    artifactsDir: artifactsDir ?? resolveJudgmentArtifactsDir(),
+    ...(signals ? {} : { reason: 'constant' }),
+  });
 }
 
 // ── Main entry point ──────────────────────────────────────────────────────────
@@ -530,6 +544,11 @@ export interface StageBInput {
  * `makeStageBRecommendationIssuedEvent` + `appendDecisionEvent` (AC#6).
  */
 export function runStageB(input: StageBInput): StageBOutput {
+  reportSignals(input.signals, input.artifactsDir);
+  return computeStageB(input);
+}
+
+function computeStageB(input: StageBInput): StageBOutput {
   const { decision, stageA, pillarOwners = DEFAULT_PILLAR_OWNERS } = input;
 
   // ── Rubric scores ──────────────────────────────────────────────────────────
@@ -590,6 +609,8 @@ export interface BaselineStageBInput {
   stageA: BaselineStageAOutput;
   pillarOwners?: PillarOwnerConfig;
   now?: Date;
+  /** Where the capability state is recorded. Defaults like the rest of pipeline-cli. */
+  artifactsDir?: string;
 }
 
 /**
@@ -599,12 +620,17 @@ export interface BaselineStageBInput {
  * type-check here.
  */
 export function runBaselineStageB(input: BaselineStageBInput): BaselineStageBOutput {
+  reportSignals(undefined, input.artifactsDir);
+  return baselineStageB(input);
+}
+
+function baselineStageB(input: BaselineStageBInput): BaselineStageBOutput {
   // The type omits `signals`, but a non-literal object can still carry it: drop it at runtime.
   const { signals: _signals, ...rest } = input as BaselineStageBInput & {
     signals?: LlmConfidenceSignals;
   };
   void _signals;
-  return brandBaseline(runStageB(rest));
+  return brandBaseline(computeStageB(rest));
 }
 
 export interface StageBWithJudgmentInput {
@@ -615,6 +641,13 @@ export interface StageBWithJudgmentInput {
   signals?: LlmConfidenceSignals;
   pillarOwners?: PillarOwnerConfig;
   now?: Date;
+  /** Where the capability state is recorded. Defaults like the rest of pipeline-cli. */
+  artifactsDir?: string;
+  /**
+   * True when `judgeStageBSignals` ran for this invocation. The judgment reports the
+   * capability itself, so the constants path does not report a second time.
+   */
+  judgmentConsulted?: boolean;
 }
 
 export interface StageBWithJudgmentResult {
@@ -637,8 +670,10 @@ export interface StageBWithJudgmentResult {
  */
 export function runStageBWithJudgment(input: StageBWithJudgmentInput): StageBWithJudgmentResult {
   const { decision, stageAInput, judgedStageA, signals, pillarOwners, now } = input;
+  // One report per invocation: the judgment's own when it ran, else judged signals or constants.
+  if (!input.judgmentConsulted) reportSignals(signals, input.artifactsDir);
   const gatingStageA = runBaselineStageA(stageAInput);
-  const gating = runBaselineStageB({
+  const gating = baselineStageB({
     decision,
     stageA: gatingStageA,
     ...(pillarOwners ? { pillarOwners } : {}),
@@ -650,7 +685,7 @@ export function runStageBWithJudgment(input: StageBWithJudgmentInput): StageBWit
   const { judged: _carried, ...cleanAInput } = stageAInput as StageAInput;
   void _carried;
   const judgedA = runStageA({ ...cleanAInput, ...(judgedStageA ? { judged: judgedStageA } : {}) });
-  const judgedRun = runStageB({
+  const judgedRun = computeStageB({
     decision,
     stageA: judgedA,
     ...(signals ? { signals } : {}),

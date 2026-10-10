@@ -1374,6 +1374,7 @@ export function buildDecisionsCli(): Argv {
           stageAInput: { decision, openDecisions, graph, workDir },
           ...(judged ? { judgedStageA: judged } : {}),
           ...(signals ? { signals } : {}),
+          ...(runner ? { judgmentConsulted: true } : {}),
         });
         const stageB = pair.gating;
         // Shown only when the layer contributed something, so the unconfigured output is unchanged.
