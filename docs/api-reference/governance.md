@@ -132,7 +132,8 @@ spec:
     name**: a commit status can be posted under any name by anyone with write
     access, so this is only meaningful once branch protection pins each required
     check to the GitHub Actions app (operator-only; tracked as "H4");
-  - the PR changes **no governance-sensitive path**: `.ai-sdlc/**` (except the
+  - **governance-sensitive paths are audited, not refused (DEC-0072)**: a trusted PR (it
+    passed the fork/author/base/task/head checks above) that changes any of `.ai-sdlc/**` (except the
     generated attestation evidence, below), `.claude/**`, `.opencode/**`,
     `.codex/**`, `.github/**`, `.husky/**`, `ai-sdlc-plugin/hooks/**`,
     `ai-sdlc-plugin/.claude-plugin/**`, `ai-sdlc-plugin/agents/**`,
@@ -142,7 +143,12 @@ spec:
     `pipeline-cli/package.json`, `pipeline-cli/tsconfig*.json`, `scripts/check-*`,
     `spec/schemas/agent-role.schema.json`, any `CODEOWNERS`, `opencode.json`,
     `opencode.jsonc`, any `CLAUDE.md` or `AGENTS.md`, and the bare names `.claude`,
-    `.opencode`, `.codex` (a symlink or gitlink has no trailing path). Matching is
+    `.opencode`, `.codex` (a symlink or gitlink has no trailing path) is still eligible
+    to merge or arm when green, CLEAN and attested; the list of sensitive paths is printed
+    in the eligibility reason and written to the merge audit entry
+    (`$ARTIFACTS_DIR/_governance/merge-audit-YYYY-MM-DD.jsonl`, event `governance-path-merge`).
+    Untrusted PRs (fork head, author outside `mergeAuthors`) are still refused by the
+    trust checks. Matching is
     case-insensitive on the normalised path (`.` and `..` resolved), and for a
     rename both the new and the previous name count. **Exempt** are only the files
     directly inside the generated evidence directories that every attested code PR
@@ -151,18 +157,12 @@ spec:
     `.ai-sdlc/transcript-leaves.jsonl`; a nested path, an evidence-looking name
     elsewhere, or `.ai-sdlc/attestations/../agent-role.yaml` stays sensitive.
     Ordinary agent PRs (source, tests, docs, `backlog/`, `spec/rfcs`, other
-    schemas, `reference/`, `orchestrator/`) are unaffected. Some listed paths do
-    appear in ordinary work (for example `pipeline-cli/package.json` when adding a
-    bin, or `ai-sdlc-plugin/commands/*.md`); they stay sensitive on purpose, so a
-    human merges those. Governance changes need a human merge, in both merge and
-    `--arm` mode, so a PR that edits the policy or the gate itself (including the
-    PR that introduced this rule, and the PR that grants `allowMerge`) is merged by
-    a human. The file list is the compare between the resolved `main` SHA and the
+    schemas, `reference/`, `orchestrator/`) record no sensitive paths. Both the
+    new and previous name of a rename count, in merge and `--arm` mode. The file list is the compare between the resolved `main` SHA and the
     PINNED head SHA (all pages, deduplicated), not the PR's current file list, so a
     push after the head was read cannot change it. A failed or malformed read, or a
     list that reaches GitHub's 300-file compare cap, refuses, and so does a PR with
-    no changed files (nothing to merge). This rule holds for the helper only, see
-    the residuals below;
+    no changed files (nothing to merge) (fail-closed, unchanged);
   - the PR head commit read in the first call is still the head just before the
     merge, and the merge is issued with `--match-head-commit <sha>` so GitHub
     rejects it if the head moved after the checks were evaluated (the CLI reports
@@ -326,15 +326,14 @@ spec:
   URLs, `node -e` / `python -c` with argv arrays, `gh api graphql --input <file>`,
   shell aliases, `gh pr --repo o/r merge`-style reordering or constructed strings.
 - **Known residuals (be explicit about them):**
-  - **"Governance changes need a human merge" holds for the helper only.**
+  - **Governance-path refusal removed (DEC-0072); GitHub-side review is the real control.**
     `.github/workflows/auto-enable-auto-merge.yml` still arms EVERY same-repo PR,
     governance PRs included, and the in-repo arming sites (`reconcile.ts`,
     `resume-from-draft.ts`, `execute-pipeline.ts`) arm through a child-process `gh`
-    call outside the hook. Today only GitHub-side review requirements keep a
-    governance PR human. Before the `allowMerge` grant (AISDLC-663.3), either run
-    this path rule in the workflow and route the in-repo sites through `--arm`
-    (recommended follow-up AISDLC-663.5.1), or confirm that branch protection
-    enforces required code-owner review (H4).
+    call outside the hook, so the helper's path rule never protected them. Since DEC-0072
+    the helper audits (records) governance-sensitive paths for trusted PRs instead of
+    refusing; the real control is GitHub-side review (CODEOWNERS plus required
+    code-owner review, H4), an operator-only setting.
   - **Operator-token power.** Agents act as the operator's `gh` login and
     `mergeAuthors` matches that same login, so the allow-list does not separate the
     agent from the operator. An admin-scoped token can bypass branch protection or
