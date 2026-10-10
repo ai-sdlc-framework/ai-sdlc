@@ -32,6 +32,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 
+import type { PromotedDecision } from '../decisions/escalation-chain.js';
 import { collectVerdicts, peekQueue, TASK_ID_RE } from '../dispatch/board.js';
 import type { EnqueueEntry } from '../dispatch/enqueue.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
@@ -156,6 +157,8 @@ export interface TickResult {
   wakeReason: WakeReason;
   /** Present when the `mark-ready-after-codeql` action is granted and a hook was supplied. */
   markReady?: MarkReadyReport;
+  /** Decisions moved up a tier this tick because their timebox lapsed. */
+  promotions?: PromotedDecision[];
 }
 
 /**
@@ -200,6 +203,8 @@ export interface LoopDeps {
   reportEveryMs?: number;
   /** Marks CodeQL-clean drafts ready; called only when `mark-ready-after-codeql` is granted. */
   markReady?: () => MarkReadyReport;
+  /** Moves escalated decisions whose tier timebox lapsed up one tier; its failure never fails the tick. */
+  promoteExpired?: () => PromotedDecision[];
 }
 
 function ingestBriefs(
@@ -367,6 +372,19 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     deps.markReady && deps.operational.has('mark-ready-after-codeql')
       ? deps.markReady()
       : undefined;
+  let promotions: PromotedDecision[] = [];
+  try {
+    promotions = deps.promoteExpired?.() ?? [];
+  } catch {
+    /* an unreadable decision log must not stop the dispatch loop */
+  }
   const wake = computeNextWake(deps.boardDir, { ...ingest, ...watch, reports }, markReady);
-  return { ...ingest, ...watch, reports, ...wake, ...(markReady ? { markReady } : {}) };
+  return {
+    ...ingest,
+    ...watch,
+    reports,
+    ...wake,
+    ...(markReady ? { markReady } : {}),
+    ...(promotions.length > 0 ? { promotions } : {}),
+  };
 }

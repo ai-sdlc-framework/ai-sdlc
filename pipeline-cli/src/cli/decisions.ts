@@ -26,6 +26,8 @@ import { hideBin } from 'yargs/helpers';
 import {
   aggregateDecisionCorpus,
   appendDecisionEvent,
+  ESCALATION_ROUTES,
+  type EscalationRoute,
   buildDecisionSupportView,
   buildPendingExemplarsDigest,
   buildSubDecisionGraph,
@@ -111,6 +113,18 @@ import {
   persistDecisionLog,
 } from '../decisions/remote-persist.js';
 import { renderOperatorDigestMarkdown, runOperatorDigest } from '../decisions/operator-digest.js';
+import {
+  afterAnswer,
+  answerRefusal,
+  callerOf,
+  createSystemChainDeps,
+  emitRouted,
+  promoteExpiredDecisions,
+  notifyTier,
+  tierSession,
+  type ChainDeps,
+} from '../decisions/escalation-chain.js';
+import { parkInflight } from '../dispatch/board.js';
 import { readCorpus, recordOperatorOverride } from '../classifier/substrate/index.js';
 import { createJudgmentRunner } from '../judgment/runner.js';
 import { buildDependencyGraph } from '../deps/dependency-graph.js';
@@ -128,6 +142,12 @@ function emitText(text: string): void {
 
 function warnToStderr(message: string): void {
   process.stderr.write(`${message}\n`);
+}
+
+/** Exit code of `escalate`: the requested one, and non-zero whenever the task was parked. */
+function effectiveExitCode(requested: unknown, park: boolean): number {
+  const code = typeof requested === 'number' ? requested : 0;
+  return park && code === 0 ? 1 : code;
 }
 
 function fail(reason: string, code = 1): never {
@@ -552,7 +572,14 @@ function gatherAddInputsFromFlags(argv: Record<string, unknown>): AddInputs {
 
 // ── CLI builder ──────────────────────────────────────────────────────────────
 
-export function buildDecisionsCli(): Argv {
+/** Collaborators the CLI takes from outside; tests inject them, production builds the real ones. */
+export interface DecisionsCliDeps {
+  /** Builds the escalation-chain collaborators (roster, identity, messaging, events, board). */
+  chain?: (workDir: string) => ChainDeps;
+}
+
+export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
+  const chainFor = cliDeps.chain ?? createSystemChainDeps;
   return yargs(hideBin(process.argv))
     .scriptName('cli-decisions')
     .usage('Usage: $0 <command> [options]\n\nRFC-0035 Decision Catalog CLI (Phase 1).')
@@ -973,6 +1000,18 @@ export function buildDecisionsCli(): Argv {
             describe:
               'AISDLC-480 AC-2 — exit code after writing the record. Pass 1 for the AskUserQuestion / non-interactive clean-fail pattern so the calling script detects the escalation.',
           })
+          .option('route', {
+            type: 'string',
+            choices: ESCALATION_ROUTES,
+            describe:
+              'Tier that answers first: operational (sequencing, environment, retries) or design (RFC interpretation, scope, conflicting instructions). Defaults to design. Giving --route also notifies the receiving tier.',
+          })
+          .option('park', {
+            type: 'boolean',
+            default: false,
+            describe:
+              "Move this task's inflight manifest to blocked/ until the decision is answered, then exit non-zero so the executor stops this task and claims the next one.",
+          })
           .option('format', {
             type: 'string',
             choices: ['json', 'text'] as const,
@@ -1030,9 +1069,17 @@ export function buildDecisionsCli(): Argv {
         const resumeBlock = `taskId: ${taskId}\nsourceWorktree: ${sourceWorktree}`;
         const body = userBody ? `${resumeBlock}\n\n${userBody}` : resumeBlock;
 
+        const route: EscalationRoute = (argv.route as EscalationRoute | undefined) ?? 'design';
+        const park = argv.park === true;
+        // The chain's side effects (roster, messages, events, parking) run only when the
+        // caller opted in; a plain escalate records the route and nothing else.
+        const chain = argv.route !== undefined || park ? chainFor(workDir) : undefined;
+        const raisedBy = chain ? callerOf(chain)?.name : undefined;
+
         const decisionId = nextDecisionIdDurable({ workDir });
         const event = makeDecisionOpenedEvent({
           decisionId,
+          escalation: { route, taskId, parked: park, ...(raisedBy ? { raisedBy } : {}) },
           source: 'subagent-escalation',
           scope,
           summary: String(argv.summary).trim(),
@@ -1046,6 +1093,28 @@ export function buildDecisionsCli(): Argv {
         const path = appendDecisionEvent(event, { workDir });
         persistDecisionLog({ workDir });
 
+        let parkedOk = false;
+        let notified: { sent: boolean; to?: string; reason?: string } | undefined;
+        if (chain) {
+          if (park) {
+            try {
+              parkedOk = parkInflight(chain.boardDir, taskId, decisionId);
+            } catch (err) {
+              warnToStderr(
+                `[cli-decisions] escalate: could not park ${taskId}: ${(err as Error).message}`,
+              );
+            }
+            if (!parkedOk) {
+              warnToStderr(
+                `[cli-decisions] escalate: ${taskId} has no inflight manifest to park; the decision is recorded.`,
+              );
+            }
+          }
+          const receiver = tierSession(chain, route);
+          emitRouted(chain, { decisionId, route, taskId, routedTo: receiver?.name ?? route });
+          notified = notifyTier(chain, route, decisionId, String(argv.summary).trim());
+        }
+
         if (String(argv.format) === 'json') {
           emit({
             ok: true,
@@ -1053,7 +1122,11 @@ export function buildDecisionsCli(): Argv {
             taskId,
             sourceWorktree,
             path,
-            exitCode: argv['exit-code'],
+            exitCode: effectiveExitCode(argv['exit-code'], park),
+            route,
+            ...(raisedBy ? { raisedBy } : {}),
+            ...(park ? { parked: parkedOk } : {}),
+            ...(notified ? { notified } : {}),
           });
         } else {
           emitText(`[cli-decisions] escalation recorded: ${decisionId}`);
@@ -1061,12 +1134,14 @@ export function buildDecisionsCli(): Argv {
           emitText(`  worktree: ${sourceWorktree}`);
           emitText(`  summary:  ${String(argv.summary).trim()}`);
           emitText(`  options:  ${options!.map((o) => o.id).join(', ')}`);
+          emitText(`  route:    ${route}`);
+          if (park) emitText(`  parked:   ${parkedOk ? 'yes (manifest in blocked/)' : 'no'}`);
           emitText(`  event log: ${path}`);
           emitText(`  operator: cli-decisions show ${decisionId}`);
           emitText(`  answer:   cli-decisions answer ${decisionId} <optionId>`);
         }
 
-        const exitCode = typeof argv['exit-code'] === 'number' ? argv['exit-code'] : 0;
+        const exitCode = effectiveExitCode(argv['exit-code'], park);
         if (exitCode !== 0) process.exit(exitCode);
       },
     )
@@ -1729,6 +1804,13 @@ export function buildDecisionsCli(): Argv {
             `optionId "${optionId}" is not declared on ${id} — valid options: ${decision!.spec.options.map((o) => o.id).join(', ')}`,
           );
         }
+        // RFC-0051: an escalated decision is answered only by the tier that owns it.
+        const tier = decision!.status.escalationTier;
+        const chain = tier !== undefined ? chainFor(workDir) : undefined;
+        if (tier !== undefined && chain !== undefined) {
+          const refusal = answerRefusal(tier, callerOf(chain));
+          if (refusal) fail(`cannot answer ${id}: ${refusal}`);
+        }
         const evt = makeOperatorAnsweredEvent({
           decisionId: id,
           chosenOptionId: optionId,
@@ -1737,13 +1819,61 @@ export function buildDecisionsCli(): Argv {
         });
         appendDecisionEvent(evt, { workDir });
         persistDecisionLog({ workDir });
+        const after = chain ? afterAnswer(chain, decision!, optionId) : undefined;
 
         if (String(argv.format) === 'json') {
-          emit({ ok: true, decisionId: id, chosenOptionId: optionId });
+          emit({
+            ok: true,
+            decisionId: id,
+            chosenOptionId: optionId,
+            ...(after ? { unblocked: after.unblocked, notified: after.notify } : {}),
+          });
         } else {
           emitText(`decision answered: ${id} → ${optionId}`);
+          if (after?.unblocked) emitText('  parked task returned to the queue');
           if (typeof argv.rationale === 'string' && argv.rationale) {
             emitText(`  rationale: ${argv.rationale}`);
+          }
+        }
+      },
+    )
+    .command(
+      'promote-expired',
+      'RFC-0051 — move every escalated decision whose tier timebox has lapsed up one tier (operational to design, design to operator) and notify the new tier. The operator tier is terminal; silence never resolves a decision. Run from the dispatch loop.',
+      (y) =>
+        y
+          .option('dry-run', {
+            type: 'boolean',
+            default: false,
+            describe: 'Report what would move without writing events or sending messages.',
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['json', 'text'] as const,
+            default: 'text' as const,
+          }),
+      async (argv) => {
+        const workDir = String(argv['work-dir']);
+        if (!isDecisionCatalogEnabled()) {
+          warnToStderr(decisionCatalogDisabledMessage());
+          if (String(argv.format) === 'json') emit({ ok: true, enabled: false, promoted: [] });
+          return;
+        }
+        const dryRun = argv['dry-run'] === true;
+        const promoted = promoteExpiredDecisions(() => chainFor(workDir), {
+          workDir,
+          dryRun,
+          persist: () => persistDecisionLog({ workDir }),
+        });
+        if (String(argv.format) === 'json') {
+          emit({ ok: true, dryRun, promoted });
+        } else if (promoted.length === 0) {
+          emitText('no escalated decision is past its tier timebox');
+        } else {
+          for (const p of promoted) {
+            emitText(
+              `${dryRun ? 'would move' : 'moved'} ${p.decisionId}: ${p.fromTier} -> ${p.toTier}`,
+            );
           }
         }
       },

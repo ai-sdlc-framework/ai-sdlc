@@ -529,15 +529,54 @@ export function releaseInflight(boardDir: string, taskId: string): boolean {
 }
 
 /**
+ * Park an inflight manifest in `blocked/` with `blockedBy` set to the decision
+ * it waits on. The claim is surrendered: the heartbeat and any resume signal
+ * go with it, and the claim logic never reads `blocked/`. The manifest keeps
+ * its mtime so it holds its FIFO position when it returns to `queue/`.
+ *
+ * Returns false, touching nothing, when no inflight manifest exists under that
+ * task id.
+ * @throws when `blocked/<task-id>` already exists.
+ */
+export function parkInflight(boardDir: string, taskId: string, decisionId: string): boolean {
+  ensureBoardDirs(boardDir);
+  const src = manifestPathIn(boardDir, 'inflight', taskId);
+  const manifest = existsSync(src) ? readManifest(src) : undefined;
+  if (!manifest) return false;
+  const dst = manifestPathIn(boardDir, 'blocked', taskId);
+  if (existsSync(dst)) {
+    throw new Error(`dispatch.park: blocked/${taskId}${MANIFEST_SUFFIX} already exists`);
+  }
+  manifest.blockedBy = decisionId;
+  const tmp = `${dst}.tmp-${process.pid}-${process.hrtime.bigint()}`;
+  const times = statSync(src);
+  writeFileSync(tmp, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+  utimesSync(tmp, times.atime, times.mtime);
+  renameSync(tmp, dst);
+  for (const suffix of [STATE_SUFFIX, RESUME_SIGNAL_SUFFIX]) {
+    const sidecar = path.join(boardDir, 'inflight', `${taskId}${suffix}`);
+    if (existsSync(sidecar)) rmSync(sidecar, { force: true });
+  }
+  rmSync(src);
+  return true;
+}
+
+/**
  * Return a parked manifest from `blocked/` to `queue/`, clearing its
  * `blockedBy` marker so the claim logic can pick it up. Returns false when
- * no parked manifest exists under that task id.
+ * no parked manifest exists under that task id, or, when `onlyIfBlockedBy` is
+ * given, when the manifest waits on a different decision.
  */
-export function unblockManifest(boardDir: string, taskId: string): boolean {
+export function unblockManifest(
+  boardDir: string,
+  taskId: string,
+  onlyIfBlockedBy?: string,
+): boolean {
   ensureBoardDirs(boardDir);
   const src = manifestPathIn(boardDir, 'blocked', taskId);
   const manifest = existsSync(src) ? readManifest(src) : undefined;
   if (!manifest) return false;
+  if (onlyIfBlockedBy !== undefined && manifest.blockedBy !== onlyIfBlockedBy) return false;
   delete manifest.blockedBy;
   const dst = manifestPathIn(boardDir, 'queue', taskId);
   if (existsSync(dst)) {

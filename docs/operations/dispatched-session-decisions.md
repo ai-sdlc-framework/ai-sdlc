@@ -93,6 +93,57 @@ git log --oneline -5
 
 If commits exist: the developer subagent's earlier work is preserved. Re-dispatching will resume from where it left off, with the decision now answered.
 
+## Escalation chain (session hierarchy)
+
+Under the session hierarchy a question goes to the lowest tier able to answer it, and an
+unanswered question never stops throughput: the executor parks the task and claims the next one.
+
+| Tier | Raised with | Answered by | Timebox (default) |
+|---|---|---|---|
+| `operational` (sequencing, environment, retries) | `escalate --route operational` | `operator-dispatch` or the planner | 30 minutes |
+| `design` (RFC interpretation, scope, conflicting instructions) | `escalate --route design` (also the default when `--route` is absent) | the planner | 4 hours |
+| `operator` | reached only by promotion, or by the planner through the decision rubric | the operator, from a terminal outside the session roster | none (terminal) |
+
+```bash
+# Executor: raise it, park the task, then stop work on this task and claim the next one.
+node pipeline-cli/bin/cli-decisions.mjs escalate --route operational --park \
+  --task-id "AISDLC-NNN" --source-worktree "$(pwd)" \
+  --summary "<one line: what is blocking>" \
+  --option "opt-a:<first option>" --option "opt-b:<second option>"
+```
+
+- **Recorded on the decision:** the route, the raising session's roster name and the task id. A
+  later move up the chain is a `routing-changed` event, so `show` carries every hop.
+- **`--park`** moves the task's inflight manifest to `blocked/` with `blockedBy` set to the decision
+  id, and the command exits non-zero (1 unless `--exit-code` asks for another non-zero value) so the
+  executor knows to stop. If no inflight manifest exists the decision is still recorded, and a warning
+  says nothing was parked.
+- **Answering is scoped to the tier.** `answer` looks up the calling session's roster role and
+  refuses an out-of-scope answer with the reason and the next step (for example, an `operator-dispatch`
+  session answering a `design` decision is told to forward it to the planner). A caller that is not a
+  running roster session is the operator at a terminal and may answer at any tier. Answering a decision
+  whose task is parked returns that manifest to `queue/` (only when it still waits on this decision) and
+  messages the raising session.
+- **Timeboxes move a decision up, never down.** Set them in `.ai-sdlc/decisions-config.yaml`:
+
+  ```yaml
+  escalationTimeboxMinutes:
+    operational: 30
+    design: 240
+  ```
+
+  The dispatch session runs `cli-decisions promote-expired` on every wake-up. A decision still open
+  when its tier's timebox lapses moves up one tier (`operational` to `design`, `design` to `operator`);
+  the operator tier is terminal. **Silence never resolves a decision, and nothing moves downward.**
+  `promote-expired --dry-run` lists what would move without writing anything.
+- **Notifications.** On escalate (with `--route` or `--park`) and on promotion, the receiving tier's
+  session, found by role in the roster, gets one message with the decision id and summary; on answer
+  the raising session is told. Sending is best-effort: a missing or unreachable session is reported in
+  the command output and never fails the command. A plain `escalate` without `--route` or `--park`
+  records the route and sends nothing.
+- **Events.** `DecisionRouted` (when raised) and `DecisionEscalated` (on each promotion) go to the
+  orchestrator events stream with the decision id, `fromTier`, `toTier` and the task id.
+
 ## Durable persistence (AISDLC-546)
 
 `cli-decisions add`, `escalate` and `answer` no longer rely on the fragile local append alone. After

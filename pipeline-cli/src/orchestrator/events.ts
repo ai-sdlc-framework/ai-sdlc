@@ -332,9 +332,15 @@ export type OrchestratorEventType =
   /**
    * RFC-0051 - emitted when a decision is routed to a tier. Per-event fields:
    * `decisionId`, `route` (`operational` or `design`), `routedTo` (session
-   * name or role that now owns it).
+   * name or role that now owns it); optional `fromTier`, `toTier`.
    */
   | 'DecisionRouted'
+  /**
+   * RFC-0051 - emitted when an unanswered decision's timebox lapses and it
+   * moves up one tier. Per-event fields: `decisionId`, `fromTier`, `toTier`;
+   * optional `taskId`.
+   */
+  | 'DecisionEscalated'
   /**
    * RFC-0051 - emitted for every unblocking-playbook action the dispatch loop
    * takes or refuses. Per-event fields: `taskId`, `action` (`rebase-push`,

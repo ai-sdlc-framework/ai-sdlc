@@ -19,6 +19,7 @@ import { readDecisionEvents, type ReadEventsOpts } from './event-log.js';
 import { msRemainingUntil } from './timebox.js';
 import {
   DECISION_PRIORITY_WEIGHTS,
+  ESCALATION_TIERS,
   type AutoExpiredEvent,
   type Decision,
   type DecisionEvent,
@@ -27,6 +28,7 @@ import {
   type RecommendationIssuedEvent,
   type OperatorAnsweredEvent,
   type OverriddenEvent,
+  type RoutingChangedEvent,
   type StageCCompletedEvent,
   type TimeboxExtendedEvent,
 } from './decision-record.js';
@@ -72,9 +74,11 @@ function applyEvent(current: Decision | null, event: DecisionEvent): Decision | 
         ...(opened.governanceChange !== undefined
           ? { governanceChange: opened.governanceChange }
           : {}),
+        ...(opened.escalation !== undefined ? { escalation: opened.escalation } : {}),
       },
       status: {
         lifecycle: 'open',
+        ...(opened.escalation !== undefined ? { escalationTier: opened.escalation.route } : {}),
         ...(opened.routing !== undefined ? { routing: opened.routing } : {}),
         ...(opened.capacity !== undefined ? { capacity: opened.capacity } : {}),
         ...(opened.deadline !== undefined ? { deadline: opened.deadline } : {}),
@@ -106,6 +110,20 @@ function applyEvent(current: Decision | null, event: DecisionEvent): Decision | 
         ...current.status,
         timeboxExpiresAt: ext.newTimeboxExpiresAt,
       },
+      decisionLog: [...current.decisionLog, event],
+    };
+  }
+
+  if (event.type === 'routing-changed') {
+    // RFC-0051 — an escalated decision moved up one tier. Events that carry no
+    // valid target tier are logged without changing state.
+    if (current === null) return null;
+    const moved = event as RoutingChangedEvent;
+    const valid = (ESCALATION_TIERS as readonly string[]).includes(moved.toTier);
+    return {
+      ...current,
+      metadata: { ...current.metadata, updated: event.ts },
+      status: valid ? { ...current.status, escalationTier: moved.toTier } : current.status,
       decisionLog: [...current.decisionLog, event],
     };
   }

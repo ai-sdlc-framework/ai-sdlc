@@ -178,6 +178,12 @@ export interface DecisionsConfig {
   timeboxWindowHours?: number;
   timeboxWindowCount?: number;
   /**
+   * RFC-0051 escalation chain: minutes an escalated decision may sit unanswered
+   * at a tier before the dispatch loop moves it up one tier.
+   * Defaults: operational 30, design 240. The operator tier has no timebox.
+   */
+  escalationTimeboxMinutes?: { operational?: number; design?: number };
+  /**
    * RFC-0035 §5.3 Stage C LLM confidence threshold (AISDLC-289 / AC#3).
    * Stage C auto-applies when the LLM's self-reported confidence on the
    * `decision-recommendation` task meets or exceeds this value AND the
