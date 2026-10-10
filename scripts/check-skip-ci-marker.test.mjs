@@ -270,6 +270,19 @@ describe('check-skip-ci-marker.sh (AISDLC-88)', () => {
     assert.match(r.stdout, /skipped \(AI_SDLC_SKIP_MARKER_GATE=1\)/);
   });
 
+  it('respects the AI_SDLC_BYPASS_ALL_GATES=1 master bypass', () => {
+    writeFileSync(join(root, 'i.txt'), 'i\n');
+    git(['add', 'i.txt'], root);
+    git(['commit', '-q', '-m', 'feat: thing\n\n[skip ci] for some reason'], root);
+    const head = git(['rev-parse', 'HEAD'], root).trim();
+    const base = git(['rev-parse', 'HEAD~1'], root).trim();
+    const r = runCheck(root, [['refs/heads/main', head, 'refs/heads/main', base]], {
+      AI_SDLC_BYPASS_ALL_GATES: '1',
+    });
+    assert.equal(r.status, 0, `expected 0 with master bypass, got ${r.status}: ${r.stderr}`);
+    assert.match(r.stderr, /AI_SDLC_BYPASS_ALL_GATES=1/);
+  });
+
   it('skips deleted-branch tuples (local_sha all zeros)', () => {
     // git push --delete sends `local_sha = 0000...`. The script must not
     // try to walk a non-existent commit.

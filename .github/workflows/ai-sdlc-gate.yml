@@ -218,6 +218,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test
+      # AISDLC-727: ci.yml no longer runs on pull requests, so schema validation
+      # (cheap, cross-cutting) runs here instead of only post-merge on main.
+      - run: pnpm validate-schemas
 
   coverage:
     name: Coverage
