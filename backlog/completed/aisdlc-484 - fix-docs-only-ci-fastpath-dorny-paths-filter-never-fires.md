@@ -165,4 +165,4 @@ The `detect` job in `ai-sdlc-gate.yml` now computes `docs_only` with a `classify
 ## Follow-up
 - declined: add `--no-renames` to the diff (rare src-to-docs rename edge; reviewer minor).
 - declined: run the classifier from the base commit instead of the PR checkout (same exposure as before; reviewer minor hardening).
-- AC5 (real docs-only PR verification) is post-merge.
+- declined: AC5 real docs-only PR verification can only happen after this PR merges.
