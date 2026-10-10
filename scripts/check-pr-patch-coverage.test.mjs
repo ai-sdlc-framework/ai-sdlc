@@ -1048,13 +1048,20 @@ describe('check-pr-patch-coverage — AISDLC-726', () => {
       'dashboard/postcss.config.mjs',
       'pkg/src/__fixtures__/sample.ts',
       'pkg/src/__mocks__/fs.ts',
+      'ai-sdlc-plugin/mods/tests/stubs/claude-code.ts',
+      'ai-sdlc-plugin/mods/tests/stubs/jsx-runtime.ts',
     ]) {
       assert.equal(isInstrumentableFile(f), false, `${f} must not be instrumentable`);
     }
   });
 
   it('still treats ordinary source files as instrumentable', () => {
-    for (const f of ['pkg/src/feature.ts', 'dashboard/src/app/page.tsx', 'pkg/src/types.ts']) {
+    for (const f of [
+      'pkg/src/feature.ts',
+      'dashboard/src/app/page.tsx',
+      'pkg/src/types.ts',
+      'pkg/src/stubs/feature.ts',
+    ]) {
       assert.equal(isInstrumentableFile(f), true, `${f} must be instrumentable`);
     }
   });
