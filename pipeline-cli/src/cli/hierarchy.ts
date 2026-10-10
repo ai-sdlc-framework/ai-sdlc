@@ -130,7 +130,10 @@ Options for up:
                            when it starts a session or the roster changes, but only if the
                            file is absent or carries the "ai-sdlc" generated marker; inside
                            a VS Code terminal it ends by naming the task to run
-  --allow-planner-bypass   Allow the planner to start in bypassPermissions mode
+  --planner-permission-mode <m>
+                           Planner permission mode (default bypassPermissions, like the
+                           other sessions); pass default for a prompting planner
+  --allow-planner-bypass   Deprecated, no effect: every session starts in bypassPermissions
 
 Options for status:
   --json                   Print machine-readable output
@@ -375,6 +378,9 @@ export async function runHierarchyCli(
             ...(flags.project === undefined
               ? {}
               : { project: flags.project === 'true' ? '' : flags.project }),
+            ...(flags['planner-permission-mode'] === undefined
+              ? {}
+              : { plannerPermissionMode: flags['planner-permission-mode'] }),
             allowPlannerBypass: flags['allow-planner-bypass'] === 'true',
             vscodeTasks: flags['no-vscode-tasks'] !== 'true',
           },

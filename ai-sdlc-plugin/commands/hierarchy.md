@@ -17,7 +17,7 @@ scripts directory and forwards the arguments.
 ```
 /ai-sdlc hierarchy
 /ai-sdlc hierarchy status
-/ai-sdlc hierarchy up --executors 1 --no-planner
+/ai-sdlc hierarchy up --executors 1
 /ai-sdlc hierarchy down
 ```
 
