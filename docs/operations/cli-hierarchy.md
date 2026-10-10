@@ -286,11 +286,12 @@ cli-hierarchy clear --self [--resume-after <seconds>]
 | Option                     | Meaning                                                                                       |
 | -------------------------- | --------------------------------------------------------------------------------------------- |
 | `--settle-ms <n>`          | Wait between the two keystrokes (default 8000).                                               |
-| `--self`                   | Schedule the calling session's own pane to receive `/clear`, then `/ai-sdlc operator-dispatch` (dispatch session) or `/ai-sdlc executor` (an idle executor). |
+| `--self`                   | Schedule the calling session's own pane to receive `/clear`, then `/ai-sdlc operator-dispatch` (dispatch session), `/ai-sdlc:planner` (planner) or `/ai-sdlc executor` (an idle executor). |
 | `--resume-after <seconds>` | With `--self`: upper bound on the delay before the resume command (default 60); a new brief or verdict file wakes it sooner; `/clear` is typed after 20 s. Refused when `TMUX_PANE` is unset. |
 
-`clear <executor>` is a dispatch-session command; `clear --self` is also open to an executor
-that holds no inflight task, which is how an idle executor returns to the context floor.
+`clear <executor>` is a dispatch-session command; `clear --self` is also open to the planner
+and to an executor that holds no inflight task, which is how an idle executor returns to the
+context floor.
 A mistake guard resolves the caller from the process tree and the
 roster and exits 1 for anyone else (not authentication). `clear <executor>` refuses an
 executor that holds an inflight task, is not a running executor, or lacks the ownership
@@ -322,6 +323,68 @@ and stops; 20 s later its context is cleared and `/ai-sdlc executor` restarts it
 context floor, so an idle executor costs one short turn per ~25 minutes rather than a poll
 every 30 s on a large context. With no tmux pane to clear it falls back to `ScheduleWakeup`
 after `spec.inSessionAgent.emptyQueueHibernateSec` (default 1800 seconds).
+
+### `handoff`
+
+Write or read a session's handoff file. The file is generated from board and catalog state
+(roster, queue, inflight tasks, blocked and failed tasks, open decisions), never from prose,
+so it cannot go stale by omission.
+
+```bash
+cli-hierarchy handoff write --role <planner|operator-dispatch|executor> [--name <n>] [--out <path>]
+cli-hierarchy handoff read  --role <planner|operator-dispatch|executor> [--name <n>] [--out <path>]
+```
+
+| Option         | Meaning                                                                                      |
+| -------------- | -------------------------------------------------------------------------------------------- |
+| `--role <r>`   | `planner`, `operator-dispatch` (alias `dispatch`) or `executor`.                             |
+| `--name <n>`   | Session name; default the calling session's roster name, else the role.                      |
+| `--out <path>` | Use another file location.                                                                   |
+
+Files: dispatch and executors write `.ai-sdlc/dispatch/handoff/<session-name>.md`; the planner
+writes its dated memory file, `.claude/memory/project_planner_handoff_YYYY_MM_DD.md` (an
+existing dated file is reused). The generated text sits between
+`<!-- ai-sdlc-handoff:begin -->` and `<!-- ai-sdlc-handoff:end -->` with a hash of the state it
+was built from; text outside the markers (the planner's own notes) is kept on every rewrite.
+
+Call `write` after each state change (a ruling recorded, a task claimed, a verdict written, a
+brief sent). `read` recomputes the hash first and regenerates a missing or stale file, so a
+stale file is never read as current.
+
+**Resume contract.** After any `/clear`, the first thing a loop body does is
+`handoff read --role <r>`; the file and the board are all a fresh context needs. The resume
+command per role is `/ai-sdlc:planner`, `/ai-sdlc operator-dispatch` and `/ai-sdlc executor`.
+
+### `auto-clear`
+
+The Stop hook of the plugin (`context-auto-clear`) runs this after each turn of a session that
+is in the roster; any other session is a no-op.
+
+```bash
+cli-hierarchy auto-clear --transcript <path>
+```
+
+It reads the session's current context size (input plus cache tokens of the newest assistant
+usage entry in `--transcript`) and compares it with the role's threshold. Over it, it writes
+the handoff and runs the `clear --self` machinery with the role's resume command; the result is
+cleared within one turn without the operator. An executor that holds an inflight task is never
+cleared: the command reports `defer`, and the first turn after its verdict is written clears it.
+A clear scheduled in the last two minutes is not scheduled again.
+
+| Role                | Default threshold (tokens) | Resume command              |
+| ------------------- | -------------------------- | --------------------------- |
+| planner             | 150000                     | `/ai-sdlc:planner`          |
+| operator-dispatch   | 120000                     | `/ai-sdlc operator-dispatch` |
+| executor            | 120000                     | `/ai-sdlc executor`         |
+
+Thresholds are configurable in `.ai-sdlc/dispatch/config.json`:
+
+```json
+{ "contextThresholds": { "planner": 150000, "operator-dispatch": 120000, "executor": 120000 } }
+```
+
+Missing or invalid values fall back to the defaults. Set `AI_SDLC_AUTO_CLEAR=off` to switch the
+hook off for a session.
 
 ### `tick`
 
@@ -413,9 +476,11 @@ The cycle is **brief, tick, clear**:
    (`clear <executor>`), which restarts its loop with an empty context.
 
 Self-clear rule: **one task per executor context**, and **the dispatch session clears itself
-after every tick** (`clear --self`, refreshing its handoff file first), so every tick starts
+after every tick** (`clear --self`, regenerating its handoff with `handoff write` first), so every tick starts
 from the context floor. The self-clear needs tmux (`TMUX_PANE`); a dispatch session outside
-tmux is refused by `clear --self` and stops rather than polling with a growing context. The planner clears at 150k tokens of context.
+tmux is refused by `clear --self` and stops rather than polling with a growing context. Every role, the
+planner included, also clears itself automatically when its context passes its [threshold](#auto-clear);
+handoff files are regenerated by the CLI, so a session can be cleared at any moment.
 
 How `clear` interacts with an executor's loop: the executor's loop ends after it reports a
 verdict (step "Stop" in [The executor loop](parallel-dispatch.md#the-executor-loop)); `clear`

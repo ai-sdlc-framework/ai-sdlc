@@ -508,11 +508,6 @@ describe('clear, tick and route-decision', () => {
     it('tick reports identity, handoff, selfClear and the wake interval', async () => {
       seedBoardWithBrief();
       vi.spyOn(process.stderr, 'write').mockReturnValue(true);
-      mkdirSync(path.join(tmp, '.claude', 'memory'), { recursive: true });
-      writeFileSync(
-        path.join(tmp, '.claude', 'memory', 'operator-dispatch-handoff.md'),
-        'queue: 1',
-      );
       const code = await runHierarchyCli(
         ['tick', '--worker', 'operator-dispatch', '--work-dir', tmp],
         overrides({ env: {} }),
@@ -526,7 +521,9 @@ describe('clear, tick and route-decision', () => {
       expect(code).toBe(0);
       const out = JSON.parse(logs.at(-1) as string);
       expect(out.identity).toEqual({ name: 'operator-dispatch', planner: 'planner' });
-      expect(out.handoff).toBe('queue: 1');
+      // generated from board and catalog state, not read from a hand-written memory file
+      expect(out.handoff).toContain('# Handoff: operator-dispatch (operator-dispatch)');
+      expect(out.handoff).toContain('Resume command: `/ai-sdlc operator-dispatch`');
       expect(out.nextWakeSec).toBe(30);
       expect(out.selfClear.available).toBe(false);
       expect(out.selfClear.reason).toContain('cli-hierarchy up');
@@ -550,7 +547,7 @@ describe('clear, tick and route-decision', () => {
       const out = JSON.parse(logs.at(-1) as string);
       expect(out.nextWakeSec).toBe(1800);
       expect(out.selfClear.available).toBe(true);
-      expect(out.handoff).toBeUndefined();
+      expect(out.handoff).toContain('Queue, eligible: (none)');
     });
 
     it('clear --self refuses without TMUX_PANE and schedules nothing', async () => {

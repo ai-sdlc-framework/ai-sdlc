@@ -44,6 +44,8 @@ export {
   clearSelf,
   DISPATCH_RESUME_COMMAND,
   EXECUTOR_RESUME_COMMAND,
+  PLANNER_RESUME_COMMAND,
+  holdsInflight,
   type ClearSelfDeps,
   type ClearSelfOptions,
   type ClearSelfResult,
@@ -73,6 +75,22 @@ export {
   type VerdictReport,
 } from './dispatch-loop.js';
 export { markReadyAfterCodeql, type MarkReadyReport } from './mark-ready.js';
+export {
+  decideAutoClear,
+  markScheduled,
+  readContextTokens,
+  resolveThresholds,
+  DEFAULT_CONTEXT_THRESHOLDS,
+  type AutoClearDecision,
+} from './auto-clear.js';
+export {
+  collectHandoffState,
+  readHandoff,
+  writeHandoff,
+  RESUME_COMMANDS,
+  type HandoffOptions,
+  type HandoffResult,
+} from './handoff.js';
 export { hierarchyDown, type DownOutcome, type DownResult } from './down.js';
 export {
   checkDispatchCaller,

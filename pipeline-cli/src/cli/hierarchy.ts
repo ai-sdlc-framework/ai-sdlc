@@ -34,6 +34,10 @@
  *     on stderr, exit 0. Used by the executor skill before acting on an instruction.
  *   - `check-repo` — exit 0 only when the working directory is in the repository that
  *     owns this roster's board; otherwise print why and exit 1.
+ *   - `handoff write|read --role <planner|operator-dispatch|executor> [--name <n>]` — write
+ *     (from board and catalog state) or read (regenerating when stale) a session's handoff file.
+ *   - `auto-clear --transcript <path>` — Stop-hook entry: when the session's context is over
+ *     its role threshold, refresh its handoff and schedule `clear --self`.
  *   - `route-decision --decision-id <id> --route operational|design --to <name>`
  *     — record that a decision was routed to a tier.
  *
@@ -46,7 +50,6 @@
  * not authentication; a session running as the same user can defeat it.
  */
 
-import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -62,6 +65,9 @@ import {
   checkOwnWorktreeForOperator,
   clearExecutor,
   clearSelf,
+  decideAutoClear,
+  readHandoff as readGeneratedHandoff,
+  writeHandoff,
   createGitRunner,
   createStreamEmitter,
   createSystemIdentity,
@@ -94,6 +100,7 @@ import {
   type ForcePushMode,
   type GitRunner,
   type HierarchyDeps,
+  type HierarchyRole,
   type IdentityDeps,
   type OperationalPolicy,
 } from '../hierarchy/index.js';
@@ -111,6 +118,8 @@ Commands:
   clear      Empty an executor's context between tasks and restart its loop
   tick       One wake-up of the dispatch loop (ingest, verdict watch, playbook, reports)
   route-decision  Record that a decision was routed to a tier
+  handoff         Write or read a session's handoff file (handoff write|read --role <r>)
+  auto-clear      Clear this session when its context is over the role threshold (Stop hook)
   executor-start  Executor identity, repository check and a blocking claim, as one call
   check-sender    Exit 0 only when a message sender is this roster's dispatch session
   check-repo      Exit 0 only when the working directory is this roster's repository
@@ -162,8 +171,8 @@ Usage for clear:
   --self schedules the calling session's own pane (from its roster entry) to receive
   /clear after 20 s and then, --resume-after seconds later (default 60) or sooner when a new
   brief or verdict file lands on the board, the resume command: /ai-sdlc operator-dispatch
-  for the dispatch session, /ai-sdlc executor for an idle executor (which is refused while it
-  holds an inflight task). Refuses without TMUX_PANE.
+  for the dispatch session, /ai-sdlc:planner for the planner, /ai-sdlc executor for an idle
+  executor (which is refused while it holds an inflight task). Refuses without TMUX_PANE.
   Sends /clear to the executor's pane, waits for the settle time (default 8000 ms),
   then sends /ai-sdlc executor. Refuses an executor that holds an inflight task.
   clear <executor-name> is for the dispatch session only. A mistake guard refuses any other caller, a human
@@ -188,6 +197,18 @@ Options for check-sender:
   --sender-ref <ref>       Session ref the harness reports for the sender
   (a name written in the message text is never used)
 
+Options for handoff:
+  write | read             write regenerates the file from board and catalog state; read
+                           returns it, regenerating first when it is missing or stale
+  --role <r>               planner, operator-dispatch (or dispatch), or executor
+  --name <n>               Session name (default the calling session's roster name, else the role)
+  --out <path>             Alternative file location
+
+Options for auto-clear:
+  --transcript <path>      Session transcript whose usage fields give the context size
+                           Thresholds: planner 150000, dispatch 120000, executor 120000 tokens;
+                           override with contextThresholds in <board-dir>/config.json
+
 Options for route-decision:
   --decision-id <id>       Decision Catalog id
   --route <name>           operational or design
@@ -199,19 +220,24 @@ Common options:
   --board-dir <path>       Dispatch board directory (default ${DEFAULT_BOARD_DIR})
 `;
 
-/** Largest handoff file `tick` hands back, in characters. */
+/** Largest handoff text `tick` hands back, in characters. */
 const HANDOFF_MAX_CHARS = 8000;
 
-/** The dispatch handoff file in the project's auto-memory directory, or undefined when absent. */
-function readHandoff(repoRoot: string): string | undefined {
+/**
+ * The dispatch handoff, regenerated from board and catalog state after this tick's changes
+ * (so it is never stale), or undefined when it cannot be written.
+ */
+function dispatchHandoff(deps: HierarchyDeps, name: string): string | undefined {
   try {
-    const text = readFileSync(
-      path.join(repoRoot, '.claude', 'memory', 'operator-dispatch-handoff.md'),
-      'utf-8',
-    );
-    return text.length > HANDOFF_MAX_CHARS
-      ? `${text.slice(0, HANDOFF_MAX_CHARS)}\n[truncated]`
-      : text;
+    const { content } = writeHandoff({
+      role: 'operator-dispatch',
+      name,
+      boardDir: deps.boardDir,
+      now: deps.now,
+    });
+    return content.length > HANDOFF_MAX_CHARS
+      ? `${content.slice(0, HANDOFF_MAX_CHARS)}\n[truncated]`
+      : content;
   } catch {
     return undefined;
   }
@@ -232,6 +258,12 @@ export function selfClearAvailability(env: NodeJS.ProcessEnv): {
       'TMUX_PANE is unset, so this session cannot clear itself. Start the dispatch session with ' +
       '`cli-hierarchy up` (it runs in tmux). Without tmux, stop after this tick instead of looping.',
   };
+}
+
+/** `--role` as a hierarchy role; `dispatch` is an alias of `operator-dispatch`. */
+function parseRoleFlag(raw: string | undefined): HierarchyRole | null {
+  if (raw === 'dispatch') return 'operator-dispatch';
+  return raw === 'planner' || raw === 'operator-dispatch' || raw === 'executor' ? raw : null;
 }
 
 /** Parse an optional whole-number flag; null (after writing an error) when malformed. */
@@ -436,20 +468,20 @@ export async function runHierarchyCli(
         return result.refused.length > 0 ? 1 : 0;
       }
       case 'clear': {
-        // An idle executor may clear itself; any other `--self` caller is the dispatch session.
+        // An idle executor and the planner may clear themselves; any other `--self` caller is the dispatch session.
         const executorSelf =
           flags.self === 'true'
             ? resolveCaller(
                 extras.identity ?? createSystemIdentity(deps.boardDir, extras.processLookup),
               )
             : null;
-        if (executorSelf?.role === 'executor') {
+        if (executorSelf?.role === 'executor' || executorSelf?.role === 'planner') {
           const resumeAfter = intFlag(flags, 'resume-after');
           if (resumeAfter === null) return 2;
           const result = clearSelf(
             {
               self: executorSelf.name,
-              role: 'executor',
+              role: executorSelf.role,
               ...(resumeAfter === undefined ? {} : { resumeAfterSeconds: resumeAfter }),
               ...(deps.env.TMUX_PANE ? { callerPane: deps.env.TMUX_PANE } : {}),
             },
@@ -580,7 +612,7 @@ export async function runHierarchyCli(
           JSON.stringify({
             ...result,
             identity: { name: worker, planner: planner?.name ?? '' },
-            handoff: readHandoff(repoRoot),
+            handoff: dispatchHandoff(deps, worker),
             selfClear: selfClearAvailability(deps.env),
           }),
         );
@@ -646,6 +678,85 @@ export async function runHierarchyCli(
           return 1;
         }
         deps.log(JSON.stringify({ ok: true, project: check.project }));
+        return 0;
+      }
+      case 'handoff': {
+        const action = firstPositional(argv);
+        const role = parseRoleFlag(flags.role);
+        if ((action !== 'write' && action !== 'read') || !role) {
+          process.stderr.write(
+            `cli-hierarchy handoff: use 'handoff write|read --role planner|operator-dispatch|executor'\n`,
+          );
+          return 2;
+        }
+        const caller = resolveCaller(
+          extras.identity ?? createSystemIdentity(deps.boardDir, extras.processLookup),
+        );
+        const name =
+          flags.name && flags.name !== 'true'
+            ? flags.name
+            : caller?.role === role
+              ? caller.name
+              : undefined;
+        const opts = {
+          role,
+          boardDir: deps.boardDir,
+          now: deps.now,
+          ...(name ? { name } : {}),
+          ...(flags.out && flags.out !== 'true' ? { file: flags.out } : {}),
+        };
+        if (action === 'write') {
+          const r = writeHandoff(opts);
+          deps.log(JSON.stringify({ ok: true, file: r.file, stateHash: r.stateHash }));
+        } else {
+          const r = readGeneratedHandoff(opts);
+          deps.log(r.content.trimEnd());
+          process.stderr.write(
+            `cli-hierarchy handoff: ${r.file}${r.regenerated ? ' (was missing or stale; regenerated from live state)' : ''}\n`,
+          );
+        }
+        return 0;
+      }
+      case 'auto-clear': {
+        const transcript = flags.transcript;
+        if (!transcript || transcript === 'true') {
+          process.stderr.write('cli-hierarchy auto-clear: --transcript is required\n');
+          return 2;
+        }
+        const self = resolveCaller(
+          extras.identity ?? createSystemIdentity(deps.boardDir, extras.processLookup),
+        );
+        if (!self) {
+          deps.log(JSON.stringify({ action: 'none', reason: 'not a hierarchy session' }));
+          return 0;
+        }
+        const role = self.role as HierarchyRole;
+        const decision = decideAutoClear({
+          boardDir: deps.boardDir,
+          role,
+          name: self.name,
+          transcriptPath: transcript,
+          now: deps.now,
+        });
+        if (decision.action !== 'clear') {
+          deps.log(JSON.stringify(decision));
+          return 0;
+        }
+        const handoff = writeHandoff({
+          role,
+          name: self.name,
+          boardDir: deps.boardDir,
+          now: deps.now,
+        });
+        const result = clearSelf(
+          {
+            self: self.name,
+            role,
+            ...(deps.env.TMUX_PANE ? { callerPane: deps.env.TMUX_PANE } : {}),
+          },
+          { run: deps.run, boardDir: deps.boardDir, log: deps.log },
+        );
+        deps.log(JSON.stringify({ ...decision, handoff: handoff.file, scheduled: result }));
         return 0;
       }
       case 'route-decision': {

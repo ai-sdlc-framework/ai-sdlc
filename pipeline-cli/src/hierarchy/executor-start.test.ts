@@ -231,13 +231,13 @@ describe('cli-hierarchy executor-start and clear --self (executor)', () => {
     expect(r.code).toBe(2);
   });
 
-  it('lets an executor clear itself and refuses a non-dispatch, non-executor caller', async () => {
+  it('lets an executor clear itself and sends any other caller through the roster check', async () => {
     const r = await run(['clear', '--self', '--resume-after', 'x'], {
       identity: identityFor('executor', 'proj-executor-alpha'),
     });
     expect(r.code).toBe(2);
     const p = await run(['clear', '--self'], { identity: identityFor('planner', 'proj-planner') });
     expect(p.code).toBe(1);
-    expect(p.err).toMatch(/only the dispatch session may run this command/);
+    expect(p.err).not.toMatch(/only the dispatch session may run this command/);
   });
 });

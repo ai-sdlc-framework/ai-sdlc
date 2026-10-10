@@ -12,7 +12,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { claimNext, writeManifest } from '../dispatch/board.js';
 import type { DispatchManifest } from '../dispatch/types.js';
-import { clearExecutor, clearSelf, HIERARCHY_CLEAR_CAPABILITY, type ClearDeps } from './clear.js';
+import {
+  clearExecutor,
+  clearSelf,
+  HIERARCHY_CLEAR_CAPABILITY,
+  recentlyScheduled,
+  type ClearDeps,
+} from './clear.js';
 import type { HierarchyEvent } from './emit.js';
 import { writeRoster } from './roster.js';
 import type { CommandRunner, Roster, RosterEntry } from './types.js';
@@ -445,6 +451,12 @@ describe('clearSelf', () => {
     expect(sends()).toHaveLength(0);
   });
 
+  it('stamps the auto-clear debounce so the Stop hook skips this turn', () => {
+    expect(recentlyScheduled(board, 'operator-dispatch', Date.now())).toBe(false);
+    clearSelf({ self: 'operator-dispatch' }, selfDeps());
+    expect(recentlyScheduled(board, 'operator-dispatch', Date.now())).toBe(true);
+  });
+
   it('wakes early on a new brief or verdict file when given the board to watch', () => {
     clearSelf(
       { self: 'operator-dispatch', resumeAfterSeconds: 1800, wakeOnBoardDir: '/board' },
@@ -499,6 +511,29 @@ describe('clearSelf', () => {
         : d.run(file, args);
     expect(() => clearSelf({ self: 'operator-dispatch' }, { ...d, run })).toThrow(/stale/);
     expect(spawned).toHaveLength(0);
+  });
+
+  describe('as the planner', () => {
+    it('schedules /clear then /ai-sdlc:planner on its own pane', () => {
+      seedRoster(
+        entry({ role: 'planner', name: 'planner', tmuxWindow: 'planner', paneId: '%5' }),
+        dispatch(),
+      );
+      const d = selfDeps();
+      const run = (file: string, args: readonly string[]) => {
+        calls.push({ file, args: [...args] });
+        const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
+        if (args[0] === 'list-windows') return ok('planner\n');
+        if (args[0] === 'display-message') return ok('%5\n');
+        return ok();
+      };
+      const r = clearSelf(
+        { self: 'planner', role: 'planner', resumeAfterSeconds: 30 },
+        { ...d, run },
+      );
+      expect(r).toMatchObject({ self: 'planner', paneId: '%5' });
+      expect(spawned[0]!.args.slice(3)).toEqual(['20', '%5', '/clear', '30', '/ai-sdlc:planner']);
+    });
   });
 
   describe('as an idle executor', () => {
