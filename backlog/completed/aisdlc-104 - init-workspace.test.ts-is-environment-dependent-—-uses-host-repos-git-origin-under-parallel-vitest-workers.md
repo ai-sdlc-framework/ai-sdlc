@@ -16,7 +16,6 @@ references:
   - orchestrator/src/cli/commands/init-workspace.test.ts
   - orchestrator/src/cli/commands/init.ts
   - orchestrator/src/cli/commands/git-remote.test.ts
-  - scripts/check-coverage.sh
 priority: medium
 ---
 

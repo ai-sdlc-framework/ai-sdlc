@@ -13,7 +13,7 @@
 # coverage data. This script fixes the base and also falls back to the full run
 # when the changed-only run selects no tests although source files changed.
 #
-# Never loosens the gate: the 80% patch-coverage check runs unchanged afterwards.
+# Never loosens the gate: the 90% patch-coverage check runs unchanged afterwards.
 set -uo pipefail
 
 full() {

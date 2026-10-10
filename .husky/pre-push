@@ -7,16 +7,8 @@
 #      AI_SDLC_SKIP_SUBSTRATE_GATE=1.
 #   0b. Dark-code gate (AISDLC-687) — `node scripts/check-dark-code.mjs`: a newly
 #      unwired module, a grown baseline or a new test double in production code
-#      blocks the push. Static scan, runs before coverage. Skip:
-#      AI_SDLC_SKIP_DARK_CODE_GATE=1.
-#   1. Coverage gate — fails fast on under-tested code so we don't
-#      sign an attestation for a build we'd reject anyway.
-#      NOTE: pnpm test:coverage is known to show transient failures (up to 17
-#      tests across 3 files) when multiple worktrees run pre-push hooks
-#      concurrently and share /tmp space. If you see intermittent failures,
-#      retry with AI_SDLC_SKIP_COVERAGE_GATE=1 git push once, then re-run
-#      coverage in isolation. See docs/operations/merge-queue-rebase-recovery.md
-#      "Coverage gate flake" section for the full retry recipe (AISDLC-357).
+#      blocks the push. Static scan. Skip: AI_SDLC_SKIP_DARK_CODE_GATE=1.
+#      (There is no local coverage gate: coverage is gated once, in CI — AISDLC-726.)
 #   2. Squash stacked chore-sign commits (AISDLC-369) — when multiple
 #      consecutive "chore: sign attestation" commits accumulate at HEAD
 #      (from re-sign cycles), squashes them into one to keep history clean.
@@ -41,7 +33,7 @@
 #      skip (they check the same bypass var).
 #
 # Skip individual gates with their respective env vars
-# (AI_SDLC_SKIP_SUBSTRATE_GATE=1, AI_SDLC_SKIP_COVERAGE_GATE=1,
+# (AI_SDLC_SKIP_SUBSTRATE_GATE=1,
 # AI_SDLC_SKIP_TASK_MOVE=1, AI_SDLC_SKIP_SQUASH_CHORES=1,
 # AI_SDLC_SKIP_CHANGELOG_CHECK=1, AI_SDLC_SKIP_FOLLOWUP_GATE=1,
 # AI_SDLC_SKIP_ATTESTATION_SIGN=1, AI_SDLC_SKIP_DARK_CODE_GATE=1)
@@ -66,10 +58,9 @@ fi
 PUSH_STDIN="$(cat || true)"
 
 node scripts/check-substrate-contract.mjs
-# AISDLC-687: dark-code static scan (cheap) before the expensive coverage gate. Skip:
+# AISDLC-687: dark-code static scan (cheap). Skip:
 # AI_SDLC_SKIP_DARK_CODE_GATE=1.
 ./scripts/check-dark-code-on-push.sh
-./scripts/check-coverage.sh
 if [ "${AI_SDLC_SKIP_SQUASH_CHORES:-}" != "1" ]; then
   ./scripts/squash-attestation-chores.sh
 fi

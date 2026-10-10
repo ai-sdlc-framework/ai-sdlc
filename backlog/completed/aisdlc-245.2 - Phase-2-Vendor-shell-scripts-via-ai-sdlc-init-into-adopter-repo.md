@@ -16,7 +16,6 @@ references:
   - scripts/check-orchestrator-state.sh
   - scripts/check-attestation-sign.sh
   - scripts/check-task-moved.sh
-  - scripts/check-coverage.sh
 priority: high
 ---
 

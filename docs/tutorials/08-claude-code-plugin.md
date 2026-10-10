@@ -39,7 +39,6 @@ Once the plugin is installed, these hooks run without any configuration:
 | `enforce-blocked-actions.js` | PreToolUse | Blocks Bash commands matching `blockedActions` patterns |
 | `collect-tool-sequence.js` | PostToolUse | Captures tool calls for workflow pattern detection (async) |
 | Agent verification | Stop | LLM-powered deep check for governance compliance (Haiku) |
-| `deferred-coverage-check.js` | Stop (asyncRewake) | Runs coverage in background, wakes model if below threshold |
 | `permission-check.js` | PermissionRequest | Hard deny at permission layer for blocked actions |
 
 The **SessionStart** hook injects context like:

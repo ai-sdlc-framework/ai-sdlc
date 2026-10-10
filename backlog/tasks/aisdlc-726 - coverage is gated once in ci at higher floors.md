@@ -10,7 +10,6 @@ labels:
   - governance
 dependencies: []
 references:
-  - scripts/check-coverage.sh
   - scripts/check-pr-patch-coverage.mjs
   - codecov.yml
   - .husky/pre-push

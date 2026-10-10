@@ -217,20 +217,20 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test:coverage
-      # AISDLC-376: server-side patch-coverage gate. Asserts ≥80% of the lines
+      # AISDLC-376: server-side patch-coverage gate. Asserts ≥90% of the lines
       # this PR adds/modifies are covered by tests, mirroring the AISDLC-372-
       # dropped codecov/patch gate without the SaaS latency. Runs INSIDE the
       # Coverage job so vitest's coverage-final.json fixtures are already on
       # disk and we don't pay a second `pnpm test:coverage`. Same gate also
       # runs in `ci.yml` as a backstop; the alls-green rollup treats either
       # passing as sufficient.
-      - name: Patch coverage gate (≥80%)
+      - name: Patch coverage gate (≥90%)
         if: github.event_name == 'pull_request'
         run: |
           node scripts/check-pr-patch-coverage.mjs \
             --base "${{ github.event.pull_request.base.sha }}" \
             --head "${{ github.event.pull_request.head.sha }}" \
-            --threshold 80
+            --threshold 90
 
   integration:
     name: Integration Tests

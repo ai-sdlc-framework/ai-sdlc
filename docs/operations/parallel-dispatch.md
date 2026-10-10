@@ -940,37 +940,18 @@ mv .ai-sdlc/dispatch/sessions/aisdlc-462.session.json \
 
 ---
 
-## Pre-push gate resource use
+## Vitest worker resource use
 
-AISDLC-681. Parallel sessions all run the pre-push coverage gate
-(`scripts/check-coverage.sh`), and each gate run fans out vitest workers, so the
-gate is bounded on three axes:
+AISDLC-681. Parallel sessions all run vitest, and each run fans out workers, so every
+package's vitest config imports the shared preset (`vitest.shared.mjs`):
 
-- **Reaping.** The build and the coverage run execute in their own process group
-  (`scripts/run-in-process-group.mjs`). When the hook ends (normally, by timeout, or
-  via SIGINT/SIGTERM/SIGHUP) that whole group is killed, so no vitest worker is left
-  with parent pid 1. Separately, every package's vitest config imports the shared
-  preset (`vitest.shared.mjs`): `pool: 'forks'`, and each worker exits when its parent
-  disappears (it polls the parent pid every 2 s). This protects any test run, including
-  subagent runs killed by a Bash-tool timeout, not only the gate. Neither is env-gated.
-- **Timeout.** `AI_SDLC_COVERAGE_TIMEOUT_SEC` (default `900`) is a hard wall-clock limit
-  per build and per coverage run. On expiry the group is killed and the gate FAILS with a
-  message naming the timeout; a timeout is never a pass.
-- **Worker ceiling.** Two variables, default `min(4, ncpu/2)` each:
-  `AI_SDLC_COVERAGE_MAX_WORKERS` sets the `--maxWorkers` the gate passes to the
-  coverage run; `AI_SDLC_VITEST_MAX_WORKERS` sets the default ceiling the shared
-  preset applies to every vitest run (local and CI). When both apply to a gate run,
-  the gate's explicit `--maxWorkers` wins.
-- **Lock.** Only one gate runs per repository at a time. The lock is the directory
-  `<main checkout>/.ai-sdlc/runtime/coverage-gate.lock` (the main checkout is resolved
-  from `git rev-parse --git-common-dir`, so sibling worktrees share it). A waiting push
-  prints the holder's pid, host, worktree, and start time. A same-host holder is
-  trusted by pid liveness only (alive keeps the lock however old; dead releases it). An
-  ownerless lock (hook killed mid-create) is reclaimed after 10 s; a foreign-host or
-  unparsable owner after 2 x timeout + 60 s. Reclaiming runs under a short mutex and
-  verifies the owner it judged stale. A symlinked lock path is refused. A push waits up
-  to 2 x timeout + 60 s (`AI_SDLC_COVERAGE_LOCK_WAIT_SEC` overrides), then fails.
-  `AI_SDLC_COVERAGE_TIMEOUT_SEC` is clamped to 86400.
+- **Reaping.** `pool: 'forks'`, and each worker exits when its parent disappears (it
+  polls the parent pid every 2 s), so a vitest run killed by a Bash-tool timeout leaves
+  no worker with parent pid 1. Not env-gated.
+- **Worker ceiling.** `AI_SDLC_VITEST_MAX_WORKERS` sets the ceiling the shared preset
+  applies to every vitest run (local and CI); default `min(4, ncpu/2)`.
+
+No local gate runs coverage (AISDLC-726); coverage is gated once, in CI.
 
 `ai-sdlc doctor` (check `orphaned-vitest-workers`) warns about vitest processes with
 parent pid 1 older than two minutes and prints the `kill` command.

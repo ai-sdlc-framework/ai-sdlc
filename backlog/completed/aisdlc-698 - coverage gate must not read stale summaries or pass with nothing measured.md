@@ -11,7 +11,6 @@ labels:
   - dx
 dependencies: []
 references:
-  - scripts/check-coverage.sh
   - CLAUDE.md
 priority: high
 dispatchable: true

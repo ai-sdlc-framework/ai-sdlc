@@ -15,7 +15,6 @@ dependencies: []
 priority: high
 references:
   - spec/rfcs/RFC-0042-proof-of-execution-attestation.md
-  - scripts/check-coverage.sh
   - scripts/check-task-moved.sh
   - scripts/check-attestation-sign.sh
 drift_log:

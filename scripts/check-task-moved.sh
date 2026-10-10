@@ -37,14 +37,12 @@
 #      and exit 1 with a clear "re-run git push" message.
 #   5. If all tasks were already moved (or nothing to move), exit 0.
 #
-# Activation: invoked from `.husky/pre-push` AFTER the coverage gate and
-# BEFORE the attestation-sign gate. Order is load-bearing (see AISDLC-220 AC
+# Activation: invoked from `.husky/pre-push` BEFORE the attestation-sign gate. Order is load-bearing (see AISDLC-220 AC
 # #2): attestation's contentHashV4 binds {path, headBlobSha} per file. If the
 # task move happens AFTER attestation sign, the envelope hashes the OLD path
 # (`backlog/tasks/…`) but the actual PR diff contains the NEW path
 # (`backlog/completed/…`) — verify-attestation will reject the envelope.
-# Order in `.husky/pre-push`: check-coverage.sh → check-task-moved.sh →
-# check-attestation-sign.sh.
+# Order in `.husky/pre-push`: check-task-moved.sh → check-attestation-sign.sh.
 #
 # Override:
 #   AI_SDLC_SKIP_TASK_MOVE=1 git push

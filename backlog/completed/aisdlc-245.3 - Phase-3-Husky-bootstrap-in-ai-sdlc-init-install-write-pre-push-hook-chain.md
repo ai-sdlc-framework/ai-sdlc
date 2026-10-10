@@ -17,7 +17,6 @@ dependencies:
   - AISDLC-245.2
 references:
   - .husky/pre-push
-  - scripts/check-coverage.sh
   - scripts/check-task-moved.sh
   - scripts/check-attestation-sign.sh
 priority: high

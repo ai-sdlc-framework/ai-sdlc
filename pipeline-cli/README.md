@@ -633,7 +633,7 @@ These come from RFC-0012 §3.1 + the AI-SDLC governance hooks:
 - **Unit tests** are colocated with the source they exercise — `src/steps/<step>.ts` ↔ `src/steps/<step>.test.ts`. Each step has happy-path + error-path coverage.
 - **Integration test** lives at `src/execute-pipeline.test.ts` and runs the full Step 0-13 against `MockSpawner` + `FakeRunner` in a tmp project root.
 - **Test helpers** (`FakeRunner`, `makeTmpProject`, `writeTaskFile`) live in `src/__test-helpers/` so they're picked up by Vitest's default include glob alongside the colocated `*.test.ts` files.
-- **Coverage gate** is 80% lines/functions, enforced by `vitest.config.ts` and the workspace-level `scripts/check-coverage.sh`.
+- **Coverage gate** is a 90% lines floor (80% functions), enforced in CI by `vitest.config.ts` thresholds plus the 90% patch-coverage gate. No local hook runs coverage (AISDLC-726).
 
 ```bash
 pnpm test                  # vitest run

@@ -2,7 +2,7 @@
 //
 // Each test sets up a temp git repo + tmp "remote" repo + invokes the script
 // via execFileSync, asserting exit code + post-state. Mirrors the pattern in
-// check-attestation-sign.test.mjs / check-coverage.sh tests.
+// check-attestation-sign.test.mjs tests.
 
 import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import { strict as assert } from 'node:assert';

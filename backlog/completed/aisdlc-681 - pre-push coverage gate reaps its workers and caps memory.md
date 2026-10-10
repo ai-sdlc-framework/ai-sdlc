@@ -13,7 +13,6 @@ labels:
   - operations
 dependencies: []
 references:
-  - scripts/check-coverage.sh
   - .husky/pre-push
   - pipeline-cli/vitest.config.ts
   - docs/operations/parallel-dispatch.md

@@ -12,8 +12,6 @@ labels:
 dependencies:
   - AISDLC-666
 references:
-  - ai-sdlc-plugin/hooks/deferred-coverage-check.js
-  - ai-sdlc-plugin/hooks/deferred-coverage-check.test.mjs
   - vitest.parent-watch.setup.mjs
   - scripts/vitest-parent-death.test.mjs
   - vitest.shared.mjs

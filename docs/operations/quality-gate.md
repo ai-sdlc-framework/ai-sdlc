@@ -141,22 +141,24 @@ Per Q3 in the AISDLC-140 redesign decision and the industry consensus documented
 
 **AISDLC-214 cleanup (follow-up PR):** Once the operator updates branch protection (AISDLC-388 AC-2), the "short-circuit — post ai-sdlc/attestation success (docs-only)" step in `verify-attestation.yml` can be deleted. It is intentionally retained until then to avoid a race where the merge queue still requires the status. Do NOT delete before the branch-protection update.
 
-## Patch coverage — the 80% gate (AISDLC-376)
+## Patch coverage — the 90% gate (AISDLC-376, AISDLC-726)
 
-**80% patch coverage is non-negotiable.** The framework enforces this at two layers and one server-side gate:
+**Coverage is gated once, in CI (AISDLC-726).** There is no local pre-push or Stop-hook coverage run and no skip variable; nothing runs coverage automatically on a developer machine. CI enforces two things:
 
 | Layer | Where | Bypassable | Authority |
 |---|---|---|---|
-| Local pre-push | `scripts/check-coverage.sh` (per-package lines threshold) | `AI_SDLC_SKIP_COVERAGE_GATE=1` | First line of defense — fast feedback |
-| CI patch gate | `scripts/check-pr-patch-coverage.mjs` (PR-diff patch coverage) | No (no skip env var) | **Authoritative merge gate** |
-| Informational | codecov.io (PR comment + dashboard) | Not a check | Visibility only |
+| Package line floors | `thresholds.lines` in each package's `vitest.config.ts` (90 for reference, orchestrator, pipeline-cli, mcp-server, mcp-advisor, sdk-typescript; 85 for dogfood, dashboard, conformance runner), enforced by `pnpm test:coverage` in CI | No | **Authoritative** |
+| CI patch gate | `scripts/check-pr-patch-coverage.mjs` (PR-diff patch coverage, threshold 90) | No (no skip env var) | **Authoritative merge gate** |
+| Informational | codecov.io (PR comment + dashboard, patch target 90) | Not a check | Visibility only |
+
+Developers are asked (developer agent instructions) to hold the packages they touch to 95% lines and to run coverage for those packages once before their first push; that is a working target, not a CI gate.
 
 The CI patch gate runs in two places that both must pass:
 
-1. **`ci.yml` → coverage job → `Patch coverage gate (≥80%)` step** — runs on every `pull_request` event after `vitest --coverage` has produced `coverage-final.json` fixtures for the affected packages.
-2. **`ai-sdlc-gate.yml` → coverage job → `Patch coverage gate (≥80%)` step** — runs as part of the `ai-sdlc/pr-ready` rollup, so any failure cascades into the single required check.
+1. **`ci.yml` → coverage job → `Patch coverage gate (≥90%)` step** — runs on every `pull_request` event after `vitest --coverage` has produced `coverage-final.json` fixtures for the affected packages.
+2. **`ai-sdlc-gate.yml` → coverage job → `Patch coverage gate (≥90%)` step** — runs as part of the `ai-sdlc/pr-ready` rollup, so any failure cascades into the single required check.
 
-Both layers parse the unified diff (`git diff --unified=0 base..head`) per file, compute the union of NEW line numbers added/modified by the PR, then check each line against vitest's istanbul-format `coverage-final.json` statement map + hit counts. A line is "covered" when any statement on it was hit at least once. The aggregate ratio `covered / executable_changed_lines` must be ≥ 80%.
+Both layers parse the unified diff (`git diff --unified=0 base..head`) per file, compute the union of NEW line numbers added/modified by the PR, then check each line against vitest's istanbul-format `coverage-final.json` statement map + hit counts. A line is "covered" when any statement on it was hit at least once. The aggregate ratio `covered / executable_changed_lines` must be ≥ 90%.
 
 ### When the gate skips (intentional)
 
@@ -168,13 +170,14 @@ Both layers parse the unified diff (`git diff --unified=0 base..head`) per file,
 
 - **patch % < threshold.** Reports per-file coverage and the aggregate ratio. Operator action: add tests for the listed lines.
 - **Missing coverage data entirely.** Zero `coverage-final.json` files found under the coverage root despite a code diff. Diagnostic: "did vitest --coverage run before this gate?" — almost always a workflow regression where the gate step ran before / instead of the `pnpm test:coverage` step.
-- **Missing per-file coverage data.** A changed code file has no entry in any `coverage-final.json`. Treated as worst case (every changed line counted as uncovered). Operator action: either add tests covering the file, or explicitly exclude it from vitest's `coverage.include` if it's not testable (CLI shims, generated code).
+- **Missing per-file coverage data.** A changed code file has no entry in any `coverage-final.json`. Treated as worst case (every changed line counted as uncovered), and it fails the gate regardless of the percentage. Operator action: either add tests covering the file, or add it to `NON_INSTRUMENTED_PATTERNS` in the script if it's not testable.
+  - File kinds that trip this rule: (1) a source file no test loads (genuinely untested; correct failure); (2) files outside any package's coverage scope: `*.d.ts`, `*.config.*` tool configs, `__fixtures__/` and `__mocks__/` directories, CLI shims, barrels, bin shims, hooks, generated schemas (all in `NON_INSTRUMENTED_PATTERNS`; the first three added by AISDLC-726); (3) types-only modules (interfaces and type aliases) that tests only ever `import type`, which v8 never loads. Kind (3) cannot be recognised by path and is deliberately still a failure: add a runtime test import, or move the types into a barrel-excluded or `.d.ts` file. The higher threshold does not change this rule, since it fails on absence of data and not on the percentage.
 
 ### Why this replaces codecov/patch as the merge-blocking signal
 
-Before AISDLC-372 dropped codecov/patch from required checks, the SaaS handled this enforcement. The drop opened a gap: PR #550 (AISDLC-302) landed UNSTABLE with 0.6% patch coverage after a shotgun-rename of 6 test files. The local pre-push gate was bypassed legitimately for a chore-sign commit (`AI_SDLC_SKIP_COVERAGE_GATE=1`), and nothing on the CI side caught the resulting drop because codecov/patch was no longer required. The operator (2026-05-19) flagged the missing CI-side mirror; AISDLC-376 closes the gap.
+Before AISDLC-372 dropped codecov/patch from required checks, the SaaS handled this enforcement. The drop opened a gap: PR #550 (AISDLC-302) landed UNSTABLE with 0.6% patch coverage after a shotgun-rename of 6 test files. The then-local pre-push gate was bypassed legitimately for a chore-sign commit, and nothing on the CI side caught the resulting drop because codecov/patch was no longer required. The operator (2026-05-19) flagged the missing CI-side mirror; AISDLC-376 closes the gap.
 
-The new gate replicates codecov/patch's gating semantics (≥80% on the PR diff) without the SaaS latency, the App-source deadlock on zero-LCOV PRs, or the third-party-dependency risk.
+The new gate replicates codecov/patch's gating semantics (≥90% on the PR diff) without the SaaS latency, the App-source deadlock on zero-LCOV PRs, or the third-party-dependency risk.
 
 ### Operator action — optionally add as a direct required check
 
@@ -184,7 +187,7 @@ The gate rolls into `ai-sdlc/pr-ready` automatically (via the `coverage` job in 
 gh api -X PATCH repos/<org>/<repo>/branches/main/protection/required_status_checks \
   -F 'contexts[]=Backlog Drift' \
   -F 'contexts[]=ai-sdlc/pr-ready' \
-  -F 'contexts[]=Patch coverage gate (≥80%)' \
+  -F 'contexts[]=Patch coverage gate (≥90%)' \
   -F 'strict=true'
 ```
 
@@ -194,11 +197,12 @@ The recommended default is to leave it inside the rollup (the alls-green pattern
 
 `scripts/check-pr-patch-coverage.test.mjs` covers:
 
-- **AC-1**: success when patch % ≥ 80 (also in JSON mode).
-- **AC-2**: failure when patch % < 80, with per-file breakdown.
+- **AC-1**: success when patch % ≥ threshold (also in JSON mode).
+- **AC-2**: failure when patch % < threshold, with per-file breakdown.
 - **AC-3**: skip on 0 changed code files (docs-only, test-only, workflow-only).
 - **AC-4**: diagnostic failure on missing coverage data (no fixture, or no entry for a changed file).
 - CLI plumbing: argv validation, threshold range checks, missing coverage-root.
+- Default threshold 90 when `--threshold` is omitted (AISDLC-726); non-instrumented kinds (`*.d.ts`, `*.config.*`, fixtures, mocks).
 - Threshold customization: pass at 50% threshold with 60% coverage; fail at 90%.
 - Multi-file aggregation: two files with 75% aggregate coverage pass at 70% threshold.
 
@@ -208,7 +212,7 @@ Run with: `pnpm test:patch-coverage-gate` or `node --test scripts/check-pr-patch
 
 `codecov/patch` was removed from required branch-protection status checks. It stays configured in CI (`codecov/codecov-action@v5` in `.github/workflows/ci.yml`) for informational reporting — PR comments with line-by-line coverage annotations and the codecov.io dashboard — but **no longer gates merges**.
 
-The codecov/patch enforcement role has moved to the server-side gate documented in the [Patch coverage section above](#patch-coverage--the-80-gate-aisdlc-376). codecov.io stays purely informational.
+The codecov/patch enforcement role has moved to the server-side gate documented in the [Patch coverage section above](#patch-coverage--the-90-gate-aisdlc-376-aisdlc-726). codecov.io stays purely informational.
 
 ### The two problems it caused
 
@@ -216,22 +220,9 @@ The codecov/patch enforcement role has moved to the server-side gate documented 
 
 2. **App-source deadlock on zero-coverage PRs.** Branch protection requires the status to come from the codecov GitHub App specifically; synthetic `gh api` statuses are rejected. PRs that produce no LCOV data (docs-only changesets, pure `.github/workflows/` changes, script-only changes) leave codecov with nothing to upload → codecov never posts its status → the PR sits in BLOCKED state permanently, even when every AI-SDLC gate is green. This was hit on PRs #553 and #554 during the AISDLC-370 cycle and required a workaround (empty-LCOV fallback) to undeadlock.
 
-### Why the local gate alone is NOT sufficient (AISDLC-376 correction)
+### Why a local gate is no longer used (AISDLC-726, DEC-0056)
 
-The original AISDLC-372 framing claimed the local pre-push gate (`scripts/check-coverage.sh`) was "sufficient and authoritative" on its own. **That was wrong.** The local gate is the first line of defense — fast feedback before the push — but it is bypassable via `AI_SDLC_SKIP_COVERAGE_GATE=1`, and a legitimate bypass (e.g. for a chore-sign commit) leaves subsequent code commits in the same push unguarded. PR #550 hit this in practice: bypassed for the chore commit, landed at 0.6% patch coverage, codecov/patch failed but was no longer required → nothing blocked merge intent.
-
-AISDLC-376 added [the server-side gate above](#patch-coverage--the-80-gate-aisdlc-376) as the authoritative mirror. The local gate stays as fast feedback; the CI gate is the merge-blocking signal. No bypass env var exists on the CI side.
-
-### Why dropping the SaaS check was still the right call
-
-`scripts/check-coverage.sh` (the `pre-push` hook) enforces **80% lines coverage per package** before the push reaches GitHub. It:
-
-- Runs in under 1 minute on our own hardware.
-- Blocks the push before the PR is even opened.
-- Has no dependency on third-party SaaS infrastructure.
-- Is skippable for emergencies via `AI_SDLC_SKIP_COVERAGE_GATE=1` (existing escape hatch).
-
-`codecov/patch` measured a similar 80% property using a slower, less-reliable mechanism (SaaS round-trip; deadlock risk on zero-LCOV PRs). Dropping it from required checks removed the latency without weakening governance — the AISDLC-376 server-side gate is functionally equivalent without the failure modes.
+The local pre-push coverage gate (`scripts/check-coverage.sh`) and the Stop-hook coverage run were removed. They were bypassable (`AI_SDLC_SKIP_COVERAGE_GATE=1`), duplicated the CI run two or three times per push, and CI was the only authoritative check anyway (PR #550 landed at 0.6% patch coverage while the local gate was bypassed). Coverage now runs once, in CI, at higher floors, and the developer agent is asked to run coverage for the packages it touches once before its first push.
 
 ### Operator action to apply
 

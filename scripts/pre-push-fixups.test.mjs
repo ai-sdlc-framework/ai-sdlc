@@ -580,14 +580,13 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
 
   // ── .husky/pre-push wiring assertion ─────────────────────────────────────
 
-  it('.husky/pre-push invokes pre-push-fixups.sh AFTER check-coverage.sh and BEFORE check-task-moved.sh', () => {
+  it('.husky/pre-push invokes pre-push-fixups.sh BEFORE check-task-moved.sh', () => {
     const prePushPath = join(PROJECT_ROOT, '.husky', 'pre-push');
     assert.equal(existsSync(prePushPath), true, `.husky/pre-push must exist at ${prePushPath}`);
 
     const content = readFileSync(prePushPath, 'utf-8');
     const lines = content.split('\n');
 
-    const coverageIdx = lines.findIndex((l) => l.includes('check-coverage.sh'));
     const fixupsIdx = lines.findIndex((l) => l.includes('pre-push-fixups.sh'));
     const taskMoveIdx = lines.findIndex(
       (l) => l.includes('check-task-moved.sh') && !l.trimStart().startsWith('#'),
@@ -596,7 +595,6 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
       (l) => l.includes('check-attestation-sign.sh') && !l.trimStart().startsWith('#'),
     );
 
-    assert.ok(coverageIdx !== -1, `check-coverage.sh must be in .husky/pre-push:\n${content}`);
     assert.ok(fixupsIdx !== -1, `pre-push-fixups.sh must be in .husky/pre-push:\n${content}`);
     assert.ok(taskMoveIdx !== -1, `check-task-moved.sh must be in .husky/pre-push:\n${content}`);
     assert.ok(
@@ -614,10 +612,6 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
       `check-mcp-bundle-sync.sh must NOT appear as an executable line in .husky/pre-push (deleted by AISDLC-385):\n${content}`,
     );
 
-    assert.ok(
-      coverageIdx < fixupsIdx,
-      `check-coverage.sh (line ${coverageIdx + 1}) must appear BEFORE pre-push-fixups.sh (line ${fixupsIdx + 1})`,
-    );
     assert.ok(
       fixupsIdx < taskMoveIdx,
       `pre-push-fixups.sh (line ${fixupsIdx + 1}) must appear BEFORE check-task-moved.sh (line ${taskMoveIdx + 1}) — orchestrator pre-empts individual hooks`,

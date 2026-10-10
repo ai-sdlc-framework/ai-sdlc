@@ -161,7 +161,6 @@ function buildSandbox() {
     GIT_COMMITTER_NAME: 'smoke',
     GIT_COMMITTER_EMAIL: 'smoke@example.com',
     AI_SDLC_ORCHESTRATOR_DETECT_SUBPROCESS: '0',
-    AI_SDLC_SKIP_COVERAGE_GATE: '1',
   };
   for (const k of ['CLAUDE_PLUGIN_ROOT', 'CLAUDE_PLUGIN_DIR', 'AI_SDLC_ACTIVE_TASK_ID'])
     delete env[k];

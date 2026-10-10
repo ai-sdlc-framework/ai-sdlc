@@ -7,7 +7,6 @@ labels:
   - hooks
   - ci
 references:
-  - scripts/check-coverage.sh
   - .github/workflows/ci.yml
   - pnpm-workspace.yaml
   - scripts/is-docs-only-changeset.mjs
