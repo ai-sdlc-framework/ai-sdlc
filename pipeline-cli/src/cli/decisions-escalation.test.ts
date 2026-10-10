@@ -229,7 +229,10 @@ describe('escalate --route / --park', () => {
     await run(h, ...escalateArgs('AISDLC-901', '--route', 'operational'));
     expect(h.sent).toHaveLength(1);
     expect(h.sent[0]!.to).toBe('operator-dispatch');
-    expect(h.sent[0]!.message).toMatch(/DEC-\d+ \(operational\).*Which retry policy applies\?/);
+    expect(h.sent[0]!.message).toMatch(
+      /^Decision DEC-\d+ \(operational\) needs an answer\. Read it with: cli-decisions show DEC-\d+$/,
+    );
+    expect(h.sent[0]!.message).not.toMatch(/retry policy/);
     expect(h.events).toEqual([
       expect.objectContaining({
         type: 'DecisionRouted',
@@ -267,13 +270,62 @@ describe('escalate --route / --park', () => {
     expect(stderrChunks.join('')).toMatch(/no inflight manifest/);
   });
 
-  it('without --route behaves as before: design route recorded, no side effects', async () => {
+  it('without --route or --park behaves as before: no escalation block, no side effects', async () => {
     const h = harness();
     await run(h, ...escalateArgs('AISDLC-905'));
-    const r = json<{ route: string }>();
-    expect(r.route).toBe('design');
+    json();
+    const opened = JSON.parse(
+      readFileSync(resolveEventLogPath(tmp), 'utf8').trim().split('\n')[0]!,
+    );
+    expect(opened.escalation).toBeUndefined();
     expect(h.sent).toEqual([]);
     expect(h.events).toEqual([]);
+  });
+
+  it('--park alone stores the default design route', async () => {
+    const h = harness();
+    await expect(run(h, ...escalateArgs('AISDLC-905', '--park'))).rejects.toThrow(
+      'process.exit(1)',
+    );
+    const opened = JSON.parse(
+      readFileSync(resolveEventLogPath(tmp), 'utf8').trim().split('\n')[0]!,
+    );
+    expect(opened.escalation).toMatchObject({ route: 'design', parked: true });
+  });
+
+  it('refuses to park a manifest claimed by a different roster session', async () => {
+    const h = harness();
+    h.caller = { name: 'executor-alpha', role: 'executor' };
+    seedInflight('AISDLC-907');
+    const file = join(boardDir, 'inflight', 'AISDLC-907.dispatch.json');
+    const m = JSON.parse(readFileSync(file, 'utf8'));
+    m.workerId = 'executor-beta';
+    writeFileSync(file, JSON.stringify(m));
+    await expect(run(h, ...escalateArgs('AISDLC-907', '--park'))).rejects.toThrow(
+      'process.exit(1)',
+    );
+    expect(stderrChunks.join('')).toMatch(/claimed by 'executor-beta'/);
+    expect(onBoard('inflight', 'AISDLC-907')).toBe(true);
+    expect(existsSync(resolveEventLogPath(tmp))).toBe(false);
+  });
+
+  it('parks when the claimer matches the caller or the manifest records none', async () => {
+    const h = harness();
+    h.caller = { name: 'executor-alpha', role: 'executor' };
+    seedInflight('AISDLC-908');
+    const file = join(boardDir, 'inflight', 'AISDLC-908.dispatch.json');
+    const m = JSON.parse(readFileSync(file, 'utf8'));
+    m.workerId = 'executor-alpha';
+    writeFileSync(file, JSON.stringify(m));
+    await expect(run(h, ...escalateArgs('AISDLC-908', '--park'))).rejects.toThrow(
+      'process.exit(1)',
+    );
+    expect(onBoard('blocked', 'AISDLC-908')).toBe(true);
+    seedInflight('AISDLC-909');
+    await expect(run(h, ...escalateArgs('AISDLC-909', '--park'))).rejects.toThrow(
+      'process.exit(1)',
+    );
+    expect(onBoard('blocked', 'AISDLC-909')).toBe(true);
   });
 
   it('rejects an unknown route', async () => {
@@ -318,7 +370,7 @@ describe('answer is scoped to the owning tier', () => {
       readFileSync(join(boardDir, 'queue', 'AISDLC-910.dispatch.json'), 'utf8'),
     );
     expect(back.blockedBy).toBeUndefined();
-    expect(h.sent.at(-1)!.message).toMatch(/was answered: opt-a/);
+    expect(h.sent.at(-1)!.message).toMatch(/^Decision DEC-\d+ was answered\. Read it with/);
   });
 
   it('lets operator-dispatch answer an operational decision', async () => {
@@ -336,6 +388,31 @@ describe('answer is scoped to the owning tier', () => {
     h.caller = { name: 'executor-alpha', role: 'executor' };
     await expect(run(h, 'answer', id, 'opt-a')).rejects.toThrow('process.exit(1)');
     expect(onBoard('blocked', 'AISDLC-912')).toBe(true);
+  });
+
+  it('refuses when the caller identity cannot be resolved', async () => {
+    const h = harness();
+    const id = await raise(h, 'design', 'AISDLC-915');
+    h.deps.identity.readSessions = () => {
+      throw new Error('roster unreadable');
+    };
+    await expect(run(h, 'answer', id, 'opt-a')).rejects.toThrow('process.exit(1)');
+    expect(stderrChunks.join('')).toMatch(/could not identify the calling session/);
+    expect(onBoard('blocked', 'AISDLC-915')).toBe(true);
+  });
+
+  it('a legacy escalate decision stays answerable by dispatch and an executor as before', async () => {
+    const h = harness();
+    await run(h, ...escalateArgs('AISDLC-916'));
+    const id = json<{ decisionId: string }>().decisionId;
+    h.caller = { name: 'operator-dispatch', role: 'operator-dispatch' };
+    await run(h, 'answer', id, 'opt-a', '--format', 'json');
+    expect(json<{ ok: boolean }>().ok).toBe(true);
+    await run(h, ...escalateArgs('AISDLC-917'));
+    const id2 = json<{ decisionId: string }>().decisionId;
+    h.caller = { name: 'executor-alpha', role: 'executor' };
+    await run(h, 'answer', id2, 'opt-b', '--format', 'json');
+    expect(json<{ ok: boolean }>().ok).toBe(true);
   });
 
   it('a caller outside the roster (the operator at a terminal) may answer', async () => {
@@ -432,6 +509,16 @@ describe('promote-expired', () => {
       promoted: [expect.objectContaining({ toTier: 'design' })],
     });
     expect(readFileSync(resolveEventLogPath(tmp), 'utf8')).toBe(before);
+    expect(h.events).toEqual([]);
+  });
+
+  it('a legacy escalate decision is never promoted', async () => {
+    const h = harness();
+    await run(h, ...escalateArgs('AISDLC-924'));
+    json();
+    backdate(100 * 60);
+    await run(h, 'promote-expired', '--format', 'json');
+    expect(json<{ promoted: unknown[] }>().promoted).toEqual([]);
     expect(h.events).toEqual([]);
   });
 

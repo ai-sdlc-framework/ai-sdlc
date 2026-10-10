@@ -80,11 +80,19 @@ export function tierTimeboxMs(
  * Why `caller` may not answer a decision at `tier`, or undefined when it may.
  * A caller that is not a running roster session (null) is the operator at a
  * terminal: it may answer at any tier. A roster session is held to its role.
+ * `resolutionError` means identity could not be determined at all (roster
+ * unreadable, process table failure): that is refused, never treated as the
+ * operator. This is a mistake guard against a session answering the wrong
+ * tier, not authentication.
  */
 export function answerRefusal(
   tier: EscalationTier,
   caller: { name: string; role: string } | null,
+  resolutionError?: string,
 ): string | undefined {
+  if (resolutionError !== undefined) {
+    return `could not identify the calling session (${oneLine(resolutionError, 100)}), so the ${tier} tier cannot be checked. Fix the roster (cli-hierarchy status) or answer from a plain terminal outside the session roster.`;
+  }
   if (caller === null) return undefined;
   const allowed = ANSWER_ROLES[tier];
   if (allowed.includes(caller.role as HierarchyRole)) return undefined;
@@ -133,6 +141,24 @@ export function callerOf(deps: ChainDeps): { name: string; role: string } | null
   }
 }
 
+/**
+ * Like {@link callerOf} but tells "no ancestor is a roster session" (caller null,
+ * the operator at a terminal) apart from "identity resolution failed" (error set).
+ */
+export function lookupCaller(deps: ChainDeps): {
+  caller: { name: string; role: string } | null;
+  error?: string;
+} {
+  try {
+    // resolveCaller maps an unreadable roster to "no caller"; probe it first so an
+    // unreadable roster is refused instead of read as the operator.
+    deps.identity.readSessions();
+    return { caller: resolveCaller(deps.identity) };
+  } catch (err) {
+    return { caller: null, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 function runningSessions(deps: ChainDeps): RosterEntry[] {
   try {
     return deps.sessions().filter((s) => s.status === 'running');
@@ -177,16 +203,42 @@ export function tierSession(deps: ChainDeps, tier: EscalationTier): RosterEntry 
   return role ? runningSessions(deps).find((s) => s.role === role) : undefined;
 }
 
-/** Tell the session that owns `tier` about a decision. Never throws. */
+/**
+ * The one-line text typed into a session. It carries only the decision id, the
+ * tier and a fixed command: the raiser's free text is never typed into another
+ * session (it would be an instruction-injection channel); the receiver reads it
+ * as data through `cli-decisions show`.
+ * @throws when the id or tier is not in the allowed shape.
+ */
+export function decisionMessage(
+  kind: 'needs-answer' | 'answered',
+  decisionId: string,
+  tier?: EscalationTier,
+): string {
+  if (!/^DEC-\d{4,}$/.test(decisionId)) {
+    throw new Error(`refusing to announce decision id '${oneLine(decisionId, 40)}'`);
+  }
+  if (kind === 'answered') {
+    return `Decision ${decisionId} was answered. Read it with: cli-decisions show ${decisionId}`;
+  }
+  if (tier === undefined || !ESCALATION_TIERS.includes(tier)) {
+    throw new Error('refusing to announce a decision without a known tier');
+  }
+  return `Decision ${decisionId} (${tier}) needs an answer. Read it with: cli-decisions show ${decisionId}`;
+}
+
+/** Tell the session that owns `tier` about a decision (id and tier only). Never throws. */
 export function notifyTier(
   deps: ChainDeps,
   tier: EscalationTier,
   decisionId: string,
-  summary: string,
 ): NotifyResult {
   if (tier === 'operator') return { sent: false, reason: 'the operator has no session' };
-  const message = `Decision ${decisionId} (${tier}) needs an answer: ${oneLine(summary)}. Read it with: cli-decisions show ${decisionId}`;
-  return sendTo(deps, tierSession(deps, tier), message);
+  try {
+    return sendTo(deps, tierSession(deps, tier), decisionMessage('needs-answer', decisionId, tier));
+  } catch (err) {
+    return { sent: false, reason: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 /** Tell the session that raised a decision that it was answered. Never throws. */
@@ -194,11 +246,14 @@ export function notifyRaiser(
   deps: ChainDeps,
   raisedBy: string | undefined,
   decisionId: string,
-  optionId: string,
 ): NotifyResult {
   if (!raisedBy) return { sent: false, reason: 'the raising session is unknown' };
   const entry = runningSessions(deps).find((s) => s.name === raisedBy);
-  return sendTo(deps, entry, `Decision ${decisionId} was answered: ${oneLine(optionId, 60)}.`);
+  try {
+    return sendTo(deps, entry, decisionMessage('answered', decisionId));
+  } catch (err) {
+    return { sent: false, reason: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 /** Record that a decision was raised to its first tier. Never throws. */
@@ -276,7 +331,7 @@ export function announcePromotion(deps: ChainDeps, due: DueDecision): NotifyResu
   } catch {
     /* events are best-effort */
   }
-  return notifyTier(deps, due.toTier, decision.metadata.id, decision.spec.summary);
+  return notifyTier(deps, due.toTier, decision.metadata.id);
 }
 
 /**
@@ -286,7 +341,6 @@ export function announcePromotion(deps: ChainDeps, due: DueDecision): NotifyResu
 export function afterAnswer(
   deps: ChainDeps,
   decision: Decision,
-  optionId: string,
 ): { unblocked: boolean; notify: NotifyResult } {
   const esc = decision.spec.escalation;
   let unblocked = false;
@@ -299,7 +353,7 @@ export function afterAnswer(
   }
   return {
     unblocked,
-    notify: notifyRaiser(deps, esc?.raisedBy, decision.metadata.id, optionId),
+    notify: notifyRaiser(deps, esc?.raisedBy, decision.metadata.id),
   };
 }
 
