@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.5.0...sdk-go-v0.6.0) (2026-10-09)
+
+
+### Features
+
+* add mark-ready-after-codeql to dispatch operational authority (AISDLC-736) ([#1264](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1264)) ([afed0d8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/afed0d87c6556e16d18e0b83bfcaa5a650c63113))
+* merge policy follows governance.allowMerge everywhere (AISDLC-753) ([#1258](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1258)) ([39e37d7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/39e37d762986f8b1a15ad0526dbce09cc9f3876e))
+
 ## [0.5.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.4.0...sdk-go-v0.5.0) (2026-10-05)
 
 

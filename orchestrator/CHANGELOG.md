@@ -5,6 +5,30 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.30.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.29.0...orchestrator-v0.30.0) (2026-10-09)
+
+
+### Features
+
+* merge policy follows governance.allowMerge everywhere (AISDLC-753) ([#1258](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1258)) ([39e37d7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/39e37d762986f8b1a15ad0526dbce09cc9f3876e))
+
+
+### Bug Fixes
+
+* **ci:** parent stale-index self-heal and post-rewrite guard survives GIT_DIR and stale hook copies (AISDLC-750) ([#1253](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1253)) ([e9b6c41](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e9b6c417c65489a217c63184272cd5d1b0f46c1b))
+* clear known dependency vulnerabilities reported by Scorecard (AISDLC-745) ([#1273](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1273)) ([5b7a40e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5b7a40e501c802a400b47b508ce65b204f6454c1))
+* did compiler warns per unlabeled field and documents identityClass exemption (AISDLC-749) ([#1271](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1271)) ([2edbaec](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2edbaecf81eddb9a5edb0d729725a7cbd328edd7))
+* harden git fetch against option injection in three sites (AISDLC-704.3) ([#1263](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1263)) ([4400224](https://github.com/ai-sdlc-framework/ai-sdlc/commit/44002247ffebd833a389b58121d6672d1c7b3d1f))
+* **orchestrator:** derive review-policy banner from inspected enforcement state (AISDLC-561) ([#1294](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1294)) ([112ec2a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/112ec2aa611fe2ab2355d0d8b48811c0391371a5))
+* replace polynomial ReDoS regexes in cycle-utils and review-agent (AISDLC-704.2) ([#1268](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1268)) ([39d9b0d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/39d9b0da2d6ababbfbdf57b78f24c12f760f7ac6))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.30.0
+
 ## [0.29.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.28.0...orchestrator-v0.29.0) (2026-10-06)
 
 
