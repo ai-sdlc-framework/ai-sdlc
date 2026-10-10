@@ -63,6 +63,8 @@ async function main(): Promise<void> {
       secretStore: infra.secretStore,
       useStructuredLogger: true,
       workDir,
+      // AISDLC-704.5: the unprivileged job commits only; a privileged job pushes.
+      skipPush: process.env.AI_SDLC_FIX_CI_SKIP_PUSH === '1',
     });
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
