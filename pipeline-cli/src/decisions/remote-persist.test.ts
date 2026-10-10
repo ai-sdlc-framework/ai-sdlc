@@ -2,7 +2,16 @@
  * AISDLC-546 — hermetic tests: a local bare repo is `origin`; `gh` is injected (no network).
  */
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -235,5 +244,36 @@ describe('persistDecisionLog (AISDLC-546)', () => {
     expect(remote).not.toContain('not json');
     expect(remote).not.toContain('bogus');
     expect(warns.filter((w) => /invalid ledger line/.test(w))).toHaveLength(2);
+  });
+  it('never replaces a record on main with a same-named file of different content', () => {
+    addDec(parent, 'DEC-0001');
+    const dir = resolveEventsDir(parent);
+    const name = readdirSync(dir).filter((n) => n.endsWith('.json'))[0]!;
+    const original = readFileSync(join(dir, name), 'utf8');
+    git(parent, 'add', '-f', '.ai-sdlc/_decisions');
+    git(parent, 'commit', '-m', 'record on main');
+    git(parent, 'push', 'origin', 'HEAD:main');
+    writeFileSync(join(dir, name), original.replace('s DEC-0001', 'forged'));
+    const warns: string[] = [];
+    const r = persistDecisionLog({ workDir: parent, runner, warn: (m) => warns.push(m) });
+    expect(r).toMatchObject({ persisted: true, reason: 'already on main' });
+    expect(git(parent, 'show', `origin/main:.ai-sdlc/_decisions/events/${name}`)).toBe(
+      original.trim(),
+    );
+    expect(warns.some((w) => /name does not match its content/.test(w))).toBe(true);
+  });
+
+  it('drops an event file whose name hash is not its content hash', () => {
+    addDec(parent, 'DEC-0001');
+    const dir = resolveEventsDir(parent);
+    const name = readdirSync(dir).filter((n) => n.endsWith('.json'))[0]!;
+    renameSync(
+      join(dir, name),
+      join(dir, name.replace(/[0-9a-f]{12}\.json$/, '000000000000.json')),
+    );
+    const warns: string[] = [];
+    const r = persistDecisionLog({ workDir: parent, runner, warn: (m) => warns.push(m) });
+    expect(r).toMatchObject({ persisted: true, reason: 'already on main' });
+    expect(warns.some((w) => /name does not match its content/.test(w))).toBe(true);
   });
 });

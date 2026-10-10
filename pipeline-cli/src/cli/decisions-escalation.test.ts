@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { buildDecisionsCli } from './decisions.js';
-import { readEventLogText, resolveEventsDir } from '../decisions/event-log.js';
+import { eventFileName, readEventLogText, resolveEventsDir } from '../decisions/event-log.js';
 import type { ChainDeps } from '../decisions/escalation-chain.js';
 import { ensureBoardDirs, writeManifest } from '../dispatch/board.js';
 import type { DispatchManifest } from '../dispatch/types.js';
@@ -441,7 +441,10 @@ describe('promote-expired', () => {
       const file = join(dir, name);
       const e = JSON.parse(readFileSync(file, 'utf8'));
       e.ts = new Date(Date.now() - minutesAgo * 60_000).toISOString();
-      writeFileSync(file, JSON.stringify(e) + '\n');
+      const line = JSON.stringify(e);
+      // The file name carries the timestamp and content hash, so rename with the content.
+      rmSync(file);
+      writeFileSync(join(dir, eventFileName(e, line)), line + '\n');
     }
   }
 

@@ -36,6 +36,7 @@ import { formatDecisionId, validateDecisionEvent } from './decision-record.js';
 import {
   eventContentHash,
   eventFileName,
+  hashFromEventFileName,
   resolveEventLogPath,
   resolveEventsDir,
 } from './event-log.js';
@@ -360,15 +361,23 @@ export function persistDecisionLog(opts: DurableOpts): PersistResult {
     const syncRef = `refs/remotes/origin/${DECISIONS_SYNC_BRANCH}`;
     // Hashes already on main (either layout) need no commit; everything else
     // from the sync branch and the local tree is added as a per-event file.
-    const onMain = new Set(
-      entriesAtRef(ctx, 'refs/remotes/origin/main').map((e) => eventContentHash(e.line)),
-    );
+    const mainEntries = entriesAtRef(ctx, 'refs/remotes/origin/main');
+    const onMain = new Set(mainEntries.map((e) => eventContentHash(e.line)));
+    const namesOnMain = new Set(mainEntries.map((e) => e.name));
     const additions = new Map<string, EventEntry>();
     for (const e of [...entriesAtRef(ctx, syncRef), ...localEntries(opts.workDir)]) {
       const h = eventContentHash(e.line);
       if (onMain.has(h) || additions.has(h)) continue;
       if (!isValidEventLine(e.line)) {
         warn(`[decisions] WARN: dropping invalid ledger line before sync: ${e.line.slice(0, 80)}`);
+        continue;
+      }
+      // `update-index --cacheinfo` replaces whatever blob sits at the path, so a record on main
+      // must never be re-addressed by a name it already has, and a name must be bound to its content.
+      if (namesOnMain.has(e.name) || hashFromEventFileName(e.name) !== h) {
+        warn(
+          `[decisions] WARN: dropping event file whose name does not match its content: ${e.name}`,
+        );
         continue;
       }
       additions.set(h, e);

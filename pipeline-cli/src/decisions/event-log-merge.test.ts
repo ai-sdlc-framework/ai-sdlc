@@ -137,6 +137,30 @@ describe('reading both layouts together', () => {
     const ids = readDecisionEvents({ workDir: dir }).events.map((e) => e.decisionId);
     expect(ids).toEqual(['DEC-0001', 'DEC-0002']);
   });
+
+  it('skips a per-event file whose name hash is not its content hash', () => {
+    const dir = mkRepo('forged-name');
+    appendDecisionEvent(ev('DEC-0001', '2026-01-01T00:00:00.000Z'), { workDir: dir });
+    const events = resolveEventsDir(dir);
+    const name = readdirSync(events)[0]!;
+    // Same bytes under a far-future prefix and the wrong hash: a forged name would pin ordering.
+    writeFileSync(
+      join(
+        events,
+        name
+          .replace(/^[^_]+/, '9999-12-31T00-00-00.000Z')
+          .replace(/[0-9a-f]{12}\.json$/, 'ffffffffffff.json'),
+      ),
+      JSON.stringify(ev('DEC-0002', '2026-01-02T00:00:00.000Z')) + '\n',
+    );
+    writeFileSync(
+      join(events, 'unhashed.json'),
+      JSON.stringify(ev('DEC-0003', '2026-01-03T00:00:00.000Z')) + '\n',
+    );
+    const r = readDecisionEvents({ workDir: dir });
+    expect(r.events.map((e) => e.decisionId)).toEqual(['DEC-0001']);
+    expect(r.skipped).toBe(2);
+  });
 });
 
 describe('migrateLegacyEventLog', () => {

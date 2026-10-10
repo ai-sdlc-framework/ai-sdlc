@@ -300,7 +300,14 @@ export function readDecisionEvents(opts: ReadEventsOpts = {}): ReadEventsResult 
     }
     for (const name of names) {
       try {
-        ingest(readFileSync(join(dir, name), 'utf8'));
+        const text = readFileSync(join(dir, name), 'utf8');
+        // A file whose name carries a different content hash was renamed or forged: its name
+        // drives ordering, so it is not trusted.
+        if (hashFromEventFileName(name) !== eventContentHash(text)) {
+          skipped += 1;
+          continue;
+        }
+        ingest(text);
       } catch {
         skipped += 1;
       }
