@@ -16,6 +16,8 @@ import { buildUsageCli } from '../cli/usage.js';
 import { appendAssignment, assignmentLogPath } from '../routing/assignment-log.js';
 import { defaultArtifactsDir, routingArtifactsDir } from '../routing/artifacts-dir.js';
 import { resolveModel } from '../routing/resolve-model.js';
+import { readAssignmentLog as readScorecardAssignmentLog } from './scorecard-sources.js';
+import { assignmentKey } from './scorecard.js';
 import { repoNameFor } from './attribution.js';
 import { defaultUsageConfig } from './usage-config.js';
 import { isUnderAiSdlc } from './replay-commands.js';
@@ -368,19 +370,24 @@ describe('project-root anchoring from a worktree (AISDLC-654.2)', () => {
     expect(anchored).toBe(join(parent, '.ai-sdlc', 'artifacts'));
     expect(anchored).toBe(defaultArtifactsDir(parent));
     expect(resolveProjectRoot(parent)).toBe(parent);
-    process.env.ARTIFACTS_DIR = join(parent, 'elsewhere');
-    expect(routingArtifactsDir(resolveProjectRoot(wt))).toBe(join(parent, 'elsewhere'));
-    expect(routingArtifactsDir(resolveProjectRoot(wt), '/x/y')).toBe('/x/y');
-    const resolved = resolveModel({
+    try {
+      process.env.ARTIFACTS_DIR = join(parent, 'elsewhere');
+      expect(routingArtifactsDir(resolveProjectRoot(wt))).toBe(join(parent, 'elsewhere'));
+      expect(routingArtifactsDir(resolveProjectRoot(wt), '/x/y')).toBe('/x/y');
+    } finally {
+      delete process.env.ARTIFACTS_DIR;
+    }
+    resolveModel({
       role: 'developer',
       taskId: 'D-1',
       taskClass: 'chore',
       workDir: wt,
       artifactsDir: anchored,
     });
-    expect(resolved).toBeDefined();
-    delete process.env.ARTIFACTS_DIR;
-    expect(existsSync(assignmentLogPath(anchored))).toBe(true);
+    // The scorecard's own reader sees the entry the worktree run wrote under the parent.
+    const log = readScorecardAssignmentLog(assignmentLogPath(anchored));
+    expect(log.has(assignmentKey('D-1', 'developer'))).toBe(true);
     expect(existsSync(join(wt, '.ai-sdlc', 'artifacts'))).toBe(false);
+    rmSync(parent, RM);
   });
 });

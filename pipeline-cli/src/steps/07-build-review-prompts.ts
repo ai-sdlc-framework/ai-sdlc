@@ -181,6 +181,11 @@ export async function buildReviewPrompts(
 
   const acList = opts.task.acceptanceCriteria.map((ac, i) => `${i + 1}. ${ac}`).join('\n');
 
+  // Resolved at most once per call (one git spawn), and only when a routing path needs it.
+  let resolvedRoot: string | undefined;
+  const projectRoot = (): string =>
+    (resolvedRoot ??= opts.projectRoot ?? resolveProjectRoot(opts.worktreePath));
+
   // Offline replay (`recordRouting: false`) leaves no trace, so it never reaches a provider.
   const judgment =
     opts.recordRouting === false
@@ -188,10 +193,7 @@ export async function buildReviewPrompts(
       : (opts.judgment ??
         buildJudgmentContext({
           workDir: opts.workDir,
-          artifactsDir: routingArtifactsDir(
-            opts.projectRoot ?? resolveProjectRoot(opts.worktreePath),
-            opts.artifactsDir,
-          ),
+          artifactsDir: routingArtifactsDir(projectRoot(), opts.artifactsDir),
           ...(opts.sourceKind ? { sourceKind: opts.sourceKind } : {}),
           taskId: opts.taskId,
         }));
@@ -242,10 +244,7 @@ export async function buildReviewPrompts(
       sourceKind: opts.sourceKind,
       iteration: opts.iteration ?? 1,
       workDir: opts.workDir,
-      artifactsDir: routingArtifactsDir(
-        opts.projectRoot ?? resolveProjectRoot(opts.worktreePath),
-        opts.artifactsDir,
-      ),
+      artifactsDir: routingArtifactsDir(projectRoot(), opts.artifactsDir),
       record:
         opts.recordRouting !== false && routingRecordable(opts.worktreePath, opts.artifactsDir),
     });

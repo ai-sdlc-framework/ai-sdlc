@@ -686,8 +686,10 @@ SLUG=$(node "$PLUGIN_SCRIPTS_DIR/compute-slug.mjs" "$TASK_FILE") || {
 BRANCH=$(echo "$BRANCH_PATTERN" | sed "s|{issueIdLower}|$TASK_ID_LOWER|g; s|{slug}|$SLUG|g")
 WORKTREE_PATH=".worktrees/$TASK_ID_LOWER"
 # AISDLC-654.2: anchor the default artifacts dir at the project root so routing assignments survive worktree cleanup.
-PROJECT_ROOT="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")"
-[ -n "$PROJECT_ROOT" ] && [ "$PROJECT_ROOT" != "." ] || PROJECT_ROOT="$(pwd)"
+# Mirrors resolveProjectRoot() in pipeline-cli/src/routing/artifacts-dir.ts: the parent of a shared `.git`
+# directory; a bare or separate-git-dir common dir (not named `.git`) falls back to the current directory.
+GIT_COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+if [ "$(basename "$GIT_COMMON_DIR")" = ".git" ]; then PROJECT_ROOT="$(dirname "$GIT_COMMON_DIR")"; else PROJECT_ROOT="$(pwd)"; fi
 ```
 
 > **AISDLC-356 — canonical branch slug for manual worktrees.** When creating a
