@@ -2323,10 +2323,11 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 opaque-segment
     }
   });
 
-  it('keeps allowing ordinary trailing comments (round 9)', () => {
+  it('refuses comments that mention the phrase (planner grammar ruling: # is opaque; AISDLC-605.1 tracks the over-block)', () => {
     for (const c of [`${gh} pr view 5 --json state # no ${mg}`, `echo hi # ${gh} pr ${mg} 5`]) {
-      assert.ok(!isDenied(run(c)), c);
+      assert.ok(isDenied(run(c)), c);
     }
+    assert.ok(!isDenied(run(`${gh} pr view 5 --json state # ok`)));
   });
 
   it('refuses expansions spliced inside the merge words (round 6)', () => {
@@ -2358,10 +2359,11 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 opaque-segment
     for (const c of [
       `${gh} pr view $PR --json mergeStateStatus`,
       `${gh} pr view $N --json mergeable`,
-      `${gh} pr view $N --json state # no ${mg}`,
     ]) {
       assert.ok(!isDenied(run(c)), c);
     }
+    // Over-blocked by the grammar ruling: the comment mentions the phrase.
+    assert.ok(isDenied(run(`${gh} pr view $N --json state # no ${mg}`)));
   });
 
   it('still allows prose, read-only gh', () => {
@@ -2495,6 +2497,148 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 pr-before-merg
       `echo hi > f`,
       `cmd 2>&1`,
     ]) {
+      assert.ok(!isDenied(run(c)), c);
+    }
+  });
+});
+
+const grammarRefused = (gh, mg) => {
+  const phrase = `${gh} pr ${mg} 42`;
+  const GHP = `/opt/homebrew/bin/g[h]`;
+  return [
+    // flags between gh / pr / merge
+    `${gh} -R o/r pr ${mg} 42`,
+    `${gh} --repo o/r pr ${mg} 42`,
+    `${gh} --repo=o/r pr ${mg} 42`,
+    `${gh} -b x pr ${mg} 42`,
+    `${gh} -t x pr ${mg} 42`,
+    `${gh} pr -R o/r ${mg} 42`,
+    `${gh} pr -F x ${mg} 5`,
+    // alias set / import
+    `${gh} alias set mm 'pr ${mg}'`,
+    `${gh} alias import aliases.yml`,
+    // ANSI-C / locale quoting, backslash-newline
+    `${gh} pr $'${mg}' 42`,
+    `${gh} pr $"${mg}" 42`,
+    `echo $'\\''; ${phrase} #'`,
+    `${gh} pr mer\\\nge 42`,
+    // brace forms
+    `{${gh},pr} ${mg} 42`,
+    `${gh} {pr,${mg}} 42`,
+    `{${gh},pr,${mg}} 42`,
+    `${gh} pr {${mg},} 42`,
+    `${gh} pr mer{g..g}e 42`,
+    // IFS forms
+    `${gh}\${IFS}pr\${IFS}${mg} 42`,
+    `${gh} pr\${IFS}${mg} 42`,
+    // substitutions, assignments, globs
+    `${gh} pr $(echo ${mg}) 5`,
+    `A=${mg}; ${gh} pr $A 5`,
+    `X=1 ${phrase}`,
+    `${GHP} pr ${mg} 42`,
+    `g[h] pr ${mg} 42`,
+    `$(echo ${gh}) pr ${mg} 42`,
+    `${gh} pr ${mg.slice(0, 4)}$(:)${mg.slice(4)} 42`,
+    `${gh} pr ${mg.slice(0, 4)}\`\`${mg.slice(4)} 42`,
+    `${gh} pr \`echo ${mg}\` 5`,
+    `${gh} pr ${mg.slice(0, 4)}\${u}${mg.slice(4)} 42`,
+    `touch ${mg}; ${gh} pr m?rge 5`,
+    // wrapped gh
+    `nice -n 10 ${gh} -b x pr ${mg} 42`,
+    `env -u HOME ${gh} -b x pr ${mg} 42`,
+    `sudo -u me ${gh} -b x pr ${mg} 42`,
+    `exec -a n ${gh} -b x pr ${mg} 42`,
+    `command -p ${phrase}`,
+    `timeout 60 ${phrase}`,
+    `/usr/bin/${gh} -b x pr ${mg} 42`,
+    // glued redirections
+    `${gh}>/dev/null pr ${mg} 42`,
+    `${gh}>&2 pr ${mg} 42`,
+    `${gh}&>/dev/null pr ${mg} 42`,
+    `${gh}</dev/null pr ${mg} 42`,
+    `${gh} pr>/dev/null ${mg} 42`,
+    `${gh} -R o/r pr ${mg}</dev/null 42`,
+    `${gh}<<<x pr ${mg} 42`,
+    `${gh}<(true) pr ${mg} 42`,
+    // glued parens, groups, case arms
+    `case a in a)${gh} -R o/r pr ${mg} --squash 42;; esac`,
+    `(${gh} -R o/r pr --squash 42 ${mg})`,
+    `{ ${phrase}; }`,
+    `! ${phrase}`,
+    `(FOO=1 ${phrase})`,
+    `if true; then FOO=1 ${phrase}; fi`,
+    // comment desync
+    `${gh} pr \`true #\` ${mg} 42`,
+    `${gh} pr \${x:+ #} ${mg} 42`,
+    `${gh} pr $(true #) ${mg} 42`,
+    // heredocs and arithmetic brackets
+    `cat <<EOF\n${phrase}\nEOF`,
+    `cat <<'EOF' | sh\n${phrase}\nEOF`,
+    `echo hi \\\n<<EOF\n${phrase}\nEOF`,
+    `echo $[1<<2]\n${phrase}`,
+    `echo x \\>& ${phrase}`,
+  ];
+};
+
+const grammarAllowed = (gh, mg) => [
+  `${gh} pr view 5 --json ${mg}StateStatus,${mg}able`,
+  `${gh} -R o/r pr view 5`,
+  `${gh} pr list --repo o/r`,
+  `${gh} pr list --search "is:open"`,
+  `${gh} alias list`,
+  `echo "some prose"`,
+  `git commit -m "fix thing"`,
+  `git log --oneline -5`,
+  `ls -la`,
+  `pnpm test`,
+  `node --test ai-sdlc-plugin/hooks/x.test.mjs`,
+  `echo "${gh} pr ${mg} is forbidden"; ls -la | wc -l`,
+];
+
+// Planner grammar ruling (AISDLC-605): the same reviewer bypass shapes at policy level.
+describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 positive grammar)', () => {
+  let dir;
+  const mg = ['mer', 'ge'].join('');
+  const gh = ['g', 'h'].join('');
+
+  before(() => {
+    dir = join(tmpdir(), `enforce-blocked-605-grammar-${Date.now()}`);
+    mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(dir, '.ai-sdlc', 'agent-role.yaml'),
+      `role: coding-agent\ngoal: Test agent\nblockedActions: []\n`,
+    );
+  });
+
+  after(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function run(command) {
+    const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command } });
+    return runHookRaw(input, { CLAUDE_PROJECT_DIR: dir });
+  }
+
+  it('refuses every reviewer bypass shape', () => {
+    for (const c of grammarRefused(gh, mg)) assert.ok(isDenied(run(c)), JSON.stringify(c));
+  });
+
+  it('refuses spliced API merge paths', () => {
+    for (const c of [
+      `${gh} api -X PUT repos/o/r/pulls/5/mer$(:)ge`,
+      `${gh} api -X PUT repos/o/r/pulls/5/mer{g..g}e`,
+      `${gh} api -X PUT repos/o/r/pulls/5/${mg}`,
+    ]) {
+      assert.ok(isDenied(run(c)), c);
+    }
+  });
+
+  it('keeps the pinned allow cases allowed', () => {
+    for (const c of grammarAllowed(gh, mg)) assert.ok(!isDenied(run(c)), c);
+  });
+
+  it('allows spaced pipes, && and ; between plain non-merge segments', () => {
+    for (const c of ['ls -la | wc -l', 'pnpm build && pnpm test', 'git status ; git log -1']) {
       assert.ok(!isDenied(run(c)), c);
     }
   });

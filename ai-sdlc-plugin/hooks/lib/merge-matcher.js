@@ -4,12 +4,17 @@
  * Used by the PreToolUse hook (`enforce-blocked-actions.js`) for both the raw
  * merge phrase and the merge-API checks so they cannot drift.
  *
- * Contract: when the dangerous text (the raw merge phrase, a merge API path or
- * mutation) appears in a segment, the command is DENIED unless that segment's
- * effective command word is on a short POSITIVE allowlist of inert commands
- * (echo, grep, cat, git commit, ...) AND every later stage of its pipeline is
- * inert too. Anything unknown (shells, interpreters, `env`, `pnpm exec`, `sudo`,
- * `xargs`, substitutions, unclassifiable words) therefore denies.
+ * Contract (positive grammar, planner ruling on AISDLC-605): a command is split into
+ * segments, and a segment is PLAIN only when it is entirely whitespace-separated words
+ * of a strict bare character set or single balanced quoted strings (see isPlainSegment).
+ * The precise matcher (gh word scan, inert allowlist, pipe-stage tracking) runs ONLY on
+ * plain segments: a plain segment holding dangerous text (the raw merge phrase, a merge
+ * API path or mutation) is DENIED unless its effective command word is on a short
+ * POSITIVE allowlist of inert commands (echo, grep, cat, git commit, ...) AND every
+ * later stage of its pipeline is inert too. Any OPAQUE segment (every other character or
+ * construct: `$`, backtick, parens, braces, redirections, `#`, backslash, ...) cannot be
+ * judged, so the whole command is refused whenever its raw text mentions a merge phrase.
+ * Over-blocking that is accepted here is tracked by AISDLC-605.1 (real tokenizer).
  * Heredocs get no special treatment (DEC-0085): every line of the command text,
  * heredoc bodies included, is matched, so a command containing a heredoc that
  * quotes the merge phrase is refused. Stripping "inert" bodies kept spawning
@@ -18,8 +23,7 @@
  *
  * Accepted limits (out of text-matching scope; branch protection and
  * cli-merge-if-eligible are the backstop): variables assembled from parts
- * (`a=mer b=ge; gh pr $a$b 5`), command substitution that prints the word, and
- * two-step store-then-run (write the phrase to a script file, then run it).
+ * (`a=mer b=ge; gh pr $a$b 5` mentions no phrase), and two-step store-then-run (write the phrase to a script file, then run it).
  */
 
 const INERT_WORDS = new Set([
@@ -268,84 +272,51 @@ function isInertSegment(segment) {
   return false;
 }
 
-/** Text with quoted and backslash-escaped characters blanked, so structural checks see only live shell syntax. */
-function unquotedView(segment) {
-  let out = '';
-  let quote = null;
-  for (let i = 0; i < segment.length; i++) {
+const IS_WS = (c) => c === ' ' || c === '\t' || c === '\n';
+const BARE_CHAR = /^[A-Za-z0-9_./=:@+,%-]$/;
+
+/**
+ * Positive plain-segment grammar (AISDLC-605, planner ruling). A segment is PLAIN only
+ * when it is made entirely of whitespace-separated words, each word being EITHER bare
+ * ASCII characters from the strict set `[A-Za-z0-9_./=:@+,%-]` OR exactly one balanced
+ * single- or double-quoted string whose content is ASCII with no `$`, backtick or
+ * backslash (and no bare characters glued to the quotes). Anything else (any other
+ * metacharacter, an unbalanced or glued quote, a non-ASCII or control character, a
+ * backslash-newline) makes the WHOLE segment OPAQUE: the precise matcher never trusts
+ * an opaque segment, it is refused whenever the command mentions a merge phrase.
+ */
+function isPlainSegment(segment) {
+  const n = segment.length;
+  let i = 0;
+  while (i < n) {
     const c = segment[i];
-    if (quote) {
-      if (c === '\\' && quote === '"') {
-        i++;
-        out += 'xx';
-      } else if (c === quote) {
-        quote = null;
-        out += 'x';
-      } else out += 'x';
-      continue;
-    }
-    if (c === '\\') {
+    if (IS_WS(c)) {
       i++;
-      out += 'xx';
       continue;
     }
     if (c === "'" || c === '"') {
-      quote = c;
-      out += 'x';
+      const end = segment.indexOf(c, i + 1);
+      if (end < 0) return false;
+      const body = segment.slice(i + 1, end);
+      if (!/^[\t\n\x20-\x7e]*$/.test(body) || /[$`\\]/.test(body)) return false;
+      i = end + 1;
+      if (i < n && !IS_WS(segment[i])) return false;
       continue;
     }
-    out += c;
+    while (i < n && !IS_WS(segment[i])) {
+      if (!BARE_CHAR.test(segment[i])) return false;
+      i++;
+    }
   }
-  return out;
+  return true;
 }
 
-/**
- * True when an unquoted shell metacharacter (`(`, `)`, `{`, `}`, `;`, `|`, `&`, `<`, `>`,
- * backtick, `!`) is glued to a word (`gh>/dev/null`, `a)gh`, `42)`, `<<<x`, `<(cmd)`):
- * whitespace splitting then cannot normalise the segment to plain words. Bare operator
- * tokens (`>`, `>>`, `{`, `)`), pure fd forms (`2>&1`, `>&2`, `&>`, `<&3`) and a leading
- * `(` / `{` / `!` group before the command word are ordinary and stay non-opaque.
- */
-function hasGluedRedirection(segment) {
-  const toks = unquotedView(stripComment(segment)).split(/\s+/).filter(Boolean);
-  return toks.some((raw, i) => {
-    const tok = i === 0 ? raw.replace(/^[({!]+/, '') : raw;
-    if (!/[()<>&|;{}`!]/.test(tok)) return false;
-    if (/^[()<>&|;{}`!]+$/.test(tok)) return false;
-    return !/^\d*(?:[<>]{1,3}|&>>?|>&|<&|>>&)\d*-?$/.test(tok);
-  });
-}
-
-/**
- * True when the segment holds a construct this tokenizer does not fully understand
- * (AISDLC-605 structural rule): ANSI-C / locale quoting, backslash-newline, brace
- * expansion, IFS, a variable-assignment prefix, a variable / command / process
- * substitution in the command or subcommand slots, or a glob or backslash in the
- * command word. An opaque segment cannot be judged by the precise matcher.
- */
 function isOpaqueSegment(segment) {
-  if (/\$['"]/.test(segment)) return true;
-  if (/\\\n/.test(segment)) return true;
-  if (/\bIFS\b/.test(segment)) return true;
-  if (hasGluedRedirection(segment)) return true;
-  if (/\{[^{}\s]*(?:,|\.\.)[^{}\s]*\}/.test(unquotedView(segment))) return true;
-  for (const t of tokenizeShellish(segment)) {
-    const tok = t.replace(/^[({!]+/, '');
-    if (!tok || RESERVED.has(tok)) continue;
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tok)) return true;
-    break;
-  }
-  const eff = effectiveTokens(segment);
-  if (eff.slice(0, 6).some((t) => /\$|`|<\(|>\(/.test(t))) return true;
-  if (eff.length && /[*?[\]\\]/.test(eff[0])) return true;
-  // A glob in the subcommand slot (`gh pr m?rge 5`) can expand to a file named merge.
-  if (eff.slice(0, 4).some((t) => /[*?[\]]/.test(t))) return true;
-  return false;
+  return !isPlainSegment(segment);
 }
 
-/** True when the command text cannot be trusted segment by segment (see isOpaqueSegment). */
-function commandIsOpaque(command, segs) {
-  if (/\$['"]/.test(command)) return true; // quote/comment state may be desynced
+/** True when any segment of the command is opaque (see isPlainSegment). */
+function commandIsOpaque(command, segs = splitShellSegmentsEx(command)) {
   return segs.some((s) => isOpaqueSegment(s.text));
 }
 
@@ -407,10 +378,14 @@ function normalizeExpansions(text) {
   return variants;
 }
 
-/** Loose mention of the raw merge command: the pr and merge words appear anywhere (gh optional). */
+/**
+ * Loose mention of the raw merge command: the pr and merge words appear anywhere (gh
+ * optional, any order, so `A=merge; gh pr $A 5` counts), or `pr` plus ANSI-C / locale
+ * quoting (`$'\x6derge'` hides the word, so the quoting itself counts).
+ */
 function mentionsGhPrMerge(text) {
   // `pr` is case-sensitive (gh subcommands are), so `$PR/merge` in an API path does not count.
-  return /\bpr\b/.test(text) && /\bmerge\b/i.test(text);
+  return /\bpr\b/.test(text) && (/\bmerge\b/i.test(text) || /\$['"]/.test(text));
 }
 
 /** Loose mention of the merge API (pulls path or the merge / auto-merge mutations). */
@@ -418,51 +393,22 @@ function mentionsApiMerge(text) {
   return /pulls[\s\S]*merge|mergePullRequest|enablePullRequestAutoMerge/i.test(text);
 }
 
-/** False when a `#` may sit inside a construct where bash starts no comment. */
-function commentBoundaryTrusted(command) {
-  return !/\$['"]|`|\$\(|\$\{|[<>]\(/.test(command);
-}
-
 /**
- * True when `matches(text)` hits a segment that is NOT inert, or an inert
- * segment whose pipeline feeds a non-inert later stage. The matcher sees the
- * comment-stripped segment both with quotes retained and with quotes removed.
- * When `mentions` is given and the command is opaque (see isOpaqueSegment) the
- * command is refused whenever `mentions(rawCommand)` holds: deny-everything-that-
- * mentions-it for text the tokenizer cannot fully understand.
+ * True when `matches(text)` hits a PLAIN segment that is NOT inert, or an inert plain
+ * segment whose pipeline feeds a non-inert later stage. Opaque segments are never
+ * judged precisely: if ANY segment is opaque and `mentions(rawCommand)` (or a
+ * normalised copy of it) holds, the whole command is refused. Comments get no
+ * special trust: `#` is opaque by grammar, so a comment that mentions the phrase
+ * over-blocks (tracked by AISDLC-605.1).
  */
 function commandHasUninertMatch(command, matches, mentions) {
   const segs = splitShellSegmentsEx(command);
   if (mentions && commandIsOpaque(command, segs)) {
-    // Comment text is ignored only where the comment boundary is trusted (no `$'` / `$"`,
-    // backtick, `$(`, `${`, `<(` or `>(`: bash starts no comment inside those).
-    const trusted = commentBoundaryTrusted(command);
-    const view = (t) => (trusted ? stripComment(t) : t);
-    const raw = trusted
-      ? segs.map((s) => stripComment(s.text)).join('\n')
-      : command.replace(/\\\n/g, '');
-    if (mentions(raw) || normalizeExpansions(raw).some((v) => mentions(v))) return true;
-    for (const s of segs) {
-      if (mentions !== mentionsGhPrMerge || !isOpaqueSegment(s.text)) continue;
-      const first = effectiveTokens(s.text)
-        .slice(0, 3)
-        .map((t) =>
-          t
-            .replace(/^[({!]+/, '')
-            .split('/')
-            .pop()
-            .toLowerCase(),
-        );
-      if (
-        first.some((t) => t === 'gh' || t === 'gh.exe') &&
-        normalizeExpansions(view(s.text)).some((v) => /\bmerge\b/i.test(v) && !mentionsApiMerge(v))
-      )
-        return true;
-    }
+    if (mentions(command) || normalizeExpansions(command).some((v) => mentions(v))) return true;
   }
-  const trustedMain = commentBoundaryTrusted(command);
   for (let i = 0; i < segs.length; i++) {
-    const clean = trustedMain ? stripComment(segs[i].text) : segs[i].text;
+    if (!isPlainSegment(segs[i].text)) continue;
+    const clean = segs[i].text;
     if (!matches(clean) && !matches(clean.replace(/['"]/g, ''))) continue;
     if (!isInertSegment(segs[i].text)) return true;
     for (let j = i + 1; j < segs.length && segs[j].pipe; j++) {
@@ -472,78 +418,44 @@ function commandHasUninertMatch(command, matches, mentions) {
   return false;
 }
 
-const GH_PR_MERGE = /\bgh(?:\.exe)?\s+pr\s+merge\b/i;
-
-/** Brace-expansion alternatives of one word (`{merge,}` gives merge and the empty word). */
-function wordAlternatives(word) {
-  const m = /^(.*?)\{([^{}]*)\}(.*)$/.exec(word);
-  if (!m) return [word];
-  const alts = m[2].split(',').flatMap((a) => wordAlternatives(m[1] + a + m[3]));
-  return alts.length ? alts : [word];
-}
-
 /**
- * Structural check (AISDLC-605 rounds 4-6). gh's parser skips unknown flags and their
- * values before resolving the subcommand, so guessing which flags take a value (or
- * how many words to look at) is unsound. For EVERY `gh` / `gh.exe` token of the
- * segment, at any position (behind `nice -n 10`, `env -u X`, `sudo -u me`, `exec -a n`,
- * `command -p`, `timeout 60`, or as an absolute path), the token `pr` followed anywhere
- * later by the token `merge` is refused, whatever flags sit between. `gh alias` followed
- * later by `set` / `import` is refused too (an alias can expand to the merge command).
- * Quotes and backslashes are removed and brace expansion is applied per word.
- * `mergeStateStatus` / `mergeable` are not the token `merge`.
+ * Precise check, run on PLAIN segments only. gh's parser skips unknown flags and
+ * their values before resolving the subcommand, so guessing which flags take a value
+ * is unsound. For EVERY `gh` / `gh.exe` word of the segment, at any position (behind
+ * `nice -n 10`, `env -u X`, `sudo -u me`, `exec -a n`, `command -p`, `timeout 60`, or
+ * as an absolute path), the word `pr` followed anywhere later by the word `merge` is
+ * refused, whatever flags sit between. `gh alias` followed later by `set` / `import`
+ * is refused too (an alias can expand to the merge command). Quotes and punctuation bound words.
+ * `mergeStateStatus` / `mergeable` are not the word `merge`.
  */
 function ghSegmentHasPrBeforeMerge(text) {
-  const base = text.replace(/['"\\]/g, '');
-  // Every shell metacharacter bounds a word, quoted or not (fail closed). Braces are kept
-  // in one variant so brace expansion (`{merge,}`) is still seen per word.
-  const split = (t) => t.split(/\s+/).filter(Boolean);
-  const variants = [
-    split(base.replace(/[()<>&|;!`]/g, ' ')),
-    split(base.replace(/[(){}<>&|;!`]/g, ' ')),
-  ];
+  // Quoted content may hold any punctuation (`'alias.m=!<gh> pr ...'`, `"echo;<gh> pr ..."`):
+  // every character outside the bare set bounds a word, so gh is found inside quotes too.
+  const tokens = text.split(/[^A-Za-z0-9_./=:@+,%-]+/).filter(Boolean);
   const isGh = (t) =>
     t
-      .replace(/^[({!]+/, '')
       .split('/')
       .pop()
       .toLowerCase()
       .replace(/\.exe$/, '') === 'gh';
-  for (const tokens of variants) {
-    for (let g = 0; g < tokens.length; g++) {
-      if (!isGh(tokens[g])) continue;
-      let seenPr = false;
-      let seenAlias = false;
-      for (const t of tokens.slice(g + 1)) {
-        const alts = wordAlternatives(t.toLowerCase());
-        if (seenPr && alts.includes('merge')) return true;
-        if (seenAlias && (alts.includes('set') || alts.includes('import'))) return true;
-        if (alts.includes('pr')) seenPr = true;
-        if (alts.includes('alias')) seenAlias = true;
-      }
+  for (let g = 0; g < tokens.length; g++) {
+    if (!isGh(tokens[g])) continue;
+    let seenPr = false;
+    let seenAlias = false;
+    for (const t of tokens.slice(g + 1)) {
+      const w = t.toLowerCase();
+      if (seenPr && w === 'merge') return true;
+      if (seenAlias && (w === 'set' || w === 'import')) return true;
+      if (w === 'pr') seenPr = true;
+      if (w === 'alias') seenAlias = true;
     }
   }
   return false;
 }
 
-/** True when a gh word is followed (anywhere later in the text) by `$'` or `$"` quoting. */
-function ghAnsiQuoted(text) {
-  const m = /(^|[\s;&|({!/])gh(?:\.exe)?(?=[\s'"$\\])/i.exec(text);
-  return !!m && /\$['"]/.test(text.slice(m.index));
-}
-
-function matchesGhPrMerge(text) {
-  return (
-    GH_PR_MERGE.test(text) ||
-    GH_PR_MERGE.test(text.replace(/\\/g, '')) ||
-    ghSegmentHasPrBeforeMerge(text) ||
-    ghAnsiQuoted(text)
-  );
-}
-
 /** True when the command runs (or could run) the raw merge command (see module contract). */
 function commandRunsGhPrMerge(command) {
-  return commandHasUninertMatch(command, matchesGhPrMerge, mentionsGhPrMerge);
+  return commandHasUninertMatch(command, ghSegmentHasPrBeforeMerge, mentionsGhPrMerge);
 }
 
 module.exports = {
@@ -554,6 +466,7 @@ module.exports = {
   tokenizeShellish,
   commandWord,
   isInertSegment,
+  isPlainSegment,
   isOpaqueSegment,
   commandIsOpaque,
   mentionsApiMerge,

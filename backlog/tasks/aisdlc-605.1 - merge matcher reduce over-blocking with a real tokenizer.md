@@ -17,13 +17,13 @@ dispatchable: true
 
 ## Description
 
-AISDLC-605 round 5 made `ai-sdlc-plugin/hooks/lib/merge-matcher.js` fail closed structurally: any command segment holding a construct the tokenizer does not fully understand (ANSI-C or locale quoting, backslash-newline, brace expansion, IFS, a variable-assignment prefix, substitutions in the command or subcommand slots, globs in the command word) is opaque, and an opaque command that mentions the merge phrase is refused. That closes the shell-expansion bypasses but over-blocks legitimately opaque, harmless commands, for example `gh api ... -q $'.x'` and `gh release create --notes $'x'`.
+AISDLC-605 (planner ruling, positive grammar) made `ai-sdlc-plugin/hooks/lib/merge-matcher.js` fail closed by construction. A command segment is PLAIN only when it consists entirely of whitespace-separated words, each either bare ASCII characters from `[A-Za-z0-9_./=:@+,%-]` or exactly one balanced single- or double-quoted string with no `$`, backtick or backslash (bare characters glued to a quote make the word non-plain). Everything else (`$`, backtick, parens, braces, `<`, `>`, `|`, `&`, `;`, `#`, backslash, unbalanced or glued quotes, non-ASCII) makes the whole segment OPAQUE. The precise matcher (gh word scan, inert allowlist, pipe-stage tracking) runs only on plain segments; when any segment is opaque and the raw command mentions a merge phrase (the words `pr` and `merge`, the pulls-merge API path or the merge mutations), the command is refused. That closes every shell-expansion bypass found in rounds 3-11 but over-blocks harmless opaque commands that mention the phrase, for example `gh api ... -q $'.x'`, `gh release create --notes $'x'`, any `$VAR`, a `>` redirection, or a trailing `# comment` that mentions pr and merge.
 
-Replace the opaque-segment fail-closed rule with a real shell tokenizer that expands brace expansion, IFS, ANSI-C quoting, backslash-newline and variable assignment into plain words, so those harmless commands are no longer blocked. Indirection through user variables, stored scripts and planted files stays out of scope: branch protection and `cli-merge-if-eligible` are the backstop.
+Replace the positive-grammar opaque-segment rule with a real shell tokenizer that expands brace expansion, IFS, ANSI-C quoting, backslash-newline, variable assignment, redirections and comments into plain words, so those harmless commands are no longer blocked. Indirection through user variables, stored scripts and planted files stays out of scope: branch protection and `cli-merge-if-eligible` are the backstop.
 
 ## Acceptance Criteria
 
 - [ ] A real tokenizer normalises brace expansion, `$IFS`/`${IFS}`, ANSI-C `$'...'` (including `\'` escapes in the splitter and comment stripper), backslash-newline and leading variable assignments.
 - [ ] `gh api ... -q $'.x'` and `gh release create --notes $'x'` are allowed.
-- [ ] Every bypass test from AISDLC-605 rounds 3, 4 and 5 stays refused (`merge-matcher.test.mjs` and `enforce-blocked-actions.test.mjs`).
+- [ ] Every bypass test from AISDLC-605 rounds 3 through 11 stays refused (`merge-matcher.test.mjs` and `enforce-blocked-actions.test.mjs`).
 - [ ] Previously allowed inert commands (echo prose, `git commit -m` text, `gh pr view`, `gh alias list`, `gh pr list --repo`) stay allowed.
