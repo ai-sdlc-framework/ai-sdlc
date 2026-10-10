@@ -37,7 +37,15 @@ export const TRUST_CHAIN_PATH_PREFIXES = Object.freeze([
   'scripts/verify-attestation',
   'scripts/check-attestation',
   'scripts/sign-attestation',
+  // Agent-instruction directories: Markdown here steers agents (AISDLC-723).
+  '.claude/',
+  '.codex/',
+  '.cursor/',
+  '.opencode/',
 ]);
+
+/** Files that act as agent instructions wherever they sit in the tree. */
+const AGENT_INSTRUCTION_BASENAMES = Object.freeze(['claude.md', 'agents.md', 'skill.md']);
 
 /**
  * Bookkeeping directories under `.ai-sdlc/` that carry data, not control. The
@@ -61,10 +69,21 @@ export const TEST_ONLY_PATTERNS = Object.freeze([
 /**
  * Copy of `DOCS_ONLY_PATTERN` in `scripts/is-docs-only-changeset.mjs` (that
  * script is not shipped with the published package, so the verifier cannot
- * import it). A test in `review-scope-core.test.mjs` asserts the two stay equal.
+ * import it). A test in `pipeline-cli/src/attestation/review-scope.test.ts` asserts the two stay equal.
  */
 export const DOCS_ONLY_PATTERN =
   /^(spec\/rfcs\/|docs\/|backlog\/tasks\/|backlog\/completed\/|\.ai-sdlc\/attestations\/[^/]+\.dsse\.json$|\.ai-sdlc\/_decisions\/|[^/]+\.md$)/;
+
+/**
+ * True when a failed `git show <ref>:<path>` means the file is definitely
+ * absent at that ref (the only failure that may be read as "no config").
+ *
+ * @param {unknown} err
+ */
+export function isPathMissingGitError(err) {
+  const stderr = String(/** @type {{stderr?: unknown}} */ (err)?.stderr ?? '');
+  return /does not exist in|exists on disk, but not in/i.test(stderr);
+}
 
 /** Markdown anywhere in the tree. */
 const MARKDOWN_PATTERN = /\.md$/i;
@@ -75,10 +94,11 @@ const MARKDOWN_PATTERN = /\.md$/i;
  * security expectation, so it forces the full set.
  */
 const SECURITY_TEST_PATH_PATTERN =
-  /attest|sign(?:ing|ature|er|[-_.])|verif|trust|hook|merkle|security|governance|permission|sandbox|auth|secret|credential|policy|injection|redos/i;
+  /attest|sign(?:ing|ature|er|[-_.])|verif|trust|hook|merkle|security|governance|permission|sandbox|auth|secret|credential|policy|injection|redos|merge|eligib|reviewer|docs-only|gate|guard|role|dor|pre-push|allow|deny|bypass/i;
 
 /** @param {string} path */
 function isTrustChainPath(path) {
+  if (AGENT_INSTRUCTION_BASENAMES.includes(path.slice(path.lastIndexOf('/') + 1))) return true;
   if (TRUST_CHAIN_DATA_EXCEPTIONS.some((re) => re.test(path))) return false;
   return TRUST_CHAIN_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
 }
@@ -95,7 +115,7 @@ function isDocsAdjacentPath(path) {
 
 /** @param {string} path */
 function normalise(path) {
-  return path.replace(/\\/g, '/').replace(/^\.\//, '');
+  return path.normalize('NFC').toLowerCase().replace(/\\/g, '/').replace(/^\.\//, '');
 }
 
 /**
@@ -141,7 +161,7 @@ export function classifyReviewScope(paths) {
  */
 export function parseSecurityReviewAlways(yaml) {
   if (typeof yaml !== 'string') return false;
-  return /^\s*securityReview:\s*['"]?always['"]?\s*(#.*)?$/m.test(yaml);
+  return /^\s*securityReview:\s*['"]?always['"]?\s*(#.*)?$/im.test(yaml);
 }
 
 /** Reviewer roles that satisfy "the correctness review" requirement. */

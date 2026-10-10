@@ -12,6 +12,7 @@
 import { execFileSync } from 'node:child_process';
 import {
   classifyReviewScope,
+  isPathMissingGitError,
   parseSecurityReviewAlways,
   reviewerSetKindFor,
   type ReviewScopeClassification,
@@ -35,6 +36,23 @@ function git(args: string[], cwd: string): string | null {
     });
   } catch {
     return null;
+  }
+}
+
+/**
+ * Read the base-branch review config. Returns `''` when the file is definitely
+ * absent, the text when present, and `null` on any other git error (the caller
+ * then fails closed to `securityAlways = true`).
+ */
+function readBaseReviewConfig(baseRef: string, cwd: string): string | null {
+  try {
+    return execFileSync('git', ['show', `${baseRef}:.ai-sdlc/review-config.yaml`], {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    return isPathMissingGitError(err) ? '' : null;
   }
 }
 
@@ -67,9 +85,8 @@ export function deriveEnvelopeReviewScope(
   );
   const paths = listing === null ? [] : listing.split('\0').filter(Boolean);
   const { classification } = classifyReviewScope(paths);
-  const securityAlways = parseSecurityReviewAlways(
-    git(['show', `${baseRef}:.ai-sdlc/review-config.yaml`], repoRoot),
-  );
+  const baseConfig = readBaseReviewConfig(baseRef, repoRoot);
+  const securityAlways = baseConfig === null ? true : parseSecurityReviewAlways(baseConfig);
   return {
     classification,
     securityAlways,

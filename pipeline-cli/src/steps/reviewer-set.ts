@@ -53,6 +53,7 @@ import {
 import type { ReviewerType } from '../types.js';
 import {
   classifyReviewScope,
+  isPathMissingGitError,
   parseSecurityReviewAlways,
   reviewerSetKindFor,
   type ReviewScopeClassification,
@@ -364,6 +365,19 @@ export interface ReviewScopeReduction {
   reason: string;
 }
 
+/** `''` when absent at `baseRef`, the text when present, `null` on any other git error. */
+function readBaseConfigFailClosed(workDir: string, baseRef: string): string | null {
+  try {
+    return execFileSync('git', ['show', `${baseRef}:.ai-sdlc/review-config.yaml`], {
+      cwd: workDir,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    return isPathMissingGitError(err) ? '' : null;
+  }
+}
+
 export interface ReduceForReviewScopeOpts {
   /** The set chosen by `selectReviewerSet` / the resolver. */
   reviewers: readonly ReviewerType[];
@@ -405,12 +419,13 @@ export function reduceForReviewScope(opts: ReduceForReviewScopeOpts): ReviewScop
   });
   if (opts.diffUnavailable === true) return unchanged('full', 'diff unavailable');
   const scope = classifyReviewScope(opts.changedFiles);
-  const securityAlways = parseSecurityReviewAlways(
-    (opts.readBaseConfig ?? readReviewConfigFromBaseRef)(
-      opts.workDir ?? process.cwd(),
-      opts.baseRef ?? 'origin/main',
-    ),
-  );
+  const workDir = opts.workDir ?? process.cwd();
+  const baseRef = opts.baseRef ?? 'origin/main';
+  // Fail closed: only a definitely-absent config reads as "no securityReview: always".
+  const baseConfig = opts.readBaseConfig
+    ? (opts.readBaseConfig(workDir, baseRef) ?? '')
+    : readBaseConfigFailClosed(workDir, baseRef);
+  const securityAlways = baseConfig === null ? true : parseSecurityReviewAlways(baseConfig);
   if (reviewerSetKindFor(scope.classification, { securityAlways }) === 'full') {
     return unchanged(scope.classification, scope.reason, securityAlways);
   }

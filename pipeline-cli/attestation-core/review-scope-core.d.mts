@@ -16,3 +16,4 @@ export function checkReviewerCoverage(
   classification: ReviewScopeClassification,
   opts?: { securityAlways?: boolean },
 ): { ok: boolean; missing: string[] };
+export function isPathMissingGitError(err: unknown): boolean;

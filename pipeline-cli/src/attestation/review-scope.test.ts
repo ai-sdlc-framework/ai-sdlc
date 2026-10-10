@@ -12,6 +12,7 @@ import {
   DOCS_ONLY_PATTERN,
   checkReviewerCoverage,
   classifyReviewScope,
+  isPathMissingGitError,
   parseSecurityReviewAlways,
   reviewerSetKindFor,
 } from '../../attestation-core/review-scope-core.mjs';
@@ -20,9 +21,8 @@ import { reduceForReviewScope } from '../steps/reviewer-set.js';
 
 type Scoped = { status: string; reason: string; reviewScope?: Record<string, unknown> };
 type EnforceFn = (
-  result: { status: string; reason: string },
+  result: { status: string; reason: string; [k: string]: unknown },
   ctx: {
-    envelope: object;
     repoRoot: string;
     baseSha: string;
     headSha: string;
@@ -97,6 +97,35 @@ describe('classifyReviewScope', () => {
     }
   });
 
+  it('agent-instruction Markdown outside the plugin forces full', () => {
+    for (const p of [
+      '.claude/commands/foo.md',
+      '.codex/prompts/x.md',
+      '.cursor/rules/a.md',
+      '.opencode/agent/a.md',
+      'CLAUDE.md',
+      'packages/x/AGENTS.md',
+      'a/b/c/skill.md',
+      'a/SKILL.MD',
+    ]) {
+      expect(classifyReviewScope([p]).classification).toBe('full');
+    }
+  });
+
+  it('is case-insensitive and NFC-normalised for trust-chain and workflow paths', () => {
+    expect(classifyReviewScope(['.GitHub/Workflows/ci.yml']).classification).toBe('full');
+    expect(classifyReviewScope(['AI-SDLC-Plugin/agents/a.md']).classification).toBe('full');
+    expect(classifyReviewScope(['Scripts/Verify-Attestation.mjs']).classification).toBe('full');
+  });
+
+  it('broadened security keywords force full for tests', () => {
+    for (const w of ['merge', 'eligibility', 'reviewer', 'gate', 'guard', 'role', 'bypass']) {
+      expect(classifyReviewScope([`src/${w}.test.ts`]).classification).toBe('full');
+    }
+    expect(classifyReviewScope(['src/dor-check.test.ts']).classification).toBe('full');
+    expect(classifyReviewScope(['src/pre-push.test.ts']).classification).toBe('full');
+  });
+
   it('data under .ai-sdlc (decisions, envelopes) stays docs-equivalent', () => {
     expect(classifyReviewScope(['.ai-sdlc/_decisions/DEC-1.md']).classification).toBe(
       'docs-adjacent',
@@ -110,9 +139,8 @@ describe('classifyReviewScope', () => {
   });
 
   it('normalises backslashes and leading ./', () => {
-    expect(classifyReviewScope(['.\\a\\b.test.ts'.replace(/\\/g, '/')]).classification).toBe(
-      'test-only',
-    );
+    expect(classifyReviewScope(['.\\a\\b.test.ts']).classification).toBe('test-only');
+    expect(classifyReviewScope(['.\\.github\\workflows\\ci.yml']).classification).toBe('full');
     expect(classifyReviewScope(['./a/b.test.ts']).classification).toBe('test-only');
   });
 
@@ -127,6 +155,7 @@ describe('classifyReviewScope', () => {
 describe('config + coverage helpers', () => {
   it('parseSecurityReviewAlways', () => {
     expect(parseSecurityReviewAlways('securityReview: always\n')).toBe(true);
+    expect(parseSecurityReviewAlways('SecurityReview: ALWAYS\n')).toBe(true);
     expect(parseSecurityReviewAlways('reviewerSet: three\n  securityReview: "always" # x')).toBe(
       true,
     );
@@ -208,11 +237,13 @@ describe('reduceForReviewScope (signer-side selection)', () => {
     expect(r.reviewers).toEqual([...three]);
   });
 
-  it('reads the config via git show on the base ref by default (null off-repo)', () => {
+  it('reads the config via git show on the base ref by default (fails closed off-repo)', () => {
     const workDir = mkdtempSync(join(tmpdir(), 'aisdlc-723-'));
     dirs.push(workDir);
     const r = reduceForReviewScope({ reviewers: three, changedFiles: ['a.test.ts'], workDir });
-    expect(r.reviewers).toEqual(['correctness-reviewer']);
+    // A git error that is not "path does not exist" fails closed to the full set.
+    expect(r.reviewers).toEqual([...three]);
+    expect(r.securityAlways).toBe(true);
   });
 });
 
@@ -252,17 +283,14 @@ function makeRepo(
   return { dir, base, head: sh(dir, 'rev-parse', 'HEAD') };
 }
 
-function envelopeWith(...names: string[]) {
-  return { transcriptLeaves: names.map((reviewerName) => ({ reviewerName })) };
+function withNames(...names: string[]) {
+  return { status: 'valid', reason: 'ok', verifiedReviewerNames: names };
 }
 
 describe('enforceReviewScope (CI verifier re-derivation)', () => {
-  const ok = { status: 'valid', reason: 'ok' };
-
   it('accepts a correctness-only attestation on a test-only diff and reports the class', () => {
     const { dir, base, head } = makeRepo({ 'src/a.test.ts': 'x' });
-    const r = enforceReviewScope(ok, {
-      envelope: envelopeWith('correctness-reviewer'),
+    const r = enforceReviewScope(withNames('correctness-reviewer'), {
       repoRoot: dir,
       baseSha: base,
       headSha: head,
@@ -275,8 +303,7 @@ describe('enforceReviewScope (CI verifier re-derivation)', () => {
 
   it('rejects a correctness-only attestation on a source diff', () => {
     const { dir, base, head } = makeRepo({ 'src/a.ts': 'x' });
-    const r = enforceReviewScope(ok, {
-      envelope: envelopeWith('correctness-reviewer'),
+    const r = enforceReviewScope(withNames('correctness-reviewer'), {
       repoRoot: dir,
       baseSha: base,
       headSha: head,
@@ -289,8 +316,7 @@ describe('enforceReviewScope (CI verifier re-derivation)', () => {
 
   it('accepts the full set on a source diff', () => {
     const { dir, base, head } = makeRepo({ 'src/a.ts': 'x' });
-    const r = enforceReviewScope(ok, {
-      envelope: envelopeWith('correctness-reviewer', 'security-reviewer'),
+    const r = enforceReviewScope(withNames('correctness-reviewer', 'security-reviewer'), {
       repoRoot: dir,
       baseSha: base,
       headSha: head,
@@ -306,8 +332,7 @@ describe('enforceReviewScope (CI verifier re-derivation)', () => {
     ];
     for (const files of cases) {
       const { dir, base, head } = makeRepo(files);
-      const r = enforceReviewScope(ok, {
-        envelope: envelopeWith('correctness-reviewer'),
+      const r = enforceReviewScope(withNames('correctness-reviewer'), {
         repoRoot: dir,
         baseSha: base,
         headSha: head,
@@ -319,23 +344,24 @@ describe('enforceReviewScope (CI verifier re-derivation)', () => {
 
   it('does not trust a classification field written by the signer', () => {
     const { dir, base, head } = makeRepo({ 'src/a.ts': 'x' });
-    const r = enforceReviewScope(ok, {
-      envelope: {
-        ...envelopeWith('correctness-reviewer'),
+    const r = enforceReviewScope(
+      {
+        ...withNames('correctness-reviewer'),
         reviewScope: { classification: 'test-only', requiredSet: 'correctness-only' },
       },
-      repoRoot: dir,
-      baseSha: base,
-      headSha: head,
-      mergeBase: base,
-    });
+      {
+        repoRoot: dir,
+        baseSha: base,
+        headSha: head,
+        mergeBase: base,
+      },
+    );
     expect(r.status).toBe('invalid');
   });
 
   it('securityReview: always on the BASE branch requires security even for tests', () => {
     const { dir, base, head } = makeRepo({ 'src/a.test.ts': 'x' }, 'securityReview: always\n');
-    const r = enforceReviewScope(ok, {
-      envelope: envelopeWith('correctness-reviewer'),
+    const r = enforceReviewScope(withNames('correctness-reviewer'), {
       repoRoot: dir,
       baseSha: base,
       headSha: head,
@@ -351,8 +377,7 @@ describe('enforceReviewScope (CI verifier re-derivation)', () => {
       '.ai-sdlc/review-config.yaml': 'securityReview: always\n',
     });
     // .ai-sdlc/ is trust-chain so the diff is full anyway; confirm the base read is empty.
-    const r = enforceReviewScope(ok, {
-      envelope: envelopeWith('correctness-reviewer', 'security-reviewer'),
+    const r = enforceReviewScope(withNames('correctness-reviewer', 'security-reviewer'), {
       repoRoot: dir,
       baseSha: base,
       headSha: head,
@@ -363,8 +388,7 @@ describe('enforceReviewScope (CI verifier re-derivation)', () => {
 
   it('fails closed to full when the diff cannot be listed', () => {
     const { dir, base, head } = makeRepo({ 'src/a.test.ts': 'x' });
-    const r = enforceReviewScope(ok, {
-      envelope: envelopeWith('correctness-reviewer'),
+    const r = enforceReviewScope(withNames('correctness-reviewer'), {
       repoRoot: dir,
       baseSha: base,
       headSha: head,
@@ -375,14 +399,49 @@ describe('enforceReviewScope (CI verifier re-derivation)', () => {
 
   it('survives a git failure listing the diff (bad sha) as full', () => {
     const { dir, base } = makeRepo({ 'src/a.test.ts': 'x' });
-    const r = enforceReviewScope(ok, {
-      envelope: envelopeWith('correctness-reviewer'),
+    const r = enforceReviewScope(withNames('correctness-reviewer'), {
       repoRoot: dir,
       baseSha: base,
       headSha: 'f'.repeat(40),
       mergeBase: base,
     });
     expect(r.status).toBe('invalid');
+  });
+});
+
+describe('enforceReviewScope fail-closed and name sourcing', () => {
+  it('a result carrying no verifiedReviewerNames is rejected (envelope names are never read)', () => {
+    const { dir, base, head } = makeRepo({ 'src/a.test.ts': 'x' });
+    const r = enforceReviewScope(
+      { status: 'valid', reason: 'ok' },
+      { repoRoot: dir, baseSha: base, headSha: head, mergeBase: base },
+    );
+    expect(r.status).toBe('invalid');
+  });
+
+  it('a git error other than a missing path fails closed to securityAlways', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'aisdlc-723-nogit-'));
+    dirs.push(dir);
+    const r = enforceReviewScope(withNames('correctness-reviewer'), {
+      repoRoot: dir,
+      baseSha: 'e'.repeat(40),
+      headSha: 'f'.repeat(40),
+      mergeBase: null,
+    });
+    expect(r.status).toBe('invalid');
+    expect(r.reason).toContain('securityReview: always');
+  });
+
+  it('isPathMissingGitError only matches a definite missing-path error', () => {
+    expect(isPathMissingGitError({ stderr: "fatal: path 'x' does not exist in 'abc'" })).toBe(true);
+    expect(isPathMissingGitError({ stderr: 'fatal: not a git repository' })).toBe(false);
+    expect(isPathMissingGitError(new Error('boom'))).toBe(false);
+  });
+
+  it('deriveEnvelopeReviewScope records nothing when the base ref is gone', () => {
+    const { dir, head } = makeRepo({ 'src/a.test.ts': 'x' });
+    sh(dir, 'update-ref', '-d', 'refs/remotes/origin/main');
+    expect(deriveEnvelopeReviewScope(dir, head, ['correctness-reviewer'])).toBeUndefined();
   });
 });
 
