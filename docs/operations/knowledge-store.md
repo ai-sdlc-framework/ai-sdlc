@@ -64,7 +64,11 @@ knowledge:
   `.husky/pre-push`) delegates to `cli-context check-scope`, which uses the real
   frontmatter parser and the roots configured in `.ai-sdlc/context.yaml`. It fails when a
   `protected` entry sits in the configured tracked root, or the configured protected root
-  has tracked files or is not git-ignored. If `pipeline-cli/dist` is not built it skips
+  has tracked files or is not git-ignored. Under the pre-push hook it also reads git's
+  push ranges from stdin and scans every pushed commit (`--rev <sha> --rev ^<remote-sha>`;
+  a new branch scans back to the merge-base with `origin/main`), so an entry added in one
+  commit and removed in a later one is still caught, and any file committed under the
+  protected root fails even if it is gone from HEAD. If `pipeline-cli/dist` is not built it skips
   with a message outside CI and fails in CI (`CI` set).
 - `scripts/check-pr-body-protected.sh <body-file>` (or
   `cli-context check-pr-body --body-file <file>`) fails when a PR body cites a protected

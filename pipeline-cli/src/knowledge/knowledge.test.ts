@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -6,7 +7,7 @@ import { classifyEntry } from './classify.js';
 import { loadKnowledgeConfig } from './config.js';
 import { hashValue } from './entry.js';
 import { DEFAULT_ONTOLOGY, parseOntology } from './ontology.js';
-import { checkKnowledgeScope } from './scope-check.js';
+import { checkKnowledgeScope, checkKnowledgeScopeRange } from './scope-check.js';
 import { findProtectedCitations, validateKnowledge } from './store.js';
 
 let root: string;
@@ -272,5 +273,70 @@ describe('checkKnowledgeScope', () => {
     expect(run({ [at('systems', 'a')]: entryText() })).toEqual(
       expect.not.arrayContaining([expect.stringContaining('scope: protected')]),
     );
+  });
+});
+
+describe('checkKnowledgeScopeRange', () => {
+  const git = (...args: string[]) =>
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
+      cwd: root,
+      encoding: 'utf-8',
+    }).trim();
+  const commit = (msg: string) => {
+    git('add', '-A', '-f');
+    git('commit', '-q', '-m', msg);
+    return git('rev-parse', 'HEAD');
+  };
+  const repo = (files: Record<string, string>) => {
+    project(files);
+    git('init', '-q');
+    return commit('base');
+  };
+
+  it('catches a protected entry added then removed within the range', () => {
+    const base = repo({ 'x.txt': 'x', '.gitignore': '.ai-sdlc/knowledge-protected/\n' });
+    mkdirSync(join(root, '.ai-sdlc/knowledge/customers'), { recursive: true });
+    writeFileSync(join(root, at('customers', 'c')), entryText({ id: 'k-c', scope: 'protected' }));
+    commit('add');
+    rmSync(join(root, at('customers', 'c')));
+    const head = commit('remove');
+    expect(checkKnowledgeScope(root)).toEqual([]);
+    const v = checkKnowledgeScopeRange(root, [head, `^${base}`]);
+    expect(v.join()).toContain('scope: protected in tracked root');
+    expect(v.join()).toContain('pushed commit');
+    expect(checkKnowledgeScopeRange(root, [head])).toHaveLength(1);
+  });
+
+  it('catches files committed under the protected root (configured and default)', () => {
+    const base = repo({
+      '.ai-sdlc/context.yaml': 'knowledge:\n  protectedRoot: kb-private\n',
+    });
+    mkdirSync(join(root, 'kb-private'), { recursive: true });
+    mkdirSync(join(root, '.ai-sdlc/knowledge-protected'), { recursive: true });
+    writeFileSync(join(root, 'kb-private/a.md'), 'x');
+    writeFileSync(join(root, '.ai-sdlc/knowledge-protected/b.md'), 'x');
+    const head = commit('add');
+    const v = checkKnowledgeScopeRange(root, [head, `^${base}`]);
+    expect(v.filter((m) => m.includes('under protected root'))).toHaveLength(2);
+  });
+
+  it('fails closed on unparseable frontmatter and passes clean ranges', () => {
+    const base = repo({ 'x.txt': 'x' });
+    mkdirSync(join(root, '.ai-sdlc/knowledge/x'), { recursive: true });
+    writeFileSync(join(root, at('x', 'bad')), '---\n: : [\n---\nb');
+    writeFileSync(join(root, at('x', 'plain')), 'no frontmatter');
+    writeFileSync(join(root, at('x', 'ok')), entryText());
+    const head = commit('add');
+    const v = checkKnowledgeScopeRange(root, [head, `^${base}`]);
+    expect(v).toHaveLength(1);
+    expect(v[0]).toContain('unparseable');
+    expect(checkKnowledgeScopeRange(root, [head, `^${head}`])).toEqual([]);
+  });
+
+  it('fails closed on an empty, malformed or unreadable range', () => {
+    repo({ 'x.txt': 'x' });
+    expect(checkKnowledgeScopeRange(root, [])).toHaveLength(1);
+    expect(checkKnowledgeScopeRange(root, ['--all'])).toHaveLength(1);
+    expect(checkKnowledgeScopeRange(root, ['deadbeef'.repeat(5)])[0]).toContain('cannot list');
   });
 });
