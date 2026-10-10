@@ -31,7 +31,7 @@ on:
         description: Exact version (x.y.z, no range) of @ai-sdlc/pipeline-cli and @ai-sdlc/orchestrator to install.
         type: string
         required: false
-        default: '0.29.0'
+        default: '0.31.0'
       required-independence-tier:
         description: Floor (none|attested|isolated) for the base independence-policy.yaml requiredTier.
         type: string

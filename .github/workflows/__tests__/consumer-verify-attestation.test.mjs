@@ -154,6 +154,14 @@ describe('consumer-verify-attestation: shipped files (AC-1, AC-3)', () => {
     assert.ok(inputs['pipeline-cli-version']);
     assert.ok(inputs['required-independence-tier']);
   });
+  it('defaults pipeline-cli-version to one published version, the same in workflow and action', () => {
+    const wf = triggers(workflow).workflow_call.inputs['pipeline-cli-version'].default;
+    const ac = action.inputs['pipeline-cli-version'].default;
+    assert.match(wf, /^\d+\.\d+\.\d+$/);
+    assert.equal(wf, ac);
+    // 0.29.0 was never published to npm; a default install of it fails with E404.
+    assert.notEqual(wf, '0.29.0');
+  });
   it('requires a pinned ai-sdlc-ref with no mutable default (fails closed on non-SHA)', () => {
     const def = triggers(workflow).workflow_call.inputs['ai-sdlc-ref'];
     assert.equal(def.required, true);

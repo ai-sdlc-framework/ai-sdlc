@@ -40,7 +40,7 @@ default, and the job fails closed unless it is a full 40-hex commit SHA. The job
 also fails first unless the caller is triggered by `pull_request_target`.
 
 Optional inputs: `pipeline-cli-version` (an **exact pin**, `x.y.z`, of the
-installed `@ai-sdlc/pipeline-cli` / `@ai-sdlc/orchestrator`, default `0.29.0`;
+installed `@ai-sdlc/pipeline-cli` / `@ai-sdlc/orchestrator`, default `0.31.0`;
 no caret or range is applied) and `required-independence-tier`
 (`none|attested|isolated`, a floor on your base policy's `requiredTier`).
 

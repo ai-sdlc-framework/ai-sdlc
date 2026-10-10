@@ -22,7 +22,7 @@ inputs:
   pipeline-cli-version:
     description: Exact version of @ai-sdlc/pipeline-cli and @ai-sdlc/orchestrator to install (x.y.z, exact pin, no range).
     required: false
-    default: '0.29.0'
+    default: '0.31.0'
   required-independence-tier:
     description: >-
       Floor for the base policy's requiredTier (none|attested|isolated). The
