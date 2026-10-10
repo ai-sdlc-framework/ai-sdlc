@@ -1,7 +1,7 @@
 ---
 id: aisdlc-569
 title: Retire the stale .claude/hooks enforce-blocked-actions copy + symlink/stale-base hardening
-status: To Do
+status: Done
 priority: high
 labels:
   - security
@@ -53,11 +53,36 @@ so it doesn't shell out on every hook invocation.
 
 ## Acceptance Criteria
 
-- [ ] This repo's live Claude Code sessions enforce the full Write/Edit floor +
+- [x] This repo's live Claude Code sessions enforce the full Write/Edit floor +
       worktree isolation (stale `.claude/hooks/` copy retired/repointed/shimmed);
       a test or documented verification proves `.claude/settings.json` resolves to
       the enforcing implementation.
-- [ ] Worktree-containment and `.ai-sdlc/**` floor checks realpath-resolve both
+- [x] Worktree-containment and `.ai-sdlc/**` floor checks realpath-resolve both
       sides; a hermetic test proves a symlink escaping the worktree is refused.
-- [ ] `warnIfStaleBase()` no longer spawns a git subprocess on every Write/Edit
+- [x] `warnIfStaleBase()` no longer spawns a git subprocess on every Write/Edit
       (cached/throttled); existing 49 hook tests still pass.
+
+## Final Summary
+
+## Summary
+Retired the stale Bash-only `.claude/hooks/enforce-blocked-actions.*` copy and registered the plugin hook for `Write|Edit|MultiEdit` in `.claude/settings.json`, so this repository's own sessions get the Write/Edit floor and worktree isolation. The plugin hook now compares real paths on both sides of its containment checks, and `warnIfStaleBase()` is throttled through a cache file.
+
+## Changes
+- `.claude/hooks/enforce-blocked-actions.{js,sh,test.mjs}` (deleted): unregistered, Bash-only, fail-open dead copy.
+- `.claude/settings.json` (modified): `Write|Edit|MultiEdit` PreToolUse matcher pointing at `ai-sdlc-plugin/hooks/enforce-blocked-actions.sh`.
+- `ai-sdlc-plugin/hooks/enforce-blocked-actions.js` (modified): `enforceWriteEdit()` realpath-resolves home, target and permittedExternalPaths (`realpathOrDeny` fails closed on `SymlinkCapError`); blockedPaths match on the real and the lexical path; untrusted floor checks both forms; stale-base check cached in a TTL cache file (`AI_SDLC_STALE_BASE_TTL_SECONDS`, `AI_SDLC_STALE_BASE_CACHE_DIR`).
+- `ai-sdlc-plugin/hooks/settings-registration.test.mjs` (new), `enforce-blocked-actions.test.mjs` (modified): registration proof, symlink-escape, symlink-onto-blockedPaths, symlinked-root and throttle tests.
+- `.claude/skills/ai-sdlc-governance/SKILL.md`, `ai-sdlc-plugin/skills/ai-sdlc-governance/SKILL.md`, `docs/api-reference/governance.md`, `orchestrator/src/action-enforcement.test.ts` (modified): references repointed to the plugin hook.
+
+## Design decisions
+- **Delete rather than shim**: nothing registered the stale copy, so a shim would be a second dead file.
+- **Deny if real OR lexical path matches blockedPaths**: keeps every existing match and adds the symlink-resolved one.
+- **File cache for the stale-base check**: hooks run as a fresh process per call, so an in-process cache would never hit.
+
+## Verification
+- `node --test` hook suites: 382 passing; `action-enforcement.test.ts` 47 passing; lint and format:check clean.
+- Reviews (code, test, security) approved with minor findings only.
+
+## Follow-up
+- declined: stale-base cache hardening against a pre-planted tmpdir symlink (CWE-59); the cache only gates a non-blocking advisory warning and macOS per-user TMPDIR is 0700
+- declined: dedicated test for the `SymlinkCapError` deny branch in `realpathOrDeny`; the branch is fail-closed and covered by the pre-existing cap tests of `realpathDeepest`
