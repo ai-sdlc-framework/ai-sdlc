@@ -21,7 +21,7 @@ dispatchable: true
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Implements DEC-0081 (operator ruling 2026-10-10, option `split-adapter-only`). PR #1102 (AISDLC-660, branch `feat/aisdlc-660-opencode-v2-adaptation`, head e0b6d4e6) bundled an opencode v2 harness adapter with a dispatch runner, `.opencode/` agents and plugins, `opencode.json`, five contrib runners and three runbooks: 7,567 lines over 30 files, now 186 commits behind main with two open CodeQL findings (`js/regex-injection` in `contrib/runners/opencode/runner.mjs:533`, `js/insufficient-password-hash` in `orchestrator/src/harness/adapters/opencode.ts:93`). The operator closes #1102; this task re-lands only the adapter, following the adapter-first pattern of the Copilot (AISDLC-429) and Codex bridges.
+Implements DEC-0081 (operator ruling 2026-10-10, option `split-adapter-only`). PR #1102 (the opencode v2 work, branch `feat/aisdlc-660-opencode-v2-adaptation`, head e0b6d4e6) bundled an opencode v2 harness adapter with a dispatch runner, `.opencode/` agents and plugins, `opencode.json`, five contrib runners and three runbooks: 7,567 lines over 30 files, now 186 commits behind main with two open CodeQL findings (`js/regex-injection` in `contrib/runners/opencode/runner.mjs:533`, `js/insufficient-password-hash` in `orchestrator/src/harness/adapters/opencode.ts:93`). The operator closes #1102; this task re-lands only the adapter, following the adapter-first pattern of the Copilot (AISDLC-429) and Codex bridges.
 
 Start from a fresh branch off main. Take `orchestrator/src/harness/adapters/opencode.ts` and its tests from the #1102 branch as reference material (read them from `git show e0b6d4e6:<path>`; do not cherry-pick the commits), re-express them against the current harness-adapter interface in `orchestrator/src/harness/adapters/`, and resolve the `js/insufficient-password-hash` finding (use a proper hash or remove the hashing). Nothing under `.opencode/`, `opencode.json`, `contrib/` or new workflow/config files is in scope: those paths are governance-blocked for agents and need an operator decision of their own. One short section in the harness docs (where the Copilot and Codex adapters are described) says opencode is adapter-only and how to select it.
 <!-- SECTION:DESCRIPTION:END -->
@@ -36,4 +36,4 @@ Start from a fresh branch off main. Take `orchestrator/src/harness/adapters/open
 
 ## Notes
 
-Reference branch: `feat/aisdlc-660-opencode-v2-adaptation` (PR #1102, to be closed by the operator). No task file for AISDLC-660 exists on main; this task supersedes it.
+Reference branch: `feat/aisdlc-660-opencode-v2-adaptation` (PR #1102, to be closed by the operator). No backlog task file ever existed for that branch; this task supersedes it.
