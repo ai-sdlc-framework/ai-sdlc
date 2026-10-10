@@ -896,3 +896,53 @@ describe('command runners reassemble split merge phrases (AISDLC-605)', () => {
     }
   });
 });
+
+describe('curl URL glob groups (AISDLC-605)', () => {
+  const base = 'https://api.github.com/repos/o/r/pulls/5';
+  const hit = (c) =>
+    m.httpClientGlobsPulls(c) ||
+    m.commandHasUninertMatch(c, () => false, m.mentionsApiMerge) ||
+    m.mentionsApiMerge(c);
+  it('expands and removes bracket groups', () => {
+    const v = m.expandBrackets('pulls/5/[m-m]erge');
+    assert.ok(v.includes('pulls/5/merge'));
+    assert.ok(v.includes('pulls/5/erge'));
+    assert.ok(m.expandBrackets('x/[me]').includes('x/e'));
+    assert.deepEqual(m.expandBrackets('no groups'), ['no groups']);
+  });
+  it('caps combinatorial expansion', () => {
+    const v = m.expandBrackets('[me][me][me][me][me][me][me][me][me]');
+    assert.ok(v.length <= 2);
+  });
+  it('normalizeExpansions yields the expanded path', () => {
+    assert.ok(m.normalizeExpansions(`'${base}/mer[g-g]e'`).some((x) => x.endsWith('/merge')));
+  });
+  it('refuses glob spellings plain and opaque, curl wget and http', () => {
+    for (const c of [
+      `curl -sS -X PUT '${base}/[m-m]erge'`,
+      `curl -sS -X PUT '${base}/merg[e-e]'`,
+      `curl -sS -X PUT '${base}/[m]erge'`,
+      `curl -sS -X PUT -H "Authorization: Bearer $(gh auth token)" '${base}/[m-m]erge'`,
+      `wget --method=PUT '${base}/[m-m]erge'`,
+      `http PUT '${base}/[m-m]erge'`,
+    ]) {
+      assert.equal(hit(c), true, c);
+    }
+  });
+  it('httpClientGlobsPulls refuses any pulls bracket for an HTTP client only', () => {
+    assert.equal(m.httpClientGlobsPulls(`curl '${base}/[a-zA-Z0-9]'`), true);
+    assert.equal(m.httpClientGlobsPulls(`echo '${base}/[x]'`), false);
+    assert.equal(m.httpClientGlobsPulls('curl https://example.com/[1-5].txt'), false);
+    assert.equal(m.httpClientGlobsPulls(`curl -s ${base}`), false);
+  });
+  it('allows reads without glob groups', () => {
+    for (const c of [
+      `curl -s ${base}`,
+      'curl https://example.com/[1-5].txt',
+      `curl ${base}/comments`,
+      `curl ${base}/merged`,
+    ]) {
+      assert.equal(hit(c), false, c);
+    }
+  });
+});

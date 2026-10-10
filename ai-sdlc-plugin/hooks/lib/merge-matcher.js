@@ -21,6 +21,11 @@
  * bypasses where this matcher and bash disagreed on where a body starts.
  * Best-effort text matching, not a sandbox: branch protection is the backstop.
  *
+ * URL globbing: curl expands `[x-y]` ranges / lists and `{a,b}` in URLs, so normalizeExpansions
+ * also yields `[...]`-removed and `[...]`-expanded variants, and an HTTP client given a `pulls`
+ * URL with a `[` is refused outright (httpClientGlobsPulls). Tools with other URL-expansion
+ * syntaxes we do not know are out of text-matching scope; branch protection is the backstop.
+ *
  * Accepted limits (out of text-matching scope; branch protection and
  * cli-merge-if-eligible are the backstop): variables assembled from parts
  * (`a=mer b=ge; gh pr $a$b 5` mentions no phrase; command-substitution splices such as
@@ -386,11 +391,102 @@ function normalizeExpansions(text) {
   t = t.replace(/`[^`]*`/g, '').replace(/`/g, '');
   t = t.replace(/\$\{[^}]*\}/g, '').replace(/\$[A-Za-z_][A-Za-z0-9_]*|\$[0-9?!#@*$-]/g, '');
   t = t.replace(/\$(?=['"])/g, '').replace(/['"\\]/g, '');
-  const variants = expandBraces(t).map(unmark);
-  // Fallback: drop every brace-ish punctuation character outright.
-  variants.push(t.replace(/[{},]|\.\./g, ''));
-  variants.push(t);
+  const variants = [];
+  for (const base of expandBrackets(t)) {
+    variants.push(...expandBraces(base).map(unmark));
+    // Fallback: drop every brace-ish punctuation character outright.
+    variants.push(base.replace(/[{},]|\.\./g, ''));
+    variants.push(base);
+  }
   return variants;
+}
+
+/** Letters of the merge path segment; a `[...]` group only matters through these. */
+const GLOB_RELEVANT = new Set('merge'.split(''));
+const GLOB_VARIANT_CAP = 256;
+
+/**
+ * Characters a curl-style `[...]` group (list `[me]` or range `[a-z]`) can expand to, reduced to
+ * the letters that can spell the merge path plus one placeholder for "any other character", so a
+ * range of any size yields at most six alternatives. Empty / negated groups yield null.
+ */
+function globGroupAlternatives(body) {
+  if (!body || body[0] === '!' || body[0] === '^') return null;
+  const alts = new Set();
+  let other = false;
+  const add = (ch) => {
+    if (GLOB_RELEVANT.has(ch.toLowerCase())) alts.add(ch);
+    else other = true;
+  };
+  for (let i = 0; i < body.length; i++) {
+    if (body[i + 1] === '-' && i + 2 < body.length) {
+      const lo = body.charCodeAt(i);
+      const hi = body.charCodeAt(i + 2);
+      if (hi - lo > 4096) return null;
+      for (let c = Math.min(lo, hi); c <= Math.max(lo, hi); c++) add(String.fromCharCode(c));
+      i += 2;
+    } else add(body[i]);
+  }
+  if (other) alts.add('\u0003');
+  return [...alts];
+}
+
+/**
+ * Variants of a text with curl URL-glob `[...]` groups (`pulls/5/[m-m]erge`) removed and
+ * expanded. Always includes the text itself and the groups-removed form; expansion variants are
+ * capped (past the cap only the removal form is added, and the HTTP-client rule in the hook
+ * refuses such commands outright).
+ */
+function expandBrackets(text) {
+  const re = /\[([^[\]]*)\]/g;
+  if (!re.test(text)) return [text];
+  const out = [text, text.replace(/\[[^[\]]*\]/g, '')];
+  const parts = [];
+  let last = 0;
+  let m;
+  re.lastIndex = 0;
+  while ((m = re.exec(text))) {
+    parts.push(text.slice(last, m.index));
+    parts.push(globGroupAlternatives(m[1]) || ['']);
+    last = m.index + m[0].length;
+  }
+  parts.push(text.slice(last));
+  let acc = [''];
+  for (let i = 0; i < parts.length; i++) {
+    const opts = i % 2 === 0 ? [parts[i]] : parts[i];
+    if (acc.length * opts.length > GLOB_VARIANT_CAP) return out;
+    acc = acc.flatMap((a) => opts.map((o) => a + o));
+  }
+  out.push(...acc.map((v) => v.replace(/\u0003/g, 'x')));
+  return out;
+}
+
+const HTTP_CLIENT_WORDS = new Set([
+  'curl',
+  'wget',
+  'http',
+  'https',
+  'xh',
+  'xhs',
+  'httpie',
+  'hurl',
+  'ab',
+  'fetch',
+]);
+
+/**
+ * True when an HTTP client (curl, wget, httpie, ...) is given a `pulls` URL containing a `[`:
+ * curl URL globbing can spell the merge endpoint without it ever appearing in the text, so any
+ * such command is refused whatever the path looks like. A bracket in a URL without `pulls`
+ * (`curl https://example.com/[1-5].txt`) is fine.
+ */
+function httpClientGlobsPulls(command) {
+  return splitShellSegmentsEx(command).some(
+    (s) =>
+      HTTP_CLIENT_WORDS.has(commandWord(s.text)) &&
+      s.text.includes('[') &&
+      /\/pulls\b|\bpulls\//i.test(s.text),
+  );
 }
 
 /**
@@ -624,6 +720,8 @@ module.exports = {
   decodeEscapes,
   segmentHasPrThenMergeToken,
   normalizeExpansions,
+  expandBrackets,
+  httpClientGlobsPulls,
   commandHasUninertMatch,
   commandRunsGhPrMerge,
 };

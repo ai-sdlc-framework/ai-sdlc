@@ -99,6 +99,7 @@ const {
   mentionsApiMerge,
   normalizePathDots,
   normalizeExpansions,
+  httpClientGlobsPulls,
   stripCommentAndQuotes: libStripCommentAndQuotes,
 } = require('./lib/merge-matcher');
 const {
@@ -662,7 +663,7 @@ function enforceApiMergeGovernance(command) {
       return mergePath.test(text) || mergeMutation.test(text);
     });
   };
-  if (commandHasUninertMatch(command, matches, mentionsApiMerge)) {
+  if (httpClientGlobsPulls(command) || commandHasUninertMatch(command, matches, mentionsApiMerge)) {
     deny(
       `merging a PR through the GitHub API ('.../pulls/<n>/merge' or the mergePullRequest ` +
         `mutation) is not a permitted merge path under any governance allowMerge value. ` +
