@@ -10,15 +10,22 @@ labels:
   - orchestrator
   - attestation
   - reconcile
-  - ci:no-issue-required
+  - 'ci:no-issue-required'
 priority: high
 dependencies: []
 references:
   - pipeline-cli/src/orchestrator/reconcile.ts
   - scripts/verify-attestation.mjs
-  - .github/workflows/auto-rebase-open-prs.yml
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - scripts/check-attestation-sign.sh
+drift_log:
+  - date: '2026-10-10'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .github/workflows/auto-rebase-open-prs.yml
+    resolution: flagged
+drift_checked: '2026-10-10'
 ---
 
 ## Description

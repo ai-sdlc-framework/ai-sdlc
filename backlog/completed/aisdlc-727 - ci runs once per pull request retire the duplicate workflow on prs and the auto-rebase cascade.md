@@ -1,7 +1,8 @@
 ---
 id: AISDLC-727
 title: >-
-  CI runs once per pull request: retire the duplicate workflow on PRs and the auto-rebase cascade
+  CI runs once per pull request: retire the duplicate workflow on PRs and the
+  auto-rebase cascade
 status: Done
 assignee: []
 created_date: '2026-10-05'
@@ -11,12 +12,24 @@ labels:
 dependencies: []
 references:
   - .github/workflows/ci.yml
-  - .github/workflows/auto-rebase-open-prs.yml
-  - .github/workflows/auto-rebase-on-queue-kick.yml
   - .github/workflows/auto-rearm-on-dequeue.yml
   - docs/operations/merge-without-queue.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-10'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .github/workflows/auto-rebase-open-prs.yml
+    resolution: flagged
+  - date: '2026-10-10'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .github/workflows/auto-rebase-on-queue-kick.yml
+    resolution: flagged
+drift_checked: '2026-10-10'
 ---
 
 ## Description

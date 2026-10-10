@@ -11,9 +11,16 @@ labels:
   - workflows
 dependencies: []
 references:
-  - .github/workflows/auto-rebase-open-prs.yml
   - docs/operations/auto-rebase-token-setup.md
 priority: high
+drift_log:
+  - date: '2026-10-10'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .github/workflows/auto-rebase-open-prs.yml
+    resolution: flagged
+drift_checked: '2026-10-10'
 ---
 
 ## Description
