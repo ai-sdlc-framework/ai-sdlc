@@ -248,6 +248,21 @@ export function sanitizeErrorMessage(message: string, credential: string): strin
   return redactCredential(message, credential);
 }
 
+/**
+ * Derive a fixed, code-based error detail safe to return to the in-sandbox caller.
+ *
+ * Never echoes the error message (it may carry upstream internals). Only a short
+ * allowlisted code token (`/^[A-Z][A-Z0-9_]{0,63}$/`, e.g. `ECONNREFUSED`) is echoed;
+ * anything else collapses to `fallback`.
+ */
+export function safeErrorCode(err: unknown, fallback = 'upstream_error'): string {
+  const code = (err as { code?: unknown } | null | undefined)?.code;
+  if (typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(code)) {
+    return code;
+  }
+  return fallback;
+}
+
 // ── Request body parsing ──────────────────────────────────────────────────────
 
 /**
@@ -576,9 +591,17 @@ export class InferenceProxy {
         this.emitAudit(entry);
         try {
           res.writeHead(500, { 'Content-Type': 'application/json' });
-          // Sanitize error detail so the credential cannot appear in the 500 response body
-          const safeDetail = sanitizeErrorMessage(String(err), this.config.credential);
-          res.end(JSON.stringify({ error: 'internal proxy error', detail: safeDetail }));
+          // Log the sanitized detail server-side only; the response carries a fixed code
+          // so no error message text (or stack info) reaches the caller.
+          process.stderr.write(
+            `[inference-proxy] internal error: ${sanitizeErrorMessage(String(err), this.config.credential)}\n`,
+          );
+          res.end(
+            JSON.stringify({
+              error: 'internal proxy error',
+              detail: safeErrorCode(err, 'internal_error'),
+            }),
+          );
         } catch {
           // best-effort — socket may already be closed
         }
@@ -775,9 +798,12 @@ export class InferenceProxy {
         }),
       );
       res.writeHead(502, { 'Content-Type': 'application/json' });
-      // Sanitize error detail to ensure the credential cannot appear in the response body
-      const safeDetail = sanitizeErrorMessage(String(err), this.config.credential);
-      res.end(JSON.stringify({ error: 'upstream connection failed', detail: safeDetail }));
+      // Log the sanitized detail server-side only; the response carries a fixed code
+      // so no upstream error message text reaches the caller.
+      process.stderr.write(
+        `[inference-proxy] upstream error: ${sanitizeErrorMessage(String(err), this.config.credential)}\n`,
+      );
+      res.end(JSON.stringify({ error: 'upstream connection failed', detail: safeErrorCode(err) }));
       return;
     }
 
