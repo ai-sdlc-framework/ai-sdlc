@@ -821,8 +821,8 @@ describe('/ai-sdlc execute — model routing wiring', () => {
     assert.doesNotMatch(emit, /AISDLC_REVIEWER_MODEL:-claude/);
     // The only fixed value is the explicit fallback for agents with no routed model.
     const fixed = emit.split('\n').filter((l) => /EMIT_MODEL="[a-z]/.test(l));
-    assert.equal(fixed.length, 2);
-    assert.match(fixed[0], /code-reviewer-codex\|test-reviewer-codex\|correctness-reviewer\)/);
+    assert.equal(fixed.length, 3);
+    assert.match(fixed[0], /code-reviewer-codex\|test-reviewer-codex\)/);
     assert.match(emit, /if \[ -z "\$EMIT_MODEL" \]; then/);
   });
 });

@@ -37,7 +37,7 @@ RFC-0036 OQ-4, and respects an explicit `--rfc-dir` flag override.
 ## Usage
 
 ```bash
-node pipeline-cli/bin/cli-rfc.mjs init <slug> [--title <title>] [--author <name>] [--rfc-dir <path>] [--force] [--template <path>] [--format <text|json>]
+node "$PIPELINE_CLI_BIN/cli-rfc.mjs" init <slug> [--title <title>] [--author <name>] [--rfc-dir <path>] [--force] [--template <path>] [--format <text|json>]
 ```
 
 `$ARGUMENTS` is the slug + any flags. Slug rules: lowercase
@@ -53,7 +53,11 @@ fi
 
 # Pass the operator's args straight through. The CLI handles slug
 # validation, conflict detection, and template materialisation.
-node pipeline-cli/bin/cli-rfc.mjs init $ARGS
+PLUGIN_SCRIPTS_DIR="${CLAUDE_PLUGIN_DIR:-${CLAUDE_PLUGIN_ROOT:-$(pwd)/ai-sdlc-plugin}}/scripts"
+if [ -z "${PIPELINE_CLI_BIN:-}" ]; then
+  PIPELINE_CLI_BIN=$(bash "$PLUGIN_SCRIPTS_DIR/resolve-pipeline-cli.sh") || exit 1
+fi
+node "$PIPELINE_CLI_BIN/cli-rfc.mjs" init $ARGS
 ```
 
 ## Output

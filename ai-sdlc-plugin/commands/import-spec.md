@@ -33,7 +33,7 @@ upstream artifact.
 ## Usage
 
 ```bash
-node pipeline-cli/bin/cli-import-spec.mjs --from .specify/specs/<feature>/
+node "$PIPELINE_CLI_BIN/cli-import-spec.mjs" --from .specify/specs/<feature>/
 ```
 
 `$ARGUMENTS` is the path. Accepts either the feature directory
@@ -48,7 +48,11 @@ fi
 
 # Pass the operator's args straight through. `--from` is the only required
 # flag; `--work-dir` defaults to cwd; `--format` defaults to text.
-node pipeline-cli/bin/cli-import-spec.mjs $ARGS
+PLUGIN_SCRIPTS_DIR="${CLAUDE_PLUGIN_DIR:-${CLAUDE_PLUGIN_ROOT:-$(pwd)/ai-sdlc-plugin}}/scripts"
+if [ -z "${PIPELINE_CLI_BIN:-}" ]; then
+  PIPELINE_CLI_BIN=$(bash "$PLUGIN_SCRIPTS_DIR/resolve-pipeline-cli.sh") || exit 1
+fi
+node "$PIPELINE_CLI_BIN/cli-import-spec.mjs" $ARGS
 ```
 
 ## Output
