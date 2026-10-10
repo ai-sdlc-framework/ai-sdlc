@@ -37,7 +37,14 @@
  * @module attestation/reviews-ledger
  */
 
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 
 /**
@@ -210,6 +217,53 @@ export function loadReviewLedger(taskId: string, repoRoot?: string): ReviewLedge
   return loadReviewLedgerFromFile(reviewsLedgerPath(taskId, repoRoot));
 }
 
+/** Names of the subdirectories of `<root>/.worktrees/`; `[]` when absent or unreadable. */
+function listWorktreeNames(root: string): string[] {
+  const dir = join(root, '.worktrees');
+  try {
+    return readdirSync(dir).filter((name) => statSync(join(dir, name)).isDirectory());
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Resolve the checkout a task's ledger record must be written into (AISDLC-793).
+ *
+ * In a Pattern C parent (`<root>/.worktrees/` exists and holds at least one
+ * directory) the parent working tree is read-only: a ledger written there is
+ * never part of the task's PR and sits as untracked residue. So the write is
+ * routed to `<root>/.worktrees/<task-id-lower>/` when that exists, else to the
+ * worktree whose `.active-task` sentinel names the task. When neither resolves
+ * this THROWS rather than falling back to the parent. A root without
+ * `.worktrees/` (plain repo, or a worktree itself) is returned unchanged.
+ */
+export function resolveLedgerWriteRoot(taskId: string, repoRoot?: string): string {
+  const root = repoRoot ?? process.cwd();
+  const names = listWorktreeNames(root);
+  if (names.length === 0) return root;
+
+  const worktrees = join(root, '.worktrees');
+  const byName = names.find((name) => name === taskId.toLowerCase());
+  if (byName) return join(worktrees, byName);
+
+  for (const name of names) {
+    try {
+      const sentinel = readFileSync(join(worktrees, name, '.active-task'), 'utf8');
+      if (sentinel.trim().toLowerCase() === taskId.toLowerCase()) return join(worktrees, name);
+    } catch {
+      // no sentinel in this worktree
+    }
+  }
+
+  throw new Error(
+    `[reviews-ledger] ${root} is a Pattern C parent and no worktree resolves for task ${taskId} ` +
+      `(tried ${join(worktrees, taskId.toLowerCase())} and every .worktrees/*/.active-task sentinel); ` +
+      `refusing to write ${reviewsLedgerPath(taskId, root)} into the main checkout. ` +
+      `Pass --repo-root <worktree path> to point at the task's worktree.`,
+  );
+}
+
 /**
  * APPEND a single record to the task's ledger. Never overwrites existing
  * content — every call, including the first pass and every subsequent
@@ -225,7 +279,10 @@ export function loadReviewLedger(taskId: string, repoRoot?: string): ReviewLedge
  * over a corpus's lifetime does not degrade write latency.
  */
 export function appendReviewLedgerRecord(record: ReviewLedgerRecord, repoRoot?: string): void {
-  const filePath = reviewsLedgerPath(record.taskId, repoRoot);
+  const filePath = reviewsLedgerPath(
+    record.taskId,
+    resolveLedgerWriteRoot(record.taskId, repoRoot),
+  );
   const dir = dirname(filePath);
   mkdirSync(dir, { recursive: true });
   appendFileSync(filePath, JSON.stringify(record) + '\n', { encoding: 'utf8' });

@@ -7,6 +7,7 @@ import {
   writeFileSync,
   appendFileSync,
   readdirSync,
+  mkdirSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,6 +18,7 @@ import {
   normalizeFindings,
   normalizeReviewerRole,
   reviewsLedgerPath,
+  resolveLedgerWriteRoot,
   type ReviewLedgerRecord,
 } from './reviews-ledger.js';
 
@@ -293,5 +295,45 @@ describe('loadReviewLedgerFromFile — malformed line resilience', () => {
     const combined = chunks.join('');
     expect(combined).toContain('[reviews-ledger] WARNING: skipping malformed JSONL line 2 in');
     expect(combined).toContain(p);
+  });
+});
+
+describe('AISDLC-793: Pattern C routing of ledger writes', () => {
+  it('routes to .worktrees/<task-id-lower>/ when that worktree exists', () => {
+    mkdirSync(join(repoRoot, '.worktrees', 'aisdlc-616'), { recursive: true });
+    expect(resolveLedgerWriteRoot('AISDLC-616', repoRoot)).toBe(
+      join(repoRoot, '.worktrees', 'aisdlc-616'),
+    );
+    appendReviewLedgerRecord(makeRecord(), repoRoot);
+    expect(existsSync(join(repoRoot, '.ai-sdlc', 'reviews'))).toBe(false);
+    expect(loadReviewLedger('AISDLC-616', join(repoRoot, '.worktrees', 'aisdlc-616'))).toHaveLength(
+      1,
+    );
+  });
+
+  it('falls back to the worktree whose .active-task sentinel names the task', () => {
+    mkdirSync(join(repoRoot, '.worktrees', 'other'), { recursive: true });
+    mkdirSync(join(repoRoot, '.worktrees', 'renamed'), { recursive: true });
+    writeFileSync(join(repoRoot, '.worktrees', 'other', '.active-task'), 'AISDLC-1\n');
+    writeFileSync(join(repoRoot, '.worktrees', 'renamed', '.active-task'), 'AISDLC-616\n');
+    expect(resolveLedgerWriteRoot('AISDLC-616', repoRoot)).toBe(
+      join(repoRoot, '.worktrees', 'renamed'),
+    );
+  });
+
+  it('throws naming task id, attempted path and --repo-root when nothing resolves, writing nothing', () => {
+    mkdirSync(join(repoRoot, '.worktrees', 'other'), { recursive: true });
+    expect(() => appendReviewLedgerRecord(makeRecord(), repoRoot)).toThrow(
+      /AISDLC-616.*aisdlc-616\.jsonl.*--repo-root/s,
+    );
+    expect(existsSync(join(repoRoot, '.ai-sdlc'))).toBe(false);
+  });
+
+  it('is unchanged for a repo without .worktrees/ and for an empty .worktrees/', () => {
+    expect(resolveLedgerWriteRoot('AISDLC-616', repoRoot)).toBe(repoRoot);
+    mkdirSync(join(repoRoot, '.worktrees'));
+    expect(resolveLedgerWriteRoot('AISDLC-616', repoRoot)).toBe(repoRoot);
+    appendReviewLedgerRecord(makeRecord(), repoRoot);
+    expect(loadReviewLedger('AISDLC-616', repoRoot)).toHaveLength(1);
   });
 });

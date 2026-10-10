@@ -47,6 +47,8 @@ import {
   checkJudgmentLayer,
   checkRuntimeGitignore,
   checkWorktreeHooks,
+  checkUntrackedReviewLedgers,
+  fixUntrackedReviewLedgers,
   checkParentCheckoutState,
   checkWorktreeRewriteHooks,
   fixWorktreeHooks,
@@ -1771,5 +1773,41 @@ describe('worktree-rewrite-hooks check (AISDLC-750)', () => {
       ),
     );
     expect(results).toEqual([]);
+  });
+});
+
+describe('untracked-review-ledgers check (AISDLC-793)', () => {
+  const adaptersWith = (stdout: string, exitCode = 0): DoctorCheckAdapters =>
+    makeAdapters({ runCommand: () => ({ stdout, exitCode }) });
+
+  it('passes when there are no untracked ledgers', () => {
+    const r = checkUntrackedReviewLedgers(makeCtx(adaptersWith('')));
+    expect(r.id).toBe('untracked-review-ledgers');
+    expect(r.severity).toBe('pass');
+  });
+
+  it('warns with the file list and task ids for several untracked ledgers', () => {
+    const out = '.ai-sdlc/reviews/aisdlc-543.jsonl\n.ai-sdlc/reviews/aisdlc-663.5.jsonl\n';
+    const r = checkUntrackedReviewLedgers(makeCtx(adaptersWith(out)));
+    expect(r.severity).toBe('warn');
+    expect(r.title).toContain('2 untracked review ledger(s)');
+    expect(r.title).toContain('.ai-sdlc/reviews/aisdlc-543.jsonl');
+    expect(r.title).toContain('aisdlc-663.5');
+    expect(r.remediation).toContain('transcript-management.md');
+  });
+
+  it('is registered, and --fix leaves the ledgers alone and says so', () => {
+    expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('untracked-review-ledgers');
+    const out = '.ai-sdlc/reviews/aisdlc-543.jsonl\n';
+    const fixed = fixUntrackedReviewLedgers(makeCtx(adaptersWith(out)));
+    expect(fixed.applied).toBe(false);
+    expect(fixed.detail).toContain('left untracked review ledgers alone');
+    expect(fixUntrackedReviewLedgers(makeCtx(adaptersWith(''))).detail).toContain('no untracked');
+  });
+
+  it('treats a failing git as no findings', () => {
+    expect(checkUntrackedReviewLedgers(makeCtx(adaptersWith('x.jsonl', 128))).severity).toBe(
+      'pass',
+    );
   });
 });

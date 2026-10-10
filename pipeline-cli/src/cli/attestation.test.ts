@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import {
   appendFileSync,
+  existsSync,
   mkdtempSync,
   mkdirSync,
   readdirSync,
@@ -822,6 +823,47 @@ describe('emit-leaf — reviews ledger integration (AISDLC-616)', () => {
     });
     expect(records[0].findings).toHaveLength(2);
     expect(records[0].findings[0]).toMatchObject({ severity: 'critical', area: 'src/foo.ts' });
+  });
+
+  it('routes the ledger to the task worktree when run from a Pattern C parent (AISDLC-793)', async () => {
+    makeTranscript('aisdlc-616', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-616',
+      'code-reviewer.jsonl',
+    );
+    const verdictPath = writeVerdict('verdict-parent.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+    const worktree = join(tmpRoot, '.worktrees', 'aisdlc-616');
+    mkdirSync(worktree, { recursive: true });
+
+    await buildAttestationCli([
+      'emit-leaf',
+      '--task-id',
+      'AISDLC-616',
+      '--reviewer',
+      'code-reviewer',
+      '--transcript-path',
+      transcriptPath,
+      '--verdict-path',
+      verdictPath,
+      '--head-sha',
+      'e'.repeat(40),
+      '--harness',
+      'claude-code',
+      '--model',
+      'claude-sonnet-4-6',
+      '--patch-id',
+      TEST_PATCH_ID,
+    ]).parseAsync();
+
+    const { loadReviewLedger } = await import('../attestation/reviews-ledger.js');
+    expect(existsSync(join(tmpRoot, '.ai-sdlc', 'reviews'))).toBe(false);
+    expect(loadReviewLedger('AISDLC-616', worktree)).toHaveLength(1);
   });
 
   it('defaults iteration to 1 and prNumber to null when omitted', async () => {
