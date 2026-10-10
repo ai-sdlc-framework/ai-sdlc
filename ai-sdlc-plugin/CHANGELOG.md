@@ -5,6 +5,18 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.27.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.26.0...ai-sdlc-plugin-v0.27.0) (2026-10-10)
+
+
+### Features
+
+* **spec:** review planner and synthesizer agents with grounded findings (AISDLC-674) ([#1181](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1181)) ([34e6d40](https://github.com/ai-sdlc-framework/ai-sdlc/commit/34e6d40f3c424e831da314250705a7268bb9bbf9))
+
+
+### Bug Fixes
+
+* embed review nonce in prompts and keep committed envelopes in sign hook (AISDLC-739) ([#1316](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1316)) ([8aa6db3](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8aa6db30055badbdd4a9962f2751d6666eed918d))
+
 ## [0.26.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.25.0...ai-sdlc-plugin-v0.26.0) (2026-10-10)
 
 
