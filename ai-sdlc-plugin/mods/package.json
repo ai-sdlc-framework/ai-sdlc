@@ -1,0 +1,18 @@
+{
+  "name": "@ai-sdlc/plugin-mods",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Claude Code mods shipped with the AI-SDLC plugin (AISDLC-743); a private package so vitest measures their coverage",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "@vitest/coverage-v8": "^4.1.11",
+    "vite": "^6.0.0",
+    "vitest": "^4.1.11"
+  }
+}

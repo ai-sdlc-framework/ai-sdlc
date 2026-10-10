@@ -8,3 +8,4 @@ packages:
   - mcp-advisor
   - pipeline-cli
   - ai-sdlc-plugin/mcp-server
+  - ai-sdlc-plugin/mods

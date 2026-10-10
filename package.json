@@ -28,7 +28,6 @@
     "smoke:first-run": "node scripts/first-run-smoke.mjs",
     "test:first-run-smoke-gate": "node --test scripts/first-run-smoke.test.mjs",
     "test:first-run-smoke-workflow": "node --test .github/workflows/__tests__/first-run-smoke.test.mjs",
-    "test:context-meter": "node --test ai-sdlc-plugin/mods/tests/context-meter.test.ts",
     "test:dark-code-push-gate": "node --test scripts/check-dark-code-on-push.test.mjs",
     "test:typecheck-workspace-gate": "node --test scripts/typecheck-workspace.test.mjs",
     "test:publishable": "node --test scripts/check-publishable-package-configs.test.mjs",
