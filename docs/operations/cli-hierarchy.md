@@ -109,7 +109,7 @@ only the missing ones are started.
 ```bash
 cli-hierarchy up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
                  [--executor-model <m>] [--no-planner] [--project <name>]
-                 [--attach] [--allow-planner-bypass]
+                 [--attach] [--allow-planner-bypass] [--no-vscode-tasks]
 ```
 
 | Option                   | Meaning                                                                      |
@@ -122,6 +122,18 @@ cli-hierarchy up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
 | `--project <name>`       | Project the names are qualified with (default the repository basename).      |
 | `--attach`               | Show the planner (or the dispatch session when there is none) when done.     |
 | `--allow-planner-bypass` | Allow the planner to start in `bypassPermissions` mode (refused by default). |
+| `--no-vscode-tasks`      | Do not regenerate `.vscode/tasks.json` (see below).                          |
+
+**VS Code tasks file (AISDLC-754).** After writing the roster, when at least one session was
+started or the roster changed, `up` regenerates `<cwd>/.vscode/tasks.json` (the same document
+`terminals --vscode` writes) if the file is absent or was written by us. "Written by us" means
+a top-level marker `"ai-sdlc": { "generated": true, "roster": "<board-dir>/hierarchy.json" }`.
+A file without the marker is never overwritten; `up` prints one line saying to merge by hand
+with `cli-hierarchy terminals --vscode --print`. A second `up` that starts nothing leaves the
+file byte-identical, and `down` leaves it alone. `--no-vscode-tasks` skips all of this for
+operators who manage the file themselves. When `up` runs in a VS Code terminal
+(`TERM_PROGRAM=vscode` or `VSCODE_GIT_IPC_HANDLE` set) it ends with one line:
+`VS Code: run task "hierarchy: open all agents" (Terminal > Run Task) to open one terminal per agent`.
 
 The planner starts in the permission mode from the operator's settings (falling back to
 `default`); dispatch and executors start in `bypassPermissions`.
@@ -199,7 +211,11 @@ tmux command's.
 ### `terminals`
 
 Generate a VS Code `tasks.json` with one dedicated terminal per agent, each running
-`cli-hierarchy attach <name>`, and a compound task `hierarchy: open all agents`.
+`node <abs path of cli-hierarchy.mjs> attach <name>` (command `node` plus an `args` array, so
+it works where `cli-hierarchy` is not on `PATH` and survives spaces in the path), and a
+compound task `hierarchy: open all agents`. Each agent task is `isBackground` with
+`echo: false`, `clear: true`, and the file carries the `ai-sdlc.generated` marker that lets
+`up` regenerate it.
 
 ```bash
 cli-hierarchy terminals --vscode [--out <dir>] [--force] [--print]

@@ -23,7 +23,6 @@ import {
   type IdentityDeps,
   type RosterEntry,
 } from '../hierarchy/index.js';
-import { sanitizeProject } from '../hierarchy/validate.js';
 import { defaultHierarchyDeps, firstPositional, runHierarchyCli } from './hierarchy.js';
 
 let tmp: string;
@@ -151,6 +150,7 @@ describe('runHierarchyCli', () => {
       overrides({
         run,
         env: {},
+        cwd: path.join(tmp, 'repo'),
         attach: (a) => {
           attached.push([...a]);
           return 4;
@@ -159,8 +159,38 @@ describe('runHierarchyCli', () => {
     );
     expect(code).toBe(4);
     // Names are qualified with the project: the basename of the working directory.
-    const project = sanitizeProject(path.basename(process.cwd()));
+    const project = 'repo';
     expect(attached).toEqual([['attach-session', '-t', `=${project}-operator-dispatch`]]);
+  });
+
+  it('up regenerates .vscode/tasks.json unless --no-vscode-tasks is given', async () => {
+    writeFileSync(
+      path.join(tmp, 'settings.json'),
+      JSON.stringify({ crossSessionInbound: 'accept' }),
+    );
+    const repo = path.join(tmp, 'repo');
+    const run: CommandRunner = (_f, args) => {
+      if (args[0] === 'has-session') return { status: 1, stdout: '', stderr: '' };
+      if (args[0] === 'display-message') return { status: 0, stdout: '%1 4242\n', stderr: '' };
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const base = ['up', '--executors', '0', '--no-planner'];
+    // The roster needs a live window to survive; a successful fake tmux covers that.
+    const live: CommandRunner = (f, a, o) =>
+      a[0] === 'has-session' && started ? { status: 0, stdout: '', stderr: '' } : run(f, a, o);
+    let started = false;
+    const spawning: CommandRunner = (f, a, o) => {
+      if (a[0] === 'new-session') started = true;
+      return live(f, a, o);
+    };
+    await runHierarchyCli(
+      [...base, '--no-vscode-tasks'],
+      overrides({ run: spawning, env: {}, cwd: repo }),
+    );
+    expect(existsSync(path.join(repo, '.vscode', 'tasks.json'))).toBe(false);
+    started = false;
+    await runHierarchyCli(base, overrides({ run: spawning, env: {}, cwd: repo }));
+    expect(existsSync(path.join(repo, '.vscode', 'tasks.json'))).toBe(true);
   });
 
   it('status prints an empty roster as text and json', async () => {

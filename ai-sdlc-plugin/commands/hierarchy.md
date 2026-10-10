@@ -30,6 +30,17 @@ scripts directory and forwards the arguments.
 - If the pipeline-cli bin cannot be found, the same install hint as
   `/ai-sdlc doctor` is printed.
 
+## VS Code terminals
+
+`up` keeps `.vscode/tasks.json` current (unless `--no-vscode-tasks`), as long as the file is
+absent or carries the `ai-sdlc.generated` marker. To get one terminal per agent:
+
+1. `/ai-sdlc hierarchy up --executors 5` (regenerates the tasks file).
+2. In VS Code run Terminal > Run Task > `hierarchy: open all agents`.
+
+A hand-written `tasks.json` is never overwritten; merge by hand from
+`/ai-sdlc hierarchy terminals --vscode --print`.
+
 ## Implementation contract
 
 Run from the repository root:

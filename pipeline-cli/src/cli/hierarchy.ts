@@ -4,7 +4,7 @@
  * Subcommands:
  *
  *   - `up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
- *     [--executor-model <m>] [--no-planner] [--attach]` — start the planner, the
+ *     [--executor-model <m>] [--no-planner] [--attach] [--no-vscode-tasks]` — start the planner, the
  *     dispatch session and up to five executors, each in its own detached tmux
  *     session named after the agent, and write the roster. Idempotent.
  *   - `status [--json]` — the roster with each session's live state, whether a
@@ -126,6 +126,10 @@ Options for up:
                            value, when sessions with the same role names already run
                            for another project on this machine.
   --attach                 Show the planner (or the dispatch session) when done
+  --no-vscode-tasks        Do not regenerate .vscode/tasks.json. By default up rewrites it
+                           when it starts a session or the roster changes, but only if the
+                           file is absent or carries the "ai-sdlc" generated marker; inside
+                           a VS Code terminal it ends by naming the task to run
   --allow-planner-bypass   Allow the planner to start in bypassPermissions mode
 
 Options for status:
@@ -372,6 +376,7 @@ export async function runHierarchyCli(
               ? {}
               : { project: flags.project === 'true' ? '' : flags.project }),
             allowPlannerBypass: flags['allow-planner-bypass'] === 'true',
+            vscodeTasks: flags['no-vscode-tasks'] !== 'true',
           },
           deps,
         );

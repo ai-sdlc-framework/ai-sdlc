@@ -121,6 +121,8 @@ export interface HierarchyDeps {
   /** Poll attempts and spacing when waiting for the registry or for a window to close. */
   pollAttempts: number;
   pollIntervalMs: number;
+  /** Absolute path of the running `cli-hierarchy.mjs`, written into generated VS Code tasks. Absent: `process.argv[1]`. */
+  binPath?: string;
   /** Liveness probe for a pid, used by the cross-project collision check. Absent: `process.kill(pid, 0)`. */
   isAlive?: (pid: number) => boolean;
   /** Records orchestrator events (session started, context cleared). Absent: nothing is recorded. */
