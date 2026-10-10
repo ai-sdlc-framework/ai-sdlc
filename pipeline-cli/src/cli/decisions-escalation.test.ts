@@ -9,6 +9,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -18,7 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { buildDecisionsCli } from './decisions.js';
-import { resolveEventLogPath } from '../decisions/event-log.js';
+import { readEventLogText, resolveEventsDir } from '../decisions/event-log.js';
 import type { ChainDeps } from '../decisions/escalation-chain.js';
 import { ensureBoardDirs, writeManifest } from '../dispatch/board.js';
 import type { DispatchManifest } from '../dispatch/types.js';
@@ -205,7 +206,7 @@ describe('escalate --route / --park', () => {
     const r = json<{ decisionId: string; route: string; raisedBy: string; parked: boolean }>();
     expect(r).toMatchObject({ route: 'operational', raisedBy: 'executor-alpha', parked: true });
 
-    const opened = readFileSync(resolveEventLogPath(tmp), 'utf8')
+    const opened = readEventLogText(tmp)
       .trim()
       .split('\n')
       .map((l) => JSON.parse(l))[0];
@@ -274,9 +275,7 @@ describe('escalate --route / --park', () => {
     const h = harness();
     await run(h, ...escalateArgs('AISDLC-905'));
     json();
-    const opened = JSON.parse(
-      readFileSync(resolveEventLogPath(tmp), 'utf8').trim().split('\n')[0]!,
-    );
+    const opened = JSON.parse(readEventLogText(tmp).trim().split('\n')[0]!);
     expect(opened.escalation).toBeUndefined();
     expect(h.sent).toEqual([]);
     expect(h.events).toEqual([]);
@@ -287,9 +286,7 @@ describe('escalate --route / --park', () => {
     await expect(run(h, ...escalateArgs('AISDLC-905', '--park'))).rejects.toThrow(
       'process.exit(1)',
     );
-    const opened = JSON.parse(
-      readFileSync(resolveEventLogPath(tmp), 'utf8').trim().split('\n')[0]!,
-    );
+    const opened = JSON.parse(readEventLogText(tmp).trim().split('\n')[0]!);
     expect(opened.escalation).toMatchObject({ route: 'design', parked: true });
   });
 
@@ -306,7 +303,7 @@ describe('escalate --route / --park', () => {
     );
     expect(stderrChunks.join('')).toMatch(/claimed by 'executor-beta'/);
     expect(onBoard('inflight', 'AISDLC-907')).toBe(true);
-    expect(existsSync(resolveEventLogPath(tmp))).toBe(false);
+    expect(readEventLogText(tmp)).toBe('');
   });
 
   it('parks when the claimer matches the caller or the manifest records none', async () => {
@@ -439,14 +436,13 @@ describe('answer is scoped to the owning tier', () => {
 
 describe('promote-expired', () => {
   function backdate(minutesAgo: number): void {
-    const file = resolveEventLogPath(tmp);
-    const lines = readFileSync(file, 'utf8').trim().split('\n');
-    const shifted = lines.map((l) => {
-      const e = JSON.parse(l);
+    const dir = resolveEventsDir(tmp);
+    for (const name of readdirSync(dir).filter((n) => n.endsWith('.json'))) {
+      const file = join(dir, name);
+      const e = JSON.parse(readFileSync(file, 'utf8'));
       e.ts = new Date(Date.now() - minutesAgo * 60_000).toISOString();
-      return JSON.stringify(e);
-    });
-    writeFileSync(file, shifted.join('\n') + '\n');
+      writeFileSync(file, JSON.stringify(e) + '\n');
+    }
   }
 
   it('moves operational to design, design to operator, and leaves the operator tier alone', async () => {
@@ -501,14 +497,14 @@ describe('promote-expired', () => {
     expect(json<{ promoted: unknown[] }>().promoted).toEqual([]);
 
     backdate(45);
-    const before = readFileSync(resolveEventLogPath(tmp), 'utf8');
+    const before = readEventLogText(tmp);
     h.events.length = 0;
     await run(h, 'promote-expired', '--dry-run', '--format', 'json');
     expect(json<{ dryRun: boolean; promoted: unknown[] }>()).toMatchObject({
       dryRun: true,
       promoted: [expect.objectContaining({ toTier: 'design' })],
     });
-    expect(readFileSync(resolveEventLogPath(tmp), 'utf8')).toBe(before);
+    expect(readEventLogText(tmp)).toBe(before);
     expect(h.events).toEqual([]);
   });
 
