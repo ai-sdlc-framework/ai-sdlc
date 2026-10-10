@@ -12,7 +12,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { claimNext, writeManifest } from '../dispatch/board.js';
 import type { DispatchManifest } from '../dispatch/types.js';
-import { clearExecutor, clearSelf, HIERARCHY_CLEAR_CAPABILITY, type ClearDeps } from './clear.js';
+import {
+  clearExecutor,
+  clearSelf,
+  HIERARCHY_CLEAR_CAPABILITY,
+  recentlyScheduled,
+  type ClearDeps,
+} from './clear.js';
 import type { HierarchyEvent } from './emit.js';
 import { writeRoster } from './roster.js';
 import type { CommandRunner, Roster, RosterEntry } from './types.js';
@@ -443,6 +449,12 @@ describe('clearSelf', () => {
     expect(a[1]).toMatch(/send-keys -t "\$2" -l -- "\$3".*sleep "\$4".*"\$5"/);
     // nothing is typed synchronously
     expect(sends()).toHaveLength(0);
+  });
+
+  it('stamps the auto-clear debounce so the Stop hook skips this turn', () => {
+    expect(recentlyScheduled(board, 'operator-dispatch', Date.now())).toBe(false);
+    clearSelf({ self: 'operator-dispatch' }, selfDeps());
+    expect(recentlyScheduled(board, 'operator-dispatch', Date.now())).toBe(true);
   });
 
   it('wakes early on a new brief or verdict file when given the board to watch', () => {

@@ -20,6 +20,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { reportCapabilityOutcome } from '@ai-sdlc/reference';
@@ -219,6 +220,30 @@ export async function clearExecutor(opts: ClearOptions, deps: ClearDeps): Promis
   return { executor: name, paneId: entry.paneId, resumed, settleMs };
 }
 
+/** After a clear is scheduled, further turns inside this window do not schedule another. */
+export const AUTO_CLEAR_DEBOUNCE_MS = 120_000;
+
+function stampFile(boardDir: string, name: string): string {
+  return path.join(boardDir, 'handoff', `.auto-clear-${name}`);
+}
+
+/** True when a clear was scheduled for this session within the debounce window. */
+export function recentlyScheduled(boardDir: string, name: string, nowMs: number): boolean {
+  try {
+    const f = stampFile(boardDir, name);
+    return existsSync(f) && nowMs - statSync(f).mtimeMs < AUTO_CLEAR_DEBOUNCE_MS;
+  } catch {
+    return false;
+  }
+}
+
+/** Record that a clear was scheduled now. */
+export function markScheduled(boardDir: string, name: string): void {
+  const f = stampFile(boardDir, name);
+  mkdirSync(path.dirname(f), { recursive: true });
+  writeFileSync(f, '', 'utf-8');
+}
+
 /** Default wait before `/clear` is typed, so the calling turn can end first. */
 export const SELF_CLEAR_LEAD_SECONDS = 20;
 /** Default wait between `/clear` and the resume command. */
@@ -360,6 +385,8 @@ export function clearSelf(opts: ClearSelfOptions, deps: ClearSelfDeps): ClearSel
         : DISPATCH_RESUME_COMMAND,
     ...(watchDir ? [watchDir] : []),
   ]);
+  // Any scheduled clear, manual or automatic, debounces the Stop hook for this session.
+  markScheduled(deps.boardDir, name);
   deps.log?.(
     `scheduled '${name}' to clear in ${leadSeconds}s and resume ${resumeAfterSeconds}s later`,
   );
