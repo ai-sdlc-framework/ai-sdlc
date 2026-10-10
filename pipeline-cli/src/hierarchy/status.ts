@@ -6,9 +6,10 @@
 import { peekQueue } from '../dispatch/board.js';
 import type { QueueCounts } from '../dispatch/types.js';
 import { listInflight } from './inflight.js';
+import { hasLaunchEnv } from './up.js';
 import { readSessionRegistry } from './registry.js';
 import { readRosterChecked } from './roster.js';
-import { listWindows, sessionAttached } from './tmux.js';
+import { listWindows, paneStartCommand, sessionAttached } from './tmux.js';
 import type { HierarchyDeps, RosterEntry } from './types.js';
 
 /** Live state of one roster entry. */
@@ -22,6 +23,13 @@ export interface StatusRow {
   attached: boolean;
   /** Task the session holds in `inflight/`, when its heartbeat names it. */
   inflightTask?: string;
+  /**
+   * Whether the running session was launched with the env the lease-push hook binds it by.
+   * Absent when the window is gone or tmux cannot report its start command.
+   */
+  launchEnv?: 'ok' | 'missing';
+  /** Present with `launchEnv: 'missing'`: how to repair it. */
+  nextStep?: string;
 }
 
 /** Result of `status`. */
@@ -61,11 +69,26 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
       state = live.status === 'busy' ? 'busy' : live.status === 'idle' ? 'idle' : 'unknown';
     } else state = 'starting';
     const held = inflight.find((i) => i.workerId === entry.name);
+    const startCommand = alive
+      ? paneStartCommand(deps.run, entry.tmuxSession, entry.tmuxWindow)
+      : '';
+    const launchEnv: StatusRow['launchEnv'] =
+      startCommand === ''
+        ? undefined
+        : hasLaunchEnv(startCommand, entry.name, entry.role)
+          ? 'ok'
+          : 'missing';
     return {
       entry,
       state,
       attached: alive && isAttached(entry.tmuxSession),
       inflightTask: held?.taskId,
+      ...(launchEnv ? { launchEnv } : {}),
+      ...(launchEnv === 'missing'
+        ? {
+            nextStep: `relaunch with \`cli-hierarchy down --role ${entry.role}\` then \`up\` from the main checkout's build`,
+          }
+        : {}),
     };
   });
   return { rows, board: peekQueue(deps.boardDir) };
@@ -82,6 +105,7 @@ export function formatStatus(result: StatusResult): string[] {
     'MODEL',
     'MODE',
     'INFLIGHT',
+    'ENV',
     'HIERARCHY_SESSION',
     'HIERARCHY_ROLE',
   ];
@@ -93,6 +117,7 @@ export function formatStatus(result: StatusResult): string[] {
     r.entry.model,
     r.entry.permissionMode,
     r.inflightTask ?? '-',
+    r.launchEnv ?? '-',
     r.entry.tmuxSession,
     r.entry.role,
   ]);
@@ -103,9 +128,13 @@ export function formatStatus(result: StatusResult): string[] {
       .join('  ')
       .trimEnd();
   const { queued, inflight, done, failed } = result.board;
+  const repairs = result.rows.flatMap((r) =>
+    r.nextStep ? [`env missing on ${r.entry.name}: ${r.nextStep}`] : [],
+  );
   return [
     fmt(header),
     ...body.map(fmt),
+    ...(repairs.length > 0 ? ['', ...repairs] : []),
     '',
     `board: ${queued} queued, ${inflight} inflight, ${done} done, ${failed} failed`,
   ];

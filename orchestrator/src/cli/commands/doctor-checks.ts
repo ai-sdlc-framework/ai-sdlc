@@ -1080,6 +1080,61 @@ export function fixWorktreeHooks(ctx: DoctorRunContext): DoctorFixResult {
   };
 }
 
+/**
+ * AISDLC-791: a running hierarchy session must have been launched with
+ * `AI_SDLC_HIERARCHY_SESSION=<name>` and `AI_SDLC_HIERARCHY_ROLE=<role>`: the
+ * lease-push hook binds an executor by them, and a bare launch (an older build's
+ * `up`) is refused at push time with `not-task-worktree`. Reads the roster and each
+ * pane's `#{pane_start_command}`; quiet when there is no roster or tmux cannot say.
+ */
+export function checkHierarchyLaunchEnv(ctx: DoctorRunContext): DoctorCheckResult[] {
+  const raw = ctx.adapters.readFile(join(ctx.projectDir, '.ai-sdlc', 'dispatch', 'hierarchy.json'));
+  if (raw === null) return [];
+  let sessions: unknown;
+  try {
+    sessions = (JSON.parse(raw) as { sessions?: unknown }).sessions;
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(sessions)) return [];
+  const bare: string[] = [];
+  for (const e of sessions as Array<Record<string, unknown>>) {
+    const { name, role, tmuxSession, tmuxWindow } = e;
+    if (e.status !== 'running') continue;
+    if (![name, role, tmuxSession, tmuxWindow].every((v) => typeof v === 'string')) continue;
+    const r = ctx.adapters.runCommand('tmux', [
+      'display-message',
+      '-p',
+      '-t',
+      `=${tmuxSession as string}:${tmuxWindow as string}`,
+      '#{pane_start_command}',
+    ]);
+    const command = r.exitCode === 0 ? r.stdout.trim() : '';
+    if (command === '') continue;
+    const has = (key: string, value: string): boolean =>
+      new RegExp(
+        `(?:^|\\s)${key}=(['"]?)${(value as string).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\1(?:\\s|$)`,
+      ).test(command);
+    if (
+      !has('AI_SDLC_HIERARCHY_SESSION', name as string) ||
+      !has('AI_SDLC_HIERARCHY_ROLE', role as string)
+    ) {
+      bare.push(`${name as string} (${role as string})`);
+    }
+  }
+  if (bare.length === 0) return [];
+  return [
+    {
+      id: 'hierarchy-launch-env',
+      severity: 'warn',
+      title: `${bare.length} hierarchy session(s) were launched without AI_SDLC_HIERARCHY_SESSION/AI_SDLC_HIERARCHY_ROLE (env: missing): ${bare.join(', ')}`,
+      remediation:
+        "Relaunch with `cli-hierarchy down --role <role>` then `up` from the main checkout's build; `cli-hierarchy clear` never relaunches a process. Without the env the lease push is refused with `not-task-worktree` (DEC-0079, DEC-0080).",
+      anonymizableEvidence: { affectedCount: bare.length },
+    },
+  ];
+}
+
 /** AISDLC-750: marker the post-rewrite guard fix (and the proxy shim) carries. */
 const POST_REWRITE_FIX_MARKER = 'AISDLC-750';
 
@@ -1547,6 +1602,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
       'Worktrees under .worktrees/ whose git hooks directory has no executable pre-push while the main checkout has one (AISDLC-693).',
     run: checkWorktreeHooks,
     fix: fixWorktreeHooks,
+  },
+  {
+    id: 'hierarchy-launch-env',
+    description:
+      'Running hierarchy sessions whose tmux start command lacks the AI_SDLC_HIERARCHY_SESSION/ROLE launch env the lease-push hook binds executors by (AISDLC-791).',
+    run: checkHierarchyLaunchEnv,
   },
   {
     id: 'parent-checkout-state',

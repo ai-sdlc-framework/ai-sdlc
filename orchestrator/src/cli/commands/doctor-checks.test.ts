@@ -46,6 +46,7 @@ import {
   parseEtimeSeconds,
   checkJudgmentLayer,
   checkRuntimeGitignore,
+  checkHierarchyLaunchEnv,
   checkWorktreeHooks,
   checkUntrackedReviewLedgers,
   fixUntrackedReviewLedgers,
@@ -1893,5 +1894,83 @@ describe('untracked-review-ledgers check (AISDLC-793)', () => {
     expect(checkUntrackedReviewLedgers(makeCtx(adaptersWith('x.jsonl', 128))).severity).toBe(
       'pass',
     );
+  });
+});
+
+// ── hierarchy-launch-env (AISDLC-791) ─────────────────────────────────
+
+describe('hierarchy-launch-env check', () => {
+  const roster = {
+    schemaVersion: 'v1',
+    sessions: [
+      {
+        name: 'p-executor-alpha',
+        role: 'executor',
+        tmuxSession: 'p-executor-alpha',
+        tmuxWindow: 'p-executor-alpha',
+        status: 'running',
+      },
+      {
+        name: 'p-executor-beta',
+        role: 'executor',
+        tmuxSession: 'p-executor-beta',
+        tmuxWindow: 'p-executor-beta',
+        status: 'running',
+      },
+      {
+        name: 'p-gone',
+        role: 'executor',
+        tmuxSession: 'p-gone',
+        tmuxWindow: 'p-gone',
+        status: 'stopped',
+      },
+    ],
+  };
+
+  function adaptersFor(commands: Record<string, string>, rosterText: string | null) {
+    return makeAdapters({
+      readFile: (p) => (p.endsWith('hierarchy.json') ? rosterText : null),
+      runCommand: (cmd, args) => {
+        const target = args[args.indexOf('-t') + 1]?.replace(/^=/, '').split(':')[0] ?? '';
+        return cmd === 'tmux' && target in commands
+          ? { stdout: `${commands[target]}\n`, exitCode: 0 }
+          : { stdout: '', exitCode: 1 };
+      },
+    });
+  }
+
+  it('flags a bare launch and names the relaunch next step', () => {
+    const results = checkHierarchyLaunchEnv(
+      makeCtx(
+        adaptersFor(
+          {
+            'p-executor-alpha':
+              "AI_SDLC_HIERARCHY_SESSION='p-executor-alpha' AI_SDLC_HIERARCHY_ROLE='executor' 'claude' --name x",
+            'p-executor-beta': "'claude' --name 'p-executor-beta' '/ai-sdlc executor'",
+          },
+          JSON.stringify(roster),
+        ),
+      ),
+    );
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe('hierarchy-launch-env');
+    expect(results[0].severity).toBe('warn');
+    expect(results[0].title).toContain('p-executor-beta');
+    expect(results[0].title).not.toContain('p-executor-alpha');
+    expect(results[0].remediation).toContain('cli-hierarchy down --role <role>');
+  });
+
+  it('is quiet when every running session carries the env, has no roster, or tmux cannot say', () => {
+    const good =
+      'AI_SDLC_HIERARCHY_SESSION=p-executor-alpha AI_SDLC_HIERARCHY_ROLE=executor claude';
+    const both = { 'p-executor-alpha': good, 'p-executor-beta': good.replace('alpha', 'beta') };
+    expect(checkHierarchyLaunchEnv(makeCtx(adaptersFor(both, JSON.stringify(roster))))).toEqual([]);
+    expect(checkHierarchyLaunchEnv(makeCtx(adaptersFor(both, null)))).toEqual([]);
+    expect(checkHierarchyLaunchEnv(makeCtx(adaptersFor(both, 'not json')))).toEqual([]);
+    expect(checkHierarchyLaunchEnv(makeCtx(adaptersFor({}, JSON.stringify(roster))))).toEqual([]);
+  });
+
+  it('is registered', () => {
+    expect(DOCTOR_CHECKS.find((x) => x.id === 'hierarchy-launch-env')).toBeDefined();
   });
 });

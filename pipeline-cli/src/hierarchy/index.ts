@@ -215,6 +215,7 @@ export {
   buildClaudeCommand,
   DEFAULT_PLANNER_MODE,
   findForeignSessions,
+  hasLaunchEnv,
   hierarchyUp,
   type UpOptions,
   type UpResult,

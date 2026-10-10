@@ -10,7 +10,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runHierarchyCli } from '../cli/hierarchy.js';
-import { writeManifest } from '../dispatch/board.js';
+import { readHeartbeat, writeManifest } from '../dispatch/board.js';
 import type { DispatchManifest } from '../dispatch/types.js';
 import type { IdentityDeps } from './caller-identity.js';
 import { executorStart } from './executor-start.js';
@@ -103,6 +103,51 @@ describe('executorStart', () => {
       taskId: 'AISDLC-9',
     });
     expect(lines[0]).toContain("[executor] I am 'proj-executor-alpha'");
+  });
+
+  it('writes the heartbeat naming the worker as part of the claim, before the task is returned (AISDLC-791)', async () => {
+    writeManifest(board, mkManifest('AISDLC-9'));
+    expect(readHeartbeat(board, 'AISDLC-9')).toBeUndefined();
+    const r = await executorStart(
+      { boardDir: board, cwd: tmp, waitSec: 5 },
+      { identity: identityFor('executor', 'proj-executor-alpha'), repoGit: gitAt(tmp) },
+    );
+    expect(r.taskId).toBe('AISDLC-9');
+    expect(readHeartbeat(board, 'AISDLC-9')).toMatchObject({
+      taskId: 'AISDLC-9',
+      workerId: 'proj-executor-alpha',
+      workerKind: 'in-session-agent',
+    });
+  });
+
+  it('fails loudly when the heartbeat cannot be written (AISDLC-791)', async () => {
+    writeManifest(board, mkManifest('AISDLC-9'));
+    await expect(
+      executorStart(
+        { boardDir: board, cwd: tmp, waitSec: 5 },
+        {
+          identity: identityFor('executor', 'proj-executor-alpha'),
+          repoGit: gitAt(tmp),
+          heartbeat: () => {
+            throw new Error('disk full');
+          },
+        },
+      ),
+    ).rejects.toThrow(/could not write its inflight heartbeat.*disk full/);
+  });
+
+  it('writes no heartbeat when nothing is claimed', async () => {
+    const hb = vi.fn();
+    const r = await executorStart(
+      { boardDir: board, cwd: tmp, waitSec: 0 },
+      {
+        identity: identityFor('executor', 'proj-executor-alpha'),
+        repoGit: gitAt(tmp),
+        heartbeat: hb,
+      },
+    );
+    expect(r.taskId).toBeNull();
+    expect(hb).not.toHaveBeenCalled();
   });
 
   it('prints the feedback note of a resumed task before the task runs (AISDLC-738)', async () => {

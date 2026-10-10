@@ -102,6 +102,18 @@ const BYPASS_MODE = 'bypassPermissions';
 /** Permission mode the planner starts in unless `--planner-permission-mode` overrides it. */
 export const DEFAULT_PLANNER_MODE = BYPASS_MODE;
 
+/**
+ * True when `command` carries the launch env the lease-push hook binds a session by:
+ * `AI_SDLC_HIERARCHY_SESSION=<name>` and `AI_SDLC_HIERARCHY_ROLE=<role>`, quoted or not.
+ */
+export function hasLaunchEnv(command: string, name: string, role: string): boolean {
+  const has = (key: string, value: string): boolean =>
+    new RegExp(
+      `(?:^|\\s)${key}=(['"]?)${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\1(?:\\s|$)`,
+    ).test(command);
+  return has('AI_SDLC_HIERARCHY_SESSION', name) && has('AI_SDLC_HIERARCHY_ROLE', role);
+}
+
 /** Build the `claude` command line for one session. */
 export function buildClaudeCommand(
   bin: string,
@@ -342,7 +354,15 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
   const started: RosterEntry[] = [];
   for (const s of toStart) {
     const spawnedAt = deps.now();
-    const result = startSession(deps.run, s.name, buildClaudeCommand(deps.claudeBin, s), deps.cwd);
+    const command = buildClaudeCommand(deps.claudeBin, s);
+    // Impossible by construction; asserted because a bare launch only fails at push time.
+    if (!hasLaunchEnv(command, s.name, s.role)) {
+      writeRoster(deps.boardDir, roster);
+      throw new Error(
+        `refusing to start '${s.name}': its command lacks AI_SDLC_HIERARCHY_SESSION/AI_SDLC_HIERARCHY_ROLE`,
+      );
+    }
+    const result = startSession(deps.run, s.name, command, deps.cwd);
     if (result.status !== 0) {
       writeRoster(deps.boardDir, roster);
       throw new Error(
