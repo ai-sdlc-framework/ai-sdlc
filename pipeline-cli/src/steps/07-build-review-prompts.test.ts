@@ -98,11 +98,11 @@ describe('Step 7 — buildReviewPrompts', () => {
     function runnerFor(files: string): FakeRunner {
       return new FakeRunner()
         .on(
-          /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+          /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
           ok('d\n'),
         )
         .on(
-          /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+          /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
           ok(files),
         );
     }
