@@ -42,6 +42,8 @@ import {
   checkMarketplaceCatalogDrift,
   checkNpmDistTagReachability,
   checkUsageIngest,
+  checkIdleSessions,
+  idlePollingMinutes,
   checkOrphanedVitestWorkers,
   parseEtimeSeconds,
   checkJudgmentLayer,
@@ -1972,5 +1974,67 @@ describe('hierarchy-launch-env check', () => {
 
   it('is registered', () => {
     expect(DOCTOR_CHECKS.find((x) => x.id === 'hierarchy-launch-env')).toBeDefined();
+  });
+});
+
+// ── checkIdleSessions (AISDLC-765) ──────────────────────────────────────
+
+describe('checkIdleSessions', () => {
+  const mk = (ts: string, noop: boolean): string =>
+    [
+      JSON.stringify({ type: 'user', message: { content: 'tick' }, timestamp: ts }),
+      JSON.stringify({
+        type: 'assistant',
+        timestamp: ts,
+        message: {
+          usage: { input_tokens: 1 },
+          content: noop
+            ? [{ type: 'tool_use', name: 'ScheduleWakeup', input: { noop: true } }]
+            : [],
+        },
+      }),
+    ].join('\n');
+  const idle = [
+    mk('2026-10-10T00:00:00Z', true),
+    mk('2026-10-10T00:20:00Z', true),
+    mk('2026-10-10T00:45:00Z', true),
+  ].join('\n');
+
+  it('measures the trailing empty-polling run', () => {
+    expect(idlePollingMinutes(idle)).toBe(45);
+    expect(idlePollingMinutes(`${idle}\n${mk('2026-10-10T01:00:00Z', false)}`)).toBe(0);
+    expect(idlePollingMinutes('garbage\n')).toBe(0);
+  });
+
+  it('warns after 30 minutes of empty polling', () => {
+    const r = checkIdleSessions(
+      makeCtx(
+        makeAdapters({
+          recentTranscripts: () => ['/t.jsonl'],
+          readFile: () => idle,
+        }),
+      ),
+    );
+    expect(r.severity).toBe('warn');
+    expect(r.title).toMatch(/45 min/);
+  });
+
+  it('passes for a short run, unreadable file, or no adapter', () => {
+    const short = mk('2026-10-10T00:00:00Z', true);
+    expect(
+      checkIdleSessions(
+        makeCtx(makeAdapters({ recentTranscripts: () => ['/t'], readFile: () => short })),
+      ).severity,
+    ).toBe('pass');
+    expect(
+      checkIdleSessions(
+        makeCtx(makeAdapters({ recentTranscripts: () => ['/t'], readFile: () => null })),
+      ).severity,
+    ).toBe('pass');
+    expect(checkIdleSessions(makeCtx(makeAdapters())).severity).toBe('pass');
+  });
+
+  it('is registered', () => {
+    expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('idle-sessions');
   });
 });
