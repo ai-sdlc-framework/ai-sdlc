@@ -6,9 +6,13 @@
  *    (non-destructive: it refuses on its own when it would lose work); a dirty
  *    parent is reported and never touched.
  *  - PreToolUse: no Edit/Write/MultiEdit into the parent working tree (outside
- *    `.worktrees/` and a short list of runtime directories), and no branch
- *    creation (`git checkout -b`, `git switch -c`) with the parent as the
- *    working directory. Edits belong in `.worktrees/<task-id>/`.
+ *    `.worktrees/` and a short list of runtime directories; paths compared by
+ *    realpath), and no branch creation or switch to a non-main branch
+ *    (`git checkout -b`, `git switch -c`, `git checkout <branch>`) with the
+ *    parent as the working directory. The command is tokenised (quotes
+ *    stripped, git global options skipped, `cd <dir> &&` tracked). This is a
+ *    guard against accidents, not a shell sandbox: eval, scripts and variable
+ *    expansion are out of reach. Edits belong in `.worktrees/<task-id>/`.
  *
  * "Parent" means a Pattern C parent: the main checkout whose `.worktrees/`
  * directory holds at least one worktree. Any other repository (an adopter
@@ -19,7 +23,7 @@
  * No environment bypass exists: the next step on a refusal is the worktree.
  */
 
-const { readdirSync, statSync } = require('fs');
+const { readdirSync, realpathSync, statSync } = require('fs');
 const { basename, dirname, isAbsolute, join, resolve, sep } = require('path');
 const { execFileSync } = require('child_process');
 
@@ -76,11 +80,176 @@ function isGuardedParentPath(absPath, parentRoot) {
   return !PARENT_WRITE_ALLOWLIST.some((d) => within(p, join(parentRoot, d)));
 }
 
-const BRANCH_CREATE =
-  /(?:^|[\s;&|(])git\s+(?:-C\s+(\S+)\s+)?(?:checkout\s+(?:-[bB]\b|--orphan\b)|switch\s+(?:-[cC]\b|--create\b|--force-create\b|--orphan\b))/;
-
 const REFUSAL_NEXT =
   'Work in a task worktree under .worktrees/<task-id>/ (the /ai-sdlc execute flow creates one).';
+
+/** realpath of `p`, or of its nearest existing ancestor plus the remainder (new files). */
+function realish(p) {
+  let cur = resolve(p);
+  const rest = [];
+  for (;;) {
+    try {
+      return join(realpathSync(cur), ...rest.reverse());
+    } catch {
+      const up = dirname(cur);
+      if (up === cur) return resolve(p);
+      rest.push(basename(cur));
+      cur = up;
+    }
+  }
+}
+
+/**
+ * Split a shell command into segments of unquoted words. Quotes and
+ * backslashes are removed; `;`, `&`, `|`, newlines and parentheses outside
+ * quotes separate segments. Approximate on purpose: it must see through the
+ * quoting and option tricks that defeat a regex, not execute a shell.
+ */
+function shellSegments(cmd) {
+  const segments = [];
+  let words = [];
+  let cur = '';
+  let inWord = false;
+  let quote = null;
+  const endWord = () => {
+    if (inWord) words.push(cur);
+    cur = '';
+    inWord = false;
+  };
+  const endSegment = () => {
+    endWord();
+    if (words.length) segments.push(words);
+    words = [];
+  };
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i];
+    if (quote) {
+      if (c === quote) quote = null;
+      else if (c === '\\' && quote === '"' && i + 1 < cmd.length) cur += cmd[++i];
+      else cur += c;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      quote = c;
+      inWord = true;
+    } else if (c === '\\' && i + 1 < cmd.length) {
+      cur += cmd[++i];
+      inWord = true;
+    } else if (/\s/.test(c) && c !== '\n') {
+      endWord();
+    } else if (c === '\n' || c === ';' || c === '&' || c === '|' || c === '(' || c === ')') {
+      endSegment();
+    } else {
+      cur += c;
+      inWord = true;
+    }
+  }
+  endSegment();
+  return segments;
+}
+
+const GLOBAL_OPTS_WITH_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace']);
+const WRAPPERS = new Set(['env', 'command', 'exec', 'time', 'nohup', 'sudo']);
+
+/**
+ * Parse one segment into `{ dir, sub, args }` when it is a `git` call, applying
+ * global options (`-C <path>`, `--work-tree`). Returns null otherwise.
+ */
+function parseGitCall(words, dir) {
+  let i = 0;
+  while (i < words.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i]) || WRAPPERS.has(words[i])))
+    i++;
+  if (words[i] !== 'git') return null;
+  i++;
+  let d = dir;
+  while (i < words.length && words[i].startsWith('-')) {
+    const w = words[i];
+    const eq = w.indexOf('=');
+    const name = eq === -1 ? w : w.slice(0, eq);
+    if (GLOBAL_OPTS_WITH_VALUE.has(name)) {
+      const value = eq === -1 ? words[++i] : w.slice(eq + 1);
+      if (name === '-C' && value) d = resolve(d, value);
+      else if (name === '--work-tree' && value) d = resolve(d, value);
+    }
+    i++;
+  }
+  if (i >= words.length) return null;
+  return { dir: d, sub: words[i], args: words.slice(i + 1) };
+}
+
+const CHECKOUT_CREATE = /^-[A-Za-z]*[bB]/;
+const SWITCH_CREATE = /^-[A-Za-z]*[cC]/;
+
+/** Whether a git checkout/switch call creates a branch. */
+function createsBranch(sub, args) {
+  for (const a of args) {
+    if (a === '--') return false;
+    if (a === '--orphan' || a.startsWith('--orphan=')) return true;
+    if (sub === 'switch' && (a === '--create' || a === '--force-create')) return true;
+    if (a.startsWith('--')) continue;
+    if (sub === 'checkout' && CHECKOUT_CREATE.test(a)) return true;
+    if (sub === 'switch' && SWITCH_CREATE.test(a)) return true;
+  }
+  return false;
+}
+
+/** The first positional (non-option) argument before `--`, or null. */
+function firstPositional(args) {
+  for (const a of args) {
+    if (a === '--') return null;
+    if (!a.startsWith('-')) return a;
+  }
+  return null;
+}
+
+/** True when `name` is an existing local branch of the repo at `dir`. */
+function isLocalBranch(dir, name, git) {
+  try {
+    git(dir, ['show-ref', '--verify', '--quiet', `refs/heads/${name}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Inspect a Bash command for a branch create or a switch to a non-main branch
+ * whose working directory is the parent checkout. Returns a reason or null.
+ */
+function evaluateBashCommand(cmd, cwd, git) {
+  let dir = cwd;
+  for (const words of shellSegments(cmd)) {
+    const head = words.findIndex((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w));
+    if (head !== -1 && (words[head] === 'cd' || words[head] === 'pushd')) {
+      const target = words.slice(head + 1).find((w) => !w.startsWith('-'));
+      if (target) dir = resolve(dir, target);
+      continue;
+    }
+    const call = parseGitCall(words, dir);
+    if (!call || (call.sub !== 'checkout' && call.sub !== 'switch')) continue;
+    const creating = createsBranch(call.sub, call.args);
+    const target = creating ? null : firstPositional(call.args);
+    if (!creating && !target) continue;
+    if (!creating && (target === 'main' || target === '-')) continue;
+    const root = findParentRoot(call.dir, git);
+    if (!root) continue;
+    let top = '';
+    try {
+      top = git(call.dir, ['rev-parse', '--show-toplevel']);
+    } catch {
+      top = '';
+    }
+    // A worktree's toplevel is the worktree itself; only the parent's own is the root.
+    if (!top || realish(top) !== realish(root)) continue;
+    if (creating) {
+      return `Creating a branch in the parent checkout (${root}) is refused: it must stay on main. ${REFUSAL_NEXT}`;
+    }
+    if (call.sub === 'switch' || isLocalBranch(call.dir, target, git)) {
+      return `Switching the parent checkout (${root}) to '${target}' is refused: it must stay on main. ${REFUSAL_NEXT}`;
+    }
+  }
+  return null;
+}
 
 /**
  * PreToolUse decision. Returns a reason string to deny, or null to allow.
@@ -93,10 +262,11 @@ function evaluatePreToolUse(input, { git = defaultGit, fallbackCwd = process.cwd
   if (tool === 'Write' || tool === 'Edit' || tool === 'MultiEdit') {
     const fp = ti.file_path;
     if (typeof fp !== 'string' || fp === '') return null;
-    const abs = isAbsolute(fp) ? fp : resolve(cwd, fp);
+    // Compare real paths so a symlink or `..` cannot dodge the guard.
+    const abs = realish(isAbsolute(fp) ? fp : resolve(cwd, fp));
     const root = findParentRoot(dirname(abs), git) ?? findParentRoot(cwd, git);
     if (!root) return null;
-    if (isGuardedParentPath(abs, root)) {
+    if (isGuardedParentPath(abs, realish(root))) {
       return `${tool} into the parent checkout (${abs}) is refused: the parent working tree is read-only and stays on main. ${REFUSAL_NEXT}`;
     }
     return null;
@@ -104,23 +274,7 @@ function evaluatePreToolUse(input, { git = defaultGit, fallbackCwd = process.cwd
   if (tool === 'Bash') {
     const cmd = ti.command;
     if (typeof cmd !== 'string') return null;
-    const m = BRANCH_CREATE.exec(cmd);
-    if (!m) return null;
-    const dir = m[1] ? (isAbsolute(m[1]) ? m[1] : resolve(cwd, m[1])) : cwd;
-    const root = findParentRoot(dir, git);
-    if (!root) return null;
-    const top = (() => {
-      try {
-        return git(dir, ['rev-parse', '--show-toplevel']);
-      } catch {
-        return '';
-      }
-    })();
-    // A worktree's toplevel is the worktree itself; only the parent's own is the root.
-    if (top && resolve(top) === resolve(root)) {
-      return `Creating a branch in the parent checkout (${root}) is refused: it must stay on main. ${REFUSAL_NEXT}`;
-    }
-    return null;
+    return evaluateBashCommand(cmd, cwd, git);
   }
   return null;
 }
@@ -184,6 +338,7 @@ function checkParentOnMain(cwd, { git = defaultGit } = {}) {
 
 module.exports = {
   PARENT_WRITE_ALLOWLIST,
+  shellSegments,
   findParentRoot,
   isGuardedParentPath,
   evaluatePreToolUse,

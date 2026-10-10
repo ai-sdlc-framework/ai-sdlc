@@ -5,7 +5,7 @@
 import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +17,7 @@ import {
   envelopeReviewerNames,
   extractTaskIds,
   isChangelogPath,
+  isReleasePleasePr,
   isReviewOrAuditTask,
   parseTaskMeta,
   run,
@@ -114,16 +115,43 @@ describe('changelog check', () => {
     const { git, base, commit } = mkRepo();
     const head = commit({ 'pipeline-cli/CHANGELOG.md': '# c\n', 'a.txt': 'a' }, 'feat: x');
     assert.equal(checkChangelog({ base, head, branch: 'ai-sdlc/x', git }).length, 1);
-    assert.deepEqual(
-      checkChangelog({ base, head, branch: 'release-please--branches--main', git }),
-      [],
-    );
+    const rp = { base, head, branch: 'release-please--branches--main', git };
+    assert.deepEqual(checkChangelog({ ...rp, headRepo: 'o/r', baseRepo: 'o/r' }), []);
     const clean = mkRepo();
     const h2 = clean.commit({ 'a.txt': 'a' }, 'feat: y');
     assert.deepEqual(
       checkChangelog({ base: clean.base, head: h2, branch: 'b', git: clean.git }),
       [],
     );
+  });
+  it('does not trust the branch name alone: fork spoof, non-main release branch, missing repos', () => {
+    const { git, base, commit } = mkRepo();
+    const head = commit({ 'CHANGELOG.md': 'x' }, 'feat: x');
+    const rp = { base, head, branch: 'release-please--branches--main', git };
+    assert.equal(checkChangelog({ ...rp, headRepo: 'evil/r', baseRepo: 'o/r' }).length, 1);
+    assert.equal(checkChangelog(rp).length, 1);
+    assert.equal(
+      checkChangelog({
+        ...rp,
+        branch: 'release-please--branches--other',
+        headRepo: 'o/r',
+        baseRepo: 'o/r',
+      }).length,
+      1,
+    );
+    assert.equal(isReleasePleasePr({ ...rp, headRepo: 'o/r', baseRepo: 'o/r' }), true);
+    assert.equal(isReleasePleasePr({ ...rp, headRepo: 'evil/r', baseRepo: 'o/r' }), false);
+  });
+  it('catches a CHANGELOG added by rename', () => {
+    const { git, base, commit, d } = mkRepo();
+    commit({ 'old.md': 'same content here\n'.repeat(5) }, 'chore: seed');
+    const mid = git(['rev-parse', 'HEAD']).trim();
+    git(['mv', 'old.md', 'CHANGELOG.md']);
+    git(['commit', '-qm', 'rename']);
+    const head = git(['rev-parse', 'HEAD']).trim();
+    assert.ok(d);
+    assert.equal(checkChangelog({ base: mid, head, branch: 'b', git }).length, 1);
+    assert.ok(base);
   });
   it('fails closed on a git error', () => {
     const { git } = mkRepo();
@@ -291,12 +319,25 @@ describe('run() and CLI', () => {
           head,
           '--branch',
           'release-please--branches--main',
+          '--head-repo',
+          'o/r',
+          '--base-repo',
+          'o/r',
           '--docs-only',
-          'true',
+          'false',
         ],
         { git, repoRoot: d, log: q.log },
       ),
       0,
+    );
+    // a fork spoofing the release branch is not exempt from changelog or reviewers
+    q = quiet();
+    assert.equal(
+      run(
+        ['changelog', '--base', base, '--head', head, '--branch', 'release-please--branches--main'],
+        { git, log: q.log },
+      ),
+      1,
     );
     const cli = spawnSync(
       'node',
@@ -304,5 +345,18 @@ describe('run() and CLI', () => {
       { cwd: d, encoding: 'utf-8' },
     );
     assert.equal(cli.status, 1);
+  });
+  it('still runs (and fails) when invoked through a symlinked directory', () => {
+    const { base, commit, d } = mkRepo();
+    const head = commit({ 'CHANGELOG.md': 'x' }, 'feat: x');
+    const link = join(mkdtempSync(join(tmpdir(), 'pr-gov-link-')), 'scripts');
+    dirs.push(dirname(link));
+    symlinkSync(dirname(SCRIPT), link);
+    const cli = spawnSync(
+      'node',
+      [join(link, 'check-pr-governance.mjs'), 'changelog', '--base', base, '--head', head],
+      { cwd: d, encoding: 'utf-8' },
+    );
+    assert.equal(cli.status, 1, cli.stdout + cli.stderr);
   });
 });

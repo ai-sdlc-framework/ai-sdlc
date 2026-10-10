@@ -626,14 +626,25 @@ jobs:
 
   # ── Governance gate (AISDLC-764) ────────────────────────────────────────
   # Rules that used to live only in prose or reviewer judgement, as code:
-  #   - CHANGELOG.md edits off a release-please branch fail (AISDLC-401)
-  #   - a review/audit task PR that adds a backlog/tasks file fails (AISDLC-308)
-  #   - a new RFC Open Questions resolution marker fails unless the PR body
-  #     carries an allowlisted operator approval marker (AISDLC-298)
+  #   - CHANGELOG.md edits off the same-repo release-please branch fail
+  #     (AISDLC-401); the branch name alone is not trusted, a fork can spoof it
+  #   - scope-creep HEURISTIC: a review/audit task PR that adds a
+  #     backlog/tasks file fails (AISDLC-308); a backstop, not complete
+  #     enforcement, reviewers still check
+  #   - a new RFC Open Questions resolution marker fails unless an APPROVED
+  #     review on the head SHA from a lifecycle-approvers.yaml login (read from
+  #     the BASE ref) other than the PR author exists (AISDLC-298); reviews are
+  #     fetched here with GITHUB_TOKEN, never taken from PR-controlled text
   #   - a code PR whose attestation lacks the full reviewer set fails
-  #     (code + test + security, or correctness + security; docs-only and
-  #     dependabot PRs are exempt, matching attestation-gate)
-  # Deterministic, no install, no LLM. Every check fails closed.
+  #     (code + test + security, or correctness + security). That check reads
+  #     reviewer NAMES only and is NOT an independent control: signature and
+  #     transcript verification are verify-attestation / attestation-gate.
+  #     Docs-only, dependabot and same-repo release-please PRs are exempt,
+  #     matching attestation-gate.
+  # Deterministic, no install, no LLM. The checker scripts run from the BASE
+  # commit against the head tree so a PR cannot weaken its own checks; while
+  # the base predates them (bootstrap) the head copy is used with a visible
+  # warning, never silently skipped. Each check fails closed on its own inputs.
   governance-gate:
     name: Governance gate
     needs: detect
@@ -641,6 +652,9 @@ jobs:
       github.event_name == 'pull_request' &&
       github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -648,11 +662,31 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
+      - name: Select trusted checker scripts (base commit)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          TRUSTED="$RUNNER_TEMP/trusted"
+          mkdir -p "$TRUSTED"
+          if git cat-file -e "$BASE_SHA:scripts/check-pr-governance.mjs" \
+            && git show "$BASE_SHA:scripts/check-rfc-docs.mjs" | grep -q -- '--oq-scan'; then
+            git archive "$BASE_SHA" scripts pipeline-cli/attestation-core | tar -x -C "$TRUSTED"
+            echo "::notice::governance checkers taken from base commit $BASE_SHA"
+          else
+            echo "::warning::base commit lacks the governance checkers (bootstrap); using the PR's own copies. Not an independent control until the base carries them."
+            mkdir -p "$TRUSTED/pipeline-cli"
+            cp -R scripts "$TRUSTED/scripts"
+            cp -R pipeline-cli/attestation-core "$TRUSTED/pipeline-cli/attestation-core"
+          fi
+          echo "TRUSTED=$TRUSTED" >> "$GITHUB_ENV"
       - name: PR governance checks (changelog, scope-creep, reviewers)
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           DOCS_ONLY: ${{ needs.detect.outputs.docs_only }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
@@ -660,22 +694,32 @@ jobs:
           set -euo pipefail
           SKIP_REVIEWERS=false
           if [ "$PR_AUTHOR" = "dependabot[bot]" ]; then SKIP_REVIEWERS=true; fi
-          node scripts/check-pr-governance.mjs all \
+          node "$TRUSTED/scripts/check-pr-governance.mjs" all \
             --base "$BASE_SHA" --head "$HEAD_SHA" \
-            --branch "$HEAD_REF" --title "$PR_TITLE" \
+            --branch "$HEAD_REF" --head-repo "$HEAD_REPO" --base-repo "$BASE_REPO" \
+            --title "$PR_TITLE" \
             --docs-only "$DOCS_ONLY" --skip-reviewers "$SKIP_REVIEWERS"
       - name: RFC Open Questions resolution markers
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.txt"
+          # Approving logins come from the GitHub API, not PR-controlled text.
+          # A fetch or parse failure fails the step (pipefail), never "no approvals".
+          gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/reviews" \
+            | jq -s --arg sha "$HEAD_SHA" \
+              '[.[][] | select(.state == "APPROVED" and .commit_id == $sha) | .user.login] | unique' \
+            > "$RUNNER_TEMP/approving-logins.json"
           MB=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
-          node scripts/check-rfc-docs.mjs --oq-scan \
+          node "$TRUSTED/scripts/check-rfc-docs.mjs" --oq-scan \
             --base-ref "$MB" --head-ref "$HEAD_SHA" \
-            --pr-body-file "$RUNNER_TEMP/pr-body.txt"
+            --approving-logins-file "$RUNNER_TEMP/approving-logins.json" \
+            --pr-author "$PR_AUTHOR"
 
   pr-ready:
     name: ai-sdlc/pr-ready

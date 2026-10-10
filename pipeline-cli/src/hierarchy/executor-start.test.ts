@@ -133,7 +133,7 @@ describe('executorStart', () => {
       },
     );
     expect(ok.taskId).toBe('AISDLC-9');
-    expect(lines.some((l) => l.includes('check-sender'))).toBe(false);
+    expect(lines.some((l) => l.includes('UNCHECKED START'))).toBe(false);
     const warned: string[] = [];
     await executorStart(
       { boardDir: board, cwd: tmp, waitSec: 0 },
@@ -143,7 +143,7 @@ describe('executorStart', () => {
         log: (l) => warned.push(l),
       },
     );
-    expect(warned.some((l) => l.includes('check-sender: warning'))).toBe(true);
+    expect(warned.some((l) => l.includes('WARNING: UNCHECKED START'))).toBe(true);
   });
 
   it('writes the heartbeat naming the worker as part of the claim, before the task is returned (AISDLC-791)', async () => {

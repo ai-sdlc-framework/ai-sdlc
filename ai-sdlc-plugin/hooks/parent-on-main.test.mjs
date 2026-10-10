@@ -6,7 +6,15 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+  readFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -99,6 +107,73 @@ describe('PreToolUse deny', () => {
     assert.ok(pre('Bash', { command: `git -C ${root} switch -c q` }, wt));
     assert.equal(pre('Bash', { command: `git -C ${wt} checkout -b q` }, root), null);
     assert.equal(pre('Bash', {}, root), null);
+  });
+});
+
+describe('PreToolUse deny: evasion forms (round 2)', () => {
+  const denied = (cmd, cwd = root) => {
+    const r = pre('Bash', { command: cmd }, cwd);
+    assert.ok(r, `expected deny: ${cmd}`);
+    return r;
+  };
+  it('sees through quotes, including a quoted -C path', () => {
+    denied('git checkout -b "feat/x"');
+    denied("git 'checkout' '-b' x");
+    denied(`git -C "${root}" switch -c q`, wt);
+    denied(`git -C '${root}' checkout -b q`, wt);
+  });
+  it('skips arbitrary git global options', () => {
+    denied('git -c user.name=x checkout -b y');
+    denied('git --no-pager checkout -b y');
+    denied('git -c a=b -c c=d --no-pager switch -c y');
+    denied(`git --work-tree=${root} checkout -b y`, wt);
+    denied('GIT_TRACE=1 git checkout -b y');
+  });
+  it('allows options between the subcommand and the branch flag', () => {
+    denied('git checkout -q -b x');
+    denied('git checkout -qb x');
+    denied('git checkout --quiet -B x');
+    denied('git switch --quiet -c x');
+    denied('git switch --discard-changes --create x');
+    denied('git checkout --orphan=z');
+  });
+  it('tracks a leading cd into the parent and ignores a cd into a worktree', () => {
+    denied(`cd ${root} && git checkout -b x`, wt);
+    denied(`cd "${root}"; git switch -c x`, wt);
+    assert.equal(pre('Bash', { command: `cd ${wt} && git checkout -b x` }, root), null);
+    assert.equal(pre('Bash', { command: `cd ${plain} && git checkout -b x` }, root), null);
+  });
+  it('denies a switch to a non-main branch in the parent, allows main, files and worktrees', () => {
+    git(root, 'branch', 'stray-existing-branch');
+    assert.match(denied('git checkout stray-existing-branch'), /Switching/);
+    assert.match(denied('git switch whatever'), /Switching/);
+    assert.equal(pre('Bash', { command: 'git checkout stray-existing-branch' }, wt), null);
+    assert.equal(pre('Bash', { command: 'git checkout nonexistent-ref-or-file' }, root), null);
+  });
+  it('does not flag non-branch checkouts', () => {
+    assert.equal(pre('Bash', { command: 'git checkout -- a.txt' }, root), null);
+    assert.equal(pre('Bash', { command: 'git checkout a.txt' }, root), null);
+    assert.equal(pre('Bash', { command: 'git checkout main' }, root), null);
+    assert.equal(pre('Bash', { command: 'git switch main' }, root), null);
+    assert.equal(pre('Bash', { command: 'git log --oneline | head -3' }, root), null);
+    assert.equal(pre('Bash', { command: 'echo "git checkout -b x"' }, root), null);
+  });
+  it('compares realpaths for Write/Edit: symlink and dot-dot into the parent are denied', () => {
+    const link = join(dirname(root), 'link-to-parent');
+    symlinkSync(root, link);
+    assert.ok(pre('Write', { file_path: join(link, 'a.txt') }, plain));
+    assert.ok(pre('Write', { file_path: join(wt, '..', '..', 'a.txt') }, wt));
+    const wlink = join(dirname(root), 'link-to-wt');
+    symlinkSync(wt, wlink);
+    assert.equal(pre('Write', { file_path: join(wlink, 'a.txt') }, wlink), null);
+  });
+  it('tokenises quoting and separators', () => {
+    assert.deepEqual(lib.shellSegments('a "b c" \'d e\'; f && g|h'), [
+      ['a', 'b c', 'd e'],
+      ['f'],
+      ['g'],
+      ['h'],
+    ]);
   });
 });
 

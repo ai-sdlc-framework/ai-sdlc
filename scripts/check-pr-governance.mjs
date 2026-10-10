@@ -5,30 +5,57 @@
  * Deterministic PR-level governance checks that used to live only in prose or
  * reviewer judgement. Run by the `governance-gate` job of
  * `.github/workflows/ai-sdlc-gate.yml`, which feeds the `ai-sdlc/pr-ready`
- * rollup. No LLM, no network. Every check fails closed: a git error is a
- * failure, never a pass.
+ * rollup. No LLM, no network. Each check fails closed on its own inputs: a git
+ * error is a failure, never a pass. The workflow runs this script from the
+ * BASE commit against the head tree, so a PR cannot weaken its own checks;
+ * when the base predates this script it falls back to the head copy with a
+ * visible notice.
  *
  *   changelog     fail when the PR touches a CHANGELOG.md and its branch is not
  *                 a release-please branch (CHANGELOG.md belongs to release-please;
  *                 AISDLC-401).
- *   scope-creep   fail when the PR implements a review or audit task and adds a
- *                 new file under backlog/tasks/ (AISDLC-308).
+ *   scope-creep   a HEURISTIC backstop, not complete enforcement: fail when the
+ *                 PR implements a review or audit task (as identified by the
+ *                 task id in a commit subject, the title or the branch) and
+ *                 adds a new file under backlog/tasks/ (AISDLC-308). A PR that
+ *                 hides its task id defeats it; reviewers still check.
  *   reviewers     fail when a code PR's attestation envelope lacks the full
  *                 reviewer set: code + test + security, or the merged
- *                 correctness + security set (AISDLC-617).
+ *                 correctness + security set (AISDLC-617). This reads reviewer
+ *                 NAMES only and is NOT an independent control: signature and
+ *                 transcript verification belong to verify-attestation and
+ *                 the attestation-gate job. It catches a missing reviewer, not
+ *                 a forged one.
  *
  * Usage:
  *   node scripts/check-pr-governance.mjs <check|all> --base <sha> --head <sha>
- *        [--branch <name>] [--title <text>] [--docs-only true|false]
- *        [--skip-reviewers true|false]
+ *        [--branch <name>] [--head-repo <owner/repo>] [--base-repo <owner/repo>]
+ *        [--title <text>] [--docs-only true|false] [--skip-reviewers true|false]
  */
 
 import { execFileSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { computePatchIdForVerifier } from '../pipeline-cli/attestation-core/verify-core.mjs';
 
 export const RELEASE_BRANCH_PREFIX = 'release-please--branches--';
+export const RELEASE_BRANCH = `${RELEASE_BRANCH_PREFIX}main`;
+
+/**
+ * The release-please rolling PR: exactly the `release-please--branches--main`
+ * branch AND a head repo equal to the base repo. A fork can name a branch
+ * anything, so the branch name alone proves nothing. Missing repo names are
+ * never a release PR (fail closed).
+ */
+export function isReleasePleasePr({ branch, headRepo, baseRepo }) {
+  return (
+    branch === RELEASE_BRANCH &&
+    typeof headRepo === 'string' &&
+    headRepo !== '' &&
+    headRepo === baseRepo
+  );
+}
 
 const REVIEWER_VARIANTS = {
   three: [
@@ -59,11 +86,11 @@ const lines = (out) =>
 export const isChangelogPath = (p) => /(^|\/)CHANGELOG\.md$/.test(p);
 
 /** Fail when a non-release branch touches a CHANGELOG.md. */
-export function checkChangelog({ base, head, branch, git }) {
-  if (typeof branch === 'string' && branch.startsWith(RELEASE_BRANCH_PREFIX)) return [];
+export function checkChangelog({ base, head, branch, headRepo, baseRepo, git }) {
+  if (isReleasePleasePr({ branch, headRepo, baseRepo })) return [];
   let files;
   try {
-    files = lines(git(['diff', '--name-only', `${base}...${head}`]));
+    files = lines(git(['diff', '--name-only', '--no-renames', `${base}...${head}`]));
   } catch (err) {
     return [`changelog: cannot diff ${base}...${head}: ${err.message}`];
   }
@@ -71,7 +98,7 @@ export function checkChangelog({ base, head, branch, git }) {
     .filter(isChangelogPath)
     .map(
       (f) =>
-        `${f}: CHANGELOG.md is owned by release-please; remove this edit from the branch (the entry is built from your conventional-commit message). Only branches named ${RELEASE_BRANCH_PREFIX}* may edit it.`,
+        `${f}: CHANGELOG.md is owned by release-please; remove this edit from the branch (the entry is built from your conventional-commit message). Only the same-repo ${RELEASE_BRANCH} branch may edit it.`,
     );
 }
 
@@ -114,7 +141,15 @@ export function checkScopeCreep({ base, head, branch, title, git }) {
   let subjects;
   try {
     added = lines(
-      git(['diff', '--name-only', '--diff-filter=A', `${base}...${head}`, '--', 'backlog/tasks/']),
+      git([
+        'diff',
+        '--name-only',
+        '--no-renames',
+        '--diff-filter=A',
+        `${base}...${head}`,
+        '--',
+        'backlog/tasks/',
+      ]),
     );
     subjects = lines(git(['log', '--format=%s', `${base}..${head}`]));
   } catch (err) {
@@ -189,7 +224,12 @@ export function envelopeReviewerNames(envelopeText) {
   return [];
 }
 
-/** Fail a code PR whose attestation lacks the full reviewer set. */
+/**
+ * Fail a code PR whose attestation lacks the full reviewer set. Names only:
+ * this is a completeness check, NOT an independent control. Whether the
+ * envelope is genuine (signature, Merkle transcript) is verify-attestation's
+ * and the attestation-gate job's job.
+ */
 export function checkReviewers({ base, head, repoRoot, git, docsOnly, skip }) {
   if (docsOnly || skip) return [];
   let mergeBase;
@@ -214,6 +254,7 @@ export function checkReviewers({ base, head, repoRoot, git, docsOnly, skip }) {
         git([
           'diff',
           '--name-only',
+          '--no-renames',
           '--diff-filter=A',
           `${mergeBase}..${head}`,
           '--',
@@ -279,7 +320,15 @@ export function run(
     log.error('[pr-governance] FAIL: --base and --head are required (fail closed)');
     return 1;
   }
-  const common = { base: flags.base, head: flags.head, branch: flags.branch ?? '', git, repoRoot };
+  const common = {
+    base: flags.base,
+    head: flags.head,
+    branch: flags.branch ?? '',
+    headRepo: flags['head-repo'] ?? '',
+    baseRepo: flags['base-repo'] ?? '',
+    git,
+    repoRoot,
+  };
   const results = {
     changelog: () => checkChangelog(common),
     'scope-creep': () => checkScopeCreep({ ...common, title: flags.title ?? '' }),
@@ -287,7 +336,8 @@ export function run(
       checkReviewers({
         ...common,
         docsOnly: flags['docs-only'] === 'true',
-        skip: flags['skip-reviewers'] === 'true',
+        // The release-please rolling PR carries no envelope (same-repo guard).
+        skip: flags['skip-reviewers'] === 'true' || isReleasePleasePr(common),
       }),
   };
   let failed = 0;
@@ -302,9 +352,15 @@ export function run(
   return failed > 0 ? 1 : 0;
 }
 
-if (
-  import.meta.url === `file://${process.argv[1]}` ||
-  process.argv[1] === fileURLToPath(import.meta.url)
-) {
+// Real-path comparison: running through a symlinked directory must still
+// execute the checks, never silently exit 0 as a no-op (fail closed).
+const isEntryPoint = (() => {
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+})();
+if (isEntryPoint) {
   process.exit(run(process.argv.slice(2)));
 }

@@ -806,9 +806,29 @@ describe('governance-gate (AISDLC-764)', () => {
   });
   it('checks out full history and runs the PR checks and the OQ scan', () => {
     assert.equal(job.steps[0].with['fetch-depth'], 0);
-    assert.match(steps, /node scripts\/check-pr-governance\.mjs all/);
-    assert.match(steps, /node scripts\/check-rfc-docs\.mjs --oq-scan/);
+    assert.match(steps, /scripts\/check-pr-governance\.mjs\\" all/);
+    assert.match(steps, /scripts\/check-rfc-docs\.mjs\\" --oq-scan/);
     assert.match(steps, /--docs-only/);
+  });
+  it('runs the checkers from the base commit, degrading to head copies with a warning', () => {
+    const select = job.steps.find((x) => /trusted checker scripts/i.test(x.name ?? ''));
+    assert.ok(select, 'a trusted-script selection step exists');
+    assert.match(select.run, /git archive "\$BASE_SHA" scripts pipeline-cli\/attestation-core/);
+    assert.match(select.run, /::warning::base commit lacks the governance checkers/);
+    assert.ok(!/node scripts\/check-(pr-governance|rfc-docs)/.test(steps));
+  });
+  it('passes repo identity so the release-please exemption is not branch-name only', () => {
+    assert.match(steps, /--head-repo/);
+    assert.match(steps, /--base-repo/);
+    assert.match(steps, /github\.event\.pull_request\.head\.repo\.full_name/);
+  });
+  it('fetches approving reviews itself and never trusts PR body text for OQ approval', () => {
+    const oq = job.steps.find((x) => /Open Questions/.test(x.name ?? ''));
+    assert.match(oq.run, /gh api --paginate "repos\/\$REPO\/pulls\/\$PR_NUMBER\/reviews"/);
+    assert.match(oq.run, /--approving-logins-file/);
+    assert.match(oq.run, /--pr-author/);
+    assert.ok(!/pr-body|PR_BODY/.test(JSON.stringify(oq)));
+    assert.equal(job.permissions['pull-requests'], 'read');
   });
   it('passes untrusted PR text through env, never inline in the script', () => {
     const run = job.steps.map((s) => s.run ?? '').join('\n');

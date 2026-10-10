@@ -42,6 +42,7 @@ import {
   openQuestionsLines,
   parseApproverIdentities,
   checkOqResolutionMarkers,
+  parseNameStatusZ,
 } from './check-rfc-docs.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -1510,23 +1511,54 @@ describe('AISDLC-764: OQ-resolution marker scan', () => {
       assert.match(r.failures[0], /Open Questions resolution marker/);
     });
 
-    it('passes with an allowlisted approver marker, fails with a stranger or a self-added approver', () => {
+    it('passes only with an approving login on the allowlist who is not the PR author', () => {
       const d = mkRepo();
-      const ok = checkOqResolutionMarkers({
-        repoRoot: d,
-        baseRef: 'main',
-        headRef: 'feat',
-        prBody: '<!-- ai-sdlc:oq-resolution-approved-by:opr reason:walkthrough -->',
-      });
+      const scan = (extra) =>
+        checkOqResolutionMarkers({ repoRoot: d, baseRef: 'main', headRef: 'feat', ...extra });
+      const ok = scan({ approvingLogins: ['opr'], prAuthor: 'dev' });
       assert.deepEqual(ok.failures, []);
       assert.equal(ok.approvedBy, 'opr');
-      const bad = checkOqResolutionMarkers({
+      // stranger, self-approval (case-insensitive), and no approvals all fail
+      assert.equal(scan({ approvingLogins: ['evil'], prAuthor: 'dev' }).failures.length, 1);
+      assert.equal(scan({ approvingLogins: ['opr'], prAuthor: 'OPR' }).failures.length, 1);
+      assert.equal(scan({ prAuthor: 'dev' }).failures.length, 1);
+    });
+
+    it('ignores a forged PR-body approval marker', () => {
+      const d = mkRepo();
+      const r = checkOqResolutionMarkers({
         repoRoot: d,
         baseRef: 'main',
         headRef: 'feat',
-        prBody: '<!-- ai-sdlc:oq-resolution-approved-by:evil reason:x -->',
+        prBody: '<!-- ai-sdlc:oq-resolution-approved-by:opr reason:x -->',
       });
+      assert.equal(r.failures.length, 1);
+    });
+
+    it('follows renames: a pure rename adds no marker, a rename that adds one fails', () => {
+      const d = mkRepo();
+      git(d, 'checkout', '-q', 'main');
+      git(d, 'checkout', '-qb', 'ren');
+      git(d, 'mv', 'spec/rfcs/RFC-9999-x.md', 'spec/rfcs/RFC-9999-y.md');
+      git(d, 'commit', '-qm', 'rename');
+      const pure = checkOqResolutionMarkers({ repoRoot: d, baseRef: 'main', headRef: 'ren' });
+      assert.deepEqual(pure.failures, []);
+      writeFileSync(
+        join(d, 'spec', 'rfcs', 'RFC-9999-y.md'),
+        rfc('- OQ-1 a\n  **Resolution:** pick A'),
+      );
+      git(d, 'commit', '-qam', 'resolve after rename');
+      const bad = checkOqResolutionMarkers({ repoRoot: d, baseRef: 'main', headRef: 'ren' });
       assert.equal(bad.failures.length, 1);
+      assert.match(bad.failures[0], /RFC-9999-y\.md/);
+    });
+
+    it('parseNameStatusZ reads plain and rename entries', () => {
+      assert.deepEqual(parseNameStatusZ('A\0a.md\0R090\0o.md\0n.md\0'), [
+        { status: 'A', path: 'a.md' },
+        { status: 'R', oldPath: 'o.md', path: 'n.md' },
+      ]);
+      assert.deepEqual(parseNameStatusZ(''), []);
     });
 
     it('passes when no marker is added and fails closed on a bad ref or missing base', () => {
@@ -1542,17 +1574,34 @@ describe('AISDLC-764: OQ-resolution marker scan', () => {
       assert.match(checkOqResolutionMarkers({ repoRoot: d }).failures[0], /no base ref/);
     });
 
-    it('CLI --oq-scan exits 1 on a violation and 0 when clean', () => {
-      const d = mkRepo();
+    it('CLI --oq-scan fails closed on a missing base or an unreadable logins file', () => {
       const script = join(__dirname, 'check-rfc-docs.mjs');
-      // The CLI scans the real repo root, so drive it with a fake base == head.
       const clean = spawnSync('node', [script, '--oq-scan', '--base-ref', 'HEAD'], {
         encoding: 'utf-8',
       });
       assert.equal(clean.status, 0, clean.stderr);
       const noBase = spawnSync('node', [script, '--oq-scan'], { encoding: 'utf-8' });
       assert.equal(noBase.status, 1);
-      assert.ok(d);
+      const d = mkdtempSync(join(tmpdir(), 'oq-logins-'));
+      dirs.push(d);
+      writeFileSync(join(d, 'bad.json'), '{"not":"an array"}');
+      for (const f of [join(d, 'missing.json'), join(d, 'bad.json')]) {
+        const r = spawnSync(
+          'node',
+          [script, '--oq-scan', '--base-ref', 'HEAD', '--approving-logins-file', f],
+          { encoding: 'utf-8' },
+        );
+        assert.equal(r.status, 1, f);
+        assert.match(r.stderr, /cannot read approving logins/);
+      }
+      const ok = join(d, 'ok.json');
+      writeFileSync(ok, '["opr"]');
+      const good = spawnSync(
+        'node',
+        [script, '--oq-scan', '--base-ref', 'HEAD', '--approving-logins-file', ok],
+        { encoding: 'utf-8' },
+      );
+      assert.equal(good.status, 0, good.stderr);
     });
   });
 });

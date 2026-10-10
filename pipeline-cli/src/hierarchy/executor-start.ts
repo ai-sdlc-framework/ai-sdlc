@@ -8,7 +8,7 @@
  *  2. Check the working directory is the repository of the roster's project.
  *  3. Check the instructing sender is the roster's dispatch session (`check-sender`,
  *     AISDLC-764): it always runs, so it cannot be skipped. The sender pid or ref the
- *     harness reports is passed in; without either the check accepts and warns.
+ *     harness reports is passed in; without either the check accepts and logs a loud UNCHECKED START warning.
  *  4. Claim the next eligible task under that name, blocking up to `waitSec`
  *     seconds (`cli-dispatch claim --wait`).
  *  5. Write `inflight/<task>.state.json` naming the worker, before returning and so
@@ -112,7 +112,13 @@ export async function executorStart(
   deps.log?.(
     `[executor] I am '${self.name}' (project '${project.project}'); dispatch session is '${dispatch || 'none'}'`,
   );
-  if (sender.warning !== undefined) deps.log?.(`[executor] check-sender: ${sender.warning}`);
+  if (sender.warning !== undefined) {
+    // Accepting is deliberate: a start has no inbound message to identify. It is
+    // still a gap (anyone able to start this session is trusted), so say so loudly.
+    deps.log?.(
+      `[executor] WARNING: UNCHECKED START: no --sender-pid or --sender-ref was given, so who instructed this start was NOT verified against the dispatch session. Pass the pid or ref the harness reports. (${sender.warning})`,
+    );
+  }
   const result = await (deps.claim ?? claimWithWait)(opts.boardDir, 'in-session-agent', {
     waitSec: opts.waitSec ?? DEFAULT_EXECUTOR_WAIT_SEC,
     workerId: self.name,
