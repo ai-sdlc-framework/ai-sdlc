@@ -117,6 +117,12 @@ import {
   computeMerkleRoot as coreComputeMerkleRoot,
   verifyInclusion as coreVerifyInclusion,
 } from './merkle-core.mjs';
+import {
+  checkReviewerCoverage,
+  classifyReviewScope,
+  parseSecurityReviewAlways,
+  reviewerSetKindFor,
+} from './review-scope-core.mjs';
 
 /**
  * Path-exclusion args for `git diff` / `git diff-tree` that omit the
@@ -1111,6 +1117,95 @@ export function v6ResolveLeavesForEnvelope(repoRoot, envelope, patchIdHint) {
   }
 
   return { leaves: [], source: 'none (no per-patch-id file, no shared file, no scan match)' };
+}
+
+/**
+ * AISDLC-723 (DEC-0055): the reviewer set a v6 attestation must carry.
+ *
+ * Before this check the v6 path only required a non-empty, correctly signed
+ * leaf set: no reviewer role was required at all (the three-role completeness
+ * check lives in the legacy v3-v5 `verifyAttestation`). This derives the diff's
+ * classification HERE, from `git diff <merge-base>..<head>`, and requires the
+ * reviewer names the (Merkle-bound) leaves carry to satisfy it. The envelope's
+ * own `reviewScope` field is informational and never trusted.
+ *
+ * Fails closed: when the diff cannot be listed the classification is `full`.
+ * The keep-security-everywhere config is read from `baseSha` via `git show`,
+ * never from the PR worktree.
+ *
+ * @param {object} result - a `status: 'valid'` verifyV6Envelope result
+ * @param {{ envelope: object, repoRoot: string, baseSha: string, headSha: string, mergeBase: string|null }} ctx
+ * @returns {object} `result` plus `reviewScope`, or an `invalid` result
+ */
+export function enforceReviewScope(result, { envelope, repoRoot, baseSha, headSha, mergeBase }) {
+  let paths = null;
+  if (mergeBase && /^[0-9a-f]{40}$/i.test(headSha)) {
+    try {
+      const out = execFileSync(
+        'git',
+        [
+          '-c',
+          'core.quotePath=false',
+          'diff',
+          '--name-only',
+          '-z',
+          '--no-renames',
+          '--no-ext-diff',
+          `${mergeBase}..${headSha}`,
+          '--',
+          ...ATTESTATION_PATH_EXCLUSIONS,
+        ],
+        {
+          cwd: repoRoot,
+          encoding: 'utf-8',
+          maxBuffer: 128 * 1024 * 1024,
+          stdio: ['ignore', 'pipe', 'ignore'],
+        },
+      );
+      paths = out.split('\0').filter(Boolean);
+    } catch {
+      paths = null;
+    }
+  }
+  const { classification, reason } = classifyReviewScope(paths ?? []);
+  let securityAlways = false;
+  if (/^[0-9a-f]{40}$/i.test(baseSha ?? '')) {
+    try {
+      securityAlways = parseSecurityReviewAlways(
+        execFileSync('git', ['show', `${baseSha}:.ai-sdlc/review-config.yaml`], {
+          cwd: repoRoot,
+          encoding: 'utf-8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        }),
+      );
+    } catch {
+      securityAlways = false;
+    }
+  }
+  const names = (envelope.transcriptLeaves ?? []).map((l) => l?.reviewerName);
+  const coverage = checkReviewerCoverage(
+    names.filter((n) => typeof n === 'string'),
+    classification,
+    { securityAlways },
+  );
+  if (!coverage.ok) {
+    return {
+      status: 'invalid',
+      reason:
+        `v6: reviewer set incomplete for a '${classification}' diff` +
+        `${securityAlways ? ' (securityReview: always)' : ''}: missing ${coverage.missing.join(', ')}` +
+        ` (${safeForReason(reason, 80)})`,
+    };
+  }
+  return {
+    ...result,
+    reviewScope: {
+      classification,
+      securityAlways,
+      requiredSet: reviewerSetKindFor(classification, { securityAlways }),
+      appliedReviewers: names.filter((n) => typeof n === 'string'),
+    },
+  };
 }
 
 /**
@@ -2856,7 +2951,7 @@ export function runVerifier({
       }
     }
 
-    return verifyV6Envelope({
+    const v6Result = verifyV6Envelope({
       envelope: chosen.envelope,
       envelopeFileName: isPatchIdNamed
         ? `${envelopeSubjectSha.toLowerCase()}.v6.dsse.json`
@@ -2867,6 +2962,16 @@ export function runVerifier({
       patchIdHint,
       changedPaths: envelopeChangedPaths,
     });
+    // AISDLC-723: required-reviewer-set check, re-derived from the PR diff.
+    return v6Result.status === 'valid'
+      ? enforceReviewScope(v6Result, {
+          envelope: chosen.envelope,
+          repoRoot,
+          baseSha,
+          headSha: lowerHead,
+          mergeBase: patchIdMergeBase,
+        })
+      : v6Result;
   }
 
   // --- Recompute current PR state (legacy v3/v5 path) ------------------

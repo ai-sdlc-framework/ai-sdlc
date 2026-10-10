@@ -29,7 +29,7 @@ import { join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import type { BuildReviewPromptsResult, ReviewPrompt, ReviewerType, TaskSpec } from '../types.js';
 import { resolveTargetBranch } from './02-compute-branch.js';
-import { selectReviewerSet } from './reviewer-set.js';
+import { reduceForReviewScope, selectReviewerSet } from './reviewer-set.js';
 import { diffHasBinaryHunk } from './review-judgment-support.js';
 import { routeReviewers } from './review-routing.js';
 import { buildJudgmentContext } from '../judgment/context.js';
@@ -186,7 +186,7 @@ export async function buildReviewPrompts(
           ...(opts.sourceKind ? { sourceKind: opts.sourceKind } : {}),
           taskId: opts.taskId,
         }));
-  const selected =
+  const configured =
     opts.reviewers ??
     (
       await selectReviewerSet({
@@ -201,6 +201,16 @@ export async function buildReviewPrompts(
         ...(judgment ? { judgment } : {}),
       })
     ).reviewers;
+  // AISDLC-723: test-only / docs-adjacent diffs run the correctness reviewer alone. An
+  // explicit `opts.reviewers` override is the caller's decision and is left untouched.
+  const selected = opts.reviewers
+    ? configured
+    : reduceForReviewScope({
+        reviewers: configured,
+        changedFiles,
+        diffUnavailable,
+        workDir: opts.workDir,
+      }).reviewers;
   // review.routing runs after set selection and can only add reviewers.
   const reviewers = (
     await routeReviewers({

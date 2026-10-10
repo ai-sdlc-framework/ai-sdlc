@@ -51,6 +51,12 @@ import {
   type JudgmentMode,
 } from '@ai-sdlc/reference';
 import type { ReviewerType } from '../types.js';
+import {
+  classifyReviewScope,
+  parseSecurityReviewAlways,
+  reviewerSetKindFor,
+  type ReviewScopeClassification,
+} from '../../attestation-core/review-scope-core.mjs';
 import { classifyPathRisk } from '../classifier/classifier.js';
 import {
   diffHasBinaryHunk,
@@ -345,4 +351,73 @@ export async function selectReviewerSet(
   const sel = base('config', why);
   await log(sel, inputs, effective);
   return sel;
+}
+
+// ── Diff-scope reduction (AISDLC-723, DEC-0055) ──────────────────────────────────────
+
+export interface ReviewScopeReduction {
+  reviewers: ReviewerType[];
+  classification: ReviewScopeClassification;
+  /** True when `securityReview: always` on the base branch kept the full set. */
+  securityAlways: boolean;
+  /** Why the classification came out as it did (path or rule). */
+  reason: string;
+}
+
+export interface ReduceForReviewScopeOpts {
+  /** The set chosen by `selectReviewerSet` / the resolver. */
+  reviewers: readonly ReviewerType[];
+  changedFiles: readonly string[];
+  /** True when the diff or file list could not be read completely; never reduces. */
+  diffUnavailable?: boolean;
+  workDir?: string;
+  baseRef?: string;
+  /** Test injection; same contract as {@link ResolveReviewerSetOpts.readBaseConfig}. */
+  readBaseConfig?: (workDir: string, baseRef: string) => string | null;
+}
+
+/** The only reviewer a test-only or docs-adjacent diff runs. */
+export const CORRECTNESS_ONLY_REVIEWER_SET: readonly ReviewerType[] = [
+  'correctness-reviewer',
+] as const;
+
+/**
+ * Narrow the reviewer set to the correctness reviewer alone when the diff is
+ * test-only or docs-adjacent (path-based), no trust-chain / workflow / hook /
+ * security-test path is present, and the base branch does not set
+ * `securityReview: always`. Everything else returns `reviewers` unchanged.
+ *
+ * The classifier is the shared `review-scope-core.mjs`, which the CI verifier
+ * re-runs against the diff: a set this function narrows is only accepted by the
+ * verifier if the re-derived classification agrees. The config is read from the
+ * base ref, never the PR worktree (see the module-level trust boundary).
+ */
+export function reduceForReviewScope(opts: ReduceForReviewScopeOpts): ReviewScopeReduction {
+  const unchanged = (
+    classification: ReviewScopeClassification,
+    reason: string,
+    securityAlways = false,
+  ): ReviewScopeReduction => ({
+    reviewers: [...opts.reviewers],
+    classification,
+    securityAlways,
+    reason,
+  });
+  if (opts.diffUnavailable === true) return unchanged('full', 'diff unavailable');
+  const scope = classifyReviewScope(opts.changedFiles);
+  const securityAlways = parseSecurityReviewAlways(
+    (opts.readBaseConfig ?? readReviewConfigFromBaseRef)(
+      opts.workDir ?? process.cwd(),
+      opts.baseRef ?? 'origin/main',
+    ),
+  );
+  if (reviewerSetKindFor(scope.classification, { securityAlways }) === 'full') {
+    return unchanged(scope.classification, scope.reason, securityAlways);
+  }
+  return {
+    reviewers: [...CORRECTNESS_ONLY_REVIEWER_SET],
+    classification: scope.classification,
+    securityAlways,
+    reason: scope.reason,
+  };
 }
