@@ -41,6 +41,7 @@ import {
   buildProxyHostArg,
   buildReviewerProxyEnv,
   sanitizeErrorMessage,
+  safeErrorCode,
   defaultUpstreamConnector,
   DEFAULT_PROXY_LIMITS,
   REDACTED_TOKEN,
@@ -856,11 +857,52 @@ describe('SI-errorSanitization: error response bodies are credential-free', () =
     expect(res.statusCode).toBe(502);
     // The credential must NOT appear in the error response sent to the sandbox caller
     expect(res.body).not.toContain(FAKE_CREDENTIAL);
-    expect(res.body).toContain(REDACTED_TOKEN);
+    // AISDLC-744: the upstream error message must never reach the caller
+    expect(res.body).not.toContain('key=');
+    expect(JSON.parse(res.body).detail).toBe('upstream_error');
     // Audit entries should also be clean
     for (const entry of auditEntries) {
       expect(assertEntryClean(entry, FAKE_CREDENTIAL)).toBe(true);
     }
+  });
+
+  it('AISDLC-744: 502 detail is code-based and never contains the upstream message', async () => {
+    class CodeProxy extends InferenceProxy {
+      constructor(cfg: InferenceProxyConfig) {
+        super(cfg);
+        this._connectToUpstream = async () => {
+          throw Object.assign(new Error('secret upstream internals at /srv/app.js:12'), {
+            code: 'ECONNREFUSED',
+          });
+        };
+        const mockServer = new MockServer();
+        this._createServer = (handler) => {
+          mockServer.setHandler(handler);
+          return mockServer as unknown as Server;
+        };
+      }
+    }
+    const proxy = new CodeProxy({
+      prNumber: 7,
+      credential: FAKE_CREDENTIAL,
+      auditLog: () => {},
+      useHttp: true,
+    });
+    const { sessionToken } = await proxy.start();
+    const res = await simulateRequest(proxy, { sessionToken, body: makeReviewBody() });
+    await proxy.stop();
+    expect(res.statusCode).toBe(502);
+    expect(JSON.parse(res.body).detail).toBe('ECONNREFUSED');
+    expect(res.body).not.toContain('secret upstream internals');
+    expect(res.body).not.toContain('/srv/app.js');
+  });
+
+  it('AISDLC-744: safeErrorCode rejects non-allowlisted codes', () => {
+    expect(safeErrorCode({ code: 'ECONNRESET' })).toBe('ECONNRESET');
+    expect(safeErrorCode({ code: 'has spaces and message text' })).toBe('upstream_error');
+    expect(safeErrorCode({ code: 'lowercase' })).toBe('upstream_error');
+    expect(safeErrorCode(new Error('boom'))).toBe('upstream_error');
+    expect(safeErrorCode(null, 'x')).toBe('x');
   });
 
   it('500 internal proxy error response body does not contain the credential', async () => {
