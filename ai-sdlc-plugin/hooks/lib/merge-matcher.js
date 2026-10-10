@@ -324,6 +324,64 @@ function commandIsOpaque(command, segs) {
   return segs.some((s) => isOpaqueSegment(s.text));
 }
 
+/** Removes balanced `$(...)` / `<(...)` / `>(...)` substitutions (nested) from text. */
+function stripParenSubstitutions(text) {
+  let out = text;
+  for (let i = 0; i < 64; i++) {
+    const next = out.replace(/[$<>]\([^()]*\)/g, '');
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
+/** Brace-expansion variants of a text (`{a,b}`, single-char `{x..y}`), capped. */
+function expandBraces(text, budget = { n: 64 }) {
+  const m = /\{([^{}]*)\}/.exec(text);
+  if (!m || budget.n <= 0) return [text];
+  const body = m[1];
+  let alts = null;
+  const seq = /^(.)\.\.(.)$/.exec(body);
+  if (seq) {
+    const a = seq[1].charCodeAt(0);
+    const b = seq[2].charCodeAt(0);
+    alts = [];
+    for (let c = Math.min(a, b); c <= Math.max(a, b) && alts.length < 32; c++)
+      alts.push(String.fromCharCode(c));
+  } else if (body.includes(',')) alts = body.split(',');
+  const pre = text.slice(0, m.index);
+  const post = text.slice(m.index + m[0].length);
+  if (!alts) return expandBraces(pre + '\u0001' + body + '\u0002' + post, budget).map(unmark);
+  const out = [];
+  for (const a of alts) {
+    budget.n--;
+    out.push(...expandBraces(pre + a + post, budget));
+    if (budget.n <= 0) break;
+  }
+  return out;
+}
+const unmark = (t) => t.replace(/\u0001/g, '{').replace(/\u0002/g, '}');
+
+/**
+ * Normalised copies of a command for the opaque-mention test (AISDLC-605): command,
+ * process and backtick substitutions, `${...}`, `$VAR`, quotes, backslashes and
+ * backslash-newlines are deleted, and brace constructs are expanded, so spliced
+ * spellings (`merg$(:)e`, `mer{g..g}e`) collapse to the word bash would run. Several
+ * variants are returned; a mention in any of them counts.
+ */
+function normalizeExpansions(text) {
+  let t = text.replace(/\\\n/g, '');
+  t = stripParenSubstitutions(t);
+  t = t.replace(/`[^`]*`/g, '').replace(/`/g, '');
+  t = t.replace(/\$\{[^}]*\}/g, '').replace(/\$[A-Za-z_][A-Za-z0-9_]*|\$[0-9?!#@*$-]/g, '');
+  t = t.replace(/\$(?=['"])/g, '').replace(/['"\\]/g, '');
+  const variants = expandBraces(t).map(unmark);
+  // Fallback: drop every brace-ish punctuation character outright.
+  variants.push(t.replace(/[{},]|\.\./g, ''));
+  variants.push(t);
+  return variants;
+}
+
 /** Loose mention of the raw merge command: the pr and merge words appear anywhere (gh optional). */
 function mentionsGhPrMerge(text) {
   // `pr` is case-sensitive (gh subcommands are), so `$PR/merge` in an API path does not count.
@@ -345,8 +403,27 @@ function mentionsApiMerge(text) {
  */
 function commandHasUninertMatch(command, matches, mentions) {
   const segs = splitShellSegmentsEx(command);
-  if (mentions && commandIsOpaque(command, segs) && mentions(command.replace(/\\\n/g, '')))
-    return true;
+  if (mentions && commandIsOpaque(command, segs)) {
+    const raw = command.replace(/\\\n/g, '');
+    if (mentions(raw) || normalizeExpansions(command).some((v) => mentions(v))) return true;
+    for (const s of segs) {
+      if (mentions !== mentionsGhPrMerge || !isOpaqueSegment(s.text)) continue;
+      const first = effectiveTokens(s.text)
+        .slice(0, 3)
+        .map((t) =>
+          t
+            .replace(/^[({!]+/, '')
+            .split('/')
+            .pop()
+            .toLowerCase(),
+        );
+      if (
+        first.some((t) => t === 'gh' || t === 'gh.exe') &&
+        normalizeExpansions(s.text).some((v) => /merge/i.test(v) && !mentionsApiMerge(v))
+      )
+        return true;
+    }
+  }
   for (let i = 0; i < segs.length; i++) {
     const clean = stripComment(segs[i].text);
     if (!matches(clean) && !matches(clean.replace(/['"]/g, ''))) continue;
@@ -440,6 +517,7 @@ module.exports = {
   isOpaqueSegment,
   commandIsOpaque,
   mentionsApiMerge,
+  normalizeExpansions,
   commandHasUninertMatch,
   commandRunsGhPrMerge,
 };

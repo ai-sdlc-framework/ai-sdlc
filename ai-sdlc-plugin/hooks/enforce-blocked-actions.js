@@ -97,6 +97,7 @@ const {
   commandRunsGhPrMerge,
   commandHasUninertMatch,
   mentionsApiMerge,
+  normalizeExpansions,
   stripCommentAndQuotes: libStripCommentAndQuotes,
 } = require('./lib/merge-matcher');
 const {
@@ -655,8 +656,10 @@ function enforceApiMergeGovernance(command) {
   const mergePath = /(?:^|[/\s])pulls\/[^\s/]*\/merge(?![A-Za-z0-9_.-])/i;
   const mergeMutation = /\b(?:mergePullRequest|enablePullRequestAutoMerge)\b/i;
   const matches = (segment) => {
-    const text = normalizeForApiMerge(segment);
-    return mergePath.test(text) || mergeMutation.test(text);
+    return [segment, ...normalizeExpansions(segment)].some((v) => {
+      const text = normalizeForApiMerge(v);
+      return mergePath.test(text) || mergeMutation.test(text);
+    });
   };
   if (commandHasUninertMatch(command, matches, mentionsApiMerge)) {
     deny(

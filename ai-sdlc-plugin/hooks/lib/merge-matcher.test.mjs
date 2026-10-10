@@ -282,6 +282,43 @@ describe('round-5 structural rule: opaque segments mentioning the merge phrase a
       assert.equal(m.isOpaqueSegment(c), false, c);
     }
   });
+  it('refuses expansions spliced inside the merge words (round 6)', () => {
+    for (const c of [
+      `${gh} pr ${mg.slice(0, 4)}$(:)${mg.slice(4)} 42`,
+      `${gh} pr ${mg.slice(0, 4)}\`\`${mg.slice(4)} 42`,
+      `${gh} p$(:)r ${mg} 42`,
+      `${gh} pr mer{g..g}e 42`,
+      `${gh} p{r..r} ${mg} 42`,
+      `${gh} pr ${mg.slice(0, 4)}\${u}${mg.slice(4)} 42`,
+      `g[h] pr ${mg} 42`,
+      `${gh}\${IFS}pr\${IFS}${mg} 42`,
+      `X=1 ${gh} pr ${mg} 5`,
+      `${gh} pr mer\\\nge 42`,
+    ]) {
+      assert.equal(m.commandRunsGhPrMerge(c), true, c);
+    }
+  });
+  it('refuses spliced API merge paths through the API mention test', () => {
+    const ok = () => true;
+    for (const c of [
+      `${gh} api -X PUT repos/o/r/pulls/5/mer$(:)ge`,
+      `${gh} api -X PUT repos/o/r/pulls/5/mer{g..g}e`,
+    ]) {
+      assert.equal(
+        m.commandHasUninertMatch(c, () => false, m.mentionsApiMerge),
+        true,
+        c,
+      );
+    }
+    assert.equal(
+      m.commandHasUninertMatch(`${gh} api repos/o/r/pulls/5`, ok, m.mentionsApiMerge),
+      true,
+    );
+  });
+  it('normalizeExpansions collapses spliced spellings', () => {
+    assert.ok(m.normalizeExpansions('mer{g..g}e').includes(mg));
+    assert.ok(m.normalizeExpansions('merg$(:)e').includes(mg));
+  });
   it('treats an assignment prefix on inert prose that mentions the phrase as opaque and refuses it', () => {
     assert.equal(m.commandRunsGhPrMerge(`FOO=1 echo "${gh} pr ${mg}"`), true);
   });

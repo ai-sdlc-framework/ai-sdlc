@@ -2320,6 +2320,25 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 opaque-segment
     }
   });
 
+  it('refuses expansions spliced inside the merge words (round 6)', () => {
+    for (const c of [
+      `${gh} pr ${mg.slice(0, 4)}$(:)${mg.slice(4)} 42`,
+      `${gh} pr ${mg.slice(0, 4)}\`\`${mg.slice(4)} 42`,
+      `${gh} p$(:)r ${mg} 42`,
+      `${gh} pr mer{g..g}e 42`,
+      `${gh} p{r..r} ${mg} 42`,
+      `${gh} pr ${mg.slice(0, 4)}\${u}${mg.slice(4)} 42`,
+      `${gh} api -X PUT repos/o/r/pulls/5/mer$(:)ge`,
+      `${gh} api -X PUT repos/o/r/pulls/5/mer{g..g}e`,
+      `g[h] pr ${mg} 42`,
+      `${gh}\${IFS}pr\${IFS}${mg} 42`,
+      `X=1 ${gh} pr ${mg} 5`,
+      `${gh} pr mer\\\nge 42`,
+    ]) {
+      assert.ok(isDenied(run(c)), c);
+    }
+  });
+
   it('still allows prose, read-only gh', () => {
     for (const c of [
       `echo "${gh} pr ${mg} is forbidden"`,
