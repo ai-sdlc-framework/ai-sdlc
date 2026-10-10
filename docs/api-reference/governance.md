@@ -572,7 +572,7 @@ A PreToolUse hook reads `blockedActions` from `agent-role.yaml` and blocks
 matching Bash commands before they execute:
 
 ```bash
-# .claude/hooks/enforce-blocked-actions.sh
+# ai-sdlc-plugin/hooks/enforce-blocked-actions.sh
 #!/bin/bash
 node "$(dirname "$0")/enforce-blocked-actions.js"
 ```

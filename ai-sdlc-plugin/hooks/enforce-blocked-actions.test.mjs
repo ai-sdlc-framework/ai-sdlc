@@ -1415,7 +1415,13 @@ blockedActions: []
     const result = spawnSync('node', [hookScript], {
       input: JSON.stringify(payload),
       encoding: 'utf-8',
-      env: { ...process.env, GITHUB_ACTIONS: '', CLAUDE_PROJECT_DIR: staleParent, ...env },
+      env: {
+        ...process.env,
+        GITHUB_ACTIONS: '',
+        CLAUDE_PROJECT_DIR: staleParent,
+        AI_SDLC_STALE_BASE_TTL_SECONDS: '0',
+        ...env,
+      },
       timeout: 5000,
     });
     return {
@@ -1443,6 +1449,36 @@ blockedActions: []
       cwd: staleWorktree,
     });
     assert.doesNotMatch(result.stderr, /behind origin\/main/i, 'no warning once rebased');
+  });
+
+  it('AISDLC-569: throttles the git check via a cache file (no subprocess within the TTL)', () => {
+    const cacheDir = join(tmpdir(), `enforce-blocked-stale-cache-${Date.now()}`);
+    const env = { AI_SDLC_STALE_BASE_TTL_SECONDS: '600', AI_SDLC_STALE_BASE_CACHE_DIR: cacheDir };
+    const payload = {
+      tool_name: 'Write',
+      tool_input: { file_path: join(staleWorktree, 'throttle.ts') },
+      cwd: staleWorktree,
+    };
+    try {
+      // Make the worktree stale again: origin advances, worktree fetches.
+      writeFileSync(join(staleOrigin, 'file.txt'), 'v3\n');
+      execSync('git commit -qam third', { cwd: staleOrigin });
+      execSync('git fetch -q origin main', { cwd: staleWorktree });
+      const first = runHookCaptureStderr(payload, env);
+      assert.match(first.stderr, /behind origin\/main/i, 'first call performs the live check');
+      // Rebase: a live check would now report 0 behind; the cache must still answer.
+      execSync('git rebase -q origin/main', { cwd: staleWorktree });
+      const second = runHookCaptureStderr(payload, env);
+      assert.match(second.stderr, /behind origin\/main/i, 'second call served from cache');
+      // Expired/disabled TTL re-checks live.
+      const third = runHookCaptureStderr(payload, {
+        ...env,
+        AI_SDLC_STALE_BASE_TTL_SECONDS: '0',
+      });
+      assert.doesNotMatch(third.stderr, /behind origin\/main/i, 'ttl 0 bypasses the cache');
+    } finally {
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -2815,4 +2851,70 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 split phrases 
       assert.ok(!isDenied(run(c)), c);
     });
   }
+});
+
+// ── AISDLC-569: realpath containment ─────────────────────────────────────
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-569 realpath containment)', () => {
+  let proj;
+  let outside;
+  let wt;
+  let realProj;
+
+  before(() => {
+    const base = join(tmpdir(), `enforce-blocked-realpath-${Date.now()}`);
+    proj = join(base, 'proj');
+    outside = join(base, 'outside');
+    wt = join(proj, '.worktrees', 'aisdlc-569');
+    mkdirSync(join(proj, '.ai-sdlc'), { recursive: true });
+    mkdirSync(join(wt, 'src'), { recursive: true });
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(
+      join(proj, '.ai-sdlc', 'agent-role.yaml'),
+      `role: coding-agent
+goal: Test agent
+blockedPaths:
+  - 'secret/**'
+blockedActions: []
+`,
+    );
+    writeFileSync(join(wt, '.active-task'), 'AISDLC-569\n');
+    symlinkSync(outside, join(wt, 'src', 'escape'));
+    mkdirSync(join(wt, 'secret'), { recursive: true });
+    symlinkSync(join(wt, 'secret'), join(wt, 'src', 'tosecret'));
+    // A symlinked project alias must still work as home.
+    realProj = join(base, 'alias');
+    symlinkSync(proj, realProj);
+  });
+
+  after(() => {
+    rmSync(join(proj, '..'), { recursive: true, force: true });
+  });
+
+  function run(file_path, projectDir = proj, cwd = wt) {
+    const result = spawnSync('node', [hookScript], {
+      input: JSON.stringify({ tool_name: 'Write', tool_input: { file_path }, cwd }),
+      encoding: 'utf-8',
+      env: { ...process.env, GITHUB_ACTIONS: '', CLAUDE_PROJECT_DIR: projectDir },
+      timeout: 5000,
+    });
+    return (result.stdout || '').trim();
+  }
+
+  it('refuses a write through a symlink inside the worktree that points outside', () => {
+    assert.match(run(join(wt, 'src', 'escape', 'x.ts')), /"deny"/);
+  });
+
+  it('refuses a write through a symlink that lands on a blockedPaths directory', () => {
+    assert.match(run(join(wt, 'src', 'tosecret', 'x.ts')), /"deny"/);
+  });
+
+  it('still allows ordinary writes inside the worktree', () => {
+    assert.equal(run(join(wt, 'src', 'ok.ts')), '');
+  });
+
+  it('still works when the project root is reached through a symlink', () => {
+    const aliasWt = join(realProj, '.worktrees', 'aisdlc-569');
+    assert.equal(run(join(aliasWt, 'src', 'ok.ts'), realProj, aliasWt), '');
+  });
 });
