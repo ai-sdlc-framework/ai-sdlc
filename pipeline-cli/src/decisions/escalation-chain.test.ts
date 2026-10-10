@@ -4,6 +4,8 @@ import {
   announcePromotion,
   answerRefusal,
   callerOf,
+  decisionMessage,
+  lookupCaller,
   emitRouted,
   findDueDecisions,
   nextTier,
@@ -109,6 +111,12 @@ describe('answerRefusal', () => {
     expect(answerRefusal('operator', planner)).toMatch(/raised to the operator/);
   });
 
+  it('fails closed when identity resolution errored', () => {
+    for (const t of ['operational', 'design', 'operator'] as const) {
+      expect(answerRefusal(t, null, 'roster unreadable')).toMatch(/could not identify/);
+    }
+  });
+
   it('a caller outside the roster is the operator and may answer at any tier', () => {
     for (const t of ['operational', 'design', 'operator'] as const) {
       expect(answerRefusal(t, null)).toBeUndefined();
@@ -150,17 +158,17 @@ describe('findDueDecisions', () => {
 describe('notifications are best-effort', () => {
   it('sends one message to the running session that owns the tier', () => {
     const d = deps();
-    expect(notifyTier(d, 'design', 'DEC-0042', 'Pick\nthe  retry policy')).toEqual({
+    expect(notifyTier(d, 'design', 'DEC-0042')).toEqual({
       sent: true,
       to: 'planner',
     });
     expect(d.sent).toEqual([
-      expect.stringMatching(/^planner: Decision DEC-0042 \(design\).*Pick the retry policy/),
+      'planner: Decision DEC-0042 (design) needs an answer. Read it with: cli-decisions show DEC-0042',
     ]);
   });
 
   it('reports instead of throwing when there is no session, the roster is unreadable or the send fails', () => {
-    expect(notifyTier(deps({ sessions: () => [] }), 'design', 'DEC-1', 's').sent).toBe(false);
+    expect(notifyTier(deps({ sessions: () => [] }), 'design', 'DEC-0001').sent).toBe(false);
     expect(
       notifyTier(
         deps({
@@ -169,8 +177,7 @@ describe('notifications are best-effort', () => {
           },
         }),
         'design',
-        'DEC-1',
-        's',
+        'DEC-0001',
       ).sent,
     ).toBe(false);
     const failing = deps({
@@ -178,7 +185,7 @@ describe('notifications are best-effort', () => {
         throw new Error('window closed');
       },
     });
-    expect(notifyTier(failing, 'operational', 'DEC-1', 's')).toEqual({
+    expect(notifyTier(failing, 'operational', 'DEC-0001')).toEqual({
       sent: false,
       to: 'operator-dispatch',
       reason: 'window closed',
@@ -187,18 +194,18 @@ describe('notifications are best-effort', () => {
 
   it('never messages a session that is not running, and has no session for the operator tier', () => {
     const d = deps({ sessions: () => [entry('planner', 'planner', 'starting')] });
-    expect(notifyTier(d, 'design', 'DEC-1', 's').sent).toBe(false);
-    expect(notifyTier(deps(), 'operator', 'DEC-1', 's')).toMatchObject({ sent: false });
+    expect(notifyTier(d, 'design', 'DEC-0001').sent).toBe(false);
+    expect(notifyTier(deps(), 'operator', 'DEC-0001')).toMatchObject({ sent: false });
   });
 
   it('notifies the raiser by roster name, and says why when it cannot', () => {
     const d = deps();
-    expect(notifyRaiser(d, 'executor-alpha', 'DEC-1', 'opt-a')).toEqual({
+    expect(notifyRaiser(d, 'executor-alpha', 'DEC-0001')).toEqual({
       sent: true,
       to: 'executor-alpha',
     });
-    expect(notifyRaiser(d, undefined, 'DEC-1', 'opt-a').sent).toBe(false);
-    expect(notifyRaiser(d, 'gone', 'DEC-1', 'opt-a').sent).toBe(false);
+    expect(notifyRaiser(d, undefined, 'DEC-0001').sent).toBe(false);
+    expect(notifyRaiser(d, 'gone', 'DEC-0001').sent).toBe(false);
   });
 
   it('a throwing event emitter never fails the command', () => {
@@ -212,6 +219,39 @@ describe('notifications are best-effort', () => {
     ).not.toThrow();
     const due = findDueDecisions([decision('operational', 60)], NOW)[0]!;
     expect(() => announcePromotion(d, due)).not.toThrow();
+  });
+
+  it('never types free text: a message carries only the id, tier and fixed command', () => {
+    const d = deps();
+    notifyRaiser(d, 'executor-alpha', 'DEC-0042');
+    expect(d.sent).toEqual([
+      'executor-alpha: Decision DEC-0042 was answered. Read it with: cli-decisions show DEC-0042',
+    ]);
+    for (const m of d.sent) expect(m).toMatch(/^[A-Za-z0-9 ():.-]+$/);
+  });
+
+  it('refuses to announce an id that is not DEC-NNNN', () => {
+    const d = deps();
+    const r = notifyTier(d, 'design', 'DEC-1; rm -rf /');
+    expect(r.sent).toBe(false);
+    expect(d.sent).toEqual([]);
+    expect(notifyRaiser(d, 'executor-alpha', 'x\ny').sent).toBe(false);
+    expect(() => decisionMessage('needs-answer', 'DEC-0001')).toThrow(/tier/);
+  });
+
+  it('lookupCaller separates no-roster-ancestor from a resolution error', () => {
+    expect(lookupCaller(deps())).toEqual({ caller: null });
+    const bad = deps({
+      identity: {
+        readSessions: () => {
+          throw new Error('roster unreadable');
+        },
+        parentPid: () => null,
+        comm: () => '',
+        startPid: 5,
+      },
+    });
+    expect(lookupCaller(bad)).toEqual({ caller: null, error: 'roster unreadable' });
   });
 
   it('callerOf is null when identity resolution throws', () => {

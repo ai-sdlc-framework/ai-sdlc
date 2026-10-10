@@ -31,6 +31,7 @@ node pipeline-cli/bin/cli-decisions.mjs show DEC-NNNN
 ```
 
 The `show` output includes:
+
 - `taskId` and `sourceWorktree` in the body (for resume context, AC-4)
 - The options the subagent surfaced
 - The `by` field identifies the dispatched session: `dispatched-session:AISDLC-NNN`
@@ -51,6 +52,7 @@ node pipeline-cli/bin/cli-decisions.mjs escalate \
 ```
 
 The `--exit-code 1` flag causes the command to:
+
 1. Write the Decision Catalog record.
 2. Print the `decisionId` on stdout (JSON format if `--format json`, text otherwise).
 3. Exit with code 1.
@@ -80,6 +82,7 @@ The decision record carries `taskId` and `sourceWorktree` in its body. After ans
 2. Re-dispatch the developer subagent for the same task, passing the chosen option in the task body or as an implementation note.
 
 Example:
+
 ```bash
 cd /path/to/.worktrees/aisdlc-nnn
 # The worktree is preserved on disk — re-dispatch:
@@ -87,6 +90,7 @@ cd /path/to/.worktrees/aisdlc-nnn
 ```
 
 Or, if the task was partially implemented before the escalation, the worktree may have commits already. Check:
+
 ```bash
 git log --oneline -5
 ```
@@ -98,11 +102,11 @@ If commits exist: the developer subagent's earlier work is preserved. Re-dispatc
 Under the session hierarchy a question goes to the lowest tier able to answer it, and an
 unanswered question never stops throughput: the executor parks the task and claims the next one.
 
-| Tier | Raised with | Answered by | Timebox (default) |
-|---|---|---|---|
-| `operational` (sequencing, environment, retries) | `escalate --route operational` | `operator-dispatch` or the planner | 30 minutes |
-| `design` (RFC interpretation, scope, conflicting instructions) | `escalate --route design` (also the default when `--route` is absent) | the planner | 4 hours |
-| `operator` | reached only by promotion, or by the planner through the decision rubric | the operator, from a terminal outside the session roster | none (terminal) |
+| Tier                                                           | Raised with                                                                   | Answered by                                              | Timebox (default) |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------- | ----------------- |
+| `operational` (sequencing, environment, retries)               | `escalate --route operational`                                                | `operator-dispatch` or the planner                       | 30 minutes        |
+| `design` (RFC interpretation, scope, conflicting instructions) | `escalate --route design` (also the stored route when only `--park` is given) | the planner                                              | 4 hours           |
+| `operator`                                                     | reached only by promotion, or by the planner through the decision rubric      | the operator, from a terminal outside the session roster | none (terminal)   |
 
 ```bash
 # Executor: raise it, park the task, then stop work on this task and claim the next one.
@@ -112,16 +116,21 @@ node pipeline-cli/bin/cli-decisions.mjs escalate --route operational --park \
   --option "opt-a:<first option>" --option "opt-b:<second option>"
 ```
 
-- **Recorded on the decision:** the route, the raising session's roster name and the task id. A
+- **Recorded on the decision** (only when `--route` or `--park` is given): the route, the raising session's roster name and the task id. A
   later move up the chain is a `routing-changed` event, so `show` carries every hop.
-- **`--park`** moves the task's inflight manifest to `blocked/` with `blockedBy` set to the decision
+- **`--park`** refuses to park a manifest whose recorded claiming worker is a different roster
+  session than the caller (when the manifest records no worker, the check is skipped). It moves the task's inflight manifest to `blocked/` with `blockedBy` set to the decision
   id, and the command exits non-zero (1 unless `--exit-code` asks for another non-zero value) so the
   executor knows to stop. If no inflight manifest exists the decision is still recorded, and a warning
   says nothing was parked.
 - **Answering is scoped to the tier.** `answer` looks up the calling session's roster role and
   refuses an out-of-scope answer with the reason and the next step (for example, an `operator-dispatch`
-  session answering a `design` decision is told to forward it to the planner). A caller that is not a
-  running roster session is the operator at a terminal and may answer at any tier. Answering a decision
+  session answering a `design` decision is told to forward it to the planner). A caller with no roster
+  session among its ancestors is the operator at a terminal and may answer at any tier; if the caller's
+  identity cannot be resolved at all (unreadable roster or process table), the answer is refused with
+  that reason rather than treated as the operator. This is a guard against a session answering the
+  wrong tier by mistake, not authentication. Only decisions raised with `--route` or `--park` are tier-scoped; a
+  plain `escalate` is answered and never promoted exactly as before. Answering a decision
   whose task is parked returns that manifest to `queue/` (only when it still waits on this decision) and
   messages the raising session.
 - **Timeboxes move a decision up, never down.** Set them in `.ai-sdlc/decisions-config.yaml`:
@@ -136,11 +145,14 @@ node pipeline-cli/bin/cli-decisions.mjs escalate --route operational --park \
   when its tier's timebox lapses moves up one tier (`operational` to `design`, `design` to `operator`);
   the operator tier is terminal. **Silence never resolves a decision, and nothing moves downward.**
   `promote-expired --dry-run` lists what would move without writing anything.
+
 - **Notifications.** On escalate (with `--route` or `--park`) and on promotion, the receiving tier's
-  session, found by role in the roster, gets one message with the decision id and summary; on answer
-  the raising session is told. Sending is best-effort: a missing or unreachable session is reported in
+  session, found by role in the roster, gets one message carrying only the decision id, the tier and the
+  fixed command `cli-decisions show <id>`; on answer the raising session gets the id and the same
+  command. The raiser's free-text summary is never typed into a session (it would be an
+  instruction-injection channel); the receiver reads it as data through `show`. Sending is best-effort: a missing or unreachable session is reported in
   the command output and never fails the command. A plain `escalate` without `--route` or `--park`
-  records the route and sends nothing.
+  records nothing about the chain and sends nothing.
 - **Events.** `DecisionRouted` (when raised) and `DecisionEscalated` (on each promotion) go to the
   orchestrator events stream with the decision id, `fromTier`, `toTier` and the task id.
 
@@ -176,12 +188,14 @@ the decision.
 All `cli-decisions escalate` calls are gated on `AI_SDLC_DECISION_CATALOG` (default-ON since AISDLC-392).
 
 When the flag is **off** (`AI_SDLC_DECISION_CATALOG=off`):
+
 - `cli-decisions escalate` prints a warning on stderr and does NOT write a catalog record.
 - It still exits with the `--exit-code` value so callers that rely on non-zero for clean-fail detection continue to work.
 
 To opt out: `export AI_SDLC_DECISION_CATALOG=off`.
 
 To confirm the current state:
+
 ```bash
 node pipeline-cli/bin/cli-decisions.mjs list --format json | jq '.enabled'
 ```
@@ -190,16 +204,16 @@ node pipeline-cli/bin/cli-decisions.mjs list --format json | jq '.enabled'
 
 Each escalation record carries:
 
-| Field | Value | Notes |
-|---|---|---|
-| `metadata.id` | `DEC-NNNN` | Stable decision id (never changes) |
-| `metadata.source` | `subagent-escalation` | Identifies dispatched-session origin |
-| `spec.summary` | One-line question | What the subagent needs to know |
-| `spec.body` | `taskId: AISDLC-NNN\nsourceWorktree: /path` | Resume context, prepended automatically |
-| `spec.options` | Array of `{id, description}` | Options the subagent surfaced |
-| `spec.contextRef` | Task id (e.g. `AISDLC-480`) | Backlink for audit trail |
-| `metadata.scope` | `task:AISDLC-NNN` (default) | Override via `--scope` |
-| `decisionLog[0].by` | `dispatched-session:AISDLC-NNN` | Machine-parseable session id |
+| Field               | Value                                       | Notes                                   |
+| ------------------- | ------------------------------------------- | --------------------------------------- |
+| `metadata.id`       | `DEC-NNNN`                                  | Stable decision id (never changes)      |
+| `metadata.source`   | `subagent-escalation`                       | Identifies dispatched-session origin    |
+| `spec.summary`      | One-line question                           | What the subagent needs to know         |
+| `spec.body`         | `taskId: AISDLC-NNN\nsourceWorktree: /path` | Resume context, prepended automatically |
+| `spec.options`      | Array of `{id, description}`                | Options the subagent surfaced           |
+| `spec.contextRef`   | Task id (e.g. `AISDLC-480`)                 | Backlink for audit trail                |
+| `metadata.scope`    | `task:AISDLC-NNN` (default)                 | Override via `--scope`                  |
+| `decisionLog[0].by` | `dispatched-session:AISDLC-NNN`             | Machine-parseable session id            |
 
 ## Mechanism-agnostic contract (AC-3)
 

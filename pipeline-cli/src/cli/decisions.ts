@@ -117,6 +117,7 @@ import {
   afterAnswer,
   answerRefusal,
   callerOf,
+  lookupCaller,
   createSystemChainDeps,
   emitRouted,
   promoteExpiredDecisions,
@@ -124,7 +125,7 @@ import {
   tierSession,
   type ChainDeps,
 } from '../decisions/escalation-chain.js';
-import { parkInflight } from '../dispatch/board.js';
+import { parkInflight, readInflightManifest } from '../dispatch/board.js';
 import { readCorpus, recordOperatorOverride } from '../classifier/substrate/index.js';
 import { createJudgmentRunner } from '../judgment/runner.js';
 import { buildDependencyGraph } from '../deps/dependency-graph.js';
@@ -1076,10 +1077,25 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
         const chain = argv.route !== undefined || park ? chainFor(workDir) : undefined;
         const raisedBy = chain ? callerOf(chain)?.name : undefined;
 
+        // A session may park only a manifest it claimed itself.
+        if (park && chain) {
+          const me = lookupCaller(chain).caller;
+          const claimedBy = me ? readInflightManifest(chain.boardDir, taskId)?.workerId : undefined;
+          if (me && claimedBy && claimedBy !== me.name) {
+            fail(
+              `cannot park ${taskId}: it is claimed by '${claimedBy}', not the calling session '${me.name}'. Park only your own task, or escalate without --park.`,
+            );
+          }
+        }
+
         const decisionId = nextDecisionIdDurable({ workDir });
         const event = makeDecisionOpenedEvent({
           decisionId,
-          escalation: { route, taskId, parked: park, ...(raisedBy ? { raisedBy } : {}) },
+          // Only a caller that opted in (--route or --park) joins the chain; a plain
+          // escalate stays outside tier-scoped answering and promotion.
+          ...(chain
+            ? { escalation: { route, taskId, parked: park, ...(raisedBy ? { raisedBy } : {}) } }
+            : {}),
           source: 'subagent-escalation',
           scope,
           summary: String(argv.summary).trim(),
@@ -1112,7 +1128,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
           }
           const receiver = tierSession(chain, route);
           emitRouted(chain, { decisionId, route, taskId, routedTo: receiver?.name ?? route });
-          notified = notifyTier(chain, route, decisionId, String(argv.summary).trim());
+          notified = notifyTier(chain, route, decisionId);
         }
 
         if (String(argv.format) === 'json') {
@@ -1808,7 +1824,8 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
         const tier = decision!.status.escalationTier;
         const chain = tier !== undefined ? chainFor(workDir) : undefined;
         if (tier !== undefined && chain !== undefined) {
-          const refusal = answerRefusal(tier, callerOf(chain));
+          const who = lookupCaller(chain);
+          const refusal = answerRefusal(tier, who.caller, who.error);
           if (refusal) fail(`cannot answer ${id}: ${refusal}`);
         }
         const evt = makeOperatorAnsweredEvent({
@@ -1819,7 +1836,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
         });
         appendDecisionEvent(evt, { workDir });
         persistDecisionLog({ workDir });
-        const after = chain ? afterAnswer(chain, decision!, optionId) : undefined;
+        const after = chain ? afterAnswer(chain, decision!) : undefined;
 
         if (String(argv.format) === 'json') {
           emit({
