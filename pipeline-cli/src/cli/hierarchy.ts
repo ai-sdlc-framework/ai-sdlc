@@ -362,6 +362,8 @@ export async function runHierarchyCli(
     gitRun?: CommandRunner | AsyncCommandRunner;
     /** Replaces the git lookup `check-repo` uses for the working directory's repository (tests). */
     repoGit?: GitRunner;
+    /** Replaces the detached process that types the self-clear keystrokes (tests). */
+    spawnDetached?: (file: string, args: readonly string[]) => void;
     /** Replaces the board enqueue (tests). */
     enqueue?: (entries: EnqueueEntry[]) => string[];
     /** Replaces the `gh` runner the mark-ready pass uses (tests). */
@@ -776,7 +778,12 @@ export async function runHierarchyCli(
             role,
             ...(deps.env.TMUX_PANE ? { callerPane: deps.env.TMUX_PANE } : {}),
           },
-          { run: deps.run, boardDir: deps.boardDir, log: deps.log },
+          {
+            run: deps.run,
+            boardDir: deps.boardDir,
+            log: deps.log,
+            ...(extras.spawnDetached ? { spawnDetached: extras.spawnDetached } : {}),
+          },
         );
         deps.log(JSON.stringify({ ...decision, handoff: handoff.file, scheduled: result }));
         return 0;

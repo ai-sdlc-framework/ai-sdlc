@@ -1376,3 +1376,148 @@ describe('peer binding: two hierarchies on one machine', () => {
     expect(String(err.mock.calls.at(-1)?.[0])).toContain('mixes projects');
   });
 });
+
+describe('handoff and auto-clear subcommands (AISDLC-766)', () => {
+  const asCaller = (role: RosterEntry['role'], name: string = role): IdentityDeps => ({
+    readSessions: () => [{ name, role, pid: 400, status: 'running' }],
+    parentPid: (pid) => (pid === 500 ? 400 : null),
+    comm: (pid) => (pid === 400 ? 'claude' : 'zsh'),
+    startPid: 500,
+  });
+  const noSession: IdentityDeps = {
+    readSessions: () => [],
+    parentPid: () => null,
+    comm: () => 'zsh',
+    startPid: 500,
+  };
+  const usage = (tokens: number): string =>
+    JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: tokens } } });
+
+  it('handoff rejects a missing action or an unknown role', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(await runHierarchyCli(['handoff', '--role', 'executor'], overrides())).toBe(2);
+    expect(await runHierarchyCli(['handoff', 'write', '--role', 'bogus'], overrides())).toBe(2);
+    expect(await runHierarchyCli(['handoff', 'write'], overrides())).toBe(2);
+    expect(String(err.mock.calls.at(-1)?.[0])).toContain("use 'handoff write|read");
+  });
+
+  it('handoff write then read round-trips through --out, accepting the dispatch alias', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const file = path.join(tmp, 'out', 'handoff.md');
+    const identity = { identity: asCaller('operator-dispatch') };
+    expect(
+      await runHierarchyCli(
+        ['handoff', 'write', '--role', 'dispatch', '--out', file],
+        overrides(),
+        identity,
+      ),
+    ).toBe(0);
+    expect(JSON.parse(logs[0] as string)).toMatchObject({ ok: true, file });
+    expect(existsSync(file)).toBe(true);
+
+    expect(
+      await runHierarchyCli(
+        ['handoff', 'read', '--role', 'operator-dispatch', '--out', file],
+        overrides(),
+        identity,
+      ),
+    ).toBe(0);
+    expect(logs.at(-1)).toContain('# Handoff');
+    expect(String(err.mock.calls.at(-1)?.[0])).toContain(file);
+  });
+
+  it('handoff read regenerates a missing file and says so; --name wins over the caller', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const file = path.join(tmp, 'missing.md');
+    expect(
+      await runHierarchyCli(
+        ['handoff', 'read', '--role', 'executor', '--name', 'executor-zeta', '--out', file],
+        overrides(),
+        { identity: asCaller('executor', 'executor-alpha') },
+      ),
+    ).toBe(0);
+    expect(logs.at(-1)).toContain('executor-zeta');
+    expect(String(err.mock.calls.at(-1)?.[0])).toContain('regenerated from live state');
+  });
+
+  it('auto-clear needs a transcript', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(await runHierarchyCli(['auto-clear'], overrides())).toBe(2);
+    expect(String(err.mock.calls.at(-1)?.[0])).toContain('--transcript is required');
+  });
+
+  it('auto-clear does nothing outside a hierarchy session', async () => {
+    const transcript = path.join(tmp, 't.jsonl');
+    writeFileSync(transcript, usage(2_000_000) + '\n');
+    expect(
+      await runHierarchyCli(['auto-clear', '--transcript', transcript], overrides(), {
+        identity: noSession,
+      }),
+    ).toBe(0);
+    expect(JSON.parse(logs[0] as string)).toMatchObject({ action: 'none' });
+    expect(calls).toEqual([]);
+  });
+
+  it('auto-clear reports no action while the context is under the threshold', async () => {
+    const transcript = path.join(tmp, 't.jsonl');
+    writeFileSync(transcript, usage(10) + '\n');
+    expect(
+      await runHierarchyCli(['auto-clear', '--transcript', transcript], overrides(), {
+        identity: asCaller('operator-dispatch'),
+      }),
+    ).toBe(0);
+    expect(JSON.parse(logs[0] as string)).toMatchObject({
+      action: 'none',
+      reason: 'under the threshold',
+    });
+    expect(calls.some((a) => a[0] === 'send-keys')).toBe(false);
+  });
+
+  it('auto-clear writes the handoff and schedules the clear once over the threshold', async () => {
+    const transcript = path.join(tmp, 't.jsonl');
+    writeFileSync(transcript, usage(5_000_000) + '\n');
+    writeRoster(path.join(tmp, 'dispatch'), {
+      schemaVersion: 'v1',
+      sessions: [
+        {
+          role: 'operator-dispatch',
+          name: 'operator-dispatch',
+          tmuxSession: 'ai-sdlc-hierarchy',
+          tmuxWindow: 'operator-dispatch',
+          paneId: '%3',
+          pid: 400,
+          model: 'sonnet',
+          permissionMode: 'bypassPermissions',
+          startedAt: '2026-09-30T12:00:00.000Z',
+          status: 'running',
+        },
+      ],
+    });
+    const run: CommandRunner = (_f, args) => {
+      const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
+      if (args[0] === 'list-windows') return ok('operator-dispatch\n');
+      if (args[0] === 'display-message') return ok('%3\n');
+      return ok();
+    };
+    const errSpy = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const spawned: string[][] = [];
+    const code = await runHierarchyCli(
+      ['auto-clear', '--transcript', transcript],
+      overrides({ run, env: { TMUX_PANE: '%3' } }),
+      {
+        identity: asCaller('operator-dispatch'),
+        spawnDetached: (_file, args) => {
+          spawned.push([...args]);
+        },
+      },
+    );
+    expect(errSpy.mock.calls.map((c) => String(c[0])).join('')).toBe('');
+    expect(code).toBe(0);
+    const out = JSON.parse(logs.at(-1) as string);
+    expect(out).toMatchObject({ action: 'clear', tokens: 5_000_000 });
+    expect(out.handoff).toContain('operator-dispatch');
+    expect(existsSync(out.handoff)).toBe(true);
+    expect(out.scheduled).toMatchObject({ self: 'operator-dispatch', paneId: '%3' });
+    expect(spawned).toHaveLength(1);
+  });
+});
