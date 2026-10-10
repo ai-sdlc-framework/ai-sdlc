@@ -163,6 +163,37 @@ describe('runHierarchyCli', () => {
     expect(attached).toEqual([['attach-session', '-t', `=${project}-operator-dispatch`]]);
   });
 
+  it('up passes --planner-permission-mode to the planner and prints the --allow-planner-bypass deprecation', async () => {
+    writeFileSync(
+      path.join(tmp, 'settings.json'),
+      JSON.stringify({ crossSessionInbound: 'accept' }),
+    );
+    let started = false;
+    const run: CommandRunner = (_f, args) => {
+      calls.push([...args]);
+      if (args[0] === 'new-session') started = true;
+      if (args[0] === 'has-session') return { status: started ? 0 : 1, stdout: '', stderr: '' };
+      if (args[0] === 'display-message') return { status: 0, stdout: '%1 4242\n', stderr: '' };
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const code = await runHierarchyCli(
+      [
+        'up',
+        '--executors',
+        '0',
+        '--planner-permission-mode',
+        'default',
+        '--allow-planner-bypass',
+        '--no-vscode-tasks',
+      ],
+      overrides({ run, env: {}, cwd: path.join(tmp, 'repo') }),
+    );
+    expect(code).toBe(0);
+    const plannerStart = calls.flat().filter((a) => a.includes('/ai-sdlc planner'));
+    expect(plannerStart.join(' ')).toContain("--permission-mode 'default'");
+    expect(logs.some((l) => l.includes('--allow-planner-bypass has no effect'))).toBe(true);
+  });
+
   it('up regenerates .vscode/tasks.json unless --no-vscode-tasks is given', async () => {
     writeFileSync(
       path.join(tmp, 'settings.json'),
