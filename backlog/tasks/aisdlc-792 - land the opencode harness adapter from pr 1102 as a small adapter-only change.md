@@ -11,7 +11,6 @@ labels:
   - dec-0081
 dependencies: []
 references:
-  - orchestrator/src/harness/adapters/opencode.ts
   - orchestrator/src/harness/adapters/
   - docs/operations/copilot-spawner.md
 priority: low
