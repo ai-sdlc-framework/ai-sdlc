@@ -144,6 +144,5 @@ session in the roster, skip the message and say so.
 
 ## Step 5 - Stop and wait
 
-After the verdict, run `handoff write --role executor --name "$MY_NAME" --board-dir "$BOARD_DIR"` through
-`cli-hierarchy.mjs`, then stop: one task per context, no second claim, no wake-up. The dispatch session
-clears this context on the verdict and issues `/ai-sdlc executor` again; a Stop hook does it past 120k tokens, never mid-task.
+After the verdict run `handoff write --role executor --name "$MY_NAME" --board-dir "$BOARD_DIR"` via `cli-hierarchy.mjs`, then
+stop: one task per context, no second claim, no wake-up. Dispatch clears this context on the verdict and re-issues `/ai-sdlc executor`; a Stop hook does it past 120k tokens, never mid-task.
