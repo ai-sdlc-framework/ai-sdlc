@@ -51,6 +51,9 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 
+import { promoteExpiredDecisions } from '../decisions/escalation-chain.js';
+import { isDecisionCatalogEnabled } from '../decisions/feature-flag.js';
+import { persistDecisionLog } from '../decisions/remote-persist.js';
 import { DEFAULT_BOARD_DIR, TASK_ID_RE } from '../dispatch/board.js';
 import { enqueueTasks, type EnqueueEntry } from '../dispatch/enqueue.js';
 import { requeueFailed } from '../dispatch/requeue.js';
@@ -571,6 +574,19 @@ export async function runHierarchyCli(
             }),
           operational,
           markReady: () => markReadyAfterCodeql(extras.ghRun ?? deps.run, repoRoot),
+          promoteExpired: () =>
+            isDecisionCatalogEnabled()
+              ? promoteExpiredDecisions(
+                  () => ({
+                    boardDir: deps.boardDir,
+                    identity: extras.identity ?? createSystemIdentity(deps.boardDir),
+                    sessions: () => readRosterChecked(deps.boardDir).roster.sessions,
+                    send: extras.sendBrief ?? createTmuxBriefSender(deps.run),
+                    emit,
+                  }),
+                  { workDir: repoRoot, persist: () => persistDecisionLog({ workDir: repoRoot }) },
+                )
+              : [],
           ...(reportEveryMs === undefined ? {} : { reportEveryMs }),
         });
         const planner = readRosterChecked(deps.boardDir).roster.sessions.find(

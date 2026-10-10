@@ -29,14 +29,19 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+import { now as clockNow } from '../clock.js';
+
 import {
   formatDecisionId,
   validateDecisionEvent,
   type AutoExpiredEvent,
+  type DecisionEscalation,
   type DecisionEvent,
   type DecisionOpenedEvent,
   type DecisionPriority,
+  type EscalationTier,
   type OperatorAnsweredEvent,
+  type RoutingChangedEvent,
   type TimeboxExtendedEvent,
 } from './decision-record.js';
 
@@ -282,6 +287,8 @@ export interface OpenDecisionInput {
   contextRef?: string;
   /** AISDLC-703 — governance-change tag (DEC-0053). */
   governanceChange?: GovernanceChange;
+  /** RFC-0051 — escalation-chain routing. */
+  escalation?: DecisionEscalation;
   by?: string;
   now?: Date;
 }
@@ -318,6 +325,33 @@ export function makeDecisionOpenedEvent(input: OpenDecisionInput): DecisionOpene
   }
   if (input.contextRef !== undefined) event.contextRef = input.contextRef;
   if (input.governanceChange !== undefined) event.governanceChange = input.governanceChange;
+  if (input.escalation !== undefined) event.escalation = input.escalation;
+  if (input.by !== undefined) event.by = input.by;
+  return event;
+}
+
+// ── Routing-changed event factory (RFC-0051) ─────────────────────────────────
+
+export interface RoutingChangedInput {
+  decisionId: string;
+  fromTier: EscalationTier;
+  toTier: EscalationTier;
+  reason?: string;
+  by?: string;
+  now?: Date;
+}
+
+/** Build a well-formed `routing-changed` event without writing it. */
+export function makeRoutingChangedEvent(input: RoutingChangedInput): RoutingChangedEvent {
+  const event: RoutingChangedEvent = {
+    eventVersion: 'v1',
+    type: 'routing-changed',
+    ts: (input.now ?? clockNow()).toISOString(),
+    decisionId: input.decisionId,
+    fromTier: input.fromTier,
+    toTier: input.toTier,
+  };
+  if (input.reason !== undefined) event.reason = input.reason;
   if (input.by !== undefined) event.by = input.by;
   return event;
 }

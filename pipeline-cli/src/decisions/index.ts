@@ -30,6 +30,7 @@ export type { BaselineStageAOutput, BaselineStageBOutput } from './baseline-bran
 export * from './corpus-aggregator.js';
 export * from './dor-bridge.js';
 export * from './decisions-config.js';
+export * from './escalation-chain.js';
 export * from './notification.js';
 export * from './pending-exemplars.js';
 export * from './decision-exemplars.js';

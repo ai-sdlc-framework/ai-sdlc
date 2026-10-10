@@ -454,6 +454,34 @@ describe('orchestrator-events.v1.schema.json — accepts every emitted type', ()
     });
   });
 
+  it('accepts tier fields on DecisionRouted and DecisionEscalated (RFC-0051)', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'DecisionRouted',
+      decisionId: 'DEC-0001',
+      route: 'operational',
+      routedTo: 'operator-dispatch',
+      fromTier: 'executor',
+      toTier: 'operational',
+      taskId: 'AISDLC-1',
+    });
+    expectValid({
+      ts: baseTs,
+      type: 'DecisionEscalated',
+      decisionId: 'DEC-0001',
+      fromTier: 'design',
+      toTier: 'operator',
+      taskId: 'AISDLC-1',
+    });
+    expectInvalid({
+      ts: baseTs,
+      type: 'DecisionEscalated',
+      decisionId: 'DEC-0001',
+      fromTier: 'design',
+      toTier: 'executor',
+    });
+  });
+
   it('accepts OperatorPlaybookAction (RFC-0051)', () => {
     expectValid({
       ts: baseTs,
