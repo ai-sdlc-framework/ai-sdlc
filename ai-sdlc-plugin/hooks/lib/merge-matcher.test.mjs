@@ -935,6 +935,41 @@ describe('curl URL glob groups (AISDLC-605)', () => {
     assert.equal(m.httpClientGlobsPulls('curl https://example.com/[1-5].txt'), false);
     assert.equal(m.httpClientGlobsPulls(`curl -s ${base}`), false);
   });
+  it('refuses globs that never spell pulls (round 14)', () => {
+    const u = 'https://api.github.com/repos/o/r/';
+    for (const path of [
+      'pu[l-l]ls/5/merge',
+      '[p-p]ulls/5/merge',
+      'pul[l-l]s/5/merge',
+      'pu[k-m]ls/5/merge',
+      'pu[l-l]ls/5/[m-m]erge',
+    ]) {
+      for (const c of [
+        `curl --netrc -X PUT '${u}${path}'`,
+        `wget --method=PUT '${u}${path}'`,
+        `http PUT '${u}${path}'`,
+        `curl -sS -X PUT -H "Authorization: Bearer $(gh auth token)" '${u}${path}'`,
+      ]) {
+        assert.equal(hit(c), true, c);
+      }
+    }
+    assert.ok(m.expandBrackets('pu[k-m]ls').includes('pulls'));
+    assert.equal(m.httpClientGlobsPulls(`curl -X PUT '${u}pulls/{5,6}/merge'`), true);
+  });
+  it('refuses an HTTP client whose bracket expansion exceeds the cap', () => {
+    assert.equal(m.httpClientGlobsPulls(`curl ${'[me]'.repeat(9)}`), true);
+    assert.equal(m.httpClientGlobsPulls(`echo ${'[me]'.repeat(9)}`), false);
+  });
+  it('allows non-GitHub globs and plain GitHub reads', () => {
+    for (const c of [
+      'curl https://example.com/[1-5].txt',
+      'wget https://example.com/file{1,2}.txt',
+      'curl -s https://api.github.com/repos/o/r/pulls/5',
+      `curl -s -d '{"body":"x"}' https://api.github.com/repos/o/r/issues/5/comments`,
+    ]) {
+      assert.equal(hit(c), false, c);
+    }
+  });
   it('allows reads without glob groups', () => {
     for (const c of [
       `curl -s ${base}`,

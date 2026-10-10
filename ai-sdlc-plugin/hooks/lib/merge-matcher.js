@@ -401,8 +401,8 @@ function normalizeExpansions(text) {
   return variants;
 }
 
-/** Letters of the merge path segment; a `[...]` group only matters through these. */
-const GLOB_RELEVANT = new Set('merge'.split(''));
+/** Letters of the `pulls/<n>/merge` path; a `[...]` group only matters through these. */
+const GLOB_RELEVANT = new Set('mergepuls'.split(''));
 const GLOB_VARIANT_CAP = 256;
 
 /**
@@ -454,7 +454,10 @@ function expandBrackets(text) {
   let acc = [''];
   for (let i = 0; i < parts.length; i++) {
     const opts = i % 2 === 0 ? [parts[i]] : parts[i];
-    if (acc.length * opts.length > GLOB_VARIANT_CAP) return out;
+    if (acc.length * opts.length > GLOB_VARIANT_CAP) {
+      out.capped = true;
+      return out;
+    }
     acc = acc.flatMap((a) => opts.map((o) => a + o));
   }
   out.push(...acc.map((v) => v.replace(/\u0003/g, 'x')));
@@ -474,19 +477,27 @@ const HTTP_CLIENT_WORDS = new Set([
   'fetch',
 ]);
 
+/** Text that targets the GitHub API (host, repos path, or a GHES-style host option). */
+const GITHUB_TARGET = /github|\/repos\/|\brepos\b|GH_HOST/i;
+/** A curl `{a,b}` / `{1..3}` list (not `${VAR}`, not JSON). */
+const BRACE_LIST = /(?<!\$)\{[^{}\s"':]*(?:,|\.\.)[^{}\s"':]*\}/;
+
 /**
- * True when an HTTP client (curl, wget, httpie, ...) is given a `pulls` URL containing a `[`:
- * curl URL globbing can spell the merge endpoint without it ever appearing in the text, so any
- * such command is refused whatever the path looks like. A bracket in a URL without `pulls`
- * (`curl https://example.com/[1-5].txt`) is fine.
+ * True when an HTTP client (curl, wget, httpie, ...) is given a URL glob group (`[...]` or a
+ * `{a,b}` list) in a command that targets the GitHub API: curl URL globbing can spell the merge
+ * endpoint without it appearing in the text (`pu[l-l]ls/5/[m-m]erge`), so such a command is
+ * refused whatever the path looks like. Also refused when the bracket expansion exceeds the cap
+ * (the matcher cannot enumerate it). Globs in URLs elsewhere (`https://example.com/[1-5].txt`)
+ * are fine.
  */
 function httpClientGlobsPulls(command) {
-  return splitShellSegmentsEx(command).some(
-    (s) =>
-      HTTP_CLIENT_WORDS.has(commandWord(s.text)) &&
-      s.text.includes('[') &&
-      /\/pulls\b|\bpulls\//i.test(s.text),
-  );
+  return splitShellSegmentsEx(command).some((s) => {
+    if (!HTTP_CLIENT_WORDS.has(commandWord(s.text))) return false;
+    const hasBracket = s.text.includes('[');
+    if (!hasBracket && !BRACE_LIST.test(s.text)) return false;
+    if (GITHUB_TARGET.test(s.text)) return true;
+    return hasBracket && expandBrackets(s.text).capped === true;
+  });
 }
 
 /**
