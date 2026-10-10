@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   appendDecisionEvent,
+  eventFileName,
   makeDecisionOpenedEvent,
   makeOperatorAnsweredEvent,
   readEventLogText,
@@ -271,6 +272,25 @@ describe('persistDecisionLog (AISDLC-546)', () => {
       join(dir, name),
       join(dir, name.replace(/[0-9a-f]{12}\.json$/, '000000000000.json')),
     );
+    const warns: string[] = [];
+    const r = persistDecisionLog({ workDir: parent, runner, warn: (m) => warns.push(m) });
+    expect(r).toMatchObject({ persisted: true, reason: 'already on main' });
+    expect(warns.some((w) => /name does not match its content/.test(w))).toBe(true);
+  });
+  it('drops an event whose ts would pin it after every later answer', () => {
+    const dir = resolveEventsDir(parent);
+    mkdirSync(dir, { recursive: true });
+    const e = makeDecisionOpenedEvent({
+      decisionId: 'DEC-0001',
+      source: 'ad-hoc',
+      scope: 't',
+      summary: 's',
+      reversible: true,
+      options: [{ id: 'a', description: 'a' }],
+    });
+    e.ts = '9999-12-31T00:00:00.000Z';
+    const line = JSON.stringify(e);
+    writeFileSync(join(dir, eventFileName(e, line)), line + '\n');
     const warns: string[] = [];
     const r = persistDecisionLog({ workDir: parent, runner, warn: (m) => warns.push(m) });
     expect(r).toMatchObject({ persisted: true, reason: 'already on main' });

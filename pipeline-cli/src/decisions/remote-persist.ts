@@ -32,11 +32,11 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
 
-import { formatDecisionId, validateDecisionEvent } from './decision-record.js';
+import { formatDecisionId, validateDecisionEvent, type DecisionEvent } from './decision-record.js';
 import {
   eventContentHash,
   eventFileName,
-  hashFromEventFileName,
+  isCanonicalEventFileName,
   resolveEventLogPath,
   resolveEventsDir,
 } from './event-log.js';
@@ -374,7 +374,10 @@ export function persistDecisionLog(opts: DurableOpts): PersistResult {
       }
       // `update-index --cacheinfo` replaces whatever blob sits at the path, so a record on main
       // must never be re-addressed by a name it already has, and a name must be bound to its content.
-      if (namesOnMain.has(e.name) || hashFromEventFileName(e.name) !== h) {
+      if (
+        namesOnMain.has(e.name) ||
+        !isCanonicalEventFileName(e.name, JSON.parse(e.line) as DecisionEvent, e.line)
+      ) {
         warn(
           `[decisions] WARN: dropping event file whose name does not match its content: ${e.name}`,
         );

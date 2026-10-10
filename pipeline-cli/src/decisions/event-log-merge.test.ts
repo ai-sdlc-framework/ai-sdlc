@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   appendDecisionEvent,
+  eventContentHash,
   eventFileName,
   makeDecisionOpenedEvent,
   makeOperatorAnsweredEvent,
@@ -160,6 +161,57 @@ describe('reading both layouts together', () => {
     const r = readDecisionEvents({ workDir: dir });
     expect(r.events.map((e) => e.decisionId)).toEqual(['DEC-0001']);
     expect(r.skipped).toBe(2);
+  });
+});
+
+describe('file names cannot pin event order', () => {
+  it('skips a file whose prefix is forged even though its hash is correct', () => {
+    const dir = mkRepo('forged-prefix');
+    appendDecisionEvent(ev('DEC-0001', '2026-01-01T00:00:00.000Z'), { workDir: dir });
+    const events = resolveEventsDir(dir);
+    const e2 = ev('DEC-0002', '2026-01-02T00:00:00.000Z');
+    const line = JSON.stringify(e2);
+    const real = eventFileName(e2, line);
+    writeFileSync(join(events, real.replace(/^[^_]+/, '~')), line + '\n');
+    const r = readDecisionEvents({ workDir: dir });
+    expect(r.events.map((e) => e.decisionId)).toEqual(['DEC-0001']);
+    expect(r.skipped).toBe(1);
+  });
+
+  it('skips an event with a far-future or non-ISO ts, under its own correct name', () => {
+    const dir = mkRepo('future-ts');
+    appendDecisionEvent(ev('DEC-0001', '2026-01-01T00:00:00.000Z'), { workDir: dir });
+    const events = resolveEventsDir(dir);
+    for (const [id, ts] of [
+      ['DEC-0002', '9999-12-31T00:00:00.000Z'],
+      ['DEC-0003', 'zzzz'],
+      ['DEC-0004', '2026-01-01'],
+    ] as const) {
+      const e = ev(id, '2026-01-01T00:00:00.000Z');
+      e.ts = ts;
+      const line = JSON.stringify(e);
+      writeFileSync(
+        join(events, `${ts}__${id}__${e.type}__${eventContentHash(line)}.json`),
+        line + '\n',
+      );
+    }
+    const r = readDecisionEvents({ workDir: dir });
+    expect(r.events.map((e) => e.decisionId)).toEqual(['DEC-0001']);
+    expect(r.skipped).toBe(3);
+  });
+
+  it('accepts migrated 0-legacy names only in their exact form', () => {
+    const dir = mkRepo('legacy-names');
+    const e = ev('DEC-0001', '2026-01-01T00:00:00.000Z');
+    const line = JSON.stringify(e);
+    const events = resolveEventsDir(dir);
+    mkdirSync(events, { recursive: true });
+    const h = eventContentHash(line);
+    writeFileSync(join(events, `0-legacy-000001__DEC-0001__${e.type}__${h}.json`), line + '\n');
+    writeFileSync(join(events, `0-legacy-000002__DEC-0009__${e.type}__${h}.json`), line + '\n');
+    const r = readDecisionEvents({ workDir: dir });
+    expect(r.events).toHaveLength(1);
+    expect(r.skipped).toBe(1);
   });
 });
 

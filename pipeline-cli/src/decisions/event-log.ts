@@ -226,6 +226,43 @@ export function eventFileName(event: DecisionEvent, line: string = JSON.stringif
   return `${ts}__${event.decisionId}__${event.type}__${eventContentHash(line)}.json`;
 }
 
+const ISO_UTC_TS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
+const TS_SKEW_MS = 60 * 60 * 1000;
+
+/**
+ * A timestamp that may name a per-event file: strict ISO-8601 UTC and not later than now
+ * plus a small clock-skew allowance. File names sort events, so a far-future prefix would
+ * otherwise outrank every later answer for good.
+ */
+export function isPlausibleEventTs(ts: string, nowMs: number = Date.now()): boolean {
+  if (!ISO_UTC_TS.test(ts)) return false;
+  const t = Date.parse(ts);
+  return Number.isFinite(t) && t <= nowMs + TS_SKEW_MS;
+}
+
+/**
+ * True when `name` is exactly the name this event's content earns: the canonical
+ * `<ts>__<id>__<type>__<hash>.json` with a plausible `ts`, or the migrated
+ * `0-legacy-<seq>__<id>__<type>__<hash>.json`. The name drives ordering, so nothing else
+ * (renamed, forged prefix, wrong id or type) is trusted.
+ */
+export function isCanonicalEventFileName(
+  name: string,
+  event: DecisionEvent,
+  line: string,
+): boolean {
+  const legacy = name.match(/^0-legacy-\d{6}__(.+)\.json$/);
+  if (legacy) {
+    return legacy[1] === `${event.decisionId}__${event.type}__${eventContentHash(line)}`;
+  }
+  if (!isPlausibleEventTs(event.ts)) return false;
+  try {
+    return name === eventFileName(event, line);
+  } catch {
+    return false;
+  }
+}
+
 /** Hash embedded in an event file name (last `__` segment), or null. */
 export function hashFromEventFileName(name: string): string | null {
   const m = name.match(/__([0-9a-f]{12})\.json$/);
@@ -301,9 +338,13 @@ export function readDecisionEvents(opts: ReadEventsOpts = {}): ReadEventsResult 
     for (const name of names) {
       try {
         const text = readFileSync(join(dir, name), 'utf8');
-        // A file whose name carries a different content hash was renamed or forged: its name
-        // drives ordering, so it is not trusted.
-        if (hashFromEventFileName(name) !== eventContentHash(text)) {
+        // A file not named exactly for its content was renamed or forged: its name drives
+        // ordering, so it is not trusted.
+        const parsed = JSON.parse(text) as unknown;
+        if (
+          validateDecisionEvent(parsed) !== null ||
+          !isCanonicalEventFileName(name, parsed as DecisionEvent, text)
+        ) {
           skipped += 1;
           continue;
         }
