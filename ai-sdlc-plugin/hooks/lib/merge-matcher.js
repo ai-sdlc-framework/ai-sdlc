@@ -263,13 +263,90 @@ function isInertSegment(segment) {
   return false;
 }
 
+/** Text with quoted and backslash-escaped characters blanked, so structural checks see only live shell syntax. */
+function unquotedView(segment) {
+  let out = '';
+  let quote = null;
+  for (let i = 0; i < segment.length; i++) {
+    const c = segment[i];
+    if (quote) {
+      if (c === '\\' && quote === '"') {
+        i++;
+        out += 'xx';
+      } else if (c === quote) {
+        quote = null;
+        out += 'x';
+      } else out += 'x';
+      continue;
+    }
+    if (c === '\\') {
+      i++;
+      out += 'xx';
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      quote = c;
+      out += 'x';
+      continue;
+    }
+    out += c;
+  }
+  return out;
+}
+
+/**
+ * True when the segment holds a construct this tokenizer does not fully understand
+ * (AISDLC-605 structural rule): ANSI-C / locale quoting, backslash-newline, brace
+ * expansion, IFS, a variable-assignment prefix, a variable / command / process
+ * substitution in the command or subcommand slots, or a glob or backslash in the
+ * command word. An opaque segment cannot be judged by the precise matcher.
+ */
+function isOpaqueSegment(segment) {
+  if (/\$['"]/.test(segment)) return true;
+  if (/\\\n/.test(segment)) return true;
+  if (/\bIFS\b/.test(segment)) return true;
+  if (/\{[^{}\s]*(?:,|\.\.)[^{}\s]*\}/.test(unquotedView(segment))) return true;
+  for (const t of tokenizeShellish(segment)) {
+    const tok = t.replace(/^[({!]+/, '');
+    if (!tok || RESERVED.has(tok)) continue;
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tok)) return true;
+    break;
+  }
+  const eff = effectiveTokens(segment);
+  if (eff.slice(0, 6).some((t) => /\$|`|<\(|>\(/.test(t))) return true;
+  if (eff.length && /[*?[\]\\]/.test(eff[0])) return true;
+  return false;
+}
+
+/** True when the command text cannot be trusted segment by segment (see isOpaqueSegment). */
+function commandIsOpaque(command, segs) {
+  if (/\$['"]/.test(command)) return true; // quote/comment state may be desynced
+  return segs.some((s) => isOpaqueSegment(s.text));
+}
+
+/** Loose mention of the raw merge command: the pr and merge words appear anywhere (gh optional). */
+function mentionsGhPrMerge(text) {
+  // `pr` is case-sensitive (gh subcommands are), so `$PR/merge` in an API path does not count.
+  return /\bpr\b/.test(text) && /\bmerge\b/i.test(text);
+}
+
+/** Loose mention of the merge API (pulls path or the merge / auto-merge mutations). */
+function mentionsApiMerge(text) {
+  return /pulls[\s\S]*merge|mergePullRequest|enablePullRequestAutoMerge/i.test(text);
+}
+
 /**
  * True when `matches(text)` hits a segment that is NOT inert, or an inert
  * segment whose pipeline feeds a non-inert later stage. The matcher sees the
  * comment-stripped segment both with quotes retained and with quotes removed.
+ * When `mentions` is given and the command is opaque (see isOpaqueSegment) the
+ * command is refused whenever `mentions(rawCommand)` holds: deny-everything-that-
+ * mentions-it for text the tokenizer cannot fully understand.
  */
-function commandHasUninertMatch(command, matches) {
+function commandHasUninertMatch(command, matches, mentions) {
   const segs = splitShellSegmentsEx(command);
+  if (mentions && commandIsOpaque(command, segs) && mentions(command.replace(/\\\n/g, '')))
+    return true;
   for (let i = 0; i < segs.length; i++) {
     const clean = stripComment(segs[i].text);
     if (!matches(clean) && !matches(clean.replace(/['"]/g, ''))) continue;
@@ -322,10 +399,11 @@ function ghTokensRunMerge(text) {
         continue;
       }
       words.push(wordAlternatives(t.toLowerCase()));
-      if (words.length >= 3) break;
+      if (words.length >= 4) break;
     }
     const is = (k, w) => !!words[k] && words[k].includes(w);
-    if (is(0, 'pr') && is(1, 'merge')) return true;
+    // Any later word may be the subcommand: an unlisted value-taking flag (`pr -F x merge`) shifts it.
+    if (is(0, 'pr') && [1, 2, 3].some((k) => is(k, 'merge'))) return true;
     if (is(0, 'alias') && (is(1, 'set') || is(1, 'import'))) return true;
   }
   return false;
@@ -348,7 +426,7 @@ function matchesGhPrMerge(text) {
 
 /** True when the command runs (or could run) the raw merge command (see module contract). */
 function commandRunsGhPrMerge(command) {
-  return commandHasUninertMatch(command, matchesGhPrMerge);
+  return commandHasUninertMatch(command, matchesGhPrMerge, mentionsGhPrMerge);
 }
 
 module.exports = {
@@ -359,6 +437,9 @@ module.exports = {
   tokenizeShellish,
   commandWord,
   isInertSegment,
+  isOpaqueSegment,
+  commandIsOpaque,
+  mentionsApiMerge,
   commandHasUninertMatch,
   commandRunsGhPrMerge,
 };

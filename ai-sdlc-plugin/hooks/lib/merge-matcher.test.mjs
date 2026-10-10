@@ -177,7 +177,8 @@ describe('round-2 security bypasses (AISDLC-605)', () => {
       `GIT_EDITOR=${['gh', 'pr', 'merge'].join('\\ ')}\\ 42 git commit`,
     ];
     for (const c of cmds) assert.equal(m.commandRunsGhPrMerge(c), true, c);
-    assert.equal(m.commandRunsGhPrMerge(`FOO=1 echo "${phrase}"`), false);
+    // An assignment prefix makes the segment opaque, so a mention is refused (round-5 structural rule).
+    assert.equal(m.commandRunsGhPrMerge(`FOO=1 echo "${phrase}"`), true);
   });
   it('does not treat program-running options of allowlisted words as inert', () => {
     assert.equal(m.isInertSegment('sort --compress-program=sh f'), false);
@@ -233,5 +234,79 @@ describe('round-4 security bypasses (AISDLC-605)', () => {
       'gh pr list --repo o/r',
     ];
     for (const c of allowed) assert.equal(m.commandRunsGhPrMerge(c), false, c);
+  });
+});
+
+describe('round-5 structural rule: opaque segments mentioning the merge phrase are refused (AISDLC-605)', () => {
+  const mg = ['mer', 'ge'].join('');
+  const gh = ['g', 'h'].join('');
+  const GH = `/opt/homebrew/bin/g[h]`;
+  const opaqueRefused = [
+    `echo $'\\''; ${gh} pr ${mg} 42 #'`,
+    `${gh} pr mer\\\nge 42`,
+    `{${gh},pr} ${mg} 42`,
+    `${gh} {pr,${mg}} 42`,
+    `{${gh},pr,${mg}} 42`,
+    `${gh} pr {${mg},} 42`,
+    `${gh}\${IFS}pr\${IFS}${mg} 42`,
+    `${gh} pr\${IFS}${mg} 42`,
+    `${gh} pr $(echo ${mg}) 5`,
+    `A=${mg}; ${gh} pr $A 5`,
+    `X=1 ${gh} pr ${mg} 5`,
+    `${GH} pr ${mg} 42`,
+    `$(echo ${gh}) pr ${mg} 42`,
+    `${gh} pr -F x ${mg} 5`,
+    `${gh} pr $'${mg}' 42`,
+    `${gh} pr $"${mg}" 42`,
+    `${gh} alias set mm 'pr ${mg}'`,
+    `${gh} pr \`echo ${mg}\` 5`,
+    `${gh} pr {1..3} ${mg}`,
+  ];
+  it('refuses every reviewer bypass shape from rounds 3 and 4', () => {
+    for (const c of opaqueRefused) assert.equal(m.commandRunsGhPrMerge(c), true, c);
+  });
+  it('flags the opaque constructs', () => {
+    for (const c of [
+      "echo $'x'",
+      'a\\\nb',
+      '{a,b} c',
+      '{1..3}',
+      'a${IFS}b',
+      'X=1 cmd',
+      'gh pr $A',
+      'g[h] pr',
+    ]) {
+      assert.equal(m.isOpaqueSegment(c), true, c);
+    }
+    for (const c of ['echo x', 'gh pr view 42', 'echo "{a,b}"', 'git commit -m "x y"']) {
+      assert.equal(m.isOpaqueSegment(c), false, c);
+    }
+  });
+  it('treats an assignment prefix on inert prose that mentions the phrase as opaque and refuses it', () => {
+    assert.equal(m.commandRunsGhPrMerge(`FOO=1 echo "${gh} pr ${mg}"`), true);
+  });
+  it('still allows opaque or plain commands that do not mention the merge phrase', () => {
+    for (const c of [
+      `echo $'x' done`,
+      `X=1 ${gh} pr view 42`,
+      `echo \${IFS}`,
+      `${gh} pr view $PR`,
+    ]) {
+      assert.equal(m.commandRunsGhPrMerge(c), false, c);
+    }
+  });
+  it('keeps the earlier allow cases allowed', () => {
+    for (const c of [
+      `echo "${gh} pr ${mg} is forbidden"`,
+      `git commit -m "docs: mention ${gh} pr ${mg}"`,
+      `echo "${gh} -R o/r pr ${mg} 42"`,
+      `${gh} pr view 42`,
+      `${gh} alias list`,
+      `${gh} pr list --repo o/r`,
+      `echo notes about other things`,
+      `git commit -m "fix: tidy docs"`,
+    ]) {
+      assert.equal(m.commandRunsGhPrMerge(c), false, c);
+    }
   });
 });

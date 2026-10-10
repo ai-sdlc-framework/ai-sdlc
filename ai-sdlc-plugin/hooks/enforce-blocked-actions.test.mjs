@@ -2273,3 +2273,62 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (scratch dirs, AISDLC-605)
     assert.ok(isDenied(write('Write', join(proj, 'backlog', 'tasks', 'x.md'))));
   });
 });
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 opaque-segment rule)', () => {
+  let dir;
+  const mg = ['mer', 'ge'].join('');
+  const gh = ['g', 'h'].join('');
+
+  before(() => {
+    dir = join(tmpdir(), `enforce-blocked-605-opaque-${Date.now()}`);
+    mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(dir, '.ai-sdlc', 'agent-role.yaml'),
+      `role: coding-agent\ngoal: Test agent\nblockedActions: []\n`,
+    );
+  });
+
+  after(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function run(command) {
+    const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command } });
+    return runHookRaw(input, { CLAUDE_PROJECT_DIR: dir });
+  }
+
+  it('refuses every opaque bypass shape', () => {
+    for (const c of [
+      `echo $'\\''; ${gh} pr ${mg} 42 #'`,
+      `${gh} pr mer\\\nge 42`,
+      `{${gh},pr} ${mg} 42`,
+      `${gh} {pr,${mg}} 42`,
+      `{${gh},pr,${mg}} 42`,
+      `${gh} pr {${mg},} 42`,
+      `${gh}\${IFS}pr\${IFS}${mg} 42`,
+      `${gh} pr\${IFS}${mg} 42`,
+      `${gh} pr $(echo ${mg}) 5`,
+      `A=${mg}; ${gh} pr $A 5`,
+      `X=1 ${gh} pr ${mg} 5`,
+      `/opt/homebrew/bin/g[h] pr ${mg} 42`,
+      `$(echo ${gh}) pr ${mg} 42`,
+      `${gh} pr -F x ${mg} 5`,
+      `${gh} pr $'${mg}' 42`,
+      `${gh} alias set mm 'pr ${mg}'`,
+    ]) {
+      assert.ok(isDenied(run(c)), c);
+    }
+  });
+
+  it('still allows prose, read-only gh', () => {
+    for (const c of [
+      `echo "${gh} pr ${mg} is forbidden"`,
+      `git commit -m "docs: mention ${gh} pr ${mg}"`,
+      `${gh} pr view 42`,
+      `${gh} alias list`,
+      `${gh} pr list --repo o/r`,
+    ]) {
+      assert.ok(!isDenied(run(c)), c);
+    }
+  });
+});

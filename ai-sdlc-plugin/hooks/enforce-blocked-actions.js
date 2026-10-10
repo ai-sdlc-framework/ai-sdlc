@@ -96,6 +96,7 @@ const { evaluateLeasePush, hasForcePushOption } = require('./lib/lease-push-guar
 const {
   commandRunsGhPrMerge,
   commandHasUninertMatch,
+  mentionsApiMerge,
   stripCommentAndQuotes: libStripCommentAndQuotes,
 } = require('./lib/merge-matcher');
 const {
@@ -657,7 +658,7 @@ function enforceApiMergeGovernance(command) {
     const text = normalizeForApiMerge(segment);
     return mergePath.test(text) || mergeMutation.test(text);
   };
-  if (commandHasUninertMatch(command, matches)) {
+  if (commandHasUninertMatch(command, matches, mentionsApiMerge)) {
     deny(
       `merging a PR through the GitHub API ('.../pulls/<n>/merge' or the mergePullRequest ` +
         `mutation) is not a permitted merge path under any governance allowMerge value. ` +
