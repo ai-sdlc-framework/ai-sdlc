@@ -5,6 +5,9 @@
  * This data feeds the workflow pattern detection engine.
  *
  * Must be fast (single fs.appendFileSync) and never fail (all errors swallowed).
+ *
+ * Also returns a one-line notice when a planner or operator-dispatch session reads a
+ * very large tool result (lib/large-output-notice.js, AISDLC-651.5).
  */
 
 const { readFileSync, appendFileSync, mkdirSync, existsSync } = require('fs');
@@ -129,6 +132,22 @@ try {
   appendFileSync(outputPath, JSON.stringify(entry) + '\n', 'utf-8');
 } catch {
   // Never fail — telemetry is best-effort
+}
+
+// ── Large-output notice (main-session roles only; never blocks) ─────
+
+try {
+  const { largeOutputNotice } = require('./lib/large-output-notice');
+  const notice = largeOutputNotice(input);
+  if (notice) {
+    process.stdout.write(
+      JSON.stringify({
+        hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: notice },
+      }) + '\n',
+    );
+  }
+} catch {
+  // Never fail
 }
 
 process.exit(0);

@@ -364,9 +364,13 @@ spec:
   allotmentTolerance: 0.25
   modelMixSimilarity: 0.8
   scorecardMinTasks: 30
+  output:
+    noticeTokens: 8000 # tool results above this many estimated tokens draw a notice
 ```
 
 Window modes: `first-use` opens at the first call after the previous window ended, `fixed` repeats from an `anchor`, and `trailing` is the last `lengthHours` before now. `weights.tokenClasses` can override the per-class weights (`input`, `cacheWrite5m`, `cacheWrite1h`, `cacheRead`, `output`). The schema is [`usage-config.v1.schema.json`](../../spec/schemas/usage-config.v1.schema.json).
+
+`output.noticeTokens` (default 8000) is read by the PostToolUse hook `collect-tool-sequence.js`: in a planner or operator-dispatch session a tool result larger than that many estimated tokens (four characters per token) returns a one-line notice pointing at an Explore subagent, `tail`/`grep` and the artifacts directory. Developer and executor sessions are exempt, and the hook never blocks. The hook reads the machine-level file, then the base-branch file, with a plain text scan of this one key. Ledger records also carry `toolNames`, the tools a call asked to run, where the transcript provides them, so growth per turn can be attributed to a tool.
 
 A config that fails validation is skipped with a warning and the next source is tried. A bad config never stops a report.
 

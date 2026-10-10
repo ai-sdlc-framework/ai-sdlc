@@ -92,6 +92,7 @@ describe('loadUsagePaneData', { timeout: 15_000 }, () => {
         allotmentTolerance: 0.25,
         modelMixSimilarity: 0.8,
         scorecardMinTasks: DEFAULT_SCORECARD_MIN_TASKS,
+        outputNoticeTokens: 8000,
         source: 'defaults',
         warnings: [],
       }),

@@ -291,6 +291,7 @@ function buildRecord(
     billingPool,
     sessionId: call.sessionId ?? file.sessionStem,
     ...(file.agentId ? { agentId: file.agentId } : {}),
+    ...(call.toolNames ? { toolNames: call.toolNames } : {}),
     agentRole,
     scope: framework ? 'framework' : 'other',
   };

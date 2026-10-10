@@ -2,7 +2,7 @@
 id: AISDLC-651.5
 title: >-
   RFC-0050 follow-up: PostToolUse large-output notice for main-session roles and the Explore-first rule in the planner and dispatch skills
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-02'
 labels:
@@ -54,9 +54,9 @@ re-read hundreds of times.
    that list can be computed.
 
 ## Acceptance Criteria
-- [ ] A fixture tool result over the threshold in a planner-role session returns the notice; the same result in a developer-role session returns nothing; the hook never exits non-zero.
-- [ ] The threshold is read from the usage config with the documented default.
-- [ ] The planner skill carries the Explore-first rule.
-- [ ] Ledger records carry the tool name where the transcript provides it (fixture).
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
+- [x] A fixture tool result over the threshold in a planner-role session returns the notice; the same result in a developer-role session returns nothing; the hook never exits non-zero.
+- [x] The threshold is read from the usage config with the documented default.
+- [x] The planner skill carries the Explore-first rule.
+- [x] Ledger records carry the tool name where the transcript provides it (fixture).
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->

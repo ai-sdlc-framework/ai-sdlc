@@ -42,6 +42,8 @@ export interface ModelCallRecord {
   billingPool: BillingPool;
   sessionId: string;
   agentId?: string;
+  /** Tools the call asked to run (RFC-0050), where the transcript provides them. */
+  toolNames?: string[];
   /** For example 'main-session' or 'ai-sdlc:developer'. */
   agentRole: string;
   scope: UsageScope;

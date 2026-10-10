@@ -134,3 +134,131 @@ describe('ai-sdlc-plugin collect-tool-sequence hook', () => {
     assert.equal(entry.action, 'git add -A', 'should use last command after &&');
   });
 });
+
+describe('large-output notice (AISDLC-651.5)', async () => {
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const lib = await import('./lib/large-output-notice.js');
+  const { largeOutputNotice, noticeTokensFromYaml, DEFAULT_NOTICE_TOKENS } = lib.default ?? lib;
+
+  const big = 'x'.repeat(DEFAULT_NOTICE_TOKENS * 4 + 4);
+  let project;
+  let usageDir;
+  before(() => {
+    project = mkdtempSync(join(tmpdir(), 'lon-proj-'));
+    usageDir = mkdtempSync(join(tmpdir(), 'lon-usage-'));
+    mkdirSync(join(project, '.ai-sdlc', 'dispatch'), { recursive: true });
+    writeFileSync(join(project, '.ai-sdlc', 'dispatch', 'hierarchy.json'), '{}');
+  });
+  after(() => {
+    rmSync(project, { recursive: true, force: true });
+    rmSync(usageDir, { recursive: true, force: true });
+  });
+
+  const env = () => ({ CLAUDE_PROJECT_DIR: project, AI_SDLC_USAGE_DIR: usageDir });
+  const asRole = (role) => () => ({ role });
+  const noBase = () => null;
+
+  it('returns the notice for a planner session and an over-threshold result', () => {
+    const msg = largeOutputNotice(
+      { tool_response: big },
+      { env: env(), resolveRole: asRole('planner'), readBase: noBase },
+    );
+    assert.match(msg, /Explore subagent/);
+    assert.match(msg, /tail/);
+    assert.match(msg, /artifacts directory/);
+    assert.match(msg, /8000 token/);
+  });
+
+  it('covers operator-dispatch and object-shaped results', () => {
+    const msg = largeOutputNotice(
+      { tool_response: { stdout: big } },
+      { env: env(), resolveRole: asRole('operator-dispatch'), readBase: noBase },
+    );
+    assert.ok(msg);
+  });
+
+  it('returns nothing for developer and executor roles, or below the threshold', () => {
+    for (const role of ['developer', 'executor']) {
+      assert.equal(
+        largeOutputNotice({ tool_response: big }, { env: env(), resolveRole: asRole(role) }),
+        null,
+      );
+    }
+    assert.equal(
+      largeOutputNotice(
+        { tool_response: 'small' },
+        { env: env(), resolveRole: asRole('planner'), readBase: noBase },
+      ),
+      null,
+    );
+    assert.equal(largeOutputNotice({}, { env: env(), resolveRole: asRole('planner') }), null);
+  });
+
+  it('returns nothing outside a hierarchy and never throws', () => {
+    const lone = mkdtempSync(join(tmpdir(), 'lon-none-'));
+    try {
+      assert.equal(
+        largeOutputNotice(
+          { tool_response: big, cwd: lone },
+          { env: { CLAUDE_PROJECT_DIR: lone }, resolveRole: asRole('planner') },
+        ),
+        null,
+      );
+    } finally {
+      rmSync(lone, { recursive: true, force: true });
+    }
+    assert.equal(
+      largeOutputNotice(
+        { tool_response: big },
+        {
+          env: env(),
+          resolveRole: () => {
+            throw new Error('boom');
+          },
+        },
+      ),
+      null,
+    );
+  });
+
+  it('reads the threshold from the machine config, then the base config, else 8000', () => {
+    const text =
+      'apiVersion: ai-sdlc.io/v1alpha1\nkind: UsageConfig\nspec:\n  output:\n    noticeTokens: 100\n';
+    assert.equal(noticeTokensFromYaml(text), 100);
+    assert.equal(noticeTokensFromYaml('spec:\n  output:\n    noticeTokens: 0\n'), undefined);
+    assert.equal(noticeTokensFromYaml('spec: {}\n'), undefined);
+
+    const mid = 'y'.repeat(2000); // 500 tokens: under the default, over a threshold of 100
+    const opts = { env: env(), resolveRole: asRole('planner') };
+    assert.equal(largeOutputNotice({ tool_response: mid }, { ...opts, readBase: noBase }), null);
+    assert.ok(largeOutputNotice({ tool_response: mid }, { ...opts, readBase: () => text }));
+
+    writeFileSync(join(usageDir, 'usage-config.yaml'), text.replace('100', '5000'));
+    assert.equal(
+      largeOutputNotice({ tool_response: mid }, { ...opts, readBase: () => text }),
+      null,
+    );
+    rmSync(join(usageDir, 'usage-config.yaml'));
+  });
+
+  it('the hook exits 0 with no output for a large result outside a hierarchy', () => {
+    const result = runHook({
+      tool_name: 'Read',
+      tool_input: { file_path: '/a.txt' },
+      tool_response: big,
+      session_id: `test-big-${Date.now()}`,
+    });
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.output, '');
+  });
+});
+
+describe('explore-first rule in the skills (AISDLC-651.5)', () => {
+  for (const skill of ['planner', 'operator-dispatch']) {
+    it(`${skill} skill carries the rule`, () => {
+      const text = readFileSync(join(__dirname, '..', 'commands', `${skill}.md`), 'utf-8');
+      assert.match(text, /\*\*Explore first\.\*\*/);
+      assert.match(text, /`Explore` or Sonnet subagent/);
+    });
+  }
+});

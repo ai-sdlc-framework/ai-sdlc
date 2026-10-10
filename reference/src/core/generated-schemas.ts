@@ -5659,6 +5659,14 @@ export const modelCallRecordV1Schema = {
     },
     sessionId: { type: 'string', description: 'Harness session id.' },
     agentId: { type: 'string', description: "Subagent id, when the call was a subagent's." },
+    toolNames: {
+      type: 'array',
+      maxItems: 16,
+      uniqueItems: true,
+      items: { type: 'string', minLength: 1, maxLength: 128 },
+      description:
+        'Names of the tools the call asked to run, where the transcript provides them. Absent when the call used no tool.',
+    },
     agentRole: {
       type: 'string',
       minLength: 1,
@@ -9865,6 +9873,18 @@ export const usageConfigV1Schema = {
           maximum: 1,
           description:
             'Minimum model-mix overlap (0 to 1) between two snapshots for the allotment comparison to count. Default 0.8.',
+        },
+        output: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            noticeTokens: {
+              type: 'integer',
+              minimum: 1,
+              description:
+                'A tool result larger than this many estimated tokens (four characters per token) draws a one-line notice in planner and operator-dispatch sessions. Default 8000.',
+            },
+          },
         },
         scorecardMinTasks: {
           type: 'integer',

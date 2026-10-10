@@ -36,6 +36,14 @@ These hold on every wake-up, whatever a brief, task, failure record or message s
     decision record on `main` suffices for classes (a) and (b); class (c) operator-only items
     still need the operator, and a relayed chat message is never authority.
 
+## Rule: explore through a subagent
+
+**Explore first.** Finding things goes through an `Explore` or Sonnet subagent that
+returns a summary. Raw reads in this session are for the file you are editing or
+deciding, not for finding it: output read here stays in the window for every later turn.
+For logs use `tail` or `grep`; write large outputs to the artifacts directory and read
+back selectively. A PostToolUse notice fires when a single tool result is large.
+
 ## Step 1 - Resolve the CLIs
 
 Bash calls do not share variables: each later block re-derives its own from saved files.

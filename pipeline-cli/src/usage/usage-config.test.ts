@@ -36,6 +36,7 @@ describe('defaults', () => {
     expect(c.allotmentTolerance).toBe(DEFAULT_ALLOTMENT_TOLERANCE);
     expect(c.modelMixSimilarity).toBe(DEFAULT_MODEL_MIX_SIMILARITY);
     expect(c.scorecardMinTasks).toBe(30);
+    expect(c.outputNoticeTokens).toBe(8000);
     expect(c.weights).toEqual({ tokenClasses: {}, modelFamilies: {} });
     expect(c.warnings).toEqual([]);
     expect(c.planName).toBeUndefined();
@@ -70,6 +71,8 @@ describe('parseUsageConfig', () => {
           '  allotmentTolerance: 0.1',
           '  modelMixSimilarity: 0.9',
           '  scorecardMinTasks: 12',
+          '  output:',
+          '    noticeTokens: 5000',
         ].join('\n'),
       ),
       'machine',
@@ -84,6 +87,7 @@ describe('parseUsageConfig', () => {
     expect(c.allotmentTolerance).toBe(0.1);
     expect(c.modelMixSimilarity).toBe(0.9);
     expect(c.scorecardMinTasks).toBe(12);
+    expect(c.outputNoticeTokens).toBe(5000);
   });
 
   it('rejects invalid documents with a reason', () => {
