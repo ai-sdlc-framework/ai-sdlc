@@ -82,11 +82,12 @@ permissions:
 
 jobs:
   # ── Archetype detection ─────────────────────────────────────────────────
-  # Mirrors the docs-only path predicate used by `ai-sdlc-review.yml`,
-  # `verify-attestation.yml`, and `ai-sdlc-review-docs-only.yml`. The
-  # `dorny/paths-filter@v4` action runs unconditionally and emits a single
-  # boolean output (`docs_only`) that the downstream gating jobs use to
-  # decide whether to short-circuit.
+  # AISDLC-484: `docs_only` is computed by `scripts/is-docs-only-changeset.mjs`
+  # (the single source of truth shared with `ai-sdlc-review.yml` and
+  # `verify-attestation.yml`) fed the PR's changed-file list. The former
+  # dorny docs_only filter step (quantifier "every") never fired in
+  # production, so every docs PR ran the full matrix. The `deps` and `tasks`
+  # outputs still come from dorny filters (default `some` quantifier).
   detect:
     name: Detect Changes
     runs-on: ubuntu-latest
@@ -94,28 +95,36 @@ jobs:
     # cascades — a draft event causes no jobs to run at all.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     outputs:
-      docs_only: ${{ steps.filter.outputs.docs_only }}
+      docs_only: ${{ steps.classify.outputs.docs_only }}
       deps: ${{ steps.deps-filter.outputs.deps }}
       tasks: ${{ steps.tasks-filter.outputs.tasks }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - id: filter
-        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
-          # `predicate-quantifier: every` makes `docs_only` true only when
-          # EVERY changed file matches at least one of the listed
-          # patterns. The default (`some`) would treat a mixed PR (one
-          # docs file + one code file) as docs-only, incorrectly skipping
-          # the build-test-coverage gates. Mirrors the docs-only pattern
-          # set used by `ai-sdlc-review-docs-only.yml`.
-          predicate-quantifier: 'every'
-          filters: |
-            docs_only:
-              - 'spec/rfcs/**'
-              - 'docs/**'
-              - 'backlog/tasks/**'
-              - 'backlog/completed/**'
-              - '*.md'
+          # Full history so the PR base SHA is present for `git diff`.
+          fetch-depth: 0
+      - name: Classify changeset
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # Fail safe: any inability to compute the PR diff resolves to
+          # docs_only=false (run the full matrix), never true.
+          if [ -n "$BASE_SHA" ]; then
+            if FILES=$(git -c core.quotePath=false diff --name-only "$BASE_SHA" "$HEAD_SHA"); then
+              RESULT=$(printf '%s\n' "$FILES" | node scripts/is-docs-only-changeset.mjs)
+            else
+              echo "::warning::git diff failed; treating changeset as not docs-only"
+              RESULT=false
+            fi
+          else
+            # Non-PR event (no base SHA): classify every tracked file.
+            RESULT=$(git -c core.quotePath=false ls-files | node scripts/is-docs-only-changeset.mjs)
+          fi
+          if [ "$RESULT" != "true" ]; then RESULT=false; fi
+          echo "docs_only=$RESULT" >> "$GITHUB_OUTPUT"
       # Second filter (default `some` quantifier): true when the PR touches
       # dependency manifests OR GitHub Actions workflows/composite actions.
       # Drives the dependency-review-gate job — covers npm + github-actions

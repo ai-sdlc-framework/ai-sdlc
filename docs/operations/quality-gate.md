@@ -50,7 +50,7 @@ This is the same pattern shipped in production by **aiohttp**, **attrs**, **cond
 
 | Job | Always required | Required for code/mixed PRs only |
 |---|---|---|
-| `Detect Changes` (archetype detection via `dorny/paths-filter@v3`) | yes | — |
+| `Detect Changes` (docs-only archetype via `scripts/is-docs-only-changeset.mjs`; deps/tasks via `dorny/paths-filter`) | yes | — |
 | `Lint & Format` (`pnpm lint && pnpm format:check`) | yes | — |
 | `Build & Test (Node 20)` | — | yes |
 | `Build & Test (Node 22)` | — | yes |
@@ -62,7 +62,7 @@ This is the same pattern shipped in production by **aiohttp**, **attrs**, **cond
 Per-archetype gating decisions:
 
 - **docs-only PRs** (every changed file matches `spec/rfcs/**`, `docs/**`, `backlog/{tasks,completed}/**`, or root `*.md`) skip the four code-gated jobs. `re-actors/alls-green` treats `skipped` as `success`, so the aggregator passes cleanly without paying ~10 minutes of compute on a typo fix.
-- **code or mixed PRs** require all six jobs to pass. The `predicate-quantifier: every` setting on the path filter ensures a PR with one docs file plus one code file correctly resolves to "code/mixed", not "docs-only".
+- **code or mixed PRs** require all six jobs to pass. The `classify` step in `Detect Changes` feeds the PR's changed-file list (`git diff --name-only <base> <head>`) to `scripts/is-docs-only-changeset.mjs`, which requires EVERY file to be docs, so a PR with one docs file plus one code file resolves to "code/mixed". If the diff cannot be computed on a PR, it fails safe to `docs_only=false` (AISDLC-484).
 - **Integration tests** additionally skip on PRs originating from forks (which lack the repo secrets needed to talk to the reference adapter). Same predicate as `ci.yml`'s `integration` job — kept in sync deliberately.
 
 ## DoR readiness for task-file PRs (AISDLC-712.1)
