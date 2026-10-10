@@ -132,6 +132,9 @@ const NON_INSTRUMENTED_PATTERNS = [
   // Test fixtures and manual mocks are test support loaded by tests, outside any
   // package's coverage include (AISDLC-726).
   /(^|\/)__(?:fixtures|mocks)__\//,
+  // Test stub/alias support dirs (`tests/stubs/`) used by vitest aliases; outside
+  // any coverage include (AISDLC-743).
+  /(^|\/)tests\/stubs\//,
   // Generated schemas — sanctioned exclusion per CLAUDE.md.
   /(^|\/)generated-schemas\.ts$/,
   // bin/*.mjs CLI entrypoint shims — these are thin argv-parse thunks that
