@@ -93,6 +93,28 @@ describe('commandRunsGhPrMerge', () => {
       assert.equal(m.commandRunsGhPrMerge(c), false, c);
     }
   });
+  it('keeps pipe tracking across fd redirections containing & (AISDLC-605)', () => {
+    const phrase = ['gh', 'pr', 'merge', '42'].join(' ');
+    for (const redir of ['2>&1', '>&2', '&>', '&>/dev/null', '2>&1 1>&2', '<&3']) {
+      for (const sink of ['sh', 'bash']) {
+        const c = `echo "${phrase}" ${redir} | ${sink}`;
+        assert.equal(m.commandRunsGhPrMerge(c), true, c);
+      }
+    }
+    // data-only use stays allowed
+    assert.equal(m.commandRunsGhPrMerge(`echo "${phrase}" 2>&1 | cat`), false);
+  });
+  it('still treats && , & and background & as operators (AISDLC-605)', () => {
+    assert.deepEqual(m.splitShellSegments('a && b'), ['a', 'b']);
+    assert.deepEqual(m.splitShellSegments('a & b'), ['a', 'b']);
+    assert.deepEqual(m.splitShellSegments('a &'), ['a']);
+    assert.deepEqual(m.splitShellSegments('a 2>&1 | b'), ['a 2>&1', 'b']);
+    assert.deepEqual(
+      m.splitShellSegmentsEx('a 2>&1 | b').map((s) => s.pipe),
+      [false, true],
+    );
+    assert.equal(m.commandRunsGhPrMerge(`sleep 1 & ${['gh', 'pr', 'merge', '1'].join(' ')}`), true);
+  });
   it('does not let a fake heredoc opener hide a real command', () => {
     assert.equal(m.commandRunsGhPrMerge('echo "<<X"\ngh pr merge 1'), true);
     assert.equal(m.commandRunsGhPrMerge('echo $((1<<X))\ngh pr merge 1'), true);

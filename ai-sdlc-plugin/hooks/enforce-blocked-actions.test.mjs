@@ -9,7 +9,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, rmSync, symlinkSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1156,6 +1156,9 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (API-merge governance)', (
         'echo ok && gh pr merge 42',
         'echo "x" | xargs gh pr merge',
         'echo "gh pr merge 42" | sh',
+        'echo "gh pr merge 42" 2>&1 | sh',
+        'echo "gh pr merge 42" >&2 | bash',
+        'echo "gh pr merge 42" &> /dev/null | sh',
         'sudo gh pr merge 42',
         'env GH_TOKEN=x gh pr merge 42',
         'echo "<<X"\ngh pr merge 42',
@@ -2205,6 +2208,13 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (scratch dirs, AISDLC-605)
     it(`${tool} to an OS temp directory is allowed by default`, () => {
       assert.ok(!isDenied(write(tool, join(scratchPlain, 'notes.txt'))));
       assert.ok(!isDenied(write(tool, join(scratchPlain, 'deep', 'er', 'notes.txt'))));
+    });
+
+    it(`${tool} does not treat TMPDIR=/, home, or an ancestor of home as scratch`, () => {
+      for (const bad of [sep, homedir(), dirname(homedir())]) {
+        const target = join(homedir(), 'aisdlc-605-nonexistent', 'a.ts');
+        assert.ok(isDenied(write(tool, target, { TMPDIR: bad })), `TMPDIR=${bad}`);
+      }
     });
 
     it(`${tool} to the session scratch directory (CLAUDE_SCRATCHPAD_DIR) is allowed`, () => {

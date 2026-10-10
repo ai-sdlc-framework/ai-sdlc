@@ -101,6 +101,17 @@ function splitShellSegmentsEx(command) {
       cur += c;
       continue;
     }
+    // fd redirections (`2>&1`, `>&2`, `<&3`, `&>`, `&>>`) are not control
+    // operators; splitting on their `&` would orphan the pipe flag so that the
+    // real downstream consumer (`... 2>&1 | sh`) is never checked.
+    if (
+      c === '&' &&
+      command[i + 1] !== '&' &&
+      (cur.endsWith('>') || cur.endsWith('<') || command[i + 1] === '>')
+    ) {
+      cur += c;
+      continue;
+    }
     if (c === '&' || c === '|' || c === ';' || c === '\n') {
       let isPipe = c === '|';
       if ((c === '&' || c === '|') && command[i + 1] === c) {
@@ -251,6 +262,10 @@ function findHeredocOpener(line) {
  * commands (`cat <<EOF`, `git commit -F - <<EOF`, `gh pr create --body-file - <<EOF`).
  * Any other opener (shells, interpreters, wrappers, unknown tools) keeps its
  * body so the matcher still sees it.
+ *
+ * Trade-off: dropping an inert body means a command-looking line inside it is
+ * never evaluated. That is intended (the body is data for `cat`/`git commit`),
+ * and it is the only way documentation that quotes a blocked phrase survives.
  */
 function stripInertHeredocBodies(command) {
   const lines = command.split('\n');
