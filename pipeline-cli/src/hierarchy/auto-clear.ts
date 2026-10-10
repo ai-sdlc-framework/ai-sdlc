@@ -12,21 +12,18 @@
  * `<board-dir>/config.json` under `contextThresholds` (keys are the role names).
  */
 
-import {
-  closeSync,
-  existsSync,
-  fstatSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  readSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { closeSync, existsSync, fstatSync, openSync, readFileSync, readSync } from 'node:fs';
 import path from 'node:path';
 
 import { now as clock } from '../clock.js';
-import { holdsInflight } from './clear.js';
+import {
+  AUTO_CLEAR_DEBOUNCE_MS,
+  holdsInflight,
+  markScheduled,
+  recentlyScheduled,
+} from './clear.js';
+
+export { AUTO_CLEAR_DEBOUNCE_MS, markScheduled, recentlyScheduled };
 import type { HierarchyRole } from './types.js';
 
 export const DEFAULT_CONTEXT_THRESHOLDS: Record<HierarchyRole, number> = {
@@ -35,8 +32,6 @@ export const DEFAULT_CONTEXT_THRESHOLDS: Record<HierarchyRole, number> = {
   executor: 120_000,
 };
 
-/** After a clear is scheduled, further turns inside this window do not schedule another. */
-export const AUTO_CLEAR_DEBOUNCE_MS = 120_000;
 /** Largest tail of the transcript examined. */
 const TAIL_BYTES = 512 * 1024;
 
@@ -118,27 +113,6 @@ export interface AutoClearInputs {
   name: string;
   transcriptPath: string;
   now?: () => Date;
-}
-
-function stampFile(boardDir: string, name: string): string {
-  return path.join(boardDir, 'handoff', `.auto-clear-${name}`);
-}
-
-/** True when a clear was scheduled for this session within the debounce window. */
-export function recentlyScheduled(boardDir: string, name: string, nowMs: number): boolean {
-  try {
-    const f = stampFile(boardDir, name);
-    return existsSync(f) && nowMs - statSync(f).mtimeMs < AUTO_CLEAR_DEBOUNCE_MS;
-  } catch {
-    return false;
-  }
-}
-
-/** Record that a clear was scheduled now. */
-export function markScheduled(boardDir: string, name: string): void {
-  const f = stampFile(boardDir, name);
-  mkdirSync(path.dirname(f), { recursive: true });
-  writeFileSync(f, '', 'utf-8');
 }
 
 /** Decide whether the session should clear itself now. Pure apart from reads. */

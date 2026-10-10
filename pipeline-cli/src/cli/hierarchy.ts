@@ -66,7 +66,6 @@ import {
   clearExecutor,
   clearSelf,
   decideAutoClear,
-  markScheduled,
   readHandoff as readGeneratedHandoff,
   writeHandoff,
   createGitRunner,
@@ -757,7 +756,6 @@ export async function runHierarchyCli(
           },
           { run: deps.run, boardDir: deps.boardDir, log: deps.log },
         );
-        markScheduled(deps.boardDir, self.name);
         deps.log(JSON.stringify({ ...decision, handoff: handoff.file, scheduled: result }));
         return 0;
       }
