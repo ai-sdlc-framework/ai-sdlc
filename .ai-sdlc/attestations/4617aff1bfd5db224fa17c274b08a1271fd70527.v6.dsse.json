@@ -1,0 +1,69 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "24d8f1616bb20171afbd935cb3a67ac9a7d618b6"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "5460cbc13d60b469b769c78852832d4ceead3d0a68dd7a1773ac17df12373468",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "5460cbc13d60b469b769c78852832d4ceead3d0a68dd7a1773ac17df12373468",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "fe78469029917397f6874de5ffbe6e14bb29118528ebeb14ebd286b114c6af81",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "fe78469029917397f6874de5ffbe6e14bb29118528ebeb14ebd286b114c6af81",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "474ba24d75a683ab43f62b10b8405d916614f05d2192c9747b4b709730afc7cc",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "474ba24d75a683ab43f62b10b8405d916614f05d2192c9747b4b709730afc7cc",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "1ffda29296195572fe48afe6bf41f27de3f26481d36e42e56884d155cd597778",
+        "cc7e8c49a60071d72d3251ffa68f4c71869b4cfd91a348781db18657a8d74149"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "3061801caa1f428365eac8f1ad61bb1943a286e89e2266408436d5a06f9868a0",
+        "cc7e8c49a60071d72d3251ffa68f4c71869b4cfd91a348781db18657a8d74149"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "6f1ebed86f4277626b0c9bfecf6474caa75bb7b44660438f65cb07e02e5c4463",
+        "8f934dede1af0d37a24bd1d9c05b3e7d217f607f51ac0bdbde829325cbd13c35"
+      ]
+    }
+  ],
+  "rootHash": "2939161f6cafdb854a3771ccebcbde62797442daead84a3730db4f44278df160",
+  "rootSignature": "Q+hiHeu2XZmgjvQyAHp+5MZMSky6wkWlTblz/DmxDsEwtNCmzLGsCfC9iMCh+yhmD20Oh+npaNaimTZouRR3Ag==",
+  "nonce": "e5bd067f9589e80536c59334bd729eb10ae3d60786da2b9ed85c5716bf444c56",
+  "leafCount": 3,
+  "signedAt": "2026-10-10T21:04:31.902Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "full",
+    "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
+  }
+}
