@@ -300,16 +300,20 @@ function unquotedView(segment) {
 }
 
 /**
- * True when an unquoted `<` / `>` redirection operator is glued to a word
- * (`gh>/dev/null`, `pr>x`, `2>/dev/null`, `<<<x`, `<(cmd)`): whitespace splitting then
- * cannot normalise the segment to plain words. Bare operator tokens (`>`, `>>`), and pure
- * fd forms (`2>&1`, `>&2`, `&>`, `<&3`) are ordinary and stay non-opaque.
+ * True when an unquoted shell metacharacter (`(`, `)`, `{`, `}`, `;`, `|`, `&`, `<`, `>`,
+ * backtick, `!`) is glued to a word (`gh>/dev/null`, `a)gh`, `42)`, `<<<x`, `<(cmd)`):
+ * whitespace splitting then cannot normalise the segment to plain words. Bare operator
+ * tokens (`>`, `>>`, `{`, `)`), pure fd forms (`2>&1`, `>&2`, `&>`, `<&3`) and a leading
+ * `(` / `{` / `!` group before the command word are ordinary and stay non-opaque.
  */
 function hasGluedRedirection(segment) {
-  return unquotedView(stripComment(segment))
-    .split(/\s+/)
-    .filter(Boolean)
-    .some((tok) => /[<>]/.test(tok) && !/^\d*(?:[<>]{1,3}|&>>?|>&|<&|>>&)\d*-?$/.test(tok));
+  const toks = unquotedView(stripComment(segment)).split(/\s+/).filter(Boolean);
+  return toks.some((raw, i) => {
+    const tok = i === 0 ? raw.replace(/^[({!]+/, '') : raw;
+    if (!/[()<>&|;{}`!]/.test(tok)) return false;
+    if (/^[()<>&|;{}`!]+$/.test(tok)) return false;
+    return !/^\d*(?:[<>]{1,3}|&>>?|>&|<&|>>&)\d*-?$/.test(tok);
+  });
 }
 
 /**
@@ -483,11 +487,14 @@ function wordAlternatives(word) {
  * `mergeStateStatus` / `mergeable` are not the token `merge`.
  */
 function ghSegmentHasPrBeforeMerge(text) {
-  const tokens = text
-    .replace(/['"\\]/g, '')
-    .replace(/[<>&]/g, ' ') // unquoted or not, redirection / control characters bound a word
-    .split(/\s+/)
-    .filter(Boolean);
+  const base = text.replace(/['"\\]/g, '');
+  // Every shell metacharacter bounds a word, quoted or not (fail closed). Braces are kept
+  // in one variant so brace expansion (`{merge,}`) is still seen per word.
+  const split = (t) => t.split(/\s+/).filter(Boolean);
+  const variants = [
+    split(base.replace(/[()<>&|;!`]/g, ' ')),
+    split(base.replace(/[(){}<>&|;!`]/g, ' ')),
+  ];
   const isGh = (t) =>
     t
       .replace(/^[({!]+/, '')
@@ -495,16 +502,18 @@ function ghSegmentHasPrBeforeMerge(text) {
       .pop()
       .toLowerCase()
       .replace(/\.exe$/, '') === 'gh';
-  for (let g = 0; g < tokens.length; g++) {
-    if (!isGh(tokens[g])) continue;
-    let seenPr = false;
-    let seenAlias = false;
-    for (const t of tokens.slice(g + 1)) {
-      const alts = wordAlternatives(t.toLowerCase());
-      if (seenPr && alts.includes('merge')) return true;
-      if (seenAlias && (alts.includes('set') || alts.includes('import'))) return true;
-      if (alts.includes('pr')) seenPr = true;
-      if (alts.includes('alias')) seenAlias = true;
+  for (const tokens of variants) {
+    for (let g = 0; g < tokens.length; g++) {
+      if (!isGh(tokens[g])) continue;
+      let seenPr = false;
+      let seenAlias = false;
+      for (const t of tokens.slice(g + 1)) {
+        const alts = wordAlternatives(t.toLowerCase());
+        if (seenPr && alts.includes('merge')) return true;
+        if (seenAlias && (alts.includes('set') || alts.includes('import'))) return true;
+        if (alts.includes('pr')) seenPr = true;
+        if (alts.includes('alias')) seenAlias = true;
+      }
     }
   }
   return false;

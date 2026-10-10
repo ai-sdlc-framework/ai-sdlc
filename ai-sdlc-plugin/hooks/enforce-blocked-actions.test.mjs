@@ -2454,4 +2454,39 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 pr-before-merg
       assert.ok(!isDenied(run(c)), c);
     }
   });
+
+  it('refuses every glued shell metacharacter spelling (round 11)', () => {
+    for (const c of [
+      `case a in a)${gh} -R o/r pr ${mg} --squash 42;; esac`,
+      `(${gh} -R o/r pr --squash 42 ${mg})`,
+      `case a in a)${gh} -b x pr ${mg} 42;; esac`,
+      `(${gh} -R o/r pr ${mg} --squash 42)`,
+      `{ ${gh} -b x pr ${mg} 42;}`,
+      `a|${gh} -b x pr ${mg} 42`,
+      `x;${gh} -b x pr ${mg} 42`,
+      `${gh} -b x pr ${mg} 42;`,
+      `echo a&&${gh} -b x pr ${mg} 42`,
+      `echo x|${gh} pr ${mg} 42`,
+      `!${gh} pr ${mg} 42`,
+      `${gh} pr ${mg})42`,
+      `${gh}<<<x pr ${mg} 42`,
+      `${gh}<(true) pr ${mg} 42`,
+    ]) {
+      assert.ok(isDenied(run(c)), c);
+    }
+  });
+
+  it('still allows read-only gh and plain commands (round 11)', () => {
+    for (const c of [
+      `${gh} pr view 5 --json ${mg}StateStatus,${mg}able`,
+      `${gh} -R o/r pr view 5`,
+      `${gh} pr list --repo o/r`,
+      `${gh} pr list --search "is:open"`,
+      `${gh} alias list`,
+      `echo hi > f`,
+      `cmd 2>&1`,
+    ]) {
+      assert.ok(!isDenied(run(c)), c);
+    }
+  });
 });

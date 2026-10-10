@@ -471,3 +471,52 @@ describe('round-10: redirections glued to words are opaque (AISDLC-605)', () => 
     assert.equal(m.isOpaqueSegment('cmd 2>&1'), false);
   });
 });
+
+describe('round-11: every glued shell metacharacter is a word boundary and opaque (AISDLC-605)', () => {
+  const mg = ['mer', 'ge'].join('');
+  const gh = ['g', 'h'].join('');
+  const refused = [
+    `case a in a)${gh} -R o/r pr ${mg} --squash 42;; esac`,
+    `(${gh} -R o/r pr --squash 42 ${mg})`,
+    `case a in a)${gh} -b x pr ${mg} 42;; esac`,
+    `(${gh} -R o/r pr ${mg} --squash 42)`,
+    `{ ${gh} -b x pr ${mg} 42;}`,
+    `a|${gh} -b x pr ${mg} 42`,
+    `x;${gh} -b x pr ${mg} 42`,
+    `${gh} -b x pr ${mg} 42;`,
+    `echo a&&${gh} -b x pr ${mg} 42`,
+    `echo x|${gh} pr ${mg} 42`,
+    `!${gh} pr ${mg} 42`,
+    `${gh} pr ${mg})42`,
+    `${gh}<<<x pr ${mg} 42`,
+    `${gh}<(true) pr ${mg} 42`,
+  ];
+  it('refuses every glued-metacharacter spelling', () => {
+    for (const c of refused) assert.equal(m.commandRunsGhPrMerge(c), true, c);
+  });
+  it('marks glued metacharacters opaque but leading groups and spaced forms are not', () => {
+    assert.equal(m.isOpaqueSegment('echo a)b'), true);
+    assert.equal(m.isOpaqueSegment('echo 42)'), true);
+    assert.equal(m.isOpaqueSegment('x;y'), true);
+    assert.equal(m.isOpaqueSegment('(echo hi'), false);
+    assert.equal(m.isOpaqueSegment('{ echo hi'), false);
+    assert.equal(m.isOpaqueSegment('!echo hi'), false);
+    assert.equal(m.isOpaqueSegment('cmd 2>&1'), false);
+    assert.equal(m.isOpaqueSegment('echo hi > f'), false);
+  });
+  it('keeps the earlier allow-cases allowed', () => {
+    for (const c of [
+      `${gh} pr view 5 --json ${mg}StateStatus,${mg}able`,
+      `${gh} -R o/r pr view 5`,
+      `${gh} pr list --repo o/r`,
+      `${gh} pr list --search "is:open"`,
+      `${gh} alias list`,
+      `${gh} pr view 5 > out.txt`,
+      `echo hi > f`,
+      `cmd 2>&1`,
+      `git commit -m "fix: pr ${mg} (hook)"`,
+    ]) {
+      assert.equal(m.commandRunsGhPrMerge(c), false, c);
+    }
+  });
+});
