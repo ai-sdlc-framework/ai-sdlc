@@ -2339,6 +2339,22 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 opaque-segment
     }
   });
 
+  it('refuses globs in the subcommand slot (round 7)', () => {
+    for (const c of [`touch ${mg}; ${gh} pr m?rge 5`, `echo > ${mg}; ${gh} pr m[e]rge 5`]) {
+      assert.ok(isDenied(run(c)), c);
+    }
+  });
+
+  it('allows read-only gh with merge-prefixed fields (round 7)', () => {
+    for (const c of [
+      `${gh} pr view $PR --json mergeStateStatus`,
+      `${gh} pr view $N --json mergeable`,
+      `${gh} pr view $N --json state # no ${mg}`,
+    ]) {
+      assert.ok(!isDenied(run(c)), c);
+    }
+  });
+
   it('still allows prose, read-only gh', () => {
     for (const c of [
       `echo "${gh} pr ${mg} is forbidden"`,

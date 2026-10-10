@@ -15,6 +15,11 @@
  * quotes the merge phrase is refused. Stripping "inert" bodies kept spawning
  * bypasses where this matcher and bash disagreed on where a body starts.
  * Best-effort text matching, not a sandbox: branch protection is the backstop.
+ *
+ * Accepted limits (out of text-matching scope; branch protection and
+ * cli-merge-if-eligible are the backstop): variables assembled from parts
+ * (`a=mer b=ge; gh pr $a$b 5`), command substitution that prints the word, and
+ * two-step store-then-run (write the phrase to a script file, then run it).
  */
 
 const INERT_WORDS = new Set([
@@ -315,6 +320,8 @@ function isOpaqueSegment(segment) {
   const eff = effectiveTokens(segment);
   if (eff.slice(0, 6).some((t) => /\$|`|<\(|>\(/.test(t))) return true;
   if (eff.length && /[*?[\]\\]/.test(eff[0])) return true;
+  // A glob in the subcommand slot (`gh pr m?rge 5`) can expand to a file named merge.
+  if (eff.slice(0, 4).some((t) => /[*?[\]]/.test(t))) return true;
   return false;
 }
 
@@ -404,8 +411,13 @@ function mentionsApiMerge(text) {
 function commandHasUninertMatch(command, matches, mentions) {
   const segs = splitShellSegmentsEx(command);
   if (mentions && commandIsOpaque(command, segs)) {
-    const raw = command.replace(/\\\n/g, '');
-    if (mentions(raw) || normalizeExpansions(command).some((v) => mentions(v))) return true;
+    // Comment text is ignored only where the comment boundary is trusted (no `$'` / `$"`).
+    const trusted = !/\$['"]/.test(command);
+    const view = (t) => (trusted ? stripComment(t) : t);
+    const raw = trusted
+      ? segs.map((s) => stripComment(s.text)).join('\n')
+      : command.replace(/\\\n/g, '');
+    if (mentions(raw) || normalizeExpansions(raw).some((v) => mentions(v))) return true;
     for (const s of segs) {
       if (mentions !== mentionsGhPrMerge || !isOpaqueSegment(s.text)) continue;
       const first = effectiveTokens(s.text)
@@ -419,7 +431,7 @@ function commandHasUninertMatch(command, matches, mentions) {
         );
       if (
         first.some((t) => t === 'gh' || t === 'gh.exe') &&
-        normalizeExpansions(s.text).some((v) => /merge/i.test(v) && !mentionsApiMerge(v))
+        normalizeExpansions(view(s.text)).some((v) => /\bmerge\b/i.test(v) && !mentionsApiMerge(v))
       )
         return true;
     }

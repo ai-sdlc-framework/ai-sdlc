@@ -347,3 +347,36 @@ describe('round-5 structural rule: opaque segments mentioning the merge phrase a
     }
   });
 });
+
+describe('round-7: globs in the subcommand slot and word-boundary gh fallback (AISDLC-605)', () => {
+  const mg = ['mer', 'ge'].join('');
+  const gh = ['g', 'h'].join('');
+  it('refuses a glob in the subcommand slot', () => {
+    for (const c of [`touch ${mg}; ${gh} pr m?rge 5`, `echo > ${mg}; ${gh} pr m[e]rge 5`]) {
+      assert.equal(m.commandRunsGhPrMerge(c), true, c);
+    }
+    assert.equal(m.isOpaqueSegment(`${gh} pr m?rge 5`), true);
+  });
+  it('still refuses spliced spellings', () => {
+    for (const c of [
+      `${gh} pr mer$(:)ge 42`,
+      `${gh} pr mer{g..g}e 42`,
+      `${gh} p{r..r} ${mg} 42`,
+      `${gh} pr mer\${u}ge 42`,
+    ]) {
+      assert.equal(m.commandRunsGhPrMerge(c), true, c);
+    }
+  });
+  it('allows read-only gh with merge-prefixed fields and trusted comments', () => {
+    for (const c of [
+      `${gh} pr view $PR --json mergeStateStatus`,
+      `${gh} pr view $N --json mergeable`,
+      `${gh} pr view $N --json state # no ${mg}`,
+    ]) {
+      assert.equal(m.commandRunsGhPrMerge(c), false, c);
+    }
+  });
+  it('keeps refusing when the quote state is untrusted', () => {
+    assert.equal(m.commandRunsGhPrMerge(`${gh} pr view $N $'x' # no ${mg}`), true);
+  });
+});
