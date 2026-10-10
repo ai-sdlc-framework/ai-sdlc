@@ -829,6 +829,7 @@ The developer returns a JSON object. Parse it and check:
 
 - If `commitSha` is `null`, the developer couldn't complete the task. Print the `notes` field, revert the task to `To Do` via `mcp__plugin_ai-sdlc_ai-sdlc__task_edit`, leave the worktree on disk for inspection, and stop. Print: "Worktree preserved at `$WORKTREE_PATH`. To clean up: `/ai-sdlc cleanup $TASK_ID`."
 - If any of `verifications.{build,test,lint}` is `failed`, treat as developer failure (same rollback as above).
+- If `notes.parked` is `true` (the developer hit its turn budget, AISDLC-651.3), treat it as a **parked** outcome, not a failure: do not roll back, keep the worktree and the WIP commit, print the `notes` (done / remaining / why), return the task to the board or operator with those notes attached, and stop before review.
 - Otherwise proceed to review.
 
 ### AISDLC-480 — dispatched-session AskUserQuestion routing (AC-2)

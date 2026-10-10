@@ -187,6 +187,32 @@ describe('integration — executePipeline (full Step 0-13)', () => {
     ).toBe(false);
   });
 
+  it('developer-parked path: a parked return yields developer-parked with the notes', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-102', title: 'parked developer', status: 'To Do' });
+    mkdirSync(join(tmp, '.worktrees', 'aisdlc-102'), { recursive: true });
+
+    const spawner = new MockSpawner({
+      developer: {
+        type: 'developer',
+        output: '',
+        parsed: { ...goodDev, notes: { parked: true, remaining: 'tests' } },
+        status: 'success',
+        durationMs: 0,
+      },
+    });
+    const result = await executePipeline({
+      taskId: 'AISDLC-102',
+      workDir: tmp,
+      spawner,
+      runner: makeHappyRunner().toRunner(),
+      skipFinalizeCommit: true,
+    });
+
+    expect(result.outcome).toBe('developer-parked');
+    expect(result.prUrl).toBeNull();
+    expect(result.notes).toMatch(/remaining: tests/);
+  });
+
   it('developer-failed path: returns developer-failed outcome without opening PR', async () => {
     writeTaskFile(tmp, {
       id: 'AISDLC-101',

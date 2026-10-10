@@ -138,6 +138,27 @@ export function loadContractRetries(artifactsDir: string): Map<string, number> {
   return out;
 }
 
+/**
+ * Developer tool calls per task, from the turn records the PostToolUse hook appends to
+ * `<usageDir>/developer-turns.jsonl` (AISDLC-651.3). Each line carries the running count of one
+ * agent run, so the run total is its maximum; runs of the same task are summed.
+ */
+export function loadDeveloperTurns(usageDir: string): Map<string, number> {
+  const perRun = new Map<string, { taskId: string; turns: number }>();
+  for (const raw of parseLines(join(usageDir, 'developer-turns.jsonl'))) {
+    const e = raw as Record<string, unknown> | null;
+    if (!e || typeof e !== 'object') continue;
+    if (typeof e.taskId !== 'string' || typeof e.agentId !== 'string') continue;
+    if (typeof e.turns !== 'number' || !Number.isFinite(e.turns)) continue;
+    const key = `${e.taskId}\u0000${e.agentId}`;
+    const prev = perRun.get(key);
+    if (!prev || e.turns > prev.turns) perRun.set(key, { taskId: e.taskId, turns: e.turns });
+  }
+  const out = new Map<string, number>();
+  for (const { taskId, turns } of perRun.values()) out.set(taskId, (out.get(taskId) ?? 0) + turns);
+  return out;
+}
+
 function fileSafe(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9._-]+/g, '-');
 }
