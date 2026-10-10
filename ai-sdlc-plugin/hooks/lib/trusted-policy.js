@@ -20,7 +20,7 @@
 
 'use strict';
 
-const { readFileSync, realpathSync, lstatSync } = require('fs');
+const { readFileSync, readdirSync, realpathSync, lstatSync } = require('fs');
 const { join, resolve, dirname, basename, sep } = require('path');
 const { execFileSync, spawnSync } = require('child_process');
 const { resolveGovernanceExtrasFromYaml } = require('./governance-resolver');
@@ -148,6 +148,55 @@ function isUnder(child, parent) {
 }
 
 /**
+ * True when this hook's own env names a hierarchy EXECUTOR session (set by
+ * `cli-hierarchy up`; the agent's Bash commands cannot change it) and the board
+ * under <main>/.ai-sdlc/dispatch/inflight/ holds EXACTLY ONE manifest claimed by
+ * that session, for `taskId` (lower-case). The claimer is the heartbeat
+ * `<task>.state.json` workerId (unqualified role name such as `executor-alpha`);
+ * the session name may carry a `<project>-` prefix. Every manifest must be a real
+ * file directly under inflight/ (no symlinks, nothing resolving elsewhere).
+ * Any error fails closed.
+ */
+function holdsInflightClaim(realMain, taskId) {
+  try {
+    const session = process.env.AI_SDLC_HIERARCHY_SESSION || '';
+    if (!session || process.env.AI_SDLC_HIERARCHY_ROLE !== 'executor') return false;
+    const inflight = join(realMain, '.ai-sdlc', 'dispatch', 'inflight');
+    const realInflight = safeReal(inflight);
+    if (realInflight !== join(realMain, '.ai-sdlc', 'dispatch', 'inflight')) return false;
+    const MANIFEST_SUFFIX = '.dispatch.json';
+    const mine = [];
+    for (const file of readdirSync(inflight)) {
+      if (!file.endsWith(MANIFEST_SUFFIX)) continue;
+      const manifest = join(inflight, file);
+      const st = lstatSync(manifest);
+      if (!st.isFile() || st.isSymbolicLink()) return false;
+      if (dirname(safeReal(manifest)) !== realInflight) return false;
+      const claimed = file.slice(0, -MANIFEST_SUFFIX.length);
+      const stateFile = join(inflight, `${claimed}.state.json`);
+      let sst;
+      try {
+        sst = lstatSync(stateFile);
+      } catch (err) {
+        if (err && err.code === 'ENOENT') continue; // no heartbeat yet: held by nobody we can name
+        throw err;
+      }
+      if (!sst.isFile() || sst.isSymbolicLink() || dirname(safeReal(stateFile)) !== realInflight) {
+        return false;
+      }
+      const workerId = JSON.parse(readFileSync(stateFile, 'utf-8')).workerId;
+      if (typeof workerId !== 'string' || !workerId) continue;
+      if (session === workerId || session.endsWith(`-${workerId}`)) {
+        mine.push(claimed.toLowerCase());
+      }
+    }
+    return mine.length === 1 && mine[0] === taskId;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Validates that the tool's cwd is a genuine dispatched worktree of the repo the
  * policy was loaded for, and returns its real root. All of these must hold, else
  * null (the caller fails closed):
@@ -181,8 +230,12 @@ function resolveLeaseWorktree(projectDir, cwd, run = runGit) {
     if (realProj !== realMain) {
       if (realProj !== top) return null;
     } else {
+      // A hierarchy executor (cli-hierarchy up) claims its task only after launch, so
+      // it is bound instead by the inflight claim it holds on the dispatch board.
       const bound = (process.env.AI_SDLC_ACTIVE_TASK_ID || '').toLowerCase();
-      if (!bound || readTaskId(top) !== bound) return null;
+      const taskId = readTaskId(top);
+      const envBound = !!bound && taskId === bound;
+      if (!envBound && !(taskId && holdsInflightClaim(realMain, taskId))) return null;
     }
     const gitDirRaw = run(['rev-parse', '--git-dir'], cwd);
     if (!gitDirRaw) return null;

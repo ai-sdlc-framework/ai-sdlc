@@ -126,6 +126,21 @@ cli-hierarchy up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
 The planner starts in the permission mode from the operator's settings (falling back to
 `default`); dispatch and executors start in `bypassPermissions`.
 
+Every session is started with `AI_SDLC_HIERARCHY_SESSION=<qualified name>` and
+`AI_SDLC_HIERARCHY_ROLE=<planner|operator-dispatch|executor>` in its environment, so the
+plugin hooks see them at launch and the agent's own Bash commands cannot change them.
+
+**Executor lease push (AISDLC-756).** Executors are rooted at the main checkout and claim a
+task only after launch, so the lease-push guard (`spec.governance.allowForcePush:
+leaseOnOwnBranch`) cannot bind them with `AI_SDLC_ACTIVE_TASK_ID`. For a main-rooted session it
+accepts the cwd task worktree when either that variable equals the worktree's `.active-task`,
+or `AI_SDLC_HIERARCHY_ROLE` is `executor` and the board's `inflight/` holds exactly one
+manifest claimed (heartbeat `workerId`) by this session, for the task in the worktree's
+`.active-task`. The dispatch and planner roles hold no claim and get no path. All the
+other worktree checks stay, and only the explicit `HEAD:refs/heads/<own-branch>` spelling is
+accepted. Hooks run from the installed plugin, so a restart (`down` then `up`) is needed
+after the plugin upgrade that ships this.
+
 Preflight, all before anything starts:
 
 - **Settings.** When any bypass session is to start, the effective `crossSessionInbound`
@@ -158,7 +173,7 @@ cli-hierarchy up --executors 3 --project billing-api
 
 Show the roster with each session's live state (`busy`, `idle`, `starting`, `gone`,
 `unknown`), whether a tmux client is attached, and the board's inflight task, plus the queue
-counts.
+counts. The table also lists each session's `HIERARCHY_SESSION` and `HIERARCHY_ROLE` values.
 
 ```bash
 cli-hierarchy status [--json]

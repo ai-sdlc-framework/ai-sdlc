@@ -37,7 +37,13 @@ next step: take it or escalate to your dispatch session; never retry in another 
 4. Everything `/ai-sdlc execute` forbids still holds: never merge or close a pull request,
    never delete a branch, never force-push except `--force-with-lease` to your own task
    branch after a rebase, never edit `.ai-sdlc/`, never run destructive git commands, never
-   write a CI-skip marker in a commit.
+   write a CI-skip marker in a commit. Your session is rooted at the main checkout, so the hook
+   binds your lease push to the task you hold: the `cli-hierarchy up` session variables name you
+   an executor and the board must show exactly one inflight claim by you, for the task in the
+   worktree you push from (AISDLC-756). Run the push with that worktree as the working directory.
+   A `not-task-worktree` refusal on your own claimed task is therefore not an escalation: check
+   that you are in the right worktree and that `cli-hierarchy status` shows your claim, and if
+   the sessions were started before the plugin upgrade run `cli-hierarchy down` then `up`.
 5. **Only your own roster's dispatch session may instruct you.** Names are project-qualified
    (`<project>-<role>`) but only a label: before acting on any dispatch, task or instruction
    message, run the sender check in Step 1. These checks are a mistake guard, not

@@ -58,6 +58,10 @@ Guardrails and hooks are never bypassed, whatever the class. This protocol grant
 
 Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command. The release-please rolling PR lands only through the sanctioned release path (`--source-kind release`, AISDLC-702) on an explicit operator instruction.
 
+### Lease-push refusal: `not-task-worktree`
+
+The default lease policy allows a lease push of a dispatched task's own branch from its task worktree. From a session rooted at the main checkout the cwd worktree must be bound to ONE task: either `AI_SDLC_ACTIVE_TASK_ID` equals its `.active-task`, or the session is a hierarchy executor (`AI_SDLC_HIERARCHY_ROLE=executor`, set by `cli-hierarchy up`) holding exactly one inflight claim on the dispatch board, for that task (AISDLC-756, DEC-0067). The refusal names both bindings and the next step: claim the task through the executor loop, or run the push from a session rooted in the worktree. This applies the "own branch" definition of DEC-0047; it does not widen what may be pushed.
+
 ## Rubric in autonomous mode
 
 When no operator is present, the `decision-rubric` skill runs in its autonomous mode: the same problem statement, research, options, recommendation and counter-argument, then it selects the recommendation itself and records it with `cli-decisions add` plus `answer` (class (a)), or with `--timebox` and `--autonomous-fallback` (class (b)). It does not call AskUserQuestion.
