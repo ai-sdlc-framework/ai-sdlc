@@ -88,6 +88,15 @@ export type OrchestratorEventType =
    * `impliedAllotment`, `changeRatio`.
    */
   | 'AllotmentChangeSuspected'
+  /**
+   * RFC-0050 B5 - emitted when a routing cell is moved back to its previous
+   * (stronger) model because the changed model's first-pass approval rate fell
+   * more than the allowed margin below the rate in the evidence for the change.
+   * Per-event fields: `role`, `taskClass`, `model` (the override), `tableModel`
+   * (the cell's model), `tasks`, `observedRate`, `evidenceRate`, optional
+   * `decisionId`.
+   */
+  | 'ModelRoutingOverrideApplied'
   | 'OrchestratorTaskAlreadyInFlight'
   | 'WorkerStateTransition'
   /**

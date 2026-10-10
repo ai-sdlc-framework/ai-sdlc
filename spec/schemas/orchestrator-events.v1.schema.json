@@ -132,6 +132,38 @@
       "type": "number",
       "description": "Relative change between the two implied allotments (new minus previous, divided by previous) - present on `AllotmentChangeSuspected`."
     },
+    "role": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Agent role of the routing cell - present on `ModelRoutingOverrideApplied` (RFC-0050)."
+    },
+    "taskClass": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Task class of the routing cell, or `*` - present on `ModelRoutingOverrideApplied`."
+    },
+    "tableModel": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The routing table cell's own model when the override was written - present on `ModelRoutingOverrideApplied`."
+    },
+    "tasks": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Tasks the changed model completed since the change - present on `ModelRoutingOverrideApplied`."
+    },
+    "observedRate": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "First-pass approval rate of the changed model since the change - present on `ModelRoutingOverrideApplied`."
+    },
+    "evidenceRate": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "First-pass approval rate recorded in the evidence that justified the change - present on `ModelRoutingOverrideApplied`."
+    },
     "context": {
       "type": "object",
       "description": "Free-form structured context bag for the event. Schema-less by design so future event types can carry per-type payload without a v2 bump.",
@@ -451,7 +483,7 @@
   "$defs": {
     "OrchestratorEventType": {
       "type": "string",
-      "description": "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. AISDLC-176 adds `DeveloperContractRetry` for the recovery path when the developer subagent returns non-JSON prose and the retry-once helper recovers the dispatch. AISDLC-196 extends `DeveloperContractRetry` with `phase` (`'initial' | 'iteration'`) + optional `iteration` (present when `phase === 'iteration'`) so operators can attribute recovery events to the initial-dispatch path versus the iteration-loop path — additive non-breaking change. AISDLC-223 adds `TaskBlocked` emitted on every tick that the Blocked admission filter rejects a candidate (the task has a non-empty `blocked.reason` frontmatter field). AISDLC-224 adds `WorktreeAutoCleaned` for the Step 3 auto-cleanup path (stale branch self-heal in autonomous mode). AISDLC-493 adds `PrOpened` (PR lifecycle anchor), `ReconcileCompleted` (per-pass reconcile overhead), and `DispatchToMergeCompleted` (DORA lead-time join). RFC-0050 adds `ModelPriceChanged` (model, tokenClass, oldPrice, newPrice) when an active model price changes, `UsageLimitObserved` (window, usedPercent, unitsInWindow, impliedAllotment) when a usage-window snapshot is recorded, and `AllotmentChangeSuspected` (window, previousAllotment, impliedAllotment, changeRatio) when consecutive snapshots of one window differ beyond the tolerance with a similar model mix. RFC-0049 adds `JudgmentEscalated` (judgmentId, escalateTo, reason) when an enforced judgment escalates and `JudgmentProviderUnavailable` (reason, judgmentId, provider) when a configured judgment provider cannot be used, at most once per process per reason. RFC-0051 adds `HierarchySessionStarted` (sessionName, sessionRole), `ExecutorContextCleared` (executor, paneId, resumed, settleMs), `DecisionRouted` (decisionId, route, routedTo, fromTier, toTier), `DecisionEscalated` (decisionId, fromTier, toTier) and `OperatorPlaybookAction` (taskId, action, result, reason) for the session hierarchy's dispatch loop. Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
+      "description": "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. AISDLC-176 adds `DeveloperContractRetry` for the recovery path when the developer subagent returns non-JSON prose and the retry-once helper recovers the dispatch. AISDLC-196 extends `DeveloperContractRetry` with `phase` (`'initial' | 'iteration'`) + optional `iteration` (present when `phase === 'iteration'`) so operators can attribute recovery events to the initial-dispatch path versus the iteration-loop path — additive non-breaking change. AISDLC-223 adds `TaskBlocked` emitted on every tick that the Blocked admission filter rejects a candidate (the task has a non-empty `blocked.reason` frontmatter field). AISDLC-224 adds `WorktreeAutoCleaned` for the Step 3 auto-cleanup path (stale branch self-heal in autonomous mode). AISDLC-493 adds `PrOpened` (PR lifecycle anchor), `ReconcileCompleted` (per-pass reconcile overhead), and `DispatchToMergeCompleted` (DORA lead-time join). RFC-0050 adds `ModelPriceChanged` (model, tokenClass, oldPrice, newPrice) when an active model price changes, `UsageLimitObserved` (window, usedPercent, unitsInWindow, impliedAllotment) when a usage-window snapshot is recorded, and `AllotmentChangeSuspected` (window, previousAllotment, impliedAllotment, changeRatio) when consecutive snapshots of one window differ beyond the tolerance with a similar model mix, and `ModelRoutingOverrideApplied` (role, taskClass, model, tableModel, tasks, observedRate, evidenceRate) when a routing cell is moved back to its previous stronger model. RFC-0049 adds `JudgmentEscalated` (judgmentId, escalateTo, reason) when an enforced judgment escalates and `JudgmentProviderUnavailable` (reason, judgmentId, provider) when a configured judgment provider cannot be used, at most once per process per reason. RFC-0051 adds `HierarchySessionStarted` (sessionName, sessionRole), `ExecutorContextCleared` (executor, paneId, resumed, settleMs), `DecisionRouted` (decisionId, route, routedTo, fromTier, toTier), `DecisionEscalated` (decisionId, fromTier, toTier) and `OperatorPlaybookAction` (taskId, action, result, reason) for the session hierarchy's dispatch loop. Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
       "enum": [
         "OrchestratorTick",
         "OrchestratorDispatched",
@@ -482,6 +514,7 @@
         "ModelPriceChanged",
         "UsageLimitObserved",
         "AllotmentChangeSuspected",
+        "ModelRoutingOverrideApplied",
         "JudgmentEscalated",
         "JudgmentProviderUnavailable",
         "HierarchySessionStarted",

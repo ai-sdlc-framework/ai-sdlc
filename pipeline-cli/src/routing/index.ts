@@ -5,3 +5,4 @@ export * from './assignment-log.js';
 export * from './resolve-model.js';
 export * from './task-class.js';
 export * from './artifacts-dir.js';
+export * from './revert.js';

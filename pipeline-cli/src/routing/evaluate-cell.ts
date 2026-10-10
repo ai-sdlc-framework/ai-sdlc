@@ -20,7 +20,7 @@ export const DEFAULT_MIN_TASKS = 30;
 export const DEFAULT_MARGIN_POINTS = 5;
 
 /** Tolerance so a rate exactly `marginPoints` away is not lost to float error. */
-const EPSILON = 1e-9;
+export const EPSILON = 1e-9;
 
 export const NOT_ATTRIBUTABLE_REASON = 'evidence not attributable to this repository';
 
@@ -102,7 +102,7 @@ function attributable(sc: EvidenceScorecard): boolean {
   return sc.legacyRecords === 0 && sc.unavailableRecords === 0;
 }
 
-function rowsFor(cell: CellRef, sc: EvidenceScorecard, model: string): ScorecardRow[] {
+export function rowsFor(cell: CellRef, sc: EvidenceScorecard, model: string): ScorecardRow[] {
   const excluded = new Set(cell.excludeClasses ?? []);
   return sc.rows.filter(
     (r) =>
@@ -115,7 +115,7 @@ function rowsFor(cell: CellRef, sc: EvidenceScorecard, model: string): Scorecard
 export const MALFORMED_EVIDENCE_REASON =
   'evidence is malformed (non-numeric or out-of-range counts)';
 
-function aggregate(rows: readonly ScorecardRow[]): {
+export function aggregate(rows: readonly ScorecardRow[]): {
   tasks: number;
   approved: number;
   malformed: boolean;
