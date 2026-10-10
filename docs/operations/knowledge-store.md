@@ -60,10 +60,21 @@ knowledge:
 - `node pipeline-cli/bin/cli-context.mjs validate [--strict]` checks every entry in both
   roots and the ontology. Classification findings (source under a data-room root, or a
   client identifier in an unprotected entry) are warnings; `--strict` makes them errors.
-- `scripts/check-knowledge-scope.sh [tracked-root] [protected-root]` fails when a
-  `protected` entry sits in the tracked root or the protected root is tracked by git.
-  It runs in `pnpm test` (`pnpm knowledge:check`) and in `.husky/pre-push`.
+- `scripts/check-knowledge-scope.sh` (also `pnpm knowledge:check`, wired into
+  `.husky/pre-push`) delegates to `cli-context check-scope`, which uses the real
+  frontmatter parser and the roots configured in `.ai-sdlc/context.yaml`. It fails when a
+  `protected` entry sits in the configured tracked root, or the configured protected root
+  has tracked files or is not git-ignored. If `pipeline-cli/dist` is not built it skips
+  with a message outside CI and fails in CI (`CI` set).
 - `scripts/check-pr-body-protected.sh <body-file>` (or
   `cli-context check-pr-body --body-file <file>`) fails when a PR body cites a protected
-  entry id or the protected root path. The pre-push hook runs it when
-  `AI_SDLC_PR_BODY_FILE` points at the body.
+  entry id or the configured protected root path. The pre-push hook runs it when
+  `AI_SDLC_PR_BODY_FILE` points at the body. Step 11 (PR creation) should export
+  `AI_SDLC_PR_BODY_FILE` to enable this check; until it does, the check runs only when a
+  pusher sets the variable.
+
+## Known gaps
+
+- The agent caps (authority `inferred`, confidence 0.85, `reverify` note) apply only when
+  an entry sets `writtenBy: agent`. Promotion of agent entries is a later phase, so an
+  agent that omits the field is not capped yet.

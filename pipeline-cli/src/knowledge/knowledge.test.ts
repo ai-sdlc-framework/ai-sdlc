@@ -6,6 +6,7 @@ import { classifyEntry } from './classify.js';
 import { loadKnowledgeConfig } from './config.js';
 import { hashValue } from './entry.js';
 import { DEFAULT_ONTOLOGY, parseOntology } from './ontology.js';
+import { checkKnowledgeScope } from './scope-check.js';
 import { findProtectedCitations, validateKnowledge } from './store.js';
 
 let root: string;
@@ -115,6 +116,11 @@ describe('validateKnowledge', () => {
       }),
     );
     expect(errs(r)).toContain("unknown entry type 'fact'");
+  });
+
+  it.each(['scope', 'authority', 'trunk', 'decay'])('rejects a non-string %s', (k) => {
+    const r = validateKnowledge(project({ [at('systems', 'a')]: entryText({ [k]: 5 }) }));
+    expect(errs(r)).toContain('must be a string');
   });
 
   it('flags an incomplete ontology', () => {
@@ -238,6 +244,33 @@ describe('findProtectedCitations', () => {
   it('passes a clean body', () => {
     expect(findProtectedCitations(project(files), 'nothing here, acme-pricing-2 neither')).toEqual(
       [],
+    );
+  });
+});
+
+describe('checkKnowledgeScope', () => {
+  const run = (files: Record<string, string>) => checkKnowledgeScope(project(files));
+  it('flags a protected flow-mapping entry in the tracked root', () => {
+    expect(run({ [at('customers', 'c')]: entryText({ scope: 'protected' }) })).toHaveLength(1);
+  });
+  it('flags CRLF, BOM and trailing-comment forms', () => {
+    const forms = [
+      '---\r\nid: k\r\nscope: protected\r\n---\r\nb',
+      '\uFEFF---\nid: k\nscope: protected # c\n---\nb',
+    ];
+    for (const f of forms) {
+      expect(run({ [at('customers', 'c')]: f }).join()).toContain('scope: protected');
+    }
+  });
+  it('fails closed on unparseable frontmatter and non-string scope', () => {
+    expect(run({ [at('x', 'a')]: '---\n: : [\n---\nb' }).join()).toContain('unparseable');
+    expect(run({ [at('x', 'a')]: '---\nscope: [protected]\n---\nb' }).join()).toContain(
+      'non-string scope',
+    );
+  });
+  it('passes internal entries and a missing root', () => {
+    expect(run({ [at('systems', 'a')]: entryText() })).toEqual(
+      expect.not.arrayContaining([expect.stringContaining('scope: protected')]),
     );
   });
 });

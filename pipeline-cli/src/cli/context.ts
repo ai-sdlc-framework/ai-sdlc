@@ -7,12 +7,15 @@
  *                     warnings (likely mis-scoped entries).
  *   check-pr-body   — fail when a PR body (`--body-file <path>` or stdin) cites a
  *                     protected entry id or the protected root path.
+ *   check-scope     — fail when a protected entry is in the configured tracked root, or the
+ *                     configured protected root is tracked / not git-ignored.
  */
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { loadKnowledgeConfig } from '../knowledge/config.js';
+import { checkKnowledgeScope } from '../knowledge/scope-check.js';
 import { findProtectedCitations, validateKnowledge } from '../knowledge/store.js';
 
 export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
@@ -33,6 +36,17 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
         if (report.errors.length > 0 || (args.strict && report.warnings.length > 0)) {
           process.exitCode = 1;
         }
+      },
+    )
+    .command(
+      'check-scope',
+      'Fail when protected knowledge could enter the repository',
+      (y) => y,
+      (args) => {
+        const projectDir = String(args['project-dir']);
+        const violations = checkKnowledgeScope(projectDir, loadKnowledgeConfig(projectDir));
+        for (const v of violations) process.stderr.write(`error: ${v}\n`);
+        if (violations.length > 0) process.exitCode = 1;
       },
     )
     .command(

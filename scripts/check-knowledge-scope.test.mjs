@@ -38,6 +38,7 @@ const run = (script, args, input) =>
 describe('check-knowledge-scope.sh', () => {
   it('passes with only internal/universal entries in the tracked root', () => {
     repo({
+      '.gitignore': '.ai-sdlc/knowledge-protected/\n',
       '.ai-sdlc/knowledge/systems/a.md': entry('k-a', 'internal'),
       '.ai-sdlc/knowledge/process/b.md': entry('k-b', 'universal'),
     });
@@ -45,7 +46,7 @@ describe('check-knowledge-scope.sh', () => {
   });
 
   it('passes when the tracked root does not exist', () => {
-    repo({ 'x.txt': 'x' });
+    repo({ 'x.txt': 'x', '.gitignore': '.ai-sdlc/knowledge-protected/\n' });
     assert.equal(run(SCOPE, []).status, 0);
   });
 
@@ -57,17 +58,60 @@ describe('check-knowledge-scope.sh', () => {
   });
 
   it('fails when files under the protected root are tracked by git', () => {
-    repo({ '.ai-sdlc/knowledge-protected/customers/c.md': entry('k-c', 'protected') });
+    repo({
+      '.gitignore': '.ai-sdlc/knowledge-protected/\n',
+      '.ai-sdlc/knowledge-protected/customers/c.md': entry('k-c', 'protected'),
+    });
     execFileSync('git', ['add', '-f', '.'], { cwd: root });
     assert.equal(run(SCOPE, []).status, 1);
   });
 
-  it('passes for an untracked protected root and honours root overrides', () => {
+  it('passes for an ignored, untracked protected root', () => {
     repo({
-      'custom/priv/customers/c.md': entry('k-c', 'protected'),
-      'pub/a.md': entry('a', 'internal'),
+      '.gitignore': '.ai-sdlc/knowledge-protected/\n',
+      '.ai-sdlc/knowledge-protected/customers/c.md': entry('k-c', 'protected'),
+      '.ai-sdlc/knowledge/a.md': entry('a', 'internal'),
     });
-    assert.equal(run(SCOPE, ['pub', 'custom/priv']).status, 0);
+    assert.equal(run(SCOPE, []).status, 0);
+  });
+
+  it('fails on a flow-mapping (JSON) frontmatter protected entry', () => {
+    repo({
+      '.ai-sdlc/knowledge/customers/c.md': '---\n{"id": "k-c", "scope": "protected"}\n---\nbody\n',
+    });
+    assert.equal(run(SCOPE, []).status, 1);
+  });
+
+  it('fails on CRLF, trailing-comment, quoted-key and BOM forms', () => {
+    const forms = [
+      '---\r\nid: k\r\nscope: protected\r\n---\r\nbody\r\n',
+      '---\nid: k\nscope: protected # client\n---\nbody\n',
+      '---\nid: k\n"scope": protected\n---\nbody\n',
+      '\uFEFF---\nid: k\nscope: protected\n---\nbody\n',
+      '---\nid: k\nscope: >\n  protected\n---\nbody\n',
+    ];
+    for (const f of forms) {
+      repo({ '.ai-sdlc/knowledge/customers/c.md': f });
+      assert.equal(run(SCOPE, []).status, 1, JSON.stringify(f));
+    }
+  });
+
+  it('checks roots configured in .ai-sdlc/context.yaml', () => {
+    repo({
+      '.ai-sdlc/context.yaml': 'knowledge:\n  trackedRoot: kb\n  protectedRoot: kb-private\n',
+      'kb/customers/c.md': entry('k-c', 'protected'),
+    });
+    assert.equal(run(SCOPE, []).status, 1);
+  });
+
+  it('fails when the configured protected root is not git-ignored', () => {
+    repo({
+      '.ai-sdlc/context.yaml': 'knowledge:\n  protectedRoot: kb-private\n',
+      '.gitignore': '.ai-sdlc/knowledge-protected/\n',
+    });
+    const r = run(SCOPE, []);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /not git-ignored/);
   });
 });
 
