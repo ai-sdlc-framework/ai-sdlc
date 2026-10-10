@@ -9,17 +9,20 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   appendDecisionEvent,
   eventContentHash,
   eventFileName,
+  isPlausibleEventTs,
   makeDecisionOpenedEvent,
   makeOperatorAnsweredEvent,
   migrateLegacyEventLog,
@@ -215,6 +218,26 @@ describe('file names cannot pin event order', () => {
   });
 });
 
+describe('per-event files are protected from reformatting', () => {
+  it('.prettierignore keeps prettier off the events directory', () => {
+    const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+    const ignored = readFileSync(join(root, '.prettierignore'), 'utf8').split('\n');
+    expect(ignored).toContain('.ai-sdlc/_decisions/events/');
+  });
+
+  it('rejects a ts without millisecond precision, which would sort out of time order', () => {
+    expect(isPlausibleEventTs('2026-01-01T00:00:00.000Z')).toBe(true);
+    expect(isPlausibleEventTs('2026-01-01T00:00:00Z')).toBe(false);
+    expect(isPlausibleEventTs('2026-01-01T00:00:00.5Z')).toBe(false);
+    expect(
+      isPlausibleEventTs(
+        '2026-01-01T00:00:00.000Z',
+        Date.parse('2026-01-01T00:00:00.000Z') - 10 * 60_000,
+      ),
+    ).toBe(false);
+  });
+});
+
 describe('migrateLegacyEventLog', () => {
   const seed = (dir: string): void => {
     const lines = [
@@ -309,10 +332,20 @@ describe('open-PR id reservation', () => {
     prPaths = `.ai-sdlc/_decisions/events/x__DEC-${'9'.repeat(400)}__y.json\n`;
     expect(nextDecisionIdDurable({ workDir: parent, runner })).toBe('DEC-0002');
 
+    // A six-digit id in a PR path is ignored, so it cannot walk the allocator to the cap.
+    prPaths = '.ai-sdlc/_decisions/events/x__DEC-999999__y.json\n';
+    expect(nextDecisionIdDurable({ workDir: parent, runner })).toBe('DEC-0002');
+
     // A failing gh falls back to the empty set.
     prPaths = '.ai-sdlc/_decisions/events/x__DEC-0007__y.json\n';
     ghStatus = 1;
     expect(nextDecisionIdDurable({ workDir: parent, runner })).toBe('DEC-0002');
+
+    // A consumed id at the top of the space is refused, never re-issued.
+    ghStatus = 0;
+    prPaths = '';
+    appendDecisionEvent(ev('DEC-999999', '2026-01-02T00:00:00.000Z'), { workDir: parent });
+    expect(() => nextDecisionIdDurable({ workDir: parent, runner })).toThrow(/exhausted/);
   });
 });
 

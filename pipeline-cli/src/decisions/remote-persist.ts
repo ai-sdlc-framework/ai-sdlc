@@ -280,7 +280,7 @@ export function openPrDecisionIds(ctx: { run: Ctx['run']; eventsRel: string }): 
     if (!pr || pr.isCrossRepository !== false || !Array.isArray(pr.files)) continue;
     for (const f of pr.files) {
       if (typeof f?.path !== 'string' || !f.path.startsWith(`${ctx.eventsRel}/`)) continue;
-      const m = f.path.match(/__(DEC-\d{4,6})__/);
+      const m = f.path.match(/__(DEC-\d{4,5})__/);
       if (m) out.add(m[1]);
     }
   }
@@ -318,6 +318,10 @@ export function nextDecisionIdDurable(opts: DurableOpts): string {
     if (!m) continue;
     const n = Number.parseInt(m[1], 10);
     if (Number.isSafeInteger(n) && n < 1_000_000) max = Math.max(max, n);
+  }
+  // Ids from 1,000,000 up are never counted above, so allocating one would repeat forever.
+  if (max + 1 >= 1_000_000) {
+    throw new Error('[decisions] decision id space exhausted; refusing to allocate a duplicate id');
   }
   return formatDecisionId(max + 1);
 }

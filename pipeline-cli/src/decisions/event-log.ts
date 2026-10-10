@@ -226,11 +226,11 @@ export function eventFileName(event: DecisionEvent, line: string = JSON.stringif
   return `${ts}__${event.decisionId}__${event.type}__${eventContentHash(line)}.json`;
 }
 
-const ISO_UTC_TS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
-const TS_SKEW_MS = 60 * 60 * 1000;
+const ISO_UTC_TS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const TS_SKEW_MS = 5 * 60 * 1000;
 
 /**
- * A timestamp that may name a per-event file: strict ISO-8601 UTC and not later than now
+ * A timestamp that may name a per-event file: strict ISO-8601 UTC with millisecond precision (so names sort in time order) and not later than now
  * plus a small clock-skew allowance. File names sort events, so a far-future prefix would
  * otherwise outrank every later answer for good.
  */
