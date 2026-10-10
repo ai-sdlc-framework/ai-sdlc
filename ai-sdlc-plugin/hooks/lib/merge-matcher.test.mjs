@@ -87,7 +87,6 @@ describe('commandRunsGhPrMerge', () => {
       'echo gh pr merge 42',
       'grep "gh pr merge" f',
       'git commit -m "gh pr merge"',
-      "cat <<'EOF'\ngh pr merge 42\nEOF",
       'gh pr view 42',
     ]) {
       assert.equal(m.commandRunsGhPrMerge(c), false, c);
@@ -123,25 +122,52 @@ describe('commandRunsGhPrMerge', () => {
 
 describe('round-2 security bypasses (AISDLC-605)', () => {
   const phrase = ['gh', 'pr', 'merge'].join(' ') + ' 42 --auto';
-  it('fails closed on a partly quoted heredoc delimiter word', () => {
+  it('refuses every heredoc whose body holds the phrase (DEC-0085, no body stripping)', () => {
     for (const opener of [
+      'cat <<EOF',
+      "cat <<'EOF'",
+      'cat <<"EOF"',
       'cat <<EOF"X"',
       'cat <<E"O"F',
       "cat <<'EOF'X",
       'cat <<EO\\F',
       'cat <<EOF$X',
+      'cat <<-EOF',
     ]) {
-      const c = `${opener}\nEOFX\n${phrase}\nEOF`;
+      const c = `${opener}\n${phrase}\nEOF`;
       assert.equal(m.commandRunsGhPrMerge(c), true, opener);
     }
   });
-  it('still strips bodies for plain and fully quoted delimiters', () => {
-    assert.equal(m.commandRunsGhPrMerge(`cat <<EOF\n${phrase}\nEOF`), false);
-    assert.equal(m.commandRunsGhPrMerge(`cat <<'EOF'\n${phrase}\nEOF`), false);
-    assert.equal(m.commandRunsGhPrMerge(`cat <<"EOF"\n${phrase}\nEOF`), false);
+  it('refuses heredoc-evasion shapes that made bash and the matcher disagree (DEC-0085)', () => {
+    const cases = {
+      'opener inside a multi-line quoted string, then a real merge': `echo "a\ncat <<EOF\nb"\n${phrase}\nEOF`,
+      'trailing pipe continuation': `cat <<EOF |\nsh\n${phrase}\nEOF`,
+      'previous-line continuation': `echo hi \\\n<<EOF\n${phrase}\nEOF`,
+      'quote opened on an earlier line': `echo "x\ny" ; cat <<EOF\n${phrase}\nEOF`,
+      'dollar-bracket arithmetic': `echo $[1<<2]\n${phrase}`,
+      'dollar-bracket arithmetic hiding an opener': `echo $[ 1 << EOF ]\n${phrase}\nEOF`,
+    };
+    for (const [name, c] of Object.entries(cases)) {
+      assert.equal(m.commandRunsGhPrMerge(c), true, name);
+    }
   });
-  it('keeps the body when the heredoc opener line continues with a backslash-newline', () => {
-    assert.equal(m.commandRunsGhPrMerge(`cat <<EOF \\\n| sh\n${phrase}\nEOF`), true);
+  it('refuses env-prefix after a leading paren, brace or reserved word', () => {
+    for (const c of [
+      `(FOO=1 ${phrase})`,
+      `{ ${phrase}; }`,
+      `{ FOO=1 ${phrase}; }`,
+      `if true; then ${phrase}; fi`,
+      `if true; then FOO=1 ${phrase}; fi`,
+      `! ${phrase}`,
+      `while true; do ${phrase}; done`,
+    ]) {
+      assert.equal(m.commandRunsGhPrMerge(c), true, c);
+    }
+  });
+  it('an escaped angle bracket before an ampersand is not an fd redirection', () => {
+    for (const c of [`echo x \\> & ${phrase}`, `echo x \\<& ${phrase}`, `echo x \\>& ${phrase}`]) {
+      assert.equal(m.commandRunsGhPrMerge(c), true, c);
+    }
   });
   it('denies a merge phrase inside a leading env assignment of an inert command', () => {
     const cmds = [

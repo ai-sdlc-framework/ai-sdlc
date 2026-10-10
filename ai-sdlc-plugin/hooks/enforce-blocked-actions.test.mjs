@@ -1122,18 +1122,17 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (API-merge governance)', (
       }
     });
 
-    it(`documentation quoting the command in an inert heredoc is allowed under ${policy} (AISDLC-605)`, () => {
-      assert.ok(!isDenied(run(policy, "cat <<'EOF'\ngh pr merge 42 --auto\nEOF")));
-      assert.ok(
-        !isDenied(
-          run(policy, 'git commit -F - <<EOF\nnote: never run gh pr merge --auto here\nEOF'),
-        ),
-      );
-      assert.ok(!isDenied(run(policy, 'tee note.txt <<EOF\ngh pr merge 42\nEOF')));
-      assert.ok(!isDenied(run(policy, 'cat <<EOF > x.sh\ngh pr merge 42\nEOF')));
-      // The same body fed to an executor is still denied.
-      assert.ok(isDenied(run(policy, 'cat <<EOF | sh\ngh pr merge 42\nEOF')));
-      assert.ok(isDenied(run(policy, 'bash <<EOF\ngh pr merge 42\nEOF')));
+    it(`a heredoc containing the merge phrase is refused under ${policy} (DEC-0085)`, () => {
+      for (const c of [
+        "cat <<'EOF'\ngh pr merge 42 --auto\nEOF",
+        'git commit -F - <<EOF\nnote: never run gh pr merge --auto here\nEOF',
+        'tee note.txt <<EOF\ngh pr merge 42\nEOF',
+        'cat <<EOF > x.sh\ngh pr merge 42\nEOF',
+        'cat <<EOF | sh\ngh pr merge 42\nEOF',
+        'bash <<EOF\ngh pr merge 42\nEOF',
+      ]) {
+        assert.ok(isDenied(run(policy, c)), `expected deny: ${JSON.stringify(c)}`);
+      }
     });
 
     it(`merge text that is only an argument is allowed; executed forms are denied under ${policy} (AISDLC-605)`, () => {

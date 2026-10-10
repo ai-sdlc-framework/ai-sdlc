@@ -601,8 +601,8 @@ function enforceBash(command) {
  * word is on a short positive allowlist of inert commands (echo, grep, cat,
  * git commit, ...) and every later pipe stage is inert too. Shells, interpreters,
  * `env`/`sudo`/`pnpm exec` prefixes, reserved words, substitutions and unknown
- * commands all deny. Heredoc bodies are dropped only when the opener line is
- * made solely of inert commands; any other opener keeps its body in view.
+ * commands all deny. Heredoc bodies are never dropped (DEC-0085): every line
+ * of the command text is matched.
  *
  * Commands that don't contain the merge phrase are untouched; they still flow
  * through the generic `blockedActions` pattern matching in enforceBash().
@@ -641,8 +641,8 @@ function enforceMergeGovernance(trimmed) {
  * Raw `gh pr merge` in every form is denied separately; see enforceMergeGovernance().
  *
  * Detection runs on a normalized copy of the command (variables collapsed like
- * a default shell, quotes/backslashes/percent-escapes removed; inert heredoc
- * bodies are dropped, see enforceMergeGovernance) and is deliberately text-level:
+ * a default shell, quotes/backslashes/percent-escapes removed; heredoc bodies
+ * stay in view, see enforceMergeGovernance) and is deliberately text-level:
  * like every matcher here it cannot defeat base64 pipelines or constructed
  * strings; branch protection + required checks remain the backstop. Like the raw
  * merge check it FAILS CLOSED: a segment containing a merge path or mutation is

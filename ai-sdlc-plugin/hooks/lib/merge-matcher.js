@@ -10,6 +10,10 @@
  * (echo, grep, cat, git commit, ...) AND every later stage of its pipeline is
  * inert too. Anything unknown (shells, interpreters, `env`, `pnpm exec`, `sudo`,
  * `xargs`, substitutions, unclassifiable words) therefore denies.
+ * Heredocs get no special treatment (DEC-0085): every line of the command text,
+ * heredoc bodies included, is matched, so a command containing a heredoc that
+ * quotes the merge phrase is refused. Stripping "inert" bodies kept spawning
+ * bypasses where this matcher and bash disagreed on where a body starts.
  * Best-effort text matching, not a sandbox: branch protection is the backstop.
  */
 
@@ -107,7 +111,10 @@ function splitShellSegmentsEx(command) {
     if (
       c === '&' &&
       command[i + 1] !== '&' &&
-      (cur.endsWith('>') || cur.endsWith('<') || command[i + 1] === '>')
+      // An escaped `\>` / `\<` is a literal word, not a redirection: stay an operator (fail closed).
+      ((cur.endsWith('>') && !cur.endsWith('\\>')) ||
+        (cur.endsWith('<') && !cur.endsWith('\\<')) ||
+        command[i + 1] === '>')
     ) {
       cur += c;
       continue;
@@ -256,92 +263,13 @@ function isInertSegment(segment) {
   return false;
 }
 
-/** Finds an unquoted `<<MARKER` heredoc opener on a line, or null. */
-function findHeredocOpener(line) {
-  // Fail closed: arithmetic `$((` may hide `<<` as a shift, so never treat as heredoc.
-  if (line.includes('$((')) return null;
-  let quote = null;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (quote) {
-      if (c === '\\' && quote === '"') i++;
-      else if (c === quote) quote = null;
-      continue;
-    }
-    if (c === '\\') {
-      i++;
-      continue;
-    }
-    if (c === "'" || c === '"') {
-      quote = c;
-      continue;
-    }
-    if (c === '#' && (i === 0 || /\s/.test(line[i - 1]))) return null;
-    if (c === '<' && line[i + 1] === '<') {
-      if (line[i + 2] === '<') {
-        i += 2; // here-string
-        continue;
-      }
-      const dashed = line[i + 2] === '-';
-      const rest = line.slice(i + (dashed ? 3 : 2)).replace(/^\s+/, '');
-      // Bash strips quotes from the WHOLE delimiter word, so read the whole word. Only a plain
-      // identifier or a single fully quoted identifier is understood; any other spelling
-      // (mid-word quotes, backslash, `$`) is `unsafe`: the body is kept in view (fail closed).
-      const word = rest.match(/^[^\s;|&<>()]*/)[0];
-      const m = word.match(
-        /^(?:([A-Za-z_][A-Za-z0-9_]*)|'([A-Za-z_][A-Za-z0-9_]*)'|"([A-Za-z_][A-Za-z0-9_]*)")$/,
-      );
-      if (!m) return { marker: null, dashed, unsafe: true };
-      return { marker: m[1] || m[2] || m[3], dashed, unsafe: false };
-    }
-  }
-  return null;
-}
-
-/**
- * Removes heredoc bodies ONLY where the opener line is made solely of inert
- * commands (`cat <<EOF`, `git commit -F - <<EOF`, `gh pr create --body-file - <<EOF`).
- * Any other opener (shells, interpreters, wrappers, unknown tools) keeps its
- * body so the matcher still sees it.
- *
- * Trade-off: dropping an inert body means a command-looking line inside it is
- * never evaluated. That is intended (the body is data for `cat`/`git commit`),
- * and it is the only way documentation that quotes a blocked phrase survives.
- */
-function stripInertHeredocBodies(command) {
-  const lines = command.split('\n');
-  const kept = [];
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    const opener = findHeredocOpener(line);
-    kept.push(line);
-    i++;
-    if (!opener) continue;
-    const { marker, dashed, unsafe } = opener;
-    if (unsafe) continue; // unknown terminator: keep everything that follows
-    const segs = splitShellSegments(line);
-    // A trailing unescaped backslash continues the opener onto the next line, which this
-    // per-line judgement cannot see: keep the body (fail closed).
-    const continued = /(?:^|[^\\])(?:\\\\)*\\$/.test(line.trimEnd());
-    const inert = !continued && segs.length > 0 && segs.every(isInertSegment);
-    while (i < lines.length) {
-      const body = dashed ? lines[i].replace(/^\t+/, '') : lines[i];
-      if (!inert) kept.push(lines[i]);
-      i++;
-      if (body === marker) break;
-    }
-  }
-  return kept.join('\n');
-}
-
 /**
  * True when `matches(text)` hits a segment that is NOT inert, or an inert
  * segment whose pipeline feeds a non-inert later stage. The matcher sees the
  * comment-stripped segment both with quotes retained and with quotes removed.
  */
 function commandHasUninertMatch(command, matches) {
-  const segs = splitShellSegmentsEx(stripInertHeredocBodies(command));
+  const segs = splitShellSegmentsEx(command);
   for (let i = 0; i < segs.length; i++) {
     const clean = stripComment(segs[i].text);
     if (!matches(clean) && !matches(clean.replace(/['"]/g, ''))) continue;
@@ -372,7 +300,6 @@ module.exports = {
   tokenizeShellish,
   commandWord,
   isInertSegment,
-  stripInertHeredocBodies,
   commandHasUninertMatch,
   commandRunsGhPrMerge,
 };
