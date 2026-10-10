@@ -195,6 +195,30 @@ after that session starts.
 
 **Enforcement:** `ai-sdlc-plugin/commands/execute.test.mjs` contains assertions (AISDLC-245.4 + AISDLC-272 suites) that scan the command body for bare `node pipeline-cli/bin/...` invocations and fail the test run if found. `ai-sdlc-plugin/scripts/resolve-pipeline-cli.test.mjs` tests each topology in isolation. When adding a new slash command, copy the path-resolution preamble above and add a similar regression test.
 
+## Attestation prerequisites for adopters (AISDLC-556)
+
+`/ai-sdlc execute` writes reviewer verdicts and opens the PR, but a signed
+attestation only appears when ALL of the following are set up in the consuming
+repo. None of them is installed by default, so a fresh adopter repo produces
+PRs with no attestation and no error:
+
+1. **A signing key** at `~/.ai-sdlc/signing-key.pem` (run `/ai-sdlc init-signing-key`), with
+   its public key listed in `.ai-sdlc/trusted-reviewers.yaml`.
+2. **The signing runtime dependency**: `@ai-sdlc/orchestrator` and
+   `@ai-sdlc/pipeline-cli` resolvable from the repo (plugin install runs
+   `install-runtime-deps.sh`, or `pnpm add -D` them).
+3. **A pre-push hook that signs** (AISDLC-555): install it with
+   `ai-sdlc init --with-attestation`. Docs elsewhere describe the pre-push hook
+   as the signer; that is true only after this step.
+
+Step 10 now probes for the signer (`scripts/warn-if-no-signer.sh`) and prints a
+warning naming the verdict file when none is reachable. It fails open: the
+pipeline continues and the PR simply carries no attestation.
+
+**`verify-attestation` CI cannot pass in a repo with no signer.** Until the
+prerequisites above are in place, adopters must omit the `verify-attestation`
+check from their required checks.
+
 ## Attestation pre-push hook — shipping + install (AISDLC-555)
 
 `/ai-sdlc execute` Step 10 does not sign attestations inline; it writes reviewer
