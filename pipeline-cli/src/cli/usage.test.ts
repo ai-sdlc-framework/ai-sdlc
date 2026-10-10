@@ -157,7 +157,7 @@ describe('renderIngestResult', () => {
 });
 
 describe('cli-usage price commands', () => {
-  const NOW = new Date('2026-10-01T09:00:00.000Z');
+  const NOW = new Date('2026-10-11T09:00:00.000Z');
 
   let dir: string;
   beforeEach(() => {
@@ -292,7 +292,7 @@ describe('cli-usage price commands', () => {
         '1',
         ...flags,
         '--effective-from',
-        '2026-10-01',
+        '2026-10-11',
       );
       expect(t.out.join('')).toContain('Manual price written for my-model');
       await t.run('prices', 'set', 'my-model', '--input', '0', ...flags);
@@ -320,7 +320,7 @@ describe('cli-usage price commands', () => {
             source: 'manual',
             url: 'manual',
             fetchedAt: NOW.toISOString(),
-            effectiveFrom: '2026-10-01',
+            effectiveFrom: '2026-10-11',
             status: 'manual',
           },
         },

@@ -12,6 +12,7 @@
 
 import type { StateStore } from './state/store.js';
 import type { CostLedgerEntry } from './state/types.js';
+import { priceCallBreakdown, UNPRICED, type PriceRow } from '@ai-sdlc/reference';
 import { DEFAULT_MODEL_COSTS, DEFAULT_COST_BUDGET_USD } from './defaults.js';
 import type { EmbeddingCostRecord } from './embedding/types.js';
 
@@ -46,6 +47,18 @@ export interface CostTimeSeriesPoint {
   runCount: number;
 }
 
+/** Cache-write tokens of one call, priced from the price history in effect at `ts`. */
+export interface CacheWriteUsage {
+  /** Tokens written to the 5-minute cache. */
+  tokens5m?: number;
+  /** Tokens written to the 1-hour cache. */
+  tokens1h?: number;
+  /** ISO time of the call; the price row in effect then is used. */
+  ts: string;
+  /** Price history to read; defaults to the seed rows plus `prices.jsonl`. */
+  rows?: ReadonlyArray<PriceRow>;
+}
+
 export class CostTracker {
   constructor(private store: StateStore) {}
 
@@ -60,15 +73,40 @@ export class CostTracker {
   /**
    * Compute cost in USD from token counts and model name, with an explicit
    * `unpriced` marker. An unknown model yields zero cost and `unpriced: true`.
+   *
+   * When the call carries cache-write tokens, every token class is priced from
+   * the price history row in effect at `cacheWrite.ts`; a model with no such row
+   * is `unpriced` rather than partly priced.
    */
   static computeCostDetailed(
     inputTokens: number,
     outputTokens: number,
     model: string,
     cacheReadTokens = 0,
+    cacheWrite?: CacheWriteUsage,
   ): { costUsd: number; unpriced: boolean; model: string } {
     if (!CostTracker.isPriced(model)) {
       return { costUsd: 0, unpriced: true, model };
+    }
+    const write5m = cacheWrite?.tokens5m ?? 0;
+    const write1h = cacheWrite?.tokens1h ?? 0;
+    if (cacheWrite && (write5m > 0 || write1h > 0)) {
+      const breakdown = priceCallBreakdown(
+        {
+          model,
+          ts: cacheWrite.ts,
+          tokens: {
+            input: inputTokens,
+            cacheWrite5m: write5m,
+            cacheWrite1h: write1h,
+            cacheRead: cacheReadTokens,
+            output: outputTokens,
+          },
+        },
+        { rows: cacheWrite?.rows },
+      );
+      if (breakdown === UNPRICED) return { costUsd: 0, unpriced: true, model };
+      return { costUsd: breakdown.total, unpriced: false, model };
     }
     const costs = DEFAULT_MODEL_COSTS[model];
     const costUsd =
@@ -89,9 +127,15 @@ export class CostTracker {
     outputTokens: number,
     model: string,
     cacheReadTokens = 0,
+    cacheWrite?: CacheWriteUsage,
   ): number {
-    return CostTracker.computeCostDetailed(inputTokens, outputTokens, model, cacheReadTokens)
-      .costUsd;
+    return CostTracker.computeCostDetailed(
+      inputTokens,
+      outputTokens,
+      model,
+      cacheReadTokens,
+      cacheWrite,
+    ).costUsd;
   }
 
   /**

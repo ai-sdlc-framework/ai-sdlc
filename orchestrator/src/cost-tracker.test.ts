@@ -20,6 +20,43 @@ describe('CostTracker', () => {
       expect(cost).toBeCloseTo(0.0105, 4);
     });
 
+    it('prices 5-minute and 1-hour cache-write tokens from the price history', () => {
+      // claude-opus-5-5 from 2026-09-22: $4 in, $5 5m write, $8 1h write, $0.20 read, $20 out.
+      // 1000 * 4 + 2000 * 5 + 3000 * 8 + 4000 * 0.2 + 500 * 20 = 4000 + 10000 + 24000 + 800 + 10000
+      // = 48800 per million tokens = $0.0488
+      const detailed = CostTracker.computeCostDetailed(1000, 500, 'claude-opus-5-5', 4000, {
+        tokens5m: 2000,
+        tokens1h: 3000,
+        ts: '2026-10-01T00:00:00.000Z',
+      });
+      expect(detailed.unpriced).toBe(false);
+      expect(detailed.costUsd).toBeCloseTo(0.0488, 10);
+      expect(
+        CostTracker.computeCost(1000, 500, 'claude-opus-5-5', 4000, {
+          tokens5m: 2000,
+          tokens1h: 3000,
+          ts: '2026-10-01T00:00:00.000Z',
+        }),
+      ).toBeCloseTo(0.0488, 10);
+    });
+
+    it('prices a cache-write call dated before the model release as unpriced', () => {
+      const detailed = CostTracker.computeCostDetailed(1000, 500, 'claude-opus-5-5', 0, {
+        tokens5m: 2000,
+        ts: '2026-09-21T00:00:00.000Z',
+      });
+      expect(detailed).toEqual({ costUsd: 0, unpriced: true, model: 'claude-opus-5-5' });
+    });
+
+    it('ignores cache-write usage that carries no tokens', () => {
+      expect(
+        CostTracker.computeCost(1000, 500, 'claude-sonnet-4-5-20250929', 0, {
+          tokens5m: 0,
+          ts: '2026-10-01T00:00:00.000Z',
+        }),
+      ).toBeCloseTo(0.0105, 10);
+    });
+
     it('does not price an unknown model as another model', () => {
       expect(CostTracker.computeCost(1000, 500, 'unknown-model')).toBe(0);
       expect(CostTracker.isPriced('unknown-model')).toBe(false);
@@ -40,8 +77,8 @@ describe('CostTracker', () => {
 
     it('computes opus cost correctly', () => {
       const cost = CostTracker.computeCost(10000, 5000, 'claude-opus-4-6');
-      // 10000 * 15 / 1M + 5000 * 75 / 1M = 0.15 + 0.375 = 0.525
-      expect(cost).toBeCloseTo(0.525, 3);
+      // 10000 * 5 / 1M + 5000 * 25 / 1M = 0.05 + 0.125 = 0.175
+      expect(cost).toBeCloseTo(0.175, 3);
     });
   });
 
