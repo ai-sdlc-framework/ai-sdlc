@@ -14,6 +14,7 @@ dependencies: []
 references:
   - ai-sdlc-plugin/hooks/lib/lease-push-guard.js
   - ai-sdlc-plugin/hooks/lib/lease-push-guard.test.mjs
+  - ai-sdlc-plugin/hooks/lib/trusted-policy.js
   - pipeline-cli/src/dispatch/resume.ts
 priority: high
 dispatchable: true
@@ -26,6 +27,8 @@ Two open PRs cannot be rebased and re-pushed by an executor: PR #1269 (AISDLC-70
 
 DEC-0083 (planner, class a) rules that the exact name `ai-sdlc/<task-id>` is the task's own branch: no other task id can produce it, and `governance.allowForcePush: leaseOnOwnBranch` (AISDLC-710) already permits a lease push on the task's own branch, so this applies an existing decision and loosens nothing.
 
+Second defect, same control, found on AISDLC-748 (#1281) the same day: `resolveLeaseWorktree` in `ai-sdlc-plugin/hooks/lib/trusted-policy.js` promises (and the refusal text says) that a session rooted at the main checkout is bound either by `AI_SDLC_ACTIVE_TASK_ID` or by being a hierarchy executor holding exactly one inflight claim for the cwd worktree's task. The claim path is implemented as `taskId && holdsInflightClaim(realMain, taskId)` where `taskId` comes from `readTaskId(top)`, i.e. the worktree's `.active-task`. Step 13 of a finished or failed attempt removes that sentinel, so a resumed executor that rebases and pushes from the existing worktree without re-running Step 4 is refused `not-task-worktree` even though its board claim is valid and unique. The worktree is already verified to be a direct child of `<main>/.worktrees/` with a genuine git dir, so the task id for the claim path must come from the worktree directory name (`basename(top)`), with the sentinel, when present, required to agree with it. The env-bound path keeps requiring the sentinel.
+
 Change the ownership check so `own === 'ai-sdlc/<task-id>'` passes alongside `own.startsWith('ai-sdlc/<task-id>-')`. The comparison must stay exact on the id boundary: `ai-sdlc/aisdlc-704.5x`, `ai-sdlc/aisdlc-704.51` and `ai-sdlc/aisdlc-704` must still be refused for task `aisdlc-704.5`, as must any other task's branch. Every other refusal (sentinel, worktree-name match, short-name aliasing, protected branches, plain force, `+` refspecs) is unchanged. Update the refusal text to name both accepted forms. Check that the branch guess in `pipeline-cli/src/dispatch/resume.ts` (`branchGuessed`) still produces the exact-name form, so a resumed task whose verdict carried no `pushedBranch` lands on the branch the hook now accepts.
 <!-- SECTION:DESCRIPTION:END -->
 
@@ -35,10 +38,11 @@ Change the ownership check so `own === 'ai-sdlc/<task-id>'` passes alongside `ow
 - [ ] From a worktree named after the task with a valid `.active-task`, a lease push to `refs/heads/ai-sdlc/<task-id>` (exact) is allowed; to `refs/heads/ai-sdlc/<task-id>-<slug>` it is still allowed.
 - [ ] `ai-sdlc/<task-id>x`, `ai-sdlc/<task-id>1`, a shorter id that is a prefix of the task id, and another task's branch are all still refused, with hermetic cases in `lease-push-guard.test.mjs` for each.
 - [ ] The refusal message names both accepted forms (`ai-sdlc/<task-id>` or `ai-sdlc/<task-id>-*`).
+- [ ] A session rooted at the main checkout, holding exactly one inflight claim whose task id equals the cwd worktree's directory name, gets the lease with no `.active-task` present; with a sentinel present that names a different task it is refused; with two claims or a claim for another task it is refused. Hermetic cases in the `trusted-policy` tests cover all four.
 - [ ] No other allowed or refused shape in `lease-push-guard.test.mjs`, `lease-push-guard-widened.test.mjs` or `governance-lease.test.mjs` changes.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 <!-- AC:END -->
 
 ## Notes
 
-Unblocker for AISDLC-704.5 (#1269) and AISDLC-752 (#1259); dispatch requeues both once this lands. Decision: DEC-0083. The executor implementing this task works on a slugged branch, so it is not itself affected.
+Unblocker for AISDLC-704.5 (#1269), AISDLC-752 (#1259) and any resumed executor push (AISDLC-748, #1281, was the first hit); dispatch requeues once this lands. Decision: DEC-0083. The executor implementing this task works on a slugged branch, so it is not itself affected.
