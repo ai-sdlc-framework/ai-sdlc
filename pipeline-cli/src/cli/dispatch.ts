@@ -77,6 +77,7 @@
  *
  * Executor loop (RFC-0051 section 5):
  *
+ *   - `record-agent` / `sessions` (AISDLC-564) — persist and read the subagent recovery key.
  *   - `complete --task-id <id> --outcome <enum> --worker <name> [--pr <number>]
  *     [--follow-ups <ids>] [--decisions <ids>] [--pr-url <url>] [--notes <s>]`
  *     — write the verdict for the inflight task this executor holds: done/
@@ -170,6 +171,7 @@ import {
   writeResumeSignal,
   writeVerdict,
 } from '../dispatch/index.js';
+import { formatSessionLine, listSessions, recordAgentSession } from '../dispatch/sessions.js';
 import { assertClaimHolder, completeTask, splitIdList } from '../dispatch/complete.js';
 import { DEFAULT_REQUEUE_RETRY_LIMIT } from '../dispatch/session-reaper.js';
 import { checkDispatchCaller, loadOperational, type IdentityDeps } from '../hierarchy/index.js';
@@ -544,6 +546,40 @@ export async function runDispatchCli(
         );
         return 1;
       }
+    }
+
+    case 'record-agent': {
+      // AISDLC-564: persist the recovery key (agentId) of a dispatched subagent.
+      const taskId = requireFlag(flags, 'task-id');
+      const agentId = requireFlag(flags, 'agent-id');
+      const worktreePath = requireFlag(flags, 'worktree');
+      if (!TASK_ID_RE.test(taskId)) {
+        process.stderr.write(`cli-dispatch record-agent: '${taskId}' is not a valid task id\n`);
+        return 2;
+      }
+      const session = recordAgentSession(boardDir, {
+        taskId,
+        agentId,
+        worktreePath,
+        ...(flags['transcript'] ? { transcriptPath: flags['transcript'] } : {}),
+      });
+      out({ ok: true, session });
+      return 0;
+    }
+
+    case 'sessions': {
+      // AISDLC-564: read the recovery records straight from the repo.
+      const sessions = listSessions(boardDir).sort((a, b) => a.taskId.localeCompare(b.taskId));
+      if (flags['json'] === 'true') {
+        out(sessions);
+        return 0;
+      }
+      process.stdout.write(
+        sessions.length === 0
+          ? 'no session records\n'
+          : sessions.map((s) => formatSessionLine(s)).join('\n') + '\n',
+      );
+      return 0;
     }
 
     case 'next-subid': {
@@ -1300,6 +1336,8 @@ Subcommands:
   complete --task-id <id> --outcome <enum> --worker <name> [--pr <number>] [--pr-url <url>]
            [--follow-ups <ids>] [--decisions <ids>] [--notes <s>] [--cause <s>]
   next-subid <task-id> [--work-dir <path>]
+  record-agent --task-id <id> --agent-id <id> --worktree <path> [--transcript <path>]
+  sessions [--json]   (agent recovery records: which agent owned which task and worktree)
 
 Phase 1.5 (RFC-0041 OQ-4 / AISDLC-377.2) — iteration mechanism:
   write-resume-signal --task-id <id> --feedback <s>

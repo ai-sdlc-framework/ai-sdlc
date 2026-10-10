@@ -129,6 +129,9 @@ export function reapStaleSessions(opts: ReaperOptions = {}): SessionReaperResult
 
   for (const session of sessions) {
     if (session.status !== 'starting' && session.status !== 'in-progress') continue;
+    // AISDLC-564: agent-recovery records carry no heartbeat of their own; the
+    // board-level sweep below owns their liveness via the inflight manifest.
+    if (!session.tmuxSession) continue;
 
     // Use lastHeartbeat if available; fall back to spawnedAt.
     const anchorIso = session.lastHeartbeat ?? session.spawnedAt;

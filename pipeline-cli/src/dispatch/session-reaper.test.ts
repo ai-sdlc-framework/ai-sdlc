@@ -435,3 +435,21 @@ describe('CancelSignal round-trip', () => {
     expect(existsSync(tmpPath)).toBe(false);
   });
 });
+
+describe('agent recovery records (AISDLC-564)', () => {
+  it('reapStaleSessions leaves a heartbeat-less agent record alone', () => {
+    const dir = mkBoardDir();
+    writeSession(dir, {
+      schemaVersion: 'v1',
+      taskId: 'AISDLC-564',
+      spawnedAt: '2020-01-01T00:00:00.000Z',
+      status: 'in-progress',
+      agentId: 'abc',
+      worktreePath: '/wt',
+    });
+    const r = reapStaleSessions({ boardDir: dir, staleMs: 1000, now: () => new Date() });
+    expect(r.reaped).toEqual([]);
+    expect(readSession(dir, 'AISDLC-564')?.status).toBe('in-progress');
+    rmSync(path.dirname(dir), { recursive: true, force: true });
+  });
+});
