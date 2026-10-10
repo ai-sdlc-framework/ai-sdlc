@@ -151,6 +151,12 @@ trust MUST NOT rest solely on the operator's key. If the `ci-only` anchor cannot
 established, the verifier downgrades the leaf to its evidence-computed tier with a recorded
 reason and MUST NOT report `isolated` (OQ-3). Verification is fully offline (OQ-1).
 
+### Adopter documentation
+
+Adopter-facing guidance for the `requiredTier` policy knob, including how to obtain
+`attested` and `isolated`, lives in
+[`docs/operations/independence-policy.md`](../../docs/operations/independence-policy.md).
+
 ## Open Questions
 
 > **All 5 resolved 2026-09-06 via operator rubric walkthrough.** The original
