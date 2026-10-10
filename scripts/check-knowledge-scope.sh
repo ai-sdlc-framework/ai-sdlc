@@ -1,62 +1,40 @@
 #!/usr/bin/env bash
 #
 # AISDLC-773 / RFC-0053 OQ-1: a `protected` knowledge entry must never sit in
-# the tracked root, and the protected root must never be tracked by git.
+# the tracked root, and the protected root must be git-ignored and untracked.
 #
-# Usage: check-knowledge-scope.sh [tracked-root] [protected-root]
-#   Defaults: .ai-sdlc/knowledge  .ai-sdlc/knowledge-protected
-#   (override per adopter via `knowledge.trackedRoot` / `knowledge.protectedRoot`
-#   in .ai-sdlc/context.yaml; pass the resolved values as arguments).
+# Delegates to the real TypeScript parser (`cli-context check-scope`), which
+# resolves `knowledge.trackedRoot` / `knowledge.protectedRoot` from
+# .ai-sdlc/context.yaml. A line-regex here would miss flow-mapping/JSON
+# frontmatter, CRLF, BOM and trailing-comment forms.
 #
 # Exit codes:
-#   0 — no violations (or tracked root absent)
-#   1 — a protected entry is in the tracked root, or protected-root files are tracked
+#   0 — no violations (or CLI not built outside CI: skipped with a message)
+#   1 — violation, or CLI not built in CI (CI env set)
 
 set -euo pipefail
 
-tracked_root="${1:-.ai-sdlc/knowledge}"
-protected_root="${2:-.ai-sdlc/knowledge-protected}"
-tracked_root="${tracked_root%/}"
-protected_root="${protected_root%/}"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cli="$here/../pipeline-cli/bin/cli-context.mjs"
+dist="$here/../pipeline-cli/dist/cli/context.js"
 
-violations=""
-
-if [ -d "$tracked_root" ]; then
-  while IFS= read -r f; do
-    # Only the first frontmatter block is inspected.
-    if awk '
-      NR == 1 && $0 != "---" { exit 1 }
-      NR > 1 && $0 == "---" { exit 1 }
-      NR > 1 && /^scope:[[:space:]]*["'\'']?protected["'\'']?[[:space:]]*$/ { found = 1; exit 0 }
-      END { exit (found ? 0 : 1) }
-    ' "$f"; then
-      violations="${violations}  - ${f} (scope: protected in tracked root)"$'\n'
-    fi
-  done < <(find "$tracked_root" -type f -name '*.md' | LC_ALL=C sort)
-fi
-
-if git rev-parse --git-dir >/dev/null 2>&1; then
-  tracked_protected=$(git ls-files -- "$protected_root" || true)
-  if [ -n "$tracked_protected" ]; then
-    while IFS= read -r f; do
-      violations="${violations}  - ${f} (file under protected root is tracked by git)"$'\n'
-    done <<<"$tracked_protected"
+if [ ! -f "$dist" ]; then
+  if [ -n "${CI:-}" ]; then
+    echo "ERROR: pipeline-cli is not built; cannot run the knowledge scope check (run pnpm build)." >&2
+    exit 1
   fi
+  echo "[check-knowledge-scope] pipeline-cli/dist not built; skipping (CI runs this check)." >&2
+  exit 0
 fi
 
-if [ -z "$violations" ]; then
+if node "$cli" check-scope --project-dir "$PWD"; then
   exit 0
 fi
 
 {
   echo ""
   echo "ERROR: protected knowledge must stay out of the repository (AISDLC-773)."
-  echo ""
-  echo "Offending paths:"
-  printf '%s' "$violations"
-  echo ""
-  echo "Move the entry under ${protected_root}/ (gitignored) or change its scope to"
-  echo "internal/universal if it is not client or data-room material."
+  echo "Move protected entries under the protected root (gitignored), or change the scope"
+  echo "to internal/universal if it is not client or data-room material."
 } >&2
-
 exit 1

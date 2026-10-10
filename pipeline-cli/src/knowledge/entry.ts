@@ -67,7 +67,7 @@ const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 export function parseEntryFile(
   text: string,
 ): { fields: Record<string, unknown>; body: string } | { error: string } {
-  const m = FRONTMATTER_RE.exec(text);
+  const m = FRONTMATTER_RE.exec(text.replace(/^\uFEFF/, ''));
   if (!m) return { error: 'missing YAML frontmatter' };
   let fields: unknown;
   try {
@@ -108,7 +108,10 @@ export function validateEntryFields(fields: Record<string, unknown>, ontology: O
   ];
   for (const [key, allowed, label] of enumChecks) {
     const v = str(key);
-    if (v !== undefined && !allowed.includes(v)) {
+    const raw = fields[key];
+    if (raw !== undefined && raw !== null && raw !== '' && v === undefined) {
+      errors.push(`${label} must be a string (got ${typeof raw})`);
+    } else if (v !== undefined && !allowed.includes(v)) {
       errors.push(`unknown ${label} '${v}' (allowed: ${allowed.join(', ')})`);
     }
   }
