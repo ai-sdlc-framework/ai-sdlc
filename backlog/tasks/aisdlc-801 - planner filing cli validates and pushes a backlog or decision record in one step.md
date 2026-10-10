@@ -31,7 +31,7 @@ dispatchable: true
 
 **Fix.**
 1. `node pipeline-cli/bin/cli-file.mjs task <path> [--pr]` and `cli-file decision <id> --answer <option> [--pr]`: run the ASCII filename check, `backlog-drift check` scoped to the new file, `cli-dor-check`, and (for decisions) a JSONL parse of the whole log; refuse with the exact finding before anything is committed. On success it creates a branch `ai-sdlc/file-<id>` from `origin/main` in `.worktrees/file-<id>`, commits with a conventional `chore(docs)`/`chore(decisions)` subject ending in `(<TASK-ID>)`, pushes as a plain fast-forward, and opens the PR with the body it generates. It never force-pushes.
-2. If the branch exists and is behind main with a conflict only in `.ai-sdlc/_decisions/events.jsonl` (append-only), `cli-file rebase <id>` rebuilds the branch from `origin/main` plus the branch's own new lines and pushes to a NEW branch `ai-sdlc/file-<id>-r<n>`, opening a replacement PR and commenting on the old one; the planner never needs a lease push. After AISDLC-719 (one file per event) this path is rarely taken.
+2. If the branch exists and is behind main with a conflict only in `.ai-sdlc/_decisions/events.jsonl` (append-only), `cli-file rebase <id>` rebuilds the branch from `origin/main` plus the branch's own new lines and pushes to a NEW branch `ai-sdlc/file-<id>-r<n>`, opening a replacement PR and commenting on the old one; the planner never needs a lease push. With one file per decision event on main this path is rarely taken.
 3. The planner command body uses `cli-file` for every filing; the "run drift and DoR before pushing" rule becomes unnecessary because the tool enforces it.
 
 **Velocity impact.** Positive: filing PRs stop bouncing; no governance change (the planner still cannot force-push).
