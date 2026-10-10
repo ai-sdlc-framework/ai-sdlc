@@ -11,8 +11,6 @@ requires: []
 assumes: [RFC-0012, RFC-0035, RFC-0041, RFC-0048, RFC-0049, RFC-0050]
 requiresDocs:
   - operator-runbook
-deferredDocs: true
-deferredDocsDeadline: '2026-11-30'
 ---
 
 # RFC-0051: Session Hierarchy for Parallel Dispatch (planner, operator-dispatch, executors)
