@@ -5,6 +5,18 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.26.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.25.0...ai-sdlc-plugin-v0.26.0) (2026-10-10)
+
+
+### Features
+
+* **orchestrator:** up regenerates VS Code tasks with a CLI path (AISDLC-754) ([#1309](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1309)) ([51d6978](https://github.com/ai-sdlc-framework/ai-sdlc/commit/51d697809515c5b96f192faf297c7806753c590f))
+
+
+### Bug Fixes
+
+* **orchestrator:** bind main-rooted hierarchy executor lease push to its claimed task (AISDLC-756) ([#1305](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1305)) ([912e41a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/912e41a519415641727c061eaec684359e292445))
+
 ## [0.25.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.24.0...ai-sdlc-plugin-v0.25.0) (2026-10-09)
 
 

@@ -5,6 +5,20 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.31.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.30.0...orchestrator-v0.31.0) (2026-10-10)
+
+
+### Miscellaneous
+
+* **orchestrator:** Synchronize node-packages versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.31.0
+
 ## [0.30.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.29.0...orchestrator-v0.30.0) (2026-10-09)
 
 
