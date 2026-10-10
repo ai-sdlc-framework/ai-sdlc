@@ -11,8 +11,6 @@ labels:
   - root-cause
 dependencies: []
 references:
-  - AISDLC-684
-  - AISDLC-791
   - pipeline-cli/src/hierarchy/peer-guard.ts
   - ai-sdlc-plugin/commands/executor.md
 priority: critical
