@@ -11,7 +11,6 @@ labels:
   - bug
 dependencies: []
 references:
-  - AISDLC-791
   - pipeline-cli/src/hierarchy/up.ts
   - pipeline-cli/src/hierarchy/hierarchy.test.ts
 priority: high
