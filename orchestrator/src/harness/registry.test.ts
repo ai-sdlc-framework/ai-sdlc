@@ -37,5 +37,6 @@ describe('createDefaultHarnessRegistry', () => {
     const reg = createDefaultHarnessRegistry();
     expect(reg.has('claude-code')).toBe(true);
     expect(reg.has('codex')).toBe(true);
+    expect(reg.has('opencode')).toBe(true);
   });
 });

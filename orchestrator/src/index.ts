@@ -946,6 +946,7 @@ export {
   UnknownHarnessError,
   ClaudeCodeAdapter,
   CodexAdapter,
+  OpenCodeAdapter,
   createDefaultHarnessRegistry,
   probeVersion,
   matchesRange,
