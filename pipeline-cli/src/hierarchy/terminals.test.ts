@@ -14,9 +14,16 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { writeRoster } from './roster.js';
-import { buildVscodeTasks, hierarchyTerminals, OPEN_ALL_LABEL } from './terminals.js';
+import {
+  buildVscodeTasks,
+  hierarchyTerminals,
+  inspectVscodeTasks,
+  OPEN_ALL_LABEL,
+  syncVscodeTasks,
+} from './terminals.js';
 import type { HierarchyDeps, RosterEntry } from './types.js';
 
+const BIN = '/opt/My Tools/pipeline-cli/bin/cli-hierarchy.mjs';
 let tmp: string;
 let logs: string[];
 let calls: string[][];
@@ -71,6 +78,7 @@ beforeEach(() => {
     claudeBin: 'claude',
     pollAttempts: 1,
     pollIntervalMs: 1,
+    binPath: BIN,
   };
   mkdirSync(deps.cwd, { recursive: true });
 });
@@ -81,24 +89,29 @@ const OPTS = { force: false, print: false };
 
 describe('buildVscodeTasks', () => {
   it('builds one task per name plus a parallel compound task', () => {
-    const doc = buildVscodeTasks(['planner', 'executor-alpha']) as {
+    const doc = buildVscodeTasks(['planner', 'executor-alpha'], BIN, '/board/hierarchy.json') as {
       version: string;
       tasks: Record<string, unknown>[];
+      'ai-sdlc': unknown;
     };
     expect(doc.version).toBe('2.0.0');
     expect(doc.tasks).toHaveLength(3);
     expect(doc.tasks[0]).toMatchObject({
       label: 'planner',
       type: 'shell',
-      command: 'cli-hierarchy attach planner',
+      command: 'node',
+      args: [BIN, 'attach', 'planner'],
+      isBackground: true,
       presentation: {
         reveal: 'always',
         panel: 'dedicated',
         showReuseMessage: false,
-        clear: false,
+        echo: false,
+        clear: true,
         focus: false,
       },
     });
+    expect(doc['ai-sdlc']).toEqual({ generated: true, roster: '/board/hierarchy.json' });
     expect(doc.tasks[2]).toMatchObject({
       label: OPEN_ALL_LABEL,
       dependsOn: ['planner', 'executor-alpha'],
@@ -111,17 +124,17 @@ describe('hierarchyTerminals', () => {
   it('--print emits valid JSON for every roster entry and writes no file', () => {
     seedRoster();
     const r = hierarchyTerminals({ ...OPTS, print: true }, deps);
-    const doc = JSON.parse(logs.join('\n')) as { tasks: { label: string; command?: string }[] };
+    const doc = JSON.parse(logs.join('\n')) as { tasks: { label: string; args?: string[] }[] };
     expect(doc.tasks.map((t) => t.label)).toEqual([
       'planner',
       'operator-dispatch',
       'executor-alpha',
       OPEN_ALL_LABEL,
     ]);
-    expect(doc.tasks.slice(0, 3).map((t) => t.command)).toEqual([
-      'cli-hierarchy attach planner',
-      'cli-hierarchy attach operator-dispatch',
-      'cli-hierarchy attach executor-alpha',
+    expect(doc.tasks.slice(0, 3).map((t) => t.args)).toEqual([
+      [BIN, 'attach', 'planner'],
+      [BIN, 'attach', 'operator-dispatch'],
+      [BIN, 'attach', 'executor-alpha'],
     ]);
     expect(r.file).toBeUndefined();
     expect(existsSync(path.join(deps.cwd, '.vscode'))).toBe(false);
@@ -187,7 +200,7 @@ describe('hierarchyTerminals', () => {
       sessions: [{ ...entry('executor-alpha'), tmuxSession: 'ai-sdlc-hierarchy' }],
     });
     hierarchyTerminals({ ...OPTS, print: true }, deps);
-    expect(logs.join('\n')).toContain('cli-hierarchy attach executor-alpha');
+    expect(logs.join('\n')).toContain('"executor-alpha"');
   });
 
   it('skips and reports a roster entry that is not safe', () => {
@@ -199,5 +212,58 @@ describe('hierarchyTerminals', () => {
     hierarchyTerminals({ ...OPTS, print: true }, deps);
     expect(logs[0]).toMatch(/ignored/);
     expect(logs.join('\n')).not.toContain('attach victim');
+  });
+});
+
+describe('syncVscodeTasks', () => {
+  const file = () => path.join(deps.cwd, '.vscode', 'tasks.json');
+
+  it('writes the file when absent, with the marker, and is byte-identical on a re-run', () => {
+    seedRoster();
+    expect(inspectVscodeTasks(deps)).toBe('absent');
+    expect(syncVscodeTasks(deps)).toBe('written');
+    const first = readFileSync(file(), 'utf-8');
+    const doc = JSON.parse(first);
+    expect(doc['ai-sdlc']).toEqual({
+      generated: true,
+      roster: path.join(deps.boardDir, 'hierarchy.json'),
+    });
+    expect(inspectVscodeTasks(deps)).toBe('ours');
+    expect(syncVscodeTasks(deps)).toBe('unchanged');
+    expect(readFileSync(file(), 'utf-8')).toBe(first);
+  });
+
+  it('rewrites a marked file when the roster changed', () => {
+    seedRoster();
+    syncVscodeTasks(deps);
+    writeRoster(deps.boardDir, {
+      schemaVersion: 'v1',
+      sessions: [entry('planner', 'planner'), entry('executor-beta')],
+    });
+    expect(syncVscodeTasks(deps)).toBe('written');
+    expect(readFileSync(file(), 'utf-8')).toContain('executor-beta');
+  });
+
+  it('never overwrites a file without the marker, nor an unparseable one', () => {
+    seedRoster();
+    mkdirSync(path.join(deps.cwd, '.vscode'));
+    writeFileSync(file(), '{ "version": "2.0.0", "tasks": [] }');
+    expect(syncVscodeTasks(deps)).toBe('foreign');
+    expect(inspectVscodeTasks(deps)).toBe('foreign');
+    writeFileSync(file(), '// comment\n{}');
+    expect(syncVscodeTasks(deps)).toBe('foreign');
+    expect(readFileSync(file(), 'utf-8')).toBe('// comment\n{}');
+  });
+
+  it('skips on an empty roster', () => {
+    expect(syncVscodeTasks(deps)).toBe('skipped');
+    expect(existsSync(file())).toBe(false);
+  });
+
+  it('defaults the bin to process.argv[1] made absolute', () => {
+    seedRoster();
+    delete deps.binPath;
+    hierarchyTerminals({ ...OPTS, print: true }, deps);
+    expect(logs.join('\n')).toContain(JSON.stringify(path.resolve(process.argv[1] ?? '')));
   });
 });

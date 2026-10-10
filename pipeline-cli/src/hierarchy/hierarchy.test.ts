@@ -308,6 +308,86 @@ function legacyEntry(name: string, role: 'planner' | 'operator-dispatch' | 'exec
   });
 }
 
+describe('hierarchy up VS Code tasks (AISDLC-754)', () => {
+  const HINT =
+    'VS Code: run task "hierarchy: open all agents" (Terminal > Run Task) to open one terminal per agent';
+  let repo: string;
+  const tasksFile = () => path.join(repo, '.vscode', 'tasks.json');
+
+  beforeEach(() => {
+    repo = path.join(tmp, 'repo');
+    mkdirSync(repo, { recursive: true });
+    deps.cwd = repo;
+    deps.binPath = '/x/bin/cli-hierarchy.mjs';
+  });
+
+  it('creates a marked tasks file listing every agent, and leaves it byte-identical on a no-op up', async () => {
+    await hierarchyUp({ ...baseOpts, vscodeTasks: true }, deps);
+    const first = readFileSync(tasksFile(), 'utf-8');
+    const doc = JSON.parse(first);
+    expect(doc['ai-sdlc']).toEqual({
+      generated: true,
+      roster: path.join(boardDir, 'hierarchy.json'),
+    });
+    expect(doc.tasks.map((t: { label: string }) => t.label)).toEqual([
+      Q('planner'),
+      Q('operator-dispatch'),
+      Q('executor-alpha'),
+      Q('executor-beta'),
+      'hierarchy: open all agents',
+    ]);
+    const second = await hierarchyUp({ ...baseOpts, vscodeTasks: true }, deps);
+    expect(second.started).toEqual([]);
+    expect(readFileSync(tasksFile(), 'utf-8')).toBe(first);
+  });
+
+  it('regenerates when more executors start', async () => {
+    await hierarchyUp({ ...baseOpts, vscodeTasks: true }, deps);
+    await hierarchyUp({ ...baseOpts, executors: 3, vscodeTasks: true }, deps);
+    expect(readFileSync(tasksFile(), 'utf-8')).toContain(Q('executor-gamma'));
+  });
+
+  it('never modifies an unmarked file and prints the merge hint', async () => {
+    mkdirSync(path.dirname(tasksFile()), { recursive: true });
+    writeFileSync(tasksFile(), '{"version":"2.0.0","tasks":[]}');
+    await hierarchyUp({ ...baseOpts, vscodeTasks: true }, deps);
+    expect(readFileSync(tasksFile(), 'utf-8')).toBe('{"version":"2.0.0","tasks":[]}');
+    expect(logs.filter((l) => l.includes('terminals --vscode --print'))).toHaveLength(1);
+  });
+
+  it('skips regeneration when vscodeTasks is not set (--no-vscode-tasks)', async () => {
+    deps.env = { TERM_PROGRAM: 'vscode' };
+    await hierarchyUp(baseOpts, deps);
+    expect(existsSync(tasksFile())).toBe(false);
+    expect(logs).not.toContain(HINT);
+  });
+
+  it('ends with the run-task hint under TERM_PROGRAM=vscode or VSCODE_GIT_IPC_HANDLE, and omits it otherwise', async () => {
+    deps.env = { TERM_PROGRAM: 'vscode' };
+    await hierarchyUp({ ...baseOpts, vscodeTasks: true }, deps);
+    expect(logs[logs.length - 1]).toBe(HINT);
+
+    logs.length = 0;
+    deps.env = { VSCODE_GIT_IPC_HANDLE: '/tmp/sock' };
+    await hierarchyUp({ ...baseOpts, vscodeTasks: true }, deps);
+    expect(logs[logs.length - 1]).toBe(HINT);
+
+    logs.length = 0;
+    deps.env = {};
+    await hierarchyUp({ ...baseOpts, vscodeTasks: true }, deps);
+    expect(logs).not.toContain(HINT);
+  });
+
+  it('warns instead of failing when the tasks file cannot be written', async () => {
+    writeFileSync(path.join(repo, '.vscode'), 'a file where the directory should be');
+    const r = await hierarchyUp({ ...baseOpts, vscodeTasks: true }, deps);
+    expect(r.started.length).toBeGreaterThan(0);
+    expect(logs.some((l) => l.startsWith('warning: could not write .vscode/tasks.json'))).toBe(
+      true,
+    );
+  });
+});
+
 describe('hierarchy up', () => {
   it('starts one session per agent, titled and with an attach hint, and writes a valid roster', async () => {
     const result = await hierarchyUp(baseOpts, deps);

@@ -2,7 +2,7 @@
 id: AISDLC-754
 title: >-
   cli-hierarchy up regenerates the VS Code tasks file with a resolved CLI path and points the operator at it
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-07'
 labels:
@@ -46,9 +46,35 @@ Sequencing: AISDLC-755 (automatic terminal opening through a VS Code extension) 
 
 ## Acceptance Criteria
 
-- [ ] `cli-hierarchy terminals --vscode --print` emits `command: "node"` plus an `args` array whose first element is the absolute path of the invoked `cli-hierarchy.mjs`; running one generated task from a shell where `cli-hierarchy` is not on `PATH` attaches to the agent.
-- [ ] After `cli-hierarchy up --executors 5` in a repo with no `.vscode/tasks.json`, the file exists, lists all seven agents plus "hierarchy: open all agents", and carries the `ai-sdlc.generated` marker; a second `up` that starts nothing leaves the file byte-identical.
-- [ ] A hand-written `.vscode/tasks.json` without the marker is never modified by `up`; `up` prints the merge-by-hand hint once. `--no-vscode-tasks` skips regeneration entirely.
-- [ ] With `TERM_PROGRAM=vscode` in the environment, `up` prints the "run task" hint as its last line; without it, no hint. Covered by a test in `hierarchy.test.ts` that drives `up` with an injected environment.
-- [ ] `terminals.test.ts` covers the array-form command, the marker, and the refusal to overwrite an unmarked file; `docs-parity.test.ts` passes with the new flag in both the help text and `docs/operations/cli-hierarchy.md`.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` and `pnpm dark-code:check` pass apart from the pre-existing pipeline-cli failures (verify-runtime, bin-invocation, TUI timeouts), disclosed in the PR body.
+- [x] `cli-hierarchy terminals --vscode --print` emits `command: "node"` plus an `args` array whose first element is the absolute path of the invoked `cli-hierarchy.mjs`; running one generated task from a shell where `cli-hierarchy` is not on `PATH` attaches to the agent.
+- [x] After `cli-hierarchy up --executors 5` in a repo with no `.vscode/tasks.json`, the file exists, lists all seven agents plus "hierarchy: open all agents", and carries the `ai-sdlc.generated` marker; a second `up` that starts nothing leaves the file byte-identical.
+- [x] A hand-written `.vscode/tasks.json` without the marker is never modified by `up`; `up` prints the merge-by-hand hint once. `--no-vscode-tasks` skips regeneration entirely.
+- [x] With `TERM_PROGRAM=vscode` in the environment, `up` prints the "run task" hint as its last line; without it, no hint. Covered by a test in `hierarchy.test.ts` that drives `up` with an injected environment.
+- [x] `terminals.test.ts` covers the array-form command, the marker, and the refusal to overwrite an unmarked file; `docs-parity.test.ts` passes with the new flag in both the help text and `docs/operations/cli-hierarchy.md`.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` and `pnpm dark-code:check` pass apart from the pre-existing pipeline-cli failures (verify-runtime, bin-invocation, TUI timeouts), disclosed in the PR body.
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+`cli-hierarchy up` now keeps `.vscode/tasks.json` correct: generated tasks run `node <abs cli-hierarchy.mjs> attach <name>`, carry `isBackground` plus `echo:false`/`clear:true`, and the file is marked `ai-sdlc.generated` so `up` regenerates it only when absent or ours.
+
+## Changes
+- `pipeline-cli/src/hierarchy/terminals.ts` (modified): array-form command, marker, safe sync (never overwrites unmarked/symlinked files).
+- `pipeline-cli/src/hierarchy/up.ts`, `types.ts`, `pipeline-cli/src/cli/hierarchy.ts` (modified): regeneration, `--no-vscode-tasks`, VS Code run-task hint.
+- Tests, `docs/operations/cli-hierarchy.md`, `ai-sdlc-plugin/commands/hierarchy.md` (modified).
+
+## Design decisions
+- **Regenerate only on change**: a no-op second `up` leaves the file byte-identical.
+- **Write failure is a warning**, not an error.
+
+## Verification
+- `pnpm build` — clean
+- `pnpm test` — pass apart from pre-existing pipeline-cli failures (verify-runtime 3, bin-invocation 4, TUI 7)
+- `pnpm lint` — clean
+- `pnpm format:check` — clean
+- 3 parallel reviews approved
+
+## Follow-up
+declined: AISDLC-755 already filed for automatic terminal opening
+<!-- SECTION:FINAL_SUMMARY:END -->
