@@ -388,9 +388,40 @@ function mentionsGhPrMerge(text) {
   return /\bpr\b/.test(text) && (/\bmerge\b/i.test(text) || /\$['"]/.test(text));
 }
 
-/** Loose mention of the merge API (pulls path or the merge / auto-merge mutations). */
+/** REST merge path: pulls/<number-or-expansion>/merge, not merge_ / mergeable / mergeStateStatus. */
+const API_MERGE_PATH = /pulls\/[^\s/]*\/merge(?![A-Za-z0-9_])/i;
+
+/**
+ * Loose mention of the merge API (the REST merge path, the merge / auto-merge mutations,
+ * or `graphql` fed from stdin / a file, which can carry either mutation unseen).
+ */
 function mentionsApiMerge(text) {
-  return /pulls[\s\S]*merge|mergePullRequest|enablePullRequestAutoMerge/i.test(text);
+  return (
+    API_MERGE_PATH.test(text) ||
+    /mergePullRequest|enablePullRequestAutoMerge/i.test(text) ||
+    (/graphql/i.test(text) && (/--input\b/.test(text) || /query=@/.test(text)))
+  );
+}
+
+/** Decodes `%XX`, `\uXXXX` and `\xXX` escapes (JSON / C style, any backslash count) for detection only. */
+function decodeEscapes(text) {
+  return text
+    .replace(/\\+u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/\\+x([0-9a-fA-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/%([0-9a-fA-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+}
+
+/** Raw, escape-decoded, normalised and decoded-normalised variants for the mention tests. */
+function mentionVariants(command) {
+  const bases = [command, decodeEscapes(command)];
+  const out = new Set(bases);
+  for (const b of bases) {
+    for (const v of normalizeExpansions(b)) {
+      out.add(v);
+      out.add(decodeEscapes(v));
+    }
+  }
+  return [...out];
 }
 
 /**
@@ -404,7 +435,7 @@ function mentionsApiMerge(text) {
 function commandHasUninertMatch(command, matches, mentions) {
   const segs = splitShellSegmentsEx(command);
   if (mentions && commandIsOpaque(command, segs)) {
-    if (mentions(command) || normalizeExpansions(command).some((v) => mentions(v))) return true;
+    if (mentionVariants(command).some((v) => mentions(v))) return true;
   }
   for (let i = 0; i < segs.length; i++) {
     if (!isPlainSegment(segs[i].text)) continue;
@@ -453,9 +484,27 @@ function ghSegmentHasPrBeforeMerge(text) {
   return false;
 }
 
+/**
+ * Binary-agnostic check on a plain, non-inert segment: the exact tokens `pr` then later
+ * `merge` (case-insensitive, quotes and punctuation bound words) are refused whatever word
+ * is the program, so a renamed or symlinked gh binary does not escape. Inert prose segments
+ * never reach a verdict from this (commandHasUninertMatch trusts them).
+ */
+function segmentHasPrThenMergeToken(text) {
+  const tokens = text.split(/[^A-Za-z0-9_./=:@+,%-]+/).filter(Boolean);
+  let seenPr = false;
+  for (const t of tokens) {
+    const w = t.toLowerCase();
+    if (seenPr && w === 'merge') return true;
+    if (w === 'pr') seenPr = true;
+  }
+  return false;
+}
+
 /** True when the command runs (or could run) the raw merge command (see module contract). */
 function commandRunsGhPrMerge(command) {
-  return commandHasUninertMatch(command, ghSegmentHasPrBeforeMerge, mentionsGhPrMerge);
+  const matches = (text) => ghSegmentHasPrBeforeMerge(text) || segmentHasPrThenMergeToken(text);
+  return commandHasUninertMatch(command, matches, mentionsGhPrMerge);
 }
 
 module.exports = {
@@ -470,6 +519,8 @@ module.exports = {
   isOpaqueSegment,
   commandIsOpaque,
   mentionsApiMerge,
+  decodeEscapes,
+  segmentHasPrThenMergeToken,
   normalizeExpansions,
   commandHasUninertMatch,
   commandRunsGhPrMerge,

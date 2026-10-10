@@ -27,3 +27,12 @@ Replace the positive-grammar opaque-segment rule with a real shell tokenizer tha
 - [ ] `gh api ... -q $'.x'` and `gh release create --notes $'x'` are allowed.
 - [ ] Every bypass test from AISDLC-605 rounds 3 through 11 stays refused (`merge-matcher.test.mjs` and `enforce-blocked-actions.test.mjs`).
 - [ ] Previously allowed inert commands (echo prose, `git commit -m` text, `gh pr view`, `gh alias list`, `gh pr list --repo`) stay allowed.
+
+## Out of scope notes carried from AISDLC-605 round 12
+
+Found in the final review of the positive grammar and deliberately not fixed in AISDLC-605; this task or a sibling should pick them up:
+
+- `+` is in the bare character set, so interpreter string concatenation (`node -e "'pr' + ' mer' + 'ge'"`) is not seen as the phrase.
+- `pr` plus `$'` over-blocks harmless commands such as `tr -d $'\r'` (the mention test treats `$'` as a hidden word).
+- The branch-merge API surface (`/merges`, the `mergeBranch` mutation) is not covered by the PR merge path matcher.
+- The permission-check hook fails open on its own errors.

@@ -2580,6 +2580,36 @@ const grammarRefused = (gh, mg) => {
   ];
 };
 
+// AISDLC-605 round 12: renamed binaries, escape-decoded opaque mentions, read-only API fields.
+const escapeRefused = (gh, mg) => {
+  const mut = [mg, 'Pull', 'Request'].join('');
+  const arm = ['enablePull', 'RequestAuto', 'Merge'].join('');
+  const pct = '%6D' + 'erge';
+  const u = '\\u006d' + 'erge';
+  return [
+    `ln -s /opt/homebrew/bin/${gh} /tmp/g && /tmp/g pr ${mg} 5`,
+    `cp /usr/bin/${gh} ./x; ./x pr ${mg} 5`,
+    `${gh} api -X PUT repos/o/r/pulls/5/${pct} 2>&1`,
+    `printf '%s' '{"query":"mutation{${mut}(input:{pullRequestId:\\"PR_x\\"}){clientMutationId}}"}' | ${gh} api graphql --input -`,
+    `printf '%s' '{"query":"mutation{${arm}(input:{pullRequestId:\\"PR_x\\"}){clientMutationId}}"}' | ${gh} api graphql --input -`,
+    `printf '%s' '{"query":"mutation{${u}PullRequest(input:{})}"}' | ${gh} api graphql --input -`,
+    `printf '%s' "$Q" | ${gh} api graphql --input -`,
+    `${gh} api graphql -F query=@q.graphql 2>&1`,
+    `${gh} api repos/o/r/pulls/5/${u} -X PUT 2>&1`,
+  ];
+};
+
+const escapeAllowed = (gh, mg) => [
+  `${gh} api repos/o/r/pulls/5 --jq .${mg}able 2>&1`,
+  `${gh} api repos/o/r/pulls/5 2>&1 | jq .${mg}StateStatus`,
+  `${gh} api repos/o/r/pulls/5/${mg}_commit_sha 2>&1`,
+  `echo "${gh} pr ${mg} 5"`,
+  `git commit -m "docs about pr ${mg}"`,
+  `grep -r "pr ${mg}" .`,
+  'git log --oneline -5',
+  `${gh} pr view 5 --json ${mg}StateStatus,${mg}able`,
+];
+
 const grammarAllowed = (gh, mg) => [
   `${gh} pr view 5 --json ${mg}StateStatus,${mg}able`,
   `${gh} -R o/r pr view 5`,
@@ -2635,6 +2665,14 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 positive gramm
 
   it('keeps the pinned allow cases allowed', () => {
     for (const c of grammarAllowed(gh, mg)) assert.ok(!isDenied(run(c)), c);
+  });
+
+  it('refuses renamed binaries and escape-decoded opaque mentions (round 12)', () => {
+    for (const c of escapeRefused(gh, mg)) assert.ok(isDenied(run(c)), c);
+  });
+
+  it('allows read-only API fields and inert prose (round 12)', () => {
+    for (const c of escapeAllowed(gh, mg)) assert.ok(!isDenied(run(c)), c);
   });
 
   it('allows spaced pipes, && and ; between plain non-merge segments', () => {
