@@ -449,9 +449,6 @@ function commandHasUninertMatch(command, matches, mentions) {
 
 const GH_PR_MERGE = /\bgh(?:\.exe)?\s+pr\s+merge\b/i;
 
-// gh flags that take a separate value token (`-R owner/repo`, `--hostname host`).
-const GH_VALUE_FLAGS = new Set(['-R', '--repo', '-h', '--hostname']);
-
 /** Brace-expansion alternatives of one word (`{merge,}` gives merge and the empty word). */
 function wordAlternatives(word) {
   const m = /^(.*?)\{([^{}]*)\}(.*)$/.exec(word);
@@ -461,52 +458,21 @@ function wordAlternatives(word) {
 }
 
 /**
- * Token-level check for gh invocations the plain regex misses (AISDLC-605 round 4):
- * global flags between `gh` and `pr` or between `pr` and `merge`, `gh alias set|import`
- * (an alias can expand to the merge command, so it is refused outright), ANSI-C /
- * locale quoting (`$'..'`, `$".."`) after gh, and brace expansion. Fail closed.
+ * Structural check (AISDLC-605 rounds 4-6). gh's parser skips unknown flags and their
+ * values before resolving the subcommand, so guessing which flags take a value (or
+ * how many words to look at) is unsound. For EVERY `gh` / `gh.exe` token of the
+ * segment, at any position (behind `nice -n 10`, `env -u X`, `sudo -u me`, `exec -a n`,
+ * `command -p`, `timeout 60`, or as an absolute path), the token `pr` followed anywhere
+ * later by the token `merge` is refused, whatever flags sit between. `gh alias` followed
+ * later by `set` / `import` is refused too (an alias can expand to the merge command).
+ * Quotes and backslashes are removed and brace expansion is applied per word.
+ * `mergeStateStatus` / `mergeable` are not the token `merge`.
  */
-function ghTokensRunMerge(text) {
+function ghSegmentHasPrBeforeMerge(text) {
   const tokens = text
     .replace(/['"\\]/g, '')
     .split(/\s+/)
     .filter(Boolean);
-  for (let i = 0; i < tokens.length; i++) {
-    const base = tokens[i]
-      .replace(/^[({!]+/, '')
-      .split('/')
-      .pop()
-      .toLowerCase()
-      .replace(/\.exe$/, '');
-    if (base !== 'gh') continue;
-    // Drop flags (and the value token of value-taking flags) after gh.
-    const words = [];
-    for (let j = i + 1; j < tokens.length; j++) {
-      const t = tokens[j];
-      if (t.startsWith('-')) {
-        if (GH_VALUE_FLAGS.has(t)) j++;
-        continue;
-      }
-      words.push(wordAlternatives(t.toLowerCase()));
-      if (words.length >= 4) break;
-    }
-    const is = (k, w) => !!words[k] && words[k].includes(w);
-    // Any later word may be the subcommand: an unlisted value-taking flag (`pr -F x merge`) shifts it.
-    if (is(0, 'pr') && [1, 2, 3].some((k) => is(k, 'merge'))) return true;
-    if (is(0, 'alias') && (is(1, 'set') || is(1, 'import'))) return true;
-  }
-  return false;
-}
-
-/**
- * Structural check (AISDLC-605 round 5): gh's parser skips unknown flags and their
- * values before resolving the subcommand, so guessing which flags take a value is
- * unsound. Any segment whose command is gh (among the first effective tokens) with
- * the token `pr` before the token `merge` anywhere after it is refused, whatever
- * flags sit between. `mergeStateStatus` / `mergeable` are not the token `merge`.
- */
-function ghSegmentHasPrBeforeMerge(text) {
-  const tokens = effectiveTokens(text.replace(/['"\\]/g, ''));
   const isGh = (t) =>
     t
       .replace(/^[({!]+/, '')
@@ -514,13 +480,17 @@ function ghSegmentHasPrBeforeMerge(text) {
       .pop()
       .toLowerCase()
       .replace(/\.exe$/, '') === 'gh';
-  const g = tokens.slice(0, 3).findIndex(isGh);
-  if (g < 0) return false;
-  let seenPr = false;
-  for (const t of tokens.slice(g + 1)) {
-    const alts = wordAlternatives(t.toLowerCase());
-    if (seenPr && alts.includes('merge')) return true;
-    if (alts.includes('pr')) seenPr = true;
+  for (let g = 0; g < tokens.length; g++) {
+    if (!isGh(tokens[g])) continue;
+    let seenPr = false;
+    let seenAlias = false;
+    for (const t of tokens.slice(g + 1)) {
+      const alts = wordAlternatives(t.toLowerCase());
+      if (seenPr && alts.includes('merge')) return true;
+      if (seenAlias && (alts.includes('set') || alts.includes('import'))) return true;
+      if (alts.includes('pr')) seenPr = true;
+      if (alts.includes('alias')) seenAlias = true;
+    }
   }
   return false;
 }
@@ -535,7 +505,6 @@ function matchesGhPrMerge(text) {
   return (
     GH_PR_MERGE.test(text) ||
     GH_PR_MERGE.test(text.replace(/\\/g, '')) ||
-    ghTokensRunMerge(text) ||
     ghSegmentHasPrBeforeMerge(text) ||
     ghAnsiQuoted(text)
   );

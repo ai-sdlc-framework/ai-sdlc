@@ -405,3 +405,32 @@ describe('round-8: any gh segment with pr before merge is refused (AISDLC-605)',
     for (const c of allowed) assert.equal(m.commandRunsGhPrMerge(c), false, c);
   });
 });
+
+describe('round-9: pr-before-merge applies to every gh token, behind wrappers (AISDLC-605)', () => {
+  const mg = ['mer', 'ge'].join('');
+  const gh = ['g', 'h'].join('');
+  it('refuses wrapped and absolute-path gh', () => {
+    for (const c of [
+      `nice -n 10 ${gh} -b x pr ${mg} 42`,
+      `env -u HOME ${gh} -b x pr ${mg} 42`,
+      `sudo -u me ${gh} -b x pr ${mg} 42`,
+      `exec -a n ${gh} -b x pr ${mg} 42`,
+      `nice -n 10 ${gh} pr -b a -b b -b c ${mg} 42`,
+      `command -p ${gh} pr ${mg} 42`,
+      `timeout 60 ${gh} pr ${mg} 42`,
+      `/usr/bin/${gh} -b x pr ${mg} 42`,
+      `nice -n 10 /usr/bin/${gh} -b x pr ${mg} 42`,
+    ]) {
+      assert.equal(m.commandRunsGhPrMerge(c), true, c);
+    }
+  });
+  it('allows read-only wrapped gh', () => {
+    for (const c of [
+      `${gh} alias list`,
+      `nice -n 10 ${gh} pr view 5 --json mergeStateStatus,mergeable`,
+      `env -u HOME ${gh} -R o/r pr list --search "is:open"`,
+    ]) {
+      assert.equal(m.commandRunsGhPrMerge(c), false, c);
+    }
+  });
+});

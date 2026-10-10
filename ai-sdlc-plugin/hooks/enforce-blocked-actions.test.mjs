@@ -2408,8 +2408,29 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 pr-before-merg
       `${gh} pr view 5 --json mergeStateStatus,mergeable`,
       `${gh} -R o/r pr view 5`,
       `${gh} pr list --repo o/r`,
+      `${gh} pr list --search "is:open"`,
+      `echo "${gh} -b x pr ${mg} 42"`,
+      `${gh} alias list`,
+      `nice -n 10 ${gh} pr view 5 --json mergeStateStatus,mergeable`,
+      `env -u HOME ${gh} -R o/r pr list --search "is:open"`,
     ]) {
       assert.ok(!isDenied(run(c)), c);
+    }
+  });
+
+  it('refuses gh behind wrappers and absolute paths', () => {
+    for (const c of [
+      `nice -n 10 ${gh} -b x pr ${mg} 42`,
+      `env -u HOME ${gh} -b x pr ${mg} 42`,
+      `sudo -u me ${gh} -b x pr ${mg} 42`,
+      `exec -a n ${gh} -b x pr ${mg} 42`,
+      `nice -n 10 ${gh} pr -b a -b b -b c ${mg} 42`,
+      `command -p ${gh} pr ${mg} 42`,
+      `timeout 60 ${gh} pr ${mg} 42`,
+      `/usr/bin/${gh} -b x pr ${mg} 42`,
+      `nice -n 10 /usr/bin/${gh} -b x pr ${mg} 42`,
+    ]) {
+      assert.ok(isDenied(run(c)), c);
     }
   });
 });
