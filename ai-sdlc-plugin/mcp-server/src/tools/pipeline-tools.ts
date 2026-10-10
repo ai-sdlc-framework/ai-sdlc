@@ -463,6 +463,11 @@ export function registerPipelineTools(server: McpServer, deps: PipelineToolDeps 
     {
       taskId: z.string(),
       worktreePath: z.string(),
+      workDir: z
+        .string()
+        .describe(
+          'Trusted project root (NOT the PR worktree); the review diff base resolves here.',
+        ),
       task: taskSpecSchema,
       branch: z.string(),
       initialDeveloperReturn: developerReturnSchema,
@@ -477,6 +482,7 @@ export function registerPipelineTools(server: McpServer, deps: PipelineToolDeps 
     async ({
       taskId,
       worktreePath,
+      workDir,
       task,
       branch,
       initialDeveloperReturn,
@@ -488,6 +494,7 @@ export function registerPipelineTools(server: McpServer, deps: PipelineToolDeps 
         const result = await runners.iterateReviewLoop({
           taskId,
           worktreePath,
+          workDir,
           task,
           branch,
           initialDeveloperReturn,

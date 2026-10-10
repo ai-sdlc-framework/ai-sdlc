@@ -95,7 +95,7 @@ async function run(sourceKind?: 'backlog' | 'gh-issue', inline = false, diffFail
     .on(/^git worktree add/, ok())
     .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
     .on(
-      /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+      /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
       diffFails ? fail('boom', 1) : ok('diff\n'),
     )
     .on(/^git -c core\.quotePath=false diff --name-only/, ok('a.ts\0'))

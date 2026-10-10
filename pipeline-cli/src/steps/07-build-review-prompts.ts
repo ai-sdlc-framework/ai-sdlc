@@ -80,8 +80,12 @@ export async function buildReviewPrompts(
   // AISDLC-606 — diff against the resolved integration branch (defaults to
   // `origin/main` when `spec.branching.targetBranch` is unset, so main-based
   // repos are byte-identical to pre-AISDLC-606 behavior).
+  // AISDLC-638.1 — the target branch comes from the TRUSTED `workDir` config (never the PR
+  // worktree's copy, which the PR controls), and the ref is fully qualified so a local
+  // branch or tag of the same short name cannot shadow the remote-tracking ref.
   const targetBranch = resolveTargetBranch(opts.workDir);
-  const baseRef = `origin/${targetBranch}`;
+  const baseRef = `refs/remotes/origin/${targetBranch}`;
+  const baseRefSource = `trusted-workdir:${join(opts.workDir, '.ai-sdlc', 'pipeline.yaml')}`;
 
   // `--text` stops a `-diff` attribute hiding content behind a binary stub, but it also
   // means git never prints `Binary files ... differ`, so binary files are detected
@@ -237,6 +241,7 @@ export async function buildReviewPrompts(
       reviewer,
       ...(routed.model !== undefined ? { model: routed.model } : {}),
       modelArm: routed.arm,
+      baseRef,
       prompt: buildPrompt(reviewer, {
         taskId: opts.taskId,
         title: opts.task.title,
@@ -252,7 +257,17 @@ export async function buildReviewPrompts(
     };
   });
 
-  return { prompts, diff, changedFiles, harnessNote, diffUnavailable, nonce, headSha };
+  return {
+    prompts,
+    baseRef,
+    baseRefSource,
+    diff,
+    changedFiles,
+    harnessNote,
+    diffUnavailable,
+    nonce,
+    headSha,
+  };
 }
 
 /** Paths git reports as binary (`-\t-\t<path>`) in `--numstat -z --no-renames` output. */

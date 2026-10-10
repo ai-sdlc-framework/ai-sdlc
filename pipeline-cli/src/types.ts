@@ -443,10 +443,16 @@ export interface ReviewPrompt {
   model?: string;
   /** Which routing arm chose the model. */
   modelArm?: 'table' | 'explore' | 'override' | 'default';
+  /** Fully qualified base ref the review diff was taken against (AISDLC-638.1). */
+  baseRef?: string;
 }
 
 export interface BuildReviewPromptsResult {
   prompts: ReviewPrompt[];
+  /** Fully qualified base ref (`refs/remotes/origin/<branch>`) the review diff used. */
+  baseRef?: string;
+  /** Where the target branch was resolved from (the trusted workDir config, never the PR worktree). */
+  baseRefSource?: string;
   diff: string;
   changedFiles: string[];
   harnessNote: string;
@@ -513,6 +519,11 @@ export interface IterateReviewLoopOptions {
    * project root. (The composite `executePipeline()` passes `branch.worktreePath`.)
    */
   worktreePath: string;
+  /**
+   * Trusted project directory (NOT the PR worktree). Step 7 resolves the review diff base
+   * from this directory's config on every iteration, so a PR cannot narrow what reviewers see.
+   */
+  workDir: string;
   task: TaskSpec;
   branch: string;
   /** First-round developer return — produced by Step 5/6 by the caller. */

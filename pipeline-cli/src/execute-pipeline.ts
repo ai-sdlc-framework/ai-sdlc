@@ -448,6 +448,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     const loop = await iterateReviewLoop({
       taskId: opts.taskId,
       worktreePath: branch.worktreePath,
+      workDir: opts.workDir,
       task,
       branch: branch.branch,
       initialDeveloperReturn: initialDev,

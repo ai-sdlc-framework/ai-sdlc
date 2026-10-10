@@ -129,7 +129,7 @@ export async function iterateReviewLoop(
       task: opts.task,
       branch: opts.branch,
       worktreePath: opts.worktreePath,
-      workDir: opts.worktreePath,
+      workDir: opts.workDir,
       iteration,
       ...(opts.runner ? { runner: opts.runner } : {}),
       // The review path gets the untrusted value (undefined when not trusted backlog work).
