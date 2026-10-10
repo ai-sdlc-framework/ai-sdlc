@@ -2,8 +2,9 @@
 id: AISDLC-674
 title: >-
   RFC-0052: planner and synthesizer agent definitions with bounded inputs, evidence-cited findings and the grounding drop rule
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - dispatch-executor-delta
 created_date: '2026-10-01'
 labels:
   - rfc-0052
