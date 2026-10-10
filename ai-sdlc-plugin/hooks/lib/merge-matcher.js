@@ -25,6 +25,12 @@
  * cli-merge-if-eligible are the backstop): variables assembled from parts
  * (`a=mer b=ge; gh pr $a$b 5` mentions no phrase; command-substitution splices such as
  * `gh pr $(echo mer)ge 5` are in the same class), and two-step store-then-run (write the phrase to a script file, then run it).
+ * Store-then-run through tee / git commit writers followed by sh in the same call is also
+ * accepted for now (tracked under AISDLC-605.1, minor).
+ *
+ * Command runners (xargs, sh, env, find -exec, node, ...) can reassemble a phrase that is
+ * split across plain segments (`echo merge 5 | xargs gh pr`): when ANY segment's command word
+ * is a runner, the whole-command mention tests run even if every segment is plain.
  */
 
 const INERT_WORDS = new Set([
@@ -447,6 +453,61 @@ function mentionVariants(command) {
   return [...out];
 }
 
+const RUNNER_WORDS = new Set([
+  'xargs',
+  'parallel',
+  'sh',
+  'bash',
+  'zsh',
+  'dash',
+  'ksh',
+  'eval',
+  'env',
+  'nohup',
+  'nice',
+  'timeout',
+  'sudo',
+  'doas',
+  'exec',
+  'command',
+  'builtin',
+  'time',
+  'watch',
+  'node',
+  'nodejs',
+  'deno',
+  'bun',
+  'python',
+  'perl',
+  'ruby',
+  'php',
+  'lua',
+  'awk',
+  'gawk',
+  'busybox',
+  'ssh',
+  'script',
+]);
+
+/** True when any segment's command word is a command-runner (see module header). */
+function commandHasRunner(segs) {
+  return segs.some((s) => {
+    const w = commandWord(s.text);
+    if (RUNNER_WORDS.has(w) || /^python[0-9.]+$/.test(w)) return true;
+    if (w === 'find')
+      return effectiveTokens(s.text).some((t) => /^-(exec|execdir|ok|okdir)$/.test(t));
+    return false;
+  });
+}
+
+/** REST / GraphQL merge pieces that a runner can reassemble from stdin (`pulls/5/X` + `merge`). */
+function mentionsApiMergePieces(text) {
+  const t = normalizePathDots(text);
+  return (
+    (/\bmerge\b/i.test(t) && /pulls\//.test(t)) || (/\bmerge\b/i.test(t) && /graphql/i.test(t))
+  );
+}
+
 /**
  * True when `matches(text)` hits a PLAIN segment that is NOT inert, or an inert plain
  * segment whose pipeline feeds a non-inert later stage. Opaque segments are never
@@ -459,6 +520,15 @@ function commandHasUninertMatch(command, matches, mentions) {
   const segs = splitShellSegmentsEx(command);
   if (mentions && commandIsOpaque(command, segs)) {
     if (mentionVariants(command).some((v) => mentions(v))) return true;
+  }
+  if (mentions && commandHasRunner(segs)) {
+    const apiMode = mentions === mentionsApiMerge;
+    // The sanctioned helper's own name contains `merge`; it is not a merge phrase.
+    const stripped = command.replace(/cli-merge-if-eligible(\.mjs)?/g, '');
+    if (
+      mentionVariants(stripped).some((v) => mentions(v) || (apiMode && mentionsApiMergePieces(v)))
+    )
+      return true;
   }
   for (let i = 0; i < segs.length; i++) {
     if (!isPlainSegment(segs[i].text)) continue;

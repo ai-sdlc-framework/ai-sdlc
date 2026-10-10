@@ -2713,3 +2713,51 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 positive gramm
     }
   });
 });
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 split phrases via command runners)', () => {
+  let dir;
+  const mg = 'mer' + 'ge';
+
+  before(() => {
+    dir = join(tmpdir(), `enforce-blocked-split-${Date.now()}`);
+    mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(dir, '.ai-sdlc', 'agent-role.yaml'),
+      'role: coding-agent\ngoal: Test agent\nblockedActions: []\n',
+    );
+  });
+
+  after(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function run(command) {
+    const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command } });
+    return runHookRaw(input, { CLAUDE_PROJECT_DIR: dir });
+  }
+
+  for (const c of [
+    `echo ${mg} 5 --squash | xargs gh pr`,
+    `echo ${mg} | xargs -I X gh api -X PUT repos/o/r/pulls/5/X`,
+    `echo ${mg} | xargs -I X gh pr X 5 --squash`,
+    `printf '%s\\n' ${mg} | xargs gh pr`,
+    `echo ${mg} | parallel gh pr {} 5`,
+    `echo pr | xargs -I X gh X ${mg} 5`,
+  ]) {
+    it(`refuses: ${c}`, () => {
+      assert.ok(isDenied(run(c)), c);
+    });
+  }
+
+  for (const c of [
+    'git log --oneline -5',
+    'node --test ai-sdlc-plugin/hooks/x.test.mjs',
+    `echo "gh pr ${mg} 5"`,
+    'gh pr view 5 --json mergeStateStatus,mergeable',
+    "find . -name '*.md'",
+  ]) {
+    it(`allows: ${c}`, () => {
+      assert.ok(!isDenied(run(c)), c);
+    });
+  }
+});

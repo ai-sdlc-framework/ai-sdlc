@@ -811,3 +811,43 @@ describe('REST path normalisation and ANSI-quote anchoring (round 13)', () => {
     }
   });
 });
+
+describe('command runners reassemble split merge phrases (AISDLC-605)', () => {
+  const mg = 'mer' + 'ge';
+  const refusedPr = [
+    `echo ${mg} 5 --squash | xargs gh pr`,
+    `printf '%s\\n' ${mg} | xargs gh pr`,
+    `echo ${mg} | xargs gh pr X 5`,
+    `echo pr | xargs -I X gh X ${mg} 5`,
+    `echo pr ${mg} 5 | sh`,
+    `echo ${mg} | parallel gh pr {} 5`,
+    `echo ${mg} | xargs -I X gh pr X 5 --squash`,
+  ];
+  const allowed = [
+    'git log --oneline -5',
+    'ls -la',
+    'pnpm test',
+    'node --test ai-sdlc-plugin/hooks/x.test.mjs',
+    `echo "gh pr ${mg} 5"`,
+    `git commit -m "docs about pr ${mg}"`,
+    `grep -r "pr ${mg}" .`,
+    'gh pr view 5 --json mergeStateStatus,mergeable',
+    'gh api repos/o/r/pulls/5 --jq .mergeable',
+    "find . -name '*.md'",
+  ];
+  it('refuses split pr-merge phrases', () => {
+    for (const c of refusedPr) assert.equal(m.commandRunsGhPrMerge(c), true, c);
+  });
+  it('refuses split REST merge path', () => {
+    const none = () => false;
+    for (const c of [`echo ${mg} | xargs -I X gh api -X PUT repos/o/r/pulls/5/X`])
+      assert.equal(m.commandHasUninertMatch(c, none, m.mentionsApiMerge), true, c);
+  });
+  it('keeps allow cases allowed', () => {
+    const none = () => false;
+    for (const c of allowed) {
+      assert.equal(m.commandRunsGhPrMerge(c), false, c);
+      assert.equal(m.commandHasUninertMatch(c, none, m.mentionsApiMerge), false, c);
+    }
+  });
+});
