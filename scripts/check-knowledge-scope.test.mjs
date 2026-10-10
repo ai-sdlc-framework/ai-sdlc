@@ -115,6 +115,74 @@ describe('check-knowledge-scope.sh', () => {
   });
 });
 
+describe('check-knowledge-scope.sh over the pushed range (AISDLC-773)', () => {
+  const git = (...args) =>
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
+      cwd: root,
+      encoding: 'utf-8',
+    }).trim();
+  const commit = (msg) => {
+    git('add', '-A', '-f');
+    git('commit', '-q', '-m', msg);
+    return git('rev-parse', 'HEAD');
+  };
+  const push = (local, remote) => `refs/heads/b ${local} refs/heads/b ${remote}\n`;
+  const NULL = '0'.repeat(40);
+
+  it('catches a protected entry added in one commit and removed in a later one', () => {
+    repo({ '.gitignore': '.ai-sdlc/knowledge-protected/\n', 'x.txt': 'x' });
+    const base = commit('base');
+    writeFileSync(join(root, 'leak.md'), 'x');
+    mkdirSync(join(root, '.ai-sdlc/knowledge/customers'), { recursive: true });
+    writeFileSync(join(root, '.ai-sdlc/knowledge/customers/c.md'), entry('k-c', 'protected'));
+    commit('add');
+    rmSync(join(root, '.ai-sdlc/knowledge/customers/c.md'));
+    const head = commit('remove');
+    assert.equal(run(SCOPE, []).status, 0, 'HEAD alone looks clean');
+    const r = run(SCOPE, [], push(head, base));
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /customers\/c\.md.*pushed commit/);
+  });
+
+  it('catches a file committed under the protected root and later removed', () => {
+    repo({ '.gitignore': '.ai-sdlc/knowledge-protected/\n', 'x.txt': 'x' });
+    const base = commit('base');
+    mkdirSync(join(root, '.ai-sdlc/knowledge-protected'), { recursive: true });
+    writeFileSync(join(root, '.ai-sdlc/knowledge-protected/p.md'), entry('k-p', 'protected'));
+    commit('add');
+    git('rm', '-q', '-f', '.ai-sdlc/knowledge-protected/p.md');
+    const head = commit('remove');
+    const r = run(SCOPE, [], push(head, base));
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /protected root is in pushed commit/);
+  });
+
+  it('passes a clean range and ignores commits already on the remote', () => {
+    repo({ '.gitignore': '.ai-sdlc/knowledge-protected/\n' });
+    mkdirSync(join(root, '.ai-sdlc/knowledge'), { recursive: true });
+    writeFileSync(join(root, '.ai-sdlc/knowledge/old.md'), entry('k-o', 'protected'));
+    const old = commit('old leak already pushed');
+    rmSync(join(root, '.ai-sdlc/knowledge/old.md'));
+    writeFileSync(join(root, '.ai-sdlc/knowledge/a.md'), entry('k-a', 'internal'));
+    const head = commit('clean');
+    assert.equal(run(SCOPE, [], push(head, old)).status, 0);
+  });
+
+  it('scans a new branch back to the merge-base and skips deleted refs', () => {
+    repo({ '.gitignore': '.ai-sdlc/knowledge-protected/\n', 'x.txt': 'x' });
+    git('branch', '-M', 'main');
+    const base = commit('base');
+    git('update-ref', 'refs/remotes/origin/main', base);
+    mkdirSync(join(root, '.ai-sdlc/knowledge'), { recursive: true });
+    writeFileSync(join(root, '.ai-sdlc/knowledge/c.md'), entry('k-c', 'protected'));
+    commit('add');
+    rmSync(join(root, '.ai-sdlc/knowledge/c.md'));
+    const head = commit('remove');
+    assert.equal(run(SCOPE, [], push(head, NULL)).status, 1);
+    assert.equal(run(SCOPE, [], push(NULL, head)).status, 0);
+  });
+});
+
 describe('check-pr-body-protected.sh', () => {
   const files = {
     '.ai-sdlc/knowledge-protected/customers/c.md': entry('acme-pricing', 'protected'),

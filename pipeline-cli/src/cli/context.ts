@@ -8,14 +8,15 @@
  *   check-pr-body   — fail when a PR body (`--body-file <path>` or stdin) cites a
  *                     protected entry id or the protected root path.
  *   check-scope     — fail when a protected entry is in the configured tracked root, or the
- *                     configured protected root is tracked / not git-ignored.
+ *                     configured protected root is tracked / not git-ignored. With `--rev`, also
+ *                     scans every commit in the pushed range, not only HEAD/the index.
  */
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { loadKnowledgeConfig } from '../knowledge/config.js';
-import { checkKnowledgeScope } from '../knowledge/scope-check.js';
+import { checkKnowledgeScope, checkKnowledgeScopeRange } from '../knowledge/scope-check.js';
 import { findProtectedCitations, validateKnowledge } from '../knowledge/store.js';
 
 export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
@@ -41,10 +42,19 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
     .command(
       'check-scope',
       'Fail when protected knowledge could enter the repository',
-      (y) => y,
+      (y) =>
+        y.option('rev', {
+          type: 'string',
+          array: true,
+          describe:
+            'git rev-list argument selecting the pushed commits (repeatable, e.g. <sha> ^<remote-sha>); every commit is scanned, not just HEAD',
+        }),
       (args) => {
         const projectDir = String(args['project-dir']);
-        const violations = checkKnowledgeScope(projectDir, loadKnowledgeConfig(projectDir));
+        const config = loadKnowledgeConfig(projectDir);
+        const violations = checkKnowledgeScope(projectDir, config);
+        const revs = (args.rev as string[] | undefined) ?? [];
+        if (revs.length > 0) violations.push(...checkKnowledgeScopeRange(projectDir, revs, config));
         for (const v of violations) process.stderr.write(`error: ${v}\n`);
         if (violations.length > 0) process.exitCode = 1;
       },
