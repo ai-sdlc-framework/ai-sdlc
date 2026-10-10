@@ -117,7 +117,7 @@ Pluggable adapters fetch raw customer signals (support tickets, community thread
 |---------|-------------|
 | [`init.md`](init.md) | `ai-sdlc init` adopter guide — wizard prompts, flags, idempotency, recommended bootstrap sequences |
 | [`auto-rebase-token-setup.md`](auto-rebase-token-setup.md) | Setting up the token required for the `/ai-sdlc rebase` automated rebase command |
-| [`auto-rebase-stale-prs.md`](auto-rebase-stale-prs.md) | Auto-rebase DIRTY/BEHIND PRs on push-to-main (Option A — operator re-signs locally) |
+| [`auto-rebase-stale-prs.md`](auto-rebase-stale-prs.md) | Auto-rebase DIRTY/BEHIND PRs script (Option A — operator re-signs locally); the `auto-rebase-open-prs.yml` workflow it complemented was deleted (AISDLC-727) |
 
 ---
 
