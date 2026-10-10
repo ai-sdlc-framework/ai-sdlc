@@ -46,6 +46,7 @@ import {
 } from '../orchestrator/index.js';
 import { runDailyPriceRefresh } from '../orchestrator/price-refresh.js';
 import { runWeeklyRoutingProposal } from '../orchestrator/routing-proposal.js';
+import { runRoutingReverts } from '../orchestrator/routing-revert.js';
 import {
   resolveResultPath,
   writeDispatchResult,
@@ -155,14 +156,20 @@ function buildAdapters(
   argv: Record<string, unknown>,
   adapters?: OrchestratorAdapters,
 ): OrchestratorAdapters {
-  // Production invocations pass no adapters and get the daily price refresh and
-  // the weekly routing proposal; callers that inject adapters (tests) stay off
+  // Production invocations pass no adapters and get the daily price refresh, the
+  // weekly routing proposal and the automatic routing revert; callers that inject adapters (tests) stay off
   // the network and the Decision Catalog.
   const base: OrchestratorAdapters = adapters ?? {
     priceRefresh: (emit) => runDailyPriceRefresh({ emit }),
     routingProposal: (ctx) =>
       runWeeklyRoutingProposal({
         ...ctx,
+        warn: (m) => void process.stderr.write(`${m}\n`),
+      }),
+    routingRevert: (ctx, emit) =>
+      runRoutingReverts({
+        ...ctx,
+        emit,
         warn: (m) => void process.stderr.write(`${m}\n`),
       }),
   };

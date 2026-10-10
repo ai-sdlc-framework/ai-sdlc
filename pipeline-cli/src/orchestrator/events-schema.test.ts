@@ -576,6 +576,28 @@ describe('orchestrator-events.v1.schema.json — accepts every emitted type', ()
     });
   });
 
+  it('accepts ModelRoutingOverrideApplied with the cell, models and rates', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'ModelRoutingOverrideApplied',
+      role: 'developer',
+      taskClass: '*',
+      model: 'opus',
+      tableModel: 'sonnet',
+      tasks: 30,
+      observedRate: 0.7,
+      evidenceRate: 0.8,
+      decisionId: 'DEC-0001',
+    });
+  });
+
+  it('rejects ModelRoutingOverrideApplied with a rate outside 0 to 1 or a negative task count', () => {
+    const base = { ts: baseTs, type: 'ModelRoutingOverrideApplied', role: 'developer' };
+    expectInvalid({ ...base, observedRate: 1.2 });
+    expectInvalid({ ...base, evidenceRate: -0.1 });
+    expectInvalid({ ...base, tasks: -1 });
+  });
+
   it('rejects ModelPriceChanged with an unknown token class or a non-positive price', () => {
     const base = { ts: baseTs, type: 'ModelPriceChanged', model: 'm', oldPrice: 1, newPrice: 2 };
     expectInvalid({ ...base, tokenClass: 'bogus' });

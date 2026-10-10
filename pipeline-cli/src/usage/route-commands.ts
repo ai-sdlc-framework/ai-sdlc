@@ -178,7 +178,7 @@ function checkThreshold(name: string, value: number | undefined): void {
   }
 }
 
-interface Collected {
+export interface Collected {
   card: Scorecard;
   weights: UnitWeights;
   minTasks: number;
@@ -192,7 +192,11 @@ interface Collected {
   unavailableRecords: number;
 }
 
-async function collect(deps: RouteDeps, opts: ProposeOptions, now: Date): Promise<Collected> {
+export async function collect(
+  deps: RouteDeps,
+  opts: ProposeOptions,
+  now: Date,
+): Promise<Collected> {
   const { repoRoot, artifactsDir } = resolvePaths(deps);
   const warnings: string[] = [];
   const repo = repoNameFor(repoRoot);

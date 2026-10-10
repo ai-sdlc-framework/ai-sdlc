@@ -480,6 +480,16 @@ export interface OrchestratorAdapters {
    */
   routingProposal?: (ctx: { workDir: string; artifactsDir: string }) => Promise<unknown>;
   /**
+   * RFC-0050 B5 - automatic routing revert. Called once per tick with the
+   * tick's event emitter; drops overrides whose table cell changed and moves a
+   * cell back to its previous model when the changed model measures worse.
+   * Non-fatal: a throw or rejection is logged as a warning. Unset in tests.
+   */
+  routingRevert?: (
+    ctx: { workDir: string; artifactsDir: string },
+    emit: (event: Omit<OrchestratorEvent, 'ts'>) => void,
+  ) => Promise<unknown>;
+  /**
    * AISDLC-373 — single-PR operator-driven path. When set to true, the
    * §4.3 admission filter chain (DependencyReadiness, Blocked, DoR, etc.)
    * is skipped and every frontier candidate flows straight to dispatch.
@@ -594,6 +604,22 @@ export async function runOrchestratorTick(
     } catch (err) {
       logger.warn(
         `[orchestrator] routing proposal failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  if (adapters.routingRevert) {
+    try {
+      await adapters.routingRevert(
+        {
+          workDir: config.workDir,
+          artifactsDir: resolveArtifactsDir(config.workDir, adapters.artifactsDir),
+        },
+        emit,
+      );
+    } catch (err) {
+      logger.warn(
+        `[orchestrator] routing revert failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
