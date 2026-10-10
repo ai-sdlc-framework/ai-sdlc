@@ -2,7 +2,7 @@
   "schemaVersion": "v6",
   "subject": {
     "digest": {
-      "sha1": "3905d1922b0ec2f4f8e5c6ec3121a376cc88d24a"
+      "sha1": "471433128a54dea87f5c028ca1de04b953ea1261"
     }
   },
   "transcriptLeaves": [
@@ -56,8 +56,8 @@
   ],
   "rootHash": "912d4842cdb6c102d5c2b4dc00abe20c358ab628b2f5d669945eee059b31bfc1",
   "rootSignature": "YX2h4sMWNCJx1kkdEdw/XP1U5f5sj6c9oEz4AFj/uCk7OjVHQx7kfVaORfyjxzre/9Ng3T3sX+8FeJ2Hv8L7Ag==",
-  "nonce": "0d064657c72de7a4b55350f82d18fc1351a4767d35f41fc431e9f8f246be6597",
+  "nonce": "9100d6d0a0d40d77e669f2cce8da0f96b274062e47de59159114fcb83b5c6987",
   "leafCount": 3,
-  "signedAt": "2026-10-10T19:05:38.029Z",
+  "signedAt": "2026-10-10T20:24:24.953Z",
   "signerIdentity": "dominique@local:doms-macbook"
 }
