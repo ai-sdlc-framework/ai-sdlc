@@ -15,7 +15,7 @@ autoContext: true
 5. **NEVER delete branches.** Do not run `git branch -D` or `git branch -d`.
 6. **NEVER run destructive git operations.** No `git reset --hard`, `git checkout -- .`, `git restore .`.
 
-These rules are also enforced technically via `.claude/hooks/enforce-blocked-actions.sh` and `.ai-sdlc/agent-role.yaml` `blockedActions`.
+These rules are also enforced technically via `ai-sdlc-plugin/hooks/enforce-blocked-actions.sh` and `.ai-sdlc/agent-role.yaml` `blockedActions`.
 
 ## Pre-Commit Checklist
 

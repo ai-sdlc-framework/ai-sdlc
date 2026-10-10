@@ -82,9 +82,13 @@ const {
   realpathSync,
   lstatSync,
   readlinkSync,
+  writeFileSync,
+  mkdirSync,
 } = require('fs');
+const { tmpdir } = require('os');
+const { createHash } = require('crypto');
 const { join, resolve, isAbsolute, relative, sep, dirname, basename } = require('path');
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const {
   resolveGovernanceFromYaml,
   resolveGovernanceExtrasFromYaml,
@@ -1032,6 +1036,18 @@ function evaluateStashSegment(segment) {
 
 // ── Write/Edit enforcement (new behavior) ────────────────────────────
 
+/** realpathDeepest, failing closed (deny) when the symlink chain is too deep to resolve. */
+function realpathOrDeny(p) {
+  try {
+    return realpathDeepest(p);
+  } catch (e) {
+    if (e instanceof SymlinkCapError) {
+      deny(`path '${p}' has a symlink chain too deep to resolve; refusing the write.`);
+    }
+    throw e;
+  }
+}
+
 function enforceWriteEdit(filePath) {
   if (!filePath || typeof filePath !== 'string') return;
 
@@ -1051,8 +1067,15 @@ function enforceWriteEdit(filePath) {
   // resolvable (plain, non-Pattern-C project), home falls back to the
   // project root — unchanged behavior for those projects.
   const worktreeDir = resolveActiveWorktreeDir(projectAbs, searchFrom);
-  const homeAbs = worktreeDir || projectAbs;
-  const insideHome = absPath === homeAbs || absPath.startsWith(homeAbs + sep);
+  const lexHomeAbs = worktreeDir || projectAbs;
+  // AISDLC-569: containment is judged on REAL paths (symlinks resolved on both
+  // sides) so a symlink inside home that points outside is treated as outside,
+  // while a symlinked home itself still works. The lexical form is kept too
+  // so blockedPaths matching also fires on the path as the agent spelled it.
+  const homeAbs = realpathOrDeny(lexHomeAbs);
+  const lexAbsPath = absPath;
+  const realAbsPath = realpathOrDeny(absPath);
+  const insideHome = realAbsPath === homeAbs || realAbsPath.startsWith(homeAbs + sep);
 
   // AISDLC-567: stale-base guard. Non-blocking — warns to stderr only, using
   // whatever refs are already cached locally (no network fetch from a hook).
@@ -1060,18 +1083,23 @@ function enforceWriteEdit(filePath) {
 
   // AISDLC-720: untrusted runs — protected paths inside OR outside home, before
   // any permittedExternalPaths allow.
-  if (UNTRUSTED.untrusted) enforceUntrustedPath(absPath, homeAbs);
+  if (UNTRUSTED.untrusted) {
+    enforceUntrustedPath(realAbsPath, homeAbs);
+    if (lexAbsPath !== realAbsPath) enforceUntrustedPath(lexAbsPath, lexHomeAbs);
+  }
 
   if (insideHome) {
     // Path is inside the agent's home — check against the hardcoded
     // never-editable floor plus the project's configured blockedPaths globs.
     // Relative path uses POSIX separators because globs do.
-    const relPath = relative(homeAbs, absPath).split(sep).join('/');
+    const relPath = relative(homeAbs, realAbsPath).split(sep).join('/');
+    const lexInHome = lexAbsPath === lexHomeAbs || lexAbsPath.startsWith(lexHomeAbs + sep);
+    const lexRel = lexInHome ? relative(lexHomeAbs, lexAbsPath).split(sep).join('/') : relPath;
 
     // AISDLC-720: no hardcoded `.ai-sdlc/**` floor for internal sessions; untrusted
     // runs are handled by enforceUntrustedPath() above.
     for (const glob of blockedPaths) {
-      if (matchGlob(glob, relPath)) {
+      if (matchGlob(glob, relPath) || matchGlob(glob, lexRel)) {
         deny(
           `path '${relPath}' matches blocked path '${glob}'. ` +
             `Configuration files under blockedPaths are out of scope for agent edits.`,
@@ -1099,8 +1127,8 @@ function enforceWriteEdit(filePath) {
   // worktree ancestor. The cwd of the subagent always does.
   const allowed = loadPermittedExternalPaths(projectAbs, searchFrom);
   for (const ext of allowed) {
-    const extAbs = resolve(projectAbs, ext);
-    if (absPath === extAbs || absPath.startsWith(extAbs + sep)) {
+    const extAbs = realpathOrDeny(resolve(projectAbs, ext));
+    if (realAbsPath === extAbs || realAbsPath.startsWith(extAbs + sep)) {
       return; // explicit allow
     }
   }
@@ -1108,13 +1136,13 @@ function enforceWriteEdit(filePath) {
   // No allowlist match — deny with a clear, actionable reason.
   if (allowed.length === 0) {
     deny(
-      `path '${absPath}' is outside the agent's active worktree/project root. ` +
+      `path '${realAbsPath}' is outside the agent's active worktree/project root. ` +
         `To permit cross-repo writes for this task, add 'permittedExternalPaths' to ` +
         `the task frontmatter and set AI_SDLC_ACTIVE_TASK_ID before invoking the agent.`,
     );
   } else {
     deny(
-      `path '${absPath}' is outside the agent's active worktree/project root and not under the ` +
+      `path '${realAbsPath}' is outside the agent's active worktree/project root and not under the ` +
         `active task's permittedExternalPaths (${allowed.join(', ')}).`,
     );
   }
@@ -1243,12 +1271,47 @@ function resolveActiveWorktreeDir(projectAbs, searchFrom) {
 function warnIfStaleBase(dir) {
   if (!dir) return;
   try {
-    const output = execSync('git rev-list --count HEAD..origin/main', {
-      cwd: dir,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-    const behindCount = parseInt(output, 10);
+    // Hooks run as a fresh process per tool call, so throttle through a small
+    // cache file (outside `.ai-sdlc/**`) rather than an in-process variable.
+    const ttlRaw = process.env.AI_SDLC_STALE_BASE_TTL_SECONDS;
+    const ttlMs = (ttlRaw !== undefined && ttlRaw !== '' ? Number(ttlRaw) : 60) * 1000;
+    const cacheDir = process.env.AI_SDLC_STALE_BASE_CACHE_DIR || tmpdir();
+    const cacheFile = join(
+      cacheDir,
+      `ai-sdlc-stale-base-${createHash('sha1').update(dir).digest('hex').slice(0, 16)}.json`,
+    );
+    let behindCount;
+    if (Number.isFinite(ttlMs) && ttlMs > 0) {
+      try {
+        const cached = JSON.parse(readFileSync(cacheFile, 'utf-8'));
+        if (
+          cached &&
+          typeof cached.checkedAt === 'number' &&
+          Date.now() - cached.checkedAt >= 0 &&
+          Date.now() - cached.checkedAt < ttlMs
+        ) {
+          behindCount = cached.behind;
+        }
+      } catch {
+        // no usable cache — fall through to a live check
+      }
+    }
+    if (behindCount === undefined) {
+      const output = execFileSync('git', ['rev-list', '--count', 'HEAD..origin/main'], {
+        cwd: dir,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+      behindCount = parseInt(output, 10);
+      if (Number.isFinite(ttlMs) && ttlMs > 0 && Number.isFinite(behindCount)) {
+        try {
+          mkdirSync(cacheDir, { recursive: true });
+          writeFileSync(cacheFile, JSON.stringify({ checkedAt: Date.now(), behind: behindCount }));
+        } catch {
+          // cache is best-effort
+        }
+      }
+    }
     if (Number.isFinite(behindCount) && behindCount > 0) {
       process.stderr.write(
         `[ai-sdlc governance] warning: this worktree's HEAD is ${behindCount} commit(s) behind ` +
