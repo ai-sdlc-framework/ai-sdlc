@@ -11,7 +11,7 @@
 
 The HarnessAdapter framework decouples the orchestrator from any single coding-agent runtime. Each adapter declares static capabilities, a binary requirement with version range, and three runtime methods (`getAccountId`, `isAvailable`, `invoke`). Adapters are in-tree only — third-party plugins are NOT supported in v1 because adapters execute external CLIs with full credential scope.
 
-The two adapters shipped with v1 are `claude-code` and `codex`. Adding a new adapter follows a five-step recipe.
+The two adapters shipped with v1 are `claude-code` and `codex`. An `opencode` adapter is also registered, as **adapter-only** (DEC-0081, AISDLC-792): it provides capabilities, version probe (`opencode >=2.0.0`), account-id derivation and model listing, but `invoke` is stubbed like Codex and the opencode dispatch runner, `.opencode/` agents and contrib runners are not part of the framework. Select it by naming `opencode` as the harness in pipeline config (`createDefaultHarnessRegistry()` registers it); set `OPENCODE_MODEL` to override the default model. Adding a new adapter follows a five-step recipe.
 
 ## Recipe
 
