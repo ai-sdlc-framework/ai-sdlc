@@ -150,6 +150,17 @@ Every session is started with `AI_SDLC_HIERARCHY_SESSION=<qualified name>` and
 `AI_SDLC_HIERARCHY_ROLE=<planner|operator-dispatch|executor>` in its environment, so the
 plugin hooks see them at launch and the agent's own Bash commands cannot change them.
 
+**Launch-env contract (AISDLC-791, DEC-0079, DEC-0080).** The prefix is not optional: the
+lease-push hook binds an executor by it, and an executor launched bare (`claude --name ...`)
+has every lease push refused with `not-task-worktree`. `up` asserts the command carries both
+assignments before it starts a session and refuses otherwise. A bare launch comes only from
+an `up` run out of an older `pipeline-cli` build, so `resolve-pipeline-cli.sh` prefers the
+main checkout's build, prints its dist mtime, and exits 1 with the build command when
+`dist/hierarchy/up.js` is missing or older than `src/hierarchy/up.ts`. `status` and
+`ai-sdlc doctor` (check `hierarchy-launch-env`) read each running entry's tmux
+`#{pane_start_command}` and flag a missing prefix. `clear` never relaunches a process, so the
+only repair is `down --role <role>` then `up` from the main checkout's build.
+
 **Executor lease push (AISDLC-756).** Executors are rooted at the main checkout and claim a
 task only after launch, so the lease-push guard (`spec.governance.allowForcePush:
 leaseOnOwnBranch`) cannot bind them with `AI_SDLC_ACTIVE_TASK_ID`. For a main-rooted session it
@@ -192,13 +203,17 @@ cli-hierarchy up --executors 3 --project billing-api
 Show the roster with each session's live state (`busy`, `idle`, `starting`, `gone`,
 `unknown`), whether a tmux client is attached, and the board's inflight task, plus the queue
 counts. The table also lists each session's `HIERARCHY_SESSION` and `HIERARCHY_ROLE` values.
+The `ENV` column is `ok` when the session's tmux start command carries
+`AI_SDLC_HIERARCHY_SESSION=<name>` and `AI_SDLC_HIERARCHY_ROLE=<role>`, `missing` when it does
+not (a bare launch; the repair line follows the table), and `-` for a gone window.
 
 ```bash
 cli-hierarchy status [--json]
 ```
 
 `--json` prints one JSON object: `{ "rows": [ { "entry": <roster entry>, "state": "...",
-"attached": true|false, "inflightTask": "AISDLC-N" } ], "board": { "queued": n,
+"attached": true|false, "inflightTask": "AISDLC-N", "launchEnv": "ok|missing",
+"nextStep": "..." } ], "board": { "queued": n,
 "inflight": n, "done": n, "failed": n } }`. Read-only. Exit code `0`.
 
 ### `attach`
@@ -461,6 +476,15 @@ session is left alone; stop it by hand if it is yours.
 
 **`clear`, `tick` or `route-decision` exits 1 with a caller message.** Only the running
 dispatch session may run them. Run them from that session.
+
+**`status` shows `ENV missing`, or `doctor` reports `hierarchy-launch-env`.** The session was
+started without the launch env, so its lease push is refused. Run `cli-hierarchy down --role
+<role>` then `up` from the main checkout's build (`pnpm --filter @ai-sdlc/pipeline-cli build`
+there first when `resolve-pipeline-cli.sh` refuses as stale). `clear` does not fix it.
+
+**An executor's heartbeat.** `executor-start` writes `inflight/<task>.state.json` naming the
+worker right after the claim, before any model call, because the hook's second condition is
+that file; it exits non-zero when the write fails, leaving the claim for the reaper.
 
 **Reading `status --json`.** `state` `busy` or `idle` come from the harness registry; `gone`
 means the tmux window is closed; `starting` means the harness has not registered the

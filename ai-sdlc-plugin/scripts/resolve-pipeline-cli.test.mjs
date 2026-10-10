@@ -721,3 +721,72 @@ describe('AISDLC-716: repo-own build preferred over plugin cache', () => {
     rmSync(base, { recursive: true, force: true });
   });
 });
+
+// ── AISDLC-791: main checkout's build preferred, stale hierarchy build refused ──
+
+describe('AISDLC-791: main checkout dist preferred; stale or missing up.js refused', () => {
+  function cacheHome(base) {
+    const home = join(base, 'home');
+    createFakePipelineBin(join(home, '.claude/plugins/cache/mp/ai-sdlc/1.0.0', PIPELINE_CLI_REL));
+    return home;
+  }
+
+  /** Main checkout with the hierarchy source and (optionally) its built up.js, plus a worktree. */
+  function makeMainAndWorktree(base, { upJs }) {
+    const main = join(base, 'main');
+    makeDogfoodRepo(main, { dist: true });
+    mkdirSync(join(main, 'pipeline-cli', 'src', 'hierarchy'), { recursive: true });
+    const up = join(main, 'pipeline-cli', 'src', 'hierarchy', 'up.ts');
+    writeFileSync(up, 'export const up = 1;\n');
+    if (upJs) {
+      mkdirSync(join(main, 'pipeline-cli', 'dist', 'hierarchy'), { recursive: true });
+      const js = join(main, 'pipeline-cli', 'dist', 'hierarchy', 'up.js');
+      writeFileSync(js, 'export const up = 1;\n');
+      const t = new Date(Date.now() + 10000);
+      utimesSync(js, t, t);
+    }
+    git(main, 'add', '-A');
+    git(main, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'init');
+    const wt = join(base, 'wt');
+    git(main, 'worktree', 'add', '-q', wt, '-b', 'feature');
+    return { main, wt };
+  }
+
+  it('prefers the main checkout build over a fresh worktree build and prints the dist mtime', () => {
+    const base = mkdtempSync(join(tmpdir(), 'aisdlc-791-main-'));
+    const { main, wt } = makeMainAndWorktree(base, { upJs: true });
+    mkdirSync(join(wt, 'pipeline-cli', 'dist'), { recursive: true });
+    const out = join(wt, 'pipeline-cli', 'dist', 'a.js');
+    writeFileSync(out, 'x');
+    const t = new Date(Date.now() + 20000);
+    utimesSync(out, t, t);
+    const { stdout, stderr, exitCode } = runScript({ HOME: cacheHome(base) }, wt);
+    assert.equal(exitCode, 0);
+    assert.equal(normPath(stdout), normPath(join(main, 'pipeline-cli', 'bin')));
+    assert.match(stderr, /main checkout/);
+    assert.match(stderr, /dist mtime \S+; checkout HEAD \S+/);
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it('exits 1 with the build command when the main checkout has no built up.js', () => {
+    const base = mkdtempSync(join(tmpdir(), 'aisdlc-791-missing-'));
+    const { wt } = makeMainAndWorktree(base, { upJs: false });
+    const { stdout, stderr, exitCode } = runScript({ HOME: cacheHome(base) }, wt);
+    assert.equal(exitCode, 1);
+    assert.equal(stdout, '');
+    assert.match(stderr, /missing or older than src\/hierarchy\/up\.ts/);
+    assert.match(stderr, /pnpm --filter @ai-sdlc\/pipeline-cli build/);
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it('exits 1 when up.js is older than src/hierarchy/up.ts', () => {
+    const base = mkdtempSync(join(tmpdir(), 'aisdlc-791-old-'));
+    const { main, wt } = makeMainAndWorktree(base, { upJs: true });
+    const t = new Date(Date.now() + 90000);
+    utimesSync(join(main, 'pipeline-cli', 'src', 'hierarchy', 'up.ts'), t, t);
+    const { exitCode, stderr } = runScript({ HOME: cacheHome(base) }, wt);
+    assert.equal(exitCode, 1);
+    assert.match(stderr, /pnpm --filter @ai-sdlc\/pipeline-cli build/);
+    rmSync(base, { recursive: true, force: true });
+  });
+});

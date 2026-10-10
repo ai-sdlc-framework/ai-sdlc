@@ -8,11 +8,16 @@
  *  2. Check the working directory is the repository of the roster's project.
  *  3. Claim the next eligible task under that name, blocking up to `waitSec`
  *     seconds (`cli-dispatch claim --wait`).
+ *  4. Write `inflight/<task>.state.json` naming the worker, before returning and so
+ *     before any model call: the lease-push hook binds an executor to its task by
+ *     that heartbeat, so it must hold from the first push. A write failure throws.
  *
  * The sender check stays with the executor's instruction handling: it needs the
  * pid or ref the harness reports for a message, which only exists per message.
  */
 
+import { now } from '../clock.js';
+import { writeHeartbeat } from '../dispatch/board.js';
 import { claimWithWait } from '../dispatch/claim-wait.js';
 import { formatResumeFeedback } from '../dispatch/resume.js';
 import type { DispatchManifest } from '../dispatch/types.js';
@@ -40,6 +45,8 @@ export interface ExecutorStartDeps {
   repoGit?: GitRunner;
   /** Replaces the blocking claim (tests). */
   claim?: typeof claimWithWait;
+  /** Replaces the heartbeat write (tests). */
+  heartbeat?: typeof writeHeartbeat;
   log?: (line: string) => void;
 }
 
@@ -94,6 +101,24 @@ export async function executorStart(
     deps.log?.(
       `[executor] RESUMED TASK ${result.manifest.taskId} - feedback to address:\n${formatResumeFeedback(result.manifest.resume)}`,
     );
+  }
+  if (result.claimed && result.manifest) {
+    const stamp = now().toISOString();
+    try {
+      (deps.heartbeat ?? writeHeartbeat)(opts.boardDir, {
+        taskId: result.manifest.taskId,
+        workerId: self.name,
+        workerKind: 'in-session-agent',
+        currentStep: 'claimed',
+        startedAt: stamp,
+        lastHeartbeat: stamp,
+      });
+    } catch (err) {
+      throw new Error(
+        `claimed ${result.manifest.taskId} but could not write its inflight heartbeat (the lease-push hook binds this session to the task by it): ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
   }
   return {
     name: self.name,

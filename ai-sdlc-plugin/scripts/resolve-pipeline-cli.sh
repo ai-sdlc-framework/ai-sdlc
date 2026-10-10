@@ -8,10 +8,14 @@
 #
 #   0. AISDLC-716: the current repository contains the pipeline-cli workspace
 #      package itself (dogfood) → use THAT repo's build, never the plugin cache:
-#      the worktree's pipeline-cli (dist present and not older than src), else
-#      the main checkout's, else fall through to 1-6 with a stderr warning that
+#      the main checkout's pipeline-cli (dist present and not older than src),
+#      else the worktree's, else fall through to 1-6 with a stderr warning that
 #      names the rebuild command. Adopter repos have no such workspace and skip
-#      this step entirely.
+#      this step entirely. AISDLC-791: when the main checkout has the hierarchy
+#      source (src/hierarchy/up.ts) its dist/hierarchy/up.js must exist and be at
+#      least as new, or the script exits 1 with the build command: a worktree's
+#      older build must never launch sessions. The chosen dist's mtime and the
+#      commit the checkout is on are printed to stderr.
 #
 #   1. CLAUDE_PLUGIN_DIR set + node_modules/@ai-sdlc/pipeline-cli/bin exists
 #      → Standard marketplace install with bundled deps. Use it.
@@ -116,6 +120,11 @@ _repo_build_fresh() {
   [ -z "$(find "$cli/src" "$cli/package.json" -type f \( -name '*.ts' -o -name package.json \) ! -name '*.test.ts' -newer "$newest" -print -quit 2>/dev/null)" ]
 }
 
+# AISDLC-791: portable mtime (BSD stat, then GNU stat) of a path, for the diagnostic line.
+_mtime() {
+  stat -f '%Sm' -t '%Y-%m-%dT%H:%M:%S' "$1" 2>/dev/null || stat -c '%y' "$1" 2>/dev/null || echo unknown
+}
+
 REPO_WORKTREE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 if [ -n "$REPO_WORKTREE_ROOT" ] && _is_pipeline_cli_workspace "$REPO_WORKTREE_ROOT"; then
   REPO_MAIN_ROOT=""
@@ -125,8 +134,17 @@ if [ -n "$REPO_WORKTREE_ROOT" ] && _is_pipeline_cli_workspace "$REPO_WORKTREE_RO
     [ "$(basename "$GIT_COMMON")" = ".git" ] && REPO_MAIN_ROOT="$(dirname "$GIT_COMMON")"
   fi
   REBUILD_HINT="run: pnpm --filter @ai-sdlc/pipeline-cli build"
+  # AISDLC-791: a main checkout that ships the hierarchy source must hold a build of it.
+  if [ -n "$REPO_MAIN_ROOT" ] && _is_pipeline_cli_workspace "$REPO_MAIN_ROOT" \
+    && [ -f "$REPO_MAIN_ROOT/pipeline-cli/src/hierarchy/up.ts" ]; then
+    MAIN_UP_JS="$REPO_MAIN_ROOT/pipeline-cli/dist/hierarchy/up.js"
+    if [ ! -f "$MAIN_UP_JS" ] || [ "$REPO_MAIN_ROOT/pipeline-cli/src/hierarchy/up.ts" -nt "$MAIN_UP_JS" ]; then
+      echo "resolve-pipeline-cli.sh: ERROR — the main checkout's build at $REPO_MAIN_ROOT/pipeline-cli/dist/hierarchy/up.js is missing or older than src/hierarchy/up.ts; a build that old would start hierarchy sessions without the launch env the lease-push hook requires. In $REPO_MAIN_ROOT $REBUILD_HINT" >&2
+      exit 1
+    fi
+  fi
   REPO_WARN=""
-  for entry in "worktree:$REPO_WORKTREE_ROOT" "main checkout:$REPO_MAIN_ROOT"; do
+  for entry in "main checkout:$REPO_MAIN_ROOT" "worktree:$REPO_WORKTREE_ROOT"; do
     LABEL="${entry%%:*}"
     ROOT="${entry#*:}"
     [ -n "$ROOT" ] || continue
@@ -134,6 +152,9 @@ if [ -n "$REPO_WORKTREE_ROOT" ] && _is_pipeline_cli_workspace "$REPO_WORKTREE_RO
     _is_pipeline_cli_workspace "$ROOT" || continue
     if _is_usable "$ROOT/pipeline-cli/bin" && _repo_build_fresh "$ROOT"; then
       echo "resolve-pipeline-cli.sh: using this repo's own pipeline-cli build ($LABEL: $ROOT/pipeline-cli), not the plugin cache" >&2
+      BUILT_FILE="$ROOT/pipeline-cli/dist/hierarchy/up.js"
+      [ -f "$BUILT_FILE" ] || BUILT_FILE="$ROOT/pipeline-cli/dist"
+      echo "resolve-pipeline-cli.sh: dist mtime $(_mtime "$BUILT_FILE"); checkout HEAD $(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)" >&2
       printf '%s' "$ROOT/pipeline-cli/bin"
       exit 0
     fi

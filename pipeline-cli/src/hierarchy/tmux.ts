@@ -90,6 +90,18 @@ export function paneInfo(
   return { paneId, panePid: Number.isFinite(panePid) ? panePid : 0 };
 }
 
+/** The command a window's pane was started with (`#{pane_start_command}`); '' when unreadable. */
+export function paneStartCommand(run: CommandRunner, session: string, window: string): string {
+  const r = run('tmux', [
+    'display-message',
+    '-p',
+    '-t',
+    `=${session}:${window}`,
+    '#{pane_start_command}',
+  ]);
+  return r.status === 0 ? r.stdout.trim() : '';
+}
+
 /** Ask the session in a pane to exit gracefully. */
 export function sendExit(run: CommandRunner, target: string): CommandResult {
   return run('tmux', ['send-keys', '-t', target, '/exit', 'Enter']);

@@ -18,6 +18,7 @@ import type { DispatchManifest } from '../dispatch/types.js';
 import {
   attachTmuxSession,
   buildClaudeCommand,
+  hasLaunchEnv,
   createSystemRunner,
   evaluateResourceGate,
   executorNames,
@@ -95,6 +96,7 @@ function makeFakeTmux(registryDir: string): FakeTmux {
     run: () => ({ status: 1, stdout: '', stderr: '' }),
   };
   const paneOf = new Map<string, string>();
+  const commandOf = new Map<string, string>();
   const removeWindow = (w: string) => {
     fake.windows = fake.windows.filter((x) => x !== w);
     fake.legacyWindows = fake.legacyWindows.filter((x) => x !== w);
@@ -128,6 +130,7 @@ function makeFakeTmux(registryDir: string): FakeTmux {
         fake.windows.push(window);
         const pid = nextPid++;
         paneOf.set(window, `%${pid - 3990} ${pid}`);
+        commandOf.set(window, args[args.length - 1] as string);
         if (fake.register) {
           mkdirSync(registryDir, { recursive: true });
           writeFileSync(
@@ -149,6 +152,10 @@ function makeFakeTmux(registryDir: string): FakeTmux {
           const session = target.replace(/^=/, '');
           if (!sessionWindows(session)) return fail('no such session');
           return ok(`${fake.attachedClients[session] ?? 0}\n`);
+        }
+        if (args[args.length - 1] === '#{pane_start_command}') {
+          const window = target.split(':')[1] as string;
+          return commandOf.has(window) ? ok(commandOf.get(window) + '\n') : fail('no pane');
         }
         const pane = paneOf.get(target.split(':')[1] as string) ?? '';
         return ok((args[args.length - 1] === '#{pane_id}' ? pane.split(' ')[0] : pane) + '\n');
@@ -770,6 +777,39 @@ describe('hierarchy status', () => {
     expect(text).toContain('HIERARCHY_ROLE');
     const alphaLine = text.split('\n').find((l) => l.includes(Q('executor-alpha')));
     expect(alphaLine).toMatch(new RegExp(`${Q('executor-alpha')}\\s+executor$`));
+  });
+
+  it('shows an ENV column from the pane start command; a bare launch is missing (AISDLC-791)', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
+    const okResult = hierarchyStatus(deps);
+    expect(okResult.rows.map((r) => r.launchEnv)).toEqual(['ok', 'ok']);
+    expect(okResult.rows.every((r) => r.nextStep === undefined)).toBe(true);
+
+    // The executor was started by an older build: a bare `claude --name ...` command.
+    const realRun = fake.run;
+    fake.run = (f, a, o) =>
+      a[0] === 'display-message' &&
+      a.includes('#{pane_start_command}') &&
+      a.includes(`=${Q('executor-alpha')}:${Q('executor-alpha')}`)
+        ? {
+            status: 0,
+            stdout: `'claude' --name '${Q('executor-alpha')}' '/ai-sdlc executor'\n`,
+            stderr: '',
+          }
+        : realRun(f, a, o);
+    const result = hierarchyStatus(deps);
+    const alpha = result.rows.find((r) => r.entry.name === Q('executor-alpha'));
+    expect(alpha?.launchEnv).toBe('missing');
+    expect(alpha?.nextStep).toBe(
+      "relaunch with `cli-hierarchy down --role executor` then `up` from the main checkout's build",
+    );
+    const json = JSON.parse(JSON.stringify(result)) as { rows: { launchEnv: string }[] };
+    expect(json.rows.map((r) => r.launchEnv)).toEqual(['ok', 'missing']);
+    const lines = formatStatus(result);
+    expect(lines[0]).toMatch(/INFLIGHT\s+ENV\s+HIERARCHY_SESSION/);
+    expect(lines.find((l) => l.includes('env missing on'))).toContain(
+      'cli-hierarchy down --role executor',
+    );
   });
 
   it('reports starting when the window is alive but the registry has no entry', async () => {
@@ -1467,6 +1507,20 @@ describe('validation helpers', () => {
       `AI_SDLC_HIERARCHY_SESSION='x' AI_SDLC_HIERARCHY_ROLE='executor' 'claude' --name 'x' --model 'm' --permission-mode 'p' 'a'\\''b'`,
     );
     for (const role of ['planner', 'operator-dispatch', 'executor'] as const) {
+      const prefixed = buildClaudeCommand('claude', {
+        role,
+        name: `proj-${role}`,
+        model: 'm',
+        permissionMode: 'p',
+        prompt: 'x',
+      });
+      expect(
+        prefixed.startsWith(
+          `AI_SDLC_HIERARCHY_SESSION='proj-${role}' AI_SDLC_HIERARCHY_ROLE='${role}' 'claude'`,
+        ),
+      ).toBe(true);
+      expect(hasLaunchEnv(prefixed, `proj-${role}`, role)).toBe(true);
+      expect(hasLaunchEnv("'claude' --name 'x'", `proj-${role}`, role)).toBe(false);
       const cmd = buildClaudeCommand('claude', {
         role,
         name: "proj-it's",
