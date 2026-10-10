@@ -90,6 +90,7 @@ async function loop(
   return iterateReviewLoop({
     taskId: 'AISDLC-1',
     worktreePath: tmp,
+    workDir: tmp,
     task,
     branch: 'b',
     initialDeveloperReturn: dev,

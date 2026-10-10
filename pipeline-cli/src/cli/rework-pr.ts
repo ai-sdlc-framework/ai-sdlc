@@ -376,6 +376,7 @@ async function runReworkPrInner(
   const loop = await iterateReviewLoop({
     taskId,
     worktreePath,
+    workDir: opts.workDir,
     task,
     branch,
     initialDeveloperReturn: initialDev,

@@ -93,6 +93,7 @@ describe('Step 9 — iterateReviewLoop', () => {
     const r = await iterateReviewLoop({
       taskId: 'AISDLC-1',
       worktreePath: tmp,
+      workDir: tmp,
       task,
       branch: 'b',
       initialDeveloperReturn: goodDev,
@@ -110,6 +111,7 @@ describe('Step 9 — iterateReviewLoop', () => {
     const r = await iterateReviewLoop({
       taskId: 'AISDLC-1',
       worktreePath: tmp,
+      workDir: tmp,
       task,
       branch: 'b',
       initialDeveloperReturn: goodDev,
@@ -154,6 +156,7 @@ describe('Step 9 — iterateReviewLoop', () => {
     const r = await iterateReviewLoop({
       taskId: 'AISDLC-1',
       worktreePath: tmp,
+      workDir: tmp,
       task,
       branch: 'b',
       initialDeveloperReturn: goodDev,
@@ -188,6 +191,7 @@ describe('Step 9 — iterateReviewLoop', () => {
       await iterateReviewLoop({
         taskId: 'AISDLC-1',
         worktreePath: tmp,
+        workDir: tmp,
         task,
         branch: 'b',
         initialDeveloperReturn: goodDev,
@@ -243,6 +247,7 @@ describe('Step 9 — iterateReviewLoop', () => {
     const r = await iterateReviewLoop({
       taskId: 'AISDLC-1',
       worktreePath: tmp,
+      workDir: tmp,
       task,
       branch: 'b',
       initialDeveloperReturn: goodDev,
@@ -267,6 +272,7 @@ describe('Step 9 — iterateReviewLoop', () => {
     const r = await iterateReviewLoop({
       taskId: 'AISDLC-1',
       worktreePath: tmp,
+      workDir: tmp,
       task,
       branch: 'b',
       initialDeveloperReturn: goodDev,
@@ -331,6 +337,7 @@ describe('Step 9 — iterateReviewLoop', () => {
     const r = await iterateReviewLoop({
       taskId: 'AISDLC-1',
       worktreePath: tmp,
+      workDir: tmp,
       task,
       branch: 'b',
       initialDeveloperReturn: goodDev,
@@ -406,6 +413,7 @@ describe('Step 9 — iterateReviewLoop', () => {
     const r = await iterateReviewLoop({
       taskId: 'AISDLC-1',
       worktreePath: tmp,
+      workDir: tmp,
       task,
       branch: 'b',
       initialDeveloperReturn: goodDev,
@@ -424,6 +432,7 @@ describe('Step 9 — iterateReviewLoop', () => {
     await iterateReviewLoop({
       taskId: 'AISDLC-1',
       worktreePath: tmp,
+      workDir: tmp,
       task,
       branch: 'b',
       initialDeveloperReturn: goodDev,

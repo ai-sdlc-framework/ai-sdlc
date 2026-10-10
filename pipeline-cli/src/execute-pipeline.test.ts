@@ -66,11 +66,11 @@ function makeHappyRunner(): FakeRunner {
     .on(/^git worktree add/, ok())
     .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
     .on(
-      /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+      /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
       ok('--- diff content ---\n'),
     )
     .on(
-      /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+      /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
       ok('a.ts\0'),
     )
     .on(/^git push -u origin/, ok())
@@ -287,7 +287,7 @@ describe('integration — executePipeline (full Step 0-13)', () => {
       .on(/^git worktree add/, ok())
       .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
       .on(
-        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
         ok(),
       )
       .on(
@@ -810,11 +810,11 @@ describe('integration — executePipeline (full Step 0-13)', () => {
       )
       .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
       .on(
-        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
         ok('--- diff content ---\n'),
       )
       .on(
-        /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+        /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
         ok('a.ts\0'),
       )
       .on(/^git push -u origin/, ok())
@@ -1039,11 +1039,11 @@ describe('integration — executePipeline (full Step 0-13)', () => {
         .on(/^git worktree add/, ok())
         .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
         .on(
-          /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+          /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
           ok('--- diff content ---\n'),
         )
         .on(
-          /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+          /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
           ok('a.ts\0'),
         )
         .on(/^git push -u origin/, ok())

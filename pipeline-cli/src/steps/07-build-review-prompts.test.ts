@@ -52,11 +52,11 @@ describe('Step 7 — buildReviewPrompts', () => {
   it('returns 3 reviewer prompts in canonical order', async () => {
     const fake = new FakeRunner()
       .on(
-        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
         ok('--- diff content ---\n'),
       )
       .on(
-        /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+        /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
         ok('a.ts\0b.ts\0'),
       );
     const r = await buildReviewPrompts({
@@ -83,7 +83,7 @@ describe('Step 7 — buildReviewPrompts', () => {
     const fake = new FakeRunner()
       .on(/^git rev-parse HEAD$/, ok(`${head}\n`))
       .on(
-        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
         ok('d\n'),
       );
     const r = await buildReviewPrompts({
@@ -106,11 +106,11 @@ describe('Step 7 — buildReviewPrompts', () => {
   it('returns the resolved model per reviewer (security on opus, others on sonnet)', async () => {
     const fake = new FakeRunner()
       .on(
-        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
         ok('d\n'),
       )
       .on(
-        /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+        /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
         ok('a.ts\0'),
       );
     const r = await buildReviewPrompts({
@@ -134,11 +134,11 @@ describe('Step 7 — buildReviewPrompts', () => {
     const mk = () =>
       new FakeRunner()
         .on(
-          /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+          /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
           ok('--- diff content ---\n'),
         )
         .on(
-          /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+          /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
           ok('a.ts\0'),
         );
     const base = {
@@ -165,11 +165,11 @@ describe('Step 7 — buildReviewPrompts', () => {
     try {
       const fake = new FakeRunner()
         .on(
-          /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+          /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
           ok('--- diff content ---\n'),
         )
         .on(
-          /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+          /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
           ok('a.ts\0b.ts\0'),
         );
       const r = await buildReviewPrompts({
@@ -197,11 +197,11 @@ describe('Step 7 — buildReviewPrompts', () => {
   it('still returns 3 reviewers by default when no reviewerSet flag is set', async () => {
     const fake = new FakeRunner()
       .on(
-        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
         ok('--- diff content ---\n'),
       )
       .on(
-        /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+        /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
         ok(''),
       );
     const r = await buildReviewPrompts({
@@ -228,11 +228,11 @@ describe('Step 7 — buildReviewPrompts', () => {
     writeFileSync(join(tmp, '.ai-sdlc', 'review-config.yaml'), 'reviewerSet: code-test-merged\n');
     const fake = new FakeRunner()
       .on(
-        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
         ok('--- diff content ---\n'),
       )
       .on(
-        /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+        /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
         ok('a.ts\0b.ts\0'),
       );
     const r = await buildReviewPrompts({
@@ -262,11 +262,11 @@ describe('Step 7 — buildReviewPrompts', () => {
     );
     const fake = new FakeRunner()
       .on(
-        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/develop\.\.\.HEAD$/,
+        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/develop\.\.\.HEAD$/,
         ok('--- develop diff ---\n'),
       )
       .on(
-        /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/develop\.\.\.HEAD$/,
+        /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/develop\.\.\.HEAD$/,
         ok('a.ts\0'),
       );
     const r = await buildReviewPrompts({
@@ -280,6 +280,77 @@ describe('Step 7 — buildReviewPrompts', () => {
     });
     expect(r.diff).toContain('develop diff');
     expect(r.changedFiles).toEqual(['a.ts']);
+  });
+
+  // AISDLC-638.1 — the target branch comes from the trusted workDir, not the PR worktree.
+  it('ignores a worktree pipeline.yaml naming another branch (iteration 2) and records the base', async () => {
+    const trusted = join(tmp, 'trusted');
+    const worktree = join(tmp, 'worktree');
+    mkdirSync(join(trusted, '.ai-sdlc'), { recursive: true });
+    mkdirSync(join(worktree, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(trusted, '.ai-sdlc', 'pipeline.yaml'),
+      ['spec:', '  branching:', '    targetBranch: develop'].join('\n') + '\n',
+    );
+    writeFileSync(
+      join(worktree, '.ai-sdlc', 'pipeline.yaml'),
+      ['spec:', '  branching:', '    targetBranch: narrow'].join('\n') + '\n',
+    );
+    const fake = new FakeRunner();
+    const r = await buildReviewPrompts({
+      taskId: 'AISDLC-1',
+      task,
+      branch: 'b',
+      worktreePath: worktree,
+      workDir: trusted,
+      iteration: 2,
+      runner: fake.toRunner(),
+      codexAvailable: false,
+    });
+    const diffRanges = fake.calls
+      .filter((c) => c.command === 'git' && c.args.includes('diff'))
+      .map((c) => c.args[c.args.length - 1]);
+    expect(diffRanges.length).toBeGreaterThan(0);
+    for (const range of diffRanges) expect(range).toBe('refs/remotes/origin/develop...HEAD');
+    expect(r.baseRef).toBe('refs/remotes/origin/develop');
+    expect(r.baseRefSource).toBe(`trusted-workdir:${join(trusted, '.ai-sdlc', 'pipeline.yaml')}`);
+    for (const p of r.prompts) expect(p.baseRef).toBe('refs/remotes/origin/develop');
+  });
+
+  it('real repo: a same-named local branch does not shadow the fully qualified base', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'rev-shadow-'));
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: repo, stdio: 'pipe' });
+    try {
+      git('init', '-q', '-b', 'main');
+      git('config', 'user.email', 'dev@example.invalid');
+      git('config', 'user.name', 'Dev');
+      git('config', 'commit.gpgsign', 'false');
+      writeFileSync(join(repo, 'a.txt'), 'one\n');
+      git('add', '.');
+      git('commit', '-q', '-m', 'base');
+      git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+      git('checkout', '-q', '-b', 'feature');
+      writeFileSync(join(repo, 'a.txt'), 'two changed\n');
+      git('commit', '-qam', 'change');
+      // A local branch and a tag both named `origin/main`, pointing at HEAD, would make the
+      // short ref `origin/main` resolve to an empty diff.
+      git('branch', 'origin/main', 'HEAD');
+      git('tag', 'origin/main', 'HEAD');
+      const r = await buildReviewPrompts({
+        taskId: 'AISDLC-1',
+        task,
+        branch: 'feature',
+        worktreePath: repo,
+        workDir: repo,
+        codexAvailable: false,
+        artifactsDir: join(tmp, 'arts'),
+        recordRouting: false,
+      });
+      expect(r.diff).toContain('+two changed');
+      expect(r.changedFiles).toEqual(['a.txt']);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 
   it('emits an INDEPENDENCE warning when codex is not available', async () => {
@@ -384,11 +455,11 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
   ) => {
     const fake = new FakeRunner()
       .on(
-        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
         ok('diff --git a/src/a.ts b/src/a.ts\n+x\n'),
       )
       .on(
-        /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+        /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
         ok('src/a.ts\0'),
       );
     const r = await buildReviewPrompts({
@@ -436,11 +507,11 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
     const ctx = judgmentCtx('enforce');
     const fake = new FakeRunner()
       .on(
-        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
         ok('d\n'),
       )
       .on(
-        /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+        /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
         ok('src/a.ts\0'),
       );
     const r = await buildReviewPrompts({
@@ -459,9 +530,9 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
   });
 
   const DIFF_RE =
-    /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/;
+    /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/;
   const FILES_RE =
-    /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/;
+    /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/;
   const GOOD_DIFF = 'diff --git a/src/a.ts b/src/a.ts\n+x\n';
 
   const runner = (diff: ReturnType<typeof ok>, files: ReturnType<typeof ok>) =>
@@ -496,7 +567,7 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
       '--no-renames',
       '--no-ext-diff',
       '--no-textconv',
-      'origin/main...HEAD',
+      'refs/remotes/origin/main...HEAD',
     ]);
   });
 
@@ -583,7 +654,7 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
       '--text',
       '--no-ext-diff',
       '--no-textconv',
-      'origin/main...HEAD',
+      'refs/remotes/origin/main...HEAD',
     ]);
   });
 
