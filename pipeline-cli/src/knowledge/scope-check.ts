@@ -70,10 +70,14 @@ export function checkKnowledgeScope(
   }
 
   const inRepo = git(projectRoot, ['rev-parse', '--git-dir']).ok;
-  if (inRepo) {
-    const root = config.protectedRoot.replace(/\/+$/, '');
+  // A protected root outside the repository cannot be tracked or committed by it.
+  const root = toRepoRelative(projectRoot, config.protectedRoot);
+  if (inRepo && root !== null) {
     const tracked = git(projectRoot, ['ls-files', '-z', '--', root]);
-    for (const f of tracked.out.split('\0').filter(Boolean)) {
+    if (!tracked.ok) {
+      violations.push(`${root}/ (cannot list tracked files, git exited ${tracked.out})`);
+    }
+    for (const f of tracked.ok ? tracked.out.split('\0').filter(Boolean) : []) {
       violations.push(`${f} (file under protected root is tracked by git)`);
     }
     // check-ignore exits 1 when the path is NOT ignored.

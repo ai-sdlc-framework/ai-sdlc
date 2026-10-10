@@ -340,3 +340,13 @@ describe('checkKnowledgeScopeRange', () => {
     expect(checkKnowledgeScopeRange(root, ['deadbeef'.repeat(5)])[0]).toContain('cannot list');
   });
 });
+
+describe('checkKnowledgeScope with a protected root outside the repository', () => {
+  it('skips the tracked and ignored checks instead of reporting a git error', () => {
+    const dir = project({
+      '.ai-sdlc/context.yaml': 'knowledge:\n  protectedRoot: ../kb-private\n',
+    });
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    expect(checkKnowledgeScope(dir)).toEqual([]);
+  });
+});

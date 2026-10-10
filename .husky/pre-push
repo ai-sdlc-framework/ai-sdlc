@@ -63,7 +63,7 @@ node scripts/check-substrate-contract.mjs
 ./scripts/check-dark-code-on-push.sh
 # AISDLC-773: protected knowledge stays out of the tracked root, and out of the PR body
 # when the pusher supplies it via AI_SDLC_PR_BODY_FILE (RFC-0053 OQ-1).
-printf '%s\n' "$PUSH_STDIN" | ./scripts/check-knowledge-scope.sh
+printf '%s\n' "$PUSH_STDIN" | ./scripts/check-knowledge-scope.sh --push-stdin
 if [ -n "${AI_SDLC_PR_BODY_FILE:-}" ] && [ -f "$AI_SDLC_PR_BODY_FILE" ]; then
   ./scripts/check-pr-body-protected.sh "$AI_SDLC_PR_BODY_FILE"
 fi

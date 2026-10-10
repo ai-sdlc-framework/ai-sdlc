@@ -132,14 +132,13 @@ describe('check-knowledge-scope.sh over the pushed range (AISDLC-773)', () => {
   it('catches a protected entry added in one commit and removed in a later one', () => {
     repo({ '.gitignore': '.ai-sdlc/knowledge-protected/\n', 'x.txt': 'x' });
     const base = commit('base');
-    writeFileSync(join(root, 'leak.md'), 'x');
     mkdirSync(join(root, '.ai-sdlc/knowledge/customers'), { recursive: true });
     writeFileSync(join(root, '.ai-sdlc/knowledge/customers/c.md'), entry('k-c', 'protected'));
     commit('add');
     rmSync(join(root, '.ai-sdlc/knowledge/customers/c.md'));
     const head = commit('remove');
     assert.equal(run(SCOPE, []).status, 0, 'HEAD alone looks clean');
-    const r = run(SCOPE, [], push(head, base));
+    const r = run(SCOPE, ['--push-stdin'], push(head, base));
     assert.equal(r.status, 1);
     assert.match(r.stderr, /customers\/c\.md.*pushed commit/);
   });
@@ -152,7 +151,7 @@ describe('check-knowledge-scope.sh over the pushed range (AISDLC-773)', () => {
     commit('add');
     git('rm', '-q', '-f', '.ai-sdlc/knowledge-protected/p.md');
     const head = commit('remove');
-    const r = run(SCOPE, [], push(head, base));
+    const r = run(SCOPE, ['--push-stdin'], push(head, base));
     assert.equal(r.status, 1);
     assert.match(r.stderr, /protected root is in pushed commit/);
   });
@@ -165,7 +164,7 @@ describe('check-knowledge-scope.sh over the pushed range (AISDLC-773)', () => {
     rmSync(join(root, '.ai-sdlc/knowledge/old.md'));
     writeFileSync(join(root, '.ai-sdlc/knowledge/a.md'), entry('k-a', 'internal'));
     const head = commit('clean');
-    assert.equal(run(SCOPE, [], push(head, old)).status, 0);
+    assert.equal(run(SCOPE, ['--push-stdin'], push(head, old)).status, 0);
   });
 
   it('scans a new branch back to the merge-base and skips deleted refs', () => {
@@ -178,8 +177,18 @@ describe('check-knowledge-scope.sh over the pushed range (AISDLC-773)', () => {
     commit('add');
     rmSync(join(root, '.ai-sdlc/knowledge/c.md'));
     const head = commit('remove');
-    assert.equal(run(SCOPE, [], push(head, NULL)).status, 1);
-    assert.equal(run(SCOPE, [], push(NULL, head)).status, 0);
+    assert.equal(run(SCOPE, ['--push-stdin'], push(head, NULL)).status, 1);
+    assert.equal(run(SCOPE, ['--push-stdin'], push(NULL, head)).status, 0);
+  });
+});
+
+describe('check-knowledge-scope.sh protected root outside the repo', () => {
+  it('does not treat a protected root outside the repository as a violation', () => {
+    repo({
+      '.ai-sdlc/context.yaml': 'knowledge:\n  protectedRoot: ../kb-private\n',
+      '.ai-sdlc/knowledge/a.md': entry('k-a', 'internal'),
+    });
+    assert.equal(run(SCOPE, []).status, 0);
   });
 });
 
