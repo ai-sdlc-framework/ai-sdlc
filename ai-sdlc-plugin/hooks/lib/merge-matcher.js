@@ -300,6 +300,19 @@ function unquotedView(segment) {
 }
 
 /**
+ * True when an unquoted `<` / `>` redirection operator is glued to a word
+ * (`gh>/dev/null`, `pr>x`, `2>/dev/null`, `<<<x`, `<(cmd)`): whitespace splitting then
+ * cannot normalise the segment to plain words. Bare operator tokens (`>`, `>>`), and pure
+ * fd forms (`2>&1`, `>&2`, `&>`, `<&3`) are ordinary and stay non-opaque.
+ */
+function hasGluedRedirection(segment) {
+  return unquotedView(stripComment(segment))
+    .split(/\s+/)
+    .filter(Boolean)
+    .some((tok) => /[<>]/.test(tok) && !/^\d*(?:[<>]{1,3}|&>>?|>&|<&|>>&)\d*-?$/.test(tok));
+}
+
+/**
  * True when the segment holds a construct this tokenizer does not fully understand
  * (AISDLC-605 structural rule): ANSI-C / locale quoting, backslash-newline, brace
  * expansion, IFS, a variable-assignment prefix, a variable / command / process
@@ -310,6 +323,7 @@ function isOpaqueSegment(segment) {
   if (/\$['"]/.test(segment)) return true;
   if (/\\\n/.test(segment)) return true;
   if (/\bIFS\b/.test(segment)) return true;
+  if (hasGluedRedirection(segment)) return true;
   if (/\{[^{}\s]*(?:,|\.\.)[^{}\s]*\}/.test(unquotedView(segment))) return true;
   for (const t of tokenizeShellish(segment)) {
     const tok = t.replace(/^[({!]+/, '');
@@ -471,6 +485,7 @@ function wordAlternatives(word) {
 function ghSegmentHasPrBeforeMerge(text) {
   const tokens = text
     .replace(/['"\\]/g, '')
+    .replace(/[<>&]/g, ' ') // unquoted or not, redirection / control characters bound a word
     .split(/\s+/)
     .filter(Boolean);
   const isGh = (t) =>

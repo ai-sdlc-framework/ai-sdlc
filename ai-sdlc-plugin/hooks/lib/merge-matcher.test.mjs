@@ -434,3 +434,40 @@ describe('round-9: pr-before-merge applies to every gh token, behind wrappers (A
     }
   });
 });
+
+describe('round-10: redirections glued to words are opaque (AISDLC-605)', () => {
+  const mg = ['mer', 'ge'].join('');
+  const gh = ['g', 'h'].join('');
+  const glued = [
+    `${gh}>/dev/null pr ${mg} 42`,
+    `${gh}>&2 pr ${mg} 42`,
+    `${gh}&>/dev/null pr ${mg} 42`,
+    `${gh}</dev/null pr ${mg} 42`,
+    `${gh} pr>/dev/null ${mg} 42`,
+    `${gh} -R o/r pr ${mg}</dev/null 42`,
+    `${gh} 2>/dev/null pr ${mg} 42`,
+    `${gh} pr ${mg} 42>/dev/null`,
+    `${gh}<<<x pr ${mg} 42`,
+    `${gh}<(true) pr ${mg} 42`,
+  ];
+  it('refuses every glued spelling', () => {
+    for (const c of glued) assert.equal(m.commandRunsGhPrMerge(c), true, c);
+  });
+  it('splits gh tokens on redirection characters', () => {
+    assert.equal(m.commandRunsGhPrMerge(`${gh}>/dev/null pr ${mg}`), true);
+    assert.equal(m.isOpaqueSegment(`${gh}>/dev/null pr view 5`), true);
+  });
+  it('keeps ordinary redirections non-opaque and allowed', () => {
+    for (const c of [
+      `${gh} pr view 5 > out.txt`,
+      `${gh} pr view 5 2>&1`,
+      `${gh} pr view 5 --json mergeStateStatus,mergeable`,
+      `echo hi > f`,
+      `${gh} pr list --search "is:open" >out.txt`,
+    ]) {
+      assert.equal(m.commandRunsGhPrMerge(c), false, c);
+    }
+    assert.equal(m.isOpaqueSegment('echo hi > f'), false);
+    assert.equal(m.isOpaqueSegment('cmd 2>&1'), false);
+  });
+});

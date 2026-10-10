@@ -2433,4 +2433,25 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 pr-before-merg
       assert.ok(isDenied(run(c)), c);
     }
   });
+
+  it('refuses redirections glued to words (round 10)', () => {
+    for (const c of [
+      `${gh}>/dev/null pr ${mg} 42`,
+      `${gh}>&2 pr ${mg} 42`,
+      `${gh}&>/dev/null pr ${mg} 42`,
+      `${gh}</dev/null pr ${mg} 42`,
+      `${gh} pr>/dev/null ${mg} 42`,
+      `${gh} -R o/r pr ${mg}</dev/null 42`,
+      `${gh} 2>/dev/null pr ${mg} 42`,
+      `${gh} pr ${mg} 42>/dev/null`,
+    ]) {
+      assert.ok(isDenied(run(c)), c);
+    }
+  });
+
+  it('allows ordinary redirections on read-only gh', () => {
+    for (const c of [`${gh} pr view 5 > out.txt`, `${gh} pr view 5 2>&1`, `echo hi > f`]) {
+      assert.ok(!isDenied(run(c)), c);
+    }
+  });
 });
