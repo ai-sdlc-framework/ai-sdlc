@@ -111,6 +111,7 @@ Once you've identified the culprit PR:
 1. **Is it a test-isolation issue?** (test A passes alone, test B passes alone, A+B together flake)
    - Fix: add test isolation (independent fixtures, cleanup hooks, etc.)
    - Action: file a follow-up task for the specific package
+   - Concurrency tests that flake only on slow runners: gate probes with a test-controlled barrier (per-probe deferred promises) instead of observing overlap through a wall-clock sleep (AISDLC-790; example: the executor fan-out width test).
 
 2. **Is it a real regression?** (feature broken, API incompatibility, etc.)
    - Fix: revert the culprit PR or push a fix PR

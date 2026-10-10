@@ -769,23 +769,57 @@ describe('executePlan: tools by probe type', () => {
 describe('executePlan: fan-out and the bundle', () => {
   it('runs six probes at the configured width and returns one valid entry per probe in plan order', async () => {
     const { dir } = makeRepo();
+    // Barrier, not a wall-clock sleep (AISDLC-790): probes park on per-probe deferreds and are
+    // released only once `width` of them are in flight, so peak concurrency is observed
+    // deterministically however slow the runner is.
+    const width = 3;
+    const releases: Array<() => void> = [];
     let inFlight = 0;
     let peak = 0;
+    let started = 0;
+    let overWidthAt: number | undefined;
+    let releasedCount = 0;
+    let widthReached!: () => void;
+    const atWidth = new Promise<void>((r) => {
+      widthReached = r;
+    });
     const { spawner, calls } = mockSpawner(async () => {
       inFlight++;
+      started++;
       peak = Math.max(peak, inFlight);
-      await new Promise((r) => setTimeout(r, 15));
+      if (started > width && overWidthAt === undefined && releasedCount === 0) {
+        overWidthAt = started;
+      }
+      if (inFlight === width) widthReached();
+      await new Promise<void>((r) => releases.push(r));
       inFlight--;
       return okResult();
     });
     const ids = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6'];
-    const bundle = await executePlan(
+    const run = executePlan(
       plan(ids.map((id) => read(id))),
       spawner,
-      limits(dir, { width: 3 }),
+      limits(dir, { width }),
       noAdded,
     );
-    expect(peak).toBe(3);
+    await atWidth;
+    // Give an over-width probe a real window to (wrongly) start. This grace period can only
+    // make a broken limit easier to catch; it never decides whether a correct one passes.
+    await new Promise<void>((r) => setTimeout(r, 100));
+    // The width is full: no further probe may have started while all of the first three park.
+    expect(started).toBe(width);
+    // Release one at a time; each release frees exactly one slot for the next probe.
+    while (releases.length > 0 || started < ids.length || inFlight > 0) {
+      const next = releases.shift();
+      if (next) {
+        releasedCount++;
+        next();
+      }
+      await new Promise<void>((r) => setImmediate(r));
+    }
+    const bundle = await run;
+    expect(overWidthAt).toBeUndefined();
+    expect(peak).toBe(width);
     expect(calls).toHaveLength(6);
     expect(bundle.entries.map((e) => e.probeId)).toEqual(ids);
     expect(bundle.entries.every((e) => e.status === 'ok')).toBe(true);
@@ -801,6 +835,8 @@ describe('executePlan: fan-out and the bundle', () => {
       const { spawner } = mockSpawner(async () => {
         inFlight++;
         peak = Math.max(peak, inFlight);
+        // Safe under slow runners: the pool starts its workers synchronously and `inFlight` is
+        // bumped before the first await, so the observed peak does not depend on the sleep length.
         await new Promise((r) => setTimeout(r, 10));
         inFlight--;
         return okResult();
@@ -2024,6 +2060,7 @@ describe('executor-git: running commands', () => {
       return false;
     }
   };
+  // Polling a real OS process with a bounded deadline; not a concurrency/ordering assertion.
   const waitUntil = async (pred: () => boolean, ms: number): Promise<boolean> => {
     const end = Date.now() + ms;
     while (Date.now() < end) {
@@ -2476,6 +2513,8 @@ describe('executePlan: ordering', () => {
     const events: string[] = [];
     const { spawner } = mockSpawner(async (o) => {
       events.push(`start:${o.probeId}`);
+      // Safe under slow runners: the phase split is structural (run probes start only after the
+      // non-run phase resolves), so the delay only widens the window and never the pass condition.
       await new Promise((r) => setTimeout(r, o.probeType === 'run' ? 1 : 25));
       events.push(`end:${o.probeId}`);
       return okResult();
