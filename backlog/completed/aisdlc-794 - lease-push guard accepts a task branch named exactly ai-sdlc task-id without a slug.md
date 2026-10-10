@@ -61,6 +61,7 @@ The lease-push guard now accepts the exact branch `ai-sdlc/<task-id>` as the tas
 ## Design decisions
 - **resume.ts untouched**: `branchGuessed` already yields `ai-sdlc/<lower-task-id>`, which the hook now accepts.
 - The old test asserting `ai-sdlc/aisdlc-1` is refused for task aisdlc-1 encoded the superseded behavior; replaced by another task's branch.
+- **Claim-verified task id reaches the guard**: `resolveLeaseWorktree` returns `claimTaskId` (the worktree directory name) only when the grant came through the inflight claim with no sentinel; the hook uses it for the guard `taskId` only then. Env-bound and all other paths still require the real sentinel (end-to-end tests in `enforce-lease-push.test.mjs`).
 
 ## Verification
 - `node --test` hooks: 935 pass, 0 fail; `pnpm build`, `pnpm lint`, `pnpm format:check` clean

@@ -208,6 +208,7 @@ function loadLeasePolicy() {
       protectedBranches: trusted.protectedBranches,
       cwd,
       top: wt.top,
+      claimTaskId: wt.claimTaskId || null,
     };
   } catch {
     return closed('error');
@@ -485,7 +486,7 @@ function enforceBash(command) {
         protectedBranches: lease.protectedBranches,
         remotes: (gitOut(['remote'], lease.cwd) || '').split('\n').filter(Boolean),
         aliasLookup: (name) => gitOut(['config', '--get', `alias.${name}`], lease.cwd),
-        taskId: top ? readTaskId(top) : null,
+        taskId: top ? readTaskId(top) || lease.claimTaskId || null : null,
         worktreeName: top ? basename(top) : null,
         refAliasState: (name) => refAliasState(name, lease.cwd),
       });

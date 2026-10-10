@@ -1400,6 +1400,45 @@ describe('main-rooted hierarchy executor: lease push bound to the inflight claim
     assert.match(reason, /rooted in the worktree/);
   });
 
+  it('AISDLC-794: claim path with NO sentinel is allowed end to end (exact and slugged branch)', () => {
+    const base794 = (n, branch) => {
+      const dir = join(r.root, '.worktrees', `aisdlc-${n}`);
+      git(r.root, 'worktree', 'add', '-q', '-b', branch, dir);
+      return realpathSync(dir);
+    };
+    const w7 = base794(7, 'ai-sdlc/aisdlc-7');
+    const w8 = base794(8, 'ai-sdlc/aisdlc-8-slug');
+    const w9 = base794(9, 'ai-sdlc/aisdlc-9');
+    writeFileSync(join(w9, '.active-task'), 'AISDLC-1\n');
+    const pushTo = (cwd, branch, opts) =>
+      run(`git push --force-with-lease origin HEAD:refs/heads/${branch}`, {
+        cwd,
+        projectDir: r.root,
+        ...opts,
+      });
+    reset();
+    claim('AISDLC-7', 'executor-alpha');
+    assert.ok(!denied(pushTo(w7, 'ai-sdlc/aisdlc-7', exec())), 'exact branch');
+    // the claimed task's worktree cannot push to another task branch
+    assert.ok(denied(pushTo(w7, 'ai-sdlc/aisdlc-8-slug', exec())));
+    reset();
+    claim('AISDLC-8', 'executor-alpha');
+    assert.ok(!denied(pushTo(w8, 'ai-sdlc/aisdlc-8-slug', exec())), 'slugged branch');
+    // claim for a different task than the directory
+    assert.ok(denied(pushTo(w7, 'ai-sdlc/aisdlc-7', exec())));
+    reset();
+    // no claim, no sentinel
+    assert.ok(denied(pushTo(w7, 'ai-sdlc/aisdlc-7', exec())));
+    // env-bound session with no sentinel still needs the sentinel
+    assert.ok(
+      denied(pushTo(w7, 'ai-sdlc/aisdlc-7', { env: { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-7' } })),
+    );
+    // a sentinel naming another task is refused even with a claim for the directory task
+    claim('AISDLC-9', 'executor-alpha');
+    assert.ok(denied(pushTo(w9, 'ai-sdlc/aisdlc-9', exec())));
+    reset();
+  });
+
   it('other push shapes stay refused even with a claim', () => {
     reset();
     claim('AISDLC-1', 'executor-alpha');

@@ -227,6 +227,7 @@ function resolveLeaseWorktree(projectDir, cwd, run = runGit) {
     // bound to ONE task by AI_SDLC_ACTIVE_TASK_ID (the hook's own env; the agent's
     // Bash commands cannot change it): the cwd worktree's .active-task must equal it.
     // No binding, or a sibling worktree => no lease.
+    let claimTaskId = null;
     if (realProj !== realMain) {
       if (realProj !== top) return null;
     } else {
@@ -242,6 +243,8 @@ function resolveLeaseWorktree(projectDir, cwd, run = runGit) {
       const dirTask = basename(top).toLowerCase();
       const claimBound = (!taskId || taskId === dirTask) && holdsInflightClaim(realMain, dirTask);
       if (!envBound && !claimBound) return null;
+      // Only a claim-verified grant with NO sentinel supplies the guard's task id.
+      if (!envBound && !taskId) claimTaskId = dirTask;
     }
     const gitDirRaw = run(['rev-parse', '--git-dir'], cwd);
     if (!gitDirRaw) return null;
@@ -249,7 +252,7 @@ function resolveLeaseWorktree(projectDir, cwd, run = runGit) {
     if (!isUnder(gitDir, join(realMain, '.git', 'worktrees'))) return null;
     const back = readFileSync(join(gitDir, 'gitdir'), 'utf-8').trim();
     if (safeReal(back) !== join(top, '.git')) return null;
-    return { mainRoot, top };
+    return { mainRoot, top, claimTaskId };
   } catch {
     return null;
   }
