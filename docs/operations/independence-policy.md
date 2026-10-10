@@ -214,7 +214,84 @@ transcript; the session directory is found by the agent id, not by which session
 written to last. Several tasks can run from one checkout at the same time: a leaf binds
 only to a run whose transcript carries its own task's nonce.
 
+## Quick reference
+
+| Question | Answer |
+| --- | --- |
+| Config file | `.ai-sdlc/independence-policy.yaml` |
+| Key | `requiredTier: none \| attested \| isolated` |
+| Default (no file, or key omitted) | `none` — informational only, never blocks |
+| Compared against | the envelope's `overallIndependenceTier` (weakest leaf) |
+| Order | `none` < `attested` < `isolated`; the envelope tier must be `>=` the required tier |
+| Branch-protection repos | `independence-policy-gate` job in `ai-sdlc-gate.yml` feeds `ai-sdlc/pr-ready` |
+| Procedural-gate repos | the ship-skill runs `cli-attestation independence-policy` and refuses on non-zero |
+
+Example for a repo that wants every shipped change to carry reviewer-bound
+(`attested`) evidence:
+
+```yaml
+# .ai-sdlc/independence-policy.yaml
+requiredTier: attested
+```
+
+## Main-session dispatches: why they are `none` / `self-authored` (by design)
+
+The tier is derived per reviewer leaf by `cli-attestation emit-leaf`: a leaf is
+classed `independent` (and gets `independenceTier: attested`) **only** when the
+harness wrote a `SubagentStart` marker for that reviewer's own run and, for
+markers outside the worktree, that run's transcript carries the leaf's diff-binding
+nonce (see "How a leaf is bound to its reviewer" below). Otherwise the leaf is
+`verdictClass: self-authored` and carries no `independenceTier`, so it counts as
+`none`.
+
+Consequences for a coordinator that holds the signing key (a main-session
+`/ai-sdlc execute`, or a hand-run `emit-leaf` outside any reviewer subagent):
+
+- A verdict the coordinator writes or relays itself is `self-authored`, so the
+  envelope's `overallIndependenceTier` is `none`. A coordinator cannot certify its
+  own independence, which is the point of the design.
+- The best a main-session run can reach is `attested`: the three reviewers run as
+  real subagents, each leaf is bound to its own reviewer run through the marker and
+  nonce, and the weakest leaf decides the envelope tier. `attested` is a
+  heuristic-grade signal and is not tamper-proof against a determined
+  same-machine coordinator.
+- `isolated` is **never** reachable from a main session. The operator key signs
+  the envelope there, and the verifier credits `isolated` only when the root
+  signature verifies under a `ci-only` trusted key that the coordinator does not hold
+  (RFC-0047).
+
+Because `verify` accepts any intact envelope, **a repo that has not set
+`requiredTier` above `none` does not enforce independence at all** for these
+dispatches. Set the policy and wire the gate, per the sections above.
+
+### How to get `attested`
+
+Run each reviewer as its own subagent and emit its leaf with the nonce and reviewer
+identity (the `/ai-sdlc execute` and `/ai-sdlc orchestrator-tick` fan-out does this).
+If a leaf still comes out `self-authored`, check the troubleshooting notes under "How
+a leaf is bound to its reviewer", including `--project-dir` for sessions started
+outside the repo root.
+
+### How to get `isolated`
+
+`isolated` comes from the CI clean-room signer in
+[`isolated-review.yml`](../../.github/workflows/isolated-review.yml) (RFC-0047):
+
+1. Register a `ci-only` public key in `.ai-sdlc/trusted-reviewers.yaml` and keep the
+   private key only in a protected GitHub Actions environment. See
+   [`ci-only-trust-marker.md`](ci-only-trust-marker.md).
+2. Set the repository variable `AI_SDLC_ISOLATED_REVIEW` to a truthy value (default
+   off).
+3. Add the `isolated-review` label to a same-repo PR. The sandboxed reviewer job
+   emits an unsigned report, and a separate protected job signs the envelope with
+   the ci-only key and commits it to the PR branch. Fork PRs are refused.
+4. Set `requiredTier: isolated` in the policy file. Without steps 1 to 3 every
+   change falls short of the policy (`policyOutcome=shortfall`).
+
 ## See also
+
+- [`review-policy.md`](review-policy.md) — what counts as a review.
+- [`ci-only-trust-marker.md`](ci-only-trust-marker.md) — registering the CI-only signing key.
 
 - [RFC-0046 — Attested Reviewer Independence](../../spec/rfcs/RFC-0046-attested-reviewer-independence.md) — §Proposal (Rollout), OQ-5.
 - [RFC-0047 — Re-derivable Isolated Anchor](../../spec/rfcs/RFC-0047-re-derivable-isolated-anchor.md) — the producer-side fix for `isolated`.
