@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { StateStore } from './state/store.js';
+import { SEED_PRICES } from '@ai-sdlc/reference';
 import { CostTracker } from './cost-tracker.js';
 
 describe('CostTracker', () => {
@@ -28,6 +29,7 @@ describe('CostTracker', () => {
         tokens5m: 2000,
         tokens1h: 3000,
         ts: '2026-10-01T00:00:00.000Z',
+        rows: SEED_PRICES,
       });
       expect(detailed.unpriced).toBe(false);
       expect(detailed.costUsd).toBeCloseTo(0.0488, 10);
@@ -36,6 +38,7 @@ describe('CostTracker', () => {
           tokens5m: 2000,
           tokens1h: 3000,
           ts: '2026-10-01T00:00:00.000Z',
+          rows: SEED_PRICES,
         }),
       ).toBeCloseTo(0.0488, 10);
     });
@@ -44,6 +47,7 @@ describe('CostTracker', () => {
       const detailed = CostTracker.computeCostDetailed(1000, 500, 'claude-opus-5-5', 0, {
         tokens5m: 2000,
         ts: '2026-09-21T00:00:00.000Z',
+        rows: SEED_PRICES,
       });
       expect(detailed).toEqual({ costUsd: 0, unpriced: true, model: 'claude-opus-5-5' });
     });

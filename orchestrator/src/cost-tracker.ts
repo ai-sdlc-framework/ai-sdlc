@@ -76,7 +76,9 @@ export class CostTracker {
    *
    * When the call carries cache-write tokens, every token class is priced from
    * the price history row in effect at `cacheWrite.ts`; a model with no such row
-   * is `unpriced` rather than partly priced.
+   * is `unpriced` rather than partly priced. A call with no cache-write tokens is
+   * priced from the undated `DEFAULT_MODEL_COSTS`, so the pre-release `unpriced`
+   * rule applies only to cache-write calls here (`priceCall` applies it to all).
    */
   static computeCostDetailed(
     inputTokens: number,
