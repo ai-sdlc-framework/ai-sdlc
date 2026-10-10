@@ -25,6 +25,8 @@ spec:
     allowMerge: onGreenClean
     mergeAuthors:
       - deefactorial
+    releaseAuthors: [deefactorial]
+    allowReleaseMerge: true
     operational:
       - rebase-own-branch
       - lease-push-own-branch
