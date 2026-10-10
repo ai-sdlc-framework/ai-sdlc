@@ -2,7 +2,7 @@
 id: AISDLC-791
 title: >-
   cli-hierarchy up guarantees, and status/doctor verify, the AI_SDLC_HIERARCHY_SESSION/ROLE launch env the lease-push hook binds executors by
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-10'
 labels:
