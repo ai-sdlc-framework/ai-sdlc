@@ -13,7 +13,6 @@ dependencies: []
 priority: medium
 references:
   - .husky/pre-push
-  - scripts/check-coverage.sh
   - scripts/audit-with-ignores.mjs
   - scripts/audit-with-ignores.test.mjs
   - spec/schemas/audit-ignores.schema.json

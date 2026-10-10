@@ -4,22 +4,22 @@
  *
  * Server-side patch-coverage gate. Computes the percentage of NEWLY added /
  * modified lines (the "patch") in a PR diff that are covered by tests, and
- * fails when the result drops below a configurable threshold (default 80%).
+ * fails when the result drops below a configurable threshold (default 90%).
  *
  * Replaces `codecov/patch` as the merge-blocking patch-coverage signal after
  * AISDLC-372 dropped codecov/patch from required branch-protection contexts.
- * The local pre-push gate (`scripts/check-coverage.sh`) enforces a per-package
- * 80% LINES gate, but it is bypassable via `AI_SDLC_SKIP_COVERAGE_GATE=1` and
- * has no CI-side mirror — meaning a PR that legitimately needs the bypass for
- * a chore commit can subsequently land code commits with arbitrarily low patch
- * coverage and nothing blocks the merge. This script closes that gap.
+ * Together with the per-package vitest `thresholds.lines` floors, this is the
+ * single coverage gate (AISDLC-726 removed the local pre-push and Stop-hook
+ * coverage runs): the floors hold whole-package coverage and this script holds
+ * the coverage of what a PR adds, so a PR cannot land low-coverage code that
+ * the package-wide average hides (PR #550 landed at 0.6% patch coverage).
  *
  * Usage (CI):
  *
  *   node scripts/check-pr-patch-coverage.mjs \
  *     --base "<base-sha>" \
  *     --head "<head-sha>" \
- *     --threshold 80
+ *     --threshold 90
  *
  * Optional flags:
  *
@@ -122,6 +122,16 @@ const NON_INSTRUMENTED_PATTERNS = [
   // coverage data for them failed every new-module PR. Narrow: only files
   // named exactly `index.ts` (not `indexer.ts`, `myindex.ts`, `index.tsx`).
   /(^|\/)src\/(?:.*\/)?index\.ts$/,
+  // Ambient type declarations (`*.d.ts`) hold no runtime code and are never loaded,
+  // so no coverage entry can exist for them (AISDLC-726).
+  /\.d\.ts$/,
+  // Tool config files (`tailwind.config.ts`, `postcss.config.mjs`, ...): build
+  // configuration, not a testable unit. Generalises the vitest/eslint/next entries
+  // below (AISDLC-726).
+  /(^|\/)[^/]+\.config\.(?:ts|mjs|js|cjs)$/,
+  // Test fixtures and manual mocks are test support loaded by tests, outside any
+  // package's coverage include (AISDLC-726).
+  /(^|\/)__(?:fixtures|mocks)__\//,
   // Generated schemas — sanctioned exclusion per CLAUDE.md.
   /(^|\/)generated-schemas\.ts$/,
   // bin/*.mjs CLI entrypoint shims — these are thin argv-parse thunks that
@@ -308,7 +318,7 @@ export function changedLinesForFile({ base, head, file, cwd }) {
  * anywhere in the tree — without this check, `findCoverageFiles` would
  * silently union the forgery into the fused map, the suffix-match resolver
  * would accept its (attacker-chosen) hit counts as authoritative coverage
- * for new source files, and the 80% gate would pass on uncovered malicious
+ * for new source files, and the patch gate would pass on uncovered malicious
  * code. Legitimate `coverage-final.json` is always written by vitest into a
  * gitignored `<pkg>/coverage/` directory and is NEVER tracked. So: any
  * tracked coverage file in a PR is by definition a forgery (or an
@@ -718,11 +728,11 @@ if (isMain) {
   const head = args.head;
   if (!base || !head || base === true || head === true) {
     process.stderr.write(
-      '[patch-coverage] usage: --base <sha> --head <sha> [--threshold 80] [--coverage-root <dir>] [--json]\n',
+      '[patch-coverage] usage: --base <sha> --head <sha> [--threshold 90] [--coverage-root <dir>] [--json]\n',
     );
     process.exit(2);
   }
-  const threshold = Number(args.threshold ?? 80);
+  const threshold = Number(args.threshold ?? 90);
   if (!Number.isFinite(threshold) || threshold < 0 || threshold > 100) {
     process.stderr.write(`[patch-coverage] invalid --threshold: ${args.threshold}\n`);
     process.exit(2);

@@ -112,11 +112,13 @@ describe('check-dark-code-on-push.sh', () => {
 describe('pre-push wiring', () => {
   const hook = readFileSync(join(REPO, '.husky', 'pre-push'), 'utf-8');
 
-  it('runs the dark-code gate before the coverage gate', () => {
+  it('runs the dark-code gate and no local coverage gate (AISDLC-726)', () => {
     const dark = hook.indexOf('./scripts/check-dark-code-on-push.sh');
-    const coverage = hook.indexOf('./scripts/check-coverage.sh');
     assert.ok(dark > 0, 'dark-code gate is not in .husky/pre-push');
-    assert.ok(coverage > 0);
-    assert.ok(dark < coverage, 'dark-code gate must run before the coverage gate');
+    assert.equal(
+      hook.includes('check-coverage.sh'),
+      false,
+      'coverage is gated once, in CI; .husky/pre-push must not run it',
+    );
   });
 });

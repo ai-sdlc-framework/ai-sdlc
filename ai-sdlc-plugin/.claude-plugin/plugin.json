@@ -98,12 +98,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/deferred-coverage-check.sh\"",
-            "asyncRewake": true,
-            "statusMessage": "Checking coverage..."
-          },
-          {
-            "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/usage-ingest.sh\"",
             "async": true,
             "timeout": 5

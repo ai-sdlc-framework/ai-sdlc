@@ -8,7 +8,6 @@ labels:
   - tech-debt
 references:
   - .github/workflows/ci.yml
-  - scripts/check-coverage.sh
   - docs/operations/gate-friction-audit-2026.md
 parentTaskId: AISDLC-384
 ---

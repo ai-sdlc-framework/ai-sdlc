@@ -10,6 +10,9 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'json-summary', 'json'],
       reportsDirectory: './coverage',
+      thresholds: {
+        lines: 85,
+      },
       exclude: [
         ...coverageConfigDefaults.exclude,
         // CLI entry-point scripts are integration boundaries — they parse argv, call into

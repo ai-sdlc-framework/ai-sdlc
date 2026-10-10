@@ -22,7 +22,7 @@ export default defineConfig({
         'src/__test-helpers/**',
       ],
       thresholds: {
-        lines: 80,
+        lines: 90,
         functions: 80,
       },
     },

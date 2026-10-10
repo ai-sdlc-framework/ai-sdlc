@@ -90,6 +90,6 @@ When review agents post findings:
 ## Testing
 
 - Use Vitest for all orchestrator and reference tests
-- Coverage target: 80% patch coverage on PRs
+- Coverage target: 90% patch coverage on PRs (CI gate)
 - Run `pnpm test` from repo root for all packages
 - Run `pnpm --filter @ai-sdlc/orchestrator test` for orchestrator only

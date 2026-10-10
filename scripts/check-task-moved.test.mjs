@@ -662,7 +662,7 @@ describe('check-task-moved.sh (AISDLC-220)', () => {
 
   // ── (g) Load-bearing order assertion (AC #2) ─────────────────────────
 
-  it('(g) .husky/pre-push invokes check-task-moved.sh AFTER check-coverage.sh and BEFORE check-attestation-sign.sh', () => {
+  it('(g) .husky/pre-push invokes check-task-moved.sh BEFORE check-attestation-sign.sh', () => {
     // Read the actual .husky/pre-push file from the project root.
     const prePushPath = join(PROJECT_ROOT, '.husky', 'pre-push');
     assert.equal(existsSync(prePushPath), true, `.husky/pre-push must exist at ${prePushPath}`);
@@ -671,14 +671,9 @@ describe('check-task-moved.sh (AISDLC-220)', () => {
     const lines = content.split('\n');
 
     // Find the line indices for each script invocation (search for the script name).
-    const coverageIdx = lines.findIndex((l) => l.includes('check-coverage.sh'));
     const taskMoveIdx = lines.findIndex((l) => l.includes('check-task-moved.sh'));
     const attestationIdx = lines.findIndex((l) => l.includes('check-attestation-sign.sh'));
 
-    assert.ok(
-      coverageIdx !== -1,
-      `check-coverage.sh must be present in .husky/pre-push:\n${content}`,
-    );
     assert.ok(
       taskMoveIdx !== -1,
       `check-task-moved.sh must be present in .husky/pre-push:\n${content}`,
@@ -688,10 +683,6 @@ describe('check-task-moved.sh (AISDLC-220)', () => {
       `check-attestation-sign.sh must be present in .husky/pre-push:\n${content}`,
     );
 
-    assert.ok(
-      coverageIdx < taskMoveIdx,
-      `check-coverage.sh (line ${coverageIdx + 1}) must appear BEFORE check-task-moved.sh (line ${taskMoveIdx + 1})`,
-    );
     assert.ok(
       taskMoveIdx < attestationIdx,
       `check-task-moved.sh (line ${taskMoveIdx + 1}) must appear BEFORE check-attestation-sign.sh (line ${attestationIdx + 1}) — order is load-bearing (AC #2: contentHashV4 binds {path, headBlobSha}; move must happen before sign)`,

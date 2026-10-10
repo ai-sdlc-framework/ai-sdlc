@@ -12,7 +12,6 @@ dependencies: []
 priority: critical
 references:
   - .github/workflows/ci.yml
-  - scripts/check-coverage.sh
   - docs/operations/quality-gate.md
 ---
 

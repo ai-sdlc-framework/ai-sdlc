@@ -13,7 +13,6 @@ labels:
 dependencies:
   - AISDLC-681
 references:
-  - ai-sdlc-plugin/hooks/deferred-coverage-check.js
   - ai-sdlc-plugin/plugin.json
   - docs/operations/parallel-dispatch.md
 priority: high

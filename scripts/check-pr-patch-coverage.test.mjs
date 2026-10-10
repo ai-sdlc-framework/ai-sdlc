@@ -1,7 +1,7 @@
 /**
  * Tests for `scripts/check-pr-patch-coverage.mjs` — AISDLC-376.
  *
- * The gate runs in CI on `pull_request` events to enforce ≥80% patch coverage
+ * The gate runs in CI on `pull_request` events to enforce ≥90% patch coverage (AISDLC-726)
  * on the lines actually changed by the PR. These tests validate the four
  * acceptance-criteria edges:
  *
@@ -25,7 +25,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync, realpathSync 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveDiffBase } from './check-pr-patch-coverage.mjs';
+import { isInstrumentableFile, resolveDiffBase } from './check-pr-patch-coverage.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(__dirname, 'check-pr-patch-coverage.mjs');
@@ -996,5 +996,66 @@ describe('check-pr-patch-coverage — base tip ahead of the PR merge-base (AISDL
       return commitFile(repo, 'pkg/src/x.ts', 'export const x = 1;\n', 'orphan');
     })();
     assert.equal(resolveDiffBase({ base, head: orphan, cwd: repo }), base);
+  });
+});
+
+// ── AISDLC-726: default threshold 90 + non-instrumented file kinds ──────────
+
+describe('check-pr-patch-coverage — AISDLC-726', () => {
+  it('excludes ambient declarations, tool configs and fixture/mock dirs from the gate', () => {
+    for (const f of [
+      'pkg/src/ambient.d.ts',
+      'dashboard/tailwind.config.ts',
+      'dashboard/postcss.config.mjs',
+      'pkg/src/__fixtures__/sample.ts',
+      'pkg/src/__mocks__/fs.ts',
+    ]) {
+      assert.equal(isInstrumentableFile(f), false, `${f} must not be instrumentable`);
+    }
+  });
+
+  it('still treats ordinary source files as instrumentable', () => {
+    for (const f of ['pkg/src/feature.ts', 'dashboard/src/app/page.tsx', 'pkg/src/types.ts']) {
+      assert.equal(isInstrumentableFile(f), true, `${f} must be instrumentable`);
+    }
+  });
+
+  describe('default threshold', () => {
+    let repo;
+    beforeEach(() => {
+      repo = initRepo();
+    });
+    afterEach(() => {
+      rmSync(repo, { recursive: true, force: true });
+    });
+
+    const body = Array.from({ length: 10 }, (_, i) => `export const v${i} = ${i};`).join('\n');
+    const runDefault = (base, head) =>
+      spawnSync(
+        'node',
+        [SCRIPT, '--base', base, '--head', head, '--cwd', repo, '--coverage-root', repo, '--json'],
+        { encoding: 'utf-8' },
+      );
+
+    it('passes at exactly 90% and reports a threshold of 90 when --threshold is omitted', () => {
+      const base = commitFile(repo, 'README.md', '# x\n', 'init');
+      const head = commitFile(repo, 'pkg/src/a.ts', body + '\n', 'feat: add a');
+      const lines = {};
+      for (let i = 1; i <= 10; i++) lines[i] = i === 10 ? 0 : 1;
+      writeCoverageFile(repo, { 'pkg/src/a.ts': { lines } });
+      const r = runDefault(base, head);
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      assert.equal(JSON.parse(r.stdout).threshold, 90);
+    });
+
+    it('fails at 80% when --threshold is omitted', () => {
+      const base = commitFile(repo, 'README.md', '# x\n', 'init');
+      const head = commitFile(repo, 'pkg/src/a.ts', body + '\n', 'feat: add a');
+      const lines = {};
+      for (let i = 1; i <= 10; i++) lines[i] = i > 8 ? 0 : 1;
+      writeCoverageFile(repo, { 'pkg/src/a.ts': { lines } });
+      const r = runDefault(base, head);
+      assert.equal(r.status, 1, r.stdout + r.stderr);
+    });
   });
 });

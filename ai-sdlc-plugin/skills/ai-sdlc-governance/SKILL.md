@@ -24,7 +24,7 @@ Before EVERY commit, run these checks and fix any failures:
 ```bash
 pnpm build          # TypeScript compilation — catches type errors
 pnpm test           # All tests must pass
-pnpm test:coverage  # Coverage thresholds enforced (80% lines/functions/statements, 70% branches)
+pnpm test:coverage  # Coverage thresholds (CI enforces per-package line floors of 85-90%); run for packages you touch
 pnpm lint           # ESLint — no errors allowed
 pnpm format:check   # Prettier — run `pnpm format` to fix
 ```
@@ -108,6 +108,6 @@ See `docs/operations/cross-harness-review.md` for the full operator runbook.
 ## Testing
 
 - Use Vitest for all orchestrator and reference tests
-- Coverage target: 80% patch coverage on PRs
+- Coverage target: 90% patch coverage on PRs (CI gate)
 - Run `pnpm test` from repo root for all packages
 - Run `pnpm --filter @ai-sdlc/orchestrator test` for orchestrator only

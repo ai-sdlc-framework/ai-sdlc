@@ -5,12 +5,11 @@
 `AI_SDLC_BYPASS_ALL_GATES=1` is a **single env var that stops the entire pre-push chain**.
 All hooks exit 0 immediately when it is set:
 
-1. `scripts/check-coverage.sh`
-2. `scripts/squash-attestation-chores.sh`
-3. `scripts/pre-push-fixups.sh` (AISDLC-386 mechanical-fixups orchestrator)
-4. `scripts/check-task-moved.sh`
-5. `scripts/check-mcp-bundle-sync.sh`
-6. `scripts/check-attestation-sign.sh`
+1. `scripts/squash-attestation-chores.sh`
+2. `scripts/pre-push-fixups.sh` (AISDLC-386 mechanical-fixups orchestrator)
+3. `scripts/check-task-moved.sh`
+4. `scripts/check-mcp-bundle-sync.sh`
+5. `scripts/check-attestation-sign.sh`
 
 The orchestrator (`scripts/pre-push-fixups.sh`) and its three sub-hooks all
 check `AI_SDLC_BYPASS_ALL_GATES` at the very top and exit 0 immediately. Setting
@@ -51,7 +50,6 @@ If you need to skip only one gate, prefer the targeted skip:
 
 | Gate | Skip var |
 |---|---|
-| Coverage | `AI_SDLC_SKIP_COVERAGE_GATE=1` |
 | Task-move | `AI_SDLC_SKIP_TASK_MOVE=1` |
 | Attestation sign | `AI_SDLC_SKIP_ATTESTATION_SIGN=1` |
 

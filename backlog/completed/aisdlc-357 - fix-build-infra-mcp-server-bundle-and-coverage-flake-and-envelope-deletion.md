@@ -14,7 +14,6 @@ dependencies: []
 priority: medium
 references:
   - .husky/pre-push
-  - scripts/check-coverage.sh
 drift_log:
   - date: '2026-05-22'
     type: ref-deleted

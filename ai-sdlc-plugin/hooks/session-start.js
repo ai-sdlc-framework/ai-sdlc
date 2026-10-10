@@ -421,7 +421,7 @@ Before EVERY commit, run these and fix any failures:
 3. \`pnpm lint\` — No lint errors
 4. \`pnpm format:check\` — Run \`pnpm format\` to fix
 
-AI-SDLC: \`.husky/pre-push\` runs \`pnpm -r test:coverage\` (80% threshold) as the canonical verification gate. Run the four commands above before \`git push\` to fail fast.
+AI-SDLC: CI is the single coverage gate (per-package line floors plus a 90% patch gate); nothing runs coverage locally. Run the four commands above before \`git push\` to fail fast.
 
 ${renderSessionStartHardRules(resolvedGovernance)}${operationalRules ? `\n${operationalRules}` : ''}${reviewPolicySummary}`;
 

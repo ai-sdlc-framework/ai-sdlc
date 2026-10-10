@@ -16,7 +16,6 @@ dependencies:
 references:
   - spec/rfcs/RFC-0050-usage-ledger-and-model-routing.md
   - spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md
-  - ai-sdlc-plugin/hooks/deferred-coverage-check.js
   - ai-sdlc-plugin/plugin.json
   - pipeline-cli/src/usage/report.ts
   - ai-sdlc-plugin/commands/planner.md

@@ -11,7 +11,7 @@ export default defineConfig({
       reporter: ['text', 'json-summary', 'json'],
       reportsDirectory: './coverage',
       thresholds: {
-        lines: 80,
+        lines: 90,
         functions: 80,
         branches: 70,
         statements: 80,
