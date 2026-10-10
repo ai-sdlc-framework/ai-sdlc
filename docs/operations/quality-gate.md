@@ -369,3 +369,12 @@ When the attestation envelope verifies on a `pull_request_target` run, the `Appr
 - **Never approves** when verification is not `valid`, on drafts, on `pull_request` or merge_group events (only `pull_request_target`), or for fork PRs (head repo must equal base repo). The job checks out the default branch explicitly (`persist-credentials: false`), so the script is base-branch code, never PR content; until the script exists on the default branch the step skips with a notice (bootstrap).
 - **Idempotent per head SHA:** a rerun does not re-approve the same SHA; when the head changes, the workflow's own stale approval is dismissed before a new one is posted. Own reviews are recognised by a hidden body marker AND the `github-actions[bot]` author, so human reviews (or a forged marker from another account) are never touched.
 - **Least privilege:** `pull-requests: write` is granted only to the `approve` job; the `verify` job keeps `pull-requests: read`.
+
+## `ai-sdlc init` enforcement: detect and fall back (AISDLC-748, DEC-0014)
+
+`ai-sdlc init` enforces by default, and chooses the mechanism by runtime capability, never by guessing the plan. It tries `PUT /repos/{owner}/{repo}/branches/main/protection`:
+
+1. **API available (200: public repo or paid plan).** Init always applies protection requiring `ai-sdlc/pr-ready`, `codecov/patch` and 1 approving review (DEC-0014); the review count is never lowered. Limitation: until the scaffolded adopter `verify-attestation.yml` ships the verifying `approve` job (see the section above), nothing posts that review, so a non-admin merge waits on a human review (or an admin bypass). `ADOPTER_TEMPLATE_POSTS_APPROVAL`, derived from the template, only changes the message init prints; it flips by itself when the job is added.
+2. **API returns 403 (GitHub Free private repo).** Init falls back to client-side enforcement: `cli-merge-if-eligible` refuses unless the attestation verifies and checks are green, and the governance hook keeps blocking direct agent merges. `ai-sdlc doctor` reports `enforcement: client-side only; the server cannot block a manual merge` as an error-level finding, because a human can still merge manually in the GitHub UI.
+
+Both paths print what was installed and the opt-out flag, `--no-branch-protection`. `--yes` follows the same detection. Re-run `ai-sdlc init --add branch-protection` after making the repo public or upgrading the plan.

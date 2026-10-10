@@ -35,6 +35,7 @@ import { execFileSync, execSync } from 'node:child_process';
 import type { DerivedGates } from '../../compliance/types.js';
 import { BASELINE_DERIVED_GATES } from '../../compliance/types.js';
 import {
+  ADOPTER_TEMPLATE_POSTS_APPROVAL,
   ATTESTATION_TEMPLATES,
   BASELINE_WORKFLOW_TEMPLATES,
   CLASSIFIER_TEMPLATES,
@@ -45,7 +46,9 @@ import {
   type FeatureTemplateSet,
 } from './init-templates.js';
 import {
+  CLIENT_SIDE_ONLY_MESSAGE,
   RECOMMENDED_BRANCH_PROTECTION_BODY,
+  isBranchProtectionUnavailable,
   resolveOwnerRepoSlug,
 } from './branch-protection-shared.js';
 
@@ -736,6 +739,8 @@ export interface WizardFlags {
   withClassifier: boolean;
   /** `--with-branch-protection` forces branch-protection on without prompting. */
   withBranchProtection: boolean;
+  /** `--no-branch-protection` opts out of branch protection and the client-side fallback (AISDLC-748). */
+  noBranchProtection?: boolean;
   /**
    * `--with-workflows` scaffolds the full GitHub Actions workflow bundle
    * (ai-sdlc-gate, verify-attestation, ai-sdlc-review, auto-enable-auto-merge)
@@ -1087,13 +1092,16 @@ export function buildProductionAdapters(): FeatureAdapters {
         // single-line error rendered by `applyBranchProtection`.
         const stdout = execFileSync(cmd, args, {
           encoding: 'utf-8',
-          stdio: ['ignore', 'pipe', 'ignore'],
+          stdio: ['ignore', 'pipe', 'pipe'],
         });
         return { stdout, exitCode: 0 };
       } catch (err) {
-        const e = err as { stdout?: Buffer | string; status?: number };
+        const e = err as { stdout?: Buffer | string; stderr?: Buffer | string; status?: number };
+        const out = typeof e.stdout === 'string' ? e.stdout : (e.stdout?.toString() ?? '');
+        // Keep stderr so callers can detect an HTTP 403 (AISDLC-748).
+        const errText = typeof e.stderr === 'string' ? e.stderr : (e.stderr?.toString() ?? '');
         return {
-          stdout: typeof e.stdout === 'string' ? e.stdout : (e.stdout?.toString() ?? ''),
+          stdout: errText ? `${out}${out ? '\n' : ''}${errText}` : out,
           exitCode: e.status ?? 1,
         };
       }
@@ -1807,7 +1815,9 @@ export async function applyFeatureSelection(
 
   // Branch protection (always last — depends on the gate workflow being
   // present so the required check exists when the rule is applied).
-  if (selection.branchProtection) {
+  if (selection.branchProtection && flags.noBranchProtection) {
+    adapters.log('  skip branch protection (--no-branch-protection)');
+  } else if (selection.branchProtection) {
     result.branchProtection = await applyBranchProtection(projectDir, flags, adapters);
   }
 
@@ -1823,6 +1833,13 @@ export interface BranchProtectionResult {
   bodyJson: string;
   /** Error message from `gh api`, if non-zero exit. */
   error?: string;
+  /**
+   * Enforcement path chosen (AISDLC-748, DEC-0014): `server` when the
+   * protection API accepted the rule; `client-side` when it returned 403
+   * (GitHub Free private repo) and the merge gate in cli-merge-if-eligible
+   * is the only enforcement. Absent in dry-run or on non-403 errors.
+   */
+  mode?: 'server' | 'client-side';
 }
 
 /**
@@ -1851,6 +1868,7 @@ export async function applyBranchProtection(
   projectDir: string,
   flags: WizardFlags,
   adapters: Pick<FeatureAdapters, 'runCommand' | 'log'>,
+  templatePostsApproval: boolean = ADOPTER_TEMPLATE_POSTS_APPROVAL,
 ): Promise<BranchProtectionResult> {
   const bodyJson = JSON.stringify(RECOMMENDED_BRANCH_PROTECTION_BODY, null, 2);
 
@@ -1904,6 +1922,24 @@ export async function applyBranchProtection(
     '--input',
     tmpPath,
   ]);
+  if (apply.exitCode !== 0 && isBranchProtectionUnavailable(apply.stdout)) {
+    // 403: GitHub Free private repo. Fall back to client-side enforcement.
+    adapters.log(
+      `  branch protection unavailable for ${slug} (HTTP 403); using client-side enforcement.`,
+    );
+    adapters.log(
+      '  installed: cli-merge-if-eligible refuses unless attestation verifies and checks are green;',
+    );
+    adapters.log('             the hook keeps blocking direct agent merges.');
+    adapters.log(
+      templatePostsApproval
+        ? '             verify-attestation.yml posts the approving review once server-side protection is available.'
+        : '             The adopter verify-attestation template does not yet post the approving review.',
+    );
+    adapters.log(`  ${CLIENT_SIDE_ONLY_MESSAGE} (ai-sdlc doctor reports this as an error).`);
+    adapters.log('  opt out with: --no-branch-protection');
+    return { applied: false, bodyJson, mode: 'client-side' };
+  }
   if (apply.exitCode !== 0) {
     return {
       applied: false,
@@ -1912,8 +1948,25 @@ export async function applyBranchProtection(
     };
   }
 
-  adapters.log(`  applied branch protection to ${slug}:main`);
-  return { applied: true, bodyJson };
+  adapters.log(`  applied branch protection to ${slug}:main (server-side enforcement)`);
+  adapters.log(
+    '  installed: required checks ai-sdlc/pr-ready, codecov/patch + 1 approving review (DEC-0014).',
+  );
+  if (templatePostsApproval) {
+    adapters.log(
+      '             verify-attestation.yml posts the approving review once the attestation verifies.',
+    );
+  } else {
+    adapters.log(
+      '             The adopter verify-attestation template does not yet post the approving review,',
+    );
+    adapters.log(
+      '             so a non-admin merge waits on a human review (or an admin bypass) until the',
+    );
+    adapters.log('             template ships the approve job.');
+  }
+  adapters.log('  opt out with: --no-branch-protection');
+  return { applied: true, bodyJson, mode: 'server' };
 }
 
 // ── Next-steps summary ───────────────────────────────────────────────────
@@ -2014,8 +2067,20 @@ export function renderNextSteps(
 
   if (selection.branchProtection) {
     if (result.branchProtection?.applied) {
-      lines.push(`${stepN}. Branch protection on \`main\` was updated.`);
+      lines.push(`${stepN}. Branch protection on \`main\` was updated (server-side enforcement).`);
       lines.push('     Required checks: ai-sdlc/pr-ready, codecov/patch');
+      lines.push('     Opt out with: --no-branch-protection');
+    } else if (result.branchProtection?.mode === 'client-side') {
+      lines.push(`${stepN}. Branch protection is unavailable for this repo (HTTP 403).`);
+      lines.push(
+        '     Chosen path: client-side enforcement (cli-merge-if-eligible + governance hook).',
+      );
+      lines.push(
+        '     The server cannot block a manual merge; `ai-sdlc doctor` reports this as an error.',
+      );
+      lines.push('     Opt out with: --no-branch-protection');
+      lines.push('     After making the repo public or upgrading the plan, re-run:');
+      lines.push('     ai-sdlc init --add branch-protection');
     } else if (result.branchProtection?.error) {
       lines.push(`${stepN}. Branch protection was NOT applied:`);
       lines.push(`     ${result.branchProtection.error}`);

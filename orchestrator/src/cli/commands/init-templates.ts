@@ -210,6 +210,21 @@ jobs:
 `;
 
 /**
+ * True when the scaffolded verify-attestation workflow contains a verifying
+ * `approve` job that posts the approving review (AISDLC-748). Derived from
+ * the template text so it flips on by itself when the job is added. Init
+ * requires an approving review in branch protection only when this is true;
+ * otherwise adopters would be locked out of merging.
+ */
+export function templatePostsApproval(template: string): boolean {
+  return /^ {2}approve:\s*$/m.test(template);
+}
+
+export const ADOPTER_TEMPLATE_POSTS_APPROVAL: boolean = templatePostsApproval(
+  VERIFY_ATTESTATION_WORKFLOW,
+);
+
+/**
  * `.husky/pre-push` (or `.git/hooks/pre-push` for non-husky repos) snippet
  * that signs an attestation when one is missing for the current HEAD.
  * Installed when `--with-attestation` is opted in.

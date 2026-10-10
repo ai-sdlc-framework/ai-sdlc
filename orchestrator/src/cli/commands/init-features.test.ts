@@ -15,6 +15,8 @@
  * complementary instead of duplicative.
  */
 
+import { ADOPTER_TEMPLATE_POSTS_APPROVAL, templatePostsApproval } from './init-templates.js';
+import { buildWizardFlags } from './init.js';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -759,6 +761,142 @@ describe('applyBranchProtection', () => {
     expect(result.error).toContain('not authenticated');
   });
 
+  it('AISDLC-748 path 1: 200 applies server-side protection and names the opt-out', async () => {
+    const { state, adapters } = makeStub({
+      runResponses: new Map([
+        ['gh repo view', { stdout: 'owner/repo\n', exitCode: 0 }],
+        ['gh api', { stdout: '{}', exitCode: 0 }],
+      ]),
+    });
+    const projectDir = mkdtempSync(join(tmpdir(), 'init-bp200-'));
+    try {
+      const result = await applyBranchProtection(projectDir, baseFlags, adapters);
+      expect(result.applied).toBe(true);
+      expect(result.mode).toBe('server');
+      const out = state.log.join('\n');
+      expect(out).toContain('server-side enforcement');
+      expect(out).toContain('--no-branch-protection');
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('AISDLC-748 path 2: 403 falls back to client-side enforcement without an error', async () => {
+    const { state, adapters } = makeStub({
+      runResponses: new Map([
+        ['gh repo view', { stdout: 'owner/repo\n', exitCode: 0 }],
+        [
+          'gh api',
+          { stdout: 'HTTP 403: Upgrade to GitHub Pro or make this repository public', exitCode: 1 },
+        ],
+      ]),
+    });
+    const projectDir = mkdtempSync(join(tmpdir(), 'init-bp403-'));
+    try {
+      const result = await applyBranchProtection(projectDir, baseFlags, adapters);
+      expect(result.applied).toBe(false);
+      expect(result.error).toBeUndefined();
+      expect(result.mode).toBe('client-side');
+      const out = state.log.join('\n');
+      expect(out).toContain('client-side enforcement');
+      expect(out).toContain('cli-merge-if-eligible');
+      expect(out).toContain('--no-branch-protection');
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('AISDLC-748: adopter template currently ships no verifying approver', () => {
+    expect(ADOPTER_TEMPLATE_POSTS_APPROVAL).toBe(false);
+  });
+
+  it('AISDLC-748: derivation flips true on a template containing an approve: job', () => {
+    const without = 'jobs:\n  verify:\n    runs-on: ubuntu-latest\n';
+    const withApprove = `${without}  approve:\n    needs: verify\n    runs-on: ubuntu-latest\n`;
+    expect(templatePostsApproval(without)).toBe(false);
+    expect(templatePostsApproval(withApprove)).toBe(true);
+  });
+
+  it('AISDLC-748: --no-branch-protection makes no gh api call and logs the skip', async () => {
+    const { state, adapters } = makeStub();
+    const result = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, branchProtection: true },
+      { ...baseFlags, noBranchProtection: true },
+      adapters,
+    );
+    expect(result.branchProtection).toBeUndefined();
+    expect(state.runCommandCalls.filter((c) => c.cmd === 'gh')).toEqual([]);
+    expect(state.log.join('\n')).toContain('skip branch protection (--no-branch-protection)');
+  });
+
+  it('AISDLC-748: next-steps for client-side mode names the path and the opt-out', () => {
+    const { adapters } = makeStub();
+    const out = renderNextSteps(
+      { ...NO_FEATURES, branchProtection: true },
+      {
+        created: [],
+        skipped: [],
+        wouldCreate: [],
+        branchProtection: { applied: false, bodyJson: '{}', mode: 'client-side' },
+      },
+      adapters,
+    );
+    expect(out).toContain('client-side enforcement');
+    expect(out).toContain('--no-branch-protection');
+    expect(out).not.toContain('dry-run');
+  });
+
+  it.each([
+    [false, 'does not yet post the approving review'],
+    [true, 'verify-attestation.yml posts the approving review'],
+  ])(
+    'AISDLC-748 200 path, templatePostsApproval=%s: always requires 1 approving review',
+    async (flag, phrase) => {
+      const { state, adapters } = makeStub({
+        runResponses: new Map([
+          ['gh repo view', { stdout: 'owner/repo\n', exitCode: 0 }],
+          ['gh api', { stdout: '{}', exitCode: 0 }],
+        ]),
+      });
+      const projectDir = mkdtempSync(join(tmpdir(), 'init-bpflag-'));
+      try {
+        const result = await applyBranchProtection(projectDir, baseFlags, adapters, flag);
+        expect(result.mode).toBe('server');
+        const body = JSON.parse(result.bodyJson);
+        expect(body.required_pull_request_reviews.required_approving_review_count).toBe(1);
+        expect(body.required_status_checks.contexts).toEqual(['ai-sdlc/pr-ready', 'codecov/patch']);
+        expect(body.required_status_checks.contexts).toContain('ai-sdlc/pr-ready');
+        const out = state.log.join('\n');
+        expect(out).toContain(phrase);
+        expect(out).toContain('--no-branch-protection');
+      } finally {
+        rmSync(projectDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([[false], [true]])(
+    'AISDLC-748 403 path, templatePostsApproval=%s: client-side fallback unchanged',
+    async (flag) => {
+      const { state, adapters } = makeStub({
+        runResponses: new Map([
+          ['gh repo view', { stdout: 'owner/repo\n', exitCode: 0 }],
+          ['gh api', { stdout: 'HTTP 403: Upgrade to GitHub Pro', exitCode: 1 }],
+        ]),
+      });
+      const projectDir = mkdtempSync(join(tmpdir(), 'init-bp403flag-'));
+      try {
+        const result = await applyBranchProtection(projectDir, baseFlags, adapters, flag);
+        expect(result.mode).toBe('client-side');
+        expect(result.error).toBeUndefined();
+        expect(state.log.join('\n')).toContain('client-side enforcement');
+      } finally {
+        rmSync(projectDir, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('round-2 MAJOR fix: handles projectDir with a literal space without word-splitting', async () => {
     // Reviewer flagged that the prior `execSync(\`${cmd} ${args.join(' ')}\`)`
     // form ran the command through `/bin/sh -c`, which word-splits on
@@ -1438,5 +1576,16 @@ describe('AISDLC-555 round-1 security review — hook installation', () => {
       adapters,
     );
     expect(state.log.some((l) => l.includes('never be reached'))).toBe(false);
+  });
+});
+
+describe('buildWizardFlags --no-branch-protection (AISDLC-748)', () => {
+  it('sets noBranchProtection when commander yields branchProtection:false', () => {
+    expect(buildWizardFlags({ branchProtection: false }).noBranchProtection).toBe(true);
+  });
+
+  it('leaves noBranchProtection false when the option is omitted', () => {
+    expect(buildWizardFlags({}).noBranchProtection).toBe(false);
+    expect(buildWizardFlags({ branchProtection: true }).noBranchProtection).toBe(false);
   });
 });

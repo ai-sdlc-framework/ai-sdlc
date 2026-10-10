@@ -37,7 +37,10 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { Command } from 'commander';
 import { formatOutput } from '../formatters/index.js';
-import { fetchBranchProtectionStatus } from './branch-protection-shared.js';
+import {
+  CLIENT_SIDE_ONLY_MESSAGE,
+  fetchBranchProtectionStatus,
+} from './branch-protection-shared.js';
 import { cleanGitEnv } from '../../runtime/git-env.js';
 import {
   DOCTOR_CHECKS,
@@ -82,6 +85,8 @@ export interface BranchProtectionCheck {
    * required on its own).
    */
   requiresAttestationDirectly?: boolean;
+  /** Branch-protection API returned 403 (GitHub Free private repo): client-side enforcement only (AISDLC-748). */
+  apiUnavailable?: boolean;
   /** Reason the check could not run, or that the API call failed. */
   error?: string;
 }
@@ -282,6 +287,9 @@ export function renderDoctorReport(result: AttestationDoctorResult): string[] {
     lines.push(
       `  branch protection (main):    requires approving review = ${result.branchProtection.requiresApprovingReview}, requires ai-sdlc/pr-ready = ${result.branchProtection.requiresPrReady}`,
     );
+  } else if (result.branchProtection.apiUnavailable) {
+    lines.push(`  branch protection (main):    unavailable (HTTP 403)`);
+    lines.push(`  ERROR ${CLIENT_SIDE_ONLY_MESSAGE}`);
   } else {
     lines.push(
       `  branch protection (main):    unknown (${result.branchProtection.error ?? 'not checked'})`,
