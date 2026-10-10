@@ -10,6 +10,52 @@ const happy = {
   acceptanceCriteriaMet: [1, 2],
 };
 
+describe('Step 6 — parked return (AISDLC-651.3)', () => {
+  const parkedNotes = {
+    parked: true,
+    done: 'schema and hook',
+    remaining: 'step 6 wiring',
+    why: 'large context reads',
+  };
+
+  it('records a parked return as parked, not failed, with notes preserved', async () => {
+    const r = await parseDeveloperReturn({
+      developerReturn: {
+        ...happy,
+        prUrl: null,
+        verifications: { build: 'failed', test: 'skipped', lint: 'skipped', format: 'skipped' },
+        notes: parkedNotes,
+      },
+    });
+    expect(r.ok).toBe(false);
+    expect(r.parked).toBe(true);
+    expect(r.contractViolation).toBeUndefined();
+    expect(r.reason).toMatch(/parked/);
+    expect(r.reason).toMatch(/remaining: step 6 wiring/);
+    expect(r.developer?.notes).toEqual(parkedNotes);
+  });
+
+  it('parks even with a null commitSha and describes missing detail', async () => {
+    const r = await parseDeveloperReturn({
+      developerReturn: { ...happy, commitSha: null, notes: { parked: true } },
+    });
+    expect(r.parked).toBe(true);
+    expect(r.reason).toMatch(/no detail given/);
+  });
+
+  it('does not treat parked: false or string notes as parked', async () => {
+    const a = await parseDeveloperReturn({
+      developerReturn: { ...happy, notes: { parked: false } },
+    });
+    expect(a.ok).toBe(true);
+    const b = await parseDeveloperReturn({
+      developerReturn: { ...happy, commitSha: null, notes: 'parked: true' },
+    });
+    expect(b.parked).toBeUndefined();
+    expect(b.ok).toBe(false);
+  });
+});
+
 describe('Step 6 — parseDeveloperReturn', () => {
   it('happy path with object input', async () => {
     const r = await parseDeveloperReturn({ developerReturn: happy });

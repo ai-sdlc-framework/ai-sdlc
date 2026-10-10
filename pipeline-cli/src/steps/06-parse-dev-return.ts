@@ -45,6 +45,21 @@ export interface ParseDeveloperReturnOptions {
   acCoverage?: AcCoverageHook;
 }
 
+function isParkedNotes(notes: unknown): boolean {
+  return (
+    typeof notes === 'object' &&
+    notes !== null &&
+    !Array.isArray(notes) &&
+    (notes as Record<string, unknown>).parked === true
+  );
+}
+
+function describeParkedNotes(notes: unknown): string {
+  const n = notes as Record<string, unknown>;
+  const part = (k: string): string => (typeof n[k] === 'string' ? `${k}: ${n[k]}` : '');
+  return ['done', 'remaining', 'why'].map(part).filter(Boolean).join('; ') || '(no detail given)';
+}
+
 export async function parseDeveloperReturn(
   opts: ParseDeveloperReturnOptions,
 ): Promise<ParseDeveloperReturnResult> {
@@ -117,6 +132,17 @@ export async function parseDeveloperReturn(
         reason: `developer return verifications.${key} must be one of ${VALID_VERIFICATION_STATUSES.join('/')}`,
       };
     }
+  }
+
+  // AISDLC-651.3 — a parked return (`notes.parked: true`, turn budget hit) is a parked outcome,
+  // not a failure. Checked before the commitSha/verification gates: WIP may not pass them.
+  if (isParkedNotes(obj.notes)) {
+    return {
+      ok: false,
+      parked: true,
+      reason: `developer parked the task at its turn budget: ${describeParkedNotes(obj.notes)}`,
+      developer: obj as unknown as DeveloperReturn,
+    };
   }
 
   // Treat null commitSha as developer failure (RFC §5.4 + execute-orchestrator Step 6).

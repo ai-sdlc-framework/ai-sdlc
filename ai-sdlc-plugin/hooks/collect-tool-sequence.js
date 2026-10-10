@@ -10,6 +10,7 @@
 const { readFileSync, appendFileSync, mkdirSync, existsSync } = require('fs');
 const { join, extname } = require('path');
 const { homedir } = require('os');
+const budgetLib = require('./lib/developer-turn-budget.js');
 
 // ── Read stdin ───────────────────────────────────────────────────────
 
@@ -83,6 +84,39 @@ const entry = {
   action: action,
   project: projectDir,
 };
+
+// ── Developer turn budget (AISDLC-651.3) ─────────────────────────────
+
+/** Count developer subagent calls; returns a notice string or null. Never throws. */
+function developerTurnNotice() {
+  try {
+    if (!budgetLib.isDeveloperAgent(input?.agent_type) || !input?.agent_id) return null;
+    const usageDir = process.env.AI_SDLC_USAGE_DIR || join(homedir(), '.ai-sdlc', 'usage');
+    const cwd = input?.cwd || process.cwd();
+    const count = budgetLib.bumpCount(join(usageDir, 'developer-turn-state'), input.agent_id);
+    const cfg = budgetLib.resolveTurnBudget(cwd);
+    budgetLib.recordTurns(usageDir, {
+      ts: entry.ts,
+      agentId: input.agent_id,
+      sessionId: sessionId,
+      taskId: budgetLib.resolveTaskId(cwd, process.env),
+      turns: count,
+      budget: cfg.budget,
+    });
+    return budgetLib.turnNotice(count, cfg);
+  } catch {
+    return null;
+  }
+}
+
+const turnNotice = developerTurnNotice();
+if (turnNotice) {
+  process.stdout.write(
+    JSON.stringify({
+      hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: turnNotice },
+    }) + '\n',
+  );
+}
 
 // ── Append to JSONL file ─────────────────────────────────────────────
 

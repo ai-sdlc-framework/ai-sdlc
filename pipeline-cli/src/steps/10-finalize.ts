@@ -27,7 +27,7 @@ import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { findTaskFile, isTaskFileCompleted, parseTaskFile } from './01-validate.js';
 import { patchFrontmatterStatus } from './04-flip-status.js';
 import { completeTaskAtomically } from '../cli/complete-task.js';
-import type { FinalizeTaskOptions, FinalizeTaskResult } from '../types.js';
+import type { DeveloperReturn, FinalizeTaskOptions, FinalizeTaskResult } from '../types.js';
 
 export interface FinalizeStepOptions extends FinalizeTaskOptions {
   runner?: Runner;
@@ -93,14 +93,14 @@ export function buildFinalSummary(opts: FinalizeTaskOptions): {
   const finalSummary =
     `## Summary\n${opts.developerReturn.summary}\n\n` +
     `## Changes\n${filesBlock}\n\n` +
-    `## Design decisions\n${opts.developerReturn.notes ?? '(none)'}\n\n` +
+    `## Design decisions\n${notesText(opts.developerReturn.notes)}\n\n` +
     `## Verification\n` +
     `- \`pnpm build\` — ${opts.developerReturn.verifications.build}\n` +
     `- \`pnpm test\` — ${opts.developerReturn.verifications.test}\n` +
     `- \`pnpm lint\` — ${opts.developerReturn.verifications.lint}\n` +
     `- \`pnpm format:check\` — ${opts.developerReturn.verifications.format}\n` +
     `- 3 parallel reviews approved${harnessLine}\n\n` +
-    `## Follow-up\n${opts.developerReturn.notes ?? '(none)'}\n`;
+    `## Follow-up\n${notesText(opts.developerReturn.notes)}\n`;
 
   return { finalSummary, acceptanceCriteriaCheck };
 }
@@ -256,4 +256,9 @@ export async function finalizeTask(opts: FinalizeStepOptions): Promise<FinalizeT
     choreCommitSha,
     skipped: false,
   };
+}
+
+function notesText(notes: DeveloperReturn['notes']): string {
+  if (notes === undefined) return '(none)';
+  return typeof notes === 'string' ? notes : JSON.stringify(notes);
 }

@@ -27,6 +27,7 @@ import {
 import {
   evidenceFileName,
   loadContractRetries,
+  loadDeveloperTurns,
   loadTaskInfo,
   readAssignmentLog,
   writeEvidenceFiles,
@@ -91,6 +92,7 @@ describe('deriveOutcomes', () => {
         rev('T-3', 3, 'test', 'approved'),
       ],
       new Map([['T-3', 2]]),
+      new Map([['T-3', 77]]),
     );
     expect(out.get('T-1')).toMatchObject({
       firstPassApproved: true,
@@ -106,7 +108,9 @@ describe('deriveOutcomes', () => {
       firstPassApproved: false,
       iterations: 3,
       contractRetries: 2,
+      developerTurns: 77,
     });
+    expect(out.get('T-1')?.developerTurns).toBe(0);
   });
 
   it('skips malformed records', () => {
@@ -397,6 +401,28 @@ describe('sources', () => {
     );
     expect(loadContractRetries(join(dir, 'art')).get('T-1')).toBe(2);
     expect(loadContractRetries(join(dir, 'none')).size).toBe(0);
+  });
+
+  it('sums per-run maximum developer turns per task from the usage records', () => {
+    const usage = join(dir, 'usage');
+    mkdirSync(usage, { recursive: true });
+    const rec = (taskId: string | null, agentId: string, turns: number) =>
+      JSON.stringify({ taskId, agentId, turns });
+    writeFileSync(
+      join(usage, 'developer-turns.jsonl'),
+      [
+        rec('T-1', 'a', 1),
+        rec('T-1', 'a', 2),
+        rec('T-1', 'a', 3),
+        rec('T-1', 'b', 4),
+        rec(null, 'c', 9),
+        'not json',
+        JSON.stringify({ taskId: 'T-2', agentId: 'a', turns: 'x' }),
+      ].join('\n'),
+    );
+    expect(loadDeveloperTurns(usage).get('T-1')).toBe(7);
+    expect(loadDeveloperTurns(usage).size).toBe(1);
+    expect(loadDeveloperTurns(join(dir, 'none')).size).toBe(0);
   });
 
   it('writes one evidence file per cell with task ids', () => {

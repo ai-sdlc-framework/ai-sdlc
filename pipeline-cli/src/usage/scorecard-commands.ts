@@ -7,7 +7,12 @@
  */
 
 import { resolve } from 'node:path';
-import { readModelCalls, readPriceHistory, type ModelCallRecord } from '@ai-sdlc/reference';
+import {
+  readModelCalls,
+  readPriceHistory,
+  resolveUsageDir,
+  type ModelCallRecord,
+} from '@ai-sdlc/reference';
 import type { Argv } from 'yargs';
 import { loadAllReviewLedgers } from '../attestation/reviews-ledger.js';
 import { repoNameFor } from './attribution.js';
@@ -28,6 +33,7 @@ import {
 import {
   ASSIGNMENT_LOG_RELATIVE,
   loadContractRetries,
+  loadDeveloperTurns,
   loadTaskInfo,
   readAssignmentLog,
   writeEvidenceFiles,
@@ -145,6 +151,7 @@ export function registerScorecardCommands(y: Argv, deps: ScorecardDeps, io: Usag
       const outcomes = deriveOutcomes(
         loadAllReviewLedgers(repoRoot),
         loadContractRetries(artifactsDir),
+        loadDeveloperTurns(resolveUsageDir({ dir: deps.usageDir })),
       );
       const taskInfo = loadTaskInfo(new Set(records.map((r) => r.taskId as string)), {
         repoRoot,

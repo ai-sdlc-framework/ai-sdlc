@@ -249,6 +249,10 @@ Return a JSON object as your final message (no other text). Re-read the [CRITICA
 
 > **If you returned without `prUrl`, you have failed the task.** Re-read the Definition of Done section at the top of this prompt and execute the push + `gh pr create` you skipped. The fact that the diff is committed locally is irrelevant if no one can review or merge it.
 
+### Turn budget and parking (AISDLC-651.3)
+
+A PostToolUse hook counts your tool calls against a per-run budget (default 120, read from the base ref's `.ai-sdlc/review-config.yaml` `developer.turnBudget`). At the warning (default 80 percent) it injects a one-line notice: converge, or prepare to park. On the **TURN BUDGET REACHED** notice you MUST stop working: commit your work in progress on the task branch, then return `prUrl: null` and a `notes` OBJECT with `parked: true`, `done` (what is finished), `remaining` (what is left) and `why` (why it took this many turns), for example `"notes": {"parked": true, "done": "...", "remaining": "...", "why": "..."}`. Step 6 records this as a parked outcome, not a failure, and the task goes back to the board or operator with your notes. Do not push or open a PR when parking.
+
 ### Failure / blocker returns
 
 If you cannot complete the task (blocked, ambiguous, infeasible) AND you genuinely cannot commit anything reviewable, return the JSON with `commitSha: null`, `prUrl: null`, `verifications` reflecting what you ran, and `notes` explaining the blocker. The orchestrator handles failure routing — don't try to escalate yourself. This null-`prUrl` exemption ONLY applies when there is no commit to push; it is NOT an escape hatch for "I committed but skipped push."

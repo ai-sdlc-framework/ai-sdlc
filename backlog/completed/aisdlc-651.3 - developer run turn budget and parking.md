@@ -2,7 +2,7 @@
 id: AISDLC-651.3
 title: >-
   RFC-0050 follow-up: a per-run turn budget for the developer agent with a warning, a hard stop and a parked return
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-01'
 labels:
@@ -56,9 +56,32 @@ cache-read tokens and the worst run is 80M over 203 turns.
    `cli-usage scorecard` can report turns per task class.
 
 ## Acceptance Criteria
-- [ ] With a budget of 10 and `warnAt` 80 percent in a fixture, the eighth tool call returns the warning and the tenth returns the stop notice; other agent types are unaffected.
-- [ ] A developer return with `notes.parked: true` is recorded by Step 6 as parked, not failed, with the notes preserved.
-- [ ] The budget and `warnAt` are read from the base ref only.
-- [ ] Turns used per run appear in the usage records for the task.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
+- [x] With a budget of 10 and `warnAt` 80 percent in a fixture, the eighth tool call returns the warning and the tenth returns the stop notice; other agent types are unaffected.
+- [x] A developer return with `notes.parked: true` is recorded by Step 6 as parked, not failed, with the notes preserved.
+- [x] The budget and `warnAt` are read from the base ref only.
+- [x] Turns used per run appear in the usage records for the task.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+## Summary
+A PostToolUse hook now counts developer subagent tool calls against a per-run budget (default 120, warnAt 80 percent from the base-ref `.ai-sdlc/review-config.yaml`), emits a warning and a stop notice, and records turns per run. The developer parks on the stop notice (`prUrl: null`, `notes.parked: true`); Step 6 and execute-pipeline record `developer-parked`, not a failure. `cli-usage scorecard` rows gain `meanDeveloperTurns`.
+
+## Changes
+- `ai-sdlc-plugin/hooks/lib/developer-turn-budget.js` (new): budget resolver, counter, notices, turn records.
+- `ai-sdlc-plugin/hooks/collect-tool-sequence.js`, `ai-sdlc-plugin/agents/developer.md`, `ai-sdlc-plugin/commands/execute.md` (modified): wiring and parking rule.
+- `pipeline-cli/src/steps/06-parse-dev-return.ts`, `execute-pipeline.ts`, `types.ts`, `steps/10-finalize.ts` (modified): parked outcome.
+- `pipeline-cli/src/usage/*` (modified): turns in usage records and scorecard.
+
+## Design decisions
+- **Base-ref only**: config read via `git show origin/main:` so a PR cannot raise its own budget.
+- **Advisory budget**: the hook adds notices and never blocks tool calls.
+
+## Verification
+- `pnpm build` passed; `pnpm lint` and `pnpm format:check` clean; `pnpm dark-code:check` clean.
+- `pnpm test`: new/affected tests pass; 14 failures in tui, bin-invocation and verify-runtime fail identically on clean main.
+- 3 reviewers approved (Claude-native; Codex quota exhausted).
+
+## Follow-up
+- declined: non-atomic counter and per-call `git show` latency are minor; budget is a cost control, not a security boundary.
