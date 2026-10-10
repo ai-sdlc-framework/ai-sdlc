@@ -40,6 +40,7 @@ import {
   validateRuntimeEvidence,
   findNewOqResolutionMarkers,
   openQuestionsLines,
+  OQ_SECTION_HEADING_REGEX,
   parseApproverIdentities,
   checkOqResolutionMarkers,
   parseNameStatusZ,
@@ -1462,6 +1463,69 @@ describe('AISDLC-764: OQ-resolution marker scan', () => {
     const withMarker = rfc('- OQ-1\n  **Resolution:** done');
     assert.deepEqual(findNewOqResolutionMarkers(withMarker, withMarker), []);
     assert.equal(findNewOqResolutionMarkers(null, withMarker).length, 1);
+  });
+
+  it('detects a marker under each numbered / lettered / suffixed heading form', () => {
+    const forms = [
+      '## 8. Open Questions',
+      '## 13. Open Questions',
+      '## B.12 Open Questions \u2014 Final Dispositions',
+      '## Open Questions (Remaining)',
+      '### Open Questions',
+    ];
+    for (const heading of forms) {
+      const doc = (oq) => `# T\n\n## Summary\n\n${heading}\n${oq}\n\n## Next\nx\n`;
+      const added = findNewOqResolutionMarkers(
+        doc('- OQ-1 a'),
+        doc('- OQ-1 a\n  **Resolution:** A'),
+      );
+      assert.equal(added.length, 1, heading);
+    }
+  });
+
+  it('section end: ### inside a ## section stays in; next ## ends; ### section ends at ### or ##', () => {
+    const inner = '## Open Questions\nq1\n### Sub\nq2\n## After\nout\n';
+    assert.deepEqual(openQuestionsLines(inner), ['q1', '### Sub', 'q2']);
+    const h3 = '### Open Questions\nq1\n#### Deep\nq2\n### Sibling\nout\n';
+    assert.deepEqual(openQuestionsLines(h3), ['q1', '#### Deep', 'q2']);
+    assert.deepEqual(openQuestionsLines('### Open Questions\nq1\n## Top\nout\n'), ['q1']);
+  });
+
+  it('corpus: every level-2/3 "Open Questions" heading in spec/rfcs matches the scan regex', () => {
+    const dir = join(__dirname, '..', 'spec', 'rfcs');
+    const missed = [];
+    for (const f of listRfcFiles(dir)) {
+      for (const line of readFileSync(f, 'utf-8').split('\n')) {
+        if (/^#{2,3}\s/.test(line) && /Open Questions/i.test(line)) {
+          if (!OQ_SECTION_HEADING_REGEX.test(line)) missed.push(`${f}: ${line}`);
+        }
+      }
+    }
+    assert.deepEqual(missed, []);
+  });
+
+  it('does not scan non-spec/rfcs paths', () => {
+    const d = mkdtempSync(join(tmpdir(), 'oq-neg-'));
+    try {
+      const git = (...a) => spawnSync('git', a, { cwd: d, encoding: 'utf-8' });
+      git('init', '-q', '-b', 'main');
+      git('config', 'user.email', 't@t');
+      git('config', 'user.name', 't');
+      mkdirSync(join(d, 'docs'), { recursive: true });
+      writeFileSync(join(d, 'docs', 'policy.md'), '# P\n\n## Open Questions Policy\nx\n');
+      git('add', '-A');
+      git('commit', '-qm', 'base');
+      git('checkout', '-qb', 'feat');
+      writeFileSync(
+        join(d, 'docs', 'policy.md'),
+        '# P\n\n## Open Questions Policy\nx\n**Resolution:** y\n',
+      );
+      git('commit', '-qam', 'edit');
+      const r = checkOqResolutionMarkers({ repoRoot: d, baseRef: 'main', headRef: 'feat' });
+      assert.deepEqual(r.failures, []);
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
   });
 
   it('parses approver identities', () => {

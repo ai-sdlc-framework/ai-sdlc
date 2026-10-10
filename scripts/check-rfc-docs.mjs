@@ -966,20 +966,36 @@ export function reportAndExit({ files, failures, warnings, enforcedCount, skippe
  */
 export const OQ_RESOLUTION_MARKER_REGEX = /\*\*Resolution:\*\*|\bRESOLVED:|✅\s*RESOLVED/;
 
-/** Lines of the `## Open Questions` section of an RFC body (empty when absent). */
+/**
+ * Heading that opens an Open Questions section: level 2 or 3, tolerating a
+ * number or letter prefix ("## 8. Open Questions", "## B.12 Open Questions")
+ * and trailing text ("## Open Questions (Remaining)").
+ */
+export const OQ_SECTION_HEADING_REGEX =
+  /^(#{2,3})\s+(?:[A-Z]\.)?(?:\d+\.)*\d*\.?\s*Open Questions\b/i;
+
+/**
+ * Lines of the Open Questions section of an RFC body (empty when absent). The
+ * section ends at the next heading of the same or higher level than the one
+ * that opened it, so a `###` subsection inside a `##` section stays inside.
+ */
 export function openQuestionsLines(source) {
   const lines = String(source ?? '')
     .replace(/\r\n/g, '\n')
     .split('\n');
   const out = [];
-  let inside = false;
+  let level = 0;
   for (const line of lines) {
-    if (/^##\s+Open Questions\b/i.test(line)) {
-      inside = true;
+    const start = OQ_SECTION_HEADING_REGEX.exec(line);
+    if (start) {
+      level = start[1].length;
       continue;
     }
-    if (inside && /^##\s/.test(line)) inside = false;
-    if (inside) out.push(line);
+    if (level) {
+      const h = /^(#{1,6})\s/.exec(line);
+      if (h && h[1].length <= level) level = 0;
+    }
+    if (level) out.push(line);
   }
   return out;
 }
