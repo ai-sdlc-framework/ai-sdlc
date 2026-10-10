@@ -76,6 +76,11 @@ describe('CI runs once per pull request (AISDLC-727)', () => {
     assert.equal(gate.jobs['backlog-drift'].name, 'Backlog Drift', 'required context name');
   });
 
+  it('the gate build-test job runs schema validation, which only ci.yml ran on PRs before', () => {
+    const steps = loadYaml('ai-sdlc-gate.yml').jobs['build-test'].steps;
+    assert.ok(steps.some((s) => /pnpm validate-schemas/.test(s.run ?? '')));
+  });
+
   it('the auto-rebase cascade workflows are deleted', () => {
     for (const f of ['auto-rebase-open-prs.yml', 'auto-rebase-on-queue-kick.yml']) {
       assert.ok(!existsSync(join(WORKFLOWS_DIR, f)), `${f} must stay deleted`);
