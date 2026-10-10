@@ -162,17 +162,26 @@ jobs:
         #        the PR with the issue list in the job output.
         run: |
           set -euo pipefail
-          # Capture JSON output (always exits 1 if any issue, regardless
-          # of severity — that's why we don't fail-fast on the npx call).
-          # `|| true` keeps the pipeline alive so we can post-process.
-          json="$(npx backlog-drift@0.1.3 check --json 2>/dev/null || true)"
+          # Write the JSON report to a file, never a `$(...)` capture: the
+          # tool calls process.exit(1) when it finds issues, and Node does
+          # not wait for pending pipe writes, so a capture is cut at the
+          # 64 KiB pipe buffer (AISDLC-796). A file redirect is not truncated.
+          # The tool exits 1 on any issue regardless of severity, so the exit
+          # code is recorded rather than failing fast.
+          report="${RUNNER_TEMP:-/tmp}/backlog-drift.json"
+          drift_rc=0
+          npx backlog-drift@0.1.3 check --json > "$report" 2>/dev/null || drift_rc=$?
           # Pretty-print every issue for the job log so reviewers see
           # context regardless of which severity gates the run.
           npx backlog-drift@0.1.3 check || true
           # Count error-severity entries. `jq -e` returns non-zero when
           # the result is null/false/0, but we want explicit branching
           # so the message is readable in the GitHub UI.
-          errors="$(printf '%s' "$json" | jq '[.[] | select(.severity == "error")] | length')"
+          if ! jq -e 'type == "array"' "$report" >/dev/null 2>&1; then
+            echo "::error::Backlog drift report ${report} is not valid JSON (backlog-drift exit code ${drift_rc}); the gate cannot read the report."
+            exit 1
+          fi
+          errors="$(jq '[.[] | select(.severity == "error")] | length' "$report")"
           echo ""
           echo "[backlog-drift] error-severity issues: ${errors}"
           if [ "${errors}" != "0" ]; then
