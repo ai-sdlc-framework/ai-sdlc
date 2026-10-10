@@ -2,7 +2,7 @@
 id: AISDLC-605
 title: >-
   Governance enforcement follow-ups from RFC-0048 review (merge-matcher polish + permission-check.js parity)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-07'
 labels:
@@ -18,6 +18,7 @@ references:
   - ai-sdlc-plugin/hooks/permission-check.js
 priority: high
 dispatchable: true
+updated_date: '2026-10-07 16:25'
 ---
 
 ## Description
@@ -57,7 +58,7 @@ separate defense-in-depth layer.
 ## Acceptance Criteria
 - [ ] `permission-check.js` reads stdin from fd 0 (no `/dev/stdin`); raw `gh pr merge --auto` arming stays BLOCKED under the broad `gh pr merge*` policy (DEC-0066).
 - [ ] Hermetic `node --test` coverage for each of the above, cross-platform-safe (no `/dev/stdin`, no >128KiB env values).
-- [ ] The merge ban applies only when the merge command or merge API call is the command being run, not when the phrase appears in an argument, a heredoc, a grep pattern or an echo; wrappers such as `sh -c` fail closed.
+- [ ] The merge ban applies only when the merge command or merge API call is the command being run, not when the phrase appears in an argument, a grep pattern or an echo; a heredoc is refused (DEC-0085); wrappers such as `sh -c` fail closed.
 - [ ] Write and Edit to the session scratch directory and OS temp directories are allowed by default by the worktree-confinement rule; confinement is unchanged for the main checkout, other worktrees and sibling repositories; tests cover both.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 <!-- SECTION:DESCRIPTION:END -->

@@ -120,3 +120,35 @@ describe('ai-sdlc-plugin permission-check hook', () => {
     }
   });
 });
+
+describe('permission-check stdin handling (AISDLC-605)', () => {
+  it('does not read /dev/stdin; uses fd 0 via the shared retry-loop reader', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(hookScript, 'utf-8');
+    assert.doesNotMatch(src, /readFileSync\(\s*['"]\/dev\/stdin['"]/);
+    assert.match(src, /require\('\.\/lib\/read-stdin'\)/);
+  });
+
+  it('still denies a blocked command when the payload exceeds one 64KiB read', () => {
+    // Over 64KiB goes through the multi-chunk path of the fd-0 reader (piped, not env).
+    const padding = 'x'.repeat(200 * 1024);
+    const input = JSON.stringify({ tool_input: { command: `git merge feature # ${padding}` } });
+    const output = execFileSync('node', [hookScript], {
+      input,
+      encoding: 'utf-8',
+      env: { ...process.env, CLAUDE_PROJECT_DIR: tempDir },
+      timeout: 10000,
+    });
+    assert.ok(isDenied({ output: output.trim() }));
+  });
+
+  it('allows everything and exits 0 on empty stdin', () => {
+    const output = execFileSync('node', [hookScript], {
+      input: '',
+      encoding: 'utf-8',
+      env: { ...process.env, CLAUDE_PROJECT_DIR: tempDir },
+      timeout: 5000,
+    });
+    assert.equal(output.trim(), '');
+  });
+});
