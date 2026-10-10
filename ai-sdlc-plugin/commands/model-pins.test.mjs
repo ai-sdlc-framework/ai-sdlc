@@ -103,6 +103,7 @@ describe('role pins', () => {
     'resolve-conflicts',
   ];
   const haikuAgents = ['review-executor', 'review-executor-codex'];
+  const opusAgents = ['security-reviewer', 'review-planner', 'review-synthesizer'];
   const sonnetAgents = [
     'developer',
     'code-reviewer',
@@ -120,7 +121,7 @@ describe('role pins', () => {
     ['commands', sonnetCommands, 'sonnet'],
     ['agents', haikuAgents, 'haiku'],
     ['agents', sonnetAgents, 'sonnet'],
-    ['agents', ['security-reviewer'], 'opus'],
+    ['agents', opusAgents, 'opus'],
   ]) {
     for (const name of names) {
       it(`${dir}/${name}.md pins ${model}`, () => {
@@ -132,7 +133,7 @@ describe('role pins', () => {
   it('the role lists cover every command and agent file', () => {
     const covered = new Set([
       ...[...haikuCommands, ...sonnetCommands].map((n) => `commands/${n}`),
-      ...[...haikuAgents, ...sonnetAgents, 'security-reviewer'].map((n) => `agents/${n}`),
+      ...[...haikuAgents, ...sonnetAgents, ...opusAgents].map((n) => `agents/${n}`),
     ]);
     const missing = files.filter((f) => !covered.has(`${f.dir}/${f.name}`));
     assert.deepEqual(
