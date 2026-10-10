@@ -437,15 +437,21 @@ describe('answer is scoped to the owning tier', () => {
 describe('promote-expired', () => {
   function backdate(minutesAgo: number): void {
     const dir = resolveEventsDir(tmp);
-    for (const name of readdirSync(dir).filter((n) => n.endsWith('.json'))) {
-      const file = join(dir, name);
-      const e = JSON.parse(readFileSync(file, 'utf8'));
-      e.ts = new Date(Date.now() - minutesAgo * 60_000).toISOString();
-      const line = JSON.stringify(e);
-      // The file name carries the timestamp and content hash, so rename with the content.
-      rmSync(file);
-      writeFileSync(join(dir, eventFileName(e, line)), line + '\n');
-    }
+    const base = Date.now() - minutesAgo * 60_000;
+    // One distinct millisecond per event, in the original read order: file names sort events,
+    // so equal timestamps would reorder them by content hash.
+    readdirSync(dir)
+      .filter((n) => n.endsWith('.json'))
+      .sort()
+      .forEach((name, i) => {
+        const file = join(dir, name);
+        const e = JSON.parse(readFileSync(file, 'utf8'));
+        e.ts = new Date(base + i).toISOString();
+        const line = JSON.stringify(e);
+        // The file name carries the timestamp and content hash, so rename with the content.
+        rmSync(file);
+        writeFileSync(join(dir, eventFileName(e, line)), line + '\n');
+      });
   }
 
   it('moves operational to design, design to operator, and leaves the operator tier alone', async () => {
