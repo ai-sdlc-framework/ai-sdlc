@@ -13,7 +13,6 @@ dependencies: []
 references:
   - .github/workflows/ci.yml
   - .github/workflows/ai-sdlc-gate.yml
-  - .github/workflows/__tests__/single-pr-ci-run.test.mjs
 priority: critical
 dispatchable: true
 ---
