@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.32.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.31.0...pipeline-cli-v0.32.0) (2026-10-10)
+
+
+### Features
+
+* **spec:** review planner and synthesizer agents with grounded findings (AISDLC-674) ([#1181](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1181)) ([34e6d40](https://github.com/ai-sdlc-framework/ai-sdlc/commit/34e6d40f3c424e831da314250705a7268bb9bbf9))
+
+
+### Bug Fixes
+
+* embed review nonce in prompts and keep committed envelopes in sign hook (AISDLC-739) ([#1316](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1316)) ([8aa6db3](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8aa6db30055badbdd4a9962f2751d6666eed918d))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.32.0
+
 ## [0.31.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.30.0...pipeline-cli-v0.31.0) (2026-10-10)
 
 
