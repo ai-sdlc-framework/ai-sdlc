@@ -94,10 +94,10 @@ describe('planner peer binding', () => {
 });
 
 describe('planner context ceiling', () => {
-  it('hands off and clears at 150k tokens', () => {
-    assert.match(match[2], /## Context ceiling/);
+  it('keeps the handoff through the CLI and clears itself automatically at 150k tokens', () => {
+    assert.match(match[2], /## Context and handoff/);
     assert.match(match[2], /150k tokens/);
-    assert.match(match[2], /15% of the\s+window/);
-    assert.match(match[2], /without exception/);
+    assert.match(match[2], /handoff write --role planner/);
+    assert.match(match[2], /cli-hierarchy auto-clear/);
   });
 });
