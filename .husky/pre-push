@@ -61,6 +61,12 @@ node scripts/check-substrate-contract.mjs
 # AISDLC-687: dark-code static scan (cheap). Skip:
 # AI_SDLC_SKIP_DARK_CODE_GATE=1.
 ./scripts/check-dark-code-on-push.sh
+# AISDLC-773: protected knowledge stays out of the tracked root, and out of the PR body
+# when the pusher supplies it via AI_SDLC_PR_BODY_FILE (RFC-0053 OQ-1).
+./scripts/check-knowledge-scope.sh
+if [ -n "${AI_SDLC_PR_BODY_FILE:-}" ] && [ -f "$AI_SDLC_PR_BODY_FILE" ]; then
+  ./scripts/check-pr-body-protected.sh "$AI_SDLC_PR_BODY_FILE"
+fi
 if [ "${AI_SDLC_SKIP_SQUASH_CHORES:-}" != "1" ]; then
   ./scripts/squash-attestation-chores.sh
 fi
