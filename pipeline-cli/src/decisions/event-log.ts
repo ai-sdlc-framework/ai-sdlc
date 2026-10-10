@@ -17,15 +17,18 @@
  */
 
 import type { GovernanceChange } from './governance-fallback.js';
+import { createHash } from 'node:crypto';
 import {
   appendFileSync,
   closeSync,
   existsSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   statSync,
   unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -50,7 +53,17 @@ export function resolveDecisionsDir(workDir: string = process.cwd()): string {
 }
 
 /**
- * Resolve the event log path: `<workDir>/.ai-sdlc/_decisions/events.jsonl`.
+ * Resolve the per-event directory: `<workDir>/.ai-sdlc/_decisions/events/`
+ * (AISDLC-719). One file per event, so two pull requests that each record a
+ * decision add distinct paths and merge without a text conflict.
+ */
+export function resolveEventsDir(workDir: string = process.cwd()): string {
+  return join(resolveDecisionsDir(workDir), 'events');
+}
+
+/**
+ * Resolve the LEGACY event log path: `<workDir>/.ai-sdlc/_decisions/events.jsonl`.
+ * Still read (never written by default) so existing history stays visible.
  */
 export function resolveEventLogPath(workDir: string = process.cwd()): string {
   return join(resolveDecisionsDir(workDir), 'events.jsonl');
@@ -173,10 +186,45 @@ export function appendDecisionEvent(event: DecisionEvent, opts: AppendEventOpts 
   const err = validateDecisionEvent(event);
   if (err) throw new Error(`[decisions] refusing to append invalid event: ${err}`);
 
-  const path = opts.filePath ?? resolveEventLogPath(opts.workDir);
+  // An explicit filePath (tests / tools) keeps the legacy single-file append.
+  if (opts.filePath) {
+    ensureParentDir(opts.filePath);
+    appendFileSync(opts.filePath, JSON.stringify(event) + '\n', { encoding: 'utf8' });
+    return opts.filePath;
+  }
+  const line = JSON.stringify(event);
+  const path = join(resolveEventsDir(opts.workDir), eventFileName(event, line));
   ensureParentDir(path);
-  appendFileSync(path, JSON.stringify(event) + '\n', { encoding: 'utf8' });
+  writeFileSync(path, line + '\n', { encoding: 'utf8' });
   return path;
+}
+
+// ── Per-event file naming (AISDLC-719) ───────────────────────────────────────
+
+/** Short content hash of an event's serialized line; the dedupe key across layouts. */
+export function eventContentHash(line: string): string {
+  return createHash('sha256').update(line.trim()).digest('hex').slice(0, 12);
+}
+
+/**
+ * Deterministic, collision-resistant file name for an event:
+ * `<ts>__<decisionId>__<type>__<hash12>.json`. Lexicographic order is
+ * timestamp order (ISO-8601 UTC), which gives the reader a total order;
+ * the content hash breaks same-millisecond ties and makes re-writing the
+ * same event idempotent. Colons are replaced for filesystem portability.
+ */
+export function eventFileName(event: DecisionEvent, line: string = JSON.stringify(event)): string {
+  if (/[\\/]|\.\./.test(event.ts)) {
+    throw new Error(`[decisions] refusing event ts with path characters: ${event.ts}`);
+  }
+  const ts = event.ts.replace(/:/g, '-');
+  return `${ts}__${event.decisionId}__${event.type}__${eventContentHash(line)}.json`;
+}
+
+/** Hash embedded in an event file name (last `__` segment), or null. */
+export function hashFromEventFileName(name: string): string | null {
+  const m = name.match(/__([0-9a-f]{12})\.json$/);
+  return m ? m[1] : null;
 }
 
 // ── Reader ───────────────────────────────────────────────────────────────────
@@ -199,20 +247,123 @@ export interface ReadEventsResult {
  * `{ events: [], skipped: 0 }`.
  */
 export function readDecisionEvents(opts: ReadEventsOpts = {}): ReadEventsResult {
-  const path = opts.filePath ?? resolveEventLogPath(opts.workDir);
-  if (!existsSync(path)) return { events: [], skipped: 0 };
+  const events: DecisionEvent[] = [];
+  const seen = new Set<string>();
+  let skipped = 0;
 
-  let raw: string;
-  try {
-    raw = readFileSync(path, 'utf8');
-  } catch {
-    return { events: [], skipped: 0 };
+  const ingest = (line: string): void => {
+    if (!line.trim()) return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      skipped += 1;
+      return;
+    }
+    if (validateDecisionEvent(parsed) !== null) {
+      skipped += 1;
+      return;
+    }
+    // Same event present in both layouts (partial migration) counts once.
+    const key = eventContentHash(line);
+    if (seen.has(key)) return;
+    seen.add(key);
+    events.push(parsed as DecisionEvent);
+  };
+
+  // 1. Legacy single-file log, in append order.
+  const legacy = opts.filePath ?? resolveEventLogPath(opts.workDir);
+  if (existsSync(legacy)) {
+    try {
+      for (const line of readFileSync(legacy, 'utf8').split('\n')) ingest(line);
+    } catch {
+      /* unreadable legacy log: treat as empty */
+    }
   }
 
-  const events: DecisionEvent[] = [];
+  // 2. Per-event files, sorted by name (timestamp order). Skipped when an
+  //    explicit filePath pins the legacy-only layout.
+  if (!opts.filePath) {
+    const dir = resolveEventsDir(opts.workDir);
+    let names: string[] = [];
+    try {
+      names = readdirSync(dir)
+        .filter((n) => n.endsWith('.json'))
+        .sort();
+    } catch {
+      /* no events dir yet */
+    }
+    for (const name of names) {
+      try {
+        ingest(readFileSync(join(dir, name), 'utf8'));
+      } catch {
+        skipped += 1;
+      }
+    }
+  }
+  return { events, skipped };
+}
+
+/**
+ * Raw serialized event lines from both layouts, newline-joined in read order
+ * (legacy file first, then per-event files by name). Diagnostics and tests.
+ */
+export function readEventLogText(workDir?: string): string {
+  const out: string[] = [];
+  const legacy = resolveEventLogPath(workDir);
+  if (existsSync(legacy)) {
+    out.push(
+      ...readFileSync(legacy, 'utf8')
+        .split('\n')
+        .filter((l) => l.trim() !== ''),
+    );
+  }
+  const dir = resolveEventsDir(workDir);
+  if (existsSync(dir)) {
+    for (const n of readdirSync(dir)
+      .filter((x) => x.endsWith('.json'))
+      .sort()) {
+      out.push(readFileSync(join(dir, n), 'utf8').trim());
+    }
+  }
+  return out.length ? out.join('\n') + '\n' : '';
+}
+
+// ── Legacy → per-event migration (AISDLC-719) ────────────────────────────────
+
+export interface MigrateResult {
+  /** Valid events written as per-event files. */
+  migrated: number;
+  /** Lines skipped as malformed / invalid (left only in the legacy file). */
+  skipped: number;
+  /** Whether the legacy file was removed. */
+  removedLegacy: boolean;
+}
+
+/**
+ * Split the legacy `events.jsonl` into per-event files, keeping every event
+ * byte-for-byte (ids and history preserved). Migrated files are named
+ * `0-legacy-<seq>__...` so they sort before timestamped files and keep the
+ * original append order even where legacy timestamps are non-monotonic.
+ * Idempotent. The legacy file is removed only when every line migrated.
+ */
+export function migrateLegacyEventLog(opts: ReadEventsOpts = {}): MigrateResult {
+  const legacy = resolveEventLogPath(opts.workDir);
+  if (!existsSync(legacy)) return { migrated: 0, skipped: 0, removedLegacy: false };
+  const dir = resolveEventsDir(opts.workDir);
+  mkdirSync(dir, { recursive: true });
+  const have = new Set(
+    readdirSync(dir)
+      .map(hashFromEventFileName)
+      .filter((h): h is string => h !== null),
+  );
+  let migrated = 0;
   let skipped = 0;
-  for (const line of raw.split('\n')) {
-    if (!line.trim()) continue;
+  let seq = 0;
+  for (const raw of readFileSync(legacy, 'utf8').split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    seq += 1;
     let parsed: unknown;
     try {
       parsed = JSON.parse(line);
@@ -224,9 +375,20 @@ export function readDecisionEvents(opts: ReadEventsOpts = {}): ReadEventsResult 
       skipped += 1;
       continue;
     }
-    events.push(parsed as DecisionEvent);
+    const hash = eventContentHash(line);
+    if (have.has(hash)) continue;
+    const evt = parsed as DecisionEvent;
+    const name = `0-legacy-${String(seq).padStart(6, '0')}__${evt.decisionId}__${evt.type}__${hash}.json`;
+    writeFileSync(join(dir, name), line + '\n', { encoding: 'utf8' });
+    have.add(hash);
+    migrated += 1;
   }
-  return { events, skipped };
+  let removedLegacy = false;
+  if (skipped === 0) {
+    unlinkSync(legacy);
+    removedLegacy = true;
+  }
+  return { migrated, skipped, removedLegacy };
 }
 
 // ── ID allocation ────────────────────────────────────────────────────────────

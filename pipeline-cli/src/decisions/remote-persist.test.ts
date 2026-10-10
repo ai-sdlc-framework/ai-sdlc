@@ -2,14 +2,7 @@
  * AISDLC-546 — hermetic tests: a local bare repo is `origin`; `gh` is injected (no network).
  */
 import { execFileSync } from 'node:child_process';
-import {
-  appendFileSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -18,7 +11,9 @@ import {
   appendDecisionEvent,
   makeDecisionOpenedEvent,
   makeOperatorAnsweredEvent,
+  readEventLogText,
   resolveEventLogPath,
+  resolveEventsDir,
 } from './event-log.js';
 import {
   assertDecisionIdFree,
@@ -55,6 +50,15 @@ const runner: GitRunner = (cmd, args, opts) => {
   }
   return defaultRunner(cmd, args, opts);
 };
+
+/** Concatenated per-event files on the sync branch. */
+function syncLedger(): string {
+  const ref = `origin/${DECISIONS_SYNC_BRANCH}`;
+  const names = git(parent, 'ls-tree', '-r', '--name-only', ref, '--', '.ai-sdlc/_decisions/events')
+    .split('\n')
+    .filter(Boolean);
+  return names.map((n) => git(parent, 'show', `${ref}:${n}`)).join('\n');
+}
 
 function addDec(workDir: string, id: string): void {
   appendDecisionEvent(
@@ -112,10 +116,8 @@ describe('persistDecisionLog (AISDLC-546)', () => {
     expect(git(parent, 'status', '--porcelain')).toContain('.ai-sdlc/');
 
     // Simulate check-orchestrator-state.sh: wipe the un-synced local append.
-    rmSync(resolveEventLogPath(parent), { force: true });
-    expect(
-      git(parent, 'show', `origin/${DECISIONS_SYNC_BRANCH}:.ai-sdlc/_decisions/events.jsonl`),
-    ).toContain('DEC-0001');
+    rmSync(resolveEventsDir(parent), { recursive: true, force: true });
+    expect(syncLedger()).toContain('DEC-0001');
 
     expect(nextDecisionIdDurable({ workDir: parent, runner })).toBe('DEC-0002');
     expect(() => assertDecisionIdFree('DEC-0001', { workDir: parent, runner })).toThrow(
@@ -129,11 +131,7 @@ describe('persistDecisionLog (AISDLC-546)', () => {
     persistDecisionLog({ workDir: parent, runner });
     addDec(parent, 'DEC-0002');
     persistDecisionLog({ workDir: parent, runner });
-    const remote = git(
-      parent,
-      'show',
-      `origin/${DECISIONS_SYNC_BRANCH}:.ai-sdlc/_decisions/events.jsonl`,
-    );
+    const remote = syncLedger();
     expect(remote).toContain('DEC-0001');
     expect(remote).toContain('DEC-0002');
   });
@@ -154,11 +152,7 @@ describe('persistDecisionLog (AISDLC-546)', () => {
       { workDir: parent },
     );
     expect(persistDecisionLog({ workDir: parent, runner }).persisted).toBe(true);
-    const remote = git(
-      parent,
-      'show',
-      `origin/${DECISIONS_SYNC_BRANCH}:.ai-sdlc/_decisions/events.jsonl`,
-    );
+    const remote = syncLedger();
     expect(remote).toContain('operator-answered');
   });
 
@@ -175,21 +169,17 @@ describe('persistDecisionLog (AISDLC-546)', () => {
     addDec(parent, 'DEC-0002');
     const r = persistDecisionLog({ workDir: parent, runner });
     expect(r.persisted).toBe(true);
-    const remote = git(
-      parent,
-      'show',
-      `origin/${DECISIONS_SYNC_BRANCH}:.ai-sdlc/_decisions/events.jsonl`,
-    );
+    const remote = syncLedger();
     expect(remote).toContain('DEC-0001');
     expect(remote).toContain('DEC-0002');
   });
 
   it('numbering takes max of origin/main and local ledgers', () => {
     addDec(parent, 'DEC-0005');
-    git(parent, 'add', '-f', '.ai-sdlc/_decisions/events.jsonl');
+    git(parent, 'add', '-f', '.ai-sdlc/_decisions/events');
     git(parent, 'commit', '-m', 'ledger');
     git(parent, 'push', 'origin', 'HEAD:main');
-    rmSync(resolveEventLogPath(parent), { force: true });
+    rmSync(resolveEventsDir(parent), { recursive: true, force: true });
     expect(nextDecisionIdDurable({ workDir: parent, runner })).toBe('DEC-0006');
   });
 
@@ -206,7 +196,7 @@ describe('persistDecisionLog (AISDLC-546)', () => {
     const r = persistDecisionLog({ workDir: parent, runner, warn: (m) => warns.push(m) });
     expect(r.persisted).toBe(false);
     expect(warns.join('')).toMatch(/WARN/);
-    expect(readFileSync(resolveEventLogPath(parent), 'utf8')).toContain('DEC-0001');
+    expect(readEventLogText(parent)).toContain('DEC-0001');
 
     const r2 = persistDecisionLog({
       workDir: parent,
@@ -230,7 +220,7 @@ describe('persistDecisionLog (AISDLC-546)', () => {
     expect(r).toEqual({ persisted: false, reason: 'untrusted run' });
     expect(warns.join('')).toMatch(/untrusted/);
     expect(git(origin, 'branch', '--list', DECISIONS_SYNC_BRANCH)).toBe('');
-    expect(readFileSync(resolveEventLogPath(parent), 'utf8')).toContain('DEC-0001');
+    expect(readEventLogText(parent)).toContain('DEC-0001');
   });
 
   it('drops invalid ledger lines before the union merge', () => {
@@ -240,11 +230,7 @@ describe('persistDecisionLog (AISDLC-546)', () => {
     expect(
       persistDecisionLog({ workDir: parent, runner, warn: (m) => warns.push(m) }).persisted,
     ).toBe(true);
-    const remote = git(
-      parent,
-      'show',
-      `origin/${DECISIONS_SYNC_BRANCH}:.ai-sdlc/_decisions/events.jsonl`,
-    );
+    const remote = syncLedger();
     expect(remote).toContain('DEC-0001');
     expect(remote).not.toContain('not json');
     expect(remote).not.toContain('bogus');
