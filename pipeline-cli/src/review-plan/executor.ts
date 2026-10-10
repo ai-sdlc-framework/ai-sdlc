@@ -186,6 +186,20 @@ export interface ProbeSpawner {
     readonly 'claude-code': boolean;
     readonly codex: boolean;
   };
+  /**
+   * Per harness: true only when the spawner (or its bridge) honours an EMPTY tool list, that
+   * is, runs the probe with no tools at all, instead of ignoring the list and falling back to
+   * the harness's default tool set. Probes that hold no file tools (read, trace, compare,
+   * run) are given an empty list, so a harness that cannot honour one must not receive them.
+   * Strict: only the literal `true` counts, and an absent record declares nothing. A probe
+   * with no tools that was going to run on Codex runs on `claude-code` instead when Codex
+   * does not declare it, and the entry records the harness that actually ran. The
+   * `claude-code` entry is read only for symmetry: a probe is never moved off it.
+   */
+  readonly honoursEmptyToolList?: {
+    readonly 'claude-code': boolean;
+    readonly codex: boolean;
+  };
   spawnProbe(opts: ProbeSpawnOpts): Promise<ProbeSpawnResult>;
 }
 
@@ -911,6 +925,15 @@ function declaresFileScope(spawner: ProbeSpawner, harness: ExecutorHarness): boo
   );
 }
 
+function honoursEmptyToolList(spawner: ProbeSpawner, harness: ExecutorHarness): boolean {
+  const declared = (spawner as { honoursEmptyToolList?: unknown }).honoursEmptyToolList;
+  return (
+    typeof declared === 'object' &&
+    declared !== null &&
+    (declared as Record<string, unknown>)[harness] === true
+  );
+}
+
 function selectHarness(probe: Probe, limits: ExecutorLimits): ExecutorHarness {
   const c = limits.codex;
   if (c?.available !== true || c.trusted !== true) return 'claude-code';
@@ -1052,6 +1075,10 @@ export async function executePlan(
     const scoped = probeUsesFileTools(probe);
     let harness = selectHarness(probe, limits);
     if (scoped && harness === 'codex' && !declaresFileScope(spawner, 'codex'))
+      harness = 'claude-code';
+    // A probe with no file tools is handed an empty tool list. Codex receives it only when the
+    // bridge declares it honours one; otherwise the probe stays on the Claude harness.
+    if (!scoped && harness === 'codex' && !honoursEmptyToolList(spawner, 'codex'))
       harness = 'claude-code';
     if (scoped && !declaresFileScope(spawner, harness))
       return {

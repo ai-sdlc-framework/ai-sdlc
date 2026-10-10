@@ -41,7 +41,7 @@ import {
   loadLeavesForPatchId,
   loadLeavesFromFile,
 } from './merkle.js';
-import type { TranscriptLeaf } from './merkle.js';
+import type { StagedLeafStage, TranscriptLeaf } from './merkle.js';
 import { formatEnvelopeJson } from './format-json.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -87,6 +87,11 @@ export interface V6TranscriptLeafSummary {
     workflowRef: string;
     signerKeyId: string;
   };
+  /**
+   * Staged review stage of the source leaf, carried through as-is. Absent for
+   * every leaf that has none: it is never written as `null` or an empty string.
+   */
+  stage?: StagedLeafStage;
 }
 
 /** A single entry in the `merkleProofs` array of the v6 envelope. */
@@ -240,6 +245,8 @@ export function buildV6Envelope(opts: BuildV6EnvelopeOptions): AttestationEnvelo
     // RFC-0047 / AISDLC-594: carried through as-is (undefined when the
     // source leaf has no anchor evidence) — audit-only, never defaulted.
     anchorEvidence: leaf.anchorEvidence,
+    // Staged review: carried through only when the source leaf has one.
+    ...(leaf.stage ? { stage: leaf.stage } : {}),
   }));
 
   // Build merkleProofs for each prLeaf.

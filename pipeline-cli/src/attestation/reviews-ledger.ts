@@ -46,6 +46,7 @@ import {
   statSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { STAGED_REVIEWER_NAME } from './merkle.js';
 
 /**
  * Reviewer role recorded in a ledger entry.
@@ -55,8 +56,12 @@ import { dirname, join } from 'node:path';
  * additive: existing `'code'` / `'test'` / `'security'` records are
  * unaffected, and ledger consumers that only know about the original three
  * roles simply never see `'correctness'` records unless the flag is enabled.
+ *
+ * `'staged'` is the staged review set: one record per review, written from the
+ * synthesizer leaf, whose verdict and findings are the set's verdict. The planner
+ * and executor leaves add no row. Additive in the same way as `'correctness'`.
  */
-export type ReviewLedgerRole = 'code' | 'test' | 'security' | 'correctness';
+export type ReviewLedgerRole = 'code' | 'test' | 'security' | 'correctness' | 'staged';
 
 /** Severity of an individual finding. */
 export type ReviewLedgerSeverity = 'critical' | 'major' | 'minor' | 'suggestion';
@@ -116,6 +121,8 @@ export function normalizeReviewerRole(reviewerName: string): ReviewLedgerRole | 
   if (n.startsWith('security-reviewer') || n === 'security' || n === 'critic') return 'security';
   // AISDLC-617 — opt-in merged code+test reviewer.
   if (n.startsWith('correctness-reviewer') || n === 'correctness') return 'correctness';
+  // Staged review set (verdict taken from the synthesizer leaf).
+  if (n === STAGED_REVIEWER_NAME || n === 'staged') return 'staged';
   return null;
 }
 

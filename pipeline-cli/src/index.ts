@@ -31,6 +31,9 @@ export * from './review-risk-map/index.js';
 // Staged review: planner and synthesizer prompts, rank budgets, finding grounding.
 export * from './review-synth/index.js';
 
+// Staged review set: phases, production probe adapters and their file-scope sandbox, leaves.
+export * from './review-staged/index.js';
+
 // RFC-0015 Phase 1 — autonomous-pipeline orchestrator (AISDLC-169.1).
 export {
   buildOrchestratorStatus,

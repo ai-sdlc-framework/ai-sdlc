@@ -29,7 +29,7 @@ import { join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import type { BuildReviewPromptsResult, ReviewPrompt, ReviewerType, TaskSpec } from '../types.js';
 import { resolveTargetBranch } from './02-compute-branch.js';
-import { reduceForReviewScope, selectReviewerSet } from './reviewer-set.js';
+import { THREE_REVIEWER_SET, reduceForReviewScope, selectReviewerSet } from './reviewer-set.js';
 import { diffHasBinaryHunk } from './review-judgment-support.js';
 import { routeReviewers } from './review-routing.js';
 import { buildJudgmentContext } from '../judgment/context.js';
@@ -231,15 +231,26 @@ export async function buildReviewPrompts(
       `[reviewer-set] ${selection.reviewers.join(', ')} (classifier: ${reviewerSetRecord.set}, ` +
         `reason: ${reviewerSetRecord.reason}${paths.length > 0 ? `, trust-chain paths: ${paths.slice(0, 5).join(', ')}${paths.length > 5 ? ', ...' : ''}` : ''})\n`,
     );
-    // AISDLC-723: test-only / docs-adjacent diffs run the correctness reviewer alone, unless
-    // the repository requires three always (`reviewerSet: three`).
-    selected = reduceForReviewScope({
-      reviewers: selection.reviewers,
-      changedFiles,
-      diffUnavailable,
-      requireThree: selection.classifier.reason === 'config:require-three',
-      workDir: opts.workDir,
-    }).reviewers;
+    if (selection.mode === 'staged') {
+      // The staged set is a pipeline (risk map, plan, probes, synthesis) that `/ai-sdlc execute`
+      // drives through `cli-staged-review`; these prompts are only the reviewer fan-out. A caller
+      // that reaches here with the staged set in force would otherwise review with the standalone
+      // security reviewer alone, so it gets the default three-reviewer set instead.
+      process.stderr.write(
+        "[reviewer-set] reviewerSet 'staged' is driven by /ai-sdlc execute; this path reviews with the 'three' set\n",
+      );
+      selected = [...THREE_REVIEWER_SET];
+    } else {
+      // AISDLC-723: test-only / docs-adjacent diffs run the correctness reviewer alone, unless
+      // the repository requires three always (`reviewerSet: three`).
+      selected = reduceForReviewScope({
+        reviewers: selection.reviewers,
+        changedFiles,
+        diffUnavailable,
+        requireThree: selection.classifier.reason === 'config:require-three',
+        workDir: opts.workDir,
+      }).reviewers;
+    }
   }
   // review.routing runs after set selection and can only add reviewers.
   const reviewers = (

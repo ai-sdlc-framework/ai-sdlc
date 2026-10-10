@@ -35,6 +35,9 @@ import {
   leavesFilePathForPatchId,
   loadLeaves,
   loadLeavesForPatchId,
+  STAGED_LEAF_STAGES,
+  STAGED_REVIEWER_NAME,
+  type StagedLeafStage,
   type TranscriptLeaf,
   verifyInclusion,
 } from '../attestation/merkle.js';
@@ -639,6 +642,16 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
                 'RFC-0047 Phase 2 (AISDLC-594): AUDIT-ONLY identifier of the ci-only signing ' +
                 'key to bind into the leaf as anchorEvidence.signerKeyId. See --anchor-run-id.',
             })
+            .option('stage', {
+              type: 'string',
+              choices: [...STAGED_LEAF_STAGES],
+              describe:
+                'Staged review: the stage this transcript belongs to (plan | execute | synthesize). ' +
+                'Only valid with --reviewer staged-review. One leaf is emitted per planner, per probe ' +
+                'and per synthesizer transcript. plan and execute leaves carry zero findings and ' +
+                'verdictApproved=false whatever the verdict file says; only the synthesize leaf carries ' +
+                'the verdict. Omit for every other reviewer: the field is then absent from the leaf.',
+            })
             .option('iteration', {
               type: 'number',
               default: 1,
@@ -664,6 +677,17 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           const headSha = args['head-sha'] as string;
           const harness = args['harness'] as string;
           const model = args['model'] as string;
+
+          // Staged review: --stage labels one stage's leaf and only exists for the
+          // staged set, so a stage on any other reviewer is a caller bug.
+          const stage = args['stage'] as StagedLeafStage | undefined;
+          if (stage !== undefined && reviewerName !== STAGED_REVIEWER_NAME) {
+            process.stderr.write(
+              `[cli-attestation] emit-leaf: --stage is only valid with --reviewer ${STAGED_REVIEWER_NAME} ` +
+                `(got --reviewer ${reviewerName})\n`,
+            );
+            process.exit(1);
+          }
 
           // AISDLC-391 Finding 1: validate --head-sha is a well-formed 40-hex-char
           // git commit SHA. RFC-0042's nonce-binding invariant assumes a real SHA;
@@ -798,11 +822,18 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
 
           // Extract verdictApproved (supports both `approved` and `verdictApproved` keys for
           // compatibility with the slash-command-body verdicts format which uses `approved`).
-          const verdictApproved = Boolean(verdict.verdictApproved ?? verdict.approved ?? false);
+          // Staged review: only the synthesize leaf carries a verdict. A plan or
+          // execute leaf is evidence that a stage ran, so it carries zero findings
+          // and verdictApproved=false by construction, whatever the verdict file holds.
+          const carriesVerdict = stage === undefined || stage === 'synthesize';
+          const verdictApproved = carriesVerdict
+            ? Boolean(verdict.verdictApproved ?? verdict.approved ?? false)
+            : false;
 
           // AISDLC-616: normalize itemized findings for the reviews ledger,
           // then derive the legacy counts object (Merkle leaf shape) from
           // whichever verdict shape was given.
+          if (!carriesVerdict) verdict.findings = [];
           const normalizedFindings = normalizeFindings(verdict.findings);
           const findings = Array.isArray(verdict.findings)
             ? {
@@ -964,6 +995,8 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             harnessTranscriptHash: harnessResult.harnessTranscriptHash,
             independenceTier,
             anchorEvidence,
+            // Never written as null or empty: spread only when a stage was given.
+            ...(stage ? { stage } : {}),
           };
 
           // Append atomically via write-to-tmp + renameSync to the per-patch-id file.
@@ -983,7 +1016,10 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           // doesn't map to a canonical role (`normalizeReviewerRole`
           // returns null) is logged and skipped rather than silently
           // mis-tagging a record with a guessed role.
-          const role = normalizeReviewerRole(reviewerName);
+          // Staged review: the ledger records one `staged` row per review, taken
+          // from the synthesize leaf; plan and execute leaves are evidence of
+          // execution and add no row, so per-role counts are unchanged.
+          const role = carriesVerdict ? normalizeReviewerRole(reviewerName) : null;
           if (role) {
             const iteration = (args['iteration'] as number | undefined) ?? 1;
             const prNumberArg = args['pr-number'] as number | undefined;
@@ -1001,7 +1037,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
               },
               repoRoot,
             );
-          } else {
+          } else if (carriesVerdict) {
             process.stderr.write(
               `[cli-attestation] emit-leaf: reviewer '${reviewerName}' does not map to a ` +
                 `canonical reviews-ledger role (code/test/security) — skipping ledger append\n`,

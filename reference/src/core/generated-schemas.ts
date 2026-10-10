@@ -736,6 +736,12 @@ export const attestationEnvelopeV6Schema = {
             description:
               'RFC-0046 Phase 1 (AISDLC-588) independence tier for this leaf. Absent on legacy leaves — verifier falls back to verdictClass via dual-read.',
           },
+          stage: {
+            type: 'string',
+            enum: ['plan', 'execute', 'synthesize'],
+            description:
+              'Staged review stage that produced this leaf. Absent on every other leaf; never null or empty.',
+          },
           anchorEvidence: {
             type: 'object',
             description:

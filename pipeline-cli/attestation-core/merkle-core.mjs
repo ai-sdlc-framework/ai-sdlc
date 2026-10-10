@@ -118,6 +118,13 @@ export function hashLeaf(leaf) {
           signerKeyId: leaf.anchorEvidence.signerKeyId,
         }
       : undefined,
+    // Staged review: trailing field naming the stage that produced the leaf
+    // ('plan' | 'execute' | 'synthesize'). `undefined` drops out of
+    // JSON.stringify, so a leaf without a stage hashes identically to a leaf
+    // signed before the field existed. MUST be `undefined` when unset, never
+    // `null` or an empty string, which would change the hash (the same
+    // additive-compat rule as `independenceTier` and `anchorEvidence`).
+    stage: leaf.stage,
   };
   return hashLeafData(JSON.stringify(ordered));
 }

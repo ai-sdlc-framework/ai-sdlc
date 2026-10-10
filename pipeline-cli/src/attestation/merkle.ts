@@ -156,7 +156,24 @@ export interface TranscriptLeaf {
     /** Identifier of the `ci-only` signing key used to sign the Merkle root. */
     signerKeyId: string;
   };
+  /**
+   * Staged review: the stage whose transcript this leaf covers. One leaf is
+   * written per planner, per probe and per synthesizer transcript. Executor
+   * (`execute`) and planner (`plan`) leaves carry zero findings and
+   * `verdictApproved: false` by construction; only the `synthesize` leaf
+   * carries the verdict. Optional and omitted when unset: never `null` and never
+   * an empty string, because either would change the leaf hash (see
+   * `merkle-core.mjs`). Leaves without it verify unchanged.
+   */
+  stage?: StagedLeafStage;
 }
+
+/** The stages of the staged review that run a model and so produce a leaf. */
+export const STAGED_LEAF_STAGES = ['plan', 'execute', 'synthesize'] as const;
+export type StagedLeafStage = (typeof STAGED_LEAF_STAGES)[number];
+
+/** `reviewerName` of every leaf the staged set produces, and the name of its verdict. */
+export const STAGED_REVIEWER_NAME = 'staged-review';
 
 // ── Merkle result shapes ──────────────────────────────────────────────────────
 

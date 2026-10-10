@@ -27,6 +27,8 @@ export interface MerkleCoreLeaf {
   signedAt: string;
   verdictClass?: 'independent' | 'self-authored';
   harnessTranscriptHash?: string | null;
+  /** Staged review stage that produced the leaf. Absent for every other leaf. */
+  stage?: 'plan' | 'execute' | 'synthesize';
 }
 
 export interface MerkleCoreResult {

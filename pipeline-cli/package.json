@@ -54,6 +54,7 @@
     "cli-hierarchy": "bin/cli-hierarchy.mjs",
     "cli-attestation": "bin/cli-attestation.mjs",
     "cli-reviews": "bin/cli-reviews.mjs",
+    "cli-staged-review": "bin/cli-staged-review.mjs",
     "cli-compliance-audit": "bin/cli-compliance-audit.mjs",
     "cli-import-spec": "bin/cli-import-spec.mjs",
     "cli-rfc": "bin/cli-rfc.mjs",

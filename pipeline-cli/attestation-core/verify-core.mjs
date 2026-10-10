@@ -1034,6 +1034,9 @@ export function verifyV6Envelope({
     return { status: 'invalid', reason: 'v6: schemaVersion must be "v6"' };
   }
 
+  /** Stages of the staged review that run a model and so produce a leaf. */
+  const V6_LEAF_STAGES = ['plan', 'execute', 'synthesize'];
+
   const HEX64 = /^[0-9a-f]{64}$/i;
   const HEX40 = /^[0-9a-f]{40}$/i;
 
@@ -1339,6 +1342,30 @@ export function verifyV6Envelope({
       return {
         status: 'invalid',
         reason: `v6: leaf[${logicalLeafIndex}] (${leafSummary.reviewerName}) independenceTier mismatch — envelope claims '${declaredIndependenceTier}' but on-disk leaf resolves to '${onDiskIndependenceTier}'`,
+      };
+    }
+
+    // ── 7d. Verify the staged-review `stage` matches the on-disk leaf ─────
+    // `stage` is optional. When present it must be one of the known stages
+    // (a null or empty value is never valid), and the envelope's copy must
+    // equal the value baked into the on-disk leaf's Merkle-proved hash, the
+    // same tamper check as 7b and 7c. Leaves without a stage skip all of this
+    // and verify exactly as before.
+    for (const [where, value] of [
+      [`transcriptLeaves[${i}]`, leafSummary.stage],
+      [`on-disk leaf[${logicalLeafIndex}]`, onDiskLeaf.stage],
+    ]) {
+      if (value !== undefined && !V6_LEAF_STAGES.includes(value)) {
+        return {
+          status: 'invalid',
+          reason: `v6: ${where}.stage must be 'plan', 'execute' or 'synthesize' when present (got: ${JSON.stringify(value)})`,
+        };
+      }
+    }
+    if (leafSummary.stage !== onDiskLeaf.stage) {
+      return {
+        status: 'invalid',
+        reason: `v6: leaf[${logicalLeafIndex}] (${leafSummary.reviewerName}) stage mismatch — envelope claims ${JSON.stringify(leafSummary.stage ?? null)} but on-disk leaf is ${JSON.stringify(onDiskLeaf.stage ?? null)}`,
       };
     }
 

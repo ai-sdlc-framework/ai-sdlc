@@ -29,6 +29,17 @@
  * opt-in path so the merged reviewer can be A/B'd against the AISDLC-616
  * findings ledger before any permanent default change.
  *
+ * ## The staged set
+ *
+ * `staged` is a third mode, selected exactly as the merged set is (env var or
+ * the base-ref config, never the working tree). It is accepted only for
+ * `sourceKind` `backlog`: anything else falls back to `three` with a logged
+ * reason, because the staged review runs the repository's own scripts and reads
+ * untrusted diffs through cheaper models, which is limited to trusted work. The
+ * staged pipeline itself (risk map, plan, probes, synthesis) is driven by
+ * `cli-staged-review`; this module only decides whether it is the set in force
+ * and which standalone reviewers run beside it.
+ *
  * ## Trust boundary — config is read from `origin/main`, NOT the PR worktree
  * (security review fix, round 2)
  *
@@ -83,7 +94,7 @@ import {
   writeSelectionRecord,
 } from './review-judgment-support.js';
 
-export type ReviewerSetMode = 'three' | 'code-test-merged';
+export type ReviewerSetMode = 'three' | 'code-test-merged' | 'staged';
 
 /** The default three-reviewer set — UNCHANGED by AISDLC-617. */
 export const THREE_REVIEWER_SET: readonly ReviewerType[] = [
@@ -135,7 +146,24 @@ export function classifyReviewerSet(input: {
   };
 }
 
+/**
+ * Reviewers that run beside the staged pipeline. The staged set carries all three
+ * remits, and the standalone security reviewer keeps running next to it so the two
+ * can be compared per change. It is never dropped: security is always present.
+ */
+export const STAGED_REVIEWER_SET: readonly ReviewerType[] = ['security-reviewer'] as const;
+
+/** Source kinds the staged set accepts. Everything else falls back to `three`. */
+export const STAGED_SET_SOURCE_KINDS: readonly string[] = ['backlog'] as const;
+
 export interface ResolveReviewerSetOpts {
+  /**
+   * Kind of the work item. `staged` is honoured only for `backlog`; an absent or
+   * other value falls back to `three` and the reason is logged.
+   */
+  sourceKind?: string;
+  /** Receives the reason when a requested `staged` set falls back to `three`. Defaults to stderr. */
+  log?: (message: string) => void;
   /** Project root (git repo / worktree root). Defaults to `process.cwd()`. */
   workDir?: string;
   /** Override env for tests. Defaults to `process.env`. */
@@ -178,12 +206,53 @@ export function readReviewConfigFromBaseRef(workDir: string, baseRef: string): s
   }
 }
 
+const MODE_PATTERN =
+  /^\s*reviewerSet:\s*['"]?(three|code-test-merged|staged)['"]?\s*(#.*)?$/im;
+
+function isMode(value: string | undefined): value is ReviewerSetMode {
+  return value === 'three' || value === 'code-test-merged' || value === 'staged';
+}
+
+/** The mode env or base-branch config names, before the staged eligibility rule. */
+function configuredMode(opts: ResolveReviewerSetOpts): ReviewerSetMode | null {
+  const env = opts.env ?? process.env;
+  const envValue = env.AI_SDLC_REVIEWER_SET;
+  if (isMode(envValue)) return envValue;
+  const raw = (opts.readBaseConfig ?? readReviewConfigFromBaseRef)(
+    opts.workDir ?? process.cwd(),
+    opts.baseRef ?? 'origin/main',
+  );
+  return raw ? parseReviewerSetModeYaml(raw) : null;
+}
+
+/**
+ * Apply the v1 eligibility rule for `staged`: only `backlog` work may use it. A
+ * request from any other source kind (or none) becomes `three`, with the reason
+ * logged so an operator can see why the configured set was not used.
+ */
+function applyStagedEligibility(
+  mode: ReviewerSetMode | null,
+  opts: ResolveReviewerSetOpts,
+): ReviewerSetMode | null {
+  if (mode !== 'staged') return mode;
+  if (opts.sourceKind !== undefined && STAGED_SET_SOURCE_KINDS.includes(opts.sourceKind)) {
+    return mode;
+  }
+  const log = opts.log ?? ((m: string) => process.stderr.write(`${m}\n`));
+  log(
+    `[reviewer-set] reviewerSet 'staged' is only available for sourceKind ` +
+      `${STAGED_SET_SOURCE_KINDS.join(', ')} (got ${opts.sourceKind ?? 'unspecified'}); ` +
+      `falling back to 'three'`,
+  );
+  return 'three';
+}
+
 /**
  * Resolve the effective `ReviewerSetMode`. Precedence (first match wins):
  *
- *   1. `AI_SDLC_REVIEWER_SET` env var (`'three'` | `'code-test-merged'`) —
- *      operator/CI-controlled, makes the flag A/B-able per-invocation
- *      without touching config files.
+ *   1. `AI_SDLC_REVIEWER_SET` env var (`'three'` | `'code-test-merged'` |
+ *      `'staged'`) — operator/CI-controlled, makes the flag A/B-able
+ *      per-invocation without touching config files.
  *   2. `.ai-sdlc/review-config.yaml`'s `reviewerSet:` field **as committed
  *      on `baseRef` (default `origin/main`)** — NEVER the PR worktree's own
  *      working-tree copy (see the module-level "Trust boundary" doc). A PR
@@ -191,23 +260,11 @@ export function readReviewConfigFromBaseRef(workDir: string, baseRef: string): s
  *      editing this file in their own branch; the change must land on main
  *      first (through the existing, unweakened review) to take effect.
  *   3. Default: `'three'`.
+ *
+ * `staged` is then limited to `backlog` work (see {@link STAGED_SET_SOURCE_KINDS}).
  */
 export function resolveReviewerSetMode(opts: ResolveReviewerSetOpts = {}): ReviewerSetMode {
-  const env = opts.env ?? process.env;
-  const envValue = env.AI_SDLC_REVIEWER_SET;
-  if (envValue === 'code-test-merged' || envValue === 'three') return envValue;
-
-  const workDir = opts.workDir ?? process.cwd();
-  const baseRef = opts.baseRef ?? 'origin/main';
-  const readBaseConfig = opts.readBaseConfig ?? readReviewConfigFromBaseRef;
-
-  const raw = readBaseConfig(workDir, baseRef);
-  if (raw) {
-    const mode = parseReviewerSetModeYaml(raw);
-    if (mode) return mode;
-  }
-
-  return 'three';
+  return applyStagedEligibility(configuredMode(opts), opts) ?? 'three';
 }
 
 /**
@@ -216,7 +273,7 @@ export function resolveReviewerSetMode(opts: ResolveReviewerSetOpts = {}): Revie
  * Returns `null` when no valid field is found (caller falls back to default).
  */
 export function parseReviewerSetModeYaml(yaml: string): ReviewerSetMode | null {
-  const match = yaml.match(/^\s*reviewerSet:\s*['"]?(three|code-test-merged)['"]?\s*(#.*)?$/im);
+  const match = yaml.match(MODE_PATTERN);
   if (!match) return null;
   return match[1].toLowerCase() as ReviewerSetMode;
 }
@@ -262,6 +319,7 @@ export function deriveReviewerSetFromGit(opts: {
 /** Resolve the reviewer set mode straight to the concrete `ReviewerType[]`. */
 export function resolveReviewerSet(opts: ResolveReviewerSetOpts = {}): ReviewerType[] {
   const mode = resolveReviewerSetMode(opts);
+  if (mode === 'staged') return [...STAGED_REVIEWER_SET];
   return mode === 'code-test-merged' ? [...CODE_TEST_MERGED_REVIEWER_SET] : [...THREE_REVIEWER_SET];
 }
 
@@ -310,14 +368,7 @@ export interface SelectReviewerSetOpts extends ResolveReviewerSetOpts {
  * neither names one. Mirrors the resolver's precedence and sources.
  */
 export function explicitReviewerSetMode(opts: ResolveReviewerSetOpts = {}): ReviewerSetMode | null {
-  const env = opts.env ?? process.env;
-  const envValue = env.AI_SDLC_REVIEWER_SET;
-  if (envValue === 'code-test-merged' || envValue === 'three') return envValue;
-  const raw = (opts.readBaseConfig ?? readReviewConfigFromBaseRef)(
-    opts.workDir ?? process.cwd(),
-    opts.baseRef ?? 'origin/main',
-  );
-  return raw ? parseReviewerSetModeYaml(raw) : null;
+  return applyStagedEligibility(configuredMode(opts), opts);
 }
 
 /** Enforce the floors on any set: security always present, never fewer than the merged set. */
@@ -328,9 +379,13 @@ export function applyReviewerSetFloors(set: readonly ReviewerType[]): ReviewerTy
 }
 
 const setOf = (mode: ReviewerSetMode): ReviewerType[] =>
-  applyReviewerSetFloors(
-    mode === 'code-test-merged' ? CODE_TEST_MERGED_REVIEWER_SET : THREE_REVIEWER_SET,
-  );
+  // The staged set is one verdict from the staged pipeline plus the standalone security
+  // reviewer beside it; the two-reviewer floor does not apply to it.
+  mode === 'staged'
+    ? [...STAGED_REVIEWER_SET]
+    : applyReviewerSetFloors(
+        mode === 'code-test-merged' ? CODE_TEST_MERGED_REVIEWER_SET : THREE_REVIEWER_SET,
+      );
 
 /**
  * Choose the reviewer set for one PR.
@@ -345,14 +400,28 @@ const setOf = (mode: ReviewerSetMode): ReviewerType[] =>
 export async function selectReviewerSet(
   opts: SelectReviewerSetOpts,
 ): Promise<ReviewerSetSelection> {
+  // Both resolutions below read the same configuration; report a staged fallback once.
+  const reported = new Set<string>();
+  const sink = opts.log ?? ((m: string) => process.stderr.write(`${m}\n`));
+  opts = {
+    ...opts,
+    log: (m: string) => {
+      if (reported.has(m)) return;
+      reported.add(m);
+      sink(m);
+    },
+  };
   // AISDLC-722: the default set is derived from the diff. Only an explicit `three`
   // (env or base-branch config) requires three always; the legacy `code-test-merged`
-  // value and "nothing configured" both mean "diff-derived".
+  // value and "nothing configured" both mean "diff-derived". An eligible explicit
+  // `staged` selects the staged set (AISDLC-676).
+  const explicit = explicitReviewerSetMode(opts);
   const classifier = classifyReviewerSet({
     changedPaths: opts.diffUnavailable === true ? null : opts.changedFiles,
-    requireThree: explicitReviewerSetMode(opts) === 'three',
+    requireThree: explicit === 'three',
   });
-  const mode: ReviewerSetMode = classifier.set === 'two' ? 'code-test-merged' : 'three';
+  const mode: ReviewerSetMode =
+    explicit === 'staged' ? 'staged' : classifier.set === 'two' ? 'code-test-merged' : 'three';
   const base = (source: ReviewerSetSource, decidedBy: string): ReviewerSetSelection => ({
     reviewers: setOf(mode),
     mode,
