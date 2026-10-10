@@ -25,9 +25,12 @@
 
 import { randomUUID } from 'node:crypto';
 
+import { reportCapabilityOutcome } from '@ai-sdlc/reference';
+
 import { appendCorpusEntry } from './corpus.js';
 import { loadSubstrateConfig } from './config.js';
-import { classifyViaJudgment } from './judgment-bridge.js';
+import { classifyViaJudgment, substrateArtifactsDir } from './judgment-bridge.js';
+import { SUBSTRATE_CAPABILITY_IDS } from './judgment-definitions.js';
 import { buildPrompt, isAllowedClassification } from './task-prompts.js';
 import type {
   CalibrationCorpusEntry,
@@ -84,9 +87,10 @@ export async function classify(
 
   // Judgment bridge: with no invoker, an `act` from the matching judgment is the
   // classification. Abstain and escalate leave the existing path below untouched.
+  const trace = { reported: false };
   const judged = opts.invoker
     ? undefined
-    : await classifyViaJudgment(input, taskType, opts, repoRoot);
+    : await classifyViaJudgment(input, taskType, opts, repoRoot, trace);
 
   if (judged) {
     // Thresholds come from the judgment config; the substrate default is not reused.
@@ -146,6 +150,28 @@ export async function classify(
       confidence >= effectiveThreshold &&
       !parseError &&
       !invokerError);
+
+  // ── Capability outcome ──────────────────────────────────────────────────
+  // One report per call. When the judgment layer evaluated, it already reported.
+  if (!trace.reported) {
+    const degradedReason = !metBehindThreshold
+      ? invokerError !== null
+        ? opts.invoker
+          ? 'invoker-error'
+          : 'no-invoker'
+        : parseError !== null
+          ? 'invalid-response'
+          : 'below-threshold'
+      : undefined;
+    reportCapabilityOutcome(
+      SUBSTRATE_CAPABILITY_IDS[taskType],
+      degradedReason ? 'degraded' : 'live',
+      {
+        artifactsDir: substrateArtifactsDir(opts, repoRoot),
+        ...(degradedReason ? { reason: degradedReason } : {}),
+      },
+    );
+  }
 
   // ── Corpus capture ──────────────────────────────────────────────────────
   let corpusEntryId: string | null = null;

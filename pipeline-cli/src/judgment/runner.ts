@@ -9,15 +9,10 @@
 
 import {
   evaluateJudgment,
-  reportCapabilityOutcome,
   type JudgmentDefinition,
   type JudgmentOutcome,
 } from '@ai-sdlc/reference';
-import {
-  buildJudgmentContext,
-  resolveJudgmentArtifactsDir,
-  type BuildJudgmentContextOptions,
-} from './context.js';
+import { buildJudgmentContext, type BuildJudgmentContextOptions } from './context.js';
 
 export interface JudgmentRunOptions {
   /** What the existing heuristic decided; recorded so agreement can be computed. */
@@ -44,17 +39,11 @@ export function createJudgmentRunner(
 ): JudgmentRunner | undefined {
   const ctx = buildJudgmentContext(opts);
   if (!ctx.config.provider) return undefined;
-  const artifactsDir = resolveJudgmentArtifactsDir(opts);
   return (definition, input, run = {}) =>
     evaluateJudgment(definition, input, {
       ...ctx,
       ...(run.incumbent !== undefined ? { incumbent: run.incumbent } : {}),
       ...(run.sourceKind ? { sourceKind: run.sourceKind } : {}),
       ...(run.taskId ? { taskId: run.taskId } : {}),
-      onCapabilityOutcome: ({ capabilityId, outcome, reason }) =>
-        reportCapabilityOutcome(capabilityId, outcome, {
-          artifactsDir,
-          ...(reason ? { reason } : {}),
-        }),
     });
 }

@@ -266,15 +266,14 @@ export function buildEstimateCli(): Argv {
         try {
           const workDir = String(argv.workdir);
           const taskId = String(argv['task-id']);
-          const judgedClass = await judgeClassForTask(
-            { taskId, workDir },
-            createJudgmentRunner({ workDir }),
-          );
+          const runner = createJudgmentRunner({ workDir });
+          const judgedClass = await judgeClassForTask({ taskId, workDir }, runner);
           const result = runStageA({
             taskId,
             workDir,
             ...(argv.loc !== undefined ? { loc: Number(argv.loc) } : {}),
             ...(judgedClass ? { judgedClass } : {}),
+            ...(runner ? { judgmentConsulted: true } : {}),
           });
           // RFC-0016 Phase 2 capture (AC #1) — append to log.jsonl
           // unless explicitly opted out with --no-capture. Best-effort:
@@ -448,14 +447,13 @@ export function buildEstimateCli(): Argv {
           const artifactsDir = resolveArtifactsDir(workDir);
 
           // Run Stage A to get signals + class.
-          const judgedClass = await judgeClassForTask(
-            { taskId, workDir },
-            createJudgmentRunner({ workDir }),
-          );
+          const runner = createJudgmentRunner({ workDir });
+          const judgedClass = await judgeClassForTask({ taskId, workDir }, runner);
           const stageAResult = runStageA({
             taskId,
             workDir,
             ...(judgedClass ? { judgedClass } : {}),
+            ...(runner ? { judgmentConsulted: true } : {}),
           });
 
           // Look up calibration state for the task class.

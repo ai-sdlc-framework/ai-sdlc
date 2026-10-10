@@ -21,12 +21,18 @@
  *     (act + spot-check). Else 'high'.
  */
 
-import { evaluateJudgment, type EvaluateJudgmentContext } from '@ai-sdlc/reference';
+import {
+  evaluateJudgment,
+  reportCapabilityOutcome,
+  type EvaluateJudgmentContext,
+} from '@ai-sdlc/reference';
+import { resolveJudgmentArtifactsDir } from '../judgment/context.js';
 import { evaluateIssue, type EvaluateOpts } from './evaluate.js';
 import {
   applyJudgedGates,
   buildDorJudgmentInput,
   ALL_GATES_PASS,
+  DOR_STAGE_B_JUDGMENT_ID,
   dorStageBJudgment,
   dorStageBPassJudgment,
   judgedGatesOf,
@@ -65,6 +71,14 @@ export interface EvaluateE2EOpts extends EvaluateOpts {
    * the result is identical to running without it.
    */
   judgment?: { context: EvaluateJudgmentContext };
+  /** Where the capability state is recorded. Defaults like the rest of pipeline-cli. */
+  artifactsDir?: string;
+}
+
+type CapabilityReport = 'live' | 'shadow' | 'degraded';
+interface CollectedReport {
+  outcome: CapabilityReport;
+  reason?: string;
 }
 
 /** Where the Stage B verdicts of an evaluation came from (recorded in the calibration log). */
@@ -105,6 +119,65 @@ export async function evaluateIssueE2E(
 export async function evaluateIssueE2EDetailed(
   input: IssueInput,
   opts: EvaluateE2EOpts = {},
+): Promise<EvaluateE2EDetailed> {
+  // Both Stage B judgments name the `dor.stage-b` capability. Collect what they report and
+  // record ONE outcome for the invocation, so a pass judgment and a tighten judgment (or a
+  // judgment and the subagent path) never report twice.
+  const collected: CollectedReport[] = [];
+  const downstream = opts.judgment?.context.onCapabilityOutcome;
+  const collecting: EvaluateE2EOpts = opts.judgment
+    ? {
+        ...opts,
+        judgment: {
+          context: {
+            ...opts.judgment.context,
+            onCapabilityOutcome: ({ outcome, reason }) => {
+              collected.push({ outcome, ...(reason ? { reason } : {}) });
+            },
+          },
+        },
+      }
+    : opts;
+  const detailed = await evaluateIssueE2EInner(input, collecting);
+  const final = mergeStageBReports(collected, opts.stageB !== undefined);
+  try {
+    if (downstream) {
+      downstream({
+        capabilityId: DOR_STAGE_B_JUDGMENT_ID,
+        outcome: final.outcome,
+        ...(final.reason ? { reason: final.reason } : {}),
+      });
+    } else {
+      reportCapabilityOutcome(DOR_STAGE_B_JUDGMENT_ID, final.outcome, {
+        artifactsDir: opts.artifactsDir ?? resolveJudgmentArtifactsDir(),
+        ...(final.reason ? { reason: final.reason } : {}),
+      });
+    }
+  } catch {
+    // reporting never changes the verdict
+  }
+  return detailed;
+}
+
+/**
+ * One outcome for the invocation: a judgment's `live`/`shadow` wins, a supplied spawner
+ * makes Stage B live, otherwise the first degraded reason (or `no-spawner`) stands.
+ */
+function mergeStageBReports(
+  collected: CollectedReport[],
+  spawnerSupplied: boolean,
+): CollectedReport {
+  const live = collected.find((r) => r.outcome === 'live');
+  if (live) return { outcome: 'live' };
+  if (spawnerSupplied) return { outcome: 'live' };
+  const shadow = collected.find((r) => r.outcome === 'shadow');
+  if (shadow) return { outcome: 'shadow' };
+  return { outcome: 'degraded', reason: collected[0]?.reason ?? 'no-spawner' };
+}
+
+async function evaluateIssueE2EInner(
+  input: IssueInput,
+  opts: EvaluateE2EOpts,
 ): Promise<EvaluateE2EDetailed> {
   const stageA = await evaluateIssue(input, opts);
   const version = opts.e2eEvaluatorVersion ?? E2E_EVALUATOR_VERSION;

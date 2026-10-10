@@ -14,6 +14,7 @@ import {
   createJudgmentLogSink,
   loadJudgmentConfig,
   registerBuiltInJudgmentProvider,
+  reportCapabilityOutcome,
   type EvaluateJudgmentContext,
   type JudgmentSink,
   type LoadJudgmentConfigOpts,
@@ -45,11 +46,35 @@ export interface BuildOrchestratorJudgmentContextOptions {
   now?: () => Date;
 }
 
+/** Resolve the artifacts directory: explicit, then `$ARTIFACTS_DIR`, then `./artifacts`. */
+export function resolveOrchestratorArtifactsDir(
+  opts: { artifactsDir?: string; env?: Record<string, string | undefined> } = {},
+): string {
+  return (
+    opts.artifactsDir ?? (opts.env ?? process.env).ARTIFACTS_DIR ?? join(process.cwd(), 'artifacts')
+  );
+}
+
 /** Build the context `evaluateJudgment` needs. Never throws. */
 export function buildOrchestratorJudgmentContext(
   opts: BuildOrchestratorJudgmentContextOptions = {},
 ): EvaluateJudgmentContext {
+  const artifactsDir = resolveOrchestratorArtifactsDir(opts);
   const perCall = {
+    // Every evaluation of a definition that names a capability records how it ran.
+    onCapabilityOutcome: ({
+      capabilityId,
+      outcome,
+      reason,
+    }: {
+      capabilityId: string;
+      outcome: 'live' | 'shadow' | 'degraded';
+      reason?: string;
+    }): void =>
+      reportCapabilityOutcome(capabilityId, outcome, {
+        artifactsDir,
+        ...(reason ? { reason } : {}),
+      }),
     ...(opts.sourceKind ? { sourceKind: opts.sourceKind } : {}),
     ...(opts.taskId ? { taskId: opts.taskId } : {}),
     ...(opts.consumerLabel ? { consumerLabel: opts.consumerLabel } : {}),
@@ -79,10 +104,6 @@ export function buildOrchestratorJudgmentContext(
     // an unregistrable provider leaves the layer abstaining
   }
 
-  const artifactsDir =
-    opts.artifactsDir ??
-    (opts.env ?? process.env).ARTIFACTS_DIR ??
-    join(process.cwd(), 'artifacts');
   const sinks: JudgmentSink[] = [createJudgmentLogSink({ artifactsDir })];
   if (opts.costTracker) sinks.push(createJudgmentCostSink(opts.costTracker, opts.runId));
   if (opts.sinks) sinks.push(...opts.sinks);

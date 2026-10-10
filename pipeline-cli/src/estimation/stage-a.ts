@@ -13,6 +13,8 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { reportCapabilityOutcome } from '@ai-sdlc/reference';
+import { resolveJudgmentArtifactsDir } from '../judgment/context.js';
 import { findTaskFile, parseSimpleYaml, parseTaskFile } from '../steps/01-validate.js';
 import { buildDependencyGraph, blockers } from '../deps/dependency-graph.js';
 import { aggregate } from './aggregator.js';
@@ -61,6 +63,11 @@ export interface StageAOptions {
    * Used after a frontmatter class and before the regex. Absent by default.
    */
   judgedClass?: TaskClass;
+  /**
+   * True when the judgment layer was consulted for the class (it reports the capability
+   * itself, so the heuristic does not report a second time).
+   */
+  judgmentConsulted?: boolean;
 }
 
 /**
@@ -114,6 +121,14 @@ export function runStageA(opts: StageAOptions): StageAResult {
             cached.source === 'llm' ? 'default' : cached.source;
           return { taskClass: cached.taskClass, source };
         })();
+
+  // The regex (or the default) decided: record that the class capability ran degraded.
+  if ((cls.source === 'heuristic' || cls.source === 'default') && !opts.judgmentConsulted) {
+    reportCapabilityOutcome('estimation.class-assignment', 'degraded', {
+      artifactsDir: opts.artifactsDir ?? resolveJudgmentArtifactsDir(),
+      reason: 'regex',
+    });
+  }
 
   const references = task.references ?? [];
 

@@ -14,7 +14,12 @@
  * query per-dimension precision by phase.
  */
 
-import type { DesignIntentDocument, DesignSystemBinding } from '@ai-sdlc/reference';
+import {
+  reportCapabilityOutcome,
+  type DesignIntentDocument,
+  type DesignSystemBinding,
+} from '@ai-sdlc/reference';
+import { resolveOrchestratorArtifactsDir } from '../judgment-context.js';
 import type { StateStore } from '../state/store.js';
 import type { SaDimension, SaPhase as StateSaPhase } from '../state/types.js';
 import { compileDid, type CompiledDid } from './did-compiler.js';
@@ -51,7 +56,10 @@ export interface ScoreSoulAlignmentInput {
 
 export interface ScoreSoulAlignmentDeps {
   depparse: DepparseClient;
-  llm: LLMClient;
+  /** Layer 3 client. When absent Layer 3 is skipped and the capability reports degraded. */
+  llm?: LLMClient;
+  /** Where the capability state is recorded. Defaults like the rest of the orchestrator. */
+  artifactsDir?: string;
   stateStore?: StateStore;
   /** Pre-compiled DID (skip recompilation). */
   compiledDid?: CompiledDid;
@@ -105,13 +113,21 @@ export async function scoreSoulAlignment(
   // of what the LLM might say. Matches §B.7.1 STOP condition.
   let layer3: LLMScoringResult | undefined;
   if (!layer1.hardGated) {
-    layer3 = await runLayer3({
-      issueText: input.issueText,
-      did: input.did,
-      dsb: input.dsb,
-      preVerifiedSummary: layer1.preVerifiedSummary,
-      llm: deps.llm,
-    });
+    const artifactsDir = resolveOrchestratorArtifactsDir(
+      deps.artifactsDir ? { artifactsDir: deps.artifactsDir } : {},
+    );
+    if (deps.llm) {
+      layer3 = await runLayer3({
+        issueText: input.issueText,
+        did: input.did,
+        dsb: input.dsb,
+        preVerifiedSummary: layer1.preVerifiedSummary,
+        llm: deps.llm,
+      });
+      reportCapabilityOutcome('sa.layer3', 'live', { artifactsDir });
+    } else {
+      reportCapabilityOutcome('sa.layer3', 'degraded', { artifactsDir, reason: 'no-client' });
+    }
   }
 
   // ── DSB-derived computable inputs for SA-2 ────────────────────
