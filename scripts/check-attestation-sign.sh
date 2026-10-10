@@ -516,8 +516,15 @@ if [ "$RESIGN" != "1" ] && [ -n "$HEAD_PARENT_SHA" ]; then
       STALE_ABS="$WT_ROOT/$ENVELOPE_PATH"
       [ -n "$STALE_ABS" ] || { echo "[attestation-sign] refusing rm: STALE_ABS empty" >&2; continue; }
       if [ -f "$STALE_ABS" ]; then
-        rm -f "$STALE_ABS"
-        echo "[attestation-sign] removed stale envelope (rebase cycle): $ENVELOPE_PATH" >&2
+        # AISDLC-739: a committed envelope is restored from HEAD, never deleted
+        # from the working copy (that leaves a spurious tracked deletion).
+        if [ "$STALE_HEAD_NAMED" != "1" ] && git cat-file -e "HEAD:$ENVELOPE_PATH" 2>/dev/null; then
+          git checkout HEAD -- "$ENVELOPE_PATH" 2>/dev/null || true
+          echo "[attestation-sign] restored committed envelope (rebase cycle): $ENVELOPE_PATH" >&2
+        else
+          rm -f "$STALE_ABS"
+          echo "[attestation-sign] removed stale envelope (rebase cycle): $ENVELOPE_PATH" >&2
+        fi
       fi
     fi
   done

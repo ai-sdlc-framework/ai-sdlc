@@ -455,6 +455,10 @@ export interface BuildReviewPromptsResult {
    * spawn reviewers on such a result: they would review an empty or partial diff.
    */
   diffUnavailable?: boolean;
+  /** AISDLC-739: diff-binding nonce embedded in every prompt; pass to `emit-leaf --nonce`. */
+  nonce?: string;
+  /** Head SHA the nonce is bound to (empty when unreadable). */
+  headSha?: string;
 }
 
 // ── Step 8 — Aggregate verdicts ──────────────────────────────────────

@@ -8,6 +8,7 @@ import {
   parseBinaryNumstat,
   stubBinaryHunks,
 } from './07-build-review-prompts.js';
+import { nonceMarkerLiteral } from '../attestation/harness-transcript.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
 import { FakeRunner, fail, ok } from '../__test-helpers/fake-runner.js';
 import type { TaskSpec } from '../types.js';
@@ -75,6 +76,31 @@ describe('Step 7 — buildReviewPrompts', () => {
     ]);
     expect(r.changedFiles).toEqual(['a.ts', 'b.ts']);
     expect(r.diff).toContain('diff content');
+  });
+
+  it('AISDLC-739: embeds one head-bound diff-binding nonce marker in every prompt', async () => {
+    const head = 'a'.repeat(40);
+    const fake = new FakeRunner()
+      .on(/^git rev-parse HEAD$/, ok(`${head}\n`))
+      .on(
+        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+        ok('d\n'),
+      );
+    const r = await buildReviewPrompts({
+      taskId: 'AISDLC-1',
+      task,
+      branch: 'b',
+      worktreePath: tmp,
+      workDir: tmp,
+      runner: fake.toRunner(),
+      codexAvailable: false,
+    });
+    expect(r.headSha).toBe(head);
+    expect(r.nonce).toMatch(/^[0-9a-f]{64}$/);
+    // Same literal the harness marker scan and `emit-leaf --nonce` use.
+    const marker = nonceMarkerLiteral(r.nonce as string);
+    expect(r.prompts.length).toBeGreaterThan(0);
+    for (const p of r.prompts) expect(p.prompt).toContain(marker);
   });
 
   it('returns the resolved model per reviewer (security on opus, others on sonnet)', async () => {
