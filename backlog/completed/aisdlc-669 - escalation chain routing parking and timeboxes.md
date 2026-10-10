@@ -2,7 +2,7 @@
 id: AISDLC-669
 title: >-
   RFC-0051: cli-decisions escalate --route, task parking, tier-scoped answering, timeboxed auto-promotion
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
