@@ -174,7 +174,7 @@ When `check-orchestrator-state.sh` exits non-zero (parent dirty, reset refused),
 
 ```bash
 # check-orchestrator-state.sh exited 1 → parent is dirty
-node pipeline-cli/bin/cli-decisions.mjs add \
+node "$PIPELINE_CLI_BIN/cli-decisions.mjs" add \
   --summary "Parent dirty — operator-authorize reset or triage?" \
   --scope orchestrator \
   --option "authorize-reset:Operator stashes/commits parent changes, then re-runs tick" \
@@ -967,7 +967,8 @@ while [ "$ITER" -lt "$MAX_ITER" ]; do
   fi
 
   # 3. Emit the manifest for the top frontier entry (build via your standard
-  #    DispatchManifest builder; see RFC-0041 §4.4) into queue/, then jump
+  #    DispatchManifest builder; see RFC-0041 §4.4) into queue/ via
+  #    `cli-dispatch.mjs write-manifest`, then jump
   #    into the per-manifest claim+dispatch block below.
   #
   # The original single-shot block continues below — the loop wraps it.
