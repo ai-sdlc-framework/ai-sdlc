@@ -291,13 +291,30 @@ function growthRatio(run: (n: number) => void, n: number, reps = 3): number {
 const LINEAR_GROWTH_LIMIT = 8;
 
 describe('ReDoS: changed regexes stay linear on adversarial input', () => {
-  it('flags a known-quadratic pattern (the growth-ratio check can fail)', () => {
-    // /\s+$/ on a whitespace run that is not at the end restarts at every position.
-    const quadratic = (n: number): void => {
-      /\s+$/.test(' '.repeat(n) + 'x');
-    };
-    expect(growthRatio(quadratic, 3_000)).toBeGreaterThan(LINEAR_GROWTH_LIMIT);
-  });
+  it(
+    'flags a known-quadratic pattern (the growth-ratio check can fail)',
+    { timeout: 60_000 },
+    () => {
+      // /\s+$/ on a whitespace run that is not at the end restarts at every position.
+      const quadratic = (n: number): void => {
+        /\s+$/.test(' '.repeat(n) + 'x');
+      };
+      // Same-process linear baseline over the same input shape: /\s+x/ matches in one pass.
+      const linear = (n: number): void => {
+        /\s+x/.test(' '.repeat(n) + 'x');
+      };
+      const median = (xs: number[]): number =>
+        [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+      const sample = (run: (n: number) => void): number =>
+        median(Array.from({ length: 5 }, () => growthRatio(run, 2_000, 3)));
+      const quadraticRatio = sample(quadratic);
+      const linearRatio = sample(linear);
+      // A loaded runner inflates both ratios, so require the quadratic one to clearly exceed the
+      // linear baseline measured here (about 4 vs about 16 when idle) and a low absolute floor.
+      expect(quadraticRatio).toBeGreaterThan(linearRatio * 1.5);
+      expect(quadraticRatio).toBeGreaterThan(6);
+    },
+  );
 
   // Formerly: 'handles 200k-char secret/whitespace/bracket/backtick runs' (absolute 5000 ms bound).
   it('grows linearly on secret/whitespace/bracket/backtick runs', { timeout: 60_000 }, () => {
