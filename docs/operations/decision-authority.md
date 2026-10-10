@@ -58,6 +58,8 @@ Guardrails and hooks are never bypassed, whatever the class. This protocol grant
 
 Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command. The release-please rolling PR lands only through the sanctioned release path (`--source-kind release`, AISDLC-702) on an explicit operator instruction.
 
+Governance-sensitive paths (plugin hooks, agents, commands, `.ai-sdlc/**`, `.github/**`, CLAUDE.md and the like) no longer force a human merge for trusted PRs (DEC-0072, AISDLC-789): `cli-merge-if-eligible` merges or arms a trusted same-repo PR that changes them once it is green, CLEAN and attested, and lists the sensitive paths in the eligibility reason and the merge audit entry. Untrusted PRs (fork head, author outside `mergeAuthors`) are still refused by trust evaluation, and an incomplete changed-file list (fetch failure or the 300-file cap) still fails closed.
+
 ### Lease-push refusal: `not-task-worktree`
 
 The default lease policy allows a lease push of a dispatched task's own branch from its task worktree. From a session rooted at the main checkout the cwd worktree must be bound to ONE task: either `AI_SDLC_ACTIVE_TASK_ID` equals its `.active-task`, or the session is a hierarchy executor (`AI_SDLC_HIERARCHY_ROLE=executor`, set by `cli-hierarchy up`) holding exactly one inflight claim on the dispatch board, for that task (AISDLC-756, DEC-0067). The refusal names both bindings and the next step: claim the task through the executor loop, or run the push from a session rooted in the worktree. This applies the "own branch" definition of DEC-0047; it does not widen what may be pushed.

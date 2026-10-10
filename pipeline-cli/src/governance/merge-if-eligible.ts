@@ -42,8 +42,9 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { lstatSync, realpathSync } from 'node:fs';
-import { basename, dirname, resolve } from 'node:path';
+import { appendFileSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
+import { now } from '../clock.js';
 import type { Runner } from '../runtime/exec.js';
 
 // ── Governance policy types (mirrors ai-sdlc-plugin/hooks/lib/governance-resolver.js) ──
@@ -532,7 +533,8 @@ function normalizePath(rawPath: string): string {
 }
 
 /**
- * Paths whose change needs a human merge: the governance policy and its
+ * Paths audited when a trusted PR changes them (DEC-0072: recorded in the merge
+ * audit entry and the eligibility reason, no longer a refusal): the governance policy and its
  * enforcement (hooks, the merge gate itself, the policy schema), the plugin's
  * agents/commands/scripts, CI, git hooks and ownership files, and agent-harness
  * configuration. Under `.ai-sdlc/` only the generated attestation evidence files
@@ -1288,6 +1290,8 @@ export interface RunMergeIfEligibleOptions {
    * checks is the point of arming.
    */
   mode?: 'merge' | 'arm';
+  /** Audit sink for trusted PRs that change governance-sensitive paths (DEC-0072). */
+  auditWriter?: BacklogAuditWriter;
 }
 
 export interface RunMergeIfEligibleResult {
@@ -1298,6 +1302,47 @@ export interface RunMergeIfEligibleResult {
   /** True when auto-merge was armed (`mode: 'arm'`). */
   armed?: boolean;
   dryRun: boolean;
+  /** DEC-0072: governance-sensitive paths a trusted PR changed (audited, not refused). */
+  governanceSensitivePaths?: string[];
+}
+
+/** Audit entry for a trusted backlog PR that changes governance-sensitive paths (DEC-0072). */
+export interface BacklogMergeAuditRecord {
+  ts: string;
+  event: 'governance-path-merge';
+  sourceKind: SourceKind | undefined;
+  prNumber: number;
+  repo: string;
+  mode: 'merge' | 'arm';
+  headSha: string;
+  governanceSensitivePaths: string[];
+  outcome: 'merged' | 'armed' | 'refused' | 'dry-run';
+  reason: string;
+}
+
+export type BacklogAuditWriter = (record: BacklogMergeAuditRecord) => void;
+
+/**
+ * Default sink: append-only JSONL at
+ * `$ARTIFACTS_DIR/_governance/merge-audit-YYYY-MM-DD.jsonl` (same file the
+ * release path writes). Best-effort: a write failure never changes the outcome.
+ */
+export function defaultBacklogAuditWriter(artifactsDir?: string): BacklogAuditWriter {
+  return (record) => {
+    try {
+      const dir = join(
+        artifactsDir ?? process.env.ARTIFACTS_DIR ?? join(process.cwd(), 'artifacts'),
+        '_governance',
+      );
+      mkdirSync(dir, { recursive: true });
+      appendFileSync(
+        join(dir, `merge-audit-${record.ts.slice(0, 10)}.jsonl`),
+        JSON.stringify(record) + '\n',
+      );
+    } catch {
+      /* best-effort */
+    }
+  };
 }
 
 /** Build a refusal result (policy fails closed to strict defaults unless given). */
@@ -1434,7 +1479,7 @@ export async function runMergeIfEligible(
   });
   if (trustRefusal) return refuse(trustRefusal);
 
-  // Governance-sensitive changes need a human merge (merge AND arm modes).
+  // Governance-sensitive changes are audited, not refused (DEC-0072); the file list must still be complete.
   const baseSha = await mainSha();
   const changed = baseSha
     ? await fetchChangedFiles(baseSha, snapshot.headRefOid, opts.repoSlug, opts.runner, opts.cwd)
@@ -1449,12 +1494,32 @@ export async function runMergeIfEligible(
     return refuse('the PR has no changed files relative to main — nothing to merge');
   }
   const sensitive = governanceSensitiveChanges(changed);
-  if (sensitive.length > 0) {
-    return refuse(
-      `the PR changes governance-sensitive paths (${sensitive.slice(0, 5).join(', ')}` +
-        `${sensitive.length > 5 ? `, +${sensitive.length - 5} more` : ''}) — these require a human merge`,
-    );
-  }
+  const sensitiveNote =
+    sensitive.length > 0
+      ? ` — governance-sensitive paths changed (audited, DEC-0072): ${sensitive.join(', ')}`
+      : '';
+  const mode = opts.mode === 'arm' ? 'arm' : 'merge';
+  const audit = (outcome: BacklogMergeAuditRecord['outcome'], reason: string): void => {
+    if (sensitive.length === 0 || !opts.auditWriter) return;
+    try {
+      opts.auditWriter({
+        ts: now().toISOString(),
+        event: 'governance-path-merge',
+        sourceKind: opts.sourceKind,
+        prNumber: opts.prNumber,
+        repo: opts.repoSlug,
+        mode,
+        headSha: snapshot.headRefOid,
+        governanceSensitivePaths: sensitive,
+        outcome,
+        reason,
+      });
+    } catch {
+      /* best-effort */
+    }
+  };
+  const withPaths = <T extends RunMergeIfEligibleResult>(r: T): T =>
+    sensitive.length > 0 ? { ...r, governanceSensitivePaths: sensitive } : r;
 
   if (opts.mode === 'arm') {
     const armEligibility: MergeEligibilityResult = {
@@ -1462,16 +1527,17 @@ export async function runMergeIfEligible(
       reason:
         `policy allowMerge=onGreenClean, sourceKind=backlog, trust checks passed for head ` +
         `${snapshot.headRefOid} — eligible to arm auto-merge (GitHub merges only once its own ` +
-        'required checks pass)',
+        `required checks pass)${sensitiveNote}`,
     };
     if (opts.dryRun) {
-      return {
+      audit('dry-run', armEligibility.reason);
+      return withPaths({
         prNumber: opts.prNumber,
         policy,
         eligibility: armEligibility,
         merged: false,
         dryRun: true,
-      };
+      });
     }
     const reread = await fetchPrSnapshot(opts.prNumber, opts.repoSlug, opts.runner, opts.cwd);
     if (!reread) {
@@ -1483,6 +1549,7 @@ export async function runMergeIfEligible(
           'checks — refusing to arm; re-run for the new head',
       );
     }
+    audit('armed', armEligibility.reason);
     const armResult = await armPr(
       opts.prNumber,
       opts.repoSlug,
@@ -1497,14 +1564,14 @@ export async function runMergeIfEligible(
           (armResult.error || '(no error text)'),
       );
     }
-    return {
+    return withPaths({
       prNumber: opts.prNumber,
       policy,
       eligibility: armEligibility,
       merged: false,
       armed: true,
       dryRun: false,
-    };
+    });
   }
 
   // Which contexts are REQUIRED comes from `gh pr checks --required` (names
@@ -1540,7 +1607,7 @@ export async function runMergeIfEligible(
     }
   }
 
-  const eligibility = evaluateMergeEligibility({
+  const baseEligibility = evaluateMergeEligibility({
     policy,
     sourceKind: opts.sourceKind,
     mergeStateStatus: snapshot.mergeStateStatus,
@@ -1548,15 +1615,19 @@ export async function runMergeIfEligible(
     checksSource,
     checksFetchFailed,
   });
+  const eligibility: MergeEligibilityResult = baseEligibility.eligible
+    ? { ...baseEligibility, reason: `${baseEligibility.reason}${sensitiveNote}` }
+    : baseEligibility;
 
   if (!eligibility.eligible || opts.dryRun) {
-    return {
+    if (eligibility.eligible) audit('dry-run', eligibility.reason);
+    return withPaths({
       prNumber: opts.prNumber,
       policy,
       eligibility,
       merged: false,
       dryRun: Boolean(opts.dryRun),
-    };
+    });
   }
 
   // Head-pin: the checks above describe `snapshot.headRefOid`. Re-read the PR;
@@ -1591,5 +1662,6 @@ export async function runMergeIfEligible(
     );
   }
 
-  return { prNumber: opts.prNumber, policy, eligibility, merged: true, dryRun: false };
+  audit('merged', eligibility.reason);
+  return withPaths({ prNumber: opts.prNumber, policy, eligibility, merged: true, dryRun: false });
 }

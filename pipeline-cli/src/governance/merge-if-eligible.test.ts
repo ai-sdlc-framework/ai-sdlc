@@ -37,6 +37,9 @@ import {
   type GovernancePolicy,
   type PrSnapshot,
   type RunMergeIfEligibleOptions,
+  defaultBacklogAuditWriter,
+  type BacklogAuditWriter,
+  type BacklogMergeAuditRecord,
 } from './merge-if-eligible.js';
 import { type ExecResult, type Runner } from '../runtime/exec.js';
 
@@ -1720,7 +1723,7 @@ describe('one consistent main commit for every read', () => {
   });
 });
 
-describe('governance-sensitive changes require a human merge (merge and arm)', () => {
+describe('governance-sensitive changes are audited, not refused, for trusted PRs (DEC-0072; merge and arm)', () => {
   it.each([
     '.ai-sdlc/agent-role.yaml',
     '.ai-sdlc/trusted-reviewers.yaml',
@@ -1847,9 +1850,13 @@ describe('governance-sensitive changes require a human merge (merge and arm)', (
     ).toEqual(['CLAUDE.md']);
   });
 
-  async function gate(files: Record<string, Partial<ExecResult>>, mode: 'merge' | 'arm') {
+  async function gate(
+    files: Record<string, Partial<ExecResult>>,
+    mode: 'merge' | 'arm',
+    extra: { auditWriter?: BacklogAuditWriter; prViewOverrides?: Record<string, unknown> } = {},
+  ) {
     const fake = makeFakeRunner({
-      'gh pr view 42': { stdout: prView() },
+      'gh pr view 42': { stdout: prView(extra.prViewOverrides) },
       ...MAIN_REF,
       ...files,
       'gh pr checks 42 --required': { stdout: JSON.stringify([{ name: 'ci', state: 'SUCCESS' }]) },
@@ -1866,6 +1873,7 @@ describe('governance-sensitive changes require a human merge (merge and arm)', (
       policyYaml: GREEN_YAML,
       taskPrefix: 'AISDLC',
       mode,
+      auditWriter: extra.auditWriter,
     });
     return { r, calls: fake.calls };
   }
@@ -1873,17 +1881,41 @@ describe('governance-sensitive changes require a human merge (merge and arm)', (
   const TASK: Changed = ['backlog/completed/aisdlc-9 - do the thing.md'];
 
   for (const mode of ['merge', 'arm'] as const) {
-    it(`${mode}: refuses a PR touching a governance path, with no merge/arm call`, async () => {
+    it(`${mode}: a trusted PR touching a governance path is eligible; paths are in the reason and audit`, async () => {
+      const records: BacklogMergeAuditRecord[] = [];
       const { r, calls } = await gate(
         changedFiles([TASK, ['.ai-sdlc/agent-role.yaml', 'modified']]),
         mode,
+        { auditWriter: (rec) => records.push(rec) },
       );
+      expect(r.eligibility.eligible).toBe(true);
       expect(r.eligibility.reason).toMatch(
-        /governance-sensitive paths \(\.ai-sdlc\/agent-role\.yaml\).*human merge/,
+        /governance-sensitive paths changed.*\.ai-sdlc\/agent-role\.yaml/,
       );
-      expect(r.merged).toBe(false);
-      expect(r.armed).toBeFalsy();
+      expect(r.governanceSensitivePaths).toEqual(['.ai-sdlc/agent-role.yaml']);
+      expect(mode === 'merge' ? r.merged : r.armed).toBe(true);
+      expect(calls.some((c) => c.args.includes('merge'))).toBe(true);
+      expect(records).toHaveLength(1);
+      expect(records[0]).toMatchObject({
+        event: 'governance-path-merge',
+        mode,
+        prNumber: 42,
+        governanceSensitivePaths: ['.ai-sdlc/agent-role.yaml'],
+        outcome: mode === 'merge' ? 'merged' : 'armed',
+      });
+    });
+
+    it(`${mode}: an untrusted (fork) PR on a governance path is still refused by trust evaluation`, async () => {
+      const records: BacklogMergeAuditRecord[] = [];
+      const { r, calls } = await gate(
+        changedFiles([TASK, ['.ai-sdlc/agent-role.yaml', 'modified']]),
+        mode,
+        { auditWriter: (rec) => records.push(rec), prViewOverrides: { isCrossRepository: true } },
+      );
+      expect(r.eligibility.eligible).toBe(false);
+      expect(r.eligibility.reason).toMatch(/fork/);
       expect(calls.some((c) => c.args.includes('merge'))).toBe(false);
+      expect(records).toHaveLength(0);
     });
 
     it(`${mode}: a realistic attested code PR passes the path check`, async () => {
@@ -1903,7 +1935,7 @@ describe('governance-sensitive changes require a human merge (merge and arm)', (
       expect(r.eligibility.eligible).toBe(true);
     });
 
-    it(`${mode}: the same PR that also edits the policy file is refused`, async () => {
+    it(`${mode}: the same PR that also edits the policy file lists only the sensitive paths`, async () => {
       const { r } = await gate(
         changedFiles([
           TASK,
@@ -1912,6 +1944,7 @@ describe('governance-sensitive changes require a human merge (merge and arm)', (
         ]),
         mode,
       );
+      expect(r.eligibility.eligible).toBe(true);
       expect(r.eligibility.reason).toMatch(/\.ai-sdlc\/agent-role\.yaml/);
       expect(r.eligibility.reason).not.toMatch(/attestations/);
     });
@@ -1932,7 +1965,7 @@ describe('governance-sensitive changes require a human merge (merge and arm)', (
       expect(r.eligibility.eligible).toBe(true);
     });
 
-    it(`${mode}: refuses a rename out of a governance path`, async () => {
+    it(`${mode}: reports a rename out of a governance path`, async () => {
       const { r } = await gate(
         changedFiles([['docs/moved.yaml', 'renamed', '.ai-sdlc/old.yaml']]),
         mode,
@@ -2024,5 +2057,34 @@ describe('resolveRepoSlug rejects dot owners and repos', () => {
     }
     const ok = makeFakeRunner({ 'gh repo view': { stdout: 'org/.github\n' } });
     expect(await resolveRepoSlug(ok.runner)).toBe('org/.github');
+  });
+});
+
+describe('defaultBacklogAuditWriter (DEC-0072)', () => {
+  it('appends a JSONL line under _governance and never throws on write failure', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+    try {
+      const rec: BacklogMergeAuditRecord = {
+        ts: '2026-10-10T00:00:00.000Z',
+        event: 'governance-path-merge',
+        sourceKind: 'backlog',
+        prNumber: 1,
+        repo: 'o/r',
+        mode: 'merge',
+        headSha: HEAD_A,
+        governanceSensitivePaths: ['.github/x.yml'],
+        outcome: 'merged',
+        reason: 'x',
+      };
+      defaultBacklogAuditWriter(dir)(rec);
+      const out = execFileSync('cat', [join(dir, '_governance', 'merge-audit-2026-10-10.jsonl')], {
+        encoding: 'utf8',
+      });
+      expect(JSON.parse(out.trim()).governanceSensitivePaths).toEqual(['.github/x.yml']);
+      writeFileSync(join(dir, 'blocker'), 'x');
+      expect(() => defaultBacklogAuditWriter(join(dir, 'blocker'))(rec)).not.toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

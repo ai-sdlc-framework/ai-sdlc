@@ -15,6 +15,7 @@ import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import {
+  defaultBacklogAuditWriter,
   refusalResult,
   resolveRepoSlug,
   resolveTrustedMainRoot,
@@ -89,6 +90,7 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
     .usage(
       'Usage: $0 <pr> --source-kind <backlog|gh-issue|release> [options]\n\n' +
         '  merge-if-eligible 176 --source-kind backlog          # merge iff green+CLEAN+trusted\n' +
+        '                                                       # (governance-path changes are audited, not refused: DEC-0072)\n' +
         '  merge-if-eligible 176 --source-kind backlog --dry-run  # evaluate only, never merge\n' +
         '  merge-if-eligible 176 --source-kind backlog --arm    # arm auto-merge iff trusted (same policy gate)\n' +
         '  merge-if-eligible 176 --source-kind gh-issue         # always refused (untrusted)\n' +
@@ -191,6 +193,7 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
                   dryRun,
                   mode,
                   policyYaml: override?.policyYaml,
+                  auditWriter: defaultBacklogAuditWriter(),
                 });
 
         if (sourceKind === 'release' && !result.eligibility.eligible) {
