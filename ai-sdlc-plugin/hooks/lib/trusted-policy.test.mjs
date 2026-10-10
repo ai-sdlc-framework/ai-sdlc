@@ -5,7 +5,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,6 +19,7 @@ const {
   loadTrustedExtras,
   bannerGovernance,
   readTaskId,
+  resolveLeaseWorktree,
 } = require('./trusted-policy.js');
 const { resolveGovernanceFromYaml } = require('./governance-resolver.js');
 
@@ -217,5 +218,99 @@ describe('verifiedMainRoot cross-checks the agent-writable gitdir chain', () => 
       let n = 0;
       const lying = () => (n++ === 0 ? join(root, '.git') : other);
       assert.equal(verifiedMainRoot(root, lying), null);
+    }));
+});
+
+describe('resolveLeaseWorktree claim path binds to the worktree directory name (AISDLC-794)', () => {
+  const SESSION = 'executor-alpha';
+  const KEYS = ['AI_SDLC_ACTIVE_TASK_ID', 'AI_SDLC_HIERARCHY_SESSION', 'AI_SDLC_HIERARCHY_ROLE'];
+
+  function fixture(d) {
+    const env = {
+      PATH: process.env.PATH,
+      HOME: d,
+      GIT_CONFIG_GLOBAL: join(d, 'c'),
+      GIT_CONFIG_NOSYSTEM: '1',
+    };
+    writeFileSync(join(d, 'c'), '');
+    const root = join(d, 'main');
+    mkdirSync(root);
+    const g = (cwd, ...a) => execFileSync('git', a, { cwd, env });
+    g(root, 'init', '-q', '-b', 'main');
+    g(
+      root,
+      '-c',
+      'user.name=t',
+      '-c',
+      'user.email=t@e.invalid',
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-m',
+      'i',
+    );
+    const wt = join(root, '.worktrees', 'aisdlc-9');
+    g(root, 'worktree', 'add', '-q', '-b', 'ai-sdlc/aisdlc-9', wt);
+    const inflight = join(realpathSync(root), '.ai-sdlc', 'dispatch', 'inflight');
+    mkdirSync(inflight, { recursive: true });
+    const claim = (id) => {
+      writeFileSync(join(inflight, `${id}.dispatch.json`), '{}');
+      writeFileSync(join(inflight, `${id}.state.json`), JSON.stringify({ workerId: SESSION }));
+    };
+    return { root: realpathSync(root), wt: realpathSync(wt), claim };
+  }
+
+  function lease(f) {
+    const saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
+    process.env.AI_SDLC_ACTIVE_TASK_ID = '';
+    process.env.AI_SDLC_HIERARCHY_SESSION = SESSION;
+    process.env.AI_SDLC_HIERARCHY_ROLE = 'executor';
+    try {
+      return resolveLeaseWorktree(f.root, f.wt);
+    } finally {
+      for (const k of KEYS) {
+        if (saved[k] === undefined) delete process.env[k];
+        else process.env[k] = saved[k];
+      }
+    }
+  }
+
+  it('grants the lease with one claim equal to the directory name and no sentinel', () =>
+    tmp((d) => {
+      const f = fixture(d);
+      f.claim('AISDLC-9');
+      assert.ok(!existsSync(join(f.wt, '.active-task')));
+      assert.equal(lease(f)?.top, f.wt);
+    }));
+
+  it('grants the lease when a present sentinel agrees', () =>
+    tmp((d) => {
+      const f = fixture(d);
+      f.claim('AISDLC-9');
+      writeFileSync(join(f.wt, '.active-task'), 'AISDLC-9\n');
+      assert.ok(lease(f));
+    }));
+
+  it('refuses when the sentinel names a different task', () =>
+    tmp((d) => {
+      const f = fixture(d);
+      f.claim('AISDLC-9');
+      writeFileSync(join(f.wt, '.active-task'), 'AISDLC-8\n');
+      assert.equal(lease(f), null);
+    }));
+
+  it('refuses with two claims', () =>
+    tmp((d) => {
+      const f = fixture(d);
+      f.claim('AISDLC-9');
+      f.claim('AISDLC-10');
+      assert.equal(lease(f), null);
+    }));
+
+  it('refuses a claim for another task', () =>
+    tmp((d) => {
+      const f = fixture(d);
+      f.claim('AISDLC-10');
+      assert.equal(lease(f), null);
     }));
 });

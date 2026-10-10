@@ -235,7 +235,13 @@ function resolveLeaseWorktree(projectDir, cwd, run = runGit) {
       const bound = (process.env.AI_SDLC_ACTIVE_TASK_ID || '').toLowerCase();
       const taskId = readTaskId(top);
       const envBound = !!bound && taskId === bound;
-      if (!envBound && !(taskId && holdsInflightClaim(realMain, taskId))) return null;
+      // The claim path takes the task id from the worktree directory name (a direct,
+      // verified child of <main>/.worktrees/): a finished attempt's Step 13 removes
+      // the sentinel, which must not strand a resumed executor. A sentinel that is
+      // present must agree with the directory name.
+      const dirTask = basename(top).toLowerCase();
+      const claimBound = (!taskId || taskId === dirTask) && holdsInflightClaim(realMain, dirTask);
+      if (!envBound && !claimBound) return null;
     }
     const gitDirRaw = run(['rev-parse', '--git-dir'], cwd);
     if (!gitDirRaw) return null;
