@@ -16,8 +16,9 @@ references:
   - .github/workflows/main-health-monitor.yml
   - ai-sdlc-plugin/commands/operator-dispatch.md
   - docs/operations/merge-without-queue.md
-priority: medium
-dispatchable: true
+priority: low
+dispatchable: false
+dispatchableReason: "Withdrawn after the five-step review: folded into the AISDLC-800 note template; no separate build."
 ---
 
 ## Description
@@ -26,6 +27,8 @@ dispatchable: true
 **Incident (2026-10-10, 21:34-22:00 UTC).** After the drift-gate fix (AISDLC-796) merged, dispatch re-ran the failed jobs on four PRs and the planner cycled three PRs draft → ready to force fresh runs. All of them still executed the old workflow step and failed again: a re-run uses the original run's ref and workflow-file version, and the fresh runs were evaluated against a merge ref computed before main changed. Half an hour and two rounds of guesswork were lost before the PRs were queued for a real rebase.
 
 **Root cause.** No documented or automated rule says that a workflow-file change on main only reaches an open PR through a push to that PR's branch, and nothing lists which open PRs are stale relative to the last workflow change.
+
+**Five-step review (requirements first).** This task is withdrawn as separate work: once no single gate can fail every PR (the drift-gate deletion in this set), a stale workflow version on an open PR is harmless (branch protection is `strict=false`; the PR merges on its own green run). The one-sentence rule "a workflow change reaches an open PR only through a push to that PR's branch" goes into the operator-dispatch playbook as part of AISDLC-800's note template, and nothing else is built. Marked non-dispatchable.
 
 **Fix.**
 1. `node pipeline-cli/bin/cli-ci.mjs stale-workflow-prs`: finds the newest commit on `origin/main` touching `.github/workflows/**`, `scripts/check-*.sh` or `scripts/check-*.mjs`, and lists every open same-repo PR whose merge-base with main predates it, with the task id derived from the branch. `--enqueue-resumes` writes a resume for each dispatchable one with the generated note "rebase onto main to pick up <sha> (<workflow files>); no code change expected".

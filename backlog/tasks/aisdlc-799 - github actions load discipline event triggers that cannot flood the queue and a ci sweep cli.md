@@ -27,6 +27,8 @@ dispatchable: true
 
 **Root cause.** Workflows fire on events they do not need and allocate runners before cheap guards; there is no deterministic, tested sweep and no queue-depth signal, so the operator notices saturation only as missing merges.
 
+**Five-step review (requirements first).** Three requirements go: auto-enable re-firing on `synchronize` and on every `check_suite` completion (an armed PR stays armed; the re-fire was added for a merge-queue race that no longer exists since AISDLC-400); the untrusted-contributor gate allocating a runner for same-repo PRs (its decision for them is constant); and, with AISDLC-727, CI running twice per PR. Delete those first. The `cli-ci sweep` and queue-depth signal are step 5 and are built only if saturation is still observed one week after the deletions land; write them as a conditional AC, not as default work.
+
 **Fix.**
 1. `auto-enable-auto-merge.yml`: trigger only on `opened`, `reopened` and `ready_for_review`; the `check_suite` and `synchronize` re-fires go, since GitHub keeps an armed PR armed across pushes. Add `concurrency: { group: auto-enable-${{ pr number }}, cancel-in-progress: true }`. Workflow tests updated.
 2. `untrusted-pr-gate.yml`: a job-level `if:` on `github.event.pull_request.head.repo.full_name == github.repository` (and author association) skips every job for same-repo PRs before a runner is allocated; the result for same-repo PRs is unchanged (the gate is for external contributors).

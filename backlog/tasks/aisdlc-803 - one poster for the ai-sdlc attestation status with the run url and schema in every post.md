@@ -29,6 +29,8 @@ dispatchable: true
 
 **Root cause.** Several posters share one status context with no ordering, no provenance in the post, and no rule that the newest verifier result wins.
 
+**Five-step review (requirements first).** The deletion IS the fix: five posters of one status context become one, and the `Attestation gate (code PRs)` job stops reading a commit status at all; it depends on the verify job's result inside the same rollup. With that, items 2 and 3 shrink to "the verify job's single post carries its run URL" and the status becomes informational for humans only. Do not add a resolution algorithm for stale statuses; delete the indirection.
+
 **Fix.**
 1. Exactly one workflow posts `ai-sdlc/attestation` for a head: `verify-attestation.yml`. Every other workflow that posts it today either stops (if its post is redundant) or posts under its own context (`ai-sdlc/attestation-review`, `ai-sdlc/attestation-untrusted`); list each poster and its disposition in the PR body. The `merge_group` docs-only short-circuit post stays until AISDLC-388 AC-4 removes it.
 2. Every post sets `target_url` to the posting run's URL and a `description` of the form `<status> | v<schema> | <reason> | run <id>`; the verifier script exposes the schema version it judged.

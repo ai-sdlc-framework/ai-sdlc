@@ -31,6 +31,8 @@ dispatchable: true
 
 **Root cause.** The board protocol lives in prose notes and messages; the CLI accepts states that the protocol forbids.
 
+**Five-step review (requirements first).** Delete first: the `wave` field on resume manifests (a resume has no wave; the field exists only because `enqueue` sets it) and the second resume mechanism (Phase 1.5 resume signals for dispatch-worker, which the hierarchy executor loop ignores): one resume path, `cli-dispatch resume`, for both success and iterate-needed. The heartbeat-at-claim item falls away if AISDLC-798's deletion is accepted; keep it only if the hook keeps its claim clause. What remains to enforce in code is small: one claim per worker, guarded release, generated resume notes, and the doctor check.
+
 **Fix (all in `pipeline-cli/src/dispatch` and the CLI, with hermetic tests).**
 1. `claimNext` refuses when the worker already holds an inflight claim (`one-claim-per-worker`), printing the held task; `executor-start` writes the heartbeat immediately after a successful claim (if AISDLC-791 has not already landed this) and fails loudly if it cannot.
 2. `resumeDone` never sets `wave`; it copies `priority` and sets `retryCount`; `enqueue --priority 1` with no wave sorts first. A board-ordering test covers a resume against wave-less entries.
