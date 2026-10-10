@@ -53,6 +53,8 @@ The Definition-of-Ready check and the backlog-drift check are no longer local ho
 
 ## CI behavior
 
+**One CI run per PR (AISDLC-727, DEC-0056).** `ai-sdlc-gate.yml` is the only workflow that runs lint, build, test, coverage and integration on `pull_request` events; `ci.yml` runs on pushes to `main` and the nightly schedule only. The old `auto-rebase-open-prs.yml` and `auto-rebase-on-queue-kick.yml` workflows are deleted: open PRs are not rebased after each merge (`strict=false`); a PR is rebased only when it conflicts, by its executor or the conflict-resolver agent.
+
 PR merge gate is the single rollup check `ai-sdlc/pr-ready` produced by `.github/workflows/ai-sdlc-gate.yml` (re-actors/alls-green pattern); see [`docs/operations/quality-gate.md`](docs/operations/quality-gate.md) for archetype gating, cutover, and rollback.
 
 **Main health monitor** (AISDLC-406): `.github/workflows/main-health-monitor.yml` fires on every push to `main` and runs the full test suite (`pnpm -r test` + workflow YAML tests). When any test fails, it creates a GitHub issue titled `[main-health] main is RED at <commit>` assigned to `@deefactorial`. This is the reactive complement to the no-queue direct-merge model (AISDLC-400): per-PR CI uses affected-package filtering and cannot detect cross-package merge-skew regressions, but the health monitor always runs the full suite post-merge. See [`docs/operations/main-health-monitor.md`](docs/operations/main-health-monitor.md) for the triage runbook. Motivating incident: AISDLC-398 + AISDLC-400 + AISDLC-405 each had green per-PR CI but combined to break `main`.

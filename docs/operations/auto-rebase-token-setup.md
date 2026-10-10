@@ -1,5 +1,7 @@
 # Auto-rebase Token Setup
 
+> **Retired (AISDLC-727 / DEC-0056):** `auto-rebase-open-prs.yml` was deleted; open PRs are no longer rebased automatically. This page is kept for the token-trigger background and for anyone restoring a proactive rebase from git history.
+
 **AISDLC-189** — The `auto-rebase-open-prs.yml` workflow must use a non-`GITHUB_TOKEN`
 credential when it force-pushes rebased PR branches. Pushes made with `GITHUB_TOKEN`
 are subject to GitHub's [recursive-workflow-prevention rule](https://docs.github.com/en/actions/using-workflows/triggering-a-workflow#triggering-a-workflow-from-a-workflow)

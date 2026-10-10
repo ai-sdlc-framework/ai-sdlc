@@ -3,7 +3,7 @@
 **AISDLC-420** — This runbook describes the auto-rebase workflow that fires
 on every push to `main` and rebases every open same-repo non-draft PR whose
 `mergeStateStatus` is `DIRTY` or `BEHIND`. It is the **Option A** sibling to
-the existing `auto-rebase-open-prs.yml` (AISDLC-138 / AISDLC-189): Option A
+the former `auto-rebase-open-prs.yml` (AISDLC-138 / AISDLC-189, deleted by AISDLC-727): Option A
 performs the rebase **locally in a temp worktree** instead of via
 `gh pr update-branch`, which gives the operator a structured JSON summary the
 [orchestrator-tick](../../pipeline-cli/docs/orchestrator.md) can consume.
@@ -204,7 +204,7 @@ the new SHA until something else kicks CI (an `auto-rearm-auto-merge.yml`
 empty-commit kick, an operator-pushed re-sign, etc.).
 
 If you have already provisioned the `AI_SDLC_PAT` secret for the sibling
-`auto-rebase-open-prs.yml` workflow (Option B from `auto-rebase-token-setup.md`),
+former `auto-rebase-open-prs.yml` workflow (Option B from `auto-rebase-token-setup.md`),
 swap the token line in the YAML above to:
 
 ```yaml

@@ -8,5 +8,8 @@ if [ -n "$STAGED" ] && ! echo "$STAGED" | grep -qvE '^\.ai-sdlc/attestations/[a-
   exit 0
 fi
 
+# AISDLC-727: backlog filenames must be ASCII (AISDLC-92). Was documented as enforced but
+# never called from any hook; it only inspects staged backlog filenames, so it is instant.
+./scripts/check-backlog-ascii.sh
 pnpm exec lint-staged
 node scripts/typecheck-workspace.mjs

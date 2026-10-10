@@ -52,67 +52,28 @@ AISDLC-398 changed the content hash to be base-independent (`headBlobSha` only).
 3. auto-enable-auto-merge.yml fires on ready_for_review
    → gh pr merge --auto --squash <PR>
 4. GitHub waits for required checks:
-   → ci.yml: Backlog Drift passes (backlog references valid)
+   → ai-sdlc-gate.yml: Backlog Drift passes (backlog references valid)
    → ai-sdlc-gate.yml: ai-sdlc/pr-ready passes (lint + build + test + coverage + integration)
 5. Both checks pass → GitHub squash-merges PR into main automatically
-6. auto-rebase-open-prs.yml fires on main push → reads branch protection strict flag
-   → strict=false (current DEC-0010 posture): exits 0, open PRs NOT proactively rebased
-   → strict=true (reverted posture): rebases other open PRs as before
+6. Nothing rebases the other open PRs. A PR is rebased only when it conflicts,
+   by its executor or the conflict-resolver agent (AISDLC-727 / DEC-0056).
 ```
+
+CI runs once per pull request (AISDLC-727): `ai-sdlc-gate.yml` is the only workflow that runs the suite on `pull_request` events. `ci.yml` runs on pushes to `main` and the nightly schedule only (the post-merge full run). The jobs that used to exist only in `ci.yml` (`Backlog Drift`, first-run smoke, Python SDK, Go SDK) moved into the gate workflow and feed `ai-sdlc/pr-ready`; `Backlog Drift` keeps its job name because it is a required context.
 
 Total wall-clock time: ~5-10 min (CI time) vs ~15-25 min with the queue (CI + queue probe + update-branch CI re-run).
 
 ---
 
-## Open PR handling under strict-false (AISDLC-495 / DEC-0010)
+## Open PR handling (AISDLC-727 / DEC-0056)
 
-### What changed
+`auto-rebase-open-prs.yml` was deleted. It rebased every other open PR after every merge to `main`; each rebase restarted CI, cancelled runs in flight, disarmed auto-merge and invalidated the attestation envelope's head binding (a 50-PR sample showed ~37 workflow runs per PR, 343 cancelled runs and auto-merge toggled about 350 times). The up-to-date requirement on `main` is off (`strict=false`, DEC-0010), so those rebases were not needed to merge.
 
-`auto-rebase-open-prs.yml` fires on every push to `main`. Before AISDLC-495, it would unconditionally call `gh pr update-branch --rebase` on every open non-draft same-repo PR. This caused a **per-main-landing re-sign churn** under the DEC-0010 `strict=false` branch protection posture:
+Current rule: a PR is rebased only when it conflicts with `main`, by its executor or the `ci-conflict-resolver` / `/ai-sdlc rebase` path. A PR that is merely BEHIND merges as-is once required checks pass. AISDLC-491 / AISDLC-448 keep the v6 attestation valid for disjoint PRs across any later rebase.
 
-1. PR A merges → main advances
-2. `auto-rebase-open-prs.yml` fires → rebases open PR B onto the new main
-3. Rebase rewrites B's commits (new SHAs)
-4. B's v6 attestation envelope was signed against a tree **without** A's changes
-5. The AISDLC-448 tree-equivalence verifier correctly rejects the stale envelope
-6. B's `Attestation gate (code PRs)` fails → operator must manually re-sign + force-push
+`auto-rebase-on-queue-kick.yml` was also deleted: it triggered only on `ai-sdlc/attestation` failures on `gh-readonly-queue/main/pr-*` probe SHAs, which no longer exist. `auto-rearm-on-dequeue.yml` is kept: it never rebases, and still re-arms auto-merge on `synchronize` / `ready_for_review` and on a 5-minute cron when GitHub clears the flag.
 
-This is the exact per-main-landing re-sign churn that DEC-0010 + AISDLC-491 were meant to eliminate. The proactive rebase was the remaining trigger.
-
-### The fix (AISDLC-495)
-
-The workflow now reads the branch protection `strict` flag before rebasing:
-
-```bash
-STRICT=$(gh api "repos/$REPO/branches/main/protection/required_status_checks" --jq '.strict' 2>/dev/null || echo "false")
-if [ "$STRICT" != "true" ]; then
-  echo "branch protection strict=$STRICT — skipping proactive rebase (AISDLC-495 / DEC-0010 trunk-based posture)."
-  exit 0
-fi
-```
-
-Under `strict=false` (the current posture per DEC-0010): the workflow exits 0 immediately. Open PRs are **not** rebased on every main landing. A PR whose attestation is valid against its own merge-base merges as-is once required checks pass — no forced re-sign.
-
-Under `strict=true` (reverted posture): the guard passes, and the full rebase path runs as before — including the genuine-conflict path (`gh pr update-branch --rebase` failing on overlapping files, which requires operator intervention).
-
-### Why this is safe
-
-AISDLC-491 made v6 attestation rebase-invariant for **disjoint** PRs. The verifier's tree-equivalence-modulo-attestation check (AISDLC-448) accepts envelopes where the source tree at `subject.sha1` and at HEAD are byte-identical modulo attestation paths. A disjoint rebase (non-overlapping files) produces exactly this: the source tree is unchanged, only the commit graph changes. The Merkle root + trusted-key signature still gate acceptance, so a rebase that resolves a real semantic conflict (i.e. changes any source byte) correctly fails verification.
-
-For **overlapping** PRs (same file modified by two branches), a genuine merge conflict arises at `gh pr merge` time. GitHub surfaces this as a "can't merge" state on the PR — the operator must rebase manually and re-sign. The `auto-rebase-open-prs.yml` genuine-conflict path (the inner loop with `gh pr update-branch --rebase` per PR) is preserved intact for the `strict=true` revert scenario.
-
-### How to revert (strict=true re-engages proactive rebase)
-
-If you flip branch protection back to `strict=true` (require up-to-date before merge):
-
-```bash
-gh api -X PATCH repos/<org>/<repo>/branches/main/protection/required_status_checks \
-  -F 'contexts[]=Backlog Drift' \
-  -F 'contexts[]=ai-sdlc/pr-ready' \
-  -F 'strict=true'
-```
-
-The next push to main will trigger `auto-rebase-open-prs.yml`, the guard will read `strict=true`, and the proactive rebase path will re-engage automatically. No workflow edits needed.
+If you flip branch protection back to `strict=true`, restore the proactive rebase from git history (`git log --diff-filter=D -- .github/workflows/auto-rebase-open-prs.yml`) or rebase PRs by hand.
 
 ---
 
@@ -188,7 +149,7 @@ After re-enabling the queue via UI, restore the `merge_group` triggers in:
 
 Use `git log --oneline -- .github/workflows/` to find the AISDLC-400 commit and cherry-pick the reverse diff if needed.
 
-**Note:** The `auto-rebase-on-queue-kick.yml` workflow (now inert) would need to be restored for queue-kick recovery automation.
+**Note:** The `auto-rebase-on-queue-kick.yml` workflow (deleted by AISDLC-727) would need to be restored from git history for queue-kick recovery automation.
 
 ---
 
@@ -210,8 +171,8 @@ At the current scale (1 operator, 1-5 AI agents, <10 PRs/day), direct merge rema
 - AISDLC-398 — content-addressed envelopes (prerequisite that made this safe)
 - AISDLC-399 — conditional update-branch (superseded by AISDLC-400)
 - AISDLC-491 — patch-scoped verifier / rebase-invariant v6 attestation for disjoint PRs
-- AISDLC-495 / DEC-0010 — strict-false guard in auto-rebase-open-prs.yml (this change)
+- AISDLC-495 / DEC-0010 — strict-false guard in auto-rebase-open-prs.yml (workflow since deleted)
+- AISDLC-727 / DEC-0056 — one CI run per PR; auto-rebase workflows retired
 - `.github/workflows/auto-enable-auto-merge.yml` — arms auto-merge (squash) on PR open
-- `.github/workflows/auto-rebase-open-prs.yml` — proactive rebase (now gated on strict=true)
 - `scripts/sync-branch-protection.sh` — idempotent branch protection sync script
 - `docs/operations/quality-gate.md` — `ai-sdlc/pr-ready` rollup documentation

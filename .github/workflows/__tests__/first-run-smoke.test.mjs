@@ -25,6 +25,20 @@ const wf = JSON.parse(
 );
 // YAML 1.1 parses the bare key `on` as boolean true.
 const triggers = wf.on ?? wf.true;
+
+// AISDLC-727: PRs are covered by ai-sdlc-gate.yml; ci.yml keeps the push + nightly runs.
+const gate = JSON.parse(
+  execFileSync(
+    'python3',
+    [
+      '-c',
+      'import sys, yaml, json; print(json.dumps(yaml.safe_load(open(sys.argv[1]))))',
+      join(REPO_ROOT, '.github', 'workflows', 'ai-sdlc-gate.yml'),
+    ],
+    { encoding: 'utf8' },
+  ),
+);
+const gateJob = gate.jobs['first-run-smoke'];
 const job = wf.jobs['first-run-smoke'];
 
 describe('ci.yml first-run-smoke job (AISDLC-771)', () => {
@@ -42,6 +56,19 @@ describe('ci.yml first-run-smoke job (AISDLC-771)', () => {
     assert.match(wf.jobs.changes.outputs.first_run, /steps\.filter\.outputs\.first_run/);
     assert.match(job.if, /needs\.changes\.outputs\.first_run == 'true'/);
     assert.ok([job.needs].flat().includes('changes'));
+  });
+
+  it('also runs on pull requests via ai-sdlc-gate.yml with the same path filter (AISDLC-727)', () => {
+    const filterStep = gate.jobs.detect.steps.find((s) => s.id === 'sdk-filter');
+    const filters = filterStep.with.filters;
+    const block = filters.slice(filters.indexOf('first_run:'));
+    for (const glob of ["'ai-sdlc-plugin/**'", "'pipeline-cli/**'", "'reference/**'"]) {
+      assert.ok(block.includes(glob), `gate first_run filter must include ${glob}`);
+    }
+    assert.match(gateJob.if, /needs\.detect\.outputs\.first_run == 'true'/);
+    assert.ok(gate.jobs['pr-ready'].needs.includes('first-run-smoke'));
+    const runs = gateJob.steps.map((s) => s.run ?? '').join('\n');
+    assert.match(runs, /node scripts\/first-run-smoke\.mjs/);
   });
 
   it('the schedule event sets the first_run output without a diff to filter', () => {
