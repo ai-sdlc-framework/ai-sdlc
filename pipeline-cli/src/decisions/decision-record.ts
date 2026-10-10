@@ -58,6 +58,29 @@ export const DECISION_EVENT_TYPES = [
 ] as const;
 export type DecisionEventType = (typeof DECISION_EVENT_TYPES)[number];
 
+/**
+ * RFC-0051 escalation chain: the tiers a dispatched session's question climbs.
+ * `operational` is answered by the dispatch session or the planner, `design` by
+ * the planner, `operator` through the interactive path.
+ */
+export const ESCALATION_TIERS = ['operational', 'design', 'operator'] as const;
+export type EscalationTier = (typeof ESCALATION_TIERS)[number];
+
+/** Tiers a session can raise a decision to directly (`escalate --route`). */
+export const ESCALATION_ROUTES = ['operational', 'design'] as const;
+export type EscalationRoute = (typeof ESCALATION_ROUTES)[number];
+
+/** Routing recorded on a decision raised with `cli-decisions escalate`. */
+export interface DecisionEscalation {
+  /** Tier the decision was first routed to. */
+  route: EscalationRoute;
+  taskId: string;
+  /** Roster name of the raising session, when it could be resolved. */
+  raisedBy?: string;
+  /** True when the raiser parked the task's manifest in `blocked/` on this decision. */
+  parked: boolean;
+}
+
 export const DECISION_TIERS = ['xs', 's', 'm', 'l', 'xl'] as const;
 export type DecisionTier = (typeof DECISION_TIERS)[number];
 
@@ -161,6 +184,8 @@ export interface DecisionSpec {
    * decision points back at what raised it.
    */
   contextRef?: string;
+  /** RFC-0051 — escalation-chain routing; absent on decisions not raised by `escalate`. */
+  escalation?: DecisionEscalation;
 }
 
 export interface DecisionRouting {
@@ -197,6 +222,11 @@ export interface DecisionStatus {
    * decisions opened without a timebox.
    */
   timeboxExpiresAt?: string | null;
+  /**
+   * RFC-0051 — tier that currently owns an escalated decision. Starts at
+   * `spec.escalation.route` and moves up one tier per `routing-changed` event.
+   */
+  escalationTier?: EscalationTier;
 }
 
 /**
@@ -279,6 +309,20 @@ export interface DecisionOpenedEvent extends DecisionEventEnvelope {
   governanceChange?: GovernanceChange;
   /** AISDLC-463 — surfacing-context backlink (PR url / `pr:N` / task id). */
   contextRef?: string;
+  /** RFC-0051 — escalation-chain routing (see {@link DecisionEscalation}). */
+  escalation?: DecisionEscalation;
+}
+
+/**
+ * RFC-0051 — `routing-changed` event: an unanswered escalated decision moved up
+ * one tier because its timebox lapsed. Silence never moves a decision down.
+ */
+export interface RoutingChangedEvent extends DecisionEventEnvelope {
+  type: 'routing-changed';
+  fromTier: EscalationTier;
+  toTier: EscalationTier;
+  /** Why the decision moved, e.g. `timebox of 30 minutes lapsed`. */
+  reason?: string;
 }
 
 /**
@@ -365,6 +409,7 @@ export type DecisionEvent =
   | OverriddenEvent
   | TimeboxExtendedEvent
   | AutoExpiredEvent
+  | RoutingChangedEvent
   | (DecisionEventEnvelope & {
       type: Exclude<
         DecisionEventType,
@@ -375,6 +420,7 @@ export type DecisionEvent =
         | 'overridden'
         | 'timebox-extended'
         | 'auto-expired'
+        | 'routing-changed'
       >;
     } & Record<string, unknown>);
 
@@ -839,9 +885,32 @@ export function validateDecisionEvent(raw: unknown): string | null {
     }
   }
 
+  if (r.type === 'routing-changed') {
+    if (!ESCALATION_TIERS.includes(r.fromTier as EscalationTier)) {
+      return `routing-changed: fromTier must be one of ${ESCALATION_TIERS.join('|')}`;
+    }
+    if (!ESCALATION_TIERS.includes(r.toTier as EscalationTier)) {
+      return `routing-changed: toTier must be one of ${ESCALATION_TIERS.join('|')}`;
+    }
+  }
+
   if (r.type === 'decision-opened') {
     if (typeof r.summary !== 'string' || r.summary.length === 0) {
       return 'decision-opened: summary is required';
+    }
+    if (r.escalation !== undefined) {
+      const e = r.escalation as Record<string, unknown> | null;
+      if (
+        !e ||
+        typeof e !== 'object' ||
+        !ESCALATION_ROUTES.includes(e.route as EscalationRoute) ||
+        typeof e.taskId !== 'string' ||
+        e.taskId.length === 0 ||
+        typeof e.parked !== 'boolean' ||
+        (e.raisedBy !== undefined && typeof e.raisedBy !== 'string')
+      ) {
+        return 'decision-opened: escalation must be {route: operational|design, taskId, parked, raisedBy?}';
+      }
     }
     // AISDLC-463 — validate the new optional author fields when present.
     if (r.priority !== undefined && !DECISION_PRIORITIES.includes(r.priority as DecisionPriority)) {

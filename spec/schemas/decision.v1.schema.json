@@ -133,6 +133,28 @@
         "contextRef": {
           "type": "string",
           "description": "RFC-0035 AISDLC-463 — backlink to the surfacing context (a PR url, 'pr:N', or a task id)."
+        },
+        "escalation": {
+          "type": "object",
+          "required": ["route", "taskId", "parked"],
+          "additionalProperties": false,
+          "description": "Escalation-chain routing recorded when a dispatched session raises the decision with `cli-decisions escalate`.",
+          "properties": {
+            "route": {
+              "type": "string",
+              "enum": ["operational", "design"],
+              "description": "The tier the decision was first routed to."
+            },
+            "taskId": { "type": "string", "minLength": 1 },
+            "raisedBy": {
+              "type": "string",
+              "description": "Roster name of the session that raised the decision, when it could be resolved."
+            },
+            "parked": {
+              "type": "boolean",
+              "description": "True when the raising session parked the task's manifest in blocked/ until the decision is answered."
+            }
+          }
         }
       }
     },
@@ -195,6 +217,11 @@
         "deadline": {
           "type": ["string", "null"],
           "format": "date-time"
+        },
+        "escalationTier": {
+          "type": "string",
+          "enum": ["operational", "design", "operator"],
+          "description": "Tier that currently owns an escalated decision; moves up one tier when the tier's timebox lapses unanswered."
         },
         "timeboxExpiresAt": {
           "type": ["string", "null"],
