@@ -225,15 +225,16 @@ function parseAllowedShape(command, ctx) {
   }
   // Bind "own" to the dispatched TASK branch: the task id comes from the
   // worktree's .active-task, the worktree directory must be named after it, and
-  // the branch must carry the task prefix (pattern `ai-sdlc/{issueIdLower}-{slug}`).
+  // the branch must be exactly `ai-sdlc/{issueIdLower}` or carry the task prefix
+  // `ai-sdlc/{issueIdLower}-{slug}` (DEC-0083).
   // All three must agree; any missing piece denies (operator sessions without a
   // sentinel get no lease push).
   if (!ctx.taskId) return 'no valid .active-task sentinel in this worktree';
   if (ctx.worktreeName !== ctx.taskId) {
     return `worktree directory '${ctx.worktreeName}' does not match task '${ctx.taskId}'`;
   }
-  if (!own.startsWith(`ai-sdlc/${ctx.taskId}-`)) {
-    return `branch '${own}' is not this task's branch (ai-sdlc/${ctx.taskId}-*)`;
+  if (own !== `ai-sdlc/${ctx.taskId}` && !own.startsWith(`ai-sdlc/${ctx.taskId}-`)) {
+    return `branch '${own}' is not this task's branch (ai-sdlc/${ctx.taskId} or ai-sdlc/${ctx.taskId}-*)`;
   }
   // Short-name aliasing: git resolves a bare name against local refs with every
   // rule (refs/tags/<x>, refs/<x>, refs/remotes/<x>, ...). Refuse unless no

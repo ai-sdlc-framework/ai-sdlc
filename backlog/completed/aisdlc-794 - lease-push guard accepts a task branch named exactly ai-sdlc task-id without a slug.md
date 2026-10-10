@@ -2,7 +2,7 @@
 id: AISDLC-794
 title: >-
   Lease-push guard accepts a task branch named exactly ai-sdlc/<task-id> (no slug suffix) as the task's own branch
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-10'
 labels:
@@ -35,14 +35,37 @@ Change the ownership check so `own === 'ai-sdlc/<task-id>'` passes alongside `ow
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] From a worktree named after the task with a valid `.active-task`, a lease push to `refs/heads/ai-sdlc/<task-id>` (exact) is allowed; to `refs/heads/ai-sdlc/<task-id>-<slug>` it is still allowed.
-- [ ] `ai-sdlc/<task-id>x`, `ai-sdlc/<task-id>1`, a shorter id that is a prefix of the task id, and another task's branch are all still refused, with hermetic cases in `lease-push-guard.test.mjs` for each.
-- [ ] The refusal message names both accepted forms (`ai-sdlc/<task-id>` or `ai-sdlc/<task-id>-*`).
-- [ ] A session rooted at the main checkout, holding exactly one inflight claim whose task id equals the cwd worktree's directory name, gets the lease with no `.active-task` present; with a sentinel present that names a different task it is refused; with two claims or a claim for another task it is refused. Hermetic cases in the `trusted-policy` tests cover all four.
-- [ ] No other allowed or refused shape in `lease-push-guard.test.mjs`, `lease-push-guard-widened.test.mjs` or `governance-lease.test.mjs` changes.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] From a worktree named after the task with a valid `.active-task`, a lease push to `refs/heads/ai-sdlc/<task-id>` (exact) is allowed; to `refs/heads/ai-sdlc/<task-id>-<slug>` it is still allowed.
+- [x] `ai-sdlc/<task-id>x`, `ai-sdlc/<task-id>1`, a shorter id that is a prefix of the task id, and another task's branch are all still refused, with hermetic cases in `lease-push-guard.test.mjs` for each.
+- [x] The refusal message names both accepted forms (`ai-sdlc/<task-id>` or `ai-sdlc/<task-id>-*`).
+- [x] A session rooted at the main checkout, holding exactly one inflight claim whose task id equals the cwd worktree's directory name, gets the lease with no `.active-task` present; with a sentinel present that names a different task it is refused; with two claims or a claim for another task it is refused. Hermetic cases in the `trusted-policy` tests cover all four.
+- [x] No other allowed or refused shape in `lease-push-guard.test.mjs`, `lease-push-guard-widened.test.mjs` or `governance-lease.test.mjs` changes.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 <!-- AC:END -->
 
 ## Notes
 
 Unblocker for AISDLC-704.5 (#1269), AISDLC-752 (#1259) and any resumed executor push (AISDLC-748, #1281, was the first hit); dispatch requeues once this lands. Decision: DEC-0083. The executor implementing this task works on a slugged branch, so it is not itself affected.
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+The lease-push guard now accepts the exact branch `ai-sdlc/<task-id>` as the task's own branch alongside `ai-sdlc/<task-id>-*`, and `resolveLeaseWorktree` binds the inflight-claim path to the worktree directory name instead of the `.active-task` sentinel (a present sentinel must agree).
+
+## Changes
+- `ai-sdlc-plugin/hooks/lib/lease-push-guard.js` (modified): exact-or-prefix own-branch check; refusal text names both forms.
+- `ai-sdlc-plugin/hooks/lib/trusted-policy.js` (modified): claim path task id from `basename(top)`; env-bound path still needs the sentinel.
+- `ai-sdlc-plugin/hooks/lib/lease-push-guard.test.mjs`, `trusted-policy.test.mjs` (modified): hermetic cases for both defects.
+
+## Design decisions
+- **resume.ts untouched**: `branchGuessed` already yields `ai-sdlc/<lower-task-id>`, which the hook now accepts.
+- The old test asserting `ai-sdlc/aisdlc-1` is refused for task aisdlc-1 encoded the superseded behavior; replaced by another task's branch.
+- **Claim-verified task id reaches the guard**: `resolveLeaseWorktree` returns `claimTaskId` (the worktree directory name) only when the grant came through the inflight claim with no sentinel; the hook uses it for the guard `taskId` only then. Env-bound and all other paths still require the real sentinel (end-to-end tests in `enforce-lease-push.test.mjs`).
+
+## Verification
+- `node --test` hooks: 935 pass, 0 fail; `pnpm build`, `pnpm lint`, `pnpm format:check` clean
+
+## Follow-up
+(none)
+<!-- SECTION:FINAL_SUMMARY:END -->

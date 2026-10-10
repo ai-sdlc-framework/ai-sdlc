@@ -467,7 +467,7 @@ describe('evaluateLeasePush - task branch binding', () => {
       'feat/x',
       'ai-sdlc/aisdlc-2-x',
       'ai-sdlc/aisdlc-10-x',
-      'ai-sdlc/aisdlc-1',
+      'ai-sdlc/aisdlc-11',
       'xai-sdlc/aisdlc-1-x',
     ]) {
       assert.equal(
@@ -490,6 +490,34 @@ describe('evaluateLeasePush - task branch binding', () => {
       ).decision,
       'allow',
     );
+  });
+});
+
+describe('evaluateLeasePush - exact ai-sdlc/<task-id> branch (AISDLC-794, DEC-0083)', () => {
+  const T = 'aisdlc-704.5';
+  const run = (branch) =>
+    evaluateLeasePush(
+      `git push --force-with-lease origin HEAD:refs/heads/${branch}`,
+      ctx({ ownRef: `refs/heads/${branch}`, taskId: T, worktreeName: T }),
+    );
+
+  it('allows the exact branch and a slugged branch', () => {
+    assert.equal(run(`ai-sdlc/${T}`).decision, 'allow');
+    assert.equal(run(`ai-sdlc/${T}-some-slug`).decision, 'allow');
+  });
+
+  for (const [name, branch] of [
+    ['a trailing letter', `ai-sdlc/${T}x`],
+    ['a trailing digit', `ai-sdlc/${T}1`],
+    ['a shorter prefix id', 'ai-sdlc/aisdlc-704'],
+    ['another task', 'ai-sdlc/aisdlc-705'],
+  ]) {
+    it(`refuses ${name}`, () => assert.equal(run(branch).decision, 'deny', branch));
+  }
+
+  it('refusal names both accepted forms', () => {
+    const r = run('ai-sdlc/aisdlc-704');
+    assert.ok(r.reason.includes(`ai-sdlc/${T} or ai-sdlc/${T}-*`), r.reason);
   });
 });
 
