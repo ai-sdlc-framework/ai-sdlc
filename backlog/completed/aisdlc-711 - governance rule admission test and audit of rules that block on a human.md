@@ -2,7 +2,7 @@
 id: AISDLC-711
 title: >-
   Governance rule admission test and audit of rules that block on a human
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-04'
 labels:
@@ -36,8 +36,8 @@ its effect on velocity, and none may leave work blocked on human intervention.
   `/tmp` path.
 
 ## Acceptance Criteria
-- [ ] A happy-path test runs the documented workflow command set (worktree setup, commit, rebase onto main, lease push to the own branch, PR create, draft to ready, attestation sign, arming a merge through the sanctioned command, decision add and escalate, task create under the own parent) through the governance hooks with DEFAULT configuration in a fresh fixture repository and asserts that none is denied. Adding a rule that breaks it fails CI. The command set lives in one data file so new workflows are added in one place.
-- [ ] Every refusal message produced by the governance hooks names the rule, the config key and value or sanctioned command that resolves it, and never instructs the agent to ask the operator; a test enumerates the deny call sites and asserts this.
+- [x] A happy-path test runs the documented workflow command set (worktree setup, commit, rebase onto main, lease push to the own branch, PR create, draft to ready, attestation sign, arming a merge through the sanctioned command, decision add and escalate, task create under the own parent) through the governance hooks with DEFAULT configuration in a fresh fixture repository and asserts that none is denied. Adding a rule that breaks it fails CI. The command set lives in one data file so new workflows are added in one place.
+- [x] Every refusal message produced by the governance hooks names the rule, the config key and value or sanctioned command that resolves it, and never instructs the agent to ask the operator; a test enumerates the deny call sites and asserts this.
 
 ## Out of scope
 - Removing review, attestation or coverage requirements.
