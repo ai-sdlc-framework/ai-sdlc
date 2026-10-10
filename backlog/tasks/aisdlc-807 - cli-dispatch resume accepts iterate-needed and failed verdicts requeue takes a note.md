@@ -11,8 +11,6 @@ labels:
   - root-cause
 dependencies: []
 references:
-  - AISDLC-738
-  - AISDLC-800
   - pipeline-cli/src/dispatch/resume.ts
 priority: critical
 dispatchable: true
