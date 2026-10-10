@@ -400,7 +400,10 @@ describe('check-pr-patch-coverage — skip on 0 changed code files', () => {
       );
       const r = runGate(repo, { base, head, json: true });
       assert.notEqual(r.status, 0, `expected failure\nstdout: ${r.stdout}`);
-      assert.match(r.stdout + r.stderr, new RegExp(notBarrel.replace(/\./g, '\\.')));
+      assert.ok(
+        (r.stdout + r.stderr).includes(notBarrel),
+        `expected output to mention ${notBarrel}, got: ${r.stdout + r.stderr}`,
+      );
     });
   }
 
@@ -470,7 +473,10 @@ describe('check-pr-patch-coverage — skip on 0 changed code files', () => {
       );
       const r = runGate(repo, { base, head, json: true });
       assert.notEqual(r.status, 0, `expected failure\nstdout: ${r.stdout}`);
-      assert.match(r.stdout + r.stderr, new RegExp(notExcluded.replace(/\./g, '\\.')));
+      assert.ok(
+        (r.stdout + r.stderr).includes(notExcluded),
+        `expected output to mention ${notExcluded}, got: ${r.stdout + r.stderr}`,
+      );
     });
   }
 
