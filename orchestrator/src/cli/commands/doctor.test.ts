@@ -219,6 +219,22 @@ describe('renderDoctorReport', () => {
     expect(lines).toContain('Close it with: ai-sdlc init --add branch-protection');
   });
 
+  it('reports the client-side-only error when the protection API returns 403 (AISDLC-748)', () => {
+    const adapters: DoctorAdapters = {
+      exists: () => true,
+      runCommand: (_cmd, args) =>
+        args[0] === 'repo'
+          ? { stdout: 'acme/widgets', exitCode: 0 }
+          : { stdout: 'HTTP 403: Upgrade to GitHub Pro', exitCode: 1 },
+    };
+    const result = checkAttestationGovernance(tmpDir, adapters);
+    expect(result.branchProtection.apiUnavailable).toBe(true);
+    const lines = renderDoctorReport(result).join('\n');
+    expect(lines).toContain(
+      'enforcement: client-side only; the server cannot block a manual merge',
+    );
+  });
+
   it('reports the neither state plainly with no false claim of enforcement', () => {
     const adapters: DoctorAdapters = {
       exists: () => false,

@@ -540,6 +540,7 @@ export function buildWizardFlags(opts: Record<string, unknown>): WizardFlags {
     withAttestation: !!opts.withAttestation,
     withClassifier: !!opts.withClassifier,
     withBranchProtection: !!opts.withBranchProtection,
+    noBranchProtection: opts.branchProtection === false,
     withWorkflows: !!opts.withWorkflows,
     withSignalIngestion: !!opts.withSignalIngestion,
     add,
@@ -593,6 +594,10 @@ export const initCommand = new Command('init')
   .option(
     '--with-branch-protection',
     'Apply recommended branch-protection rule to main (requires gh)',
+  )
+  .option(
+    '--no-branch-protection',
+    'Skip the branch-protection API call and the init-time client-side fallback notice (cli-merge-if-eligible and the hook still apply)',
   )
   // ── AISDLC-261 workflow scaffold flags ──────────────────────────────
   .option(
