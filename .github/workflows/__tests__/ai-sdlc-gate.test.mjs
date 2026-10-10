@@ -11,13 +11,11 @@
  *   1. Workflow STRUCTURE — triggers, job names, `needs:` wiring,
  *      `if: always()` on the aggregator. Locks in the contract that
  *      branch protection will be wired against post-cutover.
- *   2. Archetype DECISION LOGIC — given a hypothetical changeset, does
- *      the `docs_only` filter resolve correctly. We can't run dorny
- *      hermetically, but we can assert the filter patterns mirror the
- *      docs-only set used by the rest of the AI-SDLC review machinery
- *      (`ai-sdlc-review.yml` paths-ignore + `ai-sdlc-review-docs-only.yml`
- *      detect step) — drift between these is the exact bug class that
- *      created the AISDLC-136 deadlock.
+ *   2. Archetype DECISION LOGIC (AISDLC-484) — `docs_only` is computed by
+ *      the `classify` step in `detect`, which shells out to
+ *      `scripts/is-docs-only-changeset.mjs`. We spawn the real script and
+ *      execute the step's real `run:` body in a temp git repo, so the
+ *      mechanism that runs in CI is the one under test.
  *   3. AGGREGATOR SEMANTICS — given simulated `needs` contexts (all
  *      success / docs-only-skipped / one failure / one cancelled),
  *      does the alls-green decision match expectation. We mirror the
@@ -39,7 +37,8 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -446,53 +445,43 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     );
   });
 
-  it('detect job uses dorny/paths-filter (SHA-pinned) with predicate-quantifier: every', () => {
+  it('detect job classifies docs_only via scripts/is-docs-only-changeset.mjs (AISDLC-484)', () => {
     const detect = workflow.jobs.detect;
-    const filterStep = detect.steps.find(
-      (s) => typeof s.uses === 'string' && s.uses.startsWith('dorny/paths-filter'),
+    const classify = detect.steps.find((s) => s.id === 'classify');
+    assert.ok(classify, 'detect must have a step with id classify');
+    assert.match(classify.run, /scripts\/is-docs-only-changeset\.mjs/);
+    assert.ok(
+      !detect.steps.some((s) => s.id === 'filter'),
+      'the dead dorny docs_only filter step must be gone',
     );
-    assert.ok(filterStep, 'detect must use dorny/paths-filter');
-    // Pin must be a full 40-hex SHA (PinnedDependenciesID CodeQL fix — alerts #164, #165).
-    // fbd0ab8f3e69293af611ebaee6363fc25e6d187d = v4.0.1
-    assert.match(
-      filterStep.uses,
-      /^dorny\/paths-filter@[0-9a-f]{40}$/,
-      'dorny/paths-filter must be pinned to a full SHA (not a tag) to satisfy PinnedDependenciesID',
-    );
-    // `every` quantifier is REQUIRED for correct mixed-PR handling.
-    // Default (`some`) treats one-docs-one-code PRs as docs-only,
-    // which would skip build-test on real code changes — the exact
-    // class of bug this AC is locking in.
-    assert.equal(
-      filterStep.with?.['predicate-quantifier'],
-      'every',
-      'predicate-quantifier MUST be "every" or mixed PRs incorrectly resolve as docs-only',
-    );
+    const raw = readFileSync(WORKFLOW_PATH, 'utf-8');
+    assert.ok(!raw.includes('predicate-quantifier'), 'predicate-quantifier must not be used');
+    assert.equal(detect.outputs.docs_only, '${{ steps.classify.outputs.docs_only }}');
   });
 
-  it('docs-only filter mirrors the canonical AI-SDLC docs-only path set', () => {
-    // Drift between this filter and the docs-only sets in
-    // ai-sdlc-review.yml + verify-attestation.yml + ai-sdlc-review-docs-only.yml
-    // is the exact bug class that produced the AISDLC-136 deadlock.
-    // Lock the exact pattern set in.
+  it('classify step: full-depth checkout, SHAs via env (not interpolated), fail-safe shell', () => {
     const detect = workflow.jobs.detect;
-    const filterStep = detect.steps.find(
-      (s) => typeof s.uses === 'string' && s.uses.startsWith('dorny/paths-filter'),
+    const checkout = detect.steps.find(
+      (s) => typeof s.uses === 'string' && s.uses.startsWith('actions/checkout@'),
     );
-    const filtersYaml = filterStep.with.filters;
-    // The filters value is a YAML string (the action parses it itself).
-    // Re-parse it to check the docs_only pattern set.
-    const json = execFileSync(
-      'python3',
-      ['-c', 'import sys, yaml, json; print(json.dumps(yaml.safe_load(sys.stdin.read())))'],
-      { encoding: 'utf-8', input: filtersYaml },
-    );
-    const filters = JSON.parse(json);
-    assert.deepEqual(
-      filters.docs_only.sort(),
-      ['*.md', 'backlog/completed/**', 'backlog/tasks/**', 'docs/**', 'spec/rfcs/**'],
-      'docs_only patterns must mirror ai-sdlc-review-docs-only.yml exactly',
-    );
+    assert.match(checkout.uses, /^actions\/checkout@[0-9a-f]{40}/);
+    assert.equal(checkout.with?.['fetch-depth'], 0);
+    const classify = detect.steps.find((s) => s.id === 'classify');
+    assert.equal(classify.env.BASE_SHA, '${{ github.event.pull_request.base.sha }}');
+    assert.equal(classify.env.HEAD_SHA, '${{ github.event.pull_request.head.sha }}');
+    assert.ok(!classify.run.includes('${{'), 'no expression interpolation inside the script');
+    assert.match(classify.run, /set -euo pipefail/);
+  });
+
+  it('deps and tasks dorny filters are still present and wired to outputs', () => {
+    const detect = workflow.jobs.detect;
+    for (const id of ['deps-filter', 'tasks-filter']) {
+      const step = detect.steps.find((s) => s.id === id);
+      assert.ok(step, `${id} must remain`);
+      assert.match(step.uses, /^dorny\/paths-filter@[0-9a-f]{40}$/);
+    }
+    assert.equal(detect.outputs.deps, '${{ steps.deps-filter.outputs.deps }}');
+    assert.equal(detect.outputs.tasks, '${{ steps.tasks-filter.outputs.tasks }}');
   });
 
   it('AC #1 also: workflow file is valid YAML when validated by python3 + PyYAML', () => {
@@ -665,77 +654,118 @@ describe('ai-sdlc-gate.yml — aggregator decision logic (AC #4, #5)', () => {
   });
 });
 
-describe('ai-sdlc-gate.yml — archetype detection (AC #2)', () => {
-  // Static-pattern tests against the docs-only filter list. We model
-  // dorny/paths-filter's predicate-quantifier:every behavior in pure JS
-  // and assert that our path patterns produce the expected archetype
-  // for each canonical PR shape.
+describe('ai-sdlc-gate.yml — archetype detection (AC #2, AISDLC-484)', () => {
+  const SCRIPT = join(REPO_ROOT, 'scripts', 'is-docs-only-changeset.mjs');
 
-  // Minimal glob → regex translator for the patterns in our filter.
-  // Supports: `**` (any depth), `*` (any non-/ segment), exact strings.
-  function globToRegex(glob) {
-    // Order matters: `**` → '.*' MUST happen before `*` → '[^/]*'.
-    const re = glob
-      .replace(/[.+?^${}()|[\]\\]/g, '\\$&') // escape regex specials except *
-      .replace(/\*\*/g, '__GLOBSTAR__')
-      .replace(/\*/g, '[^/]*')
-      .replace(/__GLOBSTAR__/g, '.*');
-    return new RegExp(`^${re}$`);
+  function classifyList(files) {
+    return execFileSync('node', [SCRIPT], { encoding: 'utf-8', input: files.join('\n') }).trim();
   }
 
-  const docsPatterns = [
-    'spec/rfcs/**',
-    'docs/**',
-    'backlog/tasks/**',
-    'backlog/completed/**',
-    '*.md', // root-level only (single-* doesn't match `/`)
-  ];
-
-  function isDocsOnly(files) {
-    if (!files.length) return false; // empty diff is not docs-only
-    return files.every((f) => docsPatterns.some((p) => globToRegex(p).test(f)));
-  }
-
-  it('PR touching only spec/rfcs/** → docs-only', () => {
-    assert.equal(isDocsOnly(['spec/rfcs/RFC-0042-foo.md']), true);
+  it('spec/rfcs only -> true', () => {
+    assert.equal(classifyList(['spec/rfcs/RFC-0042-foo.md']), 'true');
+  });
+  it('docs, backlog, root *.md -> true', () => {
+    assert.equal(classifyList(['docs/operations/quality-gate.md', 'backlog/tasks/x.md']), 'true');
+    assert.equal(classifyList(['README.md', 'CHANGELOG.md']), 'true');
+  });
+  it('mixed docs + source -> false', () => {
+    assert.equal(classifyList(['docs/a.md', 'pipeline-cli/src/exec.ts']), 'false');
+  });
+  it('source only -> false', () => {
+    assert.equal(classifyList(['pipeline-cli/src/exec.ts']), 'false');
+  });
+  it('empty -> false', () => {
+    assert.equal(classifyList([]), 'false');
+  });
+  it('nested md outside docs paths -> false', () => {
+    assert.equal(classifyList(['ai-sdlc-plugin/foo.md']), 'false');
   });
 
-  it('PR touching only docs/** → docs-only', () => {
-    assert.equal(isDocsOnly(['docs/operations/quality-gate.md']), true);
-  });
+  describe('classify step run: script executed in a temp git repo', () => {
+    let runScript;
+    let repo;
+    const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf-8' }).trim();
+    before(() => {
+      const wf = loadYaml(WORKFLOW_PATH);
+      runScript = wf.jobs.detect.steps.find((s) => s.id === 'classify').run;
+    });
 
-  it('PR touching only backlog/tasks/** → docs-only', () => {
-    assert.equal(isDocsOnly(['backlog/tasks/AISDLC-140-foo.md']), true);
-  });
+    function setup() {
+      repo = mkdtempSync(join(tmpdir(), 'gate-classify-'));
+      mkdirSync(join(repo, 'scripts'));
+      writeFileSync(join(repo, 'scripts', 'is-docs-only-changeset.mjs'), readFileSync(SCRIPT));
+      git('init', '-q');
+      git('config', 'user.email', 't@example.com');
+      git('config', 'user.name', 't');
+      git('config', 'commit.gpgsign', 'false');
+      writeFileSync(join(repo, 'README.md'), 'base\n');
+      git('add', '-A');
+      git('commit', '-q', '-m', 'base');
+      return git('rev-parse', 'HEAD');
+    }
 
-  it('PR touching only root README.md → docs-only', () => {
-    assert.equal(isDocsOnly(['README.md', 'CHANGELOG.md']), true);
-  });
+    function commit(files) {
+      for (const [f, c] of Object.entries(files)) {
+        mkdirSync(dirname(join(repo, f)), { recursive: true });
+        writeFileSync(join(repo, f), c);
+      }
+      git('add', '-A');
+      git('commit', '-q', '-m', 'change');
+      return git('rev-parse', 'HEAD');
+    }
 
-  it('PR mixing docs + code → NOT docs-only (must trigger build-test)', () => {
-    // The exact case the predicate-quantifier:every assertion above
-    // protects against. This is the one that, mishandled, would
-    // silently skip build-test on real code changes.
-    assert.equal(
-      isDocsOnly(['docs/operations/quality-gate.md', 'pipeline-cli/src/exec.ts']),
-      false,
-    );
-  });
+    function run(base, head) {
+      const out = join(repo, '..', `gh-out-${Date.now()}-${Math.random()}`);
+      writeFileSync(out, '');
+      execFileSync('bash', ['-c', runScript], {
+        cwd: repo,
+        env: { ...process.env, BASE_SHA: base, HEAD_SHA: head, GITHUB_OUTPUT: out },
+        encoding: 'utf-8',
+      });
+      const text = readFileSync(out, 'utf-8');
+      rmSync(out, { force: true });
+      return text.trim();
+    }
 
-  it('PR touching only code → NOT docs-only', () => {
-    assert.equal(isDocsOnly(['pipeline-cli/src/exec.ts']), false);
-  });
+    it('docs-only commit -> docs_only=true', () => {
+      try {
+        const base = setup();
+        const head = commit({ 'docs/a.md': 'x' });
+        assert.equal(run(base, head), 'docs_only=true');
+      } finally {
+        rmSync(repo, { recursive: true, force: true });
+      }
+    });
 
-  it('PR touching nested *.md (docs/foo/bar.md) → docs-only via docs/**', () => {
-    assert.equal(isDocsOnly(['docs/foo/bar.md']), true);
-  });
+    it('mixed commit -> docs_only=false', () => {
+      try {
+        const base = setup();
+        const head = commit({ 'docs/a.md': 'x', 'src/a.ts': 'x' });
+        assert.equal(run(base, head), 'docs_only=false');
+      } finally {
+        rmSync(repo, { recursive: true, force: true });
+      }
+    });
 
-  it('PR touching nested *.md OUTSIDE docs/spec/backlog (e.g. ai-sdlc-plugin/foo.md) → NOT docs-only', () => {
-    // The root-level `*.md` pattern intentionally does NOT match nested
-    // markdown files outside the explicit docs paths. A README inside
-    // a code package should still trigger build-test in case the README
-    // documents code-level behavior that needs verifying.
-    assert.equal(isDocsOnly(['ai-sdlc-plugin/foo.md']), false);
+    it('unavailable base on a PR -> docs_only=false (never true)', () => {
+      try {
+        setup();
+        const head = commit({ 'docs/a.md': 'x' });
+        assert.equal(run('0'.repeat(40), head), 'docs_only=false');
+      } finally {
+        rmSync(repo, { recursive: true, force: true });
+      }
+    });
+
+    it('no base sha (non-PR) falls back to ls-files', () => {
+      try {
+        setup();
+        const head = commit({ 'src/a.ts': 'x' });
+        assert.equal(run('', head), 'docs_only=false');
+      } finally {
+        rmSync(repo, { recursive: true, force: true });
+      }
+    });
   });
 });
 

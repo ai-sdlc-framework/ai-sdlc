@@ -3,7 +3,7 @@ id: AISDLC-484
 title: >-
   Fix dead docs-only CI fast-path: dorny/paths-filter@v3 with
   predicate-quantifier:every never fires
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-30 00:00'
 labels:
@@ -14,6 +14,7 @@ labels:
   - performance
 dependencies: []
 priority: high
+updated_date: '2026-10-10 14:38'
 ---
 
 ## Description
@@ -126,10 +127,10 @@ The operator applies this change to `.github/workflows/ai-sdlc-gate.yml` directl
 
 ## Acceptance Criteria
 
-- [ ] #1 The `detect` job in `.github/workflows/ai-sdlc-gate.yml` determines `docs_only` via `scripts/is-docs-only-changeset.mjs` (or equivalent deterministic logic), not `dorny/paths-filter`'s `predicate-quantifier: every`.
-- [ ] #2 A docs-only PR (only `spec/rfcs/**` / `docs/**` / `backlog/**` / root `*.md`) skips Build & Test, Coverage, and Integration; `ai-sdlc/pr-ready` still posts SUCCESS so the PR merges.
-- [ ] #3 A PR touching any source file still runs the full matrix (no false-negative docs classification).
-- [ ] #4 The workflow test (`.github/workflows/__tests__/ai-sdlc-gate.test.mjs`) is updated to exercise the actual detect mechanism (not a separate hand-rolled model), including a mixed docs+source changeset that must NOT classify as docs-only.
+- [x] #1 The `detect` job in `.github/workflows/ai-sdlc-gate.yml` determines `docs_only` via `scripts/is-docs-only-changeset.mjs` (or equivalent deterministic logic), not `dorny/paths-filter`'s `predicate-quantifier: every`.
+- [x] #2 A docs-only PR (only `spec/rfcs/**` / `docs/**` / `backlog/**` / root `*.md`) skips Build & Test, Coverage, and Integration; `ai-sdlc/pr-ready` still posts SUCCESS so the PR merges.
+- [x] #3 A PR touching any source file still runs the full matrix (no false-negative docs classification).
+- [x] #4 The workflow test (`.github/workflows/__tests__/ai-sdlc-gate.test.mjs`) is updated to exercise the actual detect mechanism (not a separate hand-rolled model), including a mixed docs+source changeset that must NOT classify as docs-only.
 - [ ] #5 Verified on a real docs-only PR that the skipped jobs do not run and the PR still merges on the two required checks.
 
 ## Notes
@@ -140,3 +141,28 @@ workflow change. The task body carries the ready-to-paste detect-job YAML so
 application is mechanical.
 
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+## Summary
+The `detect` job in `ai-sdlc-gate.yml` now computes `docs_only` with a `classify` shell step that feeds the PR's changed files to `scripts/is-docs-only-changeset.mjs`, replacing the dead dorny `predicate-quantifier: every` filter. Failures resolve to `docs_only=false` (fail safe).
+
+## Changes
+- `.github/workflows/ai-sdlc-gate.yml` (modified): classify step, checkout `fetch-depth: 0`, `docs_only` output rewired; `deps`/`tasks` filters untouched.
+- `.github/workflows/__tests__/ai-sdlc-gate.test.mjs` (modified): tests spawn the real script and execute the step's own `run:` body in a temp git repo (docs-only, mixed, unavailable base, no-base fallback); removed the hand-rolled glob model.
+- `docs/operations/quality-gate.md` (modified): dropped the stale dorny reference.
+
+## Design decisions
+- **Shared classifier**: single source of truth with `ai-sdlc-review.yml` / `verify-attestation.yml`; docs-only set is slightly wider (attestations, `_decisions`), matching their `paths-ignore`.
+
+## Verification
+- `pnpm build` — clean
+- workflow tests — 457/457 pass
+- `pnpm lint` — clean
+- `pnpm format:check` — clean
+- 2 reviews approved (code-reviewer, security-reviewer; classifier-selected)
+
+## Follow-up
+- declined: add `--no-renames` to the diff (rare src-to-docs rename edge; reviewer minor).
+- declined: run the classifier from the base commit instead of the PR checkout (same exposure as before; reviewer minor hardening).
+- declined: AC5 real docs-only PR verification can only happen after this PR merges.
