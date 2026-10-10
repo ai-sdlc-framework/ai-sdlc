@@ -17,7 +17,7 @@ claude --plugin-dir ai-sdlc-plugin/mods/context-meter
 
 A folder given this way hot-reloads while you edit it; run `/reload-plugins` after changes
 if the band does not update. Validate with `claude plugin validate ai-sdlc-plugin/mods/context-meter`.
-The pure logic is tested by `pnpm test:context-meter` (part of `pnpm test`).
+The mod is the private `@ai-sdlc/plugin-mods` workspace package: `pnpm --filter @ai-sdlc/plugin-mods test` runs its vitest suite (pure logic plus the `register.tsx` handlers, with the host `claude-code` module and JSX runtime stubbed), and CI measures its coverage like any other package.
 
 ## What each element means
 
