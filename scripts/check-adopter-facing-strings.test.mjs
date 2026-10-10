@@ -45,7 +45,6 @@ const WATCHED_WORKFLOWS = [
   '.github/workflows/ai-sdlc-gate.yml',
   '.github/workflows/dor-ingress.yml',
   '.github/workflows/auto-enable-auto-merge.yml',
-  '.github/workflows/auto-rebase-open-prs.yml',
   '.github/workflows/untrusted-pr-gate.yml',
 ];
 

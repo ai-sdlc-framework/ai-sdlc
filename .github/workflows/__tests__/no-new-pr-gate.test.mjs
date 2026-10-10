@@ -32,13 +32,15 @@ const WORKFLOWS_DIR = resolve(__dirname, '..');
 const PR_TRIGGER_ALLOWLIST = new Map([
   ['ai-sdlc-gate.yml', 'produces the ai-sdlc/pr-ready required rollup check'],
   ['ai-sdlc-review.yml', 'CI-side reviewer fallback when local attestation is absent'],
-  ['ci.yml', 'core lint/build/test gate'],
   ['dor-ingress.yml', 'Definition-of-Ready evaluation of PR-staged backlog tasks'],
   ['verify-attestation.yml', 'verifies the DSSE attestation envelope on code PRs'],
   ['require-issue-link.yml', 'enforces the issue-first workflow (Closes #N)'],
   ['rfc-lifecycle-check.yml', 'validates RFC lifecycle transitions on PRs'],
   ['auto-enable-auto-merge.yml', 'arms --auto --squash on same-repo PRs'],
-  ['auto-rearm-on-dequeue.yml', 're-arms auto-merge after a merge-queue dequeue'],
+  [
+    'auto-rearm-on-dequeue.yml',
+    'safety net that re-arms auto-merge when GitHub clears it (never rebases)',
+  ],
   [
     'untrusted-pr-gate.yml',
     'zero-trust verification gate for untrusted-contributor PRs (posts the ai-sdlc/untrusted-pr-gate status; gated behind the AI_SDLC_UNTRUSTED_PR_GATE feature flag, default off)',

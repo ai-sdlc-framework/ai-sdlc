@@ -197,7 +197,6 @@ describe('AISDLC-218: workflow-changes recommendation file', () => {
     'ci.yml',
     'dor-ingress.yml',
     'auto-enable-auto-merge.yml',
-    'auto-rebase-open-prs.yml',
   ] as const;
 
   for (const workflow of AUDITED_WORKFLOWS) {

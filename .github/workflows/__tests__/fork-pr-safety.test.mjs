@@ -458,6 +458,12 @@ describe('AISDLC-704: privileged workflows never check out untrusted refs or int
     });
   }
 
+  it('ai-sdlc-fix-ci.yml triggers on the PR gate workflow (ci.yml no longer runs on pull_request, AISDLC-727)', () => {
+    const wf = loadYaml('ai-sdlc-fix-ci.yml');
+    const on = wf.on ?? wf[true];
+    assert.deepEqual(on.workflow_run.workflows, [loadYaml('ai-sdlc-gate.yml').name]);
+  });
+
   it('ai-sdlc-fix-ci.yml privileged root checkout is the default branch; PR branch goes to pr-work/', () => {
     const wf = loadYaml('ai-sdlc-fix-ci.yml');
     const steps = wf.jobs['fix-ci'].steps;

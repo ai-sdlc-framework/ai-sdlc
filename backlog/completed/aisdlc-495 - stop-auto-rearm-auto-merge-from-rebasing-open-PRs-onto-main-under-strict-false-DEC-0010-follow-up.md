@@ -16,12 +16,24 @@ labels:
 dependencies: []
 references:
   - spec/rfcs/RFC-0042-proof-of-execution-attestation.md
-  - .github/workflows/auto-rebase-open-prs.yml
-  - .github/workflows/auto-rebase-on-queue-kick.yml
   - .github/workflows/auto-rearm-on-dequeue.yml
   - .github/workflows/auto-enable-auto-merge.yml
   - docs/operations/merge-without-queue.md
 priority: high
+drift_log:
+  - date: '2026-10-10'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .github/workflows/auto-rebase-open-prs.yml
+    resolution: flagged
+  - date: '2026-10-10'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .github/workflows/auto-rebase-on-queue-kick.yml
+    resolution: flagged
+drift_checked: '2026-10-10'
 ---
 
 ## Description

@@ -13,8 +13,15 @@ dependencies: []
 references:
   - pipeline-cli/bin/cli-pr-unstick.mjs
   - scripts/check-orchestrator-state.sh
-  - .github/workflows/auto-rebase-open-prs.yml
 priority: high
+drift_log:
+  - date: '2026-10-10'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .github/workflows/auto-rebase-open-prs.yml
+    resolution: flagged
+drift_checked: '2026-10-10'
 ---
 
 ## Description

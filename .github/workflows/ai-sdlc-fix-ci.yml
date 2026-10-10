@@ -2,7 +2,7 @@ name: AI-SDLC Fix CI
 
 on:
   workflow_run:
-    workflows: ['CI']
+    workflows: ['AI-SDLC PR Ready Gate']
     types: [completed]
 
 permissions:

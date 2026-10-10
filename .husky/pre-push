@@ -36,7 +36,8 @@
 # (AI_SDLC_SKIP_SUBSTRATE_GATE=1,
 # AI_SDLC_SKIP_TASK_MOVE=1, AI_SDLC_SKIP_SQUASH_CHORES=1,
 # AI_SDLC_SKIP_CHANGELOG_CHECK=1, AI_SDLC_SKIP_FOLLOWUP_GATE=1,
-# AI_SDLC_SKIP_ATTESTATION_SIGN=1, AI_SDLC_SKIP_DARK_CODE_GATE=1)
+# AI_SDLC_SKIP_ATTESTATION_SIGN=1, AI_SDLC_SKIP_DARK_CODE_GATE=1,
+# AI_SDLC_SKIP_MARKER_GATE=1)
 # or skip all pre-push hooks via `git push --no-verify` (use sparingly —
 # these gates exist because the things they guard have failed silently in
 # the past).
@@ -58,6 +59,10 @@ fi
 PUSH_STDIN="$(cat || true)"
 
 node scripts/check-substrate-contract.mjs
+# AISDLC-727: CI-skip magic-token gate (AISDLC-88). Was documented as enforced but never
+# called from any hook; it is a fast per-commit text scan of the push range, so it runs
+# first. Skip: AI_SDLC_SKIP_MARKER_GATE=1.
+printf '%s\n' "$PUSH_STDIN" | ./scripts/check-skip-ci-marker.sh
 # AISDLC-687: dark-code static scan (cheap). Skip:
 # AI_SDLC_SKIP_DARK_CODE_GATE=1.
 ./scripts/check-dark-code-on-push.sh

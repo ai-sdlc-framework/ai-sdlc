@@ -1,17 +1,11 @@
 name: CI
 
+# AISDLC-727: this workflow runs on pushes to main (full suite, post-merge) and
+# the nightly schedule ONLY. Pull requests are covered by ai-sdlc-gate.yml
+# (`ai-sdlc/pr-ready`); running both on every PR doubled the CI cost.
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
-    # AISDLC-218 (revised): explicit types — keep `opened` (so direct-ready
-    # PRs without `--draft` fire CI), keep `synchronize` + `reopened` (push +
-    # reopen on ready PRs), add `ready_for_review` (canonical fire-once
-    # trigger when a draft flips to ready). The job-level `draft == false`
-    # guards skip draft opens, so adding `opened` doesn't reintroduce the
-    # original 2-CI-runs-per-draft-PR problem.
-    types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
   # AISDLC-771: nightly fresh-repo first-run smoke (install, init, doctor, one
   # task). Only the `first-run-smoke` job runs on this event; every other job
