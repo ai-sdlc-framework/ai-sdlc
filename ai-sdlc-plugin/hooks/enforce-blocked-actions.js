@@ -231,12 +231,21 @@ function forcePushRefusal(why) {
       `push to main/master or a protected branch are never permitted.`
     );
   }
+  const mainRooted =
+    why === 'not-task-worktree'
+      ? ` From a session rooted at the main checkout, the cwd worktree must be bound to ONE task in either of ` +
+        `two ways: (1) the task id bound to the session at launch equals the worktree's .active-task, or ` +
+        `(2) the session is a hierarchy executor that holds exactly one inflight claim on the dispatch ` +
+        `board, for that same task. Next step: claim the task through the executor loop (/ai-sdlc executor) ` +
+        `and push from its worktree, or run the push from a session rooted in the worktree.`
+      : '';
   return (
     `force-push is refused here: ${key} = leaseOnOwnBranch (the default) allows a lease push only from a ` +
     `dispatched task worktree under <repo>/.worktrees/ whose .active-task, directory name and ai-sdlc/<task-id>-* ` +
     `branch agree, with a trusted policy that can be read (${why}). Push from the task worktree with ` +
     `'git push --force-with-lease origin HEAD:refs/heads/<own-branch>'. Plain force pushes and any push ` +
-    `to main/master or a protected branch are never permitted.`
+    `to main/master or a protected branch are never permitted.` +
+    mainRooted
   );
 }
 

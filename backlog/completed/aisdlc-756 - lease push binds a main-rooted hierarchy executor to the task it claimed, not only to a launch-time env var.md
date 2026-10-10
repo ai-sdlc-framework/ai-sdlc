@@ -2,7 +2,7 @@
 id: AISDLC-756
 title: >-
   Lease push binds a main-rooted hierarchy executor to the task it claimed, not only to a launch-time env var
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-07'
 labels:
@@ -48,9 +48,35 @@ Sequencing: hooks run from the installed plugin, so executors see this only afte
 
 ## Acceptance Criteria
 
-- [ ] From a hierarchy executor started by `cli-hierarchy up` (project dir = main checkout, no `AI_SDLC_ACTIVE_TASK_ID`), with the task claimed on the board, a lone lease push in the accepted explicit form with cwd in that task's worktree is allowed; the same push from the dispatch session or from an executor that does not hold the claim is refused as `not-task-worktree`.
-- [ ] `cli-hierarchy up` exports `AI_SDLC_HIERARCHY_SESSION` and `AI_SDLC_HIERARCHY_ROLE` into each started session; `hierarchy.test.ts` asserts both on the generated command line for all three roles.
-- [ ] Hermetic hook tests cover the allowed case and each refused case listed in the description, plus the unchanged `AI_SDLC_ACTIVE_TASK_ID` path.
-- [ ] Plain force pushes, any push to main/master or a protected branch, and any no-colon or omitted-refspec form stay refused (existing tests unchanged and green).
-- [ ] The `not-task-worktree` refusal text names both bindings and a next step; `docs/operations/cli-hierarchy.md`, `docs/operations/decision-authority.md` and `ai-sdlc-plugin/commands/executor.md` are updated.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` and `pnpm dark-code:check` pass apart from the pre-existing pipeline-cli failures (verify-runtime, bin-invocation, TUI timeouts), disclosed in the PR body.
+- [x] From a hierarchy executor started by `cli-hierarchy up` (project dir = main checkout, no `AI_SDLC_ACTIVE_TASK_ID`), with the task claimed on the board, a lone lease push in the accepted explicit form with cwd in that task's worktree is allowed; the same push from the dispatch session or from an executor that does not hold the claim is refused as `not-task-worktree`.
+- [x] `cli-hierarchy up` exports `AI_SDLC_HIERARCHY_SESSION` and `AI_SDLC_HIERARCHY_ROLE` into each started session; `hierarchy.test.ts` asserts both on the generated command line for all three roles.
+- [x] Hermetic hook tests cover the allowed case and each refused case listed in the description, plus the unchanged `AI_SDLC_ACTIVE_TASK_ID` path.
+- [x] Plain force pushes, any push to main/master or a protected branch, and any no-colon or omitted-refspec form stay refused (existing tests unchanged and green).
+- [x] The `not-task-worktree` refusal text names both bindings and a next step; `docs/operations/cli-hierarchy.md`, `docs/operations/decision-authority.md` and `ai-sdlc-plugin/commands/executor.md` are updated.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` and `pnpm dark-code:check` pass apart from the pre-existing pipeline-cli failures (verify-runtime, bin-invocation, TUI timeouts), disclosed in the PR body.
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+A hierarchy executor rooted at the main checkout can now lease-push its own claimed task branch: the hook binds it to the single inflight claim it holds on the dispatch board, in addition to the unchanged `AI_SDLC_ACTIVE_TASK_ID` binding.
+
+## Changes
+- `pipeline-cli/src/hierarchy/up.ts` (modified): every started session gets `AI_SDLC_HIERARCHY_SESSION` and `AI_SDLC_HIERARCHY_ROLE` in its launch command, shell-quoted.
+- `pipeline-cli/src/hierarchy/status.ts` (modified): status table shows both values per session.
+- `ai-sdlc-plugin/hooks/lib/trusted-policy.js` (modified): `resolveLeaseWorktree()` accepts an executor session holding exactly one inflight claim for the worktree's task; fails closed on any error or symlinked manifest/state/inflight path.
+- `ai-sdlc-plugin/hooks/enforce-blocked-actions.js` (modified): `not-task-worktree` refusal names both bindings and a next step.
+- `ai-sdlc-plugin/hooks/enforce-lease-push.test.mjs`, `pipeline-cli/src/hierarchy/hierarchy.test.ts` (modified): hermetic coverage.
+- `docs/operations/cli-hierarchy.md`, `docs/operations/decision-authority.md`, `ai-sdlc-plugin/commands/executor.md` (modified): documented the binding.
+
+## Design decisions
+- **Refusal text avoids literal env var names**: an existing AISDLC-710 test forbids `AI_SDLC_` in refusals (never suggest an exit); the text describes the bindings in words.
+- **Missing heartbeat file is skipped, a symlinked one fails closed**: a claim without a heartbeat names no worker.
+
+## Verification
+- `node --test ai-sdlc-plugin/hooks/*.test.mjs ai-sdlc-plugin/hooks/lib/*.test.mjs` - 964 pass
+- `vitest run src/hierarchy` - 420 pass
+
+## Follow-up
+(none)
+<!-- SECTION:FINAL_SUMMARY:END -->

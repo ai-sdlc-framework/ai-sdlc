@@ -319,10 +319,10 @@ describe('hierarchy up', () => {
       Q('executor-beta'),
     ]);
     expect(newWindowCommands()).toEqual([
-      `'claude' --name '${Q('planner')}' --model 'fable' --permission-mode 'acceptEdits' '/ai-sdlc planner'`,
-      `'claude' --name '${Q('operator-dispatch')}' --model 'opus' --permission-mode 'bypassPermissions' '/ai-sdlc operator-dispatch'`,
-      `'claude' --name '${Q('executor-alpha')}' --model 'sonnet' --permission-mode 'bypassPermissions' '/ai-sdlc executor'`,
-      `'claude' --name '${Q('executor-beta')}' --model 'sonnet' --permission-mode 'bypassPermissions' '/ai-sdlc executor'`,
+      `AI_SDLC_HIERARCHY_SESSION='${Q('planner')}' AI_SDLC_HIERARCHY_ROLE='planner' 'claude' --name '${Q('planner')}' --model 'fable' --permission-mode 'acceptEdits' '/ai-sdlc planner'`,
+      `AI_SDLC_HIERARCHY_SESSION='${Q('operator-dispatch')}' AI_SDLC_HIERARCHY_ROLE='operator-dispatch' 'claude' --name '${Q('operator-dispatch')}' --model 'opus' --permission-mode 'bypassPermissions' '/ai-sdlc operator-dispatch'`,
+      `AI_SDLC_HIERARCHY_SESSION='${Q('executor-alpha')}' AI_SDLC_HIERARCHY_ROLE='executor' 'claude' --name '${Q('executor-alpha')}' --model 'sonnet' --permission-mode 'bypassPermissions' '/ai-sdlc executor'`,
+      `AI_SDLC_HIERARCHY_SESSION='${Q('executor-beta')}' AI_SDLC_HIERARCHY_ROLE='executor' 'claude' --name '${Q('executor-beta')}' --model 'sonnet' --permission-mode 'bypassPermissions' '/ai-sdlc executor'`,
     ]);
     // One detached session per agent, named after it; never a shared session or a new window.
     const creates = fake.calls.filter((c) =>
@@ -692,6 +692,10 @@ describe('hierarchy status', () => {
     expect(text).toContain('AISDLC-100');
     expect(text).toContain('busy');
     expect(text).toContain('board: 0 queued, 1 inflight');
+    expect(text).toContain('HIERARCHY_SESSION');
+    expect(text).toContain('HIERARCHY_ROLE');
+    const alphaLine = text.split('\n').find((l) => l.includes(Q('executor-alpha')));
+    expect(alphaLine).toMatch(new RegExp(`${Q('executor-alpha')}\\s+executor$`));
   });
 
   it('reports starting when the window is alive but the registry has no entry', async () => {
@@ -1357,7 +1361,20 @@ describe('validation helpers', () => {
         permissionMode: 'p',
         prompt: "a'b",
       }),
-    ).toBe(`'claude' --name 'x' --model 'm' --permission-mode 'p' 'a'\\''b'`);
+    ).toBe(
+      `AI_SDLC_HIERARCHY_SESSION='x' AI_SDLC_HIERARCHY_ROLE='executor' 'claude' --name 'x' --model 'm' --permission-mode 'p' 'a'\\''b'`,
+    );
+    for (const role of ['planner', 'operator-dispatch', 'executor'] as const) {
+      const cmd = buildClaudeCommand('claude', {
+        role,
+        name: "proj-it's",
+        model: 'm',
+        permissionMode: 'p',
+        prompt: 'x',
+      });
+      expect(cmd).toContain(`AI_SDLC_HIERARCHY_SESSION='proj-it'\\''s'`);
+      expect(cmd).toContain(`AI_SDLC_HIERARCHY_ROLE='${role}'`);
+    }
   });
 });
 

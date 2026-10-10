@@ -1278,3 +1278,139 @@ describe('config-mapped no-colon refspec: why only the explicit destination is a
     assert.equal(calls(shim), '');
   });
 });
+
+// ── AISDLC-756 — main-rooted hierarchy executor bound to its inflight claim ──
+
+describe('main-rooted hierarchy executor: lease push bound to the inflight claim (AISDLC-756)', () => {
+  let r;
+  let wt2;
+  const SESSION = 'proj-executor-alpha';
+  const exec = (over = {}) => ({
+    env: {
+      AI_SDLC_ACTIVE_TASK_ID: '',
+      AI_SDLC_HIERARCHY_SESSION: SESSION,
+      AI_SDLC_HIERARCHY_ROLE: 'executor',
+      ...over,
+    },
+  });
+  const dispatchDir = () => join(r.root, '.ai-sdlc', 'dispatch');
+  const inflightDir = () => join(dispatchDir(), 'inflight');
+  const claim = (taskId, workerId) => {
+    mkdirSync(inflightDir(), { recursive: true });
+    writeFileSync(join(inflightDir(), `${taskId}.dispatch.json`), '{}');
+    writeFileSync(
+      join(inflightDir(), `${taskId}.state.json`),
+      JSON.stringify({ taskId, workerId, workerKind: 'any' }),
+    );
+  };
+  const push = (opts) => run(L(), { cwd: r.wt, projectDir: r.root, ...opts });
+  const reset = () => rmSync(dispatchDir(), { recursive: true, force: true });
+
+  before(() => {
+    r = makeRepo('hier756', roleYaml(LEASE));
+    wt2 = addTaskWorktree(r.root, 2);
+  });
+  after(() => reset());
+
+  it('allowed with a matching inflight claim (session with or without the project prefix)', () => {
+    reset();
+    claim('AISDLC-1', 'executor-alpha');
+    assert.ok(!denied(push(exec())));
+    assert.ok(!denied(push(exec({ AI_SDLC_HIERARCHY_SESSION: 'executor-alpha' }))));
+    reset();
+  });
+
+  it('refused with no claim on the board', () => {
+    reset();
+    assert.ok(denied(push(exec())));
+  });
+
+  it('refused when the claim belongs to another executor', () => {
+    reset();
+    claim('AISDLC-1', 'executor-beta');
+    assert.ok(denied(push(exec())));
+  });
+
+  it('refused when the same name holds two claims', () => {
+    reset();
+    claim('AISDLC-1', 'executor-alpha');
+    claim('AISDLC-2', 'executor-alpha');
+    assert.ok(denied(push(exec())));
+    assert.ok(denied(run(L(), { cwd: wt2, projectDir: r.root, ...exec() })));
+    reset();
+  });
+
+  it('refused when the claim is for a different task', () => {
+    reset();
+    claim('AISDLC-2', 'executor-alpha');
+    assert.ok(denied(push(exec())));
+    reset();
+  });
+
+  it('refused for dispatch, planner or an unset role or session', () => {
+    reset();
+    claim('AISDLC-1', 'executor-alpha');
+    for (const role of ['operator-dispatch', 'planner', '']) {
+      assert.ok(denied(push(exec({ AI_SDLC_HIERARCHY_ROLE: role }))), role);
+    }
+    assert.ok(denied(push(exec({ AI_SDLC_HIERARCHY_SESSION: '' }))));
+    reset();
+  });
+
+  it('refused when the manifest path is tampered (symlinked manifest or symlinked inflight dir)', () => {
+    reset();
+    mkdirSync(inflightDir(), { recursive: true });
+    const outside = join(base, 'hier756-outside');
+    mkdirSync(join(outside, 'inflight'), { recursive: true });
+    writeFileSync(join(outside, 'real.dispatch.json'), '{}');
+    symlinkSync(join(outside, 'real.dispatch.json'), join(inflightDir(), 'AISDLC-1.dispatch.json'));
+    writeFileSync(
+      join(inflightDir(), 'AISDLC-1.state.json'),
+      JSON.stringify({ taskId: 'AISDLC-1', workerId: 'executor-alpha' }),
+    );
+    assert.ok(denied(push(exec())), 'symlinked manifest');
+    reset();
+    mkdirSync(dispatchDir(), { recursive: true });
+    writeFileSync(join(outside, 'inflight', 'AISDLC-1.dispatch.json'), '{}');
+    writeFileSync(
+      join(outside, 'inflight', 'AISDLC-1.state.json'),
+      JSON.stringify({ taskId: 'AISDLC-1', workerId: 'executor-alpha' }),
+    );
+    symlinkSync(join(outside, 'inflight'), inflightDir());
+    assert.ok(denied(push(exec())), 'symlinked inflight dir');
+    reset();
+  });
+
+  it('the AI_SDLC_ACTIVE_TASK_ID binding is unchanged', () => {
+    reset();
+    const bound = (id) => ({ env: { AI_SDLC_ACTIVE_TASK_ID: id } });
+    assert.ok(!denied(push(bound('AISDLC-1'))));
+    assert.ok(denied(push(bound('AISDLC-2'))));
+    assert.ok(denied(push(bound(''))));
+  });
+
+  it('the refusal text names both bindings and a next step', () => {
+    reset();
+    const out = push(exec());
+    const reason = JSON.parse(out).hookSpecificOutput.permissionDecisionReason;
+    assert.match(reason, /bound to the session at launch/);
+    assert.match(reason, /hierarchy executor/);
+    assert.match(reason, /inflight claim/);
+    assert.match(reason, /\/ai-sdlc executor/);
+    assert.match(reason, /rooted in the worktree/);
+  });
+
+  it('other push shapes stay refused even with a claim', () => {
+    reset();
+    claim('AISDLC-1', 'executor-alpha');
+    for (const cmd of [
+      `git push --force origin ${OWN}`,
+      `git push --force-with-lease origin ${OWN}`,
+      'git push --force-with-lease origin HEAD:refs/heads/main',
+      'git push --force-with-lease origin',
+    ]) {
+      assert.ok(denied(run(cmd, { cwd: r.wt, projectDir: r.root, ...exec() })), cmd);
+    }
+    reset();
+  });
+});

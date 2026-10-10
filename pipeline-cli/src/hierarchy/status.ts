@@ -74,7 +74,17 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
 /** Render the status result as a plain-text table. */
 export function formatStatus(result: StatusResult): string[] {
   if (result.rows.length === 0) return ['no sessions in the roster'];
-  const header = ['ROLE', 'NAME', 'STATE', 'ATTACHED', 'MODEL', 'MODE', 'INFLIGHT'];
+  const header = [
+    'ROLE',
+    'NAME',
+    'STATE',
+    'ATTACHED',
+    'MODEL',
+    'MODE',
+    'INFLIGHT',
+    'HIERARCHY_SESSION',
+    'HIERARCHY_ROLE',
+  ];
   const body = result.rows.map((r) => [
     r.entry.role,
     r.entry.name,
@@ -83,6 +93,8 @@ export function formatStatus(result: StatusResult): string[] {
     r.entry.model,
     r.entry.permissionMode,
     r.inflightTask ?? '-',
+    r.entry.tmuxSession,
+    r.entry.role,
   ]);
   const widths = header.map((h, i) => Math.max(h.length, ...body.map((b) => (b[i] ?? '').length)));
   const fmt = (cells: string[]) =>

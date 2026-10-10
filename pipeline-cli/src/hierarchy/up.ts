@@ -90,11 +90,13 @@ export const FALLBACK_PLANNER_MODE = 'default';
 /** Build the `claude` command line for one session. */
 export function buildClaudeCommand(
   bin: string,
-  s: Pick<PlannedSession, 'name' | 'model' | 'permissionMode' | 'prompt'> & {
-    role?: HierarchyRole;
-  },
+  s: Pick<PlannedSession, 'role' | 'name' | 'model' | 'permissionMode' | 'prompt'>,
 ): string {
+  // Exported ahead of the command so the plugin hook sees them at launch (the agent's
+  // own Bash commands cannot change them); the lease-push guard binds an executor by them.
   return [
+    `AI_SDLC_HIERARCHY_SESSION=${shellQuote(s.name)}`,
+    `AI_SDLC_HIERARCHY_ROLE=${shellQuote(s.role)}`,
     shellQuote(bin),
     '--name',
     shellQuote(s.name),
