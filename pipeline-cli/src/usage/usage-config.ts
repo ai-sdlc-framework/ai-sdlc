@@ -21,6 +21,15 @@ import { resolveUsageDir, validateUsageConfig, type UsageStoreOptions } from '@a
 import yaml from 'js-yaml';
 import type { TokenClass } from './units.js';
 
+export type BudgetRole = 'planner' | 'operator-dispatch' | 'executor';
+
+export interface RoleBudget {
+  /** Context size of one call above which a session of the role is over budget. */
+  contextBudgetTokens: number;
+  /** Model calls since the last clear above which a session of the role is over budget. */
+  turnBudget: number;
+}
+
 export type WindowMode = 'first-use' | 'fixed' | 'trailing';
 
 export interface WindowSpec {
@@ -49,6 +58,8 @@ export interface ResolvedUsageConfig {
   scorecardMinTasks: number;
   /** Estimated tokens above which a tool result draws a notice in main-session roles. */
   outputNoticeTokens: number;
+  /** Context and turn budgets per hierarchy role. */
+  roles: Record<BudgetRole, RoleBudget>;
   source: 'machine' | 'base-ref' | 'defaults';
   warnings: string[];
 }
@@ -61,10 +72,43 @@ export const DEFAULT_SCORECARD_MIN_TASKS = 30;
 /** Mirrored by `ai-sdlc-plugin/hooks/lib/large-output-notice.js`, which cannot import this package. */
 export const DEFAULT_OUTPUT_NOTICE_TOKENS = 8000;
 
+/**
+ * LOCKSTEP: `DEFAULT_ROLE_BUDGETS` in `ai-sdlc-plugin/hooks/lib/context-budget.js`
+ * holds the same numbers; `context-budget-lockstep.test.ts` asserts they agree.
+ */
+export const DEFAULT_ROLE_BUDGETS: Readonly<Record<BudgetRole, RoleBudget>> = {
+  planner: { contextBudgetTokens: 150_000, turnBudget: 300 },
+  'operator-dispatch': { contextBudgetTokens: 100_000, turnBudget: 200 },
+  executor: { contextBudgetTokens: 120_000, turnBudget: 150 },
+};
+
+export const BUDGET_ROLES = Object.keys(DEFAULT_ROLE_BUDGETS) as BudgetRole[];
+
 export const DEFAULT_WINDOWS: readonly WindowSpec[] = [
   { name: 'session', lengthHours: 5, mode: 'first-use' },
   { name: 'weekly', lengthHours: 168, mode: 'trailing' },
 ];
+
+/**
+ * The role a session name denotes: the name is the role, or starts with the role
+ * and a separator (`executor-aisdlc-12`). Same rule as `roleFromName` in
+ * `ai-sdlc-plugin/hooks/lib/context-budget.js`.
+ */
+export function roleFromSessionName(name: string | undefined): BudgetRole | undefined {
+  if (!name) return undefined;
+  const lower = name.trim().toLowerCase();
+  return BUDGET_ROLES.find(
+    (r) => lower === r || lower.startsWith(`${r}-`) || lower.startsWith(`${r}.`),
+  );
+}
+
+function cloneRoleBudgets(): Record<BudgetRole, RoleBudget> {
+  return {
+    planner: { ...DEFAULT_ROLE_BUDGETS.planner },
+    'operator-dispatch': { ...DEFAULT_ROLE_BUDGETS['operator-dispatch'] },
+    executor: { ...DEFAULT_ROLE_BUDGETS.executor },
+  };
+}
 
 export function defaultUsageConfig(warnings: string[] = []): ResolvedUsageConfig {
   return {
@@ -74,6 +118,7 @@ export function defaultUsageConfig(warnings: string[] = []): ResolvedUsageConfig
     modelMixSimilarity: DEFAULT_MODEL_MIX_SIMILARITY,
     scorecardMinTasks: DEFAULT_SCORECARD_MIN_TASKS,
     outputNoticeTokens: DEFAULT_OUTPUT_NOTICE_TOKENS,
+    roles: cloneRoleBudgets(),
     source: 'defaults',
     warnings,
   };
@@ -112,6 +157,18 @@ interface RawSpec {
   modelMixSimilarity?: number;
   scorecardMinTasks?: number;
   output?: { noticeTokens?: number };
+  roles?: Partial<Record<BudgetRole, Partial<RoleBudget>>>;
+}
+
+function resolveRoleBudgets(raw: RawSpec['roles']): Record<BudgetRole, RoleBudget> {
+  const roles = cloneRoleBudgets();
+  for (const role of BUDGET_ROLES) {
+    const set = raw?.[role];
+    if (set?.contextBudgetTokens !== undefined)
+      roles[role].contextBudgetTokens = set.contextBudgetTokens;
+    if (set?.turnBudget !== undefined) roles[role].turnBudget = set.turnBudget;
+  }
+  return roles;
 }
 
 /** Parse and validate one config document. Returns an error string on failure. */
@@ -157,6 +214,7 @@ export function parseUsageConfig(
     modelMixSimilarity: spec.modelMixSimilarity ?? base.modelMixSimilarity,
     scorecardMinTasks: spec.scorecardMinTasks ?? base.scorecardMinTasks,
     outputNoticeTokens: spec.output?.noticeTokens ?? base.outputNoticeTokens,
+    roles: resolveRoleBudgets(spec.roles),
     source,
     warnings: [],
   };

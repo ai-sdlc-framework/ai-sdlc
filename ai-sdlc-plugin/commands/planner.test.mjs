@@ -32,6 +32,10 @@ describe('planner command', () => {
     assert.match(match[2], /--notify/);
   });
 
+  it('states the unit of work and the hand-off-then-clear rule', () => {
+    assert.match(match[2], /one RFC or one brief; hand it off, then `\/clear`/);
+  });
+
   it('states the Open Questions hard rule', () => {
     assert.match(match[2], /Open Questions/);
     assert.match(match[2], /only with the operator/);

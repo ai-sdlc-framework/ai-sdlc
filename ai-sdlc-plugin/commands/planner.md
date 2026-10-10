@@ -18,6 +18,8 @@ short orientation and then stops. It is not a loop and it does not wake itself u
 
 It is the prompt `cli-hierarchy up` gives the planner session.
 
+**Unit of work:** one RFC or one brief; hand it off, then `/clear` before starting the next (the Stop hook warns past 150,000 tokens or 300 turns).
+
 ## Hard rule: Open Questions
 
 **Open Questions in an RFC are resolved only with the operator, through the
