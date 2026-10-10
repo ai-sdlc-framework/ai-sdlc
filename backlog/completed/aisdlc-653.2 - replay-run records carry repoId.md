@@ -2,7 +2,7 @@
 id: AISDLC-653.2
 title: >-
   RFC-0050 follow-up: replay-run usage records carry repoId instead of a name-only record
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-02'
 labels:
