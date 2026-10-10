@@ -2,7 +2,7 @@
 id: AISDLC-790
 title: >-
   Harden the review-plan executor fan-out width test so peak concurrency is observed deterministically, not through a wall-clock sleep
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-10'
 labels:
