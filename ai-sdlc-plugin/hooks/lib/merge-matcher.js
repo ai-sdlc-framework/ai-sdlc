@@ -283,8 +283,67 @@ function commandHasUninertMatch(command, matches) {
 
 const GH_PR_MERGE = /\bgh(?:\.exe)?\s+pr\s+merge\b/i;
 
+// gh flags that take a separate value token (`-R owner/repo`, `--hostname host`).
+const GH_VALUE_FLAGS = new Set(['-R', '--repo', '-h', '--hostname']);
+
+/** Brace-expansion alternatives of one word (`{merge,}` gives merge and the empty word). */
+function wordAlternatives(word) {
+  const m = /^(.*?)\{([^{}]*)\}(.*)$/.exec(word);
+  if (!m) return [word];
+  const alts = m[2].split(',').flatMap((a) => wordAlternatives(m[1] + a + m[3]));
+  return alts.length ? alts : [word];
+}
+
+/**
+ * Token-level check for gh invocations the plain regex misses (AISDLC-605 round 4):
+ * global flags between `gh` and `pr` or between `pr` and `merge`, `gh alias set|import`
+ * (an alias can expand to the merge command, so it is refused outright), ANSI-C /
+ * locale quoting (`$'..'`, `$".."`) after gh, and brace expansion. Fail closed.
+ */
+function ghTokensRunMerge(text) {
+  const tokens = text
+    .replace(/['"\\]/g, '')
+    .split(/\s+/)
+    .filter(Boolean);
+  for (let i = 0; i < tokens.length; i++) {
+    const base = tokens[i]
+      .replace(/^[({!]+/, '')
+      .split('/')
+      .pop()
+      .toLowerCase()
+      .replace(/\.exe$/, '');
+    if (base !== 'gh') continue;
+    // Drop flags (and the value token of value-taking flags) after gh.
+    const words = [];
+    for (let j = i + 1; j < tokens.length; j++) {
+      const t = tokens[j];
+      if (t.startsWith('-')) {
+        if (GH_VALUE_FLAGS.has(t)) j++;
+        continue;
+      }
+      words.push(wordAlternatives(t.toLowerCase()));
+      if (words.length >= 3) break;
+    }
+    const is = (k, w) => !!words[k] && words[k].includes(w);
+    if (is(0, 'pr') && is(1, 'merge')) return true;
+    if (is(0, 'alias') && (is(1, 'set') || is(1, 'import'))) return true;
+  }
+  return false;
+}
+
+/** True when a gh word is followed (anywhere later in the text) by `$'` or `$"` quoting. */
+function ghAnsiQuoted(text) {
+  const m = /(^|[\s;&|({!/])gh(?:\.exe)?(?=[\s'"$\\])/i.exec(text);
+  return !!m && /\$['"]/.test(text.slice(m.index));
+}
+
 function matchesGhPrMerge(text) {
-  return GH_PR_MERGE.test(text) || GH_PR_MERGE.test(text.replace(/\\/g, ''));
+  return (
+    GH_PR_MERGE.test(text) ||
+    GH_PR_MERGE.test(text.replace(/\\/g, '')) ||
+    ghTokensRunMerge(text) ||
+    ghAnsiQuoted(text)
+  );
 }
 
 /** True when the command runs (or could run) the raw merge command (see module contract). */

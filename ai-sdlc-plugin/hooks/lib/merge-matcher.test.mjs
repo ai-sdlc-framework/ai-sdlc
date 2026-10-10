@@ -194,3 +194,44 @@ describe('read-stdin module', () => {
     assert.equal(typeof require('./read-stdin.js').readStdinSync, 'function');
   });
 });
+
+describe('round-4 security bypasses (AISDLC-605)', () => {
+  const mg = ['mer', 'ge'].join('');
+  const refused = [
+    `gh -R owner/repo pr ${mg} 42`,
+    `gh --repo owner/repo pr ${mg} 42`,
+    `gh --repo=owner/repo pr ${mg} 42`,
+    `gh pr -R o/r ${mg} 42`,
+    `gh pr --repo o/r ${mg} 42`,
+    `gh pr --repo=o/r ${mg} 42`,
+    `gh.exe -R o/r pr ${mg} 42`,
+    `gh "pr" '${mg}' 42`,
+    `gh alias set mm 'pr ${mg}'`,
+    `gh alias set mm "pr ${mg} --squash"`,
+    'gh alias import aliases.yml',
+    'gh alias import',
+    `gh pr $'${mg}' 42`,
+    `gh $'pr' ${mg} 42`,
+    `gh pr $"${mg}" 42`,
+    "gh pr $'\\x6derge' 42",
+    "gh pr $'\\155erge' 42",
+    `gh pr {${mg},} 42`,
+    `gh {pr,} ${mg} 42`,
+    `echo x \\\\> /dev/null; gh pr ${mg} 42`,
+  ];
+  it('refuses global flags, alias set/import, ANSI-C and brace spellings', () => {
+    for (const c of refused) assert.equal(m.commandRunsGhPrMerge(c), true, c);
+  });
+  it('still allows inert prose, commit text and read-only gh', () => {
+    const allowed = [
+      `echo "gh pr ${mg} is forbidden"`,
+      `git commit -m "docs: mention gh pr ${mg}"`,
+      `echo "gh -R o/r pr ${mg} 42"`,
+      'gh pr view 42',
+      'gh -R o/r pr view 42',
+      'gh alias list',
+      'gh pr list --repo o/r',
+    ];
+    for (const c of allowed) assert.equal(m.commandRunsGhPrMerge(c), false, c);
+  });
+});

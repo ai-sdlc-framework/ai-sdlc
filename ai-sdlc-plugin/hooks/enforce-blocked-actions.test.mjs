@@ -1135,6 +1135,20 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (API-merge governance)', (
       }
     });
 
+    it(`gh global flags, alias set and ANSI-C quoting are refused under ${policy} (AISDLC-605 round 4)`, () => {
+      const mg = ['mer', 'ge'].join('');
+      for (const c of [
+        `gh -R o/r pr ${mg} 42`,
+        `gh pr --repo=o/r ${mg} 42`,
+        `gh alias set mm 'pr ${mg}'`,
+        `gh pr $'${mg}' 42`,
+        `gh pr {${mg},} 42`,
+      ]) {
+        assert.ok(isDenied(run(policy, c)), `expected deny: ${c}`);
+      }
+      assert.ok(!isDenied(run(policy, `echo "gh pr ${mg} is forbidden"`)));
+    });
+
     it(`merge text that is only an argument is allowed; executed forms are denied under ${policy} (AISDLC-605)`, () => {
       for (const ok of [
         'echo gh pr merge 42',
