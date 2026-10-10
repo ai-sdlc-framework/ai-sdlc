@@ -37,6 +37,7 @@ export {
   readHeartbeat,
   readInflightManifest,
   readResumeSignal,
+  parkInflight,
   releaseInflight,
   removeResumeSignal,
   removeVerdict,

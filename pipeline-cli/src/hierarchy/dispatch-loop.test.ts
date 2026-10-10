@@ -602,6 +602,24 @@ describe('nextWakeSec (idle hibernation)', () => {
     expect(r.wakeReason).toBe('idle');
   });
 
+  it('runs the decision timebox promotion each tick and reports what moved', async () => {
+    const moved = [{ decisionId: 'DEC-0001', fromTier: 'operational', toTier: 'design' }] as const;
+    const r = await runDispatchTick(deps({ promoteExpired: () => [...moved] }));
+    expect(r.promotions).toEqual(moved);
+    expect((await runDispatchTick(deps({ promoteExpired: () => [] }))).promotions).toBeUndefined();
+  });
+
+  it('a failing promotion never fails the tick', async () => {
+    const r = await runDispatchTick(
+      deps({
+        promoteExpired: () => {
+          throw new Error('decision log unreadable');
+        },
+      }),
+    );
+    expect(r.promotions).toBeUndefined();
+  });
+
   it('wakes in 30 s when the playbook escalated a failure', async () => {
     const result = computeNextWake(board, {
       ingested: [],
