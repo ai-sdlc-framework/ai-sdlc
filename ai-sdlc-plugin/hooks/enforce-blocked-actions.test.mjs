@@ -1039,6 +1039,13 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (API-merge governance)', (
     'gh api "repos/acme/widgets/pulls/42/merge" -X PUT',
     "gh api 'repos/acme/widgets/pu''lls/42/merge' -X PUT",
     'gh api repos/acme/widgets/pulls/42/merge/ -X PUT',
+    'curl -X PUT https://api.github.com/repos/o/r/pulls/5/./merge',
+    'curl -X PUT https://api.github.com/repos/o/r/pulls/5/../5/merge',
+    'gh api repos/o/r/pulls/5/./merge -X PUT',
+    'gh api repos/o/r/pulls/5//merge -X PUT',
+    'curl -X PUT https://api.github.com/repos/o/r/pulls/5/merge.json',
+    'curl -X PUT https://api.github.com/repos/o/r/pulls/5/merge?x=1',
+    'curl -X PUT https://api.github.com/repos/o/r/pulls/5/merge#x',
     'gh api repos/{owner}/{repo}/pulls/42/merge -X PUT',
     'gh api repos/$OWNER/$REPO/pulls/$PR/merge -X PUT',
     'gh api repos/${OWNER}/${REPO}/pulls/${PR}/merge -X PUT',
@@ -1058,6 +1065,31 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (API-merge governance)', (
     "node -e \"fetch('https://api.github.com/repos/acme/widgets/pulls/42/merge',{method:'PUT'})\"",
     'python3 -c "import requests; requests.put(\'https://api.github.com/repos/acme/widgets/pulls/42/merge\')"',
   ];
+
+  const ALLOWED_API = [
+    'gh api repos/o/r/pulls/5 --jq .mergeable 2>&1',
+    'gh api repos/o/r/pulls/5/mergeable',
+    'gh pr view 5 2>&1 | grep -v "^$"',
+    'gh pr checks 5 2>&1 | grep -c "pass$"',
+    'gh pr checks 5 2>&1 | grep -E "fail|pending$"',
+    'gh pr view 5 --json comments --jq \'.comments[-1].body\' 2>&1 | grep -v "^$"',
+  ];
+  const ANSI_DENIED = [
+    ['gh pr $', "'\\x6d", "erge' 5"].join(''),
+    ['gh pr $', '"mer', 'ge" 5'].join(''),
+  ];
+  for (const policy of ['strict', 'green']) {
+    for (const cmd of ALLOWED_API) {
+      it(`allows under ${policy}: ${cmd}`, () => {
+        assert.ok(!isDenied(run(policy, cmd)), `expected allow: ${cmd}`);
+      });
+    }
+    for (const cmd of ANSI_DENIED) {
+      it(`denies ANSI-quoted spelling under ${policy}: ${cmd}`, () => {
+        assert.ok(isDenied(run(policy, cmd)), `expected deny: ${cmd}`);
+      });
+    }
+  }
 
   for (const policy of ['strict', 'green']) {
     for (const cmd of DENIED) {

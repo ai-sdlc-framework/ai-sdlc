@@ -761,3 +761,53 @@ describe('positive plain-segment grammar (AISDLC-605)', () => {
     }
   });
 });
+
+describe('REST path normalisation and ANSI-quote anchoring (round 13)', () => {
+  const mg = ['mer', 'ge'].join('');
+  const gh = ['g', 'h'].join('');
+  const hit = (c) =>
+    m.commandRunsGhPrMerge(c) || m.commandHasUninertMatch(c, () => false, m.mentionsApiMerge);
+
+  it('refuses dot-segment, double-slash and non-word endings of the path', () => {
+    const base = 'https://api.github.com/repos/o/r/pulls';
+    for (const c of [
+      `curl -X PUT ${base}/5/./${mg}`,
+      `curl -X PUT ${base}/5/../5/${mg}`,
+      `${gh} api repos/o/r/pulls/5/./${mg} -X PUT`,
+      `${gh} api repos/o/r/pulls/5//${mg} -X PUT`,
+      `curl -X PUT ${base}/5/${mg}.json`,
+      `curl -X PUT ${base}/5/${mg}/`,
+      `curl -X PUT ${base}/5/${mg}?x=1`,
+      `curl -X PUT ${base}/5/${mg}#x`,
+    ]) {
+      assert.equal(m.mentionsApiMerge(c), true, c);
+    }
+  });
+  it('allows mergeable reads', () => {
+    for (const c of [
+      'curl https://api.github.com/repos/o/r/pulls/5/mergeable',
+      `${gh} api repos/o/r/pulls/5 --jq .mergeable 2>&1`,
+    ]) {
+      assert.equal(hit(c), false, c);
+    }
+  });
+  it('normalizePathDots reaches a fixpoint', () => {
+    assert.equal(m.normalizePathDots('a//b/./c/d/../e'), 'a/b/c/e');
+    assert.equal(m.normalizePathDots('a/b/c/../../d'), 'a/d');
+  });
+  it('does not treat an end anchor inside quotes as an ANSI quote', () => {
+    for (const c of [
+      `${gh} pr view 5 2>&1 | grep -v "^$"`,
+      `${gh} pr checks 5 2>&1 | grep -c "pass$"`,
+      `${gh} pr checks 5 2>&1 | grep -E "fail|pending$"`,
+      `${gh} pr view 5 --json comments --jq '.comments[-1].body' 2>&1 | grep -v "^$"`,
+    ]) {
+      assert.equal(hit(c), false, c);
+    }
+  });
+  it('still refuses ANSI-C and locale quoting that starts a word', () => {
+    for (const c of [`${gh} pr $'\\x6derge' 5`, `${gh} pr $"${mg}" 5`]) {
+      assert.equal(hit(c), true, c);
+    }
+  });
+});

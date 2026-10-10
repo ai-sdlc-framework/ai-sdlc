@@ -97,6 +97,7 @@ const {
   commandRunsGhPrMerge,
   commandHasUninertMatch,
   mentionsApiMerge,
+  normalizePathDots,
   normalizeExpansions,
   stripCommentAndQuotes: libStripCommentAndQuotes,
 } = require('./lib/merge-matcher');
@@ -653,11 +654,11 @@ function enforceMergeGovernance(trimmed) {
  * on text that merely mentions such a path stay allowed.
  */
 function enforceApiMergeGovernance(command) {
-  const mergePath = /(?:^|[/\s])pulls\/[^\s/]*\/merge(?![A-Za-z0-9_.-])/i;
+  const mergePath = /(?:^|[/\s])pulls\/[^\s/]*\/merge(?![A-Za-z0-9_-])/i;
   const mergeMutation = /\b(?:mergePullRequest|enablePullRequestAutoMerge)\b/i;
   const matches = (segment) => {
     return [segment, ...normalizeExpansions(segment)].some((v) => {
-      const text = normalizeForApiMerge(v);
+      const text = normalizePathDots(normalizeForApiMerge(v));
       return mergePath.test(text) || mergeMutation.test(text);
     });
   };

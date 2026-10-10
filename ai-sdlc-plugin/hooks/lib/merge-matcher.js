@@ -23,7 +23,8 @@
  *
  * Accepted limits (out of text-matching scope; branch protection and
  * cli-merge-if-eligible are the backstop): variables assembled from parts
- * (`a=mer b=ge; gh pr $a$b 5` mentions no phrase), and two-step store-then-run (write the phrase to a script file, then run it).
+ * (`a=mer b=ge; gh pr $a$b 5` mentions no phrase; command-substitution splices such as
+ * `gh pr $(echo mer)ge 5` are in the same class), and two-step store-then-run (write the phrase to a script file, then run it).
  */
 
 const INERT_WORDS = new Set([
@@ -385,7 +386,28 @@ function normalizeExpansions(text) {
  */
 function mentionsGhPrMerge(text) {
   // `pr` is case-sensitive (gh subcommands are), so `$PR/merge` in an API path does not count.
-  return /\bpr\b/.test(text) && (/\bmerge\b/i.test(text) || /\$['"]/.test(text));
+  // The ANSI-C / locale quote must START a word (`gh pr $'\x6derge'`); a `$"` / `$'` that merely
+  // follows other text is a regex end anchor inside a quoted string (`grep -v "^$"`).
+  return /\bpr\b/.test(text) && (/\bmerge\b/i.test(text) || ANSI_QUOTE_WORD_START.test(text));
+}
+
+const ANSI_QUOTE_WORD_START = /(^|[\s;|&(<>])\$['"]/;
+
+/**
+ * Collapses `//`, `/./` and `/x/../` path segments to a fixpoint (detection only), so
+ * `pulls/5/./merge`, `pulls/5//merge` and `pulls/5/../5/merge` read as `pulls/5/merge`.
+ */
+function normalizePathDots(text) {
+  let prev;
+  let out = text;
+  do {
+    prev = out;
+    out = out
+      .replace(/\/{2,}/g, '/')
+      .replace(/\/\.(?=\/|$)/g, '')
+      .replace(/\/[^/\s]+\/\.\.(?=\/|$)/g, '');
+  } while (out !== prev);
+  return out;
 }
 
 /** REST merge path: pulls/<number-or-expansion>/merge, not merge_ / mergeable / mergeStateStatus. */
@@ -398,6 +420,7 @@ const API_MERGE_PATH = /pulls\/[^\s/]*\/merge(?![A-Za-z0-9_])/i;
 function mentionsApiMerge(text) {
   return (
     API_MERGE_PATH.test(text) ||
+    API_MERGE_PATH.test(normalizePathDots(text)) ||
     /mergePullRequest|enablePullRequestAutoMerge/i.test(text) ||
     (/graphql/i.test(text) && (/--input\b/.test(text) || /query=@/.test(text)))
   );
@@ -519,6 +542,7 @@ module.exports = {
   isOpaqueSegment,
   commandIsOpaque,
   mentionsApiMerge,
+  normalizePathDots,
   decodeEscapes,
   segmentHasPrThenMergeToken,
   normalizeExpansions,
