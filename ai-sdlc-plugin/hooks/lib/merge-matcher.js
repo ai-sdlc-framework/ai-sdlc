@@ -204,18 +204,50 @@ function hasSubstitution(segment) {
   return /\$\(|`|<\(|>\(|\$\{/.test(segment);
 }
 
+/**
+ * True when a leading `VAR=value` assignment word contains whitespace or a backslash
+ * (`GIT_EDITOR='<cmd> #' git commit`, `LESSOPEN='|<cmd> %s' less f`): such a value is a
+ * program/option string that the inert command word may run, so the segment is NOT inert.
+ */
+function leadingAssignmentIsOpaque(segment) {
+  let i = 0;
+  const n = segment.length;
+  for (;;) {
+    while (i < n && /\s/.test(segment[i])) i++;
+    const start = i;
+    let quote = null;
+    while (i < n) {
+      const c = segment[i];
+      if (quote) {
+        if (c === '\\' && quote === '"') i++;
+        else if (c === quote) quote = null;
+      } else if (c === '\\') i++;
+      else if (c === "'" || c === '"') quote = c;
+      else if (/\s/.test(c)) break;
+      i++;
+    }
+    const word = segment.slice(start, i);
+    if (!/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) return false;
+    if (/[\s\\]/.test(word)) return true;
+    if (i >= n) return false;
+  }
+}
+
 /** True when the segment is a known-inert command (positive allowlist). */
 function isInertSegment(segment) {
   if (hasSubstitution(segment)) return false;
+  if (leadingAssignmentIsOpaque(segment)) return false;
   const t = effectiveTokens(segment);
   if (!t.length) return false;
   const word = commandWord(segment);
   if (word === 'rg') return !t.some((x) => /^--pre(=|$)/.test(x));
+  if (word === 'sort') return !t.some((x) => /^--compress-program(=|$)/.test(x));
   if (INERT_WORDS.has(word)) return true;
   const rest = t.slice(1).map((x) => x.toLowerCase());
   if (word === 'git') {
     // `git -c alias.x=!cmd x` can run a command: only direct subcommands (or -C <dir>) are inert.
     const i = rest[0] === '-c' ? -1 : rest[0] === '-C' ? 1 : 0;
+    if (rest.some((x) => /^--(ext-diff|textconv)\b/.test(x))) return false;
     return i >= 0 && INERT_GIT.has(rest[i] || '');
   }
   if (word === 'gh') {
@@ -250,8 +282,17 @@ function findHeredocOpener(line) {
         i += 2; // here-string
         continue;
       }
-      const m = line.slice(i).match(/^<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/);
-      return m ? { marker: m[2], dashed: line[i + 2] === '-' } : null;
+      const dashed = line[i + 2] === '-';
+      const rest = line.slice(i + (dashed ? 3 : 2)).replace(/^\s+/, '');
+      // Bash strips quotes from the WHOLE delimiter word, so read the whole word. Only a plain
+      // identifier or a single fully quoted identifier is understood; any other spelling
+      // (mid-word quotes, backslash, `$`) is `unsafe`: the body is kept in view (fail closed).
+      const word = rest.match(/^[^\s;|&<>()]*/)[0];
+      const m = word.match(
+        /^(?:([A-Za-z_][A-Za-z0-9_]*)|'([A-Za-z_][A-Za-z0-9_]*)'|"([A-Za-z_][A-Za-z0-9_]*)")$/,
+      );
+      if (!m) return { marker: null, dashed, unsafe: true };
+      return { marker: m[1] || m[2] || m[3], dashed, unsafe: false };
     }
   }
   return null;
@@ -277,9 +318,13 @@ function stripInertHeredocBodies(command) {
     kept.push(line);
     i++;
     if (!opener) continue;
-    const { marker, dashed } = opener;
+    const { marker, dashed, unsafe } = opener;
+    if (unsafe) continue; // unknown terminator: keep everything that follows
     const segs = splitShellSegments(line);
-    const inert = segs.length > 0 && segs.every(isInertSegment);
+    // A trailing unescaped backslash continues the opener onto the next line, which this
+    // per-line judgement cannot see: keep the body (fail closed).
+    const continued = /(?:^|[^\\])(?:\\\\)*\\$/.test(line.trimEnd());
+    const inert = !continued && segs.length > 0 && segs.every(isInertSegment);
     while (i < lines.length) {
       const body = dashed ? lines[i].replace(/^\t+/, '') : lines[i];
       if (!inert) kept.push(lines[i]);

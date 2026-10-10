@@ -332,6 +332,13 @@ function isProtectedForUntrusted(p) {
   );
 }
 
+class SymlinkCapError extends Error {
+  constructor(p) {
+    super(`symlink chain too deep (cap reached) resolving ${p}`);
+    this.name = 'SymlinkCapError';
+  }
+}
+
 /** realpath of the deepest existing ancestor of `p`, re-joined with the missing tail. */
 function realpathDeepest(p, depth = 0) {
   let cur = resolve(p);
@@ -342,15 +349,22 @@ function realpathDeepest(p, depth = 0) {
     } catch {
       // A DANGLING symlink fails realpath but a write through it creates the target:
       // follow it (bounded) instead of treating the link name as a plain missing file.
-      if (depth < 16) {
+      let isLink = false;
+      try {
+        isLink = lstatSync(cur).isSymbolicLink();
+      } catch {
+        /* unreadable: fall through to the parent */
+      }
+      if (isLink) {
+        // Fail closed at the depth cap: callers deny rather than judge a half-resolved path.
+        if (depth >= 16) throw new SymlinkCapError(p);
+        let target = null;
         try {
-          if (lstatSync(cur).isSymbolicLink()) {
-            const target = resolve(dirname(cur), readlinkSync(cur));
-            return join(realpathDeepest(target, depth + 1), ...tail.reverse());
-          }
+          target = resolve(dirname(cur), readlinkSync(cur));
         } catch {
-          /* not a symlink / unreadable: fall through to the parent */
+          /* unreadable link: fall through to the parent */
         }
+        if (target) return join(realpathDeepest(target, depth + 1), ...tail.reverse());
       }
       const parent = dirname(cur);
       if (parent === cur) return resolve(p);
@@ -371,8 +385,15 @@ function enforceUntrustedPath(absPath, homeAbs) {
   let hit = check(absPath, homeAbs);
   if (!hit) {
     // Symlink bypass: judge where the path REALLY lands.
-    const realHome = realpathDeepest(homeAbs);
-    hit = check(realpathDeepest(absPath), realHome);
+    try {
+      const realHome = realpathDeepest(homeAbs);
+      hit = check(realpathDeepest(absPath), realHome);
+    } catch (e) {
+      if (e instanceof SymlinkCapError) {
+        deny(untrustedMessage(`path '${absPath}' (symlink chain too deep to resolve)`));
+      }
+      throw e;
+    }
   }
   if (hit) deny(untrustedMessage(`path '${hit}'`));
 }
@@ -1147,8 +1168,10 @@ function isScratchPath(absPath, projectAbs) {
   let real = absPath;
   try {
     real = realpathDeepest(absPath);
-  } catch {
-    /* use the lexical path */
+  } catch (e) {
+    // Symlink cap reached: the real destination is unknown, so it is never scratch.
+    if (e instanceof SymlinkCapError) return false;
+    /* otherwise use the lexical path */
   }
   const under = (p, root) => p === root || p.startsWith(root + sep);
   const projectReal = (() => {

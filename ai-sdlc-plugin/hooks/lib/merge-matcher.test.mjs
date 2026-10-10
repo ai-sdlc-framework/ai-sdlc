@@ -121,6 +121,46 @@ describe('commandRunsGhPrMerge', () => {
   });
 });
 
+describe('round-2 security bypasses (AISDLC-605)', () => {
+  const phrase = ['gh', 'pr', 'merge'].join(' ') + ' 42 --auto';
+  it('fails closed on a partly quoted heredoc delimiter word', () => {
+    for (const opener of [
+      'cat <<EOF"X"',
+      'cat <<E"O"F',
+      "cat <<'EOF'X",
+      'cat <<EO\\F',
+      'cat <<EOF$X',
+    ]) {
+      const c = `${opener}\nEOFX\n${phrase}\nEOF`;
+      assert.equal(m.commandRunsGhPrMerge(c), true, opener);
+    }
+  });
+  it('still strips bodies for plain and fully quoted delimiters', () => {
+    assert.equal(m.commandRunsGhPrMerge(`cat <<EOF\n${phrase}\nEOF`), false);
+    assert.equal(m.commandRunsGhPrMerge(`cat <<'EOF'\n${phrase}\nEOF`), false);
+    assert.equal(m.commandRunsGhPrMerge(`cat <<"EOF"\n${phrase}\nEOF`), false);
+  });
+  it('keeps the body when the heredoc opener line continues with a backslash-newline', () => {
+    assert.equal(m.commandRunsGhPrMerge(`cat <<EOF \\\n| sh\n${phrase}\nEOF`), true);
+  });
+  it('denies a merge phrase inside a leading env assignment of an inert command', () => {
+    const cmds = [
+      `GIT_EDITOR='${phrase} #' git commit --allow-empty`,
+      `GIT_EXTERNAL_DIFF='${phrase}' git diff`,
+      `LESSOPEN='|${phrase} %s' less f`,
+      `GIT_EDITOR=${['gh', 'pr', 'merge'].join('\\ ')}\\ 42 git commit`,
+    ];
+    for (const c of cmds) assert.equal(m.commandRunsGhPrMerge(c), true, c);
+    assert.equal(m.commandRunsGhPrMerge(`FOO=1 echo "${phrase}"`), false);
+  });
+  it('does not treat program-running options of allowlisted words as inert', () => {
+    assert.equal(m.isInertSegment('sort --compress-program=sh f'), false);
+    assert.equal(m.isInertSegment('git diff --ext-diff'), false);
+    assert.equal(m.isInertSegment('git show --textconv HEAD'), false);
+    assert.equal(m.isInertSegment('git diff --stat'), true);
+  });
+});
+
 describe('read-stdin module', () => {
   it('exports a reader that never references /dev/stdin', () => {
     const src = readFileSync(new URL('./read-stdin.js', import.meta.url), 'utf-8');

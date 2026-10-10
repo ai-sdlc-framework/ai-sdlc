@@ -2244,6 +2244,18 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (scratch dirs, AISDLC-605)
     });
   }
 
+  it('a dangling symlink chain deeper than the cap is denied, not judged lexically', () => {
+    const base = join(scratchPlain, 'chain');
+    mkdirSync(base, { recursive: true });
+    const missing = join(base, 'never-created');
+    // link0 -> link1 -> ... -> link19 -> never-created (all dangling)
+    symlinkSync(missing, join(base, 'link19'));
+    for (let i = 18; i >= 0; i--) symlinkSync(join(base, `link${i + 1}`), join(base, `link${i}`));
+    for (const tool of ['Write', 'Edit']) {
+      assert.ok(isDenied(write(tool, join(base, 'link0'))), `${tool} through a >16 link chain`);
+    }
+  });
+
   it('a project root that itself lives under a temp dir gains no scratch allowance', () => {
     assert.ok(isDenied(write('Write', join(proj, 'backlog', 'tasks', 'x.md'))));
   });
