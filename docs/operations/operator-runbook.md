@@ -6,6 +6,8 @@
 
 ---
 
+> **Note (AISDLC-763):** `/ai-sdlc orchestrator-tick`, `dispatch-worker` and `execute-parallel*` are retired pointers; the primary path is [`cli-hierarchy`](cli-hierarchy.md). References below are historical.
+
 ## Execution Path References
 
 | Path | Status | Reference |

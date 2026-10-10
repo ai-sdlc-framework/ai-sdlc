@@ -143,10 +143,10 @@ Agent frontmatter pins model by role to prevent session-model bleed (Opus inheri
 - `rebase-resolver`, `ci-conflict-resolver`, `refinement-reviewer`, `code-reviewer-codex`, `test-reviewer-codex` → **sonnet**
 - `review-executor`, `review-executor-codex` (review probes) → **haiku**
 - `security-reviewer` → **opus** (reasoning-heavy; the one role where Opus pays for itself)
-- Commands pin too (AISDLC-761): relay/status commands (`version`, `doctor`, `hierarchy`, `cleanup`, `pipeline-status`, `triage`, `import-spec`, `rfc-init`, `init-signing-key`, `execute-parallel-status`, `execute-parallel-cleanup`) → **haiku**; orchestration/session-driving commands (`execute`, `orchestrator-tick`, `dispatch-worker`, `executor`, `operator-dispatch`, `planner`, `execute-parallel`, `fix-pr`, `review-pr`, `detect-patterns`, `rebase`, `resolve-conflicts`) → **sonnet**.
+- Commands pin too (AISDLC-761): relay/status commands (`version`, `doctor`, `hierarchy`, `cleanup`, `pipeline-status`, `triage`, `import-spec`, `rfc-init`, `init-signing-key`, and the retired pointers `execute-parallel`, `execute-parallel-status`, `execute-parallel-cleanup`, `orchestrator-tick`, `dispatch-worker`) → **haiku**; orchestration/session-driving commands (`execute`, `executor`, `operator-dispatch`, `planner`, `fix-pr`, `review-pr`, `detect-patterns`, `rebase`, `resolve-conflicts`) → **sonnet**.
 - No command or agent may carry `model: inherit` or omit `model:`; `ai-sdlc-plugin/commands/model-pins.test.mjs` (`pnpm test:plugin-model-pins-gate`) enforces it.
 
-On dispatch paths (`/ai-sdlc execute`, `/ai-sdlc orchestrator-tick`), code-review and test-review SHOULD be routed to the `-codex` variants (`code-reviewer-codex` / `test-reviewer-codex`) by default — Codex plan billing is zero Claude usage. Security review stays on the Claude-native `security-reviewer` at opus. Mechanical work (sign, reconcile, rebase) MUST NOT be wrapped in subagents.
+On dispatch paths (`/ai-sdlc execute`, `/ai-sdlc executor`), code-review and test-review SHOULD be routed to the `-codex` variants (`code-reviewer-codex` / `test-reviewer-codex`) by default — Codex plan billing is zero Claude usage. Security review stays on the Claude-native `security-reviewer` at opus. Mechanical work (sign, reconcile, rebase) MUST NOT be wrapped in subagents.
 
 ## Subagent Governance — OQ-resolution prohibition (AISDLC-298)
 
@@ -199,7 +199,7 @@ The `code-reviewer` and `test-reviewer` subagents check for inline OQ resolution
 
 **Operator action** (AISDLC-388 AC-2): branch protection on `main` should require ONLY `ai-sdlc/pr-ready` and `Backlog Drift` — NOT `ai-sdlc/attestation` directly. If your repo still lists `ai-sdlc/attestation` as a required check, run: `gh api -X PATCH repos/<org>/<repo>/branches/main/protection/required_status_checks -F 'contexts[]=Backlog Drift' -F 'contexts[]=ai-sdlc/pr-ready' -F 'strict=true'`
 
-**RFC-0042 Phase 3 cutover — COMPLETE (AISDLC-409, 2026-05-23).** v6 is now the default attestation schema. The canonical pipeline paths (`/ai-sdlc execute`, `/ai-sdlc orchestrator-tick`) emit transcript leaves to `.ai-sdlc/transcript-leaves.jsonl` via `cli-attestation.mjs emit-leaf` as part of their reviewer fan-out, satisfying the prerequisite that gated the prior `AI_SDLC_V6_CUTOVER_ACTIVE=1` opt-in. Operators on ad-hoc reviewer flows that don't yet emit transcript leaves should pass `--schema-version v5` explicitly or set `AI_SDLC_V5_LEGACY=1` — that gap is tracked as a follow-up to AISDLC-409.
+**RFC-0042 Phase 3 cutover — COMPLETE (AISDLC-409, 2026-05-23).** v6 is now the default attestation schema. The canonical pipeline paths (`/ai-sdlc execute`, `/ai-sdlc executor`) emit transcript leaves to `.ai-sdlc/transcript-leaves.jsonl` via `cli-attestation.mjs emit-leaf` as part of their reviewer fan-out, satisfying the prerequisite that gated the prior `AI_SDLC_V6_CUTOVER_ACTIVE=1` opt-in. Operators on ad-hoc reviewer flows that don't yet emit transcript leaves should pass `--schema-version v5` explicitly or set `AI_SDLC_V5_LEGACY=1` — that gap is tracked as a follow-up to AISDLC-409.
 
 **Default schema (current): v6.** New envelopes use the RFC-6962 Merkle-transcript model per RFC-0042. `sign-attestation.mjs` reads transcript leaves from `.ai-sdlc/transcript-leaves.jsonl`, builds the Merkle tree, signs the root with the operator's key, and writes `.ai-sdlc/attestations/<head-sha>.v6.dsse.json`. The verifier (AISDLC-383.4) verifies the Merkle proof + root signature. **v5 opt-out**: pass `--schema-version v5` explicitly OR set `AI_SDLC_V5_LEGACY=1` (legacy `AI_SDLC_V6_CUTOVER_ACTIVE=0` is also honored for backward-compat). v6 mode in CI rejects missing transcript leaves (replay-attack mitigation per 383.4 security review) unless `AI_SDLC_V6_SPOT_CHECK_MODE=1` is set (operator-triggered spot-check only).
 
@@ -253,7 +253,7 @@ When a CCR `/schedule` task detects work that requires local execution:
 
 1. **File a backlog task** via `mcp__backlog__task_create` — or a GitHub issue via `mcp__github__create_issue` if the work is broad.
 2. **Include full context** in the task body: what triggered the work, what the expected outcome is, any relevant file paths.
-3. **The local operator session picks it up** on the next `/ai-sdlc orchestrator-tick` or manually via `/ai-sdlc execute <task-id>`.
+3. **The local operator session picks it up** on the next hierarchy dispatch tick (`cli-hierarchy`) or manually via `/ai-sdlc execute <task-id>`.
 
 > `/ai-sdlc execute` detects CCR sandboxes at startup (AISDLC-442) and refuses with a clear error pointing here. See `docs/operations/remote-agents-readonly.md` for the full runbook.
 
@@ -348,8 +348,7 @@ The decision is computed by `pipeline-cli dor-pr-has-violations`, which consumes
 |---|---|---|
 | Internal dogfood (backlog tasks) | `/ai-sdlc execute <task-id>` (e.g. `AISDLC-393`) | Subscription (Claude Code Max) |
 | Internal dogfood (GitHub issues, subscription billing) | `/ai-sdlc execute <issue-number>` (e.g. `612`, `#612`, `gh:612`) | Subscription (Agent SDK credit pool post-2026-06-15; refuses to fall back to API key) — AISDLC-393 |
-| **Autonomous loop — single-session drain (Pattern X v2, AISDLC-396)** | `/ai-sdlc orchestrator-tick` (once, ScheduleWakeup loops). Conductor dispatches background `Agent(developer)` per manifest; dev follows its standard contract (commit → rebase → push → open DRAFT PR). Conductor's next tick **reconciles after-the-fact**: parses dev's return JSON into a verdict, fans out 3 reviewers, signs attestation, force-pushes the chore commit on top of the dev's branch, flips draft → ready. | Subscription interactive quota only — Sonnet for dev/code/test, Opus only for security. One operator-opened CC session suffices. |
-| **Autonomous loop — N>4 parallel via sibling Workers (Pattern Z)** | `/ai-sdlc orchestrator-tick` + N sibling sessions running `/ai-sdlc dispatch-worker` | Subscription interactive quota only. Use when Pattern X's `inSessionAgentMaxSessions` (default 4) is insufficient for the backlog burst. |
+| **Autonomous loop — hierarchy (RFC-0051; supersedes orchestrator-tick / dispatch-worker / execute-parallel, AISDLC-763)** | `cli-hierarchy up` (planner + dispatch + executors); see [`docs/operations/cli-hierarchy.md`](docs/operations/cli-hierarchy.md). The old `/ai-sdlc orchestrator-tick`, `dispatch-worker` and `execute-parallel*` commands are one-paragraph pointers to it. | Subscription interactive quota only — Sonnet for dev/code/test, Opus only for security. |
 | Operator-driven single-PR (task file + impl land together) | `cli-orchestrator tick --task-from-file <path>` (AISDLC-373) | Same as the configured `--spawner` (subscription on default `claude`) |
 | Manual cleanup | `/ai-sdlc cleanup [<task-id>]` | n/a |
 | Shell-driven autonomous tick (cron/daemon/sidecar; Pattern Y) | `cli-orchestrator tick --spawner claude` | Subscription (shells out to `claude -p`; draws Agent SDK credit pool post-2026-06-15). Use when no operator CC session is available. |
@@ -365,10 +364,10 @@ The decision is computed by `pipeline-cli dor-pr-has-violations`, which consumes
 - `claude` — **(DEFAULT since AISDLC-352)** shells out to `claude -p` via `child_process.spawn`. **Use this for autonomous tick from a shell** (cron/daemon/sidecar context where no slash command body is around). Billing: subscription (Agent SDK credit pool, $200/mo on Max-20x). AISDLC-349. **Warning**: if `ANTHROPIC_API_KEY` is also set in env and `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` is configured, a spawner error can silently fall through to paid API tokens — the CLI warns at tick start.
 - `codex` — dispatches via Codex CLI bridge (`CODEX_SPAWN_AGENT_BIN`). Billing: Codex plan.
 - `copilot` — dispatches via GitHub Copilot CLI bridge (`COPILOT_SPAWN_AGENT_BIN`). Resolver throws a clear configuration error before any pipeline mutation when the env var is unset — refuses to silently fall back to `ANTHROPIC_API_KEY` billing. Billing: GitHub Copilot subscription. AISDLC-429.2 + AISDLC-429.3. See [`docs/operations/copilot-spawner.md`](docs/operations/copilot-spawner.md).
-- ~~`claude-cli`~~ — **removed in RFC-0041 Phase 3.3 (AISDLC-377.6)** after the AISDLC-377.4 deprecation-warning window. Was the `ClaudeCliInlineSpawner` inline-manifest path (AISDLC-198). For subscription-billed parallel autonomous drain, use the Dispatch Board model: `/ai-sdlc orchestrator-tick` (Conductor) + N `/ai-sdlc dispatch-worker` sessions (Workers). Migration breadcrumb: [`docs/operations/claude-cli-spawner-removed.md`](docs/operations/claude-cli-spawner-removed.md).
+- ~~`claude-cli`~~ — **removed in RFC-0041 Phase 3.3 (AISDLC-377.6)** after the AISDLC-377.4 deprecation-warning window. Was the `ClaudeCliInlineSpawner` inline-manifest path (AISDLC-198). For subscription-billed parallel autonomous drain, use the session hierarchy (`cli-hierarchy up`, RFC-0051). Migration breadcrumb: [`docs/operations/claude-cli-spawner-removed.md`](docs/operations/claude-cli-spawner-removed.md).
 
 **New dispatch patterns (RFC-0041 Conductor/Worker Architecture)**:
-- `in-session-agent` — each Worker is a separate operator-opened CC session running `/ai-sdlc dispatch-worker`; tasks are claimed from the Dispatch Board (`.ai-sdlc/dispatch/queue/`) via foreground `Agent` calls (no watchdog, subscription quota). **Recommended default for autonomous drain.** N sessions = N-wide parallelism at zero incremental cost.
+- `in-session-agent` — each Worker is a separate operator-opened CC session (now an executor under `cli-hierarchy`; the `/ai-sdlc dispatch-worker` command is retired, AISDLC-763); tasks are claimed from the Dispatch Board (`.ai-sdlc/dispatch/queue/`) via foreground `Agent` calls (no watchdog, subscription quota). **Recommended default for autonomous drain.** N sessions = N-wide parallelism at zero incremental cost.
 - `claude-p-shell` — Workers are `env -u CLAUDECODE claude -p` subprocesses spawned by `cli-dispatch-supervisor`. Operator-controlled 30 min watchdog. Draws Agent SDK credit pool post-2026-06-15. For headless/CI contexts where no operator CC session is available.
 
 The Step 0-13 pipeline lives in `pipeline-cli/` (`@ai-sdlc/pipeline-cli`). Tier 1 = slash command body (subscription). Tier 2 = `executePipeline()` library + `SubagentSpawner` injection (API-key, MockSpawner, etc.). Refs: `pipeline-cli/{README,docs/spawner,docs/steps}.md`, RFC-0012.
@@ -479,7 +478,7 @@ The typical Pattern C setup: `/ai-sdlc execute <task-id>` automatically writes `
 
 ### Pattern C hard guards (AISDLC-358)
 
-The parent working tree MUST be on `main` at all times. This is enforced by `scripts/check-orchestrator-state.sh` (called at Step 0 of every `/ai-sdlc execute` and `/ai-sdlc orchestrator-tick`) and by the inline `runParentBranchGuard()` check at the top of every `runOrchestratorTick()` call in `pipeline-cli/src/orchestrator/loop.ts`.
+The parent working tree MUST be on `main` at all times. This is enforced by `scripts/check-orchestrator-state.sh` (called at Step 0 of every `/ai-sdlc execute` and by `cli-orchestrator tick`) and by the inline `runParentBranchGuard()` check at the top of every `runOrchestratorTick()` call in `pipeline-cli/src/orchestrator/loop.ts`.
 
 Guard logic (two outcomes):
 

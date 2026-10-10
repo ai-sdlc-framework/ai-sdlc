@@ -63,9 +63,7 @@ This makes harness selection transparent to the Step 8 verdict aggregator — no
 | Command | Description |
 |---------|-------------|
 | `/ai-sdlc execute <task-id>` | Full pipeline: worktree → developer → 3 reviewers → PR |
-| `/ai-sdlc execute-parallel [--count N] [--tasks ...]` | Spawn N concurrent execute sessions in tmux (max 5). Resource-gated; operator confirms before spawn. AISDLC-462. |
-| `/ai-sdlc execute-parallel-status` | Live status table of all parallel sessions (task, pane, status, step, PR, heartbeat-age). AISDLC-462. |
-| `/ai-sdlc execute-parallel-cleanup [--tasks ...]` | Kill in-flight tmux panes; archive session files to `sessions/archived/`. AISDLC-462. |
+| `/ai-sdlc orchestrator-tick`, `dispatch-worker`, `execute-parallel*` | Retired (AISDLC-763): one-paragraph pointers to [`cli-hierarchy`](../docs/operations/cli-hierarchy.md). |
 | `/ai-sdlc review-pr` | Standalone review pass on the current branch |
 | `/ai-sdlc rebase <pr>` | Mechanical rebase + re-sign of an open PR |
 | `/ai-sdlc triage` | Issue triage (DOR evaluation + PPA trust) |
@@ -195,7 +193,7 @@ now (...)`, no action is needed — the self-heal already ran; the banner is inf
 (AISDLC-608 AC-3). Run the `--force` command above only if a tool still behaves unexpectedly
 after that session starts.
 
-**Enforcement:** `ai-sdlc-plugin/commands/execute.test.mjs` and `orchestrator-tick.test.mjs` both contain assertions (AISDLC-245.4 + AISDLC-272 suites) that scan the command body for bare `node pipeline-cli/bin/...` invocations and fail the test run if found. `ai-sdlc-plugin/scripts/resolve-pipeline-cli.test.mjs` tests each topology in isolation. When adding a new slash command, copy the path-resolution preamble above and add a similar regression test.
+**Enforcement:** `ai-sdlc-plugin/commands/execute.test.mjs` contains assertions (AISDLC-245.4 + AISDLC-272 suites) that scan the command body for bare `node pipeline-cli/bin/...` invocations and fail the test run if found. `ai-sdlc-plugin/scripts/resolve-pipeline-cli.test.mjs` tests each topology in isolation. When adding a new slash command, copy the path-resolution preamble above and add a similar regression test.
 
 ## Attestation pre-push hook — shipping + install (AISDLC-555)
 
