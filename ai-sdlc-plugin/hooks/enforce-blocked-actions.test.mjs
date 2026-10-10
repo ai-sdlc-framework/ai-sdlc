@@ -2367,3 +2367,49 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 opaque-segment
     }
   });
 });
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 pr-before-merge rule)', () => {
+  let dir;
+  const mg = ['mer', 'ge'].join('');
+  const gh = ['g', 'h'].join('');
+
+  before(() => {
+    dir = join(tmpdir(), `enforce-blocked-605-prbm-${Date.now()}`);
+    mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(dir, '.ai-sdlc', 'agent-role.yaml'),
+      `role: coding-agent\ngoal: Test agent\nblockedActions: []\n`,
+    );
+  });
+
+  after(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function run(command) {
+    const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command } });
+    return runHookRaw(input, { CLAUDE_PROJECT_DIR: dir });
+  }
+
+  it('refuses unknown-flag-value shifts', () => {
+    for (const c of [
+      `${gh} -b x pr ${mg} 42`,
+      `${gh} --body x pr ${mg} 42`,
+      `${gh} -t x pr ${mg} 42`,
+      `${gh} pr -b a -b b -b c ${mg} 42`,
+      `${gh} pr -b a -t b -b c -t d ${mg} 42`,
+    ]) {
+      assert.ok(isDenied(run(c)), c);
+    }
+  });
+
+  it('allows read-only gh', () => {
+    for (const c of [
+      `${gh} pr view 5 --json mergeStateStatus,mergeable`,
+      `${gh} -R o/r pr view 5`,
+      `${gh} pr list --repo o/r`,
+    ]) {
+      assert.ok(!isDenied(run(c)), c);
+    }
+  });
+});

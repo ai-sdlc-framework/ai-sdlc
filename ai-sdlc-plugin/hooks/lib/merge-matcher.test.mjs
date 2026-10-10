@@ -380,3 +380,28 @@ describe('round-7: globs in the subcommand slot and word-boundary gh fallback (A
     assert.equal(m.commandRunsGhPrMerge(`${gh} pr view $N $'x' # no ${mg}`), true);
   });
 });
+
+describe('round-8: any gh segment with pr before merge is refused (AISDLC-605)', () => {
+  const mg = ['mer', 'ge'].join('');
+  const gh = ['g', 'h'].join('');
+  const refused = [
+    `${gh} -b x pr ${mg} 42`,
+    `${gh} --body x pr ${mg} 42`,
+    `${gh} -t x pr ${mg} 42`,
+    `${gh} pr -b a -b b -b c ${mg} 42`,
+    `${gh} pr -b a -t b -b c -t d ${mg} 42`,
+  ];
+  const allowed = [
+    `${gh} pr view 5 --json mergeStateStatus,mergeable`,
+    `${gh} -R o/r pr view 5`,
+    `${gh} pr list --repo o/r`,
+    `${gh} pr list --search "is:open"`,
+    `echo "${gh} -b x pr ${mg} 42"`,
+  ];
+  it('refuses unknown-flag-value shifts', () => {
+    for (const c of refused) assert.equal(m.commandRunsGhPrMerge(c), true, c);
+  });
+  it('allows read-only gh and inert prose', () => {
+    for (const c of allowed) assert.equal(m.commandRunsGhPrMerge(c), false, c);
+  });
+});

@@ -498,6 +498,33 @@ function ghTokensRunMerge(text) {
   return false;
 }
 
+/**
+ * Structural check (AISDLC-605 round 5): gh's parser skips unknown flags and their
+ * values before resolving the subcommand, so guessing which flags take a value is
+ * unsound. Any segment whose command is gh (among the first effective tokens) with
+ * the token `pr` before the token `merge` anywhere after it is refused, whatever
+ * flags sit between. `mergeStateStatus` / `mergeable` are not the token `merge`.
+ */
+function ghSegmentHasPrBeforeMerge(text) {
+  const tokens = effectiveTokens(text.replace(/['"\\]/g, ''));
+  const isGh = (t) =>
+    t
+      .replace(/^[({!]+/, '')
+      .split('/')
+      .pop()
+      .toLowerCase()
+      .replace(/\.exe$/, '') === 'gh';
+  const g = tokens.slice(0, 3).findIndex(isGh);
+  if (g < 0) return false;
+  let seenPr = false;
+  for (const t of tokens.slice(g + 1)) {
+    const alts = wordAlternatives(t.toLowerCase());
+    if (seenPr && alts.includes('merge')) return true;
+    if (alts.includes('pr')) seenPr = true;
+  }
+  return false;
+}
+
 /** True when a gh word is followed (anywhere later in the text) by `$'` or `$"` quoting. */
 function ghAnsiQuoted(text) {
   const m = /(^|[\s;&|({!/])gh(?:\.exe)?(?=[\s'"$\\])/i.exec(text);
@@ -509,6 +536,7 @@ function matchesGhPrMerge(text) {
     GH_PR_MERGE.test(text) ||
     GH_PR_MERGE.test(text.replace(/\\/g, '')) ||
     ghTokensRunMerge(text) ||
+    ghSegmentHasPrBeforeMerge(text) ||
     ghAnsiQuoted(text)
   );
 }
