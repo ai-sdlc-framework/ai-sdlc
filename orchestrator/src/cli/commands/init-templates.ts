@@ -143,7 +143,8 @@ jobs:
 `;
 
 /**
- * `.github/workflows/verify-attestation.yml` — AUDIT-ONLY verifier.
+ * `.github/workflows/verify-attestation.yml` — AUDIT-ONLY verifier plus a
+ * verifying `approve` job (AISDLC-748.1).
  *
  * Per Q3 in /tmp/quality-gate-redesign-final.md, attestation infrastructure
  * is opt-in and audit-only. This workflow logs verification results to the
@@ -157,13 +158,27 @@ export const VERIFY_ATTESTATION_WORKFLOW = `name: AI-SDLC Verify Review Attestat
 # and verifies the signature against any-of-N pubkeys in
 # .ai-sdlc/trusted-reviewers.yaml.
 #
-# AUDIT-ONLY: this workflow logs verification results (success/failure with
+# AUDIT-ONLY verify job: it logs verification results (success/failure with
 # reason) for forensic purposes but does NOT post a required commit status.
 # The single merge gate is \`ai-sdlc/pr-ready\` from ai-sdlc-gate.yml.
+#
+# The \`approve\` job (AISDLC-748.1) posts an APPROVE pull-request review ONLY
+# after the verify job reported a fully valid envelope, so the 1 approving
+# review that \`ai-sdlc init\` requires in branch protection is satisfied by a
+# verified attestation and never by an unverified one. Trust boundary:
+#   - Triggered by pull_request_target so the workflow definition, the trust
+#     root (.ai-sdlc/trusted-reviewers.yaml) and the verifier all come from the
+#     BASE branch. The PR head is never checked out: only its attestation
+#     envelope and transcript leaves are copied in as untrusted data.
+#   - The verifier is installed from npm into a directory outside the checkout.
+#   - \`pull-requests: write\` is held only by the \`approve\` job, which runs no
+#     repository code, only for same-repo (non-fork) non-draft PRs.
+# Requires the repo setting "Allow GitHub Actions to create and approve pull
+# requests" (Settings > Actions > General > Workflow permissions).
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
     paths-ignore:
       - 'docs/**'
@@ -172,8 +187,11 @@ on:
     types: [checks_requested]
 
 concurrency:
-  group: verify-attestation-\${{ github.event.pull_request.number || github.event.merge_group.head_sha }}
+  group: verify-attestation-\${{ github.event_name }}-\${{ github.event.pull_request.number || github.event.merge_group.head_sha }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   verify:
@@ -181,32 +199,162 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      status: \${{ steps.verify.outputs.status }}
+      reason: \${{ steps.verify.outputs.reason }}
+    env:
+      # Exact version of the verifier installed from npm. Bump deliberately.
+      AI_SDLC_CLI_VERSION: '0.31.0'
     steps:
       - name: Resolve subject SHA + base SHA from event payload
         id: resolve
+        env:
+          EVENT_NAME: \${{ github.event_name }}
+          MG_HEAD: \${{ github.event.merge_group.head_sha }}
+          MG_BASE: \${{ github.event.merge_group.base_sha }}
+          PR_HEAD: \${{ github.event.pull_request.head.sha }}
+          PR_BASE: \${{ github.event.pull_request.base.sha }}
+          PR_HEAD_REPO: \${{ github.event.pull_request.head.repo.full_name }}
+          REPO: \${{ github.repository }}
         run: |
-          if [ "\${{ github.event_name }}" = "merge_group" ]; then
-            echo "head_sha=\${{ github.event.merge_group.head_sha }}" >> "$GITHUB_OUTPUT"
-            echo "base_sha=\${{ github.event.merge_group.base_sha }}" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" = "merge_group" ]; then
+            echo "head_sha=$MG_HEAD" >> "$GITHUB_OUTPUT"
+            echo "base_sha=$MG_BASE" >> "$GITHUB_OUTPUT"
+            echo "head_repo=$REPO" >> "$GITHUB_OUTPUT"
           else
-            echo "head_sha=\${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
-            echo "base_sha=\${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+            echo "head_sha=$PR_HEAD" >> "$GITHUB_OUTPUT"
+            echo "base_sha=$PR_BASE" >> "$GITHUB_OUTPUT"
+            echo "head_repo=$PR_HEAD_REPO" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/checkout@v4
+      # BASE checkout only: the trust root and workflow definition are the
+      # base branch's, never the PR's.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          ref: \${{ steps.resolve.outputs.head_sha }}
+          ref: \${{ steps.resolve.outputs.base_sha }}
+          persist-credentials: false
 
-      - name: Log audit result
+      - name: Fetch head objects and copy attestation data (untrusted data only)
         env:
           HEAD_SHA: \${{ steps.resolve.outputs.head_sha }}
+          HEAD_REPO: \${{ steps.resolve.outputs.head_repo }}
         run: |
-          if [ -f ".ai-sdlc/attestations/\${HEAD_SHA}.dsse.json" ]; then
-            echo "::notice::ai-sdlc attestation AUDIT — envelope present at \${HEAD_SHA}"
-          else
-            echo "::notice::ai-sdlc attestation AUDIT — no envelope on \${HEAD_SHA} (audit-only, not blocking). Run 'ai-sdlc doctor' locally to check whether any enforcement is configured for this repo."
+          set -euo pipefail
+          git fetch --no-tags --no-recurse-submodules "https://github.com/$HEAD_REPO.git" "$HEAD_SHA"
+          [ "$(git rev-parse FETCH_HEAD)" = "$HEAD_SHA" ]
+          for p in .ai-sdlc/attestations .ai-sdlc/transcript-leaves .ai-sdlc/transcript-leaves.jsonl; do
+            if git cat-file -e "$HEAD_SHA:$p" 2>/dev/null; then
+              git checkout "$HEAD_SHA" -- "$p"
+            fi
+          done
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Install trusted verifier (outside the checkout)
+        id: runtime
+        run: |
+          set -euo pipefail
+          home="$RUNNER_TEMP/ai-sdlc-verifier"
+          mkdir -p "$home"
+          cd "$home"
+          npm init -y >/dev/null
+          npm install --no-save --save-exact --ignore-scripts "@ai-sdlc/orchestrator@$AI_SDLC_CLI_VERSION" "@ai-sdlc/pipeline-cli@$AI_SDLC_CLI_VERSION"
+          echo "home=$home" >> "$GITHUB_OUTPUT"
+
+      - name: Verify attestation
+        id: verify
+        env:
+          HEAD_SHA: \${{ steps.resolve.outputs.head_sha }}
+          BASE_SHA: \${{ steps.resolve.outputs.base_sha }}
+          VERIFIER_HOME: \${{ steps.runtime.outputs.home }}
+        run: |
+          set +e
+          out=$(node "$VERIFIER_HOME/node_modules/@ai-sdlc/pipeline-cli/bin/cli-attestation.mjs" verify --head "$HEAD_SHA" --base "$BASE_SHA")
+          set -e
+          status=$(printf '%s\\n' "$out" | sed -n 's/^status=//p' | head -n 1)
+          reason=$(printf '%s\\n' "$out" | sed -n 's/^reason=//p' | head -n 1 | tr -d '\\r' | cut -c1-300)
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          echo "::notice::ai-sdlc attestation AUDIT — status='\${status:-none}' on $HEAD_SHA: $reason (audit-only, not blocking)"
+
+  # Posts the approving review. Separate job: the review write scope is held
+  # ONLY here. Runs only when the verifier reported \`valid\`, only on
+  # pull_request_target, only for same-repo non-draft PRs, and executes no
+  # repository code (no checkout).
+  approve:
+    name: Approve verified attestation
+    needs: verify
+    runs-on: ubuntu-latest
+    if: >-
+      needs.verify.result == 'success' &&
+      needs.verify.outputs.status == 'valid' &&
+      github.event_name == 'pull_request_target' &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Post approving review
+        env:
+          GH_TOKEN: \${{ github.token }}
+          REPO: \${{ github.repository }}
+          PR_NUMBER: \${{ github.event.pull_request.number }}
+          HEAD_SHA: \${{ github.event.pull_request.head.sha }}
+          STATUS: \${{ needs.verify.outputs.status }}
+          REASON: \${{ needs.verify.outputs.reason }}
+        run: |
+          set -euo pipefail
+          marker='<!-- ai-sdlc-attestation-review -->'
+          setting='Allow GitHub Actions to create and approve pull requests'
+          [ "$STATUS" = "valid" ] || { echo "::notice::verification status is not valid; not approving"; exit 0; }
+          # A soft-fail or spot-check "valid" skipped the Merkle proof: not a full verification.
+          if printf '%s' "$REASON" | grep -qiE 'soft-fail|spot-check'; then
+            echo "::notice::qualified verification (soft-fail or spot-check); not approving"
+            exit 0
           fi
+          printf '%s' "$HEAD_SHA" | grep -qE '^[0-9a-f]{40}$' || { echo "::error::invalid head sha"; exit 1; }
+
+          reviews() {
+            gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/reviews?per_page=100" \\
+              --jq '.[] | select(.user.login == "github-actions[bot]" and (.body // "" | contains("'"$marker"'"))) | [.id, .state, .commit_id] | @tsv'
+          }
+
+          # Dismiss this workflow's own stale approvals (head moved).
+          reviews | while IFS="$(printf '\\t')" read -r id state commit; do
+            if [ "$state" = "APPROVED" ] && [ "$commit" != "$HEAD_SHA" ]; then
+              gh api -X PUT "repos/$REPO/pulls/$PR_NUMBER/reviews/$id/dismissals" \\
+                -f message="Superseded: head moved from \${commit:0:12} to \${HEAD_SHA:0:12}" >/dev/null \\
+                || echo "review $id already dismissed or not dismissable"
+            fi
+          done
+
+          # Idempotent per head SHA: re-list right before posting.
+          if reviews | awk -F'\\t' -v sha="$HEAD_SHA" '$2 == "APPROVED" && $3 == sha { found = 1 } END { exit !found }'; then
+            echo "::notice::already approved at $HEAD_SHA"
+            exit 0
+          fi
+
+          summary=$(printf '%s' "\${REASON:-valid envelope at HEAD}" | tr -s '[:space:]' ' ')
+          body="$marker
+          AI-SDLC attestation verified for \\\`\${HEAD_SHA:0:12}\\\`.
+
+          Verdict summary: $summary
+
+          Posted by the Verify attestation workflow after the envelope verified against .ai-sdlc/trusted-reviewers.yaml on the base branch."
+          if ! err=$(gh api -X POST "repos/$REPO/pulls/$PR_NUMBER/reviews" \\
+            -f commit_id="$HEAD_SHA" -f event=APPROVE -f body="$body" 2>&1 >/dev/null); then
+            if printf '%s' "$err" | grep -q '403'; then
+              echo "::error::GitHub returned 403 when posting the approving review. Enable the repository setting \\"$setting\\" (Settings > Actions > General > Workflow permissions) and re-run."
+            else
+              echo "::error::$err"
+            fi
+            exit 1
+          fi
+          echo "Posted approving review at $HEAD_SHA"
 `;
 
 /**
