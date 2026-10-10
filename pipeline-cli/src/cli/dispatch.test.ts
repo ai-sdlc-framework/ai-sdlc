@@ -360,6 +360,30 @@ describe('runDispatchCli', () => {
     expect(none.captured.raw).toContain('no session records');
   });
 
+  it('record-agent ignores a bare --transcript flag instead of storing "true" (AISDLC-564)', async () => {
+    const rec = await captureStdout(() =>
+      runDispatchCli([
+        'record-agent',
+        '--board-dir',
+        boardDir,
+        '--task-id',
+        'AISDLC-2090',
+        '--agent-id',
+        'a1',
+        '--worktree',
+        '/w',
+        '--transcript',
+      ]),
+    );
+    expect(rec.exit).toBe(0);
+    const listed = await captureStdout(() =>
+      runDispatchCli(['sessions', '--board-dir', boardDir, '--json']),
+    );
+    const [session] = JSON.parse(listed.captured.raw) as Array<Record<string, unknown>>;
+    expect(session.agentId).toBe('a1');
+    expect(session.transcriptPath).toBeUndefined();
+  });
+
   it('sweep returns no reaped IDs when nothing is stale', async () => {
     dispatchWriteManifest(boardDir, mkManifest('AISDLC-2030'));
     await runDispatchCli(['claim', '--board-dir', boardDir, '--worker-kind', 'in-session-agent']);

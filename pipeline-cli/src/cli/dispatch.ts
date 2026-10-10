@@ -561,7 +561,9 @@ export async function runDispatchCli(
         taskId,
         agentId,
         worktreePath,
-        ...(flags['transcript'] ? { transcriptPath: flags['transcript'] } : {}),
+        ...(flags['transcript'] && flags['transcript'] !== 'true'
+          ? { transcriptPath: flags['transcript'] }
+          : {}),
       });
       out({ ok: true, session });
       return 0;
