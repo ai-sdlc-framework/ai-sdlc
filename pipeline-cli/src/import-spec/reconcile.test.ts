@@ -24,7 +24,7 @@ import {
   scanImportedTasks,
   type ImportedTaskRecord,
 } from './reconcile.js';
-import { resolveEventLogPath } from '../decisions/event-log.js';
+import { readEventLogText } from '../decisions/event-log.js';
 import type { SpecKitTaskEntry } from './parser.js';
 
 let workDir: string;
@@ -366,7 +366,7 @@ describe('reconcileSpec', () => {
     expect(after).toContain('Body line TWO!');
 
     // Decision audit-trail: auto-sync emits decision-opened + operator-answered.
-    const eventLog = readFileSync(resolveEventLogPath(workDir), 'utf8');
+    const eventLog = readEventLogText(workDir);
     expect(eventLog).toContain('"type":"decision-opened"');
     expect(eventLog).toContain('"type":"operator-answered"');
     expect(eventLog).toContain('accept-auto-sync');
@@ -413,7 +413,7 @@ describe('reconcileSpec', () => {
     expect(readFileSync(filePath, 'utf8')).toBe(before);
 
     // AC #6 — defer Decision is open (no operator-answered yet); default-on-silence pattern.
-    const eventLog = readFileSync(resolveEventLogPath(workDir), 'utf8');
+    const eventLog = readEventLogText(workDir);
     const events = eventLog
       .trim()
       .split('\n')
@@ -455,7 +455,7 @@ describe('reconcileSpec', () => {
     expect(result.perTask[0].severity).toBe('no-change');
     expect(result.perTask[0].action).toBe('no-op');
     expect(result.perTask[0].decisionId).toBeNull();
-    expect(existsSync(resolveEventLogPath(workDir))).toBe(false);
+    expect(readEventLogText(workDir)).toBe('');
   });
 
   it('AC #8: removed-upstream marks superseded + emits Decision, never deletes', () => {
@@ -633,6 +633,6 @@ describe('reconcileSpec', () => {
     expect(result.perTask[0].severity).toBe('semantic');
     expect(result.perTask[0].action).toBe('defer-24h-window-opened');
     expect(result.perTask[0].decisionId).toBeNull();
-    expect(existsSync(resolveEventLogPath(workDir))).toBe(false);
+    expect(readEventLogText(workDir)).toBe('');
   });
 });

@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { emitIncompleteSpecDecision, emitUnknownSchemaDecision } from './decisions.js';
-import { resolveEventLogPath } from '../decisions/event-log.js';
+import { readEventLogText } from '../decisions/event-log.js';
 
 describe('emitIncompleteSpecDecision', () => {
   let workDir: string;
@@ -37,7 +37,7 @@ describe('emitIncompleteSpecDecision', () => {
     expect(taskContent).toContain('spec-kit-bridge');
     expect(taskContent).toContain('/speckit.tasks');
 
-    const eventLog = readFileSync(resolveEventLogPath(workDir), 'utf8');
+    const eventLog = readEventLogText(workDir);
     expect(eventLog).toContain('"type":"decision-opened"');
     expect(eventLog).toContain('"source":"subagent-escalation"');
     expect(eventLog).toContain('incomplete spec');
@@ -52,7 +52,7 @@ describe('emitIncompleteSpecDecision', () => {
     });
     expect(out.decisionId).toBeNull();
     expect(out.clarificationTaskFile).toBeTruthy();
-    expect(existsSync(resolveEventLogPath(workDir))).toBe(false);
+    expect(readEventLogText(workDir)).toBe('');
   });
 
   it('emitting twice allocates IMPCLARIFY-2 the second time', () => {
