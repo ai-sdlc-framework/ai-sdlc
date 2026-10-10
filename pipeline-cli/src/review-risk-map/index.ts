@@ -4,3 +4,6 @@ export * from './stage0.js';
 export * from './structural.js';
 export * from './stage2.js';
 export * from './build.js';
+export * from './tree-sitter-languages.js';
+export * from './tree-sitter-extract.js';
+export * from './tree-sitter-provider.js';
