@@ -153,6 +153,13 @@ const NON_INSTRUMENTED_PATTERNS = [
   // node_modules walk-up tests. Same rationale as bin/*.mjs and hooks above;
   // it was likewise uninstrumented in its prior home (ai-sdlc-plugin/scripts/).
   /(^|\/)attestation-core\/.+\.mjs$/,
+  // .github/actions/<action-name>/*.mjs — composite-action helper scripts
+  // (e.g. verify-attestation-base/check-policy-floor.mjs, AISDLC-757). They
+  // run as workflow steps and are tested under `node --test` via dynamic
+  // import + subprocess (`.github/workflows/__tests__/`), which vitest/istanbul
+  // can never instrument. Narrow on purpose: only .mjs directly inside an
+  // action directory, not nested subdirectories or other .github paths.
+  /(^|\/)\.github\/actions\/[^/]+\/[^/]+\.mjs$/,
   // docs/examples/** — reference scaffolds for adopters (e.g. BYO translator
   // examples from RFC-0036 Phase 10). Exercised via copy-paste into adopter
   // projects, not via vitest instrumentation. Same rationale as bin shims +
