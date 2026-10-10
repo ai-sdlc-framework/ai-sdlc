@@ -240,7 +240,7 @@ The tier is derived per reviewer leaf by `cli-attestation emit-leaf`: a leaf is
 classed `independent` (and gets `independenceTier: attested`) **only** when the
 harness wrote a `SubagentStart` marker for that reviewer's own run and, for
 markers outside the worktree, that run's transcript carries the leaf's diff-binding
-nonce (see "How a leaf is bound to its reviewer" below). Otherwise the leaf is
+nonce (see "How a leaf is bound to its reviewer" above). Otherwise the leaf is
 `verdictClass: self-authored` and carries no `independenceTier`, so it counts as
 `none`.
 
