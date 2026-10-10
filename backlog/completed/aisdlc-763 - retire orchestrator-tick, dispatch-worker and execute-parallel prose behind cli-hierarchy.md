@@ -2,7 +2,7 @@
 id: AISDLC-763
 title: >-
   Retire orchestrator-tick, dispatch-worker and execute-parallel prose behind cli-hierarchy.md
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-08'
 labels:
@@ -40,7 +40,7 @@ Sequencing: none.
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] AC-1: The five command files are pointers of a paragraph or deleted, and the command listing shrinks accordingly.
-- [ ] AC-2: CLAUDE.md canonical-paths table and docs no longer present them as primary paths.
-- [ ] AC-3: `cli-orchestrator tick --spawner` tests still pass.
+- [x] AC-1: The five command files are pointers of a paragraph or deleted, and the command listing shrinks accordingly.
+- [x] AC-2: CLAUDE.md canonical-paths table and docs no longer present them as primary paths.
+- [x] AC-3: `cli-orchestrator tick --spawner` tests still pass.
 <!-- AC:END -->

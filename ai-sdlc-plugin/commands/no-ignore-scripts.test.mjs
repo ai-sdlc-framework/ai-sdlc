@@ -24,7 +24,6 @@ const WORKTREE_INSTALL_FILES = [
   'pipeline-cli/src/steps/hooks-check.ts',
   'ai-sdlc-plugin/commands/execute.md',
   'ai-sdlc-plugin/commands/executor.md',
-  'ai-sdlc-plugin/commands/dispatch-worker.md',
   'ai-sdlc-plugin/agents/developer.md',
 ];
 

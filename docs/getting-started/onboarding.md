@@ -258,7 +258,7 @@ pipeline to its current requirement:
 | `/ai-sdlc execute <task-id>` (full pipeline) | **Yes** | Orchestrator + worktree + attestation |
 | Three-tier reviewer fan-out | **Yes** | `developer`, `code-reviewer`, `test-reviewer`, `security-reviewer` agents |
 | DSSE attestation signing | **Yes** | Operator's machine + signing key |
-| `/ai-sdlc orchestrator-tick` | **Yes** | Autonomous loop requires CC session |
+| `cli-hierarchy up` (replaces retired `/ai-sdlc orchestrator-tick`) | **Yes** | Autonomous loop requires CC sessions |
 
 **Adopters on other substrates** (GitHub Copilot, Cursor, Codex, OpenAI API)
 can use the `pnpm --filter @ai-sdlc/dogfood watch --issue <id>` path which
@@ -605,7 +605,7 @@ require a signing key.
 The attestation envelope is written by the Conductor's reconcile step (after the
 three reviewer subagents complete). If you pushed the branch before the Conductor
 ran, the envelope will not be present. Wait for the Conductor tick (or run
-`/ai-sdlc orchestrator-tick` manually) and re-push.
+`cli-hierarchy tick` manually) and re-push.
 
 ### Branch protection rejected: missing required checks
 
