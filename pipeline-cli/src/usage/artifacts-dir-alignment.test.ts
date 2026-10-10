@@ -338,3 +338,49 @@ describe('replay output ordering', () => {
     expect(res.out).not.toContain('Spend cap');
   });
 });
+
+describe('project-root anchoring from a worktree (AISDLC-654.2)', () => {
+  it('resolves the parent repository from a Pattern C worktree and keeps the explicit override', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const { mkdtempSync, realpathSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { resolveProjectRoot } = await import('../routing/artifacts-dir.js');
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), 'aisdlc-654-2-')));
+    const git = (...a: string[]) =>
+      execFileSync('git', a, {
+        cwd: parent,
+        stdio: 'ignore',
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: 't',
+          GIT_AUTHOR_EMAIL: 't@t',
+          GIT_COMMITTER_NAME: 't',
+          GIT_COMMITTER_EMAIL: 't@t',
+        },
+      });
+    git('init', '-q', '-b', 'main');
+    writeFileSync(join(parent, 'a.txt'), 'a');
+    git('add', 'a.txt');
+    git('commit', '-q', '-m', 'init');
+    const wt = join(parent, '.worktrees', 'task-1');
+    git('worktree', 'add', '-q', '-b', 'task-1', wt);
+    const anchored = routingArtifactsDir(resolveProjectRoot(wt));
+    expect(anchored).toBe(join(parent, '.ai-sdlc', 'artifacts'));
+    expect(anchored).toBe(defaultArtifactsDir(parent));
+    expect(resolveProjectRoot(parent)).toBe(parent);
+    process.env.ARTIFACTS_DIR = join(parent, 'elsewhere');
+    expect(routingArtifactsDir(resolveProjectRoot(wt))).toBe(join(parent, 'elsewhere'));
+    expect(routingArtifactsDir(resolveProjectRoot(wt), '/x/y')).toBe('/x/y');
+    const resolved = resolveModel({
+      role: 'developer',
+      taskId: 'D-1',
+      taskClass: 'chore',
+      workDir: wt,
+      artifactsDir: anchored,
+    });
+    expect(resolved).toBeDefined();
+    delete process.env.ARTIFACTS_DIR;
+    expect(existsSync(assignmentLogPath(anchored))).toBe(true);
+    expect(existsSync(join(wt, '.ai-sdlc', 'artifacts'))).toBe(false);
+  });
+});

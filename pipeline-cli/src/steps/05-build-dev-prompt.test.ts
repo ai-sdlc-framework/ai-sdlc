@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildDeveloperPrompt } from './05-build-dev-prompt.js';
 import type { TaskSpec } from '../types.js';
+import { routingArtifactsDir } from '../routing/artifacts-dir.js';
+import { assignmentLogPath } from '../routing/assignment-log.js';
 
 const task: TaskSpec = {
   id: 'AISDLC-1',
@@ -103,5 +105,25 @@ describe('Step 5 — buildDeveloperPrompt', () => {
     });
     expect(r.model).toBe('sonnet');
     expect(r.modelArm).toBe('default');
+  });
+});
+
+describe('Step 5 — artifacts dir anchoring (AISDLC-654.2)', () => {
+  it('writes the assignment log under the project root, not the worktree, when ARTIFACTS_DIR is unset', async () => {
+    delete process.env.ARTIFACTS_DIR;
+    const root = join(pinned, 'project');
+    const wt = join(root, '.worktrees', 'aisdlc-1');
+    mkdirSync(wt, { recursive: true });
+    await buildDeveloperPrompt({
+      taskId: 'AISDLC-1',
+      task,
+      branch: 'b',
+      worktreePath: wt,
+      projectRoot: root,
+    });
+    const expected = routingArtifactsDir(root);
+    expect(expected).toBe(join(root, '.ai-sdlc', 'artifacts'));
+    expect(existsSync(assignmentLogPath(expected))).toBe(true);
+    expect(existsSync(join(wt, '.ai-sdlc', 'artifacts'))).toBe(false);
   });
 });

@@ -35,7 +35,11 @@ import { routeReviewers } from './review-routing.js';
 import { buildJudgmentContext } from '../judgment/context.js';
 import type { EvaluateJudgmentContext } from '@ai-sdlc/reference';
 import { resolveModel } from '../routing/resolve-model.js';
-import { routingArtifactsDir, routingRecordable } from '../routing/artifacts-dir.js';
+import {
+  resolveProjectRoot,
+  routingArtifactsDir,
+  routingRecordable,
+} from '../routing/artifacts-dir.js';
 import { taskClassOf } from '../routing/task-class.js';
 import { generateNonce } from '../attestation/merkle.js';
 import { nonceMarkerLiteral } from '../attestation/harness-transcript.js';
@@ -58,6 +62,8 @@ export interface BuildReviewPromptsOptions {
   iteration?: number;
   /** Artifacts directory for the assignment log (defaults to $ARTIFACTS_DIR). */
   artifactsDir?: string;
+  /** Project root anchoring the default artifacts dir (defaults to the worktree's parent repository). */
+  projectRoot?: string;
   /**
    * Set false to resolve models without writing the assignment log or reporting
    * the routing capability (offline replay must leave no trace).
@@ -182,7 +188,10 @@ export async function buildReviewPrompts(
       : (opts.judgment ??
         buildJudgmentContext({
           workDir: opts.workDir,
-          artifactsDir: routingArtifactsDir(opts.worktreePath, opts.artifactsDir),
+          artifactsDir: routingArtifactsDir(
+            opts.projectRoot ?? resolveProjectRoot(opts.worktreePath),
+            opts.artifactsDir,
+          ),
           ...(opts.sourceKind ? { sourceKind: opts.sourceKind } : {}),
           taskId: opts.taskId,
         }));
@@ -233,7 +242,10 @@ export async function buildReviewPrompts(
       sourceKind: opts.sourceKind,
       iteration: opts.iteration ?? 1,
       workDir: opts.workDir,
-      artifactsDir: routingArtifactsDir(opts.worktreePath, opts.artifactsDir),
+      artifactsDir: routingArtifactsDir(
+        opts.projectRoot ?? resolveProjectRoot(opts.worktreePath),
+        opts.artifactsDir,
+      ),
       record:
         opts.recordRouting !== false && routingRecordable(opts.worktreePath, opts.artifactsDir),
     });
