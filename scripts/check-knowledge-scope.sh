@@ -8,10 +8,10 @@
 # .ai-sdlc/context.yaml. A line-regex here would miss flow-mapping/JSON
 # frontmatter, CRLF, BOM and trailing-comment forms.
 #
-# With git's pre-push stdin (`<local-ref> <local-sha> <remote-ref> <remote-sha>` per line)
-# it also scans EVERY commit being pushed, so a protected entry added in one commit and
-# removed in a later one cannot slip past a HEAD/index-only check. Without stdin (a
-# terminal, e.g. `pnpm knowledge:check`) only the working tree and index are checked.
+# With `--push-stdin` (the pre-push hook) it reads git's push lines (`<local-ref> <local-sha> <remote-ref> <remote-sha>` per line)
+# and also scans EVERY commit being pushed, so a protected entry added in one commit and
+# removed in a later one cannot slip past a HEAD/index-only check. Without the flag
+# (e.g. `pnpm knowledge:check`) only the working tree and index are checked.
 #
 # Exit codes:
 #   0 — no violations (or CLI not built outside CI: skipped with a message)
@@ -33,24 +33,36 @@ if [ ! -f "$dist" ]; then
 fi
 
 NULL_SHA="0000000000000000000000000000000000000000"
-rev_args=()
-if [ ! -t 0 ]; then
+fail=0
+
+run_check() {
+  node "$cli" check-scope --project-dir "$PWD" "$@" || fail=1
+}
+
+if [ "${1:-}" = "--push-stdin" ]; then
+  # One scan per pushed ref, so one ref's old remote tip never hides another ref's commits.
+  scanned=0
   while read -r _local_ref local_sha _remote_ref remote_sha; do
     [ -n "${local_sha:-}" ] || continue
     [ "$local_sha" = "$NULL_SHA" ] && continue # deleting a ref pushes no commits
-    rev_args+=(--rev "$local_sha")
+    revs=(--rev "$local_sha")
     if [ -n "${remote_sha:-}" ] && [ "$remote_sha" != "$NULL_SHA" ] \
       && git cat-file -e "${remote_sha}^{commit}" 2>/dev/null; then
-      rev_args+=(--rev "^$remote_sha")
+      revs+=(--rev "^$remote_sha")
     elif base="$(git merge-base "$local_sha" origin/main 2>/dev/null)" && [ -n "$base" ]; then
       # New branch (or a remote tip we do not have): everything since main.
-      rev_args+=(--rev "^$base")
+      revs+=(--rev "^$base")
     fi
     # No base at all: scan the whole history reachable from the pushed sha (fails closed).
+    run_check "${revs[@]}"
+    scanned=1
   done
+  [ "$scanned" = "1" ] || run_check
+else
+  run_check
 fi
 
-if node "$cli" check-scope --project-dir "$PWD" ${rev_args[@]+"${rev_args[@]}"}; then
+if [ "$fail" = "0" ]; then
   exit 0
 fi
 
