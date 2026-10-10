@@ -54,5 +54,5 @@ Replaced the RegExp-from-partially-escaped-string assertions in `scripts/check-p
 - 3 reviews approved (code, test, security; codex quota exhausted so Claude-native reviewers used)
 
 ## Follow-up
-(none) — CodeQL alert closure must be confirmed on the PR's CodeQL run.
+(none)
 <!-- SECTION:FINAL_SUMMARY:END -->
