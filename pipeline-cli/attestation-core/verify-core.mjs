@@ -3267,8 +3267,8 @@ export function runVerifier({
     // workflow log) telling the operator the exact recovery action.
     //
     // The hint is informational: status / reason are unchanged so branch
-    // protection still blocks merge until the operator (or the
-    // auto-rebase-on-queue-kick workflow) rebases + re-signs.
+    // protection still blocks merge until the operator (the
+    // auto-rebase-on-queue-kick workflow was retired in AISDLC-727) rebases + re-signs.
     try {
       if (detectQueueRebaseInvalidation(closest, repoRoot)) {
         process.stderr.write(

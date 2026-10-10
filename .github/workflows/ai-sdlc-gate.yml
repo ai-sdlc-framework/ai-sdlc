@@ -98,6 +98,9 @@ jobs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
       deps: ${{ steps.deps-filter.outputs.deps }}
       tasks: ${{ steps.tasks-filter.outputs.tasks }}
+      python: ${{ steps.sdk-filter.outputs.python }}
+      go: ${{ steps.sdk-filter.outputs.go }}
+      first_run: ${{ steps.sdk-filter.outputs.first_run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -150,6 +153,26 @@ jobs:
           filters: |
             tasks:
               - 'backlog/tasks/*.md'
+      # Fourth filter (AISDLC-727): SDK + first-run-smoke path filters moved
+      # here from ci.yml so this workflow is the only one that runs the suite
+      # on pull_request events.
+      - id: sdk-filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            python:
+              - 'sdk-python/**'
+              - 'conformance/**'
+            go:
+              - 'sdk-go/**'
+              - 'conformance/**'
+            first_run:
+              - 'ai-sdlc-plugin/**'
+              - 'pipeline-cli/**'
+              - 'reference/**'
+              - 'orchestrator/**'
+              - 'README.md'
+              - 'scripts/first-run-smoke*'
 
   # ── Lint & Format (always required) ─────────────────────────────────────
   # Runs on every PR archetype. Cheap (~1 min) and catches the long tail of
@@ -195,6 +218,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test
+      # AISDLC-727: ci.yml no longer runs on pull requests, so schema validation
+      # (cheap, cross-cutting) runs here instead of only post-merge on main.
+      - run: pnpm validate-schemas
 
   coverage:
     name: Coverage
@@ -221,9 +247,8 @@ jobs:
       # this PR adds/modifies are covered by tests, mirroring the AISDLC-372-
       # dropped codecov/patch gate without the SaaS latency. Runs INSIDE the
       # Coverage job so vitest's coverage-final.json fixtures are already on
-      # disk and we don't pay a second `pnpm test:coverage`. Same gate also
-      # runs in `ci.yml` as a backstop; the alls-green rollup treats either
-      # passing as sufficient.
+      # disk and we don't pay a second `pnpm test:coverage`. ci.yml no
+      # longer runs on pull requests (AISDLC-727), so this is the only PR gate.
       - name: Patch coverage gate (≥90%)
         if: github.event_name == 'pull_request'
         run: |
@@ -262,6 +287,98 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: pnpm --filter @ai-sdlc/reference test
+
+  # ── Jobs moved from ci.yml (AISDLC-727) ─────────────────────────────────
+  # ci.yml no longer runs on pull_request events; these four jobs existed only
+  # there. `Backlog Drift` keeps its exact job name because it is a required
+  # branch-protection context.
+  backlog-drift:
+    name: Backlog Drift
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run backlog-drift check (full repo, error-severity gate)
+        # Only `error`-severity issues block; info/warning are printed.
+        # Pinned to 0.1.3 (URL-fragment fix). Same logic as ci.yml's job.
+        run: |
+          set -euo pipefail
+          json="$(npx backlog-drift@0.1.3 check --json 2>/dev/null || true)"
+          npx backlog-drift@0.1.3 check || true
+          errors="$(printf '%s' "$json" | jq '[.[] | select(.severity == "error")] | length')"
+          echo ""
+          echo "[backlog-drift] error-severity issues: ${errors}"
+          if [ "${errors}" != "0" ]; then
+            echo "::error::Backlog drift gate failed: ${errors} error-severity issue(s) detected. Run \`npx backlog-drift check\` locally and \`npx backlog-drift fix --task <id>\` to auto-fix."
+            exit 1
+          fi
+          echo "[backlog-drift] gate passed (info/warning issues are informational, not blocking)"
+
+  first-run-smoke:
+    name: First-run smoke (fresh repo)
+    needs: detect
+    if: needs.detect.outputs.first_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build (orchestrator, pipeline-cli, reference)
+        run: |
+          pnpm --filter "@ai-sdlc/orchestrator..." \
+               --filter "@ai-sdlc/pipeline-cli..." \
+               build
+      - name: First-run smoke
+        run: node scripts/first-run-smoke.mjs
+
+  test-python:
+    name: Test Python SDK (${{ matrix.python-version }})
+    needs: detect
+    if: needs.detect.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    defaults:
+      run:
+        working-directory: sdk-python
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e '.[dev]'
+      - run: ruff check src/
+      - run: mypy src/
+      - run: pytest
+
+  test-go:
+    name: Test Go SDK
+    needs: detect
+    if: needs.detect.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.24'
+      - name: Test sdk-go
+        working-directory: sdk-go
+        run: go test ./... -v -count=1
+      - name: Test sdk-go/operator
+        working-directory: sdk-go/operator
+        run: go test ./... -v -count=1
 
   # ── Aggregator ──────────────────────────────────────────────────────────
   # Posts the SINGLE rollup check `ai-sdlc/pr-ready` that adopters configure
@@ -509,6 +626,10 @@ jobs:
         build-test,
         coverage,
         integration,
+        backlog-drift,
+        first-run-smoke,
+        test-python,
+        test-go,
         attestation-gate,
         independence-policy-gate,
         dependency-review-gate,
@@ -557,6 +678,9 @@ jobs:
             build-test,
             coverage,
             integration,
+            first-run-smoke,
+            test-python,
+            test-go,
             attestation-gate,
             independence-policy-gate,
             dependency-review-gate,

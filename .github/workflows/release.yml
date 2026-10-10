@@ -68,7 +68,7 @@ jobs:
           # `ai-sdlc/attestation` + `ai-sdlc/pr-ready` statuses would never
           # fire, leaving the PR BLOCKED. `secrets.AI_SDLC_PAT` is the same
           # fine-scoped PAT (or GitHub App token) used by
-          # `auto-rebase-open-prs.yml` for the same reason; see AISDLC-189
+          # the retired auto-rebase workflow (AISDLC-727) for the same reason; see AISDLC-189
           # for the canonical rationale.
           token: ${{ secrets.AI_SDLC_PAT }}
 
