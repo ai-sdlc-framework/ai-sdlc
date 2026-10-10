@@ -42,4 +42,4 @@ Operator standing rule (2026-10-10, CLAUDE.md "Five-step production algorithm", 
 
 ## Notes
 
-Operator rule 2026-10-10. Related: AISDLC-797..803 (first tasks written under the rule).
+Operator rule 2026-10-10. Related: the pipeline-stability root-cause set filed the same day in PR #1353 (first tasks written under the rule).
