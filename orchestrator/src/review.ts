@@ -9,7 +9,9 @@ import {
   type ReviewVerdict,
   type ReviewAgentConfig,
 } from './runners/review-agent.js';
+import { reportCapabilityOutcome } from '@ai-sdlc/reference';
 import { metaReview } from './review-meta.js';
+import { resolveOrchestratorArtifactsDir } from './judgment-context.js';
 import type { Logger } from './logger.js';
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -31,6 +33,8 @@ export interface ReviewOptions {
   principles?: string;
   /** LLM caller for meta-review pass. If provided, medium-confidence findings are filtered. */
   metaReviewLLM?: (prompt: string) => Promise<string>;
+  /** Where the capability state is recorded. Defaults like the rest of the orchestrator. */
+  artifactsDir?: string;
 }
 
 // ── Public API ───────────────────────────────────────────────────────
@@ -100,11 +104,23 @@ export async function executeReview(
 
     // Run meta-review on medium-confidence findings if LLM caller provided
     if (options?.metaReviewLLM && options?.principles) {
+      reportCapabilityOutcome('review.meta-review', 'live', {
+        artifactsDir: resolveOrchestratorArtifactsDir(
+          options.artifactsDir ? { artifactsDir: options.artifactsDir } : {},
+        ),
+      });
       const metaResult = await metaReview(verdict, options.principles, options.metaReviewLLM);
       if (metaResult.suppressed > 0) {
         logger?.info?.(`${reviewType} meta-review: ${metaResult.suppressed} finding(s) suppressed`);
       }
       verdict = metaResult.verdict;
+    } else {
+      reportCapabilityOutcome('review.meta-review', 'degraded', {
+        artifactsDir: resolveOrchestratorArtifactsDir(
+          options?.artifactsDir ? { artifactsDir: options.artifactsDir } : {},
+        ),
+        reason: 'no-meta-review',
+      });
     }
 
     logger?.info?.(

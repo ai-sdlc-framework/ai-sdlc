@@ -16,6 +16,7 @@ import {
   createJudgmentLogSink,
   evaluateJudgment,
   loadJudgmentConfig,
+  reportCapabilityOutcome,
   resolveJudgmentProvider,
   type JudgmentEvaluationRecord,
   type JudgmentProvider,
@@ -32,6 +33,20 @@ import {
 } from './judgment-definitions.js';
 import { isAllowedClassification } from './task-prompts.js';
 import type { ClassifierInput, ClassifierTaskType, ClassifyOpts } from './types.js';
+
+/** Filled in by `classifyViaJudgment`: true once the judgment reported the capability. */
+export interface JudgmentReportTrace {
+  reported: boolean;
+}
+
+/** Where capability state is recorded for a classification: explicit, env, then the repo. */
+export function substrateArtifactsDir(opts: ClassifyOpts, repoRoot: string): string {
+  return (
+    opts.judgment?.artifactsDir ??
+    process.env.ARTIFACTS_DIR ??
+    join(repoRoot, '.ai-sdlc', 'artifacts')
+  );
+}
 
 /** What a successful judgment contributes to a classification. */
 export interface JudgmentClassification {
@@ -69,6 +84,7 @@ export async function classifyViaJudgment(
   taskType: ClassifierTaskType,
   opts: ClassifyOpts,
   repoRoot: string,
+  trace?: JudgmentReportTrace,
 ): Promise<JudgmentClassification | undefined> {
   try {
     // An operator-supplied invoker module takes precedence over the judgment.
@@ -87,8 +103,7 @@ export async function classifyViaJudgment(
         captured = rec;
       },
     });
-    const artifactsDir =
-      j.artifactsDir ?? process.env.ARTIFACTS_DIR ?? join(repoRoot, '.ai-sdlc', 'artifacts');
+    const artifactsDir = substrateArtifactsDir(opts, repoRoot);
     sinks.push(createJudgmentLogSink({ artifactsDir }));
 
     const outcome = await evaluateJudgment(definition, input, {
@@ -100,6 +115,14 @@ export async function classifyViaJudgment(
       // What the existing path decides with no invoker: the pending sentinel.
       incumbent: { classification: PENDING_CLASSIFICATION },
       sinks,
+      // The judgment reports the capability once for this call; the caller then does not.
+      onCapabilityOutcome: ({ capabilityId, outcome, reason }) => {
+        if (trace) trace.reported = true;
+        reportCapabilityOutcome(capabilityId, outcome, {
+          artifactsDir,
+          ...(reason ? { reason } : {}),
+        });
+      },
     });
     if (outcome.kind !== 'act') return undefined;
 

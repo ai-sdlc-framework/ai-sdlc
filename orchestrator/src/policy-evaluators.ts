@@ -12,6 +12,7 @@ import {
   evaluateGate,
   scoreComplexity,
   evaluateComplexity,
+  reportCapabilityOutcome,
   type ExpressionEvaluator,
   type LLMEvaluator,
   type ABACPolicy,
@@ -24,6 +25,7 @@ import {
   type EvaluateJudgmentContext,
 } from '@ai-sdlc/reference';
 import { applyComplexityFactorJudgment } from './judgment/complexity-factors.js';
+import { resolveOrchestratorArtifactsDir } from './judgment-context.js';
 
 /**
  * Create a Rego-based policy evaluator for gate rules.
@@ -55,9 +57,14 @@ export function createPipelineExpressionEvaluator(): ExpressionEvaluator {
 }
 
 /**
- * Create a stub LLM evaluator for testing LLM gate rules.
+ * Create a stub LLM evaluator for testing LLM gate rules. Choosing the stub is recorded
+ * as a degraded `policy.llm-evaluator` capability: no model answers the rule.
  */
-export function createPipelineLLMEvaluator(): LLMEvaluator {
+export function createPipelineLLMEvaluator(opts: { artifactsDir?: string } = {}): LLMEvaluator {
+  reportCapabilityOutcome('policy.llm-evaluator', 'degraded', {
+    artifactsDir: resolveOrchestratorArtifactsDir(opts),
+    reason: 'stub-evaluator',
+  });
   return createStubLLMEvaluator([]);
 }
 

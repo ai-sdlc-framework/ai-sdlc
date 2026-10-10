@@ -47,6 +47,9 @@
 
 import { createHash } from 'node:crypto';
 
+import { reportCapabilityOutcome } from '@ai-sdlc/reference';
+import { resolveJudgmentArtifactsDir } from '../judgment/context.js';
+
 import type { Bucket, SignalOutput, StageAResult, TaskClass } from './types.js';
 import { BUCKET_INDEX, BUCKETS } from './types.js';
 import type { EstimateLogRecord } from './log-writer.js';
@@ -309,6 +312,16 @@ export interface RunStageBOpts {
   invoker?: StageBInvoker;
   /** Optional logger for best-effort diagnostics. */
   logger?: PipelineLogger;
+  /** Where the capability state is recorded. Defaults like the rest of pipeline-cli. */
+  artifactsDir?: string;
+}
+
+/** Record how Stage B ran once the escalation gate has asked for it. Never throws. */
+function reportStageB(opts: RunStageBOpts, outcome: 'live' | 'degraded', reason?: string): void {
+  reportCapabilityOutcome('estimation.stage-b', outcome, {
+    artifactsDir: opts.artifactsDir ?? resolveJudgmentArtifactsDir(),
+    ...(reason ? { reason } : {}),
+  });
 }
 
 /**
@@ -332,6 +345,7 @@ export async function runStageB(opts: RunStageBOpts): Promise<StageBResult | Sta
   }
 
   if (!opts.invoker) {
+    reportStageB(opts, 'degraded', 'no-invoker');
     return {
       invoked: false,
       skipReason: 'no LLM invoker provided (dry-run / preview mode)',
@@ -354,6 +368,7 @@ export async function runStageB(opts: RunStageBOpts): Promise<StageBResult | Sta
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     opts.logger?.warn(`[stage-b] LLM invoker failed: ${reason}`);
+    reportStageB(opts, 'degraded', 'invoker-error');
     return {
       invoked: false,
       skipReason: `LLM invoker threw: ${reason}`,
@@ -364,12 +379,14 @@ export async function runStageB(opts: RunStageBOpts): Promise<StageBResult | Sta
   const verdict = parseStageBResponse(rawResponse, promptHash);
   if (!verdict) {
     opts.logger?.warn(`[stage-b] could not parse LLM response: ${rawResponse.slice(0, 200)}`);
+    reportStageB(opts, 'degraded', 'invalid-response');
     return {
       invoked: false,
       skipReason: `LLM response unparseable: ${rawResponse.slice(0, 100)}`,
     };
   }
 
+  reportStageB(opts, 'live');
   return {
     invoked: true,
     verdict,

@@ -16,6 +16,7 @@ import {
   loadJudgmentConfig,
   registerBuiltInJudgmentDefinitions,
   registerBuiltInJudgmentProvider,
+  reportCapabilityOutcome,
   type EvaluateJudgmentContext,
   type LoadJudgmentConfigOpts,
   type ResolvedJudgmentConfig,
@@ -52,12 +53,28 @@ export function resolveJudgmentArtifactsDir(
   );
 }
 
+/**
+ * The capability callback every context carries: each evaluation of a definition that names a
+ * capability records how it ran, including when the layer is disabled. Never throws.
+ */
+function capabilityReporter(
+  artifactsDir: string,
+): NonNullable<EvaluateJudgmentContext['onCapabilityOutcome']> {
+  return ({ capabilityId, outcome, reason }) =>
+    reportCapabilityOutcome(capabilityId, outcome, {
+      artifactsDir,
+      ...(reason ? { reason } : {}),
+    });
+}
+
 /** Build the context `evaluateJudgment` needs. Never throws. */
 export function buildJudgmentContext(
   opts: BuildJudgmentContextOptions = {},
 ): EvaluateJudgmentContext {
   registerBuiltInJudgmentDefinitions();
+  const artifactsDir = resolveJudgmentArtifactsDir(opts);
   const perCall = {
+    onCapabilityOutcome: capabilityReporter(artifactsDir),
     ...(opts.sourceKind ? { sourceKind: opts.sourceKind } : {}),
     ...(opts.taskId ? { taskId: opts.taskId } : {}),
     ...(opts.consumerLabel ? { consumerLabel: opts.consumerLabel } : {}),
@@ -81,7 +98,6 @@ export function buildJudgmentContext(
   } catch {
     // an unregistrable provider leaves the layer abstaining
   }
-  const artifactsDir = resolveJudgmentArtifactsDir(opts);
   return {
     config,
     sinks: [
