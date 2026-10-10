@@ -75,6 +75,7 @@ const INDIRECT = new Set([
   'verdict.reason',
   'forcePushRefusal(lease.why)',
   "untrustedMessage(`path '${hit}'`)",
+  "untrustedMessage(`path '${absPath}' (symlink chain too deep to resolve)`)",
   'reason',
   'message',
 ]);
