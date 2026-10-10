@@ -90,6 +90,12 @@ export interface FixCIOptions {
   secretStore?: SecretStore;
   /** CI pipeline adapter for fetching logs (falls back to `gh` CLI). */
   ciAdapter?: CIPipeline;
+  /**
+   * Commit the fix locally but do not push or post the success comment
+   * (AISDLC-704.5). The unprivileged workflow job runs with this set; a
+   * separate privileged job pushes the resulting commits.
+   */
+  skipPush?: boolean;
 }
 
 /**
@@ -486,49 +492,53 @@ export async function executeFixCI(
       },
     );
 
-    // 10. Push to the same branch (CI re-runs automatically)
-    // cleanGitEnv() prevents leaked GIT_DIR from binding to a parent repo (AISDLC-72).
-    log.stage('push');
-    await execFileAsync('git', ['push', 'origin', currentBranch], {
-      cwd: workDir,
-      env: cleanGitEnv(),
-    });
-    log.stageEnd('push');
+    if (options.skipPush) {
+      log.info('skipPush set: leaving the fix commits local for the privileged push job');
+    } else {
+      // 10. Push to the same branch (CI re-runs automatically)
+      // cleanGitEnv() prevents leaked GIT_DIR from binding to a parent repo (AISDLC-72).
+      log.stage('push');
+      await execFileAsync('git', ['push', 'origin', currentBranch], {
+        cwd: workDir,
+        env: cleanGitEnv(),
+      });
+      log.stageEnd('push');
 
-    auditLog.record({
-      actor: 'system',
-      action: 'create',
-      resource: `push/${currentBranch}`,
-      decision: 'allowed',
-      details: { prNumber, attempt: attempts + 1 },
-    });
+      auditLog.record({
+        actor: 'system',
+        action: 'create',
+        resource: `push/${currentBranch}`,
+        decision: 'allowed',
+        details: { prNumber, attempt: attempts + 1 },
+      });
 
-    // 11. Comment on PR with success details
-    const successTpl = notifTemplates?.['fix-ci-success'];
-    const successComment = successTpl
-      ? renderTemplate(successTpl, {
-          attempt: String(attempts + 1),
-          max: String(maxFixAttempts),
-          branch: currentBranch,
-        })
-      : {
-          title: NOTIFICATION_TITLES.fixCIApplied,
-          body: `Attempt ${attempts + 1} of ${maxFixAttempts} — pushed fixes to \`${currentBranch}\`.`,
-        };
-    // Use pre-created marker (one per execution, prevents double-counting)
-    await addComment(
-      [
-        `## ${successComment.title}`,
-        '',
-        successComment.body,
-        '',
-        '### Changes',
-        result.filesChanged.map((f) => `- \`${f}\``).join('\n'),
-        '',
-        RETRY_MARKER,
-        cycleMarker,
-      ].join('\n'),
-    );
+      // 11. Comment on PR with success details
+      const successTpl = notifTemplates?.['fix-ci-success'];
+      const successComment = successTpl
+        ? renderTemplate(successTpl, {
+            attempt: String(attempts + 1),
+            max: String(maxFixAttempts),
+            branch: currentBranch,
+          })
+        : {
+            title: NOTIFICATION_TITLES.fixCIApplied,
+            body: `Attempt ${attempts + 1} of ${maxFixAttempts} — pushed fixes to \`${currentBranch}\`.`,
+          };
+      // Use pre-created marker (one per execution, prevents double-counting)
+      await addComment(
+        [
+          `## ${successComment.title}`,
+          '',
+          successComment.body,
+          '',
+          '### Changes',
+          result.filesChanged.map((f) => `- \`${f}\``).join('\n'),
+          '',
+          RETRY_MARKER,
+          cycleMarker,
+        ].join('\n'),
+      );
+    }
 
     // 12. Record episodic memory (success)
     if (options.memory) {

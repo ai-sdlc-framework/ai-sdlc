@@ -16,11 +16,20 @@ jobs:
   fix-ci:
     name: Fix CI Failures
     runs-on: ubuntu-latest
+    # SECURITY (AISDLC-704.5): this job runs PR-branch code (install, build, the
+    # agent's validation) so it is UNPRIVILEGED: contents is read-only and the
+    # write PAT is never in scope here. It leaves its fix as commits in pr-work/,
+    # hands them to the `push-fix` job as a git bundle (data), and exits. The
+    # only secret that reaches this job is the agent's own ANTHROPIC_API_KEY,
+    # held by the single pipeline step.
     permissions:
-      contents: write
+      contents: read
       issues: write
       pull-requests: write
       actions: read
+    outputs:
+      has_changes: ${{ steps.bundle.outputs.has_changes }}
+      pr_number: ${{ steps.pr.outputs.number }}
     # SECURITY (issue #780, CodeQL actions/untrusted-checkout): this job runs in
     # the privileged workflow_run context with secrets (AI_SDLC_PAT write token +
     # ANTHROPIC_API_KEY) and checks out + builds the PR-head code. It MUST only
@@ -82,7 +91,9 @@ jobs:
         if: steps.pr.outputs.number
         with:
           node-version: 22
-          cache: pnpm
+          # No `cache: pnpm`: this job runs PR code as the same user as the trusted
+          # install, so a saved store could carry PR content into the default
+          # branch's cache scope (AISDLC-704.5).
 
       - run: pnpm install --frozen-lockfile
         if: steps.pr.outputs.number
@@ -93,11 +104,28 @@ jobs:
       # PR worktree deps (no secrets in env, no persisted git credentials) so
       # the agent's validation can run against the PR branch inside pr-work/.
       # --ignore-scripts: PR-controlled lifecycle scripts (preinstall/prepare)
-      # never run; the pipeline only needs the installed modules for tests.
+      # never run. --ignore-pnpmfile: a PR-controlled .pnpmfile.cjs is code that
+      # pnpm would otherwise load, so it is skipped too. The runner file-command
+      # variables are unset as hygiene (not isolation: PR code runs as the same
+      # user and can still reach this job's other steps; the real boundary is
+      # that this job holds no write PAT), and the store is private to pr-work.
       - name: Install PR worktree dependencies
         if: steps.pr.outputs.number
         working-directory: pr-work
-        run: pnpm install --frozen-lockfile --ignore-scripts
+        run: |
+          unset GITHUB_ENV GITHUB_PATH GITHUB_OUTPUT GITHUB_STATE GITHUB_STEP_SUMMARY
+          pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile \
+            --store-dir "$RUNNER_TEMP/pr-work-pnpm-store"
+
+      # Build PR code here (no secrets in this step) so the agent's validation
+      # finds dist output, instead of building it inside the secret-holding step.
+      - name: Build PR worktree
+        if: steps.pr.outputs.number
+        working-directory: pr-work
+        continue-on-error: true
+        run: |
+          unset GITHUB_ENV GITHUB_PATH GITHUB_OUTPUT GITHUB_STATE GITHUB_STEP_SUMMARY
+          pnpm build
 
       - name: Install Claude Code CLI
         if: steps.pr.outputs.number
@@ -115,8 +143,9 @@ jobs:
         if: steps.pr.outputs.number
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.AI_SDLC_PAT }}
-          # gh CLI uses GH_TOKEN; default token has actions:read for log fetching
+          # gh CLI uses GH_TOKEN; the read-only job token can fetch logs and
+          # comment. The write PAT is deliberately absent (AISDLC-704.5).
+          GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -127,25 +156,51 @@ jobs:
           # The pipeline operates on the PR branch worktree; tooling runs from
           # the trusted checkout (AISDLC-704).
           AI_SDLC_FIX_CI_WORKDIR: ${{ github.workspace }}/pr-work
+          # Commit locally only; the push-fix job pushes (AISDLC-704.5).
+          AI_SDLC_FIX_CI_SKIP_PUSH: '1'
         run: |
-          # The pipeline's final `git push origin <branch>` (orchestrator
-          # fix-ci.ts) needs write auth. Supply the PAT as process-scoped git
-          # config via env (GIT_CONFIG_*), never persisted to .git/config.
-          # Residual: the pipeline process (and the agent it spawns in pr-work)
-          # holds the PAT in its environment for the duration of this step.
-          AUTH=$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)
-          echo "::add-mask::$AUTH"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $AUTH"
+          unset GITHUB_ENV GITHUB_PATH GITHUB_OUTPUT GITHUB_STATE GITHUB_STEP_SUMMARY
           pnpm --filter @ai-sdlc/dogfood fix-ci --pr "$PR_NUMBER" --run-id "$WORKFLOW_RUN_ID"
+
+      # Runs after PR code has executed, so it uses only fixed git commands and
+      # treats pr-work/ as data. The bundle holds just the new commits.
+      - name: Bundle fix commits for the push job
+        id: bundle
+        if: steps.pr.outputs.number
+        env:
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          BASE="refs/remotes/origin/${HEAD_BRANCH}"
+          COUNT=$(git -C pr-work -c core.fsmonitor= -c core.hooksPath=/dev/null rev-list --count "${BASE}..HEAD")
+          if [ "$COUNT" -eq 0 ]; then
+            echo "No new commits to push."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mkdir -p fix-bundle
+          git -C pr-work -c core.fsmonitor= -c core.hooksPath=/dev/null bundle create "$GITHUB_WORKSPACE/fix-bundle/fix.bundle" "${BASE}..HEAD"
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload fix bundle
+        if: steps.bundle.outputs.has_changes == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ai-sdlc-fix-ci-bundle-${{ github.run_id }}
+          path: fix-bundle/fix.bundle
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Collect pipeline artifacts
         if: always() && steps.pr.outputs.number
         run: |
           mkdir -p .ai-sdlc
           cp /tmp/ai-sdlc-diagnostics-audit.jsonl .ai-sdlc/diagnostics-audit.jsonl 2>/dev/null || true
-          cp pr-work/.ai-sdlc/diagnostics-audit.jsonl .ai-sdlc/pr-work-diagnostics-audit.jsonl 2>/dev/null || true
+          # pr-work/ is PR-controlled: never follow a symlink out of it (AISDLC-704.5).
+          SRC=pr-work/.ai-sdlc/diagnostics-audit.jsonl
+          if [ ! -L pr-work/.ai-sdlc ] && [ ! -L "$SRC" ] && [ -f "$SRC" ]; then
+            cp -P "$SRC" .ai-sdlc/pr-work-diagnostics-audit.jsonl || true
+          fi
 
       - name: Upload pipeline artifacts
         if: always() && steps.pr.outputs.number
@@ -155,3 +210,55 @@ jobs:
           path: .ai-sdlc/
           if-no-files-found: ignore
           retention-days: 30
+
+  # SECURITY (AISDLC-704.5): the only job with the write PAT. It never installs,
+  # builds or runs PR code: it fetches the fix commits from the bundle as data,
+  # checks they fast-forward the PR branch, and pushes with git hooks disabled
+  # so no hook (including one a trusted prepare step configured) can run.
+  push-fix:
+    name: Push Fix
+    needs: fix-ci
+    if: needs.fix-ci.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Download fix bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ai-sdlc-fix-ci-bundle-${{ github.run_id }}
+          path: fix-bundle
+
+      - name: Verify and push fix commits
+        env:
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          PR_NUMBER: ${{ needs.fix-ci.outputs.pr_number }}
+          GITHUB_TOKEN: ${{ secrets.AI_SDLC_PAT }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          AUTH=$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)
+          echo "::add-mask::$AUTH"
+          GIT_AUTH=(-c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH")
+          # Fetching never runs hooks; the push below disables them explicitly.
+          git "${GIT_AUTH[@]}" fetch --no-tags origin "+refs/heads/${HEAD_BRANCH}:refs/remotes/origin/${HEAD_BRANCH}"
+          git bundle verify fix-bundle/fix.bundle
+          git -c transfer.fsckObjects=true fetch --no-tags fix-bundle/fix.bundle "HEAD:refs/fix/incoming"
+          # Must fast-forward the branch exactly as the agent saw it.
+          git merge-base --is-ancestor "refs/remotes/origin/${HEAD_BRANCH}" refs/fix/incoming
+          if git diff --no-renames --name-only "refs/remotes/origin/${HEAD_BRANCH}" refs/fix/incoming | grep -E '^(\.github|\.husky|\.ai-sdlc)/'; then
+            echo "::error::fix touches .github/, .husky/ or .ai-sdlc/; refusing to push"
+            exit 1
+          fi
+          git -c core.hooksPath=/dev/null "${GIT_AUTH[@]}" push --no-verify origin "refs/fix/incoming:refs/heads/${HEAD_BRANCH}"
+          gh pr comment "$PR_NUMBER" --body "## AI-SDLC fix-CI applied
+
+          Pushed fixes to \`${HEAD_BRANCH}\`.
+
+          <!-- ai-sdlc-fix-ci-attempt -->"

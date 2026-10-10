@@ -475,28 +475,16 @@ describe('AISDLC-704: privileged workflows never check out untrusted refs or int
 
   it('ai-sdlc-fix-ci.yml: PAT is not persisted; PR code installs without scripts or credentials', () => {
     const wf = loadYaml('ai-sdlc-fix-ci.yml');
-    const steps = wf.jobs['fix-ci'].steps;
-    const checkout = steps.find(
-      (s) => typeof s.uses === 'string' && s.uses.startsWith('actions/checkout@'),
-    );
-    assert.equal(checkout.with['persist-credentials'], false);
-    assert.equal(checkout.with.token, undefined, 'root checkout must not receive the PAT');
-    // The PAT may appear ONLY in the pipeline step's env.
-    for (const step of steps) {
-      const isPipeline = /pnpm --filter \S+ fix-ci\b/.test(step.run ?? '');
-      const blob = JSON.stringify({ env: step.env, with: step.with });
-      if (!isPipeline) {
-        assert.ok(
-          !/secrets\.AI_SDLC_PAT/.test(blob),
-          `step '${step.name ?? step.uses ?? step.run}' must not receive the PAT`,
-        );
-      }
+    for (const jobId of ['fix-ci', 'push-fix']) {
+      const checkout = wf.jobs[jobId].steps.find(
+        (s) => typeof s.uses === 'string' && s.uses.startsWith('actions/checkout@'),
+      );
+      assert.equal(checkout.with['persist-credentials'], false);
+      assert.equal(checkout.with.token, undefined, 'checkout must not receive the PAT');
     }
-    const pipeline = steps.find((s) => /pnpm --filter \S+ fix-ci\b/.test(s.run ?? ''));
-    assert.match(pipeline.env.GITHUB_TOKEN, /secrets\.AI_SDLC_PAT/);
-    assert.match(pipeline.run, /GIT_CONFIG_VALUE_0/);
+    const steps = wf.jobs['fix-ci'].steps;
     // Nothing writes credentials into the shared .git/config.
-    for (const step of steps) {
+    for (const step of [...steps, ...wf.jobs['push-fix'].steps]) {
       assert.ok(
         !/git(\s+-C\s+\S+)?\s+config\s+[^\n]*extraheader/.test(step.run ?? ''),
         'extraheader must not be persisted via git config',
@@ -506,6 +494,64 @@ describe('AISDLC-704: privileged workflows never check out untrusted refs or int
       (s) => s['working-directory'] === 'pr-work' && /pnpm install/.test(s.run ?? ''),
     );
     assert.match(prInstall.run, /--ignore-scripts/);
+    assert.match(prInstall.run, /--ignore-pnpmfile/);
+    assert.match(prInstall.run, /--store-dir/, 'pr-work install must use its own pnpm store');
+  });
+});
+
+describe('AISDLC-704.5: fix-ci is split into an unprivileged agent job and a privileged push job', () => {
+  const wf = loadYaml('ai-sdlc-fix-ci.yml');
+  const agentSteps = wf.jobs['fix-ci'].steps;
+  const pushSteps = wf.jobs['push-fix'].steps;
+
+  it('the agent job has read-only contents and the write PAT appears nowhere in it', () => {
+    assert.equal(wf.jobs['fix-ci'].permissions.contents, 'read');
+    assert.ok(!/secrets\.AI_SDLC_PAT/.test(JSON.stringify(wf.jobs['fix-ci'])));
+    const pipeline = agentSteps.find((s) => /pnpm --filter \S+ fix-ci\b/.test(s.run ?? ''));
+    assert.equal(pipeline.env.AI_SDLC_FIX_CI_SKIP_PUSH, '1');
+    assert.ok(!/GIT_CONFIG_/.test(pipeline.run), 'no git auth in the agent job');
+  });
+
+  it('PR-code steps run with the runner file-command variables unset', () => {
+    const prCode = agentSteps.filter(
+      (s) => s['working-directory'] === 'pr-work' || /pnpm --filter \S+ fix-ci\b/.test(s.run ?? ''),
+    );
+    assert.ok(prCode.length >= 3);
+    for (const step of prCode) {
+      assert.match(step.run, /unset GITHUB_ENV GITHUB_PATH/, step.name);
+    }
+  });
+
+  it('the push job is the only holder of the PAT, needs the agent job, and pushes without hooks', () => {
+    assert.equal(wf.jobs['push-fix'].permissions.contents, 'write');
+    assert.deepEqual([].concat(wf.jobs['push-fix'].needs), ['fix-ci']);
+    const push = pushSteps.find((s) => /git .*push/.test(s.run ?? ''));
+    assert.match(push.env.GITHUB_TOKEN, /secrets\.AI_SDLC_PAT/);
+    assert.match(push.run, /-c core\.hooksPath=\/dev\/null/);
+    assert.match(push.run, /--no-verify/);
+    assert.match(push.run, /merge-base --is-ancestor/);
+    assert.match(push.run, /bundle verify/);
+    assert.match(push.run, /transfer\.fsckObjects=true/);
+    assert.match(push.run, /diff --no-renames --name-only/);
+    assert.match(push.run, /\\\.github/);
+  });
+
+  it('the agent job does not save a pnpm cache after running PR code', () => {
+    const node = agentSteps.find((x) => (x.uses ?? '').startsWith('actions/setup-node@'));
+    assert.equal(node.with.cache, undefined);
+  });
+
+  it('the push job never installs, builds or runs PR code', () => {
+    for (const step of pushSteps) {
+      assert.ok(!/pnpm|npm |node |working-directory/.test(step.run ?? ''), step.name);
+      assert.equal(step['working-directory'], undefined);
+    }
+  });
+
+  it('the diagnostics copy does not follow symlinks', () => {
+    const collect = agentSteps.find((s) => s.name === 'Collect pipeline artifacts');
+    assert.match(collect.run, /\[ ! -L "\$SRC" \]/);
+    assert.match(collect.run, /cp -P/);
   });
 });
 
