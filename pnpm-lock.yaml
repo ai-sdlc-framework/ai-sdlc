@@ -291,6 +291,12 @@ importers:
       react:
         specifier: ^19.3.0
         version: 19.3.0
+      tree-sitter-wasms:
+        specifier: ^0.1.13
+        version: 0.1.13
+      web-tree-sitter:
+        specifier: ^0.25.10
+        version: 0.25.10
       yargs:
         specifier: ^18.1.0
         version: 18.2.0
@@ -2827,6 +2833,9 @@ packages:
   tr46@0.0.3:
     resolution: {integrity: sha512-N3WMsuqV66lT30CrXNbEjx4GEwlow3v6rr4mCcv6prnfwhS01rkgyFdjPNBYd9br7LpXV1+Emh01fHnq2Gdgrw==}
 
+  tree-sitter-wasms@0.1.13:
+    resolution: {integrity: sha512-wT+cR6DwaIz80/vho3AvSF0N4txuNx/5bcRKoXouOfClpxh/qqrF4URNLQXbbt8MaAxeksZcZd1j8gcGjc+QxQ==}
+
   trigram-utils@2.0.1:
     resolution: {integrity: sha512-nfWIXHEaB+HdyslAfMxSqWKDdmqY9I32jS7GnqpdWQnLH89r6A5sdk3fDVYqGAZ0CrT8ovAFSAo6HRiWcWNIGQ==}
 
@@ -2973,6 +2982,14 @@ packages:
       happy-dom:
         optional: true
       jsdom:
+        optional: true
+
+  web-tree-sitter@0.25.10:
+    resolution: {integrity: sha512-Y09sF44/13XvgVKgO2cNDw5rGk6s26MgoZPXLESvMXeefBf7i6/73eFurre0IsTW6E14Y0ArIzhUMmjoc7xyzA==}
+    peerDependencies:
+      '@types/emscripten': ^1.40.0
+    peerDependenciesMeta:
+      '@types/emscripten':
         optional: true
 
   webidl-conversions@3.0.1:
@@ -5342,6 +5359,8 @@ snapshots:
 
   tr46@0.0.3: {}
 
+  tree-sitter-wasms@0.1.13: {}
+
   trigram-utils@2.0.1:
     dependencies:
       collapse-white-space: 2.1.0
@@ -5449,6 +5468,8 @@ snapshots:
       '@vitest/coverage-v8': 4.1.11(vitest@4.1.11)
     transitivePeerDependencies:
       - msw
+
+  web-tree-sitter@0.25.10: {}
 
   webidl-conversions@3.0.1: {}
 

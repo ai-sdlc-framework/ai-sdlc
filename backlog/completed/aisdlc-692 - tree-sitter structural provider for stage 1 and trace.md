@@ -2,7 +2,7 @@
 id: AISDLC-692
 title: >-
   RFC-0052 Stage 1: tree-sitter StructuralProvider (changed symbols, callers, callees, tests) and the trace probe's dependency query
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-03'
 labels:
@@ -76,13 +76,42 @@ false positives; that raises a hunk's risk rank, which is the safe direction.
    name-matched callers and their limits, and how to add a grammar.
 
 ## Acceptance Criteria
-- [ ] For a TypeScript fixture, a changed function is reported with its callers and callees from other tracked fixture files, and a test file referencing it is listed.
-- [ ] The same holds for a Python fixture and a Go fixture.
-- [ ] A file in a language with no installed grammar yields `unavailable` with a reason and does not fail the risk map.
-- [ ] A file over the byte cap, a syntax error, and an exceeded wall-clock budget each yield `unavailable` with a distinct reason, asserted in tests.
-- [ ] An untracked or gitignored file is never read (fixture `.env` next to the sources).
-- [ ] `buildRiskMap` with the provider attaches structural facts to hunks; without it, output equals today's.
-- [ ] With the provider wired as the dependency query, a `trace` probe in the review executor is executed and its evidence contains the callers; with no query wired it is still refused.
-- [ ] The PR body lists added install size and licences.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
+- [x] For a TypeScript fixture, a changed function is reported with its callers and callees from other tracked fixture files, and a test file referencing it is listed.
+- [x] The same holds for a Python fixture and a Go fixture.
+- [x] A file in a language with no installed grammar yields `unavailable` with a reason and does not fail the risk map.
+- [x] A file over the byte cap, a syntax error, and an exceeded wall-clock budget each yield `unavailable` with a distinct reason, asserted in tests.
+- [x] An untracked or gitignored file is never read (fixture `.env` next to the sources).
+- [x] `buildRiskMap` with the provider attaches structural facts to hunks; without it, output equals today's.
+- [x] With the provider wired as the dependency query, a `trace` probe in the review executor is executed and its evidence contains the callers; with no query wired it is still refused.
+- [x] The PR body lists added install size and licences.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+Added a tree-sitter (WASM) `StructuralProvider` for TypeScript/TSX, JavaScript, Python and Go. It reports changed declarations with name-matched callers, callees and referencing tests, read from tracked git objects at a commit. `buildRiskMap` uses it when supplied (default unchanged), and `createTreeSitterDependencyQuery` backs the trace-probe dependency query hook.
+
+## Changes
+- `pipeline-cli/src/review-risk-map/tree-sitter-provider.ts` (new): provider, caps, wall-clock budget, distinct unavailable reasons.
+- `pipeline-cli/src/review-risk-map/tree-sitter-extract.ts` (new): declaration, call and test-reference extraction per language.
+- `pipeline-cli/src/review-risk-map/tree-sitter-languages.ts` (new): grammar registry.
+- `pipeline-cli/src/review-risk-map/tree-sitter-provider.test.ts` (new): fixtures for TS, Python, Go, untracked `.env`, caps and executor wiring.
+- `pipeline-cli/src/review-risk-map/index.ts`, `pipeline-cli/package.json`, `pnpm-lock.yaml` (modified): barrel export and two runtime dependencies.
+- `docs/operations/staged-review-structural-provider.md` (new): languages, name-matched caller limits, adding a grammar.
+
+## Design decisions
+- **Git object reads**: `git ls-tree`, `git cat-file`, one `git grep -F -w`; untracked and ignored files are never listed or opened.
+- **Reasons via `provider.report()`**: the risk-map schema has no reason field, so unavailable reasons and truncation markers live on the provider report; risk map JSON is unchanged.
+- **web-tree-sitter pinned to 0.25.x**: 0.27.1 cannot load tree-sitter-wasms 0.1.13 grammars.
+
+## Verification
+- `pnpm build` — clean
+- `pnpm test` — new tests pass (25); 14 failures in 4 files (tui app, use-terminal-dimensions, bin-invocation, verify-runtime) also fail identically on the main checkout (environmental, not from this change)
+- `pnpm lint` — clean
+- `pnpm format:check` — clean
+- `pnpm dark-code:check` — clean
+- Reviews: code-reviewer and security-reviewer approved (Codex reviewer unavailable on usage limit; Claude-native used)
+
+## Follow-up
+declined: ship only the five .wasm grammar files instead of all of tree-sitter-wasms (about 49 MB installed); share the grammar loader across queries; re-validate the commit as a full SHA in the provider constructor (security reviewer minor).
+<!-- SECTION:FINAL_SUMMARY:END -->
