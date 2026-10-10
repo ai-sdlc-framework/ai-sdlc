@@ -36,7 +36,8 @@
 # (AI_SDLC_SKIP_SUBSTRATE_GATE=1,
 # AI_SDLC_SKIP_TASK_MOVE=1, AI_SDLC_SKIP_SQUASH_CHORES=1,
 # AI_SDLC_SKIP_CHANGELOG_CHECK=1, AI_SDLC_SKIP_FOLLOWUP_GATE=1,
-# AI_SDLC_SKIP_ATTESTATION_SIGN=1, AI_SDLC_SKIP_DARK_CODE_GATE=1)
+# AI_SDLC_SKIP_ATTESTATION_SIGN=1, AI_SDLC_SKIP_DARK_CODE_GATE=1,
+# AI_SDLC_SKIP_MARKER_GATE=1)
 # or skip all pre-push hooks via `git push --no-verify` (use sparingly —
 # these gates exist because the things they guard have failed silently in
 # the past).

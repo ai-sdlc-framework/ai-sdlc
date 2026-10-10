@@ -258,6 +258,9 @@ events are never captured — so auto-merge is never enabled. Adding
 
 ### 8. `.github/workflows/auto-rebase-open-prs.yml`
 
+> **Retired (AISDLC-727):** this workflow was deleted when CI moved to run once per
+> pull request. The analysis below is historical.
+
 **Current trigger:**
 ```yaml
 on:
@@ -294,7 +297,7 @@ added — its trigger is on `push` to main, not on PR events.
 | `dor-ingress.yml` | Yes (`ready_for_review`) | Yes | Needs edit |
 | `verify-mcp-bundle.yml` | Yes (`ready_for_review`) | Yes | Needs edit |
 | `auto-enable-auto-merge.yml` | Yes (`ready_for_review` only) | No (already has draft guard) | Needs edit |
-| `auto-rebase-open-prs.yml` | No (push trigger, not PR) | No (script-level filter) | No change needed |
+| `auto-rebase-open-prs.yml` | No (push trigger, not PR) | No (script-level filter) | Retired (AISDLC-727) |
 
 ## Transition behavior (before workflow edits land)
 
