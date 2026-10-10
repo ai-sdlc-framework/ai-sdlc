@@ -139,3 +139,7 @@ orchestrator/.gitignore
 
 # Dispatch briefs written by cli-hierarchy brief (machine-local runtime output)
 .ai-sdlc/dispatch/briefs/
+
+# AISDLC-773 / RFC-0053: protected-scope knowledge (client and data-room material)
+# never enters the repository or a PR body.
+.ai-sdlc/knowledge-protected/
