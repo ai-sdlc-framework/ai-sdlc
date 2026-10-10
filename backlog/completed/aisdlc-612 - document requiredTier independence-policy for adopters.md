@@ -1,7 +1,7 @@
 ---
 id: AISDLC-612
 title: Document the requiredTier independence-policy knob for adopters (MED-4)
-status: To Do
+status: Done
 priority: high
 labels:
   - docs
