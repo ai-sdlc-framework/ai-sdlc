@@ -437,7 +437,7 @@ export function parseMarker(
  * any GitHub user (including external fork-PR contributors) can post a
  * comment carrying a forged marker that this function would happily honor.
  * The fix lives at the FETCH boundary — see the `gh pr view --jq` filter
- * in `.github/workflows/ai-sdlc-review.yml` and `ai-sdlc-plugin/commands/execute.md`.
+ * in `.github/workflows/ai-sdlc-review.yml` and `pipeline-cli/src/next-step/review-prepare.ts` (the /ai-sdlc execute review gate).
  */
 export function findMarkerInComments(
   commentBodies: string[],
@@ -472,7 +472,7 @@ export function findMarkerInComments(
  * To rotate or extend this list, update BOTH this constant AND the
  * `gh pr view --jq 'select(.author.login == ...)'` filters in:
  *   - `.github/workflows/ai-sdlc-review.yml` (analyze + report jobs)
- *   - `ai-sdlc-plugin/commands/execute.md` (Step 7a-bis)
+ *   - `pipeline-cli/src/next-step/review-prepare.ts` (incremental gate, was execute.md Step 7a-bis)
  */
 export const TRUSTED_MARKER_AUTHOR_LOGINS: ReadonlySet<string> = new Set([
   'github-actions',
