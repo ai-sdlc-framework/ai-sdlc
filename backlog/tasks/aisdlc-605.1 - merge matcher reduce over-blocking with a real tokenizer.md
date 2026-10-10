@@ -36,3 +36,4 @@ Found in the final review of the positive grammar and deliberately not fixed in 
 - `pr` plus `$'` over-blocks harmless commands such as `tr -d $'\r'` (the mention test treats `$'` as a hidden word).
 - The branch-merge API surface (`/merges`, the `mergeBranch` mutation) is not covered by the PR merge path matcher.
 - The permission-check hook fails open on its own errors.
+- Accepted over-block (note only): `gh pr create --body $'...'` is refused when the body mentions the merge phrase, because ANSI-C quoting makes the segment opaque. Use a plain quoted `--body` or `--body-file` until the tokenizer lands.

@@ -263,14 +263,22 @@ function isInertSegment(segment) {
   const t = effectiveTokens(segment);
   if (!t.length) return false;
   const word = commandWord(segment);
-  if (word === 'rg') return !t.some((x) => /^--pre(=|$)/.test(x));
-  if (word === 'sort') return !t.some((x) => /^--compress-program(=|$)/.test(x));
+  // getopt_long / clap accept unambiguous long-option PREFIXES, so every check below matches
+  // the prefix (`--comp`, `--c`, `--pre`, `--host`), not just the full option name.
+  // rg: --pre and --hostname-bin run a program.
+  if (word === 'rg') return !t.some((x) => /^--(pr|ho)/i.test(x));
+  // sort: --compress-program runs a program on the spilled chunks (sh would run piped text).
+  if (word === 'sort') return !t.some((x) => /^--c/i.test(x));
+  // less/more: a `+cmd` argument runs a command; -k / --lesskey* load key bindings with exec.
+  if (word === 'less' || word === 'more') {
+    return !t.slice(1).some((x) => /^\+/.test(x) || /^-[^-]*k/.test(x) || /^--l/i.test(x));
+  }
   if (INERT_WORDS.has(word)) return true;
   const rest = t.slice(1).map((x) => x.toLowerCase());
   if (word === 'git') {
     // `git -c alias.x=!cmd x` can run a command: only direct subcommands (or -C <dir>) are inert.
     const i = rest[0] === '-c' ? -1 : rest[0] === '-C' ? 1 : 0;
-    if (rest.some((x) => /^--(ext-diff|textconv)\b/.test(x))) return false;
+    if (rest.some((x) => /^--(ext|textc)/.test(x))) return false;
     return i >= 0 && INERT_GIT.has(rest[i] || '');
   }
   if (word === 'gh') {

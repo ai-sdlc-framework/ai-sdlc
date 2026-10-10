@@ -2329,6 +2329,37 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 opaque-segment
     return runHookRaw(input, { CLAUDE_PROJECT_DIR: dir });
   }
 
+  it('refuses abbreviated program-running options on inert allowlisted commands', () => {
+    const ph = `${gh} pr ${mg} 5`;
+    for (const c of [
+      `echo ${ph} | sort -S 1 --compress-prog=sh`,
+      `echo ${ph} | sort --compress=sh`,
+      `echo ${ph} | sort --comp=sh`,
+      `echo ${ph} | sort --c=sh`,
+      `echo ${ph} | git diff --ext=sh`,
+      `echo ${ph} | git show --textc HEAD`,
+      `echo ${ph} | rg --pre=sh x`,
+      `echo ${ph} | rg --pr=sh x`,
+      `echo ${ph} | less +!sh`,
+    ]) {
+      assert.ok(isDenied(run(c)), c);
+    }
+  });
+
+  it('still allows plain read-only inert commands without a merge phrase', () => {
+    for (const c of [
+      'sort -u f',
+      'sort -n file',
+      'grep -rn x .',
+      'git log --oneline -5',
+      'git diff --stat',
+      'git show HEAD',
+      'head -n 3 f | wc -l',
+    ]) {
+      assert.ok(!isDenied(run(c)), c);
+    }
+  });
+
   it('refuses every opaque bypass shape', () => {
     for (const c of [
       `echo $'\\''; ${gh} pr ${mg} 42 #'`,

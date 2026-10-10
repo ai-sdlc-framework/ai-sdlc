@@ -187,6 +187,51 @@ describe('round-2 security bypasses (AISDLC-605)', () => {
     assert.equal(m.isInertSegment('git show --textconv HEAD'), false);
     assert.equal(m.isInertSegment('git diff --stat'), true);
   });
+  it('refuses abbreviated long options that run programs (getopt_long prefixes)', () => {
+    for (const c of [
+      'sort -S 1 --compress-prog=sh',
+      'sort --compress=sh',
+      'sort --comp=sh',
+      'sort --c=sh',
+      'sort --compress-program sh',
+      'git diff --ext=foo',
+      'git diff --ext-d',
+      'git show --textc HEAD',
+      'git log --textconv',
+      'rg --pre=sh x',
+      'rg --pr=sh x',
+      'rg --pre sh x',
+      'rg --hostname-bin=sh x',
+      'less +!sh f',
+      'more +sh f',
+      'less -k keys f',
+      'less --lesskey-file=k f',
+    ]) {
+      assert.equal(m.isInertSegment(c), false, c);
+    }
+  });
+  it('keeps plain read-only uses inert', () => {
+    for (const c of [
+      'sort -u',
+      'sort -n file',
+      'sort -S 1 -T /tmp f',
+      'grep -rn x .',
+      'rg -n foo src',
+      'git log --oneline -5',
+      'git diff --stat',
+      'git show HEAD',
+      'cat f',
+      'head -n 5',
+      'wc -l',
+      'jq .x'.replace('jq', 'cat'),
+      'echo hi',
+      'printf x',
+      'less f',
+      'more -d f',
+    ]) {
+      assert.equal(m.isInertSegment(c), true, c);
+    }
+  });
 });
 
 describe('read-stdin module', () => {
