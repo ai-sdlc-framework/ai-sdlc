@@ -2,7 +2,7 @@
 id: RFC-0053
 title: Just-In-Time Context Engine (Decision Context Engine)
 status: Approved
-lifecycle: Ready for Review
+lifecycle: Signed Off
 author: 'Dominique Legault'
 created: 2026-10-09
 updated: 2026-10-09
@@ -14,7 +14,7 @@ requiresDocs: []
 
 # RFC-0053: Just-In-Time Context Engine (Decision Context Engine)
 
-**Status:** Ready for Review (2026-10-09); Signed Off follows in a separate PR once this lands (lifecycle gate: Draft → Ready for Review → Signed Off). 8 of 8 Open Questions resolved by operator rubric,
+**Status:** Signed Off (2026-10-09). 8 of 8 Open Questions resolved by operator rubric,
 2026-10-09: scope-split two roots; local SQLite adapter; inferred-only writes with
 verifier or human promotion; tiered prefix (controls fixed, path rules conditional, the
 rest just-in-time); layered evaluation corpus with a golden gate; auto-memory indexed as
@@ -511,4 +511,4 @@ the question stays open.
 | 2026-10-09 | Initial Draft. 7 Open Questions, none resolved. Trigger: planner design brief. |
 | 2026-10-09 | Surfacing protocol: six moments, compaction, load-once ledger, role/model profiles, cache-vs-JIT measurement; OQ-8 added (open) |
 | 2026-10-09 | OQ-1, OQ-2, OQ-3 resolved via operator rubric (scope-split roots; SQLite adapter; inferred-only writes with verifier/human promotion); phase-1 tasks AISDLC-773 to AISDLC-777 filed |
-| 2026-10-09 | OQ-4..8 resolved via operator rubric (tiered prefix; layered eval corpus; memory as indexed trunk; data room read-only root; narrow-by-role triggers); Engineering + Operator signed; lifecycle Draft → Ready for Review (Signed Off in the follow-up PR); phase 2-4 tasks AISDLC-778..788 |
+| 2026-10-09 | OQ-4..8 resolved via operator rubric (tiered prefix; layered eval corpus; memory as indexed trunk; data room read-only root; narrow-by-role triggers); Engineering + Operator signed; lifecycle Draft → Ready for Review → Signed Off (two PRs, lifecycle gate); phase 2-4 tasks AISDLC-778..788 |
