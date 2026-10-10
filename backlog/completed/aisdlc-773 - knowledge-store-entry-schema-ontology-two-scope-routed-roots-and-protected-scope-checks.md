@@ -2,7 +2,7 @@
 id: AISDLC-773
 title: >-
   knowledge store: entry schema, ontology, two scope-routed roots and protected-scope checks
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-09'
 labels:
