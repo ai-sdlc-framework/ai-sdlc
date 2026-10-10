@@ -25,7 +25,7 @@
  *  - A real HTTP server is bound; requests are served; session token validated.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { createServer as createHttpServer } from 'node:http';
 import type { IncomingMessage, ServerResponse, Server } from 'node:http';
@@ -895,6 +895,43 @@ describe('SI-errorSanitization: error response bodies are credential-free', () =
     expect(JSON.parse(res.body).detail).toBe('ECONNREFUSED');
     expect(res.body).not.toContain('secret upstream internals');
     expect(res.body).not.toContain('/srv/app.js');
+  });
+
+  it('AISDLC-744: unhandled handler error returns 500 with code-based detail only', async () => {
+    class BrokenHandlerProxy extends InferenceProxy {
+      constructor(cfg: InferenceProxyConfig) {
+        super(cfg);
+        (this as unknown as { handleRequest: () => Promise<void> }).handleRequest = async () => {
+          throw new Error(`handler blew up with ${FAKE_CREDENTIAL} at /srv/internal.js:9`);
+        };
+        const mockServer = new MockServer();
+        this._createServer = (handler) => {
+          mockServer.setHandler(handler);
+          return mockServer as unknown as Server;
+        };
+      }
+    }
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const auditEntries: ProxyAuditEntry[] = [];
+    const proxy = new BrokenHandlerProxy({
+      prNumber: 8,
+      credential: FAKE_CREDENTIAL,
+      auditLog: (e) => auditEntries.push(e),
+      useHttp: true,
+    });
+    const { sessionToken } = await proxy.start();
+    const res = await simulateRequest(proxy, { sessionToken, body: makeReviewBody() });
+    await proxy.stop();
+    const logged = stderr.mock.calls.map((c) => String(c[0])).join('');
+    stderr.mockRestore();
+    expect(res.statusCode).toBe(500);
+    expect(JSON.parse(res.body).detail).toBe('internal_error');
+    expect(res.body).not.toContain('handler blew up');
+    expect(res.body).not.toContain(FAKE_CREDENTIAL);
+    // Server-side log keeps the diagnostic text, credential redacted
+    expect(logged).toContain('internal error');
+    expect(logged).not.toContain(FAKE_CREDENTIAL);
+    expect(auditEntries.some((e) => e.responseStatus === 500)).toBe(true);
   });
 
   it('AISDLC-744: safeErrorCode rejects non-allowlisted codes', () => {
