@@ -2315,8 +2315,17 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 opaque-segment
       `${gh} pr -F x ${mg} 5`,
       `${gh} pr $'${mg}' 42`,
       `${gh} alias set mm 'pr ${mg}'`,
+      `${gh} pr \`true #\` ${mg} 42`,
+      `${gh} pr \${x:+ #} ${mg} 42`,
+      `${gh} pr $(true #) ${mg} 42`,
     ]) {
       assert.ok(isDenied(run(c)), c);
+    }
+  });
+
+  it('keeps allowing ordinary trailing comments (round 9)', () => {
+    for (const c of [`${gh} pr view 5 --json state # no ${mg}`, `echo hi # ${gh} pr ${mg} 5`]) {
+      assert.ok(!isDenied(run(c)), c);
     }
   });
 

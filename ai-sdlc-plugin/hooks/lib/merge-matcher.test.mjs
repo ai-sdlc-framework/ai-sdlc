@@ -376,6 +376,17 @@ describe('round-7: globs in the subcommand slot and word-boundary gh fallback (A
       assert.equal(m.commandRunsGhPrMerge(c), false, c);
     }
   });
+  it('distrusts the comment boundary around substitutions (round 9)', () => {
+    for (const c of [
+      `${gh} pr \`true #\` ${mg} 42`,
+      `${gh} pr \${x:+ #} ${mg} 42`,
+      `${gh} pr $(true #) ${mg} 42`,
+    ]) {
+      assert.equal(m.commandRunsGhPrMerge(c), true, c);
+    }
+    assert.equal(m.commandRunsGhPrMerge(`${gh} pr view 5 --json state # no ${mg}`), false);
+    assert.equal(m.commandRunsGhPrMerge(`echo hi # ${gh} pr ${mg} 5`), false);
+  });
   it('keeps refusing when the quote state is untrusted', () => {
     assert.equal(m.commandRunsGhPrMerge(`${gh} pr view $N $'x' # no ${mg}`), true);
   });

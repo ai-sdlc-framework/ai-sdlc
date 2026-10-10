@@ -418,6 +418,11 @@ function mentionsApiMerge(text) {
   return /pulls[\s\S]*merge|mergePullRequest|enablePullRequestAutoMerge/i.test(text);
 }
 
+/** False when a `#` may sit inside a construct where bash starts no comment. */
+function commentBoundaryTrusted(command) {
+  return !/\$['"]|`|\$\(|\$\{|[<>]\(/.test(command);
+}
+
 /**
  * True when `matches(text)` hits a segment that is NOT inert, or an inert
  * segment whose pipeline feeds a non-inert later stage. The matcher sees the
@@ -429,8 +434,9 @@ function mentionsApiMerge(text) {
 function commandHasUninertMatch(command, matches, mentions) {
   const segs = splitShellSegmentsEx(command);
   if (mentions && commandIsOpaque(command, segs)) {
-    // Comment text is ignored only where the comment boundary is trusted (no `$'` / `$"`).
-    const trusted = !/\$['"]/.test(command);
+    // Comment text is ignored only where the comment boundary is trusted (no `$'` / `$"`,
+    // backtick, `$(`, `${`, `<(` or `>(`: bash starts no comment inside those).
+    const trusted = commentBoundaryTrusted(command);
     const view = (t) => (trusted ? stripComment(t) : t);
     const raw = trusted
       ? segs.map((s) => stripComment(s.text)).join('\n')
@@ -454,8 +460,9 @@ function commandHasUninertMatch(command, matches, mentions) {
         return true;
     }
   }
+  const trustedMain = commentBoundaryTrusted(command);
   for (let i = 0; i < segs.length; i++) {
-    const clean = stripComment(segs[i].text);
+    const clean = trustedMain ? stripComment(segs[i].text) : segs[i].text;
     if (!matches(clean) && !matches(clean.replace(/['"]/g, ''))) continue;
     if (!isInertSegment(segs[i].text)) return true;
     for (let j = i + 1; j < segs.length && segs[j].pipe; j++) {
