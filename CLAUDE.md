@@ -82,6 +82,18 @@ recreates exactly the condition being detected. A second rule flags non-test sou
 - **`AI_SDLC_DEPS_COMPOSITION`** (RFC-0014): gates the dependency-graph composition layer. **On by default since AISDLC-410 (2026-05-23, operator override-path promotion).** Opt out via `AI_SDLC_DEPS_COMPOSITION=off` (or `0`/`false`/`no`, case-insensitive); truthy values (`1`/`true`/`yes`/`on`) are honored for backward-compat. Phase 1 surface = `cli-deps snapshot` writes `$ARTIFACTS_DIR/_deps/snapshot.<iso>.<tag>.jsonl`; `cli-deps gc/inspect` operate on those files. See [`docs/operations/deps-composition.md`](docs/operations/deps-composition.md) and [`pipeline-cli/docs/deps.md`](pipeline-cli/docs/deps.md). Phases 2-4 (PPA composition, DoR blast-radius, Slack digest) ship behind the same flag. Phase 5 ships the corpus aggregator (`cli-deps-corpus aggregate`) + operator-override capture (`cli-deps log-override`) + the hybrid promotion runbook at [`docs/operations/deps-composition-promotion.md`](docs/operations/deps-composition-promotion.md).
 - **`AI_SDLC_AUTONOMOUS_ORCHESTRATOR`** (RFC-0015): gates the autonomous pipeline orchestrator. **On by default since AISDLC-411 (2026-05-23, operator override-path promotion).** Opt out via `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=off` (or `0`/`false`/`no`, case-insensitive); truthy values (`experimental`/`1`/`true`/`yes`/`on`) are honored for backward-compat and remain ON. Phase 1 surface = `cli-orchestrator {start,tick,status}` (invoke directly via `node pipeline-cli/bin/cli-orchestrator.mjs`). Phases 2-5 (failure playbook, DoR/dep admission filters, `events.jsonl` writer, soak corpus + promotion) ship behind the same flag. Phase 5 ships the corpus aggregator (`cli-orchestrator-corpus aggregate`) + chaos-test harness (`pipeline-cli/src/orchestrator/chaos.test.ts`) + the hybrid promotion runbook at [`docs/operations/orchestrator-promotion.md`](docs/operations/orchestrator-promotion.md). See [`pipeline-cli/docs/orchestrator.md`](pipeline-cli/docs/orchestrator.md) and [`spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md`](spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md).
 
+## Five-step production algorithm (operator rule, 2026-10-10)
+
+Every fix, prevention task, governance rule and process change is worked in this order, and its write-up names the steps (DEC-0090):
+
+1. **Make the requirements less dumb.** Every requirement carries the name of the person or decision that set it; question it, especially when it came from a smart person or an old incident.
+2. **Delete the part or process.** Delete first. If you are not adding back 10% of what you deleted, you did not delete enough.
+3. **Simplify or optimise.** Only after step 2. Never optimise something that should not exist.
+4. **Accelerate cycle time.** Only after steps 1 to 3.
+5. **Automate.** Last, never first.
+
+A task that fixes a failure or adds a rule opens its Fix with a "Five-step review (requirements first)" paragraph: the requirement questioned and who set it, what is deleted, then what is simplified, accelerated or automated. A deletion that loosens a governance control is a class (b) decision for the operator. Velocity impact: positive by construction; the rule removes work before it adds any. Origin: the 2026-10-10 PR-drain review (AISDLC-797..803), where 5 of 7 failure families traced to requirements that should not have existed.
+
 ## Decision authority (AISDLC-703, DEC-0039)
 
 Agents decide by rubric instead of waiting for the operator, and authority comes from the repository, not from a relayed message. Full protocol: [`docs/operations/decision-authority.md`](docs/operations/decision-authority.md).
