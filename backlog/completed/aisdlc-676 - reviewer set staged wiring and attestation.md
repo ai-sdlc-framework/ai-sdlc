@@ -2,7 +2,7 @@
 id: AISDLC-676
 title: >-
   RFC-0052: reviewerSet staged in resolution, Step 7 and Step 8; transcript leaves with stage; reviews-ledger role
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-01'
 labels:
