@@ -16,6 +16,7 @@
 import { randomBytes } from 'node:crypto';
 import { recordModelCall, type ModelCallTokens, type UsageStoreOptions } from '@ai-sdlc/reference';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
+import { repoIdFor } from './repo-id.js';
 import { buildReviewPrompts } from '../steps/07-build-review-prompts.js';
 import { findTaskFile, parseTaskFile } from '../steps/01-validate.js';
 import type { ReviewerType, SubagentResult, SubagentSpawner, TaskSpec } from '../types.js';
@@ -122,6 +123,8 @@ export interface RunReplayInput {
   maxUnits: number;
   repoRoot: string;
   repoName: string;
+  /** Test seam; defaults to the shared repoIdFor. */
+  repoIdFor?: (root: string) => string | undefined;
   git: Git;
   createSpawner: SpawnerFactory;
   weights: UnitWeights;
@@ -322,6 +325,8 @@ export function wrapUntrusted(
 
 export async function runReplay(input: RunReplayInput): Promise<ReplayResults> {
   const models = [input.candidate, ...(input.reference ? [input.reference] : [])];
+  // Computed once: the same value stamps every record and the results file.
+  const repoId = (input.repoIdFor ?? repoIdFor)(input.repoRoot);
   const type = reviewerTypeFor(input.role);
   const spawners = new Map(models.map((m) => [m, input.createSpawner({ model: m, type })]));
   const ordered = interleaveByLabel(input.items.filter((i) => i.role === input.role));
@@ -421,6 +426,7 @@ export async function runReplay(input: RunReplayInput): Promise<ReplayResults> {
               agentRole: `replay:${type}`,
               scope: 'framework',
               repo: input.repoName,
+              ...(repoId ? { repoId } : { repoIdUnavailable: true as const }),
               taskId: REPLAY_TASK_ID,
             },
             input.usage,
@@ -456,6 +462,7 @@ export async function runReplay(input: RunReplayInput): Promise<ReplayResults> {
     schemaVersion: 'v1',
     runId: input.runId,
     generatedAt: input.now().toISOString(),
+    ...(repoId ? { repoId } : {}),
     role: input.role,
     candidate: input.candidate,
     ...(input.reference ? { reference: input.reference } : {}),
