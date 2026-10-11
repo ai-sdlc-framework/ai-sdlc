@@ -2,7 +2,7 @@
 id: AISDLC-728
 title: >-
   Planner session context: show usage, warn at a threshold, hand off before a clear or compaction
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-05'
 labels:
