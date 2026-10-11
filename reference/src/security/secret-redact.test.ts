@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { redactSecrets, SECRET_PATTERNS } from './secret-redact.js';
+import { redactSecrets, SECRET_PATTERNS, MAX_REDACT_INPUT_LENGTH } from './secret-redact.js';
 import * as barrel from '../index.js';
 
 describe('secret-redact (reference location)', () => {
@@ -267,83 +267,96 @@ describe('.env-style assignments: PASS, PWD and dashed names', () => {
 });
 
 /**
- * Growth-ratio probe for ReDoS checks: times `run(n)` and `run(4n)`, each as the
- * minimum over `reps` runs (the minimum discards GC pauses and CPU contention, so
- * the check holds under coverage and under load), and returns t(4n) / t(n).
- * Work linear in the input gives about 4, quadratic work about 16. The result is
- * a ratio, so it does not depend on machine speed or on coverage instrumentation.
+ * Structural ReDoS check (AISDLC-795.1): no wall-clock measurement. Flags a regex source that has
+ * an unbounded quantifier (`*`, `+`, `{n,}`) on a group that itself contains an unbounded
+ * quantifier, or on an alternation whose branches start with the same token.
  */
-function growthRatio(run: (n: number) => void, n: number, reps = 3): number {
-  const best = (size: number): number => {
-    let min = Infinity;
-    for (let i = 0; i < reps; i++) {
-      const start = performance.now();
-      run(size);
-      min = Math.min(min, performance.now() - start);
+function findRedosRisks(source: string): string[] {
+  const problems: string[] = [];
+  const quant = /^(?:\*|\+|\{\d+,\}|\{\d+(?:,\d+)?\}|\?)\??/;
+  const parseAlt = (start: number): { pos: number; unbounded: boolean; branches: string[] } => {
+    let pos = start;
+    let unbounded = false;
+    const branches: string[] = [''];
+    while (pos < source.length && source[pos] !== ')') {
+      if (source[pos] === '|') {
+        branches.push('');
+        pos++;
+        continue;
+      }
+      const atomStart = pos;
+      let group: { unbounded: boolean; branches: string[] } | undefined;
+      let lookaround = false;
+      if (source[pos] === '\\') {
+        pos += 2;
+      } else if (source[pos] === '[') {
+        pos++;
+        while (pos < source.length && source[pos] !== ']') pos += source[pos] === '\\' ? 2 : 1;
+        pos++;
+      } else if (source[pos] === '(') {
+        pos++;
+        if (source[pos] === '?') {
+          const m = /^\?(?:[:=!]|<[=!]|<[A-Za-z_]\w*>)/.exec(source.slice(pos));
+          lookaround = m !== null && /^\?(?:[=!]|<[=!])/.test(m[0]);
+          pos += m ? m[0].length : 1;
+        }
+        const inner = parseAlt(pos);
+        group = inner;
+        pos = inner.pos + 1;
+      } else {
+        pos++;
+      }
+      const atom = source.slice(atomStart, pos);
+      const q = quant.exec(source.slice(pos));
+      const isUnbounded = q !== null && /^(?:\*|\+|\{\d+,\})/.test(q[0]);
+      if (q) pos += q[0].length;
+      if (group && isUnbounded && !lookaround) {
+        if (group.unbounded) problems.push(`nested unbounded quantifier in ${atom}`);
+        const starts = group.branches.filter((b) => b !== '');
+        if (new Set(starts).size < starts.length)
+          problems.push(`overlapping alternation in ${atom}`);
+      }
+      if (isUnbounded || group?.unbounded) unbounded = true;
+      if (branches[branches.length - 1] === '') branches[branches.length - 1] = atom;
     }
-    return min;
+    return { pos, unbounded, branches };
   };
-  run(n); // warm-up: compile the regexes before measuring
-  return best(4 * n) / best(n);
+  parseAlt(0);
+  return problems;
 }
 
-/** Midway (geometrically) between linear (~4) and quadratic (~16) growth for a 4x input. */
-const LINEAR_GROWTH_LIMIT = 8;
+describe('ReDoS: structural check over the exported regex list', () => {
+  it('the checker fails on nested-quantifier and overlapping-alternation fixtures', () => {
+    expect(findRedosRisks('(a+)+$').length).toBeGreaterThan(0);
+    expect(findRedosRisks('^(?:\\w+\\s*)*$').length).toBeGreaterThan(0);
+    expect(findRedosRisks('(?:x|x)*y').length).toBeGreaterThan(0);
+    expect(findRedosRisks('(?:a|b)+c').length).toBe(0);
+    expect(findRedosRisks('(?:[a-z]{1,8}){0,64}').length).toBe(0);
+  });
 
-describe('ReDoS: changed regexes stay linear on adversarial input', () => {
-  it(
-    'flags a known-quadratic pattern (the growth-ratio check can fail)',
-    { timeout: 60_000 },
-    () => {
-      // /\s+$/ on a whitespace run that is not at the end restarts at every position.
-      const quadratic = (n: number): void => {
-        /\s+$/.test(' '.repeat(n) + 'x');
-      };
-      // Same-process linear baseline over the same input shape: /\s+x/ matches in one pass.
-      const linear = (n: number): void => {
-        /\s+x/.test(' '.repeat(n) + 'x');
-      };
-      const median = (xs: number[]): number =>
-        [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
-      const sample = (run: (n: number) => void): number =>
-        median(Array.from({ length: 5 }, () => growthRatio(run, 2_000, 3)));
-      const quadraticRatio = sample(quadratic);
-      const linearRatio = sample(linear);
-      // A loaded runner inflates both ratios, so require the quadratic one to clearly exceed the
-      // linear baseline measured here (about 4 vs about 16 when idle) and a low absolute floor.
-      expect(quadraticRatio).toBeGreaterThan(linearRatio * 1.5);
-      expect(quadraticRatio).toBeGreaterThan(6);
-    },
-  );
+  it('every SECRET_PATTERNS regex has no nested unbounded quantifier or overlapping alternation', () => {
+    expect(SECRET_PATTERNS.length).toBeGreaterThan(0);
+    for (const p of SECRET_PATTERNS) {
+      expect({ name: p.name, problems: findRedosRisks(p.regex.source) }).toEqual({
+        name: p.name,
+        problems: [],
+      });
+    }
+  });
 
-  // Formerly: 'handles 200k-char secret/whitespace/bracket/backtick runs' (absolute 5000 ms bound).
-  it('grows linearly on secret/whitespace/bracket/backtick runs', { timeout: 60_000 }, () => {
-    const run = (n: number): void => {
-      const inputs = [
-        'secret'.repeat(n / 6),
-        'secret '.repeat(n / 7),
-        'secret_' + ' '.repeat(n),
-        'secret' + '['.repeat(n),
-        'secret' + '`'.repeat(n),
-        'secret:' + '`'.repeat(n),
-        'secret</a>' + ' '.repeat(n),
-        'secret</a><b>'.repeat(n / 13),
-        'secret ' + 'A'.repeat(n),
-        AKIA_RUN(n),
-        'PASS'.repeat(n / 4),
-        'PASS_' + '-'.repeat(n),
-        'secret-'.repeat(n / 7),
-        '--secret-key='.repeat(n / 13),
-      ];
-      for (const i of inputs) redactSecrets(i);
-    };
-    expect(growthRatio(run, 12_500)).toBeLessThan(LINEAR_GROWTH_LIMIT);
+  it('caps input length before matching and marks the truncation', () => {
+    const filler = 'x '.repeat(MAX_REDACT_INPUT_LENGTH);
+    const out = redactSecrets(filler);
+    expect(out.length).toBeLessThan(MAX_REDACT_INPUT_LENGTH + 64);
+    expect(out.endsWith('[REDACTED:TRUNCATED]')).toBe(true);
+    const atCap = 'y '.repeat(MAX_REDACT_INPUT_LENGTH / 2);
+    expect(redactSecrets(atCap)).toBe(atCap);
+    // a secret past the cap is dropped, never leaked
+    expect(
+      redactSecrets('a'.repeat(MAX_REDACT_INPUT_LENGTH) + ' sk-' + 'b'.repeat(30)),
+    ).not.toContain('sk-b');
   });
 });
-
-function AKIA_RUN(n: number): string {
-  return ('AKIA' + 'A'.repeat(16) + '=').repeat(n / 21);
-}
 
 describe('registry hardening', () => {
   it('is idempotent for the new shapes', () => {
@@ -357,30 +370,6 @@ describe('registry hardening', () => {
     expect(once).not.toContain(AWS_SECRET);
     expect(redactSecrets(once)).toBe(once);
   });
-
-  // Formerly: 'stays fast on long adversarial inputs (no catastrophic backtracking)' (absolute 5000 ms bound).
-  it(
-    'grows linearly on long adversarial inputs (no catastrophic backtracking)',
-    { timeout: 60_000 },
-    () => {
-      const run = (n: number): void => {
-        const inputs = [
-          'secret'.repeat(n / 6),
-          'secret_' + ' '.repeat(n),
-          'a://'.repeat(n / 4),
-          'http://' + 'a'.repeat(n),
-          'http://' + 'a:'.repeat(n / 2),
-          'TOKEN="' + 'a\\'.repeat(n / 2),
-          'TOKEN=' + ' '.repeat(n),
-          'TOKEN="x '.repeat(n / 9),
-          'AKIA' + 'A'.repeat(n),
-          'a'.repeat(n),
-        ];
-        for (const i of inputs) redactSecrets(i);
-      };
-      expect(growthRatio(run, 12_500)).toBeLessThan(LINEAR_GROWTH_LIMIT);
-    },
-  );
 });
 
 describe('AWS secret access keys: masked prompts, multi-line and structured layouts', () => {
@@ -515,38 +504,4 @@ describe('.env-style assignments: dotted and long name tails', () => {
       'SECRET_ACCESS_KEY_FOR_PROD_ENV=[REDACTED:ENV_SECRET] rest',
     );
   });
-});
-
-describe('ReDoS: round 3 regexes stay linear on adversarial input', () => {
-  // Formerly: 'handles 200k-char newline, bracket, star, backslash and timestamp runs' (absolute 5000 ms bound).
-  it(
-    'grows linearly on newline, bracket, star, backslash and timestamp runs',
-    { timeout: 60_000 },
-    () => {
-      const run = (n: number): void => {
-        const TS = '2026-10-01T12:00:00+00:00';
-        const inputs = [
-          'secret' + '\n '.repeat(n / 2),
-          'secret\r\n'.repeat(n / 8),
-          'secret:' + '\n '.repeat(n / 2),
-          'secret ' + '\n'.repeat(n),
-          'secret[' + ']'.repeat(n),
-          'secret' + '['.repeat(n),
-          'secret' + '*'.repeat(n),
-          'secret [' + '*'.repeat(n) + ']: ',
-          'secret' + '\\'.repeat(n),
-          'secret\\"'.repeat(n / 8),
-          '[REDACTED:' + 'A_'.repeat(n / 2) + 'secret',
-          '[REDACTED:ENV_SECRET]'.repeat(n / 21),
-          ('AKIA' + 'A'.repeat(16) + ' ' + TS + ' ').repeat(n / 46),
-          'AKIA' + 'A'.repeat(16) + ' '.repeat(n),
-          'AKIA' + 'A'.repeat(16) + ' ' + TS + ' '.repeat(n),
-          'A'.repeat(40) + ' '.repeat(n) + 'AKIA' + 'A'.repeat(16),
-          ('A'.repeat(40) + ' ').repeat(n / 41),
-        ];
-        for (const i of inputs) redactSecrets(i);
-      };
-      expect(growthRatio(run, 12_500)).toBeLessThan(LINEAR_GROWTH_LIMIT);
-    },
-  );
 });

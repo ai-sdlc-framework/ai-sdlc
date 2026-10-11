@@ -374,6 +374,9 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
   },
 ];
 
+/** Maximum input length (1 MiB) matched by `redactSecrets`; longer input is truncated. */
+export const MAX_REDACT_INPUT_LENGTH = 1_048_576;
+
 /**
  * Redact known-shape secrets from a string. Returns the input unchanged
  * if it's empty / undefined / contains no matches — cheap to call on
@@ -384,7 +387,12 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
  */
 export function redactSecrets(input: string | undefined | null): string {
   if (!input) return input ?? '';
-  let out = input;
+  // Cap before matching (AISDLC-795.1): bounds worst-case regex work. The tail is dropped, never
+  // passed through, so a secret past the cap cannot leak.
+  let out =
+    input.length > MAX_REDACT_INPUT_LENGTH
+      ? input.slice(0, MAX_REDACT_INPUT_LENGTH) + '[REDACTED:TRUNCATED]'
+      : input;
   for (const pattern of SECRET_PATTERNS) {
     const replacement = pattern.replacement ?? `[REDACTED:${pattern.name}]`;
     out = out.replace(pattern.regex, replacement);
