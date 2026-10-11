@@ -64,6 +64,8 @@ spec:
 
 Task class is the estimation class in the task's frontmatter `class:` field (`bug`, `feature`, `chore`), or `uncategorized` when none is recorded. The schema is [`model-routing.v1.schema.json`](../../spec/schemas/model-routing.v1.schema.json).
 
+The security reviewer floor is relative to the table's own `strength` order, so reordering `strength` changes what the floor means.
+
 **A broken table is ignored, not half-applied.** If the file is missing, is not valid YAML, fails the schema, names a model that is not in `strength`, puts `candidates` on the security reviewer, or sets the security reviewer to a model weaker than `opus`, the built-in defaults apply to every role:
 
 ```console

@@ -62,4 +62,28 @@ describe('validateResource with a UsageConfig document', () => {
     expect(good.skipped).toBeUndefined();
     expect(good.valid).toBe(validateUsageConfig({ ...base, spec: {} }).valid);
   });
+
+  it('validates a UsageConfig through validateResource', () => {
+    const r = validateResource({ ...base, spec: {} });
+    expect(r.valid).toBe(true);
+    expect(r.skipped).toBeUndefined();
+  });
+
+  it('reports an error path for an invalid UsageConfig through validateResource', () => {
+    const r = validateResource({ ...base, spec: { allotmentTolerance: 0 } });
+    expect(r.valid).toBe(false);
+    expect(r.errors?.[0].path).toContain('allotmentTolerance');
+  });
+
+  it('skips a typo of the UsageConfig kind', () => {
+    const r = validateResource({ ...base, kind: 'UsageConfg', spec: {} });
+    expect(r).toEqual({ valid: true, skipped: true });
+  });
+
+  it.each(['constructor', 'toString', '__proto__', 'hasOwnProperty'])(
+    'treats inherited property name %s as an unknown kind without throwing',
+    (kind) => {
+      expect(validateResource({ kind, apiVersion: 'x' })).toEqual({ valid: true, skipped: true });
+    },
+  );
 });

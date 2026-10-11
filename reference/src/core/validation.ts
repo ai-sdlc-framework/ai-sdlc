@@ -309,7 +309,7 @@ export function validateResource(data: unknown): ValidationResult {
   if (typeof kind === 'string' && ENVELOPE_ARTIFACT_KINDS.has(kind)) {
     return validateArtifact(kind as ArtifactKind, data);
   }
-  if (!(kind in SCHEMA_FILES)) {
+  if (!Object.hasOwn(SCHEMA_FILES, kind)) {
     // Unknown kinds are loader-private or adopter-extension resources that
     // AI-SDLC has no schema for.  Rather than emit a false-positive warning
     // we skip them gracefully.  Callers can inspect `result.skipped` to

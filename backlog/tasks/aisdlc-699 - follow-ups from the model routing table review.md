@@ -2,7 +2,7 @@
 id: AISDLC-699
 title: >-
   Follow-ups from the routing table review: kind check in the compliance loader, own-property kind lookup, and missing tests
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-03'
 labels:

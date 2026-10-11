@@ -102,18 +102,23 @@ export function loadCompliancePosture(
     ]);
   }
 
-  // JSON Schema validation via reference package
-  // validateResource infers kind from the document and validates against the registered schema.
-  // CompliancePosture is in SCHEMA_FILES so it will NOT be skipped.
-  const result = validateResource(raw);
-  if (result.skipped) {
-    // This should not happen since CompliancePosture is a registered kind —
-    // guard defensively in case the manifest has an unexpected kind field.
+  // validateResource infers the kind from the document, so a valid document of
+  // another kind would pass; check the kind explicitly before anything reads
+  // `spec.regimes`.
+  const actualKind = (raw as { kind?: unknown } | null | undefined)?.kind;
+  if (actualKind !== 'CompliancePosture') {
     throw new CompliancePostureValidationError([
       {
         path: '/kind',
-        message: `Expected kind 'CompliancePosture' but got kind '${(raw as { kind?: unknown })?.kind}'`,
+        message: `Expected kind 'CompliancePosture' but got kind '${String(actualKind)}'`,
       },
+    ]);
+  }
+
+  const result = validateResource(raw);
+  if (result.skipped) {
+    throw new CompliancePostureValidationError([
+      { path: '/kind', message: "Expected kind 'CompliancePosture' but the schema was skipped" },
     ]);
   }
   if (!result.valid) {
