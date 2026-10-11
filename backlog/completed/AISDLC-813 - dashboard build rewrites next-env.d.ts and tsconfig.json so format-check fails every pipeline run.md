@@ -2,7 +2,7 @@
 id: AISDLC-813
 title: >-
   dashboard build rewrites next-env.d.ts and tsconfig.json so format:check fails every pipeline run
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-11'
 updated_date: '2026-10-11'
