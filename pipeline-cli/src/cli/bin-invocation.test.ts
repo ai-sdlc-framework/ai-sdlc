@@ -23,7 +23,7 @@
  * the umbrella bin.
  *
  * The fix: invoke the bin shim DIRECTLY via `node ./pipeline-cli/bin/<bin>.mjs`.
- * This test guards three properties:
+ * This test guards two properties:
  *   1. Each bin shim under `pipeline-cli/bin/*.mjs` (per-CLI + umbrella)
  *      exists, is executable as a node entrypoint, and exits 0 on `--help`.
  *      This proves the shim file is present, the compiled `dist/cli/...js`
@@ -31,15 +31,9 @@
  *      A regression that breaks any of these (e.g. someone deletes the
  *      bin file, renames the dist target, or removes the `--help` alias)
  *      fails this test immediately.
- *   2. `pnpm --filter @ai-sdlc/pipeline-cli exec <bin> --help` still
- *      returns the broken `Command not found` error for both per-CLI and
- *      umbrella bins. This is the defense-in-depth against a future
- *      regression where someone reverts the workflows to the broken pattern
- *      under the assumption that `pnpm exec` should "just work". When pnpm
- *      finally fixes this (or we migrate to a different package manager),
- *      this test fails LOUDLY and forces the operator to re-evaluate
- *      whether the workflows can go back to the simpler pattern. Until
- *      then, fail loudly.
+ *   2. (Removed by AISDLC-814: a probe asserting `pnpm exec <bin>` still fails
+ *      depended on node_modules link state, not repository code. The
+ *      workflow scan below is the single enforcement of the rule.)
  *   3. No workflow file under `.github/workflows/` invokes any of the
  *      guarded bins via `pnpm ... exec <bin>` — the workflow files MUST
  *      use the direct `node pipeline-cli/bin/<bin>.mjs` form. This is
@@ -47,7 +41,7 @@
  *      test only proved the bins themselves work, not that the workflows
  *      use the right invocation form. A static scan closes that gap.
  *
- * All three properties exercise the REAL filesystem (no mocks) because the
+ * Both properties exercise the REAL filesystem (no mocks) because the
  * bug we're guarding against is a real-filesystem-resolution bug —
  * mocking `child_process` would defeat the purpose.
  */
@@ -94,6 +88,26 @@ const ALL_GUARDED_BINS = [...CI_INVOKED_BINS, UMBRELLA_BIN] as const;
 // but we still assert their shims + dist targets exist so a rename/deletion
 // doesn't silently strand the atomic-completion contract.
 const AISDLC_203_BINS = ['cli-task-complete', 'cli-backlog-verify', 'cli-hierarchy'] as const;
+
+// Match `pnpm ... exec <bin>` where `...` may include flags like
+// `--filter @ai-sdlc/pipeline-cli` and `--silent`. The bin must be a
+// separate token to avoid matching a substring (e.g. `cli-classify-pr-foo`).
+const buildBannedPattern = (binName: string): RegExp => {
+  const escaped = binName.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+  return new RegExp(`pnpm\\b[^\\n]*\\bexec\\b[^\\n]*\\b${escaped}\\b`);
+};
+
+// Scan workflow text for banned invocations of a guarded bin, skipping
+// YAML comment lines. Returns `<label>:<line>: <text>` offenders.
+const findBannedInvocations = (binName: string, label: string, lines: string[]): string[] => {
+  const bannedRe = buildBannedPattern(binName);
+  const offenders: string[] = [];
+  lines.forEach((line, idx) => {
+    if (/^\s*#/.test(line)) return;
+    if (bannedRe.test(line)) offenders.push(`${label}:${idx + 1}: ${line.trim()}`);
+  });
+  return offenders;
+};
 
 describe('AISDLC-156 + AISDLC-181: bin invocation pattern (CI cost-saver + umbrella bin guard)', () => {
   // The bins import from `dist/cli/*.js` so the dist must exist before we
@@ -175,75 +189,6 @@ describe('AISDLC-156 + AISDLC-181: bin invocation pattern (CI cost-saver + umbre
     });
   });
 
-  // Defense-in-depth: probe `pnpm exec <bin>` for every guarded bin to
-  // assert the broken pattern is STILL broken. Per-bin parameterization so
-  // a future pnpm fix surfaces which bins regained own-bin resolution
-  // (and which didn't), rather than collapsing to a single ambiguous failure.
-  describe.each(ALL_GUARDED_BINS)(
-    '`pnpm --filter @ai-sdlc/pipeline-cli exec %s` STILL FAILS',
-    (binName) => {
-      it('— defense against future workflow regressions reverting to the broken pattern', () => {
-        // We use --help (no I/O, no env required) to keep this fast. The
-        // failure mode we're asserting is pnpm refusing to resolve the bin
-        // BEFORE the bin runs — so --help never gets to the binary at all.
-        //
-        // Why this assertion matters: someone reading the workflow might
-        // assume `pnpm exec` should "just work" and revert the workflow
-        // back to the AISDLC-156 broken pattern. This test fails loudly
-        // the moment they do. If pnpm one day fixes own-bin resolution
-        // (or we move to npm/bun/yarn that handles it correctly), this
-        // test fails too — but that's the GOOD failure: it forces the
-        // operator to re-evaluate the workflow choice with current
-        // behaviour, not stale assumptions.
-        //
-        // We probe from the workspace ROOT (same as CI does), not
-        // PKG_ROOT, because `pnpm --filter` only resolves filter targets
-        // when run from the monorepo root (or a workspace package within
-        // it).
-        //
-        // NB: we deliberately omit `--silent` here (which dor-ingress.yml
-        // pre-AISDLC-181 used to clean up captured stdout for downstream
-        // parsing). pnpm's `--silent` also suppresses
-        // ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL diagnostics, leaving us
-        // with empty stderr + non-zero exit — useless for a regression
-        // test that needs to assert WHY pnpm failed. Without `--silent`
-        // pnpm prints the ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL banner so
-        // we can pattern-match on it. The CI behaviour we're guarding
-        // against is unchanged either way — both flag forms hit the
-        // same own-bin-resolution failure.
-        const result = spawnSync(
-          'pnpm',
-          ['--filter', '@ai-sdlc/pipeline-cli', 'exec', binName, '--help'],
-          {
-            cwd: WORKSPACE_ROOT,
-            encoding: 'utf-8',
-            stdio: 'pipe',
-            timeout: 30_000,
-          },
-        );
-        // `pnpm exec` with a missing bin → ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL
-        // and a non-zero exit. We DO NOT pin the exact error code/text
-        // (pnpm could change the wording across versions); we just assert
-        // the invocation failed AND the failure surface mentions the
-        // missing command. If both invariants hold, the broken pattern is
-        // still broken and the workflows MUST stay on the direct-node
-        // form.
-        const combined = result.stdout + result.stderr;
-        const detail = `\n--- exit ${result.status} ---\n--- combined ---\n${combined}`;
-        expect(
-          result.status,
-          `pnpm exec ${binName} unexpectedly succeeded — re-evaluate AISDLC-156/181:${detail}`,
-        ).not.toBe(0);
-        const escapedBin = binName.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
-        const notFoundRe = new RegExp(`Command\\s*"?${escapedBin}"?\\s*not\\s*found`, 'i');
-        expect(
-          notFoundRe.test(combined) || /ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL/.test(combined),
-          `pnpm exec ${binName} failed but for an unexpected reason:${detail}`,
-        ).toBe(true);
-      }, 60_000);
-    },
-  );
-
   // AISDLC-181: static scan of every `.github/workflows/*.yml` file. Asserts
   // that none of the guarded bins are invoked via the banned `pnpm exec`
   // pattern, and that the only invocation form present is `node
@@ -260,11 +205,6 @@ describe('AISDLC-156 + AISDLC-181: bin invocation pattern (CI cost-saver + umbre
     // don't false-positive on `pnpm --filter ... build` or `pnpm install`.
     // The bin must be a separate token to avoid matching a substring
     // (e.g. `cli-classify-pr-foo`).
-    const buildBannedPattern = (binName: string): RegExp => {
-      const escaped = binName.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
-      return new RegExp(`pnpm\\b[^\\n]*\\bexec\\b[^\\n]*\\b${escaped}\\b`);
-    };
-
     // Read each workflow file once; share across the per-bin assertions.
     const workflowFiles: { path: string; lines: string[] }[] = (() => {
       if (!existsSync(WORKFLOWS_DIR)) {
@@ -288,22 +228,23 @@ describe('AISDLC-156 + AISDLC-181: bin invocation pattern (CI cost-saver + umbre
       ).toBeGreaterThan(0);
     });
 
-    describe.each(ALL_GUARDED_BINS)('%s', (binName) => {
-      const bannedRe = buildBannedPattern(binName);
+    it.each(ALL_GUARDED_BINS)('fixture: scan detects `pnpm --filter exec %s`', (binName) => {
+      const fixture = [
+        '# pnpm --filter @ai-sdlc/pipeline-cli exec ' + binName + ' (comment, ignored)',
+        'steps:',
+        '  - run: pnpm --filter @ai-sdlc/pipeline-cli exec ' + binName + ' --help',
+        '  - run: node pipeline-cli/bin/' + binName + '.mjs --help',
+      ];
+      expect(findBannedInvocations(binName, 'fixture.yml', fixture)).toEqual([
+        `fixture.yml:3: - run: pnpm --filter @ai-sdlc/pipeline-cli exec ${binName} --help`,
+      ]);
+    });
 
+    describe.each(ALL_GUARDED_BINS)('%s', (binName) => {
       it('is NEVER invoked via `pnpm ... exec` in any workflow', () => {
-        const offenders: string[] = [];
-        for (const { path, lines } of workflowFiles) {
-          lines.forEach((line, idx) => {
-            // Skip comment lines so the AISDLC-156/181 explanatory comments
-            // in `ai-sdlc-review.yml` don't false-positive. YAML-comment
-            // detection: leading whitespace then `#`.
-            if (/^\s*#/.test(line)) return;
-            if (bannedRe.test(line)) {
-              offenders.push(`${path}:${idx + 1}: ${line.trim()}`);
-            }
-          });
-        }
+        const offenders = workflowFiles.flatMap(({ path, lines }) =>
+          findBannedInvocations(binName, path, lines),
+        );
         expect(
           offenders,
           `workflow files invoke ${binName} via banned pnpm-exec pattern (AISDLC-156/181):\n${offenders.join('\n')}`,
@@ -513,7 +454,13 @@ describe('cli-usage: bin shim guard and end-to-end ingest', () => {
         })}\n`,
       );
     }
-    const env: NodeJS.ProcessEnv = { ...process.env, AI_SDLC_USAGE_DIR: join(tmp, 'usage') };
+    // Hermetic: point the Codex ingester at an empty dir so the operator's
+    // real ~/.codex sessions never leak into the count (AISDLC-814).
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      AI_SDLC_USAGE_DIR: join(tmp, 'usage'),
+      CODEX_HOME: join(tmp, 'codex-home'),
+    };
     delete env['CLAUDE_CODE_ENV'];
     delete env['CLAUDE_REMOTE_EXECUTION'];
     delete env['AI_SDLC_USAGE_INGEST'];
