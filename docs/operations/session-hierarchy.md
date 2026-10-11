@@ -1,0 +1,270 @@
+# Session Hierarchy — Operator Runbook
+
+The session hierarchy runs sustained parallel work as three tiers of Claude Code sessions,
+each in its own tmux session: a **planner**, a **dispatch** session and up to five
+**executors**. You talk to the planner; the planner briefs dispatch; dispatch feeds a task
+board; executors claim tasks from the board and ship pull requests. Design and rationale:
+[RFC-0051](../../spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md).
+
+This page is the operator's guide. Companion pages:
+
+- [`cli-hierarchy.md`](cli-hierarchy.md): the full command and option reference.
+- [`parallel-dispatch.md`](parallel-dispatch.md): the shared runbook for the executor loop,
+  dispatch loop, liveness reaper and cancel back-channel.
+- [`dispatched-session-decisions.md`](dispatched-session-decisions.md): how a dispatched
+  session raises a decision and who answers it.
+
+## Contents
+
+- [The three tiers](#the-three-tiers)
+- [Starting and stopping](#starting-and-stopping)
+- [The roster](#the-roster)
+- [The board and sequence groups](#the-board-and-sequence-groups)
+- [The executor and dispatch loops](#the-executor-and-dispatch-loops)
+- [Escalation chain and timeboxes](#escalation-chain-and-timeboxes)
+- [Context clearing](#context-clearing)
+- [Permission modes and cross-session messages](#permission-modes-and-cross-session-messages)
+- [Governance values](#governance-values)
+- [Troubleshooting](#troubleshooting)
+
+## The three tiers
+
+| Tier      | Roster name         | Authority                                                                                                                                                 |
+| --------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| planner   | `planner`           | Faces the operator. Plans, files tasks and decisions, writes briefs, answers `design` decisions. The only tier that raises a question to you.             |
+| dispatch  | `operator-dispatch` | Ingests briefs onto the board, watches verdicts, clears finished executors, answers `operational` decisions, reports to the planner. Writes no code.      |
+| executors | `executor-alpha` .. `executor-epsilon` | Each claims one task at a time from the board and runs `/ai-sdlc execute` on it. Raises a decision when blocked, then claims the next task. |
+
+Authority runs downward for work (planner to dispatch to executors) and upward for
+questions (executor to dispatch to planner to you). The set of actions dispatch may take
+without asking is the `operational` list in [Governance values](#governance-values).
+
+## Starting and stopping
+
+The documented entry point is the plugin command; the bare binary takes the same
+subcommands:
+
+```bash
+/ai-sdlc hierarchy <command> [options]
+node pipeline-cli/bin/cli-hierarchy.mjs <command> [options]
+```
+
+Run the bare binary from the repository root. The examples below use the bare name
+`cli-hierarchy`.
+
+| Command  | Purpose                                                                                   |
+| -------- | ----------------------------------------------------------------------------------------- |
+| `up`     | Start the planner, dispatch and up to five executors; idempotent, only missing ones start. |
+| `status` | Show the roster with each session's live state and the board counts.                      |
+| `down`   | Stop sessions and return their inflight manifests to the queue.                           |
+| `clear`  | Empty an executor's context (dispatch-session command; see [Context clearing](#context-clearing)). |
+| `brief`  | Write a dispatch brief from task metadata and optionally notify dispatch.                 |
+
+```bash
+# Start the planner, dispatch and three executors.
+cli-hierarchy up --executors 3
+
+# Look at the roster and the board.
+cli-hierarchy status
+cli-hierarchy status --json
+
+# Hand a batch of work to dispatch: write the brief, then tell dispatch it is ready.
+cli-hierarchy brief --tasks TASK-1,TASK-2,TASK-3 --notify
+cli-hierarchy brief --rfc RFC-0051 --notify
+
+# Stop one executor, or everything.
+cli-hierarchy down --role executor-beta
+cli-hierarchy down
+
+# Empty an idle executor's context (run from the dispatch session).
+cli-hierarchy clear executor-alpha
+```
+
+Notes:
+
+- `up` refuses before starting anything when the resource gate fails (at least 4 GiB of
+  memory available and a 1-minute load average below the core count), when sessions with
+  the same role names run for another project, or when the effective
+  `crossSessionInbound` setting is not `accept`.
+- `up --executors <n>` takes 0 to 5. `--no-planner` starts no planner.
+- `up --attach` shows the planner when it is done; `cli-hierarchy attach <name>` shows any
+  one agent. `cli-hierarchy terminals --vscode` generates one VS Code terminal per agent;
+  `up` keeps the file current when it is absent or was generated by us.
+- Sessions load the plugin once, at start. After a plugin upgrade run `cli-hierarchy down`
+  then `cli-hierarchy up`; `clear` does not reload the plugin.
+- `down` with no `--role` stops every session. Inflight manifests return to `queue/`, so
+  no queued work is lost, but finish or accept the loss of any task in flight first.
+- `clear` and `tick` are dispatch-session commands; run from another session they exit 1.
+
+## The roster
+
+The roster is `.ai-sdlc/dispatch/hierarchy.json`, written atomically by `up` and `down`.
+Each entry records the role, project, registered name, tmux session and window (equal),
+pane id, process id, model, permission mode, start time and status (`starting` or
+`running`). Keystrokes (`clear`, `down`) are sent only to the pane the roster names, and
+only to a session carrying the `@ai-sdlc-hierarchy` ownership marker, so a personal tmux
+session that happens to share a name is never touched.
+
+Names are project-qualified, `<project>-<role>` (for example `ai-sdlc-executor-alpha`),
+with the project defaulting to the repository directory's basename. Anywhere a command
+takes an agent name, the unqualified role name also works and selects the agent in this
+repository's roster.
+
+## The board and sequence groups
+
+The board is the directory `.ai-sdlc/dispatch/`. A task is a manifest file that moves
+between directories as it progresses:
+
+| Directory   | Contents                                                           |
+| ----------- | ------------------------------------------------------------------ |
+| `briefs/`   | Briefs written by `cli-hierarchy brief`.                           |
+| `queue/`    | Manifests waiting to be claimed.                                   |
+| `inflight/` | Manifests claimed by an executor, plus heartbeats.                 |
+| `blocked/`  | Manifests parked while they wait on a decision.                    |
+| `done/`     | Verdicts for tasks that finished with `success` or `iterate-needed`. |
+| `failed/`   | Diagnostics and verdicts for every other outcome.                  |
+
+Manifest fields that control claiming order:
+
+| Field           | Effect                                                                                           |
+| --------------- | ------------------------------------------------------------------------------------------------ |
+| `wave`          | Lower waves are claimed first (default 0).                                                       |
+| `priority`      | Lower is claimed first within a wave; absent sorts last. Ties stay first-in first-out.           |
+| `after`         | Task ids that must each have a `success` verdict in `done/` before this manifest can be claimed. |
+| `sequenceGroup` | At most one manifest per group is inflight at a time.                                            |
+| `blockedBy`     | Decision id the manifest waits on; such a manifest is never claimed.                             |
+
+**Sequence groups** serialise tasks that would collide, typically because they edit the
+same files. The brief derives groups from overlapping task `references`, and waves from
+task `dependencies`. While one task in a group is inflight, every other task in that group
+stays in the queue even when executors are idle; it becomes claimable once the holder
+leaves `inflight/`. A claim that is held back for an unmet `after` or a busy group simply
+passes to the next eligible manifest.
+
+The brief is a plain Markdown file: the planner may edit it before dispatch ingests it.
+A brief is the unit of hand-off; the board is the unit of execution.
+
+## The executor and dispatch loops
+
+The operating cycle is **brief, tick, clear**:
+
+1. **Brief.** The planner runs `cli-hierarchy brief ... --notify`.
+2. **Tick.** The dispatch session runs `cli-hierarchy tick` on a schedule. A tick ingests
+   briefs into `queue/`, handles new verdicts (requeueing failures within the retry limit,
+   clearing the executor that finished), runs promotion of lapsed decisions, and prints the
+   reports and escalations to send as JSON. It also says how long to sleep: 30 seconds
+   after a brief or verdict, 5 minutes while work is queued or inflight, 30 minutes when the
+   board is empty. A new brief or verdict file wakes it sooner.
+3. **Claim and execute.** Idle executors run `cli-hierarchy executor-start`, which checks
+   identity and the repository, then blocks (costing no model calls) until a manifest can be
+   claimed. The executor then runs `/ai-sdlc execute` on the task, opens its draft pull
+   request, writes its verdict and stops.
+4. **Clear.** The next tick clears that executor so it starts the next task from an empty
+   context.
+
+Loop bodies and the liveness reaper are described in
+[`parallel-dispatch.md`](parallel-dispatch.md). A task in `done/` whose pull request later
+goes red is sent back to an executor with `cli-dispatch resume`; see
+[`cli-hierarchy.md`](cli-hierarchy.md#sending-a-finished-task-back-resume).
+
+## Escalation chain and timeboxes
+
+A question goes to the lowest tier able to answer it, and an unanswered question never
+stops throughput.
+
+1. A blocked executor records the question with `cli-decisions escalate --route
+   operational --park` (sequencing, environment, retries) or `--route design` (RFC
+   interpretation, scope, conflicting instructions), messages dispatch with the decision
+   id, and claims the next eligible task. Its own manifest moves to `blocked/`.
+2. Dispatch answers `operational` decisions within its authority and the manifest returns to
+   `queue/`. It forwards `design` decisions to the planner.
+3. The planner answers design decisions from the RFC and task text. Anything the RFC does
+   not settle goes to the operator through the decision rubric.
+4. **Timeboxes** move a decision up one tier when it stays open. Defaults: `operational` 30
+   minutes, `design` 4 hours; set them in `.ai-sdlc/decisions-config.yaml` under
+   `escalationTimeboxMinutes`. Silence never resolves a decision, and nothing moves down.
+
+**Where you are asked.** Only at the top of the chain, by the planner, and only for the
+decisions that are yours by rule: legal and licensing, money, accounts and credentials, and
+actions only your identity can perform. Everything else is decided by rubric and recorded
+in the Decision Catalog. Review with `cli-decisions operator-digest`; override with
+`cli-decisions answer`. Full tier table and commands:
+[`dispatched-session-decisions.md`](dispatched-session-decisions.md#escalation-chain-session-hierarchy).
+
+## Context clearing
+
+Each executor handles one task per context. When a verdict lands, dispatch runs
+`cli-hierarchy clear <executor>`, which sends `/clear` to the executor's pane, waits for
+the settle time, then types `/ai-sdlc executor` so the loop restarts. The session keeps its
+name and permission mode, and the plugin's `SessionStart` hook re-injects the role from the
+roster, so the executor needs no re-briefing. `clear` refuses an executor that still holds
+an inflight task, so work in progress is never destroyed.
+
+Other clearing paths:
+
+- `cli-hierarchy clear --self` clears the calling session's own pane and then types its
+  resume command (dispatch, planner, or an idle executor). It needs tmux (`TMUX_PANE`).
+- An idle executor with an empty queue clears itself instead of polling, so an idle
+  executor costs one short turn about every 25 minutes.
+- Every session also clears itself automatically when its context passes a threshold
+  (defaults: planner 150000 tokens, dispatch and executor 120000), configurable in
+  `.ai-sdlc/dispatch/config.json`; `AI_SDLC_AUTO_CLEAR=off` disables it for a session.
+- Before any clear the CLI regenerates a handoff file from board and catalog state
+  (`cli-hierarchy handoff write|read`), so a session can be cleared at any moment.
+
+**Why executors stay interactive.** Executors are interactive Claude Code sessions, cleared
+in place, rather than headless `claude -p` relaunches. A headless relaunch changes the
+billing pool; an interactive session on the subscription does not, and `/clear` keeps the
+name, mode and pane that the roster and the lease-push guard rely on (RFC-0051).
+
+## Permission modes and cross-session messages
+
+Every session, the planner included, starts in `bypassPermissions`: the hierarchy runs
+unattended for most of the day, and the governance hooks, not prompts, are the control
+surface. The permanently fixed rules (no raw merge, no force-push without a lease, no
+branch deletion, no destructive git) stay enforced in that mode. An operator who wants a
+prompting planner passes `--planner-permission-mode default` to `up`; the planner is the
+only session that flag affects.
+
+Claude Code holds a message sent between sessions in different permission classes for the
+user's approval unless the receiving session's `crossSessionInbound` setting is `accept`.
+Because every session runs in bypass mode, the effective `crossSessionInbound` must be
+`accept` in your user settings, `.claude/settings.json` or `.claude/settings.local.json`;
+`up` checks it and refuses with the exact fix when it is not. With a prompting planner
+(`--planner-permission-mode default`), messages from the lower tiers to the planner are
+held for your approval, which is a deliberate human gate on the chain.
+
+Each session is launched with `AI_SDLC_HIERARCHY_SESSION=<qualified name>` and
+`AI_SDLC_HIERARCHY_ROLE=<planner|operator-dispatch|executor>` in its environment. The
+lease-push hook binds an executor by that role, so a session launched without them has
+every lease push refused. `up` asserts them; `status` shows an `ENV` column.
+
+## Governance values
+
+Set in `.ai-sdlc/agent-role.yaml` under `spec.governance`:
+
+| Key                | Value in this repository | Meaning                                                                                                                                        |
+| ------------------ | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `allowForcePush`   | `leaseOnOwnBranch`       | `git push --force-with-lease` is permitted only to the task's own branch, written as `HEAD:refs/heads/<branch>`, never to `main`/`master`. `never` blocks every lease push. |
+| `operational`      | a list of actions        | What the dispatch role may do without asking. Here: `rebase-own-branch`, `lease-push-own-branch`, `retrigger-ci`, `requeue`, `file-subid-followups`, `answer-operational-decisions`, `clear-executor-context`, `mark-ready-after-codeql`. |
+
+The list is rendered into the dispatch session's injected rules like every other
+governance surface. An action not on the list is not dispatch's to take; it goes up the
+escalation chain.
+
+## Troubleshooting
+
+| Symptom                                                                     | Cause and fix                                                                                                                                                                                                 |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Messages between sessions never arrive, or wait for approval (held messages) | The receiving session's `crossSessionInbound` is not `accept`. Set it in user settings or `.claude/settings.json`, then `down` and `up`; `up` refuses to start without it.                                  |
+| `up` refuses: sessions with the same role names already run for another project (name collision) | Another hierarchy on this machine uses the bare names, and could receive this one's messages. Run `up --project <distinct-name>`, or stop the other sessions.                                       |
+| `attach` or `clear` says the tmux session is not running                    | The session ended outside `down`. Run `up`: it drops the dead entry and starts a replacement.                                                                                                                  |
+| `down` or `clear` refuses a session                                         | It lacks the `@ai-sdlc-hierarchy` ownership marker, or its pane id no longer matches the roster. It is left alone; stop it by hand if it is yours.                                                            |
+| `up` refuses over a stale roster ("old single-session layout")              | `hierarchy.json` predates one-session-per-agent. Run `down`, then `up`.                                                                                                                                        |
+| Stale parent checkout: the executor refuses or the tick aborts because the parent checkout is on a branch other than `main` or behind `origin/main` | The parent working tree must stay on `main`. If it is clean the guard resets it itself; if it is dirty it refuses and prints the offending paths. Commit or set aside your changes in the parent, then run `git checkout main && git reset --hard origin/main` there. `executor-start` also exits 1 when its working directory is not the project's repository. |
+| Stuck clear: an executor still shows its old context, or `clear` exits 1    | `clear` refuses an executor that holds an inflight task, is not running, or lacks the marker. Check `cli-hierarchy status`: a `busy` executor with an `inflightTask` is working and will be cleared after its verdict. For an idle one, rerun `clear <name>`; if the pane is gone, `up`. `clear` never reloads the plugin; use `down` then `up` for that. |
+| `status` shows `ENV missing`                                                | The session was started without the launch environment, so its lease pushes are refused. Run `down --role <role>` then `up`, from a current build of pipeline-cli.                                            |
+| A task sits in `queue/` while executors are idle                            | It is held back by an unmet `after`, a busy `sequenceGroup`, a `wave` ahead of it, or a `noClaimBefore` time. Look at the manifest fields; the others are claimed first.                                       |
+| A task is in `blocked/`                                                     | It waits on a decision named in `blockedBy`. Run `cli-decisions show <id>`; answering it returns the manifest to `queue/`.                                                                                    |
+
+For deeper detail on any command see [`cli-hierarchy.md`](cli-hierarchy.md).

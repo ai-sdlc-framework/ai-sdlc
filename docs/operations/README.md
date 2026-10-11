@@ -28,6 +28,7 @@ A planner, a dispatch session and up to five executors, each in its own tmux ses
 
 | Runbook | Description |
 |---------|-------------|
+| [`session-hierarchy.md`](session-hierarchy.md) | Operator runbook: the three tiers, starting and stopping, roster, board and sequence groups, escalation chain and timeboxes, context clearing, permission modes, governance values, troubleshooting |
 | [`cli-hierarchy.md`](cli-hierarchy.md) | `cli-hierarchy` reference: all eleven subcommands and the `up` options, roster file, operating cycle (brief, tick, clear), restart rule, troubleshooting |
 | [`parallel-dispatch.md`](parallel-dispatch.md) | Shared runbook for the hierarchy (executor loop, dispatch loop, liveness reaper, cancel back-channel); `/ai-sdlc execute-parallel` is superseded |
 

@@ -1,10 +1,12 @@
 # Parallel Dispatch — `/ai-sdlc execute-parallel` Operator Runbook
 
-> **Superseded.** `/ai-sdlc execute-parallel` is superseded by `cli-hierarchy` (RFC-0051).
-> Start and manage parallel sessions with `cli-hierarchy up`; see the
-> [`cli-hierarchy` reference](cli-hierarchy.md) for every command, option and the restart
-> rule. This page remains as the shared runbook for the executor loop, the dispatch loop,
-> liveness and the cancel back-channel.
+> **Superseded for sustained runs.** `/ai-sdlc execute-parallel` is superseded by the
+> session hierarchy (RFC-0051) for sustained runs and remains available for one-off bursts.
+> Start and manage a hierarchy with `cli-hierarchy up`; see the
+> [session hierarchy runbook](session-hierarchy.md) for the operator guide and the
+> [`cli-hierarchy` reference](cli-hierarchy.md) for every command and option. This page
+> remains the shared runbook for the executor loop, the dispatch loop, liveness and the
+> cancel back-channel.
 
 **AISDLC-462** — tmux N-pane wrapper for concurrent Step 0-13 dispatch.
 

@@ -2,7 +2,7 @@
 id: AISDLC-670
 title: >-
   RFC-0051 docs: operator runbook for the session hierarchy; execute-parallel marked superseded
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
@@ -45,10 +45,33 @@ requirement and removes the deferral.
    `spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md`. Change nothing else.
 
 ## Acceptance Criteria
-- [ ] `docs/operations/session-hierarchy.md` exists, cites `RFC-0051`, and covers every item in scope 1.
-- [ ] Every command shown runs as written against the shipped CLI.
-- [ ] `parallel-dispatch.md` carries the superseded note and the link; `README.md` links the new document.
-- [ ] `deferredDocs` and `deferredDocsDeadline` are removed from the RFC frontmatter and `node scripts/check-rfc-docs.mjs` passes.
-- [ ] The document contains no internal task ids.
-- [ ] `pnpm lint && pnpm format:check` pass.
+- [x] `docs/operations/session-hierarchy.md` exists, cites `RFC-0051`, and covers every item in scope 1.
+- [x] Every command shown runs as written against the shipped CLI.
+- [x] `parallel-dispatch.md` carries the superseded note and the link; `README.md` links the new document.
+- [x] `deferredDocs` and `deferredDocsDeadline` are removed from the RFC frontmatter and `node scripts/check-rfc-docs.mjs` passes.
+- [x] The document contains no internal task ids.
+- [x] `pnpm lint && pnpm format:check` pass.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+## Summary
+Added the operator runbook for the RFC-0051 session hierarchy, marked execute-parallel as superseded for sustained runs, linked the runbook from the operations index, and removed the RFC's deferred-docs fields.
+
+## Changes
+- `docs/operations/session-hierarchy.md` (new): tiers, cli-hierarchy commands, roster, board, loops, escalation, clearing, permission modes, governance values, troubleshooting.
+- `docs/operations/parallel-dispatch.md` (modified): superseded note linking the runbook.
+- `docs/operations/README.md` (modified): index link.
+- `spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md` (modified): removed deferredDocs and deferredDocsDeadline.
+
+## Design decisions
+- **Permission modes**: the runbook documents the shipped behaviour (every session starts in bypassPermissions, planner overridable), which differs from RFC wording; the RFC is untouched.
+
+## Verification
+- `pnpm build` and `pnpm test` — not run (docs-only change)
+- `node scripts/check-rfc-docs.mjs` — passes
+- `pnpm lint` — clean
+- `pnpm format:check` — clean
+
+## Follow-up
+(none)
