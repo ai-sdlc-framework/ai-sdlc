@@ -15,6 +15,13 @@ import { useTerminalDimensions } from './use-terminal-dimensions.js';
 import { App } from './app.js';
 import { TUI_TELEMETRY_FLAG } from './analytics/feature-flag.js';
 
+// AISDLC-819: App mounts the PR hooks, which run a real synchronous `gh pr list`
+// (10+ s against this repo's open-PR set). Stub child_process so the render is hermetic.
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return { ...actual, execFileSync: vi.fn(() => '[]') };
+});
+
 // Suppress telemetry writes (same pattern as app.test.tsx).
 let savedTelemetry: string | undefined;
 beforeAll(() => {
