@@ -605,11 +605,11 @@ describe('AISDLC-617: correctness-reviewer (opt-in merged code+test reviewer)', 
     assert.ok(body.includes('backlog/tasks'));
   });
 
-  it('correctness-reviewer.md documents it is opt-in and gated on the AISDLC-616 ledger', () => {
+  it('correctness-reviewer.md documents it is the default two-reviewer set for non-trust-chain diffs', () => {
     const body = readFileSync(join(__dirname, 'correctness-reviewer.md'), 'utf-8');
     assert.ok(body.includes('AISDLC-617'));
-    assert.ok(body.includes('AISDLC-616'));
-    assert.ok(body.toLowerCase().includes('opt-in'));
+    assert.ok(body.includes('AISDLC-722'));
+    assert.ok(body.includes('trust-chain'));
   });
 });
 

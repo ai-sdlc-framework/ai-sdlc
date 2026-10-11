@@ -373,6 +373,8 @@ describe('signAndWriteV6Envelope — reviewScope record (AISDLC-723)', () => {
       classification: 'test-only' as const,
       securityAlways: false,
       requiredSet: 'correctness-only' as const,
+      reason: 'every path is a test, fixture or snapshot',
+      triggeringPaths: [],
       appliedReviewers: ['correctness-reviewer'],
     };
     const env = buildV6Envelope({
@@ -413,6 +415,8 @@ describe('signAndWriteV6Envelope — reviewScope record (AISDLC-723)', () => {
       classification: 'test-only',
       securityAlways: false,
       requiredSet: 'correctness-only',
+      reason: 'every path is a test, fixture or snapshot',
+      triggeringPaths: [],
       appliedReviewers: ['correctness-reviewer'],
     });
   });
@@ -588,6 +592,45 @@ describe('nonce binding', () => {
 // ── formatV6Envelope ──────────────────────────────────────────────────────────
 
 describe('formatV6Envelope', () => {
+  it('AISDLC-722: shows the audit-only reviewer-set record from reviewScope', () => {
+    const leaf0 = makeLeaf({ leafIndex: 0 });
+    const base = {
+      headSha: FAKE_HEAD_SHA,
+      prLeaves: [leaf0],
+      allLeaves: [leaf0],
+      nonce: 'n'.repeat(64),
+      privateKeyPem,
+    };
+    const three = buildV6Envelope({
+      ...base,
+      reviewScope: {
+        classification: 'full',
+        securityAlways: false,
+        requiredSet: 'three',
+        reason: 'trust-chain-path',
+        triggeringPaths: ['ai-sdlc-plugin/hooks/x.js'],
+        appliedReviewers: ['code-reviewer'],
+      },
+    });
+    expect(formatV6Envelope(three)).toContain(
+      'Reviewer set   : three (trust-chain-path: ai-sdlc-plugin/hooks/x.js) [audit-only]',
+    );
+    const two = buildV6Envelope({
+      ...base,
+      reviewScope: {
+        classification: 'full',
+        securityAlways: false,
+        requiredSet: 'two',
+        reason: 'diff touches non-test, non-docs paths',
+        triggeringPaths: [],
+        appliedReviewers: ['correctness-reviewer'],
+      },
+    });
+    expect(formatV6Envelope(two)).toContain(
+      'Reviewer set   : two (diff touches non-test, non-docs paths) [audit-only]',
+    );
+  });
+
   it('includes key fields in output', () => {
     const leaf0 = makeLeaf({ leafIndex: 0 });
     const envelope = buildV6Envelope({

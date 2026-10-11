@@ -71,6 +71,8 @@ import {
 import { DEFAULT_ROLE_MODELS } from '../routing/default-table.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
 import { resolveTargetBranch } from '../steps/02-compute-branch.js';
+import { deriveReviewerSetFromGit } from '../steps/reviewer-set.js';
+import type { ReviewerSetClassification } from '../steps/reviewer-set.js';
 import { writeEvent, type WriteEventOpts } from './events.js';
 
 /**
@@ -203,6 +205,13 @@ export interface RunReconcileOptions {
    * per-reviewer loop reads the set from.
    */
   reviewers?: readonly ReviewerName[];
+  /**
+   * AISDLC-722 — derive the reviewer set from the worktree's diff when `reviewers` is not
+   * given (DEC-0055: two when the diff touches no trust-chain path, else three; an unreadable
+   * diff fails closed to three). Injectable for hermetic tests; defaults to
+   * `deriveReviewerSetFromGit` against `origin/<target-branch>`.
+   */
+  deriveReviewerSet?: (worktreePath: string, targetBranch: string) => ReviewerSetClassification;
   /**
    * Skip the `git fetch && rebase && push` step. Useful when the caller has
    * already pushed (e.g. operator manual rerun after fixing a conflict) and
@@ -619,7 +628,30 @@ function runReconcileInner(
   // AISDLC-493 — capture reviewer fan-out start/end timestamps for verdict patching.
   const reviewerStartedAt = now().toISOString();
 
-  const reviewersToReconcile = options.reviewers ?? RECONCILE_REVIEWERS;
+  // AISDLC-722: an explicit `reviewers` wins; otherwise the set is derived from the diff, the
+  // same way the CI verifier re-derives the set it requires. Derived sets are logged with the
+  // trust-chain paths that forced three.
+  let reviewersToReconcile: readonly ReviewerName[];
+  if (options.reviewers) {
+    reviewersToReconcile = options.reviewers;
+  } else {
+    const derive =
+      options.deriveReviewerSet ??
+      ((wt: string, branch: string) =>
+        deriveReviewerSetFromGit({ repoRoot: wt, baseRef: `origin/${branch}` }));
+    const classification = derive(worktreePath, resolveTargetBranch(workDir));
+    reviewersToReconcile =
+      classification.set === 'two' ? RECONCILE_REVIEWERS_MERGED : RECONCILE_REVIEWERS;
+    steps.push({
+      name: 'reviewer-set',
+      status: 'success',
+      output:
+        `${classification.set} (${classification.reason})` +
+        (classification.triggeringPaths.length > 0
+          ? ` trust-chain paths: ${classification.triggeringPaths.slice(0, 5).join(', ')}`
+          : ''),
+    });
+  }
 
   for (const reviewer of reviewersToReconcile) {
     const transcriptPath =

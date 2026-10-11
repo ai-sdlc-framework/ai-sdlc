@@ -6357,3 +6357,56 @@ describe('runVerifier (AISDLC-734 — bounded v6 candidate walk)', () => {
     }
   });
 });
+
+describe('runVerifier (AISDLC-722 — two-leaf envelope on a trust-chain diff)', () => {
+  let fixture;
+  let keys;
+
+  /** Commit `relPath` on top of the fixture head and return the new head SHA. */
+  function commitFile(relPath) {
+    mkdirSync(join(fixture.root, relPath, '..'), { recursive: true });
+    writeFileSync(join(fixture.root, relPath), '// x\n');
+    git(['add', '--', relPath], fixture.root);
+    git(['commit', '-q', '-m', 'touch trust-chain path'], fixture.root);
+    return git(['rev-parse', 'HEAD'], fixture.root).trim();
+  }
+
+  const twoLeaves = () => [makeLeaf(0, 'correctness-reviewer'), makeLeaf(1, 'security-reviewer')];
+
+  beforeEach(() => {
+    fixture = setupFixture();
+    keys = genV6KeyPair();
+    writeTrustedReviewersYaml(fixture.root, keys.publicKeyPem);
+  });
+
+  afterEach(() => {
+    rmSync(fixture.root, { recursive: true, force: true });
+  });
+
+  it('accepts a two-leaf envelope when the diff touches no trust-chain path', () => {
+    writeV6Fixture(fixture.root, fixture.headSha, twoLeaves(), keys.privateKeyPem);
+    const out = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'valid', `expected valid, got: ${out.reason}`);
+  });
+
+  it('rejects a two-leaf envelope when the diff touches a plugin hook', () => {
+    const head = commitFile('ai-sdlc-plugin/hooks/x.js');
+    writeV6Fixture(fixture.root, head, twoLeaves(), keys.privateKeyPem);
+    const out = runVerifier({ headSha: head, baseSha: fixture.baseSha, repoRoot: fixture.root });
+    assert.equal(out.status, 'invalid');
+    assert.match(out.reason, /reviewer set incomplete/);
+    assert.match(out.reason, /ai-sdlc-plugin\/hooks\/x\.js/);
+  });
+
+  it('rejects a two-leaf envelope when the trust-chain filename is non-ASCII (git would C-quote it)', () => {
+    const head = commitFile('ai-sdlc-plugin/hooks/héllo.js');
+    writeV6Fixture(fixture.root, head, twoLeaves(), keys.privateKeyPem);
+    const out = runVerifier({ headSha: head, baseSha: fixture.baseSha, repoRoot: fixture.root });
+    assert.equal(out.status, 'invalid');
+    assert.match(out.reason, /reviewer set incomplete/);
+  });
+});

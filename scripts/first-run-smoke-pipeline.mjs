@@ -74,6 +74,8 @@ const spawner = new MockSpawner({
   },
   'code-reviewer': approve('code-reviewer'),
   'test-reviewer': approve('test-reviewer'),
+  // AISDLC-722: a PR that touches no trust-chain path gets the two-reviewer set.
+  'correctness-reviewer': approve('correctness-reviewer'),
   'security-reviewer': approve('security-reviewer'),
 });
 

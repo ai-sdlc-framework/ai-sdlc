@@ -13,11 +13,15 @@
  *
  * Dependency-free so the verifier can import it without a `dist/` build.
  *
- * ## Lockstep surface with AISDLC-722
+ * ## One trust-chain list, three reviewer kinds (AISDLC-722)
  *
- * `TRUST_CHAIN_PATH_PREFIXES` is a minimal shared trust-chain path list. Task
- * AISDLC-722 (two reviewers by default) needs the same list; when it lands it
- * must import THIS list rather than define a second one.
+ * `TRUST_CHAIN_PATH_PREFIXES` is the ONE trust-chain path list. AISDLC-722
+ * (two reviewers by default) builds on it instead of defining a second list:
+ * `requiredReviewerKind()` maps a diff to `correctness-only` (test-only and
+ * docs-adjacent diffs), `two` (correctness + security, any other diff that
+ * touches no trust-chain path) or `three` (code + test + security, a diff that
+ * touches a trust-chain path, an unreadable diff, or `reviewerSet: three`).
+ * The signer selects with it and the CI verifier re-derives with it.
  *
  * ## Conservatism
  *
@@ -37,6 +41,32 @@ export const TRUST_CHAIN_PATH_PREFIXES = Object.freeze([
   'scripts/verify-attestation',
   'scripts/check-attestation',
   'scripts/sign-attestation',
+  'scripts/is-docs-only-changeset.mjs',
+  'scripts/pre-push-fixups.sh',
+  'scripts/check-task-moved.sh',
+  'scripts/check-dark-code-on-push.sh',
+  'pipeline-cli/src/cli/attestation.ts',
+  'pipeline-cli/bin/cli-attestation.mjs',
+  'reference/src/core/generated-schemas.ts',
+  // Governance resolver and schema, hierarchy lease policy, decision fallback.
+  'pipeline-cli/src/governance/',
+  'spec/schemas/agent-role.schema.json',
+  'pipeline-cli/src/hierarchy/lease-policy.ts',
+  'pipeline-cli/src/hierarchy/operational.ts',
+  'pipeline-cli/src/decisions/governance-fallback.ts',
+  // Reviewer selection and routing code.
+  'pipeline-cli/src/steps/reviewer-set.ts',
+  'pipeline-cli/src/runtime/untrusted-env.ts',
+  'orchestrator/src/runtime/git-env.ts',
+  '.mcp.json',
+  'pipeline-cli/src/steps/reviewer-set-comparison.ts',
+  'pipeline-cli/src/steps/07-build-review-prompts.ts',
+  'pipeline-cli/src/orchestrator/reconcile.ts',
+  // Merge and release path code.
+  'pipeline-cli/src/cli/merge-if-eligible.ts',
+  'pipeline-cli/bin/cli-merge-if-eligible.mjs',
+  'release-please-config.json',
+  '.release-please-manifest.json',
   // Agent-instruction directories: Markdown here steers agents (AISDLC-723).
   '.claude/',
   '.codex/',
@@ -55,6 +85,17 @@ const AGENT_INSTRUCTION_BASENAMES = Object.freeze(['claude.md', 'agents.md', 'sk
 const TRUST_CHAIN_DATA_EXCEPTIONS = Object.freeze([
   /^\.ai-sdlc\/attestations\/[^/]+\.dsse\.json$/,
   /^\.ai-sdlc\/_decisions\//,
+  // Runtime artifacts every reviewed PR carries: transcript leaves, the findings
+  // ledger and audit records are outputs of the review, not configuration.
+  /^\.ai-sdlc\/transcript-leaves(\.jsonl|\/)/,
+  /^\.ai-sdlc\/reviews\//,
+  /^\.ai-sdlc\/_audit\//,
+]);
+
+/** Trust-chain paths that a prefix cannot express. */
+const TRUST_CHAIN_PATH_PATTERNS = Object.freeze([
+  /^scripts\/[^/]*attestation[^/]*$/,
+  /(^|\/)\.github\/workflows\//,
 ]);
 
 /** Test files, fixtures and snapshots. */
@@ -72,7 +113,7 @@ export const TEST_ONLY_PATTERNS = Object.freeze([
  * import it). A test in `pipeline-cli/src/attestation/review-scope.test.ts` asserts the two stay equal.
  */
 export const DOCS_ONLY_PATTERN =
-  /^(spec\/rfcs\/|docs\/|backlog\/tasks\/|backlog\/completed\/|\.ai-sdlc\/attestations\/[^/]+\.dsse\.json$|\.ai-sdlc\/_decisions\/|[^/]+\.md$)/;
+  /^(spec\/rfcs\/|docs\/|backlog\/tasks\/|backlog\/completed\/|\.ai-sdlc\/attestations\/[^/]+\.dsse\.json$|\.ai-sdlc\/_decisions\/|\.github\/dependabot\.yml$|\.github\/[^/]+\.md$|[^/]+\.md$)/;
 
 /**
  * True when a failed `git show <ref>:<path>` means the file is definitely
@@ -96,11 +137,53 @@ const MARKDOWN_PATTERN = /\.md$/i;
 const SECURITY_TEST_PATH_PATTERN =
   /attest|sign(?:ing|ature|er|[-_.])|verif|trust|hook|merkle|security|governance|permission|sandbox|auth|secret|credential|policy|injection|redos|merge|eligib|reviewer|docs-only|gate|guard|role|dor|pre-push|allow|deny|bypass/i;
 
-/** @param {string} path */
-function isTrustChainPath(path) {
+/** @param {string} path normalised */
+function matchesTrustChain(path) {
   if (AGENT_INSTRUCTION_BASENAMES.includes(path.slice(path.lastIndexOf('/') + 1))) return true;
   if (TRUST_CHAIN_DATA_EXCEPTIONS.some((re) => re.test(path))) return false;
-  return TRUST_CHAIN_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
+  return (
+    TRUST_CHAIN_PATH_PREFIXES.some((prefix) => path.startsWith(prefix)) ||
+    TRUST_CHAIN_PATH_PATTERNS.some((re) => re.test(path))
+  );
+}
+
+/**
+ * True when a path cannot be trusted as a plain repo path: git C-quotes
+ * non-ASCII names (`"\\303\\251"`) unless read with `-z`, and a quoted, empty,
+ * control-character or `..` path matches no list. Such a path fails closed.
+ *
+ * @param {unknown} path
+ */
+export function isSuspectPath(path) {
+  if (typeof path !== 'string' || path === '') return true;
+  // eslint-disable-next-line no-control-regex
+  if (path.startsWith('"') || /[\u0000-\u001f\u007f]/.test(path)) return true;
+  return path.replace(/\\/g, '/').split('/').includes('..');
+}
+
+/**
+ * True when a diff path forces the three-reviewer set: a trust-chain path, a
+ * workflow file, or a path that cannot be read as a plain repo path.
+ *
+ * @param {string} path
+ */
+export function isTrustChainPath(path) {
+  return isSuspectPath(path) || matchesTrustChain(normalise(path));
+}
+
+/**
+ * The subset of `paths` that force the three-reviewer set, in input order,
+ * de-duplicated.
+ *
+ * @param {readonly string[]} paths
+ * @returns {string[]}
+ */
+export function matchTrustChainPaths(paths) {
+  const out = [];
+  for (const p of paths) {
+    if (isTrustChainPath(p) && !out.includes(p)) out.push(p);
+  }
+  return out;
 }
 
 /** @param {string} path */
@@ -134,10 +217,8 @@ export function classifyReviewScope(paths) {
       return { classification: 'full', reason: 'unparseable path' };
     }
   }
-  const trust = normalised.find(isTrustChainPath);
+  const trust = normalised.find(matchesTrustChain);
   if (trust !== undefined) return { classification: 'full', reason: `trust-chain path: ${trust}` };
-  const wf = normalised.find((p) => /(^|\/)\.github\/workflows\//.test(p));
-  if (wf !== undefined) return { classification: 'full', reason: `workflow file: ${wf}` };
 
   if (normalised.every(isTestPath)) {
     const sec = normalised.find((p) => SECURITY_TEST_PATH_PATTERN.test(p));
@@ -203,6 +284,85 @@ export function checkReviewerCoverage(reviewerNames, classification, opts = {}) 
     missing.push('correctness-reviewer (or code-reviewer + test-reviewer)');
   }
   if (reviewerSetKindFor(classification, opts) === 'full' && !names.has('security-reviewer')) {
+    missing.push('security-reviewer');
+  }
+  return { ok: missing.length === 0, missing };
+}
+
+/**
+ * Parse the `reviewerSet:` scalar from a review-config YAML string. Returns
+ * `null` when absent or unrecognised. `three` is the repository opt-out
+ * (always the three-reviewer set); `code-test-merged` and `auto` mean the
+ * default (diff-derived), because the classifier already picks two whenever
+ * that is safe. The caller MUST read the text from the base branch.
+ *
+ * @param {string | null | undefined} yaml
+ * @returns {'three' | 'code-test-merged' | 'auto' | null}
+ */
+export function parseReviewerSetConfig(yaml) {
+  const m = String(yaml ?? '').match(
+    /^\s*reviewerSet:\s*['"]?(three|code-test-merged|auto)['"]?\s*(#.*)?$/im,
+  );
+  return m ? /** @type {'three' | 'code-test-merged' | 'auto'} */ (m[1].toLowerCase()) : null;
+}
+
+/**
+ * The reviewer kind a diff requires (AISDLC-722 on top of AISDLC-723).
+ *
+ *   - `three`: code + test + security. A trust-chain path, an unreadable or
+ *     empty diff, or `requireThree` (`reviewerSet: three`).
+ *   - `correctness-only`: a test-only or docs-adjacent diff with no trust-chain
+ *     path (and `securityAlways` unset).
+ *   - `two`: correctness + security, every other diff.
+ *
+ * @param {readonly string[] | null | undefined} paths all changed paths; `null` means the diff could not be read
+ * @param {{ securityAlways?: boolean, requireThree?: boolean }} [opts]
+ * @returns {{ kind: 'correctness-only' | 'two' | 'three', classification: 'test-only' | 'docs-adjacent' | 'full', reason: string, triggeringPaths: string[] }}
+ */
+export function requiredReviewerKind(paths, opts = {}) {
+  const three = (reason, triggeringPaths = []) => ({
+    kind: /** @type {const} */ ('three'),
+    classification: /** @type {const} */ ('full'),
+    reason,
+    triggeringPaths,
+  });
+  if (opts.requireThree === true) return three('config:require-three');
+  if (!Array.isArray(paths)) return three('diff-unavailable');
+  if (paths.length === 0) return three('no-changed-files');
+  const triggering = matchTrustChainPaths(paths);
+  if (triggering.length > 0) return three('trust-chain-path', triggering);
+  const { classification, reason } = classifyReviewScope(paths);
+  return {
+    kind:
+      reviewerSetKindFor(classification, opts) === 'correctness-only' ? 'correctness-only' : 'two',
+    classification,
+    reason,
+    triggeringPaths: [],
+  };
+}
+
+/**
+ * Check the reviewer names carried by an attestation against a required kind.
+ * The three set needs a code reviewer, a test reviewer and security; the two
+ * set needs security and a correctness review (or the code + test pair); the
+ * correctness-only set needs just the correctness review. A larger set always
+ * covers a smaller requirement. `-codex` variants count as their role.
+ *
+ * @param {readonly string[]} reviewerNames
+ * @param {'correctness-only' | 'two' | 'three'} kind
+ * @returns {{ ok: boolean, missing: string[] }}
+ */
+export function checkReviewerKindCoverage(reviewerNames, kind) {
+  const names = new Set(reviewerNames);
+  const has = (list) => list.some((n) => names.has(n));
+  const missing = [];
+  if (kind === 'three') {
+    if (!has(CODE_NAMES)) missing.push('code-reviewer');
+    if (!has(TEST_NAMES)) missing.push('test-reviewer');
+  } else if (!(has(CORRECTNESS_NAMES) || (has(CODE_NAMES) && has(TEST_NAMES)))) {
+    missing.push('correctness-reviewer (or code-reviewer + test-reviewer)');
+  }
+  if (kind !== 'correctness-only' && !names.has('security-reviewer')) {
     missing.push('security-reviewer');
   }
   return { ok: missing.length === 0, missing };

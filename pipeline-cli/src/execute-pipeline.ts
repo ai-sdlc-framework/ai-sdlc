@@ -40,6 +40,8 @@ import {
   writeUntrustedMarker,
 } from './runtime/untrusted-env.js';
 import { buildJudgmentContext, getMergeBaseDiff } from './judgment/index.js';
+import { routingArtifactsDir, routingRecordable } from './routing/artifacts-dir.js';
+import { recordReviewerSetOutcome } from './steps/reviewer-set-comparison.js';
 import {
   DEFAULT_LOGGER,
   type AggregatedVerdict,
@@ -467,6 +469,20 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     });
     iterationsTotal = loop.iterations;
     finalAggregated = loop.finalVerdict;
+
+    // AISDLC-722: comparison window for the two-reviewer default. Logs the set that ran and
+    // its verdict while the window is open; best effort, never blocks the PR.
+    if (reviewBuild.reviewerSet && routingRecordable(branch.worktreePath)) {
+      recordReviewerSetOutcome({
+        artifactsDir: routingArtifactsDir(branch.worktreePath),
+        taskId: opts.taskId,
+        classification: reviewBuild.reviewerSet,
+        primary: {
+          reviewers: loop.finalVerdict.verdicts.map((v) => String(v.agentId)),
+          approved: loop.finalVerdict.approved,
+        },
+      });
+    }
 
     // Step 10 — finalize (skipped when needs-human-attention)
     await finalizeTask({

@@ -1,70 +1,71 @@
-# Reviewer set flag: 3 → 2 opt-in (AISDLC-617)
+# Reviewer set: two by default, three for trust-chain paths (AISDLC-617, AISDLC-722)
 
-> **TL;DR:** The default reviewer set is UNCHANGED — three reviewers (code, test, security) run separately, exactly as before. Set `AI_SDLC_REVIEWER_SET=code-test-merged` (or `.ai-sdlc/review-config.yaml`'s `reviewerSet: code-test-merged`) to opt into an experimental two-reviewer set (`correctness-reviewer` + `security-reviewer`) for A/B comparison against the AISDLC-616 findings ledger. **Do not flip this default until the ledger shows the merged reviewer catches the same correctness blockers the two separate reviewers did.**
+> **TL;DR:** Since AISDLC-722 (DEC-0055, operator-approved 2026-10-04) a pull request whose diff touches **no trust-chain path** is reviewed by **two** agents: `correctness-reviewer` (the merged code + test remit) and `security-reviewer`. A diff that touches **any** trust-chain path, or a repository configured with `reviewerSet: three`, gets the full **three**: `code-reviewer`, `test-reviewer`, `security-reviewer`. The set is derived from the diff by one deterministic classifier, and the CI verifier **re-derives it from the same diff** and rejects an attestation whose reviewer leaves do not cover it.
 
-## Why 3 → 2, not 3 → 1
+## Velocity impact
 
-From the operator reviewer-cost investigation (2026-09-14):
+Most pull requests drop one agent run (the second of the code/test pair). Measured against the pre-change three-reviewer fan-out: one Sonnet reviewer run saved per non-trust-chain PR, roughly 30-40% of reviewer tokens on those PRs (a merged reviewer needs a longer prompt, so the saving is not one third). Trust-chain PRs are unchanged. Security stays a separate Opus run in both sets.
 
-- **Code and test reviewers share a domain** (correctness): logic errors, edge cases, and whether tests cover them are naturally reviewed together. Folding them into one prompt has low domain-conflict risk.
-- **Security is a distinct reasoning mode** and is the ONLY role with retained evidence of unique, critical catches (e.g. AISDLC-501: a fail-open degradation giving an untrusted PR a green gate + valid signed attestation with zero sandbox / zero approval — a trust-chain CRITICAL a general correctness reviewer would not frame). Folding security into a combined reviewer risks attention dilution on exactly the highest-severity class. **Keep it separate, on Opus.**
-- **Cost reality**: a combined reviewer is not 1/3 the cost — it needs a longer multi-domain prompt and emits one long transcript; realistic saving from 3→2 is ~30-40% of reviewer tokens, not ~66%. The per-role model split (code/test on Sonnet, security on Opus — PR #327) already makes security the expensive role you'd least want to touch, so merging the two cheap Sonnet roles is the low-risk cut.
+## How the set is chosen
 
-## What ships in this task
+| Diff | Set | Reviewers |
+|---|---|---|
+| touches no trust-chain path | `two` | `correctness-reviewer`, `security-reviewer` |
+| touches at least one trust-chain path | `three` | `code-reviewer`, `test-reviewer`, `security-reviewer` |
+| repository sets `reviewerSet: three` | `three` | as above |
+| diff unreadable, empty, or no merge-base | `three` | fail closed |
 
-- A new agent, `ai-sdlc-plugin/agents/correctness-reviewer.md` — merges the `code-reviewer` and `test-reviewer` remits (bugs/logic AND test coverage/quality) into one Sonnet-pinned reviewer. Same JSON verdict envelope (`{approved, findings, summary}`) as every other reviewer, so aggregation and the AISDLC-616 findings ledger are unaffected.
-- A reviewer-set resolver, `pipeline-cli/src/steps/reviewer-set.ts` (`resolveReviewerSetMode()` / `resolveReviewerSet()`), consulted by `07-build-review-prompts.ts` (Tier 2 pipeline) and by the `/ai-sdlc execute` + `/ai-sdlc orchestrator-tick` skill bodies (Tier 1).
-- `pipeline-cli/src/orchestrator/reconcile.ts`'s `RunReconcileOptions.reviewers` — an explicit override for the reviewer set the reconcile sub-tick emits leaves + signs for. Defaults to `RECONCILE_REVIEWERS` (three); pass `RECONCILE_REVIEWERS_MERGED` (or the CLI's `--reviewers correctness-reviewer,security-reviewer`) to reconcile the opt-in set.
-- Aggregation (`pipeline_step_8_aggregate_verdicts`) and the reviews ledger (`reviews-ledger.ts` / `reviews-analysis.ts`) already accept an arbitrary reviewer count — no hardcoded `3` anywhere in the accepting path. `normalizeReviewerRole('correctness-reviewer')` maps to the new `'correctness'` ledger role, additive to the existing `code`/`test`/`security` roles.
+The trust-chain list is `TRUST_CHAIN_PATH_PREFIXES` (plus a small pattern list) in [`pipeline-cli/attestation-core/review-scope-core.mjs`](../../pipeline-cli/attestation-core/review-scope-core.mjs), the same list the correctness-only reduction below uses. It covers plugin hooks and the plugin registration (`ai-sdlc-plugin/.claude-plugin/**`), the harness settings (`.claude/settings*.json`, `.claude/hooks/**`), the governance resolver and `spec/schemas/agent-role.schema.json`, attestation and signing code (`pipeline-cli/src/attestation/**`, `pipeline-cli/attestation-core/**`, `scripts/*attestation*`, `scripts/is-docs-only-changeset.mjs`, the attestation CLI and its bin shim, the signing scripts), the push gates (`.husky/**`, `scripts/pre-push-fixups.sh`, `scripts/check-task-moved.sh`, `scripts/check-dark-code-on-push.sh`), merge and release path code, lease and governance-fallback code, the generated schemas, reviewer routing (`reviewer-set*.ts`, `07-build-review-prompts.ts`, `orchestrator/reconcile.ts`), every plugin command body, agent definition and script (`ai-sdlc-plugin/**`), reviewer and review-executor agent definitions, `CLAUDE.md`, every `.ai-sdlc/**` config file and everything under `.github/`. Review outputs that every reviewed PR carries (`.ai-sdlc/attestations/`, `.ai-sdlc/transcript-leaves*`, `.ai-sdlc/reviews/`, `.ai-sdlc/_audit/`) and the decision log (`.ai-sdlc/_decisions/**`, docs-equivalent data since AISDLC-723) are exempt: a decision record is authority only once it is on `main`, and the PR that adds it is reviewed like any other.
 
-## Enabling the opt-in set
+Matching is case-insensitive (a case-insensitive checkout addresses the same file under another spelling). Changed paths are read with `git diff-tree --name-only -z` so a non-ASCII filename is never C-quoted; any path that still starts with a double quote or contains a control character fails closed to the three-reviewer set.
 
-**Per-invocation (A/B testing, no repo changes):**
+**One module, two importers.** The pipeline (`steps/reviewer-set.ts`, the signer, the reconcile path) and the CI verifier (`verify-core.mjs`) both import `review-scope-core.mjs`. `pipeline-cli/src/attestation/reviewer-set-coverage.test.ts` fails if either side stops importing it or grows its own copy of the list. Adding a path tightens review; removing one loosens it and is itself a trust-chain change (the file is in its own list, under `pipeline-cli/attestation-core/`).
 
-```bash
-AI_SDLC_REVIEWER_SET=code-test-merged /ai-sdlc execute AISDLC-NNN
-```
+## Where the choice is made
 
-**Repo-wide (adopter opt-in):** create `.ai-sdlc/review-config.yaml`:
+- `/ai-sdlc execute` (Step 7a-pre) calls `cli-attestation reviewer-set`, which prints `{set, reviewers, reason, triggeringPaths}` and fails closed to three.
+- The headless runner (`executePipeline`, Step 7 `buildReviewPrompts`) calls `selectReviewerSet()`; the choice is logged to stderr as `[reviewer-set] ... trust-chain paths: ...`.
+- The reconcile path (`runReconcile`) derives the set from the worktree diff when `RunReconcileOptions.reviewers` is not given; an explicit `--reviewers` list still wins.
+- The judgment layer (`review.reviewer-set`) can never narrow a diff the classifier sent to three.
+
+## How the CI verifier enforces it
+
+`runVerifier` calls `enforceReviewScope`, which recomputes the changed paths from `git diff <merge-base>..<head>` and reads `.ai-sdlc/review-config.yaml` from the **base commit**, then calls the same `requiredReviewerKind` classifier. It then requires that the **Merkle-proven on-disk leaves** (not the envelope's own summary) cover the set: the three set needs code, test and security reviewers (`-codex` variants satisfy code and test; security has no codex variant); the two set needs security plus a correctness reviewer (or code and test, so a three-reviewer attestation always covers a two-reviewer requirement). The verifier **never reads** the `reviewScope` record the signer writes into the envelope; that field is for auditors only, because a self-asserted claim is forgeable.
+
+A rejected attestation reports, for example: `v6: reviewer set incomplete: the diff requires the three-reviewer set (trust-chain-path: ai-sdlc-plugin/hooks/x.js) but the attestation lacks code-reviewer, test-reviewer`. Fix: run the full three-reviewer set on the current head and re-sign.
+
+The legacy v3/v4/v5 verifier path is unchanged (it already requires all three roles).
+
+## Opting out (always three)
+
+Add to `.ai-sdlc/review-config.yaml` on the base branch:
 
 ```yaml
-reviewerSet: code-test-merged
+reviewerSet: three
 ```
 
-The env var always takes precedence over the config file, so an operator can force either mode ad hoc without editing the repo.
+or set `AI_SDLC_REVIEWER_SET=three` for one run. The config is read from `origin/main` (`git show`) and never from the pull request's own checkout, so a PR cannot change its own review depth; the verifier reads it from the PR's base commit. With nothing configured the diff-derived default applies. If the verifier cannot read the base config for any reason other than the file being absent (shallow clone, absent base commit), it fails closed to three. The legacy value `reviewerSet: code-test-merged` (and `auto`) now means the same as "nothing configured": the classifier already picks two whenever it is safe, and it can no longer narrow a trust-chain diff.
 
-**Default (no action needed):** omit both — the three-reviewer set runs exactly as it did before AISDLC-617.
+## What the attestation records
 
-## What runs in each mode
+The v6 envelope carries `reviewScope.{requiredSet, reason, triggeringPaths}`, derived by the signer from the same diff. It is audit-only. `cli-attestation inspect-v6` shows it; the verifier ignores it.
 
-| Mode | Reviewers | Model | Codex variant available? |
+## Comparison window
+
+For the first 20 pull requests, or one week from the first logged one, each PR's reviewer-set outcome is appended to `$ARTIFACTS_DIR/reviewer-set-comparison.jsonl` (`steps/reviewer-set-comparison.ts`). A PR for which both sets' verdicts were collected carries a `shadow` entry, and a disagreement on approval is flagged. `cli-attestation reviewer-set-window` prints the summary for the decision digest. The log never blocks a pull request. The staged-review comparison machinery (RFC-0052) is not on main, so this is the simple log of disagreements.
+
+## What runs in each set
+
+| Set | Reviewers | Model | Codex variant? |
 |---|---|---|---|
-| `three` (default) | `code-reviewer`, `test-reviewer`, `security-reviewer` | sonnet, sonnet, opus | code/test yes (`-codex` variants); security no |
-| `code-test-merged` (opt-in) | `correctness-reviewer`, `security-reviewer` | sonnet, opus | no (correctness-reviewer is claude-native only) |
+| `three` | `code-reviewer`, `test-reviewer`, `security-reviewer` | sonnet, sonnet, opus | code/test yes; security no |
+| `two` | `correctness-reviewer`, `security-reviewer` | sonnet, opus | no |
 
-Security is byte-for-byte unchanged in both modes — same agent, same model, same harness, same threat-model prompt.
-
-## Ledger-gated default change (do NOT skip this)
-
-This task intentionally does **not** flip the default. AISDLC-616 instruments first-pass reviewer findings into an append-only ledger (`.ai-sdlc/reviews/<task-id>.jsonl`). Before making `code-test-merged` the default:
-
-1. Run a meaningful sample of PRs with `reviewerSet: code-test-merged` enabled.
-2. Compare the `correctness` role's block rate / sole-blocker rate (via `cli-reviews analyze`, see `pipeline-cli/src/attestation/reviews-analysis.ts`) against the historical `code` + `test` combined coverage.
-3. Confirm the merged reviewer is not silently dropping a class of finding the two separate reviewers used to catch (e.g. compare cross-reviewer overlap patterns pre/post).
-4. Only then file a follow-up task to flip the default — with the ledger data cited as evidence in that task's Context section.
+Security is byte-for-byte the same agent in both sets.
 
 ## Programmatic access
 
-```typescript
-import { resolveReviewerSet, resolveReviewerSetMode } from '@ai-sdlc/pipeline-cli';
-
-resolveReviewerSetMode({ workDir: process.cwd() });
-// → 'three' (default) | 'code-test-merged' (opt-in)
-
-resolveReviewerSet({ workDir: process.cwd() });
-// → ['code-reviewer', 'test-reviewer', 'security-reviewer']   (default)
-// → ['correctness-reviewer', 'security-reviewer']             (opt-in)
-```
+`classifyReviewerSet({ changedPaths, requireThree })` in `pipeline-cli/src/steps/reviewer-set.ts` returns `{ set, reviewers, reason, triggeringPaths }`; `requiredReviewerKind(paths, opts)` in `review-scope-core.mjs` is the underlying classifier and also returns `correctness-only`. From a shell: `node pipeline-cli/bin/cli-attestation.mjs reviewer-set --repo-root <worktree>`.
 
 ## Correctness-only review for test-only and docs-adjacent diffs (AISDLC-723, DEC-0055)
 
@@ -76,8 +77,8 @@ The full set is forced when the diff contains any of: a trust-chain path (`.gith
 
 - Signer side: `reduceForReviewScope()` in `pipeline-cli/src/steps/reviewer-set.ts`, called by `07-build-review-prompts.ts`. An explicit `reviewers` override is left alone.
 - CI verifier: `enforceReviewScope()` in `pipeline-cli/attestation-core/verify-core.mjs` re-derives the classification from `git diff <merge-base>..<head>` and requires the reviewer names of the on-disk (Merkle-proved) leaves, which must equal the envelope's copies and carry no duplicate `leafIndex`, to satisfy it (correctness review, plus the security review when the diff is `full`). It never reads the classification from the envelope. If the diff cannot be listed it fails closed to `full`; a git error reading the base config other than a missing path fails closed to `securityReview: always`. Paths are lowercased and NFC-normalised before matching.
-- Both use one classifier, `pipeline-cli/attestation-core/review-scope-core.mjs`. Its `TRUST_CHAIN_PATH_PREFIXES` is the shared trust-chain list; the two-reviewer task (AISDLC-722) must import it rather than define another.
-- The envelope records `reviewScope` (`classification`, `securityAlways`, `requiredSet`, `appliedReviewers`) for audit. It is informational only.
+- Both use one classifier, `pipeline-cli/attestation-core/review-scope-core.mjs`. Its `TRUST_CHAIN_PATH_PREFIXES` is the one trust-chain list; the two-reviewer default (AISDLC-722) imports it rather than defining another.
+- The envelope records `reviewScope` (`classification`, `securityAlways`, `requiredSet`, `reason`, `triggeringPaths`, `appliedReviewers`) for audit. It is informational only.
 
 **Keep security review on everything (adopters).** Commit this to `.ai-sdlc/review-config.yaml` on your base branch:
 
@@ -87,4 +88,4 @@ securityReview: always
 
 The file is read from the base ref (`git show origin/main:.ai-sdlc/review-config.yaml` on the signer, the PR base SHA in CI), never from the PR's own checkout, so a pull request cannot switch the reduction on for itself. With `securityReview: always` the verifier requires a security reviewer on every diff.
 
-See also: `docs/operations/reviewer-dispatch-defaults.md` (Codex vs. Claude-native harness routing — orthogonal to the reviewer-SET flag; both flags compose).
+See also: `docs/operations/reviewer-dispatch-defaults.md` (Codex vs. Claude-native routing, orthogonal to the reviewer set). The changelog entry for the changed default is produced by release-please from the commit message.

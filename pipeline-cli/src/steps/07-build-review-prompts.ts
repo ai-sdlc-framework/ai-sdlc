@@ -197,31 +197,44 @@ export async function buildReviewPrompts(
           ...(opts.sourceKind ? { sourceKind: opts.sourceKind } : {}),
           taskId: opts.taskId,
         }));
-  const configured =
-    opts.reviewers ??
-    (
-      await selectReviewerSet({
-        workDir: opts.workDir,
-        ...(opts.sourceKind ? { sourceKind: opts.sourceKind } : {}),
-        taskId: opts.taskId,
-        changedFiles,
-        diff,
-        diffUnavailable,
-        binaryDiff,
-        ...(opts.iteration !== undefined ? { iteration: opts.iteration } : {}),
-        ...(judgment ? { judgment } : {}),
-      })
-    ).reviewers;
-  // AISDLC-723: test-only / docs-adjacent diffs run the correctness reviewer alone. An
-  // explicit `opts.reviewers` override is the caller's decision and is left untouched.
-  const selected = opts.reviewers
-    ? configured
-    : reduceForReviewScope({
-        reviewers: configured,
-        changedFiles,
-        diffUnavailable,
-        workDir: opts.workDir,
-      }).reviewers;
+  let reviewerSetRecord: BuildReviewPromptsResult['reviewerSet'];
+  let selected: ReviewerType[];
+  if (opts.reviewers) {
+    // An explicit override is the caller's decision and is left untouched.
+    selected = opts.reviewers;
+  } else {
+    const selection = await selectReviewerSet({
+      workDir: opts.workDir,
+      ...(opts.sourceKind ? { sourceKind: opts.sourceKind } : {}),
+      taskId: opts.taskId,
+      changedFiles,
+      diff,
+      diffUnavailable,
+      binaryDiff,
+      ...(opts.iteration !== undefined ? { iteration: opts.iteration } : {}),
+      ...(judgment ? { judgment } : {}),
+    });
+    reviewerSetRecord = {
+      set: selection.classifier.set,
+      reason: selection.classifier.reason,
+      triggeringPaths: selection.classifier.triggeringPaths,
+    };
+    // AISDLC-722: the choice is logged with the paths that triggered the full set.
+    const paths = reviewerSetRecord.triggeringPaths;
+    process.stderr.write(
+      `[reviewer-set] ${selection.reviewers.join(', ')} (classifier: ${reviewerSetRecord.set}, ` +
+        `reason: ${reviewerSetRecord.reason}${paths.length > 0 ? `, trust-chain paths: ${paths.slice(0, 5).join(', ')}${paths.length > 5 ? ', ...' : ''}` : ''})\n`,
+    );
+    // AISDLC-723: test-only / docs-adjacent diffs run the correctness reviewer alone, unless
+    // the repository requires three always (`reviewerSet: three`).
+    selected = reduceForReviewScope({
+      reviewers: selection.reviewers,
+      changedFiles,
+      diffUnavailable,
+      requireThree: selection.classifier.reason === 'config:require-three',
+      workDir: opts.workDir,
+    }).reviewers;
+  }
   // review.routing runs after set selection and can only add reviewers.
   const reviewers = (
     await routeReviewers({
@@ -288,6 +301,7 @@ export async function buildReviewPrompts(
     diffUnavailable,
     nonce,
     headSha,
+    ...(reviewerSetRecord ? { reviewerSet: reviewerSetRecord } : {}),
   };
 }
 

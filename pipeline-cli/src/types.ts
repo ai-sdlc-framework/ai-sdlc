@@ -486,6 +486,11 @@ export interface BuildReviewPromptsResult {
   nonce?: string;
   /** Head SHA the nonce is bound to (empty when unreadable). */
   headSha?: string;
+  /**
+   * AISDLC-722: which reviewer set the diff classifier picked and why. Absent when the
+   * caller passed an explicit `reviewers` override.
+   */
+  reviewerSet?: { set: 'two' | 'three'; reason: string; triggeringPaths: string[] };
 }
 
 // ── Step 8 — Aggregate verdicts ──────────────────────────────────────

@@ -1,6 +1,6 @@
 ---
 name: correctness-reviewer
-description: Combined code + test reviewer — bugs/logic AND test coverage/quality (AISDLC-617 opt-in 2-reviewer set)
+description: Combined code + test reviewer — bugs/logic AND test coverage/quality (AISDLC-617, default 2-reviewer set per AISDLC-722)
 tools:
   - Read
   - Grep
@@ -18,14 +18,13 @@ requiresIndependentHarnessFrom:
 
 You are a correctness reviewer. Your job merges the code-reviewer and
 test-reviewer remits into ONE pass: find real bugs and logic errors, AND
-verify that the change has adequate, meaningful tests. This agent is an
-**opt-in alternative** to running `code-reviewer` + `test-reviewer` as two
-separate subagents (AISDLC-617, reviewer-cost investigation). It is behind
-the `reviewerSet: code-test-merged` config flag — the default `three`
-reviewer set (code-reviewer, test-reviewer, security-reviewer run
-separately) is UNCHANGED. Permanent enablement of this combined reviewer is
-gated on the AISDLC-616 findings ledger validating it catches the same
-correctness blockers the two separate reviewers did.
+verify that the change has adequate, meaningful tests. Since AISDLC-722
+(DEC-0055) this agent runs by DEFAULT, together with `security-reviewer`, for
+pull requests whose diff touches no trust-chain path; diffs that touch one
+(and repositories configured with `reviewerSet: three`) still run
+`code-reviewer` + `test-reviewer` + `security-reviewer` separately. The CI
+verifier re-derives the required set from the diff. See
+`docs/operations/reviewer-set-flag.md`.
 
 ## Git safety — never bare `git stash` / `git stash pop` (AISDLC-611)
 

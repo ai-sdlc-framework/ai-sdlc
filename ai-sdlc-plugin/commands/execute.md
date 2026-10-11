@@ -870,28 +870,21 @@ git diff --name-only origin/main...HEAD > "/tmp/pr-files-${TASK_ID}.txt"
 cd -
 ```
 
-### Step 7a-pre — Resolve the reviewer set (AISDLC-617)
+### Step 7a-pre — Resolve the reviewer set (AISDLC-617, AISDLC-722)
 
-Before classifying, resolve which reviewer SET this run uses. **Default is unchanged** — the classic three-reviewer set (code-reviewer, test-reviewer, security-reviewer) — unless the operator explicitly opts into the merged 2-reviewer set for A/B testing against the AISDLC-616 findings ledger.
+Before classifying, resolve which reviewer SET this run uses. **Since AISDLC-722 (DEC-0055) the default is derived from the diff:** the two-reviewer set (correctness-reviewer + security-reviewer) when the diff touches NO trust-chain path, and the three-reviewer set (code-reviewer, test-reviewer, security-reviewer) when it touches any. The trust-chain path list lives in ONE module, `pipeline-cli/attestation-core/review-scope-core.mjs` (shared with the AISDLC-723 correctness-only reduction), which the CI verifier imports too: the verifier re-derives the required set from the PR diff and rejects an attestation whose leaves do not cover it, so this step cannot narrow review on its own.
 
-**Trust boundary (security review fix, round 2):** `.ai-sdlc/review-config.yaml` is read from **`origin/main` via `git show`**, never from `$WORKTREE_PATH`'s own working-tree checkout. Reading the PR's own worktree copy would let an untrusted PR author commit `reviewerSet: code-test-merged` in their OWN branch to opt their own diff into the shallower single-pass review — a self-selection hole. Resolving from `origin/main` means changing review depth requires a merged, already-reviewed change to main first. This mirrors `resolveReviewerSetMode()` in `pipeline-cli/src/steps/reviewer-set.ts` — same precedence, same fail-safe-to-`three` semantics.
+A repository requires three reviewers always with `reviewerSet: three` in `.ai-sdlc/review-config.yaml` (or `AI_SDLC_REVIEWER_SET=three` for one run). **Trust boundary:** the config is read from **`origin/main` via `git show`**, never from `$WORKTREE_PATH`'s own checkout, so a PR cannot edit its own review depth. An unreadable diff fails closed to three. Full reference: `docs/operations/reviewer-set-flag.md`.
 
 ```bash
-REVIEWER_SET_MODE="${AI_SDLC_REVIEWER_SET:-}"
-if [ -z "$REVIEWER_SET_MODE" ]; then
-  # AISDLC-617 round 2: read from origin/main, NOT $WORKTREE_PATH's working
-  # tree. `git show` failing (file absent on origin/main, ref unreachable,
-  # etc.) is the expected/safe path and must fall through to the default.
-  BASE_REVIEW_CONFIG=$(cd "$WORKTREE_PATH" && git show origin/main:.ai-sdlc/review-config.yaml 2>/dev/null || true)
-  if [ -n "$BASE_REVIEW_CONFIG" ]; then
-    REVIEWER_SET_MODE=$(printf '%s\n' "$BASE_REVIEW_CONFIG" | grep -E '^\s*reviewerSet:' \
-      | head -1 | sed -E 's/^[^:]*:\s*//' | tr -d '"'"'"' \r')
-  fi
-fi
-if [ "$REVIEWER_SET_MODE" != "code-test-merged" ]; then
-  REVIEWER_SET_MODE="three"
-fi
-echo "[ai-sdlc-progress] Step 7a-pre: reviewerSet mode = $REVIEWER_SET_MODE (AISDLC-617; default 'three' — opt in via AI_SDLC_REVIEWER_SET=code-test-merged, or a MERGED .ai-sdlc/review-config.yaml on origin/main — the PR's own worktree copy is never trusted)"
+REVIEWER_SET_JSON=$(node "$PIPELINE_CLI_BIN/cli-attestation.mjs" reviewer-set \
+  --repo-root "$WORKTREE_PATH" --base-ref origin/main 2>/dev/null \
+  || echo '{"set":"three","reason":"invocation-failed","triggeringPaths":[]}')
+REVIEWER_SET=$(printf '%s' "$REVIEWER_SET_JSON" | jq -r '.set')
+if [ "$REVIEWER_SET" = "two" ]; then REVIEWER_SET_MODE="code-test-merged"; else REVIEWER_SET_MODE="three"; fi
+REVIEWER_SET_REASON=$(printf '%s' "$REVIEWER_SET_JSON" | jq -r '.reason')
+REVIEWER_SET_PATHS=$(printf '%s' "$REVIEWER_SET_JSON" | jq -r '.triggeringPaths | join(", ")')
+echo "[ai-sdlc-progress] Step 7a-pre: reviewer set = $REVIEWER_SET (reason: $REVIEWER_SET_REASON${REVIEWER_SET_PATHS:+; trust-chain paths: $REVIEWER_SET_PATHS}) (AISDLC-722)"
 ```
 
 ### Step 7a — Classify the PR (AISDLC-141)

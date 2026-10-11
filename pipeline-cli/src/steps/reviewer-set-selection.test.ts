@@ -3,7 +3,8 @@
  * Hermetic: fake provider, no network, no git.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -18,6 +19,7 @@ import {
   CODE_TEST_MERGED_REVIEWER_SET,
   THREE_REVIEWER_SET,
   applyReviewerSetFloors,
+  deriveReviewerSetFromGit,
   explicitReviewerSetMode,
   resolveReviewerSetMode,
   selectReviewerSet,
@@ -25,6 +27,7 @@ import {
 } from './reviewer-set.js';
 import { pathClassifierReviewers, routeReviewers } from './review-routing.js';
 import { reviewPaths } from './review-judgment-support.js';
+import { isTrustChainPath } from '../../attestation-core/review-scope-core.mjs';
 
 const KEY = 'fake@fake-1';
 const SET_ID = 'review.reviewer-set';
@@ -91,6 +94,13 @@ function base(over: Partial<SelectReviewerSetOpts> = {}): SelectReviewerSetOpts 
 
 const THREE = [...THREE_REVIEWER_SET];
 const MERGED = [...CODE_TEST_MERGED_REVIEWER_SET];
+// AISDLC-722: with nothing configured the set is derived from the diff; SAFE_FILES touch no
+// trust-chain path, so the default is the two-reviewer set. Tests that exercise a veto or a
+// non-acting judgment assert the judgment did not change that default.
+const DEFAULT_SET = MERGED;
+/** The default set for a file list: three when any file is a trust-chain path, else two. */
+const defaultFor = (files: readonly string[]): string[] =>
+  files.some((f) => isTrustChainPath(f)) ? THREE : MERGED;
 
 function assertFloors(reviewers: string[]): void {
   expect(reviewers).toContain('security-reviewer');
@@ -112,7 +122,9 @@ describe('selectReviewerSet: the merged set requires every condition', () => {
   it('shadow mode alone returns the default result', async () => {
     const { ctx } = ctxFor({ mode: 'shadow' });
     const sel = await selectReviewerSet(base({ judgment: ctx }));
-    expect(sel.reviewers).toEqual(THREE);
+    expect(sel.reviewers).toEqual(DEFAULT_SET);
+    // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+    expect(sel.source).toBe('config');
     expect(sel.source).toBe('config');
     expect(sel.decidedBy).toContain('not-enforced');
     assertFloors(sel.reviewers);
@@ -121,20 +133,26 @@ describe('selectReviewerSet: the merged set requires every condition', () => {
   it('enforce without a promotion record alone returns the default result', async () => {
     const { ctx } = ctxFor({ promotion: null });
     const sel = await selectReviewerSet(base({ judgment: ctx }));
-    expect(sel.reviewers).toEqual(THREE);
+    expect(sel.reviewers).toEqual(DEFAULT_SET);
+    // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+    expect(sel.source).toBe('config');
     expect(sel.decidedBy).toBe('judgment:not-enforced:no-promotion');
   });
 
   it('a path: override promotion alone returns the default result', async () => {
     const { ctx } = ctxFor({ promotion: { path: 'override', evidence: 'trust me' } });
     const sel = await selectReviewerSet(base({ judgment: ctx }));
-    expect(sel.reviewers).toEqual(THREE);
+    expect(sel.reviewers).toEqual(DEFAULT_SET);
+    // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+    expect(sel.source).toBe('config');
     expect(sel.decidedBy).toBe('judgment:not-enforced:no-promotion');
   });
 
   it('a weak corpus promotion alone returns the default result', async () => {
     const { ctx } = ctxFor({ promotion: { path: 'corpus', n: 50, actBandPrecision: 0.94 } });
-    expect((await selectReviewerSet(base({ judgment: ctx }))).reviewers).toEqual(THREE);
+    const weak = await selectReviewerSet(base({ judgment: ctx }));
+    expect(weak.reviewers).toEqual(DEFAULT_SET);
+    expect(weak.source).toBe('config');
   });
 
   it('a gh-issue source never selects the merged set, whatever the answers', async () => {
@@ -143,7 +161,9 @@ describe('selectReviewerSet: the merged set requires every condition', () => {
       const sel = await selectReviewerSet(
         base({ judgment: ctx, ...(sourceKind ? { sourceKind } : { sourceKind: undefined }) }),
       );
-      expect(sel.reviewers).toEqual(THREE);
+      expect(sel.reviewers).toEqual(DEFAULT_SET);
+      // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+      expect(sel.source).toBe('config');
       expect(sel.decidedBy).toBe('veto:source-kind');
       assertFloors(sel.reviewers);
     }
@@ -159,7 +179,7 @@ describe('selectReviewerSet: the merged set requires every condition', () => {
   ])('an %s match vetoes even with near-zero risk Nouls', async (_n, files, decidedBy) => {
     const { ctx, fake } = ctxFor({ probability: 0 });
     const sel = await selectReviewerSet(base({ judgment: ctx, changedFiles: files }));
-    expect(sel.reviewers).toEqual(THREE);
+    expect(sel.reviewers).toEqual(defaultFor(files));
     expect(sel.decidedBy).toBe(decidedBy);
     expect(fake.requests).toHaveLength(0);
   });
@@ -171,7 +191,9 @@ describe('selectReviewerSet: the merged set requires every condition', () => {
       base({ judgment: ctx, changedFiles: ['docs/old-ci.md'], diff }),
     );
     expect(sel.decidedBy).toBe('veto:path-ci');
-    expect(sel.reviewers).toEqual(THREE);
+    expect(sel.reviewers).toEqual(DEFAULT_SET);
+    // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+    expect(sel.source).toBe('config');
   });
 
   it('an empty file list cannot be checked and so never relaxes', async () => {
@@ -185,7 +207,9 @@ describe('selectReviewerSet: the merged set requires every condition', () => {
     for (const id of REVIEWER_SET_SIGNAL_IDS) {
       const { ctx } = ctxFor({ probability: { [id]: 0.9 } });
       const sel = await selectReviewerSet(base({ judgment: ctx }));
-      expect(sel.reviewers).toEqual(THREE);
+      expect(sel.reviewers).toEqual(DEFAULT_SET);
+      // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+      expect(sel.source).toBe('config');
       expect(sel.source).toBe('config');
       expect(sel.decidedBy).toBe(`judgment:signal-raised:${id}`);
     }
@@ -195,13 +219,17 @@ describe('selectReviewerSet: the merged set requires every condition', () => {
     const { ctx, fake } = ctxFor({});
     fake.failWith('timeout');
     const sel = await selectReviewerSet(base({ judgment: ctx }));
-    expect(sel.reviewers).toEqual(THREE);
+    expect(sel.reviewers).toEqual(DEFAULT_SET);
+    // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+    expect(sel.source).toBe('config');
     expect(sel.decidedBy).toBe('judgment:provider-error');
   });
 
   it('the layer disabled returns the default result without any call', async () => {
     const { ctx, fake } = ctxFor({ provider: false });
-    expect((await selectReviewerSet(base({ judgment: ctx }))).reviewers).toEqual(THREE);
+    const weak = await selectReviewerSet(base({ judgment: ctx }));
+    expect(weak.reviewers).toEqual(DEFAULT_SET);
+    expect(weak.source).toBe('config');
     expect((await selectReviewerSet(base())).decidedBy).toBe('config:layer-disabled');
     expect(fake.requests).toHaveLength(0);
   });
@@ -223,7 +251,7 @@ describe('selectReviewerSet: path quoting, missing diff and governance vetoes', 
     ['workflow with a newline', ['.github/workflows/a\nb.yml'], 'veto:path-ci'],
   ])('plain %s paths still veto', async (_n, files, decidedBy) => {
     const { sel, fake } = await run({ changedFiles: files });
-    expect(sel.reviewers).toEqual(THREE);
+    expect(sel.reviewers).toEqual(defaultFor(files));
     expect(sel.decidedBy).toBe(decidedBy);
     expect(fake.requests).toHaveLength(0);
   });
@@ -233,6 +261,7 @@ describe('selectReviewerSet: path quoting, missing diff and governance vetoes', 
       changedFiles: ['".github/workflows/d\\303\\251ploy.yml"'],
     });
     expect(sel.decidedBy).toBe('veto:unparseable-path');
+    // AISDLC-722: a quoted path fails closed to the three-reviewer set.
     expect(sel.reviewers).toEqual(THREE);
     expect(fake.requests).toHaveLength(0);
   });
@@ -252,7 +281,9 @@ describe('selectReviewerSet: path quoting, missing diff and governance vetoes', 
       'rename to "docs/caf\\303\\251.md"',
     ].join('\n');
     const { sel } = await run({ changedFiles: ['docs/readme.md'], diff });
-    expect(sel.reviewers).toEqual(THREE);
+    expect(sel.reviewers).toEqual(DEFAULT_SET);
+    // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+    expect(sel.source).toBe('config');
     expect(sel.decidedBy).toBe('veto:unparseable-path');
   });
 
@@ -270,7 +301,9 @@ describe('selectReviewerSet: path quoting, missing diff and governance vetoes', 
     const diff = 'diff --git a/.github/workflows/x b/y.ts b/docs/z.md\n';
     const { sel } = await run({ changedFiles: ['docs/z.md'], diff });
     expect(sel.decidedBy).toBe('veto:unparseable-path');
-    expect(sel.reviewers).toEqual(THREE);
+    expect(sel.reviewers).toEqual(DEFAULT_SET);
+    // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+    expect(sel.source).toBe('config');
   });
 
   it('a CRLF diff header cannot hide a rename into a sensitive path', async () => {
@@ -297,7 +330,9 @@ describe('selectReviewerSet: path quoting, missing diff and governance vetoes', 
   it('an empty diff with changed files vetoes', async () => {
     const { sel, fake } = await run({ diff: '  \n' });
     expect(sel.decidedBy).toBe('veto:diff-unavailable');
-    expect(sel.reviewers).toEqual(THREE);
+    expect(sel.reviewers).toEqual(DEFAULT_SET);
+    // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+    expect(sel.source).toBe('config');
     expect(fake.requests).toHaveLength(0);
   });
 
@@ -347,7 +382,7 @@ describe('selectReviewerSet: path quoting, missing diff and governance vetoes', 
     'ai-sdlc-plugin/scripts/lib/sign-x.mjs',
   ])('governance path %s vetoes the merged set', async (path) => {
     const { sel, fake } = await run({ changedFiles: [path] });
-    expect(sel.reviewers).toEqual(THREE);
+    expect(sel.reviewers).toEqual(defaultFor([path]));
     expect(sel.decidedBy).toBe('veto:path-governance');
     expect(fake.requests).toHaveLength(0);
   });
@@ -359,9 +394,7 @@ describe('selectReviewerSet: path quoting, missing diff and governance vetoes', 
     'pipeline-cli/src/other/review-routing.ts',
     'reference/src/judgments/x.ts',
     'reference/src/judgment-x.ts',
-    'ai-sdlc-plugin/agent/x.md',
-    'ai-sdlc-plugin/scripts/other.mjs',
-    'ai-sdlc-plugin/scripts/design-x.mjs',
+    // AISDLC-723: the whole plugin directory is trust-chain, so no ai-sdlc-plugin/ lookalike here.
     'scripts/is-docs-only-changeset.test.mjs',
     'docs/gitattributes.md',
     'docs/npmrc.md',
@@ -383,7 +416,9 @@ describe('selectReviewerSet: path quoting, missing diff and governance vetoes', 
     ['a NaN iteration', Number.NaN],
   ])('%s never relaxes review', async (_n, iteration) => {
     const { sel, fake } = await run({ iteration });
-    expect(sel.reviewers).toEqual(THREE);
+    expect(sel.reviewers).toEqual(DEFAULT_SET);
+    // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+    expect(sel.source).toBe('config');
     expect(sel.decidedBy).toBe('veto:iteration');
     expect(fake.requests).toHaveLength(0);
   });
@@ -398,7 +433,9 @@ describe('selectReviewerSet: path quoting, missing diff and governance vetoes', 
     'diff --git a/x.bin b/x.bin\nGIT binary patch\nliteral 3\n',
   ])('a binary hunk vetoes: %#', async (diff) => {
     const { sel, fake } = await run({ diff: diff.replace(/\\n/g, '\n') });
-    expect(sel.reviewers).toEqual(THREE);
+    expect(sel.reviewers).toEqual(DEFAULT_SET);
+    // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+    expect(sel.source).toBe('config');
     expect(sel.decidedBy).toBe('veto:binary-diff');
     expect(fake.requests).toHaveLength(0);
   });
@@ -511,7 +548,7 @@ describe('judgment log record', () => {
     await selectReviewerSet(base({ judgment: ctx, changedFiles: ['yarn.lock'] }));
     const rec = selection() as { outcome: { decision: Record<string, unknown> } };
     expect(rec.outcome.decision).toMatchObject({
-      set: 'three',
+      set: 'code-test-merged',
       source: 'config',
       decidedBy: 'veto:path-lockfile',
     });
@@ -609,5 +646,99 @@ describe('routeReviewers', () => {
 
   it('reviewPaths includes both sides of renames', () => {
     expect(reviewPaths(['b.ts'], 'diff --git a/a.ts b/b.ts\n').sort()).toEqual(['a.ts', 'b.ts']);
+  });
+});
+
+describe('selectReviewerSet: the default is derived from the diff (AISDLC-722)', () => {
+  it('an ordinary source diff selects two, with no judgment layer', async () => {
+    const sel = await selectReviewerSet(base());
+    expect(sel.reviewers).toEqual(MERGED);
+    expect(sel.classifier).toMatchObject({ set: 'two', reason: 'no-trust-chain-path' });
+  });
+
+  it('a diff touching a hook selects three and names the paths', async () => {
+    const sel = await selectReviewerSet(
+      base({ changedFiles: ['pipeline-cli/src/foo.ts', 'ai-sdlc-plugin/hooks/x.js'] }),
+    );
+    expect(sel.reviewers).toEqual(THREE);
+    expect(sel.classifier.triggeringPaths).toEqual(['ai-sdlc-plugin/hooks/x.js']);
+  });
+
+  it('opt-out config (reviewerSet: three on the base) selects three for an ordinary diff', async () => {
+    const sel = await selectReviewerSet(base({ readBaseConfig: () => 'reviewerSet: three\n' }));
+    expect(sel.reviewers).toEqual(THREE);
+    expect(sel.classifier.reason).toBe('config:require-three');
+  });
+
+  it('the env var opts out too, and the legacy code-test-merged value means the default', async () => {
+    expect(
+      (await selectReviewerSet(base({ env: { AI_SDLC_REVIEWER_SET: 'three' } }))).reviewers,
+    ).toEqual(THREE);
+    expect(
+      (await selectReviewerSet(base({ env: { AI_SDLC_REVIEWER_SET: 'code-test-merged' } })))
+        .reviewers,
+    ).toEqual(MERGED);
+    // Even a legacy pin cannot narrow a trust-chain diff.
+    expect(
+      (
+        await selectReviewerSet(
+          base({
+            env: { AI_SDLC_REVIEWER_SET: 'code-test-merged' },
+            changedFiles: ['.github/workflows/ci.yml'],
+          }),
+        )
+      ).reviewers,
+    ).toEqual(THREE);
+  });
+
+  it('an unreadable diff fails closed to three', async () => {
+    const sel = await selectReviewerSet(base({ diffUnavailable: true }));
+    expect(sel.reviewers).toEqual(THREE);
+    expect(sel.classifier.reason).toBe('diff-unavailable');
+  });
+
+  it('the judgment layer cannot narrow a trust-chain diff the path veto list misses', async () => {
+    const { ctx, fake } = ctxFor({ probability: 0 });
+    const sel = await selectReviewerSet(
+      base({ judgment: ctx, changedFiles: ['pipeline-cli/src/cli/merge-if-eligible.ts'] }),
+    );
+    expect(sel.reviewers).toEqual(THREE);
+    expect(sel.decidedBy).toBe('veto:classifier-trust-chain-path');
+    expect(fake.requests).toHaveLength(0);
+  });
+});
+
+describe('deriveReviewerSetFromGit (AISDLC-722)', () => {
+  it('derives from a real diff and honours an injected base config', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'reviewer-set-derive-'));
+    try {
+      const git = (...a: string[]) => execFileSync('git', a, { cwd: repo, encoding: 'utf8' });
+      git('init', '-q', '-b', 'main');
+      git('config', 'user.email', 't@example.com');
+      git('config', 'user.name', 'T');
+      git('config', 'commit.gpgsign', 'false');
+      writeFileSync(join(repo, 'a.md'), 'a\n');
+      git('add', '.');
+      git('commit', '-q', '-m', 'base');
+      git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+      mkdirSync(join(repo, 'src'), { recursive: true });
+      writeFileSync(join(repo, 'src', 'x.ts'), 'x\n');
+      git('add', '.');
+      git('commit', '-q', '-m', 'change');
+      expect(deriveReviewerSetFromGit({ repoRoot: repo, env: {} }).set).toBe('two');
+      expect(
+        deriveReviewerSetFromGit({
+          repoRoot: repo,
+          env: {},
+          readBaseConfig: () => 'reviewerSet: three',
+        }),
+      ).toMatchObject({ set: 'three', reason: 'config:require-three' });
+      expect(deriveReviewerSetFromGit({ repoRoot: repo, baseRef: 'nope', env: {} })).toMatchObject({
+        set: 'three',
+        reason: 'diff-unavailable',
+      });
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 });

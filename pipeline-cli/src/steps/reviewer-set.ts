@@ -5,7 +5,20 @@
  * (code-reviewer, test-reviewer, security-reviewer) or the OPT-IN merged
  * two-reviewer set (correctness-reviewer, security-reviewer).
  *
- * ## Default is unchanged
+ * ## AISDLC-722 (DEC-0055): the per-PR default is diff-derived
+ *
+ * `selectReviewerSet()` (the per-PR entry point used by the headless runner,
+ * `07-build-review-prompts`) now picks the TWO-reviewer set by default when the
+ * diff touches no trust-chain path, and the three-reviewer set otherwise. The
+ * trust-chain path list and the classifier live in ONE module
+ * (`attestation-core/review-scope-core.mjs`, shared with AISDLC-723's
+ * correctness-only narrowing) that the CI verifier imports too, so the
+ * verifier re-derives the same set from the same diff. A repository
+ * requires three always with `reviewerSet: three` (env `AI_SDLC_REVIEWER_SET=three`
+ * or the base-branch config). The legacy `code-test-merged` value now means the
+ * default (diff-derived), because the classifier already picks two when safe.
+ *
+ * ## Config-only resolver (legacy, unchanged)
  *
  * `resolveReviewerSetMode()` returns `'three'` unless EITHER:
  *   - the `AI_SDLC_REVIEWER_SET` env var is explicitly `'code-test-merged'`, OR
@@ -55,6 +68,7 @@ import {
   classifyReviewScope,
   isPathMissingGitError,
   parseSecurityReviewAlways,
+  requiredReviewerKind,
   reviewerSetKindFor,
   type ReviewScopeClassification,
 } from '../../attestation-core/review-scope-core.mjs';
@@ -83,6 +97,43 @@ export const CODE_TEST_MERGED_REVIEWER_SET: readonly ReviewerType[] = [
   'correctness-reviewer',
   'security-reviewer',
 ] as const;
+
+/** The diff classifier's verdict for the per-PR default (AISDLC-722). */
+export interface ReviewerSetClassification {
+  set: 'two' | 'three';
+  reviewers: ReviewerType[];
+  /** `no-trust-chain-path` for two; otherwise why three was required. */
+  reason: string;
+  /** Trust-chain paths that forced the three-reviewer set. */
+  triggeringPaths: string[];
+}
+
+/**
+ * Derive the reviewer set from a diff (AISDLC-722, DEC-0055): three when the diff touches
+ * a trust-chain path, the repository requires three, or the diff could not be read; two
+ * otherwise. AISDLC-723's {@link reduceForReviewScope} may narrow a two further.
+ * `changedPaths` is `null` when the diff could not be read (fails closed to three).
+ */
+export function classifyReviewerSet(input: {
+  changedPaths: readonly string[] | null | undefined;
+  requireThree?: boolean;
+}): ReviewerSetClassification {
+  const k = requiredReviewerKind(input.changedPaths, { requireThree: input.requireThree === true });
+  if (k.kind === 'three') {
+    return {
+      set: 'three',
+      reviewers: [...THREE_REVIEWER_SET],
+      reason: k.reason,
+      triggeringPaths: k.triggeringPaths,
+    };
+  }
+  return {
+    set: 'two',
+    reviewers: [...CODE_TEST_MERGED_REVIEWER_SET],
+    reason: 'no-trust-chain-path',
+    triggeringPaths: [],
+  };
+}
 
 export interface ResolveReviewerSetOpts {
   /** Project root (git repo / worktree root). Defaults to `process.cwd()`. */
@@ -165,9 +216,47 @@ export function resolveReviewerSetMode(opts: ResolveReviewerSetOpts = {}): Revie
  * Returns `null` when no valid field is found (caller falls back to default).
  */
 export function parseReviewerSetModeYaml(yaml: string): ReviewerSetMode | null {
-  const match = yaml.match(/^\s*reviewerSet:\s*['"]?(three|code-test-merged)['"]?\s*$/m);
+  const match = yaml.match(/^\s*reviewerSet:\s*['"]?(three|code-test-merged)['"]?\s*(#.*)?$/im);
   if (!match) return null;
-  return match[1] as ReviewerSetMode;
+  return match[1].toLowerCase() as ReviewerSetMode;
+}
+
+/**
+ * Derive the reviewer set for a worktree straight from git (AISDLC-722), for callers with no
+ * in-process diff: the `/ai-sdlc execute` and orchestrator-tick skill bodies (via
+ * `cli-attestation reviewer-set`). Same classifier and the same trusted config resolution
+ * as {@link selectReviewerSet}; an unreadable diff fails closed to three.
+ */
+export function deriveReviewerSetFromGit(opts: {
+  repoRoot: string;
+  baseRef?: string;
+  headRef?: string;
+  env?: Record<string, string | undefined>;
+  readBaseConfig?: (workDir: string, baseRef: string) => string | null;
+}): ReviewerSetClassification {
+  const baseRef = opts.baseRef ?? 'origin/main';
+  let changedPaths: string[] | null;
+  try {
+    changedPaths = execFileSync(
+      'git',
+      ['diff', '--name-only', '-z', '--no-renames', `${baseRef}...${opts.headRef ?? 'HEAD'}`],
+      { cwd: opts.repoRoot, encoding: 'utf8', maxBuffer: 128 * 1024 * 1024 },
+    )
+      .split('\0')
+      .filter(Boolean);
+  } catch {
+    changedPaths = null;
+  }
+  return classifyReviewerSet({
+    changedPaths,
+    requireThree:
+      explicitReviewerSetMode({
+        workDir: opts.repoRoot,
+        baseRef,
+        ...(opts.env ? { env: opts.env } : {}),
+        ...(opts.readBaseConfig ? { readBaseConfig: opts.readBaseConfig } : {}),
+      }) === 'three',
+  });
 }
 
 /** Resolve the reviewer set mode straight to the concrete `ReviewerType[]`. */
@@ -187,6 +276,11 @@ export interface ReviewerSetSelection {
   source: ReviewerSetSource;
   /** The veto, pin or signal that decided the outcome (also written to the judgment log). */
   decidedBy: string;
+  /**
+   * AISDLC-722: the diff classifier's verdict (set, reason, trust-chain paths that
+   * forced the full set). Recorded in the attestation and logged at selection time.
+   */
+  classifier: ReviewerSetClassification;
 }
 
 export interface SelectReviewerSetOpts extends ResolveReviewerSetOpts {
@@ -251,12 +345,20 @@ const setOf = (mode: ReviewerSetMode): ReviewerType[] =>
 export async function selectReviewerSet(
   opts: SelectReviewerSetOpts,
 ): Promise<ReviewerSetSelection> {
-  const mode = resolveReviewerSetMode(opts);
+  // AISDLC-722: the default set is derived from the diff. Only an explicit `three`
+  // (env or base-branch config) requires three always; the legacy `code-test-merged`
+  // value and "nothing configured" both mean "diff-derived".
+  const classifier = classifyReviewerSet({
+    changedPaths: opts.diffUnavailable === true ? null : opts.changedFiles,
+    requireThree: explicitReviewerSetMode(opts) === 'three',
+  });
+  const mode: ReviewerSetMode = classifier.set === 'two' ? 'code-test-merged' : 'three';
   const base = (source: ReviewerSetSource, decidedBy: string): ReviewerSetSelection => ({
     reviewers: setOf(mode),
     mode,
     source,
     decidedBy,
+    classifier,
   });
   const ctx = opts.judgment;
   if (!ctx || !judgmentLayerActive(ctx)) return base('config', 'config:layer-disabled');
@@ -318,6 +420,8 @@ export async function selectReviewerSet(
   if (risk.touchesLockfiles) return vetoed('veto:path-lockfile');
   if (risk.touchesCi) return vetoed('veto:path-ci');
   if (governance !== undefined) return vetoed('veto:path-governance');
+  // AISDLC-722: a trust-chain diff never gets the two-reviewer set, whatever the judgment says.
+  if (classifier.set === 'three') return vetoed(`veto:classifier-${classifier.reason}`);
 
   const { value: outcome, record } = await withCapturedRecord(
     { ...ctx, sourceKind: 'backlog', ...(opts.taskId ? { taskId: opts.taskId } : {}) },
@@ -339,6 +443,7 @@ export async function selectReviewerSet(
       mode: 'code-test-merged',
       source: 'judgment',
       decidedBy: 'judgment:all-signals-below-threshold',
+      classifier,
     };
     await log(sel, { ...inputs, signals: outcome.decision.signals, defaultMode: mode }, effective);
     return sel;
@@ -384,6 +489,8 @@ export interface ReduceForReviewScopeOpts {
   changedFiles: readonly string[];
   /** True when the diff or file list could not be read completely; never reduces. */
   diffUnavailable?: boolean;
+  /** True when the repository requires three reviewers always (`reviewerSet: three`); never reduces. */
+  requireThree?: boolean;
   workDir?: string;
   baseRef?: string;
   /** Test injection; same contract as {@link ResolveReviewerSetOpts.readBaseConfig}. */
@@ -419,6 +526,7 @@ export function reduceForReviewScope(opts: ReduceForReviewScopeOpts): ReviewScop
   });
   if (opts.diffUnavailable === true) return unchanged('full', 'diff unavailable');
   const scope = classifyReviewScope(opts.changedFiles);
+  if (opts.requireThree === true) return unchanged(scope.classification, 'config:require-three');
   const workDir = opts.workDir ?? process.cwd();
   const baseRef = opts.baseRef ?? 'origin/main';
   // Fail closed: only a definitely-absent config reads as "no securityReview: always".
