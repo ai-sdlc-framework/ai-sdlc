@@ -1,0 +1,71 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "d2ddb4c8321432f351aabfd81a01bec3788a3d33"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "8929cf6956135c544d5fc47a2b71585c30dabb83d2cca2eb742a1f5565eccc3f",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "8929cf6956135c544d5fc47a2b71585c30dabb83d2cca2eb742a1f5565eccc3f",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "d0748eefd4493a9d7ab54eb2daadbd5f1191bedd9b2d20ae2bde447748aa3cd3",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "d0748eefd4493a9d7ab54eb2daadbd5f1191bedd9b2d20ae2bde447748aa3cd3",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "368b8f7782de104aa79d18cbce8a8ede0ec92d93f3864867dfc5b10f044a9e88",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "368b8f7782de104aa79d18cbce8a8ede0ec92d93f3864867dfc5b10f044a9e88",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "6c8f85a7f10c306b8cfdd46dd006de3a0e313b16124e448d01beda7ff9a47327",
+        "bf80f3066f6f7f1c4345d7bd833856f9e5c940ec0a37ebbf12d3b5783d9ea943"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "6995c1f715911d9661dd6462bafd3c09c1b7ace1fb468bbbda3c007bf2ee9183",
+        "bf80f3066f6f7f1c4345d7bd833856f9e5c940ec0a37ebbf12d3b5783d9ea943"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "d08a86d47c1286042fbc112680e9e0bb4d132c043f31e0dd134615ba30561d46",
+        "f754720bcdb51a348a1de7a15b049daaaae2c8031af222e6570d5bd3b0f970d9"
+      ]
+    }
+  ],
+  "rootHash": "01b9c7e3f339300f1a8919c2b22fa34ba3e38524030398276976aabe07a2d0db",
+  "rootSignature": "wstuPJoSpY2lfoIbDGHqYAakmzN3FQVg06il/hPxLsqlSXI/g1kFfffa9jdik0Pe1qxCnmGzo9qslK4ePZySBg==",
+  "nonce": "1d9daf9b6759dc4c5f4f515666c9dad1821e25922bcd9163e57d4afc6cec1307",
+  "leafCount": 3,
+  "signedAt": "2026-10-11T02:27:54.640Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [".ai-sdlc/gates.yaml"],
+    "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
+  }
+}
