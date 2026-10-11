@@ -2,7 +2,7 @@
 id: AISDLC-799
 title: >-
   GitHub Actions load discipline: auto-enable and untrusted-gate triggers that cannot flood the job queue, a deterministic `cli-ci sweep`, and queue-depth observability
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-10'
 labels:
