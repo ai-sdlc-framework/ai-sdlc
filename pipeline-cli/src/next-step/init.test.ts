@@ -142,11 +142,40 @@ describe('initTask', () => {
     expect(res.ok).toBe(false);
   });
 
-  it('throws (surfaced as a stop by the CLI) when the branch already exists', async () => {
+  it('resumes an existing worktree and branch with commits (AISDLC-762.1)', async () => {
+    const first = await initTask(h.ctx, 'AISDLC-900');
+    if (!first.ok) throw new Error('init failed');
+    writeFileSync(join(first.worktreePath, 'work.txt'), 'x');
+    git(first.worktreePath, 'add', 'work.txt');
+    git(first.worktreePath, 'commit', '-q', '-m', 'work');
+    const head = git(first.worktreePath, 'rev-parse', 'HEAD');
+    const res = await initTask(h.ctx, 'AISDLC-900');
+    expect(res.ok).toBe(true);
+    expect(git(first.worktreePath, 'rev-parse', 'HEAD')).toBe(head);
+  });
+
+  it('reuses a zero-commit branch with no worktree (AISDLC-762.1)', async () => {
+    const first = await initTask(h.ctx, 'AISDLC-900');
+    if (!first.ok) throw new Error('init failed');
+    git(h.root, 'worktree', 'remove', '--force', first.worktreePath);
+    const res = await initTask(h.ctx, 'AISDLC-900');
+    expect(res.ok).toBe(true);
+    expect(existsSync(join(first.worktreePath, '.git'))).toBe(true);
+  });
+
+  it('re-adds a worktree from a branch that exists only on origin (dispatch resume)', async () => {
+    const first = await initTask(h.ctx, 'AISDLC-900');
+    if (!first.ok) throw new Error('init failed');
+    git(h.root, 'push', '-q', 'origin', first.branch);
+    git(h.root, 'worktree', 'remove', '--force', first.worktreePath);
+    git(h.root, 'branch', '-q', '-D', first.branch);
+    const res = await initTask(h.ctx, 'AISDLC-900');
+    expect(res.ok).toBe(true);
+  });
+
+  it('leaves resume unset for a fresh task', async () => {
     await initTask(h.ctx, 'AISDLC-900');
-    await expect(initTask(h.ctx, 'AISDLC-900')).rejects.toThrow(
-      /worktree add failed[\s\S]*cleanup/,
-    );
+    expect(calls.some((c) => c.includes('worktree add') && c.includes('-b'))).toBe(true);
   });
 });
 

@@ -2,7 +2,7 @@
 id: AISDLC-762.1
 title: >-
   next-step init re-enters an existing worktree or branch: resume and zero-commit reuse are passed to Step 3
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-11'
 labels:
@@ -28,7 +28,7 @@ dispatchable: true
 - AISDLC-797 (PR #1388), decision DEC-0112.
 - AISDLC-801, decision DEC-0113: a zero-commit leftover branch from a Step 3 that failed under the wrong Node (see AISDLC-812).
 
-Executors fell back to hand rebases. Fix rounds that need reviewers and signing (AISDLC-676, 800, 804, 805) are parked behind this.
+Executors fell back to hand rebases. Decisions DEC-0111, DEC-0112 and DEC-0113 record the three occurrences. Fix rounds that need reviewers and signing (AISDLC-676, 800, 804, 805) are parked behind this.
 
 **Five-step review (requirements first).**
 1. Requirement questioned: "Step 3 refuses an existing branch". It protects fresh work from a name collision. For a resume, the existing worktree or branch IS the work, so the refusal is wrong there.
@@ -42,11 +42,11 @@ Executors fell back to hand rebases. Fix rounds that need reviewers and signing 
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 Hermetic next-step test: an existing worktree plus branch with commits makes init enter resume mode and Step 3 reuses them (no "already exists" refusal)
-- [ ] #2 A zero-commit branch at main is reused, no refusal
-- [ ] #3 A fresh task with no branch or worktree follows the unchanged path (`resume` not set)
-- [ ] #4 A manifest produced by `cli-dispatch resume` (resume block, or iterate-needed / failed verdict) drives the same resume mode
-- [ ] #5 DEC-0111, DEC-0112 and DEC-0113 are cited in the task body
-- [ ] #6 The five steps are named in the task body
-- [ ] #7 `pnpm build && pnpm --filter @ai-sdlc/pipeline-cli test`, `pnpm lint` and `pnpm format:check` pass
+- [x] #1 Hermetic next-step test: an existing worktree plus branch with commits makes init enter resume mode and Step 3 reuses them (no "already exists" refusal)
+- [x] #2 A zero-commit branch at main is reused, no refusal
+- [x] #3 A fresh task with no branch or worktree follows the unchanged path (`resume` not set)
+- [x] #4 A manifest produced by `cli-dispatch resume` (resume block, or iterate-needed / failed verdict) drives the same resume mode
+- [x] #5 DEC-0111, DEC-0112 and DEC-0113 are cited in the task body
+- [x] #6 The five steps are named in the task body
+- [x] #7 `pnpm build && pnpm --filter @ai-sdlc/pipeline-cli test`, `pnpm lint` and `pnpm format:check` pass
 <!-- AC:END -->
