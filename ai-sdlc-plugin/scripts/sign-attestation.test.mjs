@@ -186,6 +186,26 @@ function runHelper(cwd, args, extraEnv = {}) {
   });
 }
 
+// Hermetic copy of the signer under an isolated dir, so the node_modules
+// walk-up from the script's own location cannot reach an ancestor checkout's
+// hoisted @ai-sdlc install (e.g. a worktree nested inside the main checkout).
+function isolatedHelperPath(base) {
+  const dir = join(base, 'iso', 'plugin', 'scripts');
+  mkdirSync(dir, { recursive: true });
+  for (const f of ['sign-attestation.mjs', 'format-envelope-json.mjs']) {
+    writeFileSync(join(dir, f), readFileSync(join(__dirname, f), 'utf-8'));
+  }
+  return join(dir, 'sign-attestation.mjs');
+}
+
+function runIsolatedHelper(base, cwd, args, extraEnv = {}) {
+  return spawnSync(process.execPath, [isolatedHelperPath(base), ...args], {
+    cwd,
+    env: cleanEnv(extraEnv),
+    encoding: 'utf-8',
+  });
+}
+
 describe('sign-attestation.mjs', () => {
   let fixture;
   let tmpHome;
@@ -1305,7 +1325,7 @@ describe('sign-attestation.mjs — adopter runtime resolution (AISDLC-554)', () 
     const fixture = setupRepo(tmpHome, root);
     rmSync(join(fixture.root, 'orchestrator'), { recursive: true, force: true });
 
-    const res = runHelper(fixture.root, ['--print-content-hash'], { HOME: tmpHome });
+    const res = runIsolatedHelper(base, fixture.root, ['--print-content-hash'], { HOME: tmpHome });
     assert.notEqual(res.status, 0);
     // The pre-AISDLC-554 message offered ONLY the monorepo build, which an
     // adopter cannot run. Both routes must be named.
@@ -1321,7 +1341,9 @@ describe('sign-attestation.mjs — adopter runtime resolution (AISDLC-554)', () 
     const fixture = setupRepo(tmpHome, root);
     rmSync(join(fixture.root, 'orchestrator'), { recursive: true, force: true });
 
-    const res = runHelper(fixture.root, ['--print-content-hash'], { HOME: tmpHome });
+    const res = runIsolatedHelper(base, fixture.root, ['--print-content-hash'], {
+      HOME: tmpHome,
+    });
     // A fallback hash would verify as tampering downstream — the signer must
     // emit nothing at all rather than an envelope the real verifier rejects.
     assert.notEqual(res.status, 0);
