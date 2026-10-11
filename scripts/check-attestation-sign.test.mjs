@@ -1733,6 +1733,7 @@ describe('AISDLC-694: verify an existing envelope; re-sign when the verifier rej
     git(['add', '.'], root);
     git(['commit', '-q', '-m', 'feat: source change (AISDLC-694)'], root);
     const devHead = git(['rev-parse', 'HEAD'], root).trim();
+    if (subject === 'DEV') subject = devHead;
     const mergeBase = git(['merge-base', 'origin/main', 'HEAD'], root).trim();
     const patchId = computeCanonicalPatchId(root, mergeBase);
     assert.match(patchId, /^[0-9a-f]{40}$/);
@@ -1740,7 +1741,7 @@ describe('AISDLC-694: verify an existing envelope; re-sign when the verifier rej
     const attDir = join(root, '.ai-sdlc', 'attestations');
     mkdirSync(attDir, { recursive: true });
     const envPath = join(attDir, `${patchId}.v6.dsse.json`);
-    const envContent = `{"_test":"seeded","head":"${subject}","schemaVersion":"v6"}\n`;
+    const envContent = `{"_test":"seeded","head":"${subject}","subject":{"digest":{"sha1":"${subject}"}},"schemaVersion":"v6"}\n`;
     writeFileSync(envPath, envContent);
     const otherPath = join(attDir, `${'f'.repeat(40)}.v6.dsse.json`);
     const otherContent = '{"_test":"unrelated-envelope","head":"other"}\n';
@@ -1877,7 +1878,7 @@ describe('AISDLC-694: verify an existing envelope; re-sign when the verifier rej
   it('AC3a: a valid envelope (attestation-only descendant: subject IS an ancestor of HEAD) passes with no fixup', () => {
     const sc = seedEnvelopeScenario({ subject: 'PLACEHOLDER' });
     // Re-seed the envelope with the real dev commit as subject (an ancestor of HEAD).
-    const content = `{"_test":"seeded","head":"${sc.devHead}","schemaVersion":"v6"}\n`;
+    const content = `{"_test":"seeded","head":"${sc.devHead}","subject":{"digest":{"sha1":"${sc.devHead}"}},"schemaVersion":"v6"}\n`;
     writeFileSync(sc.envPath, content);
     git(['add', '.'], root);
     git(['commit', '-q', '-m', 'chore: auto-sign attestation for AISDLC-694 (AISDLC-133)'], root);
@@ -1897,23 +1898,73 @@ describe('AISDLC-694: verify an existing envelope; re-sign when the verifier rej
     assert.equal(existsSync(signLog), false, 'signer must not run');
   });
 
-  it('AC3b: a valid envelope that is not an ancestor (tree-equivalent after a clean rebase) passes with no fixup when the verifier accepts it', () => {
-    // The hook defers entirely to the verifier: the subject is NOT in history
-    // here, yet status=valid (as the real verifier reports for a tree-equivalent
-    // rebase). The hook must not second-guess it.
+  it('AISDLC-810 AC2: an envelope whose subject is not an ancestor of HEAD is re-signed even when the verifier reports valid', () => {
+    // The local verifier can say valid because orphaned objects still exist in
+    // this clone; CI never has them. The hook must not trust that.
     const sc = seedEnvelopeScenario({});
-    const { cmd: signCmd, logPath: signLog } = installFakeSigner(root, { fail: true });
+    const { cmd: signCmd, logPath: signLog } = installFakeSigner(root);
     const v = verifierEnv(root, { mode: 'valid' }, { AI_SDLC_SIGN_ATTESTATION_CMD: signCmd });
     const r = runHook(root, v.env);
-    assert.equal(r.status, 0, `${r.stderr}`);
-    assert.equal(git(['rev-parse', 'HEAD'], root).trim(), sc.choreHead);
-    assert.equal(existsSync(signLog), false);
-    const vlog = readFileSync(v.logPath, 'utf-8').trim();
-    assert.equal(vlog, `head=${sc.choreHead} base=${sc.mergeBase}`);
+    assert.equal(r.status, 1, `expected re-sign + re-push required, got ${r.status}: ${r.stderr}`);
+    assert.match(r.stderr, /not an ancestor of HEAD/);
+    assert.equal(existsSync(signLog), true, 'the signer must run');
+    const replaced = git(['show', `HEAD:.ai-sdlc/attestations/${sc.patchId}.v6.dsse.json`], root);
+    assert.notEqual(replaced, sc.envContent, 'the orphaned-subject envelope must be replaced');
+    assert.match(replaced, new RegExp(`"head":"${sc.choreHead}"`));
+  });
+
+  it('AISDLC-810 AC1: sign, rebase onto a moved base (subject orphaned, object still present), hook re-signs and the new subject is the pre-chore HEAD', () => {
+    const sc = seedEnvelopeScenario({ subject: 'PLACEHOLDER' });
+    // Bind the envelope to the real dev commit, as the real signer does.
+    const signed = `{"_test":"seeded","head":"${sc.devHead}","subject":{"digest":{"sha1":"${sc.devHead}"}},"schemaVersion":"v6"}\n`;
+    writeFileSync(sc.envPath, signed);
+    git(['add', '.ai-sdlc/attestations'], root);
+    git(['commit', '-q', '-m', 'chore: auto-sign attestation for AISDLC-694 (AISDLC-133)'], root);
+
+    // Move the base: a new origin/main commit touching an unrelated file.
+    const baseline = git(['rev-parse', 'origin/main'], root).trim();
+    const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], root).trim();
+    git(['checkout', '-q', '--detach', baseline], root);
+    writeFileSync(join(root, 'unrelated-on-main.txt'), 'moved\n');
+    git(['add', 'unrelated-on-main.txt'], root);
+    git(['commit', '-q', '-m', 'main moves'], root);
+    const newBase = git(['rev-parse', 'HEAD'], root).trim();
+    git(['checkout', '-q', branch], root);
+    git(['update-ref', 'refs/remotes/origin/main', newBase], root);
+    git(['rebase', '-q', 'origin/main'], root);
+
+    // The signed subject is orphaned but its object still exists locally.
+    assert.equal(git(['cat-file', '-t', sc.devHead], root).trim(), 'commit');
+    assert.throws(() => git(['merge-base', '--is-ancestor', sc.devHead, 'HEAD'], root));
+    // Patch id is unchanged by the rebase (envelope keeps its name).
+    const rebasedMergeBase = git(['merge-base', 'origin/main', 'HEAD'], root).trim();
+    assert.equal(computeCanonicalPatchId(root, rebasedMergeBase), sc.patchId);
+    const preChoreHead = git(['rev-parse', 'HEAD'], root).trim();
+
+    const { cmd: signCmd } = installFakeSigner(root);
+    const v = verifierEnv(root, { mode: 'valid' }, { AI_SDLC_SIGN_ATTESTATION_CMD: signCmd });
+    const r = runHook(root, v.env);
+    assert.equal(r.status, 1, `expected re-sign + re-push required, got ${r.status}: ${r.stderr}`);
+    const replaced = git(['show', `HEAD:.ai-sdlc/attestations/${sc.patchId}.v6.dsse.json`], root);
+    assert.match(replaced, new RegExp(`"head":"${preChoreHead}"`));
+    assert.equal(
+      git(['rev-list', '--count', `${preChoreHead}..HEAD`], root).trim(),
+      '1',
+      'exactly one re-sign chore commit on top of the pre-chore HEAD',
+    );
+  });
+
+  it('AISDLC-810: an orphaned subject with no verdict file fails the push naming the fix', () => {
+    seedEnvelopeScenario({ verdict: false });
+    const v = verifierEnv(root, { mode: 'valid' });
+    const r = runHook(root, v.env);
+    assert.equal(r.status, 2, `${r.stderr}`);
+    assert.match(r.stderr, /not an ancestor of HEAD/);
+    assert.match(r.stderr, /Re-run the review/);
   });
 
   it('AC3c: a valid envelope with no verdict file also passes (the verdict file is only needed to re-sign)', () => {
-    const sc = seedEnvelopeScenario({ verdict: false });
+    const sc = seedEnvelopeScenario({ subject: 'DEV', verdict: false });
     const v = verifierEnv(root, { mode: 'valid' });
     const r = runHook(root, v.env);
     assert.equal(r.status, 0, `${r.stderr}`);
@@ -1950,7 +2001,7 @@ describe('AISDLC-694: verify an existing envelope; re-sign when the verifier rej
   });
 
   it('AC3d: a valid envelope with NO active-task sentinel passes', () => {
-    const sc = seedEnvelopeScenario({ verdict: false });
+    const sc = seedEnvelopeScenario({ subject: 'DEV', verdict: false });
     rmSync(join(root, '.active-task'), { force: true });
     const v = verifierEnv(root, { mode: 'valid' });
     const r = runHook(root, v.env);

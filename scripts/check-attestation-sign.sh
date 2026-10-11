@@ -424,6 +424,23 @@ VERIFY_REJECTION_REASON=""
 if [ "$ENVELOPE_PRESENT" = "1" ]; then
   # Same base the patch id above was computed against (MERGE_BASE).
   run_attestation_verifier "$HEAD_SHA" "$MERGE_BASE"
+  # AISDLC-810: an envelope whose subject commit is not an ancestor of HEAD
+  # (a rebase orphaned it) is never acceptable, even when the verifier says
+  # valid here: the orphaned objects still exist in this clone but are never
+  # fetched by CI, which then fails head-binding. Treat it as rejected so the
+  # re-sign path below replaces it (same patch id, existing verdict + leaves).
+  ENVELOPE_SUBJECT_SHA=$(node -e '
+    try {
+      const e = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      const s = e && e.subject && e.subject.digest && e.subject.digest.sha1;
+      if (typeof s === "string") process.stdout.write(s);
+    } catch {}
+  ' "$REJECTED_ENVELOPE" 2>/dev/null || true)
+  if [ "$VERIFY_STATUS" = "valid" ] && [ -n "$ENVELOPE_SUBJECT_SHA" ] \
+     && ! git merge-base --is-ancestor "$ENVELOPE_SUBJECT_SHA" HEAD 2>/dev/null; then
+    VERIFY_STATUS="orphaned-subject"
+    VERIFY_REASON="envelope subject ${ENVELOPE_SUBJECT_SHA:0:7} is not an ancestor of HEAD (orphaned by a rebase; CI cannot fetch it)"
+  fi
   if [ "$VERIFY_STATUS" = "valid" ]; then
     # Already signed for this content and the verifier accepts it. Either the
     # previous push aborted (this script set exit 1, operator re-pushed, chore
