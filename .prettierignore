@@ -8,3 +8,7 @@ sdk-python/
 
 ai-sdlc-plugin/plugin.json
 ai-sdlc-plugin/.claude-plugin/plugin.json
+
+# Next.js regenerates these on every build (AISDLC-813)
+dashboard/next-env.d.ts
+dashboard/tsconfig.json
