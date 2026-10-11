@@ -85,6 +85,7 @@ describe('role pins', () => {
     'import-spec',
     'rfc-init',
     'init-signing-key',
+    'memory-dream',
     'execute-parallel-status',
     'execute-parallel',
     'orchestrator-tick',

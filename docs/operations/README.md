@@ -143,6 +143,12 @@ Token usage per model call, plan allotment tracking, and evidence-based choice o
 
 **RFC:** [`spec/rfcs/RFC-0050-usage-ledger-and-model-routing.md`](../../spec/rfcs/RFC-0050-usage-ledger-and-model-routing.md)
 
+### Agent Memory
+
+| Runbook | Description |
+|---------|-------------|
+| [`memory-dream.md`](memory-dream.md) | Consolidate, prune and refine the memory folder: run, review the report, apply, undo, memory guidance |
+
 ---
 
 ### Design System (if applicable)

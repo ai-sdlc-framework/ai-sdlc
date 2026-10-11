@@ -87,7 +87,12 @@ const ALL_GUARDED_BINS = [...CI_INVOKED_BINS, UMBRELLA_BIN] as const;
 // them locally or in workflow steps that use the correct direct-node pattern),
 // but we still assert their shims + dist targets exist so a rename/deletion
 // doesn't silently strand the atomic-completion contract.
-const AISDLC_203_BINS = ['cli-task-complete', 'cli-backlog-verify', 'cli-hierarchy'] as const;
+const AISDLC_203_BINS = [
+  'cli-task-complete',
+  'cli-backlog-verify',
+  'cli-hierarchy',
+  'cli-memory-dream',
+] as const;
 
 // Match `pnpm ... exec <bin>` where `...` may include flags like
 // `--filter @ai-sdlc/pipeline-cli` and `--silent`. The bin must be a
