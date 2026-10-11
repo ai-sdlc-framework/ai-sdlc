@@ -407,6 +407,58 @@ describe('reviewer-set', () => {
   });
 });
 
+describe('reviewer-set (git-backed)', () => {
+  it('forwards --base-ref/--head-ref: an ordinary diff is two, a hook diff is three', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-reviewer-set-git-'));
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: dir, stdio: 'pipe' });
+    try {
+      git('init', '-q', '-b', 'main');
+      git('config', 'user.email', 't@e.com');
+      git('config', 'user.name', 't');
+      git('config', 'commit.gpgsign', 'false');
+      writeFileSync(join(dir, 'seed.txt'), 's');
+      git('add', '-A');
+      git('commit', '-q', '-m', 'base');
+      git('checkout', '-q', '-b', 'pr');
+      mkdirSync(join(dir, 'src'), { recursive: true });
+      writeFileSync(join(dir, 'src', 'a.ts'), 'x');
+      git('add', '-A');
+      git('commit', '-q', '-m', 'src');
+      await buildAttestationCli([
+        'reviewer-set',
+        '--repo-root',
+        dir,
+        '--base-ref',
+        'main',
+        '--head-ref',
+        'HEAD',
+      ]).parseAsync();
+      const first = flushStdout();
+      expect(JSON.parse(first)).toMatchObject({ set: 'two' });
+      mkdirSync(join(dir, 'ai-sdlc-plugin', 'hooks'), { recursive: true });
+      writeFileSync(join(dir, 'ai-sdlc-plugin', 'hooks', 'h.js'), 'x');
+      git('add', '-A');
+      git('commit', '-q', '-m', 'hook');
+      await buildAttestationCli([
+        'reviewer-set',
+        '--repo-root',
+        dir,
+        '--base-ref',
+        'main',
+      ]).parseAsync();
+      // The captured stdout accumulates across calls; take only what the second call wrote.
+      const all = flushStdout();
+      const second = all.startsWith(first) ? all.slice(first.length) : all;
+      expect(JSON.parse(second)).toMatchObject({
+        set: 'three',
+        triggeringPaths: ['ai-sdlc-plugin/hooks/h.js'],
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('reviewer-set-window', () => {
   it('prints an empty open window for a fresh artifacts dir', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cli-reviewer-window-'));

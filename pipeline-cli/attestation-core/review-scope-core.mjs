@@ -56,6 +56,9 @@ export const TRUST_CHAIN_PATH_PREFIXES = Object.freeze([
   'pipeline-cli/src/decisions/governance-fallback.ts',
   // Reviewer selection and routing code.
   'pipeline-cli/src/steps/reviewer-set.ts',
+  'pipeline-cli/src/runtime/untrusted-env.ts',
+  'orchestrator/src/runtime/git-env.ts',
+  '.mcp.json',
   'pipeline-cli/src/steps/reviewer-set-comparison.ts',
   'pipeline-cli/src/steps/07-build-review-prompts.ts',
   'pipeline-cli/src/orchestrator/reconcile.ts',
@@ -298,9 +301,9 @@ export function checkReviewerCoverage(reviewerNames, classification, opts = {}) 
  */
 export function parseReviewerSetConfig(yaml) {
   const m = String(yaml ?? '').match(
-    /^\s*reviewerSet:\s*['"]?(three|code-test-merged|auto)['"]?\s*$/m,
+    /^\s*reviewerSet:\s*['"]?(three|code-test-merged|auto)['"]?\s*(#.*)?$/im,
   );
-  return m ? /** @type {'three' | 'code-test-merged' | 'auto'} */ (m[1]) : null;
+  return m ? /** @type {'three' | 'code-test-merged' | 'auto'} */ (m[1].toLowerCase()) : null;
 }
 
 /**

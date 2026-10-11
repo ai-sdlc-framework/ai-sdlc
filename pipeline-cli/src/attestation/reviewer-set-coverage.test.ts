@@ -22,7 +22,11 @@ import {
   parseReviewerSetConfig,
   requiredReviewerKind,
 } from '../../attestation-core/review-scope-core.mjs';
-import { classifyReviewerSet, selectReviewerSet } from '../steps/reviewer-set.js';
+import {
+  classifyReviewerSet,
+  reduceForReviewScope,
+  selectReviewerSet,
+} from '../steps/reviewer-set.js';
 import { deriveEnvelopeReviewScope } from './review-scope.js';
 import { appendLeafForPatchId } from './merkle.js';
 import { signAndWriteV6Envelope } from './sign-v6.js';
@@ -415,6 +419,20 @@ describe('the verifier re-derives the required set and rejects an uncovering att
     expect(verify(repo, THREE).status).toBe('valid');
   });
 
+  it('an unreadable base config fails closed to three (the opt-out is never silently dropped)', () => {
+    const repo = makeRepo({ 'orchestrator/src/foo.ts': 'x' }, 'reviewerSet: three\n');
+    const unreadable = (reviewers: string[]) =>
+      enforceReviewScope(names(...reviewers), {
+        repoRoot: repo.dir,
+        baseSha: 'f'.repeat(40), // a well-formed sha whose object is absent: `git show` fails
+        headSha: repo.head,
+        mergeBase: repo.base,
+      });
+    expect(unreadable(TWO).status).toBe('invalid');
+    expect(unreadable(TWO).reason).toContain('config:require-three');
+    expect(unreadable(THREE).status).toBe('valid');
+  });
+
   it('a config added only in the PR is never read, but is itself a trust-chain path', () => {
     const repo = makeRepo({
       'orchestrator/src/foo.ts': 'x',
@@ -528,5 +546,25 @@ describe('the signer records the required set and why (audit only)', () => {
       reason: expect.any(String),
       triggeringPaths: [],
     });
+  });
+});
+
+describe('signer-side reduction respects the require-three opt-out', () => {
+  it('reduceForReviewScope never narrows a test-only diff when the repo requires three', () => {
+    const three = ['code-reviewer', 'test-reviewer', 'security-reviewer'] as const;
+    const kept = reduceForReviewScope({
+      reviewers: three,
+      changedFiles: ['src/a.test.ts'],
+      requireThree: true,
+      readBaseConfig: () => null,
+    });
+    expect(kept.reviewers).toEqual([...three]);
+    expect(kept.reason).toBe('config:require-three');
+    const narrowed = reduceForReviewScope({
+      reviewers: three,
+      changedFiles: ['src/a.test.ts'],
+      readBaseConfig: () => null,
+    });
+    expect(narrowed.reviewers).toEqual(['correctness-reviewer']);
   });
 });

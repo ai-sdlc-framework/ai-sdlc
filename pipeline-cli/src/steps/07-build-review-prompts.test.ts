@@ -778,7 +778,14 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
     const NUMSTAT_RE = /diff --numstat -z/;
     const fake = runner(ok(GOOD_DIFF), ok('src/a.ts\0')).on(NUMSTAT_RE, ok('-\t-\tsrc/a.ts\0'));
     // runner() registers DIFF/FILES first; numstat never matches those, so it reaches NUMSTAT_RE.
-    expect(await reviewersFor(fake, judgmentCtx('enforce'))).toEqual(TWO);
+    // AISDLC-722: the default equals the relaxed set, so assert the judgment was never evaluated.
+    const evaluated: string[] = [];
+    const ctx: EvaluateJudgmentContext = {
+      ...judgmentCtx('enforce'),
+      sinks: [{ record: (r) => void evaluated.push(r.judgmentId) }],
+    };
+    expect(await reviewersFor(fake, ctx)).toEqual(TWO);
+    expect(evaluated).not.toContain('review.reviewer-set');
   });
 
   it('a failed numstat call marks the diff unavailable and vetoes', async () => {
@@ -806,6 +813,7 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
   });
 
   it('a NaN iteration never selects the merged set', async () => {
+    const evaluated: string[] = [];
     const reviewers = (
       await buildReviewPrompts({
         taskId: 'AISDLC-1',
@@ -818,10 +826,15 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
         artifactsDir: join(tmp, 'arts'),
         sourceKind: 'backlog',
         iteration: Number.NaN,
-        judgment: judgmentCtx('enforce'),
+        judgment: {
+          ...judgmentCtx('enforce'),
+          sinks: [{ record: (r) => void evaluated.push(r.judgmentId) }],
+        },
       })
     ).prompts.map((p) => p.reviewer);
     expect(reviewers).toEqual(TWO);
+    // AISDLC-722: the default equals the relaxed set, so assert the judgment was never evaluated.
+    expect(evaluated).not.toContain('review.reviewer-set');
   });
 
   it('real repo: a committed binary file (NUL bytes) vetoes the merged set and is stubbed in the prompt', async () => {

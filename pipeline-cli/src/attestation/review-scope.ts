@@ -93,7 +93,8 @@ export function deriveEnvelopeReviewScope(
   const paths = listing === null ? null : listing.split('\0').filter(Boolean);
   const baseConfig = readBaseReviewConfig(baseRef, repoRoot);
   const securityAlways = baseConfig === null ? true : parseSecurityReviewAlways(baseConfig);
-  const requireThree = baseConfig !== null && parseReviewerSetConfig(baseConfig) === 'three';
+  // A config that cannot be read fails closed to three, like securityAlways.
+  const requireThree = baseConfig === null || parseReviewerSetConfig(baseConfig) === 'three';
   const { kind, classification, reason, triggeringPaths } = requiredReviewerKind(paths, {
     securityAlways,
     requireThree,

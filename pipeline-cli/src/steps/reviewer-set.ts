@@ -216,9 +216,9 @@ export function resolveReviewerSetMode(opts: ResolveReviewerSetOpts = {}): Revie
  * Returns `null` when no valid field is found (caller falls back to default).
  */
 export function parseReviewerSetModeYaml(yaml: string): ReviewerSetMode | null {
-  const match = yaml.match(/^\s*reviewerSet:\s*['"]?(three|code-test-merged)['"]?\s*$/m);
+  const match = yaml.match(/^\s*reviewerSet:\s*['"]?(three|code-test-merged)['"]?\s*(#.*)?$/im);
   if (!match) return null;
-  return match[1] as ReviewerSetMode;
+  return match[1].toLowerCase() as ReviewerSetMode;
 }
 
 /**

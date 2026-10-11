@@ -1172,9 +1172,11 @@ export function enforceReviewScope(result, { repoRoot, baseSha, headSha, mergeBa
       paths = null;
     }
   }
-  // Fail closed: only a definite "file does not exist at base" means no config.
+  // Fail closed: only a definite "file does not exist at base" means no config. Any other
+  // failure (shallow clone, bad object, invalid base) keeps security review on everything AND
+  // requires three, so an unreadable `reviewerSet: three` is never silently dropped.
   let securityAlways = true;
-  let requireThree = false;
+  let requireThree = true;
   if (/^[0-9a-f]{40}$/i.test(baseSha ?? '')) {
     try {
       const baseConfig = execFileSync('git', ['show', `${baseSha}:.ai-sdlc/review-config.yaml`], {
@@ -1185,7 +1187,21 @@ export function enforceReviewScope(result, { repoRoot, baseSha, headSha, mergeBa
       securityAlways = parseSecurityReviewAlways(baseConfig);
       requireThree = parseReviewerSetConfig(baseConfig) === 'three';
     } catch (err) {
-      securityAlways = !isPathMissingGitError(err);
+      // `git show <absent-sha>:<path>` also reports "does not exist in", so a missing path only
+      // counts when the base commit itself resolves.
+      let baseResolves = false;
+      try {
+        execFileSync('git', ['cat-file', '-e', `${baseSha}^{commit}`], {
+          cwd: repoRoot,
+          stdio: 'ignore',
+        });
+        baseResolves = true;
+      } catch {
+        // base commit absent: fail closed
+      }
+      const missing = baseResolves && isPathMissingGitError(err);
+      securityAlways = !missing;
+      requireThree = !missing;
     }
   }
   // AISDLC-722: `paths === null` (diff unreadable) requires three; so does a

@@ -123,6 +123,8 @@ describe('selectReviewerSet: the merged set requires every condition', () => {
     const { ctx } = ctxFor({ mode: 'shadow' });
     const sel = await selectReviewerSet(base({ judgment: ctx }));
     expect(sel.reviewers).toEqual(DEFAULT_SET);
+    // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+    expect(sel.source).toBe('config');
     expect(sel.source).toBe('config');
     expect(sel.decidedBy).toContain('not-enforced');
     assertFloors(sel.reviewers);
@@ -132,6 +134,8 @@ describe('selectReviewerSet: the merged set requires every condition', () => {
     const { ctx } = ctxFor({ promotion: null });
     const sel = await selectReviewerSet(base({ judgment: ctx }));
     expect(sel.reviewers).toEqual(DEFAULT_SET);
+    // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+    expect(sel.source).toBe('config');
     expect(sel.decidedBy).toBe('judgment:not-enforced:no-promotion');
   });
 
@@ -139,12 +143,16 @@ describe('selectReviewerSet: the merged set requires every condition', () => {
     const { ctx } = ctxFor({ promotion: { path: 'override', evidence: 'trust me' } });
     const sel = await selectReviewerSet(base({ judgment: ctx }));
     expect(sel.reviewers).toEqual(DEFAULT_SET);
+    // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+    expect(sel.source).toBe('config');
     expect(sel.decidedBy).toBe('judgment:not-enforced:no-promotion');
   });
 
   it('a weak corpus promotion alone returns the default result', async () => {
     const { ctx } = ctxFor({ promotion: { path: 'corpus', n: 50, actBandPrecision: 0.94 } });
-    expect((await selectReviewerSet(base({ judgment: ctx }))).reviewers).toEqual(DEFAULT_SET);
+    const weak = await selectReviewerSet(base({ judgment: ctx }));
+    expect(weak.reviewers).toEqual(DEFAULT_SET);
+    expect(weak.source).toBe('config');
   });
 
   it('a gh-issue source never selects the merged set, whatever the answers', async () => {
@@ -154,6 +162,8 @@ describe('selectReviewerSet: the merged set requires every condition', () => {
         base({ judgment: ctx, ...(sourceKind ? { sourceKind } : { sourceKind: undefined }) }),
       );
       expect(sel.reviewers).toEqual(DEFAULT_SET);
+      // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+      expect(sel.source).toBe('config');
       expect(sel.decidedBy).toBe('veto:source-kind');
       assertFloors(sel.reviewers);
     }
@@ -182,6 +192,8 @@ describe('selectReviewerSet: the merged set requires every condition', () => {
     );
     expect(sel.decidedBy).toBe('veto:path-ci');
     expect(sel.reviewers).toEqual(DEFAULT_SET);
+    // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+    expect(sel.source).toBe('config');
   });
 
   it('an empty file list cannot be checked and so never relaxes', async () => {
@@ -196,6 +208,8 @@ describe('selectReviewerSet: the merged set requires every condition', () => {
       const { ctx } = ctxFor({ probability: { [id]: 0.9 } });
       const sel = await selectReviewerSet(base({ judgment: ctx }));
       expect(sel.reviewers).toEqual(DEFAULT_SET);
+      // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+      expect(sel.source).toBe('config');
       expect(sel.source).toBe('config');
       expect(sel.decidedBy).toBe(`judgment:signal-raised:${id}`);
     }
@@ -206,12 +220,16 @@ describe('selectReviewerSet: the merged set requires every condition', () => {
     fake.failWith('timeout');
     const sel = await selectReviewerSet(base({ judgment: ctx }));
     expect(sel.reviewers).toEqual(DEFAULT_SET);
+    // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+    expect(sel.source).toBe('config');
     expect(sel.decidedBy).toBe('judgment:provider-error');
   });
 
   it('the layer disabled returns the default result without any call', async () => {
     const { ctx, fake } = ctxFor({ provider: false });
-    expect((await selectReviewerSet(base({ judgment: ctx }))).reviewers).toEqual(DEFAULT_SET);
+    const weak = await selectReviewerSet(base({ judgment: ctx }));
+    expect(weak.reviewers).toEqual(DEFAULT_SET);
+    expect(weak.source).toBe('config');
     expect((await selectReviewerSet(base())).decidedBy).toBe('config:layer-disabled');
     expect(fake.requests).toHaveLength(0);
   });
@@ -264,6 +282,8 @@ describe('selectReviewerSet: path quoting, missing diff and governance vetoes', 
     ].join('\n');
     const { sel } = await run({ changedFiles: ['docs/readme.md'], diff });
     expect(sel.reviewers).toEqual(DEFAULT_SET);
+    // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+    expect(sel.source).toBe('config');
     expect(sel.decidedBy).toBe('veto:unparseable-path');
   });
 
@@ -282,6 +302,8 @@ describe('selectReviewerSet: path quoting, missing diff and governance vetoes', 
     const { sel } = await run({ changedFiles: ['docs/z.md'], diff });
     expect(sel.decidedBy).toBe('veto:unparseable-path');
     expect(sel.reviewers).toEqual(DEFAULT_SET);
+    // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+    expect(sel.source).toBe('config');
   });
 
   it('a CRLF diff header cannot hide a rename into a sensitive path', async () => {
@@ -309,6 +331,8 @@ describe('selectReviewerSet: path quoting, missing diff and governance vetoes', 
     const { sel, fake } = await run({ diff: '  \n' });
     expect(sel.decidedBy).toBe('veto:diff-unavailable');
     expect(sel.reviewers).toEqual(DEFAULT_SET);
+    // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+    expect(sel.source).toBe('config');
     expect(fake.requests).toHaveLength(0);
   });
 
@@ -393,6 +417,8 @@ describe('selectReviewerSet: path quoting, missing diff and governance vetoes', 
   ])('%s never relaxes review', async (_n, iteration) => {
     const { sel, fake } = await run({ iteration });
     expect(sel.reviewers).toEqual(DEFAULT_SET);
+    // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+    expect(sel.source).toBe('config');
     expect(sel.decidedBy).toBe('veto:iteration');
     expect(fake.requests).toHaveLength(0);
   });
@@ -408,6 +434,8 @@ describe('selectReviewerSet: path quoting, missing diff and governance vetoes', 
   ])('a binary hunk vetoes: %#', async (diff) => {
     const { sel, fake } = await run({ diff: diff.replace(/\\n/g, '\n') });
     expect(sel.reviewers).toEqual(DEFAULT_SET);
+    // AISDLC-722: the default equals the relaxed set now, so also assert the judgment did not act.
+    expect(sel.source).toBe('config');
     expect(sel.decidedBy).toBe('veto:binary-diff');
     expect(fake.requests).toHaveLength(0);
   });

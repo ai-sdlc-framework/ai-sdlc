@@ -20,6 +20,7 @@ vi.mock('./steps/07-build-review-prompts.js', async (importOriginal) => {
 });
 
 import { executePipeline } from './execute-pipeline.js';
+import { readComparisonLog } from './steps/reviewer-set-comparison.js';
 import { MockSpawner } from './runtime/subagent-spawner.js';
 import { FakeRunner, fail, ok } from './__test-helpers/fake-runner.js';
 import { cleanupTmpProject, makeTmpProject, writeTaskFile } from './__test-helpers/make-task.js';
@@ -30,10 +31,10 @@ let savedSet: string | undefined;
 beforeEach(() => {
   // AISDLC-722: these tests drive the three-reviewer mechanics; requiring three always is the
   // explicit way to get them now that the default is derived from the diff.
+  savedSet = process.env.AI_SDLC_REVIEWER_SET;
   process.env.AI_SDLC_REVIEWER_SET = 'three';
   tmp = makeTmpProject();
   seen.length = 0;
-  savedSet = process.env.AI_SDLC_REVIEWER_SET;
 });
 afterEach(() => {
   delete process.env.AI_SDLC_REVIEWER_SET;
@@ -125,6 +126,20 @@ const reviewerSpawns = (spawner: MockSpawner) =>
   );
 
 describe('executePipeline reviewer-set wiring', () => {
+  it('logs the set that ran and its verdict to the comparison window log (AISDLC-722)', async () => {
+    await run();
+    const records = readComparisonLog(
+      join(tmp, '.worktrees', 'aisdlc-300', '.ai-sdlc', 'artifacts'),
+    );
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      taskId: 'AISDLC-300',
+      set: 'three',
+      reason: 'config:require-three',
+      primary: { approved: true },
+    });
+  });
+
   it('a backlog dispatch with no explicit sourceKind reaches Step 7 as backlog', async () => {
     await run();
     expect(seen[0].sourceKind).toBe('backlog');
