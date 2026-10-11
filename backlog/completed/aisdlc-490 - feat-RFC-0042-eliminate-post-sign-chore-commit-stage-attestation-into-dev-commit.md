@@ -3,7 +3,7 @@ id: AISDLC-490
 title: >-
   feat(RFC-0042): B+ end-state — eliminate post-sign chore-commit by staging
   attestation into the dev commit
-status: To Do
+status: Withdrawn
 assignee: []
 created_date: '2026-05-31 00:00'
 labels:
@@ -13,6 +13,8 @@ labels:
 dependencies:
   - AISDLC-475
 priority: medium
+dispatchable: false
+dispatchableReason: "Withdrawn by DEC-0078 (keep-chore-commit): the AISDLC-475 chore-commit flow stays; amending the envelope into the work commit orphans the signed subject SHA"
 ---
 
 ## Description
@@ -79,3 +81,7 @@ code comment added in AISDLC-475).
 - scripts/verify-attestation.mjs (AISDLC-490 soak fallback deletion target)
 - pipeline-cli/src/attestation/sign-v6.ts
 - spec/rfcs/RFC-0042-v6-attestation-merkle-transcript.md
+
+## Withdrawal
+
+Withdrawn by DEC-0078 (answered `keep-chore-commit`). The AISDLC-475 chore-commit flow stays: amending the envelope into the work commit orphans the signed subject SHA, and the no-chore-commit requirement is cosmetic. The unpushed commit c0756303 in `.worktrees/aisdlc-490` is abandoned.
