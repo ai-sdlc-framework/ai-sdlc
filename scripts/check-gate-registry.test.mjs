@@ -103,6 +103,17 @@ describe('gate registry (AISDLC-805)', () => {
     assert.deepEqual(problems, [], `gate registry violations:\n  ${problems.join('\n  ')}`);
   });
 
+  test('derivation finds a plausible live gate set (regression guard)', () => {
+    const live = deriveLiveGates();
+    assert.ok(live.size >= 30, `live gate set suspiciously small: ${live.size}`);
+    for (const id of [
+      'workflow:ai-sdlc-gate.yml',
+      'gate-job:backlog-drift',
+      'pre-push:scripts/check-task-moved.sh',
+    ])
+      assert.ok(live.has(id), `expected live gate ${id}`);
+  });
+
   test('checkRegistry flags an unregistered gate', () => {
     const { problems } = checkRegistry({ gates: [] }, new Set(['workflow:new.yml']));
     assert.deepEqual(problems, ['unregistered gate workflow:new.yml']);

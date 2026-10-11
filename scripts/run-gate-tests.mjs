@@ -35,30 +35,57 @@ const KNOWN_RED = {
     'asserts a CHANGELOG merge rule that AISDLC-401 removed; never chained, so never enforced',
 };
 
-function discoverGateTests(root) {
+/**
+ * Discover gate test files under `root`. A configured directory that does not
+ * exist throws: a renamed or deleted dir must not silently drop its tests.
+ * `dirs` and `knownRed` are parameters so the runner can be tested hermetically.
+ */
+export function discoverGateTests(root, dirs = GATE_TEST_DIRS, knownRed = KNOWN_RED) {
   const files = [];
-  for (const dir of GATE_TEST_DIRS) {
+  const skipped = [];
+  for (const dir of dirs) {
     let names;
     try {
       names = readdirSync(join(root, dir));
-    } catch {
-      continue;
+    } catch (err) {
+      throw new Error(`gate test dir missing or unreadable: ${dir} (${err.code ?? err.message})`);
     }
     for (const n of names.sort()) {
       if (!n.endsWith('.test.mjs')) continue;
       const rel = `${dir}/${n}`;
-      if (rel in KNOWN_RED) continue;
-      files.push(rel);
+      if (rel in knownRed) skipped.push(rel);
+      else files.push(rel);
     }
   }
-  return files;
+  return { files, skipped };
 }
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const files = discoverGateTests(root);
-if (process.argv.includes('--list')) {
-  console.log(files.join('\n'));
-} else {
-  const r = spawnSync(process.execPath, ['--test', ...files], { cwd: root, stdio: 'inherit' });
-  process.exit(r.status ?? 1);
+export { GATE_TEST_DIRS, KNOWN_RED };
+
+/** A nested `node --test` inherits NODE_TEST_CONTEXT and reports through the parent; strip it. */
+function childEnv() {
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  return env;
+}
+
+/** Run discovered tests; returns the exit status. */
+export function runGateTests(root, args = [], dirs = GATE_TEST_DIRS, knownRed = KNOWN_RED) {
+  const { files, skipped } = discoverGateTests(root, dirs, knownRed);
+  if (args.includes('--list')) {
+    console.log(files.join('\n'));
+    return 0;
+  }
+  for (const f of skipped) console.log(`[run-gate-tests] SKIPPED known-red ${f}: ${knownRed[f]}`);
+  const r = spawnSync(process.execPath, ['--test', ...files], {
+    cwd: root,
+    stdio: 'inherit',
+    env: childEnv(),
+  });
+  return r.status ?? 1;
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  process.exit(runGateTests(root, process.argv.slice(2)));
 }
