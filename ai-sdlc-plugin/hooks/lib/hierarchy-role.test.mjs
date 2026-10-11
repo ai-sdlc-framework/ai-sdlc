@@ -14,7 +14,8 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { ancestorPids, resolveSessionRole, resolveSessionSelf } = require('./hierarchy-role.js');
+const lib = require('./hierarchy-role.js');
+const { ancestorPids, resolveSessionRole, resolveSessionSelf } = lib;
 
 const dirs = [];
 afterEach(() => {
@@ -154,5 +155,80 @@ describe('onMismatch', () => {
       },
     });
     assert.equal(res, null);
+  });
+});
+
+describe('handoff reload after clear or compact (AISDLC-728)', () => {
+  const roster = (role) => {
+    const d = mkdtempSync(join(tmpdir(), 'hr-handoff-'));
+    writeFileSync(
+      join(d, 'hierarchy.json'),
+      JSON.stringify({
+        schemaVersion: 'v1',
+        sessions: [{ role, name: `${role}-x`, pid: 4242, status: 'running' }],
+      }),
+    );
+    return d;
+  };
+  const claude = () => 'claude';
+
+  it('injects handoff text and the scheduled-jobs line for the planner on compact', () => {
+    const boardDir = roster('planner');
+    const out = lib.buildHierarchyRoleBlock({
+      source: 'compact',
+      boardDir,
+      pids: [4242],
+      commOf: claude,
+      readHandoff: () => 'HANDOFF BODY',
+    });
+    rmSync(boardDir, { recursive: true, force: true });
+    assert.match(out, /Handoff \(reloaded after compact\)/);
+    assert.match(out, /HANDOFF BODY/);
+    assert.match(out, /Scheduled jobs: list them now and recreate/);
+  });
+
+  it('omits the scheduled-jobs line for an executor and works with no handoff', () => {
+    const boardDir = roster('executor');
+    const out = lib.buildHierarchyRoleBlock({
+      source: 'clear',
+      boardDir,
+      pids: [4242],
+      commOf: claude,
+      readHandoff: () => null,
+    });
+    rmSync(boardDir, { recursive: true, force: true });
+    assert.doesNotMatch(out, /Scheduled jobs/);
+    assert.doesNotMatch(out, /Handoff \(/);
+  });
+
+  it('readHandoffText runs handoff read, truncates, and fails soft', () => {
+    const self = { role: 'planner', name: 'planner' };
+    let argv;
+    const run = (_node, args) => {
+      argv = args;
+      return { status: 0, stdout: 'x'.repeat(lib.HANDOFF_MAX_CHARS + 50) };
+    };
+    const text = lib.readHandoffText(self, { bin: '/bin/cli.mjs', boardDir: '/b', run });
+    assert.ok(text.endsWith('[handoff truncated]'));
+    assert.deepEqual(argv.slice(1, 6), ['handoff', 'read', '--role', 'planner', '--name']);
+    assert.equal(lib.readHandoffText(self, { bin: '', boardDir: '/b', run }), null);
+    assert.equal(
+      lib.readHandoffText({ role: 'planner', name: '../x' }, { bin: '/b', boardDir: '/b', run }),
+      null,
+    );
+    assert.equal(
+      lib.readHandoffText(self, { bin: '/b', boardDir: '/b', run: () => ({ status: 1 }) }),
+      null,
+    );
+    assert.equal(
+      lib.readHandoffText(self, {
+        bin: '/b',
+        boardDir: '/b',
+        run: () => {
+          throw new Error('x');
+        },
+      }),
+      null,
+    );
   });
 });

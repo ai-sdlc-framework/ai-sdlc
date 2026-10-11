@@ -137,8 +137,15 @@ describe('session-start role block on clear', () => {
     assert.match(ctx, /- Run now: \/ai-sdlc executor/);
   });
 
+  it('injects the role block after a compaction too', () => {
+    const ctx = runHookUnderClaude(withConfig, 'compact', [
+      entry('executor', 'executor-alpha-3', 'SELF'),
+    ]);
+    assert.match(ctx, /- Name: executor-alpha-3/);
+  });
+
   it('adds nothing for other matchers', () => {
-    for (const source of ['startup', 'resume', 'compact']) {
+    for (const source of ['startup', 'resume']) {
       assert.doesNotMatch(
         runHookUnderClaude(withConfig, source, [entry('executor', 'executor-alpha', 'SELF')]),
         /Session role/,

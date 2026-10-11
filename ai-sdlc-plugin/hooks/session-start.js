@@ -18,7 +18,13 @@ const {
 } = require('./lib/governance-resolver');
 const { bannerGovernance } = require('./lib/trusted-policy');
 const { detectEnforcement, renderReviewPolicyBanner } = require('./lib/review-policy-banner');
-const { buildHierarchyRoleBlock, ancestorPids } = require('./lib/hierarchy-role');
+const {
+  buildHierarchyRoleBlock,
+  ancestorPids,
+  readHandoffText,
+  RESET_SOURCES,
+} = require('./lib/hierarchy-role');
+const { resolveBin } = require('./context-auto-clear');
 
 // ── Read stdin ───────────────────────────────────────────────────────
 
@@ -233,15 +239,23 @@ const projectDir =
 
 const agentRolePath = join(projectDir, '.ai-sdlc', 'agent-role.yaml');
 
-// After `/clear`, a session named in the hierarchy roster is told its role again.
+// After `/clear` or a compaction, a session named in the hierarchy roster is told its role again.
 // Computed once; any other source or session yields null and nothing changes.
 const hierarchyRoleBlock = (() => {
   try {
-    if (input?.source !== 'clear') return null;
+    if (!RESET_SOURCES.includes(input?.source)) return null;
+    const boardDir =
+      process.env.AI_SDLC_DISPATCH_BOARD_DIR || join(projectDir, '.ai-sdlc', 'dispatch');
     return buildHierarchyRoleBlock({
       source: input.source,
-      boardDir: process.env.AI_SDLC_DISPATCH_BOARD_DIR || join(projectDir, '.ai-sdlc', 'dispatch'),
+      boardDir,
       pids: ancestorPids(),
+      // AISDLC-728: reload the handoff after a clear or a compaction.
+      readHandoff: (self) =>
+        readHandoffText(self, {
+          bin: resolveBin(process.env, join(__dirname, '..')) || '',
+          boardDir,
+        }),
     });
   } catch {
     return null;
