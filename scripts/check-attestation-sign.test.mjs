@@ -2153,7 +2153,11 @@ HEAD=$(git rev-parse HEAD)
 MB=$(git merge-base origin/main HEAD)
 PID=$(git diff-tree --no-color -p "$MB..HEAD" -- ${canonicalExclusionsShellArgs()} | git patch-id --stable | cut -c1-40)
 mkdir -p "$WT_ROOT/.ai-sdlc/attestations"
-printf '{"head":"%s","subject":{"digest":{"sha1":"%s"}},"schemaVersion":"v6"}\\n' "$HEAD" "$HEAD" > "$WT_ROOT/.ai-sdlc/attestations/$PID.v6.dsse.json"
+HEAD="$HEAD" node --input-type=module -e '
+import { formatEnvelopeJson } from ${JSON.stringify(pathToFileURL(join(__dirname, '..', 'ai-sdlc-plugin', 'scripts', 'format-envelope-json.mjs')).href)};
+const h = process.env.HEAD;
+process.stdout.write(formatEnvelopeJson({ head: h, subject: { digest: { sha1: h } }, schemaVersion: "v6", predicate: { triggeringPaths: ["scripts/check-attestation-sign.test.mjs", "scripts/squash-attestation-chores.sh"] } }));
+' > "$WT_ROOT/.ai-sdlc/attestations/$PID.v6.dsse.json"
 `,
     );
     chmodSync(shim, 0o755);
@@ -2229,5 +2233,32 @@ printf '{"head":"%s","subject":{"digest":{"sha1":"%s"}},"schemaVersion":"v6"}\\n
     const r3 = chain(signCmd);
     assert.equal(r3.status, 0, r3.stderr);
     assert.equal(head(), afterFirst);
+  });
+
+  it('AC-5: the envelope left by the converged chain passes prettier --check', () => {
+    seed(() => '1111111111111111111111111111111111111111');
+    const signCmd = installSubjectSigner();
+    chain(signCmd);
+    chain(signCmd);
+    const dir = join(root, '.ai-sdlc', 'attestations');
+    const envelopes = readdirSync(dir).filter((f) => f.endsWith('.v6.dsse.json'));
+    assert.ok(envelopes.length > 0, 'chain must leave an envelope');
+    const prettier = join(__dirname, '..', 'node_modules', '.bin', 'prettier');
+    for (const f of envelopes) {
+      const check = spawnSync(
+        prettier,
+        [
+          '--check',
+          '--print-width',
+          '100',
+          '--trailing-comma',
+          'all',
+          '--single-quote',
+          join(dir, f),
+        ],
+        { encoding: 'utf8' },
+      );
+      assert.equal(check.status, 0, `prettier --check ${f}: ${check.stdout}${check.stderr}`);
+    }
   });
 });

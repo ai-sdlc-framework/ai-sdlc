@@ -30,14 +30,14 @@ function mustBreak(arr) {
   return arr.length > 1 && arr.every((e) => isNonEmpty(e) && (Array.isArray(e) || isObj(e)));
 }
 
-function fmt(v, indent, trailing) {
+function fmt(v, indent, trailing, prefix = 0) {
   const pad = '  '.repeat(indent);
   if (Array.isArray(v)) {
     if (v.length === 0) return '[]';
     if (
       !mustBreak(v) &&
       !v.some(isNonEmpty) &&
-      pad.length + flat(v).length + trailing <= PRINT_WIDTH
+      pad.length + prefix + flat(v).length + trailing <= PRINT_WIDTH
     ) {
       return flat(v);
     }
@@ -48,7 +48,8 @@ function fmt(v, indent, trailing) {
     const ks = Object.keys(v);
     if (ks.length === 0) return '{}';
     const items = ks.map(
-      (k, i) => `${pad}  ${JSON.stringify(k)}: ${fmt(v[k], indent + 1, i < ks.length - 1 ? 1 : 0)}`,
+      (k, i) =>
+        `${pad}  ${JSON.stringify(k)}: ${fmt(v[k], indent + 1, i < ks.length - 1 ? 1 : 0, JSON.stringify(k).length + 2)}`,
     );
     return `{\n${items.join(',\n')}\n${pad}}`;
   }

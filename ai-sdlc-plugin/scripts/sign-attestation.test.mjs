@@ -1336,6 +1336,11 @@ describe('format-envelope-json (AISDLC-732)', () => {
     const value = {
       single: [h],
       pair: [h, h],
+      // Fits in 100 columns on its own but not once the key prefix is counted (AISDLC-820).
+      triggeringPaths: [
+        'scripts/check-attestation-sign.test.mjs',
+        'scripts/squash-attestation-chores.sh',
+      ],
       empty: [],
       obj: {},
       leaves: [{ leafIndex: 0, proof: [h] }],
