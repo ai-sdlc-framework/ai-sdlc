@@ -18,6 +18,10 @@
  *     session about it.
  *   - `down [--role <name-or-role>]` — end sessions, return their inflight
  *     manifests to `queue/`, close their windows, update the roster.
+ *   - `restart <executor> [--after-task] [--wait <sec>]` — stop and start one executor and
+ *     replace its roster entry; refuses while it holds a task unless `--after-task`.
+ *   - `register <executor>` — re-record an executor restarted by hand under a new pid, after
+ *     checking its tmux pane and process.
  *   - `executor-start [--wait <sec>]` — an executor's identity, repository check and a
  *     blocking claim in one call; prints `{taskId|null, ...}`.
  *   - `clear <executor-name> [--settle-ms <n>]` — empty an executor's context:
@@ -43,7 +47,7 @@
  *
  * All subcommands accept `--board-dir <path>` (default `.ai-sdlc/dispatch`).
  *
- * `clear`, `tick` and `route-decision` are dispatch-session commands. A mistake
+ * `clear`, `tick`, `restart`, `register` and `route-decision` are dispatch-session commands. A mistake
  * guard keeps other sessions from running them by accident: it finds the calling
  * session from the process tree and the roster and refuses unless that is the running
  * dispatch session. A `--worker` value is only compared with that result. The guard is
@@ -84,6 +88,8 @@ import {
   formatStatus,
   hierarchyAttach,
   hierarchyDown,
+  hierarchyRegister,
+  hierarchyRestart,
   hierarchyStatus,
   hierarchyTerminals,
   hierarchyUp,
@@ -119,6 +125,8 @@ Commands:
   brief      Generate a dispatch brief (waves, sequence groups) from task metadata
   down       Stop sessions and return their inflight manifests to the queue
   clear      Empty an executor's context between tasks and restart its loop
+  restart    Stop and start one executor, updating its roster entry (restart <executor>)
+  register   Re-record an executor whose process was restarted by hand (register <executor>)
   tick       One wake-up of the dispatch loop (ingest, verdict watch, playbook, reports)
   route-decision  Record that a decision was routed to a tier
   handoff         Write or read a session's handoff file (handoff write|read --role <r>)
@@ -186,6 +194,17 @@ Usage for clear:
   clear <executor-name> is for the dispatch session only. A mistake guard refuses any other caller, a human
   at a plain shell included; it is not authentication and a same-user session can defeat
   it. Outside the hierarchy, use tmux directly.
+
+Usage for restart and register (dispatch session only, executors only):
+  cli-hierarchy restart <executor> [--after-task] [--wait <seconds>]
+  cli-hierarchy register <executor>
+  restart stops the named executor and starts it again with its recorded model and mode,
+  then replaces only its roster entry (pid, pane, started time); other sessions are not touched.
+  It refuses while the executor holds a claimed task unless --after-task is given, which waits
+  (up to --wait seconds, default 1500) for the task boundary first.
+  register re-records an executor that is already running under a new pid, after checking
+  its tmux pane, the ownership marker, the pane's launch environment and a live harness session.
+  A mistake guard refuses any caller but the dispatch session; it is not authentication.
 
 Options for tick:
   --worker <name>          Optional; when given it must equal the calling session's own roster name
@@ -545,6 +564,39 @@ export async function runHierarchyCli(
             ...(deps.emit ? { emit: deps.emit } : {}),
             log: deps.log,
           },
+        );
+        deps.log(JSON.stringify(result));
+        return 0;
+      }
+      case 'restart':
+      case 'register': {
+        const caller = dispatchCaller(subcommand);
+        if (!caller.ok) {
+          process.stderr.write(`${caller.reason}\n`);
+          return 1;
+        }
+        // `--after-task executor-beta` reads the name as the flag's value.
+        const afterTask = flags['after-task'];
+        const session =
+          firstPositional(argv) ??
+          (afterTask !== undefined && afterTask !== 'true' ? afterTask : undefined);
+        if (!session) {
+          process.stderr.write(`cli-hierarchy ${subcommand}: an executor name is required\n`);
+          return 2;
+        }
+        if (subcommand === 'register') {
+          deps.log(JSON.stringify(hierarchyRegister({ session }, deps)));
+          return 0;
+        }
+        const waitSec = intFlag(flags, 'wait');
+        if (waitSec === null) return 2;
+        const result = await hierarchyRestart(
+          {
+            session,
+            afterTask: afterTask !== undefined,
+            ...(waitSec === undefined ? {} : { waitSec }),
+          },
+          deps,
         );
         deps.log(JSON.stringify(result));
         return 0;

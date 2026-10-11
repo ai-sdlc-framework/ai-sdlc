@@ -89,7 +89,7 @@ export interface UpResult {
   attachExitCode?: number;
 }
 
-interface PlannedSession {
+export interface PlannedSession {
   role: HierarchyRole;
   /** Project-qualified name, used as the harness name and the tmux session name. */
   name: string;
@@ -110,6 +110,13 @@ function insideVsCode(env: NodeJS.ProcessEnv): boolean {
 }
 
 const BYPASS_MODE = 'bypassPermissions';
+
+/** First prompt each role's session starts with. */
+export const ROLE_PROMPT: Record<HierarchyRole, string> = {
+  planner: '/ai-sdlc planner',
+  'operator-dispatch': '/ai-sdlc operator-dispatch',
+  executor: '/ai-sdlc executor',
+};
 
 /** Permission mode the planner starts in unless `--planner-permission-mode` overrides it. */
 export const DEFAULT_PLANNER_MODE = BYPASS_MODE;
@@ -168,7 +175,7 @@ function plan(
       bare: 'planner',
       model: opts.plannerModel,
       permissionMode: plannerMode,
-      prompt: '/ai-sdlc planner',
+      prompt: ROLE_PROMPT.planner,
     });
   }
   sessions.push({
@@ -177,7 +184,7 @@ function plan(
     bare: 'operator-dispatch',
     model: opts.dispatchModel,
     permissionMode: BYPASS_MODE,
-    prompt: '/ai-sdlc operator-dispatch',
+    prompt: ROLE_PROMPT['operator-dispatch'],
   });
   for (const bare of executorNames(count)) {
     sessions.push({
@@ -186,13 +193,13 @@ function plan(
       bare,
       model: opts.executorModel,
       permissionMode: BYPASS_MODE,
-      prompt: '/ai-sdlc executor',
+      prompt: ROLE_PROMPT.executor,
     });
   }
   return sessions;
 }
 
-function defaultIsAlive(pid: number): boolean {
+export function defaultIsAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 1) return false;
   try {
     process.kill(pid, 0);
@@ -225,7 +232,7 @@ export function findForeignSessions(
   });
 }
 
-async function waitForRegistry(
+export async function waitForRegistry(
   deps: HierarchyDeps,
   requestedName: string,
   spawnedAtMs: number,
@@ -242,6 +249,71 @@ async function waitForRegistry(
     if (attempt < deps.pollAttempts - 1) await deps.sleep(deps.pollIntervalMs);
   }
   return undefined;
+}
+
+/**
+ * Start one planned session in its own tmux session and build its roster entry. Shared by
+ * `up` and `restart`. Returns a failure message instead of throwing so the caller can
+ * record its progress first; `countable` marks a tmux failure (the caller adds how many
+ * sessions had started).
+ */
+export async function launchSession(
+  s: PlannedSession,
+  project: string,
+  deps: HierarchyDeps,
+  claimedNames: ReadonlySet<string>,
+  warnings: string[],
+  nodeVersion?: string,
+): Promise<{ entry: RosterEntry } | { failure: string; countable: boolean }> {
+  const spawnedAt = deps.now();
+  const command = buildClaudeCommand(deps.claudeBin, s, nodeVersion);
+  // Impossible by construction; asserted because a bare launch only fails at push time.
+  if (!hasLaunchEnv(command, s.name, s.role)) {
+    return {
+      failure: `refusing to start '${s.name}': its command lacks AI_SDLC_HIERARCHY_SESSION/AI_SDLC_HIERARCHY_ROLE`,
+      countable: false,
+    };
+  }
+  const result = startSession(deps.run, s.name, command, deps.cwd);
+  if (result.status !== 0) {
+    return {
+      failure: `could not start '${s.name}': ${result.stderr.trim() || 'tmux failed'}`,
+      countable: true,
+    };
+  }
+  // Ownership marker: `down` and `brief --notify` act only on sessions that carry it.
+  // A failure leaves the agent running but out of their reach, so say so.
+  if (markSessionOwned(deps.run, s.name).status !== 0) {
+    warnings.push(
+      `could not mark tmux session '${s.name}' with ${OWNER_OPTION}; down and brief --notify will refuse to act on it until it carries that option`,
+    );
+  }
+  // Cosmetic: a failure here must not undo a started agent.
+  if (setSessionTitles(deps.run, s.name).status !== 0) {
+    warnings.push(`could not set the terminal title of tmux session '${s.name}'`);
+  }
+  const pane = paneInfo(deps.run, s.name, s.name);
+  const registered = await waitForRegistry(deps, s.name, spawnedAt.getTime(), claimedNames);
+  if (!registered) {
+    warnings.push(
+      `'${s.name}' was started but the harness registry did not list it; the roster keeps the requested name`,
+    );
+  }
+  return {
+    entry: {
+      role: s.role,
+      project,
+      name: registered?.name ?? s.name,
+      tmuxSession: s.name,
+      tmuxWindow: s.name,
+      paneId: pane.paneId,
+      pid: registered?.pid ?? pane.panePid,
+      model: s.model,
+      permissionMode: s.permissionMode,
+      startedAt: spawnedAt.toISOString(),
+      status: registered ? 'running' : 'starting',
+    },
+  };
 }
 
 /**
@@ -386,54 +458,23 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
   const roster: Roster = { schemaVersion: 'v1', sessions: [...kept] };
   const started: RosterEntry[] = [];
   for (const s of toStart) {
-    const spawnedAt = deps.now();
-    const command = buildClaudeCommand(deps.claudeBin, s, nodeVersion);
-    // Impossible by construction; asserted because a bare launch only fails at push time.
-    if (!hasLaunchEnv(command, s.name, s.role)) {
-      writeRoster(deps.boardDir, roster);
-      throw new Error(
-        `refusing to start '${s.name}': its command lacks AI_SDLC_HIERARCHY_SESSION/AI_SDLC_HIERARCHY_ROLE`,
-      );
-    }
-    const result = startSession(deps.run, s.name, command, deps.cwd);
-    if (result.status !== 0) {
-      writeRoster(deps.boardDir, roster);
-      throw new Error(
-        `could not start '${s.name}': ${result.stderr.trim() || 'tmux failed'} (${started.length} session(s) started before the failure)`,
-      );
-    }
-    // Ownership marker: `down` and `brief --notify` act only on sessions that carry it.
-    // A failure leaves the agent running but out of their reach, so say so.
-    if (markSessionOwned(deps.run, s.name).status !== 0) {
-      warnings.push(
-        `could not mark tmux session '${s.name}' with ${OWNER_OPTION}; down and brief --notify will refuse to act on it until it carries that option`,
-      );
-    }
-    // Cosmetic: a failure here must not undo a started agent.
-    if (setSessionTitles(deps.run, s.name).status !== 0) {
-      warnings.push(`could not set the terminal title of tmux session '${s.name}'`);
-    }
-    const pane = paneInfo(deps.run, s.name, s.name);
-    const claimed = new Set(roster.sessions.map((e) => e.name));
-    const registered = await waitForRegistry(deps, s.name, spawnedAt.getTime(), claimed);
-    if (!registered) {
-      warnings.push(
-        `'${s.name}' was started but the harness registry did not list it; the roster keeps the requested name`,
-      );
-    }
-    const entry: RosterEntry = {
-      role: s.role,
+    const launched = await launchSession(
+      s,
       project,
-      name: registered?.name ?? s.name,
-      tmuxSession: s.name,
-      tmuxWindow: s.name,
-      paneId: pane.paneId,
-      pid: registered?.pid ?? pane.panePid,
-      model: s.model,
-      permissionMode: s.permissionMode,
-      startedAt: spawnedAt.toISOString(),
-      status: registered ? 'running' : 'starting',
-    };
+      deps,
+      new Set(roster.sessions.map((e) => e.name)),
+      warnings,
+      nodeVersion,
+    );
+    if ('failure' in launched) {
+      writeRoster(deps.boardDir, roster);
+      throw new Error(
+        launched.countable
+          ? `${launched.failure} (${started.length} session(s) started before the failure)`
+          : launched.failure,
+      );
+    }
+    const entry = launched.entry;
     roster.sessions.push(entry);
     started.push(entry);
     writeRoster(deps.boardDir, roster);

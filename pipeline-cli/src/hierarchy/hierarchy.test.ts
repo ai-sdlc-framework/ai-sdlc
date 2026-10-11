@@ -13,7 +13,12 @@ import path from 'node:path';
 import { validateHierarchyRoster } from '@ai-sdlc/reference';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { ensureBoardDirs, writeHeartbeat, writeManifest } from '../dispatch/board.js';
+import {
+  ensureBoardDirs,
+  releaseInflight,
+  writeHeartbeat,
+  writeManifest,
+} from '../dispatch/board.js';
 import type { DispatchManifest } from '../dispatch/types.js';
 import {
   attachTmuxSession,
@@ -25,6 +30,8 @@ import {
   findStartedSession,
   formatStatus,
   hierarchyDown,
+  hierarchyRegister,
+  hierarchyRestart,
   hierarchyStatus,
   hierarchyUp,
   isLegacyLayoutEntry,
@@ -81,6 +88,8 @@ interface FakeTmux {
   owned: Set<string>;
   /** When set, marking this session fails (tmux set-option errors). */
   failMarkFor?: string;
+  /** Epoch ms the fake harness records as a started session's start time. */
+  startedAtMs: number;
 }
 
 function makeFakeTmux(registryDir: string): FakeTmux {
@@ -94,6 +103,7 @@ function makeFakeTmux(registryDir: string): FakeTmux {
     register: true,
     exitsOnRequest: true,
     owned: new Set<string>(),
+    startedAtMs: NOW.getTime(),
     run: () => ({ status: 1, stdout: '', stderr: '' }),
   };
   const paneOf = new Map<string, string>();
@@ -139,7 +149,7 @@ function makeFakeTmux(registryDir: string): FakeTmux {
             JSON.stringify({
               pid,
               name: fake.nameFor(window),
-              startedAt: NOW.getTime(),
+              startedAt: fake.startedAtMs,
               status: 'idle',
               cwd: '/repo',
             }),
@@ -1984,5 +1994,203 @@ describe('project-scoped session names', () => {
     expect(sanitizeProject('a'.repeat(50))).toHaveLength(30);
     // Longest name still fits the 48 character session-name limit.
     expect(isValidSessionName(qualifiedName('a'.repeat(30), 'operator-dispatch'))).toBe(true);
+  });
+});
+
+describe('hierarchy restart and register (AISDLC-713)', () => {
+  const alpha = Q('executor-alpha');
+  const entryOf = (name: string) => readRoster(boardDir).sessions.find((e) => e.name === name);
+  const later = NOW.getTime() + 60_000;
+
+  beforeEach(async () => {
+    await hierarchyUp(baseOpts, deps);
+    logs.length = 0;
+    fake.calls.length = 0;
+  });
+
+  it('restarts one executor, replaces only its roster entry and leaves the others alone', async () => {
+    const before = readRoster(boardDir);
+    const old = entryOf(alpha) as RosterEntry;
+    fake.startedAtMs = later;
+    deps.now = () => new Date(later);
+
+    const result = await hierarchyRestart({ session: 'executor-alpha' }, deps);
+
+    const after = readRoster(boardDir);
+    const fresh = entryOf(alpha) as RosterEntry;
+    expect(fresh.pid).not.toBe(old.pid);
+    expect(fresh.startedAt).toBe(new Date(later).toISOString());
+    expect(fresh.status).toBe('running');
+    expect(fresh).toMatchObject({ model: old.model, permissionMode: old.permissionMode });
+    expect(after.sessions.map((e) => e.name)).toEqual(before.sessions.map((e) => e.name));
+    for (const e of before.sessions.filter((x) => x.name !== alpha)) {
+      expect(after.sessions).toContainEqual(e);
+    }
+    expect(result).toMatchObject({
+      name: alpha,
+      before: { pid: old.pid },
+      after: { pid: fresh.pid },
+    });
+    // only the executor was asked to exit, then started once with its launch environment
+    expect(fake.calls.filter((c) => c.args[0] === 'send-keys')).toHaveLength(1);
+    const started = newWindowCommands();
+    expect(started).toHaveLength(1);
+    expect(hasLaunchEnv(started[0] as string, alpha, 'executor')).toBe(true);
+    expect(started[0]).toContain("'/ai-sdlc executor'");
+    expect(validateHierarchyRoster(after).valid).toBe(true);
+  });
+
+  it('starts a session whose window is already gone (after a crash)', async () => {
+    fake.windows = fake.windows.filter((w) => w !== alpha);
+    const result = await hierarchyRestart({ session: alpha }, deps);
+    expect(fake.windows).toContain(alpha);
+    expect(fake.calls.some((c) => c.args[0] === 'send-keys')).toBe(false);
+    expect(result.name).toBe(alpha);
+  });
+
+  it('refuses while the executor holds a task, names --after-task and stops nothing', async () => {
+    putInflight('AISDLC-300', alpha);
+    const before = readRoster(boardDir);
+    await expect(hierarchyRestart({ session: alpha }, deps)).rejects.toThrow(/--after-task/);
+    expect(readRoster(boardDir)).toEqual(before);
+    expect(fake.calls.some((c) => c.args[0] === 'send-keys' || c.args[0] === 'new-session')).toBe(
+      false,
+    );
+  });
+
+  it('--after-task waits for the task boundary, then restarts', async () => {
+    putInflight('AISDLC-300', alpha);
+    let sleeps = 0;
+    deps.sleep = async () => {
+      if (++sleeps === 2) releaseInflight(boardDir, 'AISDLC-300');
+    };
+    const result = await hierarchyRestart({ session: alpha, afterTask: true }, deps);
+    expect(result.waitedFor).toBe('AISDLC-300');
+    expect(newWindowCommands()).toHaveLength(1);
+  });
+
+  it('--after-task gives up after --wait and stops nothing', async () => {
+    putInflight('AISDLC-300', alpha);
+    await expect(
+      hierarchyRestart({ session: alpha, afterTask: true, waitSec: 10 }, deps),
+    ).rejects.toThrow(/still holds AISDLC-300 after 10 s; nothing was stopped/);
+    expect(fake.calls.some((c) => c.args[0] === 'send-keys')).toBe(false);
+  });
+
+  it('--after-task with nothing inflight restarts at once', async () => {
+    const result = await hierarchyRestart({ session: alpha, afterTask: true }, deps);
+    expect(result.waitedFor).toBeUndefined();
+  });
+
+  it.each([
+    ['restart', () => hierarchyRestart({ session: 'planner' }, deps)],
+    ['register', async () => hierarchyRegister({ session: 'operator-dispatch' }, deps)],
+  ])('%s applies to executors only and names the down/up path', async (_verb, run) => {
+    await expect(run()).rejects.toThrow(/executors only.*cli-hierarchy down --role/);
+  });
+
+  it('refuses an unknown session', async () => {
+    await expect(hierarchyRestart({ session: 'executor-zeta' }, deps)).rejects.toThrow(
+      /no session named 'executor-zeta'.*cli-hierarchy status/,
+    );
+  });
+
+  it('refuses a session without the ownership marker and leaves it running', async () => {
+    fake.owned.delete(alpha);
+    const before = readRoster(boardDir);
+    await expect(hierarchyRestart({ session: alpha }, deps)).rejects.toThrow(
+      /does not carry the @ai-sdlc-hierarchy marker.*Nothing was stopped/,
+    );
+    expect(readRoster(boardDir)).toEqual(before);
+    expect(fake.windows).toContain(alpha);
+  });
+
+  it('refuses an old single-session layout entry', async () => {
+    writeRawRoster([legacyEntry('executor-alpha', 'executor')]);
+    await expect(hierarchyRestart({ session: 'executor-alpha' }, deps)).rejects.toThrow(
+      /old single-session layout/,
+    );
+  });
+
+  it('drops the dead entry and says how to recover when the new session cannot start', async () => {
+    fake.failStartFor = alpha;
+    await expect(hierarchyRestart({ session: alpha }, deps)).rejects.toThrow(
+      /could not start.*dropped from the roster.*cli-hierarchy up/,
+    );
+    expect(entryOf(alpha)).toBeUndefined();
+    expect(entryOf(Q('executor-beta'))).toBeDefined();
+  });
+
+  describe('register', () => {
+    /** Simulate an operator restarting the process by hand: a new live registry entry. */
+    const handRestart = (pid: number, name = alpha) => {
+      writeFileSync(
+        path.join(registryDir, `${pid}.json`),
+        JSON.stringify({ pid, name, startedAt: later, status: 'idle', cwd: '/repo' }),
+      );
+      deps.isAlive = (p) => p === pid;
+    };
+
+    it('re-records a session whose pid changed, touching only its entry', () => {
+      const before = readRoster(boardDir);
+      handRestart(9999);
+      const result = hierarchyRegister({ session: alpha }, deps);
+      expect(entryOf(alpha)).toMatchObject({
+        pid: 9999,
+        startedAt: new Date(later).toISOString(),
+        status: 'running',
+      });
+      expect(result.after.pid).toBe(9999);
+      for (const e of before.sessions.filter((x) => x.name !== alpha)) {
+        expect(readRoster(boardDir).sessions).toContainEqual(e);
+      }
+    });
+
+    it('does nothing when the roster already matches the live session', () => {
+      const old = entryOf(alpha) as RosterEntry;
+      deps.isAlive = (p) => p === old.pid;
+      const result = hierarchyRegister({ session: alpha }, deps);
+      expect(result.unchanged).toBe(true);
+      expect(entryOf(alpha)).toEqual(old);
+    });
+
+    it('refuses when no live harness session carries the name', () => {
+      expect(() => hierarchyRegister({ session: alpha }, deps)).toThrow(
+        /no live harness session is registered.*cli-hierarchy restart/,
+      );
+    });
+
+    it('refuses a pid that belongs to another roster entry', () => {
+      const other = entryOf(Q('executor-beta')) as RosterEntry;
+      handRestart(other.pid);
+      expect(() => hierarchyRegister({ session: alpha }, deps)).toThrow(/already belongs/);
+    });
+
+    it('refuses a closed window, a missing marker and an unreadable pane', () => {
+      fake.owned.delete(alpha);
+      expect(() => hierarchyRegister({ session: alpha }, deps)).toThrow(/marker/);
+      fake.owned.add(alpha);
+      const run = deps.run;
+      deps.run = (f, a, o) =>
+        a[0] === 'display-message' && a.includes('#{pane_id} #{pane_pid}')
+          ? { status: 1, stdout: '', stderr: '' }
+          : run(f, a, o);
+      expect(() => hierarchyRegister({ session: alpha }, deps)).toThrow(/pane cannot be read/);
+      deps.run = run;
+      fake.windows = fake.windows.filter((w) => w !== alpha);
+      expect(() => hierarchyRegister({ session: alpha }, deps)).toThrow(/is not open/);
+    });
+
+    it('refuses a pane whose command lacks the launch environment', () => {
+      handRestart(9999);
+      const run = deps.run;
+      deps.run = (f, a, o) =>
+        a[0] === 'display-message' && a.includes('#{pane_start_command}')
+          ? { status: 0, stdout: 'claude --name x\n', stderr: '' }
+          : run(f, a, o);
+      expect(() => hierarchyRegister({ session: alpha }, deps)).toThrow(
+        /AI_SDLC_HIERARCHY_SESSION/,
+      );
+    });
   });
 });
