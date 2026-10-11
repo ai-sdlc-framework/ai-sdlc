@@ -2001,7 +2001,6 @@ describe('hierarchy-launch-env check', () => {
   });
 });
 
-<<<<<<< HEAD
 // ── checkIdleSessions (AISDLC-765) ──────────────────────────────────────
 
 describe('checkIdleSessions', () => {
@@ -2083,7 +2082,9 @@ describe('checkIdleSessions', () => {
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
-=======
+  });
+});
+
 // ── backlog-drift-warnings (AISDLC-797) ───────────────────────────────
 
 describe('backlog-drift-warnings check', () => {
@@ -2120,6 +2121,5 @@ describe('backlog-drift-warnings check', () => {
 
   it('is registered', () => {
     expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('backlog-drift-warnings');
->>>>>>> 4d17cc50 (fix: ban shell-captured tool JSON in workflows and run gate scripts on main (AISDLC-797))
   });
 });
