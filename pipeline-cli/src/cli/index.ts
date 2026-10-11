@@ -37,6 +37,7 @@ import { runStageACorpus } from '../dor/corpus.js';
 import {
   refineBacklogTask,
   stripFrontmatter,
+  applyFrontmatterFields,
   declaredDependencyRefsFromFrontmatter,
 } from '../dor/ingress-claude.js';
 import { decideStaleness } from '../dor/staleness.js';
@@ -836,6 +837,10 @@ export function buildCli(): Argv {
               stripFrontmatter(body).frontmatter,
             );
             if (declared.length > 0) input.declaredDependencyRefs = declared;
+            applyFrontmatterFields(input, stripFrontmatter(body).frontmatter);
+            // CI passes no --title for tasks; use the frontmatter title so the
+            // five-step review check can key on a `fix` title (AISDLC-804).
+            if (!argv.title) input.title = stripFrontmatter(body).title || input.title;
           }
           const verdict = await evaluateIssue(input, { hermetic: argv.hermetic as boolean });
           // AISDLC-161: persist a calibration entry on EVERY evaluation so the

@@ -42,7 +42,11 @@ import {
   type DorConfig,
   type DorEvaluationMode,
 } from './dor-config.js';
-import { checkUpstreamOqs, type UpstreamOqCheckResult } from './upstream-oq-gate.js';
+import {
+  checkUpstreamOqs,
+  extractBlockedReason,
+  type UpstreamOqCheckResult,
+} from './upstream-oq-gate.js';
 import { extractDeclaredDependencyRefs } from './gates/gate-7-deps.js';
 import type { IssueInput, RefinementVerdict } from './types.js';
 
@@ -128,6 +132,27 @@ export function declaredDependencyRefsFromFrontmatter(frontmatter: string): stri
   return extractDeclaredDependencyRefs(frontmatter);
 }
 
+/** `labels:` entries from raw frontmatter (block list or inline `[a, b]`). */
+export function extractLabels(frontmatter: string): string[] {
+  const unq = (s: string): string => s.trim().replace(/^['"]|['"]$/g, '');
+  const inline = frontmatter.match(/^labels:\s*\[(.*)\]\s*$/m);
+  if (inline) return (inline[1] ?? '').split(',').map(unq).filter(Boolean);
+  const block = frontmatter.match(/^labels:\s*\n((?:[ \t]+-[ \t]+.+\n?)*)/m);
+  if (!block) return [];
+  return (block[1] ?? '')
+    .split('\n')
+    .map((l) => unq(l.replace(/^\s+-\s+/, '')))
+    .filter(Boolean);
+}
+
+/** Attach the frontmatter fields the Stage A gates key on (labels, blocked.reason). */
+export function applyFrontmatterFields(input: IssueInput, frontmatter: string): void {
+  const labels = extractLabels(frontmatter);
+  if (labels.length > 0) input.labels = labels;
+  const blocked = extractBlockedReason(frontmatter);
+  if (blocked) input.blockedReason = blocked;
+}
+
 /**
  * Strip Backlog.md frontmatter to get just the task body. The DoR rubric
  * scores the body, not the YAML preamble. Returns the input unchanged if
@@ -153,7 +178,11 @@ export function stripFrontmatter(raw: string): {
   const fm = fmMatch[1] ?? '';
   const body = fmMatch[2] ?? '';
   const titleMatch = fm.match(/^title:\s*(.+?)\s*$/m);
-  const titleRaw = titleMatch?.[1] ?? '';
+  let titleRaw = titleMatch?.[1] ?? '';
+  // Folded/literal block scalar (`title: >-` + indented line): take the text line.
+  if (/^[>|][-+]?$/.test(titleRaw)) {
+    titleRaw = fm.match(/^title:\s*[>|][-+]?\s*\n[ \t]+(.+)$/m)?.[1]?.trim() ?? '';
+  }
   // Strip surrounding single/double quotes.
   const title = titleRaw.replace(/^['"]|['"]$/g, '');
   const createdByMatch = fm.match(/^created_by:\s*(.+?)\s*$/m);
@@ -218,6 +247,7 @@ export async function refineBacklogTask(
   // lists in so a body reference to an already-declared dependency passes.
   const declaredDependencyRefs = declaredDependencyRefsFromFrontmatter(frontmatter);
   if (declaredDependencyRefs.length > 0) input.declaredDependencyRefs = declaredDependencyRefs;
+  applyFrontmatterFields(input, frontmatter);
 
   // Phase 4 (RFC-0011 §6.4 + AISDLC-115.5) — resolve the auto-pass match
   // against the project's configured rules. When a rule matches, fold its

@@ -37,7 +37,7 @@ describe('evaluateIssue (Stage A only)', () => {
   it('admits a well-formed issue', async () => {
     const v = await evaluateIssue(
       input(
-        '## Description\nFix typo in `pipeline-cli/src/index.ts`.\n## Acceptance Criteria\n- [ ] #1 Fix the typo\n',
+        '## Description\nFix typo in `pipeline-cli/src/index.ts`.\n## Acceptance Criteria\n- [ ] #1 Fix the typo\n\n**Five-step review (requirements first).** Requirement set by DEC-1; nothing to delete.\n',
         'fix RFC-0011 reference',
       ),
       { hermetic: true },

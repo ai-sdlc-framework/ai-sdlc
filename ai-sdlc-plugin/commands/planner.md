@@ -150,6 +150,14 @@ rationale and how to reverse it, then the timeboxed decisions not yet applied.
 `--mark` records now as the last-digest time. The operator overrides with the
 existing `cli-decisions answer` and `cli-decisions extend` commands.
 
+## Task template: Five-step review (AISDLC-804, DEC-0090)
+
+Every task that fixes a failure or adds a rule (labels `bug`, `fix`, `stability`, `root-cause`, `governance`, `hooks`, `ci`, or a title starting with `fix`) opens its Fix with this paragraph. The deterministic DoR gate (Gate 2) returns `needs-clarification` without it, and it must name a deletion ("Delete", "Deleted" or "nothing to delete"). A `blocked.reason` in frontmatter overrides.
+
+```markdown
+**Five-step review (requirements first).** 1. Requirement questioned: <the requirement and who or which decision set it>. 2. Deleted: <the part or process removed, or "nothing to delete" and why>. 3. Simplified or optimised: <what, after the deletion>. 4. Accelerated: <cycle-time change, after steps 1 to 3>. 5. Automated: <what, last>.
+```
+
 ## Step 5 — Hand-off flow
 
 To send work to dispatch:
