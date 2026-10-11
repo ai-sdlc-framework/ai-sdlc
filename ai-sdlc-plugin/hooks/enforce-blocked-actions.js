@@ -1056,7 +1056,11 @@ function realpathOrDeny(p) {
     return realpathDeepest(p);
   } catch (e) {
     if (e instanceof SymlinkCapError) {
-      deny(`path '${p}' has a symlink chain too deep to resolve; refusing the write.`);
+      deny(
+        `path '${p}' has a symlink chain too deep to resolve; refusing the write. Next step: write ` +
+          `to a path without the symlink chain, or record the need with ` +
+          `'node pipeline-cli/bin/cli-decisions.mjs escalate'.`,
+      );
     }
     throw e;
   }
