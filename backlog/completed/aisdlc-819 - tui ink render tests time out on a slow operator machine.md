@@ -2,7 +2,7 @@
 id: AISDLC-819
 title: >-
   TUI ink render tests time out on a slow operator machine: raise the timeout for src/tui tests or remove the slow render
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-11'
 labels:
