@@ -2,7 +2,7 @@
 id: AISDLC-695
 title: >-
   RFC-0052: review plan validator caps run probes at two in total, baseline included
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-03'
 labels:
@@ -18,6 +18,7 @@ references:
   - spec/rfcs/RFC-0052-staged-review-pipeline.md
 priority: medium
 dispatchable: true
+updated_date: '2026-10-11 00:25'
 ---
 
 ## Description
@@ -52,9 +53,33 @@ and over leaving the mismatch (every maximal plan loses a probe).
    body for that task.
 
 ## Acceptance Criteria
-- [ ] A plan with one baseline run probe and one added run probe validates; with two added it is rejected with the total and the limit in the message.
-- [ ] A plan the validator accepts is never reduced by the executor's run cap (property-style test over generated plans with 0 to 4 run probes).
-- [ ] The validator and the executor import the same default limit (asserted by a test on the exports).
-- [ ] The fallback plan builder's output always validates against the same limit.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] A plan with one baseline run probe and one added run probe validates; with two added it is rejected with the total and the limit in the message.
+- [x] A plan the validator accepts is never reduced by the executor's run cap (property-style test over generated plans with 0 to 4 run probes).
+- [x] The validator and the executor import the same default limit (asserted by a test on the exports).
+- [x] The fallback plan builder's output always validates against the same limit.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+## Summary
+The review plan validator now counts every run probe in a plan, baseline included, against `maxRunProbes` (default `DEFAULT_MAX_RUN_PROBES` = 2), matching the executor's cap. A plan with one baseline run probe and two added ones is now rejected instead of validating and then losing a probe at execution.
+
+## Changes
+- `pipeline-cli/src/review-plan/validate.ts` (modified): counts all run probes; rejection message states total, baseline count and limit.
+- `pipeline-cli/src/review-plan/fallback.ts` (modified): fails closed with `baseline-over-ceiling` when the baseline alone exceeds the run limit.
+- `pipeline-cli/src/review-plan/types.ts` (modified): `maxRunProbes` doc updated.
+- `pipeline-cli/src/review-plan/review-plan.test.ts`, `executor.test.ts` (modified): new and adjusted tests, including a 0-4 run-probe property-style test and a test pinning the executor default to the exported constant.
+
+## Design decisions
+- **One limit**: the executor already imports `DEFAULT_MAX_RUN_PROBES` from `validate.ts`; no second constant exists.
+- **Planner prompt (AISDLC-674)**: there is no prompt builder in the repo; `ai-sdlc-plugin/agents/review-planner.md` already states at most two run probes in total, baseline included. A future dynamic builder must compute allowed added run probes as limit minus baseline run probes.
+
+## Verification
+- `pnpm build` — clean
+- `pnpm test` (review-plan) — 282 passed; pipeline-cli full run has 14 failures in unrelated attestation/verify-runtime, cli/bin-invocation and tui tests, not touched by this change; CI is the gate
+- `pnpm lint`, `pnpm format:check` — clean on touched files
+- 3 reviews approved (code and test on Claude-native agents because Codex hit its usage limit)
+
+## Follow-up
+(none)
