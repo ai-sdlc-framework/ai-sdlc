@@ -54,6 +54,9 @@ import {
 import { formatTranscriptTable, listTranscripts } from '../attestation/transcript-capture.js';
 import { AGENT_ID_PATTERN } from '../attestation/verdict-class.js';
 import { loadVerifyCore } from '../attestation/verify-core-loader.js';
+import { deriveReviewerSetFromGit } from '../steps/reviewer-set.js';
+import { summarizeComparisonWindow } from '../steps/reviewer-set-comparison.js';
+import { resolveArtifactsDir } from '../routing/artifacts-dir.js';
 import {
   loadAttestationRuntime,
   TrustedRuntimeResolutionError,
@@ -1015,6 +1018,59 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           );
         },
       )
+      // ── reviewer-set (AISDLC-722) ─────────────────────────────────────────────
+      .command(
+        'reviewer-set',
+        'Print the reviewer set the PR diff requires (DEC-0055): the two-reviewer set when the ' +
+          'diff touches no trust-chain path, else three. Same classifier the CI verifier ' +
+          're-derives from the same diff. Config is read from the base ref, never the worktree. ' +
+          'Prints JSON {set, reviewers, reason, triggeringPaths}; fails closed to three.',
+        (y: Argv) =>
+          y
+            .option('repo-root', {
+              type: 'string',
+              default: process.cwd(),
+              describe: 'Worktree root (default: cwd).',
+            })
+            .option('base-ref', {
+              type: 'string',
+              default: 'origin/main',
+              describe: 'Base ref the diff and the trusted review config are read from.',
+            })
+            .option('head-ref', {
+              type: 'string',
+              default: 'HEAD',
+              describe: 'Head ref of the diff.',
+            }),
+        (args) => {
+          emitJson(
+            deriveReviewerSetFromGit({
+              repoRoot: resolve(args['repo-root'] as string),
+              baseRef: args['base-ref'] as string,
+              headRef: args['head-ref'] as string,
+            }),
+          );
+        },
+      )
+      // ── reviewer-set-window (AISDLC-722) ───────────────────────────────────────
+      .command(
+        'reviewer-set-window',
+        'Summarise the two-reviewer-default comparison window (first 20 PRs or one week): ' +
+          'PR counts per set, sampled PRs and the disagreements between the two sets, as JSON ' +
+          'for the decision digest.',
+        (y: Argv) =>
+          y.option('artifacts-dir', {
+            type: 'string',
+            describe: 'Artifacts directory (default: $ARTIFACTS_DIR or <cwd>/.ai-sdlc/artifacts).',
+          }),
+        (args) => {
+          emitJson(
+            summarizeComparisonWindow(
+              resolveArtifactsDir(process.cwd(), args['artifacts-dir'] as string | undefined),
+            ),
+          );
+        },
+      )
       // ── generate-nonce (AISDLC-573) ───────────────────────────────────────────
       .command(
         'generate-nonce',
@@ -1265,7 +1321,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
       )
       .demandCommand(
         1,
-        'Specify a subcommand (e.g. transcripts list, merkle-root, merkle-proof, sign-v6, inspect-v6, emit-leaf, generate-nonce, nonce-marker, verify, independence-policy, print-patch-id-exclusions)',
+        'Specify a subcommand (e.g. transcripts list, merkle-root, merkle-proof, sign-v6, inspect-v6, emit-leaf, generate-nonce, nonce-marker, verify, independence-policy, print-patch-id-exclusions, reviewer-set, reviewer-set-window)',
       )
       .help()
       .alias('h', 'help')

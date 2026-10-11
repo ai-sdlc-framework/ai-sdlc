@@ -17,3 +17,23 @@ export function checkReviewerCoverage(
   opts?: { securityAlways?: boolean },
 ): { ok: boolean; missing: string[] };
 export function isPathMissingGitError(err: unknown): boolean;
+export type ReviewerKind = 'correctness-only' | 'two' | 'three';
+export function isSuspectPath(path: unknown): boolean;
+export function isTrustChainPath(path: string): boolean;
+export function matchTrustChainPaths(paths: readonly string[]): string[];
+export function parseReviewerSetConfig(
+  yaml: string | null | undefined,
+): 'three' | 'code-test-merged' | 'auto' | null;
+export function requiredReviewerKind(
+  paths: readonly string[] | null | undefined,
+  opts?: { securityAlways?: boolean; requireThree?: boolean },
+): {
+  kind: ReviewerKind;
+  classification: ReviewScopeClassification;
+  reason: string;
+  triggeringPaths: string[];
+};
+export function checkReviewerKindCoverage(
+  reviewerNames: readonly string[],
+  kind: ReviewerKind,
+): { ok: boolean; missing: string[] };

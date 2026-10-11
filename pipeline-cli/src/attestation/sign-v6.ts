@@ -113,7 +113,8 @@ export interface AttestationEnvelopeV6 {
   signerIdentity?: string;
   signedAt: string;
   /**
-   * AISDLC-723: classification + applied reviewer set recorded by the signer.
+   * AISDLC-723 / AISDLC-722: classification, the reviewer kind the diff
+   * requires (and why) and the reviewers that applied, recorded by the signer.
    * Informational only; the CI verifier re-derives the classification from the
    * diff and never reads this field.
    */
@@ -568,6 +569,13 @@ export function formatV6Envelope(envelope: AttestationEnvelopeV6): string {
     lines.push(`Signer         : ${envelope.signerIdentity}`);
   }
   lines.push(`Leaf count     : ${envelope.leafCount}`);
+  if (envelope.reviewScope) {
+    const { requiredSet, reason, triggeringPaths } = envelope.reviewScope;
+    lines.push(
+      `Reviewer set   : ${requiredSet} (${reason}` +
+        `${triggeringPaths.length > 0 ? `: ${triggeringPaths.slice(0, 3).join(', ')}` : ''}) [audit-only]`,
+    );
+  }
   lines.push(`Root hash      : ${envelope.rootHash}`);
   lines.push(
     `Root signature : ${envelope.rootSignature.slice(0, 32)}... (base64, ${envelope.rootSignature.length} chars)`,

@@ -450,6 +450,74 @@ describe('runReconcile — orchestration', () => {
     expect(stepNames.filter((n) => n.startsWith('emit-leaf:'))).toHaveLength(2);
   });
 
+  // AISDLC-722 — with no explicit `reviewers`, the set is derived from the diff.
+  it('derives the two-reviewer set when the diff touches no trust-chain path', () => {
+    writeDevVerdict(boardDir);
+    const { spawn } = makeSpawnRecorder();
+    const result = runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      spawn,
+      deriveReviewerSet: () => ({
+        set: 'two',
+        reviewers: ['correctness-reviewer', 'security-reviewer'],
+        reason: 'no-trust-chain-path',
+        triggeringPaths: [],
+      }),
+    });
+    const names = result.steps.map((s) => s.name);
+    expect(names).toContain('reviewer-set');
+    expect(names).not.toContain('salvage-transcript:code-reviewer');
+    expect(names).toContain('salvage-transcript:security-reviewer');
+  });
+
+  it('derives the three-reviewer set and logs the trust-chain paths that forced it', () => {
+    writeDevVerdict(boardDir);
+    const { spawn } = makeSpawnRecorder();
+    let seen: [string, string] | undefined;
+    const result = runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      spawn,
+      deriveReviewerSet: (wt, branch) => {
+        seen = [wt, branch];
+        return {
+          set: 'three',
+          reviewers: ['code-reviewer', 'test-reviewer', 'security-reviewer'],
+          reason: 'trust-chain-path',
+          triggeringPaths: ['ai-sdlc-plugin/hooks/x.js'],
+        };
+      },
+    });
+    expect(seen?.[0]).toBe(worktreePath);
+    expect(seen?.[1]).toBe('main');
+    const step = result.steps.find((s) => s.name === 'reviewer-set');
+    expect(step?.output).toContain('three (trust-chain-path)');
+    expect(step?.output).toContain('ai-sdlc-plugin/hooks/x.js');
+    expect(result.steps.map((s) => s.name)).toContain('salvage-transcript:code-reviewer');
+  });
+
+  it('an explicit reviewers override skips the derivation', () => {
+    writeDevVerdict(boardDir);
+    const { spawn } = makeSpawnRecorder();
+    const result = runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      spawn,
+      reviewers: RECONCILE_REVIEWERS_MERGED,
+      deriveReviewerSet: () => {
+        throw new Error('must not be called');
+      },
+    });
+    expect(result.steps.map((s) => s.name)).not.toContain('reviewer-set');
+  });
+
   // AISDLC-606 — reconcile's fetch+rebase must honor spec.branching.targetBranch
   // instead of a hardcoded 'main'.
   it('fetches + rebases onto the resolved target branch (develop-based repo)', () => {

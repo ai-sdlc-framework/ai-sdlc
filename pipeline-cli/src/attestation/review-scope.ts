@@ -1,7 +1,8 @@
 /**
  * Signer-side review-scope record (AISDLC-723).
  *
- * Derives the diff classification and the reviewer set that applied, so the
+ * Derives the diff classification, the reviewer kind it requires and the
+ * reviewers that applied, so the
  * envelope can RECORD them. The record is informational: the CI verifier
  * (`verify-core.mjs` `enforceReviewScope`) re-derives the classification from
  * the diff and never reads this field, so a signer cannot assert a class.
@@ -11,18 +12,24 @@
 
 import { execFileSync } from 'node:child_process';
 import {
-  classifyReviewScope,
   isPathMissingGitError,
+  parseReviewerSetConfig,
   parseSecurityReviewAlways,
-  reviewerSetKindFor,
+  requiredReviewerKind,
   type ReviewScopeClassification,
+  type ReviewerKind,
 } from '../../attestation-core/review-scope-core.mjs';
 import { PATCH_ID_EXCLUSIONS } from './patch-id.js';
 
 export interface EnvelopeReviewScope {
   classification: ReviewScopeClassification;
   securityAlways: boolean;
-  requiredSet: 'correctness-only' | 'full';
+  /** The reviewer kind the diff requires (AISDLC-722 adds `two` and `three`). */
+  requiredSet: ReviewerKind;
+  /** Why the diff classified as it did (path or rule). */
+  reason: string;
+  /** Trust-chain paths that forced the three-reviewer set. */
+  triggeringPaths: string[];
   appliedReviewers: string[];
 }
 
@@ -83,14 +90,20 @@ export function deriveEnvelopeReviewScope(
     ],
     repoRoot,
   );
-  const paths = listing === null ? [] : listing.split('\0').filter(Boolean);
-  const { classification } = classifyReviewScope(paths);
+  const paths = listing === null ? null : listing.split('\0').filter(Boolean);
   const baseConfig = readBaseReviewConfig(baseRef, repoRoot);
   const securityAlways = baseConfig === null ? true : parseSecurityReviewAlways(baseConfig);
+  const requireThree = baseConfig !== null && parseReviewerSetConfig(baseConfig) === 'three';
+  const { kind, classification, reason, triggeringPaths } = requiredReviewerKind(paths, {
+    securityAlways,
+    requireThree,
+  });
   return {
     classification,
     securityAlways,
-    requiredSet: reviewerSetKindFor(classification, { securityAlways }),
+    requiredSet: kind,
+    reason,
+    triggeringPaths: triggeringPaths.slice(0, 20),
     appliedReviewers: [...reviewerNames],
   };
 }

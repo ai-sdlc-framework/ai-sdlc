@@ -118,11 +118,11 @@ import {
   verifyInclusion as coreVerifyInclusion,
 } from './merkle-core.mjs';
 import {
-  checkReviewerCoverage,
-  classifyReviewScope,
+  checkReviewerKindCoverage,
   isPathMissingGitError,
+  parseReviewerSetConfig,
   parseSecurityReviewAlways,
-  reviewerSetKindFor,
+  requiredReviewerKind,
 } from './review-scope-core.mjs';
 
 /**
@@ -336,6 +336,7 @@ export function computeSubjectChangedPaths(subjectSha, mergeBase, repoRoot) {
         '-r',
         '--no-renames',
         '--name-only',
+        '-z',
         mergeBase,
         subjectSha,
         '--',
@@ -347,10 +348,9 @@ export function computeSubjectChangedPaths(subjectSha, mergeBase, repoRoot) {
         maxBuffer: 128 * 1024 * 1024,
       },
     );
-    const paths = out
-      .split('\n')
-      .map((p) => p.trim())
-      .filter(Boolean);
+    // `-z`: NUL-separated, never C-quoted (AISDLC-722: a quoted non-ASCII path
+    // would match no trust-chain glob).
+    const paths = out.split('\0').filter(Boolean);
     // Empty result (e.g. attestation-only commit) → return empty array, not null.
     // isTreeEquivalentModuloAttestation treats empty changedPaths as whole-tree fallback.
     return paths;
@@ -1133,7 +1133,8 @@ export function v6ResolveLeavesForEnvelope(repoRoot, envelope, patchIdHint) {
  * and its `reviewScope` field are editable after signing and never trusted.
  * A result without `verifiedReviewerNames` fails closed.
  *
- * Fails closed: when the diff cannot be listed the classification is `full`.
+ * Fails closed: when the diff cannot be listed the three-reviewer set is required.
+ * AISDLC-722 adds the `two` and `three` kinds on top of the AISDLC-723 correctness-only kind.
  * The keep-security-everywhere config is read from `baseSha` via `git show`,
  * never from the PR worktree.
  *
@@ -1171,35 +1172,42 @@ export function enforceReviewScope(result, { repoRoot, baseSha, headSha, mergeBa
       paths = null;
     }
   }
-  const { classification, reason } = classifyReviewScope(paths ?? []);
   // Fail closed: only a definite "file does not exist at base" means no config.
   let securityAlways = true;
+  let requireThree = false;
   if (/^[0-9a-f]{40}$/i.test(baseSha ?? '')) {
     try {
-      securityAlways = parseSecurityReviewAlways(
-        execFileSync('git', ['show', `${baseSha}:.ai-sdlc/review-config.yaml`], {
-          cwd: repoRoot,
-          encoding: 'utf-8',
-          stdio: ['ignore', 'pipe', 'pipe'],
-        }),
-      );
+      const baseConfig = execFileSync('git', ['show', `${baseSha}:.ai-sdlc/review-config.yaml`], {
+        cwd: repoRoot,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      securityAlways = parseSecurityReviewAlways(baseConfig);
+      requireThree = parseReviewerSetConfig(baseConfig) === 'three';
     } catch (err) {
       securityAlways = !isPathMissingGitError(err);
     }
   }
-  const names = Array.isArray(result.verifiedReviewerNames) ? result.verifiedReviewerNames : [];
-  const coverage = checkReviewerCoverage(
-    names.filter((n) => typeof n === 'string'),
-    classification,
-    { securityAlways },
-  );
+  // AISDLC-722: `paths === null` (diff unreadable) requires three; so does a
+  // trust-chain path. AISDLC-723: a test-only or docs-adjacent diff needs the
+  // correctness review alone. Anything else needs correctness + security.
+  const { kind, classification, reason, triggeringPaths } = requiredReviewerKind(paths, {
+    securityAlways,
+    requireThree,
+  });
+  const names = (
+    Array.isArray(result.verifiedReviewerNames) ? result.verifiedReviewerNames : []
+  ).filter((n) => typeof n === 'string');
+  const coverage = checkReviewerKindCoverage(names, kind);
   if (!coverage.ok) {
+    const shown = triggeringPaths.slice(0, 3).join(', ');
+    const why = shown ? `${reason}: ${shown}${triggeringPaths.length > 3 ? ', ...' : ''}` : reason;
     return {
       status: 'invalid',
       reason:
-        `v6: reviewer set incomplete for a '${classification}' diff` +
+        `v6: reviewer set incomplete for a '${classification}' diff: the diff requires the ${kind} reviewer set` +
         `${securityAlways ? ' (securityReview: always)' : ''}: missing ${coverage.missing.join(', ')}` +
-        ` (${safeForReason(reason, 80)})`,
+        ` (${safeForReason(why, 120)})`,
     };
   }
   return {
@@ -1207,8 +1215,10 @@ export function enforceReviewScope(result, { repoRoot, baseSha, headSha, mergeBa
     reviewScope: {
       classification,
       securityAlways,
-      requiredSet: reviewerSetKindFor(classification, { securityAlways }),
-      appliedReviewers: names.filter((n) => typeof n === 'string'),
+      requiredSet: kind,
+      reason: safeForReason(reason, 120),
+      triggeringPaths: triggeringPaths.slice(0, 20).map((p) => safeForReason(p, 120)),
+      appliedReviewers: names,
     },
   };
 }

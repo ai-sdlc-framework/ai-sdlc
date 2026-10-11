@@ -28,11 +28,15 @@ import type { DeveloperReturn } from './types.js';
 let tmp: string;
 let savedSet: string | undefined;
 beforeEach(() => {
+  // AISDLC-722: these tests drive the three-reviewer mechanics; requiring three always is the
+  // explicit way to get them now that the default is derived from the diff.
+  process.env.AI_SDLC_REVIEWER_SET = 'three';
   tmp = makeTmpProject();
   seen.length = 0;
   savedSet = process.env.AI_SDLC_REVIEWER_SET;
 });
 afterEach(() => {
+  delete process.env.AI_SDLC_REVIEWER_SET;
   cleanupTmpProject(tmp);
   if (savedSet === undefined) delete process.env.AI_SDLC_REVIEWER_SET;
   else process.env.AI_SDLC_REVIEWER_SET = savedSet;

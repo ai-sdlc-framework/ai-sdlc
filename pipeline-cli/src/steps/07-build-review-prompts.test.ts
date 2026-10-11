@@ -57,7 +57,7 @@ describe('Step 7 — buildReviewPrompts', () => {
       )
       .on(
         /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
-        ok('a.ts\0b.ts\0'),
+        ok('ai-sdlc-plugin/hooks/a.js\0b.ts\0'),
       );
     const r = await buildReviewPrompts({
       taskId: 'AISDLC-1',
@@ -68,13 +68,19 @@ describe('Step 7 — buildReviewPrompts', () => {
       runner: fake.toRunner(),
       codexAvailable: false,
     });
+    // AISDLC-722: a trust-chain path in the diff forces the three-reviewer set.
     expect(r.prompts).toHaveLength(3);
     expect(r.prompts.map((p) => p.reviewer)).toEqual([
       'code-reviewer',
       'test-reviewer',
       'security-reviewer',
     ]);
-    expect(r.changedFiles).toEqual(['a.ts', 'b.ts']);
+    expect(r.changedFiles).toEqual(['ai-sdlc-plugin/hooks/a.js', 'b.ts']);
+    expect(r.reviewerSet).toEqual({
+      set: 'three',
+      reason: 'trust-chain-path',
+      triggeringPaths: ['ai-sdlc-plugin/hooks/a.js'],
+    });
     expect(r.diff).toContain('diff content');
   });
 
@@ -178,7 +184,7 @@ describe('Step 7 — buildReviewPrompts', () => {
       )
       .on(
         /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
-        ok('a.ts\0'),
+        ok('ai-sdlc-plugin/hooks/a.js\0'),
       );
     const r = await buildReviewPrompts({
       taskId: 'AISDLC-1',
@@ -290,9 +296,11 @@ describe('Step 7 — buildReviewPrompts', () => {
   // not a git repo, so the trusted `git show origin/main:...` read
   // necessarily fails closed to the default three-reviewer set — exactly
   // the fail-safe behavior required even when origin/main is unreachable.
-  it('SECURITY: a worktree-local review-config.yaml does NOT opt the PR into the merged set', async () => {
+  // AISDLC-722: the default is now diff-derived, so the worktree copy is shown to be ignored
+  // from the other side: a worktree `reviewerSet: three` does not force three on a safe diff.
+  it('SECURITY: a worktree-local review-config.yaml is never read (neither opts in nor out)', async () => {
     mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
-    writeFileSync(join(tmp, '.ai-sdlc', 'review-config.yaml'), 'reviewerSet: code-test-merged\n');
+    writeFileSync(join(tmp, '.ai-sdlc', 'review-config.yaml'), 'reviewerSet: three\n');
     const fake = new FakeRunner()
       .on(
         /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
@@ -311,12 +319,7 @@ describe('Step 7 — buildReviewPrompts', () => {
       runner: fake.toRunner(),
       codexAvailable: false,
     });
-    expect(r.prompts).toHaveLength(3);
-    expect(r.prompts.map((p) => p.reviewer)).toEqual([
-      'code-reviewer',
-      'test-reviewer',
-      'security-reviewer',
-    ]);
+    expect(r.prompts.map((p) => p.reviewer)).toEqual(['correctness-reviewer', 'security-reviewer']);
   });
 
   // AISDLC-606 — diff against the resolved target branch, not a hardcoded
@@ -545,6 +548,8 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
   };
 
   const THREE = ['code-reviewer', 'test-reviewer', 'security-reviewer'];
+  // AISDLC-722: with nothing configured the default for a non-trust-chain diff is two.
+  const TWO = ['correctness-reviewer', 'security-reviewer'];
 
   it('selects the merged set for a trusted backlog task in enforce', async () => {
     expect(await runWith(judgmentCtx('enforce'), 'backlog')).toEqual([
@@ -553,11 +558,11 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
     ]);
   });
 
-  it('keeps the three-reviewer default in shadow, for gh-issue, and with no sourceKind', async () => {
-    expect(await runWith(judgmentCtx('shadow'), 'backlog')).toEqual(THREE);
-    expect(await runWith(judgmentCtx('enforce'), 'gh-issue')).toEqual(THREE);
-    expect(await runWith(judgmentCtx('enforce'), undefined)).toEqual(THREE);
-    expect(await runWith(undefined, 'backlog')).toEqual(THREE);
+  it('keeps the diff-derived default in shadow, for gh-issue, and with no sourceKind', async () => {
+    expect(await runWith(judgmentCtx('shadow'), 'backlog')).toEqual(TWO);
+    expect(await runWith(judgmentCtx('enforce'), 'gh-issue')).toEqual(TWO);
+    expect(await runWith(judgmentCtx('enforce'), undefined)).toEqual(TWO);
+    expect(await runWith(undefined, 'backlog')).toEqual(TWO);
   });
 
   it('review.routing adds reviewers back after the merged set is selected', async () => {
@@ -593,7 +598,7 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
       recordRouting: false,
       judgment: ctx,
     });
-    expect(r.prompts).toHaveLength(3);
+    expect(r.prompts).toHaveLength(2);
   });
 
   const DIFF_RE =
@@ -645,6 +650,7 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
 
   it('a quoted path from git fails closed', async () => {
     const fake = runner(ok(GOOD_DIFF), ok('".github/workflows/d\\303\\251ploy.yml"\0'));
+    // AISDLC-722: a quoted path fails closed to the three-reviewer set.
     expect(await reviewersFor(fake, judgmentCtx('enforce'))).toEqual(THREE);
   });
 
@@ -685,7 +691,7 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
       sourceKind: 'gh-issue',
       judgment: withSink(),
     });
-    expect(r.prompts.map((p) => p.reviewer)).toEqual(THREE);
+    expect(r.prompts.map((p) => p.reviewer)).toEqual(TWO);
     expect(seen.some((x) => x?.startsWith('review.reviewer-set:'))).toBe(false);
   });
 
@@ -707,7 +713,7 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
         })
       ).prompts.map((p) => p.reviewer);
     expect(await run(1)).toEqual(['correctness-reviewer', 'security-reviewer']);
-    expect(await run(2)).toEqual(THREE);
+    expect(await run(2)).toEqual(TWO);
   });
 
   it('the diff command forces a text diff so a -diff attribute cannot hide content', async () => {
@@ -772,7 +778,7 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
     const NUMSTAT_RE = /diff --numstat -z/;
     const fake = runner(ok(GOOD_DIFF), ok('src/a.ts\0')).on(NUMSTAT_RE, ok('-\t-\tsrc/a.ts\0'));
     // runner() registers DIFF/FILES first; numstat never matches those, so it reaches NUMSTAT_RE.
-    expect(await reviewersFor(fake, judgmentCtx('enforce'))).toEqual(THREE);
+    expect(await reviewersFor(fake, judgmentCtx('enforce'))).toEqual(TWO);
   });
 
   it('a failed numstat call marks the diff unavailable and vetoes', async () => {
@@ -815,7 +821,7 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
         judgment: judgmentCtx('enforce'),
       })
     ).prompts.map((p) => p.reviewer);
-    expect(reviewers).toEqual(THREE);
+    expect(reviewers).toEqual(TWO);
   });
 
   it('real repo: a committed binary file (NUL bytes) vetoes the merged set and is stubbed in the prompt', async () => {
@@ -846,7 +852,7 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
         sourceKind: 'backlog',
         judgment: judgmentCtx('enforce'),
       });
-      expect(r.prompts.map((p) => p.reviewer)).toEqual(THREE);
+      expect(r.prompts.map((p) => p.reviewer)).toEqual(TWO);
       expect(r.diffUnavailable).toBe(false);
       expect(r.diff).toContain('+two');
       expect(r.diff).not.toContain('\u0000');

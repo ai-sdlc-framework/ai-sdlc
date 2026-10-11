@@ -376,8 +376,9 @@ describe('enforceReviewScope (CI verifier re-derivation)', () => {
       'src/a.test.ts': 'x',
       '.ai-sdlc/review-config.yaml': 'securityReview: always\n',
     });
-    // .ai-sdlc/ is trust-chain so the diff is full anyway; confirm the base read is empty.
-    const r = enforceReviewScope(withNames('correctness-reviewer', 'security-reviewer'), {
+    // .ai-sdlc/ is trust-chain so the diff needs three reviewers (AISDLC-722); confirm the base
+    // read is empty.
+    const r = enforceReviewScope(withNames('code-reviewer', 'test-reviewer', 'security-reviewer'), {
       repoRoot: dir,
       baseSha: base,
       headSha: head,
@@ -453,6 +454,8 @@ describe('deriveEnvelopeReviewScope (signer record)', () => {
       classification: 'test-only',
       securityAlways: false,
       requiredSet: 'correctness-only',
+      reason: 'every path is a test, fixture or snapshot',
+      triggeringPaths: [],
       appliedReviewers: ['correctness-reviewer'],
     });
   });

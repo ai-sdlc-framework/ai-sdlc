@@ -21,6 +21,9 @@ import type { DeveloperReturn } from './types.js';
 
 let tmp: string;
 beforeEach(() => {
+  // AISDLC-722: these tests drive the three-reviewer mechanics; requiring three always is the
+  // explicit way to get them now that the default is derived from the diff.
+  process.env.AI_SDLC_REVIEWER_SET = 'three';
   tmp = makeTmpProject();
   writeTaskFile(tmp, {
     id: 'AISDLC-400',
@@ -30,7 +33,10 @@ beforeEach(() => {
   });
   mkdirSync(join(tmp, '.worktrees', 'aisdlc-400'), { recursive: true });
 });
-afterEach(() => cleanupTmpProject(tmp));
+afterEach(() => {
+  delete process.env.AI_SDLC_REVIEWER_SET;
+  cleanupTmpProject(tmp);
+});
 
 const dev: DeveloperReturn = {
   summary: 'shipped X',

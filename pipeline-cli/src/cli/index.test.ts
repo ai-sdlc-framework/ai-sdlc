@@ -142,7 +142,8 @@ describe('CLI router', () => {
         tmp,
       );
       await buildCli().parseAsync();
-      expect((stdoutJson() as { prompts: unknown[] }).prompts).toHaveLength(3);
+      // AISDLC-722: a diff touching no trust-chain path gets the two-reviewer default.
+      expect((stdoutJson() as { prompts: unknown[] }).prompts).toHaveLength(2);
     }
     setArgv('build-review-prompts', 'AISDLC-1', '--source-kind', 'bogus', '--work-dir', tmp);
     await expect(async () => buildCli().parseAsync()).rejects.toThrow(/process\.exit/);

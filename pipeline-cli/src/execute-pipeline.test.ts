@@ -22,9 +22,13 @@ import type { DeveloperReturn } from './types.js';
 
 let tmp: string;
 beforeEach(() => {
+  // AISDLC-722: these tests drive the three-reviewer mechanics; requiring three always is the
+  // explicit way to get them now that the default is derived from the diff.
+  process.env.AI_SDLC_REVIEWER_SET = 'three';
   tmp = makeTmpProject();
 });
 afterEach(() => {
+  delete process.env.AI_SDLC_REVIEWER_SET;
   cleanupTmpProject(tmp);
 });
 

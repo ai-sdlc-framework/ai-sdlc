@@ -392,6 +392,33 @@ describe('print-patch-id-exclusions', () => {
   });
 });
 
+// ── CLI: reviewer-set (AISDLC-722) ────────────────────────────────────────────
+
+describe('reviewer-set', () => {
+  it('prints the classification as JSON and fails closed to three outside a git repo', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-reviewer-set-'));
+    try {
+      await buildAttestationCli(['reviewer-set', '--repo-root', dir]).parseAsync();
+      const parsed = JSON.parse(flushStdout()) as { set: string; reason: string };
+      expect(parsed).toMatchObject({ set: 'three', reason: 'diff-unavailable' });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('reviewer-set-window', () => {
+  it('prints an empty open window for a fresh artifacts dir', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-reviewer-window-'));
+    try {
+      await buildAttestationCli(['reviewer-set-window', '--artifacts-dir', dir]).parseAsync();
+      expect(JSON.parse(flushStdout())).toMatchObject({ windowOpen: true, prs: 0 });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 // ── CLI: merkle-proof ─────────────────────────────────────────────────────────
 
 describe('merkle-proof', () => {
