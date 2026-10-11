@@ -58,8 +58,26 @@
             },
             "blockedPaths": {
               "type": "array",
-              "description": "Glob patterns for paths the agent must not modify.",
+              "description": "Glob patterns for paths the agent must not modify (e.g. '.github/workflows/**'). Enforced by the PreToolUse hook (ai-sdlc-plugin/hooks/enforce-blocked-actions.js) on Write/Edit calls, relative to the agent's active worktree (or project root when no worktree is resolvable). Neither `.ai-sdlc/**` nor `.github/workflows/**` is blocked by default for internal sessions (AISDLC-720): trusted agents may edit governance config when their task names the file and the change. List a path here to opt every session in the project, internal ones included, out of editing it. Runs marked untrusted (the `AI_SDLC_UNTRUSTED_RUN` environment signal, set by workflows for fork PRs, PRs whose author association is not OWNER/MEMBER/COLLABORATOR, and the gh-issue source kind) are always refused `.ai-sdlc/**`, `.github/workflows/**`, `.claude/**`, `.husky/**`, `ai-sdlc-plugin/hooks/**` and the `.active-task` sentinel (symlinks are resolved first), and nothing in this file can turn that off.",
               "items": { "type": "string" }
+            },
+            "blockedActions": {
+              "type": "array",
+              "description": "Shell command patterns the agent is forbidden from executing. Supports trailing * wildcards.",
+              "items": { "type": "string" }
+            },
+            "requireHumanApproval": {
+              "type": "array",
+              "description": "Action categories that require human approval before execution (e.g., merge, release, deploy).",
+              "items": { "type": "string" }
+            },
+            "requireStory": {
+              "type": "boolean",
+              "description": "Whether the agent must produce a Storybook story for component changes (RFC-0006)."
+            },
+            "requireTokenUsage": {
+              "type": "boolean",
+              "description": "Whether the agent must use design tokens instead of hardcoded values (RFC-0006)."
             }
           },
           "additionalProperties": false
@@ -168,6 +186,46 @@
         "modelSelection": {
           "$ref": "#/$defs/ModelSelection"
         },
+        "designSystem": {
+          "type": "object",
+          "description": "Design system context configuration for frontend agents (RFC-0006 §7).",
+          "required": ["binding"],
+          "properties": {
+            "binding": {
+              "type": "string",
+              "description": "Reference to a DesignSystemBinding resource name."
+            },
+            "contextStrategy": {
+              "type": "string",
+              "enum": ["manifest-first", "tokens-only", "full"],
+              "description": "How the agent receives design system context.",
+              "default": "manifest-first"
+            },
+            "contextStrategyOverride": {
+              "type": "string",
+              "enum": ["auto", "fixed"],
+              "description": "Whether the orchestrator may escalate the context strategy at runtime.",
+              "default": "auto"
+            },
+            "componentCreationPolicy": {
+              "type": "string",
+              "enum": ["compose-or-justify", "compose-only", "unrestricted"],
+              "description": "Policy for when the agent may create new components vs. composing existing ones.",
+              "default": "compose-or-justify"
+            }
+          },
+          "additionalProperties": false
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["platform", "soul", "tenant"],
+          "description": "Soul-scoping per RFC-0009 §8.1. `platform` agents operate across all souls (substrate-scoped roles; default when omitted). `soul` agents are bound to specific Soul DIDs via `soulBindings` (soul-specific specialists). `tenant` agents are bound to tenant boundaries (orthogonal to soul scoping). Omission preserves single-DID behavior (platform-wide)."
+        },
+        "soulBindings": {
+          "type": "array",
+          "description": "Soul DID URIs the agent is bound to when `scope: soul` (RFC-0009 §8.1). Each entry is a Soul DID URI (e.g., `did:platform-x:soul:soul-a`). Empty array or omission with `scope: soul` is treated as platform-wide (no soul-specific binding declared).",
+          "items": { "type": "string" }
+        },
         "governance": {
           "$ref": "#/$defs/Governance"
         }
@@ -207,12 +265,12 @@
   "$defs": {
     "Governance": {
       "type": "object",
-      "description": "Per-repo governance hard-rule policy (RFC-0048). All keys optional; an absent `governance` block resolves to strict defaults (never-merge / never-force-push / never-close / never-branch-delete / never-reset-hard). Malformed/unknown values fail closed to strict in the resolver. Permanently-fixed integrity rules (CI-skip tokens, editing `.ai-sdlc/attestations|verdicts`, relaxing governance from a PR tree) are intentionally NOT representable here.",
+      "description": "Per-repo governance hard-rule policy (RFC-0048). All keys optional; an absent `governance` block resolves to strict defaults (never-merge / never-force-push / never-close / never-branch-delete / never-reset-hard). Malformed/unknown values fail closed to strict in the resolver (ai-sdlc-plugin/hooks/lib/governance-resolver.js). Permanently-fixed integrity rules (CI-skip tokens, editing `.ai-sdlc/attestations|verdicts`, relaxing governance from a PR tree) are intentionally NOT representable here.",
       "properties": {
         "preset": {
           "type": "string",
           "enum": ["strict", "operator-trusted"],
-          "description": "Sugar layer that expands to a resolved governance object. `strict` = the defaults (no-op). `operator-trusted` expands to `allowMerge: onGreenClean` (still trusted-tier only). Explicit granular keys override the preset."
+          "description": "Sugar layer that expands to a resolved governance object. `strict` = the defaults (no-op). `operator-trusted` expands to `allowMerge: onGreenClean` (still trusted-tier only). A preset can never set anything the granular keys couldn't; explicit granular keys override the preset."
         },
         "allowMerge": {
           "type": "string",
@@ -243,6 +301,22 @@
           "uniqueItems": true,
           "description": "GitHub logins whose pull requests the deterministic merge gate (`cli-merge-if-eligible`) may merge when `allowMerge: onGreenClean`. Read only from the file as committed on origin/main in the verified main checkout. Logins have no leading, trailing or consecutive hyphens. Absent or empty means nobody: every merge is refused (fail closed)."
         },
+        "releaseAuthors": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 45,
+            "pattern": "^[A-Za-z0-9]+(-[A-Za-z0-9]+)*(\\[bot\\])?$"
+          },
+          "uniqueItems": true,
+          "description": "GitHub logins allowed as the author of the release-please PR and of its linked commits for `cli-merge-if-eligible --source-kind release`. OPTIONAL. Resolution order for the release path only: this key if present (an explicit empty list disables the release path: kill switch), else a non-empty `mergeAuthors`, else the built-in release-please bot logins `github-actions[bot]` and `release-please[bot]`. Bot logins use the REST spelling with the `[bot]` suffix. Never widens who the other source kinds trust. Read only from the file as committed on main."
+        },
+        "releaseMergeRoles": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 40, "pattern": "^[A-Za-z][A-Za-z0-9-]*$" },
+          "uniqueItems": true,
+          "description": "Caller roles allowed to use `cli-merge-if-eligible --source-kind release`. Default: operator, planner (executor denied). The role comes from the caller's environment, so this is a mistake guard, not a security boundary (DEC-0038); the GitHub-derived PR checks are the real control."
+        },
         "operational": {
           "type": "array",
           "items": {
@@ -269,9 +343,77 @@
           "type": "boolean",
           "description": "Whether agents may delete branches (`git branch -D`/`-d`). Default false."
         },
+        "allowReleaseMerge": {
+          "type": "boolean",
+          "default": false,
+          "description": "Narrow grant for `cli-merge-if-eligible --source-kind release`: when true, agents may land the release-please PR even if `allowMerge` is `never`. Never satisfies the backlog or gh-issue kinds, which still need `allowMerge: onGreenClean`. Default false."
+        },
         "allowResetHard": {
           "type": "boolean",
           "description": "Whether agents may run destructive git (`git reset --hard`, `git checkout -- .`, `git restore .`). Default false."
+        },
+        "roles": {
+          "type": "object",
+          "description": "Per-hierarchy-role tool rules (session hierarchy roles `executor`, `operator-dispatch`, `planner`). A role's `blockedTools` list names tool calls a session holding that role is refused by the PreToolUse hook. Absent resolves to the strict defaults: an executor may not message anyone but the dispatch session, may not answer, resolve or override a decision, and may not create a top-level task. Only a session positively identified by the hierarchy roster is ever matched; any other session is treated as the operator and is never blocked.",
+          "properties": {
+            "executor": { "$ref": "#/$defs/RoleGovernance" },
+            "operator-dispatch": { "$ref": "#/$defs/RoleGovernance" },
+            "planner": { "$ref": "#/$defs/RoleGovernance" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "RoleGovernance": {
+      "type": "object",
+      "description": "Tool rules for one hierarchy role.",
+      "properties": {
+        "blockedTools": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/BlockedTool" },
+          "description": "Tool calls the role is refused. A non-empty list replaces the role's defaults; an explicit empty list removes them. A malformed list is ignored and the role's defaults apply (malformed input never relaxes a rule)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "BlockedTool": {
+      "type": "object",
+      "description": "One refused tool call: a tool name plus an optional argument matcher. `match` names a built-in matcher; `argument` and `contains` together refuse calls whose named argument contains the text (case-insensitive); with neither, every call to the tool is refused.",
+      "required": ["tool"],
+      "properties": {
+        "tool": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.*|-]{1,100}$",
+          "description": "Tool name, exact or with `*` wildcards, or several names joined with `|` (e.g. `SendMessage`, `mcp__*__task_create`, `Write|Edit|MultiEdit`)."
+        },
+        "match": {
+          "type": "string",
+          "enum": [
+            "notDispatchRecipient",
+            "decisionMutation",
+            "topLevelTask",
+            "newTaskFile",
+            "backlogCliCreate"
+          ],
+          "description": "Built-in matcher. `notDispatchRecipient`: the message recipient is not the dispatch session named in the roster. `decisionMutation`: a command runs a `cli-decisions` subcommand outside the allowlist (escalate, add without autonomous-fallback or timebox flags, and the read-only reads). `topLevelTask`: a task_create call that is not a sub-task of a task the session holds. `newTaskFile`: Write, Edit or MultiEdit creates a new task file that is not a sub-task of a task the session holds. `backlogCliCreate`: a `backlog task create` style command without `--parent` set to a task the session holds. Bash matchers are pattern matchers and do not catch every way a shell can write a file."
+        },
+        "argument": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+          "description": "Name of the tool-input field to test; used with `contains`."
+        },
+        "contains": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Text the argument must contain (case-insensitive) for the call to be refused; used with `argument`."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "Sentence shown to the session when the call is refused and in the rendered rules."
         }
       },
       "additionalProperties": false

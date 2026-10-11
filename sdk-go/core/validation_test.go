@@ -53,6 +53,33 @@ func TestValidateValidAgentRole(t *testing.T) {
 	assert.True(t, result.Valid, "expected valid, got errors: %v", result.Errors)
 }
 
+func TestValidateAgentRoleSyncedSurface(t *testing.T) {
+	// AISDLC-604: fields present in the canonical schema must be accepted.
+	data := map[string]interface{}{
+		"apiVersion": "ai-sdlc.io/v1alpha1",
+		"kind":       "AgentRole",
+		"metadata":   map[string]interface{}{"name": "coder-agent"},
+		"spec": map[string]interface{}{
+			"role":         "Senior Software Engineer",
+			"goal":         "Write high-quality code",
+			"tools":        []interface{}{"git"},
+			"scope":        "soul",
+			"soulBindings": []interface{}{"did:platform-x:soul:soul-a"},
+			"designSystem": map[string]interface{}{"binding": "ds"},
+			"constraints": map[string]interface{}{
+				"blockedActions":    []interface{}{"rm -rf*"},
+				"requireStory":      true,
+				"requireTokenUsage": true,
+			},
+		},
+	}
+	result := Validate(KindAgentRole, data)
+	assert.True(t, result.Valid, "expected valid, got errors: %v", result.Errors)
+
+	data["spec"].(map[string]interface{})["scope"] = "bogus"
+	assert.False(t, Validate(KindAgentRole, data).Valid)
+}
+
 func TestValidateValidQualityGate(t *testing.T) {
 	data := map[string]interface{}{
 		"apiVersion": "ai-sdlc.io/v1alpha1",
