@@ -9,3 +9,4 @@ packages:
   - pipeline-cli
   - ai-sdlc-plugin/mcp-server
   - ai-sdlc-plugin/mods
+  - vscode-hierarchy

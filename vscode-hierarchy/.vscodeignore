@@ -1,0 +1,7 @@
+src/**
+**/*.test.*
+**/*.map
+tsconfig.json
+vitest.config.ts
+dist/*.vsix
+dist/**/*.test.*

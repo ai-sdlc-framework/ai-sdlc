@@ -391,6 +391,11 @@ describe('hierarchy up VS Code tasks (AISDLC-754)', () => {
     expect(logs[logs.length - 1]).toBe(HINT);
 
     logs.length = 0;
+    deps.env = { TERM_PROGRAM: 'vscode', AI_SDLC_VSCODE_HIERARCHY: '1' };
+    await hierarchyUp({ ...baseOpts, vscodeTasks: true }, deps);
+    expect(logs).not.toContain(HINT);
+
+    logs.length = 0;
     deps.env = {};
     await hierarchyUp({ ...baseOpts, vscodeTasks: true }, deps);
     expect(logs).not.toContain(HINT);

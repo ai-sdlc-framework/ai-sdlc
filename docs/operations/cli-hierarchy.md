@@ -153,6 +153,25 @@ operators who manage the file themselves. When `up` runs in a VS Code terminal
 (`TERM_PROGRAM=vscode` or `VSCODE_GIT_IPC_HANDLE` set) it ends with one line:
 `VS Code: run task "hierarchy: open all agents" (Terminal > Run Task) to open one terminal per agent`.
 
+**VS Code extension (AISDLC-755).** The private workspace package `vscode-hierarchy/`
+(`vscode-hierarchy`) is a VS Code extension that opens one integrated terminal per
+roster agent as `.ai-sdlc/dispatch/hierarchy.json` changes (in the opened folder or one level
+below), each running `node <cli-hierarchy.mjs> attach <name>`. Terminals are transient, are
+disposed when the agent leaves the roster or the roster is deleted, and a terminal you close is
+not reopened until the next roster write. Install:
+
+```
+pnpm --filter vscode-hierarchy package
+code --install-extension vscode-hierarchy/dist/ai-sdlc-vscode-hierarchy.vsix
+```
+
+Settings: `aiSdlc.hierarchy.autoOpen` (default `true`), `aiSdlc.hierarchy.focusNew` (default
+`false`), `aiSdlc.hierarchy.pipelineCliBin` (absolute `cli-hierarchy.mjs`, used only when it is
+not under the repository's `pipeline-cli/bin` or the Claude plugin cache). Commands:
+`AI-SDLC: Open all hierarchy agents` and `AI-SDLC: Close all hierarchy agents`. The extension
+sets `AI_SDLC_VSCODE_HIERARCHY=1` in integrated terminals, and `up` then omits the run-task hint
+above. `.vscode/extensions.json` recommends it.
+
 Every session, the planner included, starts in `bypassPermissions` (the mode
 `claude --dangerously-skip-permissions` selects): the hierarchy is unattended for most of the
 day and hooks, not prompts, are the control surface. `--planner-permission-mode <m>`

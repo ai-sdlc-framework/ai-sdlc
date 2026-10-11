@@ -100,7 +100,10 @@ export interface PlannedSession {
   prompt: string;
 }
 
-/** The line `up` prints last when it runs inside a VS Code terminal. */
+/**
+ * The line `up` prints last when it runs inside a VS Code terminal, unless the
+ * `vscode-hierarchy` extension is active (`AI_SDLC_VSCODE_HIERARCHY=1`): it opens the terminals itself.
+ */
 export const VSCODE_HINT =
   'VS Code: run task "hierarchy: open all agents" (Terminal > Run Task) to open one terminal per agent';
 
@@ -514,7 +517,9 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
     } catch (err) {
       deps.log(`warning: could not write .vscode/tasks.json: ${(err as Error).message}`);
     }
-    if (owner === 'ours' && insideVsCode(deps.env)) deps.log(VSCODE_HINT);
+    if (owner === 'ours' && insideVsCode(deps.env) && deps.env.AI_SDLC_VSCODE_HIERARCHY !== '1') {
+      deps.log(VSCODE_HINT);
+    }
   }
 
   let attachExitCode: number | undefined;
