@@ -30,6 +30,8 @@
  *   - backlog/completed/**
  *   - .ai-sdlc/attestations/<sha>.dsse.json (chore-commit envelope files)
  *   - .ai-sdlc/_decisions/** (append-only operator governance data; DEC-0010 follow-up)
+ *   - .github/dependabot.yml (exact file; non-executable config; AISDLC-534)
+ *   - .github/*.md (directly under .github only; NOT subdirectories, NOT workflows/**, NOT CODEOWNERS)
  *   - *.md  (root-level only — single * does NOT match /)
  *
  * CLI usage (for workflow shell-out):
@@ -49,7 +51,7 @@
  *   - .github/workflows/ai-sdlc-review.yml
  */
 export const DOCS_ONLY_PATTERN =
-  /^(spec\/rfcs\/|docs\/|backlog\/tasks\/|backlog\/completed\/|\.ai-sdlc\/attestations\/[^/]+\.dsse\.json$|\.ai-sdlc\/_decisions\/|[^/]+\.md$)/;
+  /^(spec\/rfcs\/|docs\/|backlog\/tasks\/|backlog\/completed\/|\.ai-sdlc\/attestations\/[^/]+\.dsse\.json$|\.ai-sdlc\/_decisions\/|\.github\/dependabot\.yml$|\.github\/[^/]+\.md$|[^/]+\.md$)/;
 
 /**
  * Returns true iff the file list is non-empty and every file matches the

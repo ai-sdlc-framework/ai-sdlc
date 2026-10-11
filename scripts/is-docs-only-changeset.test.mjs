@@ -77,6 +77,9 @@ function globToRepresentativePath(glob) {
   if (glob === '*.md') {
     return 'README.md';
   }
+  if (glob === '.github/*.md') {
+    return '.github/SECURITY.md';
+  }
   return glob;
 }
 
@@ -122,6 +125,26 @@ describe('isDocsOnly() — path category coverage (AC-3)', () => {
     assert.equal(isDocsOnly(['.ai-sdlc/_decisions/events.jsonl']), true);
     assert.equal(isDocsOnly(['.ai-sdlc/_decisions/DEC-0010.md']), true);
     assert.equal(isDocsOnly(['.ai-sdlc/_decisions/subdirectory/entry.md']), true);
+  });
+
+  // AISDLC-534: non-executable .github config is docs-only; workflows are not
+  it('.github/dependabot.yml only → docs-only (AISDLC-534)', () => {
+    assert.equal(isDocsOnly(['.github/dependabot.yml']), true);
+    assert.equal(isDocsOnly(['.github/SECURITY.md']), true);
+  });
+
+  it('.github/workflows, actions, CODEOWNERS and look-alikes → NOT docs-only (AISDLC-534)', () => {
+    assert.equal(isDocsOnly(['.github/workflows/ci.yml']), false);
+    assert.equal(isDocsOnly(['.github/workflows/README.md']), false);
+    assert.equal(isDocsOnly(['.github/actions/foo/action.yml']), false);
+    assert.equal(isDocsOnly(['.github/CODEOWNERS']), false);
+    assert.equal(isDocsOnly(['.github/dependabot.yml.bak']), false);
+    assert.equal(isDocsOnly(['.github/sub/dependabot.yml']), false);
+  });
+
+  it('mixed changeset (.github/dependabot.yml + source) → NOT docs-only (AISDLC-534)', () => {
+    assert.equal(isDocsOnly(['.github/dependabot.yml', 'pipeline-cli/src/foo.ts']), false);
+    assert.equal(isDocsOnly(['.github/dependabot.yml', '.github/workflows/ci.yml']), false);
   });
 
   it('mixed changeset (.ai-sdlc/_decisions + .ts source) → NOT docs-only', () => {
@@ -241,6 +264,8 @@ describe('paths-ignore equivalence (AC-4) — DOCS_ONLY_PATTERN mirrors workflow
     'backlog/tasks/**',
     'backlog/completed/**',
     '.ai-sdlc/_decisions/**',
+    '.github/dependabot.yml',
+    '.github/*.md',
     '*.md',
   ]);
 

@@ -73,6 +73,8 @@ on:
       - 'backlog/tasks/**'
       - 'backlog/completed/**'
       - '.ai-sdlc/_decisions/**'
+      - '.github/dependabot.yml'
+      - '.github/*.md'
       - '*.md'
   pull_request_target:
     # AISDLC-218 (revised): keep `opened` (so direct-ready PRs without `--draft`
@@ -100,6 +102,8 @@ on:
       - 'backlog/tasks/**'
       - 'backlog/completed/**'
       - '.ai-sdlc/_decisions/**'
+      - '.github/dependabot.yml'
+      - '.github/*.md'
       - '*.md'
   # AISDLC-400 (2026-05-23): merge_group trigger removed. The GitHub merge queue
   # was dropped; there are no longer gh-readonly-queue/* probe SHAs to cover.

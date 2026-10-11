@@ -3,7 +3,7 @@ id: AISDLC-534
 title: >-
   fix(ci): classify human-authored .github/dependabot.yml (non-workflow config)
   as docs-only / skip-attestation so it doesn't require a full code-PR attestation
-status: To Do
+status: Done
 assignee: []
 labels:
   - bug
@@ -64,10 +64,28 @@ captured in operator memory `feedback_human_authored_config_pr_needs_attestation
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A PR that changes ONLY `.github/dependabot.yml` is classified as docs-only / attestation-exempt and merges without requiring a DSSE attestation envelope (the `Attestation gate (code PRs)` job does not block it)
-- [ ] #2 The exemption is applied consistently on BOTH the `pull_request` paths-ignore path and the `merge_group` inline `is-docs-only-changeset.mjs` path (no asymmetry)
-- [ ] #3 `.github/workflows/**` remains a code-PR / attestation-required surface — workflow YAML is explicitly NOT exempted
-- [ ] #4 A mixed changeset (config + any source/test file) is still treated as a code PR requiring attestation
-- [ ] #5 Hermetic tests cover the dependabot-only (exempt), workflow-yml (not exempt), and mixed (not exempt) cases; lint + format clean
-- [ ] #6 Coordinated with AISDLC-484 so the two docs-only-classification changes do not conflict
+- [x] #1 A PR that changes ONLY `.github/dependabot.yml` is classified as docs-only / attestation-exempt and merges without requiring a DSSE attestation envelope (the `Attestation gate (code PRs)` job does not block it)
+- [x] #2 The exemption is applied consistently on BOTH the `pull_request` paths-ignore path and the `merge_group` inline `is-docs-only-changeset.mjs` path (no asymmetry)
+- [x] #3 `.github/workflows/**` remains a code-PR / attestation-required surface — workflow YAML is explicitly NOT exempted
+- [x] #4 A mixed changeset (config + any source/test file) is still treated as a code PR requiring attestation
+- [x] #5 Hermetic tests cover the dependabot-only (exempt), workflow-yml (not exempt), and mixed (not exempt) cases; lint + format clean
+- [x] #6 Coordinated with AISDLC-484 so the two docs-only-classification changes do not conflict
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+Exempted exactly `.github/dependabot.yml` and root-level `.github/*.md` from the attestation/review gates. `.github/workflows/**`, `.github/actions/**` and `CODEOWNERS` remain code/governance surfaces.
+
+## Changes
+- `scripts/is-docs-only-changeset.mjs` (modified): DOCS_ONLY_PATTERN + doc comment.
+- `.github/workflows/verify-attestation.yml`, `.github/workflows/ai-sdlc-review.yml` (modified): paths-ignore additions. `ai-sdlc-gate.yml` uses the shared script, so it needs no list change.
+- `scripts/is-docs-only-changeset.test.mjs` (modified): dependabot-only, workflow/CODEOWNERS/look-alike, mixed cases; equivalence set extended.
+
+## Verification
+- `node --test scripts/is-docs-only-changeset.test.mjs`, lint, format:check.
+
+## Follow-up
+(none)
+<!-- SECTION:FINAL_SUMMARY:END -->
