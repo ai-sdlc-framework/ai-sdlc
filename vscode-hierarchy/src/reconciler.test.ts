@@ -66,6 +66,40 @@ describe('Reconciler', () => {
     expect(t.r.openNames()).toEqual([]);
   });
 
+  it('closeAll stays closed across a reconcile with the same names', () => {
+    const t = setup();
+    t.r.reconcile(['planner', 'executor-a'], { rosterWrite: true });
+    t.r.closeAll();
+    t.r.reconcile(['planner', 'executor-a']);
+    expect(t.created).toHaveLength(2);
+    expect(t.r.openNames()).toEqual([]);
+    t.r.reconcile(['planner', 'executor-a'], { rosterWrite: true });
+    expect(t.created).toHaveLength(4);
+  });
+
+  it('close events caused by closeAll are not owned by the reconciler', () => {
+    const t = setup();
+    t.r.reconcile(['planner']);
+    const h = t.handles.get('planner') as TerminalHandle;
+    t.r.closeAll();
+    expect(t.r.onTerminalClosed(h)).toBe(false);
+  });
+
+  it('reports ownership of a user close', () => {
+    const t = setup();
+    t.r.reconcile(['planner']);
+    expect(t.r.onTerminalClosed(t.handles.get('planner') as TerminalHandle)).toBe(true);
+  });
+
+  it('keeps a user-closed terminal closed across reconciles without a roster write', () => {
+    const t = setup();
+    t.r.reconcile(['planner'], { rosterWrite: true });
+    t.r.onTerminalClosed(t.handles.get('planner') as TerminalHandle);
+    t.r.reconcile(['planner']);
+    t.r.reconcile(['planner']);
+    expect(t.created).toHaveLength(1);
+  });
+
   it('does not reopen a user-closed terminal until the next roster write', () => {
     const t = setup();
     t.r.reconcile(['planner', 'executor-a'], { rosterWrite: true });

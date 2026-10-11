@@ -45,7 +45,11 @@ export function activate(context: vscode.ExtensionContext): void {
         isTransient: true,
       });
       terminal.show(!spec.focus);
-      const handle: TerminalHandle = { dispose: () => terminal.dispose() };
+      const handle: TerminalHandle = {
+        dispose: () => {
+          terminal.dispose();
+        },
+      };
       handles.set(handle, terminal);
       return handle;
     },
@@ -108,8 +112,10 @@ export function activate(context: vscode.ExtensionContext): void {
         if (t !== terminal) continue;
         handles.delete(handle);
         for (const [file, r] of reconcilers) {
-          r.onTerminalClosed(handle);
-          sync(file, false);
+          if (r.onTerminalClosed(handle)) {
+            sync(file, false);
+            break;
+          }
         }
         return;
       }

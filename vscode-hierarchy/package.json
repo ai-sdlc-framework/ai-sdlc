@@ -19,6 +19,11 @@
     "workspaceContains:.ai-sdlc/dispatch/hierarchy.json",
     "workspaceContains:*/.ai-sdlc/dispatch/hierarchy.json"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    }
+  },
   "contributes": {
     "commands": [
       {
@@ -45,6 +50,7 @@
         },
         "aiSdlc.hierarchy.pipelineCliBin": {
           "type": "string",
+          "scope": "machine",
           "default": "",
           "description": "Absolute path of cli-hierarchy.mjs, used only when it is not found under the repository or in the Claude plugin cache."
         }

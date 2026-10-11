@@ -68,11 +68,17 @@ export class Reconciler {
     for (const name of wanted) this.openOne(name);
   }
 
-  /** Dispose every terminal (roster deleted, or the close-all command). */
+  /**
+   * Dispose every terminal (roster deleted, or the close-all command). The names are
+   * remembered as closed, so neither the resulting close events nor a settings change
+   * reopens them; the next roster write or open-all does.
+   */
   closeAll(): void {
-    for (const handle of this.open.values()) handle.dispose();
-    this.open.clear();
-    this.closedByUser.clear();
+    for (const [name, handle] of [...this.open]) {
+      this.open.delete(name);
+      this.closedByUser.add(name);
+      handle.dispose();
+    }
   }
 
   /** Open every wanted agent, including ones the user closed (the open-all command). */
@@ -81,14 +87,19 @@ export class Reconciler {
     this.reconcile(names);
   }
 
-  /** The user closed the terminal behind `handle`; remember it so it is not reopened. */
-  onTerminalClosed(handle: TerminalHandle): void {
+  /**
+   * The user closed the terminal behind `handle`; remember it so it is not reopened.
+   * Returns true only when this reconciler owned a live handle (disposals made by the
+   * reconciler itself are already forgotten and return false).
+   */
+  onTerminalClosed(handle: TerminalHandle): boolean {
     for (const [name, h] of this.open) {
       if (h !== handle) continue;
       this.open.delete(name);
       this.closedByUser.add(name);
-      return;
+      return true;
     }
+    return false;
   }
 
   private openOne(name: string): void {
