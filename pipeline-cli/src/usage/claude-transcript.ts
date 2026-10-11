@@ -37,6 +37,8 @@ export interface ParsedCall {
   cwd?: string;
   gitBranch?: string;
   entrypoint?: string;
+  /** Distinct tool names the call asked to run, in order of first use. */
+  toolNames?: string[];
   isSidechain: boolean;
 }
 
@@ -127,6 +129,23 @@ function classifyLimitNotice(message: Record<string, unknown>): LimitCategory | 
   return undefined;
 }
 
+const MAX_TOOL_NAME_LEN = 128;
+const MAX_TOOL_NAMES = 16;
+
+/** Distinct `tool_use` names in a message's content, bounded. Never throws. */
+export function extractToolNames(message: Record<string, unknown>): string[] {
+  const content = message['content'];
+  if (!Array.isArray(content)) return [];
+  const names: string[] = [];
+  for (const part of content) {
+    if (!isRecord(part) || part['type'] !== 'tool_use') continue;
+    const name = cleanString(part['name'], MAX_TOOL_NAME_LEN);
+    if (name && !names.includes(name)) names.push(name);
+    if (names.length >= MAX_TOOL_NAMES) break;
+  }
+  return names;
+}
+
 /** The working directory named by a line of any type, or undefined. Never throws. */
 export function peekCwd(line: string): string | undefined {
   try {
@@ -169,6 +188,7 @@ export function parseTranscriptLine(line: string): ParsedLine {
   const cwd = cleanString(obj['cwd'], MAX_CWD_LEN);
   const gitBranch = cleanString(obj['gitBranch'], MAX_BRANCH_LEN);
   const entrypoint = cleanString(obj['entrypoint'], 64);
+  const toolNames = extractToolNames(message);
 
   return {
     kind: 'call',
@@ -183,6 +203,7 @@ export function parseTranscriptLine(line: string): ParsedLine {
       ...(cwd ? { cwd } : {}),
       ...(gitBranch ? { gitBranch } : {}),
       ...(entrypoint ? { entrypoint } : {}),
+      ...(toolNames.length > 0 ? { toolNames } : {}),
       isSidechain: obj['isSidechain'] === true,
     },
   };

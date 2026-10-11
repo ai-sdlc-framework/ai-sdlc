@@ -32,6 +32,29 @@ describe('parseTranscriptLine', () => {
     });
   });
 
+  it('records the distinct tool names a call asked to run', () => {
+    const r = parseTranscriptLine(
+      line({
+        ...base,
+        message: {
+          ...base.message,
+          content: [
+            { type: 'text', text: 'hi' },
+            { type: 'tool_use', name: 'Read' },
+            { type: 'tool_use', name: 'Read' },
+            { type: 'tool_use', name: 'Bash' },
+            { type: 'tool_use', name: 'bad\nname' },
+            { type: 'tool_use' },
+          ],
+        },
+      }),
+    );
+    expect(r).toMatchObject({ kind: 'call', call: { toolNames: ['Read', 'Bash'] } });
+    const none = parseTranscriptLine(line(base));
+    expect(none).toMatchObject({ kind: 'call' });
+    expect((none as { call: { toolNames?: string[] } }).call.toolNames).toBeUndefined();
+  });
+
   it('ignores non-assistant lines, lines without usage and non-objects', () => {
     expect(parseTranscriptLine(line({ type: 'user' }))).toEqual({ kind: 'ignore' });
     expect(parseTranscriptLine(line({ type: 'assistant', message: { id: 'm' } }))).toEqual({

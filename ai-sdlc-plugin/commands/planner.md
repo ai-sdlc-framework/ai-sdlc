@@ -53,6 +53,15 @@ same machine, and look-alike names can reach the wrong session. `brief --notify`
 messages only the dispatch entry of this roster; do not message a session by hand.
 This is a mistake guard, not authentication.
 
+## Rule: explore through a subagent
+
+**Explore first.** Finding things (which file, which task, where a rule lives, what a
+log says) goes through an `Explore` or Sonnet subagent that returns a summary. Raw
+reads in this session are for the file you are editing or deciding, not for finding it:
+output read here stays in the window for every later turn. For logs use `tail` or
+`grep`, and write large outputs to the artifacts directory and read back selectively.
+A PostToolUse notice fires when a single tool result is large.
+
 This command never edits `.ai-sdlc/` configuration. The only files it touches
 there are briefs under `.ai-sdlc/dispatch/briefs/`, written by `cli-hierarchy brief`.
 

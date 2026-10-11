@@ -47,6 +47,8 @@ export interface ResolvedUsageConfig {
   modelMixSimilarity: number;
   /** Tasks a scorecard cell needs before it stops being labelled insufficient. */
   scorecardMinTasks: number;
+  /** Estimated tokens above which a tool result draws a notice in main-session roles. */
+  outputNoticeTokens: number;
   source: 'machine' | 'base-ref' | 'defaults';
   warnings: string[];
 }
@@ -56,6 +58,8 @@ export const BASE_CONFIG_PATH = '.ai-sdlc/usage-config.yaml';
 export const DEFAULT_ALLOTMENT_TOLERANCE = 0.25;
 export const DEFAULT_MODEL_MIX_SIMILARITY = 0.8;
 export const DEFAULT_SCORECARD_MIN_TASKS = 30;
+/** Mirrored by `ai-sdlc-plugin/hooks/lib/large-output-notice.js`, which cannot import this package. */
+export const DEFAULT_OUTPUT_NOTICE_TOKENS = 8000;
 
 export const DEFAULT_WINDOWS: readonly WindowSpec[] = [
   { name: 'session', lengthHours: 5, mode: 'first-use' },
@@ -69,6 +73,7 @@ export function defaultUsageConfig(warnings: string[] = []): ResolvedUsageConfig
     allotmentTolerance: DEFAULT_ALLOTMENT_TOLERANCE,
     modelMixSimilarity: DEFAULT_MODEL_MIX_SIMILARITY,
     scorecardMinTasks: DEFAULT_SCORECARD_MIN_TASKS,
+    outputNoticeTokens: DEFAULT_OUTPUT_NOTICE_TOKENS,
     source: 'defaults',
     warnings,
   };
@@ -106,6 +111,7 @@ interface RawSpec {
   allotmentTolerance?: number;
   modelMixSimilarity?: number;
   scorecardMinTasks?: number;
+  output?: { noticeTokens?: number };
 }
 
 /** Parse and validate one config document. Returns an error string on failure. */
@@ -150,6 +156,7 @@ export function parseUsageConfig(
     allotmentTolerance: spec.allotmentTolerance ?? base.allotmentTolerance,
     modelMixSimilarity: spec.modelMixSimilarity ?? base.modelMixSimilarity,
     scorecardMinTasks: spec.scorecardMinTasks ?? base.scorecardMinTasks,
+    outputNoticeTokens: spec.output?.noticeTokens ?? base.outputNoticeTokens,
     source,
     warnings: [],
   };
