@@ -560,6 +560,75 @@ describe('cli-usage scorecard', () => {
   });
 });
 
+describe('cli-usage scorecard dispatch turns (AISDLC-667.1)', () => {
+  let repo: string;
+  const iso = (ms: number): string => new Date(ms).toISOString();
+  const tick = (id: string, startMs: number) => ({
+    ts: iso(startMs),
+    type: 'DispatchTick',
+    tickId: id,
+    startedAt: iso(startMs),
+    endedAt: iso(startMs + 1000),
+    steps: [{ name: 'reports', startedAt: iso(startMs + 500) }],
+    nextWakeSec: 600,
+  });
+
+  beforeEach(() => {
+    repo = join(root, 'repo-a');
+    mkdirSync(repo, { recursive: true });
+    const dir = join(root, 'art', '_orchestrator');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'events-2026-09-10.jsonl'),
+      `${[tick('d@1', T0), tick('d@2', T0 + H)].map((e) => JSON.stringify(e)).join('\n')}\n`,
+    );
+    const d = (id: string, hours: number, over: Partial<ModelCallRecord> = {}) =>
+      call(id, hours, { agentRole: 'operator-dispatch', taskId: undefined, ...over });
+    appendModelCalls(
+      [
+        d('d1', 0.1),
+        d('d2', 0.2),
+        d('d3', 0.3),
+        d('d4', 1.1),
+        d('other-repo', 0.15, { repo: 'repo-b' }),
+        call('dev', 0.2, { agentRole: 'ai-sdlc:developer' }),
+      ],
+      { dir: usageDir },
+    );
+  });
+
+  it('reports median and p90 turns per tick against the configured budget', async () => {
+    const extra = {
+      repoRoot: repo,
+      artifactsDir: join(root, 'art'),
+      loadConfig: () => ({ ...defaultUsageConfig(), dispatchTurnsPerTickBudget: 1 }),
+    };
+    const json = JSON.parse(await run(['scorecard', '--format', 'json'], T0, extra));
+    expect(json.dispatchTurns).toEqual({
+      ticks: 2,
+      median: 2,
+      p90: 3,
+      budget: 1,
+      overBudget: true,
+    });
+    out.length = 0;
+    const text = await run(['scorecard'], T0, extra);
+    expect(text).toContain('operator-dispatch  turns per tick: median 2, p90 3 over 2 ticks');
+    expect(text).toContain('budget 1, over budget');
+  });
+
+  it('reads the default budget of 5 and omits the row when no tick was recorded', async () => {
+    const extra = { repoRoot: repo, artifactsDir: join(root, 'art') };
+    const json = JSON.parse(await run(['scorecard', '--format', 'json'], T0, extra));
+    expect(json.dispatchTurns).toMatchObject({ budget: 5, overBudget: false });
+    out.length = 0;
+    const later = JSON.parse(
+      await run(['scorecard', '--format', 'json', '--since', '2030-01-01'], T0, extra),
+    );
+    expect(later.dispatchTurns).toBeUndefined();
+  });
+});
+
 describe('cli-usage scorecard repo identity', () => {
   const env = {
     ...process.env,

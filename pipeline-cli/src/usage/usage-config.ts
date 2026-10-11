@@ -47,6 +47,8 @@ export interface ResolvedUsageConfig {
   modelMixSimilarity: number;
   /** Tasks a scorecard cell needs before it stops being labelled insufficient. */
   scorecardMinTasks: number;
+  /** Model turns one dispatch wake-up should need (RFC-0051, AISDLC-667.1). */
+  dispatchTurnsPerTickBudget: number;
   source: 'machine' | 'base-ref' | 'defaults';
   warnings: string[];
 }
@@ -56,6 +58,7 @@ export const BASE_CONFIG_PATH = '.ai-sdlc/usage-config.yaml';
 export const DEFAULT_ALLOTMENT_TOLERANCE = 0.25;
 export const DEFAULT_MODEL_MIX_SIMILARITY = 0.8;
 export const DEFAULT_SCORECARD_MIN_TASKS = 30;
+export const DEFAULT_DISPATCH_TURNS_PER_TICK_BUDGET = 5;
 
 export const DEFAULT_WINDOWS: readonly WindowSpec[] = [
   { name: 'session', lengthHours: 5, mode: 'first-use' },
@@ -69,6 +72,7 @@ export function defaultUsageConfig(warnings: string[] = []): ResolvedUsageConfig
     allotmentTolerance: DEFAULT_ALLOTMENT_TOLERANCE,
     modelMixSimilarity: DEFAULT_MODEL_MIX_SIMILARITY,
     scorecardMinTasks: DEFAULT_SCORECARD_MIN_TASKS,
+    dispatchTurnsPerTickBudget: DEFAULT_DISPATCH_TURNS_PER_TICK_BUDGET,
     source: 'defaults',
     warnings,
   };
@@ -106,6 +110,7 @@ interface RawSpec {
   allotmentTolerance?: number;
   modelMixSimilarity?: number;
   scorecardMinTasks?: number;
+  dispatch?: { turnsPerTickBudget?: number };
 }
 
 /** Parse and validate one config document. Returns an error string on failure. */
@@ -150,6 +155,8 @@ export function parseUsageConfig(
     allotmentTolerance: spec.allotmentTolerance ?? base.allotmentTolerance,
     modelMixSimilarity: spec.modelMixSimilarity ?? base.modelMixSimilarity,
     scorecardMinTasks: spec.scorecardMinTasks ?? base.scorecardMinTasks,
+    dispatchTurnsPerTickBudget:
+      spec.dispatch?.turnsPerTickBudget ?? base.dispatchTurnsPerTickBudget,
     source,
     warnings: [],
   };

@@ -36,6 +36,7 @@ describe('defaults', () => {
     expect(c.allotmentTolerance).toBe(DEFAULT_ALLOTMENT_TOLERANCE);
     expect(c.modelMixSimilarity).toBe(DEFAULT_MODEL_MIX_SIMILARITY);
     expect(c.scorecardMinTasks).toBe(30);
+    expect(c.dispatchTurnsPerTickBudget).toBe(5);
     expect(c.weights).toEqual({ tokenClasses: {}, modelFamilies: {} });
     expect(c.warnings).toEqual([]);
     expect(c.planName).toBeUndefined();
@@ -98,6 +99,18 @@ describe('parseUsageConfig', () => {
         'machine',
       ),
     ).toMatch(/needs an anchor/);
+  });
+
+  it('reads dispatch.turnsPerTickBudget and rejects a non-positive one', () => {
+    const c = parseUsageConfig(doc('  dispatch:\n    turnsPerTickBudget: 3'), 'machine');
+    if (typeof c === 'string') throw new Error(c);
+    expect(c.dispatchTurnsPerTickBudget).toBe(3);
+    expect(parseUsageConfig(doc('  dispatch:\n    turnsPerTickBudget: 0'), 'machine')).toMatch(
+      /turnsPerTickBudget/,
+    );
+    expect(parseUsageConfig(doc('  dispatch:\n    other: 1'), 'machine')).toEqual(
+      expect.any(String),
+    );
   });
 
   it('accepts an empty spec', () => {

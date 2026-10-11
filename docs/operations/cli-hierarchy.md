@@ -376,6 +376,29 @@ stale file is never read as current.
 `handoff read --role <r>`; the file and the board are all a fresh context needs. The resume
 command per role is `/ai-sdlc:planner`, `/ai-sdlc operator-dispatch` and `/ai-sdlc executor`.
 
+### Dispatch loop measures and clears itself (RFC-0051 section 6)
+
+The dispatch loop is meant to be mechanical, so `tick` measures it and gives the dispatch
+session the context hygiene it enforces on executors:
+
+- **Self-clear after a brief.** When every manifest of an ingested brief is in `done/` or
+  `failed/`, `tick` records the completion, then schedules the dispatch session's own
+  `/clear` and `/ai-sdlc operator-dispatch` through the `clear --self` path, exactly once per
+  completed brief (`briefSelfClear.status: scheduled`). While any manifest is still inflight
+  the clear is refused (`refused`) and stays pending for a later tick.
+- **Tick marker.** Every tick emits a `DispatchTick` event (`tickId`, `startedAt`, `endedAt`,
+  ordered `steps`, `nextWakeSec`) so the usage ledger can bucket the dispatch session's model
+  calls per tick. A call belongs to the tick that had started at or before it and the next had
+  not, and to the latest step of that tick that had started.
+- **Turns per tick.** `cli-usage scorecard` prints an `operator-dispatch` line (and a
+  `dispatchTurns` field in JSON) with the median and p90 turns per tick over the window,
+  against `dispatch.turnsPerTickBudget` (default 5, see [`usage-ledger.md`](usage-ledger.md)).
+  The dispatch session's calls are recorded under the agent role `operator-dispatch`.
+- **Decision on overrun.** When the median over the last 20 completed ticks exceeds the
+  budget, `tick` files one Decision (scope `dispatch-turns-per-tick`) naming the step that used
+  the most turns, with the options `move-step`, `raise-budget` and `accept`. Further overruns
+  while it is unanswered file nothing (`turnBudget.skipped`).
+
 ### `auto-clear`
 
 The Stop hook of the plugin (`context-auto-clear`) runs this after each turn of a session that

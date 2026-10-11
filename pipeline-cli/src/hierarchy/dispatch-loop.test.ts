@@ -631,3 +631,108 @@ describe('nextWakeSec (idle hibernation)', () => {
     expect(result).toEqual({ nextWakeSec: WAKE_PENDING_SEC, wakeReason: 'pending' });
   });
 });
+
+describe('self-clear after a completed brief (AISDLC-667.1)', () => {
+  let selfClears: { resumeAfterSeconds: number }[];
+  const clearSelf = (o: { resumeAfterSeconds: number }) => {
+    selfClears.push(o);
+    return { self: 'operator-dispatch', paneId: '%1', leadSeconds: 20, resumeAfterSeconds: 5 };
+  };
+  beforeEach(() => {
+    selfClears = [];
+  });
+
+  async function completeBrief(): Promise<void> {
+    writeBrief('b1.md', ['AISDLC-1']);
+    await runDispatchTick(deps({ clearSelf }));
+    verdict('AISDLC-1');
+  }
+
+  it('clears the session exactly once when a brief completes', async () => {
+    await completeBrief();
+    const done = await runDispatchTick(deps({ clearSelf }));
+    expect(done.briefSelfClear).toEqual({ status: 'scheduled' });
+    expect(selfClears).toEqual([{ resumeAfterSeconds: done.nextWakeSec }]);
+    expect(done.tickMarker.steps.map((s) => s.name)).toContain('self-clear');
+    await runDispatchTick(deps({ clearSelf }));
+    await runDispatchTick(deps({ clearSelf }));
+    expect(selfClears).toHaveLength(1);
+  });
+
+  it('does not clear while a manifest is still inflight, and clears once it is reconciled', async () => {
+    await completeBrief();
+    const inflight = path.join(board, 'inflight');
+    mkdirSync(inflight, { recursive: true });
+    writeFileSync(path.join(inflight, 'AISDLC-9.dispatch.json'), '{}');
+    const refused = await runDispatchTick(deps({ clearSelf }));
+    expect(refused.briefSelfClear).toMatchObject({ status: 'refused', inflight: 1 });
+    expect(selfClears).toHaveLength(0);
+
+    rmSync(path.join(inflight, 'AISDLC-9.dispatch.json'));
+    const later = await runDispatchTick(deps({ clearSelf }));
+    expect(later.briefSelfClear).toEqual({ status: 'scheduled' });
+    expect(selfClears).toHaveLength(1);
+  });
+
+  it('reports a failed clear once and does not retry it every tick', async () => {
+    await completeBrief();
+    const failing = () => {
+      selfClears.push({ resumeAfterSeconds: -1 });
+      throw new Error('no pane');
+    };
+    const first = await runDispatchTick(deps({ clearSelf: failing }));
+    expect(first.briefSelfClear).toEqual({ status: 'failed', reason: 'no pane' });
+    await runDispatchTick(deps({ clearSelf: failing }));
+    expect(selfClears).toHaveLength(1);
+  });
+
+  it('keeps the clear pending while the session cannot clear itself', async () => {
+    await completeBrief();
+    const none = await runDispatchTick(deps());
+    expect(none.briefSelfClear).toBeUndefined();
+    expect(readLoopState(board).selfClearPending).toBe(true);
+    const later = await runDispatchTick(deps({ clearSelf }));
+    expect(later.briefSelfClear).toEqual({ status: 'scheduled' });
+  });
+
+  it('never clears when no brief completed', async () => {
+    verdict('AISDLC-1');
+    const r = await runDispatchTick(deps({ clearSelf }));
+    expect(r.briefSelfClear).toBeUndefined();
+    expect(selfClears).toHaveLength(0);
+  });
+});
+
+describe('tick marker and turn budget review (AISDLC-667.1)', () => {
+  it('records one marker per tick with its steps in order', async () => {
+    const markers: unknown[] = [];
+    const r = await runDispatchTick(deps({ recordTick: (m) => markers.push(m) }));
+    expect(markers).toEqual([r.tickMarker]);
+    expect(r.tickMarker).toMatchObject({
+      tickId: 'operator-dispatch@2026-09-30T12:00:00.000Z',
+      startedAt: '2026-09-30T12:00:00.000Z',
+      nextWakeSec: WAKE_IDLE_SEC,
+    });
+    expect(r.tickMarker.steps.map((s) => s.name)).toEqual(['ingest', 'verdicts', 'reports']);
+  });
+
+  it('a failing marker write or budget review never fails the tick', async () => {
+    const r = await runDispatchTick(
+      deps({
+        recordTick: () => {
+          throw new Error('disk full');
+        },
+        reviewTurnBudget: () => {
+          throw new Error('ledger unreadable');
+        },
+      }),
+    );
+    expect(r.turnBudget).toBeUndefined();
+  });
+
+  it('returns the budget review', async () => {
+    const review = { median: 3, budget: 5, overBudget: false };
+    const r = await runDispatchTick(deps({ reviewTurnBudget: async () => review }));
+    expect(r.turnBudget).toEqual(review);
+  });
+});

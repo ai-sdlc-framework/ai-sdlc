@@ -13,6 +13,12 @@
  *  3. Reports: a progress line at the configured cadence, and one summary when
  *     every task of an ingested brief has reached a final state.
  *
+ * 4. Self-clear: when a brief completes, the session clears its own context once the board
+ *    holds no inflight manifest. The completion is recorded first; a brief that finishes
+ *    while a manifest is still inflight leaves the clear pending for a later tick.
+ * 5. Marker and budget: every tick writes a `DispatchTick` marker so the usage ledger can
+ *    count the session's model turns per tick, and the turns-per-tick budget is reviewed.
+ *
  * Messages are not sent from here. The tick returns escalations and reports and
  * the skill sends them, so this module never types into another session.
  *
@@ -38,7 +44,8 @@ import type { EnqueueEntry } from '../dispatch/enqueue.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
 import { sanitizeVerdict } from '../dispatch/verdict-fields.js';
 import { parseBrief, type ParsedBrief } from './brief-format.js';
-import type { ClearResult } from './clear.js';
+import type { DispatchTickMarker } from '../usage/dispatch-turns.js';
+import type { ClearResult, ClearSelfResult } from './clear.js';
 import type { MarkReadyReport } from './mark-ready.js';
 import type { PlaybookOutcome } from './playbook.js';
 import { readRosterChecked } from './roster.js';
@@ -68,6 +75,8 @@ export interface LoopState {
   /** Verdicts already handled, as `<state>:<task>:<completedAt>`. */
   handled: string[];
   lastReportAt?: string;
+  /** A brief completed and the session has not cleared itself since (AISDLC-667.1). */
+  selfClearPending?: boolean;
 }
 
 function emptyState(): LoopState {
@@ -90,6 +99,7 @@ export function readLoopState(boardDir: string): LoopState {
       rejected: parsed.rejected ?? {},
       handled: Array.isArray(parsed.handled) ? parsed.handled : [],
       ...(parsed.lastReportAt ? { lastReportAt: parsed.lastReportAt } : {}),
+      ...(parsed.selfClearPending === true ? { selfClearPending: true } : {}),
     };
   } catch {
     return emptyState();
@@ -144,6 +154,29 @@ export interface PlannerReport {
   text: string;
 }
 
+/** What the brief-completion self-clear did this tick. */
+export interface BriefSelfClearReport {
+  status: 'scheduled' | 'refused' | 'failed';
+  /** Why it did not happen (`refused`, `failed`). */
+  reason?: string;
+  /** Tasks still inflight when it was refused. */
+  inflight?: number;
+}
+
+/** The turns-per-tick budget check, as the loop reports it. */
+export interface TurnBudgetReview {
+  /** Rolling median of turns per tick over the window, null when no tick has completed. */
+  median: number | null;
+  budget: number;
+  overBudget: boolean;
+  /** Present when this tick filed a Decision. */
+  decisionId?: string;
+  /** Step that used the most turns, when over budget. */
+  costliestStep?: string;
+  /** Why no Decision was filed although over budget (one is already open). */
+  skipped?: string;
+}
+
 /** Everything a tick did. */
 export interface TickResult {
   ingested: { file: string; tasks: string[] }[];
@@ -159,6 +192,12 @@ export interface TickResult {
   markReady?: MarkReadyReport;
   /** Decisions moved up a tier this tick because their timebox lapsed. */
   promotions?: PromotedDecision[];
+  /** Present on the tick where a completed brief caused (or was refused) a self-clear. */
+  briefSelfClear?: BriefSelfClearReport;
+  /** The marker written for this tick. */
+  tickMarker: DispatchTickMarker;
+  /** Present when a budget review was supplied and did not fail. */
+  turnBudget?: TurnBudgetReview;
 }
 
 /**
@@ -205,6 +244,15 @@ export interface LoopDeps {
   markReady?: () => MarkReadyReport;
   /** Moves escalated decisions whose tier timebox lapsed up one tier; its failure never fails the tick. */
   promoteExpired?: () => PromotedDecision[];
+  /**
+   * Schedules this session's own clear and resume (the `cli-hierarchy clear --self` path).
+   * Absent when the session cannot clear itself (no tmux): the clear then stays pending.
+   */
+  clearSelf?: (opts: { resumeAfterSeconds: number }) => ClearSelfResult;
+  /** Records the tick marker; its failure never fails the tick. */
+  recordTick?: (marker: DispatchTickMarker) => void;
+  /** Checks the turns-per-tick budget and files a Decision on an overrun; its failure never fails the tick. */
+  reviewTurnBudget?: () => TurnBudgetReview | Promise<TurnBudgetReview>;
 }
 
 function ingestBriefs(
@@ -361,30 +409,101 @@ function buildReports(deps: LoopDeps, state: LoopState, handledCount: number): P
   return reports;
 }
 
+/** Collect the steps of a tick in the order they ran, each with its start time. */
+class StepLog {
+  readonly steps: { name: string; startedAt: string }[] = [];
+  constructor(private readonly now: () => Date) {}
+  start(name: string): void {
+    this.steps.push({ name, startedAt: this.now().toISOString() });
+  }
+}
+
+/** Clear this session once, after a brief completed, when nothing is inflight. */
+function selfClearAfterBrief(
+  deps: LoopDeps,
+  state: LoopState,
+  wakeSec: number,
+): BriefSelfClearReport | undefined {
+  if (!state.selfClearPending || !deps.clearSelf) return undefined;
+  const inflight = peekQueue(deps.boardDir).inflight;
+  if (inflight > 0) {
+    return {
+      status: 'refused',
+      inflight,
+      reason: `${inflight} manifest(s) still inflight; the clear waits until they are reconciled`,
+    };
+  }
+  // One attempt per completed brief: the flag is cleared before the call, so a failure
+  // is reported once and never retried every tick.
+  state.selfClearPending = false;
+  try {
+    deps.clearSelf({ resumeAfterSeconds: wakeSec });
+    return { status: 'scheduled' };
+  } catch (err) {
+    return { status: 'failed', reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 /** Run one wake-up of the dispatch loop. */
 export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
+  const startedAt = deps.now().toISOString();
+  const log = new StepLog(deps.now);
   const state = readLoopState(deps.boardDir);
+  log.start('ingest');
   const ingest = ingestBriefs(deps, state);
+  log.start('verdicts');
   const watch = await watchVerdicts(deps, state);
+  log.start('reports');
   const reports = buildReports(deps, state, watch.verdicts.length);
+  if (reports.some((r) => r.kind === 'brief-complete')) state.selfClearPending = true;
   saveState(deps.boardDir, state);
-  const markReady =
-    deps.markReady && deps.operational.has('mark-ready-after-codeql')
-      ? deps.markReady()
-      : undefined;
+  let markReady: MarkReadyReport | undefined;
+  if (deps.markReady && deps.operational.has('mark-ready-after-codeql')) {
+    log.start('mark-ready');
+    markReady = deps.markReady();
+  }
   let promotions: PromotedDecision[] = [];
-  try {
-    promotions = deps.promoteExpired?.() ?? [];
-  } catch {
-    /* an unreadable decision log must not stop the dispatch loop */
+  if (deps.promoteExpired) {
+    log.start('promotions');
+    try {
+      promotions = deps.promoteExpired();
+    } catch {
+      /* an unreadable decision log must not stop the dispatch loop */
+    }
   }
   const wake = computeNextWake(deps.boardDir, { ...ingest, ...watch, reports }, markReady);
+  const wasPending = state.selfClearPending === true;
+  if (wasPending && deps.clearSelf) log.start('self-clear');
+  const briefSelfClear = selfClearAfterBrief(deps, state, wake.nextWakeSec);
+  if (wasPending) saveState(deps.boardDir, state);
+
+  const tickMarker: DispatchTickMarker = {
+    tickId: `${deps.workerId}@${startedAt}`,
+    startedAt,
+    endedAt: deps.now().toISOString(),
+    steps: log.steps,
+    nextWakeSec: wake.nextWakeSec,
+  };
+  try {
+    deps.recordTick?.(tickMarker);
+  } catch {
+    /* a marker is observability; losing one must not stop the loop */
+  }
+  let turnBudget: TurnBudgetReview | undefined;
+  try {
+    turnBudget = await deps.reviewTurnBudget?.();
+  } catch {
+    /* an unreadable ledger must not stop the dispatch loop */
+  }
   return {
     ...ingest,
     ...watch,
     reports,
     ...wake,
+    tickMarker,
     ...(markReady ? { markReady } : {}),
     ...(promotions.length > 0 ? { promotions } : {}),
+    ...(briefSelfClear ? { briefSelfClear } : {}),
+    ...(turnBudget ? { turnBudget } : {}),
   };
 }

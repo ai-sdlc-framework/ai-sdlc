@@ -364,9 +364,13 @@ spec:
   allotmentTolerance: 0.25
   modelMixSimilarity: 0.8
   scorecardMinTasks: 30
+  dispatch:
+    turnsPerTickBudget: 5 # model turns one dispatch wake-up should need
 ```
 
 Window modes: `first-use` opens at the first call after the previous window ended, `fixed` repeats from an `anchor`, and `trailing` is the last `lengthHours` before now. `weights.tokenClasses` can override the per-class weights (`input`, `cacheWrite5m`, `cacheWrite1h`, `cacheRead`, `output`). The schema is [`usage-config.v1.schema.json`](../../spec/schemas/usage-config.v1.schema.json).
+
+`dispatch.turnsPerTickBudget` is the budget for the dispatch session (RFC-0051). `cli-usage scorecard` reports the median and p90 of model turns per dispatch tick against it, and the dispatch loop files one Decision, naming the step that used the most turns, when the median over the last 20 ticks exceeds it.
 
 A config that fails validation is skipped with a warning and the next source is tried. A bad config never stops a report.
 

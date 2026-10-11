@@ -37,6 +37,17 @@ describe('operator-dispatch command', () => {
     assert.match(body, /`markReady`/);
   });
 
+  it('states the mechanical-steps rule and the budget it is measured against', () => {
+    assert.match(body, /Mechanical steps rule/);
+    assert.match(
+      body,
+      /every step that touches files or git is a `cli-dispatch` or `cli-hierarchy` subcommand/,
+    );
+    assert.match(body, /judgment calls/);
+    assert.match(body, /`turnBudget`/);
+    assert.match(body, /`briefSelfClear`/);
+  });
+
   it('runs one wake-up through the hierarchy tick', () => {
     assert.match(body, /cli-hierarchy\.mjs" tick --board-dir "\$BOARD_DIR"/);
   });

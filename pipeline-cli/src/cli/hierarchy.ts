@@ -107,6 +107,15 @@ import {
   type IdentityDeps,
   type OperationalPolicy,
 } from '../hierarchy/index.js';
+import {
+  fileTurnBudgetDecision,
+  hasOpenTurnBudgetDecision,
+  loadDispatchTicks,
+  reviewTurnBudget,
+  type TurnBudgetDeps,
+} from '../hierarchy/turn-budget.js';
+import { resolveArtifactsDir } from '../routing/artifacts-dir.js';
+import { loadUsageConfig } from '../usage/usage-config.js';
 import { findTaskFile, parseArgv, resolveBaseSha } from './dispatch.js';
 
 const USAGE = `Usage: cli-hierarchy <command> [options]
@@ -368,6 +377,10 @@ export async function runHierarchyCli(
     enqueue?: (entries: EnqueueEntry[]) => string[];
     /** Replaces the `gh` runner the mark-ready pass uses (tests). */
     ghRun?: CommandRunner;
+    /** Replaces the ledger, the usage config and the decision log the turn-budget review uses (tests). */
+    turnBudget?: Partial<
+      Pick<TurnBudgetDeps, 'budget' | 'ticks' | 'hasOpenDecision' | 'fileDecision'>
+    >;
   } = {},
 ): Promise<number> {
   const { subcommand, flags } = parseArgv(argv);
@@ -613,6 +626,49 @@ export async function runHierarchyCli(
               workerId: worker,
             }),
           operational,
+          ...(selfClearAvailability(deps.env).available
+            ? {
+                clearSelf: (o: { resumeAfterSeconds: number }) =>
+                  clearSelf(
+                    {
+                      self: worker,
+                      resumeAfterSeconds: o.resumeAfterSeconds,
+                      ...(deps.env.TMUX_PANE ? { callerPane: deps.env.TMUX_PANE } : {}),
+                      wakeOnBoardDir: deps.boardDir,
+                    },
+                    {
+                      run: deps.run,
+                      boardDir: deps.boardDir,
+                      log: deps.log,
+                      ...(extras.spawnDetached ? { spawnDetached: extras.spawnDetached } : {}),
+                    },
+                  ),
+              }
+            : {}),
+          recordTick: (marker) => emit({ type: 'DispatchTick', ...marker }),
+          ...(isDecisionCatalogEnabled()
+            ? {
+                reviewTurnBudget: () =>
+                  reviewTurnBudget({
+                    budget:
+                      extras.turnBudget?.budget ??
+                      loadUsageConfig({ workDir: repoRoot }).dispatchTurnsPerTickBudget,
+                    ticks:
+                      extras.turnBudget?.ticks ??
+                      (() =>
+                        loadDispatchTicks({
+                          repoRoot,
+                          artifactsDir: resolveArtifactsDir(repoRoot),
+                        })),
+                    hasOpenDecision:
+                      extras.turnBudget?.hasOpenDecision ??
+                      (() => hasOpenTurnBudgetDecision(repoRoot)),
+                    fileDecision:
+                      extras.turnBudget?.fileDecision ??
+                      ((input) => fileTurnBudgetDecision(repoRoot, input)),
+                  }),
+              }
+            : {}),
           markReady: () => markReadyAfterCodeql(extras.ghRun ?? deps.run, repoRoot),
           promoteExpired: () =>
             isDecisionCatalogEnabled()

@@ -2,7 +2,7 @@
 id: AISDLC-667.1
 title: >-
   RFC-0051 follow-up: dispatch session clears itself after a brief, records tick markers, and files a Decision when turns per tick exceed budget
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-02'
 labels:
@@ -56,10 +56,10 @@ executors.
    the judgment calls.
 
 ## Acceptance Criteria
-- [ ] A completed brief triggers exactly one self-clear through the injected runner; an unreconciled inflight manifest prevents it.
-- [ ] Each tick emits a `DispatchTick` marker that validates against the events schema.
-- [ ] The scorecard reports turns per tick from a fixture ledger and marker set, and the budget is read from config.
-- [ ] A rolling median above budget files one Decision naming the costliest step; a second overrun while it is open files none.
-- [ ] The skill body states the mechanical-steps rule.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
+- [x] A completed brief triggers exactly one self-clear through the injected runner; an unreconciled inflight manifest prevents it.
+- [x] Each tick emits a `DispatchTick` marker that validates against the events schema.
+- [x] The scorecard reports turns per tick from a fixture ledger and marker set, and the budget is read from config.
+- [x] A rolling median above budget files one Decision naming the costliest step; a second overrun while it is open files none.
+- [x] The skill body states the mechanical-steps rule.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->
