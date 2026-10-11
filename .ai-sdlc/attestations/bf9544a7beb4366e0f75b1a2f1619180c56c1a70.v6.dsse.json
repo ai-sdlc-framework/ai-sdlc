@@ -1,0 +1,85 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "e139c41683a6d2974b9832bdbc70a65332798bc6"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "aa0d96202c4f86382351984f15effafe6c973557c116f9cb27edb59e5bc1804c",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "aa0d96202c4f86382351984f15effafe6c973557c116f9cb27edb59e5bc1804c",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "f9ade9bce9046c33bc7a5d6979dec37645f42dcc06e71d98e80cf0b7cfe55f29",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "f9ade9bce9046c33bc7a5d6979dec37645f42dcc06e71d98e80cf0b7cfe55f29",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "944f251268dd1591f625d887c128cfd1ccdfd454c4852501ab97c4c5ce269781",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "944f251268dd1591f625d887c128cfd1ccdfd454c4852501ab97c4c5ce269781",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "b9e578a03171ec165146f74d0e106a3ad51c5b3a44818e4dc071deac868a6319",
+        "5325c158e61a5a323e5b5d37a332f1cdd344871d8032e311e0638400f6360b79"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "1b54a6278901e1fe8053d3e9a294501ca32caa0246c9f600c114530a7cf99b95",
+        "5325c158e61a5a323e5b5d37a332f1cdd344871d8032e311e0638400f6360b79"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "cac9a20bea2b2b1db13ed77f12720a1d40edb1a9552bff884e83384a3ded23dc",
+        "b679aeb800ab182d4ab9fa3e9dda1e8ab608241ed959b9d247554f455d9016d9"
+      ]
+    }
+  ],
+  "rootHash": "78f7e4a83071d4b22f50ea4797aa55b8b76baa5f6276711077ee05f85cff53c7",
+  "rootSignature": "htdJGZ2zD2bEInsIP2M3xAVnXoAXv8IzL6nZ9gkr+/y+M8VRLlZZzAzW3QGu55mS+7akr2gm+gLSbWaBQUPZCg==",
+  "nonce": "e331a51c1e3a6a01d28973115b96ef6648df5792e3c118eca1a7407ad361c442",
+  "leafCount": 3,
+  "signedAt": "2026-10-11T02:45:16.479Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      "ai-sdlc-plugin/.claude-plugin/plugin.json",
+      "ai-sdlc-plugin/commands/operator-dispatch.md",
+      "ai-sdlc-plugin/commands/planner.md",
+      "ai-sdlc-plugin/hooks/context-warn.js",
+      "ai-sdlc-plugin/hooks/context-warn.sh",
+      "ai-sdlc-plugin/hooks/context-warn.test.mjs",
+      "ai-sdlc-plugin/hooks/lib/context-warn.js",
+      "ai-sdlc-plugin/hooks/lib/hierarchy-role.js",
+      "ai-sdlc-plugin/hooks/lib/hierarchy-role.test.mjs",
+      "ai-sdlc-plugin/hooks/session-start-clear.test.mjs",
+      "ai-sdlc-plugin/hooks/session-start.js",
+      "ai-sdlc-plugin/plugin.json",
+      "ai-sdlc-plugin/scripts/context-statusline.mjs"
+    ],
+    "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
+  }
+}
