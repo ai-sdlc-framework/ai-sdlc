@@ -9,12 +9,7 @@
  */
 
 import type { NetworkPolicy, SandboxConstraints } from '@ai-sdlc/reference';
-import {
-  parseDuration,
-  CLAUDE_SONNET_MODEL_ID,
-  CLAUDE_OPUS_MODEL_ID,
-  CLAUDE_HAIKU_MODEL_ID,
-} from '@ai-sdlc/reference';
+import { parseDuration, CLAUDE_SONNET_MODEL_ID, SEED_PRICES } from '@ai-sdlc/reference';
 
 // ── LLM Model ────────────────────────────────────────────────────────
 
@@ -213,22 +208,22 @@ export const DEFAULT_HOTSPOT_THRESHOLD = 0.3;
 
 // ── Model cost mapping ──────────────────────────────────────────
 
-/** Cost per million tokens for known models (input/output/cache-read). */
+/**
+ * Cost per million tokens for known models (input/output/cache-read), taken from the
+ * seed table (reference/src/usage/prices-seed.ts) so the two cannot disagree. A model
+ * with no entry is reported as unpriced by the cost tracker, never priced as another
+ * model. Cache-write tokens are priced from the price history, not from this table.
+ */
 export const DEFAULT_MODEL_COSTS: Record<
   string,
   { inputPer1M: number; outputPer1M: number; cacheReadPer1M: number }
 > = {
-  // Ids the central module names (reference/src/models/claude-model-ids.ts), priced from
-  // the seed table (reference/src/usage/prices-seed.ts). A model with no entry is reported
-  // as unpriced by the cost tracker, never priced as another model.
-  [CLAUDE_SONNET_MODEL_ID]: { inputPer1M: 2.0, outputPer1M: 10.0, cacheReadPer1M: 0.2 },
-  [CLAUDE_OPUS_MODEL_ID]: { inputPer1M: 4.0, outputPer1M: 20.0, cacheReadPer1M: 0.2 },
-  [CLAUDE_HAIKU_MODEL_ID]: { inputPer1M: 1.0, outputPer1M: 5.0, cacheReadPer1M: 0.1 },
-  'claude-opus-4-6': { inputPer1M: 15.0, outputPer1M: 75.0, cacheReadPer1M: 1.5 },
-  'claude-sonnet-4-5-20250929': { inputPer1M: 3.0, outputPer1M: 15.0, cacheReadPer1M: 0.3 },
-  'claude-haiku-4-5-20251001': { inputPer1M: 0.8, outputPer1M: 4.0, cacheReadPer1M: 0.08 },
-  'claude-sonnet-4-20250514': { inputPer1M: 3.0, outputPer1M: 15.0, cacheReadPer1M: 0.3 },
-  'claude-3-5-haiku-20241022': { inputPer1M: 1.0, outputPer1M: 5.0, cacheReadPer1M: 0.1 },
+  ...Object.fromEntries(
+    SEED_PRICES.map((r) => [
+      r.model,
+      { inputPer1M: r.inputPer1M, outputPer1M: r.outputPer1M, cacheReadPer1M: r.cacheReadPer1M },
+    ]),
+  ),
   // Jev judgment provider: input-only pricing, no generated output, no cache discount.
   'jev-1.13.0': { inputPer1M: 0.042, outputPer1M: 0, cacheReadPer1M: 0 },
 };

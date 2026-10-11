@@ -1,0 +1,173 @@
+{
+  "_comment": "Snapshot of Anthropic's published price list (USD per million tokens) and each model's release date. Update it together with prices-seed.ts when the list changes; the seed test fails on any disagreement.",
+  "readOn": "2026-10-10",
+  "priceUrl": "https://platform.claude.com/docs/en/about-claude/pricing",
+  "releaseDateRules": {
+    "model-page-release-date": "the Released field on the model's page at https://platform.claude.com/docs/en/models/<model>/overview",
+    "id-snapshot-date": "the provider's model listing carries no release date; the YYYYMMDD snapshot date in the model id is used"
+  },
+  "models": {
+    "claude-fable-5-1": {
+      "input": 10,
+      "cacheWrite5m": 12.5,
+      "cacheWrite1h": 20,
+      "cacheRead": 0.25,
+      "output": 50,
+      "releaseDate": "2026-09-01",
+      "rule": "model-page-release-date"
+    },
+    "claude-fable-5": {
+      "input": 10,
+      "cacheWrite5m": 12.5,
+      "cacheWrite1h": 20,
+      "cacheRead": 1,
+      "output": 50,
+      "releaseDate": "2026-06-09",
+      "rule": "model-page-release-date"
+    },
+    "claude-opus-5-5": {
+      "input": 4,
+      "cacheWrite5m": 5,
+      "cacheWrite1h": 8,
+      "cacheRead": 0.2,
+      "output": 20,
+      "releaseDate": "2026-09-22",
+      "rule": "model-page-release-date"
+    },
+    "claude-opus-5": {
+      "input": 5,
+      "cacheWrite5m": 6.25,
+      "cacheWrite1h": 10,
+      "cacheRead": 0.5,
+      "output": 25,
+      "releaseDate": "2026-07-24",
+      "rule": "model-page-release-date"
+    },
+    "claude-opus-4-8": {
+      "input": 5,
+      "cacheWrite5m": 6.25,
+      "cacheWrite1h": 10,
+      "cacheRead": 0.5,
+      "output": 25,
+      "releaseDate": "2026-05-28",
+      "rule": "model-page-release-date"
+    },
+    "claude-opus-4-7": {
+      "input": 5,
+      "cacheWrite5m": 6.25,
+      "cacheWrite1h": 10,
+      "cacheRead": 0.5,
+      "output": 25,
+      "releaseDate": "2026-04-16",
+      "rule": "model-page-release-date"
+    },
+    "claude-opus-4-6": {
+      "input": 5,
+      "cacheWrite5m": 6.25,
+      "cacheWrite1h": 10,
+      "cacheRead": 0.5,
+      "output": 25,
+      "releaseDate": "2026-02-05",
+      "rule": "model-page-release-date"
+    },
+    "claude-opus-4-5-20251101": {
+      "input": 5,
+      "cacheWrite5m": 6.25,
+      "cacheWrite1h": 10,
+      "cacheRead": 0.5,
+      "output": 25,
+      "releaseDate": "2025-11-01",
+      "rule": "id-snapshot-date"
+    },
+    "claude-opus-4-1-20250805": {
+      "input": 15,
+      "cacheWrite5m": 18.75,
+      "cacheWrite1h": 30,
+      "cacheRead": 1.5,
+      "output": 75,
+      "releaseDate": "2025-08-05",
+      "rule": "id-snapshot-date"
+    },
+    "claude-opus-4-20250514": {
+      "input": 15,
+      "cacheWrite5m": 18.75,
+      "cacheWrite1h": 30,
+      "cacheRead": 1.5,
+      "output": 75,
+      "releaseDate": "2025-05-14",
+      "rule": "id-snapshot-date"
+    },
+    "claude-sonnet-5-5": {
+      "input": 2,
+      "cacheWrite5m": 2.5,
+      "cacheWrite1h": 4,
+      "cacheRead": 0.1,
+      "output": 10,
+      "releaseDate": "2026-09-28",
+      "rule": "model-page-release-date"
+    },
+    "claude-sonnet-5": {
+      "input": 2,
+      "cacheWrite5m": 2.5,
+      "cacheWrite1h": 4,
+      "cacheRead": 0.2,
+      "output": 10,
+      "releaseDate": "2026-06-30",
+      "rule": "model-page-release-date"
+    },
+    "claude-sonnet-4-6": {
+      "input": 3,
+      "cacheWrite5m": 3.75,
+      "cacheWrite1h": 6,
+      "cacheRead": 0.3,
+      "output": 15,
+      "releaseDate": "2026-02-17",
+      "rule": "model-page-release-date"
+    },
+    "claude-sonnet-4-5-20250929": {
+      "input": 3,
+      "cacheWrite5m": 3.75,
+      "cacheWrite1h": 6,
+      "cacheRead": 0.3,
+      "output": 15,
+      "releaseDate": "2025-09-29",
+      "rule": "id-snapshot-date"
+    },
+    "claude-sonnet-4-20250514": {
+      "input": 3,
+      "cacheWrite5m": 3.75,
+      "cacheWrite1h": 6,
+      "cacheRead": 0.3,
+      "output": 15,
+      "releaseDate": "2025-05-14",
+      "rule": "id-snapshot-date"
+    },
+    "claude-haiku-4-5-20251001": {
+      "input": 1,
+      "cacheWrite5m": 1.25,
+      "cacheWrite1h": 2,
+      "cacheRead": 0.1,
+      "output": 5,
+      "releaseDate": "2025-10-01",
+      "rule": "id-snapshot-date"
+    },
+    "claude-haiku-4-5": {
+      "input": 1,
+      "cacheWrite5m": 1.25,
+      "cacheWrite1h": 2,
+      "cacheRead": 0.1,
+      "output": 5,
+      "releaseDate": "2025-10-01",
+      "rule": "id-snapshot-date"
+    },
+    "claude-3-5-haiku-20241022": {
+      "input": 0.8,
+      "cacheWrite5m": 1,
+      "cacheWrite1h": 1.6,
+      "cacheRead": 0.08,
+      "output": 4,
+      "releaseDate": "2024-10-22",
+      "rule": "id-snapshot-date"
+    }
+  }
+}

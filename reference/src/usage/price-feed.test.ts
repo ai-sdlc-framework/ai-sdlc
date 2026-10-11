@@ -27,8 +27,8 @@ import type { PriceRow } from './types.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = (name: string): string => readFileSync(join(here, '__fixtures__', name), 'utf-8');
 
-const T1 = new Date('2026-10-01T09:00:00.000Z');
-const T2 = new Date('2026-10-02T09:00:00.000Z');
+const T1 = new Date('2026-10-11T09:00:00.000Z');
+const T2 = new Date('2026-10-12T09:00:00.000Z');
 
 let dir: string;
 beforeEach(() => {
@@ -225,15 +225,15 @@ describe('refreshPrices', () => {
     ]);
     const written = readPriceHistory({ dir }).filter((r) => r.source === 'a');
     expect(written).toHaveLength(1);
-    expect(written[0]).toMatchObject({ effectiveFrom: '2026-10-01', status: 'active' });
+    expect(written[0]).toMatchObject({ effectiveFrom: '2026-10-11', status: 'active' });
 
     const tokens = { input: 1_000_000, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 0 };
     const before = priceCall(
-      { model: 'claude-haiku-4-5', ts: '2026-09-30T12:00:00Z', tokens },
+      { model: 'claude-haiku-4-5', ts: '2026-10-10T12:00:00Z', tokens },
       { dir },
     );
     const after = priceCall(
-      { model: 'claude-haiku-4-5', ts: '2026-10-01T12:00:00Z', tokens },
+      { model: 'claude-haiku-4-5', ts: '2026-10-11T12:00:00Z', tokens },
       { dir },
     );
     expect(before).toBe(1);
@@ -304,7 +304,7 @@ describe('refreshPrices', () => {
     expect(res.appended).toBe(0);
     const tokens = { input: 1_000_000, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 0 };
     expect(
-      priceCall({ model: 'claude-haiku-4-5', ts: '2026-10-05T00:00:00Z', tokens }, { dir }),
+      priceCall({ model: 'claude-haiku-4-5', ts: '2026-10-13T00:00:00Z', tokens }, { dir }),
     ).toBe(1);
 
     // The same disagreement tomorrow does not pile up another held row.
@@ -340,7 +340,7 @@ describe('refreshPrices', () => {
     });
     expect(res.held).toEqual([{ model: 'claude-haiku-4-5', reason: 'change-factor' }]);
     const tokens = { input: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 1_000_000 };
-    const call = { model: 'claude-haiku-4-5', ts: '2026-10-03T00:00:00Z', tokens };
+    const call = { model: 'claude-haiku-4-5', ts: '2026-10-13T00:00:00Z', tokens };
     expect(priceCall(call, { dir })).toBe(5);
 
     const entry = listPrices({ dir, now: () => T2 }).find((e) => e.model === 'claude-haiku-4-5');
@@ -372,7 +372,7 @@ describe('refreshPrices', () => {
     expect(res.changes).toEqual([]);
     const tokens = { input: 1_000_000, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 0 };
     expect(
-      priceCall({ model: 'claude-haiku-4-5', ts: '2026-10-03T00:00:00Z', tokens }, { dir }),
+      priceCall({ model: 'claude-haiku-4-5', ts: '2026-10-13T00:00:00Z', tokens }, { dir }),
     ).toBe(9);
   });
 
@@ -451,7 +451,7 @@ describe('setManualPrice', () => {
     const row = setManualPrice(
       'm',
       { input: 1, output: 2, cacheRead: 3, cacheWrite5m: 4, cacheWrite1h: 5 },
-      { dir, now: () => T1, effectiveFrom: '2026-10-01' },
+      { dir, now: () => T1, effectiveFrom: '2026-10-11' },
     );
     expect(row.status).toBe('manual');
     expect(readPriceHistory({ dir }).find((r) => r.model === 'm')?.cacheWrite1hPer1M).toBe(5);
@@ -461,8 +461,8 @@ describe('setManualPrice', () => {
 describe('staleness and listing', () => {
   it('labels prices stale once the last successful refresh is past the limit', async () => {
     await refreshPrices({ dir, now: () => T1, sources: [source('a', [srow('claude-haiku-4-5')])] });
-    const fresh = new Date('2026-10-10T00:00:00Z');
-    const old = new Date('2026-10-20T00:00:00Z');
+    const fresh = new Date('2026-10-14T00:00:00Z');
+    const old = new Date('2026-10-31T00:00:00Z');
     const find = (now: Date) =>
       listPrices({ dir, now: () => now }).find((e) => e.model === 'claude-haiku-4-5');
     expect(find(fresh)?.stale).toBe(false);
@@ -484,7 +484,7 @@ describe('staleness and listing', () => {
       ...(readPriceHistory({ dir })[0] as PriceRow),
       model: 'only-held',
       status: 'held',
-      effectiveFrom: '2026-10-01',
+      effectiveFrom: '2026-10-11',
       fetchedAt: T1.toISOString(),
     };
     appendFetchedPriceRows([held], { dir });

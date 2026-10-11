@@ -652,13 +652,16 @@ describe('price table', () => {
       expect(ids.has(id)).toBe(true);
     }
     for (const r of SEED_PRICES) {
-      expect(r.fetchedAt.startsWith('2026-09-30')).toBe(true);
+      expect(r.fetchedAt.startsWith('2026-10-10')).toBe(true);
       expect(r.url).toMatch(/^https:\/\//);
     }
   });
 
-  it('prices calls made before the seed date with the seed baseline', () => {
-    expect(priceCall({ model: 'claude-opus-5', ts: '2026-06-12T00:00:00Z', tokens: T })).not.toBe(
+  it('prices calls made after a model release with the seed baseline, and earlier calls as unpriced', () => {
+    expect(priceCall({ model: 'claude-opus-5', ts: '2026-07-24T00:00:00Z', tokens: T })).not.toBe(
+      'unpriced',
+    );
+    expect(priceCall({ model: 'claude-opus-5', ts: '2026-07-23T23:59:59Z', tokens: T })).toBe(
       'unpriced',
     );
   });
