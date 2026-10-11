@@ -5487,6 +5487,7 @@ export const judgmentConfigV1Schema = {
         n: { type: 'integer', minimum: 0 },
         actBandPrecision: { type: 'number', minimum: 0, maximum: 1 },
         evalReport: { type: 'string' },
+        cacheHits: { type: 'integer', minimum: 0 },
         evidence: { type: 'string' },
       },
       additionalProperties: false,

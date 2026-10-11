@@ -374,7 +374,7 @@ async function runExportCorpus(
 const pct = (x: number | null): string => (x === null ? 'n/a' : `${(x * 100).toFixed(1)}%`);
 
 async function runEval(
-  args: CommonArgs & { id: string; corpus: string; sweep?: string },
+  args: CommonArgs & { id: string; corpus: string; sweep?: string; 'use-cache'?: boolean },
   deps: JudgmentCliDeps,
 ) {
   const out = deps.out ?? ((t) => process.stdout.write(t));
@@ -397,7 +397,8 @@ async function runEval(
   const items = await collectAnswers(def, corpus, {
     config: s.config,
     getProvider: () => provider,
-    cache: createJudgmentCache(s.artifactsDir),
+    // A planted cache entry could inflate act-band precision, so reads are opt-in.
+    ...(args['use-cache'] ? { cache: createJudgmentCache(s.artifactsDir) } : {}),
     sourceKind,
     ...(deps.now ? { now: deps.now } : {}),
   });
@@ -419,7 +420,7 @@ async function runEval(
   const date = (deps.now ?? (() => new Date()))().toISOString().slice(0, 10);
   const fileName = reportFileName({ id: def.id, provider: providerName, model, date });
   const relPath = join('.ai-sdlc', 'judgment-evals', fileName);
-  const promotion = buildPromotion(def, key, stats, relPath);
+  const promotion = buildPromotion(def, key, stats, relPath, cost.cacheHits);
   const report = {
     judgmentId: def.id,
     version: def.version,
@@ -653,6 +654,10 @@ export function buildJudgmentCli(
           .option('sweep', {
             type: 'string',
             describe: 'Recompute across a threshold range: <name>=<from>:<to>:<step>.',
+          })
+          .option('use-cache', {
+            type: 'boolean',
+            describe: 'Serve answers from the judgment cache (the report then cannot be promoted).',
           }),
       (a) => run(() => runEval(a as never, deps)),
     )

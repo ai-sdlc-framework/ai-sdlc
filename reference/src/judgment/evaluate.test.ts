@@ -338,6 +338,13 @@ describe('evaluateJudgment', () => {
     });
   });
 
+  it('promotionSatisfies rejects a corpus record that cites cache hits', () => {
+    const ok = { path: 'corpus' as const, n: 60, actBandPrecision: 0.99 };
+    expect(promotionSatisfies('seam', ok)).toBe(true);
+    expect(promotionSatisfies('seam', { ...ok, cacheHits: 0 })).toBe(true);
+    expect(promotionSatisfies('seam', { ...ok, cacheHits: 1 })).toBe(false);
+  });
+
   it('promotionSatisfies handles each bar', () => {
     expect(promotionSatisfies('seam', undefined)).toBe(false);
     expect(promotionSatisfies('seam', { path: 'override', evidence: '  ' })).toBe(false);
