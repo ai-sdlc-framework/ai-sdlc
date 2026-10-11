@@ -113,7 +113,7 @@ only the missing ones are started.
 cli-hierarchy up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
                  [--executor-model <m>] [--no-planner] [--project <name>]
                  [--attach] [--planner-permission-mode <m>] [--allow-planner-bypass]
-                 [--no-vscode-tasks]
+                 [--no-vscode-tasks] [--node <version>]
 ```
 
 | Option                   | Meaning                                                                      |
@@ -128,6 +128,19 @@ cli-hierarchy up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
 | `--planner-permission-mode <m>` | Planner permission mode (default `bypassPermissions`); `default` gives a prompting planner. |
 | `--allow-planner-bypass` | Deprecated, no effect (prints a deprecation line); every session starts in `bypassPermissions`. |
 | `--no-vscode-tasks`      | Do not regenerate `.vscode/tasks.json` (see below).                          |
+| `--node <version>`       | Node version every session runs under (default: the version in `.nvmrc`).    |
+
+**Pinned Node (AISDLC-812).** Every session command starts by loading nvm and running
+`nvm use <version>`, so the Node a session runs under never depends on the launching
+shell's default. The version is `--node <version>` when given, otherwise the first line of
+`.nvmrc` in the repository root (22.23.2, per DEC-0060); `.nvmrc` is the single source of
+truth. Without either, sessions inherit the launching shell's Node. `up` checks
+`$NVM_DIR/versions/node` before starting anything and refuses when the version is not
+installed, naming the next step (`nvm install <version>`). Only plain versions (`22`,
+`22.23.2`, `v22.23.2`) are accepted. Five-step review: the requirement (sessions run the
+engines Node, AISDLC-801 / DEC-0113) stays; the dependence on the operator's shell default is
+deleted; the launch prefix replaces a manual `nvm use`; `status` surfaces a mismatch instead
+of a mid-task Step 3 failure.
 
 **VS Code tasks file (AISDLC-754).** After writing the roster, when at least one session was
 started or the roster changed, `up` regenerates `<cwd>/.vscode/tasks.json` (the same document
@@ -206,6 +219,9 @@ counts. The table also lists each session's `HIERARCHY_SESSION` and `HIERARCHY_R
 The `ENV` column is `ok` when the session's tmux start command carries
 `AI_SDLC_HIERARCHY_SESSION=<name>` and `AI_SDLC_HIERARCHY_ROLE=<role>`, `missing` when it does
 not (a bare launch; the repair line follows the table), and `-` for a gone window.
+The `NODE` column is the Node version the pane's processes run, read from the process table
+(`ps`), with `MISMATCH` appended when it does not satisfy `.nvmrc`; a repair line follows the
+table. It is `-` when no nvm-managed node process runs under the pane or `ps` cannot be read.
 
 ```bash
 cli-hierarchy status [--json]
@@ -213,7 +229,7 @@ cli-hierarchy status [--json]
 
 `--json` prints one JSON object: `{ "rows": [ { "entry": <roster entry>, "state": "...",
 "attached": true|false, "inflightTask": "AISDLC-N", "launchEnv": "ok|missing",
-"nextStep": "..." } ], "board": { "queued": n,
+"nodeVersion": "22.23.2", "nodeMismatch": true, "nextStep": "..." } ], "board": { "queued": n,
 "inflight": n, "done": n, "failed": n } }`. Read-only. Exit code `0`.
 
 ### `attach`
