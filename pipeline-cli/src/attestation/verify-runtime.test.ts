@@ -33,6 +33,8 @@ function writeFixtureRuntime(dir: string, version = '0.19.0'): void {
   writeFileSync(join(distDir, 'attestations.js'), "export const MARKER = 'trusted-fixture';\n");
 }
 
+// AISDLC-814: every call passes an isolated walk-up start so the result never
+// depends on this checkout's own node_modules/@ai-sdlc/orchestrator or build.
 describe('verify-runtime — trusted @ai-sdlc/orchestrator resolution (AISDLC-575)', () => {
   let base: string;
 
@@ -54,7 +56,9 @@ describe('verify-runtime — trusted @ai-sdlc/orchestrator resolution (AISDLC-57
     const repoRoot = join(base, 'repo');
     mkdirSync(repoRoot, { recursive: true });
 
-    const mod = (await loadAttestationRuntime(repoRoot)) as { MARKER: string };
+    const mod = (await loadAttestationRuntime(repoRoot, join(base, 'isolated-start'))) as {
+      MARKER: string;
+    };
     expect(mod.MARKER).toBe('trusted-fixture');
   });
 
@@ -65,7 +69,9 @@ describe('verify-runtime — trusted @ai-sdlc/orchestrator resolution (AISDLC-57
     writeFixtureRuntime(repoRoot);
     process.env['CLAUDE_PLUGIN_ROOT'] = repoRoot;
 
-    await expect(loadAttestationRuntime(repoRoot)).rejects.toThrow(TrustedRuntimeResolutionError);
+    await expect(loadAttestationRuntime(repoRoot, join(base, 'isolated-start'))).rejects.toThrow(
+      TrustedRuntimeResolutionError,
+    );
   });
 
   it('rejects an installed copy older than the minimum version, even from a trusted location', async () => {
@@ -76,7 +82,9 @@ describe('verify-runtime — trusted @ai-sdlc/orchestrator resolution (AISDLC-57
     const repoRoot = join(base, 'repo');
     mkdirSync(repoRoot, { recursive: true });
 
-    await expect(loadAttestationRuntime(repoRoot)).rejects.toThrow(/too old/);
+    await expect(loadAttestationRuntime(repoRoot, join(base, 'isolated-start'))).rejects.toThrow(
+      /too old/,
+    );
   });
 
   it('fails closed with adopter-actionable guidance when no trusted runtime exists anywhere', async () => {
@@ -85,7 +93,7 @@ describe('verify-runtime — trusted @ai-sdlc/orchestrator resolution (AISDLC-57
 
     let error: unknown;
     try {
-      await loadAttestationRuntime(repoRoot);
+      await loadAttestationRuntime(repoRoot, join(base, 'isolated-start'));
     } catch (err) {
       error = err;
     }

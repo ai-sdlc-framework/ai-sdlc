@@ -87,7 +87,11 @@ function isInsideRepoRoot(candidate: string, repoRoot: string): boolean {
  * TRUSTED-LOCATIONS-ONLY candidates — deliberately contains no path derived
  * from `repoRoot`.
  */
-function trustedRuntimeModuleCandidates(pkg: string, distSubpath: string[]): string[] {
+function trustedRuntimeModuleCandidates(
+  pkg: string,
+  distSubpath: string[],
+  walkUpFrom: string,
+): string[] {
   const candidates: string[] = [];
   for (const pluginDir of [process.env['CLAUDE_PLUGIN_DIR'], process.env['CLAUDE_PLUGIN_ROOT']]) {
     if (pluginDir) {
@@ -96,14 +100,14 @@ function trustedRuntimeModuleCandidates(pkg: string, distSubpath: string[]): str
   }
   // Walk up from THIS MODULE's own on-disk location — the pipeline-cli
   // install tree, never the checked-out PR being verified.
-  candidates.push(...nodeModulesWalkUp(dirname(fileURLToPath(import.meta.url)), pkg, distSubpath));
+  candidates.push(...nodeModulesWalkUp(walkUpFrom, pkg, distSubpath));
   return [...new Set(candidates)];
 }
 
 const ORCHESTRATOR_DIST = ['dist', 'runtime', 'attestations.js'];
 
-function attestationRuntimeCandidates(): string[] {
-  return trustedRuntimeModuleCandidates('@ai-sdlc/orchestrator', ORCHESTRATOR_DIST);
+function attestationRuntimeCandidates(walkUpFrom: string): string[] {
+  return trustedRuntimeModuleCandidates('@ai-sdlc/orchestrator', ORCHESTRATOR_DIST, walkUpFrom);
 }
 
 /**
@@ -224,13 +228,21 @@ async function loadRuntimeModule(
   return import(pathToFileURL(found).href);
 }
 
-/** Resolve + import the trusted `@ai-sdlc/orchestrator` runtime module. */
-export async function loadAttestationRuntime(repoRoot: string): Promise<unknown> {
+/**
+ * Resolve + import the trusted `@ai-sdlc/orchestrator` runtime module.
+ * `walkUpFrom` is the directory the node_modules walk-up starts from; it
+ * defaults to this module's own directory and exists so tests can be
+ * independent of the checkout's own node_modules/build state (AISDLC-814).
+ */
+export async function loadAttestationRuntime(
+  repoRoot: string,
+  walkUpFrom: string = dirname(fileURLToPath(import.meta.url)),
+): Promise<unknown> {
   return loadRuntimeModule(
     repoRoot,
     'attestation runtime',
     '@ai-sdlc/orchestrator',
-    attestationRuntimeCandidates(),
+    attestationRuntimeCandidates(walkUpFrom),
     ORCHESTRATOR_DIST,
   );
 }
