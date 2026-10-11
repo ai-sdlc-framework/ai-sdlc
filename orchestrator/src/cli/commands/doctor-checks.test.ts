@@ -18,6 +18,7 @@ import {
   existsSync,
   readFileSync,
   chmodSync,
+  utimesSync,
   readdirSync,
   accessSync,
   constants as fsConstants,
@@ -28,6 +29,7 @@ import { spawnSync } from 'node:child_process';
 import { registerJudgmentDefinition, type JudgmentDefinition } from '@ai-sdlc/reference';
 import {
   DOCTOR_CHECKS,
+  buildProductionCheckAdapters,
   resolvePluginDir,
   resolvePluginInstall,
   describeResolvedPluginInstall,
@@ -2036,5 +2038,27 @@ describe('checkIdleSessions', () => {
 
   it('is registered', () => {
     expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('idle-sessions');
+  });
+
+  it('production adapter lists recent transcripts newest first', () => {
+    const home = mkdtempSync(join(tmpdir(), 'idle-home-'));
+    try {
+      const dir = join(home, '.claude', 'projects', 'p');
+      mkdirSync(dir, { recursive: true });
+      const older = join(dir, 'a.jsonl');
+      const newer = join(dir, 'b.jsonl');
+      const stale = join(dir, 'c.jsonl');
+      for (const f of [older, newer, stale]) writeFileSync(f, '');
+      writeFileSync(join(dir, 'ignore.txt'), '');
+      const nowS = Date.now() / 1000;
+      utimesSync(older, nowS - 100, nowS - 100);
+      utimesSync(newer, nowS - 10, nowS - 10);
+      utimesSync(stale, 1, 1);
+      const list = buildProductionCheckAdapters().recentTranscripts!;
+      expect(list(home, Date.now() - 3_600_000)).toEqual([newer, older]);
+      expect(list(join(home, 'nowhere'), 0)).toEqual([]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

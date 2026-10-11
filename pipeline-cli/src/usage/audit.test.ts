@@ -1,6 +1,11 @@
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   buildReport,
+  listTranscripts,
+  defaultProjectsDir,
   parseTranscript,
   projectLabel,
   renderAudit,
@@ -185,5 +190,38 @@ describe('runAudit and the cli', () => {
       }).parseAsync();
       expect(out.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('listTranscripts', () => {
+  it('finds recent jsonl files, labels projects and subagents, skips old and unreadable', () => {
+    const root = mkdtempSync(join(tmpdir(), 'usage-audit-'));
+    try {
+      mkdirSync(join(root, '-Users-bob-Documents-dev-foo', 's1', 'subagents'), { recursive: true });
+      mkdirSync(join(root, '-Users-bob-Documents-dev-bar'), { recursive: true });
+      writeFileSync(join(root, '-Users-bob-Documents-dev-foo', 's1.jsonl'), '');
+      writeFileSync(
+        join(root, '-Users-bob-Documents-dev-foo', 's1', 'subagents', 'agent-x.jsonl'),
+        '',
+      );
+      writeFileSync(join(root, '-Users-bob-Documents-dev-foo', 'notes.txt'), '');
+      const old = join(root, '-Users-bob-Documents-dev-bar', 'old.jsonl');
+      writeFileSync(old, '');
+      utimesSync(old, 1, 1);
+
+      const found = listTranscripts(root, Date.now() - 60_000);
+      const byName = Object.fromEntries(found.map((f) => [f.path.split('/').pop(), f]));
+      expect(Object.keys(byName).sort()).toEqual(['agent-x.jsonl', 's1.jsonl']);
+      expect(byName['s1.jsonl'].isSubagent).toBe(false);
+      expect(byName['agent-x.jsonl'].isSubagent).toBe(true);
+      expect(byName['s1.jsonl'].project).toBe('foo');
+      expect(listTranscripts(join(root, 'missing'), 0)).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('defaults the projects dir under ~/.claude', () => {
+    expect(defaultProjectsDir()).toMatch(/\.claude[\\/]projects$/);
   });
 });
