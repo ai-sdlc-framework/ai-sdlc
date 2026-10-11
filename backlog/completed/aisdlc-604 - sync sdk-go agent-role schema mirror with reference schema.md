@@ -2,7 +2,7 @@
 id: AISDLC-604
 title: >-
   Schema drift: sync sdk-go/core/schemas/agent-role.schema.json with the canonical reference schema (+ add a drift gate)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-07'
 labels:
@@ -57,17 +57,17 @@ rejected (or silently under-validated) by the Go SDK, and vice versa.
   validation suite; both must pass against the reconciled schema.
 
 ## Acceptance Criteria
-- [ ] `sdk-go/core/schemas/agent-role.schema.json` validation surface (properties,
+- [x] `sdk-go/core/schemas/agent-role.schema.json` validation surface (properties,
   enums, `additionalProperties`, required, `$defs`) matches
   `spec/schemas/agent-role.schema.json` — verified by an explicit diff/test, not
   by eye.
-- [ ] A drift-prevention gate (or generation step) exists so the two schemas
+- [x] A drift-prevention gate (or generation step) exists so the two schemas
   cannot silently diverge again; it is wired into `pnpm test`.
-- [ ] `cd sdk-go && go test ./...` passes.
-- [ ] Reference validation suite passes; an AgentRole config valid under the TS
+- [x] `cd sdk-go && go test ./...` passes.
+- [x] Reference validation suite passes; an AgentRole config valid under the TS
   validator is also accepted by the Go SDK (add a cross-validator conformance
   case if one does not already exist).
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Notes
