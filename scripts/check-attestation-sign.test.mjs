@@ -2127,3 +2127,107 @@ describe('AISDLC-694: verify an existing envelope; re-sign when the verifier rej
     }
   });
 });
+
+describe('AISDLC-820: squash + attestation-sign converge on a rebased branch', () => {
+  const SQUASH = join(__dirname, 'squash-attestation-chores.sh');
+  let root;
+
+  beforeEach(() => {
+    root = setupRepo();
+    chmodSync(SCRIPT, 0o755);
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  /** Signer stub that records the subject (the HEAD at sign time) like the real signer. */
+  function installSubjectSigner() {
+    const shim = join(root, 'bin', 'subject-signer.sh');
+    mkdirSync(join(root, 'bin'), { recursive: true });
+    writeFileSync(
+      shim,
+      `#!/usr/bin/env bash
+WT_ROOT=$(git rev-parse --show-toplevel)
+HEAD=$(git rev-parse HEAD)
+MB=$(git merge-base origin/main HEAD)
+PID=$(git diff-tree --no-color -p "$MB..HEAD" -- ${canonicalExclusionsShellArgs()} | git patch-id --stable | cut -c1-40)
+mkdir -p "$WT_ROOT/.ai-sdlc/attestations"
+printf '{"head":"%s","subject":{"digest":{"sha1":"%s"}},"schemaVersion":"v6"}\\n' "$HEAD" "$HEAD" > "$WT_ROOT/.ai-sdlc/attestations/$PID.v6.dsse.json"
+`,
+    );
+    chmodSync(shim, 0o755);
+    return `bash ${shim}`;
+  }
+
+  /** base -> code commit C -> two stacked chore-sign commits; envelope subject = `subject(C)`. */
+  function seed(subjectOf) {
+    writeFileSync(join(root, 'source-820.ts'), 'export const a = 1;\n');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'feat: source change (AISDLC-820)'], root);
+    const codeHead = git(['rev-parse', 'HEAD'], root).trim();
+    const patchId = computeCanonicalPatchId(
+      root,
+      git(['merge-base', 'origin/main', 'HEAD'], root).trim(),
+    );
+    const envPath = join(root, '.ai-sdlc', 'attestations', `${patchId}.v6.dsse.json`);
+    mkdirSync(dirname(envPath), { recursive: true });
+    const subject = subjectOf(codeHead);
+    for (const n of [1, 2]) {
+      writeFileSync(
+        envPath,
+        `{"head":"${subject}","subject":{"digest":{"sha1":"${subject}"}},"schemaVersion":"v6","n":${n}}\n`,
+      );
+      git(['add', '.'], root);
+      git(['commit', '-q', '-m', 'chore: auto-sign attestation for AISDLC-820 (AISDLC-133)'], root);
+    }
+    writeFileSync(join(root, '.active-task'), 'AISDLC-820\n');
+    writeVerdictFile(root, 'AISDLC-820');
+    return { codeHead };
+  }
+
+  const squash = () =>
+    spawnSync('bash', [SQUASH], { cwd: root, env: cleanEnv(), encoding: 'utf-8' });
+  const head = () => git(['rev-parse', 'HEAD'], root).trim();
+
+  function chain(signCmd) {
+    const v = verifierEnv(root, { mode: 'valid' }, { AI_SDLC_SIGN_ATTESTATION_CMD: signCmd });
+    const s = squash();
+    assert.equal(s.status, 0, s.stderr);
+    return runHook(root, v.env);
+  }
+
+  it('AC-1: two stacked chores bound to C are left alone and the chain exits 0', () => {
+    seed((c) => c);
+    const before = head();
+    const r = chain(installSubjectSigner());
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(head(), before, 'nothing may be rewritten');
+  });
+
+  it('AC-3: a lone chore commit is never rewritten', () => {
+    seed((c) => c);
+    git(['reset', '-q', '--soft', 'HEAD~1'], root);
+    git(['commit', '-q', '-m', 'chore: auto-sign attestation for AISDLC-820 (AISDLC-133)'], root);
+    git(['reset', '-q', '--soft', 'HEAD~1'], root);
+    git(['commit', '-q', '-m', 'chore: auto-sign attestation for AISDLC-820 (AISDLC-133)'], root);
+    const before = head();
+    const s = squash();
+    assert.equal(s.status, 0, s.stderr);
+    assert.equal(head(), before);
+  });
+
+  it('AC-2/AC-4: two chores plus an orphaned subject converge on the second run and the third is a no-op', () => {
+    seed(() => '1111111111111111111111111111111111111111');
+    const signCmd = installSubjectSigner();
+    const r1 = chain(signCmd);
+    assert.equal(r1.status, 1, `first push must ask for one re-run: ${r1.stderr}`);
+    const afterFirst = head();
+    const r2 = chain(signCmd);
+    assert.equal(r2.status, 0, `second push must pass: ${r2.stderr}`);
+    assert.equal(head(), afterFirst, 'second run must not rewrite or add commits');
+    const r3 = chain(signCmd);
+    assert.equal(r3.status, 0, r3.stderr);
+    assert.equal(head(), afterFirst);
+  });
+});
