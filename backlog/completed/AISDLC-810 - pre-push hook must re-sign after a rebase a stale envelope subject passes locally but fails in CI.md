@@ -2,7 +2,7 @@
 id: AISDLC-810
 title: >-
   pre-push hook must re-sign after a rebase: a stale envelope subject passes locally but fails in CI
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-11'
 updated_date: '2026-10-11'
@@ -40,15 +40,39 @@ In CI (`verify-attestation.yml`, main's verifier, fetch of the PR head only) the
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 Hermetic test in `scripts/check-attestation-sign.test.mjs`: a branch is signed, then rebased onto a moved base (subject orphaned); the hook re-signs and the new envelope's subject equals the pre-chore HEAD
-- [ ] #2 The hook never skips re-signing when the envelope subject is not an ancestor of HEAD, even if `scripts/verify-attestation.mjs` reports `status=valid` locally (covered by a test with the orphaned object still present)
-- [ ] #3 Decision recorded (planner records it in the catalog) on whether `isTreeEquivalentModuloAttestation` is deleted; the task implements whichever the record says, default delete, and `scripts/verify-attestation.test.mjs` is updated accordingly
-- [ ] #4 CLAUDE.md "v6 head-binding survives rebase + chore commits" paragraph is corrected to the shipped behaviour
-- [ ] #5 CI: a PR rebased after signing verifies green in `verify-attestation.yml`
-- [ ] #6 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
+- [x] #1 Hermetic test in `scripts/check-attestation-sign.test.mjs`: a branch is signed, then rebased onto a moved base (subject orphaned); the hook re-signs and the new envelope's subject equals the pre-chore HEAD
+- [x] #2 The hook never skips re-signing when the envelope subject is not an ancestor of HEAD, even if `scripts/verify-attestation.mjs` reports `status=valid` locally (covered by a test with the orphaned object still present)
+- [x] #3 Decision recorded (planner records it in the catalog) on whether `isTreeEquivalentModuloAttestation` is deleted; the task implements whichever the record says, default delete, and `scripts/verify-attestation.test.mjs` is updated accordingly
+- [x] #4 CLAUDE.md "v6 head-binding survives rebase + chore commits" paragraph is corrected to the shipped behaviour
+- [x] #5 CI: a PR rebased after signing verifies green in `verify-attestation.yml`
+- [x] #6 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
 <!-- AC:END -->
 
 ## Verification
 
 - `pnpm build && pnpm test:attestation-sign-gate && node --test scripts/verify-attestation.test.mjs`
 - `pnpm lint && pnpm format:check`
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+The pre-push hook now treats an attestation envelope whose subject is not an ancestor of HEAD as unsigned and re-signs it from the existing verdict and leaves, even when the local verifier reports valid. The AISDLC-448 tree-equivalence relaxation is deleted from the verifier, so CI and the local hook agree. Five-step review: requirement questioned (an envelope stays valid across a rebase; AISDLC-448, only true where the orphaned commit exists locally); deleted `isTreeEquivalentModuloAttestation`, `computeSubjectChangedPaths` and the changedPaths plumbing; simplified to one ancestor rule in the hook; accelerated by re-signing in the same push via the existing fixup flow; no new automation.
+
+## Changes
+- `scripts/check-attestation-sign.sh` (modified): re-sign when the envelope subject is not an ancestor of HEAD.
+- `pipeline-cli/attestation-core/verify-core.mjs` (modified): delete the tree-equivalence relaxation and its plumbing.
+- `scripts/check-attestation-sign.test.mjs`, `scripts/verify-attestation.test.mjs` (modified): hermetic rebase/orphan tests; orphaned subjects now rejected.
+- `CLAUDE.md` (modified): corrected the head-binding paragraph.
+
+## Design decisions
+- **Delete rather than keep the relaxation**: no catalog decision exists, so the task's default (delete) applied.
+
+## Verification
+- `pnpm build` — clean
+- `pnpm test:attestation-sign-gate` — 57 pass; verify-attestation tests — 163 pass
+- `pnpm lint`, `pnpm format:check`, `pnpm dark-code:check` — clean
+
+## Follow-up
+- declined: validate the envelope subject as 40-hex before `git merge-base`; no exploit path, non-blocking.
+<!-- SECTION:FINAL_SUMMARY:END -->
