@@ -427,8 +427,10 @@ jobs:
   # This job re-introduces machine enforcement at the rollup layer:
   #   - For docs-only PRs: skipped (verify-attestation.yml also skipped via
   #     paths-ignore) — re-actors/alls-green treats `skipped` as success.
-  #   - For code PRs: polls the commit's statuses and requires
-  #     `ai-sdlc/attestation` to be `success`. If missing or failure, this
+  #   - For code PRs: resolves the newest `verify-attestation` workflow run
+  #     for the head and requires its conclusion to be `success` (AISDLC-803;
+  #     the bare commit status is not read — a non-run-targeted status is
+  #     unknown, not failure). If missing or failed, this
   #     job fails → `ai-sdlc/pr-ready` fails → branch protection blocks merge.
   #
   # Retry/wait: verify-attestation.yml runs in parallel with this workflow,
@@ -450,32 +452,20 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       statuses: read
+      actions: read
     steps:
-      - name: Require ai-sdlc/attestation status
+      # AISDLC-803: read the newest verify-attestation RUN's conclusion, not
+      # the bare commit status (which any poster could overwrite). Logic and
+      # unit tests live in scripts/resolve-attestation-gate.mjs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require newest verify-attestation run to succeed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          echo "[attestation-gate] code PR detected — polling for ai-sdlc/attestation status on $HEAD_SHA"
-          DEADLINE=$(( $(date +%s) + 300 ))
-          while [ "$(date +%s)" -lt "$DEADLINE" ]; do
-            STATE=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/status" \
-              --jq '.statuses[] | select(.context == "ai-sdlc/attestation") | .state' | head -1)
-            if [ "$STATE" = "success" ]; then
-              echo "[attestation-gate] ai-sdlc/attestation: success — PASS"
-              exit 0
-            fi
-            if [ "$STATE" = "failure" ] || [ "$STATE" = "error" ]; then
-              echo "::error::[attestation-gate] ai-sdlc/attestation: $STATE — code PR must have a valid attestation envelope"
-              exit 1
-            fi
-            echo "[attestation-gate] status not posted yet (got: '${STATE:-<missing>}') — waiting 15s..."
-            sleep 15
-          done
-          echo "::error::[attestation-gate] timed out waiting for ai-sdlc/attestation on $HEAD_SHA — code PR cannot merge without attestation"
-          exit 1
+        run: node scripts/resolve-attestation-gate.mjs
 
   # ── Dependency review gate (npm + github-actions; issue #791 follow-up) ──
   # Folds dependency-review into the pr-ready rollup so it is a REAL blocking

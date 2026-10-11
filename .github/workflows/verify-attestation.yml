@@ -354,13 +354,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           gh api "repos/${REPO}/statuses/${HEAD_SHA}" \
             -X POST \
             -f state=success \
             -f context='ai-sdlc/attestation' \
-            -f description='docs-only changeset — attestation N/A'
+            -f description="success | vN/A | docs-only changeset, attestation N/A | run ${RUN_ID}" \
+            -f target_url="$RUN_URL"
           echo "Posted ai-sdlc/attestation: success (docs-only short-circuit) on ${HEAD_SHA}"
 
       # release-please PRs change package.json versions + workspace
@@ -511,13 +514,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           gh api "repos/${REPO}/statuses/${HEAD_SHA}" \
             -X POST \
             -f state=success \
             -f context='ai-sdlc/attestation' \
-            -f description='release-please version bump — attestation N/A'
+            -f description="success | vN/A | release-please version bump, attestation N/A | run ${RUN_ID}" \
+            -f target_url="$RUN_URL"
           echo "Posted ai-sdlc/attestation: success (release-please short-circuit) on ${HEAD_SHA}"
 
       # Skip the full verify pipeline when EITHER short-circuit already posted
@@ -636,9 +642,22 @@ jobs:
           STATUS: ${{ steps.verify.outputs.status }}
           REASON: ${{ steps.verify.outputs.reason }}
           HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
+          # AISDLC-803: every post carries the posting run's URL as target_url
+          # and `<status> | v<schema> | <reason> | run <id>` as description, so
+          # a red status is self-explaining and traceable to this run.
+          # Schema version is derived from the envelope the verifier judged
+          # (scripts/verify-attestation.mjs does not emit it).
+          if ls .ai-sdlc/attestations/*.v6.dsse.json >/dev/null 2>&1; then
+            SCHEMA=v6
+          elif ls .ai-sdlc/attestations/*.dsse.json >/dev/null 2>&1; then
+            SCHEMA=v5
+          else
+            SCHEMA=none
+          fi
           if [ "$STATUS" = "valid" ]; then
             STATE=success
             # Surface the verifier's reason in the success description so
@@ -664,12 +683,18 @@ jobs:
             DESC="${REASON:0:130}"
             echo "::warning::ai-sdlc attestation $STATUS on $HEAD_SHA: $REASON"
           fi
+          # GitHub caps descriptions at 140 chars: keep prefix + run suffix
+          # intact and trim only the reason.
+          PREFIX="${STATE} | ${SCHEMA} | "
+          SUFFIX=" | run ${RUN_ID}"
+          MAX=$(( 140 - ${#PREFIX} - ${#SUFFIX} ))
+          DESC="${PREFIX}${DESC:0:$MAX}${SUFFIX}"
           gh api "repos/${REPO}/statuses/${HEAD_SHA}" \
             -X POST \
             -f state="$STATE" \
             -f context='ai-sdlc/attestation' \
             -f description="$DESC" \
-            ${PR_URL:+-f target_url="$PR_URL"}
+            -f target_url="$RUN_URL"
           echo "Posted ai-sdlc/attestation: $STATE on $HEAD_SHA"
 
   # AISDLC-747 (DEC-0065): register a verified attestation as an APPROVE
