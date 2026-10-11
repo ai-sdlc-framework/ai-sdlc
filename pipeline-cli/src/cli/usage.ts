@@ -2,7 +2,7 @@
  * `cli-usage` - usage ledger and model price tooling (RFC-0050).
  *
  * Subcommands:
- *   ingest [--backfill] [--json]                read Claude Code transcripts into the ledger
+ *   ingest [--backfill] [--json]                read Claude Code transcripts and Codex sessions into the ledger
  *   report [--group-by ...] [--format ...]      usage by model, role, task, repo, pool, day, window
  *   window | task <id> | context                fixed views: allotment windows, one task, context overhead
  *   scorecard [--role ...] [--write-evidence d] quality and cost per role, model, task class
@@ -51,6 +51,7 @@ import { registerReplayCommands, type ReplayDeps } from '../usage/replay-command
 import { registerRouteCommands, type RouteDeps } from '../usage/route-commands.js';
 import { registerScorecardCommands, type ScorecardDeps } from '../usage/scorecard-commands.js';
 import { registerUsageViewCommands, type UsageViewDeps } from '../usage/commands.js';
+import { ingestCodexSessions, type CodexIngestResult } from '../usage/codex-ingester.js';
 import {
   DEFAULT_CONTEXT_THRESHOLD,
   renderAudit,
@@ -79,6 +80,8 @@ export interface UsageCliDeps
   onIngestCapability?: (outcome: 'live' | 'degraded', reason?: string) => void;
   /** Replaces the transcript ingester (tests). */
   ingest?: typeof ingestClaudeTranscripts;
+  /** Replaces the Codex session ingester (tests). */
+  ingestCodex?: typeof ingestCodexSessions;
   /** Replaces the default sources (tests). */
   sources?: readonly PriceSource[];
   /** Replaces transcript discovery and reading for `audit` (tests). */
@@ -133,6 +136,20 @@ export function formatRefreshSummary(r: RefreshResult): string {
   for (const h of r.held) lines.push(`held ${h.model}: ${h.reason}`);
   if (!r.anySourceSucceeded)
     lines.push('Every source failed; the last known prices stay in force.');
+  return `${lines.join('\n')}\n`;
+}
+
+export function formatCodexIngestSummary(r: CodexIngestResult): string {
+  const lines = [
+    `Codex sessions scanned: ${r.filesScanned}`,
+    `Calls written: ${r.written}`,
+    `Repeats skipped: ${r.skipped}`,
+    `Invalid records: ${r.invalid}`,
+    `Limit observations: ${r.limitEvents}`,
+    `Errors: ${r.errors}`,
+  ];
+  if (r.oversized > 0) lines.push(`Oversized files or lines skipped: ${r.oversized}`);
+  if (r.deferred > 0) lines.push(`Total-only sessions held until finished: ${r.deferred}`);
   return `${lines.join('\n')}\n`;
 }
 
@@ -319,6 +336,11 @@ export function buildUsageCli(
             describe: "Transcript projects directory. Defaults to the harness's standard location.",
             type: 'string',
           })
+          .option('sessions-dir', {
+            describe:
+              'Codex sessions directory. Defaults to $CODEX_HOME/sessions, then ~/.codex/sessions.',
+            type: 'string',
+          })
           .option('max-seconds', {
             describe: 'Stop starting new work after this many seconds.',
             type: 'number',
@@ -353,12 +375,33 @@ export function buildUsageCli(
           report('degraded', 'ingest failed');
           throw err;
         }
-        // A switched-off or sandboxed ingest never ran; it says nothing about health.
+        // A switched-off or sandboxed ingest never ran; it says nothing about health,
+        // and the Codex ingester follows the same switches.
+        let codex: CodexIngestResult | undefined;
         if (!result.disabled) {
-          if (result.errors > 0) report('degraded', `${result.errors} transcript errors`);
+          let codexFailed = false;
+          try {
+            codex = await (deps.ingestCodex ?? ingestCodexSessions)({
+              backfill: args.backfill,
+              ...(typeof args['sessions-dir'] === 'string'
+                ? { sessionsDir: args['sessions-dir'] }
+                : {}),
+              ...(deps.usageDir ? { dir: deps.usageDir } : {}),
+            });
+          } catch {
+            // Codex ingestion must never fail the Claude Code ingest that already ran.
+            codexFailed = true;
+          }
+          const errors = result.errors + (codex?.errors ?? 0);
+          if (codexFailed) report('degraded', 'codex ingest failed');
+          else if (errors > 0) report('degraded', `${errors} transcript errors`);
           else report('live');
         }
-        io.out(args.json ? `${JSON.stringify(result)}\n` : renderIngestResult(result));
+        io.out(
+          args.json
+            ? `${JSON.stringify(codex ? { ...result, codex } : result)}\n`
+            : renderIngestResult(result) + (codex ? formatCodexIngestSummary(codex) : ''),
+        );
       },
     )
     .command(

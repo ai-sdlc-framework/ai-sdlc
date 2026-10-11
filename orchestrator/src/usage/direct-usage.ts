@@ -7,6 +7,13 @@
 
 import { recordModelCall, type ModelCallTokens } from '@ai-sdlc/reference';
 
+/**
+ * Longest a direct report waits for the usage lock. The wait blocks the event
+ * loop, so it is far shorter than the ledger's default; a report that cannot
+ * get the lock in time is dropped.
+ */
+export const DIRECT_REPORT_LOCK_WAIT_MS = 200;
+
 export interface DirectUsageReport {
   provider: string;
   model: string;
@@ -52,7 +59,10 @@ export function reportApiKeyCall(report: DirectUsageReport): void {
         scope: 'framework',
         ...(report.taskId ? { taskId: report.taskId } : {}),
       },
-      report.usageDir ? { dir: report.usageDir } : {},
+      {
+        ...(report.usageDir ? { dir: report.usageDir } : {}),
+        lockWaitMs: DIRECT_REPORT_LOCK_WAIT_MS,
+      },
     );
   } catch {
     // reporting is best effort

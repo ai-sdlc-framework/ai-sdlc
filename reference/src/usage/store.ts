@@ -141,51 +141,59 @@ export function appendModelCalls(
   const result: AppendResult = { written: 0, skipped: 0, invalid: 0 };
   if (records.length === 0) return result;
 
-  return withUsageLock(dir, (touch) => {
-    const known = loadKnownIds(dir, touch);
-    const byFile = new Map<string, string[]>();
-    const newIds: string[] = [];
+  return withUsageLock(
+    dir,
+    (touch) => {
+      const known = loadKnownIds(dir, touch);
+      const byFile = new Map<string, string[]>();
+      const newIds: string[] = [];
 
-    for (const raw of records) {
-      if (
-        typeof raw?.callId !== 'string' ||
-        CONTROL_CHARS.test(raw.callId) ||
-        !validateModelCallRecord(raw).valid
-      ) {
-        result.invalid++;
-        continue;
+      for (const raw of records) {
+        if (
+          typeof raw?.callId !== 'string' ||
+          CONTROL_CHARS.test(raw.callId) ||
+          !validateModelCallRecord(raw).valid
+        ) {
+          result.invalid++;
+          continue;
+        }
+        if (known.has(raw.callId)) {
+          result.skipped++;
+          continue;
+        }
+        known.add(raw.callId);
+        newIds.push(raw.callId);
+        const file = ledgerFileForTs(raw.ts);
+        const lines = byFile.get(file) ?? [];
+        lines.push(JSON.stringify(sanitize(raw)));
+        byFile.set(file, lines);
+        result.written++;
       }
-      if (known.has(raw.callId)) {
-        result.skipped++;
-        continue;
+
+      if (result.written === 0) return result;
+
+      mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+      for (const [file, lines] of byFile) {
+        touch();
+        const path = join(dir, file);
+        // A crash can leave a partial last line; start on a fresh line so the new
+        // record is not concatenated onto it.
+        const lead = endsWithoutNewline(path) ? '\n' : '';
+        appendFileSync(path, `${lead}${lines.join('\n')}\n`, {
+          encoding: 'utf-8',
+          mode: FILE_MODE,
+        });
       }
-      known.add(raw.callId);
-      newIds.push(raw.callId);
-      const file = ledgerFileForTs(raw.ts);
-      const lines = byFile.get(file) ?? [];
-      lines.push(JSON.stringify(sanitize(raw)));
-      byFile.set(file, lines);
-      result.written++;
-    }
-
-    if (result.written === 0) return result;
-
-    mkdirSync(dir, { recursive: true, mode: DIR_MODE });
-    for (const [file, lines] of byFile) {
-      touch();
-      const path = join(dir, file);
-      // A crash can leave a partial last line; start on a fresh line so the new
-      // record is not concatenated onto it.
-      const lead = endsWithoutNewline(path) ? '\n' : '';
-      appendFileSync(path, `${lead}${lines.join('\n')}\n`, { encoding: 'utf-8', mode: FILE_MODE });
-    }
-    appendFileSync(join(dir, INDEX_IDS_FILE), newIds.map((i) => `${i}\n`).join(''), {
-      encoding: 'utf-8',
-      mode: FILE_MODE,
-    });
-    writeMeta(dir);
-    return result;
-  });
+      appendFileSync(join(dir, INDEX_IDS_FILE), newIds.map((i) => `${i}\n`).join(''), {
+        encoding: 'utf-8',
+        mode: FILE_MODE,
+      });
+      writeMeta(dir);
+      return result;
+    },
+    undefined,
+    opts.lockWaitMs,
+  );
 }
 
 // ── Cursors ─────────────────────────────────────────────────────────

@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readModelCalls, type ModelCallRecord } from '@ai-sdlc/reference';
+import { readModelCalls, withUsageLock, type ModelCallRecord } from '@ai-sdlc/reference';
 import { ReviewAgentRunner } from '../runners/review-agent.js';
 import { SecurityTriageRunner } from '../runners/security-triage.js';
 import { OpenAITextEmbedding3Small } from '../embedding/adapters/openai-text-embedding-3-small.js';
-import { anthropicTokens, reportApiKeyCall } from './direct-usage.js';
+import { anthropicTokens, reportApiKeyCall, DIRECT_REPORT_LOCK_WAIT_MS } from './direct-usage.js';
 import type { AgentContext } from '../runners/types.js';
 
 let tmp: string;
@@ -196,5 +196,27 @@ describe('direct-usage helpers', () => {
         usageDir: unwritableDir,
       }),
     ).not.toThrow();
+  });
+
+  it('returns within a short bound when the usage lock is contended', () => {
+    let returned = false;
+    let elapsed = 0;
+    withUsageLock(usageDir, () => {
+      const started = Date.now();
+      expect(() =>
+        reportApiKeyCall({
+          provider: 'anthropic',
+          model: 'm',
+          tokens: { input: 1 },
+          agentRole: 'x',
+          usageDir,
+        }),
+      ).not.toThrow();
+      elapsed = Date.now() - started;
+      returned = true;
+    });
+    expect(returned).toBe(true);
+    expect(elapsed).toBeGreaterThanOrEqual(DIRECT_REPORT_LOCK_WAIT_MS - 50);
+    expect(elapsed).toBeLessThan(5_000);
   });
 });

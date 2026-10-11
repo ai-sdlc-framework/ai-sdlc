@@ -139,11 +139,14 @@ function ownerOf(lockPath: string): string | undefined {
 /**
  * Runs `fn` while holding the directory's lock. Creates the directory if
  * needed. `fn` receives a `touch` function that refreshes the lock's age.
+ * `waitLimitMs` bounds how long to wait for a contended lock before throwing;
+ * callers on a latency-sensitive path pass a short value.
  */
 export function withUsageLock<T>(
   dir: string,
   fn: (touch: () => void) => T,
   staleAfterMs = STALE_AFTER_MS,
+  waitLimitMs = WAIT_LIMIT_MS,
 ): T {
   mkdirSync(dir, { recursive: true, mode: DIR_MODE });
   const lockPath = join(dir, LOCK_NAME);
@@ -157,7 +160,7 @@ export function withUsageLock<T>(
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
       reclaimStale(lockPath, staleAfterMs);
-      if (Date.now() - started > WAIT_LIMIT_MS) {
+      if (Date.now() - started > waitLimitMs) {
         throw new Error('timed out waiting for the usage ledger lock', { cause: err });
       }
       sleepSync(delay);

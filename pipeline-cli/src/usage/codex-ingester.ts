@@ -13,29 +13,32 @@
  * store skips a `callId` it already holds). Every failure is contained per file.
  */
 
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  statSync,
-} from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import {
   appendModelCalls,
   readCursor,
   resolveUsageDir,
+  withUsageLock,
   writeCursor,
   type ModelCallRecord,
   type UsageStoreOptions,
 } from '@ai-sdlc/reference';
 import { attributeCodexSession, type CodexAttribution } from './codex-attribution.js';
+import { LIMIT_EVENTS_FILE, LimitEventLog } from './limit-event-log.js';
+import { MAX_LINE_BYTES, readLines } from './line-reader.js';
 
 export const CODEX_HOME_ENV = 'CODEX_HOME';
-export const LIMIT_EVENTS_FILE = 'limit-events.jsonl';
+export { LIMIT_EVENTS_FILE };
 const CURSOR_PREFIX = 'codex:';
+/** A session file larger than this is skipped, not parsed. */
+export const MAX_SESSION_FILE_BYTES = 256 * 1024 * 1024;
+/**
+ * A session that reports only a cumulative total is recorded once its file has
+ * been quiet this long, so a mid-session ingest cannot freeze a partial total.
+ */
+export const TOTAL_ONLY_QUIET_MS = 15 * 60 * 1000;
 
 export interface CodexIngestOptions extends UsageStoreOptions {
   /** Sessions directory. Defaults to `$CODEX_HOME/sessions`, then `~/.codex/sessions`. */
@@ -44,6 +47,14 @@ export interface CodexIngestOptions extends UsageStoreOptions {
   backfill?: boolean;
   /** Skip `other`-scope sessions entirely. Defaults to `AI_SDLC_USAGE_SCOPE=framework-only`. */
   frameworkOnly?: boolean;
+  /** Skip session files larger than this many bytes. Defaults to 256 MiB. */
+  maxFileBytes?: number;
+  /** Drop lines longer than this many bytes. Defaults to 4 MiB. */
+  maxLineBytes?: number;
+  /** Quiet period before a total-only session counts as finished. */
+  totalOnlyQuietMs?: number;
+  /** Clock, for tests. */
+  now?: () => number;
 }
 
 export interface CodexIngestResult {
@@ -53,6 +64,10 @@ export interface CodexIngestResult {
   invalid: number;
   limitEvents: number;
   errors: number;
+  /** Session files skipped for exceeding the size cap, and lines dropped for exceeding the line cap. */
+  oversized: number;
+  /** Total-only sessions held back because they may still be running. */
+  deferred: number;
 }
 
 /** A window observation taken from a `rate_limits` object. */
@@ -102,38 +117,6 @@ function listSessionFiles(dir: string): string[] {
   return out.sort();
 }
 
-interface ParsedLine {
-  offset: number;
-  value: Record<string, unknown>;
-}
-
-/** Complete lines of the file with their byte offsets, and the offset consumed. */
-function readLines(path: string): { lines: ParsedLine[]; consumed: number } {
-  const buf = readFileSync(path);
-  const lines: ParsedLine[] = [];
-  let start = 0;
-  let consumed = 0;
-  while (start < buf.length) {
-    const nl = buf.indexOf(0x0a, start);
-    const end = nl === -1 ? buf.length : nl;
-    const text = buf.subarray(start, end).toString('utf-8').trim();
-    let ok = true;
-    if (text) {
-      try {
-        const v: unknown = JSON.parse(text);
-        if (isObject(v)) lines.push({ offset: start, value: v });
-      } catch {
-        // A truncated last line is retried next run; a corrupt complete line is skipped.
-        ok = nl !== -1;
-      }
-    }
-    if (!ok) break;
-    consumed = nl === -1 ? buf.length : nl + 1;
-    start = consumed;
-  }
-  return { lines, consumed };
-}
-
 interface TokenEvent {
   offset: number;
   ordinal: number;
@@ -170,7 +153,9 @@ function observationsOf(
 
 /**
  * Codex counts cached and cache-write tokens inside `input_tokens`. They are
- * separated here so each token class is priced once.
+ * separated here so each token class is priced once. Codex reports one
+ * cache-write figure with no duration, so every cache write is filed under the
+ * five-minute cache-write class.
  */
 function turnTokens(u: Record<string, unknown>): ModelCallRecord['tokens'] {
   const cached = num(u.cached_input_tokens);
@@ -195,15 +180,25 @@ interface FileOutcome {
   records: ModelCallRecord[];
   limits: CodexLimitEvent[];
   consumed: number;
+  oversizeLines: number;
+  /** True when a total-only session was held back because it may still be running. */
+  deferred: boolean;
+}
+
+interface ProcessOptions {
+  frameworkOnly: boolean;
+  maxLineBytes: number;
+  maxFileBytes: number;
+  /** True once the file has been quiet long enough to count a total-only session as finished. */
+  settled: boolean;
 }
 
 function processFile(
   path: string,
   cursor: number,
-  frameworkOnly: boolean,
+  opts: ProcessOptions,
   attrCache: Map<string, CodexAttribution>,
 ): FileOutcome {
-  const { lines, consumed } = readLines(path);
   let sessionId = basename(path, '.jsonl');
   let cwd: string | undefined;
   let branch: string | undefined;
@@ -212,42 +207,66 @@ function processFile(
   const events: TokenEvent[] = [];
   let ordinal = 0;
 
-  for (const { offset, value } of lines) {
-    const payload = isObject(value.payload) ? value.payload : undefined;
-    if (!payload) continue;
-    if (value.type === 'session_meta') {
-      sessionId = str(payload.id) ?? sessionId;
-      cwd = str(payload.cwd) ?? cwd;
-      model = str(payload.model) ?? model;
-      provider = str(payload.model_provider) ?? provider;
-      if (isObject(payload.git)) branch = str(payload.git.branch) ?? branch;
-    } else if (value.type === 'turn_context') {
-      cwd = cwd ?? str(payload.cwd);
-      model = str(payload.model) ?? model;
-    } else if (value.type === 'event_msg' && payload.type === 'token_count') {
-      const info = isObject(payload.info) ? payload.info : payload;
-      const ts = str(value.timestamp);
-      if (ts && !Number.isNaN(new Date(ts).getTime())) {
-        events.push({
-          offset,
-          ordinal,
-          ts,
-          model,
-          last: isObject(info.last_token_usage) ? info.last_token_usage : undefined,
-          total: isObject(info.total_token_usage) ? info.total_token_usage : undefined,
-          rateLimits:
-            isObject(payload.rate_limits) && Object.keys(payload.rate_limits).length > 0
-              ? payload.rate_limits
-              : undefined,
-        });
+  // Lines are streamed in bounded chunks; only the small token events are kept.
+  const read = readLines(path, {
+    start: 0,
+    maxBytes: opts.maxFileBytes,
+    maxLineBytes: opts.maxLineBytes,
+    onLine: (text, offset) => {
+      let value: Record<string, unknown>;
+      try {
+        const v: unknown = JSON.parse(text);
+        if (!isObject(v)) return true;
+        value = v;
+      } catch {
+        // A corrupt complete line is skipped and the cursor moves past it, so it
+        // is not retried: it cannot become valid later. (A truncated last line has
+        // no newline and is never delivered here, so it is retried next run.)
+        return true;
       }
-      ordinal++;
-    }
-  }
+      const payload = isObject(value.payload) ? value.payload : undefined;
+      if (!payload) return true;
+      if (value.type === 'session_meta') {
+        sessionId = str(payload.id) ?? sessionId;
+        cwd = str(payload.cwd) ?? cwd;
+        model = str(payload.model) ?? model;
+        provider = str(payload.model_provider) ?? provider;
+        if (isObject(payload.git)) branch = str(payload.git.branch) ?? branch;
+      } else if (value.type === 'turn_context') {
+        cwd = cwd ?? str(payload.cwd);
+        model = str(payload.model) ?? model;
+      } else if (value.type === 'event_msg' && payload.type === 'token_count') {
+        const info = isObject(payload.info) ? payload.info : payload;
+        const ts = str(value.timestamp);
+        if (ts && !Number.isNaN(new Date(ts).getTime())) {
+          events.push({
+            offset,
+            ordinal,
+            ts,
+            model,
+            last: isObject(info.last_token_usage) ? info.last_token_usage : undefined,
+            total: isObject(info.total_token_usage) ? info.total_token_usage : undefined,
+            rateLimits:
+              isObject(payload.rate_limits) && Object.keys(payload.rate_limits).length > 0
+                ? payload.rate_limits
+                : undefined,
+          });
+        }
+        ordinal++;
+      }
+      return true;
+    },
+  });
 
+  const out: FileOutcome = {
+    records: [],
+    limits: [],
+    consumed: read.consumed,
+    oversizeLines: read.oversizeLines,
+    deferred: false,
+  };
   const attr = attributeCodexSession(cwd, branch, attrCache);
-  const out: FileOutcome = { records: [], limits: [], consumed };
-  if (attr.scope === 'other' && frameworkOnly) return out;
+  if (attr.scope === 'other' && opts.frameworkOnly) return out;
 
   const base = (callId: string, ev: TokenEvent, offset: number) => ({
     schemaVersion: 'v1' as const,
@@ -267,7 +286,7 @@ function processFile(
     ...(attr.scope === 'framework' ? { source: { file: path, offset } } : {}),
   });
 
-  // Rate-limit observations (only lines not yet consumed by an earlier run).
+  // Rate-limit observations. The limit log deduplicates, so re-reading is safe.
   let prevRl: unknown;
   for (const ev of events) {
     if (!ev.rateLimits) continue;
@@ -292,7 +311,11 @@ function processFile(
   } else {
     const withTotal = events.filter((e) => e.total);
     const final = withTotal[withTotal.length - 1];
-    if (final?.total) {
+    if (final?.total && !opts.settled) {
+      // The session may still be running and its total still growing; the record
+      // is keyed once per session, so recording now would freeze a partial total.
+      out.deferred = true;
+    } else if (final?.total) {
       const total =
         num(final.total.total_tokens) ||
         num(final.total.input_tokens) + num(final.total.output_tokens);
@@ -306,20 +329,6 @@ function processFile(
   return out;
 }
 
-function appendLimitEvents(events: CodexLimitEvent[], opts: UsageStoreOptions): void {
-  if (events.length === 0) return;
-  const dir = resolveUsageDir(opts);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  appendFileSync(
-    join(dir, LIMIT_EVENTS_FILE),
-    events.map((e) => `${JSON.stringify(e)}\n`).join(''),
-    {
-      encoding: 'utf-8',
-      mode: 0o600,
-    },
-  );
-}
-
 /** Ingest every Codex session file under the sessions directory. Never throws. */
 export function ingestCodexSessions(opts: CodexIngestOptions = {}): CodexIngestResult {
   const result: CodexIngestResult = {
@@ -329,24 +338,53 @@ export function ingestCodexSessions(opts: CodexIngestOptions = {}): CodexIngestR
     invalid: 0,
     limitEvents: 0,
     errors: 0,
+    oversized: 0,
+    deferred: 0,
   };
   const frameworkOnly = opts.frameworkOnly ?? process.env.AI_SDLC_USAGE_SCOPE === 'framework-only';
   const sessionsDir = opts.sessionsDir ?? defaultCodexSessionsDir();
   const attrCache = new Map<string, CodexAttribution>();
+  const maxFileBytes = opts.maxFileBytes ?? MAX_SESSION_FILE_BYTES;
+  const maxLineBytes = opts.maxLineBytes ?? MAX_LINE_BYTES;
+  const quietMs = opts.totalOnlyQuietMs ?? TOTAL_ONLY_QUIET_MS;
+  const now = opts.now ?? Date.now;
+  const limitLog = new LimitEventLog<CodexLimitEvent>(resolveUsageDir(opts), withUsageLock, (e) =>
+    e.harness === 'codex' ? `codex|${e.ts}|${e.sessionId}|${e.window}|${e.usedPercent}` : undefined,
+  );
 
   for (const file of listSessionFiles(sessionsDir)) {
     result.filesScanned++;
     try {
+      const st = statSync(file);
+      if (st.size > maxFileBytes) {
+        result.oversized++;
+        continue;
+      }
       const key = `${CURSOR_PREFIX}${file}`;
       const cursor = opts.backfill ? 0 : readCursor(key, opts);
-      if (!opts.backfill && cursor >= statSync(file).size) continue;
-      const outcome = processFile(file, cursor, frameworkOnly, attrCache);
+      if (!opts.backfill && cursor >= st.size) continue;
+      const outcome = processFile(
+        file,
+        cursor,
+        {
+          frameworkOnly,
+          maxLineBytes,
+          maxFileBytes,
+          settled: now() - st.mtimeMs >= quietMs,
+        },
+        attrCache,
+      );
+      result.oversized += outcome.oversizeLines;
       const res = appendModelCalls(outcome.records, opts);
-      appendLimitEvents(outcome.limits, opts);
       result.written += res.written;
       result.skipped += res.skipped;
       result.invalid += res.invalid;
-      result.limitEvents += outcome.limits.length;
+      result.limitEvents += limitLog.append(outcome.limits);
+      if (outcome.deferred) {
+        // Leave the cursor where it was so the next run reads the finished session.
+        result.deferred++;
+        continue;
+      }
       writeCursor(key, outcome.consumed, opts);
     } catch {
       result.errors++;
