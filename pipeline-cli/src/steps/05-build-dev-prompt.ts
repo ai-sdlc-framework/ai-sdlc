@@ -15,7 +15,11 @@
 
 import { stripControl } from '../dispatch/resume.js';
 import { resolveModel } from '../routing/resolve-model.js';
-import { routingArtifactsDir, routingRecordable } from '../routing/artifacts-dir.js';
+import {
+  resolveProjectRoot,
+  routingArtifactsDir,
+  routingRecordable,
+} from '../routing/artifacts-dir.js';
 import { taskClassOf } from '../routing/task-class.js';
 import type { DeveloperPromptResult, TaskSpec } from '../types.js';
 
@@ -37,6 +41,8 @@ export interface BuildDeveloperPromptOptions {
   resumeFeedback?: string;
   /** Artifacts directory for the assignment log (defaults to $ARTIFACTS_DIR). */
   artifactsDir?: string;
+  /** Project root anchoring the default artifacts dir (defaults to the worktree's parent repository). */
+  projectRoot?: string;
 }
 
 /**
@@ -115,7 +121,10 @@ export async function buildDeveloperPrompt(
     sourceKind: opts.sourceKind,
     iteration,
     workDir: opts.worktreePath,
-    artifactsDir: routingArtifactsDir(opts.worktreePath, opts.artifactsDir),
+    artifactsDir: routingArtifactsDir(
+      opts.projectRoot ?? resolveProjectRoot(opts.worktreePath),
+      opts.artifactsDir,
+    ),
     record: routingRecordable(opts.worktreePath, opts.artifactsDir),
   });
 

@@ -685,6 +685,11 @@ SLUG=$(node "$PLUGIN_SCRIPTS_DIR/compute-slug.mjs" "$TASK_FILE") || {
 }
 BRANCH=$(echo "$BRANCH_PATTERN" | sed "s|{issueIdLower}|$TASK_ID_LOWER|g; s|{slug}|$SLUG|g")
 WORKTREE_PATH=".worktrees/$TASK_ID_LOWER"
+# AISDLC-654.2: anchor the default artifacts dir at the project root so routing assignments survive worktree cleanup.
+# Mirrors resolveProjectRoot() in pipeline-cli/src/routing/artifacts-dir.ts: the parent of a shared `.git`
+# directory; a bare or separate-git-dir common dir (not named `.git`) falls back to the current directory.
+GIT_COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+if [ "$(basename "$GIT_COMMON_DIR")" = ".git" ]; then PROJECT_ROOT="$(dirname "$GIT_COMMON_DIR")"; else PROJECT_ROOT="$(pwd)"; fi
 ```
 
 > **AISDLC-356 — canonical branch slug for manual worktrees.** When creating a
@@ -805,7 +810,7 @@ Watch for `[ai-sdlc-progress]` lines in the agent's tool output and surface them
 ```bash
 # Resolve the developer model from the routing table on origin/main (none present = default arm).
 ROUTE_SOURCE_KIND=backlog; [ "$ARG_FORM" = "gh-issue" ] && ROUTE_SOURCE_KIND=gh-issue
-DEV_ROUTE=$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" resolve-model developer --task-id "$TASK_ID" --source-kind "$ROUTE_SOURCE_KIND" --iteration 1 --artifacts-dir "${ARTIFACTS_DIR:-$WORKTREE_PATH/.ai-sdlc/artifacts}" --work-dir "$(pwd)" 2>/dev/null || echo '{"model":"","arm":"default"}')
+DEV_ROUTE=$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" resolve-model developer --task-id "$TASK_ID" --source-kind "$ROUTE_SOURCE_KIND" --iteration 1 --artifacts-dir "${ARTIFACTS_DIR:-$PROJECT_ROOT/.ai-sdlc/artifacts}" --work-dir "$(pwd)" 2>/dev/null || echo '{"model":"","arm":"default"}')
 echo "[ai-sdlc-progress] Step 5: developer model route: $DEV_ROUTE"
 ```
 
@@ -896,7 +901,7 @@ Pre-AISDLC-141 every push fan-outs to all 3 reviewers (testing/critic/security) 
 The CLI is shipped from `@ai-sdlc/pipeline-cli` (build it once with `pnpm --filter @ai-sdlc/pipeline-cli build` if the binary is missing). It accepts a unified-diff file, a `git diff --numstat` file, or a paths-only file; we use the paths file we just produced because the deterministic ruleset only cares about paths.
 
 ```bash
-ARTIFACTS_DIR="${ARTIFACTS_DIR:-$WORKTREE_PATH/.ai-sdlc/artifacts}"
+ARTIFACTS_DIR="${ARTIFACTS_DIR:-$PROJECT_ROOT/.ai-sdlc/artifacts}"
 mkdir -p "$ARTIFACTS_DIR"
 
 # AC-4 + AC-5: classify, write the calibration log entry, capture the JSON.
@@ -1174,7 +1179,7 @@ For each reviewer, resolve its routed model and pass it as the Agent call's `mod
 ROUTE_SOURCE_KIND=backlog; [ "${ARG_FORM:-}" = "gh-issue" ] && ROUTE_SOURCE_KIND=gh-issue
 for name in $SELECTED; do
   REVIEWER_AGENT=$(_resolve_reviewer_agent "$name")
-  REVIEWER_ROUTE=$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" resolve-model "$REVIEWER_AGENT" --task-id "$TASK_ID" --source-kind "$ROUTE_SOURCE_KIND" --iteration "${iteration_count:-1}" --artifacts-dir "${ARTIFACTS_DIR:-$WORKTREE_PATH/.ai-sdlc/artifacts}" --work-dir "$(pwd)" 2>/dev/null || echo '{"model":"","arm":"default"}')
+  REVIEWER_ROUTE=$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" resolve-model "$REVIEWER_AGENT" --task-id "$TASK_ID" --source-kind "$ROUTE_SOURCE_KIND" --iteration "${iteration_count:-1}" --artifacts-dir "${ARTIFACTS_DIR:-$PROJECT_ROOT/.ai-sdlc/artifacts}" --work-dir "$(pwd)" 2>/dev/null || echo '{"model":"","arm":"default"}')
   echo "[ai-sdlc-progress] Step 7b: $REVIEWER_AGENT model route: $REVIEWER_ROUTE"
 done
 ```
@@ -1302,7 +1307,7 @@ for REVIEWER_NAME in $SELECTED; do
   # in Step 7b) so the harness metadata in the Merkle leaf stays consistent with
   # the agent that actually ran (AISDLC-383.8 code review MAJOR finding).
   AGENT_NAME=$(_resolve_reviewer_agent "$REVIEWER_NAME")
-  EMIT_MODEL="${AISDLC_REVIEWER_MODEL:-$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" resolve-model "$AGENT_NAME" --task-id "$TASK_ID" --source-kind "${ROUTE_SOURCE_KIND:-backlog}" --iteration "${iteration_count:-1}" --artifacts-dir "${ARTIFACTS_DIR:-$WORKTREE_PATH/.ai-sdlc/artifacts}" --work-dir "$(pwd)" --skip-log 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).model||"")}catch{}})')}"
+  EMIT_MODEL="${AISDLC_REVIEWER_MODEL:-$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" resolve-model "$AGENT_NAME" --task-id "$TASK_ID" --source-kind "${ROUTE_SOURCE_KIND:-backlog}" --iteration "${iteration_count:-1}" --artifacts-dir "${ARTIFACTS_DIR:-$PROJECT_ROOT/.ai-sdlc/artifacts}" --work-dir "$(pwd)" --skip-log 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).model||"")}catch{}})')}"
   # Only an agent with no routed model (codex variants, correctness-reviewer) may
   # fall back to a fixed placeholder; a routed model always wins.
   if [ -z "$EMIT_MODEL" ]; then

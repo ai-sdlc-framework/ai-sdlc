@@ -17,7 +17,17 @@
 
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -824,5 +834,70 @@ describe('/ai-sdlc execute — model routing wiring', () => {
     assert.equal(fixed.length, 3);
     assert.match(fixed[0], /code-reviewer-codex\|test-reviewer-codex\)/);
     assert.match(emit, /if \[ -z "\$EMIT_MODEL" \]; then/);
+  });
+});
+
+describe('AISDLC-654.2: artifacts dir anchored at the project root', () => {
+  it('no artifacts-dir default is rooted at the worktree', () => {
+    assert.ok(!/\$WORKTREE_PATH\/\.ai-sdlc\/artifacts/.test(cmdBody));
+    assert.ok(!/\$\{?WORKTREE_PATH\}?\/\.ai-sdlc\/artifacts/.test(cmdBody));
+  });
+
+  it('every artifacts-dir default uses the ${ARTIFACTS_DIR:-$PROJECT_ROOT/...} form', () => {
+    const sites = cmdBody.match(/[^\n]*\.ai-sdlc\/artifacts[^\n]*/g) ?? [];
+    const defaults = sites.filter((l) => /\$PROJECT_ROOT\/\.ai-sdlc\/artifacts/.test(l));
+    assert.ok(defaults.length >= 4, 'expected the dev, set, reviewer and emit-leaf sites');
+    for (const line of defaults) {
+      assert.match(line, /\$\{ARTIFACTS_DIR:-\$PROJECT_ROOT\/\.ai-sdlc\/artifacts\}/);
+    }
+  });
+
+  it('the PROJECT_ROOT derivation equals resolveProjectRoot() in a Pattern C worktree', async () => {
+    const m = cmdBody.match(/^GIT_COMMON_DIR=.*\n^if .*PROJECT_ROOT=.*$/m);
+    assert.ok(m, 'PROJECT_ROOT derivation snippet not found');
+    const mod = join(__dirname, '..', '..', 'pipeline-cli', 'dist', 'routing', 'artifacts-dir.js');
+    const tmp = realpathSync(mkdtempSync(join(tmpdir(), 'exec-654-2-')));
+    try {
+      const env = {
+        ...process.env,
+        GIT_AUTHOR_NAME: 't',
+        GIT_AUTHOR_EMAIL: 't@t',
+        GIT_COMMITTER_NAME: 't',
+        GIT_COMMITTER_EMAIL: 't@t',
+      };
+      const git = (cwd, ...a) => execFileSync('git', a, { cwd, env, stdio: 'ignore' });
+      const parent = join(tmp, 'parent');
+      mkdirSync(parent);
+      git(parent, 'init', '-q', '-b', 'main');
+      writeFileSync(join(parent, 'a.txt'), 'a');
+      git(parent, 'add', 'a.txt');
+      git(parent, 'commit', '-q', '-m', 'init');
+      const wt = join(parent, '.worktrees', 'task-1');
+      git(parent, 'worktree', 'add', '-q', '-b', 'task-1', wt);
+      // Bare repo with a separate-git-dir checkout: common dir is not named `.git`.
+      const gitDir = join(tmp, 'sep.gitdir');
+      const sep = join(tmp, 'sep');
+      mkdirSync(sep);
+      git(sep, 'init', '-q', '-b', 'main', `--separate-git-dir=${gitDir}`);
+      const bare = join(tmp, 'bare.git');
+      execFileSync('git', ['clone', '-q', '--bare', parent, bare], { env, stdio: 'ignore' });
+
+      if (!existsSync(mod)) return; // pipeline-cli not built: bash half still ran nowhere to compare
+      const { resolveProjectRoot } = await import(mod);
+      for (const dir of [wt, parent, sep, bare]) {
+        const out = execFileSync('bash', ['-c', `${m[0]}\nprintf %s "$PROJECT_ROOT"`], {
+          cwd: dir,
+          encoding: 'utf8',
+        });
+        assert.equal(realpathSync(out), realpathSync(resolveProjectRoot(dir)), dir);
+      }
+      const fromWt = execFileSync('bash', ['-c', `${m[0]}\nprintf %s "$PROJECT_ROOT"`], {
+        cwd: wt,
+        encoding: 'utf8',
+      });
+      assert.equal(realpathSync(fromWt), parent);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

@@ -1,5 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 /** Default project artifacts directory: `<projectRoot>/.ai-sdlc/artifacts` (gitignored runtime output). */
 export function defaultArtifactsDir(projectRoot: string): string {
@@ -14,9 +15,33 @@ export function resolveArtifactsDir(projectRoot: string, explicit?: string): str
   return explicit ?? process.env.ARTIFACTS_DIR ?? defaultArtifactsDir(projectRoot);
 }
 
-/** Artifacts directory for a worktree: explicit, then $ARTIFACTS_DIR, then the worktree's own. */
-export function routingArtifactsDir(worktreePath: string, explicit?: string): string {
-  return resolveArtifactsDir(worktreePath, explicit);
+/**
+ * The project root a worktree belongs to: the parent of the shared `.git`
+ * directory (`git rev-parse --path-format=absolute --git-common-dir`). A plain
+ * checkout resolves to itself. When git cannot answer (not a repository, a bare
+ * parent, git missing) the given directory is returned unchanged.
+ */
+export function resolveProjectRoot(dir: string): string {
+  try {
+    const common = execFileSync(
+      'git',
+      ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+      {
+        cwd: dir,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      },
+    ).trim();
+    if (common && basename(common) === '.git') return dirname(common);
+  } catch {
+    // fall through to the directory itself
+  }
+  return resolve(dir);
+}
+
+/** Artifacts directory for a run: explicit, then $ARTIFACTS_DIR, then `<projectRoot>/.ai-sdlc/artifacts`. */
+export function routingArtifactsDir(projectRoot: string, explicit?: string): string {
+  return resolveArtifactsDir(projectRoot, explicit);
 }
 
 /**

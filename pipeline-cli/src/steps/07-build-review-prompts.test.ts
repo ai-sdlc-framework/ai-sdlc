@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, writeFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -889,6 +889,81 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
       ]);
     } finally {
       rmSync(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Step 7 — artifacts dir anchoring (AISDLC-654.2)', () => {
+  function fixture(): { parent: string; wt: string } {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), 'step7-654-')));
+    const env = {
+      ...process.env,
+      GIT_AUTHOR_NAME: 't',
+      GIT_AUTHOR_EMAIL: 't@t',
+      GIT_COMMITTER_NAME: 't',
+      GIT_COMMITTER_EMAIL: 't@t',
+    };
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: parent, env, stdio: 'ignore' });
+    git('init', '-q', '-b', 'main');
+    writeFileSync(join(parent, 'a.txt'), 'a');
+    git('add', 'a.txt');
+    git('commit', '-q', '-m', 'init');
+    const wt = join(parent, '.worktrees', 'task-1');
+    git('worktree', 'add', '-q', '-b', 'task-1', wt);
+    return { parent, wt };
+  }
+  const mkRunner = () =>
+    new FakeRunner()
+      .on(
+        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
+        ok('--- diff content ---\n'),
+      )
+      .on(
+        /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
+        ok('a.ts\0'),
+      )
+      .toRunner();
+
+  it('writes the assignment log under the parent project root when ARTIFACTS_DIR is unset and no projectRoot is passed', async () => {
+    delete process.env.ARTIFACTS_DIR;
+    const { parent, wt } = fixture();
+    try {
+      await buildReviewPrompts({
+        taskId: 'AISDLC-1',
+        task,
+        branch: 'task-1',
+        worktreePath: wt,
+        workDir: wt,
+        codexAvailable: false,
+        runner: mkRunner(),
+      });
+      expect(
+        existsSync(join(parent, '.ai-sdlc', 'artifacts', '_routing', 'assignments.jsonl')),
+      ).toBe(true);
+      expect(existsSync(join(wt, '.ai-sdlc', 'artifacts'))).toBe(false);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it('lets an explicit ARTIFACTS_DIR win over the project root', async () => {
+    const { parent, wt } = fixture();
+    const elsewhere = join(tmp, 'elsewhere');
+    process.env.ARTIFACTS_DIR = elsewhere;
+    try {
+      await buildReviewPrompts({
+        taskId: 'AISDLC-1',
+        task,
+        branch: 'task-1',
+        worktreePath: wt,
+        workDir: wt,
+        codexAvailable: false,
+        runner: mkRunner(),
+      });
+      expect(existsSync(join(elsewhere, '_routing', 'assignments.jsonl'))).toBe(true);
+      expect(existsSync(join(parent, '.ai-sdlc', 'artifacts'))).toBe(false);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
     }
   });
 });

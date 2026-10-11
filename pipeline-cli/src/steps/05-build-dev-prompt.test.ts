@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { buildDeveloperPrompt } from './05-build-dev-prompt.js';
 import type { TaskSpec } from '../types.js';
+import { routingArtifactsDir } from '../routing/artifacts-dir.js';
+import { assignmentLogPath } from '../routing/assignment-log.js';
 
 const task: TaskSpec = {
   id: 'AISDLC-1',
@@ -103,5 +106,49 @@ describe('Step 5 — buildDeveloperPrompt', () => {
     });
     expect(r.model).toBe('sonnet');
     expect(r.modelArm).toBe('default');
+  });
+});
+
+describe('Step 5 — artifacts dir anchoring (AISDLC-654.2)', () => {
+  it('writes the assignment log under the parent project root, not the worktree, via the default resolveProjectRoot path', async () => {
+    delete process.env.ARTIFACTS_DIR;
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), 'step5-654-')));
+    try {
+      const env = {
+        ...process.env,
+        GIT_AUTHOR_NAME: 't',
+        GIT_AUTHOR_EMAIL: 't@t',
+        GIT_COMMITTER_NAME: 't',
+        GIT_COMMITTER_EMAIL: 't@t',
+      };
+      const git = (...a: string[]) => execFileSync('git', a, { cwd: parent, env, stdio: 'ignore' });
+      git('init', '-q', '-b', 'main');
+      writeFileSync(join(parent, 'a.txt'), 'a');
+      git('add', 'a.txt');
+      git('commit', '-q', '-m', 'init');
+      const wt = join(parent, '.worktrees', 'aisdlc-1');
+      git('worktree', 'add', '-q', '-b', 'aisdlc-1', wt);
+      await buildDeveloperPrompt({ taskId: 'AISDLC-1', task, branch: 'b', worktreePath: wt });
+      // The execute.md derivation: parent of the shared .git directory.
+      const common = execFileSync(
+        'git',
+        ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+        { cwd: wt, encoding: 'utf8' },
+      ).trim();
+      const expected = routingArtifactsDir(dirname(common));
+      expect(expected).toBe(join(parent, '.ai-sdlc', 'artifacts'));
+      expect(existsSync(assignmentLogPath(expected))).toBe(true);
+      expect(existsSync(join(wt, '.ai-sdlc', 'artifacts'))).toBe(false);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it('writes nothing when ARTIFACTS_DIR is unset and the worktree path does not exist', async () => {
+    delete process.env.ARTIFACTS_DIR;
+    const ghost = join(pinned, 'no-such-worktree');
+    await buildDeveloperPrompt({ taskId: 'AISDLC-1', task, branch: 'b', worktreePath: ghost });
+    expect(existsSync(ghost)).toBe(false);
+    expect(existsSync(join(pinned, '.ai-sdlc'))).toBe(false);
   });
 });

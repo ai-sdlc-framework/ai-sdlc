@@ -16,6 +16,8 @@ import { buildUsageCli } from '../cli/usage.js';
 import { appendAssignment, assignmentLogPath } from '../routing/assignment-log.js';
 import { defaultArtifactsDir, routingArtifactsDir } from '../routing/artifacts-dir.js';
 import { resolveModel } from '../routing/resolve-model.js';
+import { readAssignmentLog as readScorecardAssignmentLog } from './scorecard-sources.js';
+import { assignmentKey } from './scorecard.js';
 import { repoNameFor } from './attribution.js';
 import { defaultUsageConfig } from './usage-config.js';
 import { isUnderAiSdlc } from './replay-commands.js';
@@ -336,5 +338,56 @@ describe('replay output ordering', () => {
     expect(res.exit).toBe(0);
     expect(res.out.startsWith('Artifacts directory:')).toBe(true);
     expect(res.out).not.toContain('Spend cap');
+  });
+});
+
+describe('project-root anchoring from a worktree (AISDLC-654.2)', () => {
+  it('resolves the parent repository from a Pattern C worktree and keeps the explicit override', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const { mkdtempSync, realpathSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { resolveProjectRoot } = await import('../routing/artifacts-dir.js');
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), 'aisdlc-654-2-')));
+    const git = (...a: string[]) =>
+      execFileSync('git', a, {
+        cwd: parent,
+        stdio: 'ignore',
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: 't',
+          GIT_AUTHOR_EMAIL: 't@t',
+          GIT_COMMITTER_NAME: 't',
+          GIT_COMMITTER_EMAIL: 't@t',
+        },
+      });
+    git('init', '-q', '-b', 'main');
+    writeFileSync(join(parent, 'a.txt'), 'a');
+    git('add', 'a.txt');
+    git('commit', '-q', '-m', 'init');
+    const wt = join(parent, '.worktrees', 'task-1');
+    git('worktree', 'add', '-q', '-b', 'task-1', wt);
+    const anchored = routingArtifactsDir(resolveProjectRoot(wt));
+    expect(anchored).toBe(join(parent, '.ai-sdlc', 'artifacts'));
+    expect(anchored).toBe(defaultArtifactsDir(parent));
+    expect(resolveProjectRoot(parent)).toBe(parent);
+    try {
+      process.env.ARTIFACTS_DIR = join(parent, 'elsewhere');
+      expect(routingArtifactsDir(resolveProjectRoot(wt))).toBe(join(parent, 'elsewhere'));
+      expect(routingArtifactsDir(resolveProjectRoot(wt), '/x/y')).toBe('/x/y');
+    } finally {
+      delete process.env.ARTIFACTS_DIR;
+    }
+    resolveModel({
+      role: 'developer',
+      taskId: 'D-1',
+      taskClass: 'chore',
+      workDir: wt,
+      artifactsDir: anchored,
+    });
+    // The scorecard's own reader sees the entry the worktree run wrote under the parent.
+    const log = readScorecardAssignmentLog(assignmentLogPath(anchored));
+    expect(log.has(assignmentKey('D-1', 'developer'))).toBe(true);
+    expect(existsSync(join(wt, '.ai-sdlc', 'artifacts'))).toBe(false);
+    rmSync(parent, RM);
   });
 });
