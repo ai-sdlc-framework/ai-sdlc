@@ -2,7 +2,7 @@
 id: AISDLC-713
 title: >-
   Restart or re-register a single hierarchy session
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-04'
 labels:
