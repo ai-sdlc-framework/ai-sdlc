@@ -107,10 +107,15 @@ export const DEFAULT_PLANNER_MODE = BYPASS_MODE;
  * `AI_SDLC_HIERARCHY_SESSION=<name>` and `AI_SDLC_HIERARCHY_ROLE=<role>`, quoted or not.
  */
 export function hasLaunchEnv(command: string, name: string, role: string): boolean {
+  // tmux `#{pane_start_command}` wraps the whole command in one pair of double quotes.
+  const unwrapped =
+    command.length >= 2 && command.startsWith('"') && command.endsWith('"')
+      ? command.slice(1, -1)
+      : command;
   const has = (key: string, value: string): boolean =>
     new RegExp(
       `(?:^|\\s)${key}=(['"]?)${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\1(?:\\s|$)`,
-    ).test(command);
+    ).test(unwrapped);
   return has('AI_SDLC_HIERARCHY_SESSION', name) && has('AI_SDLC_HIERARCHY_ROLE', role);
 }
 

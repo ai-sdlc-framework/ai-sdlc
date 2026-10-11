@@ -812,6 +812,42 @@ describe('hierarchy status', () => {
     );
   });
 
+  it('reads the double-quote-wrapped pane_start_command tmux returns as ok (AISDLC-791.1)', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
+    const name = Q('executor-alpha');
+    const quoted = `"AI_SDLC_HIERARCHY_SESSION='${name}' AI_SDLC_HIERARCHY_ROLE='executor' 'claude' --name '${name}' '/ai-sdlc executor'"`;
+    const realRun = fake.run;
+    fake.run = (f, a, o) =>
+      a[0] === 'display-message' &&
+      a.includes('#{pane_start_command}') &&
+      a.includes(`=${name}:${name}`)
+        ? { status: 0, stdout: `${quoted}\n`, stderr: '' }
+        : realRun(f, a, o);
+    const result = hierarchyStatus(deps);
+    const alpha = result.rows.find((r) => r.entry.name === name);
+    expect(alpha?.launchEnv).toBe('ok');
+    expect(alpha?.nextStep).toBeUndefined();
+    expect(formatStatus(result).some((l) => l.includes('env missing on'))).toBe(false);
+  });
+
+  it('hasLaunchEnv unwraps one double-quote pair (AISDLC-791.1)', () => {
+    expect(
+      hasLaunchEnv(
+        `"AI_SDLC_HIERARCHY_SESSION='x' AI_SDLC_HIERARCHY_ROLE='executor' 'claude' --name 'x'"`,
+        'x',
+        'executor',
+      ),
+    ).toBe(true);
+    expect(
+      hasLaunchEnv(
+        '"AI_SDLC_HIERARCHY_SESSION=ai-sdlc-planner AI_SDLC_HIERARCHY_ROLE=planner claude --name x"',
+        'ai-sdlc-planner',
+        'planner',
+      ),
+    ).toBe(true);
+    expect(hasLaunchEnv('"claude --name x"', 'x', 'executor')).toBe(false);
+  });
+
   it('reports starting when the window is alive but the registry has no entry', async () => {
     fake.register = false;
     await hierarchyUp({ ...baseOpts, executors: 0, noPlanner: true }, deps);

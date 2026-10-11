@@ -2,7 +2,7 @@
 id: AISDLC-791.1
 title: >-
   cli-hierarchy status reports every session as env-missing: hasLaunchEnv fails on tmux's quoted pane_start_command
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-10'
 updated_date: '2026-10-10'
@@ -43,14 +43,36 @@ In `hasLaunchEnv`, unwrap a leading/trailing `"` pair before matching. Add a tes
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `hasLaunchEnv('"AI_SDLC_HIERARCHY_SESSION=\'x\' AI_SDLC_HIERARCHY_ROLE=\'executor\' \'claude\' ..."', 'x', 'executor')` is true.
-- [ ] #2 The unquoted planner form (`"AI_SDLC_HIERARCHY_SESSION=ai-sdlc-planner AI_SDLC_HIERARCHY_ROLE=planner claude ..."`) is true.
-- [ ] #3 A bare `"claude --name x"` is still reported as `missing`.
-- [ ] #4 `cli-hierarchy status` on the live hierarchy shows `ok` for every row launched by `up`.
-- [ ] #5 The hermetic status test covers the quoted form.
+- [x] #1 `hasLaunchEnv('"AI_SDLC_HIERARCHY_SESSION=\'x\' AI_SDLC_HIERARCHY_ROLE=\'executor\' \'claude\' ..."', 'x', 'executor')` is true.
+- [x] #2 The unquoted planner form (`"AI_SDLC_HIERARCHY_SESSION=ai-sdlc-planner AI_SDLC_HIERARCHY_ROLE=planner claude ..."`) is true.
+- [x] #3 A bare `"claude --name x"` is still reported as `missing`.
+- [x] #4 `cli-hierarchy status` on the live hierarchy shows `ok` for every row launched by `up`.
+- [x] #5 The hermetic status test covers the quoted form.
 <!-- AC:END -->
 
 ## Verification
 
 - `pnpm --filter @ai-sdlc/pipeline-cli build && pnpm --filter @ai-sdlc/pipeline-cli test`
 - `pnpm lint && pnpm format:check`
+
+## Final Summary
+
+## Summary
+`hasLaunchEnv` now strips one surrounding double-quote pair from tmux's `#{pane_start_command}` before matching, so `cli-hierarchy status` reports `ok` for sessions launched by `up` instead of a false `env missing`.
+
+## Changes
+- `pipeline-cli/src/hierarchy/up.ts` (modified): unwrap one leading/trailing `"` pair before the regex match; the `up` refusal is unchanged.
+- `pipeline-cli/src/hierarchy/hierarchy.test.ts` (modified): unit cases for the quoted executor form, the unquoted planner form and a bare quoted `claude` command (still missing), plus a hermetic status test with the exact quoted tmux string.
+
+## Design decisions
+- **One-layer unwrap, not a looser regex**: keeps the existing anchors strict.
+
+## Verification
+- `pnpm --filter @ai-sdlc/pipeline-cli build` — clean
+- hierarchy tests — 466 passed (full pipeline-cli suite left to CI)
+- `pnpm lint` — clean
+- `pnpm format:check` — clean
+- 3 reviews approved (code and test on Claude-native reviewers; Codex plan at usage limit)
+
+## Follow-up
+(none)
