@@ -72,7 +72,7 @@ export interface DispatchManifest {
   sequenceGroup?: string;
   /** Lower is claimed first within a wave; absent sorts last. */
   priority?: number;
-  /** Lower is claimed first (default 0). */
+  /** Lower is claimed first (default 0). Never set on a resume manifest (AISDLC-800). */
   wave?: number;
   /** Decision id this manifest is waiting on; such a manifest is never claimed. */
   blockedBy?: string;
@@ -89,6 +89,18 @@ export interface DispatchManifest {
    * task's existing worktree and branch instead of creating new ones.
    */
   resume?: ResumeFeedback;
+  /** Forced releases of this task, with the reason given (AISDLC-800). */
+  releaseHistory?: ReleaseHistoryEntry[];
+}
+
+/** One forced release recorded on the manifest. */
+export interface ReleaseHistoryEntry {
+  at: string;
+  by?: string;
+  reason: string;
+  forced?: boolean;
+  /** What the guard found in the worktree when the release was forced. */
+  unsafe?: string;
 }
 
 /** Feedback attached to a manifest that resumes a finished task. */

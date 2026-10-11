@@ -32,6 +32,7 @@ export {
   listBoard,
   listResumeSignals,
   loadEligibilityContext,
+  OneClaimPerWorkerError,
   peekQueue,
   probeIterationBudget,
   readHeartbeat,

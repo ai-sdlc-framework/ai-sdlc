@@ -104,6 +104,10 @@ export interface DoctorCheckAdapters extends DoctorAdapters {
    * absent means the check passes with nothing to inspect.
    */
   recentTranscripts?: (homeDir: string, sinceMs: number) => string[];
+  /** List immediate file names of `path`; `[]` if missing/unreadable. Never throws. Optional so older fixtures compile. */
+  listFiles?: (path: string) => string[];
+  /** Modification time of a file in milliseconds; `null` if missing. Optional so older fixtures compile. */
+  fileMtimeMs?: (path: string) => number | null;
   /** Production = `node:os.homedir()`. Injectable for hermetic tests. */
   homeDir: () => string;
   /** Production = `process.env`. Injectable so tests don't depend on the real environment. */
@@ -134,6 +138,22 @@ export function buildProductionCheckAdapters(): DoctorCheckAdapters {
       }
     },
     recentTranscripts: listRecentTranscripts,
+    listFiles: (p) => {
+      try {
+        return readdirSync(p, { withFileTypes: true })
+          .filter((e) => e.isFile())
+          .map((e) => e.name);
+      } catch {
+        return [];
+      }
+    },
+    fileMtimeMs: (p) => {
+      try {
+        return statSync(p).mtimeMs;
+      } catch {
+        return null;
+      }
+    },
     homeDir: () => homedir(),
     env: process.env,
   };
@@ -1337,6 +1357,123 @@ export function checkLeasePushPreflight(ctx: DoctorRunContext): DoctorCheckResul
   ];
 }
 
+/** AISDLC-800: an inflight claim whose heartbeat is older than this is stale (matches the board's reaper). */
+const DISPATCH_HEARTBEAT_STALE_MS = 30 * 60 * 1000;
+/** AISDLC-800: a `done/` iterate-needed verdict older than this must have a released or continued claim. */
+const DISPATCH_VERDICT_GRACE_MS = 10 * 60 * 1000;
+
+/**
+ * AISDLC-800: the dispatch board invariants the protocol states in prose and the
+ * CLI now enforces: (1) one claim per worker, (2) every inflight claim has a
+ * heartbeat younger than the stale window, (3) no resume manifest carries a
+ * `wave`, (4) no `done/` iterate-needed verdict older than 10 minutes without a
+ * released claim. One result per invariant; quiet when there is no board.
+ */
+export function checkDispatchBoard(ctx: DoctorRunContext): DoctorCheckResult[] {
+  const board = join(ctx.projectDir, '.ai-sdlc', 'dispatch');
+  const { listFiles, fileMtimeMs } = ctx.adapters;
+  if (!ctx.adapters.exists(board) || !listFiles) return [];
+  const nowMs = clockNow().getTime();
+  const readManifests = (sub: string): Array<{ file: string; m: Record<string, unknown> }> =>
+    listFiles(join(board, sub))
+      .filter((f) => f.endsWith('.dispatch.json'))
+      .flatMap((file) => {
+        const m = readJson(ctx, join(board, sub, file));
+        return m && typeof m === 'object' ? [{ file, m: m as Record<string, unknown> }] : [];
+      });
+  const inflight = readManifests('inflight');
+  const queued = readManifests('queue');
+
+  const byWorker = new Map<string, string[]>();
+  for (const { file, m } of inflight) {
+    const w = typeof m.workerId === 'string' ? m.workerId : undefined;
+    if (!w) continue;
+    byWorker.set(w, [...(byWorker.get(w) ?? []), String(m.taskId ?? file)]);
+  }
+  const multi = [...byWorker.entries()].filter(([, ids]) => ids.length > 1);
+
+  const noBeat: string[] = [];
+  for (const { file, m } of inflight) {
+    const id = String(m.taskId ?? file.replace(/\.dispatch\.json$/, ''));
+    const state = readJson(ctx, join(board, 'inflight', `${id}.state.json`)) as
+      | { lastHeartbeat?: string }
+      | undefined;
+    const beat = state?.lastHeartbeat ? Date.parse(state.lastHeartbeat) : Number.NaN;
+    if (!Number.isFinite(beat)) noBeat.push(`${id} (no heartbeat)`);
+    else if (nowMs - beat > DISPATCH_HEARTBEAT_STALE_MS) noBeat.push(`${id} (stale heartbeat)`);
+  }
+
+  const waved = [...queued, ...inflight]
+    .filter(({ m }) => m.resume !== undefined && m.wave !== undefined)
+    .map(({ m, file }) => String(m.taskId ?? file));
+
+  const unhandled: string[] = [];
+  const held = new Set(inflight.map(({ m }) => String(m.taskId)));
+  for (const file of listFiles(join(board, 'done'))) {
+    if (!file.endsWith('.verdict.json')) continue;
+    const verdict = readJson(ctx, join(board, 'done', file)) as
+      | { taskId?: string; outcome?: string; completedAt?: string }
+      | undefined;
+    if (verdict?.outcome !== 'iterate-needed') continue;
+    const id = verdict.taskId ?? file.replace(/\.verdict\.json$/, '');
+    const at = verdict.completedAt
+      ? Date.parse(verdict.completedAt)
+      : (fileMtimeMs?.(join(board, 'done', file)) ?? Number.NaN);
+    if (!Number.isFinite(at) || nowMs - at <= DISPATCH_VERDICT_GRACE_MS) continue;
+    if (held.has(id) || !queued.some(({ m }) => m.taskId === id)) unhandled.push(id);
+  }
+
+  const result = (
+    id: string,
+    bad: string[],
+    ok: string,
+    problem: string,
+    remediation: string,
+    severity: CheckSeverity = 'fail',
+  ): DoctorCheckResult =>
+    bad.length === 0
+      ? { id, severity: 'pass', title: ok }
+      : {
+          id,
+          severity,
+          title: `${problem}: ${bad.join(', ')}`,
+          remediation,
+          anonymizableEvidence: { affectedCount: bad.length },
+        };
+  return [
+    result(
+      'dispatch-board-one-claim-per-worker',
+      multi.map(([w, ids]) => `${w} holds ${ids.join(' and ')}`),
+      'every worker holds at most one inflight claim',
+      'a worker holds more than one inflight claim',
+      'Finish or release all but one (`cli-dispatch release --task-id <id>`).',
+    ),
+    result(
+      'dispatch-board-heartbeat',
+      noBeat,
+      `every inflight claim has a heartbeat younger than ${DISPATCH_HEARTBEAT_STALE_MS / 60000} minutes`,
+      'inflight claims without a fresh heartbeat',
+      'Run `cli-dispatch reap`, or have the executor write its heartbeat (`cli-dispatch heartbeat`).',
+      'warn',
+    ),
+    result(
+      'dispatch-board-resume-wave',
+      waved,
+      'no resume manifest carries a wave',
+      'resume manifests carrying a wave',
+      'Re-run `cli-dispatch resume` for the task; a resume sorts by priority and has no wave.',
+    ),
+    result(
+      'dispatch-board-stale-verdict',
+      unhandled,
+      'every iterate-needed verdict in done/ has a released or continued claim',
+      'iterate-needed verdicts older than 10 minutes with no released claim',
+      'Release the claim (`cli-dispatch release --task-id <id>`) then `cli-dispatch resume --task-id <id>`.',
+      'warn',
+    ),
+  ];
+}
+
 /** AISDLC-750: marker the post-rewrite guard fix (and the proxy shim) carries. */
 const POST_REWRITE_FIX_MARKER = 'AISDLC-750';
 
@@ -1898,6 +2035,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     description:
       "With --task <id>: whether the lease-push hook would allow the task worktree's push, and each unmet condition with its fix (AISDLC-798).",
     run: checkLeasePushPreflight,
+  },
+  {
+    id: 'dispatch-board',
+    description:
+      'Dispatch board invariants: one claim per worker, a fresh heartbeat on every inflight claim, no wave on resume manifests, no stale iterate-needed verdict without a released claim (AISDLC-800).',
+    run: checkDispatchBoard,
   },
   {
     id: 'parent-checkout-state',
