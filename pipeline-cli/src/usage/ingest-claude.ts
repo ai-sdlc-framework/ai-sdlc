@@ -15,16 +15,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import {
-  appendFileSync,
-  lstatSync,
-  type Stats,
-  openSync,
-  closeSync,
-  readFileSync,
-  readdirSync,
-  readSync,
-} from 'node:fs';
+import { lstatSync, type Stats, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { BillingPool, ModelCallRecord, UsageStoreOptions } from '@ai-sdlc/reference';
@@ -36,6 +27,7 @@ import {
   type LimitCategory,
   type ParsedCall,
 } from './claude-transcript.js';
+import { LimitEventLog } from './limit-event-log.js';
 import { readLines } from './line-reader.js';
 import { isReplayWorktreeCwd } from './replay-git.js';
 
@@ -46,8 +38,6 @@ const SIDECAR_MAX_BYTES = 64 * 1024;
 const BATCH_LIMIT = 2000;
 const NORMAL_RUN_BYTES_PER_FILE = 256 * 1024 * 1024;
 const BACKFILL_BYTES_PER_FILE = 8 * 1024 * 1024 * 1024;
-const LIMIT_EVENTS_FILE = 'limit-events.jsonl';
-const LIMIT_EVENTS_READ_CAP = 8 * 1024 * 1024;
 const DEADLINE_CHECK_EVERY = 256;
 
 export const DEFAULT_MAX_SECONDS = 30;
@@ -208,68 +198,6 @@ interface LimitEvent {
   category: LimitCategory;
 }
 
-class LimitEventLog {
-  constructor(
-    private readonly dir: string,
-    private readonly withLock: <T>(dir: string, fn: () => T) => T,
-  ) {}
-
-  private static key(e: LimitEvent): string {
-    return `${e.ts}|${e.sessionId}|${e.category}`;
-  }
-
-  private load(): Set<string> {
-    const known = new Set<string>();
-    const path = join(this.dir, LIMIT_EVENTS_FILE);
-    try {
-      const fd = openSync(path, 'r');
-      try {
-        const buf = Buffer.alloc(LIMIT_EVENTS_READ_CAP);
-        const n = readSync(fd, buf, 0, LIMIT_EVENTS_READ_CAP, 0);
-        for (const line of buf.subarray(0, n).toString('utf-8').split('\n')) {
-          try {
-            const e = JSON.parse(line) as LimitEvent;
-            known.add(LimitEventLog.key(e));
-          } catch {
-            // skip a corrupt line
-          }
-        }
-      } finally {
-        closeSync(fd);
-      }
-    } catch {
-      // no file yet
-    }
-    return known;
-  }
-
-  /**
-   * Append the events not already recorded; returns how many were new. The
-   * read-check-append runs under the usage directory lock, so concurrent
-   * ingesters never duplicate an event.
-   */
-  append(events: LimitEvent[]): number {
-    if (events.length === 0) return 0;
-    return this.withLock(this.dir, () => {
-      const known = this.load();
-      const fresh: LimitEvent[] = [];
-      for (const e of events) {
-        const k = LimitEventLog.key(e);
-        if (known.has(k)) continue;
-        known.add(k);
-        fresh.push({ ts: e.ts, sessionId: e.sessionId, category: e.category });
-      }
-      if (fresh.length === 0) return 0;
-      appendFileSync(
-        join(this.dir, LIMIT_EVENTS_FILE),
-        fresh.map((e) => `${JSON.stringify(e)}\n`).join(''),
-        { encoding: 'utf-8', mode: 0o600 },
-      );
-      return fresh.length;
-    });
-  }
-}
-
 function buildRecord(
   call: ParsedCall,
   file: TranscriptFile,
@@ -329,7 +257,11 @@ export async function ingestClaudeTranscripts(opts: IngestOptions = {}): Promise
   const projectsDir = opts.projectsDir ?? defaultProjectsDir(env, home);
   const frameworkOnly = (env['AI_SDLC_USAGE_SCOPE'] ?? '').toLowerCase() === 'framework-only';
   const resolver = new AttributionResolver({ homeDir: home });
-  const limitLog = new LimitEventLog(usageDir, withUsageLock);
+  const limitLog = new LimitEventLog<LimitEvent>(
+    usageDir,
+    withUsageLock,
+    (e) => `${e.ts}|${e.sessionId}|${e.category}`,
+  );
   const bytesPerFile = opts.backfill ? BACKFILL_BYTES_PER_FILE : NORMAL_RUN_BYTES_PER_FILE;
 
   for (const file of walkTranscripts(projectsDir)) {

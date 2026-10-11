@@ -107,10 +107,11 @@ $ cli-usage ingest --projects-dir ./transcripts --backfill --json
 
 ### Codex
 
-`cli-usage-codex ingest` reads token counts from Codex session files (`$CODEX_HOME/sessions`, else `~/.codex/sessions`) into the same ledger. It takes `--backfill`, `--sessions-dir <path>` and `--json`.
+`cli-usage ingest` also reads token counts from Codex session files (`$CODEX_HOME/sessions`, else `~/.codex/sessions`) into the same ledger, in the same run and under the same switches and triggers. Pass `--sessions-dir <path>` to read another directory. The standalone `cli-usage-codex` command is retired.
 
 ```console
-$ cli-usage-codex ingest --sessions-dir ./codex-sessions
+$ cli-usage ingest --projects-dir ./transcripts --sessions-dir ./codex-sessions
+...
 Codex sessions scanned: 0
 Calls written: 0
 Repeats skipped: 0
@@ -118,6 +119,8 @@ Invalid records: 0
 Limit observations: 0
 Errors: 0
 ```
+
+Re-running writes nothing new: limit observations are deduplicated under the usage lock, so concurrent ingests and backfills never duplicate them. A session that reports only a cumulative total is recorded once its file has been quiet for 15 minutes, so the ledger holds the final total rather than a mid-session figure. A session file over 256 MiB, and any line over 4 MiB, is skipped and counted. Codex reports one cache-write figure with no duration, so every cache write is filed under the five-minute cache-write class. The cursor moves past a corrupt complete line (it cannot become valid later); only a truncated last line is retried.
 
 ### Triggers
 

@@ -66,6 +66,12 @@ export interface ModelCallRecord {
 export interface UsageStoreOptions {
   /** Explicit usage directory. Wins over `AI_SDLC_USAGE_DIR` and the home default. */
   dir?: string;
+  /**
+   * Longest time to wait for a contended usage lock before failing, in
+   * milliseconds. Defaults to 20 seconds; direct reporters on a hot path pass a
+   * short bound because the wait blocks the event loop.
+   */
+  lockWaitMs?: number;
 }
 
 export interface AppendResult {

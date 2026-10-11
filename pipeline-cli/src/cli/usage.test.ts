@@ -32,6 +32,8 @@ beforeEach(() => {
   vi.stubEnv('CLAUDE_CODE_ENV', '');
   vi.stubEnv('CLAUDE_REMOTE_EXECUTION', '');
   vi.stubEnv('AI_SDLC_USAGE_INGEST', '');
+  // Never read the real Codex sessions of the machine running the tests.
+  vi.stubEnv('CODEX_HOME', join(root, 'codex-home'));
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -69,6 +71,66 @@ describe('cli-usage ingest', () => {
   it('prints a text summary', async () => {
     await buildUsageCli(['ingest', '--projects-dir', fixture(), '--backfill']).parseAsync();
     expect(writes.join('')).toContain('Calls written:   1');
+  });
+
+  function codexSessions(): string {
+    const dir = join(root, 'codex-sessions');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'rollout-x.jsonl'),
+      [
+        { timestamp: '2026-09-02T10:00:00Z', type: 'session_meta', payload: { id: 'cx1' } },
+        {
+          timestamp: '2026-09-02T10:01:00Z',
+          type: 'event_msg',
+          payload: {
+            type: 'token_count',
+            info: {
+              last_token_usage: { input_tokens: 10, output_tokens: 2 },
+              total_token_usage: { input_tokens: 10, output_tokens: 2 },
+            },
+            rate_limits: { primary: { used_percent: 12 } },
+          },
+        },
+      ]
+        .map((o) => `${JSON.stringify(o)}\n`)
+        .join(''),
+    );
+    return dir;
+  }
+
+  it('also ingests Codex sessions, and a re-run writes nothing new', async () => {
+    const args = ['ingest', '--projects-dir', fixture(), '--sessions-dir', codexSessions()];
+    await buildUsageCli([...args, '--json']).parseAsync();
+    const first = JSON.parse(writes.join(''));
+    expect(first.codex).toMatchObject({ filesScanned: 1, written: 1, limitEvents: 1 });
+    writes.length = 0;
+    await buildUsageCli([...args, '--json']).parseAsync();
+    expect(JSON.parse(writes.join('')).codex).toMatchObject({ written: 0, limitEvents: 0 });
+    writes.length = 0;
+    await buildUsageCli(args).parseAsync();
+    expect(writes.join('')).toContain('Codex sessions scanned: 1');
+  });
+
+  it('does not touch Codex sessions when ingestion is switched off', async () => {
+    vi.stubEnv('AI_SDLC_USAGE_INGEST', 'off');
+    const ingestCodex = vi.fn();
+    await buildUsageCli(['ingest', '--sessions-dir', codexSessions()], {
+      ingestCodex,
+    }).parseAsync();
+    expect(ingestCodex).not.toHaveBeenCalled();
+  });
+
+  it('reports a Codex ingest failure as degraded without failing the run', async () => {
+    const onIngestCapability = vi.fn();
+    await buildUsageCli(['ingest', '--projects-dir', fixture(), '--json'], {
+      onIngestCapability,
+      ingestCodex: () => {
+        throw new Error('boom');
+      },
+    }).parseAsync();
+    expect(onIngestCapability).toHaveBeenCalledWith('degraded', 'codex ingest failed');
+    expect(JSON.parse(writes.join(''))).toMatchObject({ callsWritten: 1 });
   });
 
   it('explains a no-op in a remote sandbox', async () => {

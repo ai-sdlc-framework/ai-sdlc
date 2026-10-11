@@ -2,7 +2,7 @@
 id: AISDLC-650.1
 title: >-
   RFC-0050 Part A: fold the Codex ingester into cli-usage ingest and harden its limit-event and total-only paths
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-30'
 labels:
@@ -16,7 +16,7 @@ dependencies:
 references:
   - spec/rfcs/RFC-0050-usage-ledger-and-model-routing.md
   - pipeline-cli/src/usage/codex-ingester.ts
-  - pipeline-cli/src/cli/usage-codex.ts
+  - pipeline-cli/src/cli/usage.ts
   - orchestrator/src/usage/direct-usage.ts
 priority: medium
 ---

@@ -15,10 +15,11 @@ import {
   defaultCodexSessionsDir,
   ingestCodexSessions,
   LIMIT_EVENTS_FILE,
+  TOTAL_ONLY_QUIET_MS,
 } from './codex-ingester.js';
 import { selectByRepo } from './repo-id.js';
 import { attributeCodexSession } from './codex-attribution.js';
-import { formatCodexIngestSummary } from '../cli/usage-codex.js';
+import { formatCodexIngestSummary } from '../cli/usage.js';
 
 let root: string;
 let sessions: string;
@@ -177,7 +178,10 @@ describe('ingestCodexSessions', () => {
           total_tokens: 360,
         }),
     );
-    expect(ingestCodexSessions(opts()).written).toBe(1);
+    expect(
+      ingestCodexSessions({ ...opts(), now: () => Date.now() + TOTAL_ONLY_QUIET_MS + 1000 })
+        .written,
+    ).toBe(1);
     const [rec] = await readAll();
     expect(rec.breakdownMissing).toBe(true);
     expect(rec.tokens).toMatchObject({ input: 360, output: 0, cacheRead: 0 });
@@ -305,8 +309,98 @@ describe('ingestCodexSessions', () => {
         invalid: 0,
         limitEvents: 4,
         errors: 0,
+        oversized: 2,
+        deferred: 1,
       }),
     ).toContain('Calls written: 2');
+  });
+});
+
+describe('ingestCodexSessions hardening (AISDLC-650.1)', () => {
+  const rl = (pct: number) => ({ primary: { used_percent: pct, window_minutes: 300 } });
+
+  function limitLines(): string[] {
+    return readFileSync(join(usage, LIMIT_EVENTS_FILE), 'utf-8').trim().split('\n');
+  }
+
+  it('re-running an ingest writes no new records or limit events', async () => {
+    writeFileSync(
+      join(sessions, 'rollout-r.jsonl'),
+      meta('sess-r', join(root, 'nowhere')) +
+        tc('2026-09-01T10:01:00.000Z', usageObj(100, 0, 10, 0), usageObj(100, 0, 10, 0), rl(10)),
+    );
+    const first = ingestCodexSessions(opts());
+    expect(first).toMatchObject({ written: 1, limitEvents: 1 });
+    expect(ingestCodexSessions(opts())).toMatchObject({ written: 0, limitEvents: 0 });
+    expect(ingestCodexSessions({ ...opts(), backfill: true })).toMatchObject({
+      written: 0,
+      skipped: 1,
+      limitEvents: 0,
+    });
+    expect(limitLines()).toHaveLength(1);
+  });
+
+  it('records no duplicate limit observations across overlapping ingests and a backfill', () => {
+    writeFileSync(
+      join(sessions, 'rollout-c.jsonl'),
+      meta('sess-c', join(root, 'nowhere')) +
+        tc('2026-09-01T10:01:00.000Z', usageObj(1, 0, 1, 0), usageObj(1, 0, 1, 0), rl(10)) +
+        tc('2026-09-01T10:02:00.000Z', usageObj(1, 0, 1, 0), usageObj(2, 0, 2, 0), rl(20)),
+    );
+    // A crash after the append but before the cursor write: the cursor stays at 0.
+    ingestCodexSessions(opts());
+    writeFileSync(join(usage, 'cursors.json'), '{}');
+    const again = ingestCodexSessions(opts());
+    const back = ingestCodexSessions({ ...opts(), backfill: true });
+    expect(again.limitEvents + back.limitEvents).toBe(0);
+    expect(limitLines()).toHaveLength(2);
+  });
+
+  it('defers a total-only session until it is quiet, then records the final total', async () => {
+    const file = join(sessions, 'rollout-t.jsonl');
+    const total = (n: number) => ({ input_tokens: n, output_tokens: 0, total_tokens: n });
+    writeFileSync(
+      file,
+      meta('sess-t', join(root, 'nowhere')) + tc('2026-09-01T10:01:00.000Z', undefined, total(100)),
+    );
+    let clock = Date.now();
+    const o = { ...opts(), now: () => clock };
+    const mid = ingestCodexSessions(o);
+    expect(mid).toMatchObject({ written: 0, deferred: 1 });
+    expect(await readAll()).toHaveLength(0);
+
+    appendFileSync(file, tc('2026-09-01T10:30:00.000Z', undefined, total(900)));
+    expect(ingestCodexSessions(o).deferred).toBe(1);
+
+    clock += TOTAL_ONLY_QUIET_MS + 1000;
+    expect(ingestCodexSessions(o)).toMatchObject({ written: 1, deferred: 0 });
+    const recs = await readAll();
+    expect(recs).toHaveLength(1);
+    expect(recs[0]!.tokens.input).toBe(900);
+    expect(ingestCodexSessions(o).written).toBe(0);
+  });
+
+  it('skips an oversized session file without reading it', async () => {
+    writeFileSync(
+      join(sessions, 'rollout-big.jsonl'),
+      meta('sess-big', join(root, 'nowhere')) +
+        tc('2026-09-01T10:01:00.000Z', usageObj(1, 0, 1, 0), usageObj(1, 0, 1, 0)),
+    );
+    const res = ingestCodexSessions({ ...opts(), maxFileBytes: 64 });
+    expect(res).toMatchObject({ oversized: 1, written: 0, errors: 0 });
+    expect(await readAll()).toHaveLength(0);
+  });
+
+  it('drops an oversized line and still ingests the rest of the file', async () => {
+    const huge = `${JSON.stringify({ type: 'response_item', payload: { text: 'x'.repeat(5000) } })}\n`;
+    writeFileSync(
+      join(sessions, 'rollout-line.jsonl'),
+      meta('sess-line', join(root, 'nowhere')) +
+        huge +
+        tc('2026-09-01T10:01:00.000Z', usageObj(1, 0, 1, 0), usageObj(1, 0, 1, 0)),
+    );
+    const res = ingestCodexSessions({ ...opts(), maxLineBytes: 1024 });
+    expect(res).toMatchObject({ oversized: 1, written: 1, errors: 0 });
   });
 });
 
