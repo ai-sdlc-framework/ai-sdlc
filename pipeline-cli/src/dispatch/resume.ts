@@ -57,6 +57,18 @@ export function snapshotDoneManifest(boardDir: string, manifest: DispatchManifes
   return target;
 }
 
+/** Normalise and bound a feedback note; throws when it is empty or too long. */
+export function normaliseNote(raw: string): string {
+  const note = String(raw ?? '')
+    .replace(/\r\n/g, '\n')
+    .trim();
+  if (note.length === 0) throw new Error('a resume needs a feedback note');
+  if (note.length > MAX_NOTE_CHARS) {
+    throw new Error(`the feedback note may have at most ${MAX_NOTE_CHARS} characters`);
+  }
+  return note;
+}
+
 /** What the caller supplies when resuming a task. */
 export interface ResumeInput {
   note: string;
@@ -101,10 +113,12 @@ function cleanList(label: string, items: readonly string[] | undefined): string[
 }
 
 /**
- * Send a finished task back to `queue/` with feedback.
+ * Send a finished task back to `queue/` with feedback. Any verdict in `done/`
+ * (success or iterate-needed) or `failed/` (a failure verdict) qualifies; the
+ * outcome it carried is recorded as `resume.fromVerdictOutcome`.
  * @throws, writing nothing, when the id is malformed, the note is empty or too
- *   long, the task has no success verdict in `done/`, it is already queued,
- *   inflight, blocked or failed, or no manifest can be rebuilt.
+ *   long, the task has no verdict, it is already queued, inflight or blocked,
+ *   it has only a failure diagnostic, or no manifest can be rebuilt.
  */
 export function resumeDone(
   boardDir: string,
@@ -113,11 +127,7 @@ export function resumeDone(
   opts: ResumeDoneOptions,
 ): ResumeResult {
   assertId(taskId);
-  const note = input.note.replace(/\r\n/g, '\n').trim();
-  if (note.length === 0) throw new Error('a resume needs a feedback note');
-  if (note.length > MAX_NOTE_CHARS) {
-    throw new Error(`the feedback note may have at most ${MAX_NOTE_CHARS} characters`);
-  }
+  const note = normaliseNote(input.note);
   if (
     input.prNumber !== undefined &&
     (!Number.isSafeInteger(input.prNumber) || input.prNumber < 1)
@@ -128,31 +138,50 @@ export function resumeDone(
   const findings = cleanList('findings', input.findings);
 
   const doneDir = path.join(boardDir, 'done');
+  const failedDir = path.join(boardDir, 'failed');
   const verdictFile = path.join(doneDir, `${taskId}.verdict.json`);
   const markerFile = path.join(doneDir, `${taskId}.completed.json`);
-  const verdict = existsSync(verdictFile) ? readJson<DispatchVerdict>(verdictFile) : undefined;
+  const failedVerdictFile = path.join(failedDir, `${taskId}.verdict.json`);
+  const failedDiagnosticFile = path.join(failedDir, `${taskId}.diagnostic.json`);
+  const doneVerdict = existsSync(verdictFile) ? readJson<DispatchVerdict>(verdictFile) : undefined;
+  const failedVerdict = existsSync(failedVerdictFile)
+    ? readJson<DispatchVerdict>(failedVerdictFile)
+    : undefined;
+  const verdict = doneVerdict ?? failedVerdict;
   const marker = existsSync(markerFile)
     ? readJson<{ completedAt?: string }>(markerFile)
     : undefined;
   if (!verdict && !marker) {
+    if (existsSync(failedDiagnosticFile)) {
+      throw new Error(`${taskId} is in failed/ with a diagnostic only; use requeue instead`);
+    }
     throw new Error(`${taskId} is not in done/; only a finished task can be resumed`);
   }
-  if (verdict && verdict.outcome !== 'success') {
-    throw new Error(`${taskId} is in done/ with outcome '${verdict.outcome}'; it is still running`);
-  }
+  // An iterate-needed verdict leaves the executor's claim in inflight/; resuming
+  // takes that manifest over, so it is the one inflight entry that is allowed.
+  const inflightManifest = path.join(boardDir, 'inflight', `${taskId}.dispatch.json`);
+  const holdsIterateClaim = doneVerdict?.outcome === 'iterate-needed';
   for (const sub of ['queue', 'inflight', 'blocked'] as const) {
+    if (sub === 'inflight' && holdsIterateClaim) continue;
     if (existsSync(path.join(boardDir, sub, `${taskId}.dispatch.json`))) {
       throw new Error(`${taskId} is already in ${sub}/`);
     }
   }
-  for (const f of ['verdict', 'diagnostic']) {
-    if (existsSync(path.join(boardDir, 'failed', `${taskId}.${f}.json`))) {
-      throw new Error(`${taskId} is in failed/; use requeue instead`);
-    }
+  if (!failedVerdict && existsSync(failedDiagnosticFile)) {
+    throw new Error(`${taskId} is in failed/; use requeue instead`);
   }
 
-  const snapshotFile = path.join(doneDir, `${taskId}${DONE_MANIFEST_SUFFIX}`);
-  const saved = existsSync(snapshotFile) ? readJson<DispatchManifest>(snapshotFile) : undefined;
+  const doneSnapshot = path.join(doneDir, `${taskId}${DONE_MANIFEST_SUFFIX}`);
+  const failedSnapshot = path.join(failedDir, `${taskId}${DONE_MANIFEST_SUFFIX}`);
+  const savedDone = existsSync(doneSnapshot) ? readJson<DispatchManifest>(doneSnapshot) : undefined;
+  const savedFailed = existsSync(failedSnapshot)
+    ? readJson<DispatchManifest>(failedSnapshot)
+    : undefined;
+  const savedInflight =
+    holdsIterateClaim && existsSync(inflightManifest)
+      ? readJson<DispatchManifest>(inflightManifest)
+      : undefined;
+  const saved = savedDone ?? savedFailed ?? savedInflight;
   let base: DispatchManifest;
   let branchGuessed = false;
   if (saved && saved.taskId === taskId) {
@@ -189,15 +218,39 @@ export function resumeDone(
     resumedAt: (opts.now ?? now)().toISOString(),
     resumedBy: oneLine(opts.resumedBy, 80) || 'dispatch',
     ...(verdict ? { priorOutcome: verdict.outcome } : {}),
+    fromVerdictOutcome: verdict ? verdict.outcome : 'success',
     ...(branchGuessed ? { branchGuessed: true } : {}),
   };
   const next: DispatchManifest = { ...base, resume };
   delete next.workerId;
   delete next.blockedBy;
   delete next.noClaimBefore;
-  const queuePath = writeManifest(boardDir, next);
+  // writeManifest refuses while inflight/ holds the id, so park the claim and put it back on failure.
+  const parked =
+    holdsIterateClaim && existsSync(inflightManifest) ? `${inflightManifest}.resuming` : '';
+  if (parked) renameSync(inflightManifest, parked);
+  let queuePath: string;
+  try {
+    queuePath = writeManifest(boardDir, next);
+  } catch (err) {
+    if (parked) renameSync(parked, inflightManifest);
+    throw err;
+  }
+  if (parked) rmSync(parked, { force: true });
   // The task is no longer finished: dependents wait for the next success.
-  for (const f of [verdictFile, markerFile, snapshotFile]) rmSync(f, { force: true });
+  for (const f of [
+    verdictFile,
+    markerFile,
+    doneSnapshot,
+    failedVerdictFile,
+    failedDiagnosticFile,
+    failedSnapshot,
+    ...(holdsIterateClaim
+      ? ['state', 'resume'].map((x) => path.join(boardDir, 'inflight', `${taskId}.${x}.json`))
+      : []),
+  ]) {
+    rmSync(f, { force: true });
+  }
   return { taskId, queuePath, resume };
 }
 

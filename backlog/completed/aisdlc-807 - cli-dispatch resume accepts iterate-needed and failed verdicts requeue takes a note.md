@@ -2,7 +2,7 @@
 id: AISDLC-807
 title: >-
   cli-dispatch resume accepts iterate-needed and failed verdicts; requeue takes a note
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-10'
 labels:
@@ -33,15 +33,39 @@ dispatchable: true
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `resume --task-id X --pr N --note T` succeeds when `done/X.verdict.json` has outcome `iterate-needed`, and when the verdict is in `failed/`; the manifest carries `resume.{prNumber,note,fromVerdictOutcome}`
-- [ ] #2 `resume` with no verdict at all still refuses with the existing message
-- [ ] #3 `requeue --task-id X --note T` writes `resume.note`
-- [ ] #4 `release --task-id X` refuses when `done/X.verdict.json` exists, naming `resume` and `remove-verdict` as next steps
-- [ ] #5 Hermetic tests in `pipeline-cli/src/dispatch` cover AC1 to AC4
-- [ ] #6 `docs/operations` (the dispatch board doc or operator-dispatch.md) describes the three verdict outcomes resume accepts
+- [x] #1 `resume --task-id X --pr N --note T` succeeds when `done/X.verdict.json` has outcome `iterate-needed`, and when the verdict is in `failed/`; the manifest carries `resume.{prNumber,note,fromVerdictOutcome}`
+- [x] #2 `resume` with no verdict at all still refuses with the existing message
+- [x] #3 `requeue --task-id X --note T` writes `resume.note`
+- [x] #4 `release --task-id X` refuses when `done/X.verdict.json` exists, naming `resume` and `remove-verdict` as next steps
+- [x] #5 Hermetic tests in `pipeline-cli/src/dispatch` cover AC1 to AC4
+- [x] #6 `docs/operations` (the dispatch board doc or operator-dispatch.md) describes the three verdict outcomes resume accepts
 <!-- AC:END -->
 
 ## Verification
 
 - `pnpm --filter @ai-sdlc/pipeline-cli build && pnpm --filter @ai-sdlc/pipeline-cli test`
 - `pnpm lint && pnpm format:check`
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+`cli-dispatch resume` now accepts a `done/` success or iterate-needed verdict, or a `failed/` verdict, and records `resume.fromVerdictOutcome`. `requeue` takes `--note`, writing the same `resume.note` shape. `release` refuses when `done/<id>.verdict.json` exists and names `resume` and `remove-verdict`.
+
+## Changes
+- `pipeline-cli/src/dispatch/resume.ts` (modified): accept iterate-needed and failed verdicts; release guard
+- `pipeline-cli/src/dispatch/requeue.ts`, `types.ts`, `pipeline-cli/src/cli/dispatch.ts` (modified): `--note` plumbing
+- `pipeline-cli/src/dispatch/resume.test.ts` (modified): hermetic tests for AC1-AC4
+- `docs/operations/cli-hierarchy.md` (modified): documents accepted verdict outcomes
+
+## Design decisions
+- **Inflight claim of an iterate-needed task**: resume parks and removes it so the requeued manifest is the only live claim.
+
+## Verification
+- `pnpm build` passed; `pnpm lint` and `pnpm format:check` clean
+- `pnpm --filter @ai-sdlc/pipeline-cli test`: 15 failures in tui, bin-invocation, verify-runtime and review-scope; all also fail on main (environmental, unrelated)
+- 3 reviews approved (Claude-native code/test reviewers because Codex quota was exhausted)
+
+## Follow-up
+- declined: resume from failed/ skips the retry-limit bump; only the dispatch role can resume, so left as is
+<!-- SECTION:FINAL_SUMMARY:END -->

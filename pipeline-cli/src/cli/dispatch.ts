@@ -34,7 +34,8 @@
  *   - `sweep [--stale-ms <n>]` — sweep stale inflight heartbeats; print the
  *     reaped taskIds.
  *   - `release --task-id <id>` — move inflight back to queue/ (surrender
- *     the claim without writing a verdict).
+ *     the claim without writing a verdict). Refused when `done/` already
+ *     holds a verdict for the task (use `resume` or `remove-verdict`).
  *   - `write-manifest --json <path>` — Conductor entry point. Reads a JSON
  *     manifest from `<path>` and writes it into queue/.
  *
@@ -51,7 +52,7 @@
  *   - `reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]` — return
  *     stale inflight manifests to queue/ (retry count incremented), or to
  *     failed/ once past the retry limit.
- *   - `requeue --task-id <id> [--retry-limit <n>]` — return one failed task to
+ *   - `requeue --task-id <id> [--retry-limit <n>] [--note <text>]` — return one failed task to
  *     queue/ with its retry count incremented, restoring the manifest kept
  *     when it failed. Meant for the dispatch session only: a mistake guard
  *     (the one `cli-hierarchy tick` uses; it is not authentication) exits 1,
@@ -59,14 +60,15 @@
  *     session, and the repository policy must grant `requeue`. `--retry-limit` may not exceed the default of 2 (a
  *     larger value exits 2). Also exits 1, changing nothing, when the task is
  *     not in failed/, has no saved manifest, is already active, or is past the
- *     retry limit.
+ *     retry limit. `--note` writes the same `resume.note` block `resume` writes.
  *
  *   - `resume --task-id <id> --note <text> [--pr <number>] [--failing-checks <a,b>]
  *     [--finding <text>]` (or `--note-file <path>`) — send a finished task back to
  *     queue/ with a feedback note on its manifest (AISDLC-738). The next claim
  *     prints the note, and `/ai-sdlc execute` re-enters the task's existing worktree
  *     and branch and updates its pull request. Same caller check and `requeue`
- *     grant as `requeue`. Exits 1, changing nothing, when the task is not finished.
+ *     grant as `requeue`. Accepts a verdict in `done/` (success or iterate-needed) or in
+ *     `failed/`; exits 1, changing nothing, when the task has no verdict.
  *
  *   - `idle-backoff [--work-dir <path>]` — print `{"sleepSec":n}`, how long an
  *     idle executor waits before its next `claim`: the dispatch config's
@@ -684,6 +686,17 @@ export async function runDispatchCli(
 
     case 'release': {
       const taskId = requireFlag(flags, 'task-id');
+      if (
+        TASK_ID_RE.test(taskId) &&
+        existsSync(path.join(boardDir, 'done', `${taskId}.verdict.json`))
+      ) {
+        process.stderr.write(
+          `cli-dispatch release: ${taskId} already has a verdict in done/, so releasing it would queue a finished task. ` +
+            `To send it back for another round run \`cli-dispatch resume --task-id ${taskId} --note <text>\`; ` +
+            `to discard the verdict first run \`cli-dispatch remove-verdict --task-id ${taskId}\`\n`,
+        );
+        return 1;
+      }
       const released = releaseInflight(boardDir, taskId);
       out({ released });
       return 0;
@@ -1016,6 +1029,11 @@ export async function runDispatchCli(
       }
       const retryLimit = intFlag(flags, 'retry-limit');
       if (retryLimit === null) return 2;
+      const requeueNote = flags['note'];
+      if (requeueNote !== undefined && (!requeueNote || requeueNote === 'true')) {
+        process.stderr.write('cli-dispatch requeue: --note needs a text\n');
+        return 2;
+      }
       if (retryLimit !== undefined && retryLimit > DEFAULT_REQUEUE_RETRY_LIMIT) {
         process.stderr.write(
           `cli-dispatch requeue: --retry-limit may not exceed ${DEFAULT_REQUEUE_RETRY_LIMIT}; use ${DEFAULT_REQUEUE_RETRY_LIMIT} or less, or escalate with \`cli-decisions escalate\`\n`,
@@ -1025,7 +1043,10 @@ export async function runDispatchCli(
       try {
         out({
           ok: true,
-          ...requeueFailed(boardDir, taskId, retryLimit === undefined ? {} : { retryLimit }),
+          ...requeueFailed(boardDir, taskId, {
+            ...(retryLimit === undefined ? {} : { retryLimit }),
+            ...(requeueNote !== undefined ? { note: requeueNote, requeuedBy: caller.name } : {}),
+          }),
         });
         return 0;
       } catch (err) {

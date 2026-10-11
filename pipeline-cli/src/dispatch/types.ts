@@ -107,6 +107,8 @@ export interface ResumeFeedback {
   resumedBy: string;
   /** Outcome the previous round ended with. */
   priorOutcome?: string;
+  /** Verdict outcome (success, iterate-needed, failure...) the task was resumed from. */
+  fromVerdictOutcome?: string;
   /** True when the manifest was rebuilt and its branch name inferred, not recorded. */
   branchGuessed?: boolean;
 }

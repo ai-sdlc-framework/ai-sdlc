@@ -13,6 +13,7 @@ import { runDispatchCli, type DispatchCliDeps } from '../cli/dispatch.js';
 import type { IdentityDeps } from '../hierarchy/index.js';
 import { claimNext, ensureBoardDirs, readInflightManifest, writeManifest } from './board.js';
 import { completeTask } from './complete.js';
+import { requeueFailed } from './requeue.js';
 import {
   IDLE_BACKOFF_MAX_SEC,
   idleBackoffSec,
@@ -187,7 +188,10 @@ describe('resumeDone', () => {
       path.join(board, 'done', 'AISDLC-806.verdict.json'),
       JSON.stringify({ schemaVersion: 'v1', taskId: 'AISDLC-806', outcome: 'iterate-needed' }),
     );
-    expect(() => resumeDone(board, 'AISDLC-806', { note: 'n' }, opts)).toThrow(/still running/);
+    // iterate-needed is resumable now; with no saved manifest it cannot be rebuilt.
+    expect(() => resumeDone(board, 'AISDLC-806', { note: 'n' }, opts)).toThrow(
+      /none can be rebuilt/,
+    );
 
     writeFileSync(
       path.join(board, 'done', 'AISDLC-807.verdict.json'),
@@ -207,6 +211,86 @@ describe('resumeDone', () => {
     finish('AISDLC-809');
     const r = resumeDone(board, 'AISDLC-809', { note: 'n', findings: ['a\u001b[31m\nb'] }, opts);
     expect(r.resume.findings).toEqual(['a [31m b']);
+  });
+});
+
+describe('resume from iterate-needed and failed verdicts (AISDLC-807)', () => {
+  function runTo(taskId: string, outcome: 'iterate-needed' | 'failed'): void {
+    writeManifest(board, mkManifest(taskId));
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-a' });
+    completeTask(board, { taskId, outcome, workerId: 'exec-a', prNumber: 9 });
+  }
+
+  it('resumes an iterate-needed verdict and records where it came from', () => {
+    runTo('AISDLC-831', 'iterate-needed');
+    const r = resumeDone(board, 'AISDLC-831', { note: 'Fix it', prNumber: 12 }, opts);
+    expect(r.resume).toMatchObject({
+      note: 'Fix it',
+      prNumber: 12,
+      fromVerdictOutcome: 'iterate-needed',
+    });
+    const queued = JSON.parse(readFileSync(r.queuePath, 'utf-8')) as DispatchManifest;
+    expect(queued.branch).toBe('ai-sdlc/aisdlc-831-slug');
+    expect(existsSync(path.join(board, 'done', 'AISDLC-831.verdict.json'))).toBe(false);
+  });
+
+  it('resumes a verdict in failed/ and clears every failure record', () => {
+    runTo('AISDLC-832', 'failed');
+    writeFileSync(path.join(board, 'failed', 'AISDLC-832.diagnostic.json'), '{}');
+    expect(existsSync(path.join(board, 'failed', 'AISDLC-832.verdict.json'))).toBe(true);
+    const r = resumeDone(board, 'AISDLC-832', { note: 'Try again' }, opts);
+    expect(r.resume).toMatchObject({
+      note: 'Try again',
+      prNumber: 9,
+      fromVerdictOutcome: 'failed',
+    });
+    for (const f of ['verdict', 'diagnostic', 'manifest']) {
+      expect(existsSync(path.join(board, 'failed', `AISDLC-832.${f}.json`))).toBe(false);
+    }
+  });
+
+  it('records success for a task resumed from a success verdict', () => {
+    finish('AISDLC-833');
+    expect(resumeDone(board, 'AISDLC-833', { note: 'n' }, opts).resume.fromVerdictOutcome).toBe(
+      'success',
+    );
+  });
+
+  it('still refuses a task with no verdict at all, and one with only a diagnostic', () => {
+    expect(() => resumeDone(board, 'AISDLC-834', { note: 'n' }, opts)).toThrow(/not in done/);
+    writeFileSync(path.join(board, 'failed', 'AISDLC-835.diagnostic.json'), '{}');
+    expect(() => resumeDone(board, 'AISDLC-835', { note: 'n' }, opts)).toThrow(/use requeue/);
+  });
+
+  it('requeueFailed with a note writes resume.note on the same channel', () => {
+    runTo('AISDLC-836', 'failed');
+    const r = requeueFailed(board, 'AISDLC-836', {
+      note: ' Look at the lint ',
+      requeuedBy: 'dispatch',
+    });
+    const queued = JSON.parse(readFileSync(r.queuePath, 'utf-8')) as DispatchManifest;
+    expect(queued.retryCount).toBe(1);
+    expect(queued.resume).toMatchObject({
+      note: 'Look at the lint',
+      resumedBy: 'dispatch',
+      fromVerdictOutcome: 'failed',
+    });
+  });
+
+  it('requeueFailed refuses an empty note, writing nothing', () => {
+    runTo('AISDLC-837', 'failed');
+    expect(() => requeueFailed(board, 'AISDLC-837', { note: '  ' })).toThrow(/feedback note/);
+    expect(existsSync(path.join(board, 'failed', 'AISDLC-837.verdict.json'))).toBe(true);
+  });
+
+  it('requeueFailed tolerates an unreadable failure verdict and defaults the author', () => {
+    runTo('AISDLC-838', 'failed');
+    writeFileSync(path.join(board, 'failed', 'AISDLC-838.verdict.json'), 'not json');
+    const r = requeueFailed(board, 'AISDLC-838', { note: 'n' });
+    expect(r.retryCount).toBe(1);
+    const queued = JSON.parse(readFileSync(r.queuePath, 'utf-8')) as DispatchManifest;
+    expect(queued.resume?.resumedBy).toBe('dispatch');
+    expect(queued.resume?.fromVerdictOutcome).toBeUndefined();
   });
 });
 
@@ -477,6 +561,118 @@ describe('cli-dispatch resume and claim', () => {
     ).toBe(1);
     expect((await cli([...base, '--task-id', 'AISDLC-899', '--note', 'n'])).exit).toBe(1);
     expect(existsSync(path.join(board, 'done', 'AISDLC-822.verdict.json'))).toBe(true);
+  });
+});
+
+describe('cli-dispatch resume, requeue --note and release (AISDLC-807)', () => {
+  const asCaller = (role: string): IdentityDeps => ({
+    readSessions: () => [{ name: role, role, pid: 400, status: 'running' }],
+    parentPid: (pid) => (pid === 500 ? 400 : null),
+    comm: (pid) => (pid === 400 ? 'claude' : 'zsh'),
+    startPid: 500,
+  });
+  const allowed: DispatchCliDeps = {
+    identity: asCaller('operator-dispatch'),
+    operational: new Set(['requeue']),
+  };
+
+  async function cli(argv: string[]): Promise<{ exit: number; stdout: string; stderr: string }> {
+    let stdout = '';
+    let stderr = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation(((c: string | Uint8Array) => {
+      stdout += c.toString();
+      return true;
+    }) as typeof process.stdout.write);
+    vi.spyOn(process.stderr, 'write').mockImplementation(((c: string | Uint8Array) => {
+      stderr += c.toString();
+      return true;
+    }) as typeof process.stderr.write);
+    const exit = await runDispatchCli(argv, allowed);
+    return { exit, stdout, stderr };
+  }
+
+  function run(taskId: string, outcome: 'iterate-needed' | 'failed'): void {
+    writeManifest(board, mkManifest(taskId));
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-a' });
+    completeTask(board, { taskId, outcome, workerId: 'exec-a' });
+  }
+  const queued = (id: string): DispatchManifest =>
+    JSON.parse(
+      readFileSync(path.join(board, 'queue', `${id}.dispatch.json`), 'utf-8'),
+    ) as DispatchManifest;
+  const base = () => ['--board-dir', board, '--work-dir', root];
+
+  it('resume accepts an iterate-needed verdict and a failed verdict', async () => {
+    run('AISDLC-841', 'iterate-needed');
+    run('AISDLC-842', 'failed');
+    const a = await cli([
+      'resume',
+      ...base(),
+      '--task-id',
+      'AISDLC-841',
+      '--pr',
+      '5',
+      '--note',
+      'T',
+    ]);
+    expect(a.exit).toBe(0);
+    expect(queued('AISDLC-841').resume).toMatchObject({
+      prNumber: 5,
+      note: 'T',
+      fromVerdictOutcome: 'iterate-needed',
+    });
+    const b = await cli([
+      'resume',
+      ...base(),
+      '--task-id',
+      'AISDLC-842',
+      '--pr',
+      '6',
+      '--note',
+      'T',
+    ]);
+    expect(b.exit).toBe(0);
+    expect(queued('AISDLC-842').resume).toMatchObject({
+      prNumber: 6,
+      fromVerdictOutcome: 'failed',
+    });
+  });
+
+  it('resume with no verdict refuses with the existing message', async () => {
+    const r = await cli(['resume', ...base(), '--task-id', 'AISDLC-843', '--note', 'T']);
+    expect(r.exit).toBe(1);
+    expect(r.stderr).toMatch(/is not in done\/; only a finished task can be resumed/);
+  });
+
+  it('requeue --note writes resume.note, and a blank --note exits 2', async () => {
+    run('AISDLC-844', 'failed');
+    expect((await cli(['requeue', ...base(), '--task-id', 'AISDLC-844', '--note'])).exit).toBe(2);
+    expect(existsSync(path.join(board, 'failed', 'AISDLC-844.verdict.json'))).toBe(true);
+    const r = await cli(['requeue', ...base(), '--task-id', 'AISDLC-844', '--note', 'Check lint']);
+    expect(r.exit).toBe(0);
+    expect(queued('AISDLC-844').resume).toMatchObject({
+      note: 'Check lint',
+      resumedBy: 'operator-dispatch',
+    });
+  });
+
+  it('release refuses a task with a done verdict, naming resume and remove-verdict', async () => {
+    finish('AISDLC-845');
+    writeManifest(board, mkManifest('AISDLC-845'));
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-a' });
+    const r = await cli(['release', '--board-dir', board, '--task-id', 'AISDLC-845']);
+    expect(r.exit).toBe(1);
+    expect(r.stderr).toMatch(/resume/);
+    expect(r.stderr).toMatch(/remove-verdict/);
+    expect(existsSync(path.join(board, 'queue', 'AISDLC-845.dispatch.json'))).toBe(false);
+  });
+
+  it('release still works for a task with no verdict', async () => {
+    writeManifest(board, mkManifest('AISDLC-846'));
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-a' });
+    const r = await cli(['release', '--board-dir', board, '--task-id', 'AISDLC-846']);
+    expect(r.exit).toBe(0);
+    expect(existsSync(path.join(board, 'queue', 'AISDLC-846.dispatch.json'))).toBe(true);
   });
 });
 
