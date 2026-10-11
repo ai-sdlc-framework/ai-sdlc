@@ -404,7 +404,7 @@ describe('evaluate record fields and helpers', () => {
     );
     expect(reasons).toEqual([
       'provider-not-registered',
-      'provider-unavailable',
+      'fake unavailable',
       'availability-check-failed',
     ]);
   });

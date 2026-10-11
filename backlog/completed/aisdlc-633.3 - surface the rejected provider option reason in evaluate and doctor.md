@@ -2,7 +2,7 @@
 id: AISDLC-633.3
 title: >-
   RFC-0049 follow-up: the rejected provider option reason reaches evaluate.ts records and the doctor judgment check
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-02'
 labels:

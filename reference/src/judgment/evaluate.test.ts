@@ -104,6 +104,20 @@ describe('evaluateJudgment', () => {
     expect(ok.requests).toHaveLength(0);
   });
 
+  it('records the provider reason, or the constant when none is given (AISDLC-633.3)', async () => {
+    const p = new FakeJudgmentProvider({ available: false }).script('q1', YES);
+    const withReason = await run(makeDef(), cfg(), p);
+    expect(withReason.records[0].providerUnavailableReason).toBe('fake unavailable');
+    const bare = new FakeJudgmentProvider().script('q1', YES);
+    bare.isAvailable = async () => ({ available: false });
+    expect((await run(makeDef(), cfg(), bare)).records[0].providerUnavailableReason).toBe(
+      'provider-unavailable',
+    );
+    const ctl = new FakeJudgmentProvider().script('q1', YES);
+    ctl.isAvailable = async () => ({ available: false, reason: 'bad\nkey' });
+    expect((await run(makeDef(), cfg(), ctl)).records[0].providerUnavailableReason).toBe('bad key');
+  });
+
   it('abstains disabled when isAvailable throws', async () => {
     const p = new FakeJudgmentProvider().script('q1', YES);
     p.isAvailable = async () => {
