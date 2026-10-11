@@ -158,10 +158,13 @@ describe('rebase-resolver body — hard rules', () => {
 });
 
 describe('rebase-resolver body — conflict resolution rules (the 80%)', () => {
-  it('Rule 1: CHANGELOG Unreleased > Added overlaps → KEEP BOTH', () => {
+  // AISDLC-401: CHANGELOG.md is owned by release-please; the contract is to
+  // strip the feature branch's CHANGELOG edits, never to merge both sides.
+  it('Rule 1: CHANGELOG conflict → strip feature-branch edits, never merge both sides', () => {
     assert.match(body, /Rule 1.*CHANGELOG/);
-    assert.match(body, /KEEP BOTH/);
-    assert.match(body, /Unreleased/);
+    assert.match(body, /release-please/);
+    assert.match(body, /Strip the feature branch's CHANGELOG changes/);
+    assert.match(body, /Never merge both sides of a CHANGELOG\.md conflict/);
   });
 
   it('Rule 2: test file additions to same describe → KEEP BOTH', () => {
