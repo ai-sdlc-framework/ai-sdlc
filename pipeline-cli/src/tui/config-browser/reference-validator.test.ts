@@ -56,6 +56,28 @@ describe('loadReferenceSchemaValidator', () => {
   );
 
   it(
+    'returns no unknown-kind warning for a ModelRouting document',
+    async () => {
+      const validator = await loadReferenceSchemaValidator();
+      expect(validator).not.toBeNull();
+      const doc = {
+        apiVersion: 'ai-sdlc.io/v1alpha1',
+        kind: 'ModelRouting',
+        metadata: { name: 'model-routing' },
+        spec: {
+          strength: ['sonnet', 'opus'],
+          exploreShare: 0,
+          salt: 's',
+          cells: { 'security-reviewer': { '*': { model: 'opus' } } },
+        },
+      };
+      const issues = validator!('ModelRouting', doc);
+      expect(issues).toEqual([]);
+    },
+    COLD_IMPORT_TIMEOUT_MS,
+  );
+
+  it(
     'returns issues with mapped path + message for an invalid document',
     async () => {
       const validator = await loadReferenceSchemaValidator();

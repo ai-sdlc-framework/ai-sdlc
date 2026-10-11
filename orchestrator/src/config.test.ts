@@ -424,4 +424,25 @@ examples:
       rmSync(tmp, { recursive: true });
     }
   });
+
+  it('warns on an inherited-name kind and still loads the other files', async () => {
+    const { mkdtempSync, copyFileSync, writeFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmp = mkdtempSync(join(tmpdir(), 'cfg-inherited-kind-'));
+    try {
+      writeFileSync(
+        join(tmp, 'weird.yaml'),
+        'apiVersion: ai-sdlc.io/v1alpha1\nkind: constructor\nmetadata:\n  name: x\n',
+      );
+      copyFileSync(join(CONFIG_DIR, 'pipeline.yaml'), join(tmp, 'pipeline.yaml'));
+      const config = loadConfig(tmp);
+      expect(config.warnings?.find((w) => w.file === 'weird.yaml')?.error).toContain(
+        "unknown kind 'constructor'",
+      );
+      expect(config.pipeline).toBeDefined();
+    } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
 });

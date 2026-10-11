@@ -254,6 +254,34 @@ describe('loadCompliancePosture()', () => {
       }
     });
 
+    it('rejects a valid document of another kind naming expected and actual kind', () => {
+      writeManifest(
+        testDir,
+        `apiVersion: ai-sdlc.io/v1alpha1
+kind: UsageConfig
+metadata:
+  name: usage
+spec: {}
+`,
+      );
+      try {
+        loadCompliancePosture({ projectRoot: testDir });
+        expect.fail('should have thrown');
+      } catch (err) {
+        expect(err).toBeInstanceOf(CompliancePostureValidationError);
+        const msg = (err as CompliancePostureValidationError).validationErrors[0].message;
+        expect(msg).toContain("'CompliancePosture'");
+        expect(msg).toContain("'UsageConfig'");
+      }
+    });
+
+    it('rejects a manifest with no kind', () => {
+      writeManifest(testDir, 'foo: bar\n');
+      expect(() => loadCompliancePosture({ projectRoot: testDir })).toThrow(
+        CompliancePostureValidationError,
+      );
+    });
+
     it('throws CompliancePostureValidationError for unparseable YAML', () => {
       writeFileSync(join(testDir, '.ai-sdlc', 'compliance.yaml'), '{ invalid yaml: [', 'utf-8');
       expect(() => loadCompliancePosture({ projectRoot: testDir })).toThrow(
