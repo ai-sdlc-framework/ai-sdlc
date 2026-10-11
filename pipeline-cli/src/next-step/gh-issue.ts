@@ -114,7 +114,9 @@ export async function runGhIssue(
     action: 'stop',
     taskId: result.taskId,
     outcome:
-      result.outcome === 'developer-failed' || result.outcome === 'developer-json-contract-violated'
+      result.outcome === 'developer-failed' ||
+      result.outcome === 'developer-parked' ||
+      result.outcome === 'developer-json-contract-violated'
         ? result.outcome
         : 'aborted',
     reason: result.notes ?? `pipeline outcome: ${result.outcome}`,

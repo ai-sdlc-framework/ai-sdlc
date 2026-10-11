@@ -23,6 +23,7 @@ import {
   findTrustedMarkerInComments,
   type CommentWithAuthor,
 } from '../incremental-review/incremental.js';
+import { defaultArtifactsDir, resolveProjectRoot } from '../routing/artifacts-dir.js';
 import { resolveModel } from '../routing/resolve-model.js';
 import { taskClassOf } from '../routing/task-class.js';
 import { buildReviewPrompts } from '../steps/07-build-review-prompts.js';
@@ -272,7 +273,8 @@ export async function prepareReview(
   state: NextStepState,
   round: number,
 ): Promise<ReviewPrepareResult> {
-  const artifactsDir = ctx.env.ARTIFACTS_DIR || join(state.worktreePath, '.ai-sdlc', 'artifacts');
+  const artifactsDir =
+    ctx.env.ARTIFACTS_DIR || defaultArtifactsDir(resolveProjectRoot(state.worktreePath));
   mkdirSync(artifactsDir, { recursive: true });
 
   const built = await buildReviewPrompts({

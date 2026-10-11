@@ -161,6 +161,18 @@ describe('fetchTrustedComments (AISDLC-142 round 2)', () => {
 });
 
 describe('prepareReview', () => {
+  // AISDLC-722: unpinned, the set follows the diff (two reviewers off the trust chain).
+  // Pin the classic three so the per-role assertions below stay about the roles.
+  let prevSet: string | undefined;
+  beforeEach(() => {
+    prevSet = process.env.AI_SDLC_REVIEWER_SET;
+    process.env.AI_SDLC_REVIEWER_SET = 'three';
+  });
+  afterEach(() => {
+    if (prevSet === undefined) delete process.env.AI_SDLC_REVIEWER_SET;
+    else process.env.AI_SDLC_REVIEWER_SET = prevSet;
+  });
+
   it('spawns all three reviewers with nonce-bearing prompt files (default set)', async () => {
     script();
     const res = await prepareReview(h.ctx, state, 1);
@@ -337,5 +349,15 @@ describe('prepareReview', () => {
       if (prev === undefined) delete process.env.AI_SDLC_REVIEWER_SET;
       else process.env.AI_SDLC_REVIEWER_SET = prev;
     }
+  });
+  it('derives the two-reviewer set from a diff that touches no trust-chain path (AISDLC-722)', async () => {
+    delete process.env.AI_SDLC_REVIEWER_SET;
+    script();
+    const res = await prepareReview(h.ctx, state, 1);
+    if (res.kind !== 'spawn') throw new Error('expected spawn');
+    expect(res.review.spawned.map((s) => s.agent).sort()).toEqual([
+      'correctness-reviewer',
+      'security-reviewer',
+    ]);
   });
 });

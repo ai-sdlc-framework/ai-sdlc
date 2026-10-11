@@ -454,6 +454,22 @@ describe('developer failures roll back and stop', () => {
     expect(persisted().phase).toBe('aborted');
   });
 
+  it('parks (AISDLC-651.3) without reverting the task status or reviewing', async () => {
+    const parked = JSON.stringify({
+      ...DEV_RETURN,
+      commitSha: null,
+      notes: { parked: true, done: 'half', remaining: 'rest', why: 'turn budget' },
+    });
+    const { last } = await drive(deps(), { devResult: () => parked });
+    expect(last).toMatchObject({ action: 'stop', outcome: 'developer-parked', prUrl: null });
+    expect(last.action === 'stop' && last.reason).toMatch(/done: half; remaining: rest/);
+    expect(
+      readFileSync(join(worktree, 'backlog', 'tasks', 'aisdlc-900 - demo-task.md'), 'utf8'),
+    ).not.toContain('status: To Do');
+    expect(existsSync(worktree)).toBe(true);
+    expect(counters.prepared).toBe(0);
+  });
+
   it('treats a failed verification as a developer failure', async () => {
     const bad = JSON.stringify({
       ...DEV_RETURN,

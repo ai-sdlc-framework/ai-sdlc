@@ -279,6 +279,15 @@ class Machine {
       );
     }
     const parsed = await parseDeveloperReturn({ developerReturn: extractJson(text) });
+    if (parsed.parked) {
+      // AISDLC-651.3: a parked task is not a failure; keep the status, worktree and WIP commit.
+      return this.fail(
+        state,
+        'developer-parked',
+        `${parsed.reason ?? 'developer parked the task'}. Worktree preserved at ${state.worktreePath}; return the task to the board or operator with these notes.`,
+        { developer: parsed.developer ?? null },
+      );
+    }
     if (!parsed.ok || !parsed.developer) {
       await this.rollbackStatus(state);
       const reason = parsed.reason ?? 'developer subagent failed';

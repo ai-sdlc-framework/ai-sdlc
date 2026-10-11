@@ -169,7 +169,7 @@ export interface DoneInstruction {
 export interface StopInstruction {
   action: 'stop';
   taskId: string;
-  outcome: 'aborted' | 'developer-failed' | 'developer-json-contract-violated';
+  outcome: 'aborted' | 'developer-failed' | 'developer-parked' | 'developer-json-contract-violated';
   reason: string;
   branch?: string;
   worktreePath?: string;

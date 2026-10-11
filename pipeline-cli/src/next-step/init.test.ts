@@ -62,7 +62,7 @@ beforeEach(() => {
   origin = makeTmpProject();
   git(origin, 'init', '--bare', '-b', 'main', '-q');
   writeTaskFile(h.root, { id: 'AISDLC-900', title: 'Demo task' });
-  writeFileSync(join(h.root, '.gitignore'), '.worktrees/\n');
+  writeFileSync(join(h.root, '.gitignore'), '.worktrees/\n.ai-sdlc/artifacts/\n');
   git(h.root, 'init', '-b', 'main', '-q');
   git(h.root, 'add', '-A');
   git(h.root, 'commit', '-q', '-m', 'init');
