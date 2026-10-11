@@ -81,6 +81,7 @@
     "test:require-issue-link": "node --test .github/workflows/__tests__/require-issue-link.test.mjs scripts/issue-link-decision.test.mjs",
     "test:sdk-go-schema-mirror": "node --test scripts/check-sdk-go-agent-role-schema.test.mjs",
     "test:single-pr-ci-run": "node --test .github/workflows/__tests__/single-pr-ci-run.test.mjs",
+    "test:load-discipline-workflow": "node --test .github/workflows/__tests__/load-discipline.test.mjs",
     "test:supply-chain-hardening": "node --test .github/workflows/__tests__/action-pinning.test.mjs .github/workflows/__tests__/no-new-pr-gate.test.mjs",
     "test:trust-marker-workflow": "node --test .github/workflows/__tests__/trust-marker.test.mjs scripts/check-governance-boundary.test.mjs",
     "test:untrusted-pr-gate-workflow": "node --test .github/workflows/__tests__/untrusted-pr-gate.test.mjs",

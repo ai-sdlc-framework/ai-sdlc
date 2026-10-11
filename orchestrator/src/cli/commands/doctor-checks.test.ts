@@ -52,6 +52,7 @@ import {
   checkRuntimeGitignore,
   checkHierarchyLaunchEnv,
   checkLeasePushPreflight,
+  checkCiQueue,
   checkWorktreeHooks,
   checkUntrackedReviewLedgers,
   checkBacklogDriftWarnings,
@@ -71,6 +72,7 @@ import {
 } from './doctor-checks.js';
 import { SPAWN_FAILED_EXIT_CODE, buildProductionDoctorAdapters } from './doctor.js';
 import { cleanGitEnv } from '../../runtime/git-env.js';
+import { setClock } from '../../clock.js';
 
 let tmpDir: string;
 
@@ -1435,6 +1437,61 @@ describe('checkForcePushPolicy', () => {
 
   it('is registered in the check registry', () => {
     expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('force-push-policy');
+  });
+});
+
+// ── AISDLC-799: ci-queue ──────────────────────────────────────────────
+
+describe('checkCiQueue (AISDLC-799)', () => {
+  const NOW = new Date('2026-10-10T21:00:00Z');
+  let restore: () => void;
+  beforeEach(() => {
+    restore = setClock(() => NOW);
+  });
+  afterEach(() => restore());
+
+  const queued = (n: number, createdAt: string) =>
+    JSON.stringify(Array.from({ length: n }, () => ({ createdAt })));
+  const ctxWith = (stdout: string, exitCode = 0) =>
+    makeCtx(makeAdapters({ runCommand: () => ({ stdout, exitCode }) }));
+
+  it('is quiet below both thresholds', () => {
+    expect(checkCiQueue(ctxWith(queued(40, '2026-10-10T20:50:00Z')))).toEqual([]);
+  });
+
+  it('warns when more than 40 runs are queued', () => {
+    const r = checkCiQueue(ctxWith(queued(41, '2026-10-10T20:59:00Z')));
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({ id: 'ci-queue', severity: 'warn' });
+    expect(r[0].title).toContain('41 queued');
+    expect(r[0].remediation).toContain('cli-ci.mjs sweep');
+  });
+
+  it('warns when the oldest queued run is older than 15 minutes', () => {
+    const r = checkCiQueue(ctxWith(queued(1, '2026-10-10T20:40:00Z')));
+    expect(r).toHaveLength(1);
+    expect(r[0].title).toContain('oldest queued 20 min');
+  });
+
+  it('is quiet at exactly 15 minutes and when nothing is queued', () => {
+    expect(checkCiQueue(ctxWith(queued(1, '2026-10-10T20:45:00Z')))).toEqual([]);
+    expect(checkCiQueue(ctxWith('[]'))).toEqual([]);
+  });
+
+  it('ignores entries without a parseable createdAt', () => {
+    expect(checkCiQueue(ctxWith(JSON.stringify([{ createdAt: 5 }, {}])))).toEqual([]);
+  });
+
+  it('is quiet when gh fails or returns unusable output', () => {
+    expect(checkCiQueue(ctxWith('', 1))).toEqual([]);
+    expect(checkCiQueue(ctxWith('not json'))).toEqual([]);
+    expect(checkCiQueue(ctxWith('{}'))).toEqual([]);
+  });
+
+  it('is registered and report-only', () => {
+    const c = DOCTOR_CHECKS.find((x) => x.id === 'ci-queue');
+    expect(c).toBeDefined();
+    expect(c?.fix).toBeUndefined();
   });
 });
 

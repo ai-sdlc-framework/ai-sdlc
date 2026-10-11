@@ -48,6 +48,16 @@ name: Untrusted-Contributor PR Verification Gate
 #    which runs AFTER the sandboxed evaluation completes as a separate job.
 #    `github.token` is used only for status POST and label operations.
 
+# AISDLC-799 (load discipline): every job below carries a job-level `if:` that
+# skips it for same-repo PRs BEFORE a runner is allocated. The gate exists for
+# external (fork) contributors; its decision for a same-repo PR is constant
+# (trusted, governance boundary ok), and the 2026-10-10 incident showed 23-25
+# queued runs of this workflow each allocating a runner just to reach that
+# constant. The guard keys on head repo != base repo (the AISDLC-740 fork
+# signal), NOT author association. A PR whose head repo is null (deleted fork)
+# evaluates `null != repo` as true, so it still runs (fail-closed). Neither
+# `ai-sdlc/untrusted-pr-gate` nor `ai-sdlc/governance-boundary` is a required
+# status, so a skipped job on a same-repo PR blocks nothing.
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review, edited]
@@ -72,6 +82,7 @@ jobs:
   # ────────────────────────────────────────────────────────────────────────────
   classify-and-gate:
     name: 'Stage 0+1: Trust Classification + AST Gate'
+    if: github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     permissions:
       statuses: write
@@ -316,6 +327,7 @@ jobs:
     name: 'Stage 2/3: Sandbox + Hardened Reviewer Matrix'
     needs: classify-and-gate
     if: >
+      github.event.pull_request.head.repo.full_name != github.repository &&
       needs.classify-and-gate.outputs.flag_on == 'true' &&
       needs.classify-and-gate.outputs.trust != 'trusted' &&
       needs.classify-and-gate.outputs.gate_outcome == 'pass'
@@ -568,6 +580,7 @@ jobs:
     name: 'Stage 4: Clean-Room Attestation'
     needs: [classify-and-gate, sandbox-and-review]
     if: >
+      github.event.pull_request.head.repo.full_name != github.repository &&
       needs.classify-and-gate.outputs.flag_on == 'true' &&
       needs.classify-and-gate.outputs.trust != 'trusted' &&
       needs.classify-and-gate.outputs.gate_outcome == 'pass' &&
@@ -729,6 +742,7 @@ jobs:
     # the neutral success. Downstream (sandbox/clean-room) failures only occur
     # when flag_on=='true' (their own if: guards), so they keep the flag guard.
     if: >
+      github.event.pull_request.head.repo.full_name != github.repository &&
       always() &&
       (
         needs.classify-and-gate.result == 'failure' ||
@@ -883,7 +897,9 @@ jobs:
   flag-off-status:
     name: 'UCVG: flag off (skipped)'
     needs: classify-and-gate
-    if: needs.classify-and-gate.outputs.flag_on != 'true'
+    if: >
+      github.event.pull_request.head.repo.full_name != github.repository &&
+      needs.classify-and-gate.outputs.flag_on != 'true'
     runs-on: ubuntu-latest
     permissions:
       statuses: write
@@ -912,6 +928,7 @@ jobs:
     name: 'UCVG: trusted author (skipped)'
     needs: classify-and-gate
     if: >
+      github.event.pull_request.head.repo.full_name != github.repository &&
       needs.classify-and-gate.outputs.flag_on == 'true' &&
       needs.classify-and-gate.outputs.trust == 'trusted'
     runs-on: ubuntu-latest
@@ -952,6 +969,7 @@ jobs:
   # ────────────────────────────────────────────────────────────────────────────
   governance-boundary:
     name: Governance boundary
+    if: github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: read

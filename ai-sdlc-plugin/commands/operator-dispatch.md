@@ -55,7 +55,7 @@ printf '%s' "$PIPELINE_CLI_BIN" > "$BOARD_DIR/.cli-bin"
 BOARD_DIR="${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}"
 PIPELINE_CLI_BIN=$(cat "$BOARD_DIR/.cli-bin")
 node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" tick --board-dir "$BOARD_DIR" > "$BOARD_DIR/.tick.json" || exit 1
-cat "$BOARD_DIR/.tick.json"
+cat "$BOARD_DIR/.tick.json"; node "$PIPELINE_CLI_BIN/cli-ci.mjs" sweep || true
 ```
 
 `tick` checks who is calling (the nearest roster ancestor must hold the `operator-dispatch`
