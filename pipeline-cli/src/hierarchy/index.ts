@@ -62,6 +62,7 @@ export {
   type WakeReason,
   type ClearReport,
   type LoopDeps,
+  type TurnBudgetReview,
   type LoopState,
   type PlannerReport,
   type TickResult,

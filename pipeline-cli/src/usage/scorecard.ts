@@ -13,6 +13,7 @@
 import type { ModelCallRecord } from '@ai-sdlc/reference';
 import type { ReviewLedgerRecord } from '../attestation/reviews-ledger.js';
 import type { TaskClass } from '../estimation/types.js';
+import type { DispatchTurnsSummary } from './dispatch-turns.js';
 import { unitsForCall, type UnitWeights } from './units.js';
 import { DEFAULT_SCORECARD_MIN_TASKS } from './usage-config.js';
 import { csvEscape } from './csv.js';
@@ -142,6 +143,8 @@ export interface Scorecard {
   noOutcomeTaskIds: string[];
   minTasks: number;
   unitsNote?: string;
+  /** Model turns per dispatch tick (RFC-0051, AISDLC-667.1); absent when no tick was recorded. */
+  dispatchTurns?: DispatchTurnsSummary;
 }
 
 export interface BuildScorecardInput {
@@ -338,9 +341,19 @@ function cells(r: ScorecardRow): string[] {
   ];
 }
 
+/** The `operator-dispatch` row: turns per tick against the budget. */
+export function renderDispatchTurnsLine(d: DispatchTurnsSummary): string {
+  const n = (v: number | null): string => (v === null ? '-' : String(Math.round(v * 10) / 10));
+  return (
+    `operator-dispatch  turns per tick: median ${n(d.median)}, p90 ${n(d.p90)} ` +
+    `over ${d.ticks} tick${d.ticks === 1 ? '' : 's'} (budget ${d.budget}${d.overBudget ? ', over budget' : ''})`
+  );
+}
+
 export function renderScorecardText(card: Scorecard): string {
+  const dispatch = card.dispatchTurns ? `${renderDispatchTurnsLine(card.dispatchTurns)}\n` : '';
   if (card.rows.length === 0) {
-    return `No scored tasks yet. Tasks without review outcomes: ${card.noOutcome}.\n`;
+    return `No scored tasks yet. Tasks without review outcomes: ${card.noOutcome}.\n${dispatch}`;
   }
   const body = card.rows.map(cells);
   const widths = HEADER.map((h, i) => Math.max(h.length, ...body.map((r) => r[i].length)));
@@ -355,6 +368,7 @@ export function renderScorecardText(card: Scorecard): string {
     `Tasks with usage but no review outcome (excluded from approval rates): ${card.noOutcome}.`,
   );
   if (card.unitsNote) lines.push(card.unitsNote);
+  if (card.dispatchTurns) lines.push(renderDispatchTurnsLine(card.dispatchTurns));
   return `${lines.join('\n')}\n`;
 }
 
@@ -372,6 +386,7 @@ export function renderScorecardJson(card: Scorecard): string {
       noOutcomeTaskIds: card.noOutcomeTaskIds,
       minTasks: card.minTasks,
       ...(card.unitsNote ? { unitsNote: card.unitsNote } : {}),
+      ...(card.dispatchTurns ? { dispatchTurns: card.dispatchTurns } : {}),
     },
     null,
     2,

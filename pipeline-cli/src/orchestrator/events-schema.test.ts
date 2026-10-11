@@ -436,6 +436,27 @@ describe('orchestrator-events.v1.schema.json — accepts every emitted type', ()
     });
   });
 
+  it('accepts DispatchTick (RFC-0051, AISDLC-667.1)', () => {
+    const tick = {
+      ts: baseTs,
+      type: 'DispatchTick' as const,
+      tickId: 'operator-dispatch@2026-10-02T10:00:00.000Z',
+      startedAt: '2026-10-02T10:00:00.000Z',
+      endedAt: '2026-10-02T10:00:01.000Z',
+      steps: [
+        { name: 'ingest', startedAt: '2026-10-02T10:00:00.000Z' },
+        { name: 'reports', startedAt: '2026-10-02T10:00:00.500Z' },
+      ],
+      nextWakeSec: 300,
+    };
+    expectValid(tick);
+    expectValid({ ...tick, steps: [] });
+    expectInvalid({ ...tick, tickId: '' });
+    expectInvalid({ ...tick, endedAt: undefined, startedAt: 5 });
+    expectInvalid({ ...tick, steps: [{ name: 'ingest' }] });
+    expectInvalid({ ...tick, nextWakeSec: -1 });
+  });
+
   it('accepts DecisionRouted (RFC-0051)', () => {
     expectValid({
       ts: baseTs,

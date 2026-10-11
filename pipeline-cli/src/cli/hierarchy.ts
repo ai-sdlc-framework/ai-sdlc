@@ -162,6 +162,15 @@ import { routedModel } from '../routing/role-model.js';
 import { defaultRunner } from '../runtime/exec.js';
 import { runParentUpkeep, type ParentUpkeepResult } from '../steps/00-parent-upkeep.js';
 import { resolvePluginScriptsDir } from './next-step.js';
+import {
+  fileTurnBudgetDecision,
+  hasOpenTurnBudgetDecision,
+  loadDispatchTicks,
+  reviewTurnBudget,
+  type TurnBudgetDeps,
+} from '../hierarchy/turn-budget.js';
+import { resolveArtifactsDir } from '../routing/artifacts-dir.js';
+import { loadUsageConfig } from '../usage/usage-config.js';
 import { findTaskFile, parseArgv, resolveBaseSha } from './dispatch.js';
 
 const USAGE = `Usage: cli-hierarchy <command> [options]
@@ -538,6 +547,10 @@ export async function runHierarchyCli(
     parentUpkeep?: () => Promise<ParentUpkeepResult>;
     /** Replaces the demo's system dependencies (tests). */
     demo?: Partial<DemoDeps>;
+    /** Replaces the ledger, the usage config and the decision log the turn-budget review uses (tests). */
+    turnBudget?: Partial<
+      Pick<TurnBudgetDeps, 'budget' | 'ticks' | 'hasOpenDecision' | 'fileDecision'>
+    >;
   } = {},
 ): Promise<number> {
   const { subcommand, flags } = parseArgv(argv);
@@ -1086,6 +1099,30 @@ export async function runHierarchyCli(
             }
             return id;
           },
+          recordTick: (marker) => emit({ type: 'DispatchTick', ...marker }),
+          ...(isDecisionCatalogEnabled()
+            ? {
+                reviewTurnBudget: () =>
+                  reviewTurnBudget({
+                    budget:
+                      extras.turnBudget?.budget ??
+                      loadUsageConfig({ workDir: repoRoot }).dispatchTurnsPerTickBudget,
+                    ticks:
+                      extras.turnBudget?.ticks ??
+                      (() =>
+                        loadDispatchTicks({
+                          repoRoot,
+                          artifactsDir: resolveArtifactsDir(repoRoot),
+                        })),
+                    hasOpenDecision:
+                      extras.turnBudget?.hasOpenDecision ??
+                      (() => hasOpenTurnBudgetDecision(repoRoot)),
+                    fileDecision:
+                      extras.turnBudget?.fileDecision ??
+                      ((input) => fileTurnBudgetDecision(repoRoot, input)),
+                  }),
+              }
+            : {}),
           promoteExpired: () =>
             isDecisionCatalogEnabled()
               ? promoteExpiredDecisions(

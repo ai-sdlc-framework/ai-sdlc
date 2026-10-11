@@ -42,6 +42,16 @@ describe('operator-dispatch command (model-less host)', () => {
     assert.match(body, /never submits a prompt to your model/);
   });
 
+  it('states the mechanical-steps rule and the budget it is measured against', () => {
+    assert.match(body, /Mechanical steps rule/);
+    assert.match(
+      body,
+      /every step that touches files or git is a `cli-dispatch` or `cli-hierarchy` subcommand/,
+    );
+    assert.match(body, /judgment calls/);
+    assert.match(body, /`turnBudget`/);
+  });
+
   it('states the hard rules plainly', () => {
     assert.match(body, /## Hard rules/);
     assert.match(body, /Never resolve an RFC Open Question/);

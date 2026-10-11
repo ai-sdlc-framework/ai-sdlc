@@ -111,6 +111,18 @@
           "minimum": 1,
           "description": "Tasks a scorecard cell needs before it stops being labelled insufficient. Default 30."
         },
+        "dispatch": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Settings for the dispatch session (RFC-0051).",
+          "properties": {
+            "turnsPerTickBudget": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Model turns one dispatch wake-up should need. The dispatch loop files a Decision when the rolling median over the last 20 ticks exceeds it. Default 5."
+            }
+          }
+        },
         "roles": {
           "type": "object",
           "additionalProperties": false,

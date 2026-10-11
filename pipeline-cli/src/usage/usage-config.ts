@@ -60,6 +60,8 @@ export interface ResolvedUsageConfig {
   outputNoticeTokens: number;
   /** Context and turn budgets per hierarchy role. */
   roles: Record<BudgetRole, RoleBudget>;
+  /** Model turns one dispatch wake-up should need (RFC-0051, AISDLC-667.1). */
+  dispatchTurnsPerTickBudget: number;
   source: 'machine' | 'base-ref' | 'defaults';
   warnings: string[];
 }
@@ -83,6 +85,7 @@ export const DEFAULT_ROLE_BUDGETS: Readonly<Record<BudgetRole, RoleBudget>> = {
 };
 
 export const BUDGET_ROLES = Object.keys(DEFAULT_ROLE_BUDGETS) as BudgetRole[];
+export const DEFAULT_DISPATCH_TURNS_PER_TICK_BUDGET = 5;
 
 export const DEFAULT_WINDOWS: readonly WindowSpec[] = [
   { name: 'session', lengthHours: 5, mode: 'first-use' },
@@ -119,6 +122,7 @@ export function defaultUsageConfig(warnings: string[] = []): ResolvedUsageConfig
     scorecardMinTasks: DEFAULT_SCORECARD_MIN_TASKS,
     outputNoticeTokens: DEFAULT_OUTPUT_NOTICE_TOKENS,
     roles: cloneRoleBudgets(),
+    dispatchTurnsPerTickBudget: DEFAULT_DISPATCH_TURNS_PER_TICK_BUDGET,
     source: 'defaults',
     warnings,
   };
@@ -156,6 +160,7 @@ interface RawSpec {
   allotmentTolerance?: number;
   modelMixSimilarity?: number;
   scorecardMinTasks?: number;
+  dispatch?: { turnsPerTickBudget?: number };
   output?: { noticeTokens?: number };
   roles?: Partial<Record<BudgetRole, Partial<RoleBudget>>>;
 }
@@ -215,6 +220,8 @@ export function parseUsageConfig(
     scorecardMinTasks: spec.scorecardMinTasks ?? base.scorecardMinTasks,
     outputNoticeTokens: spec.output?.noticeTokens ?? base.outputNoticeTokens,
     roles: resolveRoleBudgets(spec.roles),
+    dispatchTurnsPerTickBudget:
+      spec.dispatch?.turnsPerTickBudget ?? base.dispatchTurnsPerTickBudget,
     source,
     warnings: [],
   };
