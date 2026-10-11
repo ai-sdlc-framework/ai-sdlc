@@ -642,6 +642,24 @@ describe('executePlan: run probes', () => {
     }
   });
 
+  it('caps run probes at the exported default the validator reads', async () => {
+    const { dir } = makeRepo();
+    const commands = Array.from({ length: DEFAULT_MAX_RUN_PROBES + 1 }, (_, i) => `pnpm c${i}`);
+    const runs = commands.map((c, i) => run(`r${i}`, c));
+    const skippedAt = async (n: number) => {
+      const { spawner } = mockSpawner();
+      const bundle = await executePlan(
+        plan(runs.slice(0, n)),
+        spawner,
+        runLimits(dir, { commandAllowlist: commands }),
+        noAdded,
+      );
+      return bundle.entries.filter((e) => e.status === 'skipped').length;
+    };
+    expect(await skippedAt(DEFAULT_MAX_RUN_PROBES)).toBe(0);
+    expect(await skippedAt(DEFAULT_MAX_RUN_PROBES + 1)).toBe(1);
+  });
+
   it('honours a configured cap, including zero', async () => {
     const { dir } = makeRepo();
     const one = mockSpawner();

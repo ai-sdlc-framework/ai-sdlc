@@ -746,10 +746,12 @@ describe('buildFallbackPlan', () => {
   });
 
   it('always validates against the same run limit', () => {
+    const baselineRuns = baseline().probes.filter((x) => x.type === 'run').length;
     for (const maxRunProbes of [0, 1, 2, 3]) {
       const lim = { ...limits, maxRunProbes };
       const b = baseline();
       const r = buildFallbackPlan(b, riskMap, lim);
+      expect(r.ok).toBe(baselineRuns <= maxRunProbes);
       if (r.ok) expect(validatePlan(r.plan, b, riskMap, lim).valid).toBe(true);
     }
   });
