@@ -10,7 +10,7 @@
  * @module next-step/init
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { computeBranchName } from '../steps/02-compute-branch.js';
 import { setupWorktree } from '../steps/03-setup-worktree.js';
@@ -112,12 +112,15 @@ export async function initTask(
 
   // Steps 2-4.
   const branch = await computeBranchName({ taskId, task, workDir });
+  const resume = await hasExistingWork(ctx, branch.branch, branch.worktreePath);
+  if (resume) ctx.logger.info(`[Step 3] ${branch.branch} already exists: resuming it`);
   await setupWorktree({
     taskId,
     branch: branch.branch,
     worktreePath: branch.worktreePath,
     workDir,
     runner,
+    ...(resume ? { resume: true } : {}),
   });
   await beginTask({ taskId, worktreePath: branch.worktreePath, workDir, sourceKind: 'backlog' });
 
@@ -147,6 +150,34 @@ export async function initTask(
     promptFile,
     ...(built.model && built.modelArm !== 'default' ? { model: built.model } : {}),
   };
+}
+
+/**
+ * AISDLC-762.1 — the task's worktree or branch (local, or pushed to origin)
+ * already exists: this is a resume (a dispatch resume, an iterate-needed or
+ * failed round, or a zero-commit leftover), so Step 3 re-enters it instead of
+ * refusing. A fresh task has none of the three.
+ */
+async function hasExistingWork(
+  ctx: NextStepContext,
+  branch: string,
+  worktreePath: string,
+): Promise<boolean> {
+  if (existsSync(join(worktreePath, '.git'))) return true;
+  const { workDir, runner } = ctx;
+  await runner('git', ['fetch', 'origin', '--', branch], {
+    cwd: workDir,
+    timeout: 30_000,
+    allowFailure: true,
+  });
+  for (const ref of [`refs/heads/${branch}`, `refs/remotes/origin/${branch}`]) {
+    const r = await runner('git', ['rev-parse', '--verify', '--quiet', ref], {
+      cwd: workDir,
+      allowFailure: true,
+    });
+    if (r.code === 0) return true;
+  }
+  return false;
 }
 
 /** The task began (status flipped, sentinel written) but prompt building threw: undo both. */
