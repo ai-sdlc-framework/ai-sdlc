@@ -604,6 +604,15 @@ task returns to `queue/` with the note on its manifest and is claimed like any o
 task runs; the pipeline then re-enters the existing worktree and branch (never `origin/main`),
 re-writes `.active-task`, injects the note into the developer prompt, re-runs the reviewers,
 re-signs the attestation, lease-pushes from that worktree and updates the existing pull
-request. The command exits 1, changing nothing, when the task is not in `done/`.
+request. The command exits 1, changing nothing, when the task has no verdict.
+
+`resume` accepts three verdict outcomes (AISDLC-807): a `done/` verdict with outcome
+`success`, a `done/` verdict with outcome `iterate-needed` (the executor returned for another
+round), and a `failed/` verdict (a failure). The manifest carries `resume.prNumber`,
+`resume.note` and `resume.fromVerdictOutcome`, the outcome it was resumed from. A task with
+no verdict is refused. `cli-dispatch requeue --task-id <id> --note "<text>"` returns a failed
+task with the same `resume.note` block, so there is one note channel. `cli-dispatch release`
+is refused for a task that already has a verdict in `done/`; run `resume` to send it back, or
+`remove-verdict` to discard the verdict first.
 `cli-dispatch idle-backoff` prints the sleep (5 to 60 seconds) an executor without a tmux
 pane uses when the queue is empty.
