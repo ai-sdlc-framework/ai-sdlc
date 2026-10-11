@@ -38,6 +38,8 @@ import {
   readTrackedFile,
   resolveTargetSet,
   toolsForProbe,
+  validatePlan,
+  DEFAULT_MAX_RUN_PROBES,
   type EvidenceBundle,
   type EvidenceEntry,
   type ExecutorHooks,
@@ -48,6 +50,7 @@ import {
   type ProbeSpawner,
   type ProbeTranscript,
   type ReviewPlan,
+  type RiskMapInput,
 } from './index.js';
 
 // A fixture secret in the shape of a GitHub classic token, which redactSecrets knows.
@@ -589,6 +592,54 @@ describe('executePlan: run probes', () => {
     }
     expect(bundle.entries).toHaveLength(5);
     expectValid(bundle);
+  });
+
+  it('never skips a run probe of a plan the validator accepted, for 0 to 4 run probes', async () => {
+    const { dir } = makeRepo();
+    const commands = ['pnpm a', 'pnpm b', 'pnpm c', 'pnpm d'];
+    const riskMap: RiskMapInput = {
+      criteria: [],
+      changedSourceFiles: [{ path: 'src/a.ts', changedTests: [] }],
+      changedTestFiles: [],
+      changedFiles: ['src/a.ts'],
+      hunks: [
+        {
+          id: 'h1',
+          file: 'src/a.ts',
+          fileClass: 'source' as const,
+          startLine: 1,
+          endLine: 2,
+          riskScore: 0.1,
+          judged: true,
+          flags: [],
+        },
+      ],
+    };
+    for (let total = 0; total <= 4; total++) {
+      for (const baselineRuns of [0, 1]) {
+        if (baselineRuns > total) continue;
+        const runs = commands.slice(0, total).map((c, i) => run(`r${i}`, c));
+        const baseline = { version: '1', probes: runs.slice(0, baselineRuns) };
+        const p = plan(runs);
+        const verdict = validatePlan(p, baseline, riskMap, {
+          riskThreshold: 0.5,
+          maxProbes: 100,
+          maxTargetBytes: 100_000,
+          commandAllowlist: commands,
+          repoRoot: dir,
+        });
+        expect(verdict.valid).toBe(total <= DEFAULT_MAX_RUN_PROBES);
+        if (!verdict.valid) continue;
+        const { spawner } = mockSpawner();
+        const bundle = await executePlan(
+          p,
+          spawner,
+          runLimits(dir, { commandAllowlist: commands }),
+          noAdded,
+        );
+        expect(bundle.entries.filter((e) => e.status === 'skipped')).toEqual([]);
+      }
+    }
   });
 
   it('honours a configured cap, including zero', async () => {

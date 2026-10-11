@@ -360,31 +360,34 @@ describe('validatePlan', () => {
     });
     const three = [run('r1', 'pnpm lint'), run('r2', 'pnpm typecheck'), run('r3', 'pnpm test')];
 
-    it('defaults to two added run probes, independent of maxProbes', () => {
+    it('defaults to two run probes in total, independent of maxProbes', () => {
       expect(DEFAULT_MAX_RUN_PROBES).toBe(2);
-      const p = full();
-      p.probes.push(...three);
       const roomy: PlanLimits = { ...limits, maxProbes: 100 };
+      const p = full();
+      p.probes.push(three[0]!, three[1]!);
       const r = validatePlan(p, baseline(), riskMap, roomy);
       expect(r.valid).toBe(false);
       const hit = !r.valid && r.rejections.find((x) => x.detail.includes('run probes'));
       expect(hit && hit.reason).toBe('probe-limit-exceeded');
-      const two = full();
-      two.probes.push(three[0]!, three[1]!);
-      expect(validatePlan(two, baseline(), riskMap, roomy).valid).toBe(true);
+      expect(hit && hit.detail).toBe('3 run probes in total (1 baseline) exceeds the limit of 2');
+      const one = full();
+      one.probes.push(three[0]!);
+      expect(validatePlan(one, baseline(), riskMap, roomy).valid).toBe(true);
     });
 
-    it('counts only added run probes: the baseline tests-run probe is exempt', () => {
+    it('counts the baseline tests-run probe against the cap', () => {
       expect(baseline().probes.some((x) => x.type === 'run')).toBe(true);
       const p = full();
-      p.probes.push(three[0]!, three[1]!);
+      p.probes.push(three[0]!);
       expect(reasons(p)).toEqual([]);
+      p.probes.push(three[1]!);
+      expect(reasons(p)).toContain('probe-limit-exceeded');
     });
 
     it('honours maxRunProbes, including zero', () => {
       const p = full();
       p.probes.push(...three);
-      expect(reasons(p, { ...limits, maxRunProbes: 3 })).toEqual([]);
+      expect(reasons(p, { ...limits, maxRunProbes: 4 })).toEqual([]);
       const one = full();
       one.probes.push(three[0]!);
       expect(reasons(one, { ...limits, maxRunProbes: 0 })).toContain('probe-limit-exceeded');
@@ -641,11 +644,13 @@ describe('validatePlan', () => {
       question: 'q',
       covers: [],
     });
+    // The duplicate checks need room under the run cap, which counts the baseline run probe.
+    const roomy: PlanLimits = { ...limits, maxRunProbes: 10 };
     const p = full();
     p.probes.push(run('r1'));
-    expect(reasons(p)).toEqual([]);
+    expect(reasons(p, roomy)).toEqual([]);
     p.probes.push(run('r2'));
-    expect(reasons(p)).toEqual(['duplicate-run-probe']);
+    expect(reasons(p, roomy)).toEqual(['duplicate-run-probe']);
     // Reordered files, a repeated entry and an added line range are all the same run.
     const rm2: RiskMapInput = { ...riskMap, changedTestFiles: ['a.test.ts', 'b.test.ts'] };
     const b2 = buildBaselineProbes(rm2, task, opts2);
@@ -666,7 +671,7 @@ describe('validatePlan', () => {
         rn('d1', [{ path: 'a.test.ts' }, { path: 'b.test.ts' }]),
         rn('d2', files),
       ]);
-      const r = validatePlan(plan, b2, rm2, limits);
+      const r = validatePlan(plan, b2, rm2, roomy);
       return r.valid ? [] : r.rejections.map((x) => x.reason);
     };
     expect(check([{ path: 'b.test.ts' }, { path: 'a.test.ts' }])).toEqual(['duplicate-run-probe']);
@@ -683,13 +688,13 @@ describe('validatePlan', () => {
       rn('d3', [{ path: 'b.test.ts' }, { path: 'a.test.ts' }]),
     ]);
     swapped.probes[swapped.probes.length - 1]!.target.command = 'pnpm test';
-    const sr = validatePlan(swapped, b2, rm2, limits);
+    const sr = validatePlan(swapped, b2, rm2, roomy);
     expect(!sr.valid && sr.rejections.map((x) => x.reason)).toContain('duplicate-run-probe');
     // A copy of the baseline test run is also a duplicate.
     const q = full();
     const b = baseline().probes.find((x) => x.id === 'tests-run')!;
     q.probes.push({ ...clone(b), id: 'tests-run-2', baseline: undefined });
-    expect(reasons(q)).toContain('duplicate-run-probe');
+    expect(reasons(q, roomy)).toContain('duplicate-run-probe');
   });
 
   it('rejects an inverted line range', () => {
@@ -730,6 +735,23 @@ describe('buildFallbackPlan', () => {
     expect(r.rejections).toEqual([]);
     expect(r.plan.probes).toEqual(b.probes);
     expect(validatePlan(r.plan, b, riskMap, limits).valid).toBe(true);
+  });
+
+  it('fails closed when the baseline alone has more run probes than the limit', () => {
+    const b = baseline();
+    const r = buildFallbackPlan(b, riskMap, { ...limits, maxRunProbes: 0 });
+    expect(r.ok).toBe(false);
+    expect(r.rejections.map((x) => x.reason)).toContain('baseline-over-ceiling');
+    expect(!r.ok && r.rejections.some((x) => x.detail.includes('run probes'))).toBe(true);
+  });
+
+  it('always validates against the same run limit', () => {
+    for (const maxRunProbes of [0, 1, 2, 3]) {
+      const lim = { ...limits, maxRunProbes };
+      const b = baseline();
+      const r = buildFallbackPlan(b, riskMap, lim);
+      if (r.ok) expect(validatePlan(r.plan, b, riskMap, lim).valid).toBe(true);
+    }
   });
 
   it.each([
