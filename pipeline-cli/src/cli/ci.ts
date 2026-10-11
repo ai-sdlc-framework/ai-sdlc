@@ -11,8 +11,15 @@
  * deterministic version of that sweep.
  *
  * Cancel rules (a queued run is cancelled when ONE holds):
- *   stale-head  the run is on a SHA that is no longer the head of its open PR
- *   duplicate   an older queued run of the same workflow AND event AND branch
+ *   stale-head  a `pull_request` / `pull_request_target` run on a SHA that is no
+ *               longer the head of its open SAME-REPO PR
+ *   duplicate   an older queued PR-bound run of the same workflow AND event AND branch
+ *
+ * Scope: only PR-bound events are ever cancelled. push / schedule / release /
+ * workflow_dispatch runs (post-merge coverage on main) are never touched. Open PRs
+ * from forks are not authoritative: `gh run list` carries no head repository, so a
+ * run cannot be attributed to a fork PR by name. A branch name that any cross-repo
+ * PR also uses is "ambiguous" and its runs are left alone.
  *
  * Never-cancel rules (checked first; they win over both cancel rules):
  *   current-head          the run is on its open PR's current head SHA
@@ -48,6 +55,8 @@ export interface OpenPr {
   headRefOid: string;
   /** True when GitHub auto-merge is armed on the PR. */
   armed: boolean;
+  /** True when the PR head lives in a fork (not authoritative for the base repo). */
+  crossRepo: boolean;
 }
 
 export type CancelReason = 'stale-head' | 'duplicate';
@@ -74,9 +83,18 @@ export interface QueueSummary {
 const RUN_FIELDS = 'databaseId,workflowName,event,headBranch,headSha,createdAt,status';
 const RUN_LIMIT = '500';
 
-const isAutoEnable = (run: WorkflowRun): boolean => /auto-enable/i.test(run.workflowName);
+/** Exact `name:` of the auto-enable workflow (bound to the yaml by a test). */
+export const AUTO_ENABLE_WORKFLOW = 'Auto-enable auto-merge on PR open';
+/** Exact `name:` values of the verify workflows (bound to the yaml by a test). */
+export const VERIFY_WORKFLOWS: readonly string[] = [
+  'AI-SDLC Verify Review Attestation',
+  'consumer-verify-attestation',
+];
+const PR_EVENTS = new Set(['pull_request', 'pull_request_target']);
+
+const isAutoEnable = (run: WorkflowRun): boolean => run.workflowName === AUTO_ENABLE_WORKFLOW;
 const isPrTargetVerify = (run: WorkflowRun): boolean =>
-  run.event === 'pull_request_target' && /verify/i.test(run.workflowName);
+  run.event === 'pull_request_target' && VERIFY_WORKFLOWS.includes(run.workflowName);
 
 // ── Pure planning ─────────────────────────────────────────────────────
 
@@ -84,7 +102,10 @@ const isPrTargetVerify = (run: WorkflowRun): boolean =>
  * Decide, for each queued run, whether to cancel it. Pure: no I/O, no clock.
  */
 export function planSweep(queued: WorkflowRun[], openPrs: OpenPr[]): SweepDecision[] {
-  const prByBranch = new Map(openPrs.map((pr) => [pr.headRefName, pr]));
+  // Only same-repo PRs are authoritative; fork PRs only mark a branch name ambiguous.
+  const prByBranch = new Map(openPrs.filter((p) => !p.crossRepo).map((p) => [p.headRefName, p]));
+  const crossBranches = new Set(openPrs.filter((p) => p.crossRepo).map((p) => p.headRefName));
+  const crossShas = new Set(openPrs.filter((p) => p.crossRepo).map((p) => p.headRefOid));
 
   // Newest queued run per (workflow, event, branch); everything older is a duplicate.
   const newest = new Map<string, WorkflowRun>();
@@ -97,6 +118,13 @@ export function planSweep(queued: WorkflowRun[], openPrs: OpenPr[]): SweepDecisi
   }
 
   return queued.map((run): SweepDecision => {
+    if (!PR_EVENTS.has(run.event)) {
+      return { run, action: 'keep', reason: 'no-rule-matched' };
+    }
+    if (crossShas.has(run.headSha)) {
+      return { run, action: 'keep', reason: 'current-head' };
+    }
+    const ambiguous = crossBranches.has(run.headBranch);
     const pr = prByBranch.get(run.headBranch);
 
     if (pr && pr.headRefOid === run.headSha) {
@@ -107,6 +135,9 @@ export function planSweep(queued: WorkflowRun[], openPrs: OpenPr[]): SweepDecisi
     }
 
     const verifyExempt = isPrTargetVerify(run);
+    if (ambiguous) {
+      return { run, action: 'keep', reason: 'no-rule-matched' };
+    }
     if (pr && !verifyExempt) {
       return { run, action: 'cancel', reason: 'stale-head' };
     }
@@ -182,7 +213,13 @@ export async function listRuns(
 
 export async function listOpenPrHeads(runner: Runner, cwd?: string): Promise<OpenPr[]> {
   const raw = await ghJson<
-    Array<{ number: number; headRefName: string; headRefOid: string; autoMergeRequest: unknown }>
+    Array<{
+      number: number;
+      headRefName: string;
+      headRefOid: string;
+      autoMergeRequest: unknown;
+      isCrossRepository?: boolean;
+    }>
   >(
     runner,
     [
@@ -191,7 +228,7 @@ export async function listOpenPrHeads(runner: Runner, cwd?: string): Promise<Ope
       '--state',
       'open',
       '--json',
-      'number,headRefName,headRefOid,autoMergeRequest',
+      'number,headRefName,headRefOid,autoMergeRequest,isCrossRepository',
       '--limit',
       '200',
     ],
@@ -202,6 +239,7 @@ export async function listOpenPrHeads(runner: Runner, cwd?: string): Promise<Ope
     headRefName: p.headRefName,
     headRefOid: p.headRefOid,
     armed: p.autoMergeRequest !== null && p.autoMergeRequest !== undefined,
+    crossRepo: p.isCrossRepository === true,
   }));
 }
 
@@ -216,10 +254,9 @@ export interface SweepOptions {
 
 /** Plan and (unless dry-run) execute a sweep. Returns the decisions. */
 export async function runSweep(opts: SweepOptions): Promise<SweepDecision[]> {
-  const [queued, openPrs] = await Promise.all([
-    listRuns(opts.runner, 'queued', opts.cwd),
-    listOpenPrHeads(opts.runner, opts.cwd),
-  ]);
+  // Runs first, PR heads second: heads are never older than the run snapshot.
+  const queued = await listRuns(opts.runner, 'queued', opts.cwd);
+  const openPrs = await listOpenPrHeads(opts.runner, opts.cwd);
   const decisions = planSweep(queued, openPrs);
   let cancelled = 0;
   for (const d of decisions) {

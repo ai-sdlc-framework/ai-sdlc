@@ -3,7 +3,10 @@
  * touches the network.
  */
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
+  AUTO_ENABLE_WORKFLOW,
+  VERIFY_WORKFLOWS,
   buildCiCli,
   planSweep,
   renderQueue,
@@ -15,7 +18,7 @@ import {
 } from './ci.js';
 import type { ExecResult, Runner } from '../runtime/exec.js';
 
-const AUTO_ENABLE = 'Auto-enable on PR open';
+const AUTO_ENABLE = AUTO_ENABLE_WORKFLOW;
 
 let nextId = 1;
 function run(over: Partial<WorkflowRun> = {}): WorkflowRun {
@@ -35,6 +38,7 @@ const pr = (over: Partial<OpenPr> = {}): OpenPr => ({
   headRefName: 'feat/a',
   headRefOid: 'aaaaaaa1111111',
   armed: true,
+  crossRepo: false,
   ...over,
 });
 const decide = (runs: WorkflowRun[], prs: OpenPr[]) =>
@@ -95,7 +99,7 @@ describe('planSweep never-cancel rules', () => {
 
   it('never cancels a pull_request_target verify run that is not a duplicate', () => {
     const r = run({
-      workflowName: 'Verify Attestation',
+      workflowName: VERIFY_WORKFLOWS[0],
       event: 'pull_request_target',
       headSha: 'old0000',
     });
@@ -107,7 +111,7 @@ describe('planSweep never-cancel rules', () => {
 
   it('still cancels a pull_request_target verify run when it is an older duplicate', () => {
     const base = {
-      workflowName: 'Verify Attestation',
+      workflowName: VERIFY_WORKFLOWS[0],
       event: 'pull_request_target',
       headSha: 'old0000',
     };
@@ -124,6 +128,67 @@ describe('planSweep never-cancel rules', () => {
   it('keeps runs on branches with no open PR (e.g. main)', () => {
     const r = run({ headBranch: 'main', event: 'push' });
     expect(decide([r], [pr()]).get(r.databaseId)?.action).toBe('keep');
+  });
+});
+
+describe('planSweep scoping (fork PRs, non-PR events)', () => {
+  it('does not cancel a queued push run on main because a fork PR head is named main', () => {
+    const push = run({ event: 'push', headBranch: 'main', headSha: 'mmm' });
+    const older = run({ event: 'push', headBranch: 'main', createdAt: '2026-10-10T19:00:00Z' });
+    const forkPr = pr({ headRefName: 'main', headRefOid: 'fff', crossRepo: true });
+    const d = decide([push, older], [forkPr]);
+    expect(d.get(push.databaseId)?.action).toBe('keep');
+    expect(d.get(older.databaseId)?.action).toBe('keep');
+  });
+
+  it('leaves an internal PR current-head run alone when a fork PR copies its branch name', () => {
+    const internal = run({ headBranch: 'ai-sdlc/aisdlc-1-x', headSha: 'cur' });
+    const forkRun = run({ headBranch: 'ai-sdlc/aisdlc-1-x', headSha: 'fork' });
+    const d = decide(
+      [internal, forkRun],
+      [
+        pr({ headRefName: 'ai-sdlc/aisdlc-1-x', headRefOid: 'cur' }),
+        pr({ number: 9, headRefName: 'ai-sdlc/aisdlc-1-x', headRefOid: 'fork', crossRepo: true }),
+      ],
+    );
+    expect(d.get(internal.databaseId)?.action).toBe('keep');
+    expect(d.get(forkRun.databaseId)?.action).toBe('keep');
+  });
+
+  it('still cancels a stale same-repo pull_request run', () => {
+    const r = run({ headSha: 'old0000' });
+    const prs = [pr(), pr({ number: 2, headRefName: 'other', crossRepo: true })];
+    expect(decide([r], prs).get(r.databaseId)).toMatchObject({
+      action: 'cancel',
+      reason: 'stale-head',
+    });
+  });
+
+  it('keeps older queued push, schedule and release runs on main', () => {
+    const runs = ['main-health-monitor', 'release', 'ci'].flatMap((w) =>
+      ['push', 'schedule'].flatMap((event) => [
+        run({ workflowName: w, event, headBranch: 'main', createdAt: '2026-10-10T18:00:00Z' }),
+        run({ workflowName: w, event, headBranch: 'main', createdAt: '2026-10-10T19:00:00Z' }),
+      ]),
+    );
+    for (const d of planSweep(runs, [])) expect(d.action).toBe('keep');
+  });
+});
+
+describe('workflow name matchers bound to the real workflow files', () => {
+  const nameOf = (file: string): string => {
+    const url = new URL(`../../../.github/workflows/${file}`, import.meta.url);
+    const text = readFileSync(url, 'utf8');
+    return /^name:\s*(.+?)\s*$/m.exec(text)![1].replace(/^['"]|['"]$/g, '');
+  };
+  it('auto-enable name matches its workflow file', () => {
+    expect(nameOf('auto-enable-auto-merge.yml')).toBe(AUTO_ENABLE_WORKFLOW);
+  });
+  it('verify names match the verify workflow files', () => {
+    expect([...VERIFY_WORKFLOWS]).toEqual([
+      nameOf('verify-attestation.yml'),
+      nameOf('consumer-verify-attestation.yml'),
+    ]);
   });
 });
 
@@ -162,6 +227,14 @@ const prJson = [
 ];
 
 describe('runSweep', () => {
+  it('lists runs before open PR heads', async () => {
+    const { runner, calls } = fakeRunner({ queued: [], prs: prJson });
+    await runSweep({ runner, dryRun: true, write: () => {} });
+    expect(calls.findIndex((c) => c[0] === 'run')).toBeLessThan(
+      calls.findIndex((c) => c[0] === 'pr'),
+    );
+  });
+
   it('cancels via gh and prints what it cancelled and why', async () => {
     const stale = run({ headSha: 'old0000' });
     const keep = run();

@@ -50,10 +50,12 @@ name: Untrusted-Contributor PR Verification Gate
 
 # AISDLC-799 (load discipline): every job below carries a job-level `if:` that
 # skips it for same-repo PRs BEFORE a runner is allocated. The gate exists for
-# external (fork) contributors; its decision for a same-repo PR is constant
-# (trusted, governance boundary ok), and the 2026-10-10 incident showed 23-25
-# queued runs of this workflow each allocating a runner just to reach that
-# constant. The guard keys on head repo != base repo (the AISDLC-740 fork
+# external (fork) contributors. Same-repo PRs need write access to the repo, the
+# gate flag defaults off, governance-boundary's own fork predicate already passes
+# same-repo PRs, and neither status is required, so skipping them blocks nothing.
+# The 2026-10-10 incident showed 23-25 queued runs of this workflow each
+# allocating a runner just to reach that no-op. (classifyTrust rule 4 can rate a
+# same-repo non-allowlisted author UNTRUSTED; that is not relied on here.) The guard keys on head repo != base repo (the AISDLC-740 fork
 # signal), NOT author association. A PR whose head repo is null (deleted fork)
 # evaluates `null != repo` as true, so it still runs (fail-closed). Neither
 # `ai-sdlc/untrusted-pr-gate` nor `ai-sdlc/governance-boundary` is a required
