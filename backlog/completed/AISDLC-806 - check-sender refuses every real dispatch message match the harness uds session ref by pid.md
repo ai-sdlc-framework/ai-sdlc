@@ -2,7 +2,7 @@
 id: AISDLC-806
 title: >-
   check-sender refuses every real dispatch message: match the harness uds session ref by pid
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-10'
 labels:
@@ -40,14 +40,38 @@ dispatchable: true
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 A uds ref (`uds:/tmp/cc-socks/16632.sock`) whose pid equals the running dispatch entry's pid is accepted.
-- [ ] #2 A uds ref with another pid (`uds:/tmp/cc-socks/99999.sock`) is refused, and a stopped dispatch entry is refused.
-- [ ] #3 Name and tmuxSession refs (`ai-sdlc-operator-dispatch`) are still accepted.
-- [ ] #4 No-ref / no-pid still accepts with the warning.
-- [ ] #5 `ai-sdlc-plugin/commands/executor.md` documents the uds form in Step 2.
+- [x] #1 A uds ref (`uds:/tmp/cc-socks/16632.sock`) whose pid equals the running dispatch entry's pid is accepted.
+- [x] #2 A uds ref with another pid (`uds:/tmp/cc-socks/99999.sock`) is refused, and a stopped dispatch entry is refused.
+- [x] #3 Name and tmuxSession refs (`ai-sdlc-operator-dispatch`) are still accepted.
+- [x] #4 No-ref / no-pid still accepts with the warning.
+- [x] #5 `ai-sdlc-plugin/commands/executor.md` documents the uds form in Step 2.
 - [ ] #6 A live check from an executor pane against the real roster returns ok (manual, noted in the PR body).
 <!-- AC:END -->
 
 ## Notes
 
 Verification: `pnpm --filter @ai-sdlc/pipeline-cli build && pnpm --filter @ai-sdlc/pipeline-cli test`, `pnpm lint && pnpm format:check`. Velocity impact: positive; restores the dispatch-to-executor message path. Deleting the guard outright is a separate class (b) decision.
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+`checkDispatchSender` now derives the pid from a harness `uds:.../<pid>.sock` ref and accepts it when it equals the running dispatch entry's pid.
+
+## Changes
+- `pipeline-cli/src/hierarchy/peer-guard.ts` (modified): `pidFromUdsRef` + match on the running operator-dispatch pid.
+- `pipeline-cli/src/hierarchy/peer-guard.test.ts` (modified): uds accept / refuse cases.
+- `ai-sdlc-plugin/commands/executor.md` (modified): documents the uds form in the sender check.
+
+## Design decisions
+- **Loose path match**: the regex pins `uds:` and `<digits>.sock` only, not `/tmp/cc-socks/`; this is a DEC-0038 mistake guard, not authentication.
+
+## Verification
+- `pnpm --filter @ai-sdlc/pipeline-cli build` - clean
+- peer-guard tests 13/13; full pipeline-cli suite has 15 pre-existing environment failures (TUI timeouts, pnpm exec, verify-runtime) unrelated to this change
+- prettier + eslint clean
+
+## Follow-up
+- declined: anchoring the regex to /tmp/cc-socks/ (reviewers' minor finding; mistake guard only)
+- AC #6 live check is manual (noted in PR body)
+<!-- SECTION:FINAL_SUMMARY:END -->
