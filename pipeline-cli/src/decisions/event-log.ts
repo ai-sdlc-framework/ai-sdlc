@@ -234,7 +234,7 @@ const TS_SKEW_MS = 5 * 60 * 1000;
  * plus a small clock-skew allowance. File names sort events, so a far-future prefix would
  * otherwise outrank every later answer for good.
  */
-export function isPlausibleEventTs(ts: string, nowMs: number = Date.now()): boolean {
+export function isPlausibleEventTs(ts: string, nowMs: number = clockNow().getTime()): boolean {
   if (!ISO_UTC_TS.test(ts)) return false;
   const t = Date.parse(ts);
   return Number.isFinite(t) && t <= nowMs + TS_SKEW_MS;
