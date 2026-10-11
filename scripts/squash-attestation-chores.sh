@@ -17,6 +17,8 @@
 #   3. If the run has >= 2 commits: reset --soft to the commit before the run,
 #      then recommit with the message of the most-recent chore commit.
 #   4. If 0 or 1 consecutive chore commits at HEAD: no-op (exit 0).
+#   5. (AISDLC-820) If an envelope changed in the run has a subject that is an
+#      ancestor of HEAD, no-op: squashing could orphan it and loop the push.
 #
 # The squash is ONLY applied when ALL stacked commits match the chore-sign
 # subject pattern — we never squash across a non-chore commit boundary.
@@ -62,6 +64,30 @@ if [ "$COUNT" -lt 2 ]; then
   # 0 or 1 chore-sign commit at HEAD — nothing to squash.
   exit 0
 fi
+
+# AISDLC-820: never rewrite a run whose envelope still binds to a commit that is
+# an ancestor of HEAD. Squashing would rewrite the commits the envelope's subject
+# may name, orphaning it; the signer would then re-sign and stack a new chore, and
+# the next push would squash again (a loop that never converges on a rebased
+# branch). Only an envelope whose subject is already orphaned (or absent) is
+# squashed, because the signer must replace it anyway.
+RUN_ENVELOPES=$(git diff --name-only "HEAD~${COUNT}" HEAD -- .ai-sdlc/attestations/ 2>/dev/null | grep -E '\.dsse\.json$' || true)
+for ENV_PATH in $RUN_ENVELOPES; do
+  SUBJECT_SHA=$(git show "HEAD:${ENV_PATH}" 2>/dev/null | node -e '
+    let d = "";
+    process.stdin.on("data", (c) => (d += c)).on("end", () => {
+      try {
+        const e = JSON.parse(d);
+        const s = e && e.subject && e.subject.digest && e.subject.digest.sha1;
+        if (typeof s === "string") process.stdout.write(s);
+      } catch {}
+    });
+  ' 2>/dev/null || true)
+  if [ -n "$SUBJECT_SHA" ] && git merge-base --is-ancestor "$SUBJECT_SHA" HEAD 2>/dev/null; then
+    echo "[squash-attestation-chores] envelope ${ENV_PATH##*/} still binds to ${SUBJECT_SHA:0:7} (an ancestor of HEAD) — leaving $COUNT chore-sign commits alone"
+    exit 0
+  fi
+done
 
 echo "[squash-attestation-chores] found $COUNT consecutive chore-sign commits at HEAD — squashing to 1"
 

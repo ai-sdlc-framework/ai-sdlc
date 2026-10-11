@@ -2,7 +2,7 @@
 id: AISDLC-820
 title: >-
   pre-push attestation chain converges on a rebased branch: squash leaves a single chore commit alone and sign re-runs at most once
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-12'
 labels:
