@@ -117,6 +117,13 @@ import {
   computeMerkleRoot as coreComputeMerkleRoot,
   verifyInclusion as coreVerifyInclusion,
 } from './merkle-core.mjs';
+import {
+  checkReviewerCoverage,
+  classifyReviewScope,
+  isPathMissingGitError,
+  parseSecurityReviewAlways,
+  reviewerSetKindFor,
+} from './review-scope-core.mjs';
 
 /**
  * Path-exclusion args for `git diff` / `git diff-tree` that omit the
@@ -1114,6 +1121,99 @@ export function v6ResolveLeavesForEnvelope(repoRoot, envelope, patchIdHint) {
 }
 
 /**
+ * AISDLC-723 (DEC-0055): the reviewer set a v6 attestation must carry.
+ *
+ * Before this check the v6 path only required a non-empty, correctly signed
+ * leaf set: no reviewer role was required at all (the three-role completeness
+ * check lives in the legacy v3-v5 `verifyAttestation`). This derives the diff's
+ * classification HERE, from `git diff <merge-base>..<head>`, and requires the
+ * reviewer names to satisfy it. The names come from `result.verifiedReviewerNames`,
+ * which `verifyV6Envelope` collects from the ON-DISK leaves (Merkle-proved) and
+ * binds to the envelope copy; the envelope's `transcriptLeaves[].reviewerName`
+ * and its `reviewScope` field are editable after signing and never trusted.
+ * A result without `verifiedReviewerNames` fails closed.
+ *
+ * Fails closed: when the diff cannot be listed the classification is `full`.
+ * The keep-security-everywhere config is read from `baseSha` via `git show`,
+ * never from the PR worktree.
+ *
+ * @param {object} result - a `status: 'valid'` verifyV6Envelope result
+ * @param {{ repoRoot: string, baseSha: string, headSha: string, mergeBase: string|null }} ctx
+ * @returns {object} `result` plus `reviewScope`, or an `invalid` result
+ */
+export function enforceReviewScope(result, { repoRoot, baseSha, headSha, mergeBase }) {
+  let paths = null;
+  if (mergeBase && /^[0-9a-f]{40}$/i.test(headSha)) {
+    try {
+      const out = execFileSync(
+        'git',
+        [
+          '-c',
+          'core.quotePath=false',
+          'diff',
+          '--name-only',
+          '-z',
+          '--no-renames',
+          '--no-ext-diff',
+          `${mergeBase}..${headSha}`,
+          '--',
+          ...ATTESTATION_PATH_EXCLUSIONS,
+        ],
+        {
+          cwd: repoRoot,
+          encoding: 'utf-8',
+          maxBuffer: 128 * 1024 * 1024,
+          stdio: ['ignore', 'pipe', 'ignore'],
+        },
+      );
+      paths = out.split('\0').filter(Boolean);
+    } catch {
+      paths = null;
+    }
+  }
+  const { classification, reason } = classifyReviewScope(paths ?? []);
+  // Fail closed: only a definite "file does not exist at base" means no config.
+  let securityAlways = true;
+  if (/^[0-9a-f]{40}$/i.test(baseSha ?? '')) {
+    try {
+      securityAlways = parseSecurityReviewAlways(
+        execFileSync('git', ['show', `${baseSha}:.ai-sdlc/review-config.yaml`], {
+          cwd: repoRoot,
+          encoding: 'utf-8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }),
+      );
+    } catch (err) {
+      securityAlways = !isPathMissingGitError(err);
+    }
+  }
+  const names = Array.isArray(result.verifiedReviewerNames) ? result.verifiedReviewerNames : [];
+  const coverage = checkReviewerCoverage(
+    names.filter((n) => typeof n === 'string'),
+    classification,
+    { securityAlways },
+  );
+  if (!coverage.ok) {
+    return {
+      status: 'invalid',
+      reason:
+        `v6: reviewer set incomplete for a '${classification}' diff` +
+        `${securityAlways ? ' (securityReview: always)' : ''}: missing ${coverage.missing.join(', ')}` +
+        ` (${safeForReason(reason, 80)})`,
+    };
+  }
+  return {
+    ...result,
+    reviewScope: {
+      classification,
+      securityAlways,
+      requiredSet: reviewerSetKindFor(classification, { securityAlways }),
+      appliedReviewers: names.filter((n) => typeof n === 'string'),
+    },
+  };
+}
+
+/**
  * Verify a v6 attestation envelope against trusted reviewers and on-disk
  * transcript-leaves. Returns `{ status, reason }`.
  *
@@ -1369,6 +1469,10 @@ export function verifyV6Envelope({
   );
 
   // ── 6. Verify each Merkle proof ─────────────────────────────────────────
+  // AISDLC-723: reviewer names are taken from the ON-DISK leaves each summary
+  // resolves to (never from the envelope copy), and a leafIndex may appear once.
+  const verifiedReviewerNames = [];
+  const seenLeafIndexes = new Set();
   for (let i = 0; i < envelope.transcriptLeaves.length; i++) {
     const leafSummary = envelope.transcriptLeaves[i];
     const merkleProof = envelope.merkleProofs[i];
@@ -1393,6 +1497,13 @@ export function verifyV6Envelope({
     // TranscriptLeaf.leafIndex may diverge from array position if loadLeaves
     // skipped corrupt lines. We use findIndex to get the ACTUAL array position.
     const logicalLeafIndex = leafSummary.leafIndex;
+    if (seenLeafIndexes.has(logicalLeafIndex)) {
+      return {
+        status: 'invalid',
+        reason: `v6: duplicate transcriptLeaves leafIndex=${logicalLeafIndex}`,
+      };
+    }
+    seenLeafIndexes.add(logicalLeafIndex);
     const arrayPosition = onDiskLeaves.findIndex((l) => l.leafIndex === logicalLeafIndex);
     if (arrayPosition === -1) {
       return {
@@ -1415,6 +1526,19 @@ export function verifyV6Envelope({
         status: 'invalid',
         reason: `v6: leaf[${logicalLeafIndex}] (${leafSummary.reviewerName}) transcriptHash mismatch — leaf tampered or wrong reviewer run`,
       };
+    }
+
+    // ── 7a. reviewerName must equal the on-disk leaf's (AISDLC-723) ───────
+    // The envelope JSON is editable after signing without the key; the
+    // required-reviewer-set check keys off the name, so bind it to the leaf.
+    if (onDiskLeaf.reviewerName !== leafSummary.reviewerName) {
+      return {
+        status: 'invalid',
+        reason: `v6: leaf[${logicalLeafIndex}] reviewerName mismatch — envelope claims ${JSON.stringify(safeForReason(String(leafSummary.reviewerName), 60))} but on-disk leaf differs`,
+      };
+    }
+    if (typeof onDiskLeaf.reviewerName === 'string') {
+      verifiedReviewerNames.push(onDiskLeaf.reviewerName);
     }
 
     // ── 7b. Verify verdictClass matches on-disk leaf (AISDLC-568) ─────────
@@ -1548,6 +1672,7 @@ export function verifyV6Envelope({
   return {
     status: 'valid',
     reason: 'ok',
+    verifiedReviewerNames,
     verdictClasses,
     overallVerdictClass,
     independenceTiers,
@@ -2856,7 +2981,7 @@ export function runVerifier({
       }
     }
 
-    return verifyV6Envelope({
+    const v6Result = verifyV6Envelope({
       envelope: chosen.envelope,
       envelopeFileName: isPatchIdNamed
         ? `${envelopeSubjectSha.toLowerCase()}.v6.dsse.json`
@@ -2867,6 +2992,15 @@ export function runVerifier({
       patchIdHint,
       changedPaths: envelopeChangedPaths,
     });
+    // AISDLC-723: required-reviewer-set check, re-derived from the PR diff.
+    return v6Result.status === 'valid'
+      ? enforceReviewScope(v6Result, {
+          repoRoot,
+          baseSha,
+          headSha: lowerHead,
+          mergeBase: patchIdMergeBase,
+        })
+      : v6Result;
   }
 
   // --- Recompute current PR state (legacy v3/v5 path) ------------------

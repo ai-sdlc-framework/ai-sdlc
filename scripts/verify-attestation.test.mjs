@@ -4972,6 +4972,78 @@ describe('runVerifier — v6 integration', () => {
     assert.equal(out.reason, 'ok');
   });
 
+  it('AISDLC-723: rejects a correctness-only attestation on a source diff', () => {
+    writeV6Fixture(
+      fixture.root,
+      fixture.headSha,
+      [makeLeaf(0, 'correctness-reviewer')],
+      v6Keys.privateKeyPem,
+    );
+    const out = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'invalid');
+    assert.match(out.reason, /reviewer set incomplete for a 'full' diff.*security-reviewer/);
+  });
+
+  it('AISDLC-723: accepts correctness + security on a source diff and reports the re-derived scope', () => {
+    writeV6Fixture(
+      fixture.root,
+      fixture.headSha,
+      [makeLeaf(0, 'correctness-reviewer'), makeLeaf(1, 'security-reviewer')],
+      v6Keys.privateKeyPem,
+    );
+    const out = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'valid', `got: ${out.reason}`);
+    assert.equal(out.reviewScope.classification, 'full');
+  });
+
+  it('AISDLC-723: a renamed envelope leaf (not matching the on-disk leaf) is rejected', () => {
+    const { envelope, envPath } = writeV6Fixture(
+      fixture.root,
+      fixture.headSha,
+      [makeLeaf(0, 'correctness-reviewer')],
+      v6Keys.privateKeyPem,
+    );
+    // The envelope JSON is editable after signing without the key.
+    envelope.transcriptLeaves[0].reviewerName = 'security-reviewer';
+    writeFileSync(envPath, JSON.stringify(envelope, null, 2) + '\n');
+    const out = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'invalid');
+    assert.match(out.reason, /reviewerName mismatch/);
+  });
+
+  it('AISDLC-723: a duplicated leafIndex entry appended to the envelope is rejected', () => {
+    const { envelope, envPath } = writeV6Fixture(
+      fixture.root,
+      fixture.headSha,
+      [makeLeaf(0, 'correctness-reviewer')],
+      v6Keys.privateKeyPem,
+    );
+    envelope.transcriptLeaves.push({
+      ...envelope.transcriptLeaves[0],
+      reviewerName: 'security-reviewer',
+    });
+    envelope.merkleProofs.push({ ...envelope.merkleProofs[0] });
+    writeFileSync(envPath, JSON.stringify(envelope, null, 2) + '\n');
+    const out = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'invalid');
+  });
+
   it('AISDLC-492: envelope named for a non-ancestor SHA is not surfaced (per-SHA fallback removed)', () => {
     // Confirms the per-SHA fallback is gone: an envelope whose filename is a
     // random 40-hex string that is NOT the current HEAD and whose subject.sha1

@@ -78,6 +78,73 @@ describe('Step 7 — buildReviewPrompts', () => {
     expect(r.diff).toContain('diff content');
   });
 
+  describe('AISDLC-723: diff-scope reviewer reduction', () => {
+    function gitInit(): void {
+      const g = (...a: string[]) => execFileSync('git', a, { cwd: tmp, stdio: 'ignore' });
+      g('init', '-q', '-b', 'main');
+      g(
+        '-c',
+        'user.email=t@e.com',
+        '-c',
+        'user.name=t',
+        'commit',
+        '-q',
+        '--allow-empty',
+        '-m',
+        'b',
+      );
+      g('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    }
+    function runnerFor(files: string): FakeRunner {
+      return new FakeRunner()
+        .on(
+          /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
+          ok('d\n'),
+        )
+        .on(
+          /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
+          ok(files),
+        );
+    }
+    const base = () => ({
+      taskId: 'AISDLC-1',
+      task,
+      branch: 'b',
+      worktreePath: tmp,
+      workDir: tmp,
+      codexAvailable: false,
+    });
+
+    it('a test-only diff reduces to the correctness reviewer', async () => {
+      gitInit();
+      const r = await buildReviewPrompts({
+        ...base(),
+        runner: runnerFor('src/a.test.ts\0').toRunner(),
+      });
+      expect(r.prompts.map((p) => p.reviewer)).toEqual(['correctness-reviewer']);
+    });
+
+    it('a source diff keeps the full set', async () => {
+      gitInit();
+      const r = await buildReviewPrompts({ ...base(), runner: runnerFor('src/a.ts\0').toRunner() });
+      expect(r.prompts.map((p) => p.reviewer)).toContain('security-reviewer');
+    });
+
+    it('an explicit opts.reviewers override is left untouched', async () => {
+      gitInit();
+      const r = await buildReviewPrompts({
+        ...base(),
+        reviewers: ['code-reviewer', 'test-reviewer', 'security-reviewer'],
+        runner: runnerFor('src/a.test.ts\0').toRunner(),
+      });
+      expect(r.prompts.map((p) => p.reviewer)).toEqual([
+        'code-reviewer',
+        'test-reviewer',
+        'security-reviewer',
+      ]);
+    });
+  });
+
   it('AISDLC-739: embeds one head-bound diff-binding nonce marker in every prompt', async () => {
     const head = 'a'.repeat(40);
     const fake = new FakeRunner()

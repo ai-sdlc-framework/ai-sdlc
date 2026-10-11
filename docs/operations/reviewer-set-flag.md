@@ -66,4 +66,25 @@ resolveReviewerSet({ workDir: process.cwd() });
 // → ['correctness-reviewer', 'security-reviewer']             (opt-in)
 ```
 
+## Correctness-only review for test-only and docs-adjacent diffs (AISDLC-723, DEC-0055)
+
+A diff whose every changed path is a test, fixture or snapshot (`*.test.*`, `*.spec.*`, `__tests__/**`, `**/fixtures/**`, `**/__snapshots__/**`), or whose every changed path is Markdown or covered by `scripts/is-docs-only-changeset.mjs`, runs the **correctness reviewer alone**: the security reviewer (opus) is not spawned. Classification is path-based only; a comment-only change is never inferred, and a mixed source-and-test diff is never downgraded.
+
+The full set is forced when the diff contains any of: a trust-chain path (`.github/`, `.husky/`, `.ai-sdlc/` except decision and envelope data, `ai-sdlc-plugin/` including its Markdown prompts, the agent-instruction directories `.claude/`, `.codex/`, `.cursor/`, `.opencode/`, any `CLAUDE.md`, `AGENTS.md` or `SKILL.md` at any depth, `pipeline-cli/attestation-core/`, `pipeline-cli/src/attestation/`, the attestation scripts), a workflow file, anything under hooks, a test or fixture whose path names attestation, signing, verification, trust, hook, security, governance, auth merge, eligibility, reviewer, gate, guard, role, dor, pre-push, allow, deny, bypass or similar code (a file that changes a security test's expectations), or any path that is neither a test nor docs.
+
+**Where it is enforced.**
+
+- Signer side: `reduceForReviewScope()` in `pipeline-cli/src/steps/reviewer-set.ts`, called by `07-build-review-prompts.ts`. An explicit `reviewers` override is left alone.
+- CI verifier: `enforceReviewScope()` in `pipeline-cli/attestation-core/verify-core.mjs` re-derives the classification from `git diff <merge-base>..<head>` and requires the reviewer names of the on-disk (Merkle-proved) leaves, which must equal the envelope's copies and carry no duplicate `leafIndex`, to satisfy it (correctness review, plus the security review when the diff is `full`). It never reads the classification from the envelope. If the diff cannot be listed it fails closed to `full`; a git error reading the base config other than a missing path fails closed to `securityReview: always`. Paths are lowercased and NFC-normalised before matching.
+- Both use one classifier, `pipeline-cli/attestation-core/review-scope-core.mjs`. Its `TRUST_CHAIN_PATH_PREFIXES` is the shared trust-chain list; the two-reviewer task (AISDLC-722) must import it rather than define another.
+- The envelope records `reviewScope` (`classification`, `securityAlways`, `requiredSet`, `appliedReviewers`) for audit. It is informational only.
+
+**Keep security review on everything (adopters).** Commit this to `.ai-sdlc/review-config.yaml` on your base branch:
+
+```yaml
+securityReview: always
+```
+
+The file is read from the base ref (`git show origin/main:.ai-sdlc/review-config.yaml` on the signer, the PR base SHA in CI), never from the PR's own checkout, so a pull request cannot switch the reduction on for itself. With `securityReview: always` the verifier requires a security reviewer on every diff.
+
 See also: `docs/operations/reviewer-dispatch-defaults.md` (Codex vs. Claude-native harness routing — orthogonal to the reviewer-SET flag; both flags compose).

@@ -33,6 +33,7 @@ import { sign as cryptoSign } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { deriveEnvelopeReviewScope, type EnvelopeReviewScope } from './review-scope.js';
 import {
   computeMerkleRoot,
   generateNonce,
@@ -111,6 +112,12 @@ export interface AttestationEnvelopeV6 {
   leafCount: number;
   signerIdentity?: string;
   signedAt: string;
+  /**
+   * AISDLC-723: classification + applied reviewer set recorded by the signer.
+   * Informational only; the CI verifier re-derives the classification from the
+   * diff and never reads this field.
+   */
+  reviewScope?: EnvelopeReviewScope;
 }
 
 // ── Key resolution ────────────────────────────────────────────────────────────
@@ -185,6 +192,8 @@ export interface BuildV6EnvelopeOptions {
   privateKeyPem: string;
   /** Optional identity string embedded in the envelope (informational). */
   signerIdentity?: string;
+  /** AISDLC-723: recorded review scope (informational). */
+  reviewScope?: EnvelopeReviewScope;
 }
 
 /**
@@ -263,6 +272,9 @@ export function buildV6Envelope(opts: BuildV6EnvelopeOptions): AttestationEnvelo
 
   if (signerIdentity) {
     envelope.signerIdentity = signerIdentity;
+  }
+  if (opts.reviewScope) {
+    envelope.reviewScope = opts.reviewScope;
   }
 
   return envelope;
@@ -462,6 +474,11 @@ export function signAndWriteV6Envelope(opts: SignAndWriteV6EnvelopeOptions): str
     nonce,
     privateKeyPem,
     signerIdentity,
+    reviewScope: deriveEnvelopeReviewScope(
+      repoRoot,
+      headSha,
+      prLeaves.map((l) => l.reviewerName),
+    ),
   });
 
   const serialized = formatEnvelopeJson(envelope);

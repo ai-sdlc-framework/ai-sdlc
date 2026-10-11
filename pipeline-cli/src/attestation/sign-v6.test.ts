@@ -366,6 +366,58 @@ describe('signAndWriteV6Envelope — happy path', () => {
   });
 });
 
+describe('signAndWriteV6Envelope — reviewScope record (AISDLC-723)', () => {
+  it('buildV6Envelope embeds a supplied reviewScope', () => {
+    const leaf0 = makeLeaf({ leafIndex: 0 });
+    const reviewScope = {
+      classification: 'test-only' as const,
+      securityAlways: false,
+      requiredSet: 'correctness-only' as const,
+      appliedReviewers: ['correctness-reviewer'],
+    };
+    const env = buildV6Envelope({
+      headSha: FAKE_HEAD_SHA,
+      prLeaves: [leaf0],
+      allLeaves: [leaf0],
+      nonce: 'f'.repeat(64),
+      privateKeyPem,
+      reviewScope,
+    });
+    expect(env.reviewScope).toEqual(reviewScope);
+  });
+
+  it('signAndWriteV6Envelope writes reviewScope derived from the diff', () => {
+    const g = (...a: string[]) => execFileSync('git', a, { cwd: tmpRoot, stdio: 'ignore' });
+    g('init', '-q', '-b', 'main');
+    g('-c', 'user.email=t@e.com', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'b');
+    g('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    writeFileSync(join(tmpRoot, 'a.test.ts'), 'x');
+    g('add', 'a.test.ts');
+    g('-c', 'user.email=t@e.com', '-c', 'user.name=t', 'commit', '-q', '-m', 'pr');
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: tmpRoot,
+      encoding: 'utf8',
+    }).trim();
+    appendLeaf(
+      makeLeaf({ leafIndex: 0, taskId: 'AISDLC-383.3', reviewerName: 'correctness-reviewer' }),
+      tmpRoot,
+    );
+    const outPath = signAndWriteV6Envelope({
+      repoRoot: tmpRoot,
+      headSha: head,
+      taskId: 'AISDLC-383.3',
+      privateKeyPem,
+    });
+    const parsed = JSON.parse(readFileSync(outPath, 'utf8')) as AttestationEnvelopeV6;
+    expect(parsed.reviewScope).toEqual({
+      classification: 'test-only',
+      securityAlways: false,
+      requiredSet: 'correctness-only',
+      appliedReviewers: ['correctness-reviewer'],
+    });
+  });
+});
+
 describe('signAndWriteV6Envelope — error paths', () => {
   it('throws when no leaves match taskId', () => {
     // No leaves in tree at all.
