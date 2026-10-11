@@ -12,6 +12,7 @@
  *                                               replay past reviews against a candidate model
  *   snapshot --window <n> --used-pct <p>        record a calibration point
  *   allotment [--window <n>]                    implied allotment series and change detection
+ *   audit [--days N] [--digest] [--json]        spend by project, loop, role, model; idle and no-clear flags
  *   prices refresh [--source <name>] [--json]   fetch public price sources
  *   prices list [--json]                        prices in force, source, age, held rows
  *   prices confirm <model>                      promote a held row to active
@@ -51,6 +52,13 @@ import { registerRouteCommands, type RouteDeps } from '../usage/route-commands.j
 import { registerScorecardCommands, type ScorecardDeps } from '../usage/scorecard-commands.js';
 import { registerUsageViewCommands, type UsageViewDeps } from '../usage/commands.js';
 import {
+  DEFAULT_CONTEXT_THRESHOLD,
+  renderAudit,
+  renderDigest,
+  runAudit,
+  type AuditDeps,
+} from '../usage/audit.js';
+import {
   DEFAULT_MAX_SECONDS,
   ingestClaudeTranscripts,
   type IngestResult,
@@ -73,6 +81,8 @@ export interface UsageCliDeps
   ingest?: typeof ingestClaudeTranscripts;
   /** Replaces the default sources (tests). */
   sources?: readonly PriceSource[];
+  /** Replaces transcript discovery and reading for `audit` (tests). */
+  audit?: AuditDeps;
   /** Exit code sink; defaults to `process.exitCode`. */
   setExitCode?: (code: number) => void;
 }
@@ -349,6 +359,41 @@ export function buildUsageCli(
           else report('live');
         }
         io.out(args.json ? `${JSON.stringify(result)}\n` : renderIngestResult(result));
+      },
+    )
+    .command(
+      'audit',
+      'Audit Claude Code transcripts: spend by project, loop, role and model, idle noop-wakeup turns, large no-clear sessions.',
+      (y) =>
+        y
+          .option('days', { type: 'number', default: 7, description: 'Look back this many days.' })
+          .option('context-threshold', {
+            type: 'number',
+            default: DEFAULT_CONTEXT_THRESHOLD,
+            description: 'Flag sessions whose peak context exceeds this many tokens with no clear.',
+          })
+          .option('projects-dir', { type: 'string', description: 'Transcript projects directory.' })
+          .option('digest', {
+            type: 'boolean',
+            default: false,
+            description: 'Print the short paste-ready weekly digest.',
+          })
+          .option('json', { type: 'boolean', default: false }),
+      (args) => {
+        const report = runAudit(args.days, args['context-threshold'], {
+          now: deps.now,
+          ...deps.audit,
+          ...(typeof args['projects-dir'] === 'string'
+            ? { projectsDir: args['projects-dir'] }
+            : {}),
+        });
+        io.out(
+          args.json
+            ? `${JSON.stringify(report, null, 2)}\n`
+            : args.digest
+              ? renderDigest(report)
+              : renderAudit(report),
+        );
       },
     )
     .command('prices', 'Model price feed and price history', (y) =>

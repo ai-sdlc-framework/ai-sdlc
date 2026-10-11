@@ -42,7 +42,8 @@
  *   classification.
  */
 
-import { readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
+import { now as clockNow } from '../../clock.js';
 import { CLIENT_SIDE_ONLY_MESSAGE } from './branch-protection-shared.js';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -96,6 +97,12 @@ export interface DoctorCheckAdapters extends DoctorAdapters {
   writeFile: (path: string, content: string) => void;
   /** List immediate subdirectory names of `path`; `[]` if missing/unreadable. Never throws. */
   listDir: (path: string) => string[];
+  /**
+   * Paths of Claude Code transcripts modified since `sinceMs`, newest first
+   * (idle-sessions check). Optional so existing adapter fixtures stay valid;
+   * absent means the check passes with nothing to inspect.
+   */
+  recentTranscripts?: (homeDir: string, sinceMs: number) => string[];
   /** Production = `node:os.homedir()`. Injectable for hermetic tests. */
   homeDir: () => string;
   /** Production = `process.env`. Injectable so tests don't depend on the real environment. */
@@ -125,9 +132,37 @@ export function buildProductionCheckAdapters(): DoctorCheckAdapters {
         return [];
       }
     },
+    recentTranscripts: listRecentTranscripts,
     homeDir: () => homedir(),
     env: process.env,
   };
+}
+
+/** Transcripts under `<home>/.claude/projects` touched since `sinceMs`, newest first. */
+function listRecentTranscripts(home: string, sinceMs: number): string[] {
+  const found: { p: string; m: number }[] = [];
+  const walk = (dir: string): void => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith('.jsonl')) {
+        try {
+          const m = statSync(p).mtimeMs;
+          if (m > sinceMs) found.push({ p, m });
+        } catch {
+          /* skip */
+        }
+      }
+    }
+  };
+  walk(join(home, '.claude', 'projects'));
+  return found.sort((a, b) => b.m - a.m).map((f) => f.p);
 }
 
 export interface DoctorRunContext {
@@ -906,6 +941,91 @@ export function checkUsageIngest(ctx: DoctorRunContext): DoctorCheckResult {
   };
 }
 
+// ── Idle polling sessions (AISDLC-765) ───────────────────────────────────
+
+export const IDLE_POLL_WARN_MINUTES = 30;
+const IDLE_POLL_MAX_CALLS = 4;
+
+/**
+ * Minutes a transcript has been polling empty: the trailing run of turns that
+ * each end in a noop `ScheduleWakeup` within a few model calls. 0 when the
+ * session's last turn did real work. Only timestamps and tool names are read.
+ */
+export function idlePollingMinutes(transcript: string): number {
+  let runStart: number | undefined;
+  let last = 0;
+  let calls = 0;
+  let noop = false;
+  const closeTurn = (): void => {
+    if (calls === 0) return;
+    if (noop && calls <= IDLE_POLL_MAX_CALLS) runStart ??= firstTs;
+    else runStart = undefined;
+  };
+  let firstTs = 0;
+  for (const line of transcript.split('\n')) {
+    if (!line) continue;
+    let j: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    try {
+      j = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (j.type === 'user') {
+      const raw = j.message?.content;
+      const text = typeof raw === 'string' ? raw : JSON.stringify(raw ?? '');
+      if (!/tool_result/.test(text.slice(0, 200))) {
+        closeTurn();
+        calls = 0;
+        noop = false;
+      }
+      continue;
+    }
+    if (j.type !== 'assistant' || !j.message?.usage) continue;
+    const t = Date.parse(j.timestamp);
+    if (!Number.isFinite(t)) continue;
+    if (calls === 0) firstTs = t;
+    calls++;
+    last = t;
+    if (
+      (Array.isArray(j.message.content) ? j.message.content : []).some(
+        (b: any) => b?.type === 'tool_use' && b.name === 'ScheduleWakeup' && !!b.input?.noop, // eslint-disable-line @typescript-eslint/no-explicit-any
+      )
+    )
+      noop = true;
+  }
+  closeTurn();
+  return runStart === undefined ? 0 : Math.round((last - runStart) / 60_000);
+}
+
+/**
+ * Warns when a recently active session has polled empty (noop wakeups with no
+ * real work) for over 30 minutes. A session counts as live when its transcript
+ * changed in the last hour. Passes silently-worded when none is found.
+ */
+export function checkIdleSessions(ctx: DoctorRunContext): DoctorCheckResult {
+  const list = ctx.adapters.recentTranscripts;
+  const now = clockNow().getTime();
+  const paths = list ? list(ctx.adapters.homeDir(), now - 60 * 60_000) : [];
+  const idle: number[] = [];
+  for (const p of paths.slice(0, 20)) {
+    const text = ctx.adapters.readFile(p);
+    if (text === null) continue;
+    const mins = idlePollingMinutes(text);
+    if (mins > IDLE_POLL_WARN_MINUTES) idle.push(mins);
+  }
+  if (idle.length === 0) {
+    return { id: 'idle-sessions', severity: 'pass', title: 'no session is polling empty' };
+  }
+  return {
+    id: 'idle-sessions',
+    severity: 'warn',
+    title: `${idle.length} session(s) polling empty for over ${IDLE_POLL_WARN_MINUTES} minutes (longest ${Math.max(...idle)} min)`,
+    remediation:
+      'Stop the idle loop or lengthen its interval; run `cli-usage audit --days 7` to see what idle polling costs.',
+    anonymizableEvidence: { idleSessionCount: idle.length, longestIdleMinutes: Math.max(...idle) },
+  };
+}
+
 // ── Orphaned vitest workers (AISDLC-681) ─────────────────────────────────
 
 /** Parse `ps` etime (`[[dd-]hh:]mm:ss`) to seconds; `undefined` if unparseable. */
@@ -1584,6 +1704,11 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     id: 'usage-ingest',
     description: 'Time of the last successful usage ingest (RFC-0050).',
     run: checkUsageIngest,
+  },
+  {
+    id: 'idle-sessions',
+    description: 'A session polling empty (noop wakeups) for over 30 minutes (AISDLC-765).',
+    run: checkIdleSessions,
   },
   {
     id: 'orphaned-vitest-workers',
