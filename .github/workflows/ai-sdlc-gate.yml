@@ -451,8 +451,10 @@ jobs:
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       statuses: read
       actions: read
+      pull-requests: read
     steps:
       # AISDLC-803: read the newest verify-attestation RUN's conclusion, not
       # the bare commit status (which any poster could overwrite). Logic and
@@ -464,6 +466,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: node scripts/resolve-attestation-gate.mjs
 

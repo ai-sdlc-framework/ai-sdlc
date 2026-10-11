@@ -328,7 +328,9 @@ describe('AISDLC-193: verify-attestation.yml posts ai-sdlc/attestation as requir
     const verify = loadYaml(verifyPath);
     assert.ok(verify, 'verify-attestation.yml must still parse');
     const verifyJob = verify.jobs.verify;
-    const lastStep = verifyJob.steps[verifyJob.steps.length - 1];
+    // AISDLC-803: a final "Fail the run when the attestation is not valid" step
+    // follows the status post; the post step is the last step before it.
+    const lastStep = verifyJob.steps[verifyJob.steps.length - 2];
     // AISDLC-193 stage 1 (reverses AISDLC-140 sub-4 audit-only demotion):
     // the verifier MUST post ai-sdlc/attestation as a commit status so
     // branch protection can require it. The audit-only "Log audit result"

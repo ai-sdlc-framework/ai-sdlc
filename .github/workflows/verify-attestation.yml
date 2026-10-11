@@ -697,6 +697,19 @@ jobs:
             -f target_url="$RUN_URL"
           echo "Posted ai-sdlc/attestation: $STATE on $HEAD_SHA"
 
+      # AISDLC-803: the run's CONCLUSION is the gate signal (ai-sdlc-gate.yml
+      # reads it via scripts/resolve-attestation-gate.mjs), and the verifier
+      # script exits 0 for every verdict. Conclude the run non-success whenever
+      # the verdict is not `valid`. Skipped for cancelled runs, docs-only and
+      # release-please short-circuits (those stay green).
+      - name: Fail the run when the attestation is not valid
+        if: (success() || failure()) && steps.docs_only.outputs.all_docs != 'true' && steps.release_please.outputs.is_release_please != 'true' && steps.verify.outputs.status != 'valid'
+        env:
+          STATUS: ${{ steps.verify.outputs.status }}
+        run: |
+          echo "::error::attestation not valid (status='${STATUS}'); failing the run so the gate reads a non-success conclusion"
+          exit 1
+
   # AISDLC-747 (DEC-0065): register a verified attestation as an APPROVE
   # pull-request review. Separate job so `pull-requests: write` is held ONLY
   # here (least privilege). Runs only on `pull_request_target` (never on
