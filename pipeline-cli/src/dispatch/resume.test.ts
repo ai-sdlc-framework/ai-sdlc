@@ -255,7 +255,45 @@ describe('resumeDone', () => {
       ).toThrow(/must be prose/);
     }
     expect(looksLikeCommand('Fix the gitignore and the github check')).toBe(false);
+    expect(looksLikeCommand('Git hooks failed in CI')).toBe(false);
+    expect(looksLikeCommand('GH checks are red')).toBe(false);
     expect(existsSync(path.join(board, 'done', 'AISDLC-840.verdict.json'))).toBe(true);
+  });
+
+  it('rejects command lines hidden behind escape sequences or zero-width characters', () => {
+    finish('AISDLC-841');
+    for (const bad of [
+      '\x1b[0mgit push --force',
+      '\x1b]0;x\x07gh pr view 1',
+      '\u200bgit push --force',
+      '\ufeff\u200dcli-dispatch release --task-id X',
+    ]) {
+      expect(() => resumeDone(board, 'AISDLC-841', { note: bad }, opts)).toThrow(/must be prose/);
+      expect(() => resumeDone(board, 'AISDLC-841', { note: 'ok', findings: [bad] }, opts)).toThrow(
+        /must be prose/,
+      );
+      expect(() =>
+        resumeDone(board, 'AISDLC-841', { note: 'ok', failingChecks: [bad] }, opts),
+      ).toThrow(/must be prose/);
+    }
+    expect(existsSync(path.join(board, 'done', 'AISDLC-841.verdict.json'))).toBe(true);
+  });
+
+  it('stores the stripped note, findings and failing checks', () => {
+    finish('AISDLC-842');
+    const r = resumeDone(
+      board,
+      'AISDLC-842',
+      {
+        note: 'fix \x1b[31mcoverage\x1b[0m',
+        findings: ['a\x1b]0;t\x07b'],
+        failingChecks: ['c\x1b[1md'],
+      },
+      opts,
+    );
+    expect(r.resume.note).toBe('fix coverage');
+    expect(r.resume.findings).toEqual(['ab']);
+    expect(r.resume.failingChecks).toEqual(['cd']);
   });
 
   it('writes no wave on a resume, keeps the priority and sets retryCount', () => {
@@ -328,7 +366,7 @@ describe('resumeDone', () => {
   it('strips control characters from list entries', () => {
     finish('AISDLC-809');
     const r = resumeDone(board, 'AISDLC-809', { note: 'n', findings: ['a\u001b[31m\nb'] }, opts);
-    expect(r.resume.findings).toEqual(['a [31m b']);
+    expect(r.resume.findings).toEqual(['a b']);
   });
 });
 
@@ -561,6 +599,25 @@ describe('cli-dispatch resume and claim', () => {
     const exit = await runDispatchCli(argv, deps);
     return { exit, stdout, stderr };
   }
+
+  it('accepts the singular --failing-check flag', async () => {
+    finish('AISDLC-821');
+    const r = await cli([
+      'resume',
+      '--board-dir',
+      board,
+      '--task-id',
+      'AISDLC-821',
+      '--note',
+      'Coverage is low',
+      '--failing-check',
+      'coverage',
+      '--work-dir',
+      root,
+    ]);
+    expect(r.exit).toBe(0);
+    expect(JSON.parse(r.stdout.trim()).resume.failingChecks).toEqual(['coverage']);
+  });
 
   it('resumes a done task and the next claim surfaces the feedback note', async () => {
     finish('AISDLC-820');

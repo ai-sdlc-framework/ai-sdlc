@@ -50,7 +50,21 @@ export function findStrandedWork(
   workDir: string,
   git: GitRunner = runGit,
 ): string | undefined {
+  const base = path.resolve(workDir, '.worktrees');
   const worktree = path.resolve(workDir, manifest.worktree);
+  if (!worktree.startsWith(base + path.sep)) {
+    throw new Error(
+      `${manifest.taskId}: the manifest worktree '${oneLine(manifest.worktree, 120)}' is outside .worktrees/; refusing to inspect it`,
+    );
+  }
+  for (const [label, value] of [
+    ['branch', manifest.branch],
+    ['baseSha', manifest.baseSha],
+  ] as const) {
+    if (typeof value !== 'string' || value.startsWith('-')) {
+      throw new Error(`${manifest.taskId}: the manifest ${label} is not a valid git ref`);
+    }
+  }
   if (!existsSync(worktree)) return undefined;
   const problems: string[] = [];
   const dirty = git(['status', '--porcelain', '--untracked-files=no'], worktree);

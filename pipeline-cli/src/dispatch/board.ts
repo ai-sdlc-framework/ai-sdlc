@@ -309,7 +309,8 @@ export class OneClaimPerWorkerError extends Error {
   ) {
     super(
       `one-claim-per-worker: '${workerId}' already holds the inflight claim on ${heldTaskId}; ` +
-        `finish it (write a verdict) or release it (\`cli-dispatch release --task-id ${heldTaskId}\`) before claiming another task`,
+        `finish it (write a verdict) or release it (\`cli-dispatch release --task-id ${heldTaskId}\`) before claiming another task; ` +
+        `if the worker crashed and the claim is stale, run \`cli-dispatch sweep\``,
     );
     this.name = 'OneClaimPerWorkerError';
   }

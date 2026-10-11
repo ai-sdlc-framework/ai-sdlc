@@ -8,6 +8,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { setClock } from '../../clock.js';
 import {
   buildProductionCheckAdapters,
   checkDispatchBoard,
@@ -109,12 +110,26 @@ describe('checkDispatchBoard', () => {
     expect(r.severity).toBe('warn');
     expect(r.title).toContain('AISDLC-6');
     expect(r.title).toContain('AISDLC-7');
-    expect(r.title).not.toContain('AISDLC-8,');
     expect(r.title).not.toMatch(/AISDLC-(8|9|10)\b/);
   });
 
   it('falls back to the verdict file mtime when completedAt is missing', () => {
     put('done', 'AISDLC-12.verdict.json', { taskId: 'AISDLC-12', outcome: 'iterate-needed' });
     expect(run()['dispatch-board-stale-verdict'].severity).toBe('pass');
+    const adapters = { ...buildProductionCheckAdapters(), fileMtimeMs: () => 1000 };
+    const results = checkDispatchBoard({ projectDir: dir, adapters });
+    const stale = results.find((x) => x.id === 'dispatch-board-stale-verdict');
+    expect(stale?.severity).toBe('warn');
+    expect(stale?.title).toContain('AISDLC-12');
+  });
+
+  it('reads the pinned clock when judging heartbeat age', () => {
+    inflight('AISDLC-13', 'exec-a', 1000);
+    const restore = setClock(() => new Date(Date.now() + 3 * 60 * 60 * 1000));
+    try {
+      expect(run()['dispatch-board-heartbeat'].severity).toBe('warn');
+    } finally {
+      restore();
+    }
   });
 });

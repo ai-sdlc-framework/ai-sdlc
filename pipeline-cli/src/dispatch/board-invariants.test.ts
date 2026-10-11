@@ -67,6 +67,7 @@ describe('one claim per worker', () => {
       caught = err;
     }
     expect(caught).toBeInstanceOf(OneClaimPerWorkerError);
+    expect((caught as Error).message).toContain('cli-dispatch sweep');
     expect((caught as Error).message).toMatch(/exec-a.*AISDLC-900/);
     expect(readInflightManifest(board, 'AISDLC-901')).toBeUndefined();
   });
@@ -266,6 +267,15 @@ describe('guarded release', () => {
     claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-a' });
     const r = guardedRelease(board, 'AISDLC-926', opts({ force: true, reason: 'just because' }));
     expect(r).toEqual({ released: true, forced: true });
+  });
+
+  it('refuses a manifest worktree outside .worktrees/ and option-like refs', () => {
+    const outside = mk('AISDLC-929', { worktree: '../elsewhere' });
+    expect(() => findStrandedWork(outside, root, () => null)).toThrow(/outside \.worktrees/);
+    const dashBranch = mk('AISDLC-930', { branch: '--upload-pack=x' });
+    expect(() => findStrandedWork(dashBranch, root, () => null)).toThrow(/branch is not/);
+    const dashSha = mk('AISDLC-931', { baseSha: '-x' });
+    expect(() => findStrandedWork(dashSha, root, () => null)).toThrow(/baseSha is not/);
   });
 
   it('treats git failures as nothing found', () => {

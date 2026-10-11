@@ -46,7 +46,8 @@ const MAX_ITEM_CHARS = 200;
  * after any bullet, prompt or quote marks. Resume notes are prose: the executor
  * runs the pipeline, never a command taken from the note (AISDLC-800).
  */
-const COMMAND_LINE_RE = /^[\s>$#*`'"-]*(?:cli-[\w.-]+|git\s|gh\s)/i;
+const COMMAND_LINE_RE =
+  /^[\s>$#*`'"\u200b-\u200d\u2060\ufeff-]*(?:[cC][lL][iI]-[\w.-]+|git\s|gh\s)/;
 
 /** True when any line of `text` starts like a command. */
 export function looksLikeCommand(text: string): boolean {
@@ -64,7 +65,7 @@ function dropCommandLines(text: string): string {
 function assertProse(label: string, text: string): void {
   if (looksLikeCommand(text)) {
     throw new Error(
-      `${label} must be prose: a line that starts with 'cli-', 'git ' or 'gh ' looks like a command. ` +
+      `${label} must be prose: a line that starts with 'cli-', 'git ' or 'gh ' (lowercase) looks like a command. ` +
         'Describe what to fix in words; the executor runs the pipeline unmodified from the existing worktree',
     );
   }
@@ -143,12 +144,15 @@ function readJson<T>(file: string): T | undefined {
   }
 }
 
+/** Strip control sequences, then require prose, so validation and rendering see the same text. */
 function cleanList(label: string, items: readonly string[] | undefined): string[] | undefined {
   if (!items || items.length === 0) return undefined;
   if (items.length > MAX_LIST_ITEMS) {
     throw new Error(`${label} may have at most ${MAX_LIST_ITEMS} entries`);
   }
-  const out = items.map((i) => oneLine(i, MAX_ITEM_CHARS)).filter((i) => i.length > 0);
+  const stripped = items.map((i) => stripControl(i));
+  for (const item of stripped) assertProse('a failing check or finding', item);
+  const out = stripped.map((i) => oneLine(i, MAX_ITEM_CHARS)).filter((i) => i.length > 0);
   return out.length > 0 ? out : undefined;
 }
 
@@ -167,9 +171,7 @@ export function resumeDone(
   opts: ResumeDoneOptions,
 ): ResumeResult {
   assertId(taskId);
-  let note = (input.note ?? '').replace(/
-/g, '
-').trim();
+  let note = stripControl(input.note ?? '').trim();
   if (note.length > MAX_NOTE_CHARS) {
     throw new Error(`the feedback note may have at most ${MAX_NOTE_CHARS} characters`);
   }
@@ -184,9 +186,6 @@ export function resumeDone(
   }
   const failingChecks = cleanList('failing checks', input.failingChecks);
   const findings = cleanList('findings', input.findings);
-  for (const item of [...(failingChecks ?? []), ...(findings ?? [])]) {
-    assertProse('a failing check or finding', item);
-  }
 
   const doneDir = path.join(boardDir, 'done');
   const failedDir = path.join(boardDir, 'failed');
