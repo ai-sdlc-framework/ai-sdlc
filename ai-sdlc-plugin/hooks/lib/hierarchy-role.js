@@ -28,6 +28,9 @@ const ROLE_SKILL = {
   planner: '/ai-sdlc planner',
 };
 
+/** SessionStart sources that follow an emptied or compacted context. */
+const RESET_SOURCES = ['clear', 'compact'];
+
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 /**
@@ -193,17 +196,18 @@ function resolveSessionRole(args) {
 }
 
 /**
- * The role block for a cleared session, or null.
+ * The role block (and handoff, when `readHandoff` is given) for a cleared or compacted session, or null.
  *
  * @param {object} args
  * @param {string | undefined} args.source SessionStart source (`startup`, `resume`, `clear`, `compact`).
  * @param {string} args.boardDir directory holding `hierarchy.json`.
  * @param {number[]} args.pids this process and its ancestors, nearest first; see {@link resolveSessionSelf}.
  * @param {(pid: number) => string} [args.commOf] process command lookup; defaults to `ps`.
+ * @param {(self: object) => string | null} [args.readHandoff] handoff text for the session.
  * @returns {string | null}
  */
-function buildHierarchyRoleBlock({ source, boardDir, pids, commOf = commOfPid }) {
-  if (source !== 'clear') return null;
+function buildHierarchyRoleBlock({ source, boardDir, pids, commOf = commOfPid, readHandoff }) {
+  if (!RESET_SOURCES.includes(source)) return null;
   const found = resolveSessionSelf({ boardDir, pids, commOf });
   if (!found) return null;
   const { self, sessions } = found;
@@ -215,10 +219,54 @@ function buildHierarchyRoleBlock({ source, boardDir, pids, commOf = commOfPid })
     `- Dispatch session: ${dispatch ? dispatch.name : '(not in the roster)'}`,
     `- Run now: ${ROLE_SKILL[self.role]}`,
   ];
+  const handoff = typeof readHandoff === 'function' ? readHandoff(self) : null;
+  if (handoff) {
+    lines.push('', '### Handoff (reloaded after ' + source + ')', handoff);
+  }
+  if (self.role === 'planner') {
+    lines.push(
+      '',
+      'Scheduled jobs: list them now and recreate any that this session lost, using the prompts in the handoff notes.',
+    );
+  }
   return lines.join('\n');
 }
 
+/** Longest handoff text injected into a fresh context, in characters. */
+const HANDOFF_MAX_CHARS = 12000;
+
+/**
+ * Handoff text for a roster session via `cli-hierarchy handoff read`, truncated,
+ * or null when the CLI is missing or fails. `run` is injectable for tests.
+ * @param {{ role: string, name: string }} self
+ * @param {object} args
+ * @param {string} args.bin path of cli-hierarchy.mjs, or ''.
+ * @param {string} args.boardDir
+ * @param {Function} [args.run] spawnSync-compatible.
+ * @returns {string | null}
+ */
+function readHandoffText(self, { bin, boardDir, run = spawnSync }) {
+  if (!bin || !SAFE_NAME.test(self.name)) return null;
+  try {
+    const res = run(
+      process.execPath,
+      [bin, 'handoff', 'read', '--role', self.role, '--name', self.name, '--board-dir', boardDir],
+      { encoding: 'utf-8', timeout: 10000 },
+    );
+    const text = res && res.status === 0 ? String(res.stdout || '').trim() : '';
+    if (!text) return null;
+    return text.length > HANDOFF_MAX_CHARS
+      ? `${text.slice(0, HANDOFF_MAX_CHARS)}\n[handoff truncated]`
+      : text;
+  } catch {
+    return null;
+  }
+}
+
 module.exports = {
+  readHandoffText,
+  HANDOFF_MAX_CHARS,
+  RESET_SOURCES,
   buildHierarchyRoleBlock,
   resolveSessionRole,
   resolveSessionSelf,

@@ -190,4 +190,24 @@ It regenerates the dated planner handoff memory file from board and catalog stat
 clear at any moment loses nothing. A Stop hook clears this session by itself when its
 context passes 150k tokens (`cli-hierarchy auto-clear`) and restarts it with
 `/ai-sdlc:planner`; after any clear, run `handoff read --role planner` first and resume
-from it. Never run review rounds or orchestration loops in the planner context when they can be delegated to the dispatch session or an executor.
+from it. ### Handoff routine
+
+Trigger: the operator says "handoff", or the context warning ("Context is at N%") appears; act
+at the next turn boundary, never mid-task.
+
+1. Run `handoff write --role planner --board-dir "$BOARD_DIR"` (regenerates the part between
+   the markers from board and catalog state).
+2. Edit the same file OUTSIDE the markers (text there is kept on every rewrite) and write down
+   what the CLI cannot know: open rulings, owed items, scheduled jobs and the exact prompt of
+   each, the next free task id and decision id, and what each peer session is waiting on.
+3. Confirm in one line that it is safe to clear, e.g. `Handoff written: <path>. Safe to /clear.`
+
+After a `/clear` or a compaction the SessionStart hook reloads the handoff for you and tells you
+to list scheduled jobs and recreate any the session lost; if it did not, run `handoff read` first.
+Clearing stays a human action (or the 150k auto-clear above); a compaction can be offered with
+the `/compact` line the warning prints.
+
+Peer messages to the planner are self-contained (task id, decision id, the question, the options)
+so they can be answered after a clear without scrolling back.
+
+Never run review rounds or orchestration loops in the planner context when they can be delegated to the dispatch session or an executor.

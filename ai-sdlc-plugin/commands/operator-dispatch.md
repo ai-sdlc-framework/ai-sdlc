@@ -75,7 +75,7 @@ a name. The JSON holds:
 
 ## Step 3 - Tell the planner
 
-`SendMessage` `identity.planner` once per escalation and report (no planner: print them).
+`SendMessage` `identity.planner` at once per escalation and blocking item (no planner: print them); batch the other `reports` into one self-contained digest in `$BOARD_DIR/planner-digest.md`, sent hourly (`stat` the file), then emptied.
 Never send these, or any message, to an executor.
 
 ## Step 4 - Decisions

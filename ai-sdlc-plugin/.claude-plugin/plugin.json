@@ -107,6 +107,11 @@
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/context-auto-clear.sh\"",
             "async": true,
             "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/context-warn.sh\"",
+            "timeout": 5
           }
         ]
       }

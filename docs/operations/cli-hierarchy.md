@@ -407,6 +407,34 @@ Thresholds are configurable in `.ai-sdlc/dispatch/config.json`:
 Missing or invalid values fall back to the defaults. Set `AI_SDLC_AUTO_CLEAR=off` to switch the
 hook off for a session.
 
+### Context usage: status line, warning, handoff (AISDLC-728)
+
+Three pieces work for all three roles; none of them blocks or refuses anything.
+
+- **Status line.** `ai-sdlc-plugin/scripts/context-statusline.mjs` prints `ctx NN%`, green below
+  the warn threshold, yellow from it, red from the crit threshold. Defaults 30 and 40 percent;
+  set `AI_SDLC_CONTEXT_WARN_PCT` and `AI_SDLC_CONTEXT_CRIT_PCT` to change them. Enable it in
+  settings: `{ "statusLine": { "type": "command", "command": "node <plugin>/scripts/context-statusline.mjs" } }`.
+  It also records the percentage per session in `$TMPDIR/ai-sdlc-context-warn/<session>.json`.
+- **Warning.** The `context-warn` Stop hook reads that record after each turn and, once the
+  percentage reaches the crit threshold, shows one message: say "handoff", then `/clear`, or
+  paste the `/compact Keep: ...` line it prints. It warns once per crossing and re-arms when the
+  percentage falls below the warn threshold. `AI_SDLC_CONTEXT_WARN=off` silences it. The warning
+  only appears once the status line has run for the session.
+- **Reload.** SessionStart for sources `clear` and `compact` re-injects the role block and the
+  output of `handoff read` (truncated to 12000 characters) for a roster session; for the planner
+  it also says to list scheduled jobs and recreate lost ones. The planner's routine is in
+  `commands/planner.md`; dispatch batches non-blocking reports to the planner into one hourly
+  digest (`commands/operator-dispatch.md`). The executor's clear-between-tasks flow is unchanged.
+
+**Not verified or not possible with documented APIs** (written offline): the exact status line
+JSON fields (`context_window.used_percentage`, `session_id`), the Stop hook `systemMessage`
+output field, and the SessionStart `compact` source name are taken from the task's notes and
+must be checked against current Claude Code docs. A hook cannot run `/compact` or `/clear`; it
+can only print a line to paste. A mod could call `$.session.compact({ instructions })` from a
+button (the `context-meter` mod calls it without instructions today), and whether a mod can run
+`/clear` is unverified, so clearing stays a human action (or the 150k auto-clear above).
+
 ### `tick`
 
 One wake-up of the dispatch loop: ingest briefs, handle new verdicts (clear the finished
