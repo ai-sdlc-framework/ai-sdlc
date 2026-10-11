@@ -127,6 +127,8 @@ export interface HierarchyDeps {
   isAlive?: (pid: number) => boolean;
   /** Whether nvm has the given node version installed. Absent: looks under `$NVM_DIR/versions/node`. */
   nodeInstalled?: (version: string) => boolean;
+  /** Parent of a process, or null when unreadable (register's pane ancestry check). Absent: `ps`. */
+  parentPid?: (pid: number) => number | null;
   /** Records orchestrator events (session started, context cleared). Absent: nothing is recorded. */
   emit?: EventEmitter;
 }

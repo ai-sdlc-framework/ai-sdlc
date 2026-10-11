@@ -16,8 +16,11 @@
  * guard before calling in here.
  */
 
+import { releaseInflight } from '../dispatch/board.js';
+import { createSystemIdentity } from './caller-identity.js';
 import { holdsInflight } from './clear.js';
 import { stopSessionWindow } from './down.js';
+import { listInflight } from './inflight.js';
 import { readSessionRegistry } from './registry.js';
 import {
   defaultProjectForBoard,
@@ -57,6 +60,8 @@ export interface RestartResult {
   unchanged?: boolean;
   /** Task the executor held that `--after-task` waited for. */
   waitedFor?: string;
+  /** Task the executor claimed in the instant before the stop; returned to `queue/`. */
+  requeued?: string;
 }
 
 /** Seconds `--after-task` waits for a task boundary unless `waitSec` is given. */
@@ -91,6 +96,36 @@ function selectExecutor(roster: Roster, session: string, verb: string): RosterEn
     );
   }
   return entry;
+}
+
+/**
+ * Replace (or, with `next` null, drop) the one roster entry named `name`, taking every
+ * other entry from a fresh read so a change made during a long wait is not lost.
+ */
+function replaceEntry(deps: HierarchyDeps, name: string, next: RosterEntry | null): void {
+  const { roster } = readRosterChecked(deps.boardDir);
+  const kept = roster.sessions.map((e) => (e.name === name ? next : e));
+  if (next && !roster.sessions.some((e) => e.name === name)) kept.push(next);
+  writeRoster(deps.boardDir, {
+    ...roster,
+    sessions: kept.filter((e): e is RosterEntry => e !== null),
+  });
+}
+
+/** True when `pid` is `ancestor` or one of its descendants. */
+function isSelfOrDescendant(
+  pid: number,
+  ancestor: number,
+  parentPid: (pid: number) => number | null,
+): boolean {
+  const seen = new Set<number>();
+  let cur: number | null = pid;
+  for (let i = 0; i < 32 && cur !== null && cur > 1 && !seen.has(cur); i++) {
+    if (cur === ancestor) return true;
+    seen.add(cur);
+    cur = parentPid(cur);
+  }
+  return false;
 }
 
 /** Block until the executor holds no claimed task; returns the task it was waiting for. */
@@ -141,6 +176,12 @@ export async function hierarchyRestart(
     );
   }
 
+  // A manifest claimed after the last check above would be stranded by the stop.
+  const stranded = listInflight(deps.boardDir).find((i) => i.workerId === entry.name);
+  const requeued =
+    stranded && releaseInflight(deps.boardDir, stranded.taskId) ? stranded.taskId : undefined;
+  if (requeued) deps.log(`returned ${requeued} to the queue`);
+
   const project = entry.project ?? defaultProjectForBoard(deps.boardDir);
   const warnings: string[] = [];
   const others = roster.sessions.filter((e) => e !== entry);
@@ -161,16 +202,13 @@ export async function hierarchyRestart(
   );
   if ('failure' in launched) {
     // The old process is gone; do not leave its dead pid in the roster.
-    writeRoster(deps.boardDir, { ...roster, sessions: others });
+    replaceEntry(deps, entry.name, null);
     throw new Error(
       `${launched.failure}; '${entry.name}' was stopped and dropped from the roster. Run cli-hierarchy up to start it again`,
     );
   }
   const next = launched.entry;
-  writeRoster(deps.boardDir, {
-    ...roster,
-    sessions: roster.sessions.map((e) => (e === entry ? next : e)),
-  });
+  replaceEntry(deps, entry.name, next);
   deps.emit?.({ type: 'HierarchySessionStarted', sessionName: next.name, sessionRole: next.role });
   for (const w of warnings) deps.log(`warning: ${w}`);
   deps.log(
@@ -181,6 +219,7 @@ export async function hierarchyRestart(
     before: snapshot(entry),
     after: snapshot(next),
     ...(waitedFor ? { waitedFor } : {}),
+    ...(requeued ? { requeued } : {}),
   };
 }
 
@@ -232,6 +271,13 @@ export function hierarchyRegister(opts: { session: string }, deps: HierarchyDeps
       'Check cli-hierarchy status',
     );
   }
+  const parentPid = deps.parentPid ?? createSystemIdentity(deps.boardDir).parentPid;
+  if (!pane.panePid || !isSelfOrDescendant(live.pid, pane.panePid, parentPid)) {
+    return refuse(
+      `pid ${live.pid} is not the tmux pane's process (pid ${pane.panePid}) or one of its descendants`,
+      restartHint,
+    );
+  }
   if (live.pid === entry.pid && pane.paneId === entry.paneId && entry.status === 'running') {
     deps.log(`'${entry.name}' is already registered (pid ${entry.pid}); nothing changed`);
     return { name: entry.name, before: snapshot(entry), after: snapshot(entry), unchanged: true };
@@ -244,10 +290,7 @@ export function hierarchyRegister(opts: { session: string }, deps: HierarchyDeps
       live.startedAt > 0 ? new Date(live.startedAt).toISOString() : deps.now().toISOString(),
     status: 'running',
   };
-  writeRoster(deps.boardDir, {
-    ...roster,
-    sessions: roster.sessions.map((e) => (e === entry ? next : e)),
-  });
+  replaceEntry(deps, entry.name, next);
   deps.log(`registered executor '${next.tmuxWindow}'; pid ${entry.pid} -> ${next.pid}`);
   return { name: next.name, before: snapshot(entry), after: snapshot(next) };
 }

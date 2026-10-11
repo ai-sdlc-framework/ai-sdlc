@@ -1586,6 +1586,21 @@ describe('restart and register (AISDLC-713)', () => {
     expect(String(err.mock.calls[0]?.[0])).toContain("no session named 'executor-zeta'");
   });
 
+  it('a value-taking flag before the name still resolves the name', async () => {
+    const run: CommandRunner = (_f, args) => {
+      calls.push([...args]);
+      if (args[0] === 'display-message') return { status: 0, stdout: '%9 4242\n', stderr: '' };
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const code = await runHierarchyCli(
+      ['restart', '--wait', '30', 'executor-alpha'],
+      overrides({ run }),
+      dispatch,
+    );
+    expect(code).toBe(0);
+    expect(JSON.parse(logs.at(-1) as string)).toMatchObject({ name: 'executor-alpha' });
+  });
+
   it('restarts the named executor; --after-task before the name still selects it', async () => {
     const run: CommandRunner = (_f, args) => {
       calls.push([...args]);

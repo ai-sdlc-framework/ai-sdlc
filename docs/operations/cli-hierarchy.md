@@ -328,8 +328,9 @@ already gone (a crash) is simply started.
 An executor that holds a claimed task is refused: the message names `--after-task`. With
 `--after-task` the command waits for the task boundary (up to `--wait` seconds, default
 1500; nothing is stopped if the wait runs out), then restarts. If the executor claims its
-next task in the instant between the release and the stop, that manifest goes back to
-`queue/` like any stopped session's. If the new session cannot be started, its dead entry
+next task in the instant between the last check and the stop, that manifest is returned to
+`queue/` right after the stop (the JSON shows it as `requeued`). The roster is re-read just
+before the write, so a change to another entry made during the wait is kept. If the new session cannot be started, its dead entry
 is dropped from the roster and the message says to run `cli-hierarchy up`.
 
 Dispatch session only (the same mistake guard as `clear`, not authentication); executors
@@ -350,7 +351,7 @@ cli-hierarchy register <executor>
 Before writing it checks that the tmux window is open, carries the ownership marker, has a
 readable pane whose start command carries this session's `AI_SDLC_HIERARCHY_SESSION` and
 `AI_SDLC_HIERARCHY_ROLE`, and that a live harness session of that name is registered in this
-checkout. It then replaces that entry's pid, pane and started time (status `running`) and
+checkout whose pid is the pane's process or one of its descendants. It then replaces that entry's pid, pane and started time (status `running`) and
 nothing else; a pid that belongs to another roster entry is refused, and an entry that
 already matches is left unchanged. It does not wait for tasks, because the roster's task
 binding is the session name, not the pid. Same caller and role rules as `restart`.

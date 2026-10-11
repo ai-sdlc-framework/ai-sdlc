@@ -2069,6 +2069,38 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
     expect(newWindowCommands()).toHaveLength(1);
   });
 
+  it('returns a manifest claimed between the last check and the stop to the queue', async () => {
+    const run = deps.run;
+    let claimed = false;
+    deps.run = (f, a, o) => {
+      if (a[0] === 'send-keys' && !claimed) {
+        claimed = true;
+        putInflight('AISDLC-301', alpha);
+      }
+      return run(f, a, o);
+    };
+    const result = await hierarchyRestart({ session: alpha, afterTask: true }, deps);
+    expect(result.requeued).toBe('AISDLC-301');
+    expect(existsSync(path.join(boardDir, 'inflight', 'AISDLC-301.dispatch.json'))).toBe(false);
+    expect(existsSync(path.join(boardDir, 'queue', 'AISDLC-301.dispatch.json'))).toBe(true);
+  });
+
+  it('keeps an entry another writer changed during the --after-task wait', async () => {
+    putInflight('AISDLC-300', alpha);
+    const beta = Q('executor-beta');
+    deps.sleep = async () => {
+      releaseInflight(boardDir, 'AISDLC-300');
+      const r = readRoster(boardDir);
+      writeRoster(boardDir, {
+        ...r,
+        sessions: r.sessions.map((e) => (e.name === beta ? { ...e, pid: 7777 } : e)),
+      });
+    };
+    await hierarchyRestart({ session: alpha, afterTask: true }, deps);
+    expect(entryOf(beta)?.pid).toBe(7777);
+    expect(entryOf(alpha)?.pid).not.toBe(7777);
+  });
+
   it('--after-task gives up after --wait and stops nothing', async () => {
     putInflight('AISDLC-300', alpha);
     await expect(
@@ -2129,6 +2161,9 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
         JSON.stringify({ pid, name, startedAt: later, status: 'idle', cwd: '/repo' }),
       );
       deps.isAlive = (p) => p === pid;
+      const panePid = (entryOf(name) as RosterEntry).pid;
+      // the new process runs under the pane's shell
+      deps.parentPid = (p) => (p === pid ? panePid : null);
     };
 
     it('re-records a session whose pid changed, touching only its entry', () => {
@@ -2158,6 +2193,24 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
       expect(() => hierarchyRegister({ session: alpha }, deps)).toThrow(
         /no live harness session is registered.*cli-hierarchy restart/,
       );
+    });
+
+    it('accepts a pid several levels below the pane process', () => {
+      handRestart(9999);
+      const panePid = (entryOf(alpha) as RosterEntry).pid;
+      deps.parentPid = (p) => ({ 9999: 9998, 9998: panePid })[p] ?? null;
+      hierarchyRegister({ session: alpha }, deps);
+      expect(entryOf(alpha)?.pid).toBe(9999);
+    });
+
+    it('refuses a live pid that is not under the tmux pane', () => {
+      handRestart(9999);
+      deps.parentPid = () => null;
+      const before = readRoster(boardDir);
+      expect(() => hierarchyRegister({ session: alpha }, deps)).toThrow(
+        /not the tmux pane's process.*cli-hierarchy restart/,
+      );
+      expect(readRoster(boardDir)).toEqual(before);
     });
 
     it('refuses a pid that belongs to another roster entry', () => {
