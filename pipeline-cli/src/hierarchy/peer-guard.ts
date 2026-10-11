@@ -60,13 +60,26 @@ export function checkDispatchSender(
   const hasRef = typeof sender.ref === 'string' && sender.ref !== '';
   if (!hasPid && !hasRef) return { ok: true, warning: SENDER_UNVERIFIED_WARNING };
   const dispatch = sessions.filter((s) => s.role === 'operator-dispatch' && s.status === 'running');
+  const refPid = hasRef ? pidFromUdsRef(sender.ref as string) : undefined;
   for (const d of dispatch) {
     if (hasPid && d.pid === sender.pid) return { ok: true, name: d.name };
+    if (refPid !== undefined && d.pid === refPid) return { ok: true, name: d.name };
     if (hasRef && (d.name === sender.ref || d.tmuxSession === sender.ref)) {
       return { ok: true, name: d.name };
     }
   }
   return refused;
+}
+
+/**
+ * The pid in a harness uds session ref (`uds:/tmp/cc-socks/<pid>.sock`, the `from=`
+ * attribute of a cross-session message), or undefined for any other ref shape.
+ */
+function pidFromUdsRef(ref: string): number | undefined {
+  const match = /^uds:.*?(\d+)\.sock$/.exec(ref);
+  if (!match) return undefined;
+  const pid = Number(match[1]);
+  return Number.isSafeInteger(pid) && pid > 1 ? pid : undefined;
 }
 
 /** Result of {@link checkRepoMatch}. */

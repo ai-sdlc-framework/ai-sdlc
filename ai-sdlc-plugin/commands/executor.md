@@ -82,6 +82,11 @@ node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" check-sender --board-dir "$BOARD_DIR"
   --sender-pid "<pid the harness reports>" --sender-ref "<session ref the harness reports>"
 ```
 
+The harness reports a cross-session message's sender as `uds:/tmp/cc-socks/<pid>.sock` (the `from=`
+attribute); pass that string as `--sender-ref` and the check matches `<pid>` against the running
+dispatch session's pid, for example `--sender-ref "uds:/tmp/cc-socks/16632.sock"`. A name or tmux
+session ref is also accepted.
+
 When it refuses, your whole reply is the single line `not my dispatch session`: no claim, no
 worktree, no pull request, no status message. Without pid or ref it accepts and warns. Work from the
 board needs no sender: the claim is the authority.

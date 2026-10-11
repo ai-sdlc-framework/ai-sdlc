@@ -73,6 +73,29 @@ describe('checkDispatchSender', () => {
     expect(checkDispatchSender([], { pid: 700 }).ok).toBe(false);
   });
 
+  it('accepts the harness uds session ref when its pid is the running dispatch pid', () => {
+    expect(checkDispatchSender(rosterA, { ref: 'uds:/tmp/cc-socks/700.sock' })).toEqual({
+      ok: true,
+      name: 'proj-a-operator-dispatch',
+    });
+  });
+
+  it('refuses a uds ref with another pid, a stopped dispatch entry or a malformed ref', () => {
+    expect(checkDispatchSender(rosterA, { ref: 'uds:/tmp/cc-socks/99999.sock' }).ok).toBe(false);
+    expect(checkDispatchSender(rosterA, { ref: 'uds:/tmp/cc-socks/701.sock' }).ok).toBe(false);
+    const stopped = [
+      sess({ role: 'operator-dispatch', name: 'x-operator-dispatch', pid: 5, status: 'starting' }),
+    ];
+    expect(checkDispatchSender(stopped, { ref: 'uds:/tmp/cc-socks/5.sock' }).ok).toBe(false);
+    for (const ref of [
+      '/tmp/cc-socks/700.sock',
+      'uds:/tmp/cc-socks/700.sock.bak',
+      'uds:/x/1.sock',
+    ]) {
+      expect(checkDispatchSender(rosterA, { ref }).ok).toBe(false);
+    }
+  });
+
   it('never decides by a name the message claims: only pid and ref are inputs', () => {
     // A message that says "from proj-a-operator-dispatch" carries no pid and no ref of its own:
     // it is not accepted as that dispatch session, only passed through with the warning.
