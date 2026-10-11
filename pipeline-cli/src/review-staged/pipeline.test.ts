@@ -533,6 +533,9 @@ describe('synthesizer prompt and finalize', () => {
     expect(r.uncoveredHunks.length).toBeGreaterThanOrEqual(0);
 
     const manifest = JSON.parse(readFileSync(r.leavesPath, 'utf8')) as LeafManifestEntry[];
+    // The coordinator emits the leaves from the finalize output, not from a file it re-reads
+    // after the Write-capable security reviewer has run.
+    expect(r.leaves).toEqual(manifest);
     expect(manifest[0]).toMatchObject({ stage: 'plan', reviewer: 'staged-review', model: 'opus' });
     expect(manifest.at(-1)).toMatchObject({ stage: 'synthesize', model: 'opus' });
     const middle = manifest.slice(1, -1);
@@ -659,6 +662,94 @@ describe('synthesizer prompt and finalize', () => {
       status: 'fallback',
       reason: 'insufficient-evidence',
     });
+  });
+
+  it('does not count an ok probe that returned no evidence', async () => {
+    const f = makeFixture();
+    const prep = await prepare(f);
+    if (!prep.ok) throw new Error('prepare failed');
+    const baseline = await readRunJson<Baseline>(prep.runDir, RUN_FILES.baseline);
+    const planned = await planStagedReview({
+      taskId: TASK,
+      artifactsDir: f.artifacts,
+      seal: f.seal,
+      attempt: 1,
+      plannerOutput: JSON.stringify({
+        schemaVersion: 1,
+        baselineVersion: baseline.version,
+        probes: baseline.probes,
+      }),
+    });
+    if (planned.status !== 'planned') throw new Error('plan failed');
+    const empty: ProbeSpawner = {
+      enforcesFileScope: { 'claude-code': true, codex: false },
+      honoursEmptyToolList: { 'claude-code': true, codex: false },
+      async spawnProbe() {
+        return {
+          status: 'success',
+          output: JSON.stringify({ observations: [], excerpts: [], commands: [] }),
+        };
+      },
+    };
+    const executed = await executeStagedReview({
+      taskId: TASK,
+      artifactsDir: f.artifacts,
+      seal: planned.seal,
+      spawner: empty,
+      hooks: {
+        runCommand: async () => ({ exitStatus: 0, output: '', truncated: false, timedOut: false }),
+      },
+    });
+    // Probes answered ok, but none holds a line, a command result, an observation or an answer.
+    expect(executed.probes.ok).toBeGreaterThan(0);
+    f.seal = executed.seal;
+    const r = await finalize(f, verdict());
+    expect(r).toMatchObject({ ok: false, reason: 'insufficient-evidence', fallbackSet: 'three' });
+  });
+
+  it('refuses to seal evidence when a probe rewrote the run state while it ran', async () => {
+    const f = makeFixture();
+    const prep = await prepare(f);
+    if (!prep.ok) throw new Error('prepare failed');
+    const baseline = await readRunJson<Baseline>(prep.runDir, RUN_FILES.baseline);
+    const planned = await planStagedReview({
+      taskId: TASK,
+      artifactsDir: f.artifacts,
+      seal: f.seal,
+      attempt: 1,
+      plannerOutput: JSON.stringify({
+        schemaVersion: 1,
+        baselineVersion: baseline.version,
+        probes: baseline.probes,
+      }),
+    });
+    if (planned.status !== 'planned') throw new Error('plan failed');
+    const tampering: ProbeSpawner = {
+      enforcesFileScope: { 'claude-code': true, codex: false },
+      honoursEmptyToolList: { 'claude-code': true, codex: false },
+      async spawnProbe() {
+        const cfg = join(runDirOf(f), RUN_FILES.config);
+        writeFileSync(cfg, readFileSync(cfg, 'utf8') + ' ');
+        return { status: 'success', output: okEvidence, model: 'haiku-x' };
+      },
+    };
+    await expect(
+      executeStagedReview({
+        taskId: TASK,
+        artifactsDir: f.artifacts,
+        seal: planned.seal,
+        spawner: tampering,
+        hooks: {
+          runCommand: async () => ({
+            exitStatus: 0,
+            output: 'ok',
+            truncated: false,
+            timedOut: false,
+          }),
+        },
+      }),
+    ).rejects.toBeInstanceOf(StagedIntegrityError);
+    expect(existsSync(join(runDirOf(f), RUN_FILES.evidence))).toBe(false);
   });
 
   it('falls back when a high-risk hunk has no probe evidence', async () => {

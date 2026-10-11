@@ -71,7 +71,12 @@ import {
   writeRunText,
   type ProbeCounts,
 } from './run-store.js';
-import { buildLeafManifest, executeTranscriptFiles, type ExecuteLeafSource } from './leaves.js';
+import {
+  buildLeafManifest,
+  executeTranscriptFiles,
+  type ExecuteLeafSource,
+  type LeafManifestEntry,
+} from './leaves.js';
 import { toReviewerVerdict } from './verdict.js';
 import type { EvaluateJudgmentContext } from '@ai-sdlc/reference';
 import type { StructuralProvider } from '../review-risk-map/structural.js';
@@ -490,6 +495,17 @@ export function countProbes(bundle: EvidenceBundle): ProbeCounts {
   return counts;
 }
 
+/** True when an `ok` probe actually returned something a verdict can rest on. */
+function holdsEvidence(e: EvidenceBundle['entries'][number]): boolean {
+  return (
+    e.status === 'ok' &&
+    (e.excerpts.length > 0 ||
+      e.commands.length > 0 ||
+      e.observations.length > 0 ||
+      (e.answer !== undefined && e.answer.text.trim() !== ''))
+  );
+}
+
 /** The transcript of one probe, in the JSONL event shape the other reviewer transcripts use. */
 function transcriptJsonl(t: ProbeTranscript, at: string): string {
   const lines = [
@@ -580,6 +596,9 @@ export async function executeStagedReview(
   };
 
   const bundle = await executePlan(plan, spawner, limits, hooks);
+  // Run probes execute the repository's own scripts, so they could have rewritten the run
+  // state this phase just read. Check the plan seal again before the evidence is sealed.
+  await assertSeal(runDir, 'plan', opts.seal);
   const evidencePath = await writeRunJson(runDir, RUN_FILES.evidence, bundle);
   written.sort((a, b) => (a.probeId < b.probeId ? -1 : 1));
   await writeRunJson(runDir, RUN_FILES.executeLeaves, written);
@@ -640,6 +659,8 @@ export type FinalizeStagedReviewResult =
       reviewerVerdict: ReturnType<typeof toReviewerVerdict>;
       verdictPath: string;
       leavesPath: string;
+      /** The leaf manifest, so the coordinator emits the leaves without re-reading a file. */
+      leaves: LeafManifestEntry[];
       uncoveredHunks: string[];
       dropped: number;
     }
@@ -690,9 +711,10 @@ export async function finalizeStagedReview(
   const uncoveredHigh = riskMap.hunks
     .filter((h) => uncoveredAll.includes(h.id) && isHighRisk(h, config.riskThreshold))
     .map((h) => h.id);
-  if (probeCounts.ok === 0 || uncoveredHigh.length > 0) {
+  const withEvidence = evidence.entries.filter(holdsEvidence).length;
+  if (withEvidence === 0 || uncoveredHigh.length > 0) {
     const detail =
-      probeCounts.ok === 0
+      withEvidence === 0
         ? 'no probe returned evidence, so the verdict rests on nothing'
         : `high-risk hunk(s) have no probe evidence: ${uncoveredHigh.slice(0, 10).join(', ')}`;
     const rejections: Rejection[] = [
@@ -767,6 +789,7 @@ export async function finalizeStagedReview(
     reviewerVerdict,
     verdictPath,
     leavesPath,
+    leaves: manifest.leaves,
     uncoveredHunks: uncovered,
     dropped: grounded.dropped.length,
   };

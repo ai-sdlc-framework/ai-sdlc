@@ -206,8 +206,7 @@ export function readReviewConfigFromBaseRef(workDir: string, baseRef: string): s
   }
 }
 
-const MODE_PATTERN =
-  /^\s*reviewerSet:\s*['"]?(three|code-test-merged|staged)['"]?\s*(#.*)?$/im;
+const MODE_PATTERN = /^\s*reviewerSet:\s*['"]?(three|code-test-merged|staged)['"]?\s*(#.*)?$/im;
 
 function isMode(value: string | undefined): value is ReviewerSetMode {
   return value === 'three' || value === 'code-test-merged' || value === 'staged';
