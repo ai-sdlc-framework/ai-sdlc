@@ -32,23 +32,50 @@ export interface ValidateTaskOptions {
    * the default scan never visits.
    */
   taskFilePathOverride?: string;
+  /**
+   * AISDLC-822 — the task is being resumed. A resumed task whose branch already
+   * carries its Done move has its file in `backlog/completed/`; Step 1 accepts
+   * that location (and its `Done` status) instead of refusing with
+   * `no task file for <id>`. First runs are unchanged.
+   */
+  resume?: boolean;
 }
 
-/** Locate `<workDir>/backlog/tasks/<id-lower> - *.md`. Case-insensitive ID match. */
-export function findTaskFile(taskId: string, workDir: string): string | null {
-  const tasksDir = join(workDir, 'backlog', 'tasks');
-  if (!existsSync(tasksDir)) return null;
-  const lower = taskId.toLowerCase();
+export interface FindTaskFileOptions {
+  /**
+   * AISDLC-822 — when no file exists in `backlog/tasks/`, fall back to
+   * `backlog/completed/` (a resumed task already carries its Done move).
+   */
+  includeCompleted?: boolean;
+}
+
+function findInDir(dir: string, taskId: string): string | null {
+  if (!existsSync(dir)) return null;
   let entries: string[];
   try {
-    entries = readdirSync(tasksDir);
+    entries = readdirSync(dir);
   } catch {
     return null;
   }
   // Match files starting with "<lower> -" (Backlog.md filename convention).
-  const prefix = `${lower} -`;
+  const prefix = `${taskId.toLowerCase()} -`;
   const match = entries.find((name) => name.toLowerCase().startsWith(prefix));
-  return match ? join(tasksDir, match) : null;
+  return match ? join(dir, match) : null;
+}
+
+/**
+ * Locate `<workDir>/backlog/tasks/<id-lower> - *.md` (case-insensitive ID
+ * match). The single resolver for Steps 1, 4 and 10: with
+ * `includeCompleted` it falls back to `backlog/completed/` (AISDLC-822).
+ */
+export function findTaskFile(
+  taskId: string,
+  workDir: string,
+  opts: FindTaskFileOptions = {},
+): string | null {
+  const open = findInDir(join(workDir, 'backlog', 'tasks'), taskId);
+  if (open || !opts.includeCompleted) return open;
+  return findInDir(join(workDir, 'backlog', 'completed'), taskId);
 }
 
 /**
@@ -58,14 +85,7 @@ export function findTaskFile(taskId: string, workDir: string): string | null {
  */
 export function isTaskFileCompleted(taskId: string, workDir: string): boolean {
   if (findTaskFile(taskId, workDir)) return false;
-  const dir = join(workDir, 'backlog', 'completed');
-  if (!existsSync(dir)) return false;
-  try {
-    const prefix = `${taskId.toLowerCase()} -`;
-    return readdirSync(dir).some((name) => name.toLowerCase().startsWith(prefix));
-  } catch {
-    return false;
-  }
+  return findTaskFile(taskId, workDir, { includeCompleted: true }) !== null;
 }
 
 /**
@@ -173,7 +193,7 @@ export async function validateTask(opts: ValidateTaskOptions): Promise<ValidateR
   const filePath =
     opts.taskFilePathOverride && existsSync(opts.taskFilePathOverride)
       ? opts.taskFilePathOverride
-      : findTaskFile(opts.taskId, opts.workDir);
+      : findTaskFile(opts.taskId, opts.workDir, { includeCompleted: opts.resume === true });
   if (!filePath) {
     return { ok: false, reason: `no task file for ${opts.taskId}` };
   }
@@ -185,7 +205,12 @@ export async function validateTask(opts: ValidateTaskOptions): Promise<ValidateR
     return { ok: false, reason: `failed to parse task file: ${(err as Error).message}` };
   }
 
-  if (task.status === 'Done') {
+  // AISDLC-822 — a resumed task already moved to backlog/completed/ is Done by design.
+  const resumedCompleted =
+    opts.resume === true &&
+    !opts.taskFilePathOverride &&
+    isTaskFileCompleted(opts.taskId, opts.workDir);
+  if (task.status === 'Done' && !resumedCompleted) {
     return { ok: false, reason: `status is 'Done' — already shipped`, task };
   }
   if (task.status === 'Draft') {
@@ -208,7 +233,7 @@ export async function validateTask(opts: ValidateTaskOptions): Promise<ValidateR
       task,
     };
   }
-  if (task.status !== 'To Do' && task.status !== 'In Progress') {
+  if (task.status !== 'To Do' && task.status !== 'In Progress' && !resumedCompleted) {
     return {
       ok: false,
       reason: `unexpected status "${task.status}" — expected 'To Do' or 'In Progress'`,

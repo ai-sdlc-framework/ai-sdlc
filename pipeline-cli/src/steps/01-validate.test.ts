@@ -116,6 +116,37 @@ describe('Step 1 — validateTask', () => {
   });
 });
 
+describe('Step 1 — resume with task file in backlog/completed (AISDLC-822)', () => {
+  it('AC-1: resume accepts a completed-location file and parses it', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-822', title: 'resume', completed: true });
+    const r = await validateTask({ taskId: 'AISDLC-822', workDir: tmp, resume: true });
+    expect(r.ok).toBe(true);
+    expect(r.task?.id).toBe('AISDLC-822');
+    expect(r.task?.filePath).toContain('completed');
+    expect(r.task?.acceptanceCriteria.length).toBeGreaterThan(0);
+  });
+
+  it('AC-2: first run still refuses a completed-only task', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-822', title: 'resume', completed: true });
+    const r = await validateTask({ taskId: 'AISDLC-822', workDir: tmp });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('no task file for AISDLC-822');
+  });
+
+  it('resume prefers backlog/tasks over completed and still refuses Done there', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-823', title: 'x', status: 'Done' });
+    const r = await validateTask({ taskId: 'AISDLC-823', workDir: tmp, resume: true });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/already shipped/);
+  });
+
+  it('findTaskFile includeCompleted falls back to completed only when asked', () => {
+    writeTaskFile(tmp, { id: 'AISDLC-824', title: 'y', completed: true });
+    expect(findTaskFile('AISDLC-824', tmp)).toBeNull();
+    expect(findTaskFile('AISDLC-824', tmp, { includeCompleted: true })).toContain('completed');
+  });
+});
+
 describe('Step 1 — helpers', () => {
   it('findTaskFile returns null when tasks/ missing', () => {
     expect(findTaskFile('AISDLC-1', '/no/such/path')).toBeNull();
