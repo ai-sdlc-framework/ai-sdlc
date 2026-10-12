@@ -43,7 +43,6 @@
  */
 
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, unlinkSync } from 'node:fs';
-import { now as clockNow } from '../../clock.js';
 import { CLIENT_SIDE_ONLY_MESSAGE } from './branch-protection-shared.js';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
