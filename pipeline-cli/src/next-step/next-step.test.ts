@@ -538,6 +538,30 @@ describe('iteration (Step 9) and the human-attention cap', () => {
   });
 });
 
+describe('lease-push preflight before Step 10.5 (AISDLC-798)', () => {
+  const refusal = (blocking: boolean) => ({
+    status: 'refused' as const,
+    blocking,
+    failing: [{ condition: 'board-claim', found: 'f', expected: 'e', fix: 'x' }],
+    message: 'lease-push preflight: board-claim unmet',
+  });
+
+  it('stops a dispatch-managed run before any rebase or signing', async () => {
+    const { last, exitCodes } = await drive({ ...deps(), leasePreflight: () => refusal(true) });
+    expect(last).toMatchObject({ action: 'stop', outcome: 'aborted' });
+    expect(last.action === 'stop' && last.reason).toContain('board-claim unmet');
+    expect(exitCodes.at(-1)).toBe(1);
+    expect(counters.rebased).toBe(0);
+    expect(shipped).toHaveLength(0);
+  });
+
+  it('only warns for a hand-run session and ships', async () => {
+    const { last } = await drive({ ...deps(), leasePreflight: () => refusal(false) });
+    expect(last.action).toBe('done');
+    expect(counters.rebased).toBe(1);
+  });
+});
+
 describe('pre-sign rebase (Step 10.5)', () => {
   it('re-reviews exactly once when the rebase changed the content', async () => {
     const { instructions, last } = await drive(deps({ rebases: ['changed', 'changed'] }));

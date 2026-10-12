@@ -169,6 +169,8 @@ function listRecentTranscripts(home: string, sinceMs: number): string[] {
 export interface DoctorRunContext {
   projectDir: string;
   adapters: DoctorCheckAdapters;
+  /** Task id for task-scoped checks such as `lease-push-preflight` (`doctor --task <id>`). */
+  taskId?: string;
 }
 
 export interface DoctorFixResult {
@@ -1256,6 +1258,85 @@ export function checkHierarchyLaunchEnv(ctx: DoctorRunContext): DoctorCheckResul
   ];
 }
 
+/** Prints the plugin's own `evaluateLeasePush` result as JSON (args: module, projectDir, cwd, branch). */
+const LEASE_PREFLIGHT_SCRIPT =
+  'const m=require(process.argv[1]);const r=m.evaluateLeasePush({projectDir:process.argv[2],cwd:process.argv[3],env:process.env,...(process.argv[4]?{branch:process.argv[4]}:{})});console.log(JSON.stringify({allowed:r.allowed,failing:r.failing}));';
+
+/**
+ * AISDLC-798: for `doctor --task <id>`, evaluates the lease-push hook's own
+ * predicate (the plugin's `evaluateLeasePush`) for that task's worktree and prints
+ * each unmet condition with its sanctioned fix, the same table the pipeline prints
+ * before Step 10.5. Quiet without `--task`.
+ */
+export function checkLeasePushPreflight(ctx: DoctorRunContext): DoctorCheckResult[] {
+  const taskId = ctx.taskId;
+  if (!taskId) return [];
+  const id = 'lease-push-preflight';
+  const worktree = join(ctx.projectDir, '.worktrees', taskId.toLowerCase());
+  const module = join(ctx.projectDir, 'ai-sdlc-plugin', 'hooks', 'lib', 'trusted-policy.js');
+  if (!ctx.adapters.exists(worktree)) {
+    return [
+      {
+        id,
+        severity: 'fail',
+        title: `no worktree at ${worktree} for ${taskId}`,
+        remediation:
+          'Run `/ai-sdlc execute` for the task (Step 3 creates the worktree), then re-run.',
+      },
+    ];
+  }
+  if (!ctx.adapters.exists(module)) {
+    return [
+      {
+        id,
+        severity: 'warn',
+        title: `lease-push preflight skipped: ${module} not found`,
+        remediation: 'Run from the repository that carries ai-sdlc-plugin/.',
+      },
+    ];
+  }
+  const branch = ctx.adapters.runCommand('git', [
+    '-C',
+    worktree,
+    'symbolic-ref',
+    '--short',
+    'HEAD',
+  ]);
+  const run = ctx.adapters.runCommand('node', [
+    '-e',
+    LEASE_PREFLIGHT_SCRIPT,
+    module,
+    ctx.projectDir,
+    worktree,
+    branch.exitCode === 0 ? branch.stdout.trim() : '',
+  ]);
+  let parsed: { allowed: boolean; failing: Array<Record<string, string>> };
+  try {
+    parsed = JSON.parse(run.stdout);
+  } catch {
+    return [
+      { id, severity: 'warn', title: `lease-push preflight could not be evaluated for ${taskId}` },
+    ];
+  }
+  if (parsed.allowed) {
+    return [{ id, severity: 'pass', title: `lease push allowed for ${taskId} from ${worktree}` }];
+  }
+  const table = parsed.failing
+    .map(
+      (f) => `${f['condition']}: found ${f['found']}; expected ${f['expected']}; fix: ${f['fix']}`,
+    )
+    .join('\n');
+  return [
+    {
+      id,
+      severity: 'fail',
+      title: `lease push for ${taskId} would be refused (not-task-worktree):\n${table}`,
+      remediation: parsed.failing.map((f) => f['fix']).join('\n'),
+      anonymizableEvidence: { conditions: parsed.failing.map((f) => f['condition']) },
+    },
+  ];
+}
+
 /** AISDLC-750: marker the post-rewrite guard fix (and the proxy shim) carries. */
 const POST_REWRITE_FIX_MARKER = 'AISDLC-750';
 
@@ -1811,6 +1892,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     description:
       'Running hierarchy sessions whose tmux start command lacks the AI_SDLC_HIERARCHY_SESSION/ROLE launch env the lease-push hook binds executors by (AISDLC-791).',
     run: checkHierarchyLaunchEnv,
+  },
+  {
+    id: 'lease-push-preflight',
+    description:
+      "With --task <id>: whether the lease-push hook would allow the task worktree's push, and each unmet condition with its fix (AISDLC-798).",
+    run: checkLeasePushPreflight,
   },
   {
     id: 'parent-checkout-state',

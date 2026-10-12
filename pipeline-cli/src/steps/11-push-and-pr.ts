@@ -30,6 +30,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkOwnWorktreeForOperator, isProtectedBranch } from '../hierarchy/lease-policy.js';
+import { leasePushPreflight, type LeasePreflight } from '../hierarchy/lease-preflight.js';
 import { loadOperationalPolicy } from '../hierarchy/operational.js';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import {
@@ -75,6 +76,8 @@ export interface PushAndPrStepOptions extends PushAndPrOptions {
    * verify-attestation.yml sees a valid envelope after the rebase.
    */
   signAttestationScript?: string;
+  /** AISDLC-798 — replaces the lease-push preflight (tests). */
+  leasePreflight?: (opts: PushAndPrStepOptions) => LeasePreflight;
 }
 
 const DEFAULT_TITLE_TEMPLATE = 'feat: {issueTitle} ({issueId})';
@@ -256,6 +259,25 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
   if (opts.resume) {
     const refusal = checkResumeLeasePush(opts);
     if (refusal) return { pushed: false, prUrl: null, reason: refusal };
+  }
+
+  // 0-pre-b. AISDLC-798 — evaluate the lease-push hook's own predicate before the rebase, so a
+  //    dispatch-managed session the hook would refuse stops here with the failing conditions
+  //    named, not after the rebase, reviews and signing. Advice only for a hand-run session.
+  const dir = process.env['CLAUDE_PROJECT_DIR'];
+  const lease = (
+    opts.leasePreflight ??
+    ((o) =>
+      leasePushPreflight({
+        projectDir: dir && dir.startsWith('/') ? dir : o.workDir,
+        cwd: o.worktreePath,
+        taskId: o.taskId,
+        branch: o.branch,
+      }))
+  )(opts);
+  if (lease.status === 'refused') {
+    if (lease.blocking) return { pushed: false, prUrl: null, reason: lease.message };
+    (opts.logger ?? DEFAULT_LOGGER).warn(lease.message);
   }
 
   // 0. AISDLC-232 — Late-rebase: fetch + rebase origin/main before pushing.

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { composeBody, composeTitle, pushAndPr, readTitleTemplate } from './11-push-and-pr.js';
@@ -9,9 +9,13 @@ import { eventsFilePath } from '../orchestrator/events.js';
 
 let tmp: string;
 beforeEach(() => {
+  // The lease-push preflight reads the session env (AISDLC-798); keep it hermetic.
+  vi.stubEnv('CLAUDE_PLUGIN_ROOT', '');
+  vi.stubEnv('AI_SDLC_HIERARCHY_ROLE', '');
   tmp = makeTmpProject();
 });
 afterEach(() => {
+  vi.unstubAllEnvs();
   cleanupTmpProject(tmp);
 });
 
@@ -574,5 +578,61 @@ describe('Step 11 — pushAndPr', () => {
     const evPath = eventsFilePath(tmp, frozenDate);
     // No event written when PR creation fails
     expect(existsSync(evPath)).toBe(false);
+  });
+});
+
+describe('Step 11 lease-push preflight (AISDLC-798)', () => {
+  const refused = (blocking: boolean) => ({
+    status: 'refused' as const,
+    blocking,
+    failing: [{ condition: 'heartbeat', found: 'f', expected: 'e', fix: 'x' }],
+    message: 'lease-push preflight: heartbeat unmet',
+  });
+  const base = () => ({
+    taskId: 'AISDLC-1',
+    workDir: tmp,
+    worktreePath: tmp,
+    branch: 'b',
+    task,
+    developerReturn: dev,
+    verdict: approved,
+  });
+
+  it('stops a dispatch-managed session before the rebase, naming the failing conditions', async () => {
+    const fake = new FakeRunner();
+    const r = await pushAndPr({
+      ...base(),
+      runner: fake.toRunner(),
+      leasePreflight: () => refused(true),
+    });
+    expect(r).toMatchObject({
+      pushed: false,
+      prUrl: null,
+      reason: 'lease-push preflight: heartbeat unmet',
+    });
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it('only warns for a hand-run session and carries on', async () => {
+    const warn = vi.fn();
+    const fake = new FakeRunner()
+      .on(/^git push -u origin/, ok())
+      .on(/^gh pr create/, ok('https://github.com/x/y/pull/1\n'));
+    const r = await pushAndPr({
+      ...base(),
+      runner: fake.toRunner(),
+      logger: { info: vi.fn(), warn, error: vi.fn(), progress: vi.fn() } as never,
+      leasePreflight: () => refused(false),
+    });
+    expect(r.pushed).toBe(true);
+    expect(warn).toHaveBeenCalledWith('lease-push preflight: heartbeat unmet');
+  });
+
+  it('runs the real preflight by default and skips it when the plugin is not on disk', async () => {
+    const fake = new FakeRunner()
+      .on(/^git push -u origin/, ok())
+      .on(/^gh pr create/, ok('https://github.com/x/y/pull/1\n'));
+    const r = await pushAndPr({ ...base(), runner: fake.toRunner() });
+    expect(r.pushed).toBe(true);
   });
 });

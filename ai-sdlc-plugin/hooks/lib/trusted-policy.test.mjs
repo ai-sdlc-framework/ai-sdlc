@@ -20,6 +20,8 @@ const {
   bannerGovernance,
   readTaskId,
   resolveLeaseWorktree,
+  evaluateLeasePush,
+  renderLeaseFailing,
 } = require('./trusted-policy.js');
 const { resolveGovernanceFromYaml } = require('./governance-resolver.js');
 
@@ -312,5 +314,199 @@ describe('resolveLeaseWorktree claim path binds to the worktree directory name (
       const f = fixture(d);
       f.claim('AISDLC-10');
       assert.equal(lease(f), null);
+    }));
+});
+
+describe('evaluateLeasePush golden paths and negative twins (AISDLC-798)', () => {
+  const SESSION = 'executor-alpha';
+
+  function fixture(d) {
+    const gitEnv = {
+      PATH: process.env.PATH,
+      HOME: d,
+      GIT_CONFIG_GLOBAL: join(d, 'c'),
+      GIT_CONFIG_NOSYSTEM: '1',
+    };
+    writeFileSync(join(d, 'c'), '');
+    const root = join(d, 'main');
+    mkdirSync(root);
+    const g = (cwd, ...a) => execFileSync('git', a, { cwd, env: gitEnv });
+    g(root, 'init', '-q', '-b', 'main');
+    g(
+      root,
+      '-c',
+      'user.name=t',
+      '-c',
+      'user.email=t@e.invalid',
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-m',
+      'i',
+    );
+    const wt = join(root, '.worktrees', 'aisdlc-9');
+    g(root, 'worktree', 'add', '-q', '-b', 'ai-sdlc/aisdlc-9', wt);
+    const inflight = join(realpathSync(root), '.ai-sdlc', 'dispatch', 'inflight');
+    mkdirSync(inflight, { recursive: true });
+    return {
+      root: realpathSync(root),
+      wt: realpathSync(wt),
+      claim: (id, { heartbeat = true } = {}) => {
+        writeFileSync(join(inflight, `${id}.dispatch.json`), '{}');
+        if (heartbeat) {
+          writeFileSync(join(inflight, `${id}.state.json`), JSON.stringify({ workerId: SESSION }));
+        }
+      },
+    };
+  }
+
+  const execEnv = (extra = {}) => ({
+    AI_SDLC_HIERARCHY_SESSION: SESSION,
+    AI_SDLC_HIERARCHY_ROLE: 'executor',
+    ...extra,
+  });
+  const conditions = (r) => r.failing.map((f) => f.condition);
+
+  it('ALLOWS a fresh slugged task worktree with a sentinel (worktree-rooted session)', () =>
+    tmp((d) => {
+      const f = fixture(d);
+      writeFileSync(join(f.wt, '.active-task'), 'AISDLC-9\n');
+      const r = evaluateLeasePush({
+        projectDir: f.wt,
+        cwd: f.wt,
+        env: {},
+        branch: 'ai-sdlc/aisdlc-9-some-slug',
+      });
+      assert.deepEqual(r.failing, []);
+      assert.equal(r.allowed, true);
+    }));
+
+  it('ALLOWS a resumed worktree with NO sentinel and its task file in backlog/completed', () =>
+    tmp((d) => {
+      const f = fixture(d);
+      mkdirSync(join(f.wt, 'backlog', 'completed'), { recursive: true });
+      writeFileSync(join(f.wt, 'backlog', 'completed', 'aisdlc-9 - done.md'), 'x');
+      f.claim('AISDLC-9');
+      assert.ok(!existsSync(join(f.wt, '.active-task')));
+      const r = evaluateLeasePush({
+        projectDir: f.root,
+        cwd: f.wt,
+        env: execEnv(),
+        branch: 'ai-sdlc/aisdlc-9-resumed',
+      });
+      assert.deepEqual(r.failing, []);
+      assert.equal(r.taskId, 'aisdlc-9');
+    }));
+
+  it('ALLOWS a main-rooted hierarchy executor with env, one claim and a heartbeat', () =>
+    tmp((d) => {
+      const f = fixture(d);
+      f.claim('AISDLC-9');
+      writeFileSync(join(f.wt, '.active-task'), 'AISDLC-9\n');
+      const r = evaluateLeasePush({
+        projectDir: f.root,
+        cwd: f.wt,
+        env: execEnv({ AI_SDLC_HIERARCHY_SESSION: `proj-${SESSION}` }),
+        branch: 'ai-sdlc/aisdlc-9-x',
+      });
+      assert.equal(r.allowed, true);
+    }));
+
+  it('ALLOWS the exact-name branch ai-sdlc/<id>', () =>
+    tmp((d) => {
+      const f = fixture(d);
+      f.claim('AISDLC-9');
+      const r = evaluateLeasePush({
+        projectDir: f.root,
+        cwd: f.wt,
+        env: execEnv(),
+        branch: 'refs/heads/ai-sdlc/aisdlc-9',
+      });
+      assert.equal(r.allowed, true);
+    }));
+
+  it('ALLOWS an env-bound main-rooted session without any board claim', () =>
+    tmp((d) => {
+      const f = fixture(d);
+      writeFileSync(join(f.wt, '.active-task'), 'AISDLC-9\n');
+      const r = evaluateLeasePush({
+        projectDir: f.root,
+        cwd: f.wt,
+        env: { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-9' },
+      });
+      assert.equal(r.allowed, true);
+    }));
+
+  it('REFUSES two claims with board-claim', () =>
+    tmp((d) => {
+      const f = fixture(d);
+      f.claim('AISDLC-9');
+      f.claim('AISDLC-10');
+      const r = evaluateLeasePush({ projectDir: f.root, cwd: f.wt, env: execEnv() });
+      assert.equal(r.allowed, false);
+      assert.ok(conditions(r).includes('board-claim'));
+      assert.match(renderLeaseFailing(r.failing), /board-claim: found .*expected .*fix:/);
+    }));
+
+  it('REFUSES a missing heartbeat with heartbeat and names the command', () =>
+    tmp((d) => {
+      const f = fixture(d);
+      f.claim('AISDLC-9', { heartbeat: false });
+      const r = evaluateLeasePush({ projectDir: f.root, cwd: f.wt, env: execEnv() });
+      assert.deepEqual(conditions(r), ['heartbeat']);
+      assert.match(r.failing[0].fix, /cli-dispatch heartbeat --task-id AISDLC-9/);
+    }));
+
+  it('REFUSES missing hierarchy env with hierarchy-env', () =>
+    tmp((d) => {
+      const f = fixture(d);
+      f.claim('AISDLC-9');
+      const r = evaluateLeasePush({ projectDir: f.root, cwd: f.wt, env: {} });
+      assert.deepEqual(conditions(r), ['hierarchy-env']);
+    }));
+
+  it('REFUSES a mismatched sentinel with sentinel-agreement', () =>
+    tmp((d) => {
+      const f = fixture(d);
+      f.claim('AISDLC-9');
+      writeFileSync(join(f.wt, '.active-task'), 'AISDLC-8\n');
+      const r = evaluateLeasePush({ projectDir: f.root, cwd: f.wt, env: execEnv() });
+      assert.deepEqual(conditions(r), ['sentinel-agreement']);
+    }));
+
+  it("REFUSES another task's branch with branch", () =>
+    tmp((d) => {
+      const f = fixture(d);
+      f.claim('AISDLC-9');
+      const r = evaluateLeasePush({
+        projectDir: f.root,
+        cwd: f.wt,
+        env: execEnv(),
+        branch: 'ai-sdlc/aisdlc-10-other',
+      });
+      assert.deepEqual(conditions(r), ['branch']);
+    }));
+
+  it('REFUSES a cwd outside .worktrees with worktree-location, and a worktree-rooted sibling with own-session', () =>
+    tmp((d) => {
+      const f = fixture(d);
+      const sibling = join(f.root, '.worktrees', 'aisdlc-10');
+      execFileSync('git', ['worktree', 'add', '-q', '-b', 'x/sibling', sibling], {
+        cwd: f.root,
+        env: { ...process.env, HOME: d, GIT_CONFIG_GLOBAL: join(d, 'c') },
+      });
+      assert.deepEqual(
+        conditions(evaluateLeasePush({ projectDir: f.root, cwd: f.root, env: execEnv() })),
+        ['worktree-location'],
+      );
+      assert.deepEqual(conditions(evaluateLeasePush({ projectDir: sibling, cwd: f.wt, env: {} })), [
+        'own-session',
+      ]);
+    }));
+
+  it('REFUSES with main-checkout when the project dir is not a repository', () =>
+    tmp((d) => {
+      const r = evaluateLeasePush({ projectDir: d, cwd: d, env: {} });
+      assert.deepEqual(conditions(r), ['main-checkout']);
     }));
 });

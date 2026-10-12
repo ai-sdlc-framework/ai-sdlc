@@ -12,6 +12,10 @@
  *     before any model call: the lease-push hook binds an executor to its task by
  *     that heartbeat, so it must hold from the first push. A write failure throws.
  *
+ *  5. Run the lease-push preflight (AISDLC-798) on the new claim and print what the
+ *     PreToolUse hook would refuse later (missing launch env, a second claim, a missing
+ *     heartbeat), so a misconfigured executor is caught at claim time.
+ *
  * The sender check stays with the executor's instruction handling: it needs the
  * pid or ref the harness reports for a message, which only exists per message.
  */
@@ -22,6 +26,7 @@ import { claimWithWait } from '../dispatch/claim-wait.js';
 import { formatResumeFeedback } from '../dispatch/resume.js';
 import type { DispatchManifest } from '../dispatch/types.js';
 import { resolveCaller, type IdentityDeps } from './caller-identity.js';
+import { claimPreflight, type LeasePreflight } from './lease-preflight.js';
 import { checkRepoMatch, rosterProject } from './peer-guard.js';
 import { readRosterChecked } from './roster.js';
 import type { GitRunner } from './trusted-root.js';
@@ -47,6 +52,10 @@ export interface ExecutorStartDeps {
   claim?: typeof claimWithWait;
   /** Replaces the heartbeat write (tests). */
   heartbeat?: typeof writeHeartbeat;
+  /** Replaces the lease-push preflight (tests). */
+  preflight?: typeof claimPreflight;
+  /** The session env the hook would see (default process.env). */
+  env?: NodeJS.ProcessEnv;
   log?: (line: string) => void;
 }
 
@@ -59,6 +68,8 @@ export interface ExecutorStartResult {
   /** The claimed task, or null when the wait lapsed with nothing eligible. */
   taskId: string | null;
   manifest?: DispatchManifest;
+  /** The lease-push preflight of the claim; absent when nothing was claimed. */
+  leasePreflight?: LeasePreflight;
 }
 
 /**
@@ -120,11 +131,22 @@ export async function executorStart(
       );
     }
   }
+  let leasePreflight: LeasePreflight | undefined;
+  if (result.claimed && result.manifest) {
+    leasePreflight = (deps.preflight ?? claimPreflight)(
+      opts.boardDir,
+      result.manifest.taskId,
+      deps.env ?? process.env,
+      [opts.cwd],
+    );
+    deps.log?.(`[executor] ${leasePreflight.message}`);
+  }
   return {
     name: self.name,
     project: project.project,
     dispatch,
     taskId: result.claimed && result.manifest ? result.manifest.taskId : null,
     ...(result.claimed && result.manifest ? { manifest: result.manifest } : {}),
+    ...(leasePreflight ? { leasePreflight } : {}),
   };
 }

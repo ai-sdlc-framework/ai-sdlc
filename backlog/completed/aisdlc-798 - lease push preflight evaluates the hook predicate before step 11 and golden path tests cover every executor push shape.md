@@ -2,7 +2,7 @@
 id: AISDLC-798
 title: >-
   Lease-push preflight: the pipeline evaluates the hook's own predicate before Step 11 and names the failing condition; golden-path tests cover every executor push shape
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-10'
 labels:

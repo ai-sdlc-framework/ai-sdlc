@@ -51,6 +51,7 @@ import {
   checkJudgmentLayer,
   checkRuntimeGitignore,
   checkHierarchyLaunchEnv,
+  checkLeasePushPreflight,
   checkWorktreeHooks,
   checkUntrackedReviewLedgers,
   checkBacklogDriftWarnings,
@@ -2121,5 +2122,64 @@ describe('backlog-drift-warnings check', () => {
 
   it('is registered', () => {
     expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('backlog-drift-warnings');
+  });
+});
+
+describe('checkLeasePushPreflight (AISDLC-798)', () => {
+  const worktree = () => join(tmpDir, '.worktrees', 'aisdlc-9');
+  const pluginModule = () => join(tmpDir, 'ai-sdlc-plugin', 'hooks', 'lib', 'trusted-policy.js');
+  const ctxWith = (adapters: DoctorCheckAdapters, taskId: string | null = 'AISDLC-9') => ({
+    ...makeCtx(adapters),
+    ...(taskId ? { taskId } : {}),
+  });
+  const present = (...paths: string[]) => makeAdapters({ exists: (p) => paths.includes(p) });
+  const evaluated = (stdout: string) =>
+    makeAdapters({
+      exists: (p) => [worktree(), pluginModule()].includes(p),
+      runCommand: (cmd) =>
+        cmd === 'git' ? { stdout: 'ai-sdlc/aisdlc-9-x\n', exitCode: 0 } : { stdout, exitCode: 0 },
+    });
+
+  it('is quiet without --task', () => {
+    expect(checkLeasePushPreflight(ctxWith(makeAdapters(), null))).toEqual([]);
+  });
+
+  it('fails when the task has no worktree', () => {
+    const [r] = checkLeasePushPreflight(ctxWith(present()));
+    expect(r.severity).toBe('fail');
+    expect(r.title).toContain('no worktree');
+  });
+
+  it('warns when the plugin module is not in this project', () => {
+    const [r] = checkLeasePushPreflight(ctxWith(present(worktree())));
+    expect(r.severity).toBe('warn');
+  });
+
+  it('passes when the predicate allows', () => {
+    const [r] = checkLeasePushPreflight(
+      ctxWith(evaluated(JSON.stringify({ allowed: true, failing: [] }))),
+    );
+    expect(r.severity).toBe('pass');
+  });
+
+  it('prints the condition table with fixes when the predicate refuses', () => {
+    const failing = [
+      { condition: 'heartbeat', found: 'none', expected: 'a file', fix: 'write it' },
+    ];
+    const [r] = checkLeasePushPreflight(
+      ctxWith(evaluated(JSON.stringify({ allowed: false, failing }))),
+    );
+    expect(r.severity).toBe('fail');
+    expect(r.title).toContain('heartbeat: found none; expected a file; fix: write it');
+    expect(r.remediation).toBe('write it');
+  });
+
+  it('warns when the predicate output cannot be read', () => {
+    const [r] = checkLeasePushPreflight(ctxWith(evaluated('garbage')));
+    expect(r.severity).toBe('warn');
+  });
+
+  it('is registered', () => {
+    expect(DOCTOR_CHECKS.find((x) => x.id === 'lease-push-preflight')).toBeDefined();
   });
 });
