@@ -18,6 +18,7 @@
  */
 
 import { join } from 'node:path';
+import { leasePushPreflight, type LeasePreflight } from '../hierarchy/lease-preflight.js';
 import { writeVerdictFile } from '../cli/execute.js';
 import { resolveTargetBranch } from '../steps/02-compute-branch.js';
 import { detectDraftPrForBranch } from '../steps/03-setup-worktree.js';
@@ -34,6 +35,24 @@ import {
 import { markTaskDone } from './task-done.js';
 import { recordSessionPr, updateSessionState } from './session.js';
 import type { DoneInstruction, NextStepContext, NextStepState, StopInstruction } from './types.js';
+
+// ── lease-push preflight (AISDLC-798) ────────────────────────────────
+
+/**
+ * Evaluate the lease-push hook's own predicate for this task's worktree before the
+ * pre-sign rebase, so a push the hook would refuse stops the run before any review
+ * or signing is spent.
+ */
+export function leasePreflightStep(ctx: NextStepContext, state: NextStepState): LeasePreflight {
+  const dir = ctx.env['CLAUDE_PROJECT_DIR'];
+  return leasePushPreflight({
+    projectDir: dir && dir.startsWith('/') ? dir : ctx.workDir,
+    cwd: state.worktreePath,
+    taskId: state.taskId,
+    branch: state.branch,
+    env: ctx.env,
+  });
+}
 
 // ── 10.5 pre-sign rebase ─────────────────────────────────────────────
 

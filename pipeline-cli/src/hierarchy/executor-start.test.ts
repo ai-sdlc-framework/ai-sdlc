@@ -120,6 +120,35 @@ describe('executorStart', () => {
     });
   });
 
+  it('runs the lease-push preflight on the new claim and prints it (AISDLC-798)', async () => {
+    writeManifest(board, mkManifest('AISDLC-9'));
+    const lines: string[] = [];
+    const preflight = vi.fn().mockReturnValue({
+      status: 'refused',
+      blocking: true,
+      failing: [{ condition: 'hierarchy-env', found: 'f', expected: 'e', fix: 'x' }],
+      message: 'lease-push preflight (claim of AISDLC-9): hierarchy-env unmet',
+    });
+    const r = await executorStart(
+      { boardDir: board, cwd: tmp, waitSec: 5 },
+      {
+        identity: identityFor('executor', 'proj-executor-alpha'),
+        repoGit: gitAt(tmp),
+        preflight,
+        env: { AI_SDLC_HIERARCHY_ROLE: 'executor' },
+        log: (l) => lines.push(l),
+      },
+    );
+    expect(preflight).toHaveBeenCalledWith(
+      board,
+      'AISDLC-9',
+      { AI_SDLC_HIERARCHY_ROLE: 'executor' },
+      [tmp],
+    );
+    expect(r.leasePreflight?.status).toBe('refused');
+    expect(lines.at(-1)).toContain('hierarchy-env unmet');
+  });
+
   it('fails loudly when the heartbeat cannot be written (AISDLC-791)', async () => {
     writeManifest(board, mkManifest('AISDLC-9'));
     await expect(

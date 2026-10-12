@@ -37,7 +37,8 @@ import {
   type ReviewerReport,
 } from './review-finalize.js';
 import { checkCancelSignal, updateSessionState } from './session.js';
-import { preSignRebase, shipTask, type PreSignRebaseResult } from './ship.js';
+import { leasePreflightStep, preSignRebase, shipTask, type PreSignRebaseResult } from './ship.js';
+import type { LeasePreflight } from '../hierarchy/lease-preflight.js';
 import type {
   DoneInstruction,
   FixReportInstruction,
@@ -62,6 +63,8 @@ export interface NextStepDeps {
     state: NextStepState,
     reports: ReviewerReport[],
   ) => Promise<ReviewFinalizeResult>;
+  /** AISDLC-798: the hook's lease predicate, evaluated before any rebase, review or signing. */
+  leasePreflight: (ctx: NextStepContext, state: NextStepState) => LeasePreflight;
   preSignRebase: (ctx: NextStepContext, state: NextStepState) => Promise<PreSignRebaseResult>;
   ship: (ctx: NextStepContext, state: NextStepState) => Promise<DoneInstruction | StopInstruction>;
   buildDeveloperPrompt: typeof buildDeveloperPrompt;
@@ -72,6 +75,7 @@ export const defaultNextStepDeps: NextStepDeps = {
   initTask,
   prepareReview,
   finalizeReview,
+  leasePreflight: leasePreflightStep,
   preSignRebase,
   ship: shipTask,
   buildDeveloperPrompt,
@@ -405,6 +409,11 @@ class Machine {
     const { ctx, deps } = this;
     const verdict = state.verdict!;
     if (verdict.decision === 'APPROVED') {
+      const lease = deps.leasePreflight(ctx, state);
+      if (lease.status === 'refused') {
+        if (lease.blocking) return this.fail(state, 'aborted', lease.message);
+        ctx.logger.warn(lease.message);
+      }
       if (!state.postRebaseReviewed) {
         const rebase = await deps.preSignRebase(ctx, state);
         if (rebase.kind === 'failed') return this.fail(state, 'aborted', rebase.reason);

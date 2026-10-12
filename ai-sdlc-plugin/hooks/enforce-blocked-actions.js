@@ -111,7 +111,8 @@ const {
   probeRef,
   readPolicyText,
   loadTrustedExtras,
-  resolveLeaseWorktree,
+  evaluateLeasePush: evaluateLeasePreflight,
+  renderLeaseFailing,
   readTaskId,
 } = require('./lib/trusted-policy');
 
@@ -221,8 +222,8 @@ function loadLeasePolicy() {
     if (trusted.forcePushMode !== 'leaseOnOwnBranch') return closed('policy-never');
     // The cwd must be a genuine dispatched worktree under <main>/.worktrees/
     // (realpath), else no lease: operator main-checkout sessions get none.
-    const wt = resolveLeaseWorktree(projectDir, cwd);
-    if (!wt) return closed('not-task-worktree');
+    const wt = evaluateLeasePreflight({ projectDir, cwd, env: process.env });
+    if (!wt.allowed) return { ...closed('not-task-worktree'), failing: wt.failing };
     return {
       mode: 'leaseOnOwnBranch',
       protectedBranches: trusted.protectedBranches,
@@ -241,7 +242,7 @@ function loadLeasePolicy() {
  * Never suggests an exit the guard itself forbids (no skip variable, no hook
  * bypass flag, no plain force) — the next step is the config or the task worktree.
  */
-function forcePushRefusal(why) {
+function forcePushRefusal(why, failing) {
   const key = 'spec.governance.allowForcePush in .ai-sdlc/agent-role.yaml';
   if (why === 'policy-never') {
     return (
@@ -258,7 +259,10 @@ function forcePushRefusal(why) {
         `two ways: (1) the task id bound to the session at launch equals the worktree's .active-task, or ` +
         `(2) the session is a hierarchy executor that holds exactly one inflight claim on the dispatch ` +
         `board, for that same task. Next step: claim the task through the executor loop (/ai-sdlc executor) ` +
-        `and push from its worktree, or run the push from a session rooted in the worktree.`
+        `and push from its worktree, or run the push from a session rooted in the worktree.` +
+        (failing && failing.length > 0
+          ? ` Unmet conditions (AISDLC-798):\n${renderLeaseFailing(failing)}\n`
+          : '')
       : '';
   return (
     `force-push is refused here: ${key} = leaseOnOwnBranch (the default) allows a lease push only from a ` +
@@ -550,7 +554,7 @@ function enforceBash(command) {
     // anchored blockedActions globs miss (`git push origin --force main`,
     // `git push origin -f HEAD:main`, `+refspec`). Runs no git subprocess.
     if (lease.mode !== 'leaseOnOwnBranch' && hasForcePushOption(trimmed)) {
-      deny(forcePushRefusal(lease.why));
+      deny(forcePushRefusal(lease.why, lease.failing));
     }
   } catch {
     // A thrown error (or timeout) must not become an allow: deny pushes, ignore the rest.

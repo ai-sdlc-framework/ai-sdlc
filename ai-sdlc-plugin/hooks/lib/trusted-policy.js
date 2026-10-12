@@ -24,6 +24,7 @@ const { readFileSync, readdirSync, realpathSync, lstatSync } = require('fs');
 const { join, resolve, dirname, basename, sep } = require('path');
 const { execFileSync, spawnSync } = require('child_process');
 const { resolveGovernanceExtrasFromYaml } = require('./governance-resolver');
+const { taskBindingProblem } = require('./lease-push-guard');
 
 const GIT_TIMEOUT_MS = 2000;
 
@@ -148,31 +149,67 @@ function isUnder(child, parent) {
 }
 
 /**
- * True when this hook's own env names a hierarchy EXECUTOR session (set by
- * `cli-hierarchy up`; the agent's Bash commands cannot change it) and the board
- * under <main>/.ai-sdlc/dispatch/inflight/ holds EXACTLY ONE manifest claimed by
- * that session, for `taskId` (lower-case). The claimer is the heartbeat
- * `<task>.state.json` workerId (unqualified role name such as `executor-alpha`);
- * the session name may carry a `<project>-` prefix. Every manifest must be a real
- * file directly under inflight/ (no symlinks, nothing resolving elsewhere).
- * Any error fails closed.
+ * Inspects the dispatch board for the claim an executor session holds on `taskId`
+ * (lower-case). The ONLY accepted shape: the hook's own env names a hierarchy
+ * EXECUTOR session (set by `cli-hierarchy up`; the agent's Bash commands cannot
+ * change it) and <board>/inflight/ holds EXACTLY ONE manifest claimed by that
+ * session, for `taskId`. The claimer is the heartbeat `<task>.state.json` workerId
+ * (unqualified role name such as `executor-alpha`); the session name may carry a
+ * `<project>-` prefix. Every manifest must be a real file directly under inflight/
+ * (no symlinks, nothing resolving elsewhere). Any error fails closed.
+ *
+ * @returns {{ held: boolean, failing: Array<object> }} `failing` names each unmet
+ *   condition (empty when held).
  */
-function holdsInflightClaim(realMain, taskId) {
+function inspectInflightClaim(boardDir, taskId, env) {
+  const failing = [];
+  const session = env.AI_SDLC_HIERARCHY_SESSION || '';
+  if (!session || env.AI_SDLC_HIERARCHY_ROLE !== 'executor') {
+    failing.push({
+      condition: 'hierarchy-env',
+      found: `AI_SDLC_HIERARCHY_SESSION=${session || '(unset)'}, AI_SDLC_HIERARCHY_ROLE=${env.AI_SDLC_HIERARCHY_ROLE || '(unset)'}`,
+      expected:
+        'AI_SDLC_HIERARCHY_SESSION=<session name> and AI_SDLC_HIERARCHY_ROLE=executor in the session launch env',
+      fix: 'relaunch this executor with `cli-hierarchy down --role executor` then `cli-hierarchy up` from the main checkout; `cli-hierarchy clear` never relaunches a process',
+    });
+    return { held: false, failing };
+  }
+  const inflight = join(boardDir, 'inflight');
+  const claimProblem = (found, fix) =>
+    failing.push({
+      condition: 'board-claim',
+      found,
+      expected: `exactly one inflight claim held by '${session}', for ${taskId}`,
+      fix,
+    });
   try {
-    const session = process.env.AI_SDLC_HIERARCHY_SESSION || '';
-    if (!session || process.env.AI_SDLC_HIERARCHY_ROLE !== 'executor') return false;
-    const inflight = join(realMain, '.ai-sdlc', 'dispatch', 'inflight');
     const realInflight = safeReal(inflight);
-    if (realInflight !== join(realMain, '.ai-sdlc', 'dispatch', 'inflight')) return false;
+    if (realInflight !== inflight) {
+      claimProblem(
+        `${inflight} resolves elsewhere (${realInflight})`,
+        'restore inflight/ as a real directory of the main checkout',
+      );
+      return { held: false, failing };
+    }
     const MANIFEST_SUFFIX = '.dispatch.json';
     const mine = [];
+    let taskManifest = false;
+    let taskHeartbeat = false;
+    let taskWorker = null;
     for (const file of readdirSync(inflight)) {
       if (!file.endsWith(MANIFEST_SUFFIX)) continue;
       const manifest = join(inflight, file);
       const st = lstatSync(manifest);
-      if (!st.isFile() || st.isSymbolicLink()) return false;
-      if (dirname(safeReal(manifest)) !== realInflight) return false;
+      if (!st.isFile() || st.isSymbolicLink() || dirname(safeReal(manifest)) !== realInflight) {
+        claimProblem(
+          `manifest ${file} is not a plain file directly under inflight/`,
+          'remove the odd manifest through the dispatch CLI, or ask the dispatch session',
+        );
+        return { held: false, failing };
+      }
       const claimed = file.slice(0, -MANIFEST_SUFFIX.length);
+      const isTask = claimed.toLowerCase() === taskId;
+      if (isTask) taskManifest = true;
       const stateFile = join(inflight, `${claimed}.state.json`);
       let sst;
       try {
@@ -182,80 +219,245 @@ function holdsInflightClaim(realMain, taskId) {
         throw err;
       }
       if (!sst.isFile() || sst.isSymbolicLink() || dirname(safeReal(stateFile)) !== realInflight) {
-        return false;
+        claimProblem(
+          `heartbeat ${claimed}.state.json is not a plain file directly under inflight/`,
+          'remove it and rewrite it with `cli-dispatch heartbeat`',
+        );
+        return { held: false, failing };
       }
+      if (isTask) taskHeartbeat = true;
       const workerId = JSON.parse(readFileSync(stateFile, 'utf-8')).workerId;
+      if (isTask) taskWorker = typeof workerId === 'string' ? workerId : null;
       if (typeof workerId !== 'string' || !workerId) continue;
       if (session === workerId || session.endsWith(`-${workerId}`)) {
         mine.push(claimed.toLowerCase());
       }
     }
-    return mine.length === 1 && mine[0] === taskId;
-  } catch {
-    return false;
+    if (mine.length === 1 && mine[0] === taskId) return { held: true, failing };
+    if (!taskManifest) {
+      claimProblem(
+        `no inflight manifest for ${taskId} (claims held by this session: ${mine.join(', ') || 'none'})`,
+        'claim the task: `cli-hierarchy executor-start` from this session (it claims and writes the heartbeat)',
+      );
+    } else if (!taskHeartbeat) {
+      failing.push({
+        condition: 'heartbeat',
+        found: `inflight/${taskId}.dispatch.json exists but inflight/${taskId}.state.json does not`,
+        expected: `a heartbeat file naming '${session}' as workerId`,
+        fix: `write it: cli-dispatch heartbeat --task-id ${taskId.toUpperCase()} --worker-id <your roster name> --worker-kind in-session-agent`,
+      });
+    } else if (
+      taskWorker === null ||
+      !(session === taskWorker || session.endsWith(`-${taskWorker}`))
+    ) {
+      claimProblem(
+        `${taskId} is claimed by worker '${taskWorker ?? '(none)'}', not by session '${session}'`,
+        'push from the executor that holds the claim, or ask the dispatch session to re-assign the task',
+      );
+    }
+    if (mine.length > 1 || (mine.length === 1 && mine[0] !== taskId)) {
+      claimProblem(
+        `this session holds ${mine.length} claim(s): ${mine.join(', ')}`,
+        'finish or release the other claim(s) so the session holds only this task (one task per executor context)',
+      );
+    }
+    if (failing.length === 0) {
+      claimProblem(
+        `claims held by this session: ${mine.join(', ') || 'none'}`,
+        'claim the task with `cli-hierarchy executor-start`',
+      );
+    }
+    return { held: false, failing };
+  } catch (err) {
+    claimProblem(
+      `the board could not be read (${err && err.message ? err.message : 'error'})`,
+      'check .ai-sdlc/dispatch/inflight/ is readable',
+    );
+    return { held: false, failing };
   }
+}
+
+/** One line per failing condition: what was found, what is expected, the sanctioned fix. */
+function renderLeaseFailing(failing) {
+  return failing
+    .map((f) => `  - ${f.condition}: found ${f.found}; expected ${f.expected}; fix: ${f.fix}`)
+    .join('\n');
+}
+
+/**
+ * The lease-push decision for a tool cwd, as ONE pure function (AISDLC-798). The
+ * PreToolUse hook, the pipeline preflight (`next-step` ship, Step 11,
+ * `cli-hierarchy executor-start`) and `ai-sdlc doctor lease-push-preflight` all
+ * call it, so the refusal an executor meets at push time is the one it was
+ * told about up front.
+ *
+ * The cwd must be a genuine dispatched worktree of the repo the policy was
+ * loaded for. All of these must hold, else `allowed` is false and `failing`
+ * lists each unmet condition as `{ condition, found, expected, fix }`:
+ *  - `main-checkout`: the main checkout is verifiable (a real `.git` directory);
+ *  - `project-dir`: the project dir is the main checkout or a worktree under it;
+ *  - `worktree-location`: the worktree top (realpath, symlinks resolved) is a
+ *    direct child of realpath(<mainRoot>)/.worktrees/;
+ *  - `own-session`: a worktree-rooted session may only push from that worktree;
+ *  - for a session rooted at the main checkout, either `AI_SDLC_ACTIVE_TASK_ID`
+ *    equals the worktree's `.active-task`, or the worktree's `.active-task` (when
+ *    present) agrees with its directory name AND the hierarchy executor holds
+ *    exactly one board claim for it: `hierarchy-env`, `board-claim`, `heartbeat`,
+ *    `sentinel-agreement`;
+ *  - `worktree-registration`: the worktree's own git dir lives under
+ *    <mainRoot>/.git/worktrees/ and its `gitdir` back-pointer leads to <top>/.git;
+ *  - when `branch` is given: `active-task-sentinel`, `worktree-name`, `branch`
+ *    (the same predicate `lease-push-guard` applies to the command).
+ *
+ * @param {object} args
+ * @param {string} args.projectDir  the session's project dir (CLAUDE_PROJECT_DIR)
+ * @param {string} args.cwd         the directory the push runs from
+ * @param {object} [args.env]       the session env (default process.env)
+ * @param {string} [args.branch]    the branch being pushed; omit to skip branch checks
+ * @param {string} [args.boardDir]  dispatch board dir (default <main>/.ai-sdlc/dispatch)
+ * @param {Function} [args.run]     git runner (tests)
+ * @returns {{ allowed: boolean, failing: object[], mainRoot?: string, top?: string, claimTaskId?: string|null, taskId?: string|null }}
+ */
+function evaluateLeasePush({ projectDir, cwd, env = process.env, branch, boardDir, run = runGit }) {
+  const failing = [];
+  const fail = (condition, found, expected, fix) =>
+    failing.push({ condition, found, expected, fix });
+  const done = (extra = {}) => ({ allowed: failing.length === 0, failing, ...extra });
+  try {
+    const mainRoot = verifiedMainRoot(projectDir, run);
+    if (!mainRoot) {
+      fail(
+        'main-checkout',
+        `${projectDir} is not in a repository whose main checkout is a real .git directory`,
+        'a normal (non-bare) clone with its task worktrees under .worktrees/',
+        'run the push from a task worktree of the project clone',
+      );
+      return done();
+    }
+    const realMain = safeReal(mainRoot);
+    const worktreesDir = join(realMain, '.worktrees');
+    const realProj = safeReal(projectDir);
+    if (realProj !== realMain && !isUnder(realProj, worktreesDir)) {
+      fail(
+        'project-dir',
+        `session project dir ${realProj}`,
+        `the main checkout ${realMain} or a worktree under ${worktreesDir}`,
+        'launch the session from the project clone (CLAUDE_PROJECT_DIR must be absolute and explicit)',
+      );
+      return done();
+    }
+    const topRaw = run(['rev-parse', '--show-toplevel'], cwd);
+    const top = topRaw ? safeReal(topRaw) : null;
+    if (!top || !isUnder(top, worktreesDir) || dirname(top) !== worktreesDir) {
+      fail(
+        'worktree-location',
+        `working directory resolves to ${top || '(not a git worktree)'}`,
+        `a direct child of ${worktreesDir}`,
+        'cd into the task worktree (.worktrees/<task-id>) before pushing',
+      );
+      return done();
+    }
+    const dirTask = basename(top).toLowerCase();
+    const taskId = readTaskId(top);
+    let claimTaskId = null;
+    if (realProj !== realMain) {
+      if (realProj !== top) {
+        fail(
+          'own-session',
+          `session is rooted in ${realProj}, working directory is ${top}`,
+          'the session project dir to be this very worktree',
+          'push from the worktree the session was launched in, not a sibling it cd-ed into',
+        );
+      }
+    } else {
+      // A session rooted at the main checkout has no worktree of its own. It is
+      // bound to ONE task by AI_SDLC_ACTIVE_TASK_ID (hook env), or, for a hierarchy
+      // executor that claims its task only after launch, by the board claim it
+      // holds. The claim path takes the task id from the worktree directory name:
+      // a finished attempt's Step 13 removes the sentinel, which must not strand a
+      // resumed executor. A sentinel that is present must agree with it.
+      const bound = (env.AI_SDLC_ACTIVE_TASK_ID || '').toLowerCase();
+      const envBound = !!bound && taskId === bound;
+      if (!envBound) {
+        const claim = inspectInflightClaim(
+          boardDir || join(realMain, '.ai-sdlc', 'dispatch'),
+          dirTask,
+          env,
+        );
+        const sentinelOk = !taskId || taskId === dirTask;
+        if (!(sentinelOk && claim.held)) {
+          if (!sentinelOk) {
+            fail(
+              'sentinel-agreement',
+              `.active-task names ${taskId}, the worktree directory is ${dirTask}`,
+              'the sentinel to name the same task as the directory',
+              `fix or delete ${join(top, '.active-task')} (resume rewrites it; Step 13 removes it)`,
+            );
+          }
+          failing.push(...claim.failing);
+        }
+        // Only a claim-verified grant with NO sentinel supplies the guard's task id.
+        if (!taskId && failing.length === 0) claimTaskId = dirTask;
+      }
+    }
+    const gitDirRaw = run(['rev-parse', '--git-dir'], cwd);
+    let registered = false;
+    if (gitDirRaw) {
+      try {
+        const gitDir = safeReal(resolve(cwd, gitDirRaw));
+        registered =
+          isUnder(gitDir, join(realMain, '.git', 'worktrees')) &&
+          safeReal(readFileSync(join(gitDir, 'gitdir'), 'utf-8').trim()) === join(top, '.git');
+      } catch {
+        registered = false;
+      }
+    }
+    if (!registered) {
+      fail(
+        'worktree-registration',
+        `${top} is not registered as a worktree of ${realMain}`,
+        'a worktree created by `git worktree add` from the main checkout',
+        'recreate the worktree with /ai-sdlc execute (Step 3) instead of copying a directory',
+      );
+    }
+    const effectiveTask = taskId || claimTaskId;
+    if (branch !== undefined && failing.length === 0) {
+      const own = String(branch).replace(/^refs\/heads\//, '');
+      const problem = taskBindingProblem(own, effectiveTask, basename(top));
+      if (problem) {
+        fail(problem.condition, problem.found, problem.expected, branchFix(problem.condition, top));
+      }
+    }
+    return done({ mainRoot, top, claimTaskId, taskId: effectiveTask });
+  } catch (err) {
+    fail(
+      'evaluation-error',
+      String(err && err.message ? err.message : err),
+      'the lease policy to be evaluable',
+      'check the repository is readable',
+    );
+    return done();
+  }
+}
+
+function branchFix(condition, top) {
+  if (condition === 'branch') {
+    return 'check out the task branch (ai-sdlc/<task-id> or ai-sdlc/<task-id>-<slug>) in this worktree';
+  }
+  if (condition === 'worktree-name')
+    return 'run from the worktree directory named after the task id';
+  return `write the task id into ${join(top, '.active-task')} (Step 4) or claim the task so the board names it`;
 }
 
 /**
  * Validates that the tool's cwd is a genuine dispatched worktree of the repo the
- * policy was loaded for, and returns its real root. All of these must hold, else
- * null (the caller fails closed):
- *  - the worktree top (realpath, symlinks resolved) is under
- *    realpath(<mainRoot>)/.worktrees/  (so an operator's main checkout, a forged
- *    directory elsewhere such as /tmp/x/aisdlc-700, and a symlinked entry all fail);
- *  - the project dir is the main checkout or sits under <mainRoot>/.worktrees/,
- *    and when it is a worktree it must BE the worktree the tool runs in;
- *  - the worktree's own git dir lives under <mainRoot>/.git/worktrees/ and its
- *    `gitdir` back-pointer leads to <top>/.git (a hand-forged gitdir elsewhere
- *    that merely points its `commondir` at the real repo fails).
+ * policy was loaded for, and returns its real root, or null when it is not (the
+ * caller fails closed). The decision is {@link evaluateLeasePush}; this keeps the
+ * hook's `{ mainRoot, top, claimTaskId }` shape.
  */
 function resolveLeaseWorktree(projectDir, cwd, run = runGit) {
-  try {
-    const mainRoot = verifiedMainRoot(projectDir, run);
-    if (!mainRoot) return null;
-    const realMain = safeReal(mainRoot);
-    const worktreesDir = join(realMain, '.worktrees');
-    const realProj = safeReal(projectDir);
-    if (realProj !== realMain && !isUnder(realProj, worktreesDir)) return null;
-    const topRaw = run(['rev-parse', '--show-toplevel'], cwd);
-    if (!topRaw) return null;
-    const top = safeReal(topRaw);
-    if (!isUnder(top, worktreesDir) || dirname(top) !== worktreesDir) return null;
-    // Own-session binding: a session whose project dir IS a task worktree may only
-    // use the lease from that very worktree (not from a sibling it cd'd into).
-    // A session rooted at the main checkout has no worktree of its own, so it is
-    // bound to ONE task by AI_SDLC_ACTIVE_TASK_ID (the hook's own env; the agent's
-    // Bash commands cannot change it): the cwd worktree's .active-task must equal it.
-    // No binding, or a sibling worktree => no lease.
-    let claimTaskId = null;
-    if (realProj !== realMain) {
-      if (realProj !== top) return null;
-    } else {
-      // A hierarchy executor (cli-hierarchy up) claims its task only after launch, so
-      // it is bound instead by the inflight claim it holds on the dispatch board.
-      const bound = (process.env.AI_SDLC_ACTIVE_TASK_ID || '').toLowerCase();
-      const taskId = readTaskId(top);
-      const envBound = !!bound && taskId === bound;
-      // The claim path takes the task id from the worktree directory name (a direct,
-      // verified child of <main>/.worktrees/): a finished attempt's Step 13 removes
-      // the sentinel, which must not strand a resumed executor. A sentinel that is
-      // present must agree with the directory name.
-      const dirTask = basename(top).toLowerCase();
-      const claimBound = (!taskId || taskId === dirTask) && holdsInflightClaim(realMain, dirTask);
-      if (!envBound && !claimBound) return null;
-      // Only a claim-verified grant with NO sentinel supplies the guard's task id.
-      if (!envBound && !taskId) claimTaskId = dirTask;
-    }
-    const gitDirRaw = run(['rev-parse', '--git-dir'], cwd);
-    if (!gitDirRaw) return null;
-    const gitDir = safeReal(resolve(cwd, gitDirRaw));
-    if (!isUnder(gitDir, join(realMain, '.git', 'worktrees'))) return null;
-    const back = readFileSync(join(gitDir, 'gitdir'), 'utf-8').trim();
-    if (safeReal(back) !== join(top, '.git')) return null;
-    return { mainRoot, top, claimTaskId };
-  } catch {
-    return null;
-  }
+  const r = evaluateLeasePush({ projectDir, cwd, env: process.env, run });
+  return r.allowed ? { mainRoot: r.mainRoot, top: r.top, claimTaskId: r.claimTaskId } : null;
 }
 
 /**
@@ -303,6 +505,9 @@ module.exports = {
   mainCheckoutRoot,
   verifiedMainRoot,
   resolveLeaseWorktree,
+  evaluateLeasePush,
+  renderLeaseFailing,
+  inspectInflightClaim,
   loadTrustedExtras,
   bannerGovernance,
   readTaskId,

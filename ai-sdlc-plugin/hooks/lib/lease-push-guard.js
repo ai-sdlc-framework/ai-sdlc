@@ -209,6 +209,41 @@ function classifySegment(toks, aliasLookup) {
   };
 }
 
+/**
+ * The task-binding half of the lease decision, shared with the preflight in
+ * `trusted-policy.js` (`evaluateLeasePush`) so both name the same condition:
+ * the sentinel task id must exist, the worktree directory must be named after
+ * it, and the branch must be `ai-sdlc/<id>` or `ai-sdlc/<id>-*`. Returns null
+ * when all three agree, else `{ condition, found, expected, reason }`.
+ */
+function taskBindingProblem(own, taskId, worktreeName) {
+  if (!taskId) {
+    return {
+      condition: 'active-task-sentinel',
+      found: 'no valid .active-task sentinel and no board claim naming a task',
+      expected: 'a task id bound to this worktree',
+      reason: 'no valid .active-task sentinel in this worktree',
+    };
+  }
+  if (worktreeName !== taskId) {
+    return {
+      condition: 'worktree-name',
+      found: `worktree directory '${worktreeName}'`,
+      expected: `a directory named '${taskId}'`,
+      reason: `worktree directory '${worktreeName}' does not match task '${taskId}'`,
+    };
+  }
+  if (own !== `ai-sdlc/${taskId}` && !own.startsWith(`ai-sdlc/${taskId}-`)) {
+    return {
+      condition: 'branch',
+      found: `branch '${own}'`,
+      expected: `ai-sdlc/${taskId} or ai-sdlc/${taskId}-*`,
+      reason: `branch '${own}' is not this task's branch (ai-sdlc/${taskId} or ai-sdlc/${taskId}-*)`,
+    };
+  }
+  return null;
+}
+
 function parseAllowedShape(command, ctx) {
   if (/[^\x20-\x7e\t]/.test(command)) return 'non-printable or non-ASCII characters present';
   if (META_RE.test(command)) return 'shell metacharacters, quoting or expansion present';
@@ -229,13 +264,8 @@ function parseAllowedShape(command, ctx) {
   // `ai-sdlc/{issueIdLower}-{slug}` (DEC-0083).
   // All three must agree; any missing piece denies (operator sessions without a
   // sentinel get no lease push).
-  if (!ctx.taskId) return 'no valid .active-task sentinel in this worktree';
-  if (ctx.worktreeName !== ctx.taskId) {
-    return `worktree directory '${ctx.worktreeName}' does not match task '${ctx.taskId}'`;
-  }
-  if (own !== `ai-sdlc/${ctx.taskId}` && !own.startsWith(`ai-sdlc/${ctx.taskId}-`)) {
-    return `branch '${own}' is not this task's branch (ai-sdlc/${ctx.taskId} or ai-sdlc/${ctx.taskId}-*)`;
-  }
+  const binding = taskBindingProblem(own, ctx.taskId, ctx.worktreeName);
+  if (binding) return binding.reason;
   // Short-name aliasing: git resolves a bare name against local refs with every
   // rule (refs/tags/<x>, refs/<x>, refs/remotes/<x>, ...). Refuse unless no
   // other local ref answers to the name (unknown counts as colliding).
@@ -356,4 +386,4 @@ function hasForcePushOption(command) {
   return false;
 }
 
-module.exports = { evaluateLeasePush, isProtectedBranch, hasForcePushOption };
+module.exports = { evaluateLeasePush, isProtectedBranch, hasForcePushOption, taskBindingProblem };

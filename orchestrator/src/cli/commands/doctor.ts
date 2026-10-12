@@ -345,63 +345,68 @@ export function createDoctorCommand(
       '--only <id>',
       'run only the check with this id (e.g. attestation-governance); used by the SessionStart hook (AISDLC-561)',
     )
+    .option('--task <id>', 'task id for task-scoped checks (lease-push-preflight, AISDLC-798)')
     .option('--fix', 'apply the safe/mechanical auto-fixes, then re-report', false)
     .option(
       '--strict',
       'exit non-zero on warn severity too (default: only fail exits non-zero)',
       false,
     )
-    .action(async (opts: { fix?: boolean; strict?: boolean; only?: string }, cmd) => {
-      const globalOpts = cmd.parent?.opts() ?? {};
-      const format = globalOpts.format ?? 'table';
-      const projectDir = process.cwd();
+    .action(
+      async (opts: { fix?: boolean; strict?: boolean; only?: string; task?: string }, cmd) => {
+        const globalOpts = cmd.parent?.opts() ?? {};
+        const format = globalOpts.format ?? 'table';
+        const projectDir = process.cwd();
 
-      const adapters = buildAdapters();
-      const ctx = { projectDir, adapters };
+        const adapters = buildAdapters();
+        const ctx = { projectDir, adapters, ...(opts.task ? { taskId: opts.task } : {}) };
 
-      if (opts.fix) {
-        const fixes = runDoctorFixes(ctx);
-        for (const fix of fixes) {
-          console.log(`[fix] ${fix.id}: ${fix.applied ? 'applied' : 'skipped'} — ${fix.detail}`);
+        if (opts.fix) {
+          const fixes = runDoctorFixes(ctx);
+          for (const fix of fixes) {
+            console.log(`[fix] ${fix.id}: ${fix.applied ? 'applied' : 'skipped'} — ${fix.detail}`);
+          }
         }
-      }
 
-      const selected = opts.only ? DOCTOR_CHECKS.filter((c) => c.id === opts.only) : DOCTOR_CHECKS;
-      if (opts.only && selected.length === 0) {
-        console.error(`Unknown doctor check id: ${opts.only}`);
-        process.exitCode = 2;
-        return;
-      }
-      const results = runDoctorChecks(ctx, selected);
-      const summary = summarizeDoctorResults(results);
-      const install = resolvePluginInstall(ctx);
-
-      if (format === 'json') {
-        console.log(
-          formatOutput('json', {
-            install,
-            results,
-            summary,
-          } as unknown as Record<string, unknown>),
-        );
-      } else if (format === 'minimal') {
-        console.log(
-          formatOutput('minimal', {
-            type: 'doctor',
-            summary,
-          } as unknown as Record<string, unknown>),
-        );
-      } else {
-        for (const line of renderFullDoctorReport(results, install)) {
-          console.log(line);
+        const selected = opts.only
+          ? DOCTOR_CHECKS.filter((c) => c.id === opts.only)
+          : DOCTOR_CHECKS;
+        if (opts.only && selected.length === 0) {
+          console.error(`Unknown doctor check id: ${opts.only}`);
+          process.exitCode = 2;
+          return;
         }
-      }
+        const results = runDoctorChecks(ctx, selected);
+        const summary = summarizeDoctorResults(results);
+        const install = resolvePluginInstall(ctx);
 
-      const shouldFail = summary.fail > 0 || (opts.strict && summary.warn > 0);
-      if (shouldFail) {
-        process.exitCode = 1;
-      }
-    });
+        if (format === 'json') {
+          console.log(
+            formatOutput('json', {
+              install,
+              results,
+              summary,
+            } as unknown as Record<string, unknown>),
+          );
+        } else if (format === 'minimal') {
+          console.log(
+            formatOutput('minimal', {
+              type: 'doctor',
+              summary,
+            } as unknown as Record<string, unknown>),
+          );
+        } else {
+          for (const line of renderFullDoctorReport(results, install)) {
+            console.log(line);
+          }
+        }
+
+        const shouldFail = summary.fail > 0 || (opts.strict && summary.warn > 0);
+        if (shouldFail) {
+          process.exitCode = 1;
+        }
+      },
+    );
 }
 
 export const doctorCommand = createDoctorCommand();
