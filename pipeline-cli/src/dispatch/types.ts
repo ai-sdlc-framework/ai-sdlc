@@ -97,6 +97,8 @@ export interface ResumeFeedback {
   note: string;
   /** Pull request to update, when one exists. */
   prNumber?: number;
+  /** Head branch of `prNumber`, recorded at resume so Step 3 needs no network call. */
+  prHeadRef?: string;
   /** Names of the checks that failed. */
   failingChecks?: string[];
   /** Reviewer findings to address. */

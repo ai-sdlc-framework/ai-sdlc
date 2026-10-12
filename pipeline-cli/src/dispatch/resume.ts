@@ -73,6 +73,8 @@ export function normaliseNote(raw: string): string {
 export interface ResumeInput {
   note: string;
   prNumber?: number;
+  /** Head branch of the pull request, when the caller looked it up. */
+  prHeadRef?: string;
   failingChecks?: readonly string[];
   findings?: readonly string[];
   /** Resume without a developer or reviewer round (AISDLC-821). */
@@ -212,19 +214,21 @@ export function resumeDone(
   }
 
   const prNumber = input.prNumber ?? verdict?.prNumber;
+  const prHeadRef = input.prNumber !== undefined ? input.prHeadRef?.trim() || undefined : undefined;
   const resume: ResumeFeedback = {
     note,
     ...(prNumber !== undefined ? { prNumber } : {}),
+    ...(prHeadRef ? { prHeadRef } : {}),
     ...(failingChecks ? { failingChecks } : {}),
     ...(findings ? { findings } : {}),
     resumedAt: (opts.now ?? now)().toISOString(),
     resumedBy: oneLine(opts.resumedBy, 80) || 'dispatch',
     ...(verdict ? { priorOutcome: verdict.outcome } : {}),
     fromVerdictOutcome: verdict ? verdict.outcome : 'success',
-    ...(branchGuessed ? { branchGuessed: true } : {}),
+    ...(branchGuessed && !prHeadRef ? { branchGuessed: true } : {}),
     ...(input.pushOnly ? { resumeMode: 'push-only' as const } : {}),
   };
-  const next: DispatchManifest = { ...base, resume };
+  const next: DispatchManifest = { ...base, ...(prHeadRef ? { branch: prHeadRef } : {}), resume };
   delete next.workerId;
   delete next.blockedBy;
   delete next.noClaimBefore;
