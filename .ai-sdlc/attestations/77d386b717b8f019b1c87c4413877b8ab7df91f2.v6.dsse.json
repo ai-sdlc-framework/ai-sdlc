@@ -1,0 +1,120 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "f123cb566f8e0ffdac0b3c0533f4362e46ceafb2"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "a92b8595a29a811e495a7da9a6a9f58e2c70920fca7895fea99dc21666375a6d",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "2fa342a7a03711cc2c5a3434bfa558f77a5ba54b2214be3507e042be9e88cbb8",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "2fa342a7a03711cc2c5a3434bfa558f77a5ba54b2214be3507e042be9e88cbb8",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "d3f2eb7f45127eb1d09c86792c77b3a63e9ac38e972acb78bdaf899f1d52441f",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "d3f2eb7f45127eb1d09c86792c77b3a63e9ac38e972acb78bdaf899f1d52441f",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 3,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "8d34c5234179296312d551bf22e0e61b835ca166e28fece7effaa61b4d54e6bf",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 4,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "4c294700138dd6f34aafe735efe46b2020e289ba19d2efaa7ab2ea1ba197458d",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "4c294700138dd6f34aafe735efe46b2020e289ba19d2efaa7ab2ea1ba197458d",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "d9c7810a659bcb6da31699a620b4e1b6f375345f4fb390a7f47496035f5fdc65",
+        "898263c944d448586fd03cb4ec5e0be1b824105a5c96547d1aa059ce855eb56e",
+        "99484d921d608ba041512fa5b72f4a7c1260f74bfd709e5518ccc9be027c5bbc"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "5b6fe290139ac818b0f2615e78c35cd3a12a32aba3cd66cc00c7a81ae9f4ee15",
+        "898263c944d448586fd03cb4ec5e0be1b824105a5c96547d1aa059ce855eb56e",
+        "99484d921d608ba041512fa5b72f4a7c1260f74bfd709e5518ccc9be027c5bbc"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "822f18e2bef171ac6d7b5463e83a31ad0affa4c96c1eeb20735235c5a0450623",
+        "910a6e5f7ebdc95f6d1a504b636b790ccf514303818524b55d278584cfab4cfc",
+        "99484d921d608ba041512fa5b72f4a7c1260f74bfd709e5518ccc9be027c5bbc"
+      ]
+    },
+    {
+      "leafIndex": 3,
+      "proof": [
+        "ff9c2138869628851c997e80af4c66dfc4c80ec4c8e1d59c466fcb39c6ee2620",
+        "910a6e5f7ebdc95f6d1a504b636b790ccf514303818524b55d278584cfab4cfc",
+        "99484d921d608ba041512fa5b72f4a7c1260f74bfd709e5518ccc9be027c5bbc"
+      ]
+    },
+    {
+      "leafIndex": 4,
+      "proof": [
+        "1c026d5eae990b250948accbb5d448e18f09dce2c4f10e71abcc2b2973a1d715",
+        "93e0971e67abb2817ff9431ce13860bb1baf75877622510e6dfebc2cf8dcef65",
+        "d1f2a29258caa77d9861dc4cbf98b9ff2b79885ac28858d942432073501aff5d"
+      ]
+    }
+  ],
+  "rootHash": "82763d2f9a5c428d8b35a00f4283bbe859198da5fbe35761fc6f09df4154b234",
+  "rootSignature": "lgJCUrQ4IQ6107dkqxHLDc1DEjh+x525egdrxH5BSh004FllRyJya1+7Yz9HjSmB24TZk3U9hNUn1FNetnnjAQ==",
+  "nonce": "28df0b543c98d6be2a4fa2790014602d3285ffebda7c2bebc023f3af79eb0bf8",
+  "leafCount": 5,
+  "signedAt": "2026-10-12T18:26:15.907Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      "ai-sdlc-plugin/.claude-plugin/plugin.json",
+      "ai-sdlc-plugin/commands/planner.md",
+      "ai-sdlc-plugin/commands/planner.test.mjs",
+      "ai-sdlc-plugin/hooks/context-budget.js",
+      "ai-sdlc-plugin/hooks/context-budget.sh",
+      "ai-sdlc-plugin/hooks/context-budget.test.mjs",
+      "ai-sdlc-plugin/hooks/lib/context-budget.js",
+      "ai-sdlc-plugin/plugin.json",
+      "reference/src/core/generated-schemas.ts"
+    ],
+    "appliedReviewers": [
+      "code-reviewer-codex",
+      "security-reviewer",
+      "code-reviewer",
+      "security-reviewer",
+      "test-reviewer"
+    ]
+  }
+}

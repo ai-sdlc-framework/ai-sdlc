@@ -2,7 +2,7 @@
 id: AISDLC-651.4
 title: >-
   RFC-0050 follow-up: per-role context and turn budgets, Stop-hook over-budget notice, turns-since-clear and growth-per-turn in cli-usage context
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-02'
 labels:

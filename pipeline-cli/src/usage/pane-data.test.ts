@@ -6,7 +6,7 @@ import { appendModelCalls, ledgerFileForTs, type ModelCallRecord } from '@ai-sdl
 import { loadUsagePaneData, pickConsumerWindow, top } from './pane-data.js';
 import type { ReportRow } from './report.js';
 import { LIMIT_EVENTS_FILE, SNAPSHOTS_FILE } from './snapshots.js';
-import { DEFAULT_SCORECARD_MIN_TASKS } from './usage-config.js';
+import { DEFAULT_ROLE_BUDGETS, DEFAULT_SCORECARD_MIN_TASKS } from './usage-config.js';
 
 const NOW = new Date('2026-09-10T12:00:00.000Z');
 let dir: string;
@@ -93,6 +93,7 @@ describe('loadUsagePaneData', { timeout: 15_000 }, () => {
         modelMixSimilarity: 0.8,
         scorecardMinTasks: DEFAULT_SCORECARD_MIN_TASKS,
         outputNoticeTokens: 8000,
+        roles: { ...DEFAULT_ROLE_BUDGETS },
         source: 'defaults',
         warnings: [],
       }),

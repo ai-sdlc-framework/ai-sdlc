@@ -223,13 +223,21 @@ It takes `--format text|json|csv`.
 
 ### `cli-usage context`
 
-Context overhead per session: the size of the context at the first call (the fixed prefix each later turn re-reads), the number of turns and the total cache read. Cache reads dominate consumption, so this is where reductions are found. Options: `--since`, `--until`, `--scope`, `--limit <rows>` (default 20) and `--format text|json`.
+Context overhead per session: the size of the context at the first call (the fixed prefix each later turn re-reads), the size of the last call, the number of turns, the turns since the last `/clear`, whether the session is over its role budget and the total cache read. Cache reads dominate consumption, so this is where reductions are found. Options: `--since`, `--until`, `--scope`, `--limit <rows>` (default 20), `--role planner|operator-dispatch|executor` and `--format text|json`.
+
+- `turnsSinceClear` counts the calls after the last `SessionStart:clear` entry in the session transcript. A session with no recorded clear, or whose transcript cannot be read (other scope, deleted file), counts all its calls.
+- `overBudget` is `true` when the last call's context (input plus cache read plus cache write tokens) exceeds the role's `contextBudgetTokens`, or `turnsSinceClear` exceeds its `turnBudget` (see [Role budgets](#role-budgets)). The role comes from the session name recorded in the transcript (the name is the role, or starts with it and a dash, for example `executor-aisdlc-12`); `--role` supplies a role for main sessions whose name does not resolve. When no role is known, `overBudget` is `n/a` (`null` in JSON). Subagent rows have no role.
+- Under each table the command lists the ten largest single-turn context growths per session: the `cache_creation_input_tokens` of the call, the tool that produced it and the time. The tool is the one the call before it invoked (its result entered the context in the growing call). `(session start)` marks the first call, `(no tool)` a call after one that invoked no tool, and `-` a transcript that could not be read. Only tool names are read from the transcript, never message text or tool output.
 
 ```console
 $ cli-usage context --limit 5
-session  agent         scope      first_call_tokens  turns  total_cache_read  path
-sess-a   main-session  framework  45,300             12     678,000           .../projects/p1/sess-a.jsonl
-sess-b   main-session  other      22,200             5      100,000           -
+session  agent         scope      role     first_call_tokens  context_tokens  turns  turnsSinceClear  overBudget  total_cache_read  path
+sess-a   main-session  framework  planner  45,300             162,900         312    41               true        678,000           .../projects/p1/sess-a.jsonl
+sess-b   main-session  other      -        22,200             30,100          5      5                n/a         100,000           -
+
+Largest single-turn context growths, sess-a (main-session):
+   1. +38,200 tokens  Read  2026-09-10T09:14:03.000Z
+   2. +21,900 tokens  Bash  2026-09-10T09:31:47.000Z
 ```
 
 (The path is shortened here. It is shown only for framework scope.) For a subagent row the `agent` column shows the subagent id rather than the role, so a main session and its subagents appear as separate rows.
@@ -369,7 +377,56 @@ spec:
   scorecardMinTasks: 30
   output:
     noticeTokens: 8000 # tool results above this many estimated tokens draw a notice
+  roles: # optional; defaults shown in Role budgets below
+    executor:
+      turnBudget: 150
 ```
+
+### Role budgets
+
+`spec.roles.<role>.contextBudgetTokens` and `spec.roles.<role>.turnBudget` set when a session of a hierarchy role is over budget. A main session re-reads its whole context on every turn, so the unit of work for the planner is one RFC or one brief, for the dispatch session one brief, and for an executor one task; hand the unit off, then `/clear`. Absent values use these defaults:
+
+| Role | `contextBudgetTokens` | `turnBudget` |
+|---|---|---|
+| `planner` | 150000 | 300 |
+| `operator-dispatch` | 100000 | 200 |
+| `executor` | 120000 | 150 |
+
+```yaml
+spec:
+  roles:
+    planner:
+      contextBudgetTokens: 150000
+      turnBudget: 300
+```
+
+The plugin's `Stop` hook (`hooks/context-budget.sh`) applies these budgets at the end of every turn. It reads the tail of the session's own transcript, takes the last call's context size and the turns since the last `/clear`, and when either is over the budget of the session's role it prints a one-line notice (context size, budget, turns since clear, "finish this unit and `/clear`"). Under budget, or for a session whose role cannot be resolved, it prints nothing. The role is resolved from the hierarchy roster, else from the session name (`AI_SDLC_SESSION_NAME`, the hook input's `session_name`, or the name recorded in the transcript). The hook reads the machine-level `usage-config.yaml`, else the base-ref `.ai-sdlc/usage-config.yaml`, else the defaults, never blocks a session and always exits 0. Only the last 8 MB of the transcript is read, so turns older than that are not counted when no `/clear` appears in that tail.
+
+#### Colouring the status-line context segment
+
+The status-line command receives JSON on stdin that carries `session_name` and the context window figures; the hierarchy roster (`cli-hierarchy status`) gives the role of a named session. Pick the role from the name with the same rule as above, then colour the segment by the share of that role's budget: dim below 70 percent, yellow from 70, red from 100.
+
+```bash
+#!/bin/bash
+# status-line command: context segment coloured against the role budget
+in=$(cat)
+name=$(jq -r '.session_name // ""' <<<"$in")
+tokens=$(jq -r '.context_window.total_input_tokens // 0' <<<"$in")
+case "$name" in
+  planner*)           budget=150000 ;;
+  operator-dispatch*) budget=100000 ;;
+  executor*)          budget=120000 ;;
+  *)                  budget=0 ;;
+esac
+colour=0
+if [ "$budget" -gt 0 ]; then
+  pct=$(( tokens * 100 / budget ))
+  if [ "$pct" -ge 100 ]; then colour=31; elif [ "$pct" -ge 70 ]; then colour=33; fi
+fi
+printf '\033[%sm%sk ctx\033[0m' "$colour" "$(( tokens / 1000 ))"
+```
+
+Keep the thresholds in step with `spec.roles` if you override the defaults. If your harness version names the context field differently, read the figure from the same place its default status line does.
 
 Window modes: `first-use` opens at the first call after the previous window ended, `fixed` repeats from an `anchor`, and `trailing` is the last `lengthHours` before now. `weights.tokenClasses` can override the per-class weights (`input`, `cacheWrite5m`, `cacheWrite1h`, `cacheRead`, `output`). The schema is [`usage-config.v1.schema.json`](../../spec/schemas/usage-config.v1.schema.json).
 

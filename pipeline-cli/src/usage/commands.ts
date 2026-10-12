@@ -39,7 +39,9 @@ import {
   type Snapshot,
 } from './snapshots.js';
 import { UNITS_PROXY_NOTE, deriveUnitWeights, describeWeights, type UnitWeights } from './units.js';
+import { inspectTranscript, type TranscriptInspector } from './transcript-inspect.js';
 import {
+  BUDGET_ROLES,
   loadUsageConfig,
   type LoadUsageConfigOptions,
   type ResolvedUsageConfig,
@@ -65,6 +67,8 @@ export interface UsageViewDeps {
   loadConfig?: (opts: LoadUsageConfigOptions) => ResolvedUsageConfig;
   /** Price rows (tests); otherwise the price history in the usage directory. */
   priceRows?: ReadonlyArray<PriceRow>;
+  /** Replaces the transcript reader used by `context` (tests). */
+  inspectTranscript?: TranscriptInspector;
   emit?: (event: Omit<OrchestratorEvent, 'ts'>) => void;
 }
 
@@ -328,10 +332,15 @@ export function registerUsageViewCommands(y: Argv, deps: UsageViewDeps, io: Usag
     )
     .command(
       'context',
-      'Context overhead per session: first-call tokens, turns and total cache read',
+      'Context overhead per session: first-call tokens, turns, turns since clear, budget status and the largest context growths',
       (c) =>
         withRange(c)
           .option('limit', { type: 'number', default: 20, description: 'Rows to show' })
+          .option('role', {
+            type: 'string',
+            choices: BUDGET_ROLES,
+            description: 'Role budget to apply to main sessions whose name does not resolve',
+          })
           .option('format', {
             type: 'string',
             choices: ['text', 'json'] as const,
@@ -340,10 +349,12 @@ export function registerUsageViewCommands(y: Argv, deps: UsageViewDeps, io: Usag
       async (argv) => {
         const filter = rangeFilter(argv, io);
         if (!filter) return;
-        const rows = buildContextView(await loadRecords(deps, filter)).slice(
-          0,
-          Math.max(1, argv.limit),
-        );
+        const ctx = context(deps, io);
+        const rows = buildContextView(await loadRecords(deps, filter), {
+          roles: ctx.config.roles,
+          ...(argv.role ? { defaultRole: argv.role } : {}),
+          inspect: deps.inspectTranscript ?? inspectTranscript,
+        }).slice(0, Math.max(1, argv.limit));
         io.out(
           argv.format === 'json' ? `${JSON.stringify(rows, null, 2)}\n` : renderContextText(rows),
         );

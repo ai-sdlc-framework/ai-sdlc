@@ -110,6 +110,61 @@
           "type": "integer",
           "minimum": 1,
           "description": "Tasks a scorecard cell needs before it stops being labelled insufficient. Default 30."
+        },
+        "roles": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Per-role context and turn budgets for hierarchy sessions (RFC-0051). Defaults: planner 150000 tokens and 300 turns, operator-dispatch 100000 and 200, executor 120000 and 150.",
+          "properties": {
+            "planner": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "contextBudgetTokens": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Context size of one call (input plus cache read plus cache write tokens) above which a session of this role is over budget."
+                },
+                "turnBudget": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Model calls since the last clear above which a session of this role is over budget."
+                }
+              }
+            },
+            "operator-dispatch": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "contextBudgetTokens": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Context size of one call (input plus cache read plus cache write tokens) above which a session of this role is over budget."
+                },
+                "turnBudget": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Model calls since the last clear above which a session of this role is over budget."
+                }
+              }
+            },
+            "executor": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "contextBudgetTokens": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Context size of one call (input plus cache read plus cache write tokens) above which a session of this role is over budget."
+                },
+                "turnBudget": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Model calls since the last clear above which a session of this role is over budget."
+                }
+              }
+            }
+          }
         }
       }
     }
