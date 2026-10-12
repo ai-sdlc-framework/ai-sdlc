@@ -1667,6 +1667,64 @@ export function fixUntrackedReviewLedgers(ctx: DoctorRunContext): DoctorFixResul
   };
 }
 
+// ── Backlog drift warnings (AISDLC-797) ─────────────────────────────────
+
+/** Drift warnings above this count get a doctor warning; the report size follows the count. */
+export const BACKLOG_DRIFT_WARNING_THRESHOLD = 150;
+
+/**
+ * The backlog-drift report grows with unattended warnings; at 190 warnings it crossed the
+ * 64 KiB pipe buffer and broke the required Backlog Drift check for every PR (AISDLC-796).
+ * Warns once the warning count passes the threshold so the backlog is cleaned first. The
+ * report is redirected to a temp file inside `sh` (never captured from the tool's own
+ * stdout) for the same reason the workflow step is.
+ */
+export function checkBacklogDriftWarnings(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'backlog-drift-warnings';
+  if (!ctx.adapters.exists(join(ctx.projectDir, 'backlog'))) {
+    return { id, severity: 'pass', title: 'no backlog directory; drift check not applicable' };
+  }
+  const r = ctx.adapters.runCommand('sh', [
+    '-c',
+    'cd "$1" && f="$(mktemp)" && { npx backlog-drift@0.1.3 check --json > "$f" 2>/dev/null; cat "$f"; rm -f "$f"; }',
+    'sh',
+    ctx.projectDir,
+  ]);
+  let report: unknown;
+  try {
+    report = JSON.parse(r.stdout);
+  } catch {
+    report = undefined;
+  }
+  if (!Array.isArray(report)) {
+    return {
+      id,
+      severity: 'pass',
+      title: 'backlog drift report unavailable; warning count not checked',
+    };
+  }
+  const warnings = report.filter(
+    (e) => (e as { severity?: string } | null)?.severity === 'warning',
+  ).length;
+  const bytes = Buffer.byteLength(r.stdout, 'utf-8');
+  if (warnings <= BACKLOG_DRIFT_WARNING_THRESHOLD) {
+    return {
+      id,
+      severity: 'pass',
+      title: `backlog drift: ${warnings} warning(s), report ${bytes} bytes`,
+      anonymizableEvidence: { warnings, reportBytes: bytes },
+    };
+  }
+  return {
+    id,
+    severity: 'warn',
+    title: `backlog drift: ${warnings} warnings exceed ${BACKLOG_DRIFT_WARNING_THRESHOLD} (report ${bytes} bytes)`,
+    remediation:
+      'Clean up drift warnings before the report grows large: `npx backlog-drift check`, then `npx backlog-drift fix --task <id>`.',
+    anonymizableEvidence: { warnings, reportBytes: bytes },
+  };
+}
+
 // ── Registry ──────────────────────────────────────────────────────────────
 
 /**
@@ -1772,6 +1830,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
       'Untracked .ai-sdlc/reviews/*.jsonl ledgers left in the main checkout by a writer that ran from the parent (AISDLC-793).',
     run: checkUntrackedReviewLedgers,
     fix: fixUntrackedReviewLedgers,
+  },
+  {
+    id: 'backlog-drift-warnings',
+    description:
+      'Backlog drift warning count against the 150 threshold, with report size (AISDLC-797).',
+    run: checkBacklogDriftWarnings,
   },
   {
     id: 'force-push-policy',

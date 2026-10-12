@@ -53,6 +53,7 @@ import {
   checkHierarchyLaunchEnv,
   checkWorktreeHooks,
   checkUntrackedReviewLedgers,
+  checkBacklogDriftWarnings,
   fixUntrackedReviewLedgers,
   checkParentCheckoutState,
   checkWorktreeRewriteHooks,
@@ -2081,5 +2082,44 @@ describe('checkIdleSessions', () => {
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
+  });
+});
+
+// ── backlog-drift-warnings (AISDLC-797) ───────────────────────────────
+
+describe('backlog-drift-warnings check', () => {
+  const report = (n: number) =>
+    JSON.stringify(Array.from({ length: n }, () => ({ severity: 'warning' })));
+  const withBacklog = (stdout: string) => {
+    mkdirSync(join(tmpDir, 'backlog'), { recursive: true });
+    return makeCtx(makeAdapters({ runCommand: () => ({ stdout, exitCode: 0 }) }));
+  };
+
+  it('passes and reports counts at or below the threshold', () => {
+    const r = checkBacklogDriftWarnings(withBacklog(report(150)));
+    expect(r.severity).toBe('pass');
+    expect(r.title).toContain('150 warning(s)');
+    expect(r.title).toContain('bytes');
+  });
+
+  it('warns above 150 warnings', () => {
+    const r = checkBacklogDriftWarnings(withBacklog(report(151)));
+    expect(r.severity).toBe('warn');
+    expect(r.title).toContain('151 warnings exceed 150');
+    expect(r.remediation).toContain('backlog-drift');
+  });
+
+  it('passes quietly when the report is unreadable', () => {
+    expect(checkBacklogDriftWarnings(withBacklog('not json')).severity).toBe('pass');
+  });
+
+  it('passes when there is no backlog directory', () => {
+    const r = checkBacklogDriftWarnings(makeCtx(makeAdapters()));
+    expect(r.severity).toBe('pass');
+    expect(r.title).toContain('not applicable');
+  });
+
+  it('is registered', () => {
+    expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('backlog-drift-warnings');
   });
 });

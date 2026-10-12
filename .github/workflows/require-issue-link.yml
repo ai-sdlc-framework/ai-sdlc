@@ -87,11 +87,18 @@ jobs:
           # scripts/issue-link-decision.mjs owns every rule (bypass label, linked
           # issue, backlog task by diff, backlog task by title id) and is unit
           # tested under `pnpm test`.
-          DECISION=$(node scripts/issue-link-decision.mjs)
-          STATE=$(printf '%s' "$DECISION" | jq -r '.state')
-          RULE=$(printf '%s' "$DECISION" | jq -r '.rule')
-          DESCRIPTION=$(printf '%s' "$DECISION" | jq -r '.description')
-          TARGET_URL=$(printf '%s' "$DECISION" | jq -r '.targetUrl')
+          # AISDLC-797: JSON goes to a file, never a `$(...)` capture.
+          DECISION_FILE="$RUNNER_TEMP/issue-link-decision.json"
+          decision_rc=0
+          node scripts/issue-link-decision.mjs > "$DECISION_FILE" || decision_rc=$?
+          if ! jq -e 'type == "array" or type == "object"' "$DECISION_FILE" >/dev/null 2>&1; then
+            echo "::error::issue-link decision ${DECISION_FILE} is not valid JSON (issue-link-decision exit code ${decision_rc})."
+            exit 1
+          fi
+          STATE=$(jq -r '.state' "$DECISION_FILE")
+          RULE=$(jq -r '.rule' "$DECISION_FILE")
+          DESCRIPTION=$(jq -r '.description' "$DECISION_FILE")
+          TARGET_URL=$(jq -r '.targetUrl' "$DECISION_FILE")
           [ -n "$TARGET_URL" ] || TARGET_URL="https://github.com/$REPO/pull/$PR_NUMBER"
 
           echo "result=$STATE" >> "$GITHUB_OUTPUT"

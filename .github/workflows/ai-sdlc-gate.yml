@@ -329,6 +329,10 @@ jobs:
             exit 1
           fi
           errors="$(jq '[.[] | select(.severity == "error")] | length' "$report")"
+          # Leading indicator (AISDLC-797): the report size and warning count,
+          # so growth toward a size problem is visible before it breaks a gate.
+          warnings="$(jq '[.[] | select(.severity == "warning")] | length' "$report")"
+          echo "[backlog-drift] report size: $(wc -c < "$report" | tr -d ' ') bytes, warnings: ${warnings}"
           echo ""
           echo "[backlog-drift] error-severity issues: ${errors}"
           if [ "${errors}" != "0" ]; then

@@ -123,10 +123,104 @@ jobs:
           echo "::error::Runbook: docs/operations/main-health-monitor.md"
           exit 1
 
+  # AISDLC-797: run the gate scripts PRs run against main itself, so a gate that
+  # is broken for every branch pages within minutes of the change that broke it
+  # instead of being discovered one red PR at a time (the 2026-10-10 Backlog
+  # Drift outage). Each step records its outcome; the last step fails the job.
+  gate-scripts:
+    name: Gate Scripts On Main
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build pipeline-cli (patch-id parity and DoR need dist)
+        run: pnpm --filter @ai-sdlc/pipeline-cli... build
+
+      - name: Gate - backlog drift
+        id: gate-drift
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          report="${RUNNER_TEMP:-/tmp}/backlog-drift.json"
+          drift_rc=0
+          npx backlog-drift@0.1.3 check --json > "$report" 2>/dev/null || drift_rc=$?
+          if ! jq -e 'type == "array" or type == "object"' "$report" >/dev/null 2>&1; then
+            echo "::error::Backlog drift report ${report} is not valid JSON (backlog-drift exit code ${drift_rc})."
+            exit 1
+          fi
+          errors="$(jq '[.[] | select(.severity == "error")] | length' "$report")"
+          echo "[gate-scripts] drift report $(wc -c < "$report" | tr -d ' ') bytes, error-severity issues: ${errors}"
+          [ "${errors}" = "0" ]
+
+      - name: Gate - docs-only classifier
+        id: gate-docs-only
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          RESULT=$(git -c core.quotePath=false ls-files | node scripts/is-docs-only-changeset.mjs)
+          echo "[gate-scripts] docs-only classifier over tracked files: ${RESULT}"
+          [ "$RESULT" = "true" ] || [ "$RESULT" = "false" ]
+
+      - name: Gate - DoR violations
+        id: gate-dor
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          verdicts="${RUNNER_TEMP:-/tmp}/dor-results.jsonl"
+          out="${RUNNER_TEMP:-/tmp}/dor-violations.json"
+          : > "$verdicts"
+          dor_rc=0
+          node pipeline-cli/bin/ai-sdlc-pipeline.mjs dor-pr-has-violations --verdicts-file "$verdicts" > "$out" || dor_rc=$?
+          if ! jq -e 'type == "object"' "$out" >/dev/null 2>&1; then
+            echo "::error::DoR violations report ${out} is not valid JSON (exit code ${dor_rc})."
+            exit 1
+          fi
+
+      - name: Gate - dark-code
+        id: gate-dark-code
+        continue-on-error: true
+        run: node scripts/check-dark-code.mjs
+
+      - name: Gate - patch-id exclusions parity
+        id: gate-patch-id
+        continue-on-error: true
+        run: node --test scripts/check-attestation-sign.test.mjs
+
+      - name: Determine gate outcome
+        run: |
+          fail=0
+          for pair in \
+            "backlog-drift=${{ steps.gate-drift.outcome }}" \
+            "docs-only-classifier=${{ steps.gate-docs-only.outcome }}" \
+            "dor-violations=${{ steps.gate-dor.outcome }}" \
+            "dark-code=${{ steps.gate-dark-code.outcome }}" \
+            "patch-id-parity=${{ steps.gate-patch-id.outcome }}"; do
+            echo "[gate-scripts] ${pair}"
+            case "$pair" in *=success) ;; *) fail=1 ;; esac
+          done
+          if [ "$fail" = "1" ]; then
+            echo "::error::a gate script failed on main; see the steps above. Runbook: docs/operations/main-health-monitor.md"
+            exit 1
+          fi
+
   # AC-2: On failure, create a GitHub issue to page the operator.
   alert:
     name: File Red-Main Issue
-    needs: health-check
+    needs: [health-check, gate-scripts]
     # Only fire when the health check failed. `if: failure()` matches when ANY
     # upstream job in `needs` has result=failure. This includes the case where
     # the health-check job itself exits non-zero on the "Fail on test failure"
@@ -134,6 +228,7 @@ jobs:
     if: failure()
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       issues: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -144,6 +239,8 @@ jobs:
           COMMIT_SHA: ${{ github.sha }}
           EVENT_NAME: ${{ github.event_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          HEALTH_RESULT: ${{ needs.health-check.result }}
+          GATE_RESULT: ${{ needs.gate-scripts.result }}
         run: |
           set -euo pipefail
           SHORT_SHA="${COMMIT_SHA:0:8}"
@@ -172,9 +269,12 @@ jobs:
 
           ## What failed
 
-          The full test suite failed on ${EVENT_NAME} run against main. This indicates a merge-skew regression: individual PRs were green, but their combined effect breaks the suite.
+          A job failed on the ${EVENT_NAME} run against main (health-check: ${HEALTH_RESULT}, gate-scripts: ${GATE_RESULT}).
 
-          Check the [CI run](${RUN_URL}) for the specific failing test names and stack traces.
+          - If health-check failed, the full test suite is red on main: a merge-skew regression where individual PRs were green but their combined effect breaks the suite.
+          - If gate-scripts failed, a gate script (backlog drift, docs-only classifier, DoR violations, dark-code, or patch-id exclusions parity) failed on main. The failing gate is the step in the gate-scripts job whose outcome is not success.
+
+          Check the [CI run](${RUN_URL}) for the failing step, test names and stack traces.
 
           ## Triage steps
 
