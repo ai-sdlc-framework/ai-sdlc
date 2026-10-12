@@ -53,6 +53,7 @@ import {
   isModelAlias,
   judgmentEnforceDowngradeReason,
   loadJudgmentConfig,
+  resolveJudgmentProvider,
 } from '@ai-sdlc/reference';
 import {
   ARTIFACTS_GITIGNORE_ENTRY,
@@ -1526,7 +1527,26 @@ export function checkJudgmentLayer(ctx: DoctorRunContext): DoctorCheckResult[] {
   }
 
   const results: DoctorCheckResult[] = [];
-  const provider = createBuiltInJudgmentProvider(config.provider, { model: config.model });
+  let resolved: ReturnType<typeof resolveJudgmentProvider>;
+  try {
+    resolved = resolveJudgmentProvider(config.provider, config.providerOptions, config.model);
+  } catch {
+    resolved = undefined;
+  }
+  if (resolved?.rejectedReason) {
+    return [
+      {
+        id: 'judgment-provider-options',
+        severity: 'warn',
+        title: `judgment provider '${cleanText(config.provider)}' options were rejected, so the layer is disabled: ${cleanText(resolved.rejectedReason)}`,
+        remediation:
+          'Fix `spec.providerOptions` in the judgment config; see docs/operations/judgment-layer.md.',
+        anonymizableEvidence: { provider: config.provider, optionsRejected: true },
+      },
+    ];
+  }
+  const provider =
+    resolved ?? createBuiltInJudgmentProvider(config.provider, { model: config.model });
   if (!provider) {
     return [
       {
@@ -1539,7 +1559,7 @@ export function checkJudgmentLayer(ctx: DoctorRunContext): DoctorCheckResult[] {
     ];
   }
 
-  if (!env[provider.requires.envVar]) {
+  if (provider.requires.envVar && !env[provider.requires.envVar]) {
     results.push({
       id: 'judgment-provider-key',
       severity: 'warn',

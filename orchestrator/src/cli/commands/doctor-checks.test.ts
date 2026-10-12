@@ -1100,6 +1100,27 @@ describe('checkJudgmentLayer', () => {
     expect(rs[0].title).toMatch(/disabled/);
   });
 
+  it('names a rejected providerOptions key; valid options report none (AISDLC-633.3)', () => {
+    const bad = checkJudgmentLayer(
+      ctxWith(
+        config(
+          '  provider: openai-compatible\n  model: m\n  providerOptions:\n    openai-compatible:\n      baseUrl: http://localhost:1/v1\n      BOGUSKEY: 1\n',
+        ),
+      ),
+    );
+    expect(ids(bad)).toEqual(['judgment-provider-options']);
+    expect(bad[0].severity).toBe('warn');
+    expect(bad[0].title).toContain('BOGUSKEY');
+    const good = checkJudgmentLayer(
+      ctxWith(
+        config(
+          '  provider: openai-compatible\n  model: m\n  providerOptions:\n    openai-compatible:\n      baseUrl: http://localhost:1/v1\n',
+        ),
+      ),
+    );
+    expect(ids(good)).toEqual(['judgment-layer']);
+  });
+
   it('warns when the provider is not built in', () => {
     const rs = checkJudgmentLayer(ctxWith(config('  provider: mystery\n')));
     expect(rs[0].severity).toBe('warn');

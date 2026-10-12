@@ -222,6 +222,7 @@ function createDisabledProvider(reason: string): JudgmentProvider {
       calibratedProbabilities: false,
     },
     requires: { envVar: '' },
+    rejectedReason: reason,
     async isAvailable() {
       return { available: false, reason };
     },

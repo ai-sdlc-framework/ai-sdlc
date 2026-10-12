@@ -63,10 +63,7 @@ export interface JudgmentEvaluationRecord {
   incumbent?: unknown;
   sourceKind?: string;
   /** Set when a provider was configured but could not be used. */
-  providerUnavailableReason?:
-    | 'provider-not-registered'
-    | 'availability-check-failed'
-    | 'provider-unavailable';
+  providerUnavailableReason?: string;
   taskId?: string;
 }
 
@@ -100,6 +97,14 @@ export interface EvaluateJudgmentContext {
 
 const ALIAS_RE = /(^|[-:@])(latest|preview|beta|exp|nightly)$/i;
 const CORPUS_MIN_N = 50;
+
+/** A provider-supplied reason, stripped of control characters and capped; undefined when empty. */
+function cleanReason(reason: unknown): string | undefined {
+  if (typeof reason !== 'string') return undefined;
+  // eslint-disable-next-line no-control-regex
+  const text = reason.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim();
+  return text ? text.slice(0, 300) : undefined;
+}
 
 /** True when a URL points at the local machine (the only egress exemption). */
 export function isLoopbackUrl(url: string | undefined): boolean {
@@ -342,7 +347,7 @@ export async function evaluateJudgment<I, D>(
       rec.providerUnavailableReason = 'provider-not-registered';
       return await abstain('disabled');
     }
-    let availability: { available: boolean };
+    let availability: { available: boolean; reason?: string };
     try {
       availability = await provider.isAvailable();
     } catch {
@@ -350,7 +355,7 @@ export async function evaluateJudgment<I, D>(
       return await abstain('disabled');
     }
     if (!availability.available) {
-      rec.providerUnavailableReason = 'provider-unavailable';
+      rec.providerUnavailableReason = cleanReason(availability.reason) ?? 'provider-unavailable';
       return await abstain('disabled');
     }
 

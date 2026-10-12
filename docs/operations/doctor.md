@@ -75,6 +75,7 @@ so run the check after you commit a config change.
 |---|---|---|
 | `judgment-layer` | pass | The layer is disabled (no provider configured) and every judgment abstains. Informational. Also the result when the layer is enabled and healthy. |
 | `judgment-provider-key` | warn | A provider is configured but its API key environment variable (`TYPESAFE_API_KEY` for `jev`) is not set, so every judgment abstains. |
+| `judgment-provider-options` | warn | The provider's `spec.providerOptions` were rejected (an unknown key, a non-https host, a denylisted env name). The title names the cause; the layer is disabled. |
 | `judgment-model-pin` | warn | A judgment is configured `enforce` while `spec.model` is missing or an alias such as `jev-latest`; the runtime runs it as `shadow`. Pin an exact version. |
 | `judgment-enforce-downgrade` | warn | An `enforce` judgment the runtime would run as `shadow`, with the reason (for example `no-thresholds`, `no-promotion`, `model-alias`, `uncalibrated-provider`, or `unknown-judgment`). |
 
