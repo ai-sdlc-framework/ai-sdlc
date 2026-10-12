@@ -204,6 +204,7 @@ export async function buildReviewPrompts(
           taskId: opts.taskId,
         }));
   let reviewerSetRecord: BuildReviewPromptsResult['reviewerSet'];
+  let reviewerSetMode: BuildReviewPromptsResult['reviewerSetMode'];
   let selected: ReviewerType[];
   if (opts.reviewers) {
     // An explicit override is the caller's decision and is left untouched.
@@ -231,6 +232,7 @@ export async function buildReviewPrompts(
       `[reviewer-set] ${selection.reviewers.join(', ')} (classifier: ${reviewerSetRecord.set}, ` +
         `reason: ${reviewerSetRecord.reason}${paths.length > 0 ? `, trust-chain paths: ${paths.slice(0, 5).join(', ')}${paths.length > 5 ? ', ...' : ''}` : ''})\n`,
     );
+    reviewerSetMode = selection.mode;
     if (selection.mode === 'staged') {
       // The staged set is a pipeline (risk map, plan, probes, synthesis) that `/ai-sdlc execute`
       // drives through `cli-staged-review`; these prompts are only the reviewer fan-out. A caller
@@ -319,6 +321,7 @@ export async function buildReviewPrompts(
     nonce,
     headSha,
     ...(reviewerSetRecord ? { reviewerSet: reviewerSetRecord } : {}),
+    ...(reviewerSetMode ? { reviewerSetMode } : {}),
   };
 }
 

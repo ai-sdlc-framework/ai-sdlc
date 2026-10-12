@@ -30,6 +30,10 @@ export interface ReviewerReport {
   approved: boolean;
   findings?: ReviewerFinding[];
   summary?: string;
+  /** Staged stages only (RFC-0052): the agent's final message, inline. */
+  output?: string;
+  /** Staged stages only: a file holding the agent's final message, written verbatim. */
+  outputFile?: string;
 }
 
 const SEVERITIES: readonly Severity[] = ['critical', 'major', 'minor', 'suggestion'];
@@ -64,6 +68,8 @@ function asReport(raw: unknown, fallbackAgent?: string): ReviewerReport | null {
     approved: nested.approved === true,
     findings,
     ...(typeof nested.summary === 'string' ? { summary: nested.summary } : {}),
+    ...(typeof r.output === 'string' ? { output: r.output } : {}),
+    ...(typeof r.outputFile === 'string' ? { outputFile: r.outputFile } : {}),
   };
 }
 
@@ -169,7 +175,8 @@ export async function finalizeReview(
   const review = state.review;
   if (!review) return { ok: false, reason: 'review-finalize called with no review round in state' };
   const warnings: string[] = [];
-  const verdicts: ReviewerVerdict[] = [];
+  // The staged set's one grounded verdict (RFC-0052) joins the standalone reviewers'.
+  const verdicts: ReviewerVerdict[] = review.staged?.verdict ? [review.staged.verdict] : [];
   const wtAiSdlc = join(state.worktreePath, '.ai-sdlc');
 
   // Resolve every reviewer's harness agent id BEFORE touching disk, so a reporting slip

@@ -15,6 +15,7 @@ import type {
   DeveloperReturn,
   PipelineLogger,
   ReviewerType,
+  ReviewerVerdict,
   TaskSpec,
 } from '../types.js';
 
@@ -31,8 +32,8 @@ export type NextStepOutcome =
 
 /** One reviewer the model is asked to spawn. */
 export interface SpawnedReviewer {
-  /** Role (`code-reviewer`, `security-reviewer`, ...). */
-  reviewer: ReviewerType;
+  /** Role (`code-reviewer`, `security-reviewer`, ...); the staged model stages for RFC-0052. */
+  reviewer: ReviewerType | StagedModelAgent;
   /** Agent to spawn (the codex variant by default for code/test review). */
   agent: string;
   /** Harness label recorded on the transcript leaf. */
@@ -43,6 +44,32 @@ export interface SpawnedReviewer {
   model?: string;
   /** File holding the full reviewer prompt, nonce marker included. */
   promptFile: string;
+}
+
+/** The two agents of the staged review that run a model beside the probe executors (RFC-0052). */
+export type StagedModelAgent = 'review-planner' | 'review-synthesizer';
+
+/**
+ * Where the staged review of one round stands. Each stage is one `spawn-reviewers`
+ * instruction with one agent; the standalone security reviewer runs LAST, after the
+ * staged leaves are emitted, because it is Write-capable and reads the untrusted diff.
+ */
+export interface StagedRoundState {
+  stage: 'plan' | 'synthesize' | 'security';
+  /** The seal the last `cli-staged-review` phase printed. */
+  seal: string;
+  /** 1 or 2: which planner output is expected. */
+  plannerAttempt: 1 | 2;
+  plannerPromptFile: string;
+  plannerModel: string;
+  synthModel: string;
+  /** Harness agent id and output file of the planner, kept for its transcript. */
+  plannerAgentId?: string;
+  plannerOutputFile?: string;
+  /** The staged set's single grounded verdict, once finalized. */
+  verdict?: ReviewerVerdict;
+  /** The standalone security reviewer, spawned last (prompt built before the staged run). */
+  security: SpawnedReviewer;
 }
 
 /** Everything the review-finalize wrapper needs to bind results to the prompts. */
@@ -64,6 +91,8 @@ export interface ReviewRoundState {
     lastReviewedSha: string | null;
     contentHash: string;
   };
+  /** Set while the staged review (RFC-0052) is driving this round. */
+  staged?: StagedRoundState;
 }
 
 /** Durable state, JSON on disk between `next-step` invocations. */

@@ -823,3 +823,99 @@ describe('approved-without-reviewers verdict', () => {
     expect(approvedWithoutReviewers('').decision).toBe('APPROVED');
   });
 });
+
+describe('staged review stages (RFC-0052)', () => {
+  const plannerRound = (round: number): ReviewRoundState => ({
+    ...reviewRound(round),
+    spawned: [
+      {
+        reviewer: 'review-planner',
+        agent: 'review-planner',
+        harness: 'claude-code',
+        leafModel: 'fable',
+        promptFile: '/files/planner.md',
+      },
+    ],
+    staged: {
+      stage: 'plan',
+      seal: 's0',
+      plannerAttempt: 1,
+      plannerPromptFile: '/files/planner.md',
+      plannerModel: 'fable',
+      synthModel: 'fable',
+      security: reviewRound(round).spawned[1],
+    },
+  });
+
+  it('asks for the planner with the staged reply shape, then falls back to the three reviewers when a phase refuses', async () => {
+    const noStaged: Array<boolean | undefined> = [];
+    const d = deps({
+      prepare: async (_c, _s, round, opts) => {
+        noStaged.push(opts?.noStaged);
+        return {
+          kind: 'spawn',
+          review: opts?.noStaged ? reviewRound(round) : plannerRound(round),
+          classifierLine: 'x',
+        };
+      },
+    });
+    h.runner.on((_c, a) => a[1] === 'plan', {
+      stdout: JSON.stringify({ ok: false, reason: 'integrity-check-failed' }),
+      stderr: '',
+      code: 0,
+    });
+    const plannerOut = join(h.root, 'planner-out.txt');
+    writeFileSync(plannerOut, '{}', 'utf8');
+    const first = await nextStep(ctx, { task: 'AISDLC-900' }, d);
+    expect(first.instruction.action).toBe('spawn-developer');
+    const planner = await nextStep(ctx, { task: 'AISDLC-900', result: DEV_JSON }, d);
+    if (planner.instruction.action !== 'spawn-reviewers')
+      throw new Error('expected spawn-reviewers');
+    expect(planner.instruction.reviewers.map((r) => r.agent)).toEqual(['review-planner']);
+    expect(planner.instruction.replyShape).toContain('outputFile');
+
+    const fallback = await nextStep(
+      ctx,
+      {
+        task: 'AISDLC-900',
+        result: JSON.stringify({
+          reviewers: [{ agent: 'review-planner', agentId: 'p1', outputFile: plannerOut }],
+        }),
+      },
+      d,
+    );
+    if (fallback.instruction.action !== 'spawn-reviewers')
+      throw new Error('expected spawn-reviewers');
+    expect(noStaged).toEqual([undefined, true]);
+    expect(fallback.instruction.reviewers.map((r) => r.agent)).toEqual([
+      'code-reviewer-codex',
+      'security-reviewer',
+    ]);
+    expect(fallback.instruction.replyShape).not.toContain('outputFile');
+    expect(persisted().review?.staged).toBeUndefined();
+  });
+
+  it('asks again with the staged shape when the planner report has no output file', async () => {
+    const d = deps({
+      prepare: async (_c, _s, round) => ({
+        kind: 'spawn',
+        review: plannerRound(round),
+        classifierLine: 'x',
+      }),
+    });
+    await nextStep(ctx, { task: 'AISDLC-900' }, d);
+    await nextStep(ctx, { task: 'AISDLC-900', result: DEV_JSON }, d);
+    const fix = await nextStep(
+      ctx,
+      {
+        task: 'AISDLC-900',
+        result: JSON.stringify({ reviewers: [{ agent: 'review-planner', agentId: 'p1' }] }),
+      },
+      d,
+    );
+    expect(fix.instruction.action).toBe('fix-report');
+    if (fix.instruction.action === 'fix-report') {
+      expect(fix.instruction.replyShape).toContain('outputFile');
+    }
+  });
+});
