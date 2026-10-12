@@ -44,7 +44,7 @@
     "yaml": "^2.9.1"
   },
   "devDependencies": {
-    "@types/node": "^25.9.3",
+    "@types/node": "^26.6.5",
     "@vitest/coverage-v8": "^4.1.11",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
