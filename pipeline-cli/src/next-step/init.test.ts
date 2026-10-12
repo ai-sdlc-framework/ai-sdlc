@@ -138,6 +138,22 @@ describe('initTask', () => {
     if (!res.ok) expect(res.reason).toMatch(/stray\.txt[\s\S]*clean them up/);
   });
 
+  it('passes Step 0.5 with the dispatch board and harness dirs present (AISDLC-811)', async () => {
+    writeFileSync(
+      join(h.root, '.gitignore'),
+      readFileSync(join(__dirname, '..', '..', '..', '.gitignore'), 'utf8'),
+    );
+    git(h.root, 'add', '.gitignore');
+    git(h.root, 'commit', '-q', '-m', 'ignore runtime state');
+    mkdirSync(join(h.root, '.ai-sdlc', 'dispatch', 'queue'), { recursive: true });
+    writeFileSync(join(h.root, '.ai-sdlc', 'dispatch', 'queue', 'x.json'), '{}');
+    mkdirSync(join(h.root, '.codex'), { recursive: true });
+    writeFileSync(join(h.root, '.codex', 'config.toml'), '');
+    writeFileSync(join(h.root, 'AGENTS.md'), 'x');
+    const res = await initTask(h.ctx, 'AISDLC-900');
+    expect(res.ok).toBe(true);
+  });
+
   it('refuses an unknown task', async () => {
     const res = await initTask(h.ctx, 'AISDLC-404');
     expect(res.ok).toBe(false);
