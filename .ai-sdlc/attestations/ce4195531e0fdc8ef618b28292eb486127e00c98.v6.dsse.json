@@ -1,0 +1,68 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "c804f962fb42ba5cfa4c6f1331a65c45e3bee7b4"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "2c31bbd53a56f7481c2265b7f6ecaf68260cbd7feb28b632c328e938cd57d85c",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "62c4b83a98987aa198989b1f9b067454eb116a6890e2abc8d1d7f03c808ab852",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "62c4b83a98987aa198989b1f9b067454eb116a6890e2abc8d1d7f03c808ab852",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": ["74b93943f4267b38478021ce04722edab91bfada4325b5f2d95732faf2c4757f"]
+    },
+    {
+      "leafIndex": 1,
+      "proof": ["e8affead287c096e606e9e046bca11a90a08eb4c5679b74d7bf448a5e9a25c2e"]
+    }
+  ],
+  "rootHash": "e9dd69fa2d4a3d8831a4e521f7416bd0073a69b4a5cf71fa9246980cdc2a440b",
+  "rootSignature": "4Cb4DkLs1sfOONBmWLCNQLPDD+xgiFJujHUr6n4xo3uW4Xdz2qW0WDGlHP45ib70X08reqmLg4tfhuKzyxtPDw==",
+  "nonce": "99e2d31f8c7e6e4e79ada22bb38ccc2d3a1cc43c02d8472207dd30cc312745fa",
+  "leafCount": 2,
+  "signedAt": "2026-10-12T21:03:01.283Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      "ai-sdlc-plugin/agents/agents.test.mjs",
+      "ai-sdlc-plugin/agents/review-planner.md",
+      "ai-sdlc-plugin/agents/review-synthesizer.md",
+      "ai-sdlc-plugin/commands/execute.md",
+      "ai-sdlc-plugin/commands/execute.test.mjs",
+      "pipeline-cli/attestation-core/merkle-core.d.mts",
+      "pipeline-cli/attestation-core/merkle-core.mjs",
+      "pipeline-cli/attestation-core/verify-core.mjs",
+      "pipeline-cli/src/attestation/merkle.ts",
+      "pipeline-cli/src/attestation/reviews-analysis.ts",
+      "pipeline-cli/src/attestation/reviews-ledger.ts",
+      "pipeline-cli/src/attestation/sign-v6.ts",
+      "pipeline-cli/src/attestation/staged-leaves.test.ts",
+      "pipeline-cli/src/attestation/staged-ledger.test.ts",
+      "pipeline-cli/src/cli/attestation.ts",
+      "pipeline-cli/src/steps/07-build-review-prompts.ts",
+      "pipeline-cli/src/steps/reviewer-set.ts",
+      "reference/src/core/generated-schemas.ts"
+    ],
+    "appliedReviewers": ["code-reviewer-codex", "security-reviewer"]
+  }
+}
