@@ -103,6 +103,32 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       sourceKind,
     });
 
+  // AISDLC-738 — a finished task sent back for another round carries its
+  // feedback on the claimed board manifest; an explicit option wins. A block on
+  // the manifest only starts resume mode when the dispatch session left it and,
+  // when this session can be identified, it is the one that claimed the task.
+  let resume: { feedback: string; prNumber?: number; branchGuessed?: boolean } | undefined =
+    opts.resume;
+  if (!resume) {
+    const authority = authoriseResume(
+      dispatchBoardDir(opts.workDir),
+      opts.taskId,
+      opts.resumeIdentity,
+    );
+    if (authority && !authority.ok) {
+      return abort(opts, '', '', null, authority.reason);
+    }
+    if (authority) {
+      resume = {
+        feedback: formatResumeFeedback(authority.feedback),
+        ...(authority.feedback.prNumber !== undefined
+          ? { prNumber: authority.feedback.prNumber }
+          : {}),
+        ...(authority.feedback.branchGuessed ? { branchGuessed: true } : {}),
+      };
+    }
+  }
+
   // Step 1 — Validate task.
   //
   // AISDLC-393 — when `opts.taskSpec` is provided, use it directly and skip
@@ -130,6 +156,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     const validation = await validateTask({
       taskId: opts.taskId,
       workDir: opts.workDir,
+      ...(resume ? { resume: true } : {}),
       ...(opts.taskFilePathOverride !== undefined
         ? { taskFilePathOverride: opts.taskFilePathOverride }
         : {}),
@@ -138,32 +165,6 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       return abort(opts, '', '', null, validation.reason ?? 'validation failed');
     }
     task = validation.task;
-  }
-
-  // AISDLC-738 — a finished task sent back for another round carries its
-  // feedback on the claimed board manifest; an explicit option wins. A block on
-  // the manifest only starts resume mode when the dispatch session left it and,
-  // when this session can be identified, it is the one that claimed the task.
-  let resume: { feedback: string; prNumber?: number; branchGuessed?: boolean } | undefined =
-    opts.resume;
-  if (!resume) {
-    const authority = authoriseResume(
-      dispatchBoardDir(opts.workDir),
-      opts.taskId,
-      opts.resumeIdentity,
-    );
-    if (authority && !authority.ok) {
-      return abort(opts, '', '', null, authority.reason);
-    }
-    if (authority) {
-      resume = {
-        feedback: formatResumeFeedback(authority.feedback),
-        ...(authority.feedback.prNumber !== undefined
-          ? { prNumber: authority.feedback.prNumber }
-          : {}),
-        ...(authority.feedback.branchGuessed ? { branchGuessed: true } : {}),
-      };
-    }
   }
 
   // Step 2

@@ -2,7 +2,7 @@
 id: AISDLC-822
 title: >-
   Resume of a task whose file is already in backlog/completed fails Step 1 with "no task file": validateTask must honour the completed location like Steps 4 and 10 do
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-12'
 labels:
