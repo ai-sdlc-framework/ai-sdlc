@@ -38,7 +38,7 @@ dispatchable: true
 2. `resumeDone` never sets `wave`; it copies `priority` and sets `retryCount`; `enqueue --priority 1` with no wave sorts first. A board-ordering test covers a resume against wave-less entries.
 3. `release --task-id` refuses when the task's worktree has commits not on its PR head or uncommitted tracked changes, unless `--force --reason <text>`; the reason is written to the manifest history.
 4. Resume notes are generated: `cli-dispatch resume` takes `--failing-check`, `--finding`, `--note` (prose, no commands) and renders the executor instruction from a fixed template that says "run the pipeline unmodified from the existing worktree"; free-text commands are rejected (a `cli-`/`git `/`gh ` prefix in the note fails validation).
-5. `resumeDone` accepts a `done/` verdict with outcome `iterate-needed` when the claim is released, turning it into a resume with the verdict notes as feedback; the hierarchy executor loop documents this as the continuation path.
+5. `resumeDone` accepts a `done/` verdict with outcome `iterate-needed` and takes over the executor's still-held inflight claim (main's `holdsIterateClaim` takeover; no release-first step, DEC-0147), turning it into a resume with the verdict notes as feedback; the hierarchy executor loop documents this as the continuation path.
 6. `ai-sdlc doctor` check `dispatch-board`: one claim per worker, every inflight claim has a heartbeat younger than the stale window, no resume manifest carries a wave, no `done/` verdict older than 10 minutes without a released or continued claim.
 
 **Velocity impact.** Positive: removes the manual policing the dispatch session did every pass; nothing new blocks a correctly behaving executor.
@@ -51,7 +51,7 @@ dispatchable: true
 - [x] Resume manifests carry no `wave` and sort by priority ahead of wave-less backlog entries (board-ordering test).
 - [x] `release` refuses on unpushed or uncommitted work without `--force --reason`, and records the reason.
 - [x] Resume notes are rendered from a template; a note containing a command prefix is rejected with a clear message.
-- [x] An iterate-needed verdict from a hierarchy executor can be resumed through `cli-dispatch resume` once the claim is released.
+- [x] An iterate-needed verdict from a hierarchy executor can be resumed through `cli-dispatch resume`, which takes over the held claim (DEC-0147).
 - [x] `ai-sdlc doctor dispatch-board` reports the four invariants.
 - [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 <!-- AC:END -->

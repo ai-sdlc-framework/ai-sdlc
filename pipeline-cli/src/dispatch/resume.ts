@@ -23,13 +23,7 @@ import {
   resolveCaller,
   type IdentityDeps,
 } from '../hierarchy/caller-identity.js';
-import {
-  ensureBoardDirs,
-  manifestPathIn,
-  readInflightManifest,
-  TASK_ID_RE,
-  writeManifest,
-} from './board.js';
+import { ensureBoardDirs, readInflightManifest, TASK_ID_RE, writeManifest } from './board.js';
 import { DEFAULT_VERIFY_COMMANDS } from './enqueue.js';
 import type { DispatchManifest, DispatchVerdict, ResumeFeedback } from './types.js';
 import { oneLine } from './verdict-fields.js';

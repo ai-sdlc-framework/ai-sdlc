@@ -11,13 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runDispatchCli, type DispatchCliDeps } from '../cli/dispatch.js';
 import type { IdentityDeps } from '../hierarchy/index.js';
-import {
-  claimNext,
-  ensureBoardDirs,
-  readInflightManifest,
-  releaseInflight,
-  writeManifest,
-} from './board.js';
+import { claimNext, ensureBoardDirs, readInflightManifest, writeManifest } from './board.js';
 import { completeTask } from './complete.js';
 import { requeueFailed } from './requeue.js';
 import {
@@ -323,16 +317,8 @@ describe('resumeDone', () => {
       completeTask(board, { taskId, outcome: 'iterate-needed', workerId: 'exec-a', notes });
     }
 
-    it('refuses while the claim is still held and names the worker and the release command', () => {
-      iterate('AISDLC-842');
-      expect(() => resumeDone(board, 'AISDLC-842', {}, opts)).toThrow(
-        /still claimed by 'exec-a'.*cli-dispatch release --task-id AISDLC-842/,
-      );
-    });
-
-    it('turns a released claim into a resume carrying the verdict notes', () => {
+    it('takes over the held claim and resumes carrying the verdict notes', () => {
       iterate('AISDLC-843');
-      releaseInflight(board, 'AISDLC-843');
       const r = resumeDone(board, 'AISDLC-843', {}, opts);
       const queued = JSON.parse(readFileSync(r.queuePath, 'utf-8')) as DispatchManifest;
       expect(queued.resume?.note).toBe('Reviewer wants a test for the edge case');
@@ -344,19 +330,16 @@ describe('resumeDone', () => {
 
     it('drops command-looking lines from the verdict notes and falls back when none remain', () => {
       iterate('AISDLC-844', 'Add a test\ngit push --force\n');
-      releaseInflight(board, 'AISDLC-844');
       expect(resumeDone(board, 'AISDLC-844', {}, opts).resume.note).toBe('Add a test');
     });
 
     it('falls back to a fixed sentence when no prose is left', () => {
       iterate('AISDLC-845', 'cli-dispatch release');
-      releaseInflight(board, 'AISDLC-845');
       expect(resumeDone(board, 'AISDLC-845', {}, opts).resume.note).toMatch(/no notes/);
     });
 
     it('lets an explicit note override the verdict notes', () => {
       iterate('AISDLC-846');
-      releaseInflight(board, 'AISDLC-846');
       expect(resumeDone(board, 'AISDLC-846', { note: 'Do this instead' }, opts).resume.note).toBe(
         'Do this instead',
       );
@@ -771,8 +754,8 @@ describe('cli-dispatch resume, requeue --note and release (AISDLC-807)', () => {
 
   function run(taskId: string, outcome: 'iterate-needed' | 'failed'): void {
     writeManifest(board, mkManifest(taskId));
-    claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-a' });
-    completeTask(board, { taskId, outcome, workerId: 'exec-a' });
+    claimNext(board, 'in-session-agent', undefined, { workerId: `exec-${taskId}` });
+    completeTask(board, { taskId, outcome, workerId: `exec-${taskId}` });
   }
   const queued = (id: string): DispatchManifest =>
     JSON.parse(
