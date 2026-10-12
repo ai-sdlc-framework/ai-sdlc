@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-12T21:21:49.045Z","decisionId":"DEC-0154","chosenOptionId":"dispatch-push","rationale":"Operational class (a): my own lease push is refused by the hook (not-task-worktree), so the task is requeued via cli-dispatch resume for a bound executor to push-only.","by":"ai-sdlc-operator-dispatch"}

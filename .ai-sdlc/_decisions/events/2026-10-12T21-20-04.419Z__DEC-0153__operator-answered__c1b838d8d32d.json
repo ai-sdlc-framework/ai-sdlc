@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-12T21:20:04.419Z","decisionId":"DEC-0153","chosenOptionId":"clean-and-resume","rationale":"Operational class (a): restored the orphaned envelope and removed the stray leaves file in .worktrees/aisdlc-800; the pre-push hook re-signs from the verdict file. Resume AISDLC-800 push-only.","by":"ai-sdlc-operator-dispatch"}
