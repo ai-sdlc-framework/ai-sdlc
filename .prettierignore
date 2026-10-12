@@ -12,3 +12,7 @@ ai-sdlc-plugin/.claude-plugin/plugin.json
 # Next.js regenerates these on every build (AISDLC-813)
 dashboard/next-env.d.ts
 dashboard/tsconfig.json
+
+# Per-event decision files are named by a hash of their exact text (AISDLC-719); reformatting one
+# would make the reader treat it as forged and drop the decision.
+.ai-sdlc/_decisions/events/

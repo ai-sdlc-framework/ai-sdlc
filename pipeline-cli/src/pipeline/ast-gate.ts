@@ -788,7 +788,7 @@ export const STAGE_1_HEURISTIC_REQUEST_DECISION_SUMMARY =
 
 /**
  * RFC-0035 Stage A counter entry shape for the heuristic-request Decision.
- * Emitted to `.ai-sdlc/_decisions/events.jsonl` by the drift workflow
+ * Emitted to the `.ai-sdlc/_decisions/events/` per-event log by the drift workflow
  * when adopters submit heuristic requests.
  *
  * Counter semantics: auto-promote when counter.count >= 2 AND

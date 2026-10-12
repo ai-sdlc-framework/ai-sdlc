@@ -2,7 +2,7 @@
  * RFC-0035 Decision resource types + event types.
  *
  * The Decision Catalog is event-sourced (OQ-1 resolution): an append-only
- * event log at `.ai-sdlc/_decisions/events.jsonl` is the source of truth,
+ * event log under `.ai-sdlc/_decisions/events/` (one file per event) is the source of truth,
  * and a `Decision` is the materialized projection over events that share
  * the same `decisionId`.
  *

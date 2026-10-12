@@ -14,7 +14,9 @@ import {
   nextDecisionId,
   readDecisionEvents,
   resolveDecisionsDir,
+  readEventLogText,
   resolveEventLogPath,
+  resolveEventsDir,
   withEventLogLock,
 } from './event-log.js';
 
@@ -51,7 +53,7 @@ describe('appendDecisionEvent', () => {
     });
     const path = appendDecisionEvent(evt, { workDir });
     expect(existsSync(path)).toBe(true);
-    expect(path).toBe(resolveEventLogPath(workDir));
+    expect(path.startsWith(resolveEventsDir(workDir))).toBe(true);
   });
 
   it('appends without rewriting earlier lines (append-only)', () => {
@@ -75,8 +77,7 @@ describe('appendDecisionEvent', () => {
       }),
       { workDir },
     );
-    const raw = readFileSync(resolveEventLogPath(workDir), 'utf8');
-    const lines = raw.trim().split('\n');
+    const lines = readEventLogText(workDir).trim().split('\n');
     expect(lines).toHaveLength(2);
     expect(JSON.parse(lines[0]).decisionId).toBe('DEC-0001');
     expect(JSON.parse(lines[1]).decisionId).toBe('DEC-0002');
@@ -146,7 +147,7 @@ describe('readDecisionEvents', () => {
       { workDir },
     );
     const path = resolveEventLogPath(workDir);
-    const raw = readFileSync(path, 'utf8');
+    const raw = existsSync(path) ? readFileSync(path, 'utf8') : '';
     writeFileSync(
       path,
       raw + '{not json\n' + JSON.stringify({ eventVersion: 'v2', type: 'unknown-type' }) + '\n',
@@ -227,7 +228,7 @@ describe('nextDecisionId', () => {
       }),
       { workDir },
     );
-    writeFileSync(path, readFileSync(path, 'utf8') + 'garbage line\n', 'utf8');
+    writeFileSync(path, 'garbage line\n', 'utf8');
     expect(nextDecisionId({ workDir })).toBe('DEC-0004');
   });
 });

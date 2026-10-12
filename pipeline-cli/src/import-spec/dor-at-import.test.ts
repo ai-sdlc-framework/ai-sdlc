@@ -35,7 +35,7 @@ import {
   resolveTmpImportDir,
   runDorAtImport,
 } from './dor-at-import.js';
-import { resolveEventLogPath } from '../decisions/event-log.js';
+import { readEventLogText } from '../decisions/event-log.js';
 import type { RefinementVerdict } from '../dor/types.js';
 import type { RefineBacklogTaskResult } from '../dor/ingress-claude.js';
 import type { SpecKitTaskEntry } from './parser.js';
@@ -315,7 +315,7 @@ describe('runDorAtImport — AC#5, AC#6 (refuse-strict + clarification hints)', 
     if (out.outcome.kind !== 'refused-strict') throw new Error('expected refused-strict');
     expect(out.outcome.decisionId).toMatch(/^DEC-\d{4,}$/);
 
-    const log = readFileSync(resolveEventLogPath(workDir), 'utf8');
+    const log = readEventLogText(workDir);
     expect(log).toContain('"type":"decision-opened"');
     expect(log).toContain('"scope":"import-spec:dor:T-007"');
     expect(log).toContain('import blocked on DoR');
@@ -337,7 +337,7 @@ describe('runDorAtImport — AC#5, AC#6 (refuse-strict + clarification hints)', 
     if (out.outcome.kind !== 'refused-strict') throw new Error('expected refused-strict');
     expect(out.outcome.decisionId).toBeNull();
     expect(out.outcome.clarificationTaskFile).toBeTruthy();
-    expect(existsSync(resolveEventLogPath(workDir))).toBe(false);
+    expect(readEventLogText(workDir)).toBe('');
   });
 });
 
@@ -401,7 +401,7 @@ describe('runDorAtImport — AC#3, AC#7 (analyze auto-resolve via catalog)', () 
     expect(out.outcome.failedGates).toEqual([5]);
     expect(out.outcome.autoResolvedDecisionIds).toHaveLength(1);
 
-    const log = readFileSync(resolveEventLogPath(workDir), 'utf8');
+    const log = readEventLogText(workDir);
     // AC#7 — analyze-coverage event pair (decision-opened + operator-answered)
     expect(log).toContain('"type":"decision-opened"');
     expect(log).toContain('"type":"operator-answered"');

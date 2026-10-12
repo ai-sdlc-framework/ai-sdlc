@@ -29,7 +29,11 @@ let savedEnv: Record<string, string | undefined>;
 
 const remoteLedger = (): string => {
   git(parent, 'fetch', '--quiet', 'origin', DECISIONS_SYNC_BRANCH);
-  return git(parent, 'show', `origin/${DECISIONS_SYNC_BRANCH}:.ai-sdlc/_decisions/events.jsonl`);
+  const ref = `origin/${DECISIONS_SYNC_BRANCH}`;
+  const names = git(parent, 'ls-tree', '-r', '--name-only', ref, '--', '.ai-sdlc/_decisions/events')
+    .split('\n')
+    .filter(Boolean);
+  return names.map((n) => git(parent, 'show', `${ref}:${n}`)).join('\n');
 };
 
 beforeEach(() => {
@@ -133,7 +137,7 @@ describe('cli-decisions remote persistence (AISDLC-546)', () => {
   it('refuses an explicit --id already consumed on origin', async () => {
     await run(...ADD);
     // simulate a parent reset wiping the local append; origin still holds DEC-0001
-    rmSync(join(parent, '.ai-sdlc', '_decisions', 'events.jsonl'), { force: true });
+    rmSync(join(parent, '.ai-sdlc', '_decisions', 'events'), { recursive: true, force: true });
     const errs: string[] = [];
     process.stderr.write = ((c: string | Uint8Array) => {
       errs.push(String(c));
