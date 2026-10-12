@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "199666b3a3aab97925443592068e5b6db8ca92a4"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "a92b8595a29a811e495a7da9a6a9f58e2c70920fca7895fea99dc21666375a6d",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "2fa342a7a03711cc2c5a3434bfa558f77a5ba54b2214be3507e042be9e88cbb8",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "2fa342a7a03711cc2c5a3434bfa558f77a5ba54b2214be3507e042be9e88cbb8",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": ["d9c7810a659bcb6da31699a620b4e1b6f375345f4fb390a7f47496035f5fdc65"]
+    },
+    {
+      "leafIndex": 1,
+      "proof": ["5b6fe290139ac818b0f2615e78c35cd3a12a32aba3cd66cc00c7a81ae9f4ee15"]
+    }
+  ],
+  "rootHash": "910a6e5f7ebdc95f6d1a504b636b790ccf514303818524b55d278584cfab4cfc",
+  "rootSignature": "cuM5L2kBZt8pm3/I31Z39N334wtTgOMxuyroEwc+cynGJkHxUzXolOGXyvVVurL1zwG7FqwUwAOU1o6GJFJyBw==",
+  "nonce": "c9924647a43aa31743b1f4c8b082159a7c522de0542353ac32d40fba77fc12d3",
+  "leafCount": 2,
+  "signedAt": "2026-10-12T18:16:22.927Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      "ai-sdlc-plugin/.claude-plugin/plugin.json",
+      "ai-sdlc-plugin/commands/planner.md",
+      "ai-sdlc-plugin/commands/planner.test.mjs",
+      "ai-sdlc-plugin/hooks/context-budget.js",
+      "ai-sdlc-plugin/hooks/context-budget.sh",
+      "ai-sdlc-plugin/hooks/context-budget.test.mjs",
+      "ai-sdlc-plugin/hooks/lib/context-budget.js",
+      "ai-sdlc-plugin/plugin.json",
+      "reference/src/core/generated-schemas.ts"
+    ],
+    "appliedReviewers": ["code-reviewer-codex", "security-reviewer"]
+  }
+}
