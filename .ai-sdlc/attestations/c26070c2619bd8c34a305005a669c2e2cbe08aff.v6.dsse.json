@@ -1,0 +1,72 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "ea476b1ee7149f1ec600963b1a46433af4d3e08a"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "76a97a7ee79689bc1d7d03920052c043e6807849f51276932a8b1f78b23dd16f",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "cf4d17a9222dbef8fa8a73c94e57718c9627bf277b3518931d37da45a256909e",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "a74e1863dbbd602dc9a3c05e82276658482bbe17315fe78f1e05b033f71a6a11",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "d06829ad4ca745fad2476052851b6b7e15398dd169b681d3da00b4a43ef19f57",
+        "70193f6935e7890c18fbb9e70676a4b7b7144c042ef386142e54523ef9d73120"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "f5c24e34234a55c1f794244972431a65cfbe2c539723b5c722f98dc00522a365",
+        "70193f6935e7890c18fbb9e70676a4b7b7144c042ef386142e54523ef9d73120"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "776eba6c1813fba5c48a81d654c2024977b1c1ea074cd9e15426a0409a16ff10",
+        "ccbfb6996f0f4dc12d550f8c03fa8fffe5db27429fd9a2601ecd00f3688aff97"
+      ]
+    }
+  ],
+  "rootHash": "8fc8b902079f6aac2387bbbef2fb2621fdaa2e56d8170e4fc632c08da9777381",
+  "rootSignature": "Cxzb1484SQmcgkEXKctVcfs6371y6TqAeL5wDnNuA+yuhLmtQuNt551sdpK2fprvgvJJFLYQl2qPP/mIyXBIAg==",
+  "nonce": "904d48b9b95cfd1aecaeaa77e5a494634a17f1ea4610df0d310aadf069c8bced",
+  "leafCount": 3,
+  "signedAt": "2026-10-12T20:30:41.900Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      "ai-sdlc-plugin/commands/executor.md",
+      "ai-sdlc-plugin/commands/operator-dispatch.md",
+      "reference/src/core/generated-schemas.ts"
+    ],
+    "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
+  }
+}
