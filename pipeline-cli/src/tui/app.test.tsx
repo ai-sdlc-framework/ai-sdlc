@@ -16,6 +16,13 @@ import { BLOCKERS_EMPTY_STATE } from './panes/blockers.js';
 import { FOOTER_KEYS, Footer } from './footer.js';
 import { TUI_TELEMETRY_FLAG } from './analytics/feature-flag.js';
 
+// AISDLC-819: App mounts the PR hooks, which run a real synchronous `gh pr list`
+// (10+ s against this repo's open-PR set). Stub child_process so the render is hermetic.
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return { ...actual, execFileSync: vi.fn(() => '[]') };
+});
+
 // AISDLC-178.6 — the App's ModeRouter now logs interactions on mount.
 // Suppress those writes here so app.test.tsx stays hermetic (no writes
 // to <cwd>/artifacts/_operator/interactions.jsonl).
@@ -34,6 +41,14 @@ afterEach(() => {
 });
 
 describe('App (Overview Mode layout)', () => {
+  it('AISDLC-819 guard: first render stays fast and never shells out to real gh', async () => {
+    const cp = await import('node:child_process');
+    const start = Date.now();
+    render(<App />);
+    expect(Date.now() - start).toBeLessThan(1000);
+    expect(vi.isMockFunction(cp.execFileSync)).toBe(true);
+  });
+
   it('renders all five RFC-0023 §7 pane titles', () => {
     const { lastFrame } = render(<App />);
     const frame = lastFrame() ?? '';
