@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "602dfbf6d621a7a1168219a6f65d47ab14a790ee"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "8b27a4ad85b78aa9ca571966a9df46fcee61492431faec6b8c21ade691b64e87",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "8b27a4ad85b78aa9ca571966a9df46fcee61492431faec6b8c21ade691b64e87",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "a2747833e47c923cc0fd7894dd6a3048a61bfa0021cbcf3934a07c32120e0755",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "a2747833e47c923cc0fd7894dd6a3048a61bfa0021cbcf3934a07c32120e0755",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": ["7a31697e4d757ebb765a00d4034fb6b12576d7f5b743ff0051c82cbfaaae2532"]
+    },
+    {
+      "leafIndex": 1,
+      "proof": ["a4cf79b6edbf1055aa133e959b210f80dfe47739dd092cc3c6efee4f62574731"]
+    }
+  ],
+  "rootHash": "8f390aa738cfd21268bcfed7f250e8331d1b0f0c999f9f69abe75f65fe3649de",
+  "rootSignature": "Cs6WNLTFNcmN5vn96KMdHkQrvD0WHArMRLLHWpH8dNi49OgT/9Hk1vXZ9new9moZjc4k0glL2vyIvn8fF7yrAw==",
+  "nonce": "2cde6ade649ffd66d3cde1c14d10929b61f62d9d6f478676a4218eb6ec97fe96",
+  "leafCount": 2,
+  "signedAt": "2026-10-12T19:53:22.473Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      ".github/workflows/main-health-monitor.yml",
+      "ai-sdlc-plugin/agents/rebase-resolver.test.mjs",
+      "ai-sdlc-plugin/scripts/sign-attestation.test.mjs",
+      "ai-sdlc-plugin/scripts/verify-attestation.test.mjs"
+    ],
+    "appliedReviewers": ["code-reviewer-codex", "security-reviewer"]
+  }
+}
