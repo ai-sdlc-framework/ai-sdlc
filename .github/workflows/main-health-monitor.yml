@@ -226,6 +226,7 @@ jobs:
     if: failure()
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       issues: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -236,6 +237,8 @@ jobs:
           COMMIT_SHA: ${{ github.sha }}
           EVENT_NAME: ${{ github.event_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          HEALTH_RESULT: ${{ needs.health-check.result }}
+          GATE_RESULT: ${{ needs.gate-scripts.result }}
         run: |
           set -euo pipefail
           SHORT_SHA="${COMMIT_SHA:0:8}"
@@ -264,9 +267,12 @@ jobs:
 
           ## What failed
 
-          The full test suite failed on ${EVENT_NAME} run against main. This indicates a merge-skew regression: individual PRs were green, but their combined effect breaks the suite.
+          A job failed on the ${EVENT_NAME} run against main (health-check: ${HEALTH_RESULT}, gate-scripts: ${GATE_RESULT}).
 
-          Check the [CI run](${RUN_URL}) for the specific failing test names and stack traces.
+          - If health-check failed, the full test suite is red on main: a merge-skew regression where individual PRs were green but their combined effect breaks the suite.
+          - If gate-scripts failed, a gate script (backlog drift, docs-only classifier, DoR violations, dark-code, or patch-id exclusions parity) failed on main. The failing gate is the step in the gate-scripts job whose outcome is not success.
+
+          Check the [CI run](${RUN_URL}) for the failing step, test names and stack traces.
 
           ## Triage steps
 

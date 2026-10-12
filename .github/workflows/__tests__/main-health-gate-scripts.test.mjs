@@ -57,6 +57,9 @@ describe('main-health-monitor gate-scripts job (AISDLC-797)', () => {
     const alert = job('alert');
     assert.match(SRC, /needs: \[health-check, gate-scripts\]/);
     assert.match(alert, /if: failure\(\)/);
+    assert.match(alert, /contents: read/);
+    assert.match(alert, /issues: write/);
+    assert.match(alert, /GATE_RESULT: \$\{\{ needs\.gate-scripts\.result \}\}/);
     assert.match(SRC, /\[main-health\] main is RED/);
   });
 
