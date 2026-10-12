@@ -41,9 +41,7 @@ export type PreSignRebaseResult =
   | { kind: 'skipped'; reason: string }
   | { kind: 'unchanged'; hash: string }
   | { kind: 'changed'; before: string; after: string }
-  | { kind: 'failed'; reason: string };
-
-const MAX_REBASE_ATTEMPTS = 3;
+  | { kind: 'failed'; reason: string; conflictingFiles?: string[] };
 
 async function contentHash(ctx: NextStepContext, worktreePath: string): Promise<string> {
   const r = await ctx.runner(
@@ -56,8 +54,7 @@ async function contentHash(ctx: NextStepContext, worktreePath: string): Promise<
 
 /**
  * Rebase onto the latest target branch before signing. Fetch trouble skips the
- * rebase (a flaky network must not block signing); a conflict or a rebase loop
- * fails the run, because conflict resolution is the operator's.
+ * rebase (a flaky network must not block signing); a conflict fails the run, because conflict resolution is the operator's.
  */
 export async function preSignRebase(
   ctx: NextStepContext,
@@ -82,35 +79,48 @@ export async function preSignRebase(
   if (anc.code === 0)
     return { kind: 'skipped', reason: `origin/${target} already ancestor of HEAD` };
 
-  let attempts = 0;
-  let ok = false;
-  while (attempts < MAX_REBASE_ATTEMPTS) {
-    attempts += 1;
-    const rb = await ctx.runner('git', ['rebase', `origin/${target}`], {
+  // One rebase per run. A non-zero exit is a conflict, never a moved base:
+  // under strict=false (AISDLC-727) a PR need not be current with the target,
+  // so chasing a moving base buys nothing and a retry would only repeat the
+  // same conflict (AISDLC-818).
+  const baseBefore = await ctx.runner('git', ['rev-parse', `origin/${target}`], {
+    cwd: wt,
+    allowFailure: true,
+  });
+  const rb = await ctx.runner('git', ['rebase', `origin/${target}`], {
+    cwd: wt,
+    allowFailure: true,
+    timeout: 120_000,
+  });
+  if (rb.code !== 0) {
+    const conflicted = await ctx.runner('git', ['diff', '--name-only', '--diff-filter=U'], {
       cwd: wt,
       allowFailure: true,
-      timeout: 120_000,
     });
-    if (rb.code === 0) {
-      ok = true;
-      break;
-    }
+    const files = conflicted.stdout
+      .split('\n')
+      .map((f) => f.trim())
+      .filter((f) => f !== '');
     await ctx.runner('git', ['rebase', '--abort'], { cwd: wt, allowFailure: true });
-    const refetch = await ctx.runner('git', ['fetch', 'origin', target], {
-      cwd: wt,
-      allowFailure: true,
-      timeout: 30_000,
-    });
-    if (refetch.code !== 0) break;
-  }
-  if (!ok) {
+    const named = files.length > 0 ? files.join(', ') : 'unknown (see git status)';
     return {
       kind: 'failed',
       reason:
-        attempts >= MAX_REBASE_ATTEMPTS
-          ? `Step 10.5 rebase loop: ${target} moved ${MAX_REBASE_ATTEMPTS} times during rebase attempts (rebase-loop)`
-          : `Step 10.5 rebase conflict, operator must resolve manually: cd ${wt} && git fetch origin ${target} && git rebase origin/${target}; then re-run /ai-sdlc execute ${state.taskId} (rebase-conflict)`,
+        `Step 10.5 rebase conflict in: ${named}. Resolve by hand: cd ${wt} && ` +
+        `git fetch origin ${target} && git rebase origin/${target}; then re-run ` +
+        `/ai-sdlc execute ${state.taskId} (rebase-conflict)`,
+      conflictingFiles: files,
     };
+  }
+  const baseAfter = await ctx.runner('git', ['rev-parse', `origin/${target}`], {
+    cwd: wt,
+    allowFailure: true,
+  });
+  if (baseBefore.code === 0 && baseAfter.code === 0 && baseBefore.stdout !== baseAfter.stdout) {
+    ctx.logger.progress(
+      'step-10.5',
+      `origin/${target} moved during the rebase (now ${baseAfter.stdout.trim()}); not an error under strict=false`,
+    );
   }
   const after = await contentHash(ctx, wt);
   if (before !== '' && before === after) return { kind: 'unchanged', hash: before };

@@ -2,7 +2,7 @@
 id: AISDLC-818
 title: >-
   Step 10.5 pre-sign rebase distinguishes a conflict from a moved base, rebases at most once per base, and names the conflicting files
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-11'
 labels:
