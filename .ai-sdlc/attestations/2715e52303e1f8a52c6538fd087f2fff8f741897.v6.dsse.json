@@ -2,7 +2,7 @@
   "schemaVersion": "v6",
   "subject": {
     "digest": {
-      "sha1": "b8213931cd2529e52b63b1d3c5ab35fc47a2598e"
+      "sha1": "8a90d5c5c344d64d3bc722095a418d03c5219c79"
     }
   },
   "transcriptLeaves": [
@@ -35,6 +35,21 @@
       "verdictClass": "independent",
       "harnessTranscriptHash": "c850b251070ac41adbce5b81ec8755c8e3b32b3498ef7ab6bac694d26006159b",
       "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 4,
+      "reviewerName": "correctness-reviewer",
+      "transcriptHash": "64d9e50c911d30aa6210fcea73ffc2735f043bbcf758c3f6ce734cfeb953ac86",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 5,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "eda49af81186f82d8b54079d4f9ad303587dbf26cb180fd6c21bfd7034cfbabb",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "eda49af81186f82d8b54079d4f9ad303587dbf26cb180fd6c21bfd7034cfbabb",
+      "independenceTier": "attested"
     }
   ],
   "merkleProofs": [
@@ -42,36 +57,56 @@
       "leafIndex": 0,
       "proof": [
         "dd336790b4593bc45c552387234afe1b0e9b35d51bc600dcae4fbc3a66642cbe",
-        "47ecc67e79531a39415095c3fc3212295e7c08f92f682b39fac0e2d297493cbc"
+        "47ecc67e79531a39415095c3fc3212295e7c08f92f682b39fac0e2d297493cbc",
+        "10b5bd5f75edf0a47c1da68a9e80056fa8a5fd954bd233555e739b31ba2a9b77"
       ]
     },
     {
       "leafIndex": 1,
       "proof": [
         "5595886843fdd576b7b93d3df77eeb0be6c137b28a47ac6554d383babaacf0aa",
-        "47ecc67e79531a39415095c3fc3212295e7c08f92f682b39fac0e2d297493cbc"
+        "47ecc67e79531a39415095c3fc3212295e7c08f92f682b39fac0e2d297493cbc",
+        "10b5bd5f75edf0a47c1da68a9e80056fa8a5fd954bd233555e739b31ba2a9b77"
       ]
     },
     {
       "leafIndex": 2,
       "proof": [
         "d4932e1609af3ddcf605e2372c391174c3029a88df0c044626a70d94210486a4",
-        "9dbda9c2e45f0f900890056f5d7951657de258368c5f1ab24baf7d6e05041b63"
+        "9dbda9c2e45f0f900890056f5d7951657de258368c5f1ab24baf7d6e05041b63",
+        "10b5bd5f75edf0a47c1da68a9e80056fa8a5fd954bd233555e739b31ba2a9b77"
       ]
     },
     {
       "leafIndex": 3,
       "proof": [
         "887f9a554bc447c1832d4a9b492bc3bcc2c274fc6c5af119cf472657f12ac113",
-        "9dbda9c2e45f0f900890056f5d7951657de258368c5f1ab24baf7d6e05041b63"
+        "9dbda9c2e45f0f900890056f5d7951657de258368c5f1ab24baf7d6e05041b63",
+        "10b5bd5f75edf0a47c1da68a9e80056fa8a5fd954bd233555e739b31ba2a9b77"
+      ]
+    },
+    {
+      "leafIndex": 4,
+      "proof": [
+        "47bd9849a78e1a88a0c3ccb9408eca75d860b06227894fe787d795eca2574780",
+        "213a6eeea62872756574dca32dc4645d8a79cd633b3783b9dc3735e8c779118e",
+        "86d0a6258b8c02f1904bebf9f73feed30b8d2439f6d5af99ec08e49b1e58b0e9"
+      ]
+    },
+    {
+      "leafIndex": 5,
+      "proof": [
+        "47df715800db2476bdb799b583fa838be955937b2a92921b7c383ea36680b85d",
+        "213a6eeea62872756574dca32dc4645d8a79cd633b3783b9dc3735e8c779118e",
+        "86d0a6258b8c02f1904bebf9f73feed30b8d2439f6d5af99ec08e49b1e58b0e9"
       ]
     }
   ],
-  "rootHash": "86d0a6258b8c02f1904bebf9f73feed30b8d2439f6d5af99ec08e49b1e58b0e9",
-  "rootSignature": "/hV/tPuNFM4pSjENGAt+31o3O476jWRl34YWxYPKjE7ZU6bIyWhRvCv/K1o/KJtgiyvDQ8OEF6T1DIlu2BxJBg==",
-  "nonce": "3abff7a1382aad4733aa785f15b5350cf4d103a5d150e2469f5a52212671c9d3",
-  "leafCount": 4,
-  "signedAt": "2026-10-11T22:12:56.349Z",
+  "rootHash": "77734f56c2a49726b895387000dfb16501ba22fbf10401ddddc931c07f36fc2d",
+  "rootSignature": "N8yWpjqDrFvNXmoswtx69KbUWwKtrp5BiFtkrUMlGip7iOQIKOi7iSF5Sk47wHnYet4CQxmh3i488Z90u/GrDA==",
+  "nonce": "1246500919a174ed3ea29e987b0fb5a8ec50c8ce519087db1bf0261ada7bc9b4",
+  "leafCount": 6,
+  "signedAt": "2026-10-12T00:42:11.747Z",
   "signerIdentity": "dominique@local:doms-macbook",
   "reviewScope": {
     "classification": "test-only",
@@ -79,6 +114,13 @@
     "requiredSet": "correctness-only",
     "reason": "every path is a test, fixture or snapshot",
     "triggeringPaths": [],
-    "appliedReviewers": ["correctness-reviewer", "security-reviewer", "correctness-reviewer", "security-reviewer"]
+    "appliedReviewers": [
+      "correctness-reviewer",
+      "security-reviewer",
+      "correctness-reviewer",
+      "security-reviewer",
+      "correctness-reviewer",
+      "security-reviewer"
+    ]
   }
 }
