@@ -372,7 +372,13 @@ class Machine {
     try {
       reports = parseReviewReports(extractJson(text));
     } catch (err) {
-      return this.fixReport(state, `reviewer result is not valid JSON (${(err as Error).message})`);
+      return this.fixReport(
+        state,
+        `reviewer result is not valid JSON (${(err as Error).message})`,
+        state.review?.staged && state.review.staged.stage !== 'security'
+          ? STAGED_REPORT_SHAPE
+          : REPORT_SHAPE,
+      );
     }
     if (state.review?.staged && state.review.staged.stage !== 'security') {
       return this.onStagedStage(state, reports);

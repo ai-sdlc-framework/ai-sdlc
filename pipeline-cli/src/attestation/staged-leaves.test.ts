@@ -18,7 +18,7 @@ import {
 } from './merkle.js';
 import { signAndWriteV6Envelope } from './sign-v6.js';
 // @ts-expect-error -- plain ESM, no type declarations shipped
-import { verifyV6Envelope } from '../../attestation-core/verify-core.mjs';
+import { enforceReviewScope, verifyV6Envelope } from '../../attestation-core/verify-core.mjs';
 
 interface V6VerifyResult {
   status: string;
@@ -135,17 +135,31 @@ describe('an envelope with staged leaves verifies', () => {
     expect(verify(envelope, patchId).status).toBe('valid');
   });
 
-  it('executor leaves carry no findings and no approval; only the synthesizer leaf has a verdict', () => {
+  it('the verifier rejects an execute leaf that approves (real signer and verifier)', () => {
     const patchId = '2'.repeat(40);
-    const leaves = stagedSet('attested');
+    const leaves = stagedSet('attested').map((l) =>
+      l.stage === 'execute' ? { ...l, verdictApproved: true } : l,
+    );
     write(patchId, leaves);
-    for (const l of leaves.filter((x) => x.stage === 'execute')) {
-      expect(l.verdictApproved).toBe(false);
-      expect(l.findings).toEqual({ critical: 0, major: 0, minor: 0, suggestion: 0 });
-    }
-    const synth = leaves.filter((x) => x.stage === 'synthesize');
-    expect(synth).toHaveLength(1);
-    expect(synth[0]!.verdictApproved).toBe(true);
+    const result = verify(sign(patchId), patchId);
+    expect(result.status).toBe('invalid');
+  });
+
+  it('staged leaves never satisfy a reviewer-set requirement (DEC-0149)', () => {
+    const patchId = '4'.repeat(40);
+    write(patchId, stagedSet('attested'));
+    const result = verify(sign(patchId), patchId);
+    expect(result.status).toBe('valid');
+    // No merge base: the diff cannot be listed, so the three-reviewer set is required.
+    const scoped = enforceReviewScope(result, {
+      repoRoot: root,
+      baseSha: '',
+      headSha: HEAD,
+      mergeBase: null,
+    }) as V6VerifyResult;
+    expect(scoped.status).toBe('invalid');
+    expect(scoped.reason).toContain('reviewer set incomplete');
+    expect(scoped.reason).toContain('code-reviewer');
   });
 });
 

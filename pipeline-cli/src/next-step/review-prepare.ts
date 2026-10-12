@@ -483,12 +483,16 @@ export async function prepareReview(
         : await rebuilt(['security-reviewer'], ALL_CLASSIFIER_NAMES)
     ).filter((p) => p.reviewer === 'security-reviewer');
     const security = spawnedFor(securityPrompts)[0] ?? null;
+    // DEC-0149: staged leaves are advisory and never satisfy the reviewer-set requirement, so
+    // the classifier's normal set runs beside the staged pipeline and is what the envelope covers.
+    const beside = spawnedFor(prompts);
     const diffFile = promptDiff !== undefined ? join(ctx.filesDir, 'pr-delta-diff.txt') : undefined;
     const stagedReview = await startStagedRound(ctx, state, {
       round,
       artifactsDir,
       baseReview,
       security,
+      beside,
       ...(diffFile ? { diffFile } : {}),
       nonce,
     });

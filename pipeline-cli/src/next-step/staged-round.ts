@@ -8,7 +8,7 @@
  *
  *   stage `plan`        spawn review-planner        -> plan, execute, synth-prompt
  *   stage `synthesize`  spawn review-synthesizer    -> finalize, emit the staged leaves
- *   stage `security`    spawn security-reviewer     -> the normal finalize path
+ *   stage `security`    spawn the normal set beside the advisory staged verdict -> normal finalize
  *
  * The standalone security reviewer runs LAST. It is Write-capable and reads the untrusted
  * diff, so nothing the staged phases wrote may be read after it ran: the verdict is held in
@@ -135,6 +135,8 @@ export interface StartStagedOpts {
   baseReview: ReviewRoundState;
   /** The security reviewer entry the round ends with; null means it cannot run, so no staged run. */
   security: SpawnedReviewer | null;
+  /** The classifier's normal reviewer set, which runs beside the advisory staged verdict. */
+  beside?: SpawnedReviewer[];
   /** The delta diff for an incremental delta-only round. */
   diffFile?: string;
   nonce: string;
@@ -191,6 +193,7 @@ export async function startStagedRound(
       plannerModel: planner.leafModel,
       synthModel: synth.leafModel,
       security: opts.security,
+      ...(opts.beside && opts.beside.length > 0 ? { beside: opts.beside } : {}),
     },
   };
 }
@@ -383,7 +386,7 @@ export async function advanceStagedRound(
     }
 
     // Every staged leaf is emitted NOW, before the security reviewer is spawned.
-    let synthLeafOk = true;
+    let leavesOk = true;
     for (const leaf of fin.leaves ?? []) {
       let ok = ctx.exists(leaf.transcriptPath) && ctx.exists(leaf.verdictPath);
       if (!ok) {
@@ -428,10 +431,10 @@ export async function advanceStagedRound(
           );
         }
       }
-      if (!ok && leaf.stage === 'synthesize') synthLeafOk = false;
+      if (!ok) leavesOk = false;
     }
     let verdict: ReviewerVerdict = fin.reviewerVerdict;
-    if (!synthLeafOk) {
+    if (!leavesOk) {
       // A verdict with no attestation evidence must not approve.
       verdict = {
         ...verdict,
@@ -441,7 +444,7 @@ export async function advanceStagedRound(
           {
             severity: 'major',
             message:
-              'The staged review synthesize leaf could not be emitted, so its verdict has no attestation evidence; re-run the review.',
+              'A staged review leaf (plan, execute or synthesize) could not be emitted, so its verdict has no attestation evidence; re-run the review.',
           },
         ],
       };
@@ -454,7 +457,7 @@ export async function advanceStagedRound(
       kind: 'spawn',
       review: {
         ...review,
-        spawned: [staged.security],
+        spawned: staged.beside && staged.beside.length > 0 ? staged.beside : [staged.security],
         staged: { ...staged, stage: 'security', verdict },
       },
     };

@@ -100,6 +100,12 @@ describe('prepareReview with reviewerSet staged', () => {
       security: { agent: 'security-reviewer', harness: 'claude-code' },
     });
     expect(res.review.nonce).toBe('nonce-1');
+    // DEC-0149: the classifier's normal set runs beside the advisory staged verdict.
+    expect(res.review.staged?.beside?.map((b) => b.reviewer).sort()).toEqual([
+      'code-reviewer',
+      'security-reviewer',
+      'test-reviewer',
+    ]);
     // Trusted backlog work only: the CLI is told the source kind.
     const prep = h.runner.calls.find((c) => c.args[1] === 'prepare');
     expect(prep?.args).toContain('--source-kind');
@@ -416,6 +422,50 @@ describe('advanceStagedRound, synthesize stage', () => {
     // The security reviewer is spawned only after every leaf was emitted.
     expect(res.review.spawned.map((s) => s.agent)).toEqual(['security-reviewer']);
     expect(res.review.staged).toMatchObject({ stage: 'security', verdict: reviewerVerdict });
+  });
+
+  it('spawns the whole normal set beside the staged verdict when one was recorded', async () => {
+    const code: SpawnedReviewer = {
+      ...security,
+      reviewer: 'code-reviewer',
+      agent: 'code-reviewer',
+    };
+    const test: SpawnedReviewer = {
+      ...security,
+      reviewer: 'test-reviewer',
+      agent: 'test-reviewer',
+    };
+    state.review = stagedReview({ stage: 'synthesize', beside: [code, test, security] });
+    const synth = leaf('synthesize', 'synth');
+    h.present.add(synth.transcriptPath);
+    h.present.add(synth.verdictPath);
+    h.runner.on(
+      (c, a) => a[1] === 'finalize',
+      ok(JSON.stringify({ ok: true, reviewerVerdict, leaves: [synth], dropped: 0 })),
+    );
+    const res = await advanceStagedRound(h.ctx, state, report(), artifacts);
+    if (res.kind !== 'spawn') throw new Error('expected spawn');
+    expect(res.review.spawned.map((s) => s.agent)).toEqual([
+      'code-reviewer',
+      'test-reviewer',
+      'security-reviewer',
+    ]);
+  });
+
+  it('marks the staged verdict not approved when a plan leaf cannot be emitted', async () => {
+    synthState();
+    const plan = leaf('plan', 'planner');
+    const synth = leaf('synthesize', 'synth');
+    // The plan leaf has no transcript on disk; the synthesize leaf is fine.
+    h.present.add(synth.transcriptPath);
+    h.present.add(synth.verdictPath);
+    h.runner.on(
+      (c, a) => a[1] === 'finalize',
+      ok(JSON.stringify({ ok: true, reviewerVerdict, leaves: [plan, synth], dropped: 0 })),
+    );
+    const res = await advanceStagedRound(h.ctx, state, report(), artifacts);
+    if (res.kind !== 'spawn') throw new Error('expected spawn');
+    expect(res.review.staged?.verdict?.approved).toBe(false);
   });
 
   it('marks the staged verdict not approved when its synthesize leaf cannot be emitted', async () => {

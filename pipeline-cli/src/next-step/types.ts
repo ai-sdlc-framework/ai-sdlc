@@ -70,6 +70,12 @@ export interface StagedRoundState {
   verdict?: ReviewerVerdict;
   /** The standalone security reviewer, spawned last (prompt built before the staged run). */
   security: SpawnedReviewer;
+  /**
+   * The classifier's normal reviewer set, spawned last beside the staged verdict (DEC-0149:
+   * staged leaves are advisory and never satisfy the reviewer-set requirement). Empty or absent
+   * means only `security` is spawned.
+   */
+  beside?: SpawnedReviewer[];
 }
 
 /** Everything the review-finalize wrapper needs to bind results to the prompts. */
