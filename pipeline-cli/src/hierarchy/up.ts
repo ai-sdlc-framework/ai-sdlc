@@ -31,6 +31,13 @@ import {
   type RosterEntry,
 } from './types.js';
 import {
+  isNodeInstalled,
+  missingNodeMessage,
+  normalizeNodeVersion,
+  nvmActivationPrefix,
+  readNvmrc,
+} from './node-pin.js';
+import {
   assertModel,
   assertPermissionMode,
   assertProject,
@@ -66,6 +73,11 @@ export interface UpOptions {
    * unless `--no-vscode-tasks` is given). Absent: no regeneration.
    */
   vscodeTasks?: boolean;
+  /**
+   * Node version every session runs under (`--node`). Default: the version `.nvmrc` in the
+   * repository root names; with neither, sessions inherit the launching shell's Node.
+   */
+  node?: string;
 }
 
 /** Result of `up`. */
@@ -123,10 +135,12 @@ export function hasLaunchEnv(command: string, name: string, role: string): boole
 export function buildClaudeCommand(
   bin: string,
   s: Pick<PlannedSession, 'role' | 'name' | 'model' | 'permissionMode' | 'prompt'>,
+  nodeVersion?: string,
 ): string {
   // Exported ahead of the command so the plugin hook sees them at launch (the agent's
   // own Bash commands cannot change them); the lease-push guard binds an executor by them.
   return [
+    ...(nodeVersion ? [nvmActivationPrefix(nodeVersion)] : []),
     `AI_SDLC_HIERARCHY_SESSION=${shellQuote(s.name)}`,
     `AI_SDLC_HIERARCHY_ROLE=${shellQuote(s.role)}`,
     shellQuote(bin),
@@ -253,6 +267,16 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
   }
   assertProject(project);
 
+  let nodeVersion: string | undefined;
+  if (opts.node !== undefined) {
+    nodeVersion = normalizeNodeVersion(opts.node);
+    if (!nodeVersion) {
+      throw new Error(`--node '${opts.node}' is not a node version such as 22.23.2 or 22`);
+    }
+  } else {
+    nodeVersion = readNvmrc(deps.cwd);
+  }
+
   const settings = readSettingsView(deps.settingsFiles);
   // The operator's own `defaultMode` setting does not feed the planner mode: the
   // hierarchy is an unattended fleet and its mode is a hierarchy decision.
@@ -351,6 +375,10 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
       );
       if (!inbound.ok) throw new Error(inbound.message);
     }
+    if (nodeVersion) {
+      const installed = deps.nodeInstalled ?? ((v: string) => isNodeInstalled(v, deps.env));
+      if (!installed(nodeVersion)) throw new Error(missingNodeMessage(nodeVersion));
+    }
     const refusal = evaluateResourceGate(deps.resources(), deps.env);
     if (refusal) throw new Error(refusal);
   }
@@ -359,7 +387,7 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
   const started: RosterEntry[] = [];
   for (const s of toStart) {
     const spawnedAt = deps.now();
-    const command = buildClaudeCommand(deps.claudeBin, s);
+    const command = buildClaudeCommand(deps.claudeBin, s, nodeVersion);
     // Impossible by construction; asserted because a bare launch only fails at push time.
     if (!hasLaunchEnv(command, s.name, s.role)) {
       writeRoster(deps.boardDir, roster);

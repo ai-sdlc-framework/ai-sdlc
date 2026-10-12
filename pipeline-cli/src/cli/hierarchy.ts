@@ -146,6 +146,8 @@ Options for up:
                            Planner permission mode (default bypassPermissions, like the
                            other sessions); pass default for a prompting planner
   --allow-planner-bypass   Deprecated, no effect: every session starts in bypassPermissions
+  --node <version>         Node version every session runs under, activated through nvm
+                           (default the version in .nvmrc; refuses when it is not installed)
 
 Options for status:
   --json                   Print machine-readable output
@@ -419,6 +421,7 @@ export async function runHierarchyCli(
               ? {}
               : { plannerPermissionMode: flags['planner-permission-mode'] }),
             allowPlannerBypass: flags['allow-planner-bypass'] === 'true',
+            ...(flags.node === undefined ? {} : { node: flags.node === 'true' ? '' : flags.node }),
             vscodeTasks: flags['no-vscode-tasks'] !== 'true',
           },
           deps,

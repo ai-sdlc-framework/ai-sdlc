@@ -6,10 +6,11 @@
 import { peekQueue } from '../dispatch/board.js';
 import type { QueueCounts } from '../dispatch/types.js';
 import { listInflight } from './inflight.js';
+import { paneNodeVersion, readNvmrc, versionMatches } from './node-pin.js';
 import { hasLaunchEnv } from './up.js';
 import { readSessionRegistry } from './registry.js';
 import { readRosterChecked } from './roster.js';
-import { listWindows, paneStartCommand, sessionAttached } from './tmux.js';
+import { listWindows, paneInfo, paneStartCommand, sessionAttached } from './tmux.js';
 import type { HierarchyDeps, RosterEntry } from './types.js';
 
 /** Live state of one roster entry. */
@@ -28,6 +29,10 @@ export interface StatusRow {
    * Absent when the window is gone or tmux cannot report its start command.
    */
   launchEnv?: 'ok' | 'missing';
+  /** Node version the pane's processes run; absent when it cannot be read. */
+  nodeVersion?: string;
+  /** True when `nodeVersion` does not satisfy the version `.nvmrc` pins (AISDLC-812). */
+  nodeMismatch?: boolean;
   /** Present with `launchEnv: 'missing'`: how to repair it. */
   nextStep?: string;
 }
@@ -58,6 +63,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     return v;
   };
 
+  const wantedNode = readNvmrc(deps.cwd);
   const rows = roster.sessions.map((entry): StatusRow => {
     const live =
       registry.find((r) => r.name === entry.name) ??
@@ -78,9 +84,18 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
         : hasLaunchEnv(startCommand, entry.name, entry.role)
           ? 'ok'
           : 'missing';
+    const nodeVersion = alive
+      ? paneNodeVersion(deps.run, paneInfo(deps.run, entry.tmuxSession, entry.tmuxWindow).panePid)
+      : undefined;
+    const nodeMismatch =
+      nodeVersion !== undefined &&
+      wantedNode !== undefined &&
+      !versionMatches(wantedNode, nodeVersion);
     return {
       entry,
       state,
+      ...(nodeVersion ? { nodeVersion } : {}),
+      ...(nodeMismatch ? { nodeMismatch } : {}),
       attached: alive && isAttached(entry.tmuxSession),
       inflightTask: held?.taskId,
       ...(launchEnv ? { launchEnv } : {}),
@@ -106,6 +121,7 @@ export function formatStatus(result: StatusResult): string[] {
     'MODE',
     'INFLIGHT',
     'ENV',
+    'NODE',
     'HIERARCHY_SESSION',
     'HIERARCHY_ROLE',
   ];
@@ -118,6 +134,7 @@ export function formatStatus(result: StatusResult): string[] {
     r.entry.permissionMode,
     r.inflightTask ?? '-',
     r.launchEnv ?? '-',
+    r.nodeVersion ? `${r.nodeVersion}${r.nodeMismatch ? ' MISMATCH' : ''}` : '-',
     r.entry.tmuxSession,
     r.entry.role,
   ]);
@@ -131,10 +148,17 @@ export function formatStatus(result: StatusResult): string[] {
   const repairs = result.rows.flatMap((r) =>
     r.nextStep ? [`env missing on ${r.entry.name}: ${r.nextStep}`] : [],
   );
+  const nodeRepairs = result.rows.flatMap((r) =>
+    r.nodeMismatch
+      ? [
+          `node mismatch on ${r.entry.name}: runs ${r.nodeVersion}, .nvmrc pins another version; relaunch with \`cli-hierarchy down --role ${r.entry.role}\` then \`up\``,
+        ]
+      : [],
+  );
   return [
     fmt(header),
     ...body.map(fmt),
-    ...(repairs.length > 0 ? ['', ...repairs] : []),
+    ...(repairs.length + nodeRepairs.length > 0 ? ['', ...repairs, ...nodeRepairs] : []),
     '',
     `board: ${queued} queued, ${inflight} inflight, ${done} done, ${failed} failed`,
   ];

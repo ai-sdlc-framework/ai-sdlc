@@ -2,7 +2,7 @@
 id: AISDLC-812
 title: >-
   hierarchy up launches every session under the pinned Node (nvm 22.23.2), and status flags a session on the wrong Node
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-11'
 labels:

@@ -125,6 +125,8 @@ export interface HierarchyDeps {
   binPath?: string;
   /** Liveness probe for a pid, used by the cross-project collision check. Absent: `process.kill(pid, 0)`. */
   isAlive?: (pid: number) => boolean;
+  /** Whether nvm has the given node version installed. Absent: looks under `$NVM_DIR/versions/node`. */
+  nodeInstalled?: (version: string) => boolean;
   /** Records orchestrator events (session started, context cleared). Absent: nothing is recorded. */
   emit?: EventEmitter;
 }

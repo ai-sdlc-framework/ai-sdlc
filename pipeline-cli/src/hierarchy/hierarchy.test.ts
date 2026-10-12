@@ -52,6 +52,7 @@ import {
   type UpOptions,
   unsafeEntryReason,
 } from './index.js';
+import { isNodeInstalled, readNvmrc } from './node-pin.js';
 
 const NOW = new Date('2026-09-30T12:00:00.000Z');
 
@@ -806,7 +807,7 @@ describe('hierarchy status', () => {
     const json = JSON.parse(JSON.stringify(result)) as { rows: { launchEnv: string }[] };
     expect(json.rows.map((r) => r.launchEnv)).toEqual(['ok', 'missing']);
     const lines = formatStatus(result);
-    expect(lines[0]).toMatch(/INFLIGHT\s+ENV\s+HIERARCHY_SESSION/);
+    expect(lines[0]).toMatch(/INFLIGHT\s+ENV\s+NODE\s+HIERARCHY_SESSION/);
     expect(lines.find((l) => l.includes('env missing on'))).toContain(
       'cli-hierarchy down --role executor',
     );
@@ -1567,6 +1568,114 @@ describe('validation helpers', () => {
       expect(cmd).toContain(`AI_SDLC_HIERARCHY_SESSION='proj-it'\\''s'`);
       expect(cmd).toContain(`AI_SDLC_HIERARCHY_ROLE='${role}'`);
     }
+  });
+});
+
+describe('pinned Node (AISDLC-812)', () => {
+  const sess = {
+    role: 'executor',
+    name: 'p-executor-alpha',
+    model: 'm',
+    permissionMode: 'p',
+    prompt: 'x',
+  } as const;
+
+  it('buildClaudeCommand prefixes the nvm activation for the version and keeps the launch env', () => {
+    const cmd = buildClaudeCommand('claude', sess, '22.23.2');
+    expect(cmd).toContain(`. "$NVM_DIR/nvm.sh"`);
+    expect(cmd).toContain(
+      `nvm use '22.23.2' >/dev/null && AI_SDLC_HIERARCHY_SESSION='p-executor-alpha'`,
+    );
+    expect(hasLaunchEnv(cmd, 'p-executor-alpha', 'executor')).toBe(true);
+    expect(buildClaudeCommand('claude', sess).includes('nvm')).toBe(false);
+  });
+
+  it('up resolves the version from .nvmrc and passes it to every session command', async () => {
+    const repo = path.join(tmp, 'repo');
+    mkdirSync(repo);
+    writeFileSync(path.join(repo, '.nvmrc'), 'v22.23.2\n');
+    const installed: string[] = [];
+    const d = { ...deps, cwd: repo, nodeInstalled: (v: string) => (installed.push(v), true) };
+    await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, d);
+    expect(installed).toEqual(['22.23.2']);
+    const starts = fake.calls.filter((c) => c.args[0] === 'new-session');
+    expect(starts.length).toBe(2);
+    for (const c of starts) {
+      expect(c.args[c.args.length - 1]).toContain(`nvm use '22.23.2'`);
+    }
+  });
+
+  it('--node overrides .nvmrc, and a bad value is refused', async () => {
+    const repo = path.join(tmp, 'repo2');
+    mkdirSync(repo);
+    writeFileSync(path.join(repo, '.nvmrc'), '22.22.1\n');
+    const d = { ...deps, cwd: repo, nodeInstalled: () => true };
+    await hierarchyUp({ ...baseOpts, executors: 0, noPlanner: true, node: 'v22.19.0' }, d);
+    const start = fake.calls.find((c) => c.args[0] === 'new-session');
+    expect(start?.args[start.args.length - 1]).toContain(`nvm use '22.19.0'`);
+    await expect(
+      hierarchyUp({ ...baseOpts, executors: 0, noPlanner: true, node: 'lts/*; rm' }, d),
+    ).rejects.toThrow(/not a node version/);
+  });
+
+  it('up refuses before starting anything when the version is not installed', async () => {
+    const repo = path.join(tmp, 'repo3');
+    mkdirSync(repo);
+    writeFileSync(path.join(repo, '.nvmrc'), '22.23.2\n');
+    const d = { ...deps, cwd: repo, nodeInstalled: () => false };
+    await expect(hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, d)).rejects.toThrow(
+      /Node 22\.23\.2 is not installed.*nvm install 22\.23\.2/,
+    );
+    expect(fake.calls.some((c) => c.args[0] === 'new-session')).toBe(false);
+  });
+
+  it('default install check reads $NVM_DIR/versions/node', () => {
+    const nvm = path.join(tmp, 'nvm');
+    mkdirSync(path.join(nvm, 'versions', 'node', 'v22.23.2'), { recursive: true });
+    expect(isNodeInstalled('22.23.2', { NVM_DIR: nvm })).toBe(true);
+    expect(isNodeInstalled('22', { NVM_DIR: nvm })).toBe(true);
+    expect(isNodeInstalled('22.19.0', { NVM_DIR: nvm })).toBe(false);
+    expect(isNodeInstalled('22.23.2', { NVM_DIR: path.join(tmp, 'none') })).toBe(false);
+    expect(readNvmrc(tmp)).toBeUndefined();
+    writeFileSync(path.join(tmp, '.nvmrc'), 'lts/*\n');
+    expect(readNvmrc(tmp)).toBeUndefined();
+  });
+
+  it('status shows a NODE column and flags a session on the wrong Node', async () => {
+    const repo = path.join(tmp, 'repo4');
+    mkdirSync(repo);
+    writeFileSync(path.join(repo, '.nvmrc'), '22.23.2\n');
+    const d = { ...deps, cwd: repo, nodeInstalled: () => true };
+    await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, d);
+    const home = '/h/.nvm/versions/node';
+    const realRun = fake.run;
+    d.run = (f, a, o) =>
+      f === 'ps'
+        ? {
+            status: 0,
+            stdout: [
+              `  4000     1 /bin/zsh`,
+              `  4100  4000 ${home}/v22.23.2/bin/node`,
+              `  4001     1 /bin/zsh`,
+              `  4200  4001 ${home}/v22.19.0/bin/node`,
+              `  9999     1 ${home}/v20.0.0/bin/node`,
+            ].join('\n'),
+            stderr: '',
+          }
+        : realRun(f, a, o);
+    const result = hierarchyStatus(d);
+    const nodes = result.rows.map((r) => [r.nodeVersion, r.nodeMismatch]);
+    expect(nodes).toEqual([
+      ['22.23.2', undefined],
+      ['22.19.0', true],
+    ]);
+    const lines = formatStatus(result);
+    expect(lines[0]).toMatch(/ENV\s+NODE\s+HIERARCHY_SESSION/);
+    expect(lines.join('\n')).toContain('22.19.0 MISMATCH');
+    expect(lines.join('\n')).toContain('node mismatch on');
+    // ps unreadable: no version, no flag.
+    d.run = realRun;
+    expect(hierarchyStatus(d).rows.every((r) => r.nodeVersion === undefined)).toBe(true);
   });
 });
 
