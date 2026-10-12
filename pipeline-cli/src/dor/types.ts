@@ -57,6 +57,10 @@ export interface IssueInput {
    * of `references`.
    */
   declaredDependencyRefs?: string[];
+  /** Backlog frontmatter labels (AISDLC-804: the five-step review check keys on them). */
+  labels?: string[];
+  /** Frontmatter `blocked.reason` override; when set the five-step review check is skipped. */
+  blockedReason?: string;
   /** Defaults to the current rubric version ('v1'). */
   rubricVersion?: string;
   /**

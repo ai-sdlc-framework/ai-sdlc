@@ -150,6 +150,10 @@ rationale and how to reverse it, then the timeboxed decisions not yet applied.
 `--mark` records now as the last-digest time. The operator overrides with the
 existing `cli-decisions answer` and `cli-decisions extend` commands.
 
+## Task template: Five-step review
+
+Every task that fixes a failure or adds a rule opens its Fix with a paragraph starting `**Five-step review (requirements first).**` that names the requirement questioned, a deletion (or "nothing to delete"), then what is simplified, accelerated and automated. The DoR gate returns `needs-clarification` without it. Template and rules: `docs/operations/decision-authority.md`.
+
 ## Step 5 — Hand-off flow
 
 To send work to dispatch:
