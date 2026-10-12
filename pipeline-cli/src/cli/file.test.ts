@@ -218,6 +218,60 @@ describe('cli-file', () => {
     expect(() => fileRebase(repo, 'empty', { pr: false }, deps)).toThrow(/no changes/);
   });
 
+  it('answers a decision already opened on main, appending only the new event', () => {
+    const opened = ev('DEC-0005', 'decision-opened', { options: [{ id: 'a' }] });
+    commitMain(EVENT_LOG_REL, ev('DEC-0001', 'decision-opened') + '\n' + opened + '\n');
+    const r = fileDecision(
+      repo,
+      'DEC-0005',
+      { taskId: 'AISDLC-801', answer: 'a', pr: false },
+      deps,
+    );
+    const log = sh(remote, 'show', `${r.branch}:${EVENT_LOG_REL}`).split('\n');
+    expect(
+      log.filter((l) => l.includes('"decision-opened"') && l.includes('DEC-0005')),
+    ).toHaveLength(1);
+    expect(log.filter((l) => l.includes('"operator-answered"'))).toHaveLength(1);
+  });
+
+  it('refuses task paths outside backlog/tasks and rebase of out-of-scope paths', () => {
+    expect(() => fileTask(repo, '../elsewhere.md', { pr: false }, deps)).toThrow(/inside backlog/);
+    expect(() => fileTask(repo, 'docs/x.md', { pr: false }, deps)).toThrow(/inside backlog/);
+    sh(repo, 'checkout', '-b', 'tmp-wf');
+    mkdirSync(join(repo, '.github/workflows'), { recursive: true });
+    writeFileSync(join(repo, '.github/workflows/x.yml'), 'a');
+    sh(repo, 'add', '-A');
+    sh(repo, 'commit', '-m', 'wf');
+    sh(repo, 'push', 'origin', 'HEAD:refs/heads/ai-sdlc/file-wf');
+    expect(() => fileRebase(repo, 'wf', { pr: false }, deps)).toThrow(/outside the filing scope/);
+  });
+
+  it('rebase ignores files the branch deleted', () => {
+    commitMain('backlog/tasks/aisdlc-7 - gone.md', 'x');
+    sh(repo, 'checkout', '-b', 'tmp-del');
+    sh(repo, 'rm', '-q', 'backlog/tasks/aisdlc-7 - gone.md');
+    mkdirSync(join(repo, 'backlog/tasks'), { recursive: true });
+    writeFileSync(join(repo, 'backlog/tasks/aisdlc-8 - new.md'), 'n');
+    sh(repo, 'add', '-A');
+    sh(repo, 'commit', '-m', 'del');
+    sh(repo, 'push', 'origin', 'HEAD:refs/heads/ai-sdlc/file-del');
+    const r = fileRebase(repo, 'del', { pr: false }, deps);
+    expect(sh(remote, 'show', `${r.branch}:backlog/tasks/aisdlc-8 - new.md`)).toBe('n');
+  });
+
+  it('cleans up the worktree and branch when publishing fails', () => {
+    const failing: FileDeps = {
+      ...deps,
+      exec(cmd, args, cwd) {
+        if (cmd === 'git' && args[0] === 'push') return { status: 1, stdout: '', stderr: 'boom' };
+        return deps.exec(cmd, args, cwd);
+      },
+    };
+    expect(() => fileTask(repo, writeTask(), { pr: false }, failing)).toThrow(/boom/);
+    expect(sh(repo, 'branch', '--list', 'ai-sdlc/file-aisdlc-900')).toBe('');
+    expect(() => fileTask(repo, writeTask(), { pr: false }, deps)).not.toThrow();
+  });
+
   it('helpers', () => {
     expect(() => assertAscii('abc')).not.toThrow();
     const p = join(root, 'weird.md');
@@ -231,7 +285,9 @@ describe('cli-file', () => {
 
   it('default validators report failures', () => {
     expect(defaultDeps.dor(join(root, 'nope.md'), root)).toMatch(/^DoR:/);
-    expect(typeof defaultDeps.drift('AISDLC-1', root) === 'string' || true).toBe(true);
+    // non-git temp dir: backlog-drift cannot pass, so a failure string is returned
+    const d = defaultDeps.drift('AISDLC-1', root);
+    expect(d === null || d.startsWith('backlog-drift:')).toBe(true);
   });
 
   it('CLI maps refusals to exit 1 and errors to exit 2', async () => {
