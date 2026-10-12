@@ -26,6 +26,10 @@ export interface DirectCallInput {
   agentRole?: string;
   scope?: UsageScope;
   repo?: string;
+  /** Stable repository identity; mutually exclusive with repoIdUnavailable. */
+  repoId?: string;
+  /** True when repoId could not be computed; such records are never matched by name. */
+  repoIdUnavailable?: true;
   taskId?: string;
 }
 
@@ -68,6 +72,11 @@ export function recordModelCall(
       agentRole: partial.agentRole ?? 'direct',
       scope: partial.scope ?? 'other',
       ...(partial.repo ? { repo: partial.repo } : {}),
+      ...(partial.repoId
+        ? { repoId: partial.repoId }
+        : partial.repoIdUnavailable
+          ? { repoIdUnavailable: true as const }
+          : {}),
       ...(partial.taskId ? { taskId: partial.taskId } : {}),
     };
     const res = appendModelCalls([record], opts);

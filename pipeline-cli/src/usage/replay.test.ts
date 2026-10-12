@@ -27,7 +27,8 @@ import { buildUsageCli } from '../cli/usage.js';
 import type { ProcessSpawner } from '../runtime/shell-claude-p-spawner.js';
 import type { SpawnOpts, SubagentResult, SubagentSpawner } from '../types.js';
 import { buildCorpus, labelRecords, readCorpus, type CorpusFile } from './replay-corpus.js';
-import { repoIdFor } from './repo-id.js';
+import { repoIdFor, selectByRepo } from './repo-id.js';
+import { runReplay } from './replay-run.js';
 import {
   activeWorktreeCount,
   isOwnedByUser,
@@ -560,6 +561,69 @@ describe('replay', () => {
         tokens: { input: 1000, output: 100 },
       });
     }
+  });
+
+  it('stamps every replay record and the results file with the same repoId, never counted legacy', async () => {
+    await buildCorpusViaCli();
+    await run(
+      [
+        'replay',
+        '--role',
+        'code',
+        '--model',
+        'cand-model',
+        '--max-items',
+        '2',
+        '--max-units',
+        '1000000',
+      ],
+      { createSpawner: makeSpawner([]) },
+    );
+    const id = repoIdFor(repo) as string;
+    expect(id).toMatch(/\S/);
+    const records = await usageRecords();
+    expect(records).toHaveLength(2);
+    for (const r of records) {
+      expect(r.repoId).toBe(id);
+      expect(r.repoIdUnavailable).toBeUndefined();
+    }
+    const file = readdirSync(join(artifacts, 'replay')).find((n) => n.startsWith('results-'));
+    const raw = JSON.parse(readFileSync(join(artifacts, 'replay', file as string), 'utf8'));
+    expect(raw.repoId).toBe(id);
+    const sel = selectByRepo(records, { repoId: id, repoName: 'other-name' });
+    expect(sel.records).toHaveLength(2);
+    expect(sel.legacy).toBe(0);
+    expect(sel.unavailable).toBe(0);
+  });
+
+  it('stamps repoIdUnavailable on every record when the repoId cannot be computed', async () => {
+    const corpus = await buildCorpusViaCli();
+    const results = await runReplay({
+      items: corpus.items,
+      role: 'code',
+      candidate: 'cand-model',
+      maxItems: 2,
+      maxUnits: 1_000_000,
+      repoRoot: repo,
+      repoName: 'replay-repo',
+      repoIdFor: () => undefined,
+      git: createGit(),
+      createSpawner: makeSpawner([]),
+      weights: deriveUnitWeights([], T0.toISOString(), defaultUsageConfig().weights),
+      usage: { dir: usageDir },
+      now: () => T0,
+      runId: 'unavail',
+      tmpRoot,
+    });
+    expect(results.repoId).toBeUndefined();
+    const records = await usageRecords();
+    expect(records).toHaveLength(2);
+    for (const r of records) {
+      expect(r.repoIdUnavailable).toBe(true);
+      expect(r.repoId).toBeUndefined();
+    }
+    const sel = selectByRepo(records, { repoId: 'x#y', repoName: 'replay-repo' });
+    expect(sel).toMatchObject({ records: [], legacy: 0, unavailable: 2 });
   });
 
   it('keeps replay usage out of the scorecard and adds reviewer rows from a results file', async () => {
