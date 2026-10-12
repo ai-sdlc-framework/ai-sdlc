@@ -82,9 +82,10 @@ what to resume and where its work is.
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [x] #1 Dispatching a developer subagent writes a session record containing
+- [ ] #1 Dispatching a developer subagent writes a session record containing
       `agentId`, `transcriptPath` and `worktreePath` alongside the existing
       fields
+      (library + `cli-dispatch record-agent` shipped here; the call at dispatch time is wired by AISDLC-564.1, so this AC is not yet met end to end)
 - [x] #2 The record's `status` reflects completion or failure, so a stale
       in-progress entry is distinguishable from a finished one
 - [x] #3 Given only the repo (no conversation context), an operator can
@@ -122,7 +123,7 @@ The dispatch session record (`.ai-sdlc/dispatch/sessions/<task-id>.session.json`
 - `pipeline-cli/src/cli/dispatch.ts` (modified): `record-agent` and `sessions` subcommands
 - `pipeline-cli/src/dispatch/complete.ts`, `session-reaper.ts` (modified): status update on completion; reaper skips tmux-less records
 - `spec/schemas/dispatch-session.v1.schema.json` (modified): relaxed required set, new optional fields
-- `ai-sdlc-plugin/commands/{orchestrator-tick,dispatch-worker}.md`, `docs/operations/dispatched-session-decisions.md` (modified): record the key at dispatch, recovery runbook
+- `docs/operations/dispatched-session-decisions.md` (modified): recovery runbook (dispatch-time call site is AISDLC-564.1)
 
 ## Design decisions
 - **Local-only records**: `sessions/*.session.json` is gitignored, so recovery does not survive a fresh clone; it survives session loss on the same machine.
@@ -132,5 +133,5 @@ The dispatch session record (`.ai-sdlc/dispatch/sessions/<task-id>.session.json`
 - `pnpm build`, lint, format:check, dark-code:check clean; targeted vitest (dispatch + cli/dispatch) 499/499
 
 ## Follow-up
-(none)
+AISDLC-564.1: wire `cli-dispatch record-agent` into the current executor dispatch path (the orchestrator-tick and dispatch-worker call sites were retired); AC #1 stays unchecked until it lands.
 <!-- SECTION:FINAL_SUMMARY:END -->
