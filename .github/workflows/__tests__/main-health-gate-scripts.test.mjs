@@ -63,6 +63,11 @@ describe('main-health-monitor gate-scripts job (AISDLC-797)', () => {
     assert.match(SRC, /\[main-health\] main is RED/);
   });
 
+  it('runs with read-only contents permission and no issues write', () => {
+    assert.match(gate, /permissions:\n\s+contents: read/);
+    assert.doesNotMatch(gate, /issues: write/);
+  });
+
   it('fires on every push to main', () => {
     assert.match(SRC, /push:\n\s+branches: \[main\]/);
   });
