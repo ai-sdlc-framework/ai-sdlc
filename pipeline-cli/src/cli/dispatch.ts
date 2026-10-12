@@ -62,7 +62,7 @@
  *     not in failed/, has no saved manifest, is already active, or is past the
  *     retry limit. `--note` writes the same `resume.note` block `resume` writes.
  *
- *   - `resume --task-id <id> --note <text> [--pr <number>] [--failing-checks <a,b>]
+ *   - `resume --task-id <id> --note <text> [--pr <number>] [--failing-checks <a,b>] [--push-only]
  *     [--finding <text>]` (or `--note-file <path>`) — send a finished task back to
  *     queue/ with a feedback note on its manifest (AISDLC-738). The next claim
  *     prints the note, and `/ai-sdlc execute` re-enters the task's existing worktree
@@ -1126,6 +1126,7 @@ export async function runDispatchCli(
               ...(prNumber !== undefined ? { prNumber } : {}),
               failingChecks: splitIdList(flags['failing-checks']),
               findings: flags['finding'] ? [flags['finding']] : [],
+              pushOnly: flags['push-only'] === 'true',
             },
             {
               resumedBy: caller.name,

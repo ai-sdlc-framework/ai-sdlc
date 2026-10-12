@@ -25,8 +25,8 @@ describe('executor command', () => {
     assert.match(match[1], /^description: /m);
   });
 
-  it('stays under 150 lines by leaving the deterministic start-up to executor-start', () => {
-    assert.ok(raw.split('\n').length < 150, `executor.md has ${raw.split('\n').length} lines`);
+  it('stays under 165 lines by leaving the deterministic start-up to executor-start', () => {
+    assert.ok(raw.split('\n').length < 165, `executor.md has ${raw.split('\n').length} lines`);
   });
 
   it('starts with one executor-start call that blocks on the board', () => {

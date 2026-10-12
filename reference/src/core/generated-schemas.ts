@@ -4026,6 +4026,7 @@ export const dispatchManifestV1Schema = {
         resumedBy: { type: 'string', minLength: 1 },
         priorOutcome: { type: 'string' },
         branchGuessed: { type: 'boolean' },
+        resumeMode: { type: 'string', enum: ['push-only'] },
       },
       additionalProperties: false,
     },
