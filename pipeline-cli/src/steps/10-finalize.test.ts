@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildFinalSummary, finalizeTask, moveTaskToCompleted } from './10-finalize.js';
+import {
+  buildFinalSummary,
+  finalizeTask,
+  moveTaskToCompleted,
+  noSignerWarning,
+} from './10-finalize.js';
 import { cleanupTmpProject, makeTmpProject, writeTaskFile } from '../__test-helpers/make-task.js';
-import { FakeRunner, ok } from '../__test-helpers/fake-runner.js';
+import { FakeRunner, fail, ok } from '../__test-helpers/fake-runner.js';
 import type { AggregatedVerdict, DeveloperReturn, TaskSpec } from '../types.js';
 
 let tmp: string;
@@ -210,6 +215,112 @@ describe('Step 10 — finalizeTask', () => {
     expect(existsSync(completedPath)).toBe(true);
     expect(existsSync(tasksPath)).toBe(false);
     expect(readFileSync(completedPath, 'utf8')).toContain('status: Done');
+  });
+
+  describe('AISDLC-556 — no-signer warning (fail open)', () => {
+    const base = () => ({
+      taskId: 'AISDLC-7',
+      workDir: tmp,
+      worktreePath: tmp,
+      task,
+      developerReturn: dev,
+      verdict: approved(),
+      iterations: 1,
+      skipCommit: true,
+    });
+
+    it('warns naming the verdict path when the signer script is absent, and does not block', async () => {
+      writeTaskFile(tmp, { id: 'AISDLC-7', title: 'seven', status: 'In Progress' });
+      const warnings: string[] = [];
+      const r = await finalizeTask({
+        ...base(),
+        runner: new FakeRunner().toRunner(),
+        signAttestationScript: join(tmp, 'missing-signer.mjs'),
+        warn: (m) => warnings.push(m),
+      });
+      expect(r.skipped).toBe(false);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('.ai-sdlc/verdicts/aisdlc-7.json');
+      expect(warnings[0]).toContain('the PR will carry no attestation');
+    });
+
+    it('warns when the signer cannot locate the attestation runtime, and does not block', async () => {
+      writeTaskFile(tmp, { id: 'AISDLC-7', title: 'seven', status: 'In Progress' });
+      const helper = join(tmp, 'fake-sign-attestation.mjs');
+      writeFileSync(helper, '// noop\n');
+      const warnings: string[] = [];
+      const fake = new FakeRunner().on(
+        /^node .*fake-sign-attestation\.mjs/,
+        fail('Cannot locate the AI-SDLC attestation runtime', 1),
+      );
+      const r = await finalizeTask({
+        ...base(),
+        runner: fake.toRunner(),
+        signAttestationScript: helper,
+        warn: (m) => warnings.push(m),
+      });
+      expect(r.skipped).toBe(false);
+      expect(r.attestationPath).toBeNull();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('runtime not installed');
+    });
+
+    it('does not warn when the signer is reachable and signs', async () => {
+      writeTaskFile(tmp, { id: 'AISDLC-7', title: 'seven', status: 'In Progress' });
+      const helper = join(tmp, 'fake-sign-attestation.mjs');
+      writeFileSync(helper, '// noop\n');
+      const warnings: string[] = [];
+      const fake = new FakeRunner().on(
+        /^node .*fake-sign-attestation\.mjs/,
+        ok('.ai-sdlc/attestations/a0b1c2d3e4f5061728394a5b6c7d8e9f00112233.v6.dsse.json\n'),
+      );
+      await finalizeTask({
+        ...base(),
+        runner: fake.toRunner(),
+        signAttestationScript: helper,
+        warn: (m) => warnings.push(m),
+      });
+      expect(warnings).toEqual([]);
+    });
+
+    it('does not warn on an unrelated signer failure', async () => {
+      writeTaskFile(tmp, { id: 'AISDLC-7', title: 'seven', status: 'In Progress' });
+      const helper = join(tmp, 'fake-sign-attestation.mjs');
+      writeFileSync(helper, '// noop\n');
+      const warnings: string[] = [];
+      const fake = new FakeRunner().on(/^node .*fake-sign-attestation\.mjs/, fail('no key', 1));
+      await finalizeTask({
+        ...base(),
+        runner: fake.toRunner(),
+        signAttestationScript: helper,
+        warn: (m) => warnings.push(m),
+      });
+      expect(warnings).toEqual([]);
+    });
+
+    it('noSignerWarning names the lower-cased task verdict path', () => {
+      expect(noSignerWarning('AISDLC-9', 'x')).toContain('.ai-sdlc/verdicts/aisdlc-9.json');
+    });
+
+    it('defaults the sink to stderr', async () => {
+      writeTaskFile(tmp, { id: 'AISDLC-7', title: 'seven', status: 'In Progress' });
+      const orig = process.stderr.write;
+      let captured = '';
+      process.stderr.write = ((c: string) => (
+        (captured += c),
+        true
+      )) as typeof process.stderr.write;
+      try {
+        await finalizeTask({
+          ...base(),
+          runner: new FakeRunner().toRunner(),
+          signAttestationScript: join(tmp, 'missing-signer.mjs'),
+        });
+      } finally {
+        process.stderr.write = orig;
+      }
+      expect(captured).toContain('no attestation signer is available');
+    });
   });
 
   it('AISDLC-409: extracts v6 envelope path (.v6.dsse.json) from sign-attestation stdout', async () => {

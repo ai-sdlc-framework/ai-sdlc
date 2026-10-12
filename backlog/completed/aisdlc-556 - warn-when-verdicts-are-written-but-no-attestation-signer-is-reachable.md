@@ -3,7 +3,7 @@ id: AISDLC-556
 title: >-
   feat(pipeline): warn at Step 10 when verdicts are written but no attestation
   signer is reachable, and document the adopter prerequisites
-status: To Do
+status: Done
 assignee: []
 labels:
   - attestation
@@ -60,13 +60,13 @@ when the classifier binary is missing, rather than degrading quietly.
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] #1 With no signer reachable, Step 10 emits a warning that names the
+- [x] #1 With no signer reachable, Step 10 emits a warning that names the
       verdict path and states the PR will carry no attestation
-- [ ] #2 The warning does not block the pipeline (fail open)
-- [ ] #3 With a signer reachable, no warning is emitted
-- [ ] #4 The plugin README lists the adopter prerequisites for attestation,
+- [x] #2 The warning does not block the pipeline (fail open)
+- [x] #3 With a signer reachable, no warning is emitted
+- [x] #4 The plugin README lists the adopter prerequisites for attestation,
       including that `verify-attestation` CI cannot pass without them
-- [ ] #5 The execute docs no longer describe the pre-push hook as if it is
+- [x] #5 The execute docs no longer describe the pre-push hook as if it is
       already installed in a consuming repo
 <!-- SECTION:ACCEPTANCE:END -->
 
@@ -78,3 +78,32 @@ AISDLC-554 because that task fixes the signer's own reachability, whereas this
 one concerns a different code path — the pipeline step that never attempts to
 sign in the first place.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+Step 10 of `/ai-sdlc execute` now probes for a reachable attestation signer after writing the verdict file and warns, without blocking, when none is found. The plugin README documents the adopter prerequisites for attestation.
+
+## Changes
+- `ai-sdlc-plugin/scripts/warn-if-no-signer.sh` (new): probes with `sign-attestation.mjs --print-content-hash`; warns naming the verdict path and that the PR will carry no attestation; always exits 0.
+- `ai-sdlc-plugin/scripts/warn-if-no-signer.test.mjs` (new): hermetic tests for warn, no-warn and fail-open.
+- `ai-sdlc-plugin/commands/execute.md` (modified): Step 10 calls the probe; the pre-push hook is no longer described as already installed in a consuming repo.
+- `ai-sdlc-plugin/README.md` (modified): "Attestation prerequisites for adopters" section, stating verify-attestation CI cannot pass without a signer.
+- `package.json` (modified): `test:warn-if-no-signer-gate`, chained into `pnpm test`.
+
+## Design decisions
+- **Fail open**: always exits 0; the defect is silence, not permissiveness.
+- **Narrow probe**: warns only when the script or node is missing, or the runtime cannot be located; other probe failures are treated as reachable.
+
+## Verification
+- `pnpm build` — clean
+- `pnpm test` — new test 4/4, dark-code check OK, plugin command tests 420/420; full suite left to CI
+- `pnpm lint` — clean
+- `pnpm format:check` — clean
+
+## Follow-up
+- declined: fallback echo in execute.md when the probe script path does not resolve (minor reviewer note; still fails open)
+- declined: test tying the probe string to the signer source (suggestion)
+- declined: README note that the warning cannot detect a missing hook or key (suggestion)
+<!-- SECTION:FINAL_SUMMARY:END -->
