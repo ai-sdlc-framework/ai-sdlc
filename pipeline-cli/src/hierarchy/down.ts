@@ -47,6 +47,46 @@ export interface DownResult {
 }
 
 /**
+ * End one session's tmux window: ask it to exit, wait, then close it by pane id when it
+ * stays open. A window that is already gone counts as stopped. Refuses (and touches
+ * nothing) when the session lacks the ownership marker or its recorded pane no longer
+ * belongs to it; both are checked before the exit request and again before a forced close.
+ */
+export async function stopSessionWindow(
+  entry: RosterEntry,
+  deps: HierarchyDeps,
+): Promise<{ forced: boolean } | { refused: string; verb: 'stopping' | 'closing' }> {
+  const isOpen = () => listWindows(deps.run, entry.tmuxSession).includes(entry.tmuxWindow);
+  // Ownership and pane gate: a session `up` started, reached through a pane id that
+  // still belongs to it.
+  const gate = (): { target: string } | { reason: string } => {
+    const refusal = ownershipRefusal(deps.run, entry);
+    if (refusal) return { reason: refusal };
+    try {
+      return {
+        target: resolveSendTarget(deps.run, entry.tmuxSession, entry.tmuxWindow, entry.paneId),
+      };
+    } catch (err) {
+      return { reason: (err as Error).message };
+    }
+  };
+  if (!isOpen()) return { forced: false };
+  const first = gate();
+  if ('reason' in first) return { refused: first.reason, verb: 'stopping' };
+  sendExit(deps.run, first.target);
+  for (let i = 0; i < deps.pollAttempts && isOpen(); i++) await deps.sleep(deps.pollIntervalMs);
+  if (!isOpen()) return { forced: false };
+  // The grace period is seconds long: a session could have been replaced meanwhile,
+  // so check again immediately before the destructive call. A confirmed pane id is
+  // closed by id (never reused); otherwise the window by name.
+  const again = gate();
+  if ('reason' in again) return { refused: again.reason, verb: 'closing' };
+  if (entry.paneId) killPane(deps.run, again.target);
+  else killWindow(deps.run, entry.tmuxSession, entry.tmuxWindow);
+  return { forced: true };
+}
+
+/**
  * Stop sessions. `role` matches a roster name (`executor-beta`) or a role
  * (`executor` selects every executor); without it every session is stopped.
  * @throws when `role` matches nothing.
@@ -74,47 +114,13 @@ export async function hierarchyDown(
   const stopped: DownOutcome[] = [];
   const refused: { name: string; reason: string }[] = [];
   for (const entry of selected) {
-    const isOpen = () => listWindows(deps.run, entry.tmuxSession).includes(entry.tmuxWindow);
-    let forced = false;
-    // Ownership and pane gate: a session `up` started, reached through a pane id that
-    // still belongs to it. Run before the exit request and again before any forced close.
-    const gate = (): { target: string } | { reason: string } => {
-      const refusal = ownershipRefusal(deps.run, entry);
-      if (refusal) return { reason: refusal };
-      try {
-        return {
-          target: resolveSendTarget(deps.run, entry.tmuxSession, entry.tmuxWindow, entry.paneId),
-        };
-      } catch (err) {
-        return { reason: (err as Error).message };
-      }
-    };
-    const refuse = (verb: string, reason: string) => {
-      refused.push({ name: entry.name, reason });
-      deps.log(`warning: not ${verb} '${entry.name}': ${reason}`);
-    };
-    if (isOpen()) {
-      const first = gate();
-      if ('reason' in first) {
-        refuse('stopping', first.reason);
-        continue;
-      }
-      sendExit(deps.run, first.target);
-      for (let i = 0; i < deps.pollAttempts && isOpen(); i++) await deps.sleep(deps.pollIntervalMs);
-      if (isOpen()) {
-        // The grace period is seconds long: a session could have been replaced meanwhile,
-        // so check again immediately before the destructive call. A confirmed pane id is
-        // closed by id (never reused); otherwise the window by name.
-        const again = gate();
-        if ('reason' in again) {
-          refuse('closing', again.reason);
-          continue;
-        }
-        if (entry.paneId) killPane(deps.run, again.target);
-        else killWindow(deps.run, entry.tmuxSession, entry.tmuxWindow);
-        forced = true;
-      }
+    const stop = await stopSessionWindow(entry, deps);
+    if ('refused' in stop) {
+      refused.push({ name: entry.name, reason: stop.refused });
+      deps.log(`warning: not ${stop.verb} '${entry.name}': ${stop.refused}`);
+      continue;
     }
+    const { forced } = stop;
     const held = listInflight(deps.boardDir).find((i) => i.workerId === entry.name);
     let requeued: string | undefined;
     if (held && releaseInflight(deps.boardDir, held.taskId)) requeued = held.taskId;

@@ -16,7 +16,7 @@ resolved pipeline-cli bin (works from an installed plugin, not only the dogfood 
 It passes `up`, `status`, `attach`, `terminals`, `brief` and `down` through unchanged,
 with these differences: `attach` and `up --attach` print the shell command to run (a
 Claude Code session cannot switch your terminal); `down` with no `--role` asks you to
-confirm first; `clear`, `tick`, `route-decision`, `check-sender`, `check-repo` and
+confirm first; `clear`, `tick`, `restart`, `register`, `route-decision`, `check-sender`, `check-repo` and
 `executor-start` are refused (they belong to the dispatch and executor loop bodies); with no arguments it
 prints `--help` plus a common-recipes block.
 
@@ -310,6 +310,52 @@ in the roster. Effects: manifests held by a stopped session move from `inflight/
 `queue/`; stopped entries are removed from `hierarchy.json`. Exit `0`; `1` when any
 session was refused or `--role` matches nothing.
 
+### `restart`
+
+Stop and start one executor without touching the rest of the hierarchy.
+
+```bash
+cli-hierarchy restart <executor> [--after-task] [--wait <seconds>]
+```
+
+`<executor>` is a roster name, a tmux window or the unqualified name (`executor-beta`).
+The session is asked to exit (closed by pane id when it stays open), then started again
+with the model, permission mode and launch environment its roster entry records. Its roster
+entry (pid, pane, started time) is replaced in one atomic write; no other entry, window or
+inflight manifest is touched, and the dispatch session keeps running. A window that is
+already gone (a crash) is simply started.
+
+An executor that holds a claimed task is refused: the message names `--after-task`. With
+`--after-task` the command waits for the task boundary (up to `--wait` seconds, default
+1500; nothing is stopped if the wait runs out), then restarts. If the executor claims its
+next task in the instant between the last check and the stop, that manifest is returned to
+`queue/` right after the stop (the JSON shows it as `requeued`). The roster is re-read just
+before the write, so a change to another entry made during the wait is kept. If the new session cannot be started, its dead entry
+is dropped from the roster and the message says to run `cli-hierarchy up`.
+
+Dispatch session only (the same mistake guard as `clear`, not authentication); executors
+only. The planner and dispatch sessions are refused with the `down --role` then `up` path.
+A session without the ownership marker, or whose recorded pane no longer belongs to it, is
+refused and left running. Prints the before and after pid, start time and pane as JSON.
+Exit `0`; `1` on a refusal.
+
+### `register`
+
+Re-record an executor that is already running under a new pid, for example after it was
+restarted by hand.
+
+```bash
+cli-hierarchy register <executor>
+```
+
+Before writing it checks that the tmux window is open, carries the ownership marker, has a
+readable pane whose start command carries this session's `AI_SDLC_HIERARCHY_SESSION` and
+`AI_SDLC_HIERARCHY_ROLE`, and that a live harness session of that name is registered in this
+checkout whose pid is the pane's process or one of its descendants. It then replaces that entry's pid, pane and started time (status `running`) and
+nothing else; a pid that belongs to another roster entry is refused, and an entry that
+already matches is left unchanged. It does not wait for tasks, because the roster's task
+binding is the session name, not the pid. Same caller and role rules as `restart`.
+
 ### `clear`
 
 Empty an executor's context between tasks: send `/clear`, wait for the settle time, then
@@ -555,7 +601,9 @@ that still holds an inflight task is never cleared, so work in progress is never
 ## Restarting after a plugin upgrade
 
 Sessions load the plugin once, when they start. A new plugin version (commands, hooks,
-role text) is picked up only after `cli-hierarchy down` followed by `cli-hierarchy up`;
+role text) is picked up only after `cli-hierarchy down` followed by `cli-hierarchy up`, or,
+for one executor at a time, `cli-hierarchy restart <executor> --after-task` from the dispatch
+session (the dispatch and planner sessions still need `down` then `up`);
 `clear` does not reload the plugin. `down` returns inflight manifests to `queue/`, so the
 restart loses no queued work, but finish or accept the loss of any task in flight first.
 
@@ -583,7 +631,7 @@ with a `gone` state needs `up` to restart it.
 (a personal tmux session sharing the name) or its pane id no longer matches the roster. The
 session is left alone; stop it by hand if it is yours.
 
-**`clear`, `tick` or `route-decision` exits 1 with a caller message.** Only the running
+**`clear`, `tick`, `restart`, `register` or `route-decision` exits 1 with a caller message.** Only the running
 dispatch session may run them. Run them from that session.
 
 **`status` shows `ENV missing`, or `doctor` reports `hierarchy-launch-env`.** The session was

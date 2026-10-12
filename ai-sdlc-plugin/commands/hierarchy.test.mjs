@@ -68,6 +68,8 @@ describe('hierarchy dispatch script', () => {
     assert.deepEqual(REFUSED, [
       'clear',
       'tick',
+      'restart',
+      'register',
       'route-decision',
       'check-sender',
       'check-repo',

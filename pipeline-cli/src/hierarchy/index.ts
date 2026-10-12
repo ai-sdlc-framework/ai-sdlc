@@ -91,7 +91,14 @@ export {
   type HandoffOptions,
   type HandoffResult,
 } from './handoff.js';
-export { hierarchyDown, type DownOutcome, type DownResult } from './down.js';
+export { hierarchyDown, stopSessionWindow, type DownOutcome, type DownResult } from './down.js';
+export {
+  DEFAULT_AFTER_TASK_WAIT_SEC,
+  hierarchyRegister,
+  hierarchyRestart,
+  type RestartOptions,
+  type RestartResult,
+} from './restart.js';
 export {
   checkDispatchCaller,
   defaultInstallDir,

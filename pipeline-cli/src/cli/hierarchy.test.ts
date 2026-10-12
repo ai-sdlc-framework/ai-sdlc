@@ -1521,3 +1521,106 @@ describe('handoff and auto-clear subcommands (AISDLC-766)', () => {
     expect(spawned).toHaveLength(1);
   });
 });
+
+describe('restart and register (AISDLC-713)', () => {
+  const entry = (role: RosterEntry['role'], name: string): RosterEntry => ({
+    role,
+    name,
+    tmuxSession: name,
+    tmuxWindow: name,
+    paneId: '%3',
+    pid: 1,
+    model: 'sonnet',
+    permissionMode: 'bypassPermissions',
+    startedAt: '2026-09-30T12:00:00.000Z',
+    status: 'running',
+  });
+  const asCaller = (role: RosterEntry['role'], name: string): IdentityDeps => ({
+    readSessions: () => [{ name, role, pid: 400, status: 'running' }],
+    parentPid: (pid) => (pid === 500 ? 400 : null),
+    comm: (pid) => (pid === 400 ? 'claude' : 'zsh'),
+    startPid: 500,
+  });
+  const dispatch = { identity: asCaller('operator-dispatch', 'operator-dispatch') };
+  const board = () => path.join(tmp, 'dispatch');
+
+  beforeEach(() => {
+    writeRoster(board(), {
+      schemaVersion: 'v1',
+      sessions: [
+        entry('operator-dispatch', 'operator-dispatch'),
+        entry('executor', 'executor-alpha'),
+      ],
+    });
+  });
+
+  it.each(['restart', 'register'])(
+    '%s refuses an executor caller and changes nothing',
+    async (cmd) => {
+      const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      const code = await runHierarchyCli([cmd, 'executor-alpha'], overrides(), {
+        identity: asCaller('executor', 'executor-alpha'),
+      });
+      expect(code).toBe(1);
+      expect(String(err.mock.calls[0]?.[0])).toContain('only the dispatch session');
+      expect(calls).toEqual([]);
+    },
+  );
+
+  it.each(['restart', 'register'])('%s needs an executor name', async (cmd) => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(await runHierarchyCli([cmd], overrides(), dispatch)).toBe(2);
+    expect(String(err.mock.calls[0]?.[0])).toContain('an executor name is required');
+  });
+
+  it('restart rejects a malformed --wait', async () => {
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(
+      await runHierarchyCli(['restart', 'executor-alpha', '--wait', 'x'], overrides(), dispatch),
+    ).toBe(2);
+  });
+
+  it('reports a refusal from the command with exit 1', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(await runHierarchyCli(['register', 'executor-zeta'], overrides(), dispatch)).toBe(1);
+    expect(String(err.mock.calls[0]?.[0])).toContain("no session named 'executor-zeta'");
+  });
+
+  it('a value-taking flag before the name still resolves the name', async () => {
+    const run: CommandRunner = (_f, args) => {
+      calls.push([...args]);
+      if (args[0] === 'display-message') return { status: 0, stdout: '%9 4242\n', stderr: '' };
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const code = await runHierarchyCli(
+      ['restart', '--wait', '30', 'executor-alpha'],
+      overrides({ run }),
+      dispatch,
+    );
+    expect(code).toBe(0);
+    expect(JSON.parse(logs.at(-1) as string)).toMatchObject({ name: 'executor-alpha' });
+  });
+
+  it('restarts the named executor; --after-task before the name still selects it', async () => {
+    const run: CommandRunner = (_f, args) => {
+      calls.push([...args]);
+      if (args[0] === 'display-message') return { status: 0, stdout: '%9 4242\n', stderr: '' };
+      if (args[0] === 'new-session' || args[0] === 'set-option') {
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      return { status: 1, stdout: '', stderr: '' };
+    };
+    const code = await runHierarchyCli(
+      ['restart', '--after-task', 'executor-alpha'],
+      overrides({ run }),
+      dispatch,
+    );
+    expect(code).toBe(0);
+    expect(JSON.parse(logs.at(-1) as string)).toMatchObject({
+      name: 'executor-alpha',
+      before: { pid: 1 },
+      after: { pid: 4242, paneId: '%9' },
+    });
+    expect(calls.filter((c) => c[0] === 'new-session')).toHaveLength(1);
+  });
+});

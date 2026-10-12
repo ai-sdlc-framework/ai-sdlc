@@ -27,6 +27,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 export const REFUSED = [
   'clear',
   'tick',
+  'restart',
+  'register',
   'route-decision',
   'check-sender',
   'check-repo',
