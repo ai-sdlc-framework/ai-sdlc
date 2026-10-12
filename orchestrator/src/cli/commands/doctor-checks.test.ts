@@ -2122,7 +2122,9 @@ describe('backlog-drift-warnings check', () => {
 
   it('is registered', () => {
     expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('backlog-drift-warnings');
-=======
+  });
+});
+
 describe('checkLeasePushPreflight (AISDLC-798)', () => {
   const worktree = () => join(tmpDir, '.worktrees', 'aisdlc-9');
   const pluginModule = () => join(tmpDir, 'ai-sdlc-plugin', 'hooks', 'lib', 'trusted-policy.js');
@@ -2179,6 +2181,5 @@ describe('checkLeasePushPreflight (AISDLC-798)', () => {
 
   it('is registered', () => {
     expect(DOCTOR_CHECKS.find((x) => x.id === 'lease-push-preflight')).toBeDefined();
->>>>>>> 25e907f7 (feat: lease-push preflight names the failing hook condition before Step 10.5 (AISDLC-798))
   });
 });
