@@ -48,6 +48,7 @@
     "cli-quality-corpus": "bin/cli-quality-corpus.mjs",
     "cli-quality": "bin/cli-quality.mjs",
     "cli-dor-check": "bin/cli-dor-check.mjs",
+    "cli-file": "bin/cli-file.mjs",
     "cli-dispatch": "bin/cli-dispatch.mjs",
     "cli-dispatch-supervisor": "bin/cli-dispatch-supervisor.mjs",
     "cli-hierarchy": "bin/cli-hierarchy.mjs",
