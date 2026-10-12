@@ -26,6 +26,7 @@ import type { BuildBaselineOpts } from './baseline.js';
 import {
   ABSOLUTE_MAX_PROBES,
   ABSOLUTE_MAX_TARGET_BYTES,
+  DEFAULT_MAX_RUN_PROBES,
   probeSafetyProblems,
   targetBytes,
 } from './validate.js';
@@ -79,6 +80,15 @@ export function buildFallbackPlan(
     rejections.push({
       reason: 'baseline-over-ceiling',
       detail: 'the fallback plan exceeds the absolute probe or size ceiling',
+    });
+
+  // The fallback adds only read probes, so the run cap is exceeded only by the baseline itself.
+  const maxRuns = limits.maxRunProbes ?? DEFAULT_MAX_RUN_PROBES;
+  const runs = probes.filter((p) => p.type === 'run').length;
+  if (runs > maxRuns)
+    rejections.push({
+      reason: 'baseline-over-ceiling',
+      detail: `the baseline alone has ${runs} run probes, over the limit of ${maxRuns}`,
     });
 
   const plan: ReviewPlan = { schemaVersion: 1, baselineVersion: baseline.version, probes };

@@ -1,0 +1,71 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "e34f68e70cb7fcc22c9cc1aba636774eaa2bf054"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "a690ff13e07458a53ae2ee485039fbaaeae2df305025dd51a91ecae31b0af0c7",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "a690ff13e07458a53ae2ee485039fbaaeae2df305025dd51a91ecae31b0af0c7",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "a100f26df96c4829e3edaecc623c2a8167cc38c718534ee497d125d62a3413eb",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "a100f26df96c4829e3edaecc623c2a8167cc38c718534ee497d125d62a3413eb",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "3012cae939c0c5a506d3fb71541a9c3527093ef34a901d92a3030e0c8904a523",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "3012cae939c0c5a506d3fb71541a9c3527093ef34a901d92a3030e0c8904a523",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "2021f4c7597a1c23fd72b3446cb8f5c6e823ca25720754d6922a0ce3dfc85bb1",
+        "518ad1e24f55652afe061b01d8e674471f5fb3ddeb761a41b639cb0f67f4ac99"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "6fbcc338847186842257b648cdad5542cb5f6361c4b456c672c3986aac3a185f",
+        "518ad1e24f55652afe061b01d8e674471f5fb3ddeb761a41b639cb0f67f4ac99"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "fb1977e45605ebfa3195a7152a2167514efb316d551cf9e6f9ccb1c43618de69",
+        "831cd6739b7f2267d0f57e80f1eaf285ef754140528af4fbc772aaaaf35f91d0"
+      ]
+    }
+  ],
+  "rootHash": "cdae57ef2da667e61dd35d2b36d8802e3664f09565c87f7b340e39128e861ab8",
+  "rootSignature": "uaruB81YkRySMNIZmHQep4UqwkzKyHTmCAforGvLQQBJfJ3EQdr9XBhd5IJLJnzo/FUMCFleH2Qz58vbeILkCg==",
+  "nonce": "1044149134f29c7f35a87d24e3bbd089bf31625f3907d6a2875151951b100a35",
+  "leafCount": 3,
+  "signedAt": "2026-10-12T14:54:49.794Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "two",
+    "reason": "diff touches non-test, non-docs paths",
+    "triggeringPaths": [],
+    "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
+  }
+}

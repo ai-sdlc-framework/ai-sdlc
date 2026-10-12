@@ -163,7 +163,7 @@ export interface PlanLimits {
    */
   mergeBase?: string;
   /**
-   * Cap on the `run` probes the plan adds beyond the baseline, independent of `maxProbes`
+   * Cap on the `run` probes in the plan, baseline included, independent of `maxProbes`
    * (each run probe executes the repository's own scripts). Defaults to
    * `DEFAULT_MAX_RUN_PROBES`.
    */

@@ -46,7 +46,10 @@ function canonical(value: unknown): string {
 /** Absolute ceilings that bound fan-out even for the mandatory baseline. */
 export const ABSOLUTE_MAX_PROBES = 500;
 export const ABSOLUTE_MAX_TARGET_BYTES = 1_000_000;
-/** Default cap on the run probes a plan adds (each one executes the repository's own scripts). */
+/**
+ * Default cap on the run probes in a plan, baseline included (each one executes the repository's
+ * own scripts). The validator and the executor both read this one value.
+ */
 export const DEFAULT_MAX_RUN_PROBES = 2;
 
 export function targetBytes(target: unknown): number {
@@ -291,14 +294,17 @@ export function validatePlan(
     );
   if (probes.length > ABSOLUTE_MAX_PROBES)
     reject('probe-limit-exceeded', `${probes.length} probes exceeds the absolute ceiling`);
-  // Run probes execute the repository's own scripts, so they have their own, much lower cap.
+  // Run probes execute the repository's own scripts, so they have their own, much lower cap. It
+  // counts every run probe in the plan, baseline included, because the executor caps the same way.
   const maxRunProbes = limits.maxRunProbes ?? DEFAULT_MAX_RUN_PROBES;
-  const addedRuns = added.filter((p) => p.type === 'run').length;
-  if (addedRuns > maxRunProbes)
+  const totalRuns = probes.filter((p) => p.type === 'run').length;
+  if (totalRuns > maxRunProbes) {
+    const baselineRuns = probes.filter((p) => baselineById.has(p.id) && p.type === 'run').length;
     reject(
       'probe-limit-exceeded',
-      `${addedRuns} added run probes exceeds the limit of ${maxRunProbes}`,
+      `${totalRuns} run probes in total (${baselineRuns} baseline) exceeds the limit of ${maxRunProbes}`,
     );
+  }
   const addedBytes = added.reduce((n, p) => n + targetBytes(p.target), 0);
   const totalBytes = addedBytes + baselineBytes;
   if (addedBytes > limits.maxTargetBytes)
