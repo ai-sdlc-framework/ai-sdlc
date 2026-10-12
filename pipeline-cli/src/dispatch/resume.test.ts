@@ -21,6 +21,7 @@ import {
 } from './idle-backoff.js';
 import {
   authoriseResume,
+  evaluatePushOnly,
   formatResumeFeedback,
   readResumeFeedback,
   resumeDone,
@@ -716,5 +717,98 @@ describe('idle back-off', () => {
       {},
     );
     expect(JSON.parse(stdout.trim())).toEqual({ claimed: false });
+  });
+});
+
+describe('push-only resume (AISDLC-821)', () => {
+  it('records resumeMode push-only and prints it; no flag leaves it unset', () => {
+    finish('AISDLC-830');
+    const r = resumeDone(board, 'AISDLC-830', { note: 'n', pushOnly: true }, opts);
+    expect(r.resume.resumeMode).toBe('push-only');
+    const queued = JSON.parse(readFileSync(r.queuePath, 'utf-8')) as DispatchManifest;
+    expect(queued.resume?.resumeMode).toBe('push-only');
+    expect(formatResumeFeedback(r.resume)).toContain('RESUME MODE: push-only');
+  });
+
+  it('leaves resumeMode unset without the flag', () => {
+    finish('AISDLC-831');
+    const plain = resumeDone(board, 'AISDLC-831', { note: 'n' }, opts);
+    expect(plain.resume.resumeMode).toBeUndefined();
+    expect(formatResumeFeedback(plain.resume)).not.toContain('RESUME MODE');
+  });
+
+  it('cli-dispatch resume --push-only sets the mode', async () => {
+    finish('AISDLC-832');
+    vi.spyOn(process.stdout, 'write').mockImplementation(
+      (() => true) as typeof process.stdout.write,
+    );
+    const exit = await runDispatchCli(
+      [
+        'resume',
+        '--board-dir',
+        board,
+        '--task-id',
+        'AISDLC-832',
+        '--note',
+        'n',
+        '--push-only',
+        '--work-dir',
+        root,
+      ],
+      {
+        identity: {
+          readSessions: () => [
+            { name: 'operator-dispatch', role: 'operator-dispatch', pid: 400, status: 'running' },
+          ],
+          parentPid: (pid) => (pid === 500 ? 400 : null),
+          comm: (pid) => (pid === 400 ? 'claude' : 'zsh'),
+          startPid: 500,
+        },
+        operational: new Set(['requeue']),
+      },
+    );
+    vi.restoreAllMocks();
+    expect(exit).toBe(0);
+    const queued = JSON.parse(
+      readFileSync(path.join(board, 'queue', 'AISDLC-832.dispatch.json'), 'utf-8'),
+    ) as DispatchManifest;
+    expect(queued.resume?.resumeMode).toBe('push-only');
+  });
+
+  describe('evaluatePushOnly', () => {
+    const writeVerdict = (wt: string, id: string, body: unknown): void => {
+      mkdirSync(path.join(wt, '.ai-sdlc', 'verdicts'), { recursive: true });
+      writeFileSync(
+        path.join(wt, '.ai-sdlc', 'verdicts', `${id.toLowerCase()}.json`),
+        typeof body === 'string' ? body : JSON.stringify(body),
+      );
+    };
+    const good = { taskId: 'AISDLC-840', approved: true, decision: 'APPROVED' };
+    it('accepts an approval whose content still matches', () => {
+      writeVerdict(root, 'AISDLC-840', good);
+      expect(evaluatePushOnly(root, 'AISDLC-840', { contentMatches: () => true })).toEqual({
+        mode: 'push-only',
+      });
+    });
+    it('falls back when the verdict file is missing', () => {
+      const d = evaluatePushOnly(root, 'AISDLC-841', { contentMatches: () => true });
+      expect(d).toMatchObject({ mode: 'normal' });
+      expect((d as { reason: string }).reason).toContain('no verdict file');
+    });
+    it('falls back when the verdict is unreadable, foreign or not an approval', () => {
+      writeVerdict(root, 'AISDLC-842', '{nope');
+      writeVerdict(root, 'AISDLC-843', { ...good, taskId: 'AISDLC-1' });
+      writeVerdict(root, 'AISDLC-844', { ...good, approved: false, decision: 'CHANGES_REQUESTED' });
+      for (const id of ['AISDLC-842', 'AISDLC-843', 'AISDLC-844']) {
+        expect(evaluatePushOnly(root, id, { contentMatches: () => true }).mode).toBe('normal');
+      }
+    });
+    it('falls back when the content no longer matches or cannot be checked', () => {
+      writeVerdict(root, 'AISDLC-845', { ...good, taskId: 'AISDLC-845' });
+      expect(evaluatePushOnly(root, 'AISDLC-845', { contentMatches: () => false }).mode).toBe(
+        'normal',
+      );
+      expect(evaluatePushOnly(root, 'AISDLC-845').mode).toBe('normal');
+    });
   });
 });

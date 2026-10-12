@@ -46,6 +46,10 @@ node "${CLAUDE_PLUGIN_ROOT:-$(pwd)/ai-sdlc-plugin}/scripts/render-governance-har
 
 Other floors that `next-step` enforces so you do not have to: the CCR remote-sandbox refusal (AISDLC-442, `AI_SDLC_SKIP_CCR_GUARD=1` for tests), a fail-closed hooks-directory check on the new worktree (AISDLC-693, install scripts are never disabled), the per-worktree `.active-task` sentinel (AISDLC-81, written at Step 4 and removed on every exit path), `permittedExternalPaths` sibling PRs, never auto-resolving a rebase conflict, and opening the PR as a DRAFT (AISDLC-218).
 
+## Push-only resume (AISDLC-821)
+
+An executor that claims a task whose manifest carries `resume.resumeMode: push-only` (set by `cli-dispatch resume --push-only`) does not run this pipeline: the worktree already holds an approved verdict, so it rebases, builds, signs from the existing verdict and pushes without a developer or reviewer round (see `executor.md` Step 2). When the mode is refused (no verdict, not an approval, content changed after the rebase) the run falls back to this normal pipeline.
+
 ## Run
 
 Resolve the pipeline CLI once (every later call uses the absolute `reply` command the CLI prints, so you never re-resolve), then make the first call. `--fresh` discards any stale state from an earlier run of the same argument.

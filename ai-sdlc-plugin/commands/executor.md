@@ -99,6 +99,17 @@ refused (no tmux pane), `ScheduleWakeup` for the `sleepSec` printed by `cli-disp
 
 ## Step 2 - Run the pipeline, unmodified
 
+**Push-only resume.** When the `RESUMED TASK` block says `RESUME MODE: push-only` (the
+manifest's `resume.resumeMode`), run no developer and no reviewer subagent. In the existing worktree:
+`git fetch origin && git rebase origin/main` (mechanical only; on a conflict abort the rebase, report
+`failed` naming the conflicting files in the verdict note, and stop), build `reference`, `orchestrator`
+and `pipeline-cli`, run `pnpm lint` and `pnpm format:check` (fix format drift with `pnpm format` and commit
+it as `style:`), then sign from the existing `.ai-sdlc/verdicts/<task-id-lower>.json` and transcript
+leaves, lease-push from your own session (never a subagent), run `gh pr ready`, and report the verdict.
+Refuse the mode, say why in your status line, and run the normal pipeline below when the verdict file is
+missing, is not an approval, or the branch content no longer matches it after the rebase (the check is
+`evaluatePushOnly` in `pipeline-cli/src/dispatch/resume.ts`). Never write a new verdict file and never set an `AI_SDLC_SKIP_*` variable.
+
 Run `/ai-sdlc execute <task-id>` with the task id and **nothing else**: invoke the plugin's `execute`
 command with the `Skill` tool, passing `$TASK_ID` as the only argument. If it reports a worktree with
 no git hooks directory, run `pnpm install --frozen-lockfile && pnpm run prepare` there (scripts stay

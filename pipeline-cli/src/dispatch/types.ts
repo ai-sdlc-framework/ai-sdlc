@@ -111,6 +111,12 @@ export interface ResumeFeedback {
   fromVerdictOutcome?: string;
   /** True when the manifest was rebuilt and its branch name inferred, not recorded. */
   branchGuessed?: boolean;
+  /**
+   * `push-only` (AISDLC-821): the worktree already holds an approved verdict, so the
+   * executor rebases, builds, signs from the existing verdict and pushes, with no
+   * developer or reviewer round. Absent means a normal resume.
+   */
+  resumeMode?: 'push-only';
 }
 
 /**

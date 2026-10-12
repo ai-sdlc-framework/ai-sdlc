@@ -75,6 +75,8 @@ export interface ResumeInput {
   prNumber?: number;
   failingChecks?: readonly string[];
   findings?: readonly string[];
+  /** Resume without a developer or reviewer round (AISDLC-821). */
+  pushOnly?: boolean;
 }
 
 /** Collaborators of {@link resumeDone}. */
@@ -220,6 +222,7 @@ export function resumeDone(
     ...(verdict ? { priorOutcome: verdict.outcome } : {}),
     fromVerdictOutcome: verdict ? verdict.outcome : 'success',
     ...(branchGuessed ? { branchGuessed: true } : {}),
+    ...(input.pushOnly ? { resumeMode: 'push-only' as const } : {}),
   };
   const next: DispatchManifest = { ...base, resume };
   delete next.workerId;
@@ -278,6 +281,11 @@ export function stripControl(text: string): string {
 /** The text the executor prints and the developer prompt carries. */
 export function formatResumeFeedback(resume: ResumeFeedback): string {
   const lines = [
+    ...(resume.resumeMode === 'push-only'
+      ? [
+          'RESUME MODE: push-only. Run no developer and no reviewer subagent: rebase, build, sign from the existing verdict, push. Fall back to a normal resume if the mode is refused.',
+        ]
+      : []),
     `This task was finished earlier and is being resumed for another round (by ${stripControl(resume.resumedBy)}).`,
     resume.prNumber !== undefined
       ? `Update the existing pull request #${resume.prNumber}; do not open a new one.`
@@ -292,6 +300,50 @@ export function formatResumeFeedback(resume: ResumeFeedback): string {
     lines.push('', 'Reviewer findings:', ...resume.findings.map((f) => `- ${stripControl(f)}`));
   }
   return lines.join('\n');
+}
+
+/** The outcome of {@link evaluatePushOnly}. */
+export type PushOnlyDecision = { mode: 'push-only' } | { mode: 'normal'; reason: string };
+
+/** Collaborators of {@link evaluatePushOnly}. */
+export interface PushOnlyDeps {
+  /**
+   * True when the branch content (after the rebase) still matches what the verdict
+   * approved, e.g. an envelope exists for the current patch-id. Treated as a
+   * mismatch when omitted.
+   */
+  contentMatches?: () => boolean;
+}
+
+/**
+ * Decide, after the rebase, whether a push-only resume may run. Fails closed: the
+ * verdict file must exist, be an approval for this task, and the content must still
+ * match; otherwise the run is a normal resume and `reason` says why. Writes nothing.
+ */
+export function evaluatePushOnly(
+  worktree: string,
+  taskId: string,
+  deps: PushOnlyDeps = {},
+): PushOnlyDecision {
+  assertId(taskId);
+  const file = path.join(worktree, '.ai-sdlc', 'verdicts', `${taskId.toLowerCase()}.json`);
+  const fallback = (why: string): PushOnlyDecision => ({
+    mode: 'normal',
+    reason: `push-only refused for ${taskId}: ${why}; running a normal resume`,
+  });
+  if (!existsSync(file)) return fallback('no verdict file in the worktree');
+  const v = readJson<{ taskId?: string; approved?: boolean; decision?: string }>(file);
+  if (!v) return fallback('the verdict file is unreadable');
+  if (v.taskId !== undefined && v.taskId !== taskId) {
+    return fallback('the verdict file belongs to another task');
+  }
+  if (v.approved !== true || (v.decision !== undefined && v.decision !== 'APPROVED')) {
+    return fallback('the verdict is not an approval');
+  }
+  if (!deps.contentMatches || !deps.contentMatches()) {
+    return fallback('the branch content no longer matches the approved verdict after the rebase');
+  }
+  return { mode: 'push-only' };
 }
 
 /** The feedback on the claimed (inflight) or queued manifest of a task, if any. */
