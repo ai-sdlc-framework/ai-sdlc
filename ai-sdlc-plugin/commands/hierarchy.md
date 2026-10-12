@@ -69,3 +69,12 @@ node "$PLUGIN_SCRIPTS_DIR/hierarchy-dispatch.mjs" down --confirmed
 ```
 
 `down --role <role>` needs no confirmation.
+
+## VS Code extension
+
+The `vscode-hierarchy` extension opens one terminal per roster agent automatically. Install with
+`pnpm --filter vscode-hierarchy package` then
+`code --install-extension vscode-hierarchy/dist/ai-sdlc-vscode-hierarchy.vsix`. Settings:
+`aiSdlc.hierarchy.autoOpen`, `aiSdlc.hierarchy.focusNew`, `aiSdlc.hierarchy.pipelineCliBin`. With it
+active, `up` no longer prints the run-task hint. See
+[`docs/operations/cli-hierarchy.md`](../../docs/operations/cli-hierarchy.md).

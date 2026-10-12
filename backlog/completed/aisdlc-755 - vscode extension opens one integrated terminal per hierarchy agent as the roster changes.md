@@ -2,7 +2,7 @@
 id: AISDLC-755
 title: >-
   VS Code extension opens one integrated terminal per hierarchy agent as the roster changes
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-07'
 labels:
@@ -44,10 +44,37 @@ Sequencing: dispatch after AISDLC-754 merges, which defines the generated-file m
 
 ## Acceptance Criteria
 
-- [ ] With the extension installed and VS Code open on the repo (or its parent folder), `cli-hierarchy up --executors 2` results in four integrated terminals (planner, operator-dispatch, executor-alpha, executor-beta), each attached to its tmux session, without any operator action.
-- [ ] `cli-hierarchy up --executors 5` afterwards opens exactly three more terminals (gamma, delta, epsilon); no agent ever gets a second terminal.
-- [ ] `cli-hierarchy down --role executor-epsilon` disposes that one terminal; `cli-hierarchy down --confirmed` disposes them all.
-- [ ] `aiSdlc.hierarchy.autoOpen: false` stops automatic opening while the "Open all hierarchy agents" command still works.
-- [ ] Reconciler unit tests cover: initial open, incremental add, removal, roster deletion, terminal closed by the user then roster unchanged (no reopen until the next roster write), and bin resolution order.
-- [ ] `vscode-hierarchy` is a private workspace package, `pnpm build && pnpm test && pnpm lint && pnpm format:check` and `pnpm dark-code:check` pass, and `pnpm lint:publishable` still passes.
-- [ ] `docs/operations/cli-hierarchy.md` and `ai-sdlc-plugin/commands/hierarchy.md` document installation and settings.
+- [x] With the extension installed and VS Code open on the repo (or its parent folder), `cli-hierarchy up --executors 2` results in four integrated terminals (planner, operator-dispatch, executor-alpha, executor-beta), each attached to its tmux session, without any operator action.
+- [x] `cli-hierarchy up --executors 5` afterwards opens exactly three more terminals (gamma, delta, epsilon); no agent ever gets a second terminal.
+- [x] `cli-hierarchy down --role executor-epsilon` disposes that one terminal; `cli-hierarchy down --confirmed` disposes them all.
+- [x] `aiSdlc.hierarchy.autoOpen: false` stops automatic opening while the "Open all hierarchy agents" command still works.
+- [x] Reconciler unit tests cover: initial open, incremental add, removal, roster deletion, terminal closed by the user then roster unchanged (no reopen until the next roster write), and bin resolution order.
+- [x] `vscode-hierarchy` is a private workspace package, `pnpm build && pnpm test && pnpm lint && pnpm format:check` and `pnpm dark-code:check` pass, and `pnpm lint:publishable` still passes.
+- [x] `docs/operations/cli-hierarchy.md` and `ai-sdlc-plugin/commands/hierarchy.md` document installation and settings.
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+Added the private workspace package `vscode-hierarchy` (VS Code extension that keeps one transient integrated terminal per hierarchy roster agent) and made `cli-hierarchy up` skip the VS Code hint when `AI_SDLC_VSCODE_HIERARCHY=1`.
+
+## Changes
+- `vscode-hierarchy/` (new): reconciler, roster reader, thin extension adapter, tests, packaging (`vsce package`).
+- `pipeline-cli/src/hierarchy/up.ts` (modified): hint suppressed when the extension is active.
+- `docs/operations/cli-hierarchy.md`, `ai-sdlc-plugin/commands/hierarchy.md`, `.vscode/extensions.json`, `.gitignore`, `pnpm-workspace.yaml`: install/settings docs, extension recommendation.
+
+## Design decisions
+- **npm name `vscode-hierarchy`**: vsce rejects scoped names; package stays private. Extension id `ai-sdlc.vscode-hierarchy`.
+- **Env via `environmentVariableCollection`**: the extension API for terminal env, rather than editing the user setting.
+- **Close-all records names as closed** until the next roster write so close events do not reopen them.
+- **`pipelineCliBin` is machine-scoped; untrusted workspaces unsupported**.
+
+## Verification
+- `pnpm build` — clean
+- `pnpm test` — vscode-hierarchy 24 pass, pipeline-cli hierarchy 535 pass; four pre-existing environment failures in bin-invocation (pnpm exec resolves own-bins locally)
+- `pnpm lint` — clean
+- `pnpm format:check` — clean
+
+## Follow-up
+(none)
+<!-- SECTION:FINAL_SUMMARY:END -->

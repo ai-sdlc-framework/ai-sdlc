@@ -183,6 +183,10 @@ const NON_INSTRUMENTED_PATTERNS = [
   // scripts/vitest-parent-death.test.mjs under node --test. Exactly these two
   // root-level filenames, anchored; any other vitest.*.mjs is not excluded.
   /^vitest\.(?:shared|parent-watch\.setup)\.mjs$/,
+  // vscode-hierarchy/src/extension.ts: thin adapter over the `vscode` runtime API,
+  // which cannot be loaded under Vitest; the logic lives in reconciler.ts and
+  // roster.ts (covered). Mirrors that package's vitest `coverage.exclude`.
+  /^vscode-hierarchy\/src\/extension\.ts$/,
   // ucvg-demo/ — zero-dependency `node --test` fixture repo used for RFC-0043
   // UCVG live-demo differential testing. Runs under `node --test`, not Vitest,
   // so no istanbul/v8 coverage data is produced for it by Vitest instrumentation.

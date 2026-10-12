@@ -1,0 +1,75 @@
+{
+  "name": "vscode-hierarchy",
+  "displayName": "AI-SDLC Hierarchy Terminals",
+  "publisher": "ai-sdlc",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Opens one VS Code integrated terminal per AI-SDLC hierarchy agent as the roster changes",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ai-sdlc-framework/ai-sdlc.git",
+    "directory": "vscode-hierarchy"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "workspaceContains:.ai-sdlc/dispatch/hierarchy.json",
+    "workspaceContains:*/.ai-sdlc/dispatch/hierarchy.json"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "aiSdlc.hierarchy.openAll",
+        "title": "AI-SDLC: Open all hierarchy agents"
+      },
+      {
+        "command": "aiSdlc.hierarchy.closeAll",
+        "title": "AI-SDLC: Close all hierarchy agents"
+      }
+    ],
+    "configuration": {
+      "title": "AI-SDLC Hierarchy",
+      "properties": {
+        "aiSdlc.hierarchy.autoOpen": {
+          "type": "boolean",
+          "default": true,
+          "description": "Open one terminal per hierarchy agent automatically as the roster changes."
+        },
+        "aiSdlc.hierarchy.focusNew": {
+          "type": "boolean",
+          "default": false,
+          "description": "Focus a terminal when it is opened. Off by default so new agents do not steal focus."
+        },
+        "aiSdlc.hierarchy.pipelineCliBin": {
+          "type": "string",
+          "scope": "machine",
+          "default": "",
+          "description": "Absolute path of cli-hierarchy.mjs, used only when it is not found under the repository or in the Claude plugin cache."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "package": "pnpm build && npx --yes @vscode/vsce@3 package --no-dependencies --out dist/ai-sdlc-vscode-hierarchy.vsix",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "@types/vscode": "^1.85.0",
+    "@vitest/coverage-v8": "^4.1.11",
+    "typescript": "^6.0.3",
+    "vite": "^6.0.0",
+    "vitest": "^4.1.11"
+  }
+}
