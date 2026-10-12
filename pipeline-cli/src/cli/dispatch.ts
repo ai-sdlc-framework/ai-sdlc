@@ -324,6 +324,24 @@ export interface DispatchCliDeps {
   cwd?: string;
   /** Role the calling process holds in the roster; null when it holds none. */
   callerRole?: () => HierarchyRole | null;
+  /** Head branch of a pull request (`resume --pr`); undefined when it cannot be read. */
+  prHeadRef?: (pr: number, workDir: string) => string | undefined;
+}
+
+/** Head branch of a pull request, from the GitHub REST API; undefined on any failure. */
+function lookupPrHeadRef(pr: number, workDir: string): string | undefined {
+  try {
+    const out = execFileSync(
+      'gh',
+      ['api', `repos/{owner}/{repo}/pulls/${pr}`, '--jq', '.head.ref'],
+      { cwd: workDir, encoding: 'utf-8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] },
+    ).trim();
+    return /^[A-Za-z0-9._/-]+$/.test(out) && !out.startsWith('-') && !out.includes('..')
+      ? out
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** File paths touched by open pull requests, from the `gh` CLI. */
@@ -1115,6 +1133,8 @@ export async function runDispatchCli(
         return 1;
       }
       const workDir = path.resolve(flags['work-dir'] ?? '.');
+      const prHeadRef =
+        prNumber !== undefined ? (deps.prHeadRef ?? lookupPrHeadRef)(prNumber, workDir) : undefined;
       try {
         out({
           ok: true,
@@ -1124,6 +1144,7 @@ export async function runDispatchCli(
             {
               note,
               ...(prNumber !== undefined ? { prNumber } : {}),
+              ...(prHeadRef ? { prHeadRef } : {}),
               failingChecks: splitIdList(flags['failing-checks']),
               findings: flags['finding'] ? [flags['finding']] : [],
               pushOnly: flags['push-only'] === 'true',

@@ -5,7 +5,7 @@
  */
 
 import { execFile, execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -20,10 +20,14 @@ const execFileP = promisify(execFile);
 const calls: string[] = [];
 let depsExit = 0;
 let stateScriptExit = 0;
+let ghApiOut: string | undefined;
 
 /** Real git, hermetic env; `gh` and the cli-deps / state-script calls are stubbed. */
 const runner: Runner = async (command, args, opts: ExecOptions = {}) => {
   calls.push(`${command} ${args.join(' ')}`);
+  if (command === 'gh' && args[0] === 'api') {
+    return { stdout: ghApiOut ?? '', stderr: '', code: ghApiOut === undefined ? 1 : 0 };
+  }
   if (command === 'gh') return { stdout: '[]', stderr: '', code: 0 };
   if (command === 'node' && args[0]?.endsWith('cli-deps.mjs')) {
     return { stdout: '', stderr: depsExit ? 'blocked by AISDLC-1' : '', code: depsExit };
@@ -58,11 +62,15 @@ beforeEach(() => {
   calls.length = 0;
   depsExit = 0;
   stateScriptExit = 0;
+  ghApiOut = undefined;
   h = makeHarness({ runner });
   origin = makeTmpProject();
   git(origin, 'init', '--bare', '-b', 'main', '-q');
   writeTaskFile(h.root, { id: 'AISDLC-900', title: 'Demo task' });
-  writeFileSync(join(h.root, '.gitignore'), '.worktrees/\n.ai-sdlc/artifacts/\n');
+  writeFileSync(
+    join(h.root, '.gitignore'),
+    '.worktrees/\n.ai-sdlc/artifacts/\n.ai-sdlc/dispatch/\n',
+  );
   git(h.root, 'init', '-b', 'main', '-q');
   git(h.root, 'add', '-A');
   git(h.root, 'commit', '-q', '-m', 'init');
@@ -176,6 +184,92 @@ describe('initTask', () => {
   it('leaves resume unset for a fresh task', async () => {
     await initTask(h.ctx, 'AISDLC-900');
     expect(calls.some((c) => c.includes('worktree add') && c.includes('-b'))).toBe(true);
+  });
+});
+
+describe('resume branch sources (AISDLC-762.2)', () => {
+  const writeInflight = (resume: Record<string, unknown>, branch = 'ai-sdlc/aisdlc-900'): void => {
+    const dir = join(h.root, '.ai-sdlc', 'dispatch', 'inflight');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'AISDLC-900.dispatch.json'),
+      JSON.stringify({
+        schemaVersion: 'v1',
+        taskId: 'AISDLC-900',
+        branch,
+        worktree: '.worktrees/aisdlc-900',
+        baseSha: 'a'.repeat(40),
+        workerKind: 'any',
+        dispatchedAt: '2026-10-11T00:00:00.000Z',
+        dispatchedBy: 'dispatch',
+        spec: { taskFile: 'backlog/tasks/x.md', verifyCommands: [] },
+        resume: {
+          note: 'n',
+          resumedAt: '2026-10-11T00:00:00.000Z',
+          resumedBy: 'dispatch',
+          ...resume,
+        },
+      }),
+    );
+  };
+  const pushShortBranch = (branch: string): void => {
+    git(h.root, 'branch', branch);
+    git(h.root, 'push', '-q', 'origin', branch);
+    git(h.root, 'branch', '-q', '-D', branch);
+  };
+
+  it('reproduces DEC-0128: a short-form branch is resumed, not the recomputed slug', async () => {
+    pushShortBranch('ai-sdlc/aisdlc-900');
+    writeInflight({});
+    const res = await initTask(h.ctx, 'AISDLC-900');
+    expect(res).toMatchObject({ ok: true });
+    if (!res.ok) return;
+    expect(res.branch).toBe('ai-sdlc/aisdlc-900');
+    expect(git(res.worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe(
+      'ai-sdlc/aisdlc-900',
+    );
+    expect(h.logs.join('\n')).toContain('source: manifest');
+  });
+
+  it('prefers the PR head ref recorded in the manifest over manifest.branch', async () => {
+    pushShortBranch('feat/recorded');
+    writeInflight({ prNumber: 5, prHeadRef: 'feat/recorded' }, 'ai-sdlc/other');
+    const res = await initTask(h.ctx, 'AISDLC-900');
+    expect(res.ok && res.branch).toBe('feat/recorded');
+    expect(calls.some((c) => c.startsWith('gh api'))).toBe(false);
+  });
+
+  it('falls back to the PR head ref over REST when the manifest branch was guessed', async () => {
+    pushShortBranch('ai-sdlc/aisdlc-900-from-pr');
+    writeInflight({ prNumber: 7, branchGuessed: true });
+    ghApiOut = 'ai-sdlc/aisdlc-900-from-pr\n';
+    const res = await initTask(h.ctx, 'AISDLC-900');
+    expect(res.ok && res.branch).toBe('ai-sdlc/aisdlc-900-from-pr');
+    expect(calls.some((c) => c.includes('pulls/7'))).toBe(true);
+    expect(h.logs.join('\n')).toContain('source: pr');
+  });
+
+  it('adopts an existing worktree whose branch differs from the slug, without renaming', async () => {
+    const first = await initTask(h.ctx, 'AISDLC-900');
+    if (!first.ok) throw new Error('init failed');
+    git(first.worktreePath, 'branch', '-m', 'ai-sdlc/aisdlc-900');
+    const res = await initTask(h.ctx, 'AISDLC-900');
+    expect(res.ok && res.branch).toBe('ai-sdlc/aisdlc-900');
+    expect(
+      git(h.root, 'worktree', 'list')
+        .split('\n')
+        .filter((l) => l.includes('.worktrees/aisdlc-900')),
+    ).toHaveLength(1);
+    expect(git(first.worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe(
+      'ai-sdlc/aisdlc-900',
+    );
+    expect(h.logs.join('\n')).toContain('source: worktree');
+  });
+
+  it('ignores an unreadable PR head and computes the branch for a fresh task', async () => {
+    writeInflight({ prNumber: 7, branchGuessed: true });
+    const res = await initTask(h.ctx, 'AISDLC-900');
+    expect(res.ok && res.branch).toBe('ai-sdlc/aisdlc-900-demo-task');
   });
 });
 

@@ -67,6 +67,27 @@ function finish(taskId: string, prNumber = 7): void {
 const opts = { resumedBy: 'dispatch', now: () => new Date('2026-10-09T10:00:00.000Z') };
 
 describe('resumeDone', () => {
+  it('records the PR head ref as the branch when a --pr head is supplied (AISDLC-762.2)', () => {
+    finish('AISDLC-803', 9);
+    const r = resumeDone(
+      board,
+      'AISDLC-803',
+      { note: 'again', prNumber: 9, prHeadRef: 'ai-sdlc/aisdlc-803' },
+      opts,
+    );
+    const queued = JSON.parse(readFileSync(r.queuePath, 'utf-8')) as DispatchManifest;
+    expect(queued.branch).toBe('ai-sdlc/aisdlc-803');
+    expect(queued.resume?.prHeadRef).toBe('ai-sdlc/aisdlc-803');
+  });
+
+  it('ignores a PR head ref when no PR number is given (AISDLC-762.2)', () => {
+    finish('AISDLC-804');
+    const r = resumeDone(board, 'AISDLC-804', { note: 'x', prHeadRef: 'other' }, opts);
+    const queued = JSON.parse(readFileSync(r.queuePath, 'utf-8')) as DispatchManifest;
+    expect(queued.branch).toBe('ai-sdlc/aisdlc-804-slug');
+    expect(queued.resume?.prHeadRef).toBeUndefined();
+  });
+
   it('moves a done task back to queue/ with the feedback note and its original branch', () => {
     finish('AISDLC-801');
     const r = resumeDone(

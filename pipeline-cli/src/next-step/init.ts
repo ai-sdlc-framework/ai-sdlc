@@ -13,6 +13,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { computeBranchName } from '../steps/02-compute-branch.js';
+import { resolveResumeBranch } from './resume-branch.js';
 import { setupWorktree } from '../steps/03-setup-worktree.js';
 import { beginTask, patchFrontmatterStatus } from '../steps/04-flip-status.js';
 import { cleanupTask } from '../steps/13-cleanup.js';
@@ -111,9 +112,18 @@ export async function initTask(
   }
 
   // Steps 2-4.
-  const branch = await computeBranchName({ taskId, task, workDir });
-  const resume = await hasExistingWork(ctx, branch.branch, branch.worktreePath);
-  if (resume) ctx.logger.info(`[Step 3] ${branch.branch} already exists: resuming it`);
+  // AISDLC-762.2: on a resume the branch is read from the manifest, the PR or the
+  // worktree; the title-derived name is computed only for a fresh task.
+  const known = await resolveResumeBranch(ctx, taskId);
+  const branch = known
+    ? { branch: known.branch, worktreePath: join(workDir, '.worktrees', taskId.toLowerCase()) }
+    : await computeBranchName({ taskId, task, workDir });
+  const resume = known ? true : await hasExistingWork(ctx, branch.branch, branch.worktreePath);
+  if (known) {
+    ctx.logger.info(`[Step 3] resuming ${branch.branch} (source: ${known.source})`);
+  } else if (resume) {
+    ctx.logger.info(`[Step 3] ${branch.branch} already exists: resuming it (source: recomputed)`);
+  }
   await setupWorktree({
     taskId,
     branch: branch.branch,
