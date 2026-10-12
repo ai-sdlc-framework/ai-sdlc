@@ -7,7 +7,13 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { discoverGateTests, runGateTests, GATE_TEST_DIRS, KNOWN_RED } from './run-gate-tests.mjs';
+import {
+  discoverGateTests,
+  findUnscannedTests,
+  runGateTests,
+  GATE_TEST_DIRS,
+  KNOWN_RED,
+} from './run-gate-tests.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -96,8 +102,20 @@ describe('KNOWN_RED ratchet (AISDLC-805)', () => {
     'scripts/check-rm-guard.test.mjs',
   ];
 
-  test('KNOWN_RED is pinned to the current entries', () => {
-    assert.deepEqual(Object.keys(KNOWN_RED).sort(), PINNED);
+  test('KNOWN_RED is shrink-only: no id outside the frozen list', () => {
+    const extra = Object.keys(KNOWN_RED).filter((k) => !PINNED.includes(k));
+    assert.deepEqual(extra, [], `KNOWN_RED grew; fix the test instead: ${extra.join(', ')}`);
+  });
+
+  test('discovery fails on a test file under a subdirectory that is not scanned', () => {
+    const root = fixture({ 'g/a.test.mjs': '', 'g/sub/b.test.mjs': '' });
+    try {
+      assert.deepEqual(findUnscannedTests(root, ['g']), ['g/sub/b.test.mjs']);
+      assert.throws(() => discoverGateTests(root, ['g'], {}), /g\/sub\/b\.test\.mjs/);
+      assert.deepEqual(findUnscannedTests(root, ['g', 'g/sub']), []);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('every KNOWN_RED key exists on disk and carries a reason', () => {

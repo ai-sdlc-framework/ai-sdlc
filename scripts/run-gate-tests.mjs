@@ -13,7 +13,7 @@
  *
  * Usage: node scripts/run-gate-tests.mjs [--list]
  */
-import { readdirSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -40,6 +40,28 @@ const KNOWN_RED = {
  * exist throws: a renamed or deleted dir must not silently drop its tests.
  * `dirs` and `knownRed` are parameters so the runner can be tested hermetically.
  */
+/**
+ * Test files under a scanned dir's subdirectories whose own directory is not in `dirs`.
+ * Such a file would never run, so discovery fails on it instead of dropping it silently.
+ */
+export function findUnscannedTests(root, dirs = GATE_TEST_DIRS) {
+  const scanned = new Set(dirs);
+  const missed = [];
+  const walk = (rel) => {
+    for (const n of readdirSync(join(root, rel)).sort()) {
+      if (n === 'node_modules' || n.startsWith('.')) continue;
+      const child = `${rel}/${n}`;
+      if (statSync(join(root, child)).isDirectory()) {
+        walk(child);
+      } else if (n.endsWith('.test.mjs') && !scanned.has(rel)) {
+        missed.push(child);
+      }
+    }
+  };
+  for (const dir of dirs) walk(dir);
+  return missed;
+}
+
 export function discoverGateTests(root, dirs = GATE_TEST_DIRS, knownRed = KNOWN_RED) {
   const files = [];
   const skipped = [];
@@ -56,6 +78,12 @@ export function discoverGateTests(root, dirs = GATE_TEST_DIRS, knownRed = KNOWN_
       if (rel in knownRed) skipped.push(rel);
       else files.push(rel);
     }
+  }
+  const missed = findUnscannedTests(root, dirs);
+  if (missed.length) {
+    throw new Error(
+      `gate tests exist in directories not listed in GATE_TEST_DIRS (add the dir): ${missed.join(', ')}`,
+    );
   }
   return { files, skipped };
 }

@@ -94,6 +94,70 @@ export function checkRegistry(registry, live) {
   return { problems, stale };
 }
 
+/** The ids registered when this PR landed. Only `baseline: true` may apply to these. */
+const BASELINE_IDS = [
+  'workflow:ai-sdlc-gate.yml',
+  'gate-job:detect',
+  'gate-job:lint',
+  'gate-job:build-test',
+  'gate-job:coverage',
+  'gate-job:integration',
+  'gate-job:backlog-drift',
+  'gate-job:first-run-smoke',
+  'gate-job:test-python',
+  'gate-job:test-go',
+  'gate-job:attestation-gate',
+  'gate-job:dependency-review-gate',
+  'gate-job:dor-readiness-gate',
+  'gate-job:independence-policy-gate',
+  'gate-job:pr-ready',
+  'workflow:ai-sdlc-review.yml',
+  'workflow:auto-enable-auto-merge.yml',
+  'workflow:auto-rearm-on-dequeue.yml',
+  'workflow:dor-ingress.yml',
+  'workflow:isolated-review.yml',
+  'workflow:require-issue-link.yml',
+  'workflow:rfc-lifecycle-check.yml',
+  'workflow:untrusted-pr-gate.yml',
+  'workflow:verify-attestation.yml',
+  'pre-push:scripts/check-substrate-contract.mjs',
+  'pre-push:scripts/check-skip-ci-marker.sh',
+  'pre-push:scripts/check-dark-code-on-push.sh',
+  'pre-push:scripts/squash-attestation-chores.sh',
+  'pre-push:scripts/check-changelog-edit.sh',
+  'pre-push:scripts/check-followups-on-push.sh',
+  'pre-push:scripts/pre-push-fixups.sh',
+  'pre-push:scripts/check-task-moved.sh',
+  'pre-push:scripts/check-attestation-sign.sh',
+  'pre-commit:scripts/check-backlog-ascii.sh',
+  'pre-commit:lint-staged',
+  'pre-commit:scripts/typecheck-workspace.mjs',
+  'test-chain:pnpm -r test',
+  'test-chain:pnpm test:gates',
+  'test-chain:pnpm docs:check',
+  'test-chain:pnpm rfc:check',
+  'test-chain:pnpm dark-code:check',
+  'test-chain:pnpm sync:plugin-runtime-deps:check',
+  'role-action:gh pr merge*',
+  'role-action:git merge*',
+  'role-action:git push --force*',
+  'role-action:git push -f*',
+  'role-action:gh pr close*',
+  'role-action:gh issue close*',
+  'role-action:git branch -D*',
+  'role-action:git branch -d*',
+  'role-action:git reset --hard*',
+  'role-action:git checkout -- .',
+  'role-action:git restore .',
+  'role-path:opencode.json',
+  'role-path:opencode.jsonc',
+  'role-path:.opencode/**',
+  'role-path:**/opencode.json',
+  'role-path:**/opencode.jsonc',
+  'role-path:**/.opencode/**',
+  'role-path:scripts/verify-attestation.mjs',
+];
+
 describe('gate registry (AISDLC-805)', () => {
   const registry = yaml.load(read('.ai-sdlc/gates.yaml'));
 
@@ -101,6 +165,28 @@ describe('gate registry (AISDLC-805)', () => {
     const { problems, stale } = checkRegistry(registry, deriveLiveGates());
     if (stale.length) console.log(`stale registry entries (delete them): ${stale.join(', ')}`);
     assert.deepEqual(problems, [], `gate registry violations:\n  ${problems.join('\n  ')}`);
+  });
+
+  test('every frozen baseline id is still live (a removed gate must leave this list)', () => {
+    const live = deriveLiveGates();
+    const gone = BASELINE_IDS.filter((id) => !live.has(id));
+    assert.deepEqual(
+      gone,
+      [],
+      `registered gates no longer live; delete them from BASELINE_IDS and gates.yaml: ${gone.join(', ')}`,
+    );
+  });
+
+  test('only frozen ids may carry baseline: true; new entries need a decision id', () => {
+    const frozen = new Set(BASELINE_IDS);
+    const bad = (registry.gates ?? [])
+      .filter((e) => e.baseline && !frozen.has(e.id))
+      .map((e) => e.id);
+    assert.deepEqual(
+      bad,
+      [],
+      `new entries must use decision: DEC-NNNN, not baseline: ${bad.join(', ')}`,
+    );
   });
 
   test('derivation finds a plausible live gate set (regression guard)', () => {
