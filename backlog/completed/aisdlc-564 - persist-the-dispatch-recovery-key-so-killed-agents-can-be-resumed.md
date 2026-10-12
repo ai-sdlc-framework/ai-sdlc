@@ -3,7 +3,7 @@ id: AISDLC-564
 title: >-
   feat(dispatch): persist the agent recovery key so a killed subagent can be
   resumed after the dispatching session loses context
-status: To Do
+status: Done
 assignee: []
 labels:
   - dispatch
@@ -85,15 +85,16 @@ what to resume and where its work is.
 - [ ] #1 Dispatching a developer subagent writes a session record containing
       `agentId`, `transcriptPath` and `worktreePath` alongside the existing
       fields
-- [ ] #2 The record's `status` reflects completion or failure, so a stale
+      (library + `cli-dispatch record-agent` shipped here; the call at dispatch time is wired by AISDLC-564.1, so this AC is not yet met end to end)
+- [x] #2 The record's `status` reflects completion or failure, so a stale
       in-progress entry is distinguishable from a finished one
-- [ ] #3 Given only the repo (no conversation context), an operator can
+- [x] #3 Given only the repo (no conversation context), an operator can
       identify which agent owned a task and which worktree holds its work
-- [ ] #4 The addition is backward-compatible with existing tmux-path records —
+- [x] #4 The addition is backward-compatible with existing tmux-path records —
       `schemaVersion` handling covers records lacking the new fields
-- [ ] #5 Hermetic tests cover write-on-dispatch, status update, and reading a
+- [x] #5 Hermetic tests cover write-on-dispatch, status update, and reading a
       legacy record without the new fields
-- [ ] #6 No transcript content is copied into the repo — only the path
+- [x] #6 No transcript content is copied into the repo — only the path
 <!-- SECTION:ACCEPTANCE:END -->
 
 ## Implementation Notes
@@ -110,3 +111,27 @@ whether these records are committed or local-only — the answer changes whether
 recovery survives a fresh clone, and is worth stating explicitly in the PR body
 either way.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+The dispatch session record (`.ai-sdlc/dispatch/sessions/<task-id>.session.json`) now carries `agentId`, `worktreePath` and an optional `transcriptPath` for in-session-agent dispatch. `cli-dispatch record-agent` writes it, `complete` flips status to done/failed, and `cli-dispatch sessions` reads it back with a `SendMessage <agentId>` resume hint.
+
+## Changes
+- `pipeline-cli/src/dispatch/sessions.ts` (modified): optional agent fields, tmux fields optional, `recordAgentSession`, `markSessionOutcome`
+- `pipeline-cli/src/cli/dispatch.ts` (modified): `record-agent` and `sessions` subcommands
+- `pipeline-cli/src/dispatch/complete.ts`, `session-reaper.ts` (modified): status update on completion; reaper skips tmux-less records
+- `spec/schemas/dispatch-session.v1.schema.json` (modified): relaxed required set, new optional fields
+- `docs/operations/dispatched-session-decisions.md` (modified): recovery runbook (dispatch-time call site is AISDLC-564.1)
+
+## Design decisions
+- **Local-only records**: `sessions/*.session.json` is gitignored, so recovery does not survive a fresh clone; it survives session loss on the same machine.
+- **Path only**: no transcript content is copied.
+
+## Verification
+- `pnpm build`, lint, format:check, dark-code:check clean; targeted vitest (dispatch + cli/dispatch) 499/499
+
+## Follow-up
+AISDLC-564.1: wire `cli-dispatch record-agent` into the current executor dispatch path (the orchestrator-tick and dispatch-worker call sites were retired); AC #1 stays unchecked until it lands.
+<!-- SECTION:FINAL_SUMMARY:END -->

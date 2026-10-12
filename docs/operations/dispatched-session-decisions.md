@@ -156,6 +156,23 @@ node pipeline-cli/bin/cli-decisions.mjs escalate --route operational --park \
 - **Events.** `DecisionRouted` (when raised) and `DecisionEscalated` (on each promotion) go to the
   orchestrator events stream with the decision id, `fromTier`, `toTier` and the task id.
 
+## Recovering a killed subagent (AISDLC-564)
+
+A developer subagent killed by a usage limit can be resumed from its transcript with
+`SendMessage <agentId>`. The recovery key is recorded in the per-task session record
+`.ai-sdlc/dispatch/sessions/<task-id-lower>.session.json` (local only, gitignored) by
+`cli-dispatch record-agent`, which stores `agentId`, `worktreePath` and optionally
+`transcriptPath` (a path; transcript content is never copied). `cli-dispatch complete` sets the
+record's `status` to `done` or `failed`, so an `in-progress` record is a stale or running agent.
+
+```bash
+node pipeline-cli/bin/cli-dispatch.mjs sessions          # task, status, agent, worktree, resume hint
+node pipeline-cli/bin/cli-dispatch.mjs sessions --json
+```
+
+Check the worktree for uncommitted work (`git -C <worktreePath> status`), then resume with
+`SendMessage <agentId>`. Resuming is a judgement call and is never automatic.
+
 ## Durable persistence (AISDLC-546)
 
 `cli-decisions add`, `escalate` and `answer` no longer rely on the fragile local append alone. After

@@ -283,6 +283,107 @@ describe('runDispatchCli', () => {
     expect(state.pid).toBe(99999);
   });
 
+  it('record-agent persists the recovery key; sessions reads it; complete marks it done (AISDLC-564)', async () => {
+    dispatchWriteManifest(boardDir, mkManifest('AISDLC-2040'));
+    await runDispatchCli([
+      'claim',
+      '--board-dir',
+      boardDir,
+      '--worker-kind',
+      'in-session-agent',
+      '--worker',
+      'w1',
+    ]);
+    const rec = await captureStdout(() =>
+      runDispatchCli([
+        'record-agent',
+        '--board-dir',
+        boardDir,
+        '--task-id',
+        'AISDLC-2040',
+        '--agent-id',
+        'abc123',
+        '--worktree',
+        '/wt/aisdlc-2040',
+        '--transcript',
+        '/t/agent-abc123.jsonl',
+      ]),
+    );
+    expect(rec.exit).toBe(0);
+    const listed = await captureStdout(() =>
+      runDispatchCli(['sessions', '--board-dir', boardDir, '--json']),
+    );
+    expect(JSON.parse(listed.captured.raw)[0]).toMatchObject({
+      taskId: 'AISDLC-2040',
+      agentId: 'abc123',
+      worktreePath: '/wt/aisdlc-2040',
+      status: 'in-progress',
+    });
+    const text = await captureStdout(() => runDispatchCli(['sessions', '--board-dir', boardDir]));
+    expect(text.captured.raw).toContain('SendMessage abc123');
+    const done = await captureStdout(() =>
+      runDispatchCli([
+        'complete',
+        '--board-dir',
+        boardDir,
+        '--task-id',
+        'AISDLC-2040',
+        '--outcome',
+        'success',
+        '--worker',
+        'w1',
+      ]),
+    );
+    expect(done.exit).toBe(0);
+    const after = await captureStdout(() =>
+      runDispatchCli(['sessions', '--board-dir', boardDir, '--json']),
+    );
+    expect(JSON.parse(after.captured.raw)[0].status).toBe('done');
+  });
+
+  it('record-agent rejects a bad task id; sessions reports empty', async () => {
+    const bad = await captureStdout(() =>
+      runDispatchCli([
+        'record-agent',
+        '--board-dir',
+        boardDir,
+        '--task-id',
+        'nope',
+        '--agent-id',
+        'a',
+        '--worktree',
+        '/w',
+      ]),
+    );
+    expect(bad.exit).toBe(2);
+    const none = await captureStdout(() => runDispatchCli(['sessions', '--board-dir', boardDir]));
+    expect(none.captured.raw).toContain('no session records');
+  });
+
+  it('record-agent ignores a bare --transcript flag instead of storing "true" (AISDLC-564)', async () => {
+    const rec = await captureStdout(() =>
+      runDispatchCli([
+        'record-agent',
+        '--board-dir',
+        boardDir,
+        '--task-id',
+        'AISDLC-2090',
+        '--agent-id',
+        'a1',
+        '--worktree',
+        '/w',
+        '--transcript',
+      ]),
+    );
+    expect(rec.exit).toBe(0);
+    const listed = await captureStdout(() =>
+      runDispatchCli(['sessions', '--board-dir', boardDir, '--json']),
+    );
+    const [session] = JSON.parse(listed.captured.raw) as Array<Record<string, unknown>>;
+    expect(session.agentId).toBe('a1');
+    expect(session.transcriptPath).toBeUndefined();
+  });
+
   it('sweep returns no reaped IDs when nothing is stale', async () => {
     dispatchWriteManifest(boardDir, mkManifest('AISDLC-2030'));
     await runDispatchCli(['claim', '--board-dir', boardDir, '--worker-kind', 'in-session-agent']);

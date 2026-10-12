@@ -4094,15 +4094,7 @@ export const dispatchSessionV1Schema = {
   description:
     'Per-task session file written by /ai-sdlc execute-parallel to .ai-sdlc/dispatch/sessions/<task-id-lower>.session.json. Tracks the tmux pane lifecycle and heartbeat state for a single concurrently-running /ai-sdlc execute invocation. Updated by the spawned session after each Step 0-13 transition. AISDLC-462.',
   type: 'object',
-  required: [
-    'schemaVersion',
-    'taskId',
-    'tmuxSession',
-    'tmuxWindow',
-    'paneId',
-    'spawnedAt',
-    'status',
-  ],
+  required: ['schemaVersion', 'taskId', 'spawnedAt', 'status'],
   properties: {
     schemaVersion: {
       type: 'string',
@@ -4158,6 +4150,23 @@ export const dispatchSessionV1Schema = {
       type: ['string', 'null'],
       description:
         "GitHub PR URL set when status reaches 'done'. Null or absent while the session is still running.",
+    },
+    agentId: {
+      type: 'string',
+      minLength: 1,
+      description:
+        'AISDLC-564: recovery key of the dispatched in-session subagent. `SendMessage <agentId>` resumes the agent from its transcript. Absent on tmux-path records.',
+    },
+    transcriptPath: {
+      type: 'string',
+      minLength: 1,
+      description:
+        'AISDLC-564: path to the transcript the harness wrote for the agent. Path only; transcript content is never copied into the repo.',
+    },
+    worktreePath: {
+      type: 'string',
+      minLength: 1,
+      description: 'AISDLC-564: worktree the agent owns, so its uncommitted work is findable.',
     },
     prNumber: {
       type: ['integer', 'null'],

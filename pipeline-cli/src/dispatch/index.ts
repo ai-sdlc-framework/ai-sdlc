@@ -172,6 +172,9 @@ export {
   SESSIONS_SUBDIR,
   sessionsArchiveDir,
   sessionsDir,
+  recordAgentSession,
+  markSessionOutcome,
+  formatSessionLine,
   sessionFilename,
   sessionFilePath,
   updateSession,
@@ -179,7 +182,12 @@ export {
   writeSession,
 } from './sessions.js';
 
-export type { CancelSignal, DispatchSession, SessionStatus } from './sessions.js';
+export type {
+  CancelSignal,
+  DispatchSession,
+  RecordAgentSessionInput,
+  SessionStatus,
+} from './sessions.js';
 
 // AISDLC-481: Session heartbeat reaper + cancel back-channel.
 export {

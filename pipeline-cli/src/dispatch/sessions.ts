@@ -23,6 +23,8 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 
+import { now as clockNow } from '../clock.js';
+
 /** Subdirectory under .ai-sdlc/dispatch/ for session files. */
 export const SESSIONS_SUBDIR = 'sessions';
 
@@ -133,15 +135,91 @@ export function removeCancelSignal(boardDir: string, taskId: string): void {
 export interface DispatchSession {
   schemaVersion: 'v1';
   taskId: string;
-  tmuxSession: string;
-  tmuxWindow: string;
-  paneId: string;
+  /** tmux path only (absent on in-session-agent records, AISDLC-564). */
+  tmuxSession?: string;
+  tmuxWindow?: string;
+  paneId?: string;
   spawnedAt: string;
   status: SessionStatus;
   currentStep?: string;
   lastHeartbeat?: string;
   prUrl?: string | null;
   prNumber?: number | null;
+  /** AISDLC-564: recovery key of the dispatched subagent (`SendMessage <agentId>` resumes it). */
+  agentId?: string;
+  /** AISDLC-564: path to the harness-written transcript. Path only; content is never copied. */
+  transcriptPath?: string;
+  /** AISDLC-564: worktree the agent owns, where its uncommitted work lives. */
+  worktreePath?: string;
+}
+
+/** Input for {@link recordAgentSession}. */
+export interface RecordAgentSessionInput {
+  taskId: string;
+  agentId: string;
+  worktreePath: string;
+  transcriptPath?: string;
+  now?: () => Date;
+}
+
+/**
+ * AISDLC-564: persist the recovery key of an in-session-agent dispatch.
+ * Creates the session record (no tmux fields) or, when a record already
+ * exists, merges the agent fields into it. Status becomes `in-progress`.
+ * Legacy tmux records without these fields stay valid.
+ */
+export function recordAgentSession(
+  boardDir: string,
+  input: RecordAgentSessionInput,
+): DispatchSession {
+  const nowIso = (input.now ?? clockNow)().toISOString();
+  const existing = readSession(boardDir, input.taskId);
+  const session: DispatchSession = {
+    ...(existing ?? {
+      schemaVersion: 'v1' as const,
+      taskId: input.taskId,
+      spawnedAt: nowIso,
+    }),
+    status: 'in-progress',
+    lastHeartbeat: nowIso,
+    agentId: input.agentId,
+    worktreePath: input.worktreePath,
+  };
+  if (input.transcriptPath) session.transcriptPath = input.transcriptPath;
+  writeSession(boardDir, session);
+  return session;
+}
+
+/**
+ * AISDLC-564: mark a session record finished (`done`) or `failed`, so a stale
+ * in-progress record is distinguishable from a finished one. No-op when the
+ * task has no session record.
+ */
+export function markSessionOutcome(
+  boardDir: string,
+  taskId: string,
+  status: 'done' | 'failed',
+  prUrl?: string,
+): void {
+  updateSession(boardDir, taskId, {
+    status,
+    ...(prUrl ? { prUrl } : {}),
+  });
+}
+
+/** One-line operator view of a session record: which agent, which worktree. */
+export function formatSessionLine(s: DispatchSession): string {
+  const parts = [s.taskId.padEnd(14), s.status.padEnd(11)];
+  if (s.agentId) {
+    parts.push(`agent=${s.agentId}`, `worktree=${s.worktreePath ?? '?'}`);
+    if (s.transcriptPath) parts.push(`transcript=${s.transcriptPath}`);
+    if (s.status === 'in-progress' || s.status === 'starting') {
+      parts.push(`resume: SendMessage ${s.agentId}`);
+    }
+  } else if (s.tmuxSession) {
+    parts.push(`tmux=${s.tmuxSession}:${s.tmuxWindow ?? '?'}`);
+  }
+  return parts.join('  ');
 }
 
 /**

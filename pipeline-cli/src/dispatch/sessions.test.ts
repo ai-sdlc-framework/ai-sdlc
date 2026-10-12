@@ -28,8 +28,11 @@ import {
   countActiveSessions,
   isSessionActive,
   listActiveSessions,
+  formatSessionLine,
   listSessions,
+  markSessionOutcome,
   readSession,
+  recordAgentSession,
   sessionsArchiveDir,
   sessionsDir,
   sessionFilePath,
@@ -365,5 +368,97 @@ describe('archiveSession', () => {
     const archivePath = path.join(sessionsArchiveDir(boardDir), `aisdlc-462.session.json`);
     const r = JSON.parse(readFileSync(archivePath, 'utf-8')) as DispatchSession;
     expect(r.prUrl).toBe('https://github.com/org/repo/pull/800');
+  });
+});
+
+// ─── AISDLC-564: agent recovery key ─────────────────────────────────────────
+
+describe('agent recovery record (AISDLC-564)', () => {
+  const agent = {
+    taskId: 'AISDLC-564',
+    agentId: 'a1b2c3d4e5f6a7b8c',
+    worktreePath: '/repo/.worktrees/aisdlc-564',
+    transcriptPath: '/tmp/x/subagents/agent-a1b2c3d4e5f6a7b8c.jsonl',
+  };
+
+  it('writes a schema-valid record on dispatch with no tmux fields', () => {
+    const s = recordAgentSession(boardDir, {
+      ...agent,
+      now: () => new Date('2026-10-10T00:00:00Z'),
+    });
+    expect(s.status).toBe('in-progress');
+    const raw = JSON.parse(readFileSync(sessionFilePath(boardDir, agent.taskId), 'utf-8'));
+    expect(raw).toMatchObject(agent);
+    expect(raw.tmuxSession).toBeUndefined();
+    expect(validateSession(raw)).toBe(true);
+  });
+
+  it('omits transcriptPath when none is supplied and keeps a prior spawnedAt', () => {
+    const t0 = () => new Date('2026-10-10T00:00:00Z');
+    recordAgentSession(boardDir, { ...agent, transcriptPath: undefined, now: t0 });
+    recordAgentSession(boardDir, {
+      ...agent,
+      transcriptPath: undefined,
+      now: () => new Date('2026-10-10T01:00:00Z'),
+    });
+    const r = readSession(boardDir, agent.taskId);
+    expect(r?.transcriptPath).toBeUndefined();
+    expect(r?.spawnedAt).toBe('2026-10-10T00:00:00.000Z');
+  });
+
+  it('merges agent fields into an existing tmux record', () => {
+    writeSession(boardDir, mkSession({ taskId: 'AISDLC-564' }));
+    recordAgentSession(boardDir, agent);
+    const r = readSession(boardDir, 'AISDLC-564');
+    expect(r?.tmuxSession).toBe('ai-sdlc-parallel');
+    expect(r?.agentId).toBe(agent.agentId);
+  });
+
+  it('updates status to done or failed, distinguishing finished from stale', () => {
+    recordAgentSession(boardDir, agent);
+    expect(isSessionActive(boardDir, agent.taskId)).toBe(true);
+    markSessionOutcome(boardDir, agent.taskId, 'failed');
+    expect(readSession(boardDir, agent.taskId)?.status).toBe('failed');
+    markSessionOutcome(boardDir, agent.taskId, 'done', 'https://github.com/o/r/pull/1');
+    const r = readSession(boardDir, agent.taskId);
+    expect(r?.status).toBe('done');
+    expect(r?.prUrl).toBe('https://github.com/o/r/pull/1');
+    expect(isSessionActive(boardDir, agent.taskId)).toBe(false);
+  });
+
+  it('markSessionOutcome is a no-op without a record', () => {
+    markSessionOutcome(boardDir, 'AISDLC-1', 'done');
+    expect(readSession(boardDir, 'AISDLC-1')).toBeNull();
+  });
+
+  it('reads a legacy tmux record lacking the new fields', () => {
+    const legacy = mkSession();
+    writeSession(boardDir, legacy);
+    const r = readSession(boardDir, legacy.taskId);
+    expect(r?.agentId).toBeUndefined();
+    expect(r?.worktreePath).toBeUndefined();
+    expect(validateSession(r)).toBe(true);
+  });
+
+  it('formats an operator line naming agent, worktree, transcript and resume hint', () => {
+    const line = formatSessionLine(recordAgentSession(boardDir, agent));
+    expect(line).toContain(`agent=${agent.agentId}`);
+    expect(line).toContain(`worktree=${agent.worktreePath}`);
+    expect(line).toContain(`transcript=${agent.transcriptPath}`);
+    expect(line).toContain(`SendMessage ${agent.agentId}`);
+    const done = formatSessionLine({ ...readSession(boardDir, agent.taskId)!, status: 'done' });
+    expect(done).not.toContain('SendMessage');
+    expect(formatSessionLine(mkSession())).toContain('tmux=ai-sdlc-parallel:exec-aisdlc-462');
+    expect(formatSessionLine({ ...mkSession(), tmuxSession: undefined })).not.toContain('tmux=');
+    expect(
+      formatSessionLine({
+        ...agent,
+        schemaVersion: 'v1',
+        spawnedAt: 'x',
+        status: 'in-progress',
+        transcriptPath: undefined,
+        worktreePath: undefined,
+      }),
+    ).toContain('worktree=?');
   });
 });
