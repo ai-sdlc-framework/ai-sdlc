@@ -2,7 +2,7 @@
   "schemaVersion": "v6",
   "subject": {
     "digest": {
-      "sha1": "41035e9396f50d5df6b989b0f443e36f65bffd0d"
+      "sha1": "e34f68e70cb7fcc22c9cc1aba636774eaa2bf054"
     }
   },
   "transcriptLeaves": [
@@ -56,14 +56,16 @@
   ],
   "rootHash": "cdae57ef2da667e61dd35d2b36d8802e3664f09565c87f7b340e39128e861ab8",
   "rootSignature": "uaruB81YkRySMNIZmHQep4UqwkzKyHTmCAforGvLQQBJfJ3EQdr9XBhd5IJLJnzo/FUMCFleH2Qz58vbeILkCg==",
-  "nonce": "54daf41b350db418a7d52e2231e26243bd44f18d77418f51c59a3da0e09723b1",
+  "nonce": "1044149134f29c7f35a87d24e3bbd089bf31625f3907d6a2875151951b100a35",
   "leafCount": 3,
-  "signedAt": "2026-10-11T00:25:42.064Z",
+  "signedAt": "2026-10-12T14:54:49.794Z",
   "signerIdentity": "dominique@local:doms-macbook",
   "reviewScope": {
     "classification": "full",
     "securityAlways": false,
-    "requiredSet": "full",
+    "requiredSet": "two",
+    "reason": "diff touches non-test, non-docs paths",
+    "triggeringPaths": [],
     "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
   }
 }
