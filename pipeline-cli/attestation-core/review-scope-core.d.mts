@@ -36,9 +36,4 @@ export function requiredReviewerKind(
 export function checkReviewerKindCoverage(
   reviewerNames: readonly string[],
   kind: ReviewerKind,
-  stagedStages?: readonly string[],
 ): { ok: boolean; missing: string[] };
-export function expandStagedCoverage(
-  reviewerNames: readonly string[],
-  stagedStages?: readonly string[],
-): string[];

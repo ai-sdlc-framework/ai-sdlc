@@ -963,10 +963,7 @@ export function enforceReviewScope(result, { repoRoot, baseSha, headSha, mergeBa
   const names = (
     Array.isArray(result.verifiedReviewerNames) ? result.verifiedReviewerNames : []
   ).filter((n) => typeof n === 'string');
-  const stagedStages = (
-    Array.isArray(result.verifiedStagedStages) ? result.verifiedStagedStages : []
-  ).filter((n) => typeof n === 'string');
-  const coverage = checkReviewerKindCoverage(names, kind, stagedStages);
+  const coverage = checkReviewerKindCoverage(names, kind);
   if (!coverage.ok) {
     const shown = triggeringPaths.slice(0, 3).join(', ');
     const why = shown ? `${reason}: ${shown}${triggeringPaths.length > 3 ? ', ...' : ''}` : reason;
@@ -1227,7 +1224,6 @@ export function verifyV6Envelope({
   // AISDLC-723: reviewer names are taken from the ON-DISK leaves each summary
   // resolves to (never from the envelope copy), and a leafIndex may appear once.
   const verifiedReviewerNames = [];
-  const verifiedStagedStages = [];
   const seenLeafIndexes = new Set();
   for (let i = 0; i < envelope.transcriptLeaves.length; i++) {
     const leafSummary = envelope.transcriptLeaves[i];
@@ -1295,9 +1291,6 @@ export function verifyV6Envelope({
     }
     if (typeof onDiskLeaf.reviewerName === 'string') {
       verifiedReviewerNames.push(onDiskLeaf.reviewerName);
-      if (onDiskLeaf.reviewerName === 'staged-review' && typeof onDiskLeaf.stage === 'string') {
-        verifiedStagedStages.push(onDiskLeaf.stage);
-      }
     }
 
     // ── 7b. Verify verdictClass matches on-disk leaf (AISDLC-568) ─────────
@@ -1482,7 +1475,6 @@ export function verifyV6Envelope({
     status: 'valid',
     reason: 'ok',
     verifiedReviewerNames,
-    verifiedStagedStages,
     verdictClasses,
     overallVerdictClass,
     independenceTiers,
