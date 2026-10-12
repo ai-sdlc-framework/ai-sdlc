@@ -568,3 +568,60 @@ describe('signer-side reduction respects the require-three opt-out', () => {
     expect(narrowed.reviewers).toEqual(['correctness-reviewer']);
   });
 });
+
+describe('DEC-0094: the verifier counts a Merkle-proved staged-review leaf set', () => {
+  const stagedResult = (reviewers: string[], stages: string[]) => ({
+    status: 'valid',
+    reason: 'ok',
+    verifiedReviewerNames: reviewers,
+    verifiedStagedStages: stages,
+  });
+  const run = (
+    repo: { dir: string; base: string; head: string },
+    r: ReturnType<typeof stagedResult>,
+  ) =>
+    enforceReviewScope(r, {
+      repoRoot: repo.dir,
+      baseSha: repo.base,
+      headSha: repo.head,
+      mergeBase: repo.base,
+    });
+  const staged = ['staged-review', 'staged-review', 'staged-review', 'security-reviewer'];
+
+  it('accepts plan + execute + synthesize staged leaves plus security on an ordinary diff', () => {
+    const repo = makeRepo({ 'orchestrator/src/foo.ts': 'x' });
+    expect(run(repo, stagedResult(staged, ['plan', 'execute', 'synthesize'])).status).toBe('valid');
+  });
+
+  it('accepts staged leaves for the three set (opt-out) as code + test coverage', () => {
+    const repo = makeRepo({ 'ai-sdlc-plugin/hooks/x.js': 'x' });
+    expect(run(repo, stagedResult(staged, ['plan', 'synthesize'])).status).toBe('valid');
+  });
+
+  it('rejects a staged synthesize leaf with no plan leaf', () => {
+    const repo = makeRepo({ 'orchestrator/src/foo.ts': 'x' });
+    const r = run(repo, stagedResult(['staged-review', 'security-reviewer'], ['synthesize']));
+    expect(r.status).toBe('invalid');
+    expect(r.reason).toContain('reviewer set incomplete');
+  });
+
+  it('rejects a staged set with no synthesize leaf, and one without security', () => {
+    const repo = makeRepo({ 'orchestrator/src/foo.ts': 'x' });
+    expect(run(repo, stagedResult(['staged-review', 'security-reviewer'], ['plan'])).status).toBe(
+      'invalid',
+    );
+    const noSec = run(
+      repo,
+      stagedResult(['staged-review', 'staged-review'], ['plan', 'synthesize']),
+    );
+    expect(noSec.status).toBe('invalid');
+    expect(noSec.reason).toContain('security-reviewer');
+  });
+
+  it('ignores stage claims when no staged-review reviewer is present', () => {
+    const repo = makeRepo({ 'orchestrator/src/foo.ts': 'x' });
+    expect(run(repo, stagedResult(['security-reviewer'], ['plan', 'synthesize'])).status).toBe(
+      'invalid',
+    );
+  });
+});

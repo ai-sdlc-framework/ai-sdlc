@@ -342,6 +342,30 @@ export function requiredReviewerKind(paths, opts = {}) {
 }
 
 /**
+ * DEC-0094 (verifier-accepts-staged): a `staged-review` leaf counts toward the
+ * correctness, code and test roles ONLY when the Merkle-proved leaves of the
+ * same envelope show the staged checklist ran, meaning at least one `plan`
+ * stage leaf AND a `synthesize` stage leaf. A staged leaf set without a plan
+ * leaf (or without a synthesize leaf) covers nothing. Security coverage is
+ * never expanded: `security-reviewer` must still be present by name.
+ *
+ * @param {readonly string[]} reviewerNames
+ * @param {readonly string[]} [stagedStages] stages of the on-disk staged-review leaves
+ * @returns {string[]}
+ */
+export function expandStagedCoverage(reviewerNames, stagedStages = []) {
+  const out = [...reviewerNames];
+  if (
+    reviewerNames.includes('staged-review') &&
+    stagedStages.includes('plan') &&
+    stagedStages.includes('synthesize')
+  ) {
+    out.push('correctness-reviewer', 'code-reviewer', 'test-reviewer');
+  }
+  return out;
+}
+
+/**
  * Check the reviewer names carried by an attestation against a required kind.
  * The three set needs a code reviewer, a test reviewer and security; the two
  * set needs security and a correctness review (or the code + test pair); the
@@ -352,8 +376,8 @@ export function requiredReviewerKind(paths, opts = {}) {
  * @param {'correctness-only' | 'two' | 'three'} kind
  * @returns {{ ok: boolean, missing: string[] }}
  */
-export function checkReviewerKindCoverage(reviewerNames, kind) {
-  const names = new Set(reviewerNames);
+export function checkReviewerKindCoverage(reviewerNames, kind, stagedStages = []) {
+  const names = new Set(expandStagedCoverage(reviewerNames, stagedStages));
   const has = (list) => list.some((n) => names.has(n));
   const missing = [];
   if (kind === 'three') {
