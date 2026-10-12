@@ -60,7 +60,7 @@
   "scripts": {
     "build": "tsc",
     "clean": "rm -rf dist *.tsbuildinfo",
-    "package": "pnpm build && vsce package --no-dependencies --out dist/ai-sdlc-vscode-hierarchy.vsix",
+    "package": "pnpm build && npx --yes @vscode/vsce@3 package --no-dependencies --out dist/ai-sdlc-vscode-hierarchy.vsix",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage"
   },
@@ -68,7 +68,6 @@
     "@types/node": "^25.9.3",
     "@types/vscode": "^1.85.0",
     "@vitest/coverage-v8": "^4.1.11",
-    "@vscode/vsce": "^3.2.0",
     "typescript": "^6.0.3",
     "vite": "^6.0.0",
     "vitest": "^4.1.11"
