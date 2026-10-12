@@ -152,34 +152,45 @@ describe('preSignRebase (AISDLC-102)', () => {
     expect(r).toEqual({ kind: 'changed', before: 'A', after: 'B' });
   });
 
-  it('never auto-resolves a conflict: aborts the rebase and reports it', async () => {
+  it('names the conflicting files, aborts, and does not retry', async () => {
     hashes('A');
     h.runner.on(/merge-base --is-ancestor/, fail('', 1));
-    h.runner.on(/git fetch origin main/, ok(''));
     h.runner.on(/git rebase origin\/main/, fail('CONFLICT', 1));
+    h.runner.on(/diff --name-only --diff-filter=U/, ok('a.ts\nb/c.ts\n'));
     const r = await preSignRebase(h.ctx, state);
-    expect(r.kind).toBe('failed');
-    expect(indexOfCall(/git rebase --abort/)).toBeGreaterThan(-1);
+    expect(r).toEqual({
+      kind: 'failed',
+      reason: expect.stringContaining('(rebase-conflict)'),
+      conflictingFiles: ['a.ts', 'b/c.ts'],
+    });
+    expect((r as { reason: string }).reason).toContain('a.ts, b/c.ts');
+    expect((r as { reason: string }).reason).toContain(`/ai-sdlc execute ${state.taskId}`);
+    expect(cmds().filter((c) => c === 'git rebase origin/main')).toHaveLength(1);
+    expect(cmds().filter((c) => c.startsWith('git fetch'))).toHaveLength(1);
+    expect(indexOfCall(/git rebase --abort/)).toBeGreaterThan(indexOfCall(/git rebase origin/));
     expect(cmds().filter((c) => /git (checkout|restore|reset)/.test(c))).toEqual([]);
   });
 
-  it('gives up after three rebase attempts when main keeps moving', async () => {
+  it('reports unknown files when git lists none', async () => {
     hashes('A');
     h.runner.on(/merge-base --is-ancestor/, fail('', 1));
-    h.runner.on(/git rebase origin\/main/, fail('CONFLICT', 1));
+    h.runner.on(/git rebase origin\/main/, fail('boom', 1));
     const r = await preSignRebase(h.ctx, state);
-    expect(cmds().filter((c) => c === 'git rebase origin/main')).toHaveLength(3);
-    expect(r).toEqual({ kind: 'failed', reason: expect.stringContaining('rebase-loop') });
+    expect(r).toEqual({
+      kind: 'failed',
+      reason: expect.stringContaining('unknown'),
+      conflictingFiles: [],
+    });
   });
 
-  it('reports a conflict (not a loop) when the refetch fails after a failed rebase', async () => {
-    hashes('A');
-    let fetches = 0;
-    h.runner.on(/git fetch origin main/, () => (fetches++ === 0 ? ok('') : fail('offline', 128)));
+  it('treats a base that moved during the rebase as success', async () => {
+    hashes('A', 'B');
     h.runner.on(/merge-base --is-ancestor/, fail('', 1));
-    h.runner.on(/git rebase origin\/main/, fail('CONFLICT', 1));
+    let revs = 0;
+    h.runner.on(/rev-parse origin\/main/, () => ok(revs++ === 0 ? 'old\n' : 'new\n'));
     const r = await preSignRebase(h.ctx, state);
-    expect(r).toEqual({ kind: 'failed', reason: expect.stringContaining('rebase-conflict') });
+    expect(r).toEqual({ kind: 'changed', before: 'A', after: 'B' });
+    expect(cmds().filter((c) => c === 'git rebase origin/main')).toHaveLength(1);
   });
 });
 
