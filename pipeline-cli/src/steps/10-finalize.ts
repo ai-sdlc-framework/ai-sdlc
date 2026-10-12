@@ -64,6 +64,24 @@ export interface FinalizeStepOptions extends FinalizeTaskOptions {
    * first PR); attestation signing and the chore commit still run.
    */
   resume?: boolean;
+  /** AISDLC-556 — sink for the no-signer warning (defaults to stderr). */
+  warn?: (message: string) => void;
+}
+
+/** Marker the signer prints when the attestation runtime cannot be resolved (AISDLC-554). */
+const SIGNER_RUNTIME_MISSING = 'Cannot locate the AI-SDLC';
+
+/**
+ * AISDLC-556 — adopter-facing warning for verdicts written with no reachable
+ * signer. Pure — exported for unit tests.
+ */
+export function noSignerWarning(taskId: string, reason: string): string {
+  return (
+    `[finalize] WARNING: verdicts written to .ai-sdlc/verdicts/${taskId.toLowerCase()}.json, ` +
+    `but no attestation signer is available in this repo (${reason}) - the PR will carry no ` +
+    `attestation. verify-attestation CI cannot pass without a signer; see ` +
+    `ai-sdlc-plugin/README.md "Attestation prerequisites for adopters". Continuing (fail open).`
+  );
 }
 
 /**
@@ -183,6 +201,7 @@ export async function finalizeTask(opts: FinalizeStepOptions): Promise<FinalizeT
 
   // 3. Attestation signing — best-effort. The helper script lives in the
   //    plugin and isn't always available when running pipeline-cli standalone.
+  const warn = opts.warn ?? ((m: string) => void process.stderr.write(`${m}\n`));
   let attestationPath: string | null = null;
   const helperScript =
     opts.signAttestationScript ??
@@ -200,7 +219,11 @@ export async function finalizeTask(opts: FinalizeStepOptions): Promise<FinalizeT
       // commit message names the real envelope path on the v6-default path.
       const m = signResult.stdout.match(/\.ai-sdlc\/attestations\/[a-f0-9]+(?:\.v6)?\.dsse\.json/);
       attestationPath = m ? m[0] : null;
+    } else if (`${signResult.stdout}\n${signResult.stderr}`.includes(SIGNER_RUNTIME_MISSING)) {
+      warn(noSignerWarning(opts.taskId, 'attestation runtime not installed'));
     }
+  } else {
+    warn(noSignerWarning(opts.taskId, 'sign-attestation.mjs not found'));
   }
 
   // 4. Chore commit (move + attestation if signed). Skip in tests without a repo.

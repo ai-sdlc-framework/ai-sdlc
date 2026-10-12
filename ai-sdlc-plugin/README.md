@@ -199,8 +199,9 @@ after that session starts.
 
 `/ai-sdlc execute` writes reviewer verdicts and opens the PR, but a signed
 attestation only appears when ALL of the following are set up in the consuming
-repo. None of them is installed by default, so a fresh adopter repo produces
-PRs with no attestation and no error:
+repo. The signing key and the pre-push hook are not installed by default (the
+runtime dependency is, see item 2), so a fresh adopter repo can produce PRs with
+no attestation and no error:
 
 1. **A signing key** at `~/.ai-sdlc/signing-key.pem` (run `/ai-sdlc init-signing-key`), with
    its public key listed in `.ai-sdlc/trusted-reviewers.yaml`.
@@ -211,8 +212,8 @@ PRs with no attestation and no error:
    `ai-sdlc init --with-attestation`. Docs elsewhere describe the pre-push hook
    as the signer; that is true only after this step.
 
-Step 10 now probes for the signer (`scripts/warn-if-no-signer.sh`) and prints a
-warning naming the verdict file when none is reachable. It fails open: the
+Step 10 (`pipeline-cli/src/steps/10-finalize.ts`) checks the signer it invokes
+and prints a warning naming the verdict file when none is reachable. It fails open: the
 pipeline continues and the PR simply carries no attestation.
 
 **`verify-attestation` CI cannot pass in a repo with no signer.** Until the
