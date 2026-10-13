@@ -47,35 +47,20 @@ agents per tick.
 
 ## Hard rules (NEVER violate)
 
-1. **Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command.** No raw `gh pr merge` in any form (the hook denies
-   it, `--auto` included). The re-arm path is
-   `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind backlog --arm`,
-   which applies the repo's merge policy and trust checks before re-attaching
-   the auto-merge request the force-push cleared (AISDLC-356); when it refuses,
-   the repository workflow re-arms on push.
-2. **Force-push uses `--force-with-lease` ONLY.** Plain `git push --force`
-   / `-f` is forbidden — `--force-with-lease` refuses if the remote
-   moved under us, which preserves a co-pusher's work.
-3. **Never push to `main` or `master`.** Refuse early in the run if the
-   resolved branch name is either. The agent-role.yaml block list
-   already forbids `git push --force*` against protected refs; this is
-   the same rule extended to `--force-with-lease` because the harm
-   model is identical at the branch tip we never own.
-4. **Never close PRs or issues.** No `gh pr close`, `gh issue close`.
-5. **Never delete branches.** No `git branch -D` / `-d`.
-6. **Edit governance config (`.ai-sdlc/**`) only when the task names the file and the change; never as a side effect.** Runtime artifacts (attestations, reviews, transcript leaves, the decision log, the dispatch board) are written through their CLIs as today. Runs marked untrusted (`AI_SDLC_UNTRUSTED_RUN`) are blocked from `.ai-sdlc/**` and `.github/workflows/**` by the hook; ask a maintainer in the PR instead of retrying.
-   `.github/workflows/**` is only refused when the project's
-   `.ai-sdlc/agent-role.yaml` lists it under `blockedPaths` — not blocked by
-   default; check the project's config before editing it.
-7. **Never run destructive git operations** outside the rebase flow.
-   No `git reset --hard <ref>`, no `git checkout -- .`, no
-   `git restore .` on the working tree. `git rebase --abort` is allowed
-   (it restores the pre-rebase HEAD cleanly).
-8. **Never write GitHub Actions CI-skip magic tokens.** The five literal
-   substrings (`[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`,
-   `[actions skip]`) silently disable workflows. Do not introduce them
-   into commit messages during conflict resolution. (AISDLC-88.)
-9. **N=2 concurrent-PR cap.** The watcher enforces this externally, but
+<!-- prompt-rules:begin ids=merge,force-push,close,branch-delete,destructive-git,ci-skip,governance-config -->
+- **Merge:** only via `cli-merge-if-eligible` when `governance.allowMerge` permits it; the raw `gh pr merge` (any form, `--auto` included) is blocked by the PreToolUse hook.
+- **Force-push:** only `git push --force-with-lease origin HEAD:refs/heads/<your-branch>` to your own task branch after a rebase; plain `git push --force`/`-f` and any push to `main`/`master` are blocked by the PreToolUse hook.
+- **Close:** never close PRs or issues (`gh pr close`, `gh issue close`); report in `notes` instead (hook-enforced unless repo policy grants it).
+- **Delete branches:** never (`git branch -D`/`-d`); leave cleanup to `/ai-sdlc cleanup` (hook-enforced unless repo policy grants it).
+- **Destructive git:** never `git reset --hard`, `git checkout -- .` or `git restore .`; use a WIP commit plus `git reset --soft` to set work aside (hook-enforced unless repo policy grants it).
+- **CI-skip markers:** never write `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]` or `[actions skip]` in a commit message (backticks do not help); write the paren form `(skip ci marker)`; `check-skip-ci-marker.sh` blocks the push.
+- **Governance config:** edit `.ai-sdlc/**` only when the task names the file and the change; write runtime artifacts through their CLIs; for untrusted runs the PreToolUse hook blocks it, so ask a maintainer in the PR instead of retrying (`.github/workflows/**` is blocked only when `blockedPaths` lists it).
+<!-- prompt-rules:end -->
+
+1. **Re-arm path:** `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind backlog --arm` applies the repo's merge policy and trust checks before re-attaching the auto-merge request the lease push cleared (AISDLC-356); when it refuses, the repository workflow re-arms on push.
+2. **Protected refs:** refuse early when the resolved branch name is `main` or `master` (same harm model applies to a lease push).
+3. `git rebase --abort` is allowed (it restores the pre-rebase HEAD); the reset/checkout/restore ban applies outside the rebase flow.
+4. **N=2 concurrent-PR cap.** The watcher enforces this externally, but
    if you discover you are processing a third PR for the same watcher
    tick (e.g. a manual re-invocation crossed wires), abort early with
    `outcome: 'failed'` + `escalationReason: 'concurrency-cap-exceeded'`.
@@ -201,9 +186,7 @@ node pipeline-cli/bin/cli-merge-if-eligible.mjs "$PR_NUMBER" --source-kind backl
 ```
 
 Swallow non-zero exits — auto-merge may not be enabled in the repo or
-the PR may not yet be ready. The re-arm is best-effort. NEVER use
-`gh pr merge --merge` / `--squash` / `--rebase` here — that would MERGE
-the PR, which Hard Rule 1 forbids.
+the PR may not yet be ready. The re-arm is best-effort; it must go through the CLI above, never a raw merge.
 
 Emit: `[ai-sdlc-progress] push: pushed <branch> to origin (--force-with-lease)`
 Emit: `[ai-sdlc-progress] re-arm: auto-merge re-attached (best-effort)`

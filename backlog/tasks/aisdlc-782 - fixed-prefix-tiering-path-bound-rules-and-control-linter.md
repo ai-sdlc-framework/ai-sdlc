@@ -18,7 +18,7 @@ references:
   - ai-sdlc-plugin/hooks/session-start.js
   - ai-sdlc-plugin/hooks/lib/governance-resolver.js
   - backlog/tasks/aisdlc-742 - condense claude.md to rules and pointers to cut the per-call context floor (63 kb to at most 20 kb).md
-  - backlog/tasks/aisdlc-651.2 - fixed prefix diet for claude md and injected governance.md
+  - backlog/completed/aisdlc-651.2 - fixed prefix diet for claude md and injected governance.md
 priority: high
 dispatchable: true
 ---
@@ -30,6 +30,8 @@ Implement the RFC-0053 OQ-4 resolution as a structural rule. The fixed prefix is
 
 Sequencing: listed in `dependencies:` (AISDLC-773, AISDLC-742).
 <!-- SECTION:DESCRIPTION:END -->
+
+**Five-step review (requirements first).** (1) Requirement questioned: "every control sentence lives in the always-loaded CLAUDE.md" (set by the pre-RFC-0053 prompt layout); only controls rendered from configuration need the fixed prefix. (2) Delete: control prose duplicated outside the prefix, and the one-time diet in AISDLC-742 that this supersedes. (3) Simplify: path-bound sections move to `.claude/rules/*.md` loaded by the harness instead of a custom loader. (4) Accelerate: the prefix size cap is a test, so growth fails fast rather than in review. (5) Automate: the control-sentence linter, last.
 
 ## Acceptance Criteria
 

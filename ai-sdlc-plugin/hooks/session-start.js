@@ -410,32 +410,17 @@ if (existsSync(reviewPolicyPath)) {
 
 // ── Build governance context ─────────────────────────────────────────
 
+// AISDLC-651.2: compact form. One line per section; the prose behind each rule
+// lives in the linked runbooks (docs/operations/agent-governance-reference.md),
+// because this block is re-read on every turn of every session.
 let context = `## AI-SDLC Governance Active
 
-**Role:** ${role}
-**Goal:** ${goal}
-
-### Constraints
-- Maximum files per change: ${maxFiles}
-- Tests required: ${requireTests}`;
-
-if (blockedPaths.length > 0) {
-  context += `\n- Blocked paths: ${blockedPaths.join(', ')}`;
-}
-
-context += `
-
-### Blocked Actions (NEVER execute these)
-${blockedActions.map((a) => `- \`${a}\``).join('\n')}
-
-### Pre-Commit Checklist
-Before EVERY commit, run these and fix any failures:
-1. \`pnpm build\` — TypeScript compilation
-2. \`pnpm test\` — All tests must pass
-3. \`pnpm lint\` — No lint errors
-4. \`pnpm format:check\` — Run \`pnpm format\` to fix
-
-AI-SDLC: CI is the single coverage gate (per-package line floors plus a 90% patch gate); nothing runs coverage locally. Run the four commands above before \`git push\` to fail fast.
+**Role:** ${role} | **Goal:** ${goal}
+Limits: max ${maxFiles} files per change; tests required: ${requireTests}${
+  blockedPaths.length > 0 ? `; blocked paths: ${blockedPaths.join(', ')}` : ''
+}.
+Blocked actions (NEVER execute): ${blockedActions.map((a) => `\`${a}\``).join(', ')}
+Before EVERY commit run and fix: \`pnpm build\`, \`pnpm test\`, \`pnpm lint\`, \`pnpm format:check\` (\`pnpm format\` fixes). CI is the only coverage gate (per-package floors plus a 90% patch gate); nothing runs coverage locally.
 
 ${renderSessionStartHardRules(resolvedGovernance)}${operationalRules ? `\n${operationalRules}` : ''}${reviewPolicySummary}`;
 
