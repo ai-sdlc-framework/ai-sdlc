@@ -2918,3 +2918,66 @@ blockedActions: []
     assert.equal(run(join(aliasWt, 'src', 'ok.ts'), realProj, aliasWt), '');
   });
 });
+
+describe('enforce-blocked-actions: paired opencode blockedPaths entries (AISDLC-839)', () => {
+  // The six entries as listed in .ai-sdlc/agent-role.yaml. matchGlob turns
+  // `**/x` into `.*/x` (a slash is required) and `x` into a literal, so the
+  // root and nested entries of each pair are NOT interchangeable and no
+  // single glob the matcher supports equals both (`**x` would also block
+  // `fooopencode.json`). The pairs therefore stay unfolded; these tests pin
+  // that each original string keeps blocking and that the over-block a fold
+  // would introduce does not exist today.
+  const entries = [
+    'opencode.json',
+    'opencode.jsonc',
+    '.opencode/**',
+    '**/opencode.json',
+    '**/opencode.jsonc',
+    '**/.opencode/**',
+  ];
+  let dir;
+
+  before(() => {
+    dir = join(tmpdir(), `enforce-blocked-opencode-${Date.now()}`);
+    mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(dir, '.ai-sdlc', 'agent-role.yaml'),
+      `role: coding-agent
+goal: Test agent
+blockedPaths:
+${entries.map((e) => `  - '${e}'`).join('\n')}
+blockedActions: []
+`,
+    );
+  });
+
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const denied = (rel) =>
+    isDenied(
+      runHookRaw(
+        JSON.stringify({ tool_name: 'Write', tool_input: { file_path: join(dir, rel) } }),
+        { CLAUDE_PROJECT_DIR: dir },
+      ),
+    );
+
+  for (const rel of [
+    'opencode.json',
+    'opencode.jsonc',
+    '.opencode/plugin.js',
+    'pkg/opencode.json',
+    'a/b/opencode.jsonc',
+    'pkg/.opencode/plugin.js',
+  ]) {
+    it(`blocks ${rel}`, () => assert.ok(denied(rel)));
+  }
+
+  it('repo agent-role.yaml still lists every original entry', () => {
+    const real = readFileSync(join(__dirname, '..', '..', '.ai-sdlc', 'agent-role.yaml'), 'utf-8');
+    for (const e of entries) assert.ok(real.includes(`- '${e}'`), `missing ${e}`);
+  });
+
+  for (const rel of ['fooopencode.json', 'foo.opencode/x.js']) {
+    it(`does not block ${rel} (a folded '**x' glob would)`, () => assert.ok(!denied(rel)));
+  }
+});
