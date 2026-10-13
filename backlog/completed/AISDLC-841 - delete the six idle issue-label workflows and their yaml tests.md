@@ -11,12 +11,6 @@ labels:
   - governance
 dependencies: []
 references:
-  - .github/workflows/ai-sdlc.yml
-  - .github/workflows/ai-sdlc-admit.yml
-  - .github/workflows/ai-sdlc-route.yml
-  - .github/workflows/ai-sdlc-triage.yml
-  - .github/workflows/ai-sdlc-sa-feedback.yml
-  - .github/workflows/ai-sdlc-slack-issue.yml
   - docs/audits/2026-10-13-cicd-five-step-audit.md
 priority: high
 dispatchable: true

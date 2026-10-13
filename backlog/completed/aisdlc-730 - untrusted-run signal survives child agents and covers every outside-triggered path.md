@@ -15,7 +15,6 @@ references:
   - pipeline-cli/src/runtime/untrusted-env.ts
   - pipeline-cli/src/execute-pipeline.ts
   - pipeline-cli/src/cli/rework-pr.ts
-  - .github/workflows/ai-sdlc.yml
   - docs/api-reference/governance.md
 priority: high
 dispatchable: true
