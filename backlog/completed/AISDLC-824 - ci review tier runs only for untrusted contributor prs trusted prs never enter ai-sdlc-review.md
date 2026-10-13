@@ -2,7 +2,7 @@
 id: AISDLC-824
 title: >-
   CI review tier runs only for untrusted contributor PRs: trusted PRs never enter ai-sdlc-review.yml
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-12'
 labels:
@@ -37,13 +37,13 @@ dispatchable: true
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `ai-sdlc-review.yml` has a single `pull_request_target` trigger; the `pull_request` trigger and the `attestation-precheck` job are deleted
-- [ ] #2 The `analyze` and `report` jobs run only when the trust predicate says untrusted (fork head repo, non-collaborator author, or a bot other than release-please); the predicate is shared with or identical to the one in `untrusted-pr-gate.yml`
-- [ ] #3 A trusted-author PR (collaborator, same repo) produces no `Analyze PR`, `Post Review Results` or `Attestation precheck` check at all
-- [ ] #4 A Dependabot PR runs the review and the reviewers run with the configured secret; when the secret is absent the job fails loudly (`::error::`) instead of posting a REQUEST_CHANGES review
-- [ ] #5 Workflow test in `.github/workflows/__tests__/` asserts the single trigger, the absence of the precheck job, and the trust condition on `analyze`
-- [ ] #6 CLAUDE.md "Review attestations" paragraph no longer describes `Post Review Results` as a fallback review tier for trusted PRs
-- [ ] #7 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
+- [x] #1 `ai-sdlc-review.yml` has a single `pull_request_target` trigger; the `pull_request` trigger and the `attestation-precheck` job are deleted
+- [x] #2 The `analyze` and `report` jobs run only when the trust predicate says untrusted (fork head repo, non-collaborator author, or a bot other than release-please); the predicate is shared with or identical to the one in `untrusted-pr-gate.yml`
+- [x] #3 A trusted-author PR (collaborator, same repo) produces no `Analyze PR`, `Post Review Results` or `Attestation precheck` check at all
+- [x] #4 A Dependabot PR runs the review and the reviewers run with the configured secret; when the secret is absent the job fails loudly (`::error::`) instead of posting a REQUEST_CHANGES review
+- [x] #5 Workflow test in `.github/workflows/__tests__/` asserts the single trigger, the absence of the precheck job, and the trust condition on `analyze`
+- [x] #6 CLAUDE.md "Review attestations" paragraph no longer describes `Post Review Results` as a fallback review tier for trusted PRs
+- [x] #7 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
 <!-- AC:END -->
 
 ## Verification

@@ -59,23 +59,11 @@ name: AI-SDLC PR Review
 #    step that consumes fork-controlled input.
 
 on:
-  # AISDLC-381 transitional dual-trigger: keep `pull_request` alongside
-  # `pull_request_target` so main's CURRENT version of this workflow (which
-  # has only `pull_request`) still fires on THIS PR. Without the dual-trigger
-  # neither version fires (chicken-and-egg). Drop `pull_request` in a
-  # follow-up PR once this lands on main.
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    branches: [main]
-    paths-ignore:
-      - 'spec/rfcs/**'
-      - 'docs/**'
-      - 'backlog/tasks/**'
-      - 'backlog/completed/**'
-      - '.ai-sdlc/_decisions/**'
-      - '.github/dependabot.yml'
-      - '.github/*.md'
-      - '*.md'
+  # AISDLC-824: this workflow reviews UNTRUSTED contributor PRs only (forks,
+  # non-collaborators, bots such as Dependabot). Trusted PRs are reviewed
+  # locally by `/ai-sdlc execute` and attested; they never enter this workflow
+  # (job-level trust condition below). One trigger only, so there is no
+  # pull_request / pull_request_target race under the concurrency group.
   pull_request_target:
     # AISDLC-218 (revised): keep `opened` (so direct-ready PRs without `--draft`
     # fire CI) AND add `ready_for_review` (canonical fire-once trigger when a
@@ -93,9 +81,7 @@ on:
     #   gh workflow run ai-sdlc-review.yml --ref <branch>
     # Note (AISDLC-214): unlike `verify-attestation.yml`, this workflow posts
     # `Post Review Results` which is NOT a required check — paths-ignore
-    # skipping the workflow doesn't deadlock the PR. The docs-only-check job
-    # below still handles merge_group docs-only commits where paths-ignore
-    # doesn't apply.
+    # skipping the workflow doesn't deadlock the PR.
     paths-ignore:
       - 'spec/rfcs/**'
       - 'docs/**'
@@ -105,14 +91,6 @@ on:
       - '.github/dependabot.yml'
       - '.github/*.md'
       - '*.md'
-  # AISDLC-400 (2026-05-23): merge_group trigger removed. The GitHub merge queue
-  # was dropped; there are no longer gh-readonly-queue/* probe SHAs to cover.
-  # PRs merge directly via auto-merge (squash) once required checks on the PR
-  # head pass. The merge-queue-passthrough.yml workflow (which also handled
-  # merge_group passthrough) is now a no-op and can be deleted after this PR
-  # merges. Rollback: restore the merge_group trigger here and re-enable the
-  # merge queue in Settings → Branches → main. See
-  # docs/operations/merge-without-queue.md.
 
 concurrency:
   group: review-${{ github.event.pull_request.number || github.sha }}
@@ -122,290 +100,24 @@ permissions:
   contents: read
 
 jobs:
-  # ── Job -1: Docs-only short-circuit (merge_group + pull_request fallback) ──
-  # AISDLC-214: handles two cases with one job:
-  #
-  # Case A — merge_group with docs-only changeset:
-  #   `paths-ignore` does NOT apply to `merge_group` events, so this workflow
-  #   fires for every merge_group commit. We detect docs-only changesets via
-  #   `scripts/is-docs-only-changeset.mjs` (AISDLC-206) and post
-  #   `Post Review Results: success` directly. Code/mixed changesets skip this
-  #   step and the PR-review jobs below run normally (they guard on
-  #   `github.event_name == 'pull_request'` to avoid merge_group context issues).
-  #
-  # Case B — pull_request with docs-only changeset:
-  #   Although `paths-ignore` should skip the workflow for docs-only PRs, branch
-  #   protection still requires `Post Review Results` to be posted. This job handles
-  #   that case — replacing the now-deleted `ai-sdlc-review-docs-only.yml` fallback.
-  #   For mixed PRs (docs + code), this step exits cleanly; the PR-review jobs
-  #   below handle verification normally.
-  #
-  # This job runs on BOTH events so it can be the sole poster of
-  # `Post Review Results: success` for docs-only changes in all contexts.
-  docs-only-check:
-    name: Docs-only check
-    runs-on: ubuntu-latest
-    # AISDLC-218: draft guard for `synchronize` events (which fire on draft
-    # pushes too). `merge_group` events are unaffected — drafts can't enter
-    # the merge queue.
-    # AISDLC-381: include `pull_request_target` in the PR-event match (we
-    # migrated the trigger so this is the PR-event channel now).
-    if: github.event_name == 'merge_group' || github.event.pull_request.draft == false
-    permissions:
-      contents: read
-      statuses: write
-      pull-requests: read
-    steps:
-      - name: Resolve event-driven SHA + range
-        id: resolve
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
-          MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          if [ "$EVENT_NAME" = "merge_group" ]; then
-            echo "head_sha=${MG_HEAD_SHA}" >> "${GITHUB_OUTPUT}"
-            echo "base_sha=${MG_BASE_SHA}" >> "${GITHUB_OUTPUT}"
-            echo "is_merge_group=true" >> "${GITHUB_OUTPUT}"
-          else
-            echo "head_sha=${PR_HEAD_SHA}" >> "${GITHUB_OUTPUT}"
-            echo "is_merge_group=false" >> "${GITHUB_OUTPUT}"
-          fi
-
-      # AISDLC-381 Safety guard #1: checkout the TARGET repo's main (no
-      # `ref:` arg = pull_request_target defaults to the base branch tip).
-      # This is what supplies `scripts/is-docs-only-changeset.mjs`. We
-      # deliberately do NOT checkout the fork's HEAD here — running a
-      # script from the fork's tree under pull_request_target would
-      # execute fork-controlled code with the elevated GITHUB_TOKEN.
-      - name: Checkout target main (workflow logic)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Detect docs-only changeset
-        id: detect
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-          IS_MERGE_GROUP: ${{ steps.resolve.outputs.is_merge_group }}
-          BASE_SHA: ${{ steps.resolve.outputs.base_sha }}
-          HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
-        run: |
-          set -euo pipefail
-          # AISDLC-381 Safety guard #2: file enumeration uses the GitHub
-          # API (`gh api .../pulls/<N>/files`) for pull_request_target
-          # events instead of `git diff <fork-sha>`. The API returns
-          # filenames as DATA strings without requiring local git
-          # reachability of fork-only commits — no fork checkout needed.
-          # For merge_group events the queue ref IS in the upstream repo
-          # so `git diff` works (and is unaffected by the fork concern).
-          if [ "${IS_MERGE_GROUP}" = "true" ]; then
-            # -c core.quotePath=false emits raw UTF-8 filenames (AISDLC-205 round 3 fix).
-            FILES=$(git -c core.quotePath=false diff --name-only "${BASE_SHA}...${HEAD_SHA}")
-          else
-            # AISDLC-381: API-based enumeration (DATA-only, no fork checkout).
-            FILES=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename')
-          fi
-
-          if [ -z "${FILES}" ]; then
-            echo "No changed files; treating as docs-only (nothing to attest)"
-            echo "all_docs=true" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-
-          ALL_DOCS=$(printf '%s\n' "${FILES}" | node scripts/is-docs-only-changeset.mjs)
-          echo "all_docs=${ALL_DOCS}" >> "${GITHUB_OUTPUT}"
-          echo "---"
-          echo "Files in changeset (event=${{ github.event_name }}):"
-          printf '%s\n' "${FILES}" | sed 's/^/  - /'
-          echo "---"
-          echo "All docs-only: ${ALL_DOCS}"
-
-      - name: Post Review Results status (success, docs-only)
-        if: steps.detect.outputs.all_docs == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-        run: |
-          set -euo pipefail
-          if [ -n "${PR_URL:-}" ]; then
-            TARGET_URL_FLAG=(-f "target_url=${PR_URL}")
-          else
-            TARGET_URL_FLAG=()
-          fi
-          gh api "repos/${REPO}/statuses/${HEAD_SHA}" \
-            -X POST \
-            -f state=success \
-            -f context='Post Review Results' \
-            -f description='docs-only changeset — review N/A' \
-            "${TARGET_URL_FLAG[@]}"
-          echo "Posted Post Review Results: success (docs-only short-circuit) on ${HEAD_SHA}"
-
-      - name: Skip (mixed/code PR — handled by PR-review jobs below)
-        if: steps.detect.outputs.all_docs != 'true'
-        run: |
-          echo "Changeset contains non-docs files; PR-review jobs will handle verification."
-          echo "This step exits cleanly without posting any status."
-
-  # ── Job 0: Attestation precheck (cost-saver SOFT signal) ──────────
-  # AISDLC-147 patch 1: when a valid `.ai-sdlc/attestations/<HEAD-sha>.dsse.json`
-  # exists at HEAD (the operator already ran the 3 reviewers locally via
-  # `/ai-sdlc execute` and signed the envelope), skip the 3 CI reviewer-agent
-  # invocations and instead post auto-approved verdicts via the post-skip-results
-  # job below.
-  #
-  # This is the COST-SAVING side: when local attestation is valid, we skip
-  # the CI-side reviewer fan-out (~$X of Anthropic credits per run). The
-  # merge-gate side is also restored as of AISDLC-193 — `verify-attestation.yml`
-  # posts `ai-sdlc/attestation` as a required status; `Post Review Results`
-  # remains required as the second-line check that CI-side review fired
-  # successfully when local attestation was missing.
-  attestation-precheck:
-    name: Attestation precheck
-    runs-on: ubuntu-latest
-    # AISDLC-214: only run on PR events; merge_group events are handled
-    # by the docs-only-check job above (which short-circuits with success for
-    # docs-only queue commits; code/mixed queue commits rely on verify-attestation.yml).
-    # AISDLC-218: also skip drafts (synchronize fires on draft pushes too).
-    # AISDLC-381: trigger migrated to pull_request_target — gate matches both
-    # the new event and the legacy one (forward-compatibility on revert).
-    # AISDLC-381 iter-2 CRITICAL fix: the release-please skip is only
-    # trusted for SAME-REPO PRs. A fork PR named `release-please--evil`
-    # would otherwise skip attestation-precheck entirely under
-    # pull_request_target, leaving `Post Review Results` (a required
-    # check) to fall through with no signal. Fork-source guard:
-    # `github.event.pull_request.head.repo.full_name == github.repository`.
-    if: >-
-      (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') &&
-      !(github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'release-please--')) &&
-      github.event.pull_request.draft == false
-    permissions:
-      contents: read
-    outputs:
-      # `true` when a valid envelope was found at HEAD — analyze job skips,
-      # post-skip-results job runs. `false` when missing/invalid — the
-      # existing analyze + report path runs unchanged.
-      skip: ${{ steps.verify.outputs.skip }}
-    steps:
-      # AISDLC-381 Safety guard #1: checkout MAIN (no `ref:`) — supplies
-      # scripts/verify-attestation.mjs + the orchestrator runtime barrel.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      # AISDLC-381 Safety guard #2 (AISDLC-704 revision): the fork's head is
-      # NEVER checked out in this pull_request_target job (Scorecard
-      # DangerousWorkflow alert 174). The only fork content the verifier needs
-      # is the signed envelope, which is fetched as DATA through the GitHub
-      # contents API with the head repo/sha bound to env vars, written straight
-      # to the path the verifier reads, and never executed.
-      - name: Stage fork envelope for verifier (DATA-ONLY API fetch)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          HEAD_REPO_FULL: ${{ github.event.pull_request.head.repo.full_name }}
-          BASE_REPO_FULL: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          mkdir -p .ai-sdlc/attestations
-          case "$HEAD_SHA" in
-            *[!0-9a-f]*|"") echo "::error::unexpected head sha"; exit 1 ;;
-          esac
-          ENVELOPE_PATH=".ai-sdlc/attestations/${HEAD_SHA}.dsse.json"
-          if gh api -H "Accept: application/vnd.github.raw" \
-              "repos/${HEAD_REPO_FULL}/contents/${ENVELOPE_PATH}?ref=${HEAD_SHA}" \
-              > "${ENVELOPE_PATH}.tmp" 2>/dev/null; then
-            mv -- "${ENVELOPE_PATH}.tmp" "${ENVELOPE_PATH}"
-            echo "[attestation-precheck] staged envelope for $HEAD_SHA"
-          else
-            rm -f -- "${ENVELOPE_PATH}.tmp"
-            echo "[attestation-precheck] no envelope present; verifier will report missing"
-          fi
-          # Fetch the fork HEAD SHA into main's git store for git diff ops.
-          if [ -n "${HEAD_REPO_FULL:-}" ] && [ "$HEAD_REPO_FULL" != "$BASE_REPO_FULL" ]; then
-            FORK_URL=$(gh api "repos/${HEAD_REPO_FULL}" --jq '.clone_url' 2>/dev/null || echo "")
-            if [ -n "$FORK_URL" ]; then
-              git fetch --no-tags "$FORK_URL" "+${HEAD_SHA}:refs/remotes/fork/${HEAD_SHA}" 2>/dev/null || true
-            fi
-          fi
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-          cache: pnpm
-
-      # AISDLC-381 Safety guard #3: pnpm install reads pnpm-lock.yaml +
-      # package.json from MAIN's checkout — fork content cannot inject a
-      # malicious preinstall/postinstall script here.
-      - name: Install (verifier needs the orchestrator runtime barrel)
-        run: pnpm install --frozen-lockfile
-
-      - name: Build orchestrator + dependencies
-        # `...` builds @ai-sdlc/orchestrator AND its workspace deps in topo order.
-        # The verifier imports compiled JS from orchestrator/dist/runtime/.
-        run: pnpm --filter "@ai-sdlc/orchestrator..." build
-
-      - name: Verify attestation (same logic as verify-attestation.yml)
-        id: verify
-        env:
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          # Run the canonical verifier — produces status=valid|invalid +
-          # reason on $GITHUB_OUTPUT (handled by buildGithubOutputLines in
-          # scripts/verify-attestation.mjs). We capture just the boolean
-          # "should we skip the CI reviewers?" signal in a separate output.
-          node scripts/verify-attestation.mjs > /tmp/verifier.log 2>&1 || true
-          cat /tmp/verifier.log
-
-          # Re-derive the skip decision by re-reading $GITHUB_OUTPUT. The
-          # verifier appends a heredoc-shaped status=… block; we match the
-          # final occurrence (defense-in-depth against an attacker padding
-          # the reason with extra status= lines).
-          STATUS=$(grep -E '^status=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-)
-          if [ "$STATUS" = "valid" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::Attestation valid — skipping CI reviewer fan-out (cost-saver)"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Attestation $STATUS — running CI reviewer fan-out"
-          fi
-
   # ── Job 1: Parallel Review Analysis (sandboxed) ──────────────────
   # Has ANTHROPIC_API_KEY but NO GitHub write access.
   # Defense: even if the LLM is compromised, it cannot modify the repo.
   #
-  # AISDLC-193: attestation is REQUIRED again (verify-attestation.yml posts
-  # the `ai-sdlc/attestation` commit status as a required gate). The
-  # `check_attestation` short-circuit + CI-side attestor signing remain
-  # removed (AISDLC-140 sub-4 originally removed them to break a `[skip ci]`
-  # chore-commit loop that deadlocked PRs #176/#177). The CI-side reviewer
-  # fan-out below is now a SECOND-line check: it runs whenever the local
-  # attestation precheck reports invalid/missing, posting `Post Review
-  # Results` deterministically. Both gates are required on `main`.
-  #
-  # AISDLC-147 patch 1: gated on attestation-precheck. When the precheck
-  # decides to skip (valid envelope at HEAD), this job is skipped and the
-  # `post-skip-results` job below posts auto-approved verdicts directly.
+  # AISDLC-824 trust predicate (same facts untrusted-pr-gate.yml uses: fork head
+  # repo, non-collaborator author, bot other than release-please). It is repeated
+  # verbatim on `report` (GitHub Actions has no shared expression); the workflow
+  # test asserts the two copies are identical. A trusted PR produces no check
+  # at all from this workflow.
   analyze:
     name: Analyze PR
-    needs: [attestation-precheck]
     runs-on: ubuntu-latest
-    # AISDLC-381: gate matches both pull_request and pull_request_target.
-    # AISDLC-381 iter-2 CRITICAL fix: same fork-source guard as
-    # attestation-precheck. A fork PR named `release-please--evil` must
-    # NOT be skipped here under pull_request_target.
-    # Dependabot PRs are exempt from CI-side LLM review (issue #791 model):
-    # gated by build/test + the dependency-review CVE gate in pr-ready instead.
-    # The automation-review-skip job posts the success status + APPROVE.
-    if: "(github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && !(github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'release-please--')) && needs.attestation-precheck.outputs.skip != 'true' && github.event.pull_request.user.login != 'dependabot[bot]'"
+    if: >-
+      github.event.pull_request.draft == false &&
+      !(github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'release-please--')) &&
+      (github.event.pull_request.head.repo.full_name != github.repository ||
+      github.event.pull_request.user.type == 'Bot' ||
+      !contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association))
     # AISDLC-142: analyze needs `pull-requests: read` to fetch existing PR
     # comments for the incremental-review marker. Read-only — write happens
     # in the `report` job (which already has `pull-requests: write`).
@@ -758,6 +470,19 @@ jobs:
             cp /tmp/pr-diff.txt /tmp/review-diff.txt
           fi
 
+      # AISDLC-824: fail loudly when the reviewer secret is absent. Without it the
+      # reviewers error out and the report job would post a REQUEST_CHANGES review
+      # on a PR nobody actually reviewed. Note: for Dependabot-authored runs the
+      # value comes from the repository's Dependabot secrets, not Actions secrets.
+      - name: Require reviewer API key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY}" ]; then
+            echo "::error::ANTHROPIC_API_KEY is not available to this run (Dependabot-authored PRs read Dependabot secrets, not Actions secrets); refusing to post a review without reviewers."
+            exit 1
+          fi
+
       - name: Run conditional review agents (classifier-gated subset)
         id: review
         env:
@@ -951,79 +676,18 @@ jobs:
   # ── Job 2: Post Reviews (write access, no LLM) ──────────────────
   # Has GitHub write access but NO ANTHROPIC_API_KEY.
   # Defense: this job only reads structured JSON — no LLM interaction.
-  # Dependabot review exemption (issue #791). Bot dependency bumps are gated by
-  # build/test + the dependency-review CVE gate in pr-ready, NOT by CI-side LLM
-  # review (analyze + report skip for dependabot[bot]). This self-contained job
-  # posts `Post Review Results: success` + an APPROVE so no stale
-  # CHANGES_REQUESTED blocks the PR. Mirrors the docs-only / attestation-skip
-  # short-circuit pattern.
-  automation-review-skip:
-    name: Auto-approve automation PR (Dependabot)
-    runs-on: ubuntu-latest
-    if: >-
-      (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') &&
-      github.event.pull_request.draft == false &&
-      github.event.pull_request.user.login == 'dependabot[bot]'
-    permissions:
-      pull-requests: write
-      statuses: write
-    steps:
-      - name: Post Review Results status (success, automation)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-        run: |
-          set -euo pipefail
-          gh api "repos/${REPO}/statuses/${HEAD_SHA}" \
-            -X POST \
-            -f state=success \
-            -f context='Post Review Results' \
-            -f description='automation PR — gated by build/test + dependency-review' \
-            -f target_url="${PR_URL}"
-          echo "Posted Post Review Results: success (Dependabot review exemption) on ${HEAD_SHA}"
-      - name: Post APPROVE review (clears any stale CHANGES_REQUESTED)
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const prNumber = context.payload.pull_request.number;
-            // Tolerate the 422 "approve your own PR" failure mode the same way
-            // the report + post-skip-results jobs do (the success status is the
-            // load-bearing signal; the APPROVE just clears stale CHANGES_REQUESTED).
-            try {
-              await github.rest.pulls.createReview({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: prNumber,
-                event: 'APPROVE',
-                body: [
-                  '<!-- ai-sdlc:automation-review-exempt -->',
-                  '## AI-SDLC: Automation PR — CI review skipped (issue #791)',
-                  '',
-                  'Dependabot dependency bumps are exempt from the CI-side LLM review.',
-                  'They are gated by **build/test** + the **dependency-review** CVE gate',
-                  '(high+ severity blocks `ai-sdlc/pr-ready`) instead of an LLM opinion.',
-                ].join('\n'),
-              });
-              core.info(`Posted APPROVE review on PR #${prNumber} (Dependabot review exemption)`);
-            } catch (err) {
-              if (err.status === 422 && /approve your own/i.test(err.message)) {
-                core.warning('Cannot self-approve PR — APPROVE skipped (success status still posted)');
-              } else {
-                throw err;
-              }
-            }
-
   report:
     name: Post Review Results
     runs-on: ubuntu-latest
     needs: [analyze]
-    # AISDLC-214: only run on PR events; merge_group is handled by docs-only-check.
-    # AISDLC-381: gate matches both pull_request and pull_request_target.
-    # Dependabot PRs skip the verdict-posting (no CHANGES_REQUESTED) — see analyze
-    # job + the automation-review-skip job (issue #791 Dependabot review exemption).
-    if: always() && (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && github.event.pull_request.user.login != 'dependabot[bot]'
+    # AISDLC-824: same trust predicate as `analyze` (untrusted PRs only).
+    if: >-
+      always() &&
+      github.event.pull_request.draft == false &&
+      !(github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'release-please--')) &&
+      (github.event.pull_request.head.repo.full_name != github.repository ||
+      github.event.pull_request.user.type == 'Bot' ||
+      !contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association))
     permissions:
       pull-requests: write
       issues: read
@@ -1589,128 +1253,3 @@ jobs:
               issue_number: context.payload.pull_request.number,
               body: '## AI-SDLC: Review Pipeline Failed\n\nThe automated review pipeline failed. See the [workflow run](' + context.serverUrl + '/' + context.repo.owner + '/' + context.repo.repo + '/actions/runs/' + context.runId + ') for details.\n\n*Reviewed by [AI-SDLC Review Agents](https://github.com/ai-sdlc-framework/ai-sdlc)*'
             });
-
-  # ── Job 3: Post auto-approved verdicts when attestation valid ────────
-  # AISDLC-147 patch 1: when `attestation-precheck` decided to skip the
-  # analyze fan-out (valid local DSSE envelope at HEAD), the analyze + report
-  # jobs are skipped. The `report` job still emits its job-level check
-  # (`Post Review Results: success`) because it runs to completion with all
-  # steps skipped — branch protection is satisfied.
-  #
-  # This job adds the operator-facing surface: posts an APPROVE PR review
-  # citing the attestation as the source of truth, AND posts an idempotent
-  # comment marker explaining the skip. Without this, an operator scanning
-  # the PR thread sees nothing (silent skip = confusing).
-  post-skip-results:
-    name: Post auto-approved verdicts (attestation valid)
-    runs-on: ubuntu-latest
-    needs: [attestation-precheck, analyze]
-    # AISDLC-214: only run on PR events; merge_group is handled by docs-only-check.
-    # AISDLC-381: gate matches both pull_request and pull_request_target.
-    if: |
-      always() &&
-      (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') &&
-      needs.attestation-precheck.result == 'success' &&
-      needs.attestation-precheck.outputs.skip == 'true' &&
-      needs.analyze.result == 'skipped'
-    permissions:
-      pull-requests: write
-      issues: read
-      # Defense in depth — also post the `Post Review Results` status via
-      # the API so the check lands even if the `report` job's auto-emitted
-      # job-level check is ever removed/renamed (e.g. by a future
-      # restructuring). Same pattern as `ai-sdlc-review-docs-only.yml`.
-      statuses: write
-    steps:
-      - name: Post Review Results status (auto-approved by attestation)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-        run: |
-          set -euo pipefail
-          gh api "repos/${REPO}/statuses/${HEAD_SHA}" \
-            -X POST \
-            -f state=success \
-            -f context='Post Review Results' \
-            -f description='auto-approved by local attestation' \
-            -f target_url="${PR_URL}"
-          echo "✓ Posted Post Review Results: success on ${HEAD_SHA} (attestation cost-saver path)"
-
-      - name: Post APPROVE review + idempotent comment marker
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const prNumber = context.payload.pull_request.number;
-            const marker = '<!-- ai-sdlc:reviewer-skipped-by-attestation -->';
-            const body = [
-              marker,
-              '## AI-SDLC: Reviewer Agents Skipped (Local Attestation Valid)',
-              '',
-              'A valid DSSE attestation envelope was found at',
-              '`.ai-sdlc/attestations/<HEAD-sha>.dsse.json` for this commit. The 3 review',
-              'agents were already run locally via `/ai-sdlc execute` and the verdict was',
-              'cryptographically signed against:',
-              '- Per-file content hash (`contentHashV3`)',
-              '- Review policy hash',
-              '- Reviewer agent file hashes',
-              '- Plugin version',
-              '',
-              'CI re-running the same 3 agents would produce the same verdict at the cost',
-              'of ~3 Anthropic API invocations. We trust the local attestation as a SOFT',
-              'signal and skip the duplicate review.',
-              '',
-              '_Note: attestation is required for code PRs (machine-enforced via the `ai-sdlc/pr-ready` rollup). Docs-only PRs skip the check entirely._',
-              '_The `re-actors/alls-green` aggregator (`ai-sdlc/pr-ready`) is the single merge gate._',
-              '',
-              '*Posted by [AI-SDLC Review Agents](https://github.com/ai-sdlc-framework/ai-sdlc) — attestation cost-saver*',
-            ].join('\n');
-
-            // Idempotent comment — find prior by marker, update in place.
-            const { data: existing } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-              per_page: 100,
-            });
-            const prior = existing.find((c) => typeof c.body === 'string' && c.body.includes(marker));
-            if (prior) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: prior.id,
-                body,
-              });
-              core.info(`Updated existing attestation-skip comment ${prior.id} on PR #${prNumber}`);
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-                body,
-              });
-              core.info(`Posted new attestation-skip comment on PR #${prNumber}`);
-            }
-
-            // Post a fresh APPROVE PR review so branch protection's
-            // `dismiss_stale_reviews: true` doesn't strand auto-merge after
-            // a force-push (mirrors the AISDLC-74 force-push recovery
-            // documented in CLAUDE.md). We tolerate the 422 "approve your
-            // own PR" failure mode the same way the report job does.
-            try {
-              await github.rest.pulls.createReview({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: prNumber,
-                event: 'APPROVE',
-                body: 'Auto-approved: a valid local DSSE attestation envelope is present on the PR head SHA, so the CI-side reviewer fan-out is skipped as a cost-saver (the local attestation IS the review). See docs/operations/quality-gate.md for the attestation chain.',
-              });
-              core.info(`Posted APPROVE review on PR #${prNumber} (attestation cost-saver)`);
-            } catch (err) {
-              if (err.status === 422 && /approve your own/i.test(err.message)) {
-                core.warning('Cannot self-approve PR — APPROVE review skipped (comment + status still posted)');
-              } else {
-                throw err;
-              }
-            }
