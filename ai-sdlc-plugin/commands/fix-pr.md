@@ -42,8 +42,7 @@ if [ -n "$RUN_ID" ]; then
 fi
 ```
 
-`executeFixCI` checks the `<!-- ai-sdlc-fix-ci-attempt -->` marker
-comments on the PR and refuses to retry past `MAX_FIX_ATTEMPTS`. If it
+`executeFixCI` checks the attempt-marker comments on the PR and refuses to retry past `MAX_FIX_ATTEMPTS`. If it
 hits the cap, surface the message — don't paper over it.
 
 ## Step 3 — Fix review findings

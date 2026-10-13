@@ -2,8 +2,8 @@
 # check-branch-name-resolution.test.sh — regression test for branch-name
 # resolution rule (AISDLC-369).
 #
-# Guards that the branch-name resolution logic used in auto-rearm-on-dequeue.yml
-# and verify-attestation.yml correctly handles:
+# Guards that the branch-name resolution logic used in verify-attestation.yml
+# correctly handles:
 #   1. Standard branch names (short, no special chars)
 #   2. Long branch names (> 64 chars, common for ai-sdlc/* prefixed branches)
 #   3. Release-please branch name detection (release-please--* prefix)
@@ -86,21 +86,11 @@ echo "3. Branch-name resolution correctness (static rule check)"
 # any shell script in the project that computes branch names uses the
 # single-PR API pattern.
 #
-# This test scans the scripts that implement auto-rearm and verify-attestation
+# This test scans the scripts that implement verify-attestation
 # to ensure they use the correct pattern.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKFLOWS_DIR="$(cd "${SCRIPT_DIR}/../.github/workflows" && pwd)"
-
-# auto-rearm-on-dequeue.yml must use `gh pr view` (single-PR endpoint) not
-# `gh pr list --json headRefName` for branch-name lookup in the re-arm loop.
-REARM_YML="${WORKFLOWS_DIR}/auto-rearm-on-dequeue.yml"
-if [ -f "$REARM_YML" ]; then
-  check "auto-rearm uses gh pr view for branch name" "true" \
-    "$(grep -q 'gh pr view.*headRefName' "$REARM_YML" && echo 'true' || echo 'false')"
-else
-  echo "  SKIP: ${REARM_YML} not found (expected in this PR)"
-fi
 
 # verify-attestation.yml uses `gh pr view` for the merge_group source PR lookup.
 VERIFY_YML="${WORKFLOWS_DIR}/verify-attestation.yml"

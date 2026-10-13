@@ -1344,7 +1344,6 @@ specific workflows currently in scope are:
 - `.github/workflows/verify-attestation.yml` (posts `ai-sdlc/attestation`)
 - `.github/workflows/ai-sdlc-review.yml` (posts `Post Review Results` + review comments)
 - `.github/workflows/auto-enable-auto-merge.yml` (arms auto-merge on PR open)
-- `.github/workflows/auto-rearm-on-dequeue.yml` (re-arms after queue dequeue)
 
 #### Guard 1 — Workflow logic checks out the TARGET repo's main, NOT the fork's HEAD
 
@@ -1456,7 +1455,6 @@ permissions and secrets they need. Suggested matrix:
 | `ai-sdlc-review.yml` (analyze) | `contents:read`, `pull-requests:read` | `ANTHROPIC_API_KEY`, `MARKER_HMAC_SECRET` |
 | `ai-sdlc-review.yml` (report) | `pull-requests:write`, `issues:read`, `statuses:write` | `github.token`, `SLACK_BOT_TOKEN` |
 | `auto-enable-auto-merge.yml` | `pull-requests:write` | `AI_SDLC_PAT` |
-| `auto-rearm-on-dequeue.yml` | `pull-requests:write` | `AI_SDLC_PAT` |
 
 NEVER:
 
@@ -1512,8 +1510,7 @@ re-trigger procedure is:
 gh pr checks <pr-number>          # confirm current status
 gh workflow run verify-attestation.yml --ref <fork-branch-ref>
 gh workflow run ai-sdlc-review.yml --ref <fork-branch-ref>
-# auto-enable + auto-rearm re-fire automatically on the next push
-# (and via the */5 cron poll for auto-rearm)
+# auto-enable re-fires automatically on the next push
 ```
 
 If the fork PR still fails after re-trigger, capture the workflow run

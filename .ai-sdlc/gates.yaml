@@ -113,23 +113,11 @@ gates:
     owner: engineering
     property: arms auto-merge (squash) on same-repo PRs; not a quality gate
     baseline: true
-  - id: workflow:auto-rearm-on-dequeue.yml
-    surface: pr-workflow
-    origin: AISDLC-369, AISDLC-381, AISDLC-400
-    owner: engineering
-    property: keeps auto-merge armed after a dequeue; safety net, not a quality gate
-    baseline: true
   - id: workflow:dor-ingress.yml
     surface: pr-workflow
     origin: RFC-0011 section 5.2, AISDLC-161, AISDLC-379
     owner: engineering
     property: fails Evaluate backlog tasks changed by PR on unresolved Definition-of-Ready violations
-    baseline: true
-  - id: workflow:isolated-review.yml
-    surface: pr-workflow
-    origin: RFC-0047 Phase 4, AISDLC-596
-    owner: security
-    property: isolated reviewer run (opt-in, skipped on almost every PR)
     baseline: true
   - id: workflow:require-issue-link.yml
     surface: pr-workflow

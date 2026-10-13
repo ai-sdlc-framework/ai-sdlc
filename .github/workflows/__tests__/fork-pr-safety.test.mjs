@@ -1,8 +1,8 @@
 /**
  * Tests for `.github/workflows/*.yml` — AISDLC-381 fork-PR safety pattern.
  *
- * Migrates 4 workflows (`verify-attestation.yml`, `ai-sdlc-review.yml`,
- * `auto-enable-auto-merge.yml`, `auto-rearm-on-dequeue.yml`) from
+ * Migrates 3 workflows (`verify-attestation.yml`, `ai-sdlc-review.yml`,
+ * `auto-enable-auto-merge.yml`) from
  * `pull_request` to `pull_request_target` so the required GitHub Actions
  * app posts statuses + comments on fork PRs (witnessed at PR #568:
  * external-contributor PRs blocked at the merge queue because fork
@@ -30,8 +30,8 @@
  *   5. Minimum-needed permissions + no signing keys leaked into fork
  *      data flow paths.
  *
- * The first 4 workflows (verify-attestation, ai-sdlc-review,
- * auto-enable-auto-merge, auto-rearm-on-dequeue) are validated here.
+ * The first 3 workflows (verify-attestation, ai-sdlc-review,
+ * auto-enable-auto-merge) are validated here.
  *
  * AC-5 (open a test fork PR end-to-end) and AC-6 (re-trigger PR #568's
  * CI) are OPERATOR ACTIONS — cannot be exercised hermetically. See the
@@ -71,7 +71,6 @@ const AFFECTED_WORKFLOWS = [
   'verify-attestation.yml',
   'ai-sdlc-review.yml',
   'auto-enable-auto-merge.yml',
-  'auto-rearm-on-dequeue.yml',
 ];
 
 // Flatten every `steps:` block of every job in a workflow into a single
@@ -210,19 +209,6 @@ describe('AISDLC-381: AC #3 — workflow permissions blocks are correct', () => 
       'auto-enable-auto-merge.yml must NOT have contents:write (fork-PR safety guard #5; only needs pull-requests:write)',
     );
   });
-
-  it('auto-rearm-on-dequeue.yml: pull-requests:write, no contents:write', () => {
-    const wf = loadYaml('auto-rearm-on-dequeue.yml');
-    assert.equal(wf.permissions['pull-requests'], 'write');
-    // AISDLC-381 iter-2 MINOR (security-reviewer): same as auto-enable —
-    // only uses `gh pr merge` / `gh pr view`, no git writes; drop
-    // `contents: write` to reduce blast radius under pull_request_target.
-    assert.notEqual(
-      wf.permissions.contents,
-      'write',
-      'auto-rearm-on-dequeue.yml must NOT have contents:write (fork-PR safety guard #5; only needs pull-requests:write)',
-    );
-  });
 });
 
 describe('AISDLC-381 iter-2: release-please short-circuits require fork-source guard', () => {
@@ -331,7 +317,7 @@ describe('AISDLC-381: AC #4 (safety guard #1) — workflow logic uses target mai
   // `ref: ${{ github.event.pull_request.head.sha }}` — that would put
   // fork content in the working tree where subsequent `pnpm install` /
   // `node scripts/...` steps would execute it with the elevated token.
-  // Auto-enable + auto-rearm don't checkout at all (no scripts to run).
+  // Auto-enable does not checkout at all (no scripts to run).
 
   it('verify-attestation.yml: first checkout has no ref (defaults to target main)', () => {
     const wf = loadYaml('verify-attestation.yml');
@@ -381,12 +367,6 @@ describe('AISDLC-381: AC #4 (safety guard #1) — workflow logic uses target mai
     const checkouts = checkoutSteps(wf);
     assert.equal(checkouts.length, 0, 'auto-enable-auto-merge.yml must not check out any content');
   });
-
-  it('auto-rearm-on-dequeue.yml has NO checkout steps (no fork content needed)', () => {
-    const wf = loadYaml('auto-rearm-on-dequeue.yml');
-    const checkouts = checkoutSteps(wf);
-    assert.equal(checkouts.length, 0, 'auto-rearm-on-dequeue.yml must not check out any content');
-  });
 });
 
 describe('AISDLC-381: AC #4 (safety guard #2) — fork checkouts are sandboxed under pr-content/', () => {
@@ -427,12 +407,7 @@ describe('AISDLC-704: privileged workflows never check out untrusted refs or int
   const UNTRUSTED_REF =
     /github\.event\.(pull_request\.head\.(sha|ref)|workflow_run\.head_(branch|sha))/;
 
-  for (const name of [
-    'ai-sdlc-review.yml',
-    'ai-sdlc-fix-ci.yml',
-    'verify-attestation.yml',
-    'untrusted-pr-gate.yml',
-  ]) {
+  for (const name of ['ai-sdlc-review.yml', 'verify-attestation.yml', 'untrusted-pr-gate.yml']) {
     it(`${name}: no actions/checkout uses an untrusted head ref`, () => {
       const wf = loadYaml(name);
       for (const { jobId, step } of allSteps(wf)) {
@@ -457,108 +432,6 @@ describe('AISDLC-704: privileged workflows never check out untrusted refs or int
       }
     });
   }
-
-  it('ai-sdlc-fix-ci.yml triggers on the PR gate workflow (ci.yml no longer runs on pull_request, AISDLC-727)', () => {
-    const wf = loadYaml('ai-sdlc-fix-ci.yml');
-    const on = wf.on ?? wf[true];
-    assert.deepEqual(on.workflow_run.workflows, [loadYaml('ai-sdlc-gate.yml').name]);
-  });
-
-  it('ai-sdlc-fix-ci.yml privileged root checkout is the default branch; PR branch goes to pr-work/', () => {
-    const wf = loadYaml('ai-sdlc-fix-ci.yml');
-    const steps = wf.jobs['fix-ci'].steps;
-    const checkout = steps.find(
-      (s) => typeof s.uses === 'string' && s.uses.startsWith('actions/checkout@'),
-    );
-    assert.equal(checkout.with.ref, undefined);
-    const fetchStep = steps.find((s) => /pr-work/.test(s.run ?? '') && /worktree add/.test(s.run));
-    assert.ok(fetchStep, 'PR branch must be fetched into a separate pr-work worktree');
-    assert.equal(fetchStep.env.HEAD_BRANCH, '${{ github.event.workflow_run.head_branch }}');
-    const run = steps.find((s) => /pnpm --filter \S+ fix-ci\b/.test(s.run ?? ''));
-    assert.ok(run, 'fix-ci pipeline step must exist');
-    assert.match(run.env.AI_SDLC_FIX_CI_WORKDIR, /pr-work$/);
-  });
-
-  it('ai-sdlc-fix-ci.yml: PAT is not persisted; PR code installs without scripts or credentials', () => {
-    const wf = loadYaml('ai-sdlc-fix-ci.yml');
-    for (const jobId of ['fix-ci', 'push-fix']) {
-      const checkout = wf.jobs[jobId].steps.find(
-        (s) => typeof s.uses === 'string' && s.uses.startsWith('actions/checkout@'),
-      );
-      assert.equal(checkout.with['persist-credentials'], false);
-      assert.equal(checkout.with.token, undefined, 'checkout must not receive the PAT');
-    }
-    const steps = wf.jobs['fix-ci'].steps;
-    // Nothing writes credentials into the shared .git/config.
-    for (const step of [...steps, ...wf.jobs['push-fix'].steps]) {
-      assert.ok(
-        !/git(\s+-C\s+\S+)?\s+config\s+[^\n]*extraheader/.test(step.run ?? ''),
-        'extraheader must not be persisted via git config',
-      );
-    }
-    const prInstall = steps.find(
-      (s) => s['working-directory'] === 'pr-work' && /pnpm install/.test(s.run ?? ''),
-    );
-    assert.match(prInstall.run, /--ignore-scripts/);
-    assert.match(prInstall.run, /--ignore-pnpmfile/);
-    assert.match(prInstall.run, /--store-dir/, 'pr-work install must use its own pnpm store');
-  });
-});
-
-describe('AISDLC-704.5: fix-ci is split into an unprivileged agent job and a privileged push job', () => {
-  const wf = loadYaml('ai-sdlc-fix-ci.yml');
-  const agentSteps = wf.jobs['fix-ci'].steps;
-  const pushSteps = wf.jobs['push-fix'].steps;
-
-  it('the agent job has read-only contents and the write PAT appears nowhere in it', () => {
-    assert.equal(wf.jobs['fix-ci'].permissions.contents, 'read');
-    assert.ok(!/secrets\.AI_SDLC_PAT/.test(JSON.stringify(wf.jobs['fix-ci'])));
-    const pipeline = agentSteps.find((s) => /pnpm --filter \S+ fix-ci\b/.test(s.run ?? ''));
-    assert.equal(pipeline.env.AI_SDLC_FIX_CI_SKIP_PUSH, '1');
-    assert.ok(!/GIT_CONFIG_/.test(pipeline.run), 'no git auth in the agent job');
-  });
-
-  it('PR-code steps run with the runner file-command variables unset', () => {
-    const prCode = agentSteps.filter(
-      (s) => s['working-directory'] === 'pr-work' || /pnpm --filter \S+ fix-ci\b/.test(s.run ?? ''),
-    );
-    assert.ok(prCode.length >= 3);
-    for (const step of prCode) {
-      assert.match(step.run, /unset GITHUB_ENV GITHUB_PATH/, step.name);
-    }
-  });
-
-  it('the push job is the only holder of the PAT, needs the agent job, and pushes without hooks', () => {
-    assert.equal(wf.jobs['push-fix'].permissions.contents, 'write');
-    assert.deepEqual([].concat(wf.jobs['push-fix'].needs), ['fix-ci']);
-    const push = pushSteps.find((s) => /git .*push/.test(s.run ?? ''));
-    assert.match(push.env.GITHUB_TOKEN, /secrets\.AI_SDLC_PAT/);
-    assert.match(push.run, /-c core\.hooksPath=\/dev\/null/);
-    assert.match(push.run, /--no-verify/);
-    assert.match(push.run, /merge-base --is-ancestor/);
-    assert.match(push.run, /bundle verify/);
-    assert.match(push.run, /transfer\.fsckObjects=true/);
-    assert.match(push.run, /diff --no-renames --name-only/);
-    assert.match(push.run, /\\\.github/);
-  });
-
-  it('the agent job does not save a pnpm cache after running PR code', () => {
-    const node = agentSteps.find((x) => (x.uses ?? '').startsWith('actions/setup-node@'));
-    assert.equal(node.with.cache, undefined);
-  });
-
-  it('the push job never installs, builds or runs PR code', () => {
-    for (const step of pushSteps) {
-      assert.ok(!/pnpm|npm |node |working-directory/.test(step.run ?? ''), step.name);
-      assert.equal(step['working-directory'], undefined);
-    }
-  });
-
-  it('the diagnostics copy does not follow symlinks', () => {
-    const collect = agentSteps.find((s) => s.name === 'Collect pipeline artifacts');
-    assert.match(collect.run, /\[ ! -L "\$SRC" \]/);
-    assert.match(collect.run, /cp -P/);
-  });
 });
 
 describe('AISDLC-592 / AISDLC-704.6: no checkout opts into allow-unsafe-pr-checkout', () => {
@@ -748,7 +621,7 @@ describe('AISDLC-381: AC #4 (safety guard #5) — secrets are not leaked into fo
   // Allowed — these secrets DO appear in some fork-impacted workflows
   // and the documentation below justifies why each is safe:
   //
-  // - `AI_SDLC_PAT` (auto-enable-auto-merge.yml + auto-rearm-on-dequeue.yml)
+  // - `AI_SDLC_PAT` (auto-enable-auto-merge.yml)
   //   The PAT is only used to call `gh pr merge --auto` and `gh pr view`
   //   against the TARGET repo. Both workflows have NO `actions/checkout`,
   //   NO `pnpm install`, and NO `node`/`bash` invocation against
@@ -834,7 +707,7 @@ describe('AISDLC-381: regression — required statuses still produced for same-r
 describe('AISDLC-704: every $VAR in a run: block of the changed workflows is declared in that step', () => {
   // Names the runner provides or that are conventional shell/GitHub built-ins.
   const BUILTIN = /^(GITHUB_|RUNNER_|HOME$|PATH$|PWD$|CI$|TMPDIR$|USER$|IFS$|RANDOM$)/;
-  for (const name of ['ai-sdlc-review.yml', 'ai-sdlc-fix-ci.yml', 'verify-attestation.yml']) {
+  for (const name of ['ai-sdlc-review.yml', 'verify-attestation.yml']) {
     it(`${name}: no unbound env references`, () => {
       const wf = loadYaml(name);
       for (const { jobId, step } of allSteps(wf)) {

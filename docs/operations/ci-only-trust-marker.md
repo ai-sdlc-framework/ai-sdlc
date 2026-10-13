@@ -66,7 +66,7 @@ operator-signed claim.
 
    ```yaml
      - identity: 'ci-only@ai-sdlc.io'
-       machine: 'gha-isolated-review-job'
+       machine: 'gha-ci-only-signer-job'
        addedAt: '2026-09-06'
        addedBy: 'deefactorial'
        ciOnly: true
