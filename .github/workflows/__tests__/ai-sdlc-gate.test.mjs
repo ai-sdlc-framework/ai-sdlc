@@ -172,6 +172,8 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       'independence-policy-gate',
       'dependency-review-gate',
       'dor-readiness-gate',
+      // AISDLC-764: changelog, scope-creep, OQ-marker and reviewer-set checks.
+      'governance-gate',
       'pr-ready',
     ];
     assert.deepEqual(Object.keys(workflow.jobs).sort(), expectedJobs.sort());
@@ -789,5 +791,47 @@ describe('ai-sdlc-gate.yml — coexistence with legacy workflows (AISDLC-140 sub
       const contents = readFileSync(path, 'utf-8');
       assert.ok(contents.length > 0, `${legacy} must still exist (cutover is sub-3, not sub-1)`);
     }
+  });
+});
+
+describe('governance-gate (AISDLC-764)', () => {
+  const wf = loadYaml(WORKFLOW_PATH);
+  const job = wf.jobs['governance-gate'];
+  const steps = JSON.stringify(job.steps);
+
+  it('is a required input of the pr-ready rollup and is not an allowed skip', () => {
+    assert.ok(wf.jobs['pr-ready'].needs.includes('governance-gate'));
+    const allowed = wf.jobs['pr-ready'].steps[0].with['allowed-skips'];
+    assert.ok(!/governance-gate/.test(allowed));
+  });
+  it('checks out full history and runs the PR checks and the OQ scan', () => {
+    assert.equal(job.steps[0].with['fetch-depth'], 0);
+    assert.match(steps, /scripts\/check-pr-governance\.mjs\\" all/);
+    assert.match(steps, /scripts\/check-rfc-docs\.mjs\\" --oq-scan/);
+    assert.match(steps, /--docs-only/);
+  });
+  it('runs the checkers from the base commit, degrading to head copies with a warning', () => {
+    const select = job.steps.find((x) => /trusted checker scripts/i.test(x.name ?? ''));
+    assert.ok(select, 'a trusted-script selection step exists');
+    assert.match(select.run, /git archive "\$BASE_SHA" scripts pipeline-cli\/attestation-core/);
+    assert.match(select.run, /::warning::base commit lacks the governance checkers/);
+    assert.ok(!/node scripts\/check-(pr-governance|rfc-docs)/.test(steps));
+  });
+  it('passes repo identity so the release-please exemption is not branch-name only', () => {
+    assert.match(steps, /--head-repo/);
+    assert.match(steps, /--base-repo/);
+    assert.match(steps, /github\.event\.pull_request\.head\.repo\.full_name/);
+  });
+  it('fetches approving reviews itself and never trusts PR body text for OQ approval', () => {
+    const oq = job.steps.find((x) => /Open Questions/.test(x.name ?? ''));
+    assert.match(oq.run, /gh api --paginate "repos\/\$REPO\/pulls\/\$PR_NUMBER\/reviews"/);
+    assert.match(oq.run, /--approving-logins-file/);
+    assert.match(oq.run, /--pr-author/);
+    assert.ok(!/pr-body|PR_BODY/.test(JSON.stringify(oq)));
+    assert.equal(job.permissions['pull-requests'], 'read');
+  });
+  it('passes untrusted PR text through env, never inline in the script', () => {
+    const run = job.steps.map((s) => s.run ?? '').join('\n');
+    assert.ok(!/\$\{\{\s*github\.event\.pull_request\.(title|body)/.test(run));
   });
 });

@@ -38,6 +38,12 @@ import {
   REQUIRES_OK_LIFECYCLES,
   KNOWN_CAPABILITY_IDS,
   validateRuntimeEvidence,
+  findNewOqResolutionMarkers,
+  openQuestionsLines,
+  OQ_SECTION_HEADING_REGEX,
+  parseApproverIdentities,
+  checkOqResolutionMarkers,
+  parseNameStatusZ,
 } from './check-rfc-docs.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -1430,5 +1436,236 @@ describe('rfc.schema.json runtimeEvidence', () => {
     assert.equal(validate({ ...base, runtimeEvidence: [{ ...good, status: 'bogus' }] }), false);
     const { capability: _c, ...noCap } = good;
     assert.equal(validate({ ...base, runtimeEvidence: [noCap] }), false);
+  });
+});
+
+describe('AISDLC-764: OQ-resolution marker scan', () => {
+  const rfc = (oq) =>
+    `---\nid: RFC-9999\n---\n# T\n\n## Summary\n**Resolution:** not an OQ\n\n## Open Questions\n${oq}\n\n## Next\nRESOLVED: elsewhere\n`;
+
+  it('openQuestionsLines returns only the OQ section', () => {
+    assert.deepEqual(
+      openQuestionsLines(rfc('- OQ-1 a')).filter((l) => l.trim()),
+      ['- OQ-1 a'],
+    );
+    assert.deepEqual(openQuestionsLines(null), []);
+  });
+
+  it('flags each marker form added in Open Questions and ignores other sections', () => {
+    for (const marker of ['**Resolution:** use A', 'RESOLVED: use A', '\u2705 RESOLVED use A']) {
+      const added = findNewOqResolutionMarkers(rfc('- OQ-1 a'), rfc(`- OQ-1 a\n  ${marker}`));
+      assert.equal(added.length, 1, marker);
+    }
+    assert.deepEqual(findNewOqResolutionMarkers(rfc('- OQ-1 a'), rfc('- OQ-1 a')), []);
+  });
+
+  it('does not flag a pre-existing marker, but flags a new RFC with one', () => {
+    const withMarker = rfc('- OQ-1\n  **Resolution:** done');
+    assert.deepEqual(findNewOqResolutionMarkers(withMarker, withMarker), []);
+    assert.equal(findNewOqResolutionMarkers(null, withMarker).length, 1);
+  });
+
+  it('detects a marker under each numbered / lettered / suffixed heading form', () => {
+    const forms = [
+      '## 8. Open Questions',
+      '## 13. Open Questions',
+      '## B.12 Open Questions \u2014 Final Dispositions',
+      '## Open Questions (Remaining)',
+      '### Open Questions',
+    ];
+    for (const heading of forms) {
+      const doc = (oq) => `# T\n\n## Summary\n\n${heading}\n${oq}\n\n## Next\nx\n`;
+      const added = findNewOqResolutionMarkers(
+        doc('- OQ-1 a'),
+        doc('- OQ-1 a\n  **Resolution:** A'),
+      );
+      assert.equal(added.length, 1, heading);
+    }
+  });
+
+  it('section end: ### inside a ## section stays in; next ## ends; ### section ends at ### or ##', () => {
+    const inner = '## Open Questions\nq1\n### Sub\nq2\n## After\nout\n';
+    assert.deepEqual(openQuestionsLines(inner), ['q1', '### Sub', 'q2']);
+    const h3 = '### Open Questions\nq1\n#### Deep\nq2\n### Sibling\nout\n';
+    assert.deepEqual(openQuestionsLines(h3), ['q1', '#### Deep', 'q2']);
+    assert.deepEqual(openQuestionsLines('### Open Questions\nq1\n## Top\nout\n'), ['q1']);
+  });
+
+  it('corpus: every level-2/3 "Open Questions" heading in spec/rfcs matches the scan regex', () => {
+    const dir = join(__dirname, '..', 'spec', 'rfcs');
+    const missed = [];
+    for (const f of listRfcFiles(dir)) {
+      for (const line of readFileSync(f, 'utf-8').split('\n')) {
+        if (/^#{2,3}\s/.test(line) && /Open Questions/i.test(line)) {
+          if (!OQ_SECTION_HEADING_REGEX.test(line)) missed.push(`${f}: ${line}`);
+        }
+      }
+    }
+    assert.deepEqual(missed, []);
+  });
+
+  it('does not scan non-spec/rfcs paths', () => {
+    const d = mkdtempSync(join(tmpdir(), 'oq-neg-'));
+    try {
+      const git = (...a) => spawnSync('git', a, { cwd: d, encoding: 'utf-8' });
+      git('init', '-q', '-b', 'main');
+      git('config', 'user.email', 't@t');
+      git('config', 'user.name', 't');
+      mkdirSync(join(d, 'docs'), { recursive: true });
+      writeFileSync(join(d, 'docs', 'policy.md'), '# P\n\n## Open Questions Policy\nx\n');
+      git('add', '-A');
+      git('commit', '-qm', 'base');
+      git('checkout', '-qb', 'feat');
+      writeFileSync(
+        join(d, 'docs', 'policy.md'),
+        '# P\n\n## Open Questions Policy\nx\n**Resolution:** y\n',
+      );
+      git('commit', '-qam', 'edit');
+      const r = checkOqResolutionMarkers({ repoRoot: d, baseRef: 'main', headRef: 'feat' });
+      assert.deepEqual(r.failures, []);
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it('parses approver identities', () => {
+    assert.deepEqual(
+      [...parseApproverIdentities("operators:\n  - identity: deefactorial\n    addedAt: 'x'\n")],
+      ['deefactorial'],
+    );
+  });
+
+  describe('against a real git repo', () => {
+    const dirs = [];
+    after(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
+    const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf-8' });
+    function mkRepo() {
+      const d = mkdtempSync(join(tmpdir(), 'oq-scan-'));
+      dirs.push(d);
+      git(d, 'init', '-q', '-b', 'main');
+      git(d, 'config', 'user.email', 't@t');
+      git(d, 'config', 'user.name', 't');
+      mkdirSync(join(d, 'spec', 'rfcs'), { recursive: true });
+      mkdirSync(join(d, '.ai-sdlc'), { recursive: true });
+      writeFileSync(
+        join(d, '.ai-sdlc', 'lifecycle-approvers.yaml'),
+        'operators:\n  - identity: opr\n',
+      );
+      writeFileSync(join(d, 'spec', 'rfcs', 'RFC-9999-x.md'), rfc('- OQ-1 a'));
+      git(d, 'add', '-A');
+      git(d, 'commit', '-qm', 'base');
+      git(d, 'checkout', '-qb', 'feat');
+      writeFileSync(
+        join(d, 'spec', 'rfcs', 'RFC-9999-x.md'),
+        rfc('- OQ-1 a\n  **Resolution:** pick A'),
+      );
+      git(d, 'commit', '-qam', 'resolve');
+      return d;
+    }
+
+    it('fails a PR that adds a marker with no approval', () => {
+      const d = mkRepo();
+      const r = checkOqResolutionMarkers({
+        repoRoot: d,
+        baseRef: 'main',
+        headRef: 'feat',
+        prBody: '',
+      });
+      assert.equal(r.failures.length, 1);
+      assert.match(r.failures[0], /Open Questions resolution marker/);
+    });
+
+    it('passes only with an approving login on the allowlist who is not the PR author', () => {
+      const d = mkRepo();
+      const scan = (extra) =>
+        checkOqResolutionMarkers({ repoRoot: d, baseRef: 'main', headRef: 'feat', ...extra });
+      const ok = scan({ approvingLogins: ['opr'], prAuthor: 'dev' });
+      assert.deepEqual(ok.failures, []);
+      assert.equal(ok.approvedBy, 'opr');
+      // stranger, self-approval (case-insensitive), and no approvals all fail
+      assert.equal(scan({ approvingLogins: ['evil'], prAuthor: 'dev' }).failures.length, 1);
+      assert.equal(scan({ approvingLogins: ['opr'], prAuthor: 'OPR' }).failures.length, 1);
+      assert.equal(scan({ prAuthor: 'dev' }).failures.length, 1);
+    });
+
+    it('ignores a forged PR-body approval marker', () => {
+      const d = mkRepo();
+      const r = checkOqResolutionMarkers({
+        repoRoot: d,
+        baseRef: 'main',
+        headRef: 'feat',
+        prBody: '<!-- ai-sdlc:oq-resolution-approved-by:opr reason:x -->',
+      });
+      assert.equal(r.failures.length, 1);
+    });
+
+    it('follows renames: a pure rename adds no marker, a rename that adds one fails', () => {
+      const d = mkRepo();
+      git(d, 'checkout', '-q', 'main');
+      git(d, 'checkout', '-qb', 'ren');
+      git(d, 'mv', 'spec/rfcs/RFC-9999-x.md', 'spec/rfcs/RFC-9999-y.md');
+      git(d, 'commit', '-qm', 'rename');
+      const pure = checkOqResolutionMarkers({ repoRoot: d, baseRef: 'main', headRef: 'ren' });
+      assert.deepEqual(pure.failures, []);
+      writeFileSync(
+        join(d, 'spec', 'rfcs', 'RFC-9999-y.md'),
+        rfc('- OQ-1 a\n  **Resolution:** pick A'),
+      );
+      git(d, 'commit', '-qam', 'resolve after rename');
+      const bad = checkOqResolutionMarkers({ repoRoot: d, baseRef: 'main', headRef: 'ren' });
+      assert.equal(bad.failures.length, 1);
+      assert.match(bad.failures[0], /RFC-9999-y\.md/);
+    });
+
+    it('parseNameStatusZ reads plain and rename entries', () => {
+      assert.deepEqual(parseNameStatusZ('A\0a.md\0R090\0o.md\0n.md\0'), [
+        { status: 'A', path: 'a.md' },
+        { status: 'R', oldPath: 'o.md', path: 'n.md' },
+      ]);
+      assert.deepEqual(parseNameStatusZ(''), []);
+    });
+
+    it('passes when no marker is added and fails closed on a bad ref or missing base', () => {
+      const d = mkRepo();
+      assert.deepEqual(
+        checkOqResolutionMarkers({ repoRoot: d, baseRef: 'main', headRef: 'main' }).failures,
+        [],
+      );
+      assert.match(
+        checkOqResolutionMarkers({ repoRoot: d, baseRef: 'nope', headRef: 'feat' }).failures[0],
+        /cannot diff/,
+      );
+      assert.match(checkOqResolutionMarkers({ repoRoot: d }).failures[0], /no base ref/);
+    });
+
+    it('CLI --oq-scan fails closed on a missing base or an unreadable logins file', () => {
+      const script = join(__dirname, 'check-rfc-docs.mjs');
+      const clean = spawnSync('node', [script, '--oq-scan', '--base-ref', 'HEAD'], {
+        encoding: 'utf-8',
+      });
+      assert.equal(clean.status, 0, clean.stderr);
+      const noBase = spawnSync('node', [script, '--oq-scan'], { encoding: 'utf-8' });
+      assert.equal(noBase.status, 1);
+      const d = mkdtempSync(join(tmpdir(), 'oq-logins-'));
+      dirs.push(d);
+      writeFileSync(join(d, 'bad.json'), '{"not":"an array"}');
+      for (const f of [join(d, 'missing.json'), join(d, 'bad.json')]) {
+        const r = spawnSync(
+          'node',
+          [script, '--oq-scan', '--base-ref', 'HEAD', '--approving-logins-file', f],
+          { encoding: 'utf-8' },
+        );
+        assert.equal(r.status, 1, f);
+        assert.match(r.stderr, /cannot read approving logins/);
+      }
+      const ok = join(d, 'ok.json');
+      writeFileSync(ok, '["opr"]');
+      const good = spawnSync(
+        'node',
+        [script, '--oq-scan', '--base-ref', 'HEAD', '--approving-logins-file', ok],
+        { encoding: 'utf-8' },
+      );
+      assert.equal(good.status, 0, good.stderr);
+    });
   });
 });
