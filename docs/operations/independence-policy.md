@@ -38,14 +38,14 @@ separate, deliberately scoped follow-up (AISDLC-597), which has now shipped:
 - **Infra prerequisites.** Before setting `requiredTier: isolated` in a live
   policy file, your repo needs: (1) a registered ci-only signing key
   (AISDLC-593's key partitioning — distinct from the operator's own key used
-  for the `attested` tier) and (2) the isolated-review workflow that
-  produces re-derivable evidence for the verifier to check (AISDLC-596's
-  isolated producer). Without both, every PR/ship legitimately falls short
+  for the `attested` tier) and (2) a CI clean-room producer of re-derivable
+  evidence for the verifier to check. This repo no longer ships that
+  workflow (AISDLC-832). Without both, every PR/ship legitimately falls short
   (`policyOutcome=shortfall`) rather than passing — this is the honest
-  outcome, not a bug: an adopter with no isolated-review infra simply cannot
+  outcome, not a bug: an adopter with no clean-room producer simply cannot
   produce an `isolated` envelope.
 - **Downgrade-with-reason when the anchor is missing.** If the CI-only
-  signing key or the isolated-review workflow output is absent/invalid at
+  signing key or the clean-room producer output is absent/invalid at
   verification time, the verifier (AISDLC-595) does not silently credit
   `isolated` — it downgrades the envelope's `overallIndependenceTier` to the
   honest floor it CAN verify (`attested` or `none`) and records the reason
@@ -274,18 +274,16 @@ outside the repo root.
 
 ### How to get `isolated`
 
-`isolated` comes from the CI clean-room signer in
-[`isolated-review.yml`](../../.github/workflows/isolated-review.yml) (RFC-0047):
+`isolated` comes from a CI clean-room signer (RFC-0047). This repo's workflow for it
+was deleted (AISDLC-832: 949 of 950 runs skipped, none succeeded), so no `isolated`
+envelope is produced here today. An adopter that builds one:
 
-1. Register a `ci-only` public key in `.ai-sdlc/trusted-reviewers.yaml` and keep the
+1. Registers a `ci-only` public key in `.ai-sdlc/trusted-reviewers.yaml` and keeps the
    private key only in a protected GitHub Actions environment. See
    [`ci-only-trust-marker.md`](ci-only-trust-marker.md).
-2. Set the repository variable `AI_SDLC_ISOLATED_REVIEW` to a truthy value (default
-   off).
-3. Add the `isolated-review` label to a same-repo PR. The sandboxed reviewer job
-   emits an unsigned report, and a separate protected job signs the envelope with
-   the ci-only key and commits it to the PR branch. Fork PRs are refused.
-4. Set `requiredTier: isolated` in the policy file. Without steps 1 to 3 every
+2. Runs the sandboxed reviewer in CI and signs the envelope with the ci-only key in a
+   separate protected job. Fork PRs must be refused.
+3. Sets `requiredTier: isolated` in the policy file. Without steps 1 and 2 every
    change falls short of the policy (`policyOutcome=shortfall`).
 
 ## See also

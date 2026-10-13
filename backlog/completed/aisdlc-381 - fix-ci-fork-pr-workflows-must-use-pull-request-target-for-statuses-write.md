@@ -1,6 +1,8 @@
 ---
 id: AISDLC-381
-title: 'fix(ci): fork PR workflows must use pull_request_target so the required GitHub Actions app can post statuses + post-back comments'
+title: >-
+  fix(ci): fork PR workflows must use pull_request_target so the required GitHub
+  Actions app can post statuses + post-back comments
 status: Done
 assignee: []
 created_date: '2026-05-20'
@@ -15,7 +17,14 @@ references:
   - .github/workflows/verify-attestation.yml
   - .github/workflows/ai-sdlc-review.yml
   - .github/workflows/auto-enable-auto-merge.yml
-  - .github/workflows/auto-rearm-on-dequeue.yml
+drift_log:
+  - date: '2026-10-13'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .github/workflows/auto-rearm-on-dequeue.yml
+    resolution: flagged
+drift_checked: '2026-10-13'
 ---
 
 ## Problem

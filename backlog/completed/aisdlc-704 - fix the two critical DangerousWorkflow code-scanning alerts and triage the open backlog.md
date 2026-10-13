@@ -1,7 +1,8 @@
 ---
 id: AISDLC-704
 title: >-
-  Fix the two critical DangerousWorkflow code-scanning alerts and triage the open backlog
+  Fix the two critical DangerousWorkflow code-scanning alerts and triage the
+  open backlog
 status: To Do
 assignee: []
 created_date: '2026-10-03'
@@ -11,9 +12,14 @@ labels:
 dependencies: []
 references:
   - .github/workflows/ai-sdlc-review.yml
-  - .github/workflows/ai-sdlc-fix-ci.yml
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-13'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: .github/workflows/ai-sdlc-fix-ci.yml'
+    resolution: flagged
+drift_checked: '2026-10-13'
 ---
 
 ## Description

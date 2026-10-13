@@ -1,8 +1,9 @@
 ---
 id: AISDLC-832
 title: >-
-  delete the three workflows that never produce a result: isolated-review, ai-sdlc-fix-ci, auto-rearm-on-dequeue
-status: To Do
+  delete the three workflows that never produce a result: isolated-review,
+  ai-sdlc-fix-ci, auto-rearm-on-dequeue
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:
@@ -11,14 +12,27 @@ labels:
   - governance
 dependencies: []
 references:
-  - .github/workflows/isolated-review.yml
-  - .github/workflows/ai-sdlc-fix-ci.yml
-  - .github/workflows/auto-rearm-on-dequeue.yml
   - .ai-sdlc/gates.yaml
   - docs/operations/merge-without-queue.md
   - docs/audits/2026-10-13-cicd-five-step-audit.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-13'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: .github/workflows/isolated-review.yml'
+    resolution: flagged
+  - date: '2026-10-13'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: .github/workflows/ai-sdlc-fix-ci.yml'
+    resolution: flagged
+  - date: '2026-10-13'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .github/workflows/auto-rearm-on-dequeue.yml
+    resolution: flagged
+drift_checked: '2026-10-13'
 ---
 
 ## Description
@@ -54,12 +68,12 @@ Authority: DEC-0099 (answered 2026-10-11, on main).
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 The three workflow files no longer exist on the branch
-- [ ] #2 `.ai-sdlc/gates.yaml` (the AISDLC-805 shrink-only gate registry) has the removed gates' entries deleted, and `scripts/check-gate-registry.test.mjs` passes (`pnpm test:gates`) with no entry added
-- [ ] #3 `.github/workflows/__tests__/` tests that referenced the deleted workflows are updated and `node --test .github/workflows/__tests__/` passes
-- [ ] #4 `docs/operations/merge-without-queue.md` rollback section names the commit to restore `auto-rearm-on-dequeue.yml` from and no longer says the file is kept
-- [ ] #5 CLAUDE.md and the docs/operations pages listed in the Fix carry no pointer to the deleted workflows (rg check in Fix step 5)
-- [ ] #6 `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass
+- [x] #1 The three workflow files no longer exist on the branch
+- [x] #2 `.ai-sdlc/gates.yaml` (the AISDLC-805 shrink-only gate registry) has the removed gates' entries deleted, and `scripts/check-gate-registry.test.mjs` passes (`pnpm test:gates`) with no entry added
+- [x] #3 `.github/workflows/__tests__/` tests that referenced the deleted workflows are updated and `node --test .github/workflows/__tests__/` passes
+- [x] #4 `docs/operations/merge-without-queue.md` rollback section names the commit to restore `auto-rearm-on-dequeue.yml` from and no longer says the file is kept
+- [x] #5 CLAUDE.md and the docs/operations pages listed in the Fix carry no pointer to the deleted workflows (rg check in Fix step 5)
+- [x] #6 `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass
 <!-- AC:END -->
 
 ## Verification
