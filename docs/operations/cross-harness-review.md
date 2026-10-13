@@ -450,7 +450,7 @@ runbook after the pilot completes:
 | Reviewer count | 3 (code + test + security) | 3 |
 | Sandbox mode used | Must be `-s read-only` | read-only |
 | `--skip-git-repo-check` needed | Boolean; note if required for your environment | Y/N |
-| DSSE verification result | `verify-attestation.yml` CI status or manual: `node pipeline-cli/bin/cli-verify-attestation.mjs` | passed/failed |
+| DSSE verification result | `ai-sdlc-gate.yml (attestation-gate job)` CI status or manual: `node pipeline-cli/bin/cli-verify-attestation.mjs` | passed/failed |
 | Anomalies | Any manual-intervention points, parse failures, CLI version issues | ___ |
 
 ### What to observe
@@ -469,7 +469,7 @@ runbook after the pilot completes:
 **During attestation sign:**
 - Does `sign-attestation.mjs` accept the verdict file without reshaping?
 - Does the DSSE envelope's predicate carry `harness: { name: "codex", version: "0.128.0" }`?
-- Does `verify-attestation.yml` post `ai-sdlc/attestation: success`?
+- Does `ai-sdlc-gate.yml (attestation-gate job)` post `ai-sdlc/attestation: success`?
 
 ### Known flags required (as of v0.128.0)
 

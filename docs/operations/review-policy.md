@@ -7,7 +7,7 @@ it. It is written so the OpenSSF Best Practices questionnaire can link to it.
 ## Policy in one paragraph
 
 `main` requires **0 human approving reviews**. The review signal is a **signed
-three-reviewer attestation** (code, test, security) that the `verify-attestation.yml`
+three-reviewer attestation** (code, test, security) that the `ai-sdlc-gate.yml (attestation-gate job)`
 workflow verifies and that feeds the single required rollup check `ai-sdlc/pr-ready`
 (with `Backlog Drift`). A change cannot reach `main` without that rollup passing. A
 human can always review, request changes or override (see "Human override").

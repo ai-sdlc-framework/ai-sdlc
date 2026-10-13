@@ -78,7 +78,7 @@ function loadYaml(path) {
 //
 // Archetype-conditional jobs in our workflow (must be in allowed-skips):
 //   - build-test, integration: skip on docs-only PRs
-//   - attestation-gate: skips on docs-only PRs (paths-ignore in verify-attestation.yml)
+//   - attestation-gate: skips on docs-only PRs (docs-only detect)
 //   - dependency-review-gate: skips on non-dep PRs (detect.outputs.deps == false)
 //   - dor-readiness-gate: skips on PRs that touch no backlog/tasks/*.md file (AISDLC-712.1)
 //
@@ -792,7 +792,7 @@ describe('ai-sdlc-gate.yml — coexistence with legacy workflows (AISDLC-140 sub
     // and remove the legacy required checks. This test asserts the
     // legacy workflows are still present so a regression that quietly
     // deletes them as part of sub-1 fails fast.
-    for (const legacy of ['ci.yml', 'ai-sdlc-review.yml', 'verify-attestation.yml']) {
+    for (const legacy of ['ci.yml', 'ai-sdlc-review.yml']) {
       const path = join(REPO_ROOT, '.github', 'workflows', legacy);
       const contents = readFileSync(path, 'utf-8');
       assert.ok(contents.length > 0, `${legacy} must still exist (cutover is sub-3, not sub-1)`);
@@ -839,5 +839,102 @@ describe('governance-gate (AISDLC-764)', () => {
   it('passes untrusted PR text through env, never inline in the script', () => {
     const run = job.steps.map((s) => s.run ?? '').join('\n');
     assert.ok(!/\$\{\{\s*github\.event\.pull_request\.(title|body)/.test(run));
+  });
+});
+
+// ── AISDLC-412 (relocated by AISDLC-833): cancelled runs must not post status ──
+describe('AISDLC-412: attestation-gate does not post a status on cancelled runs', () => {
+  let wf;
+  let raw;
+  before(() => {
+    wf = loadYaml(WORKFLOW_PATH);
+    raw = readFileSync(WORKFLOW_PATH, 'utf-8');
+  });
+
+  const postCond = () => {
+    const step = (wf.jobs['attestation-gate'].steps ?? []).find(
+      (s) => typeof s.name === 'string' && /Post ai-sdlc\/attestation status/i.test(s.name),
+    );
+    assert.ok(step, 'attestation-gate must declare a "Post ai-sdlc/attestation status" step');
+    const cond = String(step.if ?? '');
+    assert.ok(cond, 'Post step MUST declare an `if:` condition');
+    return cond;
+  };
+
+  it('declares concurrency.cancel-in-progress: true', () => {
+    assert.ok(wf.concurrency, 'workflow must declare a top-level concurrency block');
+    assert.equal(wf.concurrency['cancel-in-progress'], true);
+  });
+
+  it('Post status step does NOT use always() or cancelled()', () => {
+    const cond = postCond();
+    assert.doesNotMatch(cond, /\balways\s*\(\s*\)/);
+    assert.doesNotMatch(cond, /\bcancelled\s*\(\s*\)/);
+  });
+
+  it('Post status step uses success() || failure()', () => {
+    const cond = postCond();
+    assert.match(cond, /\bsuccess\s*\(\s*\)/);
+    assert.match(cond, /\bfailure\s*\(\s*\)/);
+  });
+
+  it('Post status step still skips the release-please short-circuit', () => {
+    assert.match(postCond(), /steps\.release_please\.outputs\.is_release_please\s*!=\s*'true'/);
+  });
+
+  it('attestation-gate skips docs-only PRs at job level', () => {
+    assert.match(String(wf.jobs['attestation-gate'].if), /docs_only\s*!=\s*'true'/);
+  });
+
+  it('inline comment documents the AISDLC-412 rationale', () => {
+    assert.match(raw, /AISDLC-412/);
+    assert.match(raw, /cancel/i);
+  });
+});
+
+// ── AISDLC-747 (relocated by AISDLC-833): approving review step in attestation-gate ──
+describe('AISDLC-747: attestation-gate posts an approving review on a verified envelope', () => {
+  let job;
+  let step;
+  before(() => {
+    job = loadYaml(WORKFLOW_PATH).jobs['attestation-gate'];
+    step = job.steps.find((st) => /post-attestation-review\.mjs/.test(String(st.run ?? '')));
+  });
+
+  it('holds pull-requests: write on attestation-gate only among workflow-level scopes', () => {
+    const wf = loadYaml(WORKFLOW_PATH);
+    assert.equal(job.permissions['pull-requests'], 'write');
+    assert.notEqual(wf.permissions?.['pull-requests'], 'write');
+  });
+
+  it('gates on a valid verifier status and a same-repo head', () => {
+    assert.ok(step, 'approve step must exist');
+    const clauses = String(step.if)
+      .split('&&')
+      .map((c) => c.trim());
+    assert.deepEqual(clauses, [
+      "steps.verify.outputs.status == 'valid'",
+      'github.event.pull_request.head.repo.full_name == github.repository',
+    ]);
+  });
+
+  it('job exposes status and reason outputs', () => {
+    assert.ok(job.outputs.status);
+    assert.ok(job.outputs.reason);
+  });
+
+  it('runs base-sha code with no persisted credentials', () => {
+    const checkout = job.steps.find((st) => /actions\/checkout/.test(String(st.uses ?? '')));
+    assert.equal(checkout.with.ref, '${{ github.event.pull_request.base.sha }}');
+    assert.equal(checkout.with['persist-credentials'], false);
+    assert.equal(checkout.with['allow-unsafe-pr-checkout'], undefined);
+  });
+
+  it('runs the script and skips with a notice when it is absent (bootstrap)', () => {
+    const run = String(step.run);
+    assert.match(run, /\[ ! -f scripts\/post-attestation-review\.mjs \]/);
+    assert.match(run, /::notice::/);
+    assert.match(run, /exit 0/);
+    assert.match(run, /node scripts\/post-attestation-review\.mjs/);
   });
 });

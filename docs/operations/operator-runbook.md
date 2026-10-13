@@ -1341,7 +1341,7 @@ of the following constraints. The hermetic test at
 forbidden patterns; CI fails the PR if any guard is violated. The
 specific workflows currently in scope are:
 
-- `.github/workflows/verify-attestation.yml` (posts `ai-sdlc/attestation`)
+- `.github/workflows/ai-sdlc-gate.yml (attestation-gate job)` (posts `ai-sdlc/attestation`)
 - `.github/workflows/ai-sdlc-review.yml` (posts `Post Review Results` + review comments)
 - `.github/workflows/auto-enable-auto-merge.yml` (arms auto-merge on PR open)
 
@@ -1450,7 +1450,7 @@ permissions and secrets they need. Suggested matrix:
 
 | Workflow | `permissions:` | Secrets allowed |
 |---|---|---|
-| `verify-attestation.yml` | `contents:read`, `statuses:write`, `pull-requests:read` | `github.token` only |
+| `ai-sdlc-gate.yml (attestation-gate job)` | `contents:read`, `statuses:write`, `pull-requests:read` | `github.token` only |
 | `ai-sdlc-review.yml` (docs-only-check) | `contents:read`, `statuses:write`, `pull-requests:read` | `github.token` only |
 | `ai-sdlc-review.yml` (analyze) | `contents:read`, `pull-requests:read` | `ANTHROPIC_API_KEY`, `MARKER_HMAC_SECRET` |
 | `ai-sdlc-review.yml` (report) | `pull-requests:write`, `issues:read`, `statuses:write` | `github.token`, `SLACK_BOT_TOKEN` |
@@ -1508,7 +1508,7 @@ re-trigger procedure is:
 ```bash
 # Re-run all checks against the existing PR head SHA
 gh pr checks <pr-number>          # confirm current status
-gh workflow run verify-attestation.yml --ref <fork-branch-ref>
+gh workflow run ai-sdlc-gate.yml (attestation-gate job) --ref <fork-branch-ref>
 gh workflow run ai-sdlc-review.yml --ref <fork-branch-ref>
 # auto-enable re-fires automatically on the next push
 ```

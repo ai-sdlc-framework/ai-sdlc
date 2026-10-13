@@ -293,7 +293,7 @@ node pipeline-cli/bin/cli-reviews.mjs analyze --repo-root . --repo-root ../sibli
 | Phase 1 | Transcript capture in reviewer subagents | AISDLC-383.1 (this runbook) |
 | Phase 2 | Merkle leaf index + root computation | AISDLC-383.2 |
 | Phase 3 | v6 envelope schema + signer | AISDLC-383.3 |
-| Phase 4 | v6 verifier in `verify-attestation.yml` | AISDLC-383.4 |
+| Phase 4 | v6 verifier in `ai-sdlc-gate.yml (attestation-gate job)` | AISDLC-383.4 |
 | Cleanup | Delete v3/v4/v5 collectors, sub-attestation code | AISDLC-383.7 |
 
 ## Staged review leaves (`emit-leaf --stage`)

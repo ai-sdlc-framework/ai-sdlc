@@ -41,7 +41,7 @@ Never leave `AI_SDLC_BYPASS_ALL_GATES=1` in your shell profile or a committed `.
 ## What it does NOT bypass
 
 - `git push --no-verify` is a separate escape hatch that skips the entire husky pre-push chain including the bypass logic. If both are set, `--no-verify` wins (git never invokes the hook).
-- CI-side gates are independent. Bypassing locally does not affect `verify-attestation.yml`, `ai-sdlc-review.yml`, or any other required status on `main`.
+- CI-side gates are independent. Bypassing locally does not affect `ai-sdlc-gate.yml (attestation-gate job)`, `ai-sdlc-review.yml`, or any other required status on `main`.
 - `scripts/check-skip-ci-marker.sh` is a pre-push hook but is NOT part of the 6 gates above. It is NOT bypassed by `AI_SDLC_BYPASS_ALL_GATES`. If your commit contains a `(skip ci marker)` token, that check still fires.
 
 ## Per-gate bypasses remain available independently
@@ -60,7 +60,7 @@ If you need to skip only one gate, prefer the targeted skip:
 | Coverage regression ships to `main` | CI codecov patch gate is still required; PR cannot merge if patch < 80% |
 | Task file stays in `backlog/tasks/` forever | Move it manually with `git mv` before or after push |
 | DoR violation enters the backlog | `cli-dor-check` still runs in CI against changed task files |
-| Unattested code PR merges | `verify-attestation.yml` is a required check; missing envelope → PR blocked |
+| Unattested code PR merges | `ai-sdlc-gate.yml (attestation-gate job)` is a required check; missing envelope → PR blocked |
 
 ## Required PR-body disclosure
 

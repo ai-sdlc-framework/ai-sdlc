@@ -30,20 +30,14 @@ name: AI-SDLC PR Ready Gate
 #   docs-only PRs (every changed file in spec/rfcs/**, docs/**,
 #   backlog/{tasks,completed}/**, or root *.md):
 #     → build-test, integration are SKIPPED (already gated by `detect`)
-#     → `ai-sdlc/attestation` is NOT required; verify-attestation.yml is skipped
-#       via paths-ignore on pull_request events; on merge_group events the inline
-#       short-circuit in verify-attestation.yml posts `success` cheaply
+#     → `ai-sdlc/attestation` is NOT required; the attestation-gate job is skipped
 #     → pr-ready aggregator passes via alls-green treating skipped as allowed
 #
 #   code/mixed PRs (at least one non-docs file):
 #     → build-test, integration all required (existing behavior)
-#     → `ai-sdlc/attestation` must be posted by verify-attestation.yml;
-#       missing/invalid envelopes cause verify-attestation to post `failure`
-#       (visible as a non-required informational status — branch protection
-#       only requires `ai-sdlc/pr-ready` per AISDLC-388 operator action)
-#     → the DSSE envelope verifier enforces review attestation on code PRs
-#       before operators merge them (attestation is required for code,
-#       governance-enforced via the verify-attestation workflow result)
+#     → the attestation-gate job runs the DSSE verifier and posts
+#       `ai-sdlc/attestation`; a missing/invalid envelope fails the job and so
+#       `ai-sdlc/pr-ready` (branch protection requires only `ai-sdlc/pr-ready`)
 #
 # Operator action required: after this PR lands, update branch protection on
 # `main` to require ONLY `ai-sdlc/pr-ready` (remove `ai-sdlc/attestation`
@@ -86,8 +80,7 @@ permissions:
 jobs:
   # ── Archetype detection ─────────────────────────────────────────────────
   # AISDLC-484: `docs_only` is computed by `scripts/is-docs-only-changeset.mjs`
-  # (the single source of truth shared with `ai-sdlc-review.yml` and
-  # `verify-attestation.yml`) fed the PR's changed-file list. The former
+  # (the single source of truth shared with `ai-sdlc-review.yml`) fed the PR's changed-file list. The former
   # dorny docs_only filter step (quantifier "every") never fired in
   # production, so every docs PR ran the full matrix. The `deps` and `tasks`
   # outputs still come from dorny filters (default `some` quantifier).
@@ -409,24 +402,14 @@ jobs:
   #     `<workflow-name> / <job-name>` but `re-actors/alls-green` also
   #     posts a check_run named exactly `ai-sdlc/pr-ready` for adopters
   #     who want a stable name independent of job/workflow renames.
-  # ── Attestation gate (AISDLC-388, per-archetype enforcement) ──────────
-  # AISDLC-388 made `ai-sdlc/attestation` a non-required check on branch
-  # protection so docs-only PRs (which have no code to attest) could merge
-  # without a synthetic envelope (AISDLC-214/AISDLC-215 workaround retired).
-  # Without this job, code PRs could ALSO merge without attestation — the
-  # verify-attestation.yml status would be posted but nothing requires it.
-  #
-  # This job re-introduces machine enforcement at the rollup layer:
-  #   - For docs-only PRs: skipped (verify-attestation.yml also skipped via
-  #     paths-ignore) — re-actors/alls-green treats `skipped` as success.
-  #   - For code PRs: polls the commit's statuses and requires
-  #     `ai-sdlc/attestation` to be `success`. If missing or failure, this
-  #     job fails → `ai-sdlc/pr-ready` fails → branch protection blocks merge.
-  #
-  # Retry/wait: verify-attestation.yml runs in parallel with this workflow,
-  # so the attestation status may not be posted yet when this job first
-  # checks. We poll for up to 5 minutes (sufficient for verify-attestation's
-  # typical ~30-60s runtime) before failing.
+  # ── Attestation gate (AISDLC-388, AISDLC-833) ─────────────────────────
+  # Runs the DSSE verifier (scripts/verify-attestation.mjs) inline on code PRs
+  # under this workflow's single `pull_request` trigger. Scripts come from the
+  # BASE sha; the head envelope is fetched as DATA only (AISDLC-704.6). It posts
+  # the `ai-sdlc/attestation` status once per head SHA (best-effort on fork PRs,
+  # whose token is read-only) and fails the job on an invalid envelope, which
+  # fails `ai-sdlc/pr-ready`. Docs-only, draft and dependabot PRs skip the job
+  # (alls-green treats `skipped` as success).
   attestation-gate:
     name: Attestation gate (code PRs)
     needs: detect
@@ -440,34 +423,312 @@ jobs:
       github.event.pull_request.user.login != 'dependabot[bot]' &&
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
+    outputs:
+      status: ${{ steps.verify.outputs.status }}
+      reason: ${{ steps.verify.outputs.reason }}
     permissions:
-      statuses: read
+      contents: read
+      statuses: write
+      pull-requests: write
     steps:
-      - name: Require ai-sdlc/attestation status
+      # Trusted scripts come from the BASE sha; the head is fetched as DATA only
+      # (never checked out, never executed): AISDLC-704.6.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Stage head envelope for verifier (DATA-ONLY git fetch)
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REPO_FULL: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO_FULL: ${{ github.repository }}
         run: |
           set -euo pipefail
-          echo "[attestation-gate] code PR detected — polling for ai-sdlc/attestation status on $HEAD_SHA"
-          DEADLINE=$(( $(date +%s) + 300 ))
-          while [ "$(date +%s)" -lt "$DEADLINE" ]; do
-            STATE=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/status" \
-              --jq '.statuses[] | select(.context == "ai-sdlc/attestation") | .state' | head -1)
-            if [ "$STATE" = "success" ]; then
-              echo "[attestation-gate] ai-sdlc/attestation: success — PASS"
-              exit 0
+          if ! [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::unexpected head sha"; exit 1
+          fi
+          if ! [[ "$HEAD_REPO_FULL" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::unexpected head repository name"; exit 1
+          fi
+          if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+            if ! git fetch --no-tags "https://github.com/${HEAD_REPO_FULL}.git" \
+                "+${HEAD_SHA}:refs/remotes/head/${HEAD_SHA}"; then
+              echo "::error::failed to fetch head ${HEAD_SHA} from ${HEAD_REPO_FULL}"; exit 1
             fi
-            if [ "$STATE" = "failure" ] || [ "$STATE" = "error" ]; then
-              echo "::error::[attestation-gate] ai-sdlc/attestation: $STATE — code PR must have a valid attestation envelope"
-              exit 1
+          fi
+          bash scripts/stage-attestation-data.sh
+
+      - name: Detect release-please PR
+        id: release_please
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_HEAD_REF: ${{ github.head_ref }}
+          # AISDLC-381 iter-2 CRITICAL fix: under pull_request_target a
+          # fork PR with branch name release-please--evil would otherwise
+          # bypass attestation by matching the prefix-only trust path.
+          # The fork-source guard inside the script below requires
+          # PR_HEAD_REPO_FULL == REPO before honoring the release-please
+          # short-circuit; falls through to full verifier otherwise.
+          PR_HEAD_REPO_FULL: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          set -euo pipefail
+          IS_RP='false'
+
+          # Trust signal: the `release-please--` branch-name prefix +
+          # a fork-source guard (same-repo only).
+          #
+          # We previously gated on BOTH the prefix AND a bot-identity allowlist
+          # (github-actions[bot] / release-please[bot] / app/github-actions).
+          # That broke the moment release-please-action started pushing under
+          # `secrets.AI_SDLC_PAT` (PR #450) — the resulting PR's `user.login`
+          # is the operator's identity (e.g. `deefactorial`), NOT a bot. Every
+          # legit release-please PR fell through to full verification and
+          # posted `contentHashV4 mismatch`.
+          #
+          # For SAME-REPO PRs, the prefix-only trust is sufficient — the
+          # `auto-enable-auto-merge.yml` release-please skip (PR #445) means
+          # release-please PRs do NOT auto-merge: the operator MUST manually
+          # arm `gh pr merge <N> --auto` to ship one. That human-in-the-loop
+          # is the trust gate for prefix bypasses by same-repo pushers.
+          #
+          # AISDLC-381 (pull_request_target migration) introduced a NEW attack
+          # vector: a malicious FORK PR with branch `release-please--evil`
+          # would otherwise match this prefix and post
+          # `ai-sdlc/attestation: success` on the fork's HEAD SHA — fully
+          # bypassing the DSSE attestation gate. The operator-trust argument
+          # above DOES NOT cover fork PRs because the malicious code is
+          # already in the PR diff at the moment the workflow fires + posts
+          # the success status; an operator could miss the prefix bypass
+          # entirely until merge. The fix is the fork-source guard below:
+          # only honor the prefix when PR_HEAD_REPO_FULL == REPO. Fork PRs
+          # with this prefix fall through to the full verifier which will
+          # correctly report `no envelope` or `invalid` → status:failure.
+          #
+          # Net: branch-prefix + fork-source guard matches the actual model.
+          # See PR #455 for the original rationale + PR #X (AISDLC-381 iter-2)
+          # for the fork-source guard addition.
+
+          # pull_request: branch prefix is sufficient — BUT the prefix
+          # is only trustworthy when the PR comes from the SAME repo
+          # (not a fork). Under pull_request_target a fork PR with branch
+          # name `release-please--evil` would otherwise bypass the
+          # attestation verifier entirely and post `ai-sdlc/attestation:
+          # success` on a malicious head SHA. The fork-source guard
+          # below restricts the short-circuit to same-repo PRs only;
+          # any release-please-named branch from a fork falls through
+          # to the full envelope verifier path (which will report
+          # missing/invalid → status:failure). AISDLC-381 iter-2 CRITICAL.
+          case "${PR_HEAD_REF:-}" in
+            release-please--*)
+              if [ "${PR_HEAD_REPO_FULL:-}" = "${REPO}" ]; then
+                IS_RP='true'
+                echo "pull_request release-please match: head_ref='${PR_HEAD_REF}' head_repo='${PR_HEAD_REPO_FULL}' (same-repo trust)"
+              else
+                echo "pull_request release-please prefix on FORK PR ('${PR_HEAD_REPO_FULL}' != '${REPO}') — NOT trusting prefix; falling through to full verification"
+              fi
+              ;;
+          esac
+
+          echo "is_release_please=${IS_RP}" >> "${GITHUB_OUTPUT}"
+          echo "Release-please detection: head_ref='${PR_HEAD_REF:-}', is_release_please=${IS_RP}"
+
+      - name: Short-circuit — post ai-sdlc/attestation success (release-please)
+        if: steps.release_please.outputs.is_release_please == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -X POST \
+            -f state=success \
+            -f context='ai-sdlc/attestation' \
+            -f description='release-please version bump — attestation N/A'
+          echo "Posted ai-sdlc/attestation: success (release-please short-circuit) on ${HEAD_SHA}"
+
+      # Skip the full verify pipeline when EITHER short-circuit already posted
+      # the success status above. These steps only run for code PRs or mixed PRs.
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        if: steps.release_please.outputs.is_release_please != 'true'
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.release_please.outputs.is_release_please != 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install (orchestrator only — verifier needs the runtime barrel)
+        if: steps.release_please.outputs.is_release_please != 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Build orchestrator + dependencies (verifier imports compiled JS)
+        # `...` suffix builds @ai-sdlc/orchestrator AND its workspace deps
+        # (notably @ai-sdlc/reference) in topological order. Without it the
+        # orchestrator build fails with TS2307: cannot find @ai-sdlc/reference.
+        if: steps.release_please.outputs.is_release_please != 'true'
+        run: pnpm --filter "@ai-sdlc/orchestrator..." build
+
+      # AISDLC-369: ensure signedMergeBase is reachable before running the
+      # verifier. Even with fetch-depth: 0, there can be edge cases where a
+      # specific commit SHA (signedMergeBase from a v5 envelope) is not yet
+      # in the local clone (e.g. a very recent merge that wasn't part of the
+      # normal fetch path). This step reads the signedMergeBase from every
+      # envelope on disk and explicitly fetches any that are unreachable.
+      # Non-fatal: if no envelopes or fetch fails, the verifier handles it.
+      - name: Fetch signedMergeBase if unreachable (v5 rebase-stability fix)
+        if: steps.release_please.outputs.is_release_please != 'true'
+        run: |
+          set -euo pipefail
+          ATTDIR=".ai-sdlc/attestations"
+          if [ ! -d "$ATTDIR" ]; then
+            echo "[fetch-signedMergeBase] no attestations dir — skipping"
+            exit 0
+          fi
+          for env_file in "$ATTDIR"/*.dsse.json; do
+            [ -f "$env_file" ] || continue
+            # Extract signedMergeBase from the decoded payload (jq + base64).
+            SMB=$(node -e "
+              const {readFileSync} = require('fs');
+              const env = JSON.parse(readFileSync('${env_file}', 'utf-8'));
+              if (!env.payload) process.exit(0);
+              const pred = JSON.parse(Buffer.from(env.payload, 'base64').toString('utf-8'));
+              if (pred.signedMergeBase && /^[0-9a-f]{40}$/.test(pred.signedMergeBase)) {
+                process.stdout.write(pred.signedMergeBase + '\n');
+              }
+            " 2>/dev/null || true)
+            [ -z "$SMB" ] && continue
+            # Check reachability.
+            if git cat-file -t "$SMB" >/dev/null 2>&1; then
+              echo "[fetch-signedMergeBase] $SMB is reachable — no fetch needed"
+            else
+              echo "[fetch-signedMergeBase] $SMB unreachable — fetching from origin..."
+              git fetch --depth=1 origin "$SMB" 2>/dev/null \
+                || git fetch --unshallow origin 2>/dev/null \
+                || echo "[fetch-signedMergeBase] WARN: could not fetch $SMB — verifier will fall back to v4"
             fi
-            echo "[attestation-gate] status not posted yet (got: '${STATE:-<missing>}') — waiting 15s..."
-            sleep 15
           done
-          echo "::error::[attestation-gate] timed out waiting for ai-sdlc/attestation on $HEAD_SHA — code PR cannot merge without attestation"
-          exit 1
+
+      - name: Verify attestation
+        id: verify
+        if: steps.release_please.outputs.is_release_please != 'true'
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node scripts/verify-attestation.mjs
+
+      # AISDLC-193: post the `ai-sdlc/attestation` commit status. Branch
+      # protection requires it; missing/invalid envelopes block merge.
+      # Posts on BOTH the pull_request HEAD (direct verification) AND the
+      # merge_group tip (queue-time re-verification with sibling-rebase
+      # state) so a sibling PR merging into the same files between PR-head
+      # verification and queue execution surfaces here.
+      #
+      # AISDLC-412: this step MUST NOT run when the job is CANCELLED.
+      # The concurrency block above (`cancel-in-progress: true`) means a
+      # newer push on the same PR cancels the in-flight run mid-execution.
+      # Before AISDLC-412, this step used `if: always()`, which fires even
+      # on cancellation. The cancelled run's `Verify attestation` step
+      # never produced a STATUS output, so the cancelled run posted
+      # `ai-sdlc/attestation: failure` (with description "verifier crashed
+      # before emitting result"). GitHub commit-status semantics keep the
+      # MOST RECENT status per context — but two parallel runs racing to
+      # POST can land in any order, and the cancelled-run's FAILURE
+      # frequently overwrote the new run's SUCCESS, leaving PRs stuck on
+      # a FAILURE status that did NOT reflect the current HEAD's
+      # verification result. Workarounds operators used: `gh run rerun
+      # <cancelled-id>` or empty-commit push to re-trigger cleanly.
+      #
+      # The fix is to use `(success() || failure())` instead of `always()`.
+      # GitHub's status-check functions:
+      #   - `success()`  → true when no prior step failed (default)
+      #   - `failure()`  → true when at least one prior step failed
+      #   - `cancelled()` → true when the workflow was cancelled
+      #   - `always()`   → true regardless (UNION of the above three)
+      # `success() || failure()` is the canonical pattern for "run even
+      # on crashes, but NOT on cancellation" — it preserves the crash
+      # recovery behavior (a verifier exception still triggers
+      # STATE=failure post with a clear reason) while ensuring a
+      # cancelled run leaves the previous (correct) status untouched.
+      #
+      # Preserved: when the verifier crashes (raises uncaught), `failure()`
+      # is true, the step runs, and STATUS is empty → STATE=failure with
+      # "verifier crashed before emitting result". That recovery branch
+      # is still load-bearing.
+      - name: Post ai-sdlc/attestation status
+        if: (success() || failure()) && steps.release_please.outputs.is_release_please != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          STATUS: ${{ steps.verify.outputs.status }}
+          REASON: ${{ steps.verify.outputs.reason }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+          if [ "$STATUS" = "valid" ]; then
+            STATE=success
+            # Surface the verifier's reason in the success description so
+            # soft-fail / spot-check qualifiers ("soft-fail: …") are visible
+            # on the GitHub status surface, not just buried in workflow logs.
+            # Per AISDLC-383.4 security review: a hardcoded clean string
+            # would mask the soft-fail caveat from operators reviewing PR
+            # status. Truncate to 130 chars (GitHub limit is 140) with
+            # a sensible default when the reason is empty.
+            DESC="${REASON:0:130}"
+            if [ -z "${DESC:-}" ]; then
+              DESC="valid envelope at HEAD"
+            fi
+            echo "::notice::ai-sdlc attestation valid on $HEAD_SHA: $REASON"
+          elif [ -z "${STATUS:-}" ]; then
+            # Verifier crashed before emitting status= to GITHUB_OUTPUT.
+            STATE=failure
+            DESC="verifier crashed before emitting result — see workflow logs"
+            echo "::error::ai-sdlc attestation verifier crashed on $HEAD_SHA"
+          else
+            STATE=failure
+            # GitHub status descriptions are truncated at 140 chars; trim.
+            DESC="${REASON:0:130}"
+            echo "::warning::ai-sdlc attestation $STATUS on $HEAD_SHA: $REASON"
+          fi
+          # Fork PRs get a read-only token on `pull_request`; the job result is
+          # the gate there, the status is best-effort.
+          gh api "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -X POST \
+            -f state="$STATE" \
+            -f context='ai-sdlc/attestation' \
+            -f description="$DESC" \
+            ${PR_URL:+-f target_url="$PR_URL"} \
+            || echo "::warning::could not post ai-sdlc/attestation status (read-only token on fork PR)"
+          if [ "$STATE" != "success" ]; then exit 1; fi
+          echo "Posted ai-sdlc/attestation: $STATE on $HEAD_SHA"
+
+      # AISDLC-747 (DEC-0065): register a verified attestation as an APPROVE
+      # pull-request review. Folded into attestation-gate by AISDLC-833; runs only
+      # when the verifier reported `valid` and the PR head repo == base repo (never
+      # forks). The checkout above is the BASE sha with no persisted credentials,
+      # so the script is base-branch code, never PR content. Needs the repo setting
+      # "Allow GitHub Actions to create and approve pull requests"; a 403 fails the
+      # job naming that setting.
+      - name: Post approving review
+        if: steps.verify.outputs.status == 'valid' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          STATUS: ${{ steps.verify.outputs.status }}
+          REASON: ${{ steps.verify.outputs.reason }}
+        run: |
+          if [ ! -f scripts/post-attestation-review.mjs ]; then
+            echo "::notice::scripts/post-attestation-review.mjs not on the base yet; skipping"
+            exit 0
+          fi
+          node scripts/post-attestation-review.mjs
 
   # ── Dependency review gate (npm + github-actions; issue #791 follow-up) ──
   # Folds dependency-review into the pr-ready rollup so it is a REAL blocking

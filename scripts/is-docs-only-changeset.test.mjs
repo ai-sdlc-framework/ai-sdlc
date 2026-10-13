@@ -257,7 +257,7 @@ describe('paths-ignore equivalence (AC-4) — DOCS_ONLY_PATTERN mirrors workflow
   // ai-sdlc/attestation is no longer a direct required check (replaced by the
   // ai-sdlc/pr-ready rollup), so paths-ignore no longer deadlocks docs-only PRs.
   // Both workflow files are therefore checked here for paths-ignore equivalence.
-  const WORKFLOW_FILES = ['ai-sdlc-review.yml', 'verify-attestation.yml'];
+  const WORKFLOW_FILES = ['ai-sdlc-review.yml'];
   const EXPECTED_GLOBS = new Set([
     'spec/rfcs/**',
     'docs/**',
