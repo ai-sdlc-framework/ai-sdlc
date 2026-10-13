@@ -70,7 +70,10 @@ for (const pattern of blockedActions) {
       hookSpecificOutput: {
         hookEventName: 'PermissionRequest',
         permissionDecision: 'deny',
-        permissionDecisionReason: `Blocked by AI-SDLC governance: '${pattern}'`,
+        permissionDecisionReason:
+          `Blocked by AI-SDLC governance: blockedActions pattern '${pattern}' (.ai-sdlc/agent-role.yaml). ` +
+          `Next step: use the sanctioned alternative for the same goal, or record the need with ` +
+          `'node pipeline-cli/bin/cli-decisions.mjs escalate'.`,
       },
     };
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');

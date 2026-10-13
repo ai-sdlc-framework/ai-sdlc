@@ -1,0 +1,146 @@
+{
+  "description": "AISDLC-711: the documented agent workflow, run through every governance hook with DEFAULT configuration in governance-happy-path.test.mjs. None of these may be denied. Add a new workflow step here (one place); a new governance rule that blocks any entry fails CI. tool is Bash or a file/MCP tool; cwd is 'worktree' (the task worktree) or 'main'. {OWN} is the task's own branch, {TASK} its id, {PARENT} its sub-task parent.",
+  "commands": [
+    {
+      "id": "worktree-setup",
+      "tool": "Bash",
+      "cwd": "main",
+      "command": "git worktree add .worktrees/aisdlc-2 -b ai-sdlc/aisdlc-2-other origin/main"
+    },
+    { "id": "fetch-main", "tool": "Bash", "cwd": "worktree", "command": "git fetch origin main" },
+    {
+      "id": "stage-files",
+      "tool": "Bash",
+      "cwd": "worktree",
+      "command": "git add -- src/a.ts src/a.test.ts"
+    },
+    {
+      "id": "commit",
+      "tool": "Bash",
+      "cwd": "worktree",
+      "command": "git commit -m \"feat: add a thing (AISDLC-1)\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\""
+    },
+    {
+      "id": "rebase-onto-main",
+      "tool": "Bash",
+      "cwd": "worktree",
+      "command": "git fetch origin main && git rebase origin/main"
+    },
+    {
+      "id": "plain-push-own-branch",
+      "tool": "Bash",
+      "cwd": "worktree",
+      "command": "git push -u origin HEAD:refs/heads/{OWN}"
+    },
+    {
+      "id": "lease-push-own-branch",
+      "tool": "Bash",
+      "cwd": "worktree",
+      "command": "git push --force-with-lease -u origin HEAD:refs/heads/{OWN}",
+      "skipPermissionCheck": "the PermissionRequest hook matches blockedActions globs only and has no lease policy; enforce-blocked-actions (PreToolUse) is the authority for lease pushes. Tracked in docs/operations/governance-rule-admission.md."
+    },
+    {
+      "id": "pr-create-draft",
+      "tool": "Bash",
+      "cwd": "worktree",
+      "command": "gh pr create --draft --title \"feat: add a thing (AISDLC-1)\" --body \"why and how\""
+    },
+    { "id": "pr-ready", "tool": "Bash", "cwd": "worktree", "command": "gh pr ready 12" },
+    {
+      "id": "attestation-sign",
+      "tool": "Bash",
+      "cwd": "worktree",
+      "command": "node pipeline-cli/bin/cli-attestation.mjs emit-leaf --task-id {TASK}"
+    },
+    {
+      "id": "merge-arm-sanctioned",
+      "tool": "Bash",
+      "cwd": "worktree",
+      "command": "node pipeline-cli/bin/cli-merge-if-eligible.mjs 12 --source-kind backlog --arm"
+    },
+    {
+      "id": "merge-sanctioned",
+      "tool": "Bash",
+      "cwd": "worktree",
+      "command": "node pipeline-cli/bin/cli-merge-if-eligible.mjs 12 --source-kind backlog"
+    },
+    {
+      "id": "release-arm-sanctioned",
+      "tool": "Bash",
+      "cwd": "main",
+      "command": "node pipeline-cli/bin/cli-merge-if-eligible.mjs 13 --source-kind release --arm"
+    },
+    {
+      "id": "decision-add",
+      "tool": "Bash",
+      "cwd": "worktree",
+      "command": "node pipeline-cli/bin/cli-decisions.mjs add --summary \"pick a name\" --scope area --option \"a:first\" --option \"b:second\""
+    },
+    {
+      "id": "decision-escalate",
+      "tool": "Bash",
+      "cwd": "worktree",
+      "command": "node pipeline-cli/bin/cli-decisions.mjs escalate --task-id {TASK} --source-worktree \"$(pwd)\" --summary \"blocked\" --option \"a:first\" --option \"b:second\""
+    },
+    {
+      "id": "decision-list",
+      "tool": "Bash",
+      "cwd": "worktree",
+      "command": "node pipeline-cli/bin/cli-decisions.mjs list"
+    },
+    {
+      "id": "stash-safe",
+      "tool": "Bash",
+      "cwd": "worktree",
+      "command": "git stash push -u -m aisdlc-1-tag"
+    },
+    {
+      "id": "message-dispatch",
+      "tool": "SendMessage",
+      "cwd": "worktree",
+      "input": { "to": "operator-dispatch", "message": "executor-alpha: AISDLC-1 done" }
+    },
+    {
+      "id": "write-source",
+      "tool": "Write",
+      "cwd": "worktree",
+      "input": { "file_path": "{WORKTREE}/src/a.ts" }
+    },
+    {
+      "id": "edit-source",
+      "tool": "Edit",
+      "cwd": "worktree",
+      "input": { "file_path": "{WORKTREE}/src/a.ts" }
+    },
+    {
+      "id": "edit-task-file",
+      "tool": "Edit",
+      "cwd": "worktree",
+      "input": { "file_path": "{WORKTREE}/backlog/tasks/aisdlc-1 - task.md" }
+    },
+    {
+      "id": "edit-workflow-file",
+      "tool": "Edit",
+      "cwd": "worktree",
+      "input": { "file_path": "{WORKTREE}/.github/workflows/ci.yml" }
+    },
+    {
+      "id": "task-create-plugin-subtask",
+      "tool": "mcp__plugin_ai-sdlc_ai-sdlc__task_create",
+      "cwd": "worktree",
+      "input": { "id": "{TASK}.1", "title": "follow-up" }
+    },
+    {
+      "id": "task-create-backlog-subtask",
+      "tool": "mcp__backlog__task_create",
+      "cwd": "worktree",
+      "input": { "parentTaskId": "{PARENT}", "title": "follow-up" }
+    },
+    {
+      "id": "task-create-cli-subtask",
+      "tool": "Bash",
+      "cwd": "worktree",
+      "command": "backlog task create \"follow-up\" --parent {PARENT}"
+    }
+  ]
+}

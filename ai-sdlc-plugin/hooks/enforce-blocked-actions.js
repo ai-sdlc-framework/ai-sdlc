@@ -120,7 +120,9 @@ const {
 function failClosed(why) {
   process.stderr.write(
     `Blocked by AI-SDLC governance policy: this run is marked untrusted and the hook hit an ` +
-      `internal error (${why}); failing closed. Ask a maintainer in the PR; do not retry.\n`,
+      `internal error (${why}); failing closed ` +
+      `(rule AISDLC-720, untrusted-run fail-closed). Next step: do not retry; describe the needed change in the PR or issue body, ` +
+      `or record it with 'node pipeline-cli/bin/cli-decisions.mjs escalate'.\n`,
   );
   process.exit(2);
 }
@@ -247,9 +249,11 @@ function forcePushRefusal(why, failing) {
   if (why === 'policy-never') {
     return (
       `force-push is refused because ${key} resolves to never (set explicitly in this repo). ` +
-      `Agents must not edit .ai-sdlc/: escalate to the dispatch session and ask the operator to set ` +
-      `spec.governance.allowForcePush to leaseOnOwnBranch, which allows 'git push --force-with-lease ` +
-      `origin HEAD:refs/heads/<own-branch>' on a dispatched task's own branch. Plain force pushes and any ` +
+      `Agents must not edit .ai-sdlc/. Next step: do not force-push; push with 'git push origin HEAD:refs/heads/<own-branch>' ` +
+      `(after 'git fetch origin main && git rebase origin/main' when no force is needed), or record the need with ` +
+      `'node pipeline-cli/bin/cli-decisions.mjs escalate --task-id <id> --summary <one line> --option <id>:<description>' ` +
+      `so the dispatch or planner session routes a change of spec.governance.allowForcePush to leaseOnOwnBranch, which allows ` +
+      `'git push --force-with-lease origin HEAD:refs/heads/<own-branch>' on a dispatched task's own branch. Plain force pushes and any ` +
       `push to main/master or a protected branch are never permitted.`
     );
   }
@@ -415,9 +419,9 @@ function untrustedMessage(what) {
   return (
     `${what} is governance config or enforcement code, and this run is marked untrusted${why} ` +
     `(AI_SDLC_UNTRUSTED_RUN or the git-dir untrusted marker is set for fork PRs, outside authors, or issue-sourced runs). ` +
-    `Untrusted runs cannot change .ai-sdlc/**, .github/workflows/**, .claude/**, .husky/**, ` +
-    `ai-sdlc-plugin/hooks/** or .active-task. Next step: leave a note in the PR ` +
-    `or issue asking a maintainer to make that change; do not retry or route around this. ` +
+    `Rule (AISDLC-720, untrusted-run protected paths): untrusted runs cannot change .ai-sdlc/**, .github/workflows/**, .claude/**, .husky/**, ` +
+    `ai-sdlc-plugin/hooks/** or .active-task. Next step: describe the needed change in the PR (a maintainer reviews every PR) ` +
+    `or issue body, or record it with 'node pipeline-cli/bin/cli-decisions.mjs escalate'; do not retry or route around this. ` +
     `A trusted CI job (not one that takes outside input) that legitimately needs this sets ` +
     `AI_SDLC_INTERNAL_RUN=1 in the step-level env: of that step only, never at job or workflow ` +
     `level and never via $GITHUB_ENV.`
@@ -522,7 +526,12 @@ function enforceBash(command) {
   // Defense in depth: no legitimate command mentions the removed policy-root
   // override, so any attempt to name it is refused.
   if (/AI_SDLC_MERGE_POLICY_ROOT/i.test(trimmed)) {
-    deny('overriding the merge policy root is not a permitted action');
+    deny(
+      "rule 'merge policy root is fixed': overriding it is not a permitted action. Next step: remove the " +
+        'override; the merge policy is read from the trusted checkout, and a different policy is set through ' +
+        'spec.governance.allowMerge in .ai-sdlc/agent-role.yaml (record the need with ' +
+        "'node pipeline-cli/bin/cli-decisions.mjs escalate' to route it).",
+    );
   }
 
   // AISDLC-611: no-bare-stash governance is enforced unconditionally too —
@@ -588,7 +597,8 @@ function enforceBash(command) {
       const forceHint =
         !leasePushAllowed && /^git\s+push\b/i.test(pattern) && hasForcePushOption(trimmed);
       deny(
-        `command matches blockedAction pattern '${pattern}'` +
+        `command matches blockedActions pattern '${pattern}' (.ai-sdlc/agent-role.yaml); use the sanctioned ` +
+          `alternative for the same goal, or record the need with 'node pipeline-cli/bin/cli-decisions.mjs escalate'` +
           (forceHint
             ? ` (a force-with-lease push on a task's own branch is allowed by spec.governance.allowForcePush = leaseOnOwnBranch in .ai-sdlc/agent-role.yaml, when the push is spelled 'git push --force-with-lease origin HEAD:refs/heads/<own-branch>' from the task worktree)`
             : ''),
@@ -1046,7 +1056,11 @@ function realpathOrDeny(p) {
     return realpathDeepest(p);
   } catch (e) {
     if (e instanceof SymlinkCapError) {
-      deny(`path '${p}' has a symlink chain too deep to resolve; refusing the write.`);
+      deny(
+        `path '${p}' has a symlink chain too deep to resolve; refusing the write. Next step: write ` +
+          `to a path without the symlink chain, or record the need with ` +
+          `'node pipeline-cli/bin/cli-decisions.mjs escalate'.`,
+      );
     }
     throw e;
   }
@@ -1105,8 +1119,10 @@ function enforceWriteEdit(filePath) {
     for (const glob of blockedPaths) {
       if (matchGlob(glob, relPath) || matchGlob(glob, lexRel)) {
         deny(
-          `path '${relPath}' matches blocked path '${glob}'. ` +
-            `Configuration files under blockedPaths are out of scope for agent edits.`,
+          `path '${relPath}' matches blockedPaths entry '${glob}' in .ai-sdlc/agent-role.yaml. ` +
+            `Next step: if this task needs the file, record it with ` +
+            `'node pipeline-cli/bin/cli-decisions.mjs escalate --task-id <id> --summary <one line> --option <id>:<description>' ` +
+            `so the dispatch or planner session routes the change to blockedPaths (or a task that names the file).`,
         );
       }
     }
@@ -1147,7 +1163,9 @@ function enforceWriteEdit(filePath) {
   } else {
     deny(
       `path '${realAbsPath}' is outside the agent's active worktree/project root and not under the ` +
-        `active task's permittedExternalPaths (${allowed.join(', ')}).`,
+        `active task's permittedExternalPaths (${allowed.join(', ')}). Next step: add the path to ` +
+        `'permittedExternalPaths' in the task frontmatter, or record the need with ` +
+        `'node pipeline-cli/bin/cli-decisions.mjs escalate'.`,
     );
   }
 }
