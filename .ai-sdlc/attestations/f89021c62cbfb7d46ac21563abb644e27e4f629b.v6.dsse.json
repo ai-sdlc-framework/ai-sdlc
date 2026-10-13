@@ -1,0 +1,76 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "07e3e76fa37d0cc67b16ce5257c28cd01f9c355e"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "fe86e7709806b5ade46bdf3a5713eb198b487b69a9e6d0313926f84c44ec0856",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "fe86e7709806b5ade46bdf3a5713eb198b487b69a9e6d0313926f84c44ec0856",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer-codex",
+      "transcriptHash": "2eec79b236e39cd1980b6e98138acbeca35a6dd31802a3900707af739741143a",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "2c1b86c815626a8e058a26f320c47071e81298c4303f291526e947669f58da58",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "2c1b86c815626a8e058a26f320c47071e81298c4303f291526e947669f58da58",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "852be85b01b881cdbeaa2a150d54f71babbf2d4caf8cfffcf92129a8499024cf",
+        "4565a6174aa03e487e88dff09c67e49aa92d770e8a3f7273b255f525e4d9e1fd"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "92b958b61af0e81dba3dd0b71435bdaeec7d2cb3d69eeb4bb536039d1963befc",
+        "4565a6174aa03e487e88dff09c67e49aa92d770e8a3f7273b255f525e4d9e1fd"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "88750a1b7990d0f312e42b57620e085c46ad0df1967439b5ff4f9a0479be6f8a",
+        "12c9aef89006c72a92be206118fbaadc9b416b3e6551bde82652b6137339a733"
+      ]
+    }
+  ],
+  "rootHash": "9d403fb36875188f22b2d8fa7ef105fc3c088c1bcdaf3c6f07f70fe35e7e7722",
+  "rootSignature": "u6jfuw5+CCHp2W61sSpKNFu50zQNy1BaqnMgGoaWY6jrClhRFeiurYnHAPgI+eIb4rnWK12XkEQTJ8b8joQsDQ==",
+  "nonce": "ee16fb7f834a20c1c6bada447c705ae268d49ca1480eb57941917b084e6182f7",
+  "leafCount": 3,
+  "signedAt": "2026-10-13T22:18:58.819Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      ".github/workflows/__tests__/ai-sdlc-review.test.mjs",
+      ".github/workflows/__tests__/fork-pr-safety.test.mjs",
+      ".github/workflows/__tests__/no-new-pr-gate.test.mjs",
+      ".github/workflows/ai-sdlc-review.yml",
+      "CLAUDE.md"
+    ],
+    "appliedReviewers": ["code-reviewer-codex", "test-reviewer-codex", "security-reviewer"]
+  }
+}

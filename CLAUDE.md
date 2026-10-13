@@ -79,6 +79,7 @@ TypeScript strict, ESM. Prettier + ESLint. No premature abstractions: three simi
 - **Lockstep (AISDLC-618):** `PATCH_ID_EXCLUSIONS` (`pipeline-cli/src/attestation/patch-id.ts`) has THREE copies that change together: `ATTESTATION_PATH_EXCLUSIONS` in `scripts/verify-attestation.mjs` and `PATCH_ID_EXCLUSIONS_FALLBACK` in `scripts/check-attestation-sign.sh`. Never add source, tests, configs or RFCs to `CONTENTHASH_SHARED_CHURN_FILES`.
 - A v6 envelope proves a real review ran against the exact code, not reviewer independence (AISDLC-568).
 - Algorithms, rebase relaxations, history: [`docs/operations/attestation-reference.md`](docs/operations/attestation-reference.md), [`docs/operations/attestation-troubleshooting.md`](docs/operations/attestation-troubleshooting.md).
+- `ai-sdlc-review.yml` (`Analyze PR`, `Post Review Results`) is the CI review tier for UNTRUSTED PRs only (fork, non-collaborator, or a bot such as Dependabot; AISDLC-824); trusted PRs never enter it.
 
 ## Remote agents (`/schedule`) are read-only (AISDLC-442)
 

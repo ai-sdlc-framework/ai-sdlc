@@ -168,13 +168,6 @@ describe('AISDLC-381: AC #3 — workflow permissions blocks are correct', () => 
     );
   });
 
-  it('ai-sdlc-review.yml docs-only-check job: statuses:write, no contents:write', () => {
-    const wf = loadYaml('ai-sdlc-review.yml');
-    const job = wf.jobs['docs-only-check'];
-    assert.equal(job.permissions.statuses, 'write');
-    assert.notEqual(job.permissions.contents, 'write');
-  });
-
   it('ai-sdlc-review.yml analyze job: read-only for fork content path', () => {
     const wf = loadYaml('ai-sdlc-review.yml');
     const job = wf.jobs.analyze;
@@ -260,19 +253,6 @@ describe('AISDLC-381 iter-2: release-please short-circuits require fork-source g
       runBlob,
       /PR_HEAD_REPO_FULL.*REPO|head_repo_full/i,
       'Detect step run: must compare PR_HEAD_REPO_FULL against REPO before honoring the release-please prefix (fork-source guard)',
-    );
-  });
-
-  it('ai-sdlc-review.yml: attestation-precheck `if:` includes fork-source guard on the release-please skip', () => {
-    const wf = loadYaml('ai-sdlc-review.yml');
-    const job = wf.jobs['attestation-precheck'];
-    assert.ok(job, 'attestation-precheck job must exist');
-    const cond = String(job.if ?? '');
-    assert.match(cond, /release-please--/, 'still skips release-please branch prefix');
-    assert.match(
-      cond,
-      FORK_SOURCE_GUARD_RE,
-      'attestation-precheck `if:` MUST include a fork-source guard (head.repo.full_name == github.repository) before honoring the release-please skip',
     );
   });
 
@@ -386,19 +366,6 @@ describe('AISDLC-381: AC #4 (safety guard #2) — fork checkouts are sandboxed u
         );
         assert.equal(c.path, undefined, `${name} job ${c.jobId}: no sandbox path checkout`);
       }
-    }
-  });
-
-  it('ai-sdlc-review.yml attestation-precheck never checks out the PR head (AISDLC-704, alert 174)', () => {
-    const wf = loadYaml('ai-sdlc-review.yml');
-    const job = wf.jobs['attestation-precheck'];
-    const checkouts = (job.steps ?? []).filter(
-      (s) => typeof s.uses === 'string' && s.uses.startsWith('actions/checkout@'),
-    );
-    for (const c of checkouts) {
-      assert.equal(c.with?.ref, undefined, 'attestation-precheck checkout must not set ref');
-      assert.equal(c.with?.repository, undefined, 'attestation-precheck must not check out a fork');
-      assert.equal(c.with?.['allow-unsafe-pr-checkout'], undefined);
     }
   });
 });

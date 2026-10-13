@@ -1,19 +1,12 @@
 /**
- * Tests for `.github/workflows/ai-sdlc-review.yml` — AISDLC-147 cost-savers.
+ * Tests for `.github/workflows/ai-sdlc-review.yml`.
  *
- * Patch 1 (attestation precheck) and patch 2 (Anthropic API budget circuit
- * breaker) both modify the workflow's job graph. These tests lock in the
- * load-bearing structural details so a future restructuring can't silently
- * regress the cost-saver behaviour:
+ * AISDLC-824: the workflow reviews UNTRUSTED contributor PRs only. It has a
+ * single `pull_request_target` trigger, no attestation precheck, and the
+ * `analyze` + `report` jobs carry one shared trust predicate. Trusted PRs are
+ * reviewed locally by `/ai-sdlc execute` and never enter this workflow.
  *
- * Patch 1 — attestation-precheck:
- *   - Job exists with the right outputs (`skip`)
- *   - `analyze` is gated on `attestation-precheck.outputs.skip != 'true'`
- *   - `post-skip-results` job exists with the right `if:` (only when
- *     attestation-precheck succeeded AND skip=true AND analyze was skipped)
- *   - `post-skip-results` posts both the `Post Review Results` status
- *     (defense-in-depth — branch protection check name) AND the idempotent
- *     comment marker `<!-- ai-sdlc:reviewer-skipped-by-attestation -->`
+ * AISDLC-147 cost-savers still locked in here:
  *
  * Patch 2 — budget circuit breaker:
  *   - `analyze` exposes `budget_aggregate` + `budget_exhausted_count` outputs
@@ -58,168 +51,56 @@ before(() => {
   workflow = loadYaml(WORKFLOW_PATH);
 });
 
-describe('ai-sdlc-review.yml — workflow structure (AISDLC-147)', () => {
-  it('parses as valid YAML with all 6 jobs', () => {
-    assert.ok(workflow, 'workflow must parse');
+const TRUST_RE = {
+  draft: /github\.event\.pull_request\.draft == false/,
+  releasePlease:
+    /!\(github\.event\.pull_request\.head\.repo\.full_name == github\.repository && startsWith\(github\.head_ref, 'release-please--'\)\)/,
+  fork: /github\.event\.pull_request\.head\.repo\.full_name != github\.repository/,
+  bot: /github\.event\.pull_request\.user\.type == 'Bot'/,
+  assoc:
+    /!contains\(fromJSON\('\["OWNER","MEMBER","COLLABORATOR"\]'\), github\.event\.pull_request\.author_association\)/,
+};
+
+describe('AISDLC-824: untrusted-only review tier', () => {
+  it('AC-1: single pull_request_target trigger, no pull_request trigger', () => {
+    const triggers = workflow.on || workflow[true] || {};
+    assert.deepEqual(Object.keys(triggers), ['pull_request_target']);
+  });
+
+  it('AC-1: attestation-precheck and the trusted-PR short-circuit jobs are deleted', () => {
     assert.equal(workflow.name, 'AI-SDLC PR Review');
-    const jobs = Object.keys(workflow.jobs).sort();
-    assert.deepEqual(
-      jobs,
-      [
-        'analyze',
-        'attestation-precheck',
-        'automation-review-skip',
-        'docs-only-check',
-        'post-skip-results',
-        'report',
-      ],
-      'must have exactly 6 jobs (issue #791 adds automation-review-skip for Dependabot)',
-    );
+    assert.deepEqual(Object.keys(workflow.jobs).sort(), ['analyze', 'report']);
+    const raw = JSON.stringify(workflow);
+    assert.doesNotMatch(raw, /attestation-precheck/);
+    assert.doesNotMatch(raw, /verify-attestation\.mjs/);
   });
 
-  it('Dependabot review exemption: analyze + report skip dependabot[bot]; automation-review-skip is dependabot-only (issue #791)', () => {
-    // Locks the 3 if: conditions that implement the exemption. Without these,
-    // silently dropping a login check would re-block every Dependabot PR with
-    // CHANGES_REQUESTED (the #782 incident) and pass all other tests.
-    const analyzeIf = String(workflow.jobs['analyze']?.if ?? '');
-    const reportIf = String(workflow.jobs['report']?.if ?? '');
-    const skipIf = String(workflow.jobs['automation-review-skip']?.if ?? '');
-    assert.match(
-      analyzeIf,
-      /github\.event\.pull_request\.user\.login\s*!=\s*'dependabot\[bot\]'/,
-      'analyze must NOT run for dependabot[bot] (no LLM review)',
-    );
-    assert.match(
-      reportIf,
-      /github\.event\.pull_request\.user\.login\s*!=\s*'dependabot\[bot\]'/,
-      'report must NOT run for dependabot[bot] (no CHANGES_REQUESTED)',
-    );
-    assert.match(
-      skipIf,
-      /github\.event\.pull_request\.user\.login\s*==\s*'dependabot\[bot\]'/,
-      'automation-review-skip must fire ONLY for dependabot[bot]',
-    );
-  });
-});
-
-describe('Patch 1: attestation-precheck job (AC-1, AC-2, AC-3)', () => {
-  it('AC-1: attestation-precheck job exists with skip output', () => {
-    const job = workflow.jobs['attestation-precheck'];
-    assert.ok(job, 'attestation-precheck job must exist');
-    assert.equal(job.name, 'Attestation precheck');
-    assert.ok(job.outputs?.skip, 'must expose `skip` output');
-    assert.match(
-      String(job.outputs.skip),
-      /steps\.verify\.outputs\.skip/,
-      'skip output must come from the verify step',
-    );
+  it('AC-2: analyze and report carry the same trust predicate', () => {
+    const analyzeIf = String(workflow.jobs.analyze.if).replace(/\s+/g, ' ').trim();
+    const reportIf = String(workflow.jobs.report.if).replace(/\s+/g, ' ').trim();
+    for (const re of Object.values(TRUST_RE)) {
+      assert.match(analyzeIf, re);
+      assert.match(reportIf, re);
+    }
+    assert.equal(reportIf, `always() && ${analyzeIf}`);
   });
 
-  it('attestation-precheck has read-only contents permission (no write access)', () => {
-    const job = workflow.jobs['attestation-precheck'];
-    assert.equal(
-      job.permissions?.contents,
-      'read',
-      'precheck must NOT have write access — it only reads attestations',
-    );
+  it('AC-2/3: Dependabot is no longer exempt; it is reviewed as untrusted', () => {
+    const raw = JSON.stringify(workflow);
+    assert.doesNotMatch(raw, /dependabot\[bot\]'/);
+    assert.doesNotMatch(raw, /automation-review-skip/);
   });
 
-  it('attestation-precheck reuses scripts/verify-attestation.mjs (AC-5: same logic as verify-attestation.yml)', () => {
-    const job = workflow.jobs['attestation-precheck'];
-    const verifyStep = job.steps.find((s) => s.id === 'verify');
-    assert.ok(verifyStep, 'must have a step with id=verify');
-    // The run script must invoke the canonical verifier — embedded as a
-    // substring in the bash glue.
-    assert.match(
-      String(verifyStep.run ?? ''),
-      /node scripts\/verify-attestation\.mjs/,
-      'precheck must invoke scripts/verify-attestation.mjs',
-    );
-    // Required env to drive the verifier — same shape as verify-attestation.yml.
-    assert.equal(
-      verifyStep.env?.PR_HEAD_SHA,
-      '${{ github.event.pull_request.head.sha }}',
-      'verify step must pass PR_HEAD_SHA',
-    );
-    assert.equal(
-      verifyStep.env?.PR_BASE_SHA,
-      '${{ github.event.pull_request.base.sha }}',
-      'verify step must pass PR_BASE_SHA',
-    );
-  });
-
-  it('AC-2: analyze job is gated on attestation-precheck.outputs.skip != "true"', () => {
-    const analyze = workflow.jobs.analyze;
-    assert.ok(analyze.if, 'analyze must have an if: condition');
-    assert.match(
-      String(analyze.if),
-      /needs\.attestation-precheck\.outputs\.skip\s*!=\s*'true'/,
-      'analyze must skip when attestation precheck says skip=true',
-    );
-    // Defense in depth: needs must include attestation-precheck so the
-    // outputs are available + so the skip cascade is enforced.
-    const needs = Array.isArray(analyze.needs) ? analyze.needs : [analyze.needs];
-    assert.ok(
-      needs.includes('attestation-precheck'),
-      'analyze must declare needs: [attestation-precheck]',
-    );
-  });
-
-  it('AC-3: post-skip-results job posts the idempotent comment marker', () => {
-    const job = workflow.jobs['post-skip-results'];
-    assert.ok(job, 'post-skip-results job must exist');
-    // The comment marker is the load-bearing string for idempotent
-    // update-vs-create — search the entire job body for the literal.
-    const blob = JSON.stringify(job);
-    assert.match(
-      blob,
-      /<!-- ai-sdlc:reviewer-skipped-by-attestation -->/,
-      'post-skip-results must include the canonical comment marker',
-    );
-  });
-
-  it('AC-3: post-skip-results posts the Post Review Results status', () => {
-    const job = workflow.jobs['post-skip-results'];
-    const blob = JSON.stringify(job);
-    // The status context name MUST be `Post Review Results` (branch
-    // protection key) — an exact substring match is the cheapest gate
-    // against accidental rename.
-    assert.match(
-      blob,
-      /context=['"]Post Review Results['"]/,
-      'post-skip-results must post status with context=Post Review Results',
-    );
-    assert.match(blob, /state=success/, 'must post status as success');
-  });
-
-  it('AC-3: post-skip-results posts an APPROVE PR review (force-push recovery)', () => {
-    const job = workflow.jobs['post-skip-results'];
-    const blob = JSON.stringify(job);
-    assert.match(
-      blob,
-      /event:\s*['"]APPROVE['"]/,
-      'post-skip-results must post APPROVE event so branch protection dismiss_stale_reviews recovery works',
-    );
-  });
-
-  it('post-skip-results runs only when precheck succeeded + skip=true + analyze was skipped', () => {
-    const job = workflow.jobs['post-skip-results'];
-    const ifStr = String(job.if).replace(/\s+/g, ' ');
-    assert.match(
-      ifStr,
-      /needs\.attestation-precheck\.result == 'success'/,
-      'must guard against precheck failure',
-    );
-    assert.match(
-      ifStr,
-      /needs\.attestation-precheck\.outputs\.skip == 'true'/,
-      'must require skip=true (no false-positive cost-saver)',
-    );
-    assert.match(
-      ifStr,
-      /needs\.analyze\.result == 'skipped'/,
-      'must require analyze was actually skipped (defense in depth)',
-    );
+  it('AC-4: analyze fails loudly with ::error:: when the reviewer secret is absent', () => {
+    const steps = workflow.jobs.analyze.steps;
+    const guardIdx = steps.findIndex((s) => s.name === 'Require reviewer API key');
+    const reviewIdx = steps.findIndex((s) => s.id === 'review');
+    assert.ok(guardIdx >= 0 && guardIdx < reviewIdx, 'guard must run before the reviewers');
+    const guard = steps[guardIdx];
+    assert.match(String(guard.env.ANTHROPIC_API_KEY), /secrets\.ANTHROPIC_API_KEY/);
+    assert.match(String(guard.run), /-z "\$\{ANTHROPIC_API_KEY\}"/);
+    assert.match(String(guard.run), /::error::/);
+    assert.match(String(guard.run), /exit 1/);
   });
 });
 
@@ -523,90 +404,20 @@ describe('AISDLC-214: docs-only short-circuit eliminates fallback workflow race 
     });
   });
 
-  // AC-2: ai-sdlc-review.yml short-circuits on docs-only PR commits
-  // AISDLC-400 (2026-05-23): merge_group trigger removed; docs-only short-circuit
-  // now applies to pull_request/pull_request_target events only.
-  describe('ai-sdlc-review.yml docs-only short-circuit (AC-2)', () => {
-    it('ai-sdlc-review.yml does NOT trigger on merge_group (AISDLC-400: merge queue dropped)', () => {
+  // AC-2: ai-sdlc-review.yml. AISDLC-824: docs-only handling is paths-ignore only;
+  // the docs-only-check job and the queue-group trigger are gone.
+  describe('ai-sdlc-review.yml docs-only handling (AC-2)', () => {
+    it('ai-sdlc-review.yml does NOT trigger on merge_group (AISDLC-400: queue dropped)', () => {
       const triggers = reviewWorkflow.on || reviewWorkflow[true] || {};
       assert.ok(
         !('merge_group' in triggers),
-        'ai-sdlc-review.yml must NOT trigger on merge_group after AISDLC-400 dropped the merge queue',
+        'ai-sdlc-review.yml must NOT trigger on merge_group after AISDLC-400 dropped the queue',
       );
     });
 
-    it('has a docs-only-check job that handles pull_request docs-only', () => {
-      const job = reviewWorkflow.jobs['docs-only-check'];
-      assert.ok(job, 'ai-sdlc-review.yml must have a docs-only-check job');
-      assert.ok(job.steps, 'docs-only-check must have steps');
-    });
-
-    it('docs-only-check step posts Post Review Results: success on docs-only changeset', () => {
-      const job = reviewWorkflow.jobs['docs-only-check'];
-      const blob = JSON.stringify(job);
-      assert.match(
-        blob,
-        /context=['"]Post Review Results['"]/,
-        'docs-only-check must post status with context=Post Review Results',
-      );
-      assert.match(blob, /state=success/, 'docs-only-check must post success state');
-    });
-
-    it('docs-only-check uses scripts/is-docs-only-changeset.mjs (AISDLC-206 shared predicate)', () => {
-      const job = reviewWorkflow.jobs['docs-only-check'];
-      const blob = JSON.stringify(job);
-      assert.match(
-        blob,
-        /node scripts\/is-docs-only-changeset\.mjs/,
-        'docs-only-check must use the shared predicate script (AISDLC-206)',
-      );
-    });
-
-    it('docs-only-check uses -c core.quotePath=false for non-ASCII safety', () => {
-      const job = reviewWorkflow.jobs['docs-only-check'];
-      const blob = JSON.stringify(job);
-      assert.match(
-        blob,
-        /core\.quotePath=false/,
-        'docs-only-check must use -c core.quotePath=false for non-ASCII filename safety',
-      );
-    });
-
-    it('PR-review jobs are gated to only run on pull_request events', () => {
-      const precheck = reviewWorkflow.jobs['attestation-precheck'];
-      const analyze = reviewWorkflow.jobs.analyze;
-      const report = reviewWorkflow.jobs.report;
-      const postSkip = reviewWorkflow.jobs['post-skip-results'];
-
-      for (const [name, job] of [
-        ['attestation-precheck', precheck],
-        ['analyze', analyze],
-        ['report', report],
-        ['post-skip-results', postSkip],
-      ]) {
-        const ifStr = String(job?.if ?? '');
-        assert.match(
-          ifStr,
-          /github\.event_name\s*==\s*'pull_request'/,
-          `${name} job must be gated on github.event_name == 'pull_request' so it does not run on merge_group events`,
-        );
-      }
-    });
-
-    it('workflow has 6 jobs total (issue #791 adds automation-review-skip)', () => {
-      const jobs = Object.keys(reviewWorkflow.jobs).sort();
-      assert.deepEqual(
-        jobs,
-        [
-          'analyze',
-          'attestation-precheck',
-          'automation-review-skip',
-          'docs-only-check',
-          'post-skip-results',
-          'report',
-        ],
-        'must have exactly 6 jobs (issue #791 adds automation-review-skip for Dependabot)',
-      );
+    it('docs-only PRs are skipped through paths-ignore on the single trigger', () => {
+      const triggers = reviewWorkflow.on || reviewWorkflow[true] || {};
+      assert.ok(triggers.pull_request_target['paths-ignore'].includes('docs/**'));
     });
   });
 
