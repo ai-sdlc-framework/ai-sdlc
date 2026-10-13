@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-13T00:58:45.771Z","decisionId":"DEC-0158","chosenOptionId":"delete-gate","rationale":"Operator, in session: the regex verifies a keyword, not the thinking; the rule stays in CLAUDE.md and the DoR rubric. Class (b) weakening decided directly by the operator, so it applies at once.","by":"dominique@reliablegenius.io"}
