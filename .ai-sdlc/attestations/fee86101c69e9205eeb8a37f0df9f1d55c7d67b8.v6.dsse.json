@@ -1,0 +1,72 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "058e52582a101fb7e2c7c4b282d0717548dedc7a"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "74b0d4e6864aefb57393e105cfb7c10c08f83984d63c3b757361511f47d2926f",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "2700ffc1ca51c28eb10256151ec4cefd12c4b134827e7e6e4334e71429c87f41",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "b01626d7e031269f0e4ac57956565c1240e7c0eff8bac0dd201390c242c214d1",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "7cabf6cb585cc258609cc73c16a30230e70270e2a9c50574269eb2c862fb34ae",
+        "7de28f11e6650056866b2ce318574b1d41c779fb0a9541d1d6b65ba7c22dced7"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "eaa36a6b9d41f6c3de687fb88191b473ee2e120642c1572e43e42c4440cd5a45",
+        "7de28f11e6650056866b2ce318574b1d41c779fb0a9541d1d6b65ba7c22dced7"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "0770d7716c7ec89e780d4456c06f9a3a6e09ae52c7c433f28d5c81547c9cafb1",
+        "54ab37ffe10a855bee80cce53e01746ca9cdcb53f585faf2d4459546a5cc195d"
+      ]
+    }
+  ],
+  "rootHash": "6a276017f32b0d1f64599d5ad0a8ca45cf3275b158d9b84d47afaa047b240a45",
+  "rootSignature": "fK/W0s/76aCL12bP6CZQPV4UT9MI/89TMKaayY6gVpuQosBhDVA9rGEv8giFX0Bp/FyWhqiQtl+BOsKkuuDPAw==",
+  "nonce": "6f35a4d4caa9a329d91d123566f0643195cdc4e0a2f6ab4e25ed439be34ad252",
+  "leafCount": 3,
+  "signedAt": "2026-10-13T00:43:30.481Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      ".ai-sdlc/gates.yaml",
+      "ai-sdlc-plugin/hooks/collect-tool-sequence.js",
+      "ai-sdlc-plugin/scripts/resolve-pipeline-cli.sh"
+    ],
+    "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
+  }
+}
