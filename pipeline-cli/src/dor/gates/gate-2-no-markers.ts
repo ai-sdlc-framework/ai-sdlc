@@ -18,7 +18,6 @@
  */
 
 import type { GateEvaluation, IssueInput } from '../types.js';
-import { checkFiveStepReview, FIVE_STEP_QUESTION } from './five-step-review.js';
 
 interface MarkerPattern {
   re: RegExp;
@@ -67,18 +66,6 @@ export function findMarkers(body: string): Array<{ marker: string; description: 
 
 export function evaluateGate2(input: IssueInput): GateEvaluation {
   const hits = findMarkers(input.body);
-  const fiveStepFinding = checkFiveStepReview(input);
-  if (hits.length === 0 && fiveStepFinding) {
-    return {
-      gateId: 2,
-      verdict: 'fail',
-      severity: 'block',
-      stage: 'A',
-      confidence: 'high',
-      finding: fiveStepFinding,
-      clarificationQuestion: FIVE_STEP_QUESTION,
-    };
-  }
   if (hits.length === 0) {
     return {
       gateId: 2,

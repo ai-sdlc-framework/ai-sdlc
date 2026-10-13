@@ -166,7 +166,7 @@ existing `cli-decisions answer` and `cli-decisions extend` commands.
 
 ## Task template: Five-step review
 
-Every task that fixes a failure or adds a rule opens its Fix with a paragraph starting `**Five-step review (requirements first).**` that names the requirement questioned, a deletion (or "nothing to delete"), then what is simplified, accelerated and automated. The DoR gate returns `needs-clarification` without it. Template and rules: `docs/operations/decision-authority.md`.
+Every task that fixes a failure or adds a rule opens its Fix with a paragraph starting `**Five-step review (requirements first).**` that names the requirement questioned, a deletion (or "nothing to delete"), then what is simplified, accelerated and automated. No regex gate enforces it; the planner and the Stage-B refinement reviewer judge it (DEC-0158). Template and rules: `docs/operations/decision-authority.md`.
 
 ## Step 5 — Hand-off flow
 

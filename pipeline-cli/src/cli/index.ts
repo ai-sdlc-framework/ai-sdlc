@@ -838,8 +838,7 @@ export function buildCli(): Argv {
             );
             if (declared.length > 0) input.declaredDependencyRefs = declared;
             applyFrontmatterFields(input, stripFrontmatter(body).frontmatter);
-            // CI passes no --title for tasks; use the frontmatter title so the
-            // five-step review check can key on a `fix` title (AISDLC-804).
+            // CI passes no --title for tasks; use the frontmatter title.
             if (!argv.title) input.title = stripFrontmatter(body).title || input.title;
           }
           const verdict = await evaluateIssue(input, { hermetic: argv.hermetic as boolean });
