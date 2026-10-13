@@ -29,14 +29,14 @@ name: AI-SDLC PR Ready Gate
 #
 #   docs-only PRs (every changed file in spec/rfcs/**, docs/**,
 #   backlog/{tasks,completed}/**, or root *.md):
-#     → build-test, coverage, integration are SKIPPED (already gated by `detect`)
+#     → build-test, integration are SKIPPED (already gated by `detect`)
 #     → `ai-sdlc/attestation` is NOT required; verify-attestation.yml is skipped
 #       via paths-ignore on pull_request events; on merge_group events the inline
 #       short-circuit in verify-attestation.yml posts `success` cheaply
 #     → pr-ready aggregator passes via alls-green treating skipped as allowed
 #
 #   code/mixed PRs (at least one non-docs file):
-#     → build-test, coverage, integration all required (existing behavior)
+#     → build-test, integration all required (existing behavior)
 #     → `ai-sdlc/attestation` must be posted by verify-attestation.yml;
 #       missing/invalid envelopes cause verify-attestation to post `failure`
 #       (visible as a non-required informational status — branch protection
@@ -210,6 +210,10 @@ jobs:
         node-version: [22]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # AISDLC-376: full clone so the patch-coverage gate can compute the
+          # PR diff (base..head).
+          fetch-depth: 0
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -217,38 +221,20 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm test
+      # AISDLC-844: the suite runs ONCE, with coverage on (per-package line
+      # floors from each vitest.config.ts apply), instead of `pnpm test` in
+      # this job plus `pnpm test:coverage` in a separate Coverage job.
+      - run: pnpm test:coverage
+      # The non-vitest remainder of `pnpm test` (root gates and checks, and the
+      # ucvg-demo node:test suite that has no coverage script).
+      - run: pnpm --filter ./ucvg-demo test
+      - run: pnpm test:gates && pnpm docs:check && pnpm rfc:check && pnpm dark-code:check && pnpm knowledge:check && pnpm sync:plugin-runtime-deps:check
       # AISDLC-727: ci.yml no longer runs on pull requests, so schema validation
       # (cheap, cross-cutting) runs here instead of only post-merge on main.
       - run: pnpm validate-schemas
-
-  coverage:
-    name: Coverage
-    needs: detect
-    if: needs.detect.outputs.docs_only != 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # AISDLC-376: full clone so the patch-coverage gate can compute the
-          # PR diff (base..head). Without fetch-depth: 0, git diff against the
-          # PR base sha would fail with "bad object" and the gate would
-          # mis-report as a missing-coverage-data failure.
-          fetch-depth: 0
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - run: pnpm test:coverage
-      # AISDLC-376: server-side patch-coverage gate. Asserts ≥90% of the lines
-      # this PR adds/modifies are covered by tests, mirroring the AISDLC-372-
-      # dropped codecov/patch gate without the SaaS latency. Runs INSIDE the
-      # Coverage job so vitest's coverage-final.json fixtures are already on
-      # disk and we don't pay a second `pnpm test:coverage`. ci.yml no
-      # longer runs on pull requests (AISDLC-727), so this is the only PR gate.
+      # AISDLC-376: server-side patch-coverage gate (>=90% of added/modified
+      # lines covered), reading the coverage-final.json fixtures produced by
+      # the `pnpm test:coverage` step above.
       - name: Patch coverage gate (≥90%)
         if: github.event_name == 'pull_request'
         run: |
@@ -414,7 +400,7 @@ jobs:
   #     and the required check would never post → permanent merge block).
   #  2. The action inspects the `needs` context and treats `skipped` as
   #     allowed — which is exactly what archetype-conditional jobs need
-  #     (docs-only PRs skip build-test/coverage/integration; the gate
+  #     (docs-only PRs skip build-test/integration; the gate
   #     should still pass).
   #  3. The job's overall outcome IS the check named `ai-sdlc/pr-ready`
   #     by virtue of the job's `name:` — branch protection matches on
@@ -520,7 +506,7 @@ jobs:
   # It does not re-run the evaluation. It waits for the dor-ingress check run
   # on the PR head SHA to complete and mirrors its conclusion. dor-ingress runs
   # concurrently with this workflow and its install + build is shorter than the
-  # build-test / coverage jobs, so the wait is normally hidden behind them.
+  # build-test job, so the wait is normally hidden behind them.
   # A missing check run after the timeout fails closed.
   dor-readiness-gate:
     name: DoR readiness (task-file PRs)
@@ -645,7 +631,6 @@ jobs:
         detect,
         lint,
         build-test,
-        coverage,
         integration,
         backlog-drift,
         first-run-smoke,
@@ -683,7 +668,7 @@ jobs:
           #
           # archetype-conditional jobs that legitimately skip must be listed
           # in allowed-skips so that the aggregator doesn't fail on their skip:
-          #   - build-test / coverage / integration: skip on docs-only PRs
+          #   - build-test / integration: skip on docs-only PRs
           #   - attestation-gate: skips on docs-only PRs (paths-ignore)
           #   - independence-policy-gate: skips on docs-only PRs (AISDLC-591)
           #   - dependency-review-gate: skips on non-dep PRs (deps==false)
@@ -697,7 +682,6 @@ jobs:
           jobs: ${{ toJSON(needs) }}
           allowed-skips: >-
             build-test,
-            coverage,
             integration,
             first-run-smoke,
             test-python,

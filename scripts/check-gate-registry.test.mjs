@@ -103,7 +103,6 @@ const BASELINE_IDS = [
   'gate-job:detect',
   'gate-job:lint',
   'gate-job:build-test',
-  'gate-job:coverage',
   'gate-job:integration',
   'gate-job:backlog-drift',
   'gate-job:first-run-smoke',

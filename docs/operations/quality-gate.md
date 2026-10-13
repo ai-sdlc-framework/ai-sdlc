@@ -15,7 +15,7 @@ Configure **one** required check on your protected branch (AISDLC-388, AISDLC-83
 ai-sdlc/pr-ready
 ```
 
-`ai-sdlc/pr-ready` is the rollup of every PR signal AI-SDLC needs (lint, build, test on Node 22, coverage, integration tests). `Backlog Drift` (dangling task references) is a `needs:` of the rollup, so it gates merges through it and is not a separately required context. The rollup runs on `pull_request` events (no merge queue required — AISDLC-400 dropped the queue in favour of direct auto-merge with squash).
+`ai-sdlc/pr-ready` is the rollup of every PR signal AI-SDLC needs (lint, build, test with coverage on Node 22, integration tests). `Backlog Drift` (dangling task references) is a `needs:` of the rollup, so it gates merges through it and is not a separately required context. The rollup runs on `pull_request` events (no merge queue required — AISDLC-400 dropped the queue in favour of direct auto-merge with squash).
 
 **`ai-sdlc/attestation` is NO LONGER a direct required check** (AISDLC-388). Attestation is a conditional contributor to `ai-sdlc/pr-ready`: code PRs require it (verify-attestation.yml runs and its `ai-sdlc/attestation` status is an informational governance signal operators must review before merging), but docs-only PRs skip it entirely — no status needs to be posted. This eliminates the workaround class where docs PRs had to have a synthetic attestation status posted (AISDLC-214 short-circuit + AISDLC-215 synthesis, now deleted).
 
@@ -51,9 +51,7 @@ This is the same pattern shipped in production by **aiohttp**, **attrs**, **cond
 |---|---|---|
 | `Detect Changes` (docs-only archetype via `scripts/is-docs-only-changeset.mjs`; deps/tasks via `dorny/paths-filter`) | yes | — |
 | `Lint & Format` (`pnpm lint && pnpm format:check`) | yes | — |
-| `Build & Test (Node 20)` | — | yes |
-| `Build & Test (Node 22)` | — | yes |
-| `Coverage` (`pnpm test:coverage`) | — | yes |
+| `Build & Test (Node 22)` (build, `pnpm test:coverage` once with per-package floors, root gate checks, schema validation, then the 90% patch gate; AISDLC-844 folded the former `Coverage` job into it) | — | yes |
 | `Integration Tests` (`pnpm --filter @ai-sdlc/reference test`) | — | yes |
 | `DoR readiness (task-file PRs)` (see below) | — | only when the PR changes `backlog/tasks/*.md` |
 | `ai-sdlc/pr-ready` (the aggregator itself) | yes | yes |
@@ -154,8 +152,8 @@ Developers are asked (developer agent instructions) to hold the packages they to
 
 The CI patch gate runs in two places that both must pass:
 
-1. **`ci.yml` → coverage job → `Patch coverage gate (≥90%)` step** — runs on every `pull_request` event after `vitest --coverage` has produced `coverage-final.json` fixtures for the affected packages.
-2. **`ai-sdlc-gate.yml` → coverage job → `Patch coverage gate (≥90%)` step** — runs as part of the `ai-sdlc/pr-ready` rollup, so any failure cascades into the single required check.
+1. **`ci.yml` → `Patch coverage gate (≥90%)` step** — runs after `vitest --coverage` has produced `coverage-final.json` fixtures for the affected packages.
+2. **`ai-sdlc-gate.yml` → `build-test` job → `Patch coverage gate (≥90%)` step** (the suite runs once, with coverage on) — runs as part of the `ai-sdlc/pr-ready` rollup, so any failure cascades into the single required check.
 
 Both layers parse the unified diff (`git diff --unified=0 base..head`) per file, compute the union of NEW line numbers added/modified by the PR, then check each line against vitest's istanbul-format `coverage-final.json` statement map + hit counts. A line is "covered" when any statement on it was hit at least once. The aggregate ratio `covered / executable_changed_lines` must be ≥ 90%.
 
@@ -180,7 +178,7 @@ The new gate replicates codecov/patch's gating semantics (≥90% on the PR diff)
 
 ### Operator action — optionally add as a direct required check
 
-The gate rolls into `ai-sdlc/pr-ready` automatically (via the `coverage` job in `ai-sdlc-gate.yml`'s `needs:` list), so no branch-protection change is strictly required. Operators who want the gate to surface as an independently-named status on the PR checks tab can add it directly:
+The gate rolls into `ai-sdlc/pr-ready` automatically (via the `build-test` job in `ai-sdlc-gate.yml`'s `needs:` list), so no branch-protection change is strictly required. Operators who want the gate to surface as an independently-named status on the PR checks tab can add it directly:
 
 ```bash
 gh api -X PATCH repos/<org>/<repo>/branches/main/protection/required_status_checks \

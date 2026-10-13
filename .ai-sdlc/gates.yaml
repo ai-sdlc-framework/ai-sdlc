@@ -35,12 +35,6 @@ gates:
     owner: engineering
     property: build and test of affected packages on Node 22
     baseline: true
-  - id: gate-job:coverage
-    surface: pr-ready-job
-    origin: AISDLC-726, AISDLC-372, AISDLC-376
-    owner: engineering
-    property: package line-coverage floors and 90 percent patch coverage
-    baseline: true
   - id: gate-job:integration
     surface: pr-ready-job
     origin: AISDLC-727, AISDLC-400
