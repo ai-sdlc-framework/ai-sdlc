@@ -1,0 +1,114 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "6e90dab8e30db43eebc8ef3b8ea745aac8b789c3"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "3ffdc3774ccd766adbaa0592f11dcb3dba27b6e83c4f46328d3242ba7531bd19",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "df169350f7f12ea2f7fb9de2289041e7de125f458caab0247bb2f053534449c5",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "df169350f7f12ea2f7fb9de2289041e7de125f458caab0247bb2f053534449c5",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "0b4a7c4c331094931b0eefe73c91152f11b2ea5957ddaf744950e9d98ec5c56a",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 3,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "a54cc57d77f62e880e61e345489f1d627fb893f6b41c556fd5dc1e95f1cba843",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "a54cc57d77f62e880e61e345489f1d627fb893f6b41c556fd5dc1e95f1cba843",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 4,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "ba5bf5f74b5afd3662aace7f7bd6e550bad8cf9fdd6bda27edd2d1f59adbec20",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "ba5bf5f74b5afd3662aace7f7bd6e550bad8cf9fdd6bda27edd2d1f59adbec20",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "6aa0b827abea173038ab99ef179c13cc4b07b847ff68cec2b7061357d241d93e",
+        "99ad47ac3c162e8a102a489299081f18563fa343fd7d94b781f59d9b08430c0c",
+        "d1a3195c6fb89be378f5917e12265bcef4003e38a596013458b116e0c4e63f0d"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "29a1ca6ba48cd290e6a4af980a532f48fcce4f3b3d18b74d4ea52e84157a11fb",
+        "99ad47ac3c162e8a102a489299081f18563fa343fd7d94b781f59d9b08430c0c",
+        "d1a3195c6fb89be378f5917e12265bcef4003e38a596013458b116e0c4e63f0d"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "3b58e9602e633780e75b0ca31e8abb9712f7f526199cc1fbbfa16cf34ac68fd5",
+        "cd37eefb55cd080c564bd06903d79d292c28df3a9a2835922607f9dcb36f0593",
+        "d1a3195c6fb89be378f5917e12265bcef4003e38a596013458b116e0c4e63f0d"
+      ]
+    },
+    {
+      "leafIndex": 3,
+      "proof": [
+        "65069592096236abc6920d833255aa9ea766a1d36403b1f082eb6ad6ccf94529",
+        "cd37eefb55cd080c564bd06903d79d292c28df3a9a2835922607f9dcb36f0593",
+        "d1a3195c6fb89be378f5917e12265bcef4003e38a596013458b116e0c4e63f0d"
+      ]
+    },
+    {
+      "leafIndex": 4,
+      "proof": [
+        "cf2dfd26cfefbe3e0f2f2c8c3bf9b3fef3c6584e6f7a9dbd9aee075cd5a349fa",
+        "92566f29282e5b2b1468e51d59571f104ba69e72ba724fa8618aec1e5b08e388",
+        "dd4be6416ff250e7f15eb66493d0f994376d1b865212def1c810f441a268e376"
+      ]
+    }
+  ],
+  "rootHash": "f17cc5897e884ebf07261e1fe8a7f54657aa2f0aa3f25115e5f082e9d1e8704e",
+  "rootSignature": "7EnGYRNmcvezFYbvRy861Er4ihbVfuCkV70K/02nSRpBGYtlv0bBqg42L/Mb7zToQbiri31l+5AiNdz6LrraDg==",
+  "nonce": "68f9c234b9e417024f4143f33a54385cd987eb9707ad93efa8525ab807d017de",
+  "leafCount": 5,
+  "signedAt": "2026-10-13T06:35:38.777Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      ".ai-sdlc/gates.yaml",
+      ".github/workflows/__tests__/ai-sdlc-gate.test.mjs",
+      ".github/workflows/ai-sdlc-gate.yml"
+    ],
+    "appliedReviewers": [
+      "code-reviewer-codex",
+      "security-reviewer",
+      "code-reviewer-codex",
+      "security-reviewer",
+      "test-reviewer"
+    ]
+  }
+}
