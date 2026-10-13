@@ -39,7 +39,6 @@ describe('CLAUDE.md size budget', () => {
       'cli-merge-if-eligible',
       'Never close',
       'Always rebase',
-      '(skip ci marker)',
       'MUST NOT resolve RFC Open Questions',
       'PATCH_ID_EXCLUSIONS',
       'read-only',

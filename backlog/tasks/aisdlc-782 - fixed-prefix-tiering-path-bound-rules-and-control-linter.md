@@ -17,7 +17,7 @@ references:
   - CLAUDE.md
   - ai-sdlc-plugin/hooks/session-start.js
   - ai-sdlc-plugin/hooks/lib/governance-resolver.js
-  - backlog/tasks/aisdlc-742 - condense claude.md to rules and pointers to cut the per-call context floor (63 kb to at most 20 kb).md
+  - backlog/completed/aisdlc-742 - condense claude.md to rules and pointers to cut the per-call context floor (63 kb to at most 20 kb).md
   - backlog/completed/aisdlc-651.2 - fixed prefix diet for claude md and injected governance.md
 priority: high
 dispatchable: true
