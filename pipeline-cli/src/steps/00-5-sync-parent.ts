@@ -120,6 +120,8 @@ function resolveTaskIdPrefixSource(workDir: string): string {
  * `backlog/completed/<prefix>-N*.md`, where `<prefix>` is derived per-repo
  * via `resolveTaskIdPrefixSource` (AISDLC-609).
  */
+const DECISION_EVENTS_PREFIX = '.ai-sdlc/_decisions/events/';
+
 function backlogTaskRegex(workDir: string): RegExp {
   return new RegExp(`^backlog/(tasks|completed)/${resolveTaskIdPrefixSource(workDir)}-\\d`, 'i');
 }
@@ -303,7 +305,11 @@ export async function syncParentUntrackedFiles(opts: SyncParentOptions): Promise
   // 2. Partition (AISDLC-609: prefix derived per-repo, not hardcoded aisdlc-)
   const backlogTaskRe = backlogTaskRegex(workDir);
   const backlogFiles = untracked.filter((f) => backlogTaskRe.test(f));
-  const otherFiles = untracked.filter((f) => !backlogTaskRe.test(f));
+  // AISDLC-825: decision events filed from task worktrees land in the parent
+  // catalog untracked until a fast-forward brings them; tolerate them.
+  const otherFiles = untracked.filter(
+    (f) => !backlogTaskRe.test(f) && !f.startsWith(DECISION_EVENTS_PREFIX),
+  );
 
   // 3. Non-backlog untracked files → operator attention required
   if (otherFiles.length > 0) {

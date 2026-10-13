@@ -115,6 +115,16 @@ describe('isFileOnOriginMain', () => {
 // ── syncParentUntrackedFiles integration tests ────────────────────────
 
 describe('Step 0.5 — syncParentUntrackedFiles', () => {
+  it('AISDLC-825: untracked decision events do not refuse the execute', async () => {
+    const fake = new FakeRunner().on(
+      /^git ls-files/,
+      ok('.ai-sdlc/_decisions/events/2026-10-12-DEC-0153-created.json\n'),
+    );
+    const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
+    expect(result.ok).toBe(true);
+    expect(result.reason).toBeUndefined();
+  });
+
   it('(d) parent fully clean → no-op (ok: true, syncedFiles: [])', async () => {
     const fake = new FakeRunner().on(/^git ls-files/, ok(''));
     const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
