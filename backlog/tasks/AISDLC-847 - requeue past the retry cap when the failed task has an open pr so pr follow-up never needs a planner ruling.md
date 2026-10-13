@@ -1,5 +1,5 @@
 ---
-id: AISDLC-828
+id: AISDLC-847
 title: >-
   requeue past the retry cap when the failed task has an open pr, so pr follow-up never needs a planner ruling
 status: To Do
