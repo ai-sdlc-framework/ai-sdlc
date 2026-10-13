@@ -1282,6 +1282,24 @@ describe('peer binding: two hierarchies on one machine', () => {
     ).toBe(0);
   });
 
+  it('check-sender derives the pid from a harness uds socket ref', async () => {
+    seedBoth();
+    expect(
+      await runHierarchyCli(
+        ['check-sender', '--sender-ref', 'uds:/tmp/cc-socks/700.sock'],
+        overrides({ boardDir: dirA() }),
+      ),
+    ).toBe(0);
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(
+      await runHierarchyCli(
+        ['check-sender', '--sender-ref', 'uds:/tmp/cc-socks/800.sock'],
+        overrides({ boardDir: dirA() }),
+      ),
+    ).toBe(1);
+    expect(err.mock.calls.map((c) => String(c[0]))).toEqual(['not my dispatch session\n']);
+  });
+
   it('check-sender fails open with a logged warning when the envelope has no sender id', async () => {
     const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
     expect(await runHierarchyCli(['check-sender'], overrides({ boardDir: dirA() }))).toBe(0);

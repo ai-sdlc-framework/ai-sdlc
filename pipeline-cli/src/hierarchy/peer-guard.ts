@@ -45,8 +45,19 @@ export const SENDER_UNVERIFIED_WARNING =
   'warning: the message envelope carries no sender pid and no sender session ref, so the sender could not be checked against the roster; accepting it (this check is a mistake guard, not authentication)';
 
 /**
+ * The pid in a harness socket ref `uds:<dir>/<pid>.sock`, or undefined when the ref is
+ * not of that form (a malformed socket ref yields no pid and so matches nothing).
+ */
+export function pidFromSocketRef(ref: string): number | undefined {
+  const m = /^uds:(?:.*\/)?(\d+)\.sock$/.exec(ref);
+  if (!m) return undefined;
+  const pid = Number(m[1]);
+  return Number.isSafeInteger(pid) && pid > 1 ? pid : undefined;
+}
+
+/**
  * Accept the sender only when it is the running dispatch session of this roster.
- * A pid is compared with the entry's pid; a ref with the entry's recorded name or
+ * A pid is compared with the entry's pid; a harness socket ref (`uds:<dir>/<pid>.sock`) has its pid derived from the socket name and compared the same way; any other ref with the entry's recorded name or
  * tmux session. A sender that reports neither cannot be compared: the check fails open
  * with a warning that names what was missing. A sender that reports one and does not
  * match is refused.
@@ -59,9 +70,11 @@ export function checkDispatchSender(
   const hasPid = Number.isInteger(sender.pid) && (sender.pid as number) > 1;
   const hasRef = typeof sender.ref === 'string' && sender.ref !== '';
   if (!hasPid && !hasRef) return { ok: true, warning: SENDER_UNVERIFIED_WARNING };
+  const refPid = hasRef ? pidFromSocketRef(sender.ref as string) : undefined;
   const dispatch = sessions.filter((s) => s.role === 'operator-dispatch' && s.status === 'running');
   for (const d of dispatch) {
     if (hasPid && d.pid === sender.pid) return { ok: true, name: d.name };
+    if (refPid !== undefined && d.pid === refPid) return { ok: true, name: d.name };
     if (hasRef && (d.name === sender.ref || d.tmuxSession === sender.ref)) {
       return { ok: true, name: d.name };
     }
