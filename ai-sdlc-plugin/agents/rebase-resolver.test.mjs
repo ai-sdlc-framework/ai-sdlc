@@ -117,8 +117,8 @@ describe('rebase-resolver frontmatter', () => {
 
 describe('rebase-resolver body — hard rules', () => {
   it('forbids `gh pr merge`', () => {
-    assert.match(body, /Merging follows `governance\.allowMerge`/);
-    assert.match(body, /never run the raw merge command/);
+    assert.match(body, /`governance\.allowMerge` permits it/);
+    assert.match(body, /cli-merge-if-eligible/);
     assert.match(body, /gh pr merge/);
   });
 
@@ -128,7 +128,7 @@ describe('rebase-resolver body — hard rules', () => {
   });
 
   it('refuses to push on main/master', () => {
-    assert.match(body, /Never push to `main` or `master`/);
+    assert.match(body, /any push to `main`\/`master`/);
     assert.match(body, /BRANCH.*main.*master/);
   });
 
