@@ -27,7 +27,9 @@ The runtime checks the bar in code (the `no-promotion` downgrade): a promotion
 record whose numbers do not satisfy the judgment's `riskClass` bar leaves the judgment
 running as `shadow`. The record is self-declared. The runtime compares the `n` and
 `actBandPrecision` written in the config and never opens the cited `evalReport`, so
-the PR reviewer must verify that report, especially for a `relax` judgment. `openai-compatible` judgments cannot be promoted in v1 (they are
+the PR reviewer must verify that report, especially for a `relax` judgment. `eval` reads no
+cache unless `--use-cache` is passed; a report with any cache hit is NOT MET and a corpus
+record carrying `cacheHits` above zero never satisfies the bar. `openai-compatible` judgments cannot be promoted in v1 (they are
 uncalibrated); promotion applies to a calibrated provider such as `jev`.
 
 ---

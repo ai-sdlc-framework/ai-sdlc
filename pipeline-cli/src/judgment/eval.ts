@@ -406,15 +406,20 @@ export function buildPromotion(
   key: string,
   stats: Pick<EvalStats, 'n' | 'actBandPrecision'>,
   evalReportPath: string,
+  cacheHits = 0,
 ): PromotionSummary {
   const bar = promotionCorpusBar(definition.riskClass);
   const met = promotionSatisfies(definition.riskClass, {
     path: 'corpus',
     n: stats.n,
+    ...(cacheHits > 0 ? { cacheHits } : {}),
     ...(stats.actBandPrecision !== null ? { actBandPrecision: stats.actBandPrecision } : {}),
   });
   const pct = Math.round(bar.minActBandPrecision * 100);
   const bits = [
+    ...(cacheHits > 0
+      ? [`${cacheHits} cache hit(s) (a promotion report must come from an uncached run)`]
+      : []),
     `n=${stats.n} (needs >= ${bar.minN})`,
     stats.actBandPrecision === null
       ? 'no items in the act band (needs act-band precision >= ' + `${pct}%)`
@@ -436,6 +441,7 @@ export function buildPromotion(
   if (stats.actBandPrecision !== null) {
     lines.push(`        actBandPrecision: ${stats.actBandPrecision}`);
   }
+  if (cacheHits > 0) lines.push(`        cacheHits: ${cacheHits}`);
   lines.push(`        evalReport: ${evalReportPath}`);
   return {
     key,

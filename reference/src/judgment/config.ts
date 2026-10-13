@@ -7,6 +7,8 @@ export interface PromotionRecord {
   n?: number;
   actBandPrecision?: number;
   evalReport?: string;
+  /** Cache hits in the eval run; a corpus record citing any is rejected. */
+  cacheHits?: number;
   evidence?: string;
 }
 

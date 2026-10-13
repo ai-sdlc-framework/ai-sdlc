@@ -217,14 +217,19 @@ describe('eval', () => {
     expect(outText).toContain('sweep pass:');
   });
 
-  it('reuses the cache on a second run', async () => {
+  it('reuses the cache on a second run only with --use-cache', async () => {
     const fake = makeFake();
     const corpus = writeCorpus(CASE);
     const d = deps({ getProvider: () => fake, getDefinition: () => makeDef() });
-    await run(['eval', 'test.judgment', '--corpus', corpus], d);
-    await run(['eval', 'test.judgment', '--corpus', corpus], d);
+    await run(['eval', 'test.judgment', '--corpus', corpus, '--use-cache'], d);
+    await run(['eval', 'test.judgment', '--corpus', corpus, '--use-cache'], d);
     expect(fake.requests).toHaveLength(10);
     expect(outText).toContain('10 cache hits');
+    expect(outText).toContain('NOT MET');
+    expect(outText).toContain('cacheHits: 10');
+    await run(['eval', 'test.judgment', '--corpus', corpus], d);
+    expect(fake.requests).toHaveLength(20);
+    expect(outText).toContain('0 cache hits');
   });
 
   it('states met for a seam definition at the bar and not met for relax', async () => {

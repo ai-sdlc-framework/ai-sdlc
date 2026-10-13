@@ -136,6 +136,7 @@ export function promotionSatisfies(
   if (record.path === 'corpus') {
     const bar = promotionCorpusBar(riskClass);
     return (
+      !(typeof record.cacheHits === 'number' && record.cacheHits > 0) &&
       typeof record.n === 'number' &&
       record.n >= bar.minN &&
       typeof record.actBandPrecision === 'number' &&
