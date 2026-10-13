@@ -19,7 +19,7 @@ const budgetLib = require('./lib/developer-turn-budget.js');
 
 let input;
 try {
-  const raw = readFileSync('/dev/stdin', 'utf-8');
+  const raw = readFileSync(0, 'utf-8');
   input = JSON.parse(raw);
 } catch {
   process.exit(0);

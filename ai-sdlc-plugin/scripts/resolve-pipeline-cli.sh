@@ -122,7 +122,13 @@ _repo_build_fresh() {
 
 # AISDLC-791: portable mtime (BSD stat, then GNU stat) of a path, for the diagnostic line.
 _mtime() {
-  stat -f '%Sm' -t '%Y-%m-%dT%H:%M:%S' "$1" 2>/dev/null || stat -c '%y' "$1" 2>/dev/null || echo unknown
+  # GNU stat first: on GNU, `stat -f` succeeds but prints filesystem status, not an mtime.
+  local epoch
+  if epoch="$(stat -c '%Y' "$1" 2>/dev/null)" && [ -n "$epoch" ]; then
+    date -u -d "@$epoch" '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || echo "$epoch"
+  else
+    stat -f '%Sm' -t '%Y-%m-%dT%H:%M:%S' "$1" 2>/dev/null || echo unknown
+  fi
 }
 
 REPO_WORKTREE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
