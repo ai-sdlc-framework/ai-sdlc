@@ -10,7 +10,13 @@ import {
   resolveReviewerAgent,
   reviewerHarness,
   selectByClassifier,
+  selectForReview,
 } from './review-prepare.js';
+import {
+  TRUST_CHAIN_PATH_PREFIXES,
+  checkReviewerKindCoverage,
+  requiredReviewerKind,
+} from '../../attestation-core/review-scope-core.mjs';
 import type { NextStepState } from './types.js';
 
 const DIFF = 'diff --git a/src/a.ts b/src/a.ts\n+const a = 1;\n';
@@ -129,6 +135,30 @@ describe('pure helpers', () => {
   it('classifier fail-open selects every reviewer', () => {
     expect(CLASSIFIER_FAIL_OPEN).toMatchObject({ fellOpen: true, confidence: 0 });
     expect(CLASSIFIER_FAIL_OPEN.reviewers).toEqual(['testing', 'critic', 'security']);
+  });
+});
+
+describe('selectForReview (AISDLC-850)', () => {
+  const p = (r: string): { reviewer: never } => ({ reviewer: r as never });
+  const three = [p('code-reviewer'), p('test-reviewer'), p('security-reviewer')];
+
+  it.each(TRUST_CHAIN_PATH_PREFIXES.map((x) => `${x}file.ts`))(
+    'keeps the verifier-required set for trust-chain path %s',
+    (path) => {
+      const names = selectForReview(three, ['security'], [path]).map((x) =>
+        resolveReviewerAgent(x.reviewer, {}),
+      );
+      const kind = requiredReviewerKind([path]).kind;
+      expect(kind).toBe('three');
+      expect(checkReviewerKindCoverage(names, kind).ok).toBe(true);
+      expect(names).toContain('test-reviewer-codex');
+    },
+  );
+
+  it('still narrows a docs-only diff', () => {
+    expect(selectForReview(three, ['security'], ['docs/a.md']).map((x) => x.reviewer)).toEqual([
+      'security-reviewer',
+    ]);
   });
 });
 

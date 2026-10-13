@@ -28,6 +28,7 @@ import { resolveModel } from '../routing/resolve-model.js';
 import { taskClassOf } from '../routing/task-class.js';
 import { buildReviewPrompts } from '../steps/07-build-review-prompts.js';
 import type { ReviewerType, ReviewerVerdict } from '../types.js';
+import { requiredReviewerKind } from '../../attestation-core/review-scope-core.mjs';
 import { writeRunFile } from './init.js';
 import type { NextStepContext, NextStepState, ReviewRoundState, SpawnedReviewer } from './types.js';
 
@@ -126,6 +127,22 @@ export function selectByClassifier<T extends { reviewer: ReviewerType }>(
         return true;
     }
   });
+}
+
+/**
+ * `selectByClassifier` plus the verifier's floor (AISDLC-850): when the diff requires the
+ * three-reviewer set (`requiredReviewerKind`, the same function the CI verifier uses), the
+ * code, test and security reviewers are always kept whatever the narrowing classifier said.
+ */
+export function selectForReview<T extends { reviewer: ReviewerType }>(
+  prompts: readonly T[],
+  names: readonly string[],
+  changedPaths: readonly string[],
+): T[] {
+  const selected = selectByClassifier(prompts, names);
+  if (requiredReviewerKind(changedPaths).kind !== 'three') return selected;
+  const required = new Set<ReviewerType>(['code-reviewer', 'test-reviewer', 'security-reviewer']);
+  return prompts.filter((p) => required.has(p.reviewer) || selected.includes(p));
 }
 
 async function runClassifier(
@@ -298,7 +315,7 @@ export async function prepareReview(
 
   const classifier = await runClassifier(ctx, state, pathsFile, artifactsDir);
   const classifierLine = classifierLineFor(classifier);
-  const selected = selectByClassifier(built.prompts, classifier.reviewers);
+  const selected = selectForReview(built.prompts, classifier.reviewers, built.changedFiles);
 
   const incremental = await runIncrementalGate(ctx, state, pathsFile);
   const headSha = (
@@ -377,7 +394,7 @@ export async function prepareReview(
   const prompts =
     promptDiff === undefined
       ? selected
-      : selectByClassifier(
+      : selectForReview(
           (
             await buildReviewPrompts({
               taskId: state.taskId,
@@ -394,6 +411,7 @@ export async function prepareReview(
             })
           ).prompts,
           classifier.reviewers,
+          built.changedFiles,
         );
 
   // One nonce per round, shared by every reviewer (they all review the same head).

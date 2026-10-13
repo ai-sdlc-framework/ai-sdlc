@@ -2,7 +2,7 @@
 id: AISDLC-850
 title: >-
   next-step reviewer set uses the attestation trust-chain classifier so test-reviewer is never omitted
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:
