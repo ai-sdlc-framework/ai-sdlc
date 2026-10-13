@@ -2,7 +2,7 @@
 id: AISDLC-840
 title: >-
   codeql go and python run per pr only when their paths change, plus a weekly full scan
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-13'
 labels:
