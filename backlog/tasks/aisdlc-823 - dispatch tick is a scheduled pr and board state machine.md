@@ -10,7 +10,7 @@ labels:
   - velocity
 dependencies: []
 references:
-  - RFC-0051
+  - spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md
 priority: critical
 dispatchable: true
 ---
@@ -20,6 +20,8 @@ dispatchable: true
 The operator-dispatch session (RFC-0051) runs "one tick per wake-up, then sleep" and nothing wakes it: no cadence and no PR/CI event source. On 2026-10-12 the drain idled for two hours after its blocking PR (#1433, DEC-0142) merged, and for the whole day every tick was triggered by a planner message, which in turn needed an operator ping. Seven escalations that day were all mechanical (push non-fast-forward x2, rebase/patch-id moved x3, reviewer set short x1, manifest branch mismatch x2) and each maps to a fixed action. Dispatch also refused to act on stale claims because it did not know `cli-dispatch reap`, `release`, `requeue` and `write-resume-signal` were on its list. Decision authority for the mechanical actions is already on main: DEC-0127 (drain), DEC-0142 (post-rebase hand review path), AISDLC-821 (push-only resume).
 
 ## Five-step review (requirements first)
+
+**Five-step review (requirements first).** Deleted: the planner round trip for every mechanical PR stop and the "dispatch acts only when woken by a message" assumption (details in the numbered steps below). Scope note 2026-10-13: AISDLC-826 (stall detection) and AISDLC-829 (PR sweep in the tick) now carry two slices of this task; this task keeps the scheduled tick and the board state machine.
 
 1. Requirement questioned: "dispatch acts only when woken by a message" (RFC-0051 design assumption that the planner or operator supplies wakes; set by the planner 2026-10-06). Deleted: the dispatch tick schedules itself.
 2. Deleted: the planner round trip for every mechanical PR stop; the "operator pings planner pings dispatch" chain.
