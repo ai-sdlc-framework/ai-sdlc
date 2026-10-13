@@ -31,8 +31,6 @@ const GATE_TEST_DIRS = [
 const KNOWN_RED = {
   'scripts/check-rm-guard.test.mjs':
     'AISDLC-482 guard finds 7 unguarded rm invocations in shipped shell scripts; never chained, so never enforced',
-  'ai-sdlc-plugin/agents/rebase-resolver.test.mjs':
-    'asserts a CHANGELOG merge rule that AISDLC-401 removed; never chained, so never enforced',
 };
 
 /**
