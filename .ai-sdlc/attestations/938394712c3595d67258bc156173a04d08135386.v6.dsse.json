@@ -2,7 +2,7 @@
   "schemaVersion": "v6",
   "subject": {
     "digest": {
-      "sha1": "f7f142c3978eecdee83ca7c4b32919ec72638ac0"
+      "sha1": "6e7ffaf888c4729e0f8a5c8959538b237d55c814"
     }
   },
   "transcriptLeaves": [
@@ -20,23 +20,59 @@
       "verdictClass": "independent",
       "harnessTranscriptHash": "6e422b7087efb439bbd77764ee045825795987ffe5423efed9363b34d22655e6",
       "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "ba8d6f124142c2533ec99b7b8e836fd7b2b0e02ea850e27bff842c7b27d6298c",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "ba8d6f124142c2533ec99b7b8e836fd7b2b0e02ea850e27bff842c7b27d6298c",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 3,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "b69a3e70f1c0130036fb1a70dd43fd5aa7a9057bea6181358bf39161d2316644",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "b69a3e70f1c0130036fb1a70dd43fd5aa7a9057bea6181358bf39161d2316644",
+      "independenceTier": "attested"
     }
   ],
   "merkleProofs": [
     {
       "leafIndex": 0,
-      "proof": ["c3679acf63b77774fe9dc3d8a4d3809296c17c5bf730db3adeb5def83a870e3b"]
+      "proof": [
+        "c3679acf63b77774fe9dc3d8a4d3809296c17c5bf730db3adeb5def83a870e3b",
+        "e9bb8c7813998e1ff0b1fb118ddfdcf4c28d3e3115aa04eb509d94d43e0b0006"
+      ]
     },
     {
       "leafIndex": 1,
-      "proof": ["649ff7aa0b1313dd10ab175bdd05a62b257fe1a5ff4f02f606ba0a9603f2f9f9"]
+      "proof": [
+        "649ff7aa0b1313dd10ab175bdd05a62b257fe1a5ff4f02f606ba0a9603f2f9f9",
+        "e9bb8c7813998e1ff0b1fb118ddfdcf4c28d3e3115aa04eb509d94d43e0b0006"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "9c83822ee3fa60d24a4665a4e1051bf5aa56d1b2cb8f244c1ca27f36ec3dfcdc",
+        "1493ca5dcf9d8f69721d34f56ec78f439cf41cd442db98ff471229bcaee5a684"
+      ]
+    },
+    {
+      "leafIndex": 3,
+      "proof": [
+        "576a1c037c3f0a45b066cbd3eadef25f5275affe310665fd5c32f20a1e0521ba",
+        "1493ca5dcf9d8f69721d34f56ec78f439cf41cd442db98ff471229bcaee5a684"
+      ]
     }
   ],
-  "rootHash": "1493ca5dcf9d8f69721d34f56ec78f439cf41cd442db98ff471229bcaee5a684",
-  "rootSignature": "Sl3+u483Y3vPhNrstcGWnJyKlWma+z/DDl8Ktr5qaAlvEgUTfa42Rtc4ZPPt3h+Ghjk/GkBI0z9JD3vlK+sYCg==",
-  "nonce": "ce3824d9dc74d5b9fca39964fbacbce38c4456142ff1a6cf299de3b2f0270d62",
-  "leafCount": 2,
-  "signedAt": "2026-10-13T05:12:06.594Z",
+  "rootHash": "f24aab52cf5dd68a4c5deaf2316f0c09a5eb7f5179b046a18ab1387a59bd1e67",
+  "rootSignature": "WXlqUwlMwCmDioQ+q3T0d1IYYOQb3tesx08qOlpyeeoCAX9LAnmbypGEvRW+0+qYhwBuMTDPOM7bGoJmSxF1Bw==",
+  "nonce": "2af7ca1e08ecd6e5c837daf6975781217f40c5417283f983a06a4003282df105",
+  "leafCount": 4,
+  "signedAt": "2026-10-13T19:19:03.040Z",
   "signerIdentity": "dominique@local:doms-macbook",
   "reviewScope": {
     "classification": "full",
@@ -52,6 +88,6 @@
       ".github/workflows/isolated-review.yml",
       "ai-sdlc-plugin/commands/fix-pr.md"
     ],
-    "appliedReviewers": ["code-reviewer-codex", "security-reviewer"]
+    "appliedReviewers": ["code-reviewer-codex", "security-reviewer", "code-reviewer-codex", "security-reviewer"]
   }
 }
