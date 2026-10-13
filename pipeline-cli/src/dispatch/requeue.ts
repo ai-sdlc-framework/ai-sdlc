@@ -11,6 +11,7 @@
  * the board exactly as it was.
  */
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -60,6 +61,8 @@ export interface RequeueFailedResult {
   /** Retry count now recorded on the queued manifest. */
   retryCount: number;
   queuePath: string;
+  /** True when the failed task has an open PR: the requeue is PR follow-up and used no retry. */
+  followUp?: boolean;
 }
 
 /** Options for {@link requeueFailed}. */
@@ -71,6 +74,22 @@ export interface RequeueFailedOptions {
   /** Who requeues the task (audit only); used with `note`. */
   requeuedBy?: string;
   now?: () => Date;
+  /** Reads a PR's state (`OPEN`, `MERGED`, `CLOSED`) from its URL; undefined when unknown. Default: `gh pr view`. */
+  prState?: (prUrl: string) => string | undefined;
+}
+
+/** Default PR state reader; any failure means "unknown", so the retry cap applies. */
+function ghPrState(prUrl: string): string | undefined {
+  try {
+    const out = execFileSync('gh', ['pr', 'view', prUrl, '--json', 'state', '--jq', '.state'], {
+      encoding: 'utf-8',
+      timeout: 30_000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return out.trim() || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function readSnapshot(file: string): DispatchManifest | undefined {
@@ -119,8 +138,20 @@ export function requeueFailed(
     Number.isInteger(manifest.retryCount) && (manifest.retryCount as number) > 0
       ? (manifest.retryCount as number)
       : 0;
-  const retryCount = prior + 1;
-  if (retryCount > retryLimit) {
+  // A task whose failure record names a still-open PR needs PR follow-up (finish the
+  // existing PR), which is not a retry: the cap guards PR-less churn only.
+  let prUrl: string | undefined;
+  try {
+    const v = JSON.parse(
+      readFileSync(path.join(failedDir, `${taskId}.verdict.json`), 'utf-8'),
+    ) as DispatchVerdict;
+    if (typeof v.prUrl === 'string' && v.prUrl) prUrl = v.prUrl;
+  } catch {
+    prUrl = undefined;
+  }
+  const followUp = prUrl !== undefined && (opts.prState ?? ghPrState)(prUrl) === 'OPEN';
+  const retryCount = followUp ? prior : prior + 1;
+  if (!followUp && retryCount > retryLimit) {
     throw new Error(
       `${taskId} has already been re-queued ${prior} time(s); the limit is ${retryLimit}`,
     );
@@ -146,5 +177,5 @@ export function requeueFailed(
   delete next.blockedBy;
   const queuePath = writeManifest(boardDir, next);
   for (const f of [...records, snapshotFile]) rmSync(f, { force: true });
-  return { taskId, retryCount, queuePath };
+  return { taskId, retryCount, queuePath, ...(followUp ? { followUp: true } : {}) };
 }
