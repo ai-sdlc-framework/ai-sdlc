@@ -116,7 +116,12 @@ test('untrusted-pr-gate.yml governance-boundary job is unflagged, base-checkout,
   const doc = yaml.load(src);
   const job = doc.jobs['governance-boundary'];
   assert.ok(job, 'governance-boundary job exists');
-  assert.equal(job.if, undefined, 'not behind the UCVG feature flag');
+  // AISDLC-799: only the fork predicate may gate the job, never the UCVG flag.
+  assert.equal(
+    job.if,
+    'github.event.pull_request.head.repo.full_name != github.repository',
+    'gated by the fork predicate only, not behind the UCVG feature flag',
+  );
   assert.equal(String(job.env?.AI_SDLC_UNTRUSTED_RUN), '1');
   assert.ok(!job.steps.some((s) => s.with?.ref), 'never checks out PR content');
   for (const s of job.steps) {
