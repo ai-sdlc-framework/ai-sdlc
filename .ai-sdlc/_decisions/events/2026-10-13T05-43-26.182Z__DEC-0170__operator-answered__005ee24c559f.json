@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-13T05:43:26.182Z","decisionId":"DEC-0170","chosenOptionId":"rereview","rationale":"Class (a): restores the required v6 reviewer set (test-reviewer round, Claude-native), re-sign, push. Why next-step omitted it = DEC-0169 post-drain item."}

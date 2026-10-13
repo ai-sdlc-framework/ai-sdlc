@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-13T07:49:54.486Z","decisionId":"DEC-0180","chosenOptionId":"wait-850","rationale":"Class (a): #1482 (850) is armed and on checks; the by-hand leaf path has failed repeatedly in practice. Hold 844 behind 850, same as 833; resume plain once it lands."}

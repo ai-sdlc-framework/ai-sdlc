@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-13T06:24:55.011Z","decisionId":"DEC-0175","chosenOptionId":"run-test-reviewer-by-hand","rationale":"Class (a), DEC-0170/0172/0174 pattern: Claude-native test-reviewer round by the executor, emit-leaf, re-sign, lease push; completes the required set, weakens nothing. 844 holds 833/834/835; 850 (#1476) fixes the root."}

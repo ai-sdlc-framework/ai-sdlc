@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-13T05:43:32.976Z","decisionId":"DEC-0171","chosenOptionId":"rereview","rationale":"Class (a): git mv task file back to backlog/tasks in the worktree, reviewer round for leaves, sign, lease push; check-task-moved moves it at push. ci-attest refused: weakening."}

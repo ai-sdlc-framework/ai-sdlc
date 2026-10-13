@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-13T06:09:05.057Z","decisionId":"DEC-0173","chosenOptionId":"push-only","rationale":"Class (a): reversible, no control changes; CI remains the gate. Authority for dispatch once on main via decisions-sync."}
