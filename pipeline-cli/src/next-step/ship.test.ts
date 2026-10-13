@@ -162,6 +162,7 @@ describe('preSignRebase (AISDLC-102)', () => {
       kind: 'failed',
       reason: expect.stringContaining('(rebase-conflict)'),
       conflictingFiles: ['a.ts', 'b/c.ts'],
+      cause: 'rebase-conflict',
     });
     expect((r as { reason: string }).reason).toContain('a.ts, b/c.ts');
     expect((r as { reason: string }).reason).toContain(`/ai-sdlc execute ${state.taskId}`);
@@ -171,16 +172,45 @@ describe('preSignRebase (AISDLC-102)', () => {
     expect(cmds().filter((c) => /git (checkout|restore|reset)/.test(c))).toEqual([]);
   });
 
-  it('reports unknown files when git lists none', async () => {
+  it('names a rebase refusal without conflict markers by cause and stderr', async () => {
+    hashes('A');
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    h.runner.on(
+      /git rebase origin\/main/,
+      fail('error: cannot rebase: You have unstaged changes.', 1),
+    );
+    const r = await preSignRebase(h.ctx, state);
+    expect(r).toEqual({
+      kind: 'failed',
+      reason: expect.stringContaining('cannot rebase: You have unstaged changes.'),
+      conflictingFiles: [],
+      cause: 'dirty-worktree',
+    });
+    expect((r as { reason: string }).reason).not.toContain('unknown');
+  });
+
+  it('labels other refusals rebase-failed', async () => {
     hashes('A');
     h.runner.on(/merge-base --is-ancestor/, fail('', 1));
     h.runner.on(/git rebase origin\/main/, fail('boom', 1));
     const r = await preSignRebase(h.ctx, state);
-    expect(r).toEqual({
-      kind: 'failed',
-      reason: expect.stringContaining('unknown'),
-      conflictingFiles: [],
-    });
+    expect(r).toMatchObject({ kind: 'failed', cause: 'rebase-failed' });
+    expect((r as { reason: string }).reason).toContain('boom');
+  });
+
+  it('commits pending transcript leaves before the rebase (dirty-leaf case)', async () => {
+    hashes('A', 'A');
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    h.runner.on(
+      /status --porcelain -- \.ai-sdlc\/transcript-leaves\//,
+      ok('?? .ai-sdlc/transcript-leaves/abc.jsonl\n'),
+    );
+    const r = await preSignRebase(h.ctx, state);
+    expect(r).toEqual({ kind: 'unchanged', hash: 'A' });
+    const commit = indexOfCall(/git commit -m chore: commit pending transcript leaves/);
+    expect(commit).toBeGreaterThan(-1);
+    expect(indexOfCall(/git add -- \.ai-sdlc\/transcript-leaves\//)).toBeLessThan(commit);
+    expect(commit).toBeLessThan(indexOfCall(/git rebase origin\/main/));
   });
 
   it('treats a base that moved during the rebase as success', async () => {
