@@ -153,6 +153,7 @@ import {
   collectVerdicts,
   DEFAULT_BOARD_DIR,
   enqueueTasks,
+  evaluatePushOnly,
   formatResumeFeedback,
   idleBackoffSec,
   MAX_NOTE_CHARS,
@@ -178,6 +179,7 @@ import {
   writeResumeSignal,
   writeVerdict,
 } from '../dispatch/index.js';
+import { computePatchId } from '../attestation/patch-id.js';
 import { formatSessionLine, listSessions, recordAgentSession } from '../dispatch/sessions.js';
 import { assertClaimHolder, completeTask, splitIdList } from '../dispatch/complete.js';
 import { guardedRelease } from '../dispatch/release-guard.js';
@@ -366,6 +368,25 @@ function listOpenPrFiles(workDir: string): string[] {
   return prs.flatMap((pr) =>
     (pr.files ?? []).map((f) => f.path).filter((p): p is string => typeof p === 'string'),
   );
+}
+
+/**
+ * AISDLC-849: true when the worktree holds an attestation envelope for the branch's
+ * current patch-id (so a push-only resume's content still matches an approval).
+ */
+export function approvalEnvelopeMatches(worktree: string, target = 'origin/main'): boolean {
+  try {
+    const git = (a: string[]): string =>
+      execFileSync('git', a, { cwd: worktree, encoding: 'utf-8', timeout: 30_000 }).trim();
+    const head = git(['rev-parse', 'HEAD']);
+    const base = git(['merge-base', target, 'HEAD']);
+    const pid = computePatchId(base, head, worktree);
+    if (!pid) return false;
+    const dir = path.join(worktree, '.ai-sdlc', 'attestations');
+    return [`${pid}.v6.dsse.json`, `${pid}.dsse.json`].some((f) => existsSync(path.join(dir, f)));
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -720,6 +741,19 @@ export async function runDispatchCli(
       const target = writeIterationExhaustedDiagnostic(boardDir, args);
       out({ ok: true, path: target });
       return 0;
+    }
+
+    case 'push-only-check': {
+      // AISDLC-849: the executor's push-only gate. A missing verdict file is not a
+      // refusal when the branch content still matches an approval envelope: the
+      // verdict step runs (verdictMissing) instead of a developer rerun.
+      const taskId = requireFlag(flags, 'task-id');
+      const worktree = path.resolve(flags['worktree'] ?? process.cwd());
+      const decision = evaluatePushOnly(worktree, taskId, {
+        contentMatches: () => approvalEnvelopeMatches(worktree),
+      });
+      out(decision);
+      return decision.mode === 'push-only' ? 0 : 1;
     }
 
     case 'remove-verdict': {
@@ -1357,6 +1391,7 @@ Subcommands:
                 [--commit-sha <s>]
                 [--iterations-attempted <n>] [--session-id <uuid>] ...
   remove-verdict --task-id <id> [--from done|failed]
+  push-only-check --task-id <id> [--worktree <path>]   (exit 0 push-only, 1 run a normal resume)
   heartbeat --task-id <id> --worker-id <id> --worker-kind <kind>
   sweep [--stale-ms <n>]
   release --task-id <id> [--force --reason <text>]   (refuses while the worktree has unpushed or uncommitted work)

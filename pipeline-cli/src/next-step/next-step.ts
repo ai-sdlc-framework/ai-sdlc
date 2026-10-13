@@ -309,7 +309,7 @@ class Machine {
   /** Revert the task to its pre-dispatch status; the worktree stays for inspection. */
   private async rollbackStatus(state: NextStepState): Promise<void> {
     try {
-      const file = findTaskFile(state.taskId, state.worktreePath);
+      const file = findTaskFile(state.taskId, state.worktreePath, { includeCompleted: true });
       if (!file) return;
       const raw = readFileSync(file, 'utf8');
       writeFileSync(file, patchFrontmatterStatus(raw, state.fromStatus), 'utf8');
