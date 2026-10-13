@@ -46,11 +46,12 @@ function run(args, cwd, extra = {}) {
 }
 
 before(() => {
+  // AISDLC-862: reuse the built dist; never build inside a test.
   if (!existsSync(RULE_DIST)) {
-    execFileSync('pnpm', ['--filter', '@ai-sdlc/pipeline-cli', 'build'], {
-      cwd: REPO_ROOT,
-      stdio: 'inherit',
-    });
+    throw new Error(
+      'precondition: pipeline-cli/dist is not built (missing pipeline-cli/dist/backlog/followup-rule.js); ' +
+        'run `pnpm --filter @ai-sdlc/pipeline-cli build` first. Tests never build it (AISDLC-862).',
+    );
   }
 });
 

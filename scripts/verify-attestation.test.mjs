@@ -76,14 +76,12 @@ let signAttestation;
 let generateSigningKeyPair;
 
 before(async () => {
-  // Make sure the orchestrator is built so our import below resolves.
-  try {
-    execFileSync('pnpm', ['--filter', '@ai-sdlc/orchestrator', 'build'], {
-      cwd: join(__dirname, '..'),
-      stdio: 'pipe',
-    });
-  } catch (err) {
-    throw new Error(`failed to build orchestrator: ${err.stderr?.toString() ?? err.message}`);
+  // AISDLC-862: reuse the built dist; never build inside a test.
+  if (!existsSync(orchestratorBarrel)) {
+    throw new Error(
+      'precondition: orchestrator/dist is not built (missing orchestrator/dist/runtime/attestations.js); ' +
+        'run `pnpm --filter @ai-sdlc/orchestrator build` first. Tests never build it (AISDLC-862).',
+    );
   }
   const mod = await import(orchestratorBarrel);
   buildPredicate = mod.buildPredicate;

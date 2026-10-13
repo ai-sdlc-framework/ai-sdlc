@@ -27,7 +27,7 @@
 
 import { describe, it, before, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -39,25 +39,20 @@ const signHelperPath = join(__dirname, 'sign-attestation.mjs');
 const verifyHelperPath = join(__dirname, 'verify-attestation.mjs');
 const repoRoot = join(__dirname, '..', '..');
 
-before(() => {
-  // Both helpers ultimately resolve to the compiled orchestrator runtime —
-  // make sure it's built so the shim (which re-exports the real dist) works.
-  // The v6 sign path additionally resolves @ai-sdlc/pipeline-cli's compiled
-  // sign-v6 module.
-  try {
-    execFileSync('pnpm', ['--filter', '@ai-sdlc/orchestrator', 'build'], {
-      cwd: repoRoot,
-      stdio: 'pipe',
-    });
-    execFileSync('pnpm', ['--filter', '@ai-sdlc/pipeline-cli', 'build'], {
-      cwd: repoRoot,
-      stdio: 'pipe',
-    });
-  } catch (err) {
+function requireDist(pkg, file) {
+  const p = join(repoRoot, pkg, 'dist', file);
+  if (!existsSync(p)) {
     throw new Error(
-      `failed to build orchestrator/pipeline-cli: ${err.stderr?.toString() ?? err.message}`,
+      `precondition: ${pkg}/dist is not built (missing ${pkg}/dist/${file}); ` +
+        `run \`pnpm --filter @ai-sdlc/${pkg} build\` first. Tests never build it (AISDLC-862).`,
     );
   }
+}
+
+before(() => {
+  // AISDLC-862: reuse the built dist; never build inside a test.
+  requireDist('orchestrator', 'runtime/attestations.js');
+  requireDist('pipeline-cli', 'attestation/patch-id.js');
 });
 
 function cleanEnv(extra = {}) {
