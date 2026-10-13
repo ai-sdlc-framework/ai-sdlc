@@ -22,7 +22,7 @@ dispatchable: true
 <!-- SECTION:DESCRIPTION:BEGIN -->
 **Context (verified 2026-10-12 23:40Z).** Executors alpha and beta refused every message from the dispatch session with `not my dispatch session`, so dispatch could not deliver resume notes. The harness envelope reports the sender as `from="uds:/tmp/cc-socks/18365.sock" from-name="ai-sdlc-operator-dispatch"` and no pid. The executor passes that string as `--sender-ref`. `checkDispatchSender` (`pipeline-cli/src/hierarchy/peer-guard.ts`) compares a ref only with the roster entry's `name` or `tmuxSession`, so a `uds:` ref never matches, although `18365` is exactly the pid the roster holds for dispatch (`hierarchy.json`: operator-dispatch pid 18365, status running). The guard is a mistake guard (DEC-0038), and today it refuses the one sender it exists to accept.
 
-**Five-step review (requirements first).**
+**Five-step review (requirements first).** Nothing to delete: the guard stays, only the ref format it understands changes (step 2).
 1. Requirement questioned: "the sender is checked by pid or by harness session ref against the roster" (RFC-0051, check-sender). Kept: it is cheap and it stops look-alike sessions from other projects. What was wrong is the ref format the check understands.
 2. Delete: nothing; the fail-open warning path (no pid, no ref) stays as is.
 3. Simplify: `check-sender` derives the pid from a `uds:<path>/<pid>.sock` ref (the harness's actual format) and compares it like `--sender-pid`; a ref that is neither a roster name, a tmux session nor a socket path is refused as today. The executor instruction documents the two forms the harness emits.

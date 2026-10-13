@@ -27,7 +27,7 @@ dispatchable: true
 
 **Operator instruction (Dominique, 2026-10-12):** fix the agent stall by having the dispatch loop check for it.
 
-**Five-step review (requirements first).**
+**Five-step review (requirements first).** Delete: the executor-side manual heartbeat prose and the claim-time-only heartbeat (step 2).
 1. Requirement questioned: "a stalled worker is reaped after 30 minutes without a heartbeat" (RFC-0041 OQ-3). Kept; it was never wired to the hierarchy, and heartbeats were never refreshed, so the threshold could never fire for a hierarchy executor.
 2. Delete: the `executor.md` prose asking the executor to heartbeat between steps (an instruction no session follows), and the `heartbeat at claim` as the only heartbeat.
 3. Simplify: (a) the pipeline writes the heartbeat itself: `next-step` (and the MCP step tools) call `writeHeartbeat` with `currentStep` on every step transition when a board claim exists for the task, so a live executor heartbeats every few minutes without being told to. (b) The dispatch tick, which already wakes every 300 s while work is in flight, runs one stall check: an inflight claim is stalled when its heartbeat is older than the threshold OR the roster shows its holder `idle`, `gone` or `unknown` for longer than a short grace (an executor that ended its turn without writing a verdict). A stalled claim moves to `failed/` with cause `stale-worker` and the executor's last known step; the holder is cleared and relaunched with `/ai-sdlc:executor`; the task is re-queued with a resume note naming the step it stalled at (no developer re-run when a PR already exists). One decision class only: this is operational, no planner round trip.

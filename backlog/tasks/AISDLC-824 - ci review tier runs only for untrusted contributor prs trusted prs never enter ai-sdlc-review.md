@@ -24,7 +24,7 @@ dispatchable: true
 
 **Operator statement (Dominique, 2026-10-12):** the workflow exists for unverified contributor PR reviews, not for regular reviews of trusted contributor PRs. Trusted PRs are reviewed locally by `/ai-sdlc execute` and attested; that is the control.
 
-**Five-step review (requirements first).**
+**Five-step review (requirements first).** Delete: the `pull_request` trigger and the attestation precheck of ai-sdlc-review.yml (step 2).
 1. Requirement questioned: "CI reviewers run whenever the local attestation cannot be verified" (an accident of the precheck, never a stated requirement; the stated requirement, by the operator, is review of untrusted PRs only).
 2. Delete: the `pull_request` trigger, the `attestation-precheck` job, and every branch in `ai-sdlc-review.yml` that exists to decide whether a trusted PR needs CI review. Trusted PRs never enter the workflow.
 3. Simplify: one `pull_request_target` trigger and one job-level condition, the same trust predicate `untrusted-pr-gate.yml` already uses (head repo is a fork, or author is not a collaborator / is a bot other than release-please). Dependabot counts as untrusted and is reviewed here, nowhere else.
