@@ -8,15 +8,20 @@ assignee: []
 labels:
   - security
   - ci
-  - ci:no-issue-required
+  - 'ci:no-issue-required'
 priority: high
 dependencies: []
 references:
   - .github/workflows/untrusted-pr-gate.yml
   - .github/workflows/ai-sdlc-review.yml
-  - .github/workflows/ai-sdlc-fix-ci.yml
   - .github/workflows/ci.yml
   - .github/workflows/ai-sdlc-gate.yml
+drift_log:
+  - date: '2026-10-13'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: .github/workflows/ai-sdlc-fix-ci.yml'
+    resolution: flagged
+drift_checked: '2026-10-13'
 ---
 
 ## Description

@@ -12,7 +12,6 @@ labels:
 dependencies: []
 references:
   - .github/workflows/ci.yml
-  - .github/workflows/auto-rearm-on-dequeue.yml
   - docs/operations/merge-without-queue.md
 priority: high
 dispatchable: true
@@ -29,7 +28,13 @@ drift_log:
       Referenced file no longer exists:
       .github/workflows/auto-rebase-on-queue-kick.yml
     resolution: flagged
-drift_checked: '2026-10-10'
+  - date: '2026-10-13'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .github/workflows/auto-rearm-on-dequeue.yml
+    resolution: flagged
+drift_checked: '2026-10-13'
 ---
 
 ## Description

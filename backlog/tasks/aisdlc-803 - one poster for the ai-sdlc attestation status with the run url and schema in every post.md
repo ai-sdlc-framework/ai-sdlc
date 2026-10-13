@@ -1,10 +1,13 @@
 ---
 id: AISDLC-803
 title: >-
-  One poster for the `ai-sdlc/attestation` commit status: every post carries the run URL and schema version, stale posts are overwritten by the verifier, and the gate reads the verifier's run, not the bare status
+  One poster for the `ai-sdlc/attestation` commit status: every post carries the
+  run URL and schema version, stale posts are overwritten by the verifier, and
+  the gate reads the verifier's run, not the bare status
 status: To Do
 assignee: []
 created_date: '2026-10-10'
+updated_date: '2026-10-13 20:39'
 labels:
   - attestation
   - ci
@@ -16,10 +19,14 @@ references:
   - .github/workflows/ai-sdlc-gate.yml
   - .github/workflows/ai-sdlc-review.yml
   - .github/workflows/untrusted-pr-gate.yml
-  - .github/workflows/isolated-review.yml
   - scripts/verify-attestation.mjs
 priority: medium
-dispatchable: true
+drift_log:
+  - date: '2026-10-13'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: .github/workflows/isolated-review.yml'
+    resolution: flagged
+drift_checked: '2026-10-13'
 ---
 
 ## Description
