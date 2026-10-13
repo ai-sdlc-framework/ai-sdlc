@@ -2,7 +2,7 @@
 id: AISDLC-801
 title: >-
   `cli-file` for the planner: validate (drift, DoR, ASCII filename, task-id title) and push a backlog task or decision record in one step, so filing PRs land first time
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-10'
 labels:

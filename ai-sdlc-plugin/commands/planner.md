@@ -46,6 +46,20 @@ Open Questions rule above is unchanged: it governs RFC Open Questions and is not
 loosened by this section. Guardrails and hooks are never bypassed; a missing
 sanctioned path is filed as a task.
 
+## Filing tasks and decision records
+
+File every backlog task and decision record with `cli-file`, never by hand. It runs the
+ASCII filename check, `backlog-drift`, the DoR check (and, for decisions, a strict parse of
+the whole log with a duplicate `(decisionId, type)` refusal) BEFORE anything is committed,
+then pushes `ai-sdlc/file-<id>` from `origin/main` as a plain fast-forward and opens the PR.
+It never force-pushes.
+
+```bash
+node "$PIPELINE_CLI_BIN/cli-file.mjs" task "backlog/tasks/<file>.md" --pr
+node "$PIPELINE_CLI_BIN/cli-file.mjs" decision DEC-NNNN --task-id AISDLC-N [--answer <option>] --pr
+node "$PIPELINE_CLI_BIN/cli-file.mjs" rebase <id> --pr   # branch conflicted on main: new -r<n> branch + PR, no lease push
+```
+
 ## Hard rule: only your own roster
 
 **Address only sessions listed in this roster** (`cli-hierarchy status`), by the name

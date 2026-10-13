@@ -1,0 +1,454 @@
+/**
+ * `cli-file` — planner filing tool (AISDLC-801).
+ *
+ * Validates a backlog task or decision record, then commits it on a fresh
+ * branch `ai-sdlc/file-<id>` cut from `origin/main` (in `.worktrees/file-<id>`),
+ * pushes it as a plain fast-forward and opens the PR. It never force-pushes:
+ * when a filing branch conflicts on the append-only decision log, `rebase`
+ * rebuilds it on a NEW branch `ai-sdlc/file-<id>-r<n>` and opens a replacement PR.
+ *
+ *   cli-file task <path> [--pr]
+ *   cli-file decision <DEC-NNNN> --task-id <ID> [--answer <option>] [--rationale <t>] [--pr]
+ *   cli-file rebase <id> [--pr]
+ */
+
+import { spawnSync } from 'node:child_process';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import yargs from 'yargs';
+import { hideBin } from 'yargs/helpers';
+import { now as clockNow } from '../clock.js';
+
+export const EVENT_LOG_REL = '.ai-sdlc/_decisions/events.jsonl';
+
+export interface ExecResult {
+  status: number;
+  stdout: string;
+  stderr: string;
+}
+
+export interface FileDeps {
+  exec(cmd: string, args: string[], cwd: string): ExecResult;
+  /** Returns an error string, or null when clean. */
+  drift(taskId: string, cwd: string): string | null;
+  dor(taskFile: string, cwd: string): string | null;
+}
+
+export class FileRefusal extends Error {}
+
+function realExec(cmd: string, args: string[], cwd: string): ExecResult {
+  const r = spawnSync(cmd, args, { cwd, encoding: 'utf8' });
+  return { status: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
+}
+
+const PKG_BIN = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'bin');
+
+export const defaultDeps: FileDeps = {
+  exec: realExec,
+  drift(taskId, cwd) {
+    const r = realExec('npx', ['backlog-drift', 'check', '--task', taskId], cwd);
+    return r.status === 0 ? null : `backlog-drift: ${(r.stdout + r.stderr).trim()}`;
+  },
+  dor(taskFile, cwd) {
+    const r = realExec(
+      process.execPath,
+      [join(PKG_BIN, 'cli-dor-check.mjs'), '--task', taskFile],
+      cwd,
+    );
+    return r.status === 0 ? null : `DoR: ${(r.stdout + r.stderr).trim()}`;
+  },
+};
+
+function git(deps: FileDeps, cwd: string, ...args: string[]): string {
+  const r = deps.exec('git', args, cwd);
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${r.stderr.trim()}`);
+  return r.stdout;
+}
+
+// -- Validation ---------------------------------------------------------------
+
+export function assertAscii(path: string): void {
+  // eslint-disable-next-line no-control-regex
+  if (/[^\x00-\x7f]/.test(path)) {
+    throw new FileRefusal(`non-ASCII characters in backlog filename: ${path}`);
+  }
+}
+
+export function taskIdOf(file: string): string {
+  const m = basename(file).match(/^([a-z]+-\d+(?:\.\d+)?)\s/i);
+  if (m) return m[1].toUpperCase();
+  const fm = readFileSync(file, 'utf8').match(/^id:\s*['"]?([A-Za-z]+-\d+(?:\.\d+)?)['"]?\s*$/m);
+  if (fm) return fm[1].toUpperCase();
+  throw new FileRefusal(`cannot derive a task id from ${file}`);
+}
+
+export interface ParsedLog {
+  lines: string[];
+  events: Array<Record<string, unknown>>;
+}
+
+/** Strict parse: every non-empty line must be a JSON object. */
+export function parseLogStrict(text: string, label: string): ParsedLog {
+  const lines: string[] = [];
+  const events: Array<Record<string, unknown>> = [];
+  text.split('\n').forEach((line, i) => {
+    if (line.trim() === '') return;
+    let obj: unknown;
+    try {
+      obj = JSON.parse(line);
+    } catch {
+      throw new FileRefusal(`${label}: line ${i + 1} is not valid JSON`);
+    }
+    if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
+      throw new FileRefusal(`${label}: line ${i + 1} is not a JSON object`);
+    }
+    lines.push(line);
+    events.push(obj as Record<string, unknown>);
+  });
+  return { lines, events };
+}
+
+export function assertNoDuplicatePairs(
+  events: Array<Record<string, unknown>>,
+  label: string,
+): void {
+  const seen = new Set<string>();
+  for (const e of events) {
+    if (typeof e.decisionId !== 'string') continue;
+    const key = `${e.decisionId}|${String(e.type)}`;
+    if (seen.has(key)) {
+      throw new FileRefusal(
+        `${label}: duplicate (decisionId, type) pair ${e.decisionId} ${String(e.type)}`,
+      );
+    }
+    seen.add(key);
+  }
+}
+
+// -- Branch + PR plumbing -------------------------------------------------------
+
+interface Publish {
+  repo: string;
+  branch: string;
+  worktreeDir: string;
+  subject: string;
+  prBody: string;
+  pr: boolean;
+  /** Writes the content into the new worktree; returns repo-relative paths to stage. */
+  materialise(worktree: string): string[];
+}
+
+function publish(deps: FileDeps, p: Publish): { branch: string; prUrl: string | null } {
+  git(deps, p.repo, 'fetch', 'origin', 'main');
+  const wt = join(p.repo, '.worktrees', p.worktreeDir);
+  git(deps, p.repo, 'worktree', 'add', '-b', p.branch, wt, 'origin/main');
+  try {
+    const paths = p.materialise(wt);
+    git(deps, wt, 'add', '--', ...paths);
+    git(
+      deps,
+      wt,
+      'commit',
+      '-m',
+      `${p.subject}\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`,
+    );
+    // Plain fast-forward push of a brand-new branch; never a force push.
+    git(deps, wt, 'push', '-u', 'origin', `HEAD:refs/heads/${p.branch}`);
+  } catch (err) {
+    // Remove what this call created so a retry starts clean (no branch deletion of pushed work).
+    deps.exec('git', ['worktree', 'remove', '--force', wt], p.repo);
+    deps.exec('git', ['branch', '-D', p.branch], p.repo);
+    throw err;
+  }
+  let prUrl: string | null = null;
+  if (p.pr) {
+    const r = deps.exec(
+      'gh',
+      [
+        'pr',
+        'create',
+        '--base',
+        'main',
+        '--head',
+        p.branch,
+        '--title',
+        p.subject,
+        '--body',
+        p.prBody,
+      ],
+      wt,
+    );
+    if (r.status !== 0) throw new Error(`gh pr create failed: ${r.stderr.trim()}`);
+    prUrl = r.stdout.trim().split('\n').pop() ?? null;
+  }
+  return { branch: p.branch, prUrl };
+}
+
+function appendEvents(worktree: string, newLines: string[], label: string): void {
+  const p = join(worktree, EVENT_LOG_REL);
+  mkdirSync(dirname(p), { recursive: true });
+  let text = existsSync(p) ? readFileSync(p, 'utf8') : '';
+  if (text !== '' && !text.endsWith('\n')) text += '\n';
+  const combined = text + newLines.map((l) => l + '\n').join('');
+  assertNoDuplicatePairs(parseLogStrict(combined, label).events, label);
+  writeFileSync(p, combined);
+}
+
+// -- Subcommands ----------------------------------------------------------------
+
+export function fileTask(
+  repo: string,
+  taskPath: string,
+  opts: { pr: boolean },
+  deps: FileDeps = defaultDeps,
+) {
+  const abs = isAbsolute(taskPath) ? taskPath : resolve(repo, taskPath);
+  const rel = relative(repo, abs);
+  assertAscii(rel);
+  if (rel.startsWith('..') || isAbsolute(rel) || !rel.startsWith('backlog/tasks/')) {
+    throw new FileRefusal(`task path must be inside backlog/tasks/ of the repo: ${rel}`);
+  }
+  if (!existsSync(abs)) throw new FileRefusal(`task file not found: ${abs}`);
+  const id = taskIdOf(abs);
+  const drift = deps.drift(id, repo);
+  if (drift) throw new FileRefusal(drift);
+  const dor = deps.dor(abs, repo);
+  if (dor) throw new FileRefusal(dor);
+  const slug = id.toLowerCase();
+  return publish(deps, {
+    repo,
+    branch: `ai-sdlc/file-${slug}`,
+    worktreeDir: `file-${slug}`,
+    subject: `chore(docs): file backlog task ${id} (${id})`,
+    prBody: `Files backlog task ${id}.\n\nValidated before commit: ASCII filename, backlog-drift, DoR.\n\nGenerated by cli-file (AISDLC-801).`,
+    pr: opts.pr,
+    materialise(wt) {
+      const dest = join(wt, rel);
+      mkdirSync(dirname(dest), { recursive: true });
+      copyFileSync(abs, dest);
+      return [rel];
+    },
+  });
+}
+
+export function fileDecision(
+  repo: string,
+  decisionId: string,
+  opts: { taskId: string; answer?: string; rationale?: string; pr: boolean },
+  deps: FileDeps = defaultDeps,
+) {
+  const logPath = join(repo, EVENT_LOG_REL);
+  const local = parseLogStrict(
+    existsSync(logPath) ? readFileSync(logPath, 'utf8') : '',
+    'local log',
+  );
+  assertNoDuplicatePairs(local.events, 'local log');
+  const own = local.events.filter((e) => e.decisionId === decisionId);
+  const opened = own.find((e) => e.type === 'decision-opened');
+  if (!opened) {
+    throw new FileRefusal(`no decision-opened event for ${decisionId} in ${EVENT_LOG_REL}`);
+  }
+  const lines = own.map((e) => JSON.stringify(e));
+  if (opts.answer) {
+    const options = (opened.options as Array<{ id: string }> | undefined) ?? [];
+    if (!options.some((o) => o.id === opts.answer)) {
+      throw new FileRefusal(`option ${opts.answer} is not an option of ${decisionId}`);
+    }
+    if (own.some((e) => e.type === 'operator-answered')) {
+      throw new FileRefusal(`duplicate (decisionId, type) pair ${decisionId} operator-answered`);
+    }
+    lines.push(
+      JSON.stringify({
+        eventVersion: 'v1',
+        type: 'operator-answered',
+        ts: clockNow().toISOString(),
+        decisionId,
+        chosenOptionId: opts.answer,
+        ...(opts.rationale ? { rationale: opts.rationale } : {}),
+        by: 'planner',
+      }),
+    );
+  }
+  // Append only events origin/main does not already contain.
+  git(deps, repo, 'fetch', 'origin', 'main');
+  const mainShow = deps.exec('git', ['show', `origin/main:${EVENT_LOG_REL}`], repo);
+  const onMain = new Set(
+    mainShow.status === 0 ? parseLogStrict(mainShow.stdout, 'origin/main log').lines : [],
+  );
+  const fresh = lines.filter((l) => !onMain.has(l));
+  if (fresh.length === 0) {
+    throw new FileRefusal(`origin/main already has every ${decisionId} event; nothing to file`);
+  }
+  const slug = decisionId.toLowerCase();
+  return publish(deps, {
+    repo,
+    branch: `ai-sdlc/file-${slug}`,
+    worktreeDir: `file-${slug}`,
+    subject: `chore(decisions): record ${decisionId} (${opts.taskId})`,
+    prBody: `Appends the ${decisionId} event(s) to the decision log.\n\nThe whole log was parsed and checked for duplicate (decisionId, type) pairs before commit.\n\nGenerated by cli-file (AISDLC-801).`,
+    pr: opts.pr,
+    materialise(wt) {
+      appendEvents(wt, fresh, `log for ${decisionId}`);
+      return [EVENT_LOG_REL];
+    },
+  });
+}
+
+/**
+ * Rebuild an existing filing branch on a NEW branch from current `origin/main`
+ * plus the branch's own additions. No force push is involved.
+ */
+export function fileRebase(
+  repo: string,
+  id: string,
+  opts: { pr: boolean },
+  deps: FileDeps = defaultDeps,
+) {
+  const slug = id.toLowerCase();
+  const oldBranch = `ai-sdlc/file-${slug}`;
+  const old = `origin/${oldBranch}`;
+  git(deps, repo, 'fetch', 'origin');
+  const base = git(deps, repo, 'merge-base', 'origin/main', old).trim();
+  const changed = git(
+    deps,
+    repo,
+    '-c',
+    'core.quotepath=false',
+    'diff',
+    '--name-only',
+    '--diff-filter=AM',
+    base,
+    old,
+  )
+    .split('\n')
+    .filter(Boolean);
+  if (changed.length === 0) throw new FileRefusal(`branch ${old} has no changes`);
+  for (const f of changed) {
+    if (
+      f !== EVENT_LOG_REL &&
+      !f.startsWith('backlog/tasks/') &&
+      !f.startsWith('backlog/completed/')
+    ) {
+      throw new FileRefusal(`refusing to rebuild path outside the filing scope: ${f}`);
+    }
+  }
+  const subjectOld = git(deps, repo, 'log', '-1', '--format=%s', old).trim();
+  let own: string[] = [];
+  if (changed.includes(EVENT_LOG_REL)) {
+    const before = parseLogStrict(
+      git(deps, repo, 'show', `${base}:${EVENT_LOG_REL}`),
+      'base log',
+    ).lines;
+    const after = parseLogStrict(
+      git(deps, repo, 'show', `${old}:${EVENT_LOG_REL}`),
+      'branch log',
+    ).lines;
+    const have = new Set(before);
+    own = after.filter((l) => !have.has(l));
+  }
+  const heads = git(deps, repo, 'ls-remote', '--heads', 'origin', `${oldBranch}-r*`);
+  let n = 2;
+  while (heads.includes(`refs/heads/${oldBranch}-r${n}`)) n++;
+  const branch = `${oldBranch}-r${n}`;
+  const res = publish(deps, {
+    repo,
+    branch,
+    worktreeDir: `file-${slug}-r${n}`,
+    subject: subjectOld,
+    prBody: `Replacement for ${oldBranch}, rebuilt from current main without a force push.\n\nGenerated by cli-file (AISDLC-801).`,
+    pr: opts.pr,
+    materialise(wt) {
+      for (const f of changed.filter((c) => c !== EVENT_LOG_REL)) {
+        const out = deps.exec('git', ['show', `${old}:${f}`], repo);
+        if (out.status !== 0) throw new Error(`cannot read ${f} from ${old}`);
+        mkdirSync(dirname(join(wt, f)), { recursive: true });
+        writeFileSync(join(wt, f), out.stdout);
+      }
+      if (own.length > 0) appendEvents(wt, own, `rebuilt log for ${id}`);
+      return changed;
+    },
+  });
+  if (opts.pr) {
+    deps.exec(
+      'gh',
+      ['pr', 'comment', oldBranch, '--body', `Superseded by ${res.prUrl ?? branch}.`],
+      repo,
+    );
+  }
+  return res;
+}
+
+// -- CLI --------------------------------------------------------------------------
+
+export async function runFileCli(argv: string[] = hideBin(process.argv)): Promise<number> {
+  const repo = process.cwd();
+  let code = 0;
+  const report = (r: { branch: string; prUrl: string | null }) =>
+    process.stdout.write(`${JSON.stringify(r)}\n`);
+  const guard = <T>(fn: () => T): T | undefined => {
+    try {
+      return fn();
+    } catch (err) {
+      const refused = err instanceof FileRefusal;
+      process.stderr.write(
+        `[cli-file] ${refused ? 'refused' : 'error'}: ${(err as Error).message}\n`,
+      );
+      code = refused ? 1 : 2;
+      return undefined;
+    }
+  };
+  await yargs(argv)
+    .scriptName('cli-file')
+    .command(
+      'task <path>',
+      'validate and file a backlog task',
+      (y) =>
+        y
+          .positional('path', { type: 'string', demandOption: true })
+          .option('pr', { type: 'boolean', default: false }),
+      (a) => {
+        const r = guard(() => fileTask(repo, a.path as string, { pr: a.pr as boolean }));
+        if (r) report(r);
+      },
+    )
+    .command(
+      'decision <id>',
+      'validate and file decision-log events',
+      (y) =>
+        y
+          .positional('id', { type: 'string', demandOption: true })
+          .option('task-id', { type: 'string', demandOption: true })
+          .option('answer', { type: 'string' })
+          .option('rationale', { type: 'string' })
+          .option('pr', { type: 'boolean', default: false }),
+      (a) => {
+        const r = guard(() =>
+          fileDecision(repo, a.id as string, {
+            taskId: a.taskId as string,
+            answer: a.answer as string | undefined,
+            rationale: a.rationale as string | undefined,
+            pr: a.pr as boolean,
+          }),
+        );
+        if (r) report(r);
+      },
+    )
+    .command(
+      'rebase <id>',
+      'rebuild a conflicting filing branch on a new branch (no force push)',
+      (y) =>
+        y
+          .positional('id', { type: 'string', demandOption: true })
+          .option('pr', { type: 'boolean', default: false }),
+      (a) => {
+        const r = guard(() => fileRebase(repo, a.id as string, { pr: a.pr as boolean }));
+        if (r) report(r);
+      },
+    )
+    .demandCommand(1)
+    .strict()
+    .help()
+    .parseAsync();
+  return code;
+}
