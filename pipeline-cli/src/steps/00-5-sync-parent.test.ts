@@ -1157,3 +1157,86 @@ describe('pruneStaleParentDebris — non-aisdlc-prefix repo (AC-1)', () => {
     expect(existsSync(staleFile)).toBe(false);
   });
 });
+
+describe('AISDLC-858 idempotent resume', () => {
+  const file = 'backlog/tasks/aisdlc-900 - resume.md';
+  const setup = (prs: string, branch: string, remote: string) => {
+    writeFileSync(join(workDir, file), '# resume', 'utf8');
+    return new FakeRunner()
+      .on(/^git ls-files/, ok(file + '\n'))
+      .on(/^git ls-tree origin\/main/, ok(''))
+      .on(/^git rev-parse --short/, ok('abc12345\n'))
+      .on(/^gh pr list/, ok(prs))
+      .on(/^git branch --list/, ok(branch))
+      .on(/^git ls-remote/, ok(remote))
+      .on(/^gh pr create/, ok('https://github.com/org/repo/pull/7\n'));
+  };
+  const noWorktree = (f: FakeRunner) => f.calls.some((c) => c.args[0] === 'worktree');
+
+  it('continues with an open PR and logs its number', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const fake = setup(
+      JSON.stringify([{ number: 42, state: 'OPEN', url: 'https://github.com/org/repo/pull/42' }]),
+      'x',
+      'y',
+    );
+    const r = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
+    expect(r.ok).toBe(true);
+    expect(r.prUrl).toBe('https://github.com/org/repo/pull/42');
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('#42'));
+    expect(noWorktree(fake)).toBe(false);
+    log.mockRestore();
+  });
+
+  it('pushes a local-only branch and opens the PR', async () => {
+    const fake = setup('[]', '  chore/sync-tasks-x\n', '');
+    const r = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
+    expect(r.ok).toBe(true);
+    expect(r.prUrl).toBe('https://github.com/org/repo/pull/7');
+    expect(fake.calls.some((c) => c.command === 'git' && c.args[0] === 'push')).toBe(true);
+    expect(noWorktree(fake)).toBe(false);
+  });
+
+  it('blocks on a closed-unmerged PR without creating a branch', async () => {
+    const fake = setup(
+      JSON.stringify([{ number: 43, state: 'CLOSED', url: 'https://github.com/org/repo/pull/43' }]),
+      '',
+      '',
+    );
+    const r = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('#43');
+    expect(noWorktree(fake)).toBe(false);
+  });
+
+  it('reports a merged PR as already synced', async () => {
+    const fake = setup(JSON.stringify([{ number: 44, state: 'MERGED', url: 'u' }]), '', '');
+    const r = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
+    expect(r.ok).toBe(true);
+    expect(r.skippedReason).toContain('#44');
+  });
+
+  it('handles remote-only branch, bad JSON, push and create failures', async () => {
+    const remoteOnly = setup('not json', '', 'sha\trefs/heads/x');
+    const r = await syncParentUntrackedFiles({ workDir, runner: remoteOnly.toRunner() });
+    expect(r.prUrl).toBe('https://github.com/org/repo/pull/7');
+
+    const pushFail = new FakeRunner()
+      .on(/^git push/, fakeRunnerFail('denied'))
+      .on(/^git ls-files/, ok(file + '\n'))
+      .on(/^git ls-tree origin\/main/, ok(''))
+      .on(/^git branch --list/, ok('x'));
+    const f1 = await syncParentUntrackedFiles({ workDir, runner: pushFail.toRunner() });
+    expect(f1.ok).toBe(false);
+    expect(f1.reason).toContain('push');
+
+    const createFail = new FakeRunner()
+      .on(/^gh pr create/, fakeRunnerFail('nope'))
+      .on(/^git ls-files/, ok(file + '\n'))
+      .on(/^git ls-tree origin\/main/, ok(''))
+      .on(/^git ls-remote/, ok('sha\tref'));
+    const f2 = await syncParentUntrackedFiles({ workDir, runner: createFail.toRunner() });
+    expect(f2.ok).toBe(false);
+    expect(f2.reason).toContain('gh pr create');
+  });
+});

@@ -144,3 +144,7 @@ Overriding a class (a) decision that was already applied means undoing what it a
 ## Tasks that ship in halves
 
 The executor's stale-dispatch check keys on a merged commit carrying the task id, so a task cannot be re-dispatched for a remaining half once any commit for it has merged. A task that will ship in halves is split into sub-tasks (`<id>.1`, `<id>.2`) when it is filed, each with its own acceptance criteria. A remaining half discovered after a merge gets a new sub-task, not a "remaining scope" note on the original (example: AISDLC-720 and AISDLC-720.1 on 2026-10-05).
+
+## Superseded: Step 0.5 stale sync-branch decisions
+
+DEC-0186 and DEC-0188 (a resume blocked because `chore/sync-tasks-<sha>` already existed, resolved by deleting the branch) are superseded by AISDLC-858. Step 0.5 now names the sync branch by HEAD plus a hash of the untracked file set and reuses it: an open PR is logged and continued past, a local-only branch is pushed and its PR opened, and a closed-unmerged PR returns a blocked verdict naming the PR. No branch deletion, flag or env var is needed.
