@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-13T19:38:41.241Z","decisionId":"DEC-0185","chosenOptionId":"ff-parent","rationale":"Dispatch fast-forwarded parent main to 832ed590 (class a, reversible); sync branch name changes. Resume AISDLC-828."}
