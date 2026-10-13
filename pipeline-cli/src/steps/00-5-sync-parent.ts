@@ -60,6 +60,7 @@ import {
 } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 
 // ── AISDLC-609: task-id-prefix-agnostic resolution ──────────────────────────
@@ -426,7 +427,104 @@ export async function syncParentUntrackedFiles(opts: SyncParentOptions): Promise
 
   // 5. Genuinely new files — create a sync worktree, commit, push, open PR.
   const sha = await shortSha(workDir, runner);
-  const syncBranch = `chore/sync-tasks-${sha}`;
+  // AISDLC-858: the branch name is keyed by HEAD AND the file set (names +
+  // contents), so a resume over the same untracked files finds its own branch.
+  const setHash = createHash('sha1');
+  for (const f of [...newFiles].sort()) {
+    setHash
+      .update(f)
+      .update('\0')
+      .update(readFileSync(join(workDir, f)))
+      .update('\0');
+  }
+  const syncBranch = `chore/sync-tasks-${sha}-${setHash.digest('hex').slice(0, 6)}`;
+
+  // AISDLC-858: idempotent resume. Reuse an existing sync branch / PR.
+  const existingPr = await runner(
+    'gh',
+    ['pr', 'list', '--head', syncBranch, '--state', 'all', '--json', 'number,state,url'],
+    { cwd: workDir, allowFailure: true },
+  );
+  let prs: Array<{ number: number; state: string; url: string }> = [];
+  try {
+    const parsed: unknown = JSON.parse(existingPr.stdout.trim() || '[]');
+    if (Array.isArray(parsed)) prs = parsed as typeof prs;
+  } catch {
+    prs = [];
+  }
+  const openPr = prs.find((p) => p.state === 'OPEN');
+  if (openPr) {
+    console.log(`[step-0.5] reusing open sync PR #${openPr.number} (${syncBranch})`);
+    return { ok: true, syncedFiles: newFiles, prUrl: openPr.url };
+  }
+  const mergedPr = prs.find((p) => p.state === 'MERGED');
+  if (mergedPr) {
+    console.log(`[step-0.5] sync PR #${mergedPr.number} already merged (${syncBranch})`);
+    return {
+      ok: true,
+      syncedFiles: [],
+      skippedReason: `Sync PR #${mergedPr.number} for this file set already merged.`,
+    };
+  }
+  const closedPr = prs.find((p) => p.state === 'CLOSED');
+  if (closedPr) {
+    return {
+      ok: false,
+      reason: `Step 0.5: sync branch ${syncBranch} has a closed-unmerged PR #${closedPr.number} (${closedPr.url}); reopen or land it, or resolve the untracked files manually.`,
+      syncedFiles: [],
+    };
+  }
+  const localBranch = await runner('git', ['branch', '--list', syncBranch], {
+    cwd: workDir,
+    allowFailure: true,
+  });
+  const remoteBranch = await runner('git', ['ls-remote', '--heads', 'origin', syncBranch], {
+    cwd: workDir,
+    allowFailure: true,
+  });
+  if (localBranch.stdout.trim() || remoteBranch.stdout.trim()) {
+    if (localBranch.stdout.trim() && !remoteBranch.stdout.trim()) {
+      const push = await runner('git', ['push', '-u', 'origin', syncBranch], {
+        cwd: workDir,
+        allowFailure: true,
+      });
+      if (push.code !== 0) {
+        return {
+          ok: false,
+          reason: `Step 0.5: failed to push existing sync branch: ${push.stderr.trim() || push.stdout.trim()}`,
+          syncedFiles: newFiles,
+        };
+      }
+    }
+    const created = await runner(
+      'gh',
+      [
+        'pr',
+        'create',
+        '--title',
+        `chore: sync ${newFiles.length} untracked task file${newFiles.length === 1 ? '' : 's'}`,
+        '--body',
+        `Auto-opened by Step 0.5 (AISDLC-217, resumed per AISDLC-858).\n\n## Files\n${newFiles.map((f) => `- \`${f}\``).join('\n')}`,
+        '--base',
+        'main',
+        '--head',
+        syncBranch,
+      ],
+      { cwd: workDir, allowFailure: true },
+    );
+    if (created.code !== 0) {
+      return {
+        ok: false,
+        reason: `Step 0.5: existing sync branch pushed but gh pr create failed: ${created.stderr.trim() || created.stdout.trim()}`,
+        syncedFiles: newFiles,
+      };
+    }
+    return {
+      ok: true,
+      syncedFiles: newFiles,
+      prUrl: created.stdout.trim().split('\n').pop()?.trim(),
+    };
+  }
 
   // Reserve a unique temp path. mkdtempSync creates the directory atomically
   // (race-safe), but `git worktree add` requires the destination to NOT exist
