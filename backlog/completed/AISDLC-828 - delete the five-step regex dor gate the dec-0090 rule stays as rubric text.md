@@ -1,8 +1,7 @@
 ---
 id: AISDLC-828
-title: >-
-  Delete the five-step regex DoR gate; the DEC-0090 rule stays as rubric text
-status: To Do
+title: Delete the five-step regex DoR gate; the DEC-0090 rule stays as rubric text
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:
@@ -10,10 +9,17 @@ labels:
   - velocity
 dependencies: []
 references:
-  - pipeline-cli/src/dor/gates/five-step-review.ts
   - .github/workflows/dor-ingress.yml
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-13'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/src/dor/gates/five-step-review.ts
+    resolution: flagged
+drift_checked: '2026-10-13'
 ---
 
 ## Description
@@ -36,10 +42,10 @@ dispatchable: true
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `pipeline-cli/src/dor/gates/five-step-review.ts` and its test file are deleted; Gate 2 no longer calls `checkFiveStepReview`; no other import remains (`pnpm dark-code:check` and the build pass)
-- [ ] #2 A task with `fix` in its title and no five-step paragraph evaluates with no Gate-2 finding about the five-step paragraph (regression test on the Gate-2 suite)
-- [ ] #3 The DoR rubric text (refinement-reviewer prompt or `docs/operations/` DoR page) still asks for the five-step paragraph as judgment, and CLAUDE.md's "Five-step production algorithm" section is unchanged except that it no longer claims a deterministic check enforces it (if it does)
-- [ ] #4 The task body carries its own five-step paragraph
+- [x] #1 `pipeline-cli/src/dor/gates/five-step-review.ts` and its test file are deleted; Gate 2 no longer calls `checkFiveStepReview`; no other import remains (`pnpm dark-code:check` and the build pass)
+- [x] #2 A task with `fix` in its title and no five-step paragraph evaluates with no Gate-2 finding about the five-step paragraph (regression test on the Gate-2 suite)
+- [x] #3 The DoR rubric text (refinement-reviewer prompt or `docs/operations/` DoR page) still asks for the five-step paragraph as judgment, and CLAUDE.md's "Five-step production algorithm" section is unchanged except that it no longer claims a deterministic check enforces it (if it does)
+- [x] #4 The task body carries its own five-step paragraph
 <!-- AC:END -->
 
 ## Verification

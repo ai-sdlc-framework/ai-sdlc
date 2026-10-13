@@ -56,6 +56,13 @@ describe('findMarkers', () => {
 });
 
 describe('evaluateGate2', () => {
+  it('passes a fix-titled task with no five-step paragraph (DEC-0158)', () => {
+    const v = evaluateGate2({
+      ...input('Plain body, no review paragraph.'),
+      title: 'Fix the thing',
+    });
+    expect(v.verdict).toBe('pass');
+  });
   it('passes a clean body', () => {
     const v = evaluateGate2(input('A clean issue body with no hedges.'));
     expect(v.verdict).toBe('pass');

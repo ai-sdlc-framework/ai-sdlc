@@ -88,7 +88,7 @@ To make the class visible to the digest, add a line `Class: (a)`, `Class: (b)` o
 
 ## Five-step review paragraph on fix and rule tasks (AISDLC-804)
 
-The five-step production algorithm (DEC-0090) is enforced at task intake. A task labelled `bug`, `fix`, `stability`, `root-cause`, `governance`, `hooks` or `ci`, or titled `fix...`, must carry this paragraph, naming a deletion ("Delete", "Deleted" or "nothing to delete"). Otherwise Gate 2 of the DoR rubric returns `needs-clarification`, quoting the five steps. A `blocked.reason` in the task frontmatter overrides, as for other gates.
+The five-step production algorithm (DEC-0090) is applied as rubric judgment at task intake (no regex gate; deleted by DEC-0158). The planner and the Stage-B refinement reviewer expect a task labelled `bug`, `fix`, `stability`, `root-cause`, `governance`, `hooks` or `ci`, or titled `fix...`, to carry this paragraph, naming a deletion or why there is nothing to delete. A missing or hollow paragraph is a review finding, not a CI failure.
 
 ```markdown
 **Five-step review (requirements first).** 1. Requirement questioned: <the requirement and who or which decision set it>. 2. Deleted: <the part or process removed, or "nothing to delete" and why>. 3. Simplified or optimised: <what, after the deletion>. 4. Accelerated: <cycle-time change, after steps 1 to 3>. 5. Automated: <what, last>.
