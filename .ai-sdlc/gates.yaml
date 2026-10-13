@@ -250,7 +250,7 @@ gates:
     origin: AISDLC-846, AISDLC-97
     owner: engineering
     property: every non-private workspace package carries publishConfig
-    decision: DEC-0092
+    decision: DEC-0176
   - id: pre-push:scripts/check-knowledge-scope.sh
     surface: pre-push
     origin: AISDLC-773
