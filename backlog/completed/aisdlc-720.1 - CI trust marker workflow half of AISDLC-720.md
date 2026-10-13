@@ -11,7 +11,6 @@ labels:
 dependencies:
   - AISDLC-721
 references:
-  - .github/workflows/ai-sdlc.yml
   - .github/workflows/ai-sdlc-review.yml
   - .github/workflows/untrusted-pr-gate.yml
   - ai-sdlc-plugin/hooks/enforce-blocked-actions.js

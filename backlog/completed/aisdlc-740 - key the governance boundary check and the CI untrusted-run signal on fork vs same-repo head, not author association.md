@@ -11,7 +11,6 @@ dependencies:
   - AISDLC-733
 references:
   - .github/workflows/untrusted-pr-gate.yml
-  - .github/workflows/ai-sdlc-admit.yml
   - .github/workflows/ai-sdlc-review.yml
 priority: high
 dispatchable: true
