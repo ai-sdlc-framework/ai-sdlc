@@ -46,7 +46,8 @@ dispatchable: true
 - [ ] #4 The tick result and the dispatch progress line report each reap (`task`, `worker`, `age`, `step`); the planner is NOT asked
 - [ ] #5 `executor.md` no longer instructs the executor to heartbeat by hand; `docs/operations/cli-hierarchy.md` describes the stall check and its two thresholds
 - [ ] #6 Hermetic tests in `dispatch-loop.test.ts`: stale heartbeat reaped; idle holder with no verdict reaped after grace; busy holder with fresh heartbeat untouched; a reap is recorded once (no double clear)
-- [ ] #7 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
+- [ ] #7 The unblocking playbook recognises `cause: stale-worker` (and the `stale-heartbeat` cause the board sweep writes) as a re-queue-with-resume-note shape; it no longer escalates them to the planner as `unrecognised failure shape` (observed 2026-10-12 on AISDLC-549)
+- [ ] #8 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
 <!-- AC:END -->
 
 ## Verification
