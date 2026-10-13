@@ -2,7 +2,7 @@
 id: AISDLC-631.6
 title: >-
   RFC-0049 follow-up (security low): cli-judgment eval runs without cache reads by default and buildPromotion refuses MET when cache hits occurred
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-02'
 labels:
