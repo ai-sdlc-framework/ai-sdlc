@@ -1,0 +1,68 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "5e469a74b938f95094d0be3839ff8ee12c622a96"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "d47d1d018d890664b388c9e0c9e0eccbedfa78da6bf3d8d827ef1d1d457c9f2a",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "9721796289314ec384e6bf23069b9ca55a22d917ae3f31ea34a631b1ceeb27aa",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "63fd8114ea8a040712c749785ac52a46c2968109d058899b0e78fcc4e778dc51",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "2c99418d3d30a8578347302177d687e3a950cc150d92bc0f71be1b652029c823",
+        "745de4c0c480941257c2390a6dc7b5ca43cc9b583c016270ca6096f92254cf60"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "a8b082bbfc5f6d1e7c22d90d104b96b7b395d4620e115cf344a2fe80910e2a09",
+        "745de4c0c480941257c2390a6dc7b5ca43cc9b583c016270ca6096f92254cf60"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "b4c5693b3c1f998f57c6e13e6c92d535ba626819042bb3728f5e935a2ca3f555",
+        "cae6e2cfb9b958a49d3755728baf7112e7c39ca46466be15124a5bcc158fe891"
+      ]
+    }
+  ],
+  "rootHash": "9dd044cf5040f6b4fa3f5e4b1ba0206681846e5570bf2b0bad7ff2de24288981",
+  "rootSignature": "KObB4CnvCW7Dq1KOs7IcmDpW0au53n2vQSLEzc/kTP72b7pZT2FK3bFRn/qakaXZ9auybKe7D0gqAqfIXPE2Aw==",
+  "nonce": "01e8de3246387c8da150829b30ddaa8e9ff96ddaaf24ec6870b6d6590668cba6",
+  "leafCount": 3,
+  "signedAt": "2026-10-13T00:16:27.878Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [".ai-sdlc/knowledge/ontology.yaml", ".husky/pre-push"],
+    "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
+  }
+}

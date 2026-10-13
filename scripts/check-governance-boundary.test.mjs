@@ -64,6 +64,7 @@ test('newly covered paths are governance; ordinary source and artifacts are not'
     '.ai-sdlc/custom-policy.md',
     '.ai-sdlc/custom-principles.md',
     '.ai-sdlc/templates/decisions-config.yaml',
+    '.ai-sdlc/knowledge/ontology.yaml',
   ])
     assert.equal(isGovernancePath(p), true, p);
   for (const p of [

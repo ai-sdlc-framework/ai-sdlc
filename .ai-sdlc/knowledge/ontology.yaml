@@ -1,0 +1,6 @@
+# Knowledge ontology (RFC-0053, AISDLC-773). Entries may only use values declared here.
+trunks: [systems, products, customers, decisions, people, process]
+entryTypes: [fact, decision, constraint, procedure, person, system]
+relations: [supports, contradicts, supersedes, depends_on]
+# Closed vocabulary of proof kinds a framework verifier may re-run to promote an entry.
+proofKinds: [test-id, decision-id, path-exists, allowlisted-command]
