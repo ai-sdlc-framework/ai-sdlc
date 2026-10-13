@@ -1,11 +1,9 @@
 name: CI
 
-# AISDLC-727: this workflow runs on pushes to main (full suite, post-merge) and
-# the nightly schedule ONLY. Pull requests are covered by ai-sdlc-gate.yml
-# (`ai-sdlc/pr-ready`); running both on every PR doubled the CI cost.
+# AISDLC-842: this workflow runs on the nightly schedule (and the queue event)
+# ONLY. Pull requests are covered by ai-sdlc-gate.yml (`ai-sdlc/pr-ready`) and
+# pushes to main by main-health-monitor.yml (the single main-push suite).
 on:
-  push:
-    branches: [main]
   merge_group:
   # AISDLC-771: nightly fresh-repo first-run smoke (install, init, doctor, one
   # task). Only the `first-run-smoke` job runs on this event; every other job

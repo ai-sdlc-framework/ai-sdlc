@@ -59,11 +59,20 @@ describe('CI runs once per pull request (AISDLC-727)', () => {
     assert.deepEqual(prSuiteWorkflows, ['ai-sdlc-gate.yml']);
   });
 
-  it('ci.yml does not run on pull_request events and still runs on pushes to main', () => {
+  it('ci.yml and scorecard.yml have no push trigger and keep their schedules (AISDLC-842)', () => {
     const ci = loadYaml('ci.yml');
     assert.ok(!triggers(ci).includes('pull_request'));
     assert.ok(!triggers(ci).includes('pull_request_target'));
-    const on = ci.on ?? ci.true;
+    assert.ok(!triggers(ci).includes('push'));
+    assert.ok(triggers(ci).includes('schedule'));
+    const score = loadYaml('scorecard.yml');
+    assert.ok(!triggers(score).includes('push'));
+    assert.ok(triggers(score).includes('schedule'));
+  });
+
+  it('main-health-monitor.yml is the single main-push suite (AISDLC-842)', () => {
+    const mh = loadYaml('main-health-monitor.yml');
+    const on = mh.on ?? mh.true;
     assert.deepEqual(on.push.branches, ['main']);
   });
 
