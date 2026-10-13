@@ -22,6 +22,7 @@ import type { IdentityDeps } from '../hierarchy/index.js';
 import { claimNext, ensureBoardDirs, writeManifest, writeVerdict } from './board.js';
 import { completeTask } from './complete.js';
 import { FAILED_MANIFEST_SUFFIX, requeueFailed, snapshotFailedManifest } from './requeue.js';
+import { readResumeFeedback } from './resume.js';
 import type { DispatchManifest } from './types.js';
 
 function mkManifest(taskId: string, extra: Partial<DispatchManifest> = {}): DispatchManifest {
@@ -255,6 +256,65 @@ describe('requeueFailed', () => {
     const before = snapshot();
     expect(() => requeueFailed(board, 'AISDLC-910')).toThrow(/no saved manifest/);
     expect(snapshot()).toEqual(before);
+  });
+});
+
+describe('requeueFailed with an open PR (follow-up)', () => {
+  const PR = 'https://github.com/o/r/pull/9';
+  function failWithPr(taskId: string, retryCount: number, prUrl: string | null = PR): void {
+    failTask(taskId, { retryCount });
+    const f = path.join(board, 'failed', `${taskId}.verdict.json`);
+    const v = JSON.parse(readFileSync(f, 'utf-8'));
+    if (prUrl) v.prUrl = prUrl;
+    writeFileSync(f, JSON.stringify(v));
+  }
+
+  it('requeues past the cap at retryCount 2 and 3 without using a retry', () => {
+    for (const [id, n] of [
+      ['AISDLC-920', 2],
+      ['AISDLC-921', 3],
+    ] as const) {
+      failWithPr(id, n);
+      const r = requeueFailed(board, id, { prState: () => 'OPEN', note: 'rebase and re-sign' });
+      expect(r.followUp).toBe(true);
+      expect(r.retryCount).toBe(n);
+      const queued = JSON.parse(readFileSync(r.queuePath, 'utf-8')) as DispatchManifest;
+      expect(queued.retryCount).toBe(n);
+      expect(queued.resume?.note).toBe('rebase and re-sign');
+      rmSync(r.queuePath);
+    }
+  });
+
+  it('hands the note to the executor that claims the follow-up', () => {
+    failWithPr('AISDLC-927', 3);
+    requeueFailed(board, 'AISDLC-927', { prState: () => 'OPEN', note: 'rebase and re-sign' });
+    expect(readResumeFeedback(board, 'AISDLC-927')).toBeUndefined(); // queued, not claimed
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-a' });
+    expect(readResumeFeedback(board, 'AISDLC-927')?.note).toBe('rebase and re-sign');
+  });
+
+  it('still refuses past the cap with no PR, or a MERGED/CLOSED/unknown PR', () => {
+    failWithPr('AISDLC-922', 2, null);
+    expect(() => requeueFailed(board, 'AISDLC-922', { prState: () => 'OPEN' })).toThrow(
+      /limit is 2/,
+    );
+    for (const [id, state] of [
+      ['AISDLC-923', 'MERGED'],
+      ['AISDLC-924', 'CLOSED'],
+      ['AISDLC-925', undefined],
+    ] as const) {
+      failWithPr(id, 2);
+      expect(() => requeueFailed(board, id, { prState: () => state })).toThrow(/limit is 2/);
+      rmSync(path.join(board, 'failed'), { recursive: true, force: true });
+      ensureBoardDirs(board);
+    }
+  });
+
+  it('counts a normal requeue as before when the PR is not open', () => {
+    failWithPr('AISDLC-926', 0);
+    const r = requeueFailed(board, 'AISDLC-926', { prState: () => 'MERGED' });
+    expect(r.retryCount).toBe(1);
+    expect(r.followUp).toBeUndefined();
   });
 });
 

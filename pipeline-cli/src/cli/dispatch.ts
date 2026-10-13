@@ -64,7 +64,8 @@
  *     session, and the repository policy must grant `requeue`. `--retry-limit` may not exceed the default of 2 (a
  *     larger value exits 2). Also exits 1, changing nothing, when the task is
  *     not in failed/, has no saved manifest, is already active, or is past the
- *     retry limit. `--note` writes the same `resume.note` block `resume` writes.
+ *     retry limit. A failed task whose verdict names an open PR is PR follow-up: it is requeued past the cap with
+ *     `followUp: true` and no retry used. `--note` writes the same `resume.note` block `resume` writes.
  *
  *   - `resume --task-id <id> --note <text> [--pr <number>] [--failing-check <a,b>] [--push-only]
  *     [--finding <text>]` (or `--note-file <path>`; `--note` may be omitted for an
