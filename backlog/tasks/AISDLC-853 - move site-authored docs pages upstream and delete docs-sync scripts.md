@@ -1,5 +1,5 @@
 ---
-id: AISDLC-847
+id: AISDLC-853
 title: Move the 15 site-authored ai-sdlc.io pages into docs/ and spec/, add description frontmatter, delete the dead docs-sync scripts
 status: To Do
 assignee: []
@@ -26,7 +26,7 @@ The two scripts `scripts/docs-sync.mjs` and `scripts/check-docs-sync.mjs` implem
 5. Delete `scripts/docs-sync.mjs`, `scripts/check-docs-sync.mjs`, `scripts/docs-sync.test.mjs`; remove `docs:sync`, `docs:check`, `docs:test` from `package.json` and the `pnpm docs:check` step from the root `test` script. Update `docs/README.md`, which names `docs-sync.mjs` as the canonical sync, to say the site pulls this repo at a pinned commit (one paragraph, link to the `ai-sdlc-io` README).
 6. Fix the links inside the moved pages so they are relative paths that resolve in this repo (for example `../../spec/rfcs/RFC-0052-....md`), not site routes.
 
-Out of scope: navigation files (AISDLC-848); content corrections to existing pages (AISDLC-849).
+Out of scope: navigation files (AISDLC-854); content corrections to existing pages (AISDLC-855).
 
 ## Acceptance Criteria
 
