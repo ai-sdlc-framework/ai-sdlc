@@ -113,12 +113,7 @@ missing, is not an approval, or the branch content no longer matches it after th
 Run `/ai-sdlc execute <task-id>` with the task id and **nothing else**: invoke the plugin's `execute`
 command with the `Skill` tool, passing `$TASK_ID` as the only argument. If it reports a worktree with
 no git hooks directory, run `pnpm install --frozen-lockfile && pnpm run prepare` there (scripts stay
-enabled); if still missing, report `failed` and stop: never commit from such a worktree. Refresh the claim between steps:
-
-```bash
-node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" heartbeat --board-dir "$BOARD_DIR" \
-  --task-id "$TASK_ID" --worker-id "$MY_NAME" --worker-kind in-session-agent --current-step executing
-```
+enabled); if still missing, report `failed` and stop: never commit from such a worktree. The pipeline refreshes your claim's heartbeat on every step itself; do not heartbeat by hand.
 
 Note the outcome, the pull request number, and every follow-up and decision id. File follow-ups as
 sub-ids of this task: `cli-dispatch.mjs next-subid "$TASK_ID" --board-dir "$BOARD_DIR"` prints the first

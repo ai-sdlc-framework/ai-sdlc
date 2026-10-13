@@ -2,7 +2,7 @@
 id: AISDLC-826
 title: >-
   Dispatch tick detects stalled executors: heartbeat per pipeline step, stale claims reaped, executor relaunched
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-12'
 labels:

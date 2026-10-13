@@ -9,6 +9,8 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -19,7 +21,9 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { writeVerdict } from '../dispatch/board.js';
+import { writeHeartbeat, writeVerdict } from '../dispatch/board.js';
+import { requeueFailed } from '../dispatch/requeue.js';
+import type { LiveState } from './status.js';
 import { enqueueTasks, type EnqueueEntry } from '../dispatch/enqueue.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
 import { renderBriefBlock, type BriefEntry } from './brief-format.js';
@@ -629,5 +633,177 @@ describe('nextWakeSec (idle hibernation)', () => {
       reports: [],
     });
     expect(result).toEqual({ nextWakeSec: WAKE_PENDING_SEC, wakeReason: 'pending' });
+  });
+});
+
+describe('stall check (AISDLC-826)', () => {
+  const MIN = 60_000;
+  let states: Map<string, LiveState>;
+  let requeueCalls: { id: string; note: string }[];
+
+  /** Claim a task for a worker: a real manifest moved to inflight/ plus its heartbeat. */
+  function claim(taskId: string, worker: string, ageMs: number, step = '05-dev-running'): void {
+    enqueueTasks(board, [{ taskId, wave: 1 }], {
+      baseSha: 'abc1234',
+      dispatchedBy: 'operator-dispatch',
+      resolveTaskFile: (id) => `backlog/tasks/${id.toLowerCase()}.md`,
+    });
+    mkdirSync(path.join(board, 'inflight'), { recursive: true });
+    renameSync(
+      path.join(board, 'queue', `${taskId}.dispatch.json`),
+      path.join(board, 'inflight', `${taskId}.dispatch.json`),
+    );
+    const at = new Date(clock - ageMs).toISOString();
+    writeHeartbeat(board, {
+      taskId,
+      workerId: worker,
+      workerKind: 'in-session-agent',
+      currentStep: step,
+      startedAt: at,
+      lastHeartbeat: at,
+    });
+  }
+
+  function stallDeps(over: Partial<LoopDeps> = {}): LoopDeps {
+    return deps({
+      stall: {
+        liveness: () => states,
+        findPr: (id) => (id === 'AISDLC-71' ? 4242 : undefined),
+        requeue: (id, note) => {
+          requeueCalls.push({ id, note });
+          requeueFailed(board, id, { note, requeuedBy: 'operator-dispatch' });
+        },
+      },
+      ...over,
+    });
+  }
+
+  beforeEach(() => {
+    states = new Map([['executor-alpha', 'busy']]);
+    requeueCalls = [];
+  });
+
+  it('reaps a stale heartbeat, clears the holder and re-queues with a resume note', async () => {
+    claim('AISDLC-71', 'executor-alpha', 31 * MIN, '06-review');
+    const r = await runDispatchTick(stallDeps());
+    expect(r.stalled).toHaveLength(1);
+    expect(r.stalled![0]).toMatchObject({
+      taskId: 'AISDLC-71',
+      worker: 'executor-alpha',
+      step: '06-review',
+      reason: 'stale-heartbeat',
+      prNumber: 4242,
+      requeue: { done: true },
+    });
+    expect(cleared).toEqual([{ executor: 'executor-alpha', taskId: 'AISDLC-71' }]);
+    expect(requeueCalls[0]!.note).toContain('06-review');
+    expect(requeueCalls[0]!.note).toContain('#4242');
+    const queued = JSON.parse(
+      readFileSync(path.join(board, 'queue', 'AISDLC-71.dispatch.json'), 'utf-8'),
+    );
+    expect(queued.resume.note).toContain('#4242');
+    expect(existsSync(path.join(board, 'inflight', 'AISDLC-71.dispatch.json'))).toBe(false);
+    expect(r.reports.some((x) => x.text.includes('Reaped stalled AISDLC-71'))).toBe(true);
+    expect(r.escalations).toEqual([]);
+    expect(r.wakeReason).toBe('pending');
+  });
+
+  it('records the failure with cause stale-worker, the last step and the heartbeat age', async () => {
+    claim('AISDLC-71', 'executor-alpha', 40 * MIN, 'ship');
+    await runDispatchTick(
+      stallDeps({ stall: { liveness: () => states } }), // no requeue: the record stays
+    );
+    const rec = JSON.parse(
+      readFileSync(path.join(board, 'failed', 'AISDLC-71.diagnostic.json'), 'utf-8'),
+    );
+    expect(rec).toMatchObject({
+      cause: 'stale-worker',
+      lastStep: 'ship',
+      heartbeatAgeMs: 40 * MIN,
+      outcome: 'failed',
+    });
+  });
+
+  it('reaps an idle holder with no verdict once the grace has passed', async () => {
+    claim('AISDLC-71', 'executor-alpha', 11 * MIN);
+    states.set('executor-alpha', 'idle');
+    const r = await runDispatchTick(stallDeps());
+    expect(r.stalled![0]!.reason).toBe('holder-not-busy');
+    expect(cleared).toHaveLength(1);
+  });
+
+  it('leaves an idle holder alone inside the grace', async () => {
+    claim('AISDLC-71', 'executor-alpha', 5 * MIN);
+    states.set('executor-alpha', 'gone');
+    const r = await runDispatchTick(stallDeps());
+    expect(r.stalled).toBeUndefined();
+    expect(existsSync(path.join(board, 'inflight', 'AISDLC-71.dispatch.json'))).toBe(true);
+  });
+
+  it('leaves a busy holder with a fresh heartbeat alone', async () => {
+    claim('AISDLC-71', 'executor-alpha', 11 * MIN);
+    const r = await runDispatchTick(stallDeps());
+    expect(r.stalled).toBeUndefined();
+    expect(cleared).toEqual([]);
+  });
+
+  it('records a reap once: the next tick neither reaps nor clears again', async () => {
+    claim('AISDLC-71', 'executor-alpha', 31 * MIN);
+    await runDispatchTick(stallDeps());
+    const again = await runDispatchTick(stallDeps());
+    expect(again.stalled).toBeUndefined();
+    expect(cleared).toHaveLength(1);
+    expect(playbooked).toEqual([]);
+  });
+
+  it('does not clear the holder twice when the re-queue is refused', async () => {
+    claim('AISDLC-71', 'executor-alpha', 31 * MIN);
+    const withoutRequeue = (): LoopDeps =>
+      stallDeps({ operational: new Set(['clear-executor-context']) });
+    const first = await runDispatchTick(withoutRequeue());
+    expect(first.stalled![0]!.requeue.done).toBe(false);
+    await runDispatchTick(withoutRequeue());
+    expect(cleared).toHaveLength(1);
+    expect(playbooked).toEqual([]);
+  });
+
+  it('does not clear when clear-executor-context is not granted', async () => {
+    claim('AISDLC-71', 'executor-alpha', 31 * MIN);
+    await runDispatchTick(stallDeps({ operational: new Set(['requeue']) }));
+    expect(cleared).toEqual([]);
+  });
+
+  it('skips a claim that already has a verdict and never runs without a stall config', async () => {
+    claim('AISDLC-71', 'executor-alpha', 31 * MIN);
+    verdict('AISDLC-72');
+    const none = await runDispatchTick(deps());
+    expect(none.stalled).toBeUndefined();
+    mkdirSync(path.join(board, 'done'), { recursive: true });
+    writeFileSync(path.join(board, 'done', 'AISDLC-71.verdict.json'), '{}');
+    const r = await runDispatchTick(stallDeps());
+    expect(r.stalled).toBeUndefined();
+  });
+
+  it('honours configured thresholds and survives a failing clear, PR lookup and liveness', async () => {
+    claim('AISDLC-71', 'executor-alpha', 2 * MIN);
+    clearImpl = async () => {
+      throw new Error('tmux gone');
+    };
+    const r = await runDispatchTick(
+      deps({
+        stall: {
+          staleMs: MIN,
+          findPr: () => {
+            throw new Error('gh down');
+          },
+          requeue: () => {
+            throw new Error('limit');
+          },
+        },
+      }),
+    );
+    expect(r.stalled![0]!.clear!.status).toBe('refused');
+    expect(r.stalled![0]!.requeue).toEqual({ done: false, reason: 'limit' });
+    expect(r.reports.some((x) => x.text.includes('not re-queued (limit)'))).toBe(true);
   });
 });

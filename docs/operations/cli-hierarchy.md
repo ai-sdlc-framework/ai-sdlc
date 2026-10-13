@@ -547,6 +547,22 @@ run is still pending waits up to the idle interval (1800 s) before mark-ready fl
 a standing failed Analyze job does not shorten the sleep. Exit `0`; `1` on a guard refusal; `2` on a malformed number or a retry limit above
 the cap.
 
+**Stall check (AISDLC-826).** Every tick also checks each inflight claim once. The
+pipeline refreshes the claim's heartbeat (`inflight/<task>.state.json`, `lastHeartbeat` and
+`currentStep`) on every `next-step` transition, so a live executor is never silent for
+longer than one step. A claim is stalled when its heartbeat is older than the stale
+threshold (default 30 minutes, `AI_SDLC_DISPATCH_STALE_MS`), or when its holder session is
+`idle`, `gone` or `unknown` in `status` and the heartbeat is older than the grace (default
+10 minutes, `AI_SDLC_DISPATCH_STALL_GRACE_MS`) with no verdict in `done/` or `failed/`. A
+stalled claim moves to `failed/` with `cause: stale-worker`, `lastStep` and
+`heartbeatAgeMs`; the holder is cleared (which restarts its executor loop with
+`/ai-sdlc:executor`) and the task is re-queued with a resume note naming the step it
+stalled at and any existing pull request number, so no developer re-runs when a PR exists.
+The tick result carries `stalled` (`taskId`, `worker`, `ageMs`, `step`) and a progress line
+per reap. This is operational: the planner is not asked. Clearing needs
+`clear-executor-context` and the re-queue needs `requeue`; the playbook treats both
+`stale-worker` and `stale-heartbeat` failures as re-queue-with-resume-note shapes.
+
 ### `route-decision`
 
 Record that a decision was routed to a tier (emits a `DecisionRouted` event).
