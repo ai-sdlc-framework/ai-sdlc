@@ -23,6 +23,7 @@ import {
   authoriseResume,
   evaluatePushOnly,
   formatResumeFeedback,
+  looksLikeCommand,
   readResumeFeedback,
   resumeDone,
   stripControl,
@@ -229,10 +230,126 @@ describe('resumeDone', () => {
     expect(() => resumeDone(board, 'AISDLC-808', { note: 'n' }, opts)).toThrow(/use requeue/);
   });
 
+  it('rejects a note, finding or failing check that starts like a command', () => {
+    finish('AISDLC-840');
+    for (const bad of [
+      'cli-dispatch release --task-id X',
+      'git push --force',
+      '  $ gh pr view 1',
+    ]) {
+      expect(() => resumeDone(board, 'AISDLC-840', { note: bad }, opts)).toThrow(/must be prose/);
+      expect(() => resumeDone(board, 'AISDLC-840', { note: 'ok\n' + bad }, opts)).toThrow(
+        /must be prose/,
+      );
+      expect(() => resumeDone(board, 'AISDLC-840', { note: 'ok', findings: [bad] }, opts)).toThrow(
+        /must be prose/,
+      );
+      expect(() =>
+        resumeDone(board, 'AISDLC-840', { note: 'ok', failingChecks: [bad] }, opts),
+      ).toThrow(/must be prose/);
+    }
+    expect(looksLikeCommand('Fix the gitignore and the github check')).toBe(false);
+    expect(looksLikeCommand('Git hooks failed in CI')).toBe(false);
+    expect(looksLikeCommand('GH checks are red')).toBe(false);
+    expect(existsSync(path.join(board, 'done', 'AISDLC-840.verdict.json'))).toBe(true);
+  });
+
+  it('rejects command lines hidden behind escape sequences or zero-width characters', () => {
+    finish('AISDLC-841');
+    for (const bad of [
+      '\x1b[0mgit push --force',
+      '\x1b]0;x\x07gh pr view 1',
+      '\u200bgit push --force',
+      '\ufeff\u200dcli-dispatch release --task-id X',
+    ]) {
+      expect(() => resumeDone(board, 'AISDLC-841', { note: bad }, opts)).toThrow(/must be prose/);
+      expect(() => resumeDone(board, 'AISDLC-841', { note: 'ok', findings: [bad] }, opts)).toThrow(
+        /must be prose/,
+      );
+      expect(() =>
+        resumeDone(board, 'AISDLC-841', { note: 'ok', failingChecks: [bad] }, opts),
+      ).toThrow(/must be prose/);
+    }
+    expect(existsSync(path.join(board, 'done', 'AISDLC-841.verdict.json'))).toBe(true);
+  });
+
+  it('stores the stripped note, findings and failing checks', () => {
+    finish('AISDLC-842');
+    const r = resumeDone(
+      board,
+      'AISDLC-842',
+      {
+        note: 'fix \x1b[31mcoverage\x1b[0m',
+        findings: ['a\x1b]0;t\x07b'],
+        failingChecks: ['c\x1b[1md'],
+      },
+      opts,
+    );
+    expect(r.resume.note).toBe('fix coverage');
+    expect(r.resume.findings).toEqual(['ab']);
+    expect(r.resume.failingChecks).toEqual(['cd']);
+  });
+
+  it('writes no wave on a resume, keeps the priority and sets retryCount', () => {
+    writeManifest(board, mkManifest('AISDLC-841', { wave: 3, priority: 1 }));
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-a' });
+    completeTask(board, { taskId: 'AISDLC-841', outcome: 'success', workerId: 'exec-a' });
+    const r = resumeDone(board, 'AISDLC-841', { note: 'again' }, opts);
+    const queued = JSON.parse(readFileSync(r.queuePath, 'utf-8')) as DispatchManifest;
+    expect(queued.wave).toBeUndefined();
+    expect(queued.priority).toBe(1);
+    expect(queued.retryCount).toBe(0);
+  });
+
+  it('renders the executor instruction from the fixed template', () => {
+    const text = formatResumeFeedback({
+      note: 'Raise coverage',
+      resumedAt: '2026-10-09T10:00:00.000Z',
+      resumedBy: 'dispatch',
+    });
+    expect(text).toContain('Run the pipeline unmodified from the existing worktree');
+  });
+
+  describe('iterate-needed verdicts (AISDLC-800)', () => {
+    function iterate(taskId: string, notes = 'Reviewer wants a test for the edge case'): void {
+      writeManifest(board, mkManifest(taskId, { priority: 2 }));
+      claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-a' });
+      completeTask(board, { taskId, outcome: 'iterate-needed', workerId: 'exec-a', notes });
+    }
+
+    it('takes over the held claim and resumes carrying the verdict notes', () => {
+      iterate('AISDLC-843');
+      const r = resumeDone(board, 'AISDLC-843', {}, opts);
+      const queued = JSON.parse(readFileSync(r.queuePath, 'utf-8')) as DispatchManifest;
+      expect(queued.resume?.note).toBe('Reviewer wants a test for the edge case');
+      expect(queued.resume?.priorOutcome).toBe('iterate-needed');
+      expect(queued.priority).toBe(2);
+      expect(queued.wave).toBeUndefined();
+      expect(existsSync(path.join(board, 'done', 'AISDLC-843.verdict.json'))).toBe(false);
+    });
+
+    it('drops command-looking lines from the verdict notes and falls back when none remain', () => {
+      iterate('AISDLC-844', 'Add a test\ngit push --force\n');
+      expect(resumeDone(board, 'AISDLC-844', {}, opts).resume.note).toBe('Add a test');
+    });
+
+    it('falls back to a fixed sentence when no prose is left', () => {
+      iterate('AISDLC-845', 'cli-dispatch release');
+      expect(resumeDone(board, 'AISDLC-845', {}, opts).resume.note).toMatch(/no notes/);
+    });
+
+    it('lets an explicit note override the verdict notes', () => {
+      iterate('AISDLC-846');
+      expect(resumeDone(board, 'AISDLC-846', { note: 'Do this instead' }, opts).resume.note).toBe(
+        'Do this instead',
+      );
+    });
+  });
+
   it('strips control characters from list entries', () => {
     finish('AISDLC-809');
     const r = resumeDone(board, 'AISDLC-809', { note: 'n', findings: ['a\u001b[31m\nb'] }, opts);
-    expect(r.resume.findings).toEqual(['a [31m b']);
+    expect(r.resume.findings).toEqual(['a b']);
   });
 });
 
@@ -400,6 +517,9 @@ describe('authoriseResume', () => {
     const r = authoriseResume(board, 'AISDLC-832', roster([dispatch, executor]));
     expect(r?.ok).toBe(false);
     expect(r && !r.ok && r.reason).toMatch(/not a dispatch session in the roster/);
+  });
+
+  it('refuses a block left by a roster name that has another role', () => {
     // A roster name that exists but with another role is not enough.
     resumedAndClaimed('AISDLC-833', 'exec-b');
     const r2 = authoriseResume(board, 'AISDLC-833', roster([dispatch, executor]));
@@ -462,6 +582,25 @@ describe('cli-dispatch resume and claim', () => {
     const exit = await runDispatchCli(argv, deps);
     return { exit, stdout, stderr };
   }
+
+  it('accepts the singular --failing-check flag', async () => {
+    finish('AISDLC-821');
+    const r = await cli([
+      'resume',
+      '--board-dir',
+      board,
+      '--task-id',
+      'AISDLC-821',
+      '--note',
+      'Coverage is low',
+      '--failing-check',
+      'coverage',
+      '--work-dir',
+      root,
+    ]);
+    expect(r.exit).toBe(0);
+    expect(JSON.parse(r.stdout.trim()).resume.failingChecks).toEqual(['coverage']);
+  });
 
   it('resumes a done task and the next claim surfaces the feedback note', async () => {
     finish('AISDLC-820');
@@ -561,7 +700,7 @@ describe('cli-dispatch resume and claim', () => {
     finish('AISDLC-822');
     const base = ['resume', '--board-dir', board, '--work-dir', root];
     expect((await cli([...base, '--task-id', 'x', '--note', 'n'])).exit).toBe(2);
-    expect((await cli([...base, '--task-id', 'AISDLC-822'])).exit).toBe(2);
+    expect((await cli([...base, '--task-id', 'AISDLC-822'])).exit).toBe(1);
     expect(
       (await cli([...base, '--task-id', 'AISDLC-822', '--note', 'n', '--pr', 'zz'])).exit,
     ).toBe(2);
@@ -615,8 +754,8 @@ describe('cli-dispatch resume, requeue --note and release (AISDLC-807)', () => {
 
   function run(taskId: string, outcome: 'iterate-needed' | 'failed'): void {
     writeManifest(board, mkManifest(taskId));
-    claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-a' });
-    completeTask(board, { taskId, outcome, workerId: 'exec-a' });
+    claimNext(board, 'in-session-agent', undefined, { workerId: `exec-${taskId}` });
+    completeTask(board, { taskId, outcome, workerId: `exec-${taskId}` });
   }
   const queued = (id: string): DispatchManifest =>
     JSON.parse(

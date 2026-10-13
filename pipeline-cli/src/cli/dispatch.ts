@@ -33,9 +33,13 @@
  *     [--current-step <s>]` — write or refresh a heartbeat.
  *   - `sweep [--stale-ms <n>]` — sweep stale inflight heartbeats; print the
  *     reaped taskIds.
- *   - `release --task-id <id>` — move inflight back to queue/ (surrender
- *     the claim without writing a verdict). Refused when `done/` already
- *     holds a verdict for the task (use `resume` or `remove-verdict`).
+ *   - `release --task-id <id> [--force --reason <text>]` — move inflight back
+ *     to queue/ (surrender the claim without writing a verdict). Refused when
+ *     `done/` already holds a verdict for the task (use `resume` or
+ *     `remove-verdict`). Also refuses, exit 1, while the task's worktree holds
+ *     commits that are not on its pushed branch or uncommitted changes to
+ *     tracked files; `--force` with a reason releases anyway and writes the
+ *     reason to the manifest's `releaseHistory` (AISDLC-800).
  *   - `write-manifest --json <path>` — Conductor entry point. Reads a JSON
  *     manifest from `<path>` and writes it into queue/.
  *
@@ -62,8 +66,11 @@
  *     not in failed/, has no saved manifest, is already active, or is past the
  *     retry limit. `--note` writes the same `resume.note` block `resume` writes.
  *
- *   - `resume --task-id <id> --note <text> [--pr <number>] [--failing-checks <a,b>] [--push-only]
- *     [--finding <text>]` (or `--note-file <path>`) — send a finished task back to
+ *   - `resume --task-id <id> --note <text> [--pr <number>] [--failing-check <a,b>] [--push-only]
+ *     [--finding <text>]` (or `--note-file <path>`; `--note` may be omitted for an
+ *     iterate-needed verdict whose claim was released, which resumes with the
+ *     verdict notes). Notes, checks and findings are prose: a line starting with
+ *     `cli-`, `git ` or `gh ` is rejected (AISDLC-800) — send a finished task back to
  *     queue/ with a feedback note on its manifest (AISDLC-738). The next claim
  *     prints the note, and `/ai-sdlc execute` re-enters the task's existing worktree
  *     and branch and updates its pull request. Same caller check and `requeue`
@@ -151,12 +158,12 @@ import {
   MAX_NOTE_CHARS,
   listBoard,
   listResumeSignals,
+  OneClaimPerWorkerError,
   peekQueue,
   probeIterationBudget,
   readEmptyQueueHibernateSec,
   readInflightManifest,
   readResumeSignal,
-  releaseInflight,
   removeResumeSignal,
   requeueFailed,
   requeueStaleInflight,
@@ -173,11 +180,13 @@ import {
 } from '../dispatch/index.js';
 import { formatSessionLine, listSessions, recordAgentSession } from '../dispatch/sessions.js';
 import { assertClaimHolder, completeTask, splitIdList } from '../dispatch/complete.js';
+import { guardedRelease } from '../dispatch/release-guard.js';
 import { DEFAULT_REQUEUE_RETRY_LIMIT } from '../dispatch/session-reaper.js';
 import { checkDispatchCaller, loadOperational, type IdentityDeps } from '../hierarchy/index.js';
 import { nextSubId } from '../dispatch/subid.js';
 import type {
   BoardEntry,
+  ClaimResult,
   EnqueueEntry,
   DispatchManifest,
   DispatchVerdict,
@@ -404,18 +413,25 @@ export async function runDispatchCli(
         );
         return 2;
       }
-      const result =
-        waitRaw === undefined
-          ? claimNext(
-              boardDir,
-              kind as WorkerKind,
-              undefined,
-              workerId === undefined ? {} : { workerId },
-            )
-          : await claimWithWait(boardDir, kind as WorkerKind, {
-              waitSec: Number.parseInt(waitRaw, 10),
-              ...(workerId === undefined ? {} : { workerId }),
-            });
+      let result: ClaimResult;
+      try {
+        result =
+          waitRaw === undefined
+            ? claimNext(
+                boardDir,
+                kind as WorkerKind,
+                undefined,
+                workerId === undefined ? {} : { workerId },
+              )
+            : await claimWithWait(boardDir, kind as WorkerKind, {
+                waitSec: Number.parseInt(waitRaw, 10),
+                ...(workerId === undefined ? {} : { workerId }),
+              });
+      } catch (err) {
+        if (!(err instanceof OneClaimPerWorkerError)) throw err;
+        process.stderr.write(`cli-dispatch claim: ${err.message}\n`);
+        return 1;
+      }
       if (!result.claimed) {
         out({ claimed: false });
         return 0;
@@ -753,9 +769,22 @@ export async function runDispatchCli(
         );
         return 1;
       }
-      const released = releaseInflight(boardDir, taskId);
-      out({ released });
-      return 0;
+      const reasonFlag = flags['reason'];
+      try {
+        const result = guardedRelease(boardDir, taskId, {
+          workDir: path.resolve(flags['work-dir'] ?? deps.cwd ?? '.'),
+          force: flags['force'] === 'true',
+          ...(reasonFlag !== undefined && reasonFlag !== 'true' ? { reason: reasonFlag } : {}),
+          ...(flags['worker'] ? { by: flags['worker'] } : {}),
+        });
+        out(result);
+        return 0;
+      } catch (err) {
+        process.stderr.write(
+          `cli-dispatch release: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+        return 1;
+      }
     }
 
     case 'write-manifest': {
@@ -1138,9 +1167,9 @@ export async function runDispatchCli(
         }
         note = read.note;
       }
-      if (!note || note === 'true') {
+      if (note === 'true') {
         process.stderr.write(
-          'cli-dispatch resume: --note <text> (or --note-file <path>) is required\n',
+          'cli-dispatch resume: --note <text> (or --note-file <path>) needs a value\n',
         );
         return 2;
       }
@@ -1183,7 +1212,10 @@ export async function runDispatchCli(
               note,
               ...(prNumber !== undefined ? { prNumber } : {}),
               ...(prHeadRef ? { prHeadRef } : {}),
-              failingChecks: splitIdList(flags['failing-checks']),
+              failingChecks: [
+                ...splitIdList(flags['failing-checks']),
+                ...splitIdList(flags['failing-check']),
+              ],
               findings: flags['finding'] ? [flags['finding']] : [],
               pushOnly: flags['push-only'] === 'true',
             },
@@ -1327,7 +1359,7 @@ Subcommands:
   remove-verdict --task-id <id> [--from done|failed]
   heartbeat --task-id <id> --worker-id <id> --worker-kind <kind>
   sweep [--stale-ms <n>]
-  release --task-id <id>
+  release --task-id <id> [--force --reason <text>]   (refuses while the worktree has unpushed or uncommitted work)
   write-manifest --json <path>
   enqueue --task <id> [--task <id> ...] [--after <ids>] [--group <name>]
           [--priority <n>] [--wave <n>] [--base-sha <sha>] | --from-brief <path>

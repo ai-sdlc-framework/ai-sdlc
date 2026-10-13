@@ -148,6 +148,23 @@
       "minLength": 1,
       "description": "The claiming session's roster name, recorded verbatim when the manifest is claimed. In a hierarchy it equals the roster name exactly, collision suffix included."
     },
+    "releaseHistory": {
+      "type": "array",
+      "maxItems": 20,
+      "description": "Forced releases of this task (AISDLC-800): a release that skipped the unpushed or uncommitted work guard, with the reason given.",
+      "items": {
+        "type": "object",
+        "required": ["at", "reason"],
+        "properties": {
+          "at": { "type": "string", "format": "date-time" },
+          "by": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "forced": { "type": "boolean" },
+          "unsafe": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
     "resume": {
       "type": "object",
       "description": "Present when a finished task is sent back for another round. The executor reads it before running the task and the pipeline re-enters the task's existing worktree and branch.",

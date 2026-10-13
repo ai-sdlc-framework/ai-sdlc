@@ -110,7 +110,7 @@ function boardFile(boardDir: string, sub: string, taskId: string, suffix: string
 }
 
 /** Build the absolute path for a manifest in a given subdir. */
-function manifestPathIn(boardDir: string, sub: string, taskId: string): string {
+export function manifestPathIn(boardDir: string, sub: string, taskId: string): string {
   return boardFile(boardDir, sub, taskId, MANIFEST_SUFFIX);
 }
 
@@ -301,6 +301,32 @@ function comparePriority(a: unknown, b: unknown): number {
   return x < y ? -1 : 1;
 }
 
+/** Thrown by {@link claimNext} when the worker already holds an inflight claim. */
+export class OneClaimPerWorkerError extends Error {
+  constructor(
+    readonly workerId: string,
+    readonly heldTaskId: string,
+  ) {
+    super(
+      `one-claim-per-worker: '${workerId}' already holds the inflight claim on ${heldTaskId}; ` +
+        `finish it (write a verdict) or release it (\`cli-dispatch release --task-id ${heldTaskId}\`) before claiming another task; ` +
+        `if the worker crashed and the claim is stale, run \`cli-dispatch sweep\``,
+    );
+    this.name = 'OneClaimPerWorkerError';
+  }
+}
+
+/** Task id of the inflight manifest `workerId` holds, if any. */
+export function findHeldClaim(boardDir: string, workerId: string): string | undefined {
+  const inflightDir = path.join(boardDir, 'inflight');
+  for (const entry of safeReaddir(inflightDir).sort()) {
+    if (!entry.endsWith(MANIFEST_SUFFIX)) continue;
+    const held = readManifest(path.join(inflightDir, entry));
+    if (held && held.workerId === workerId) return held.taskId;
+  }
+  return undefined;
+}
+
 /**
  * Atomically claim the next eligible manifest from `queue/` matching the
  * requested Worker kind. Implementation:
@@ -320,6 +346,10 @@ function comparePriority(a: unknown, b: unknown): number {
  *
  * `blocked/` is never read here.
  *
+ * A named worker (`hooks.workerId`) holds at most one claim: while an inflight
+ * manifest carries its name the call throws {@link OneClaimPerWorkerError}
+ * naming that task (AISDLC-800).
+ *
  * Returns `{ claimed: false }` when the queue is empty (or contains only
  * non-matching / cool-down / ineligible entries).
  */
@@ -330,6 +360,10 @@ export function claimNext(
   hooks: ClaimHooks = {},
 ): ClaimResult {
   const queueDir = path.join(boardDir, 'queue');
+  if (hooks.workerId !== undefined) {
+    const held = findHeldClaim(boardDir, hooks.workerId);
+    if (held !== undefined) throw new OneClaimPerWorkerError(hooks.workerId, held);
+  }
   let candidates: ManifestCandidate[];
   try {
     ensureBoardDirs(boardDir);
