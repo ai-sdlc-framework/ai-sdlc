@@ -8,11 +8,16 @@ import { execFile, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { buildDeveloperPrompt } from '../steps/05-build-dev-prompt.js';
 import { makeGitEnv } from '../__test-helpers/git-env.js';
 import { cleanupTmpProject, makeTmpProject, writeTaskFile } from '../__test-helpers/make-task.js';
 import { makeHarness, type Harness } from '../__test-helpers/next-step-fixtures.js';
 import type { ExecOptions, Runner } from '../runtime/exec.js';
+vi.mock('../steps/05-build-dev-prompt.js', async (orig) => {
+  const m = await orig<typeof import('../steps/05-build-dev-prompt.js')>();
+  return { ...m, buildDeveloperPrompt: vi.fn(m.buildDeveloperPrompt) };
+});
 import { initTask, statusOf, writeRunFile } from './init.js';
 import { makeTask } from '../__test-helpers/next-step-fixtures.js';
 
@@ -215,6 +220,20 @@ describe('initTask', () => {
     const res = await initTask(h.ctx, 'AISDLC-900');
     expect(res.ok).toBe(true);
     expect(existsSync(moved)).toBe(true);
+  });
+
+  it('rolls the task back when prompt building throws (AISDLC-849)', async () => {
+    vi.mocked(buildDeveloperPrompt).mockRejectedValueOnce(new Error('boom'));
+    await expect(initTask(h.ctx, 'AISDLC-900')).rejects.toThrow('boom');
+    const file = join(
+      h.root,
+      '.worktrees',
+      'aisdlc-900',
+      'backlog',
+      'tasks',
+      'aisdlc-900 - demo-task.md',
+    );
+    if (existsSync(file)) expect(readFileSync(file, 'utf8')).not.toContain('status: In Progress');
   });
 
   it('still refuses a missing task file when there is no prior work (AISDLC-849)', async () => {

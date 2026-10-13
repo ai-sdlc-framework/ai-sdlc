@@ -1694,6 +1694,12 @@ describe('push-only-check (AISDLC-849)', () => {
     expect(captured.raw).toContain('"mode":"normal"');
   });
 
+  it('approvalEnvelopeMatches is false outside a git repo', () => {
+    expect(approvalEnvelopeMatches(mkdtempSync(path.join(tmpdir(), 'push-only-nogit-')))).toBe(
+      false,
+    );
+  });
+
   it('accepts a missing verdict file when an approval envelope matches the content', async () => {
     const wt = mkdtempSync(path.join(tmpdir(), 'push-only-'));
     const sh = (a: string[]): string =>
