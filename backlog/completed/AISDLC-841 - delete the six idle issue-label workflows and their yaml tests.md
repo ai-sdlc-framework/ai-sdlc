@@ -2,7 +2,7 @@
 id: AISDLC-841
 title: >-
   delete the six idle issue-label workflows and their yaml tests
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-13'
 labels:
