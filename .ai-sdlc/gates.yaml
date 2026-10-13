@@ -257,6 +257,24 @@ gates:
     owner: engineering
     property: no module without a non-test importer
     baseline: true
+  - id: pre-push:scripts/check-knowledge-scope.sh
+    surface: pre-push
+    origin: AISDLC-773
+    owner: engineering
+    property: protected knowledge stays out of the tracked root
+    baseline: true
+  - id: pre-push:scripts/check-pr-body-protected.sh
+    surface: pre-push
+    origin: AISDLC-773
+    owner: engineering
+    property: protected knowledge stays out of the PR body
+    baseline: true
+  - id: test-chain:pnpm knowledge:check
+    surface: test-chain
+    origin: AISDLC-773
+    owner: engineering
+    property: protected knowledge stays out of the tracked root
+    baseline: true
   - id: test-chain:pnpm sync:plugin-runtime-deps:check
     surface: test-chain
     origin: unknown (plugin runtime deps sync)

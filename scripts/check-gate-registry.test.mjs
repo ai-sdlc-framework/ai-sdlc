@@ -96,6 +96,9 @@ export function checkRegistry(registry, live) {
 
 /** The ids registered when this PR landed. Only `baseline: true` may apply to these. */
 const BASELINE_IDS = [
+  'pre-push:scripts/check-knowledge-scope.sh',
+  'pre-push:scripts/check-pr-body-protected.sh',
+  'test-chain:pnpm knowledge:check',
   'workflow:ai-sdlc-gate.yml',
   'gate-job:detect',
   'gate-job:lint',
