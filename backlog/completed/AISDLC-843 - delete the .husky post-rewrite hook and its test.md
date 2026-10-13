@@ -2,7 +2,7 @@
 id: AISDLC-843
 title: >-
   delete the .husky/post-rewrite hook and its test
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:

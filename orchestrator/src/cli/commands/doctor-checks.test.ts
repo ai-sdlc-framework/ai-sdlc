@@ -57,7 +57,6 @@ import {
   checkBacklogDriftWarnings,
   fixUntrackedReviewLedgers,
   checkParentCheckoutState,
-  checkWorktreeRewriteHooks,
   fixWorktreeHooks,
   checkForcePushPolicy,
   readForcePushPolicy,
@@ -1846,45 +1845,6 @@ describe('parent-checkout-state provable stale index (AISDLC-750)', () => {
       makeCtx(staleAdapters({ indexTree: 'tx', log: 'c1 t1\n' })),
     );
     expect(results[0].severity).toBe('warn');
-  });
-});
-
-describe('worktree-rewrite-hooks check (AISDLC-750)', () => {
-  function hookAdapters(files: Record<string, string>) {
-    return makeAdapters({
-      listDir: () => ['wt-old', 'wt-new', 'wt-none'],
-      readFile: (p) => {
-        for (const [k, v] of Object.entries(files)) if (p.endsWith(k)) return v;
-        return null;
-      },
-    });
-  }
-
-  it('reports worktrees whose hook copy lacks the fix marker', () => {
-    const results = checkWorktreeRewriteHooks(
-      makeCtx(
-        hookAdapters({
-          'wt-old/.husky/post-rewrite': '#!/bin/bash\nold\n',
-          'wt-new/.husky/post-rewrite': '# AISDLC-750\n',
-        }),
-      ),
-    );
-    expect(results).toHaveLength(1);
-    expect(results[0].title).toContain('wt-old');
-    expect(results[0].title).not.toContain('wt-new');
-    expect(results[0].title).not.toContain('wt-none');
-  });
-
-  it('accepts a worktree whose husky shim was repointed at the main hook', () => {
-    const results = checkWorktreeRewriteHooks(
-      makeCtx(
-        hookAdapters({
-          'wt-old/.husky/post-rewrite': 'old\n',
-          'wt-old/.husky/_/post-rewrite': '# AISDLC-750 proxy\n',
-        }),
-      ),
-    );
-    expect(results).toEqual([]);
   });
 });
 

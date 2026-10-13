@@ -30,15 +30,6 @@
 #      and HEAD is current or behind origin/main, every staged "change" is explained
 #      by that commit and `git read-tree -u -m <match> HEAD` loses nothing. Otherwise
 #      the existing refuse/warn behaviour stays.
-#   5. Parent independence from worktree hook copies. Git runs post-rewrite from the
-#      worktree doing the rebase, so a worktree whose branch predates the guard fix
-#      would still move the parent's refs/heads/main alone. CHOICE (a): on every run
-#      this script rewrites the GENERATED, gitignored husky shim
-#      `<worktree>/.husky/_/post-rewrite` in every registered worktree to exec the main
-#      checkout's `.husky/post-rewrite`, logging each rewrite. The tracked
-#      `.husky/post-rewrite` is deliberately NOT touched: editing it would leave the
-#      worktree with a dirty tracked file that blocks `git rebase`. `pnpm run prepare`
-#      regenerates the shim, so this re-applies on the next Step 0.
 #
 # Skip with: AI_SDLC_SKIP_ORCHESTRATOR_STATE_CHECK=1
 
@@ -84,25 +75,6 @@ fi
 if ! git rev-parse refs/heads/main >/dev/null 2>&1; then
   echo "[orchestrator-state] skipping: local refs/heads/main not present — likely a shallow CI clone"
   exit 0
-fi
-
-# AISDLC-750 (5): repoint every worktree's generated post-rewrite shim at the main
-# checkout's hook so a stale worktree copy cannot desync the parent. Non-fatal.
-PARENT_REWRITE_HOOK="${PARENT_ROOT}/.husky/post-rewrite"
-if [ -f "$PARENT_REWRITE_HOOK" ]; then
-  PROXY_BODY=$(printf '#!/usr/bin/env sh\n# AISDLC-750 proxy: run the main checkout post-rewrite guard, not this worktree copy\nexec bash "%s" "$@"\n' "$PARENT_REWRITE_HOOK")
-  while IFS= read -r wt_line; do
-    case "$wt_line" in worktree\ *) ;; *) continue ;; esac
-    wt_path="${wt_line#worktree }"
-    [ "$wt_path" = "$PARENT_ROOT" ] && continue
-    shim="${wt_path}/.husky/_/post-rewrite"
-    [ -d "${wt_path}/.husky/_" ] || continue
-    if [ "$(cat "$shim" 2>/dev/null)" != "$PROXY_BODY" ]; then
-      if printf '%s\n' "$PROXY_BODY" > "$shim" 2>/dev/null && chmod +x "$shim" 2>/dev/null; then
-        echo "[orchestrator-state] repointed post-rewrite shim in worktree ${wt_path} at the main checkout hook (AISDLC-750)"
-      fi
-    fi
-  done < <(git worktree list --porcelain 2>/dev/null || true)
 fi
 
 # 1a. AISDLC-358: Pattern-C contract — parent MUST be on main.
