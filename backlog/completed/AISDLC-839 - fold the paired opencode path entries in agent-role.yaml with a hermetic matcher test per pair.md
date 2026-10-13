@@ -2,7 +2,7 @@
 id: AISDLC-839
 title: >-
   fold the paired opencode path entries in agent-role.yaml with a hermetic matcher test per pair
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:
