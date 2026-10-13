@@ -558,10 +558,18 @@ describe('verify-attestation.mjs — consumer-runnable verifier (AISDLC-566)', (
       JSON.stringify({ name: '@ai-sdlc/orchestrator', version: '0.13.9' }),
     );
 
-    const verifyRes = runVerify(
-      fixture.root,
-      ['--head', fixture.headSha, '--base', fixture.baseSha],
-      { HOME: tmpHome, CLAUDE_PLUGIN_ROOT: pluginDir },
+    const isoDir = join(base, 'iso', 'plugin', 'scripts');
+    mkdirSync(isoDir, { recursive: true });
+    const isoCopy = join(isoDir, 'verify-attestation.mjs');
+    writeFileSync(isoCopy, readFileSync(verifyHelperPath, 'utf-8'));
+    const verifyRes = spawnSync(
+      process.execPath,
+      [isoCopy, '--head', fixture.headSha, '--base', fixture.baseSha],
+      {
+        cwd: fixture.root,
+        env: cleanEnv({ HOME: tmpHome, CLAUDE_PLUGIN_ROOT: pluginDir }),
+        encoding: 'utf-8',
+      },
     );
     assert.equal(verifyRes.status, 2);
     assert.match(verifyRes.stderr, /Rejected as too old/);

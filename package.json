@@ -41,6 +41,7 @@
     "test:dark-code-gate": "node --test scripts/check-dark-code.test.mjs",
     "test:task-move-gate": "node --test scripts/check-task-moved.test.mjs",
     "test:attestation-sign-gate": "node --test scripts/check-attestation-sign.test.mjs",
+    "test:plugin-suite-gate": "cd ai-sdlc-plugin && node --test hooks/*.test.mjs agents/*.test.mjs scripts/*.test.mjs commands/*.test.mjs",
     "test:plugin-commands-gate": "node --test \"ai-sdlc-plugin/commands/*.test.mjs\"",
     "test:plugin-model-pins-gate": "node --test ai-sdlc-plugin/commands/model-pins.test.mjs",
     "test:plugin-attestation-sign-gate": "node --test ai-sdlc-plugin/scripts/check-attestation-sign.test.mjs",

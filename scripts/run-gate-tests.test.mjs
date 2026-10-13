@@ -97,10 +97,7 @@ describe('runGateTests (AISDLC-805)', () => {
 
 describe('KNOWN_RED ratchet (AISDLC-805)', () => {
   // Growth requires editing this pin so reviewers see it. Shrink by deleting the entry and the pin.
-  const PINNED = [
-    'ai-sdlc-plugin/agents/rebase-resolver.test.mjs',
-    'scripts/check-rm-guard.test.mjs',
-  ];
+  const PINNED = ['scripts/check-rm-guard.test.mjs'];
 
   test('KNOWN_RED is shrink-only: no id outside the frozen list', () => {
     const extra = Object.keys(KNOWN_RED).filter((k) => !PINNED.includes(k));

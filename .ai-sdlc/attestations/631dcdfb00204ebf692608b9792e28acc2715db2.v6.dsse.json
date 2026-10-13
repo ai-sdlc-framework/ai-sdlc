@@ -1,0 +1,74 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "a2b8ed205650725cc58683112e099b3c0ffffb24"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "763f6526dce8272b0b244039133218c7a32749b297576f5c3d3027afb87f23b9",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer-codex",
+      "transcriptHash": "acf58f9e1e2133643d3a0a5d7eb27379aa54c6ad9f66fb7947a285ba5a48b4c4",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "81b62abb8f68c8845033852ce4e7d58cb66eb8d3c8755b6fddb3f74b71b097de",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "81b62abb8f68c8845033852ce4e7d58cb66eb8d3c8755b6fddb3f74b71b097de",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "ad495fed3dc6002f70d56b51f45989606fc4b789c56d058fa0ff07e215bf1387",
+        "61f2ec78ced331aa40b9ca75c7867ce5bb1455363cb5372d959ae11d0735acf5"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "2aa24270c2f4d4e5a835ebd7522ab7da25b4ec1d5daba5aae2a471be5a3083c4",
+        "61f2ec78ced331aa40b9ca75c7867ce5bb1455363cb5372d959ae11d0735acf5"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "26c4a951e392b4fb4be553f69c2db992941961fccc49c8526cae5ad68fff2a83",
+        "4df91e4901b35473cbe4da61397ff88f4a4f3c03d5afab5781f0da49cd2ea165"
+      ]
+    }
+  ],
+  "rootHash": "99b47f02c798133a1a6efd84392822ed96e1ef559db69f8908f128352c9edb3b",
+  "rootSignature": "7dY10TwD2Yg32xgW5Dg1JSs32fDBULpV2dRU32jyLeh9AgSqyKbKNw7QL8Rc4qk8VXRqlmFBzpRMEHU5pzP/CQ==",
+  "nonce": "64151ef7eb3ce05ab2c90cc5485a6a7fdb085c50ce0aa0dfb4d2909be2fec2bf",
+  "leafCount": 3,
+  "signedAt": "2026-10-13T22:54:13.171Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      ".github/workflows/main-health-monitor.yml",
+      "ai-sdlc-plugin/agents/rebase-resolver.test.mjs",
+      "ai-sdlc-plugin/scripts/sign-attestation.test.mjs",
+      "ai-sdlc-plugin/scripts/verify-attestation.test.mjs"
+    ],
+    "appliedReviewers": ["code-reviewer-codex", "test-reviewer-codex", "security-reviewer"]
+  }
+}

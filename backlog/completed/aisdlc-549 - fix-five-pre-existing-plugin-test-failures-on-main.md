@@ -3,7 +3,7 @@ id: AISDLC-549
 title: >-
   fix(tests): resolve the 5 pre-existing ai-sdlc-plugin test failures on main
   and close the main-health blind spot that let them persist
-status: To Do
+status: Done
 assignee: []
 labels:
   - tests

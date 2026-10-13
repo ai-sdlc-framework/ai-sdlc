@@ -123,13 +123,21 @@ jobs:
           # failure. The glob also auto-includes any future workflow test files.
           node --test .github/workflows/__tests__/*.test.mjs
 
+      # AISDLC-549: `pnpm -r test` runs only workspace-member `test` scripts; the
+      # plugin's `node --test` doc-contract suites (agents/commands/hooks/scripts)
+      # are not a workspace member's `test`, so five failures sat on main unseen.
+      - name: Test (plugin node --test suite)
+        id: plugin-test
+        continue-on-error: true
+        run: pnpm test:plugin-suite-gate
+
       # Consolidate the two step outcomes into a single job output.
       - name: Determine test outcome
         id: test-outcome
         run: |
           full="${{ steps.full-test.outcome }}"
           workflow="${{ steps.workflow-test.outcome }}"
-          extra="lint=${{ steps.lint.outcome }} format=${{ steps.format.outcome }} schemas=${{ steps.schemas.outcome }} coverage=${{ steps.coverage.outcome }} smoke=${{ steps.smoke.outcome }}"
+          extra="plugin=${{ steps.plugin-test.outcome }} lint=${{ steps.lint.outcome }} format=${{ steps.format.outcome }} schemas=${{ steps.schemas.outcome }} coverage=${{ steps.coverage.outcome }} smoke=${{ steps.smoke.outcome }}"
           echo "full-test outcome: $full"
           echo "workflow-test outcome: $workflow"
           echo "other outcomes: $extra"
@@ -147,7 +155,7 @@ jobs:
       - name: Fail on test failure
         if: steps.test-outcome.outputs.status == 'failure'
         run: |
-          echo "::error::main health check FAILED — full-test=${{ steps.full-test.outcome }} workflow-test=${{ steps.workflow-test.outcome }}"
+          echo "::error::main health check FAILED — full-test=${{ steps.full-test.outcome }} workflow-test=${{ steps.workflow-test.outcome }} plugin-test=${{ steps.plugin-test.outcome }}"
           echo "::error::See the steps above for failing test output."
           echo "::error::Runbook: docs/operations/main-health-monitor.md"
           exit 1
