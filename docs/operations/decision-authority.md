@@ -48,6 +48,10 @@ Class (c) is never derived from the other questions; it is recognised by its sub
 | Subscribing to a paid service                                                                                                | (c)                                   | Money and an account                                                                                |
 | Accepting a licence for a dependency                                                                                         | (c)                                   | Legal                                                                                               |
 
+## Where decision events live (AISDLC-825)
+
+`cli-decisions` resolves the catalog root to the main checkout when run from a linked worktree (`git rev-parse --git-common-dir`), so `add`, `answer`, `show` and `list` read and write `<main checkout>/.ai-sdlc/_decisions/events/` wherever they run. A decision an executor files from `.worktrees/<id>/` is therefore visible to dispatch with `cli-decisions show <id>` from the parent, with no manual copy. The events reach `main` as before (a filing PR, or committed in a task branch); the parent copy is what a later fast-forward brings. Step 0.5 treats untracked files under `.ai-sdlc/_decisions/events/` as parent-tolerated, so they never refuse a fresh execute.
+
 ## Velocity: no refusal ends in a person
 
 Only class (c) waits on a human, and only for legal, money, credentials or the operator's own identity. Everything else a rule refuses must name a next step the agent can take itself: a sanctioned command, a config key and value, or escalation to the dispatch or planner session. New rules, gates and defaults carry a "Velocity impact" section in their PR body (harm prevented, workflows touched, happy-path firing in a fresh adopter repo, what the agent does when refused), and with nothing configured the documented workflow must run.

@@ -18,6 +18,7 @@
  * @module cli/decisions
  */
 
+import { resolveCatalogRoot } from '../decisions/catalog-root.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
 import yargs, { type Argv } from 'yargs';
@@ -588,9 +589,10 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
     .option('work-dir', {
       alias: 'w',
       describe:
-        'Project root (defaults to cwd). Resolves the event log under <work-dir>/.ai-sdlc/_decisions/events/.',
+        'Project root (defaults to cwd). Resolves the event log under <work-dir>/.ai-sdlc/_decisions/events/. From a linked worktree the main checkout is used instead (AISDLC-825).',
       type: 'string',
       default: process.cwd(),
+      coerce: (v: string) => resolveCatalogRoot(v),
     })
     .command(
       'list',
