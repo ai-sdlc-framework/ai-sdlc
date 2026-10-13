@@ -1,0 +1,81 @@
+name: CodeQL
+
+# AISDLC-840 (DEC-0161): advanced CodeQL setup replacing GitHub default setup.
+# Per pull request, actions and go and python run only when their own paths
+# change; javascript-typescript always runs. A weekly schedule and every push to
+# main scan all four languages unfiltered, so a skipped PR scan is never a gap.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 5 * * 1' # Mondays 05:17 UTC
+
+permissions: read-all
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [actions, go, javascript-typescript, python]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Decide scope
+        id: scope
+        env:
+          LANGUAGE: ${{ matrix.language }}
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          run=true
+          if [ "$EVENT" = "pull_request" ]; then
+            case "$LANGUAGE" in
+              go) pattern='^sdk-go/' ;;
+              python) pattern='\.py$' ;;
+              actions) pattern='^\.github/(workflows|actions)/' ;;
+              *) pattern='' ;;
+            esac
+            if [ -n "$pattern" ]; then
+              if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -Eq "$pattern"; then
+                run=true
+              else
+                run=false
+              fi
+            fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "CodeQL $LANGUAGE on $EVENT: run=$run"
+
+      - name: Initialize CodeQL
+        if: steps.scope.outputs.run == 'true'
+        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      - name: Analyze
+        if: steps.scope.outputs.run == 'true'
+        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v3
+        with:
+          category: /language:${{ matrix.language }}

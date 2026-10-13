@@ -377,3 +377,9 @@ gates:
     owner: security
     property: agent cannot disable attestation verification by editing the verifier
     baseline: true
+  - id: workflow:codeql.yml
+    surface: pr-workflow
+    origin: AISDLC-840
+    owner: security
+    property: CodeQL code scanning; go, python and actions run per PR only when their paths change, weekly and main push scan all four languages
+    decision: DEC-0161

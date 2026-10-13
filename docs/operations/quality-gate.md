@@ -333,6 +333,12 @@ This is overkill for AI-SDLC's own dogfood repo (single-dev, low PR volume, fast
 
 For repos with a merge queue enabled (GHMQ, Mergify, Aviator), add `merge_group: types: [checks_requested]` back to `ai-sdlc-gate.yml`'s `on:` block — the aggregator was written to handle both events and the logic is preserved in git history (AISDLC-400 removed it for the direct-merge path). Repeat the shadow-mode comparison for `merge_group` events in that case.
 
+## CodeQL scope (AISDLC-840, DEC-0161)
+
+CodeQL runs from `.github/workflows/codeql.yml` (advanced setup), not GitHub default setup. Per pull request: `javascript-typescript` always runs; `go` runs only when `sdk-go/**` changes; `python` only when a `.py` file changes; `actions` only when `.github/workflows/**` or `.github/actions/**` changes. A weekly schedule (Mondays 05:17 UTC) and every push to `main` scan all four languages unfiltered, so a skipped PR scan is never a permanent gap. The per-language check is a step inside the job (not a workflow `paths:` filter), so each `Analyze (<language>)` check always reports.
+
+Operator action: default setup must be disabled or both setups upload duplicate alerts: `gh api -X PATCH repos/ai-sdlc-framework/ai-sdlc/code-scanning/default-setup -f state=not-configured`.
+
 ## Adopter scaffolding (sub-5)
 
 The `ai-sdlc init` interactive wizard (planned in AISDLC-140 sub-5) will scaffold this workflow into adopter repos and walk through the cutover procedure interactively. Until that ships, copy `.github/workflows/ai-sdlc-gate.yml` from this repo and adjust the job bodies (especially `Build & Test`, `Coverage`, `Integration Tests`) to match your project's commands.
