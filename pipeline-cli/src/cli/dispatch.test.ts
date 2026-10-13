@@ -12,15 +12,17 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { computePatchId } from '../attestation/patch-id.js';
 import { dispatchEnsureBoardDirs, dispatchWriteManifest } from '../index.js';
 import type { DispatchManifest } from '../index.js';
 
-import { parseArgv, runDispatchCli } from './dispatch.js';
+import { approvalEnvelopeMatches, parseArgv, runDispatchCli } from './dispatch.js';
 
 describe('parseArgv', () => {
   it('parses subcommand + key/value flag pairs', () => {
@@ -1679,5 +1681,47 @@ describe('runDispatchCli ordering commands', () => {
     expect(await run(['unblock', '--task-id', '../../x'])).toBe(2);
     expect(err.mock.calls.join('')).toContain('--priority must be an integer');
     err.mockRestore();
+  });
+});
+
+describe('push-only-check (AISDLC-849)', () => {
+  it('refuses with exit 1 and a reason when nothing approves the content', async () => {
+    const wt = mkdtempSync(path.join(tmpdir(), 'push-only-'));
+    const { exit, captured } = await captureStdout(() =>
+      runDispatchCli(['push-only-check', '--task-id', 'AISDLC-849', '--worktree', wt]),
+    );
+    expect(exit).toBe(1);
+    expect(captured.raw).toContain('"mode":"normal"');
+  });
+
+  it('accepts a missing verdict file when an approval envelope matches the content', async () => {
+    const wt = mkdtempSync(path.join(tmpdir(), 'push-only-'));
+    const sh = (a: string[]): string =>
+      execFileSync('git', a, { cwd: wt, encoding: 'utf-8' }).trim();
+    sh(['init', '-q', '-b', 'main']);
+    sh(['config', 'user.email', 't@t']);
+    sh(['config', 'user.name', 't']);
+    writeFileSync(path.join(wt, 'a.txt'), 'a\n');
+    sh(['add', 'a.txt']);
+    sh(['commit', '-q', '-m', 'base']);
+    sh(['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+    writeFileSync(path.join(wt, 'b.txt'), 'b\n');
+    sh(['add', 'b.txt']);
+    sh(['commit', '-q', '-m', 'work']);
+    const pid = computePatchId(
+      sh(['merge-base', 'origin/main', 'HEAD']),
+      sh(['rev-parse', 'HEAD']),
+      wt,
+    );
+    expect(pid).toBeTruthy();
+    expect(approvalEnvelopeMatches(wt)).toBe(false);
+    mkdirSync(path.join(wt, '.ai-sdlc', 'attestations'), { recursive: true });
+    writeFileSync(path.join(wt, '.ai-sdlc', 'attestations', `${pid}.v6.dsse.json`), '{}');
+    expect(approvalEnvelopeMatches(wt)).toBe(true);
+    const { exit, captured } = await captureStdout(() =>
+      runDispatchCli(['push-only-check', '--task-id', 'AISDLC-849', '--worktree', wt]),
+    );
+    expect(exit).toBe(0);
+    expect(captured.raw).toContain('"verdictMissing":true');
   });
 });

@@ -124,6 +124,7 @@ export { FAILED_MANIFEST_SUFFIX, requeueFailed, snapshotFailedManifest } from '.
 export type { RequeueFailedOptions, RequeueFailedResult } from './requeue.js';
 export {
   authoriseResume,
+  evaluatePushOnly,
   formatResumeFeedback,
   MAX_NOTE_CHARS,
   readResumeFeedback,
