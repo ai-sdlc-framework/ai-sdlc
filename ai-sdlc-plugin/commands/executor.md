@@ -150,8 +150,7 @@ node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" complete --board-dir "$BOARD_DIR" \
 `success` and `iterate-needed` land in `done/`, the rest in `failed/`. `--worker` must equal the claim-time name
 (a guard, not authentication). If `complete` refuses, say so; do not retry.
 
-**`iterate-needed` is the continuation path.** The verdict leaves the claim in place, so release it right after reporting (`cli-dispatch.mjs release --board-dir "$BOARD_DIR" --task-id "$TASK_ID"`); it refuses while the worktree holds unpushed commits or uncommitted tracked changes (commit and push first; `--force --reason <text>` drops work). Dispatch then continues the task with `cli-dispatch.mjs resume --task-id <id>`
-(no `--note` needed: the verdict notes become the feedback), which requeues it with no wave for the next claim. A worker holds one claim at a time.
+**`iterate-needed` is the continuation path.** The verdict leaves the claim in place, so release it right after reporting (`cli-dispatch.mjs release --board-dir "$BOARD_DIR" --task-id "$TASK_ID"`); it refuses while the worktree holds unpushed commits or uncommitted tracked changes (commit and push first; `--force --reason <text>` drops work). Dispatch then continues the task with `cli-dispatch.mjs resume --task-id <id>` (no `--note` needed: the verdict notes become the feedback), which requeues it with no wave for the next claim. A worker holds one claim at a time.
 
 ## Step 4 - Tell the dispatch session
 
