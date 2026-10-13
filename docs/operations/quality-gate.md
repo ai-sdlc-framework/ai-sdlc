@@ -9,20 +9,19 @@
 
 ## TL;DR
 
-Configure **two** required checks on your protected branch (AISDLC-388):
+Configure **one** required check on your protected branch (AISDLC-388, AISDLC-836):
 
 ```
-Backlog Drift
 ai-sdlc/pr-ready
 ```
 
-`ai-sdlc/pr-ready` is the rollup of every PR signal AI-SDLC needs (lint, build, test on Node 22, coverage, integration tests). `Backlog Drift` is a standalone CI job that catches dangling task references. The rollup runs on `pull_request` events (no merge queue required — AISDLC-400 dropped the queue in favour of direct auto-merge with squash).
+`ai-sdlc/pr-ready` is the rollup of every PR signal AI-SDLC needs (lint, build, test on Node 22, coverage, integration tests). `Backlog Drift` (dangling task references) is a `needs:` of the rollup, so it gates merges through it and is not a separately required context. The rollup runs on `pull_request` events (no merge queue required — AISDLC-400 dropped the queue in favour of direct auto-merge with squash).
 
 **`ai-sdlc/attestation` is NO LONGER a direct required check** (AISDLC-388). Attestation is a conditional contributor to `ai-sdlc/pr-ready`: code PRs require it (verify-attestation.yml runs and its `ai-sdlc/attestation` status is an informational governance signal operators must review before merging), but docs-only PRs skip it entirely — no status needs to be posted. This eliminates the workaround class where docs PRs had to have a synthetic attestation status posted (AISDLC-214 short-circuit + AISDLC-215 synthesis, now deleted).
 
 You no longer need to enumerate `CI OK`, `Post Review Results`, `codecov/patch`, `Build & Test (Node 20)`, etc. individually. `codecov/patch` was removed as a required check (AISDLC-372) — see ["Why codecov/patch is informational, not required"](#why-codecovpatch-is-informational-not-required-aisdlc-372) below. The aggregator owns the CI list, in code you control.
 
-**Operator action required** (AISDLC-388 AC-2): update branch protection on `main` to require ONLY `ai-sdlc/pr-ready` and `Backlog Drift`. Remove the `ai-sdlc/attestation` direct required check. See the [updated cutover procedure](#cutover-procedure-operator-action) below for the exact `gh api` command.
+**Operator action required** (AISDLC-388 AC-2): update branch protection on `main` to require ONLY `ai-sdlc/pr-ready`. Remove the `ai-sdlc/attestation` direct required check. See the [updated cutover procedure](#cutover-procedure-operator-action) below for the exact `gh api` command.
 
 ---
 
@@ -185,7 +184,6 @@ The gate rolls into `ai-sdlc/pr-ready` automatically (via the `coverage` job in 
 
 ```bash
 gh api -X PATCH repos/<org>/<repo>/branches/main/protection/required_status_checks \
-  -F 'contexts[]=Backlog Drift' \
   -F 'contexts[]=ai-sdlc/pr-ready' \
   -F 'contexts[]=Patch coverage gate (≥90%)' \
   -F 'strict=true'
@@ -232,13 +230,13 @@ Branch protection changes require admin scope; CI does not have admin scope. Aft
 bash scripts/apply-codecov-drop.sh
 ```
 
-This patches the required contexts to `[Backlog Drift, ai-sdlc/pr-ready, ai-sdlc/attestation]`, dropping `codecov/patch`. The script is idempotent — safe to re-run if branch protection is recreated. See [`scripts/apply-codecov-drop.sh`](../../scripts/apply-codecov-drop.sh) for the full command and dry-run mode.
+This patched the required contexts at the time, dropping `codecov/patch`; the current list is the single `ai-sdlc/pr-ready` (AISDLC-836, see `scripts/sync-dor-branch-protection.sh`). The script is idempotent — safe to re-run if branch protection is recreated. See [`scripts/apply-codecov-drop.sh`](../../scripts/apply-codecov-drop.sh) for the full command and dry-run mode.
 
 ### Required contexts after the change
 
 | Context | Required | Source |
 |---|---|---|
-| `Backlog Drift` | yes | `ci.yml` `backlog-drift` job |
+| `Backlog Drift` | **no** (a `needs:` of the rollup) | `ai-sdlc-gate.yml` `backlog-drift` job |
 | `ai-sdlc/pr-ready` | yes | `ai-sdlc-gate.yml` aggregator (alls-green) |
 | `ai-sdlc/attestation` | **no** (informational governance signal for code PRs) | `verify-attestation.yml` (conditional — skipped on docs-only PRs per AISDLC-388) |
 | `codecov/patch` | **no** (informational only) | codecov GitHub App |
@@ -259,8 +257,7 @@ After AISDLC-388 lands on main, the operator must update branch protection to re
 2. **Update the required-checks list** to remove `ai-sdlc/attestation`:
    ```bash
    gh api -X PATCH repos/<org>/<repo>/branches/main/protection/required_status_checks \
-     -F 'contexts[]=Backlog Drift' \
-     -F 'contexts[]=ai-sdlc/pr-ready' \
+        -F 'contexts[]=ai-sdlc/pr-ready' \
      -F 'strict=true'
    ```
    This is the exact command for ai-sdlc's own repo. Attestation is intentionally absent — `ai-sdlc/pr-ready` is now the sole gate.
@@ -287,14 +284,13 @@ When you're ready to cut over from the legacy individual required checks, the op
    ```
 
 2. **Update the required-checks list.** In the GitHub UI under *Settings → Branches → Edit rule for `main`*:
-   - **Add:** `ai-sdlc/pr-ready`, `Backlog Drift`
+   - **Add:** `ai-sdlc/pr-ready`
    - **Remove:** the legacy required checks. For ai-sdlc itself this set is `CI OK`, `Post Review Results`, `codecov/patch`, `Build & Test (Node 20)`, `ai-sdlc/attestation`, etc. For adopters, remove whatever individual checks `ai-sdlc/pr-ready` now subsumes.
 
    Or via `gh api`:
    ```bash
    gh api -X PATCH repos/<org>/<repo>/branches/main/protection/required_status_checks \
-     -F 'contexts[]=Backlog Drift' \
-     -F 'contexts[]=ai-sdlc/pr-ready' \
+        -F 'contexts[]=ai-sdlc/pr-ready' \
      -F 'strict=true'
    ```
 

@@ -20,7 +20,7 @@ GitHub Actions skips ALL workflows when any commit body contains `[skip ci]`, `[
 - Branches: `feat/<desc>`, `fix/<desc>`, or `ai-sdlc/issue-<n>`. Conventional commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `style:`) with `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>`.
 - **Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command.** The release-please PR (`chore: release main`) lands only via `cli-merge-if-eligible --source-kind release` on explicit operator instruction (see Releases).
 - **Never close** issues or PRs. Dismiss stale reviews only with a documented reason (truncation, API errors).
-- `auto-enable-auto-merge.yml` sets `--auto --squash` (no merge queue); `--auto` is NOT merging. PRs merge once `ai-sdlc/pr-ready` + `Backlog Drift` pass ([`docs/operations/merge-without-queue.md`](docs/operations/merge-without-queue.md)).
+- `auto-enable-auto-merge.yml` sets `--auto --squash` (no merge queue); `--auto` is NOT merging. PRs merge once `ai-sdlc/pr-ready` passes ([`docs/operations/merge-without-queue.md`](docs/operations/merge-without-queue.md)).
 
 ## Testing
 
@@ -80,7 +80,7 @@ TypeScript strict, ESM. Prettier + ESLint. No premature abstractions: three simi
 
 ## Review attestations
 
-- **Required for code PRs.** `/ai-sdlc execute` runs three reviewers and writes a DSSE envelope `.ai-sdlc/attestations/<patch-id>.v6.dsse.json`. `verify-attestation.yml` posts `ai-sdlc/attestation`, which feeds the `ai-sdlc/pr-ready` rollup; branch protection requires only `ai-sdlc/pr-ready` and `Backlog Drift`. Docs-only PRs skip it.
+- **Required for code PRs.** `/ai-sdlc execute` runs three reviewers and writes a DSSE envelope `.ai-sdlc/attestations/<patch-id>.v6.dsse.json`. `verify-attestation.yml` posts `ai-sdlc/attestation`, which feeds the `ai-sdlc/pr-ready` rollup; branch protection requires only `ai-sdlc/pr-ready`. Docs-only PRs skip it.
 - **v6 is the default schema** (RFC-0042): Merkle tree over `.ai-sdlc/transcript-leaves.jsonl` (`cli-attestation.mjs emit-leaf`). Opt out with `--schema-version v5` or `AI_SDLC_V5_LEGACY=1`.
 - **Lockstep (AISDLC-618):** `PATCH_ID_EXCLUSIONS` (`pipeline-cli/src/attestation/patch-id.ts`) has THREE copies that change together: `ATTESTATION_PATH_EXCLUSIONS` in `scripts/verify-attestation.mjs` and `PATCH_ID_EXCLUSIONS_FALLBACK` in `scripts/check-attestation-sign.sh`. Never add source, tests, configs or RFCs to `CONTENTHASH_SHARED_CHURN_FILES`.
 - A v6 envelope proves a real review ran against the exact code, not reviewer independence (AISDLC-568).

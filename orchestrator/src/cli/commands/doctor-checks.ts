@@ -627,8 +627,7 @@ export function checkAttestationGovernanceCheck(ctx: DoctorRunContext): DoctorCh
       severity: 'fail',
       title:
         'branch protection requires `ai-sdlc/attestation` directly — it is audit-only by design (AISDLC-388) and should not gate merges on its own',
-      remediation:
-        'Require `ai-sdlc/pr-ready` (+ `Backlog Drift`) instead of `ai-sdlc/attestation` directly',
+      remediation: 'Require `ai-sdlc/pr-ready` instead of `ai-sdlc/attestation` directly',
       anonymizableEvidence: evidence,
     };
   }

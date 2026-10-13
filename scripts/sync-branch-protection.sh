@@ -3,7 +3,7 @@
 # for the no-queue direct-merge model (AISDLC-400).
 #
 # What this does:
-#   - Sets required status checks on `main` to: [ai-sdlc/pr-ready, Backlog Drift]
+#   - Sets required status checks on `main` to: [ai-sdlc/pr-ready]
 #   - Enforces strict mode (branch must be up to date before merging)
 #   - Removes the "Require merge queue" setting (by not including it in the PATCH)
 #
@@ -38,7 +38,6 @@ set -euo pipefail
 BRANCH="main"
 REQUIRED_CONTEXTS=(
   "ai-sdlc/pr-ready"
-  "Backlog Drift"
 )
 STRICT=true  # require branch to be up-to-date before merging
 
