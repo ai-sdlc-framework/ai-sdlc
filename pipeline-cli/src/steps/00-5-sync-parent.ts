@@ -4,9 +4,9 @@
  * Mirrors `ai-sdlc-plugin/commands/execute.md` Step 0.5. Scans the parent
  * (orchestrator) repo's working tree for untracked files matching
  * `backlog/{tasks,completed}/<prefix>-N*.md`. For each genuinely-new file
- * (not already on `origin/main`), creates a sync worktree on a generated
- * branch, copies the files there, commits, pushes, and opens a docs-only
- * PR. DOES NOT BLOCK — logs the sync PR URL and returns so main dispatch
+ * (not already on `origin/main`), files it through the `cli-file task` path
+ * (AISDLC-860: ASCII, duplicate-id, backlog-drift and DoR checks, then a
+ * `ai-sdlc/file-<id>` branch and PR); any refusal returns a `blocked` verdict. DOES NOT BLOCK — logs the sync PR URL and returns so main dispatch
  * proceeds in parallel with the sync PR's CI + auto-merge.
  *
  * This is the backstop safety net for Pattern C: AISDLC-216 routes MCP
@@ -49,19 +49,16 @@
  * @module steps/00-5-sync-parent
  */
 
-import {
-  copyFileSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  unlinkSync,
-  existsSync,
-  readFileSync,
-} from 'node:fs';
-import { join, dirname, basename } from 'node:path';
-import { tmpdir } from 'node:os';
-import { createHash } from 'node:crypto';
+import { unlinkSync, existsSync, readFileSync } from 'node:fs';
+import { join, basename } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
+import {
+  defaultDeps as defaultFileDeps,
+  fileTask,
+  validateTaskFile,
+  type FileDeps,
+  type ValidatedTask,
+} from '../cli/file.js';
 
 // ── AISDLC-609: task-id-prefix-agnostic resolution ──────────────────────────
 //
@@ -139,6 +136,8 @@ export interface SyncParentOptions {
    * Tests inject a `FakeRunner` to script git/gh side-effects.
    */
   runner?: Runner;
+  /** Injectable cli-file dependencies (AISDLC-860). */
+  fileDeps?: FileDeps;
 }
 
 export interface SyncParentResult {
@@ -160,6 +159,9 @@ export interface SyncParentResult {
    * Populated only when path-mismatch files were detected.
    */
   pathMismatchedFiles?: string[];
+  /** AISDLC-860: set to 'blocked' when the cli-file checks refused one or more files. */
+  verdict?: 'blocked';
+  refused?: Array<{ file: string; reason: string }>;
 }
 
 /**
@@ -260,19 +262,6 @@ export async function isFileOnOriginMainInAnyDir(
   }
 
   return { onOrigin: false, exactMatch: false, canonicalPath: null };
-}
-
-/**
- * Returns a short sha-like suffix for branch names: the first 8 chars of
- * the git hash of HEAD. Falls back to a timestamp if git call fails.
- */
-async function shortSha(workDir: string, runner: Runner): Promise<string> {
-  const r = await runner('git', ['rev-parse', '--short=8', 'HEAD'], {
-    cwd: workDir,
-    allowFailure: true,
-  });
-  if (r.code === 0 && r.stdout.trim()) return r.stdout.trim();
-  return Date.now().toString(36).slice(-8);
 }
 
 /**
@@ -426,239 +415,68 @@ export async function syncParentUntrackedFiles(opts: SyncParentOptions): Promise
   }
 
   // 5. Genuinely new files — create a sync worktree, commit, push, open PR.
-  const sha = await shortSha(workDir, runner);
-  // AISDLC-858: the branch name is keyed by HEAD AND the file set (names +
-  // contents), so a resume over the same untracked files finds its own branch.
-  const setHash = createHash('sha1');
-  for (const f of [...newFiles].sort()) {
-    setHash
-      .update(f)
-      .update('\0')
-      .update(readFileSync(join(workDir, f)))
-      .update('\0');
+  // AISDLC-860: file every new task through the `cli-file task` path (ASCII, duplicate id
+  // on origin/main, backlog-drift, DoR). Validate ALL first so a refusal creates no branch or PR.
+  const fileDeps = opts.fileDeps ?? defaultFileDeps;
+  const refused: Array<{ file: string; reason: string }> = [];
+  const validated = new Map<string, ValidatedTask>();
+  for (const file of newFiles) {
+    try {
+      validated.set(file, validateTaskFile(workDir, file, fileDeps));
+    } catch (err) {
+      refused.push({ file, reason: err instanceof Error ? err.message : String(err) });
+    }
   }
-  const syncBranch = `chore/sync-tasks-${sha}-${setHash.digest('hex').slice(0, 6)}`;
-
-  // AISDLC-858: idempotent resume. Reuse an existing sync branch / PR.
-  const existingPr = await runner(
-    'gh',
-    ['pr', 'list', '--head', syncBranch, '--state', 'all', '--json', 'number,state,url'],
-    { cwd: workDir, allowFailure: true },
-  );
-  let prs: Array<{ number: number; state: string; url: string }> = [];
-  try {
-    const parsed: unknown = JSON.parse(existingPr.stdout.trim() || '[]');
-    if (Array.isArray(parsed)) prs = parsed as typeof prs;
-  } catch {
-    prs = [];
-  }
-  const openPr = prs.find((p) => p.state === 'OPEN');
-  if (openPr) {
-    console.log(`[step-0.5] reusing open sync PR #${openPr.number} (${syncBranch})`);
-    return { ok: true, syncedFiles: newFiles, prUrl: openPr.url };
-  }
-  const mergedPr = prs.find((p) => p.state === 'MERGED');
-  if (mergedPr) {
-    console.log(`[step-0.5] sync PR #${mergedPr.number} already merged (${syncBranch})`);
-    return {
-      ok: true,
-      syncedFiles: [],
-      skippedReason: `Sync PR #${mergedPr.number} for this file set already merged.`,
-    };
-  }
-  const closedPr = prs.find((p) => p.state === 'CLOSED');
-  if (closedPr) {
+  if (refused.length > 0) {
     return {
       ok: false,
-      reason: `Step 0.5: sync branch ${syncBranch} has a closed-unmerged PR #${closedPr.number} (${closedPr.url}); reopen or land it, or resolve the untracked files manually.`,
+      verdict: 'blocked',
+      refused,
+      reason:
+        `Step 0.5: blocked, ${refused.length} untracked task file(s) refused by the cli-file checks ` +
+        `(nothing was filed):\n${refused.map((r) => `  ${safeForLog(r.file)}: ${safeForLog(r.reason)}`).join('\n')}`,
       syncedFiles: [],
     };
   }
-  const localBranch = await runner('git', ['branch', '--list', syncBranch], {
-    cwd: workDir,
-    allowFailure: true,
-  });
-  const remoteBranch = await runner('git', ['ls-remote', '--heads', 'origin', syncBranch], {
-    cwd: workDir,
-    allowFailure: true,
-  });
-  if (localBranch.stdout.trim() || remoteBranch.stdout.trim()) {
-    if (localBranch.stdout.trim() && !remoteBranch.stdout.trim()) {
-      const push = await runner('git', ['push', '-u', 'origin', syncBranch], {
-        cwd: workDir,
-        allowFailure: true,
-      });
-      if (push.code !== 0) {
-        return {
-          ok: false,
-          reason: `Step 0.5: failed to push existing sync branch: ${push.stderr.trim() || push.stdout.trim()}`,
-          syncedFiles: newFiles,
-        };
+
+  const prUrls: string[] = [];
+  for (const file of newFiles) {
+    const task = validated.get(file)!;
+    const branch = `ai-sdlc/file-${task.id.toLowerCase()}`;
+    const existing = await runner(
+      'gh',
+      ['pr', 'list', '--head', branch, '--state', 'open', '--json', 'number,url'],
+      { cwd: workDir, allowFailure: true },
+    );
+    try {
+      const open: unknown = JSON.parse(existing.stdout.trim() || '[]');
+      if (Array.isArray(open) && open.length > 0) {
+        const pr = open[0] as { number: number; url: string };
+        console.log(`[step-0.5] reusing open filing PR #${pr.number} (${branch})`);
+        prUrls.push(pr.url);
+        continue;
       }
-    }
-    const created = await runner(
-      'gh',
-      [
-        'pr',
-        'create',
-        '--title',
-        `chore: sync ${newFiles.length} untracked task file${newFiles.length === 1 ? '' : 's'}`,
-        '--body',
-        `Auto-opened by Step 0.5 (AISDLC-217, resumed per AISDLC-858).\n\n## Files\n${newFiles.map((f) => `- \`${f}\``).join('\n')}`,
-        '--base',
-        'main',
-        '--head',
-        syncBranch,
-      ],
-      { cwd: workDir, allowFailure: true },
-    );
-    if (created.code !== 0) {
-      return {
-        ok: false,
-        reason: `Step 0.5: existing sync branch pushed but gh pr create failed: ${created.stderr.trim() || created.stdout.trim()}`,
-        syncedFiles: newFiles,
-      };
-    }
-    return {
-      ok: true,
-      syncedFiles: newFiles,
-      prUrl: created.stdout.trim().split('\n').pop()?.trim(),
-    };
-  }
-
-  // Reserve a unique temp path. mkdtempSync creates the directory atomically
-  // (race-safe), but `git worktree add` requires the destination to NOT exist
-  // — it creates the directory itself. Remove the empty dir immediately so the
-  // path is reserved (no other process will collide on it within the same
-  // tmpdir tick) but absent on disk when worktree add runs.
-  const syncWorktreePath = mkdtempSync(join(tmpdir(), 'ai-sdlc-sync-parent-'));
-  rmSync(syncWorktreePath, { recursive: true, force: true });
-  try {
-    // Create the worktree on origin/main
-    const addResult = await runner(
-      'git',
-      ['worktree', 'add', syncWorktreePath, '-b', syncBranch, 'origin/main'],
-      { cwd: workDir, allowFailure: true },
-    );
-    if (addResult.code !== 0) {
-      return {
-        ok: false,
-        reason: `Step 0.5: failed to create sync worktree: ${addResult.stderr.trim() || addResult.stdout.trim()}`,
-        syncedFiles: [],
-      };
-    }
-
-    // Copy each new file into the sync worktree, preserving directory structure.
-    for (const relPath of newFiles) {
-      const srcAbs = join(workDir, relPath);
-      const dstAbs = join(syncWorktreePath, relPath);
-      mkdirSync(dirname(dstAbs), { recursive: true });
-      copyFileSync(srcAbs, dstAbs);
-    }
-
-    // Stage all copied files
-    const stageResult = await runner('git', ['add', '--', ...newFiles], {
-      cwd: syncWorktreePath,
-      allowFailure: true,
-    });
-    if (stageResult.code !== 0) {
-      return {
-        ok: false,
-        reason: `Step 0.5: failed to stage files in sync worktree: ${stageResult.stderr.trim()}`,
-        syncedFiles: [],
-      };
-    }
-
-    // Commit
-    const commitMsg =
-      `chore: sync ${newFiles.length} untracked task file${newFiles.length === 1 ? '' : 's'} (AISDLC-217)\n\n` +
-      `Auto-synced by Step 0.5 (backstop for Pattern C untracked-file drift).\n\n` +
-      `Files:\n${newFiles.map((f) => `- ${f}`).join('\n')}\n\n` +
-      `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>`;
-
-    const commitResult = await runner('git', ['commit', '-m', commitMsg], {
-      cwd: syncWorktreePath,
-      allowFailure: true,
-    });
-    if (commitResult.code !== 0) {
-      return {
-        ok: false,
-        reason: `Step 0.5: failed to commit in sync worktree: ${commitResult.stderr.trim()}`,
-        syncedFiles: [],
-      };
-    }
-
-    // Push
-    const pushResult = await runner('git', ['push', '-u', 'origin', syncBranch], {
-      cwd: syncWorktreePath,
-      allowFailure: true,
-    });
-    if (pushResult.code !== 0) {
-      return {
-        ok: false,
-        reason: `Step 0.5: failed to push sync branch: ${pushResult.stderr.trim() || pushResult.stdout.trim()}`,
-        syncedFiles: newFiles,
-      };
-    }
-
-    // Open PR
-    const prTitle = `chore: sync ${newFiles.length} untracked task file${newFiles.length === 1 ? '' : 's'}`;
-    const prBody =
-      `Auto-opened by Step 0.5 — backstop for Pattern C untracked-file drift (AISDLC-217).\n\n` +
-      `## Files\n${newFiles.map((f) => `- \`${f}\``).join('\n')}\n\n` +
-      `This is a docs-only PR (\`backlog/tasks/\` and \`backlog/completed/\` are under ` +
-      `\`paths-ignore\` for attestation workflows) and will auto-merge once CI passes.\n\n` +
-      `> Source: AISDLC-216 (Pattern-C MCP routing) is the upstream fix; Step 0.5 is the ` +
-      `backstop for cases #216 misses.`;
-
-    const prResult = await runner(
-      'gh',
-      [
-        'pr',
-        'create',
-        '--title',
-        prTitle,
-        '--body',
-        prBody,
-        '--base',
-        'main',
-        '--head',
-        syncBranch,
-      ],
-      { cwd: syncWorktreePath, allowFailure: true },
-    );
-    if (prResult.code !== 0) {
-      return {
-        ok: false,
-        reason: `Step 0.5: files pushed but gh pr create failed: ${prResult.stderr.trim() || prResult.stdout.trim()}`,
-        syncedFiles: newFiles,
-      };
-    }
-
-    const prUrl = prResult.stdout.trim().split('\n').pop()?.trim();
-
-    return {
-      ok: true,
-      syncedFiles: newFiles,
-      prUrl,
-      ...(pathMismatchedFiles.length > 0 ? { pathMismatchedFiles } : {}),
-    };
-  } finally {
-    // Always clean up the temp sync worktree. Best-effort — don't throw on failure.
-    try {
-      await runner('git', ['worktree', 'remove', '--force', syncWorktreePath], {
-        cwd: workDir,
-        allowFailure: true,
-      });
     } catch {
-      // ignore
+      // fall through to filing
     }
     try {
-      rmSync(syncWorktreePath, { recursive: true, force: true });
-    } catch {
-      // ignore
+      const r = fileTask(workDir, file, { pr: true, validated: task }, fileDeps);
+      if (r.prUrl) prUrls.push(r.prUrl);
+    } catch (err) {
+      return {
+        ok: false,
+        reason: `Step 0.5: filing ${safeForLog(file)} failed: ${safeForLog(err instanceof Error ? err.message : String(err))}`,
+        syncedFiles: [],
+      };
     }
   }
+
+  return {
+    ok: true,
+    syncedFiles: newFiles,
+    prUrl: prUrls[prUrls.length - 1],
+    ...(pathMismatchedFiles.length > 0 ? { pathMismatchedFiles } : {}),
+  };
 }
 
 // ── AISDLC-446: Prune stale parent debris ─────────────────────────────────────
