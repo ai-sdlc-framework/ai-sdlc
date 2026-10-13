@@ -43,6 +43,9 @@ event source, poll-based reconciliation, and a hybrid of webhook and poll) and r
 of work that starts with deletions that need no new code. The operator's leading candidate, a
 webhook that triggers the state machine, is evaluated on equal terms with the others.
 
+The lifecycle, its watchdog dwell times and the happy and recovery sequences are drawn in
+[Lifecycle and anti-stagnation](#lifecycle-and-anti-stagnation).
+
 ## Motivation
 
 ### The problem in one picture
@@ -409,6 +412,227 @@ setup of A or B, plus nothing for correctness.
 | Operator attention | Moderate (keep it up, rotate secret) | Low-moderate | Lowest | Moderate (but optional) |
 | Deletes | Poll clock, watcher | Watcher, some workflow noise | Watcher, planner survey | Same as C plus latency floor |
 | Failure when broken | Silent gap until reconcile | Silent skip until reconcile | Slow, but visible | Slow, visible |
+
+## Lifecycle and anti-stagnation
+
+These diagrams depict the **recommended design** (Option C as the core, a fast path later, per the
+Recommendation below). They are illustrations of that recommendation, not decisions: where an Open
+Question changes the picture, the note says "per OQ-n" and the diagram shows the recommended answer
+only as a placeholder. Legend: `[today]` marks a transition that exists now (possibly driven by a
+person or a poll); `[new]` marks a transition this RFC proposes. Owners: executor, dispatch (the
+tick), SM (the proposed state machine, which runs inside dispatch per OQ-2 and OQ-8), GitHub,
+operator. Dashed-border states in the first diagram are new.
+
+### 1. State diagram: one unit of work from intake to main
+
+The diagram follows one task from filing to a landed PR with the parent checkout fast-forwarded and
+the task file in `backlog/completed/`. The side states (Conflicting, Stalled, Failed, Parked) can be
+entered from any non-terminal state; to keep the picture readable they are drawn from the state
+where they most often occur, and the anti-stagnation table below lists the entry rules. Failed means
+the board `failed/` directory; Parked means a decision is open for the operator.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> Filed : task or issue filed [today] planner
+    Filed --> DoR : filing PR landed [today] dispatch
+    DoR --> Held : verdict needs-clarification [today] dispatch
+    DoR --> Queued : verdict ready [today] dispatch
+    Held --> DoR : task edited [today] planner
+    Queued --> Claimed : executor claims, worktree made [today] executor
+    Claimed --> Developing : Step 5 dev spawned [today] executor
+    Developing --> Reviewing : dev returns [today] executor
+    Reviewing --> Developing : changes requested [today] executor
+    Reviewing --> Signed : 3 approvals, leaves emitted [today] executor
+    Signed --> DraftPR : Step 11 push [today] executor
+    DraftPR --> CIRunning : ready flip by state test [new] SM
+    CIRunning --> Green : pr-ready success [today] GitHub
+    CIRunning --> RedSkew : stale base or subject [new] SM
+    CIRunning --> RedReal : test lint coverage fail [new] SM
+    CIRunning --> RedFlake : infra or cancelled [new] SM
+    RedSkew --> Signed : rebase and re-sign follow-up [new] SM
+    RedFlake --> CIRunning : retrigger once [new] SM
+    RedReal --> Developing : fix round resume [new] SM
+    Green --> Ready : CLEAN and approved [new] SM
+    Ready --> Armed : arm via sanctioned CLI [new] SM
+    Armed --> Merged : PR closed as merged [today] GitHub
+    Merged --> Landed : parent ff and task completed [new] SM
+    Landed --> [*]
+
+    CIRunning --> Conflicting : mergeState DIRTY or BEHIND [new] SM
+    Armed --> Conflicting : mergeState DIRTY [new] SM
+    Conflicting --> Signed : rebase and re-sign [new] SM
+    Conflicting --> Developing : semantic conflict, files named [new] SM
+    Claimed --> Stalled : no heartbeat 30 min [today] dispatch
+    Developing --> Stalled : no heartbeat 30 min [today] dispatch
+    Reviewing --> Stalled : no heartbeat 30 min [today] dispatch
+    Stalled --> Queued : reap and relaunch with note [today] dispatch
+    Developing --> Failed : verdict failed [today] executor
+    Failed --> Queued : follow-up requeue, no cap [new] SM
+    RedReal --> Parked : 3 follow-ups used [new] SM
+    Conflicting --> Parked : 3 follow-ups used [new] SM
+    Failed --> Parked : second reaction failed [new] SM
+    Held --> Parked : held beyond 24 h [new] SM
+    Parked --> Queued : operator answers decision [today] operator
+
+    classDef proposed stroke-dasharray: 5 5
+    class RedSkew,RedReal,RedFlake,Ready,Armed,Landed,Conflicting,Parked proposed
+```
+
+Transition and owner reference:
+
+| Transition | Event | Owner | Today or new |
+|---|---|---|---|
+| Filed to DoR | filing PR landed, DoR check runs | dispatch | today (DoR is a CI check plus the tick) |
+| Queued to Claimed | atomic rename into `inflight/` | executor | today |
+| Reviewing to Signed | 3 verdicts approve, leaves emitted, attestation signed | executor | today |
+| Signed to DraftPR | Step 11 push and PR create | executor | today |
+| DraftPR to CIRunning | draft flipped ready by a state test (CodeQL clean, verdict approved) | SM | new (today a phrase in the PR body, AISDLC-816) |
+| CIRunning to Green or Red | `ai-sdlc/pr-ready` conclusion | GitHub | today for the check, new for the classification |
+| Red and Conflicting reactions | classifier output | SM | new (replaces planner rulings and the dormant watcher) |
+| Ready to Armed | first green on a CLEAN PR | SM | new (today `auto-enable-auto-merge.yml` skips drafts and noisy events) |
+| Merged to Landed | merged event or reconcile | SM | new (DEC-0127, AISDLC-816) |
+| Stalled to Queued | heartbeat stale 30 min | dispatch | today (AISDLC-826) |
+| Parked to Queued | decision answered | operator | today |
+
+Per OQ-2 the SM owner is a placeholder for whoever OQ-2 names; per OQ-5 `Landed` may split into
+`delivered` and `landed`; per OQ-7 the push and the draft step may move into the machine.
+
+### 2. Anti-stagnation table
+
+Every state has a maximum dwell time, a detector, an automatic reaction and an escalation if the
+reaction fails twice. Dwell numbers are proposals derived from measurements in this RFC: CI median
+13 min (code PRs green 9 to 14 min after the last push), main moves about every 18 min, tick 5 to 30
+min, heartbeat stale at 30 min. A watchdog fires at the max dwell; the reconcile pass runs at least
+every tick, so detection latency is at most one tick. Only Parked waits on a person, and it always
+carries a line in the operator digest (`cli-decisions operator-digest`).
+
+| State | Max dwell | Detector | Automatic reaction (who) | If it fails twice | 2026-10-13 failure seen here |
+|---|---|---|---|---|---|
+| Filed | 30 min | poll reconcile: filing PR landed, no board record | dispatch ingests the brief, runs DoR | Parked with digest line | filing PRs the planner cannot lease-push (memory: filing hygiene) |
+| DoR | 15 min | poll reconcile: DoR result present, task not routed | dispatch routes to Queued or Held | Parked | none seen |
+| Held | 24 h | poll reconcile: held task, no edit | dispatch sends the DoR violations to the planner, who edits the task | Parked (digest names the violations) | none seen |
+| Queued | 30 min with an idle executor | poll reconcile: eligible task, idle executor, no claim | dispatch hands the next task to the idle executor | relaunch executor, then Parked | alpha reaped and not relaunched for hours |
+| Claimed | 10 min | heartbeat: no step recorded after claim | dispatch reaps and relaunches with a note naming the step | Failed, then follow-up | AISDLC-764 Step 0.5 refused over parent debris |
+| Developing | 60 min, or heartbeat stale 30 min | heartbeat | dispatch reaps, relaunches, resumes from the last good step | Failed, follow-up | AISDLC-827 stale worktree during dev |
+| Reviewing | 45 min, or heartbeat stale 30 min | heartbeat | dispatch reaps, relaunches, resumes from existing leaves (no new reviewer round if leaves match HEAD) | Failed, follow-up | AISDLC-549 reviewer set incomplete |
+| Signed | 10 min | poll reconcile: verdict signed, branch not pushed | SM runs the push-only follow-up: rebase, build, re-sign, lease push (Step 10.5 dirty worktree fixed per AISDLC-848) | Failed, follow-up, then Parked | AISDLC-742 dirty worktree at Step 10.5; AISDLC-825 missing dist; 549 unpushed commits |
+| DraftPR | 10 min | webhook or poll reconcile: draft, verdict approved, CodeQL clean | SM flips ready by state test | Parked | four drafts 2 to 3 days old |
+| CIRunning | 30 min (about 2.3x the 13 min median) | Actions status or poll: checks pending beyond dwell | SM retriggers once, then reclassifies | Parked with the run link | auto-enable noise: 624 of 1000 runs were check_suite |
+| RedSkew | 15 min | webhook or poll: failure classified skew | SM requeues a follow-up: rebase, drop stale envelope, lease push, hook re-signs | Parked after 3 follow-ups | stale attestation subject after a rebase |
+| RedReal | 20 min to resume | webhook or poll: failure classified real | SM resumes the executor with the failing line; fix round | Parked after 3 follow-ups | no automatic path today |
+| RedFlake | 15 min | webhook or poll | SM retriggers once | reclassify as real, then fix round | cancelled and superseded checks |
+| Green | 5 min | webhook or poll: green, not ready or not armed | SM marks Ready and arms in the same pass | Parked | green drafts never flipped |
+| Ready | 5 min | poll reconcile: ready and CLEAN, not armed | SM arms via `cli-merge-if-eligible --arm` | Parked (check the grant) | auto-enable skipped some events |
+| Armed | 45 min (main moves about every 18 min, so two to three rebase windows) | poll: armed, not landed | SM checks mergeState: BEHIND or DIRTY enters Conflicting; otherwise re-arm | Parked | armed PRs stuck behind a moving base |
+| Conflicting | 20 min | webhook or poll: DIRTY or BEHIND | SM mechanical rebase and re-sign; semantic conflict returns to the executor naming the files | Parked after 3 follow-ups | AISDLC-742 branch 8 commits behind |
+| Merged | 10 min | merged event or poll | SM fast-forwards the parent, completes the task file, writes `done/` | Parked | parent debris blocking 764 |
+| Stalled | 30 min heartbeat stale (existing) | heartbeat | dispatch reaps and relaunches (AISDLC-826) | Failed, follow-up | alpha not relaunched |
+| Failed | 15 min | poll: task in `failed/` with an open PR or branch | SM follow-up requeue with no retry cap (per OQ-3) and a note naming the stalled step | Parked | 549 past the cap, no sanctioned re-entry (AISDLC-828) |
+| Parked | no timer; digest every tick | operator digest | none by design: the digest line names the decision and the next step | n/a | DEC-0166 for 764 |
+
+### 3. Sequence diagrams
+
+#### 3a. Happy path
+
+The path of one task from brief to landed, with the machine acting at each point where the executor
+used to stop (per OQ-2 and OQ-7 the exact owner of ready and arm may differ).
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Op as Operator
+    participant Pl as Planner
+    participant D as Dispatch and SM
+    participant B as Board
+    participant E as Executor
+    participant GH as GitHub
+    participant P as Parent checkout
+    Op->>Pl: ask
+    Pl->>D: brief, filing PR landed
+    D->>B: enqueue after DoR
+    E->>B: claim task
+    E->>E: Steps 0 to 10, 3 reviews, sign
+    E->>GH: Step 11 push, draft PR
+    E->>B: verdict success, state landing
+    GH-->>D: CI events or reconcile poll
+    D->>GH: ready flip when CodeQL clean (new)
+    GH-->>D: pr-ready success
+    D->>GH: arm via cli-merge-if-eligible (new)
+    GH-->>D: merged event
+    D->>P: fast-forward parent (new)
+    D->>B: complete task, write done (new)
+    D-->>Op: digest line
+```
+
+| Step | Owner | Today or new |
+|---|---|---|
+| 1 to 4 intake and claim | planner, dispatch, executor | today |
+| 5 to 7 build, review, push | executor | today |
+| 8 board state `landing` | executor writes, SM owns | new (AISDLC-816) |
+| 10 to 13 ready, arm | SM | new |
+| 14 to 16 land | SM | new (DEC-0127) |
+
+#### 3b. Recovery path: main moved, or the PR went red
+
+The loop is a follow-up, not a retry: each pass is classified from GitHub facts, runs a bounded
+mechanical or fix action, and goes back to CI. The bound is 3 follow-ups per PR, after which the PR is
+Parked and one digest line names the last classification. The bound value and its scope are per OQ-3.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Op as Operator
+    participant D as Dispatch and SM
+    participant B as Board
+    participant E as Executor
+    participant GH as GitHub
+    participant P as Parent checkout
+    GH-->>D: pr-ready failure, or main moved
+    D->>GH: read PR, checks, mergeState
+    D->>D: classify skew, real, flake, conflict
+    alt skew or main moved
+        D->>B: requeue follow-up, push only (AISDLC-847)
+        E->>B: claim follow-up
+        E->>E: Step 10.5 commits leaves first (AISDLC-848)
+        E->>GH: rebase, re-sign, lease push
+    else real failure
+        D->>B: resume with failing line
+        E->>E: fix round, re-review
+        E->>GH: push
+    else conflict
+        D->>B: resume naming conflicting files
+        E->>GH: resolve, re-sign, push
+    else flake
+        D->>GH: retrigger once
+    end
+    GH-->>D: CI result
+    alt green
+        D->>GH: ready and arm
+        GH-->>D: merged
+        D->>P: fast-forward, complete task
+    else red again, under 3 follow-ups
+        D->>D: classify again
+    else 3 follow-ups used
+        D->>Op: Parked, digest line
+    end
+    opt dirty worktree at Step 10.5
+        E->>D: verdict failed, step named (AISDLC-848)
+        D->>B: follow-up requeue, no cap
+    end
+    opt heartbeat lost
+        D->>E: reap, relaunch, resume with note
+    end
+```
+
+| Branch | Detector | Reaction | Bound | Escalation |
+|---|---|---|---|---|
+| Skew or main moved | CI red event or mergeState BEHIND | push-only follow-up (AISDLC-847) | 3 per PR | Parked with digest |
+| Real failure | pr-ready failure on current head | fix round via resume | 3 per PR | Parked |
+| Conflict | mergeState DIRTY | named files to executor | 3 per PR | Parked |
+| Flake | cancelled or infra with no newer run | one retrigger, then reclassify | 1 | reclassify as real |
+| Dirty worktree at Step 10.5 | executor verdict names the step | follow-up requeue (AISDLC-848) | counts toward 3 | Parked |
+| Heartbeat lost | stale 30 min | reap and relaunch | 2 relaunches | Failed then Parked |
 
 ## Recommendation (the RFC may recommend; it may not resolve)
 
