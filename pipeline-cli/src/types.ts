@@ -491,6 +491,11 @@ export interface BuildReviewPromptsResult {
    * caller passed an explicit `reviewers` override.
    */
   reviewerSet?: { set: 'two' | 'three'; reason: string; triggeringPaths: string[] };
+  /**
+   * The set mode that was selected (RFC-0052). `staged` means the caller drives the staged
+   * pipeline; `prompts` still hold the three-reviewer fan-out for the fail-closed fallback.
+   */
+  reviewerSetMode?: 'three' | 'code-test-merged' | 'staged';
 }
 
 // ── Step 8 — Aggregate verdicts ──────────────────────────────────────

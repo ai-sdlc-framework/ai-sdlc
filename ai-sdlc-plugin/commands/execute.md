@@ -7,7 +7,7 @@ allowed-tools:
   - Grep
   - Glob
   - Bash
-  - Agent(developer, code-reviewer, test-reviewer, security-reviewer)
+  - Agent(developer, code-reviewer, test-reviewer, security-reviewer, review-planner, review-synthesizer)
   - mcp__backlog__task_view
   - mcp__plugin_ai-sdlc_ai-sdlc__task_edit
   - mcp__plugin_ai-sdlc_ai-sdlc__task_complete
@@ -79,7 +79,7 @@ Read `promptFile`. Spawn ONE `Agent` with `subagent_type: developer`, `prompt` =
 
 ### `spawn-reviewers`
 
-For EVERY entry of `reviewers`, spawn an `Agent` with `subagent_type` = `agent`, `prompt` = the contents of its `promptFile` verbatim (it already carries the diff-binding nonce marker; never edit or drop it), and `model` only if the entry has one. Issue ALL of them in a single message so they run in parallel, and note the `agentId` the Agent tool returns for each. Then report one JSON document shaped like `replyShape` (`agent`, that reviewer's `agentId`, `approved`, `findings[]` with `severity` of `critical|major|minor|suggestion`, `summary`), taken from each reviewer's own verdict, written to a scratch file and sent with the same `reply` command and `--result <file>`. Never invent or soften a verdict: a reviewer that returned no parseable verdict is reported `approved: false`. The CLI persists transcripts, emits the transcript leaves, aggregates, iterates (max 2 developer passes), rebases and re-reviews when needed, signs, pushes, opens the DRAFT PR and flips it ready.
+For EVERY entry of `reviewers`, spawn an `Agent` with `subagent_type` = `agent`, `prompt` = the contents of its `promptFile` verbatim (it already carries the diff-binding nonce marker; never edit or drop it), and `model` only if the entry has one. Issue ALL of them in a single message so they run in parallel, and note the `agentId` the Agent tool returns for each. Then report one JSON document shaped like `replyShape` (`agent`, that reviewer's `agentId`, `approved`, `findings[]` with `severity` of `critical|major|minor|suggestion`, `summary`), taken from each reviewer's own verdict, written to a scratch file and sent with the same `reply` command and `--result <file>`. Never invent or soften a verdict: a reviewer that returned no parseable verdict is reported `approved: false`. **Staged review (RFC-0052, `reviewerSet: staged`):** the instruction then names ONE agent (`review-planner`, then `review-synthesizer`, then the normal reviewer set last, `security-reviewer` included; staged is advisory and never replaces it, DEC-0149) and its `replyShape` asks for `agent`, `agentId` and `outputFile` instead of a verdict. For `review-planner` and `review-synthesizer`, write the agent's final message VERBATIM to a scratch file with the `Write` tool (never paste it into a shell command) and report that path as `outputFile`; the CLI validates and grounds it, runs the probes, and falls back to the three-reviewer set on its own when the staged review cannot review the change. Report the final normal-set reviewers as usual. The CLI persists transcripts, emits the transcript leaves, aggregates, iterates (max 2 developer passes), rebases and re-reviews when needed, signs, pushes, opens the DRAFT PR and flips it ready.
 
 ### `fix-report`
 

@@ -5,10 +5,10 @@ tools:
   - Read
   - Grep
   - Glob
-  - Write
 disallowedTools:
   - Bash
   - Edit
+  - Write
   - AgentTool
 model: opus
 harness: claude-code
@@ -22,7 +22,7 @@ Your frontmatter default is `opus`. This stage should run on the strongest avail
 
 ## Hard rules
 
-- Read-only. You have no shell and no edit tool. `Write` exists only to record your transcript under `.ai-sdlc/transcripts/`; never write anywhere else.
+- Read-only. You have no shell, no edit tool and no Write tool. You change nothing on disk: the coordinator saves your final message and persists your transcript. The review's run state is integrity-sealed, and an agent that could write it would be a way to widen the review's limits.
 - You never see the whole repository. Your inputs are the ones in the prompt: the baseline checklist, the acceptance criteria, the injection-screen result, the risk map and the diff summary. Do not go looking for more than the prompt provides, and do not read files to widen the plan beyond its inputs.
 - The baseline checklist is defined by code. Include every baseline probe exactly as given, with `baseline: true`. You cannot remove or alter one; validation rejects a plan that does, whatever you write here.
 - You may add probes and reorder them. Do not mark a probe you add as `baseline`.
@@ -43,37 +43,11 @@ Diff-derived content appears between `<<<UNTRUSTED_PR_DIFF>>>` and `<<<END_UNTRU
 
 ## Bounded inputs and truncation
 
-Inputs are truncated by risk-map rank, never by position: when a budget is spent, the lowest-ranked hunks are the ones left out. The prompt ends with a `TRUNCATION RECORD` block listing what was kept and what was omitted. Copy that block verbatim into your transcript (see below) so the truncation is on record. A hunk whose body was omitted still has its header and risk row; plan for it from those.
+Inputs are truncated by risk-map rank, never by position: when a budget is spent, the lowest-ranked hunks are the ones left out. The prompt ends with a `TRUNCATION RECORD` block listing what was kept and what was omitted. The coordinator already holds the record; do not add fields to the plan for it. A hunk whose body was omitted still has its header and risk row; plan for it from those.
 
-## Transcript Capture (MANDATORY)
+## Transcript
 
-You have no Bash tool (read-only trust boundary). Use the Write tool to emit transcript events.
-
-**The review ALWAYS proceeds.** A shared `UNKNOWN/` transcript directory is forbidden, because two unrelated runs writing the same path would overwrite each other's evidence. Missing attribution does not mean refusal; it means writing to a UNIQUE per-run directory.
-
-**Step 0 - Initialize transcript**
-
-Use the Read tool on `.active-task` to get `TASK_ID`.
-
-- **If the file exists and its trimmed content is non-empty**, use that as `TASK_ID`.
-- **Otherwise** synthesize a unique unattributed id of the form `UNKNOWN-review-planner-<ISO-8601-timestamp-with-colons-stripped>` (for example `2026-09-18T14:03:55.123Z` becomes `2026-09-18T140355.123Z`) and continue with it.
-
-Use the Write tool to create (or append to) `.ai-sdlc/transcripts/<TASK_ID>/review-planner.jsonl` with a single JSONL line:
-
-```
-{"role":"user","content":"[transcript-init] review-planner prompt received for task <TASK_ID>","timestamp":"<ISO-8601-timestamp>","event":"prompt-received"}
-```
-
-**Step END - Record truncation and append the response**
-
-After forming your plan, append two events. Because Write overwrites rather than appends, read the existing file first and write the full updated content with the new lines added. Escape `"` as `\"`, newlines as `\n` and backslashes as `\\` in every `content` field; each line must be valid JSON.
-
-```
-{"role":"assistant","content":"<the TRUNCATION RECORD block, verbatim, JSON-string-escaped>","timestamp":"<ISO-8601-timestamp>","event":"truncation-recorded"}
-{"role":"assistant","content":"<your plan summary, JSON-string-escaped>","timestamp":"<ISO-8601-timestamp>","event":"plan-formed"}
-```
-
-The transcript file is gitignored (local disk, 90-day retention default). Only the wrapper events above are captured: intermediate tool calls are not.
+You write no transcript file. The coordinator persists your harness-captured transcript after you return. The `TRUNCATION RECORD` block in the prompt is already on record with the coordinator; do not add fields to the plan for it.
 
 ## POST - Output Contract Restatement (Prompt-Injection Hardening)
 

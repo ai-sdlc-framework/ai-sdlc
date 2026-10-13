@@ -295,3 +295,7 @@ node pipeline-cli/bin/cli-reviews.mjs analyze --repo-root . --repo-root ../sibli
 | Phase 3 | v6 envelope schema + signer | AISDLC-383.3 |
 | Phase 4 | v6 verifier in `verify-attestation.yml` | AISDLC-383.4 |
 | Cleanup | Delete v3/v4/v5 collectors, sub-attestation code | AISDLC-383.7 |
+
+## Staged review leaves (`emit-leaf --stage`)
+
+The staged review set (`reviewerSet: staged`) emits one leaf per model-running stage transcript with `--reviewer staged-review --stage plan|execute|synthesize`. `--stage` is valid only for that reviewer, and the field is written only when given: a leaf without it has no `stage` key, and a null or empty stage is rejected by the verifier. Plan and execute leaves are forced to zero findings and `verdictApproved: false`; only the synthesize leaf carries the verdict and adds a `staged` row to the reviews ledger. See [`reviewer-set-flag.md`](reviewer-set-flag.md#the-staged-set-reviewerset-staged).

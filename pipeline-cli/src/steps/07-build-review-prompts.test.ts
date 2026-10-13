@@ -265,6 +265,49 @@ describe('Step 7 — buildReviewPrompts', () => {
     }
   });
 
+  it('reviews with the three-reviewer set when the staged set is in force, since this path cannot run the pipeline', async () => {
+    const prevEnv = process.env.AI_SDLC_REVIEWER_SET;
+    process.env.AI_SDLC_REVIEWER_SET = 'staged';
+    const chunks: string[] = [];
+    const savedErr = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((c: string | Uint8Array) => {
+      chunks.push(typeof c === 'string' ? c : Buffer.from(c).toString('utf8'));
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      const fake = new FakeRunner()
+        .on(
+          /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+          ok('--- diff content ---\n'),
+        )
+        .on(
+          /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+          ok('a.ts\0b.ts\0'),
+        );
+      const r = await buildReviewPrompts({
+        taskId: 'AISDLC-1',
+        task,
+        branch: 'b',
+        worktreePath: tmp,
+        workDir: tmp,
+        runner: fake.toRunner(),
+        codexAvailable: false,
+        sourceKind: 'backlog',
+      });
+      // Never the standalone security reviewer alone: code and test review are kept.
+      expect(r.prompts.map((p) => p.reviewer)).toEqual([
+        'code-reviewer',
+        'test-reviewer',
+        'security-reviewer',
+      ]);
+      expect(chunks.join('')).toContain('driven by /ai-sdlc execute');
+    } finally {
+      process.stderr.write = savedErr;
+      if (prevEnv === undefined) delete process.env.AI_SDLC_REVIEWER_SET;
+      else process.env.AI_SDLC_REVIEWER_SET = prevEnv;
+    }
+  });
+
   // AISDLC-617 AC-4 — default reviewerSet is unchanged (three) even with an
   // unrelated config file present.
   it('still returns 3 reviewers by default when no reviewerSet flag is set', async () => {

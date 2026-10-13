@@ -476,3 +476,11 @@ describe('AISDLC-651.3: a parked developer return is not a failure', () => {
     assert.match(cmdBody, /developer-parked/);
   });
 });
+
+describe('/ai-sdlc execute: staged review agents (RFC-0052)', () => {
+  it('may spawn the planner and synthesizer and tells the model how to report them', () => {
+    assert.match(cmdContent, /Agent\([^)]*review-planner, review-synthesizer\)/);
+    assert.match(cmdBody, /`outputFile`/);
+    assert.match(cmdBody, /falls back to the three-reviewer set on its own/);
+  });
+});

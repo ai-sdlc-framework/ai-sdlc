@@ -88,7 +88,18 @@ export interface ReviewAnalysisResult {
 // {code, test} OR {correctness}, never both, so per-role stats and pair
 // overlaps degrade gracefully (0 participation) for whichever set a given
 // repo/period didn't use.
-const ALL_ROLES: ReviewLedgerRole[] = ['code', 'test', 'security', 'correctness'];
+//
+// 'staged' (the staged review set) is reported as its own role. Its one record
+// per cycle is the synthesizer leaf's verdict. It runs beside the gating reviewers
+// in the same cycle during the comparison, so the OTHER roles' stats are computed
+// as if it were absent (see `peersOf`): adding staged rows never changes another
+// role's counts.
+const ALL_ROLES: ReviewLedgerRole[] = ['code', 'test', 'security', 'correctness', 'staged'];
+
+/** The roles a role is compared with. Staged is a peer of itself's comparison only. */
+function peersOf(role: ReviewLedgerRole): ReviewLedgerRole[] {
+  return ALL_ROLES.filter((r) => r !== role && (role === 'staged' || r !== 'staged'));
+}
 
 function cycleKey(record: ReviewLedgerRecord): string {
   return `${record.taskId}::${record.commitSha}::${record.iteration}`;
@@ -157,7 +168,7 @@ export function analyzeReviewLedger(records: ReviewLedgerRecord[]): ReviewAnalys
       const ownBlocked = isBlocked(own);
       if (ownBlocked) blockedCycles++;
 
-      const otherRoles = ALL_ROLES.filter((r) => r !== role);
+      const otherRoles = peersOf(role);
       const anyOtherBlocked = otherRoles.some((r) => {
         const other = cycle[r];
         return other ? isBlocked(other) : false;

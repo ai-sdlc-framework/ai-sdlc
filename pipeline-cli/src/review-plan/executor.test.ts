@@ -174,6 +174,7 @@ function mockSpawner(
     calls,
     spawner: {
       enforcesFileScope,
+      honoursEmptyToolList: { 'claude-code': true, codex: true },
       async spawnProbe(opts) {
         calls.push(opts);
         return respond(opts);
@@ -1674,6 +1675,41 @@ describe('executePlan: file scope must be declared per harness (fail closed)', (
     // A probe with no file tools may still go to codex.
     expect(callFor(calls, 'r1').harness).toBe('codex');
     expect(calls.filter((c) => c.probeId === 's1' && c.harness === 'codex')).toEqual([]);
+  });
+
+  it('keeps a probe with no file tools on claude-code unless codex declares an empty tool list', async () => {
+    const { dir } = makeRepo();
+    for (const declared of [undefined, { 'claude-code': true, codex: false }, { codex: 1 }]) {
+      const calls: ProbeSpawnOpts[] = [];
+      const spawner = {
+        enforcesFileScope: { 'claude-code': true, codex: true },
+        ...(declared === undefined ? {} : { honoursEmptyToolList: declared }),
+        async spawnProbe(opts: ProbeSpawnOpts) {
+          calls.push(opts);
+          return okResult();
+        },
+      } as unknown as ProbeSpawner;
+      const bundle = await executePlan(
+        plan([read('r1')]),
+        spawner,
+        limits(dir, { codex: { available: true, trusted: true } }),
+        noAdded,
+      );
+      expect(callFor(calls, 'r1')).toMatchObject({ harness: 'claude-code', tools: [] });
+      expect(entryFor(bundle, 'r1').harness).toBe('claude-code');
+    }
+  });
+
+  it('sends a probe with no file tools to codex once codex declares an empty tool list', async () => {
+    const { dir } = makeRepo();
+    const { spawner, calls } = mockSpawner(() => okResult(), true);
+    await executePlan(
+      plan([read('r1')]),
+      spawner,
+      limits(dir, { codex: { available: true, trusted: true } }),
+      noAdded,
+    );
+    expect(callFor(calls, 'r1')).toMatchObject({ harness: 'codex', tools: [] });
   });
 
   it('refuses a search probe when neither harness declares scope', async () => {

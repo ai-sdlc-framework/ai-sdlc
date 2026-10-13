@@ -28,6 +28,7 @@ import { formatFeedback } from '../steps/08-aggregate-verdicts.js';
 import { ccrRefusalMessage, detectCcr, parseExecuteArg } from './args.js';
 import { runGhIssue, type GhIssueDeps, defaultGhIssueDeps } from './gh-issue.js';
 import { initTask, writeRunFile, type InitFailure, type InitSuccess } from './init.js';
+import { defaultArtifactsDir, resolveProjectRoot } from '../routing/artifacts-dir.js';
 import { prepareReview, type ReviewPrepareResult } from './review-prepare.js';
 import {
   aggregateRound,
@@ -36,6 +37,7 @@ import {
   type ReviewFinalizeResult,
   type ReviewerReport,
 } from './review-finalize.js';
+import { advanceStagedRound, STAGED_REPORT_SHAPE } from './staged-round.js';
 import { checkCancelSignal, updateSessionState } from './session.js';
 import { leasePreflightStep, preSignRebase, shipTask, type PreSignRebaseResult } from './ship.js';
 import type { LeasePreflight } from '../hierarchy/lease-preflight.js';
@@ -45,6 +47,7 @@ import type {
   Instruction,
   NextStepContext,
   NextStepState,
+  ReviewRoundState,
   SpawnDeveloperInstruction,
   SpawnReviewersInstruction,
   StopInstruction,
@@ -57,6 +60,7 @@ export interface NextStepDeps {
     ctx: NextStepContext,
     state: NextStepState,
     round: number,
+    opts?: { noStaged?: boolean },
   ) => Promise<ReviewPrepareResult>;
   finalizeReview: (
     ctx: NextStepContext,
@@ -322,10 +326,13 @@ class Machine {
 
   // ── review ────────────────────────────────────────────────────────
 
-  private async review(state: NextStepState): Promise<Instruction> {
+  private async review(
+    state: NextStepState,
+    opts: { noStaged?: boolean } = {},
+  ): Promise<Instruction> {
     const { ctx, deps } = this;
     state.reviewRound += 1;
-    const prep = await deps.prepareReview(ctx, state, state.reviewRound);
+    const prep = await deps.prepareReview(ctx, state, state.reviewRound, opts);
     if (prep.kind === 'abort') return this.fail(state, 'aborted', prep.reason);
     state.review = prep.review;
     state.classifierLine = prep.classifierLine;
@@ -334,18 +341,25 @@ class Machine {
       return this.afterVerdict(state);
     }
     await updateSessionState(ctx, state.taskIdLower, '07-reviewers-running');
+    return this.spawnReviewers(state, prep.review);
+  }
+
+  private spawnReviewers(state: NextStepState, review: ReviewRoundState): Instruction {
+    const { ctx } = this;
     const instruction: SpawnReviewersInstruction = {
       action: 'spawn-reviewers',
       taskId: state.taskId,
-      round: prep.review.round,
-      reviewers: prep.review.spawned.map((r) => ({
+      round: review.round,
+      reviewers: review.spawned.map((r) => ({
         agent: r.agent,
         promptFile: r.promptFile,
         ...(r.model ? { model: r.model } : {}),
       })),
-      replyShape: REPORT_SHAPE,
+      replyShape:
+        review.staged && review.staged.stage !== 'security' ? STAGED_REPORT_SHAPE : REPORT_SHAPE,
       reply: resumeCommand(ctx, state.taskId),
     };
+    state.review = review;
     state.phase = 'awaiting-reviewers';
     state.pending = instruction;
     this.save(state);
@@ -358,7 +372,16 @@ class Machine {
     try {
       reports = parseReviewReports(extractJson(text));
     } catch (err) {
-      return this.fixReport(state, `reviewer result is not valid JSON (${(err as Error).message})`);
+      return this.fixReport(
+        state,
+        `reviewer result is not valid JSON (${(err as Error).message})`,
+        state.review?.staged && state.review.staged.stage !== 'security'
+          ? STAGED_REPORT_SHAPE
+          : REPORT_SHAPE,
+      );
+    }
+    if (state.review?.staged && state.review.staged.stage !== 'security') {
+      return this.onStagedStage(state, reports);
     }
     const fin = await deps.finalizeReview(ctx, state, reports);
     if (!fin.ok) {
@@ -381,11 +404,37 @@ class Machine {
     return this.afterVerdict(state);
   }
 
+  /** One model call of the staged review (RFC-0052) came back. */
+  private async onStagedStage(
+    state: NextStepState,
+    reports: ReviewerReport[],
+  ): Promise<Instruction> {
+    const { ctx } = this;
+    const artifactsDir =
+      ctx.env.ARTIFACTS_DIR || defaultArtifactsDir(resolveProjectRoot(state.worktreePath));
+    const next = await advanceStagedRound(ctx, state, reports, artifactsDir);
+    if (next.kind === 'fix') return this.fixReport(state, next.reason, STAGED_REPORT_SHAPE);
+    if (next.kind === 'abort') return this.fail(state, 'aborted', next.reason);
+    delete state.reportRetries;
+    if (next.kind === 'fallback') {
+      ctx.logger.warn(
+        `staged review fell back to the three-reviewer set (${next.reason}); see cli-staged-review status`,
+      );
+      delete state.pending;
+      return this.review(state, { noStaged: true });
+    }
+    return this.spawnReviewers(state, next.review);
+  }
+
   /**
    * The report was unusable but nothing irreversible happened: ask for a corrected
    * report (twice at most) instead of burning the reviewer fan-out.
    */
-  private async fixReport(state: NextStepState, reason: string): Promise<Instruction> {
+  private async fixReport(
+    state: NextStepState,
+    reason: string,
+    replyShape: string = REPORT_SHAPE,
+  ): Promise<Instruction> {
     const retries = state.reportRetries ?? 0;
     if (retries >= MAX_REPORT_RETRIES) {
       return this.fail(state, 'aborted', `${reason} (after ${retries} corrected reports)`);
@@ -396,7 +445,7 @@ class Machine {
       taskId: state.taskId,
       round: state.review?.round ?? 0,
       reason,
-      replyShape: REPORT_SHAPE,
+      replyShape,
       reply: resumeCommand(this.ctx, state.taskId),
     };
     state.pending = instruction;

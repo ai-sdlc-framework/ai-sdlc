@@ -30,6 +30,7 @@ import { buildReviewPrompts } from '../steps/07-build-review-prompts.js';
 import type { ReviewerType, ReviewerVerdict } from '../types.js';
 import { requiredReviewerKind } from '../../attestation-core/review-scope-core.mjs';
 import { writeRunFile } from './init.js';
+import { startStagedRound } from './staged-round.js';
 import type { NextStepContext, NextStepState, ReviewRoundState, SpawnedReviewer } from './types.js';
 
 /** Names the deterministic classifier emits (RFC-0010 §12). */
@@ -289,6 +290,7 @@ export async function prepareReview(
   ctx: NextStepContext,
   state: NextStepState,
   round: number,
+  opts: { noStaged?: boolean } = {},
 ): Promise<ReviewPrepareResult> {
   const artifactsDir =
     ctx.env.ARTIFACTS_DIR || defaultArtifactsDir(resolveProjectRoot(state.worktreePath));
@@ -369,7 +371,9 @@ export async function prepareReview(
       verdicts,
     };
   }
-  if (selected.length === 0) {
+  const stagedWanted =
+    built.reviewerSetMode === 'staged' && opts.noStaged !== true && !incremental.skip;
+  if (selected.length === 0 && !stagedWanted) {
     return { kind: 'nothing-to-spawn', review: baseReview, classifierLine, verdicts: [] };
   }
 
@@ -391,27 +395,32 @@ export async function prepareReview(
         `still applies to the WHOLE PR; only the diff you read is scoped down.\n\n`;
     }
   }
+  const rebuilt = async (reviewers: ReviewerType[], names: readonly string[]) =>
+    selectForReview(
+      (
+        await buildReviewPrompts({
+          taskId: state.taskId,
+          task: state.task,
+          branch: state.branch,
+          worktreePath: state.worktreePath,
+          workDir: ctx.workDir,
+          runner: ctx.runner,
+          sourceKind: 'backlog',
+          iteration: round,
+          promptDiff,
+          recordRouting: false,
+          reviewers,
+        })
+      ).prompts,
+      names,
+      built.changedFiles,
+    );
   const prompts =
     promptDiff === undefined
       ? selected
-      : selectForReview(
-          (
-            await buildReviewPrompts({
-              taskId: state.taskId,
-              task: state.task,
-              branch: state.branch,
-              worktreePath: state.worktreePath,
-              workDir: ctx.workDir,
-              runner: ctx.runner,
-              sourceKind: 'backlog',
-              iteration: round,
-              promptDiff,
-              recordRouting: false,
-              reviewers: selected.map((p) => p.reviewer),
-            })
-          ).prompts,
+      : await rebuilt(
+          selected.map((p) => p.reviewer),
           classifier.reviewers,
-          built.changedFiles,
         );
 
   // One nonce per round, shared by every reviewer (they all review the same head).
@@ -435,32 +444,63 @@ export async function prepareReview(
   const nonceMarker = markerRun.stdout.trim();
 
   const taskClass = taskClassOf(state.task.rawBody);
-  const spawned: SpawnedReviewer[] = [];
-  for (const p of prompts) {
-    const agent = resolveReviewerAgent(p.reviewer, ctx.env);
-    const routed = resolveModel({
-      role: agent,
-      taskClass,
-      taskId: state.taskId,
-      sourceKind: 'backlog',
-      iteration: round,
-      workDir: ctx.workDir,
+  const spawnedFor = (ps: typeof prompts): SpawnedReviewer[] => {
+    const out: SpawnedReviewer[] = [];
+    for (const p of ps) {
+      const agent = resolveReviewerAgent(p.reviewer, ctx.env);
+      const routed = resolveModel({
+        role: agent,
+        taskClass,
+        taskId: state.taskId,
+        sourceKind: 'backlog',
+        iteration: round,
+        workDir: ctx.workDir,
+        artifactsDir,
+      });
+      const promptFile = writeRunFile(
+        ctx,
+        `review-r${round}-${agent}.md`,
+        `${promptPreamble}${p.prompt}\n\n` +
+          `Diff-binding token (for attestation, do not omit from your response): ${nonceMarker}\n`,
+      );
+      out.push({
+        reviewer: p.reviewer,
+        agent,
+        harness: reviewerHarness(p.reviewer, ctx.env, codex),
+        leafModel: ctx.env.AISDLC_REVIEWER_MODEL || routed.model || fallbackLeafModel(agent),
+        ...(routed.model && routed.arm !== 'default' ? { model: routed.model } : {}),
+        promptFile,
+      });
+    }
+    return out;
+  };
+
+  if (stagedWanted) {
+    // The standalone security reviewer runs beside the staged set, last (RFC-0052 OQ-1).
+    const securityPrompts = (
+      promptDiff === undefined
+        ? built.prompts
+        : await rebuilt(['security-reviewer'], ALL_CLASSIFIER_NAMES)
+    ).filter((p) => p.reviewer === 'security-reviewer');
+    const security = spawnedFor(securityPrompts)[0] ?? null;
+    // DEC-0149: staged leaves are advisory and never satisfy the reviewer-set requirement, so
+    // the classifier's normal set runs beside the staged pipeline and is what the envelope covers.
+    const beside = spawnedFor(prompts);
+    const diffFile = promptDiff !== undefined ? join(ctx.filesDir, 'pr-delta-diff.txt') : undefined;
+    const stagedReview = await startStagedRound(ctx, state, {
+      round,
       artifactsDir,
+      baseReview,
+      security,
+      beside,
+      ...(diffFile ? { diffFile } : {}),
+      nonce,
     });
-    const promptFile = writeRunFile(
-      ctx,
-      `review-r${round}-${agent}.md`,
-      `${promptPreamble}${p.prompt}\n\n` +
-        `Diff-binding token (for attestation, do not omit from your response): ${nonceMarker}\n`,
-    );
-    spawned.push({
-      reviewer: p.reviewer,
-      agent,
-      harness: reviewerHarness(p.reviewer, ctx.env, codex),
-      leafModel: ctx.env.AISDLC_REVIEWER_MODEL || routed.model || fallbackLeafModel(agent),
-      ...(routed.model && routed.arm !== 'default' ? { model: routed.model } : {}),
-      promptFile,
-    });
+    if (stagedReview) return { kind: 'spawn', review: stagedReview, classifierLine };
+    // Fell back: the existing set reviews, exactly as if staged had not been requested.
+    return prepareReview(ctx, state, round, { noStaged: true });
   }
+
+  const spawned = spawnedFor(prompts);
   return { kind: 'spawn', review: { ...baseReview, spawned, nonce }, classifierLine };
 }
