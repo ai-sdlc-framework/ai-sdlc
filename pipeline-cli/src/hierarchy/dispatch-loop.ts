@@ -42,6 +42,7 @@ import type { ClearResult } from './clear.js';
 import type { MarkReadyReport } from './mark-ready.js';
 import type { PlaybookOutcome } from './playbook.js';
 import { readRosterChecked } from './roster.js';
+import { formatStall, reapStalledClaims, type StallDeps, type StalledReport } from './stall.js';
 
 /** Filename of the loop's state under the board directory. */
 export const LOOP_STATE_FILENAME = 'operator-dispatch.state.json';
@@ -152,6 +153,8 @@ export interface TickResult {
   /** Failures the playbook could not fix; the skill messages the planner with each. */
   escalations: { taskId: string; message: string }[];
   reports: PlannerReport[];
+  /** Stalled claims reaped this tick (AISDLC-826); the planner is not asked about them. */
+  stalled?: StalledReport[];
   /** Seconds the session should sleep before the next wake-up (30, 300 or 1800). */
   nextWakeSec: number;
   wakeReason: WakeReason;
@@ -171,7 +174,8 @@ export interface TickResult {
  */
 export function computeNextWake(
   boardDir: string,
-  result: Pick<TickResult, 'ingested' | 'ingestErrors' | 'verdicts' | 'escalations' | 'reports'>,
+  result: Pick<TickResult, 'ingested' | 'ingestErrors' | 'verdicts' | 'escalations' | 'reports'> &
+    Partial<Pick<TickResult, 'stalled'>>,
   markReady?: MarkReadyReport,
 ): { nextWakeSec: number; wakeReason: WakeReason } {
   const handled =
@@ -179,6 +183,7 @@ export function computeNextWake(
     result.ingestErrors.length > 0 ||
     result.verdicts.length > 0 ||
     result.escalations.length > 0 ||
+    (result.stalled?.length ?? 0) > 0 ||
     (markReady !== undefined && markReady.readied.length > 0);
   if (handled) return { nextWakeSec: WAKE_PENDING_SEC, wakeReason: 'pending' };
   const c = peekQueue(boardDir);
@@ -205,6 +210,11 @@ export interface LoopDeps {
   markReady?: () => MarkReadyReport;
   /** Moves escalated decisions whose tier timebox lapsed up one tier; its failure never fails the tick. */
   promoteExpired?: () => PromotedDecision[];
+  /**
+   * Stall check (AISDLC-826). Absent means no check runs; `boardDir`, `now`,
+   * `clear` and `requeue` default to this tick's own.
+   */
+  stall?: Partial<Omit<StallDeps, 'boardDir' | 'now'>>;
 }
 
 function ingestBriefs(
@@ -361,12 +371,48 @@ function buildReports(deps: LoopDeps, state: LoopState, handledCount: number): P
   return reports;
 }
 
+/**
+ * Reap stalled claims. The failure record is marked handled first, so the
+ * verdict watch never clears the holder a second time.
+ */
+async function checkStalls(deps: LoopDeps, state: LoopState): Promise<StalledReport[]> {
+  const stall = deps.stall;
+  if (!stall) return [];
+  try {
+    return await reapStalledClaims(
+      {
+        ...stall,
+        boardDir: deps.boardDir,
+        now: deps.now,
+        clear: deps.operational.has('clear-executor-context')
+          ? async (o) => {
+              const r = await clearOnce(deps, {
+                taskId: o.taskId,
+                workerId: o.executor,
+              } as DispatchVerdict);
+              return { status: r.status, ...(r.reason ? { reason: r.reason } : {}) };
+            }
+          : undefined,
+        requeue: deps.operational.has('requeue') ? stall.requeue : undefined,
+      },
+      (v) => {
+        state.handled.push(`failed:${v.taskId}:${v.completedAt}`);
+        saveState(deps.boardDir, state);
+      },
+    );
+  } catch {
+    return [];
+  }
+}
+
 /** Run one wake-up of the dispatch loop. */
 export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   const state = readLoopState(deps.boardDir);
   const ingest = ingestBriefs(deps, state);
   const watch = await watchVerdicts(deps, state);
+  const stalled = await checkStalls(deps, state);
   const reports = buildReports(deps, state, watch.verdicts.length);
+  for (const s of stalled) reports.push({ kind: 'progress', text: formatStall(s) });
   saveState(deps.boardDir, state);
   const markReady =
     deps.markReady && deps.operational.has('mark-ready-after-codeql')
@@ -378,11 +424,12 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   } catch {
     /* an unreadable decision log must not stop the dispatch loop */
   }
-  const wake = computeNextWake(deps.boardDir, { ...ingest, ...watch, reports }, markReady);
+  const wake = computeNextWake(deps.boardDir, { ...ingest, ...watch, reports, stalled }, markReady);
   return {
     ...ingest,
     ...watch,
     reports,
+    ...(stalled.length > 0 ? { stalled } : {}),
     ...wake,
     ...(markReady ? { markReady } : {}),
     ...(promotions.length > 0 ? { promotions } : {}),

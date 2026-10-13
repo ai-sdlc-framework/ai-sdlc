@@ -100,6 +100,8 @@ import {
   readRosterChecked,
   rosterProject,
   runDispatchTick,
+  findOpenPrNumber,
+  stallThresholdsFromEnv,
   runPlaybook,
   SAFE_SESSION_NAME,
   systemResourceSnapshot,
@@ -668,6 +670,18 @@ export async function runHierarchyCli(
               workerId: worker,
             }),
           operational,
+          stall: {
+            ...stallThresholdsFromEnv(deps.env),
+            liveness: () =>
+              new Map(hierarchyStatus(deps).rows.map((r) => [r.entry.name, r.state] as const)),
+            requeue: (id, note) =>
+              void requeueFailed(deps.boardDir, id, {
+                ...(retryLimit === undefined ? {} : { retryLimit }),
+                note,
+                requeuedBy: worker,
+              }),
+            findPr: (id) => findOpenPrNumber(extras.ghRun ?? deps.run, repoRoot, id),
+          },
           markReady: () => markReadyAfterCodeql(extras.ghRun ?? deps.run, repoRoot),
           promoteExpired: () =>
             isDecisionCatalogEnabled()

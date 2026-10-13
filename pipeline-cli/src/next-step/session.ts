@@ -11,20 +11,52 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { readHeartbeat, TASK_ID_RE, writeHeartbeat } from '../dispatch/board.js';
 import type { NextStepContext } from './types.js';
 
 /** Relative path (under the project root) of the canonical heartbeat helper. */
 export const UPDATE_SESSION_STATE_LIB = 'lib/update-session-state.sh';
 
 /**
+ * Refresh the board claim's heartbeat (`lastHeartbeat`, `currentStep`) when
+ * `inflight/<task>.state.json` exists for the task (AISDLC-826). The pipeline
+ * writes it on every step transition, so a live executor is never silent for
+ * longer than one step and the dispatch tick can tell a stalled one apart.
+ * Best effort: a standalone run has no claim, and a failure never stops a run.
+ */
+export function refreshClaimHeartbeat(
+  ctx: NextStepContext,
+  taskIdLower: string,
+  step: string,
+): void {
+  try {
+    const taskId = taskIdLower.toUpperCase();
+    if (!TASK_ID_RE.test(taskId)) return;
+    const boardDir =
+      ctx.env.AI_SDLC_DISPATCH_BOARD_DIR || join(ctx.workDir, '.ai-sdlc', 'dispatch');
+    const held = readHeartbeat(boardDir, taskId);
+    if (!held) return;
+    writeHeartbeat(boardDir, {
+      ...held,
+      currentStep: step,
+      lastHeartbeat: ctx.now().toISOString(),
+    });
+  } catch {
+    // non-fatal by contract
+  }
+}
+
+/**
  * Write `currentStep` + `lastHeartbeat` to the session file when one exists
  * (no-op for standalone runs). Delegates to the canonical shell helper.
+ * Also refreshes the board claim heartbeat (AISDLC-826).
  */
 export async function updateSessionState(
   ctx: NextStepContext,
   taskIdLower: string,
   step: string,
 ): Promise<void> {
+  refreshClaimHeartbeat(ctx, taskIdLower, step);
   const lib = join(ctx.pluginScriptsDir, UPDATE_SESSION_STATE_LIB);
   if (!ctx.exists(lib)) return;
   if (

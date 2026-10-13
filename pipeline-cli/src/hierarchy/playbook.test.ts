@@ -119,7 +119,13 @@ describe('classifyFailure', () => {
     expect(classifyFailure(verdict({ cause: 'stale-merge-ref' }))).toEqual({
       kind: 'retrigger-ci',
     });
-    for (const cause of ['stale-heartbeat', 'spawn-rejected', 'quota-exhausted', 'transient']) {
+    for (const cause of [
+      'stale-heartbeat',
+      'stale-worker',
+      'spawn-rejected',
+      'quota-exhausted',
+      'transient',
+    ]) {
       expect(classifyFailure(verdict({ cause }))).toEqual({ kind: 'requeue', cause });
     }
   });

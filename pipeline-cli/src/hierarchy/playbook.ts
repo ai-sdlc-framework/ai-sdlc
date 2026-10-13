@@ -58,6 +58,7 @@ export const MECHANICAL_SHAPES: readonly FailureShape[] = [
 /** Cause codes of failures that can simply be run again. */
 export const REQUEUEABLE_CAUSES: readonly string[] = [
   'stale-heartbeat',
+  'stale-worker',
   'spawn-rejected',
   'quota-exhausted',
   'transient',

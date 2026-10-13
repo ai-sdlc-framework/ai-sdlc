@@ -49,6 +49,53 @@ describe('updateSessionState', () => {
   });
 });
 
+describe('claim heartbeat (AISDLC-826)', () => {
+  const inflight = (): string => join(h.root, '.ai-sdlc', 'dispatch', 'inflight');
+  const stateFile = (): string => join(inflight(), 'AISDLC-900.state.json');
+
+  it('refreshes lastHeartbeat and currentStep on every step transition', async () => {
+    mkdirSync(inflight(), { recursive: true });
+    writeFileSync(
+      stateFile(),
+      JSON.stringify({
+        taskId: 'AISDLC-900',
+        workerId: 'alpha',
+        workerKind: 'in-session-agent',
+        startedAt: '2000-01-01T00:00:00.000Z',
+        lastHeartbeat: '2000-01-01T00:00:00.000Z',
+      }),
+    );
+    await updateSessionState(h.ctx, 'aisdlc-900', '05-dev-running');
+    const hb = JSON.parse(readFileSync(stateFile(), 'utf8'));
+    expect(hb.currentStep).toBe('05-dev-running');
+    expect(hb.workerId).toBe('alpha');
+    expect(hb.startedAt).toBe('2000-01-01T00:00:00.000Z');
+    expect(hb.lastHeartbeat).toBe(h.ctx.now().toISOString());
+  });
+
+  it('writes nothing when the task holds no claim', async () => {
+    await updateSessionState(h.ctx, 'aisdlc-900', 'x');
+    expect(existsSync(stateFile())).toBe(false);
+  });
+
+  it('ignores a malformed task id', async () => {
+    await updateSessionState(h.ctx, 'not a task', 'x');
+    expect(existsSync(stateFile())).toBe(false);
+  });
+
+  it('never throws when the heartbeat cannot be written', async () => {
+    mkdirSync(inflight(), { recursive: true });
+    writeFileSync(stateFile(), '{"taskId":"AISDLC-900"}');
+    const bad = {
+      ...h.ctx,
+      now: () => {
+        throw new Error('clock');
+      },
+    };
+    await expect(updateSessionState(bad, 'aisdlc-900', 'x')).resolves.toBeUndefined();
+  });
+});
+
 describe('checkCancelSignal (AISDLC-481)', () => {
   it('returns false and touches nothing without a signal', () => {
     expect(checkCancelSignal(h.ctx, 'aisdlc-900', 'AISDLC-900')).toBe(false);

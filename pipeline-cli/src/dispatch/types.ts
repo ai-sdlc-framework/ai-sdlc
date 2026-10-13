@@ -172,6 +172,10 @@ export interface DispatchVerdict {
   workerKind?: WorkerKind;
   retryAfter?: number;
   cause?: string;
+  /** `stale-worker` reaps: the step the executor last reported (AISDLC-826). */
+  lastStep?: string;
+  /** `stale-worker` reaps: age of the last heartbeat in milliseconds (AISDLC-826). */
+  heartbeatAgeMs?: number;
   durationMs?: number;
   /**
    * RFC-0041 Phase 1.5 (AISDLC-377.2) — total iteration cycles the Worker

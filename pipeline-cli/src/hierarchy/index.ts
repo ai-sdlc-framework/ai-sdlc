@@ -259,3 +259,14 @@ export {
   shellQuote,
   splitSessionName,
 } from './validate.js';
+
+export {
+  DEFAULT_STALL_GRACE_MS,
+  DEFAULT_STALL_STALE_MS,
+  findOpenPrNumber,
+  reapStalledClaims,
+  STALE_WORKER_CAUSE,
+  stallResumeNote,
+  stallThresholdsFromEnv,
+  type StalledReport,
+} from './stall.js';
