@@ -245,6 +245,12 @@ gates:
     owner: engineering
     property: no module without a non-test importer
     baseline: true
+  - id: test-chain:pnpm lint:publishable
+    surface: test-chain
+    origin: AISDLC-846, AISDLC-97
+    owner: engineering
+    property: every non-private workspace package carries publishConfig
+    decision: DEC-0092
   - id: pre-push:scripts/check-knowledge-scope.sh
     surface: pre-push
     origin: AISDLC-773

@@ -2,7 +2,7 @@
 id: AISDLC-846
 title: >-
   wire pnpm lint:publishable into pnpm test
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:
