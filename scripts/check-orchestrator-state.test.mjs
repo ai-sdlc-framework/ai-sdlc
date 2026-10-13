@@ -373,25 +373,6 @@ describe('check-orchestrator-state.sh', () => {
     assert.equal(sh(`cat "${join(env.local, 'README.md')}"`), 'my unsaved edit');
   });
 
-  it('[AISDLC-750] repoints every worktree post-rewrite shim at the main checkout hook', () => {
-    mkdirSync(join(env.local, '.husky'), { recursive: true });
-    writeFileSync(join(env.local, '.husky', 'post-rewrite'), '#!/usr/bin/env bash\nexit 0\n');
-    sh(`git -C "${env.local}" add .husky && git -C "${env.local}" commit -q -m hook`);
-    sh(`git -C "${env.local}" push -q origin main`);
-    const wt = join(env.root, 'wt');
-    sh(`git -C "${env.local}" worktree add -q -b feat "${wt}"`);
-    mkdirSync(join(wt, '.husky', '_'), { recursive: true });
-    writeFileSync(join(wt, '.husky', '_', 'post-rewrite'), 'old shim\n');
-    const r = runScript(env.local);
-    assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /repointed post-rewrite shim/);
-    const shim = sh(`cat "${join(wt, '.husky', '_', 'post-rewrite')}"`);
-    assert.match(shim, /AISDLC-750 proxy/);
-    assert.ok(shim.includes(join(env.local, '.husky', 'post-rewrite')));
-    // Idempotent: second run logs nothing.
-    assert.doesNotMatch(runScript(env.local).stdout, /repointed/);
-  });
-
   it('[AISDLC-708] stale index under a current HEAD is reported with the path count and not reset', () => {
     advanceOrigin('adv-stale', { 'a.txt': 'a\n', 'b.txt': 'b\n' });
     // Reproduce the desync: move HEAD alone (what post-rewrite's update-ref did),

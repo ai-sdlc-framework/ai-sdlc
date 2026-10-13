@@ -12,7 +12,6 @@ dependencies: []
 references:
   - ai-sdlc-plugin/scripts/check-orchestrator-state.sh
   - ai-sdlc-plugin/scripts/check-orchestrator-state.parity.test.mjs
-  - .husky/post-rewrite
 priority: critical
 dispatchable: true
 ---

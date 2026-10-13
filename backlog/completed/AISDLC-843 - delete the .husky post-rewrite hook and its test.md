@@ -2,7 +2,7 @@
 id: AISDLC-843
 title: >-
   delete the .husky/post-rewrite hook and its test
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:
@@ -10,8 +10,6 @@ labels:
   - velocity
 dependencies: []
 references:
-  - .husky/post-rewrite
-  - scripts/post-rewrite-hook.test.mjs
   - scripts/check-orchestrator-state.sh
   - docs/operations/doctor.md
   - docs/audits/2026-10-13-cicd-five-step-audit.md

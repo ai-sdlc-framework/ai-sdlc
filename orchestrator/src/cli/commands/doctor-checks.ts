@@ -1476,43 +1476,6 @@ export function checkDispatchBoard(ctx: DoctorRunContext): DoctorCheckResult[] {
   ];
 }
 
-/** AISDLC-750: marker the post-rewrite guard fix (and the proxy shim) carries. */
-const POST_REWRITE_FIX_MARKER = 'AISDLC-750';
-
-/** Worktrees whose post-rewrite hook (tracked copy and husky shim) predates the AISDLC-750 fix. */
-function findWorktreesWithStaleRewriteHook(ctx: DoctorRunContext): string[] {
-  const root = join(ctx.projectDir, '.worktrees');
-  return ctx.adapters
-    .listDir(root)
-    .map((name) => join(root, name))
-    .filter((wt) => {
-      const copy = ctx.adapters.readFile(join(wt, '.husky', 'post-rewrite'));
-      if (copy === null) return false; // no hook in this worktree: nothing runs
-      const shim = ctx.adapters.readFile(join(wt, '.husky', '_', 'post-rewrite')) ?? '';
-      return !copy.includes(POST_REWRITE_FIX_MARKER) && !shim.includes(POST_REWRITE_FIX_MARKER);
-    });
-}
-
-/**
- * Git runs `post-rewrite` from the worktree doing the rebase, so a worktree whose copy
- * predates the AISDLC-750 fix can still move the parent's `refs/heads/main` alone.
- * `check-orchestrator-state.sh` (Step 0) repoints each worktree's generated husky shim
- * at the main checkout's hook; this reports the ones not yet repointed.
- */
-export function checkWorktreeRewriteHooks(ctx: DoctorRunContext): DoctorCheckResult[] {
-  const affected = findWorktreesWithStaleRewriteHook(ctx);
-  if (affected.length === 0) return [];
-  return [
-    {
-      id: 'worktree-rewrite-hooks',
-      severity: 'warn',
-      title: `${affected.length} worktree(s) carry a post-rewrite hook that predates the parent-guard fix: ${affected.map((wt) => basename(wt)).join(', ')}`,
-      remediation: `bash ${join(ctx.projectDir, 'scripts', 'check-orchestrator-state.sh')} (repoints every worktree's .husky/_/post-rewrite at the main checkout's hook)`,
-      anonymizableEvidence: { affectedCount: affected.length },
-    },
-  ];
-}
-
 // ── Parent checkout state (AISDLC-708) ──────────────────────────────────
 
 /** Tracked paths whose index or working-tree content differs from HEAD, unique and sorted. */
@@ -2086,12 +2049,6 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     description:
       'Orchestrator parent checkout on main whose index or working tree differs from HEAD, with the path count (AISDLC-708).',
     run: checkParentCheckoutState,
-  },
-  {
-    id: 'worktree-rewrite-hooks',
-    description:
-      'Worktrees whose post-rewrite hook predates the parent-on-main guard fix and can desync the parent checkout (AISDLC-750).',
-    run: checkWorktreeRewriteHooks,
   },
   {
     id: 'untracked-review-ledgers',
