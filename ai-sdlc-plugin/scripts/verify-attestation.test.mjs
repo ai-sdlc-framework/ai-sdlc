@@ -221,8 +221,22 @@ function runSign(cwd, args, extraEnv = {}) {
   });
 }
 
+// AISDLC-862: run a COPY of the verifier from a temp dir so the script-relative
+// node_modules walk-up cannot reach ambient installs in the real checkout or its
+// parent directories (hermetic: only what each test lays out is resolvable).
+let isolatedVerifyPath;
+function isolatedVerify() {
+  if (!isolatedVerifyPath) {
+    const dir = mkdtempSync(join(tmpdir(), 'ai-sdlc-verify-isolated-'));
+    isolatedVerifyPath = join(dir, 'scripts', 'verify-attestation.mjs');
+    mkdirSync(dirname(isolatedVerifyPath), { recursive: true });
+    writeFileSync(isolatedVerifyPath, readFileSync(verifyHelperPath));
+  }
+  return isolatedVerifyPath;
+}
+
 function runVerify(cwd, args, extraEnv = {}) {
-  return spawnSync(process.execPath, [verifyHelperPath, ...args], {
+  return spawnSync(process.execPath, [isolatedVerify(), ...args], {
     cwd,
     env: cleanEnv(extraEnv),
     encoding: 'utf-8',
