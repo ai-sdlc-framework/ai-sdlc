@@ -56,8 +56,8 @@ The alert step creates its labels (`ci`, `main-red`) with `gh label create --for
 | Workflow | Trigger | Scope | Purpose |
 |---|---|---|---|
 | `ai-sdlc-gate.yml` | PR events (push/sync/ready) | Per-PR, affected packages | **Pre-merge gate** — blocks merge until green |
-| `ci.yml` | PR + push to main | Per-PR: affected pkgs; push: full | General CI (build, test, lint, coverage) |
-| `main-health-monitor.yml` | Push to main + daily 06:00 UTC | **Always full suite** | **Post-merge skew detector** — alerts when merge combination breaks main |
+| `ci.yml` | Nightly schedule + merge_group (no push, AISDLC-842) | Nightly first-run smoke | Scheduled smoke only |
+| `main-health-monitor.yml` | Push to main + daily 06:00 UTC | **Always full suite** | **Single main-push suite** — build, tests, lint, format, schema validation, coverage, first-run smoke, workflow tests, gate scripts (incl. backlog drift), Python and Go SDK tests; alerts when a merge combination breaks main |
 
 Key distinction: `main-health-monitor.yml` always runs the full test suite (`pnpm -r test`), not affected-package filtered. This is intentional — merge-skew failures are cross-package by definition; affected-package CI would miss them.
 
@@ -164,3 +164,10 @@ The alert job checks for existing open `[main-health] main is RED` issues before
 - `.github/workflows/main-health-monitor.yml` — the workflow
 - `docs/operations/merge-without-queue.md` — full merge flow + rollback
 - `docs/operations/quality-gate.md` — `ai-sdlc/pr-ready` per-PR gate
+
+
+---
+
+## Single main-push suite (AISDLC-842)
+
+`ci.yml` and `scorecard.yml` no longer trigger on push to main (`ci.yml` keeps its nightly schedule, `scorecard.yml` its weekly one). `main-health-monitor.yml` carries every check `ci.yml` ran on push: lint, format check, schema validation, full coverage, the first-run smoke, backlog drift, and the Python and Go SDK suites (run unfiltered), on top of the full `pnpm -r test` run. The integration tests are the `@ai-sdlc/reference` package, already inside `pnpm -r test`.

@@ -11,9 +11,8 @@ name: Main Health Monitor
 # cleanup PR that blocked 5 other PRs from merging while main was red).
 #
 # This is NOT a PR gate — it fires only on push to main (post-merge). It is
-# explicitly decoupled from `ai-sdlc/pr-ready` (per-PR gate) and `ci.yml`
-# (push-to-main also fires ci.yml, but ci.yml runs affected-package filtering
-# on PR events; this workflow always runs the full suite).
+# explicitly decoupled from `ai-sdlc/pr-ready` (per-PR gate). AISDLC-842: this
+# is the single main-push suite; ci.yml and scorecard.yml no longer run on push.
 #
 # See docs/operations/main-health-monitor.md for the full operator runbook.
 
@@ -78,6 +77,34 @@ jobs:
         continue-on-error: true
         run: pnpm -r test
 
+      # AISDLC-842: ci.yml no longer runs on push to main, so this workflow is the
+      # single main-push suite. These steps carry the remaining checks ci.yml ran
+      # on push: lint, format, schema validation, full coverage, first-run smoke.
+      - name: Lint
+        id: lint
+        continue-on-error: true
+        run: pnpm lint
+
+      - name: Format check
+        id: format
+        continue-on-error: true
+        run: pnpm format:check
+
+      - name: Validate schemas
+        id: schemas
+        continue-on-error: true
+        run: pnpm validate-schemas
+
+      - name: Coverage (full)
+        id: coverage
+        continue-on-error: true
+        run: pnpm test:coverage
+
+      - name: First-run smoke
+        id: smoke
+        continue-on-error: true
+        run: node scripts/first-run-smoke.mjs
+
       # AC-1: Also run the workflow-test suite under .github/workflows/__tests__/.
       # These tests validate workflow YAML structure and are separate from per-package
       # unit tests — they're included here so a broken workflow file (e.g. a merge
@@ -102,14 +129,16 @@ jobs:
         run: |
           full="${{ steps.full-test.outcome }}"
           workflow="${{ steps.workflow-test.outcome }}"
+          extra="lint=${{ steps.lint.outcome }} format=${{ steps.format.outcome }} schemas=${{ steps.schemas.outcome }} coverage=${{ steps.coverage.outcome }} smoke=${{ steps.smoke.outcome }}"
           echo "full-test outcome: $full"
           echo "workflow-test outcome: $workflow"
-          if [[ "$full" == "success" && "$workflow" == "success" ]]; then
+          echo "other outcomes: $extra"
+          if [[ "$full" == "success" && "$workflow" == "success" && "$extra" != *failure* && "$extra" != *cancelled* ]]; then
             echo "status=success" >> "$GITHUB_OUTPUT"
             echo "[main-health] all suites PASS"
           else
             echo "status=failure" >> "$GITHUB_OUTPUT"
-            echo "[main-health] FAIL — full-test=$full workflow-test=$workflow"
+            echo "[main-health] FAIL — full-test=$full workflow-test=$workflow $extra"
           fi
 
       # Exit non-zero when any suite failed so this job itself is marked red.
@@ -217,10 +246,46 @@ jobs:
             exit 1
           fi
 
+  # AISDLC-842: SDK suites ci.yml ran on push (unfiltered here: a push has no
+  # reliable path diff for a post-merge health check).
+  test-python:
+    name: Test Python SDK (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    defaults:
+      run:
+        working-directory: sdk-python
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e '.[dev]'
+      - run: ruff check src/
+      - run: mypy src/
+      - run: pytest
+
+  test-go:
+    name: Test Go SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.24'
+      - name: Test sdk-go
+        working-directory: sdk-go
+        run: go test ./... -v -count=1
+      - name: Test sdk-go/operator
+        working-directory: sdk-go/operator
+        run: go test ./... -v -count=1
+
   # AC-2: On failure, create a GitHub issue to page the operator.
   alert:
     name: File Red-Main Issue
-    needs: [health-check, gate-scripts]
+    needs: [health-check, gate-scripts, test-python, test-go]
     # Only fire when the health check failed. `if: failure()` matches when ANY
     # upstream job in `needs` has result=failure. This includes the case where
     # the health-check job itself exits non-zero on the "Fail on test failure"

@@ -2,7 +2,7 @@
 id: AISDLC-842
 title: >-
   main-push cluster: ci.yml push leg folds into main-health-monitor.yml and scorecard.yml runs weekly only
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:

@@ -37,7 +37,7 @@ Only rules that change behaviour in every session live here (re-read every turn;
 ## CI behavior
 
 - One CI run per PR (AISDLC-727): only `ai-sdlc-gate.yml` runs CI on `pull_request`; open PRs are rebased only on conflict.
-- Merge gate is the single rollup `ai-sdlc/pr-ready` (`ai-sdlc-gate.yml`); see [`docs/operations/quality-gate.md`](docs/operations/quality-gate.md). Main health monitor files `[main-health] main is RED` issues ([`docs/operations/main-health-monitor.md`](docs/operations/main-health-monitor.md)).
+- Merge gate is the single rollup `ai-sdlc/pr-ready` (`ai-sdlc-gate.yml`): [`docs/operations/quality-gate.md`](docs/operations/quality-gate.md). `main-health-monitor.yml` = single main-push suite ([`docs/operations/main-health-monitor.md`](docs/operations/main-health-monitor.md)).
 - Workflows MUST call pipeline-cli via `node pipeline-cli/bin/cli-XXX.mjs`, never `pnpm --filter @ai-sdlc/pipeline-cli exec cli-XXX` (workspace own-bins do not resolve; AISDLC-156).
 - **Dark-code gate (AISDLC-552):** `pnpm dark-code:check` (in `pnpm test`) fails on a module with no non-test importer and on non-test source using a test double. `.ai-sdlc/dark-code-baseline.json` only shrinks; never silence a finding with a token import.
 

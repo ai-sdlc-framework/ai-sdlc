@@ -55,7 +55,7 @@ describe('main-health-monitor gate-scripts job (AISDLC-797)', () => {
 
   it('feeds the [main-health] alert job', () => {
     const alert = job('alert');
-    assert.match(SRC, /needs: \[health-check, gate-scripts\]/);
+    assert.match(SRC, /needs: \[health-check, gate-scripts, test-python, test-go\]/);
     assert.match(alert, /if: failure\(\)/);
     assert.match(alert, /contents: read/);
     assert.match(alert, /issues: write/);

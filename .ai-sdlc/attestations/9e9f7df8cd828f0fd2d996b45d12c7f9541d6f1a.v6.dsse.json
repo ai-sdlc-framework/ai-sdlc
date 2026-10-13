@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "0842f5383159479aee6f9a627c48bc81f5864376"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "05c6b1bb035fc5dda76ade4497bf7a48da52760e14c9a193c0fbe640696b4dc0",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "b5e1b311f54948eba7b0b43a778c629e63d7650ecbff34fb0fd42fe9f1de835e",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "b5e1b311f54948eba7b0b43a778c629e63d7650ecbff34fb0fd42fe9f1de835e",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": ["f351d2177fa4a1da87dc6946765bb99bfb3355deabced636c3bc6a66c72dc70d"]
+    },
+    {
+      "leafIndex": 1,
+      "proof": ["f85940b39b1ef41bb54eecc3d95f65c1ea97f9426996ed3059438da1c3a0fa73"]
+    }
+  ],
+  "rootHash": "45edfc8905515b055c276930be364d6835733cd8b8ec4c9e5fd9b6246df90c37",
+  "rootSignature": "p86KYfgk6qxo4XsfB9m+UXY2dQrG06xpY0jsjF7+d7b1t1m+4rJmHbd0ZnOJNREjE8gNrewJt8ZlhEHh4xwhBA==",
+  "nonce": "73212a4e9b46c7914931e0951ade14c32040ce5e5f5bf8c2564e50ef13b7b037",
+  "leafCount": 2,
+  "signedAt": "2026-10-13T06:05:11.026Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      ".github/workflows/__tests__/main-health-gate-scripts.test.mjs",
+      ".github/workflows/__tests__/single-pr-ci-run.test.mjs",
+      ".github/workflows/ci.yml",
+      ".github/workflows/main-health-monitor.yml",
+      ".github/workflows/scorecard.yml",
+      "CLAUDE.md"
+    ],
+    "appliedReviewers": ["code-reviewer-codex", "security-reviewer"]
+  }
+}
