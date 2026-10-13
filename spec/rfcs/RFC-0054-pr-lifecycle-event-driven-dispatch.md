@@ -43,6 +43,8 @@ event source, poll-based reconciliation, and a hybrid of webhook and poll) and r
 of work that starts with deletions that need no new code. The operator's leading candidate, a
 webhook that triggers the state machine, is evaluated on equal terms with the others.
 
+Every automation proposed here follows the [Automation ladder](#automation-ladder-normative): deterministic first, structural second, a cheap decision model (JEV) only where structure cannot decide, and strong models only to plan and synthesize what a cheaper model executes.
+
 The lifecycle, its watchdog dwell times and the happy and recovery sequences are drawn in
 [Lifecycle and anti-stagnation](#lifecycle-and-anti-stagnation).
 
@@ -634,6 +636,129 @@ sequenceDiagram
 | Dirty worktree at Step 10.5 | executor verdict names the step | follow-up requeue (AISDLC-848) | counts toward 3 | Parked |
 | Heartbeat lost | stale 30 min | reap and relaunch | 2 relaunches | Failed then Parked |
 
+## Automation ladder (normative)
+
+This section records an operator rule (2026-10-13) as a design principle of this RFC. It is a
+principle for how every automation proposed here and in later phases is built; it is not the
+resolution of any Open Question.
+
+> Apply deterministic automations first, structural automations second. If and only if an LLM
+> automation is needed, consider a cheap decision model (JEV) first. If more context or a fallback
+> for JEV is needed, use a Haiku model with a tightly scoped prompt fed with the data from the
+> structural automation. If a strong thinking model is needed, use it only to PLAN what a cheaper
+> model can execute, execute with the cheaper model, then SYNTHESIZE the result with the strong
+> model, the same way the staged review is planned (`review-planner`, then `review-executor` on
+> Haiku, then `review-synthesizer`). Keep prose automations to a minimum, with tightly scoped
+> parameters.
+
+**JEV.** The repository defines Jev as the first provider of the System One Judgment Layer: a
+cheap closed-set classifier behind typed questions, pinned to an exact model version (for example
+`jev-1.13.0`), shadow-first (`spec/rfcs/RFC-0049-system-one-judgment-layer.md`,
+`docs/operations/judgment-layer.md`). RFC-0052 states its limit: "Jev cannot write a finding or
+follow a call chain" (`spec/rfcs/RFC-0052-staged-review-pipeline.md`). Rung 2 below is therefore
+the judgment layer; whether any other provider may fill rung 2 is OQ-12.
+
+**The plan/execute/synthesize pattern** is the one RFC-0052 specifies and the plugin implements:
+`ai-sdlc-plugin/agents/review-planner.md` turns a ranked risk map into a probe plan (read, grep,
+glob and write only, no shell, no edit); `ai-sdlc-plugin/agents/review-executor.md` runs one
+read-only probe and returns evidence as a fixed JSON shape (read, grep, glob only; Haiku per the
+CLAUDE.md model pins); `ai-sdlc-plugin/agents/review-synthesizer.md` produces the verdict from
+that evidence, every finding citing evidence. The strong model never touches the code directly and
+the cheap model never decides the verdict.
+
+### The five rungs
+
+0. **Deterministic.** Code, git and gh state, file and path tests, exit codes. No model.
+   Inputs: the repository, the git object store, a single `gh` read. Outputs: a boolean or an
+   enum from code. Cost class: free, microseconds to seconds. Move up when: the decision needs a
+   value no field, path, count or exit code carries.
+1. **Structural.** A schema or state-machine decision over structured data already fetched (board
+   JSON, PR JSON, check-run conclusions, `mergeStateStatus`, dwell timers, heartbeat ages). Still
+   no model. Inputs: typed records. Outputs: a state-machine transition or a typed reaction.
+   Cost class: free. Move up when: the answer depends on meaning the structure does not carry
+   (for example whether a red check is a real failure) after the structured fields are exhausted.
+2. **Cheap decision model (JEV).** Bounded classification over structured fields with a fixed
+   label set, asked as a typed question. Inputs: rung-1 fields, never raw logs. Outputs: one label
+   from the closed set plus a confidence, validated by schema. Cost class: fractions of a cent per
+   question, shadow-first. Move up when: the labels are not enough because the case needs text
+   the structured fields lack, or JEV is unavailable or below its confidence floor.
+3. **Haiku, tightly scoped.** Only when rung 2 lacks context or as its fallback. The prompt is a
+   template whose parameters are the rung-1 structured data; the output has a fixed schema; no
+   free prose in or out. Cost class: cents per call, bounded by input size. Move up when: the task
+   is generation or multi-step reasoning (writing a fix, resolving a semantic conflict), not
+   extraction or labelling.
+4. **Strong model, plan/execute/synthesize only.** The strong model writes the plan, a cheaper
+   model executes each step, the strong model synthesizes the result. Never a strong model
+   executing directly. Cost class: dollars per run, justified only by a real failure or a
+   semantic conflict that rungs 0 to 3 provably could not decide.
+
+**The rule.** A rung is used only when the rung below provably cannot decide. "Provably" means the
+design names the case the lower rung fails on, and the lower rung's output for that case is
+logged. Every prose automation (any step where a model reads or writes free text) must declare its
+rung, its input schema, its output schema and its parameter bounds (maximum input size, maximum
+calls per state dwell, maximum retries); an automation without that declaration is not admitted.
+
+### Reclassification of the anti-stagnation reactions
+
+Every reaction in the anti-stagnation table above, by the lowest rung that can decide it. Where
+the rung is 0 the "why not lower" column explains why no model is needed.
+
+| State | Reaction | Rung | Why not a lower rung |
+|---|---|---|---|
+| Filed | dispatch ingests the brief, runs DoR | 0 | Nothing lower exists; the ingest is a file read and DoR Stage A is deterministic (Stage B keeps its existing rung under RFC-0011) |
+| DoR | route to Queued or Held | 1 | The DoR result is a typed verdict; routing is a table lookup, not a file or exit-code test |
+| Held | send DoR violations to the planner, who edits the task | 1 | The violation list is typed; editing the task is a planner decision outside the machine |
+| Queued | hand the next task to an idle executor | 1 | Eligibility, idle state and claim are board fields, a record rather than a single test |
+| Claimed | reap and relaunch with a note naming the step | 1 | Heartbeat age and last recorded step are fields; the note is a typed requeue reason |
+| Developing | reap, relaunch, resume from the last good step | 1 | Same fields; the resume point is a recorded step id |
+| Reviewing | reap, relaunch, resume from existing leaves | 0 | Leaf-to-HEAD match is a hash comparison |
+| Signed | rebase, build, re-sign, lease push | 0 | Exit-code driven commands; the pre-push hook already re-signs |
+| DraftPR | flip ready by state test | 0 | Draft flag, verdict file and CodeQL conclusion are read directly |
+| CIRunning | retrigger once, then reclassify | 1 | Pending age against the dwell is a timer, the retrigger count a counter on the record |
+| Red (skew, real, flake) | classify the failure | 2 | Check names and changed paths decide most cases at rung 1 (a known-name table: stale attestation, cancelled, superseded). The residue (a check name not in the table, a diff touching both a failing test and unrelated paths) needs a closed-set judgment, which is JEV's job |
+| RedSkew | requeue follow-up: rebase, drop stale envelope, lease push | 0 | Fixed command sequence once classified |
+| RedFlake | retrigger once | 0 | One gh call once classified |
+| RedReal | name the failing line and a fix hint from the log | 3 | Needs text from the log that no structured field holds; Haiku with check name, log tail and diff paths as parameters, output `{line, file, hint}` |
+| RedReal | the fix round itself | 4 | Writing code is generation; an executor developer round, planned, executed and synthesized (below) |
+| Green | mark Ready and arm | 0 | Check conclusions and `mergeStateStatus` are read directly |
+| Ready | arm via `cli-merge-if-eligible --arm` | 0 | The CLI derives eligibility from GitHub |
+| Armed | check mergeState; BEHIND or DIRTY enters Conflicting, else re-arm | 1 | A transition table over `mergeStateStatus` |
+| Conflicting | mechanical rebase and re-sign | 0 | git exit codes; the mechanical class is pattern-based |
+| Conflicting | semantic conflict, return to the executor naming the files | 4 | A semantic resolution is generation; the file list is rung 0, the resolution is a developer round |
+| Merged | fast-forward the parent, complete the task file, write `done/` | 0 | Commands and file moves |
+| Stalled | reap and relaunch | 1 | Heartbeat age against a threshold |
+| Failed | follow-up requeue with a note naming the stalled step | 1 | A failed record with an open PR or branch; the note is the typed reason |
+| Parked | digest line naming the decision and the next step | 1 | The line is rendered from a template over the typed park reason; no model writes it |
+
+Counts over the 24 reactions above: rung 0 = 10, rung 1 = 10, rung 2 = 1, rung 3 = 1, rung 4 = 2.
+Twenty of the 24 need no model at all.
+
+**Rung 4 for the real-failure fix round and semantic conflict resolution.** Both run as an
+executor developer round structured as plan, execute, synthesize: the strong model reads the
+failure facts (the rung-3 output, changed paths, the task's acceptance criteria) and writes a plan
+of bounded steps; a cheaper model executes each step in the worktree; the strong model
+synthesizes whether the acceptance criteria and the failing check now hold, and the result still
+goes through the existing reviewer fan-out and attestation. The strong model does not edit code.
+Whether the current developer role (Sonnet) is the "cheaper model" here, or the pattern needs a
+new planner, executor, synthesizer trio for development, is OQ-14.
+
+### Minimising prose automations
+
+The prose automations the RFC and the current hierarchy rely on, and the rung-0/1 mechanism that
+replaces each. This follows the delete-first list above: prose is removed before it is optimised.
+
+| Prose automation today | Replaced by (rung) |
+|---|---|
+| Dispatch playbook prose (instructions in `ai-sdlc-plugin/commands/operator-dispatch.md` and `pipeline-cli/src/hierarchy/playbook.ts` that a model reads each tick to decide the next action) | The state machine's transition table, run by the tick; the model is not asked what to do for any state with a row (rung 1) |
+| Resume notes in prose (a free-text note attached to a requeue) | A typed requeue reason with a closed `kind` set: `{kind: stalled-step, red-real, conflict, skew; step; pr; headSha}`; the executor reads fields, not a paragraph (rung 1) |
+| PR comments as instructions (a comment an agent reads as a command) | Typed resume signals with a fixed field set written to the board record; comments stay for humans and are never parsed as instructions (rung 1) |
+| Planner rulings in chat for operational questions | A decision record in the catalog for class (a) and (b) rulings (existing `cli-decisions` rubric), and a state-machine row for the recurring ones so the same question is never asked twice (rung 1) |
+| An agent reading a whole CI log to say what failed | Rung 2 for the label, rung 3 for the line, with the log tail bounded and the parameters declared (rung 3) |
+| Operator digest lines written by hand | A template over the typed park reason (rung 1) |
+
+What remains as prose after this pass is generation (code, task bodies, review findings) and the
+operator's own decisions. Each remaining use declares its rung under the rule above.
+
 ## Recommendation (the RFC may recommend; it may not resolve)
 
 Build in this order, which keeps the operator's webhook instinct as the destination and puts the
@@ -817,6 +942,21 @@ rubric (class (a), (b) or (c) per the Decision authority rules).
     - (a) Out of scope: reported to the planner, not owned.
     - (b) Owned by the same machine with a no-task action set (arm only).
     - (c) Owned by a separate small machine.
+
+12. **What does "JEV" mean for the ladder's rung 2?**
+    - (a) Exactly the RFC-0049 judgment layer with Jev as the provider.
+    - (b) Any provider behind the RFC-0049 typed-question interface, selected by config.
+    - (c) A separate cheap classifier outside the judgment layer.
+13. **Where is the ladder enforced?**
+    - (a) A lint over agent and command frontmatter requiring a declared rung, input schema, output schema and bounds.
+    - (b) A reviewer-gate check on PRs that add a prose automation.
+    - (c) Convention only, recorded in this RFC and CLAUDE.md.
+    - (d) The dark-code style static scan extended to flag undeclared model calls.
+14. **Is there a development trio for rung 4, and what is the budget per rung?**
+    - (a) Reuse the current developer role as the cheap executor, with a new planner and synthesizer step around it.
+    - (b) A new planner, executor, synthesizer trio for development, parallel to the review trio.
+    - (c) Keep the executor developer round as is; apply the ladder to everything else.
+    - Budget: (i) a per-state-dwell call cap per rung, (ii) a per-PR token budget where rung-4 spend needs a logged rung-3 failure, (iii) report only, no cap, in v1.
 
 ## References
 
