@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.6.0...sdk-go-v0.6.1) (2026-10-13)
+
+
+### Bug Fixes
+
+* **sdk-go:** sync agent-role schema mirror and add drift gate (AISDLC-604) ([#1402](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1402)) ([a51c402](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a51c402a16e67d675fb7266706247775f1bf19d9))
+
 ## [0.6.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.5.0...sdk-go-v0.6.0) (2026-10-09)
 
 

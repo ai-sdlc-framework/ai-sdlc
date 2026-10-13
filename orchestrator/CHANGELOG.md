@@ -5,6 +5,40 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.32.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.31.0...orchestrator-v0.32.0) (2026-10-13)
+
+
+### Features
+
+* enforce dispatch board invariants in code (AISDLC-800) ([#1391](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1391)) ([fd6e13f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fd6e13fbbab93670f6b861150db6bbf5e329f63d))
+* fold Codex ingester into cli-usage ingest and harden it (AISDLC-650.1) ([#1378](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1378)) ([8f6760b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8f6760b0ddbef93606829796b4e9c7799cc78d45))
+* guarantee and verify the hierarchy launch env for executors (AISDLC-791) ([#1330](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1330)) ([4e6e7c6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4e6e7c663b364b329e3ee4de41c73e8628e33fdb))
+* init detects branch-protection availability, client-side merge-gate fallback (AISDLC-748) ([#1281](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1281)) ([23b0a30](https://github.com/ai-sdlc-framework/ai-sdlc/commit/23b0a30691c19fe0006c83fc15bc55325241aabc))
+* land opencode harness adapter, adapter-only (AISDLC-792) ([#1341](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1341)) ([bde0812](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bde081225a2f7d79f1d75c2c071582003d44b959))
+* lease-push preflight names the failing hook condition before Step 10.5 (AISDLC-798) ([#1436](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1436)) ([4e0aa4f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4e0aa4fd0dc9e51dcaa6707b248077ff3a39bc21))
+* report capability outcomes from every registered seam and the judgment runtime (AISDLC-643) ([#1315](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1315)) ([843883b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/843883b16ca972e83d42b625b329338a721255d6))
+* ship verifying approve job in adopter verify-attestation template (AISDLC-748.1) ([#1354](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1354)) ([eda705d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/eda705d9ba4b91a2606a710b946709ebb2d038d7))
+* usage audit CLI and idle-sessions doctor check (AISDLC-765) ([#1363](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1363)) ([270ce03](https://github.com/ai-sdlc-framework/ai-sdlc/commit/270ce03829e2c304b5f234a0f0abbf29d292569b))
+
+
+### Bug Fixes
+
+* ban shell-captured tool JSON in workflows and run gate scripts on main (AISDLC-797) ([#1388](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1388)) ([124f683](https://github.com/ai-sdlc-framework/ai-sdlc/commit/124f683ebc221ddf2e5f728eeb4568a9004a8de8))
+* **ci:** split fix-ci into an unprivileged agent job and a privileged push job (AISDLC-704.5) ([#1269](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1269)) ([9f98876](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9f98876ca4b249c54bc9b4651255be6ae4a7bcbb))
+* correct seed prices, price cache-write tokens, release-date effectiveFrom (AISDLC-648.1) ([#1374](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1374)) ([b57ee54](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b57ee54a4a8c4fbc868285901afe84ec3e06a9fb))
+* gitignore parent runtime state so Step 0.5 stops refusing fresh executes (AISDLC-811) ([#1439](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1439)) ([37c5fbd](https://github.com/ai-sdlc-framework/ai-sdlc/commit/37c5fbd353810883f10567ba76bbd68eb9ee7bfd))
+* harden kind lookups and add routing-table follow-up tests (AISDLC-699) ([#1387](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1387)) ([4e3a0ca](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4e3a0caceec8f01a6e0033ee60763248fc48af56))
+* retire stale .claude hook copy, realpath containment, throttle stale-base check (AISDLC-569) ([#1362](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1362)) ([447e32e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/447e32e04c488702de104e0237ed550cf2c5bf8f))
+* route review ledger writes to the task worktree (AISDLC-793) ([#1331](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1331)) ([cc22e6b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cc22e6b8028cc771303feb9b354c393fe50934ca))
+* surface rejected provider option reason in evaluate records and doctor (AISDLC-633.3) ([#1406](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1406)) ([f68464d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f68464ddc37d077ba4d4f8a4ca600907631a58e2))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.32.0
+
 ## [0.31.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.30.0...orchestrator-v0.31.0) (2026-10-10)
 
 
