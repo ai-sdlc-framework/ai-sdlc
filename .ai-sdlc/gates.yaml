@@ -1,0 +1,391 @@
+# Gate registry (AISDLC-805). Shrink-only ratchet, same shape as .ai-sdlc/dark-code-baseline.json.
+#
+# Every gate the repository enforces appears here: workflows that fire on pull request
+# events, jobs in the ai-sdlc/pr-ready rollup, pre-push and pre-commit scripts, entries
+# chained in the root `pnpm test` script, and agent-role.yaml blockedActions/blockedPaths.
+# scripts/check-gate-registry.test.mjs derives that set from the repository and fails when a
+# gate is not listed here or an entry lacks origin or owner.
+#
+# Removing an entry is free (delete the gate first). ADDING an entry requires a decision id:
+# set `decision: DEC-NNNN` on the new entry instead of `baseline: true`. Entries marked
+# baseline were present when the registry landed. An origin of "unknown" is allowed and is
+# itself an audit finding (docs/operations/gate-audit-2026-10.md).
+gates:
+  - id: workflow:ai-sdlc-gate.yml
+    surface: pr-workflow
+    origin: AISDLC-727 (DEC-0056); rollup pattern AISDLC-388
+    owner: engineering
+    property: single per-PR CI run producing the ai-sdlc/pr-ready rollup
+    baseline: true
+  - id: gate-job:detect
+    surface: pr-ready-job
+    origin: AISDLC-727, AISDLC-712.1
+    owner: engineering
+    property: affected-package and docs-only change classification feeding the other jobs
+    baseline: true
+  - id: gate-job:lint
+    surface: pr-ready-job
+    origin: AISDLC-140
+    owner: engineering
+    property: eslint, prettier and clock-discipline on every PR
+    baseline: true
+  - id: gate-job:build-test
+    surface: pr-ready-job
+    origin: AISDLC-727
+    owner: engineering
+    property: build and test of affected packages on Node 22
+    baseline: true
+  - id: gate-job:coverage
+    surface: pr-ready-job
+    origin: AISDLC-726, AISDLC-372, AISDLC-376
+    owner: engineering
+    property: package line-coverage floors and 90 percent patch coverage
+    baseline: true
+  - id: gate-job:integration
+    surface: pr-ready-job
+    origin: AISDLC-727, AISDLC-400
+    owner: engineering
+    property: integration suite across packages
+    baseline: true
+  - id: gate-job:backlog-drift
+    surface: pr-ready-job
+    origin: AISDLC-796; required context since AISDLC-125
+    owner: engineering
+    property: every backlog task reference resolves
+    baseline: true
+  - id: gate-job:first-run-smoke
+    surface: pr-ready-job
+    origin: AISDLC-771
+    owner: engineering
+    property: fresh-repo install, init, doctor and one task
+    baseline: true
+  - id: gate-job:test-python
+    surface: pr-ready-job
+    origin: unknown (SDK matrix; no task id in the job)
+    owner: engineering
+    property: Python SDK tests on 3.11 to 3.13
+    baseline: true
+  - id: gate-job:test-go
+    surface: pr-ready-job
+    origin: AISDLC-215, AISDLC-388
+    owner: engineering
+    property: Go SDK tests
+    baseline: true
+  - id: gate-job:attestation-gate
+    surface: pr-ready-job
+    origin: AISDLC-388 (attestation feeds the rollup, not branch protection)
+    owner: security
+    property: code PRs carry a valid DSSE review attestation
+    baseline: true
+  - id: gate-job:dependency-review-gate
+    surface: pr-ready-job
+    origin: AISDLC-712.1
+    owner: security
+    property: dependency and action changes reviewed for known-vulnerable or unpinned additions
+    baseline: true
+  - id: gate-job:dor-readiness-gate
+    surface: pr-ready-job
+    origin: AISDLC-588, AISDLC-591, RFC-0046
+    owner: engineering
+    property: task files changed by the PR pass the Definition of Ready
+    baseline: true
+  - id: gate-job:independence-policy-gate
+    surface: pr-ready-job
+    origin: AISDLC-591
+    owner: security
+    property: reviewer independence policy holds for the PR
+    baseline: true
+  - id: gate-job:pr-ready
+    surface: pr-ready-job
+    origin: AISDLC-388, AISDLC-712.1
+    owner: engineering
+    property: the single required rollup over every job above
+    baseline: true
+  - id: workflow:ai-sdlc-review.yml
+    surface: pr-workflow
+    origin: AISDLC-381, AISDLC-141, AISDLC-142, AISDLC-147
+    owner: security
+    property: CI-side reviewers run when no local attestation exists; posts Post Review Results
+    baseline: true
+  - id: workflow:auto-enable-auto-merge.yml
+    surface: pr-workflow
+    origin: AISDLC-381, AISDLC-400
+    owner: engineering
+    property: arms auto-merge (squash) on same-repo PRs; not a quality gate
+    baseline: true
+  - id: workflow:auto-rearm-on-dequeue.yml
+    surface: pr-workflow
+    origin: AISDLC-369, AISDLC-381, AISDLC-400
+    owner: engineering
+    property: keeps auto-merge armed after a dequeue; safety net, not a quality gate
+    baseline: true
+  - id: workflow:dor-ingress.yml
+    surface: pr-workflow
+    origin: RFC-0011 section 5.2, AISDLC-161, AISDLC-379
+    owner: engineering
+    property: fails Evaluate backlog tasks changed by PR on unresolved Definition-of-Ready violations
+    baseline: true
+  - id: workflow:isolated-review.yml
+    surface: pr-workflow
+    origin: RFC-0047 Phase 4, AISDLC-596
+    owner: security
+    property: isolated reviewer run (opt-in, skipped on almost every PR)
+    baseline: true
+  - id: workflow:require-issue-link.yml
+    surface: pr-workflow
+    origin: AISDLC-443, AISDLC-700
+    owner: engineering
+    property: external PRs link an issue; posts ai-sdlc/issue-link
+    baseline: true
+  - id: workflow:rfc-lifecycle-check.yml
+    surface: pr-workflow
+    origin: AISDLC-350, AISDLC-417
+    owner: engineering
+    property: RFC lifecycle promotions follow the allowed ladder
+    baseline: true
+  - id: workflow:untrusted-pr-gate.yml
+    surface: pr-workflow
+    origin: RFC-0043 Phase 5, AISDLC-501, AISDLC-704.6, AISDLC-740
+    owner: security
+    property: untrusted contributors cannot change governance config or trust-chain paths
+    baseline: true
+  - id: workflow:verify-attestation.yml
+    surface: pr-workflow
+    origin: AISDLC-214, AISDLC-381, AISDLC-388, AISDLC-704.6
+    owner: security
+    property: verifies the DSSE review attestation envelope and posts ai-sdlc/attestation
+    baseline: true
+  - id: pre-push:scripts/check-substrate-contract.mjs
+    surface: pre-push
+    origin: AISDLC-453, RFC-0028 section 4
+    owner: engineering
+    property: substrate type-registry contract integrity
+    baseline: true
+  - id: pre-push:scripts/check-skip-ci-marker.sh
+    surface: pre-push
+    origin: AISDLC-88, AISDLC-727
+    owner: engineering
+    property: no CI-skip magic tokens in pushed commit messages
+    baseline: true
+  - id: pre-push:scripts/check-dark-code-on-push.sh
+    surface: pre-push
+    origin: AISDLC-687, AISDLC-552
+    owner: engineering
+    property: no newly unwired module or test double in production code
+    baseline: true
+  - id: pre-push:scripts/squash-attestation-chores.sh
+    surface: pre-push
+    origin: AISDLC-369
+    owner: engineering
+    property: stacked sign-attestation chore commits collapse to one
+    baseline: true
+  - id: pre-push:scripts/check-changelog-edit.sh
+    surface: pre-push
+    origin: AISDLC-401
+    owner: engineering
+    property: warns when a feature branch edits CHANGELOG.md
+    baseline: true
+  - id: pre-push:scripts/check-followups-on-push.sh
+    surface: pre-push
+    origin: unknown (follow-up gate; origin not recorded in the script header)
+    owner: engineering
+    property: completed task files track, decline or say none for every follow-up
+    baseline: true
+  - id: pre-push:scripts/pre-push-fixups.sh
+    surface: pre-push
+    origin: AISDLC-386
+    owner: engineering
+    property: orders task-move then attestation-sign in one pass
+    baseline: true
+  - id: pre-push:scripts/check-task-moved.sh
+    surface: pre-push
+    origin: AISDLC-220, AISDLC-402
+    owner: engineering
+    property: task file moves to backlog/completed in the PR diff
+    baseline: true
+  - id: pre-push:scripts/check-attestation-sign.sh
+    surface: pre-push
+    origin: AISDLC-133, AISDLC-214, AISDLC-618
+    owner: security
+    property: auto-signs and re-verifies the DSSE attestation before push
+    baseline: true
+  - id: pre-commit:scripts/check-backlog-ascii.sh
+    surface: pre-commit
+    origin: AISDLC-92, AISDLC-727
+    owner: engineering
+    property: backlog filenames are ASCII
+    baseline: true
+  - id: pre-commit:lint-staged
+    surface: pre-commit
+    origin: unknown (husky bootstrap)
+    owner: engineering
+    property: prettier and eslint on staged files
+    baseline: true
+  - id: pre-commit:scripts/typecheck-workspace.mjs
+    surface: pre-commit
+    origin: unknown (typecheck gate; test is test:typecheck-workspace-gate)
+    owner: engineering
+    property: whole-workspace TypeScript typecheck before commit
+    baseline: true
+  - id: test-chain:pnpm -r test
+    surface: test-chain
+    origin: project baseline
+    owner: engineering
+    property: every package test suite
+    baseline: true
+  - id: test-chain:pnpm test:gates
+    surface: test-chain
+    origin: AISDLC-805
+    owner: engineering
+    property: glob runner over gate tests (scripts, workflow tests, plugin tests)
+    baseline: true
+  - id: test-chain:pnpm docs:check
+    surface: test-chain
+    origin: unknown (docs sync check)
+    owner: engineering
+    property: generated docs match their sources
+    baseline: true
+  - id: test-chain:pnpm rfc:check
+    surface: test-chain
+    origin: AISDLC-165, check-rfc-docs
+    owner: engineering
+    property: RFC frontmatter and docs-drift linter
+    baseline: true
+  - id: test-chain:pnpm dark-code:check
+    surface: test-chain
+    origin: AISDLC-552
+    owner: engineering
+    property: no module without a non-test importer
+    baseline: true
+  - id: pre-push:scripts/check-knowledge-scope.sh
+    surface: pre-push
+    origin: AISDLC-773
+    owner: engineering
+    property: protected knowledge stays out of the tracked root
+    baseline: true
+  - id: pre-push:scripts/check-pr-body-protected.sh
+    surface: pre-push
+    origin: AISDLC-773
+    owner: engineering
+    property: protected knowledge stays out of the PR body
+    baseline: true
+  - id: test-chain:pnpm knowledge:check
+    surface: test-chain
+    origin: AISDLC-773
+    owner: engineering
+    property: protected knowledge stays out of the tracked root
+    baseline: true
+  - id: test-chain:pnpm sync:plugin-runtime-deps:check
+    surface: test-chain
+    origin: unknown (plugin runtime deps sync)
+    owner: engineering
+    property: plugin runtime dependency list matches the workspace
+    baseline: true
+  - id: role-action:gh pr merge*
+    surface: role-action
+    origin: AISDLC-602, AISDLC-703, AISDLC-753
+    owner: operator
+    property: no raw merge command; merges go through cli-merge-if-eligible
+    baseline: true
+  - id: role-action:git merge*
+    surface: role-action
+    origin: 'project baseline (Git Flow: rebase, never merge)'
+    owner: operator
+    property: no merge commits on feature branches
+    baseline: true
+  - id: role-action:git push --force*
+    surface: role-action
+    origin: AISDLC-663, AISDLC-710
+    owner: operator
+    property: no unleased force-push
+    baseline: true
+  - id: role-action:git push -f*
+    surface: role-action
+    origin: AISDLC-663, AISDLC-710
+    owner: operator
+    property: no unleased force-push (short flag)
+    baseline: true
+  - id: role-action:gh pr close*
+    surface: role-action
+    origin: project baseline (never close PRs)
+    owner: operator
+    property: agents never close PRs
+    baseline: true
+  - id: role-action:gh issue close*
+    surface: role-action
+    origin: project baseline (never close issues)
+    owner: operator
+    property: agents never close issues
+    baseline: true
+  - id: role-action:git branch -D*
+    surface: role-action
+    origin: project baseline (never delete branches)
+    owner: operator
+    property: agents never delete branches
+    baseline: true
+  - id: role-action:git branch -d*
+    surface: role-action
+    origin: project baseline (never delete branches)
+    owner: operator
+    property: agents never delete branches
+    baseline: true
+  - id: role-action:git reset --hard*
+    surface: role-action
+    origin: AISDLC-450, AISDLC-358
+    owner: operator
+    property: no destructive reset outside check-orchestrator-state.sh
+    baseline: true
+  - id: role-action:git checkout -- .
+    surface: role-action
+    origin: project baseline (no destructive git)
+    owner: operator
+    property: no discarding of working-tree changes
+    baseline: true
+  - id: role-action:git restore .
+    surface: role-action
+    origin: project baseline (no destructive git)
+    owner: operator
+    property: no discarding of working-tree changes
+    baseline: true
+  - id: role-path:opencode.json
+    surface: role-path
+    origin: AISDLC-660
+    owner: security
+    property: agent cannot rewrite its own OpenCode governance config
+    baseline: true
+  - id: role-path:opencode.jsonc
+    surface: role-path
+    origin: AISDLC-660
+    owner: security
+    property: agent cannot rewrite its own OpenCode governance config
+    baseline: true
+  - id: role-path:.opencode/**
+    surface: role-path
+    origin: AISDLC-660
+    owner: security
+    property: agent cannot rewrite its own OpenCode governance plugin
+    baseline: true
+  - id: role-path:**/opencode.json
+    surface: role-path
+    origin: AISDLC-660
+    owner: security
+    property: agent cannot rewrite nested OpenCode governance config
+    baseline: true
+  - id: role-path:**/opencode.jsonc
+    surface: role-path
+    origin: AISDLC-660
+    owner: security
+    property: agent cannot rewrite nested OpenCode governance config
+    baseline: true
+  - id: role-path:**/.opencode/**
+    surface: role-path
+    origin: AISDLC-660
+    owner: security
+    property: agent cannot rewrite nested OpenCode governance plugin
+    baseline: true
+  - id: role-path:scripts/verify-attestation.mjs
+    surface: role-path
+    origin: AISDLC-383.7
+    owner: security
+    property: agent cannot disable attestation verification by editing the verifier
+    baseline: true

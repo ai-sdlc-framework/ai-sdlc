@@ -177,6 +177,8 @@ function runCodexExec(promptText, cwd, timeoutMs, extraArgs = [], agentType = 'd
       settle(() => resolve(stdout));
     });
 
+    // The child may exit without reading stdin; that surfaces via 'close', not as an unhandled EPIPE.
+    child.stdin?.on('error', () => {});
     try {
       child.stdin?.end(promptText);
     } catch (err) {
