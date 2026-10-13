@@ -48,6 +48,23 @@ describe('checkDispatchSender', () => {
     expect(checkDispatchSender(renamed, { ref: 'proj-a-operator-dispatch' }).ok).toBe(true);
   });
 
+  it('accepts a uds socket ref whose pid is the dispatch pid, refuses others and malformed refs', () => {
+    expect(checkDispatchSender(rosterA, { ref: 'uds:/tmp/cc-socks/700.sock' })).toEqual({
+      ok: true,
+      name: 'proj-a-operator-dispatch',
+    });
+    for (const ref of [
+      'uds:/tmp/cc-socks/800.sock',
+      'uds:/tmp/cc-socks/701.sock',
+      'uds:/tmp/cc-socks/abc.sock',
+      'uds:/tmp/cc-socks/700.sock.x',
+      'uds:/tmp/cc-socks/1.sock',
+      'uds:',
+    ]) {
+      expect(checkDispatchSender(rosterA, { ref })).toEqual({ ok: false, reason: NOT_MY_DISPATCH });
+    }
+  });
+
   it('refuses the foreign dispatch session even though it has the same role', () => {
     const refused = checkDispatchSender(rosterA, foreignDispatch);
     expect(refused).toEqual({ ok: false, reason: NOT_MY_DISPATCH });
