@@ -77,7 +77,7 @@ function loadYaml(path) {
 // causes alls-green to fail the aggregate.
 //
 // Archetype-conditional jobs in our workflow (must be in allowed-skips):
-//   - build-test, coverage, integration: skip on docs-only PRs
+//   - build-test, integration: skip on docs-only PRs
 //   - attestation-gate: skips on docs-only PRs (paths-ignore in verify-attestation.yml)
 //   - dependency-review-gate: skips on non-dep PRs (detect.outputs.deps == false)
 //   - dor-readiness-gate: skips on PRs that touch no backlog/tasks/*.md file (AISDLC-712.1)
@@ -89,7 +89,6 @@ function loadYaml(path) {
 // This oracle matches the workflow's actual `allowed-skips:` list.
 const ALLOWED_SKIPS = new Set([
   'build-test',
-  'coverage',
   'integration',
   'attestation-gate',
   'independence-policy-gate',
@@ -163,7 +162,6 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       'detect',
       'lint',
       'build-test',
-      'coverage',
       'integration',
       // AISDLC-727: jobs moved from ci.yml so the gate is the only PR workflow.
       'backlog-drift',
@@ -207,7 +205,6 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       'detect',
       'lint',
       'build-test',
-      'coverage',
       'integration',
       'backlog-drift',
       'first-run-smoke',
@@ -244,7 +241,6 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     const allowedSkips = String(allsGreenStep.with?.['allowed-skips'] ?? '');
     for (const job of [
       'build-test',
-      'coverage',
       'integration',
       'attestation-gate',
       'independence-policy-gate',
@@ -358,7 +354,6 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       detect: { result: 'success' },
       lint: { result: 'success' },
       'build-test': { result: 'skipped' },
-      coverage: { result: 'skipped' },
       integration: { result: 'skipped' },
       'attestation-gate': { result: 'skipped' },
       'independence-policy-gate': { result: 'skipped' },
@@ -420,13 +415,26 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     );
   });
 
+  it('AISDLC-844: no coverage job; build-test runs coverage once, then the 90 percent patch gate', () => {
+    assert.equal(workflow.jobs.coverage, undefined);
+    const steps = workflow.jobs['build-test'].steps;
+    const runs = steps.map((s) => String(s.run ?? ''));
+    assert.equal(runs.filter((r) => r.trim() === 'pnpm test').length, 0);
+    const cov = runs.findIndex((r) => r.trim() === 'pnpm test:coverage');
+    assert.ok(cov >= 0, 'build-test must run pnpm test:coverage');
+    const gate = runs.findIndex((r) => r.includes('check-pr-patch-coverage.mjs'));
+    assert.ok(gate > cov, 'patch gate must run after coverage');
+    assert.match(runs[gate], /--threshold 90/);
+    assert.ok(workflow.jobs['pr-ready'].needs.includes('build-test'));
+  });
+
   it('AC #3 (docs-only): only Detect Changes + Lint & Format are required when docs_only=true', () => {
-    // The build-test, coverage, integration jobs must each carry an
+    // The build-test, integration jobs must each carry an
     // `if:` that short-circuits when detect.outputs.docs_only == 'true'.
     // Skipped jobs are treated as "passed" by alls-green (per the
     // load-bearing detail in /tmp/research-prior-art.md), so docs-only
     // PRs naturally pass the aggregator.
-    for (const jobId of ['build-test', 'coverage', 'integration']) {
+    for (const jobId of ['build-test', 'integration']) {
       const job = workflow.jobs[jobId];
       assert.ok(job.if, `${jobId} must have an if: gating expression`);
       assert.match(
@@ -510,7 +518,7 @@ describe('ai-sdlc-gate.yml — aggregator decision logic (AC #4, #5)', () => {
   // /tmp/research-prior-art.md flags as load-bearing: skipped MUST count
   // as pass, otherwise archetype-conditional gates deadlock.
 
-  it('AC #5: docs-only PR (build-test/coverage/integration skipped) → pr-ready PASSES', () => {
+  it('AC #5: docs-only PR (build-test/integration skipped) → pr-ready PASSES', () => {
     // The docs-only archetype: detect ran (success), lint ran (success),
     // the three code-gated jobs were skipped because `if:` evaluated
     // false. These jobs are in ALLOWED_SKIPS so alls-green allows skip.
@@ -518,7 +526,6 @@ describe('ai-sdlc-gate.yml — aggregator decision logic (AC #4, #5)', () => {
       detect: { result: 'success' },
       lint: { result: 'success' },
       'build-test': { result: 'skipped' },
-      coverage: { result: 'skipped' },
       integration: { result: 'skipped' },
       'attestation-gate': { result: 'skipped' },
       'independence-policy-gate': { result: 'skipped' },
@@ -543,7 +550,6 @@ describe('ai-sdlc-gate.yml — aggregator decision logic (AC #4, #5)', () => {
       detect: { result: 'success' },
       lint: { result: 'success' },
       'build-test': { result: 'success' },
-      coverage: { result: 'success' },
       integration: { result: 'success' },
       'attestation-gate': { result: 'success' },
       'independence-policy-gate': { result: 'failure' },
@@ -558,7 +564,6 @@ describe('ai-sdlc-gate.yml — aggregator decision logic (AC #4, #5)', () => {
       detect: { result: 'success' },
       lint: { result: 'success' },
       'build-test': { result: 'success' },
-      coverage: { result: 'success' },
       integration: { result: 'success' },
       'attestation-gate': { result: 'success' },
       'independence-policy-gate': { result: 'success' },
@@ -576,7 +581,6 @@ describe('ai-sdlc-gate.yml — aggregator decision logic (AC #4, #5)', () => {
       detect: { result: 'success' },
       lint: { result: 'success' },
       'build-test': { result: 'success' },
-      coverage: { result: 'success' },
       integration: { result: 'success' },
       'attestation-gate': { result: 'success' },
       'dependency-review-gate': { result: 'skipped' },
@@ -594,7 +598,6 @@ describe('ai-sdlc-gate.yml — aggregator decision logic (AC #4, #5)', () => {
       detect: { result: 'success' },
       lint: { result: 'success' },
       'build-test': { result: 'success' },
-      coverage: { result: 'success' },
       integration: { result: 'success' },
     };
     assert.equal(allsGreenDecision(needs).passed, true);
@@ -605,7 +608,6 @@ describe('ai-sdlc-gate.yml — aggregator decision logic (AC #4, #5)', () => {
       detect: { result: 'success' },
       lint: { result: 'success' },
       'build-test': { result: 'failure' },
-      coverage: { result: 'success' },
       integration: { result: 'success' },
     };
     const decision = allsGreenDecision(needs);
@@ -621,7 +623,6 @@ describe('ai-sdlc-gate.yml — aggregator decision logic (AC #4, #5)', () => {
       detect: { result: 'success' },
       lint: { result: 'cancelled' },
       'build-test': { result: 'success' },
-      coverage: { result: 'success' },
       integration: { result: 'success' },
     };
     const decision = allsGreenDecision(needs);
@@ -636,7 +637,6 @@ describe('ai-sdlc-gate.yml — aggregator decision logic (AC #4, #5)', () => {
       detect: { result: 'success' },
       lint: { result: 'success' },
       'build-test': { result: 'success' },
-      coverage: { result: 'success' },
       integration: { result: 'skipped' }, // fork PR
     };
     assert.equal(allsGreenDecision(needs).passed, true);
@@ -651,7 +651,6 @@ describe('ai-sdlc-gate.yml — aggregator decision logic (AC #4, #5)', () => {
       detect: { result: 'skipped' },
       lint: { result: 'skipped' },
       'build-test': { result: 'skipped' },
-      coverage: { result: 'skipped' },
       integration: { result: 'skipped' },
     };
     const decision = allsGreenDecision(needs);
