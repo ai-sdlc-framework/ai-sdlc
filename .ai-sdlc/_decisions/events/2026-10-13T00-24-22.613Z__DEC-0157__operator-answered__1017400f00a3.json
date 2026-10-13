@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-13T00:24:22.613Z","decisionId":"DEC-0157","chosenOptionId":"rereview","rationale":"Operational: the envelope must carry all three classifier reviewers; rereview is the standard non-weakening path (no skip vars, no hand-review exception).","by":"ai-sdlc-operator-dispatch"}
