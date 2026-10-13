@@ -1,7 +1,6 @@
 ---
 id: AISDLC-828
-title: >-
-  Delete the five-step regex DoR gate; the DEC-0090 rule stays as rubric text
+title: Delete the five-step regex DoR gate; the DEC-0090 rule stays as rubric text
 status: Done
 assignee: []
 created_date: '2026-10-13'
@@ -10,10 +9,17 @@ labels:
   - velocity
 dependencies: []
 references:
-  - pipeline-cli/src/dor/gates/five-step-review.ts
   - .github/workflows/dor-ingress.yml
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-13'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/src/dor/gates/five-step-review.ts
+    resolution: flagged
+drift_checked: '2026-10-13'
 ---
 
 ## Description
