@@ -666,6 +666,13 @@ describe('AISDLC-704: every $VAR in a run: block of the changed workflows is dec
         for (const m of step.run.matchAll(/\bread\s+(?:-\w+\s+)*([A-Za-z_][A-Za-z0-9_]*)/g)) {
           declared.add(m[1]);
         }
+        // Names a prior step exported through $GITHUB_ENV count for the job.
+        for (const { jobId: j, step: prior } of allSteps(wf)) {
+          if (j !== jobId || typeof prior.run !== 'string') continue;
+          for (const m of prior.run.matchAll(/echo "([A-Z][A-Z0-9_]*)=[^"]*" >> "?\$GITHUB_ENV/g)) {
+            declared.add(m[1]);
+          }
+        }
         // Job-level / workflow-level env also count.
         for (const k of Object.keys(wf.env ?? {})) declared.add(k);
         for (const k of Object.keys(wf.jobs[jobId].env ?? {})) declared.add(k);
