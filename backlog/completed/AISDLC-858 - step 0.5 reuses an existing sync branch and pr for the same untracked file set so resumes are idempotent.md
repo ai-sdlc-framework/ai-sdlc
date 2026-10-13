@@ -2,7 +2,7 @@
 id: AISDLC-858
 title: >-
   Step 0.5 reuses an existing sync branch and PR for the same untracked file set so resumes are idempotent
-status: Done
+status: To Do
 assignee: []
 created_date: '2026-10-13'
 labels:
