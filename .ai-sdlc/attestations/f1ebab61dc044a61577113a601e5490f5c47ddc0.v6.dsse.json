@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "042613876a476f7c04406c728d0ddb5e8aa61aef"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "2b370300373b46413065d3206f5bb21170937f71a3c96b127ea5e58eacb8ef87",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "0672a21424c909327acf53fe9971b9cb00446de0a493fe48ee3571e3a88889ca",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "0672a21424c909327acf53fe9971b9cb00446de0a493fe48ee3571e3a88889ca",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": ["5de6e2241d91aeab8c5a2ad5a4179589149ffa242877877d9f2a0982a0cc7ba9"]
+    },
+    {
+      "leafIndex": 1,
+      "proof": ["3ef02a7357ef338c28c11dfbf1f3c381c060be9f4eb1bced04d2e140e5c0bbde"]
+    }
+  ],
+  "rootHash": "26945817b207ad5776b277aa26fc1c8731486d1f3ee54352e730063b4fe7719c",
+  "rootSignature": "fVT3czi7snEJFy9wiMFd3i6hVDkGht0H/PX+QDSpYLstZrttK/R6xw8zpUCmQP3rGDglLdvingZufIUK0jvXAA==",
+  "nonce": "e3a1d2422ccef1c1d0913e1c070167a637c77f56ebe63df260d20e821d22601c",
+  "leafCount": 2,
+  "signedAt": "2026-10-13T05:40:43.875Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      ".ai-sdlc/gates.yaml",
+      ".github/workflows/__tests__/codeql.test.mjs",
+      ".github/workflows/codeql.yml"
+    ],
+    "appliedReviewers": ["code-reviewer-codex", "security-reviewer"]
+  }
+}
