@@ -367,7 +367,9 @@ export function formatResumeFeedback(resume: ResumeFeedback): string {
 }
 
 /** The outcome of {@link evaluatePushOnly}. */
-export type PushOnlyDecision = { mode: 'push-only' } | { mode: 'normal'; reason: string };
+export type PushOnlyDecision =
+  | { mode: 'push-only'; verdictMissing?: true }
+  | { mode: 'normal'; reason: string };
 
 /** Collaborators of {@link evaluatePushOnly}. */
 export interface PushOnlyDeps {
@@ -381,8 +383,8 @@ export interface PushOnlyDeps {
 
 /**
  * Decide, after the rebase, whether a push-only resume may run. Fails closed: the
- * verdict file must exist, be an approval for this task, and the content must still
- * match; otherwise the run is a normal resume and `reason` says why. Writes nothing.
+ * verdict file (when present) must be an approval for this task, and the content must
+ * still match, a missing verdict file being recomputed (`verdictMissing`); otherwise the run is a normal resume and `reason` says why. Writes nothing.
  */
 export function evaluatePushOnly(
   worktree: string,
@@ -395,7 +397,13 @@ export function evaluatePushOnly(
     mode: 'normal',
     reason: `push-only refused for ${taskId}: ${why}; running a normal resume`,
   });
-  if (!existsSync(file)) return fallback('no verdict file in the worktree');
+  if (!existsSync(file)) {
+    // AISDLC-849: no verdict file is not a reason to re-run the developer. The
+    // content check (an approval envelope for the current patch-id) is the
+    // fail-closed gate; when it holds, the caller computes the verdict.
+    if (deps.contentMatches?.()) return { mode: 'push-only', verdictMissing: true };
+    return fallback('no verdict file in the worktree and the branch content is not approved');
+  }
   const v = readJson<{ taskId?: string; approved?: boolean; decision?: string }>(file);
   if (!v) return fallback('the verdict file is unreadable');
   if (v.taskId !== undefined && v.taskId !== taskId) {

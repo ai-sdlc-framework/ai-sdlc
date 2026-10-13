@@ -197,6 +197,31 @@ describe('initTask', () => {
     expect(res.ok).toBe(true);
   });
 
+  it('resumes a task whose file is only in backlog/completed/ on the branch (AISDLC-849)', async () => {
+    const first = await initTask(h.ctx, 'AISDLC-900');
+    if (!first.ok) throw new Error('init failed');
+    const wt = first.worktreePath;
+    mkdirSync(join(wt, 'backlog', 'completed'), { recursive: true });
+    git(wt, 'mv', 'backlog/tasks/aisdlc-900 - demo-task.md', 'backlog/completed/');
+    const moved = join(wt, 'backlog', 'completed', 'aisdlc-900 - demo-task.md');
+    writeFileSync(
+      moved,
+      readFileSync(moved, 'utf8').replace('status: In Progress', 'status: Done'),
+    );
+    git(wt, 'add', '-A');
+    git(wt, 'commit', '-q', '-m', 'move to completed');
+    git(h.root, 'rm', '-q', 'backlog/tasks/aisdlc-900 - demo-task.md');
+    git(h.root, 'commit', '-q', '-m', 'drop from parent');
+    const res = await initTask(h.ctx, 'AISDLC-900');
+    expect(res.ok).toBe(true);
+    expect(existsSync(moved)).toBe(true);
+  });
+
+  it('still refuses a missing task file when there is no prior work (AISDLC-849)', async () => {
+    const res = await initTask(h.ctx, 'AISDLC-777');
+    expect(res.ok).toBe(false);
+  });
+
   it('leaves resume unset for a fresh task', async () => {
     await initTask(h.ctx, 'AISDLC-900');
     expect(calls.some((c) => c.includes('worktree add') && c.includes('-b'))).toBe(true);

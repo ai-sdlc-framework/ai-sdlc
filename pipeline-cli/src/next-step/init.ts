@@ -89,8 +89,19 @@ export async function initTask(
     ctx.logger.warn(`Step 0.5b: prune failed (non-fatal): ${(err as Error).message}`);
   }
 
+  // AISDLC-849: decide resume before validating, so a task file the dev already
+  // moved to backlog/completed/ is found instead of refused. A fresh task still
+  // validates against backlog/tasks/ only.
+  const known = await resolveResumeBranch(ctx, taskId);
+  const knownWorktree = join(workDir, '.worktrees', taskId.toLowerCase());
+  const priorWork = known !== undefined || existsSync(join(knownWorktree, '.git'));
+
   // Step 1 — validate.
-  const validation = await validateTask({ taskId, workDir });
+  let validation = await validateTask({ taskId, workDir, ...(priorWork ? { resume: true } : {}) });
+  if (!validation.ok && priorWork && validation.reason === `no task file for ${taskId}`) {
+    // The Done move lives on the branch, not in the parent checkout.
+    validation = await validateTask({ taskId, workDir: knownWorktree, resume: true });
+  }
   if (!validation.ok || !validation.task) {
     return { ok: false, reason: validation.reason ?? 'validation failed' };
   }
@@ -114,7 +125,6 @@ export async function initTask(
   // Steps 2-4.
   // AISDLC-762.2: on a resume the branch is read from the manifest, the PR or the
   // worktree; the title-derived name is computed only for a fresh task.
-  const known = await resolveResumeBranch(ctx, taskId);
   const branch = known
     ? { branch: known.branch, worktreePath: join(workDir, '.worktrees', taskId.toLowerCase()) }
     : await computeBranchName({ taskId, task, workDir });
@@ -132,7 +142,13 @@ export async function initTask(
     runner,
     ...(resume ? { resume: true } : {}),
   });
-  await beginTask({ taskId, worktreePath: branch.worktreePath, workDir, sourceKind: 'backlog' });
+  await beginTask({
+    taskId,
+    worktreePath: branch.worktreePath,
+    workDir,
+    sourceKind: 'backlog',
+    ...(resume ? { resume: true } : {}),
+  });
 
   let built: Awaited<ReturnType<typeof buildDeveloperPrompt>>;
   let promptFile: string;
@@ -193,7 +209,7 @@ async function hasExistingWork(
 /** The task began (status flipped, sentinel written) but prompt building threw: undo both. */
 async function rollbackBegun(taskId: string, task: TaskSpec, worktreePath: string): Promise<void> {
   try {
-    const file = findTaskFile(taskId, worktreePath);
+    const file = findTaskFile(taskId, worktreePath, { includeCompleted: true });
     if (file) {
       writeFileSync(
         file,

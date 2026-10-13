@@ -950,8 +950,14 @@ describe('push-only resume (AISDLC-821)', () => {
         mode: 'push-only',
       });
     });
-    it('falls back when the verdict file is missing', () => {
-      const d = evaluatePushOnly(root, 'AISDLC-841', { contentMatches: () => true });
+    it('computes the verdict when the file is missing but the content is approved', () => {
+      expect(evaluatePushOnly(root, 'AISDLC-841', { contentMatches: () => true })).toEqual({
+        mode: 'push-only',
+        verdictMissing: true,
+      });
+    });
+    it('falls back when the verdict file is missing and the content is not approved', () => {
+      const d = evaluatePushOnly(root, 'AISDLC-841', { contentMatches: () => false });
       expect(d).toMatchObject({ mode: 'normal' });
       expect((d as { reason: string }).reason).toContain('no verdict file');
     });

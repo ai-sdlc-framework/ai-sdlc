@@ -2,7 +2,7 @@
 id: AISDLC-849
 title: >-
   next-step resume resolves a task file already moved to backlog/completed/ (and push-only accepts a missing verdict file by re-running the verdict step)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:
@@ -47,10 +47,10 @@ Velocity impact: positive. Removes a manual workaround from every interrupted re
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `next-step` init on a resume whose task file is only in `backlog/completed/` finds it and proceeds (no `no task file for` refusal)
-- [ ] #2 Push-only resume without `.ai-sdlc/verdicts/<id>.json` computes the verdict rather than refusing or re-running the developer
-- [ ] #3 Unit tests cover both cases; a task file in `backlog/tasks/` behaves exactly as before
-- [ ] #4 `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass
+- [x] #1 `next-step` init on a resume whose task file is only in `backlog/completed/` finds it and proceeds (no `no task file for` refusal)
+- [x] #2 Push-only resume without `.ai-sdlc/verdicts/<id>.json` computes the verdict rather than refusing or re-running the developer
+- [x] #3 Unit tests cover both cases; a task file in `backlog/tasks/` behaves exactly as before
+- [x] #4 `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass
 <!-- AC:END -->
 
 ## Follow-up
