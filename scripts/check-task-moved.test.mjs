@@ -662,31 +662,18 @@ describe('check-task-moved.sh (AISDLC-220)', () => {
 
   // ── (g) Load-bearing order assertion (AC #2) ─────────────────────────
 
-  it('(g) .husky/pre-push invokes check-task-moved.sh BEFORE check-attestation-sign.sh', () => {
-    // Read the actual .husky/pre-push file from the project root.
-    const prePushPath = join(PROJECT_ROOT, '.husky', 'pre-push');
-    assert.equal(existsSync(prePushPath), true, `.husky/pre-push must exist at ${prePushPath}`);
-
-    const content = readFileSync(prePushPath, 'utf-8');
-    const lines = content.split('\n');
-
-    // Find the line indices for each script invocation (search for the script name).
-    const taskMoveIdx = lines.findIndex((l) => l.includes('check-task-moved.sh'));
-    const attestationIdx = lines.findIndex((l) => l.includes('check-attestation-sign.sh'));
-
-    assert.ok(
-      taskMoveIdx !== -1,
-      `check-task-moved.sh must be present in .husky/pre-push:\n${content}`,
-    );
-    assert.ok(
-      attestationIdx !== -1,
-      `check-attestation-sign.sh must be present in .husky/pre-push:\n${content}`,
-    );
-
-    assert.ok(
-      taskMoveIdx < attestationIdx,
-      `check-task-moved.sh (line ${taskMoveIdx + 1}) must appear BEFORE check-attestation-sign.sh (line ${attestationIdx + 1}) — order is load-bearing (AC #2: contentHashV4 binds {path, headBlobSha}; move must happen before sign)`,
-    );
+  it('(g) pre-push-fixups.sh invokes squash, then check-task-moved.sh, then check-attestation-sign.sh', () => {
+    // AISDLC-837: the orchestrator is the single caller; order is load-bearing
+    // (contentHashV4 binds {path, headBlobSha}; move must happen before sign).
+    const content = readFileSync(join(PROJECT_ROOT, 'scripts', 'pre-push-fixups.sh'), 'utf-8');
+    const code = content.split('\n').filter((l) => !l.trimStart().startsWith('#'));
+    const idx = (name) => code.findIndex((l) => l.includes(name));
+    const squashIdx = idx('squash-attestation-chores.sh');
+    const taskMoveIdx = idx('check-task-moved.sh');
+    const attestationIdx = idx('check-attestation-sign.sh');
+    assert.ok(squashIdx !== -1 && taskMoveIdx !== -1 && attestationIdx !== -1);
+    assert.ok(squashIdx < taskMoveIdx, 'squash must run before task-move');
+    assert.ok(taskMoveIdx < attestationIdx, 'task-move must run before attestation-sign');
   });
 
   // ── Extra: chore commit must not carry CI-skip tokens (AISDLC-88) ────

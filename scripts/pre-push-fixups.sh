@@ -35,15 +35,15 @@
 #   envelope hashes the old path → verify-attestation rejects.
 #
 # Activation:
-#   Invoked from `.husky/pre-push` AFTER coverage + DoR gates (which can fail)
-#   and BEFORE the individual hook invocations (which act as a defense-in-depth
-#   fallback on the re-push after the orchestrator exits 1).
+#   Invoked once from `.husky/pre-push` (AISDLC-837): it is the only caller of
+#   squash-attestation-chores, check-task-moved and check-attestation-sign.
+#   Order: squash → task-move → attestation-sign.
 #
 # Bypass:
 #   AI_SDLC_BYPASS_ALL_GATES=1 git push — skips this orchestrator and all sub-hooks.
 #
 # Individual sub-hook bypasses:
-#   AI_SDLC_SKIP_TASK_MOVE=1, AI_SDLC_SKIP_ATTESTATION_SIGN=1 — forwarded to sub-hooks as-is.
+#   AI_SDLC_SKIP_SQUASH_CHORES=1, AI_SDLC_SKIP_TASK_MOVE=1, AI_SDLC_SKIP_ATTESTATION_SIGN=1 — forwarded to sub-hooks as-is.
 #
 # Exit codes:
 #   0 — no fixups were needed (sub-hooks all exited 0)
@@ -113,6 +113,18 @@ run_sub_hook() {
 
 # ── Track which fixups ran ────────────────────────────────────────────
 FIXED=()
+
+# ── Step 0: squash stacked chore-sign commits (AISDLC-369, AISDLC-837) ──
+# Runs first so the squashed HEAD is the one attestation-sign signs. A squash
+# is not counted as a fixup (it never required a re-push on its own).
+if [ "${AI_SDLC_SKIP_SQUASH_CHORES:-}" != "1" ]; then
+  SQUASH_EXIT=0
+  run_sub_hook "squash-chores" "$SCRIPT_DIR/squash-attestation-chores.sh" || SQUASH_EXIT=$?
+  if [ "$SQUASH_EXIT" -ne 0 ]; then
+    echo "[pre-push-fixups] squash-chores failed (exit $SQUASH_EXIT) — aborting push" >&2
+    exit 2
+  fi
+fi
 
 # ── Sub-hook 1: task-move ─────────────────────────────────────────────
 # Dependency: MUST run before attestation-sign (contentHashV4 binding).
