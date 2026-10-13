@@ -67,10 +67,9 @@ a name. The JSON holds:
 - `ingested`, `ingestErrors`: each new brief once. Tell the planner about an error.
 - `verdicts`: each new verdict once, with the executor `clear` result (`degraded`: check
   `cli-hierarchy status`) and validated `decisionIds`; a `blocked` one awaits Step 4.
-- `escalations`, `reports`: failures the playbook (already run inside `tick`, gated by the
-  operational list) could not fix, and progress lines. Send each to the planner (Step 3).
+- `escalations`, `reports`: failures the playbook (already run inside `tick`) could not fix, and progress lines; send each to the planner (Step 3).
 - `markReady`: `readied` flipped after clean CodeQL, `failedAnalyze` go back to an executor
-  as a fix round, `skipped` are listed for the operator. A finished task whose pull request goes red returns to its executor, not to a push from here: `cli-dispatch.mjs resume --board-dir "$BOARD_DIR" --task-id <id> --pr <n> --failing-check "<check name>" --note "<what to fix, in prose>"`; the note, checks and findings are prose (a line starting `cli-`, `git ` or `gh ` is rejected) and the executor instruction is rendered from a fixed template ("run the pipeline unmodified from the existing worktree"); an `iterate-needed` verdict resumes the same way once its claim is released, with no `--note` (docs/operations/cli-hierarchy.md).
+  as a fix round, `skipped` are listed for the operator. A finished task whose pull request goes red returns to its executor, not to a push from here: `cli-dispatch.mjs resume --board-dir "$BOARD_DIR" --task-id <id> --pr <n> --failing-check "<check name>" --note "<what to fix, in prose>"`; notes are prose (a line starting `cli-`, `git ` or `gh ` is rejected); an `iterate-needed` verdict resumes the same way once its claim is released, with no `--note` (docs/operations/cli-hierarchy.md).
 - A failed task whose verdict names an OPEN PR is PR follow-up, not an escalation: `cli-dispatch.mjs requeue --board-dir "$BOARD_DIR" --task-id <id> --note "<what to finish, in prose>"`; it passes the retry cap and uses no retry.
 - `nextWakeSec`, `selfClear`: Step 5.
 
