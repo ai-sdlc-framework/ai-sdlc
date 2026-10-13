@@ -2,7 +2,7 @@
 id: AISDLC-844
 title: >-
   fold the coverage job into build-test so the suite runs once with coverage on
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-13'
 labels:
