@@ -89,11 +89,5 @@ PR #1469 is still a draft. The operator must run the default-setup disable comma
 - 3 parallel reviews approved
 
 ## Follow-up
-I ran `node --test .github/workflows/__tests__/*.test.mjs` (468 pass, 0 fail). Passing the directory itself to `node --test` reports 0 pass and 1 fail in this environment, so use the glob. Build, lint and format:check were not re-run, so AC7 is unconfirmed. The PR body says full build, test and lint were left to CI.
-
-The push is still pending. Local HEAD is rebased onto origin/main with 0 commits behind, but it is a rebased copy of the remote branch with different SHAs (ahead 27, behind 5). Both lease-push attempts were refused with `worktree-location`: the hook sees the Bash cwd as the repo root, because cwd resets between calls. A session rooted in `.worktrees/aisdlc-840` must run `git push --force-with-lease -u origin HEAD:refs/heads/ai-sdlc/aisdlc-840-codeql-go-and-python-run-per-pr-only-when-their-pa`.
-
-The working tree has two uncommitted changes that I left alone. One is a deleted attestation file, `.ai-sdlc/attestations/f1ebab61dc044a61577113a601e5490f5c47ddc0.v6.dsse.json`. The other is the task file's status, changed from To Do to In Progress.
-
-PR #1469 is still a draft. The operator must run the default-setup disable command after the PR lands: `gh api -X PATCH repos/ai-sdlc-framework/ai-sdlc/code-scanning/default-setup -f state=not-configured`. The PR body records this and says I did not run it.
+(none)
 
