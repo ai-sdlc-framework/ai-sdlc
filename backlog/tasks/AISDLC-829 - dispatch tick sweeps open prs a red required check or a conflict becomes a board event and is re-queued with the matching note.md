@@ -15,7 +15,6 @@ dependencies:
 references:
   - pipeline-cli/src/hierarchy/dispatch-loop.ts
   - pipeline-cli/src/hierarchy/playbook.ts
-  - .ai-sdlc/dispatch/notes/hand-review-path.md
 priority: critical
 dispatchable: true
 ---
