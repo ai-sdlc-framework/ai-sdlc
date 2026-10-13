@@ -155,12 +155,6 @@ gates:
     owner: engineering
     property: no newly unwired module or test double in production code
     baseline: true
-  - id: pre-push:scripts/check-changelog-edit.sh
-    surface: pre-push
-    origin: AISDLC-401
-    owner: engineering
-    property: warns when a feature branch edits CHANGELOG.md
-    baseline: true
   - id: pre-push:scripts/check-followups-on-push.sh
     surface: pre-push
     origin: unknown (follow-up gate; origin not recorded in the script header)
@@ -185,11 +179,11 @@ gates:
     owner: engineering
     property: prettier and eslint on staged files
     baseline: true
-  - id: pre-commit:scripts/typecheck-workspace.mjs
-    surface: pre-commit
+  - id: pre-push:scripts/typecheck-workspace.mjs
+    surface: pre-push
     origin: unknown (typecheck gate; test is test:typecheck-workspace-gate)
     owner: engineering
-    property: whole-workspace TypeScript typecheck before commit
+    property: whole-workspace TypeScript typecheck before push
     baseline: true
   - id: test-chain:pnpm -r test
     surface: test-chain

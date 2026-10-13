@@ -2,7 +2,7 @@
 id: AISDLC-838
 title: >-
   delete the warn-only check-changelog-edit.sh hook and move typecheck-workspace.mjs from pre-commit to pre-push
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-13'
 labels:
