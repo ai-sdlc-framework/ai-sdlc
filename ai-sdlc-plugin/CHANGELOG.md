@@ -5,6 +5,50 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.27.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.26.0...ai-sdlc-plugin-v0.27.0) (2026-10-13)
+
+
+### Features
+
+* anchor artifacts dir at the project root for routing (AISDLC-654.2) ([#1375](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1375)) ([456b0ae](https://github.com/ai-sdlc-framework/ai-sdlc/commit/456b0aef828359af61b85484baf200877a8d3fb4))
+* Claude Code context-meter mod for the planner session (AISDLC-743) ([#1274](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1274)) ([aa64fa8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/aa64fa805dfe42a0d5a19d750596761dc7029da6))
+* cli-file validates and files planner records (AISDLC-801) ([#1435](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1435)) ([9c3f280](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9c3f280994a2dce696dddfdd65fab8dc18688aba))
+* continuous handoff files and automatic context clearing (AISDLC-766) ([#1292](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1292)) ([2843e58](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2843e585858c9cb021fdec57cbec6e24efa0be55))
+* developer run turn budget with warning, stop notice and parked return (AISDLC-651.3) ([#1365](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1365)) ([853ed1a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/853ed1aa4f2967a9ec34d155abc519983176bdc0))
+* dispatch tick reaps stalled executors and relaunches them (AISDLC-826) ([#1450](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1450)) ([9ec8d8a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9ec8d8ad5dde4354575ee553bfcc92adbcc341e9))
+* **docs:** cut the fixed prompt prefix, one source for never-rules (AISDLC-651.2) ([#1345](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1345)) ([4f020de](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4f020def477425e3aece77e76a7ed614279132fe))
+* enforce dispatch board invariants in code (AISDLC-800) ([#1391](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1391)) ([fd6e13f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fd6e13fbbab93670f6b861150db6bbf5e329f63d))
+* execute command body becomes a next-step state machine (AISDLC-762) ([#1303](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1303)) ([0f75632](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0f7563231acaff05c6c5e0016f2ff4b277eb03f4))
+* governance rule admission test and refusal-message audit (AISDLC-711) ([#1350](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1350)) ([9c4350c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9c4350cb5d7c21402662fb61da0e01b35329221c))
+* guarantee and verify the hierarchy launch env for executors (AISDLC-791) ([#1330](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1330)) ([4e6e7c6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4e6e7c663b364b329e3ee4de41c73e8628e33fdb))
+* hierarchy sessions default to bypassPermissions, planner included (AISDLC-752) ([#1259](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1259)) ([31117a4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/31117a4f189c43e6557b1dcb6eeab6a8c7255181))
+* large tool output notice, explore-first rule, tool names in ledger (AISDLC-651.5) ([#1366](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1366)) ([935d0b0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/935d0b0f4fdcf08deca301406e03ff78cff4ace8))
+* lease-push preflight names the failing hook condition before Step 10.5 (AISDLC-798) ([#1436](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1436)) ([4e0aa4f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4e0aa4fd0dc9e51dcaa6707b248077ff3a39bc21))
+* **orchestrator:** context usage status line, one-time warning and handoff reload (AISDLC-728) ([#1395](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1395)) ([ffc5d3c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ffc5d3ca00bdad43dff8f79cd4b3ed756fe2335a))
+* per-role context budgets, Stop-hook notice, turns since clear (AISDLC-651.4) ([#1348](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1348)) ([99f8495](https://github.com/ai-sdlc-framework/ai-sdlc/commit/99f8495d8f84a44c9726c51c47ec1c1eb2e04a44))
+* PR gate audit and shrink-only gate registry (AISDLC-805) ([#1392](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1392)) ([ff8b56a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ff8b56aae1148a70a0b0d801e09052e65355b111))
+* push-only resume mode for tasks with an approved verdict (AISDLC-821) ([#1429](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1429)) ([da05b62](https://github.com/ai-sdlc-framework/ai-sdlc/commit/da05b6294359272d633c8452c8039ca09decbfcb))
+* requeue past the retry cap when the failed task has an open PR (AISDLC-847) ([#1478](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1478)) ([c596d6a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c596d6a1587f32a4f4da3fe0c3bd97b6161d5929))
+* require a five-step review paragraph on fix and rule tasks in DoR (AISDLC-804) ([#1394](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1394)) ([090ade3](https://github.com/ai-sdlc-framework/ai-sdlc/commit/090ade364ef506daf1fe8cbd52c20f019e16f43d))
+* restart or re-register a single hierarchy session (AISDLC-713) ([#1379](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1379)) ([b47581d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b47581dce808551b816e267b57544b0ada0e5c70))
+* **spec:** review planner and synthesizer agents with grounded findings (AISDLC-674) ([#1181](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1181)) ([34e6d40](https://github.com/ai-sdlc-framework/ai-sdlc/commit/34e6d40f3c424e831da314250705a7268bb9bbf9))
+* two reviewers by default for PRs touching no trust-chain path (AISDLC-722) ([#1347](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1347)) ([8a09acd](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8a09acd63a9d22f22dbb927ecd8a6850023e34d2))
+* vscode extension opens one terminal per hierarchy agent (AISDLC-755) ([#1398](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1398)) ([72fd350](https://github.com/ai-sdlc-framework/ai-sdlc/commit/72fd35028ea16810e6fae7bae5ec6e68e00370a7))
+* warn when verdicts are written but no attestation signer is reachable (AISDLC-556) ([#1371](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1371)) ([a5a548c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a5a548c5c296a6c41ead9999e88e1be43929f7fd))
+
+
+### Bug Fixes
+
+* accept exact ai-sdlc/&lt;task-id&gt; branch in lease-push guard (AISDLC-794) ([#1332](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1332)) ([bf8d543](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bf8d543039739ab6d3b608bc3f7872da2882833c))
+* check-sender derives the pid from the harness uds socket ref (AISDLC-827) ([#1449](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1449)) ([6038f6c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/6038f6c2c09365f74bec8891e06fa7e1db1c73da))
+* **ci:** squash leaves chores alone while envelope binds to HEAD (AISDLC-820) ([#1426](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1426)) ([2ee69f5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2ee69f501ff8284243a789869311f5b327604785))
+* embed review nonce in prompts and keep committed envelopes in sign hook (AISDLC-739) ([#1316](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1316)) ([8aa6db3](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8aa6db30055badbdd4a9962f2751d6666eed918d))
+* **orchestrator:** one file per decision event so concurrent PRs merge cleanly (AISDLC-719) ([#1243](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1243)) ([7042011](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7042011e63f2ed69c6092a571fe372b5e85393d5))
+* resolve review diff base from trusted workDir with qualified refs (AISDLC-638.1) ([#1361](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1361)) ([f6ecdd1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f6ecdd11cff92e9d1f729a50a9fab6cc42f89b25))
+* resume finds a task file already in backlog/completed (AISDLC-849) ([#1481](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1481)) ([32fe9a7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/32fe9a7a97be55c887055cc09aec099ad56fad59))
+* retire stale .claude hook copy, realpath containment, throttle stale-base check (AISDLC-569) ([#1362](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1362)) ([447e32e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/447e32e04c488702de104e0237ed550cf2c5bf8f))
+* shared merge matcher, command-position merge ban, scratch-dir writes [needs-human-attention] (AISDLC-605) ([#1275](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1275)) ([306d1fb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/306d1fbb8493f05176689649cb1310e319efc27e))
+
 ## [0.26.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.25.0...ai-sdlc-plugin-v0.26.0) (2026-10-10)
 
 

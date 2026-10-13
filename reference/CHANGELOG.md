@@ -1,5 +1,28 @@
 # @ai-sdlc/reference
 
+## [0.32.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.31.0...reference-v0.32.0) (2026-10-13)
+
+
+### Features
+
+* automatic revert and strength-only overrides for model routing (AISDLC-656.3) ([#1351](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1351)) ([77940db](https://github.com/ai-sdlc-framework/ai-sdlc/commit/77940db935ed3395c76f8239dded82e2cfd380fd))
+* enforce dispatch board invariants in code (AISDLC-800) ([#1391](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1391)) ([fd6e13f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fd6e13fbbab93670f6b861150db6bbf5e329f63d))
+* fold Codex ingester into cli-usage ingest and harden it (AISDLC-650.1) ([#1378](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1378)) ([8f6760b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8f6760b0ddbef93606829796b4e9c7799cc78d45))
+* large tool output notice, explore-first rule, tool names in ledger (AISDLC-651.5) ([#1366](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1366)) ([935d0b0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/935d0b0f4fdcf08deca301406e03ff78cff4ace8))
+* **orchestrator:** escalation chain routing, parking, tier-scoped answers, timeboxes (AISDLC-669) ([#1317](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1317)) ([e02db2f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e02db2f930a6f9cd9588ae60962b16d13a905f71))
+* per-role context budgets, Stop-hook notice, turns since clear (AISDLC-651.4) ([#1348](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1348)) ([99f8495](https://github.com/ai-sdlc-framework/ai-sdlc/commit/99f8495d8f84a44c9726c51c47ec1c1eb2e04a44))
+* persist the dispatch agent recovery key in the session record (AISDLC-564) ([#1372](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1372)) ([63adf95](https://github.com/ai-sdlc-framework/ai-sdlc/commit/63adf95c7a8d09bcec6e6d1244169766f5c5ea6e))
+* push-only resume mode for tasks with an approved verdict (AISDLC-821) ([#1429](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1429)) ([da05b62](https://github.com/ai-sdlc-framework/ai-sdlc/commit/da05b6294359272d633c8452c8039ca09decbfcb))
+* replay-run usage records carry repoId (AISDLC-653.2) ([#1349](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1349)) ([7a24d68](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7a24d683b94c6df81f85ca19dd68a0217da00976))
+
+
+### Bug Fixes
+
+* correct seed prices, price cache-write tokens, release-date effectiveFrom (AISDLC-648.1) ([#1374](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1374)) ([b57ee54](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b57ee54a4a8c4fbc868285901afe84ec3e06a9fb))
+* eval reads no cache by default; cache hits make a promotion not met (AISDLC-631.6) ([#1403](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1403)) ([c25b303](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c25b303a843947b19e739167572fc0ae23f7e3f1))
+* harden kind lookups and add routing-table follow-up tests (AISDLC-699) ([#1387](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1387)) ([4e3a0ca](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4e3a0caceec8f01a6e0033ee60763248fc48af56))
+* surface rejected provider option reason in evaluate records and doctor (AISDLC-633.3) ([#1406](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1406)) ([f68464d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f68464ddc37d077ba4d4f8a4ca600907631a58e2))
+
 ## [0.31.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.30.0...reference-v0.31.0) (2026-10-10)
 
 
