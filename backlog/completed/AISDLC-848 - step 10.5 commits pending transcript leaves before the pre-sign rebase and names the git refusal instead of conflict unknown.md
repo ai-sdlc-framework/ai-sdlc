@@ -2,7 +2,7 @@
 id: AISDLC-848
 title: >-
   step 10.5 commits pending transcript leaves before the pre-sign rebase and names the git refusal instead of conflict unknown
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:

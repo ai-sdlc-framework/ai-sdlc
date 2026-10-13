@@ -60,7 +60,12 @@ export type PreSignRebaseResult =
   | { kind: 'skipped'; reason: string }
   | { kind: 'unchanged'; hash: string }
   | { kind: 'changed'; before: string; after: string }
-  | { kind: 'failed'; reason: string; conflictingFiles?: string[] };
+  | {
+      kind: 'failed';
+      reason: string;
+      conflictingFiles?: string[];
+      cause?: 'rebase-conflict' | 'dirty-worktree' | 'rebase-failed';
+    };
 
 async function contentHash(ctx: NextStepContext, worktreePath: string): Promise<string> {
   const r = await ctx.runner(
@@ -106,6 +111,25 @@ export async function preSignRebase(
     cwd: wt,
     allowFailure: true,
   });
+  // Pending transcript leaves are untracked/modified files that make git refuse
+  // the rebase; commit them first. They are excluded from the patch-id
+  // (patch-id.ts), so the content hash is unchanged (AISDLC-848).
+  const pending = await ctx.runner(
+    'git',
+    ['status', '--porcelain', '--', '.ai-sdlc/transcript-leaves/'],
+    { cwd: wt, allowFailure: true },
+  );
+  if (pending.code === 0 && pending.stdout.trim() !== '') {
+    await ctx.runner('git', ['add', '--', '.ai-sdlc/transcript-leaves/'], {
+      cwd: wt,
+      allowFailure: true,
+    });
+    await ctx.runner(
+      'git',
+      ['commit', '-m', `chore: commit pending transcript leaves (${state.taskId})`],
+      { cwd: wt, allowFailure: true, timeout: 300_000 },
+    );
+  }
   const rb = await ctx.runner('git', ['rebase', `origin/${target}`], {
     cwd: wt,
     allowFailure: true,
@@ -121,7 +145,21 @@ export async function preSignRebase(
       .map((f) => f.trim())
       .filter((f) => f !== '');
     await ctx.runner('git', ['rebase', '--abort'], { cwd: wt, allowFailure: true });
-    const named = files.length > 0 ? files.join(', ') : 'unknown (see git status)';
+    if (files.length === 0) {
+      const err = (rb.stderr || rb.stdout).trim();
+      const cause = /uncommitted|unstaged|local changes|dirty/i.test(err)
+        ? 'dirty-worktree'
+        : 'rebase-failed';
+      return {
+        kind: 'failed',
+        reason:
+          `Step 10.5 rebase refused (${cause}): ${err || '(no git output)'}. ` +
+          `Fix in ${wt}, then re-run /ai-sdlc execute ${state.taskId} (${cause})`,
+        conflictingFiles: [],
+        cause,
+      };
+    }
+    const named = files.join(', ');
     return {
       kind: 'failed',
       reason:
@@ -129,6 +167,7 @@ export async function preSignRebase(
         `git fetch origin ${target} && git rebase origin/${target}; then re-run ` +
         `/ai-sdlc execute ${state.taskId} (rebase-conflict)`,
       conflictingFiles: files,
+      cause: 'rebase-conflict',
     };
   }
   const baseAfter = await ctx.runner('git', ['rev-parse', `origin/${target}`], {
