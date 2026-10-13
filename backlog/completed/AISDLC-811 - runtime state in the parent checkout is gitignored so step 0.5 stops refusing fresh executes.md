@@ -2,7 +2,7 @@
 id: AISDLC-811
 title: >-
   Runtime state in the parent checkout is gitignored so Step 0.5 stops refusing fresh executes
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-11'
 updated_date: '2026-10-11'

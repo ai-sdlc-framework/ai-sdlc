@@ -1908,13 +1908,51 @@ describe('untracked-review-ledgers check (AISDLC-793)', () => {
     expect(r.remediation).toContain('transcript-management.md');
   });
 
-  it('is registered, and --fix leaves the ledgers alone and says so', () => {
+  it('is registered, and --fix reports nothing to do when clean', () => {
     expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('untracked-review-ledgers');
+    expect(fixUntrackedReviewLedgers(makeCtx(adaptersWith(''))).detail).toContain('no untracked');
+  });
+
+  it('--fix deletes untracked ledgers and never a tracked one (real git repo)', () => {
+    const git = (...args: string[]) =>
+      spawnSync('git', ['-C', tmpDir, ...args], { env: cleanGitEnv(), encoding: 'utf-8' });
+    git('init', '-q', '-b', 'main');
+    const dir = join(tmpDir, '.ai-sdlc', 'reviews');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'aisdlc-1.jsonl'), 'tracked\n');
+    git('add', '-A');
+    git('-c', 'user.email=a@b.c', '-c', 'user.name=t', 'commit', '-q', '-m', 'x');
+    writeFileSync(join(dir, 'aisdlc-2.jsonl'), 'stray\n');
+    const adapters = makeAdapters({
+      removeFile: (p) => rmSync(p),
+      runCommand: (cmd, args) => {
+        const r = spawnSync(cmd, args, { env: cleanGitEnv(), encoding: 'utf-8' });
+        return { stdout: r.stdout ?? '', exitCode: r.status ?? 1 };
+      },
+    });
+    const fixed = fixUntrackedReviewLedgers(makeCtx(adapters));
+    expect(fixed.applied).toBe(true);
+    expect(fixed.detail).toContain('aisdlc-2.jsonl');
+    expect(existsSync(join(dir, 'aisdlc-2.jsonl'))).toBe(false);
+    expect(existsSync(join(dir, 'aisdlc-1.jsonl'))).toBe(true);
+  });
+
+  it('--fix without a removeFile adapter leaves the files and says so', () => {
     const out = '.ai-sdlc/reviews/aisdlc-543.jsonl\n';
     const fixed = fixUntrackedReviewLedgers(makeCtx(adaptersWith(out)));
     expect(fixed.applied).toBe(false);
-    expect(fixed.detail).toContain('left untracked review ledgers alone');
-    expect(fixUntrackedReviewLedgers(makeCtx(adaptersWith(''))).detail).toContain('no untracked');
+    expect(fixed.detail).toContain('by hand');
+  });
+
+  it('--fix tolerates a removeFile that throws', () => {
+    const out = '.ai-sdlc/reviews/aisdlc-543.jsonl\n';
+    const adapters = makeAdapters({
+      runCommand: () => ({ stdout: out, exitCode: 0 }),
+      removeFile: () => {
+        throw new Error('nope');
+      },
+    });
+    expect(fixUntrackedReviewLedgers(makeCtx(adapters)).applied).toBe(false);
   });
 
   it('treats a failing git as no findings', () => {

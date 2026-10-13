@@ -42,7 +42,7 @@
  *   classification.
  */
 
-import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, unlinkSync } from 'node:fs';
 import { now as clockNow } from '../../clock.js';
 import { CLIENT_SIDE_ONLY_MESSAGE } from './branch-protection-shared.js';
 import { homedir } from 'node:os';
@@ -96,6 +96,8 @@ export interface DoctorCheckAdapters extends DoctorAdapters {
    * surface the error).
    */
   writeFile: (path: string, content: string) => void;
+  /** Delete a file; only ever called by a check's `fix()`. Optional so existing fixtures stay valid. */
+  removeFile?: (path: string) => void;
   /** List immediate subdirectory names of `path`; `[]` if missing/unreadable. Never throws. */
   listDir: (path: string) => string[];
   /**
@@ -128,6 +130,7 @@ export function buildProductionCheckAdapters(): DoctorCheckAdapters {
       mkdirSync(dirname(p), { recursive: true });
       writeFileSync(p, content, 'utf-8');
     },
+    removeFile: (p) => unlinkSync(p),
     listDir: (p) => {
       try {
         return readdirSync(p, { withFileTypes: true })
@@ -1867,21 +1870,58 @@ export function checkUntrackedReviewLedgers(ctx: DoctorRunContext): DoctorCheckR
     severity: 'warn',
     title: `${files.length} untracked review ledger(s) in the main checkout: ${files.join(', ')} (tasks: ${taskIds.join(', ')})`,
     remediation:
-      'Each ledger is a per-file decision: commit it in a chore PR, or delete it. `ai-sdlc doctor --fix` leaves them alone. See "Untracked ledgers in the main checkout" in docs/operations/transcript-management.md.',
+      'Untracked ledgers are residue; `ai-sdlc doctor --fix` deletes them (tracked ledgers are never touched). See "Untracked ledgers in the main checkout" in docs/operations/transcript-management.md.',
     anonymizableEvidence: { untrackedCount: files.length },
   };
 }
 
-/** `--fix` never touches ledgers: commit-or-delete is a decision per file. */
+/**
+ * `--fix` deletes the untracked ledgers. `git ls-files --others` lists only files git
+ * does not track, so a committed ledger can never be selected (AISDLC-811).
+ */
 export function fixUntrackedReviewLedgers(ctx: DoctorRunContext): DoctorFixResult {
   const found = checkUntrackedReviewLedgers(ctx);
+  if (found.severity === 'pass') {
+    return {
+      id: 'untracked-review-ledgers',
+      applied: false,
+      detail: 'no untracked review ledgers',
+    };
+  }
+  const r = ctx.adapters.runCommand('git', [
+    '-C',
+    ctx.projectDir,
+    'ls-files',
+    '--others',
+    '--exclude-standard',
+    '--',
+    '.ai-sdlc/reviews/',
+  ]);
+  const files = r.stdout
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.endsWith('.jsonl'));
+  const remove = ctx.adapters.removeFile;
+  if (!remove) {
+    return {
+      id: 'untracked-review-ledgers',
+      applied: false,
+      detail: 'no removeFile adapter; delete the untracked review ledgers by hand',
+    };
+  }
+  const removed: string[] = [];
+  for (const f of files) {
+    try {
+      remove(join(ctx.projectDir, f));
+      removed.push(f);
+    } catch {
+      // leave it; the next check run reports it again
+    }
+  }
   return {
     id: 'untracked-review-ledgers',
-    applied: false,
-    detail:
-      found.severity === 'pass'
-        ? 'no untracked review ledgers'
-        : 'left untracked review ledgers alone (commit in a chore PR or delete each one by hand)',
+    applied: removed.length > 0,
+    detail: `deleted ${removed.length} untracked review ledger(s): ${removed.join(', ')}`,
   };
 }
 
