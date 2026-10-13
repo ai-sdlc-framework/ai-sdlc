@@ -22,6 +22,7 @@ import type { IdentityDeps } from '../hierarchy/index.js';
 import { claimNext, ensureBoardDirs, writeManifest, writeVerdict } from './board.js';
 import { completeTask } from './complete.js';
 import { FAILED_MANIFEST_SUFFIX, requeueFailed, snapshotFailedManifest } from './requeue.js';
+import { readResumeFeedback } from './resume.js';
 import type { DispatchManifest } from './types.js';
 
 function mkManifest(taskId: string, extra: Partial<DispatchManifest> = {}): DispatchManifest {
@@ -282,6 +283,14 @@ describe('requeueFailed with an open PR (follow-up)', () => {
       expect(queued.resume?.note).toBe('rebase and re-sign');
       rmSync(r.queuePath);
     }
+  });
+
+  it('hands the note to the executor that claims the follow-up', () => {
+    failWithPr('AISDLC-927', 3);
+    requeueFailed(board, 'AISDLC-927', { prState: () => 'OPEN', note: 'rebase and re-sign' });
+    expect(readResumeFeedback(board, 'AISDLC-927')).toBeUndefined(); // queued, not claimed
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-a' });
+    expect(readResumeFeedback(board, 'AISDLC-927')?.note).toBe('rebase and re-sign');
   });
 
   it('still refuses past the cap with no PR, or a MERGED/CLOSED/unknown PR', () => {
