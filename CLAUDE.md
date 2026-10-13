@@ -11,10 +11,6 @@ Only rules that change behaviour in every session live here (re-read every turn;
 - `/ai-sdlc rebase <pr>` automates mechanical conflicts and escalates semantic ones. Never force-push `main`/`master`.
 - CHANGELOG.md is owned by release-please: never edit it on a feature branch; remove such a diff on rebase conflict (AISDLC-401).
 
-## CI marker hygiene
-
-GitHub Actions skips ALL workflows when any commit body contains `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]` or `[actions skip]` (substring, case-insensitive; backticks do not help). Use the paren form `(skip ci marker)`. `scripts/check-skip-ci-marker.sh` enforces on push.
-
 ## Branches, commits, PRs
 
 - Branches: `feat/<desc>`, `fix/<desc>`, or `ai-sdlc/issue-<n>`. Conventional commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `style:`) with `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>`.
@@ -44,7 +40,6 @@ GitHub Actions skips ALL workflows when any commit body contains `[skip ci]`, `[
 - Merge gate is the single rollup `ai-sdlc/pr-ready` (`ai-sdlc-gate.yml`); see [`docs/operations/quality-gate.md`](docs/operations/quality-gate.md). Main health monitor files `[main-health] main is RED` issues ([`docs/operations/main-health-monitor.md`](docs/operations/main-health-monitor.md)).
 - Workflows MUST call pipeline-cli via `node pipeline-cli/bin/cli-XXX.mjs`, never `pnpm --filter @ai-sdlc/pipeline-cli exec cli-XXX` (workspace own-bins do not resolve; AISDLC-156).
 - **Dark-code gate (AISDLC-552):** `pnpm dark-code:check` (in `pnpm test`) fails on a module with no non-test importer and on non-test source using a test double. `.ai-sdlc/dark-code-baseline.json` only shrinks; never silence a finding with a token import.
-- Feature flags `AI_SDLC_DEPS_COMPOSITION`, `AI_SDLC_AUTONOMOUS_ORCHESTRATOR`, `AI_SDLC_DECISION_CATALOG` default ON (opt out `off`). Detail in the reference above.
 
 ## Five-step algorithm (DEC-0090)
 
@@ -72,7 +67,6 @@ TypeScript strict, ESM. Prettier + ESLint. No premature abstractions: three simi
 
 - **Scope creep (AISDLC-308):** do not expand scope beyond the ask. A review/audit/read-only task that surfaces follow-up work presents the recommendation and STOPS until the operator authorizes filing tasks, extra PRs or subagent dispatch. "Pre-work required", "Pre-conditions" or "OQ walkthrough needed" prose is a HARD precondition. A decision record on `main` covering the filing or dispatch overrides the wait.
 - **Reviewer gates:** reviewers flag as critical a review/audit task that creates `backlog/tasks/` files (scope-creep candidate) and any new `**Resolution:**` marker in an RFC `## Open Questions` section.
-- **Read-only agents** must not use `Write`, `Edit`, task-create tools or dispatch downstream agents (frontmatter `disallowedTools`).
 - **OQ resolution prohibition (AISDLC-298):** dev subagents MUST NOT resolve RFC Open Questions inline: no `**Resolution:**` / `RESOLVED:` / `✅ RESOLVED` marker, no replacing an OQ with a design decision, no code that implicitly resolves one. When an OQ blocks or constrains the work: stop, file a catalog record (`node pipeline-cli/bin/cli-decisions.mjs escalate --task-id ... --scope rfc:RFC-XXXX --option ...`), return `prUrl: null` with `notes` naming the RFC, OQ and options. A genuinely non-blocking OQ gets a documented assumption in the PR body, not a marker. Resolution is exclusively the operator's role.
 - **Decision Catalog (RFC-0035, default ON):** `cli-decisions add --summary ... --scope <area> --option "<id>:<desc>"`; for operator routing, not a license to resolve OQs.
 - **Model defaults:** every agent and command pins `model:` (never `inherit`; `pnpm test:plugin-model-pins-gate`): developer and reviewers sonnet, `review-executor*` haiku, `security-reviewer` opus. Route code/test review to `-codex` variants on dispatch paths; never wrap mechanical work (sign, reconcile, rebase) in subagents. List: [`docs/operations/agent-governance-reference.md`](docs/operations/agent-governance-reference.md).
