@@ -2,7 +2,7 @@
 id: AISDLC-845
 title: >-
   untrusted-pr-gate gets a concurrency group so a moved head cancels the old run instead of failing it
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-13'
 labels:
