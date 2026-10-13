@@ -10,7 +10,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runHierarchyCli } from '../cli/hierarchy.js';
-import { readHeartbeat, writeManifest } from '../dispatch/board.js';
+import { readHeartbeat, releaseInflight, writeManifest } from '../dispatch/board.js';
 import type { DispatchManifest } from '../dispatch/types.js';
 import type { IdentityDeps } from './caller-identity.js';
 import { executorStart } from './executor-start.js';
@@ -134,6 +134,7 @@ describe('executorStart', () => {
     );
     expect(ok.taskId).toBe('AISDLC-9');
     expect(lines.some((l) => l.includes('UNCHECKED START'))).toBe(false);
+    releaseInflight(board, 'AISDLC-9');
     const warned: string[] = [];
     await executorStart(
       { boardDir: board, cwd: tmp, waitSec: 0 },
@@ -347,6 +348,7 @@ describe('cli-hierarchy executor-start and clear --self (executor)', () => {
     };
     const ok = await run(['executor-start', '--wait', '5', '--sender-pid', '4000'], extras);
     expect(ok.code).toBe(0);
+    releaseInflight(board, 'AISDLC-4');
     const ref = await run(
       ['executor-start', '--wait', '0', '--sender-ref', 'proj-operator-dispatch'],
       extras,

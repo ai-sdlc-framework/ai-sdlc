@@ -47,6 +47,12 @@ gates:
     owner: engineering
     property: every backlog task reference resolves
     baseline: true
+  - id: gate-job:governance-gate
+    surface: pr-ready-job
+    origin: AISDLC-764
+    owner: engineering
+    property: scope-creep, CHANGELOG-edit, reviewer-set and Open Questions marker checks run as code, not prose
+    decision: DEC-0056
   - id: gate-job:first-run-smoke
     surface: pr-ready-job
     origin: AISDLC-771
