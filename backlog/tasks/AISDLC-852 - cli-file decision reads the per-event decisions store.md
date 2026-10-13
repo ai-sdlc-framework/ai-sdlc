@@ -5,7 +5,8 @@ status: To Do
 assignee: []
 created_date: '2026-10-13'
 labels: [bug, pipeline-cli, decisions]
-dependencies: []
+dependencies:
+  - AISDLC-719
 references: [pipeline-cli/src/cli/file.ts, pipeline-cli/src/decisions/event-log.ts, pipeline-cli/src/cli/decisions.ts, docs/operations/decision-authority.md]
 priority: high
 dispatchable: true
