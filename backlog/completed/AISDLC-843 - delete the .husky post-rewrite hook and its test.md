@@ -10,8 +10,6 @@ labels:
   - velocity
 dependencies: []
 references:
-  - .husky/post-rewrite
-  - scripts/post-rewrite-hook.test.mjs
   - scripts/check-orchestrator-state.sh
   - docs/operations/doctor.md
   - docs/audits/2026-10-13-cicd-five-step-audit.md

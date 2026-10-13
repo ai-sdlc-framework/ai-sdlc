@@ -14,7 +14,6 @@ labels:
 dependencies: []
 references:
   - ai-sdlc-plugin/commands/execute.md
-  - .husky/post-rewrite
   - scripts/check-orchestrator-state.sh
 priority: high
 drift_log:
