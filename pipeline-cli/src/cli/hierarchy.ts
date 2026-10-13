@@ -219,7 +219,11 @@ Options for executor-start:
   --wait <seconds>         How long to block waiting for a task (default 1500). Prints the
                            identity line, then one JSON line: {name, project, dispatch,
                            taskId|null, manifest?}. Exit 1 when this is not an executor
-                           session or the working directory is not the project's repository.
+                           session, the working directory is not the project's repository, or
+                           the sender is not the dispatch session. It runs the repository and
+                           sender checks itself (AISDLC-764); the sender is checked from
+                           --sender-pid / --sender-ref (accepts with a warning when neither).
+  --sender-pid <n>, --sender-ref <ref>   as for check-sender
 
 Options for check-sender:
   --sender-pid <n>         Pid the harness reports for the sender
@@ -713,12 +717,16 @@ export async function runHierarchyCli(
       }
       case 'executor-start': {
         const waitSec = intFlag(flags, 'wait');
-        if (waitSec === null) return 2;
+        const startPid = intFlag(flags, 'sender-pid');
+        if (waitSec === null || startPid === null) return 2;
+        const startRef = flags['sender-ref'] === 'true' ? undefined : flags['sender-ref'];
         try {
           const result = await executorStart(
             {
               boardDir: deps.boardDir,
               cwd: deps.cwd,
+              ...(startPid === undefined ? {} : { senderPid: startPid }),
+              ...(startRef === undefined ? {} : { senderRef: startRef }),
               ...(waitSec === undefined ? {} : { waitSec }),
             },
             {

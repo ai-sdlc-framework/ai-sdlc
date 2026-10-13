@@ -172,6 +172,8 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       'independence-policy-gate',
       'dependency-review-gate',
       'dor-readiness-gate',
+      // AISDLC-764: changelog, scope-creep, OQ-marker and reviewer-set checks.
+      'governance-gate',
       'pr-ready',
     ];
     assert.deepEqual(Object.keys(workflow.jobs).sort(), expectedJobs.sort());
@@ -789,5 +791,27 @@ describe('ai-sdlc-gate.yml — coexistence with legacy workflows (AISDLC-140 sub
       const contents = readFileSync(path, 'utf-8');
       assert.ok(contents.length > 0, `${legacy} must still exist (cutover is sub-3, not sub-1)`);
     }
+  });
+});
+
+describe('governance-gate (AISDLC-764)', () => {
+  const wf = loadYaml(WORKFLOW_PATH);
+  const job = wf.jobs['governance-gate'];
+  const steps = JSON.stringify(job.steps);
+
+  it('is a required input of the pr-ready rollup and is not an allowed skip', () => {
+    assert.ok(wf.jobs['pr-ready'].needs.includes('governance-gate'));
+    const allowed = wf.jobs['pr-ready'].steps[0].with['allowed-skips'];
+    assert.ok(!/governance-gate/.test(allowed));
+  });
+  it('checks out full history and runs the PR checks and the OQ scan', () => {
+    assert.equal(job.steps[0].with['fetch-depth'], 0);
+    assert.match(steps, /node scripts\/check-pr-governance\.mjs all/);
+    assert.match(steps, /node scripts\/check-rfc-docs\.mjs --oq-scan/);
+    assert.match(steps, /--docs-only/);
+  });
+  it('passes untrusted PR text through env, never inline in the script', () => {
+    const run = job.steps.map((s) => s.run ?? '').join('\n');
+    assert.ok(!/\$\{\{\s*github\.event\.pull_request\.(title|body)/.test(run));
   });
 });

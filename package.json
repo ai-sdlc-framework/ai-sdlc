@@ -87,6 +87,8 @@
     "test:substrate-contract-conformance": "node --test scripts/check-substrate-contract.conformance.test.mjs",
     "sync:plugin-runtime-deps:check": "node scripts/sync-plugin-runtime-deps.mjs --check",
     "test:sync-plugin-runtime-deps-gate": "node --test scripts/sync-plugin-runtime-deps.test.mjs",
+    "test:pr-governance-gate": "node --test scripts/check-pr-governance.test.mjs",
+    "test:parent-on-main-hook": "node --test ai-sdlc-plugin/hooks/parent-on-main.test.mjs",
     "rfc:check": "node scripts/check-rfc-docs.mjs",
     "rfc:test": "node --test scripts/check-rfc-docs.test.mjs && node --test scripts/check-rfc-lifecycle-transitions.test.mjs",
     "rfc:lifecycle-check": "node scripts/check-rfc-lifecycle-transitions.mjs",

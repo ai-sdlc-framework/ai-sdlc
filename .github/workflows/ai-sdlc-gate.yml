@@ -624,6 +624,59 @@ jobs:
             --head "$HEAD_SHA" \
             --base "$BASE_SHA"
 
+  # ── Governance gate (AISDLC-764) ────────────────────────────────────────
+  # Rules that used to live only in prose or reviewer judgement, as code:
+  #   - CHANGELOG.md edits off a release-please branch fail (AISDLC-401)
+  #   - a review/audit task PR that adds a backlog/tasks file fails (AISDLC-308)
+  #   - a new RFC Open Questions resolution marker fails unless the PR body
+  #     carries an allowlisted operator approval marker (AISDLC-298)
+  #   - a code PR whose attestation lacks the full reviewer set fails
+  #     (code + test + security, or correctness + security; docs-only and
+  #     dependabot PRs are exempt, matching attestation-gate)
+  # Deterministic, no install, no LLM. Every check fails closed.
+  governance-gate:
+    name: Governance gate
+    needs: detect
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: PR governance checks (changelog, scope-creep, reviewers)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          DOCS_ONLY: ${{ needs.detect.outputs.docs_only }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+          SKIP_REVIEWERS=false
+          if [ "$PR_AUTHOR" = "dependabot[bot]" ]; then SKIP_REVIEWERS=true; fi
+          node scripts/check-pr-governance.mjs all \
+            --base "$BASE_SHA" --head "$HEAD_SHA" \
+            --branch "$HEAD_REF" --title "$PR_TITLE" \
+            --docs-only "$DOCS_ONLY" --skip-reviewers "$SKIP_REVIEWERS"
+      - name: RFC Open Questions resolution markers
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.txt"
+          MB=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+          node scripts/check-rfc-docs.mjs --oq-scan \
+            --base-ref "$MB" --head-ref "$HEAD_SHA" \
+            --pr-body-file "$RUNNER_TEMP/pr-body.txt"
+
   pr-ready:
     name: ai-sdlc/pr-ready
     needs:
@@ -640,6 +693,7 @@ jobs:
         independence-policy-gate,
         dependency-review-gate,
         dor-readiness-gate,
+        governance-gate,
       ]
     # AISDLC-218: skip the rollup on draft PRs. With all upstream jobs skipped
     # (per their own draft guards), `re-actors/alls-green` treats all-skipped

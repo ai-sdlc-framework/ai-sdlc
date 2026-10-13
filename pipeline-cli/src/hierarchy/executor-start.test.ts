@@ -105,6 +105,47 @@ describe('executorStart', () => {
     expect(lines[0]).toContain("[executor] I am 'proj-executor-alpha'");
   });
 
+  it('refuses a sender that is not the dispatch session, before any claim (AISDLC-764)', async () => {
+    writeManifest(board, mkManifest('AISDLC-9'));
+    const claim = vi.fn();
+    await expect(
+      executorStart(
+        { boardDir: board, cwd: tmp, waitSec: 0, senderPid: 9999 },
+        {
+          identity: identityFor('executor', 'proj-executor-alpha'),
+          repoGit: gitAt(tmp),
+          claim,
+        },
+      ),
+    ).rejects.toThrow(/not my dispatch session/);
+    expect(claim).not.toHaveBeenCalled();
+  });
+
+  it('accepts the dispatch session as sender and warns when none is reported (AISDLC-764)', async () => {
+    writeManifest(board, mkManifest('AISDLC-9'));
+    const lines: string[] = [];
+    const ok = await executorStart(
+      { boardDir: board, cwd: tmp, waitSec: 5, senderRef: 'proj-operator-dispatch' },
+      {
+        identity: identityFor('executor', 'proj-executor-alpha'),
+        repoGit: gitAt(tmp),
+        log: (l) => lines.push(l),
+      },
+    );
+    expect(ok.taskId).toBe('AISDLC-9');
+    expect(lines.some((l) => l.includes('check-sender'))).toBe(false);
+    const warned: string[] = [];
+    await executorStart(
+      { boardDir: board, cwd: tmp, waitSec: 0 },
+      {
+        identity: identityFor('executor', 'proj-executor-alpha'),
+        repoGit: gitAt(tmp),
+        log: (l) => warned.push(l),
+      },
+    );
+    expect(warned.some((l) => l.includes('check-sender: warning'))).toBe(true);
+  });
+
   it('writes the heartbeat naming the worker as part of the claim, before the task is returned (AISDLC-791)', async () => {
     writeManifest(board, mkManifest('AISDLC-9'));
     expect(readHeartbeat(board, 'AISDLC-9')).toBeUndefined();
@@ -296,6 +337,25 @@ describe('cli-hierarchy executor-start and clear --self (executor)', () => {
     });
     expect(r.code).toBe(1);
     expect(r.err).toMatch(/not a running executor/);
+  });
+
+  it('runs check-sender from --sender-pid / --sender-ref and refuses a stranger (AISDLC-764)', async () => {
+    writeManifest(board, mkManifest('AISDLC-4'));
+    const extras = {
+      identity: identityFor('executor', 'proj-executor-alpha'),
+      repoGit: gitAt(tmp),
+    };
+    const ok = await run(['executor-start', '--wait', '5', '--sender-pid', '4000'], extras);
+    expect(ok.code).toBe(0);
+    const ref = await run(
+      ['executor-start', '--wait', '0', '--sender-ref', 'proj-operator-dispatch'],
+      extras,
+    );
+    expect(ref.code).toBe(0);
+    const bad = await run(['executor-start', '--wait', '0', '--sender-pid', '9999'], extras);
+    expect(bad.code).toBe(1);
+    expect(bad.err).toMatch(/not my dispatch session/);
+    expect((await run(['executor-start', '--sender-pid', 'x'], extras)).code).toBe(2);
   });
 
   it('rejects a non-numeric --wait', async () => {

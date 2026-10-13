@@ -38,6 +38,10 @@ import {
   REQUIRES_OK_LIFECYCLES,
   KNOWN_CAPABILITY_IDS,
   validateRuntimeEvidence,
+  findNewOqResolutionMarkers,
+  openQuestionsLines,
+  parseApproverIdentities,
+  checkOqResolutionMarkers,
 } from './check-rfc-docs.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -1430,5 +1434,125 @@ describe('rfc.schema.json runtimeEvidence', () => {
     assert.equal(validate({ ...base, runtimeEvidence: [{ ...good, status: 'bogus' }] }), false);
     const { capability: _c, ...noCap } = good;
     assert.equal(validate({ ...base, runtimeEvidence: [noCap] }), false);
+  });
+});
+
+describe('AISDLC-764: OQ-resolution marker scan', () => {
+  const rfc = (oq) =>
+    `---\nid: RFC-9999\n---\n# T\n\n## Summary\n**Resolution:** not an OQ\n\n## Open Questions\n${oq}\n\n## Next\nRESOLVED: elsewhere\n`;
+
+  it('openQuestionsLines returns only the OQ section', () => {
+    assert.deepEqual(
+      openQuestionsLines(rfc('- OQ-1 a')).filter((l) => l.trim()),
+      ['- OQ-1 a'],
+    );
+    assert.deepEqual(openQuestionsLines(null), []);
+  });
+
+  it('flags each marker form added in Open Questions and ignores other sections', () => {
+    for (const marker of ['**Resolution:** use A', 'RESOLVED: use A', '\u2705 RESOLVED use A']) {
+      const added = findNewOqResolutionMarkers(rfc('- OQ-1 a'), rfc(`- OQ-1 a\n  ${marker}`));
+      assert.equal(added.length, 1, marker);
+    }
+    assert.deepEqual(findNewOqResolutionMarkers(rfc('- OQ-1 a'), rfc('- OQ-1 a')), []);
+  });
+
+  it('does not flag a pre-existing marker, but flags a new RFC with one', () => {
+    const withMarker = rfc('- OQ-1\n  **Resolution:** done');
+    assert.deepEqual(findNewOqResolutionMarkers(withMarker, withMarker), []);
+    assert.equal(findNewOqResolutionMarkers(null, withMarker).length, 1);
+  });
+
+  it('parses approver identities', () => {
+    assert.deepEqual(
+      [...parseApproverIdentities("operators:\n  - identity: deefactorial\n    addedAt: 'x'\n")],
+      ['deefactorial'],
+    );
+  });
+
+  describe('against a real git repo', () => {
+    const dirs = [];
+    after(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
+    const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf-8' });
+    function mkRepo() {
+      const d = mkdtempSync(join(tmpdir(), 'oq-scan-'));
+      dirs.push(d);
+      git(d, 'init', '-q', '-b', 'main');
+      git(d, 'config', 'user.email', 't@t');
+      git(d, 'config', 'user.name', 't');
+      mkdirSync(join(d, 'spec', 'rfcs'), { recursive: true });
+      mkdirSync(join(d, '.ai-sdlc'), { recursive: true });
+      writeFileSync(
+        join(d, '.ai-sdlc', 'lifecycle-approvers.yaml'),
+        'operators:\n  - identity: opr\n',
+      );
+      writeFileSync(join(d, 'spec', 'rfcs', 'RFC-9999-x.md'), rfc('- OQ-1 a'));
+      git(d, 'add', '-A');
+      git(d, 'commit', '-qm', 'base');
+      git(d, 'checkout', '-qb', 'feat');
+      writeFileSync(
+        join(d, 'spec', 'rfcs', 'RFC-9999-x.md'),
+        rfc('- OQ-1 a\n  **Resolution:** pick A'),
+      );
+      git(d, 'commit', '-qam', 'resolve');
+      return d;
+    }
+
+    it('fails a PR that adds a marker with no approval', () => {
+      const d = mkRepo();
+      const r = checkOqResolutionMarkers({
+        repoRoot: d,
+        baseRef: 'main',
+        headRef: 'feat',
+        prBody: '',
+      });
+      assert.equal(r.failures.length, 1);
+      assert.match(r.failures[0], /Open Questions resolution marker/);
+    });
+
+    it('passes with an allowlisted approver marker, fails with a stranger or a self-added approver', () => {
+      const d = mkRepo();
+      const ok = checkOqResolutionMarkers({
+        repoRoot: d,
+        baseRef: 'main',
+        headRef: 'feat',
+        prBody: '<!-- ai-sdlc:oq-resolution-approved-by:opr reason:walkthrough -->',
+      });
+      assert.deepEqual(ok.failures, []);
+      assert.equal(ok.approvedBy, 'opr');
+      const bad = checkOqResolutionMarkers({
+        repoRoot: d,
+        baseRef: 'main',
+        headRef: 'feat',
+        prBody: '<!-- ai-sdlc:oq-resolution-approved-by:evil reason:x -->',
+      });
+      assert.equal(bad.failures.length, 1);
+    });
+
+    it('passes when no marker is added and fails closed on a bad ref or missing base', () => {
+      const d = mkRepo();
+      assert.deepEqual(
+        checkOqResolutionMarkers({ repoRoot: d, baseRef: 'main', headRef: 'main' }).failures,
+        [],
+      );
+      assert.match(
+        checkOqResolutionMarkers({ repoRoot: d, baseRef: 'nope', headRef: 'feat' }).failures[0],
+        /cannot diff/,
+      );
+      assert.match(checkOqResolutionMarkers({ repoRoot: d }).failures[0], /no base ref/);
+    });
+
+    it('CLI --oq-scan exits 1 on a violation and 0 when clean', () => {
+      const d = mkRepo();
+      const script = join(__dirname, 'check-rfc-docs.mjs');
+      // The CLI scans the real repo root, so drive it with a fake base == head.
+      const clean = spawnSync('node', [script, '--oq-scan', '--base-ref', 'HEAD'], {
+        encoding: 'utf-8',
+      });
+      assert.equal(clean.status, 0, clean.stderr);
+      const noBase = spawnSync('node', [script, '--oq-scan'], { encoding: 'utf-8' });
+      assert.equal(noBase.status, 1);
+      assert.ok(d);
+    });
   });
 });

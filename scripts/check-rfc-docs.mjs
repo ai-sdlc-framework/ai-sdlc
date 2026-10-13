@@ -957,17 +957,183 @@ export function reportAndExit({ files, failures, warnings, enforcedCount, skippe
   return 0;
 }
 
+// ─── OQ-resolution marker scan (AISDLC-764; AISDLC-298 rule moved into code) ──
+
+/**
+ * A line carrying an Open Question resolution marker: `**Resolution:**`,
+ * `RESOLVED:` or `✅ RESOLVED`. Resolving an OQ is the operator's (or the
+ * planner's, after a walkthrough) act, never a developer subagent's.
+ */
+export const OQ_RESOLUTION_MARKER_REGEX = /\*\*Resolution:\*\*|\bRESOLVED:|✅\s*RESOLVED/;
+
+/** PR-body marker a planner/operator PR carries to authorize new OQ resolutions. */
+export const OQ_APPROVAL_MARKER_REGEX =
+  /<!--\s*ai-sdlc:oq-resolution-approved-by:([a-zA-Z0-9_-]{1,32})\s+reason:([\s\S]+?)-->/;
+
+/** Lines of the `## Open Questions` section of an RFC body (empty when absent). */
+export function openQuestionsLines(source) {
+  const lines = String(source ?? '')
+    .replace(/\r\n/g, '\n')
+    .split('\n');
+  const out = [];
+  let inside = false;
+  for (const line of lines) {
+    if (/^##\s+Open Questions\b/i.test(line)) {
+      inside = true;
+      continue;
+    }
+    if (inside && /^##\s/.test(line)) inside = false;
+    if (inside) out.push(line);
+  }
+  return out;
+}
+
+/**
+ * Marker-bearing Open Questions lines present in `toContent` that are not
+ * already present (multiset difference) in `fromContent`. `fromContent` is
+ * null for a new file, so every marker in a new RFC's OQ section counts.
+ */
+export function findNewOqResolutionMarkers(fromContent, toContent) {
+  const remaining = new Map();
+  for (const line of openQuestionsLines(fromContent)) {
+    if (!OQ_RESOLUTION_MARKER_REGEX.test(line)) continue;
+    const key = line.trim();
+    remaining.set(key, (remaining.get(key) ?? 0) + 1);
+  }
+  const added = [];
+  for (const line of openQuestionsLines(toContent)) {
+    if (!OQ_RESOLUTION_MARKER_REGEX.test(line)) continue;
+    const key = line.trim();
+    const n = remaining.get(key) ?? 0;
+    if (n > 0) remaining.set(key, n - 1);
+    else added.push(line.trim());
+  }
+  return added;
+}
+
+/** Operator identities listed in a lifecycle-approvers.yaml text. */
+export function parseApproverIdentities(text) {
+  const ids = new Set();
+  for (const m of String(text ?? '').matchAll(
+    /^\s*-\s*identity:\s*['"]?([A-Za-z0-9_-]+)['"]?\s*$/gm,
+  )) {
+    ids.add(m[1]);
+  }
+  return ids;
+}
+
+/**
+ * Scan every RFC changed between `baseRef` and `headRef` for newly added
+ * Open Questions resolution markers. Fail closed: any git error is a failure.
+ * The allowlist is read from `baseRef`, never from the PR's own tree, so a PR
+ * cannot approve itself. A PR body carrying
+ * `<!-- ai-sdlc:oq-resolution-approved-by:<id> reason:<text> -->` for an
+ * allowlisted `<id>` (the planner or operator) is the authorized path.
+ *
+ * @returns {{ failures: string[], approvedBy: string|null, markers: Array<{file: string, line: string}> }}
+ */
+export function checkOqResolutionMarkers({
+  repoRoot = REPO_ROOT,
+  baseRef,
+  headRef = 'HEAD',
+  prBody = '',
+  rfcsRelDir = 'spec/rfcs',
+  gitFn,
+} = {}) {
+  const git =
+    gitFn ??
+    ((args) =>
+      execFileSync('git', args, {
+        cwd: repoRoot,
+        encoding: 'utf-8',
+        maxBuffer: 64 * 1024 * 1024,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }));
+  const failures = [];
+  if (!baseRef) {
+    return {
+      failures: ['oq-scan: no base ref given (--base-ref); cannot scan the diff'],
+      approvedBy: null,
+      markers: [],
+    };
+  }
+  let names;
+  try {
+    names = git(['diff', '--name-only', '--diff-filter=AM', baseRef, headRef, '--', rfcsRelDir])
+      .split('\n')
+      .map((f) => f.trim())
+      .filter((f) => f.endsWith('.md') && !f.includes(TEMPLATE_FILENAME));
+  } catch (err) {
+    return {
+      failures: [`oq-scan: cannot diff ${baseRef}..${headRef}: ${err.message}`],
+      approvedBy: null,
+      markers: [],
+    };
+  }
+  const markers = [];
+  for (const file of names) {
+    let from = null;
+    try {
+      from = git(['show', `${baseRef}:${file}`]);
+    } catch {
+      from = null; // new file
+    }
+    let to;
+    try {
+      to = git(['show', `${headRef}:${file}`]);
+    } catch (err) {
+      failures.push(`oq-scan: cannot read ${file} at ${headRef}: ${err.message}`);
+      continue;
+    }
+    for (const line of findNewOqResolutionMarkers(from, to)) markers.push({ file, line });
+  }
+  if (markers.length === 0) return { failures, approvedBy: null, markers };
+
+  let approvers = new Set();
+  try {
+    approvers = parseApproverIdentities(
+      git(['show', `${baseRef}:.ai-sdlc/lifecycle-approvers.yaml`]),
+    );
+  } catch {
+    approvers = new Set();
+  }
+  const m = OQ_APPROVAL_MARKER_REGEX.exec(prBody ?? '');
+  if (m && approvers.has(m[1])) return { failures, approvedBy: m[1], markers };
+
+  for (const { file, line } of markers) {
+    failures.push(
+      `${file}: adds an Open Questions resolution marker (${JSON.stringify(line.slice(0, 80))}). ` +
+        'Only the operator or planner resolves an OQ, after a walkthrough: the PR body must carry ' +
+        '<!-- ai-sdlc:oq-resolution-approved-by:<operator> reason:<text> --> for an operator listed ' +
+        'in .ai-sdlc/lifecycle-approvers.yaml on the base branch. A developer must escalate instead ' +
+        '(cli-decisions escalate), not resolve it inline.',
+    );
+  }
+  return { failures, approvedBy: null, markers };
+}
+
 function parseArgs(argv) {
-  const args = { rfcsDir: DEFAULT_RFCS_DIR, docsDir: DEFAULT_DOCS_DIR, baseRef: null, prBody: '' };
+  const args = {
+    rfcsDir: DEFAULT_RFCS_DIR,
+    docsDir: DEFAULT_DOCS_DIR,
+    baseRef: null,
+    headRef: 'HEAD',
+    prBody: '',
+    prBodyFile: null,
+    oqScan: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--rfcs-dir') args.rfcsDir = resolve(argv[++i]);
     else if (a === '--docs-dir') args.docsDir = resolve(argv[++i]);
     else if (a === '--base-ref') args.baseRef = argv[++i];
     else if (a === '--pr-body') args.prBody = argv[++i];
+    else if (a === '--pr-body-file') args.prBodyFile = argv[++i];
+    else if (a === '--head-ref') args.headRef = argv[++i];
+    else if (a === '--oq-scan') args.oqScan = true;
     else if (a === '--help' || a === '-h') {
       console.log(
-        'Usage: node scripts/check-rfc-docs.mjs [--rfcs-dir <path>] [--docs-dir <path>] [--base-ref <git-ref>] [--pr-body <text>]',
+        'Usage: node scripts/check-rfc-docs.mjs [--rfcs-dir <path>] [--docs-dir <path>] [--base-ref <git-ref>] [--pr-body <text>] [--oq-scan --base-ref <ref> [--head-ref <ref>] [--pr-body-file <path>]]',
       );
       process.exit(0);
     } else {
@@ -980,6 +1146,34 @@ function parseArgs(argv) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
+
+  // AISDLC-764: OQ-resolution marker scan. Fail closed; needs full history.
+  if (args.oqScan) {
+    let prBody = args.prBody;
+    if (args.prBodyFile) {
+      try {
+        prBody = readFileSync(args.prBodyFile, 'utf-8');
+      } catch {
+        prBody = '';
+      }
+    }
+    const r = checkOqResolutionMarkers({
+      repoRoot: REPO_ROOT,
+      baseRef: args.baseRef,
+      headRef: args.headRef,
+      prBody,
+    });
+    if (r.failures.length > 0) {
+      for (const f of r.failures) console.error(`[rfc-oq-scan] FAIL ${f}`);
+      process.exit(1);
+    }
+    console.log(
+      r.approvedBy
+        ? `[rfc-oq-scan] OK: ${r.markers.length} new OQ resolution marker(s) approved by ${r.approvedBy}`
+        : '[rfc-oq-scan] OK: no new OQ resolution markers',
+    );
+    process.exit(0);
+  }
 
   // When --base-ref is not explicitly provided, fall back to GitHub Actions
   // environment variables. GITHUB_BASE_REF is set automatically for

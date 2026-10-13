@@ -6,18 +6,19 @@
  *     claude-process roster entry, and it must be an executor. The name is used
  *     exactly as the roster has it.
  *  2. Check the working directory is the repository of the roster's project.
- *  3. Claim the next eligible task under that name, blocking up to `waitSec`
+ *  3. Check the instructing sender is the roster's dispatch session (`check-sender`,
+ *     AISDLC-764): it always runs, so it cannot be skipped. The sender pid or ref the
+ *     harness reports is passed in; without either the check accepts and warns.
+ *  4. Claim the next eligible task under that name, blocking up to `waitSec`
  *     seconds (`cli-dispatch claim --wait`).
- *  4. Write `inflight/<task>.state.json` naming the worker, before returning and so
+ *  5. Write `inflight/<task>.state.json` naming the worker, before returning and so
  *     before any model call: the lease-push hook binds an executor to its task by
  *     that heartbeat, so it must hold from the first push. A write failure throws.
- *
- *  5. Run the lease-push preflight (AISDLC-798) on the new claim and print what the
+ *  6. Run the lease-push preflight (AISDLC-798) on the new claim and print what the
  *     PreToolUse hook would refuse later (missing launch env, a second claim, a missing
  *     heartbeat), so a misconfigured executor is caught at claim time.
  *
- * The sender check stays with the executor's instruction handling: it needs the
- * pid or ref the harness reports for a message, which only exists per message.
+ * Later instruction messages are still checked with `cli-hierarchy check-sender`.
  */
 
 import { now } from '../clock.js';
@@ -27,7 +28,7 @@ import { formatResumeFeedback } from '../dispatch/resume.js';
 import type { DispatchManifest } from '../dispatch/types.js';
 import { resolveCaller, type IdentityDeps } from './caller-identity.js';
 import { claimPreflight, type LeasePreflight } from './lease-preflight.js';
-import { checkRepoMatch, rosterProject } from './peer-guard.js';
+import { checkDispatchSender, checkRepoMatch, rosterProject } from './peer-guard.js';
 import { readRosterChecked } from './roster.js';
 import type { GitRunner } from './trusted-root.js';
 
@@ -42,6 +43,10 @@ export interface ExecutorStartOptions {
   cwd: string;
   /** Seconds to wait for an eligible task (default {@link DEFAULT_EXECUTOR_WAIT_SEC}). */
   waitSec?: number;
+  /** Pid the harness reports for the sender of the instruction (check-sender). */
+  senderPid?: number;
+  /** Session ref the harness reports for the sender of the instruction (check-sender). */
+  senderRef?: string;
 }
 
 /** Collaborators; every one is replaceable in tests. */
@@ -97,11 +102,17 @@ export async function executorStart(
     ...(deps.repoGit ? { git: deps.repoGit } : {}),
   });
   if (!repo.ok) throw new Error(repo.reason);
+  const sender = checkDispatchSender(roster.sessions, {
+    ...(opts.senderPid === undefined ? {} : { pid: opts.senderPid }),
+    ...(opts.senderRef === undefined ? {} : { ref: opts.senderRef }),
+  });
+  if (!sender.ok) throw new Error(sender.reason);
 
   // The identity line is how `cli-hierarchy clear` sees an executor report back.
   deps.log?.(
     `[executor] I am '${self.name}' (project '${project.project}'); dispatch session is '${dispatch || 'none'}'`,
   );
+  if (sender.warning !== undefined) deps.log?.(`[executor] check-sender: ${sender.warning}`);
   const result = await (deps.claim ?? claimWithWait)(opts.boardDir, 'in-session-agent', {
     waitSec: opts.waitSec ?? DEFAULT_EXECUTOR_WAIT_SEC,
     workerId: self.name,
