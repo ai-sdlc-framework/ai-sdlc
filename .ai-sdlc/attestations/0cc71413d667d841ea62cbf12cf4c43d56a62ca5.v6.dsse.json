@@ -1,0 +1,57 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "30de7523c24bd64a070d76e7665a12572c1e0413"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "64273f59b4e57583ffb0f5dcceb39a51bc249cdf76d9654eb2cc6c3f6541c42d",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "bd0f71dcb85693de606fb93afd02c55ccc621fbb01b67876aaa1bef7423174a9",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "bd0f71dcb85693de606fb93afd02c55ccc621fbb01b67876aaa1bef7423174a9",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": ["61d866e2844b7a40303274305a7c6ec38eec58ecb8352ab8ff02c72321962dbb"]
+    },
+    {
+      "leafIndex": 1,
+      "proof": ["717f2f670e4e84aeb35d5c22c031697ad749c51efae908b19659cf5dad4bae05"]
+    }
+  ],
+  "rootHash": "6dc275bc68d45c2098664660bc2a9f32816933820122b694548024f7f9e7e4ea",
+  "rootSignature": "a60U11FGEB1AiozrYSDrkXS0E5pd8i1esBCk25OqHuGVATl7TUC1Me/X1HmuGh85AkEP2neAyVa5hSHEeBH8Dg==",
+  "nonce": "66bd767bc44911d5548662aa6ac2a3983acd7ead12c3da4feda308c797b66920",
+  "leafCount": 2,
+  "signedAt": "2026-10-13T06:17:30.045Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      ".github/workflows/__tests__/trust-marker.test.mjs",
+      ".github/workflows/ai-sdlc-admit.yml",
+      ".github/workflows/ai-sdlc-route.yml",
+      ".github/workflows/ai-sdlc-sa-feedback.yml",
+      ".github/workflows/ai-sdlc-slack-issue.yml",
+      ".github/workflows/ai-sdlc-triage.yml",
+      ".github/workflows/ai-sdlc.yml"
+    ],
+    "appliedReviewers": ["code-reviewer-codex", "security-reviewer"]
+  }
+}
