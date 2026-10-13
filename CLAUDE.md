@@ -1,497 +1,115 @@
 # AI-SDLC Project Instructions
 
-**Scope:** AI-SDLC is a full autonomous SDLC framework — autonomous orchestrator (RFC-0015), cross-harness review (RFC-0010 §13), decision engine (RFC-0011 DoR), operator TUI (RFC-0023), Pattern-C worktree isolation, and declarative governance. The `ai-sdlc-plugin/` package is the Claude Code plugin pillar; `pipeline-cli/` is the Step 0-13 pipeline runtime; `orchestrator/` is the CLI and agent runner layer.
+`ai-sdlc-plugin/` = Claude Code plugin, `pipeline-cli/` = Step 0-13 runtime, `orchestrator/` = CLI + agent runner.
+
+Only rules that change behaviour in every session live here (re-read every turn; budget 15k characters, enforced by `scripts/check-claude-md-size.test.mjs`). Reference material is in `docs/operations/`, one pointer per moved section.
 
 ## Git Flow
 
-- **Always rebase** feature branches onto main; never merge main in.
-- Update branch: `git fetch origin && git rebase origin/main`, then `git push --force-with-lease origin HEAD:refs/heads/<branch>` (explicit destination is the canonical spelling; `leaseOnOwnBranch` is the default `spec.governance.allowForcePush` since AISDLC-710, so a lease push of a dispatched task's own branch needs no operator prompt; only that explicit `HEAD:refs/heads/<branch>` spelling (and its `--force-with-lease=<branch>:<sha>` variants) is accepted, bare `HEAD` and omitted remote/refspec forms are refused because git maps them through config; an explicit `never` blocks every lease push).
-- Never `gh api pulls/N/update-branch` with merge method. Keep linear history.
-- `/ai-sdlc rebase <pr>` automates mechanical conflicts (test additions to same `describe`, prettier drift) and re-signs the attestation only when `contentHash` changed. Escalates semantic conflicts, modify-vs-delete, verification failures, and 3-attempt iteration cap. Refuses force-push to `main`/`master`. **CHANGELOG.md conflicts should not arise on feature branches** — if a rebase surfaces one, remove the CHANGELOG change from the feature branch rather than merging both sides (AISDLC-401).
+- **Always rebase** feature branches onto main; never merge main in. Keep history linear (no `update-branch` merge).
+- Update: `git fetch origin && git rebase origin/main`, then `git push --force-with-lease origin HEAD:refs/heads/<branch>`. Only that explicit spelling (and `--force-with-lease=<branch>:<sha>`) is accepted. `leaseOnOwnBranch` is the default `allowForcePush` (AISDLC-710); `never` blocks every lease push.
+- `/ai-sdlc rebase <pr>` automates mechanical conflicts and escalates semantic ones. Never force-push `main`/`master`.
+- CHANGELOG.md is owned by release-please: never edit it on a feature branch; remove such a diff on rebase conflict (AISDLC-401).
 
 ## CI marker hygiene
 
-GitHub Actions silently skips ALL workflows when ANY commit body contains `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`, or `[actions skip]` (substring, case-insensitive). Use the paren-quoted form `(skip ci marker)` in commit messages. Backtick-wrapping does NOT defeat the parser. `scripts/check-skip-ci-marker.sh` enforces on push.
+GitHub Actions skips ALL workflows when any commit body contains `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]` or `[actions skip]` (substring, case-insensitive; backticks do not help). Use the paren form `(skip ci marker)`. `scripts/check-skip-ci-marker.sh` enforces on push.
 
-## Branches & Commits
+## Branches, commits, PRs
 
-- Branches: `feat/<desc>`, `fix/<desc>`, or `ai-sdlc/issue-<n>`.
-- Conventional commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `style:`).
-- Include `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>`.
-
-## PRs
-
-- **Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command.** The release-please rolling PR (`chore: release main`) lands only through the sanctioned release path (`cli-merge-if-eligible`, source kind `release`, eligibility derived from GitHub) on an explicit operator instruction. No raw merge command is ever permitted, and the hooks are not loosened (AISDLC-703).
-- **Never close** issues or PRs. **Never force-push to main/master.**
-- Dismiss stale reviews only with documented reason (truncation, API errors).
-- `auto-enable-auto-merge.yml` sets `--auto --squash` on same-repo PRs (AISDLC-400: merge queue dropped 2026-05-23; explicit `--squash` ensures PRs always land as one commit on main regardless of repo-default drift). Setting `--auto` is NOT merging. PRs merge directly once `ai-sdlc/pr-ready` + `Backlog Drift` required checks pass — no merge-queue serialization, no update-branch CI re-run. AISDLC-398's content-addressed envelopes (headBlobSha-based, base-independent) eliminate v4-kick permanently. See `docs/operations/merge-without-queue.md` for the full flow and rollback procedure.
+- Branches: `feat/<desc>`, `fix/<desc>`, or `ai-sdlc/issue-<n>`. Conventional commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `style:`) with `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>`.
+- **Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command.** The release-please PR (`chore: release main`) lands only via `cli-merge-if-eligible --source-kind release` on explicit operator instruction (see Releases).
+- **Never close** issues or PRs. Dismiss stale reviews only with a documented reason (truncation, API errors).
+- `auto-enable-auto-merge.yml` sets `--auto --squash` (no merge queue); `--auto` is NOT merging. PRs merge once `ai-sdlc/pr-ready` + `Backlog Drift` pass ([`docs/operations/merge-without-queue.md`](docs/operations/merge-without-queue.md)).
 
 ## Testing
 
 - Run `pnpm build && pnpm test && pnpm lint && pnpm format:check` before pushing.
-- `.husky/pre-push` holds the fast local gates; coverage is NOT one of them. CI is the single coverage gate (AISDLC-726): vitest line floors of 90 for reference, orchestrator, pipeline-cli, mcp-server, mcp-advisor and sdk-typescript, 85 for dogfood, dashboard and the conformance runner, plus a 90% patch-coverage gate (`scripts/check-pr-patch-coverage.mjs`). Nothing runs coverage automatically on a developer machine.
-- Hook scripts (`ai-sdlc-plugin/hooks/*.js`) use Node built-in `node --test`. Orchestrator + MCP server use Vitest.
-- `@ai-sdlc/dogfood` tests (`dogfood/src/runner/exports.test.ts`) import from `dist/runner/index.js` to validate the built exports surface. The `pretest` lifecycle hook in `dogfood/package.json` runs `pnpm build` automatically before `pnpm test`, so `pnpm --filter @ai-sdlc/dogfood test` always works. Do NOT remove the `pretest` hook — it prevents CI failures on PRs where dogfood is selected by the `...[origin/main]` test filter but dist wasn't explicitly built (AISDLC-404).
+- Coverage is NOT a local gate; CI is the single gate (AISDLC-726): per-package line floors of 85-90 plus a 90% patch gate.
+- Hook scripts (`ai-sdlc-plugin/hooks/*.js`) use `node --test`; orchestrator and MCP server use Vitest.
+- Do NOT remove the `pretest` build hook in `dogfood/package.json` (AISDLC-404).
+- `CLAUDE.md` stays under 15k characters; move reference material to `docs/operations/` with a pointer.
 
-## Hooks
+## Hooks (pre-push chain)
 
-`.husky/pre-push` chains in order:
+`.husky/pre-push` runs, in order: dark-code check (`AI_SDLC_SKIP_DARK_CODE_GATE=1`), `squash-attestation-chores.sh`, `pre-push-fixups.sh`, `check-task-moved.sh` (moves the task file to `backlog/completed/`; must run BEFORE attestation-sign), `check-attestation-sign.sh` (signs/verifies the DSSE envelope). Per-gate skips are `AI_SDLC_SKIP_*` and are never a routine shortcut. Emergency only: `AI_SDLC_BYPASS_ALL_GATES=1` (document in the PR body; [`docs/operations/emergency-bypass.md`](docs/operations/emergency-bypass.md)).
 
-1. **`scripts/check-dark-code-on-push.sh`** (AISDLC-687) — runs `node scripts/check-dark-code.mjs`, the same static scan CI runs through `pnpm test`, so a newly dark module, a grown dark baseline or a new test double in production code blocks the push locally. Cheap (no build), so it runs BEFORE the coverage gate. Skip: `AI_SDLC_SKIP_DARK_CODE_GATE=1`. Hermetic tests: `scripts/check-dark-code-on-push.test.mjs` (run via `pnpm test:dark-code-push-gate`).
-2. **`scripts/squash-attestation-chores.sh`** — squashes stacked `chore: sign attestation` commits at HEAD into one to keep history clean. Must run before attestation-sign. No-op when 0 or 1 such commits. Skip: `AI_SDLC_SKIP_SQUASH_CHORES=1`.
-3. **`scripts/pre-push-fixups.sh`** (AISDLC-386) — orchestrates two mechanical fixup sub-hooks in dependency order (task-move → attestation-sign) in a single pass. (mcp-bundle-sync removed by AISDLC-385 — bundle now distributed via npm.) Each sub-hook is invoked with `AI_SDLC_INTERNAL_NO_EXIT_1=1` so it does its work but exits 0 instead of 1. After all sub-hooks complete, if any fixup ran, the orchestrator exits 1 ONCE with a consolidated "re-run git push" message. This collapses the worst-case 3-push chain into 2. Exit 0 silently when no fixups are needed.
-4. **`scripts/check-task-moved.sh`** (defense-in-depth) — auto-moves backlog task file from `backlog/tasks/` to `backlog/completed/` when any commit in the push range has `(AISDLC-N)` in its subject. Commits as `chore: auto-close AISDLC-N (AISDLC-220)`. **Silent skip when file is already git-tracked in `backlog/completed/`** (AISDLC-402): uses `git ls-files` to check tracked state; when the dev subagent already moved the file (the `/ai-sdlc execute` path), exits 0 with zero log noise and zero chore commits, eliminating the double-push for 95%+ of PRs. On the re-push after the orchestrator ran, this is an idempotent no-op. **Order is load-bearing — MUST run BEFORE attestation-sign:** attestation's contentHashV4 binds `{path, headBlobSha}` per file; task move must happen before sign. Skip: `AI_SDLC_SKIP_TASK_MOVE=1`.
-5. **`scripts/check-attestation-sign.sh`** (defense-in-depth) — auto-signs DSSE attestation when `<worktree>/.active-task` exists, `<worktree>/.ai-sdlc/verdicts/<task-id-lower>.json` exists, and no envelope exists for the current patch-id. When an envelope for the current patch-id already exists — with or without an active task — the hook runs the SAME verifier CI runs (`node scripts/verify-attestation.mjs`, `PR_HEAD_SHA` = local HEAD, `PR_BASE_SHA` = the merge base with `origin/main`) and contains no acceptance rules of its own. `status=valid` is an idempotent no-op. A rejected envelope with a verdict file is re-signed through the normal signer (only the rejected envelope is replaced) via the usual "re-run `git push`" fixup, then verified again; a rejected envelope with no verdict file or no active task fails the push (exit 2) with the verifier's reason and `re-run the review`, and signs nothing; unbuilt verifier inputs (`orchestrator/dist`) fail with `pnpm --filter @ai-sdlc/orchestrator build`. When there is no envelope and no verdict file (docs-only PRs, chore commits, ad-hoc pushes), exits 0 as a no-op — docs-only PRs skip `verify-attestation.yml` entirely via `paths-ignore` (AISDLC-388) and do not require an attestation status posted (AISDLC-214 + AISDLC-387 + AISDLC-388). Skip: `AI_SDLC_SKIP_ATTESTATION_SIGN=1`.
-
-**Master bypass (emergency only):** `AI_SDLC_BYPASS_ALL_GATES=1 git push` stops the entire pre-push chain — the orchestrator and all sub-hooks check this var at the very top and exit 0 immediately with a `[<hook>] AI_SDLC_BYPASS_ALL_GATES=1 — skipping` message to stderr. Use exclusively during RFC-0042 / gate-rewrite cutover windows; document every use in the PR body. Per-gate `AI_SDLC_SKIP_*` vars continue to work independently. See [`docs/operations/emergency-bypass.md`](docs/operations/emergency-bypass.md) for the full runbook.
-
-**Worktree hooks (AISDLC-693).** `core.hooksPath` is `.husky/_`, which is gitignored and generated by `prepare`; a worktree with no hooks directory runs NO pre-commit, commit-msg or pre-push gate, silently. Step 3 (`pipeline-cli/src/steps/hooks-check.ts`) fails closed when the directory git resolves for hooks has no executable `pre-push` while the main checkout has one (on a fresh worktree it installs with scripts enabled, then runs `prepare` once if still needed), install scripts are never disabled, and `ai-sdlc doctor` check `worktree-hooks` lists affected worktrees (`--fix` runs `prepare` where `node_modules` exists). Root `engines.node` is `>=22.22.1` (`lint-staged` floor) with a matching `.nvmrc`.
-
-`set -euo pipefail` aborts on first failure. `git push --no-verify` bypasses everything. All gates have hermetic tests at `scripts/<name>.test.mjs` wired via `test:task-move-gate` / `test:attestation-sign-gate` / `test:pre-push-fixups-gate`. (`test:mcp-bundle-sync-gate` removed by AISDLC-385.)
-
-The Definition-of-Ready check and the backlog-drift check are no longer local hooks (AISDLC-712, DEC-0056 row 3): they run in CI ("Evaluate backlog tasks changed by PR", "Backlog Drift"). Agents may still run `node pipeline-cli/bin/cli-dor-check.mjs --task <path>` and `npx backlog-drift check` by hand.
+- **Worktree hooks (AISDLC-693):** `core.hooksPath` is `.husky/_` (gitignored, made by `prepare`); a worktree without it runs NO gate. Never disable install scripts. `ai-sdlc doctor` check `worktree-hooks` lists affected worktrees.
+- DoR and backlog-drift run in CI only; run by hand: `node pipeline-cli/bin/cli-dor-check.mjs --task <path>`, `npx backlog-drift check`.
+- Per-hook behaviour and skips: [`docs/operations/pre-push-and-ci-reference.md`](docs/operations/pre-push-and-ci-reference.md).
 
 ## CI behavior
 
-**One CI run per PR (AISDLC-727, DEC-0056).** `ai-sdlc-gate.yml` is the only workflow that runs lint, build, test, coverage and integration on `pull_request` events; `ci.yml` runs on pushes to `main` and the nightly schedule only. The old `auto-rebase-open-prs.yml` and `auto-rebase-on-queue-kick.yml` workflows are deleted: open PRs are not rebased after each merge (`strict=false`); a PR is rebased only when it conflicts, by its executor or the conflict-resolver agent.
+- One CI run per PR (AISDLC-727): only `ai-sdlc-gate.yml` runs CI on `pull_request`; open PRs are rebased only on conflict.
+- Merge gate is the single rollup `ai-sdlc/pr-ready` (`ai-sdlc-gate.yml`); see [`docs/operations/quality-gate.md`](docs/operations/quality-gate.md). Main health monitor files `[main-health] main is RED` issues ([`docs/operations/main-health-monitor.md`](docs/operations/main-health-monitor.md)).
+- Workflows MUST call pipeline-cli via `node pipeline-cli/bin/cli-XXX.mjs`, never `pnpm --filter @ai-sdlc/pipeline-cli exec cli-XXX` (workspace own-bins do not resolve; AISDLC-156).
+- **Dark-code gate (AISDLC-552):** `pnpm dark-code:check` (in `pnpm test`) fails on a module with no non-test importer and on non-test source using a test double. `.ai-sdlc/dark-code-baseline.json` only shrinks; never silence a finding with a token import.
+- Feature flags `AI_SDLC_DEPS_COMPOSITION`, `AI_SDLC_AUTONOMOUS_ORCHESTRATOR`, `AI_SDLC_DECISION_CATALOG` default ON (opt out `off`). Detail in the reference above.
 
-PR merge gate is the single rollup check `ai-sdlc/pr-ready` produced by `.github/workflows/ai-sdlc-gate.yml` (re-actors/alls-green pattern); see [`docs/operations/quality-gate.md`](docs/operations/quality-gate.md) for archetype gating, cutover, and rollback.
+## Five-step algorithm (DEC-0090)
 
-**Main health monitor** (AISDLC-406): `.github/workflows/main-health-monitor.yml` fires on every push to `main` and runs the full test suite (`pnpm -r test` + workflow YAML tests). When any test fails, it creates a GitHub issue titled `[main-health] main is RED at <commit>` assigned to `@deefactorial`. This is the reactive complement to the no-queue direct-merge model (AISDLC-400): per-PR CI uses affected-package filtering and cannot detect cross-package merge-skew regressions, but the health monitor always runs the full suite post-merge. See [`docs/operations/main-health-monitor.md`](docs/operations/main-health-monitor.md) for the triage runbook. Motivating incident: AISDLC-398 + AISDLC-400 + AISDLC-405 each had green per-PR CI but combined to break `main`.
-
-Workflows MUST invoke pipeline-cli CLIs via `node pipeline-cli/bin/cli-XXX.mjs` directly — never via `pnpm --filter @ai-sdlc/pipeline-cli exec cli-XXX`. `pnpm exec` does not resolve workspace own-bins, so the latter form silently fails with `Command not found` and any `|| echo <fallback>` safety net fires unconditionally. `pipeline-cli/src/cli/bin-invocation.test.ts` enforces both directions of this rule. See AISDLC-156 + the "Invoking from CI" section of `pipeline-cli/README.md`.
-
-### Dark-code gate (AISDLC-552)
-
-`pnpm dark-code:check` (wired into `pnpm test`) fails when a module has **no
-non-test importer and no barrel re-export** — code that ships with passing unit
-tests, three reviewer approvals, and zero runtime effect. Reachability counts
-static imports, `export … from`, dynamic `import()`, and `.mjs` bin shims —
-resolved to actual file paths, so two same-named modules never mask each other;
-**a module imported only by its own test is dark by definition**.
-
-`.ai-sdlc/dark-code-baseline.json` records the 25 modules that were already dark
-when the gate landed, so it fails only on NEWLY dark modules. It is a **ratchet**:
-shrink it as modules get wired (`--update-baseline` after wiring), never grow it
-by hand. Entry points that are legitimately never imported go in its `allowlist`
-with a required reason. Do NOT silence a finding with a token import — that
-recreates exactly the condition being detected. A second rule flags non-test source that imports or calls a test double (`fake-*`/`mock-*`/`stub-*` modules, `createStub*`/`Fake*`/`Mock*` exports); resolve by wiring a real implementation or adding a `stubAllowlist` entry `{ path, capability, reason }`, and the `stubSites` baseline is shrink-only. It cannot see an interface with no implementation at all (nothing to import); capability outcome reporting covers that.
-
-## Feature flags
-
-- **`AI_SDLC_DEPS_COMPOSITION`** (RFC-0014): gates the dependency-graph composition layer. **On by default since AISDLC-410 (2026-05-23, operator override-path promotion).** Opt out via `AI_SDLC_DEPS_COMPOSITION=off` (or `0`/`false`/`no`, case-insensitive); truthy values (`1`/`true`/`yes`/`on`) are honored for backward-compat. Phase 1 surface = `cli-deps snapshot` writes `$ARTIFACTS_DIR/_deps/snapshot.<iso>.<tag>.jsonl`; `cli-deps gc/inspect` operate on those files. See [`docs/operations/deps-composition.md`](docs/operations/deps-composition.md) and [`pipeline-cli/docs/deps.md`](pipeline-cli/docs/deps.md). Phases 2-4 (PPA composition, DoR blast-radius, Slack digest) ship behind the same flag. Phase 5 ships the corpus aggregator (`cli-deps-corpus aggregate`) + operator-override capture (`cli-deps log-override`) + the hybrid promotion runbook at [`docs/operations/deps-composition-promotion.md`](docs/operations/deps-composition-promotion.md).
-- **`AI_SDLC_AUTONOMOUS_ORCHESTRATOR`** (RFC-0015): gates the autonomous pipeline orchestrator. **On by default since AISDLC-411 (2026-05-23, operator override-path promotion).** Opt out via `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=off` (or `0`/`false`/`no`, case-insensitive); truthy values (`experimental`/`1`/`true`/`yes`/`on`) are honored for backward-compat and remain ON. Phase 1 surface = `cli-orchestrator {start,tick,status}` (invoke directly via `node pipeline-cli/bin/cli-orchestrator.mjs`). Phases 2-5 (failure playbook, DoR/dep admission filters, `events.jsonl` writer, soak corpus + promotion) ship behind the same flag. Phase 5 ships the corpus aggregator (`cli-orchestrator-corpus aggregate`) + chaos-test harness (`pipeline-cli/src/orchestrator/chaos.test.ts`) + the hybrid promotion runbook at [`docs/operations/orchestrator-promotion.md`](docs/operations/orchestrator-promotion.md). See [`pipeline-cli/docs/orchestrator.md`](pipeline-cli/docs/orchestrator.md) and [`spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md`](spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md).
-
-## Five-step production algorithm (operator rule, 2026-10-10)
-
-Every fix, prevention task, governance rule and process change is worked in this order, and its write-up names the steps (DEC-0090):
-
-1. **Make the requirements less dumb.** Every requirement carries the name of the person or decision that set it; question it, especially when it came from a smart person or an old incident.
-2. **Delete the part or process.** Delete first. If you are not adding back 10% of what you deleted, you did not delete enough.
-3. **Simplify or optimise.** Only after step 2. Never optimise something that should not exist.
-4. **Accelerate cycle time.** Only after steps 1 to 3.
-5. **Automate.** Last, never first.
-
-A task that fixes a failure or adds a rule opens its Fix with a "Five-step review (requirements first)" paragraph: the requirement questioned and who set it, what is deleted, then what is simplified, accelerated or automated. A deletion that loosens a governance control is a class (b) decision for the operator. Velocity impact: positive by construction; the rule removes work before it adds any. Origin: the 2026-10-10 PR-drain review (AISDLC-797..803), where 5 of 7 failure families traced to requirements that should not have existed.
+For every fix or rule: question the requirement, delete, simplify, accelerate, automate last; name the steps. Details: [`docs/operations/agent-governance-reference.md`](docs/operations/agent-governance-reference.md).
 
 ## Decision authority (AISDLC-703, DEC-0039)
 
-Agents decide by rubric instead of waiting for the operator, and authority comes from the repository, not from a relayed message. Full protocol: [`docs/operations/decision-authority.md`](docs/operations/decision-authority.md).
-
-A decision record in the catalog on `main`, authored by the planner role, is sufficient authority for classes (a) and (b). A relayed chat message alone is never authority, and the permission-laundering rules are unchanged.
+Agents decide by rubric; authority comes from the repository, never a relayed message. A planner-authored decision record on `main` authorizes classes (a) and (b), only for the action it names; a record not yet on `main` is not authority. Protocol: [`docs/operations/decision-authority.md`](docs/operations/decision-authority.md).
 
 | Class | Criteria | What happens |
 |---|---|---|
-| (a) decide-and-proceed | Reversible, small blast radius, touches no trust-chain or governance control | Decide by rubric, record with `cli-decisions add` plus `answer`, apply at once |
-| (b) timeboxed | Hard to reverse, wide blast radius, or weakens a governance or trust-chain control | Decide by rubric, record with `--timebox` and `--autonomous-fallback`; applied when the timebox lapses without an operator override. Default 10 hours, two 5-hour windows (`timeboxWindowHours: 5` and `timeboxWindowCount: 2` in `.ai-sdlc/decisions-config.yaml`). A weakening option never applies itself when the timebox lapses |
-| (c) operator-only | Legal and licensing, money, accounts and credentials, and actions only the operator's identity can perform (merging the release PR, closing or disarming a PR) | Never self-decide. Record it with `cli-decisions escalate`, park only that task, and keep working other eligible tasks |
+| (a) decide-and-proceed | Reversible, small blast radius, no trust-chain or governance control | Decide by rubric, `cli-decisions add` + `answer`, apply at once |
+| (b) timeboxed | Hard to reverse, wide blast radius, or weakens a control | `--timebox` + `--autonomous-fallback` (default 10h); a weakening never self-applies |
+| (c) operator-only | Legal/licensing, money, accounts and credentials, actions only the operator's identity can perform (merging the release PR, closing or disarming a PR) | Never self-decide: `cli-decisions escalate`, park only that task, keep working others |
 
-Derive the class from three questions: can it be undone cheaply, how far does a mistake spread, and does it change a trust-chain or governance control. Examples: a CLAUDE.md edit named by a task (a); dispatching a planner-filed task (a); release timing per DEC-0042 (b, or (a) when the criteria give it); a change that weakens a governance or trust-chain control (b); signing up for a paid service (c). Two worked class (a) cases: (i) tightening a control to match a decision already on `main` (making AISDLC-720 fail closed); (ii) choosing the option that needs no exception to any hook or rule (AISDLC-721 waits for the hook fix, then uses the Edit tool).
+Derive the class from: undoable cheaply? how far does a mistake spread? does it change a trust-chain or governance control? **Only a change that loosens a control beyond what a recorded decision allows is a weakening** (tagged `--governance-change weakening --weakens <option-id>`, non-weakening `--autonomous-fallback`); tightening is class (a).
 
-**Only a change that loosens a control beyond what a recorded decision already allows is a weakening.** Tightening, or applying what a decision on `main` already permits, is class (a).
-
-**Away rule.** No session opens a blocking question prompt (`AskUserQuestion`) to the operator while the operator is away. Questions go to the planner, which decides (a) and (b) and collects (c).
-
-Only class (c) ever waits on a person, and only for legal, money, credentials or the operator's own identity. Every refusal a rule produces must name a next step the agent can take itself: a sanctioned command, a config key and value, or escalation to the dispatch or planner session.
-
-A decision record authorizes only the action it names. Where a record covers filing or dispatching a task, it overrides the "wait for explicit operator authorization" step of the Scope Creep section above; with no such record, that section stands. A record that is not yet on `main` is not authority: not one in an unmerged PR, and not one added in the same PR as the change that acts on it. `--by` is a claim, not authentication. `cli-decisions operator-digest` shows the PR and merge commit that put each record on main next to its claimed author, and flags an author that is not a recognised planner or operator identity, a record not on main, and any untagged record that names a governance or trust-chain surface.
-
-A decision that weakens a control (removes or loosens a hook, gate, required check, review or attestation requirement, merge restriction or role restriction, or moves a governance default in the permissive direction) is tagged `--governance-change weakening --weakens <option-id>`. `cli-decisions add` also applies the tag itself when the decision's scope, context-ref or body names a governance surface (plugin hooks, the governance resolver and schema defaults, agent-role config and templates, required checks and rulesets, workflow gates, CLAUDE.md rule sections, merge and role restrictions); an author can add the tag but cannot remove an auto-applied one. Its `--autonomous-fallback` must then be a non-weakening option, so a lapsed timebox resolves to "control stays"; `cli-decisions add` refuses otherwise, and the two ways forward are to pick a non-weakening fallback or add the decision with no fallback so it stays open for the planner or dispatch session. Tightening decisions are unaffected.
-
-Guardrails and hooks are never bypassed. When a sanctioned path is missing, file a task for it; do not route around the hook. The operator reviews with `cli-decisions operator-digest` and overrides with the existing `answer` and `extend` commands.
+**Away rule.** No session opens `AskUserQuestion` while the operator is away; questions go to the planner. Only class (c) waits on a person. Every refusal names a next step the agent can take itself. Hooks are never bypassed; when a sanctioned path is missing, file a task. Details: [`docs/operations/agent-governance-reference.md`](docs/operations/agent-governance-reference.md).
 
 ## Code Style
 
-- TypeScript strict, ESM. Prettier + ESLint. No premature abstractions — three similar lines beat one wrong abstraction.
+TypeScript strict, ESM. Prettier + ESLint. No premature abstractions: three similar lines beat one wrong abstraction.
 
-## Subagent Governance — Scope Creep Prevention (AISDLC-308)
+## Subagent governance
 
-**Agents must not auto-expand scope beyond the original ask.** The PR #481 audit (2026-05-16) documented the root-cause governance gap: an agent asked to *review the state of RFCs* independently filed follow-up tasks, then dispatched implementation of those tasks within 1.5 hours — ignoring its own written "operator walkthrough required as pre-work" note. See `docs/audits/2026-05-16-pr-481-rfc-0025-subagent-forged-signoff.md` for the full chain.
-
-When a review / audit / read-only task surfaces work that would be useful to do next, the agent MUST:
-
-1. **Present the recommendation** in the review output (PR body, task summary, comment).
-2. **Stop.** Wait for explicit operator authorization before:
-   - Filing new backlog tasks
-   - Opening any PR beyond the original ask
-   - Dispatching new subagents for downstream work
-3. **Treat "Pre-work required" / "Pre-conditions" / "OQ walkthrough needed" prose as a HARD precondition.** If a task body or referenced RFC flags an unresolved OQ or walkthrough requirement, the agent MUST NOT proceed to dispatch implementation until the operator confirms the precondition is met.
-
-Every scope expansion is a decision that belongs in the [Decision Catalog (RFC-0035)](spec/rfcs/RFC-0035-decision-catalog-operator-routing.md). Surface it there for operator routing — do not self-authorize.
-
-### Reviewer gate (AISDLC-308)
-
-The `code-reviewer` and `test-reviewer` subagents check for scope-creep candidates in every PR: if the PR BOTH (a) implements a "review" or "audit" task AND (b) creates new files under `backlog/tasks/`, it is flagged as **critical** with the message "scope-creep candidate — verify operator authorized task creation."
-
-### Read-only agent constraint (AISDLC-308)
-
-Agents whose role is read-only (exploration, audit, refinement review) MUST NOT use `Write`, `Edit`, task-create MCP tools, or dispatch downstream agents. These constraints are enforced in each agent's frontmatter `disallowedTools` list and are re-stated in the agent body as **Hard rules**.
-
-### Subagent model defaults (AISDLC cost control)
-
-Agent frontmatter pins model by role to prevent session-model bleed (Opus inheritance was the root cause of a 26%-weekly-budget incident on 2026-05-30):
-
-- `developer`, `code-reviewer`, `test-reviewer`, `correctness-reviewer` → **sonnet** (cost-efficient for mechanical tasks)
-- `rebase-resolver`, `ci-conflict-resolver`, `refinement-reviewer`, `code-reviewer-codex`, `test-reviewer-codex` → **sonnet**
-- `review-executor`, `review-executor-codex` (review probes) → **haiku**
-- `security-reviewer` → **opus** (reasoning-heavy; the one role where Opus pays for itself)
-- Commands pin too (AISDLC-761): relay/status commands (`version`, `doctor`, `hierarchy`, `cleanup`, `pipeline-status`, `triage`, `import-spec`, `rfc-init`, `init-signing-key`, and the retired pointers `execute-parallel`, `execute-parallel-status`, `execute-parallel-cleanup`, `orchestrator-tick`, `dispatch-worker`) → **haiku**; orchestration/session-driving commands (`execute`, `executor`, `operator-dispatch`, `planner`, `fix-pr`, `review-pr`, `detect-patterns`, `rebase`, `resolve-conflicts`) → **sonnet**.
-- No command or agent may carry `model: inherit` or omit `model:`; `ai-sdlc-plugin/commands/model-pins.test.mjs` (`pnpm test:plugin-model-pins-gate`) enforces it.
-
-On dispatch paths (`/ai-sdlc execute`, `/ai-sdlc executor`), code-review and test-review SHOULD be routed to the `-codex` variants (`code-reviewer-codex` / `test-reviewer-codex`) by default — Codex plan billing is zero Claude usage. Security review stays on the Claude-native `security-reviewer` at opus. Mechanical work (sign, reconcile, rebase) MUST NOT be wrapped in subagents.
-
-## Subagent Governance — OQ-resolution prohibition (AISDLC-298)
-
-**Dev subagents MUST NOT resolve RFC Open Questions inline during implementation.**
-
-AISDLC-271 / RFC-0031 shipped with all 5 OQs resolved by the dev subagent during a single development iteration — framework-level architectural decisions made without operator walkthrough or cross-pillar review. This is explicitly prohibited.
-
-### What counts as inline OQ resolution
-
-Any addition of a `**Resolution:**` (or `RESOLVED:` / `✅ RESOLVED`) marker to an RFC `## Open Questions` section by a developer subagent during task implementation. This includes:
-
-- Picking an implementation approach and writing the rationale directly into the RFC
-- Removing or replacing an OQ bullet with a concluded design decision
-- Writing code that implicitly resolves an OQ without documenting the escalation
-
-### Required behavior: escalate, do not resolve
-
-When a dev subagent encounters an open question that blocks or constrains implementation:
-
-1. **Stop and escalate** — do not pick an approach and resolve the OQ inline
-2. **Return `prUrl: null` with a `notes` field** explaining which OQ in which RFC is blocking and what options exist
-3. **Do not write Resolution markers** into RFC bodies — that is exclusively the operator's role after a walkthrough
-
-If an OQ is genuinely non-blocking (implementation can proceed without resolving it), proceed with a documented assumption in the PR body — not a Resolution marker in the RFC.
-
-### RFC-0035 Decision Catalog (default-ON since AISDLC-392)
-
-The mechanism for architectural / OQ-style decision routing is the [Decision Catalog (RFC-0035)](spec/rfcs/RFC-0035-decision-catalog-operator-routing.md). OQs project into the catalog as `Decision` records, routed to the appropriate actor (Engineering / Product / Operator), resolved asynchronously with full audit trail.
-
-**Feature flag `AI_SDLC_DECISION_CATALOG` is default-ON (AISDLC-392, 2026-05-22).** File decisions with:
-
-```bash
-node pipeline-cli/bin/cli-decisions.mjs add --summary "<one-line>" --scope <area> --option "<id>:<description>"
-node pipeline-cli/bin/cli-decisions.mjs list
-```
-
-To opt out: set `AI_SDLC_DECISION_CATALOG=off` (or `0`/`false`/`no`/`disabled`).
-
-Dev subagents that hit an OQ-class architectural question during implementation should still escalate by returning `prUrl: null` per the protocol above. The Decision Catalog is for OPERATOR-side decision routing, not a license for dev subagents to resolve OQs in code.
-
-### Reviewer gate (AISDLC-298)
-
-The `code-reviewer` and `test-reviewer` subagents check for inline OQ resolutions in every PR diff. A new `**Resolution:**` marker added by a developer in an RFC's `## Open Questions` section is a **critical** finding that blocks approval.
+- **Scope creep (AISDLC-308):** do not expand scope beyond the ask. A review/audit/read-only task that surfaces follow-up work presents the recommendation and STOPS until the operator authorizes filing tasks, extra PRs or subagent dispatch. "Pre-work required", "Pre-conditions" or "OQ walkthrough needed" prose is a HARD precondition. A decision record on `main` covering the filing or dispatch overrides the wait.
+- **Reviewer gates:** reviewers flag as critical a review/audit task that creates `backlog/tasks/` files (scope-creep candidate) and any new `**Resolution:**` marker in an RFC `## Open Questions` section.
+- **Read-only agents** must not use `Write`, `Edit`, task-create tools or dispatch downstream agents (frontmatter `disallowedTools`).
+- **OQ resolution prohibition (AISDLC-298):** dev subagents MUST NOT resolve RFC Open Questions inline: no `**Resolution:**` / `RESOLVED:` / `✅ RESOLVED` marker, no replacing an OQ with a design decision, no code that implicitly resolves one. When an OQ blocks or constrains the work: stop, file a catalog record (`node pipeline-cli/bin/cli-decisions.mjs escalate --task-id ... --scope rfc:RFC-XXXX --option ...`), return `prUrl: null` with `notes` naming the RFC, OQ and options. A genuinely non-blocking OQ gets a documented assumption in the PR body, not a marker. Resolution is exclusively the operator's role.
+- **Decision Catalog (RFC-0035, default ON):** `cli-decisions add --summary ... --scope <area> --option "<id>:<desc>"`; for operator routing, not a license to resolve OQs.
+- **Model defaults:** every agent and command pins `model:` (never `inherit`; `pnpm test:plugin-model-pins-gate`): developer and reviewers sonnet, `review-executor*` haiku, `security-reviewer` opus. Route code/test review to `-codex` variants on dispatch paths; never wrap mechanical work (sign, reconcile, rebase) in subagents. List: [`docs/operations/agent-governance-reference.md`](docs/operations/agent-governance-reference.md).
+- **Prompt rules live in one source (AISDLC-651.2):** "never do X" rules are defined once in `ai-sdlc-plugin/hooks/lib/prompt-rules.js` and rendered as one line per agent/command; do not restate them in prose ([`docs/operations/prompt-rules.md`](docs/operations/prompt-rules.md)).
 
 ## Review attestations
 
-**Attestation is required for code PRs.** `/ai-sdlc execute` runs three reviewer subagents locally and writes a DSSE envelope to `.ai-sdlc/attestations/<patch-id>.dsse.json` (v5, primary, AISDLC-398) and `.ai-sdlc/attestations/<head-sha>.dsse.json` (v5, legacy compat bridge). When v6 cutover is active: `.ai-sdlc/attestations/<patch-id>.v6.dsse.json` (primary) and `.ai-sdlc/attestations/<head-sha>.v6.dsse.json` (bridge). `verify-attestation.yml` posts `ai-sdlc/attestation: success/failure` as an informational governance signal — it feeds into the `ai-sdlc/pr-ready` rollup (the single required check on `main` per AISDLC-388), not directly into branch protection. Docs-only PRs skip `verify-attestation.yml` entirely via `paths-ignore` and do not need an envelope. Code PRs must have a valid envelope; missing/invalid envelopes are visible as a check failure that operators must resolve before merging. `ai-sdlc-review.yml`'s `Post Review Results` is the parallel review-tier check (CI-side reviewers run when local attestation is missing as the cost-saver fallback).
+- **Required for code PRs.** `/ai-sdlc execute` runs three reviewers and writes a DSSE envelope `.ai-sdlc/attestations/<patch-id>.v6.dsse.json`. `verify-attestation.yml` posts `ai-sdlc/attestation`, which feeds the `ai-sdlc/pr-ready` rollup; branch protection requires only `ai-sdlc/pr-ready` and `Backlog Drift`. Docs-only PRs skip it.
+- **v6 is the default schema** (RFC-0042): Merkle tree over `.ai-sdlc/transcript-leaves.jsonl` (`cli-attestation.mjs emit-leaf`). Opt out with `--schema-version v5` or `AI_SDLC_V5_LEGACY=1`.
+- **Lockstep (AISDLC-618):** `PATCH_ID_EXCLUSIONS` (`pipeline-cli/src/attestation/patch-id.ts`) has THREE copies that change together: `ATTESTATION_PATH_EXCLUSIONS` in `scripts/verify-attestation.mjs` and `PATCH_ID_EXCLUSIONS_FALLBACK` in `scripts/check-attestation-sign.sh`. Never add source, tests, configs or RFCs to `CONTENTHASH_SHARED_CHURN_FILES`.
+- A v6 envelope proves a real review ran against the exact code, not reviewer independence (AISDLC-568).
+- Algorithms, rebase relaxations, history: [`docs/operations/attestation-reference.md`](docs/operations/attestation-reference.md), [`docs/operations/attestation-troubleshooting.md`](docs/operations/attestation-troubleshooting.md).
 
-**AISDLC-398 content-addressed envelope filenames.** The envelope's primary filename is now `<git-patch-id>.dsse.json` where the patch-id is computed from `git diff-tree --no-color -p <merge-base>..<head> -- ':!.ai-sdlc/attestations/' | git patch-id --stable`. This decouples the lookup key from git commit history: a conflict-free queue rebase changes the commit SHA but NOT the patch-id, so the verifier always finds the envelope. The per-SHA legacy filename is written as a compat bridge for one release; pre-AISDLC-398 envelopes continue to be found by the per-SHA fallback. Per-SHA legacy files scheduled for deletion in the AISDLC-398 follow-up task after soak.
+## Remote agents (`/schedule`) are read-only (AISDLC-442)
 
-**Operator action** (AISDLC-388 AC-2): branch protection on `main` should require ONLY `ai-sdlc/pr-ready` and `Backlog Drift` — NOT `ai-sdlc/attestation` directly. If your repo still lists `ai-sdlc/attestation` as a required check, run: `gh api -X PATCH repos/<org>/<repo>/branches/main/protection/required_status_checks -F 'contexts[]=Backlog Drift' -F 'contexts[]=ai-sdlc/pr-ready' -F 'strict=true'`
-
-**RFC-0042 Phase 3 cutover — COMPLETE (AISDLC-409, 2026-05-23).** v6 is now the default attestation schema. The canonical pipeline paths (`/ai-sdlc execute`, `/ai-sdlc executor`) emit transcript leaves to `.ai-sdlc/transcript-leaves.jsonl` via `cli-attestation.mjs emit-leaf` as part of their reviewer fan-out, satisfying the prerequisite that gated the prior `AI_SDLC_V6_CUTOVER_ACTIVE=1` opt-in. Operators on ad-hoc reviewer flows that don't yet emit transcript leaves should pass `--schema-version v5` explicitly or set `AI_SDLC_V5_LEGACY=1` — that gap is tracked as a follow-up to AISDLC-409.
-
-**Default schema (current): v6.** New envelopes use the RFC-6962 Merkle-transcript model per RFC-0042. `sign-attestation.mjs` reads transcript leaves from `.ai-sdlc/transcript-leaves.jsonl`, builds the Merkle tree, signs the root with the operator's key, and writes `.ai-sdlc/attestations/<head-sha>.v6.dsse.json`. The verifier (AISDLC-383.4) verifies the Merkle proof + root signature. **v5 opt-out**: pass `--schema-version v5` explicitly OR set `AI_SDLC_V5_LEGACY=1` (legacy `AI_SDLC_V6_CUTOVER_ACTIVE=0` is also honored for backward-compat). v6 mode in CI rejects missing transcript leaves (replay-attack mitigation per 383.4 security review) unless `AI_SDLC_V6_SPOT_CHECK_MODE=1` is set (operator-triggered spot-check only).
-
-**v6 head-binding survives chore commits, NOT a rebase.** The verifier's head-binding check (envelope filename / `subject.digest.sha1` agree with HEAD) has exactly one relaxation, **attestation-only descendant** (AISDLC-419): `subject.sha1` is an ancestor of HEAD and the diff between them touches ONLY `.ai-sdlc/attestations/`, `.ai-sdlc/transcript-leaves.jsonl`, and `.ai-sdlc/transcript-leaves/`. That covers the linear chore-commit case (Step 10 sign + pre-push `check-attestation-sign.sh` chain). The AISDLC-448 "tree-equivalent modulo attestation" relaxation was deleted by AISDLC-810: it accepted an envelope whose subject a rebase had orphaned, but only where the orphaned commit still existed (the signer's clone), never in CI, so a locally green push failed `verify-attestation.yml`. After a rebase the envelope keeps its patch-id name but its subject is orphaned; the pre-push hook detects that (`git merge-base --is-ancestor <subject> HEAD` false, even when the local verifier says `status=valid`) and re-signs from the existing verdict file and per-patch-id transcript leaves (no reviewer round), replacing only that envelope via the usual "re-run `git push`" fixup; the new subject is the pre-chore HEAD. With no verdict file or no active task the push fails (exit 2) naming `re-run the review`. The helper lives in `scripts/verify-attestation.mjs` (`isAttestationOnlyDescendant`, re-exported from `pipeline-cli/attestation-core/verify-core.mjs`) and shares `ATTESTATION_PATH_EXCLUSIONS`; hermetic coverage is in `scripts/verify-attestation.test.mjs` and `scripts/check-attestation-sign.test.mjs`. Adding paths to the relaxation requires extending `ATTESTATION_PATH_EXCLUSIONS` in lockstep on the signer side (`pipeline-cli/src/attestation/patch-id.ts:PATCH_ID_EXCLUSIONS`) — asymmetric exclusion lists reproduce the AISDLC-421 hotfix class of bug (verifier computes a different patch-id than the signer).
-
-**Three-way lockstep (AISDLC-618): the bash pre-push hook is a THIRD synchronized surface.** `scripts/check-attestation-sign.sh`'s own `git diff-tree` idempotency check (Step 4) must exclude the SAME pathspecs as `PATCH_ID_EXCLUSIONS` / `ATTESTATION_PATH_EXCLUSIONS` above — AISDLC-610 added `backlog/tasks/` + `backlog/completed/` to the signer and verifier but NOT to the hook, so every `/ai-sdlc execute` PR (which moves a task file to `backlog/completed/` in the same diff the signer signs) computed a DIFFERENT patch-id in the hook than the signer used, and the hook's idempotency check hard-aborted the push with `ERROR: signer did not produce <patch-id>.v6.dsse.json`. The fix: the hook resolves its exclusion pathspecs from `cli-attestation print-patch-id-exclusions` (single source of truth reading `PATCH_ID_EXCLUSIONS`) when the compiled CLI is available, falling back to a hardcoded `PATCH_ID_EXCLUSIONS_FALLBACK` array for fresh worktrees / hermetic test repos where `pipeline-cli/dist` doesn't exist yet. `scripts/check-attestation-sign.test.mjs` binds ALL THREE copies together, not just the two hand-copies against each other: its `AISDLC-618: bash hook fallback exclusions stay in lockstep` suite asserts (a) the hook's `PATCH_ID_EXCLUSIONS_FALLBACK` equals the test file's own `CANONICAL_PATCH_ID_EXCLUSIONS` mirror, AND (b) both of those are asserted against the REAL `PATCH_ID_EXCLUSIONS` imported from the built `pipeline-cli/dist` (skipped, not failed, when dist isn't built yet — so fresh-checkout CI ordering can't false-fail). This closes the round-2-review gap where two hand-copies could silently drift together from the real array. Adding a new exclusion to `PATCH_ID_EXCLUSIONS` MUST update all three: the TS array itself, `ATTESTATION_PATH_EXCLUSIONS` in `verify-attestation.mjs`, and `PATCH_ID_EXCLUSIONS_FALLBACK` in `check-attestation-sign.sh` — the test suite fails loudly (once dist is rebuilt) if any of the three is missed.
-
-**v3/v4/v5 verifier code retained per OQ-7 (read-only).** The verifier prefers v6 when present, falls back to v5, v4, v3 for legacy envelopes — every historical PR remains auditable. The v5 signer path remains opt-in via `--schema-version v5` or `AI_SDLC_V5_LEGACY=1` for ad-hoc reviewer flows that have not yet wired transcript-leaf emission. The file collector excludes the envelope file itself so the chore-commit pattern doesn't chicken-and-egg the hash. All collectors also exclude a fixed `CONTENTHASH_SHARED_CHURN_FILES` list of shared-churn files (`pnpm-lock.yaml`, `CHANGELOG.md`, `pipeline-cli/CHANGELOG.md`, `orchestrator/CHANGELOG.md`, `reference/src/core/generated-schemas.ts`). These files are excluded on BOTH the signer and verifier sides. DO NOT add source files, test files, configs, `package.json`, or RFCs to this list. `generated-schemas.ts` is the **only** sanctioned `.ts` source-file exception (AISDLC-342).
-
-**AISDLC-380 sub-attestation gate — REMOVED (AISDLC-383.7).** The per-reviewer sub-attestation gate (`scripts/check-attestation-sign.sh` Step 4d) and its supporting scripts (`scripts/verify-reviewer-sub-attestations.mjs`, `ai-sdlc-plugin/scripts/sign-reviewer-verdict.mjs`, `ai-sdlc-plugin/scripts/init-reviewer-signing-key.mjs`) were deleted in RFC-0042 Phase 4 cleanup after the 30-day soak post-AISDLC-409. v6 envelopes are resistant to unexecuted-review forgery by construction (the Merkle transcript binds reviewer evidence to committed leaves signed by the operator's key), so the audit-only fallback was no longer earning its complexity. **Honest scope (AISDLC-568):** this proves a real review ran against the exact code state by a process with repo access; it does NOT by itself prove reviewer identity or independence from the coordinator that also makes the ship decision — a coordinator willing to pay the same LLM-token cost could self-author the transcript today. The `AI_SDLC_LEGACY_VERDICTS=1` env var, the `AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD` test hook, and the `~/.ai-sdlc/reviewer-keys/` per-reviewer key directory are no longer consulted. AISDLC-380.2 (architectural follow-up to close nonce/Read-tool bypasses) was already marked Superseded by RFC-0042's Merkle-transcript model.
-
-**Legacy v5 algorithm (AISDLC-362, retained read-only):** `computeContentHashV5(entries, signedMergeBase)` — SHA-256 of canonical JSON `{schemaVersion:'v5', signedMergeBase:'<sha>', files:[{path,blobSha}...]}`. `collectChangedFileEntriesForV5(repoRoot, baseRef, headRef)` — computes `git merge-base <baseRef> HEAD` ONCE at sign time (the FROZEN merge-base), then diffs `<signedMergeBase>..HEAD`. Non-overlapping sibling merges do not invalidate v5; overlapping (same file) sibling merges correctly invalidate it. Docs-only PRs (`spec/rfcs/**`, `docs/**`, `backlog/{tasks,completed}/**`, root `*.md`) bypass the full review+attestation pipeline: `paths-ignore` skips `ai-sdlc-review.yml` and `verify-attestation.yml` on `pull_request` events (AISDLC-388 reinstated the `paths-ignore` that AISDLC-214 removed); on `merge_group` events (where `paths-ignore` does not apply), both workflows detect docs-only changesets inline via `scripts/is-docs-only-changeset.mjs` (AISDLC-206) and short-circuit directly (AISDLC-214). The `verify-attestation.yml` short-circuit still posts `ai-sdlc/attestation: success` on merge_group docs-only events as a transitional measure; this code will be deleted once branch protection is updated (AISDLC-388 AC-4). The former fallback workflows (`ai-sdlc-review-docs-only.yml`, `verify-attestation-docs-only.yml`) have been retired — they caused CANCELLED races on the merge queue.
-
-## Remote agents (`/schedule`) — read-only by design (AISDLC-442)
-
-CCR remote sandboxes are **read-only by design**. They lack four prerequisites that `/ai-sdlc execute` requires:
-
-| Missing prerequisite | Why it matters |
-|---|---|
-| `~/.ai-sdlc/signing-key.pem` | Signing key is operator-machine-local; CCR has no access |
-| Plugin install | `mcp__plugin_ai-sdlc_ai-sdlc__*` tools are unavailable |
-| Worktree filesystem | `.worktrees/<task-id>/` creation / git-worktree ops fail |
-| Operator filesystem | `.ai-sdlc/trusted-reviewers.yaml` pubkeys inaccessible |
-
-**Acceptable in CCR**: PR/backlog status surveys, cron metric digests, Slack workflows, CI run-list / flake detection, `mcp__backlog__task_create`, `mcp__github__create_issue`.
-
-**Prohibited in CCR**: `/ai-sdlc execute`, signing-key flows, plugin subagents (`developer`, `code-reviewer`, etc.), worktree ops, sibling-repo writes.
-
-### Local vs. remote — what works where
-
-| Task type | Works in CCR? | Works locally? | Notes |
-|---|---|---|---|
-| Survey open PRs | Yes | Yes | `gh pr list` |
-| Check CI run health | Yes | Yes | `gh run list` |
-| Post Slack digest | Yes | Yes | Webhook call |
-| File a backlog task | Yes | Yes | `mcp__backlog__task_create` |
-| File a GitHub issue | Yes | Yes | `mcp__github__create_issue` |
-| Run `/ai-sdlc execute` | **No** | Yes | Requires signing key + worktree |
-| Sign attestation envelopes | **No** | Yes | Signing key is operator-machine-local |
-| Open worktrees | **No** | Yes | `git worktree add` fails in sandbox |
-| Run developer subagent | **No** | Yes | Plugin subagents unavailable in CCR |
-
-### Supported handoff workflow
-
-When a CCR `/schedule` task detects work that requires local execution:
-
-1. **File a backlog task** via `mcp__backlog__task_create` — or a GitHub issue via `mcp__github__create_issue` if the work is broad.
-2. **Include full context** in the task body: what triggered the work, what the expected outcome is, any relevant file paths.
-3. **The local operator session picks it up** on the next hierarchy dispatch tick (`cli-hierarchy`) or manually via `/ai-sdlc execute <task-id>`.
-
-> `/ai-sdlc execute` detects CCR sandboxes at startup (AISDLC-442) and refuses with a clear error pointing here. See `docs/operations/remote-agents-readonly.md` for the full runbook.
-
-### Detection heuristics
-
-`/ai-sdlc execute` uses three signals (first match wins):
-
-1. `CLAUDE_CODE_ENV=ccr` — canonical env var injected by Claude Code in CCR sessions.
-2. `CLAUDE_REMOTE_EXECUTION=1` — alternative injection used in some operator configurations.
-3. `CLAUDE_CODE_ENV` set (any value) + `~/.ai-sdlc/signing-key.pem` absent — likely managed sandbox; conservative fallback when (1) and (2) don't fire.
+CCR sandboxes lack the signing key, plugin and worktrees. Allowed: PR/CI surveys, digests, `mcp__backlog__task_create`, `mcp__github__create_issue`. Prohibited: `/ai-sdlc execute`, signing, plugin subagents, worktree ops, sibling-repo writes. For local work, file a backlog task with full context. Tables and detection heuristics: [`docs/operations/remote-agents-readonly.md`](docs/operations/remote-agents-readonly.md).
 
 ## RFCs
 
-Live in `spec/rfcs/RFC-NNNN-*.md`. Process: [`spec/rfcs/README.md`](spec/rfcs/README.md). Template: [`spec/rfcs/RFC-0001-template.md`](spec/rfcs/RFC-0001-template.md).
-
-**Lifecycle field** (frontmatter, separate from sign-off checklist): `Draft` → `Ready for Review` → `Signed Off` → `Implemented`, or `Superseded`. Drafts land on main early — sign-off doesn't gate visibility. Legacy `status:` field retained for `scripts/check-rfc-docs.mjs`'s `requiresDocs` gate.
-
-**Number lookup**: the canonical registry of every shipped, in-flight, withdrawn, and reserved RFC number is the [Registry](spec/rfcs/README.md#registry) table in `spec/rfcs/README.md` (AISDLC-165). To pick the next available number, read the "Next available number" line at the bottom of that table — do NOT scan the filesystem, the registry includes reservations that have no file yet.
-
-**`requires:` vs `assumes:` — dependency-kind semantics (AISDLC-311).** RFC frontmatter splits inter-RFC dependencies into two explicit fields:
-
-- **`requires:`** — runtime-code dependency. This RFC's implementation IMPORTS code from the listed RFCs. They MUST ship (lifecycle `Implemented`) before this RFC's implementation can ship. Use when removing the dep would cause a TypeScript / Node `import` error.
-- **`assumes:`** — design-contract dependency. This RFC reads the listed RFCs as a design contract (type shape, schema, naming, semantics) but does NOT code-import. They only need to EXIST at `Ready for Review` or higher. Use when removing the dep would only leave a comment or design rationale stale.
-
-**Example**: RFC-0031 (calibration-driven DID revision) assumes RFC-0009's DID schema as a design contract — its shipped code (`orchestrator/src/sa-scoring/revision-proposal.ts`) only imports `crypto.randomUUID`, not any RFC-0009 module. Correct: `assumes: [RFC-0009]`, not `requires: [RFC-0009]`.
-
-**Gate composition:**
-- **DoR upstream-OQ gate** — tasks BLOCK dispatch on open OQs / pre-`Signed Off` lifecycle of RFCs they list under `requires:` (or `references:` for legacy backward-compat). Tasks that list an RFC under `assumes:` are documentation-only — the gate does NOT block on the target's OQ / lifecycle status.
-- **Lifecycle promotion** — when an RFC is promoted to `Implemented`, its `requires:` entries SHOULD also be `Implemented` (warning during AISDLC-311 soak window). `assumes:` entries only need to exist.
-- **Docs-drift linter** (`scripts/check-rfc-docs.mjs`) — `requires:` / `assumes:` entries must reference real RFC IDs. When the RFC declares `implementedBy:` (source-tree paths) and the target also does, the linter scans for actual imports; missing imports surface a deprecation warning suggesting `assumes:`.
-
-See [`spec/rfcs/README.md#requires-vs-assumes--dependency-kind-semantics-aisdlc-311`](spec/rfcs/README.md#requires-vs-assumes--dependency-kind-semantics-aisdlc-311) for the full contract.
+`spec/rfcs/RFC-NNNN-*.md` ([process](spec/rfcs/README.md)). Lifecycle: `Draft` → `Ready for Review` → `Signed Off` → `Implemented` (or `Superseded`). Next number: the README Registry's "Next available number" line, never a file scan. `requires:` = runtime-code dependency (must be `Implemented`); `assumes:` = design-contract dependency (must exist); the DoR upstream-OQ gate blocks on `requires:` only. Semantics: [`docs/operations/backlog-and-execution-reference.md`](docs/operations/backlog-and-execution-reference.md).
 
 ## Backlog Workflow
 
-Tasks live in `backlog/tasks/` (open) and `backlog/completed/` (closed); managed via `mcp__backlog__*` MCP tools. Filename **must be ASCII**; titles may use unicode (`scripts/check-backlog-ascii.sh` enforces on commit).
+Tasks live in `backlog/tasks/` (open) and `backlog/completed/` (closed); managed via `mcp__backlog__*` tools. Filenames must be ASCII.
 
-### Non-dispatchable tasks (`dispatchable: false`) — AISDLC-243
-
-Tasks that are **never** meant to be picked up by the autonomous orchestrator's developer subagent (soak phases, operator-only monitoring steps, investigation/diagnosis tasks) should carry `dispatchable: false` in their frontmatter. This prevents the orchestrator from wasting subscription time dispatching a subagent for work that requires human judgment.
-
-```yaml
-dispatchable: false                          # required to opt out of dispatch
-dispatchableReason: "Operator soak phase — no code work; operator monitors stability"  # optional advisory
-```
-
-- **Default is `true`** — omitting the field means the task IS dispatchable (backward-compatible).
-- **`blocked.reason`** is for temporary holds (awaiting external signal, soak windows that may eventually need code follow-up). Use `dispatchable: false` for tasks that are **permanently** not LLM-dispatchable.
-- The `Dispatchability` filter runs AFTER `DependencyReadiness` and BEFORE `DorReadiness` in the orchestrator's admission chain, so non-dispatchable tasks skip the DoR log scan entirely.
-- `cli-deps frontier --format table` annotates non-dispatchable frontier entries with `[non-dispatchable]` so operators can see the full frontier at a glance.
-- Events: `OrchestratorBlockedByDispatchability` is emitted per-tick per-rejected-candidate to events.jsonl.
-
-### Drift gate
-
-`backlog-drift` checks every reference in task frontmatter resolves. **Required** on commit (per-task pre-commit, fails on any drift in staged tasks) + CI (full repo, fails on `error`-severity issues only — `info`/`warning` are surfaced but non-blocking, AISDLC-125). Local-only escape: `AI_SDLC_SKIP_DRIFT_GATE=1` (pre-commit hook only — NOT honored in CI). Auto-fix: `npx backlog-drift fix --task AISDLC-N`.
-
-### Upstream-OQ gate (AISDLC-296 / RFC-0011 extension)
-
-`refineBacklogTask()` (the DoR ingress shim) now runs an **upstream-OQ gate** before the seven-point rubric. The gate checks every RFC referenced by the task (via `references:` frontmatter or bare `RFC-NNNN` in body) and **rejects the task** when:
-
-- The RFC's `lifecycle:` field is `Draft` or `Ready for Review` (not `Signed Off` or `Implemented`), OR
-- The RFC's `## Open Questions` section contains at least one unresolved entry (no `**Resolution:**` / `RESOLVED:` / `✅ RESOLVED` marker).
-
-**Rejection** emits a `DorRejectedByOpenUpstreamOqEvent` and is included in `shouldRefuseExecution` when `evaluationMode === 'enforce'`.
-
-**Manual override**: tasks with `blocked.reason` in their frontmatter skip the gate — the operator has explicitly acknowledged the OQ status:
-
-```yaml
-blocked:
-  reason: "RFC-0024 OQs acknowledged; operator walkthrough scheduled for 2026-05-20"
-```
-
-This prevents retroactive blocking of in-flight tasks and allows a graceful migration path. The override is logged to the calibration log.
-
-**Code surface**: `pipeline-cli/src/dor/upstream-oq-gate.ts` — `checkUpstreamOqs()` is the entry point. All helpers (`extractRfcLifecycle`, `extractBlockedReason`, `findUnresolvedOqs`, `resolveRfcFilePath`) are exported for unit testing and reuse. `RefineBacklogTaskResult.upstreamOqCheck` exposes the full check result to callers.
-
-### DoR ingress workflow gate (AISDLC-379)
-
-`.github/workflows/dor-ingress.yml`'s `evaluate-pr-tasks` job **fails the `Evaluate backlog tasks changed by PR` status check** when any PR-staged backlog task has `overallVerdict: 'needs-clarification'` AND no `blocked.reason` override in frontmatter. Pre-AISDLC-379 the workflow posted the violations comment and then exited 0, so the check returned SUCCESS and auto-merge armed against PRs with unresolved Gate-3 violations (the 2026-05-20 RFC-0041 task-breakdown incident).
-
-The decision is computed by `pipeline-cli dor-pr-has-violations`, which consumes the same JSONL the renderer reads and applies the same `extractBlockedReason()` parser as the upstream-OQ gate — one source of truth for what "violation with no override" means. The `Fail check on unresolved violations` step exits 1 with `::error::` annotations that surface in the PR Files-changed UI.
-
-**Operator override mirrors the upstream-OQ gate**: tasks with `blocked.reason` in frontmatter bypass the workflow gate (the comment still posts as a `(override applied)` note). Use sparingly — every override is logged to the calibration log.
-
-**Branch-protection helper**: `scripts/sync-dor-branch-protection.sh` PATCHes the canonical required-checks list (idempotent). Edit `REQUIRED_CONTEXTS` at the top of the script to add / remove a context, then re-run. Full runbook at [`docs/operations/dor-ingress-gate.md`](docs/operations/dor-ingress-gate.md).
-
-**Code surface**: `pipeline-cli/src/dor/pr-violations.ts` (`computePrViolations()`), the `dor-pr-has-violations` subcommand in `pipeline-cli/src/cli/index.ts`, and the `Compute has_violations` + `Fail check on unresolved violations` steps in `.github/workflows/dor-ingress.yml`. Hermetic tests: `pipeline-cli/src/dor/pr-violations.test.ts` + `.github/workflows/__tests__/dor-ingress.test.mjs`.
-
-### Canonical execution paths
-
-| Use case | Command | Billing |
-|---|---|---|
-| Internal dogfood (backlog tasks) | `/ai-sdlc execute <task-id>` (e.g. `AISDLC-393`) | Subscription (Claude Code Max) |
-| Internal dogfood (GitHub issues, subscription billing) | `/ai-sdlc execute <issue-number>` (e.g. `612`, `#612`, `gh:612`) | Subscription (Agent SDK credit pool post-2026-06-15; refuses to fall back to API key) — AISDLC-393 |
-| **Autonomous loop — hierarchy (RFC-0051; supersedes orchestrator-tick / dispatch-worker / execute-parallel, AISDLC-763)** | `cli-hierarchy up` (planner + dispatch + executors); see [`docs/operations/cli-hierarchy.md`](docs/operations/cli-hierarchy.md). The old `/ai-sdlc orchestrator-tick`, `dispatch-worker` and `execute-parallel*` commands are one-paragraph pointers to it. | Subscription interactive quota only — Sonnet for dev/code/test, Opus only for security. |
-| Operator-driven single-PR (task file + impl land together) | `cli-orchestrator tick --task-from-file <path>` (AISDLC-373) | Same as the configured `--spawner` (subscription on default `claude`) |
-| Manual cleanup | `/ai-sdlc cleanup [<task-id>]` | n/a |
-| Shell-driven autonomous tick (cron/daemon/sidecar; Pattern Y) | `cli-orchestrator tick --spawner claude` | Subscription (shells out to `claude -p`; draws Agent SDK credit pool post-2026-06-15). Use when no operator CC session is available. |
-| GitHub issue / unattended / CI | `pnpm --filter @ai-sdlc/dogfood watch --issue <id>` | API key |
-
-`/ai-sdlc execute` is the default for internal work. Worktree-isolated, auto-creates sibling-repo PRs from `permittedExternalPaths`, marks Done + moves task file in the same PR.
-
-**AISDLC-393 — argument forms.** `/ai-sdlc execute` accepts (in this precedence order): `gh:<n>` (explicit GH-issue), `<prefix>-<number>` (backlog task ID like `AISDLC-393`, including hierarchical sub-IDs like `AISDLC-100.5`), `<number>` / `#<number>` (bare/hash-prefixed numeric → GH-issue). The reference parser lives in `dogfood/src/dispatch-execute-arg.ts` (`parseExecuteArg`) with hermetic test coverage. On the GH-issue path, NO backlog task file is created — the issue is the source of truth and the PR closes it via `Closes #N`. The watcher path (`pnpm --filter @ai-sdlc/dogfood watch --issue <id>`) accepts the same argument forms via the same parser, preserved unchanged for API-key/unattended/CI use. **Dispatch wiring:** the GH-issue path uses `fetchGhIssueAsTaskSpec()` (`dogfood/src/dispatch-from-issue.ts`) to synthesise an in-memory `TaskSpec`, then dispatches via `executePipeline({ taskSpec, sourceKind: 'gh-issue', issueNumber })` — the same composite the backlog-task path uses, just with two knobs flipped. Step 1 skips `findTaskFile`; Step 4 skips the frontmatter patch (sentinel still written) and materialises a transient synthetic task file at `<worktree>/backlog/tasks/<id> - <slug>.md` when `permittedExternalPaths` is non-empty so the PreToolUse hook resolves the allowlist (round-2 AC-2 fix; Step 13 removes the synthetic before push); Step 10 skips the tasks→completed move (attestation envelope still signed + committed); Step 11 formats the PR title with `(closes #N)` and prepends `Closes #N` to the body so the issue auto-closes on merge. **Billing safety (round 2 FINDING 2 fix):** the gh-issue branch pre-flights `claude` on PATH and refuses dispatch if the CLI is missing — refuses to fall back to `ANTHROPIC_API_KEY`-based SDK dispatch (paid API tokens) without explicit operator opt-in via the watcher path. **Latency (round 2 FINDING 3 fix):** the gh-issue branch fetches the issue once, caches the synthesised spec to a `$TMPDIR/aisdlc-393-spec-<n>-$$.json` tmpfile cleaned up on EXIT/INT/TERM, and feeds both the shell-scope TASK_ID extraction and the dispatch `node -e` block from that cache — no second `gh issue view` round-trip.
-
-**Spawner kinds for `cli-orchestrator tick --spawner <kind>`** (AISDLC-349, default changed AISDLC-352; legacy `claude-cli` removed AISDLC-377.6):
-- `mock` — fixtures only; for plumbing tests. Billing: none.
-- `api-key` — uses `ANTHROPIC_API_KEY` via the Claude Code SDK. Billing: API token (pay-as-you-go or Agent SDK credit pool post-2026-06-15).
-- `claude` — **(DEFAULT since AISDLC-352)** shells out to `claude -p` via `child_process.spawn`. **Use this for autonomous tick from a shell** (cron/daemon/sidecar context where no slash command body is around). Billing: subscription (Agent SDK credit pool, $200/mo on Max-20x). AISDLC-349. **Warning**: if `ANTHROPIC_API_KEY` is also set in env and `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` is configured, a spawner error can silently fall through to paid API tokens — the CLI warns at tick start.
-- `codex` — dispatches via Codex CLI bridge (`CODEX_SPAWN_AGENT_BIN`). Billing: Codex plan.
-- `copilot` — dispatches via GitHub Copilot CLI bridge (`COPILOT_SPAWN_AGENT_BIN`). Resolver throws a clear configuration error before any pipeline mutation when the env var is unset — refuses to silently fall back to `ANTHROPIC_API_KEY` billing. Billing: GitHub Copilot subscription. AISDLC-429.2 + AISDLC-429.3. See [`docs/operations/copilot-spawner.md`](docs/operations/copilot-spawner.md).
-- ~~`claude-cli`~~ — **removed in RFC-0041 Phase 3.3 (AISDLC-377.6)** after the AISDLC-377.4 deprecation-warning window. Was the `ClaudeCliInlineSpawner` inline-manifest path (AISDLC-198). For subscription-billed parallel autonomous drain, use the session hierarchy (`cli-hierarchy up`, RFC-0051). Migration breadcrumb: [`docs/operations/claude-cli-spawner-removed.md`](docs/operations/claude-cli-spawner-removed.md).
-
-**New dispatch patterns (RFC-0041 Conductor/Worker Architecture)**:
-- `in-session-agent` — each Worker is a separate operator-opened CC session (now an executor under `cli-hierarchy`; the `/ai-sdlc dispatch-worker` command is retired, AISDLC-763); tasks are claimed from the Dispatch Board (`.ai-sdlc/dispatch/queue/`) via foreground `Agent` calls (no watchdog, subscription quota). **Recommended default for autonomous drain.** N sessions = N-wide parallelism at zero incremental cost.
-- `claude-p-shell` — Workers are `env -u CLAUDECODE claude -p` subprocesses spawned by `cli-dispatch-supervisor`. Operator-controlled 30 min watchdog. Draws Agent SDK credit pool post-2026-06-15. For headless/CI contexts where no operator CC session is available.
-
-The Step 0-13 pipeline lives in `pipeline-cli/` (`@ai-sdlc/pipeline-cli`). Tier 1 = slash command body (subscription). Tier 2 = `executePipeline()` library + `SubagentSpawner` injection (API-key, MockSpawner, etc.). Refs: `pipeline-cli/{README,docs/spawner,docs/steps}.md`, RFC-0012.
-
-### Done semantics
-
-All paths: task file is moved to `backlog/completed/` in the originating PR's own diff via the `scripts/check-task-moved.sh` pre-push hook (AISDLC-220). The hook detects `(AISDLC-N)` in any commit subject in the push range, invokes the AISDLC-203 atomic helper, and commits the move as a chore commit — so the lifecycle close lands atomically with the work commit in the same PR.
-
-- **`/ai-sdlc execute` path**: the developer subagent moves the file to `backlog/completed/` BEFORE push. The hook detects the file is already in completed/ and no-ops (idempotent).
-- **Ad-hoc / external contributor path**: if the file is still in `backlog/tasks/` at push time, the hook auto-moves it. Zero friction, zero learning curve.
-
-### Cross-repo writes — `permittedExternalPaths`
-
-Tasks needing sibling-repo writes (e.g. `../ai-sdlc-io/`) declare an allowlist:
-
-```yaml
-permittedExternalPaths:
-  - '../ai-sdlc-io/'
-```
-
-The PreToolUse hook reads `<worktree>/.active-task` (per-worktree sentinel, AISDLC-81) to resolve which allowlist applies. Without the file, cross-repo writes are denied. The developer subagent writes; `/ai-sdlc execute` Step 12 creates the parallel sibling PRs. Env fallback: `AI_SDLC_ACTIVE_TASK_ID`.
-
-### Parallel runs
-
-Each `/ai-sdlc execute` runs in its own Claude Code session with its own per-worktree sentinel. Fan out via `/loop /ai-sdlc execute <task-id>` or multiple terminals — no shared mutable state to race on. Pre-push hook serializes only at push (Step 11); Steps 5-10 run fully in parallel across runs.
-
-Plugin subagents cannot use the `Agent` tool (Claude Code filters it one level deep — verified via AISDLC-69.2 test). The pipeline therefore lives inline in the slash command body, not in a subagent middleman (AISDLC-82 reverted by AISDLC-98).
-
-### Lifecycle rules
-
-- **Create-before-execution**: when a plan spans multiple tasks, create them ALL before dispatching. In Pattern C projects (non-bare parent repo + `.worktrees/` isolates), use `mcp__plugin_ai-sdlc_ai-sdlc__task_create` — it routes writes to the active worktree so files survive the next `git reset --hard` on the parent. In plain (non-Pattern-C) projects `mcp__backlog__task_create` is fine.
-- **Claim on start**: status → `In Progress` (auto by `/ai-sdlc execute`).
-- **Complete = TWO steps**: `mcp__backlog__task_edit` (status, ACs, finalSummary) + `mcp__backlog__task_complete` (moves file). File location is source of truth. Run the workspace test suite + lint before flipping.
-- **Never leave `To Do` after implementation.** A task isn't closed until it's in `backlog/completed/`.
-
-### `finalSummary` template
-
-```markdown
-## Summary
-<one-paragraph: what shipped>
-
-## Changes
-- `path/to/file.ts` (new|modified): <what + why>
-
-## Design decisions
-- **<Decision>**: <reason + tradeoff>
-
-## Verification
-- `pnpm build` — clean
-- `pnpm test` — <counts>
-- `pnpm lint` — clean
-
-## Follow-up
-<every item cites a task or issue id (e.g. AISDLC-123 or #123), or starts with "declined: <reason>"; or write "(none)">
-```
-
-### When NOT to create a backlog task
-
-- Inline fixes caught during review (use the PR).
-- Trivial chores (deps, config, typos).
-- Exploration/spikes (retroactively if it becomes real work).
+- **`dispatchable: false`** (AISDLC-243) in frontmatter keeps the orchestrator from dispatching permanent human-only work (soak phases, investigations); default is dispatchable. `blocked.reason` is for temporary holds.
+- **Drift gate:** `backlog-drift` checks every frontmatter reference resolves; CI fails on `error` severity. Fix with `npx backlog-drift fix --task AISDLC-N`. When you rename/move/delete a file, `grep -rl "<old path>" backlog/` first and fix inbound references in the same commit.
+- **DoR gates:** the upstream-OQ gate (AISDLC-296) rejects tasks whose referenced RFC is not `Signed Off`/`Implemented` or has unresolved OQs; the ingress gate (AISDLC-379) fails `Evaluate backlog tasks changed by PR` on `needs-clarification`. A `blocked.reason` frontmatter override skips both (logged). Runbook: [`docs/operations/dor-ingress-gate.md`](docs/operations/dor-ingress-gate.md).
+- **Execution:** `/ai-sdlc execute <task-id|n|#n|gh:n>` for internal work (subscription billing; issues close via `Closes #N`). Autonomous drain: `cli-hierarchy up` (RFC-0051). Never fall back silently to `ANTHROPIC_API_KEY` billing. Spawners and patterns: [`docs/operations/backlog-and-execution-reference.md`](docs/operations/backlog-and-execution-reference.md).
+- **Done semantics:** the task file moves to `backlog/completed/` in the PR's own diff (dev subagent before push; `check-task-moved.sh` otherwise). Never leave `To Do` after implementation.
+- **Cross-repo writes:** a task declares `permittedExternalPaths` in frontmatter; the PreToolUse hook resolves it from `<worktree>/.active-task`. Without it, cross-repo writes are denied. The dev subagent writes; it never commits in the sibling repo.
+- **Lifecycle:** create ALL tasks of a plan before dispatching (in Pattern C use `mcp__plugin_ai-sdlc_ai-sdlc__task_create`); claim on start; complete = `task_edit` then `task_complete`, after tests + lint. No tasks for inline review fixes, chores or spikes. `finalSummary` template: reference above.
 
 ## Releases
 
-**CHANGELOG.md is managed exclusively by release-please. Contributors MUST NOT edit it manually.**
+**CHANGELOG.md is managed exclusively by release-please; never edit it** (one rolling `chore: release main` PR; [`docs/operations/release-flow.md`](docs/operations/release-flow.md)). Land the release PR only on explicit operator instruction: `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind release --arm` (drop `--arm` to merge now). Every non-private workspace package needs `publishConfig` (`pnpm lint:publishable`). See [`docs/operations/release-and-plugin-reference.md`](docs/operations/release-and-plugin-reference.md).
 
-### release-please rolling PR model (AISDLC-401)
+## Plugin MCP server root and Pattern C
 
-`release.yml` fires on every push to `main`, runs `googleapis/release-please-action@v4`, and
-maintains a **single rolling PR** (`chore: release main` on branch `release-please--branches--main`).
-The rolling PR accumulates version bumps + CHANGELOG entries from conventional-commit messages.
-Regular feature PRs MUST NOT touch CHANGELOG.md — parallel-merge conflicts are the penalty
-(root cause of AISDLC-401, made visible after AISDLC-400 dropped the merge queue).
-
-The pre-push hook (`scripts/check-changelog-edit.sh`) WARNs when a feature branch touches
-CHANGELOG.md. If you see that warning, revert the CHANGELOG changes — release-please will
-reconstruct them from your commit messages. See [`docs/operations/release-flow.md`](docs/operations/release-flow.md) for the full flow.
-
-**Landing the release PR.** The governance hook refuses raw `gh` merge commands (including `--auto` arming). When the operator explicitly instructs a release, arm the release-please PR with `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind release --arm` (drop `--arm` to merge now). The CLI verifies the PR from GitHub (release branch, same repo, base `main`, release-only files whose content changes only version values, effective release author set (`governance.releaseAuthors`, else `mergeAuthors`, else the release-please bots; an explicit empty `releaseAuthors` disables the release path), green checks and CLEAN), squash-merges, and audits the call; the caller-role restriction (set `AI_SDLC_CALLER_ROLE=operator` from a plain shell) is a CLI role mistake guard (DEC-0038), not a security boundary; no hook-level control exists yet and a follow-up task adds one. When the release PR is authored by a shared PAT identity that agents also push as (this repo's setup), the author check is NOT the control; the controls are the exact release branch, content-based file validation and green checks. Release merges also need `governance.allowMerge: onGreenClean` or `governance.allowReleaseMerge: true` on main (a narrower grant for release PRs only; `allowMerge: never` does NOT stop release merges while `allowReleaseMerge: true`, so to stop all agent merges also leave `allowReleaseMerge` unset/false or set `releaseAuthors: []`; neither key affects GitHub's own auto-merge once armed). Never cut a release without an explicit operator instruction.
-
-### Package configuration
-
-`.github/workflows/release.yml` runs `pnpm -r publish --no-git-checks` with no `--access` flag. Every non-`"private": true` workspace package MUST carry:
-
-```jsonc
-"publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" }
-```
-
-Without it, npm rejects with E402 silently per-package while the overall job appears green. `pnpm lint:publishable` (wired into `pnpm test`) catches regressions; the operator should also wire it as an explicit CI step in `.github/workflows/ci.yml`.
-
-When adding a new publishable package: add to `pnpm-workspace.yaml`, add the `publishConfig` block (or mark `"private": true`), add to `release-please-config.json` if release-please should track its version. release-please does NOT add `publishConfig` automatically.
-
-## Plugin MCP server — project root resolution (AISDLC-99, AISDLC-216)
-
-The plugin's MCP server (`mcp__plugin_ai-sdlc_ai-sdlc__*` tools) resolves the project directory in this order: `AI_SDLC_PROJECT_ROOT` env → `CLAUDE_PROJECT_DIR` env → walk up from `process.cwd()` for an ancestor with `backlog/` → throw. Almost always falls through to the cwd-walk and finds the right project. Override with `AI_SDLC_PROJECT_ROOT=/abs/path` before launching Claude Code.
-
-### Pattern C routing (AISDLC-216)
-
-In Pattern C (non-bare parent repo + `.worktrees/<task-id>/` isolates), the parent's working tree is **read-only**. The MCP server starts from the parent's cwd and `process.cwd()` resolves to the parent root — without extra routing, writes would accumulate as untracked debris in the parent rather than landing in the correct worktree.
-
-After resolving the candidate root, the resolver checks for Pattern C: if `<root>/.worktrees/` exists and contains at least one subdirectory, the root is a Pattern C parent and the following routing applies:
-
-1. **`AI_SDLC_ACTIVE_TASK_ID` env var** — if set, routes to `<parent>/.worktrees/<task-id-lower>/`
-2. **Per-worktree `.active-task` sentinels** — scans `<parent>/.worktrees/<id>/.active-task` (matches `pipeline-cli/src/steps/04-flip-status.ts` write location and `findWorktreeSentinel` pattern). When multiple worktrees have sentinels (parallel runs), the most-recently-modified one wins.
-3. **No signal → refuse** with the Pattern C error message.
-
-The typical Pattern C setup: `/ai-sdlc execute <task-id>` automatically writes `.worktrees/<task-id>/.active-task` (per AISDLC-81). For sessions where the env-var path is preferred (e.g. operator manually launching Claude Code into a multi-worktree project), set `AI_SDLC_ACTIVE_TASK_ID=AISDLC-NNN` before launch.
-
-### Pattern C hard guards (AISDLC-358)
-
-The parent working tree MUST be on `main` at all times. This is enforced by `scripts/check-orchestrator-state.sh` (called at Step 0 of every `/ai-sdlc execute` and by `cli-orchestrator tick`) and by the inline `runParentBranchGuard()` check at the top of every `runOrchestratorTick()` call in `pipeline-cli/src/orchestrator/loop.ts`.
-
-Guard logic (two outcomes):
-
-- **Parent on non-main branch, clean working tree** → auto-recover: `git checkout main && git reset --hard origin/main`. Logs `[orchestrator-state] auto-recovered parent from '<branch>' to main`.
-- **Parent on non-main branch, dirty working tree** → REFUSE. Prints the offending branch name, the dirty paths, and the manual recovery command. Exits non-zero (`check-orchestrator-state.sh`) or throws `ParentNotOnMainError` (TypeScript loop). The orchestrator tick is aborted; no frontier work proceeds.
-
-Recovery (operator): stash or commit your changes in the parent, then run `git checkout main && git reset --hard origin/main`.
-
-**Sanctioned vs. ad-hoc reset (AISDLC-450):** `git reset --hard origin/main` is ONLY permitted when invoked by `scripts/check-orchestrator-state.sh` on a verifiably clean working tree. Ad-hoc `git reset --hard` by the Conductor or a subagent (outside the script) is forbidden — if the script refuses (dirty parent), escalate to the Decision Catalog (see `/ai-sdlc orchestrator-tick` Step 0).
+In Pattern C (non-bare parent + `.worktrees/<task-id>/`) the parent working tree is **read-only**; MCP writes route to the worktree named by `AI_SDLC_ACTIVE_TASK_ID` or a per-worktree `.active-task` sentinel, else refuse. The parent MUST stay on `main` (AISDLC-358): `scripts/check-orchestrator-state.sh` auto-recovers a clean parent and aborts the tick on a dirty one. `git reset --hard origin/main` is permitted only inside that script on a clean tree; if it refuses, escalate to the Decision Catalog. Internals: [`docs/operations/release-and-plugin-reference.md`](docs/operations/release-and-plugin-reference.md).

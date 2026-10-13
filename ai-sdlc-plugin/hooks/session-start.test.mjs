@@ -611,3 +611,20 @@ describe('ai-sdlc-plugin session-start hook — version-aware self-heal gate (AI
     });
   });
 });
+
+describe('ai-sdlc-plugin session-start hook — compact form (AISDLC-651.2)', () => {
+  it('renders limits, blocked actions and the checklist as single lines', () => {
+    const ctx = JSON.parse(runHook(tempDirWithConfig).output).hookSpecificOutput.additionalContext;
+    const lines = ctx.split('\n');
+    assert.equal(lines.filter((l) => l.startsWith('Limits:')).length, 1);
+    assert.equal(lines.filter((l) => l.startsWith('Blocked actions')).length, 1);
+    assert.equal(lines.filter((l) => l.startsWith('Before EVERY commit')).length, 1);
+    assert.ok(!ctx.includes('### Pre-Commit Checklist'), 'no multi-line checklist section');
+    assert.ok(!ctx.includes('### Blocked Actions'), 'no per-action bullet section');
+  });
+
+  it('keeps the injected block small', () => {
+    const ctx = JSON.parse(runHook(tempDirWithConfig).output).hookSpecificOutput.additionalContext;
+    assert.ok(ctx.length < 2000, `session governance block grew to ${ctx.length} chars`);
+  });
+});

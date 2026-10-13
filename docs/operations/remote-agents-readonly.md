@@ -134,3 +134,53 @@ For the architectural paths that WOULD enable `/ai-sdlc execute` from CCR (signi
 - `ai-sdlc-plugin/commands/execute.md` — "Remote-sandbox guard (AISDLC-442)" section
 - `docs/operations/init.md` — how to run `/ai-sdlc init-signing-key` on a local session
 - RFC-0042 — v6 attestation schema (Merkle-transcript model, operator-local signing)
+
+## Reference moved from CLAUDE.md (AISDLC-651.2)
+
+### Remote agents (`/schedule`) — read-only by design (AISDLC-442)
+
+CCR remote sandboxes are **read-only by design**. They lack four prerequisites that `/ai-sdlc execute` requires:
+
+| Missing prerequisite | Why it matters |
+|---|---|
+| `~/.ai-sdlc/signing-key.pem` | Signing key is operator-machine-local; CCR has no access |
+| Plugin install | `mcp__plugin_ai-sdlc_ai-sdlc__*` tools are unavailable |
+| Worktree filesystem | `.worktrees/<task-id>/` creation / git-worktree ops fail |
+| Operator filesystem | `.ai-sdlc/trusted-reviewers.yaml` pubkeys inaccessible |
+
+**Acceptable in CCR**: PR/backlog status surveys, cron metric digests, Slack workflows, CI run-list / flake detection, `mcp__backlog__task_create`, `mcp__github__create_issue`.
+
+**Prohibited in CCR**: `/ai-sdlc execute`, signing-key flows, plugin subagents (`developer`, `code-reviewer`, etc.), worktree ops, sibling-repo writes.
+
+#### Local vs. remote — what works where
+
+| Task type | Works in CCR? | Works locally? | Notes |
+|---|---|---|---|
+| Survey open PRs | Yes | Yes | `gh pr list` |
+| Check CI run health | Yes | Yes | `gh run list` |
+| Post Slack digest | Yes | Yes | Webhook call |
+| File a backlog task | Yes | Yes | `mcp__backlog__task_create` |
+| File a GitHub issue | Yes | Yes | `mcp__github__create_issue` |
+| Run `/ai-sdlc execute` | **No** | Yes | Requires signing key + worktree |
+| Sign attestation envelopes | **No** | Yes | Signing key is operator-machine-local |
+| Open worktrees | **No** | Yes | `git worktree add` fails in sandbox |
+| Run developer subagent | **No** | Yes | Plugin subagents unavailable in CCR |
+
+#### Supported handoff workflow
+
+When a CCR `/schedule` task detects work that requires local execution:
+
+1. **File a backlog task** via `mcp__backlog__task_create` — or a GitHub issue via `mcp__github__create_issue` if the work is broad.
+2. **Include full context** in the task body: what triggered the work, what the expected outcome is, any relevant file paths.
+3. **The local operator session picks it up** on the next `/ai-sdlc orchestrator-tick` or manually via `/ai-sdlc execute <task-id>`.
+
+> `/ai-sdlc execute` detects CCR sandboxes at startup (AISDLC-442) and refuses with a clear error pointing here. See `docs/operations/remote-agents-readonly.md` for the full runbook.
+
+#### Detection heuristics
+
+`/ai-sdlc execute` uses three signals (first match wins):
+
+1. `CLAUDE_CODE_ENV=ccr` — canonical env var injected by Claude Code in CCR sessions.
+2. `CLAUDE_REMOTE_EXECUTION=1` — alternative injection used in some operator configurations.
+3. `CLAUDE_CODE_ENV` set (any value) + `~/.ai-sdlc/signing-key.pem` absent — likely managed sandbox; conservative fallback when (1) and (2) don't fire.
+

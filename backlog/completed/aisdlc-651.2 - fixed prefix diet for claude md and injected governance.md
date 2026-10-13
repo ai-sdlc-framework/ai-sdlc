@@ -2,7 +2,7 @@
 id: AISDLC-651.2
 title: >-
   RFC-0050 follow-up: cut the fixed prefix every session and subagent re-reads (CLAUDE.md, injected governance), measured by cli-usage context
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-01'
 labels:
@@ -60,11 +60,11 @@ cache-read tokens and the worst run is 80M over 203 turns.
 5. **Measure after.** Repeat step 1 and commit the before and after numbers.
 
 ## Acceptance Criteria
-- [ ] `CLAUDE.md` is at most 15k characters, and every section moved out has a one-line pointer to its new location in `docs/operations/`.
-- [ ] A test asserts `CLAUDE.md` stays under the size budget so it does not regrow silently.
-- [ ] Both hooks render the governance block in the compact form, with the existing hook tests updated and passing.
-- [ ] The developer agent definition is reduced and still carries its full return contract and hard rules.
-- [ ] Before and after first-call context for a main session and a developer subagent are recorded in the PR body, with the developer prefix reduced by at least half.
-- [ ] Prompt rules of the 'never do X' kind live in one source; each agent and command prompt receives each relevant rule once, as a single line that names the sanctioned alternative and says when a hook enforces it; escalating duplicates are removed; a test fails when a rule appears more than once in a prompt or when an agent file drifts from the source.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
+- [x] `CLAUDE.md` is at most 15k characters, and every section moved out has a one-line pointer to its new location in `docs/operations/`.
+- [x] A test asserts `CLAUDE.md` stays under the size budget so it does not regrow silently.
+- [x] Both hooks render the governance block in the compact form, with the existing hook tests updated and passing.
+- [x] The developer agent definition is reduced and still carries its full return contract and hard rules.
+- [x] Before and after first-call context for a main session and a developer subagent are recorded in the PR body, with the developer prefix reduced by at least half.
+- [x] Prompt rules of the 'never do X' kind live in one source; each agent and command prompt receives each relevant rule once, as a single line that names the sanctioned alternative and says when a hook enforces it; escalating duplicates are removed; a test fails when a rule appears more than once in a prompt or when an agent file drifts from the source.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->

@@ -33,29 +33,17 @@ escalates the rest.
 
 ## Hard rules (NEVER violate)
 
-1. **Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command.** No `gh pr merge`.
-2. **Force-push uses `--force-with-lease` ONLY.** Plain `git push --force` /
-   `-f` is forbidden — `--force-with-lease` refuses if the remote moved
-   under us, which preserves a co-pusher's work.
-3. **Never push to `main` or `master`.** Refuse early in the run if the
-   current branch resolves to either name. The agent-role.yaml block list
-   already forbids `git push --force*`; this is the same rule extended to
-   `--force-with-lease` because the harm model is identical at the branch
-   tip we never own.
-4. **Never close PRs or issues.** No `gh pr close`, `gh issue close`.
-5. **Never delete branches.** No `git branch -D` / `-d`.
-6. **Edit governance config (`.ai-sdlc/**`) only when the task names the file and the change; never as a side effect.** Runtime artifacts (attestations, reviews, transcript leaves, the decision log, the dispatch board) are written through their CLIs as today. Runs marked untrusted (`AI_SDLC_UNTRUSTED_RUN`) are blocked from `.ai-sdlc/**` and `.github/workflows/**` by the hook; ask a maintainer in the PR instead of retrying.
-   `.github/workflows/**` is only refused when the project's
-   `.ai-sdlc/agent-role.yaml` lists it under `blockedPaths` — not blocked by
-   default; check the project's config before editing it.
-7. **Never run destructive git operations** outside the rebase flow itself.
-   No `git reset --hard <ref>`, no `git checkout -- .`, no `git restore .`
-   on the working tree. `git rebase --abort` is allowed (it restores the
-   pre-rebase HEAD cleanly).
-8. **Never write GitHub Actions CI-skip magic tokens.** The five literal
-   substrings (`[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`,
-   `[actions skip]`) silently disable workflows. Do not introduce them
-   into commit messages during conflict resolution. (AISDLC-88.)
+<!-- prompt-rules:begin ids=merge,force-push,close,branch-delete,destructive-git,ci-skip,governance-config -->
+- **Merge:** only via `cli-merge-if-eligible` when `governance.allowMerge` permits it; the raw `gh pr merge` (any form, `--auto` included) is blocked by the PreToolUse hook.
+- **Force-push:** only `git push --force-with-lease origin HEAD:refs/heads/<your-branch>` to your own task branch after a rebase; plain `git push --force`/`-f` and any push to `main`/`master` are blocked by the PreToolUse hook.
+- **Close:** never close PRs or issues (`gh pr close`, `gh issue close`); report in `notes` instead (hook-enforced unless repo policy grants it).
+- **Delete branches:** never (`git branch -D`/`-d`); leave cleanup to `/ai-sdlc cleanup` (hook-enforced unless repo policy grants it).
+- **Destructive git:** never `git reset --hard`, `git checkout -- .` or `git restore .`; use a WIP commit plus `git reset --soft` to set work aside (hook-enforced unless repo policy grants it).
+- **CI-skip markers:** never write `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]` or `[actions skip]` in a commit message (backticks do not help); write the paren form `(skip ci marker)`; `check-skip-ci-marker.sh` blocks the push.
+- **Governance config:** edit `.ai-sdlc/**` only when the task names the file and the change; write runtime artifacts through their CLIs; for untrusted runs the PreToolUse hook blocks it, so ask a maintainer in the PR instead of retrying (`.github/workflows/**` is blocked only when `blockedPaths` lists it).
+<!-- prompt-rules:end -->
+
+Role-specific carve-outs: refuse early when the current branch resolves to `main` or `master` (same harm model applies to a lease push); `git rebase --abort` is allowed (it restores the pre-rebase HEAD) and the reset/checkout/restore ban applies outside the rebase flow itself.
 
 ## Your workflow
 

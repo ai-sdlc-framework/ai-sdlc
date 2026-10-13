@@ -369,3 +369,24 @@ describe('ai-sdlc-plugin subagent-start hook — AISDLC-572 agent_type capture',
     }
   });
 });
+
+describe('ai-sdlc-plugin subagent-start hook — compact form (AISDLC-651.2)', () => {
+  it('renders blocked paths and actions as one line each, not one bullet per entry', () => {
+    const ctx = JSON.parse(runHook(tempDirWithConfig).output).hookSpecificOutput.additionalContext;
+    const lines = ctx.split('\n');
+    assert.equal(lines.filter((l) => l.startsWith('Blocked paths')).length, 1);
+    assert.equal(lines.filter((l) => l.startsWith('Blocked Bash actions')).length, 1);
+    assert.equal(lines.filter((l) => l.startsWith('Cross-repo writes')).length, 1);
+    // Only the hard-rule list renders bullets; the other lists are inline.
+    const bullets = lines.filter((l) => l.startsWith('- '));
+    assert.ok(
+      bullets.length <= 5,
+      `expected at most the 5 hard-rule bullets, got ${bullets.length}`,
+    );
+  });
+
+  it('keeps the injected block small', () => {
+    const ctx = JSON.parse(runHook(tempDirWithConfig).output).hookSpecificOutput.additionalContext;
+    assert.ok(ctx.length < 2200, `subagent governance block grew to ${ctx.length} chars`);
+  });
+});

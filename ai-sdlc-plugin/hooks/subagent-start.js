@@ -122,28 +122,23 @@ const operationalRules = renderOperationalRules(
 // the lifecycle (no pre-commit checklist, no PR creation), they just do their
 // stage. The hard rules are the same.
 
+// AISDLC-651.2: compact form, one line per rule or list; the prose lives in
+// docs/operations/agent-governance-reference.md. Re-read on every subagent turn.
 let context = `## AI-SDLC Governance (subagent context)
-
-You are running as a Claude Code subagent. The orchestrating command will
-gate your output (reviews, PR creation). Stay focused on your assigned task.
+Subagent: the orchestrating command gates your output; stay on your assigned task.
 
 ### Hard rules — NEVER violate
 ${renderSubagentHardRules(resolvedGovernance)}${operationalRules ? `\n- ${operationalRules}` : ''}`;
 
 if (blockedPaths.length > 0) {
-  context += `\n\n### Blocked paths (PreToolUse hook enforces — no edits)
-${blockedPaths.map((p) => `- \`${p}\``).join('\n')}`;
+  context += `\nBlocked paths (PreToolUse hook, no edits): ${blockedPaths.map((p) => `\`${p}\``).join(', ')}`;
 }
 
 if (blockedActions.length > 0) {
-  context += `\n\n### Blocked Bash actions (PreToolUse hook enforces — no execution)
-${blockedActions.map((a) => `- \`${a}\``).join('\n')}`;
+  context += `\nBlocked Bash actions (PreToolUse hook, no execution): ${blockedActions.map((a) => `\`${a}\``).join(', ')}`;
 }
 
-context += `\n\n### Cross-repo writes
-If you have \`AI_SDLC_ACTIVE_TASK_ID\` set, the active task's \`permittedExternalPaths\`
-in its frontmatter allowlists writes to sibling repos. The PreToolUse hook honors
-this — writes outside your cwd that aren't in the allowlist will be denied.`;
+context += `\nCross-repo writes: the \`permittedExternalPaths\` of the task in \`AI_SDLC_ACTIVE_TASK_ID\` allowlists sibling repos; other writes outside your cwd are denied.`;
 
 // ── Output ───────────────────────────────────────────────────────────
 
