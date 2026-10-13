@@ -8,7 +8,7 @@
 
 ## TL;DR
 
-The GitHub merge queue is **disabled**. PRs merge directly via GitHub's auto-merge (squash) once `ai-sdlc/pr-ready` and `Backlog Drift` required checks pass. No serialization, no update-branch CI re-run, no `merge_group` events.
+The GitHub merge queue is **disabled**. PRs merge directly via GitHub's auto-merge (squash) once the single required check `ai-sdlc/pr-ready` passes. No serialization, no update-branch CI re-run, no `merge_group` events.
 
 To re-enable the queue: see [Rollback procedure](#rollback-procedure) below.
 
@@ -32,7 +32,7 @@ Operator architectural review on 2026-05-23 determined the merge queue was overk
 | v4-kick (attestation invalidation on queue rebase) | Was felt acutely; AISDLC-398 closed the gap |
 
 **Verdict:** drop the queue, achieve equivalent safety via:
-- Branch protection: require `ai-sdlc/pr-ready` + `Backlog Drift`
+- Branch protection: require only `ai-sdlc/pr-ready` (Backlog Drift is a `needs:` of the rollup)
 - Repo settings: squash-only merges (same as the queue's enforced strategy)
 - AISDLC-398 content-addressed envelopes: base-independent, survive any commit-SHA change
 
@@ -59,7 +59,7 @@ AISDLC-398 changed the content hash to be base-independent (`headBlobSha` only).
    by its executor or the conflict-resolver agent (AISDLC-727 / DEC-0056).
 ```
 
-CI runs once per pull request (AISDLC-727): `ai-sdlc-gate.yml` is the only workflow that runs the suite on `pull_request` events. `ci.yml` runs on pushes to `main` and the nightly schedule only (the post-merge full run). The jobs that used to exist only in `ci.yml` (`Backlog Drift`, first-run smoke, Python SDK, Go SDK) moved into the gate workflow and feed `ai-sdlc/pr-ready`; `Backlog Drift` keeps its job name because it is a required context.
+CI runs once per pull request (AISDLC-727): `ai-sdlc-gate.yml` is the only workflow that runs the suite on `pull_request` events. `ci.yml` runs on pushes to `main` and the nightly schedule only (the post-merge full run). The jobs that used to exist only in `ci.yml` (`Backlog Drift`, first-run smoke, Python SDK, Go SDK) moved into the gate workflow and feed `ai-sdlc/pr-ready`; `Backlog Drift` is a `needs:` of the rollup, not a separately required context.
 
 Total wall-clock time: ~5-10 min (CI time) vs ~15-25 min with the queue (CI + queue probe + update-branch CI re-run).
 
@@ -105,7 +105,7 @@ cd <repo-root>
 bash scripts/sync-branch-protection.sh
 ```
 
-This PATCHes required_status_checks to `[ai-sdlc/pr-ready, Backlog Drift]` with `strict: true`. Requires admin permission. Safe to re-run.
+This PATCHes required_status_checks to `[ai-sdlc/pr-ready]` with `strict: true`. Requires admin permission. Safe to re-run.
 
 ### Step 2 — Disable merge queue in branch protection (UI)
 1. Go to **Settings → Branches → Edit rule for `main`**
@@ -125,7 +125,7 @@ These settings ensure that even if auto-merge is manually triggered without `--s
 Open a trivial docs PR (or use an in-flight PR) and confirm:
 - `auto-enable-auto-merge.yml` fires and posts `gh pr merge --auto --squash <PR>`
 - `ai-sdlc/pr-ready` appears in required checks and goes green
-- `Backlog Drift` appears in required checks and goes green
+- `Backlog Drift` is not a required context but gates `ai-sdlc/pr-ready`
 - PR merges automatically as a squash commit once both checks pass
 
 ---

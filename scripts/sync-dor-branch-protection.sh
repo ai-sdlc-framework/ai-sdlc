@@ -2,8 +2,8 @@
 #
 # scripts/sync-dor-branch-protection.sh — AISDLC-379 helper.
 #
-# Adds `Evaluate backlog tasks changed by PR` (the DoR ingress check) to the
-# required-status-checks list on `main`. Reproducible so branch protection
+# Sets the required-status-checks list on `main` to the single rollup
+# `ai-sdlc/pr-ready`. Reproducible so branch protection
 # can be re-applied after a recreate.
 #
 # Usage:
@@ -56,15 +56,11 @@ done
 # Keep ordered: a contributor scanning the file should be able to read it
 # top-down and reason about why each one is required.
 #
-#   1. Backlog Drift                          — references resolve (AISDLC-125)
-#   2. ai-sdlc/pr-ready                       — single rollup (AISDLC-388)
-#   3. ai-sdlc/attestation                    — attestation envelope present
-#   4. Evaluate backlog tasks changed by PR   — DoR ingress gate (AISDLC-379, this PR)
+#   1. ai-sdlc/pr-ready  — single rollup (AISDLC-388). Backlog Drift, attestation
+#      and the DoR ingress gate are all `needs:` of the rollup, so they are
+#      enforced through it and are not separately required (AISDLC-836).
 REQUIRED_CONTEXTS=(
-  "Backlog Drift"
   "ai-sdlc/pr-ready"
-  "ai-sdlc/attestation"
-  "Evaluate backlog tasks changed by PR"
 )
 
 ARGS=(api -X PATCH "repos/${REPO}/branches/main/protection/required_status_checks"

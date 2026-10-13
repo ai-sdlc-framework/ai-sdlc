@@ -2,7 +2,7 @@
 id: AISDLC-836
 title: >-
   require only ai-sdlc/pr-ready on main: drop Backlog Drift and the other duplicate required contexts
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:
