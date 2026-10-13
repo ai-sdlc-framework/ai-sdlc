@@ -1,0 +1,68 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "65779b7feee31cf165d6e742ad2aa9dea773fb0a"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "19292487838dd6877c0b4dbdc280239bd434f1c8736481c8441e2a024e2c1e17",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "712fb0058b067790b301f872248ad59ef1fb753fe11dc6b2136a84c07adf0dc2",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "6284cd56d03950f53862106d8224975ffe3c147ad48948b07acd08b31e644f82",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "03c90c7675c8082df001f656194001e47a48a6dc21a2fcd0ece879dc63c04da3",
+        "cc85141bb51b1024b6ec3e8cf35d1b09eac9414ec3a2dc253de8729139df5369"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "bc5055aa27a48f35f90df518f6657986e8de653098c872074d6b5f4116dcf1d9",
+        "cc85141bb51b1024b6ec3e8cf35d1b09eac9414ec3a2dc253de8729139df5369"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "99606bf4d6ae6065c13bc732f6655257ba692f40adeeed000deb473c55e82a64",
+        "0f1d630e6bb8e222b67e3a32480eaefb8a15f55c74e107254f845fff0404b97b"
+      ]
+    }
+  ],
+  "rootHash": "ae44a0905b68421489b5858a63ed94967495a83c82734346ab0647f1880b16c7",
+  "rootSignature": "LeFXOTc9sbt+KsnIIIoa0iXfZxqVXN+BmQrZ4p0Amkt+OGY1EDsEby4DgOZZh36w86rP9SSzWeadCEmw/5aIBA==",
+  "nonce": "84dfcc7d6187c59674da6f775f39981b609a83063e84db09cfdf98e2f902782f",
+  "leafCount": 3,
+  "signedAt": "2026-10-13T00:16:47.836Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": ["reference/src/core/generated-schemas.ts"],
+    "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
+  }
+}
