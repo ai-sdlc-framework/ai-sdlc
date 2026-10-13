@@ -2,7 +2,7 @@
 id: AISDLC-861
 title: >-
   lease-push hook resolves the task worktree from `git -C <worktree>` or the active task id so a dev subagent can push from the parent cwd
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-13'
 labels:

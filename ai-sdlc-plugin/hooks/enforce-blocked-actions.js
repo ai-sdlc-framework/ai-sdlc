@@ -112,6 +112,8 @@ const {
   readPolicyText,
   loadTrustedExtras,
   evaluateLeasePush: evaluateLeasePreflight,
+  verifiedMainRoot,
+  safeReal,
   renderLeaseFailing,
   readTaskId,
 } = require('./lib/trusted-policy');
@@ -194,6 +196,33 @@ try {
 // ── Own-branch lease policy (RFC-0051 §10) ───────────────────────────
 
 /**
+ * AISDLC-861: where a lease push runs. A leading `git -C <path> push ...` (a plain
+ * path, no shell syntax) names the worktree and is rewritten to the equivalent
+ * `git push ...` for the guard; with no `-C`, a dispatcher-set
+ * AI_SDLC_ACTIVE_TASK_ID run from the main checkout resolves `.worktrees/<id>`.
+ * The resolved cwd still passes every evaluateLeasePreflight condition
+ * (worktree-location included), so a path outside `.worktrees/` is refused.
+ */
+function resolveLeaseTarget(command) {
+  const base = toolCwd || process.cwd();
+  const m = /^git[ \t]+-C[ \t]+([A-Za-z0-9_.\/@+-]+)[ \t]+(push(?:[ \t][^;&|$`()<>\n]*)?)$/.exec(
+    command,
+  );
+  if (m) return { cwd: resolve(base, m[1]), command: `git ${m[2]}` };
+  const id = process.env.AI_SDLC_ACTIVE_TASK_ID;
+  if (id && /^[A-Za-z0-9.-]+$/.test(id) && /^git[ \t]+push\b/.test(command)) {
+    const main = verifiedMainRoot(projectDir, gitOut);
+    if (main) {
+      const realMain = safeReal(main);
+      const wt = join(realMain, '.worktrees', id.toLowerCase());
+      const here = safeReal(base);
+      if (here === realMain && existsSync(wt)) return { cwd: wt, command };
+    }
+  }
+  return { cwd: undefined, command };
+}
+
+/**
  * Resolves the lease policy (see lib/trusted-policy.js for the trust model).
  *
  * Step 1 reads the project-dir policy text with NO git subprocess; unless it
@@ -202,7 +231,7 @@ try {
  * main-checkout policy ALSO says lease (so a worktree copy can only tighten).
  * Any failure fails closed to `never`.
  */
-function loadLeasePolicy() {
+function loadLeasePolicy(rawCommand) {
   // `why` says which gate closed the lease so a refusal can name the right fix
   // (see forcePushRefusal): 'policy-never' = an explicit/malformed `never`.
   const closed = (why) => ({ mode: 'never', protectedBranches: [], cwd: undefined, why });
@@ -218,7 +247,8 @@ function loadLeasePolicy() {
     // trivially (project dir == whatever the cwd is in).
     const envDir = process.env.CLAUDE_PROJECT_DIR;
     if (!envDir || !isAbsolute(envDir)) return closed('no-project-dir');
-    const cwd = toolCwd || process.cwd();
+    const target = resolveLeaseTarget(rawCommand);
+    const cwd = target.cwd || toolCwd || process.cwd();
     const trusted = loadTrustedExtras(projectDir, cwd);
     if (!trusted) return closed('trusted-policy-unavailable');
     if (trusted.forcePushMode !== 'leaseOnOwnBranch') return closed('policy-never');
@@ -230,6 +260,7 @@ function loadLeasePolicy() {
       mode: 'leaseOnOwnBranch',
       protectedBranches: trusted.protectedBranches,
       cwd,
+      command: target.command,
       top: wt.top,
       claimTaskId: wt.claimTaskId || null,
     };
@@ -544,10 +575,17 @@ function enforceBash(command) {
   // exactly as before.
   let leasePushAllowed = false;
   try {
-    const lease = loadLeasePolicy();
+    // AISDLC-861: a `-C` path built by shell expansion cannot be resolved, so the
+    // push it names is unverifiable: refuse rather than let it escape the guard.
+    if (/^git[ \t]+-C[ \t]/.test(trimmed) && /[$`]/.test(trimmed) && /\bpush\b/.test(trimmed)) {
+      deny(
+        'a git -C push whose path is shell-expanded cannot be verified. Next step: spell the path literally as git -C <main>/.worktrees/<task-id> followed by the push.',
+      );
+    }
+    const lease = loadLeasePolicy(trimmed);
     if (lease.mode === 'leaseOnOwnBranch') {
       const top = lease.top;
-      const verdict = evaluateLeasePush(trimmed, {
+      const verdict = evaluateLeasePush(lease.command, {
         ownRef: gitOut(['symbolic-ref', '-q', 'HEAD'], lease.cwd),
         protectedBranches: lease.protectedBranches,
         remotes: (gitOut(['remote'], lease.cwd) || '').split('\n').filter(Boolean),

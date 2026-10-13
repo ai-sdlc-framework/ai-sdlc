@@ -35,7 +35,7 @@ escalates the rest.
 
 <!-- prompt-rules:begin ids=merge,force-push,close,branch-delete,destructive-git,ci-skip,governance-config -->
 - **Merge:** only via `cli-merge-if-eligible` when `governance.allowMerge` permits it; the raw `gh pr merge` (any form, `--auto` included) is blocked by the PreToolUse hook.
-- **Force-push:** only `git push --force-with-lease origin HEAD:refs/heads/<your-branch>` to your own task branch after a rebase; plain `git push --force`/`-f` and any push to `main`/`master` are blocked by the PreToolUse hook.
+- **Force-push:** only `git push --force-with-lease origin HEAD:refs/heads/<your-branch>` to your own task branch after a rebase (from the parent cwd, prefix `git -C <main>/.worktrees/<task-id>`); plain `git push --force`/`-f` and any push to `main`/`master` are blocked by the PreToolUse hook.
 - **Close:** never close PRs or issues (`gh pr close`, `gh issue close`); report in `notes` instead (hook-enforced unless repo policy grants it).
 - **Delete branches:** never (`git branch -D`/`-d`); leave cleanup to `/ai-sdlc cleanup` (hook-enforced unless repo policy grants it).
 - **Destructive git:** never `git reset --hard`, `git checkout -- .` or `git restore .`; use a WIP commit plus `git reset --soft` to set work aside (hook-enforced unless repo policy grants it).
