@@ -842,8 +842,8 @@ describe('governance-gate (AISDLC-764)', () => {
   });
 });
 
-// ── AISDLC-412 (relocated by AISDLC-833): cancelled runs must not post status ──
-describe('AISDLC-412: attestation-gate does not post a status on cancelled runs', () => {
+// ── AISDLC-412 (relocated by AISDLC-833, split per DEC-0206): cancelled runs record no verdict ──
+describe('AISDLC-412: attestation-gate records no verdict on cancelled runs', () => {
   let wf;
   let raw;
   before(() => {
@@ -851,13 +851,13 @@ describe('AISDLC-412: attestation-gate does not post a status on cancelled runs'
     raw = readFileSync(WORKFLOW_PATH, 'utf-8');
   });
 
-  const postCond = () => {
+  const recordCond = () => {
     const step = (wf.jobs['attestation-gate'].steps ?? []).find(
-      (s) => typeof s.name === 'string' && /Post ai-sdlc\/attestation status/i.test(s.name),
+      (s) => typeof s.name === 'string' && /Record attestation verdict/i.test(s.name),
     );
-    assert.ok(step, 'attestation-gate must declare a "Post ai-sdlc/attestation status" step');
+    assert.ok(step, 'attestation-gate must declare a "Record attestation verdict" step');
     const cond = String(step.if ?? '');
-    assert.ok(cond, 'Post step MUST declare an `if:` condition');
+    assert.ok(cond, 'Record step MUST declare an `if:` condition');
     return cond;
   };
 
@@ -866,20 +866,26 @@ describe('AISDLC-412: attestation-gate does not post a status on cancelled runs'
     assert.equal(wf.concurrency['cancel-in-progress'], true);
   });
 
-  it('Post status step does NOT use always() or cancelled()', () => {
-    const cond = postCond();
+  it('Record step does NOT use always() or cancelled()', () => {
+    const cond = recordCond();
     assert.doesNotMatch(cond, /\balways\s*\(\s*\)/);
     assert.doesNotMatch(cond, /\bcancelled\s*\(\s*\)/);
   });
 
-  it('Post status step uses success() || failure()', () => {
-    const cond = postCond();
+  it('Record step uses success() || failure()', () => {
+    const cond = recordCond();
     assert.match(cond, /\bsuccess\s*\(\s*\)/);
     assert.match(cond, /\bfailure\s*\(\s*\)/);
   });
 
-  it('Post status step still skips the release-please short-circuit', () => {
-    assert.match(postCond(), /steps\.release_please\.outputs\.is_release_please\s*!=\s*'true'/);
+  it('attestation-gate posts no status and holds no write token', () => {
+    const job = wf.jobs['attestation-gate'];
+    assert.equal(job.permissions.statuses, undefined);
+    assert.notEqual(job.permissions['pull-requests'], 'write');
+    assert.doesNotMatch(
+      job.steps.map((s) => String(s.run ?? '')).join('\n'),
+      /repos\/\$\{REPO\}\/statuses/,
+    );
   });
 
   it('attestation-gate skips docs-only PRs at job level', () => {
@@ -892,49 +898,69 @@ describe('AISDLC-412: attestation-gate does not post a status on cancelled runs'
   });
 });
 
-// ── AISDLC-747 (relocated by AISDLC-833): approving review step in attestation-gate ──
-describe('AISDLC-747: attestation-gate posts an approving review on a verified envelope', () => {
+// ── AISDLC-747 / AISDLC-833 (DEC-0206): status + approving review live in attestation-post.yml ──
+describe('AISDLC-833: attestation-post.yml (workflow_run) posts the status and approving review', () => {
+  let post;
   let job;
-  let step;
+  let raw;
   before(() => {
-    job = loadYaml(WORKFLOW_PATH).jobs['attestation-gate'];
-    step = job.steps.find((st) => /post-attestation-review\.mjs/.test(String(st.run ?? '')));
+    const postPath = resolve(dirname(WORKFLOW_PATH), 'attestation-post.yml');
+    post = loadYaml(postPath);
+    job = post.jobs.post;
+    raw = readFileSync(postPath, 'utf-8');
   });
 
-  it('holds pull-requests: write on attestation-gate only among workflow-level scopes', () => {
-    const wf = loadYaml(WORKFLOW_PATH);
+  it('has exactly one trigger, workflow_run on the gate workflow', () => {
+    const on = post.on ?? post[true];
+    assert.deepEqual(Object.keys(on), ['workflow_run']);
+    assert.deepEqual(on.workflow_run.workflows, [loadYaml(WORKFLOW_PATH).name]);
+  });
+
+  it('gate workflow keeps a single pull_request trigger', () => {
+    const on = loadYaml(WORKFLOW_PATH).on ?? loadYaml(WORKFLOW_PATH)[true];
+    assert.deepEqual(Object.keys(on), ['pull_request']);
+  });
+
+  it('skips cancelled gate runs and non-PR runs', () => {
+    assert.match(String(job.if), /conclusion != 'cancelled'/);
+    assert.match(String(job.if), /event == 'pull_request'/);
+  });
+
+  it('checks out the default branch, never the PR head, with no persisted credentials', () => {
+    const checkout = job.steps.find((st) => /actions\/checkout/.test(String(st.uses ?? '')));
+    assert.equal(checkout.with.ref, '${{ github.event.repository.default_branch }}');
+    assert.equal(checkout.with['persist-credentials'], false);
+    assert.doesNotMatch(raw, /pull_request\.head\.sha|workflow_run\.head_branch/);
+  });
+
+  it('holds the write scopes the gate job no longer has', () => {
+    assert.equal(job.permissions.statuses, 'write');
     assert.equal(job.permissions['pull-requests'], 'write');
-    assert.notEqual(wf.permissions?.['pull-requests'], 'write');
   });
 
-  it('gates on a valid verifier status and a same-repo head', () => {
+  it('posts the ai-sdlc/attestation context and validates the head sha against the run', () => {
+    assert.match(raw, /context='ai-sdlc\/attestation'/);
+    assert.match(raw, /v\.headSha !== process\.env\.RUN_HEAD_SHA/);
+  });
+
+  it('approving review only for a valid verdict on a same-repo head', () => {
+    const step = job.steps.find((st) => /post-attestation-review\.mjs/.test(String(st.run ?? '')));
     assert.ok(step, 'approve step must exist');
     const clauses = String(step.if)
       .split('&&')
       .map((c) => c.trim());
     assert.deepEqual(clauses, [
-      "steps.verify.outputs.status == 'valid'",
-      'github.event.pull_request.head.repo.full_name == github.repository',
+      "steps.post.outputs.status == 'valid'",
+      'steps.post.outputs.head_repo == github.repository',
     ]);
-  });
-
-  it('job exposes status and reason outputs', () => {
-    assert.ok(job.outputs.status);
-    assert.ok(job.outputs.reason);
-  });
-
-  it('runs base-sha code with no persisted credentials', () => {
-    const checkout = job.steps.find((st) => /actions\/checkout/.test(String(st.uses ?? '')));
-    assert.equal(checkout.with.ref, '${{ github.event.pull_request.base.sha }}');
-    assert.equal(checkout.with['persist-credentials'], false);
-    assert.equal(checkout.with['allow-unsafe-pr-checkout'], undefined);
-  });
-
-  it('runs the script and skips with a notice when it is absent (bootstrap)', () => {
     const run = String(step.run);
     assert.match(run, /\[ ! -f scripts\/post-attestation-review\.mjs \]/);
     assert.match(run, /::notice::/);
-    assert.match(run, /exit 0/);
-    assert.match(run, /node scripts\/post-attestation-review\.mjs/);
+  });
+
+  it('run blocks never interpolate github.event.*', () => {
+    for (const st of job.steps) {
+      assert.doesNotMatch(String(st.run ?? ''), /\$\{\{\s*github\.event\./);
+    }
   });
 });

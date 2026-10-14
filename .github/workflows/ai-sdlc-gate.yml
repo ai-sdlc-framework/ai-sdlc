@@ -405,10 +405,11 @@ jobs:
   # ── Attestation gate (AISDLC-388, AISDLC-833) ─────────────────────────
   # Runs the DSSE verifier (scripts/verify-attestation.mjs) inline on code PRs
   # under this workflow's single `pull_request` trigger. Scripts come from the
-  # BASE sha; the head envelope is fetched as DATA only (AISDLC-704.6). It posts
-  # the `ai-sdlc/attestation` status once per head SHA (best-effort on fork PRs,
-  # whose token is read-only) and fails the job on an invalid envelope, which
-  # fails `ai-sdlc/pr-ready`. Docs-only, draft and dependabot PRs skip the job
+  # BASE sha; the head envelope is fetched as DATA only (AISDLC-704.6). It holds
+  # a read-only token, uploads the verdict as an artifact and fails the job on an
+  # invalid envelope, which fails `ai-sdlc/pr-ready`. The `ai-sdlc/attestation`
+  # status and the DEC-0065 approving review are posted once per head SHA by
+  # `attestation-post.yml` (workflow_run, base-defined, no PR code; DEC-0206). Docs-only, draft and dependabot PRs skip the job
   # (alls-green treats `skipped` as success).
   attestation-gate:
     name: Attestation gate (code PRs)
@@ -428,8 +429,6 @@ jobs:
       reason: ${{ steps.verify.outputs.reason }}
     permissions:
       contents: read
-      statuses: write
-      pull-requests: write
     steps:
       # Trusted scripts come from the BASE sha; the head is fetched as DATA only
       # (never checked out, never executed): AISDLC-704.6.
@@ -535,21 +534,6 @@ jobs:
           echo "is_release_please=${IS_RP}" >> "${GITHUB_OUTPUT}"
           echo "Release-please detection: head_ref='${PR_HEAD_REF:-}', is_release_please=${IS_RP}"
 
-      - name: Short-circuit — post ai-sdlc/attestation success (release-please)
-        if: steps.release_please.outputs.is_release_please == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          gh api "repos/${REPO}/statuses/${HEAD_SHA}" \
-            -X POST \
-            -f state=success \
-            -f context='ai-sdlc/attestation' \
-            -f description='release-please version bump — attestation N/A'
-          echo "Posted ai-sdlc/attestation: success (release-please short-circuit) on ${HEAD_SHA}"
-
       # Skip the full verify pipeline when EITHER short-circuit already posted
       # the success status above. These steps only run for code PRs or mixed PRs.
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -620,115 +604,52 @@ jobs:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: node scripts/verify-attestation.mjs
 
-      # AISDLC-193: post the `ai-sdlc/attestation` commit status. Branch
-      # protection requires it; missing/invalid envelopes block merge.
-      # Posts on BOTH the pull_request HEAD (direct verification) AND the
-      # merge_group tip (queue-time re-verification with sibling-rebase
-      # state) so a sibling PR merging into the same files between PR-head
-      # verification and queue execution surfaces here.
+      # AISDLC-193 / AISDLC-412 / AISDLC-833 (DEC-0206): this job holds the PR
+      # context and runs the verifier but does NOT post the `ai-sdlc/attestation`
+      # status or the DEC-0065 approving review. It records the verdict as an
+      # artifact; the base-defined `attestation-post.yml` (workflow_run, no PR
+      # code) posts both with a write token, once per head SHA.
       #
-      # AISDLC-412: this step MUST NOT run when the job is CANCELLED.
-      # The concurrency block above (`cancel-in-progress: true`) means a
-      # newer push on the same PR cancels the in-flight run mid-execution.
-      # Before AISDLC-412, this step used `if: always()`, which fires even
-      # on cancellation. The cancelled run's `Verify attestation` step
-      # never produced a STATUS output, so the cancelled run posted
-      # `ai-sdlc/attestation: failure` (with description "verifier crashed
-      # before emitting result"). GitHub commit-status semantics keep the
-      # MOST RECENT status per context — but two parallel runs racing to
-      # POST can land in any order, and the cancelled-run's FAILURE
-      # frequently overwrote the new run's SUCCESS, leaving PRs stuck on
-      # a FAILURE status that did NOT reflect the current HEAD's
-      # verification result. Workarounds operators used: `gh run rerun
-      # <cancelled-id>` or empty-commit push to re-trigger cleanly.
-      #
-      # The fix is to use `(success() || failure())` instead of `always()`.
-      # GitHub's status-check functions:
-      #   - `success()`  → true when no prior step failed (default)
-      #   - `failure()`  → true when at least one prior step failed
-      #   - `cancelled()` → true when the workflow was cancelled
-      #   - `always()`   → true regardless (UNION of the above three)
-      # `success() || failure()` is the canonical pattern for "run even
-      # on crashes, but NOT on cancellation" — it preserves the crash
-      # recovery behavior (a verifier exception still triggers
-      # STATE=failure post with a clear reason) while ensuring a
-      # cancelled run leaves the previous (correct) status untouched.
-      #
-      # Preserved: when the verifier crashes (raises uncaught), `failure()`
-      # is true, the step runs, and STATUS is empty → STATE=failure with
-      # "verifier crashed before emitting result". That recovery branch
-      # is still load-bearing.
-      - name: Post ai-sdlc/attestation status
-        if: (success() || failure()) && steps.release_please.outputs.is_release_please != 'true'
+      # AISDLC-412: `success() || failure()` (never `always()`): a run cancelled by
+      # a newer push must not record a verdict, so a cancelled run cannot overwrite
+      # the current head's verdict. A verifier crash (no status output) still
+      # records `failure` so the post job reports "verifier crashed".
+      - name: Record attestation verdict
+        if: success() || failure()
         env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          STATUS: ${{ steps.verify.outputs.status }}
+          STATUS: ${{ steps.release_please.outputs.is_release_please == 'true' && 'release-please' || steps.verify.outputs.status }}
           REASON: ${{ steps.verify.outputs.reason }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           set -euo pipefail
-          if [ "$STATUS" = "valid" ]; then
-            STATE=success
-            # Surface the verifier's reason in the success description so
-            # soft-fail / spot-check qualifiers ("soft-fail: …") are visible
-            # on the GitHub status surface, not just buried in workflow logs.
-            # Per AISDLC-383.4 security review: a hardcoded clean string
-            # would mask the soft-fail caveat from operators reviewing PR
-            # status. Truncate to 130 chars (GitHub limit is 140) with
-            # a sensible default when the reason is empty.
-            DESC="${REASON:0:130}"
-            if [ -z "${DESC:-}" ]; then
-              DESC="valid envelope at HEAD"
-            fi
-            echo "::notice::ai-sdlc attestation valid on $HEAD_SHA: $REASON"
-          elif [ -z "${STATUS:-}" ]; then
-            # Verifier crashed before emitting status= to GITHUB_OUTPUT.
-            STATE=failure
-            DESC="verifier crashed before emitting result — see workflow logs"
-            echo "::error::ai-sdlc attestation verifier crashed on $HEAD_SHA"
-          else
-            STATE=failure
-            # GitHub status descriptions are truncated at 140 chars; trim.
-            DESC="${REASON:0:130}"
-            echo "::warning::ai-sdlc attestation $STATUS on $HEAD_SHA: $REASON"
-          fi
-          # Fork PRs get a read-only token on `pull_request`; the job result is
-          # the gate there, the status is best-effort.
-          gh api "repos/${REPO}/statuses/${HEAD_SHA}" \
-            -X POST \
-            -f state="$STATE" \
-            -f context='ai-sdlc/attestation' \
-            -f description="$DESC" \
-            ${PR_URL:+-f target_url="$PR_URL"} \
-            || echo "::warning::could not post ai-sdlc/attestation status (read-only token on fork PR)"
-          if [ "$STATE" != "success" ]; then exit 1; fi
-          echo "Posted ai-sdlc/attestation: $STATE on $HEAD_SHA"
+          mkdir -p attestation-verdict
+          node -e '
+            const e = process.env;
+            require("fs").writeFileSync("attestation-verdict/verdict.json", JSON.stringify({
+              status: e.STATUS || "", reason: e.REASON || "", headSha: e.HEAD_SHA,
+              prNumber: e.PR_NUMBER, headRepo: e.HEAD_REPO, prUrl: e.PR_URL || "",
+            }));
+          '
 
-      # AISDLC-747 (DEC-0065): register a verified attestation as an APPROVE
-      # pull-request review. Folded into attestation-gate by AISDLC-833; runs only
-      # when the verifier reported `valid` and the PR head repo == base repo (never
-      # forks). The checkout above is the BASE sha with no persisted credentials,
-      # so the script is base-branch code, never PR content. Needs the repo setting
-      # "Allow GitHub Actions to create and approve pull requests"; a 403 fails the
-      # job naming that setting.
-      - name: Post approving review
-        if: steps.verify.outputs.status == 'valid' && github.event.pull_request.head.repo.full_name == github.repository
+      - name: Upload attestation verdict
+        if: success() || failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: attestation-verdict
+          path: attestation-verdict/verdict.json
+          retention-days: 7
+
+      - name: Enforce attestation verdict
+        if: (success() || failure()) && steps.release_please.outputs.is_release_please != 'true' && steps.verify.outputs.status != 'valid'
         env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           STATUS: ${{ steps.verify.outputs.status }}
           REASON: ${{ steps.verify.outputs.reason }}
         run: |
-          if [ ! -f scripts/post-attestation-review.mjs ]; then
-            echo "::notice::scripts/post-attestation-review.mjs not on the base yet; skipping"
-            exit 0
-          fi
-          node scripts/post-attestation-review.mjs
+          echo "::error::ai-sdlc attestation ${STATUS:-crashed}: ${REASON:-verifier did not emit a result}"
+          exit 1
 
   # ── Dependency review gate (npm + github-actions; issue #791 follow-up) ──
   # Folds dependency-review into the pr-ready rollup so it is a REAL blocking

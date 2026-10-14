@@ -149,9 +149,9 @@ describe('AISDLC-381: AC #3 — workflow permissions blocks are correct', () => 
   // Comment-posting workflows need `pull-requests:write`. None should
   // declare `contents:write` (which would allow pushing back to main).
 
-  it('ai-sdlc-gate.yml attestation-gate job: statuses:write, no contents:write', () => {
-    const wf = loadYaml('ai-sdlc-gate.yml');
-    const job = wf.jobs['attestation-gate'];
+  it('attestation-post.yml post job: statuses:write, no contents:write (AISDLC-833)', () => {
+    const wf = loadYaml('attestation-post.yml');
+    const job = wf.jobs.post;
     assert.equal(
       job.permissions.statuses,
       'write',
@@ -629,8 +629,8 @@ describe('AISDLC-381: regression — required statuses still produced for same-r
   // We assert the canonical status contexts are still posted by the
   // expected workflows.
 
-  it('ai-sdlc-gate.yml posts ai-sdlc/attestation context', () => {
-    const raw = readFileSync(resolve(WORKFLOWS_DIR, 'ai-sdlc-gate.yml'), 'utf-8');
+  it('attestation-post.yml posts ai-sdlc/attestation context', () => {
+    const raw = readFileSync(resolve(WORKFLOWS_DIR, 'attestation-post.yml'), 'utf-8');
     assert.match(raw, /ai-sdlc\/attestation/, 'must post ai-sdlc/attestation status');
   });
 
