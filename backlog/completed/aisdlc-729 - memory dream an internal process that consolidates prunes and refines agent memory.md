@@ -2,7 +2,7 @@
 id: AISDLC-729
 title: >-
   Memory dream: an internal process that consolidates, prunes and refines agent memory
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-05'
 labels:
