@@ -1047,6 +1047,27 @@ rubric (class (a), (b) or (c) per the Decision authority rules).
    - (b) GitHub itself (labels, check runs) read by the tick.
    - (c) The decisions `events.jsonl` style append-only log.
    - (d) A combination: board for ownership, GitHub for facts.
+   **Resolution (2026-10-14, full rubric): board for ownership and history, GitHub for facts.**
+   A per-PR record `landing/<pr>.json` holds the owner (OQ-2), the `(state, action, headSha)`
+   history the loop guard needs (OQ-3) and the delivered and landed timestamps (OQ-5); the
+   `events/` directory holds raw ingest as the common section requires; PR facts (checks,
+   mergeStateStatus, draft, merged, auto-merge) are re-read from GitHub on every classification
+   and are never cached as truth. The existing `_orchestrator/events-*.jsonl` log remains the
+   audit trail (AISDLC-823 already writes `DispatchPrClassified` there). Mirroring the owner as a
+   PR label is an optional, additive later step for UI visibility and does not move the source of
+   truth. Industry research: Tide recomputes its pool from the GitHub API every sync and writes
+   nothing to GitHub but the merge; Mergify keeps queue state server-side and mirrors a summary as
+   a check run; Kubernetes keeps desired state in its own store and treats the live system as the
+   fact source. **Shipped substrate:** the board already uses per-task sidecar JSON under
+   `queue/ inflight/ done/ failed/ blocked/`; `landing/` is a new sibling in the same idiom; 823
+   has no per-PR record today. **Counter-argument:** "board files live on one laptop; a second
+   machine or the operator in the GitHub UI cannot see ownership." Rebuttal: the deployment is
+   one laptop by design (signing key and worktrees are local; remote agents are read-only per
+   AISDLC-442); facts are on GitHub regardless, so a second reader recomputes state minus
+   ownership, and the label mirror covers the UI case. **Selected over GitHub-only** because
+   mutable labels as the only copy of ownership break the recomputable guarantee; **over an
+   append-only log only** because the audit log already exists and replaying it to answer "who
+   owns this PR" is the wrong shape for a tick.
 7. **Do the pipeline's push, ready and arm steps move into the state machine?**
    - (a) No; Step 11 stays, the machine starts at "draft PR exists".
    - (b) Ready and arm move (the machine flips and arms); push stays with the executor.
