@@ -1245,6 +1245,32 @@ rubric (class (a), (b) or (c) per the Decision authority rules).
     - (b) A new planner, executor, synthesizer trio for development, parallel to the review trio.
     - (c) Keep the executor developer round as is; apply the ladder to everything else.
     - Budget: (i) a per-state-dwell call cap per rung, (ii) a per-PR token budget where rung-4 spend needs a logged rung-3 failure, (iii) report only, no cap, in v1.
+    **Resolution (2026-10-14, full rubric): no development trio in this RFC, but dev-round
+    spend is measured per PR from Phase 1; budget is report-only in v1 with the per-PR budget as
+    the Phase 3 target.** (14a) The executor's developer round stays as it is (the developer is
+    already the Sonnet tier); the ladder governs everything after the push. The operator's
+    condition: per-PR developer-round spend (tokens and calls, by model) is recorded from Phase 1
+    so a dev-trio decision can be made from data; that decision, if it comes, is its own RFC.
+    Industry research: plan-then-execute splits for coding (architect and editor modes,
+    planner-coder agent variants) gain on hard tasks and lose on small ones, since the extra
+    round-trip outweighs the saving; the split pays where one plan drives many cheap executions,
+    which is the review case (RFC-0052's planner, executor, synthesizer) and not a single dev
+    pass. (14b) Budget option (iii): per-PR, per-rung spend (rung, model, tokens, calls, state the
+    PR was in) is logged through the existing cost tracker and surfaced in the operator digest;
+    no cap in v1. Option (ii), a per-PR token budget where rung-4 spend requires a logged rung-3
+    failure, is the Phase 3 target, and the v1 report is shaped to produce exactly the numbers it
+    needs (rung-3 outcomes logged per question from Phase 1). **Shipped substrate:** the
+    developer agent pins Sonnet; the review trio exists; `orchestrator` has a cost tracker with
+    no per-rung or per-PR dimension yet. **Counter-argument (14a):** "the dev round is the
+    largest spend per task; leaving it out makes the ladder cosmetic." Rebuttal: the lifecycle
+    side is where the 2026-10-11 storm burned tokens, and the dev round's spend is unmeasured;
+    the measurement is now required, and a trio decided from it is cheaper than one decided from
+    instinct. **Counter-argument (14b):** "report-only is how burn got out of control; a crude
+    cap stops the bleeding now." Rebuttal: the bleeding was hand paths and ownerless retries,
+    removed structurally by OQ-2, 3 and 4; a crude cap would block the first legitimate long fix
+    and be bypassed. **Selected over wrapping or replacing the developer** because both add
+    strong-model calls around the cheap tier without evidence; **over a dwell cap** because dwell
+    does not track cost; **over a budget now** because it needs logging that does not exist.
 
 ## References
 
