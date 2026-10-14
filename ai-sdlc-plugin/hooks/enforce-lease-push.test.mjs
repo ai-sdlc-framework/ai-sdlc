@@ -1453,3 +1453,49 @@ describe('main-rooted hierarchy executor: lease push bound to the inflight claim
     reset();
   });
 });
+
+describe('AISDLC-861: lease push resolves the worktree from -C or the active task id', () => {
+  const dash = (r) => `git -C ${r.wt} push --force-with-lease origin HEAD:refs/heads/${OWN}`;
+  const fromRoot = (cmd, r, env = {}) =>
+    run(cmd, {
+      cwd: r.root,
+      projectDir: r.root,
+      env: { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-1', ...env },
+    });
+
+  it('allows a -C <main>/.worktrees/<task> push from the parent cwd', () => {
+    const out = fromRoot(dash(leaseRepo), leaseRepo);
+    assert.ok(!denied(out), out);
+  });
+
+  it('later conditions still apply: a task-id mismatch is refused', () => {
+    assert.ok(denied(fromRoot(dash(leaseRepo), leaseRepo, { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-9' })));
+  });
+
+  it('refuses a -C path outside .worktrees/ with worktree-location', () => {
+    const out = fromRoot(
+      `git -C ${leaseRepo.root} push --force-with-lease origin HEAD:refs/heads/${OWN}`,
+      leaseRepo,
+    );
+    assert.ok(denied(out), out);
+    assert.match(out, /worktree-location/);
+  });
+
+  it('does not resolve a worktree from AI_SDLC_ACTIVE_TASK_ID alone (executed cwd would differ)', () => {
+    const out = fromRoot(L(), leaseRepo);
+    assert.ok(denied(out), out);
+  });
+
+  it('compound -C commands stay refused', () => {
+    assert.ok(denied(fromRoot(`${dash(leaseRepo)} && echo hi`, leaseRepo)));
+    assert.ok(denied(fromRoot(`${dash(leaseRepo)}; echo hi`, leaseRepo)));
+    assert.ok(
+      denied(
+        fromRoot(
+          `git -C $(echo ${leaseRepo.wt}) push --force-with-lease origin HEAD:refs/heads/${OWN}`,
+          leaseRepo,
+        ),
+      ),
+    );
+  });
+});

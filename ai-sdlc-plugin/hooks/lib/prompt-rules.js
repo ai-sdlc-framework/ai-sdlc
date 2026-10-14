@@ -36,7 +36,7 @@ const PROMPT_RULES = [
   },
   {
     id: 'force-push',
-    text: '**Force-push:** only `git push --force-with-lease origin HEAD:refs/heads/<your-branch>` to your own task branch after a rebase; plain `git push --force`/`-f` and any push to `main`/`master` are blocked by the PreToolUse hook.',
+    text: '**Force-push:** only `git push --force-with-lease origin HEAD:refs/heads/<your-branch>` to your own task branch after a rebase (from the parent cwd, prefix `git -C <main>/.worktrees/<task-id>`); plain `git push --force`/`-f` and any push to `main`/`master` are blocked by the PreToolUse hook.',
     detect: /git push --force(?!-with-lease)/g,
   },
   {
