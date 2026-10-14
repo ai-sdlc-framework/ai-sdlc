@@ -1219,6 +1219,27 @@ rubric (class (a), (b) or (c) per the Decision authority rules).
     - (b) A reviewer-gate check on PRs that add a prose automation.
     - (c) Convention only, recorded in this RFC and CLAUDE.md.
     - (d) The dark-code style static scan extended to flag undeclared model calls.
+    **Resolution (2026-10-14, full rubric): a `rung:` frontmatter key on every agent and
+    command, checked by the existing model-pins gate.** Values 0 to 4. A rung-2 entry names the
+    typed question it asks; a rung-3 entry points at its input and output schema and its bounds;
+    a rung-4 entry names its plan, execute and synthesize split. The gate fails only a new or
+    edited file that lacks a required key; the migration adds one key per existing file in one
+    mechanical PR. Velocity impact (DEC-0048): none after migration; it runs in the same test
+    harness as the `model:` pin check. Extending the dark-code static scan to flag model-call
+    sites with no declaring frontmatter is the recorded follow-up once declarations exist, not
+    part of this resolution. Industry research: policy-as-code (OPA, Conftest, admission
+    controllers) checks declared structured fields and never prose; model-routing and cost
+    tooling make tiers auditable by tagging the declaration. **Shipped substrate:**
+    `pnpm test:plugin-model-pins-gate` already lints agent and command frontmatter for a pinned
+    `model:` and survived AISDLC-828's deletion of the five-step prose gate (DEC-0158); the
+    dark-code scan exists but knows nothing of rungs. **Counter-argument:** "828 just deleted a
+    gate because rubric text beats regex, and `rung: 0` will be pasted by default and never
+    read." Rebuttal: 828's gate parsed prose for a paragraph shape, while this checks presence
+    and allowed values of a structured key, the class 828 kept; a wrong rung is a visible lie in
+    a diff for the reviewer round, an absent one is what the gate catches. **Selected over the
+    call-site scan** as first step because a scan needs declarations to check against; **over a
+    reviewer-gate check** because a model enforcing a rung-0 rule inverts the ladder; **over
+    convention only** because the drain has shown unenforced cost rules do not hold.
 14. **Is there a development trio for rung 4, and what is the budget per rung?**
     - (a) Reuse the current developer role as the cheap executor, with a new planner and synthesizer step around it.
     - (b) A new planner, executor, synthesizer trio for development, parallel to the review trio.
