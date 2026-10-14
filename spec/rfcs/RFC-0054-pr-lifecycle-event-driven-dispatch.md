@@ -1099,6 +1099,25 @@ rubric (class (a), (b) or (c) per the Decision authority rules).
    - (a) Local only (signing key, worktrees and plugin are local; remote agents are read-only by design).
    - (b) CI-side classification, local actions.
    - (c) CI-side for non-signing actions (ready flip, retrigger), local for the rest.
+   **Resolution (2026-10-14, full rubric): local only.** Receiver (OQ-1), classifier, board
+   records (OQ-6) and the `land-prep` runner (OQ-7) all run in `pipeline-cli` on the operator's
+   machine, where the signing key, the worktrees and the plugin are; remote agents stay read-only
+   (AISDLC-442). Laptop closed means nothing happens, and the reconciler catches up on wake. A
+   self-contained `rerun-on-cancel` workflow (re-run a cancelled or infra-failed gate run while
+   the laptop is closed) may be added later as an additive step, with `actions: write` scoped to
+   that job, only if measured overnight dwell justifies it; it would not move any part of the
+   machine. Industry research: Tide, Bors and Mergify run as a controller or service outside CI;
+   CI produces check results and the controller decides; none runs the decision loop inside the
+   job whose rollup it is waiting for. **Shipped substrate:** everything AISDLC-823, 826 and 847
+   shipped is local `pipeline-cli` code; no workflow writes to the board; a retrigger is one REST
+   call. **Counter-argument:** "a flaky run cancelled at midnight sits for eight hours; a small
+   workflow could re-run it so the PR is green at wake." Rebuttal: that is the one honest CI-side
+   gain and it is the additive step named above; a CI-side rebase is not a gain because it
+   produces an unsigned head the attestation gate rejects. **Selected over CI-side
+   classification** because a classifier without the board (ownership, loop-guard history) is a
+   different and weaker classifier maintained twice; **over CI-side flip and retrigger** because
+   the flip is the executor's under OQ-7, leaving one action row for the cost of a second runtime
+   and a write-permission workflow.
 9. **How do AISDLC-816, 823, 826, 828, 829 fold in?**
    - (a) All superseded by this RFC's phases and re-filed against it.
    - (b) 816 stays (it is DEC-0127 as written); 823, 826, 828, 829 are phases of this RFC.
