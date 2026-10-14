@@ -516,6 +516,40 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
     assert.equal(headAfterSecond, headAfterFirst, 'second push must not add any commits');
   });
 
+  // ── AISDLC-837: single orchestrator owns squash, task-move, attestation-sign ──
+
+  it('.husky/pre-push calls only the orchestrator, never the sub-hooks directly', () => {
+    const hook = readFileSync(join(PROJECT_ROOT, '.husky', 'pre-push'), 'utf-8');
+    const code = hook
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('#'))
+      .join('\n');
+    assert.equal((code.match(/pre-push-fixups\.sh/g) ?? []).length, 1);
+    assert.doesNotMatch(code, /check-task-moved\.sh/);
+    assert.doesNotMatch(code, /check-attestation-sign\.sh/);
+    assert.doesNotMatch(code, /squash-attestation-chores\.sh/);
+  });
+
+  it('squashes stacked chore-sign commits in the same pass (and honours its skip var)', () => {
+    for (const skip of [false, true]) {
+      const r0 = setupRepo();
+      try {
+        for (let i = 0; i < 2; i++) {
+          writeFileSync(join(r0, `a${i}.txt`), 'x');
+          git(['add', '.'], r0);
+          git(['commit', '-q', '-m', 'chore: sign attestation'], r0);
+        }
+        const before = git(['rev-list', '--count', 'HEAD'], r0).trim();
+        const r = runOrchestrator(r0, { env: skip ? { AI_SDLC_SKIP_SQUASH_CHORES: '1' } : {} });
+        assert.equal(r.status, 0, r.stderr);
+        const after = git(['rev-list', '--count', 'HEAD'], r0).trim();
+        assert.equal(after, skip ? before : String(Number(before) - 1));
+      } finally {
+        rmSync(r0, { recursive: true, force: true });
+      }
+    }
+  });
+
   // ── AC-5: sub-hooks retain standalone exit-1 behavior ─────────────────
 
   it('check-task-moved.sh still exits 1 when invoked directly (no AI_SDLC_INTERNAL_NO_EXIT_1)', () => {
@@ -575,50 +609,6 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
       r.status,
       1,
       `standalone check-attestation-sign.sh must exit 1, got ${r.status}: ${r.stderr}`,
-    );
-  });
-
-  // ── .husky/pre-push wiring assertion ─────────────────────────────────────
-
-  it('.husky/pre-push invokes pre-push-fixups.sh BEFORE check-task-moved.sh', () => {
-    const prePushPath = join(PROJECT_ROOT, '.husky', 'pre-push');
-    assert.equal(existsSync(prePushPath), true, `.husky/pre-push must exist at ${prePushPath}`);
-
-    const content = readFileSync(prePushPath, 'utf-8');
-    const lines = content.split('\n');
-
-    const fixupsIdx = lines.findIndex((l) => l.includes('pre-push-fixups.sh'));
-    const taskMoveIdx = lines.findIndex(
-      (l) => l.includes('check-task-moved.sh') && !l.trimStart().startsWith('#'),
-    );
-    const attestationIdx = lines.findIndex(
-      (l) => l.includes('check-attestation-sign.sh') && !l.trimStart().startsWith('#'),
-    );
-
-    assert.ok(fixupsIdx !== -1, `pre-push-fixups.sh must be in .husky/pre-push:\n${content}`);
-    assert.ok(taskMoveIdx !== -1, `check-task-moved.sh must be in .husky/pre-push:\n${content}`);
-    assert.ok(
-      attestationIdx !== -1,
-      `check-attestation-sign.sh must be in .husky/pre-push:\n${content}`,
-    );
-
-    // check-mcp-bundle-sync.sh must NOT appear as an executable line (AISDLC-385 deleted it).
-    const mcpBundleIdx = lines.findIndex(
-      (l) => l.includes('check-mcp-bundle-sync.sh') && !l.trimStart().startsWith('#'),
-    );
-    assert.equal(
-      mcpBundleIdx,
-      -1,
-      `check-mcp-bundle-sync.sh must NOT appear as an executable line in .husky/pre-push (deleted by AISDLC-385):\n${content}`,
-    );
-
-    assert.ok(
-      fixupsIdx < taskMoveIdx,
-      `pre-push-fixups.sh (line ${fixupsIdx + 1}) must appear BEFORE check-task-moved.sh (line ${taskMoveIdx + 1}) — orchestrator pre-empts individual hooks`,
-    );
-    assert.ok(
-      fixupsIdx < attestationIdx,
-      `pre-push-fixups.sh (line ${fixupsIdx + 1}) must appear BEFORE check-attestation-sign.sh (line ${attestationIdx + 1})`,
     );
   });
 });

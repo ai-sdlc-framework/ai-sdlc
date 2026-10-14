@@ -161,12 +161,6 @@ gates:
     owner: engineering
     property: no newly unwired module or test double in production code
     baseline: true
-  - id: pre-push:scripts/squash-attestation-chores.sh
-    surface: pre-push
-    origin: AISDLC-369
-    owner: engineering
-    property: stacked sign-attestation chore commits collapse to one
-    baseline: true
   - id: pre-push:scripts/check-changelog-edit.sh
     surface: pre-push
     origin: AISDLC-401
@@ -183,19 +177,7 @@ gates:
     surface: pre-push
     origin: AISDLC-386
     owner: engineering
-    property: orders task-move then attestation-sign in one pass
-    baseline: true
-  - id: pre-push:scripts/check-task-moved.sh
-    surface: pre-push
-    origin: AISDLC-220, AISDLC-402
-    owner: engineering
-    property: task file moves to backlog/completed in the PR diff
-    baseline: true
-  - id: pre-push:scripts/check-attestation-sign.sh
-    surface: pre-push
-    origin: AISDLC-133, AISDLC-214, AISDLC-618
-    owner: security
-    property: auto-signs and re-verifies the DSSE attestation before push
+    property: one pass of squash, task-move and attestation-sign (re-push is clean)
     baseline: true
   - id: pre-commit:scripts/check-backlog-ascii.sh
     surface: pre-commit

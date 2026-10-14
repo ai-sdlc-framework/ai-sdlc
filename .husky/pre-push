@@ -9,28 +9,15 @@
 #      unwired module, a grown baseline or a new test double in production code
 #      blocks the push. Static scan. Skip: AI_SDLC_SKIP_DARK_CODE_GATE=1.
 #      (There is no local coverage gate: coverage is gated once, in CI — AISDLC-726.)
-#   2. Squash stacked chore-sign commits (AISDLC-369) — when multiple
-#      consecutive "chore: sign attestation" commits accumulate at HEAD
-#      (from re-sign cycles), squashes them into one to keep history clean.
-#      ORDER: MUST run BEFORE attestation-sign (item 4 below) so the
-#      squashed HEAD is the one the attestation is signed against.
-#      No-op when there is 0 or 1 chore-sign commit at HEAD.
-#   3. Mechanical fixups orchestrator (AISDLC-386) — runs two mechanical
-#      fixup sub-hooks in dependency order in a single pass:
-#        task-move (AISDLC-220) → attestation-sign (AISDLC-133)
-#      (mcp-bundle-sync was DELETED by AISDLC-385 — bundle now distributed via npm)
-#      If any fixup ran, exits 1 ONCE with a consolidated "re-run git push"
-#      message instead of each sub-hook exiting 1 separately (collapses the
-#      worst-case 3-push chain into 2). ORDER IS LOAD-BEARING: task-move
-#      MUST run before attestation-sign (attestation's contentHashV4 binds
-#      {path, headBlobSha}; if move happens after sign the envelope references
-#      the old path → verify-attestation rejects).
-#   4-5. Individual sub-hook invocations (task-moved, attestation-sign) remain
-#      below as defense-in-depth: on the re-push after the orchestrator exits 1,
-#      the orchestrator sees no fixups needed and exits 0. Each sub-hook's
-#      idempotency check then confirms clean state. If the orchestrator is
-#      bypassed (AI_SDLC_BYPASS_ALL_GATES), the individual hooks below also
-#      skip (they check the same bypass var).
+#   2. Mechanical fixups orchestrator (AISDLC-386, AISDLC-837) — ONE call of
+#      scripts/pre-push-fixups.sh runs, in order:
+#        squash-attestation-chores (AISDLC-369) → task-move (AISDLC-220)
+#        → attestation-sign (AISDLC-133)
+#      ORDER IS LOAD-BEARING: squash first so the squashed HEAD is the one
+#      signed; task-move before sign (contentHashV4 binds {path, headBlobSha}).
+#      If task-move or sign made a commit, exits 1 ONCE ("re-run git push");
+#      the re-push finds nothing to do and exits 0. The sub-hooks are no
+#      longer invoked directly from this file.
 #
 # Skip individual gates with their respective env vars
 # (AI_SDLC_SKIP_SUBSTRATE_GATE=1,
@@ -72,9 +59,6 @@ printf '%s\n' "$PUSH_STDIN" | ./scripts/check-knowledge-scope.sh --push-stdin
 if [ -n "${AI_SDLC_PR_BODY_FILE:-}" ] && [ -f "$AI_SDLC_PR_BODY_FILE" ]; then
   ./scripts/check-pr-body-protected.sh "$AI_SDLC_PR_BODY_FILE"
 fi
-if [ "${AI_SDLC_SKIP_SQUASH_CHORES:-}" != "1" ]; then
-  ./scripts/squash-attestation-chores.sh
-fi
 # AISDLC-401: warn when CHANGELOG.md is staged on a feature branch.
 # release-please owns CHANGELOG.md; manual edits cause rebase conflicts.
 printf '%s\n' "$PUSH_STDIN" | ./scripts/check-changelog-edit.sh
@@ -82,15 +66,7 @@ printf '%s\n' "$PUSH_STDIN" | ./scripts/check-changelog-edit.sh
 # track, decline, or say "(none)" for every follow-up. Runs before the fixup
 # orchestrator. Skip: AI_SDLC_SKIP_FOLLOWUP_GATE=1
 printf '%s\n' "$PUSH_STDIN" | ./scripts/check-followups-on-push.sh
-# AISDLC-386: orchestrator handles all mechanical fixups (task-move →
-# attestation-sign) in a single pass and exits 1 ONCE if any work was done.
-# (mcp-bundle-sync removed per AISDLC-385 — bundle now distributed via npm.)
-# This collapses the worst-case 3-push chain into 2.
-# The individual hook invocations below act as defense-in-depth: on the
-# re-push after the orchestrator exits 1, the orchestrator sees no fixups
-# needed and exits 0, then each sub-hook's own idempotency check confirms
-# the state is clean. If the orchestrator is bypassed (AI_SDLC_BYPASS_ALL_GATES)
-# the individual hooks below also skip (they check the same bypass var).
+# AISDLC-386/837: the orchestrator handles squash, task-move and attestation-sign
+# in a single pass and exits 1 ONCE if a fixup commit was made. Skips:
+# AI_SDLC_SKIP_SQUASH_CHORES, AI_SDLC_SKIP_TASK_MOVE, AI_SDLC_SKIP_ATTESTATION_SIGN.
 printf '%s\n' "$PUSH_STDIN" | ./scripts/pre-push-fixups.sh
-./scripts/check-task-moved.sh
-./scripts/check-attestation-sign.sh

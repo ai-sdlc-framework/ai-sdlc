@@ -123,12 +123,9 @@ const BASELINE_IDS = [
   'pre-push:scripts/check-substrate-contract.mjs',
   'pre-push:scripts/check-skip-ci-marker.sh',
   'pre-push:scripts/check-dark-code-on-push.sh',
-  'pre-push:scripts/squash-attestation-chores.sh',
   'pre-push:scripts/check-changelog-edit.sh',
   'pre-push:scripts/check-followups-on-push.sh',
   'pre-push:scripts/pre-push-fixups.sh',
-  'pre-push:scripts/check-task-moved.sh',
-  'pre-push:scripts/check-attestation-sign.sh',
   'pre-commit:scripts/check-backlog-ascii.sh',
   'pre-commit:lint-staged',
   'pre-commit:scripts/typecheck-workspace.mjs',
@@ -195,7 +192,7 @@ describe('gate registry (AISDLC-805)', () => {
     for (const id of [
       'workflow:ai-sdlc-gate.yml',
       'gate-job:backlog-drift',
-      'pre-push:scripts/check-task-moved.sh',
+      'pre-push:scripts/pre-push-fixups.sh',
     ])
       assert.ok(live.has(id), `expected live gate ${id}`);
   });

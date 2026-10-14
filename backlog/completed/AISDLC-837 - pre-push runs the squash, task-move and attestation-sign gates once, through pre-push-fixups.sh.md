@@ -2,7 +2,7 @@
 id: AISDLC-837
 title: >-
   pre-push runs the squash, task-move and attestation-sign gates once, through pre-push-fixups.sh
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:

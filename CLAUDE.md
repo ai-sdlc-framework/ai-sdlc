@@ -28,7 +28,7 @@ Only rules that change behaviour in every session live here (re-read every turn;
 
 ## Hooks (pre-push chain)
 
-`.husky/pre-push` runs, in order: dark-code check (`AI_SDLC_SKIP_DARK_CODE_GATE=1`), `squash-attestation-chores.sh`, `pre-push-fixups.sh`, `check-task-moved.sh` (moves the task file to `backlog/completed/`; must run BEFORE attestation-sign), `check-attestation-sign.sh` (signs/verifies the DSSE envelope). Per-gate skips are `AI_SDLC_SKIP_*` and are never a routine shortcut. Emergency only: `AI_SDLC_BYPASS_ALL_GATES=1` (document in the PR body; [`docs/operations/emergency-bypass.md`](docs/operations/emergency-bypass.md)).
+`.husky/pre-push` runs, in order: dark-code check (`AI_SDLC_SKIP_DARK_CODE_GATE=1`), then `pre-push-fixups.sh` once, which runs squash-attestation-chores, check-task-moved (task file to `backlog/completed/`, BEFORE sign) and check-attestation-sign (signs/verifies the DSSE envelope) in that order. Per-gate skips are `AI_SDLC_SKIP_*` and are never a routine shortcut. Emergency only: `AI_SDLC_BYPASS_ALL_GATES=1` (document in the PR body; [`docs/operations/emergency-bypass.md`](docs/operations/emergency-bypass.md)).
 
 - **Worktree hooks (AISDLC-693):** `core.hooksPath` is `.husky/_` (gitignored, made by `prepare`); a worktree without it runs NO gate. Never disable install scripts. `ai-sdlc doctor` check `worktree-hooks` lists affected worktrees.
 - DoR and backlog-drift run in CI only; run by hand: `node pipeline-cli/bin/cli-dor-check.mjs --task <path>`, `npx backlog-drift check`.
