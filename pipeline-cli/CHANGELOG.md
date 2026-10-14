@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.33.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.32.0...pipeline-cli-v0.33.0) (2026-10-14)
+
+
+### Features
+
+* GitHub Actions load discipline, cli-ci sweep and queue (AISDLC-799) ([#1389](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1389)) ([b6e2241](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b6e224165ce025e5558a9b248431d06598a89798))
+* governance rules enforced in prose move to hooks and CI checks (AISDLC-764) ([#1368](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1368)) ([217cdb2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/217cdb25d1ca475d6135646ff2f878041e5944b9))
+* reviewerSet staged, staged Step 7 pipeline, stage leaves, staged ledger role [needs-human-attention] (AISDLC-676) ([#1360](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1360)) ([c42ea82](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c42ea82748dc006ddd1a4ca2106bfe8fd12553d5))
+
+
+### Bug Fixes
+
+* **ci:** step 0.5 files tasks via cli-file and refuses duplicate ids (AISDLC-860) ([#1505](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1505)) ([165c5a0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/165c5a0092b8a3f24ac0e8b50faf1c592013687f))
+* reuse existing sync branch and PR in step 0.5 on resume (AISDLC-858) ([#1499](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1499)) ([8eb024e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8eb024e405752a2abb197383c0c1078305ff03f6))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.33.0
+
 ## [0.32.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.31.0...pipeline-cli-v0.32.0) (2026-10-13)
 
 

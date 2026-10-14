@@ -5,6 +5,21 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.28.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.27.0...ai-sdlc-plugin-v0.28.0) (2026-10-14)
+
+
+### Features
+
+* GitHub Actions load discipline, cli-ci sweep and queue (AISDLC-799) ([#1389](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1389)) ([b6e2241](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b6e224165ce025e5558a9b248431d06598a89798))
+* governance rules enforced in prose move to hooks and CI checks (AISDLC-764) ([#1368](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1368)) ([217cdb2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/217cdb25d1ca475d6135646ff2f878041e5944b9))
+* lease push resolves the task worktree from git -C or the active task id (AISDLC-861) ([#1506](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1506)) ([d9ff632](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d9ff6320110a6c44b8ac45c65d26f0e2b4d28d4a))
+* reviewerSet staged, staged Step 7 pipeline, stage leaves, staged ledger role [needs-human-attention] (AISDLC-676) ([#1360](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1360)) ([c42ea82](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c42ea82748dc006ddd1a4ca2106bfe8fd12553d5))
+
+
+### Bug Fixes
+
+* **ci:** wire plugin suite into CI and main-health, fix stale test (AISDLC-549) ([#1407](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1407)) ([d03eda7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d03eda7c071a394fbeb0a0b2da614b23d7bf2046))
+
 ## [0.27.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.26.0...ai-sdlc-plugin-v0.27.0) (2026-10-13)
 
 

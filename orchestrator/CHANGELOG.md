@@ -5,6 +5,20 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.33.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.32.0...orchestrator-v0.33.0) (2026-10-14)
+
+
+### Features
+
+* GitHub Actions load discipline, cli-ci sweep and queue (AISDLC-799) ([#1389](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1389)) ([b6e2241](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b6e224165ce025e5558a9b248431d06598a89798))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.33.0
+
 ## [0.32.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.31.0...orchestrator-v0.32.0) (2026-10-13)
 
 
