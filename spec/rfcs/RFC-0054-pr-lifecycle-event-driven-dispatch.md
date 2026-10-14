@@ -1195,6 +1195,25 @@ rubric (class (a), (b) or (c) per the Decision authority rules).
     - (a) Exactly the RFC-0049 judgment layer with Jev as the provider.
     - (b) Any provider behind the RFC-0049 typed-question interface, selected by config.
     - (c) A separate cheap classifier outside the judgment layer.
+    **Resolution (2026-10-14, full rubric): rung 2 is the RFC-0049 System One judgment layer,
+    with the provider chosen by configuration.** Jev is the default provider; a local model (the
+    operator's named alternative is Qwen 27B) or any OpenAI-compatible endpoint is sanctioned
+    through the adapter RFC-0049 already ships in shadow; each typed question declares its
+    confidence floor, below which the case escalates to rung 3; shadow-first comparison stays
+    mandatory before a provider decides anything. The ladder text's "JEV" is to be read as "the
+    judgment layer" and is corrected where it names the vendor. Industry research: cascade and
+    routing designs put an interface between caller and cheap model so the tier can be swapped or
+    self-hosted; a single hosted vendor hard-wired into a control loop is a standard postmortem
+    finding. **Shipped substrate:** RFC-0049 is Signed Off and implemented
+    (`pipeline-cli/src/judgment/`, `JudgmentProvider` modelled on the embedding adapter, Jev
+    first, OpenAI-compatible adapter in shadow; RFC-0052 records Jev's limit that it cannot write
+    a finding); a local Qwen behind an OpenAI-compatible endpoint needs no new code.
+    **Counter-argument:** "provider-by-config lets a weaker local model be called rung 2 while
+    the ladder's cost and quality claims were measured on Jev." Rebuttal: the per-question
+    confidence floor is the guard: a weaker provider falls below it more often and escalates
+    visibly at measured cost, and shadow mode compares a new provider before it decides.
+    **Selected over exactly Jev** because the dispatch loop must not depend on one hosted vendor;
+    **over a separate classifier** because it would rebuild what RFC-0049 shipped.
 13. **Where is the ladder enforced?**
     - (a) A lint over agent and command frontmatter requiring a declared rung, input schema, output schema and bounds.
     - (b) A reviewer-gate check on PRs that add a prose automation.
