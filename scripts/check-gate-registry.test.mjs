@@ -122,6 +122,7 @@ const BASELINE_IDS = [
   'pre-push:scripts/check-substrate-contract.mjs',
   'pre-push:scripts/check-skip-ci-marker.sh',
   'pre-push:scripts/check-dark-code-on-push.sh',
+  'pre-push:scripts/typecheck-workspace.mjs',
   'pre-push:scripts/check-followups-on-push.sh',
   'pre-push:scripts/pre-push-fixups.sh',
   'pre-commit:scripts/check-backlog-ascii.sh',
