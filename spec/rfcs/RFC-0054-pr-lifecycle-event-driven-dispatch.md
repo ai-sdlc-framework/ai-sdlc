@@ -955,6 +955,25 @@ rubric (class (a), (b) or (c) per the Decision authority rules).
    - (b) Replaced by a per-shape loop guard (same classified failure N times).
    - (c) Deleted entirely; the loop guard is the stall detector.
    - (d) Kept as is; only `resume` is widened.
+   **Resolution (2026-10-14, full rubric): the count cap stays for PR-less failures; PR
+   follow-ups get a same-head loop guard instead of a count.** Industry research: Kubernetes
+   controllers use per-key backoff with a rate limiter rather than a retry count; Prow/Tide retests
+   with backoff and gives up only on a repeated identical failure; Mergify has a per-rule retry
+   maximum. **Shipped substrate:** the RFC's option (a) is already live as AISDLC-847 (the text
+   above says AISDLC-828; the retry-cap change was renumbered to 847 and 828 is the five-step DoR
+   gate deletion): `dispatch/requeue.ts` bypasses the cap when the failed task has an open PR, and
+   AISDLC-857 extends the check to `prNumber`. That bypass is unbounded. **Refinement:** the state
+   machine records `(state, action, headSha)` for every action it takes on a PR; when it is about
+   to take the same action on the same head SHA a second time (rebase and still DIRTY, retrigger and
+   still cancelled, re-sign and still a content-hash mismatch), it parks the PR to the planner with
+   the pair as the note instead of acting. Unlike failures never add up and a new head resets the
+   guard. **Counter-argument:** "the guard depends on a stable classifier; if skew and real red
+   flap, no two pairs match and the loop continues." Rebuttal: the key is the head SHA, not the
+   classification; two actions with no new head between them mean the action did not change the
+   code, which is the loop signature whatever the state was called. **Selected over keeping 847
+   as shipped** because an unbounded mechanical loop costs a reviewer round per pass; **over
+   deleting the cap in favour of the stall detector** because AISDLC-826 sees only silent
+   workers and a worker that fails loudly every time never stalls.
 4. **Is "resume needs a claim" kept?**
    - (a) Keep; add `requeue --note`.
    - (b) Delete; a note can be attached to a `failed/` or `landing/` task.
