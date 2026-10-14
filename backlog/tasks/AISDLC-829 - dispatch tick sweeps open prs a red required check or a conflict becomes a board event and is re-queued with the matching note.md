@@ -1,52 +1,61 @@
 ---
 id: AISDLC-829
 title: >-
-  Dispatch tick sweeps open PRs: a red required check or a conflict becomes a board event and is re-queued with the matching note
+  RFC-0054 Phase 1 core: coded reconciler and scheduler, landing/ records, one action table (task and docs action sets) replacing the dispatch tick's prose PR sweep
 status: To Do
 assignee: []
 created_date: '2026-10-13'
+updated_date: '2026-10-14'
 labels:
   - dispatch
   - hierarchy
   - velocity
   - root-cause
+  - rfc-0054
+  - phase-1
 dependencies:
   - AISDLC-826
 references:
+  - spec/rfcs/RFC-0054-pr-lifecycle-event-driven-dispatch.md
   - pipeline-cli/src/hierarchy/dispatch-loop.ts
-  - pipeline-cli/src/hierarchy/playbook.ts
+  - pipeline-cli/src/hierarchy/pr-state.ts
+  - pipeline-cli/src/hierarchy/stall.ts
+  - pipeline-cli/src/cli/dispatch.ts
+  - docs/operations/cli-hierarchy.md
 priority: critical
 dispatchable: true
 ---
 
 ## Description
 
-<!-- SECTION:DESCRIPTION:BEGIN -->
-**Context (operator, 2026-10-13 00:50Z).** 22 PRs were open with only one being worked, and a planner filing PR (#1447) sat red for an hour with nothing noticing. Nothing in the system owns "open PR with a red required check": the dispatch tick (`dispatch-loop.ts`) watches board verdicts, not PRs; planner filing PRs never touch the board; the AISDLC-460 ci-failure-watcher is code behind a manual command (`/ai-sdlc resolve-conflicts`); `auto-enable-auto-merge.yml` arms and then does nothing. The drain's definition of done is a PR on main (DEC-0127), yet the only component that reacts to a red PR is a person reading the PR page. Today's red PRs fell into a handful of shapes that dispatch already knows how to resume: orphaned attestation after a rebase (DEC-0142 hand-review path), Step 10.5 dirty-tree stop (DEC-0153 clean-and-resume), `node --test` regressions in named files, cancelled superseded runs, a drift error, a one-file conflict.
+Amended in place 2026-10-14 under RFC-0054 OQ-9 (id kept; the original scope, "tick sweeps open PRs and re-queues red ones with a note", is now one row of this task). This is the Phase 1 core of RFC-0054, resolved 2026-10-14: the PR lifecycle is one state machine, owned by the dispatch session's code, not by its prose.
 
-**Five-step review (requirements first).** Delete: the AISDLC-460 ci-failure-watcher runtime and the `/ai-sdlc resolve-conflicts` command as the only PR-failure path (step 2).
-1. Requirement questioned: "a task is done when its executor writes a verdict" (RFC-0051 board design). Wrong for the drain: done is merged. A red PR must be a board event, otherwise every gate added to `ai-sdlc/pr-ready` is invisible to the drain until a human looks.
-2. Delete: `pipeline-cli/src/runtime/ci-failure-watcher.*` and the `resolve-conflicts` command body that imports it (keep a one-paragraph pointer, as the retired commands have); the sweep below replaces them inside the loop that already runs.
-3. Simplify: one PR sweep in the existing dispatch tick (same 300 s wake, no new loop, no new session). For every open non-draft PR against main whose required rollup is red, whose head is `CONFLICTING`, or whose checks are all from a cancelled superseded run: resolve the task id from the branch name or title (`AISDLC-N`; a filing PR with no task id is reported, not re-queued), classify by the failing job or state with a small fixed table — `Verify attestation`/`Attestation gate` → DEC-0142 hand-review note; `rebase-conflict`/`CONFLICTING` → rebase-first prefix; `Build & Test` with a `node --test` summary → note naming the failing test files parsed from the log; cancelled superseded run → re-push note; anything else → failed verdict whose `cause` is the job name — and `cli-dispatch resume` it with that note when the task has no inflight claim and is not already queued. Idempotent: a PR already queued or inflight is skipped; a PR re-queued by the sweep is recorded in the loop state with its head sha, so the same head is never re-queued twice.
-4. Accelerate: a red PR is back on the board within one tick instead of hours; the planner is not consulted.
-5. Automate: nothing beyond the sweep; the notes are the existing templates.
+Today (AISDLC-823) the classifier is code (`pr-state.ts`, `cli-dispatch classify-prs`) but the facts it classifies are gathered by the dispatch *model* following `operator-dispatch.md` Step 2b (REST calls written into `.pr-facts.json`), on a 15-minute self-clear cadence, and the actions are prose instructions to the same model. Under OQ-1 the webhook receiver (AISDLC-880) wakes a reconciler; under OQ-6 ownership and history live in `landing/<pr>.json`; under OQ-2, OQ-4 and OQ-11 the action table has a task set (post-ready PRs, takeover on executor death) and a docs set (no-task PRs, owned from birth); under OQ-8 everything runs locally.
 
-**Velocity impact.** Positive: closes the blind spot that left 22 PRs open; every future gate added to the rollup is drained automatically or shows up as a named failed verdict.
-<!-- SECTION:DESCRIPTION:END -->
+**Five-step review (requirements first).** Requirement questioned: "the dispatch model must look at PRs". No: the facts are REST JSON and the decision is a table; a model adds latency, cost and a 15-minute floor. Deleted: Step 2b of `operator-dispatch.md`, `.pr-facts.json`, the model-driven cadence for PR handling. Simplified: one reconciler, one record per PR, one table. Accelerated: reaction time drops from the tick interval to the reconciler's run time after an event. Automated last: the reconciler runs itself on wake, on event, and on a timer.
+
+1. **Reconciler** (`pipeline-cli/src/hierarchy/reconcile.ts`, `cli-dispatch reconcile [--pr <n>]`): lists open PRs over REST (task PRs by branch or title id; docs PRs by the docs-only detector and branch prefixes `ai-sdlc/file-*`, `ai-sdlc/decisions-sync*`, `docs/*`), reads checks and merge state, classifies with `pr-state.ts`, writes or updates `landing/<pr>.json` (owner, state, last action history, delivered and landed timestamps), and executes the action. Idempotent: the same facts twice produce the same record and no second action.
+2. **Scheduler**: runs on (a) a wake file touched by the webhook receiver, (b) session start and machine wake, (c) a timer (default 60 s while any task or docs PR is open, else 15 min). Deterministic code in the dispatch loop, not a model turn; `cli-hierarchy clear --self --resume-after` is no longer how PR handling is paced.
+3. **Action table** (replaces prose in `operator-dispatch.md`): task set per the RFC's ownership table from `ready` on (`merged` → mark landed, write `done/`, sync parent, release dependants; skew → `land-prep` (AISDLC-881, until it exists: the existing rebase path); flake → retrigger once; real red → `reenter` (AISDLC-882, until it exists: requeue with the failing line); `ready-to-flip` only for takeover after executor death post-sign); docs set (`rebase-in-place` via `cli-file rebase`, `rerun-dor`, `arm` via `cli-merge-if-eligible --source-kind docs`, `route-to-planner` for a real docs check failure). The release-please PR is reported, never acted on.
+4. **Ownership**: `landing/<pr>.json.owner` is `executor:<name>` until `delivered`, then `machine`; docs PRs are `machine` from creation. `cli-dispatch peek` and the brief-progress loop read `done/` only (OQ-5).
+5. **Docs**: `docs/operations/cli-hierarchy.md` documents the reconciler, the scheduler, the record and the table; `operator-dispatch.md` Step 2b is deleted and replaced by one line that runs the reconciler.
 
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 The dispatch tick runs a PR sweep each wake: open, non-draft, base main, required check red or `mergeable == CONFLICTING` or all checks from a cancelled run; one `gh` list call plus one view per candidate; tolerant of `gh` failures (sweep skipped, reported in the tick result)
-- [ ] #2 Classification table with hermetic tests for each shape: attestation red → DEC-0142 note; conflict → rebase-first prefix; `node --test` failure → note naming the failing files; cancelled superseded → re-push note; unknown → failed verdict with `cause: <job name>`
-- [ ] #3 `cli-dispatch resume` is called with the note only when the task is neither queued nor inflight; a `(head sha, task)` pair is re-queued at most once (loop state), covered by a test
-- [ ] #4 A PR with no task id in branch or title (filing PRs) is listed in the tick result's progress line as `unowned red PR #N <job>`; never re-queued
-- [ ] #5 `pipeline-cli/src/runtime/ci-failure-watcher.*` is deleted and `/ai-sdlc resolve-conflicts` becomes a one-paragraph pointer to the sweep; `pnpm dark-code:check` passes
-- [ ] #6 `docs/operations/cli-hierarchy.md` documents the sweep, the table and the idempotency rule
-- [ ] #7 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
+- [ ] #1 `cli-dispatch reconcile` over a fixture of PR facts produces one `landing/<pr>.json` per PR with owner, state, action and history; running it again on the same facts changes no file and runs no action (idempotency test).
+- [ ] #2 Every state in `PR_STATES` maps to exactly one action in the task set or the docs set, with a hermetic test per row; a docs-only PR with `mergeStateStatus: DIRTY` yields `rebase-in-place`, a task PR with a real red yields the re-entry action carrying the failing check line and head SHA.
+- [ ] #3 The scheduler fires on wake-file touch, on session start and on the timer; a test shows a touched wake file causes one reconcile within the debounce window and no model turn is involved (no `claude` invocation in the trace).
+- [ ] #4 A PR with no task id (filing PR) gets `owner: machine` at first sight and is never listed as unowned; the tick result's progress line shows docs PRs with their state.
+- [ ] #5 `operator-dispatch.md` has no Step 2b and no `.pr-facts.json` reference; the reconciler is invoked by one line; `ai-sdlc-plugin/commands/operator-dispatch.test.mjs` is updated.
+- [ ] #6 `docs/operations/cli-hierarchy.md` documents the reconciler, scheduler, record format and both action sets.
+- [ ] #7 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate).
 <!-- AC:END -->
 
 ## Verification
 
-- `pnpm --filter @ai-sdlc/pipeline-cli build && pnpm --filter @ai-sdlc/pipeline-cli test && pnpm dark-code:check`
-- `pnpm lint && pnpm format:check`
+`pnpm build && pnpm test && pnpm lint && pnpm format:check`; one drain hour with the reconciler as the only PR handler and zero planner messages for mechanical states (the AISDLC-823.1 soak criterion applies to this task).
+
+## Out of scope
+
+The webhook receiver (AISDLC-880); the loop guard, stale-claim row removal and `ci-failure-watcher` deletion (AISDLC-883); the `land-prep` runner (AISDLC-881); the `reenter` command (AISDLC-882).

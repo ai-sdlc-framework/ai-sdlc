@@ -1,11 +1,11 @@
 ---
 id: RFC-0054
 title: PR Lifecycle as Event-Driven Dispatch (one state machine from branch pushed to merged)
-status: Draft
-lifecycle: Draft
+status: Ready for Review
+lifecycle: Ready for Review
 author: 'Dominique Legault'
 created: 2026-10-13
-updated: 2026-10-13
+updated: 2026-10-14
 targetSpecVersion: v1alpha1
 requires: []
 assumes: [RFC-0012, RFC-0035, RFC-0041, RFC-0042, RFC-0051]
@@ -14,14 +14,14 @@ requiresDocs: []
 
 # RFC-0054: PR Lifecycle as Event-Driven Dispatch (one state machine from branch pushed to merged)
 
-**Status:** Draft
-**Lifecycle:** Draft
+**Status:** Ready for Review (v0.2, 2026-10-14: all 14 Open Questions resolved with the operator through the decision rubric; webhook-first event source with poll reconciler, executor owns to ready then the state machine, docs lane for no-task PRs, delivered/landed, landing/ records, land-prep runner, local only, rung: key, report-only budget)
+**Lifecycle:** Ready for Review
 **Author:** Dominique Legault (drafted by an agent session on the operator's 2026-10-13 mandate)
 **Created:** 2026-10-13
-**Updated:** 2026-10-13
+**Updated:** 2026-10-14
 **Target Spec Version:** v1alpha1
 
-> This RFC presents options and a recommendation. It does not resolve any Open Question. Every
+> This RFC presented options and a recommendation; the operator resolved every Open Question on 2026-10-14 (see each **Resolution** block). Every
 > question in the Open Questions section is routed through the decision rubric
 > (`decision-rubric`, Decision Catalog RFC-0035); the answers are the operator's.
 
@@ -896,67 +896,388 @@ rubric (class (a), (b) or (c) per the Decision authority rules).
    - (b) Option C first, add a fast path later (the recommended order).
    - (c) Option A from the start (webhook with poll only as emergency catch-up).
    - (d) Option B (Actions as the source) with C as fallback.
+   **Resolution (2026-10-14, full rubric): webhook first, poll as the fallback reconciler** (RFC
+   Option A as the primary source, Option C as catch-up; the hybrid of Option D with the fast path
+   mandatory in Phase 1 rather than deferred). Industry research: Argo CD and Flux keep the
+   reconcile loop as truth and use webhooks only to shorten the interval; Mergify, Kodiak and Bors
+   are webhook-driven hosted services; GitHub's local-receiver tooling (`gh webhook forward`, smee)
+   drops on sleep. **Shipped substrate:** AISDLC-823 already landed the poll, but as prose (the
+   dispatch model gathers PR facts over REST into `.pr-facts.json` every 15 min or less and calls
+   `cli-dispatch classify-prs`); `ci-failure-watcher` (AISDLC-460) is a second 60 s `gh` poller; a
+   reusable HMAC-validating receiver exists in `reference/src/adapters/webhook-server.ts` and
+   `orchestrator/src/webhook-manager.ts` and is used by nothing in dispatch. **Refinement:** the
+   webhook receiver is the Phase 1 producer of event records; the 823 poll is re-implemented in code
+   (classifier plus a deterministic scheduler, not a model session) as the reconciler that runs on
+   wake and on a timer, and must produce the same state the events would have; `ci-failure-watcher`
+   is deleted as a duplicate poller. **Counter-argument:** "a laptop receiver needs a tunnel and a
+   secret, loses events while asleep, and the audits blame ownerless states, not notification
+   latency." Rebuttal (operator): latency and a warm executor context are weighted above
+   operational simplicity; on an 80-merge day the base moves every 18 min, so a poll interval is a
+   real fraction of the churn window and costs second and third rebases; sleep loss is covered by
+   the reconciler. **Selected over poll-first-fast-path-later** because a deferred fast path has no
+   forcing function and risks "poll forever"; **over Actions-as-source** because the runner queue
+   (64 s median) makes it no faster than a poll. Consequence: OQ-10 (receiver trust) is in scope.
 2. **Who owns the PR after the draft is created?**
    - (a) The executor that made it, until merged (long-lived context).
    - (b) A "landing" role (a new roster entry) that owns every unlanded PR.
    - (c) Dispatch's state machine, with the executor re-entered by resume only for real red.
    - (d) Mixed by state (the ownership table in the Proposal).
+   **Resolution (2026-10-14, full rubric): mixed by stage, with the executor owning the PR until it
+   is READY and the dispatch state machine owning it from ready to merged.** Operator's statement
+   of the executor lifecycle: do the work with the developer, push the branch as a draft PR, run the
+   reviewer round, sign the attestation once the reviews finish, push the envelope, and flip the PR
+   from draft to ready so CI can run. The dispatched task is owned by that executor until the flip
+   to ready, unless the executor dies or times out (AISDLC-826 thresholds); then the dispatch state
+   machine takes over and continues the attestation work itself (resume on the same branch, not a
+   fresh executor claim by default). From ready onward the state machine owns the PR: CI
+   observation, rebase on skew, re-sign via the hook, retrigger on flake, arm, and done on merge;
+   a real red on the current head re-enters an executor by resume carrying the failing check line
+   and head SHA (the Proposal's ownership table applies from "ready" on). Industry research:
+   Mergify, Kodiak, Bors and Prow/Tide hand the PR to the bot after approval and pull the author
+   back only for a real failure; the operator's split puts that hand-over at "ready" rather than at
+   "draft". **Shipped substrate:** AISDLC-823's action table already implements the post-ready
+   half (mechanical states get machine actions, only real failure resumes the executor); AISDLC-826
+   implements the death/timeout hand-over; AISDLC-816 (DEC-0127, unshipped) must be read with this
+   split: an executor is free to claim once its PR is ready, not once it is merged.
+   **Gap surfaced:** planner filing PRs (docs, task files, decision sync) have been opened as
+   drafts by the planner and left with no owner; under this split they have no executor stage at
+   all and fall straight to the state machine, which today ignores PRs without a task id. OQ-11
+   decides the mechanism; the requirement recorded here is that every PR has an owner from the
+   moment it exists. **Counter-argument:** "freeing the slot at draft PR (machine owns from draft)
+   would raise throughput by the length of the review round." Rebuttal (operator): the review
+   round and the signing are the executor's work product, done in its worktree with its key; a
+   half-attested PR has no meaning to the machine. **Selected over originating-executor-until-
+   merged** because CI waits and rebases are not executor work; **over a landing roster role**
+   because the post-ready stages are mechanical and belong to the deterministic machine, not a
+   model session.
 3. **Is the retry cap deleted or scoped?**
    - (a) Deleted for PR follow-ups only (AISDLC-828); stays for PR-less failures.
    - (b) Replaced by a per-shape loop guard (same classified failure N times).
    - (c) Deleted entirely; the loop guard is the stall detector.
    - (d) Kept as is; only `resume` is widened.
+   **Resolution (2026-10-14, full rubric): the count cap stays for PR-less failures; PR
+   follow-ups get a same-head loop guard instead of a count.** Industry research: Kubernetes
+   controllers use per-key backoff with a rate limiter rather than a retry count; Prow/Tide retests
+   with backoff and gives up only on a repeated identical failure; Mergify has a per-rule retry
+   maximum. **Shipped substrate:** the RFC's option (a) is already live as AISDLC-847 (the text
+   above says AISDLC-828; the retry-cap change was renumbered to 847 and 828 is the five-step DoR
+   gate deletion): `dispatch/requeue.ts` bypasses the cap when the failed task has an open PR, and
+   AISDLC-857 extends the check to `prNumber`. That bypass is unbounded. **Refinement:** the state
+   machine records `(state, action, headSha)` for every action it takes on a PR; when it is about
+   to take the same action on the same head SHA a second time (rebase and still DIRTY, retrigger and
+   still cancelled, re-sign and still a content-hash mismatch), it parks the PR to the planner with
+   the pair as the note instead of acting. Unlike failures never add up and a new head resets the
+   guard. **Counter-argument:** "the guard depends on a stable classifier; if skew and real red
+   flap, no two pairs match and the loop continues." Rebuttal: the key is the head SHA, not the
+   classification; two actions with no new head between them mean the action did not change the
+   code, which is the loop signature whatever the state was called. **Selected over keeping 847
+   as shipped** because an unbounded mechanical loop costs a reviewer round per pass; **over
+   deleting the cap in favour of the stall detector** because AISDLC-826 sees only silent
+   workers and a worker that fails loudly every time never stalls.
 4. **Is "resume needs a claim" kept?**
    - (a) Keep; add `requeue --note`.
    - (b) Delete; a note can be attached to a `failed/` or `landing/` task.
    - (c) Replace both with one `reenter` command keyed on PR state.
+   **Resolution (2026-10-14, full rubric): split by PR kind. Docs-only PRs re-enter by
+   `cli-file rebase` performed in place (lease push on the same branch, no replacement PR); task
+   PRs re-enter by one `reenter` command keyed on PR state that runs the machine action or writes
+   a queue manifest carrying note, branch and head SHA, creating the claim as its side effect.**
+   The claim stops being a precondition of re-entry and becomes an output of it. Operator framing:
+   the volume behind the "resume cannot reach the branch" escalation class (DEC-0111 to DEC-0122
+   in one night) was planner filing PRs (task files, decision records, RFC edits, operations
+   docs) pushed through the task-PR shape: draft, reviewer round, claim, resume. None of those
+   stages has meaning for a docs change, so the fix is to delete them for that kind rather than
+   to make resume reach them. **Shipped substrate (survey 2026-10-14):** `cli-file --pr` already
+   opens ready (not draft) from a fast-forward of `origin/main` (`pipeline-cli/src/cli/file.ts`);
+   `auto-enable-auto-merge.yml` arms any non-draft same-repo PR on `opened`; the gate's docs-only
+   detector (`scripts/is-docs-only-changeset.mjs`) skips build-test, integration, attestation and
+   independence; `check-pr-governance.mjs` requires no reviewers for docs-only; branch protection
+   needs only `Backlog Drift` and `ai-sdlc/pr-ready` with zero approvals; DEC-0088 grants the
+   planner lease pushes on `ai-sdlc/file-*`. The lane exists; the stalls are four gaps: (1)
+   `dor-readiness-gate` fails a task file whose reference is a sibling task in another open
+   filing PR and nothing re-runs it when that PR lands (#1524 is the live case); (2) `cli-file
+   rebase` opens a replacement PR and closes the old one, a closed-unmerged PR per base move; (3)
+   PRs opened `--draft` by the planner or a skill (decisions-sync #1525, RFC walkthrough PRs) skip
+   both the gate and the arming and sit ownerless; (4) `lint` runs unconditionally on a one-file
+   `.md` diff and `cli-merge-if-eligible` has no `docs` source kind. **Refinement (Phase 0 of
+   this RFC, deletions first):** no-task PRs are never opened as drafts; `lint` leaves the
+   docs-only job set (prettier on markdown runs inside the drift job without an install);
+   `cli-file rebase` rebases in place under DEC-0088; a DoR reference to a task present in
+   another open `ai-sdlc/file-*` PR is `pending` rather than `fail` and the machine re-runs the
+   gate when that PR merges; `--source-kind docs` is added to `cli-merge-if-eligible`; the docs-only
+   path list gains `.ai-sdlc/dispatch/briefs/` and `.claude/memory/`, and its four copies (gate
+   detector, `verify-attestation.yml` paths-ignore, `review-scope-core.mjs`, `pr-unstick.ts`;
+   AISDLC-534.1 is consolidating them) collapse to one. Industry research: Prow/Tide and Mergify
+   re-enter a PR by PR number and allocate the worker from the action; Temporal re-enters a
+   workflow by id with the worker as a leased detail. **Counter-argument:** "AISDLC-762.1 and 807
+   just wired resume through the claim path; `requeue --note` is nearly free and `reenter` is new
+   surface in a stability week." Rebuttal: those fixes patched symptoms of the coupling and the
+   class recurred after each; removing the docs volume from the task shape and keying task
+   re-entry on the PR removes the root and deletes two commands. **Selected over keeping the
+   claim-bound resume** for that reason; **over attaching notes to board records without a
+   claim** because the branch lease is the one safety property worth keeping.
 5. **Is "done" only "merged"?**
    - (a) Yes, a single definition (DEC-0127 as written).
    - (b) Two named states: `landed` (merged) for the board and `delivered` (armed and green) for the
      executor's verdict.
    - (c) Keep the status quo definition for planner filing PRs (no task, no executor), "merged" for
      task PRs.
+   **Resolution (2026-10-14, full rubric): two named states.** `delivered` means the PR is ready
+   and auto-merge is armed; it is the executor's verdict outcome and it frees the executor slot
+   (the OQ-2 hand-over point). `landed` means merged; it is the only event that writes `done/`,
+   syncs the parent and releases dependants (the effect DEC-0127 asked for). The task file still
+   moves to `backlog/completed/` in the PR's own diff. Industry research: Prow/Tide separates "in
+   the merge pool" from "merged"; deployment pipelines separate "approved" from "deployed";
+   states with different owners and failure modes are not collapsed into one word. **Shipped
+   substrate:** today `done/` receives a verdict when the executor returns `success` with a
+   `prUrl`, which is "done at draft PR", the definition that left PRs ownerless in the 2026-10-11
+   pile-up; AISDLC-823's `merged` state already maps to `mark-done-sync-parent-start-next`, so the
+   landed action exists in code and only the writer rule changes. **Refinement:** `delivered`
+   is a verdict outcome value, not a board directory; `done/` has a single writer (the state
+   machine, on merge); the brief-progress loop and `cli-dispatch peek` read only `done/`.
+   AISDLC-816 is to be read as: no new claim while this executor has an undelivered PR, not an
+   unlanded one. **Counter-argument:** "two words invite drift; a dashboard counts delivered as
+   finished and the pile-up returns under a new name." Rebuttal: drift would require a second
+   writer of `done/`, which is a reviewable code change, and the board exposes no directory for
+   delivered. **Selected over a single done = merged** because the executor cannot author a
+   verdict for a PR it no longer owns after ready; **over the status quo** because that is the
+   failure being fixed.
 6. **Where does the state machine persist?**
    - (a) Board files (`landing/`, per-PR record) with GitHub as the recompute source.
    - (b) GitHub itself (labels, check runs) read by the tick.
    - (c) The decisions `events.jsonl` style append-only log.
    - (d) A combination: board for ownership, GitHub for facts.
+   **Resolution (2026-10-14, full rubric): board for ownership and history, GitHub for facts.**
+   A per-PR record `landing/<pr>.json` holds the owner (OQ-2), the `(state, action, headSha)`
+   history the loop guard needs (OQ-3) and the delivered and landed timestamps (OQ-5); the
+   `events/` directory holds raw ingest as the common section requires; PR facts (checks,
+   mergeStateStatus, draft, merged, auto-merge) are re-read from GitHub on every classification
+   and are never cached as truth. The existing `_orchestrator/events-*.jsonl` log remains the
+   audit trail (AISDLC-823 already writes `DispatchPrClassified` there). Mirroring the owner as a
+   PR label is an optional, additive later step for UI visibility and does not move the source of
+   truth. Industry research: Tide recomputes its pool from the GitHub API every sync and writes
+   nothing to GitHub but the merge; Mergify keeps queue state server-side and mirrors a summary as
+   a check run; Kubernetes keeps desired state in its own store and treats the live system as the
+   fact source. **Shipped substrate:** the board already uses per-task sidecar JSON under
+   `queue/ inflight/ done/ failed/ blocked/`; `landing/` is a new sibling in the same idiom; 823
+   has no per-PR record today. **Counter-argument:** "board files live on one laptop; a second
+   machine or the operator in the GitHub UI cannot see ownership." Rebuttal: the deployment is
+   one laptop by design (signing key and worktrees are local; remote agents are read-only per
+   AISDLC-442); facts are on GitHub regardless, so a second reader recomputes state minus
+   ownership, and the label mirror covers the UI case. **Selected over GitHub-only** because
+   mutable labels as the only copy of ownership break the recomputable guarantee; **over an
+   append-only log only** because the audit log already exists and replaying it to answer "who
+   owns this PR" is the wrong shape for a tick.
 7. **Do the pipeline's push, ready and arm steps move into the state machine?**
    - (a) No; Step 11 stays, the machine starts at "draft PR exists".
    - (b) Ready and arm move (the machine flips and arms); push stays with the executor.
    - (c) All of Step 11 and the pre-push re-sign path move to a deterministic runner the machine calls.
+   **Resolution (2026-10-14, full rubric): Step 11 stays with the executor through the ready
+   flip; the mechanical landing path is extracted into one deterministic runner that both Step 11
+   and the state machine call.** The runner (working name `land-prep <pr>`) does: rebase onto
+   `origin/main`, drop a stale envelope, lease push so the pre-push hook re-signs, and a guarded
+   flip to ready whose precondition (CodeQL clean, verdict approved by state, not by phrase) is
+   code in the runner whoever invokes it. Step 11 calls it before the first push when the base is
+   stale and at the end of the executor's round for the flip; the state machine calls it for
+   post-ready skew (red(skew), DIRTY, BEHIND) and when it takes over a dead executor's PR after
+   signing. Arming stays with `auto-enable-auto-merge.yml` on `ready_for_review`; the machine arms
+   through `cli-merge-if-eligible --arm` only when that was missed. Industry research: Bors, Tide
+   and Mergify push to an author's branch only to update it; the author marks ready; the bot owns
+   the mechanical updates and the merge. **Shipped substrate:** Step 11 is TypeScript in
+   `pipeline-cli` (push, `gh pr create --draft`, flip); re-sign on rebase lives in the pre-push
+   hook chain (`check-attestation-sign.sh`) and fires on any push from a worktree; the 2026-10-11
+   handoff shows the machine-side gap as a repeated hand path ("rebase + heartbeat + lease push,
+   hook re-signs; REST flip") because no CLI wraps it. **Counter-argument:** "the machine
+   flipping is safer because it checks CodeQL and the verdict by state rather than trusting the
+   executor's own round." Rebuttal: the check is code in the runner; the caller does not change
+   what is checked, and an executor flipping through the same guarded runner avoids a draft
+   window waiting on the next event. **Selected over moving ready and arm to the machine**
+   because that re-introduces an ownerless window between sign and flip, against OQ-2; **over
+   moving all of Step 11** because the push, and with it the hook chain, belongs to whoever holds
+   the worktree.
 8. **Local runner or CI-side runner for the state machine?**
    - (a) Local only (signing key, worktrees and plugin are local; remote agents are read-only by design).
    - (b) CI-side classification, local actions.
    - (c) CI-side for non-signing actions (ready flip, retrigger), local for the rest.
+   **Resolution (2026-10-14, full rubric): local only.** Receiver (OQ-1), classifier, board
+   records (OQ-6) and the `land-prep` runner (OQ-7) all run in `pipeline-cli` on the operator's
+   machine, where the signing key, the worktrees and the plugin are; remote agents stay read-only
+   (AISDLC-442). Laptop closed means nothing happens, and the reconciler catches up on wake. A
+   self-contained `rerun-on-cancel` workflow (re-run a cancelled or infra-failed gate run while
+   the laptop is closed) may be added later as an additive step, with `actions: write` scoped to
+   that job, only if measured overnight dwell justifies it; it would not move any part of the
+   machine. Industry research: Tide, Bors and Mergify run as a controller or service outside CI;
+   CI produces check results and the controller decides; none runs the decision loop inside the
+   job whose rollup it is waiting for. **Shipped substrate:** everything AISDLC-823, 826 and 847
+   shipped is local `pipeline-cli` code; no workflow writes to the board; a retrigger is one REST
+   call. **Counter-argument:** "a flaky run cancelled at midnight sits for eight hours; a small
+   workflow could re-run it so the PR is green at wake." Rebuttal: that is the one honest CI-side
+   gain and it is the additive step named above; a CI-side rebase is not a gain because it
+   produces an unsigned head the attestation gate rejects. **Selected over CI-side
+   classification** because a classifier without the board (ownership, loop-guard history) is a
+   different and weaker classifier maintained twice; **over CI-side flip and retrigger** because
+   the flip is the executor's under OQ-7, leaving one action row for the cost of a second runtime
+   and a write-permission workflow.
 9. **How do AISDLC-816, 823, 826, 828, 829 fold in?**
    - (a) All superseded by this RFC's phases and re-filed against it.
    - (b) 816 stays (it is DEC-0127 as written); 823, 826, 828, 829 are phases of this RFC.
    - (c) All proceed as filed; this RFC only adds the fast path (Option A, B or D).
    - (d) Sequence them, with this RFC deciding only the event source.
+   **Resolution (2026-10-14, full rubric): the shipped tasks become Phase 0 retroactively; the
+   open ones are amended in place; nothing is re-filed.** Correction to the question: the
+   retry-cap change shipped as AISDLC-847, not 828 (828 deleted the five-step DoR regex gate and
+   is unrelated to this RFC). Fold-in per task: AISDLC-823 (merged, #1520) is the Phase 1 core;
+   its classifier (`pipeline-cli/src/hierarchy/pr-state.ts`) stays, its prose fact-gathering in
+   `operator-dispatch.md` Step 2b is replaced by code under OQ-1, and its `stale-claim` row,
+   which duplicates 826 at the same 30-minute threshold, is removed in Phase 1 in favour of 826.
+   AISDLC-826 (merged, #1450; frontmatter still says In Progress and is corrected by the Phase 1
+   PR) stays as the death and timeout hand-over OQ-2 relies on. AISDLC-847 (merged, #1478) stays;
+   OQ-3's same-head loop guard is added beside it (with AISDLC-857's `prNumber` extension).
+   AISDLC-816 (open, DEC-0127) is amended, not superseded: "unlanded" becomes "undelivered"
+   (OQ-5) and its landing clauses name the state machine (OQ-2). AISDLC-829 (open) is re-scoped
+   in place, id kept, to Phase 1 of this RFC: coded reconciler and scheduler, `landing/` records,
+   the action table with the docs action set. Amendments are docs-lane PRs (OQ-4/OQ-11) and carry
+   `references: RFC-0054` plus a phase label; the DoR gate re-evaluates the task on edit, so the
+   eventual PR is judged against the amended file on `main`. This follows the five-step order:
+   delete nothing that works, amend what is wrong, file only what is new. **Counter-argument:**
+   "amending 829 in place turns a small task into the RFC's largest phase under an id filed for
+   something else." Rebuttal: the file on `main` is the spec the executor and reviewers read;
+   keeping the id preserves every brief, decision record and handoff line that cites it.
+   **Selected over superseding and re-filing** because that spends closed PRs (a tracked KPI)
+   and orphans references for no design gain; **over leaving all as filed** because 829 would
+   build the prose-tick sweep OQ-1 replaced and 816 would contradict OQ-2 and OQ-5.
 10. **What does the receiver trust, if Option A or D is chosen?** (Only relevant to 1(c)/(d).)
     - (a) Nothing in the payload; an event is a trigger to re-read through authenticated REST.
     - (b) The payload for non-mutating state only; mutating actions re-read.
     - (c) Full payload (not recommended; listed for completeness).
+    **Resolution (2026-10-14, full rubric): the payload is a trigger, never a fact.** The
+    receiver validates `X-Hub-Signature-256` with the configured secret, writes the event record
+    with only `(repo, pr, headSha, event kind, delivery id)` for idempotency and audit, and the
+    machine then re-reads the PR, its check runs and merge state over authenticated REST and
+    classifies from that read alone. A forged or replayed delivery with a valid signature can
+    cause at most one extra read; it can never cause a rebase, flip or arm. Bursts (check-run
+    events arrive several per head) are debounced by `(pr, headSha)` before the read. Industry
+    research: GitHub's guidance is to validate the signature, expect redelivery and never assume
+    order; Argo CD and Flux treat a webhook as "refresh now" and re-read the source; Prow reads
+    payload fields on a trusted cluster endpoint but re-fetches before mutating. **Shipped
+    substrate:** `reference/src/adapters/webhook-server.ts` already validates HMAC and dispatches
+    by event name, and `orchestrator/src/webhook-manager.ts` wires a secret provider; no consumer
+    reads payload fields today. **Counter-argument:** "a read per event burns the rate limit
+    that broke dispatch on 2026-10-11." Rebuttal: those failures were GraphQL, which is why
+    dispatch moved to REST; REST allows 5,000 requests per hour, a PR emits on the order of ten
+    events from push to merge, and debounce removes most of those. **Selected over payload for
+    display only** because it adds a second classifier input path that must be proven equal to
+    the REST path for no action gained; **over trusting the payload** because an inbound endpoint
+    must not be able to cause a mutation.
 11. **Planner filing PRs and other no-task PRs (release, decision-sync).**
     - (a) Out of scope: reported to the planner, not owned.
     - (b) Owned by the same machine with a no-task action set (arm only).
     - (c) Owned by a separate small machine.
+    **Resolution (2026-10-14, full rubric, decided with OQ-4): owned by the same state machine
+    with a docs action set.** A no-task PR (planner filing of task files, decision records and
+    decision-log sync, RFC edits and walkthroughs, operations docs, briefs, memory files) has no
+    executor stage; it is owned by the state machine from the moment it exists, which is the
+    requirement OQ-2 recorded (every PR has an owner from birth). Its action set is small and
+    deterministic: `rebase-in-place` on DIRTY or BEHIND (`cli-file rebase` under DEC-0088),
+    `rerun-dor` when a sibling filing PR it references merges, `arm` through `cli-merge-if-eligible
+    --source-kind docs` when auto-enable missed it, and `route-to-planner` only for a real check
+    failure (drift error, DoR gate 1 or 2, governance marker scan). The release-please PR stays
+    operator-only (class (c)); the machine reports it and never arms it. A docs PR needs no
+    backlog task: the PR is the work. **Shipped substrate** and the four gaps are listed under
+    OQ-4. **Counter-argument:** "a separate small machine keeps the task-PR classifier simple and
+    lets the docs lane ship first." Rebuttal: the docs action set is three rows of the same table
+    keyed on the same PR facts; a second machine is a second scheduler, a second event ingest and
+    a second owner column for no gain. **Selected over out-of-scope** because ownerless filing
+    PRs were the main source of the 2026-10-11 escalation storm; **over a separate machine** for
+    the reason above.
 
 12. **What does "JEV" mean for the ladder's rung 2?**
     - (a) Exactly the RFC-0049 judgment layer with Jev as the provider.
     - (b) Any provider behind the RFC-0049 typed-question interface, selected by config.
     - (c) A separate cheap classifier outside the judgment layer.
+    **Resolution (2026-10-14, full rubric): rung 2 is the RFC-0049 System One judgment layer,
+    with the provider chosen by configuration.** Jev is the default provider; a local model (the
+    operator's named alternative is Qwen 27B) or any OpenAI-compatible endpoint is sanctioned
+    through the adapter RFC-0049 already ships in shadow; each typed question declares its
+    confidence floor, below which the case escalates to rung 3; shadow-first comparison stays
+    mandatory before a provider decides anything. The ladder text's "JEV" is to be read as "the
+    judgment layer" and is corrected where it names the vendor. Industry research: cascade and
+    routing designs put an interface between caller and cheap model so the tier can be swapped or
+    self-hosted; a single hosted vendor hard-wired into a control loop is a standard postmortem
+    finding. **Shipped substrate:** RFC-0049 is Signed Off and implemented
+    (`pipeline-cli/src/judgment/`, `JudgmentProvider` modelled on the embedding adapter, Jev
+    first, OpenAI-compatible adapter in shadow; RFC-0052 records Jev's limit that it cannot write
+    a finding); a local Qwen behind an OpenAI-compatible endpoint needs no new code.
+    **Counter-argument:** "provider-by-config lets a weaker local model be called rung 2 while
+    the ladder's cost and quality claims were measured on Jev." Rebuttal: the per-question
+    confidence floor is the guard: a weaker provider falls below it more often and escalates
+    visibly at measured cost, and shadow mode compares a new provider before it decides.
+    **Selected over exactly Jev** because the dispatch loop must not depend on one hosted vendor;
+    **over a separate classifier** because it would rebuild what RFC-0049 shipped.
 13. **Where is the ladder enforced?**
     - (a) A lint over agent and command frontmatter requiring a declared rung, input schema, output schema and bounds.
     - (b) A reviewer-gate check on PRs that add a prose automation.
     - (c) Convention only, recorded in this RFC and CLAUDE.md.
     - (d) The dark-code style static scan extended to flag undeclared model calls.
+    **Resolution (2026-10-14, full rubric): a `rung:` frontmatter key on every agent and
+    command, checked by the existing model-pins gate.** Values 0 to 4. A rung-2 entry names the
+    typed question it asks; a rung-3 entry points at its input and output schema and its bounds;
+    a rung-4 entry names its plan, execute and synthesize split. The gate fails only a new or
+    edited file that lacks a required key; the migration adds one key per existing file in one
+    mechanical PR. Velocity impact (DEC-0048): none after migration; it runs in the same test
+    harness as the `model:` pin check. Extending the dark-code static scan to flag model-call
+    sites with no declaring frontmatter is the recorded follow-up once declarations exist, not
+    part of this resolution. Industry research: policy-as-code (OPA, Conftest, admission
+    controllers) checks declared structured fields and never prose; model-routing and cost
+    tooling make tiers auditable by tagging the declaration. **Shipped substrate:**
+    `pnpm test:plugin-model-pins-gate` already lints agent and command frontmatter for a pinned
+    `model:` and survived AISDLC-828's deletion of the five-step prose gate (DEC-0158); the
+    dark-code scan exists but knows nothing of rungs. **Counter-argument:** "828 just deleted a
+    gate because rubric text beats regex, and `rung: 0` will be pasted by default and never
+    read." Rebuttal: 828's gate parsed prose for a paragraph shape, while this checks presence
+    and allowed values of a structured key, the class 828 kept; a wrong rung is a visible lie in
+    a diff for the reviewer round, an absent one is what the gate catches. **Selected over the
+    call-site scan** as first step because a scan needs declarations to check against; **over a
+    reviewer-gate check** because a model enforcing a rung-0 rule inverts the ladder; **over
+    convention only** because the drain has shown unenforced cost rules do not hold.
 14. **Is there a development trio for rung 4, and what is the budget per rung?**
     - (a) Reuse the current developer role as the cheap executor, with a new planner and synthesizer step around it.
     - (b) A new planner, executor, synthesizer trio for development, parallel to the review trio.
     - (c) Keep the executor developer round as is; apply the ladder to everything else.
     - Budget: (i) a per-state-dwell call cap per rung, (ii) a per-PR token budget where rung-4 spend needs a logged rung-3 failure, (iii) report only, no cap, in v1.
+    **Resolution (2026-10-14, full rubric): no development trio in this RFC, but dev-round
+    spend is measured per PR from Phase 1; budget is report-only in v1 with the per-PR budget as
+    the Phase 3 target.** (14a) The executor's developer round stays as it is (the developer is
+    already the Sonnet tier); the ladder governs everything after the push. The operator's
+    condition: per-PR developer-round spend (tokens and calls, by model) is recorded from Phase 1
+    so a dev-trio decision can be made from data; that decision, if it comes, is its own RFC.
+    Industry research: plan-then-execute splits for coding (architect and editor modes,
+    planner-coder agent variants) gain on hard tasks and lose on small ones, since the extra
+    round-trip outweighs the saving; the split pays where one plan drives many cheap executions,
+    which is the review case (RFC-0052's planner, executor, synthesizer) and not a single dev
+    pass. (14b) Budget option (iii): per-PR, per-rung spend (rung, model, tokens, calls, state the
+    PR was in) is logged through the existing cost tracker and surfaced in the operator digest;
+    no cap in v1. Option (ii), a per-PR token budget where rung-4 spend requires a logged rung-3
+    failure, is the Phase 3 target, and the v1 report is shaped to produce exactly the numbers it
+    needs (rung-3 outcomes logged per question from Phase 1). **Shipped substrate:** the
+    developer agent pins Sonnet; the review trio exists; `orchestrator` has a cost tracker with
+    no per-rung or per-PR dimension yet. **Counter-argument (14a):** "the dev round is the
+    largest spend per task; leaving it out makes the ladder cosmetic." Rebuttal: the lifecycle
+    side is where the 2026-10-11 storm burned tokens, and the dev round's spend is unmeasured;
+    the measurement is now required, and a trio decided from it is cheaper than one decided from
+    instinct. **Counter-argument (14b):** "report-only is how burn got out of control; a crude
+    cap stops the bleeding now." Rebuttal: the bleeding was hand paths and ownerless retries,
+    removed structurally by OQ-2, 3 and 4; a crude cap would block the first legitimate long fix
+    and be bypassed. **Selected over wrapping or replacing the developer** because both add
+    strong-model calls around the cheap tier without evidence; **over a dwell cap** because dwell
+    does not track cost; **over a budget now** because it needs logging that does not exist.
+
+## Revision History
+
+| Date | Version | Change |
+|---|---|---|
+| 2026-10-13 | v0.1 | Drafted on the operator's mandate; four options, recommendation, 14 Open Questions, none resolved. |
+| 2026-10-14 | v0.2 | OQ walkthrough with the operator, full rubric per question; lifecycle Draft to Ready for Review. OQ-1 webhook first with poll as the fallback reconciler (the hybrid with the fast path in Phase 1); OQ-2 executor owns the PR until ready, the state machine from ready to merged, takeover on death or timeout; OQ-3 count cap kept for PR-less failures, same-head loop guard for PR follow-ups (corrects the 828 reference to 847); OQ-4 and OQ-11 docs lane: no-task PRs owned by the machine from birth with a docs action set, `cli-file rebase` in place, `reenter` keyed on PR state for task PRs; OQ-5 `delivered` (ready and armed) and `landed` (merged), `done/` written only on landed; OQ-6 `landing/` board records for ownership and history, GitHub for facts; OQ-7 `land-prep` runner extracted, executor still flips; OQ-8 local only; OQ-9 shipped 823/826/847 are Phase 0, 816 and 829 amended in place; OQ-10 payload is a trigger, re-read via REST; OQ-12 rung 2 is the RFC-0049 judgment layer with provider by config; OQ-13 `rung:` frontmatter key checked by the model-pins gate; OQ-14 no dev trio, dev-round spend measured per PR, budget report-only in v1 with the per-PR budget as the Phase 3 target. Implementation tasks AISDLC-878 to 885 filed; AISDLC-816 and 829 amended. |
 
 ## References
 
