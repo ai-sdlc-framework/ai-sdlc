@@ -12,7 +12,7 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -277,5 +277,33 @@ describe('CLI', () => {
     assert.equal(r.status, 0);
     assert.match(r.stdout, /Usage:/);
     assert.match(r.stdout, /publishConfig/);
+  });
+});
+
+// ------------------------------------------------------- pnpm test wiring
+
+describe('pnpm test wiring (AISDLC-846)', () => {
+  const root = join(__dirname, '..');
+  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+
+  it('defines lint:publishable as the script under test', () => {
+    assert.equal(
+      pkg.scripts['lint:publishable'],
+      'node scripts/check-publishable-package-configs.mjs',
+    );
+  });
+
+  it('runs lint:publishable as a step of the root test script', () => {
+    const steps = pkg.scripts.test.split('&&').map((s) => s.trim());
+    assert.ok(steps.includes('pnpm lint:publishable'), `test steps: ${steps.join(' | ')}`);
+  });
+
+  it('release reference no longer asks for a separate CI step', () => {
+    const doc = readFileSync(
+      join(root, 'docs/operations/release-and-plugin-reference.md'),
+      'utf-8',
+    );
+    assert.match(doc, /lint:publishable/);
+    assert.doesNotMatch(doc, /lint:publishable[^\n]*(separate|add (it )?as a|CI step)/i);
   });
 });
