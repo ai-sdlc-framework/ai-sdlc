@@ -1,5 +1,12 @@
 # @ai-sdlc/reference
 
+## [0.33.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.32.0...reference-v0.33.0) (2026-10-14)
+
+
+### Features
+
+* reviewerSet staged, staged Step 7 pipeline, stage leaves, staged ledger role [needs-human-attention] (AISDLC-676) ([#1360](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1360)) ([c42ea82](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c42ea82748dc006ddd1a4ca2106bfe8fd12553d5))
+
 ## [0.32.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.31.0...reference-v0.32.0) (2026-10-13)
 
 
