@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-14T00:01:15.554Z","decisionId":"DEC-0207","chosenOptionId":"disable-default-setup","rationale":"Operator chose via decision rubric 2026-10-14 02:05Z; applied at once (API returned not-configured). Keeps 840's Actions saving and weekly baseline; reversible by re-enabling default setup.","by":"operator"}
