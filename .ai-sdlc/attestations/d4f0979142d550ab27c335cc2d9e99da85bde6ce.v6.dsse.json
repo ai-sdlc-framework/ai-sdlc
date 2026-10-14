@@ -221,7 +221,12 @@
     "securityAlways": false,
     "requiredSet": "three",
     "reason": "trust-chain-path",
-    "triggeringPaths": [".ai-sdlc/gates.yaml", ".husky/pre-push", "CLAUDE.md", "scripts/pre-push-fixups.sh"],
+    "triggeringPaths": [
+      ".ai-sdlc/gates.yaml",
+      ".husky/pre-push",
+      "CLAUDE.md",
+      "scripts/pre-push-fixups.sh"
+    ],
     "appliedReviewers": [
       "code-reviewer-codex",
       "test-reviewer-codex",
