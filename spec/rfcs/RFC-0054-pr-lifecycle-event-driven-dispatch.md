@@ -922,6 +922,34 @@ rubric (class (a), (b) or (c) per the Decision authority rules).
    - (b) A "landing" role (a new roster entry) that owns every unlanded PR.
    - (c) Dispatch's state machine, with the executor re-entered by resume only for real red.
    - (d) Mixed by state (the ownership table in the Proposal).
+   **Resolution (2026-10-14, full rubric): mixed by stage, with the executor owning the PR until it
+   is READY and the dispatch state machine owning it from ready to merged.** Operator's statement
+   of the executor lifecycle: do the work with the developer, push the branch as a draft PR, run the
+   reviewer round, sign the attestation once the reviews finish, push the envelope, and flip the PR
+   from draft to ready so CI can run. The dispatched task is owned by that executor until the flip
+   to ready, unless the executor dies or times out (AISDLC-826 thresholds); then the dispatch state
+   machine takes over and continues the attestation work itself (resume on the same branch, not a
+   fresh executor claim by default). From ready onward the state machine owns the PR: CI
+   observation, rebase on skew, re-sign via the hook, retrigger on flake, arm, and done on merge;
+   a real red on the current head re-enters an executor by resume carrying the failing check line
+   and head SHA (the Proposal's ownership table applies from "ready" on). Industry research:
+   Mergify, Kodiak, Bors and Prow/Tide hand the PR to the bot after approval and pull the author
+   back only for a real failure; the operator's split puts that hand-over at "ready" rather than at
+   "draft". **Shipped substrate:** AISDLC-823's action table already implements the post-ready
+   half (mechanical states get machine actions, only real failure resumes the executor); AISDLC-826
+   implements the death/timeout hand-over; AISDLC-816 (DEC-0127, unshipped) must be read with this
+   split: an executor is free to claim once its PR is ready, not once it is merged.
+   **Gap surfaced:** planner filing PRs (docs, task files, decision sync) have been opened as
+   drafts by the planner and left with no owner; under this split they have no executor stage at
+   all and fall straight to the state machine, which today ignores PRs without a task id. OQ-11
+   decides the mechanism; the requirement recorded here is that every PR has an owner from the
+   moment it exists. **Counter-argument:** "freeing the slot at draft PR (machine owns from draft)
+   would raise throughput by the length of the review round." Rebuttal (operator): the review
+   round and the signing are the executor's work product, done in its worktree with its key; a
+   half-attested PR has no meaning to the machine. **Selected over originating-executor-until-
+   merged** because CI waits and rebases are not executor work; **over a landing roster role**
+   because the post-ready stages are mechanical and belong to the deterministic machine, not a
+   model session.
 3. **Is the retry cap deleted or scoped?**
    - (a) Deleted for PR follow-ups only (AISDLC-828); stays for PR-less failures.
    - (b) Replaced by a per-shape loop guard (same classified failure N times).
