@@ -40,6 +40,16 @@ const rows: Array<[PrState, PrFacts]> = [
   ['cancelled-or-infra', { ...base, checks: [{ name: 'build', conclusion: 'infra' }] }],
   ['pending', { ...base, checks: [] }],
   ['pending', { ...base, checks: [{ name: 'build', conclusion: 'pending' }] }],
+  [
+    'pending',
+    {
+      ...base,
+      checks: [
+        { name: 'ai-sdlc/attestation', conclusion: 'success' },
+        { name: 'ai-sdlc/pr-ready', conclusion: 'pending' },
+      ],
+    },
+  ],
   ['stale-claim', { ...base, claimHeartbeatAgeMs: STALE_CLAIM_MS + 1 }],
   ['manifest-branch-mismatch', { ...base, manifestBranch: 'feat/other' }],
   ['no-match', { ...base, checks: green, draft: true }],

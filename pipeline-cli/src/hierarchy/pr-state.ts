@@ -119,7 +119,10 @@ export function classifyPr(f: PrFacts): PrClassification {
   if (green && !f.draft && f.mergeStateStatus === 'CLEAN' && f.autoMergeArmed) {
     return mk('armed-clean');
   }
-  if (checks.length === 0 || checks.every((c) => c.conclusion === 'pending')) {
+  if (
+    checks.length === 0 ||
+    (checks.some((c) => c.conclusion === 'pending') && !checks.some(failed))
+  ) {
     return mk('pending');
   }
   return mk('no-match');
