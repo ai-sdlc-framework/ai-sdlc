@@ -978,6 +978,44 @@ rubric (class (a), (b) or (c) per the Decision authority rules).
    - (a) Keep; add `requeue --note`.
    - (b) Delete; a note can be attached to a `failed/` or `landing/` task.
    - (c) Replace both with one `reenter` command keyed on PR state.
+   **Resolution (2026-10-14, full rubric): split by PR kind. Docs-only PRs re-enter by
+   `cli-file rebase` performed in place (lease push on the same branch, no replacement PR); task
+   PRs re-enter by one `reenter` command keyed on PR state that runs the machine action or writes
+   a queue manifest carrying note, branch and head SHA, creating the claim as its side effect.**
+   The claim stops being a precondition of re-entry and becomes an output of it. Operator framing:
+   the volume behind the "resume cannot reach the branch" escalation class (DEC-0111 to DEC-0122
+   in one night) was planner filing PRs (task files, decision records, RFC edits, operations
+   docs) pushed through the task-PR shape: draft, reviewer round, claim, resume. None of those
+   stages has meaning for a docs change, so the fix is to delete them for that kind rather than
+   to make resume reach them. **Shipped substrate (survey 2026-10-14):** `cli-file --pr` already
+   opens ready (not draft) from a fast-forward of `origin/main` (`pipeline-cli/src/cli/file.ts`);
+   `auto-enable-auto-merge.yml` arms any non-draft same-repo PR on `opened`; the gate's docs-only
+   detector (`scripts/is-docs-only-changeset.mjs`) skips build-test, integration, attestation and
+   independence; `check-pr-governance.mjs` requires no reviewers for docs-only; branch protection
+   needs only `Backlog Drift` and `ai-sdlc/pr-ready` with zero approvals; DEC-0088 grants the
+   planner lease pushes on `ai-sdlc/file-*`. The lane exists; the stalls are four gaps: (1)
+   `dor-readiness-gate` fails a task file whose reference is a sibling task in another open
+   filing PR and nothing re-runs it when that PR lands (#1524 is the live case); (2) `cli-file
+   rebase` opens a replacement PR and closes the old one, a closed-unmerged PR per base move; (3)
+   PRs opened `--draft` by the planner or a skill (decisions-sync #1525, RFC walkthrough PRs) skip
+   both the gate and the arming and sit ownerless; (4) `lint` runs unconditionally on a one-file
+   `.md` diff and `cli-merge-if-eligible` has no `docs` source kind. **Refinement (Phase 0 of
+   this RFC, deletions first):** no-task PRs are never opened as drafts; `lint` leaves the
+   docs-only job set (prettier on markdown runs inside the drift job without an install);
+   `cli-file rebase` rebases in place under DEC-0088; a DoR reference to a task present in
+   another open `ai-sdlc/file-*` PR is `pending` rather than `fail` and the machine re-runs the
+   gate when that PR merges; `--source-kind docs` is added to `cli-merge-if-eligible`; the docs-only
+   path list gains `.ai-sdlc/dispatch/briefs/` and `.claude/memory/`, and its four copies (gate
+   detector, `verify-attestation.yml` paths-ignore, `review-scope-core.mjs`, `pr-unstick.ts`;
+   AISDLC-534.1 is consolidating them) collapse to one. Industry research: Prow/Tide and Mergify
+   re-enter a PR by PR number and allocate the worker from the action; Temporal re-enters a
+   workflow by id with the worker as a leased detail. **Counter-argument:** "AISDLC-762.1 and 807
+   just wired resume through the claim path; `requeue --note` is nearly free and `reenter` is new
+   surface in a stability week." Rebuttal: those fixes patched symptoms of the coupling and the
+   class recurred after each; removing the docs volume from the task shape and keying task
+   re-entry on the PR removes the root and deletes two commands. **Selected over keeping the
+   claim-bound resume** for that reason; **over attaching notes to board records without a
+   claim** because the branch lease is the one safety property worth keeping.
 5. **Is "done" only "merged"?**
    - (a) Yes, a single definition (DEC-0127 as written).
    - (b) Two named states: `landed` (merged) for the board and `delivered` (armed and green) for the
@@ -1010,6 +1048,23 @@ rubric (class (a), (b) or (c) per the Decision authority rules).
     - (a) Out of scope: reported to the planner, not owned.
     - (b) Owned by the same machine with a no-task action set (arm only).
     - (c) Owned by a separate small machine.
+    **Resolution (2026-10-14, full rubric, decided with OQ-4): owned by the same state machine
+    with a docs action set.** A no-task PR (planner filing of task files, decision records and
+    decision-log sync, RFC edits and walkthroughs, operations docs, briefs, memory files) has no
+    executor stage; it is owned by the state machine from the moment it exists, which is the
+    requirement OQ-2 recorded (every PR has an owner from birth). Its action set is small and
+    deterministic: `rebase-in-place` on DIRTY or BEHIND (`cli-file rebase` under DEC-0088),
+    `rerun-dor` when a sibling filing PR it references merges, `arm` through `cli-merge-if-eligible
+    --source-kind docs` when auto-enable missed it, and `route-to-planner` only for a real check
+    failure (drift error, DoR gate 1 or 2, governance marker scan). The release-please PR stays
+    operator-only (class (c)); the machine reports it and never arms it. A docs PR needs no
+    backlog task: the PR is the work. **Shipped substrate** and the four gaps are listed under
+    OQ-4. **Counter-argument:** "a separate small machine keeps the task-PR classifier simple and
+    lets the docs lane ship first." Rebuttal: the docs action set is three rows of the same table
+    keyed on the same PR facts; a second machine is a second scheduler, a second event ingest and
+    a second owner column for no gain. **Selected over out-of-scope** because ownerless filing
+    PRs were the main source of the 2026-10-11 escalation storm; **over a separate machine** for
+    the reason above.
 
 12. **What does "JEV" mean for the ladder's rung 2?**
     - (a) Exactly the RFC-0049 judgment layer with Jev as the provider.
