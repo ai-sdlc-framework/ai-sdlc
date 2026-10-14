@@ -41,18 +41,40 @@ const gate = JSON.parse(
 const gateJob = gate.jobs['first-run-smoke'];
 const job = wf.jobs['first-run-smoke'];
 
+const ADOPTER_GLOBS = [
+  "'ai-sdlc-plugin/**'",
+  "'orchestrator/src/cli/commands/init*'",
+  "'orchestrator/src/cli/commands/doctor*'",
+  "'orchestrator/src/cli/commands/init-templates.ts'",
+  "'scripts/first-run-smoke*'",
+];
+
+function assertNarrowed(block) {
+  for (const glob of ["'pipeline-cli/**'", "'reference/**'", "'orchestrator/**'", "'README.md'"]) {
+    assert.ok(!block.includes(glob), `first_run filter must not include ${glob} (AISDLC-835)`);
+  }
+}
+
 describe('ci.yml first-run-smoke job (AISDLC-771)', () => {
+  it('has a workflow_dispatch trigger (AISDLC-835)', () => {
+    assert.ok('workflow_dispatch' in triggers);
+    const steps = wf.jobs.changes.steps;
+    assert.match(steps.find((s) => s.id === 'schedule').if, /workflow_dispatch/);
+    assert.match(steps.find((s) => s.id === 'filter').if, /!= 'workflow_dispatch'/);
+  });
+
   it('runs nightly', () => {
     assert.ok(triggers.schedule?.some((s) => /^\S+ \S+ \S+ \S+ \S+$/.test(s.cron)));
   });
 
-  it('is gated by a paths-filter covering plugin, pipeline-cli and reference', () => {
+  it('is gated by a paths-filter covering only the adopter surface', () => {
     const filterStep = wf.jobs.changes.steps.find((s) => s.id === 'filter');
     const filters = filterStep.with.filters;
     const block = filters.slice(filters.indexOf('first_run:'));
-    for (const glob of ["'ai-sdlc-plugin/**'", "'pipeline-cli/**'", "'reference/**'"]) {
+    for (const glob of ADOPTER_GLOBS) {
       assert.ok(block.includes(glob), `first_run filter must include ${glob}`);
     }
+    assertNarrowed(block);
     assert.match(wf.jobs.changes.outputs.first_run, /steps\.filter\.outputs\.first_run/);
     assert.match(job.if, /needs\.changes\.outputs\.first_run == 'true'/);
     assert.ok([job.needs].flat().includes('changes'));
@@ -62,9 +84,10 @@ describe('ci.yml first-run-smoke job (AISDLC-771)', () => {
     const filterStep = gate.jobs.detect.steps.find((s) => s.id === 'sdk-filter');
     const filters = filterStep.with.filters;
     const block = filters.slice(filters.indexOf('first_run:'));
-    for (const glob of ["'ai-sdlc-plugin/**'", "'pipeline-cli/**'", "'reference/**'"]) {
+    for (const glob of ADOPTER_GLOBS) {
       assert.ok(block.includes(glob), `gate first_run filter must include ${glob}`);
     }
+    assertNarrowed(block);
     assert.match(gateJob.if, /needs\.detect\.outputs\.first_run == 'true'/);
     assert.ok(gate.jobs['pr-ready'].needs.includes('first-run-smoke'));
     const runs = gateJob.steps.map((s) => s.run ?? '').join('\n');

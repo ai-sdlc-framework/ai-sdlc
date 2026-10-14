@@ -179,6 +179,28 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     assert.deepEqual(Object.keys(workflow.jobs).sort(), expectedJobs.sort());
   });
 
+  it('first_run filter lists only the adopter surface (AISDLC-835)', () => {
+    const filters = workflow.jobs.detect.steps.find((x) => x.id === 'sdk-filter').with.filters;
+    const block = filters.slice(filters.indexOf('first_run:'));
+    for (const glob of [
+      "'ai-sdlc-plugin/**'",
+      "'orchestrator/src/cli/commands/init*'",
+      "'orchestrator/src/cli/commands/doctor*'",
+      "'orchestrator/src/cli/commands/init-templates.ts'",
+      "'scripts/first-run-smoke*'",
+    ]) {
+      assert.ok(block.includes(glob), `missing ${glob}`);
+    }
+    for (const dropped of [
+      "'pipeline-cli/**'",
+      "'reference/**'",
+      "'orchestrator/**'",
+      "'README.md'",
+    ]) {
+      assert.ok(!block.includes(dropped), `${dropped} must be dropped`);
+    }
+  });
+
   it('AC #4: pr-ready aggregator uses re-actors/alls-green with if: always() and inspects needs context', () => {
     const agg = workflow.jobs['pr-ready'];
     assert.equal(agg.name, 'ai-sdlc/pr-ready', 'check name must be exactly ai-sdlc/pr-ready');

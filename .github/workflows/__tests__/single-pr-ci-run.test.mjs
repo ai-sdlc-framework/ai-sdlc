@@ -65,6 +65,7 @@ describe('CI runs once per pull request (AISDLC-727)', () => {
     assert.ok(!triggers(ci).includes('pull_request_target'));
     assert.ok(!triggers(ci).includes('push'));
     assert.ok(triggers(ci).includes('schedule'));
+    assert.ok(triggers(ci).includes('workflow_dispatch'), 'first-run smoke dispatch (AISDLC-835)');
     const score = loadYaml('scorecard.yml');
     assert.ok(!triggers(score).includes('push'));
     assert.ok(triggers(score).includes('schedule'));
@@ -83,6 +84,21 @@ describe('CI runs once per pull request (AISDLC-727)', () => {
       assert.ok(gate.jobs['pr-ready'].needs.includes(id), `pr-ready must need ${id}`);
     }
     assert.equal(gate.jobs['backlog-drift'].name, 'Backlog Drift', 'required context name');
+  });
+
+  it('the gate first_run filter is narrowed to the adopter surface (AISDLC-835)', () => {
+    const gate = loadYaml('ai-sdlc-gate.yml');
+    const filters = gate.jobs.detect.steps.find((x) => x.id === 'sdk-filter').with.filters;
+    const block = filters.slice(filters.indexOf('first_run:'));
+    assert.ok(block.includes("'ai-sdlc-plugin/**'"));
+    for (const dropped of [
+      "'pipeline-cli/**'",
+      "'reference/**'",
+      "'orchestrator/**'",
+      "'README.md'",
+    ]) {
+      assert.ok(!block.includes(dropped), `${dropped} must be dropped`);
+    }
   });
 
   it('the gate build-test job runs schema validation, which only ci.yml ran on PRs before', () => {

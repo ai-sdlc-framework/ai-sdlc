@@ -168,10 +168,9 @@ jobs:
               - 'conformance/**'
             first_run:
               - 'ai-sdlc-plugin/**'
-              - 'pipeline-cli/**'
-              - 'reference/**'
-              - 'orchestrator/**'
-              - 'README.md'
+              - 'orchestrator/src/cli/commands/init*'
+              - 'orchestrator/src/cli/commands/doctor*'
+              - 'orchestrator/src/cli/commands/init-templates.ts'
               - 'scripts/first-run-smoke*'
 
   # ── Lint & Format (always required) ─────────────────────────────────────

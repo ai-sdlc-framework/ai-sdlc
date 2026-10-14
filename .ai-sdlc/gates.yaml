@@ -57,7 +57,7 @@ gates:
     surface: pr-ready-job
     origin: AISDLC-771
     owner: engineering
-    property: fresh-repo install, init, doctor and one task
+    property: fresh-repo install, init, doctor and one task, per PR only on adopter-surface paths (plugin, init, doctor, templates) plus nightly and workflow_dispatch
     baseline: true
   - id: gate-job:test-python
     surface: pr-ready-job

@@ -2,7 +2,7 @@
 id: AISDLC-835
 title: >-
   first-run-smoke runs per PR only on matching paths, plus nightly and workflow_dispatch
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:
