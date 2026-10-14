@@ -13,13 +13,13 @@ dispatchable: true
 
 ## Context
 
-Dependabot PR #1446 bumps vitest 4.1.11 to 5.0.3. It is untrusted and red on Build & Test and on `ai-sdlc/attestation` (no attestation envelope can exist for a bot PR). Operator decision 2026-10-14 (planner session): MAJOR dependency bumps are redone as backlog tasks under the repo identity; minor and patch bumps follow the dependabot attestation exemption recorded in DEC-0212.
+Dependabot PR #1446 bumps vitest 4.1.11 to 5.0.3. It is untrusted and red on Build & Test and on `ai-sdlc/attestation` (no attestation envelope can exist for a bot PR). Operator decision 2026-10-14 (planner session): MAJOR dependency bumps are redone as backlog tasks under the repo identity; minor and patch bumps follow the dependabot attestation exemption recorded in DEC-0213.
 
 vitest is declared in every workspace package that runs tests (pipeline-cli, orchestrator, reference, dogfood, sdk-typescript, dashboard, mcp-advisor, ai-sdlc-plugin/mcp-server, ai-sdlc-plugin/mods, vscode-hierarchy, conformance/runner). `forge-data-room-kit` pins 3.2.7 and is out of scope.
 
 ## Fix
 
-**Five-step review (requirements first).** Requirement questioned: "does every dependency bump need a signed review?" Answer for majors: yes, because the vitest 5 migration changes test code, and a code diff needs reviewers and an envelope; minors and patches do not (DEC-0212). Nothing to delete. Simplified: one bump across all workspaces in one PR, no per-package split. Accelerated: the dependabot branch already resolved the lockfile, so start from its version set. Automated: nothing new; the existing gate chain is the check.
+**Five-step review (requirements first).** Requirement questioned: "does every dependency bump need a signed review?" Answer for majors: yes, because the vitest 5 migration changes test code, and a code diff needs reviewers and an envelope; minors and patches do not (DEC-0213). Nothing to delete. Simplified: one bump across all workspaces in one PR, no per-package split. Accelerated: the dependabot branch already resolved the lockfile, so start from its version set. Automated: nothing new; the existing gate chain is the check.
 
 1. Read the vitest 5 changelog and migration notes before editing.
 2. Bump `vitest` (and any `@vitest/*` companion such as the coverage provider) to 5.0.3 in every workspace package.json that declares `^4.1.11`; regenerate `pnpm-lock.yaml` with `pnpm install` under nvm Node 22.23.2 (never with install scripts disabled).
