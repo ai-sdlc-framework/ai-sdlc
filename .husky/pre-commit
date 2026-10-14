@@ -12,4 +12,3 @@ fi
 # never called from any hook; it only inspects staged backlog filenames, so it is instant.
 ./scripts/check-backlog-ascii.sh
 pnpm exec lint-staged
-node scripts/typecheck-workspace.mjs

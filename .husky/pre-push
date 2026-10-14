@@ -22,7 +22,7 @@
 # Skip individual gates with their respective env vars
 # (AI_SDLC_SKIP_SUBSTRATE_GATE=1,
 # AI_SDLC_SKIP_TASK_MOVE=1, AI_SDLC_SKIP_SQUASH_CHORES=1,
-# AI_SDLC_SKIP_CHANGELOG_CHECK=1, AI_SDLC_SKIP_FOLLOWUP_GATE=1,
+# AI_SDLC_SKIP_FOLLOWUP_GATE=1,
 # AI_SDLC_SKIP_ATTESTATION_SIGN=1, AI_SDLC_SKIP_DARK_CODE_GATE=1,
 # AI_SDLC_SKIP_MARKER_GATE=1)
 # or skip all pre-push hooks via `git push --no-verify` (use sparingly —
@@ -53,15 +53,14 @@ printf '%s\n' "$PUSH_STDIN" | ./scripts/check-skip-ci-marker.sh
 # AISDLC-687: dark-code static scan (cheap). Skip:
 # AI_SDLC_SKIP_DARK_CODE_GATE=1.
 ./scripts/check-dark-code-on-push.sh
+# AISDLC-838: whole-workspace typecheck runs once, here, not on every commit.
+node scripts/typecheck-workspace.mjs
 # AISDLC-773: protected knowledge stays out of the tracked root, and out of the PR body
 # when the pusher supplies it via AI_SDLC_PR_BODY_FILE (RFC-0053 OQ-1).
 printf '%s\n' "$PUSH_STDIN" | ./scripts/check-knowledge-scope.sh --push-stdin
 if [ -n "${AI_SDLC_PR_BODY_FILE:-}" ] && [ -f "$AI_SDLC_PR_BODY_FILE" ]; then
   ./scripts/check-pr-body-protected.sh "$AI_SDLC_PR_BODY_FILE"
 fi
-# AISDLC-401: warn when CHANGELOG.md is staged on a feature branch.
-# release-please owns CHANGELOG.md; manual edits cause rebase conflicts.
-printf '%s\n' "$PUSH_STDIN" | ./scripts/check-changelog-edit.sh
 # Follow-up gate: completed task files added/modified in the push range must
 # track, decline, or say "(none)" for every follow-up. Runs before the fixup
 # orchestrator. Skip: AI_SDLC_SKIP_FOLLOWUP_GATE=1

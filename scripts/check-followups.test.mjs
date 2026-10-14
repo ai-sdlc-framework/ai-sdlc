@@ -216,12 +216,12 @@ describe('range mode and pre-push hook', () => {
     assert.equal(r.status, 1);
   });
 
-  it('is wired into .husky/pre-push after the changelog check and before the fixups orchestrator', () => {
+  it('is wired into .husky/pre-push after the typecheck step and before the fixups orchestrator', () => {
     const text = readFileSync(PRE_PUSH, 'utf-8');
-    const changelog = text.indexOf('./scripts/check-changelog-edit.sh');
+    const typecheck = text.indexOf('node scripts/typecheck-workspace.mjs');
     const fu = text.indexOf('./scripts/check-followups-on-push.sh');
     const fix = text.indexOf('./scripts/pre-push-fixups.sh');
-    assert.ok(changelog !== -1 && fu > changelog && fix > fu);
+    assert.ok(typecheck !== -1 && fu > typecheck && fix > fu);
     assert.match(text, /AI_SDLC_SKIP_FOLLOWUP_GATE/);
   });
 });

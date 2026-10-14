@@ -13,7 +13,6 @@ references:
   - ai-sdlc-plugin/hooks/
   - scripts/check-rfc-docs.mjs
   - scripts/check-orchestrator-state.sh
-  - scripts/check-changelog-edit.sh
   - CLAUDE.md
 priority: medium
 dispatchable: true

@@ -1,8 +1,9 @@
 ---
 id: AISDLC-838
 title: >-
-  delete the warn-only check-changelog-edit.sh hook and move typecheck-workspace.mjs from pre-commit to pre-push
-status: To Do
+  delete the warn-only check-changelog-edit.sh hook and move
+  typecheck-workspace.mjs from pre-commit to pre-push
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:
@@ -13,12 +14,17 @@ dependencies: []
 references:
   - .husky/pre-push
   - .husky/pre-commit
-  - scripts/check-changelog-edit.sh
   - scripts/typecheck-workspace.mjs
   - .ai-sdlc/gates.yaml
   - docs/audits/2026-10-13-cicd-five-step-audit.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-13'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-changelog-edit.sh'
+    resolution: flagged
+drift_checked: '2026-10-13'
 ---
 
 ## Description

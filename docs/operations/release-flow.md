@@ -43,19 +43,6 @@ a collision rate that became visible once the merge queue was dropped (AISDLC-40
 | Let release-please manage version bumps | Manually bump versions in package.json |
 | Merge the rolling release PR when ready to ship | Merge the release PR before tests pass |
 
-## Pre-push warning
-
-The pre-push hook (`scripts/check-changelog-edit.sh`, AISDLC-401) emits a `WARNING`
-when your branch includes CHANGELOG.md changes. This is **non-blocking** — the push
-proceeds. But it signals that you likely need to revert those changes before the PR
-can land cleanly alongside parallel PRs.
-
-To silence the warning for a deliberate edit (rare):
-
-```bash
-AI_SDLC_SKIP_CHANGELOG_CHECK=1 git push
-```
-
 ## How to trigger a release PR refresh
 
 If the rolling release PR is stale (was closed, or you need to add a commit to the
