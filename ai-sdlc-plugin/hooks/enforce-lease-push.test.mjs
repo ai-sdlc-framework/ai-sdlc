@@ -678,14 +678,8 @@ describe('fail-closed paths and git-subprocess discipline', () => {
       denied(run(L(), { cwd: leaseRepo.wt, projectDir: leaseRepo.root, ...bound('') })),
       'no binding refused',
     );
-    // AISDLC-861: from the main checkout, the dispatcher-set id resolves its own worktree;
-    // with no binding the operator main-checkout session is refused.
     assert.ok(
-      !denied(run(L(), { cwd: leaseRepo.root, projectDir: leaseRepo.root, ...bound('AISDLC-1') })),
-      'bound main-checkout session resolves its worktree',
-    );
-    assert.ok(
-      denied(run(L(), { cwd: leaseRepo.root, projectDir: leaseRepo.root, ...bound('') })),
+      denied(run(L(), { cwd: leaseRepo.root, projectDir: leaseRepo.root, ...bound('AISDLC-1') })),
       'operator main-checkout session refused',
     );
     // project dir = A whose copy says lease while the main checkout says never: blocked.
@@ -1487,9 +1481,9 @@ describe('AISDLC-861: lease push resolves the worktree from -C or the active tas
     assert.match(out, /worktree-location/);
   });
 
-  it('resolves .worktrees/<id> from AI_SDLC_ACTIVE_TASK_ID with no -C', () => {
+  it('does not resolve a worktree from AI_SDLC_ACTIVE_TASK_ID alone (executed cwd would differ)', () => {
     const out = fromRoot(L(), leaseRepo);
-    assert.ok(!denied(out), out);
+    assert.ok(denied(out), out);
   });
 
   it('compound -C commands stay refused', () => {

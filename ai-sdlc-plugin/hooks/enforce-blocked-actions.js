@@ -112,8 +112,6 @@ const {
   readPolicyText,
   loadTrustedExtras,
   evaluateLeasePush: evaluateLeasePreflight,
-  verifiedMainRoot,
-  safeReal,
   renderLeaseFailing,
   readTaskId,
 } = require('./lib/trusted-policy');
@@ -198,9 +196,10 @@ try {
 /**
  * AISDLC-861: where a lease push runs. A leading `git -C <path> push ...` (a plain
  * path, no shell syntax) names the worktree and is rewritten to the equivalent
- * `git push ...` for the guard; with no `-C`, a dispatcher-set
- * AI_SDLC_ACTIVE_TASK_ID run from the main checkout resolves `.worktrees/<id>`.
- * The resolved cwd still passes every evaluateLeasePreflight condition
+ * `git push ...` for the guard. The executed command keeps its `-C`, so the push
+ * the guard validated is the push that runs. With no `-C` the cwd form applies
+ * unchanged (an AI_SDLC_ACTIVE_TASK_ID fallback was rejected: the shell would run
+ * the push in the parent cwd, where HEAD is main). The resolved cwd still passes every evaluateLeasePreflight condition
  * (worktree-location included), so a path outside `.worktrees/` is refused.
  */
 function resolveLeaseTarget(command) {
@@ -209,16 +208,6 @@ function resolveLeaseTarget(command) {
     command,
   );
   if (m) return { cwd: resolve(base, m[1]), command: `git ${m[2]}` };
-  const id = process.env.AI_SDLC_ACTIVE_TASK_ID;
-  if (id && /^[A-Za-z0-9.-]+$/.test(id) && /^git[ \t]+push\b/.test(command)) {
-    const main = verifiedMainRoot(projectDir, gitOut);
-    if (main) {
-      const realMain = safeReal(main);
-      const wt = join(realMain, '.worktrees', id.toLowerCase());
-      const here = safeReal(base);
-      if (here === realMain && existsSync(wt)) return { cwd: wt, command };
-    }
-  }
   return { cwd: undefined, command };
 }
 
