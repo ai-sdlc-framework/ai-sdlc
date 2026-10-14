@@ -316,8 +316,9 @@ auto-merge request on every force-push (AISDLC-356):
 ```bash
 PR_NUMBER=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number' 2>/dev/null || echo '')
 if [ -n "$PR_NUMBER" ]; then
-  node "${PIPELINE_CLI_BIN:-pipeline-cli/bin}/cli-merge-if-eligible.mjs" "$PR_NUMBER" --source-kind backlog --arm 2>/dev/null || true
-  # refused (policy never / untrusted PR) is fine: the repo workflow re-arms on push
+  # AISDLC-872: re-arm only when the patch-id is unchanged versus the pre-rebase head
+  node "${PIPELINE_CLI_BIN:-pipeline-cli/bin}/cli-merge-if-eligible.mjs" "$PR_NUMBER" --source-kind backlog --rearm-previous-head "$HEAD_SHA" 2>/dev/null || true
+  # refused (content changed / policy never / untrusted PR) is fine: a content change needs a fresh review and arm
 fi
 ```
 

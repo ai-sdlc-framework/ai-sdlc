@@ -1,7 +1,7 @@
 ---
 id: AISDLC-872
 title: 'fix(merge): keep approval and auto-merge across a rebase-only force-push'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [merge, ci, reliability]
