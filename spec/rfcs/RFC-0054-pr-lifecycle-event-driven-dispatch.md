@@ -1123,6 +1123,29 @@ rubric (class (a), (b) or (c) per the Decision authority rules).
    - (b) 816 stays (it is DEC-0127 as written); 823, 826, 828, 829 are phases of this RFC.
    - (c) All proceed as filed; this RFC only adds the fast path (Option A, B or D).
    - (d) Sequence them, with this RFC deciding only the event source.
+   **Resolution (2026-10-14, full rubric): the shipped tasks become Phase 0 retroactively; the
+   open ones are amended in place; nothing is re-filed.** Correction to the question: the
+   retry-cap change shipped as AISDLC-847, not 828 (828 deleted the five-step DoR regex gate and
+   is unrelated to this RFC). Fold-in per task: AISDLC-823 (merged, #1520) is the Phase 1 core;
+   its classifier (`pipeline-cli/src/hierarchy/pr-state.ts`) stays, its prose fact-gathering in
+   `operator-dispatch.md` Step 2b is replaced by code under OQ-1, and its `stale-claim` row,
+   which duplicates 826 at the same 30-minute threshold, is removed in Phase 1 in favour of 826.
+   AISDLC-826 (merged, #1450; frontmatter still says In Progress and is corrected by the Phase 1
+   PR) stays as the death and timeout hand-over OQ-2 relies on. AISDLC-847 (merged, #1478) stays;
+   OQ-3's same-head loop guard is added beside it (with AISDLC-857's `prNumber` extension).
+   AISDLC-816 (open, DEC-0127) is amended, not superseded: "unlanded" becomes "undelivered"
+   (OQ-5) and its landing clauses name the state machine (OQ-2). AISDLC-829 (open) is re-scoped
+   in place, id kept, to Phase 1 of this RFC: coded reconciler and scheduler, `landing/` records,
+   the action table with the docs action set. Amendments are docs-lane PRs (OQ-4/OQ-11) and carry
+   `references: RFC-0054` plus a phase label; the DoR gate re-evaluates the task on edit, so the
+   eventual PR is judged against the amended file on `main`. This follows the five-step order:
+   delete nothing that works, amend what is wrong, file only what is new. **Counter-argument:**
+   "amending 829 in place turns a small task into the RFC's largest phase under an id filed for
+   something else." Rebuttal: the file on `main` is the spec the executor and reviewers read;
+   keeping the id preserves every brief, decision record and handoff line that cites it.
+   **Selected over superseding and re-filing** because that spends closed PRs (a tracked KPI)
+   and orphans references for no design gain; **over leaving all as filed** because 829 would
+   build the prose-tick sweep OQ-1 replaced and 816 would contradict OQ-2 and OQ-5.
 10. **What does the receiver trust, if Option A or D is chosen?** (Only relevant to 1(c)/(d).)
     - (a) Nothing in the payload; an event is a trigger to re-read through authenticated REST.
     - (b) The payload for non-mutating state only; mutating actions re-read.
