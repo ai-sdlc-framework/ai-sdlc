@@ -24,14 +24,14 @@ Request from the ai-sdlc-io planner session on 2026-10-14 (ai-sdlc-io DEC-0008; 
 - `evaluatePrTrust` (`governance/merge-if-eligible.ts:756-765`) requires a task id derivable from the head branch (`^ai-sdlc/<PREFIX>-\d+`) or a trailing `(<ID>)` in the title (`deriveTaskId`, L609-624; refusal text at L788-789). The decisions-sync branch carries no task id, so the PR is refused under every policy.
 - `--source-kind` accepts only `backlog | gh-issue | release` (`cli/merge-if-eligible.ts:109-117`; `SourceKind` at `governance/merge-if-eligible.ts:384`, `isTrustedSourceKind` L386). `release` already shows the pattern for a task-less trusted kind (`governance/release-merge.ts`).
 
-**Five-step review (requirements first).** Requirement questioned: "the decisions-sync PR opens as a draft so a person reviews it". The PR holds only append-only decision event files that the CLI validated before pushing; a draft adds a human step with nothing to decide. Delete: the hard-coded `--draft` in `remote-persist.ts`. Simplify: reuse the `release` pattern (task-less trusted kind with a diff restriction) instead of a bypass of `deriveTaskId`. Accelerate: the sync PR lands on the next tick (AISDLC-894). Automate: the diff restriction is a deterministic path check, no model call.
+**Five-step review (requirements first).** Requirement questioned: "the decisions-sync PR opens as a draft so a person reviews it". The PR holds only append-only decision event files that the CLI validated before pushing; a draft adds a human step with nothing to decide. Delete: the hard-coded `--draft` in `remote-persist.ts`. Simplify: reuse the `release` pattern (task-less trusted kind with a diff restriction) instead of a bypass of `deriveTaskId`. Accelerate: the sync PR lands on the next tick (the dispatch-tick landing task). Automate: the diff restriction is a deterministic path check, no model call.
 
 ## Fix
 
 1. `decisions/remote-persist.ts`: drop `--draft`. Add an optional repo setting `decisions.syncPrDraft` (default `false`) read from `.ai-sdlc/decisions-config` for adopters who want drafts.
 2. `governance/merge-if-eligible.ts`: add `'decisions-sync'` to `SourceKind` and `isTrustedSourceKind`. Its trust evaluation runs the same not-a-fork, base `main`, author-in-`mergeAuthors` and head-sha checks, skips `deriveTaskId`, and additionally requires the head branch to be exactly `ai-sdlc/decisions-sync` and every changed path to match `.ai-sdlc/_decisions/events/**` (refuse otherwise, naming the offending path). Use `gh pr view --json files` for the path list.
 3. `cli/merge-if-eligible.ts`: add the choice; route like `release` at L166/L199.
-4. AISDLC-894's tick step derives `sourceKind: 'decisions-sync'` from the branch name.
+4. the dispatch-tick landing step derives `sourceKind: 'decisions-sync'` from the branch name.
 5. Docs: `docs/operations/decision-authority.md` (sync PR lifecycle) and the CLI reference.
 6. Tests: sync PR with only event files is eligible; one extra path refuses with the path named; wrong branch refuses; `syncPrDraft: true` restores `--draft`.
 
