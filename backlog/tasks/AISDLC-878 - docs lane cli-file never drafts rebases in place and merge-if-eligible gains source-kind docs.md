@@ -30,8 +30,11 @@ RFC-0054 OQ-4 and OQ-11 (resolved 2026-10-14): a no-task PR (task file, decision
 4. Docs-only path list: one exported constant (land it in the module AISDLC-534.1 chooses; if 534.1 has not merged, add it to `scripts/is-docs-only-changeset.mjs` and make the other three copies import it), extended with `.ai-sdlc/dispatch/briefs/` and `.claude/memory/`.
 5. `docs/operations/cli-hierarchy.md`: a "docs lane" section describing the no-task PR lifecycle and the three machine actions (`rebase-in-place`, `rerun-dor`, `arm`).
 
+**Configuration (operator ruling 2026-10-14).** Every repository convention this task uses (docs-only paths, no-task branch prefixes, timers, ports, thresholds) is read from `.ai-sdlc/pr-lifecycle.yaml` (RFC-0054, Design Details, Configuration) with the documented defaults; nothing is hard-coded in TypeScript, workflow YAML or command prose. The first of these tasks to land creates the file with the defaults; the others read it.
+
 ## Acceptance Criteria
 
+- [ ] Config: no convention value (path pattern, branch prefix, timer, port, threshold) appears as a literal in source, workflow or command body touched by this task; each is read from `.ai-sdlc/pr-lifecycle.yaml`, and one test shows that changing a config value changes the behaviour.
 - [ ] `cli-file rebase <id>` on a DIRTY filing PR results in the same PR number green and armed; `gh pr list --state closed` gains no entry (test with a fixture repo or a mocked `gh`).
 - [ ] A unit test asserts the `gh pr create` argv built by `cli-file` never contains `--draft`.
 - [ ] `cli-merge-if-eligible <pr> --source-kind docs --arm` arms a docs-only `ai-sdlc/file-*` PR and refuses a PR whose diff touches a non-docs path, with the refusing path named.

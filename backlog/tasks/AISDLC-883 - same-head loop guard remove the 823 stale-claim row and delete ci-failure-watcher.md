@@ -29,8 +29,11 @@ RFC-0054 OQ-3 and OQ-9 (resolved 2026-10-14). AISDLC-847 bypasses the retry cap 
 3. Delete `pipeline-cli/src/runtime/ci-failure-watcher.ts`, its test, and the `isRebaseFixable` import in `playbook.ts` (move the function next to the classifier if 829 still needs it); remove the watcher from the runtime index and the orchestrator CLI; `ci-conflict-resolver` agent is reached only through the state machine's actions.
 4. `docs/operations/parallel-dispatch.md`: document the guard and the single-poller rule.
 
+**Configuration (operator ruling 2026-10-14).** Every repository convention this task uses (docs-only paths, no-task branch prefixes, timers, ports, thresholds) is read from `.ai-sdlc/pr-lifecycle.yaml` (RFC-0054, Design Details, Configuration) with the documented defaults; nothing is hard-coded in TypeScript, workflow YAML or command prose. The first of these tasks to land creates the file with the defaults; the others read it.
+
 ## Acceptance Criteria
 
+- [ ] Config: no convention value (path pattern, branch prefix, timer, port, threshold) appears as a literal in source, workflow or command body touched by this task; each is read from `.ai-sdlc/pr-lifecycle.yaml`, and one test shows that changing a config value changes the behaviour.
 - [ ] A fixture where `rebase` on head H leaves the PR DIRTY twice: the second classification yields `route-to-planner` with note `rebase@H x2` and no second rebase runs; after a push to head H2 the guard allows one rebase again.
 - [ ] A PR-less task still parks after the configured retry count (847 behaviour preserved for `prUrl: null`).
 - [ ] `pr-state.ts` has no `stale-claim` state; `stall.ts` tests cover the 30-minute and 10-minute-idle cases alone.
