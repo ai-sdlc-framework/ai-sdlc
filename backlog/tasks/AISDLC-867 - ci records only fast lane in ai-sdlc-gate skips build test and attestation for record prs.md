@@ -46,4 +46,4 @@ Positive: about half of all merges drop from a 6 to 15 minute full gate to the c
 
 ## Out of scope
 
-The dependabot attestation exemption (DEC-0212); changes to which checks are required in branch protection.
+The dependabot attestation exemption (DEC-0213); changes to which checks are required in branch protection.
