@@ -53,6 +53,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          RUN_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
         run: |
           set -euo pipefail
           node -e '
@@ -61,8 +63,11 @@ jobs:
             const bad = (m) => { console.error("::error::" + m); process.exit(1); };
             if (!/^[0-9a-f]{40}$/.test(v.headSha || "")) bad("invalid head sha in verdict");
             if (v.headSha !== process.env.RUN_HEAD_SHA) bad("verdict head sha does not match the workflow run");
-            if (!/^[0-9]+$/.test(String(v.prNumber || ""))) bad("invalid PR number in verdict");
-            if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(v.headRepo || "")) bad("invalid head repo in verdict");
+            const e = process.env;
+            if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(e.RUN_HEAD_REPO || "")) bad("invalid head repo in workflow run");
+            const prNumber = /^[0-9]+$/.test(e.RUN_PR_NUMBER || "") ? e.RUN_PR_NUMBER : "";
+            if (prNumber && v.prNumber !== undefined && String(v.prNumber) !== prNumber) bad("verdict PR number does not match the workflow run");
+            if (v.headRepo !== undefined && v.headRepo !== e.RUN_HEAD_REPO) bad("verdict head repo does not match the workflow run");
             const status = String(v.status || "");
             const reason = String(v.reason || "").replace(/[\r\n]+/g, " ");
             let state, desc;
@@ -70,28 +75,27 @@ jobs:
             else if (status === "valid") { state = "success"; desc = reason.slice(0, 130) || "valid envelope at HEAD"; }
             else if (!status) { state = "failure"; desc = "verifier crashed before emitting result — see workflow logs"; }
             else { state = "failure"; desc = reason.slice(0, 130); }
-            const out = { state, desc, headSha: v.headSha, prNumber: String(v.prNumber), headRepo: v.headRepo, prUrl: /^https:\/\/github\.com\//.test(v.prUrl || "") ? v.prUrl : "", status, reason };
+            const out = { state, desc, headSha: v.headSha, prNumber, headRepo: e.RUN_HEAD_REPO, status, reason };
             fs.writeFileSync("verdict/clean.json", JSON.stringify(out));
             const o = process.env.GITHUB_OUTPUT;
             fs.appendFileSync(o, "state=" + state + "\nhead_sha=" + out.headSha + "\npr_number=" + out.prNumber + "\nhead_repo=" + out.headRepo + "\nstatus=" + status + "\n");
           '
           STATE=$(node -p 'require("./verdict/clean.json").state')
           DESC=$(node -p 'require("./verdict/clean.json").desc')
-          PR_URL=$(node -p 'require("./verdict/clean.json").prUrl')
           HEAD_SHA=$(node -p 'require("./verdict/clean.json").headSha')
-          gh api "repos/${REPO}/statuses/${HEAD_SHA}" \
-            -X POST \
-            -f state="$STATE" \
-            -f context='ai-sdlc/attestation' \
-            -f description="$DESC" \
-            ${PR_URL:+-f target_url="$PR_URL"}
+          ARGS=(-X POST -f state="$STATE" -f context='ai-sdlc/attestation' -f description="$DESC")
+          PR_NUM=$(node -p 'require("./verdict/clean.json").prNumber')
+          if [ -n "$PR_NUM" ]; then
+            ARGS+=(-f target_url="https://github.com/${REPO}/pull/${PR_NUM}")
+          fi
+          gh api "repos/${REPO}/statuses/${HEAD_SHA}" "${ARGS[@]}"
           echo "Posted ai-sdlc/attestation: $STATE on $HEAD_SHA"
 
       # AISDLC-747 (DEC-0065): APPROVE review for a verified attestation, same-repo
       # heads only (never forks). Needs the repo setting "Allow GitHub Actions to
       # create and approve pull requests"; a 403 fails naming that setting.
       - name: Post approving review
-        if: steps.post.outputs.status == 'valid' && steps.post.outputs.head_repo == github.repository
+        if: steps.post.outputs.status == 'valid' && steps.post.outputs.pr_number != '' && github.event.workflow_run.head_repository.full_name == github.repository
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}

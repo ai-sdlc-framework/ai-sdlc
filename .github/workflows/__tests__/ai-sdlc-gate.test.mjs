@@ -951,7 +951,8 @@ describe('AISDLC-833: attestation-post.yml (workflow_run) posts the status and a
       .map((c) => c.trim());
     assert.deepEqual(clauses, [
       "steps.post.outputs.status == 'valid'",
-      'steps.post.outputs.head_repo == github.repository',
+      "steps.post.outputs.pr_number != ''",
+      'github.event.workflow_run.head_repository.full_name == github.repository',
     ]);
     const run = String(step.run);
     assert.match(run, /\[ ! -f scripts\/post-attestation-review\.mjs \]/);
@@ -962,5 +963,53 @@ describe('AISDLC-833: attestation-post.yml (workflow_run) posts the status and a
     for (const st of job.steps) {
       assert.doesNotMatch(String(st.run ?? ''), /\$\{\{\s*github\.event\./);
     }
+  });
+
+  it('takes head repo and PR number from the workflow_run event, not the artifact', () => {
+    const postStep = job.steps.find((st) => st.id === 'post');
+    assert.equal(
+      postStep.env.RUN_HEAD_REPO,
+      '${{ github.event.workflow_run.head_repository.full_name }}',
+    );
+    assert.equal(
+      postStep.env.RUN_PR_NUMBER,
+      '${{ github.event.workflow_run.pull_requests[0].number }}',
+    );
+    const run = String(postStep.run);
+    // artifact values are only cross-checked, never trusted
+    assert.match(run, /v\.headRepo !== e\.RUN_HEAD_REPO/);
+    assert.match(run, /String\(v\.prNumber\) !== prNumber/);
+    assert.match(run, /headRepo: e\.RUN_HEAD_REPO/);
+    assert.doesNotMatch(run, /headRepo: v\.headRepo|prNumber: String\(v\.prNumber\)/);
+    const approve = job.steps.find((st) =>
+      /post-attestation-review\.mjs/.test(String(st.run ?? '')),
+    );
+    assert.match(String(approve.env.HEAD_REPO), /steps\.post\.outputs\.head_repo/);
+    assert.match(
+      String(approve.if),
+      /workflow_run\.head_repository\.full_name == github\.repository/,
+    );
+  });
+
+  it('does not word-split the optional target_url argument', () => {
+    assert.doesNotMatch(raw, /\$\{PR_URL:\+/);
+    assert.match(raw, /ARGS\+=\(-f target_url=/);
+  });
+});
+
+describe('AISDLC-833: Stage head envelope step binds head inputs and validates before fetching', () => {
+  it('binds env from the pull_request event and validates sha and repo before git fetch', () => {
+    const gate = loadYaml(WORKFLOW_PATH).jobs['attestation-gate'];
+    const step = gate.steps.find((st) => /Stage head envelope/.test(String(st.name ?? '')));
+    assert.ok(step, 'stage step must exist');
+    assert.equal(step.env.HEAD_SHA, '${{ github.event.pull_request.head.sha }}');
+    assert.equal(step.env.HEAD_REPO_FULL, '${{ github.event.pull_request.head.repo.full_name }}');
+    const run = String(step.run);
+    assert.doesNotMatch(run, /\$\{\{/);
+    const shaCheck = run.indexOf('unexpected head sha');
+    const repoCheck = run.indexOf('unexpected head repository name');
+    const fetchAt = run.indexOf('git fetch');
+    assert.ok(shaCheck > -1 && repoCheck > shaCheck && fetchAt > repoCheck);
+    assert.ok(run.indexOf('stage-attestation-data.sh') > fetchAt);
   });
 });

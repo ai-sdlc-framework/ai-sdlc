@@ -409,8 +409,9 @@ jobs:
   # a read-only token, uploads the verdict as an artifact and fails the job on an
   # invalid envelope, which fails `ai-sdlc/pr-ready`. The `ai-sdlc/attestation`
   # status and the DEC-0065 approving review are posted once per head SHA by
-  # `attestation-post.yml` (workflow_run, base-defined, no PR code; DEC-0206). Docs-only, draft and dependabot PRs skip the job
-  # (alls-green treats `skipped` as success).
+  # `attestation-post.yml` (workflow_run, base-defined, no PR code; DEC-0206).
+  # Docs-only, draft and dependabot PRs skip the job (alls-green treats
+  # `skipped` as success).
   attestation-gate:
     name: Attestation gate (code PRs)
     needs: detect

@@ -127,6 +127,8 @@ GitHub status-check function semantics:
 
 ## Per-archetype attestation gating (AISDLC-388)
 
+**Trust model after AISDLC-833 (DEC-0206).** The `ai-sdlc/attestation` status is posted by `attestation-post.yml` (`workflow_run`, default-branch definition, no PR code) from a verdict artifact produced by the PR-triggered `attestation-gate` job. A PR runs its own copy of `ai-sdlc-gate.yml`, so a fork PR can forge that artifact, and the status relayed from it is NOT unforgeable. The artifact supplies only `status` and `reason`: head sha, head repo and PR number come from the trusted `workflow_run` event, and the approving review (DEC-0065) is posted only when the event shows a same-repo head with a PR number. The rollup is unaffected because the `attestation-gate` job itself fails `ai-sdlc/pr-ready` on an invalid envelope.
+
 `ai-sdlc/attestation` is **not a direct required check** on branch protection. It is a conditional contributor to the `ai-sdlc/pr-ready` rollup via per-archetype routing:
 
 | PR archetype | `ai-sdlc/attestation` behavior |
