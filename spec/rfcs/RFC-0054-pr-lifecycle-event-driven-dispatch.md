@@ -1022,6 +1022,26 @@ rubric (class (a), (b) or (c) per the Decision authority rules).
      executor's verdict.
    - (c) Keep the status quo definition for planner filing PRs (no task, no executor), "merged" for
      task PRs.
+   **Resolution (2026-10-14, full rubric): two named states.** `delivered` means the PR is ready
+   and auto-merge is armed; it is the executor's verdict outcome and it frees the executor slot
+   (the OQ-2 hand-over point). `landed` means merged; it is the only event that writes `done/`,
+   syncs the parent and releases dependants (the effect DEC-0127 asked for). The task file still
+   moves to `backlog/completed/` in the PR's own diff. Industry research: Prow/Tide separates "in
+   the merge pool" from "merged"; deployment pipelines separate "approved" from "deployed";
+   states with different owners and failure modes are not collapsed into one word. **Shipped
+   substrate:** today `done/` receives a verdict when the executor returns `success` with a
+   `prUrl`, which is "done at draft PR", the definition that left PRs ownerless in the 2026-10-11
+   pile-up; AISDLC-823's `merged` state already maps to `mark-done-sync-parent-start-next`, so the
+   landed action exists in code and only the writer rule changes. **Refinement:** `delivered`
+   is a verdict outcome value, not a board directory; `done/` has a single writer (the state
+   machine, on merge); the brief-progress loop and `cli-dispatch peek` read only `done/`.
+   AISDLC-816 is to be read as: no new claim while this executor has an undelivered PR, not an
+   unlanded one. **Counter-argument:** "two words invite drift; a dashboard counts delivered as
+   finished and the pile-up returns under a new name." Rebuttal: drift would require a second
+   writer of `done/`, which is a reviewable code change, and the board exposes no directory for
+   delivered. **Selected over a single done = merged** because the executor cannot author a
+   verdict for a PR it no longer owns after ready; **over the status quo** because that is the
+   failure being fixed.
 6. **Where does the state machine persist?**
    - (a) Board files (`landing/`, per-PR record) with GitHub as the recompute source.
    - (b) GitHub itself (labels, check runs) read by the tick.
