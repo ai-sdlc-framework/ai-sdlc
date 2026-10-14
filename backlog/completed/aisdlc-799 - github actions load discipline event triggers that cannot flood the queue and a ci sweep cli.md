@@ -2,7 +2,7 @@
 id: AISDLC-799
 title: >-
   GitHub Actions load discipline: auto-enable and untrusted-gate triggers that cannot flood the job queue, a deterministic `cli-ci sweep`, and queue-depth observability
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-10'
 labels:
@@ -41,13 +41,38 @@ dispatchable: true
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] `auto-enable-auto-merge.yml` fires only on `opened`, `reopened`, `ready_for_review`, with a per-PR concurrency group; workflow tests assert the trigger set.
-- [ ] `untrusted-pr-gate.yml` skips all jobs at the job level for same-repo PRs; a workflow test asserts the guard and a same-repo PR still receives whatever status it receives today.
-- [ ] `cli-ci sweep` and `cli-ci queue` exist with hermetic tests covering the three never-cancel rules and the two cancel rules.
-- [ ] The operator-dispatch command body uses `cli-ci sweep`; `ai-sdlc doctor` warns on queue depth and age thresholds.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] `auto-enable-auto-merge.yml` fires only on `opened`, `reopened`, `ready_for_review`, with a per-PR concurrency group; workflow tests assert the trigger set.
+- [x] `untrusted-pr-gate.yml` skips all jobs at the job level for same-repo PRs; a workflow test asserts the guard and a same-repo PR still receives whatever status it receives today.
+- [x] `cli-ci sweep` and `cli-ci queue` exist with hermetic tests covering the three never-cancel rules and the two cancel rules.
+- [x] The operator-dispatch command body uses `cli-ci sweep`; `ai-sdlc doctor` warns on queue depth and age thresholds.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 <!-- AC:END -->
 
 ## Notes
 
 Family 3 of the 2026-10-10 root-cause set. Related: AISDLC-727 (#1313), AISDLC-487 (merge starvation, low).
+
+## Final Summary
+
+## Summary
+Removed the trigger fan-out behind the 2026-10-10 queue saturation: the arming workflow now fires only on opened, reopened and ready_for_review with a per-PR concurrency group, and every untrusted-pr-gate job is skipped for same-repo PRs before a runner is allocated. Added `cli-ci sweep` and `cli-ci queue` plus a `ci-queue` doctor warning (queued > 40 or oldest queued > 15 min).
+
+## Changes
+- the arming workflow and `.github/workflows/untrusted-pr-gate.yml` (modified): trigger set, concurrency group, same-repo skip.
+- `.github/workflows/__tests__/load-discipline.test.mjs` (new): asserts the trigger set and the guard.
+- `pipeline-cli/src/cli/ci.ts`, `ci.test.ts`, `bin/cli-ci.mjs`, `package.json` (new/modified): sweep and queue.
+- `orchestrator/src/cli/commands/doctor-checks.ts` (+ test), `orchestrator/src/clock.ts` (new): ci-queue doctor check.
+- `ai-sdlc-plugin/commands/operator-dispatch.md` (modified): board pass runs `cli-ci sweep`.
+
+## Design decisions
+- **Only same-repo PRs are authoritative for stale-head cancels**: the run listing has no head-repo field, so a branch name or SHA shared with a cross-repo PR is ambiguous and left alone; only pull_request and pull_request_target runs are ever cancelled.
+- **Duplicate rule limited to PR-bound events**: older push runs on main (health monitor, release) survive.
+
+## Verification
+- `pnpm build` - clean
+- touched-package tests, `pnpm lint`, `pnpm format:check`, `pnpm dark-code:check` - pass
+- 2 review rounds: code-reviewer and security-reviewer approved
+
+## Follow-up
+- declined: queue recording in the main-health-monitor workflow (optional per task)
+- declined: harden `crossRepo` to `isCrossRepository !== false` (minor note from the security reviewer; availability only)

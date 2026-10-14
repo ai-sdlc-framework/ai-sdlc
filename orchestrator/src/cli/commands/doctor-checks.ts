@@ -43,7 +43,6 @@
  */
 
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, unlinkSync } from 'node:fs';
-import { now as clockNow } from '../../clock.js';
 import { CLIENT_SIDE_ONLY_MESSAGE } from './branch-protection-shared.js';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -55,6 +54,7 @@ import {
   loadJudgmentConfig,
   resolveJudgmentProvider,
 } from '@ai-sdlc/reference';
+import { now as clockNow } from '../../clock.js';
 import {
   ARTIFACTS_GITIGNORE_ENTRY,
   gitCheckIgnoreArgs,
@@ -1225,6 +1225,58 @@ export function fixWorktreeHooks(ctx: DoctorRunContext): DoctorFixResult {
   };
 }
 
+/** AISDLC-799: GitHub Actions queue pressure thresholds for the `ci-queue` check. */
+export const CI_QUEUE_MAX_QUEUED = 40;
+export const CI_QUEUE_MAX_OLDEST_MINUTES = 15;
+
+/**
+ * AISDLC-799: warns when the Actions job queue is saturated (queued runs above
+ * {@link CI_QUEUE_MAX_QUEUED} or the oldest queued run older than
+ * {@link CI_QUEUE_MAX_OLDEST_MINUTES} minutes). The 2026-10-10 incident showed
+ * saturation only as missing merges. Read-only; quiet when `gh` is unavailable,
+ * unauthenticated or returns something unparseable.
+ */
+export function checkCiQueue(ctx: DoctorRunContext): DoctorCheckResult[] {
+  const r = ctx.adapters.runCommand('gh', [
+    'run',
+    'list',
+    '--status',
+    'queued',
+    '--json',
+    'createdAt',
+    '--limit',
+    '500',
+  ]);
+  if (r.exitCode !== 0) return [];
+  let runs: unknown;
+  try {
+    runs = JSON.parse(r.stdout);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(runs)) return [];
+  const times = (runs as Array<{ createdAt?: unknown }>)
+    .map((x) => (typeof x.createdAt === 'string' ? Date.parse(x.createdAt) : NaN))
+    .filter((t) => !Number.isNaN(t));
+  const oldestMin =
+    times.length === 0
+      ? 0
+      : Math.max(0, Math.floor((clockNow().getTime() - Math.min(...times)) / 60_000));
+  const tooMany = runs.length > CI_QUEUE_MAX_QUEUED;
+  const tooOld = oldestMin > CI_QUEUE_MAX_OLDEST_MINUTES;
+  if (!tooMany && !tooOld) return [];
+  return [
+    {
+      id: 'ci-queue',
+      severity: 'warn',
+      title: `GitHub Actions queue is saturated: ${runs.length} queued (limit ${CI_QUEUE_MAX_QUEUED}), oldest queued ${oldestMin} min (limit ${CI_QUEUE_MAX_OLDEST_MINUTES})`,
+      remediation:
+        'Run `node pipeline-cli/bin/cli-ci.mjs queue` to see the per-workflow breakdown, then `node pipeline-cli/bin/cli-ci.mjs sweep --dry-run` (drop `--dry-run` to cancel stale-head and duplicate queued runs).',
+      anonymizableEvidence: { queued: runs.length, oldestQueuedMinutes: oldestMin },
+    },
+  ];
+}
+
 /**
  * AISDLC-791: a running hierarchy session must have been launched with
  * `AI_SDLC_HIERARCHY_SESSION=<name>` and `AI_SDLC_HIERARCHY_ROLE=<role>`: the
@@ -2025,6 +2077,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
       'Worktrees under .worktrees/ whose git hooks directory has no executable pre-push while the main checkout has one (AISDLC-693).',
     run: checkWorktreeHooks,
     fix: fixWorktreeHooks,
+  },
+  {
+    id: 'ci-queue',
+    description:
+      'GitHub Actions queue saturation: more than 40 queued runs or the oldest queued run older than 15 minutes (AISDLC-799).',
+    run: checkCiQueue,
   },
   {
     id: 'hierarchy-launch-env',

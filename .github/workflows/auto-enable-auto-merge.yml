@@ -64,24 +64,17 @@ name: Auto-enable auto-merge on PR open
 # require manual approval before any merge can happen, which is correct
 # (drive-by malicious PRs shouldn't be granted auto-merge automatically).
 #
-# Trigger types include `synchronize` and `reopened` so force-pushes during
-# the AI-SDLC pipeline (rebase onto main, attestation re-sign, conflict
-# resolution) self-heal — every push that GitHub silently dismisses
-# auto-merge from re-fires this workflow which re-enables it. `gh pr merge
-# --auto` is idempotent (verified empirically: exit 0 + no error when
-# auto-merge is already enabled), so no extra guard is needed (AISDLC-130).
-#
-# AISDLC-230 (2026-05-07): also re-fire on `check_suite.completed` and
-# `status` events. Without these, when CI completes AFTER auto-merge was
-# armed, GitHub's direct-merge admission logic can leave the PR sitting
-# CLEAN + armed but never actually merged — operators report needing to
-# manually `gh pr merge --disable-auto && gh pr merge --auto` to force a
-# fresh evaluation. By re-running the disable-then-arm cycle on every CI
-# completion, the workflow self-heals that staleness without operator
-# intervention. The disable-then-arm cycle (vs bare `--auto`) is required
-# because bare `--auto` is idempotent — calling it on an already-armed
-# stale state is a no-op. `--disable-auto` followed by `--auto` is what
-# clears GitHub's cached state and triggers immediate merge admission.
+# AISDLC-799 (load discipline, 2026-10-10 incident): triggers are `opened`,
+# `reopened` and `ready_for_review` ONLY. Earlier revisions also fired on
+# `synchronize` (AISDLC-130) and on `check_suite.completed` / `status`
+# (AISDLC-230) to re-arm after every push and every CI completion. That
+# fan-out flooded the org-wide concurrent-job cap: 59 of roughly 140 queued
+# runs were this workflow, re-arming PRs that were already armed. The re-fires
+# existed for a queue / direct-merge admission race that no longer applies
+# since AISDLC-400 dropped the merge queue, and GitHub keeps an armed PR armed
+# across pushes. A PR GitHub does disarm is re-armed by
+# `auto-rearm-on-dequeue.yml` (the safety net) or by the operator. A per-PR
+# concurrency group cancels a superseded run for the same PR.
 
 on:
   # AISDLC-381: migrated from `pull_request` to `pull_request_target` so
@@ -95,19 +88,13 @@ on:
     # draft-PR flow flips a draft to ready (which is the FIRST time the PR
     # should arm auto-merge). The existing job-level `draft == false` guard
     # below correctly skips draft `opened` events.
-    types: [opened, synchronize, reopened, ready_for_review]
-  # AISDLC-230: re-fire when a check_suite completes so auto-merge is
-  # re-evaluated after CI finishes. Same `--disable-auto` / `--auto`
-  # cycle is what unsticks PRs that go CLEAN+armed-but-not-queued.
-  # `check_suite` and `status` events ALWAYS run in target-repo context
-  # already (they don't have the pull_request fork-token-downgrade quirk),
-  # so they are unchanged by the AISDLC-381 migration.
-  check_suite:
-    types: [completed]
-  # AISDLC-230: status events (used by some external CI providers like
-  # Codecov) carry the same staleness risk. Inexpensive to handle: the
-  # discover-PR step is gated to a single PR per head SHA.
-  status:
+    # AISDLC-799: `synchronize`, `check_suite.completed` and `status` are
+    # intentionally NOT triggers (see the load-discipline note above).
+    types: [opened, reopened, ready_for_review]
+
+concurrency:
+  group: auto-enable-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 permissions:
   # AISDLC-381 iter-2 MINOR (security-reviewer): `contents: write` was
