@@ -1,7 +1,7 @@
 ---
 id: AISDLC-469
 title: 'feat: RFC-0018 Phase 5 — WCAG version evolution (additive enum + superseded Decision + WCAG 3.0 scoring-model preview)'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-28'
 labels:
