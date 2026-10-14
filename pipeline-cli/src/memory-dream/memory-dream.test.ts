@@ -479,6 +479,23 @@ describe('run', () => {
     expect(summaryLines(r).join('\n')).toContain('output (unapplied)');
   });
 
+  it('retries with budget feedback while a budget is missed, bounded by maxAttempts', async () => {
+    seed(FIXTURE, INDEX);
+    const syn = new FakeSynthesizer({ dispositions: [], outputs: [], lowConfidence: [] });
+    const r = await runDream({
+      memoryDir: mem,
+      model: 'sonnet',
+      dryRun: false,
+      budgets: { ...DEFAULT_BUDGETS, indexMaxLines: 1 },
+      synthesizer: syn,
+      maxAttempts: 2,
+    });
+    expect(syn.prompts).toHaveLength(2);
+    expect(syn.prompts[1]).toContain('Budget feedback from your previous attempt');
+    expect(syn.prompts[0]).not.toContain('Budget feedback');
+    expect(r.report.budgetsMet?.index).toBe(false);
+  });
+
   it('falls back to keep-all when synthesis fails or returns junk', async () => {
     seed(FIXTURE, INDEX);
     const bad = await runDream({

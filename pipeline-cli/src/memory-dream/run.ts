@@ -40,6 +40,8 @@ export interface RunOptions {
   mineTranscriptsDir?: string;
   addProposals?: boolean;
   synthesizer: Synthesizer;
+  /** Synthesis attempts when budgets are missed (default 3). */
+  maxAttempts?: number;
   now?: Date;
 }
 
@@ -73,6 +75,37 @@ const keepAll = (files: string[]): Plan => ({
   lowConfidence: [],
   indexLines: {},
 });
+
+function budgetMisses(b: ReturnType<typeof buildOutput>, bud: Budgets): number {
+  return (
+    Math.max(0, b.after.indexLines - bud.indexMaxLines) +
+    Math.max(0, Math.ceil((b.after.indexBytes - bud.indexMaxBytes) / 100)) +
+    b.overBudgetNotes.length
+  );
+}
+
+function budgetFeedback(
+  b: ReturnType<typeof buildOutput>,
+  bud: Budgets,
+  repairs: string[],
+): string {
+  const lines = [
+    'Budget feedback from your previous attempt (the budgets are required, not advisory):',
+    `- loaded index: ${b.after.indexLines} lines, ${b.after.indexBytes} bytes; limit ${bud.indexMaxLines} lines and ${bud.indexMaxBytes} bytes. Archive finished work and transient state and merge same-rule notes until it fits; keep index lines short.`,
+  ];
+  if (b.overBudgetNotes.length > 0)
+    lines.push(
+      `- notes over ${bud.noteMaxBytes} bytes, condense each (keep quotes, dates and reasons verbatim): ${b.overBudgetNotes.join(', ')}`,
+    );
+  if (repairs.length > 0)
+    lines.push(
+      `- the validator rejected or repaired these proposals, avoid the same mistakes:\n${repairs
+        .slice(0, 15)
+        .map((r) => `  - ${r}`)
+        .join('\n')}`,
+    );
+  return lines.join('\n');
+}
 
 export async function runDream(opts: RunOptions): Promise<RunResult> {
   const at = opts.now ?? now();
@@ -109,26 +142,43 @@ export async function runDream(opts: RunOptions): Promise<RunResult> {
   if (opts.dryRun) return { report, markdown: renderReport(report) };
 
   // Synthesis pass. A failed or unparseable response falls back to keep-all.
+  // When the built output misses a budget, retry with feedback naming what was
+  // missed (bounded by maxAttempts); the attempt with the fewest misses wins.
+  const maxAttempts = Math.max(1, opts.maxAttempts ?? 3);
   let plan = keepAll(input.notes.map((n) => n.file));
   let usage = EMPTY_USAGE(opts.model);
-  try {
-    const prompt = buildSynthesisPrompt(
-      input.notes,
-      input.indexText,
-      opts.budgets,
-      opts.instructions,
-    );
-    const res = await opts.synthesizer.synthesize(prompt, opts.model);
-    usage = addUsage(usage, res.usage);
-    const v = validatePlan(extractJson(res.text), input.notes, {
-      allowLowConfidence: opts.allowLowConfidence,
-    });
-    plan = v.plan;
-    report.validatorRepairs = v.repairs;
-  } catch (e) {
-    report.warnings.push(
-      `synthesis failed, output holds the mechanical fixes only: ${(e as Error).message}`,
-    );
+  let built = buildOutput(input, plan, opts.budgets);
+  let bestScore = Number.POSITIVE_INFINITY;
+  let feedback = '';
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const prompt = buildSynthesisPrompt(
+        input.notes,
+        input.indexText,
+        opts.budgets,
+        [opts.instructions, feedback].filter(Boolean).join('\n\n') || undefined,
+      );
+      const res = await opts.synthesizer.synthesize(prompt, opts.model);
+      usage = addUsage(usage, res.usage);
+      const v = validatePlan(extractJson(res.text), input.notes, {
+        allowLowConfidence: opts.allowLowConfidence,
+      });
+      const candidate = buildOutput(input, v.plan, opts.budgets);
+      const score = budgetMisses(candidate, opts.budgets);
+      if (score < bestScore) {
+        bestScore = score;
+        plan = v.plan;
+        built = candidate;
+        report.validatorRepairs = v.repairs;
+      }
+      if (score === 0) break;
+      feedback = budgetFeedback(candidate, opts.budgets, v.repairs);
+    } catch (e) {
+      report.warnings.push(
+        `synthesis failed, output holds the mechanical fixes only: ${(e as Error).message}`,
+      );
+      break;
+    }
   }
 
   // Optional transcript mining: proposals only.
@@ -149,7 +199,7 @@ export async function runDream(opts: RunOptions): Promise<RunResult> {
   report.proposals = proposals;
   report.proposalsAdded = opts.addProposals === true && proposals.length > 0;
 
-  const built = buildOutput(input, plan, opts.budgets, report.proposalsAdded ? proposals : []);
+  if (report.proposalsAdded) built = buildOutput(input, plan, opts.budgets, proposals);
   report.dispositions = plan.dispositions;
   report.outputs = built.rewritten;
   report.lowConfidence = plan.lowConfidence;
