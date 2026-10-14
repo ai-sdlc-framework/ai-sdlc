@@ -184,6 +184,7 @@ import { computePatchId } from '../attestation/patch-id.js';
 import { formatSessionLine, listSessions, recordAgentSession } from '../dispatch/sessions.js';
 import { assertClaimHolder, completeTask, splitIdList } from '../dispatch/complete.js';
 import { guardedRelease } from '../dispatch/release-guard.js';
+import { classifyAndRecord, type PrFacts } from '../hierarchy/pr-state.js';
 import { DEFAULT_REQUEUE_RETRY_LIMIT } from '../dispatch/session-reaper.js';
 import { checkDispatchCaller, loadOperational, type IdentityDeps } from '../hierarchy/index.js';
 import { nextSubId } from '../dispatch/subid.js';
@@ -401,7 +402,32 @@ export async function runDispatchCli(
   const { subcommand, flags } = parseArgv(argv);
   const boardDir = resolveBoardDir(flags);
 
+  // `<subcommand> --help` / `-h` prints help and never runs the subcommand.
+  if (subcommand !== '' && (flags['help'] !== undefined || argv.includes('-h'))) {
+    process.stdout.write(HELP_TEXT);
+    return 0;
+  }
+
   switch (subcommand) {
+    case 'classify-prs': {
+      const input = requireFlag(flags, 'input');
+      let facts: unknown;
+      try {
+        facts = JSON.parse(readFileSync(path.resolve(input), 'utf-8'));
+      } catch (err) {
+        process.stderr.write(
+          `cli-dispatch: --input must be a readable JSON file (${err instanceof Error ? err.message : String(err)})\n`,
+        );
+        return 2;
+      }
+      if (!Array.isArray(facts)) {
+        process.stderr.write('cli-dispatch: --input must be a JSON array of PR facts\n');
+        return 2;
+      }
+      out(classifyAndRecord(facts as PrFacts[]));
+      return 0;
+    }
+
     case 'peek': {
       out(peekQueue(boardDir));
       return 0;
@@ -1401,6 +1427,9 @@ Subcommands:
           [--priority <n>] [--wave <n>] [--base-sha <sha>] | --from-brief <path>
   board [--json]
   unblock --task-id <id>
+  classify-prs --input <facts.json>
+      Classify each open task PR (array of REST facts) into one state and action;
+      writes one DispatchPrClassified event each (AISDLC-823).
   reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]
   requeue --task-id <id> [--retry-limit <n>]   (meant for the dispatch session; mistake guard, limit at most 2)
   complete --task-id <id> --outcome <enum> --worker <name> [--pr <number>] [--pr-url <url>]

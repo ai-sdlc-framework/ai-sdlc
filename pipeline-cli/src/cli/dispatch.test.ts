@@ -1661,6 +1661,40 @@ describe('runDispatchCli ordering commands', () => {
     expect(existsSync(path.join(boardDir, 'queue', 'T-1.dispatch.json'))).toBe(true);
   });
 
+  it('reap --help prints help and does not run the reap (AISDLC-823)', async () => {
+    dispatchWriteManifest(boardDir, mkManifest('T-1'));
+    await captureStdout(() =>
+      runDispatchCli(['claim', '--worker-kind', 'in-session-agent', '--board-dir', boardDir]),
+    );
+    const hourAgo = new Date(Date.now() - 3_600_000);
+    utimesSync(path.join(boardDir, 'inflight', 'T-1.dispatch.json'), hourAgo, hourAgo);
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const exit = await runDispatchCli(['reap', '--help', '--board-dir', boardDir]);
+    const exitShort = await runDispatchCli(['reap', '-h', '--board-dir', boardDir]);
+    const printed = spy.mock.calls.map((c) => String(c[0])).join('');
+    spy.mockRestore();
+    expect([exit, exitShort]).toEqual([0, 0]);
+    expect(printed).toContain('reap [--stale-ms');
+    expect(existsSync(path.join(boardDir, 'inflight', 'T-1.dispatch.json'))).toBe(true);
+    expect(existsSync(path.join(boardDir, 'queue', 'T-1.dispatch.json'))).toBe(false);
+  });
+
+  it('classify-prs classifies facts from a file and rejects bad input', async () => {
+    const input = path.join(root, 'facts.json');
+    writeFileSync(input, JSON.stringify([{ prNumber: 3, taskId: 'T-1', merged: true }]));
+    const { captured } = await captureStdout(() =>
+      runDispatchCli(['classify-prs', '--input', input]),
+    );
+    expect(readLastJson(captured)).toEqual([
+      { prNumber: 3, taskId: 'T-1', state: 'merged', action: 'mark-done-sync-parent-start-next' },
+    ]);
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    expect(await runDispatchCli(['classify-prs', '--input', path.join(root, 'nope.json')])).toBe(2);
+    writeFileSync(input, '{}');
+    expect(await runDispatchCli(['classify-prs', '--input', input])).toBe(2);
+    err.mockRestore();
+  });
+
   it('rejects non-integer numeric flags and a malformed roster', async () => {
     const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const run = (args: string[]) => runDispatchCli([...args, '--board-dir', boardDir]);

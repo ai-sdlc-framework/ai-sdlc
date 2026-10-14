@@ -73,6 +73,14 @@ a name. The JSON holds:
 - A failed task whose verdict names an OPEN PR is PR follow-up, not an escalation: `cli-dispatch.mjs requeue --board-dir "$BOARD_DIR" --task-id <id> --note "<what to finish, in prose>"`; it passes the retry cap and uses no retry.
 - `nextWakeSec`, `selfClear`: Step 5.
 
+## Step 2b - PR and board state machine
+
+Every tick, after `tick`: run `cli-dispatch.mjs reap --board-dir "$BOARD_DIR"`, then list the roster's open task PRs over REST (the repo's pull request list plus check-runs for each head; no GraphQL), write the facts as a JSON array to `$BOARD_DIR/.pr-facts.json` and run `cli-dispatch.mjs classify-prs --input "$BOARD_DIR/.pr-facts.json"`. It returns one `{prNumber, taskId, state, action}` per PR (and writes the event); take that one action, from the table in docs/operations/cli-hierarchy.md ("Dispatch tick: PR and board state machine"). Open no decision for any state. Only `no-match` goes to the planner, with the REST payload summary.
+
+Board commands (`cli-dispatch.mjs`, always with `--board-dir`): `peek` lists the queue; `claim` takes a task; `reap` returns stale claims; `release` frees a claim; `requeue` puts a failed task back with a prose note; `enqueue` adds a task; `write-manifest` rewrites a manifest (use the PR head ref); `write-resume-signal` leaves a resume note on a claim; `complete` records a finished task; `remove-verdict` clears a handled verdict.
+
+Cadence: while the board has queued, inflight or failed-eligible work, or any task PR is open, `touch "$BOARD_DIR/.work-open"` (else remove it) so the next tick is at most 900 seconds away. When both are empty the loop stops: clear with the default cadence. A tick with nothing to do is a no-op.
+
 ## Step 3 - Tell the planner
 
 `SendMessage` `identity.planner` at once per escalation and blocking item (no planner: print them); batch the other `reports` into one self-contained digest in `$BOARD_DIR/planner-digest.md`, sent hourly (`stat` the file), then emptied.
@@ -109,6 +117,8 @@ BOARD_DIR="${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}"
 PIPELINE_CLI_BIN=$(cat "$BOARD_DIR/.cli-bin")
 MY_NAME=$(node -pe "JSON.parse(require('fs').readFileSync('$BOARD_DIR/.tick.json','utf8')).identity.name")
 NEXT_WAKE_SEC=$(node -pe "JSON.parse(require('fs').readFileSync('$BOARD_DIR/.tick.json','utf8')).nextWakeSec")
+# Step 2b cadence: with work or an open task PR, wake within 15 minutes.
+[ -f "$BOARD_DIR/.work-open" ] && [ "$NEXT_WAKE_SEC" -gt 900 ] && NEXT_WAKE_SEC=900
 node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" clear --self --resume-after "$NEXT_WAKE_SEC" \
   --board-dir "$BOARD_DIR" --worker "$MY_NAME"
 ```

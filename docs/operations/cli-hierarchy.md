@@ -42,6 +42,7 @@ reads the real `--help` output and fails when this page omits a command or optio
 - [On-disk state](#on-disk-state)
 - [Commands](#commands)
 - [Operating cycle](#operating-cycle)
+- [Dispatch tick: PR and board state machine](#dispatch-tick-pr-and-board-state-machine)
 - [Restarting after a plugin upgrade](#restarting-after-a-plugin-upgrade)
 - [Troubleshooting](#troubleshooting)
 
@@ -632,6 +633,35 @@ How `clear` interacts with an executor's loop: the executor's loop ends after it
 verdict (step "Stop" in [The executor loop](parallel-dispatch.md#the-executor-loop)); `clear`
 then empties the context and types `/ai-sdlc executor`, starting a fresh pass. An executor
 that still holds an inflight task is never cleared, so work in progress is never destroyed.
+
+## Dispatch tick: PR and board state machine
+
+Every dispatch tick (AISDLC-823) runs `cli-dispatch reap`, reads the roster's open task PRs
+over REST (the pull request list plus check-runs for each head, no GraphQL) and passes the
+facts to `cli-dispatch classify-prs --input <facts.json>`. The classifier
+(`pipeline-cli/src/hierarchy/pr-state.ts`) maps each PR to exactly one state and returns the
+one action below, and writes one `DispatchPrClassified` event per PR (fields `taskId`,
+`prNumber`, `state`, `action`) so per-role KPIs can count escalations per landed PR. No
+decision record is opened for any state; only `no-match` goes to the planner, with the REST
+payload summary. While the board has queued, inflight or failed-eligible work, or any task PR
+is open, the next tick is at most 15 minutes away; when both are empty the loop stops.
+
+| PR state | Classifier state | Action |
+|---|---|---|
+| landed | `merged` | mark task done, sync parent (ff + pipeline-cli build), start next task in the recorded order |
+| checks green, CLEAN, auto-merge armed | `armed-clean` | none |
+| checks green, draft, approved verdict | `ready-to-flip` | flip ready via REST (`PATCH pulls/<n>` draft=false) |
+| BEHIND or DIRTY | `behind-or-dirty` | requeue with the hand-review-path resume note ([hand-review-path.md](hand-review-path.md)) |
+| red `ai-sdlc/attestation`, content-hash mismatch | `attestation-content-hash-mismatch` | push-only re-sign resume (`git fetch origin` first; AISDLC-821) |
+| red `ai-sdlc/pr-ready`, real test/lint/coverage failure | `real-failure` | full fix resume with the failing line in the note |
+| CANCELLED / infra | `cancelled-or-infra` | rerun the workflow, no resume |
+| pending, no run started | `pending` | none |
+| stale inflight claim (no heartbeat over 30 min) | `stale-claim` | `cli-dispatch reap`, then `write-resume-signal` on claim |
+| manifest branch differs from PR head branch | `manifest-branch-mismatch` | `write-manifest` with the PR head ref, requeue |
+| fits no row | `no-match` | route to the planner |
+
+Rows are checked in this precedence: landed, manifest mismatch, stale claim, BEHIND/DIRTY,
+attestation, pr-ready, cancelled/infra, then the green and pending rows.
 
 ## Restarting after a plugin upgrade
 
