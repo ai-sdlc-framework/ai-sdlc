@@ -2,7 +2,7 @@
   "schemaVersion": "v6",
   "subject": {
     "digest": {
-      "sha1": "3c49ed0c560db895aa3d922fdae6826d6792c498"
+      "sha1": "6033f0f0be798a64b243d019505c0dae16eff23f"
     }
   },
   "transcriptLeaves": [
@@ -212,21 +212,16 @@
   ],
   "rootHash": "6b32d24a8ccd5ef41c16857f48386046ea537d9d695337f9bbbf9e35adbc41b1",
   "rootSignature": "5Yxxy1n92SxE8Lk4ExLZaKZlReUCbh+yV7wVHpQR5HNdiLV0YO5Aoxi8criqQ4GauXtEZfroELhrwcZjSoIGCQ==",
-  "nonce": "f44f0f5b67c4842fb6031c2ab68f7394b4296e80a2c20bb347324bef97dfb31d",
+  "nonce": "a15b9e2003e0a7118064e8f3dd2c03caf0f6534654dade5241f47914ef418a01",
   "leafCount": 12,
-  "signedAt": "2026-10-14T00:03:50.606Z",
+  "signedAt": "2026-10-14T02:05:31.726Z",
   "signerIdentity": "dominique@local:doms-macbook",
   "reviewScope": {
     "classification": "full",
     "securityAlways": false,
     "requiredSet": "three",
     "reason": "trust-chain-path",
-    "triggeringPaths": [
-      ".ai-sdlc/gates.yaml",
-      ".husky/pre-push",
-      "CLAUDE.md",
-      "scripts/pre-push-fixups.sh"
-    ],
+    "triggeringPaths": [".ai-sdlc/gates.yaml", ".husky/pre-push", "CLAUDE.md", "scripts/pre-push-fixups.sh"],
     "appliedReviewers": [
       "code-reviewer-codex",
       "test-reviewer-codex",
