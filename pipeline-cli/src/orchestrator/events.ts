@@ -58,6 +58,11 @@ export type OrchestratorEventType =
   | 'OrchestratorOrphanParent'
   | 'OrchestratorStuckCandidate'
   /**
+   * AISDLC-823 - one per dispatch-tick PR classification. Per-event fields:
+   * `taskId`, `prNumber`, `state`, `action`.
+   */
+  | 'DispatchPrClassified'
+  /**
    * AISDLC-176 — emitted on the recovery path when the developer
    * subagent returned non-JSON prose AND the one-shot retry helper
    * (`parseDeveloperReturnWithRetry()` in `steps/06-parse-dev-return.ts`)

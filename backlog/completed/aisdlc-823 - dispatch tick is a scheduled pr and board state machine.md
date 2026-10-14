@@ -1,7 +1,7 @@
 ---
 id: AISDLC-823
 title: Dispatch tick is a scheduled PR and board state machine
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-12'
 labels:
@@ -55,12 +55,12 @@ The operator-dispatch session (RFC-0051) runs "one tick per wake-up, then sleep"
 
 ## Acceptance Criteria
 
-- [ ] AC-1: Classifier helper with unit tests covering every row of the table plus the no-match case.
-- [ ] AC-2: operator-dispatch command body: self-scheduled 15-minute tick with the stop condition; calls the classifier; lists its board commands.
-- [ ] AC-3: `cli-dispatch reap --help` is a no-op help print (test).
-- [ ] AC-4: Event written per classification; test asserts the shape.
-- [ ] AC-5: docs/operations/cli-hierarchy.md gains a "Dispatch tick: PR and board state machine" section with the table.
-- [ ] AC-6: Soak evidence in the PR body: one drain hour with zero planner messages for mechanical stops.
+- [x] AC-1: Classifier helper with unit tests covering every row of the table plus the no-match case.
+- [x] AC-2: operator-dispatch command body: self-scheduled 15-minute tick with the stop condition; calls the classifier; lists its board commands.
+- [x] AC-3: `cli-dispatch reap --help` is a no-op help print (test).
+- [x] AC-4: Event written per classification; test asserts the shape.
+- [x] AC-5: docs/operations/cli-hierarchy.md gains a "Dispatch tick: PR and board state machine" section with the table.
+- [x] AC-6: Soak evidence in the PR body: one drain hour with zero planner messages for mechanical stops.
 
 ## Velocity impact
 
