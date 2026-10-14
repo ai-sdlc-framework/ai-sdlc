@@ -607,42 +607,14 @@ jobs:
 
       # AISDLC-193 / AISDLC-412 / AISDLC-833 (DEC-0206): this job holds the PR
       # context and runs the verifier but does NOT post the `ai-sdlc/attestation`
-      # status or the DEC-0065 approving review. It records the verdict as an
-      # artifact; the base-defined `attestation-post.yml` (workflow_run, no PR
-      # code) posts both with a write token, once per head SHA.
+      # status or the DEC-0065 approving review; the base-defined
+      # `attestation-post.yml` (workflow_run, no PR code) re-runs the verifier
+      # from the default branch and posts both, once per head SHA. No artifact
+      # from this run is read by the poster.
       #
-      # AISDLC-412: `success() || failure()` (never `always()`): a run cancelled by
-      # a newer push must not record a verdict, so a cancelled run cannot overwrite
-      # the current head's verdict. A verifier crash (no status output) still
-      # records `failure` so the post job reports "verifier crashed".
-      - name: Record attestation verdict
-        if: success() || failure()
-        env:
-          STATUS: ${{ steps.release_please.outputs.is_release_please == 'true' && 'release-please' || steps.verify.outputs.status }}
-          REASON: ${{ steps.verify.outputs.reason }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-        run: |
-          set -euo pipefail
-          mkdir -p attestation-verdict
-          node -e '
-            const e = process.env;
-            require("fs").writeFileSync("attestation-verdict/verdict.json", JSON.stringify({
-              status: e.STATUS || "", reason: e.REASON || "", headSha: e.HEAD_SHA,
-              prNumber: e.PR_NUMBER, headRepo: e.HEAD_REPO, prUrl: e.PR_URL || "",
-            }));
-          '
-
-      - name: Upload attestation verdict
-        if: success() || failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: attestation-verdict
-          path: attestation-verdict/verdict.json
-          retention-days: 7
-
+      # AISDLC-412: `success() || failure()` (never `always()`): a run cancelled
+      # by a newer push must not fail the job. A verifier crash (no status
+      # output) still fails it.
       - name: Enforce attestation verdict
         if: (success() || failure()) && steps.release_please.outputs.is_release_please != 'true' && steps.verify.outputs.status != 'valid'
         env:

@@ -843,7 +843,7 @@ describe('governance-gate (AISDLC-764)', () => {
 });
 
 // ── AISDLC-412 (relocated by AISDLC-833, split per DEC-0206): cancelled runs record no verdict ──
-describe('AISDLC-412: attestation-gate records no verdict on cancelled runs', () => {
+describe('AISDLC-412: attestation-gate does not fail on cancelled runs', () => {
   let wf;
   let raw;
   before(() => {
@@ -853,11 +853,11 @@ describe('AISDLC-412: attestation-gate records no verdict on cancelled runs', ()
 
   const recordCond = () => {
     const step = (wf.jobs['attestation-gate'].steps ?? []).find(
-      (s) => typeof s.name === 'string' && /Record attestation verdict/i.test(s.name),
+      (s) => typeof s.name === 'string' && /Enforce attestation verdict/i.test(s.name),
     );
-    assert.ok(step, 'attestation-gate must declare a "Record attestation verdict" step');
+    assert.ok(step, 'attestation-gate must declare an "Enforce attestation verdict" step');
     const cond = String(step.if ?? '');
-    assert.ok(cond, 'Record step MUST declare an `if:` condition');
+    assert.ok(cond, 'Enforce step MUST declare an `if:` condition');
     return cond;
   };
 
@@ -866,13 +866,13 @@ describe('AISDLC-412: attestation-gate records no verdict on cancelled runs', ()
     assert.equal(wf.concurrency['cancel-in-progress'], true);
   });
 
-  it('Record step does NOT use always() or cancelled()', () => {
+  it('Enforce step does NOT use always() or cancelled()', () => {
     const cond = recordCond();
     assert.doesNotMatch(cond, /\balways\s*\(\s*\)/);
     assert.doesNotMatch(cond, /\bcancelled\s*\(\s*\)/);
   });
 
-  it('Record step uses success() || failure()', () => {
+  it('Enforce step uses success() || failure()', () => {
     const cond = recordCond();
     assert.match(cond, /\bsuccess\s*\(\s*\)/);
     assert.match(cond, /\bfailure\s*\(\s*\)/);
@@ -930,7 +930,7 @@ describe('AISDLC-833: attestation-post.yml (workflow_run) posts the status and a
     const checkout = job.steps.find((st) => /actions\/checkout/.test(String(st.uses ?? '')));
     assert.equal(checkout.with.ref, '${{ github.event.repository.default_branch }}');
     assert.equal(checkout.with['persist-credentials'], false);
-    assert.doesNotMatch(raw, /pull_request\.head\.sha|workflow_run\.head_branch/);
+    assert.doesNotMatch(raw, /pull_request\.head\.sha/);
   });
 
   it('holds the write scopes the gate job no longer has', () => {
@@ -940,7 +940,7 @@ describe('AISDLC-833: attestation-post.yml (workflow_run) posts the status and a
 
   it('posts the ai-sdlc/attestation context and validates the head sha against the run', () => {
     assert.match(raw, /context='ai-sdlc\/attestation'/);
-    assert.match(raw, /v\.headSha !== process\.env\.RUN_HEAD_SHA/);
+    assert.match(raw, /headSha: e\.RUN_HEAD_SHA/);
   });
 
   it('approving review only for a valid verdict on a same-repo head', () => {
@@ -965,7 +965,7 @@ describe('AISDLC-833: attestation-post.yml (workflow_run) posts the status and a
     }
   });
 
-  it('takes head repo and PR number from the workflow_run event, not the artifact', () => {
+  it('takes head repo and PR number from the workflow_run event', () => {
     const postStep = job.steps.find((st) => st.id === 'post');
     assert.equal(
       postStep.env.RUN_HEAD_REPO,
@@ -976,11 +976,7 @@ describe('AISDLC-833: attestation-post.yml (workflow_run) posts the status and a
       '${{ github.event.workflow_run.pull_requests[0].number }}',
     );
     const run = String(postStep.run);
-    // artifact values are only cross-checked, never trusted
-    assert.match(run, /v\.headRepo !== e\.RUN_HEAD_REPO/);
-    assert.match(run, /String\(v\.prNumber\) !== prNumber/);
     assert.match(run, /headRepo: e\.RUN_HEAD_REPO/);
-    assert.doesNotMatch(run, /headRepo: v\.headRepo|prNumber: String\(v\.prNumber\)/);
     const approve = job.steps.find((st) =>
       /post-attestation-review\.mjs/.test(String(st.run ?? '')),
     );
@@ -989,6 +985,26 @@ describe('AISDLC-833: attestation-post.yml (workflow_run) posts the status and a
       String(approve.if),
       /workflow_run\.head_repository\.full_name == github\.repository/,
     );
+  });
+
+  it('does NOT take status or the approving review from the PR-controlled artifact', () => {
+    assert.doesNotMatch(raw, /download-artifact/);
+    assert.doesNotMatch(raw, /verdict\.json|attestation-verdict/);
+    assert.doesNotMatch(raw, /JSON\.parse\(fs\.readFileSync/);
+    const postStep = job.steps.find((st) => st.id === 'post');
+    assert.equal(postStep.env.VERIFY_STATUS, '${{ steps.verify.outputs.status }}');
+    assert.equal(postStep.env.VERIFY_REASON, '${{ steps.verify.outputs.reason }}');
+  });
+
+  it('re-runs the verifier from the default-branch checkout after staging head as data', () => {
+    const names = job.steps.map((st) => String(st.name ?? st.uses ?? ''));
+    const stage = names.findIndex((n) => /Stage head envelope/.test(n));
+    const verify = names.findIndex((n) => /Verify attestation/.test(n));
+    const post = names.findIndex((n) => /Validate verdict and post status/.test(n));
+    assert.ok(stage > 0 && verify > stage && post > verify, 'stage, verify, post in order');
+    assert.match(String(job.steps[stage].run), /scripts\/stage-attestation-data\.sh/);
+    assert.match(String(job.steps[verify].run), /node scripts\/verify-attestation\.mjs/);
+    assert.equal(job.steps[verify].env.PR_HEAD_SHA, '${{ github.event.workflow_run.head_sha }}');
   });
 
   it('does not word-split the optional target_url argument', () => {

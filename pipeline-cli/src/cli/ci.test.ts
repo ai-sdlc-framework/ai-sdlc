@@ -185,10 +185,7 @@ describe('workflow name matchers bound to the real workflow files', () => {
     expect(nameOf('auto-enable-auto-merge.yml')).toBe(AUTO_ENABLE_WORKFLOW);
   });
   it('verify names match the verify workflow files', () => {
-    expect([...VERIFY_WORKFLOWS]).toEqual([
-      nameOf('verify-attestation.yml'),
-      nameOf('consumer-verify-attestation.yml'),
-    ]);
+    expect([...VERIFY_WORKFLOWS]).toEqual([nameOf('consumer-verify-attestation.yml')]);
   });
 });
 
