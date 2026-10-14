@@ -41,6 +41,7 @@ import { parseBrief, type ParsedBrief } from './brief-format.js';
 import type { ClearResult } from './clear.js';
 import type { MarkReadyReport } from './mark-ready.js';
 import type { PlaybookOutcome } from './playbook.js';
+import { summariseLanding } from './reconcile.js';
 import { readRosterChecked } from './roster.js';
 import { formatStall, reapStalledClaims, type StallDeps, type StalledReport } from './stall.js';
 
@@ -358,12 +359,14 @@ function buildReports(deps: LoopDeps, state: LoopState, handledCount: number): P
   const nowMs = deps.now().getTime();
   if (Number.isNaN(last) || nowMs - last >= every) {
     const c = peekQueue(deps.boardDir);
-    if (c.queued + c.inflight + c.done + c.failed > 0) {
+    const prs = summariseLanding(deps.boardDir);
+    if (c.queued + c.inflight + c.done + c.failed > 0 || prs !== '') {
       reports.push({
         kind: 'progress',
         text:
           `Progress: ${c.queued} queued, ${c.inflight} inflight, ${c.done} done, ${c.failed} failed` +
-          (handledCount > 0 ? `; ${handledCount} new verdict(s) this wake-up` : ''),
+          (handledCount > 0 ? `; ${handledCount} new verdict(s) this wake-up` : '') +
+          (prs === '' ? '' : `; PRs: ${prs}`),
       });
       state.lastReportAt = deps.now().toISOString();
     }

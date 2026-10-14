@@ -147,6 +147,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'n
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
 import {
   claimNext,
@@ -185,6 +186,15 @@ import { formatSessionLine, listSessions, recordAgentSession } from '../dispatch
 import { assertClaimHolder, completeTask, splitIdList } from '../dispatch/complete.js';
 import { guardedRelease } from '../dispatch/release-guard.js';
 import { classifyAndRecord, type PrFacts } from '../hierarchy/pr-state.js';
+import {
+  commandExecutor,
+  gatherFacts,
+  listLanding,
+  reconcile,
+  type ReconcilePr,
+} from '../hierarchy/reconcile.js';
+import { startScheduler } from '../hierarchy/scheduler.js';
+import { createSystemRunner } from '../hierarchy/system-runner.js';
 import { DEFAULT_REQUEUE_RETRY_LIMIT } from '../dispatch/session-reaper.js';
 import { checkDispatchCaller, loadOperational, type IdentityDeps } from '../hierarchy/index.js';
 import { nextSubId } from '../dispatch/subid.js';
@@ -425,6 +435,51 @@ export async function runDispatchCli(
         return 2;
       }
       out(classifyAndRecord(facts as PrFacts[]));
+      return 0;
+    }
+
+    case 'reconcile': {
+      // RFC-0054: one coded pass over the open PRs; `--watch` keeps the scheduler running.
+      const cliBin = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin');
+      const cwd = deps.cwd ?? process.cwd();
+      const execute = commandExecutor(createSystemRunner(), cwd, cliBin);
+      const only = flags['pr'] === undefined ? undefined : Number.parseInt(flags['pr'], 10);
+      if (only !== undefined && Number.isNaN(only)) {
+        process.stderr.write('cli-dispatch reconcile: --pr must be a number\n');
+        return 2;
+      }
+      const pass = (): ReconcilePr[] | undefined => {
+        let facts: ReconcilePr[] | undefined;
+        if (flags['facts']) {
+          try {
+            const parsed: unknown = JSON.parse(readFileSync(path.resolve(flags['facts']), 'utf-8'));
+            facts = Array.isArray(parsed) ? (parsed as ReconcilePr[]) : undefined;
+          } catch {
+            facts = undefined;
+          }
+        } else {
+          facts = gatherFacts(createSystemRunner(), cwd, boardDir);
+        }
+        return facts && only !== undefined ? facts.filter((f) => f.prNumber === only) : facts;
+      };
+      if (flags['watch'] === 'true') {
+        startScheduler({
+          wakeFile: path.join(boardDir, '.reconcile-wake'),
+          reconcile: () => {
+            const facts = pass();
+            if (!facts) return listLanding(boardDir).filter((r) => !r.landed).length;
+            out(reconcile(facts, { boardDir, execute }));
+            return listLanding(boardDir).filter((r) => !r.landed).length;
+          },
+        });
+        return new Promise<number>(() => {});
+      }
+      const facts = pass();
+      if (!facts) {
+        process.stderr.write('cli-dispatch reconcile: could not read the open PRs\n');
+        return 1;
+      }
+      out(reconcile(facts, { boardDir, execute }));
       return 0;
     }
 
@@ -1428,6 +1483,7 @@ Subcommands:
   board [--json]
   unblock --task-id <id>
   classify-prs --input <facts.json>
+  reconcile [--pr <n>] [--facts <facts.json>] [--watch]
       Classify each open task PR (array of REST facts) into one state and action;
       writes one DispatchPrClassified event each (AISDLC-823).
   reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]
