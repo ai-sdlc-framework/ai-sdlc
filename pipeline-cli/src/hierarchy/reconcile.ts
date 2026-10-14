@@ -24,6 +24,7 @@ import path from 'node:path';
 
 import { now as clockNow } from '../clock.js';
 import { classifyPr, type PrCheck, type PrFacts, type PrState } from './pr-state.js';
+import { collectVerdicts, readInflightManifest } from '../dispatch/board.js';
 import type { CommandRunner } from './types.js';
 
 /** Task set: one action per classifier state (RFC-0054 ownership table). */
@@ -413,6 +414,56 @@ interface ListedPr {
   mergeStateStatus?: string;
   autoMergeRequest?: unknown;
   files?: { path: string }[];
+  isCrossRepository?: boolean;
+  author?: { login?: string };
+}
+
+/** PR number in a `.../pull/<n>` URL. */
+function prNumberFromUrl(url?: string | null): number | undefined {
+  const m = /\/pull\/(\d+)/.exec(url ?? '');
+  return m ? Number(m[1]) : undefined;
+}
+
+/**
+ * Authors whose PRs the reconciler may act on: `AI_SDLC_RECONCILE_AUTHORS` (comma
+ * separated) when set, else the authenticated `gh` user. Undefined when neither is known.
+ */
+export function allowedAuthors(
+  run: CommandRunner,
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Set<string> | undefined {
+  const fromEnv = (env['AI_SDLC_RECONCILE_AUTHORS'] ?? '')
+    .split(',')
+    .map((x) => x.trim().toLowerCase())
+    .filter(Boolean);
+  if (fromEnv.length > 0) return new Set(fromEnv);
+  const me = run('gh', ['api', 'user', '--jq', '.login'], { cwd });
+  const login = me.status === 0 ? me.stdout.trim().toLowerCase() : '';
+  return login ? new Set([login]) : undefined;
+}
+
+/**
+ * True when the task's own board record names this PR: a verdict or resume
+ * feedback carrying the PR number, or an inflight manifest whose branch is the PR head. A PR
+ * that merely names a task id in its branch or title is not enough.
+ */
+export function prBelongsToTask(
+  boardDir: string,
+  taskId: string,
+  prNumber: number,
+  headBranch: string | undefined,
+  verdicts: readonly { taskId: string; prNumber?: number; prUrl?: string | null }[],
+): boolean {
+  const id = taskId.toLowerCase();
+  for (const v of verdicts) {
+    if (v.taskId.toLowerCase() !== id) continue;
+    if (v.prNumber === prNumber || prNumberFromUrl(v.prUrl) === prNumber) return true;
+  }
+  const manifest = readInflightManifest(boardDir, taskId);
+  if (manifest?.resume?.prNumber === prNumber) return true;
+  const branch = manifest?.branch;
+  return branch !== undefined && headBranch !== undefined && branch === headBranch;
 }
 
 interface RollupItem {
@@ -466,14 +517,30 @@ export function gatherFacts(
       '--limit',
       '100',
       '--json',
-      'number,title,headRefName,headRefOid,isDraft,mergeStateStatus,autoMergeRequest,files',
+      'number,title,headRefName,headRefOid,isDraft,mergeStateStatus,autoMergeRequest,files,isCrossRepository,author',
     ],
     { cwd },
   );
   const prs = listed.status === 0 ? parse<ListedPr[]>(listed.stdout) : undefined;
   if (!Array.isArray(prs)) return undefined;
+  const allowed = allowedAuthors(run, cwd);
+  if (!allowed) return undefined;
+  const verdicts = collectVerdicts(boardDir);
   const facts: ReconcilePr[] = [];
   for (const p of prs) {
+    // A fork PR can name any task id; never act on one.
+    if (p.isCrossRepository !== false) continue;
+    const taskId = taskIdFrom(p.headRefName, p.title);
+    const kind = detectKind({
+      ...(p.title === undefined ? {} : { title: p.title }),
+      ...(p.headRefName === undefined ? {} : { headBranch: p.headRefName }),
+      taskId,
+    });
+    if (kind !== 'release') {
+      if (!allowed.has((p.author?.login ?? '').toLowerCase())) continue;
+      if (kind === 'task' && !prBelongsToTask(boardDir, taskId, p.number, p.headRefName, verdicts))
+        continue;
+    }
     const view = run('gh', ['pr', 'view', String(p.number), '--json', 'statusCheckRollup'], {
       cwd,
     });
@@ -482,7 +549,7 @@ export function gatherFacts(
     const files = p.files?.map((x) => x.path) ?? [];
     facts.push({
       prNumber: p.number,
-      taskId: taskIdFrom(p.headRefName, p.title),
+      taskId,
       ...(p.title === undefined ? {} : { title: p.title }),
       ...(p.headRefName === undefined ? {} : { headBranch: p.headRefName }),
       ...(p.headRefOid === undefined ? {} : { headSha: p.headRefOid }),

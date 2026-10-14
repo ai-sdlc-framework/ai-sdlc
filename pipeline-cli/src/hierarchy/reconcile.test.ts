@@ -1,9 +1,10 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { writeVerdict } from '../dispatch/board.js';
 import { PR_STATES, type PrState } from './pr-state.js';
 import {
   actionCommands,
@@ -11,7 +12,9 @@ import {
   decide,
   detectKind,
   DOCS_ACTIONS,
+  allowedAuthors,
   gatherFacts,
+  prBelongsToTask,
   listLanding,
   normaliseCheck,
   readLanding,
@@ -306,6 +309,8 @@ describe('gatherFacts', () => {
   it('returns undefined when the list cannot be read', () => {
     expect(gatherFacts(runner({}), '/', board)).toBeUndefined();
     expect(gatherFacts(runner({ 'pr list': 'not json' }), '/', board)).toBeUndefined();
+    // Authenticated user unknown: fail closed.
+    expect(gatherFacts(runner({ 'pr list': '[]' }), '/', board)).toBeUndefined();
   });
 
   it('builds facts, detects docs-only and finds merged records', () => {
@@ -320,15 +325,25 @@ describe('gatherFacts', () => {
         title: 'fix (AISDLC-1)',
         headRefName: 'ai-sdlc/aisdlc-1-x',
         headRefOid: 's1',
+        isCrossRepository: false,
+        author: { login: 'Me' },
         isDraft: true,
         mergeStateStatus: 'CLEAN',
         autoMergeRequest: { x: 1 },
         files: [{ path: 'docs/a.md' }],
       },
-      { number: 2 },
+      { number: 2, isCrossRepository: false, author: { login: 'me' } },
     ]);
+    writeVerdict(board, {
+      schemaVersion: 'v1',
+      taskId: 'AISDLC-1',
+      outcome: 'success',
+      prNumber: 1,
+      completedAt: '2026-10-14T00:00:00.000Z',
+    } as never);
     const facts = gatherFacts(
       runner({
+        'api user': 'me\n',
         'pr list': list,
         'pr view 1': JSON.stringify({
           statusCheckRollup: [{ name: 'c', status: 'COMPLETED', conclusion: 'SUCCESS' }],
@@ -349,5 +364,121 @@ describe('gatherFacts', () => {
     expect(facts[0]!.checks).toHaveLength(1);
     expect(facts[1]).toMatchObject({ prNumber: 2, docsOnly: false, checks: [] });
     expect(facts.find((f) => f.prNumber === 77)).toMatchObject({ merged: true });
+  });
+});
+
+describe('gatherFacts trust filter', () => {
+  const pr = (over: Record<string, unknown>) => ({
+    number: 5,
+    title: 'feat: x (AISDLC-9)',
+    headRefName: 'ai-sdlc/aisdlc-9-x',
+    isCrossRepository: false,
+    author: { login: 'me' },
+    ...over,
+  });
+  const run =
+    (list: unknown[]): CommandRunner =>
+    (_f, args) => {
+      if (args[0] === 'api') return { status: 0, stdout: 'me', stderr: '' };
+      if (args[1] === 'list') return { status: 0, stdout: JSON.stringify(list), stderr: '' };
+      return { status: 0, stdout: '{}', stderr: '' };
+    };
+  const done = (prNumber: number, prUrl?: string) =>
+    writeVerdict(board, {
+      schemaVersion: 'v1',
+      taskId: 'AISDLC-9',
+      outcome: 'success',
+      prNumber,
+      ...(prUrl ? { prUrl } : {}),
+      completedAt: '2026-10-14T00:00:00.000Z',
+    } as never);
+
+  it('skips cross-repository PRs and PRs with no recorded cross-repo flag', () => {
+    done(5);
+    const facts = gatherFacts(
+      run([pr({ isCrossRepository: true }), pr({ number: 6, isCrossRepository: undefined })]),
+      '/',
+      board,
+    )!;
+    expect(facts).toEqual([]);
+  });
+
+  it('skips authors outside the allow-list for task and docs PRs', () => {
+    done(5);
+    const facts = gatherFacts(
+      run([
+        pr({ author: { login: 'mallory' } }),
+        pr({
+          number: 7,
+          title: 'chore(docs): file x',
+          headRefName: 'ai-sdlc/file-x',
+          author: { login: 'mallory' },
+        }),
+      ]),
+      '/',
+      board,
+    )!;
+    expect(facts).toEqual([]);
+  });
+
+  it('acts on a task PR only when its number matches the task record', () => {
+    expect(gatherFacts(run([pr({})]), '/', board)).toEqual([]);
+    done(5);
+    expect(gatherFacts(run([pr({})]), '/', board)!.map((f) => f.prNumber)).toEqual([5]);
+    expect(gatherFacts(run([pr({ number: 8 })]), '/', board)).toEqual([]);
+  });
+
+  it('keeps allowed docs PRs and same-repo release PRs', () => {
+    const facts = gatherFacts(
+      run([
+        pr({ number: 7, title: 'chore(docs): file x', headRefName: 'ai-sdlc/file-x' }),
+        pr({
+          number: 9,
+          title: 'chore: release main',
+          headRefName: 'release-please--x',
+          author: {},
+        }),
+      ]),
+      '/',
+      board,
+    )!;
+    expect(facts.map((f) => f.prNumber)).toEqual([7, 9]);
+  });
+
+  it('prBelongsToTask accepts a verdict url or an inflight branch', () => {
+    expect(
+      prBelongsToTask(board, 'AISDLC-9', 5, 'b', [
+        { taskId: 'AISDLC-9', prUrl: 'https://x/pull/5' },
+      ]),
+    ).toBe(true);
+    expect(prBelongsToTask(board, 'AISDLC-9', 5, 'b', [{ taskId: 'AISDLC-8', prNumber: 5 }])).toBe(
+      false,
+    );
+  });
+
+  it('prBelongsToTask accepts an inflight resume PR number or branch', () => {
+    mkdirSync(path.join(board, 'inflight'), { recursive: true });
+    writeFileSync(
+      path.join(board, 'inflight', 'AISDLC-9.dispatch.json'),
+      JSON.stringify({
+        taskId: 'AISDLC-9',
+        branch: 'ai-sdlc/aisdlc-9-x',
+        resume: { prNumber: 12 },
+      }),
+    );
+    expect(prBelongsToTask(board, 'AISDLC-9', 12, 'zzz', [])).toBe(true);
+    expect(prBelongsToTask(board, 'AISDLC-9', 13, 'ai-sdlc/aisdlc-9-x', [])).toBe(true);
+    expect(prBelongsToTask(board, 'AISDLC-9', 13, 'evil', [])).toBe(false);
+  });
+
+  it('allowedAuthors prefers the env list', () => {
+    const r = run([]);
+    expect([...allowedAuthors(r, '/', { AI_SDLC_RECONCILE_AUTHORS: ' A, b ' })!]).toEqual([
+      'a',
+      'b',
+    ]);
+    expect([...allowedAuthors(r, '/', {})!]).toEqual(['me']);
+    const bad: CommandRunner = () => ({ status: 1, stdout: '', stderr: '' });
+    expect(allowedAuthors(bad, '/', {})).toBeUndefined();
   });
 });

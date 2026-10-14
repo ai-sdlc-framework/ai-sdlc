@@ -655,6 +655,12 @@ action. A PR that merged is detected through its record and marked `landed`.
 no task id is a docs PR; one with a task id (branch or title) is a task PR; the release-please
 PR (`chore: release`, `release-please--*`) is reported and never acted on.
 
+**Trust filter.** Facts gathering skips cross-repository (fork) PRs and PRs whose author is not
+in the allow-list (`AI_SDLC_RECONCILE_AUTHORS`, comma separated, else the authenticated `gh`
+user; unknown means no facts). A task PR is acted on only when the task's own board record
+names its number (a verdict `prNumber` or `prUrl`, a resume signal, or the inflight manifest
+branch); a PR that only names a task id in its branch or title is ignored.
+
 **Record** (`landing/<pr>.json`): `pr`, `kind`, `taskId`, `owner`, `state`, `action`,
 `headSha`, `failingLine`, `delivered`, `landed`, and `history` (one `{ts, state, action,
 headSha}` per change). `owner` is `executor:<name>` until `delivered` (the PR flipped ready),
