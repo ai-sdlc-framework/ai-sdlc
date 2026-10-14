@@ -1,8 +1,8 @@
 ---
 id: RFC-0054
 title: PR Lifecycle as Event-Driven Dispatch (one state machine from branch pushed to merged)
-status: Draft
-lifecycle: Draft
+status: Ready for Review
+lifecycle: Ready for Review
 author: 'Dominique Legault'
 created: 2026-10-13
 updated: 2026-10-14
@@ -14,14 +14,14 @@ requiresDocs: []
 
 # RFC-0054: PR Lifecycle as Event-Driven Dispatch (one state machine from branch pushed to merged)
 
-**Status:** Draft
-**Lifecycle:** Draft
+**Status:** Ready for Review (v0.2, 2026-10-14: all 14 Open Questions resolved with the operator through the decision rubric; webhook-first event source with poll reconciler, executor owns to ready then the state machine, docs lane for no-task PRs, delivered/landed, landing/ records, land-prep runner, local only, rung: key, report-only budget)
+**Lifecycle:** Ready for Review
 **Author:** Dominique Legault (drafted by an agent session on the operator's 2026-10-13 mandate)
 **Created:** 2026-10-13
-**Updated:** 2026-10-13
+**Updated:** 2026-10-14
 **Target Spec Version:** v1alpha1
 
-> This RFC presents options and a recommendation. It does not resolve any Open Question. Every
+> This RFC presented options and a recommendation; the operator resolved every Open Question on 2026-10-14 (see each **Resolution** block). Every
 > question in the Open Questions section is routed through the decision rubric
 > (`decision-rubric`, Decision Catalog RFC-0035); the answers are the operator's.
 
@@ -1271,6 +1271,13 @@ rubric (class (a), (b) or (c) per the Decision authority rules).
     and be bypassed. **Selected over wrapping or replacing the developer** because both add
     strong-model calls around the cheap tier without evidence; **over a dwell cap** because dwell
     does not track cost; **over a budget now** because it needs logging that does not exist.
+
+## Revision History
+
+| Date | Version | Change |
+|---|---|---|
+| 2026-10-13 | v0.1 | Drafted on the operator's mandate; four options, recommendation, 14 Open Questions, none resolved. |
+| 2026-10-14 | v0.2 | OQ walkthrough with the operator, full rubric per question; lifecycle Draft to Ready for Review. OQ-1 webhook first with poll as the fallback reconciler (the hybrid with the fast path in Phase 1); OQ-2 executor owns the PR until ready, the state machine from ready to merged, takeover on death or timeout; OQ-3 count cap kept for PR-less failures, same-head loop guard for PR follow-ups (corrects the 828 reference to 847); OQ-4 and OQ-11 docs lane: no-task PRs owned by the machine from birth with a docs action set, `cli-file rebase` in place, `reenter` keyed on PR state for task PRs; OQ-5 `delivered` (ready and armed) and `landed` (merged), `done/` written only on landed; OQ-6 `landing/` board records for ownership and history, GitHub for facts; OQ-7 `land-prep` runner extracted, executor still flips; OQ-8 local only; OQ-9 shipped 823/826/847 are Phase 0, 816 and 829 amended in place; OQ-10 payload is a trigger, re-read via REST; OQ-12 rung 2 is the RFC-0049 judgment layer with provider by config; OQ-13 `rung:` frontmatter key checked by the model-pins gate; OQ-14 no dev trio, dev-round spend measured per PR, budget report-only in v1 with the per-PR budget as the Phase 3 target. Implementation tasks AISDLC-878 to 885 filed; AISDLC-816 and 829 amended. |
 
 ## References
 
