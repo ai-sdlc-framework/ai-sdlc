@@ -1,17 +1,20 @@
 ---
 id: AISDLC-816
 title: >-
-  Definition of done is a PR on main: executors and dispatch own the landing, fresh claims pause while open PRs are unlanded
+  Definition of done: delivered (ready and armed) frees the executor, landed (merged) writes done/; fresh claims pause while this executor has an undelivered PR (amended 2026-10-14 under RFC-0054)
 status: To Do
 assignee: []
 created_date: '2026-10-11'
 labels:
   - hierarchy
+  - rfc-0054
+  - phase-2
   - governance
   - rfc-0051
 dependencies: []
 references:
   - spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md
+  - spec/rfcs/RFC-0054-pr-lifecycle-event-driven-dispatch.md
   - ai-sdlc-plugin/commands/executor.md
   - ai-sdlc-plugin/commands/operator-dispatch.md
   - pipeline-cli/src/dispatch/
@@ -20,6 +23,8 @@ dispatchable: true
 ---
 
 ## Description
+
+**Amended in place 2026-10-14 under RFC-0054 OQ-2, OQ-5 and OQ-9 (id kept).** The two-word definition replaces the single "done = merged": `delivered` = PR ready and auto-merge armed, the executor's verdict outcome, frees its slot; `landed` = merged, the only event that writes `done/`, performed by the state machine (AISDLC-829), not by the executor. "Unlanded" below is to be read as "undelivered" and "dispatch tick flips" as "the executor flips through the guarded runner (AISDLC-881); the machine flips only when it takes over a dead executor's PR".
 
 Operator instruction 2026-10-11 (Dominique), recorded as DEC-0127: the open PR list reached 32 and kept growing while 80 PRs merged in 24 hours, because the pipeline hands back at "PR open" (Step 11) and nothing owns the landing. Definition of done becomes "PR on main".
 
@@ -34,10 +39,10 @@ Velocity impact: positive. The PR list stops growing; resume rounds for stale PR
 
 ## Acceptance Criteria
 
-- [ ] AC-1: An executor verdict `success` requires the PR to be non-draft, armed and with `ai-sdlc/pr-ready` green at hand-back; otherwise the verdict is `iterate-needed` naming the failing check. Enforced in the verdict writer, with tests.
-- [ ] AC-2: The board moves a task to `done/` only when its PR has merged (dispatch tick checks via REST); until then it is `landing/` (new state) and is the executor's to resume if it goes red.
-- [ ] AC-3: `cli-dispatch claim` refuses a fresh task while any `landing/` task is red or unarmed, unless the fresh task's manifest carries `fixesPr`. Error names the blocking PR(s).
-- [ ] AC-4: Dispatch tick flips clean drafts to ready and arms eligible PRs through `cli-merge-if-eligible --arm` (REST, no GraphQL).
+- [ ] AC-1: An executor verdict `delivered` requires the PR to be non-draft and auto-merge armed at hand-back; otherwise the verdict is `iterate-needed` naming the unmet condition. `success` at PR-open no longer exists as an outcome.
+- [ ] AC-2: The board writes `done/` only when the PR has merged (`landed`), performed by the state machine reconciler (AISDLC-829) from `landing/<pr>.json`; until then the task is `landing` and re-entry goes through `reenter` (AISDLC-882).
+- [ ] AC-3: `cli-dispatch claim` refuses a fresh task for an executor that has an undelivered PR (its own `landing/` record with owner `executor:<name>` and no `delivered` timestamp), unless the fresh task's manifest carries `fixesPr`. Error names the blocking PR. A delivered-but-unlanded PR does not block.
+- [ ] AC-4: Arming happens through `auto-enable-auto-merge.yml` on `ready_for_review`; the state machine arms through `cli-merge-if-eligible --arm` (REST) only when that was missed. The executor flips its own PR (AISDLC-881); the machine flips only on takeover.
 - [ ] AC-5: `cli-hierarchy status` shows per executor the PR it is landing and its state.
 - [ ] AC-6: `docs/operations/cli-hierarchy.md` and CLAUDE.md "Done semantics" state the new definition in one paragraph each.
 
