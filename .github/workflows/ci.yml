@@ -146,7 +146,6 @@ jobs:
         # Pinned to 0.1.3 — first version with the URL-fragment fix
         # (refs like `spec/rfc.md#section` no longer false-positive as
         # missing files). Pre-0.1.3 produced ~70% noise on our backlog.
-        # See docs/upstream-bug-reports/backlog-drift-url-fragment-false-positive.md
         #
         # Exit semantics:
         #  - 0 → no `error`-severity issues (info/warning OK, printed)
