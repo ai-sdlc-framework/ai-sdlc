@@ -46,6 +46,6 @@ Verified in `pipeline-cli/src/governance/merge-if-eligible.ts:148-172`: `resolve
 - [ ] #4 A test executes the CLI from a non-git directory against a fixture and passes.
 - [ ] #5 Behaviour in this repository's own hierarchy (dogfood layout) is unchanged.
 
-**Velocity impact.** Positive: today no adopter can use `cli-merge-if-eligible` at all, so AISDLC-894 through 896 would be dead code outside this repo. Unblocks the site repo's standing order (ai-sdlc-io DEC-0008).
+**Velocity impact.** Positive: today no adopter can use `cli-merge-if-eligible` at all, so the dispatch landing tasks would be dead code outside this repo. Unblocks the site repo's standing order (ai-sdlc-io DEC-0008).
 
 Authority: class (b) timeboxed via DEC-0222 (a trust-chain control is replaced); implementation proceeds only on the option recorded on `main`.
