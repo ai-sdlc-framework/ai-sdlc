@@ -202,7 +202,7 @@ never the checked-out PR.
    stderr for auditability.
 2. Runs the SAME verification core — `verify-core.mjs`, shipped inside
    `@ai-sdlc/pipeline-cli` at `attestation-core/verify-core.mjs` — that this
-   monorepo's own `.github/workflows/verify-attestation.yml` and the
+   monorepo's own `attestation-gate` job in `.github/workflows/ai-sdlc-gate.yml` and the
    plugin-installed driver both use. One implementation, three callers: the
    Merkle-transcript proof + trusted-key signature check for v6 envelopes,
    with fallback support for legacy v5/v4/v3 envelopes.
