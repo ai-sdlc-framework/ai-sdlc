@@ -534,6 +534,30 @@ export interface JourneyScopedResult {
    * for `single-journey` and `no-journey-routing` paths. Exposed for audit.
    */
   aggregationRule?: JourneyAggregationRule;
+  /**
+   * Advisory Decisions raised while resolving targeted journeys (AISDLC-469),
+   * e.g. `wcag-version-superseded`. Visible-gap signal only: never affects
+   * sa2, ck or er5Elevated.
+   */
+  advisories: WcagVersionSupersededDecision[];
+}
+
+/** Collect wcag-version-superseded advisories for the targeted journeys (deduped). */
+function collectWcagAdvisories(
+  refs: ParsedJourneyRef[],
+  ctx: JourneyContext | undefined,
+): WcagVersionSupersededDecision[] {
+  const out: WcagVersionSupersededDecision[] = [];
+  const seen = new Set<string>();
+  for (const ref of refs) {
+    const key = `${ref.soulId}/${ref.journeyId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const decl = ctx?.journeysBySoul[ref.soulId]?.find((j) => j.id === ref.journeyId);
+    const d = decl ? evaluateWcagVersion(decl.accessibility.wcagVersion) : null;
+    if (d) out.push(d);
+  }
+  return out;
 }
 
 /**
@@ -584,6 +608,7 @@ export function computeJourneyScopedScores(
       er5Elevated: fallbackEr5Elevated,
       routingPath: 'no-journey-routing',
       targetedJourneys: [],
+      advisories: [],
     };
   }
 
@@ -597,6 +622,7 @@ export function computeJourneyScopedScores(
       er5Elevated: scores?.er5Elevated ?? fallbackEr5Elevated,
       routingPath: 'single-journey',
       targetedJourneys,
+      advisories: collectWcagAdvisories(targetedJourneys, journeyCtx),
     };
   }
 
@@ -653,5 +679,6 @@ export function computeJourneyScopedScores(
     routingPath: 'multi-journey',
     targetedJourneys,
     aggregationRule: firstAggregationRule ?? 'min',
+    advisories: collectWcagAdvisories(targetedJourneys, journeyCtx),
   };
 }

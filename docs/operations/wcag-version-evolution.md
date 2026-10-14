@@ -21,3 +21,7 @@ Use `evaluateWcagVersion(version)` to obtain the Decision (or `null`).
 WCAG 3.0 is still a draft. `3.0` is accepted in the enum today and treated like 2.x for scoring.
 
 Scoring-model shift (pre-documented): WCAG 2.x conformance is binary (a criterion passes or fails; `conformanceTarget` is a percentage of passing criteria). WCAG 3.0 moves to graduated scoring (outcome ratings across levels). When 3.0 becomes normative, a future RFC may need a `scoringModel` discriminant (for example `binary` vs `graduated`) on `accessibility` so `conformanceTarget` is interpreted correctly. No schema change is made now; existing declarations remain valid.
+
+## Runtime wiring
+
+`computeJourneyScopedScores` (`orchestrator/src/journey-sa2-router.ts`) calls `evaluateWcagVersion` for every targeted journey and returns the results in `JourneyScopedResult.advisories`. Callers surface these as `wcag-version-superseded` Decisions; the field never feeds `sa2`, `ck` or `er5Elevated`.

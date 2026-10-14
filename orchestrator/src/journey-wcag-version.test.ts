@@ -58,10 +58,32 @@ describe('wcag-version-superseded Decision (AC #2)', () => {
 
 describe('no Eρ₅ impact (AC #3)', () => {
   it('scores are identical regardless of declared wcagVersion', () => {
-    const base = computeJourneyScopedScores('T-1', 0.5, 0.5, false, ctxFor('2.2'));
+    const strip = (r: ReturnType<typeof computeJourneyScopedScores>) => ({
+      sa2: r.sa2,
+      ck: r.ck,
+      er5Elevated: r.er5Elevated,
+    });
+    const base = strip(computeJourneyScopedScores('T-1', 0.5, 0.5, false, ctxFor('2.2')));
     for (const v of WCAG_VERSIONS) {
-      expect(computeJourneyScopedScores('T-1', 0.5, 0.5, false, ctxFor(v))).toEqual(base);
+      expect(strip(computeJourneyScopedScores('T-1', 0.5, 0.5, false, ctxFor(v)))).toEqual(base);
     }
+  });
+});
+
+describe('runtime wiring through computeJourneyScopedScores (AC #2)', () => {
+  it('surfaces the advisory for a targeted WCAG 2.0 journey', () => {
+    const r = computeJourneyScopedScores('T-1', 0.5, 0.5, false, ctxFor('2.0'));
+    expect(r.advisories).toHaveLength(1);
+    expect(r.advisories[0].kind).toBe('wcag-version-superseded');
+    expect(r.advisories[0].severity).toBe('low');
+  });
+  it('surfaces no advisory for non-superseded versions or untargeted items', () => {
+    expect(computeJourneyScopedScores('T-1', 0.5, 0.5, false, ctxFor('2.2')).advisories).toEqual(
+      [],
+    );
+    expect(computeJourneyScopedScores('T-9', 0.5, 0.5, false, ctxFor('2.0')).advisories).toEqual(
+      [],
+    );
   });
 });
 
