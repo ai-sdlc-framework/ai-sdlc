@@ -13,7 +13,7 @@ dispatchable: true
 
 ## Context
 
-Dependabot PR #1445 bumps js-yaml 4.3.2 to 5.4.3. It is untrusted and red on Build & Test, Coverage, First-run smoke and Integration Tests; no attestation envelope can exist for a bot PR. Operator decision 2026-10-14 (planner session): MAJOR bumps are redone as backlog tasks under the repo identity (see AISDLC-865 for the vitest twin and DEC-0212 for the minor/patch exemption).
+Dependabot PR #1445 bumps js-yaml 4.3.2 to 5.4.3. It is untrusted and red on Build & Test, Coverage, First-run smoke and Integration Tests; no attestation envelope can exist for a bot PR. Operator decision 2026-10-14 (planner session): MAJOR bumps are redone as backlog tasks under the repo identity (see AISDLC-865 for the vitest twin and DEC-0213 for the minor/patch exemption).
 
 js-yaml 5 is ESM-first, so a `require('js-yaml')` consumer or a default-import shape can break. Declared in root `package.json` and `pipeline-cli/package.json` (`@types/js-yaml` ^4.0.9 is a devDependency of pipeline-cli; check whether v5 ships its own types and drop the `@types` package if so).
 
