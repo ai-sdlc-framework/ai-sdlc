@@ -1,0 +1,128 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "1ec9ac37a5f861036d626c46ad715042031631cb"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "7c893e500b8ce1b82bdcd3a861b1e490602a1fbe7a69e132a8e6f165bea88d1f",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer-codex",
+      "transcriptHash": "675c5f345216abbe809df2a9497253e01e27fade249fe3c7e22bce108fec41d8",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "1c9a46357eb42d04b93116fe6300f305f050d7c4de04c1146725562bbce835d4",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "1c9a46357eb42d04b93116fe6300f305f050d7c4de04c1146725562bbce835d4",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 3,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "1373ee45cbeba6ec00f401242215f946b095bcb2398b2f624d388aecbcf900ff",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 4,
+      "reviewerName": "test-reviewer-codex",
+      "transcriptHash": "65887732d8325de170717d7e0961b3567441bca44bcf6503d5574ec2409b2aab",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 5,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "dd116bfcf4d2f6a3327930be20d09f2fcd64ffc34aec2b369ef7092006ae3c57",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "dd116bfcf4d2f6a3327930be20d09f2fcd64ffc34aec2b369ef7092006ae3c57",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "cdd2507bd1be82c15e02112010352f723165bb0c8ec33afaef9fa3434be3164a",
+        "ae3f81fc96094937f871204011175466c2f98dd23c82ff84dade0a944ad906b7",
+        "e1c4faf0960117f1e3ad41122df864113869ff7a390073ba456aa94ec7765ae2"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "ac3584a19b777cb3fb872437505ebe64aa26ce0861371527fa4a1cfdc235c6a3",
+        "ae3f81fc96094937f871204011175466c2f98dd23c82ff84dade0a944ad906b7",
+        "e1c4faf0960117f1e3ad41122df864113869ff7a390073ba456aa94ec7765ae2"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "a09aefee6e5079d35e20fbf45b5eb2967bf8cd550bb119ab1a1398ce94be3f2b",
+        "85c7cfab2f22fa68e57e5d20d027acd1fc6789797777e5aac1d9c3e9ee556117",
+        "e1c4faf0960117f1e3ad41122df864113869ff7a390073ba456aa94ec7765ae2"
+      ]
+    },
+    {
+      "leafIndex": 3,
+      "proof": [
+        "cae8c2763e5bc5a688a1996311962031aab4c297f424a07b903ae5c6a91df956",
+        "85c7cfab2f22fa68e57e5d20d027acd1fc6789797777e5aac1d9c3e9ee556117",
+        "e1c4faf0960117f1e3ad41122df864113869ff7a390073ba456aa94ec7765ae2"
+      ]
+    },
+    {
+      "leafIndex": 4,
+      "proof": [
+        "c35e98ff1aa364d252d9e6d0b2d2673d7d9981ba0bc98c8ddbdc6ff8f015e020",
+        "1fe830f31644a48aa993495064236db09871fb1180244947e8d00dbbc0bee4ec",
+        "ddef39d6e58b1fe28abb06a67774e7cf3f8f4db67014630180dc5c5e4ef8ec95"
+      ]
+    },
+    {
+      "leafIndex": 5,
+      "proof": [
+        "12dd0dbf5282beee7d0d7d98b53dc05c32a94c8ea7e2885f1ba110d5922fdf8f",
+        "1fe830f31644a48aa993495064236db09871fb1180244947e8d00dbbc0bee4ec",
+        "ddef39d6e58b1fe28abb06a67774e7cf3f8f4db67014630180dc5c5e4ef8ec95"
+      ]
+    }
+  ],
+  "rootHash": "003ea723c23094437e9fdbeb1b281ae0292e78ab6b9d39b2471b3b14e406c826",
+  "rootSignature": "wUarKYDovcif1FxMW6R8YDs6hCJCu2r8O9dFkZM6/hEdsp57GVDkbg3gfhUwYkx6UM6Sff77DN7oxLdw1tV7Bw==",
+  "nonce": "7f47a13b28af34715c8cfb562251badda3501509e4ca75c95b15797751f005f3",
+  "leafCount": 6,
+  "signedAt": "2026-10-14T02:26:33.062Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      ".github/workflows/__tests__/untrusted-pr-gate.test.mjs",
+      ".github/workflows/untrusted-pr-gate.yml"
+    ],
+    "appliedReviewers": [
+      "code-reviewer-codex",
+      "test-reviewer-codex",
+      "security-reviewer",
+      "code-reviewer-codex",
+      "test-reviewer-codex",
+      "security-reviewer"
+    ]
+  }
+}
