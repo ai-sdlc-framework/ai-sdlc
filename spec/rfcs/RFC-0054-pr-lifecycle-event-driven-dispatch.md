@@ -1072,6 +1072,29 @@ rubric (class (a), (b) or (c) per the Decision authority rules).
    - (a) No; Step 11 stays, the machine starts at "draft PR exists".
    - (b) Ready and arm move (the machine flips and arms); push stays with the executor.
    - (c) All of Step 11 and the pre-push re-sign path move to a deterministic runner the machine calls.
+   **Resolution (2026-10-14, full rubric): Step 11 stays with the executor through the ready
+   flip; the mechanical landing path is extracted into one deterministic runner that both Step 11
+   and the state machine call.** The runner (working name `land-prep <pr>`) does: rebase onto
+   `origin/main`, drop a stale envelope, lease push so the pre-push hook re-signs, and a guarded
+   flip to ready whose precondition (CodeQL clean, verdict approved by state, not by phrase) is
+   code in the runner whoever invokes it. Step 11 calls it before the first push when the base is
+   stale and at the end of the executor's round for the flip; the state machine calls it for
+   post-ready skew (red(skew), DIRTY, BEHIND) and when it takes over a dead executor's PR after
+   signing. Arming stays with `auto-enable-auto-merge.yml` on `ready_for_review`; the machine arms
+   through `cli-merge-if-eligible --arm` only when that was missed. Industry research: Bors, Tide
+   and Mergify push to an author's branch only to update it; the author marks ready; the bot owns
+   the mechanical updates and the merge. **Shipped substrate:** Step 11 is TypeScript in
+   `pipeline-cli` (push, `gh pr create --draft`, flip); re-sign on rebase lives in the pre-push
+   hook chain (`check-attestation-sign.sh`) and fires on any push from a worktree; the 2026-10-11
+   handoff shows the machine-side gap as a repeated hand path ("rebase + heartbeat + lease push,
+   hook re-signs; REST flip") because no CLI wraps it. **Counter-argument:** "the machine
+   flipping is safer because it checks CodeQL and the verdict by state rather than trusting the
+   executor's own round." Rebuttal: the check is code in the runner; the caller does not change
+   what is checked, and an executor flipping through the same guarded runner avoids a draft
+   window waiting on the next event. **Selected over moving ready and arm to the machine**
+   because that re-introduces an ownerless window between sign and flip, against OQ-2; **over
+   moving all of Step 11** because the push, and with it the hook chain, belongs to whoever holds
+   the worktree.
 8. **Local runner or CI-side runner for the state machine?**
    - (a) Local only (signing key, worktrees and plugin are local; remote agents are read-only by design).
    - (b) CI-side classification, local actions.
