@@ -987,6 +987,13 @@ describe('AISDLC-833: attestation-post.yml (workflow_run) posts the status and a
     );
   });
 
+  it('resolves the PR base sha via the API so fork PRs (empty pull_requests) still verify', () => {
+    const baseStep = job.steps.find((st) => st.id === 'base');
+    assert.match(String(baseStep.run), /commits\/\$\{HEAD_SHA\}\/pulls/);
+    const verify = job.steps.find((st) => st.id === 'verify');
+    assert.equal(verify.env.PR_BASE_SHA, '${{ steps.base.outputs.base_sha }}');
+  });
+
   it('does NOT take status or the approving review from the PR-controlled artifact', () => {
     assert.doesNotMatch(raw, /download-artifact/);
     assert.doesNotMatch(raw, /verdict\.json|attestation-verdict/);
