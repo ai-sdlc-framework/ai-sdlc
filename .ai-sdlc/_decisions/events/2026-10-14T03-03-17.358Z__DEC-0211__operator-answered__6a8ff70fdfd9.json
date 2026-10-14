@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-14T03:03:17.358Z","decisionId":"DEC-0211","chosenOptionId":"dispatch-restarts","rationale":"Class (a): reversible (restart again), blast radius one executor pane, no trust-chain control involved; the CLI's own refusal text designates dispatch.","by":"dominique@reliablegenius.io"}
