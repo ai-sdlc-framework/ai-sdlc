@@ -76,6 +76,19 @@ describe('cli-file', () => {
     return p;
   };
 
+  it('AISDLC-860: refuses an id already on origin/main in any case, tasks or completed', () => {
+    commitMain('backlog/completed/AISDLC-900 - old.md', '---\nid: AISDLC-900\n---\n');
+    const p = writeTask();
+    expect(() => fileTask(repo, p, { pr: true }, deps)).toThrow(/already exists on origin\/main/);
+    expect(ghCalls).toHaveLength(0);
+  });
+
+  it('AISDLC-860: refuses a filename differing only in case', () => {
+    commitMain('backlog/tasks/AISDLC-900 - THING.md', '---\nid: AISDLC-900\n---\n');
+    const p = writeTask('aisdlc-900 - thing.md');
+    expect(() => fileTask(repo, p, { pr: true }, deps)).toThrow(FileRefusal);
+  });
+
   it('files a task: branch fast-forward pushed and PR opened', () => {
     const p = writeTask();
     const r = fileTask(repo, p, { pr: true }, deps);

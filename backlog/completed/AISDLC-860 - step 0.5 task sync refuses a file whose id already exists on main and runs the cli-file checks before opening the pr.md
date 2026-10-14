@@ -2,7 +2,7 @@
 id: AISDLC-860
 title: >-
   Step 0.5 task sync refuses a file whose id already exists on main and runs the cli-file checks before opening the PR
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:

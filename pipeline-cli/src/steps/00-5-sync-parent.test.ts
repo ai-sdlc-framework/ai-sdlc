@@ -34,6 +34,7 @@ import {
   readOriginMainFile,
   readConfiguredTaskPrefix,
 } from './00-5-sync-parent.js';
+import type { FileDeps } from '../cli/file.js';
 import { FakeRunner, ok, fail as fakeRunnerFail } from '../__test-helpers/fake-runner.js';
 
 let workDir: string;
@@ -183,195 +184,6 @@ describe('Step 0.5 — syncParentUntrackedFiles', () => {
     expect(result.syncedFiles).toEqual([]);
     expect(result.skippedReason).toBeDefined();
     expect(result.skippedReason).toMatch(/already on origin\/main/);
-  });
-
-  it('(a) 3 untracked task files in parent → opens 1 sync PR with all 3', async () => {
-    // Create dummy task files in workDir so copyFileSync can read them
-    const taskFiles = [
-      'backlog/tasks/aisdlc-100 - task-a.md',
-      'backlog/tasks/aisdlc-101 - task-b.md',
-      'backlog/completed/aisdlc-102 - task-c.md',
-    ];
-    for (const f of taskFiles) {
-      writeFileSync(join(workDir, f), `# ${f}\ncontent`, 'utf8');
-    }
-
-    const untrackedOutput = taskFiles.join('\n') + '\n';
-
-    const fake = new FakeRunner()
-      // git ls-files returns 3 task files
-      .on(/^git ls-files/, ok(untrackedOutput))
-      // None are on origin/main
-      .on(/^git ls-tree origin\/main/, ok(''))
-      // rev-parse for short sha
-      .on(/^git rev-parse --short/, ok('abc12345\n'))
-      // git worktree add succeeds
-      .on(/^git worktree add/, ok())
-      // git add succeeds
-      .on(/^git add --/, ok())
-      // git commit succeeds
-      .on(/^git commit/, ok())
-      // git push succeeds
-      .on(/^git push -u origin chore\/sync-tasks/, ok())
-      // gh pr create returns a URL
-      .on(/^gh pr create/, ok('https://github.com/org/repo/pull/999\n'))
-      // git worktree remove for cleanup
-      .on(/^git worktree remove/, ok());
-
-    const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
-
-    expect(result.ok).toBe(true);
-    expect(result.syncedFiles).toHaveLength(3);
-    expect(result.syncedFiles).toEqual(expect.arrayContaining(taskFiles));
-    expect(result.prUrl).toBe('https://github.com/org/repo/pull/999');
-    expect(result.skippedReason).toBeUndefined();
-    expect(result.reason).toBeUndefined();
-  });
-
-  it('(a) only genuinely-new files are synced (already-on-origin files excluded)', async () => {
-    const taskFiles = [
-      'backlog/tasks/aisdlc-200 - new.md',
-      'backlog/tasks/aisdlc-201 - existing.md',
-    ];
-    for (const f of taskFiles) {
-      writeFileSync(join(workDir, f), `# ${f}\ncontent`, 'utf8');
-    }
-
-    const fake = new FakeRunner()
-      .on(/^git ls-files/, ok(taskFiles.join('\n') + '\n'))
-      // aisdlc-200 is NOT on origin
-      .on(/^git ls-tree origin\/main .+aisdlc-200/, ok(''))
-      // aisdlc-201 IS on origin
-      .on(/^git ls-tree origin\/main .+aisdlc-201/, ok('backlog/tasks/aisdlc-201 - existing.md\n'))
-      .on(/^git rev-parse --short/, ok('def67890\n'))
-      .on(/^git worktree add/, ok())
-      .on(/^git add --/, ok())
-      .on(/^git commit/, ok())
-      .on(/^git push/, ok())
-      .on(/^gh pr create/, ok('https://github.com/org/repo/pull/1000\n'))
-      .on(/^git worktree remove/, ok());
-
-    const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
-
-    expect(result.ok).toBe(true);
-    expect(result.syncedFiles).toHaveLength(1);
-    expect(result.syncedFiles[0]).toContain('aisdlc-200');
-    expect(result.prUrl).toBe('https://github.com/org/repo/pull/1000');
-  });
-
-  it('(f) git worktree add fails → ok: false with reason', async () => {
-    writeFileSync(join(workDir, 'backlog/tasks/aisdlc-300 - new.md'), '# content', 'utf8');
-    const fake = new FakeRunner()
-      .on(/^git ls-files/, ok('backlog/tasks/aisdlc-300 - new.md\n'))
-      .on(/^git ls-tree origin\/main/, ok(''))
-      .on(/^git rev-parse --short/, ok('aaa11111\n'))
-      .on(/^git worktree add/, fakeRunnerFail('branch already exists', 128))
-      .on(/^git worktree remove/, ok());
-
-    const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
-    expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/failed to create sync worktree/);
-    expect(result.syncedFiles).toEqual([]);
-  });
-
-  it('(g) git push fails → ok: false with reason, syncedFiles still contains new files', async () => {
-    writeFileSync(join(workDir, 'backlog/tasks/aisdlc-400 - new.md'), '# content', 'utf8');
-    const fake = new FakeRunner()
-      .on(/^git ls-files/, ok('backlog/tasks/aisdlc-400 - new.md\n'))
-      .on(/^git ls-tree origin\/main/, ok(''))
-      .on(/^git rev-parse --short/, ok('bbb22222\n'))
-      .on(/^git worktree add/, ok())
-      .on(/^git add --/, ok())
-      .on(/^git commit/, ok())
-      .on(/^git push/, fakeRunnerFail('rejected: non-fast-forward', 1))
-      .on(/^git worktree remove/, ok());
-
-    const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
-    expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/failed to push sync branch/);
-    expect(result.syncedFiles).toContain('backlog/tasks/aisdlc-400 - new.md');
-  });
-
-  it('(h) gh pr create fails → ok: false (but syncedFiles populated)', async () => {
-    writeFileSync(join(workDir, 'backlog/tasks/aisdlc-500 - new.md'), '# content', 'utf8');
-    const fake = new FakeRunner()
-      .on(/^git ls-files/, ok('backlog/tasks/aisdlc-500 - new.md\n'))
-      .on(/^git ls-tree origin\/main/, ok(''))
-      .on(/^git rev-parse --short/, ok('ccc33333\n'))
-      .on(/^git worktree add/, ok())
-      .on(/^git add --/, ok())
-      .on(/^git commit/, ok())
-      .on(/^git push/, ok())
-      .on(/^gh pr create/, fakeRunnerFail('rate limited', 1))
-      .on(/^git worktree remove/, ok());
-
-    const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
-    expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/gh pr create failed/);
-    expect(result.syncedFiles).toContain('backlog/tasks/aisdlc-500 - new.md');
-  });
-
-  it('uses correct branch naming pattern chore/sync-tasks-<sha>', async () => {
-    writeFileSync(join(workDir, 'backlog/tasks/aisdlc-600 - new.md'), '# content', 'utf8');
-
-    // Capture what worktree branch is created
-    const worktreeCalls: string[] = [];
-    const capturingFake = new FakeRunner()
-      .on(/^git ls-files/, ok('backlog/tasks/aisdlc-600 - new.md\n'))
-      .on(/^git ls-tree origin\/main/, ok(''))
-      .on(/^git rev-parse --short/, ok('deadbeef\n'))
-      .on(/^git worktree add/, (args) => {
-        worktreeCalls.push(...args);
-        return { stdout: '', stderr: '', code: 0 };
-      })
-      .on(/^git add/, ok())
-      .on(/^git commit/, ok())
-      .on(/^git push/, ok())
-      .on(/^gh pr create/, ok('https://github.com/org/repo/pull/1\n'))
-      .on(/^git worktree remove/, ok());
-
-    await syncParentUntrackedFiles({ workDir, runner: capturingFake.toRunner() });
-    // The branch passed to worktree add should contain our sha
-    expect(worktreeCalls.join(' ')).toContain('chore/sync-tasks-deadbeef');
-  });
-
-  it('reserves the sync worktree path WITHOUT pre-creating the directory (regression)', async () => {
-    // Regression: an earlier version called mkdtempSync but never removed the
-    // empty dir it created. `git worktree add` requires the destination to NOT
-    // exist (it creates the dir itself), so every live invocation failed with
-    // "destination path already exists". FakeRunner can't catch this because
-    // it never execs git — instead, capture the path argument inside the
-    // `worktree add` matcher and assert existsSync(path) === false at the
-    // exact moment git would run.
-    writeFileSync(join(workDir, 'backlog/tasks/aisdlc-700 - new.md'), '# content', 'utf8');
-
-    let capturedPath: string | undefined;
-    let pathExistedAtAddTime: boolean | undefined;
-    const fake = new FakeRunner()
-      .on(/^git ls-files/, ok('backlog/tasks/aisdlc-700 - new.md\n'))
-      .on(/^git ls-tree origin\/main/, ok(''))
-      .on(/^git rev-parse --short/, ok('eee44444\n'))
-      .on(/^git worktree add/, (args) => {
-        // worktree add args: ['worktree', 'add', <path>, '-b', <branch>, 'origin/main']
-        capturedPath = args[2];
-        pathExistedAtAddTime = existsSync(capturedPath);
-        // After git would have created it, simulate by mkdir so the subsequent
-        // copyFileSync calls have a real directory to write into.
-        mkdirSync(capturedPath, { recursive: true });
-        return { stdout: '', stderr: '', code: 0 };
-      })
-      .on(/^git add/, ok())
-      .on(/^git commit/, ok())
-      .on(/^git push/, ok())
-      .on(/^gh pr create/, ok('https://github.com/org/repo/pull/700\n'))
-      .on(/^git worktree remove/, ok());
-
-    const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
-
-    expect(result.ok).toBe(true);
-    expect(capturedPath).toBeDefined();
-    expect(capturedPath).toMatch(/ai-sdlc-sync-parent-/);
-    expect(pathExistedAtAddTime).toBe(false);
   });
 
   it('does NOT block on non-ok results from git ls-files (clean + non-backlog)', async () => {
@@ -580,34 +392,6 @@ describe('Step 0.5 — path-mismatch reconciliation (AISDLC-222)', () => {
     expect(mismatchLog).toBeDefined();
     expect(mismatchLog).toContain('backlog/completed/aisdlc-11 - in-progress.md');
     expect(mismatchLog).toContain('backlog/tasks/aisdlc-11 - in-progress.md');
-  });
-
-  it('genuinely new file (not on origin anywhere) is NOT treated as path-mismatch', async () => {
-    writeFileSync(
-      join(workDir, 'backlog/tasks/aisdlc-999 - brand-new.md'),
-      '# aisdlc-999\ncontent',
-      'utf8',
-    );
-
-    const fake = new FakeRunner()
-      .on(/^git ls-files/, ok('backlog/tasks/aisdlc-999 - brand-new.md\n'))
-      // Neither exact nor alternate path found on origin
-      .on(/^git ls-tree origin\/main/, ok(''))
-      .on(/^git rev-parse --short/, ok('abc12345\n'))
-      .on(/^git worktree add/, ok())
-      .on(/^git add --/, ok())
-      .on(/^git commit/, ok())
-      .on(/^git push/, ok())
-      .on(/^gh pr create/, ok('https://github.com/org/repo/pull/1001\n'))
-      .on(/^git worktree remove/, ok());
-
-    const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
-
-    expect(result.ok).toBe(true);
-    expect(result.syncedFiles).toHaveLength(1);
-    expect(result.syncedFiles[0]).toContain('aisdlc-999');
-    expect(result.pathMismatchedFiles).toBeUndefined();
-    expect(result.prUrl).toBe('https://github.com/org/repo/pull/1001');
   });
 
   it('(k) AI_SDLC_STEP_0_5_AUTO_RECONCILE=1: deletes stale local copy when set', async () => {
@@ -1044,53 +828,6 @@ describe('readConfiguredTaskPrefix', () => {
 });
 
 describe('Step 0.5 sync — non-aisdlc-prefix repo (AC-1, AC-4)', () => {
-  it('syncs untracked LT-N task files when backlog/config.yml sets task_prefix: LT', async () => {
-    writeFileSync(
-      join(workDir, 'backlog/config.yml'),
-      "project_name: 'local-trades'\ntask_prefix: 'LT'\n",
-      'utf8',
-    );
-    writeFileSync(join(workDir, 'backlog/tasks/LT-42 - some-feature.md'), '# LT-42\n', 'utf8');
-
-    const fake = new FakeRunner()
-      .on(/^git ls-files/, ok('backlog/tasks/LT-42 - some-feature.md\n'))
-      .on(/^git ls-tree origin\/main .+LT-42/, ok(''))
-      .on(/^git rev-parse --short=8 HEAD/, ok('deadbee0'))
-      .on(/^git worktree add/, ok(''))
-      .on(/^git add/, ok(''))
-      .on(/^git commit/, ok(''))
-      .on(/^git push/, ok(''))
-      .on(/^gh pr create/, ok('https://github.com/acme/local-trades/pull/1'))
-      .on(/^git worktree remove/, ok(''));
-
-    const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
-
-    expect(result.ok).toBe(true);
-    expect(result.syncedFiles).toEqual(['backlog/tasks/LT-42 - some-feature.md']);
-    expect(result.prUrl).toBe('https://github.com/acme/local-trades/pull/1');
-  });
-
-  it('syncs untracked LT-N task files with NO config.yml present (prefix-agnostic fallback)', async () => {
-    // No backlog/config.yml at all — falls back to the generic <prefix>-<digits> shape.
-    writeFileSync(join(workDir, 'backlog/tasks/LT-7 - fallback.md'), '# LT-7\n', 'utf8');
-
-    const fake = new FakeRunner()
-      .on(/^git ls-files/, ok('backlog/tasks/LT-7 - fallback.md\n'))
-      .on(/^git ls-tree origin\/main .+LT-7/, ok(''))
-      .on(/^git rev-parse --short=8 HEAD/, ok('deadbee1'))
-      .on(/^git worktree add/, ok(''))
-      .on(/^git add/, ok(''))
-      .on(/^git commit/, ok(''))
-      .on(/^git push/, ok(''))
-      .on(/^gh pr create/, ok('https://github.com/acme/local-trades/pull/2'))
-      .on(/^git worktree remove/, ok(''));
-
-    const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
-
-    expect(result.ok).toBe(true);
-    expect(result.syncedFiles).toEqual(['backlog/tasks/LT-7 - fallback.md']);
-  });
-
   it('recognizes the repo-configured LT-N files as backlog files (no false "refuse")', async () => {
     // Regression guard: a repo with task_prefix LT should not treat its OWN
     // LT-N files as "other" debris.
@@ -1158,85 +895,120 @@ describe('pruneStaleParentDebris — non-aisdlc-prefix repo (AC-1)', () => {
   });
 });
 
-describe('AISDLC-858 idempotent resume', () => {
-  const file = 'backlog/tasks/aisdlc-900 - resume.md';
-  const setup = (prs: string, branch: string, remote: string) => {
-    writeFileSync(join(workDir, file), '# resume', 'utf8');
-    return new FakeRunner()
+describe('AISDLC-860 step 0.5 files through the cli-file path', () => {
+  const file = 'backlog/tasks/aisdlc-900 - thing.md';
+  const FILE_PR = 'https://github.com/org/repo/pull/9';
+
+  function setup(files: string[], onMain: string) {
+    for (const f of files) writeFileSync(join(workDir, f), '---\nid: x\n---\n', 'utf8');
+    const execCalls: Array<[string, string[]]> = [];
+    const fileDeps: FileDeps = {
+      exec(cmd, args) {
+        execCalls.push([cmd, args]);
+        if (cmd === 'git' && args[0] === 'ls-tree')
+          return { status: 0, stdout: onMain, stderr: '' };
+        if (cmd === 'gh') return { status: 0, stdout: FILE_PR + '\n', stderr: '' };
+        return { status: 0, stdout: '', stderr: '' };
+      },
+      drift: () => null,
+      dor: () => null,
+    };
+    const fake = new FakeRunner()
+      .on(/^git ls-files/, ok(files.join('\n') + '\n'))
+      .on(/^git ls-tree origin\/main/, ok(''))
+      .on(/^gh pr list/, ok('[]'));
+    return { fake, fileDeps, execCalls };
+  }
+  const created = (calls: Array<[string, string[]]>) =>
+    calls.some(([c, a]) => (c === 'git' && a[0] === 'worktree') || (c === 'gh' && a[0] === 'pr'));
+
+  it('refuses a file whose id exists on origin/main in any case (tasks or completed)', async () => {
+    const { fake, fileDeps, execCalls } = setup(
+      [file],
+      'backlog/completed/AISDLC-900 - old thing.md\n',
+    );
+    const r = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner(), fileDeps });
+    expect(r.ok).toBe(false);
+    expect(r.verdict).toBe('blocked');
+    expect(r.refused?.[0].file).toBe(file);
+    expect(r.reason).toContain('AISDLC-900 - old thing.md');
+    expect(created(execCalls)).toBe(false);
+  });
+
+  it('refuses a file whose name differs only in case from a file on main', async () => {
+    const { fake, fileDeps, execCalls } = setup([file], 'backlog/tasks/AISDLC-900 - THING.md\n');
+    const r = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner(), fileDeps });
+    expect(r.verdict).toBe('blocked');
+    expect(r.reason).toContain('case-insensitive');
+    expect(created(execCalls)).toBe(false);
+  });
+
+  it('refuses everything when one of several files is refused', async () => {
+    const other = 'backlog/tasks/aisdlc-901 - clean.md';
+    const { fake, fileDeps, execCalls } = setup([file, other], 'backlog/tasks/aisdlc-900 - a.md\n');
+    const r = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner(), fileDeps });
+    expect(r.refused).toHaveLength(1);
+    expect(created(execCalls)).toBe(false);
+  });
+
+  it('files a clean new file via cli-file with drift and DoR checked', async () => {
+    const { fake, fileDeps, execCalls } = setup([file], '');
+    const drift = vi.fn(() => null);
+    const dor = vi.fn(() => null);
+    const r = await syncParentUntrackedFiles({
+      workDir,
+      runner: fake.toRunner(),
+      fileDeps: { ...fileDeps, drift, dor },
+    });
+    expect(r.ok).toBe(true);
+    expect(r.prUrl).toBe(FILE_PR);
+    expect(drift).toHaveBeenCalledTimes(1);
+    expect(dor).toHaveBeenCalledTimes(1);
+    expect(execCalls.some(([c, a]) => c === 'git' && a.includes('ai-sdlc/file-aisdlc-900'))).toBe(
+      true,
+    );
+    expect(execCalls.some(([, a]) => a.some((x) => x.startsWith('chore/sync-tasks')))).toBe(false);
+  });
+
+  it('refuses when DoR or drift fails', async () => {
+    const { fake, fileDeps } = setup([file], '');
+    const r = await syncParentUntrackedFiles({
+      workDir,
+      runner: fake.toRunner(),
+      fileDeps: { ...fileDeps, dor: () => 'DoR: no' },
+    });
+    expect(r.verdict).toBe('blocked');
+    expect(r.reason).toContain('DoR: no');
+  });
+
+  it('reuses an open filing PR on resume', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { fileDeps, execCalls } = setup([file], '');
+    const fake = new FakeRunner()
       .on(/^git ls-files/, ok(file + '\n'))
       .on(/^git ls-tree origin\/main/, ok(''))
-      .on(/^git rev-parse --short/, ok('abc12345\n'))
-      .on(/^gh pr list/, ok(prs))
-      .on(/^git branch --list/, ok(branch))
-      .on(/^git ls-remote/, ok(remote))
-      .on(/^gh pr create/, ok('https://github.com/org/repo/pull/7\n'));
-  };
-  const noWorktree = (f: FakeRunner) => f.calls.some((c) => c.args[0] === 'worktree');
-
-  it('continues with an open PR and logs its number', async () => {
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const fake = setup(
-      JSON.stringify([{ number: 42, state: 'OPEN', url: 'https://github.com/org/repo/pull/42' }]),
-      'x',
-      'y',
-    );
-    const r = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
-    expect(r.ok).toBe(true);
-    expect(r.prUrl).toBe('https://github.com/org/repo/pull/42');
-    expect(log).toHaveBeenCalledWith(expect.stringContaining('#42'));
-    expect(noWorktree(fake)).toBe(false);
+      .on(/^gh pr list/, ok(JSON.stringify([{ number: 42, url: 'https://x/pull/42' }])));
+    const r = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner(), fileDeps });
+    expect(r.prUrl).toBe('https://x/pull/42');
+    expect(created(execCalls)).toBe(false);
     log.mockRestore();
   });
 
-  it('pushes a local-only branch and opens the PR', async () => {
-    const fake = setup('[]', '  chore/sync-tasks-x\n', '');
-    const r = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
-    expect(r.ok).toBe(true);
-    expect(r.prUrl).toBe('https://github.com/org/repo/pull/7');
-    expect(fake.calls.some((c) => c.command === 'git' && c.args[0] === 'push')).toBe(true);
-    expect(noWorktree(fake)).toBe(false);
-  });
-
-  it('blocks on a closed-unmerged PR without creating a branch', async () => {
-    const fake = setup(
-      JSON.stringify([{ number: 43, state: 'CLOSED', url: 'https://github.com/org/repo/pull/43' }]),
-      '',
-      '',
-    );
-    const r = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
+  it('reports a filing failure after validation', async () => {
+    const { fake, fileDeps } = setup([file], '');
+    const r = await syncParentUntrackedFiles({
+      workDir,
+      runner: fake.toRunner(),
+      fileDeps: {
+        ...fileDeps,
+        exec: (cmd, args, cwd) =>
+          cmd === 'git' && args[0] === 'worktree'
+            ? { status: 1, stdout: '', stderr: 'boom' }
+            : fileDeps.exec(cmd, args, cwd),
+      },
+    });
     expect(r.ok).toBe(false);
-    expect(r.reason).toContain('#43');
-    expect(noWorktree(fake)).toBe(false);
-  });
-
-  it('reports a merged PR as already synced', async () => {
-    const fake = setup(JSON.stringify([{ number: 44, state: 'MERGED', url: 'u' }]), '', '');
-    const r = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
-    expect(r.ok).toBe(true);
-    expect(r.skippedReason).toContain('#44');
-  });
-
-  it('handles remote-only branch, bad JSON, push and create failures', async () => {
-    const remoteOnly = setup('not json', '', 'sha\trefs/heads/x');
-    const r = await syncParentUntrackedFiles({ workDir, runner: remoteOnly.toRunner() });
-    expect(r.prUrl).toBe('https://github.com/org/repo/pull/7');
-
-    const pushFail = new FakeRunner()
-      .on(/^git push/, fakeRunnerFail('denied'))
-      .on(/^git ls-files/, ok(file + '\n'))
-      .on(/^git ls-tree origin\/main/, ok(''))
-      .on(/^git branch --list/, ok('x'));
-    const f1 = await syncParentUntrackedFiles({ workDir, runner: pushFail.toRunner() });
-    expect(f1.ok).toBe(false);
-    expect(f1.reason).toContain('push');
-
-    const createFail = new FakeRunner()
-      .on(/^gh pr create/, fakeRunnerFail('nope'))
-      .on(/^git ls-files/, ok(file + '\n'))
-      .on(/^git ls-tree origin\/main/, ok(''))
-      .on(/^git ls-remote/, ok('sha\tref'));
-    const f2 = await syncParentUntrackedFiles({ workDir, runner: createFail.toRunner() });
-    expect(f2.ok).toBe(false);
-    expect(f2.reason).toContain('gh pr create');
+    expect(r.verdict).toBeUndefined();
+    expect(r.reason).toContain('filing');
   });
 });

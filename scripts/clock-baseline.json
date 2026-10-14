@@ -175,7 +175,6 @@
     "pipeline-cli/src/runtime/spawners/copilot-harness.ts": 3,
     "pipeline-cli/src/runtime/spawners/dispatch-result.ts": 1,
     "pipeline-cli/src/runtime/worktree-mutex.ts": 2,
-    "pipeline-cli/src/steps/00-5-sync-parent.ts": 1,
     "pipeline-cli/src/steps/03-setup-worktree.ts": 2,
     "pipeline-cli/src/steps/06-parse-dev-return.ts": 2,
     "pipeline-cli/src/steps/11-push-and-pr.ts": 1,
