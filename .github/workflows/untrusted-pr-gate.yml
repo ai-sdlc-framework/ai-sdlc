@@ -71,6 +71,12 @@ on:
 permissions:
   contents: read
 
+# AISDLC-845: one run per PR. A newer push cancels the in-flight run for the old
+# head instead of letting it race the new head and post a spurious failure.
+concurrency:
+  group: untrusted-pr-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 env:
   # Feature flag — default off per RFC-0043 §Migration Path.
   # Set AI_SDLC_UNTRUSTED_PR_GATE=1 (or true/yes/on) to engage UCVG.
@@ -986,6 +992,7 @@ jobs:
           persist-credentials: false
 
       - name: List changed files at head.sha from the compare API
+        id: list
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -1001,9 +1008,13 @@ jobs:
           LIVE_HEAD=${LIVE%%$'\t'*}
           LIVE_COUNT=${LIVE##*$'\t'}
           if [ "$LIVE_HEAD" != "$HEAD_SHA" ]; then
-            echo "::error::PR head moved from ${HEAD_SHA} to ${LIVE_HEAD} while checking; a newer run will re-evaluate."
-            exit 1
+            # A moved head is not a violation: the newer run re-evaluates. Exit 0 and
+            # post no status on the stale sha (the later steps skip on stale=true).
+            echo "::notice::PR head moved from ${HEAD_SHA} to ${LIVE_HEAD} while checking; a newer run will re-evaluate."
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "stale=false" >> "$GITHUB_OUTPUT"
           echo "$LIVE_COUNT" > "${RUNNER_TEMP}/changed-count.txt"
           # One row per line: filename[TAB previous_filename]. A failed API call fails the step.
           gh api --paginate "repos/${REPO}/compare/${BASE_SHA}...${HEAD_SHA}" \
@@ -1011,6 +1022,7 @@ jobs:
 
       - name: Enforce governance boundary
         id: enforce
+        if: steps.list.outputs.stale != 'true'
         env:
           PR_IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name }}
         run: |
@@ -1018,7 +1030,7 @@ jobs:
             node scripts/check-governance-boundary.mjs --files "${RUNNER_TEMP}/changed-files.txt"
 
       - name: Publish unique commit-status context
-        if: always()
+        if: always() && steps.list.outputs.stale != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}

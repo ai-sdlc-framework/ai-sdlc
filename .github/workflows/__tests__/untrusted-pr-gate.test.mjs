@@ -1127,3 +1127,39 @@ describe('AISDLC-592 — gate-failure-watchdog distinguishes infra crash from ga
     );
   });
 });
+
+// ── AISDLC-845: per-PR concurrency + head-moved race guard is not a failure ──
+
+describe('AISDLC-845 — concurrency group cancels a superseded run', () => {
+  it('has a per-PR concurrency group with cancel-in-progress: true', () => {
+    assert.match(String(wf.concurrency?.group ?? ''), /github\.event\.pull_request\.number/);
+    assert.equal(wf.concurrency?.['cancel-in-progress'], true);
+  });
+});
+
+describe('AISDLC-845 — head-moved race guard exits 0 and posts no failure status', () => {
+  const job = () => wf.jobs['governance-boundary'];
+  const listStep = () => job().steps.find((s) => s.id === 'list');
+
+  it('the moved-head branch exits 0 and flags stale instead of failing', () => {
+    const run = String(listStep().run);
+    const branch = run.slice(run.indexOf('if [ "$LIVE_HEAD"'), run.indexOf('echo "stale=false"'));
+    assert.match(branch, /stale=true/);
+    assert.match(branch, /exit 0/);
+    assert.doesNotMatch(branch, /exit 1|::error::/);
+  });
+
+  it('enforce and status-publish steps are skipped when stale', () => {
+    const enforce = job().steps.find((s) => s.id === 'enforce');
+    const publish = job().steps.find((s) => /Publish unique commit-status/.test(s.name));
+    assert.match(String(enforce.if), /steps\.list\.outputs\.stale != 'true'/);
+    assert.match(String(publish.if), /steps\.list\.outputs\.stale != 'true'/);
+  });
+
+  it('a genuine violation on the current head still publishes failure', () => {
+    const publish = job().steps.find((s) => /Publish unique commit-status/.test(s.name));
+    assert.match(String(publish.if), /always\(\)/);
+    assert.match(String(publish.run), /STATE=failure/);
+    assert.match(String(publish.run), /OUTCOME" = "success"/);
+  });
+});
