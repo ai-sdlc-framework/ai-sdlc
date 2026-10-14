@@ -1150,6 +1150,25 @@ rubric (class (a), (b) or (c) per the Decision authority rules).
     - (a) Nothing in the payload; an event is a trigger to re-read through authenticated REST.
     - (b) The payload for non-mutating state only; mutating actions re-read.
     - (c) Full payload (not recommended; listed for completeness).
+    **Resolution (2026-10-14, full rubric): the payload is a trigger, never a fact.** The
+    receiver validates `X-Hub-Signature-256` with the configured secret, writes the event record
+    with only `(repo, pr, headSha, event kind, delivery id)` for idempotency and audit, and the
+    machine then re-reads the PR, its check runs and merge state over authenticated REST and
+    classifies from that read alone. A forged or replayed delivery with a valid signature can
+    cause at most one extra read; it can never cause a rebase, flip or arm. Bursts (check-run
+    events arrive several per head) are debounced by `(pr, headSha)` before the read. Industry
+    research: GitHub's guidance is to validate the signature, expect redelivery and never assume
+    order; Argo CD and Flux treat a webhook as "refresh now" and re-read the source; Prow reads
+    payload fields on a trusted cluster endpoint but re-fetches before mutating. **Shipped
+    substrate:** `reference/src/adapters/webhook-server.ts` already validates HMAC and dispatches
+    by event name, and `orchestrator/src/webhook-manager.ts` wires a secret provider; no consumer
+    reads payload fields today. **Counter-argument:** "a read per event burns the rate limit
+    that broke dispatch on 2026-10-11." Rebuttal: those failures were GraphQL, which is why
+    dispatch moved to REST; REST allows 5,000 requests per hour, a PR emits on the order of ten
+    events from push to merge, and debounce removes most of those. **Selected over payload for
+    display only** because it adds a second classifier input path that must be proven equal to
+    the REST path for no action gained; **over trusting the payload** because an inbound endpoint
+    must not be able to cause a mutation.
 11. **Planner filing PRs and other no-task PRs (release, decision-sync).**
     - (a) Out of scope: reported to the planner, not owned.
     - (b) Owned by the same machine with a no-task action set (arm only).
