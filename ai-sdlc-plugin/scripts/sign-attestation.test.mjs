@@ -27,28 +27,21 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const helperPath = join(__dirname, 'sign-attestation.mjs');
 const repoRoot = join(__dirname, '..', '..');
 
+function requireDist(pkg, file) {
+  const p = join(repoRoot, pkg, 'dist', file);
+  if (!existsSync(p)) {
+    throw new Error(
+      `precondition: ${pkg}/dist is not built (missing ${pkg}/dist/${file}); ` +
+        `run \`pnpm --filter @ai-sdlc/${pkg} build\` first. Tests never build it (AISDLC-862).`,
+    );
+  }
+}
+
 before(() => {
-  // The helper imports the orchestrator's compiled barrel — make sure
-  // it's built so the dynamic import resolves.
-  try {
-    execFileSync('pnpm', ['--filter', '@ai-sdlc/orchestrator', 'build'], {
-      cwd: repoRoot,
-      stdio: 'pipe',
-    });
-  } catch (err) {
-    throw new Error(`failed to build orchestrator: ${err.stderr?.toString() ?? err.message}`);
-  }
-  // AISDLC-610: the helper also resolves pipeline-cli's compiled patch-id
-  // module (best-effort — see `tryLoadPipelineCliPatchId`) — make sure it's
-  // built so the `setupRepo` stub (which re-exports from the real dist) resolves.
-  try {
-    execFileSync('pnpm', ['--filter', '@ai-sdlc/pipeline-cli', 'build'], {
-      cwd: repoRoot,
-      stdio: 'pipe',
-    });
-  } catch (err) {
-    throw new Error(`failed to build pipeline-cli: ${err.stderr?.toString() ?? err.message}`);
-  }
+  // AISDLC-862: reuse the built dist; never build inside a test (a concurrent
+  // `pnpm build` races the tsc output dir).
+  requireDist('orchestrator', 'runtime/attestations.js');
+  requireDist('pipeline-cli', 'attestation/patch-id.js');
 });
 
 // Mirrors .prettierrc (printWidth 100); the fixture repos live outside the checkout.

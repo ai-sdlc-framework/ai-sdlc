@@ -2,7 +2,7 @@
 id: AISDLC-862
 title: >-
   attestation gate tests reuse the built dist instead of building orchestrator and pipeline-cli inside each test
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:
