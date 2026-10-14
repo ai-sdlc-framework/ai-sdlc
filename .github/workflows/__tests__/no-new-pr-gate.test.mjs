@@ -32,7 +32,6 @@ const WORKFLOWS_DIR = resolve(__dirname, '..');
 const PR_TRIGGER_ALLOWLIST = new Map([
   ['ai-sdlc-gate.yml', 'produces the ai-sdlc/pr-ready required rollup check'],
   ['ai-sdlc-review.yml', 'CI-side review of untrusted contributor PRs only (AISDLC-824)'],
-  ['dor-ingress.yml', 'Definition-of-Ready evaluation of PR-staged backlog tasks'],
   ['verify-attestation.yml', 'verifies the DSSE attestation envelope on code PRs'],
   ['require-issue-link.yml', 'enforces the issue-first workflow (Closes #N)'],
   ['rfc-lifecycle-check.yml', 'validates RFC lifecycle transitions on PRs'],

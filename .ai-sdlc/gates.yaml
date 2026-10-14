@@ -113,12 +113,6 @@ gates:
     owner: engineering
     property: arms auto-merge (squash) on same-repo PRs; not a quality gate
     baseline: true
-  - id: workflow:dor-ingress.yml
-    surface: pr-workflow
-    origin: RFC-0011 section 5.2, AISDLC-161, AISDLC-379
-    owner: engineering
-    property: fails Evaluate backlog tasks changed by PR on unresolved Definition-of-Ready violations
-    baseline: true
   - id: workflow:require-issue-link.yml
     surface: pr-workflow
     origin: AISDLC-443, AISDLC-700

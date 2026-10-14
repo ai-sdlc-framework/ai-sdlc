@@ -18,7 +18,7 @@ Reference material moved out of `CLAUDE.md` by AISDLC-651.2 to keep the per-turn
 
 `set -euo pipefail` aborts on first failure. `git push --no-verify` bypasses everything. All gates have hermetic tests at `scripts/<name>.test.mjs` wired via `test:task-move-gate` / `test:attestation-sign-gate` / `test:pre-push-fixups-gate`. (`test:mcp-bundle-sync-gate` removed by AISDLC-385.)
 
-The Definition-of-Ready check and the backlog-drift check are no longer local hooks (AISDLC-712, DEC-0056 row 3): they run in CI ("Evaluate backlog tasks changed by PR", "Backlog Drift"). Agents may still run `node pipeline-cli/bin/cli-dor-check.mjs --task <path>` and `npx backlog-drift check` by hand.
+The Definition-of-Ready check and the backlog-drift check are no longer local hooks (AISDLC-712, DEC-0056 row 3): they run in CI (the `dor-readiness-gate` job, "Backlog Drift"). Agents may still run `node pipeline-cli/bin/cli-dor-check.mjs --task <path>` and `npx backlog-drift check` by hand.
 
 ## CI behavior
 

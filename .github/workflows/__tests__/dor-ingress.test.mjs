@@ -1,5 +1,6 @@
 /**
- * Tests for `.github/workflows/dor-ingress.yml` — AISDLC-379.
+ * Tests for the DoR PR evaluation — AISDLC-379, folded into the
+ * `dor-readiness-gate` job of `ai-sdlc-gate.yml` by AISDLC-834.
  *
  * The workflow used to post a `<!-- ai-sdlc:dor-comment -->` comment when
  * DoR violations were detected on PR-staged backlog tasks but exit 0
@@ -34,7 +35,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const WORKFLOW_PATH = resolve(__dirname, '..', 'dor-ingress.yml');
+const WORKFLOW_PATH = resolve(__dirname, '..', 'ai-sdlc-gate.yml');
+const INGRESS_PATH = resolve(__dirname, '..', 'dor-ingress.yml');
 
 function loadYaml(path) {
   const json = execFileSync(
@@ -47,16 +49,34 @@ function loadYaml(path) {
 
 let workflow;
 let prJob;
+let ingress;
 
 before(() => {
   workflow = loadYaml(WORKFLOW_PATH);
-  prJob = workflow.jobs['evaluate-pr-tasks'];
+  prJob = workflow.jobs['dor-readiness-gate'];
+  ingress = loadYaml(INGRESS_PATH);
 });
 
-describe('dor-ingress.yml — workflow structure (AISDLC-379)', () => {
-  it('parses as valid YAML and declares the evaluate-pr-tasks job', () => {
+describe('dor-ingress.yml — issue-only after AISDLC-834', () => {
+  it('has no pull_request trigger and no evaluate-pr-tasks job; evaluate-issue remains', () => {
+    const on = ingress.on ?? ingress[true];
+    assert.equal(on.pull_request, undefined, 'pull_request trigger must be gone');
+    assert.ok(on.issues, 'issues trigger stays');
+    assert.equal(ingress.jobs['evaluate-pr-tasks'], undefined);
+    assert.ok(ingress.jobs['evaluate-issue']);
+  });
+
+  it('dor-readiness-gate posts the PR comment (pull-requests: write) from one evaluation', () => {
+    assert.equal(prJob.permissions?.['pull-requests'], 'write');
+    const evals = prJob.steps.filter((s) => /dor-evaluate/.test(s.run ?? ''));
+    assert.equal(evals.length, 1, 'exactly one evaluation step per PR');
+  });
+});
+
+describe('dor-readiness-gate — workflow structure (AISDLC-379)', () => {
+  it('parses as valid YAML and declares the dor-readiness-gate job', () => {
     assert.ok(workflow, 'workflow must parse');
-    assert.ok(prJob, 'evaluate-pr-tasks job must exist');
+    assert.ok(prJob, 'dor-readiness-gate job must exist');
   });
 
   it('AC #2: the evaluate step carries id `dor_eval` so the gate steps can reference it', () => {
