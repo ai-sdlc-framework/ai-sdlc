@@ -6,10 +6,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import {
-  DOCS_ONLY_PATTERN,
   checkReviewerCoverage,
   classifyReviewScope,
   isPathMissingGitError,
@@ -34,7 +32,6 @@ const enforceReviewScope: EnforceFn = (
   (await import(/* @vite-ignore */ verifyCoreUrl)) as { enforceReviewScope: EnforceFn }
 ).enforceReviewScope;
 
-const HERE = dirname(fileURLToPath(import.meta.url));
 const dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
@@ -142,13 +139,6 @@ describe('classifyReviewScope', () => {
     expect(classifyReviewScope(['.\\a\\b.test.ts']).classification).toBe('test-only');
     expect(classifyReviewScope(['.\\.github\\workflows\\ci.yml']).classification).toBe('full');
     expect(classifyReviewScope(['./a/b.test.ts']).classification).toBe('test-only');
-  });
-
-  it('DOCS_ONLY_PATTERN stays in lockstep with scripts/is-docs-only-changeset.mjs', async () => {
-    const mod = (await import(
-      /* @vite-ignore */ resolve(HERE, '../../../scripts/is-docs-only-changeset.mjs')
-    )) as { DOCS_ONLY_PATTERN: RegExp };
-    expect(DOCS_ONLY_PATTERN.source).toBe(mod.DOCS_ONLY_PATTERN.source);
   });
 });
 

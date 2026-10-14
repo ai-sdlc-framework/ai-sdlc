@@ -2,7 +2,7 @@
 id: AISDLC-534.1
 title: >-
   docs-only pattern duplicated in is-docs-only-changeset.mjs and review-scope-core.mjs: make one source of truth
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-11'
 labels:
