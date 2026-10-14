@@ -40,9 +40,12 @@ Today (AISDLC-823) the classifier is code (`pr-state.ts`, `cli-dispatch classify
 4. **Ownership**: `landing/<pr>.json.owner` is `executor:<name>` until `delivered`, then `machine`; docs PRs are `machine` from creation. `cli-dispatch peek` and the brief-progress loop read `done/` only (OQ-5).
 5. **Docs**: `docs/operations/cli-hierarchy.md` documents the reconciler, the scheduler, the record and the table; `operator-dispatch.md` Step 2b is deleted and replaced by one line that runs the reconciler.
 
+**Configuration (operator ruling 2026-10-14).** Every repository convention this task uses (docs-only paths, no-task branch prefixes, timers, ports, thresholds) is read from `.ai-sdlc/pr-lifecycle.yaml` (RFC-0054, Design Details, Configuration) with the documented defaults; nothing is hard-coded in TypeScript, workflow YAML or command prose. The first of these tasks to land creates the file with the defaults; the others read it.
+
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
+- [ ] #0 Config: no convention value (path pattern, branch prefix, timer, port, threshold) appears as a literal in source, workflow or command body touched by this task; each is read from `.ai-sdlc/pr-lifecycle.yaml`, and one test shows that changing a config value changes the behaviour.
 - [ ] #1 `cli-dispatch reconcile` over a fixture of PR facts produces one `landing/<pr>.json` per PR with owner, state, action and history; running it again on the same facts changes no file and runs no action (idempotency test).
 - [ ] #2 Every state in `PR_STATES` maps to exactly one action in the task set or the docs set, with a hermetic test per row; a docs-only PR with `mergeStateStatus: DIRTY` yields `rebase-in-place`, a task PR with a real red yields the re-entry action carrying the failing check line and head SHA.
 - [ ] #3 The scheduler fires on wake-file touch, on session start and on the timer; a test shows a touched wake file causes one reconcile within the debounce window and no model turn is involved (no `claude` invocation in the trace).

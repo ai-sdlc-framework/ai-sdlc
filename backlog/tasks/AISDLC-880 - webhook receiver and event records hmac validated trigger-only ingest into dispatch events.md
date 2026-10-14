@@ -31,8 +31,11 @@ RFC-0054 OQ-1 (webhook first, poll as the fallback reconciler), OQ-8 (local only
 4. Tunnel: document the supported forwarders (`gh webhook forward` for development, a named tunnel for daily use) in `docs/operations/cli-hierarchy.md`; the receiver itself binds to localhost only.
 5. `cli-hierarchy up` starts the receiver when `AI_SDLC_WEBHOOK_SECRET` is set and reports it in `status`; absence of the secret is not an error (poll-only mode).
 
+**Configuration (operator ruling 2026-10-14).** Every repository convention this task uses (docs-only paths, no-task branch prefixes, timers, ports, thresholds) is read from `.ai-sdlc/pr-lifecycle.yaml` (RFC-0054, Design Details, Configuration) with the documented defaults; nothing is hard-coded in TypeScript, workflow YAML or command prose. The first of these tasks to land creates the file with the defaults; the others read it.
+
 ## Acceptance Criteria
 
+- [ ] Config: no convention value (path pattern, branch prefix, timer, port, threshold) appears as a literal in source, workflow or command body touched by this task; each is read from `.ai-sdlc/pr-lifecycle.yaml`, and one test shows that changing a config value changes the behaviour.
 - [ ] A delivery with a valid signature produces exactly one record file with the five fields and nothing else; a replay of the same delivery id produces no second file and returns 200.
 - [ ] A delivery with a missing or wrong signature returns 401 and writes nothing (test with a forged body).
 - [ ] Five check-run deliveries for one head within the debounce window cause one wake.

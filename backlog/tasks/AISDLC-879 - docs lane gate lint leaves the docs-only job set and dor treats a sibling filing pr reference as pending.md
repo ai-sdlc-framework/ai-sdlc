@@ -29,8 +29,11 @@ RFC-0054 OQ-4 and OQ-11 (resolved 2026-10-14). Two of the four docs-lane stalls 
 3. Re-run: when a filing PR merges, a step in the same workflow (or the state machine's `rerun-dor` action, AISDLC-829) re-runs the gate on every open filing PR whose DoR comment names it; implement the workflow step here so Phase 0 works without the machine.
 4. No-task PRs are never drafts: the decisions-sync workflow drops `--draft`; `~/.claude/skills/rfc-oq-walkthrough` is user-local, so document the rule in `docs/operations/dor-ingress-gate.md` and in the planner command body.
 
+**Configuration (operator ruling 2026-10-14).** Every repository convention this task uses (docs-only paths, no-task branch prefixes, timers, ports, thresholds) is read from `.ai-sdlc/pr-lifecycle.yaml` (RFC-0054, Design Details, Configuration) with the documented defaults; nothing is hard-coded in TypeScript, workflow YAML or command prose. The first of these tasks to land creates the file with the defaults; the others read it.
+
 ## Acceptance Criteria
 
+- [ ] Config: no convention value (path pattern, branch prefix, timer, port, threshold) appears as a literal in source, workflow or command body touched by this task; each is read from `.ai-sdlc/pr-lifecycle.yaml`, and one test shows that changing a config value changes the behaviour.
 - [ ] A docs-only PR's gate run shows `lint` skipped and `ai-sdlc/pr-ready` green; a code PR still runs `lint`.
 - [ ] A task file referencing an id whose file exists only in another open `ai-sdlc/file-*` PR gets DoR `pending` (gate passes, comment names the PR); an id matching nothing still fails.
 - [ ] Merging the referenced filing PR triggers a re-run on the dependent PR without a push (workflow run visible with the dependent PR as target).
