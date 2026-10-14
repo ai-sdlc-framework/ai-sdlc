@@ -5,7 +5,7 @@ status: Draft
 lifecycle: Draft
 author: 'Dominique Legault'
 created: 2026-10-13
-updated: 2026-10-13
+updated: 2026-10-14
 targetSpecVersion: v1alpha1
 requires: []
 assumes: [RFC-0012, RFC-0035, RFC-0041, RFC-0042, RFC-0051]
@@ -896,6 +896,27 @@ rubric (class (a), (b) or (c) per the Decision authority rules).
    - (b) Option C first, add a fast path later (the recommended order).
    - (c) Option A from the start (webhook with poll only as emergency catch-up).
    - (d) Option B (Actions as the source) with C as fallback.
+   **Resolution (2026-10-14, full rubric): webhook first, poll as the fallback reconciler** (RFC
+   Option A as the primary source, Option C as catch-up; the hybrid of Option D with the fast path
+   mandatory in Phase 1 rather than deferred). Industry research: Argo CD and Flux keep the
+   reconcile loop as truth and use webhooks only to shorten the interval; Mergify, Kodiak and Bors
+   are webhook-driven hosted services; GitHub's local-receiver tooling (`gh webhook forward`, smee)
+   drops on sleep. **Shipped substrate:** AISDLC-823 already landed the poll, but as prose (the
+   dispatch model gathers PR facts over REST into `.pr-facts.json` every 15 min or less and calls
+   `cli-dispatch classify-prs`); `ci-failure-watcher` (AISDLC-460) is a second 60 s `gh` poller; a
+   reusable HMAC-validating receiver exists in `reference/src/adapters/webhook-server.ts` and
+   `orchestrator/src/webhook-manager.ts` and is used by nothing in dispatch. **Refinement:** the
+   webhook receiver is the Phase 1 producer of event records; the 823 poll is re-implemented in code
+   (classifier plus a deterministic scheduler, not a model session) as the reconciler that runs on
+   wake and on a timer, and must produce the same state the events would have; `ci-failure-watcher`
+   is deleted as a duplicate poller. **Counter-argument:** "a laptop receiver needs a tunnel and a
+   secret, loses events while asleep, and the audits blame ownerless states, not notification
+   latency." Rebuttal (operator): latency and a warm executor context are weighted above
+   operational simplicity; on an 80-merge day the base moves every 18 min, so a poll interval is a
+   real fraction of the churn window and costs second and third rebases; sleep loss is covered by
+   the reconciler. **Selected over poll-first-fast-path-later** because a deferred fast path has no
+   forcing function and risks "poll forever"; **over Actions-as-source** because the runner queue
+   (64 s median) makes it no faster than a poll. Consequence: OQ-10 (receiver trust) is in scope.
 2. **Who owns the PR after the draft is created?**
    - (a) The executor that made it, until merged (long-lived context).
    - (b) A "landing" role (a new roster entry) that owns every unlanded PR.
