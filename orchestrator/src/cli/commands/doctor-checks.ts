@@ -45,7 +45,10 @@
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, unlinkSync } from 'node:fs';
 import { CLIENT_SIDE_ONLY_MESSAGE } from './branch-protection-shared.js';
 import { homedir } from 'node:os';
+import { createPrivateKey, createPublicKey } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
+import { Ajv2020 } from 'ajv/dist/2020.js';
+import { parse as parseYaml } from 'yaml';
 import {
   createBuiltInJudgmentProvider,
   getJudgmentDefinition,
@@ -53,6 +56,7 @@ import {
   judgmentEnforceDowngradeReason,
   loadJudgmentConfig,
   resolveJudgmentProvider,
+  SCHEMAS,
 } from '@ai-sdlc/reference';
 import { now as clockNow } from '../../clock.js';
 import {
@@ -61,6 +65,7 @@ import {
   gitignoreCovers,
   interpretCheckIgnoreExit,
 } from '../../runtime-gitignore.js';
+import { HUSKY_PREPUSH_SIGN_SNIPPET } from './init-templates.js';
 import {
   buildProductionDoctorAdapters,
   checkAttestationGovernance,
@@ -594,6 +599,22 @@ export function fixManifestsAgree(ctx: DoctorRunContext): DoctorFixResult {
 
 export function checkAttestationGovernanceCheck(ctx: DoctorRunContext): DoctorCheckResult {
   const gov = checkAttestationGovernance(ctx.projectDir, ctx.adapters);
+
+  if (
+    gov.state === 'fully-configured' &&
+    gov.branchProtection.requiresBacklogDrift === false &&
+    ctx.adapters.exists(join(ctx.projectDir, 'backlog'))
+  ) {
+    return {
+      id: 'attestation-governance',
+      severity: 'warn',
+      title:
+        'branch protection requires `ai-sdlc/pr-ready` but not the `Backlog Drift` context — the AISDLC-388 contract needs both',
+      remediation:
+        'Add `Backlog Drift` to the required status checks on main (Settings > Branches), or re-run `ai-sdlc init --add branch-protection`',
+      anonymizableEvidence: { state: gov.state, requiresBacklogDrift: false },
+    };
+  }
 
   if (gov.state === 'fully-configured') {
     return {
@@ -2082,6 +2103,395 @@ export function fixConfigManifest(ctx: DoctorRunContext): DoctorFixResult {
   };
 }
 
+// ── Checks 4, 5, 6: config files validated against their JSON schema (AISDLC-582) ──
+
+type SchemaValidator = ReturnType<InstanceType<typeof Ajv2020>['compile']>;
+let schemaAjv: InstanceType<typeof Ajv2020> | undefined;
+const schemaValidators = new Map<string, SchemaValidator>();
+
+/** Compile (and cache) the validator for a `spec/schemas/<file>` schema. */
+function getSchemaValidator(schemaFile: string): SchemaValidator {
+  let validator = schemaValidators.get(schemaFile);
+  if (validator) return validator;
+  if (!schemaAjv) {
+    schemaAjv = new Ajv2020({ allErrors: true, strict: false });
+    for (const schema of Object.values(SCHEMAS)) schemaAjv.addSchema(schema);
+  }
+  const id = (SCHEMAS[schemaFile] as { $id: string }).$id;
+  validator = schemaAjv.getSchema(id) as SchemaValidator;
+  schemaValidators.set(schemaFile, validator);
+  return validator;
+}
+
+type ParsedConfig =
+  | { state: 'missing' }
+  | { state: 'unparseable'; error: string }
+  | { state: 'invalid'; errors: string[]; doc: unknown }
+  | { state: 'valid'; doc: unknown };
+
+/** Read a YAML config and validate it against a schema; never throws. */
+function loadAndValidateYaml(
+  ctx: DoctorRunContext,
+  path: string,
+  schemaFile: string,
+): ParsedConfig {
+  const raw = ctx.adapters.readFile(path);
+  if (raw == null) return { state: 'missing' };
+  let doc: unknown;
+  try {
+    doc = parseYaml(raw);
+  } catch (err) {
+    return { state: 'unparseable', error: (err as Error).message.split('\n')[0] };
+  }
+  const validate = getSchemaValidator(schemaFile);
+  if (validate(doc)) return { state: 'valid', doc };
+  const errors = (validate.errors ?? []).slice(0, 5).map((e) => {
+    return `${e.instancePath || '/'} ${e.message ?? 'is invalid'}`;
+  });
+  return { state: 'invalid', errors, doc };
+}
+
+function configFindings(
+  id: string,
+  label: string,
+  parsed: Exclude<ParsedConfig, { state: 'missing' } | { state: 'valid' }>,
+  remediation: string,
+): DoctorCheckResult {
+  if (parsed.state === 'unparseable') {
+    return {
+      id,
+      severity: 'fail',
+      title: `${label} is not parseable YAML: ${parsed.error}`,
+      remediation,
+      anonymizableEvidence: { state: 'unparseable' },
+    };
+  }
+  return {
+    id,
+    severity: 'fail',
+    title: `${label} fails schema validation: ${parsed.errors.join('; ')}`,
+    remediation,
+    anonymizableEvidence: { state: 'invalid', errorCount: parsed.errors.length },
+  };
+}
+
+// Check 4: agent-role.yaml
+
+export function checkAgentRoleConfig(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'agent-role-config';
+  const path = join(ctx.projectDir, '.ai-sdlc', 'agent-role.yaml');
+  const parsed = loadAndValidateYaml(ctx, path, 'agent-role.schema.json');
+  if (parsed.state === 'missing') {
+    return {
+      id,
+      severity: 'warn',
+      title: '.ai-sdlc/agent-role.yaml is missing — governance hooks fall back to defaults',
+      remediation: 'Run `ai-sdlc init` to scaffold .ai-sdlc/agent-role.yaml',
+    };
+  }
+  if (parsed.state !== 'valid') {
+    return configFindings(
+      id,
+      '.ai-sdlc/agent-role.yaml',
+      parsed,
+      'Fix the listed fields against spec/schemas/agent-role.schema.json (SessionStart swallows this silently, so the hooks run on defaults until it is fixed)',
+    );
+  }
+  return { id, severity: 'pass', title: '.ai-sdlc/agent-role.yaml is present and schema-valid' };
+}
+
+// Check 5: dor-config.yaml (only when the DoR feature is enabled)
+
+export function checkDorConfig(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'dor-config';
+  const path = join(ctx.projectDir, '.ai-sdlc', 'dor-config.yaml');
+  const workflow = join(ctx.projectDir, '.github', 'workflows', 'dor-ingress.yml');
+  const configExists = ctx.adapters.exists(path);
+  if (!configExists && !ctx.adapters.exists(workflow)) {
+    return { id, severity: 'pass', title: 'DoR gate not enabled — dor-config.yaml not required' };
+  }
+  const parsed = loadAndValidateYaml(ctx, path, 'dor-config.v1.schema.json');
+  if (parsed.state === 'missing') {
+    return {
+      id,
+      severity: 'warn',
+      title: 'DoR ingress workflow is installed but .ai-sdlc/dor-config.yaml is missing',
+      remediation: 'Run `ai-sdlc init --add dor` to scaffold .ai-sdlc/dor-config.yaml',
+    };
+  }
+  if (parsed.state !== 'valid') {
+    return configFindings(
+      id,
+      '.ai-sdlc/dor-config.yaml',
+      parsed,
+      'Fix the listed fields against spec/schemas/dor-config.v1.schema.json',
+    );
+  }
+  return { id, severity: 'pass', title: '.ai-sdlc/dor-config.yaml is present and schema-valid' };
+}
+
+// Check 6: trusted-reviewers.yaml + operator signing key
+
+function normalizePem(pem: string): string {
+  return pem.replace(/-----[^-]+-----/g, '').replace(/\s+/g, '');
+}
+
+/** Derive the SPKI PEM public key from a private-key PEM; `undefined` when unparseable. */
+function derivePublicKeyPem(privatePem: string): string | undefined {
+  try {
+    return createPublicKey(createPrivateKey(privatePem))
+      .export({ type: 'spki', format: 'pem' })
+      .toString();
+  } catch {
+    return undefined;
+  }
+}
+
+export function checkTrustedReviewers(ctx: DoctorRunContext): DoctorCheckResult[] {
+  const id = 'trusted-reviewers';
+  const { adapters, projectDir } = ctx;
+  const path = join(projectDir, '.ai-sdlc', 'trusted-reviewers.yaml');
+  const workflowPresent = adapters.exists(
+    join(projectDir, '.github', 'workflows', 'verify-attestation.yml'),
+  );
+  const parsed = loadAndValidateYaml(ctx, path, 'trusted-reviewers.schema.json');
+
+  if (parsed.state === 'missing') {
+    if (!workflowPresent) {
+      return [{ id, severity: 'pass', title: 'attestation not enabled — no keyring required' }];
+    }
+    return [
+      {
+        id,
+        severity: 'fail',
+        title: 'verify-attestation.yml is installed but .ai-sdlc/trusted-reviewers.yaml is missing',
+        remediation:
+          'Run `ai-sdlc init --add attestation`, then register a key via `/ai-sdlc init-signing-key`',
+      },
+    ];
+  }
+  if (parsed.state !== 'valid') {
+    return [
+      configFindings(
+        id,
+        '.ai-sdlc/trusted-reviewers.yaml',
+        parsed,
+        'Fix the listed fields against spec/schemas/trusted-reviewers.schema.json',
+      ),
+    ];
+  }
+
+  const reviewers = ((parsed.doc as { reviewers?: Array<{ pubkey: string }> } | null)?.reviewers ??
+    []) as Array<{ pubkey: string }>;
+  if (reviewers.length === 0) {
+    return [
+      {
+        id,
+        severity: 'fail',
+        title:
+          '.ai-sdlc/trusted-reviewers.yaml lists no public keys — CI rejects every attestation',
+        remediation: 'Run `/ai-sdlc init-signing-key` and open a PR appending the printed entry',
+        anonymizableEvidence: { keyCount: 0 },
+      },
+    ];
+  }
+
+  const results: DoctorCheckResult[] = [
+    {
+      id,
+      severity: 'pass',
+      title: `.ai-sdlc/trusted-reviewers.yaml is schema-valid with ${reviewers.length} key(s)`,
+      anonymizableEvidence: { keyCount: reviewers.length },
+    },
+  ];
+
+  const keyPath = join(adapters.homeDir(), '.ai-sdlc', 'signing-key.pem');
+  const keyPem = adapters.readFile(keyPath);
+  if (keyPem == null) {
+    results.push({
+      id: 'operator-signing-key',
+      severity: 'warn',
+      title: 'operator signing key (~/.ai-sdlc/signing-key.pem) not found on this machine',
+      remediation: 'Run `/ai-sdlc init-signing-key` to generate one',
+    });
+    return results;
+  }
+  const publicPem = derivePublicKeyPem(keyPem);
+  if (!publicPem) {
+    results.push({
+      id: 'operator-signing-key',
+      severity: 'fail',
+      title: '~/.ai-sdlc/signing-key.pem exists but is not a readable private key',
+      remediation:
+        'Regenerate it with `/ai-sdlc init-signing-key` and re-register the new public key',
+    });
+    return results;
+  }
+  const listed = reviewers.some((r) => normalizePem(r.pubkey) === normalizePem(publicPem));
+  results.push(
+    listed
+      ? {
+          id: 'operator-signing-key',
+          severity: 'pass',
+          title: 'operator signing key is registered in trusted-reviewers.yaml',
+        }
+      : {
+          id: 'operator-signing-key',
+          severity: 'warn',
+          title: 'operator signing key public half is NOT listed in trusted-reviewers.yaml',
+          remediation:
+            'Open a PR appending this key (`/ai-sdlc init-signing-key` prints the YAML block); CI rejects attestations signed by an unlisted key',
+          anonymizableEvidence: { listed: false },
+        },
+  );
+  return results;
+}
+
+// ── Check 8: husky pre-push attestation-sign hook ─────────────────────────
+
+const ATTESTATION_SIGN_MARKERS = ['ai-sdlc:attestation-sign-block', 'check-attestation-sign'];
+
+function readPrePushHook(ctx: DoctorRunContext): { path: string; text: string } | undefined {
+  for (const rel of [join('.husky', 'pre-push'), join('.git', 'hooks', 'pre-push')]) {
+    const path = join(ctx.projectDir, rel);
+    const text = ctx.adapters.readFile(path);
+    if (text != null) return { path, text };
+  }
+  return undefined;
+}
+
+function attestationEnabled(ctx: DoctorRunContext): boolean {
+  return ctx.adapters.exists(
+    join(ctx.projectDir, '.github', 'workflows', 'verify-attestation.yml'),
+  );
+}
+
+export function checkHuskyPrePushGate(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'husky-pre-push-gate';
+  if (!attestationEnabled(ctx)) {
+    return {
+      id,
+      severity: 'pass',
+      title: 'attestation not enabled — no pre-push sign gate required',
+    };
+  }
+  const hook = readPrePushHook(ctx);
+  if (!hook) {
+    return {
+      id,
+      severity: 'fail',
+      title:
+        'attestation is enabled but no .husky/pre-push (or .git/hooks/pre-push) exists — pushes carry no attestation',
+      remediation:
+        'Run `ai-sdlc doctor --fix` (writes the sign snippet) or `ai-sdlc init --add attestation`',
+    };
+  }
+  if (!ATTESTATION_SIGN_MARKERS.some((m) => hook.text.includes(m))) {
+    return {
+      id,
+      severity: 'fail',
+      title:
+        'pre-push hook does not reference the attestation sign snippet — pushes carry no attestation',
+      remediation:
+        'Run `ai-sdlc doctor --fix` to append the sign snippet, or `ai-sdlc init --add attestation`',
+    };
+  }
+  return { id, severity: 'pass', title: 'pre-push hook runs the attestation sign snippet' };
+}
+
+/**
+ * Mechanically safe: appends the sentinel-guarded snippet to an existing
+ * `.husky/pre-push`, or creates it when `.husky/` already exists. Idempotent
+ * (the sentinel makes a second run a no-op). Never edits `.git/hooks`.
+ */
+export function fixHuskyPrePushGate(ctx: DoctorRunContext): DoctorFixResult {
+  const id = 'husky-pre-push-gate';
+  if (checkHuskyPrePushGate(ctx).severity === 'pass') {
+    return {
+      id,
+      applied: false,
+      detail: 'pre-push gate already wired (or attestation not enabled)',
+    };
+  }
+  const huskyDir = join(ctx.projectDir, '.husky');
+  const hookPath = join(huskyDir, 'pre-push');
+  const existing = ctx.adapters.readFile(hookPath);
+  if (existing == null && !ctx.adapters.exists(huskyDir)) {
+    return {
+      id,
+      applied: false,
+      detail: 'no .husky/ directory — install husky first, then re-run',
+    };
+  }
+  const base = existing == null ? '' : existing.endsWith('\n') ? existing : `${existing}\n`;
+  ctx.adapters.writeFile(hookPath, `${base}${base ? '\n' : ''}${HUSKY_PREPUSH_SIGN_SNIPPET}`);
+  return { id, applied: true, detail: `appended the attestation sign snippet to ${hookPath}` };
+}
+
+// ── Check 9: feature-flag sanity ──────────────────────────────────────────
+
+/** Flags that are default-ON; an explicit opt-out value turns the feature off. */
+const DEFAULT_ON_FLAGS = ['AI_SDLC_DEPS_COMPOSITION', 'AI_SDLC_AUTONOMOUS_ORCHESTRATOR'] as const;
+const FLAG_OFF_VALUES = new Set(['off', '0', 'false', 'no']);
+
+export function checkFeatureFlags(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'feature-flags';
+  const disabled = DEFAULT_ON_FLAGS.filter((flag) => {
+    const value = ctx.adapters.env[flag];
+    return value != null && FLAG_OFF_VALUES.has(value.trim().toLowerCase());
+  });
+  if (disabled.length === 0) {
+    return { id, severity: 'pass', title: 'default-on feature flags are not opted out' };
+  }
+  return {
+    id,
+    severity: 'warn',
+    title: `default-on feature flag(s) explicitly disabled: ${disabled.join(', ')}`,
+    remediation: `Unset ${disabled.join(' / ')} to restore the default (on) unless the opt-out is intentional`,
+    anonymizableEvidence: { disabledFlags: disabled },
+  };
+}
+
+// ── Check 10: workflow-file presence for enabled features ─────────────────
+
+/** Feature → the workflow files its init template scaffolds, keyed by an "enabled" artifact. */
+const FEATURE_WORKFLOWS: Array<{ feature: string; enabledBy: string; workflow: string }> = [
+  {
+    feature: 'attestation',
+    enabledBy: '.ai-sdlc/trusted-reviewers.yaml',
+    workflow: '.github/workflows/verify-attestation.yml',
+  },
+  {
+    feature: 'dor',
+    enabledBy: '.ai-sdlc/dor-config.yaml',
+    workflow: '.github/workflows/dor-ingress.yml',
+  },
+  {
+    feature: 'gate',
+    enabledBy: '.ai-sdlc/agent-role.yaml',
+    workflow: '.github/workflows/ai-sdlc-gate.yml',
+  },
+];
+
+export function checkFeatureWorkflows(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'feature-workflows';
+  const missing = FEATURE_WORKFLOWS.filter(
+    (f) =>
+      ctx.adapters.exists(join(ctx.projectDir, f.enabledBy)) &&
+      !ctx.adapters.exists(join(ctx.projectDir, f.workflow)),
+  );
+  if (missing.length === 0) {
+    return { id, severity: 'pass', title: 'workflow files exist for every enabled feature' };
+  }
+  return {
+    id,
+    severity: 'warn',
+    title: `enabled feature(s) missing their workflow file: ${missing.map((m) => `${m.feature} (${m.workflow})`).join(', ')}`,
+    remediation: 'Run `ai-sdlc init --add workflows` to scaffold the missing workflow files',
+    anonymizableEvidence: { missingFeatures: missing.map((m) => m.feature) },
+  };
+}
+
 // ── Registry ──────────────────────────────────────────────────────────────
 
 /**
@@ -2212,6 +2622,42 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     description:
       'Backlog drift warning count against the 150 threshold, with report size (AISDLC-797).',
     run: checkBacklogDriftWarnings,
+  },
+  {
+    id: 'agent-role-config',
+    description:
+      '.ai-sdlc/agent-role.yaml is present and valid against agent-role.schema.json (AISDLC-582).',
+    run: checkAgentRoleConfig,
+  },
+  {
+    id: 'dor-config',
+    description:
+      '.ai-sdlc/dor-config.yaml is valid against dor-config.v1.schema.json when DoR is enabled (AISDLC-582).',
+    run: checkDorConfig,
+  },
+  {
+    id: 'trusted-reviewers',
+    description:
+      'trusted-reviewers.yaml is schema-valid, lists a key, and includes the operator signing key (AISDLC-582).',
+    run: checkTrustedReviewers,
+  },
+  {
+    id: 'husky-pre-push-gate',
+    description:
+      'The pre-push hook runs the attestation sign snippet when attestation is enabled (AISDLC-582).',
+    run: checkHuskyPrePushGate,
+    fix: fixHuskyPrePushGate,
+  },
+  {
+    id: 'feature-flags',
+    description:
+      'Default-on feature flags (deps composition, autonomous orchestrator) are not opted out (AISDLC-582).',
+    run: checkFeatureFlags,
+  },
+  {
+    id: 'feature-workflows',
+    description: 'Workflow files exist for every enabled feature (AISDLC-582).',
+    run: checkFeatureWorkflows,
   },
   {
     id: 'force-push-policy',

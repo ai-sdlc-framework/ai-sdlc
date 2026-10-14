@@ -1537,7 +1537,10 @@ describe('runDoctorChecks + summarizeDoctorResults', () => {
       withHooksScript: true,
     });
     mkdirSync(join(tmpDir, '.ai-sdlc', 'attestations'), { recursive: true });
-    writeFileSync(join(tmpDir, '.ai-sdlc', 'trusted-reviewers.yaml'), 'reviewers: []\n');
+    writeFileSync(
+      join(tmpDir, '.ai-sdlc', 'trusted-reviewers.yaml'),
+      "reviewers:\n  - identity: 'a@b.com'\n    pubkey: |\n      -----BEGIN PUBLIC KEY-----\n      AAAA\n      -----END PUBLIC KEY-----\n",
+    );
 
     const results = runDoctorChecks(
       makeCtx(

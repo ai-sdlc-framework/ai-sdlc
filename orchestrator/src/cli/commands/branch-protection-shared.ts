@@ -106,6 +106,8 @@ export interface BranchProtectionCheck {
   requiresPrReady: boolean;
   /** `required_status_checks.contexts` includes `ai-sdlc/attestation` directly (AISDLC-388 misconfiguration). */
   requiresAttestationDirectly: boolean;
+  /** `required_status_checks.contexts` includes `Backlog Drift` (AISDLC-388 contract needs it alongside `ai-sdlc/pr-ready`; AISDLC-582). */
+  requiresBacklogDrift: boolean;
   /**
    * The branch-protection API returned 403 (GitHub Free private repo):
    * the server cannot enforce, only the client-side merge gate applies.
@@ -129,6 +131,7 @@ export function fetchBranchProtectionStatus(adapters: RunCommandAdapter): Branch
       requiresApprovingReview: false,
       requiresPrReady: false,
       requiresAttestationDirectly: false,
+      requiresBacklogDrift: false,
       error: resolved.error,
     };
   }
@@ -143,6 +146,7 @@ export function fetchBranchProtectionStatus(adapters: RunCommandAdapter): Branch
       requiresApprovingReview: false,
       requiresPrReady: false,
       requiresAttestationDirectly: false,
+      requiresBacklogDrift: false,
       apiUnavailable: isBranchProtectionUnavailable(protection.stdout, protection.stderr),
       error: `gh api repos/${resolved.slug}/branches/main/protection failed (branch protection likely not configured)`,
     };
@@ -158,13 +162,21 @@ export function fetchBranchProtectionStatus(adapters: RunCommandAdapter): Branch
       (body.required_pull_request_reviews?.required_approving_review_count ?? 0) >= 1;
     const requiresPrReady = contexts.includes('ai-sdlc/pr-ready');
     const requiresAttestationDirectly = contexts.includes('ai-sdlc/attestation');
-    return { checked: true, requiresApprovingReview, requiresPrReady, requiresAttestationDirectly };
+    const requiresBacklogDrift = contexts.includes('Backlog Drift');
+    return {
+      checked: true,
+      requiresApprovingReview,
+      requiresPrReady,
+      requiresAttestationDirectly,
+      requiresBacklogDrift,
+    };
   } catch {
     return {
       checked: false,
       requiresApprovingReview: false,
       requiresPrReady: false,
       requiresAttestationDirectly: false,
+      requiresBacklogDrift: false,
       error: 'could not parse `gh api .../protection` response as JSON',
     };
   }

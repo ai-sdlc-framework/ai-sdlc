@@ -14,6 +14,7 @@ export {
   mergeSoulDsbSpec,
   type SoulDsbResolution,
 } from './soul-dsb-resolver.js';
+export { SCHEMAS } from './generated-schemas.js';
 export {
   validate,
   validateResource,
