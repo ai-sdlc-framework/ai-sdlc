@@ -64,7 +64,7 @@ Per-archetype gating decisions:
 
 ## DoR readiness for task-file PRs (AISDLC-712.1)
 
-The Definition-of-Ready check is no longer a local hook (AISDLC-712, DEC-0056 row 3). It runs in CI as the `Evaluate backlog tasks changed by PR` job in `.github/workflows/dor-ingress.yml`, and the `ai-sdlc/pr-ready` rollup requires it through one conditional job, `dor-readiness-gate` in `ai-sdlc-gate.yml`.
+The Definition-of-Ready check is no longer a local hook (AISDLC-712, DEC-0056 row 3). It runs in CI as one conditional job, `dor-readiness-gate` in `ai-sdlc-gate.yml` (one evaluation per PR, AISDLC-834), which the `ai-sdlc/pr-ready` rollup requires.
 
 - **Conditional.** `Detect Changes` has a third path filter, `tasks`, matching `backlog/tasks/*.md`. That is exactly the `paths:` trigger of `dor-ingress.yml`, so the filter is true if and only if the DoR check will run. The path is narrower than "anything under `backlog/`" on purpose: a PR that only moves a file into `backlog/completed/` starts no DoR run, and a gate waiting for a check that never starts would block it.
 - **No task file, no cost.** When `tasks` is false the job is skipped, and `dor-readiness-gate` is in `allowed-skips`, so the rollup passes with no new run and no wait.

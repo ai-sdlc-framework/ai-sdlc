@@ -497,17 +497,13 @@ jobs:
           comment-summary-in-pr: on-failure
 
   # ── DoR readiness gate (AISDLC-712.1, DEC-0056 row 3) ───────────────────
-  # The Definition-of-Ready check moved out of the pre-push hook into CI: the
-  # "Evaluate backlog tasks changed by PR" job in dor-ingress.yml. This job
-  # makes that check part of the `ai-sdlc/pr-ready` rollup, ONLY for PRs that
-  # add or edit a `backlog/tasks/*.md` file (`detect.outputs.tasks`). PRs that
-  # touch no task file skip this job entirely: no new run, no wait.
-  #
-  # It does not re-run the evaluation. It waits for the dor-ingress check run
-  # on the PR head SHA to complete and mirrors its conclusion. dor-ingress runs
-  # concurrently with this workflow and its install + build is shorter than the
-  # build-test job, so the wait is normally hidden behind them.
-  # A missing check run after the timeout fails closed.
+  # The Definition-of-Ready check moved out of the pre-push hook into CI. This
+  # job is the single evaluation per PR (AISDLC-834; the former
+  # "Evaluate backlog tasks changed by PR" job in dor-ingress.yml is gone): it
+  # scores the changed `backlog/tasks/*.md` files, posts the violations
+  # comment, and fails on needs-clarification unless the task carries a
+  # `blocked.reason` override. Runs ONLY for PRs that add or edit a task file
+  # (`detect.outputs.tasks`); other PRs skip it entirely.
   dor-readiness-gate:
     name: DoR readiness (task-file PRs)
     needs: detect
@@ -518,44 +514,218 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
-      checks: read
+      pull-requests: write
+      contents: read
     steps:
-      - name: Wait for the DoR ingress check on the PR head
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          CHECK_NAME: Evaluate backlog tasks changed by PR
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          run_install: false
+
+      - name: Install + build pipeline-cli
         run: |
-          set -euo pipefail
-          deadline=$(( $(date +%s) + 15 * 60 ))
-          while :; do
-            # Newest run of the check on this SHA, created by GitHub Actions
-            # (not another app), that can be a final answer.
-            # `skipped` (the draft-time run: evaluate-pr-tasks has a draft
-            # guard) and `cancelled` (a run superseded by a concurrency
-            # restart) are stale on the draft-to-ready flip; treat them as
-            # "not started" and keep polling for the real run.
-            if ! out=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" --paginate \
-              --jq '.check_runs[] | select(.name == env.CHECK_NAME and .app.slug == "github-actions") | select(.conclusion != "skipped" and .conclusion != "cancelled") | [.id, .status, (.conclusion // "")] | @tsv' 2>&1); then
-              echo "::warning::gh api check-runs failed (will retry): ${out}"
-              out=""
+          pnpm install --filter @ai-sdlc/pipeline-cli... --frozen-lockfile
+          pnpm --filter @ai-sdlc/pipeline-cli build
+
+      - name: List changed backlog/tasks/*.md files
+        id: changed
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # AISDLC-197: 3-dot diff (`A...B`) finds the merge-base of A and B
+          # then diffs from merge-base to B, scoping to only the changes
+          # introduced ON THE PR SIDE. With 2-dot (`A B`), when a sibling PR
+          # merges to main and moves a backlog file (e.g. `tasks/X.md` →
+          # `completed/X.md`), the diff would include that move in the file
+          # list even when the PR under evaluation didn't touch the file. The
+          # OLD path at `backlog/tasks/X.md` would then ENOENT in the evaluator
+          # below. Witnessed on PR #325 at 2026-05-05 02:33:44.
+          # Limit to backlog/tasks/*.md additions/modifications (Added or Modified).
+          FILES=$(git diff --name-only --diff-filter=AM "$BASE_SHA"..."$HEAD_SHA" -- 'backlog/tasks/*.md' || true)
+          # GitHub Actions multiline output via heredoc.
+          {
+            echo 'files<<EOF'
+            echo "$FILES"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+          if [ -z "$FILES" ]; then
+            echo "no-changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Evaluate each changed task
+        id: dor_eval
+        if: steps.changed.outputs.no-changes != 'true'
+        # AISDLC-161: ARTIFACTS_DIR exported so each `dor-evaluate` invocation
+        # below appends its calibration entry to the same path the upload
+        # step picks up. Same rationale as the issues job — pre-AISDLC-161,
+        # the calibration log went to the runner's CWD and was discarded.
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          FILES: ${{ steps.changed.outputs.files }}
+          ARTIFACTS_DIR: /tmp/dor/artifacts
+        run: |
+          mkdir -p /tmp/dor "$ARTIFACTS_DIR/_dor"
+          : > /tmp/dor/results.jsonl
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            # AISDLC-197 defense-in-depth: even with 3-dot diff, skip if the
+            # file doesn't exist on HEAD (e.g. PR deleted it within its own
+            # diff). Prevents ENOENT crash on the dor-evaluate --body-file
+            # call below.
+            [ ! -f "$f" ] && { echo "::notice::Skipping non-existent file from diff: $f"; continue; }
+            ID=$(basename "$f" .md | cut -d- -f1-2)
+            set +e
+            OUT=$(node pipeline-cli/bin/ai-sdlc-pipeline.mjs \
+              dor-evaluate "$ID" --body-file "$f" --source backlog --hermetic)
+            STATUS=$?
+            set -e
+            if [ "$STATUS" -ne 0 ] && [ "$STATUS" -ne 2 ]; then
+              echo "::error::Failed to evaluate $f (exit $STATUS)"
+              echo "$OUT"
+              exit "$STATUS"
             fi
-            run=$(printf '%s\n' "$out" | sort -n | tail -1)
-            status=$(printf '%s' "$run" | cut -f2)
-            conclusion=$(printf '%s' "$run" | cut -f3)
-            if [ "$status" = "completed" ]; then
-              echo "DoR ingress check concluded: ${conclusion}"
-              [ "$conclusion" = "success" ] && exit 0
-              echo "::error::'${CHECK_NAME}' concluded '${conclusion}'; resolve its findings (see the PR comment)."
-              exit 1
-            fi
-            if [ "$(date +%s)" -ge "$deadline" ]; then
-              echo "::error::'${CHECK_NAME}' did not complete within 15 minutes (status: ${status:-not started})."
-              exit 1
-            fi
-            sleep 20
-          done
+            # One JSON line per evaluated task with the source file inlined.
+            # SECURITY (AISDLC-115.4 round-2 critical fix): pass $f via env var
+            # instead of shell-interpolating into the JS literal. A malicious PR
+            # could otherwise add a backlog/tasks/*.md file with a single quote
+            # in the name to escape the JS string and execute arbitrary code in
+            # the runner. $OUT is also written to a file rather than interpolated
+            # to keep the node -e source free of shell-substituted JSON.
+            printf '%s\n' "$OUT" > /tmp/dor/_eval_out.json
+            EVAL_FILE="$f" node -e "const v = JSON.parse(require('fs').readFileSync('/tmp/dor/_eval_out.json', 'utf8')); v.__file = process.env.EVAL_FILE; process.stdout.write(JSON.stringify(v))" \
+              >> /tmp/dor/results.jsonl
+            echo >> /tmp/dor/results.jsonl
+          done <<< "$FILES"
+
+      - name: Render PR summary comment via pipeline-cli
+        if: steps.changed.outputs.no-changes != 'true'
+        id: render-pr
+        # Single source of truth for comment composition + secret redaction
+        # (see `pipeline-cli/src/dor/comment-loop.ts` `renderPrTasksComment`).
+        # The inline github-script renderer used to embed `gate.finding`
+        # verbatim, so a leaked token in a task body could reflect into the
+        # public PR comment.
+        run: |
+          BODY=$(node pipeline-cli/bin/ai-sdlc-pipeline.mjs \
+            dor-render-pr-summary --verdicts-file /tmp/dor/results.jsonl --channel author)
+          {
+            echo 'body<<__DOR_END__'
+            printf '%s' "$BODY"
+            echo
+            echo '__DOR_END__'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post idempotent PR summary comment
+        if: steps.changed.outputs.no-changes != 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          DOR_BODY: ${{ steps.render-pr.outputs.body }}
+        with:
+          script: |
+            const marker = '<!-- ai-sdlc:dor-comment channel="author" -->';
+            const body = process.env.DOR_BODY;
+            if (!body || !body.includes(marker)) {
+              core.setFailed('dor-render-pr-summary produced an empty or marker-less body');
+              return;
+            }
+
+            const pr_number = context.payload.pull_request.number;
+            // `github.paginate` instead of a single per_page=100 call —
+            // PRs with >100 prior comments still need to find the marker
+            // or we'd post a duplicate summary on every CI run.
+            const existing = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr_number,
+              per_page: 100,
+            });
+            const prior = existing.find((c) => c.body && c.body.includes(marker));
+            if (prior) {
+              if (prior.body.trim() === body.trim()) {
+                core.info('DoR PR comment unchanged — no-op.');
+                return;
+              }
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: prior.id,
+                body,
+              });
+              core.notice(`Updated DoR PR comment ${prior.id}`);
+            } else {
+              const { data: created } = await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr_number,
+                body,
+              });
+              core.notice(`Created DoR PR comment ${created.id}`);
+            }
+
+      - name: Upload DoR calibration entries as workflow artifact
+        # AISDLC-161 — same rationale as the issues job: persist the JSONL
+        # so `gh run download` + `cli-dor-corpus aggregate` can build the
+        # FP-rate digest. PR job evaluates N tasks per run, so the JSONL
+        # may contain N entries (one per changed `backlog/tasks/*.md`).
+        # `if: always()` so partial failures still leave a trail.
+        if: always() && hashFiles('/tmp/dor/artifacts/_dor/calibration.jsonl') != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dor-calibration-pr-${{ github.event.pull_request.number }}-${{ github.run_attempt }}
+          path: /tmp/dor/artifacts/_dor/calibration.jsonl
+          retention-days: 90
+          if-no-files-found: ignore
+
+      # AISDLC-379 — compute the workflow-gate signal `has_violations` from
+      # the SAME JSONL the renderer above consumed, applying the
+      # `blocked.reason` operator-override rule from
+      # `pipeline-cli/src/dor/upstream-oq-gate.ts` so the gate stays in
+      # lockstep with the `refineBacklogTask()` ingress shim used by
+      # `/ai-sdlc execute`. Pre-AISDLC-379, the workflow posted a
+      # comment listing violations and then exited 0 — the `Evaluate
+      # backlog tasks changed by PR` check flipped to SUCCESS regardless,
+      # and auto-merge armed against PRs with unresolved Gate-3 violations
+      # (the 2026-05-20 RFC-0041 task-breakdown incident).
+      - name: Compute has_violations
+        id: compute_violations
+        if: steps.changed.outputs.no-changes != 'true'
+        run: |
+          # Write the gate envelope to disk and parse it from there so the
+          # subsequent `node -e` calls don't have to deal with shell-escaping
+          # an arbitrary JSON blob (the renderer output above uses the same
+          # write-then-read pattern for the same reason — see the SECURITY
+          # comment under "Evaluate each changed task").
+          node pipeline-cli/bin/ai-sdlc-pipeline.mjs \
+            dor-pr-has-violations --verdicts-file /tmp/dor/results.jsonl \
+            > /tmp/dor/violations.json
+          cat /tmp/dor/violations.json
+          HAS=$(node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync('/tmp/dor/violations.json','utf8')).has_violations))")
+          COUNT=$(node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync('/tmp/dor/violations.json','utf8')).blocking.length))")
+          echo "has_violations=$HAS" >> "$GITHUB_OUTPUT"
+          echo "blocking_count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      # AISDLC-379 — actually fail the check when has_violations=true. The
+      # comment posted above tells the operator WHAT to fix; this step
+      # blocks the merge so they DO fix it (or set blocked.reason in
+      # frontmatter as the explicit override). Skipped when no backlog
+      # files changed (no-op PR), or when has_violations stayed false
+      # (clean PR or all violations overridden).
+      - name: Fail check on unresolved violations
+        if: steps.changed.outputs.no-changes != 'true' && steps.compute_violations.outputs.has_violations == 'true'
+        run: |
+          echo "::error::DoR violations detected in ${{ steps.compute_violations.outputs.blocking_count }} staged backlog task change(s). See PR comment for details."
+          echo "::error::Fix the offending task body or set blocked.reason in frontmatter; push to re-evaluate."
+          exit 1
 
   # ── Independence policy gate (RFC-0046 Phase 4, AISDLC-591) ─────────────
   # Enforces the repo's per-repo `.ai-sdlc/independence-policy.yaml`

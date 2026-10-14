@@ -303,7 +303,7 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     );
   });
 
-  it('AISDLC-712.1: dor-readiness-gate runs only for task-file PRs and waits on the dor-ingress check', () => {
+  it('AISDLC-712.1: dor-readiness-gate runs only for task-file PRs and evaluates once', () => {
     const job = workflow.jobs['dor-readiness-gate'];
     assert.ok(job, 'dor-readiness-gate job must exist');
     // Conditional wiring: no task file changed → job skipped (no new run, no wait).
@@ -315,39 +315,23 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     assert.match(job.if, /draft\s*==\s*false/, 'must skip draft PRs like every other gate job');
     const needs = Array.isArray(job.needs) ? job.needs : [job.needs];
     assert.ok(needs.includes('detect'), 'must declare needs: [detect]');
-    assert.equal(job.permissions?.checks, 'read', 'needs checks: read to poll the check run');
+    assert.equal(job.permissions?.['pull-requests'], 'write', 'posts the violations comment');
 
-    // detect exposes the output, and its filter is EXACTLY dor-ingress's trigger
-    // paths, so the gate fires iff the check it waits for will exist.
+    // detect exposes the output with the task-file filter.
     const detect = workflow.jobs['detect'];
     assert.match(String(detect.outputs?.tasks ?? ''), /tasks-filter\.outputs\.tasks/);
     const filterStep = detect.steps.find((s) => s.id === 'tasks-filter');
     assert.ok(filterStep, 'detect must have a tasks-filter step');
-    const dor = loadYaml(join(REPO_ROOT, '.github', 'workflows', 'dor-ingress.yml'));
-    const dorPaths = (dor.on ?? dor[true]).pull_request.paths;
-    assert.deepEqual(dorPaths, ['backlog/tasks/*.md']);
-    for (const p of dorPaths) {
-      assert.ok(
-        String(filterStep.with.filters).includes(`'${p}'`),
-        `tasks-filter must match dor-ingress trigger path ${p}`,
-      );
-    }
+    assert.ok(String(filterStep.with.filters).includes(`'backlog/tasks/*.md'`));
 
-    // The check it mirrors is the evaluate-pr-tasks job, by exact name.
-    const checkName = dor.jobs['evaluate-pr-tasks'].name;
-    assert.equal(checkName, 'Evaluate backlog tasks changed by PR');
-    const waitStep = job.steps.find((s) => s.env?.CHECK_NAME);
-    assert.ok(waitStep, 'must have a wait step carrying CHECK_NAME');
-    assert.equal(waitStep.env.CHECK_NAME, checkName);
-    // Stale draft-time `skipped` and superseded `cancelled` runs must not be
-    // treated as the final answer on the draft-to-ready flip.
-    assert.match(waitStep.run, /conclusion != "skipped" and \.conclusion != "cancelled"/);
-    assert.match(waitStep.run, /\.app\.slug == "github-actions"/);
-    assert.ok(!/\|\|\s*true/.test(waitStep.run), 'API errors must be logged, not swallowed');
+    // The job evaluates once itself (AISDLC-834); it no longer polls a check run.
+    const evalSteps = job.steps.filter((s) => /dor-evaluate/.test(s.run ?? ''));
+    assert.equal(evalSteps.length, 1, 'exactly one dor-evaluate step');
+    const evalStep = evalSteps[0];
     // Untrusted event data must not be interpolated into the script body.
     assert.ok(
-      !/\$\{\{/.test(waitStep.run),
-      'wait script must read expressions through env, not interpolate them',
+      !/\$\{\{/.test(evalStep.run),
+      'eval script must read expressions through env, not interpolate them',
     );
   });
 

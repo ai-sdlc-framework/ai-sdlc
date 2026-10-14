@@ -2,7 +2,7 @@
 id: AISDLC-834
 title: >-
   fold the pull request half of dor-ingress.yml into the dor-readiness-gate job
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:

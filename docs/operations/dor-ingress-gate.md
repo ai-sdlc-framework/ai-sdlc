@@ -1,7 +1,9 @@
 # DoR Ingress Gate (AISDLC-379)
 
-The DoR ingress workflow (`.github/workflows/dor-ingress.yml`) is a hard
-merge gate: a PR that adds or modifies a `backlog/tasks/*.md` file is
+The PR half of DoR ingress is the `dor-readiness-gate` job in
+`.github/workflows/ai-sdlc-gate.yml` (AISDLC-834): one evaluation per PR,
+no separate workflow or check run. `dor-ingress.yml` now handles issues
+only. The job is a hard merge gate (it feeds `ai-sdlc/pr-ready`): a PR that adds or modifies a `backlog/tasks/*.md` file is
 blocked when any of those tasks fails the Definition-of-Ready rubric and
 does not carry an explicit operator-override.
 
@@ -22,9 +24,8 @@ For every PR opened / re-opened / synchronized that touches
    rule (`blocked.reason` in frontmatter). Output is the
    `has_violations` step output.
 5. **Fail the check** — when `has_violations == 'true'` the workflow exits
-   `1`. The `Evaluate backlog tasks changed by PR` status check turns
-   red, the PR's required-checks rollup goes UNSTABLE, and auto-merge
-   cannot proceed.
+   `1`. The `dor-readiness-gate` job fails, `ai-sdlc/pr-ready` fails, and the
+   PR cannot land.
 
 Pre-AISDLC-379, step 5 did not exist: the check always returned SUCCESS
 regardless of how many violations were posted. The 2026-05-20 RFC-0041
@@ -74,8 +75,8 @@ in `cli-dor-stats` digests.
 
 ## Branch protection
 
-`Evaluate backlog tasks changed by PR` must be listed in the
-required-status-checks for `main`. The canonical list is encoded in
+Only the `ai-sdlc/pr-ready` rollup is required for `main`; it includes
+`dor-readiness-gate`. The canonical list is encoded in
 `scripts/sync-dor-branch-protection.sh`:
 
 ```bash
@@ -94,7 +95,7 @@ array at the top of the script and re-run.
 |---|---|
 | `pipeline-cli/src/dor/pr-violations.test.ts` | Unit tests for `computePrViolations()` — clean / override / blocking / mixed-batch / missing-file / absolute-path / empty-input branches. |
 | `pipeline-cli/src/cli/index.test.ts` (`dor-pr-has-violations` block) | CLI envelope shape + `--fail-on-violations` exit behavior. |
-| `.github/workflows/__tests__/dor-ingress.test.mjs` | Workflow YAML structure — `Compute has_violations` step wiring, `Fail check on unresolved violations` step `exit 1` + `::error::` annotation, step order (comment-post BEFORE fail), CLI invocation via direct node bin path (CLAUDE.md CI rule). |
+| `.github/workflows/__tests__/dor-ingress.test.mjs` | Issue-only `dor-ingress.yml`; `dor-readiness-gate` YAML structure — `Compute has_violations` step wiring, `Fail check on unresolved violations` step `exit 1` + `::error::` annotation, step order (comment-post BEFORE fail), CLI invocation via direct node bin path (CLAUDE.md CI rule). |
 
 Run locally:
 
