@@ -1190,7 +1190,10 @@ export function patchDoneVerdict(
   boardDir: string,
   taskId: string,
   patch: Partial<
-    Pick<DispatchVerdict, 'reviewerStartedAt' | 'reviewerCompletedAt' | 'signedAt' | 'prOpenedAt'>
+    Pick<
+      DispatchVerdict,
+      'reviewerStartedAt' | 'reviewerCompletedAt' | 'signedAt' | 'prOpenedAt' | 'landed'
+    >
   >,
 ): boolean {
   // A malformed id patches nothing.

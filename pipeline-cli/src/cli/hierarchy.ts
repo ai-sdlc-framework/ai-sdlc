@@ -56,6 +56,7 @@
 
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
 import { promoteExpiredDecisions } from '../decisions/escalation-chain.js';
@@ -67,6 +68,7 @@ import { requeueFailed } from '../dispatch/requeue.js';
 import { correctManifestBranch } from '../dispatch/resume.js';
 import { DEFAULT_REQUEUE_RETRY_LIMIT } from '../dispatch/session-reaper.js';
 import { DECISION_ID_RE } from '../dispatch/verdict-fields.js';
+import { resolveGovernanceFromYaml } from '../governance/merge-if-eligible.js';
 import {
   attachTmuxSession,
   checkDispatchCaller,
@@ -96,6 +98,10 @@ import {
   hierarchyUp,
   loadOperationalPolicy,
   markReadyAfterCodeql,
+  createLander,
+  landEligiblePrs,
+  readMergeAuthors,
+  type LandReport,
   checkDispatchSender,
   checkRepoMatch,
   readRosterChecked,
@@ -410,6 +416,8 @@ export async function runHierarchyCli(
     enqueue?: (entries: EnqueueEntry[]) => string[];
     /** Replaces the `gh` runner the mark-ready pass uses (tests). */
     ghRun?: CommandRunner;
+    /** Replaces the landing pass of the `land-eligible-prs` action (tests). */
+    landEligible?: () => Promise<LandReport>;
   } = {},
 ): Promise<number> {
   const { subcommand, flags } = parseArgv(argv);
@@ -719,6 +727,22 @@ export async function runHierarchyCli(
           },
           listPrs: () => fetchHumanAttentionPrs(extras.ghRun ?? deps.run, repoRoot, deps.boardDir),
           markReady: () => markReadyAfterCodeql(extras.ghRun ?? deps.run, repoRoot),
+          landEligible:
+            extras.landEligible ??
+            (() =>
+              landEligiblePrs({
+                boardDir: deps.boardDir,
+                repoRoot,
+                run: extras.ghRun ?? deps.run,
+                mergeAuthors: readMergeAuthors(
+                  repoRoot,
+                  (y) => resolveGovernanceFromYaml(y).mergeAuthors,
+                ),
+                land: createLander({
+                  repoRoot,
+                  anchorDir: path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..'),
+                }),
+              })),
           promoteExpired: () =>
             isDecisionCatalogEnabled()
               ? promoteExpiredDecisions(

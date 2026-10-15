@@ -79,6 +79,12 @@ export {
   fetchHumanAttentionPrs,
   type HumanAttentionRow,
 } from './human-attention.js';
+export {
+  createLander,
+  landEligiblePrs,
+  readMergeAuthors,
+  type LandReport,
+} from './land-eligible.js';
 export { markReadyAfterCodeql, type MarkReadyReport } from './mark-ready.js';
 export {
   decideAutoClear,

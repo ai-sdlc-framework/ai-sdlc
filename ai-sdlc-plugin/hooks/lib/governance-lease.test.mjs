@@ -39,6 +39,7 @@ const ALL_OPS = [
   'answer-operational-decisions',
   'clear-executor-context',
   'mark-ready-after-codeql',
+  'land-eligible-prs',
 ];
 
 // The exact snippet the operator commits to .ai-sdlc/agent-role.yaml (shown in
@@ -61,6 +62,7 @@ spec:
       - answer-operational-decisions
       - clear-executor-context
       - mark-ready-after-codeql
+      - land-eligible-prs
   constraints:
     blockedActions:
       - 'git push --force*'
@@ -196,7 +198,7 @@ describe('resolver - protectedBranches', () => {
 });
 
 describe('operator snippet (manual step) resolves cleanly', () => {
-  it('resolves to leaseOnOwnBranch + all eight operational entries with no unknown keys or values', () => {
+  it('resolves to leaseOnOwnBranch + all nine operational entries with no unknown keys or values', () => {
     const raw = parseGovernanceBlock(OPERATOR_SNIPPET);
     assert.deepEqual(Object.keys(raw).sort(), ['allowForcePush', 'operational']);
     assert.equal(raw.operational.length, ALL_OPS.length);

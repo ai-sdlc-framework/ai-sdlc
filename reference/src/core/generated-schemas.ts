@@ -478,6 +478,7 @@ export const agentRoleSchema = {
               'answer-operational-decisions',
               'clear-executor-context',
               'mark-ready-after-codeql',
+              'land-eligible-prs',
             ],
           },
           uniqueItems: true,
@@ -4362,6 +4363,12 @@ export const dispatchVerdictV1Schema = {
       format: 'date-time',
       description:
         'AISDLC-493 — ISO-8601 timestamp when the GitHub PR was opened (Step 11). Populated at the corresponding Step 0-13 point.',
+    },
+    landed: {
+      type: 'string',
+      format: 'date-time',
+      description:
+        'AISDLC-894 - ISO-8601 time the dispatch tick landed (merged, or armed auto-merge on) the task PR through merge-if-eligible.',
     },
   },
   additionalProperties: false,

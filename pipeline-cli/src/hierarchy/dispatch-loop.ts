@@ -46,6 +46,7 @@ import {
   type HumanAttentionRow,
 } from './human-attention.js';
 import type { ClearResult } from './clear.js';
+import type { LandReport } from './land-eligible.js';
 import type { MarkReadyReport } from './mark-ready.js';
 import type { PlaybookOutcome } from './playbook.js';
 import { summariseLanding } from './reconcile.js';
@@ -172,6 +173,8 @@ export interface TickResult {
   wakeReason: WakeReason;
   /** Present when the `mark-ready-after-codeql` action is granted and a hook was supplied. */
   markReady?: MarkReadyReport;
+  /** Present when the `land-eligible-prs` action is granted and a hook was supplied (AISDLC-894). */
+  landed?: LandReport;
   /** Decisions moved up a tier this tick because their timebox lapsed. */
   promotions?: PromotedDecision[];
 }
@@ -220,6 +223,8 @@ export interface LoopDeps {
   reportEveryMs?: number;
   /** Marks CodeQL-clean drafts ready; called only when `mark-ready-after-codeql` is granted. */
   markReady?: () => MarkReadyReport;
+  /** Lands eligible own-author PRs through merge-if-eligible; called only when `land-eligible-prs` is granted. */
+  landEligible?: () => Promise<LandReport>;
   /** Moves escalated decisions whose tier timebox lapsed up one tier; its failure never fails the tick. */
   promoteExpired?: () => PromotedDecision[];
   /**
@@ -454,6 +459,18 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     deps.markReady && deps.operational.has('mark-ready-after-codeql')
       ? deps.markReady()
       : undefined;
+  let landed: LandReport | undefined;
+  if (deps.landEligible && deps.operational.has('land-eligible-prs')) {
+    try {
+      landed = await deps.landEligible();
+    } catch (err) {
+      landed = {
+        landed: [],
+        refused: [],
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
   let promotions: PromotedDecision[] = [];
   try {
     promotions = deps.promoteExpired?.() ?? [];
@@ -469,6 +486,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     ...(humanAttention.length > 0 ? { humanAttention } : {}),
     ...wake,
     ...(markReady ? { markReady } : {}),
+    ...(landed ? { landed } : {}),
     ...(promotions.length > 0 ? { promotions } : {}),
   };
 }

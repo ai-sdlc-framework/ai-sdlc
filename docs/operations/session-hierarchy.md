@@ -246,7 +246,7 @@ Set in `.ai-sdlc/agent-role.yaml` under `spec.governance`:
 | Key                | Value in this repository | Meaning                                                                                                                                        |
 | ------------------ | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `allowForcePush`   | `leaseOnOwnBranch`       | `git push --force-with-lease` is permitted only to the task's own branch, written as `HEAD:refs/heads/<branch>`, never to `main`/`master`. `never` blocks every lease push. |
-| `operational`      | a list of actions        | What the dispatch role may do without asking. Here: `rebase-own-branch`, `lease-push-own-branch`, `retrigger-ci`, `requeue`, `file-subid-followups`, `answer-operational-decisions`, `clear-executor-context`, `mark-ready-after-codeql`. |
+| `operational`      | a list of actions        | What the dispatch role may do without asking. Here: `rebase-own-branch`, `lease-push-own-branch`, `retrigger-ci`, `requeue`, `file-subid-followups`, `answer-operational-decisions`, `clear-executor-context`, `mark-ready-after-codeql`, `land-eligible-prs`. |
 
 The list is rendered into the dispatch session's injected rules like every other
 governance surface. An action not on the list is not dispatch's to take; it goes up the

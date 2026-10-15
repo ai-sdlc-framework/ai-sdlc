@@ -567,7 +567,8 @@ cli-hierarchy tick [--worker <dispatch-name>] [--report-every-ms <n>] [--settle-
 
 Dispatch-session command, guarded like `clear`. Effects: moves manifests into `queue/`,
 requeues failed tasks within the retry limit, clears executors whose tasks reached a
-verdict, and flips CodeQL-clean drafts ready when `mark-ready-after-codeql` is granted.
+verdict, flips CodeQL-clean drafts ready when `mark-ready-after-codeql` is granted, and
+lands eligible own-author PRs when `land-eligible-prs` is granted.
 The JSON also carries the caller's `identity` (`name`, `planner`), the `handoff` file text,
 `selfClear` (whether `TMUX_PANE` is set) and `nextWakeSec`/`wakeReason`: 30 when a brief or
 verdict was handled, 300 when work is queued or inflight, 1800 when the board is empty and
@@ -576,6 +577,19 @@ early), so an idle board costs at most two model calls an hour. A draft PR whose
 run is still pending waits up to the idle interval (1800 s) before mark-ready flips it, and
 a standing failed Analyze job does not shorten the sleep. Exit `0`; `1` on a guard refusal; `2` on a malformed number or a retry limit above
 the cap.
+
+**Landing step (AISDLC-894).** With the `land-eligible-prs` operational action granted in
+`.ai-sdlc/agent-role.yaml`, every tick lists the open, non-draft pull requests whose author
+is on the policy's `mergeAuthors` list and passes each through `runMergeIfEligible`, the one
+governed path to a landing: policy read from main, author, head commit and required checks
+are all re-verified, and this step issues no raw `gh` call that lands anything. When GitHub
+auto-merge is available (`autoMergeAllowed` from `gh repo view`) the PR is armed, once per
+head sha; when it is unavailable or cannot be read, the PR is squashed at once, but only
+when it is green and CLEAN. A landing (squashed or armed) stamps `landed` (ISO-8601) on the
+task's verdict in `done/`. A refusal is written once per head sha to
+`<board>/notes/land-<pr>-<sha>.refused.txt`; the attempt is repeated each tick, since a
+pending check turns green later. The tick result carries `landed` (`landed`, `refused`,
+`error`). Without the grant the tick makes no arm or squash call.
 
 **Stall check (AISDLC-826).** Every tick also checks each inflight claim once. The
 pipeline refreshes the claim's heartbeat (`inflight/<task>.state.json`, `lastHeartbeat` and

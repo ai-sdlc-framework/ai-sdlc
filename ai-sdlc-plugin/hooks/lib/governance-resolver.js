@@ -85,6 +85,7 @@ const OPERATIONAL_ACTIONS = Object.freeze([
   'answer-operational-decisions',
   'clear-executor-context',
   'mark-ready-after-codeql',
+  'land-eligible-prs',
 ]);
 
 const KNOWN_PRESETS = new Set(['strict', 'operator-trusted']);

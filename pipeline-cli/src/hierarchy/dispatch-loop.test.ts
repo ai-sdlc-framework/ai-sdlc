@@ -607,6 +607,31 @@ describe('nextWakeSec (idle hibernation)', () => {
     expect(denied.nextWakeSec).toBe(WAKE_IDLE_SEC);
   });
 
+  it('lands eligible PRs only when land-eligible-prs is granted (AISDLC-894)', async () => {
+    let calls = 0;
+    const landEligible = async () => {
+      calls++;
+      return { landed: [{ pr: 9, mode: 'arm' as const }], refused: [] };
+    };
+    const denied = await runDispatchTick(deps({ landEligible }));
+    expect(denied.landed).toBeUndefined();
+    expect(calls).toBe(0);
+    const granted = await runDispatchTick(
+      deps({ landEligible, operational: new Set([...GRANTS, 'land-eligible-prs']) }),
+    );
+    expect(granted.landed?.landed).toEqual([{ pr: 9, mode: 'arm' }]);
+    expect(calls).toBe(1);
+    const failing = await runDispatchTick(
+      deps({
+        landEligible: async () => {
+          throw new Error('gh down');
+        },
+        operational: new Set([...GRANTS, 'land-eligible-prs']),
+      }),
+    );
+    expect(failing.landed?.error).toBe('gh down');
+  });
+
   it('does not pin the 30 s wake on a standing failed Analyze job', async () => {
     const markReady = () => ({ readied: [], skipped: [], failedAnalyze: [7] });
     const r = await runDispatchTick(
