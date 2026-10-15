@@ -2137,13 +2137,13 @@ describe('runMergeIfEligible - decisions-sync source kind (AISDLC-895)', () => {
   });
 
   it('refuses the legacy ledger path and traversal', () => {
-    expect(decisionsSyncPathRefusal([{ path: '.ai-sdlc/_decisions/events.jsonl' }])).toMatch(
-      /events\.jsonl/,
-    );
-    expect(decisionsSyncPathRefusal([{ path: '.ai-sdlc/_decisions/events/../x' }])).toMatch(
-      /\.\.\/x/,
-    );
-    expect(decisionsSyncPathRefusal([{ path: EVENT }])).toBeNull();
+    expect(
+      decisionsSyncPathRefusal([{ path: '.ai-sdlc/_decisions/events.jsonl', status: 'modified' }]),
+    ).toMatch(/events\.jsonl/);
+    expect(
+      decisionsSyncPathRefusal([{ path: '.ai-sdlc/_decisions/events/../x', status: 'added' }]),
+    ).toMatch(/\.\.\/x/);
+    expect(decisionsSyncPathRefusal([{ path: EVENT, status: 'added' }])).toBeNull();
   });
 
   it('refuses any other head branch, naming it', async () => {
