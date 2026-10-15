@@ -33,7 +33,6 @@ describe('manifest contents (AC1)', () => {
     for (const p of [
       '.ai-sdlc/trusted-reviewers.yaml',
       '.ai-sdlc/review-policy.md',
-      '.ai-sdlc/review-config.yaml',
       '.ai-sdlc/agent-role.yaml',
       '.ai-sdlc/pipeline.yaml',
     ]) {
@@ -60,7 +59,6 @@ describe('preflight (AC3)', () => {
     mkdirSync(join(dir, '.ai-sdlc'));
     writeFileSync(join(dir, '.ai-sdlc/agent-role.yaml'), 'x');
     writeFileSync(join(dir, '.ai-sdlc/pipeline.yaml'), 'x');
-    writeFileSync(join(dir, '.ai-sdlc/review-config.yaml'), 'x');
     const r = configPreflight(dir);
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -114,11 +112,12 @@ describe('scaffold (AC2)', () => {
 
   it('skipOperatorInput scaffolds only default-able entries (doctor --fix)', async () => {
     const res = await scaffoldConfig({ projectDir: dir, skipOperatorInput: true });
-    expect(res.created).toEqual([
-      '.ai-sdlc/review-policy.md',
-      '.ai-sdlc/review-config.yaml',
-      '.ai-sdlc/agent-role.yaml',
-    ]);
+    expect(res.created).toEqual(['.ai-sdlc/review-policy.md', '.ai-sdlc/agent-role.yaml']);
+  });
+
+  it('doctor --fix does not stamp configVersion while operator-input entries are missing', async () => {
+    await scaffoldConfig({ projectDir: dir, skipOperatorInput: true });
+    expect(readConfigVersion(dir)).toBeNull();
   });
 
   it('after bumping an entry since, a re-run prompts only for that entry', async () => {

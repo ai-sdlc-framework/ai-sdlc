@@ -66,12 +66,6 @@ below before analyzing a PR. Edit freely: this file is yours.
 6. **Scope discipline**: do not flag deferred work or unchanged code.
 `;
 
-const REVIEW_CONFIG_DEFAULT = `# Reviewer set selection. \`auto\` derives the set from the diff: two reviewers
-# (correctness + security) unless a trust-chain path changed, then three.
-# Set \`three\` to always require code + test + security reviewers.
-reviewerSet: auto
-`;
-
 const AGENT_ROLE_DEFAULT = `apiVersion: ai-sdlc.io/v1alpha1
 kind: AgentRole
 metadata:
@@ -182,15 +176,6 @@ export const REQUIRED_CONFIG_MANIFEST: readonly ConfigEntry[] = [
     operatorInput: false,
     prompts: [],
     render: () => REVIEW_POLICY_DEFAULT,
-  },
-  {
-    id: 'review-config',
-    path: '.ai-sdlc/review-config.yaml',
-    since: '0.20.0',
-    description: 'reviewer set selection shared by the review step and the verifier',
-    operatorInput: false,
-    prompts: [],
-    render: () => REVIEW_CONFIG_DEFAULT,
   },
   {
     id: 'agent-role',
@@ -357,7 +342,9 @@ export async function scaffoldConfig(opts: ScaffoldOptions): Promise<ScaffoldRes
       result.failed.push({ id: entry.id, path: entry.path, reason: (err as Error).message });
     }
   }
-  if (result.failed.length === 0) {
+  // Stamp the version only when nothing required is still missing, so a skipped
+  // operator-input entry keeps SessionStart's notice alive.
+  if (result.failed.length === 0 && missingConfigEntries(opts.projectDir, manifest).length === 0) {
     writeConfigVersion(opts.projectDir, newestConfigVersion(manifest));
   }
   return result;
