@@ -2,7 +2,7 @@
 id: AISDLC-857
 title: >-
   requeue passes the retry cap on prNumber as well as prUrl so an open PR always counts as follow-up
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:

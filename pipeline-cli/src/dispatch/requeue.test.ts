@@ -293,6 +293,21 @@ describe('requeueFailed with an open PR (follow-up)', () => {
     expect(readResumeFeedback(board, 'AISDLC-927')?.note).toBe('rebase and re-sign');
   });
 
+  it('treats a prNumber-only verdict with an OPEN PR as follow-up', () => {
+    failWithPr('AISDLC-940', 2, null);
+    const f = path.join(board, 'failed', 'AISDLC-940.verdict.json');
+    const v = JSON.parse(readFileSync(f, 'utf-8'));
+    v.prNumber = 9;
+    writeFileSync(f, JSON.stringify(v));
+    const seen: string[] = [];
+    const r = requeueFailed(board, 'AISDLC-940', {
+      prState: (ref) => (seen.push(ref), 'OPEN'),
+    });
+    expect(seen).toEqual(['9']);
+    expect(r.followUp).toBe(true);
+    expect(r.retryCount).toBe(2);
+  });
+
   it('still refuses past the cap with no PR, or a MERGED/CLOSED/unknown PR', () => {
     failWithPr('AISDLC-922', 2, null);
     expect(() => requeueFailed(board, 'AISDLC-922', { prState: () => 'OPEN' })).toThrow(
