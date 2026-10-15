@@ -338,6 +338,31 @@ describe('signAndWriteV6Envelope — happy path', () => {
     expect(parsed.subject.digest.sha1).toBe(FAKE_HEAD_SHA);
   });
 
+  it('writes an envelope that passes prettier --check (AISDLC-875)', () => {
+    appendLeaf(makeLeaf({ leafIndex: 0, taskId: 'AISDLC-383.3' }), tmpRoot);
+    const outPath = signAndWriteV6Envelope({
+      repoRoot: tmpRoot,
+      headSha: FAKE_HEAD_SHA,
+      taskId: 'AISDLC-383.3',
+      privateKeyPem,
+    });
+    const root = join(__dirname, '..', '..', '..');
+    execFileSync(
+      join(root, 'node_modules', '.bin', 'prettier'),
+      [
+        '--no-config',
+        '--print-width',
+        '100',
+        '--single-quote',
+        '--trailing-comma',
+        'all',
+        '--check',
+        outPath,
+      ],
+      { stdio: 'pipe' },
+    );
+  });
+
   it('filters leaves by taskId (case-insensitive) via legacy shared-file fallback', () => {
     // AISDLC-421: this test exercises the shared-file fallback (no patch-id),
     // which filters by taskId. Post-AISDLC-421, the Merkle tree is built from

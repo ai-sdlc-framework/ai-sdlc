@@ -45,6 +45,7 @@ import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { gunzipSync } from 'node:zlib';
+import { formatEnvelopeJson } from '../ai-sdlc-plugin/scripts/format-envelope-json.mjs';
 
 /** Predicate type URI — versioned for forward evolution. */
 export const TARBALL_PREDICATE_TYPE = 'https://ai-sdlc.io/mcp-server-tarball/v1';
@@ -193,6 +194,14 @@ export function buildTarballPredicate({
  * construction here so sign-mcp-tarball.mjs can run standalone during CI
  * without requiring the orchestrator dist to be built.
  */
+/**
+ * Write the envelope prettier-formatted so `pnpm format:check` passes on the
+ * committed file (AISDLC-875: this writer used JSON.stringify(_, null, 2)).
+ */
+export function writeTarballEnvelope(outPath, envelope) {
+  writeFileSync(outPath, formatEnvelopeJson(envelope), 'utf-8');
+}
+
 export function signTarballEnvelope({ predicate, privateKeyPem, keyid }) {
   const payloadType = TARBALL_PREDICATE_TYPE;
   const payloadJson = JSON.stringify(predicate, null, 2);
@@ -349,7 +358,7 @@ async function main() {
   const envelope = signTarballEnvelope({ predicate, privateKeyPem, keyid });
 
   mkdirSync(join(repoRoot, '.ai-sdlc', 'attestations'), { recursive: true });
-  writeFileSync(outPath, JSON.stringify(envelope, null, 2) + '\n', 'utf-8');
+  writeTarballEnvelope(outPath, envelope);
 
   process.stderr.write(`[sign-mcp-tarball] wrote envelope: ${outPath}\n`);
   process.stdout.write(`${outPath}\n`);
