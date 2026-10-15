@@ -2,7 +2,7 @@
   "schemaVersion": "v6",
   "subject": {
     "digest": {
-      "sha1": "76b6a90d80048a0e12e984c8b822e51590659ce2"
+      "sha1": "f54e84995368b6d1384938d0a3fb79bebc9e6626"
     }
   },
   "transcriptLeaves": [
@@ -27,6 +27,28 @@
       "verdictClass": "independent",
       "harnessTranscriptHash": "f83a02c9a1bf4b03ed391d13cd374f2cb8fa073478bd316f9c06021f26a37d68",
       "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 3,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "801161791fd8f49dca8133e00b34a31e5b6b9094e16d9a00bee0a272761860fc",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 4,
+      "reviewerName": "test-reviewer-codex",
+      "transcriptHash": "6de9a3d6ea86c3c231f30a0944710a04f935fe0fcd346131643c4b60e90204af",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 5,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "443b013b248811cfe0ee0ed97d4ed844deb20de2365df61c133a5e3ae5a717df",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "443b013b248811cfe0ee0ed97d4ed844deb20de2365df61c133a5e3ae5a717df",
+      "independenceTier": "attested"
     }
   ],
   "merkleProofs": [
@@ -34,29 +56,56 @@
       "leafIndex": 0,
       "proof": [
         "41b8a3e0814cf49ae65a17f312872c1d692dff8922c3f19230f4946c8018fa30",
-        "a531164c5e3b9ea5cb11e8923cb7d7981397026e7b54d6c31a4ce4616901ab3a"
+        "05c71b37c28bcb6781ba313be9cf248eff3f1b48785edb24b173950c7913e751",
+        "71fbe124314a25fd6709ad3f9da36eddcc2ad09261a9d5748d5a8ef5db5bd1a4"
       ]
     },
     {
       "leafIndex": 1,
       "proof": [
         "54ae3c18b4132e8f1dc76c063f5268e9cd312bcdaf0a180cacd30bb895bf35cc",
-        "a531164c5e3b9ea5cb11e8923cb7d7981397026e7b54d6c31a4ce4616901ab3a"
+        "05c71b37c28bcb6781ba313be9cf248eff3f1b48785edb24b173950c7913e751",
+        "71fbe124314a25fd6709ad3f9da36eddcc2ad09261a9d5748d5a8ef5db5bd1a4"
       ]
     },
     {
       "leafIndex": 2,
       "proof": [
+        "92958fca5f4d0f49992ca3c467a965b7d2ddd9010948bd198c6047bcba9db5a6",
+        "8155aa45a03f102f5f86d64812991a0d1cf471ebc9f7b54b98695be472d7cfe1",
+        "71fbe124314a25fd6709ad3f9da36eddcc2ad09261a9d5748d5a8ef5db5bd1a4"
+      ]
+    },
+    {
+      "leafIndex": 3,
+      "proof": [
         "c93f3ddc1a96e99060b1089a0a04bc374a850d02ff511dc6fdcbe65cf23b73ce",
-        "8155aa45a03f102f5f86d64812991a0d1cf471ebc9f7b54b98695be472d7cfe1"
+        "8155aa45a03f102f5f86d64812991a0d1cf471ebc9f7b54b98695be472d7cfe1",
+        "71fbe124314a25fd6709ad3f9da36eddcc2ad09261a9d5748d5a8ef5db5bd1a4"
+      ]
+    },
+    {
+      "leafIndex": 4,
+      "proof": [
+        "7aaab38959f24cb99f80847c5642b8c6b46ddb4d2ae9ba0ae2d04628e4106e9b",
+        "ca2b769b856f78252b05f3f8411066689e1367f7555e1c90de2757f9d5dc045f",
+        "328dae4ad05958c4602bb04989d8c15fefa4ebcfc9a2b086fde470c698761401"
+      ]
+    },
+    {
+      "leafIndex": 5,
+      "proof": [
+        "0a271a5377c4044ac20711b7c3a4e52d05968ba29bdb9edbccd0056d41e7576f",
+        "ca2b769b856f78252b05f3f8411066689e1367f7555e1c90de2757f9d5dc045f",
+        "328dae4ad05958c4602bb04989d8c15fefa4ebcfc9a2b086fde470c698761401"
       ]
     }
   ],
-  "rootHash": "97854ca6115b9c6ba469ed131cf1d2c257beccaa85a669881ee6ca99244dfe26",
-  "rootSignature": "AZqKWPNjfpFejJb8W/1r2yeSwhbEiC+aO/7Cs1QsENHseYCrLmepjIBEzzqwkXvemdeXslDlpdIQ1ju5oLnaDQ==",
-  "nonce": "1c4e24202574a62c083b118ec60c0d42c150b3a85d9de03ce5245e9155d46185",
-  "leafCount": 3,
-  "signedAt": "2026-10-15T19:28:23.909Z",
+  "rootHash": "a41c08eca73f41a82e7b54ebe51c02213f1083816abe00133481d064b6798190",
+  "rootSignature": "JIFGadhPW5IMsjVB+RvcEO1BP0dZbYZ2/d9czIt5+z9IJLG3R86UoqxLzPP+ygJNEnksviHMj1/HO4rfbgotAQ==",
+  "nonce": "ba7e95d76c57931ab2d077d776abe2b74434740643cdb37dd974660a112190f6",
+  "leafCount": 6,
+  "signedAt": "2026-10-15T19:29:56.729Z",
   "signerIdentity": "dominique@local:doms-macbook",
   "reviewScope": {
     "classification": "full",
@@ -71,6 +120,13 @@
       "reference/src/core/generated-schemas.ts",
       "spec/schemas/agent-role.schema.json"
     ],
-    "appliedReviewers": ["code-reviewer-codex", "test-reviewer-codex", "security-reviewer"]
+    "appliedReviewers": [
+      "code-reviewer-codex",
+      "test-reviewer-codex",
+      "security-reviewer",
+      "code-reviewer-codex",
+      "test-reviewer-codex",
+      "security-reviewer"
+    ]
   }
 }
