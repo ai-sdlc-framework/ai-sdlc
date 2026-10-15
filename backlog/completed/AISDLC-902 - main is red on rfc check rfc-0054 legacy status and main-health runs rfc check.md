@@ -1,7 +1,7 @@
 ---
 id: AISDLC-902
 title: 'fix: main is red on rfc:check (PR lifecycle RFC legacy status) and main-health-monitor runs rfc:check'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [ci, rfc]
