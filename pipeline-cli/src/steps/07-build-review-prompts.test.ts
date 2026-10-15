@@ -1077,3 +1077,107 @@ describe('stubBinaryHunks: diff headers', () => {
     expect(large).toBeLessThan(5000);
   }, 30000);
 });
+
+describe('Step 7 — shared incremental round plan (AISDLC-725)', () => {
+  const fakeFor = (): FakeRunner =>
+    new FakeRunner()
+      .on(
+        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+        ok('FULL_DIFF_MARKER\n'),
+      )
+      .on(
+        /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+        ok('a.ts\0'),
+      );
+
+  const deltaPlan = {
+    round: 2,
+    mode: 'delta' as const,
+    reason: 'delta-only' as const,
+    baseSha: 'a'.repeat(40),
+    headSha: 'b'.repeat(40),
+    deltaSize: 4,
+    deltaDiff: 'diff --git a/a.ts b/a.ts\n+DELTA_MARKER\n',
+    contentHash: 'c'.repeat(64),
+    headBlobHash: 'd'.repeat(64),
+    deltaReviewers: ['code-reviewer', 'test-reviewer', 'security-reviewer'],
+    prior: {
+      round: 1,
+      developerResponse: 'DEV_RESPONSE_MARKER',
+      reviewers: [
+        {
+          reviewer: 'code-reviewer',
+          approved: false,
+          findings: [{ severity: 'major', message: 'CODE_FINDING_MARKER' }],
+        },
+      ],
+    },
+  };
+
+  it('every prompt build goes through the shared planner, first round included', async () => {
+    const seen: Array<{ taskId: string; baseRef: string }> = [];
+    const r = await buildReviewPrompts({
+      taskId: 'AISDLC-1',
+      task,
+      branch: 'b',
+      worktreePath: tmp,
+      workDir: tmp,
+      runner: fakeFor().toRunner(),
+      codexAvailable: false,
+      planRound: (i) => {
+        seen.push({ taskId: i.taskId, baseRef: i.baseRef });
+        return {
+          ...deltaPlan,
+          round: 1,
+          mode: 'full',
+          reason: 'first-round',
+          baseSha: null,
+          deltaDiff: null,
+          prior: null,
+          deltaReviewers: [],
+        };
+      },
+    });
+    expect(seen).toEqual([{ taskId: 'AISDLC-1', baseRef: 'origin/main' }]);
+    expect(r.roundPlan?.round).toBe(1);
+    expect(r.prompts[0].prompt).toContain('FULL_DIFF_MARKER');
+    expect(r.prompts[0].prompt).not.toContain('Incremental review');
+  });
+
+  it('with no planner override the default planner still runs and a stateless worktree plans round one', async () => {
+    const r = await buildReviewPrompts({
+      taskId: 'AISDLC-1',
+      task,
+      branch: 'b',
+      worktreePath: tmp,
+      workDir: tmp,
+      runner: fakeFor().toRunner(),
+      codexAvailable: false,
+    });
+    expect(r.roundPlan).toMatchObject({ round: 1, mode: 'full', reason: 'first-round' });
+  });
+
+  it('a later round reads the delta diff, not the full diff, and carries prior findings per reviewer', async () => {
+    const r = await buildReviewPrompts({
+      taskId: 'AISDLC-1',
+      task,
+      branch: 'b',
+      worktreePath: tmp,
+      workDir: tmp,
+      runner: fakeFor().toRunner(),
+      codexAvailable: false,
+      planRound: () => deltaPlan,
+    });
+    const code = r.prompts.find((p) => p.reviewer === 'code-reviewer')!.prompt;
+    const test = r.prompts.find((p) => p.reviewer === 'test-reviewer')!.prompt;
+    expect(code).toContain('DELTA_MARKER');
+    expect(code).not.toContain('FULL_DIFF_MARKER');
+    expect(code).toContain('CODE_FINDING_MARKER');
+    expect(code).toContain('DEV_RESPONSE_MARKER');
+    expect(code).toContain('Review ONLY that delta');
+    expect(code).toContain(`## Diff (since ${'a'.repeat(40)})`);
+    expect(test).not.toContain('CODE_FINDING_MARKER');
+    // The full diff stays available to callers (reviewer-set judgments see the whole change).
+    expect(r.diff).toContain('FULL_DIFF_MARKER');
+  });
+});

@@ -68,6 +68,13 @@ import {
   patchDoneVerdict,
   removeVerdict,
 } from '../dispatch/board.js';
+import {
+  formatRoundLogLine,
+  recordRoundFromVerdicts,
+  reviewerReadsDelta,
+  type RecordableVerdict,
+  type ReviewRoundPlan,
+} from '../incremental-review/review-rounds.js';
 import { DEFAULT_ROLE_MODELS } from '../routing/default-table.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
 import { resolveTargetBranch } from '../steps/02-compute-branch.js';
@@ -257,6 +264,13 @@ export interface RunReconcileOptions {
    * findings from later re-review iterations. Defaults to 1 (first pass).
    */
   reviewIteration?: number;
+  /**
+   * AISDLC-725 — the shared round plan (`cli-incremental-decide plan`) this reconcile
+   * pass reviewed under. Tags every `emit-leaf` (full vs delta, base commit; a delta
+   * leaf binds to the commit range) and records the round in the local review state
+   * so the next round can be a delta whatever this round's verdict.
+   */
+  reviewRoundPlan?: ReviewRoundPlan;
   /**
    * Override sign-attestation script path. Defaults to
    * `ai-sdlc-plugin/scripts/sign-attestation.mjs` relative to workDir.
@@ -735,6 +749,16 @@ function runReconcileInner(
     // already known from devVerdict.prUrl) on the reviews ledger record
     // `emit-leaf` appends alongside the Merkle leaf.
     emitLeafArgs.push('--iteration', String(options.reviewIteration ?? 1));
+    if (options.reviewRoundPlan) {
+      const plan = options.reviewRoundPlan;
+      // Per reviewer: only one that read the delta is tagged delta; the rest read the full diff.
+      const readDelta = reviewerReadsDelta(plan, reviewer);
+      emitLeafArgs.push('--review-mode', readDelta ? 'delta' : 'full');
+      emitLeafArgs.push('--review-reason', readDelta ? plan.reason : 'review-uncorroborated');
+      if (readDelta && plan.baseSha) {
+        emitLeafArgs.push('--review-base-sha', plan.baseSha, '--review-head-sha', plan.headSha);
+      }
+    }
     const prNumberForLedger = extractPrNumberFromUrl(devVerdict.prUrl);
     if (prNumberForLedger) {
       emitLeafArgs.push('--pr-number', prNumberForLedger);
@@ -744,6 +768,39 @@ function runReconcileInner(
       name: `emit-leaf:${reviewer}`,
       status: emit.status === 0 ? 'success' : 'failed',
       output: trimOutput(emit.stdout + (emit.stderr ? `\n[stderr] ${emit.stderr}` : '')),
+    });
+  }
+
+  // AISDLC-725 — record this round (any verdict) in the local review state.
+  if (options.reviewRoundPlan) {
+    const recorded: RecordableVerdict[] = [];
+    for (const reviewer of reviewersToReconcile) {
+      const verdictPath =
+        options.reviewerVerdicts?.[reviewer] ??
+        path.join(worktreePath, '.ai-sdlc', 'verdicts', `${reviewer}-${taskIdLower}.json`);
+      try {
+        const v = JSON.parse(readFileSync(verdictPath, 'utf-8')) as {
+          approved?: boolean;
+          findings?: unknown;
+        };
+        recorded.push({
+          agentId: reviewer,
+          approved: v.approved === true,
+          findings: Array.isArray(v.findings) ? (v.findings as RecordableVerdict['findings']) : [],
+        });
+      } catch {
+        // An unreadable verdict is not recorded; the next round then plans a full review.
+      }
+    }
+    const ok =
+      recorded.length === reviewersToReconcile.length &&
+      recordRoundFromVerdicts(worktreePath, taskId, options.reviewRoundPlan, recorded);
+    steps.push({
+      name: 'record-review-round',
+      status: ok ? 'success' : 'skipped',
+      output: ok
+        ? formatRoundLogLine(options.reviewRoundPlan)
+        : 'round not recorded (missing verdicts or plan hashes); next round plans a full review',
     });
   }
 

@@ -508,6 +508,8 @@ export interface BuildReviewPromptsResult {
    * pipeline; `prompts` still hold the three-reviewer fan-out for the fail-closed fallback.
    */
   reviewerSetMode?: 'three' | 'code-test-merged' | 'staged';
+  /** AISDLC-725: the shared round plan the prompts were built from (full or delta). */
+  roundPlan?: import('./incremental-review/review-rounds.js').ReviewRoundPlan;
 }
 
 // ── Step 8 — Aggregate verdicts ──────────────────────────────────────

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { join } from 'node:path';
+import { loadReviewState, recordReviewRound } from '../incremental-review/review-rounds.js';
 import {
   coerceReviewerVerdict,
   isDegenerateVerdict,
@@ -173,6 +174,65 @@ describe('Step 9 — iterateReviewLoop', () => {
     expect(r.finalVerdict.decision).toBe('APPROVED');
     expect(r.needsHumanAttention).toBe(false);
     expect(spawner.getCallCount('developer')).toBe(1);
+  });
+
+  it('keys the developer response on the last RECORDED round, not iteration-1 (AISDLC-725)', async () => {
+    recordReviewRound(tmp, {
+      taskId: 'AISDLC-1',
+      round: 3,
+      headSha: 'a'.repeat(40),
+      contentHash: 'b'.repeat(64),
+      headBlobHash: 'c'.repeat(64),
+      mode: 'full',
+      reason: 'first-round',
+      baseSha: null,
+      deltaSize: 0,
+      approved: false,
+      reviewers: [],
+    });
+    const ok = { approved: true, findings: [], summary: 'ok' };
+    const spawner = new MockSpawner({
+      developer: {
+        type: 'developer',
+        output: '',
+        parsed: goodDev,
+        status: 'success',
+        durationMs: 0,
+      },
+      'code-reviewer': {
+        type: 'code-reviewer',
+        output: '',
+        parsed: ok,
+        status: 'success',
+        durationMs: 0,
+      },
+      'test-reviewer': {
+        type: 'test-reviewer',
+        output: '',
+        parsed: ok,
+        status: 'success',
+        durationMs: 0,
+      },
+      'security-reviewer': {
+        type: 'security-reviewer',
+        output: '',
+        parsed: ok,
+        status: 'success',
+        durationMs: 0,
+      },
+    });
+    await iterateReviewLoop({
+      taskId: 'AISDLC-1',
+      worktreePath: tmp,
+      task,
+      branch: 'b',
+      initialDeveloperReturn: goodDev,
+      initialVerdict: blockedVerdict(),
+      maxIterations: 2,
+      spawner,
+      runner: diffRunner,
+    });
+    expect(loadReviewState('AISDLC-1', tmp).responses.map((r) => r.round)).toEqual([3]);
   });
 
   it('passes the routed model on the iteration-2 developer and reviewer spawns', async () => {

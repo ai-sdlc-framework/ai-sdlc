@@ -672,6 +672,55 @@ describe('sign-v6', () => {
 
 // ── CLI: emit-leaf ────────────────────────────────────────────────────────────
 
+describe('emit-leaf — --review-head-sha validation (AISDLC-725)', () => {
+  it.each(['', 'not-a-sha', 'a'.repeat(39)])('exits 1 on --review-head-sha %j', async (bad) => {
+    makeTranscript('aisdlc-383.8', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-383.8',
+      'code-reviewer.jsonl',
+    );
+    const verdictPath = writeVerdict('verdict-badhead.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli([
+        'emit-leaf',
+        '--task-id',
+        'AISDLC-383.8',
+        '--reviewer',
+        'code-reviewer',
+        '--transcript-path',
+        transcriptPath,
+        '--verdict-path',
+        verdictPath,
+        '--head-sha',
+        'a'.repeat(40),
+        '--harness',
+        'claude-code',
+        '--model',
+        'claude-sonnet-4-6',
+        '--patch-id',
+        TEST_PATCH_ID,
+        '--review-mode',
+        'delta',
+        '--review-base-sha',
+        'b'.repeat(40),
+        '--review-head-sha',
+        bad,
+      ]).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
+  });
+});
+
 describe('emit-leaf — happy path', () => {
   it('appends one leaf for a single reviewer run', async () => {
     makeTranscript('aisdlc-383.8', 'code-reviewer');

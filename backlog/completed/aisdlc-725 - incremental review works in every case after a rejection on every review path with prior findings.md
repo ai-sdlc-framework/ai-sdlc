@@ -2,7 +2,7 @@
 id: AISDLC-725
 title: >-
   Incremental review works in every case: after a rejection, on every review path, with prior findings
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-05'
 labels:

@@ -1271,3 +1271,153 @@ describe('runReconcile — AISDLC-543 ordering + concurrent-writer protection', 
     }
   });
 });
+
+describe('runReconcile — shared incremental round plan (AISDLC-725)', () => {
+  let workDir: string;
+  let worktreePath: string;
+  let boardDir: string;
+  const taskId = 'AISDLC-418';
+  const taskIdLower = taskId.toLowerCase();
+
+  beforeEach(() => {
+    workDir = mkdtempSync(path.join(tmpdir(), 'reconcile-725-'));
+    worktreePath = path.join(workDir, '.worktrees', taskIdLower);
+    boardDir = path.join(workDir, '.ai-sdlc', 'dispatch');
+    mkdirSync(path.join(worktreePath, '.git'), { recursive: true });
+    setupReviewerArtifacts(worktreePath, taskIdLower);
+  });
+
+  afterEach(() => {
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  const deltaPlan = {
+    round: 2,
+    mode: 'delta' as const,
+    reason: 'delta-only' as const,
+    baseSha: 'a'.repeat(40),
+    headSha: '1'.repeat(40),
+    deltaSize: 12,
+    deltaDiff: null,
+    contentHash: 'b'.repeat(64),
+    headBlobHash: 'c'.repeat(64),
+    prior: null,
+    deltaReviewers: ['code-reviewer', 'test-reviewer', 'security-reviewer'],
+  };
+
+  it('tags a leaf delta only for a reviewer that read the delta; the others are tagged full', () => {
+    writeDevVerdict(boardDir);
+    const { spawn, calls } = makeSpawnRecorder();
+    runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      spawn,
+      skipPush: true,
+      reviewRoundPlan: { ...deltaPlan, deltaReviewers: ['code-reviewer'] },
+    });
+    const emits = calls.filter((c) => c.args.includes('emit-leaf'));
+    const modeOf = (reviewer: string): string => {
+      const a = emits.find((c) => c.args[c.args.indexOf('--reviewer') + 1] === reviewer)!.args;
+      return a[a.indexOf('--review-mode') + 1];
+    };
+    expect(modeOf('code-reviewer')).toBe('delta');
+    expect(modeOf('test-reviewer')).toBe('full');
+    expect(modeOf('security-reviewer')).toBe('full');
+    const test = emits.find((c) => c.args[c.args.indexOf('--reviewer') + 1] === 'test-reviewer')!;
+    expect(test.args).not.toContain('--review-base-sha');
+  });
+
+  it('tags every emit-leaf with the round mode and binds a delta leaf to its base commit, then records the round', () => {
+    writeDevVerdict(boardDir);
+    const { spawn, calls } = makeSpawnRecorder();
+    const result = runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      spawn,
+      skipPush: true,
+      reviewRoundPlan: deltaPlan,
+    });
+    const emits = calls.filter((c) => c.args.includes('emit-leaf'));
+    expect(emits).toHaveLength(3);
+    for (const c of emits) {
+      const a = c.args;
+      expect(a[a.indexOf('--review-mode') + 1]).toBe('delta');
+      expect(a[a.indexOf('--review-base-sha') + 1]).toBe('a'.repeat(40));
+      expect(a[a.indexOf('--review-head-sha') + 1]).toBe('1'.repeat(40));
+      expect(a[a.indexOf('--review-reason') + 1]).toBe('delta-only');
+    }
+    const rec = result.steps.find((s) => s.name === 'record-review-round');
+    expect(rec?.status).toBe('success');
+    const state = readFileSync(
+      path.join(worktreePath, '.ai-sdlc', 'review-state', `${taskIdLower}.jsonl`),
+      'utf8',
+    );
+    expect(JSON.parse(state.trim())).toMatchObject({
+      round: 2,
+      mode: 'delta',
+      baseSha: 'a'.repeat(40),
+    });
+  });
+
+  it('a full round passes no base commit; without a plan no round flags are passed at all', () => {
+    writeDevVerdict(boardDir);
+    const full = makeSpawnRecorder();
+    runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      spawn: full.spawn,
+      skipPush: true,
+      reviewRoundPlan: {
+        ...deltaPlan,
+        mode: 'full',
+        reason: 'first-round',
+        baseSha: null,
+        deltaReviewers: [],
+      },
+    });
+    const a = full.calls.find((c) => c.args.includes('emit-leaf'))!.args;
+    expect(a[a.indexOf('--review-mode') + 1]).toBe('full');
+    expect(a).not.toContain('--review-base-sha');
+
+    // The first pass removed the verdict files; stage them again for a plan-less pass.
+    writeDevVerdict(boardDir);
+    setupReviewerArtifacts(worktreePath, taskIdLower);
+    const none = makeSpawnRecorder();
+    const r = runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      spawn: none.spawn,
+      skipPush: true,
+    });
+    expect(none.calls.find((c) => c.args.includes('emit-leaf'))!.args).not.toContain(
+      '--review-mode',
+    );
+    expect(r.steps.find((s) => s.name === 'record-review-round')).toBeUndefined();
+  });
+
+  it('does not record the round when a verdict file is unreadable', () => {
+    writeDevVerdict(boardDir);
+    rmSync(
+      path.join(worktreePath, '.ai-sdlc', 'verdicts', `security-reviewer-${taskIdLower}.json`),
+    );
+    const { spawn } = makeSpawnRecorder();
+    const result = runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      spawn,
+      skipPush: true,
+      reviewRoundPlan: deltaPlan,
+    });
+    expect(result.steps.find((s) => s.name === 'record-review-round')?.status).toBe('skipped');
+  });
+});

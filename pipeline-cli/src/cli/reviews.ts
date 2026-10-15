@@ -28,6 +28,11 @@ import {
   isSafeRef,
   ledgerToReviewerSetCorpus,
 } from '../judgment/reviewer-set-corpus.js';
+import {
+  formatRoundReport,
+  loadAllRoundRecords,
+  summarizeRounds,
+} from '../incremental-review/review-rounds.js';
 import { analyzeReviewLedger, formatReviewAnalysis } from '../attestation/reviews-analysis.js';
 
 function emitText(text: string): void {
@@ -86,6 +91,29 @@ export function buildReviewsCli(argv: string[]): ReturnType<typeof yargs> {
         } else {
           emitText(formatReviewAnalysis(result));
         }
+      },
+    )
+    .command(
+      'rounds',
+      'AISDLC-725: report the share of 2nd+ review rounds that ran as delta reviews and the ' +
+        'average tokens per round by round number, from the per-task local review state.',
+      (y: Argv) =>
+        y
+          .option('repo-root', {
+            type: 'array',
+            string: true,
+            default: [] as string[],
+            describe: 'Repo root (its .worktrees/* are scanned too). Defaults to cwd.',
+          })
+          .option('json', { type: 'boolean', default: false }),
+      (args) => {
+        const roots = (args['repo-root'] as string[] | undefined) ?? [];
+        const records = (roots.length > 0 ? roots : [process.cwd()]).flatMap((r) =>
+          loadAllRoundRecords(resolve(r)),
+        );
+        const report = summarizeRounds(records);
+        if (args['json']) emitJson(report);
+        else emitText(formatRoundReport(report));
       },
     )
     .command(

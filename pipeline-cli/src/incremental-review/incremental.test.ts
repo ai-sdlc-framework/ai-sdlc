@@ -1120,3 +1120,51 @@ describeBash('AISDLC-151 — bash validator behavior (real shell)', () => {
     expect(warned).toBe(true);
   });
 });
+
+// ── AISDLC-725: a failed or empty delta is never a zero-line delta ─────
+
+describe('decideIncrementalReview — uncomputable delta (AISDLC-725)', () => {
+  const prior = {
+    contentHash: 'a'.repeat(64),
+    reviewedSha: '1'.repeat(40),
+    reviewedAt: '2026-01-01T00:00:00.000Z',
+  };
+  const zero = {
+    linesAdded: 0,
+    linesRemoved: 0,
+    totalLines: 0,
+    topLevelDirs: new Set<string>(),
+    filesChanged: 0,
+  };
+
+  it('deltaComputed=false routes to a full review', () => {
+    const d = decideIncrementalReview({
+      prior,
+      currentContentHash: 'b'.repeat(64),
+      deltaStats: zero,
+      deltaComputed: false,
+      fullDiffTopLevelDirs: new Set(),
+    });
+    expect(d).toMatchObject({ deltaOnly: false, skip: false, reason: 'delta-uncomputable' });
+  });
+
+  it('an empty numstat (zero files) while the hash differs is not a zero-line delta', () => {
+    const d = decideIncrementalReview({
+      prior,
+      currentContentHash: 'b'.repeat(64),
+      deltaStats: zero,
+      fullDiffTopLevelDirs: new Set(),
+    });
+    expect(d).toMatchObject({ deltaOnly: false, reason: 'delta-uncomputable' });
+  });
+
+  it('a real delta is still a delta', () => {
+    const d = decideIncrementalReview({
+      prior,
+      currentContentHash: 'b'.repeat(64),
+      deltaStats: { ...zero, totalLines: 4, filesChanged: 1, topLevelDirs: new Set(['src']) },
+      fullDiffTopLevelDirs: new Set(['src']),
+    });
+    expect(d).toMatchObject({ deltaOnly: true, reason: 'delta-only' });
+  });
+});

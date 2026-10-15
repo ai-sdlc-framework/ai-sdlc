@@ -44,6 +44,14 @@ import { taskClassOf } from '../routing/task-class.js';
 import { generateNonce } from '../attestation/merkle.js';
 import { nonceMarkerLiteral } from '../attestation/harness-transcript.js';
 import { diffHeaderPaths } from '../classifier/diff-header.js';
+import {
+  buildLaterRoundSection,
+  reviewerReadsDelta,
+  defaultGitRunner,
+  formatRoundLogLine,
+  planReviewRound,
+  type ReviewRoundPlan,
+} from '../incremental-review/review-rounds.js';
 
 export interface BuildReviewPromptsOptions {
   taskId: string;
@@ -82,6 +90,16 @@ export interface BuildReviewPromptsOptions {
    * exactly what the resolver returns.
    */
   judgment?: EvaluateJudgmentContext;
+  /**
+   * AISDLC-725: the round planner. Every prompt build goes through the shared
+   * incremental decision; this hook exists only so tests can inject a plan.
+   * Defaults to `planReviewRound` over the task worktree's local review state.
+   */
+  planRound?: (inputs: {
+    taskId: string;
+    worktreePath: string;
+    baseRef: string;
+  }) => ReviewRoundPlan;
 }
 
 export async function buildReviewPrompts(
@@ -98,6 +116,22 @@ export async function buildReviewPrompts(
   const targetBranch = resolveTargetBranch(opts.workDir);
   const baseRef = `refs/remotes/origin/${targetBranch}`;
   const baseRefSource = `trusted-workdir:${join(opts.workDir, '.ai-sdlc', 'pipeline.yaml')}`;
+
+  // AISDLC-725: ONE shared incremental decision for every prompt build. A first round (no
+  // recorded state) plans a full review; a later round plans a delta unless a forced-full
+  // rule fires. This step never auto-approves, so `skip` is disabled.
+  const roundPlan: ReviewRoundPlan = (
+    opts.planRound ??
+    ((i) =>
+      planReviewRound({
+        taskId: i.taskId,
+        repoRoot: i.worktreePath,
+        baseRef: i.baseRef,
+        runGit: defaultGitRunner(),
+        allowSkip: false,
+      }))
+  )({ taskId: opts.taskId, worktreePath: opts.worktreePath, baseRef });
+  console.log(`[ai-sdlc-progress] ${formatRoundLogLine(roundPlan)}`);
 
   // `--text` stops a `-diff` attribute hiding content behind a binary stub, but it also
   // means git never prints `Binary files ... differ`, so binary files are detected
@@ -140,6 +174,12 @@ export async function buildReviewPrompts(
   const binaryPaths =
     numstatResult.code === 0 ? parseBinaryNumstat(numstatResult.stdout) : new Set<string>();
   const { diff, stubbed } = stubBinaryHunks(rawDiff, binaryPaths);
+  // The reviewers read the delta on a delta round; the judgments keep the FULL diff
+  // (reviewer-set selection must see the whole change).
+  const deltaReviewDiff =
+    roundPlan.mode === 'delta' && roundPlan.deltaDiff !== null
+      ? stubBinaryHunks(roundPlan.deltaDiff, binaryPaths).diff
+      : null;
   const binaryDiff = stubbed || binaryPaths.size > 0 || diffHasBinaryHunk(rawDiff);
 
   const filesResult = await runner(
@@ -290,6 +330,7 @@ export async function buildReviewPrompts(
       record:
         opts.recordRouting !== false && routingRecordable(opts.worktreePath, opts.artifactsDir),
     });
+    const readsDelta = reviewerReadsDelta(roundPlan, reviewer);
     return {
       reviewer,
       ...(routed.model !== undefined ? { model: routed.model } : {}),
@@ -300,7 +341,10 @@ export async function buildReviewPrompts(
         title: opts.task.title,
         description: opts.task.description,
         acList,
-        diff: opts.promptDiff ?? diff,
+        // Delta per reviewer: only one with a recorded parseable earlier verdict reads the delta.
+        diff: readsDelta && deltaReviewDiff !== null ? deltaReviewDiff : (opts.promptDiff ?? diff),
+        diffLabel: readsDelta ? `Diff (since ${roundPlan.baseSha})` : 'Diff',
+        roundSection: buildLaterRoundSection(roundPlan, reviewer),
         changedFiles,
         branch: opts.branch,
         policy,
@@ -322,6 +366,7 @@ export async function buildReviewPrompts(
     headSha,
     ...(reviewerSetRecord ? { reviewerSet: reviewerSetRecord } : {}),
     ...(reviewerSetMode ? { reviewerSetMode } : {}),
+    roundPlan,
   };
 }
 
@@ -373,6 +418,10 @@ interface PromptInputs {
   description: string;
   acList: string;
   diff: string;
+  /** Heading of the diff section (a delta round names its base commit). */
+  diffLabel: string;
+  /** AISDLC-725: later-round section (delta framing, prior findings); '' on a first round. */
+  roundSection: string;
   changedFiles: string[];
   branch: string;
   policy: string;
@@ -398,7 +447,8 @@ function buildPrompt(reviewer: ReviewerType, inputs: PromptInputs): string {
     `## Changed files\n${filesBlock}\n` +
     policyBlock +
     harnessBlock +
-    `\n## Diff\n\n\`\`\`diff\n${inputs.diff}\n\`\`\`\n\n` +
+    (inputs.roundSection ? `\n${inputs.roundSection}\n` : '') +
+    `\n## ${inputs.diffLabel}\n\n\`\`\`diff\n${inputs.diff}\n\`\`\`\n\n` +
     `Return a verdict JSON: { approved: boolean, findings: [...], summary: string }.\n\n` +
     `${inputs.nonceMarker}\n`
   );

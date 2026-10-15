@@ -63,6 +63,8 @@ pnpm-debug.log*
 # committed; the signed envelope at .ai-sdlc/attestations/<sha>.dsse.json is
 # the durable artifact.
 .ai-sdlc/verdicts/
+# AISDLC-725: per-task local review-round state (reviewed commit, findings); never committed.
+.ai-sdlc/review-state/
 # AISDLC-462: per-task session files for execute-parallel coordination.
 # Runtime-only, per-machine — never committed. Gitkeep preserves the
 # sessions/ directory structure so the wrapper can write files immediately.

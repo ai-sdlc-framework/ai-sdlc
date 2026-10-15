@@ -13,6 +13,7 @@
  * @module execute-pipeline
  */
 
+import { recordRoundFromVerdicts } from './incremental-review/review-rounds.js';
 import {
   aggregateVerdicts,
   beginTask,
@@ -432,6 +433,16 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     const initialVerdicts: ReviewerVerdict[] = reviewerResults.map((r, i) =>
       coerceReviewerVerdict(reviewBuild.prompts[i].reviewer, r),
     );
+
+    // AISDLC-725: record the first round (whatever the verdict) for later delta rounds.
+    if (reviewBuild.roundPlan) {
+      recordRoundFromVerdicts(
+        branch.worktreePath,
+        opts.taskId,
+        reviewBuild.roundPlan,
+        initialVerdicts,
+      );
+    }
 
     // Step 8 — aggregate
     const initialVerdict = await aggregateVerdicts({

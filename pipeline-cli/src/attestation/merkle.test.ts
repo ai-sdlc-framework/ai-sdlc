@@ -639,3 +639,30 @@ describe('end-to-end: append → compute → verify', () => {
     expect(verifyInclusion(hashLeaf(tampered), proofs[0], root, 0, loaded.length)).toBe(false);
   });
 });
+
+describe('hashLeaf — reviewRange (AISDLC-725)', () => {
+  const range = { mode: 'delta' as const, baseSha: '1'.repeat(40), headSha: '2'.repeat(40) };
+
+  it('a full-round leaf (no reviewRange) hashes exactly as before the field existed', () => {
+    const legacy = makeLeaf();
+    expect(hashLeaf({ ...legacy, reviewRange: undefined })).toBe(hashLeaf(legacy));
+  });
+
+  it('a delta leaf binds the commit range: changing the base or head changes the hash', () => {
+    const base = hashLeaf(makeLeaf({ reviewRange: range }));
+    expect(base).not.toBe(hashLeaf(makeLeaf()));
+    expect(hashLeaf(makeLeaf({ reviewRange: { ...range, baseSha: '3'.repeat(40) } }))).not.toBe(
+      base,
+    );
+    expect(hashLeaf(makeLeaf({ reviewRange: { ...range, headSha: '3'.repeat(40) } }))).not.toBe(
+      base,
+    );
+  });
+
+  it('is independent of construction order of the range keys', () => {
+    const reordered = { headSha: range.headSha, mode: range.mode, baseSha: range.baseSha };
+    expect(hashLeaf(makeLeaf({ reviewRange: reordered }))).toBe(
+      hashLeaf(makeLeaf({ reviewRange: range })),
+    );
+  });
+});

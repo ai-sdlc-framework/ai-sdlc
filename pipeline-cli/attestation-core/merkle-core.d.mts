@@ -29,6 +29,7 @@ export interface MerkleCoreLeaf {
   harnessTranscriptHash?: string | null;
   /** Staged review stage that produced the leaf. Absent for every other leaf. */
   stage?: 'plan' | 'execute' | 'synthesize';
+  reviewRange?: { mode: 'delta'; baseSha: string; headSha: string };
 }
 
 export interface MerkleCoreResult {
