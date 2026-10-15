@@ -1,7 +1,7 @@
 ---
 id: AISDLC-876
 title: 'ci: stop cancelling the running gate on ready-for-review; path-filter decisions-sync runs'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [ci, velocity]
