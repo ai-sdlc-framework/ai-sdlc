@@ -46,7 +46,7 @@
  * mocking `child_process` would defeat the purpose.
  */
 
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -113,6 +113,23 @@ const findBannedInvocations = (binName: string, label: string, lines: string[]):
   });
   return offenders;
 };
+
+// AISDLC-908: file-level isolation. Every spawned bin inherits process.env, and
+// `cli-usage ingest` also scans $CODEX_HOME/sessions (falling back to
+// ~/.codex/sessions). Point it at an empty temp dir so no test in this file
+// walks the machine's real Codex history.
+let fileCodexHome: string;
+let priorCodexHome: string | undefined;
+beforeAll(() => {
+  priorCodexHome = process.env.CODEX_HOME;
+  fileCodexHome = mkdtempSync(join(tmpdir(), 'bin-invocation-codex-home-'));
+  process.env.CODEX_HOME = fileCodexHome;
+});
+afterAll(() => {
+  if (priorCodexHome === undefined) delete process.env.CODEX_HOME;
+  else process.env.CODEX_HOME = priorCodexHome;
+  rmSync(fileCodexHome, { recursive: true, force: true });
+});
 
 describe('AISDLC-156 + AISDLC-181: bin invocation pattern (CI cost-saver + umbrella bin guard)', () => {
   // The bins import from `dist/cli/*.js` so the dist must exist before we

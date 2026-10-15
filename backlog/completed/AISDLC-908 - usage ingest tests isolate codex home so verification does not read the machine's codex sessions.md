@@ -1,7 +1,7 @@
 ---
 id: AISDLC-908
 title: 'fix: cli-usage ingest tests isolate CODEX_HOME so local verification does not scan the machine''s real Codex sessions'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [bug, pipeline-cli, tests]
