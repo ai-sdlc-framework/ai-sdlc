@@ -49,11 +49,11 @@ describe('extractReferences', () => {
     expect(raws).not.toContain('#999');
   });
 
-  it('extracts RFC and AISDLC IDs', () => {
+  it('extracts RFC IDs but not AISDLC task ids from prose (AISDLC-898)', () => {
     const refs = extractReferences('depends on RFC-0011 and AISDLC-115.1');
     const raws = refs.map((r) => r.raw);
     expect(raws).toContain('RFC-0011');
-    expect(raws).toContain('AISDLC-115.1');
+    expect(raws).not.toContain('AISDLC-115.1');
   });
 
   it('does NOT extract backtick-quoted file paths from body prose (narrowed 2026-05-23)', () => {

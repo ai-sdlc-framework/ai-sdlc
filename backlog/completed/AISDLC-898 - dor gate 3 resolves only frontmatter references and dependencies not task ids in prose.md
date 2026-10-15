@@ -1,7 +1,7 @@
 ---
 id: AISDLC-898
 title: 'fix(dor): Gate 3 resolves only frontmatter references and dependencies; a task id in body prose is not a reference'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [dor, velocity, filing, gate]
