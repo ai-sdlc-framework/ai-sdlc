@@ -14,6 +14,7 @@ import {
   deriveTaskId,
   evaluateMergeEligibility,
   decisionsSyncPathRefusal,
+  docsLanePathRefusal,
   evaluatePrTrust,
   governanceSensitiveChanges,
   isGovernanceSensitivePath,
@@ -2166,5 +2167,67 @@ describe('runMergeIfEligible - decisions-sync source kind (AISDLC-895)', () => {
       expect(r.merged).toBe(false);
       expect(r.eligibility.reason).toMatch(re);
     }
+  });
+});
+
+describe('runMergeIfEligible - docs lane (AISDLC-878)', () => {
+  const DOC = 'backlog/tasks/aisdlc-900 - thing.md';
+  const base = (files: ReturnType<typeof changedFiles>, pr: Record<string, unknown> = {}) => ({
+    'gh pr view 42': {
+      stdout: prView({ headRefName: 'ai-sdlc/file-aisdlc-900', files: [], ...pr }),
+    },
+    ...MAIN_REF,
+    ...files,
+    ...COMMIT_OPERATOR,
+    'gh pr merge 42': {},
+  });
+  const run = (handlers: Record<string, Partial<ExecResult> | Error>) => {
+    const fake = makeFakeRunner(handlers);
+    const promise = runMergeIfEligible({
+      prNumber: 42,
+      sourceKind: 'docs',
+      repoSlug: 'org/repo',
+      repoRoot: '/unused',
+      runner: fake.runner,
+      policyYaml: GREEN_YAML,
+      taskPrefix: 'AISDLC',
+      mode: 'arm',
+    });
+    return { promise, calls: fake.calls };
+  };
+  const armed = (calls: RecordedCall[]) => calls.some((c) => c.args.includes('merge'));
+
+  it('arms a docs-only ai-sdlc/file-* PR', async () => {
+    expect(isTrustedSourceKind('docs')).toBe(true);
+    const { promise, calls } = run(
+      base(changedFiles([[DOC], ['.ai-sdlc/dispatch/briefs/a.md'], ['.claude/memory/m.md']])),
+    );
+    const r = await promise;
+    expect(r.armed).toBe(true);
+    expect(armed(calls)).toBe(true);
+  });
+
+  it('refuses a PR touching a non-docs path, naming it', async () => {
+    const { promise, calls } = run(
+      base(changedFiles([[DOC], ['pipeline-cli/src/evil.ts', 'modified']])),
+    );
+    const r = await promise;
+    expect(r.armed).toBeFalsy();
+    expect(r.eligibility.reason).toMatch(/pipeline-cli\/src\/evil\.ts/);
+    expect(armed(calls)).toBe(false);
+  });
+
+  it('refuses a head branch outside ai-sdlc/file-*', async () => {
+    const r = await run(base(changedFiles([[DOC]]), { headRefName: 'ai-sdlc/aisdlc-9-x' })).promise;
+    expect(r.armed).toBeFalsy();
+    expect(r.eligibility.reason).toMatch(/ai-sdlc\/aisdlc-9-x/);
+  });
+
+  it('docsLanePathRefusal handles renames and traversal', () => {
+    expect(docsLanePathRefusal([{ path: DOC, status: 'added' }])).toBeNull();
+    expect(
+      docsLanePathRefusal([{ path: DOC, previousPath: 'scripts/x.sh', status: 'renamed' }]),
+    ).toMatch(/scripts\/x\.sh/);
+    expect(docsLanePathRefusal([{ path: 'docs/../src/x.ts', status: 'added' }])).toMatch(/\.\./);
   });
 });

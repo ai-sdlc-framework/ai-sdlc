@@ -710,6 +710,12 @@ describe('ai-sdlc-gate.yml — archetype detection (AC #2, AISDLC-484)', () => {
       repo = mkdtempSync(join(tmpdir(), 'gate-classify-'));
       mkdirSync(join(repo, 'scripts'));
       writeFileSync(join(repo, 'scripts', 'is-docs-only-changeset.mjs'), readFileSync(SCRIPT));
+      // The script imports the single docs-only path definition (AISDLC-878).
+      mkdirSync(join(repo, 'pipeline-cli', 'attestation-core'), { recursive: true });
+      writeFileSync(
+        join(repo, 'pipeline-cli', 'attestation-core', 'docs-only-paths.mjs'),
+        readFileSync(join(REPO_ROOT, 'pipeline-cli', 'attestation-core', 'docs-only-paths.mjs')),
+      );
       git('init', '-q');
       git('config', 'user.email', 't@example.com');
       git('config', 'user.name', 't');

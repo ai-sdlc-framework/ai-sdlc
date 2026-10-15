@@ -16,6 +16,7 @@ import {
   fileDecision,
   fileRebase,
   fileTask,
+  buildPrCreateArgs,
   parseLogStrict,
   runFileCli,
   taskIdOf,
@@ -33,6 +34,7 @@ describe('cli-file', () => {
   let remote: string;
   let repo: string;
   let ghCalls: string[][];
+  let armCalls: string[][];
   let drift: string | null;
   let dor: string | null;
   let deps: FileDeps;
@@ -56,12 +58,24 @@ describe('cli-file', () => {
     sh(repo, 'checkout', '-b', 'main');
     commitMain(EVENT_LOG_REL, ev('DEC-0001', 'decision-opened') + '\n');
     ghCalls = [];
+    armCalls = [];
     drift = null;
     dor = null;
     deps = {
       exec(cmd, args, cwd) {
+        if (cmd === process.execPath) {
+          armCalls.push(args);
+          return { status: 0, stdout: '', stderr: '' };
+        }
         if (cmd === 'gh') {
           ghCalls.push(args);
+          if (args[1] === 'list') {
+            return {
+              status: 0,
+              stdout: JSON.stringify([{ number: 1, url: 'https://github.com/o/r/pull/1' }]),
+              stderr: '',
+            };
+          }
           return { status: 0, stdout: 'https://github.com/o/r/pull/1\n', stderr: '' };
         }
         const r = spawnSync(cmd, args, { cwd, encoding: 'utf8' });
@@ -104,6 +118,14 @@ describe('cli-file', () => {
     );
     const title = ghCalls[0][ghCalls[0].indexOf('--title') + 1];
     expect(title.endsWith('(AISDLC-900)')).toBe(true);
+    expect(ghCalls[0]).not.toContain('--draft');
+  });
+
+  it('AISDLC-878: the gh pr create argv never contains --draft', () => {
+    const args = buildPrCreateArgs({ branch: 'ai-sdlc/file-x', subject: 's', prBody: 'b' });
+    expect(args.slice(0, 2)).toEqual(['pr', 'create']);
+    expect(args).not.toContain('--draft');
+    expect(args.join(' ')).not.toMatch(/draft/i);
   });
 
   it('files without a PR when --pr is absent', () => {
@@ -240,8 +262,7 @@ describe('cli-file', () => {
     );
   });
 
-  it('rebase rebuilds a conflicting branch on a new branch without force push', () => {
-    // Filing branch appends DEC-0002 on top of the original log.
+  it('rebase rebuilds a conflicting branch in place: same branch, same PR, re-armed (DEC-0088)', () => {
     const d = deps;
     writeFileSync(
       join(repo, EVENT_LOG_REL),
@@ -250,9 +271,7 @@ describe('cli-file', () => {
         ev('DEC-0002', 'decision-opened', { options: [{ id: 'a' }] }),
       ].join('\n') + '\n',
     );
-    // Local log has both; filing only DEC-0002 appends its lines on origin/main.
     const first = fileDecision(repo, 'DEC-0002', { taskId: 'AISDLC-801', pr: true }, d);
-    // main moves: another record lands, appended at the same spot (would conflict on merge).
     sh(repo, 'checkout', '-f', '--detach', 'origin/main');
     writeFileSync(
       join(repo, EVENT_LOG_REL),
@@ -264,21 +283,27 @@ describe('cli-file', () => {
     ghCalls = [];
     const r = fileRebase(repo, 'DEC-0002', { pr: true }, d);
     expect(first.branch).toBe('ai-sdlc/file-dec-0002');
-    expect(r.branch).toBe('ai-sdlc/file-dec-0002-r2');
+    expect(r.branch).toBe('ai-sdlc/file-dec-0002');
+    expect(r.prUrl).toBe('https://github.com/o/r/pull/1');
+    expect(r.armed).toBe(true);
     const log = parseLogStrict(sh(remote, 'show', `${r.branch}:${EVENT_LOG_REL}`), 'x').events.map(
       (e) => e.decisionId,
     );
     expect(log).toEqual(['DEC-0001', 'DEC-0003', 'DEC-0002']);
-    expect(ghCalls.map((c) => c[1])).toEqual(['create', 'comment']);
-    // a second rebase picks the next free suffix
-    const r3 = fileRebase(repo, 'DEC-0002', { pr: false }, d);
-    expect(r3.branch).toBe('ai-sdlc/file-dec-0002-r3');
+    // no PR is created or closed, no comment; only the lookup of the existing PR
+    expect(ghCalls.map((c) => c[1])).toEqual(['list']);
+    expect(armCalls).toHaveLength(1);
+    expect(armCalls[0].slice(1)).toEqual(['1', '--source-kind', 'docs', '--arm']);
+    // the remote has no replacement branch
+    expect(sh(remote, 'branch', '--list', 'ai-sdlc/file-dec-0002*')).not.toContain('-r2');
+    // a second rebase works too (temporary local branch was cleaned up)
+    expect(fileRebase(repo, 'DEC-0002', { pr: false }, d).branch).toBe('ai-sdlc/file-dec-0002');
   });
 
   it('rebase carries non-log files and refuses a branch with no changes', () => {
     fileTask(repo, writeTask(), { pr: false }, deps);
     const r = fileRebase(repo, 'AISDLC-900', { pr: false }, deps);
-    expect(r.branch).toBe('ai-sdlc/file-aisdlc-900-r2');
+    expect(r.branch).toBe('ai-sdlc/file-aisdlc-900');
     expect(sh(remote, 'show', `${r.branch}:backlog/tasks/aisdlc-900 - thing.md`)).toContain('body');
     sh(repo, 'push', 'origin', 'origin/main:refs/heads/ai-sdlc/file-empty');
     expect(() => fileRebase(repo, 'empty', { pr: false }, deps)).toThrow(/no changes/);

@@ -107,13 +107,8 @@ export const TEST_ONLY_PATTERNS = Object.freeze([
   /(^|\/)__snapshots__\//,
 ]);
 
-/**
- * Copy of `DOCS_ONLY_PATTERN` in `scripts/is-docs-only-changeset.mjs` (that
- * script is not shipped with the published package, so the verifier cannot
- * import it). A test in `pipeline-cli/src/attestation/review-scope.test.ts` asserts the two stay equal.
- */
-export const DOCS_ONLY_PATTERN =
-  /^(spec\/rfcs\/|docs\/|backlog\/tasks\/|backlog\/completed\/|\.ai-sdlc\/attestations\/[^/]+\.dsse\.json$|\.ai-sdlc\/_decisions\/|\.github\/dependabot\.yml$|\.github\/[^/]+\.md$|[^/]+\.md$)/;
+import { DOCS_ONLY_PATTERN } from './docs-only-paths.mjs';
+export { DOCS_ONLY_PATTERN };
 
 /**
  * True when a failed `git show <ref>:<path>` means the file is definitely
