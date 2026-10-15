@@ -1,7 +1,7 @@
 ---
 id: AISDLC-926
 title: 'fix: reconciler treats GitHub installation rate-limit reds as wait-and-rerun, not real-failure or no-match'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [bug, hierarchy, reconcile, pipeline-cli, velocity, token-cost]

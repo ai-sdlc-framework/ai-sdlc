@@ -44,6 +44,7 @@ export const PR_STATES = [
   'stale-claim',
   'behind-or-dirty',
   'attestation-content-hash-mismatch',
+  'rate-limited',
   'real-failure',
   'cancelled-or-infra',
   'ready-to-flip',
@@ -60,6 +61,7 @@ export const PR_ACTIONS: Record<PrState, string> = {
   'stale-claim': 'reap-then-write-resume-signal',
   'behind-or-dirty': 'requeue-hand-review-path-resume',
   'attestation-content-hash-mismatch': 'push-only-resign-resume',
+  'rate-limited': 'wait-and-rerun',
   'real-failure': 'full-fix-resume-with-failing-line',
   'cancelled-or-infra': 'rerun-workflow',
   'ready-to-flip': 'flip-ready-via-rest',
@@ -79,6 +81,14 @@ export interface PrClassification {
 
 const ATTESTATION = 'ai-sdlc/attestation';
 const PR_READY = 'ai-sdlc/pr-ready';
+
+/** Checks that fail on every PR when the App installation rate limit is exhausted. */
+export const RATE_LIMIT_CHECKS: readonly string[] = [
+  'Detect Changes',
+  'ai-sdlc/issue-link',
+  PR_READY,
+];
+const RATE_LIMIT_RE = /rate limit exceeded for installation/i;
 
 function failed(c: PrCheck): boolean {
   return c.conclusion === 'failure';
@@ -108,6 +118,14 @@ export function classifyPr(f: PrFacts): PrClassification {
   const att = checks.find((c) => c.name === ATTESTATION && failed(c));
   if (att && /content[- ]?hash/i.test(att.summary ?? '')) {
     return mk('attestation-content-hash-mismatch');
+  }
+  const failedChecks = checks.filter(failed);
+  if (
+    failedChecks.length > 0 &&
+    failedChecks.every((c) => RATE_LIMIT_CHECKS.includes(c.name)) &&
+    failedChecks.some((c) => RATE_LIMIT_RE.test(c.summary ?? ''))
+  ) {
+    return mk('rate-limited');
   }
   const ready = checks.find((c) => c.name === PR_READY && failed(c));
   if (ready) return mk('real-failure', ready.summary);
