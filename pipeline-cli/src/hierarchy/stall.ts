@@ -6,7 +6,7 @@
  * its heartbeat is older than a short grace (the executor ended its turn
  * without writing a verdict). A stalled claim moves to `failed/` with cause
  * `stale-worker`, the holder is cleared (which restarts its executor loop) and
- * the task is re-queued with a resume note naming the step it stalled at and
+ * the task re-enters (`reenter` when a pull request exists, else a requeue) with a note naming the step it stalled at and
  * any pull request that already exists. This is operational: the planner is
  * never asked.
  */
@@ -60,8 +60,11 @@ export interface StallDeps {
   liveness?: () => ReadonlyMap<string, LiveState>;
   /** Clears (and so restarts) one executor; undefined when the grant is missing. */
   clear?: (o: { executor: string; taskId: string }) => Promise<{ status: string; reason?: string }>;
-  /** Re-queues a failed task with a resume note; undefined when the grant is missing. */
-  requeue?: (taskId: string, note: string) => void;
+  /**
+   * Sends the reaped task back to an executor; undefined when the grant is missing. With
+   * a pull request it is a `reenter` carrying the step note; without one, a plain requeue.
+   */
+  requeue?: (taskId: string, note: string, pr?: number) => void;
   /** Open pull request number of the task, when one exists. */
   findPr?: (taskId: string) => number | undefined;
 }
@@ -179,7 +182,7 @@ export async function reapStalledClaims(
     if (pr !== undefined) report.prNumber = pr;
     if (deps.requeue) {
       try {
-        deps.requeue(taskId, stallResumeNote(step, pr));
+        deps.requeue(taskId, stallResumeNote(step, pr), pr);
         report.requeue = { done: true };
       } catch (err) {
         report.requeue = {

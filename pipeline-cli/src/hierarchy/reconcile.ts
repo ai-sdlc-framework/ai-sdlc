@@ -32,10 +32,9 @@ export const TASK_ACTIONS: Record<PrState, string> = {
   merged: 'mark-landed',
   'manifest-branch-mismatch': 'rewrite-manifest',
   'stale-claim': 'reap-resume',
-  // `land-prep` (AISDLC-881) does not exist yet: a rebase resume stands in.
+  // `land-prep` (AISDLC-881) is not built yet: `reenter` runs its rebase for a BEHIND PR.
   'behind-or-dirty': 'land-prep',
   'attestation-content-hash-mismatch': 'push-only-resign',
-  // `reenter` (AISDLC-882) does not exist yet: a resume carrying the failing line stands in.
   'real-failure': 'reenter',
   'cancelled-or-infra': 'retrigger-once',
   'ready-to-flip': 'flip-ready-takeover',
@@ -187,11 +186,6 @@ export interface ActionContext {
 
 export type ActionExecutor = (ctx: ActionContext) => ActionResult;
 
-function note(text: string): string {
-  // Resume notes are prose: one that starts like a command is refused by the board.
-  return `Fix: ${text.replace(/\s+/g, ' ').trim().slice(0, 400)}`;
-}
-
 /** The argv an action runs, or null when it is record-only or left to a session. Pure. */
 export function actionCommands(
   ctx: ActionContext,
@@ -201,28 +195,13 @@ export function actionCommands(
     file: 'node',
     args: [path.join(cliBin, 'cli-dispatch.mjs'), ...a, '--board-dir', ctx.boardDir],
   });
-  const sha = ctx.headSha ? ` (head ${ctx.headSha})` : '';
-  const resume = (check: string, text: string) =>
-    dispatch(
-      'resume',
-      '--task-id',
-      ctx.taskId,
-      '--pr',
-      String(ctx.pr),
-      '--failing-check',
-      check,
-      '--note',
-      note(text),
-    );
+  // `reenter` classifies the PR itself and runs the machine action or writes the manifest.
+  const reenter = () => dispatch('reenter', String(ctx.pr));
   switch (ctx.action) {
     case 'reenter':
-      return [resume('ai-sdlc/pr-ready', `${ctx.failingLine ?? 'a required check failed'}${sha}`)];
     case 'land-prep':
-      return [resume('ai-sdlc/pr-ready', `rebase onto origin/main, resolve conflicts, push${sha}`)];
     case 'push-only-resign':
-      return [
-        resume('ai-sdlc/attestation', `fetch origin, re-sign the attestation, push only${sha}`),
-      ];
+      return [reenter()];
     case 'rewrite-manifest':
       return [dispatch('write-manifest', '--task-id', ctx.taskId, '--from-pr', String(ctx.pr))];
     case 'reap-resume':

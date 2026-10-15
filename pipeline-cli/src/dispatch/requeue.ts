@@ -15,10 +15,8 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { now } from '../clock.js';
 import { ensureBoardDirs, TASK_ID_RE, writeManifest } from './board.js';
 import { DEFAULT_REQUEUE_RETRY_LIMIT } from './session-reaper.js';
-import { normaliseNote } from './resume.js';
 import type { DispatchManifest, DispatchVerdict } from './types.js';
 
 /** Filename suffix of the manifest copy kept in `failed/`. */
@@ -69,11 +67,6 @@ export interface RequeueFailedResult {
 export interface RequeueFailedOptions {
   /** Re-queues allowed per task (default {@link DEFAULT_REQUEUE_RETRY_LIMIT}). */
   retryLimit?: number;
-  /** Feedback for the next round; written as `resume.note`, the same channel `resume` uses. */
-  note?: string;
-  /** Who requeues the task (audit only); used with `note`. */
-  requeuedBy?: string;
-  now?: () => Date;
   /** Reads a PR's state (`OPEN`, `MERGED`, `CLOSED`) from its URL or number; undefined when unknown. Default: `gh pr view`. */
   prState?: (prUrl: string) => string | undefined;
 }
@@ -116,7 +109,6 @@ export function requeueFailed(
 ): RequeueFailedResult {
   assertId(taskId);
   const retryLimit = opts.retryLimit ?? DEFAULT_REQUEUE_RETRY_LIMIT;
-  const note = opts.note === undefined ? undefined : normaliseNote(opts.note);
   const failedDir = path.join(boardDir, 'failed');
   const records = FAILURE_SUFFIXES.map((s) => path.join(failedDir, `${taskId}${s}`)).filter((f) =>
     existsSync(f),
@@ -160,21 +152,6 @@ export function requeueFailed(
   }
 
   const next: DispatchManifest = { ...manifest, retryCount };
-  if (note !== undefined) {
-    const verdictFile = path.join(failedDir, `${taskId}.verdict.json`);
-    let outcome: string | undefined;
-    try {
-      outcome = (JSON.parse(readFileSync(verdictFile, 'utf-8')) as DispatchVerdict).outcome;
-    } catch {
-      outcome = undefined;
-    }
-    next.resume = {
-      note,
-      resumedAt: (opts.now ?? now)().toISOString(),
-      resumedBy: opts.requeuedBy || 'dispatch',
-      ...(outcome ? { priorOutcome: outcome, fromVerdictOutcome: outcome } : {}),
-    };
-  }
   delete next.workerId;
   delete next.blockedBy;
   const queuePath = writeManifest(boardDir, next);

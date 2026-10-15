@@ -11,9 +11,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runDispatchCli, type DispatchCliDeps } from '../cli/dispatch.js';
 import type { IdentityDeps } from '../hierarchy/index.js';
+import type { CommandRunner } from '../hierarchy/types.js';
 import { claimNext, ensureBoardDirs, readInflightManifest, writeManifest } from './board.js';
 import { completeTask } from './complete.js';
-import { requeueFailed } from './requeue.js';
 import {
   IDLE_BACKOFF_MAX_SEC,
   idleBackoffSec,
@@ -64,6 +64,34 @@ function finish(taskId: string, prNumber = 7): void {
   writeManifest(board, mkManifest(taskId));
   claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-a' });
   completeTask(board, { taskId, outcome: 'success', workerId: 'exec-a', prNumber });
+}
+
+/** A GitHub PR-view stand-in: the PR of `taskId` is red (or as `over` says) on head `sha`. */
+function ghFor(
+  taskId: string,
+  over: { merge?: string; checks?: unknown[]; sha?: string; prNumber?: number } = {},
+): CommandRunner {
+  return () => ({
+    status: 0,
+    stderr: '',
+    stdout: JSON.stringify({
+      number: over.prNumber ?? 7,
+      title: `feat: x (${taskId})`,
+      state: 'OPEN',
+      headRefName: `ai-sdlc/${taskId.toLowerCase()}-slug`,
+      headRefOid: over.sha ?? 'aaaaaaa1111111',
+      isDraft: true,
+      mergeStateStatus: over.merge ?? 'BLOCKED',
+      statusCheckRollup: over.checks ?? [
+        {
+          name: 'ai-sdlc/pr-ready',
+          status: 'COMPLETED',
+          conclusion: 'FAILURE',
+          title: 'coverage is low',
+        },
+      ],
+    }),
+  });
 }
 
 const opts = { resumedBy: 'dispatch', now: () => new Date('2026-10-09T10:00:00.000Z') };
@@ -401,37 +429,6 @@ describe('resume from iterate-needed and failed verdicts (AISDLC-807)', () => {
     writeFileSync(path.join(board, 'failed', 'AISDLC-835.diagnostic.json'), '{}');
     expect(() => resumeDone(board, 'AISDLC-835', { note: 'n' }, opts)).toThrow(/use requeue/);
   });
-
-  it('requeueFailed with a note writes resume.note on the same channel', () => {
-    runTo('AISDLC-836', 'failed');
-    const r = requeueFailed(board, 'AISDLC-836', {
-      note: ' Look at the lint ',
-      requeuedBy: 'dispatch',
-    });
-    const queued = JSON.parse(readFileSync(r.queuePath, 'utf-8')) as DispatchManifest;
-    expect(queued.retryCount).toBe(1);
-    expect(queued.resume).toMatchObject({
-      note: 'Look at the lint',
-      resumedBy: 'dispatch',
-      fromVerdictOutcome: 'failed',
-    });
-  });
-
-  it('requeueFailed refuses an empty note, writing nothing', () => {
-    runTo('AISDLC-837', 'failed');
-    expect(() => requeueFailed(board, 'AISDLC-837', { note: '  ' })).toThrow(/feedback note/);
-    expect(existsSync(path.join(board, 'failed', 'AISDLC-837.verdict.json'))).toBe(true);
-  });
-
-  it('requeueFailed tolerates an unreadable failure verdict and defaults the author', () => {
-    runTo('AISDLC-838', 'failed');
-    writeFileSync(path.join(board, 'failed', 'AISDLC-838.verdict.json'), 'not json');
-    const r = requeueFailed(board, 'AISDLC-838', { note: 'n' });
-    expect(r.retryCount).toBe(1);
-    const queued = JSON.parse(readFileSync(r.queuePath, 'utf-8')) as DispatchManifest;
-    expect(queued.resume?.resumedBy).toBe('dispatch');
-    expect(queued.resume?.fromVerdictOutcome).toBeUndefined();
-  });
 });
 
 describe('feedback reaches the executor', () => {
@@ -554,7 +551,7 @@ describe('authoriseResume', () => {
   });
 });
 
-describe('cli-dispatch resume and claim', () => {
+describe('cli-dispatch reenter and claim', () => {
   const asCaller = (role: string): IdentityDeps => ({
     readSessions: () => [{ name: role, role, pid: 400, status: 'running' }],
     parentPid: (pid) => (pid === 500 ? 400 : null),
@@ -565,6 +562,7 @@ describe('cli-dispatch resume and claim', () => {
     identity: asCaller('operator-dispatch'),
     operational: new Set(['requeue']),
   };
+  const withGh = (id: string): DispatchCliDeps => ({ ...allowed, ghRun: ghFor(id) });
 
   async function cli(
     argv: string[],
@@ -584,23 +582,17 @@ describe('cli-dispatch resume and claim', () => {
     return { exit, stdout, stderr };
   }
 
-  it('accepts the singular --failing-check flag', async () => {
+  it('derives the failing check and head SHA from the pull request', async () => {
     finish('AISDLC-821');
-    const r = await cli([
-      'resume',
-      '--board-dir',
-      board,
-      '--task-id',
-      'AISDLC-821',
-      '--note',
-      'Coverage is low',
-      '--failing-check',
-      'coverage',
-      '--work-dir',
-      root,
-    ]);
+    const r = await cli(
+      ['reenter', '7', '--board-dir', board, '--work-dir', root],
+      withGh('AISDLC-821'),
+    );
     expect(r.exit).toBe(0);
-    expect(JSON.parse(r.stdout.trim()).resume.failingChecks).toEqual(['coverage']);
+    const out = JSON.parse(r.stdout.trim());
+    expect(out.resume.failingChecks).toEqual(['ai-sdlc/pr-ready: coverage is low']);
+    expect(out.resume.headSha).toBe('aaaaaaa1111111');
+    expect(out.resume.failingLine).toBe('coverage is low');
   });
 
   it('splits --failing-checks on commas only and keeps spaces, ampersands and parentheses (AISDLC-868)', async () => {
@@ -693,19 +685,19 @@ describe('cli-dispatch resume and claim', () => {
 
   it('resumes a done task and the next claim surfaces the feedback note', async () => {
     finish('AISDLC-820');
-    const r = await cli([
-      'resume',
-      '--board-dir',
-      board,
-      '--task-id',
-      'AISDLC-820',
-      '--note',
-      'Coverage is 70 percent',
-      '--failing-checks',
-      'coverage,attestation',
-      '--work-dir',
-      root,
-    ]);
+    const r = await cli(
+      [
+        'reenter',
+        'AISDLC-820',
+        '--board-dir',
+        board,
+        '--note',
+        'Coverage is 70 percent',
+        '--work-dir',
+        root,
+      ],
+      withGh('AISDLC-820'),
+    );
     expect(r.exit).toBe(0);
     expect(JSON.parse(r.stdout.trim()).ok).toBe(true);
 
@@ -717,23 +709,16 @@ describe('cli-dispatch resume and claim', () => {
     const parsed = JSON.parse(claim.stdout.trim());
     expect(parsed.claimed).toBe(true);
     expect(parsed.resumeFeedback).toContain('Coverage is 70 percent');
-    expect(parsed.resumeFeedback).toContain('- coverage');
+    expect(parsed.resumeFeedback).toContain('- ai-sdlc/pr-ready: coverage is low');
     expect(parsed.resumeFeedback).toContain('pull request #7');
   });
 
   it('records the caller roster name as resumedBy when --worker is omitted', async () => {
     finish('AISDLC-822');
-    const r = await cli([
-      'resume',
-      '--board-dir',
-      board,
-      '--task-id',
-      'AISDLC-822',
-      '--note',
-      'raise coverage',
-      '--work-dir',
-      root,
-    ]);
+    const r = await cli(
+      ['reenter', '7', '--board-dir', board, '--note', 'raise coverage', '--work-dir', root],
+      withGh('AISDLC-822'),
+    );
     expect(r.exit).toBe(0);
     const queued = JSON.parse(
       readFileSync(path.join(board, 'queue', 'AISDLC-822.dispatch.json'), 'utf-8'),
@@ -746,17 +731,10 @@ describe('cli-dispatch resume and claim', () => {
     finish('AISDLC-821');
     const noteFile = path.join(root, 'note.txt');
     writeFileSync(noteFile, 'from file');
-    const r = await cli([
-      'resume',
-      '--board-dir',
-      board,
-      '--task-id',
-      'AISDLC-821',
-      '--note-file',
-      noteFile,
-      '--work-dir',
-      root,
-    ]);
+    const r = await cli(
+      ['reenter', '7', '--board-dir', board, '--note-file', noteFile, '--work-dir', root],
+      withGh('AISDLC-821'),
+    );
     expect(r.exit).toBe(0);
     const queued = JSON.parse(
       readFileSync(path.join(board, 'queue', 'AISDLC-821.dispatch.json'), 'utf-8'),
@@ -766,55 +744,61 @@ describe('cli-dispatch resume and claim', () => {
 
   it('reads a note file under the board dir, and refuses outside files and oversized ones', async () => {
     finish('AISDLC-823');
-    const base = ['resume', '--board-dir', board, '--work-dir', root, '--task-id', 'AISDLC-823'];
+    const base = ['reenter', '7', '--board-dir', board, '--work-dir', root];
+    const cli2 = (argv: string[]) => cli(argv, withGh('AISDLC-823'));
     const inBoard = path.join(board, 'note.txt');
     writeFileSync(inBoard, 'in board');
     const outside = path.join(process.cwd(), 'package.json');
-    const outsideRes = await cli([...base, '--note-file', outside]);
+    const outsideRes = await cli2([...base, '--note-file', outside]);
     expect(outsideRes.exit).toBe(2);
     expect(outsideRes.stderr).toContain('--note-file must be under');
     const big = path.join(root, 'big.txt');
     writeFileSync(big, 'x'.repeat(4000 * 4 + 1));
     vi.restoreAllMocks();
-    const bigRes = await cli([...base, '--note-file', big]);
+    const bigRes = await cli2([...base, '--note-file', big]);
     expect(bigRes.exit).toBe(2);
     expect(bigRes.stderr).toContain('note limit');
     vi.restoreAllMocks();
-    expect((await cli([...base, '--note-file', path.join(root, 'missing.txt')])).exit).toBe(2);
+    expect((await cli2([...base, '--note-file', path.join(root, 'missing.txt')])).exit).toBe(2);
     vi.restoreAllMocks();
-    expect((await cli([...base, '--note-file', inBoard])).exit).toBe(0);
+    expect((await cli2([...base, '--note-file', inBoard])).exit).toBe(0);
   });
 
-  it('refuses bad input, a wrong caller, a missing grant and a task that is not done', async () => {
+  it('refuses bad input, a wrong caller, a missing grant and a task with no pull request', async () => {
     finish('AISDLC-822');
-    const base = ['resume', '--board-dir', board, '--work-dir', root];
-    expect((await cli([...base, '--task-id', 'x', '--note', 'n'])).exit).toBe(2);
-    expect((await cli([...base, '--task-id', 'AISDLC-822'])).exit).toBe(1);
+    const base = ['--board-dir', board, '--work-dir', root];
+    const gh = ghFor('AISDLC-822');
     expect(
-      (await cli([...base, '--task-id', 'AISDLC-822', '--note', 'n', '--pr', 'zz'])).exit,
-    ).toBe(2);
+      (await cli(['reenter', 'x', ...base, '--note', 'n'], { ...allowed, ghRun: gh })).exit,
+    ).toBe(1);
+    expect((await cli(['reenter', ...base], { ...allowed, ghRun: gh })).exit).toBe(2);
     expect(
       (
-        await cli([...base, '--task-id', 'AISDLC-822', '--note', 'n'], {
+        await cli(['reenter', '7', ...base, '--note', 'n'], {
           identity: asCaller('executor'),
           operational: new Set(['requeue']),
+          ghRun: gh,
         })
       ).exit,
     ).toBe(1);
     expect(
       (
-        await cli([...base, '--task-id', 'AISDLC-822', '--note', 'n'], {
+        await cli(['reenter', '7', ...base, '--note', 'n'], {
           identity: asCaller('operator-dispatch'),
           operational: new Set(),
+          ghRun: gh,
         })
       ).exit,
     ).toBe(1);
-    expect((await cli([...base, '--task-id', 'AISDLC-899', '--note', 'n'])).exit).toBe(1);
+    expect(
+      (await cli(['reenter', 'AISDLC-899', ...base, '--note', 'n'], { ...allowed, ghRun: gh }))
+        .exit,
+    ).toBe(1);
     expect(existsSync(path.join(board, 'done', 'AISDLC-822.verdict.json'))).toBe(true);
   });
 });
 
-describe('cli-dispatch resume, requeue --note and release (AISDLC-807)', () => {
+describe('cli-dispatch reenter, requeue and release (AISDLC-807)', () => {
   const asCaller = (role: string): IdentityDeps => ({
     readSessions: () => [{ name: role, role, pid: 400, status: 'running' }],
     parentPid: (pid) => (pid === 500 ? 400 : null),
@@ -826,7 +810,10 @@ describe('cli-dispatch resume, requeue --note and release (AISDLC-807)', () => {
     operational: new Set(['requeue']),
   };
 
-  async function cli(argv: string[]): Promise<{ exit: number; stdout: string; stderr: string }> {
+  async function cli(
+    argv: string[],
+    gh?: CommandRunner,
+  ): Promise<{ exit: number; stdout: string; stderr: string }> {
     let stdout = '';
     let stderr = '';
     vi.spyOn(process.stdout, 'write').mockImplementation(((c: string | Uint8Array) => {
@@ -837,7 +824,7 @@ describe('cli-dispatch resume, requeue --note and release (AISDLC-807)', () => {
       stderr += c.toString();
       return true;
     }) as typeof process.stderr.write);
-    const exit = await runDispatchCli(argv, allowed);
+    const exit = await runDispatchCli(argv, gh ? { ...allowed, ghRun: gh } : allowed);
     return { exit, stdout, stderr };
   }
 
@@ -852,35 +839,23 @@ describe('cli-dispatch resume, requeue --note and release (AISDLC-807)', () => {
     ) as DispatchManifest;
   const base = () => ['--board-dir', board, '--work-dir', root];
 
-  it('resume accepts an iterate-needed verdict and a failed verdict', async () => {
+  it('reenter accepts an iterate-needed verdict and a failed verdict', async () => {
     run('AISDLC-841', 'iterate-needed');
     run('AISDLC-842', 'failed');
-    const a = await cli([
-      'resume',
-      ...base(),
-      '--task-id',
-      'AISDLC-841',
-      '--pr',
-      '5',
-      '--note',
-      'T',
-    ]);
-    expect(a.exit).toBe(0);
+    const a = await cli(
+      ['reenter', '5', ...base(), '--note', 'T'],
+      ghFor('AISDLC-841', { prNumber: 5 }),
+    );
+    expect([a.exit, a.stderr]).toEqual([0, '']);
     expect(queued('AISDLC-841').resume).toMatchObject({
       prNumber: 5,
       note: 'T',
       fromVerdictOutcome: 'iterate-needed',
     });
-    const b = await cli([
-      'resume',
-      ...base(),
-      '--task-id',
-      'AISDLC-842',
-      '--pr',
-      '6',
-      '--note',
-      'T',
-    ]);
+    const b = await cli(
+      ['reenter', '6', ...base(), '--note', 'T'],
+      ghFor('AISDLC-842', { prNumber: 6 }),
+    );
     expect(b.exit).toBe(0);
     expect(queued('AISDLC-842').resume).toMatchObject({
       prNumber: 6,
@@ -888,31 +863,33 @@ describe('cli-dispatch resume, requeue --note and release (AISDLC-807)', () => {
     });
   });
 
-  it('resume with no verdict refuses with the existing message', async () => {
-    const r = await cli(['resume', ...base(), '--task-id', 'AISDLC-843', '--note', 'T']);
+  it('reenter with no verdict refuses with the existing message', async () => {
+    const r = await cli(['reenter', '5', ...base(), '--note', 'T'], ghFor('AISDLC-843'));
     expect(r.exit).toBe(1);
     expect(r.stderr).toMatch(/is not in done\/; only a finished task can be resumed/);
   });
 
-  it('requeue --note writes resume.note, and a blank --note exits 2', async () => {
+  it('requeue no longer takes --note and leaves the board untouched', async () => {
     run('AISDLC-844', 'failed');
-    expect((await cli(['requeue', ...base(), '--task-id', 'AISDLC-844', '--note'])).exit).toBe(2);
-    expect(existsSync(path.join(board, 'failed', 'AISDLC-844.verdict.json'))).toBe(true);
     const r = await cli(['requeue', ...base(), '--task-id', 'AISDLC-844', '--note', 'Check lint']);
-    expect(r.exit).toBe(0);
-    expect(queued('AISDLC-844').resume).toMatchObject({
-      note: 'Check lint',
-      resumedBy: 'operator-dispatch',
-    });
+    expect(r.exit).toBe(2);
+    expect(r.stderr).toContain('reenter');
+    expect(existsSync(path.join(board, 'failed', 'AISDLC-844.verdict.json'))).toBe(true);
   });
 
-  it('release refuses a task with a done verdict, naming resume and remove-verdict', async () => {
+  it('resume is not a subcommand any more', async () => {
+    const r = await cli(['resume', ...base(), '--task-id', 'AISDLC-844', '--note', 'x']);
+    expect(r.exit).toBe(2);
+    expect(r.stderr).toContain("unknown subcommand 'resume'");
+  });
+
+  it('release refuses a task with a done verdict, naming reenter and remove-verdict', async () => {
     finish('AISDLC-845');
     writeManifest(board, mkManifest('AISDLC-845'));
     claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-a' });
     const r = await cli(['release', '--board-dir', board, '--task-id', 'AISDLC-845']);
     expect(r.exit).toBe(1);
-    expect(r.stderr).toMatch(/resume/);
+    expect(r.stderr).toMatch(/reenter/);
     expect(r.stderr).toMatch(/remove-verdict/);
     expect(existsSync(path.join(board, 'queue', 'AISDLC-845.dispatch.json'))).toBe(false);
   });
@@ -986,36 +963,32 @@ describe('push-only resume (AISDLC-821)', () => {
     expect(formatResumeFeedback(plain.resume)).not.toContain('RESUME MODE');
   });
 
-  it('cli-dispatch resume --push-only sets the mode', async () => {
+  it('cli-dispatch reenter sets push-only for an attestation content mismatch', async () => {
     finish('AISDLC-832');
     vi.spyOn(process.stdout, 'write').mockImplementation(
       (() => true) as typeof process.stdout.write,
     );
-    const exit = await runDispatchCli(
-      [
-        'resume',
-        '--board-dir',
-        board,
-        '--task-id',
-        'AISDLC-832',
-        '--note',
-        'n',
-        '--push-only',
-        '--work-dir',
-        root,
-      ],
-      {
-        identity: {
-          readSessions: () => [
-            { name: 'operator-dispatch', role: 'operator-dispatch', pid: 400, status: 'running' },
-          ],
-          parentPid: (pid) => (pid === 500 ? 400 : null),
-          comm: (pid) => (pid === 400 ? 'claude' : 'zsh'),
-          startPid: 500,
-        },
-        operational: new Set(['requeue']),
+    const exit = await runDispatchCli(['reenter', '7', '--board-dir', board, '--work-dir', root], {
+      identity: {
+        readSessions: () => [
+          { name: 'operator-dispatch', role: 'operator-dispatch', pid: 400, status: 'running' },
+        ],
+        parentPid: (pid) => (pid === 500 ? 400 : null),
+        comm: (pid) => (pid === 400 ? 'claude' : 'zsh'),
+        startPid: 500,
       },
-    );
+      operational: new Set(['requeue']),
+      ghRun: ghFor('AISDLC-832', {
+        checks: [
+          {
+            name: 'ai-sdlc/attestation',
+            status: 'COMPLETED',
+            conclusion: 'FAILURE',
+            title: 'content hash mismatch',
+          },
+        ],
+      }),
+    });
     vi.restoreAllMocks();
     expect(exit).toBe(0);
     const queued = JSON.parse(

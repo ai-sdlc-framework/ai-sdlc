@@ -14,7 +14,7 @@
  * `resumeDone` checks everything before it writes anything.
  */
 
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { now } from '../clock.js';
@@ -110,6 +110,10 @@ export interface ResumeInput {
   findings?: readonly string[];
   /** Resume without a developer or reviewer round (AISDLC-821). */
   pushOnly?: boolean;
+  /** Head commit of the pull request when the round was ordered (`reenter`, AISDLC-882). */
+  headSha?: string;
+  /** The failing check line the round must fix (`reenter`). */
+  failingLine?: string;
 }
 
 /** Collaborators of {@link resumeDone}. */
@@ -121,6 +125,13 @@ export interface ResumeDoneOptions {
   resolveTaskFile?: (taskId: string) => string | undefined;
   /** Used only with `resolveTaskFile`, to rebuild the base commit. */
   resolveBaseSha?: () => string | undefined;
+  /**
+   * Move the task's finished-state files here instead of deleting them (`reenter`
+   * keeps them under `landing/<pr>/history/`).
+   */
+  archiveDir?: string;
+  /** Accept a failure that left only a diagnostic and a manifest copy (a reaped claim). */
+  allowDiagnosticOnly?: boolean;
 }
 
 /** Result of a successful resume. */
@@ -218,7 +229,8 @@ export function resumeDone(
   const marker = existsSync(markerFile)
     ? readJson<{ completedAt?: string }>(markerFile)
     : undefined;
-  if (!verdict && !marker) {
+  const diagnosticOnly = opts.allowDiagnosticOnly === true && !verdict && !marker;
+  if (!verdict && !marker && !(diagnosticOnly && existsSync(failedDiagnosticFile))) {
     if (existsSync(failedDiagnosticFile)) {
       throw new Error(`${taskId} is in failed/ with a diagnostic only; use requeue instead`);
     }
@@ -234,7 +246,7 @@ export function resumeDone(
       throw new Error(`${taskId} is already in ${sub}/`);
     }
   }
-  if (!failedVerdict && existsSync(failedDiagnosticFile)) {
+  if (!failedVerdict && !diagnosticOnly && existsSync(failedDiagnosticFile)) {
     throw new Error(`${taskId} is in failed/; use requeue instead`);
   }
 
@@ -298,7 +310,9 @@ export function resumeDone(
     resumedAt: (opts.now ?? now)().toISOString(),
     resumedBy: oneLine(opts.resumedBy, 80) || 'dispatch',
     ...(verdict ? { priorOutcome: verdict.outcome } : {}),
-    fromVerdictOutcome: verdict ? verdict.outcome : 'success',
+    fromVerdictOutcome: verdict ? verdict.outcome : diagnosticOnly ? 'failed' : 'success',
+    ...(input.headSha ? { headSha: input.headSha } : {}),
+    ...(input.failingLine ? { failingLine: input.failingLine } : {}),
     ...(branchGuessed && !prHeadRef ? { branchGuessed: true } : {}),
     ...(input.pushOnly ? { resumeMode: 'push-only' as const } : {}),
   };
@@ -338,7 +352,13 @@ export function resumeDone(
       ? ['state', 'resume'].map((x) => path.join(boardDir, 'inflight', `${taskId}.${x}.json`))
       : []),
   ]) {
-    rmSync(f, { force: true });
+    if (opts.archiveDir && existsSync(f)) {
+      mkdirSync(opts.archiveDir, { recursive: true });
+      const stamp = (opts.now ?? now)().toISOString().replace(/[:.]/g, '-');
+      renameSync(f, path.join(opts.archiveDir, `${path.basename(f)}.${stamp}`));
+    } else {
+      rmSync(f, { force: true });
+    }
   }
   return { taskId, queuePath, resume };
 }
@@ -473,7 +493,7 @@ export function authoriseResume(
   const manifest = readInflightManifest(boardDir, taskId);
   const feedback = manifest?.resume;
   if (!manifest || !feedback) return undefined;
-  const next = 'ask the dispatch session to run `cli-dispatch resume` again';
+  const next = 'ask the dispatch session to run `cli-dispatch reenter` again';
   let sessions: ReturnType<IdentityDeps['readSessions']>;
   try {
     sessions = identity.readSessions();

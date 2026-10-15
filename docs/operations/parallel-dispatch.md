@@ -828,7 +828,7 @@ becomes an escalation.
 | Mechanical conflict shape (`test-additions-overlap`, `prettier-drift`, `pnpm-lock-regen`, `package-json-bin-concat`, `behind-only`) | Rebase the task branch onto `origin/main`, then lease-push to that branch | `rebase-own-branch`, `lease-push-own-branch` |
 | `stale-merge-ref` | Push an empty commit to the task branch | `retrigger-ci` |
 | `stale-heartbeat`, `spawn-rejected`, `quota-exhausted`, `transient`, within the retry limit | `cli-dispatch requeue --task-id <id>` | `requeue` |
-| Failed task whose verdict names an OPEN PR (PR follow-up: rebase, re-sign, push, ready flip) | `cli-dispatch requeue --task-id <id> --note "<what to finish>"`; no retry is used, no escalation | `requeue` |
+| Failed task whose verdict names an OPEN PR (PR follow-up: rebase, re-sign, push, ready flip) | `cli-dispatch reenter <pr-or-task> --note "<what to finish>"`; no retry is used, no escalation. A second `reenter` on the same `(action, head SHA)` is refused by the loop guard (AISDLC-883) | `requeue` |
 | Anything else | Escalate: the planner is messaged with the task id and the failure. No git action is taken. | none |
 
 The playbook can push to one place: `HEAD:refs/heads/<the task's own branch>`.

@@ -35,7 +35,7 @@
  *     reaped taskIds.
  *   - `release --task-id <id> [--force --reason <text>]` — move inflight back
  *     to queue/ (surrender the claim without writing a verdict). Refused when
- *     `done/` already holds a verdict for the task (use `resume` or
+ *     `done/` already holds a verdict for the task (use `reenter` or
  *     `remove-verdict`). Also refuses, exit 1, while the task's worktree holds
  *     commits that are not on its pushed branch or uncommitted changes to
  *     tracked files; `--force` with a reason releases anyway and writes the
@@ -56,7 +56,7 @@
  *   - `reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]` — return
  *     stale inflight manifests to queue/ (retry count incremented), or to
  *     failed/ once past the retry limit.
- *   - `requeue --task-id <id> [--retry-limit <n>] [--note <text>]` — return one failed task to
+ *   - `requeue --task-id <id> [--retry-limit <n>]` — return one failed PR-less task to
  *     queue/ with its retry count incremented, restoring the manifest kept
  *     when it failed. Meant for the dispatch session only: a mistake guard
  *     (the one `cli-hierarchy tick` uses; it is not authentication) exits 1,
@@ -65,18 +65,18 @@
  *     larger value exits 2). Also exits 1, changing nothing, when the task is
  *     not in failed/, has no saved manifest, is already active, or is past the
  *     retry limit. A failed task whose verdict names an open PR is PR follow-up: it is requeued past the cap with
- *     `followUp: true` and no retry used. `--note` writes the same `resume.note` block `resume` writes.
+ *     `followUp: true` and no retry used. There is no `--note`: a task with a PR re-enters with `reenter`.
  *
- *   - `resume --task-id <id> --note <text> [--pr <number>] [--failing-check <a,b>] [--push-only]
- *     [--finding <text>]` (or `--note-file <path>`; `--note` may be omitted for an
- *     iterate-needed verdict whose claim was released, which resumes with the
- *     verdict notes). Notes, checks and findings are prose: a line starting with
- *     `cli-`, `git ` or `gh ` is rejected (AISDLC-800) — send a finished task back to
- *     queue/ with a feedback note on its manifest (AISDLC-738). The next claim
- *     prints the note, and `/ai-sdlc execute` re-enters the task's existing worktree
- *     and branch and updates its pull request. Same caller check and `requeue`
- *     grant as `requeue`. Accepts a verdict in `done/` (success or iterate-needed) or in
- *     `failed/`; exits 1, changing nothing, when the task has no verdict.
+ *   - `reenter <pr|task-id> [--note <text> | --note-file <path>]` (AISDLC-882) — re-enter a
+ *     pull request keyed on its state. A state a machine can fix (BEHIND, a cancelled or infra
+ *     check) runs that action and writes no manifest. A state that needs an executor (a real
+ *     failure on the current head, a semantic conflict, an attestation content mismatch)
+ *     writes ONE queue manifest naming the branch, head SHA and failing line, and moves the
+ *     task's `done/` and `failed/` files into `landing/<pr>/history/`; the claim is made by the
+ *     normal executor claim and Step 3 reuses that branch. A state that needs nothing is
+ *     refused unless `--note` orders a round. Re-entering the same `(action, headSha)` twice is
+ *     refused by the loop guard (AISDLC-883). Notes are prose: a line starting with `cli-`,
+ *     `git ` or `gh ` is rejected (AISDLC-800). Same caller check and `requeue` grant as `requeue`.
  *
  *   - `idle-backoff [--work-dir <path>]` — print `{"sleepSec":n}`, how long an
  *     idle executor waits before its next `claim`: the dispatch config's
@@ -171,7 +171,6 @@ import {
   requeueFailed,
   requeueStaleInflight,
   removeVerdict,
-  resumeDone,
   TASK_ID_RE,
   sweepStaleHeartbeats,
   unblockManifest,
@@ -199,8 +198,10 @@ import {
   reconcile,
   type ReconcilePr,
 } from '../hierarchy/reconcile.js';
+import { reenter } from '../hierarchy/reenter.js';
 import { startScheduler } from '../hierarchy/scheduler.js';
 import { createSystemRunner } from '../hierarchy/system-runner.js';
+import type { CommandRunner } from '../hierarchy/types.js';
 import { DEFAULT_REQUEUE_RETRY_LIMIT } from '../dispatch/session-reaper.js';
 import { checkDispatchCaller, loadOperational, type IdentityDeps } from '../hierarchy/index.js';
 import { nextSubId } from '../dispatch/subid.js';
@@ -355,24 +356,8 @@ export interface DispatchCliDeps {
   cwd?: string;
   /** Role the calling process holds in the roster; null when it holds none. */
   callerRole?: () => HierarchyRole | null;
-  /** Head branch of a pull request (`resume --pr`); undefined when it cannot be read. */
-  prHeadRef?: (pr: number, workDir: string) => string | undefined;
-}
-
-/** Head branch of a pull request, from the GitHub REST API; undefined on any failure. */
-function lookupPrHeadRef(pr: number, workDir: string): string | undefined {
-  try {
-    const out = execFileSync(
-      'gh',
-      ['api', `repos/{owner}/{repo}/pulls/${pr}`, '--jq', '.head.ref'],
-      { cwd: workDir, encoding: 'utf-8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] },
-    ).trim();
-    return /^[A-Za-z0-9._/-]+$/.test(out) && !out.startsWith('-') && !out.includes('..')
-      ? out
-      : undefined;
-  } catch {
-    return undefined;
-  }
+  /** Runs `gh` for `reenter`; default the process's `gh`. */
+  ghRun?: CommandRunner;
 }
 
 /** File paths touched by open pull requests, from the `gh` CLI. */
@@ -898,7 +883,7 @@ export async function runDispatchCli(
       ) {
         process.stderr.write(
           `cli-dispatch release: ${taskId} already has a verdict in done/, so releasing it would queue a finished task. ` +
-            `To send it back for another round run \`cli-dispatch resume --task-id ${taskId} --note <text>\`; ` +
+            `To send it back for another round run \`cli-dispatch reenter ${taskId} --note <text>\`; ` +
             `to discard the verdict first run \`cli-dispatch remove-verdict --task-id ${taskId}\`\n`,
         );
         return 1;
@@ -1282,9 +1267,10 @@ export async function runDispatchCli(
       }
       const retryLimit = intFlag(flags, 'retry-limit');
       if (retryLimit === null) return 2;
-      const requeueNote = flags['note'];
-      if (requeueNote !== undefined && (!requeueNote || requeueNote === 'true')) {
-        process.stderr.write('cli-dispatch requeue: --note needs a text\n');
+      if (flags['note'] !== undefined) {
+        process.stderr.write(
+          'cli-dispatch requeue: --note no longer exists; a task with a pull request re-enters with `cli-dispatch reenter <pr> --note <text>` (AISDLC-882)\n',
+        );
         return 2;
       }
       if (retryLimit !== undefined && retryLimit > DEFAULT_REQUEUE_RETRY_LIMIT) {
@@ -1298,7 +1284,6 @@ export async function runDispatchCli(
           ok: true,
           ...requeueFailed(boardDir, taskId, {
             ...(retryLimit === undefined ? {} : { retryLimit }),
-            ...(requeueNote !== undefined ? { note: requeueNote, requeuedBy: caller.name } : {}),
           }),
         });
         return 0;
@@ -1320,32 +1305,31 @@ export async function runDispatchCli(
       return 0;
     }
 
-    case 'resume': {
-      const taskId = requireFlag(flags, 'task-id');
-      if (!TASK_ID_RE.test(taskId)) {
-        process.stderr.write(`cli-dispatch resume: '${taskId}' is not a valid task id\n`);
+    case 'reenter': {
+      const first = argv[1] !== undefined && !argv[1].startsWith('--') ? argv[1] : undefined;
+      const target = first ?? flags['pr'] ?? flags['task-id'] ?? '';
+      if (!target || target === 'true') {
+        process.stderr.write('cli-dispatch reenter: pass a pull request number or a task id\n');
         return 2;
       }
-      let note = flags['note'] ?? '';
-      if (flags['note'] === undefined && flags['note-file']) {
+      let note = flags['note'];
+      if (note === undefined && flags['note-file']) {
         const read = readNoteFile(flags['note-file'], boardDir);
         if ('error' in read) {
-          process.stderr.write(`cli-dispatch resume: ${read.error}\n`);
+          process.stderr.write(`cli-dispatch reenter: ${read.error}\n`);
           return 2;
         }
         note = read.note;
       }
       if (note === 'true') {
         process.stderr.write(
-          'cli-dispatch resume: --note <text> (or --note-file <path>) needs a value\n',
+          'cli-dispatch reenter: --note <text> (or --note-file <path>) needs a value\n',
         );
         return 2;
       }
-      const prNumber = intFlag(flags, 'pr');
-      if (prNumber === null) return 2;
       const cwd = deps.cwd ?? process.cwd();
       const caller = checkDispatchCaller({
-        label: 'cli-dispatch resume',
+        label: 'cli-dispatch reenter',
         cwd,
         boardDir,
         workDir: flags['work-dir'],
@@ -1358,37 +1342,26 @@ export async function runDispatchCli(
         process.stderr.write(`${caller.reason}\n`);
         return 1;
       }
-      // Sending a finished task back is a kind of requeue: the same grant applies.
+      // Sending a PR back to an executor is a kind of requeue: the same grant applies.
       const granted = deps.operational ?? loadOperational(cwd, cwd);
       if (!granted.has('requeue')) {
         process.stderr.write(
-          'cli-dispatch resume: refused; the repository policy does not grant requeue to the dispatch session. ' +
+          'cli-dispatch reenter: refused; the repository policy does not grant requeue to the dispatch session. ' +
             'Raise it with `cli-decisions escalate` so the decision is recorded and routed\n',
         );
         return 1;
       }
       const workDir = path.resolve(flags['work-dir'] ?? '.');
-      const prHeadRef =
-        prNumber !== undefined ? (deps.prHeadRef ?? lookupPrHeadRef)(prNumber, workDir) : undefined;
       try {
         out({
           ok: true,
-          ...resumeDone(
-            boardDir,
-            taskId,
+          ...reenter(
+            { target, ...(note === undefined ? {} : { note }) },
             {
-              note,
-              ...(prNumber !== undefined ? { prNumber } : {}),
-              ...(prHeadRef ? { prHeadRef } : {}),
-              failingChecks: [
-                ...splitCommaList(flags['failing-checks']),
-                ...splitCommaList(flags['failing-check']),
-              ],
-              findings: flags['finding'] ? [flags['finding']] : [],
-              pushOnly: flags['push-only'] === 'true',
-            },
-            {
-              resumedBy: caller.name,
+              boardDir,
+              run: deps.ghRun ?? createSystemRunner(),
+              cwd: workDir,
+              reenteredBy: caller.name,
               resolveBaseSha: () => flags['base-sha'] ?? resolveBaseSha(workDir),
               resolveTaskFile: (id) => findTaskFile(workDir, id),
             },
@@ -1397,7 +1370,7 @@ export async function runDispatchCli(
         return 0;
       } catch (err) {
         process.stderr.write(
-          `cli-dispatch resume: ${err instanceof Error ? err.message : String(err)}\n`,
+          `cli-dispatch reenter: ${err instanceof Error ? err.message : String(err)}\n`,
         );
         return 1;
       }
@@ -1540,7 +1513,8 @@ Subcommands:
       Classify each open task PR (array of REST facts) into one state and action;
       writes one DispatchPrClassified event each (AISDLC-823).
   reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]
-  requeue --task-id <id> [--retry-limit <n>]   (meant for the dispatch session; mistake guard, limit at most 2)
+  requeue --task-id <id> [--retry-limit <n>]   (PR-less failures; meant for the dispatch session; limit at most 2)
+  reenter <pr|task-id> [--note <text>]   (re-enter a PR keyed on its state; replaces resume)
   complete --task-id <id> --outcome <enum> --worker <name> [--pr <number>] [--pr-url <url>]
            [--follow-ups <ids>] [--decisions <ids>] [--notes <s>] [--cause <s>]
   next-subid <task-id> [--work-dir <path>]

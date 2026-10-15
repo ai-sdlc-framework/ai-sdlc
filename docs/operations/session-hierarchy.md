@@ -164,8 +164,8 @@ The operating cycle is **brief, tick, clear**:
 
 Loop bodies and the liveness reaper are described in
 [`parallel-dispatch.md`](parallel-dispatch.md). A task in `done/` whose pull request later
-goes red is sent back to an executor with `cli-dispatch resume`; see
-[`cli-hierarchy.md`](cli-hierarchy.md#sending-a-finished-task-back-resume).
+goes red is sent back to an executor with `cli-dispatch reenter`; see
+[`cli-hierarchy.md`](cli-hierarchy.md#sending-a-finished-task-back-reenter).
 
 ## Escalation chain and timeboxes
 

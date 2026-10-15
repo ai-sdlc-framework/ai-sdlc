@@ -1515,14 +1515,14 @@ export function checkDispatchBoard(ctx: DoctorRunContext): DoctorCheckResult[] {
       waved,
       'no resume manifest carries a wave',
       'resume manifests carrying a wave',
-      'Re-run `cli-dispatch resume` for the task; a resume sorts by priority and has no wave.',
+      'Re-run `cli-dispatch reenter <pr>` for the task; a resume sorts by priority and has no wave.',
     ),
     result(
       'dispatch-board-stale-verdict',
       unhandled,
       'every iterate-needed verdict in done/ has a released or continued claim',
       'iterate-needed verdicts older than 10 minutes with no released claim',
-      'Release the claim (`cli-dispatch release --task-id <id>`) then `cli-dispatch resume --task-id <id>`.',
+      'Release the claim (`cli-dispatch release --task-id <id>`) then `cli-dispatch reenter <pr>`.',
       'warn',
     ),
   ];

@@ -195,9 +195,9 @@ describe('action table (AC2)', () => {
     expect(ctx.headSha).toBe('abc123');
     const cmds = actionCommands({ ...ctx, failingLine: 'test x failed' }, '/bin');
     const args = cmds![0]!.args.join(' ');
-    expect(args).toContain('test x failed');
-    expect(args).toContain('abc123');
-    expect(args).toContain('resume');
+    // `reenter` reads the head and the failing line from the PR itself.
+    expect(args).toContain('reenter');
+    expect(args).not.toContain('resume');
   });
 
   it('docs: DoR failure reruns DoR, other failure goes to the planner, green CLEAN arms', () => {
@@ -319,9 +319,9 @@ describe('helpers', () => {
     expect(run('arm')![0]!.args).toContain('--arm');
     expect(run('retrigger-once')![0]!.args).toContain('sha');
     expect(run('rerun-dor', { headSha: undefined })).toBeNull();
-    expect(run('land-prep')![0]!.args.join(' ')).toContain('rebase onto');
-    expect(run('push-only-resign')![0]!.args.join(' ')).toContain('re-sign');
-    expect(run('reenter')![0]!.args.join(' ')).toContain('a required check failed');
+    for (const a of ['land-prep', 'push-only-resign', 'reenter']) {
+      expect(run(a)![0]!.args.slice(1, 3)).toEqual(['reenter', '3']);
+    }
     expect(run('none')).toBeNull();
   });
 
