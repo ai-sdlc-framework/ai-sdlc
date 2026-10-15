@@ -519,6 +519,25 @@ describe('fanoutPost', () => {
 });
 
 describe('renderPrTasksComment', () => {
+  it('names the pending reference and its PR in a clean comment', () => {
+    const v = cleanTaskVerdict();
+    v.gates = [
+      ...(v.gates ?? []),
+      {
+        gateId: 3,
+        verdict: 'pass',
+        severity: 'block',
+        stage: 'A',
+        confidence: 'high',
+        pending: [{ ref: 'AISDLC-777', where: 'open filing PR #42' }],
+      },
+    ];
+    const body = renderPrTasksComment([v]);
+    expect(body).toContain('DoR clean');
+    expect(body).toContain('AISDLC-777');
+    expect(body).toContain('open filing PR #42');
+  });
+
   function blockingTaskVerdict(): PrTaskVerdict {
     return {
       ...blockedVerdict(),

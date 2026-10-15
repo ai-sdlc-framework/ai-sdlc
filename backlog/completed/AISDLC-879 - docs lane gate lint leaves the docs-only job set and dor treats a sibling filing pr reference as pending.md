@@ -1,7 +1,7 @@
 ---
 id: AISDLC-879
 title: 'docs lane gate: lint leaves the docs-only job set, DoR treats a reference to a task in another open filing PR as pending and re-runs when it merges, no-task PRs are never drafts'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-14'
 labels: [rfc-0054, docs-lane, phase-0, ci]

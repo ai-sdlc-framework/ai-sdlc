@@ -145,6 +145,7 @@ async function evaluateGate3Hermetic(
     // `resolved: true`), while `fileExistenceResolver` still performs a
     // real offline check.
     const gate3opts: Gate3Opts = {
+      pendingRefs: pendingRefsFromEnv(),
       ...opts.gate3,
       resolvers: opts.gate3?.resolvers,
     };
@@ -160,7 +161,26 @@ async function evaluateGate3Hermetic(
     }
     return evaluateGate3(input, gate3opts);
   }
-  return evaluateGate3(input, opts.gate3 ?? {});
+  return evaluateGate3(input, { pendingRefs: pendingRefsFromEnv(), ...opts.gate3 });
+}
+
+/**
+ * AISDLC-879: the DoR workflow exports `AI_SDLC_DOR_PENDING_REFS` as a JSON
+ * object (`{"AISDLC-12": "open filing PR #34"}`). Malformed input is ignored,
+ * so a bad value can only make the gate stricter, never looser.
+ */
+function pendingRefsFromEnv(): Record<string, string> | undefined {
+  const raw = process.env.AI_SDLC_DOR_PENDING_REFS;
+  if (!raw) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed)) if (typeof v === 'string') out[k] = v;
+    return out;
+  } catch {
+    return undefined;
+  }
 }
 
 function aggregateConfidence(gates: GateEvaluation[]): StageAVerdict['overallConfidence'] {

@@ -1,0 +1,37 @@
+# RFC-0054 "Configuration (normative)": repository conventions used by the PR
+# lifecycle. Consumers read them from here; a literal in code is a defect.
+# apiVersion/kind (PrLifecycle) are deliberately omitted until a schema lands:
+# the generic config walk would otherwise warn "unknown kind". Readers take `spec`.
+spec:
+  docsOnlyPaths:
+    - spec/rfcs/
+    - docs/
+    - backlog/tasks/
+    - backlog/completed/
+    - .ai-sdlc/_decisions/
+    - .ai-sdlc/attestations/*.dsse.json
+    - .ai-sdlc/dispatch/briefs/
+    - .claude/memory/
+    - .github/dependabot.yml
+    - .github/*.md
+    - '*.md'
+  noTaskBranchPrefixes: [ai-sdlc/file-, ai-sdlc/decisions-sync, docs/]
+  releaseBranchPrefix: release-please--
+  taskIdPattern: '[A-Z][A-Z0-9]+-[0-9]+(\.[0-9]+)*'
+  webhook:
+    port: 8787
+    bind: 127.0.0.1
+    secretEnv: AI_SDLC_WEBHOOK_SECRET
+    debounceMs: 5000
+    events: [pull_request, check_suite, check_run, workflow_run, status, pull_request_review]
+  reconcile:
+    timerOpenMs: 60000
+    timerIdleMs: 900000
+  stall:
+    staleMs: 1800000
+    graceMs: 600000
+  loopGuard:
+    maxSameHeadActions: 1
+  flipPreconditions:
+    requireCodeql: true
+    requireApprovedVerdict: true

@@ -248,6 +248,18 @@ export function renderPrTasksComment(
   if (blocking.length === 0) {
     sections.push('## Backlog tasks: DoR clean', '');
     sections.push('All backlog tasks changed by this PR pass the Definition-of-Ready rubric.');
+    const pendingLines = verdicts.flatMap((v) =>
+      (v.gates ?? []).flatMap((g) =>
+        (g.pending ?? []).map(
+          (p) =>
+            `- \`${v.__file}\`: \`${redactSecrets(p.ref)}\` is pending (${redactSecrets(p.where)})`,
+        ),
+      ),
+    );
+    if (pendingLines.length > 0) {
+      sections.push('', '### Pending references', '', ...pendingLines, '');
+      sections.push('This check re-runs when the referenced filing PR merges.');
+    }
     return sections.join('\n');
   }
   sections.push('## Backlog tasks: DoR clarifications needed', '');

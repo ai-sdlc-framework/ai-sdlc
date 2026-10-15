@@ -18,6 +18,26 @@ function input(body: string, references?: string[]): IssueInput {
   return { source: 'backlog', id: 'AISDLC-1', title: 't', body, workDir: tmp, references };
 }
 
+describe('evaluateGate3 pending refs (AISDLC-879)', () => {
+  it('passes with a pending note when the id is in another open filing PR', async () => {
+    const v = await evaluateGate3(input('plain', ['AISDLC-777']), {
+      resolvers: [fileExistenceResolver],
+      pendingRefs: { 'aisdlc-777': 'open filing PR #42' },
+    });
+    expect(v.verdict).toBe('pass');
+    expect(v.pending).toEqual([{ ref: 'AISDLC-777', where: 'open filing PR #42' }]);
+    expect(v.finding).toMatch(/#42/);
+  });
+
+  it('still fails an id that matches nothing', async () => {
+    const v = await evaluateGate3(input('plain', ['AISDLC-778']), {
+      resolvers: [fileExistenceResolver],
+      pendingRefs: { 'AISDLC-777': 'open filing PR #42' },
+    });
+    expect(v.verdict).toBe('fail');
+  });
+});
+
 describe('evaluateGate3', () => {
   it('passes vacuously when no refs', async () => {
     const v = await evaluateGate3(input('plain text'));

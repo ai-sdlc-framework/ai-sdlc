@@ -30,7 +30,15 @@ export interface Gate3Opts {
   resolvers?: Resolver[];
   /** Per-reference timeout in ms. */
   timeoutMs?: number;
+  /**
+   * AISDLC-879: task ids (`AISDLC-N`) whose file exists only in another open
+   * `ai-sdlc/file-*` PR, mapped to a label naming that PR (e.g. `PR #12`).
+   * An unresolved reference found here is `pending`, not a failure.
+   */
+  pendingRefs?: Record<string, string>;
 }
+
+const TASK_ID_RE = /^AISDLC-\d+(?:\.\d+)?$/i;
 
 export async function evaluateGate3(
   input: IssueInput,
@@ -65,9 +73,16 @@ export async function evaluateGate3(
   };
 
   const failures: Array<{ raw: string; reason: string | undefined }> = [];
+  const pending: Array<{ ref: string; where: string }> = [];
+  const pendingMap: Record<string, string> = {};
+  for (const [k, v] of Object.entries(opts.pendingRefs ?? {})) pendingMap[k.toUpperCase()] = v;
   for (const ref of allRefs) {
     const result = await resolveReference(ref, resolverOpts, opts.resolvers);
-    if (!result.resolved) {
+    const raw = ref.raw.trim();
+    const where = TASK_ID_RE.test(raw) ? pendingMap[raw.toUpperCase()] : undefined;
+    if (!result.resolved && where !== undefined) {
+      pending.push({ ref: raw, where });
+    } else if (!result.resolved) {
       failures.push({ raw: ref.raw, reason: result.reason });
     }
   }
@@ -79,6 +94,12 @@ export async function evaluateGate3(
       severity: 'block',
       stage: 'A',
       confidence: 'high',
+      ...(pending.length > 0
+        ? {
+            pending,
+            finding: `pending: ${pending.map((p) => `${p.ref} (${p.where})`).join(', ')}.`,
+          }
+        : {}),
     };
   }
 

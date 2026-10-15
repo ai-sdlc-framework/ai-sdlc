@@ -265,3 +265,34 @@ describe('evaluateIssue — auto-pass via gatesSkipped (RFC-0011 Phase 4)', () =
     expect(v.gates.every((g) => g.verdict === 'skip')).toBe(true);
   });
 });
+
+describe('AI_SDLC_DOR_PENDING_REFS (AISDLC-879)', () => {
+  const saved = process.env.AI_SDLC_DOR_PENDING_REFS;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.AI_SDLC_DOR_PENDING_REFS;
+    else process.env.AI_SDLC_DOR_PENDING_REFS = saved;
+  });
+  const mk = () => ({
+    source: 'backlog' as const,
+    id: 'AISDLC-1',
+    title: 't',
+    body: 'A task body.',
+    references: ['AISDLC-987654'],
+  });
+
+  it('treats an env-listed id as pending', async () => {
+    process.env.AI_SDLC_DOR_PENDING_REFS = JSON.stringify({ 'AISDLC-987654': 'PR #9' });
+    const v = await evaluateIssue(mk(), { hermetic: true });
+    const g3 = v.gates.find((g) => g.gateId === 3);
+    expect(g3?.verdict).toBe('pass');
+    expect(g3?.pending?.[0]?.where).toBe('PR #9');
+  });
+
+  it('ignores malformed env and still fails the missing id', async () => {
+    for (const bad of ['not json', '[1]', 'null']) {
+      process.env.AI_SDLC_DOR_PENDING_REFS = bad;
+      const v = await evaluateIssue(mk(), { hermetic: true });
+      expect(v.gates.find((g) => g.gateId === 3)?.verdict).toBe('fail');
+    }
+  });
+});
