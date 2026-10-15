@@ -32,7 +32,7 @@ dispatchable: true
 
 Operator request 2026-10-14: "ensure that our documentation is up to date in the docs folder". A survey the same day (planner session) found about 25 files under `docs/operations` that describe retired surfaces as current. After AISDLC-853 the `docs/` tree is the source the public site renders, so each of these pages is published.
 
-This task takes the files whose whole subject is retired or finished; AISDLC-892 fixes stale sentences in the living pages; AISDLC-893 fixes the reviewer-count claims and adds the retired-term gate.
+This task takes the files whose whole subject is retired or finished; a sibling task fixes stale sentences in the living pages; another sibling task fixes the reviewer-count claims and adds the retired-term gate.
 
 Whole-subject stale files:
 
@@ -40,7 +40,7 @@ Whole-subject stale files:
 - Retired by operator decision 2026-10-13 (TUI: no further investment; a web dashboard RFC follows): `operator-tui-promotion.md`.
 - Finished promotions whose runbooks tell readers to set flags that are now default: `decision-catalog-promotion.md` (lines 186 and 285 still say `AI_SDLC_DECISION_CATALOG=experimental` while line 12 says the promotion is done), `adopter-authoring-promotion.md`, `embedding-substrate-promotion.md`, `signal-ingestion-promotion.md`, `untrusted-pr-gate-promotion.md` (all cite the orchestrator flip as a live sibling pattern).
 
-**Five-step review (requirements first).** Requirement questioned: "keep a runbook for every feature that ever shipped". A runbook for a retired surface or a finished promotion has no reader; git history keeps the text. Delete: the twelve files above (the main step of this task). Simplify: inbound links point at the one living page for the subject (`cli-hierarchy.md` for orchestration, `decision-authority.md` or the Decision Catalog page for the catalog) instead of a "superseded, see X" banner. Accelerate: nothing. Automate: AISDLC-893 adds the retired-term gate so these subjects cannot come back as current prose; this task only removes.
+**Five-step review (requirements first).** Requirement questioned: "keep a runbook for every feature that ever shipped". A runbook for a retired surface or a finished promotion has no reader; git history keeps the text. Delete: the twelve files above (the main step of this task). Simplify: inbound links point at the one living page for the subject (`cli-hierarchy.md` for orchestration, `decision-authority.md` or the Decision Catalog page for the catalog) instead of a "superseded, see X" banner. Accelerate: nothing. Automate: a sibling task adds the retired-term gate so these subjects cannot come back as current prose; this task only removes.
 
 ## Fix
 
@@ -48,7 +48,7 @@ Whole-subject stale files:
 2. `scripts/check-rfc-docs.mjs` lists `requiresDocs` surfaces per signed-off RFC; where a deleted file is one of them, point the RFC's `requiresDocs` entry at the replacement page in the same PR (an RFC frontmatter edit, not an Open Question).
 3. `docs/operations/README.md`: remove the entries for the deleted files (AISDLC-854 rebuilds the index; this task lands after it and only removes rows).
 4. Where a deleted file held a still-valid procedure not present elsewhere (check `operator-runbook.md` and `parallel-dispatch.md` in particular), move that section into `cli-hierarchy.md` under its own heading before deleting; name each moved section in the PR body.
-5. Files touched: at most 15 (12 deletions plus the index, `cli-hierarchy.md`, and RFC frontmatter edits count toward the limit; if the inbound-link rewrite exceeds it, leave the two superseded-banner files `operator-runbook.md` and `parallel-dispatch.md` for AISDLC-892 and say so in the PR body).
+5. Files touched: at most 15 (12 deletions plus the index, `cli-hierarchy.md`, and RFC frontmatter edits count toward the limit; if the inbound-link rewrite exceeds it, leave the two superseded-banner files `operator-runbook.md` and `parallel-dispatch.md` for the sibling living-pages task and say so in the PR body).
 
 ## Acceptance Criteria
 
