@@ -5,8 +5,6 @@ status: To Do
 assignee: []
 created_date: '2026-10-14'
 labels: [docs, docs-platform, velocity]
-dependencies:
-  - AISDLC-892
 references:
   - docs/operations/untrusted-contributor-pr-verification.md
   - docs/operations/independence-policy.md
@@ -21,7 +19,7 @@ dispatchable: true
 
 ## Context
 
-Operator request 2026-10-14: "ensure that our documentation is up to date in the docs folder". Third of three tasks (AISDLC-891 deletes whole-subject stale files; AISDLC-892 fixes stale orchestrator and flag sentences). This one fixes the reviewer-count claims and adds the deterministic check that keeps retired terms from returning.
+Operator request 2026-10-14: "ensure that our documentation is up to date in the docs folder". Third of three tasks (a sibling task deletes whole-subject stale files; another sibling task fixes stale orchestrator and flag sentences). This one fixes the reviewer-count claims and adds the deterministic check that keeps retired terms from returning.
 
 Survey findings (planner, 2026-10-14). AISDLC-722 made a two-reviewer default (`correctness-reviewer` + `security-reviewer`) with the three-reviewer set available by configuration (`docs/operations/reviewer-set-flag.md`); the pages below still state three as the fixed set:
 
@@ -39,7 +37,7 @@ No script checks docs currency today: `pnpm docs:check` compares trees (deleted 
 
 1. Rewrite the reviewer-count sentences in the five pages above to "the configured reviewer set (two by default: correctness and security; three with `reviewerSet: three`, see [reviewer-set-flag.md])", using the flag name and values as `docs/operations/reviewer-set-flag.md` states them. Rewrite the `onboarding.md` Conductor passages around the executor loop (`/ai-sdlc:executor`) and `cli-hierarchy`.
 2. Add `scripts/check-docs-retired-terms.test.mjs`: tokens `cli-orchestrator tick`, `orchestrator-tick`, `AI_SDLC_AUTONOMOUS_ORCHESTRATOR`, `AI_SDLC_TUI`, `execute-parallel`, `dispatch-worker`, `Pattern Z`, `auto-rearm-on-dequeue.yml`, `isolated-review.yml`, `ai-sdlc-fix-ci.yml`; a line passes when it contains `retired`, `superseded`, `deleted` or `removed` within the same line; the test prints `path:line: token` for every failure. Scope: `docs/**/*.md` minus the three excluded folders. Add it to the root `test` script next to the CLAUDE.md size test.
-3. Run the new test; fix any remaining line it reports in `docs/` (AISDLC-891 and AISDLC-892 should have cleared `docs/operations`; `docs/concepts`, `docs/getting-started`, `docs/tutorials`, `docs/api-reference` have not been swept and may add a few lines). If the fix list exceeds the 15-file limit, extend the allowlist for the exact remaining lines, list them in the PR body, and name them as follow-up.
+3. Run the new test; fix any remaining line it reports in `docs/` (the two sibling docs tasks should have cleared `docs/operations`; `docs/concepts`, `docs/getting-started`, `docs/tutorials`, `docs/api-reference` have not been swept and may add a few lines). If the fix list exceeds the 15-file limit, extend the allowlist for the exact remaining lines, list them in the PR body, and name them as follow-up.
 
 ## Acceptance Criteria
 
