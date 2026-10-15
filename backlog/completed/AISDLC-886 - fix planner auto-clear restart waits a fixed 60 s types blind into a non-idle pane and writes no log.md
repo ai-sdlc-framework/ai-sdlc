@@ -1,7 +1,7 @@
 ---
 id: AISDLC-886
 title: 'fix(hierarchy): planner auto-clear restart waits a fixed 60 s, types blind into a non-idle pane with text in the prompt, writes no log, and the handoff lands in a stale dated file'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [hierarchy, planner, bug, velocity]
@@ -32,11 +32,11 @@ Operator report 2026-10-14: "the command /ai-sdlc:planner doesn't run after auto
 
 ## Acceptance Criteria
 
-- [ ] With a running turn in the pane, the resume command is delivered only after the pane is idle (fake-tmux test), never appended to existing prompt text (input is cleared first).
-- [ ] After `/clear`, `/ai-sdlc:planner` runs within 10 s of the pane becoming idle, with no fixed sleep in the code path (grep for `SELF_CLEAR_RESUME_SECONDS` returns nothing).
-- [ ] If the session does not come back within the timeout, one line naming the session and the command is written to `handoff/auto-clear.log`; the hook wrapper no longer redirects to `/dev/null`.
-- [ ] `handoff write --role planner` on 2026-10-15 creates `project_planner_handoff_2026_10_15.md`, carries over the text outside the markers, and `MEMORY.md` points at it.
-- [ ] `clear.test.ts` covers the delivery sequence and the non-idle case; `pnpm test` passes.
+- [x] With a running turn in the pane, the resume command is delivered only after the pane is idle (fake-tmux test), never appended to existing prompt text (input is cleared first).
+- [x] After `/clear`, `/ai-sdlc:planner` runs within 10 s of the pane becoming idle, with no fixed sleep in the code path (grep for `SELF_CLEAR_RESUME_SECONDS` returns nothing).
+- [x] If the session does not come back within the timeout, one line naming the session and the command is written to `handoff/auto-clear.log`; the hook wrapper no longer redirects to `/dev/null`.
+- [x] `handoff write --role planner` on 2026-10-15 creates `project_planner_handoff_2026_10_15.md`, carries over the text outside the markers, and `MEMORY.md` points at it.
+- [x] `clear.test.ts` covers the delivery sequence and the non-idle case; `pnpm test` passes.
 
 ## Verification
 

@@ -117,6 +117,9 @@ import {
 } from '../hierarchy/index.js';
 import { findTaskFile, parseArgv, resolveBaseSha } from './dispatch.js';
 
+/** Dispatch holds its resume this long (upper bound; a new board file wakes it sooner). */
+const DISPATCH_RESUME_HOLD_SECONDS = 60;
+
 const USAGE = `Usage: cli-hierarchy <command> [options]
 
 Commands:
@@ -187,8 +190,9 @@ Usage for clear:
   cli-hierarchy clear <executor-name> [--settle-ms <n>]
   cli-hierarchy clear --self [--resume-after <seconds>]
   --self schedules the calling session's own pane (from its roster entry) to receive
-  /clear after 20 s and then, --resume-after seconds later (default 60) or sooner when a new
-  brief or verdict file lands on the board, the resume command: /ai-sdlc operator-dispatch
+  /clear after 20 s (waiting for an idle pane, input line emptied first) and then, once the
+  pane is idle again (or --resume-after seconds later, or sooner when a new brief or verdict
+  file lands on the board, for dispatch), the resume command: /ai-sdlc operator-dispatch
   for the dispatch session, /ai-sdlc:planner for the planner, /ai-sdlc executor for an idle
   executor (which is refused while it holds an inflight task). Refuses without TMUX_PANE.
   Sends /clear to the executor's pane, waits for the settle time (default 8000 ms),
@@ -545,7 +549,7 @@ export async function runHierarchyCli(
           const result = clearSelf(
             {
               self: caller.name,
-              ...(resumeAfter === undefined ? {} : { resumeAfterSeconds: resumeAfter }),
+              resumeAfterSeconds: resumeAfter ?? DISPATCH_RESUME_HOLD_SECONDS,
               ...(deps.env.TMUX_PANE ? { callerPane: deps.env.TMUX_PANE } : {}),
               wakeOnBoardDir: deps.boardDir,
             },
