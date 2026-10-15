@@ -50,4 +50,17 @@ describe('enqueue and Step 2 share one branch name (AISDLC-851)', () => {
       'ai-sdlc/aisdlc-9-some-title',
     );
   });
+
+  it('falls back to the file name when the task file cannot be parsed', () => {
+    const board = path.join(root, 'board');
+    const [written] = enqueueTasks(board, [{ taskId: 'AISDLC-9' }], {
+      baseSha: 'abc',
+      dispatchedBy: 'test',
+      resolveTaskFile: () => 'backlog/tasks/AISDLC-9 - Missing file.md',
+      workDir: root,
+    });
+    expect((JSON.parse(readFileSync(written!, 'utf8')) as { branch: string }).branch).toBe(
+      'ai-sdlc/aisdlc-9-missing-file',
+    );
+  });
 });
