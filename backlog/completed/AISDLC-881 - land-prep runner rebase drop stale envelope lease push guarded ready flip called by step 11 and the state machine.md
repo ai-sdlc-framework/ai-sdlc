@@ -1,7 +1,7 @@
 ---
 id: AISDLC-881
 title: 'feat(pipeline): land-prep runner - rebase, drop stale envelope, lease push so the hook re-signs, guarded ready flip; called by Step 11 and by the state machine'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [rfc-0054, phase-2, pipeline, dispatch]
@@ -31,11 +31,11 @@ RFC-0054 OQ-7 (resolved 2026-10-14): Step 11 stays with the executor through the
 
 ## Acceptance Criteria
 
-- [ ] On a BEHIND PR with a mechanical conflict, `land-prep <pr>` leaves the PR rebased, re-signed (new envelope, `ai-sdlc/attestation` success on the new head) and lease-pushed; no hook was skipped (test asserts no `AI_SDLC_SKIP_*` in the environment of the push).
-- [ ] On a semantic conflict it exits non-zero naming the conflicting paths and leaves the branch unchanged.
-- [ ] `--flip` refuses when CodeQL is not green or the verdict is not approved, naming the condition; flips otherwise.
-- [ ] Step 11's inline rebase and flip code is removed; its tests call the runner.
-- [ ] The 2026-10-11 hand sequence is documented as replaced in `docs/operations/attestation-reference.md`.
+- [x] On a BEHIND PR with a mechanical conflict, `land-prep <pr>` leaves the PR rebased, re-signed (new envelope, `ai-sdlc/attestation` success on the new head) and lease-pushed; no hook was skipped (test asserts no `AI_SDLC_SKIP_*` in the environment of the push).
+- [x] On a semantic conflict it exits non-zero naming the conflicting paths and leaves the branch unchanged.
+- [x] `--flip` refuses when CodeQL is not green or the verdict is not approved, naming the condition; flips otherwise.
+- [x] Step 11's inline rebase and flip code is removed; its tests call the runner.
+- [x] The 2026-10-11 hand sequence is documented as replaced in `docs/operations/attestation-reference.md`.
 
 ## Verification
 

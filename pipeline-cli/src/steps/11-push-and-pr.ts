@@ -44,7 +44,7 @@ import {
   parsePipelineBacklogKey,
   resolveTargetBranch,
 } from './02-compute-branch.js';
-import { lateRebase } from './11-late-rebase.js';
+import { landPrep } from './land-prep.js';
 import { detectDraftPrForBranch } from './03-setup-worktree.js';
 import { composeJudgmentNotes } from '../judgment/agent-output-checks.js';
 import { writeEvent, type WriteEventOpts } from '../orchestrator/events.js';
@@ -295,7 +295,13 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
   //    auto-resolved in-place; semantic conflicts abort + return the conflict
   //    files so the orchestrator can record `rebase-conflict` and continue.
   const targetBranch = resolveTargetBranch(opts.workDir, opts.logger);
-  const rebase = await lateRebase({ worktreePath: opts.worktreePath, runner, targetBranch });
+  const rebase = await landPrep({
+    worktreePath: opts.worktreePath,
+    branch: opts.branch,
+    targetBranch,
+    push: false,
+    runner,
+  });
   if (!rebase.ok) {
     return {
       pushed: false,
