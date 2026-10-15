@@ -214,6 +214,11 @@ export interface DecisionsConfig {
    * `fatigue.inferFromBehavior: true`.
    */
   fatigue?: FatigueConfig;
+  /**
+   * AISDLC-895: open the `ai-sdlc/decisions-sync` PR as a draft. Default false
+   * (ready), so the decisions-sync source kind can land it when green and clean.
+   */
+  syncPrDraft?: boolean;
 }
 
 // ── Loader ────────────────────────────────────────────────────────────────────

@@ -154,6 +154,19 @@ describe('persistDecisionLog (AISDLC-546)', () => {
     expect(ghCalls.some((a) => a[0] === 'pr' && a[1] === 'create')).toBe(false);
   });
 
+  it('opens the sync PR ready by default (no --draft), draft when syncPrDraft: true', () => {
+    addDec(parent, 'DEC-0001');
+    persistDecisionLog({ workDir: parent, runner });
+    const create = ghCalls.find((a) => a[0] === 'pr' && a[1] === 'create')!;
+    expect(create).not.toContain('--draft');
+
+    ghCalls.length = 0;
+    writeFileSync(join(parent, '.ai-sdlc', 'decisions-config.yaml'), 'syncPrDraft: true\n');
+    addDec(parent, 'DEC-0002');
+    persistDecisionLog({ workDir: parent, runner });
+    expect(ghCalls.find((a) => a[0] === 'pr' && a[1] === 'create')).toContain('--draft');
+  });
+
   it('answer-style append lands on the sync branch', () => {
     addDec(parent, 'DEC-0001');
     persistDecisionLog({ workDir: parent, runner });
