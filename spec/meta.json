@@ -1,0 +1,14 @@
+{
+  "title": "Specification",
+  "pages": [
+    "primer",
+    "spec",
+    "policy",
+    "autonomy",
+    "agents",
+    "adapters",
+    "design-intent",
+    "metrics",
+    "glossary"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "title": "Tutorials",
+  "pages": [
+    "index",
+    "01-basic-pipeline",
+    "02-quality-gates",
+    "03-progressive-autonomy",
+    "04-custom-adapter",
+    "05-multi-agent-orchestration",
+    "06-openshell-sandbox",
+    "07-workflow-patterns",
+    "08-claude-code-plugin",
+    "09-review-calibration",
+    "10-spec-kit-bridge",
+    "11-authoring-adopter-rfc",
+    "12-declaring-variants",
+    "13-authoring-substrate-contract",
+    "cost-governance",
+    "design-system-getting-started"
+  ]
+}

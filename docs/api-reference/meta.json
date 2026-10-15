@@ -1,0 +1,27 @@
+{
+  "title": "API Reference",
+  "pages": [
+    "index",
+    "core",
+    "runners",
+    "agents",
+    "policy",
+    "adapters",
+    "reconciler",
+    "metrics",
+    "audit",
+    "telemetry",
+    "security",
+    "compliance",
+    "priority",
+    "design-intent",
+    "builders",
+    "governance",
+    "sdk-runner",
+    "review-calibration",
+    "cost",
+    "design-system",
+    "parallel-execution",
+    "rfc-0043-ucvg"
+  ]
+}
