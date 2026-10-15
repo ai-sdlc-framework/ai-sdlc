@@ -1,7 +1,7 @@
 ---
 id: AISDLC-880
 title: 'feat(dispatch): webhook receiver and event records - HMAC-validated, trigger-only, idempotent ingest into .ai-sdlc/dispatch/events/'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [rfc-0054, phase-1, dispatch, webhook, trust-sensitive]
@@ -33,11 +33,11 @@ RFC-0054 OQ-1 (webhook first, poll as the fallback reconciler), OQ-8 (local only
 
 ## Acceptance Criteria
 
-- [ ] A delivery with a valid signature produces exactly one record file with the five fields and nothing else; a replay of the same delivery id produces no second file and returns 200.
-- [ ] A delivery with a missing or wrong signature returns 401 and writes nothing (test with a forged body).
-- [ ] Five check-run deliveries for one head within the debounce window cause one wake.
-- [ ] The receiver binds to 127.0.0.1 only; `cli-hierarchy status` shows `webhook: up` with the port when running and `webhook: off (no secret)` otherwise.
-- [ ] No code path in the receiver reads a payload field other than the five recorded ones (reviewer AC; grep of the handler).
+- [x] A delivery with a valid signature produces exactly one record file with the five fields and nothing else; a replay of the same delivery id produces no second file and returns 200.
+- [x] A delivery with a missing or wrong signature returns 401 and writes nothing (test with a forged body).
+- [x] Five check-run deliveries for one head within the debounce window cause one wake.
+- [x] The receiver binds to 127.0.0.1 only; `cli-hierarchy status` shows `webhook: up` with the port when running and `webhook: off (no secret)` otherwise.
+- [x] No code path in the receiver reads a payload field other than the five recorded ones (reviewer AC; grep of the handler).
 
 ## Verification
 

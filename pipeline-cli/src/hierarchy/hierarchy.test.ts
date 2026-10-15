@@ -887,7 +887,7 @@ describe('hierarchy status', () => {
 
   it('handles an empty roster', () => {
     const result = hierarchyStatus(deps);
-    expect(formatStatus(result)).toEqual(['no sessions in the roster']);
+    expect(formatStatus(result)).toEqual(['no sessions in the roster', 'webhook: off (no secret)']);
   });
 
   it('shows an ATTACHED column per session, yes only when a client is attached', async () => {

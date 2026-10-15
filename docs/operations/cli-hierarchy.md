@@ -242,6 +242,8 @@ not (a bare launch; the repair line follows the table), and `-` for a gone windo
 The `NODE` column is the Node version the pane's processes run, read from the process table
 (`ps`), with `MISMATCH` appended when it does not satisfy `.nvmrc`; a repair line follows the
 table. It is `-` when no nvm-managed node process runs under the pane or `ps` cannot be read.
+The last line is the webhook receiver: `webhook: up (port N)` when running, `webhook: off (no secret)`
+when `AI_SDLC_WEBHOOK_SECRET` is unset, `webhook: off (not running)` otherwise.
 
 ```bash
 cli-hierarchy status [--json]
@@ -250,7 +252,34 @@ cli-hierarchy status [--json]
 `--json` prints one JSON object: `{ "rows": [ { "entry": <roster entry>, "state": "...",
 "attached": true|false, "inflightTask": "AISDLC-N", "launchEnv": "ok|missing",
 "nodeVersion": "22.23.2", "nodeMismatch": true, "nextStep": "..." } ], "board": { "queued": n,
-"inflight": n, "done": n, "failed": n } }`. Read-only. Exit code `0`.
+"inflight": n, "done": n, "failed": n }, "webhook": { "state": "up", "port": n, "pid": n } }`. Read-only. Exit code `0`.
+
+### `webhook`
+
+The local GitHub webhook receiver (RFC-0054, AISDLC-880). A delivery is a trigger, never a fact:
+after the `X-Hub-Signature-256` HMAC check the receiver writes one event record into
+`.ai-sdlc/dispatch/events/` (create-if-absent, named by `<repo>#<pr>@<headSha>:<kind>:<deliveryId>`,
+URL-encoded) holding `repo`, `pr`, `headSha`, `kind`, `deliveryId` and `receivedAt`, and nothing else.
+A replay of a delivery id returns 200 and writes nothing; a missing or wrong signature returns 401 and
+writes nothing. After a record is written, deliveries for the same `(pr, headSha)` are debounced for 5 s
+and then the file `.ai-sdlc/dispatch/wake` is touched, once. The receiver never classifies or acts.
+
+```bash
+AI_SDLC_WEBHOOK_SECRET=... cli-hierarchy webhook up [--port 8765]
+cli-hierarchy webhook status [--json]
+cli-hierarchy webhook down
+```
+
+The secret comes only from the `AI_SDLC_WEBHOOK_SECRET` environment variable, never a file in the
+repository. Without it `webhook up` does nothing and dispatch stays poll-only (not an error). The
+receiver binds to `127.0.0.1` only, on `--port` or `AI_SDLC_WEBHOOK_PORT` (default 8765), at path
+`/webhooks/github`. `cli-hierarchy up` starts it when the secret is set. Subscribed event kinds:
+`pull_request`, `check_suite`, `check_run`, `workflow_run`, `status`, `pull_request_review`.
+
+Reaching it from GitHub, with the repository webhook's secret equal to `AI_SDLC_WEBHOOK_SECRET`:
+`gh webhook forward --repo <owner>/<repo> --events pull_request,check_suite,check_run,workflow_run,status,pull_request_review --url http://127.0.0.1:8765/webhooks/github`
+for development, or a named tunnel (for example Cloudflare Tunnel) pointing at `127.0.0.1:8765` for daily
+use.
 
 ### `attach`
 

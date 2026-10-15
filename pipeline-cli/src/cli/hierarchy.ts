@@ -115,6 +115,11 @@ import {
   type HierarchyRole,
   type IdentityDeps,
   type OperationalPolicy,
+  webhookDown,
+  webhookServe,
+  webhookUp,
+  webhookStatus,
+  formatWebhookStatus,
 } from '../hierarchy/index.js';
 import { findTaskFile, parseArgv, resolveBaseSha } from './dispatch.js';
 
@@ -133,6 +138,7 @@ Commands:
   clear      Empty an executor's context between tasks and restart its loop
   restart    Stop and start one executor, updating its roster entry (restart <executor>)
   register   Re-record an executor whose process was restarted by hand (register <executor>)
+  webhook    Local GitHub webhook receiver: webhook up|down|status (needs AI_SDLC_WEBHOOK_SECRET)
   tick       One wake-up of the dispatch loop (ingest, verdict watch, playbook, reports)
   route-decision  Record that a decision was routed to a tier
   handoff         Write or read a session's handoff file (handoff write|read --role <r>)
@@ -165,6 +171,9 @@ Options for up:
 
 Options for status:
   --json                   Print machine-readable output
+
+Options for webhook:
+  --port <n>               Local port, bound to 127.0.0.1 (default 8765, or AI_SDLC_WEBHOOK_PORT)
 
 Options for attach:
   <name>                   Agent name from the roster (planner, operator-dispatch, executor-alpha, ...)
@@ -462,6 +471,20 @@ export async function runHierarchyCli(
         const result = hierarchyStatus(deps);
         if (flags.json === 'true') deps.log(JSON.stringify(result));
         else for (const line of formatStatus(result)) deps.log(line);
+        return 0;
+      }
+      case 'webhook': {
+        const action = firstPositional(argv);
+        if (action === 'up') webhookUp(deps, flags.port);
+        else if (action === 'down') webhookDown(deps);
+        else if (action === 'status') {
+          const w = webhookStatus(deps);
+          deps.log(flags.json === 'true' ? JSON.stringify(w) : formatWebhookStatus(w));
+        } else if (action === 'serve') await webhookServe(deps, flags.port);
+        else {
+          process.stderr.write(`cli-hierarchy: webhook needs up, down or status\n\n${USAGE}`);
+          return 2;
+        }
         return 0;
       }
       case 'attach': {
