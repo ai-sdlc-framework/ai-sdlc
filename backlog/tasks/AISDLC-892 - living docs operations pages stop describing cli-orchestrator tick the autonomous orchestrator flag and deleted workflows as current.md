@@ -5,8 +5,6 @@ status: To Do
 assignee: []
 created_date: '2026-10-14'
 labels: [docs, docs-platform, velocity]
-dependencies:
-  - AISDLC-891
 references:
   - docs/operations/README.md
   - docs/operations/usage-ledger.md
@@ -28,7 +26,7 @@ dispatchable: true
 
 ## Context
 
-Operator request 2026-10-14: "ensure that our documentation is up to date in the docs folder". Second of three tasks (AISDLC-891 deletes whole-subject stale files; AISDLC-893 fixes reviewer-count claims and adds the gate). This one corrects stale sentences in pages that are otherwise current. Survey findings (planner, 2026-10-14):
+Operator request 2026-10-14: "ensure that our documentation is up to date in the docs folder". Second of three tasks (a sibling task deletes whole-subject stale files; another sibling task fixes reviewer-count claims and adds the gate). This one corrects stale sentences in pages that are otherwise current. Survey findings (planner, 2026-10-14):
 
 - `docs/operations/README.md:19` `**Feature flag:** AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental`; line 16 links the orchestrator promotion runbook and lists the TUI.
 - `usage-ledger.md:439` documents a TUI usage pane (`AI_SDLC_TUI=experimental`); line 130 hooks on the "orchestrator tick".
@@ -44,12 +42,12 @@ Operator request 2026-10-14: "ensure that our documentation is up to date in the
 
 The code for `cli-orchestrator tick` still exists in `pipeline-cli/src/cli/orchestrator.ts`; the policy (CLAUDE.md, AISDLC-763) is that `cli-hierarchy` is the drain. The docs follow the policy.
 
-**Five-step review (requirements first).** Requirement questioned: "every page must explain the history of how we got here". A reader of an operations page needs the current command, not the retired one with a note. Delete: the retired-command sentences, the TUI pane section in `usage-ledger.md`, the restore instructions for a deleted workflow in `merge-without-queue.md`, the Pattern Y rows in `backlog-and-execution-reference.md`. Simplify: where a sentence named `cli-orchestrator tick` as the caller or default, name `cli-hierarchy tick` (or the executor loop) and nothing else. Accelerate: nothing. Automate: the retired-term gate lands in AISDLC-893 after this task so that it starts green.
+**Five-step review (requirements first).** Requirement questioned: "every page must explain the history of how we got here". A reader of an operations page needs the current command, not the retired one with a note. Delete: the retired-command sentences, the TUI pane section in `usage-ledger.md`, the restore instructions for a deleted workflow in `merge-without-queue.md`, the Pattern Y rows in `backlog-and-execution-reference.md`. Simplify: where a sentence named `cli-orchestrator tick` as the caller or default, name `cli-hierarchy tick` (or the executor loop) and nothing else. Accelerate: nothing. Automate: the retired-term gate lands in a sibling task after this task so that it starts green.
 
 ## Fix
 
 1. For each file and line above, rewrite the sentence to the current behaviour: `cli-hierarchy` (RFC-0051) is the drain, `cli-hierarchy tick` the tick, the executor loop (`/ai-sdlc:executor`) the per-task runner; the `AI_SDLC_AUTONOMOUS_ORCHESTRATOR` and `AI_SDLC_TUI` flags are not documented anywhere as current; `execute-parallel` is not a write path. Where the text is a history note that is still useful (for example "superseded by AISDLC-763"), keep one sentence and drop the procedural detail.
-2. `docs/operations/README.md`: delete line 19's feature-flag row and the TUI entry; make sure the orchestration row points at `cli-hierarchy.md` (AISDLC-891 removed the orchestrator-promotion link).
+2. `docs/operations/README.md`: delete line 19's feature-flag row and the TUI entry; make sure the orchestration row points at `cli-hierarchy.md` (the sibling whole-file-deletion task removed the orchestrator-promotion link).
 3. `merge-without-queue.md`: remove the restore instructions at line 152; the line-74 note that the workflow was deleted under DEC-0099 stays.
 4. `backlog-and-execution-reference.md`: remove the Pattern Y rows and leave the "superseded" sentence pointing at `cli-hierarchy.md`.
 5. At most 14 files; the list above is the whole scope. Anything else found while editing goes in the PR body as a note, not a change.
