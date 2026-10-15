@@ -207,13 +207,52 @@ export interface JourneySuccessMetric {
   targetSeconds?: number;
 }
 
+// ── WCAG version evolution (RFC-0018 OQ-7, AISDLC-469) ──────────────────
+
+/**
+ * Additive list of supported `wcagVersion` values. New W3C versions are
+ * appended; existing declarations stay valid (OQ-7 resolution).
+ */
+export const WCAG_VERSIONS = ['2.0', '2.1', '2.2', '3.0'] as const;
+export type WcagVersion = (typeof WCAG_VERSIONS)[number];
+
+/** Versions superseded by a newer W3C Recommendation (advisory only). */
+export const WCAG_SUPERSEDED_VERSIONS: ReadonlySet<WcagVersion> = new Set<WcagVersion>(['2.0']);
+
+/** Decision kind emitted when an adopter declares a W3C-superseded WCAG version. */
+export const WCAG_VERSION_SUPERSEDED_DECISION_KIND = 'wcag-version-superseded' as const;
+
+export interface WcagVersionSupersededDecision {
+  kind: typeof WCAG_VERSION_SUPERSEDED_DECISION_KIND;
+  severity: 'low';
+  /** Advisory only: never affects Eρ₅ or any score. */
+  advisory: true;
+  declaredVersion: WcagVersion;
+  message: string;
+}
+
+/**
+ * Returns a low-severity advisory Decision when the declared version is
+ * W3C-superseded (WCAG 2.0), otherwise `null`. Pure; no scoring impact.
+ */
+export function evaluateWcagVersion(version: string): WcagVersionSupersededDecision | null {
+  if (!WCAG_SUPERSEDED_VERSIONS.has(version as WcagVersion)) return null;
+  return {
+    kind: WCAG_VERSION_SUPERSEDED_DECISION_KIND,
+    severity: 'low',
+    advisory: true,
+    declaredVersion: version as WcagVersion,
+    message: `WCAG ${version} is superseded by a newer W3C Recommendation; consider declaring 2.2. Advisory only.`,
+  };
+}
+
 /**
  * Accessibility requirements for a Journey (RFC-0018 §5.2).
  * Journey WCAG level may be set HIGHER than the soul floor.
  */
 export interface JourneyAccessibility {
   wcagLevel: WcagLevel;
-  wcagVersion: '2.0' | '2.1' | '2.2' | '3.0';
+  wcagVersion: WcagVersion;
   conformanceTarget: number;
   auditCadence?: 'quarterly' | 'annually' | 'release-gated' | 'continuous';
 }
@@ -495,6 +534,30 @@ export interface JourneyScopedResult {
    * for `single-journey` and `no-journey-routing` paths. Exposed for audit.
    */
   aggregationRule?: JourneyAggregationRule;
+  /**
+   * Advisory Decisions raised while resolving targeted journeys (AISDLC-469),
+   * e.g. `wcag-version-superseded`. Visible-gap signal only: never affects
+   * sa2, ck or er5Elevated.
+   */
+  advisories: WcagVersionSupersededDecision[];
+}
+
+/** Collect wcag-version-superseded advisories for the targeted journeys (deduped). */
+function collectWcagAdvisories(
+  refs: ParsedJourneyRef[],
+  ctx: JourneyContext | undefined,
+): WcagVersionSupersededDecision[] {
+  const out: WcagVersionSupersededDecision[] = [];
+  const seen = new Set<string>();
+  for (const ref of refs) {
+    const key = `${ref.soulId}/${ref.journeyId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const decl = ctx?.journeysBySoul[ref.soulId]?.find((j) => j.id === ref.journeyId);
+    const d = decl ? evaluateWcagVersion(decl.accessibility.wcagVersion) : null;
+    if (d) out.push(d);
+  }
+  return out;
 }
 
 /**
@@ -545,6 +608,7 @@ export function computeJourneyScopedScores(
       er5Elevated: fallbackEr5Elevated,
       routingPath: 'no-journey-routing',
       targetedJourneys: [],
+      advisories: [],
     };
   }
 
@@ -558,6 +622,7 @@ export function computeJourneyScopedScores(
       er5Elevated: scores?.er5Elevated ?? fallbackEr5Elevated,
       routingPath: 'single-journey',
       targetedJourneys,
+      advisories: collectWcagAdvisories(targetedJourneys, journeyCtx),
     };
   }
 
@@ -614,5 +679,6 @@ export function computeJourneyScopedScores(
     routingPath: 'multi-journey',
     targetedJourneys,
     aggregationRule: firstAggregationRule ?? 'min',
+    advisories: collectWcagAdvisories(targetedJourneys, journeyCtx),
   };
 }
