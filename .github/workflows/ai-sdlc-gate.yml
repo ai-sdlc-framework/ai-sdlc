@@ -72,10 +72,13 @@ on:
   # merge queue in Settings → Branches → main. See
   # docs/operations/merge-without-queue.md.
 
-# One in-flight gate run per PR; cancel superseded runs.
+# One in-flight gate run per PR; cancel superseded runs. AISDLC-876: a
+# `ready_for_review` event is the draft-to-ready flip on an UNCHANGED head SHA,
+# so it must not cancel the run already in flight (it queues behind it instead);
+# only head-changing events (opened, synchronize, reopened) cancel.
 concurrency:
   group: ai-sdlc-gate-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event.action != 'ready_for_review' }}
 
 permissions:
   contents: read

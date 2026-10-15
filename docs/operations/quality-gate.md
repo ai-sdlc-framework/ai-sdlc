@@ -60,6 +60,8 @@ Per-archetype gating decisions:
 
 - **docs-only PRs** (every changed file matches `spec/rfcs/**`, `docs/**`, `backlog/{tasks,completed}/**`, or root `*.md`) skip the four code-gated jobs. `re-actors/alls-green` treats `skipped` as `success`, so the aggregator passes cleanly without paying ~10 minutes of compute on a typo fix.
 - **code or mixed PRs** require all six jobs to pass. The `classify` step in `Detect Changes` feeds the PR's changed-file list (`git diff --name-only <base> <head>`) to `scripts/is-docs-only-changeset.mjs`, which requires EVERY file to be docs, so a PR with one docs file plus one code file resolves to "code/mixed". If the diff cannot be computed on a PR, it fails safe to `docs_only=false` (AISDLC-484).
+- **Concurrency key (AISDLC-876).** `ai-sdlc-gate.yml` runs one gate per PR (`group: ai-sdlc-gate-<pr number>`). `cancel-in-progress` is `github.event.action != 'ready_for_review'`: a push (`synchronize`, `opened`, `reopened`) changes the head SHA and cancels the superseded run, but the draft-to-ready flip is on an unchanged SHA, so it queues behind the running gate instead of cancelling it, and the run still ends by posting `ai-sdlc/pr-ready`.
+- **Events-only rule (AISDLC-876).** A PR whose diff is only `.ai-sdlc/_decisions/**` (decision event files) is docs-only per `scripts/is-docs-only-changeset.mjs`: the code-gated jobs skip and `ai-sdlc/pr-ready` still posts. A PR mixing event files with any code file is code/mixed and runs the full gate.
 - **Integration tests** additionally skip on PRs originating from forks (which lack the repo secrets needed to talk to the reference adapter). Same predicate as `ci.yml`'s `integration` job — kept in sync deliberately.
 
 ## DoR readiness for task-file PRs (AISDLC-712.1)

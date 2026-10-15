@@ -511,3 +511,39 @@ describe('release-please skip guard — merge_group head_ref limitation (AC-6)',
     );
   });
 });
+
+// AISDLC-876: decision-event-only PRs skip the full gate; mixed PRs run it.
+describe('AISDLC-876 decision event files and gate concurrency', () => {
+  it('events-only changeset → docs-only (full gate skipped)', () => {
+    assert.equal(
+      isDocsOnly([
+        '.ai-sdlc/_decisions/events/2026-10-14T23-57-59.309Z__DEC-0224__decision-opened__0954e528fc47.json',
+        '.ai-sdlc/_decisions/events/2026-10-14T23-58-51.494Z__DEC-0224__operator-answered__d6b055d6d231.json',
+      ]),
+      true,
+    );
+  });
+
+  it('events + code → NOT docs-only (full gate runs)', () => {
+    assert.equal(
+      isDocsOnly([
+        '.ai-sdlc/_decisions/events/2026-10-14T23-57-59.309Z__DEC-0224__decision-opened__0954e528fc47.json',
+        'pipeline-cli/src/foo.ts',
+      ]),
+      false,
+    );
+  });
+
+  it('gate workflow does not cancel the running gate on ready_for_review', async () => {
+    const { readFileSync } = await import('node:fs');
+    const yml = readFileSync(
+      join(dirname(new URL(import.meta.url).pathname), '..', '.github/workflows/ai-sdlc-gate.yml'),
+      'utf8',
+    );
+    assert.match(
+      yml,
+      /cancel-in-progress: \$\{\{ github\.event\.action != 'ready_for_review' \}\}/,
+    );
+    assert.match(yml, /types: \[opened, synchronize, reopened, ready_for_review\]/);
+  });
+});
