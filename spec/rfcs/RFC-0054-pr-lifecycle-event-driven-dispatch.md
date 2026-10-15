@@ -1,7 +1,7 @@
 ---
 id: RFC-0054
 title: PR Lifecycle as Event-Driven Dispatch (one state machine from branch pushed to merged)
-status: Signed Off
+status: Approved
 lifecycle: Signed Off
 author: 'Dominique Legault'
 created: 2026-10-13
