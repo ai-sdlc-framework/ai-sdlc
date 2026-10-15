@@ -881,3 +881,6 @@ to discard the verdict first.
 
 `cli-dispatch idle-backoff` prints the sleep (5 to 60 seconds) an executor without a tmux
 pane uses when the queue is empty.
+
+
+No-CodeQL repositories (AISDLC-896): mark-ready flips any `ai-sdlc/` task draft whose PR checks are all green. `governance.openTaskPrsReady: true` opens task PRs ready from Step 11 and `ship`; the default stays draft.

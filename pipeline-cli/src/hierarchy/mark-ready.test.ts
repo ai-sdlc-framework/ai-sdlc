@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { analyzeState, markReadyAfterCodeql } from './mark-ready.js';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+import { analyzeState, markReadyAfterCodeql, repoHasCodeql, rollupState } from './mark-ready.js';
 import type { CommandRunner } from './types.js';
 
 const BODY = 'Draft until CodeQL is clean.';
@@ -87,5 +91,65 @@ describe('markReadyAfterCodeql', () => {
     const r = markReadyAfterCodeql(run, '/repo');
     expect(r.error).toContain('gh pr list failed');
     expect(r.readied).toEqual([]);
+  });
+});
+
+describe('repos without CodeQL (AISDLC-896)', () => {
+  const green = { statusCheckRollup: [{ name: 'build', conclusion: 'SUCCESS' }], comments: [] };
+
+  it('flips a task-branch draft whose PR checks are green', () => {
+    const gh = fakeGh(
+      [
+        {
+          number: 7,
+          body: 'plain body',
+          headRefName: 'ai-sdlc/aisdlc-1-x',
+          mergeStateStatus: 'CLEAN',
+        },
+        { number: 8, body: 'wip', headRefName: 'feat/other', mergeStateStatus: 'CLEAN' },
+      ],
+      { 7: green, 8: green },
+    );
+    const r = markReadyAfterCodeql(gh.run, '/repo', { hasCodeql: false });
+    expect(r.readied).toEqual([7]);
+  });
+
+  it('leaves a draft with failing or pending checks alone', () => {
+    const gh = fakeGh(
+      [
+        { number: 9, headRefName: 'ai-sdlc/a', mergeStateStatus: 'CLEAN' },
+        { number: 10, headRefName: 'ai-sdlc/b', mergeStateStatus: 'CLEAN' },
+      ],
+      {
+        9: { statusCheckRollup: [{ name: 'build', conclusion: 'FAILURE' }], comments: [] },
+        10: { statusCheckRollup: [{ name: 'build', conclusion: '' }], comments: [] },
+      },
+    );
+    const r = markReadyAfterCodeql(gh.run, '/repo', { hasCodeql: false });
+    expect(r.readied).toEqual([]);
+  });
+
+  it('with CodeQL, a green non-Analyze rollup does not flip a task draft', () => {
+    const gh = fakeGh([{ number: 7, body: 'plain', headRefName: 'ai-sdlc/a' }], { 7: green });
+    expect(markReadyAfterCodeql(gh.run, '/repo', { hasCodeql: true }).readied).toEqual([]);
+  });
+
+  it('rollupState classifies', () => {
+    expect(rollupState([])).toBe('pending');
+    expect(rollupState([{ conclusion: 'SKIPPED' }, { conclusion: 'SUCCESS' }])).toBe('clean');
+    expect(rollupState([{ conclusion: 'ERROR' }])).toBe('failed');
+  });
+
+  it('repoHasCodeql detects the codeql-action in a workflow', () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'cq-'));
+    expect(repoHasCodeql(root)).toBe(false);
+    mkdirSync(path.join(root, '.github', 'workflows'), { recursive: true });
+    writeFileSync(path.join(root, '.github', 'workflows', 'ci.yml'), 'jobs: {}\n');
+    expect(repoHasCodeql(root)).toBe(false);
+    writeFileSync(
+      path.join(root, '.github', 'workflows', 'codeql.yml'),
+      'uses: github/codeql-action/analyze@v3\n',
+    );
+    expect(repoHasCodeql(root)).toBe(true);
   });
 });

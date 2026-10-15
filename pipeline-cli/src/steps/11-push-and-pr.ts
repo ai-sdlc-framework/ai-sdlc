@@ -412,7 +412,7 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
     [
       'pr',
       'create',
-      '--draft',
+      ...(loadOperationalPolicy(opts.workDir, opts.workDir).openTaskPrsReady ? [] : ['--draft']),
       '--title',
       title,
       '--body',
