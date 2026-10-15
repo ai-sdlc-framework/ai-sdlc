@@ -1,7 +1,7 @@
 ---
 id: AISDLC-887
 title: 'fix(test): the cli-usage test family no longer times out under full-suite load'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [test, flaky, velocity]

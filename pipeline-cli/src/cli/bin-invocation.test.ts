@@ -366,6 +366,10 @@ describe('cli-judgment: bin shim guard', () => {
   });
 });
 
+// Cold node start + ingest under full-suite CPU load exceeded vitest's 5s default
+// (AISDLC-887). Scoped to the spawn-based cli-usage tests; the global timeout is unchanged.
+const CLI_USAGE_SPAWN_TIMEOUT_MS = 30_000;
+
 describe('cli-usage: bin shim guard and end-to-end ingest', () => {
   const binPath = join(PKG_ROOT, 'bin', 'cli-usage.mjs');
   let tmp: string;
@@ -397,58 +401,67 @@ describe('cli-usage: bin shim guard and end-to-end ingest', () => {
     expect(existsSync(binPath), `missing bin shim: ${binPath}`).toBe(true);
   });
 
-  it('is invokable via `node <pkg-root>/bin/cli-usage.mjs --help` and exits 0', () => {
-    const result = spawnSync(process.execPath, [binPath, '--help'], {
-      cwd: PKG_ROOT,
-      encoding: 'utf-8',
-      stdio: 'pipe',
-      timeout: 10_000,
-      env: process.env,
-    });
-    const detail = `\n--- exit ${result.status} ---\n${result.stdout}\n${result.stderr}`;
-    expect(result.status, `cli-usage --help did not exit 0:${detail}`).toBe(0);
-    expect(/Usage:/.test(result.stdout + result.stderr), detail).toBe(true);
-  });
-
-  it('`ingest --json` reports scanned, written, skipped and error counts', () => {
-    const projects = join(tmp, 'projects', 'p1');
-    mkdirSync(projects, { recursive: true });
-    const call = (id: string): string =>
-      JSON.stringify({
-        type: 'assistant',
-        timestamp: '2026-09-02T10:00:00Z',
-        sessionId: 's1',
-        cwd: join(tmp, 'elsewhere'),
-        message: { id, model: 'claude-x', usage: { input_tokens: 1, output_tokens: 1 } },
+  it(
+    'is invokable via `node <pkg-root>/bin/cli-usage.mjs --help` and exits 0',
+    () => {
+      const result = spawnSync(process.execPath, [binPath, '--help'], {
+        cwd: PKG_ROOT,
+        encoding: 'utf-8',
+        stdio: 'pipe',
+        timeout: 10_000,
+        env: process.env,
       });
-    writeFileSync(
-      join(projects, 's1.jsonl'),
-      `${call('m1')}\n${call('m1')}\n{broken SENTINEL-CANARY-BIN\n`,
-    );
-    const env: NodeJS.ProcessEnv = {
-      ...process.env,
-      AI_SDLC_USAGE_DIR: join(tmp, 'usage'),
-      // Hermetic: never walk the operator's real Codex home.
-      CODEX_HOME: join(tmp, 'codex-home'),
-    };
-    delete env['CLAUDE_CODE_ENV'];
-    delete env['CLAUDE_REMOTE_EXECUTION'];
-    delete env['AI_SDLC_USAGE_INGEST'];
-    const result = spawnSync(
-      process.execPath,
-      [binPath, 'ingest', '--json', '--projects-dir', join(tmp, 'projects')],
-      { cwd: PKG_ROOT, encoding: 'utf-8', stdio: 'pipe', timeout: 20_000, env },
-    );
-    const detail = `\n--- exit ${result.status} ---\n${result.stdout}\n${result.stderr}`;
-    expect(result.status, detail).toBe(0);
-    expect(result.stdout + result.stderr).not.toContain('SENTINEL');
-    expect(JSON.parse(result.stdout), detail).toMatchObject({
-      filesScanned: 1,
-      callsWritten: 1,
-      repeatsSkipped: 1,
-      errors: 1,
-    });
-  });
+      const detail = `\n--- exit ${result.status} ---\n${result.stdout}\n${result.stderr}`;
+      expect(result.status, `cli-usage --help did not exit 0:${detail}`).toBe(0);
+      expect(/Usage:/.test(result.stdout + result.stderr), detail).toBe(true);
+    },
+    CLI_USAGE_SPAWN_TIMEOUT_MS,
+  );
+
+  it(
+    '`ingest --json` reports scanned, written, skipped and error counts',
+    () => {
+      const projects = join(tmp, 'projects', 'p1');
+      mkdirSync(projects, { recursive: true });
+      const call = (id: string): string =>
+        JSON.stringify({
+          type: 'assistant',
+          timestamp: '2026-09-02T10:00:00Z',
+          sessionId: 's1',
+          cwd: join(tmp, 'elsewhere'),
+          message: { id, model: 'claude-x', usage: { input_tokens: 1, output_tokens: 1 } },
+        });
+      writeFileSync(
+        join(projects, 's1.jsonl'),
+        `${call('m1')}\n${call('m1')}\n{broken SENTINEL-CANARY-BIN\n`,
+      );
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        AI_SDLC_USAGE_DIR: join(tmp, 'usage'),
+        // Hermetic: never walk the operator's real ~/.codex sessions (AISDLC-887).
+        CODEX_HOME: join(tmp, 'codex-home'),
+      };
+      delete env['CLAUDE_CODE_ENV'];
+      delete env['CLAUDE_REMOTE_EXECUTION'];
+      delete env['AI_SDLC_USAGE_INGEST'];
+      const result = spawnSync(
+        process.execPath,
+        [binPath, 'ingest', '--json', '--projects-dir', join(tmp, 'projects')],
+        { cwd: PKG_ROOT, encoding: 'utf-8', stdio: 'pipe', timeout: 20_000, env },
+      );
+      const detail = `\n--- exit ${result.status} ---\n${result.stdout}\n${result.stderr}`;
+      expect(result.status, detail).toBe(0);
+      expect(result.stdout + result.stderr).not.toContain('SENTINEL');
+      expect(JSON.parse(result.stdout), detail).toMatchObject({
+        filesScanned: 1,
+        callsWritten: 1,
+        repeatsSkipped: 1,
+        errors: 1,
+      });
+    },
+    CLI_USAGE_SPAWN_TIMEOUT_MS,
+  );
+
   it('two concurrent ingests never duplicate limit events', async () => {
     const projects = join(tmp, 'projects', 'p1');
     mkdirSync(projects, { recursive: true });
@@ -755,16 +768,20 @@ describe('RFC-0050: cli-usage bin shim', () => {
     expect(existsSync(binPath), `missing bin shim: ${binPath}`).toBe(true);
   });
 
-  it('is invokable via `node <pkg-root>/bin/cli-usage.mjs prices --help` and exits 0', () => {
-    const result = spawnSync(process.execPath, [binPath, 'prices', '--help'], {
-      cwd: PKG_ROOT,
-      encoding: 'utf-8',
-      stdio: 'pipe',
-      timeout: 10_000,
-      env: process.env,
-    });
-    const detail = `\n--- exit ${result.status} ---\n${result.stdout}\n${result.stderr}`;
-    expect(result.status, `cli-usage prices --help did not exit 0:${detail}`).toBe(0);
-    expect(result.stdout + result.stderr).toMatch(/refresh/);
-  });
+  it(
+    'is invokable via `node <pkg-root>/bin/cli-usage.mjs prices --help` and exits 0',
+    () => {
+      const result = spawnSync(process.execPath, [binPath, 'prices', '--help'], {
+        cwd: PKG_ROOT,
+        encoding: 'utf-8',
+        stdio: 'pipe',
+        timeout: 10_000,
+        env: process.env,
+      });
+      const detail = `\n--- exit ${result.status} ---\n${result.stdout}\n${result.stderr}`;
+      expect(result.status, `cli-usage prices --help did not exit 0:${detail}`).toBe(0);
+      expect(result.stdout + result.stderr).toMatch(/refresh/);
+    },
+    CLI_USAGE_SPAWN_TIMEOUT_MS,
+  );
 });
