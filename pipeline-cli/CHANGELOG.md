@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.34.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.33.0...pipeline-cli-v0.34.0) (2026-10-15)
+
+
+### Features
+
+* dispatch tick PR and board state machine (AISDLC-823) ([#1520](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1520)) ([bfa4b3f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bfa4b3f9bfd25e512e687354b8f8aa6b500b2c64))
+* **orchestrator:** accept DEC-0202 test waiver in developer return (AISDLC-864) ([#1582](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1582)) ([5357ab3](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5357ab3f85d2b972c62df76b8f18a87b3c098c1f))
+* **orchestrator:** coded PR reconciler, scheduler and landing records (AISDLC-829) ([#1546](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1546)) ([47f899e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/47f899ee322394fe862e08f686850db3057e530e))
+
+
+### Bug Fixes
+
+* **ci:** keep approval across a rebase-only force-push (AISDLC-872) ([#1545](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1545)) ([2f98e94](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2f98e94c6b3ad203c8842ac45a9a62ee61740833))
+* planner auto-clear waits for an idle pane and logs failures (AISDLC-886) ([#1572](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1572)) ([cc5096b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cc5096b483180e5259c963b0f60ce9732881e614))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.34.0
+
 ## [0.33.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.32.0...pipeline-cli-v0.33.0) (2026-10-14)
 
 

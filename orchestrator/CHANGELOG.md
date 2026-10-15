@@ -5,6 +5,20 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.34.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.33.0...orchestrator-v0.34.0) (2026-10-15)
+
+
+### Features
+
+* add wcag version evolution advisory for journeys (AISDLC-469) ([#1531](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1531)) ([8ff6d48](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8ff6d48d0035df2018bb867da07b834d1e73a492))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.34.0
+
 ## [0.33.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.32.0...orchestrator-v0.33.0) (2026-10-14)
 
 
