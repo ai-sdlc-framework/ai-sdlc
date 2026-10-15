@@ -7,6 +7,9 @@
  * batch is all-or-nothing. The brief format itself lives in `hierarchy/brief-format.ts`.
  */
 
+import path from 'node:path';
+import { parseTaskFile } from '../steps/01-validate.js';
+import { buildBranchName, DEFAULT_PATTERN, readBranchPattern } from '../steps/02-compute-branch.js';
 import { isOnBoard, TASK_ID_RE, writeManifest } from './board.js';
 import type { DispatchManifest, ManifestWorkerKind } from './types.js';
 
@@ -28,6 +31,26 @@ export interface EnqueueDefaults {
   /** Resolves the repo-relative backlog task file for an id; undefined when none exists. */
   resolveTaskFile: (taskId: string) => string | undefined;
   now?: () => Date;
+  /** Repo root; with it the branch uses the configured pattern and the task's frontmatter title. */
+  workDir?: string;
+}
+
+/** The branch Step 2 will compute for this task (AISDLC-851): one builder, so they agree. */
+function branchFor(id: string, taskFile: string, workDir: string | undefined): string {
+  let title = '';
+  let pattern = DEFAULT_PATTERN;
+  if (workDir) {
+    try {
+      title = parseTaskFile(path.join(workDir, taskFile)).title;
+    } catch {
+      // fall through to the file name
+    }
+    pattern = readBranchPattern(workDir, DEFAULT_PATTERN);
+  }
+  if (!title) {
+    title = path.posix.basename(taskFile, '.md').replace(/^[^ ]+ - /, '');
+  }
+  return buildBranchName(pattern, id, title).branch;
 }
 
 /** Default verification commands copied onto each manifest. */
@@ -68,7 +91,7 @@ export function enqueueTasks(
     const manifest: DispatchManifest = {
       schemaVersion: 'v1',
       taskId: id,
-      branch: `ai-sdlc/${lower}`,
+      branch: branchFor(id, taskFile, defaults.workDir),
       worktree: `.worktrees/${lower}`,
       baseSha: defaults.baseSha,
       workerKind: defaults.workerKind ?? 'any',

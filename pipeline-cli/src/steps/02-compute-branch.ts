@@ -39,7 +39,7 @@ export interface ComputeBranchOptions {
   logger?: PipelineLogger;
 }
 
-const DEFAULT_PATTERN = 'ai-sdlc/{issueIdLower}-{slug}';
+export const DEFAULT_PATTERN = 'ai-sdlc/{issueIdLower}-{slug}';
 
 /**
  * AISDLC-202.2 — used when slugify() degrades to an empty string AND the
@@ -256,15 +256,18 @@ export function parsePipelineBranchingKey<T>(
   return walkKeyPath<T>(branching, keyPath);
 }
 
-export async function computeBranchName(opts: ComputeBranchOptions): Promise<ComputeBranchResult> {
-  const taskIdLower = opts.taskId.toLowerCase();
-  const pattern = readBranchPattern(
-    opts.workDir,
-    opts.defaultPattern ?? DEFAULT_PATTERN,
-    opts.logger,
-  );
-  const rawSlug = slugify(opts.task.title);
-
+/**
+ * The one place a task branch name is built (AISDLC-851): Step 2 and
+ * `cli-dispatch enqueue` both call it, so the manifest and the checkout agree.
+ */
+export function buildBranchName(
+  pattern: string,
+  taskId: string,
+  title: string,
+  logger?: PipelineLogger,
+): { branch: string; slug: string } {
+  const taskIdLower = taskId.toLowerCase();
+  const rawSlug = slugify(title);
   // AISDLC-202.2 — degraded-input fallback. AISDLC-180 originally threw here
   // to surface upstream parser bugs (legacy line-based frontmatter parser
   // captured YAML block-scalar markers like `>-` as the literal title). The
@@ -278,16 +281,26 @@ export async function computeBranchName(opts: ComputeBranchOptions): Promise<Com
   let slug = rawSlug;
   if (slug === '' && pattern.includes('{slug}')) {
     slug = FALLBACK_SLUG;
-    const logger = opts.logger ?? DEFAULT_LOGGER;
-    logger.warn(
-      `[ai-sdlc] computeBranchName: slug normalisation of title ${JSON.stringify(opts.task.title)} ` +
-        `(task ${opts.taskId}) produced an empty string; using fallback slug ${JSON.stringify(FALLBACK_SLUG)}. ` +
+    (logger ?? DEFAULT_LOGGER).warn(
+      `[ai-sdlc] computeBranchName: slug normalisation of title ${JSON.stringify(title)} ` +
+        `(task ${taskId}) produced an empty string; using fallback slug ${JSON.stringify(FALLBACK_SLUG)}. ` +
         `If the title field uses YAML block-scalar (>- or |-), confirm the frontmatter parser ` +
         `decodes it to the unwrapped string before slugify().`,
     );
   }
 
   const branch = pattern.replace(/\{issueIdLower\}/g, taskIdLower).replace(/\{slug\}/g, slug);
+  return { branch, slug };
+}
+
+export async function computeBranchName(opts: ComputeBranchOptions): Promise<ComputeBranchResult> {
+  const taskIdLower = opts.taskId.toLowerCase();
+  const pattern = readBranchPattern(
+    opts.workDir,
+    opts.defaultPattern ?? DEFAULT_PATTERN,
+    opts.logger,
+  );
+  const { branch, slug } = buildBranchName(pattern, opts.taskId, opts.task.title, opts.logger);
   const worktreePath = join(opts.workDir, '.worktrees', taskIdLower);
   return { branch, worktreePath, slug, taskIdLower };
 }

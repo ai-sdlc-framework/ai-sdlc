@@ -138,6 +138,29 @@ function readJson<T>(file: string): T | undefined {
   }
 }
 
+/**
+ * Rewrite `branch` in every manifest kept for a task (queue, inflight, blocked, and
+ * the done/failed snapshots), so a later resume starts from the branch that is
+ * really pushed (AISDLC-851). Returns the number of manifests rewritten.
+ */
+export function correctManifestBranch(boardDir: string, taskId: string, branch: string): number {
+  if (!TASK_ID_RE.test(taskId)) return 0;
+  const files = [
+    ...['queue', 'inflight', 'blocked'].map((d) =>
+      path.join(boardDir, d, `${taskId}.dispatch.json`),
+    ),
+    ...['done', 'failed'].map((d) => path.join(boardDir, d, `${taskId}${DONE_MANIFEST_SUFFIX}`)),
+  ];
+  let n = 0;
+  for (const f of files) {
+    const m = existsSync(f) ? readJson<DispatchManifest>(f) : undefined;
+    if (!m || m.taskId !== taskId) continue;
+    writeFileSync(f, JSON.stringify({ ...m, branch }, null, 2) + '\n', 'utf-8');
+    n++;
+  }
+  return n;
+}
+
 /** Strip control sequences, then require prose, so validation and rendering see the same text. */
 function cleanList(label: string, items: readonly string[] | undefined): string[] | undefined {
   if (!items || items.length === 0) return undefined;

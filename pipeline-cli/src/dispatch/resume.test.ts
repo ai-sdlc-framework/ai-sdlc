@@ -21,6 +21,7 @@ import {
 } from './idle-backoff.js';
 import {
   authoriseResume,
+  correctManifestBranch,
   evaluatePushOnly,
   formatResumeFeedback,
   looksLikeCommand,
@@ -976,5 +977,30 @@ describe('push-only resume (AISDLC-821)', () => {
       );
       expect(evaluatePushOnly(root, 'AISDLC-845').mode).toBe('normal');
     });
+  });
+});
+
+describe('correctManifestBranch (AISDLC-851)', () => {
+  it('rewrites the branch in every kept manifest and ignores bad input', () => {
+    const board = mkdtempSync(path.join(tmpdir(), 'correct-branch-'));
+    try {
+      for (const d of ['queue', 'done', 'failed'])
+        mkdirSync(path.join(board, d), { recursive: true });
+      const m = mkManifest('AISDLC-7', { branch: 'ai-sdlc/aisdlc-7' });
+      writeFileSync(path.join(board, 'queue', 'AISDLC-7.dispatch.json'), JSON.stringify(m));
+      writeFileSync(path.join(board, 'done', 'AISDLC-7.manifest.json'), JSON.stringify(m));
+      writeFileSync(
+        path.join(board, 'failed', 'AISDLC-7.manifest.json'),
+        JSON.stringify({ ...m, taskId: 'AISDLC-8' }),
+      );
+      expect(correctManifestBranch(board, 'AISDLC-7', 'ai-sdlc/aisdlc-7-long')).toBe(2);
+      const q = JSON.parse(
+        readFileSync(path.join(board, 'queue', 'AISDLC-7.dispatch.json'), 'utf8'),
+      ) as { branch: string };
+      expect(q.branch).toBe('ai-sdlc/aisdlc-7-long');
+      expect(correctManifestBranch(board, '../evil', 'x')).toBe(0);
+    } finally {
+      rmSync(board, { recursive: true, force: true });
+    }
   });
 });

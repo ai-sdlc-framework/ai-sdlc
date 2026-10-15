@@ -1136,6 +1136,7 @@ export async function runDispatchCli(
           baseSha: flags['base-sha'] ?? resolveBaseSha(workDir),
           dispatchedBy: flags['dispatched-by'] ?? `operator-${process.pid}`,
           resolveTaskFile: (id) => findTaskFile(workDir, id),
+          workDir,
         });
         out({ ok: true, enqueued: entries.map((e) => e.taskId), paths });
         return 0;

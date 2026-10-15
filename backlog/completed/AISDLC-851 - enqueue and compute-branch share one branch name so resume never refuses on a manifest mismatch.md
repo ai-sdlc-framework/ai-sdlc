@@ -2,7 +2,7 @@
 id: AISDLC-851
 title: >-
   enqueue and compute-branch share one branch name so resume never refuses on a manifest mismatch
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:
@@ -38,11 +38,11 @@ dispatchable: true
 
 ## Acceptance Criteria
 
-- [ ] #1 Enqueuing a task and running Step 2 on it yields the same branch name (test in `02-compute-branch.test.ts` or a new enqueue test).
-- [ ] #2 A resume whose manifest carries the pre-fix short name against a worktree on the long name succeeds and leaves the manifest `branch` rewritten to the long name (playbook test).
-- [ ] #3 A resume where neither the manifest branch nor the worktree branch exists on origin still refuses (playbook test).
-- [ ] #4 No new field, flag or CLI subcommand is added.
-- [ ] #5 `docs/operations/decision-authority.md` notes that DEC-0183 is superseded by this task.
+- [x] #1 Enqueuing a task and running Step 2 on it yields the same branch name (test in `02-compute-branch.test.ts` or a new enqueue test).
+- [x] #2 A resume whose manifest carries the pre-fix short name against a worktree on the long name succeeds and leaves the manifest `branch` rewritten to the long name (playbook test).
+- [x] #3 A resume where neither the manifest branch nor the worktree branch exists on origin still refuses (playbook test).
+- [x] #4 No new field, flag or CLI subcommand is added.
+- [x] #5 `docs/operations/decision-authority.md` notes that DEC-0183 is superseded by this task.
 
 **Velocity impact.** Positive: removes a recurring park-and-escalate loop (two tasks on 2026-10-13 alone).
 
