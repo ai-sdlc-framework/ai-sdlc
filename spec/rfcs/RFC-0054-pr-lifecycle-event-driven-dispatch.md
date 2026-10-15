@@ -1,8 +1,8 @@
 ---
 id: RFC-0054
 title: PR Lifecycle as Event-Driven Dispatch (one state machine from branch pushed to merged)
-status: Draft
-lifecycle: Ready for Review
+status: Approved
+lifecycle: Signed Off
 author: 'Dominique Legault'
 created: 2026-10-13
 updated: 2026-10-14
@@ -14,8 +14,8 @@ requiresDocs: []
 
 # RFC-0054: PR Lifecycle as Event-Driven Dispatch (one state machine from branch pushed to merged)
 
-**Status:** Ready for Review (v0.2, 2026-10-14: all 14 Open Questions resolved with the operator through the decision rubric; webhook-first event source with poll reconciler, executor owns to ready then the state machine, docs lane for no-task PRs, delivered/landed, landing/ records, land-prep runner, local only, rung: key, report-only budget)
-**Lifecycle:** Ready for Review
+**Status:** Signed Off (v0.2, 2026-10-14, operator sign-off same day: all 14 Open Questions resolved with the operator through the decision rubric; webhook-first event source with poll reconciler, executor owns to ready then the state machine, docs lane for no-task PRs, delivered/landed, landing/ records, land-prep runner, local only, rung: key, report-only budget)
+**Lifecycle:** Signed Off
 **Author:** Dominique Legault (drafted by an agent session on the operator's 2026-10-13 mandate)
 **Created:** 2026-10-13
 **Updated:** 2026-10-14
@@ -808,6 +808,56 @@ order simply defers its cost until the state machine it would feed exists.
 
 An event is a hint to re-read the PR; the classifier reads state from GitHub, not from the payload.
 
+### Configuration (normative, operator ruling 2026-10-14)
+
+Repository conventions used by the state machine are configuration, never code and never command
+prose. They live in `.ai-sdlc/pr-lifecycle.yaml` (kind `PrLifecycle`, the same shape as the other
+`.ai-sdlc/*.yaml` files) with the defaults below. Every consumer reads them from there: the gate's
+docs-only detector, the DoR reference gate, `cli-file`, `cli-merge-if-eligible`, the reconciler,
+the webhook receiver, the loop guard and the stall detector. A convention value that appears as a
+literal in TypeScript, workflow YAML or a command body is a defect. The `.ai-sdlc/` block is
+protected only against untrusted external PRs; a trusted session changes it through the docs lane.
+
+```yaml
+apiVersion: ai-sdlc.io/v1alpha1
+kind: PrLifecycle
+metadata:
+  name: default
+spec:
+  docsOnlyPaths:                      # one list; the four copies collapse to this (AISDLC-878)
+    - spec/rfcs/
+    - docs/
+    - backlog/tasks/
+    - backlog/completed/
+    - .ai-sdlc/_decisions/
+    - .ai-sdlc/attestations/*.dsse.json
+    - .ai-sdlc/dispatch/briefs/
+    - .claude/memory/
+    - .github/dependabot.yml
+    - .github/*.md
+    - '*.md'
+  noTaskBranchPrefixes: [ai-sdlc/file-, ai-sdlc/decisions-sync, docs/]
+  releaseBranchPrefix: release-please--
+  taskIdPattern: '[A-Z][A-Z0-9]+-[0-9]+(\.[0-9]+)*'
+  webhook:
+    port: 8787
+    bind: 127.0.0.1
+    secretEnv: AI_SDLC_WEBHOOK_SECRET
+    debounceMs: 5000
+    events: [pull_request, check_suite, check_run, workflow_run, status, pull_request_review]
+  reconcile:
+    timerOpenMs: 60000                # while any task or docs PR is open
+    timerIdleMs: 900000
+  stall:
+    staleMs: 1800000                  # AISDLC-826 defaults, moved here
+    graceMs: 600000
+  loopGuard:
+    maxSameHeadActions: 1             # OQ-3: the second identical (action, headSha) parks
+  flipPreconditions:
+    requireCodeql: true
+    requireApprovedVerdict: true
+```
+
 ### Board changes
 
 New board state `landing/` (AISDLC-816 AC-2): a task moves from `inflight/` to `landing/` at PR
@@ -1272,12 +1322,18 @@ rubric (class (a), (b) or (c) per the Decision authority rules).
     strong-model calls around the cheap tier without evidence; **over a dwell cap** because dwell
     does not track cost; **over a budget now** because it needs logging that does not exist.
 
+## Sign-Off
+
+| Role | Name | Status | Date |
+|---|---|---|---|
+| CTO / Engineering Authority + AI-SDLC Operator | Dominique Legault | ✅ Signed (14/14 OQs resolved with the full rubric on 2026-10-14; webhook-first with coded reconciler, executor-to-ready ownership, docs lane, delivered/landed; implementation tasks AISDLC-878 to 885 filed, 816 and 829 amended) | 2026-10-14 |
+
 ## Revision History
 
 | Date | Version | Change |
 |---|---|---|
 | 2026-10-13 | v0.1 | Drafted on the operator's mandate; four options, recommendation, 14 Open Questions, none resolved. |
-| 2026-10-14 | v0.2 | OQ walkthrough with the operator, full rubric per question; lifecycle Draft to Ready for Review. OQ-1 webhook first with poll as the fallback reconciler (the hybrid with the fast path in Phase 1); OQ-2 executor owns the PR until ready, the state machine from ready to merged, takeover on death or timeout; OQ-3 count cap kept for PR-less failures, same-head loop guard for PR follow-ups (corrects the 828 reference to 847); OQ-4 and OQ-11 docs lane: no-task PRs owned by the machine from birth with a docs action set, `cli-file rebase` in place, `reenter` keyed on PR state for task PRs; OQ-5 `delivered` (ready and armed) and `landed` (merged), `done/` written only on landed; OQ-6 `landing/` board records for ownership and history, GitHub for facts; OQ-7 `land-prep` runner extracted, executor still flips; OQ-8 local only; OQ-9 shipped 823/826/847 are Phase 0, 816 and 829 amended in place; OQ-10 payload is a trigger, re-read via REST; OQ-12 rung 2 is the RFC-0049 judgment layer with provider by config; OQ-13 `rung:` frontmatter key checked by the model-pins gate; OQ-14 no dev trio, dev-round spend measured per PR, budget report-only in v1 with the per-PR budget as the Phase 3 target. Implementation tasks AISDLC-878 to 885 filed; AISDLC-816 and 829 amended. |
+| 2026-10-14 | v0.2 | OQ walkthrough with the operator, full rubric per question; lifecycle Draft to Ready for Review (#1542) then Signed Off the same day (operator sign-off). OQ-1 webhook first with poll as the fallback reconciler (the hybrid with the fast path in Phase 1); OQ-2 executor owns the PR until ready, the state machine from ready to merged, takeover on death or timeout; OQ-3 count cap kept for PR-less failures, same-head loop guard for PR follow-ups (corrects the 828 reference to 847); OQ-4 and OQ-11 docs lane: no-task PRs owned by the machine from birth with a docs action set, `cli-file rebase` in place, `reenter` keyed on PR state for task PRs; OQ-5 `delivered` (ready and armed) and `landed` (merged), `done/` written only on landed; OQ-6 `landing/` board records for ownership and history, GitHub for facts; OQ-7 `land-prep` runner extracted, executor still flips; OQ-8 local only; OQ-9 shipped 823/826/847 are Phase 0, 816 and 829 amended in place; OQ-10 payload is a trigger, re-read via REST; OQ-12 rung 2 is the RFC-0049 judgment layer with provider by config; OQ-13 `rung:` frontmatter key checked by the model-pins gate; OQ-14 no dev trio, dev-round spend measured per PR, budget report-only in v1 with the per-PR budget as the Phase 3 target. Implementation tasks AISDLC-878 to 885 filed; AISDLC-816 and 829 amended. |
 
 ## References
 
