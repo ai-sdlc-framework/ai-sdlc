@@ -1,7 +1,7 @@
 ---
 id: AISDLC-895
 title: 'feat(decisions): decisions-sync PR opens ready, and a trusted decisions-sync source kind lets merge-if-eligible land it when green and clean'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [decisions, governance, velocity, adopters]

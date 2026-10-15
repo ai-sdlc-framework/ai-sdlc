@@ -12,7 +12,7 @@
  *     tree is `origin/main` plus the merged ledger, and pushes it to a dedicated sync
  *     branch (`ai-sdlc/decisions-sync`). The ledger on that branch is the union of
  *     origin/main, the previous sync-branch tip, and the local ledger (line-level, so
- *     nothing is ever dropped). A draft PR is opened best-effort via `gh`.
+ *     nothing is ever dropped). A ready PR (draft only when `syncPrDraft: true`) is opened best-effort via `gh`.
  *  2. `nextDecisionIdDurable()` / `assertDecisionIdFree()` derive numbering from
  *     max(local, origin/main, sync branch) after a fetch, so a freed number can't be reissued.
  *
@@ -32,6 +32,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
 
+import { loadDecisionsConfig } from './decisions-config.js';
 import { formatDecisionId, validateDecisionEvent, type DecisionEvent } from './decision-record.js';
 import {
   eventContentHash,
@@ -477,7 +478,7 @@ function openSyncPr(ctx: Ctx): string | undefined {
   const created = ctx.run('gh', [
     'pr',
     'create',
-    '--draft',
+    ...(loadDecisionsConfig({ workDir: ctx.root }).syncPrDraft === true ? ['--draft'] : []),
     '--base',
     'main',
     '--head',

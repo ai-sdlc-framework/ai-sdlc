@@ -381,10 +381,32 @@ export function resolveGovernanceFromYaml(yamlText: string): {
  * (external GitHub issue / contributor-authored work) and any unrecognised
  * value are untrusted — fail closed.
  */
-export type SourceKind = 'backlog' | 'gh-issue' | 'release';
+export type SourceKind = 'backlog' | 'gh-issue' | 'release' | 'decisions-sync';
+
+/** AISDLC-895: the dedicated Decision Catalog sync branch (mirrors remote-persist.ts). */
+export const DECISIONS_SYNC_HEAD = 'ai-sdlc/decisions-sync';
+const DECISIONS_EVENTS_PREFIX = '.ai-sdlc/_decisions/events/';
+
+/**
+ * AISDLC-895: refusal reason for a decisions-sync PR whose diff leaves the
+ * events directory, or `null` when every path is confined to it.
+ */
+export function decisionsSyncPathRefusal(files: ChangedFile[]): string | null {
+  const bad: string[] = [];
+  for (const f of files) {
+    for (const p of [f.path, f.previousPath]) {
+      const ok =
+        p === undefined || (p.startsWith(DECISIONS_EVENTS_PREFIX) && !p.split('/').includes('..'));
+      if (!ok && !bad.includes(p)) bad.push(p);
+    }
+  }
+  return bad.length === 0
+    ? null
+    : `decisions-sync PR changes paths outside ${DECISIONS_EVENTS_PREFIX}**: ${bad.join(', ')}`;
+}
 
 export function isTrustedSourceKind(sourceKind: SourceKind | undefined): boolean {
-  return sourceKind === 'backlog';
+  return sourceKind === 'backlog' || sourceKind === 'decisions-sync';
 }
 
 // ── PR-derived trust facts (read from GitHub, not from caller flags) ────
@@ -758,6 +780,8 @@ export async function evaluatePrTrust(args: {
   mergeAuthors: string[];
   repoSlug: string;
   taskPrefix: string;
+  /** AISDLC-895: `decisions-sync` swaps the backlog-task check for a head-branch check. */
+  sourceKind?: SourceKind;
   /** Resolves the single main commit SHA all reads use (memoised by the caller). */
   mainSha: () => Promise<string | null>;
   runner: Runner;
@@ -781,30 +805,36 @@ export async function evaluatePrTrust(args: {
   if (!allowed(pr.authorLogin)) {
     return `PR author "${pr.authorLogin}" is not on the spec.governance.mergeAuthors allow-list`;
   }
-  const derived = deriveTaskId(pr.headRefName, pr.title, args.taskPrefix);
-  if (derived.conflict) return `ambiguous task id: ${derived.conflict}`;
-  if (!derived.taskId) {
-    return (
-      `no backlog task id (${args.taskPrefix}-<n>[.<n>]) could be derived from head branch ` +
-      `"${pr.headRefName}" (expected ai-sdlc/<id>-...) or the PR title (trailing "(<ID>)")`
+  if (args.sourceKind === 'decisions-sync') {
+    if (pr.headRefName !== DECISIONS_SYNC_HEAD) {
+      return `PR head branch is "${pr.headRefName}" - decisions-sync landing is limited to "${DECISIONS_SYNC_HEAD}"`;
+    }
+  } else {
+    const derived = deriveTaskId(pr.headRefName, pr.title, args.taskPrefix);
+    if (derived.conflict) return `ambiguous task id: ${derived.conflict}`;
+    if (!derived.taskId) {
+      return (
+        `no backlog task id (${args.taskPrefix}-<n>[.<n>]) could be derived from head branch ` +
+        `"${pr.headRefName}" (expected ai-sdlc/<id>-...) or the PR title (trailing "(<ID>)")`
+      );
+    }
+    const inPr = pr.files.some(
+      (f) =>
+        f.changeType?.toUpperCase() !== 'DELETED' && isBacklogTaskFileFor(derived.taskId!, f.path),
     );
-  }
-  const inPr = pr.files.some(
-    (f) =>
-      f.changeType?.toUpperCase() !== 'DELETED' && isBacklogTaskFileFor(derived.taskId!, f.path),
-  );
-  let onMain = false;
-  if (!inPr) {
-    const sha = await args.mainSha();
-    if (!sha)
-      return 'could not resolve the main branch to a commit on GitHub — refusing (fail-closed)';
-    onMain = await taskFileOnMain(derived.taskId, args.repoSlug, sha, args.runner, args.cwd);
-  }
-  if (!inPr && !onMain) {
-    return (
-      `no backlog task file for "${derived.taskId}" exists on main (per GitHub) or in this PR's own ` +
-      'diff (backlog/tasks or backlog/completed)'
-    );
+    let onMain = false;
+    if (!inPr) {
+      const sha = await args.mainSha();
+      if (!sha)
+        return 'could not resolve the main branch to a commit on GitHub — refusing (fail-closed)';
+      onMain = await taskFileOnMain(derived.taskId, args.repoSlug, sha, args.runner, args.cwd);
+    }
+    if (!inPr && !onMain) {
+      return (
+        `no backlog task file for "${derived.taskId}" exists on main (per GitHub) or in this PR's own ` +
+        'diff (backlog/tasks or backlog/completed)'
+      );
+    }
   }
   const logins = await fetchCommitLogins(pr.headRefOid, args.repoSlug, args.runner, args.cwd);
   if (!logins) return 'could not read the head commit author from GitHub — refusing (fail-closed)';
@@ -1473,6 +1503,7 @@ export async function runMergeIfEligible(
     mergeAuthors,
     repoSlug: opts.repoSlug,
     taskPrefix,
+    sourceKind: opts.sourceKind,
     mainSha,
     runner: opts.runner,
     cwd: opts.cwd,
@@ -1492,6 +1523,10 @@ export async function runMergeIfEligible(
   }
   if (changed.length === 0) {
     return refuse('the PR has no changed files relative to main — nothing to merge');
+  }
+  if (opts.sourceKind === 'decisions-sync') {
+    const pathRefusal = decisionsSyncPathRefusal(changed);
+    if (pathRefusal) return refuse(pathRefusal);
   }
   const sensitive = governanceSensitiveChanges(changed);
   const sensitiveNote =
@@ -1525,7 +1560,7 @@ export async function runMergeIfEligible(
     const armEligibility: MergeEligibilityResult = {
       eligible: true,
       reason:
-        `policy allowMerge=onGreenClean, sourceKind=backlog, trust checks passed for head ` +
+        `policy allowMerge=onGreenClean, sourceKind=${opts.sourceKind}, trust checks passed for head ` +
         `${snapshot.headRefOid} — eligible to arm auto-merge (GitHub merges only once its own ` +
         `required checks pass)${sensitiveNote}`,
     };

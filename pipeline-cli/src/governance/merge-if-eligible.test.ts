@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import {
   deriveTaskId,
   evaluateMergeEligibility,
+  decisionsSyncPathRefusal,
   evaluatePrTrust,
   governanceSensitiveChanges,
   isGovernanceSensitivePath,
@@ -2085,6 +2086,85 @@ describe('defaultBacklogAuditWriter (DEC-0072)', () => {
       expect(() => defaultBacklogAuditWriter(join(dir, 'blocker'))(rec)).not.toThrow();
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('runMergeIfEligible - decisions-sync source kind (AISDLC-895)', () => {
+  const EVENT = '.ai-sdlc/_decisions/events/2026-10-15T16-05-08.310Z__DEC-0233__x__abc.json';
+  const base = (files: ReturnType<typeof changedFiles>, pr: Record<string, unknown> = {}) => ({
+    'gh pr view 42': {
+      stdout: prView({ headRefName: 'ai-sdlc/decisions-sync', files: [], ...pr }),
+    },
+    ...MAIN_REF,
+    ...files,
+    'gh pr checks 42 --required': { stdout: JSON.stringify([{ name: 'ci', state: 'SUCCESS' }]) },
+    ...COMMIT_OPERATOR,
+    ...shaChecks(HEAD_A, [['ci', 'completed', 'success']]),
+    'gh pr merge 42': {},
+  });
+  const run = (handlers: Record<string, Partial<ExecResult> | Error>) => {
+    const fake = makeFakeRunner(handlers);
+    const promise = runMergeIfEligible({
+      prNumber: 42,
+      sourceKind: 'decisions-sync',
+      repoSlug: 'org/repo',
+      repoRoot: '/unused',
+      runner: fake.runner,
+      policyYaml: GREEN_YAML,
+      taskPrefix: 'AISDLC',
+    });
+    return { promise, calls: fake.calls };
+  };
+  const merged = (calls: RecordedCall[]) => calls.some((c) => c.args.includes('merge'));
+
+  it('trusts the kind and merges a green CLEAN events-only PR on the sync branch', async () => {
+    expect(isTrustedSourceKind('decisions-sync')).toBe(true);
+    const { promise, calls } = run(base(changedFiles([[EVENT]])));
+    const r = await promise;
+    expect(r.merged).toBe(true);
+    expect(merged(calls)).toBe(true);
+  });
+
+  it('refuses a path outside the events directory, naming the path', async () => {
+    const { promise, calls } = run(
+      base(changedFiles([[EVENT], ['pipeline-cli/src/evil.ts', 'modified']])),
+    );
+    const r = await promise;
+    expect(r.merged).toBe(false);
+    expect(r.eligibility.reason).toMatch(/pipeline-cli\/src\/evil\.ts/);
+    expect(merged(calls)).toBe(false);
+  });
+
+  it('refuses the legacy ledger path and traversal', () => {
+    expect(
+      decisionsSyncPathRefusal([{ path: '.ai-sdlc/_decisions/events.jsonl', status: 'modified' }]),
+    ).toMatch(/events\.jsonl/);
+    expect(
+      decisionsSyncPathRefusal([{ path: '.ai-sdlc/_decisions/events/../x', status: 'added' }]),
+    ).toMatch(/\.\.\/x/);
+    expect(decisionsSyncPathRefusal([{ path: EVENT, status: 'added' }])).toBeNull();
+  });
+
+  it('refuses any other head branch, naming it', async () => {
+    const { promise, calls } = run(
+      base(changedFiles([[EVENT]]), { headRefName: 'ai-sdlc/aisdlc-9-do-thing' }),
+    );
+    const r = await promise;
+    expect(r.merged).toBe(false);
+    expect(r.eligibility.reason).toMatch(/ai-sdlc\/aisdlc-9-do-thing/);
+    expect(merged(calls)).toBe(false);
+  });
+
+  it('keeps the fork, base and author checks', async () => {
+    for (const [pr, re] of [
+      [{ isCrossRepository: true }, /fork/],
+      [{ baseRefName: 'dev' }, /base branch/],
+      [{ author: { login: 'mallory' } }, /mallory/],
+    ] as const) {
+      const r = await run(base(changedFiles([[EVENT]]), pr)).promise;
+      expect(r.merged).toBe(false);
+      expect(r.eligibility.reason).toMatch(re);
     }
   });
 });

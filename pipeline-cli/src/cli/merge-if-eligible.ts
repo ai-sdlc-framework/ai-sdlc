@@ -123,7 +123,7 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
   return yargs(hideBin(process.argv))
     .scriptName('merge-if-eligible')
     .usage(
-      'Usage: $0 <pr> --source-kind <backlog|gh-issue|release> [options]\n\n' +
+      'Usage: $0 <pr> --source-kind <backlog|gh-issue|release|decisions-sync> [options]\n\n' +
         '  merge-if-eligible 176 --source-kind backlog          # merge iff green+CLEAN+trusted\n' +
         '                                                       # (governance-path changes are audited, not refused: DEC-0072)\n' +
         '  merge-if-eligible 176 --source-kind backlog --dry-run  # evaluate only, never merge\n' +
@@ -143,11 +143,11 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
           })
           .option('source-kind', {
             type: 'string',
-            choices: ['backlog', 'gh-issue', 'release'] as const,
+            choices: ['backlog', 'gh-issue', 'release', 'decisions-sync'] as const,
             demandOption: true,
             describe:
               'Work-item provenance for the OQ-2 trust boundary. Only "backlog" (internal, ' +
-              'dispatched by our own orchestrator) and "release" (the release-please PR, verified from ' +
+              'dispatched by our own orchestrator) "decisions-sync" (the ai-sdlc/decisions-sync PR, confined to .ai-sdlc/_decisions/events/**) and "release" (the release-please PR, verified from ' +
               'GitHub, caller role restricted by governance) are mergeable by an agent.',
           })
           .option('cwd', {
