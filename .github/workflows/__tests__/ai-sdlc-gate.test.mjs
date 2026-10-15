@@ -861,9 +861,9 @@ describe('AISDLC-412: attestation-gate does not fail on cancelled runs', () => {
     return cond;
   };
 
-  it('declares concurrency.cancel-in-progress: true', () => {
+  it('declares concurrency.cancel-in-progress (cancels except on ready_for_review)', () => {
     assert.ok(wf.concurrency, 'workflow must declare a top-level concurrency block');
-    assert.equal(wf.concurrency['cancel-in-progress'], true);
+    assert.match(String(wf.concurrency['cancel-in-progress']), /ready_for_review/);
   });
 
   it('Enforce step does NOT use always() or cancelled()', () => {
