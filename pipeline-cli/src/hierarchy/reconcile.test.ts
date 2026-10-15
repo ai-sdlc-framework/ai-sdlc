@@ -85,6 +85,24 @@ describe('reconcile idempotency (AC1)', () => {
     expect(readLanding(board, 10)?.history).toHaveLength(1);
   });
 
+  it('retries a failed action on the next pass without a new history entry', () => {
+    const red = [{ name: 'ai-sdlc/pr-ready', conclusion: 'failure' as const, summary: 'boom' }];
+    const execute = vi
+      .fn<(c: ActionContext) => { ran: boolean; failed?: boolean }>()
+      .mockReturnValueOnce({ ran: true, failed: true })
+      .mockReturnValue({ ran: true });
+    const facts = [taskPr({ checks: red })];
+    reconcile(facts, { boardDir: board, execute, now: fixedNow });
+    expect(readLanding(board, 10)?.actionFailed).toBe(true);
+    const second = reconcile(facts, { boardDir: board, execute, now: fixedNow });
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(second.acted).toHaveLength(1);
+    expect(readLanding(board, 10)?.actionFailed).toBeUndefined();
+    expect(readLanding(board, 10)?.history).toHaveLength(1);
+    reconcile(facts, { boardDir: board, execute, now: fixedNow });
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
   it('appends history and runs the new action when the head SHA changes', () => {
     const execute = vi.fn(() => ({ ran: true }));
     const red = [{ name: 'ai-sdlc/pr-ready', conclusion: 'failure' as const, summary: 'boom' }];
@@ -289,7 +307,11 @@ describe('helpers', () => {
       boardDir: '/b',
     };
     expect(commandExecutor(ok, '/', '/bin')(ctx)).toEqual({ ran: true });
-    expect(commandExecutor(bad, '/', '/bin')(ctx)).toEqual({ ran: true, note: 'gh failed: nope' });
+    expect(commandExecutor(bad, '/', '/bin')(ctx)).toEqual({
+      ran: true,
+      failed: true,
+      note: 'gh failed: nope',
+    });
     expect(commandExecutor(ok, '/', '/bin')({ ...ctx, action: 'none' }).ran).toBe(false);
   });
 });

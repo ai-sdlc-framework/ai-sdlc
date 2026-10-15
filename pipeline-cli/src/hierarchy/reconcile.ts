@@ -92,6 +92,8 @@ export interface LandingRecord {
   action: string;
   headSha?: string;
   failingLine?: string;
+  /** Set when the last run of `action` failed; the next pass retries without a new history entry. */
+  actionFailed?: boolean;
   delivered?: string;
   landed?: string;
   history: LandingEntry[];
@@ -162,6 +164,8 @@ export function decide(f: ReconcilePr, record?: LandingRecord): Decision {
 export interface ActionResult {
   ran: boolean;
   note?: string;
+  /** The action's command exited non-zero; the next pass retries it. */
+  failed?: boolean;
 }
 
 export interface ActionContext {
@@ -257,6 +261,7 @@ export function commandExecutor(run: CommandRunner, cwd: string, cliBin: string)
       if (r.status !== 0) {
         return {
           ran: true,
+          failed: true,
           note: `${c.file} failed: ${r.stderr.trim().split('\n')[0] ?? ''}`.trim(),
         };
       }
@@ -343,13 +348,37 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
       existing?.owner === 'machine' ||
       (f.executorDead === true && d.action !== 'none');
     const owner = machineOwned ? 'machine' : `executor:${f.executor ?? 'unknown'}`;
-    if (
+    const unchanged =
       existing !== undefined &&
       existing.state === d.state &&
       existing.action === d.action &&
       existing.headSha === f.headSha &&
-      existing.owner === owner
-    ) {
+      existing.owner === owner;
+    if (unchanged && existing.actionFailed === true && d.action !== 'none') {
+      // A failed action is retried on the next pass; history is not appended again.
+      const retry = opts.execute({
+        pr: f.prNumber,
+        taskId: f.taskId,
+        kind: d.kind,
+        action: d.action,
+        state: d.state,
+        ...(f.headSha === undefined ? {} : { headSha: f.headSha }),
+        ...(d.failingLine === undefined ? {} : { failingLine: d.failingLine }),
+        boardDir: opts.boardDir,
+      });
+      const { actionFailed: _drop, ...rest } = existing;
+      const updated: LandingRecord = retry.failed ? { ...rest, actionFailed: true } : rest;
+      writeLanding(opts.boardDir, updated);
+      report.records.push(updated);
+      report.acted.push({
+        pr: f.prNumber,
+        action: d.action,
+        ran: retry.ran,
+        ...(retry.note ? { note: retry.note } : {}),
+      });
+      continue;
+    }
+    if (unchanged) {
       report.records.push(existing);
       continue;
     }
@@ -387,6 +416,7 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
         boardDir: opts.boardDir,
       });
     }
+    if (result.failed) record.actionFailed = true;
     writeLanding(opts.boardDir, record);
     report.records.push(record);
     if (d.action !== 'none') {
