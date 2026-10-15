@@ -2,7 +2,7 @@
   "schemaVersion": "v6",
   "subject": {
     "digest": {
-      "sha1": "cb060b64d9140c492e7f06e37ad911b09bceea9d"
+      "sha1": "99c35bd1108c30baf6675592cf44b8635d9cd7ab"
     }
   },
   "transcriptLeaves": [
@@ -51,6 +51,28 @@
       "verdictClass": "independent",
       "harnessTranscriptHash": "ffca50a57a1d74267145b1865af696636275b8719d37d4956fd8e900d1ce67eb",
       "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 6,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "3cf017fbca35c1337d80dc2392e9e0b8bf8fbfbc1155c74564916a568d73dbfc",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 7,
+      "reviewerName": "test-reviewer-codex",
+      "transcriptHash": "6a0339c46054b2219977f4e2ca7a726dd01b6ec3fa12f8479ba19b01a52233db",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 8,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "2205f4f2c14b20b5601657a717638cac088ed2dc06a733c48293fd980d665740",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "2205f4f2c14b20b5601657a717638cac088ed2dc06a733c48293fd980d665740",
+      "independenceTier": "attested"
     }
   ],
   "merkleProofs": [
@@ -59,7 +81,8 @@
       "proof": [
         "7e9d8fb16968e98d98a547ebaca7577422f1e9a3a8334211764d8e2ed63e61ed",
         "8154dcc5a267235b57ef70e9ad2c811ba919dc02d1ff32bbb38500d3be4747c3",
-        "58623f71938111504d0a081ccdedc5305763c08de69d1805f35b9930028b51eb"
+        "ba50e1229b48a8e034101e8f0b817732c497dafbaecdff989dbf2e1b4ebd04e4",
+        "8bbb423ad44c5c0d3ce3fe611b2e76877af636a3b2aef43e99043360a50f8be5"
       ]
     },
     {
@@ -67,7 +90,8 @@
       "proof": [
         "2f3d9ed52a2f8c39ef7634c6e8ad922f98a78834dd28f73a980d519af577112b",
         "8154dcc5a267235b57ef70e9ad2c811ba919dc02d1ff32bbb38500d3be4747c3",
-        "58623f71938111504d0a081ccdedc5305763c08de69d1805f35b9930028b51eb"
+        "ba50e1229b48a8e034101e8f0b817732c497dafbaecdff989dbf2e1b4ebd04e4",
+        "8bbb423ad44c5c0d3ce3fe611b2e76877af636a3b2aef43e99043360a50f8be5"
       ]
     },
     {
@@ -75,7 +99,8 @@
       "proof": [
         "87a134bbec1fae0d83f825a57ab284a9ab37d35a8c879b3405345b4009a610b1",
         "687f1a852a3593538a66599f25f07e2a1e1dcb906e46a1a4db494ee2c0dc7802",
-        "58623f71938111504d0a081ccdedc5305763c08de69d1805f35b9930028b51eb"
+        "ba50e1229b48a8e034101e8f0b817732c497dafbaecdff989dbf2e1b4ebd04e4",
+        "8bbb423ad44c5c0d3ce3fe611b2e76877af636a3b2aef43e99043360a50f8be5"
       ]
     },
     {
@@ -83,31 +108,61 @@
       "proof": [
         "62976367576746f591f7090a3e04bbc8ddfa0456ad96a7e7ca73d12e8a21961a",
         "687f1a852a3593538a66599f25f07e2a1e1dcb906e46a1a4db494ee2c0dc7802",
-        "58623f71938111504d0a081ccdedc5305763c08de69d1805f35b9930028b51eb"
+        "ba50e1229b48a8e034101e8f0b817732c497dafbaecdff989dbf2e1b4ebd04e4",
+        "8bbb423ad44c5c0d3ce3fe611b2e76877af636a3b2aef43e99043360a50f8be5"
       ]
     },
     {
       "leafIndex": 4,
       "proof": [
         "1ee61f7a30a2c289cafc72f5ac12ee57765b54d0deea5b1e1ab85c1f7156573c",
-        "26c040d9cb626c8699e47b908f210634526a30d30d68e845362fc35970456d1e",
-        "466c3485a92fe4bbf60e2b35f56da8de1b9738ddd917537b1e5b2c2d6bd04366"
+        "898e10c7b2166bb728838644e2fa078689627c2c53d3a35eca99122ab137bb56",
+        "466c3485a92fe4bbf60e2b35f56da8de1b9738ddd917537b1e5b2c2d6bd04366",
+        "8bbb423ad44c5c0d3ce3fe611b2e76877af636a3b2aef43e99043360a50f8be5"
       ]
     },
     {
       "leafIndex": 5,
       "proof": [
         "d7539078206045315465ab7d7ba949ac9e8f0c30636969a3ef29559df077436f",
+        "898e10c7b2166bb728838644e2fa078689627c2c53d3a35eca99122ab137bb56",
+        "466c3485a92fe4bbf60e2b35f56da8de1b9738ddd917537b1e5b2c2d6bd04366",
+        "8bbb423ad44c5c0d3ce3fe611b2e76877af636a3b2aef43e99043360a50f8be5"
+      ]
+    },
+    {
+      "leafIndex": 6,
+      "proof": [
+        "f0bcd061a0406c067fcf20356d3ce0c801448440e3610ba6e0fdc356130b9639",
         "26c040d9cb626c8699e47b908f210634526a30d30d68e845362fc35970456d1e",
-        "466c3485a92fe4bbf60e2b35f56da8de1b9738ddd917537b1e5b2c2d6bd04366"
+        "466c3485a92fe4bbf60e2b35f56da8de1b9738ddd917537b1e5b2c2d6bd04366",
+        "8bbb423ad44c5c0d3ce3fe611b2e76877af636a3b2aef43e99043360a50f8be5"
+      ]
+    },
+    {
+      "leafIndex": 7,
+      "proof": [
+        "302d19af3500c940bd408714858610bb8849ca7e54b4e3f760af9f7e0ef127ec",
+        "26c040d9cb626c8699e47b908f210634526a30d30d68e845362fc35970456d1e",
+        "466c3485a92fe4bbf60e2b35f56da8de1b9738ddd917537b1e5b2c2d6bd04366",
+        "8bbb423ad44c5c0d3ce3fe611b2e76877af636a3b2aef43e99043360a50f8be5"
+      ]
+    },
+    {
+      "leafIndex": 8,
+      "proof": [
+        "f8b143ed33d4bed828a0542bcc2ad436e36d1543b576ebe75acebb9ab7e89e60",
+        "c61a29acba381ff4aadb516559ec0dcd1b29a5d289d68ae9e2f24e93821def4d",
+        "202144bbbd2543596d9b64da40065a775f9934bbf07a9f253407155638974595",
+        "8066f902c26de38824bee62acf48b50a09246b01aa2a5831896d3710cbb9f794"
       ]
     }
   ],
-  "rootHash": "d89ae98d31b2cbac2bbfbb8c0dcdfa927e20ee46e6da4bfa078e889eee3cfd05",
-  "rootSignature": "XaKGD6K5sFg+ns0/jXHveTBkf8DYQ5zxeV/QoaWCiJn4iHjm74GrGL9Ojm7EMNeTumsN0hXvUr+l73EsWwXsAQ==",
-  "nonce": "f11fc06517578e7042d6f9210bcd9095f5b4cb498b181be5ff4ab27f87412441",
-  "leafCount": 6,
-  "signedAt": "2026-10-15T22:43:14.275Z",
+  "rootHash": "cab73ea9823ad91bbe421f2567b7c798296c06e95eaae8c59ad56f2e019aa8cb",
+  "rootSignature": "TiRvLrRV+Q0jj7h0w2mvpTm4eCMBOSt15wo2BR+IUf3ckxsh+lWUpGVV9TpDYZKE/WxwGF6Nr9DsxyORKJLeAQ==",
+  "nonce": "d2f6a7abe173630370160baa7775800500e024e4e9249331029cd4266acf5f8b",
+  "leafCount": 9,
+  "signedAt": "2026-10-15T23:43:54.690Z",
   "signerIdentity": "dominique@local:doms-macbook",
   "reviewScope": {
     "classification": "full",
@@ -120,8 +175,7 @@
       "test-reviewer-codex",
       "security-reviewer",
       "code-reviewer",
-      "test-reviewer",
-      "security-reviewer"
+      "test-reviewer"
     ]
   }
 }
