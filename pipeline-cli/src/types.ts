@@ -524,6 +524,8 @@ export interface ReviewerFinding {
 export interface ReviewerVerdict {
   agentId: ReviewerType | string;
   harness: 'claude-code' | 'codex' | string;
+  /** Set when a fallback reviewer ran in place of the planned harness (AISDLC-911). */
+  plannedHarness?: string;
   approved: boolean;
   findings: ReviewerFinding[];
   summary?: string;

@@ -30,6 +30,8 @@ export interface ReviewerReport {
   approved: boolean;
   findings?: ReviewerFinding[];
   summary?: string;
+  /** Model the reporting agent ran on; recorded on the leaf when a fallback ran (AISDLC-911). */
+  model?: string;
   /** Staged stages only (RFC-0052): the agent's final message, inline. */
   output?: string;
   /** Staged stages only: a file holding the agent's final message, written verbatim. */
@@ -167,6 +169,28 @@ export function approvedWithoutReviewers(harnessNote: string): AggregatedVerdict
   };
 }
 
+/**
+ * AISDLC-911: a planned `-codex` slot whose report came from the Claude-native
+ * agent (codex quota exhausted) really ran on claude-code; label it truthfully.
+ */
+function resolveActual(
+  sp: { agent: string; reviewer: string; harness: 'claude-code' | 'codex'; leafModel: string },
+  report: ReviewerReport,
+): { agent: string; harness: string; leafModel: string; plannedHarness?: string } {
+  const fellBack =
+    sp.harness === 'codex' &&
+    sp.agent.endsWith('-codex') &&
+    !report.agent.endsWith('-codex') &&
+    report.agent === sp.reviewer;
+  if (!fellBack) return { agent: sp.agent, harness: sp.harness, leafModel: sp.leafModel };
+  return {
+    agent: report.agent,
+    harness: 'claude-code',
+    leafModel: report.model ?? 'sonnet',
+    plannedHarness: sp.harness,
+  };
+}
+
 export async function finalizeReview(
   ctx: NextStepContext,
   state: NextStepState,
@@ -185,7 +209,9 @@ export async function finalizeReview(
   for (const sp of review.spawned) {
     const report = reports.find((r) => r.agent === sp.agent || r.agent === sp.reviewer);
     if (!report) continue;
-    const id = report.agentId ?? resolveAgentIdFromMarkers(state.worktreePath, sp.agent);
+    const id =
+      report.agentId ??
+      resolveAgentIdFromMarkers(state.worktreePath, resolveActual(sp, report).agent);
     if (!id) {
       return {
         ok: false,
@@ -216,9 +242,11 @@ export async function finalizeReview(
       });
       continue;
     }
+    const actual = resolveActual(sp, report);
     verdicts.push({
-      agentId: sp.agent,
-      harness: sp.harness,
+      agentId: actual.agent,
+      harness: actual.harness,
+      ...(actual.plannedHarness ? { plannedHarness: actual.plannedHarness } : {}),
       approved: report.approved,
       findings: report.findings ?? [],
       ...(report.summary !== undefined ? { summary: report.summary } : {}),
@@ -228,7 +256,7 @@ export async function finalizeReview(
     const agentId = agentIds.get(sp.agent)!;
     const verdictScratch = writeRunFile(
       ctx,
-      `verdict-${sp.agent}.json`,
+      `verdict-${actual.agent}.json`,
       JSON.stringify({
         approved: report.approved,
         findings: report.findings ?? [],
@@ -244,7 +272,7 @@ export async function finalizeReview(
         '--task-id',
         state.taskId,
         '--reviewer',
-        sp.agent,
+        actual.agent,
         '--agent-id',
         agentId,
         '--verdict-file',
@@ -260,8 +288,8 @@ export async function finalizeReview(
     }
 
     // 7c — one transcript leaf per reviewer that really ran.
-    const transcript = join(wtAiSdlc, 'transcripts', state.taskIdLower, `${sp.agent}.jsonl`);
-    const verdictFile = join(wtAiSdlc, 'verdicts', `${sp.agent}-${state.taskIdLower}.json`);
+    const transcript = join(wtAiSdlc, 'transcripts', state.taskIdLower, `${actual.agent}.jsonl`);
+    const verdictFile = join(wtAiSdlc, 'verdicts', `${actual.agent}-${state.taskIdLower}.json`);
     if (!ctx.exists(transcript) || !ctx.exists(verdictFile)) {
       warnings.push(
         `Step 7c: transcript or verdict missing for ${sp.agent} after persistence; leaf not emitted (the v6 sign step will block)`,
@@ -278,7 +306,7 @@ export async function finalizeReview(
         '--task-id',
         state.taskId,
         '--reviewer',
-        sp.agent,
+        actual.agent,
         '--transcript-path',
         transcript,
         '--verdict-path',
@@ -286,9 +314,9 @@ export async function finalizeReview(
         '--head-sha',
         review.headSha,
         '--harness',
-        sp.harness,
+        actual.harness,
         '--model',
-        sp.leafModel,
+        actual.leafModel,
         '--nonce',
         review.nonce,
         '--iteration',
