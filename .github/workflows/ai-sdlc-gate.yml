@@ -1,5 +1,12 @@
 name: AI-SDLC PR Ready Gate
 
+# AISDLC-927: run-name carries an API-free skip signal for attestation-post.yml.
+# Draft and dependabot PRs never run the attestation job, so the marker lets the
+# workflow_run consumer skip without calling the API. It is built only from
+# trusted context, never from the PR title (display_title is the run-name here).
+run-name: >-
+  AI-SDLC PR Ready Gate${{ (github.event.pull_request.draft == true || github.event.pull_request.user.login == 'dependabot[bot]') && ' [no-attestation]' || '' }}
+
 # AISDLC-140 sub-1 — single rollup status check `ai-sdlc/pr-ready` that
 # aggregates every PR signal AI-SDLC adopters need into ONE branch-protection
 # entry. Replaces the historical pattern of enumerating N required checks by

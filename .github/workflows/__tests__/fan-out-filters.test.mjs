@@ -46,4 +46,13 @@ describe('fan-out filters (AISDLC-927)', () => {
     assert.match(q.run, /rate_limit/);
     assert.match(q.run, /GITHUB_STEP_SUMMARY/);
   });
+
+  it('attestation-post skips marked gate runs without an API call', () => {
+    const marker = '[no-attestation]';
+    assert.match(String(load('ai-sdlc-gate.yml')['run-name']), /\[no-attestation\]/);
+    const post = load('attestation-post.yml').jobs.post;
+    assert.ok(
+      String(post.if).includes(`!contains(github.event.workflow_run.display_title, '${marker}')`),
+    );
+  });
 });
