@@ -479,6 +479,27 @@ describe('run', () => {
     expect(summaryLines(r).join('\n')).toContain('output (unapplied)');
   });
 
+  it('carries the live archive and other non-note entries into the output', async () => {
+    seed(FIXTURE, INDEX);
+    mkdirSync(join(mem, 'archive'), { recursive: true });
+    writeFileSync(join(mem, 'archive', 'project_earlier.md'), 'earlier dream archive');
+    mkdirSync(join(mem, 'extras'), { recursive: true });
+    writeFileSync(join(mem, 'extras', 'data.txt'), 'keep me');
+    const r = await runDream({
+      memoryDir: mem,
+      model: 'sonnet',
+      dryRun: false,
+      budgets: DEFAULT_BUDGETS,
+      synthesizer: new FakeSynthesizer(plan),
+    });
+    const out = r.outputDir as string;
+    expect(readFileSync(join(out, 'archive', 'project_earlier.md'), 'utf-8')).toBe(
+      'earlier dream archive',
+    );
+    expect(existsSync(join(out, 'archive', 'project_old.md'))).toBe(true);
+    expect(readFileSync(join(out, 'extras', 'data.txt'), 'utf-8')).toBe('keep me');
+  });
+
   it('retries with budget feedback while a budget is missed, bounded by maxAttempts', async () => {
     seed(FIXTURE, INDEX);
     const syn = new FakeSynthesizer({ dispositions: [], outputs: [], lowConfidence: [] });

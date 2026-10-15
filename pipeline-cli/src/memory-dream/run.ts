@@ -6,7 +6,7 @@
  * @module memory-dream/run
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { type Budgets, buildOutput, measureInput } from './build-output.js';
 import { now } from '../clock.js';
@@ -105,6 +105,24 @@ function budgetFeedback(
         .join('\n')}`,
     );
   return lines.join('\n');
+}
+
+/**
+ * Copies everything the dream does not own into the output: the live
+ * `archive/` (earlier dreams' archived notes, kept on disk per AC 4) and any
+ * other non-note file or subfolder. Entries the output already has win.
+ */
+function carryForwardUntouched(inputDir: string, outputDir: string): void {
+  for (const name of readdirSync(inputDir)) {
+    if (name === INDEX_FILE || (name.endsWith('.md') && statSync(join(inputDir, name)).isFile())) {
+      continue;
+    }
+    cpSync(join(inputDir, name), join(outputDir, name), {
+      recursive: true,
+      force: false,
+      errorOnExist: false,
+    });
+  }
 }
 
 export async function runDream(opts: RunOptions): Promise<RunResult> {
@@ -224,6 +242,7 @@ export async function runDream(opts: RunOptions): Promise<RunResult> {
     for (const [f, c] of built.archive) writeFileSync(join(outputDir, 'archive', f), c);
   }
   writeFileSync(join(outputDir, INDEX_FILE), built.indexText);
+  carryForwardUntouched(opts.memoryDir, outputDir);
   const meta: RunMeta = {
     version: 1,
     startedAt: report.startedAt,
