@@ -1036,3 +1036,16 @@ describe('AISDLC-833: Stage head envelope step binds head inputs and validates b
     assert.ok(run.indexOf('stage-attestation-data.sh') > fetchAt);
   });
 });
+
+describe('AISDLC-833: attestation-post.yml never fetches or checks out the PR head (CodeQL untrusted-checkout)', () => {
+  it('checks out the default branch and stages head data through the API only', () => {
+    const post = loadYaml(resolve(dirname(WORKFLOW_PATH), 'attestation-post.yml')).jobs.post;
+    const checkout = post.steps.find((st) => /actions\/checkout/.test(String(st.uses ?? '')));
+    assert.equal(checkout.with.ref, '${{ github.event.repository.default_branch }}');
+    for (const st of post.steps) {
+      assert.doesNotMatch(String(st.run ?? ''), /git (fetch|checkout|cat-file)/);
+    }
+    const stage = post.steps.find((st) => /Stage head envelope/.test(String(st.name ?? '')));
+    assert.match(String(stage.run), /stage-attestation-data-api\.sh/);
+  });
+});

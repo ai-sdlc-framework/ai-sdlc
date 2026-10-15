@@ -3,7 +3,7 @@
 # job of ai-sdlc-gate.yml. This workflow is the write-token half of the split:
 # it fires on `workflow_run` (so it always runs the DEFAULT-branch definition
 # with a write token, including for fork PRs) and runs NO PR code. The only
-# PR-influenced input is the head envelope, fetched as DATA only. The verdict is
+# PR-influenced input is the head envelope, read through the GitHub API as DATA only. The verdict is
 # RE-COMPUTED here by running scripts/verify-attestation.mjs from the default
 # branch; the PR-controlled gate run's artifacts are never read, so a fork PR
 # cannot forge the posted state or the DEC-0065 approving review.
@@ -58,25 +58,13 @@ jobs:
             echo "ran=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Stage head envelope (DATA-ONLY git fetch)
+      - name: Stage head envelope (DATA-ONLY, GitHub API; no fetch or checkout of the head)
         if: steps.gate.outputs.ran == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          HEAD_REPO_FULL: ${{ github.event.workflow_run.head_repository.full_name }}
-        run: |
-          set -euo pipefail
-          if ! [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::unexpected head sha"; exit 1
-          fi
-          if ! [[ "$HEAD_REPO_FULL" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
-            echo "::error::unexpected head repository name"; exit 1
-          fi
-          if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
-            git fetch --no-tags "https://github.com/${HEAD_REPO_FULL}.git" \
-              "+${HEAD_SHA}:refs/remotes/head/${HEAD_SHA}" \
-              || { echo "::error::failed to fetch head ${HEAD_SHA}"; exit 1; }
-          fi
-          bash scripts/stage-attestation-data.sh
+        run: bash scripts/stage-attestation-data-api.sh
 
       # Same-repo release-please branches only; a fork with that prefix is verified.
       - name: Detect release-please PR
