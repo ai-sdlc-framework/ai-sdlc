@@ -183,12 +183,7 @@ import {
 } from '../dispatch/index.js';
 import { computePatchId } from '../attestation/patch-id.js';
 import { formatSessionLine, listSessions, recordAgentSession } from '../dispatch/sessions.js';
-import {
-  assertClaimHolder,
-  completeTask,
-  splitCommaList,
-  splitIdList,
-} from '../dispatch/complete.js';
+import { assertClaimHolder, completeTask, splitIdList } from '../dispatch/complete.js';
 import { guardedRelease } from '../dispatch/release-guard.js';
 import { classifyAndRecord, type PrFacts } from '../hierarchy/pr-state.js';
 import {

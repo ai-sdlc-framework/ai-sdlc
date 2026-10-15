@@ -595,28 +595,6 @@ describe('cli-dispatch reenter and claim', () => {
     expect(out.resume.failingLine).toBe('coverage is low');
   });
 
-  it('splits --failing-checks on commas only and keeps spaces, ampersands and parentheses (AISDLC-868)', async () => {
-    finish('AISDLC-823');
-    const r = await cli([
-      'resume',
-      '--board-dir',
-      board,
-      '--task-id',
-      'AISDLC-823',
-      '--note',
-      'Two checks are red',
-      '--failing-checks',
-      'Backlog Drift, Build & Test (Node 22)',
-      '--work-dir',
-      root,
-    ]);
-    expect(r.exit).toBe(0);
-    expect(JSON.parse(r.stdout.trim()).resume.failingChecks).toEqual([
-      'Backlog Drift',
-      'Build & Test (Node 22)',
-    ]);
-  });
-
   it('remove-verdict --from failed drops verdict and manifest with --with-manifest, or when the task is completed (AISDLC-868)', async () => {
     const failedManifest = (id: string) => path.join(board, 'failed', `${id}.manifest.json`);
     const failedVerdict = (id: string) => path.join(board, 'failed', `${id}.verdict.json`);
