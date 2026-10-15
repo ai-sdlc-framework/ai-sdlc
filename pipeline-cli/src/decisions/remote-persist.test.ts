@@ -117,6 +117,26 @@ afterEach(() => {
 });
 
 describe('persistDecisionLog (AISDLC-546)', () => {
+  it('refuses with a message naming the missing git identity and pushes nothing (AISDLC-928)', () => {
+    addDec(parent, 'DEC-0001');
+    git(parent, 'config', 'user.email', '');
+    const warnings: string[] = [];
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
+    const r = persistDecisionLog({ workDir: parent, runner, env, warn: (m) => warnings.push(m) });
+    expect(r.persisted).toBe(false);
+    expect(r.reason).toMatch(/user\.email/);
+    expect(warnings.join('\n')).toMatch(/user\.email/);
+    expect(git(origin, 'branch', '--list', 'ai-sdlc/decisions-sync')).toBe('');
+  });
+
+  it('authors the sync commit with the configured identity (AISDLC-928)', () => {
+    addDec(parent, 'DEC-0001');
+    expect(persistDecisionLog({ workDir: parent, runner }).persisted).toBe(true);
+    expect(git(origin, 'log', '-1', '--format=%an <%ae>', 'ai-sdlc/decisions-sync')).toBe(
+      't <t@t.invalid>',
+    );
+  });
+
   it('add -> parent hard reset -> decision survives on origin and number is not reused', () => {
     addDec(parent, 'DEC-0001');
     const r = persistDecisionLog({ workDir: parent, runner });

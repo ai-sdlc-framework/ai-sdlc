@@ -856,6 +856,31 @@ describe('evaluatePrTrust (GitHub-derived trust facts)', () => {
 
 // ── Native governance resolution ─────────────────────────────────────
 
+describe('decisions-sync author check (AISDLC-928)', () => {
+  async function syncTrust(commitStdout: string) {
+    const { runner } = makeFakeRunner({ 'commits/': { stdout: commitStdout } });
+    return evaluatePrTrust({
+      snapshot: { ...SNAPSHOT, headRefName: 'ai-sdlc/decisions-sync' },
+      mergeAuthors: ['operator'],
+      repoSlug: 'org/repo',
+      taskPrefix: 'AISDLC',
+      sourceKind: 'decisions-sync',
+      mainSha: async () => MAIN_SHA,
+      runner,
+    });
+  }
+
+  it('passes when the head author login is on mergeAuthors', async () => {
+    expect(await syncTrust('{"author":"operator","committer":"operator"}')).toBeNull();
+  });
+
+  it('refuses an unlinked head author', async () => {
+    expect(await syncTrust('{"author":null,"committer":null}')).toMatch(
+      /not linked to a GitHub account/,
+    );
+  });
+});
+
 describe('resolveGovernanceFromYaml (native)', () => {
   it('fails closed to strict with no authors when the block is absent', () => {
     // Strict everywhere except allowForcePush, which defaults to lease-on-own-branch (AISDLC-710).
