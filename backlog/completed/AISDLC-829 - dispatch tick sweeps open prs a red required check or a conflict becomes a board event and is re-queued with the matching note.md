@@ -2,7 +2,7 @@
 id: AISDLC-829
 title: >-
   RFC-0054 Phase 1 core: coded reconciler and scheduler, landing/ records, one action table (task and docs action sets) replacing the dispatch tick's prose PR sweep
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 updated_date: '2026-10-14'
@@ -43,13 +43,13 @@ Today (AISDLC-823) the classifier is code (`pr-state.ts`, `cli-dispatch classify
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `cli-dispatch reconcile` over a fixture of PR facts produces one `landing/<pr>.json` per PR with owner, state, action and history; running it again on the same facts changes no file and runs no action (idempotency test).
-- [ ] #2 Every state in `PR_STATES` maps to exactly one action in the task set or the docs set, with a hermetic test per row; a docs-only PR with `mergeStateStatus: DIRTY` yields `rebase-in-place`, a task PR with a real red yields the re-entry action carrying the failing check line and head SHA.
-- [ ] #3 The scheduler fires on wake-file touch, on session start and on the timer; a test shows a touched wake file causes one reconcile within the debounce window and no model turn is involved (no `claude` invocation in the trace).
-- [ ] #4 A PR with no task id (filing PR) gets `owner: machine` at first sight and is never listed as unowned; the tick result's progress line shows docs PRs with their state.
-- [ ] #5 `operator-dispatch.md` has no Step 2b and no `.pr-facts.json` reference; the reconciler is invoked by one line; `ai-sdlc-plugin/commands/operator-dispatch.test.mjs` is updated.
-- [ ] #6 `docs/operations/cli-hierarchy.md` documents the reconciler, scheduler, record format and both action sets.
-- [ ] #7 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate).
+- [x] #1 `cli-dispatch reconcile` over a fixture of PR facts produces one `landing/<pr>.json` per PR with owner, state, action and history; running it again on the same facts changes no file and runs no action (idempotency test).
+- [x] #2 Every state in `PR_STATES` maps to exactly one action in the task set or the docs set, with a hermetic test per row; a docs-only PR with `mergeStateStatus: DIRTY` yields `rebase-in-place`, a task PR with a real red yields the re-entry action carrying the failing check line and head SHA.
+- [x] #3 The scheduler fires on wake-file touch, on session start and on the timer; a test shows a touched wake file causes one reconcile within the debounce window and no model turn is involved (no `claude` invocation in the trace).
+- [x] #4 A PR with no task id (filing PR) gets `owner: machine` at first sight and is never listed as unowned; the tick result's progress line shows docs PRs with their state.
+- [x] #5 `operator-dispatch.md` has no Step 2b and no `.pr-facts.json` reference; the reconciler is invoked by one line; `ai-sdlc-plugin/commands/operator-dispatch.test.mjs` is updated.
+- [x] #6 `docs/operations/cli-hierarchy.md` documents the reconciler, scheduler, record format and both action sets.
+- [x] #7 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate).
 <!-- AC:END -->
 
 ## Verification

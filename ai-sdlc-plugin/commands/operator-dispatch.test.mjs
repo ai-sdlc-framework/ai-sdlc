@@ -188,7 +188,9 @@ describe('operator-dispatch bash blocks assign what they use', () => {
 
 describe('operator-dispatch PR state machine ', () => {
   it('reaps every tick, classifies PRs, lists the board commands and caps the wake at 15 minutes', () => {
-    assert.match(body, /classify-prs/);
+    assert.match(body, /cli-dispatch\.mjs reconcile/);
+    assert.doesNotMatch(body, /Step 2b/);
+    assert.doesNotMatch(body, /\.pr-facts\.json/);
     assert.match(body, /`reap`/);
     for (const c of [
       'peek',
@@ -204,6 +206,6 @@ describe('operator-dispatch PR state machine ', () => {
       assert.match(body, new RegExp('`' + c + '`'));
     }
     assert.match(body, /900 seconds/);
-    assert.match(body, /Dispatch tick: PR and board state machine/);
+    assert.match(body, /PR reconciler/);
   });
 });

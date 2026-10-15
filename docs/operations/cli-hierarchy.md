@@ -634,34 +634,78 @@ verdict (step "Stop" in [The executor loop](parallel-dispatch.md#the-executor-lo
 then empties the context and types `/ai-sdlc executor`, starting a fresh pass. An executor
 that still holds an inflight task is never cleared, so work in progress is never destroyed.
 
-## Dispatch tick: PR and board state machine
+## PR reconciler
 
-Every dispatch tick (AISDLC-823) runs `cli-dispatch reap`, reads the roster's open task PRs
-over REST (the pull request list plus check-runs for each head, no GraphQL) and passes the
-facts to `cli-dispatch classify-prs --input <facts.json>`. The classifier
-(`pipeline-cli/src/hierarchy/pr-state.ts`) maps each PR to exactly one state and returns the
-one action below, and writes one `DispatchPrClassified` event per PR (fields `taskId`,
-`prNumber`, `state`, `action`) so per-role KPIs can count escalations per landed PR. No
-decision record is opened for any state; only `no-match` goes to the planner, with the REST
-payload summary. While the board has queued, inflight or failed-eligible work, or any task PR
-is open, the next tick is at most 15 minutes away; when both are empty the loop stops.
+The PR lifecycle is one state machine owned by code, not by the dispatch model (RFC-0054,
+AISDLC-829). Five steps: the requirement "the model must look at PRs" is questioned, because
+the facts are REST JSON and the decision is a table; Step 2b of `operator-dispatch.md`, the
+`.pr-facts.json` file and the model-paced cadence are deleted; one reconciler, one record per
+PR and one table remain; reaction time drops from the tick interval to the reconciler's run
+time after an event; the reconciler runs itself, automated last. The tick runs one line,
+`cli-dispatch reconcile --board-dir "$BOARD_DIR"`.
 
-| PR state | Classifier state | Action |
+`cli-dispatch reconcile [--pr <n>] [--facts <facts.json>] [--watch]` lists open PRs (`gh pr
+list` and `gh pr view` for checks), classifies each with `pipeline-cli/src/hierarchy/pr-state.ts`
+(`classifyPr`, unchanged), writes `landing/<pr>.json` under the board and runs the one action
+the table names. `--facts` reads a JSON array of PR facts instead of GitHub. It is idempotent:
+facts that match the stored state, action, head SHA and owner change no file and run no
+action. A PR that merged is detected through its record and marked `landed`.
+
+**Kinds.** A PR on a docs branch (`ai-sdlc/file-*`, `ai-sdlc/decisions-sync*`, `docs/*`) or with
+no task id is a docs PR; one with a task id (branch or title) is a task PR; the release-please
+PR (`chore: release`, `release-please--*`) is reported and never acted on.
+
+**Trust filter.** Facts gathering skips cross-repository (fork) PRs and PRs whose author is not
+in the allow-list (`AI_SDLC_RECONCILE_AUTHORS`, comma separated, else the authenticated `gh`
+user; unknown means no facts). A task PR is acted on only when the task's own board record
+names its number (a verdict `prNumber` or `prUrl`, a resume signal, or the inflight manifest
+branch); a PR that only names a task id in its branch or title is ignored.
+
+**Record** (`landing/<pr>.json`): `pr`, `kind`, `taskId`, `owner`, `state`, `action`,
+`headSha`, `failingLine`, `delivered`, `landed`, and `history` (one `{ts, state, action,
+headSha}` per change). `owner` is `executor:<name>` until `delivered` (the PR flipped ready),
+then `machine`; docs PRs are `machine` from creation, so no PR is ever unowned. `cli-dispatch
+peek` and the brief-progress loop read `done/` only.
+
+**Scheduler** (`pipeline-cli/src/hierarchy/scheduler.ts`, `reconcile --watch`): a reconcile
+runs at start (session start or machine wake), within a 2 s debounce after the webhook
+receiver touches `<board>/.reconcile-wake`, and on a timer of 60 s while any task or docs PR
+is open, else 15 min. It is code, not a model turn; `cli-hierarchy clear --self
+--resume-after` no longer paces PR handling. The tick's progress line lists open PRs as
+`#<n> <kind> <state>`.
+
+**Task action set** (acted on from `ready` on; before delivery the executor owns the PR, so
+the action is `none`, except stale claims and takeover after executor death post-sign):
+
+| Classifier state | Action | What runs |
 |---|---|---|
-| landed | `merged` | mark task done, sync parent (ff + pipeline-cli build), start next task in the recorded order |
-| checks green, CLEAN, auto-merge armed | `armed-clean` | none |
-| checks green, draft, approved verdict | `ready-to-flip` | flip ready via REST (`PATCH pulls/<n>` draft=false) |
-| BEHIND or DIRTY | `behind-or-dirty` | requeue with the hand-review-path resume note ([hand-review-path.md](hand-review-path.md)) |
-| red `ai-sdlc/attestation`, content-hash mismatch | `attestation-content-hash-mismatch` | push-only re-sign resume (`git fetch origin` first; AISDLC-821) |
-| red `ai-sdlc/pr-ready`, real test/lint/coverage failure | `real-failure` | full fix resume with the failing line in the note |
-| CANCELLED / infra | `cancelled-or-infra` | rerun the workflow, no resume |
-| pending, no run started | `pending` | none |
-| stale inflight claim (no heartbeat over 30 min) | `stale-claim` | `cli-dispatch reap`, then `write-resume-signal` on claim |
-| manifest branch differs from PR head branch | `manifest-branch-mismatch` | `write-manifest` with the PR head ref, requeue |
-| fits no row | `no-match` | route to the planner |
+| `merged` | `mark-landed` | record `landed`; done verdict, parent sync and dependants stay with the tick playbook |
+| `manifest-branch-mismatch` | `rewrite-manifest` | left to a session (`write-manifest` with the PR head ref) |
+| `stale-claim` | `reap-resume` | `cli-dispatch reap` |
+| `behind-or-dirty` | `land-prep` | until AISDLC-881: `resume` with a rebase note ([hand-review-path.md](hand-review-path.md)) |
+| `attestation-content-hash-mismatch` | `push-only-resign` | `resume` with a push-only re-sign note (AISDLC-821) |
+| `real-failure` | `reenter` | until AISDLC-882: `resume` carrying the failing check line and head SHA |
+| `cancelled-or-infra` | `retrigger-once` | `gh run rerun --failed --commit <sha>`; once per head SHA |
+| `ready-to-flip` | `flip-ready-takeover` | `gh pr ready <n>`, only after executor death post-sign |
+| `armed-clean`, `pending` | `none` | nothing |
+| `no-match` | `route-to-planner` | the only state routed to the planner |
+
+**Docs action set** (machine-owned from birth):
+
+| Situation | Action | What runs |
+|---|---|---|
+| `behind-or-dirty` | `rebase-in-place` | `cli-file rebase <id> --pr` |
+| failing DoR check | `rerun-dor` | `gh run rerun --failed --commit <sha>` |
+| green, CLEAN, not armed | `arm` | `cli-merge-if-eligible <pr> --source-kind backlog` with the arm flag |
+| other real check failure, `no-match` | `route-to-planner` | planner |
+| `cancelled-or-infra` | `retrigger-once` | rerun once per head SHA |
+| `merged` | `mark-landed` | record `landed` |
+| remaining states | `none` | nothing |
 
 Rows are checked in this precedence: landed, manifest mismatch, stale claim, BEHIND/DIRTY,
 attestation, pr-ready, cancelled/infra, then the green and pending rows.
+`cli-dispatch classify-prs --input <facts.json>` remains for fixtures and writes one
+`DispatchPrClassified` event per PR.
 
 ## Restarting after a plugin upgrade
 
