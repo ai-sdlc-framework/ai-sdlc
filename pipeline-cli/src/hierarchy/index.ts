@@ -270,3 +270,14 @@ export {
   stallThresholdsFromEnv,
   type StalledReport,
 } from './stall.js';
+export {
+  DEFAULT_WEBHOOK_PORT,
+  WEBHOOK_PORT_ENV,
+  WEBHOOK_SECRET_ENV,
+  formatWebhookStatus,
+  webhookDown,
+  webhookServe,
+  webhookStatus,
+  webhookUp,
+  type WebhookStatus,
+} from './webhook.js';

@@ -10,6 +10,7 @@ import { paneNodeVersion, readNvmrc, versionMatches } from './node-pin.js';
 import { hasLaunchEnv } from './up.js';
 import { readSessionRegistry } from './registry.js';
 import { readRosterChecked } from './roster.js';
+import { formatWebhookStatus, webhookStatus, type WebhookStatus } from './webhook.js';
 import { listWindows, paneInfo, paneStartCommand, sessionAttached } from './tmux.js';
 import type { HierarchyDeps, RosterEntry } from './types.js';
 
@@ -41,6 +42,8 @@ export interface StatusRow {
 export interface StatusResult {
   rows: StatusRow[];
   board: QueueCounts;
+  /** The local webhook receiver (AISDLC-880). */
+  webhook: WebhookStatus;
 }
 
 /** Join the roster with the registry, tmux and the board. */
@@ -106,12 +109,13 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
         : {}),
     };
   });
-  return { rows, board: peekQueue(deps.boardDir) };
+  return { rows, board: peekQueue(deps.boardDir), webhook: webhookStatus(deps) };
 }
 
 /** Render the status result as a plain-text table. */
 export function formatStatus(result: StatusResult): string[] {
-  if (result.rows.length === 0) return ['no sessions in the roster'];
+  if (result.rows.length === 0)
+    return ['no sessions in the roster', formatWebhookStatus(result.webhook)];
   const header = [
     'ROLE',
     'NAME',
@@ -161,5 +165,6 @@ export function formatStatus(result: StatusResult): string[] {
     ...(repairs.length + nodeRepairs.length > 0 ? ['', ...repairs, ...nodeRepairs] : []),
     '',
     `board: ${queued} queued, ${inflight} inflight, ${done} done, ${failed} failed`,
+    formatWebhookStatus(result.webhook),
   ];
 }

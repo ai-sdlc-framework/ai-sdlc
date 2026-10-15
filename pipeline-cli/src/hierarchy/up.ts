@@ -8,6 +8,7 @@
 
 import path from 'node:path';
 
+import { webhookUp } from './webhook.js';
 import { attachEntry } from './attach.js';
 import { findStartedSession, readSessionRegistry } from './registry.js';
 import { checkCrossSessionInbound, evaluateResourceGate, readSettingsView } from './preflight.js';
@@ -519,6 +520,15 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
     }
     if (owner === 'ours' && insideVsCode(deps.env) && deps.env.AI_SDLC_VSCODE_HIERARCHY !== '1') {
       deps.log(VSCODE_HINT);
+    }
+  }
+
+  // Poll-only mode when no secret is set; this is not an error (AISDLC-880).
+  if (deps.env.AI_SDLC_WEBHOOK_SECRET) {
+    try {
+      webhookUp(deps);
+    } catch (err) {
+      deps.log(`warning: webhook receiver not started: ${(err as Error).message}`);
     }
   }
 

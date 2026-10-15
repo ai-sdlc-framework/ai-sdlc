@@ -226,10 +226,22 @@ describe('runHierarchyCli', () => {
 
   it('status prints an empty roster as text and json', async () => {
     expect(await runHierarchyCli(['status'], overrides())).toBe(0);
-    expect(logs).toEqual(['no sessions in the roster']);
+    expect(logs).toEqual(['no sessions in the roster', 'webhook: off (no secret)']);
     logs.length = 0;
     expect(await runHierarchyCli(['status', '--json'], overrides())).toBe(0);
     expect(JSON.parse(logs[0] as string).rows).toEqual([]);
+  });
+
+  it('webhook status and usage errors', async () => {
+    expect(await runHierarchyCli(['webhook', 'status'], overrides())).toBe(0);
+    expect(logs).toEqual(['webhook: off (no secret)']);
+    logs.length = 0;
+    expect(await runHierarchyCli(['webhook', 'status', '--json'], overrides())).toBe(0);
+    expect(JSON.parse(logs[0] as string)).toEqual({ state: 'off', reason: 'no secret' });
+    expect(await runHierarchyCli(['webhook', 'down'], overrides())).toBe(0);
+    expect(await runHierarchyCli(['webhook', 'up'], overrides())).toBe(0);
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(await runHierarchyCli(['webhook'], overrides())).toBe(2);
   });
 
   it('down reports an unknown role with exit 1', async () => {
