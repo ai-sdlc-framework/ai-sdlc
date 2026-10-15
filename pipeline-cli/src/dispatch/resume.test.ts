@@ -603,6 +603,94 @@ describe('cli-dispatch resume and claim', () => {
     expect(JSON.parse(r.stdout.trim()).resume.failingChecks).toEqual(['coverage']);
   });
 
+  it('splits --failing-checks on commas only and keeps spaces, ampersands and parentheses (AISDLC-868)', async () => {
+    finish('AISDLC-823');
+    const r = await cli([
+      'resume',
+      '--board-dir',
+      board,
+      '--task-id',
+      'AISDLC-823',
+      '--note',
+      'Two checks are red',
+      '--failing-checks',
+      'Backlog Drift, Build & Test (Node 22)',
+      '--work-dir',
+      root,
+    ]);
+    expect(r.exit).toBe(0);
+    expect(JSON.parse(r.stdout.trim()).resume.failingChecks).toEqual([
+      'Backlog Drift',
+      'Build & Test (Node 22)',
+    ]);
+  });
+
+  it('remove-verdict --from failed drops verdict and manifest with --with-manifest, or when the task is completed (AISDLC-868)', async () => {
+    const failedManifest = (id: string) => path.join(board, 'failed', `${id}.manifest.json`);
+    const failedVerdict = (id: string) => path.join(board, 'failed', `${id}.verdict.json`);
+    for (const id of ['AISDLC-824', 'AISDLC-825', 'AISDLC-826']) {
+      writeManifest(board, mkManifest(id));
+      claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-a' });
+      completeTask(board, { taskId: id, outcome: 'failed', workerId: 'exec-a' });
+      expect(existsSync(failedManifest(id))).toBe(true);
+    }
+    // Default, task not completed: the manifest stays for a live resume.
+    await cli(
+      [
+        'remove-verdict',
+        '--board-dir',
+        board,
+        '--task-id',
+        'AISDLC-824',
+        '--from',
+        'failed',
+        '--work-dir',
+        root,
+      ],
+      {},
+    );
+    expect(existsSync(failedVerdict('AISDLC-824'))).toBe(false);
+    expect(existsSync(failedManifest('AISDLC-824'))).toBe(true);
+    // Explicit flag.
+    await cli(
+      [
+        'remove-verdict',
+        '--board-dir',
+        board,
+        '--task-id',
+        'AISDLC-825',
+        '--from',
+        'failed',
+        '--with-manifest',
+        'true',
+        '--work-dir',
+        root,
+      ],
+      {},
+    );
+    expect(existsSync(failedVerdict('AISDLC-825'))).toBe(false);
+    expect(existsSync(failedManifest('AISDLC-825'))).toBe(false);
+    // Default when the task file is in backlog/completed.
+    mkdirSync(path.join(root, 'backlog', 'completed'), { recursive: true });
+    writeFileSync(path.join(root, 'backlog', 'completed', 'AISDLC-826 - done.md'), '---\n---\n');
+    await cli(
+      [
+        'remove-verdict',
+        '--board-dir',
+        board,
+        '--task-id',
+        'AISDLC-826',
+        '--from',
+        'failed',
+        '--work-dir',
+        root,
+      ],
+      {},
+    );
+    expect(existsSync(failedVerdict('AISDLC-826'))).toBe(false);
+    expect(existsSync(failedManifest('AISDLC-826'))).toBe(false);
+  });
+
   it('resumes a done task and the next claim surfaces the feedback note', async () => {
     finish('AISDLC-820');
     const r = await cli([

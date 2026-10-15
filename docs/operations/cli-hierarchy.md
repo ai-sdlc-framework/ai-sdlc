@@ -816,5 +816,20 @@ no verdict is refused. `cli-dispatch requeue --task-id <id> --note "<text>"` ret
 task with the same `resume.note` block, so there is one note channel. `cli-dispatch release`
 is refused for a task that already has a verdict in `done/`; run `resume` to send it back, or
 `remove-verdict` to discard the verdict first.
+**Three board behaviours (AISDLC-868).**
+
+- `cli-dispatch remove-verdict --task-id <id> --from failed` removes the verdict and
+  diagnostic. It also removes the `failed/<id>.manifest.json` copy when `--with-manifest true`
+  is passed or when the task file is already in `backlog/completed/`, so no stale failed
+  manifest outlives a finished task (the AISDLC-800 invariant). Otherwise the manifest stays,
+  because a live resume or `requeue` needs it. Pass `--work-dir` when not run from the repo root.
+- `resume --failing-checks` (and `--failing-check`) splits on commas only and trims each item.
+  Spaces, ampersands and parentheses stay inside a name, so
+  `"Backlog Drift,Build & Test (Node 22)"` records exactly two checks.
+- Brief ingestion by `cli-hierarchy tick` skips a task already on the board (a resume, for
+  example) instead of refusing the whole brief. The tick result lists each one under `skipped`
+  as `{ file, taskId, state }` and ingests the rest; the exit code is unchanged. A brief whose
+  tasks are all on the board is marked ingested with no tasks.
+
 `cli-dispatch idle-backoff` prints the sleep (5 to 60 seconds) an executor without a tmux
 pane uses when the queue is empty.

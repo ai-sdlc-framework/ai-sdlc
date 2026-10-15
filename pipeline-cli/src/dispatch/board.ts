@@ -718,6 +718,23 @@ export interface BoardEntry {
   sequenceGroup?: string;
 }
 
+/** The board state holding the id (`queue`, `inflight`, `blocked`, `done`, `failed`), or undefined. */
+export function boardStateOf(
+  boardDir: string,
+  taskId: string,
+): 'queue' | 'inflight' | 'blocked' | 'done' | 'failed' | undefined {
+  if (!TASK_ID_RE.test(taskId)) return undefined;
+  for (const sub of ['queue', 'inflight', 'blocked'] as const) {
+    if (existsSync(manifestPathIn(boardDir, sub, taskId))) return sub;
+  }
+  for (const sub of ['done', 'failed'] as const) {
+    for (const suffix of [VERDICT_SUFFIX, DIAGNOSTIC_SUFFIX, COMPLETED_SUFFIX]) {
+      if (existsSync(path.join(boardDir, sub, `${taskId}${suffix}`))) return sub;
+    }
+  }
+  return undefined;
+}
+
 /** True when the id is on the board in any state (manifest, verdict, or diagnostic). */
 export function isOnBoard(boardDir: string, taskId: string): boolean {
   for (const sub of ['queue', 'inflight', 'blocked'] as const) {
@@ -1180,6 +1197,7 @@ export function removeVerdict(
   boardDir: string,
   taskId: string,
   subdir: 'done' | 'failed' = 'done',
+  opts: { withManifest?: boolean } = {},
 ): void {
   // A malformed id removes nothing.
   if (!TASK_ID_RE.test(taskId)) return;
@@ -1198,7 +1216,16 @@ export function removeVerdict(
     }
   }
   // Verdicts and diagnostics use different suffixes; check both.
-  for (const suffix of [VERDICT_SUFFIX, DIAGNOSTIC_SUFFIX]) {
+  // AISDLC-868: a failed/ manifest left behind is a stale entry; `withManifest` clears it.
+  const suffixes =
+    subdir === 'failed' && opts.withManifest
+      ? [
+          VERDICT_SUFFIX,
+          DIAGNOSTIC_SUFFIX,
+          '.manifest.json' /* requeue.ts FAILED_MANIFEST_SUFFIX */,
+        ]
+      : [VERDICT_SUFFIX, DIAGNOSTIC_SUFFIX];
+  for (const suffix of suffixes) {
     const target = boardFile(boardDir, subdir, taskId, suffix);
     if (existsSync(target)) {
       try {

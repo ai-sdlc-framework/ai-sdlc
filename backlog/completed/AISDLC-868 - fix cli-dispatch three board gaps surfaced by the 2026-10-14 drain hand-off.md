@@ -32,10 +32,10 @@ The 2026-10-14 drain hand-off exposed three gaps in the dispatch board commands.
 
 ## Acceptance Criteria
 
-- [ ] AC-1: node test for (a): after `remove-verdict --from failed` (with the chosen flag or default), neither verdict nor manifest remains in `failed/`.
-- [ ] AC-2: node test for (b) using the real check names `Backlog Drift` and `Build & Test (Node 22)`; manifest holds exactly two entries.
-- [ ] AC-3: node test for (c): a brief with one already-on-board task and two new ones ingests the two and reports the skipped one; exit code is success.
-- [ ] AC-4: `docs/operations/cli-hierarchy.md` documents all three behaviours.
+- [x] AC-1: node test for (a): after `remove-verdict --from failed` (with the chosen flag or default), neither verdict nor manifest remains in `failed/`.
+- [x] AC-2: node test for (b) using the real check names `Backlog Drift` and `Build & Test (Node 22)`; manifest holds exactly two entries.
+- [x] AC-3: node test for (c): a brief with one already-on-board task and two new ones ingests the two and reports the skipped one; exit code is success.
+- [x] AC-4: `docs/operations/cli-hierarchy.md` documents all three behaviours.
 
 ## Out of scope
 

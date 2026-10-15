@@ -17,6 +17,7 @@
  *   - peekQueue counts, releaseInflight idempotency, removeVerdict.
  */
 
+import { snapshotFailedManifest } from './requeue.js';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -1336,6 +1337,19 @@ describe('removeVerdict', () => {
     writeVerdict(boardDir, mkVerdict('AISDLC-1501', 'failed'));
     removeVerdict(boardDir, 'AISDLC-1501', 'failed');
     expect(existsSync(path.join(boardDir, 'failed', 'AISDLC-1501.verdict.json'))).toBe(false);
+  });
+
+  it('with withManifest, removes neither verdict nor manifest from failed/ (AISDLC-868)', () => {
+    const boardDir = mkBoard();
+    writeManifest(boardDir, mkManifest('AISDLC-1502'));
+    claimNext(boardDir, 'in-session-agent');
+    snapshotFailedManifest(boardDir, mkManifest('AISDLC-1502'));
+    writeVerdict(boardDir, mkVerdict('AISDLC-1502', 'failed'));
+    const manifest = path.join(boardDir, 'failed', 'AISDLC-1502.manifest.json');
+    expect(existsSync(manifest)).toBe(true);
+    removeVerdict(boardDir, 'AISDLC-1502', 'failed', { withManifest: true });
+    expect(existsSync(path.join(boardDir, 'failed', 'AISDLC-1502.verdict.json'))).toBe(false);
+    expect(existsSync(manifest)).toBe(false);
   });
 
   it('is idempotent on missing files', () => {
