@@ -24,7 +24,7 @@ import path from 'node:path';
 
 import { now as clockNow } from '../clock.js';
 import { classifyPr, type PrCheck, type PrFacts, type PrState } from './pr-state.js';
-import { collectVerdicts, readInflightManifest } from '../dispatch/board.js';
+import { collectVerdicts, readInflightManifest, readQueuedManifest } from '../dispatch/board.js';
 import type { CommandRunner } from './types.js';
 
 /** Task set: one action per classifier state (RFC-0054 ownership table). */
@@ -74,6 +74,8 @@ export interface ReconcilePr extends PrFacts {
   executor?: string;
   /** The executor is gone after signing: the machine takes over. */
   executorDead?: boolean;
+  /** Where the task's manifest sits on the board, when it has one. */
+  manifestState?: 'queue' | 'inflight';
 }
 
 export interface LandingEntry {
@@ -152,6 +154,10 @@ export function decide(f: ReconcilePr, record?: LandingRecord): Decision {
     }
     return { ...base, action };
   }
+  // A queued manifest with the wrong branch is repaired at once; an inflight one is reported.
+  if (c.state === 'manifest-branch-mismatch' && f.manifestState !== undefined) {
+    return { ...base, action: f.manifestState === 'queue' ? 'rewrite-manifest' : 'report-only' };
+  }
   // Task set: the executor owns the PR until it is delivered (flipped ready); a stale
   // claim, or a dead executor after signing, hands it to the machine.
   const delivered = f.merged === true || f.draft === false || record?.delivered !== undefined;
@@ -217,6 +223,8 @@ export function actionCommands(
       return [
         resume('ai-sdlc/attestation', `fetch origin, re-sign the attestation, push only${sha}`),
       ];
+    case 'rewrite-manifest':
+      return [dispatch('write-manifest', '--task-id', ctx.taskId, '--from-pr', String(ctx.pr))];
     case 'reap-resume':
       return [dispatch('reap')];
     case 'flip-ready-takeover':
@@ -493,7 +501,15 @@ export function prBelongsToTask(
   const manifest = readInflightManifest(boardDir, taskId);
   if (manifest?.resume?.prNumber === prNumber) return true;
   const branch = manifest?.branch;
-  return branch !== undefined && headBranch !== undefined && branch === headBranch;
+  if (branch !== undefined && headBranch !== undefined && branch === headBranch) return true;
+  // A queued manifest holding the short form of the head (`<branch>-<slug>`) still owns the PR.
+  const queued = readQueuedManifest(boardDir, taskId);
+  if (queued?.resume?.prNumber === prNumber) return true;
+  return (
+    queued?.branch !== undefined &&
+    headBranch !== undefined &&
+    headBranch.startsWith(`${queued.branch}-`)
+  );
 }
 
 interface RollupItem {
@@ -577,7 +593,16 @@ export function gatherFacts(
     const rollup =
       view.status === 0 ? parse<{ statusCheckRollup?: RollupItem[] }>(view.stdout) : undefined;
     const files = p.files?.map((x) => x.path) ?? [];
+    const queuedManifest = kind === 'task' ? readQueuedManifest(boardDir, taskId) : undefined;
+    const inflightManifest = kind === 'task' ? readInflightManifest(boardDir, taskId) : undefined;
+    const onBoard = inflightManifest ?? queuedManifest;
     facts.push({
+      ...(onBoard?.branch === undefined
+        ? {}
+        : {
+            manifestBranch: onBoard.branch,
+            manifestState: inflightManifest ? ('inflight' as const) : ('queue' as const),
+          }),
       prNumber: p.number,
       taskId,
       ...(p.title === undefined ? {} : { title: p.title }),

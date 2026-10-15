@@ -8,6 +8,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   utimesSync,
   writeFileSync,
@@ -424,6 +425,47 @@ describe('runDispatchCli', () => {
     );
     expect(exit).toBe(0);
     expect(existsSync(path.join(boardDir, 'queue', 'AISDLC-2050.dispatch.json'))).toBe(true);
+  });
+
+  it('write-manifest --branch replaces a queued branch and refuses an inflight task (AISDLC-901)', async () => {
+    dispatchWriteManifest(boardDir, mkManifest('AISDLC-2060'));
+    const { exit } = await captureStdout(() =>
+      runDispatchCli([
+        'write-manifest',
+        'AISDLC-2060',
+        '--branch',
+        'ai-sdlc/aisdlc-2060-long-slug',
+        '--board-dir',
+        boardDir,
+      ]),
+    );
+    expect(exit).toBe(0);
+    const queued = JSON.parse(
+      readFileSync(path.join(boardDir, 'queue', 'AISDLC-2060.dispatch.json'), 'utf-8'),
+    ) as DispatchManifest;
+    expect(queued.branch).toBe('ai-sdlc/aisdlc-2060-long-slug');
+    expect(queued.baseSha).toBe(mkManifest('AISDLC-2060').baseSha);
+
+    renameSync(
+      path.join(boardDir, 'queue', 'AISDLC-2060.dispatch.json'),
+      path.join(boardDir, 'inflight', 'AISDLC-2060.dispatch.json'),
+    );
+    const refused = await captureStdout(() =>
+      runDispatchCli([
+        'write-manifest',
+        '--task-id',
+        'AISDLC-2060',
+        '--branch',
+        'x',
+        '--board-dir',
+        boardDir,
+      ]),
+    );
+    expect(refused.exit).toBe(1);
+    const missing = await captureStdout(() =>
+      runDispatchCli(['write-manifest', '--branch', 'x', '--board-dir', boardDir]),
+    );
+    expect(missing.exit).toBe(2);
   });
 
   it('help subcommand prints usage', async () => {

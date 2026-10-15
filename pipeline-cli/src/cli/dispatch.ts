@@ -177,6 +177,7 @@ import {
   unblockManifest,
   writeHeartbeat,
   writeIterationExhaustedDiagnostic,
+  replaceQueuedBranch,
   writeManifest,
   writeResumeSignal,
   writeVerdict,
@@ -921,6 +922,39 @@ export async function runDispatchCli(
     }
 
     case 'write-manifest': {
+      // AISDLC-901: correct the branch of an already queued manifest.
+      const branchFlag = flags['branch'];
+      const fromPr = flags['from-pr'];
+      if (branchFlag !== undefined || fromPr !== undefined) {
+        const positional = argv[1] && !argv[1].startsWith('--') ? argv[1] : undefined;
+        const taskId = flags['task-id'] ?? positional;
+        if (!taskId) {
+          process.stderr.write('cli-dispatch write-manifest: a task id is required\n');
+          return 2;
+        }
+        let branch: string | undefined = branchFlag;
+        if (fromPr !== undefined) {
+          const view = createSystemRunner()(
+            'gh',
+            ['pr', 'view', fromPr, '--json', 'headRefName', '--jq', '.headRefName'],
+            { cwd: deps.cwd ?? process.cwd() },
+          );
+          branch = view.status === 0 ? view.stdout.trim() : undefined;
+        }
+        if (!branch || branch === 'true') {
+          process.stderr.write('cli-dispatch write-manifest: could not resolve the branch\n');
+          return 2;
+        }
+        try {
+          out({ ok: true, path: replaceQueuedBranch(boardDir, taskId, branch), branch });
+          return 0;
+        } catch (err) {
+          process.stderr.write(
+            `cli-dispatch write-manifest: ${err instanceof Error ? err.message : String(err)}\n`,
+          );
+          return 1;
+        }
+      }
       const jsonPath = requireFlag(flags, 'json');
       const manifest = JSON.parse(readFileSync(jsonPath, 'utf-8')) as DispatchManifest;
       const target = writeManifest(boardDir, manifest);
@@ -1496,6 +1530,7 @@ Subcommands:
   sweep [--stale-ms <n>]
   release --task-id <id> [--force --reason <text>]   (refuses while the worktree has unpushed or uncommitted work)
   write-manifest --json <path>
+  write-manifest <task> (--branch <head> | --from-pr <n>)   (rewrite a queued manifest's branch)
   enqueue --task <id> [--task <id> ...] [--after <ids>] [--group <name>]
           [--priority <n>] [--wave <n>] [--base-sha <sha>] | --from-brief <path>
   board [--json]

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-901
 title: 'fix: cli-dispatch rewrites a queued manifest''s branch when it no longer matches the PR head'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [dispatch, bug]

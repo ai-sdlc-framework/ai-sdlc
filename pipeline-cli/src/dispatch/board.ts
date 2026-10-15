@@ -170,6 +170,34 @@ export function writeManifest(boardDir: string, manifest: DispatchManifest): str
 }
 
 /**
+ * Replace the `branch` of a queued manifest in place (AISDLC-901), leaving every
+ * other field intact. Refuses while the task is inflight or when nothing is queued.
+ */
+export function replaceQueuedBranch(boardDir: string, taskId: string, branch: string): string {
+  ensureBoardDirs(boardDir);
+  if (existsSync(manifestPathIn(boardDir, 'inflight', taskId))) {
+    throw new Error(
+      `dispatch.writeManifest: inflight/${taskId}${MANIFEST_SUFFIX} already exists; release before re-emitting`,
+    );
+  }
+  const target = manifestPathIn(boardDir, 'queue', taskId);
+  const current = existsSync(target) ? readManifest(target) : undefined;
+  if (!current) {
+    throw new Error(`dispatch.writeManifest: no queued manifest for ${taskId}`);
+  }
+  const tmp = `${target}.tmp-${process.pid}`;
+  writeFileSync(tmp, JSON.stringify({ ...current, branch }, null, 2) + '\n', 'utf-8');
+  renameSync(tmp, target);
+  return target;
+}
+
+/** Read one queued manifest (undefined when absent or unparseable). */
+export function readQueuedManifest(boardDir: string, taskId: string): DispatchManifest | undefined {
+  const p = manifestPathIn(boardDir, 'queue', taskId);
+  return existsSync(p) ? readManifest(p) : undefined;
+}
+
+/**
  * Read a manifest from disk. Returns `undefined` if the file vanished
  * between the caller seeing it and our read (common race during sweeps).
  */

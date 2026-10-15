@@ -117,6 +117,40 @@ describe('reconcile idempotency (AC1)', () => {
   });
 });
 
+describe('manifest-branch-mismatch (AISDLC-901)', () => {
+  it('rewrites a queued manifest even while the PR is a draft, and only reports an inflight one', () => {
+    const queued = decide(
+      taskPr({ draft: true, manifestBranch: 'ai-sdlc/aisdlc-1', manifestState: 'queue' }),
+    );
+    expect(queued).toMatchObject({ state: 'manifest-branch-mismatch', action: 'rewrite-manifest' });
+    const inflight = decide(
+      taskPr({ draft: true, manifestBranch: 'ai-sdlc/aisdlc-1', manifestState: 'inflight' }),
+    );
+    expect(inflight.action).toBe('report-only');
+    const ctx: ActionContext = {
+      pr: 10,
+      taskId: 'AISDLC-1',
+      kind: 'task',
+      action: 'rewrite-manifest',
+      state: 'manifest-branch-mismatch',
+      boardDir: board,
+    };
+    const cmds = actionCommands(ctx, '/bin');
+    expect(cmds?.[0]?.args).toContain('--from-pr');
+    expect(cmds?.[0]?.args).toContain('write-manifest');
+  });
+
+  it('tick auto-repair: reconcile runs the rewrite for a queued mismatch and records it', () => {
+    const execute = vi.fn(() => ({ ran: true }));
+    const report = reconcile(
+      [taskPr({ draft: true, manifestBranch: 'ai-sdlc/aisdlc-1', manifestState: 'queue' })],
+      { boardDir: board, execute, now: fixedNow },
+    );
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(report.acted[0]).toMatchObject({ pr: 10, action: 'rewrite-manifest', ran: true });
+  });
+});
+
 describe('action table (AC2)', () => {
   const taskFacts: Record<PrState, ReconcilePr> = {
     merged: taskPr({ merged: true }),

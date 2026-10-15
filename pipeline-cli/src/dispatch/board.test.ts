@@ -37,6 +37,7 @@ import {
   readHeartbeat,
   readResumeSignal,
   releaseInflight,
+  replaceQueuedBranch,
   removeResumeSignal,
   removeVerdict,
   sweepStaleHeartbeats,
@@ -1440,4 +1441,20 @@ afterEach(() => {
       /* ignore */
     }
   }
+});
+
+describe('replaceQueuedBranch (AISDLC-901)', () => {
+  it('replaces the branch, keeps other fields, and refuses inflight or missing', () => {
+    const boardDir = mkBoard();
+    writeManifest(boardDir, mkManifest('AISDLC-901'));
+    replaceQueuedBranch(boardDir, 'AISDLC-901', 'ai-sdlc/aisdlc-901-slug');
+    const raw = JSON.parse(
+      readFileSync(path.join(boardDir, 'queue', 'AISDLC-901.dispatch.json'), 'utf-8'),
+    );
+    expect(raw.branch).toBe('ai-sdlc/aisdlc-901-slug');
+    expect(raw.baseSha).toBe('abc1234');
+    expect(() => replaceQueuedBranch(boardDir, 'AISDLC-1', 'x')).toThrow(/no queued manifest/);
+    claimNext(boardDir, 'in-session-agent');
+    expect(() => replaceQueuedBranch(boardDir, 'AISDLC-901', 'x')).toThrow(/inflight/);
+  });
 });
