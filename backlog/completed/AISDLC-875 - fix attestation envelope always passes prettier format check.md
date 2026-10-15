@@ -31,10 +31,10 @@ Source: 24h PR-drain review 2026-10-14 (planner + operator). Operator constraint
 
 ## Acceptance Criteria
 
-- [ ] #1 The root cause (the writer that skips formatting) is named in the PR body.
-- [ ] #2 After signing through every writer, `pnpm format:check` passes on the envelope.
-- [ ] #3 A test covers each writer; `scripts/verify-attestation.mjs` is not changed.
-- [ ] #4 If `.prettierignore` is used, the PR shows the verifier does not depend on the file layout; the three-copy `PATCH_ID_EXCLUSIONS` lockstep is untouched.
+- [x] #1 The root cause (the writer that skips formatting) is named in the PR body.
+- [x] #2 After signing through every writer, `pnpm format:check` passes on the envelope.
+- [x] #3 A test covers each writer; `scripts/verify-attestation.mjs` is not changed.
+- [x] #4 If `.prettierignore` is used, the PR shows the verifier does not depend on the file layout; the three-copy `PATCH_ID_EXCLUSIONS` lockstep is untouched.
 
 ## Out of scope
 

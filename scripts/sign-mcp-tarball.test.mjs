@@ -28,7 +28,10 @@ import {
   computeDistFileSha512s,
   sha512Hex,
   signTarballEnvelope,
+  writeTarballEnvelope,
 } from './sign-mcp-tarball.mjs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import {
   parseTrustedReviewersYaml,
@@ -518,5 +521,49 @@ describe('formatVerificationError', () => {
   it('mentions git pull in envelope-missing message', () => {
     const msg = formatVerificationError({ ...base, reason: 'envelope-missing' });
     assert.ok(msg.includes('git'));
+  });
+});
+
+describe('writeTarballEnvelope (AISDLC-875)', () => {
+  it('writes an envelope that passes prettier --check', () => {
+    const dir = join(tmpdir(), `sign-mcp-fmt-${process.pid}-${Date.now()}`);
+    mkdirSync(dir, { recursive: true });
+    try {
+      const kp = generateKeyPairSync('ed25519');
+      const predicate = buildTarballPredicate({
+        packageName: '@ai-sdlc/plugin-mcp-server',
+        version: '0.9.2',
+        sha512: sha512Hex(Buffer.from('x')),
+        tarballUrl: 'https://registry.npmjs.org/x.tgz',
+        registry: 'https://registry.npmjs.org',
+        signerIdentity: 'test@example.com',
+        machine: 'm',
+      });
+      const envelope = signTarballEnvelope({
+        predicate,
+        privateKeyPem: kp.privateKey.export({ format: 'pem', type: 'pkcs8' }).toString(),
+        keyid: 'test@example.com:m',
+      });
+      const out = join(dir, 'mcp-server-0.9.2.dsse.json');
+      writeTarballEnvelope(out, envelope);
+      const root = join(fileURLToPath(new URL('.', import.meta.url)), '..');
+      const check = spawnSync(
+        join(root, 'node_modules', '.bin', 'prettier'),
+        [
+          '--no-config',
+          '--print-width',
+          '100',
+          '--single-quote',
+          '--trailing-comma',
+          'all',
+          '--check',
+          out,
+        ],
+        { encoding: 'utf8' },
+      );
+      assert.equal(check.status, 0, `${check.stdout}${check.stderr}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
