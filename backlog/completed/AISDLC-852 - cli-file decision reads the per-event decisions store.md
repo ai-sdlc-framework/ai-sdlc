@@ -1,7 +1,7 @@
 ---
 id: AISDLC-852
 title: 'fix: cli-file decision reads and appends the per-event _decisions/events/ store, not only the legacy events.jsonl'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels: [bug, pipeline-cli, decisions]
