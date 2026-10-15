@@ -1,5 +1,6 @@
 ---
 title: "Proof of Execution: Verifiable Evidence That Your AI Reviewers Actually Ran"
+description: "Signed, tamper-evident evidence that a real review ran against the exact code, and why it matters for AI-driven delivery."
 subtitle: "A cryptographic attestation primitive for AI-driven software delivery"
 audience: "Security, compliance, and governance leaders evaluating AI-assisted development"
 version: "1.0"

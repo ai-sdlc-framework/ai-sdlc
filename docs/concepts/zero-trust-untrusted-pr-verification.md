@@ -1,3 +1,8 @@
+---
+title: "Zero-Trust Untrusted-Contributor PR Verification — Concept"
+description: "Why automation can review pull requests from untrusted contributors without privilege escalation, credential theft, forged results or hijacked reviewers."
+---
+
 # Zero-Trust Untrusted-Contributor PR Verification — Concept
 
 > **Positioning page.** This is the *why-it-matters* lens. For the operational

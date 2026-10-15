@@ -223,7 +223,7 @@ jobs:
       # The non-vitest remainder of `pnpm test` (root gates and checks, and the
       # ucvg-demo node:test suite that has no coverage script).
       - run: pnpm --filter ./ucvg-demo test
-      - run: pnpm test:gates && pnpm docs:check && pnpm rfc:check && pnpm dark-code:check && pnpm knowledge:check && pnpm sync:plugin-runtime-deps:check
+      - run: pnpm test:gates && pnpm rfc:check && pnpm dark-code:check && pnpm knowledge:check && pnpm sync:plugin-runtime-deps:check
       # AISDLC-727: ci.yml no longer runs on pull requests, so schema validation
       # (cheap, cross-cutting) runs here instead of only post-merge on main.
       - run: pnpm validate-schemas

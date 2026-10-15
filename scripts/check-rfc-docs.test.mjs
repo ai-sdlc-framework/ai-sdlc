@@ -4,7 +4,7 @@
  *
  * Run with: `node --test scripts/check-rfc-docs.test.mjs`
  *
- * Why node:test (not vitest): same rationale as `scripts/docs-sync.test.mjs` —
+ * Why node:test (not vitest): same rationale as other node:test scripts —
  * the script lives at workspace root, has no package.json, and node:test ships
  * with Node >=22 which we already require.
  */

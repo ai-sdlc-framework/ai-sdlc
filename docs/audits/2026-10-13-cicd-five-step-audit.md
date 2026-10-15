@@ -64,7 +64,7 @@ Count: **13 decided and not implemented, 1 partial (D12), 1 done (D8).** This is
 - **F7. `ci.yml` and `main-health-monitor.yml` both run the full suite on every push to main.** 204 pushes in 7 days; `ci.yml` push runs plus nightly are about 2,300 runner-minutes of its 5,855 (the remainder is stale `pull_request` runs from branches carrying the pre-AISDLC-727 file, last seen 2026-10-10), and `main-health-monitor.yml` adds about 930. Same property, two workflows (merge-skew detection, AISDLC-406).
 - **F8. Dead triggers and idle workflows.** `merge-queue-passthrough.yml` has had no run since 2026-05-23 (queue dropped by AISDLC-400). The six February/March dogfood issue workflows (`ai-sdlc.yml`, `ai-sdlc-admit/route/triage/sa-feedback/slack-issue.yml`) had 0 runs in 7 days; last runs 2026-10-05 (admit), 2026-09-15 (others) and 2026-03-28 (slack). `scorecard.yml` runs on every main push (204 runs, 146 runner-minutes) while its own weekly cron is the useful part.
 - **F9. Stated wiring that is not wired.** `pnpm lint:publishable` was documented as wired into `pnpm test` (CLAUDE.md before AISDLC-651.2) and CLAUDE.md still tells contributors to run it; no workflow and no `test` chain entry calls it (`grep` finds only the package.json definition and its unit test). The `post-rewrite` hook cannot act in the Pattern C steady state it exists for: it returns early when the parent has `main` checked out, and the parent is required to be on `main` at all times (AISDLC-358).
-- **F10. Registry and meta-test cost is low.** The glob runner replaced a 58-entry chain with 123 discovered files and is the right shape; `docs:check`, `rfc:check`, `dark-code:check`, `knowledge:check` and `sync:plugin-runtime-deps:check` are static scans that run once inside Build & Test.
+- **F10. Registry and meta-test cost is low.** The glob runner replaced a 58-entry chain with 123 discovered files and is the right shape; `rfc:check`, `dark-code:check`, `knowledge:check` and `sync:plugin-runtime-deps:check` are static scans that run once inside Build & Test.
 
 ## 5. Five-step review (requirements first)
 
@@ -198,7 +198,6 @@ Branch protection `main` (`required_status_checks`, `strict: false`): `Backlog D
 |---|---|---|---|---|---|---|
 | `pnpm -r test` | `package.json` `test` | CI `build-test`, main-health | package suites | the long pole (8 min) | KEEP; shard | no |
 | `test:gates` (`run-gate-tests.mjs`, 123 files) | `scripts/run-gate-tests.mjs:1` | in `pnpm test` | all `node --test` gate suites; AISDLC-805 | ~24 s | KEEP | no |
-| `docs:check` | `scripts/check-docs-sync.mjs` | in `pnpm test` | generated docs in sync; AISDLC-68 | seconds | KEEP | no |
 | `rfc:check` | `scripts/check-rfc-docs.mjs` | in `pnpm test` | RFC docs drift; AISDLC-69.3 | seconds | KEEP | no |
 | `dark-code:check` | `scripts/check-dark-code.mjs` | in `pnpm test` | unwired modules; AISDLC-552 | seconds | KEEP | no |
 | `knowledge:check` | `scripts/check-knowledge-scope.sh` | in `pnpm test` | knowledge scope; AISDLC-773 | seconds | KEEP | no |

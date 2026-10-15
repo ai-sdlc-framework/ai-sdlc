@@ -2,9 +2,7 @@
 
 User-facing documentation for the AI-SDLC Framework.
 
-> **Source of truth.** This directory (`ai-sdlc/docs/`) is the canonical source for all user-facing documentation. The published site at `ai-sdlc-io/content/docs/` is generated from these `.md` files via `pnpm docs:sync` (`scripts/docs-sync.mjs`). **Always edit here, never directly in `ai-sdlc-io`.**
->
-> CI catches drift via `pnpm docs:check` (`scripts/check-docs-sync.mjs`). See [`backlog/decisions/AISDLC-68-documentation-consolidation.md`](../backlog/decisions/AISDLC-68-documentation-consolidation.md) for the architecture decision.
+> **Source of truth.** This repository is the canonical source for all user-facing documentation. The published site at `ai-sdlc-io` builds from this repository at a pinned commit; it does not hold its own copy. **Always edit here, never in `ai-sdlc-io`.** See [`backlog/decisions/AISDLC-68-documentation-consolidation.md`](../backlog/decisions/AISDLC-68-documentation-consolidation.md) for the original architecture decision.
 
 ## Sections
 

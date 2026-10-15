@@ -1,3 +1,8 @@
+---
+title: "Adopter Translators"
+description: "Bring-your-own upstream translators for the spec-kit bridge and the canonical task-import format."
+---
+
 # Adopter Translators — BYO Upstream for the Spec-Kit Bridge
 
 > RFC-0036 Phase 10 (AISDLC-335). Companion to [`docs/concepts/spec-driven.md`](spec-driven.md) and [Tutorial 10 — Spec-Kit Bridge](../tutorials/10-spec-kit-bridge.md). Normative reference: [RFC-0036 §14 OQ-6](../../spec/rfcs/RFC-0036-spec-kit-bridge-adopter-authoring.md).
