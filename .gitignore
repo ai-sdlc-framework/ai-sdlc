@@ -142,3 +142,6 @@ AGENTS.md
 # AISDLC-773 / RFC-0053: protected-scope knowledge (client and data-room material)
 # never enters the repository or a PR body.
 .ai-sdlc/knowledge-protected/
+
+# AISDLC-877: cached PR list for cli-kpi
+.ai-sdlc/kpi/
