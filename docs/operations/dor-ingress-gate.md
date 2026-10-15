@@ -133,7 +133,7 @@ ship windows; document every use in the PR body
 ## Pending references and the no-draft rule (AISDLC-879)
 
 A reference to a task id (`AISDLC-N`) whose file does not exist on disk but is
-added by another open `ai-sdlc/file-*` PR is `pending`, not a failure. Gate 3
+added by another open filing PR (branch prefixes read from `.ai-sdlc/pr-lifecycle.yaml`) is `pending`, not a failure. Gate 3
 passes and the PR comment lists the id and the PR that carries it under
 "Pending references". An id that matches nothing (no file, no open filing PR)
 still fails Gate 3. The `dor-readiness-gate` job builds the id-to-PR map before
@@ -141,7 +141,7 @@ evaluating and passes it to `dor-evaluate` as `AI_SDLC_DOR_PENDING_REFS` (JSON);
 ids already on `main` count as resolved too.
 
 When the referenced filing PR lands, `dor-rerun-on-filing-merge.yml` re-runs the
-latest gate run of every other open `ai-sdlc/file-*` PR, so the dependent PR
+latest gate run of every other open filing PR, so the dependent PR
 re-evaluates without a push.
 
 No-draft rule: PRs that carry no task (the `ai-sdlc/decisions-sync` PR, filing

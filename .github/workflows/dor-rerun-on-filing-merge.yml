@@ -1,11 +1,13 @@
 name: DoR re-run on filing PR landing
 
 # AISDLC-879: a task PR whose DoR is `pending` on a reference in another open
-# `ai-sdlc/file-*` PR must re-evaluate when that PR lands, without a push.
+# filing PR must re-evaluate when that PR lands, without a push. Filing-PR
+# branch prefixes come from `.ai-sdlc/pr-lifecycle.yaml` (noTaskBranchPrefixes).
 # Fires on a push to main that touches backlog/tasks (a PR trigger would be a
-# new per-PR gate). This workflow re-runs the latest `ai-sdlc-gate.yml` run of every other open
-# `ai-sdlc/file-*` PR. The gate's pending step also treats ids already on main
-# as pending-resolved, so the re-run passes even though its merge ref is old.
+# new per-PR gate). This workflow re-runs the latest `ai-sdlc-gate.yml` run of
+# every other open filing PR. The gate's pending step also treats ids already
+# on main as pending-resolved, so the re-run passes even though its merge ref
+# is old.
 
 on:
   push:
@@ -23,6 +25,12 @@ jobs:
     name: Re-run DoR on dependent filing PRs
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          run_install: false
+      - name: Install the config reader dependency
+        run: pnpm install --filter @ai-sdlc/pipeline-cli... --frozen-lockfile --ignore-scripts
       - name: Re-run the gate on open filing PRs
         env:
           GH_TOKEN: ${{ github.token }}
@@ -30,9 +38,11 @@ jobs:
           LANDED: ${{ github.sha }}
         run: |
           set -euo pipefail
+          node scripts/read-pr-lifecycle.mjs noTaskBranchPrefixes --array > "$RUNNER_TEMP/no-task-prefixes.json"
+          PREFIXES_JSON=$(cat "$RUNNER_TEMP/no-task-prefixes.json")
           gh pr list --repo "$REPO" --state open --limit 100 \
             --json number,headRefName,headRefOid \
-            --jq '.[] | select(.headRefName | startswith("ai-sdlc/file-")) | [.number, .headRefName, .headRefOid] | @tsv' \
+            --jq ".[] | select(.headRefName as \$b | $PREFIXES_JSON | any(. as \$p | \$b | startswith(\$p))) | [.number, .headRefName, .headRefOid] | @tsv" \
           | while IFS=$'\t' read -r n branch sha; do
               run_id=$(gh run list --repo "$REPO" --workflow ai-sdlc-gate.yml --branch "$branch" \
                 --json databaseId,headSha --jq "[.[] | select(.headSha == \"$sha\")][0].databaseId // empty")

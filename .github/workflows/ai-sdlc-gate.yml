@@ -726,7 +726,7 @@ jobs:
         id: pending
         if: steps.changed.outputs.no-changes != 'true'
         # AISDLC-879: a task referencing an id whose file exists only in another
-        # open `ai-sdlc/file-*` PR (or landed on main after this run's merge
+        # open filing PR (or landed on main after this run's merge
         # ref was built) is `pending`, not a failure. Map: id -> label.
         env:
           GH_TOKEN: ${{ github.token }}
@@ -735,13 +735,16 @@ jobs:
         run: |
           set -euo pipefail
           : > /tmp/dor-pending.tsv
+          # Branch prefixes of no-task (filing/docs) PRs come from .ai-sdlc/pr-lifecycle.yaml.
+          node scripts/read-pr-lifecycle.mjs noTaskBranchPrefixes --array > "$RUNNER_TEMP/no-task-prefixes.json"
+          PREFIXES_JSON=$(cat "$RUNNER_TEMP/no-task-prefixes.json")
           git fetch --quiet origin main
           git ls-tree --name-only origin/main backlog/tasks/ | while IFS= read -r p; do
             id=$(basename "$p" | sed -E 's/^([A-Za-z]+-[0-9]+(\.[0-9]+)?) .*/\1/' | tr a-z A-Z)
             printf '%s\t%s\n' "$id" "already on main" >> /tmp/dor-pending.tsv
           done
           for n in $(gh pr list --repo "$REPO" --state open --limit 100 \
-              --json number,headRefName --jq '.[] | select(.headRefName | startswith("ai-sdlc/file-")) | .number'); do
+              --json number,headRefName --jq ".[] | select(.headRefName as \$b | $PREFIXES_JSON | any(. as \$p | \$b | startswith(\$p))) | .number"); do
             [ "$n" = "$PR_NUMBER" ] && continue
             gh api --paginate "repos/$REPO/pulls/$n/files" --jq '.[] | select(.status != "removed") | .filename' \
               | grep -E '^backlog/tasks/[^/]+\.md$' | while IFS= read -r p; do
