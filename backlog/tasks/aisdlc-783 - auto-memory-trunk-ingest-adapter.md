@@ -14,7 +14,7 @@ dependencies:
   - AISDLC-780
 references:
   - spec/rfcs/RFC-0053-just-in-time-context-engine.md
-  - backlog/tasks/aisdlc-729 - memory dream an internal process that consolidates prunes and refines agent memory.md
+  - backlog/completed/aisdlc-729 - memory dream an internal process that consolidates prunes and refines agent memory.md
   - pipeline-cli/src/cli/index.ts
 priority: medium
 dispatchable: true
