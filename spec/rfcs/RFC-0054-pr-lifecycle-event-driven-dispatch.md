@@ -14,7 +14,7 @@ requiresDocs: []
 
 # RFC-0054: PR Lifecycle as Event-Driven Dispatch (one state machine from branch pushed to merged)
 
-**Status:** Signed Off (v0.2, 2026-10-14, operator sign-off same day: all 14 Open Questions resolved with the operator through the decision rubric; webhook-first event source with poll reconciler, executor owns to ready then the state machine, docs lane for no-task PRs, delivered/landed, landing/ records, land-prep runner, local only, rung: key, report-only budget)
+**Status:** Signed Off (v0.3, 2026-10-15; v0.2 2026-10-14, operator sign-off same day: all 14 Open Questions resolved with the operator through the decision rubric; webhook-first event source with poll reconciler, executor owns to ready then the state machine, docs lane for no-task PRs, delivered/landed, landing/ records, land-prep runner, local only, rung: key, report-only budget)
 **Lifecycle:** Signed Off
 **Author:** Dominique Legault (drafted by an agent session on the operator's 2026-10-13 mandate)
 **Created:** 2026-10-13
@@ -840,12 +840,16 @@ spec:
   releaseBranchPrefix: release-please--
   taskIdPattern: '[A-Z][A-Z0-9]+-[0-9]+(\.[0-9]+)*'
   webhook:
-    port: 8787
+    port: 8765                        # the shipped receiver's default (AISDLC-880)
     bind: 127.0.0.1
+    path: /webhooks/github
     secretEnv: AI_SDLC_WEBHOOK_SECRET
     debounceMs: 5000
     events: [pull_request, check_suite, check_run, workflow_run, status, pull_request_review]
+    forwarder: gh                     # OQ-15: gh (`gh webhook forward`, owned by `up`) | external
+    wakeFile: .reconcile-wake         # one name, read by the receiver and the scheduler
   reconcile:
+    startWithUp: true                 # OQ-15: `cli-hierarchy up` launches `reconcile --watch`
     timerOpenMs: 60000                # while any task or docs PR is open
     timerIdleMs: 900000
   stall:
@@ -857,6 +861,15 @@ spec:
     requireCodeql: true
     requireApprovedVerdict: true
 ```
+
+**Process lifetime (OQ-15).** `cli-hierarchy up` owns three processes when `webhook.secretEnv` is
+set: the receiver, the forwarder named by `webhook.forwarder` (`gh` runs `gh webhook forward` with
+`webhook.events` and the receiver URL; `external` runs nothing and the operator registers the
+repository webhook against their own tunnel) and the scheduler (`cli-dispatch reconcile --watch`,
+when `reconcile.startWithUp` is true). `cli-hierarchy down` stops all three; the `gh` forwarder
+removes the repository webhook it created. `status` reports each. The receiver touches
+`<board>/<reconcile.wakeFile>` and the scheduler watches the same path; a second name for that
+file anywhere in source is a defect.
 
 ### Board changes
 
@@ -938,8 +951,9 @@ number.
 
 ## Open Questions
 
-None of these is resolved here. Each lists options only; the operator answers through the decision
-rubric (class (a), (b) or (c) per the Decision authority rules).
+All fifteen are resolved with the operator through the decision rubric (OQ-1 to OQ-14 on
+2026-10-14, OQ-15 on 2026-10-15). Each keeps its options above its resolution so the choice can be
+re-read against the alternatives.
 
 1. **Event source: webhook, poll, or hybrid?**
    - (a) Option C first, no fast path (poll only).
@@ -1322,11 +1336,45 @@ rubric (class (a), (b) or (c) per the Decision authority rules).
     strong-model calls around the cheap tier without evidence; **over a dwell cap** because dwell
     does not track cost; **over a budget now** because it needs logging that does not exist.
 
+15. **How does GitHub reach the laptop-local receiver?**
+    - (a) `gh webhook forward`, started and stopped by `cli-hierarchy up` / `down`; tunnels stay
+      available as `webhook.forwarder: external`.
+    - (b) Tailscale Funnel: a stable public `ts.net` URL that survives sleep; needs Tailscale with
+      Funnel enabled in the tailnet ACL; the hook is registered by hand once.
+    - (c) Cloudflare Tunnel (the choice the operations doc made on its own): stable URL,
+      outbound-only; needs an account, a zone, `cloudflared` as a service and tunnel credentials.
+    - (d) No exposure: poll-only on the reconcile timer.
+    **Resolution (2026-10-15, full rubric): (a) `gh webhook forward` owned by `up`, with the
+    forwarder a configuration value so (b) or (c) is a config swap, not a code change.** Problem:
+    OQ-1 chose webhook first, OQ-8 made the receiver laptop-local and OQ-10 made the payload a
+    trigger, but nothing decided the last hop from GitHub to `127.0.0.1`; AISDLC-880 shipped with
+    the choice made in `docs/operations/cli-hierarchy.md`, the receiver and scheduler wrote two
+    different wake-file names, and nothing launched the scheduler. Industry research: GitHub's
+    own local-receiver paths are `gh webhook forward` and smee.io relays, the same shape as
+    `stripe listen`; hosted receivers (Probot, Mergify) live on public endpoints; self-hosted
+    Renovate and Dependabot poll; home-lab exposure has converged on two outbound-only tunnels,
+    Cloudflare Tunnel and Tailscale Funnel, both of which reconnect after sleep as services and
+    both of which expose a public hostname that HMAC must defend. Why (a): zero new infrastructure;
+    it uses the `gh` auth every session already holds, creates and deletes the hook itself, and
+    its lifetime equals the session's, which is exactly what OQ-8 accepts. **Counter-argument:**
+    "GitHub documents `gh webhook forward` for testing; a dropped websocket is silent loss until
+    the 60 s poll, a crash leaves a stale hook, and a tunnel gives one permanent hook with no
+    babysitting." Rebuttal: the loss window on sleep is identical for every option (OQ-8) and the
+    poller backstops it (OQ-1); `up` already supervises the receiver pid, so the forwarder is one
+    more child; stale hooks are removed by `down`; a tunnel's permanence only pays when the
+    receiver outlives the session, and by design it does not. **Selected over (b)** because it
+    assumes nothing about what is installed, and (b) is the second-cheapest swap when Tailscale is
+    present; **over (c)** because three new infrastructure pieces for a per-session receiver fail
+    the five-step; **over (d)** because it discards the API-budget win that motivated OQ-1 (the
+    GraphQL rate limit broke `gh pr list` on 2026-10-11). Consequences recorded in the
+    Configuration section: `webhook.forwarder`, `webhook.wakeFile`, `reconcile.startWithUp`, and
+    the port aligned to the shipped 8765. Implementation: AISDLC-918.
+
 ## Sign-Off
 
 | Role | Name | Status | Date |
 |---|---|---|---|
-| CTO / Engineering Authority + AI-SDLC Operator | Dominique Legault | ✅ Signed (14/14 OQs resolved with the full rubric on 2026-10-14; webhook-first with coded reconciler, executor-to-ready ownership, docs lane, delivered/landed; implementation tasks AISDLC-878 to 885 filed, 816 and 829 amended) | 2026-10-14 |
+| CTO / Engineering Authority + AI-SDLC Operator | Dominique Legault | ✅ Signed (15/15 OQs resolved with the full rubric, 14 on 2026-10-14 and OQ-15 on 2026-10-15; webhook-first with coded reconciler, executor-to-ready ownership, docs lane, delivered/landed; implementation tasks AISDLC-878 to 885 filed, 816 and 829 amended) | 2026-10-14 |
 
 ## Revision History
 
@@ -1334,6 +1382,7 @@ rubric (class (a), (b) or (c) per the Decision authority rules).
 |---|---|---|
 | 2026-10-13 | v0.1 | Drafted on the operator's mandate; four options, recommendation, 14 Open Questions, none resolved. |
 | 2026-10-14 | v0.2 | OQ walkthrough with the operator, full rubric per question; lifecycle Draft to Ready for Review (#1542) then Signed Off the same day (operator sign-off). OQ-1 webhook first with poll as the fallback reconciler (the hybrid with the fast path in Phase 1); OQ-2 executor owns the PR until ready, the state machine from ready to merged, takeover on death or timeout; OQ-3 count cap kept for PR-less failures, same-head loop guard for PR follow-ups (corrects the 828 reference to 847); OQ-4 and OQ-11 docs lane: no-task PRs owned by the machine from birth with a docs action set, `cli-file rebase` in place, `reenter` keyed on PR state for task PRs; OQ-5 `delivered` (ready and armed) and `landed` (merged), `done/` written only on landed; OQ-6 `landing/` board records for ownership and history, GitHub for facts; OQ-7 `land-prep` runner extracted, executor still flips; OQ-8 local only; OQ-9 shipped 823/826/847 are Phase 0, 816 and 829 amended in place; OQ-10 payload is a trigger, re-read via REST; OQ-12 rung 2 is the RFC-0049 judgment layer with provider by config; OQ-13 `rung:` frontmatter key checked by the model-pins gate; OQ-14 no dev trio, dev-round spend measured per PR, budget report-only in v1 with the per-PR budget as the Phase 3 target. Implementation tasks AISDLC-878 to 885 filed; AISDLC-816 and 829 amended. |
+| 2026-10-15 | v0.3 | OQ-15 added and resolved with the operator (receiver exposure: `gh webhook forward` owned by `up`, forwarder as config); Configuration gains `webhook.path`, `webhook.forwarder`, `webhook.wakeFile`, `reconcile.startWithUp`, port aligned to the shipped 8765; process-lifetime paragraph; stale "none resolved" line corrected. AISDLC-918 filed. |
 
 ## References
 
