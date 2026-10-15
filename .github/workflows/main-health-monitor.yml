@@ -95,6 +95,13 @@ jobs:
         continue-on-error: true
         run: pnpm validate-schemas
 
+      # AISDLC-902: `pnpm test` runs rfc:check but this job runs `pnpm -r test`,
+      # so an invalid RFC status sat on main unseen.
+      - name: RFC docs check
+        id: rfc-check
+        continue-on-error: true
+        run: pnpm rfc:check
+
       - name: Coverage (full)
         id: coverage
         continue-on-error: true
@@ -137,7 +144,7 @@ jobs:
         run: |
           full="${{ steps.full-test.outcome }}"
           workflow="${{ steps.workflow-test.outcome }}"
-          extra="plugin=${{ steps.plugin-test.outcome }} lint=${{ steps.lint.outcome }} format=${{ steps.format.outcome }} schemas=${{ steps.schemas.outcome }} coverage=${{ steps.coverage.outcome }} smoke=${{ steps.smoke.outcome }}"
+          extra="plugin=${{ steps.plugin-test.outcome }} lint=${{ steps.lint.outcome }} format=${{ steps.format.outcome }} schemas=${{ steps.schemas.outcome }} rfc=${{ steps.rfc-check.outcome }} coverage=${{ steps.coverage.outcome }} smoke=${{ steps.smoke.outcome }}"
           echo "full-test outcome: $full"
           echo "workflow-test outcome: $workflow"
           echo "other outcomes: $extra"
