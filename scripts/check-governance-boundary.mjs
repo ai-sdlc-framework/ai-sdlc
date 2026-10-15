@@ -31,6 +31,8 @@ export const GOVERNANCE_PATTERNS = [
   // AISDLC-740: scripts that run in trusted CI/hook context must cover themselves.
   'scripts/check-governance-boundary.mjs',
   'scripts/is-docs-only-changeset.mjs',
+  'pipeline-cli/attestation-core/docs-only-paths.mjs', // AISDLC-878: single docs-only classifier source
+  'pipeline-cli/attestation-core/review-scope-core.mjs',
   'scripts/check-pr-patch-coverage.mjs',
   'scripts/post-attestation-review.mjs',
   'scripts/check-attestation-sign.sh',
