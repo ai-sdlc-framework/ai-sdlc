@@ -200,6 +200,41 @@ function readJson<T>(text: string): T | null {
 }
 
 /**
+ * Split `gh api --paginate` output (one JSON document per page, back to back)
+ * into its documents. Returns null when any page fails to parse.
+ */
+function readPages(text: string): unknown[] | null {
+  const docs: unknown[] = [];
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  let start = -1;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === '\\') esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === '{' || ch === '[') {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === '}' || ch === ']') {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        const doc = readJson<unknown>(text.slice(start, i + 1));
+        if (doc === null) return null;
+        docs.push(doc);
+        start = -1;
+      }
+    }
+  }
+  return depth === 0 && docs.length > 0 ? docs : null;
+}
+
+/**
  * Flip a draft PR to ready, failing closed: CodeQL green on the head, an approved
  * aggregate verdict file, and no outstanding CHANGES_REQUESTED review.
  */
@@ -228,18 +263,23 @@ export async function flipReady(opts: FlipOptions): Promise<FlipResult> {
   }
 
   const runs = await api([`repos/:owner/:repo/commits/${sha}/check-runs`, '--paginate']);
-  const parsed =
-    runs.code === 0
-      ? readJson<{ check_runs?: Array<{ name: string; conclusion: string | null }> }>(runs.stdout)
-      : null;
-  const codeql = parsed?.check_runs?.filter((c) => /^codeql/i.test(c.name)) ?? [];
+  const runPages = runs.code === 0 ? readPages(runs.stdout) : null;
+  const allRuns = (runPages ?? []).flatMap(
+    (p) =>
+      (p as { check_runs?: Array<{ name: string; conclusion: string | null }> }).check_runs ?? [],
+  );
+  const codeql = allRuns.filter((c) => /^codeql/i.test(c.name));
   if (codeql.length === 0 || !codeql.every((c) => c.conclusion === 'success')) {
     return { ok: false, reason: `CodeQL is not green on ${sha.slice(0, 7)}` };
   }
 
   const rv = await api([`${pull}/reviews`, '--paginate']);
-  const reviews =
-    rv.code === 0 ? readJson<Array<{ user?: { login?: string }; state: string }>>(rv.stdout) : null;
+  const rvPages = rv.code === 0 ? readPages(rv.stdout) : null;
+  const reviews = rvPages
+    ? rvPages.flatMap((p) =>
+        Array.isArray(p) ? (p as Array<{ user?: { login?: string }; state: string }>) : [],
+      )
+    : null;
   if (!reviews) return { ok: false, reason: 'cannot read reviews' };
   const latest = new Map<string, string>();
   for (const r of reviews) {

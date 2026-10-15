@@ -251,6 +251,35 @@ describe('flipReady', () => {
     expect(good.ok).toBe(true);
   });
 
+  it('reads back-to-back paginated pages from gh --paginate', async () => {
+    const runner: Runner = async (_cmd, args) => {
+      const a = args.join(' ');
+      if (a.includes('check-runs')) {
+        const p1 = JSON.stringify({ check_runs: [{ name: 'lint "x" }', conclusion: 'success' }] });
+        const p2 = JSON.stringify({ check_runs: [{ name: 'CodeQL', conclusion: 'success' }] });
+        return { stdout: p1 + p2, stderr: '', code: 0 };
+      }
+      if (a.includes('/reviews')) {
+        const p1 = JSON.stringify([{ user: { login: 'a' }, state: 'CHANGES_REQUESTED' }]);
+        const p2 = JSON.stringify([{ user: { login: 'a' }, state: 'APPROVED' }]);
+        return { stdout: `${p1}\n${p2}`, stderr: '', code: 0 };
+      }
+      if (a.includes('PATCH')) return { stdout: '{"draft":false}', stderr: '', code: 0 };
+      return {
+        stdout: JSON.stringify({ draft: true, head: { sha: 'abcdef123' } }),
+        stderr: '',
+        code: 0,
+      };
+    };
+    const r = await flipReady({
+      prNumber: 1,
+      taskId: 'AISDLC-1',
+      worktreePath: fixture(approved),
+      runner,
+    });
+    expect(r.ok).toBe(true);
+  });
+
   it('flips via REST PATCH when all conditions hold', async () => {
     const { runner, calls } = runnerFor({ codeql: 'success' });
     const r = await flipReady({
