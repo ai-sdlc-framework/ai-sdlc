@@ -78,12 +78,19 @@ Include that `pipeline-cli build:` line in the doctor output.
 
 ## When to run this
 
-- After `ai-sdlc init`, to confirm the scaffold landed cleanly.
+- After `/ai-sdlc init` (`ai-sdlc-plugin/commands/init.md`), to confirm the scaffold landed cleanly.
 - Periodically, to catch config drift (plugin/pin staleness, manifest
   disagreement, attestation misconfiguration) before it causes a silent
   failure — see the AISDLC-578 motivation in `docs/operations/doctor.md`.
 - Before filing a bug report against ai-sdlc itself — most "it's not
   working" reports trace back to a `doctor`-detectable misconfiguration.
+
+## Required configuration
+
+The `config-manifest` check lists every missing entry of the required-config
+manifest with the same wording as the `/ai-sdlc execute` Step 1 preflight, and
+`--fix` scaffolds the entries that need no operator input (review policy,
+reviewer set, agent role). The keyring and pipeline need `/ai-sdlc init`.
 
 ## Output
 

@@ -78,6 +78,7 @@ describe('role pins', () => {
   const haikuCommands = [
     'version',
     'doctor',
+    'init',
     'hierarchy',
     'cleanup',
     'pipeline-status',

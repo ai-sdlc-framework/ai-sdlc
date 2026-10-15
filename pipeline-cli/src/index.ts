@@ -252,3 +252,25 @@ export {
   type FollowupCheckResult,
   type FollowupViolation,
 } from './backlog/followup-rule.js';
+
+// Required consumer configuration manifest: init, execute preflight, doctor and
+// SessionStart share one list (AISDLC-910).
+export {
+  CONFIG_VERSION_PATH,
+  INIT_COMMAND,
+  REQUIRED_CONFIG_MANIFEST,
+  compareVersions,
+  configPreflight,
+  configVersionNotice,
+  formatMissingConfig,
+  formatMissingEntry,
+  missingConfigEntries,
+  newestConfigVersion,
+  readConfigVersion,
+  scaffoldConfig,
+  writeConfigVersion,
+  type ConfigEntry,
+  type ConfigPrompt,
+  type ScaffoldOptions,
+  type ScaffoldResult,
+} from './config-manifest/manifest.js';

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-910
 title: 'feat: ai-sdlc init scaffolds the required consumer configuration from one manifest; execute preflight and doctor report the same missing entries before any dev budget is spent'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [feature, adopters, pipeline-cli, plugin]
@@ -21,14 +21,14 @@ In a consumer repository (ai-sdlc-io, plugin 0.28.0, 2026-10-14/15) the attestat
 
 ## Acceptance Criteria
 
-- [ ] `pipeline-cli` exports one required-config manifest; a test asserts every path the pipeline reads under `.ai-sdlc/` for attestation and review (keyring, review policy, reviewer set, agent-role, pipeline.yaml) is listed with a `since` version.
-- [ ] `/ai-sdlc init` on an empty repo creates every manifest entry (operator-input ones prompted, with `--non-interactive` taking defaults or failing with the missing names); re-run is a no-op without `--force`; `configVersion` is written and a re-run after bumping an entry's `since` prompts only for that entry.
-- [ ] `/ai-sdlc execute` Step 1 refuses, before any worktree or dev dispatch, when a manifest entry the run will read is missing, with the doctor wording and the init command; a test covers a missing keyring and a missing review policy.
-- [ ] `doctor` lists the same entries with the same wording as the preflight; `doctor --fix` scaffolds non-interactive entries.
-- [ ] The verifier and the classifier agree on the required reviewer set for a run (test: classifier picks the two-reviewer set, verifier accepts an envelope with exactly those two).
-- [ ] SessionStart prints one line when `configVersion` is older than the newest manifest `since`.
-- [ ] `docs/operations/doctor.md` and `ai-sdlc-plugin/commands/doctor.md` reference the real command; `init-signing-key` docs say it is a step of `init`.
-- [ ] Task file moved to `backlog/completed/` in the PR.
+- [x] `pipeline-cli` exports one required-config manifest; a test asserts every path the pipeline reads under `.ai-sdlc/` for attestation and review (keyring, review policy, reviewer set, agent-role, pipeline.yaml) is listed with a `since` version.
+- [x] `/ai-sdlc init` on an empty repo creates every manifest entry (operator-input ones prompted, with `--non-interactive` taking defaults or failing with the missing names); re-run is a no-op without `--force`; `configVersion` is written and a re-run after bumping an entry's `since` prompts only for that entry.
+- [x] `/ai-sdlc execute` Step 1 refuses, before any worktree or dev dispatch, when a manifest entry the run will read is missing, with the doctor wording and the init command; a test covers a missing keyring and a missing review policy.
+- [x] `doctor` lists the same entries with the same wording as the preflight; `doctor --fix` scaffolds non-interactive entries.
+- [x] The verifier and the classifier agree on the required reviewer set for a run (test: classifier picks the two-reviewer set, verifier accepts an envelope with exactly those two).
+- [x] SessionStart prints one line when `configVersion` is older than the newest manifest `since`.
+- [x] `docs/operations/doctor.md` and `ai-sdlc-plugin/commands/doctor.md` reference the real command; `init-signing-key` docs say it is a step of `init`.
+- [x] Task file moved to `backlog/completed/` in the PR.
 
 ## Notes
 

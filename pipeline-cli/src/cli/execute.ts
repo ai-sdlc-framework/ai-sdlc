@@ -95,6 +95,7 @@ import type { Argv, CommandModule } from 'yargs';
 import { executePipeline } from '../execute-pipeline.js';
 import { computeBranchName } from '../steps/02-compute-branch.js';
 import { validateTask } from '../steps/01-validate.js';
+import { configPreflight } from '../config-manifest/manifest.js';
 import { defaultSpawner } from '../runtime/default-spawner.js';
 import { MockSpawner } from '../runtime/subagent-spawner.js';
 import { ShellClaudePSpawner } from '../runtime/shell-claude-p-spawner.js';
@@ -572,6 +573,13 @@ export async function runExecuteCommand(
     spawner = await factory(opts.spawnerKind);
   } catch (err) {
     return { ok: false, reason: (err as Error).message };
+  }
+
+  // AISDLC-910 — refuse before any worktree or dev dispatch when required
+  // consumer config is missing (same wording as `ai-sdlc doctor`).
+  if (process.env.AI_SDLC_SKIP_CONFIG_PREFLIGHT !== '1') {
+    const preflight = configPreflight(opts.workDir);
+    if (!preflight.ok) return { ok: false, reason: preflight.reason };
   }
 
   // Real run — drive `executePipeline` with the verdict-file hook wired into

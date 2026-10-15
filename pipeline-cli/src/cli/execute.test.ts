@@ -21,7 +21,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   CLAUDE_CLI_SPAWNER_REMOVED_MESSAGE,
@@ -426,6 +426,38 @@ describe('runExecuteCommand — real-run mode', () => {
     expect(spawnerFactoryCalled).toBe(false);
     expect(executorCalled).toBe(false);
   });
+
+  it.each(['.ai-sdlc/trusted-reviewers.yaml', '.ai-sdlc/review-policy.md'])(
+    'refuses before any dev dispatch when %s is missing (AISDLC-910)',
+    async (missing) => {
+      writeTaskFile(tmp, { id: 'AISDLC-201', title: 'preflight', status: 'To Do' });
+      rmSync(join(tmp, missing));
+      let spawnerFactoryCalled = false;
+      let executorCalled = false;
+      const result = await runExecuteCommand({
+        taskId: 'AISDLC-201',
+        workDir: tmp,
+        spawnerKind: 'sdk',
+        maxIterations: 2,
+        dryRun: false,
+        run: true,
+        spawnerFactory: async () => {
+          spawnerFactoryCalled = true;
+          return stubSpawner;
+        },
+        executor: async () => {
+          executorCalled = true;
+          throw new Error('executor must not run');
+        },
+        logger: silentLogger(),
+      });
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain(missing);
+      expect(result.reason).toContain('/ai-sdlc init');
+      expect(spawnerFactoryCalled).toBe(true); // resolved first; no worktree or dev dispatch follows
+      expect(executorCalled).toBe(false);
+    },
+  );
 
   it('invokes executor and writes the verdict file via onProgress', async () => {
     writeTaskFile(tmp, { id: 'AISDLC-200', title: 'real run', status: 'To Do' });

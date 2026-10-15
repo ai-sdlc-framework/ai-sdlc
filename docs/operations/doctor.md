@@ -16,7 +16,7 @@ ai-sdlc doctor --fix        # apply the safe/mechanical auto-fixes, then re-repo
 ai-sdlc doctor --strict     # exit non-zero on warn severity too (default: only fail exits non-zero)
 ```
 
-`ai-sdlc init` scaffolds a correct project once. Nothing re-validates the
+`/ai-sdlc init` (plugin command, `cli-init` in pipeline-cli; scaffolds everything in the required-config manifest) scaffolds a correct project once. Nothing re-validates the
 setup afterward — config drifts, runtime/plugin versions lag, files get
 hand-edited, and some failure modes (a missing/malformed
 `.ai-sdlc/agent-role.yaml`, for example) fail silently. `ai-sdlc doctor` is
@@ -31,6 +31,19 @@ call. Upstream reporting (an opt-in, anonymized "file this as a GitHub
 issue" flow) is a separate, not-yet-built RFC that extends RFC-0025; this
 command's typed result shape (`anonymizableEvidence` per finding) is the
 extension seam for that RFC, not an implementation of it.
+
+## Required configuration (AISDLC-910)
+
+One manifest (`pipeline-cli/src/config-manifest/manifest.ts`) lists every
+`.ai-sdlc/` file the attestation and review pipeline reads, each with the
+config version that first required it (`since`). `/ai-sdlc init` scaffolds
+from it and records `configVersion` in `.ai-sdlc/config-version.yaml`;
+`/ai-sdlc execute` Step 1 refuses before any worktree or dev dispatch when an
+entry is missing; the `config-manifest` doctor check reports the same entries
+with the same wording; SessionStart prints one line when `configVersion` is
+older than the newest `since`. `doctor --fix` scaffolds entries that need no
+operator input; the keyring and pipeline need `/ai-sdlc init`. Set
+`AI_SDLC_SKIP_CONFIG_PREFLIGHT=1` only to bypass the preflight in an emergency.
 
 ## Check registry
 
