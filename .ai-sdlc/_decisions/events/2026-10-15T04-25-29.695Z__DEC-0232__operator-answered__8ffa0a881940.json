@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-15T04:25:29.695Z","decisionId":"DEC-0232","chosenOptionId":"dispatch-rebases","rationale":"Class (a): mechanical rebase of a docs PR, reversible, no control touched; landing #1543 unblocks AISDLC-878..885. Operator absent; rubric recommendation applied.","by":"planner"}
