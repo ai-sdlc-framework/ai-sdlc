@@ -1155,3 +1155,13 @@ jobs:
             independence-policy-gate,
             dependency-review-gate,
             dor-readiness-gate
+
+      # AISDLC-927: surface the shared installation quota so an exhausted budget
+      # is visible in the run summary. /rate_limit itself is not metered.
+      - name: Report API quota remaining
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api rate_limit --jq '.resources.core | "API quota remaining: \(.remaining)/\(.limit), resets at \(.reset | todate)"' | tee -a "$GITHUB_STEP_SUMMARY"

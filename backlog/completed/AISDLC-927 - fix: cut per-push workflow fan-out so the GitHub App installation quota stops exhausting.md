@@ -1,7 +1,7 @@
 ---
 id: AISDLC-927
 title: 'fix: cut per-push workflow fan-out so the GitHub App installation quota stops exhausting every hour'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [bug, ci, velocity, token-cost, github-actions]

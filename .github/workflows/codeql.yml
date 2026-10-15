@@ -8,6 +8,13 @@ name: CodeQL
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    # AISDLC-927: record and docs pushes carry no code to scan; skipping the run
+    # saves the installation API quota. push to main and the schedule stay unfiltered.
+    paths-ignore:
+      - 'backlog/**'
+      - '.ai-sdlc/_decisions/**'
+      - 'docs/**'
+      - 'spec/**'
   push:
     branches: [main]
   schedule:
