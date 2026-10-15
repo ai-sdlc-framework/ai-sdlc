@@ -54,6 +54,10 @@ spec:
       # script `scripts/verify-reviewer-sub-attestations.mjs` was deleted in
       # AISDLC-383.7 along with the rest of the AISDLC-380 trust chain.)
       - 'scripts/verify-attestation.mjs'
+      # AISDLC-725 / DEC-0219: the review ledger and the local review state decide whether a
+      # later round is a delta review; the agent under review must not write either.
+      - '.ai-sdlc/reviews/**'
+      - '.ai-sdlc/review-state/**'
     blockedActions:
       - 'gh pr merge*'
       - 'git merge*'

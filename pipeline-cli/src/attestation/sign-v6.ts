@@ -92,6 +92,7 @@ export interface V6TranscriptLeafSummary {
    * every leaf that has none: it is never written as `null` or an empty string.
    */
   stage?: StagedLeafStage;
+  /**
    * AISDLC-725: the commit range a delta review round covered, carried through
    * as-is from the source leaf. Present only on delta rounds; a full round omits
    * it. The leaf hash binds it, so the Merkle root signature covers the value.

@@ -34,21 +34,20 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 describe('every review path goes through the shared decision (AC2)', () => {
-  it('the execute command, the orchestrator tick and the executor call `cli-incremental-decide plan`', () => {
-    const cmds = join(REPO, 'ai-sdlc-plugin', 'commands');
-    const execute = read(join(cmds, 'execute.md'));
-    const tick = read(join(cmds, 'orchestrator-tick.md'));
-    const executor = read(join(cmds, 'executor.md'));
-    expect(execute).toMatch(/cli-incremental-decide\.mjs" plan/);
-    expect(execute).toMatch(/cli-incremental-decide\.mjs" record-round/);
-    expect(tick).toMatch(/cli-incremental-decide\.mjs" plan/);
-    expect(tick).toContain('--review-plan-file "$ROUND_PLAN_FILE"');
+  it('the next-step review path and the executor command go through the shared decision', () => {
+    const executor = read(join(REPO, 'ai-sdlc-plugin', 'commands', 'executor.md'));
     // The executor runs reviews only through /ai-sdlc execute and says so.
     expect(executor).toContain('/ai-sdlc execute <task-id>');
     expect(executor).toContain('cli-incremental-decide plan');
-    // The old unconditional full-diff wording is gone.
-    expect(execute).not.toMatch(/Your verdict still applies to the WHOLE PR/);
-    expect(execute).not.toMatch(/decide \\\n\s+--comments-json-file/);
+    // The execute command's review step (next-step) builds prompts through the shared planner
+    // and records every round and the developer response; the legacy marker-only gate is gone.
+    const prep = read(join(SRC, 'next-step', 'review-prepare.ts'));
+    expect(prep).toContain('built.roundPlan');
+    expect(prep).not.toMatch(/cli-incremental-decide\.mjs/);
+    expect(prep).not.toMatch(/applies to the WHOLE PR/);
+    const next = read(join(SRC, 'next-step', 'next-step.ts'));
+    expect(next).toContain('recordRoundFromVerdicts(');
+    expect(next).toContain('recordDeveloperResponse(');
   });
 
   it('the step 7 builder calls the planner for every prompt build and feeds the section in', () => {
@@ -109,7 +108,7 @@ describe('cli-incremental-decide plan / record-round / record-response + cli-rev
     role: ReviewLedgerRole,
     approved: boolean,
     taskId = 'AISDLC-9',
-  ): void =>
+  ): void => {
     appendReviewLedgerRecord(
       {
         taskId,
@@ -124,6 +123,10 @@ describe('cli-incremental-decide plan / record-round / record-response + cli-rev
       },
       repo,
     );
+    // The planner reads the COMMITTED ledger, never the worktree file.
+    git('add', '-f', `.ai-sdlc/reviews/${taskId.toLowerCase()}.jsonl`);
+    git('commit', '-q', '-m', 'ledger');
+  };
   const commit = (path: string, body: string): void => {
     mkdirSync(join(repo, path, '..'), { recursive: true });
     writeFileSync(join(repo, path), body);
@@ -178,6 +181,7 @@ describe('cli-incremental-decide plan / record-round / record-response + cli-rev
           approved: false,
           findings: [{ severity: 'major', message: 'FIX_ME' }],
         },
+        { reviewer: 'security-reviewer', approved: true, findings: [] },
       ]),
     );
     const rec = JSON.parse(
@@ -197,6 +201,7 @@ describe('cli-incremental-decide plan / record-round / record-response + cli-rev
     );
     expect(rec).toMatchObject({ round: 1, approved: false, tokens: 500 });
     ledger(first.headSha, 'code', false);
+    ledger(first.headSha, 'security', true);
 
     const resp = join(scratch, 'resp.txt');
     writeFileSync(resp, 'done');
@@ -280,10 +285,14 @@ describe('cli-incremental-decide plan / record-round / record-response + cli-rev
       repo,
       'AISDLC-9',
       p1,
-      [{ agentId: 'code-reviewer', approved: false, findings: [] }],
+      [
+        { agentId: 'code-reviewer', approved: false, findings: [] },
+        { agentId: 'security-reviewer', approved: true, findings: [] },
+      ],
       1000,
     );
     ledger(p1.headSha, 'code', false);
+    ledger(p1.headSha, 'security', true);
     commit('src/a.ts', 'a3\n');
     const p2 = planReviewRound({ taskId: 'AISDLC-9', repoRoot: repo, runGit: defaultGitRunner() });
     recordRoundFromVerdicts(

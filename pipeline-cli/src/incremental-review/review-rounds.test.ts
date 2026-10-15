@@ -100,6 +100,11 @@ function ledger(
     },
     root,
   );
+  // The planner reads the COMMITTED ledger, never the worktree file.
+  if (root === repo) {
+    git(repo, 'add', '-f', `.ai-sdlc/reviews/${taskId.toLowerCase()}.jsonl`);
+    git(repo, 'commit', '-q', '-m', 'ledger');
+  }
 }
 
 /** Run a first round at HEAD and record it (plus the ledger records emit-leaf would write). */
@@ -153,14 +158,17 @@ describe('planReviewRound — rounds after a rejection (AISDLC-725 AC1/AC3)', ()
     const code = buildLaterRoundSection(p, 'code-reviewer-codex');
     expect(code).toContain('a must be 3');
     expect(code).toContain('Changed a to 3.');
-    expect(code).toContain('Review ONLY that delta');
-    expect(code).toContain('open the surrounding files');
-    expect(code).toContain('does not re-judge the rest of the pull request');
-    expect(code).not.toMatch(/applies to the whole/i);
-    // The security reviewer raised nothing: it sees no code-reviewer finding.
+    // The code reviewer rejected at the base commit: it reads the full diff (DEC-0219).
+    expect(code).toContain('(full review)');
+    expect(code).not.toContain('Review ONLY that delta');
+    // The security reviewer approved: it reads the delta, with the delta wording.
     const sec = buildLaterRoundSection(p, 'security-reviewer');
     expect(sec).not.toContain('a must be 3');
     expect(sec).toContain('(you raised no findings)');
+    expect(sec).toContain('Review ONLY that delta');
+    expect(sec).toContain('open the surrounding files');
+    expect(sec).toContain('does not re-judge the rest of the pull request');
+    expect(sec).not.toMatch(/applies to the whole/i);
   });
 
   it('a first round produces an empty section', () => {
@@ -239,7 +247,7 @@ describe('planReviewRound — forced-full safety rules (AC4)', () => {
     commit({ 'src/a.ts': 'export const a = 2;\n' });
     runRound(false, ['x']);
     // Amend (history rewrite): the reviewed commit is no longer an ancestor of HEAD.
-    git(repo, 'reset', '-q', '--soft', 'HEAD~1');
+    git(repo, 'reset', '-q', '--soft', 'HEAD~3');
     commit({ 'src/a.ts': 'export const a = 5;\n' }, 'amended');
     expect(plan()).toMatchObject({ mode: 'full', reason: 'last-reviewed-unreachable' });
   });
@@ -531,6 +539,37 @@ describe('planReviewRound — corroboration and per-reviewer delta (AISDLC-725 r
     expect(plan()).toMatchObject({ mode: 'full', reason: 'review-uncorroborated' });
   });
 
+  it('a role that rejected at the base commit per the committed ledger reads in full, whatever the worktree state says', () => {
+    const sha = commit({ 'src/a.ts': 'export const a = 2;\n' });
+    // The advisory worktree state claims approval; the committed ledger recorded a rejection.
+    recordOnly([{ agentId: 'code-reviewer', approved: true }]);
+    ledger(sha, 'code', false);
+    commit({ 'src/a.ts': 'export const a = 3;\n' });
+    expect(plan()).toMatchObject({ mode: 'full', reason: 'review-uncorroborated' });
+  });
+
+  it('an uncommitted worktree ledger record never shortens a review', () => {
+    const sha = commit({ 'src/a.ts': 'export const a = 2;\n' });
+    recordOnly([{ agentId: 'code-reviewer', approved: true }]);
+    // Written to the worktree file only, never committed.
+    appendReviewLedgerRecord(
+      {
+        taskId: TASK,
+        prNumber: null,
+        commitSha: sha,
+        iteration: 1,
+        role: 'code',
+        harness: 'claude-code',
+        timestamp: '2026-01-01T00:00:00.000Z',
+        verdict: 'approved',
+        findings: [],
+      },
+      repo,
+    );
+    commit({ 'src/a.ts': 'export const a = 3;\n' });
+    expect(plan()).toMatchObject({ mode: 'full', reason: 'review-uncorroborated' });
+  });
+
   it('delta is decided per reviewer: a synthetic-verdict or absent reviewer reads the full diff', () => {
     const sha = commit({ 'src/a.ts': 'export const a = 2;\n' });
     recordOnly([
@@ -541,7 +580,7 @@ describe('planReviewRound — corroboration and per-reviewer delta (AISDLC-725 r
         message: 'test-reviewer returned no parseable verdict (status=timeout)',
       },
     ]);
-    ledger(sha, 'code', false);
+    ledger(sha, 'code', true);
     ledger(sha, 'test', false);
     ledger(sha, 'security', true);
     commit({ 'src/a.ts': 'export const a = 3;\n' });

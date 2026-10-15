@@ -18,6 +18,7 @@ import {
   type Harness,
 } from '../__test-helpers/next-step-fixtures.js';
 import type { AggregatedVerdict, ReviewerVerdict } from '../types.js';
+import { loadReviewState } from '../incremental-review/review-rounds.js';
 import { approvedWithoutReviewers } from './review-finalize.js';
 import { extractJson, nextStep, readState, writeState, type NextStepDeps } from './next-step.js';
 import type {
@@ -482,6 +483,40 @@ describe('developer failures roll back and stop', () => {
   it('flags non-JSON prose as a contract violation', async () => {
     const { last } = await drive(deps(), { devResult: () => 'I finished the task, all green!' });
     expect(last).toMatchObject({ action: 'stop', outcome: 'developer-json-contract-violated' });
+  });
+});
+
+describe('incremental review state (AISDLC-725)', () => {
+  it('records every round whatever the verdict and the developer response, so round two can be a delta', async () => {
+    mkdirSync(join(worktree, '.git'), { recursive: true });
+    const roundPlan = (round: number) => ({
+      round,
+      mode: 'full' as const,
+      reason: 'first-round' as const,
+      baseSha: null,
+      headSha: 'a'.repeat(40),
+      deltaSize: 0,
+      contentHash: 'b'.repeat(64),
+      headBlobHash: 'c'.repeat(64),
+      prior: null,
+      deltaReviewers: [],
+    });
+    await drive(
+      deps({
+        approvals: [false, true],
+        prepare: async (_c, _s, round) => ({
+          kind: 'spawn',
+          review: { ...reviewRound(round), roundPlan: roundPlan(round) },
+          classifierLine: 'x',
+        }),
+      }),
+    );
+    const state = loadReviewState('AISDLC-900', worktree);
+    expect(state.rounds.map((r) => [r.round, r.approved])).toEqual([
+      [1, false],
+      [2, true],
+    ]);
+    expect(state.responses.map((r) => r.round)).toEqual([1]);
   });
 });
 

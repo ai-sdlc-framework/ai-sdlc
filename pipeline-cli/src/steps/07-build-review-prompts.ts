@@ -95,6 +95,8 @@ export interface BuildReviewPromptsOptions {
    * incremental decision; this hook exists only so tests can inject a plan.
    * Defaults to `planReviewRound` over the task worktree's local review state.
    */
+  /** The next-step review path reuses a corroborated earlier approval for unchanged content. */
+  allowSkip?: boolean;
   planRound?: (inputs: {
     taskId: string;
     worktreePath: string;
@@ -119,7 +121,7 @@ export async function buildReviewPrompts(
 
   // AISDLC-725: ONE shared incremental decision for every prompt build. A first round (no
   // recorded state) plans a full review; a later round plans a delta unless a forced-full
-  // rule fires. This step never auto-approves, so `skip` is disabled.
+  // rule fires. `skip` is chosen only when the caller opts in with `allowSkip`.
   const roundPlan: ReviewRoundPlan = (
     opts.planRound ??
     ((i) =>
@@ -128,7 +130,7 @@ export async function buildReviewPrompts(
         repoRoot: i.worktreePath,
         baseRef: i.baseRef,
         runGit: defaultGitRunner(),
-        allowSkip: false,
+        allowSkip: opts.allowSkip === true,
       }))
   )({ taskId: opts.taskId, worktreePath: opts.worktreePath, baseRef });
   console.log(`[ai-sdlc-progress] ${formatRoundLogLine(roundPlan)}`);

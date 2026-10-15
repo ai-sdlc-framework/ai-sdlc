@@ -17,6 +17,7 @@ import {
   checkReviewerKindCoverage,
   requiredReviewerKind,
 } from '../../attestation-core/review-scope-core.mjs';
+import type { ReviewRoundPlan } from '../incremental-review/review-rounds.js';
 import type { NextStepState } from './types.js';
 
 const DIFF = 'diff --git a/src/a.ts b/src/a.ts\n+const a = 1;\n';
@@ -327,18 +328,26 @@ describe('prepareReview', () => {
     expect(h.runner.calls.some((c) => c.args.includes('generate-nonce'))).toBe(false);
   });
 
+  const plan = (over: Partial<ReviewRoundPlan>): ReviewRoundPlan => ({
+    round: 2,
+    mode: 'full',
+    reason: 'first-round',
+    baseSha: null,
+    headSha: 'headsha',
+    deltaSize: 0,
+    deltaDiff: null,
+    contentHash: 'hash1',
+    headBlobHash: 'blob1',
+    prior: null,
+    deltaReviewers: [],
+    ...over,
+  });
+
   it('reuses the prior approval (no spawn, no nonce) when the content is unchanged', async () => {
-    script({
-      incremental: {
-        skip: true,
-        deltaOnly: false,
-        reason: 'unchanged',
-        lastReviewedSha: 'oldsha',
-        currentContentHash: 'hash1',
-        deltaSize: 0,
-      },
+    script();
+    const res = await prepareReview(h.ctx, state, 2, {
+      planRound: () => plan({ mode: 'skip', reason: 'unchanged', baseSha: 'oldsha' }),
     });
-    const res = await prepareReview(h.ctx, state, 2);
     expect(res.kind).toBe('nothing-to-spawn');
     if (res.kind !== 'nothing-to-spawn') return;
     expect(res.verdicts).toHaveLength(3);
@@ -347,26 +356,29 @@ describe('prepareReview', () => {
     expect(h.runner.calls.some((c) => c.args.includes('generate-nonce'))).toBe(false);
   });
 
-  it('gives reviewers the delta diff with the incremental preamble on delta-only', async () => {
-    h.runner.on(/diff oldsha\.\.\.HEAD$/, ok('diff --git a/x b/x\n+DELTA_ONLY_LINE\n'));
-    script({
-      incremental: {
-        skip: false,
-        deltaOnly: true,
-        reason: 'delta-only',
-        lastReviewedSha: 'oldsha',
-        currentContentHash: 'hash2',
-        deltaSize: 12,
-      },
+  it('gives a delta reviewer the delta diff and the later-round section, not the whole-PR wording', async () => {
+    script();
+    const res = await prepareReview(h.ctx, state, 2, {
+      planRound: () =>
+        plan({
+          mode: 'delta',
+          reason: 'delta-only',
+          baseSha: 'oldsha',
+          deltaSize: 12,
+          deltaDiff: 'diff --git a/x b/x\n+DELTA_ONLY_LINE\n',
+          deltaReviewers: ['code-reviewer', 'test-reviewer', 'security-reviewer'],
+          prior: { round: 1, reviewers: [], developerResponse: null },
+        }),
     });
-    const res = await prepareReview(h.ctx, state, 2);
     if (res.kind !== 'spawn') throw new Error('expected spawn');
     const text = readFileSync(res.review.spawned[0].promptFile, 'utf8');
-    expect(text).toContain('Incremental review (AISDLC-142)');
-    expect(text).toContain('`oldsha`');
+    expect(text).toContain('oldsha');
     expect(text).toContain('DELTA_ONLY_LINE');
     expect(text).not.toContain('const a = 1;');
+    expect(text).not.toMatch(/applies to the WHOLE PR/i);
     expect(res.review.incremental.deltaOnly).toBe(true);
+    expect(res.review.roundPlan).toMatchObject({ mode: 'delta', baseSha: 'oldsha' });
+    expect(res.review.roundPlan).not.toHaveProperty('deltaDiff');
   });
 
   it('aborts when the review diff is unavailable', async () => {

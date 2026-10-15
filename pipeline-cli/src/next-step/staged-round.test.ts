@@ -154,17 +154,22 @@ describe('prepareReview with reviewerSet staged', () => {
     state = makeState(h.root, { developer: null });
     h.ctx.env.ARTIFACTS_DIR = artifacts;
     mkdirSync(artifacts, { recursive: true });
-    scriptReviewPlumbing({
-      incremental: {
-        skip: true,
-        deltaOnly: false,
+    scriptReviewPlumbing();
+    const res = await prepareReview(h.ctx, state, 1, {
+      planRound: () => ({
+        round: 2,
+        mode: 'skip',
         reason: 'unchanged',
-        lastReviewedSha: 'abc123',
-        currentContentHash: 'h1',
+        baseSha: 'abc123',
+        headSha: 'headsha',
         deltaSize: 0,
-      },
+        deltaDiff: null,
+        contentHash: 'h1',
+        headBlobHash: 'b1',
+        prior: null,
+        deltaReviewers: [],
+      }),
     });
-    const res = await prepareReview(h.ctx, state, 1);
     expect(res.kind).toBe('nothing-to-spawn');
     expect(stagedCalls()).toEqual([]);
   });

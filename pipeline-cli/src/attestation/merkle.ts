@@ -166,6 +166,7 @@ export interface TranscriptLeaf {
    * `merkle-core.mjs`). Leaves without it verify unchanged.
    */
   stage?: StagedLeafStage;
+  /**
    * AISDLC-725: the commit range a DELTA review round covered
    * (`git diff baseSha headSha`). Present ONLY on delta rounds; a full round
    * omits it so its leaf hashes exactly as before this field existed (the

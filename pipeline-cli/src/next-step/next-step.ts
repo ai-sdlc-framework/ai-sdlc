@@ -25,6 +25,10 @@ import { patchFrontmatterStatus } from '../steps/04-flip-status.js';
 import { cleanupTask } from '../steps/13-cleanup.js';
 import { parseDeveloperReturn } from '../steps/06-parse-dev-return.js';
 import { formatFeedback } from '../steps/08-aggregate-verdicts.js';
+import {
+  recordDeveloperResponse,
+  recordRoundFromVerdicts,
+} from '../incremental-review/review-rounds.js';
 import { ccrRefusalMessage, detectCcr, parseExecuteArg } from './args.js';
 import { runGhIssue, type GhIssueDeps, defaultGhIssueDeps } from './gh-issue.js';
 import { initTask, writeRunFile, type InitFailure, type InitSuccess } from './init.js';
@@ -329,7 +333,44 @@ class Machine {
       );
     }
     state.developer = parsed.developer;
+    this.recordDeveloperResponse(state);
     return this.review(state);
+  }
+
+  /** AISDLC-725: record this round (any verdict) so the next round can be a delta round. */
+  private recordRound(state: NextStepState): void {
+    const plan = state.review?.roundPlan;
+    if (!plan || !state.verdict) return;
+    try {
+      recordRoundFromVerdicts(
+        state.worktreePath,
+        state.taskId,
+        { ...plan, deltaDiff: null },
+        state.verdict.verdicts.map((v) => ({
+          agentId: String(v.agentId),
+          approved: v.approved,
+          findings: v.findings,
+        })),
+      );
+    } catch {
+      // a recording gap only costs a full review next round
+    }
+  }
+
+  /** AISDLC-725: the developer's reply to the last round's findings, for the next reviewers. */
+  private recordDeveloperResponse(state: NextStepState): void {
+    const dev = state.developer;
+    if (!dev || !state.review?.roundPlan) return;
+    try {
+      recordDeveloperResponse(
+        state.worktreePath,
+        state.taskId,
+        state.review.round,
+        [dev.summary, typeof dev.notes === 'string' ? dev.notes : ''].filter(Boolean).join('\n\n'),
+      );
+    } catch {
+      // only costs the reply
+    }
   }
 
   /** Revert the task to its pre-dispatch status; the worktree stays for inspection. */
@@ -415,6 +456,7 @@ class Machine {
     delete state.reportRetries;
     for (const w of fin.warnings) ctx.logger.warn(w);
     state.verdict = fin.verdict;
+    this.recordRound(state);
     await updateSessionState(ctx, state.taskIdLower, '07c-leaves-emitted');
     if (checkCancelSignal(ctx, state.taskIdLower, state.taskId)) {
       return this.fail(

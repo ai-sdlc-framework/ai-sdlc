@@ -28,9 +28,9 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { now } from '../clock.js';
-import { loadReviewLedger, normalizeReviewerRole } from '../attestation/reviews-ledger.js';
+import { normalizeReviewerRole, reviewsLedgerPath } from '../attestation/reviews-ledger.js';
 import {
   collectChangedFileDeltaEntries,
   computeContentHashV3,
@@ -308,22 +308,54 @@ export function isSyntheticVerdict(r: RoundReviewerRecord): boolean {
 }
 
 /**
- * Per-role verdict the reviews ledger (written by emit-leaf, committed) records for a review
- * that ran at exactly `sha`. The last record per role wins.
+ * Per-role verdict the reviews ledger records for a review that ran at exactly `sha`.
+ *
+ * The ledger is read from COMMITTED git content (`git show <headRef>:<ledger>`), never from
+ * the worktree file: the worktree copy is writable by the agent under review, a committed
+ * record is not silently rewritable. A role maps to `true` only when EVERY record for it at
+ * `sha` is approved; any rejection at `sha` makes it `false`, so a role that rejected at the
+ * base commit always gets a full review (AISDLC-725, DEC-0219). An absent or unreadable
+ * ledger corroborates nothing.
  */
-function ledgerVerdictsAt(taskId: string, repoRoot: string, sha: string): Map<string, boolean> {
+function ledgerVerdictsAt(
+  taskId: string,
+  repoRoot: string,
+  sha: string,
+  runGit: RunGit,
+  headRef: string,
+): Map<string, boolean> {
   const out = new Map<string, boolean>();
-  try {
-    for (const rec of loadReviewLedger(taskId, repoRoot)) {
-      if (rec && rec.commitSha === sha && typeof rec.role === 'string') {
-        out.set(rec.role, rec.verdict === 'approved');
+  const rel = relative(repoRoot, reviewsLedgerPath(taskId, repoRoot)).split(sep).join('/');
+  const raw = tryGit(runGit, ['show', `${headRef}:${rel}`], repoRoot);
+  if (raw === null) return out;
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const rec = JSON.parse(line) as { commitSha?: unknown; role?: unknown; verdict?: unknown };
+      if (rec.commitSha === sha && typeof rec.role === 'string') {
+        out.set(rec.role, (out.get(rec.role) ?? true) && rec.verdict === 'approved');
       }
+    } catch {
+      // a malformed line corroborates nothing
     }
-  } catch {
-    // an unreadable ledger corroborates nothing
   }
   return out;
 }
+
+/** Review bookkeeping committed between rounds is not part of the code delta. */
+const BOOKKEEPING_PREFIXES = [
+  '.ai-sdlc/reviews/',
+  '.ai-sdlc/review-state/',
+  '.ai-sdlc/attestations/',
+  '.ai-sdlc/transcript-leaves/',
+  '.ai-sdlc/transcript-leaves.jsonl',
+];
+const RUNTIME_PATHSPEC_EXCLUDES = [
+  '.',
+  ...BOOKKEEPING_PREFIXES.map((p) => `:(exclude)${p.replace(/\/$/, '')}`),
+];
+const isBookkeeping = (path: string): boolean =>
+  BOOKKEEPING_PREFIXES.some((p) => path === p || path.startsWith(p));
 
 function tryGit(runGit: RunGit, args: string[], cwd: string): string | null {
   try {
@@ -399,7 +431,9 @@ export function planReviewRound(inputs: PlanReviewRoundInputs): ReviewRoundPlan 
   let entries: ChangedFileDeltaEntry[] | null = null;
   if (headSha !== '') {
     try {
-      entries = collectChangedFileDeltaEntries(baseRef, headRef, repoRoot, runGit);
+      entries = collectChangedFileDeltaEntries(baseRef, headRef, repoRoot, runGit).filter(
+        (e) => !isBookkeeping(e.path),
+      );
     } catch {
       entries = null;
     }
@@ -420,7 +454,7 @@ export function planReviewRound(inputs: PlanReviewRoundInputs): ReviewRoundPlan 
     if (!allowSkip) return fullPlan(withHashes, 'unchanged');
     // The local state is writable by the agent under review, so it never auto-approves alone:
     // the reviews ledger must show EVERY reviewer of the prior round approved this commit.
-    const ledgerAtAnchor = ledgerVerdictsAt(taskId, repoRoot, anchor.sha);
+    const ledgerAtAnchor = ledgerVerdictsAt(taskId, repoRoot, anchor.sha, runGit, headRef);
     const roles = anchor.reviewers
       ? anchor.reviewers.map((r) =>
           isSyntheticVerdict(r) || !r.approved ? null : normalizeReviewerRole(r.reviewer),
@@ -441,7 +475,17 @@ export function planReviewRound(inputs: PlanReviewRoundInputs): ReviewRoundPlan 
 
   const numstat = tryGit(
     runGit,
-    ['-c', 'core.quotepath=false', 'diff', '--numstat', '--no-renames', anchor.sha, headRef],
+    [
+      '-c',
+      'core.quotepath=false',
+      'diff',
+      '--numstat',
+      '--no-renames',
+      anchor.sha,
+      headRef,
+      '--',
+      ...RUNTIME_PATHSPEC_EXCLUDES,
+    ],
     repoRoot,
   );
   let deltaStats: DeltaStats | null = null;
@@ -468,7 +512,7 @@ export function planReviewRound(inputs: PlanReviewRoundInputs): ReviewRoundPlan 
   const fullDirs = new Set<string>();
   for (const p of reviewedPaths.split('\n')) {
     const path = p.trim();
-    if (!path) continue;
+    if (!path || isBookkeeping(path)) continue;
     const slash = path.indexOf('/');
     fullDirs.add(slash === -1 ? '' : path.slice(0, slash));
   }
@@ -506,6 +550,8 @@ export function planReviewRound(inputs: PlanReviewRoundInputs): ReviewRoundPlan 
       '--no-textconv',
       anchor.sha,
       headRef,
+      '--',
+      ...RUNTIME_PATHSPEC_EXCLUDES,
     ],
     repoRoot,
   );
@@ -514,15 +560,15 @@ export function planReviewRound(inputs: PlanReviewRoundInputs): ReviewRoundPlan 
   }
   // Delta is decided PER REVIEWER: only a reviewer with a parseable verdict in the previous
   // round and a ledger record of a review at the base commit reads the delta.
-  const ledgerAtBase = ledgerVerdictsAt(taskId, repoRoot, anchor.sha);
+  const ledgerAtBase = ledgerVerdictsAt(taskId, repoRoot, anchor.sha, runGit, headRef);
   const deltaReviewers = anchor.reviewers
     ? anchor.reviewers
         .filter((r) => {
           const role = normalizeReviewerRole(r.reviewer);
-          return !isSyntheticVerdict(r) && role !== null && ledgerAtBase.has(role);
+          return !isSyntheticVerdict(r) && role !== null && ledgerAtBase.get(role) === true;
         })
         .map((r) => r.reviewer)
-    : [...ledgerAtBase.keys()].map((role) => `${role}-reviewer`);
+    : [...ledgerAtBase.entries()].filter(([, ok]) => ok).map(([role]) => `${role}-reviewer`);
   if (deltaReviewers.length === 0) return fullPlan(withHashes, 'review-uncorroborated');
   return {
     ...withHashes,

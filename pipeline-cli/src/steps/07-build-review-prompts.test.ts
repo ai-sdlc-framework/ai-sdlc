@@ -1082,11 +1082,11 @@ describe('Step 7 — shared incremental round plan (AISDLC-725)', () => {
   const fakeFor = (): FakeRunner =>
     new FakeRunner()
       .on(
-        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+        /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
         ok('FULL_DIFF_MARKER\n'),
       )
       .on(
-        /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+        /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
         ok('a.ts\0'),
       );
 
@@ -1138,7 +1138,7 @@ describe('Step 7 — shared incremental round plan (AISDLC-725)', () => {
         };
       },
     });
-    expect(seen).toEqual([{ taskId: 'AISDLC-1', baseRef: 'origin/main' }]);
+    expect(seen).toEqual([{ taskId: 'AISDLC-1', baseRef: 'refs/remotes/origin/main' }]);
     expect(r.roundPlan?.round).toBe(1);
     expect(r.prompts[0].prompt).toContain('FULL_DIFF_MARKER');
     expect(r.prompts[0].prompt).not.toContain('Incremental review');
@@ -1166,8 +1166,14 @@ describe('Step 7 — shared incremental round plan (AISDLC-725)', () => {
       workDir: tmp,
       runner: fakeFor().toRunner(),
       codexAvailable: false,
+      reviewers: ['code-reviewer', 'test-reviewer', 'security-reviewer'],
       planRound: () => deltaPlan,
     });
+    console.log(
+      'REVIEWERS',
+      r.prompts.map((p) => p.reviewer),
+      r.reviewerSet,
+    );
     const code = r.prompts.find((p) => p.reviewer === 'code-reviewer')!.prompt;
     const test = r.prompts.find((p) => p.reviewer === 'test-reviewer')!.prompt;
     expect(code).toContain('DELTA_MARKER');
