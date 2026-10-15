@@ -460,6 +460,17 @@ describe('deriveEnvelopeReviewScope (signer record)', () => {
     });
   });
 
+  it('lists each applied reviewer once in first-seen order (AISDLC-916)', () => {
+    const { dir, head } = makeRepo({ 'src/a.test.ts': 'x' });
+    const rec = deriveEnvelopeReviewScope(dir, head, [
+      'correctness-reviewer',
+      'security-reviewer',
+      'correctness-reviewer',
+      'security-reviewer',
+    ]);
+    expect(rec?.appliedReviewers).toEqual(['correctness-reviewer', 'security-reviewer']);
+  });
+
   it('returns undefined off-repo', () => {
     const dir = mkdtempSync(join(tmpdir(), 'aisdlc-723-nogit-'));
     dirs.push(dir);

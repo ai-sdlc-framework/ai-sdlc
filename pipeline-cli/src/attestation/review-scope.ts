@@ -105,6 +105,6 @@ export function deriveEnvelopeReviewScope(
     requiredSet: kind,
     reason,
     triggeringPaths: triggeringPaths.slice(0, 20),
-    appliedReviewers: [...reviewerNames],
+    appliedReviewers: [...new Set(reviewerNames)],
   };
 }
