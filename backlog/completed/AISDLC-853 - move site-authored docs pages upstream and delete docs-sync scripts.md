@@ -1,7 +1,7 @@
 ---
 id: AISDLC-853
 title: Move the 15 site-authored ai-sdlc.io pages into docs/ and spec/, add description frontmatter, delete the dead docs-sync scripts
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels: [docs, docs-platform]
