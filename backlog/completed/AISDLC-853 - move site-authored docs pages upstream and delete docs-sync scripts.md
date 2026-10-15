@@ -6,7 +6,7 @@ assignee: []
 created_date: '2026-10-13'
 labels: [docs, docs-platform]
 dependencies: []
-references: [docs/concepts/zero-trust-untrusted-pr-verification.md, docs/concepts/untrusted-contributor-verification.md, docs/whitepapers/proof-of-execution.md, scripts/docs-sync.mjs, scripts/check-docs-sync.mjs, scripts/docs-sync.test.mjs, package.json, docs/README.md]
+references: [docs/concepts/zero-trust-untrusted-pr-verification.md, docs/concepts/untrusted-contributor-verification.md, docs/whitepapers/proof-of-execution.md, package.json, docs/README.md]
 priority: high
 dispatchable: true
 ---
