@@ -218,6 +218,8 @@ export interface DispatchVerdict {
    * reconcile pass — absent from Worker-written verdicts.
    */
   prOpenedAt?: string;
+  /** AISDLC-894 - ISO-8601 time the dispatch tick landed (merged or armed) the task's PR. */
+  landed?: string;
 }
 
 /**

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-894
 title: 'feat(hierarchy): dispatch tick lands every eligible own-author PR through merge-if-eligible, squashing at once when GitHub auto-merge is unavailable'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [hierarchy, governance, velocity, adopters]

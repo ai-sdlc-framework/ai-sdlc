@@ -329,7 +329,8 @@
               "file-subid-followups",
               "answer-operational-decisions",
               "clear-executor-context",
-              "mark-ready-after-codeql"
+              "mark-ready-after-codeql",
+              "land-eligible-prs"
             ]
           },
           "uniqueItems": true,

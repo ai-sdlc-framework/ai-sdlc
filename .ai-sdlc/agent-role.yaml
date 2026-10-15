@@ -36,6 +36,7 @@ spec:
       - answer-operational-decisions
       - clear-executor-context
       - mark-ready-after-codeql
+      - land-eligible-prs
   constraints:
     maxFilesPerChange: 15
     requireTests: true
