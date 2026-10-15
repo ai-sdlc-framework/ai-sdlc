@@ -169,12 +169,15 @@ jobs:
               - 'orchestrator/src/cli/commands/init-templates.ts'
               - 'scripts/first-run-smoke*'
 
-  # ── Lint & Format (always required) ─────────────────────────────────────
-  # Runs on every PR archetype. Cheap (~1 min) and catches the long tail of
-  # syntactic regressions that even docs-only PRs can introduce (broken
-  # markdown frontmatter, prettier drift in JSON examples, etc.).
+  # ── Lint & Format (code/mixed only) ─────────────────────────────────────
+  # AISDLC-879: skipped on docs-only PRs (`lint` is in the rollup's
+  # allowed-skips). Docs-only changesets (spec/rfcs, docs, backlog, decisions
+  # data, root *.md) carry no source that eslint or the code formatters cover,
+  # and the docs lane is the hot path for filing PRs.
   lint:
     name: Lint & Format
+    needs: detect
+    if: needs.detect.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -719,6 +722,37 @@ jobs:
             echo "no-changes=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Find task ids pending in other open filing PRs
+        id: pending
+        if: steps.changed.outputs.no-changes != 'true'
+        # AISDLC-879: a task referencing an id whose file exists only in another
+        # open `ai-sdlc/file-*` PR (or landed on main after this run's merge
+        # ref was built) is `pending`, not a failure. Map: id -> label.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          : > /tmp/dor-pending.tsv
+          git fetch --quiet origin main
+          git ls-tree --name-only origin/main backlog/tasks/ | while IFS= read -r p; do
+            id=$(basename "$p" | sed -E 's/^([A-Za-z]+-[0-9]+(\.[0-9]+)?) .*/\1/' | tr a-z A-Z)
+            printf '%s\t%s\n' "$id" "already on main" >> /tmp/dor-pending.tsv
+          done
+          for n in $(gh pr list --repo "$REPO" --state open --limit 100 \
+              --json number,headRefName --jq '.[] | select(.headRefName | startswith("ai-sdlc/file-")) | .number'); do
+            [ "$n" = "$PR_NUMBER" ] && continue
+            gh api --paginate "repos/$REPO/pulls/$n/files" --jq '.[] | select(.status != "removed") | .filename' \
+              | grep -E '^backlog/tasks/[^/]+\.md$' | while IFS= read -r p; do
+                id=$(basename "$p" | sed -E 's/^([A-Za-z]+-[0-9]+(\.[0-9]+)?) .*/\1/' | tr a-z A-Z)
+                printf '%s\t%s\n' "$id" "open filing PR #$n" >> /tmp/dor-pending.tsv
+              done || true
+          done
+          jq -Rn '[inputs | split("\t") | select(length == 2) | {(.[0]): .[1]}] | add // {}' \
+            < /tmp/dor-pending.tsv > /tmp/dor-pending.json
+          echo "pending refs: $(cat /tmp/dor-pending.json)"
+
       - name: Evaluate each changed task
         id: dor_eval
         if: steps.changed.outputs.no-changes != 'true'
@@ -732,6 +766,8 @@ jobs:
           ARTIFACTS_DIR: /tmp/dor/artifacts
         run: |
           mkdir -p /tmp/dor "$ARTIFACTS_DIR/_dor"
+          AI_SDLC_DOR_PENDING_REFS=$(cat /tmp/dor-pending.json)
+          export AI_SDLC_DOR_PENDING_REFS
           : > /tmp/dor/results.jsonl
           while IFS= read -r f; do
             [ -z "$f" ] && continue
@@ -1093,7 +1129,7 @@ jobs:
           #
           # archetype-conditional jobs that legitimately skip must be listed
           # in allowed-skips so that the aggregator doesn't fail on their skip:
-          #   - build-test / integration: skip on docs-only PRs
+          #   - lint / build-test / integration: skip on docs-only PRs
           #   - attestation-gate: skips on docs-only PRs (paths-ignore)
           #   - independence-policy-gate: skips on docs-only PRs (AISDLC-591)
           #   - dependency-review-gate: skips on non-dep PRs (deps==false)
@@ -1106,6 +1142,7 @@ jobs:
           # introduced by PR #794 that blocked all non-dep PRs.
           jobs: ${{ toJSON(needs) }}
           allowed-skips: >-
+            lint,
             build-test,
             integration,
             first-run-smoke,

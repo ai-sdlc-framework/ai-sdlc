@@ -139,6 +139,12 @@ export interface GateEvaluation {
   finding?: string;
   /** Single clarifying question for the comment-loop ingress. */
   clarificationQuestion?: string;
+  /**
+   * AISDLC-879: references that did not resolve on disk but exist in another
+   * open filing PR (or on main since the run started). The gate passes; the
+   * PR comment names each one so the dependency is visible.
+   */
+  pending?: Array<{ ref: string; where: string }>;
 }
 
 /**

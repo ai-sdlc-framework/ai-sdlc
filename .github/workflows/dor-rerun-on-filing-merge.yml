@@ -1,0 +1,45 @@
+name: DoR re-run on filing PR landing
+
+# AISDLC-879: a task PR whose DoR is `pending` on a reference in another open
+# `ai-sdlc/file-*` PR must re-evaluate when that PR lands, without a push.
+# Fires on a push to main that touches backlog/tasks (a PR trigger would be a
+# new per-PR gate). This workflow re-runs the latest `ai-sdlc-gate.yml` run of every other open
+# `ai-sdlc/file-*` PR. The gate's pending step also treats ids already on main
+# as pending-resolved, so the re-run passes even though its merge ref is old.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backlog/tasks/**'
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: read
+
+jobs:
+  rerun-dependents:
+    name: Re-run DoR on dependent filing PRs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Re-run the gate on open filing PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          LANDED: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          gh pr list --repo "$REPO" --state open --limit 100 \
+            --json number,headRefName,headRefOid \
+            --jq '.[] | select(.headRefName | startswith("ai-sdlc/file-")) | [.number, .headRefName, .headRefOid] | @tsv' \
+          | while IFS=$'\t' read -r n branch sha; do
+              run_id=$(gh run list --repo "$REPO" --workflow ai-sdlc-gate.yml --branch "$branch" \
+                --json databaseId,headSha --jq "[.[] | select(.headSha == \"$sha\")][0].databaseId // empty")
+              if [ -z "$run_id" ]; then
+                echo "::notice::PR #$n has no gate run for $sha; nothing to re-run"
+                continue
+              fi
+              echo "Re-running gate run $run_id for PR #$n (task files landed on main at $LANDED)"
+              gh run rerun "$run_id" --repo "$REPO" || echo "::warning::could not re-run $run_id for PR #$n"
+            done
