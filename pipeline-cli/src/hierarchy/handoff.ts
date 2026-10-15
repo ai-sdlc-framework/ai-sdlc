@@ -20,6 +20,7 @@ import path from 'node:path';
 
 import { now as clock } from '../clock.js';
 import { listBoard, readInflightManifest, type BoardEntry } from '../dispatch/board.js';
+import { listRulings, type BoardRuling } from '../dispatch/ruling.js';
 import { listDecisions } from '../decisions/projection.js';
 import { listInflight } from './inflight.js';
 import { readRoster } from './roster.js';
@@ -42,6 +43,8 @@ export interface HandoffState {
   board: BoardEntry[];
   inflight: { taskId: string; workerId?: string }[];
   openDecisions: { id: string; lifecycle: string; summary: string }[];
+  /** Planner rulings in force on the board (AISDLC-903). */
+  rulings: BoardRuling[];
 }
 
 /** Inputs of {@link writeHandoff} / {@link readHandoff}. */
@@ -106,7 +109,7 @@ export function collectHandoffState(boardDir: string, now: () => Date = clock): 
     const workerId = i.workerId ?? readInflightManifest(boardDir, i.taskId)?.workerId;
     return { taskId: i.taskId, ...(workerId ? { workerId } : {}) };
   });
-  return { roster, board, inflight, openDecisions };
+  return { roster, board, inflight, openDecisions, rulings: listRulings(boardDir) };
 }
 
 /** Hash of the state; identical state always gives the identical hash. */
@@ -177,6 +180,18 @@ export function renderHandoff(
     ...(state.openDecisions.length
       ? state.openDecisions.map((d) => `- ${d.id} [${d.lifecycle}] ${d.summary}`)
       : ['- (none)']),
+    ...(role === 'operator-dispatch'
+      ? [
+          '',
+          '## Rulings in force',
+          ...(state.rulings.length
+            ? state.rulings.map(
+                (r) =>
+                  `- ${r.taskId}: ${r.text} (until: ${r.until ?? '(none)'}; by: ${r.by ?? '(unknown)'}; at: ${r.at})`,
+              )
+            : ['- (none)']),
+        ]
+      : []),
     HANDOFF_END,
   ];
   return lines.join('\n') + '\n';

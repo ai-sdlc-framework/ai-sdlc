@@ -51,6 +51,8 @@ printf '%s' "$PIPELINE_CLI_BIN" > "$BOARD_DIR/.cli-bin"
 
 ## Step 2 - Run one wake-up
 
+First, drain the inbox: read every pending message; apply each ruling it carries with `cli-dispatch rule` before the tick (`cli-dispatch.mjs rule <task-id> --text "<ruling>" [--until <task-id>] --board-dir "$BOARD_DIR"`), so it survives your next clear.
+
 ```bash
 BOARD_DIR="${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}"
 PIPELINE_CLI_BIN=$(cat "$BOARD_DIR/.cli-bin")
@@ -75,7 +77,7 @@ a name. The JSON holds:
 
 ## PRs
 
-Every tick, after `tick`, run `cli-dispatch.mjs reconcile --board-dir "$BOARD_DIR"`: the coded reconciler owns every open PR (docs/operations/cli-hierarchy.md, "PR reconciler"); take no PR action by hand. Only an action named `route-to-planner` in its output goes to the planner.
+Every tick, after `tick`, run `cli-dispatch.mjs reconcile --board-dir "$BOARD_DIR"`: the coded reconciler owns every open PR (docs/operations/cli-hierarchy.md, "PR reconciler"); take no PR action by hand. Only an action named `route-to-planner` in its output goes to the planner; `held` (a ruling in force) and `ready-to-requeue` (the ruling's `until` task merged) do not.
 
 Board commands (`cli-dispatch.mjs`, always with `--board-dir`): `peek` lists the queue; `claim` takes a task; `reap` returns stale claims; `release` frees a claim; `requeue` puts a failed task back with a prose note; `enqueue` adds a task; `write-manifest` rewrites a manifest (use the PR head ref); `write-resume-signal` leaves a resume note on a claim; `complete` records a finished task; `remove-verdict` clears a handled verdict.
 
@@ -83,7 +85,7 @@ Cadence: while the board has queued, inflight or failed-eligible work, or any ta
 
 ## Step 3 - Tell the planner
 
-`SendMessage` `identity.planner` at once per escalation and blocking item (no planner: print them); batch the other `reports` into one self-contained digest in `$BOARD_DIR/planner-digest.md`, sent hourly (`stat` the file), then emptied.
+`SendMessage` `identity.planner` at once per escalation and blocking item (no planner: print them); batch the other `reports` into one self-contained digest in `$BOARD_DIR/planner-digest.md`, sent hourly (`stat` the file), then emptied; the digest never repeats an item that carries a ruling in force (the handoff's "Rulings in force" section lists them).
 Never send these, or any message, to an executor.
 
 ## Step 4 - Decisions

@@ -89,8 +89,19 @@ export interface DispatchManifest {
    * task's existing worktree and branch instead of creating new ones.
    */
   resume?: ResumeFeedback;
+  /** A planner ruling that holds the task; survives dispatch clears (AISDLC-903). */
+  ruling?: TaskRuling;
   /** Forced releases of this task, with the reason given (AISDLC-800). */
   releaseHistory?: ReleaseHistoryEntry[];
+}
+
+/** A planner ruling recorded on a task's manifest. */
+export interface TaskRuling {
+  text: string;
+  /** Task id whose merged PR lifts the hold. */
+  until?: string;
+  by?: string;
+  at: string;
 }
 
 /** One forced release recorded on the manifest. */

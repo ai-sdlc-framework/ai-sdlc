@@ -199,6 +199,7 @@ import { computePatchId } from '../attestation/patch-id.js';
 import { formatSessionLine, listSessions, recordAgentSession } from '../dispatch/sessions.js';
 import { assertClaimHolder, completeTask, splitIdList } from '../dispatch/complete.js';
 import { guardedRelease } from '../dispatch/release-guard.js';
+import { clearRuling, setRuling } from '../dispatch/ruling.js';
 import { classifyAndRecord, type PrFacts } from '../hierarchy/pr-state.js';
 import {
   commandExecutor,
@@ -499,6 +500,43 @@ export async function runDispatchCli(
       }
       out(reconcile(facts, { boardDir, execute }));
       return 0;
+    }
+
+    case 'rule': {
+      // AISDLC-903: keep a planner ruling on the task so it outlives the dispatch session's clears.
+      const taskId = argv[1] && !argv[1].startsWith('--') ? argv[1] : (flags['task-id'] ?? '');
+      if (!TASK_ID_RE.test(taskId)) {
+        process.stderr.write(`cli-dispatch rule: '${taskId}' is not a valid task id\n`);
+        return 2;
+      }
+      try {
+        if (flags['clear'] !== undefined) {
+          out({ ok: true, taskId, cleared: clearRuling(boardDir, taskId) });
+          return 0;
+        }
+        const text = flags['text'];
+        if (!text || text === 'true') {
+          process.stderr.write('cli-dispatch rule: --text <ruling> is required (or --clear)\n');
+          return 2;
+        }
+        const until = flags['until'];
+        const by = flags['by'];
+        out({
+          ok: true,
+          taskId,
+          ruling: setRuling(boardDir, taskId, {
+            text,
+            ...(until === undefined ? {} : { until }),
+            ...(by === undefined ? {} : { by }),
+          }),
+        });
+        return 0;
+      } catch (err) {
+        process.stderr.write(
+          `cli-dispatch rule: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+        return 1;
+      }
     }
 
     case 'peek': {
@@ -1556,6 +1594,9 @@ Subcommands:
   unblock --task-id <id>
   classify-prs [--input <facts.json>]   (without --input, gathers the facts itself)
   pr-facts [--out <path>]   (writes .pr-facts.json: mergeStateStatus and failing line filled in)
+  rule <task-id> --text "<ruling>" [--until <task-id>] [--by <name>] | rule <task-id> --clear
+      Keep a planner ruling on a queued, failed or done task; the reconciler then reports a
+      red or no-match PR of that task as held (AISDLC-903). Refused while inflight.
   reconcile [--pr <n>] [--facts <facts.json>] [--watch]
       Classify each open task PR (array of REST facts) into one state and action;
       writes one DispatchPrClassified event each (AISDLC-823).

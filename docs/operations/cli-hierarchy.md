@@ -783,6 +783,18 @@ the GraphQL vocabulary (REST `mergeable_state` is mapped when the list omits it)
 failed `ai-sdlc/pr-ready`, the first failing line of the job log as `failingLine`. Nobody
 assembles REST payloads by hand.
 
+## Planner rulings (`cli-dispatch rule`)
+
+A ruling the planner sends by message would die with the dispatch session's next clear, so the
+session records it: `cli-dispatch rule <task-id> --text "<ruling>" [--until <task-id>] [--by <name>]`
+writes a `ruling` object (`text`, `until`, `by`, `at`) onto the task's manifest in `queue/`,
+`failed/` or `done/` and refuses on `inflight/`; `cli-dispatch rule <task-id> --clear` removes it.
+The reconciler then classifies a red or no-match PR of that task as `held` with the ruling text,
+not `route-to-planner` or `reenter`. When `until` is set and that task's PR has merged, the next
+pass clears the ruling and reports `ready-to-requeue`. `handoff write --role operator-dispatch`
+lists every ruling under "Rulings in force". Dispatch drains its inbox (and applies each ruling)
+before the tick, and its digest never repeats an item that carries a ruling.
+
 ## Restarting after a plugin upgrade
 
 Sessions load the plugin once, when they start. A new plugin version (commands, hooks,
