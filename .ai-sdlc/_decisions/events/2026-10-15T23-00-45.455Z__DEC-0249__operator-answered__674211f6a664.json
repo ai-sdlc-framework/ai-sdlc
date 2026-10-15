@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-15T23:00:45.455Z","decisionId":"DEC-0249","chosenOptionId":"full","rationale":"Duplicate of DEC-0250 (same D16 record double-opened 40 s apart by the planner); the operator chose full on DEC-0250, this record mirrors it and carries no separate authority."}
