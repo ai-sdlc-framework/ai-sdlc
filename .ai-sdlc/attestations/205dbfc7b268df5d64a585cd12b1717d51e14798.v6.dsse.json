@@ -2,7 +2,7 @@
   "schemaVersion": "v6",
   "subject": {
     "digest": {
-      "sha1": "ac84f40b6fa028afdc3719df758460f7715fc4e5"
+      "sha1": "19ce2ddc52cb2aadfff5b5047576597ccbefa6d6"
     }
   },
   "transcriptLeaves": [
@@ -65,6 +65,21 @@
       "verdictClass": "independent",
       "harnessTranscriptHash": "52de6c1397a5dee2d94cf1eba7477a7fac0f47b9fd32fec9b78fd0713282a52c",
       "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 8,
+      "reviewerName": "correctness-reviewer",
+      "transcriptHash": "ec74e1f9834fa44d1893f8eb98151e3ed20c8d2e97b5e8d9680dd997ef18b0c8",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 9,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "9209f2d19076974da00b69da7aa0b615ad368027ce0642b4954a6f89873095fe",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "9209f2d19076974da00b69da7aa0b615ad368027ce0642b4954a6f89873095fe",
+      "independenceTier": "attested"
     }
   ],
   "merkleProofs": [
@@ -73,7 +88,8 @@
       "proof": [
         "51eb17926641c164e6de8d150a034e1b57e8a3db73cc0ff1f4380ff36a4cce5f",
         "363e5952343b96508e8068fef3920940750bc0ebd94a5be575b63c3acecf530d",
-        "f8eb19b29c18335ed6bc3f7fdb5c63da1ffa39f3ddcdf141bcbf238713b435ec"
+        "f8eb19b29c18335ed6bc3f7fdb5c63da1ffa39f3ddcdf141bcbf238713b435ec",
+        "0c60f59e43f17469860a09efe972f13a2074df69683bea2c933b1b0bfcb1d2d9"
       ]
     },
     {
@@ -81,7 +97,8 @@
       "proof": [
         "a4953282873a84bf4798f16eb9b766318ddec1c3143058b9b8bdff9867c2a306",
         "363e5952343b96508e8068fef3920940750bc0ebd94a5be575b63c3acecf530d",
-        "f8eb19b29c18335ed6bc3f7fdb5c63da1ffa39f3ddcdf141bcbf238713b435ec"
+        "f8eb19b29c18335ed6bc3f7fdb5c63da1ffa39f3ddcdf141bcbf238713b435ec",
+        "0c60f59e43f17469860a09efe972f13a2074df69683bea2c933b1b0bfcb1d2d9"
       ]
     },
     {
@@ -89,7 +106,8 @@
       "proof": [
         "82976229e8a7ce75cb0241fde45704a19262801aef6dc3c89d372feef67e5ff5",
         "37d19056eed23c25e1622ba96b15bbf8d97ace49994934edf962e275c2f80bc6",
-        "f8eb19b29c18335ed6bc3f7fdb5c63da1ffa39f3ddcdf141bcbf238713b435ec"
+        "f8eb19b29c18335ed6bc3f7fdb5c63da1ffa39f3ddcdf141bcbf238713b435ec",
+        "0c60f59e43f17469860a09efe972f13a2074df69683bea2c933b1b0bfcb1d2d9"
       ]
     },
     {
@@ -97,7 +115,8 @@
       "proof": [
         "5d61d9408d1e1ea1b16e6323e307e1409d373fec7d723babd6f18eee779c9de9",
         "37d19056eed23c25e1622ba96b15bbf8d97ace49994934edf962e275c2f80bc6",
-        "f8eb19b29c18335ed6bc3f7fdb5c63da1ffa39f3ddcdf141bcbf238713b435ec"
+        "f8eb19b29c18335ed6bc3f7fdb5c63da1ffa39f3ddcdf141bcbf238713b435ec",
+        "0c60f59e43f17469860a09efe972f13a2074df69683bea2c933b1b0bfcb1d2d9"
       ]
     },
     {
@@ -105,7 +124,8 @@
       "proof": [
         "b837b426d24c01dc7102ccde8e9b06dd3b7d997b23af6fd7db296ec0133d2c6c",
         "8dd70ddb06cba2242e28737791f8da5928b1ad94f6561d7b0ea37e88fe3a100d",
-        "c0c27605bdd07a1f6baaf79267cd0980856c01e1d2c9a17870530ec60ded6e17"
+        "c0c27605bdd07a1f6baaf79267cd0980856c01e1d2c9a17870530ec60ded6e17",
+        "0c60f59e43f17469860a09efe972f13a2074df69683bea2c933b1b0bfcb1d2d9"
       ]
     },
     {
@@ -113,7 +133,8 @@
       "proof": [
         "8cbe7935444a137f603c947cd81671f6fecd2db753ab83c1a09e318727a0a11d",
         "8dd70ddb06cba2242e28737791f8da5928b1ad94f6561d7b0ea37e88fe3a100d",
-        "c0c27605bdd07a1f6baaf79267cd0980856c01e1d2c9a17870530ec60ded6e17"
+        "c0c27605bdd07a1f6baaf79267cd0980856c01e1d2c9a17870530ec60ded6e17",
+        "0c60f59e43f17469860a09efe972f13a2074df69683bea2c933b1b0bfcb1d2d9"
       ]
     },
     {
@@ -121,7 +142,8 @@
       "proof": [
         "50df2fafd23223e360e9a1dedc4415b265d5329a2e86fbec5a28320750bcd6c8",
         "3b11c99df0e19d0412574f64bd173b02be66bb88e77eb10123c08f4a44ef1339",
-        "c0c27605bdd07a1f6baaf79267cd0980856c01e1d2c9a17870530ec60ded6e17"
+        "c0c27605bdd07a1f6baaf79267cd0980856c01e1d2c9a17870530ec60ded6e17",
+        "0c60f59e43f17469860a09efe972f13a2074df69683bea2c933b1b0bfcb1d2d9"
       ]
     },
     {
@@ -129,15 +151,34 @@
       "proof": [
         "60f17d7a08796d9e178510b9d1cd3a2e70b8a54faad504c8e4343273f5b4ad39",
         "3b11c99df0e19d0412574f64bd173b02be66bb88e77eb10123c08f4a44ef1339",
-        "c0c27605bdd07a1f6baaf79267cd0980856c01e1d2c9a17870530ec60ded6e17"
+        "c0c27605bdd07a1f6baaf79267cd0980856c01e1d2c9a17870530ec60ded6e17",
+        "0c60f59e43f17469860a09efe972f13a2074df69683bea2c933b1b0bfcb1d2d9"
+      ]
+    },
+    {
+      "leafIndex": 8,
+      "proof": [
+        "f1f28b63cb9f70aa592bc20cfbf4379db51cbd4e63aed75ae52ab665348c12da",
+        "b3d16f1703798a6ad7e7649e12a7b225367c9eb3bce60c74b8d2cf5b39e9531d",
+        "9448fbf588de9db1b46ba9faf097e09067e0e7f568eb41671a4db136cc01401e",
+        "d23bac0da690164ef823f2f221ef8f65da77a92b39459e25f814aed7cd93375a"
+      ]
+    },
+    {
+      "leafIndex": 9,
+      "proof": [
+        "f388c6945c0823f16e7a8d7be02e8f41c0a7d48e63ff34281f20eecc91a29fa3",
+        "b3d16f1703798a6ad7e7649e12a7b225367c9eb3bce60c74b8d2cf5b39e9531d",
+        "9448fbf588de9db1b46ba9faf097e09067e0e7f568eb41671a4db136cc01401e",
+        "d23bac0da690164ef823f2f221ef8f65da77a92b39459e25f814aed7cd93375a"
       ]
     }
   ],
-  "rootHash": "d23bac0da690164ef823f2f221ef8f65da77a92b39459e25f814aed7cd93375a",
-  "rootSignature": "5jWJqbjkIKYBf/KPI3t2I/5sMMCkzSw9B1HzaCBy6F3dEmsM4Epxnk2KaCbBP/38/74u1ETldlBK9GrV7/hoCQ==",
-  "nonce": "1eb2a2237e80880e5dcf02dbbc38a24964c8c33843d7960c3cba133a7163f367",
-  "leafCount": 8,
-  "signedAt": "2026-10-15T18:47:54.780Z",
+  "rootHash": "86f12524c06f8824bc7b6382d4e61e58d7e5eadb3623d73b16755e5e56c0948a",
+  "rootSignature": "scjZ6sCLA6uKXe33SFEN1yBkAcfwTSZKe1hhPfhy9Nvv9hUO7y7o0hCIrOvHIm2LVM30HK3JXFbPDkL48R9iCg==",
+  "nonce": "90e0470809c34aeef8b5624267943a14754056e1647207113bd734a64222a64e",
+  "leafCount": 10,
+  "signedAt": "2026-10-15T18:58:42.667Z",
   "signerIdentity": "dominique@local:doms-macbook",
   "reviewScope": {
     "classification": "test-only",
@@ -146,6 +187,8 @@
     "reason": "every path is a test, fixture or snapshot",
     "triggeringPaths": [],
     "appliedReviewers": [
+      "correctness-reviewer",
+      "security-reviewer",
       "correctness-reviewer",
       "security-reviewer",
       "correctness-reviewer",
