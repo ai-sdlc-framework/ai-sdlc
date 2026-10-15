@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-15T22:46:21.620Z","decisionId":"DEC-0250","chosenOptionId":"full","rationale":"Operator chose full on 2026-10-15 via AskUserQuestion (planner session): velocity and token budget; CodeQL still runs on main within minutes and weekly.","by":"operator"}
