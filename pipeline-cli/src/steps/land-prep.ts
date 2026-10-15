@@ -64,12 +64,16 @@ const fail = (reason: string, extra: Partial<LandPrepResult> = {}): LandPrepResu
 });
 
 /** Subject commit sha of a DSSE envelope, or null when unreadable. */
-function envelopeSubjectSha(file: string): string | null {
+export function envelopeSubjectSha(file: string): string | null {
+  type Subject = Array<{ digest?: { sha1?: string } }>;
   try {
-    const env = JSON.parse(readFileSync(file, 'utf8')) as { payload?: string };
+    const env = JSON.parse(readFileSync(file, 'utf8')) as { payload?: string; subject?: Subject };
+    // v6 envelopes carry the subject at the top level; v5 wraps it in a DSSE payload.
+    const top = env.subject?.[0]?.digest?.sha1;
+    if (top) return top;
     if (!env.payload) return null;
     const stmt = JSON.parse(Buffer.from(env.payload, 'base64').toString('utf8')) as {
-      subject?: Array<{ digest?: { sha1?: string } }>;
+      subject?: Subject;
     };
     return stmt.subject?.[0]?.digest?.sha1 ?? null;
   } catch {
