@@ -30,6 +30,7 @@
  *   - backlog/completed/**
  *   - .ai-sdlc/attestations/<sha>.dsse.json (chore-commit envelope files)
  *   - .ai-sdlc/_decisions/** (append-only operator governance data; DEC-0010 follow-up)
+ *   - .ai-sdlc/dispatch/briefs/**, .claude/memory/** (AISDLC-878)
  *   - .github/dependabot.yml (exact file; non-executable config; AISDLC-534)
  *   - .github/*.md (directly under .github only; NOT subdirectories, NOT workflows/**, NOT CODEOWNERS)
  *   - *.md  (root-level only — single * does NOT match /)
@@ -44,14 +45,9 @@
  *   isDocsOnly(['docs/foo.md', 'spec/rfcs/RFC-0001.md']); // → true
  */
 
-/**
- * Regex that matches all paths considered "docs-only".
- * Keep this in sync with `paths-ignore` in:
- *   - .github/workflows/verify-attestation.yml
- *   - .github/workflows/ai-sdlc-review.yml
- */
-export const DOCS_ONLY_PATTERN =
-  /^(spec\/rfcs\/|docs\/|backlog\/tasks\/|backlog\/completed\/|\.ai-sdlc\/attestations\/[^/]+\.dsse\.json$|\.ai-sdlc\/_decisions\/|\.github\/dependabot\.yml$|\.github\/[^/]+\.md$|[^/]+\.md$)/;
+// The single definition lives in the shipped attestation-core directory (AISDLC-878).
+import { DOCS_ONLY_PATTERN } from '../pipeline-cli/attestation-core/docs-only-paths.mjs';
+export { DOCS_ONLY_PATTERN };
 
 /**
  * Returns true iff the file list is non-empty and every file matches the

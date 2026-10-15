@@ -44,6 +44,8 @@ test('AISDLC-740: boundary script and trusted-context scripts cover themselves',
   for (const p of [
     'scripts/check-governance-boundary.mjs',
     'scripts/is-docs-only-changeset.mjs',
+    'pipeline-cli/attestation-core/docs-only-paths.mjs',
+    'pipeline-cli/attestation-core/review-scope-core.mjs',
     'scripts/check-pr-patch-coverage.mjs',
     'scripts/post-attestation-review.mjs',
   ])

@@ -44,6 +44,7 @@
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
+import { DOCS_ONLY_PATTERN } from '../../attestation-core/docs-only-paths.mjs';
 import { now } from '../clock.js';
 import type { Runner } from '../runtime/exec.js';
 
@@ -381,7 +382,7 @@ export function resolveGovernanceFromYaml(yamlText: string): {
  * (external GitHub issue / contributor-authored work) and any unrecognised
  * value are untrusted — fail closed.
  */
-export type SourceKind = 'backlog' | 'gh-issue' | 'release' | 'decisions-sync';
+export type SourceKind = 'backlog' | 'gh-issue' | 'release' | 'decisions-sync' | 'docs';
 
 /** AISDLC-895: the dedicated Decision Catalog sync branch (mirrors remote-persist.ts). */
 export const DECISIONS_SYNC_HEAD = 'ai-sdlc/decisions-sync';
@@ -405,8 +406,29 @@ export function decisionsSyncPathRefusal(files: ChangedFile[]): string | null {
     : `decisions-sync PR changes paths outside ${DECISIONS_EVENTS_PREFIX}**: ${bad.join(', ')}`;
 }
 
+/** AISDLC-878: head-branch prefix of every `cli-file` filing PR (the docs lane). */
+export const DOCS_LANE_HEAD_PREFIX = 'ai-sdlc/file-';
+
+/**
+ * AISDLC-878: refusal reason for a docs-lane PR whose diff touches a path outside
+ * the single docs-only list (`attestation-core/docs-only-paths.mjs`), naming each
+ * offending path; `null` when every path is docs-only.
+ */
+export function docsLanePathRefusal(files: ChangedFile[]): string | null {
+  const bad: string[] = [];
+  for (const f of files) {
+    for (const p of [f.path, f.previousPath]) {
+      const ok = p === undefined || (DOCS_ONLY_PATTERN.test(p) && !p.split('/').includes('..'));
+      if (!ok && !bad.includes(p)) bad.push(p);
+    }
+  }
+  return bad.length === 0
+    ? null
+    : `docs-lane PR changes paths outside the docs-only list: ${bad.join(', ')}`;
+}
+
 export function isTrustedSourceKind(sourceKind: SourceKind | undefined): boolean {
-  return sourceKind === 'backlog' || sourceKind === 'decisions-sync';
+  return sourceKind === 'backlog' || sourceKind === 'decisions-sync' || sourceKind === 'docs';
 }
 
 // ── PR-derived trust facts (read from GitHub, not from caller flags) ────
@@ -808,6 +830,10 @@ export async function evaluatePrTrust(args: {
   if (args.sourceKind === 'decisions-sync') {
     if (pr.headRefName !== DECISIONS_SYNC_HEAD) {
       return `PR head branch is "${pr.headRefName}" - decisions-sync landing is limited to "${DECISIONS_SYNC_HEAD}"`;
+    }
+  } else if (args.sourceKind === 'docs') {
+    if (!pr.headRefName.startsWith(DOCS_LANE_HEAD_PREFIX)) {
+      return `PR head branch is "${pr.headRefName}" - docs-lane landing is limited to "${DOCS_LANE_HEAD_PREFIX}*"`;
     }
   } else {
     const derived = deriveTaskId(pr.headRefName, pr.title, args.taskPrefix);
@@ -1526,6 +1552,10 @@ export async function runMergeIfEligible(
   }
   if (opts.sourceKind === 'decisions-sync') {
     const pathRefusal = decisionsSyncPathRefusal(changed);
+    if (pathRefusal) return refuse(pathRefusal);
+  }
+  if (opts.sourceKind === 'docs') {
+    const pathRefusal = docsLanePathRefusal(changed);
     if (pathRefusal) return refuse(pathRefusal);
   }
   const sensitive = governanceSensitiveChanges(changed);

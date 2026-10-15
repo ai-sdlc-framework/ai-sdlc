@@ -1,7 +1,7 @@
 ---
 id: AISDLC-878
 title: 'docs lane: cli-file never drafts, rebases in place under DEC-0088, merge-if-eligible gains --source-kind docs, one docs-only path list'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [rfc-0054, docs-lane, phase-0, dispatch]

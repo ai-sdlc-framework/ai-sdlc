@@ -732,13 +732,31 @@ the action is `none`, except stale claims and takeover after executor death post
 
 | Situation | Action | What runs |
 |---|---|---|
-| `behind-or-dirty` | `rebase-in-place` | `cli-file rebase <id> --pr` |
+| `behind-or-dirty` | `rebase-in-place` | `cli-file rebase <id> --pr` (same branch, same PR number; lease push, then re-armed) |
 | failing DoR check | `rerun-dor` | `gh run rerun --failed --commit <sha>` |
-| green, CLEAN, not armed | `arm` | `cli-merge-if-eligible <pr> --source-kind backlog` with the arm flag |
+| green, CLEAN, not armed | `arm` | `cli-merge-if-eligible <pr> --source-kind docs` with the arm flag |
 | other real check failure, `no-match` | `route-to-planner` | planner |
 | `cancelled-or-infra` | `retrigger-once` | rerun once per head SHA |
 | `merged` | `mark-landed` | record `landed` |
 | remaining states | `none` | nothing |
+
+**Docs lane (AISDLC-878).** Filing PRs made by `cli-file` (head branch `ai-sdlc/file-*`) travel a
+lane of their own:
+
+- `cli-file` never opens a draft: its `gh pr create` argv carries no `--draft`, so the PR is
+  armable the moment it exists.
+- `cli-file rebase <id> --pr` rebuilds the branch from current `origin/main` and lease-pushes the
+  SAME branch (DEC-0088: `--force-with-lease` pinned to the SHA it read). The PR number is kept,
+  no replacement PR is opened and nothing is closed; the PR is then re-armed.
+- `cli-merge-if-eligible <pr> --source-kind docs` with the arm flag arms such a PR. It keeps the
+  fork, base, author and head-commit checks, requires the head branch to start with
+  `ai-sdlc/file-`, and refuses any PR whose diff touches a path outside the docs-only list,
+  naming each offending path.
+- The docs-only list has one definition, `pipeline-cli/attestation-core/docs-only-paths.mjs`
+  (`DOCS_ONLY_PATTERN`). It covers the RFC, docs and backlog directories, attestation envelopes,
+  `.ai-sdlc/_decisions/`, `.ai-sdlc/dispatch/briefs/`, `.claude/memory/`,
+  `.github/dependabot.yml`, `.github/*.md` and root-level `*.md`.
+  `scripts/is-docs-only-changeset.mjs` and the reviewer-scope code re-export it.
 
 Rows are checked in this precedence: landed, manifest mismatch, stale claim, BEHIND/DIRTY,
 attestation, pr-ready, cancelled/infra, then the green and pending rows.
