@@ -2,7 +2,7 @@
   "schemaVersion": "v6",
   "subject": {
     "digest": {
-      "sha1": "745f87c7aef92b84d5f96f93505b325b6c03b2b1"
+      "sha1": "c191444bfaa4136ef5da180901672e6f35098bf3"
     }
   },
   "transcriptLeaves": [
@@ -29,6 +29,28 @@
       "verdictClass": "independent",
       "harnessTranscriptHash": "becf9d520261095d59d57248e5a972e9675a6cdeaad166d7f9af32df1aa9ed76",
       "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 3,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "2b76300213886dac5325dca1f8f1b2aaa70060302f93134d47d9477c0bc72c5b",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 4,
+      "reviewerName": "test-reviewer-codex",
+      "transcriptHash": "32ee8c3765ce923efb72d15c0362b1b1b591e680e51861d6061c0bc22fd68233",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 5,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "6ad046a332403e85aa18ee55acc991792b223c7d943a29621732155afd29d801",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "6ad046a332403e85aa18ee55acc991792b223c7d943a29621732155afd29d801",
+      "independenceTier": "attested"
     }
   ],
   "merkleProofs": [
@@ -36,29 +58,56 @@
       "leafIndex": 0,
       "proof": [
         "45e2108f6305ed2e9ef013d1689992c4e0bfccc459a8f3b3f443fec886bb3561",
-        "87b22ab218d359ab42e0a5b001f0b1d9ee1762398ec49e340e3f056c3f8222ec"
+        "ce7c3e5eb877812c3143bbfd3725b8b7424ac67ff84faa3d022c7b28627d4d0d",
+        "59eaca1aff39e992f4ec0e3e5903840aed3a0c7db2ea54c93d8a92092dbfc291"
       ]
     },
     {
       "leafIndex": 1,
       "proof": [
         "bc351771b08f678a418b65e6a6cee4ae7b2f3e2cd6d76cdd7b1c866d5e186b95",
-        "87b22ab218d359ab42e0a5b001f0b1d9ee1762398ec49e340e3f056c3f8222ec"
+        "ce7c3e5eb877812c3143bbfd3725b8b7424ac67ff84faa3d022c7b28627d4d0d",
+        "59eaca1aff39e992f4ec0e3e5903840aed3a0c7db2ea54c93d8a92092dbfc291"
       ]
     },
     {
       "leafIndex": 2,
       "proof": [
+        "bb9c093baf6e41bbd508388e49237eafcad6d8070560c95927fce41e335a844d",
+        "ba4651c71f269b24f9fc3a34be6c594affb2853a5527706bca0dc0c7b8c6ddb9",
+        "59eaca1aff39e992f4ec0e3e5903840aed3a0c7db2ea54c93d8a92092dbfc291"
+      ]
+    },
+    {
+      "leafIndex": 3,
+      "proof": [
         "fb796feac6dce51d6bc6d6ebfaa72d711f9736abee5130ae078a2b9a0a953600",
-        "ba4651c71f269b24f9fc3a34be6c594affb2853a5527706bca0dc0c7b8c6ddb9"
+        "ba4651c71f269b24f9fc3a34be6c594affb2853a5527706bca0dc0c7b8c6ddb9",
+        "59eaca1aff39e992f4ec0e3e5903840aed3a0c7db2ea54c93d8a92092dbfc291"
+      ]
+    },
+    {
+      "leafIndex": 4,
+      "proof": [
+        "53133e6ca53531945e076818f7cc2d78a668373294e37e5821ce7d619b3474ac",
+        "b41081df08d5aa73b077b975f79b5b2966ea868c06a80725a1111e8bb26b5dc3",
+        "1ee696097f901dd2e908f9dad33141a7cffbb1e4f4a764bfb34cdad48d6ab923"
+      ]
+    },
+    {
+      "leafIndex": 5,
+      "proof": [
+        "b2069af90565f82e3a779facc32c95ce4f911b328b9ce53ad153f7254ec33295",
+        "b41081df08d5aa73b077b975f79b5b2966ea868c06a80725a1111e8bb26b5dc3",
+        "1ee696097f901dd2e908f9dad33141a7cffbb1e4f4a764bfb34cdad48d6ab923"
       ]
     }
   ],
-  "rootHash": "5b96d9c8da6abecb29e3e236b0ef82b68a8cb6d91f4661121500900b2eab24f1",
-  "rootSignature": "S1DVO+QZPQgXtrS8fnSeLkrJ4ZRpRSSIjqkCXTRpA50adcJw246hexmSobsdva6ebG7yB+Xs0dhEoyeQMUQ5AA==",
-  "nonce": "a21e5f71e7820b385898d6a819d979611d454f37bc2486fc4e4577fed7ccadeb",
-  "leafCount": 3,
-  "signedAt": "2026-10-15T03:07:24.055Z",
+  "rootHash": "e35ee726a9598a55ca7c4209366f4bef09892070ed8aee11da37dadc3806db42",
+  "rootSignature": "/QsEawxnB10JWsTOzWYhFASPrBeegQxgC8VLC/OC8Vc+LJfJ5ZtON9ppA0nd8/sLNXB9lvIkplfXdeu9ZnnkDA==",
+  "nonce": "c91c82bc423343c966c0b53220d590ae908d8f8d628a8113933fefadb718cd76",
+  "leafCount": 6,
+  "signedAt": "2026-10-15T03:09:50.215Z",
   "signerIdentity": "dominique@local:doms-macbook",
   "reviewScope": {
     "classification": "full",
@@ -69,6 +118,13 @@
       "ai-sdlc-plugin/commands/operator-dispatch.md",
       "ai-sdlc-plugin/commands/operator-dispatch.test.mjs"
     ],
-    "appliedReviewers": ["code-reviewer-codex", "test-reviewer-codex", "security-reviewer"]
+    "appliedReviewers": [
+      "code-reviewer-codex",
+      "test-reviewer-codex",
+      "security-reviewer",
+      "code-reviewer-codex",
+      "test-reviewer-codex",
+      "security-reviewer"
+    ]
   }
 }
