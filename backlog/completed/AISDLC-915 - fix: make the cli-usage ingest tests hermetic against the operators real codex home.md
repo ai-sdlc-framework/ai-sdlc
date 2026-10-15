@@ -1,7 +1,7 @@
 ---
 id: AISDLC-915
 title: 'fix: make the cli-usage ingest tests hermetic against the operator''s real codex home'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [bug, pipeline-cli, tests]

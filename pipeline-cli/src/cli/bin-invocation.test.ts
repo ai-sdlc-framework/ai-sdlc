@@ -425,7 +425,12 @@ describe('cli-usage: bin shim guard and end-to-end ingest', () => {
       join(projects, 's1.jsonl'),
       `${call('m1')}\n${call('m1')}\n{broken SENTINEL-CANARY-BIN\n`,
     );
-    const env: NodeJS.ProcessEnv = { ...process.env, AI_SDLC_USAGE_DIR: join(tmp, 'usage') };
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      AI_SDLC_USAGE_DIR: join(tmp, 'usage'),
+      // Hermetic: never walk the operator's real Codex home.
+      CODEX_HOME: join(tmp, 'codex-home'),
+    };
     delete env['CLAUDE_CODE_ENV'];
     delete env['CLAUDE_REMOTE_EXECUTION'];
     delete env['AI_SDLC_USAGE_INGEST'];
