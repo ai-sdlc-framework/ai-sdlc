@@ -74,6 +74,11 @@ export {
   type TickResult,
   type VerdictReport,
 } from './dispatch-loop.js';
+export {
+  classifyHumanAttention,
+  fetchHumanAttentionPrs,
+  type HumanAttentionRow,
+} from './human-attention.js';
 export { markReadyAfterCodeql, type MarkReadyReport } from './mark-ready.js';
 export {
   decideAutoClear,

@@ -102,6 +102,7 @@ import {
   rosterProject,
   runDispatchTick,
   findOpenPrNumber,
+  fetchHumanAttentionPrs,
   stallThresholdsFromEnv,
   runPlaybook,
   SAFE_SESSION_NAME,
@@ -716,6 +717,7 @@ export async function runHierarchyCli(
               }),
             findPr: (id) => findOpenPrNumber(extras.ghRun ?? deps.run, repoRoot, id),
           },
+          listPrs: () => fetchHumanAttentionPrs(extras.ghRun ?? deps.run, repoRoot, deps.boardDir),
           markReady: () => markReadyAfterCodeql(extras.ghRun ?? deps.run, repoRoot),
           promoteExpired: () =>
             isDecisionCatalogEnabled()

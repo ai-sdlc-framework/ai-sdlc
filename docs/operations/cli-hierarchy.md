@@ -593,6 +593,15 @@ per reap. This is operational: the planner is not asked. Clearing needs
 `clear-executor-context` and the re-queue needs `requeue`; the playbook treats both
 `stale-worker` and `stale-heartbeat` failures as re-queue-with-resume-note shapes.
 
+**PRs needing a human (AISDLC-888).** Every tick lists each open PR whose title contains
+`[needs-human-attention]`, or whose `done/` verdict is `iterate-needed` with the iteration
+budget spent, as a progress line: PR number, age, draft or ready, merge state and open
+finding count (read from the PR body). The tick result carries the same rows as
+`humanAttention`. A flagged PR older than 24 hours adds one more line, `PR #N needs a human
+for Nh`; no new notification channel is involved. The operator digest prints a
+"PRs needing a human" section with the same rows and omits it when there are none. Both use
+the single classifier `classifyHumanAttention` (`hierarchy/human-attention.ts`).
+
 ### `route-decision`
 
 Record that a decision was routed to a tier (emits a `DecisionRouted` event).

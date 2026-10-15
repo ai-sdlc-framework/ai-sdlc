@@ -434,3 +434,40 @@ describe('governance config changes in the digest (AISDLC-720.1)', () => {
     }
   });
 });
+
+describe('PRs needing a human section (AISDLC-888)', () => {
+  const row = {
+    number: 12,
+    title: 'feat: x [needs-human-attention]',
+    reason: 'title-marker' as const,
+    ageMs: 30 * 3_600_000,
+    draft: true,
+    mergeState: 'CLEAN',
+    openFindings: 2,
+    stalled: true,
+  };
+
+  it('renders the section when rows exist and omits it otherwise', () => {
+    const d = buildOperatorDigest([], '2026-10-03T00:00:00Z', NOW);
+    expect(renderOperatorDigestMarkdown(d)).not.toContain('PRs needing a human');
+    const md = renderOperatorDigestMarkdown({ ...d, humanPrs: [row] });
+    expect(md).toContain('## PRs needing a human (1)');
+    expect(md).toContain('PR #12');
+    expect(md).toContain('2 open finding(s)');
+    expect(md).toContain('older than 24h');
+    expect(renderOperatorDigestMarkdown({ ...d, humanPrs: [] })).not.toContain(
+      'PRs needing a human',
+    );
+  });
+
+  it('runOperatorDigest attaches rows only when non-empty', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'op-digest-hp-'));
+    const common = { workDir: dir, now: NOW, provenance: () => null, governanceChanges: () => [] };
+    try {
+      expect(runOperatorDigest({ ...common, humanPrs: () => [row] }).humanPrs).toEqual([row]);
+      expect(runOperatorDigest({ ...common, humanPrs: () => [] }).humanPrs).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

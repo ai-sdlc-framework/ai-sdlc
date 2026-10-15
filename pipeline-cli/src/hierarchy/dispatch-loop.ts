@@ -38,6 +38,13 @@ import type { EnqueueEntry } from '../dispatch/enqueue.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
 import { sanitizeVerdict } from '../dispatch/verdict-fields.js';
 import { parseBrief, type ParsedBrief } from './brief-format.js';
+import {
+  classifyHumanAttention,
+  formatHumanAttentionRow,
+  formatHumanAttentionStall,
+  type HumanAttentionPr,
+  type HumanAttentionRow,
+} from './human-attention.js';
 import type { ClearResult } from './clear.js';
 import type { MarkReadyReport } from './mark-ready.js';
 import type { PlaybookOutcome } from './playbook.js';
@@ -158,6 +165,8 @@ export interface TickResult {
   reports: PlannerReport[];
   /** Stalled claims reaped this tick (AISDLC-826); the planner is not asked about them. */
   stalled?: StalledReport[];
+  /** Open PRs that need a human (AISDLC-888); absent when there are none. */
+  humanAttention?: HumanAttentionRow[];
   /** Seconds the session should sleep before the next wake-up (30, 300 or 1800). */
   nextWakeSec: number;
   wakeReason: WakeReason;
@@ -218,6 +227,8 @@ export interface LoopDeps {
    * `clear` and `requeue` default to this tick's own.
    */
   stall?: Partial<Omit<StallDeps, 'boardDir' | 'now'>>;
+  /** Open PRs for the human-attention section (AISDLC-888); undefined when GitHub cannot be read. */
+  listPrs?: () => HumanAttentionPr[] | undefined;
 }
 
 function ingestBriefs(
@@ -428,6 +439,16 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   const stalled = await checkStalls(deps, state);
   const reports = buildReports(deps, state, watch.verdicts.length);
   for (const s of stalled) reports.push({ kind: 'progress', text: formatStall(s) });
+  let humanAttention: HumanAttentionRow[] = [];
+  try {
+    humanAttention = classifyHumanAttention(deps.listPrs?.() ?? [], deps.now());
+  } catch {
+    /* an unreadable PR list must not stop the dispatch loop */
+  }
+  for (const r of humanAttention) {
+    reports.push({ kind: 'progress', text: formatHumanAttentionRow(r) });
+    if (r.stalled) reports.push({ kind: 'progress', text: formatHumanAttentionStall(r) });
+  }
   saveState(deps.boardDir, state);
   const markReady =
     deps.markReady && deps.operational.has('mark-ready-after-codeql')
@@ -445,6 +466,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     ...watch,
     reports,
     ...(stalled.length > 0 ? { stalled } : {}),
+    ...(humanAttention.length > 0 ? { humanAttention } : {}),
     ...wake,
     ...(markReady ? { markReady } : {}),
     ...(promotions.length > 0 ? { promotions } : {}),

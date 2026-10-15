@@ -1,7 +1,7 @@
 ---
 id: AISDLC-888
 title: 'feat(hierarchy): PRs flagged [needs-human-attention] surface in the dispatch tick report and the operator digest'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [hierarchy, visibility, feature, velocity]
@@ -36,12 +36,12 @@ Related open tasks: AISDLC-871 (alert-only stall notice) and AISDLC-829 (the tic
 
 ## Acceptance Criteria
 
-- [ ] The dispatch tick report lists every open PR whose title contains `[needs-human-attention]` or whose board verdict is `iterate-needed` at the review cap, with age, draft/merge state and open finding count.
-- [ ] `cli-decisions operator-digest` prints a "PRs needing a human" section with the same rows, and omits it when there are none.
-- [ ] A flagged PR older than 24 h produces a stall-notice condition: through the AISDLC-871 alert path if present on `main`, otherwise one tick-report line.
-- [ ] The classification is a single pure function used by both the tick report and the digest; no second PR fetch is added and no code from AISDLC-871 or AISDLC-829 is copied.
-- [ ] A unit test covers the classifier on (i) a title with the marker, (ii) a verdict `iterate-needed` at the cap, and (iii) a plain PR (not flagged); further tests cover the digest section and its omission when empty, and the 24 h threshold.
-- [ ] `docs/operations/cli-hierarchy.md` describes the section and the 24 h rule.
+- [x] The dispatch tick report lists every open PR whose title contains `[needs-human-attention]` or whose board verdict is `iterate-needed` at the review cap, with age, draft/merge state and open finding count.
+- [x] `cli-decisions operator-digest` prints a "PRs needing a human" section with the same rows, and omits it when there are none.
+- [x] A flagged PR older than 24 h produces a stall-notice condition: through the AISDLC-871 alert path if present on `main`, otherwise one tick-report line.
+- [x] The classification is a single pure function used by both the tick report and the digest; no second PR fetch is added and no code from AISDLC-871 or AISDLC-829 is copied.
+- [x] A unit test covers the classifier on (i) a title with the marker, (ii) a verdict `iterate-needed` at the cap, and (iii) a plain PR (not flagged); further tests cover the digest section and its omission when empty, and the 24 h threshold.
+- [x] `docs/operations/cli-hierarchy.md` describes the section and the 24 h rule.
 
 ## Tests
 
