@@ -1,7 +1,7 @@
 ---
 id: AISDLC-882
 title: 'feat(dispatch): reenter <pr|task> keyed on PR state replaces resume and requeue --note; the claim becomes an output of re-entry, not a precondition'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [rfc-0054, phase-2, dispatch]
@@ -44,3 +44,7 @@ RFC-0054 OQ-4 (resolved 2026-10-14): task PRs re-enter by one command keyed on P
 ## Out of scope
 
 The loop guard itself (AISDLC-883); the land-prep runner (AISDLC-881).
+
+## Final Summary
+
+Shipped: `cli-dispatch reenter <pr|task-id> [--note]` in `pipeline-cli/src/hierarchy/reenter.ts`; `resume` and `requeue --note` removed; stall.ts calls it with the step note when a PR exists; same-head loop guard in `landing/<pr>/reentered.json`.

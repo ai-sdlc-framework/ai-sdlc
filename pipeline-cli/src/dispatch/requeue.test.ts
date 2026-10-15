@@ -22,7 +22,6 @@ import type { IdentityDeps } from '../hierarchy/index.js';
 import { claimNext, ensureBoardDirs, writeManifest, writeVerdict } from './board.js';
 import { completeTask } from './complete.js';
 import { FAILED_MANIFEST_SUFFIX, requeueFailed, snapshotFailedManifest } from './requeue.js';
-import { readResumeFeedback } from './resume.js';
 import type { DispatchManifest } from './types.js';
 
 function mkManifest(taskId: string, extra: Partial<DispatchManifest> = {}): DispatchManifest {
@@ -275,22 +274,13 @@ describe('requeueFailed with an open PR (follow-up)', () => {
       ['AISDLC-921', 3],
     ] as const) {
       failWithPr(id, n);
-      const r = requeueFailed(board, id, { prState: () => 'OPEN', note: 'rebase and re-sign' });
+      const r = requeueFailed(board, id, { prState: () => 'OPEN' });
       expect(r.followUp).toBe(true);
       expect(r.retryCount).toBe(n);
       const queued = JSON.parse(readFileSync(r.queuePath, 'utf-8')) as DispatchManifest;
       expect(queued.retryCount).toBe(n);
-      expect(queued.resume?.note).toBe('rebase and re-sign');
       rmSync(r.queuePath);
     }
-  });
-
-  it('hands the note to the executor that claims the follow-up', () => {
-    failWithPr('AISDLC-927', 3);
-    requeueFailed(board, 'AISDLC-927', { prState: () => 'OPEN', note: 'rebase and re-sign' });
-    expect(readResumeFeedback(board, 'AISDLC-927')).toBeUndefined(); // queued, not claimed
-    claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-a' });
-    expect(readResumeFeedback(board, 'AISDLC-927')?.note).toBe('rebase and re-sign');
   });
 
   it('treats a prNumber-only verdict with an OPEN PR as follow-up', () => {

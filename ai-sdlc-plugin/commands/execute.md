@@ -50,7 +50,7 @@ Other floors that `next-step` enforces so you do not have to: the CCR remote-san
 
 **Attestation prerequisites in a consuming repo (AISDLC-556).** Signing is not automatic outside this repo: the pre-push hook that signs (`ai-sdlc init --with-attestation`, AISDLC-555), a signing key and the runtime dependency must be installed first (see `ai-sdlc-plugin/README.md`, "Attestation prerequisites for adopters"). Any `.husky/pre-push` signing behavior described in these docs applies only where that hook is installed. When no signer is reachable Step 10 warns, naming the verdict file, and fails open; the PR then carries no attestation and `verify-attestation` CI cannot pass.
 
-An executor that claims a task whose manifest carries `resume.resumeMode: push-only` (set by `cli-dispatch resume --push-only`) does not run this pipeline: the worktree already holds an approved verdict, so it rebases, builds, signs from the existing verdict and pushes without a developer or reviewer round (see `executor.md` Step 2). When the mode is refused (no verdict, not an approval, content changed after the rebase) the run falls back to this normal pipeline.
+An executor that claims a task whose manifest carries `resume.resumeMode: push-only` (set by `cli-dispatch reenter` for an attestation content mismatch) does not run this pipeline: the worktree already holds an approved verdict, so it rebases, builds, signs from the existing verdict and pushes without a developer or reviewer round (see `executor.md` Step 2). When the mode is refused (no verdict, not an approval, content changed after the rebase) the run falls back to this normal pipeline.
 
 ## Run
 

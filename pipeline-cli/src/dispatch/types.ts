@@ -111,6 +111,10 @@ export interface ResumeFeedback {
   prNumber?: number;
   /** Head branch of `prNumber`, recorded at resume so Step 3 needs no network call. */
   prHeadRef?: string;
+  /** Head commit of `prNumber` when `reenter` ordered the round. */
+  headSha?: string;
+  /** The failing check line the round must fix (`reenter`). */
+  failingLine?: string;
   /** Names of the checks that failed. */
   failingChecks?: string[];
   /** Reviewer findings to address. */

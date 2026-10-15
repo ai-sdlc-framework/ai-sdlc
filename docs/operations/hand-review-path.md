@@ -1,6 +1,6 @@
 # Hand review path — post-rebase review round (planner note, 2026-10-12)
 
-Use as the `--note` of `cli-dispatch resume --task-id <ID> --pr <N>` for a task whose
+Use as the `--note` of `cli-dispatch reenter <N>` for a task whose
 rebase changed the patch-id (check-attestation-sign finds no leaves at the current
 patch-id). Substitute <id> (lower-case task id, e.g. aisdlc-799) and <ID> (AISDLC-799).
 Authority: DEC-0142 (planner record on main), template at docs/operations/hand-review-path.md; DEC-0141 for AISDLC-755.

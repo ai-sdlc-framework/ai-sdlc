@@ -2,7 +2,7 @@
 id: AISDLC-863
 title: >-
   push-only resume binds to the verdict patch-id so a deleted envelope never forces a review rerun
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels:
@@ -49,3 +49,7 @@ dispatchable: true
 
 Authority: class (a) under `docs/operations/decision-authority.md` (reversible; the content binding is kept, only moved from a deletable file to the verdict; no control loosened).
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+Closed by AISDLC-882: `cli-dispatch reenter` carries the head SHA and the failing line on the manifest and a push-only round binds to the PR's current head; there is no separate resume path any more.

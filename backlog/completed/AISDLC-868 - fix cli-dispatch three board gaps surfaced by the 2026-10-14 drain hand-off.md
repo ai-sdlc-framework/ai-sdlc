@@ -1,7 +1,7 @@
 ---
 id: AISDLC-868
 title: 'fix(cli-dispatch): three board gaps surfaced by the 2026-10-14 drain hand-off'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [bug, dispatch, hierarchy]
@@ -40,3 +40,7 @@ The 2026-10-14 drain hand-off exposed three gaps in the dispatch board commands.
 ## Out of scope
 
 Changes to the tick classifier (AISDLC-823) and to claim or reap semantics.
+
+## Final Summary
+
+Closed by AISDLC-882: `cli-dispatch resume` is gone (item b with it), and `reenter` moves the failed verdict and manifest copy to `landing/<pr>/history/` so `failed/` keeps no manifest (item a). Item c (brief ingestion refusing an already-on-board task) is not changed here; re-file it if it recurs.

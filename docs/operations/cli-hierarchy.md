@@ -600,8 +600,9 @@ threshold (default 30 minutes, `AI_SDLC_DISPATCH_STALE_MS`), or when its holder 
 10 minutes, `AI_SDLC_DISPATCH_STALL_GRACE_MS`) with no verdict in `done/` or `failed/`. A
 stalled claim moves to `failed/` with `cause: stale-worker`, `lastStep` and
 `heartbeatAgeMs`; the holder is cleared (which restarts its executor loop with
-`/ai-sdlc:executor`) and the task is re-queued with a resume note naming the step it
-stalled at and any existing pull request number, so no developer re-runs when a PR exists.
+`/ai-sdlc:executor`) and the task is sent back with a note naming the step it stalled at
+and any existing pull request number (`cli-dispatch reenter <pr> --note` when a PR exists,
+so no developer re-runs; a plain `requeue` when none does).
 The tick result carries `stalled` (`taskId`, `worker`, `ageMs`, `step`) and a progress line
 per reap. This is operational: the planner is not asked. Clearing needs
 `clear-executor-context` and the re-queue needs `requeue`; the playbook treats both
@@ -734,9 +735,9 @@ the action is `none`, except stale claims and takeover after executor death post
 | `merged` | `mark-landed` | record `landed`; done verdict, parent sync and dependants stay with the tick playbook |
 | `manifest-branch-mismatch` | `rewrite-manifest` | left to a session (`write-manifest` with the PR head ref) |
 | `stale-claim` | `reap-resume` | `cli-dispatch reap` |
-| `behind-or-dirty` | `land-prep` | until AISDLC-881: `resume` with a rebase note ([hand-review-path.md](hand-review-path.md)) |
-| `attestation-content-hash-mismatch` | `push-only-resign` | `resume` with a push-only re-sign note (AISDLC-821) |
-| `real-failure` | `reenter` | until AISDLC-882: `resume` carrying the failing check line and head SHA |
+| `behind-or-dirty` | `land-prep` | until AISDLC-881: `reenter` (rebases a BEHIND PR; a DIRTY one goes to an executor) ([hand-review-path.md](hand-review-path.md)) |
+| `attestation-content-hash-mismatch` | `push-only-resign` | `reenter` (push-only re-sign manifest, AISDLC-821) |
+| `real-failure` | `reenter` | `cli-dispatch reenter <pr>` (manifest with the failing line and head SHA) |
 | `cancelled-or-infra` | `retrigger-once` | `gh run rerun --failed --commit <sha>`; once per head SHA |
 | `ready-to-flip` | `flip-ready-takeover` | `gh pr ready <n>`, only after executor death post-sign |
 | `armed-clean`, `pending` | `none` | nothing |
@@ -828,46 +829,52 @@ session; `unknown` means it is open but absent from the registry. `inflightTask`
 task the session's heartbeat holds; an executor with `idle` and no `inflightTask` is ready
 to claim. `board.queued` of 0 with all executors idle means the queue is drained.
 
-## Sending a finished task back (resume)
+## Sending a finished task back (reenter)
 
-A task in `done/` whose pull request later goes red (a coverage shortfall, a stale
-attestation after a rebase, reviewer findings) goes back to an executor, not to a second
+A task whose pull request goes red (a coverage shortfall, a stale attestation after a
+rebase, reviewer findings, a semantic conflict) goes back to an executor, not to a second
 `/ai-sdlc execute` and not to a push from the dispatch session: the hook binds a push to
-the task's own worktree, which only its executor holds.
+the task's own worktree, which only its executor holds. One command, keyed on PR state
+(RFC-0054, AISDLC-882; it replaced `resume` and `requeue --note`):
 
 ```bash
-node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" resume --board-dir "$BOARD_DIR" \
-  --task-id "<task-id>" --pr "<number>" --failing-checks "<check,check>" \
-  --note "<what the executor must fix>" [--finding "<reviewer finding>"]
+node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" reenter "<pr-number|task-id>" --board-dir "$BOARD_DIR" \
+  [--note "<what the executor must fix>" | --note-file <path>]
 ```
 
-It needs the same `requeue` grant as `requeue` and runs only from the dispatch session. The
-task returns to `queue/` with the note on its manifest and is claimed like any other task
-(an idle executor claims it within a minute). `executor-start` prints the note before the
-task runs; the pipeline then re-enters the existing worktree and branch (never `origin/main`),
-re-writes `.active-task`, injects the note into the developer prompt, re-runs the reviewers,
-re-signs the attestation, lease-pushes from that worktree and updates the existing pull
-request. The command exits 1, changing nothing, when the task has no verdict.
+It needs the `requeue` grant and runs only from the dispatch session. It reads the PR from
+GitHub, classifies it (`pr-state.ts`) and then:
 
-`resume` accepts three verdict outcomes (AISDLC-807): a `done/` verdict with outcome
-`success`, a `done/` verdict with outcome `iterate-needed` (the executor returned for another
-round), and a `failed/` verdict (a failure). The manifest carries `resume.prNumber`,
-`resume.note` and `resume.fromVerdictOutcome`, the outcome it was resumed from. A task with
-no verdict is refused. `cli-dispatch requeue --task-id <id> --note "<text>"` returns a failed
-task with the same `resume.note` block, so there is one note channel. `cli-dispatch release`
-is refused for a task that already has a verdict in `done/`; run `resume` to send it back, or
-`remove-verdict` to discard the verdict first.
+- BEHIND with no other failure, or a cancelled or infra check: runs the machine action
+  (`gh pr update-branch --rebase`, or a rerun of the failed jobs on the head) and writes no manifest.
+- A real failure on the current head, a DIRTY (semantic) conflict or an attestation content
+  mismatch: writes ONE `queue/` manifest carrying `branch` (the PR head ref), `resume.prNumber`,
+  `resume.headSha`, `resume.failingLine`, `resume.failingChecks` and the note, and moves the
+  task's `done/` and `failed/` files (verdict, diagnostic, manifest copy) to
+  `landing/<pr>/history/`. The claim is made later by the normal executor claim; Step 3 reuses
+  the branch the manifest names and never guesses. `executor-start` prints the note before the
+  task runs; the pipeline re-enters the existing worktree, injects the note into the developer
+  prompt, re-runs the reviewers, re-signs, lease-pushes from that worktree and updates the PR.
+- A state that needs nothing (green, pending, armed): refused, unless `--note` orders a round.
+- Loop guard (AISDLC-883): the same `(action, head SHA)` is never taken twice. The second call
+  exits 1 with `loop guard: <action>@<sha> x2 ...`; a push (new head) resets it. Route a
+  refused loop to the planner with `cli-decisions escalate`.
+
+The command exits 1, changing nothing, when the PR is merged or closed, the task has no
+verdict, or no PR can be found (a PR-less failure uses `cli-dispatch requeue --task-id <id>`,
+which takes no `--note`). A verdict may be a `done/` `success` or `iterate-needed`, a
+`failed/` verdict, or a reaped claim's diagnostic. `cli-dispatch release` is refused for a
+task that already has a verdict in `done/`; run `reenter` to send it back, or `remove-verdict`
+to discard the verdict first.
+
 **Three board behaviours (AISDLC-868).**
 
 - `cli-dispatch remove-verdict --task-id <id> --from failed` removes the verdict and
   diagnostic. It also removes the `failed/<id>.manifest.json` copy when `--with-manifest true`
   is passed or when the task file is already in `backlog/completed/`, so no stale failed
   manifest outlives a finished task (the AISDLC-800 invariant). Otherwise the manifest stays,
-  because a live resume or `requeue` needs it. Pass `--work-dir` when not run from the repo root.
-- `resume --failing-checks` (and `--failing-check`) splits on commas only and trims each item.
-  Spaces, ampersands and parentheses stay inside a name, so
-  `"Backlog Drift,Build & Test (Node 22)"` records exactly two checks.
-- Brief ingestion by `cli-hierarchy tick` skips a task already on the board (a resume, for
+  because a live `reenter` or `requeue` needs it. Pass `--work-dir` when not run from the repo root.
+- Brief ingestion by `cli-hierarchy tick` skips a task already on the board (a re-entry, for
   example) instead of refusing the whole brief. The tick result lists each one under `skipped`
   as `{ file, taskId, state }` and ingests the rest; the exit code is unchanged. A brief whose
   tasks are all on the board is marked ingested with no tasks.

@@ -69,8 +69,8 @@ a name. The JSON holds:
   `cli-hierarchy status`) and validated `decisionIds`; a `blocked` one awaits Step 4.
 - `escalations`, `reports`: failures the playbook (already run inside `tick`) could not fix, and progress lines; send each to the planner (Step 3).
 - `markReady`: `readied` flipped after clean CodeQL, `failedAnalyze` go back to an executor
-  as a fix round, `skipped` are listed for the operator. A finished task whose pull request goes red returns to its executor, not to a push from here: `cli-dispatch.mjs resume --board-dir "$BOARD_DIR" --task-id <id> --pr <n> --failing-check "<check name>" --note "<what to fix, in prose>"`; notes are prose (a line starting `cli-`, `git ` or `gh ` is rejected); an `iterate-needed` verdict resumes the same way once its claim is released, with no `--note` (docs/operations/cli-hierarchy.md).
-- A failed task whose verdict names an OPEN PR is PR follow-up, not an escalation: `cli-dispatch.mjs requeue --board-dir "$BOARD_DIR" --task-id <id> --note "<what to finish, in prose>"`; it passes the retry cap and uses no retry.
+  as a fix round, `skipped` are listed for the operator. A finished task whose pull request goes red returns to its executor, not to a push from here: `cli-dispatch.mjs reenter --board-dir "$BOARD_DIR" <pr-number|task-id>`. It reads the PR, runs the machine action itself for BEHIND or a cancelled check, and for a real failure or a semantic conflict writes one queue manifest (branch, head SHA, failing line) and moves the old `failed/` and `done/` files to `landing/<pr>/history/`. `--note "<what to fix, in prose>"` adds feedback (a line starting `cli-`, `git ` or `gh ` is rejected). The same `(action, head SHA)` twice is refused by the loop guard: route it to the planner (docs/operations/cli-hierarchy.md).
+- A failed task whose verdict names an OPEN PR is PR follow-up, not an escalation: `cli-dispatch.mjs reenter --board-dir "$BOARD_DIR" <pr-number|task-id> --note "<what to finish, in prose>"`; it uses no retry. `requeue` is for failures with no PR only and takes no `--note`.
 - `nextWakeSec`, `selfClear`: Step 5.
 
 ## PRs

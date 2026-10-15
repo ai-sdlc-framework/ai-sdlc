@@ -65,6 +65,7 @@ import { persistDecisionLog } from '../decisions/remote-persist.js';
 import { DEFAULT_BOARD_DIR, TASK_ID_RE } from '../dispatch/board.js';
 import { enqueueTasks, type EnqueueEntry } from '../dispatch/enqueue.js';
 import { requeueFailed } from '../dispatch/requeue.js';
+import { reenter } from '../hierarchy/reenter.js';
 import { correctManifestBranch } from '../dispatch/resume.js';
 import { DEFAULT_REQUEUE_RETRY_LIMIT } from '../dispatch/session-reaper.js';
 import { DECISION_ID_RE } from '../dispatch/verdict-fields.js';
@@ -717,12 +718,27 @@ export async function runHierarchyCli(
             ...stallThresholdsFromEnv(deps.env),
             liveness: () =>
               new Map(hierarchyStatus(deps).rows.map((r) => [r.entry.name, r.state] as const)),
-            requeue: (id, note) =>
-              void requeueFailed(deps.boardDir, id, {
-                ...(retryLimit === undefined ? {} : { retryLimit }),
-                note,
-                requeuedBy: worker,
-              }),
+            requeue: (id, note, pr) => {
+              if (pr === undefined) {
+                void requeueFailed(
+                  deps.boardDir,
+                  id,
+                  retryLimit === undefined ? {} : { retryLimit },
+                );
+                return;
+              }
+              void reenter(
+                { target: String(pr), note },
+                {
+                  boardDir: deps.boardDir,
+                  run: extras.ghRun ?? deps.run,
+                  cwd: repoRoot,
+                  reenteredBy: worker,
+                  resolveBaseSha: () => resolveBaseSha(repoRoot),
+                  resolveTaskFile: (tid) => findTaskFile(repoRoot, tid),
+                },
+              );
+            },
             findPr: (id) => findOpenPrNumber(extras.ghRun ?? deps.run, repoRoot, id),
           },
           listPrs: () => fetchHumanAttentionPrs(extras.ghRun ?? deps.run, repoRoot, deps.boardDir),
