@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-15T18:28:17.983Z","decisionId":"DEC-0241","chosenOptionId":"dispatch-fixes-up","rationale":"Only path that is both sanctioned (record on main) and not blocked: the executor-task option fails DoR until #1543 lands, and the operator asked for dispatch to do it.","by":"planner"}
