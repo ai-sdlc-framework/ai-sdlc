@@ -437,7 +437,7 @@ describe('runExecuteCommand — real-run mode', () => {
       const result = await runExecuteCommand({
         taskId: 'AISDLC-201',
         workDir: tmp,
-        spawnerKind: 'sdk',
+        spawnerKind: 'api-key',
         maxIterations: 2,
         dryRun: false,
         run: true,
