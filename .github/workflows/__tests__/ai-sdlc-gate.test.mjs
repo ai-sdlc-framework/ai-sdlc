@@ -1009,7 +1009,7 @@ describe('AISDLC-833: attestation-post.yml (workflow_run) posts the status and a
     const verify = names.findIndex((n) => /Verify attestation/.test(n));
     const post = names.findIndex((n) => /Validate verdict and post status/.test(n));
     assert.ok(stage > 0 && verify > stage && post > verify, 'stage, verify, post in order');
-    assert.match(String(job.steps[stage].run), /scripts\/stage-attestation-data\.sh/);
+    assert.match(String(job.steps[stage].run), /scripts\/stage-attestation-data-api\.sh/);
     assert.match(String(job.steps[verify].run), /node scripts\/verify-attestation\.mjs/);
     assert.equal(job.steps[verify].env.PR_HEAD_SHA, '${{ github.event.workflow_run.head_sha }}');
   });
