@@ -4,6 +4,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  appendDecisionEvent,
+  makeDecisionOpenedEvent,
+  makeOperatorAnsweredEvent,
+} from '../decisions/event-log.js';
+import {
   EVENT_LOG_REL,
   FileRefusal,
   assertAscii,
@@ -138,6 +143,54 @@ describe('cli-file', () => {
     expect(log).toContain('"operator-answered"');
     expect(log).toContain('"rationale":"why"');
     expect(ghCalls[0][ghCalls[0].indexOf('--title') + 1]).toMatch(/\(AISDLC-801\)$/);
+  });
+
+  describe('per-event store (AISDLC-852)', () => {
+    const open = () =>
+      makeDecisionOpenedEvent({
+        decisionId: 'DEC-0001',
+        source: 'ad-hoc',
+        scope: 'test',
+        summary: 's',
+        options: [
+          { id: 'opt-a', description: 'a' },
+          { id: 'opt-b', description: 'b' },
+        ],
+      } as Parameters<typeof makeDecisionOpenedEvent>[0]);
+
+    it('files from events/ only, writing one new per-event file (no legacy log)', () => {
+      sh(repo, 'rm', '-q', EVENT_LOG_REL);
+      sh(repo, 'commit', '-m', 'drop legacy');
+      sh(repo, 'push', 'origin', 'HEAD:refs/heads/main');
+      appendDecisionEvent(open(), { workDir: repo });
+      const r = fileDecision(repo, 'DEC-0001', { taskId: 'X-1', answer: 'opt-a', pr: false }, deps);
+      const files = sh(remote, 'ls-tree', '--name-only', `${r.branch}:.ai-sdlc/_decisions/events`)
+        .split('\n')
+        .filter((f) => f.includes('operator-answered'));
+      expect(files).toHaveLength(1);
+      expect(() => sh(remote, 'show', `${r.branch}:${EVENT_LOG_REL}`)).toThrow();
+    });
+
+    it('refuses a duplicate answer split across the two stores', () => {
+      writeFileSync(join(repo, EVENT_LOG_REL), JSON.stringify(open()) + '\n');
+      appendDecisionEvent(
+        makeOperatorAnsweredEvent({
+          decisionId: 'DEC-0001',
+          chosenOptionId: 'opt-a',
+          by: 'planner',
+        } as Parameters<typeof makeOperatorAnsweredEvent>[0]),
+        { workDir: repo },
+      );
+      expect(() =>
+        fileDecision(repo, 'DEC-0001', { taskId: 'X-1', answer: 'opt-b', pr: false }, deps),
+      ).toThrow(/duplicate \(decisionId, type\) pair DEC-0001 operator-answered/);
+    });
+
+    it('keeps appending to the legacy log when no events/ directory exists', () => {
+      commitMain(EVENT_LOG_REL, JSON.stringify(open()) + '\n');
+      const r = fileDecision(repo, 'DEC-0001', { taskId: 'X-1', answer: 'opt-a', pr: false }, deps);
+      expect(sh(remote, 'show', `${r.branch}:${EVENT_LOG_REL}`)).toContain('"operator-answered"');
+    });
   });
 
   function withOptions(): FileDeps {
