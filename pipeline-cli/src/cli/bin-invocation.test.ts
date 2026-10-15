@@ -411,36 +411,6 @@ describe('cli-usage: bin shim guard and end-to-end ingest', () => {
         timeout: 10_000,
         env: process.env,
       });
-<<<<<<< HEAD
-    writeFileSync(
-      join(projects, 's1.jsonl'),
-      `${call('m1')}\n${call('m1')}\n{broken SENTINEL-CANARY-BIN\n`,
-    );
-    const env: NodeJS.ProcessEnv = {
-      ...process.env,
-      AI_SDLC_USAGE_DIR: join(tmp, 'usage'),
-      // Hermetic: never walk the operator's real Codex home.
-      CODEX_HOME: join(tmp, 'codex-home'),
-    };
-    delete env['CLAUDE_CODE_ENV'];
-    delete env['CLAUDE_REMOTE_EXECUTION'];
-    delete env['AI_SDLC_USAGE_INGEST'];
-    const result = spawnSync(
-      process.execPath,
-      [binPath, 'ingest', '--json', '--projects-dir', join(tmp, 'projects')],
-      { cwd: PKG_ROOT, encoding: 'utf-8', stdio: 'pipe', timeout: 20_000, env },
-    );
-    const detail = `\n--- exit ${result.status} ---\n${result.stdout}\n${result.stderr}`;
-    expect(result.status, detail).toBe(0);
-    expect(result.stdout + result.stderr).not.toContain('SENTINEL');
-    expect(JSON.parse(result.stdout), detail).toMatchObject({
-      filesScanned: 1,
-      callsWritten: 1,
-      repeatsSkipped: 1,
-      errors: 1,
-    });
-  });
-=======
       const detail = `\n--- exit ${result.status} ---\n${result.stdout}\n${result.stderr}`;
       expect(result.status, `cli-usage --help did not exit 0:${detail}`).toBe(0);
       expect(/Usage:/.test(result.stdout + result.stderr), detail).toBe(true);
@@ -465,7 +435,12 @@ describe('cli-usage: bin shim guard and end-to-end ingest', () => {
         join(projects, 's1.jsonl'),
         `${call('m1')}\n${call('m1')}\n{broken SENTINEL-CANARY-BIN\n`,
       );
-      const env: NodeJS.ProcessEnv = { ...process.env, AI_SDLC_USAGE_DIR: join(tmp, 'usage') };
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        AI_SDLC_USAGE_DIR: join(tmp, 'usage'),
+        // Hermetic: never walk the operator's real ~/.codex sessions (AISDLC-887).
+        CODEX_HOME: join(tmp, 'codex-home'),
+      };
       delete env['CLAUDE_CODE_ENV'];
       delete env['CLAUDE_REMOTE_EXECUTION'];
       delete env['AI_SDLC_USAGE_INGEST'];
@@ -487,7 +462,6 @@ describe('cli-usage: bin shim guard and end-to-end ingest', () => {
     CLI_USAGE_SPAWN_TIMEOUT_MS,
   );
 
->>>>>>> f0240181e (fix(ci): scope a 30s timeout to the spawn-based cli-usage bin tests (AISDLC-887))
   it('two concurrent ingests never duplicate limit events', async () => {
     const projects = join(tmp, 'projects', 'p1');
     mkdirSync(projects, { recursive: true });
