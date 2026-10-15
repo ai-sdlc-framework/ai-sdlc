@@ -148,3 +148,7 @@ The executor's stale-dispatch check keys on a merged commit carrying the task id
 ## Superseded: Step 0.5 stale sync-branch decisions
 
 DEC-0186 and DEC-0188 (a resume blocked because `chore/sync-tasks-<sha>` already existed, resolved by deleting the branch) are superseded by AISDLC-858. Step 0.5 now names the sync branch by HEAD plus a hash of the untracked file set and reuses it: an open PR is logged and continued past, a local-only branch is pushed and its PR opened, and a closed-unmerged PR returns a blocked verdict naming the PR. No branch deletion, flag or env var is needed.
+
+## Superseded: DEC-0183 manifest branch correction
+
+DEC-0183 (dispatch corrects a manifest whose branch differs from the PR head with `write-manifest`) is superseded by AISDLC-851. `cli-dispatch enqueue` now writes the branch with the same builder Step 2 uses, so new manifests never carry a different name. For older manifests, the playbook accepts a worktree branch that exists on `origin` and rewrites the recorded branch itself; it still refuses when that branch is not on `origin`. No manual `write-manifest` correction is needed.

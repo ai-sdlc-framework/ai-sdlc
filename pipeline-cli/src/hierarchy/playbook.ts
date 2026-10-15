@@ -128,7 +128,15 @@ export function isSafeTaskPush(args: readonly string[], taskId: string): boolean
   return m !== null && isOwnTaskBranch(m[1]!, taskId);
 }
 
-const GIT_SUBCOMMANDS = new Set(['branch', 'fetch', 'status', 'rebase', 'commit', 'push']);
+const GIT_SUBCOMMANDS = new Set([
+  'branch',
+  'fetch',
+  'ls-remote',
+  'status',
+  'rebase',
+  'commit',
+  'push',
+]);
 
 /** Collaborators of {@link runPlaybook}; every one is injected in tests. */
 export interface PlaybookDeps {
@@ -153,6 +161,11 @@ export interface PlaybookDeps {
   /** Roster name of the dispatch session, recorded on every event. */
   workerId: string;
   exists?: (file: string) => boolean;
+  /**
+   * Rewrites the task's recorded manifest branch (AISDLC-851), called when the
+   * worktree's branch is on origin but the recorded one differs.
+   */
+  correctBranch?: (taskId: string, branch: string) => void;
 }
 
 /** What the playbook did with one failure. */
@@ -274,7 +287,16 @@ export async function runPlaybook(
       return { error: `the task branch '${oneLine(branch, 80)}' is protected by policy` };
     }
     if (verdict.pushedBranch && verdict.pushedBranch !== branch) {
-      return { error: 'the recorded branch differs from the one checked out in the worktree' };
+      // The pushed branch is the ground truth (AISDLC-851): accept the worktree's branch
+      // when origin has it, and correct the record; otherwise neither side is verified.
+      const onOrigin = await git(
+        ['ls-remote', '--exit-code', '--heads', 'origin', branch],
+        worktree,
+      );
+      if (onOrigin.status !== 0 || onOrigin.stdout.trim() === '') {
+        return { error: 'the recorded branch differs from the one checked out in the worktree' };
+      }
+      deps.correctBranch?.(taskId, branch);
     }
     return { worktree, branch };
   };

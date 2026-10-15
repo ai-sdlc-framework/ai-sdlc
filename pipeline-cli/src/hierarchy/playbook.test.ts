@@ -226,6 +226,29 @@ describe('mechanical conflict shape: rebase and lease push', () => {
     expect(outcome.result).toBe('escalated');
     expect(pushes()).toEqual([]);
   });
+
+  it('accepts a worktree branch that is on origin and corrects the recorded one (AISDLC-851)', async () => {
+    results['ls-remote'] = ok(`abc\trefs/heads/${BRANCH}\n`);
+    const corrected: [string, string][] = [];
+    const outcome = await runPlaybook(
+      verdict({ pushedBranch: 'ai-sdlc/aisdlc-9' }),
+      deps({ correctBranch: (id, b) => void corrected.push([id, b]) }),
+    );
+    expect(outcome.result).toBe('done');
+    expect(corrected).toEqual([['AISDLC-9', BRANCH]]);
+  });
+
+  it('still refuses when the worktree branch is not on origin', async () => {
+    results['ls-remote'] = { status: 2, stdout: '', stderr: '' };
+    const corrected: string[] = [];
+    const outcome = await runPlaybook(
+      verdict({ pushedBranch: 'ai-sdlc/aisdlc-9' }),
+      deps({ correctBranch: (id) => void corrected.push(id) }),
+    );
+    expect(outcome.result).toBe('escalated');
+    expect(corrected).toEqual([]);
+    expect(pushes()).toEqual([]);
+  });
 });
 
 describe('the playbook never pushes to main or master', () => {

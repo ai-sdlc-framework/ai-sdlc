@@ -64,6 +64,7 @@ import { persistDecisionLog } from '../decisions/remote-persist.js';
 import { DEFAULT_BOARD_DIR, TASK_ID_RE } from '../dispatch/board.js';
 import { enqueueTasks, type EnqueueEntry } from '../dispatch/enqueue.js';
 import { requeueFailed } from '../dispatch/requeue.js';
+import { correctManifestBranch } from '../dispatch/resume.js';
 import { DEFAULT_REQUEUE_RETRY_LIMIT } from '../dispatch/session-reaper.js';
 import { DECISION_ID_RE } from '../dispatch/verdict-fields.js';
 import {
@@ -653,6 +654,7 @@ export async function runHierarchyCli(
                 baseSha: resolveBaseSha(repoRoot),
                 dispatchedBy: worker,
                 resolveTaskFile: (id) => findTaskFile(repoRoot, id),
+                workDir: repoRoot,
               })),
           clear: (o) =>
             clearExecutor(
@@ -676,6 +678,7 @@ export async function runHierarchyCli(
                 requeueFailed(deps.boardDir, id, retryLimit === undefined ? {} : { retryLimit }),
               emit,
               workerId: worker,
+              correctBranch: (id, b) => void correctManifestBranch(deps.boardDir, id, b),
             }),
           operational,
           stall: {
