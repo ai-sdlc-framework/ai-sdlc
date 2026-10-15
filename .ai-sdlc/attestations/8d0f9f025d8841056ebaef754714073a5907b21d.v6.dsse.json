@@ -79,6 +79,11 @@
     "requiredSet": "correctness-only",
     "reason": "every path is a test, fixture or snapshot",
     "triggeringPaths": [],
-    "appliedReviewers": ["correctness-reviewer", "security-reviewer", "correctness-reviewer", "security-reviewer"]
+    "appliedReviewers": [
+      "correctness-reviewer",
+      "security-reviewer",
+      "correctness-reviewer",
+      "security-reviewer"
+    ]
   }
 }
