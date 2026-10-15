@@ -817,4 +817,29 @@ describe('stall check (AISDLC-826)', () => {
     expect(r.stalled![0]!.requeue).toEqual({ done: false, reason: 'limit' });
     expect(r.reports.some((x) => x.text.includes('not re-queued (limit)'))).toBe(true);
   });
+
+  it('lists PRs needing a human, with a stall line past 24h (AISDLC-888)', async () => {
+    const created = new Date(clock - 30 * 3_600_000).toISOString();
+    const result = await runDispatchTick({
+      ...deps(),
+      listPrs: () => [
+        { number: 5, title: 'x [needs-human-attention]', createdAt: created, isDraft: false },
+        { number: 6, title: 'plain', createdAt: created, isDraft: false },
+      ],
+    });
+    expect(result.humanAttention?.map((r) => r.number)).toEqual([5]);
+    const texts = result.reports.map((r) => r.text);
+    expect(texts.some((t) => t.startsWith('PR #5 '))).toBe(true);
+    expect(texts).toContain('PR #5 needs a human for 30h');
+  });
+
+  it('survives a throwing PR list', async () => {
+    const result = await runDispatchTick({
+      ...deps(),
+      listPrs: () => {
+        throw new Error('gh down');
+      },
+    });
+    expect(result.humanAttention).toBeUndefined();
+  });
 });

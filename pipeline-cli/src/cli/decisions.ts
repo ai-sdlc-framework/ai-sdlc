@@ -20,6 +20,7 @@
 
 import { resolveCatalogRoot } from '../decisions/catalog-root.js';
 import { existsSync, readFileSync } from 'node:fs';
+import { join as joinPath } from 'node:path';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
@@ -114,6 +115,9 @@ import {
   nextDecisionIdDurable,
   persistDecisionLog,
 } from '../decisions/remote-persist.js';
+import { classifyHumanAttention, fetchHumanAttentionPrs } from '../hierarchy/human-attention.js';
+import { DEFAULT_BOARD_DIR } from '../dispatch/board.js';
+import { createSystemRunner } from '../hierarchy/system-runner.js';
 import { renderOperatorDigestMarkdown, runOperatorDigest } from '../decisions/operator-digest.js';
 import {
   afterAnswer,
@@ -1374,6 +1378,14 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
           workDir,
           ...(typeof argv.since === 'string' ? { since: argv.since } : {}),
           mark: Boolean(argv.mark),
+          humanPrs: (now) => {
+            const prs = fetchHumanAttentionPrs(
+              createSystemRunner(),
+              workDir,
+              joinPath(workDir, DEFAULT_BOARD_DIR),
+            );
+            return classifyHumanAttention(prs ?? [], now);
+          },
         });
         if (String(argv.format) === 'json') {
           emit({ ok: true, digest });

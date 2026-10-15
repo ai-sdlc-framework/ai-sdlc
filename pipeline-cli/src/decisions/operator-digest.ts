@@ -19,6 +19,7 @@ import { join } from 'node:path';
 
 import { loadDecisionsConfig, resolveTimeboxConfig } from './decisions-config.js';
 import { readDecisionEvents, resolveDecisionsDir } from './event-log.js';
+import { formatHumanAttentionRow, type HumanAttentionRow } from '../hierarchy/human-attention.js';
 import type {
   AutoExpiredEvent,
   DecisionEvent,
@@ -169,6 +170,8 @@ export interface OperatorDigest {
   pending: DigestPending[];
   /** Every merged change to governance config in the window, with its PR (visibility only). */
   governanceChanges?: GovernanceChange[];
+  /** Open PRs that need a human (AISDLC-888); the section is omitted when empty or absent. */
+  humanPrs?: HumanAttentionRow[];
   /** Default class (b) timebox in hours, from config (DEC-0059). */
   defaultTimeboxHours?: number;
 }
@@ -334,6 +337,12 @@ export function renderOperatorDigestMarkdown(d: OperatorDigest): string {
       );
     }
   }
+  if (d.humanPrs && d.humanPrs.length > 0) {
+    lines.push('', `## PRs needing a human (${d.humanPrs.length})`, '');
+    for (const r of d.humanPrs) {
+      lines.push(`- ${formatHumanAttentionRow(r)}${r.stalled ? ' (older than 24h)' : ''}`);
+    }
+  }
   lines.push('', `## Timeboxed, still open (${d.pending.length})`, '');
   if (d.pending.length === 0) lines.push('None.', '');
   for (const p of d.pending) {
@@ -363,6 +372,8 @@ export interface RunOperatorDigestOpts {
   provenance?: ProvenanceResolver;
   /** Merged governance-config changes; defaults to git history of origin/main. */
   governanceChanges?: GovernanceChangeResolver;
+  /** Rows of PRs needing a human, from the shared classifier; omitted when not supplied. */
+  humanPrs?: (now: Date) => HumanAttentionRow[];
 }
 
 /** Build the digest from the event log, resolving the cutoff from the marker file. */
@@ -399,6 +410,8 @@ export function runOperatorDigest(opts: RunOperatorDigestOpts): OperatorDigest {
   digest.governanceChanges = (opts.governanceChanges ?? gitGovernanceChangeResolver(opts.workDir))(
     since,
   );
+  const humanPrs = opts.humanPrs?.(now) ?? [];
+  if (humanPrs.length > 0) digest.humanPrs = humanPrs;
   if (opts.mark) {
     mkdirSync(dir, { recursive: true });
     writeFileSync(markerPath, JSON.stringify({ at: digest.generatedAt }) + '\n');
