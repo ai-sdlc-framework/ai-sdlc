@@ -1,7 +1,7 @@
 ---
 id: RFC-0054
 title: PR Lifecycle as Event-Driven Dispatch (one state machine from branch pushed to merged)
-status: Ready for Review
+status: Draft
 lifecycle: Ready for Review
 author: 'Dominique Legault'
 created: 2026-10-13
