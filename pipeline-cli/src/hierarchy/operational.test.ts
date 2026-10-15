@@ -145,6 +145,14 @@ describe('parseOperationalPolicy', () => {
     expect([...p.operational]).toEqual(['requeue']);
   });
 
+  it('reads openTaskPrsReady, defaulting to false', () => {
+    expect(parseOperationalPolicy(doc('    openTaskPrsReady: true\n')).openTaskPrsReady).toBe(true);
+    expect(parseOperationalPolicy(doc('    allowForcePush: never\n')).openTaskPrsReady).toBe(false);
+    expect(parseOperationalPolicy(doc('    openTaskPrsReady: "yes"\n')).openTaskPrsReady).toBe(
+      false,
+    );
+  });
+
   it('treats true as the lease mode and everything else as never', () => {
     expect(parseOperationalPolicy(doc('    allowForcePush: true\n')).forcePushMode).toBe(
       'leaseOnOwnBranch',
@@ -193,6 +201,11 @@ describe('parseOperationalPolicy', () => {
 describe('loadOperationalPolicy', () => {
   it('denies everything outside a verified checkout', () => {
     const p = loadOperationalPolicy(tmp, tmp, () => null);
-    expect(p).toEqual({ operational: new Set(), forcePushMode: 'never', protectedBranches: [] });
+    expect(p).toEqual({
+      operational: new Set(),
+      forcePushMode: 'never',
+      protectedBranches: [],
+      openTaskPrsReady: false,
+    });
   });
 });

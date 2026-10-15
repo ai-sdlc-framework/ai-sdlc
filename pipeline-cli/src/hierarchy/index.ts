@@ -85,7 +85,7 @@ export {
   readMergeAuthors,
   type LandReport,
 } from './land-eligible.js';
-export { markReadyAfterCodeql, type MarkReadyReport } from './mark-ready.js';
+export { markReadyAfterCodeql, repoHasCodeql, type MarkReadyReport } from './mark-ready.js';
 export {
   decideAutoClear,
   markScheduled,

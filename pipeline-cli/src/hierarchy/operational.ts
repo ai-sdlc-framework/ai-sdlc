@@ -59,12 +59,15 @@ export interface OperationalPolicy {
   forcePushMode: ForcePushMode;
   /** Extra protected branch names; malformed entries are dropped (never a relaxation of the defaults). */
   protectedBranches: string[];
+  /** `governance.openTaskPrsReady: true` opens task PRs ready instead of draft (AISDLC-896); default false. */
+  openTaskPrsReady: boolean;
 }
 
 const DENY_ALL: () => OperationalPolicy = () => ({
   operational: new Set(),
   forcePushMode: 'never',
   protectedBranches: [],
+  openTaskPrsReady: false,
 });
 
 /** Parse the whole dispatch policy out of agent-role.yaml text. Unknown or malformed input grants nothing. */
@@ -77,7 +80,11 @@ export function parseOperationalPolicy(yamlText: string): OperationalPolicy {
   } catch {
     return DENY_ALL();
   }
-  type Governance = { allowForcePush?: unknown; protectedBranches?: unknown };
+  type Governance = {
+    allowForcePush?: unknown;
+    protectedBranches?: unknown;
+    openTaskPrsReady?: unknown;
+  };
   const gov = (doc as { spec?: { governance?: Governance } } | null)?.spec?.governance;
   const mode = gov?.allowForcePush;
   // AISDLC-710: unset (undefined) is the `leaseOnOwnBranch` default, matching the hook's
@@ -85,6 +92,7 @@ export function parseOperationalPolicy(yamlText: string): OperationalPolicy {
   if (mode === undefined || mode === true || mode === 'leaseOnOwnBranch') {
     policy.forcePushMode = 'leaseOnOwnBranch';
   }
+  policy.openTaskPrsReady = gov?.openTaskPrsReady === true;
   const listed = gov?.protectedBranches;
   if (Array.isArray(listed)) {
     policy.protectedBranches = (listed as unknown[]).filter(

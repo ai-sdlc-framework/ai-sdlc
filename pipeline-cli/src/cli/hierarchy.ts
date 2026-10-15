@@ -99,6 +99,7 @@ import {
   hierarchyUp,
   loadOperationalPolicy,
   markReadyAfterCodeql,
+  repoHasCodeql,
   createLander,
   landEligiblePrs,
   readMergeAuthors,
@@ -742,7 +743,10 @@ export async function runHierarchyCli(
             findPr: (id) => findOpenPrNumber(extras.ghRun ?? deps.run, repoRoot, id),
           },
           listPrs: () => fetchHumanAttentionPrs(extras.ghRun ?? deps.run, repoRoot, deps.boardDir),
-          markReady: () => markReadyAfterCodeql(extras.ghRun ?? deps.run, repoRoot),
+          markReady: () =>
+            markReadyAfterCodeql(extras.ghRun ?? deps.run, repoRoot, {
+              hasCodeql: repoHasCodeql(repoRoot),
+            }),
           landEligible:
             extras.landEligible ??
             (() =>

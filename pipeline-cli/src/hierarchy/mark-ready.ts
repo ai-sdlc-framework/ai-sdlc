@@ -8,7 +8,44 @@
  * a dead PR ready would arm auto-merge on it. This module never runs a merge command.
  */
 
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+
 import type { CommandRunner } from './types.js';
+
+/** True when the repository runs CodeQL: a workflow file that uses `github/codeql-action`. */
+export function repoHasCodeql(repoRoot: string): boolean {
+  const dir = path.join(repoRoot, '.github', 'workflows');
+  if (!existsSync(dir)) return false;
+  try {
+    return readdirSync(dir)
+      .filter((f) => /\.ya?ml$/i.test(f))
+      .some((f) => /github\/codeql-action/.test(readFileSync(path.join(dir, f), 'utf-8')));
+  } catch {
+    return false;
+  }
+}
+
+/** Task PRs are opened from `ai-sdlc/` branches; the no-CodeQL pass touches only those. */
+const TASK_BRANCH_RE = /^ai-sdlc\//;
+
+/**
+ * Classify the whole check rollup of a head, for a repo without CodeQL: `failed` on any
+ * failing check, `clean` when there is at least one check and all finished green,
+ * else `pending`.
+ */
+export function rollupState(checks: Check[]): 'clean' | 'failed' | 'pending' {
+  if (checks.length === 0) return 'pending';
+  const verdicts = checks.map((c) => (c.conclusion ?? c.state ?? '').toUpperCase());
+  if (
+    verdicts.some((v) =>
+      ['FAILURE', 'ERROR', 'TIMED_OUT', 'CANCELLED', 'STARTUP_FAILURE'].includes(v),
+    )
+  ) {
+    return 'failed';
+  }
+  return verdicts.every((v) => ['SUCCESS', 'SKIPPED', 'NEUTRAL'].includes(v)) ? 'clean' : 'pending';
+}
 
 /** What one pass did. */
 export interface MarkReadyReport {
@@ -29,6 +66,7 @@ interface ListedPr {
   number: number;
   body?: string;
   mergeStateStatus?: string;
+  headRefName?: string;
 }
 
 interface Check {
@@ -63,7 +101,12 @@ export function analyzeState(checks: Check[]): 'clean' | 'failed' | 'pending' {
 }
 
 /** Run one mark-ready pass with the injected command runner (`gh`). */
-export function markReadyAfterCodeql(run: CommandRunner, cwd: string): MarkReadyReport {
+export function markReadyAfterCodeql(
+  run: CommandRunner,
+  cwd: string,
+  opts: { hasCodeql?: boolean } = {},
+): MarkReadyReport {
+  const hasCodeql = opts.hasCodeql ?? true;
   const report: MarkReadyReport = { readied: [], skipped: [], failedAnalyze: [] };
   const listed = run(
     'gh',
@@ -76,7 +119,7 @@ export function markReadyAfterCodeql(run: CommandRunner, cwd: string): MarkReady
       '--limit',
       '50',
       '--json',
-      'number,body,mergeStateStatus',
+      'number,body,mergeStateStatus,headRefName',
     ],
     { cwd },
   );
@@ -90,7 +133,13 @@ export function markReadyAfterCodeql(run: CommandRunner, cwd: string): MarkReady
     return report;
   }
   for (const pr of prs) {
-    if (!Number.isInteger(pr.number) || !WAITS_FOR_CODEQL_RE.test(pr.body ?? '')) continue;
+    if (!Number.isInteger(pr.number)) continue;
+    // With CodeQL, only drafts that say so qualify; without it, any task-branch draft whose
+    // own PR checks are green qualifies (AISDLC-896).
+    const qualifies = hasCodeql
+      ? WAITS_FOR_CODEQL_RE.test(pr.body ?? '')
+      : TASK_BRANCH_RE.test(pr.headRefName ?? '');
+    if (!qualifies) continue;
     if (SUPERSEDED_RE.test(pr.body ?? '')) {
       report.skipped.push({ pr: pr.number, reason: 'the body marks it superseded' });
       continue;
@@ -116,7 +165,8 @@ export function markReadyAfterCodeql(run: CommandRunner, cwd: string): MarkReady
       report.skipped.push({ pr: pr.number, reason: 'a comment marks it superseded' });
       continue;
     }
-    const state = analyzeState(detail.statusCheckRollup ?? []);
+    const checks = detail.statusCheckRollup ?? [];
+    const state = hasCodeql ? analyzeState(checks) : rollupState(checks);
     if (state === 'failed') report.failedAnalyze.push(pr.number);
     if (state !== 'clean') continue;
     const ready = run('gh', ['pr', 'ready', String(pr.number)], { cwd });

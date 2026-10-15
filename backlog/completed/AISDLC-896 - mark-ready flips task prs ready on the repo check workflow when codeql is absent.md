@@ -1,7 +1,7 @@
 ---
 id: AISDLC-896
 title: 'fix(hierarchy): mark-ready flips task PRs ready on the repository''s own PR check workflow when the repo has no CodeQL'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [hierarchy, reliability, velocity, adopters]

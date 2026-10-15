@@ -18,6 +18,7 @@
  */
 
 import { join } from 'node:path';
+import { loadOperationalPolicy } from '../hierarchy/operational.js';
 import { leasePushPreflight, type LeasePreflight } from '../hierarchy/lease-preflight.js';
 import { writeVerdictFile } from '../cli/execute.js';
 import { resolveTargetBranch } from '../steps/02-compute-branch.js';
@@ -417,7 +418,7 @@ async function shipInner(
       [
         'pr',
         'create',
-        '--draft',
+        ...(loadOperationalPolicy(ctx.workDir, ctx.workDir).openTaskPrsReady ? [] : ['--draft']),
         '--title',
         title,
         '--body',
