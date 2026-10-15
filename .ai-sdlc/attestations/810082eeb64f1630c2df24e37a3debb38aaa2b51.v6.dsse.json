@@ -2,7 +2,7 @@
   "schemaVersion": "v6",
   "subject": {
     "digest": {
-      "sha1": "dd5e010c2894edcbb49bf136dc028e4ab9ce0fbb"
+      "sha1": "529e088fc74c2c5a2929a1b37769bdc9480c935a"
     }
   },
   "transcriptLeaves": [
@@ -27,6 +27,30 @@
       "verdictClass": "independent",
       "harnessTranscriptHash": "7f921d2ddc01395796b62bf5dae16d6fef8dad06096e69cb4929f6c3ecbb9e0a",
       "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 3,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "379df1b1fe5a1774d1992071aeb12920e63fac2292ffe5bc195e113d409e04ca",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "379df1b1fe5a1774d1992071aeb12920e63fac2292ffe5bc195e113d409e04ca",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 4,
+      "reviewerName": "test-reviewer-codex",
+      "transcriptHash": "4228d4769e291fa26c8da48b2f0d4ed4e8cefc7a542fd81dd01fb02abfe0d975",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "4228d4769e291fa26c8da48b2f0d4ed4e8cefc7a542fd81dd01fb02abfe0d975",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 5,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "b551e6b6683738e47b4cc29c9842785e42de70780c5834308e3e3ed961554234",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "b551e6b6683738e47b4cc29c9842785e42de70780c5834308e3e3ed961554234",
+      "independenceTier": "attested"
     }
   ],
   "merkleProofs": [
@@ -34,29 +58,56 @@
       "leafIndex": 0,
       "proof": [
         "4bac46f2f44368ab23e9bc884de3570fad8ee37f7d8ef655b0233b4740778128",
-        "a5dc16bf33a82fc40a3a4e4423eb4928d109b860a09006052a4195e4ef7ccc3b"
+        "a844dceac8907c8ae94ee18492d1de3a2c4347efd3e66d4214fc337f029e95ca",
+        "718cfd4b6ac3c28342b97a00925bcb275f54fc1a1556be7e087ebdacce02c9aa"
       ]
     },
     {
       "leafIndex": 1,
       "proof": [
         "5a9fa778c96ee22b03598077d4750728c75027c60f0f0dfce4b5349da02f269c",
-        "a5dc16bf33a82fc40a3a4e4423eb4928d109b860a09006052a4195e4ef7ccc3b"
+        "a844dceac8907c8ae94ee18492d1de3a2c4347efd3e66d4214fc337f029e95ca",
+        "718cfd4b6ac3c28342b97a00925bcb275f54fc1a1556be7e087ebdacce02c9aa"
       ]
     },
     {
       "leafIndex": 2,
       "proof": [
+        "fdc3a3129d210c069f3135f442ceae0840f250027e24f4a2061374f92d973585",
+        "77542e2b9e8c8ec524b2eb83d454cd82be8619b7dbede328a74e1400e5cf1794",
+        "718cfd4b6ac3c28342b97a00925bcb275f54fc1a1556be7e087ebdacce02c9aa"
+      ]
+    },
+    {
+      "leafIndex": 3,
+      "proof": [
         "9f9fab909e928ff36e71f7b61403df8a9db83c13ba5a96e975fbbfb76cdbcc8f",
-        "77542e2b9e8c8ec524b2eb83d454cd82be8619b7dbede328a74e1400e5cf1794"
+        "77542e2b9e8c8ec524b2eb83d454cd82be8619b7dbede328a74e1400e5cf1794",
+        "718cfd4b6ac3c28342b97a00925bcb275f54fc1a1556be7e087ebdacce02c9aa"
+      ]
+    },
+    {
+      "leafIndex": 4,
+      "proof": [
+        "70a4cd01718d4ab2061020720a8d403299a8dd36d7b564f08dfd4ad83099e29f",
+        "fb1076dd62fe55cf7a96ced42d1765075bec823a3122f422806a36c057d604e2",
+        "6db9626e6ef491353d8ef6dc8db231ba11306999c2225ca46ff43d1d6515c7b0"
+      ]
+    },
+    {
+      "leafIndex": 5,
+      "proof": [
+        "7727e8fa6bc8b3cc24d4928a7bd9e5ca553eadaca19b6076345fce0c1b244c57",
+        "fb1076dd62fe55cf7a96ced42d1765075bec823a3122f422806a36c057d604e2",
+        "6db9626e6ef491353d8ef6dc8db231ba11306999c2225ca46ff43d1d6515c7b0"
       ]
     }
   ],
-  "rootHash": "b280def2fa4eaf7ae4ac805b1f70917d719ade14bc24e3ebaa4aa63dab5947de",
-  "rootSignature": "yy0Mr9Hf+YPv6EHoy6TwX2lZQXidQMPWQFPQ7/DrhUH1s87iAZS6Ign9VRIy3PpGUVTagBNcoWKj7Cp4mq9VBg==",
-  "nonce": "63a67775c0794d8b491efbc730b45f2ab579dce9fa59656da6b1c65c0208e35d",
-  "leafCount": 3,
-  "signedAt": "2026-10-15T16:36:34.141Z",
+  "rootHash": "82608bcd964ac562bf848dcf40f1fd4a676ff6a90ae835d53e79e4a883f21cf1",
+  "rootSignature": "KUxwx96ESxROlJiiZC3CSY6OxtaU5FO+i49BSfg04gKXFdxX0whSbZOcKSsGxGFF8O+EyZgILJlq2xTOoUwyDw==",
+  "nonce": "cf5721ca4b30cb051983885ebbe7c743db72d878af8e85a88e385f694bb8c2ff",
+  "leafCount": 6,
+  "signedAt": "2026-10-15T16:38:54.007Z",
   "signerIdentity": "dominique@local:doms-macbook",
   "reviewScope": {
     "classification": "full",
@@ -64,6 +115,13 @@
     "requiredSet": "three",
     "reason": "trust-chain-path",
     "triggeringPaths": [".ai-sdlc/gates.yaml", ".github/workflows/ai-sdlc-gate.yml"],
-    "appliedReviewers": ["code-reviewer-codex", "test-reviewer-codex", "security-reviewer"]
+    "appliedReviewers": [
+      "code-reviewer-codex",
+      "test-reviewer-codex",
+      "security-reviewer",
+      "code-reviewer-codex",
+      "test-reviewer-codex",
+      "security-reviewer"
+    ]
   }
 }
