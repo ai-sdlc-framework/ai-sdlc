@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-15T18:40:41.966Z","decisionId":"DEC-0246","chosenOptionId":"fix-manifest","rationale":"Renumbered from DEC-0237 (id allocation collision; the DEC-0237 answer realign-manifest is an option of the AISDLC-910 record only). Same shape as DEC-0240: dispatch realigns the AISDLC-908 manifest branch.","by":"planner"}
