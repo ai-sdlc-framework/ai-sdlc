@@ -79,6 +79,11 @@
     "requiredSet": "two",
     "reason": "diff touches non-test, non-docs paths",
     "triggeringPaths": [],
-    "appliedReviewers": ["correctness-reviewer", "security-reviewer", "correctness-reviewer", "security-reviewer"]
+    "appliedReviewers": [
+      "correctness-reviewer",
+      "security-reviewer",
+      "correctness-reviewer",
+      "security-reviewer"
+    ]
   }
 }
