@@ -1997,6 +1997,91 @@ export function checkBacklogDriftWarnings(ctx: DoctorRunContext): DoctorCheckRes
   };
 }
 
+// ── Check: required consumer config manifest (AISDLC-910) ───────────────
+
+/** Locate `cli-init.mjs` (the manifest owner) in the project, its node_modules, or the plugin install. */
+function resolveCliInit(ctx: DoctorRunContext): string | undefined {
+  const pluginDir = resolvePluginDir(ctx);
+  const candidates = [
+    join(ctx.projectDir, 'pipeline-cli', 'bin', 'cli-init.mjs'),
+    join(ctx.projectDir, 'node_modules', '@ai-sdlc', 'pipeline-cli', 'bin', 'cli-init.mjs'),
+    ...(pluginDir
+      ? [join(pluginDir, 'node_modules', '@ai-sdlc', 'pipeline-cli', 'bin', 'cli-init.mjs')]
+      : []),
+  ];
+  return candidates.find((c) => ctx.adapters.exists(c));
+}
+
+interface ManifestCheckReport {
+  missing: { id: string; path: string; since: string; operatorInput: boolean; title: string }[];
+  remediation: string;
+}
+
+/**
+ * Reports the same missing entries, with the same wording, as the `/ai-sdlc
+ * execute` Step 1 preflight: both come from `cli-init --check`, which reads the
+ * one manifest in pipeline-cli.
+ */
+export function checkConfigManifest(ctx: DoctorRunContext): DoctorCheckResult[] {
+  const cli = resolveCliInit(ctx);
+  if (!cli) {
+    return [
+      {
+        id: 'config-manifest',
+        severity: 'warn',
+        title: 'could not locate pipeline-cli cli-init; required config was not checked',
+        remediation: 'Run `ai-sdlc-plugin/scripts/install-runtime-deps.sh` and re-run doctor',
+      },
+    ];
+  }
+  const res = ctx.adapters.runCommand('node', [
+    cli,
+    '--check',
+    '--format',
+    'json',
+    '--project-dir',
+    ctx.projectDir,
+  ]);
+  let report: ManifestCheckReport;
+  try {
+    report = JSON.parse(res.stdout) as ManifestCheckReport;
+  } catch {
+    return [
+      {
+        id: 'config-manifest',
+        severity: 'warn',
+        title: 'cli-init --check produced no readable report',
+        remediation: res.stderr?.trim() || undefined,
+      },
+    ];
+  }
+  if (report.missing.length === 0) {
+    return [
+      { id: 'config-manifest', severity: 'pass', title: 'all required config entries present' },
+    ];
+  }
+  return report.missing.map((m) => ({
+    id: `config-manifest:${m.id}`,
+    severity: 'fail' as const,
+    title: m.title,
+    remediation: report.remediation,
+    anonymizableEvidence: { path: m.path, since: m.since, operatorInput: m.operatorInput },
+  }));
+}
+
+/** `doctor --fix`: scaffold the entries that need no operator input. */
+export function fixConfigManifest(ctx: DoctorRunContext): DoctorFixResult {
+  const cli = resolveCliInit(ctx);
+  if (!cli) return { id: 'config-manifest', applied: false, detail: 'cli-init not found' };
+  const res = ctx.adapters.runCommand('node', [cli, '--fix', '--project-dir', ctx.projectDir]);
+  const created = res.stdout.split('\n').filter((l) => l.startsWith('created '));
+  return {
+    id: 'config-manifest',
+    applied: res.exitCode === 0 && created.length > 0,
+    detail: created.length > 0 ? created.join('; ') : 'nothing to scaffold without operator input',
+  };
+}
+
 // ── Registry ──────────────────────────────────────────────────────────────
 
 /**
@@ -2004,6 +2089,13 @@ export function checkBacklogDriftWarnings(ctx: DoctorRunContext): DoctorCheckRes
  * contract. Order here is also render order.
  */
 export const DOCTOR_CHECKS: DoctorCheck[] = [
+  {
+    id: 'config-manifest',
+    description:
+      'Required .ai-sdlc config entries from the pipeline-cli manifest; same wording as the execute preflight (AISDLC-910).',
+    run: checkConfigManifest,
+    fix: fixConfigManifest,
+  },
   {
     id: 'plugin-version',
     description: 'Plugin installed version vs. latest published (reuses check-plugin-version.js).',

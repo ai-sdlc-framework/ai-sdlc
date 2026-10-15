@@ -66,8 +66,9 @@ function cleanup() {
   if (tempHome && existsSync(tempHome)) rmSync(tempHome, { recursive: true, force: true });
 }
 
-async function runHook({ env = {}, args = [], input = '{}' } = {}) {
+async function runHook({ env = {}, args = [], input = '{}', cwd } = {}) {
   const child = execFile('node', [HOOK, ...args], {
+    cwd: cwd ?? tempHome,
     env: {
       // Inherit PATH but isolate cache + plugin root + marketplace URL.
       PATH: process.env.PATH,
@@ -269,6 +270,56 @@ describe('check-plugin-version hook (AISDLC-89)', () => {
       assert.equal(serverHits, 1, 'stale cache must trigger one fetch');
       assert.match(stderr, /v0\.8\.1 available/);
     } finally {
+      cleanup();
+    }
+  });
+});
+
+describe('config version notice (AISDLC-910 AC6)', () => {
+  function project(withCli) {
+    const dir = join(
+      tmpdir(),
+      `aisdlc-910-proj-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+    if (withCli) {
+      mkdirSync(join(dir, 'pipeline-cli', 'bin'), { recursive: true });
+      writeFileSync(
+        join(dir, 'pipeline-cli', 'bin', 'cli-init.mjs'),
+        "if (process.argv.includes('--notice')) console.log('ai-sdlc: project config is 0.1.0, release requires 0.20.0; run `/ai-sdlc init`');\n",
+      );
+    }
+    return dir;
+  }
+
+  it('prints one line when the manifest owner reports an older configVersion', async () => {
+    const dir = project(true);
+    try {
+      writeFileSync(
+        join(tempRoot, '.claude-plugin', 'plugin.json'),
+        JSON.stringify({ name: 'ai-sdlc', version: '0.8.1' }),
+      );
+      const { code, stderr } = await runHook({ cwd: dir });
+      assert.equal(code, 0);
+      assert.match(stderr, /project config is 0\.1\.0, release requires 0\.20\.0/);
+      assert.equal(stderr.trim().split('\n').length, 1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      cleanup();
+    }
+  });
+
+  it('stays silent when the project has no pipeline-cli to ask', async () => {
+    const dir = project(false);
+    try {
+      writeFileSync(
+        join(tempRoot, '.claude-plugin', 'plugin.json'),
+        JSON.stringify({ name: 'ai-sdlc', version: '0.8.1' }),
+      );
+      const { stderr } = await runHook({ cwd: dir });
+      assert.equal(stderr, '');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
       cleanup();
     }
   });

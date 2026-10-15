@@ -142,6 +142,10 @@ function main() {
     return;
   }
 
+  // AISDLC-910: one line when the project's recorded configVersion is older than
+  // the newest required-config entry. Silent on every failure.
+  maybeConfigNotice();
+
   // Hook path: try cache first.
   const cached = readCache();
   if (cached && cached.latestVersion && Date.now() - Date.parse(cached.checkedAt) < CACHE_TTL_MS) {
@@ -171,6 +175,33 @@ function main() {
       verifyMcpServerTarball(installed);
       emitEmptyHookResponse();
     });
+}
+
+// ── AISDLC-910: config version notice ────────────────────────────────────
+//
+// The manifest lives in pipeline-cli (one source for init, the execute
+// preflight, doctor and this hook); this hook asks `cli-init --notice` rather
+// than carrying a second copy of the list.
+function maybeConfigNotice() {
+  try {
+    const projectDir = process.cwd();
+    if (!fs.existsSync(path.join(projectDir, '.ai-sdlc'))) return;
+    const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '..');
+    const candidates = [
+      path.join(projectDir, 'pipeline-cli', 'bin', 'cli-init.mjs'),
+      path.join(pluginRoot, 'node_modules', '@ai-sdlc', 'pipeline-cli', 'bin', 'cli-init.mjs'),
+    ];
+    const cli = candidates.find((c) => fs.existsSync(c));
+    if (!cli) return;
+    const out = childProcess.execFileSync(
+      process.execPath,
+      [cli, '--notice', '--project-dir', projectDir],
+      { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    if (out.trim()) process.stderr.write(`${out.trim()}\n`);
+  } catch {
+    // never block SessionStart
+  }
 }
 
 // ── AISDLC-439: MCP server tarball DSSE attestation verification ─────────

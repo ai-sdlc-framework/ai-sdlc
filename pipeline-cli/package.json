@@ -58,6 +58,7 @@
     "cli-staged-review": "bin/cli-staged-review.mjs",
     "cli-compliance-audit": "bin/cli-compliance-audit.mjs",
     "cli-import-spec": "bin/cli-import-spec.mjs",
+    "cli-init": "bin/cli-init.mjs",
     "cli-rfc": "bin/cli-rfc.mjs",
     "cli-context": "bin/cli-context.mjs",
     "cli-embedding-gc": "bin/cli-embedding-gc.mjs",

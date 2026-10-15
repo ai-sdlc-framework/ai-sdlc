@@ -58,6 +58,8 @@ import {
   checkBacklogDriftWarnings,
   fixUntrackedReviewLedgers,
   checkParentCheckoutState,
+  checkConfigManifest,
+  fixConfigManifest,
   fixWorktreeHooks,
   checkForcePushPolicy,
   readForcePushPolicy,
@@ -2236,5 +2238,88 @@ describe('checkLeasePushPreflight (AISDLC-798)', () => {
 
   it('is registered', () => {
     expect(DOCTOR_CHECKS.find((x) => x.id === 'lease-push-preflight')).toBeDefined();
+  });
+});
+
+describe('config-manifest check (AISDLC-910)', () => {
+  const report = {
+    missing: [
+      {
+        id: 'trusted-reviewers',
+        path: '.ai-sdlc/trusted-reviewers.yaml',
+        since: '0.10.0',
+        operatorInput: true,
+        title:
+          'missing required config .ai-sdlc/trusted-reviewers.yaml (keyring; required since 0.10.0)',
+      },
+    ],
+    remediation: 'Run `/ai-sdlc init` to scaffold it.',
+  };
+
+  function withCli(): void {
+    mkdirSync(join(tmpDir, 'pipeline-cli', 'bin'), { recursive: true });
+    writeFileSync(join(tmpDir, 'pipeline-cli', 'bin', 'cli-init.mjs'), '');
+  }
+
+  it('warns when cli-init cannot be located', () => {
+    const [r] = checkConfigManifest(makeCtx(makeAdapters()));
+    expect(r.severity).toBe('warn');
+  });
+
+  it('fails per missing entry using the preflight wording and the init command', () => {
+    withCli();
+    const results = checkConfigManifest(
+      makeCtx(
+        makeAdapters({ runCommand: () => ({ stdout: JSON.stringify(report), exitCode: 1 }) }),
+      ),
+    );
+    expect(results).toHaveLength(1);
+    expect(results[0].severity).toBe('fail');
+    expect(results[0].title).toBe(report.missing[0].title);
+    expect(results[0].remediation).toContain('/ai-sdlc init');
+  });
+
+  it('passes when nothing is missing and warns on unreadable output', () => {
+    withCli();
+    const ok = checkConfigManifest(
+      makeCtx(
+        makeAdapters({
+          runCommand: () => ({
+            stdout: JSON.stringify({ missing: [], remediation: '' }),
+            exitCode: 0,
+          }),
+        }),
+      ),
+    );
+    expect(ok[0].severity).toBe('pass');
+    const bad = checkConfigManifest(
+      makeCtx(
+        makeAdapters({ runCommand: () => ({ stdout: 'nope', exitCode: 2, stderr: 'boom' }) }),
+      ),
+    );
+    expect(bad[0].severity).toBe('warn');
+  });
+
+  it('--fix runs cli-init --fix and reports what was created', () => {
+    expect(fixConfigManifest(makeCtx(makeAdapters())).applied).toBe(false);
+    withCli();
+    let args: string[] = [];
+    const fix = fixConfigManifest(
+      makeCtx(
+        makeAdapters({
+          runCommand: (_c, a) => {
+            args = a;
+            return { stdout: 'created .ai-sdlc/review-policy.md\n', exitCode: 0 };
+          },
+        }),
+      ),
+    );
+    expect(args).toContain('--fix');
+    expect(fix.applied).toBe(true);
+    expect(fix.detail).toContain('review-policy.md');
+    const none = fixConfigManifest(
+      makeCtx(makeAdapters({ runCommand: () => ({ stdout: '', exitCode: 0 }) })),
+    );
+    expect(none.applied).toBe(false);
   });
 });

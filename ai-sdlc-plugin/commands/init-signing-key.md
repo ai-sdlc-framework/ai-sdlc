@@ -12,6 +12,12 @@ added to `.ai-sdlc/trusted-reviewers.yaml` via a follow-up onboarding PR — CI
 verifies signatures against that committed file and skips its own duplicate
 review when the attestation is valid (AISDLC-74).
 
+## Part of `/ai-sdlc init`
+
+Generating a signing key is a step of `/ai-sdlc init` (AISDLC-910): init reads
+the public key this command writes to build `.ai-sdlc/trusted-reviewers.yaml`.
+Run this first, then `/ai-sdlc init`.
+
 ## When to run this
 
 You only need to run this **once per machine** before your first `/ai-sdlc
