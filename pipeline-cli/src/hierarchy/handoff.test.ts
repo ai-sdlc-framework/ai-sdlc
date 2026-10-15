@@ -90,19 +90,32 @@ describe('handoff write', () => {
     const notes = `my notes\n\n${readFileSync(first.file, 'utf-8')}\ntrailing notes\n`;
     writeFileSync(first.file, notes);
     writeManifest(board, manifest('AISDLC-2'));
-    // a later day still reuses the existing dated file
+    // a later day starts a new dated file that carries the text outside the markers
     const second = writeHandoff({
       role: 'planner',
       name: 'p-planner',
       boardDir: board,
       now: () => new Date('2026-10-12T00:00:00.000Z'),
     });
-    expect(second.file).toBe(first.file);
+    expect(second.file).toBe(
+      path.join(repo, '.claude', 'memory', 'project_planner_handoff_2026_10_12.md'),
+    );
     expect(second.content).toContain('my notes');
     expect(second.content).toContain('trailing notes');
     expect(second.content).toContain('AISDLC-2');
     expect(second.content.split(HANDOFF_BEGIN)).toHaveLength(2);
     expect(second.content.split(HANDOFF_END)).toHaveLength(2);
+    const index = readFileSync(path.join(repo, '.claude', 'memory', 'MEMORY.md'), 'utf-8');
+    expect(index).toContain('(project_planner_handoff_2026_10_12.md)');
+    expect(index).not.toContain('2026_10_09');
+    // a same-day rewrite keeps the index unchanged
+    writeHandoff({
+      role: 'planner',
+      name: 'p-planner',
+      boardDir: board,
+      now: () => new Date('2026-10-12T05:00:00.000Z'),
+    });
+    expect(readFileSync(path.join(repo, '.claude', 'memory', 'MEMORY.md'), 'utf-8')).toBe(index);
   });
 
   it('refuses an unsafe session name', () => {

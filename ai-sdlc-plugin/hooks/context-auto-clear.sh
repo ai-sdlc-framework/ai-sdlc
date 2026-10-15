@@ -13,5 +13,6 @@ if [ ! -f "$SCRIPT" ]; then
   exit 0
 fi
 
-node "$SCRIPT" >/dev/null 2>&1 || true
+# Output goes to stderr/stdout of the hook runner, never discarded (AISDLC-886).
+node "$SCRIPT" || true
 exit 0

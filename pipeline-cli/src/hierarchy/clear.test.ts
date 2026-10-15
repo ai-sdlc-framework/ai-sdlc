@@ -3,7 +3,8 @@
  * runner; the roster and board are temp directories; no session is started.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -444,9 +445,20 @@ describe('clearSelf', () => {
     expect(spawned).toHaveLength(1);
     const a = spawned[0]!.args;
     expect(spawned[0]!.file).toBe('sh');
-    // lead delay, pane, /clear, resume delay, resume command, all as arguments
-    expect(a.slice(3)).toEqual(['20', '%3', '/clear', '45', '/ai-sdlc operator-dispatch']);
-    expect(a[1]).toMatch(/send-keys -t "\$2" -l -- "\$3".*sleep "\$4".*"\$5"/);
+    // lead delay, pane, /clear, resume hold, resume command, watch dir, log, name, timeouts
+    expect(a.slice(3)).toEqual([
+      '20',
+      '%3',
+      '/clear',
+      '45',
+      '/ai-sdlc operator-dispatch',
+      '',
+      path.join(board, 'handoff', 'auto-clear.log'),
+      'operator-dispatch',
+      '120',
+      '60',
+    ]);
+    expect(a[1]).toMatch(/send-keys -t "\$pane" -l -- "\$1"/);
     // nothing is typed synchronously
     expect(sends()).toHaveLength(0);
   });
@@ -463,7 +475,7 @@ describe('clearSelf', () => {
       selfDeps(),
     );
     const a = spawned[0]!.args;
-    expect(a.slice(3)).toEqual([
+    expect(a.slice(3, 9)).toEqual([
       '20',
       '%3',
       '/clear',
@@ -472,9 +484,11 @@ describe('clearSelf', () => {
       '/board',
     ]);
     // the marker is made before the lead delay; the wait ends on a newer file in the board
-    expect(a[1]).toMatch(/^m=\$\(mktemp\)/);
-    expect(a[1]).toMatch(/find "\$6\/briefs" "\$6\/done" "\$6\/failed" -type f -newer "\$m"/);
-    expect(a[1]).toMatch(/-lt "\$4"/);
+    expect(a[1]).toMatch(/\[ -n "\$watch" \] && \{ m=\$\(mktemp\)/);
+    expect(a[1]).toMatch(
+      /find "\$watch\/briefs" "\$watch\/done" "\$watch\/failed" -type f -newer "\$m"/,
+    );
+    expect(a[1]).toMatch(/-lt "\$hold"/);
   });
 
   it('refuses a caller that is not the dispatch session', () => {
@@ -513,6 +527,100 @@ describe('clearSelf', () => {
     expect(spawned).toHaveLength(0);
   });
 
+  describe('delivery with a fake tmux (real sh)', { timeout: 30_000 }, () => {
+    let dir: string;
+    let tlog: string;
+    beforeEach(() => {
+      dir = mkdtempSync(path.join(tmpdir(), 'fake-tmux-'));
+      tlog = path.join(dir, 'tmux.log');
+    });
+    afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+    /** Fake tmux: `busyPolls` capture-pane calls show a running turn; then the pane is quiet. */
+    function fakeTmux(busyPolls: number, comesBack: boolean): void {
+      writeFileSync(path.join(dir, 'n'), '0');
+      writeFileSync(
+        path.join(dir, 'tmux'),
+        `#!/bin/sh
+case "$1" in
+  send-keys) echo "$*" >> "${tlog}"; if [ "$4" = "-l" ] && [ "$6" = "/ai-sdlc:planner" ]; then touch "${dir}/resumed"; fi ;;
+  capture-pane)
+    n=$(cat "${dir}/n"); echo $((n+1)) > "${dir}/n"
+    if [ "$n" -lt ${busyPolls} ]; then echo "working (esc to interrupt) $n"
+    elif [ -f "${dir}/resumed" ] && ${comesBack}; then echo "esc to interrupt"
+    else echo "idle prompt"; fi ;;
+esac
+`,
+        { mode: 0o755 },
+      );
+    }
+
+    function deliver(): string[] {
+      seedRoster(
+        entry({ role: 'planner', name: 'planner', tmuxWindow: 'planner', paneId: '%5' }),
+        dispatch(),
+      );
+      const d = selfDeps();
+      const run2 = (file: string, args: readonly string[]) =>
+        args[0] === 'list-windows'
+          ? { status: 0, stdout: 'planner\n', stderr: '' }
+          : args[0] === 'display-message'
+            ? { status: 0, stdout: '%5\n', stderr: '' }
+            : d.run(file, args);
+      clearSelf(
+        {
+          self: 'planner',
+          role: 'planner',
+          leadSeconds: 0,
+          idleTimeoutSeconds: 4,
+          comebackTimeoutSeconds: 2,
+        },
+        { ...d, run: run2 },
+      );
+      const a = spawned[0]!.args;
+      const r = spawnSync('sh', ['-c', a[1]!, ...a.slice(2)], {
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+        encoding: 'utf-8',
+        timeout: 60_000,
+      });
+      expect(r.stderr).toBe('');
+      expect(r.status).toBe(0);
+      return existsSync(tlog) ? readFileSync(tlog, 'utf-8').trim().split('\n') : [];
+    }
+
+    it('waits for a running turn, empties the input line first and runs the resume command', () => {
+      fakeTmux(3, true);
+      const sent = deliver();
+      expect(sent).toEqual([
+        'send-keys -t %5 C-u',
+        'send-keys -t %5 -l -- /clear',
+        'send-keys -t %5 Enter',
+        'send-keys -t %5 C-u',
+        'send-keys -t %5 -l -- /ai-sdlc:planner',
+        'send-keys -t %5 Enter',
+      ]);
+      expect(existsSync(path.join(board, 'handoff', 'auto-clear.log'))).toBe(false);
+    });
+
+    it('sends nothing and logs when the pane never goes idle', () => {
+      fakeTmux(1000, true);
+      expect(deliver()).toEqual([]);
+      const log = readFileSync(path.join(board, 'handoff', 'auto-clear.log'), 'utf-8');
+      expect(log).toContain('planner: pane never became idle');
+      expect(log).toContain('/ai-sdlc:planner');
+    });
+
+    it('logs one line naming the session and command when it does not come back', () => {
+      fakeTmux(0, false);
+      expect(deliver()).toHaveLength(6);
+      const lines = readFileSync(path.join(board, 'handoff', 'auto-clear.log'), 'utf-8')
+        .trim()
+        .split('\n');
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatch(/planner: did not come back; command sent: \/ai-sdlc:planner$/);
+    });
+  });
+
   describe('as the planner', () => {
     it('schedules /clear then /ai-sdlc:planner on its own pane', () => {
       seedRoster(
@@ -532,7 +640,13 @@ describe('clearSelf', () => {
         { ...d, run },
       );
       expect(r).toMatchObject({ self: 'planner', paneId: '%5' });
-      expect(spawned[0]!.args.slice(3)).toEqual(['20', '%5', '/clear', '30', '/ai-sdlc:planner']);
+      expect(spawned[0]!.args.slice(3, 8)).toEqual([
+        '20',
+        '%5',
+        '/clear',
+        '30',
+        '/ai-sdlc:planner',
+      ]);
     });
   });
 
@@ -552,7 +666,13 @@ describe('clearSelf', () => {
         executorDeps(),
       );
       expect(r).toMatchObject({ self: 'executor-alpha', paneId: '%7', resumeAfterSeconds: 30 });
-      expect(spawned[0]!.args.slice(3)).toEqual(['20', '%7', '/clear', '30', '/ai-sdlc executor']);
+      expect(spawned[0]!.args.slice(3, 8)).toEqual([
+        '20',
+        '%7',
+        '/clear',
+        '30',
+        '/ai-sdlc executor',
+      ]);
       expect(sends()).toHaveLength(0);
     });
 

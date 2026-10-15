@@ -246,8 +246,12 @@ export function markScheduled(boardDir: string, name: string): void {
 
 /** Default wait before `/clear` is typed, so the calling turn can end first. */
 export const SELF_CLEAR_LEAD_SECONDS = 20;
-/** Default wait between `/clear` and the resume command. */
-export const SELF_CLEAR_RESUME_SECONDS = 60;
+/** Default longest wait for the pane to become idle before each keystroke group. */
+export const SELF_CLEAR_IDLE_TIMEOUT_SECONDS = 120;
+/** Default longest wait for the session to start a turn after the resume command. */
+export const SELF_CLEAR_COMEBACK_TIMEOUT_SECONDS = 60;
+/** Where a session that did not come back after a clear is recorded, under the board dir. */
+export const AUTO_CLEAR_LOG = path.join('handoff', 'auto-clear.log');
 /** The command the dispatch session re-issues after its own clear. */
 export const DISPATCH_RESUME_COMMAND = '/ai-sdlc operator-dispatch';
 /** The command an idle executor re-issues after its own clear. */
@@ -278,8 +282,16 @@ export interface ClearSelfOptions {
   self: string;
   /** Role of the calling session (default the dispatch session). */
   role?: 'operator-dispatch' | 'executor' | 'planner';
-  /** Seconds between `/clear` and the resume command (default 60). */
+  /**
+   * Optional seconds to hold the resume command after `/clear` (dispatch uses it as a
+   * wake-on-board upper bound). Default 0: the resume command is typed as soon as the
+   * pane is idle after `/clear`.
+   */
   resumeAfterSeconds?: number;
+  /** Longest wait for an idle pane before typing (default 120). */
+  idleTimeoutSeconds?: number;
+  /** Longest wait for the session to start a turn after the resume command (default 60). */
+  comebackTimeoutSeconds?: number;
   /** Seconds before `/clear` is typed (default 20). */
   leadSeconds?: number;
   /** The `TMUX_PANE` of the calling process; when set it must equal the roster pane. */
@@ -313,11 +325,15 @@ export function clearSelf(opts: ClearSelfOptions, deps: ClearSelfDeps): ClearSel
   if (typeof name !== 'string' || !EXECUTOR_NAME_RE.test(name)) {
     throw new Error(`'${String(name)}' is not a valid session name`);
   }
-  const resumeAfterSeconds = opts.resumeAfterSeconds ?? SELF_CLEAR_RESUME_SECONDS;
+  const resumeAfterSeconds = opts.resumeAfterSeconds ?? 0;
+  const idleTimeoutSeconds = opts.idleTimeoutSeconds ?? SELF_CLEAR_IDLE_TIMEOUT_SECONDS;
+  const comebackTimeoutSeconds = opts.comebackTimeoutSeconds ?? SELF_CLEAR_COMEBACK_TIMEOUT_SECONDS;
   const leadSeconds = opts.leadSeconds ?? SELF_CLEAR_LEAD_SECONDS;
   for (const [label, v] of [
     ['resume delay', resumeAfterSeconds],
     ['lead delay', leadSeconds],
+    ['idle timeout', idleTimeoutSeconds],
+    ['comeback timeout', comebackTimeoutSeconds],
   ] as const) {
     if (!Number.isInteger(v) || v < 0 || v > 3600) {
       throw new Error(`the ${label} must be a whole number of seconds from 0 to 3600`);
@@ -357,19 +373,40 @@ export function clearSelf(opts: ClearSelfOptions, deps: ClearSelfDeps): ClearSel
   }
   const target = resolveSendTarget(deps.run, entry.tmuxSession, entry.tmuxWindow, entry.paneId);
 
+  const watchDir = opts.wakeOnBoardDir;
   // Every value is passed as an argument, never interpolated into the script. The marker
   // is made before the lead delay, so a file written while this turn ends still wakes us.
-  const watchDir = opts.wakeOnBoardDir;
-  const wait = watchDir
-    ? 'sleep 5; i=0; while [ "$i" -lt "$4" ]; do ' +
-      'if [ -n "$(find "$6/briefs" "$6/done" "$6/failed" -type f -newer "$m" 2>/dev/null | head -n 1)" ]; ' +
-      'then break; fi; sleep 2; i=$((i+2)); done; rm -f "$m"; '
-    : 'sleep "$4"; ';
-  const script =
-    (watchDir ? 'm=$(mktemp) || exit 1; ' : '') +
-    'sleep "$1"; tmux send-keys -t "$2" -l -- "$3"; tmux send-keys -t "$2" Enter; ' +
-    wait +
-    'tmux send-keys -t "$2" -l -- "$5"; tmux send-keys -t "$2" Enter';
+  // Positional arguments: 1 lead, 2 pane, 3 /clear, 4 resume hold, 5 resume command,
+  // 6 board to watch ('' for none), 7 log file, 8 session name, 9 idle timeout,
+  // 10 comeback timeout. Polls run every 0.5 s.
+  const script = [
+    // functions see their own $1, so every argument is copied to a named variable first
+    'lead=$1; pane=$2; clr=$3; hold=$4; cmd=$5; watch=$6; logf=$7; who=$8; idlet=$9; backt=${10}',
+    '[ -n "$watch" ] && { m=$(mktemp) || exit 1; }',
+    'log() { mkdir -p "$(dirname "$logf")"; printf "%s %s: %s\\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$who" "$1" >> "$logf"; }',
+    // idle: the pane text is unchanged across two polls and shows no running turn
+    'idle() { n=0; prev=; st=0; while [ "$n" -lt $(( idlet * 2 )) ]; do ' +
+      'cur=$(tmux capture-pane -p -t "$pane" 2>/dev/null) || return 1; ' +
+      'if [ "$cur" = "$prev" ] && ! printf "%s" "$cur" | grep -q "esc to interrupt"; ' +
+      'then st=$((st+1)); [ "$st" -ge 2 ] && return 0; else st=0; fi; ' +
+      'prev=$cur; sleep 0.5; n=$((n+1)); done; return 1; }',
+    // type: empty the input line first so nothing is appended to text already there
+    'type() { tmux send-keys -t "$pane" C-u; tmux send-keys -t "$pane" -l -- "$1"; tmux send-keys -t "$pane" Enter; }',
+    'sleep "$lead"',
+    'idle || { log "pane never became idle; did not send: $clr then $cmd"; exit 0; }',
+    'type "$clr"',
+    'sleep 1',
+    'if [ -n "$watch" ]; then sleep 5; i=0; while [ "$i" -lt "$hold" ]; do ' +
+      'if [ -n "$(find "$watch/briefs" "$watch/done" "$watch/failed" -type f -newer "$m" 2>/dev/null | head -n 1)" ]; ' +
+      'then break; fi; sleep 2; i=$((i+2)); done; rm -f "$m"; else sleep "$hold"; fi',
+    'idle || { log "pane not idle after /clear; did not send: $cmd"; exit 0; }',
+    'type "$cmd"',
+    'n=0; while [ "$n" -lt $(( backt * 2 )) ]; do ' +
+      'tmux capture-pane -p -t "$pane" 2>/dev/null | grep -q "esc to interrupt" && exit 0; ' +
+      'sleep 0.5; n=$((n+1)); done',
+    'log "did not come back; command sent: $cmd"',
+  ].join('\n');
+  const logFile = path.join(deps.boardDir, AUTO_CLEAR_LOG);
   (deps.spawnDetached ?? defaultSpawnDetached)('sh', [
     '-c',
     script,
@@ -383,12 +420,16 @@ export function clearSelf(opts: ClearSelfOptions, deps: ClearSelfDeps): ClearSel
       : role === 'planner'
         ? PLANNER_RESUME_COMMAND
         : DISPATCH_RESUME_COMMAND,
-    ...(watchDir ? [watchDir] : []),
+    watchDir ?? '',
+    logFile,
+    name,
+    String(idleTimeoutSeconds),
+    String(comebackTimeoutSeconds),
   ]);
   // Any scheduled clear, manual or automatic, debounces the Stop hook for this session.
   markScheduled(deps.boardDir, name);
   deps.log?.(
-    `scheduled '${name}' to clear in ${leadSeconds}s and resume ${resumeAfterSeconds}s later`,
+    `scheduled '${name}' to clear in ${leadSeconds}s and resume as soon as the pane is idle`,
   );
   return { self: name, paneId: entry.paneId, leadSeconds, resumeAfterSeconds };
 }
