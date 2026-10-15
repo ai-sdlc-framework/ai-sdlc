@@ -110,14 +110,19 @@ Return a JSON object as your final message (no other text):
   "prUrl": "https://github.com/<org>/<repo>/pull/<n>",
   "verifications": {
     "build": "passed | failed | skipped",
-    "test": "passed | failed | skipped",
+    "test": "passed | failed | skipped | waived",
     "lint": "passed | failed | skipped",
     "format": "passed | failed | skipped"
   },
   "acceptanceCriteriaMet": [1, 2, 3],
+  "testWaiver": {"tests": ["<test name>"], "passesAlone": "<evidence>", "untouched": true},
   "notes": "anything the reviewers or operator should know (optional)"
 }
 ```
+
+### Local test waiver (DEC-0202)
+
+A locally failing test is waived only when (1) it passes when re-run alone and (2) the task diff does not touch the test or the source it exercises. Then return `verifications.test: "waived"` with a complete `testWaiver` (`tests` non-empty, `passesAlone` evidence, `untouched: true`); the PR body carries it. Without it the return is rejected. `build`, `lint` and `format` are never waived; everything else blocks.
 
 ### Required fields
 

@@ -184,6 +184,14 @@ export function composeBody(opts: PushAndPrOptions): string {
   });
   const notesBlock = judgmentNotes ? `\n${judgmentNotes}` : '';
 
+  const waiver = opts.developerReturn.testWaiver;
+  const waiverBlock =
+    opts.developerReturn.verifications?.test === 'waived' && waiver
+      ? `\n## Local test waiver (DEC-0202)\n\nFailing locally, waived because each passes when re-run alone and the task diff does not touch it or the source it exercises:\n\n${waiver.tests
+          .map((t) => `- ${t}`)
+          .join('\n')}\n\nPasses-alone evidence: ${waiver.passesAlone}\n`
+      : '';
+
   const footer = isGhIssue ? `\nCloses #${opts.issueNumber}\n` : `\nReferences ${opts.taskId}\n`;
 
   return (
@@ -193,6 +201,7 @@ export function composeBody(opts: PushAndPrOptions): string {
     `## Changed files\n${filesBlock}\n` +
     reviewBlock +
     notesBlock +
+    waiverBlock +
     footer
   );
 }

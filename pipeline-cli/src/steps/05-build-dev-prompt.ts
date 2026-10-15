@@ -62,6 +62,14 @@ function fenceSafe(text: string): string {
     .join('\n');
 }
 
+/** DEC-0202: the two conditions under which a locally failing test is waived. Quoted in developer.md. */
+export const TEST_WAIVER_RULE =
+  `## Local test waiver (DEC-0202)\n` +
+  `A locally failing test is waived only when (1) it passes when re-run alone and (2) the task diff ` +
+  `does not touch the test or the source it exercises. Then return \`verifications.test: "waived"\` with ` +
+  `\`testWaiver: {"tests": [<names>], "passesAlone": "<evidence>", "untouched": true}\`. ` +
+  `Anything else blocks; build, lint and format are never waived.`;
+
 export async function buildDeveloperPrompt(
   opts: BuildDeveloperPromptOptions,
 ): Promise<DeveloperPromptResult> {
@@ -103,6 +111,7 @@ export async function buildDeveloperPrompt(
     `## Permitted external paths (cross-repo writes)\n${externalPaths}\n\n` +
     `## Verification commands (run before commit)\n` +
     `- pnpm build\n- pnpm test\n- pnpm lint\n- pnpm format:check\n\n` +
+    `${TEST_WAIVER_RULE}\n\n` +
     `## Commit message template\n` +
     `<conventional-commit type>: <subject> (${opts.taskId})\n\n` +
     `<body>\n\n` +

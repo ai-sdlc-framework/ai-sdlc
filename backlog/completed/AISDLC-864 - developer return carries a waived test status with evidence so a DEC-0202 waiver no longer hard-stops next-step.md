@@ -2,7 +2,7 @@
 id: AISDLC-864
 title: >-
   developer return carries a waived test status with evidence so a DEC-0202 waiver no longer hard-stops next-step
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels:

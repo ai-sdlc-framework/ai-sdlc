@@ -35,6 +35,33 @@ import { runAcCoverage, type AcCoverageHook } from '../judgment/agent-output-che
 
 const VALID_VERIFICATION_STATUSES: VerificationStatus[] = ['passed', 'failed', 'skipped'];
 
+/** Only `test` may be waived (DEC-0202); build, lint and format never are. */
+function validStatusesFor(key: string): VerificationStatus[] {
+  return key === 'test' ? [...VALID_VERIFICATION_STATUSES, 'waived'] : VALID_VERIFICATION_STATUSES;
+}
+
+/** Returns the reason a `testWaiver` is incomplete, or null when it satisfies DEC-0202. */
+function testWaiverProblem(waiver: unknown): string | null {
+  if (!waiver || typeof waiver !== 'object' || Array.isArray(waiver)) {
+    return "verifications.test is 'waived' but the return has no 'testWaiver' object";
+  }
+  const w = waiver as Record<string, unknown>;
+  if (
+    !Array.isArray(w.tests) ||
+    w.tests.length === 0 ||
+    !w.tests.every((t) => typeof t === 'string' && t.trim() !== '')
+  ) {
+    return 'testWaiver.tests must be a non-empty list of test names';
+  }
+  if (w.untouched !== true) {
+    return 'testWaiver.untouched must be true (the task diff touches neither the test nor the source it exercises)';
+  }
+  if (typeof w.passesAlone !== 'string' || w.passesAlone.trim() === '') {
+    return 'testWaiver.passesAlone must be non-empty evidence that the tests pass when re-run alone';
+  }
+  return null;
+}
+
 export interface ParseDeveloperReturnOptions {
   /** Either a JSON string or a parsed object. */
   developerReturn: string | unknown;
@@ -123,13 +150,10 @@ export async function parseDeveloperReturn(
   const vObj = v as Record<string, unknown>;
   for (const key of ['build', 'test', 'lint', 'format']) {
     const val = vObj[key];
-    if (
-      typeof val !== 'string' ||
-      !VALID_VERIFICATION_STATUSES.includes(val as VerificationStatus)
-    ) {
+    if (typeof val !== 'string' || !validStatusesFor(key).includes(val as VerificationStatus)) {
       return {
         ok: false,
-        reason: `developer return verifications.${key} must be one of ${VALID_VERIFICATION_STATUSES.join('/')}`,
+        reason: `developer return verifications.${key} must be one of ${validStatusesFor(key).join('/')}`,
       };
     }
   }
@@ -161,6 +185,17 @@ export async function parseDeveloperReturn(
       return {
         ok: false,
         reason: `developer reported verifications.${key} = failed`,
+        developer: obj as unknown as DeveloperReturn,
+      };
+    }
+  }
+
+  if (vObj.test === 'waived') {
+    const problem = testWaiverProblem(obj.testWaiver);
+    if (problem) {
+      return {
+        ok: false,
+        reason: `developer return rejected: ${problem}`,
         developer: obj as unknown as DeveloperReturn,
       };
     }

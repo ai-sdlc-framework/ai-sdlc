@@ -379,6 +379,8 @@ export interface DeveloperReturn {
     format: VerificationStatus;
   };
   acceptanceCriteriaMet: number[];
+  /** Required when `verifications.test` is `waived` (DEC-0202). */
+  testWaiver?: TestWaiver;
   /**
    * Free-text notes, or (AISDLC-651.3) a structured object. `parked: true` marks a run that
    * hit its turn budget and returned its work in progress instead of finishing.
@@ -395,7 +397,17 @@ export interface DeveloperNotes {
   [key: string]: unknown;
 }
 
-export type VerificationStatus = 'passed' | 'failed' | 'skipped';
+export type VerificationStatus = 'passed' | 'failed' | 'skipped' | 'waived';
+
+/**
+ * DEC-0202 evidence for `verifications.test: 'waived'`: the failing tests, proof they pass when
+ * re-run alone, and `untouched: true` (the task diff touches neither the test nor its source).
+ */
+export interface TestWaiver {
+  tests: string[];
+  passesAlone: string;
+  untouched: boolean;
+}
 
 /** One acceptance criterion's advisory coverage verdict (`dev.ac-coverage`). */
 export interface AcCoverageEntry {
