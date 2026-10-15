@@ -33,6 +33,16 @@ task-breakdown PR (the AISDLC-377 phase files) shipped with Gate-3
 unresolved-reference violations on every task and the merge state was
 CLEAN — auto-merge armed against the violations.
 
+## Gate 3 reference scope (AISDLC-898)
+
+Gate 3 resolves only intentional references: frontmatter `references:`, markdown
+links, RFC ids, URLs and `closes #N`-style issue citations in the body. A task id
+(`AISDLC-N`) mentioned in body prose is narrative and is NOT a reference, so a
+missing backlog file for it does not fail Gate 3. A task id that is a real
+dependency belongs in frontmatter `dependencies:`, which Gate 7 still validates:
+a `dependencies:` entry naming a missing task fails Gate 7. Broken file paths and
+RFC ids still fail Gate 3 with the existing message.
+
 ## Operator override — `blocked.reason`
 
 Tasks that carry a `blocked.reason` entry in their YAML frontmatter

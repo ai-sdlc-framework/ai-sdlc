@@ -69,7 +69,7 @@ export async function resolveReference(
  *       - `owner/repo#42` (qualified form)
  *     Bare `#42` in narrative prose is NOT extracted (narrowed 2026-05-23).
  *   - RFC IDs `RFC-NNNN`
- *   - AISDLC backlog IDs `AISDLC-NN`
+ *   - (AISDLC backlog IDs in prose are NOT extracted; see AISDLC-898)
  *
  * Returns a stable, deduped list of tagged references.
  *
@@ -142,10 +142,9 @@ export function extractReferences(body: string): Reference[] {
     add(m[1], 'file-existence');
   }
 
-  // 5. AISDLC IDs.
-  for (const m of text.matchAll(/\b(AISDLC-\d+(?:\.\d+)?)\b/g)) {
-    add(m[1], 'file-existence');
-  }
+  // 5. AISDLC IDs in body prose are NOT extracted (AISDLC-898): a task id in
+  //    prose is narrative. Task ids are validated only where declared, via
+  //    frontmatter `references:` (Gate 3) and `dependencies:` (Gate 7).
 
   // (Rule #6 — backtick-quoted body paths — was removed 2026-05-23 per the
   // header comment. Frontmatter `references:` and markdown links remain the
