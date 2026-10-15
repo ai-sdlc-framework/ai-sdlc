@@ -131,12 +131,6 @@ gates:
     owner: security
     property: untrusted contributors cannot change governance config or trust-chain paths
     baseline: true
-  - id: workflow:verify-attestation.yml
-    surface: pr-workflow
-    origin: AISDLC-214, AISDLC-381, AISDLC-388, AISDLC-704.6
-    owner: security
-    property: verifies the DSSE review attestation envelope and posts ai-sdlc/attestation
-    baseline: true
   - id: pre-push:scripts/check-substrate-contract.mjs
     surface: pre-push
     origin: AISDLC-453, RFC-0028 section 4

@@ -9,7 +9,7 @@ labels:
   - ci
 dependencies: []
 references:
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - .github/workflows/ai-sdlc-review.yml
 priority: low
 dispatchable: true

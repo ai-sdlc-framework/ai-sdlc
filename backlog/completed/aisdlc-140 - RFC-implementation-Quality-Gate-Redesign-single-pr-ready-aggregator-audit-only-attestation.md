@@ -17,7 +17,7 @@ dependencies: []
 references:
   - .github/workflows/ai-sdlc-gate.yml
   - .github/workflows/ai-sdlc-review.yml
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - docs/operations/quality-gate.md
 priority: high
 ---

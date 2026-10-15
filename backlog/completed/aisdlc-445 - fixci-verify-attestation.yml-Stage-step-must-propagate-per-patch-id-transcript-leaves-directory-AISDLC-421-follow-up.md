@@ -14,7 +14,7 @@ labels:
   - high
 dependencies: []
 references:
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - >-
     backlog/completed/aisdlc-421 -
     fixattestation-RFC-0042-amendment-—-per-task-transcript-leaves-files-to-eliminate-cross-PR-rebase-conflicts.md

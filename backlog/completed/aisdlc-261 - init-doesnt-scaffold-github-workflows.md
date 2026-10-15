@@ -13,7 +13,7 @@ dependencies: []
 priority: high
 references:
   - .github/workflows/ai-sdlc-gate.yml
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - .github/workflows/ai-sdlc-review.yml
   - orchestrator/src/cli/commands/init-features.ts
 ---

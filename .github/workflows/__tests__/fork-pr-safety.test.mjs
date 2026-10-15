@@ -1,7 +1,7 @@
 /**
  * Tests for `.github/workflows/*.yml` — AISDLC-381 fork-PR safety pattern.
  *
- * Migrates 3 workflows (`verify-attestation.yml`, `ai-sdlc-review.yml`,
+ * Migrates 3 workflows (`ai-sdlc-gate.yml`, `ai-sdlc-review.yml`,
  * `auto-enable-auto-merge.yml`) from
  * `pull_request` to `pull_request_target` so the required GitHub Actions
  * app posts statuses + comments on fork PRs (witnessed at PR #568:
@@ -67,11 +67,7 @@ function getTriggers(wf) {
   return wf.on ?? wf[true] ?? wf['on'] ?? {};
 }
 
-const AFFECTED_WORKFLOWS = [
-  'verify-attestation.yml',
-  'ai-sdlc-review.yml',
-  'auto-enable-auto-merge.yml',
-];
+const AFFECTED_WORKFLOWS = ['ai-sdlc-review.yml', 'auto-enable-auto-merge.yml'];
 
 // Flatten every `steps:` block of every job in a workflow into a single
 // array so we can grep across the entire workflow's step surface.
@@ -153,9 +149,9 @@ describe('AISDLC-381: AC #3 — workflow permissions blocks are correct', () => 
   // Comment-posting workflows need `pull-requests:write`. None should
   // declare `contents:write` (which would allow pushing back to main).
 
-  it('verify-attestation.yml verify job: statuses:write, no contents:write', () => {
-    const wf = loadYaml('verify-attestation.yml');
-    const job = wf.jobs.verify;
+  it('attestation-post.yml post job: statuses:write, no contents:write (AISDLC-833)', () => {
+    const wf = loadYaml('attestation-post.yml');
+    const job = wf.jobs.post;
     assert.equal(
       job.permissions.statuses,
       'write',
@@ -230,13 +226,13 @@ describe('AISDLC-381 iter-2: release-please short-circuits require fork-source g
   const FORK_SOURCE_GUARD_RE =
     /(head\.repo\.full_name\s*==\s*github\.repository|head\.repo\.full_name\s*==\s*\$\{\{\s*github\.repository\s*\}\}|PR_HEAD_REPO_FULL.*REPO|head\.repo\.full_name|head_repo_full)/i;
 
-  it('verify-attestation.yml: Detect release-please PR step has fork-source guard', () => {
-    const wf = loadYaml('verify-attestation.yml');
-    const verifyJob = wf.jobs.verify;
+  it('ai-sdlc-gate.yml: Detect release-please PR step has fork-source guard', () => {
+    const wf = loadYaml('ai-sdlc-gate.yml');
+    const verifyJob = wf.jobs['attestation-gate'];
     const detectStep = (verifyJob.steps ?? []).find(
       (s) => typeof s.name === 'string' && /Detect release-please PR/i.test(s.name),
     );
-    assert.ok(detectStep, 'verify-attestation.yml must declare a "Detect release-please PR" step');
+    assert.ok(detectStep, 'attestation-gate must declare a "Detect release-please PR" step');
 
     // The fork-source guard can live in either the `env:` wiring (where
     // PR_HEAD_REPO_FULL gets pulled in) AND the inline bash (where the
@@ -299,23 +295,6 @@ describe('AISDLC-381: AC #4 (safety guard #1) — workflow logic uses target mai
   // `node scripts/...` steps would execute it with the elevated token.
   // Auto-enable does not checkout at all (no scripts to run).
 
-  it('verify-attestation.yml: first checkout has no ref (defaults to target main)', () => {
-    const wf = loadYaml('verify-attestation.yml');
-    const checkouts = checkoutSteps(wf);
-    assert.ok(checkouts.length >= 1, 'verify-attestation.yml must have at least one checkout');
-    const first = checkouts[0];
-    assert.equal(
-      first.ref,
-      undefined,
-      'first checkout must NOT specify ref: — pull_request_target defaults to target main',
-    );
-    assert.equal(
-      first.path,
-      undefined,
-      'first checkout must NOT specify path: — workflow logic runs from the default working tree (main)',
-    );
-  });
-
   it('ai-sdlc-review.yml: every job that checks out scripts uses target main first', () => {
     const wf = loadYaml('ai-sdlc-review.yml');
     const checkouts = checkoutSteps(wf);
@@ -356,8 +335,8 @@ describe('AISDLC-381: AC #4 (safety guard #2) — fork checkouts are sandboxed u
   // subdirectory that subsequent steps can read AS DATA but never
   // execute against.
 
-  it('verify-attestation.yml and untrusted-pr-gate.yml never check out the fork head (AISDLC-704.6)', () => {
-    for (const name of ['verify-attestation.yml', 'untrusted-pr-gate.yml']) {
+  it('ai-sdlc-gate.yml and untrusted-pr-gate.yml never check out the fork head (AISDLC-704.6)', () => {
+    for (const name of ['ai-sdlc-gate.yml', 'untrusted-pr-gate.yml']) {
       const wf = loadYaml(name);
       for (const c of checkoutSteps(wf)) {
         assert.ok(
@@ -374,7 +353,7 @@ describe('AISDLC-704: privileged workflows never check out untrusted refs or int
   const UNTRUSTED_REF =
     /github\.event\.(pull_request\.head\.(sha|ref)|workflow_run\.head_(branch|sha))/;
 
-  for (const name of ['ai-sdlc-review.yml', 'verify-attestation.yml', 'untrusted-pr-gate.yml']) {
+  for (const name of ['ai-sdlc-review.yml', 'ai-sdlc-gate.yml', 'untrusted-pr-gate.yml']) {
     it(`${name}: no actions/checkout uses an untrusted head ref`, () => {
       const wf = loadYaml(name);
       for (const { jobId, step } of allSteps(wf)) {
@@ -390,6 +369,8 @@ describe('AISDLC-704: privileged workflows never check out untrusted refs or int
     it(`${name}: no run: block interpolates \${{ github.event.* }}`, () => {
       const wf = loadYaml(name);
       for (const { jobId, step } of allSteps(wf)) {
+        // ai-sdlc-gate.yml: only the attestation jobs are in scope (AISDLC-833).
+        if (name === 'ai-sdlc-gate.yml' && !jobId.startsWith('attestation-')) continue;
         if (typeof step.run === 'string') {
           assert.ok(
             !/\$\{\{\s*github\.event\./.test(step.run),
@@ -404,7 +385,7 @@ describe('AISDLC-704: privileged workflows never check out untrusted refs or int
 describe('AISDLC-592 / AISDLC-704.6: no checkout opts into allow-unsafe-pr-checkout', () => {
   // The fork head is no longer checked out by these workflows (data is fetched
   // via the contents API / git objects), so the v7 opt-in flag must not return.
-  for (const name of ['untrusted-pr-gate.yml', 'verify-attestation.yml']) {
+  for (const name of ['untrusted-pr-gate.yml', 'ai-sdlc-gate.yml']) {
     it(`${name}: no checkout sets allow-unsafe-pr-checkout`, () => {
       const wf = loadYaml(name);
       const checkouts = allSteps(wf).filter(
@@ -648,20 +629,14 @@ describe('AISDLC-381: regression — required statuses still produced for same-r
   // We assert the canonical status contexts are still posted by the
   // expected workflows.
 
-  it('verify-attestation.yml posts ai-sdlc/attestation context', () => {
-    const raw = readFileSync(resolve(WORKFLOWS_DIR, 'verify-attestation.yml'), 'utf-8');
+  it('attestation-post.yml posts ai-sdlc/attestation context', () => {
+    const raw = readFileSync(resolve(WORKFLOWS_DIR, 'attestation-post.yml'), 'utf-8');
     assert.match(raw, /ai-sdlc\/attestation/, 'must post ai-sdlc/attestation status');
   });
 
   it('ai-sdlc-review.yml posts Post Review Results context', () => {
     const raw = readFileSync(resolve(WORKFLOWS_DIR, 'ai-sdlc-review.yml'), 'utf-8');
     assert.match(raw, /Post Review Results/, 'must post Post Review Results status');
-  });
-
-  it('verify-attestation.yml does NOT trigger on merge_group (AISDLC-400: queue dropped)', () => {
-    const wf = loadYaml('verify-attestation.yml');
-    const triggers = getTriggers(wf);
-    assert.ok(!('merge_group' in triggers), 'must NOT trigger on merge_group post-AISDLC-400');
   });
 
   it('ai-sdlc-review.yml does NOT trigger on merge_group (AISDLC-400: queue dropped)', () => {
@@ -674,7 +649,7 @@ describe('AISDLC-381: regression — required statuses still produced for same-r
 describe('AISDLC-704: every $VAR in a run: block of the changed workflows is declared in that step', () => {
   // Names the runner provides or that are conventional shell/GitHub built-ins.
   const BUILTIN = /^(GITHUB_|RUNNER_|HOME$|PATH$|PWD$|CI$|TMPDIR$|USER$|IFS$|RANDOM$)/;
-  for (const name of ['ai-sdlc-review.yml', 'verify-attestation.yml']) {
+  for (const name of ['ai-sdlc-review.yml', 'ai-sdlc-gate.yml']) {
     it(`${name}: no unbound env references`, () => {
       const wf = loadYaml(name);
       for (const { jobId, step } of allSteps(wf)) {
@@ -690,6 +665,13 @@ describe('AISDLC-704: every $VAR in a run: block of the changed workflows is dec
         }
         for (const m of step.run.matchAll(/\bread\s+(?:-\w+\s+)*([A-Za-z_][A-Za-z0-9_]*)/g)) {
           declared.add(m[1]);
+        }
+        // Names a prior step exported through $GITHUB_ENV count for the job.
+        for (const { jobId: j, step: prior } of allSteps(wf)) {
+          if (j !== jobId || typeof prior.run !== 'string') continue;
+          for (const m of prior.run.matchAll(/echo "([A-Z][A-Z0-9_]*)=[^"]*" >> "?\$GITHUB_ENV/g)) {
+            declared.add(m[1]);
+          }
         }
         // Job-level / workflow-level env also count.
         for (const k of Object.keys(wf.env ?? {})) declared.add(k);

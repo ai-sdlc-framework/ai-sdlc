@@ -14,7 +14,7 @@ priority: medium
 dependencies: []
 references:
   - scripts/is-docs-only-changeset.mjs
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - .github/workflows/ai-sdlc-review.yml
   - .github/dependabot.yml
 ---

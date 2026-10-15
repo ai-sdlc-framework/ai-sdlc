@@ -13,7 +13,7 @@ labels:
   - dx
 references:
   - scripts/verify-attestation.mjs
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - >-
     backlog/completed/aisdlc-193.1 -
     Stage-2-contentHashV4-base-independent-per-file-hash-plus-envelope-self-exclusion.md

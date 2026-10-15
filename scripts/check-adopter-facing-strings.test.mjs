@@ -41,7 +41,6 @@ const REPO_ROOT = join(__dirname, '..');
  */
 const WATCHED_WORKFLOWS = [
   '.github/workflows/ai-sdlc-review.yml',
-  '.github/workflows/verify-attestation.yml',
   '.github/workflows/ai-sdlc-gate.yml',
   '.github/workflows/dor-ingress.yml',
   '.github/workflows/auto-enable-auto-merge.yml',

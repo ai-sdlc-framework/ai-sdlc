@@ -86,10 +86,7 @@ const RUN_LIMIT = '500';
 /** Exact `name:` of the auto-enable workflow (bound to the yaml by a test). */
 export const AUTO_ENABLE_WORKFLOW = 'Auto-enable auto-merge on PR open';
 /** Exact `name:` values of the verify workflows (bound to the yaml by a test). */
-export const VERIFY_WORKFLOWS: readonly string[] = [
-  'AI-SDLC Verify Review Attestation',
-  'consumer-verify-attestation',
-];
+export const VERIFY_WORKFLOWS: readonly string[] = ['consumer-verify-attestation'];
 const PR_EVENTS = new Set(['pull_request', 'pull_request_target']);
 
 const isAutoEnable = (run: WorkflowRun): boolean => run.workflowName === AUTO_ENABLE_WORKFLOW;

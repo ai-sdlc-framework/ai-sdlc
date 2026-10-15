@@ -6,7 +6,7 @@ labels: [attestation, ci, merge-queue, v4-kick, root-cause-fix]
 references:
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - scripts/verify-attestation.mjs
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - CLAUDE.md
 priority: critical
 permittedExternalPaths: []

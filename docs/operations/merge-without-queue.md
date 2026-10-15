@@ -142,7 +142,7 @@ If dropping the queue causes merge-skew problems, re-enable it without any code 
 
 ### Code path (complement to UI)
 After re-enabling the queue via UI, restore the `merge_group` triggers in:
-- `.github/workflows/verify-attestation.yml` — add back the `merge_group: types: [checks_requested]` block
+- `.github/workflows/ai-sdlc-gate.yml (attestation-gate job)` — add back the `merge_group: types: [checks_requested]` block
 - `.github/workflows/ai-sdlc-review.yml` — add back the `merge_group: types: [checks_requested]` block
 - `.github/workflows/ai-sdlc-gate.yml` — add back `merge_group: types: [checks_requested]`
 - `.github/workflows/auto-enable-auto-merge.yml` — remove `--squash` flag (the queue enforces its own strategy)

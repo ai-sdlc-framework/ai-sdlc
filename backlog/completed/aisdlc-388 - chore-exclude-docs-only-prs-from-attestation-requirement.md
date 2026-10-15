@@ -8,7 +8,7 @@ labels:
   - branch-protection
   - tech-debt-removal
 references:
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - .github/workflows/ai-sdlc-gate.yml
   - scripts/is-docs-only-changeset.mjs
   - scripts/check-attestation-sign.sh

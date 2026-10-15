@@ -12,7 +12,7 @@ labels:
 dependencies: []
 references:
   - .github/workflows/ai-sdlc-review.yml
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - scripts/verify-attestation.mjs
   - pipeline-cli/src/classifier/classifier.ts
 priority: high

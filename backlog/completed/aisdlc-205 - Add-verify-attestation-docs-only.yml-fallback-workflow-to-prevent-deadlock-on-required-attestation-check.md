@@ -14,7 +14,7 @@ labels:
   - urgent
 dependencies: []
 references:
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - >-
     backlog/completed/aisdlc-193 -
     Re-enable-attestation-as-required-merge-gate-design-rebase-stable-HEAD-content-binding.md

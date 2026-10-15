@@ -6,7 +6,7 @@ This runbook covers common `ai-sdlc/attestation` check failures and how to diagn
 
 ## Symptom: `v6: rootSignature did not match any trusted reviewer pubkey`
 
-The `verify-attestation.yml` workflow posts this failure when the Merkle root reconstructed from the transcript leaves does not match the signature in the DSSE envelope.
+The `ai-sdlc-gate.yml (attestation-gate job)` workflow posts this failure when the Merkle root reconstructed from the transcript leaves does not match the signature in the DSSE envelope.
 
 ### Common cause: per-patch-id leaves file missing from the commit tree (fixed by AISDLC-471)
 
@@ -136,7 +136,7 @@ If present, `agentFileHash` was not enforced for the named reviewer(s) on that r
 
 1. `git ls-tree HEAD -- .ai-sdlc/attestations/` — confirms an envelope is committed.
 2. `git ls-tree HEAD -- .ai-sdlc/transcript-leaves/` — confirms the per-patch-id leaves file is committed (if empty, apply the AISDLC-471 manual workaround above).
-3. Check the `verify-attestation.yml` CI log for `leaves source:` — `per-patch-id` is correct; `shared (legacy fallback)` means the per-patch-id file is missing from the commit tree.
+3. Check the `ai-sdlc-gate.yml (attestation-gate job)` CI log for `leaves source:` — `per-patch-id` is correct; `shared (legacy fallback)` means the per-patch-id file is missing from the commit tree.
 4. `cat .ai-sdlc/attestations/*.v6.dsse.json | jq .payload | base64 -d | jq .` — inspect the envelope payload to verify `subject.digest.sha1` and confirm the signed merge-base.
 
 ---

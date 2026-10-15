@@ -15,7 +15,7 @@ references:
   - .husky/pre-push
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - scripts/check-attestation-sign.sh
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - .github/workflows/ai-sdlc-review.yml
 ---
 

@@ -92,15 +92,6 @@ echo "3. Branch-name resolution correctness (static rule check)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKFLOWS_DIR="$(cd "${SCRIPT_DIR}/../.github/workflows" && pwd)"
 
-# verify-attestation.yml uses `gh pr view` for the merge_group source PR lookup.
-VERIFY_YML="${WORKFLOWS_DIR}/verify-attestation.yml"
-if [ -f "$VERIFY_YML" ]; then
-  check "verify-attestation uses gh pr view for source PR lookup" "true" \
-    "$(grep -q 'gh pr view.*headRefName' "$VERIFY_YML" && echo 'true' || echo 'false')"
-else
-  echo "  SKIP: ${VERIFY_YML} not found"
-fi
-
 # ── Test 4: squash-attestation-chores.sh pattern ─────────────────────────────
 
 echo ""

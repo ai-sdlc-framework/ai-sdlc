@@ -118,7 +118,6 @@ const BASELINE_IDS = [
   'workflow:require-issue-link.yml',
   'workflow:rfc-lifecycle-check.yml',
   'workflow:untrusted-pr-gate.yml',
-  'workflow:verify-attestation.yml',
   'pre-push:scripts/check-substrate-contract.mjs',
   'pre-push:scripts/check-skip-ci-marker.sh',
   'pre-push:scripts/check-dark-code-on-push.sh',

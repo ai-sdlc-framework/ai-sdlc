@@ -12,7 +12,7 @@ dependencies:
   - AISDLC-748
 references:
   - orchestrator/src/cli/commands/init-templates.ts
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - scripts/post-attestation-review.mjs
 priority: high
 parentTaskId: AISDLC-748

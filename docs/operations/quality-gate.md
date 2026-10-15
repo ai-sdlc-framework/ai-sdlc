@@ -17,7 +17,7 @@ ai-sdlc/pr-ready
 
 `ai-sdlc/pr-ready` is the rollup of every PR signal AI-SDLC needs (lint, build, test with coverage on Node 22, integration tests). `Backlog Drift` (dangling task references) is a `needs:` of the rollup, so it gates merges through it and is not a separately required context. The rollup runs on `pull_request` events (no merge queue required — AISDLC-400 dropped the queue in favour of direct auto-merge with squash).
 
-**`ai-sdlc/attestation` is NO LONGER a direct required check** (AISDLC-388). Attestation is a conditional contributor to `ai-sdlc/pr-ready`: code PRs require it (verify-attestation.yml runs and its `ai-sdlc/attestation` status is an informational governance signal operators must review before merging), but docs-only PRs skip it entirely — no status needs to be posted. This eliminates the workaround class where docs PRs had to have a synthetic attestation status posted (AISDLC-214 short-circuit + AISDLC-215 synthesis, now deleted).
+**`ai-sdlc/attestation` is NO LONGER a direct required check** (AISDLC-388). Attestation is a conditional contributor to `ai-sdlc/pr-ready`: code PRs require it (ai-sdlc-gate.yml (attestation-gate job) runs and its `ai-sdlc/attestation` status is an informational governance signal operators must review before merging), but docs-only PRs skip it entirely — no status needs to be posted. This eliminates the workaround class where docs PRs had to have a synthetic attestation status posted (AISDLC-214 short-circuit + AISDLC-215 synthesis, now deleted).
 
 You no longer need to enumerate `CI OK`, `Post Review Results`, `codecov/patch`, `Build & Test (Node 20)`, etc. individually. `codecov/patch` was removed as a required check (AISDLC-372) — see ["Why codecov/patch is informational, not required"](#why-codecovpatch-is-informational-not-required-aisdlc-372) below. The aggregator owns the CI list, in code you control.
 
@@ -90,7 +90,7 @@ The PR's check list shows two `AI-SDLC Verify Review Attestation` runs:
 
 ### Why it happened
 
-`verify-attestation.yml` declares `concurrency.cancel-in-progress: true`, so a newer push on the same PR cancels the in-flight run mid-execution. The pre-AISDLC-412 `Post ai-sdlc/attestation status` step used `if: always()`, which fires even on cancellation. The cancelled run's `Verify attestation` step never produced a `STATUS` output, so the step posted `ai-sdlc/attestation: failure` with the "crashed before emitting result" description.
+`ai-sdlc-gate.yml (attestation-gate job)` declares `concurrency.cancel-in-progress: true`, so a newer push on the same PR cancels the in-flight run mid-execution. The pre-AISDLC-412 `Post ai-sdlc/attestation status` step used `if: always()`, which fires even on cancellation. The cancelled run's `Verify attestation` step never produced a `STATUS` output, so the step posted `ai-sdlc/attestation: failure` with the "crashed before emitting result" description.
 
 GitHub commit-status semantics keep the most-recent status per context. Two parallel runs racing to POST can land in either order — when the cancelled run's FAILURE POST happens to win against the new run's SUCCESS POST, the rollup reads FAILURE and the PR sits stuck.
 
@@ -102,7 +102,7 @@ Pick any one — all force a fresh attestation post on the current HEAD:
    ```bash
    gh run rerun <cancelled-run-id>
    ```
-   Find the cancelled run ID via `gh run list --workflow=verify-attestation.yml --status=cancelled --limit 5` filtered by your PR's branch.
+   Find the cancelled run ID via `gh run list --workflow=ai-sdlc-gate.yml (attestation-gate job) --status=cancelled --limit 5` filtered by your PR's branch.
 
 2. **Push an empty commit** to re-trigger a clean workflow run:
    ```bash
@@ -127,18 +127,20 @@ GitHub status-check function semantics:
 
 ## Per-archetype attestation gating (AISDLC-388)
 
+**Trust model after AISDLC-833 (DEC-0206).** The `ai-sdlc/attestation` status is posted by `attestation-post.yml` (`workflow_run`, default-branch definition, write token). It runs no PR code and reads nothing from the PR-controlled gate run except whether the `attestation-gate` job ran: it fetches the head envelope as data, re-runs `scripts/verify-attestation.mjs` from the default-branch checkout, and derives the state only from that result. Head sha, head repo and PR number come from the trusted `workflow_run` event, and the approving review (DEC-0065) is posted only for a valid result on a same-repo head with a PR number. The `attestation-gate` job still fails `ai-sdlc/pr-ready` on an invalid envelope.
+
 `ai-sdlc/attestation` is **not a direct required check** on branch protection. It is a conditional contributor to the `ai-sdlc/pr-ready` rollup via per-archetype routing:
 
 | PR archetype | `ai-sdlc/attestation` behavior |
 |---|---|
-| **docs-only** (all changed files in `spec/rfcs/**`, `docs/**`, `backlog/**`, or root `*.md`) | `verify-attestation.yml` is **skipped** on `pull_request` events via `paths-ignore`. On `merge_group` events the inline short-circuit posts `success` cheaply. No envelope required. |
-| **code or mixed** (at least one non-docs file) | `verify-attestation.yml` runs and posts `ai-sdlc/attestation: success` (valid envelope) or `failure` (missing/invalid). Operators must see `success` before merging — governance enforced by reviewing the status, not by branch protection directly. |
+| **docs-only** (all changed files in `spec/rfcs/**`, `docs/**`, `backlog/**`, or root `*.md`) | `ai-sdlc-gate.yml (attestation-gate job)` is **skipped** on `pull_request` events via `paths-ignore`. On `merge_group` events the inline short-circuit posts `success` cheaply. No envelope required. |
+| **code or mixed** (at least one non-docs file) | `ai-sdlc-gate.yml (attestation-gate job)` runs and posts `ai-sdlc/attestation: success` (valid envelope) or `failure` (missing/invalid). Operators must see `success` before merging — governance enforced by reviewing the status, not by branch protection directly. |
 
 This design preserves the AISDLC-380 forgery defense for code PRs while eliminating the "docs require attestation" workaround class (AISDLC-214 short-circuit + AISDLC-215 synthesis). The `ai-sdlc/attestation` status is an informational governance signal for code PRs — visible in the PR checks UI and webhook-subscribable — but branch protection gates only on `ai-sdlc/pr-ready`.
 
 Per Q3 in the AISDLC-140 redesign decision and the industry consensus documented in `/tmp/research-prior-art.md` (SLSA, npm, PyPI, Google Cloud GKE, Red Hat), source-time attestations are inherently fragile against history rewrites (rebase, force-push) and the mainstream pattern is **audit at source, enforce at deploy**. The `ai-sdlc/pr-ready` rollup is the enforcer; attestation is the audit trail.
 
-**AISDLC-214 cleanup (follow-up PR):** Once the operator updates branch protection (AISDLC-388 AC-2), the "short-circuit — post ai-sdlc/attestation success (docs-only)" step in `verify-attestation.yml` can be deleted. It is intentionally retained until then to avoid a race where the merge queue still requires the status. Do NOT delete before the branch-protection update.
+**AISDLC-214 cleanup (follow-up PR):** Once the operator updates branch protection (AISDLC-388 AC-2), the "short-circuit — post ai-sdlc/attestation success (docs-only)" step in `ai-sdlc-gate.yml (attestation-gate job)` can be deleted. It is intentionally retained until then to avoid a race where the merge queue still requires the status. Do NOT delete before the branch-protection update.
 
 ## Patch coverage — the 90% gate (AISDLC-376, AISDLC-726)
 
@@ -161,7 +163,7 @@ Both layers parse the unified diff (`git diff --unified=0 base..head`) per file,
 
 ### When the gate skips (intentional)
 
-- **No changed code files.** Docs-only / workflow-only / config-only PRs produce no executable diff. The gate returns success with `reason: no-instrumentable-changes`. Mirrors the docs-only short-circuit pattern in `verify-attestation.yml` and `ai-sdlc-review.yml`.
+- **No changed code files.** Docs-only / workflow-only / config-only PRs produce no executable diff. The gate returns success with `reason: no-instrumentable-changes`. Mirrors the docs-only short-circuit pattern in `ai-sdlc-gate.yml (attestation-gate job)` and `ai-sdlc-review.yml`.
 - **No executable lines in the patch.** A code-file change that only adds comments, blank lines, or pure type-only declarations produces 0 executable diff lines. The gate returns success with `reason: no-executable-changed-lines`.
 - **Test files only.** `*.test.ts`, `*.test.tsx`, etc. are excluded from instrumentation by every vitest config (`coverage.exclude`). Pure-test PRs skip the gate.
 
@@ -238,7 +240,7 @@ This patched the required contexts at the time, dropping `codecov/patch`; the cu
 |---|---|---|
 | `Backlog Drift` | **no** (a `needs:` of the rollup) | `ai-sdlc-gate.yml` `backlog-drift` job |
 | `ai-sdlc/pr-ready` | yes | `ai-sdlc-gate.yml` aggregator (alls-green) |
-| `ai-sdlc/attestation` | **no** (informational governance signal for code PRs) | `verify-attestation.yml` (conditional — skipped on docs-only PRs per AISDLC-388) |
+| `ai-sdlc/attestation` | **no** (informational governance signal for code PRs) | `ai-sdlc-gate.yml (attestation-gate job)` (conditional — skipped on docs-only PRs per AISDLC-388) |
 | `codecov/patch` | **no** (informational only) | codecov GitHub App |
 
 ## Cutover procedure (operator action)
@@ -265,10 +267,10 @@ After AISDLC-388 lands on main, the operator must update branch protection to re
 3. **Verify the change.** Open one trivial docs PR and confirm:
    - `ai-sdlc/pr-ready` appears in the required-checks list.
    - The PR is mergeable when `ai-sdlc/pr-ready` is green (even without `ai-sdlc/attestation` posted).
-   - `verify-attestation.yml` does NOT fire on the docs PR (paths-ignore skips it).
+   - `ai-sdlc-gate.yml (attestation-gate job)` does NOT fire on the docs PR (paths-ignore skips it).
    - Attempting to bypass (e.g. push directly to main) is still blocked.
 
-4. **Open the AISDLC-214 cleanup PR** to delete the short-circuit step in `verify-attestation.yml` (the "always post status on every head SHA" code path). This step is safe to delete ONLY after branch protection no longer requires `ai-sdlc/attestation`. The cleanup PR is intentionally separate (AISDLC-388 AC-4).
+4. **Open the AISDLC-214 cleanup PR** to delete the short-circuit step in `ai-sdlc-gate.yml (attestation-gate job)` (the "always post status on every head SHA" code path). This step is safe to delete ONLY after branch protection no longer requires `ai-sdlc/attestation`. The cleanup PR is intentionally separate (AISDLC-388 AC-4).
 
 5. **Communicate the change** in the project's release notes / Slack so contributors know which check name to look for in the merge UI.
 
@@ -356,7 +358,7 @@ The `ai-sdlc init` interactive wizard (planned in AISDLC-140 sub-5) will scaffol
 
 ## Approving review on a verified attestation (AISDLC-747, DEC-0065)
 
-When the attestation envelope verifies on a `pull_request_target` run, the `Approve verified attestation` job in `verify-attestation.yml` submits an APPROVE pull-request review from the Actions token (body: verdict summary plus links to the envelope and the nonce-bound transcripts), so GitHub, Scorecard and adopters see "reviewed" and not only the `ai-sdlc/attestation` commit status. Logic lives in `scripts/post-attestation-review.mjs` (hermetic tests in `scripts/post-attestation-review.test.mjs`).
+When the attestation envelope verifies on a `pull_request_target` run, the `Approve verified attestation` job in `ai-sdlc-gate.yml (attestation-gate job)` submits an APPROVE pull-request review from the Actions token (body: verdict summary plus links to the envelope and the nonce-bound transcripts), so GitHub, Scorecard and adopters see "reviewed" and not only the `ai-sdlc/attestation` commit status. Logic lives in `scripts/post-attestation-review.mjs` (hermetic tests in `scripts/post-attestation-review.test.mjs`).
 
 - **Operator setting required:** Settings > Actions > General > Workflow permissions > enable "Allow GitHub Actions to create and approve pull requests". If it is off, the API returns 403 and the job fails loudly with an error naming that setting.
 - **Never approves** when verification is not `valid`, on drafts, on `pull_request` or merge_group events (only `pull_request_target`), or for fork PRs (head repo must equal base repo). The job checks out the default branch explicitly (`persist-credentials: false`), so the script is base-branch code, never PR content; until the script exists on the default branch the step skips with a notice (bootstrap).
@@ -367,7 +369,7 @@ When the attestation envelope verifies on a `pull_request_target` run, the `Appr
 
 `ai-sdlc init` enforces by default, and chooses the mechanism by runtime capability, never by guessing the plan. It tries `PUT /repos/{owner}/{repo}/branches/main/protection`:
 
-1. **API available (200: public repo or paid plan).** Init always applies protection requiring `ai-sdlc/pr-ready`, `codecov/patch` and 1 approving review (DEC-0014); the review count is never lowered. The scaffolded adopter `verify-attestation.yml` ships a verifying `approve` job (AISDLC-748.1) that posts the review only after the envelope verifies, so a non-admin merge needs no human review. It requires the repo setting "Allow GitHub Actions to create and approve pull requests". `ADOPTER_TEMPLATE_POSTS_APPROVAL`, derived from the template, selects the message init prints.
+1. **API available (200: public repo or paid plan).** Init always applies protection requiring `ai-sdlc/pr-ready`, `codecov/patch` and 1 approving review (DEC-0014); the review count is never lowered. The scaffolded adopter `ai-sdlc-gate.yml (attestation-gate job)` ships a verifying `approve` job (AISDLC-748.1) that posts the review only after the envelope verifies, so a non-admin merge needs no human review. It requires the repo setting "Allow GitHub Actions to create and approve pull requests". `ADOPTER_TEMPLATE_POSTS_APPROVAL`, derived from the template, selects the message init prints.
 2. **API returns 403 (GitHub Free private repo).** Init falls back to client-side enforcement: `cli-merge-if-eligible` refuses unless the attestation verifies and checks are green, and the governance hook keeps blocking direct agent merges. `ai-sdlc doctor` reports `enforcement: client-side only; the server cannot block a manual merge` as an error-level finding, because a human can still merge manually in the GitHub UI.
 
 Both paths print what was installed and the opt-out flag, `--no-branch-protection`. `--yes` follows the same detection. Re-run `ai-sdlc init --add branch-protection` after making the repo public or upgrading the plan.

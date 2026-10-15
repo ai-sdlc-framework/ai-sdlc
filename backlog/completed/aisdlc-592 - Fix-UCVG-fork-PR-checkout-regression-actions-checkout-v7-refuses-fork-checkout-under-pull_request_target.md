@@ -15,7 +15,7 @@ dependencies: []
 references:
   - .github/workflows/untrusted-pr-gate.yml
   - .github/workflows/ai-sdlc-review.yml
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - .github/workflows/__tests__/untrusted-pr-gate.test.mjs
 priority: high
 ---

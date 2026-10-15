@@ -21,7 +21,7 @@ If you're new to AI-SDLC, start with [`docs/operations/operator-runbook.md`](./o
 | Dispatch a single backlog task headless from a terminal | `node pipeline-cli/bin/ai-sdlc-pipeline.mjs execute <task-id> --run --spawner api-key` | **$200/mo Agent SDK credit** (Max-20x), then API-key overflow |
 | Run an autonomous loop on the dispatch frontier (cron/daemon) | `cli-orchestrator tick --spawner claude` | **$200/mo Agent SDK credit** (Max-20x), then API-key overflow (post-2026-06-15; uses `claude -p` which the credit covers) |
 | Run reviewers + attestation IN CI on every push | `ai-sdlc-review.yml` GitHub Actions | **$200/mo Agent SDK credit** (Max-20x), then API-key overflow |
-| Skip CI-side reviewers when local attestation already signed | Sign locally first; CI's `verify-attestation.yml` short-circuits | Local sign uses no LLM (pure crypto). **FREE.** |
+| Skip CI-side reviewers when local attestation already signed | Sign locally first; CI's `ai-sdlc-gate.yml (attestation-gate job)` short-circuits | Local sign uses no LLM (pure crypto). **FREE.** |
 
 The single most impactful cost-saving habit: **always sign attestation locally before pushing.** Local sign uses your machine's signing key + a content-hash computation — no Claude API call. CI verifies the signature (also free) and skips its own reviewers. The CI-side review only fires when local attestation is missing — that's the fallback cost.
 
@@ -210,7 +210,7 @@ The loop respects `AISDLC-242` recoverable-abort detection — interrupted dispa
 
 ---
 
-### 4. CI-side reviewers — `ai-sdlc-review.yml` + `verify-attestation.yml` GitHub Actions
+### 4. CI-side reviewers — `ai-sdlc-review.yml` + `ai-sdlc-gate.yml (attestation-gate job)` GitHub Actions
 
 **Where it runs**: GitHub Actions runners on every push / PR / merge_group event.
 
@@ -220,7 +220,7 @@ The loop respects `AISDLC-242` recoverable-abort detection — interrupted dispa
 - **Post-2026-06-15**: $200/mo Agent SDK credit (the SDK is what the workflow uses internally)
 
 **When it fires**:
-- `verify-attestation.yml` runs on every PR; if the local DSSE envelope at `.ai-sdlc/attestations/<head-sha>.dsse.json` is valid → posts `ai-sdlc/attestation: success` and **skips CI-side reviewers**
+- `ai-sdlc-gate.yml (attestation-gate job)` runs on every PR; if the local DSSE envelope at `.ai-sdlc/attestations/<head-sha>.dsse.json` is valid → posts `ai-sdlc/attestation: success` and **skips CI-side reviewers**
 - `ai-sdlc-review.yml`'s `Post Review Results` runs CI-side reviewers ONLY when local attestation is missing (cost-saver fallback)
 
 **Cost shape**: 3 reviewer subagent runs per PR with no local attestation. Avoidable by signing locally.
@@ -275,7 +275,7 @@ Run through this before every autonomous tick session to avoid surprise API-key 
 
 ### Pattern 1 — Always sign locally first ⭐ (most impactful)
 
-Local sign costs **zero LLM tokens**. The pre-push hook (`scripts/check-attestation-sign.sh`) detects the per-worktree `.active-task` sentinel + verdict file and auto-signs the DSSE envelope. CI's `verify-attestation.yml` then accepts the signature and posts `success` — bypassing CI-side reviewers entirely.
+Local sign costs **zero LLM tokens**. The pre-push hook (`scripts/check-attestation-sign.sh`) detects the per-worktree `.active-task` sentinel + verdict file and auto-signs the DSSE envelope. CI's `ai-sdlc-gate.yml (attestation-gate job)` then accepts the signature and posts `success` — bypassing CI-side reviewers entirely.
 
 Most adopters who watched their bill soar discovered they were signing in CI when they could have signed locally. Wire your dispatch to:
 
