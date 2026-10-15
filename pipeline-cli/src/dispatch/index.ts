@@ -49,6 +49,7 @@ export {
   writeDiagnostic,
   writeHeartbeat,
   writeIterationExhaustedDiagnostic,
+  replaceQueuedBranch,
   writeManifest,
   writeResumeSignal,
   writeVerdict,
