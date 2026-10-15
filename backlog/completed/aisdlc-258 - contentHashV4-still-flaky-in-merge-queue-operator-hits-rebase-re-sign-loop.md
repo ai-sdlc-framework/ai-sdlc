@@ -16,7 +16,7 @@ priority: high
 references:
   - scripts/verify-attestation.mjs
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
 drift_log:
   - date: '2026-05-25'
     type: ref-deleted

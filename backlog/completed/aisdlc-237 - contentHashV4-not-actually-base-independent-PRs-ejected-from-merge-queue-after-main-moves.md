@@ -16,7 +16,7 @@ dependencies: []
 priority: high
 references:
   - CLAUDE.md
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
 ---
 
 ## Description

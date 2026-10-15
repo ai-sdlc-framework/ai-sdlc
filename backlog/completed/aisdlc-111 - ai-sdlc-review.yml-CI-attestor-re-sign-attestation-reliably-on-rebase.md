@@ -13,7 +13,7 @@ labels:
 dependencies: []
 references:
   - .github/workflows/ai-sdlc-review.yml
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - >-
     backlog/completed/aisdlc-87 -

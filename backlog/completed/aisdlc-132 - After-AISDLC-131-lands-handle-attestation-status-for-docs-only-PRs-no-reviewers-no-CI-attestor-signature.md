@@ -15,7 +15,7 @@ milestone: m-3
 dependencies:
   - AISDLC-131
 references:
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - .github/workflows/ai-sdlc-review.yml
 priority: high
 drift_log:

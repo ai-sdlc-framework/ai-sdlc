@@ -10,7 +10,7 @@ labels:
   - ci
 dependencies: []
 references:
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - ai-sdlc-plugin/scripts/verify-attestation.mjs
   - docs/operations/decision-authority.md
 priority: high

@@ -5,7 +5,7 @@ status: Done
 labels: [ci, merge-queue, throughput, operator-merge, architecture]
 references:
   - .github/workflows/auto-enable-auto-merge.yml
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - .github/workflows/ai-sdlc-review.yml
   - .github/workflows/ai-sdlc-gate.yml
   - CLAUDE.md

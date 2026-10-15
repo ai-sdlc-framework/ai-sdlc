@@ -14,7 +14,7 @@ labels:
 dependencies: []
 priority: critical
 references:
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - .github/workflows/ai-sdlc-review.yml
   - .github/workflows/auto-enable-auto-merge.yml
 drift_log:

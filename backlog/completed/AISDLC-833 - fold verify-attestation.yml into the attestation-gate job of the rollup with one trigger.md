@@ -12,7 +12,7 @@ labels:
   - attestation
 dependencies: []
 references:
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - .github/workflows/ai-sdlc-gate.yml
   - .ai-sdlc/gates.yaml
   - docs/operations/attestation-reference.md

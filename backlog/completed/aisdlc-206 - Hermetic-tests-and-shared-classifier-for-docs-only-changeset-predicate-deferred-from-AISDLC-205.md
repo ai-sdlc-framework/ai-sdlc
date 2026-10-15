@@ -14,7 +14,7 @@ labels:
 dependencies:
   - AISDLC-205
 references:
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - .github/workflows/ai-sdlc-review.yml
 priority: medium
 drift_log:

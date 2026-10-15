@@ -15,7 +15,7 @@ dependencies:
 priority: high
 references:
   - spec/rfcs/RFC-0042-proof-of-execution-attestation.md
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - scripts/verify-attestation.mjs
 ---
 

@@ -5,8 +5,8 @@ status: Done
 labels: [ci, attestation, operator-merge, throughput]
 references:
   - .github/workflows/ai-sdlc-gate.yml
-  - .github/workflows/verify-attestation.yml
-  - .github/workflows/__tests__/verify-attestation-cancelled.test.mjs
+  - .github/workflows/ai-sdlc-gate.yml
+  - .github/workflows/__tests__/ai-sdlc-gate.test.mjs
   - docs/operations/quality-gate.md
 priority: high
 permittedExternalPaths: []

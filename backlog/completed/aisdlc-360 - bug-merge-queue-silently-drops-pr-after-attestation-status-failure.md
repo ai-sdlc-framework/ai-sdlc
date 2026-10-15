@@ -20,7 +20,7 @@ priority: critical
 blocked:
   reason: "Task already completed 2026-05-22; cleanup edit by AISDLC-383.7 — DoR upstream-OQ re-evaluation on RFC-0035 lifecycle is not applicable to a shipped task."
 references:
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - orchestrator/src/runtime/attestations.ts
 drift_log:

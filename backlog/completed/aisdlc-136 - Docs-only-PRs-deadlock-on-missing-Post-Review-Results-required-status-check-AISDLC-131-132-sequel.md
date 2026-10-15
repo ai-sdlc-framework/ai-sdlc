@@ -16,7 +16,7 @@ dependencies:
   - AISDLC-132
 references:
   - .github/workflows/ai-sdlc-review.yml
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
 priority: high
 drift_log:
   - date: '2026-05-03'

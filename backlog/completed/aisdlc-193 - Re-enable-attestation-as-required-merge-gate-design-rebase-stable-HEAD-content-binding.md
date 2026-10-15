@@ -14,7 +14,7 @@ labels:
   - rfc-0012
 dependencies: []
 references:
-  - .github/workflows/verify-attestation.yml
+  - .github/workflows/ai-sdlc-gate.yml
   - scripts/verify-attestation.mjs
   - pipeline-cli/src/incremental-review/incremental.ts
   - pipeline-cli/src/cli/pr-unstick.ts
