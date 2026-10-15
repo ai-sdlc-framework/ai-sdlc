@@ -78,6 +78,7 @@ All state lives under the dispatch board directory, `.ai-sdlc/dispatch/` by defa
 | `.ai-sdlc/dispatch/done/`          | Verdicts for tasks that finished with `success` or `iterate-needed`.                               |
 | `.ai-sdlc/dispatch/failed/`        | Diagnostics and verdicts for every other outcome.                                                  |
 | `.ai-sdlc/dispatch/blocked/`       | Manifests parked while they wait on a decision.                                                    |
+| `.ai-sdlc/dispatch/retired/`       | Queued manifests retired by `dequeue`, with `retiredReason` and `retiredAt`.                       |
 | `.ai-sdlc/dispatch/briefs/`        | Dispatch briefs written by `brief`.                                                                |
 
 ### Roster shape
@@ -828,6 +829,20 @@ means the tmux window is closed; `starting` means the harness has not registered
 session; `unknown` means it is open but absent from the registry. `inflightTask` names the
 task the session's heartbeat holds; an executor with `idle` and no `inflightTask` is ready
 to claim. `board.queued` of 0 with all executors idle means the queue is drained.
+
+## Correcting a stale queued manifest (dequeue)
+
+A queued, unclaimed manifest that names a wrong field (for example a branch that no longer
+exists) is corrected in two calls, never with a hand `rm` of the queue file:
+
+```bash
+node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" dequeue --task-id <id> --reason "<why it is stale>" --board-dir "$BOARD_DIR"
+node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" write-manifest --json <corrected-manifest.json> --board-dir "$BOARD_DIR"
+```
+
+`dequeue` moves `queue/<id>.dispatch.json` to `retired/` with `retiredReason` and `retiredAt`
+recorded; `--reason` is required. It exits 1, leaving the queue file untouched, when the task
+is inflight (claimed), has a `done/` verdict, or is not queued.
 
 ## Sending a finished task back (reenter)
 

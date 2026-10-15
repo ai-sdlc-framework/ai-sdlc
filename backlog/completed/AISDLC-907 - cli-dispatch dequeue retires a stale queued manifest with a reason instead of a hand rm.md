@@ -1,7 +1,7 @@
 ---
 id: AISDLC-907
 title: 'fix: cli-dispatch dequeue retires a stale queued manifest with a reason, so dispatch never removes a queue file by hand'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-14'
 labels: [bug, pipeline-cli, dispatch]

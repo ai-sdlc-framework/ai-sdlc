@@ -40,6 +40,12 @@
  *     commits that are not on its pushed branch or uncommitted changes to
  *     tracked files; `--force` with a reason releases anyway and writes the
  *     reason to the manifest's `releaseHistory` (AISDLC-800).
+ *   - `dequeue --task-id <id> --reason <text>` (AISDLC-907) — retire a stale queued,
+ *     unclaimed manifest: moves `queue/<id>.dispatch.json` to `retired/` with the reason
+ *     and time recorded. `--reason` is required. Refused (exit 1, queue file untouched)
+ *     when the task is inflight (claimed), has a `done/` verdict, or is not queued.
+ *     Correction is two calls: `dequeue --task-id <id> --reason <why>`, then
+ *     `write-manifest --json <path>` with the corrected manifest. Never `rm` a queue file.
  *   - `write-manifest --json <path>` — Conductor entry point. Reads a JSON
  *     manifest from `<path>` and writes it into queue/.
  *
@@ -173,6 +179,7 @@ import {
   removeVerdict,
   TASK_ID_RE,
   sweepStaleHeartbeats,
+  retireQueued,
   unblockManifest,
   writeHeartbeat,
   writeIterationExhaustedDiagnostic,
@@ -901,6 +908,24 @@ export async function runDispatchCli(
       }
     }
 
+    case 'dequeue': {
+      const taskId = requireFlag(flags, 'task-id');
+      const reason = flags['reason'];
+      if (!reason || reason === 'true') {
+        process.stderr.write('cli-dispatch dequeue: --reason <text> is required\n');
+        return 2;
+      }
+      try {
+        out({ ok: true, retired: retireQueued(boardDir, taskId, reason) });
+        return 0;
+      } catch (err) {
+        process.stderr.write(
+          `cli-dispatch dequeue: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+        return 1;
+      }
+    }
+
     case 'write-manifest': {
       // AISDLC-901: correct the branch of an already queued manifest.
       const branchFlag = flags['branch'];
@@ -1497,6 +1522,7 @@ Subcommands:
   heartbeat --task-id <id> --worker-id <id> --worker-kind <kind>
   sweep [--stale-ms <n>]
   release --task-id <id> [--force --reason <text>]   (refuses while the worktree has unpushed or uncommitted work)
+  dequeue --task-id <id> --reason <text>   (retire a stale queued manifest to retired/; then write-manifest --json)
   write-manifest --json <path>
   write-manifest <task> (--branch <head> | --from-pr <n>)   (rewrite a queued manifest's branch)
   enqueue --task <id> [--task <id> ...] [--after <ids>] [--group <name>]
