@@ -167,6 +167,39 @@ At the current scale (1 operator, 1-5 AI agents, <10 PRs/day), direct merge rema
 
 ---
 
+## Re-arm after a rebase-only force-push (AISDLC-872)
+
+A lease push after a rebase dismisses the GitHub review and clears auto-merge even
+when no content changed (153 approval dismissals across 16 sampled PRs in 24h, about
+70 PR-hours of green but unmerged PRs). The attestation is already keyed on patch-id,
+so the content proof survives a rebase; only the review and the arm are lost.
+
+**Predicate.** `isRebaseOnlyPush` (`pipeline-cli/src/governance/rebase-rearm.ts`): the
+`git patch-id --stable` of the new head (against its merge-base with `origin/main`,
+attestation paths excluded) equals that of the previously armed head. Any failure to
+compute either id fails closed (not rebase-only).
+
+**Rule.** `cli-merge-if-eligible <pr> --source-kind backlog --rearm-previous-head <old-head-sha>`
+arms only when the predicate holds, then runs the normal eligibility checks (fork, author,
+base, task, head commit, required checks) and `--arm`. A push that changes the patch-id is
+refused and needs a fresh review and arm. `/ai-sdlc rebase`, `ci-conflict-resolver` and
+`rebase-resolver` all re-arm through this one command; no new direct merge call exists.
+`auto-enable-auto-merge.yml` stays on `opened`/`reopened`/`ready_for_review` (AISDLC-799).
+
+**Operator decision: "Dismiss stale pull request approvals" (branch protection).** GitHub
+cannot tell a rebase-only push from a content change, so the setting is not changed from
+code. Options:
+
+| Option | Effect | Trade-off |
+|---|---|---|
+| Keep enabled (current) | Every push dismisses reviews; the re-arm above restores auto-merge for rebase-only pushes | Safest; the arm is the only thing restored, a fresh review is still needed where one is required |
+| Disable | Approvals survive any push | Removes the content-change guard; a changed patch-id would keep a stale approval |
+| Keep enabled, drop required reviews (merge gate is `ai-sdlc/pr-ready` only) | Dismissal has no effect on merge | Already the case if only `ai-sdlc/pr-ready` is required |
+
+Recommendation: keep enabled; the code rule removes the manual step without weakening it.
+
+---
+
 ## References
 
 - AISDLC-400 — task that dropped the queue

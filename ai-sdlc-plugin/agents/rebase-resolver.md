@@ -82,6 +82,13 @@ Stages:
    on main/master).
    Emit: `[ai-sdlc-progress] return: handing off to /ai-sdlc rebase for re-attestation + push`
 
+**Re-arm (AISDLC-872).** The push clears the PR's review and auto-merge. The
+caller re-arms after its push with
+`node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind backlog --rearm-previous-head <pre-rebase-head-sha>`.
+Report the pre-rebase head SHA in your return so the caller can pass it. The CLI arms only when the
+patch-id is unchanged and every eligibility check passes; a content change is refused and needs a
+fresh review. Never arm any other way. Rule: `docs/operations/merge-without-queue.md`.
+
 ## Conflict resolution rules — the 80% you handle
 
 ### Rule 1 — CHANGELOG.md conflict on a feature branch (AISDLC-401)

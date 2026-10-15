@@ -182,8 +182,12 @@ After a successful push, re-arm auto-merge (GitHub clears the auto-merge
 request on every force-push per AISDLC-356):
 
 ```bash
-node pipeline-cli/bin/cli-merge-if-eligible.mjs "$PR_NUMBER" --source-kind backlog --arm 2>/dev/null || true
+node pipeline-cli/bin/cli-merge-if-eligible.mjs "$PR_NUMBER" --source-kind backlog --rearm-previous-head "$PRE_PUSH_HEAD_SHA" 2>/dev/null || true
 ```
+
+`$PRE_PUSH_HEAD_SHA` is the prompt's `headSha` (the head before the rebase).
+The CLI arms only when the patch-id is unchanged (AISDLC-872); a content
+change is refused and needs a fresh review and arm.
 
 Swallow non-zero exits — auto-merge may not be enabled in the repo or
 the PR may not yet be ready. The re-arm is best-effort; it must go through the CLI above, never a raw merge.

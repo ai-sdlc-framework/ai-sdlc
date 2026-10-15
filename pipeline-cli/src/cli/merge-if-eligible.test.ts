@@ -167,10 +167,18 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
     argv: string[],
     runner: Runner,
     trustedRootOverride?: { root: string; policyYaml: string | null },
+    rebaseOnlyCheck?: (a: { previousHead: string; newHead: string; repoRoot: string }) => {
+      rebaseOnly: boolean;
+      reason: string;
+    },
   ): Promise<string> {
     process.argv = ['node', 'merge-if-eligible', ...argv];
     try {
-      await buildMergeIfEligibleCli({ runner, trustedRootOverride }).parseAsync();
+      await buildMergeIfEligibleCli({
+        runner,
+        trustedRootOverride,
+        rebaseOnlyCheck,
+      }).parseAsync();
       return 'ok';
     } catch (e) {
       return e instanceof Error ? e.message : String(e);
@@ -251,6 +259,77 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
     expect(out.join('')).toMatch(/PR #42 \| ARMED \|/);
     const arm = fake.calls.find((c) => c.args.includes('--auto'));
     expect(arm?.args).toEqual(expect.arrayContaining(['--match-head-commit', HEAD, '--squash']));
+  });
+
+  describe('--rearm-previous-head (AISDLC-872)', () => {
+    const PREV = 'd'.repeat(40);
+    const handlers = () => ({
+      ...repoView,
+      'pr view 42 --json headRefOid --jq': { stdout: `${HEAD}\n` },
+      'gh pr view 42': { stdout: GOOD_PR },
+      ...MAIN_REF,
+      [`commits/${HEAD} --jq {author`]: { stdout: '{"author":"operator","committer":"operator"}' },
+      'contents/backlog/config.yml': { stdout: "task_prefix: 'AISDLC'\n" },
+      'gh pr merge 42': {},
+    });
+    const root = { root: '/main', policyYaml: GREEN_YAML };
+
+    it('re-arms through the normal eligibility path when the patch-id is unchanged', async () => {
+      const fake = makeFakeRunner(handlers());
+      const seen: string[] = [];
+      const msg = await runCli(
+        ['42', '--source-kind', 'backlog', '--rearm-previous-head', PREV],
+        fake.runner,
+        root,
+        (a) => {
+          seen.push(a.previousHead, a.newHead);
+          return { rebaseOnly: true, reason: 'same' };
+        },
+      );
+      expect(msg).toBe('ok');
+      expect(seen).toEqual([PREV, HEAD]);
+      expect(out.join('')).toMatch(/PR #42 \| ARMED \|/);
+      const arm = fake.calls.find((c) => c.args.includes('--auto'));
+      expect(arm?.args).toEqual(expect.arrayContaining(['--match-head-commit', HEAD]));
+    });
+
+    it('does not arm when the patch-id changed', async () => {
+      const fake = makeFakeRunner(handlers());
+      const msg = await runCli(
+        ['42', '--source-kind', 'backlog', '--rearm-previous-head', PREV],
+        fake.runner,
+        root,
+        () => ({ rebaseOnly: false, reason: 'patch-id changed' }),
+      );
+      expect(msg).toBe('process.exit(1)');
+      expect(out.join('')).toMatch(/REFUSED.*not a rebase-only push: patch-id changed/);
+      expect(fake.calls.some((c) => c.args.includes('--auto'))).toBe(false);
+    });
+
+    it('refuses a malformed previous head and an unreadable PR head', async () => {
+      const fake = makeFakeRunner(handlers());
+      expect(
+        await runCli(
+          ['42', '--source-kind', 'backlog', '--rearm-previous-head', 'xyz'],
+          fake.runner,
+          root,
+        ),
+      ).toBe('process.exit(1)');
+      expect(out.join('')).toMatch(/40-char commit SHA/);
+      out = [];
+      const bad = makeFakeRunner({
+        ...handlers(),
+        'pr view 42 --json headRefOid --jq': { code: 1 },
+      });
+      expect(
+        await runCli(
+          ['42', '--source-kind', 'backlog', '--rearm-previous-head', PREV],
+          bad.runner,
+          root,
+        ),
+      ).toBe('process.exit(1)');
+      expect(out.join('')).toMatch(/could not read the PR head/);
+    });
   });
 
   it('--arm --format json reports armed, and exits 1 when refused (policy never)', async () => {

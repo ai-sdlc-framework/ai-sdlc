@@ -23,6 +23,7 @@ import {
   type RunMergeIfEligibleResult,
   type SourceKind,
 } from '../governance/merge-if-eligible.js';
+import { isRebaseOnlyPush, type RebaseOnlyResult } from '../governance/rebase-rearm.js';
 import { NEXT_STEP_PREFIX, runReleaseMerge } from '../governance/release-merge.js';
 
 /**
@@ -34,6 +35,34 @@ import { NEXT_STEP_PREFIX, runReleaseMerge } from '../governance/release-merge.j
 function packageRoot(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   return join(here, '..', '..');
+}
+
+/**
+ * Returns a refusal reason when the PR head is not provably a rebase-only
+ * successor of `previousHead`, or null when re-arming may proceed to the normal
+ * eligibility checks (AISDLC-872).
+ */
+async function checkRebaseOnly(args: {
+  previousHead: string;
+  prNumber: number;
+  runner: Runner;
+  cwd: string;
+  check: (a: { previousHead: string; newHead: string; repoRoot: string }) => RebaseOnlyResult;
+}): Promise<string | null> {
+  if (!/^[0-9a-f]{40}$/i.test(args.previousHead)) {
+    return '--rearm-previous-head must be a 40-char commit SHA; not re-arming';
+  }
+  const out = await args.runner(
+    'gh',
+    ['pr', 'view', String(args.prNumber), '--json', 'headRefOid', '--jq', '.headRefOid'],
+    { cwd: args.cwd, allowFailure: true },
+  );
+  const newHead = out.stdout.trim();
+  if (out.code !== 0 || !/^[0-9a-f]{40}$/i.test(newHead)) {
+    return 'could not read the PR head commit; not re-arming';
+  }
+  const r = args.check({ previousHead: args.previousHead, newHead, repoRoot: args.cwd });
+  return r.rebaseOnly ? null : `not a rebase-only push: ${r.reason}`;
 }
 
 export function renderResult(result: RunMergeIfEligibleResult): string {
@@ -80,6 +109,12 @@ export interface BuildCliOptions {
    * that imports this builder can set it (the bin shim never does).
    */
   trustedRootOverride?: { root: string; policyYaml: string | null };
+  /** Test seam for the rebase-only predicate (AISDLC-872). */
+  rebaseOnlyCheck?: (args: {
+    previousHead: string;
+    newHead: string;
+    repoRoot: string;
+  }) => RebaseOnlyResult;
 }
 
 export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
@@ -132,6 +167,13 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
               'Arm auto-merge instead of merging now. Needs the same allowMerge grant and the same ' +
               'fork/author/base/task/head checks; GitHub then merges once its own required checks pass.',
           })
+          .option('rearm-previous-head', {
+            type: 'string',
+            describe:
+              'Re-arm after a rebase (AISDLC-872): the head SHA before the force-push. Implies --arm, ' +
+              'and arms only when the patch-id of the PR head equals that of this SHA; a content ' +
+              'change is refused. All eligibility checks still apply.',
+          })
           .option('dry-run', {
             type: 'boolean',
             default: false,
@@ -148,7 +190,8 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
         const sourceKind = argv['source-kind'] as SourceKind;
         const mergeMethod = argv['merge-method'] as 'squash' | 'merge' | 'rebase';
         const dryRun = Boolean(argv['dry-run']);
-        const mode = argv.arm ? ('arm' as const) : ('merge' as const);
+        const previousHead = argv['rearm-previous-head'] as string | undefined;
+        const mode = argv.arm || previousHead ? ('arm' as const) : ('merge' as const);
         const format = String(argv.format) as 'text' | 'json';
 
         // The policy root is the VERIFIED main checkout only. There is no flag
@@ -162,39 +205,52 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
         // The repository slug comes only from `gh repo view` in the verified checkout.
         const repoSlug = trusted.root === null ? null : await resolveRepoSlug(runner, trusted.root);
 
+        let rebaseRefusal: string | null = null;
+        if (previousHead !== undefined) {
+          rebaseRefusal = await checkRebaseOnly({
+            previousHead,
+            prNumber,
+            runner,
+            cwd,
+            check: opts.rebaseOnlyCheck ?? ((a) => isRebaseOnlyPush(a)),
+          });
+        }
+
         const result =
-          sourceKind === 'release' && trusted.root !== null && repoSlug !== null
-            ? await runReleaseMerge({
-                prNumber,
-                repoSlug,
-                runner,
-                cwd,
-                mergeMethod,
-                dryRun,
-                mode,
-                policyYaml: override?.policyYaml,
-              })
-            : trusted.root !== null && repoSlug === null
-              ? refusalResult(
+          rebaseRefusal !== null
+            ? refusalResult(prNumber, rebaseRefusal, dryRun)
+            : sourceKind === 'release' && trusted.root !== null && repoSlug !== null
+              ? await runReleaseMerge({
                   prNumber,
-                  'could not determine the repository (owner/name) with `gh repo view` in the verified ' +
-                    'main checkout — refusing (fail-closed)',
-                  dryRun,
-                )
-              : await runMergeIfEligible({
-                  prNumber,
-                  sourceKind,
-                  repoSlug: repoSlug ?? '',
-                  repoRoot: trusted.root,
-                  rootRefusal: trusted.reason,
+                  repoSlug,
                   runner,
                   cwd,
                   mergeMethod,
                   dryRun,
                   mode,
                   policyYaml: override?.policyYaml,
-                  auditWriter: defaultBacklogAuditWriter(),
-                });
+                })
+              : trusted.root !== null && repoSlug === null
+                ? refusalResult(
+                    prNumber,
+                    'could not determine the repository (owner/name) with `gh repo view` in the verified ' +
+                      'main checkout — refusing (fail-closed)',
+                    dryRun,
+                  )
+                : await runMergeIfEligible({
+                    prNumber,
+                    sourceKind,
+                    repoSlug: repoSlug ?? '',
+                    repoRoot: trusted.root,
+                    rootRefusal: trusted.reason,
+                    runner,
+                    cwd,
+                    mergeMethod,
+                    dryRun,
+                    mode,
+                    policyYaml: override?.policyYaml,
+                    auditWriter: defaultBacklogAuditWriter(),
+                  });
 
         if (sourceKind === 'release' && !result.eligibility.eligible) {
           const reason = result.eligibility.reason;
