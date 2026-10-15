@@ -392,6 +392,17 @@ export function persistDecisionLog(opts: DurableOpts): PersistResult {
     }
     if (additions.size === 0) return { persisted: true, reason: 'already on main' };
 
+    // AISDLC-928: author with the session's own identity so the sanctioned landing path can
+    // resolve the head commit author to a GitHub login. No synthetic identity, no fallback.
+    const missing = ['user.name', 'user.email'].filter(
+      (k) => ctx.run('git', ['config', '--get', k]).stdout.trim() === '',
+    );
+    if (missing.length > 0) {
+      const msg = `git config ${missing.join(' and ')} not set; the decisions-sync commit needs the session identity (set it with git config), nothing was pushed`;
+      warn(`[decisions] WARN: ${msg}; decision kept locally only`);
+      return { persisted: false, reason: msg };
+    }
+
     const gitDir = ctx.run('git', ['rev-parse', '--absolute-git-dir']).stdout.trim();
     const idx = join(gitDir, `decisions-sync-index-${process.pid}`);
     const env = { ...(opts.env ?? process.env), GIT_INDEX_FILE: idx };
@@ -416,10 +427,6 @@ export function persistDecisionLog(opts: DurableOpts): PersistResult {
       const commit = ctx.run(
         'git',
         [
-          '-c',
-          'user.name=ai-sdlc-decisions',
-          '-c',
-          'user.email=decisions@ai-sdlc.invalid',
           'commit-tree',
           tree.stdout.trim(),
           '-p',

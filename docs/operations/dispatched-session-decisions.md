@@ -186,6 +186,10 @@ the decision.
   so a freed DEC-NNNN is never reissued; an explicit `--id` that is already consumed remotely is refused.
 - Offline / no `origin` / no `gh`: a warning goes to stderr, the exit code is unchanged and the local
   append is kept (the next successful `add`/`answer` pushes everything).
+- The sync commit is authored and committed with the session's configured git `user.name` and
+  `user.email` (AISDLC-928), so `cli-merge-if-eligible --source-kind decisions-sync` can resolve the head
+  author to a GitHub login on `mergeAuthors`. With no configured identity the sync refuses with a message
+  naming the missing config and pushes nothing.
 - Opt out (tests, air-gapped use): `AI_SDLC_DECISIONS_NO_REMOTE_PERSIST=1`.
 - The sync push is a programmatic `--no-verify` lease-protected force push to a hard-coded,
   non-configurable dedicated ref (`ai-sdlc/decisions-sync`). This is a documented exception for a
