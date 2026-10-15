@@ -74,7 +74,7 @@ export interface RequeueFailedOptions {
   /** Who requeues the task (audit only); used with `note`. */
   requeuedBy?: string;
   now?: () => Date;
-  /** Reads a PR's state (`OPEN`, `MERGED`, `CLOSED`) from its URL; undefined when unknown. Default: `gh pr view`. */
+  /** Reads a PR's state (`OPEN`, `MERGED`, `CLOSED`) from its URL or number; undefined when unknown. Default: `gh pr view`. */
   prState?: (prUrl: string) => string | undefined;
 }
 
@@ -146,6 +146,8 @@ export function requeueFailed(
       readFileSync(path.join(failedDir, `${taskId}.verdict.json`), 'utf-8'),
     ) as DispatchVerdict;
     if (typeof v.prUrl === 'string' && v.prUrl) prUrl = v.prUrl;
+    else if (Number.isSafeInteger(v.prNumber) && (v.prNumber as number) > 0)
+      prUrl = String(v.prNumber);
   } catch {
     prUrl = undefined;
   }

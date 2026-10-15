@@ -152,3 +152,7 @@ DEC-0186 and DEC-0188 (a resume blocked because `chore/sync-tasks-<sha>` already
 ## Superseded: DEC-0183 manifest branch correction
 
 DEC-0183 (dispatch corrects a manifest whose branch differs from the PR head with `write-manifest`) is superseded by AISDLC-851. `cli-dispatch enqueue` now writes the branch with the same builder Step 2 uses, so new manifests never carry a different name. For older manifests, the playbook accepts a worktree branch that exists on `origin` and rewrites the recorded branch itself; it still refuses when that branch is not on `origin`. No manual `write-manifest` correction is needed.
+
+## Superseded: DEC-0187 re-enqueue procedure
+
+DEC-0187 (hand-editing the verdict and writing a manifest to re-enqueue a failed task that hit the retry cap) is superseded by AISDLC-857. `requeueFailed` now reads `prNumber` as well as `prUrl` from the failed verdict, so an OPEN PR always counts as follow-up and consumes no retry. A failed verdict with neither field at the cap is still refused.
