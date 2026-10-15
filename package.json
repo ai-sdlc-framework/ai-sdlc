@@ -12,7 +12,7 @@
   "scripts": {
     "typecheck": "pnpm -r --parallel exec tsc --noEmit",
     "build": "pnpm -r build",
-    "test": "pnpm -r test && pnpm test:gates && pnpm docs:check && pnpm rfc:check && pnpm dark-code:check && pnpm lint:publishable && pnpm knowledge:check && pnpm sync:plugin-runtime-deps:check",
+    "test": "pnpm -r test && pnpm test:gates && pnpm rfc:check && pnpm dark-code:check && pnpm lint:publishable && pnpm knowledge:check && pnpm sync:plugin-runtime-deps:check",
     "test:gates": "node scripts/run-gate-tests.mjs",
     "test:coverage": "pnpm -r test:coverage",
     "lint": "eslint . && node scripts/check-clock-discipline.mjs",
@@ -23,9 +23,6 @@
     "clean": "pnpm -r clean",
     "tui": "AI_SDLC_TUI=experimental node pipeline-cli/bin/cli-tui.mjs",
     "validate-schemas": "pnpm -C reference validate-schemas",
-    "docs:sync": "node scripts/docs-sync.mjs",
-    "docs:check": "node scripts/check-docs-sync.mjs",
-    "docs:test": "node --test scripts/docs-sync.test.mjs",
     "smoke:first-run": "node scripts/first-run-smoke.mjs",
     "test:first-run-smoke-gate": "node --test scripts/first-run-smoke.test.mjs",
     "test:first-run-smoke-workflow": "node --test .github/workflows/__tests__/first-run-smoke.test.mjs",

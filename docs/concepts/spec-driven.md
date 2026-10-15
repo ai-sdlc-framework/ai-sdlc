@@ -1,3 +1,8 @@
+---
+title: "Spec-Driven Development with AI-SDLC"
+description: "How spec-driven development composes with the Decision Engine framing and which authoring model to choose."
+---
+
 # Spec-Driven Development with AI-SDLC
 
 AI-SDLC is a **Decision Engine** — its core value proposition is that the operator remains the decision-steward throughout the development lifecycle, while autonomous agents handle execution. Spec-driven development is the broader methodology that makes this sustainable: decisions are captured as artifacts before execution begins, so the engine has a clear contract to execute against.
@@ -36,8 +41,8 @@ AI-SDLC is the **contract-to-shipped** half of a spec-driven stack.
 
 Spec-driven is a *category*. AI-SDLC's distinctive value within that category is the **operator-as-decision-steward substrate**:
 
-- The [Decision Catalog (RFC-0035)](../../../spec/rfcs/RFC-0035-decision-catalog-operator-routing.md) routes decisions to the right human actor — never to an autonomous agent acting unilaterally.
-- The [DoR Gate (RFC-0011)](../../../spec/rfcs/RFC-0011-definition-of-ready-gate.md) evaluates every task against a seven-point quality rubric before any execution dollar is spent.
+- The [Decision Catalog (RFC-0035)](../../spec/rfcs/RFC-0035-decision-catalog-operator-routing.md) routes decisions to the right human actor — never to an autonomous agent acting unilaterally.
+- The [DoR Gate (RFC-0011)](../../spec/rfcs/RFC-0011-definition-of-ready-gate.md) evaluates every task against a seven-point quality rubric before any execution dollar is spent.
 - The attestation + quality-gate system produces a tamper-evident audit trail for every shipped artifact.
 - Progressive autonomy (RFC-0010 §13) lets agents earn trust incrementally — decisions about promoting an agent's autonomy level remain with the operator.
 
@@ -120,7 +125,7 @@ Use the following questions to determine which tier a piece of work belongs at:
 
 ### Does this work pass the DoR Gate on its own?
 
-The [DoR Gate (RFC-0011)](../../../spec/rfcs/RFC-0011-definition-of-ready-gate.md) checks seven rubric points before a task enters the pipeline. If you can express the work as a task with:
+The [DoR Gate (RFC-0011)](../../spec/rfcs/RFC-0011-definition-of-ready-gate.md) checks seven rubric points before a task enters the pipeline. If you can express the work as a task with:
 
 1. Binary-testable acceptance criteria
 2. Named affected surface (file path, route, system)
@@ -197,14 +202,14 @@ When upstream output meets this contract, the bridge is a translation step. When
 
 ## 7. The seam: DoR Gate as the quality boundary
 
-The [Definition of Ready Gate (RFC-0011)](../../../spec/rfcs/RFC-0011-definition-of-ready-gate.md) is the single quality boundary between upstream authoring (whatever tool or process the adopter uses) and downstream execution (AI-SDLC's pipeline). This boundary is **not optional** and does not move based on what upstream tool produced the task.
+The [Definition of Ready Gate (RFC-0011)](../../spec/rfcs/RFC-0011-definition-of-ready-gate.md) is the single quality boundary between upstream authoring (whatever tool or process the adopter uses) and downstream execution (AI-SDLC's pipeline). This boundary is **not optional** and does not move based on what upstream tool produced the task.
 
 The DoR Gate runs:
 - At manual task authoring time (via `ai-sdlc refine <task-id>` or the MCP tool)
 - At spec import time (when `ai-sdlc import-spec` ships in Phase 4+)
 - As part of the autonomous orchestrator's admission chain (before any task is dispatched to a developer subagent)
 
-The Decision Catalog ([RFC-0035](../../../spec/rfcs/RFC-0035-decision-catalog-operator-routing.md)) routes DoR failures to the appropriate human actor — never silently discarding them or auto-resolving them. This is the "Decision Engine" pattern in action: the gate produces a decision event; the catalog routes it; the operator resolves it at the right altitude and cadence.
+The Decision Catalog ([RFC-0035](../../spec/rfcs/RFC-0035-decision-catalog-operator-routing.md)) routes DoR failures to the appropriate human actor — never silently discarding them or auto-resolving them. This is the "Decision Engine" pattern in action: the gate produces a decision event; the catalog routes it; the operator resolves it at the right altitude and cadence.
 
 ---
 
@@ -212,9 +217,9 @@ The Decision Catalog ([RFC-0035](../../../spec/rfcs/RFC-0035-decision-catalog-op
 
 | Resource | What it covers |
 |---|---|
-| [RFC-0011: DoR Gate](../../../spec/rfcs/RFC-0011-definition-of-ready-gate.md) | The seven-point quality rubric every task must pass before entering the pipeline |
-| [RFC-0035: Decision Catalog](../../../spec/rfcs/RFC-0035-decision-catalog-operator-routing.md) | How decisions are routed to the right human actor; the substrate for the Decision Engine framing |
-| [RFC-0036: Spec-Kit Bridge](../../../spec/rfcs/RFC-0036-spec-kit-bridge-adopter-authoring.md) | The full adopter authoring RFC: three-tier model, spec-kit import path, adopter RFC scaffold, positioning updates |
+| [RFC-0011: DoR Gate](../../spec/rfcs/RFC-0011-definition-of-ready-gate.md) | The seven-point quality rubric every task must pass before entering the pipeline |
+| [RFC-0035: Decision Catalog](../../spec/rfcs/RFC-0035-decision-catalog-operator-routing.md) | How decisions are routed to the right human actor; the substrate for the Decision Engine framing |
+| [RFC-0036: Spec-Kit Bridge](../../spec/rfcs/RFC-0036-spec-kit-bridge-adopter-authoring.md) | The full adopter authoring RFC: three-tier model, spec-kit import path, adopter RFC scaffold, positioning updates |
 | [Adopter Translators (BYO upstream)](adopter-translators.md) | Bring-your-own translator pattern for non-spec-kit upstreams (Linear, Notion, plain markdown); canonical `tasks.md` format; BYO → first-party promotion via RFC-0035 |
 | [GitHub Spec Kit](https://github.com/github/spec-kit) | The recommended front-of-funnel tool: idea → contract |
 | [Getting Started](../getting-started/README.md) | Installation, CLI quick start, first pipeline |

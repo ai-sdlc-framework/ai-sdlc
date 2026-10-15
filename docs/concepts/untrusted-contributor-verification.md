@@ -1,3 +1,8 @@
+---
+title: "Untrusted-Contributor Verification"
+description: "Adopter explainer for verifying pull requests from untrusted contributors."
+---
+
 # Untrusted-Contributor Verification — Adopter Explainer
 
 **Document type:** Concept / Explainer

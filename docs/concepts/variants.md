@@ -1,3 +1,8 @@
+---
+title: "Soul Variants"
+description: "Named sub-themes within a Soul DID and how they carry visual identity specializations."
+---
+
 # Soul Variants
 
 **Document type:** Informative

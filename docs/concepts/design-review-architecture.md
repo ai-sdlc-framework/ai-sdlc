@@ -1,3 +1,8 @@
+---
+title: "Design Review Architecture"
+description: "How the design review pipeline splits review into focused stages instead of one pass."
+---
+
 # Design Review Architecture
 
 **Document type:** Informative

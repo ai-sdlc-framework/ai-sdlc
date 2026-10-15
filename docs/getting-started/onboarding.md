@@ -544,17 +544,6 @@ it requires manually constructing the `trusted-reviewers.yaml` YAML block.
 (without the slash-command prefix) would close this gap. Surfaced for operator
 routing.
 
-### Gap 3 — `pnpm docs:check` skips silently when the sibling `ai-sdlc-io` repo is not checked out
-
-**Observed:** `pnpm docs:check` exits 0 with `[docs-check] skipping (treating as
-pass)` when `../ai-sdlc-io/content/docs` is absent. This means CI on a fork or
-CI without the sibling repo never catches doc drift.
-
-**Status:** Expected behavior — the check is designed to be a no-op in forks and
-CI contexts without the sibling repo. The guide documents `pnpm docs:check` as
-the relevant command; the actual drift is caught when the maintainer runs it with
-both repos checked out side by side. No change needed for adopters.
-
 ### Gap 4 — Claude Code must be authenticated before `/ai-sdlc execute` dispatches
 
 **Observed:** a fresh machine with `claude` on PATH but not authenticated (no
@@ -617,18 +606,6 @@ ai-sdlc init --add branch-protection
 
 This applies the recommended required-checks list (`ai-sdlc/pr-ready` + `Backlog
 Drift`) via `gh api`. If `gh auth` is not configured, run `gh auth login` first.
-
-### `pnpm docs:check` fails with "drift between source and published"
-
-This means the `.md` source in `docs/` diverged from the `.mdx` files in the
-sibling `ai-sdlc-io` repo. Fix it with:
-
-```bash
-pnpm docs:sync
-cd ../ai-sdlc-io
-git add content/docs
-git commit -m "docs: sync MDX from ai-sdlc source"
-```
 
 ---
 

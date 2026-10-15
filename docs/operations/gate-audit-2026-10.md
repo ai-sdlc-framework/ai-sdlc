@@ -103,7 +103,6 @@ Local cost and failure rate are **not measured** (hooks write no run history). "
 | 53 `pnpm test:<x>` / `docs:test` / `rfc:test` entries | each runs one or two `node --test` files | one task each | engineering | **DELETE (applied, class a)** | replaced by `pnpm test:gates`, the glob runner; every previously chained file still runs (see below) |
 | `pnpm -r test` | all package suites | baseline | engineering | KEEP | |
 | `pnpm test:gates` | glob runner (new) | AISDLC-805 | engineering | KEEP | `scripts/run-gate-tests.mjs` |
-| `pnpm docs:check` | generated docs in sync | unknown | engineering | KEEP | |
 | `pnpm rfc:check` | RFC docs-drift | AISDLC-165 | engineering | KEEP | |
 | `pnpm dark-code:check` | no dark modules | AISDLC-552 | engineering | KEEP | |
 | `pnpm sync:plugin-runtime-deps:check` | plugin dep list in sync | unknown | engineering | KEEP | |
@@ -210,4 +209,4 @@ Nothing governance or trust-chain is deleted in this PR. Each item below is a cl
 
 - `scripts/check-rm-guard.test.mjs` and `ai-sdlc-plugin/agents/rebase-resolver.test.mjs` were never chained and fail on `main`; each needs a fix task (recorded in the runner's `KNOWN_RED` map, shrink-only).
 - The old chain did not name 36 existing test files explicitly; they now run.
-- `check-followups-on-push.sh`, `lint-staged`, `typecheck-workspace.mjs`, `docs:check`, `sync:plugin-runtime-deps:check`, `test-python` and three reviewer agents have no recorded origin.
+- `check-followups-on-push.sh`, `lint-staged`, `typecheck-workspace.mjs`, `sync:plugin-runtime-deps:check`, `test-python` and three reviewer agents have no recorded origin.

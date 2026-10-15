@@ -35,7 +35,7 @@ A reported semantic conflict is recoverable; a wrong auto-resolve is a silent re
 ```
 [ai-sdlc-progress] commit: a1b2c3d feat(spec): add docs sync (AISDLC-68)
 [ai-sdlc-progress] rebase: fetched origin/main; rebased clean (0 conflicts)
-[ai-sdlc-progress] push: pushed ai-sdlc/aisdlc-68-docs-sync to origin (--force-with-lease)
+[ai-sdlc-progress] push: pushed ai-sdlc/aisdlc-68-docs-consolidation to origin (--force-with-lease)
 [ai-sdlc-progress] pr: opened https://github.com/org/repo/pull/4321
 ... return JSON with prUrl: "https://github.com/org/repo/pull/4321"
 ```
@@ -48,7 +48,7 @@ The PR opens at-or-ahead of `main`, `auto-enable-auto-merge.yml` arms auto-merge
 [ai-sdlc-progress] commit: a1b2c3d feat(spec): add docs sync (AISDLC-68)
 [ai-sdlc-progress] rebase: fetched origin/main; pnpm-lock.yaml conflict — accepted incoming, ran pnpm install, re-staged
 [ai-sdlc-progress] rebase: rebase complete (1 mechanical conflict resolved)
-[ai-sdlc-progress] push: pushed ai-sdlc/aisdlc-68-docs-sync to origin (--force-with-lease)
+[ai-sdlc-progress] push: pushed ai-sdlc/aisdlc-68-docs-consolidation to origin (--force-with-lease)
 [ai-sdlc-progress] pr: opened https://github.com/org/repo/pull/4321
 ```
 
@@ -56,7 +56,7 @@ The PR opens at-or-ahead of `main`, `auto-enable-auto-merge.yml` arms auto-merge
 
 ```
 [ai-sdlc-progress] commit: a1b2c3d feat(spec): add docs sync (AISDLC-68)
-[ai-sdlc-progress] push: pushed ai-sdlc/aisdlc-68-docs-sync to origin
+[ai-sdlc-progress] push: pushed ai-sdlc/aisdlc-68-docs-consolidation to origin
 [ai-sdlc-progress] pr: opened https://github.com/org/repo/pull/4321
 ```
 

@@ -191,12 +191,6 @@ gates:
     owner: engineering
     property: glob runner over gate tests (scripts, workflow tests, plugin tests)
     baseline: true
-  - id: test-chain:pnpm docs:check
-    surface: test-chain
-    origin: unknown (docs sync check)
-    owner: engineering
-    property: generated docs match their sources
-    baseline: true
   - id: test-chain:pnpm rfc:check
     surface: test-chain
     origin: AISDLC-165, check-rfc-docs

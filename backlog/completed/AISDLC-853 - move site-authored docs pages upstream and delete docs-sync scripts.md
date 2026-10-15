@@ -1,12 +1,12 @@
 ---
 id: AISDLC-853
 title: Move the 15 site-authored ai-sdlc.io pages into docs/ and spec/, add description frontmatter, delete the dead docs-sync scripts
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels: [docs, docs-platform]
 dependencies: []
-references: [docs/concepts/zero-trust-untrusted-pr-verification.md, docs/concepts/untrusted-contributor-verification.md, docs/whitepapers/proof-of-execution.md, scripts/docs-sync.mjs, scripts/check-docs-sync.mjs, scripts/docs-sync.test.mjs, package.json, docs/README.md]
+references: [docs/concepts/zero-trust-untrusted-pr-verification.md, docs/concepts/untrusted-contributor-verification.md, docs/whitepapers/proof-of-execution.md, package.json, docs/README.md]
 priority: high
 dispatchable: true
 ---

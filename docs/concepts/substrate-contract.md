@@ -1,3 +1,8 @@
+---
+title: "Substrate Contract"
+description: "The typed JSON configuration that shared substrate code reads to enforce engineering-axis rules."
+---
+
 # Substrate Contract
 
 **Document type:** Informative / Adopter-facing  

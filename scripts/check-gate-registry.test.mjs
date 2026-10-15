@@ -128,7 +128,6 @@ const BASELINE_IDS = [
   'pre-commit:lint-staged',
   'test-chain:pnpm -r test',
   'test-chain:pnpm test:gates',
-  'test-chain:pnpm docs:check',
   'test-chain:pnpm rfc:check',
   'test-chain:pnpm dark-code:check',
   'test-chain:pnpm sync:plugin-runtime-deps:check',
