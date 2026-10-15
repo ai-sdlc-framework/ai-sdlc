@@ -209,6 +209,17 @@ describe('brief ingestion', () => {
     expect(enqueued).toHaveLength(2);
   });
 
+  it('skips a task already on the board, reports it and ingests the rest (AISDLC-868)', async () => {
+    mkdirSync(path.join(board, 'queue'), { recursive: true });
+    writeFileSync(path.join(board, 'queue', 'AISDLC-1.dispatch.json'), '{}');
+    writeBrief('b1.md', ['AISDLC-1', 'AISDLC-2', 'AISDLC-3']);
+    const result = await runDispatchTick(deps());
+    expect(result.ingestErrors).toEqual([]);
+    expect(result.ingested).toEqual([{ file: 'b1.md', tasks: ['AISDLC-2', 'AISDLC-3'] }]);
+    expect(result.skipped).toEqual([{ file: 'b1.md', taskId: 'AISDLC-1', state: 'queue' }]);
+    expect(enqueued[0]!.map((e) => e.taskId)).toEqual(['AISDLC-2', 'AISDLC-3']);
+  });
+
   it('reports a malformed brief and ignores files that are not briefs', async () => {
     const dir = path.join(board, 'briefs');
     mkdirSync(path.join(dir, 'sub.md'), { recursive: true });

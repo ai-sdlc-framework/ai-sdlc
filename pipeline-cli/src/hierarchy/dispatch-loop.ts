@@ -33,7 +33,7 @@ import {
 import path from 'node:path';
 
 import type { PromotedDecision } from '../decisions/escalation-chain.js';
-import { collectVerdicts, peekQueue, TASK_ID_RE } from '../dispatch/board.js';
+import { boardStateOf, collectVerdicts, peekQueue, TASK_ID_RE } from '../dispatch/board.js';
 import type { EnqueueEntry } from '../dispatch/enqueue.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
 import { sanitizeVerdict } from '../dispatch/verdict-fields.js';
@@ -150,6 +150,8 @@ export interface PlannerReport {
 export interface TickResult {
   ingested: { file: string; tasks: string[] }[];
   ingestErrors: { file: string; error: string }[];
+  /** Brief tasks already on the board (a resume, say): skipped, the rest of the brief ingested (AISDLC-868). */
+  skipped?: { file: string; taskId: string; state: string }[];
   verdicts: VerdictReport[];
   /** Failures the playbook could not fix; the skill messages the planner with each. */
   escalations: { taskId: string; message: string }[];
@@ -221,8 +223,12 @@ export interface LoopDeps {
 function ingestBriefs(
   deps: LoopDeps,
   state: LoopState,
-): Pick<TickResult, 'ingested' | 'ingestErrors'> {
-  const result: Pick<TickResult, 'ingested' | 'ingestErrors'> = { ingested: [], ingestErrors: [] };
+): Pick<TickResult, 'ingested' | 'ingestErrors'> & {
+  skipped: { file: string; taskId: string; state: string }[];
+} {
+  const result: Pick<TickResult, 'ingested' | 'ingestErrors'> & {
+    skipped: { file: string; taskId: string; state: string }[];
+  } = { ingested: [], ingestErrors: [], skipped: [] };
   const dir = path.join(deps.boardDir, 'briefs');
   if (!existsSync(dir)) return result;
   for (const file of readdirSync(dir).sort()) {
@@ -233,7 +239,12 @@ function ingestBriefs(
     const mtime = statSync(full).mtimeMs;
     if (state.rejected[file] === mtime) continue;
     try {
-      const entries = briefToEnqueueEntries(parseBrief(readFileSync(full, 'utf-8')));
+      const all = briefToEnqueueEntries(parseBrief(readFileSync(full, 'utf-8')));
+      const entries = all.filter((e) => {
+        const where = boardStateOf(deps.boardDir, e.taskId);
+        if (where) result.skipped.push({ file, taskId: e.taskId, state: where });
+        return !where;
+      });
       if (entries.length > 0) deps.enqueue(entries);
       state.ingested[file] = { tasks: entries.map((e) => e.taskId), summarised: false };
       delete state.rejected[file];
@@ -411,7 +422,8 @@ async function checkStalls(deps: LoopDeps, state: LoopState): Promise<StalledRep
 /** Run one wake-up of the dispatch loop. */
 export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   const state = readLoopState(deps.boardDir);
-  const ingest = ingestBriefs(deps, state);
+  const { skipped, ...ingestRest } = ingestBriefs(deps, state);
+  const ingest = { ...ingestRest, ...(skipped.length > 0 ? { skipped } : {}) };
   const watch = await watchVerdicts(deps, state);
   const stalled = await checkStalls(deps, state);
   const reports = buildReports(deps, state, watch.verdicts.length);

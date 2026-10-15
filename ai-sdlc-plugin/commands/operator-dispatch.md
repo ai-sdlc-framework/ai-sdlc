@@ -64,7 +64,7 @@ a name. The JSON holds:
 
 - `identity.name` (`$MY_NAME`) and `identity.planner` (`$PLANNER_NAME`, empty when none).
 - `handoff`: this session's handoff, regenerated from board and catalog state at the end of the tick (what `cli-hierarchy.mjs handoff read --role operator-dispatch` returns after a clear); nothing to write by hand.
-- `ingested`, `ingestErrors`: each new brief once. Tell the planner about an error.
+- `ingested`, `ingestErrors`: each new brief once. Tell the planner about an error. `skipped`: brief tasks already on the board, left alone; the rest of the brief was ingested.
 - `verdicts`: each new verdict once, with the executor `clear` result (`degraded`: check
   `cli-hierarchy status`) and validated `decisionIds`; a `blocked` one awaits Step 4.
 - `escalations`, `reports`: failures the playbook (already run inside `tick`) could not fix, and progress lines; send each to the planner (Step 3).

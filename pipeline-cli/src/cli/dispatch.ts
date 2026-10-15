@@ -183,7 +183,12 @@ import {
 } from '../dispatch/index.js';
 import { computePatchId } from '../attestation/patch-id.js';
 import { formatSessionLine, listSessions, recordAgentSession } from '../dispatch/sessions.js';
-import { assertClaimHolder, completeTask, splitIdList } from '../dispatch/complete.js';
+import {
+  assertClaimHolder,
+  completeTask,
+  splitCommaList,
+  splitIdList,
+} from '../dispatch/complete.js';
 import { guardedRelease } from '../dispatch/release-guard.js';
 import { classifyAndRecord, type PrFacts } from '../hierarchy/pr-state.js';
 import {
@@ -841,7 +846,19 @@ export async function runDispatchCli(
     case 'remove-verdict': {
       const taskId = requireFlag(flags, 'task-id');
       const from = (flags['from'] ?? 'done') as 'done' | 'failed';
-      removeVerdict(boardDir, taskId, from);
+      // AISDLC-868: `--from failed` also drops the failed/ manifest when asked
+      // (`--with-manifest`) or when the task already sits in backlog/completed
+      // (the AISDLC-800 invariant); otherwise a live resume keeps its manifest.
+      const workDir = path.resolve(flags['work-dir'] ?? process.cwd());
+      const completed = path.join(workDir, 'backlog', 'completed');
+      const inCompleted =
+        existsSync(completed) &&
+        readdirSync(completed).some((f) =>
+          f.toLowerCase().startsWith(`${taskId.toLowerCase()} - `),
+        );
+      removeVerdict(boardDir, taskId, from, {
+        withManifest: flags['with-manifest'] === 'true' || inCompleted,
+      });
       out({ ok: true });
       return 0;
     }
@@ -1330,8 +1347,8 @@ export async function runDispatchCli(
               ...(prNumber !== undefined ? { prNumber } : {}),
               ...(prHeadRef ? { prHeadRef } : {}),
               failingChecks: [
-                ...splitIdList(flags['failing-checks']),
-                ...splitIdList(flags['failing-check']),
+                ...splitCommaList(flags['failing-checks']),
+                ...splitCommaList(flags['failing-check']),
               ],
               findings: flags['finding'] ? [flags['finding']] : [],
               pushOnly: flags['push-only'] === 'true',
@@ -1473,7 +1490,7 @@ Subcommands:
   write-verdict --task-id <id> --outcome <enum> [--worker <name>; required for executors]
                 [--commit-sha <s>]
                 [--iterations-attempted <n>] [--session-id <uuid>] ...
-  remove-verdict --task-id <id> [--from done|failed]
+  remove-verdict --task-id <id> [--from done|failed] [--with-manifest]
   push-only-check --task-id <id> [--worktree <path>]   (exit 0 push-only, 1 run a normal resume)
   heartbeat --task-id <id> --worker-id <id> --worker-kind <kind>
   sweep [--stale-ms <n>]

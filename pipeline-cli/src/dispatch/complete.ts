@@ -61,6 +61,18 @@ export function splitIdList(raw: string | undefined): string[] {
 }
 
 /**
+ * Split a comma-separated list, keeping spaces, ampersands and parentheses
+ * inside each item (check names such as `Build & Test (Node 22)`; AISDLC-868).
+ */
+export function splitCommaList(raw: string | undefined): string[] {
+  if (raw === undefined) return [];
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
  * Check that `worker` is the name the claim of `taskId` recorded, and return it.
  *
  * Shared by `complete` and `write-verdict` so both refuse the same way. This
