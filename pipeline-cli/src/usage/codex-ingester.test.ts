@@ -300,6 +300,13 @@ describe('ingestCodexSessions', () => {
     expect(defaultCodexSessionsDir({})).toMatch(/\.codex[\\/]sessions$/);
   });
 
+  it('never resolves a sessions directory outside CODEX_HOME when it is set', async () => {
+    const home = join(root, 'codex-home');
+    const dir = defaultCodexSessionsDir({ CODEX_HOME: home });
+    expect(dir).toBe(join(home, 'sessions'));
+    expect(dir.startsWith(home)).toBe(true);
+  });
+
   it('formats a summary', async () => {
     expect(
       formatCodexIngestSummary({

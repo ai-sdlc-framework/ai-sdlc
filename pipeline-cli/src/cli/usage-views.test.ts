@@ -42,6 +42,8 @@ beforeEach(() => {
   exitCode = undefined;
   // A stray env var must never point a test at the real usage directory.
   vi.stubEnv('AI_SDLC_USAGE_DIR', usageDir);
+  // Hermetic: the Codex ingester must never walk the operator's real ~/.codex.
+  vi.stubEnv('CODEX_HOME', join(root, 'codex-home'));
 });
 afterEach(() => {
   vi.unstubAllEnvs();
