@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-14T23:59:25.626Z","decisionId":"DEC-0225","chosenOptionId":"reuse-ai-sdlc-pat","rationale":"Operator confirmed 2026-10-14 that AI_SDLC_PAT reaches ai-sdlc-io with contents and pull-requests write; no new secret.","by":"dominique@reliablegenius.io"}
