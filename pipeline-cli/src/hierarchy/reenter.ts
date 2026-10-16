@@ -57,6 +57,8 @@ export interface ReenterDeps {
   now?: () => Date;
   resolveTaskFile?: (taskId: string) => string | undefined;
   resolveBaseSha?: () => string | undefined;
+  /** Where the origin-lookup fallback notice goes; defaults to stderr. */
+  warn?: (line: string) => void;
 }
 
 interface GuardEntry {
@@ -161,8 +163,21 @@ export function reenter(input: ReenterInput, deps: ReenterDeps): ReenterResult {
   if (!view) throw new Error(`pull request #${pr} could not be read from GitHub`);
   if (view.state === 'MERGED') throw new Error(`pull request #${pr} is already merged`);
   if (view.state === 'CLOSED') throw new Error(`pull request #${pr} is closed`);
-  const headSha = view.headRefOid ?? '';
   const headRef = view.headRefName ?? '';
+  // GitHub's record can lag the branch on origin (AISDLC-937): key the guard on origin.
+  const recordedSha = view.headRefOid ?? '';
+  let headSha = recordedSha;
+  if (headRef) {
+    const ls = deps.run('git', ['ls-remote', 'origin', `refs/heads/${headRef}`], { cwd: deps.cwd });
+    const originSha = ls.status === 0 ? /^([0-9a-f]{7,40})\s/i.exec(ls.stdout)?.[1] : undefined;
+    if (originSha) {
+      headSha = originSha;
+    } else {
+      (deps.warn ?? ((l: string) => process.stderr.write(`${l}\n`)))(
+        `reenter: git ls-remote origin ${headRef} failed; guarding on the recorded head ${short(recordedSha)} from GitHub`,
+      );
+    }
+  }
   if (!headSha || !headRef) throw new Error(`pull request #${pr} has no head to re-enter`);
 
   const taskId =

@@ -73,27 +73,30 @@ function ghFor(
   taskId: string,
   over: { merge?: string; checks?: unknown[]; sha?: string; prNumber?: number } = {},
 ): CommandRunner {
-  return () => ({
-    status: 0,
-    stderr: '',
-    stdout: JSON.stringify({
-      number: over.prNumber ?? 7,
-      title: `feat: x (${taskId})`,
-      state: 'OPEN',
-      headRefName: `ai-sdlc/${taskId.toLowerCase()}-slug`,
-      headRefOid: over.sha ?? 'aaaaaaa1111111',
-      isDraft: true,
-      mergeStateStatus: over.merge ?? 'BLOCKED',
-      statusCheckRollup: over.checks ?? [
-        {
-          name: 'ai-sdlc/pr-ready',
-          status: 'COMPLETED',
-          conclusion: 'FAILURE',
-          title: 'coverage is low',
-        },
-      ],
-    }),
-  });
+  return (file, args) =>
+    file === 'git' && args[0] === 'ls-remote'
+      ? { status: 0, stderr: '', stdout: `${over.sha ?? 'aaaaaaa1111111'}\trefs/heads/x\n` }
+      : {
+          status: 0,
+          stderr: '',
+          stdout: JSON.stringify({
+            number: over.prNumber ?? 7,
+            title: `feat: x (${taskId})`,
+            state: 'OPEN',
+            headRefName: `ai-sdlc/${taskId.toLowerCase()}-slug`,
+            headRefOid: over.sha ?? 'aaaaaaa1111111',
+            isDraft: true,
+            mergeStateStatus: over.merge ?? 'BLOCKED',
+            statusCheckRollup: over.checks ?? [
+              {
+                name: 'ai-sdlc/pr-ready',
+                status: 'COMPLETED',
+                conclusion: 'FAILURE',
+                title: 'coverage is low',
+              },
+            ],
+          }),
+        };
 }
 
 const opts = { resumedBy: 'dispatch', now: () => new Date('2026-10-09T10:00:00.000Z') };
