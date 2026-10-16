@@ -275,6 +275,7 @@ export {
 export {
   DEFAULT_STALL_GRACE_MS,
   DEFAULT_STALL_STALE_MS,
+  endsWithQuestion,
   findOpenPrNumber,
   reapStalledClaims,
   STALE_WORKER_CAUSE,
@@ -282,6 +283,7 @@ export {
   stallThresholdsFromEnv,
   type StalledReport,
 } from './stall.js';
+export { paneTail } from './tmux.js';
 export {
   DEFAULT_WEBHOOK_PORT,
   WEBHOOK_PORT_ENV,

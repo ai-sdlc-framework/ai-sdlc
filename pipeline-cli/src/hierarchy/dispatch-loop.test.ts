@@ -829,6 +829,31 @@ describe('stall check (AISDLC-826)', () => {
     expect(existsSync(path.join(board, 'inflight', 'AISDLC-71.dispatch.json'))).toBe(true);
   });
 
+  it('reaps an idle holder whose last output is a question on the next tick, inside the grace (AISDLC-948)', async () => {
+    claim('AISDLC-71', 'executor-alpha', 1 * MIN);
+    states.set('executor-alpha', 'idle');
+    const r = await runDispatchTick(
+      stallDeps({ stall: { liveness: () => states, lastOutputIsQuestion: () => true } }),
+    );
+    expect(r.stalled![0]!.reason).toBe('holder-asked-question');
+  });
+
+  it('leaves an idle holder inside the grace alone when its output is not a question, or the check throws', async () => {
+    claim('AISDLC-71', 'executor-alpha', 1 * MIN);
+    states.set('executor-alpha', 'idle');
+    for (const lastOutputIsQuestion of [
+      () => false,
+      () => {
+        throw new Error('tmux gone');
+      },
+    ]) {
+      const r = await runDispatchTick(
+        stallDeps({ stall: { liveness: () => states, lastOutputIsQuestion } }),
+      );
+      expect(r.stalled).toBeUndefined();
+    }
+  });
+
   it('leaves a busy holder with a fresh heartbeat alone', async () => {
     claim('AISDLC-71', 'executor-alpha', 11 * MIN);
     const r = await runDispatchTick(stallDeps());

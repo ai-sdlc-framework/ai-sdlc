@@ -167,3 +167,9 @@ export function ownershipRefusal(run: CommandRunner, entry: RosterEntry): string
   if (sessionOwned(run, entry.tmuxSession)) return undefined;
   return `tmux session '${entry.tmuxSession}' (roster entry '${entry.name}') does not carry the ${OWNER_OPTION} marker, so cli-hierarchy did not start it; refusing to send keys to it or close it. Mark a session by hand only if cli-hierarchy created it; marking a personal session lets down and brief --notify type into it and close it: tmux set-option -t =${entry.tmuxSession}: ${OWNER_OPTION} 1`;
 }
+
+/** Last lines of a window's visible output; empty when it cannot be read (AISDLC-948). */
+export function paneTail(run: CommandRunner, session: string, window: string): string {
+  const r = run('tmux', ['capture-pane', '-p', '-t', `${session}:${window}`, '-S', '-30']);
+  return r.status === 0 ? r.stdout : '';
+}

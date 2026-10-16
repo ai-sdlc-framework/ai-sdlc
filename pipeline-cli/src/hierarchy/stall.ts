@@ -43,7 +43,7 @@ export interface StalledReport {
   /** Step the executor last reported, or `unknown`. */
   step: string;
   /** Why the claim counted as stalled. */
-  reason: 'stale-heartbeat' | 'holder-not-busy';
+  reason: 'stale-heartbeat' | 'holder-not-busy' | 'holder-asked-question';
   /** Pull request that already existed for the task, when one was found. */
   prNumber?: number;
   clear?: { status: string; reason?: string };
@@ -58,6 +58,12 @@ export interface StallDeps {
   graceMs?: number;
   /** Live state of each roster session by name; absent means no holder check. */
   liveness?: () => ReadonlyMap<string, LiveState>;
+  /**
+   * Whether the named executor's last output is a question (AISDLC-948). No channel
+   * reaches an executor, so an idle holder that asked one waits forever: it is
+   * stalled on the next tick, without the idle grace.
+   */
+  lastOutputIsQuestion?: (worker: string) => boolean;
   /** Clears (and so restarts) one executor; undefined when the grant is missing. */
   clear?: (o: { executor: string; taskId: string }) => Promise<{ status: string; reason?: string }>;
   /**
@@ -67,6 +73,19 @@ export interface StallDeps {
   requeue?: (taskId: string, note: string, pr?: number) => void;
   /** Open pull request number of the task, when one exists. */
   findPr?: (taskId: string) => number | undefined;
+}
+
+/**
+ * True when the last line of real output in a captured pane tail is a question.
+ * Lines that are only terminal chrome (box drawing, the input prompt) are skipped.
+ */
+export function endsWithQuestion(paneTail: string): boolean {
+  const lines = paneTail
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l !== '' && !/^[─━│┃╭╮╰╯┌┐└┘❯>⏵\s]/u.test(l));
+  const last = lines[lines.length - 1];
+  return last !== undefined && last.endsWith('?');
 }
 
 /** Read a positive millisecond value from the environment, else the default. */
@@ -90,6 +109,14 @@ function hasVerdict(boardDir: string, taskId: string): boolean {
       existsSync(path.join(boardDir, d, `${taskId}${s}`)),
     ),
   );
+}
+
+function safeIsQuestion(fn: (worker: string) => boolean, worker: string): boolean {
+  try {
+    return fn(worker);
+  } catch {
+    return false;
+  }
 }
 
 /** Build the resume note: the stalled step and the existing pull request. */
@@ -129,10 +156,18 @@ export async function reapStalledClaims(
     const worker = heartbeat?.workerId ?? 'unknown';
     let reason: StalledReport['reason'] | undefined;
     if (ageMs > staleMs) reason = 'stale-heartbeat';
-    else if (ageMs > graceMs && heartbeat?.workerId && deps.liveness) {
+    else if (heartbeat?.workerId && deps.liveness) {
       live ??= deps.liveness();
       const state = live.get(heartbeat.workerId);
-      if (state === 'idle' || state === 'gone' || state === 'unknown') reason = 'holder-not-busy';
+      if (
+        state === 'idle' &&
+        deps.lastOutputIsQuestion &&
+        safeIsQuestion(deps.lastOutputIsQuestion, heartbeat.workerId)
+      ) {
+        reason = 'holder-asked-question';
+      } else if (ageMs > graceMs && (state === 'idle' || state === 'gone' || state === 'unknown')) {
+        reason = 'holder-not-busy';
+      }
     }
     if (!reason) continue;
 
@@ -147,7 +182,10 @@ export async function reapStalledClaims(
       cause: STALE_WORKER_CAUSE,
       notes:
         `stalled at step ${step}: heartbeat ${Math.round(ageMs / 1000)}s old` +
-        (reason === 'holder-not-busy' ? ', holder session not busy' : ''),
+        (reason === 'holder-not-busy' ? ', holder session not busy' : '') +
+        (reason === 'holder-asked-question'
+          ? ', holder idle on a question (no channel reaches an executor)'
+          : ''),
       lastStep: step,
       heartbeatAgeMs: ageMs,
     };

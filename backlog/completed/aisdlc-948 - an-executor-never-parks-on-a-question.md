@@ -1,7 +1,7 @@
 ---
 id: AISDLC-948
 title: 'An executor never parks on a question: a blocked step becomes a verdict note and the stall path, since no roster channel reaches an executor'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels:
