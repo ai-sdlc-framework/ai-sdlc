@@ -18,11 +18,7 @@ import path from 'node:path';
 
 import { now as clock } from '../clock.js';
 import { patchDoneVerdict } from '../dispatch/board.js';
-import {
-  resolveRepoSlug,
-  resolveTrustedMainRoot,
-  runMergeIfEligible,
-} from '../governance/merge-if-eligible.js';
+import { resolveTargetRepo, runMergeIfEligible } from '../governance/merge-if-eligible.js';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { taskIdFrom } from './reconcile.js';
 import type { CommandRunner } from './types.js';
@@ -176,25 +172,15 @@ export function readMergeAuthors(repoRoot: string, parse: (yaml: string) => stri
 }
 
 /**
- * The production `land` callback: `runMergeIfEligible` with the verified main checkout.
- * `anchorDir` is the running CLI's own directory, as `cli-merge-if-eligible` uses it.
+ * The production `land` callback: `runMergeIfEligible` against the target repo's
+ * `origin/main` policy, read through the GitHub API (AISDLC-897).
  */
-export function createLander(opts: {
-  repoRoot: string;
-  anchorDir: string;
-  runner?: Runner;
-}): LandDeps['land'] {
+export function createLander(opts: { repoRoot: string; runner?: Runner }): LandDeps['land'] {
   const runner = opts.runner ?? defaultRunner;
   return async (pr, mode) => {
-    const trusted = resolveTrustedMainRoot({ cwd: opts.repoRoot, anchorDir: opts.anchorDir });
-    const repoSlug = trusted.root === null ? null : await resolveRepoSlug(runner, trusted.root);
-    if (trusted.root !== null && repoSlug === null) {
-      return {
-        merged: false,
-        armed: false,
-        reason: 'could not determine the repository (owner/name) with `gh repo view`',
-      };
-    }
+    const target = await resolveTargetRepo({ runner, cwd: opts.repoRoot });
+    const repoSlug = target.slug;
+    const trusted = { root: repoSlug === null ? null : opts.repoRoot, reason: target.reason };
     const r = await runMergeIfEligible({
       prNumber: pr,
       sourceKind: 'backlog',

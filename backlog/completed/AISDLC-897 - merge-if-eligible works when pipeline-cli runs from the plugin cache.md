@@ -1,7 +1,7 @@
 ---
 id: AISDLC-897
 title: 'fix(governance): merge-if-eligible reads the target repo''s policy from origin/main and works when pipeline-cli runs from the plugin cache'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [governance, adopters, velocity, trust-chain]
