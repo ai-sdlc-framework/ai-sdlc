@@ -70,7 +70,7 @@ const GRACE_PERIOD_DAYS = 30;
 
 /**
  * Default registry shipped with the orchestrator. Maintainers update deprecatedAt /
- * removedAt / replacementAlias from public vendor announcements (see operator-runbook).
+ * removedAt / replacementAlias from public vendor announcements (see docs/operations/cli-hierarchy.md).
  */
 export const DEFAULT_REGISTRY: readonly ModelEntry[] = [
   {

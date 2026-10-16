@@ -33,4 +33,4 @@ The framework is prescriptive by design. The point of this RFC is not to make ag
 ## Where to go next
 
 - [Definition-of-Ready gate](./dor-gate.md) is the other place where a repository shapes the framework's behavior declaratively.
-- The [operator runbook](https://github.com/ai-sdlc-framework/ai-sdlc/blob/main/docs/operations/operator-runbook.md) covers the governance section's fields.
+- The [operator runbook](https://github.com/ai-sdlc-framework/ai-sdlc/blob/main/docs/operations/cli-hierarchy.md) covers the governance section's fields.

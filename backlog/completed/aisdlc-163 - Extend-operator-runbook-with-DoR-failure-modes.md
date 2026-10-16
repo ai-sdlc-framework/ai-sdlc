@@ -1,6 +1,8 @@
 ---
 id: AISDLC-163
-title: 'Extend operator runbook with DoR-specific failure modes (refusal, bypass, escalation)'
+title: >-
+  Extend operator runbook with DoR-specific failure modes (refusal, bypass,
+  escalation)
 status: Done
 assignee: []
 created_date: '2026-05-02'
@@ -14,11 +16,18 @@ dependencies:
   - AISDLC-115.7
 references:
   - spec/rfcs/RFC-0011-definition-of-ready-gate.md
-  - docs/operations/operator-runbook.md
   - docs/operations/dor-promotion.md
-  - backlog/completed/aisdlc-115 - RFC-0011-Definition-of-Ready-Gate-for-Pipeline-Admission.md
+  - >-
+    backlog/completed/aisdlc-115 -
+    RFC-0011-Definition-of-Ready-Gate-for-Pipeline-Admission.md
 parent_task_id: AISDLC-115
 priority: medium
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/operator-runbook.md'
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description

@@ -1,7 +1,8 @@
 ---
 id: AISDLC-752
 title: >-
-  Every hierarchy session starts in bypassPermissions by default, planner included
+  Every hierarchy session starts in bypassPermissions by default, planner
+  included
 status: Done
 assignee: []
 created_date: '2026-10-07'
@@ -17,10 +18,15 @@ references:
   - pipeline-cli/src/hierarchy/docs-parity.test.ts
   - pipeline-cli/src/hierarchy/index.ts
   - docs/operations/cli-hierarchy.md
-  - docs/operations/parallel-dispatch.md
   - ai-sdlc-plugin/commands/planner.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/parallel-dispatch.md'
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description

@@ -1,7 +1,8 @@
 ---
 id: AISDLC-681.2
 title: >-
-  Pipeline sync of the parent checkout's main updates the index and working tree, never only the ref
+  Pipeline sync of the parent checkout's main updates the index and working
+  tree, never only the ref
 status: Done
 assignee: []
 created_date: '2026-10-02'
@@ -14,9 +15,14 @@ dependencies:
 references:
   - orchestrator/src/execute.ts
   - pipeline-cli/src/steps/13-cleanup.ts
-  - docs/operations/parallel-dispatch.md
 priority: medium
 dispatchable: true
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/parallel-dispatch.md'
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Resolution

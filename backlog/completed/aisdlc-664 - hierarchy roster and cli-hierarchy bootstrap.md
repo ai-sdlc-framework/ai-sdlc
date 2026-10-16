@@ -1,7 +1,8 @@
 ---
 id: AISDLC-664
 title: >-
-  RFC-0051: hierarchy roster schema and cli-hierarchy up/status/down bootstrapping named tmux sessions per role
+  RFC-0051: hierarchy roster schema and cli-hierarchy up/status/down
+  bootstrapping named tmux sessions per role
 status: Done
 assignee: []
 created_date: '2026-09-30'
@@ -18,9 +19,14 @@ references:
   - pipeline-cli/src/dispatch/sessions.ts
   - pipeline-cli/src/dispatch/session-reaper.ts
   - pipeline-cli/src/cli/bin-invocation.test.ts
-  - docs/operations/parallel-dispatch.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/parallel-dispatch.md'
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description

@@ -6,9 +6,7 @@
  *
  * The CLI aggregates TUI usage events from `$ARTIFACTS_DIR/_tui/events.jsonl`
  * into a soak-window report and recommendation envelope. See
- * `pipeline-cli/src/tui/corpus/aggregate.ts` for the full contract and
- * `docs/operations/operator-tui-promotion.md` for how the recommendation
- * drives the AI_SDLC_TUI default-on promotion decision.
+ * `pipeline-cli/src/tui/corpus/aggregate.ts` for the full contract.
  *
  * Usage:
  *   node pipeline-cli/bin/cli-tui-corpus.mjs aggregate $ARTIFACTS_DIR/_tui/events.jsonl

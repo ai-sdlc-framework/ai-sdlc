@@ -1,10 +1,12 @@
 ---
 id: AISDLC-664.6
 title: >-
-  RFC-0051 follow-up: cli-hierarchy up requires the repo root, sets CLAUDE_PROJECT_DIR per window, preflights policy
+  RFC-0051 follow-up: cli-hierarchy up requires the repo root, sets
+  CLAUDE_PROJECT_DIR per window, preflights policy
 status: To Do
 assignee: []
 created_date: '2026-10-01'
+updated_date: '2026-10-16 18:29'
 labels:
   - rfc-0051
   - dispatch
@@ -13,9 +15,18 @@ dependencies:
   - AISDLC-664
 references:
   - spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md
-  - docs/operations/parallel-dispatch.md
 priority: low
-dispatchable: false
+drift_status: flagged
+drift_checked: '2026-10-16'
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/parallel-dispatch.md'
+    resolution: flagged
+  - date: '2026-10-16'
+    type: dep-resolved
+    detail: Dependency AISDLC-664 has been completed
+    resolution: flagged
 ---
 
 ## Description

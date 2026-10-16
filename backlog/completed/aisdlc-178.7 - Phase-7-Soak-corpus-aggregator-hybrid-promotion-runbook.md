@@ -13,7 +13,6 @@ dependencies:
   - AISDLC-178.6
 references:
   - spec/rfcs/RFC-0023-operator-tui-pipeline-monitoring.md
-  - docs/operations/orchestrator-promotion.md
   - docs/operations/deps-composition-promotion.md
   - spec/rfcs/RFC-0024-emergent-issue-capture-and-triage.md
 parent_task_id: AISDLC-178
@@ -29,6 +28,14 @@ blocked:
     place (operator monitors stability for ~1 week with the 178.x TUI in real
     use, then promotes). NOT a dispatchable code task. Orchestrator's
     BlockedFilter should skip this.
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/orchestrator-promotion.md
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description

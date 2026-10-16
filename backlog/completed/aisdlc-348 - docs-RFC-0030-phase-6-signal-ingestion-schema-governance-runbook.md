@@ -1,6 +1,8 @@
 ---
 id: AISDLC-348
-title: 'docs: RFC-0030 Phase 6 — signal-ingestion.yaml schema + governance event logging + operator runbook'
+title: >-
+  docs: RFC-0030 Phase 6 — signal-ingestion.yaml schema + governance event
+  logging + operator runbook
 status: Done
 assignee: []
 created_date: '2026-05-16'
@@ -16,10 +18,21 @@ references:
   - spec/rfcs/RFC-0030-signal-ingestion-pipeline.md
   - spec/schemas/signal-ingestion-config.v1.schema.json
   - docs/operations/signal-ingestion.md
-  - docs/operations/signal-ingestion-promotion.md
 priority: medium
 blocked:
-  reason: "RFC-0030 lifecycle is Ready for Review; all 5 §13 OQs explicitly resolved via operator walkthrough 2026-05-16 (see §13.1-13.5 Resolution markers); sibling phases AISDLC-343/344/345/346/347 all shipped under the same override; this Phase 6 task closes out the RFC-0030 implementation per §11."
+  reason: >-
+    RFC-0030 lifecycle is Ready for Review; all 5 §13 OQs explicitly resolved
+    via operator walkthrough 2026-05-16 (see §13.1-13.5 Resolution markers);
+    sibling phases AISDLC-343/344/345/346/347 all shipped under the same
+    override; this Phase 6 task closes out the RFC-0030 implementation per §11.
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/signal-ingestion-promotion.md
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description

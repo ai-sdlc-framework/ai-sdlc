@@ -15,7 +15,7 @@ is now a supported `SubagentSpawner` for `cli-execute` and the
 
 - [`docs/operations/copilot-execution-path.md`](./copilot-execution-path.md) — Phase 1 design map: per-step Codex-vs-Copilot deltas. Read this first if you want the architectural context that motivated the adapter.
 - [`docs/operations/codex-execution-path.md`](./codex-execution-path.md) — sibling design for `--spawner codex`. The Copilot adapter mirrors the Codex one almost step-for-step; this doc only covers the Copilot-specific deltas.
-- [`docs/operations/operator-runbook.md`](./operator-runbook.md) — top-level operator runbook; cross-links here from the Execution Path References table.
+- [`docs/operations/cli-hierarchy.md`](./cli-hierarchy.md) — top-level operator runbook; cross-links here from the Execution Path References table.
 - [`pipeline-cli/README.md`](../../pipeline-cli/README.md) `#--spawner-options` — the canonical `SpawnerKind` table.
 
 ---

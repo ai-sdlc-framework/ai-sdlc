@@ -31,8 +31,7 @@
  *
  * Hybrid promotion model (mirrors AISDLC-161 / AISDLC-167.5 / AISDLC-169.5):
  *   - `recommendation: 'safe-to-promote'`  → operator can flip the
- *     `AI_SDLC_TUI` default OFF → ON (single PR, runbook in
- *     `docs/operations/operator-tui-promotion.md`).
+ *     `AI_SDLC_TUI` default OFF → ON (single PR).
  *   - `recommendation: 'continue-soak'`     → keep gathering data; the
  *     `reason` field names the failing metric.
  *   - `recommendation: 'insufficient-data'` → use the operator-override
@@ -480,8 +479,7 @@ export function aggregateTuiCorpus(
     reason =
       `sessionCount=${sessionCount} < minSamples=${minSamples}` +
       ` OR distinctDays=${distinctDays} < minDays=${minDays}` +
-      ` — operator may use the spot-check promotion path` +
-      ` (see docs/operations/operator-tui-promotion.md)`;
+      ` — operator may use the spot-check promotion path`;
   } else if (paneEngagementRate < paneOpenThreshold) {
     recommendation = 'continue-soak';
     reason =
@@ -496,7 +494,7 @@ export function aggregateTuiCorpus(
       ` sessionCount=${sessionCount} >= ${minSamples},` +
       ` distinctDays=${distinctDays} >= ${minDays},` +
       ` paneEngagementRate=${(paneEngagementRate * 100).toFixed(1)}% >= ${(paneOpenThreshold * 100).toFixed(1)}%` +
-      ` — flip AI_SDLC_TUI default OFF -> ON per docs/operations/operator-tui-promotion.md`;
+      ` — flip AI_SDLC_TUI default OFF -> ON`;
   }
 
   return {

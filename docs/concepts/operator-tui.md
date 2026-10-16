@@ -41,4 +41,3 @@ Reads `events.jsonl` (the orchestrator's append-only event log), the `cli-status
 ## Operator runbook
 
 - [`pipeline-cli/docs/tui.md`](https://github.com/ai-sdlc-framework/ai-sdlc/blob/main/pipeline-cli/docs/tui.md) — full reference
-- [`docs/operations/operator-tui-promotion.md`](https://github.com/ai-sdlc-framework/ai-sdlc/blob/main/docs/operations/operator-tui-promotion.md) — promotion runbook (when the TUI graduates from experimental to default-on)

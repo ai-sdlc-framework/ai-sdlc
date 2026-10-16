@@ -12,10 +12,13 @@ dependencies: []
 references:
   - spec/rfcs/RFC-0023-operator-tui-pipeline-monitoring.md
   - VISION.md
-  - docs/operations/operator-runbook.md
 priority: high
 blocked:
-  reason: 'Umbrella parent task — dispatch sub-phases AISDLC-178.2 through 178.7 directly. 178.1 Done; 178.2–178.7 are the actual dispatchable work items. Parent unblocks when AC #1 (all 7 sub-tasks Done) + AC #2 (flag promotion post-soak) are met.'
+  reason: >-
+    Umbrella parent task — dispatch sub-phases AISDLC-178.2 through 178.7
+    directly. 178.1 Done; 178.2–178.7 are the actual dispatchable work items.
+    Parent unblocks when AC #1 (all 7 sub-tasks Done) + AC #2 (flag promotion
+    post-soak) are met.
   unblockedBy:
     - AISDLC-178.2
     - AISDLC-178.3
@@ -23,6 +26,12 @@ blocked:
     - AISDLC-178.5
     - AISDLC-178.6
     - AISDLC-178.7
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/operator-runbook.md'
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description

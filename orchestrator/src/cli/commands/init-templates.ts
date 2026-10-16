@@ -1503,7 +1503,6 @@ export const SIGNAL_INGESTION_CONFIG_STUB = `# RFC-0030 Signal Ingestion Pipelin
 # other DID-adjacent decision.
 #
 # Operator runbook: docs/operations/signal-ingestion.md
-# Promotion runbook: docs/operations/signal-ingestion-promotion.md
 # Schema: spec/schemas/signal-ingestion-config.v1.schema.json
 # RFC: spec/rfcs/RFC-0030-signal-ingestion-pipeline.md
 # Re-walkthrough (2026-05-26): AISDLC-430..434 rolled up OQ-13.1..13.5

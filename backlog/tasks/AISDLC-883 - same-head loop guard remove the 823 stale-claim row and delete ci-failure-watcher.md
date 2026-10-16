@@ -27,7 +27,7 @@ RFC-0054 OQ-3 and OQ-9 (resolved 2026-10-14). AISDLC-847 bypasses the retry cap 
 1. Loop guard: before any machine action on a PR, read `landing/<pr>.json` history; if the same `(action, headSha)` was already taken, do not act; write `route-to-planner` with the pair and the count as the note. A new head SHA resets the guard. The count cap in `requeue.ts` stays for PR-less failures (847's `prUrl`/`prNumber` bypass is kept and the guard sits beside it).
 2. Remove `stale-claim` from `PR_STATES`/`PR_ACTIONS` and its tests; `stall.ts` is the only stale-claim path.
 3. Delete `pipeline-cli/src/runtime/ci-failure-watcher.ts`, its test, and the `isRebaseFixable` import in `playbook.ts` (move the function next to the classifier if 829 still needs it); remove the watcher from the runtime index and the orchestrator CLI; `ci-conflict-resolver` agent is reached only through the state machine's actions.
-4. `docs/operations/parallel-dispatch.md`: document the guard and the single-poller rule.
+4. `docs/operations/cli-hierarchy.md`: document the guard and the single-poller rule.
 
 **Configuration (operator ruling 2026-10-14).** Every repository convention this task uses (docs-only paths, no-task branch prefixes, timers, ports, thresholds) is read from `.ai-sdlc/pr-lifecycle.yaml` (RFC-0054, Design Details, Configuration) with the documented defaults; nothing is hard-coded in TypeScript, workflow YAML or command prose. The first of these tasks to land creates the file with the defaults; the others read it.
 
@@ -38,7 +38,7 @@ RFC-0054 OQ-3 and OQ-9 (resolved 2026-10-14). AISDLC-847 bypasses the retry cap 
 - [ ] A PR-less task still parks after the configured retry count (847 behaviour preserved for `prUrl: null`).
 - [ ] `pr-state.ts` has no `stale-claim` state; `stall.ts` tests cover the 30-minute and 10-minute-idle cases alone.
 - [ ] `ci-failure-watcher.ts` is gone; `grep -r ci-failure-watcher pipeline-cli/src orchestrator/src` returns only the docs and this task; the dark-code gate passes without a baseline addition.
-- [ ] `docs/operations/parallel-dispatch.md` describes the guard.
+- [ ] `docs/operations/cli-hierarchy.md` describes the guard.
 
 ## Verification
 

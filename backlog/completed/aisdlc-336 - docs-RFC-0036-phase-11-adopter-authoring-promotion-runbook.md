@@ -1,6 +1,8 @@
 ---
 id: AISDLC-336
-title: 'docs: RFC-0036 Phase 11 — adopter-authoring promotion runbook (hybrid promotion to default-on)'
+title: >-
+  docs: RFC-0036 Phase 11 — adopter-authoring promotion runbook (hybrid
+  promotion to default-on)
 status: Done
 assignee: []
 created_date: '2026-05-16'
@@ -20,8 +22,15 @@ dependencies:
 references:
   - spec/rfcs/RFC-0036-spec-kit-bridge-adopter-authoring.md
   - docs/operations/dor-promotion.md
-  - docs/operations/orchestrator-promotion.md
 priority: low
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/orchestrator-promotion.md
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description

@@ -1213,7 +1213,7 @@ The "no DA configured" semantic groups two distinct underlying conditions — DS
 - [`orchestrator/src/pillar-breakdown.ts`](../../orchestrator/src/pillar-breakdown.ts) — `computePillarBreakdown` (lines 169-186) mirrors the same omit-only-on-undefined rule onto `pillarBreakdown.shared.hcComposite.designAuthorityConfigured`, so consumers can distinguish all four states at the breakdown surface.
 - [`orchestrator/src/design-authority.ts`](../../orchestrator/src/design-authority.ts) — `checkDesignAuthority` resolves principal participation; the AISDLC-171 anchor JSDoc on this module ties back to this sub-section and to RFC-0009 §13 OQ-8.
 
-**Operator response.** See [`docs/operations/operator-runbook.md`](../../docs/operations/operator-runbook.md) — the "HC_design three-state diagnostic (AISDLC-171)" section walks through what each state means in practice, how to read it from `pillarBreakdown`, and when `configured-but-silent` warrants reviewing DA assignment.
+**Operator response.** See [`docs/operations/cli-hierarchy.md`](../../docs/operations/cli-hierarchy.md) — the "HC_design three-state diagnostic (AISDLC-171)" section walks through what each state means in practice, how to read it from `pillarBreakdown`, and when `configured-but-silent` warrants reviewing DA assignment.
 
 **Cross-references.**
 

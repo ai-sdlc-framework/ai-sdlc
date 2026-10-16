@@ -17,9 +17,14 @@ references:
   - pipeline-cli/src/cli/execute.ts
   - pipeline-cli/src/runtime/spawners/codex-harness.ts
   - scripts/codex-spawn-agent-bridge.mjs
-  - docs/operations/orchestrator-runbook.md
   - docs/operations/codex-execution-path.md
 priority: high
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/orchestrator-runbook.md'
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description

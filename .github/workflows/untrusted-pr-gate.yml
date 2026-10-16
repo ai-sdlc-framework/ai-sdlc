@@ -19,7 +19,7 @@ name: Untrusted-Contributor PR Verification Gate
 # legacy `pull_request` event). We use `pull_request_target` which runs in the
 # target repo's context with full write permissions even for fork PRs.
 #
-# ── 5-point safety guard (AISDLC-381 — see docs/operations/operator-runbook.md
+# ── 5-point safety guard (AISDLC-381 — see docs/operations/cli-hierarchy.md
 #    § Fork-PR workflow safety pattern) ────────────────────────────────
 #
 # 1. Workflow logic checks out the TARGET repo's main (via the default

@@ -1,7 +1,8 @@
 ---
 id: AISDLC-753
 title: >-
-  Merge policy follows the spec governance.allowMerge config everywhere; no hard-coded never-merge rule
+  Merge policy follows the spec governance.allowMerge config everywhere; no
+  hard-coded never-merge rule
 status: Done
 assignee: []
 created_date: '2026-10-07'
@@ -27,7 +28,6 @@ references:
   - orchestrator/src/cli/commands/doctor-checks.test.ts
   - docs/api-reference/governance.md
   - docs/operations/decision-authority.md
-  - docs/operations/operator-runbook.md
   - docs/operations/ci-conflict-resolver.md
   - spec/rfcs/RFC-0048-per-repo-configurable-governance.md
   - CLAUDE.md
@@ -46,6 +46,190 @@ references:
 priority: critical
 dispatchable: true
 updated_date: '2026-10-07 16:43'
+drift_status: flagged
+drift_checked: '2026-10-16'
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/operator-runbook.md'
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file .ai-sdlc/agent-role.yaml was modified after task was
+      completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file pipeline-cli/src/governance/merge-if-eligible.ts was
+      modified after task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file pipeline-cli/src/governance/release-merge.ts was modified
+      after task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file pipeline-cli/src/cli/merge-if-eligible.ts was modified
+      after task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file pipeline-cli/src/decisions/governance-fallback.ts was
+      modified after task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file ai-sdlc-plugin/hooks/lib/governance-resolver.js was
+      modified after task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file ai-sdlc-plugin/hooks/enforce-blocked-actions.js was
+      modified after task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file
+      ai-sdlc-plugin/scripts/render-governance-hard-rules.test.mjs was modified
+      after task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file spec/schemas/agent-role.schema.json was modified after
+      task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file sdk-go/core/schemas/agent-role.schema.json was modified
+      after task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file reference/src/core/generated-schemas.ts was modified after
+      task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file orchestrator/src/runners/claude-code-sdk.ts was modified
+      after task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file orchestrator/src/cli/commands/doctor-checks.test.ts was
+      modified after task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file docs/api-reference/governance.md was modified after task
+      was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file docs/operations/decision-authority.md was modified after
+      task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file docs/operations/ci-conflict-resolver.md was modified after
+      task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file spec/rfcs/RFC-0048-per-repo-configurable-governance.md was
+      modified after task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: Referenced file CLAUDE.md was modified after task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: Referenced file README.md was modified after task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file ai-sdlc-plugin/commands/execute.md was modified after task
+      was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file ai-sdlc-plugin/commands/rebase.md was modified after task
+      was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file ai-sdlc-plugin/commands/review-pr.md was modified after
+      task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file ai-sdlc-plugin/commands/fix-pr.md was modified after task
+      was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file ai-sdlc-plugin/commands/resolve-conflicts.md was modified
+      after task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file ai-sdlc-plugin/commands/execute-parallel.md was modified
+      after task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file ai-sdlc-plugin/commands/execute-parallel-cleanup.md was
+      modified after task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file ai-sdlc-plugin/agents/developer.md was modified after task
+      was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file ai-sdlc-plugin/agents/rebase-resolver.md was modified
+      after task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file ai-sdlc-plugin/agents/ci-conflict-resolver.md was modified
+      after task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file ai-sdlc-plugin/agents/refinement-reviewer.md was modified
+      after task was completed
+    resolution: flagged
 ---
 
 ## Description

@@ -13,7 +13,6 @@ milestone: m-2
 dependencies: []
 references:
   - spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md
-  - docs/operations/operator-runbook.md
   - orchestrator/src/execute.ts
   - orchestrator/src/runtime/parallelism-flag.ts
   - orchestrator/src/runtime/worktree-pool.ts
@@ -39,7 +38,7 @@ references:
     Promote-AI_SDLC_PARALLELISM-feature-flag-to-default-on.md
 priority: high
 drift_status: flagged
-drift_checked: '2026-05-03'
+drift_checked: '2026-10-16'
 drift_log:
   - date: '2026-05-03'
     type: post-complete-change
@@ -135,6 +134,10 @@ drift_log:
       Referenced file backlog/completed/aisdlc-116 -
       Promote-AI_SDLC_PARALLELISM-feature-flag-to-default-on.md was modified
       after task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/operator-runbook.md'
     resolution: flagged
 ---
 

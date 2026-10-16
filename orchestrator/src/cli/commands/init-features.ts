@@ -2060,7 +2060,6 @@ export function renderNextSteps(
     lines.push('          uncomment the adapters block, and confirm tier multipliers.');
     lines.push('     Config edits emit SignalIngestionConfigChanged governance events to');
     lines.push('     <ARTIFACTS_DIR>/_orchestrator/events-YYYY-MM-DD.jsonl.');
-    lines.push('     Promotion runbook: docs/operations/signal-ingestion-promotion.md');
     lines.push('');
     stepN++;
   }

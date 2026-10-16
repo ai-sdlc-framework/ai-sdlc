@@ -18,10 +18,15 @@ references:
   - pipeline-cli/src/orchestrator/loop.umbrella.test.ts
   - pipeline-cli/README.md
   - CLAUDE.md
-  - docs/operations/operator-runbook.md
   - docs/operations/codex-execution-path.md
 priority: high
 permittedExternalPaths: []
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/operator-runbook.md'
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description

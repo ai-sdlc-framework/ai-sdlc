@@ -246,6 +246,5 @@ Each escalation record carries:
 
 ## Related runbooks
 
-- `docs/operations/decision-catalog-promotion.md` — general Decision Catalog lifecycle
 - `docs/operations/decision-catalog-phase10-adopter-integration.md` — adopter integration guide
 - RFC-0035 — Decision Catalog specification

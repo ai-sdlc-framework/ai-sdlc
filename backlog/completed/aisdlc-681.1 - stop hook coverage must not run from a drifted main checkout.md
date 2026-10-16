@@ -1,7 +1,8 @@
 ---
 id: AISDLC-681.1
 title: >-
-  Stop-hook deferred coverage check ignores index-only drift and never runs workspace coverage from a hierarchy main checkout
+  Stop-hook deferred coverage check ignores index-only drift and never runs
+  workspace coverage from a hierarchy main checkout
 status: Done
 assignee: []
 created_date: '2026-10-02'
@@ -14,9 +15,14 @@ dependencies:
   - AISDLC-681
 references:
   - ai-sdlc-plugin/plugin.json
-  - docs/operations/parallel-dispatch.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/parallel-dispatch.md'
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Resolution

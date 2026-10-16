@@ -1,7 +1,8 @@
 ---
 id: AISDLC-751
 title: >-
-  /ai-sdlc hierarchy plugin command wraps cli-hierarchy so the session hierarchy is driven from Claude Code
+  /ai-sdlc hierarchy plugin command wraps cli-hierarchy so the session hierarchy
+  is driven from Claude Code
 status: Done
 assignee: []
 created_date: '2026-10-06'
@@ -17,9 +18,14 @@ references:
   - ai-sdlc-plugin/scripts/resolve-pipeline-cli.test.mjs
   - pipeline-cli/bin/cli-hierarchy.mjs
   - pipeline-cli/src/hierarchy/
-  - docs/operations/parallel-dispatch.md
 priority: medium
 dispatchable: true
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/parallel-dispatch.md'
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description

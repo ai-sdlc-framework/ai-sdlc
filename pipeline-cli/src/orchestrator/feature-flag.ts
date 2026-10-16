@@ -2,7 +2,7 @@
  * Feature-flag predicate for the autonomous orchestrator (RFC-0015).
  *
  * DEFAULT-ON since AISDLC-411 (2026-05-23 operator override-path promotion
- * per `docs/operations/orchestrator-promotion.md`).
+ * per `docs/operations/cli-hierarchy.md`).
  *
  * Polarity: absent env = ON. Operator opts OUT with one of the falsy values
  * (`off`, `0`, `false`, `no`, case-insensitive). Truthy values

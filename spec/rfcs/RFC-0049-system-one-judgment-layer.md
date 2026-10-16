@@ -951,7 +951,7 @@ tiered by `riskClass`.** `seam` and `tighten` judgments promote by the corpus pa
 (n ≥ 50, act-band precision ≥ 90 percent) or by a documented operator-override path.
 `relax` judgments are corpus-only: n ≥ 50 rows from the AISDLC-616 ledger and act-band
 precision ≥ 95 percent, with no override path. Industry research: `dor-promotion.md`,
-`estimation-promotion.md` and `decision-catalog-promotion.md` all use a corpus path
+`estimation-promotion.md` and the decision-catalog promotion runbook (since removed) all use a corpus path
 (n ≥ 50, n ≥ 50 at 95 percent, and n ≥ 30 at 80 percent respectively) plus an
 operator-override path, and in practice DoR, deps composition, the orchestrator and
 the Decision Catalog were promoted through the override path; the provider's guidance

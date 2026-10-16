@@ -605,7 +605,6 @@ All UCVG events route through the [RFC-0035 G0 non-blocking pipeline](../../spec
 
 - [API Reference — RFC-0043 UCVG](../api-reference/rfc-0043-ucvg.md)
 - [Adopter Explainer — Untrusted Contributor Verification](../concepts/untrusted-contributor-verification.md)
-- [Promotion Runbook — Untrusted PR Gate](untrusted-pr-gate-promotion.md)
 - [RFC-0043 — Untrusted-Contributor PR Verification](../../spec/rfcs/RFC-0043-untrusted-contributor-pr-verification.md)
 - [RFC-0042 — Proof-of-Execution Attestation](../../spec/rfcs/RFC-0042-proof-of-execution-attestation.md)
 - [RFC-0022 — Compliance Posture + Audit Surface](../../spec/rfcs/RFC-0022-compliance-posture-audit-surface.md)

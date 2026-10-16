@@ -1,7 +1,8 @@
 ---
 id: AISDLC-681
 title: >-
-  Pre-push coverage gate must reap its vitest workers on exit and cap concurrent test memory
+  Pre-push coverage gate must reap its vitest workers on exit and cap concurrent
+  test memory
 status: Done
 assignee:
   - dispatch-executor-beta
@@ -15,9 +16,14 @@ dependencies: []
 references:
   - .husky/pre-push
   - pipeline-cli/vitest.config.ts
-  - docs/operations/parallel-dispatch.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/parallel-dispatch.md'
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description

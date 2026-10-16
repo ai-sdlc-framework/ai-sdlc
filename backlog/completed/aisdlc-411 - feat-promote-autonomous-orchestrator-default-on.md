@@ -1,14 +1,27 @@
 ---
 id: AISDLC-411
-title: 'feat(orchestrator): promote AI_SDLC_AUTONOMOUS_ORCHESTRATOR to default-ON (RFC-0015 Phase 5)'
+title: >-
+  feat(orchestrator): promote AI_SDLC_AUTONOMOUS_ORCHESTRATOR to default-ON
+  (RFC-0015 Phase 5)
 status: Done
-labels: [orchestrator, rfc-0015, promotion, operator-merge]
+labels:
+  - orchestrator
+  - rfc-0015
+  - promotion
+  - operator-merge
 references:
   - pipeline-cli/src/orchestrator/feature-flag.ts
-  - docs/operations/orchestrator-promotion.md
   - spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md
 priority: high
 permittedExternalPaths: []
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/orchestrator-promotion.md
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description

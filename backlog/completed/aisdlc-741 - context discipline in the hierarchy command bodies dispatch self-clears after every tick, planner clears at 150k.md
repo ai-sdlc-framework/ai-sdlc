@@ -1,8 +1,8 @@
 ---
 id: AISDLC-741
 title: >-
-  Context discipline in the hierarchy command bodies: dispatch self-clears
-  after every tick, planner clears at 150k
+  Context discipline in the hierarchy command bodies: dispatch self-clears after
+  every tick, planner clears at 150k
 status: Done
 assignee: []
 created_date: '2026-10-06'
@@ -19,9 +19,14 @@ references:
   - ai-sdlc-plugin/commands/executor.md
   - pipeline-cli/src/hierarchy/clear.ts
   - pipeline-cli/src/cli/hierarchy.ts
-  - docs/operations/parallel-dispatch.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/parallel-dispatch.md'
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description

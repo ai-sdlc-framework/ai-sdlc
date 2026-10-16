@@ -32,7 +32,7 @@ name: Auto-enable auto-merge on PR open
 # context to talk to the GitHub API at all (for status posting on the
 # fork's commit-status thread on future task expansion).
 #
-# ── 5-point safety guard (AISDLC-381 — see docs/operations/operator-runbook.md
+# ── 5-point safety guard (AISDLC-381 — see docs/operations/cli-hierarchy.md
 #    § Fork-PR workflow safety pattern) ────────────────────────────────
 # 1. NO `actions/checkout` here. We never touch fork content. The workflow
 #    only invokes `gh pr merge` / `gh api` against the target-repo's API.

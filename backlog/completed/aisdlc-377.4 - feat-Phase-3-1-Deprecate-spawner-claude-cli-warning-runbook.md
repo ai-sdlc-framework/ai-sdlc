@@ -1,6 +1,8 @@
 ---
 id: AISDLC-377.4
-title: 'feat(deprecation): RFC-0041 Phase 3.1 — deprecate --spawner claude-cli (warning + operator runbook)'
+title: >-
+  feat(deprecation): RFC-0041 Phase 3.1 — deprecate --spawner claude-cli
+  (warning + operator runbook)
 status: Done
 assignee: []
 created_date: '2026-05-20'
@@ -16,7 +18,12 @@ priority: medium
 references:
   - spec/rfcs/RFC-0041-conductor-worker-process-architecture.md
   - pipeline-cli/docs/spawner.md
-  - docs/operations/operator-runbook.md
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/operator-runbook.md'
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Scope (RFC-0041 §7 Phase 3.1)

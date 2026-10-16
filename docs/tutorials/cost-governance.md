@@ -231,5 +231,5 @@ Every PR the orchestrator opens carries a cost receipt. Over time, this becomes 
 
 - [RFC-0004 — Cost Governance and Attribution](../../spec/rfcs/RFC-0004-cost-governance-and-attribution.md) — full normative spec
 - [API Reference — Cost Governance](../api-reference/cost.md) — type signatures for `CostPolicy`, `BudgetPolicy`, `CostReceipt`
-- [Operator Runbook — Quota and cost events](../operations/operator-runbook.md#quota-and-cost-events) — what to do when a `BudgetExceeded` event fires
+- [Operator Runbook — Quota and cost events](../operations/cli-hierarchy.md) — what to do when a `BudgetExceeded` event fires
 - [Tutorial 3: Progressive Autonomy](03-progressive-autonomy.md) — RFC-0004's cost-based demotion triggers (§7) plug into the autonomy ladder

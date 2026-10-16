@@ -9,7 +9,7 @@ board; executors claim tasks from the board and ship pull requests. Design and r
 This page is the operator's guide. Companion pages:
 
 - [`cli-hierarchy.md`](cli-hierarchy.md): the full command and option reference.
-- [`parallel-dispatch.md`](parallel-dispatch.md): the shared runbook for the executor loop,
+- [`cli-hierarchy.md`](cli-hierarchy.md#the-executor-loop): the executor loop,
   dispatch loop, liveness reaper and cancel back-channel.
 - [`dispatched-session-decisions.md`](dispatched-session-decisions.md): how a dispatched
   session raises a decision and who answers it.
@@ -163,7 +163,7 @@ The operating cycle is **brief, tick, clear**:
    context.
 
 Loop bodies and the liveness reaper are described in
-[`parallel-dispatch.md`](parallel-dispatch.md). A task in `done/` whose pull request later
+[`cli-hierarchy.md`](cli-hierarchy.md). A task in `done/` whose pull request later
 goes red is sent back to an executor with `cli-dispatch reenter`; see
 [`cli-hierarchy.md`](cli-hierarchy.md#sending-a-finished-task-back-reenter).
 

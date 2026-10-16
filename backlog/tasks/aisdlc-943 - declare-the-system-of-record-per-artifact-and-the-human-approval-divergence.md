@@ -1,9 +1,12 @@
 ---
 id: AISDLC-943
-title: 'Docs: declare the system of record per artifact and where this project diverges from human-approval stages'
+title: >-
+  Docs: declare the system of record per artifact and where this project
+  diverges from human-approval stages
 status: To Do
 assignee: []
 created_date: '2026-10-16'
+updated_date: '2026-10-16 18:30'
 labels:
   - docs
   - governance
@@ -11,11 +14,17 @@ dependencies: []
 references:
   - docs/operations/backlog-and-execution-reference.md
   - docs/operations/decision-authority.md
-  - docs/operations/decision-catalog-promotion.md
   - spec/rfcs/README.md
   - docs/operations/README.md
 priority: medium
-dispatchable: true
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/decision-catalog-promotion.md
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description

@@ -16,17 +16,24 @@ dependencies:
 references:
   - spec/rfcs/RFC-0005-product-priority-algorithm.md
   - docs/api-reference/priority.md
-  - docs/operations/operator-runbook.md
 parent_task_id: AISDLC-69
 priority: low
 drift_status: flagged
-drift_checked: '2026-05-03'
+drift_checked: '2026-10-16'
 drift_log:
   - date: '2026-05-03'
     type: dep-resolved
     detail: Dependency AISDLC-69.2 has been completed
     resolution: flagged
   - date: '2026-05-03'
+    type: dep-resolved
+    detail: Dependency AISDLC-69.2 has been completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/operator-runbook.md'
+    resolution: flagged
+  - date: '2026-10-16'
     type: dep-resolved
     detail: Dependency AISDLC-69.2 has been completed
     resolution: flagged

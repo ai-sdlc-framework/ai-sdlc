@@ -420,7 +420,7 @@ mode, so messages to it are held for the operator, which is the human gate. Indu
 research: the harness holds messages between the bypass class and the prompting class
 and auto-accepts with the inbound setting; `execute-parallel` already runs spawned
 windows with permissions skipped as an opt-in with the trade-off documented in
-`docs/operations/parallel-dispatch.md`; governance hard rules are hook-enforced in every
+`docs/operations/cli-hierarchy.md`; governance hard rules are hook-enforced in every
 mode. **Counter-argument:** "Bypass on five unattended sessions is the widest blast
 radius in the system." Rebuttal: it is what the existing parallel path already does,
 the hard rules hold in every mode, and the narrower option pays for its narrowness in
@@ -432,7 +432,7 @@ where a human should be asked.
 
 - `pipeline-cli/src/dispatch/` (board, sessions, reaper, supervisor);
   `ai-sdlc-plugin/commands/execute-parallel.md` (AISDLC-462);
-  `ai-sdlc-plugin/commands/dispatch-worker.md`; `docs/operations/parallel-dispatch.md`;
+  `ai-sdlc-plugin/commands/dispatch-worker.md`; `docs/operations/cli-hierarchy.md`;
   `docs/operations/dispatched-session-decisions.md` (AISDLC-480);
   `ai-sdlc-plugin/hooks/lib/governance-resolver.js`; `spec/schemas/agent-role.schema.json`.
 - Claude Code docs: CLI reference (`--name`, `--model`, `--permission-mode`,

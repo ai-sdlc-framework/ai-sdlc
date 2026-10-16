@@ -1,7 +1,8 @@
 ---
 id: AISDLC-670
 title: >-
-  RFC-0051 docs: operator runbook for the session hierarchy; execute-parallel marked superseded
+  RFC-0051 docs: operator runbook for the session hierarchy; execute-parallel
+  marked superseded
 status: Done
 assignee: []
 created_date: '2026-09-30'
@@ -14,11 +15,16 @@ dependencies:
   - AISDLC-667
 references:
   - spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md
-  - docs/operations/parallel-dispatch.md
   - docs/operations/README.md
   - docs/operations/dispatched-session-decisions.md
 priority: medium
 dispatchable: true
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/parallel-dispatch.md'
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description
