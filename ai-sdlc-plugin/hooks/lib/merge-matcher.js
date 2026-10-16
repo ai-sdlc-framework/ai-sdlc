@@ -518,7 +518,10 @@ function canonicalizeCommand(command) {
     const name = m[1];
     const delim = m[0].trimStart()[0];
     const before = out.slice(0, m.index);
-    const occurrences = out.match(new RegExp('(?:^|[^A-Za-z0-9_])' + name + '\\+?=', 'g')) || [];
+    // Any other bare mention of the name (`read A`, `for A in`, `printf -v A`, `declare -n`,
+    // `A+=`, a second `A=`) may rebind it; only `$A`/`${A}` references are allowed.
+    const occurrences =
+      out.match(new RegExp('(?<!\\$|\\$\\{)' + name + '(?![A-Za-z0-9_])', 'g')) || [];
     const conditional =
       !(m.index === 0 || delim === ';' || delim === '\n') ||
       /\b(?:if|then|else|elif|while|until|for|case|do|select|function)\b|[{(]|&&|\|\||&|\|/.test(

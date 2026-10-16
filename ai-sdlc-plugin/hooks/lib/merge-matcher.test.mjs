@@ -1001,6 +1001,21 @@ describe('real tokenizer normalisation (AISDLC-605.1)', () => {
     assert.equal(m.commandRunsGhPrMerge(`A=view; ${gh} pr $A 5`), false);
   });
 
+  it('refuses variable-binder rebinding of a literal assignment (security round 2)', () => {
+    for (const c of [
+      `A=view; read A <<< ${mg}; ${gh} pr $A 5`,
+      `A=view; printf -v A %s ${mg}; ${gh} pr $A 5`,
+      `A=view; printf -vA %s ${mg}; ${gh} pr $A 5`,
+      `A=view; for A in ${mg}; do ${gh} pr $A 5; done`,
+      `A=view; declare A=${mg}; ${gh} pr $A 5`,
+      `A=view; mapfile A <<< ${mg}; ${gh} pr $A 5`,
+      `A=view; B=A; declare -n R=$B; R=${mg}; ${gh} pr $A 5`,
+      `A=view; A+=x; ${gh} pr $A 5`,
+    ]) {
+      assert.equal(m.commandRunsGhPrMerge(c), true, c);
+    }
+  });
+
   it('allows harmless opaque commands that mention the phrase', () => {
     for (const c of [
       `${gh} api repos/o/r/pulls/5 -q $'.x' # pr ${mg}`,
