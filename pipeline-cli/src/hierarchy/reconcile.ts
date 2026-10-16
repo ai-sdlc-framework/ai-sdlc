@@ -326,6 +326,49 @@ export interface ReconcileReport {
   acted: { pr: number; action: string; ran: boolean; note?: string }[];
   /** PRs reported and never acted on (the release-please PR). */
   reported: { pr: number; title?: string }[];
+  /** `route-to-planner` reports withheld this pass because the same key was already sent. */
+  suppressed: number;
+}
+
+/** Dedupe ledger for planner reports, persisted on the board (AISDLC-924). */
+interface PlannerRoutes {
+  /** Keys `pr|headSha|reason` already sent to the planner. */
+  sent: string[];
+  /** Reports withheld since the last tick summary. */
+  suppressed: number;
+}
+
+function routesPath(boardDir: string): string {
+  return path.join(landingDir(boardDir), 'planner-routes.json');
+}
+
+function readRoutes(boardDir: string): PlannerRoutes {
+  try {
+    const r = JSON.parse(readFileSync(routesPath(boardDir), 'utf-8')) as Partial<PlannerRoutes>;
+    return { sent: r.sent ?? [], suppressed: r.suppressed ?? 0 };
+  } catch {
+    return { sent: [], suppressed: 0 };
+  }
+}
+
+function writeRoutes(boardDir: string, r: PlannerRoutes): void {
+  mkdirSync(landingDir(boardDir), { recursive: true });
+  const target = routesPath(boardDir);
+  const tmp = `${target}.tmp-${process.pid}`;
+  writeFileSync(tmp, JSON.stringify(r, null, 2) + '\n', 'utf-8');
+  renameSync(tmp, target);
+}
+
+/** True the first time a (PR, head sha, reason) key is seen; later calls count a suppression. */
+function firstRoute(boardDir: string, pr: number, headSha: string | undefined, reason: string) {
+  const routes = readRoutes(boardDir);
+  const key = `${pr}|${headSha ?? ''}|${reason}`;
+  if (routes.sent.includes(key)) {
+    writeRoutes(boardDir, { ...routes, suppressed: routes.suppressed + 1 });
+    return false;
+  }
+  writeRoutes(boardDir, { ...routes, sent: [...routes.sent, key] });
+  return true;
 }
 
 /** One-line summary of the open landing records, for the tick's progress line. */
@@ -342,6 +385,14 @@ export function summariseLanding(boardDir: string): string {
   return `${line}; rate-limited: ${limited.length}${reset}`;
 }
 
+/** Suppressed planner reports since the last call, as a summary suffix. Resets the count. */
+export function takeSuppressedNote(boardDir: string): string {
+  const routes = readRoutes(boardDir);
+  if (routes.suppressed === 0) return '';
+  writeRoutes(boardDir, { ...routes, suppressed: 0 });
+  return `planner reports suppressed: ${routes.suppressed}`;
+}
+
 /** The installation limit resets hourly; wait this long from first sight before the rerun. */
 export const RATE_LIMIT_WAIT_MS = 60 * 60 * 1000;
 
@@ -354,7 +405,12 @@ export interface ReconcileOpts {
 /** Reconcile a set of PR facts: update the records and run the actions. Idempotent. */
 export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): ReconcileReport {
   const now = opts.now ?? clockNow;
-  const report: ReconcileReport = { records: [], acted: [], reported: [] };
+  const report: ReconcileReport = { records: [], acted: [], reported: [], suppressed: 0 };
+  const routeOnce = (pr: number, headSha: string | undefined, reason: string): boolean => {
+    const first = firstRoute(opts.boardDir, pr, headSha, reason);
+    if (!first) report.suppressed++;
+    return first;
+  };
   for (const f of facts) {
     const existing = readLanding(opts.boardDir, f.prNumber);
     const ruled = rulingFacts(opts.boardDir, f, facts);
@@ -447,6 +503,12 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
       continue;
     }
     if (unchanged) {
+      if (
+        d.action === 'route-to-planner' &&
+        routeOnce(f.prNumber, f.headSha, d.failingLine ?? d.state)
+      ) {
+        report.acted.push({ pr: f.prNumber, action: d.action, ran: false });
+      }
       report.records.push(existing);
       continue;
     }
@@ -493,7 +555,10 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
     if (result.failed) record.actionFailed = true;
     writeLanding(opts.boardDir, record);
     report.records.push(record);
-    if (d.action !== 'none') {
+    const withheld =
+      d.action === 'route-to-planner' &&
+      !routeOnce(f.prNumber, f.headSha, d.failingLine ?? d.state);
+    if (d.action !== 'none' && !withheld) {
       report.acted.push({
         pr: f.prNumber,
         action: d.action,

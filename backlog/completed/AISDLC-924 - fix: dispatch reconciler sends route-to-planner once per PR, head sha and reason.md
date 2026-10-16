@@ -1,7 +1,7 @@
 ---
 id: AISDLC-924
 title: 'fix: dispatch reconciler sends route-to-planner once per PR, head sha and reason'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [bug, hierarchy, reconcile, pipeline-cli, velocity]

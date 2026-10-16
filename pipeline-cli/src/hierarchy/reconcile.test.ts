@@ -20,6 +20,7 @@ import {
   readLanding,
   reconcile,
   summariseLanding,
+  takeSuppressedNote,
   taskIdFrom,
   TASK_ACTIONS,
   type ActionContext,
@@ -607,5 +608,49 @@ describe('rate-limited wait-and-rerun (AISDLC-926)', () => {
       now: at('2026-10-14T03:05:00.000Z'),
     });
     expect(execute).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('route-to-planner dedupe (AISDLC-924)', () => {
+  const gate = (summary: string) => [
+    { name: 'ai-sdlc/pr-ready', conclusion: 'failure' as const, summary },
+  ];
+  const failing = (over: Partial<ReconcilePr> = {}) =>
+    docsPr({ checks: gate('Build and Test failed'), ...over });
+  const run = (pr: ReconcilePr) =>
+    reconcile([pr], { boardDir: board, execute: () => ({ ran: false }), now: fixedNow });
+  const routed = (r: ReturnType<typeof run>) =>
+    r.acted.filter((a) => a.action === 'route-to-planner').length;
+
+  it('sends the first report and suppresses repeats of the same key', () => {
+    const first = run(failing());
+    expect(routed(first)).toBe(1);
+    const second = run(failing());
+    expect(routed(second)).toBe(0);
+    expect(second.suppressed).toBe(1);
+    expect(run(failing()).suppressed).toBe(1);
+  });
+
+  it('sends again on a new head sha or a new reason', () => {
+    expect(routed(run(failing()))).toBe(1);
+    expect(routed(run(failing({ headSha: 'new999' })))).toBe(1);
+    const r = run(failing({ headSha: 'new999', checks: gate('Lint failed') }));
+    expect(routed(r)).toBe(1);
+  });
+
+  it('shows the suppressed count in the next summary, once', () => {
+    run(failing());
+    run(failing());
+    run(failing());
+    expect(takeSuppressedNote(board)).toBe('planner reports suppressed: 2');
+    expect(takeSuppressedNote(board)).toBe('');
+  });
+
+  it('persists on the board across a restart', () => {
+    run(failing());
+    const raw = readFileSync(path.join(board, 'landing', 'planner-routes.json'), 'utf-8');
+    expect(JSON.parse(raw).sent).toHaveLength(1);
+    // A fresh reconcile call holds no memory: only the file carries the state.
+    expect(run(failing()).suppressed).toBe(1);
   });
 });

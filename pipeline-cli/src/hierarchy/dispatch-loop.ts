@@ -49,7 +49,7 @@ import type { ClearResult } from './clear.js';
 import type { LandReport } from './land-eligible.js';
 import type { MarkReadyReport } from './mark-ready.js';
 import type { PlaybookOutcome } from './playbook.js';
-import { summariseLanding } from './reconcile.js';
+import { summariseLanding, takeSuppressedNote } from './reconcile.js';
 import { readRosterChecked } from './roster.js';
 import { formatStall, reapStalledClaims, type StallDeps, type StalledReport } from './stall.js';
 
@@ -386,7 +386,8 @@ function buildReports(deps: LoopDeps, state: LoopState, handledCount: number): P
   const nowMs = deps.now().getTime();
   if (Number.isNaN(last) || nowMs - last >= every) {
     const c = peekQueue(deps.boardDir);
-    const prs = summariseLanding(deps.boardDir);
+    const suppressed = takeSuppressedNote(deps.boardDir);
+    const prs = [summariseLanding(deps.boardDir), suppressed].filter(Boolean).join('; ');
     if (c.queued + c.inflight + c.done + c.failed > 0 || prs !== '') {
       reports.push({
         kind: 'progress',
