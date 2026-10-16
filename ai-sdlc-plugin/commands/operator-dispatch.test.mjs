@@ -37,6 +37,15 @@ describe('operator-dispatch command', () => {
     assert.match(body, /`markReady`/);
   });
 
+  it('drains the inbox before the tick and keeps ruled items out of the digest (AISDLC-903)', () => {
+    assert.ok(
+      body.includes(
+        'drain the inbox: read every pending message; apply each ruling it carries with `cli-dispatch rule` before the tick',
+      ),
+    );
+    assert.ok(body.includes('the digest never repeats an item that carries a ruling in force'));
+  });
+
   it('runs one wake-up through the hierarchy tick', () => {
     assert.match(body, /cli-hierarchy\.mjs" tick --board-dir "\$BOARD_DIR"/);
   });

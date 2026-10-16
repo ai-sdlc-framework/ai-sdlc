@@ -4037,6 +4037,19 @@ export const dispatchManifestV1Schema = {
         additionalProperties: false,
       },
     },
+    ruling: {
+      type: 'object',
+      description:
+        "A planner ruling kept on the task so it survives the dispatch session's clears (AISDLC-903).",
+      required: ['text', 'at'],
+      properties: {
+        text: { type: 'string', minLength: 1, maxLength: 1000 },
+        until: { type: 'string' },
+        by: { type: 'string' },
+        at: { type: 'string', format: 'date-time' },
+      },
+      additionalProperties: false,
+    },
     resume: {
       type: 'object',
       description:

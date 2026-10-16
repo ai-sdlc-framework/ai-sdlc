@@ -1,7 +1,7 @@
 ---
 id: AISDLC-903
 title: 'fix: dispatch keeps planner rulings across its clears and drains its inbox before it composes a digest'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [hierarchy, dispatch, velocity]
@@ -23,9 +23,9 @@ During the night of 2026-10-14/15 the dispatch session asked the planner the sam
 
 ## Acceptance Criteria
 
-- [ ] `cli-dispatch rule <task-id> --text "<ruling>" [--until <task-id>] [--by <name>]` writes a `ruling` object onto the task's manifest in `queue/`, `failed/` or `done/` and refuses on `inflight/`; `cli-dispatch rule <task-id> --clear` removes it. Tests cover all four locations.
-- [ ] The tick's PR classification reports a red or no-match PR whose task carries a ruling as `held` with the ruling text, not as `route-to-planner` or `real-failure`; when `until` is set and that task's PR has merged, the tick clears the ruling and reports the task as `ready-to-requeue`. Tests cover both branches.
-- [ ] `handoff write --role operator-dispatch` renders a "Rulings in force" section listing every task with a ruling (`task, text, until, by, at`); `handoff read` shows it. Test covers an empty and a populated board.
-- [ ] `ai-sdlc-plugin/commands/operator-dispatch.md` Step 2 begins with "drain the inbox: read every pending message; apply each ruling it carries with `cli-dispatch rule` before the tick"; Step 3 says the digest never repeats an item that carries a ruling in force. The command's test (`operator-dispatch.test.mjs`) asserts both sentences.
-- [ ] `docs/operations/cli-hierarchy.md` documents the `rule` command and the held classification in one short section.
-- [ ] Task file moved to `backlog/completed/` in the PR.
+- [x] `cli-dispatch rule <task-id> --text "<ruling>" [--until <task-id>] [--by <name>]` writes a `ruling` object onto the task's manifest in `queue/`, `failed/` or `done/` and refuses on `inflight/`; `cli-dispatch rule <task-id> --clear` removes it. Tests cover all four locations.
+- [x] The tick's PR classification reports a red or no-match PR whose task carries a ruling as `held` with the ruling text, not as `route-to-planner` or `real-failure`; when `until` is set and that task's PR has merged, the tick clears the ruling and reports the task as `ready-to-requeue`. Tests cover both branches.
+- [x] `handoff write --role operator-dispatch` renders a "Rulings in force" section listing every task with a ruling (`task, text, until, by, at`); `handoff read` shows it. Test covers an empty and a populated board.
+- [x] `ai-sdlc-plugin/commands/operator-dispatch.md` Step 2 begins with "drain the inbox: read every pending message; apply each ruling it carries with `cli-dispatch rule` before the tick"; Step 3 says the digest never repeats an item that carries a ruling in force. The command's test (`operator-dispatch.test.mjs`) asserts both sentences.
+- [x] `docs/operations/cli-hierarchy.md` documents the `rule` command and the held classification in one short section.
+- [x] Task file moved to `backlog/completed/` in the PR.

@@ -25,6 +25,8 @@ import path from 'node:path';
 import { now as clockNow } from '../clock.js';
 import { classifyPr, type PrCheck, type PrFacts, type PrState } from './pr-state.js';
 import { collectVerdicts, readInflightManifest, readQueuedManifest } from '../dispatch/board.js';
+import { clearRuling, readRuling } from '../dispatch/ruling.js';
+import type { TaskRuling } from '../dispatch/types.js';
 import type { CommandRunner } from './types.js';
 
 /** Task set: one action per classifier state (RFC-0054 ownership table). */
@@ -95,6 +97,8 @@ export interface LandingRecord {
   action: string;
   headSha?: string;
   failingLine?: string;
+  /** The planner ruling text that holds this PR (action `held`). */
+  ruling?: string;
   /** Set when the last run of `action` failed; the next pass retries without a new history entry. */
   actionFailed?: boolean;
   /** `rate-limited` only: when the installation limit resets and the rerun may fire. */
@@ -130,10 +134,21 @@ export interface Decision {
   state: PrState;
   action: string;
   failingLine?: string;
+  /** Ruling text, when the action is `held`. */
+  ruling?: string;
 }
 
+/** A planner ruling on the PR's task, with whether its `until` task has merged (AISDLC-903). */
+export interface RulingFacts {
+  ruling: TaskRuling;
+  untilMerged: boolean;
+}
+
+/** Task states a ruling holds: the ones that would otherwise reach the planner or a fix round. */
+const HELD_ACTIONS = new Set(['reenter', 'route-to-planner']);
+
 /** Classify one PR and pick its action from the set that owns it. Pure. */
-export function decide(f: ReconcilePr, record?: LandingRecord): Decision {
+export function decide(f: ReconcilePr, record?: LandingRecord, ruled?: RulingFacts): Decision {
   const kind = detectKind({
     ...(f.title === undefined ? {} : { title: f.title }),
     ...(f.headBranch === undefined ? {} : { headBranch: f.headBranch }),
@@ -168,7 +183,12 @@ export function decide(f: ReconcilePr, record?: LandingRecord): Decision {
   const delivered = f.merged === true || f.draft === false || record?.delivered !== undefined;
   const takeover = f.executorDead === true && c.state === 'ready-to-flip';
   if (!delivered && !takeover && c.state !== 'stale-claim') return { ...base, action: 'none' };
-  return { ...base, action: TASK_ACTIONS[c.state] };
+  const action = TASK_ACTIONS[c.state];
+  if (ruled && c.state !== 'merged') {
+    if (ruled.untilMerged) return { ...base, action: 'ready-to-requeue' };
+    if (HELD_ACTIONS.has(action)) return { ...base, action: 'held', ruling: ruled.ruling.text };
+  }
+  return { ...base, action };
 }
 
 /** What an action did. */
@@ -337,7 +357,16 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
   const report: ReconcileReport = { records: [], acted: [], reported: [] };
   for (const f of facts) {
     const existing = readLanding(opts.boardDir, f.prNumber);
-    const d = decide(f, existing);
+    const ruled = rulingFacts(opts.boardDir, f, facts);
+    const d = decide(f, existing, ruled);
+    // The hold is lifted: drop the ruling so it is not carried past the task it waited on.
+    if (d.action === 'ready-to-requeue') {
+      try {
+        clearRuling(opts.boardDir, f.taskId);
+      } catch {
+        /* the task went inflight meanwhile; the ruling is dropped when it next finishes */
+      }
+    }
     if (d.kind === 'release') {
       report.reported.push({
         pr: f.prNumber,
@@ -357,6 +386,7 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
       existing !== undefined &&
       existing.state === d.state &&
       existing.action === d.action &&
+      existing.ruling === d.ruling &&
       existing.headSha === f.headSha &&
       existing.owner === owner;
     if (unchanged && existing.actionFailed === true && d.action !== 'none') {
@@ -442,12 +472,13 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
             rateLimitResetAt: new Date(now().getTime() + RATE_LIMIT_WAIT_MS).toISOString(),
           }
         : {}),
+      ...(d.ruling === undefined ? {} : { ruling: d.ruling }),
       ...(deliveredAt === undefined ? {} : { delivered: deliveredAt }),
       ...(landedAt === undefined ? {} : { landed: landedAt }),
       history: [...(existing?.history ?? []), entry],
     };
     let result: ActionResult = { ran: false };
-    if (d.action !== 'none' && d.action !== 'mark-landed' && d.action !== 'wait-and-rerun') {
+    if (!['none', 'mark-landed', 'held', 'ready-to-requeue', 'wait-and-rerun'].includes(d.action)) {
       result = opts.execute({
         pr: f.prNumber,
         taskId: f.taskId,
@@ -467,11 +498,29 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
         pr: f.prNumber,
         action: d.action,
         ran: result.ran,
+        ...(d.ruling === undefined ? {} : { note: `held: ${d.ruling}` }),
         ...(result.note ? { note: result.note } : {}),
       });
     }
   }
   return report;
+}
+
+/** The ruling on the PR's task, and whether the task it waits on has merged. */
+function rulingFacts(
+  boardDir: string,
+  f: ReconcilePr,
+  all: readonly ReconcilePr[],
+): RulingFacts | undefined {
+  if (!f.taskId) return undefined;
+  const ruling = readRuling(boardDir, f.taskId);
+  if (!ruling) return undefined;
+  const until = ruling.until;
+  const untilMerged =
+    until !== undefined &&
+    (all.some((o) => o.taskId === until && o.merged === true) ||
+      listLanding(boardDir).some((r) => r.taskId === until && r.landed !== undefined));
+  return { ruling, untilMerged };
 }
 
 // ---------------------------------------------------------------------------
