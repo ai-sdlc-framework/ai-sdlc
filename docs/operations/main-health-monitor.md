@@ -8,7 +8,7 @@
 
 ## TL;DR
 
-A GitHub Actions workflow fires on every push to `main` and daily at 06:00 UTC, and runs the full test suite. If any test fails, it automatically creates a GitHub issue titled `[main-health] main is RED at <commit>` assigned to `@deefactorial`. When you see this issue, use the triage steps below to bisect which PR introduced the regression.
+A GitHub Actions workflow fires on every push to `main` and daily at 06:00 UTC, and runs the full test suite. If any test fails, the run fails and writes a step summary. It creates no issue and no label (AISDLC-929). The dispatch tick reads the run conclusion and reports `main: RED at <sha>` with the run URL as a `route-to-planner` item, once per sha; otherwise `main: green`, or `main: unknown` when the head sha has no completed run (nothing is routed).
 
 ---
 
@@ -30,24 +30,22 @@ Each individual PR had green CI. Their combination broke `main`. This workflow p
 1. PR merges into main (auto-merge squash, AISDLC-400)
 2. main-health-monitor.yml triggers on push to main (or the daily 06:00 UTC schedule)
 3. Full test suite runs (pnpm -r test + workflow YAML tests)
-4. If all green → workflow completes silently (no issue created)
+4. If all green → the run succeeds and the tick reports `main: green`
 5. If any failure:
-   a. health-check job exits non-zero (visible as red in Actions UI)
-   b. alert job fires and creates GitHub issue:
-      Title: "[main-health] main is RED at <8-char-sha>"
-      Assigned to: @deefactorial
-      Body: commit SHA + message + link to failing CI run + triage steps
+   a. health-check job exits non-zero (visible as red in Actions UI) and writes the step summary
+   b. the next dispatch tick (`cli-dispatch reconcile`) finds the failed run for the main head and
+      reports `main: RED at <sha> <run url>` as a route-to-planner item, once per sha
 ```
 
-The issue is the primary notification mechanism. GitHub sends an email/notification to assigned users on issue creation.
+The dispatch tick is the notification path: a red main blocks every PR's Build and Test, and dispatch acts on it. The once-per-sha record lives in `<board>/main-health.json`.
 
 ---
 
 ## Scheduled run and label behaviour (AISDLC-768)
 
-The workflow also runs on a daily `schedule` (06:00 UTC) against the current `main` head, so a test that rots with the calendar (clock-dependent fixtures) turns red without waiting for an unrelated push. On scheduled runs `github.event.head_commit` is empty, so the alert job reads the commit subject from the checked-out head with `git log -1 --format=%s`. The open-issue dedupe check means a still-red main yields one issue, not one per day.
+The workflow also runs on a daily `schedule` (06:00 UTC) against the current `main` head, so a test that rots with the calendar (clock-dependent fixtures) turns red without waiting for an unrelated push. On scheduled runs `github.event.head_commit` is empty, so the workflow reads the commit subject from the checked-out head with `git log -1 --format=%s`.
 
-The alert step creates its labels (`ci`, `main-red`) with `gh label create --force` before `gh issue create`. If label creation is refused it files the issue without labels. If the issue itself cannot be filed, the job writes the reason to `$GITHUB_STEP_SUMMARY`, emits `::error::`, and exits non-zero, so a silent failure to page is impossible. `.github/workflows/__tests__/main-health-monitor.test.mjs` fails when any `--label` value is neither created by the workflow nor listed in `.github/workflows/label-manifest.json`.
+No labels are created.
 
 ---
 
@@ -76,13 +74,13 @@ concurrency:
 
 ---
 
-## Triage a red-main alert
+## Triage a red main
 
-When you receive a `[main-health] main is RED at <sha>` issue:
+When the tick reports `main: RED at <sha>`:
 
 ### Step 1 — Identify the failing tests
 
-Click the **CI run** link in the issue body. Look for the `Test (full suite)` step output. The failing test names are listed there.
+Click the run URL in the report. Look for the `Test (full suite)` step output. The failing test names are listed there.
 
 ### Step 2 — Identify the candidate PRs
 
@@ -92,7 +90,7 @@ git fetch origin main
 git log --oneline origin/main -10
 ```
 
-This shows the last 10 commits on main (squash merges, one per PR). The red commit SHA is in the issue title. Look at the commit just before it (the last green) and identify which PR(s) merged between them.
+This shows the last 10 commits on main (squash merges, one per PR). The red commit SHA is in the report. Look at the commit just before it (the last green) and identify which PR(s) merged between them.
 
 ### Step 3 — Bisect the regression
 
@@ -129,12 +127,9 @@ Once you've identified the culprit PR:
    - Fix: rerun the CI, use `pnpm test:flaky` detection if available
    - Action: see `docs/operations/flaky-tests.md`
 
-### Step 5 — Close the issue
+### Step 5 — Follow up
 
-Once main is green again (either via fix PR or confirmed false alarm):
-
-1. Close the GitHub issue with a comment explaining what happened and what fixed it.
-2. If this is the second+ time the same test/package has caused a merge-skew alert, file a follow-up task to improve test isolation in that package.
+Once main is green again the tick reports `main: green`; nothing needs closing. If this is the second+ time the same test/package has caused a merge-skew alert, file a follow-up task to improve test isolation in that package.
 
 ---
 
@@ -150,9 +145,9 @@ See `docs/operations/merge-without-queue.md` — Rollback procedure.
 
 ---
 
-## Duplicate issue prevention
+## Once per sha
 
-The alert job checks for existing open `[main-health] main is RED` issues before creating a new one. If main is red from commit N and commit N+1 also fails (e.g. a failed fix attempt), no duplicate issue is created. The existing open issue serves as the tracking record. Add comments to it manually as you triage.
+The tick routes a red sha once. A later red sha routes again; a stale record can never disarm the report, because there is no issue to go stale.
 
 ---
 

@@ -328,6 +328,10 @@ export interface ReconcileReport {
   reported: { pr: number; title?: string }[];
   /** `route-to-planner` reports withheld this pass because the same key was already sent. */
   suppressed: number;
+  /** AISDLC-929: `main: RED at <sha>`, `main: green` or `main: unknown`; undefined when not checked. */
+  main?: string;
+  /** Set once per red sha: the item the tick routes to the planner. */
+  routed?: { action: 'route-to-planner'; text: string };
 }
 
 /** Dedupe ledger for planner reports, persisted on the board (AISDLC-924). */
@@ -371,6 +375,72 @@ function firstRoute(boardDir: string, pr: number, headSha: string | undefined, r
   return true;
 }
 
+/** Health of main's latest completed monitor run. */
+export interface MainHealth {
+  status: 'red' | 'green' | 'unknown';
+  sha?: string;
+  runUrl?: string;
+}
+
+/** The monitor's conclusion for the main head, read through `gh`. Unreadable or no completed run is `unknown`. */
+export function gatherMainHealth(run: CommandRunner, cwd: string): MainHealth {
+  const head = run('gh', ['api', 'repos/{owner}/{repo}/commits/main', '--jq', '.sha'], { cwd });
+  const sha = head.status === 0 ? head.stdout.trim() : '';
+  if (!sha) return { status: 'unknown' };
+  const listed = run(
+    'gh',
+    [
+      'run',
+      'list',
+      '--workflow',
+      'main-health-monitor.yml',
+      '--commit',
+      sha,
+      '--status',
+      'completed',
+      '--limit',
+      '1',
+      '--json',
+      'conclusion,url',
+    ],
+    { cwd },
+  );
+  const runs =
+    listed.status === 0 ? parse<{ conclusion?: string; url?: string }[]>(listed.stdout) : undefined;
+  const latest = Array.isArray(runs) ? runs[0] : undefined;
+  if (!latest?.conclusion) return { status: 'unknown', sha };
+  if (latest.conclusion === 'success') return { status: 'green', sha };
+  if (latest.conclusion === 'failure')
+    return { status: 'red', sha, ...(latest.url ? { runUrl: latest.url } : {}) };
+  return { status: 'unknown', sha };
+}
+
+function mainHealthPath(boardDir: string): string {
+  return path.join(boardDir, 'main-health.json');
+}
+
+/** Report main's health; a red sha is routed to the planner once. */
+export function reportMainHealth(
+  boardDir: string,
+  health: MainHealth,
+): Pick<ReconcileReport, 'main' | 'routed'> {
+  if (health.status === 'green') return { main: 'main: green' };
+  if (health.status === 'unknown') return { main: 'main: unknown' };
+  const short = (health.sha ?? '').slice(0, 8);
+  const text = `main: RED at ${short}${health.runUrl ? ` ${health.runUrl}` : ''}`;
+  let seen: string | undefined;
+  try {
+    seen = (JSON.parse(readFileSync(mainHealthPath(boardDir), 'utf-8')) as { redSha?: string })
+      .redSha;
+  } catch {
+    seen = undefined;
+  }
+  if (seen === health.sha) return { main: text };
+  mkdirSync(boardDir, { recursive: true });
+  writeFileSync(mainHealthPath(boardDir), JSON.stringify({ redSha: health.sha }) + '\n', 'utf-8');
+  return { main: text, routed: { action: 'route-to-planner', text } };
+}
+
 /** One-line summary of the open landing records, for the tick's progress line. */
 export function summariseLanding(boardDir: string): string {
   const open = listLanding(boardDir).filter((r) => !r.landed);
@@ -400,12 +470,15 @@ export interface ReconcileOpts {
   boardDir: string;
   execute: ActionExecutor;
   now?: () => Date;
+  /** AISDLC-929: main's health this pass, when the caller read it. */
+  mainHealth?: MainHealth;
 }
 
 /** Reconcile a set of PR facts: update the records and run the actions. Idempotent. */
 export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): ReconcileReport {
   const now = opts.now ?? clockNow;
   const report: ReconcileReport = { records: [], acted: [], reported: [], suppressed: 0 };
+  if (opts.mainHealth) Object.assign(report, reportMainHealth(opts.boardDir, opts.mainHealth));
   const routeOnce = (pr: number, headSha: string | undefined, reason: string): boolean => {
     const first = firstRoute(opts.boardDir, pr, headSha, reason);
     if (!first) report.suppressed++;

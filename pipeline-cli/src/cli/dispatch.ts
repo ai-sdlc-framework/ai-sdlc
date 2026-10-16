@@ -206,6 +206,7 @@ import {
   gatherFacts,
   listLanding,
   reconcile,
+  gatherMainHealth,
   type ReconcilePr,
 } from '../hierarchy/reconcile.js';
 import { gatherPrFacts } from '../hierarchy/pr-facts.js';
@@ -487,7 +488,13 @@ export async function runDispatchCli(
           reconcile: () => {
             const facts = pass();
             if (!facts) return listLanding(boardDir).filter((r) => !r.landed).length;
-            out(reconcile(facts, { boardDir, execute }));
+            out(
+              reconcile(facts, {
+                boardDir,
+                execute,
+                mainHealth: gatherMainHealth(createSystemRunner(), cwd),
+              }),
+            );
             return listLanding(boardDir).filter((r) => !r.landed).length;
           },
         });
@@ -498,7 +505,13 @@ export async function runDispatchCli(
         process.stderr.write('cli-dispatch reconcile: could not read the open PRs\n');
         return 1;
       }
-      out(reconcile(facts, { boardDir, execute }));
+      out(
+        reconcile(facts, {
+          boardDir,
+          execute,
+          mainHealth: gatherMainHealth(createSystemRunner(), cwd),
+        }),
+      );
       return 0;
     }
 
