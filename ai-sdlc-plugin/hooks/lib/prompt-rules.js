@@ -79,6 +79,11 @@ const PROMPT_RULES = [
     text: '**Pre-work flags:** when the task says "Pre-work required", "Pre-conditions:" or "operator walkthrough needed", STOP and return `prUrl: null` naming the unmet precondition; never self-authorize scope expansion (AISDLC-308).',
     detect: /Pre-work required/gi,
   },
+  {
+    id: 'executor-no-question',
+    text: '**Executor questions:** no channel reaches an executor, so never wait on a question; when a step cannot proceed, write the exact refusal and the options into the verdict notes, report `failed` or `iterate-needed`, release nothing by force and stop; the dispatch tick routes it, and a class (c) question goes through `cli-decisions escalate`.',
+    detect: /never wait on a question/g,
+  },
 ];
 
 const BEGIN_RE = /<!-- prompt-rules:begin ids=([a-z0-9,-]+) -->/;

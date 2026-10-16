@@ -4,6 +4,7 @@ import {
   DEFAULT_STALL_GRACE_MS,
   DEFAULT_STALL_STALE_MS,
   findOpenPrNumber,
+  endsWithQuestion,
   stallResumeNote,
   stallThresholdsFromEnv,
 } from './stall.js';
@@ -55,5 +56,15 @@ describe('findOpenPrNumber', () => {
   it('is undefined when gh fails or prints junk', () => {
     expect(findOpenPrNumber(run(1, ''), '/r', 'AISDLC-8')).toBeUndefined();
     expect(findOpenPrNumber(run(0, 'nope'), '/r', 'AISDLC-8')).toBeUndefined();
+  });
+});
+
+describe('endsWithQuestion', () => {
+  it('is true when the last real line is a question, ignoring chrome', () => {
+    expect(endsWithQuestion('done\nShall I push or release?\n╭────╮\n│ > │\n╰────╯\n')).toBe(true);
+  });
+  it('is false for a statement or empty output', () => {
+    expect(endsWithQuestion('Pushed the branch.\n❯ \n')).toBe(false);
+    expect(endsWithQuestion('')).toBe(false);
   });
 });

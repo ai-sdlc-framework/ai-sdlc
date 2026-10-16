@@ -1645,6 +1645,15 @@ rules above refuse the task tools' other forms; see the qualification there). `c
 
 ---
 
+**No channel reaches an executor (AISDLC-948).** An executor takes input from the board only:
+the roster gives the planner no route to it, and the dispatch session may not message it or type
+into its pane. An executor therefore never waits on a question. When a step cannot proceed, it
+writes the exact refusal and the options into the verdict notes, reports `failed` or
+`iterate-needed` with `cli-dispatch complete`, releases nothing by force, and stops; the dispatch
+tick routes that verdict to the planner. The stall check backs this up: an executor that is idle
+with a question as its last output is reaped on the next tick (reason `holder-asked-question`),
+without waiting for the idle grace.
+
 ## The operator-dispatch loop
 
 The dispatch session runs `/ai-sdlc operator-dispatch` on a wake-up interval (60

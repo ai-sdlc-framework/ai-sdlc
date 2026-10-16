@@ -83,6 +83,14 @@ describe('prompt-rules source', () => {
   });
 });
 
+describe('executor command', () => {
+  it('renders the no-question rule (AISDLC-948)', () => {
+    const found = findPromptRulesBlock(read('commands/executor.md'));
+    assert.ok(found?.ids.includes('executor-no-question'));
+    assert.match(found.block, /never wait on a question/);
+  });
+});
+
 describe('prompts carrying a rules block', () => {
   for (const rel of GUARDED) {
     it(`${rel} carries a block`, () => {

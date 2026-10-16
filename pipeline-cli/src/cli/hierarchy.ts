@@ -109,7 +109,9 @@ import {
   readRosterChecked,
   rosterProject,
   runDispatchTick,
+  endsWithQuestion,
   findOpenPrNumber,
+  paneTail,
   fetchHumanAttentionPrs,
   stallThresholdsFromEnv,
   runPlaybook,
@@ -720,6 +722,15 @@ export async function runHierarchyCli(
             ...stallThresholdsFromEnv(deps.env),
             liveness: () =>
               new Map(hierarchyStatus(deps).rows.map((r) => [r.entry.name, r.state] as const)),
+            lastOutputIsQuestion: (name) => {
+              const entry = readRosterChecked(deps.boardDir).roster.sessions.find(
+                (e) => e.name === name,
+              );
+              return (
+                entry !== undefined &&
+                endsWithQuestion(paneTail(deps.run, entry.tmuxSession, entry.tmuxWindow))
+              );
+            },
             requeue: (id, note, pr) => {
               if (pr === undefined) {
                 void requeueFailed(
