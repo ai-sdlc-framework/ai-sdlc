@@ -124,7 +124,11 @@ export async function preSignRebase(
     allowFailure: true,
   });
   if (pending.code === 0 && pending.stdout.trim() !== '') {
-    await ctx.runner('git', ['add', '--', ...owned], { cwd: wt, allowFailure: true });
+    // One `git add` per path: a pathspec matching nothing aborts the whole
+    // call, so a missing ledger must not keep the leaves from being staged.
+    for (const path of owned) {
+      await ctx.runner('git', ['add', '--', path], { cwd: wt, allowFailure: true });
+    }
     await ctx.runner(
       'git',
       [

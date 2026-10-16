@@ -225,10 +225,48 @@ describe('preSignRebase (AISDLC-102)', () => {
     const r = await preSignRebase(h.ctx, state);
     expect(r).toEqual({ kind: 'unchanged', hash: 'A' });
     expect(cmds().filter((c) => c.startsWith('git commit'))).toHaveLength(1);
-    expect(indexOfCall(new RegExp(`git add -- .*reviews/${state.taskId}\\.jsonl`))).toBeGreaterThan(
-      -1,
-    );
+    expect(cmds()).toContain(`git add -- .ai-sdlc/reviews/${state.taskId}.jsonl`);
+    expect(cmds()).toContain('git add -- .ai-sdlc/transcript-leaves/');
     expect(indexOfCall(/git commit/)).toBeLessThan(indexOfCall(/git rebase origin\/main/));
+  });
+
+  it('stages each owned path in its own add, even when one add fails (AISDLC-951)', async () => {
+    hashes('A', 'A');
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    h.runner.on(/status --porcelain/, ok('?? .ai-sdlc/transcript-leaves/abc.jsonl\n'));
+    h.runner.on(
+      new RegExp(`git add -- \\.ai-sdlc/reviews/${state.taskId}\\.jsonl`),
+      fail('fatal: pathspec did not match any files', 128),
+    );
+    const r = await preSignRebase(h.ctx, state);
+    expect(r).toEqual({ kind: 'unchanged', hash: 'A' });
+    expect(cmds().filter((c) => c.startsWith('git add'))).toEqual([
+      'git add -- .ai-sdlc/transcript-leaves/',
+      `git add -- .ai-sdlc/reviews/${state.taskId}.jsonl`,
+    ]);
+    expect(cmds().filter((c) => c.startsWith('git commit'))).toHaveLength(1);
+  });
+
+  it('still stages the ledger when the leaves add fails (only-ledger-dirty)', async () => {
+    hashes('A', 'A');
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    h.runner.on(/status --porcelain/, ok(` M .ai-sdlc/reviews/${state.taskId}.jsonl\n`));
+    h.runner.on(/git add -- \.ai-sdlc\/transcript-leaves\//, fail('no match', 128));
+    await preSignRebase(h.ctx, state);
+    expect(cmds()).toContain(`git add -- .ai-sdlc/reviews/${state.taskId}.jsonl`);
+    expect(cmds().filter((c) => c.startsWith('git commit'))).toHaveLength(1);
+  });
+
+  it('commits once per dirty state: dirty, clean after commit, dirty again (AISDLC-951)', async () => {
+    hashes('A', 'A', 'A', 'A', 'A', 'A');
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    const states = [' M x\n', '', ' M x\n'];
+    let i = 0;
+    h.runner.on(/status --porcelain/, () => ok(states[i++]));
+    await preSignRebase(h.ctx, state);
+    await preSignRebase(h.ctx, state);
+    await preSignRebase(h.ctx, state);
+    expect(cmds().filter((c) => c.startsWith('git commit'))).toHaveLength(2);
   });
 
   it('converges on a later attempt when the ledger re-dirties after the rebase', async () => {
