@@ -1727,6 +1727,84 @@ describe('runDispatchCli ordering commands', () => {
     });
   });
 
+  describe('reprioritize and peek --order (AISDLC-904)', () => {
+    const run = (...a: string[]) => runDispatchCli(['reprioritize', ...a, '--board-dir', boardDir]);
+    const q = (id: string) => path.join(boardDir, 'queue', `${id}.dispatch.json`);
+    const put = (id: string, overrides: Partial<DispatchManifest>, ageSec: number) => {
+      writeFileSync(q(id), JSON.stringify(mkManifest(id, overrides), null, 2) + '\n');
+      const t = new Date(Date.now() - ageSec * 1000);
+      utimesSync(q(id), t, t);
+    };
+
+    it('rewrites only priority and keeps every other byte', async () => {
+      put('T-1', { priority: 3 }, 10);
+      const before = readFileSync(q('T-1'), 'utf-8');
+      expect(await run('T-1', '--priority', '0')).toBe(0);
+      const after = readFileSync(q('T-1'), 'utf-8');
+      expect(after).toBe(before.replace('"priority": 3', '"priority": 0'));
+    });
+
+    it('sets resume.note, and refuses a note over the limit', async () => {
+      put('T-1', {}, 10);
+      const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      expect(await run('T-1', '--priority', '0', '--note', 'do the fix first')).toBe(0);
+      expect(JSON.parse(readFileSync(q('T-1'), 'utf-8')).resume.note).toBe('do the fix first');
+      const before = readFileSync(q('T-1'), 'utf-8');
+      expect(await run('T-1', '--priority', '5', '--note', 'x'.repeat(4001))).toBe(1);
+      expect(readFileSync(q('T-1'), 'utf-8')).toBe(before);
+      err.mockRestore();
+    });
+
+    it('refuses inflight, done, failed, unqueued and a missing priority', async () => {
+      const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      put('T-1', {}, 10);
+      writeFileSync(path.join(boardDir, 'inflight', 'T-1.dispatch.json'), '{}');
+      expect(await run('T-1', '--priority', '0')).toBe(1);
+      rmSync(path.join(boardDir, 'inflight', 'T-1.dispatch.json'));
+      writeFileSync(path.join(boardDir, 'done', 'T-1.verdict.json'), '{}');
+      expect(await run('T-1', '--priority', '0')).toBe(1);
+      rmSync(path.join(boardDir, 'done', 'T-1.verdict.json'));
+      writeFileSync(path.join(boardDir, 'failed', 'T-1.diagnostic.json'), '{}');
+      expect(await run('T-1', '--priority', '0')).toBe(1);
+      expect(await run('T-9', '--priority', '0')).toBe(1);
+      expect(await run('T-1')).toBe(2);
+      expect(JSON.parse(readFileSync(q('T-1'), 'utf-8')).priority).toBeUndefined();
+      err.mockRestore();
+    });
+
+    it('peek --order prints the claim order on a mixed board', async () => {
+      put('T-11', { priority: 1 }, 50);
+      put('T-12', {}, 60);
+      put('T-13', { priority: 1 }, 40);
+      put('T-14', { priority: 2, wave: 1 }, 70);
+      put('T-15', { priority: 9 }, 30);
+      expect(await run('T-15', '--priority', '0')).toBe(0);
+      const peek = await captureStdout(() =>
+        runDispatchCli(['peek', '--order', '--board-dir', boardDir]),
+      );
+      const listed = readLastJson(peek.captured) as {
+        taskId: string;
+        wave: number;
+        priority: number | null;
+        dispatchedAt: string;
+      }[];
+      expect(listed[0]).toMatchObject({ wave: 0, priority: 0 });
+      expect(listed[0]).toHaveProperty('dispatchedAt');
+      const claimed: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        const r = await captureStdout(() =>
+          runDispatchCli(['claim', '--worker-kind', 'in-session-agent', '--board-dir', boardDir]),
+        );
+        const c = readLastJson(r.captured) as { claimed: boolean; manifest?: { taskId: string } };
+        if (!c.claimed) break;
+        claimed.push(c.manifest!.taskId);
+        rmSync(path.join(boardDir, 'inflight', `${c.manifest!.taskId}.dispatch.json`));
+      }
+      expect(listed.map((e) => e.taskId)).toEqual(['T-15', 'T-11', 'T-13', 'T-12', 'T-14']);
+      expect(claimed).toEqual(listed.map((e) => e.taskId));
+    });
+  });
+
   it('reaps a stale inflight manifest back to the queue', async () => {
     dispatchWriteManifest(boardDir, mkManifest('T-1'));
     await captureStdout(() =>

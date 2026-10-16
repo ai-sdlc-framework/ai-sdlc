@@ -1,7 +1,7 @@
 ---
 id: AISDLC-904
 title: 'feat: cli-dispatch reprioritize moves a queued task to the front and the claim order is documented'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [dispatch, velocity]

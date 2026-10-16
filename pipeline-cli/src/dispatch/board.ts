@@ -442,38 +442,7 @@ export function claimNext(
     reportBoard(boardDir, 'degraded', degradedReason('board directory unreadable', err));
     throw err;
   }
-  const wallNow = now().getTime();
-  const ctx = loadEligibilityContext(boardDir);
-  const eligible: { fullPath: string; manifest: DispatchManifest; mtimeMs: number }[] = [];
-  for (const candidate of candidates) {
-    const manifest = readManifest(candidate.fullPath);
-    if (!manifest) continue;
-    // A manifest with a malformed id is never claimed; it stays where it is so
-    // the rest of the queue keeps flowing.
-    if (typeof manifest.taskId !== 'string' || !TASK_ID_RE.test(manifest.taskId)) continue;
-
-    if (manifest.workerKind !== 'any' && manifest.workerKind !== workerKind) {
-      continue;
-    }
-
-    if (manifest.noClaimBefore) {
-      const claimAfter = Date.parse(manifest.noClaimBefore);
-      if (!Number.isNaN(claimAfter) && claimAfter > wallNow) {
-        continue;
-      }
-    }
-
-    if (!checkEligibility(manifest, ctx).eligible) continue;
-    eligible.push({ fullPath: candidate.fullPath, manifest, mtimeMs: candidate.mtimeMs });
-  }
-
-  // Array.prototype.sort is stable; candidates already arrive oldest-first.
-  eligible.sort(
-    (a, b) =>
-      (a.manifest.wave ?? 0) - (b.manifest.wave ?? 0) ||
-      comparePriority(a.manifest.priority, b.manifest.priority) ||
-      a.mtimeMs - b.mtimeMs,
-  );
+  const eligible = orderEligible(boardDir, candidates, workerKind, now);
 
   const claimedGroups = new Set<string>();
   for (const { fullPath, manifest } of eligible) {
@@ -876,6 +845,116 @@ export function listBoard(boardDir: string, now: () => Date = () => new Date()):
     }
   }
   return entries;
+}
+
+/** Eligible queue entries for `workerKind` (any kind when undefined), in the order {@link claimNext} tries them. */
+function orderEligible(
+  boardDir: string,
+  candidates: ManifestCandidate[],
+  workerKind: WorkerKind | undefined,
+  now: () => Date,
+): { fullPath: string; manifest: DispatchManifest; mtimeMs: number }[] {
+  const wallNow = now().getTime();
+  const ctx = loadEligibilityContext(boardDir);
+  const eligible: { fullPath: string; manifest: DispatchManifest; mtimeMs: number }[] = [];
+  for (const candidate of candidates) {
+    const manifest = readManifest(candidate.fullPath);
+    if (!manifest) continue;
+    // A manifest with a malformed id is never claimed; it stays where it is so
+    // the rest of the queue keeps flowing.
+    if (typeof manifest.taskId !== 'string' || !TASK_ID_RE.test(manifest.taskId)) continue;
+
+    if (
+      workerKind !== undefined &&
+      manifest.workerKind !== 'any' &&
+      manifest.workerKind !== workerKind
+    ) {
+      continue;
+    }
+
+    if (manifest.noClaimBefore) {
+      const claimAfter = Date.parse(manifest.noClaimBefore);
+      if (!Number.isNaN(claimAfter) && claimAfter > wallNow) {
+        continue;
+      }
+    }
+
+    if (!checkEligibility(manifest, ctx).eligible) continue;
+    eligible.push({ fullPath: candidate.fullPath, manifest, mtimeMs: candidate.mtimeMs });
+  }
+
+  // Array.prototype.sort is stable; candidates already arrive oldest-first.
+  eligible.sort(
+    (a, b) =>
+      (a.manifest.wave ?? 0) - (b.manifest.wave ?? 0) ||
+      comparePriority(a.manifest.priority, b.manifest.priority) ||
+      a.mtimeMs - b.mtimeMs,
+  );
+  return eligible;
+}
+
+/** One row of `peek --order` (AISDLC-904). */
+export interface QueueOrderEntry {
+  taskId: string;
+  wave: number;
+  priority: number | null;
+  dispatchedAt: string;
+}
+
+/** Eligible queue entries in claim order: wave, priority ascending (absent last), then enqueue time. */
+export function peekQueueOrder(
+  boardDir: string,
+  now: () => Date = () => clockNow(),
+): QueueOrderEntry[] {
+  ensureBoardDirs(boardDir);
+  const candidates = listManifestCandidates(path.join(boardDir, 'queue'));
+  return orderEligible(boardDir, candidates, undefined, now).map(({ manifest }) => ({
+    taskId: manifest.taskId,
+    wave: manifest.wave ?? 0,
+    priority: typeof manifest.priority === 'number' ? manifest.priority : null,
+    dispatchedAt: manifest.dispatchedAt,
+  }));
+}
+
+/**
+ * Rewrite fields of a queued manifest in place (AISDLC-904): `priority` and/or
+ * `resume`. Every other field is kept. Refuses while the task is inflight, or has a
+ * verdict in `done/` or a diagnostic in `failed/`, or when nothing is queued.
+ */
+export function updateQueuedManifest(
+  boardDir: string,
+  taskId: string,
+  patch: Pick<DispatchManifest, 'priority' | 'resume'>,
+): string {
+  ensureBoardDirs(boardDir);
+  if (existsSync(manifestPathIn(boardDir, 'inflight', taskId))) {
+    throw new Error(`reprioritize: ${taskId} is inflight (claimed); it can no longer be reordered`);
+  }
+  for (const [sub, suffixes] of [
+    ['done', [VERDICT_SUFFIX, COMPLETED_SUFFIX]],
+    ['failed', [DIAGNOSTIC_SUFFIX]],
+  ] as const) {
+    if (suffixes.some((x) => existsSync(path.join(boardDir, sub, `${taskId}${x}`)))) {
+      throw new Error(
+        `reprioritize: ${taskId} is already in ${sub}/; only a queued task can be reordered`,
+      );
+    }
+  }
+  const target = manifestPathIn(boardDir, 'queue', taskId);
+  const current = existsSync(target) ? readManifest(target) : undefined;
+  if (!current) {
+    throw new Error(`reprioritize: no queued manifest for ${taskId}`);
+  }
+  const next: DispatchManifest = { ...current };
+  if (patch.priority !== undefined) next.priority = patch.priority;
+  if (patch.resume !== undefined) next.resume = patch.resume;
+  const mtime = statSync(target).mtime;
+  const tmp = `${target}.tmp-${process.pid}`;
+  writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n', 'utf-8');
+  // Keep the enqueue time: the file mtime is the tiebreak inside a priority band.
+  utimesSync(tmp, mtime, mtime);
+  renameSync(tmp, target);
+  return target;
 }
 
 /**
