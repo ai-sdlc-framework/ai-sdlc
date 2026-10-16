@@ -1,7 +1,7 @@
 ---
 id: AISDLC-933
 title: 'fix(hierarchy): handoff write keeps one current notes block and rolls older prose into an archive file'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [hierarchy, reliability, planner, velocity]

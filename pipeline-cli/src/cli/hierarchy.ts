@@ -261,6 +261,7 @@ Options for handoff:
   --role <r>               planner, operator-dispatch (or dispatch), or executor
   --name <n>               Session name (default the calling session's roster name, else the role)
   --out <path>             Alternative file location
+  --no-archive             write (planner): do not roll older notes blocks into <basename>_archive.md
   --full                   read: print the whole file (default: block plus last 8000 chars of prose)
 
 Options for auto-clear:
@@ -890,10 +891,20 @@ export async function runHierarchyCli(
           now: deps.now,
           ...(name ? { name } : {}),
           ...(flags.out && flags.out !== 'true' ? { file: flags.out } : {}),
+          ...(flags['no-archive'] === 'true' ? { archive: false } : {}),
         };
         if (action === 'write') {
           const r = writeHandoff(opts);
-          deps.log(JSON.stringify({ ok: true, file: r.file, stateHash: r.stateHash }));
+          deps.log(
+            JSON.stringify({
+              ok: true,
+              file: r.file,
+              stateHash: r.stateHash,
+              ...(r.archivedBlocks === undefined
+                ? {}
+                : { archivedBlocks: r.archivedBlocks, archiveFile: r.archiveFile }),
+            }),
+          );
         } else {
           const r = readGeneratedHandoff(opts);
           deps.log(

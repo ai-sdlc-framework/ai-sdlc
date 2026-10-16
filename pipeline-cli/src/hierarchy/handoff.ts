@@ -56,6 +56,8 @@ export interface HandoffOptions {
   now?: () => Date;
   /** Overrides the file location (tests). */
   file?: string;
+  /** Planner only: roll older notes into `<basename>_archive.md` (default true; AISDLC-933). */
+  archive?: boolean;
 }
 
 /** Result of a write or read. */
@@ -65,6 +67,9 @@ export interface HandoffResult {
   /** read: the file was missing or stale and was regenerated first. */
   regenerated: boolean;
   content: string;
+  /** write: older notes blocks and loose prose moved to the archive file. */
+  archivedBlocks?: number;
+  archiveFile?: string;
 }
 
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -267,6 +272,56 @@ function splice(existing: string | undefined, block: string): string {
   return existing.slice(0, start) + block.trimEnd() + existing.slice(end + HANDOFF_END.length);
 }
 
+const RESUME_HEADING_RE = /^## RESUME HERE\b/;
+
+/**
+ * Keep one current notes block (AISDLC-933). Splits `text` into frontmatter, loose prose
+ * before the generated block (an optional leading `# ` title line stays as header), the
+ * generated block, and the text after it. Prose before the block and every `## RESUME HERE`
+ * section but the last one come back as `archived`; the rest stays in `kept`.
+ */
+export function rollArchive(text: string): { kept: string; archived: string[] } {
+  const start = text.indexOf(HANDOFF_BEGIN);
+  const end = text.indexOf(HANDOFF_END);
+  if (start === -1 || end === -1 || end < start) return { kept: text, archived: [] };
+  const fm = /^---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
+  const fmLen = fm && fm[0].length <= start ? fm[0].length : 0;
+  const archived: string[] = [];
+  let before = text.slice(fmLen, start);
+  let header = '';
+  const title = /^\s*# [^\n]*\n/.exec(before);
+  if (title) {
+    header = title[0].replace(/^\s+/, '');
+    before = before.slice(title[0].length);
+  }
+  if (before.trim()) archived.push(before.trim());
+  const blockEnd = end + HANDOFF_END.length;
+  const after = text.slice(blockEnd);
+  const lines = after.split('\n');
+  const sections: { from: number; to: number }[] = [];
+  let open = -1;
+  lines.forEach((line, i) => {
+    if (/^## /.test(line)) {
+      if (open !== -1) sections.push({ from: open, to: i });
+      open = RESUME_HEADING_RE.test(line) ? i : -1;
+    }
+  });
+  if (open !== -1) sections.push({ from: open, to: lines.length });
+  const drop = new Set<number>();
+  for (const sec of sections.slice(0, -1)) {
+    archived.push(lines.slice(sec.from, sec.to).join('\n').trim());
+    for (let i = sec.from; i < sec.to; i++) drop.add(i);
+  }
+  const keptAfter = lines.filter((_, i) => !drop.has(i)).join('\n');
+  if (!archived.length) return { kept: text, archived };
+  const kept =
+    text.slice(0, fmLen) +
+    header +
+    text.slice(start, blockEnd) +
+    keptAfter.replace(/\n{3,}/g, '\n\n');
+  return { kept, archived };
+}
+
 /** Generate the handoff from live state and write it. */
 export function writeHandoff(opts: HandoffOptions): HandoffResult {
   const now = (opts.now ?? clock)();
@@ -276,11 +331,33 @@ export function writeHandoff(opts: HandoffOptions): HandoffResult {
   const block = renderHandoff(opts.role, name, state, now.toISOString());
   const carried = existsSync(file) ? file : newestPlannerHandoff(file, opts);
   const existing = carried ? readFileSync(carried, 'utf-8') : undefined;
-  const content = splice(existing, block);
+  let content = splice(existing, block);
   mkdirSync(path.dirname(file), { recursive: true });
+  let archivedBlocks: number | undefined;
+  let archiveFile: string | undefined;
+  if (opts.role === 'planner' && opts.archive !== false) {
+    const rolled = rollArchive(content);
+    archivedBlocks = rolled.archived.length;
+    archiveFile = path.join(
+      path.dirname(file),
+      `${path.basename(file).replace(/\.md$/, '')}_archive.md`,
+    );
+    if (rolled.archived.length) {
+      content = rolled.kept;
+      const prior = existsSync(archiveFile) ? readFileSync(archiveFile, 'utf-8').trimEnd() : '';
+      const add = rolled.archived.join('\n\n');
+      writeFileSync(archiveFile, (prior ? prior + '\n\n' : '') + add + '\n', 'utf-8');
+    }
+  }
   writeFileSync(file, content, 'utf-8');
   if (opts.role === 'planner' && !opts.file) pointMemoryIndexAt(file);
-  return { file, stateHash: hashHandoffState(state), regenerated: false, content };
+  return {
+    file,
+    stateHash: hashHandoffState(state),
+    regenerated: false,
+    content,
+    ...(archivedBlocks === undefined ? {} : { archivedBlocks, archiveFile }),
+  };
 }
 
 /**
