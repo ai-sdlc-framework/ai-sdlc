@@ -1,7 +1,7 @@
 ---
 id: AISDLC-854
 title: Own the docs site navigation in-repo via fumadocs meta.json files under docs/ and spec/
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels: [docs, docs-platform]

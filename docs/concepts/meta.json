@@ -1,0 +1,19 @@
+{
+  "title": "Concepts",
+  "pages": [
+    "index",
+    "dor-gate",
+    "autonomous-orchestrator",
+    "session-hierarchy",
+    "two-tier-pipeline",
+    "cross-harness-review",
+    "staged-review",
+    "judgment-layer",
+    "proof-of-execution",
+    "reviewer-independence",
+    "zero-trust-untrusted-pr-verification",
+    "per-repo-governance",
+    "usage-ledger-model-routing",
+    "operator-tui"
+  ]
+}

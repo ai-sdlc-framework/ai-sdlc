@@ -9,8 +9,10 @@ User-facing documentation for the AI-SDLC Framework.
 | Section | Description |
 |---|---|
 | [Getting Started](getting-started/) | Installation, CLI quick start, first pipeline |
-| [Tutorials](tutorials/) | Step-by-step walkthroughs (5 tutorials) |
+| [Concepts](concepts/) | Design concepts behind the pipeline, governance, and review model |
+| [Tutorials](tutorials/) | Step-by-step walkthroughs (15 tutorials) |
 | [API Reference](api-reference/) | Complete SDK and orchestrator reference |
+| [White papers](whitepapers/) | Proof of execution and untrusted-contributor verification |
 | [Examples](examples/) | Runnable TypeScript and YAML examples |
 | [Architecture](architecture.md) | Package structure, data flow, design decisions |
 | [Operations](operations/) | Operator runbooks, execution paths, and production triage — see [Operations index](operations/README.md) for the full navigation map |

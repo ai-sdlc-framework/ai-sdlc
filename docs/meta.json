@@ -1,0 +1,19 @@
+{
+  "title": "Documentation",
+  "pages": [
+    "---Getting Started---",
+    "index",
+    "getting-started",
+    "---Concepts---",
+    "concepts",
+    "---Tutorials---",
+    "tutorials",
+    "---Reference---",
+    "api-reference",
+    "rfc-registry",
+    "prd-claude-code-native-integration",
+    "---Guides---",
+    "architecture",
+    "troubleshooting"
+  ]
+}
