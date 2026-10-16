@@ -2554,13 +2554,18 @@ export function runVerifier({
   baseSha,
   repoRoot = process.cwd(),
   agentDir,
+  // AISDLC-947: caller-supplied trusted-reviewers.yaml text (read from a trusted ref, never the
+  // worktree a PR could modify). Default: the checkout's own copy (CI behaviour, unchanged).
+  trustedReviewersYaml,
   // AISDLC-734: clock seam so the scan budget is testable without timing races.
   now = Date.now,
 } = {}) {
   // --- Load trusted reviewers + ACCEPTED_SCHEMA_VERSIONS first ---------
   // We need the schema-version allowlist for the predicate-content match,
   // and we need trustedReviewers anyway for the signature step.
-  const trustedYaml = readFileSync(join(repoRoot, '.ai-sdlc', 'trusted-reviewers.yaml'), 'utf-8');
+  const trustedYaml =
+    trustedReviewersYaml ??
+    readFileSync(join(repoRoot, '.ai-sdlc', 'trusted-reviewers.yaml'), 'utf-8');
   const parsedYaml = parseTrustedReviewers(trustedYaml);
   let trustedReviewers;
   try {

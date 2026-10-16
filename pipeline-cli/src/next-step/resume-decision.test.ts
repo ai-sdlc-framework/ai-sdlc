@@ -25,6 +25,7 @@ function script(delta = 'docs/readme.md\0', envelope: boolean | string = true): 
   r.on(/cat-file -e/, ok());
   r.on(/rev-parse HEAD/, ok(`${SHA}\n`));
   r.on(/-base origin/, ok(`${'d'.repeat(40)}\n`));
+  r.on(/show origin\/.*trusted-reviewers/, ok('reviewers: []\n'));
   r.on(/diff --name-only/, ok(delta));
 }
 
@@ -104,6 +105,23 @@ describe('decideResumeReview (AISDLC-947)', () => {
     await decideResumeReview(h.ctx, h.root, { ...opts(PID), verifyAt });
     await decideResumeReview(h.ctx, h.root, { ...opts('e'.repeat(40)), verifyAt });
     expect(seen).toEqual([SHA, LAST]);
+  });
+
+  it('verifies against trusted-reviewers.yaml from the target ref, not the worktree', async () => {
+    script();
+    const yamls: string[] = [];
+    const verifyAt = async (_h: string, _b: string, _c: string, y: string) => (yamls.push(y), true);
+    await decideResumeReview(h.ctx, h.root, { ...opts(PID), verifyAt });
+    expect(yamls).toEqual(['reviewers: []\n']);
+    expect(
+      h.runner.calls.some((c: { args: string[] }) => c.args.join(' ').includes('show origin/')),
+    ).toBe(true);
+  });
+
+  it('falls back to full when the trusted ref has no trusted-reviewers.yaml', async () => {
+    h.runner.on(/show origin\/.*trusted-reviewers/, fail('missing'));
+    script();
+    expect((await decideResumeReview(h.ctx, h.root, opts(PID))).branch).toBe('full');
   });
 
   it('picks the newest of two envelopes on the branch (git log is newest first)', async () => {

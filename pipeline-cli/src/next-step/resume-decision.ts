@@ -47,7 +47,12 @@ export interface ResumeDecisionOpts {
    * Test injection: verify the signed attestation for `headSha` (signature against the trusted
    * reviewers, Merkle proof, patch-id binding, review scope). Default: the trusted verifier core.
    */
-  verifyAt?: (headSha: string, baseSha: string, cwd: string) => Promise<boolean>;
+  verifyAt?: (
+    headSha: string,
+    baseSha: string,
+    cwd: string,
+    trustedReviewersYaml: string,
+  ) => Promise<boolean>;
 }
 
 /**
@@ -59,11 +64,14 @@ async function verifyAttestationAt(
   headSha: string,
   baseSha: string,
   cwd: string,
+  trustedReviewersYaml: string,
 ): Promise<boolean> {
   try {
     const core = await loadVerifyCore();
     core.bindRuntime(await loadAttestationRuntime(cwd));
-    return core.runVerifier({ headSha, baseSha, repoRoot: cwd }).status === 'valid';
+    return (
+      core.runVerifier({ headSha, baseSha, repoRoot: cwd, trustedReviewersYaml }).status === 'valid'
+    );
   } catch {
     return false;
   }
@@ -119,7 +127,12 @@ async function decide(
   if (!base) return FULL;
   const current = (opts.currentPatchId ?? computePatchId)(base, head, cwd);
   if (current === null) return FULL;
-  const verify = opts.verifyAt ?? verifyAttestationAt;
+  // SECURITY: the signer allowlist comes from the target branch, never the worktree copy a PR
+  // could edit to trust its own forged key.
+  const trustedYaml = await git(['show', `${target}:.ai-sdlc/trusted-reviewers.yaml`]);
+  if (trustedYaml === null) return FULL;
+  const verify = (h: string, b: string, c: string): Promise<boolean> =>
+    (opts.verifyAt ?? verifyAttestationAt)(h, b, c, trustedYaml);
   if (current.toLowerCase() === attestedPatchId) {
     if (!(await verify(head, base, cwd))) return FULL;
     return { branch: 'unchanged', note: 'review-skipped: unchanged', lastHead };
