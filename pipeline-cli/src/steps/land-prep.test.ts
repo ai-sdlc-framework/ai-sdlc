@@ -127,6 +127,32 @@ describe('landPrep (real git)', () => {
     expect(git(wt, 'status', '--porcelain')).toBe('');
   });
 
+  it('keeps envelopes that came from main (only drops envelopes this branch added)', async () => {
+    const { root, wt, other } = setup();
+    dirs.push(root);
+    // main carries an old PR's envelope whose subject is not an ancestor of the branch
+    const oldEnv = join(other, '.ai-sdlc', 'attestations', 'old.v6.dsse.json');
+    mkdirSync(join(other, '.ai-sdlc', 'attestations'), { recursive: true });
+    writeFileSync(
+      oldEnv,
+      JSON.stringify({ schemaVersion: 'v6', subject: { digest: { sha1: 'a'.repeat(40) } } }),
+    );
+    git(other, 'add', '.');
+    git(other, 'commit', '-q', '-m', 'old pr');
+    git(other, 'push', '-q', 'origin', 'HEAD:main');
+    writeFileSync(join(wt, 'b.txt'), 'mine\n');
+    git(wt, 'add', 'b.txt');
+    git(wt, 'commit', '-q', '-m', 'mine');
+    git(wt, 'push', '-q', '-u', 'origin', 'feat/x');
+    writeFileSync(join(other, 'a.txt'), 'theirs\n');
+    git(other, 'commit', '-q', '-am', 'theirs');
+    git(other, 'push', '-q', 'origin', 'HEAD:main');
+    const res = await landPrep({ worktreePath: wt, branch: 'feat/x', push: false, env: {} });
+    expect(res.ok).toBe(true);
+    expect(res.droppedEnvelopes).toEqual([]);
+    expect(existsSync(join(wt, '.ai-sdlc', 'attestations', 'old.v6.dsse.json'))).toBe(true);
+  });
+
   it('reads the subject from a v5 DSSE payload and returns null when unreadable', () => {
     const dir = mkdtempSync(join(tmpdir(), 'env-'));
     dirs.push(dir);
