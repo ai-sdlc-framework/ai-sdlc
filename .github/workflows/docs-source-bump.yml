@@ -43,9 +43,10 @@ jobs:
     steps:
       - name: Resolve sha to pin
         id: sha
+        shell: bash
         run: |
           SHA="${INPUT_SHA:-$PUSH_SHA}"
-          if ! printf '%s' "$SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+          if ! [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::sha must be 40 lowercase hex characters"
             exit 1
           fi
@@ -74,12 +75,13 @@ jobs:
           SHA: ${{ steps.sha.outputs.sha }}
         run: |
           set -euo pipefail
-          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${SITE_REPO}.git" "$RUNNER_TEMP/site"
+          gh auth setup-git
+          gh repo clone "$SITE_REPO" "$RUNNER_TEMP/site" -- --depth 1
           cd "$RUNNER_TEMP/site"
           git config user.name "ai-sdlc-bot"
           git config user.email "noreply@ai-sdlc.io"
           git checkout -B "$BUMP_BRANCH"
-          printf '{\n  "repo": "ai-sdlc-framework/ai-sdlc",\n  "sha": "%s"\n}\n' "$SHA" > docs-source.lock.json
+          jq -n --arg sha "$SHA" '{repo: "ai-sdlc-framework/ai-sdlc", sha: $sha}' > docs-source.lock.json
           if [ -z "$(git status --porcelain)" ]; then
             echo "Default branch already pins $SHA; nothing to bump."
             echo "number=" >> "$GITHUB_OUTPUT"
@@ -108,5 +110,8 @@ jobs:
           GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
+          # Run from a non-git directory: the helper refuses a cwd whose origin
+          # (ai-sdlc) differs from --repo, and evaluates via the GitHub API.
+          NEUTRAL_DIR="$(mktemp -d)"
           node pipeline-cli/bin/cli-merge-if-eligible.mjs "$PR_NUMBER" \
-            --source-kind backlog --repo "$SITE_REPO" --arm
+            --source-kind backlog --repo "$SITE_REPO" --cwd "$NEUTRAL_DIR" --arm

@@ -39,6 +39,18 @@ describe('docs-source-bump workflow (AISDLC-859)', () => {
     assert.match(raw, /cli-merge-if-eligible\.mjs "\$PR_NUMBER"[\s\S]*--arm/);
     assert.ok(!/gh pr (merge)|pulls\/.*\/(merge)|enablePullRequestAutoMerge/.test(raw));
   });
+  it('arms from a neutral cwd so the origin check does not refuse', () => {
+    assert.match(
+      raw,
+      /cli-merge-if-eligible\.mjs[\s\S]*--repo "\$SITE_REPO" --cwd "\$NEUTRAL_DIR" --arm/,
+    );
+  });
+  it('validates the sha in bash, writes the lock with jq, keeps the token out of the clone URL', () => {
+    assert.match(raw, /\[\[ "\$SHA" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
+    assert.match(raw, /jq -n --arg sha/);
+    assert.ok(!/x-access-token/.test(raw));
+    assert.match(raw, /gh repo clone/);
+  });
   it('references the PAT only in the single bump job', () => {
     assert.deepEqual(Object.keys(wf.jobs), ['bump']);
     assert.equal((raw.match(/secrets\.AI_SDLC_PAT/g) ?? []).length, 2);
