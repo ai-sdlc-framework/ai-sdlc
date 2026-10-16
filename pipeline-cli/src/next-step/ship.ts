@@ -112,22 +112,30 @@ export async function preSignRebase(
     cwd: wt,
     allowFailure: true,
   });
-  // Pending transcript leaves are untracked/modified files that make git refuse
-  // the rebase; commit them first. They are excluded from the patch-id
-  // (patch-id.ts), so the content hash is unchanged (AISDLC-848).
-  const pending = await ctx.runner(
-    'git',
-    ['status', '--porcelain', '--', '.ai-sdlc/transcript-leaves/'],
-    { cwd: wt, allowFailure: true },
-  );
+  // Pipeline-owned files (transcript leaves, this task's review ledger) are
+  // untracked/modified files that make git refuse the rebase; commit them
+  // first, in one commit. Both are excluded from the patch-id (patch-id.ts),
+  // so the content hash is unchanged (AISDLC-848). A non-empty porcelain means
+  // a real change, so no empty commit is made when the ledger equals HEAD
+  // (AISDLC-951).
+  const owned = ['.ai-sdlc/transcript-leaves/', `.ai-sdlc/reviews/${state.taskId}.jsonl`];
+  const pending = await ctx.runner('git', ['status', '--porcelain', '--', ...owned], {
+    cwd: wt,
+    allowFailure: true,
+  });
   if (pending.code === 0 && pending.stdout.trim() !== '') {
-    await ctx.runner('git', ['add', '--', '.ai-sdlc/transcript-leaves/'], {
-      cwd: wt,
-      allowFailure: true,
-    });
+    // One `git add` per path: a pathspec matching nothing aborts the whole
+    // call, so a missing ledger must not keep the leaves from being staged.
+    for (const path of owned) {
+      await ctx.runner('git', ['add', '--', path], { cwd: wt, allowFailure: true });
+    }
     await ctx.runner(
       'git',
-      ['commit', '-m', `chore: commit pending transcript leaves (${state.taskId})`],
+      [
+        'commit',
+        '-m',
+        `chore: commit pending transcript leaves and review ledger (${state.taskId})`,
+      ],
       { cwd: wt, allowFailure: true, timeout: 300_000 },
     );
   }

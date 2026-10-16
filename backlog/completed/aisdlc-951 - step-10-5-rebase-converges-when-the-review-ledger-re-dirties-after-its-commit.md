@@ -1,7 +1,7 @@
 ---
 id: AISDLC-951
 title: 'Step 10.5 rebase converges when the review ledger re-dirties after its commit, instead of looping until the executor fails'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels:
