@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-16T01:28:56.266Z","decisionId":"DEC-0252","chosenOptionId":"rereview","rationale":"Waiving re-review would loosen a trust-chain control; rereview is the sanctioned path and only costs tokens (class a).","by":"ai-sdlc-operator-dispatch"}
