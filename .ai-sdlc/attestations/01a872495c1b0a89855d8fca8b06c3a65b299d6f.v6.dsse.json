@@ -1,0 +1,70 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "81192ac3c31fc7314fdc28f873038389fdca2adb"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "b5d4920016b14b5cadab59372ac928fe634d0dcfef44e730862f13482c525e40",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "b5d4920016b14b5cadab59372ac928fe634d0dcfef44e730862f13482c525e40",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer-codex",
+      "transcriptHash": "4dfef22602439427a7ec6643f4589ba3d5bcf560d4021da17295f07c34e11e34",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "37aefa2b9b93c3ac1bcd44e8fae02128e11d8ea133f36d8eb5098015373f7b59",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "37aefa2b9b93c3ac1bcd44e8fae02128e11d8ea133f36d8eb5098015373f7b59",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "88a1a3a71628d6bca56a978a31d2c763b936ad8ec25a4987409af691713a4edc",
+        "8ce0fa98f39e9a4be839b60f2a7f7b5f8225a641ed3e5d7d3bb5da1e08aab83e"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "e5ee1732ac574f89b0b6b7492114aa1efa118d679f14f1c83d22a95c8c3eab9c",
+        "8ce0fa98f39e9a4be839b60f2a7f7b5f8225a641ed3e5d7d3bb5da1e08aab83e"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "df51787c6de77c591757c158a5df5c89b420fa829a45874707eb9eac3e1391c7",
+        "eebeb7be845bf89e290dc9b09542e6e1c7ed67a23192f32b8de047a4744b3a5b"
+      ]
+    }
+  ],
+  "rootHash": "38f7e01afeb7bf069a18e0f68516236eb0bcd79b8d51cc9f1e63c8836e8cbc52",
+  "rootSignature": "VzVhal9l6es1OrK+JNBgnwasMWyo58gdqSWiBddUWNdW0Tx5dRjhmrdXKu8FvyopupJBPQS1HAh8IfcTgFmMDA==",
+  "nonce": "8678d0abca66c607e65e3c8222749c8411741757c8de1c5bbc8654d322a2cb66",
+  "leafCount": 3,
+  "signedAt": "2026-10-16T17:55:09.822Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": ["pipeline-cli/src/attestation/review-scope.test.ts"],
+    "appliedReviewers": ["code-reviewer-codex", "test-reviewer-codex", "security-reviewer"]
+  }
+}
