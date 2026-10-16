@@ -1,7 +1,7 @@
 ---
 id: AISDLC-931
 title: 'fix: cli-file task accepts a task file written outside the read-only parent tree'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-15'
 labels: [hierarchy, planner, pipeline-cli, velocity]

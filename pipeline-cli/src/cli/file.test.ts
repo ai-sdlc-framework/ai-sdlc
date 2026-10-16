@@ -147,6 +147,42 @@ describe('cli-file', () => {
     expect(sh(remote, 'branch', '--list')).not.toContain('file-aisdlc-900');
   });
 
+  it('AISDLC-931: files a task written outside the repo, parent tree untouched', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scratch-'));
+    const src = join(dir, 'aisdlc-931 - ext.md');
+    writeFileSync(src, '---\nid: AISDLC-931\n---\nbody\n');
+    const r = fileTask(repo, src, { pr: true }, deps);
+    expect(r.prUrl).toBe('https://github.com/o/r/pull/1');
+    expect(sh(remote, 'show', `${r.branch}:backlog/tasks/aisdlc-931 - ext.md`)).toContain('body');
+    expect(sh(repo, 'status', '--porcelain', '--', 'backlog')).toBe('');
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('AISDLC-931: refuses an external source whose basename exists on main, naming the path', () => {
+    commitMain('backlog/completed/aisdlc-931 - ext.md', '---\nid: AISDLC-931\n---\n');
+    const dir = mkdtempSync(join(tmpdir(), 'scratch-'));
+    const src = join(dir, 'aisdlc-931 - ext.md');
+    writeFileSync(src, '---\nid: AISDLC-931\n---\n');
+    expect(() => fileTask(repo, src, { pr: true }, deps)).toThrow(
+      /backlog\/completed\/aisdlc-931 - ext\.md/,
+    );
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('AISDLC-931: refuses a non-.md source', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scratch-'));
+    const src = join(dir, 'aisdlc-931 - ext.txt');
+    writeFileSync(src, 'x');
+    expect(() => fileTask(repo, src, { pr: true }, deps)).toThrow(/\.md/);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('AISDLC-931: still refuses a missing external source', () => {
+    expect(() => fileTask(repo, '/nonexistent-dir/aisdlc-931 - x.md', { pr: false }, deps)).toThrow(
+      /not found/,
+    );
+  });
+
   it('refuses a missing task file', () => {
     expect(() => fileTask(repo, 'backlog/tasks/aisdlc-5 - no.md', { pr: false }, deps)).toThrow(
       /not found/,
@@ -348,8 +384,8 @@ describe('cli-file', () => {
   });
 
   it('refuses task paths outside backlog/tasks and rebase of out-of-scope paths', () => {
-    expect(() => fileTask(repo, '../elsewhere.md', { pr: false }, deps)).toThrow(/inside backlog/);
-    expect(() => fileTask(repo, 'docs/x.md', { pr: false }, deps)).toThrow(/inside backlog/);
+    expect(() => fileTask(repo, '../elsewhere.md', { pr: false }, deps)).toThrow(/not found/);
+    expect(() => fileTask(repo, 'docs/x.txt', { pr: false }, deps)).toThrow(/\.md/);
     sh(repo, 'checkout', '-b', 'tmp-wf');
     mkdirSync(join(repo, '.github/workflows'), { recursive: true });
     writeFileSync(join(repo, '.github/workflows/x.yml'), 'a');
