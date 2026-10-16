@@ -25,7 +25,13 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { DOCS_ONLY_PATTERN, isDocsOnly } from './is-docs-only-changeset.mjs';
+import {
+  DOCS_ONLY_PATTERN,
+  RECORDS_ONLY_PATTERN,
+  classifyChangeset,
+  isDocsOnly,
+  isRecordsOnly,
+} from './is-docs-only-changeset.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -545,5 +551,43 @@ describe('AISDLC-876 decision event files and gate concurrency', () => {
       /cancel-in-progress: \$\{\{ github\.event\.action != 'ready_for_review' \}\}/,
     );
     assert.match(yml, /types: \[opened, synchronize, reopened, ready_for_review\]/);
+  });
+});
+
+describe('AISDLC-867 records-only classifier', () => {
+  it('records-only: backlog, decisions and spec paths', () => {
+    const files = ['backlog/config.yml', '.ai-sdlc/_decisions/x.json', 'spec/notes/a.json'];
+    assert.equal(isRecordsOnly(files), true);
+    assert.equal(classifyChangeset(files), 'records-only');
+  });
+  it('mixed: record file plus code file is code', () => {
+    assert.equal(classifyChangeset(['backlog/config.yml', 'pipeline-cli/src/a.ts']), 'code');
+  });
+  it('mixed: record file plus workflow file is code', () => {
+    assert.equal(classifyChangeset(['backlog/config.yml', '.github/workflows/x.yml']), 'code');
+  });
+  it('trust-chain spec path is not records-only', () => {
+    assert.equal(classifyChangeset(['spec/schemas/agent-role.schema.json']), 'code');
+    assert.equal(classifyChangeset(['spec/schemas/pipeline.schema.json']), 'code');
+  });
+  it('docs-only wins over records-only', () => {
+    assert.equal(classifyChangeset(['backlog/tasks/a.md', 'docs/a.md']), 'docs-only');
+  });
+  it('code and empty input', () => {
+    assert.equal(classifyChangeset(['src/a.ts']), 'code');
+    assert.equal(classifyChangeset([]), 'code');
+    assert.equal(isRecordsOnly([]), false);
+  });
+  it('allowlist is prefix-exact', () => {
+    assert.equal(RECORDS_ONLY_PATTERN.test('backlogs/a'), false);
+    assert.equal(RECORDS_ONLY_PATTERN.test('x/backlog/a'), false);
+    assert.equal(RECORDS_ONLY_PATTERN.test('.ai-sdlc/agent-role.yaml'), false);
+  });
+  it('--class CLI prints the class', () => {
+    const r = spawnSync('node', [join(__dirname, 'is-docs-only-changeset.mjs'), '--class'], {
+      input: 'backlog/config.yml\n',
+      encoding: 'utf-8',
+    });
+    assert.equal(r.stdout.trim(), 'records-only');
   });
 });

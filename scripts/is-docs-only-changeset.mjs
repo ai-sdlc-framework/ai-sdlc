@@ -40,14 +40,20 @@
  *   → exits 0 and prints "true" if all files are docs-only
  *   → exits 0 and prints "false" otherwise (or on empty input)
  *
+ * `--class` prints `code`, `docs-only` or `records-only` instead (AISDLC-867).
+ *
  * Module usage:
  *   import { DOCS_ONLY_PATTERN, isDocsOnly } from './is-docs-only-changeset.mjs';
  *   isDocsOnly(['docs/foo.md', 'spec/rfcs/RFC-0001.md']); // → true
  */
 
 // The single definition lives in the shipped attestation-core directory (AISDLC-878).
-import { DOCS_ONLY_PATTERN } from '../pipeline-cli/attestation-core/docs-only-paths.mjs';
-export { DOCS_ONLY_PATTERN };
+import {
+  DOCS_ONLY_PATTERN,
+  RECORDS_ONLY_PATTERN,
+} from '../pipeline-cli/attestation-core/docs-only-paths.mjs';
+import { isTrustChainPath } from '../pipeline-cli/attestation-core/review-scope-core.mjs';
+export { DOCS_ONLY_PATTERN, RECORDS_ONLY_PATTERN };
 
 /**
  * Returns true iff the file list is non-empty and every file matches the
@@ -61,6 +67,33 @@ export { DOCS_ONLY_PATTERN };
  */
 export function isDocsOnly(files) {
   return files.length > 0 && files.every((f) => DOCS_ONLY_PATTERN.test(f));
+}
+
+/**
+ * Returns true iff the file list is non-empty and every file is on the
+ * records-only allowlist (backlog/**, .ai-sdlc/_decisions/**, spec/**) and is
+ * not a trust-chain path (AISDLC-867).
+ *
+ * @param {string[]} files
+ * @returns {boolean}
+ */
+export function isRecordsOnly(files) {
+  return (
+    files.length > 0 && files.every((f) => RECORDS_ONLY_PATTERN.test(f) && !isTrustChainPath(f))
+  );
+}
+
+/**
+ * Classify a changeset: `docs-only`, `records-only` (records allowlist but not
+ * docs-only) or `code` (anything else, including empty input).
+ *
+ * @param {string[]} files
+ * @returns {'code' | 'docs-only' | 'records-only'}
+ */
+export function classifyChangeset(files) {
+  if (isDocsOnly(files)) return 'docs-only';
+  if (isRecordsOnly(files)) return 'records-only';
+  return 'code';
 }
 
 // CLI entrypoint — only runs when this file is the main module.
@@ -77,6 +110,10 @@ if (isMain) {
       .split('\n')
       .map((f) => f.trim())
       .filter(Boolean);
-    process.stdout.write(isDocsOnly(files) ? 'true\n' : 'false\n');
+    if (process.argv.includes('--class')) {
+      process.stdout.write(`${classifyChangeset(files)}\n`);
+    } else {
+      process.stdout.write(isDocsOnly(files) ? 'true\n' : 'false\n');
+    }
   });
 }

@@ -99,6 +99,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     outputs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
+      records_only: ${{ steps.classify.outputs.records_only }}
       deps: ${{ steps.deps-filter.outputs.deps }}
       tasks: ${{ steps.tasks-filter.outputs.tasks }}
       python: ${{ steps.sdk-filter.outputs.python }}
@@ -121,16 +122,24 @@ jobs:
           if [ -n "$BASE_SHA" ]; then
             if FILES=$(git -c core.quotePath=false diff --name-only "$BASE_SHA" "$HEAD_SHA"); then
               RESULT=$(printf '%s\n' "$FILES" | node scripts/is-docs-only-changeset.mjs)
+              CLASS=$(printf '%s\n' "$FILES" | node scripts/is-docs-only-changeset.mjs --class)
             else
               echo "::warning::git diff failed; treating changeset as not docs-only"
               RESULT=false
+              CLASS=code
             fi
           else
             # Non-PR event (no base SHA): classify every tracked file.
             RESULT=$(git -c core.quotePath=false ls-files | node scripts/is-docs-only-changeset.mjs)
+            CLASS=code
           fi
           if [ "$RESULT" != "true" ]; then RESULT=false; fi
+          # AISDLC-867: records-only fast lane (backlog/**, .ai-sdlc/_decisions/**,
+          # spec/** minus trust-chain paths). Fail safe to false.
+          RECORDS=false
+          if [ "$CLASS" = "records-only" ]; then RECORDS=true; fi
           echo "docs_only=$RESULT" >> "$GITHUB_OUTPUT"
+          echo "records_only=$RECORDS" >> "$GITHUB_OUTPUT"
       # Second filter (default `some` quantifier): true when the PR touches
       # dependency manifests OR GitHub Actions workflows/composite actions.
       # Drives the dependency-review-gate job — covers npm + github-actions
@@ -205,7 +214,7 @@ jobs:
   build-test:
     name: Build & Test (Node ${{ matrix.node-version }})
     needs: detect
-    if: needs.detect.outputs.docs_only != 'true'
+    if: needs.detect.outputs.docs_only != 'true' && needs.detect.outputs.records_only != 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -258,6 +267,7 @@ jobs:
     # AISDLC-400: merge_group branch removed (no queue); only skip forks.
     if: |
       needs.detect.outputs.docs_only != 'true' &&
+      needs.detect.outputs.records_only != 'true' &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
@@ -432,6 +442,7 @@ jobs:
     #     instead of a DSSE envelope (operator decision 2026-05-30, issue #791).
     if: >-
       needs.detect.outputs.docs_only != 'true' &&
+      needs.detect.outputs.records_only != 'true' &&
       github.event.pull_request.user.login != 'dependabot[bot]' &&
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
@@ -950,6 +961,7 @@ jobs:
     needs: detect
     if: >-
       needs.detect.outputs.docs_only != 'true' &&
+      needs.detect.outputs.records_only != 'true' &&
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     steps:
