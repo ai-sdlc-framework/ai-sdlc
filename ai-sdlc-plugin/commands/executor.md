@@ -121,7 +121,7 @@ alone is not a refusal: the JSON carries `verdictMissing`, so run the verdict st
 Run `/ai-sdlc execute <task-id>` with the task id and **nothing else**: invoke the plugin's `execute`
 command with the `Skill` tool, passing `$TASK_ID` as the only argument. If it reports a worktree with
 no git hooks directory, run `pnpm install --frozen-lockfile && pnpm run prepare` there (scripts stay
-enabled); if still missing, report `failed` and stop: never commit from such a worktree. The pipeline refreshes your claim's heartbeat on every step itself; do not heartbeat by hand.
+enabled); if still missing, report `failed` and stop: never commit from such a worktree. The pipeline refreshes your claim's heartbeat on every step itself; do not heartbeat by hand. A rebased commit on a resume is pushed through the pipeline's push step from the task worktree, never by a hand-typed push from another directory (a reset shell cwd makes the lease-push guard refuse with `worktree-location`).
 
 Note the outcome, the pull request number, and every follow-up and decision id. File follow-ups as
 sub-ids of this task: `cli-dispatch.mjs next-subid "$TASK_ID" --board-dir "$BOARD_DIR"` prints the first

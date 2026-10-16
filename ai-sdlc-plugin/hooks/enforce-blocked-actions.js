@@ -288,7 +288,15 @@ function forcePushRefusal(why, failing) {
           ? ` Unmet conditions (AISDLC-798):\n${renderLeaseFailing(failing)}\n`
           : '')
       : '';
+  const loc = (failing || []).find((f) => f.condition === 'worktree-location');
+  const cwdCause = loc
+    ? `CAUSE (AISDLC-905): the tool's cwd is outside the task worktree: the hook saw ${loc.found}, ` +
+      `expected ${loc.expected}. The shell cwd can silently reset to the main checkout between calls. ` +
+      `Fix: run it as a lone command from that worktree (cd <worktree> in a call of its own, then the push by itself, ` +
+      `or git -C <main>/.worktrees/<task-id> push ...). `
+    : '';
   return (
+    cwdCause +
     `force-push is refused here: ${key} = leaseOnOwnBranch (the default) allows a lease push only from a ` +
     `dispatched task worktree under <repo>/.worktrees/ whose .active-task, directory name and ai-sdlc/<task-id>-* ` +
     `branch agree, with a trusted policy that can be read (${why}). Push from the task worktree with ` +

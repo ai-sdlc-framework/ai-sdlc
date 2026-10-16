@@ -1481,6 +1481,15 @@ describe('AISDLC-861: lease push resolves the worktree from -C or the active tas
     assert.match(out, /worktree-location/);
   });
 
+  it('names the cwd it saw, the worktree expected and the fix when cwd is the parent checkout (AISDLC-905)', () => {
+    const out = fromRoot(L(), leaseRepo);
+    assert.ok(denied(out), out);
+    assert.match(out, /tool's cwd is outside the task worktree/);
+    assert.match(out, /expected a direct child of/);
+    assert.ok(out.includes(leaseRepo.root), 'names the cwd it saw');
+    assert.match(out, /run it as a lone command from that worktree/);
+  });
+
   it('does not resolve a worktree from AI_SDLC_ACTIVE_TASK_ID alone (executed cwd would differ)', () => {
     const out = fromRoot(L(), leaseRepo);
     assert.ok(denied(out), out);

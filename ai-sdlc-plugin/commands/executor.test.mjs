@@ -25,6 +25,14 @@ describe('executor command', () => {
     assert.match(match[1], /^description: /m);
   });
 
+  it('tells a resume to push through the pipeline push step from the task worktree (AISDLC-905)', () => {
+    assert.ok(
+      body.includes(
+        "A rebased commit on a resume is pushed through the pipeline's push step from the task worktree, never by a hand-typed push from another directory",
+      ),
+    );
+  });
+
   it('stays under 165 lines by leaving the deterministic start-up to executor-start', () => {
     assert.ok(raw.split('\n').length < 165, `executor.md has ${raw.split('\n').length} lines`);
   });
