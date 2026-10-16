@@ -341,6 +341,18 @@ gates:
     owner: security
     property: agent cannot disable attestation verification by editing the verifier
     baseline: true
+  - id: role-path:.ai-sdlc/reviews/**
+    surface: role-path
+    origin: AISDLC-725
+    owner: security
+    property: agent under review cannot rewrite the review ledger that decides delta reviews
+    decision: DEC-0219
+  - id: role-path:.ai-sdlc/review-state/**
+    surface: role-path
+    origin: AISDLC-725
+    owner: security
+    property: agent under review cannot rewrite the local review state that decides delta reviews
+    decision: DEC-0219
   - id: workflow:codeql.yml
     surface: pr-workflow
     origin: AISDLC-840
