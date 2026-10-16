@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-15T18:40:41.966Z","decisionId":"DEC-0243","chosenOptionId":"fix-manifest","rationale":"Renumbered from DEC-0233 (id allocation collision; DEC-0233 is the AISDLC-897 record). Same shape as DEC-0182 and DEC-0240: dispatch rewrote the manifest branch to the worktree branch.","by":"planner"}
