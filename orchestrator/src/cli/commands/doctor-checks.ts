@@ -2284,10 +2284,15 @@ export function checkTrustedReviewers(ctx: DoctorRunContext): DoctorCheckResult[
   const reviewers = ((parsed.doc as { reviewers?: Array<{ pubkey: string }> } | null)?.reviewers ??
     []) as Array<{ pubkey: string }>;
   if (reviewers.length === 0) {
+    // Fresh `ai-sdlc init` repo: no attestations signed yet, so an empty keyring
+    // is only a warning; it fails once attestations exist that CI would reject.
+    const attestationsDir = join(projectDir, '.ai-sdlc', 'attestations');
+    const hasAttestations = adapters.listDir(attestationsDir).some((n) => n.endsWith('.json'));
+    const severity = hasAttestations ? 'fail' : 'warn';
     return [
       {
         id,
-        severity: 'fail',
+        severity,
         title:
           '.ai-sdlc/trusted-reviewers.yaml lists no public keys — CI rejects every attestation',
         remediation: 'Run `/ai-sdlc init-signing-key` and open a PR appending the printed entry',

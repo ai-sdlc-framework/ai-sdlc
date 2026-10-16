@@ -5,7 +5,15 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { generateKeyPairSync } from 'node:crypto';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  existsSync,
+  readFileSync,
+  readdirSync,
+} from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -45,7 +53,13 @@ function makeAdapters(overrides: Partial<DoctorCheckAdapters> = {}): DoctorCheck
       mkdirSync(dirname(p), { recursive: true });
       writeFileSync(p, content, 'utf-8');
     },
-    listDir: () => [],
+    listDir: (p) => {
+      try {
+        return readdirSync(p);
+      } catch {
+        return [];
+      }
+    },
     homeDir: () => join(tmpDir, '__home__'),
     env: {},
     runCommand: () => ({ stdout: '', exitCode: 1 }),
@@ -174,8 +188,15 @@ describe('check 6: trusted reviewers + signing key', () => {
     expect(r[0].severity).toBe('fail');
     expect(r[0].remediation).toMatch(/trusted-reviewers.schema.json/);
   });
-  it('fails an empty keyring', () => {
+  it('warns (not fails) on an empty keyring in a fresh repo with no attestations', () => {
     put('.ai-sdlc/trusted-reviewers.yaml', 'reviewers: []\n');
+    const r = checkTrustedReviewers(ctxOf());
+    expect(r[0].severity).toBe('warn');
+    expect(r[0].title).toMatch(/no public keys/);
+  });
+  it('fails an empty keyring once attestations exist', () => {
+    put('.ai-sdlc/trusted-reviewers.yaml', 'reviewers: []\n');
+    put('.ai-sdlc/attestations/abc.v6.dsse.json', '{}');
     const r = checkTrustedReviewers(ctxOf());
     expect(r[0].severity).toBe('fail');
     expect(r[0].title).toMatch(/no public keys/);
