@@ -55,6 +55,7 @@ import { defaultRunner, type Runner } from '../runtime/exec.js';
 import {
   defaultDeps as defaultFileDeps,
   fileTask,
+  taskIdOf,
   validateTaskFile,
   type FileDeps,
   type ValidatedTask,
@@ -418,6 +419,41 @@ export async function syncParentUntrackedFiles(opts: SyncParentOptions): Promise
   // AISDLC-860: file every new task through the `cli-file task` path (ASCII, duplicate id
   // on origin/main, backlog-drift, DoR). Validate ALL first so a refusal creates no branch or PR.
   const fileDeps = opts.fileDeps ?? defaultFileDeps;
+  // AISDLC-950: a leftover source copy whose filing branch already exists is skipped, never re-filed.
+  const toFile: string[] = [];
+  const onExistingBranch: string[] = [];
+  for (const file of newFiles) {
+    let branch: string | null = null;
+    try {
+      branch = `ai-sdlc/file-${taskIdOf(join(workDir, file)).toLowerCase()}`;
+    } catch {
+      // no derivable id: validation below reports it
+    }
+    if (branch) {
+      const found = await runner(
+        'git',
+        ['branch', '--all', '--list', branch, `remotes/origin/${branch}`],
+        { cwd: workDir, allowFailure: true },
+      );
+      if (found.code === 0 && found.stdout.trim() !== '') {
+        console.log(
+          `[step-0.5] ${safeForLog(basename(file))}: filing branch ${branch} already exists — skipping (the branch holds this file)`,
+        );
+        onExistingBranch.push(file);
+        continue;
+      }
+    }
+    toFile.push(file);
+  }
+  if (toFile.length === 0) {
+    return {
+      ok: true,
+      syncedFiles: [],
+      skippedReason: `All untracked backlog task file(s) skipped — filing branch already exists for ${onExistingBranch.length} file(s)`,
+      ...(pathMismatchedFiles.length > 0 ? { pathMismatchedFiles } : {}),
+    };
+  }
+  newFiles.splice(0, newFiles.length, ...toFile);
   const refused: Array<{ file: string; reason: string }> = [];
   const validated = new Map<string, ValidatedTask>();
   for (const file of newFiles) {

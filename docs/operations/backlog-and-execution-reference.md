@@ -127,6 +127,10 @@ permittedExternalPaths:
 
 The PreToolUse hook reads `<worktree>/.active-task` (per-worktree sentinel, AISDLC-81) to resolve which allowlist applies. Without the file, cross-repo writes are denied. The developer subagent writes; `/ai-sdlc execute` Step 12 creates the parallel sibling PRs. Env fallback: `AI_SDLC_ACTIVE_TASK_ID`.
 
+### Filing cleanup (AISDLC-950)
+
+After `cli-file task` / `cli-file decision` pushes the filing branch, it removes the untracked source copy from the parent when it is byte-identical to the committed copy (for decisions, the per-event files). A tracked or differing file is kept and a `[cli-file] kept ...` line says why. Step 0.5 (`00-5-sync-parent.ts`) skips an untracked `backlog/tasks/` file whose `ai-sdlc/file-<id>` branch already exists (local or `origin`) and names the branch, instead of aborting on `git worktree add -b`.
+
 ### Parallel runs
 
 Each `/ai-sdlc execute` runs in its own Claude Code session with its own per-worktree sentinel. Fan out via `/loop /ai-sdlc execute <task-id>` or multiple terminals — no shared mutable state to race on. Pre-push hook serializes only at push (Step 11); Steps 5-10 run fully in parallel across runs.

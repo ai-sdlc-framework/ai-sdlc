@@ -970,6 +970,21 @@ describe('AISDLC-860 step 0.5 files through the cli-file path', () => {
     expect(execCalls.some(([, a]) => a.some((x) => x.startsWith('chore/sync-tasks')))).toBe(false);
   });
 
+  it('AISDLC-950: skips a file whose filing branch already exists and names the branch', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { fileDeps, execCalls } = setup([file], '');
+    const fake = new FakeRunner()
+      .on(/^git ls-files/, ok(file + '\n'))
+      .on(/^git ls-tree origin\/main/, ok(''))
+      .on(/^git branch --all/, ok('  ai-sdlc/file-aisdlc-900\n'));
+    const r = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner(), fileDeps });
+    expect(r.ok).toBe(true);
+    expect(r.syncedFiles).toEqual([]);
+    expect(created(execCalls)).toBe(false);
+    expect(log.mock.calls.some((c) => String(c[0]).includes('ai-sdlc/file-aisdlc-900'))).toBe(true);
+    log.mockRestore();
+  });
+
   it('refuses when DoR or drift fails', async () => {
     const { fake, fileDeps } = setup([file], '');
     const r = await syncParentUntrackedFiles({
