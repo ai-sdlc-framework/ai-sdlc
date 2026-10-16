@@ -1,6 +1,6 @@
 ---
 name: resolve-conflicts
-description: /ai-sdlc resolve-conflicts <pr-number> — manually invoke the ci-conflict-resolver agent against a single PR. Phase 1 surface (AISDLC-460) for the same agent the ci-failure-watcher dispatches automatically. Use when CI failed on a stale base and you'd like the rebase + re-arm to happen now rather than waiting for the next watcher tick.
+description: /ai-sdlc resolve-conflicts <pr-number> — manually invoke the ci-conflict-resolver agent against a single PR. Manual surface (AISDLC-460) for the same agent the dispatch state machine reaches. Use when CI failed on a stale base and you'd like the rebase + re-arm to happen now rather than waiting for the next dispatch tick.
 argument-hint: <pr-number>
 allowed-tools:
   - Read
@@ -10,8 +10,8 @@ model: sonnet
 ---
 
 Manually invoke the `ci-conflict-resolver` subagent for PR
-#$ARGUMENTS. This is the AISDLC-460 manual escape hatch — the watcher
-will pick it up on the next tick anyway, but the operator sometimes
+#$ARGUMENTS. This is the AISDLC-460 manual escape hatch — the dispatch
+state machine will pick it up on a later tick anyway, but the operator sometimes
 wants to drive the rebase + re-arm immediately (e.g. an auto-merge-armed
 PR is stuck and you want it cleared before walking away).
 
@@ -79,19 +79,18 @@ fi
 
 ## Step 2 — Pre-classify the failure shape
 
-Use the same classifier the watcher uses, so the agent gets the same
-seed hint:
+Seed the agent with a coarse hint from the PR facts already fetched:
 
 ```bash
-node -e "
-import('./pipeline-cli/dist/runtime/ci-failure-watcher.js').then((m) => {
-  const raw = JSON.parse(require('fs').readFileSync('/tmp/resolve-conflicts-pr-${PR}.json', 'utf8'));
-  const snap = m.normalizePrSnapshot(raw);
-  process.stdout.write(m.classifyPrFailureShape(snap));
-});
-" > /tmp/resolve-conflicts-shape-${PR}.txt
-
-CLASSIFIED_SHAPE=$(cat /tmp/resolve-conflicts-shape-${PR}.txt)
+MERGE_STATE=$(jq -r '.mergeStateStatus' /tmp/resolve-conflicts-pr-${PR}.json)
+CLASSIFIED_SHAPE=skip
+case "$MERGE_STATE" in
+  DIRTY) CLASSIFIED_SHAPE=conflict-detected ;;
+  BEHIND) CLASSIFIED_SHAPE=behind-only ;;
+esac
+if jq -e '.statusCheckRollup[]? | select(.conclusion == "FAILURE")' /tmp/resolve-conflicts-pr-${PR}.json >/dev/null; then
+  [ "$CLASSIFIED_SHAPE" = "skip" ] && CLASSIFIED_SHAPE=unclassified
+fi
 echo "[ai-sdlc-progress] classify: $CLASSIFIED_SHAPE"
 
 if [ "$CLASSIFIED_SHAPE" = "skip" ]; then
@@ -113,7 +112,7 @@ $TITLE
 ## Head SHA at snapshot time
 $HEAD_SHA
 
-## Classified failure shape (from the watcher's heuristic)
+## Classified failure shape (a coarse hint)
 $CLASSIFIED_SHAPE
 
 ## Your job
@@ -147,33 +146,12 @@ Read the JSON returned by the subagent. Branch on `action`:
 - **`rebased`** — print summary (commitSha, pushedBranch, verifications).
   Stop.
 - **`noop-already-up-to-date`** — print "no rebase needed". Stop.
-- **`escalated`** — write the cool-down record + post the deduped
-  comment, mirroring what the watcher does. The operator can then
-  inspect the worktree (left clean) and decide next steps.
-- **`failed`** — same cool-down + comment behavior as `escalated`,
-  but the worktree may or may not be clean depending on where the
-  failure surfaced.
-
-For escalation/failed, route the cool-down + comment write through
-`cli-orchestrator ci-failure-watch` reasoning:
+- **`escalated`** / **`failed`** — post one PR comment with the
+  escalation reason so the operator can inspect the worktree (left clean)
+  and decide next steps:
 
 ```bash
-NODE_PATH=./pipeline-cli/node_modules node -e "
-import('./pipeline-cli/dist/runtime/ci-failure-watcher.js').then(async (m) => {
-  const out = JSON.parse(require('fs').readFileSync('/tmp/agent-return-${PR}.json', 'utf8'));
-  m.writeCooldown(process.cwd(), {
-    prNumber: ${PR},
-    classification: out.reclassifiedShape ?? '$CLASSIFIED_SHAPE',
-    escalatedAt: Date.now(),
-    reason: out.escalationReason ?? out.action,
-  });
-  const body = m.composeEscalationComment(out, '$CLASSIFIED_SHAPE');
-  await m.postDeduplicatedComment(m.defaultRunner ?? (async (c, a) => {
-    const { execFile } = await import('node:child_process');
-    return new Promise((resolve) => execFile(c, a, (err, stdout, stderr) => resolve({ stdout: stdout || '', stderr: stderr || '', code: err ? (err.code ?? 1) : 0 })));
-  }), undefined, ${PR}, body);
-});
-"
+gh pr comment "$PR" --body "ai-sdlc/ci-conflict-resolver: <action> - <escalationReason>"
 ```
 
 ## Step 5 — Report
@@ -189,14 +167,13 @@ Print a tight summary:
 
 ## When the operator should invoke this manually
 
-- **A specific auto-merge-armed PR is stuck and you want it cleared
-  NOW** rather than waiting up to 60s for the watcher's next tick.
-- **The watcher has the PR in cool-down** but you've fixed whatever was
-  blocking it (e.g. resolved a semantic conflict manually) and want to
-  retry without waiting 24h. The cool-down doesn't block this command
-  — manual invocation always runs.
+- **A specific armed PR is stuck and you want it cleared
+  NOW** rather than waiting for the next dispatch tick.
+- **The same-head loop guard routed the PR to the planner** and you've
+  fixed whatever was blocking it (e.g. resolved a semantic conflict
+  manually) and want to retry. Manual invocation always runs.
 - **You're testing the agent's flow** end-to-end in a controlled
-  setting before relying on the watcher daemon.
+  setting.
 
 ## What this command DOES NOT do (intentional)
 

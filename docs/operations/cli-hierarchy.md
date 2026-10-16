@@ -756,7 +756,6 @@ the action is `none`, except stale claims and takeover after executor death post
 |---|---|---|
 | `merged` | `mark-landed` | record `landed`; done verdict, parent sync and dependants stay with the tick playbook |
 | `manifest-branch-mismatch` | `rewrite-manifest` | left to a session (`write-manifest` with the PR head ref) |
-| `stale-claim` | `reap-resume` | `cli-dispatch reap` |
 | `behind-or-dirty` | `land-prep` | until AISDLC-881: `reenter` (rebases a BEHIND PR; a DIRTY one goes to an executor) ([hand-review-path.md](hand-review-path.md)) |
 | `attestation-content-hash-mismatch` | `push-only-resign` | `reenter` (push-only re-sign manifest, AISDLC-821) |
 | `real-failure` | `reenter` | `cli-dispatch reenter <pr>` (manifest with the failing line and head SHA) |
@@ -764,6 +763,8 @@ the action is `none`, except stale claims and takeover after executor death post
 | `ready-to-flip` | `flip-ready-takeover` | `gh pr ready <n>`, only after executor death post-sign |
 | `armed-clean`, `pending` | `none` | nothing |
 | `no-match` | `route-to-planner` | the only state routed to the planner |
+
+**PR follow-up loop guard (AISDLC-883).** The reconciler (`pipeline-cli/src/hierarchy/reconcile.ts`) is the only PR poller, and a stalled claim has one owner, the stall check (`stall.ts`). Unlike failures must not add up, so a PR follow-up is bounded by what the action did, not by a retry count. Before any machine action on a PR, the reconciler reads `landing/<pr>.json` history; if the same `(action, headSha)` was already taken and the PR returned to it on the same head, the action is not run again and the record becomes `route-to-planner` with a note such as `rebase@<sha> x2`. A push that moves the head resets the guard. The limit is `loopGuard.maxSameHeadActions` in `.ai-sdlc/pr-lifecycle.yaml`. A task with no PR keeps the retry cap in `requeue.ts`.
 
 **Docs action set** (machine-owned from birth):
 

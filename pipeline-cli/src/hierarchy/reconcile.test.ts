@@ -157,7 +157,6 @@ describe('action table (AC2)', () => {
   const taskFacts: Record<PrState, ReconcilePr> = {
     merged: taskPr({ merged: true }),
     'manifest-branch-mismatch': taskPr({ manifestBranch: 'other' }),
-    'stale-claim': taskPr({ claimHeartbeatAgeMs: 99 * 60_000 }),
     'behind-or-dirty': taskPr({ mergeStateStatus: 'BEHIND' }),
     'attestation-content-hash-mismatch': taskPr({
       checks: [
@@ -324,7 +323,6 @@ describe('helpers', () => {
     };
     const run = (action: string, over: Partial<ActionContext> = {}) =>
       actionCommands({ ...base, action, ...over }, '/bin');
-    expect(run('reap-resume')![0]!.args).toContain('reap');
     expect(run('flip-ready-takeover')![0]).toEqual({ file: 'gh', args: ['pr', 'ready', '3'] });
     expect(run('rebase-in-place')![0]!.args).toContain('rebase');
     expect(run('arm')![0]!.args).toContain('--arm');
@@ -712,5 +710,55 @@ describe('main health (AISDLC-929)', () => {
       mainHealth: { status: 'red', sha: 'abcdef123456' },
     });
     expect(r.main).toBe('main: RED at abcdef12');
+  });
+});
+
+describe('same-head loop guard (AISDLC-883)', () => {
+  const dirty = (sha: string) => taskPr({ mergeStateStatus: 'DIRTY', headSha: sha });
+  const quiet = (sha: string) => taskPr({ mergeStateStatus: 'BLOCKED', headSha: sha, checks: [] });
+
+  it('routes a repeat of the same action on the same head to the planner, and resets on a new head', () => {
+    const execute = vi.fn((_ctx: ActionContext) => ({ ran: true }));
+    const rebases = () => execute.mock.calls.filter(([c]) => c.action === 'land-prep').length;
+    const pass = (f: ReconcilePr) => reconcile([f], { boardDir: board, execute, now: fixedNow });
+
+    pass(dirty('H'));
+    expect(rebases()).toBe(1);
+    // The same facts again are the idempotent no-op, not a repeat.
+    pass(dirty('H'));
+    expect(rebases()).toBe(1);
+
+    pass(quiet('H'));
+    const guarded = pass(dirty('H'));
+    expect(guarded.records[0]!.action).toBe('route-to-planner');
+    expect(guarded.records[0]!.note).toBe('rebase@H x2');
+    expect(guarded.acted[0]!.note).toBe('rebase@H x2');
+    expect(rebases()).toBe(1);
+
+    // Stays guarded, and stable, while the head does not move.
+    pass(dirty('H'));
+    expect(
+      readLanding(board, 10)!.history.filter((h) => h.action === 'route-to-planner'),
+    ).toHaveLength(1);
+
+    // A push to a new head allows one rebase again.
+    const next = pass(dirty('H2'));
+    expect(next.records[0]!.action).toBe('land-prep');
+    expect(rebases()).toBe(2);
+  });
+
+  it('a larger maxSameHeadActions from config allows more same-head actions before parking', () => {
+    const execute = vi.fn((_ctx: ActionContext) => ({ ran: true }));
+    const rebases = () => execute.mock.calls.filter(([c]) => c.action === 'land-prep').length;
+    const pass = (f: ReconcilePr) =>
+      reconcile([f], { boardDir: board, execute, now: fixedNow, maxSameHeadActions: 2 });
+    pass(dirty('H'));
+    pass(quiet('H'));
+    expect(pass(dirty('H')).records[0]!.action).toBe('land-prep');
+    pass(quiet('H'));
+    const parked = pass(dirty('H'));
+    expect(parked.records[0]!.action).toBe('route-to-planner');
+    expect(parked.records[0]!.note).toBe('rebase@H x3');
+    expect(rebases()).toBe(2);
   });
 });

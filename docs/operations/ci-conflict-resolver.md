@@ -1,5 +1,7 @@
 # CI Conflict Resolver Runbook (AISDLC-460)
 
+> **Watcher removed (AISDLC-883).** The 60-second poller and its `cli-orchestrator ci-failure-watch` command no longer exist: the dispatch reconciler is the only PR poller (see [parallel-dispatch.md](parallel-dispatch.md#pr-follow-up-loop-guard-aisdlc-883)). The sections below describe the retired watcher; the `ci-conflict-resolver` agent is reached through `/ai-sdlc resolve-conflicts` and the reconciler's actions.
+
 Phase 1 polling watcher + `ci-conflict-resolver` subagent. Together they
 auto-rebase auto-merge-armed PRs whose CI failed because `main` moved
 ahead, then re-arm auto-merge. The operator no longer has to babysit
@@ -7,7 +9,7 @@ the BLOCKED-because-stale failure mode.
 
 ## What the system does
 
-1. **`pipeline-cli/src/runtime/ci-failure-watcher.ts`** polls
+1. **The CI failure watcher (removed in AISDLC-883)** polled
    `gh pr list --state open --json number,...,statusCheckRollup` every
    60 seconds (configurable). For each open PR the watcher:
    - Classifies the failure shape (`conflict-detected`, `behind-only`,
@@ -250,7 +252,7 @@ Safe — the next watcher tick will rebuild any still-relevant records.
 
 - Task spec: `backlog/completed/aisdlc-460 - feat-ci-triggered-pr-conflict-resolver-agent.md`
 - Agent definition: `ai-sdlc-plugin/agents/ci-conflict-resolver.md`
-- Watcher module: `pipeline-cli/src/runtime/ci-failure-watcher.ts`
+- Watcher module: removed in AISDLC-883
 - Slash command: `ai-sdlc-plugin/commands/resolve-conflicts.md`
 - CLI subcommand: `cli-orchestrator ci-failure-watch` (registered in
   `pipeline-cli/src/cli/orchestrator.ts`)

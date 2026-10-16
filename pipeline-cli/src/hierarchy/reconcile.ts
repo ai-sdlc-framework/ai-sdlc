@@ -33,7 +33,6 @@ import type { CommandRunner } from './types.js';
 export const TASK_ACTIONS: Record<PrState, string> = {
   merged: 'mark-landed',
   'manifest-branch-mismatch': 'rewrite-manifest',
-  'stale-claim': 'reap-resume',
   // `land-prep` (AISDLC-881) is not built yet: `reenter` runs its rebase for a BEHIND PR.
   'behind-or-dirty': 'land-prep',
   'attestation-content-hash-mismatch': 'push-only-resign',
@@ -50,7 +49,6 @@ export const TASK_ACTIONS: Record<PrState, string> = {
 export const DOCS_ACTIONS: Record<PrState, string> = {
   merged: 'mark-landed',
   'manifest-branch-mismatch': 'none',
-  'stale-claim': 'none',
   'behind-or-dirty': 'rebase-in-place',
   'attestation-content-hash-mismatch': 'none',
   'rate-limited': 'wait-and-rerun',
@@ -99,6 +97,8 @@ export interface LandingRecord {
   failingLine?: string;
   /** The planner ruling text that holds this PR (action `held`). */
   ruling?: string;
+  /** Set when the same-head loop guard replaced the action with `route-to-planner`. */
+  note?: string;
   /** Set when the last run of `action` failed; the next pass retries without a new history entry. */
   actionFailed?: boolean;
   /** `rate-limited` only: when the installation limit resets and the rerun may fire. */
@@ -136,6 +136,8 @@ export interface Decision {
   failingLine?: string;
   /** Ruling text, when the action is `held`. */
   ruling?: string;
+  /** Why the action was replaced (same-head loop guard). */
+  note?: string;
 }
 
 /** A planner ruling on the PR's task, with whether its `until` task has merged (AISDLC-903). */
@@ -148,7 +150,12 @@ export interface RulingFacts {
 const HELD_ACTIONS = new Set(['reenter', 'route-to-planner']);
 
 /** Classify one PR and pick its action from the set that owns it. Pure. */
-export function decide(f: ReconcilePr, record?: LandingRecord, ruled?: RulingFacts): Decision {
+export function decide(
+  f: ReconcilePr,
+  record?: LandingRecord,
+  ruled?: RulingFacts,
+  maxSameHeadActions = 1,
+): Decision {
   const kind = detectKind({
     ...(f.title === undefined ? {} : { title: f.title }),
     ...(f.headBranch === undefined ? {} : { headBranch: f.headBranch }),
@@ -172,7 +179,7 @@ export function decide(f: ReconcilePr, record?: LandingRecord, ruled?: RulingFac
         action = 'route-to-planner';
       }
     }
-    return { ...base, action };
+    return guardSameHead({ ...base, action }, f, record, maxSameHeadActions);
   }
   // A queued manifest with the wrong branch is repaired at once; an inflight one is reported.
   if (c.state === 'manifest-branch-mismatch' && f.manifestState !== undefined) {
@@ -182,13 +189,50 @@ export function decide(f: ReconcilePr, record?: LandingRecord, ruled?: RulingFac
   // claim, or a dead executor after signing, hands it to the machine.
   const delivered = f.merged === true || f.draft === false || record?.delivered !== undefined;
   const takeover = f.executorDead === true && c.state === 'ready-to-flip';
-  if (!delivered && !takeover && c.state !== 'stale-claim') return { ...base, action: 'none' };
+  if (!delivered && !takeover) return { ...base, action: 'none' };
   const action = TASK_ACTIONS[c.state];
   if (ruled && c.state !== 'merged') {
     if (ruled.untilMerged) return { ...base, action: 'ready-to-requeue' };
     if (HELD_ACTIONS.has(action)) return { ...base, action: 'held', ruling: ruled.ruling.text };
   }
-  return { ...base, action };
+  return guardSameHead({ ...base, action }, f, record, maxSameHeadActions);
+}
+
+/** Actions that are not machine work on the PR, so the same-head guard never counts them. */
+const GUARD_EXEMPT_ACTIONS = new Set([
+  'none',
+  'mark-landed',
+  'route-to-planner',
+  'report-only',
+  'held',
+  'ready-to-requeue',
+  'wait-and-rerun',
+]);
+
+/** Names of actions in the guard note: the PR-facing verb, not the table's internal one. */
+const GUARD_LABELS: Record<string, string> = { 'land-prep': 'rebase' };
+
+/**
+ * Same-head loop guard (AISDLC-883). An action that was already taken on this head
+ * and did not change it is not taken again: the PR goes to the planner with the
+ * `(action, head)` pair and the count as the note. A new head SHA resets the guard.
+ * Only a return to the action counts (the PR left it and came back on the same head);
+ * the same facts seen twice in a row are the idempotent no-op above, not a repeat.
+ */
+function guardSameHead(
+  d: Decision,
+  f: ReconcilePr,
+  record: LandingRecord | undefined,
+  maxSameHeadActions: number,
+): Decision {
+  if (!record || !f.headSha || GUARD_EXEMPT_ACTIONS.has(d.action)) return d;
+  if (record.action === d.action) return d;
+  const prior = record.history.filter(
+    (h) => h.action === d.action && h.headSha === f.headSha,
+  ).length;
+  if (prior < maxSameHeadActions) return d;
+  const label = GUARD_LABELS[d.action] ?? d.action;
+  return { ...d, action: 'route-to-planner', note: `${label}@${f.headSha} x${prior + 1}` };
 }
 
 /** What an action did. */
@@ -230,8 +274,6 @@ export function actionCommands(
       return [reenter()];
     case 'rewrite-manifest':
       return [dispatch('write-manifest', '--task-id', ctx.taskId, '--from-pr', String(ctx.pr))];
-    case 'reap-resume':
-      return [dispatch('reap')];
     case 'flip-ready-takeover':
       return [{ file: 'gh', args: ['pr', 'ready', String(ctx.pr)] }];
     case 'rebase-in-place':
@@ -472,6 +514,8 @@ export interface ReconcileOpts {
   now?: () => Date;
   /** AISDLC-929: main's health this pass, when the caller read it. */
   mainHealth?: MainHealth;
+  /** `loopGuard.maxSameHeadActions` from `.ai-sdlc/pr-lifecycle.yaml`; default 1. */
+  maxSameHeadActions?: number;
 }
 
 /** Reconcile a set of PR facts: update the records and run the actions. Idempotent. */
@@ -487,7 +531,7 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
   for (const f of facts) {
     const existing = readLanding(opts.boardDir, f.prNumber);
     const ruled = rulingFacts(opts.boardDir, f, facts);
-    const d = decide(f, existing, ruled);
+    const d = decide(f, existing, ruled, opts.maxSameHeadActions);
     // The hold is lifted: drop the ruling so it is not carried past the task it waited on.
     if (d.action === 'ready-to-requeue') {
       try {
@@ -608,6 +652,7 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
           }
         : {}),
       ...(d.ruling === undefined ? {} : { ruling: d.ruling }),
+      ...(d.note === undefined ? {} : { note: d.note }),
       ...(deliveredAt === undefined ? {} : { delivered: deliveredAt }),
       ...(landedAt === undefined ? {} : { landed: landedAt }),
       history: [...(existing?.history ?? []), entry],
@@ -637,7 +682,7 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
         action: d.action,
         ran: result.ran,
         ...(d.ruling === undefined ? {} : { note: `held: ${d.ruling}` }),
-        ...(result.note ? { note: result.note } : {}),
+        ...(result.note || d.note ? { note: d.note ?? result.note } : {}),
       });
     }
   }

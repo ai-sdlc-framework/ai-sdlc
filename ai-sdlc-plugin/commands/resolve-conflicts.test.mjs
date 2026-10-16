@@ -3,7 +3,7 @@
  *
  * The command body spawns the ci-conflict-resolver subagent, parses the
  * structured return JSON, and on escalation writes a 24h cool-down +
- * posts a deduplicated PR comment via the ci-failure-watcher runtime
+ * posts a deduplicated PR comment as a PR comment
  * module.
  *
  * Run with: node --test ai-sdlc-plugin/commands/resolve-conflicts.test.mjs
@@ -92,11 +92,9 @@ describe('/ai-sdlc resolve-conflicts body', () => {
     assert.match(body, /ERROR: pass a PR number/i);
   });
 
-  it('routes cool-down + deduped comment through ci-failure-watcher runtime', () => {
-    assert.match(body, /ci-failure-watcher/);
-    assert.match(body, /writeCooldown/);
-    assert.match(body, /composeEscalationComment/);
-    assert.match(body, /postDeduplicatedComment/);
+  it('posts the escalation as a PR comment and does not depend on the removed watcher', () => {
+    assert.doesNotMatch(body, /ci-failure-watcher/);
+    assert.match(body, /gh pr comment/);
   });
 
   it('never runs gh pr merge for merge variants', () => {
@@ -111,8 +109,8 @@ describe('/ai-sdlc resolve-conflicts body', () => {
     assert.match(body, /--force-with-lease/);
   });
 
-  it('uses the ci-conflict-resolver classifier from the watcher module', () => {
-    assert.match(body, /classifyPrFailureShape/);
-    assert.match(body, /normalizePrSnapshot/);
+  it('seeds the agent from the PR merge state', () => {
+    assert.match(body, /mergeStateStatus/);
+    assert.match(body, /CLASSIFIED_SHAPE/);
   });
 });

@@ -4,7 +4,6 @@ import {
   classifyAndRecord,
   classifyPr,
   PR_ACTIONS,
-  STALE_CLAIM_MS,
   type PrCheck,
   type PrFacts,
   type PrState,
@@ -50,7 +49,6 @@ const rows: Array<[PrState, PrFacts]> = [
       ],
     },
   ],
-  ['stale-claim', { ...base, claimHeartbeatAgeMs: STALE_CLAIM_MS + 1 }],
   ['manifest-branch-mismatch', { ...base, manifestBranch: 'feat/other' }],
   ['no-match', { ...base, checks: green, draft: true }],
 ];
@@ -67,8 +65,8 @@ describe('classifyPr (AISDLC-823)', () => {
     expect(classifyPr(rows[6]![1]).failingLine).toBe('FAIL foo.test.ts');
   });
 
-  it('keeps a fresh heartbeat and matching branches out of the stale rows', () => {
-    const c = classifyPr({ ...base, claimHeartbeatAgeMs: 1, manifestBranch: 'feat/x' });
+  it('keeps matching branches out of the mismatch row', () => {
+    const c = classifyPr({ ...base, manifestBranch: 'feat/x' });
     expect(c.state).toBe('pending');
   });
 

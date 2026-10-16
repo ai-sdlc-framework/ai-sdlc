@@ -34,7 +34,6 @@ import {
   isValidDecisionId,
   oneLine,
 } from '../dispatch/verdict-fields.js';
-import { isRebaseFixable, type FailureShape } from '../runtime/ci-failure-watcher.js';
 import type { EventEmitter } from './emit.js';
 import { isProtectedBranch, type ForcePushMode } from './lease-policy.js';
 import type { OperationalAction } from './operational.js';
@@ -47,7 +46,7 @@ export type PlaybookAction = 'rebase-push' | 'retrigger-ci' | 'requeue' | 'escal
 export const STALE_MERGE_REF_CAUSE = 'stale-merge-ref';
 
 /** Conflict shapes a plain rebase onto `origin/main` is expected to fix. */
-export const MECHANICAL_SHAPES: readonly FailureShape[] = [
+export const MECHANICAL_SHAPES: readonly string[] = [
   'test-additions-overlap',
   'prettier-drift',
   'pnpm-lock-regen',
@@ -92,10 +91,7 @@ export function classifyFailure(verdict: DispatchVerdict): Classification {
   if (!isValidCause(cause)) {
     return { kind: 'escalate', reason: 'the failure record has a malformed cause code' };
   }
-  if (
-    (MECHANICAL_SHAPES as readonly string[]).includes(cause) &&
-    isRebaseFixable(cause as FailureShape)
-  ) {
+  if (MECHANICAL_SHAPES.includes(cause)) {
     return { kind: 'rebase-push', shape: cause };
   }
   if (cause === STALE_MERGE_REF_CAUSE) return { kind: 'retrigger-ci' };

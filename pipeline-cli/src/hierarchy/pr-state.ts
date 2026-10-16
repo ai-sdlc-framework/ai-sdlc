@@ -1,14 +1,11 @@
 /**
  * Deterministic classifier for the dispatch tick's PR and board state machine
- * (AISDLC-823). The tick gathers REST facts per open task PR, this module maps
+ * (AISDLC-823; a stale claim is owned by `stall.ts`, AISDLC-826). The tick gathers REST facts per open task PR, this module maps
  * each to exactly one state and the one action the table names. A PR that fits
  * no row classifies as `no-match`: the only state routed to the planner.
  */
 
 import { writeEvent } from '../orchestrator/events.js';
-
-/** Heartbeat age after which an inflight claim is stale. */
-export const STALE_CLAIM_MS = 30 * 60 * 1000;
 
 /** Outcome of one check run or status, normalised by the caller from REST. */
 export type CheckConclusion = 'success' | 'failure' | 'cancelled' | 'infra' | 'pending';
@@ -34,8 +31,6 @@ export interface PrFacts {
   /** An approved review verdict exists for the head. */
   approvedVerdict?: boolean;
   checks?: PrCheck[];
-  /** Age of the inflight claim's last heartbeat, when the task holds a claim. */
-  claimHeartbeatAgeMs?: number;
   headBranch?: string;
   manifestBranch?: string;
 }
@@ -43,7 +38,6 @@ export interface PrFacts {
 export const PR_STATES = [
   'merged',
   'manifest-branch-mismatch',
-  'stale-claim',
   'behind-or-dirty',
   'attestation-content-hash-mismatch',
   'rate-limited',
@@ -60,7 +54,6 @@ export type PrState = (typeof PR_STATES)[number];
 export const PR_ACTIONS: Record<PrState, string> = {
   merged: 'mark-done-sync-parent-start-next',
   'manifest-branch-mismatch': 'write-manifest-with-pr-head-ref-and-requeue',
-  'stale-claim': 'reap-then-write-resume-signal',
   'behind-or-dirty': 'requeue-hand-review-path-resume',
   'attestation-content-hash-mismatch': 'push-only-resign-resume',
   'rate-limited': 'wait-and-rerun',
@@ -110,9 +103,6 @@ export function classifyPr(f: PrFacts): PrClassification {
   if (f.merged) return mk('merged');
   if (f.manifestBranch && f.headBranch && f.manifestBranch !== f.headBranch) {
     return mk('manifest-branch-mismatch');
-  }
-  if (f.claimHeartbeatAgeMs !== undefined && f.claimHeartbeatAgeMs > STALE_CLAIM_MS) {
-    return mk('stale-claim');
   }
   if (f.mergeStateStatus === 'BEHIND' || f.mergeStateStatus === 'DIRTY') {
     return mk('behind-or-dirty');
