@@ -111,6 +111,45 @@ describe('rate-limited (AISDLC-926)', () => {
   });
 });
 
+describe('rate-limit signature (AISDLC-949)', () => {
+  const rl = '##[error]API rate limit exceeded for installation';
+  const job = (name: string, durationSec: number, summary?: string): PrCheck => ({
+    name,
+    conclusion: 'failure',
+    durationSec,
+    ...(summary ? { summary } : {}),
+  });
+  const rollup: PrCheck = { name: 'ai-sdlc/pr-ready', conclusion: 'failure', summary: 'rolled up' };
+
+  it('PR 1652 shape: Detect Changes alone, 6 s', () => {
+    expect(classifyPr({ ...base, checks: [job('Detect Changes', 6, rl), rollup] }).state).toBe(
+      'rate-limited',
+    );
+  });
+
+  it('PR 1687 shape: Detect Changes plus issue-link', () => {
+    const c = classifyPr({
+      ...base,
+      checks: [job('Detect Changes', 8, rl), job('ai-sdlc/issue-link', 3, rl), rollup],
+    });
+    expect(c.state).toBe('rate-limited');
+  });
+
+  it('a genuine test failure stays real-failure', () => {
+    const c = classifyPr({
+      ...base,
+      checks: [job('Detect Changes', 6, rl), job('Build & Test', 300, 'FAIL a.test.ts'), rollup],
+    });
+    expect(c.state).toBe('real-failure');
+  });
+
+  it('a slow job with the text stays real-failure', () => {
+    expect(classifyPr({ ...base, checks: [job('Other job', 90, rl), rollup] }).state).toBe(
+      'real-failure',
+    );
+  });
+});
+
 describe('classifyAndRecord event shape (AC-4)', () => {
   it('writes one DispatchPrClassified event per PR', () => {
     const events: Array<Record<string, unknown>> = [];

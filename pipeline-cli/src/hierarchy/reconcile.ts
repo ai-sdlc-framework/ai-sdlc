@@ -508,6 +508,11 @@ export function takeSuppressedNote(boardDir: string): string {
 /** The installation limit resets hourly; wait this long from first sight before the rerun. */
 export const RATE_LIMIT_WAIT_MS = 60 * 60 * 1000;
 
+/** The quota resets on the hour: the next full hour after `now` (AISDLC-949). */
+export function nextFullHour(now: Date): Date {
+  return new Date((Math.floor(now.getTime() / RATE_LIMIT_WAIT_MS) + 1) * RATE_LIMIT_WAIT_MS);
+}
+
 export interface ReconcileOpts {
   boardDir: string;
   execute: ActionExecutor;
@@ -648,7 +653,7 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
       ...(d.failingLine === undefined ? {} : { failingLine: d.failingLine }),
       ...(d.state === 'rate-limited'
         ? {
-            rateLimitResetAt: new Date(now().getTime() + RATE_LIMIT_WAIT_MS).toISOString(),
+            rateLimitResetAt: nextFullHour(now()).toISOString(),
           }
         : {}),
       ...(d.ruling === undefined ? {} : { ruling: d.ruling }),
@@ -788,6 +793,8 @@ interface RollupItem {
   description?: string;
   title?: string;
   detailsUrl?: string;
+  startedAt?: string;
+  completedAt?: string;
 }
 
 function parse<T>(text: string): T | undefined {
@@ -812,9 +819,14 @@ export function normaliseCheck(c: RollupItem): PrCheck {
     else if (['FAILURE', 'ERROR', 'ACTION_REQUIRED'].includes(raw)) conclusion = 'failure';
   }
   const summary = c.description ?? c.title;
+  const t0 = Date.parse(c.startedAt ?? '');
+  const t1 = Date.parse(c.completedAt ?? '');
   return {
     name: c.name ?? c.context ?? '',
     conclusion,
+    ...(Number.isFinite(t0) && Number.isFinite(t1) && t1 >= t0
+      ? { durationSec: Math.round((t1 - t0) / 1000) }
+      : {}),
     ...(summary ? { summary } : {}),
     ...(c.detailsUrl ? { detailsUrl: c.detailsUrl } : {}),
   };

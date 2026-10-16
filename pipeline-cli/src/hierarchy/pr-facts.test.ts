@@ -94,6 +94,58 @@ describe('gatherPrFacts', () => {
     });
   });
 
+  it('reads the log of a short failed job so the rate-limit signature matches (AISDLC-949)', () => {
+    const run: CommandRunner = (file, args) => {
+      const a = args.join(' ');
+      const ok = (stdout: string) => ({ status: 0, stdout, stderr: '' });
+      if (a.startsWith('pr list'))
+        return ok(
+          JSON.stringify([
+            {
+              number: 7,
+              title: 'chore(docs): file x',
+              headRefName: 'ai-sdlc/file-x',
+              isDraft: false,
+              isCrossRepository: false,
+              author: { login: 'me' },
+              mergeStateStatus: 'CLEAN',
+              files: [],
+            },
+          ]),
+        );
+      if (a.startsWith('api user')) return ok('me');
+      if (a.startsWith('pr view 7'))
+        return ok(
+          JSON.stringify({
+            statusCheckRollup: [
+              {
+                name: 'Detect Changes',
+                status: 'COMPLETED',
+                conclusion: 'FAILURE',
+                startedAt: '2026-10-16T19:29:00Z',
+                completedAt: '2026-10-16T19:29:06Z',
+                detailsUrl: 'https://github.com/o/r/actions/runs/555/job/9',
+              },
+              {
+                name: 'ai-sdlc/pr-ready',
+                status: 'COMPLETED',
+                conclusion: 'FAILURE',
+                detailsUrl: 'https://github.com/o/r/actions/runs/555/job/10',
+              },
+            ],
+          }),
+        );
+      if (a === 'run view 555 --log-failed --job 9')
+        return ok(
+          'Detect\tStep\t2026-10-16T19:29:05Z ##[error]API rate limit exceeded for installation\n',
+        );
+      if (a.startsWith('run view 555')) return ok('x\ty\t2026-10-16T19:29:05Z rolled up\n');
+      return { status: 1, stdout: '', stderr: file };
+    };
+    const facts = gatherPrFacts(run, '/', board);
+    expect(classifyPr({ ...facts![0]!, taskId: 'AISDLC-1' }).state).toBe('rate-limited');
+  });
+
   it('falls back to the single-PR resource when the list has no merge state', () => {
     expect(gatherPrFacts(make(undefined), '/', board)?.[0]?.mergeStateStatus).toBe('BEHIND');
     expect(gatherPrFacts(make('UNKNOWN'), '/', board)?.[0]?.mergeStateStatus).toBe('BEHIND');

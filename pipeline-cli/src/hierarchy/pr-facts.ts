@@ -8,6 +8,7 @@
  */
 
 import { gatherFacts, type ReconcilePr } from './reconcile.js';
+import { RATE_LIMIT_MAX_JOB_SEC } from './pr-state.js';
 import type { CommandRunner } from './types.js';
 
 const PR_READY = 'ai-sdlc/pr-ready';
@@ -79,6 +80,18 @@ export function gatherPrFacts(
       f.mergeStateStatus = toMergeStateStatus(r.status === 0 ? r.stdout : undefined);
     } else {
       f.mergeStateStatus = toMergeStateStatus(f.mergeStateStatus);
+    }
+    // AISDLC-949: read the log of each short failed job so the rate-limit
+    // signature (duration under 30 s plus the installation text) can match.
+    for (const c of f.checks ?? []) {
+      if (c.conclusion !== 'failure' || c.name === PR_READY || c.summary) continue;
+      if (c.durationSec === undefined || c.durationSec >= RATE_LIMIT_MAX_JOB_SEC) continue;
+      const rid = runIdFrom(c.detailsUrl);
+      const jid = /\/job\/(\d+)/.exec(c.detailsUrl ?? '')?.[1];
+      if (!rid || !jid) continue;
+      const jl = run('gh', ['run', 'view', rid, '--log-failed', '--job', jid], { cwd });
+      const jline = jl.status === 0 ? firstFailingLine(jl.stdout) : undefined;
+      if (jline) c.summary = jline;
     }
     const ready = (f.checks ?? []).find((c) => c.name === PR_READY && c.conclusion === 'failure');
     if (!ready) continue;

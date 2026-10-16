@@ -17,6 +17,8 @@ export interface PrCheck {
   summary?: string;
   /** Link to the check run; names the workflow run whose log holds the failing line. */
   detailsUrl?: string;
+  /** Job duration in seconds (completedAt - startedAt), when known. */
+  durationSec?: number;
 }
 
 /** REST facts for one open (or just merged) task PR. */
@@ -84,6 +86,25 @@ export const RATE_LIMIT_CHECKS: readonly string[] = [
   PR_READY,
 ];
 const RATE_LIMIT_RE = /rate limit exceeded for installation/i;
+/** A job that dies on the rate limit finishes in seconds; a real failure runs longer. */
+export const RATE_LIMIT_MAX_JOB_SEC = 30;
+
+/**
+ * AISDLC-949 signature: every failing job (the pr-ready rollup aside) finished
+ * under 30 s and its annotation or log carries the installation rate-limit text.
+ */
+function rateLimitSignature(failedChecks: readonly PrCheck[]): boolean {
+  const jobs = failedChecks.filter((c) => c.name !== PR_READY);
+  return (
+    jobs.length > 0 &&
+    jobs.every(
+      (c) =>
+        c.durationSec !== undefined &&
+        c.durationSec < RATE_LIMIT_MAX_JOB_SEC &&
+        RATE_LIMIT_RE.test(c.summary ?? ''),
+    )
+  );
+}
 
 function failed(c: PrCheck): boolean {
   return c.conclusion === 'failure';
@@ -113,9 +134,10 @@ export function classifyPr(f: PrFacts): PrClassification {
   }
   const failedChecks = checks.filter(failed);
   if (
-    failedChecks.length > 0 &&
-    failedChecks.every((c) => RATE_LIMIT_CHECKS.includes(c.name)) &&
-    failedChecks.some((c) => RATE_LIMIT_RE.test(c.summary ?? ''))
+    rateLimitSignature(failedChecks) ||
+    (failedChecks.length > 0 &&
+      failedChecks.every((c) => RATE_LIMIT_CHECKS.includes(c.name)) &&
+      failedChecks.some((c) => RATE_LIMIT_RE.test(c.summary ?? '')))
   ) {
     return mk('rate-limited');
   }
