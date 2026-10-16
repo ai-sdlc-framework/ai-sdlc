@@ -14,6 +14,7 @@ import type { DispatchManifest } from '../dispatch/types.js';
 import {
   HANDOFF_BEGIN,
   HANDOFF_END,
+  boundedHandoffView,
   RESUME_COMMANDS,
   readHandoff,
   writeHandoff,
@@ -172,5 +173,38 @@ describe('handoff read', () => {
     const r = readHandoff({ role: 'executor', name: 'p-exec', boardDir: board, now: NOW });
     expect(r.regenerated).toBe(true);
     expect(r.content).toContain(HANDOFF_BEGIN);
+  });
+});
+
+describe('handoff bounded view and marker placement (AISDLC-889)', () => {
+  it('prints block first, then the newest prose tail on a line boundary, then the path', () => {
+    const block = `${HANDOFF_BEGIN}\n<!-- state-hash: ${'a'.repeat(64)} -->\n${HANDOFF_END}`;
+    const old = Array.from({ length: 2000 }, (_, i) => `old note ${i}`).join('\n');
+    const content = `---\nname: x\n---\n${block}\n${old}\nNEWEST NOTE\n`;
+    const view = boundedHandoffView(content, '/f.md');
+    expect(view.startsWith(HANDOFF_BEGIN)).toBe(true);
+    expect(view.endsWith('/f.md')).toBe(true);
+    expect(view).toContain('NEWEST NOTE');
+    expect(view).not.toContain('old note 0\n');
+    expect(view.length).toBeLessThan(8000 + block.length + 200);
+    const tail = view.slice(view.indexOf(HANDOFF_END) + HANDOFF_END.length);
+    expect(tail).toMatch(/omitted; use --full\]\nold note \d+\n/);
+  });
+
+  it('shows short prose whole', () => {
+    expect(boundedHandoffView('just notes\n', '/f.md')).toBe('just notes\n\n/f.md');
+  });
+
+  it('places a new block right after the frontmatter, not at the end', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'ho-fm-'));
+    const file = path.join(dir, 'h.md');
+    writeFileSync(file, '---\nname: planner\n---\nsome notes\n', 'utf-8');
+    const board = path.join(dir, '.ai-sdlc', 'dispatch');
+    mkdirSync(board, { recursive: true });
+    const r = writeHandoff({ role: 'executor', name: 'e', boardDir: board, now: NOW, file });
+    const fmEnd = r.content.indexOf('---\n', 4) + 4;
+    expect(r.content.indexOf(HANDOFF_BEGIN)).toBe(fmEnd);
+    expect(r.content.endsWith('some notes\n')).toBe(true);
+    rmSync(dir, { recursive: true, force: true });
   });
 });

@@ -253,7 +253,17 @@ function splice(existing: string | undefined, block: string): string {
   if (!existing) return block;
   const start = existing.indexOf(HANDOFF_BEGIN);
   const end = existing.indexOf(HANDOFF_END);
-  if (start === -1 || end === -1 || end < start) return existing.replace(/\s*$/, '\n\n') + block;
+  if (start === -1 || end === -1 || end < start) {
+    const fm = /^---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/.exec(existing);
+    const at = fm ? fm[0].length : 0;
+    const rest = existing.slice(at).replace(/^\s+/, '');
+    return (
+      existing.slice(0, at) +
+      (at && !existing.slice(0, at).endsWith('\n') ? '\n' : '') +
+      block +
+      (rest ? '\n' + rest : '')
+    );
+  }
   return existing.slice(0, start) + block.trimEnd() + existing.slice(end + HANDOFF_END.length);
 }
 
@@ -288,4 +298,35 @@ export function readHandoff(opts: HandoffOptions): HandoffResult {
   }
   const written = writeHandoff(opts);
   return { ...written, regenerated: true };
+}
+
+/** Default size of the prose tail {@link boundedHandoffView} keeps, in characters. */
+export const HANDOFF_PROSE_TAIL_CHARS = 8000;
+
+/**
+ * The bounded view of a handoff file (AISDLC-889): the generated block first, then
+ * the last `tail` characters (cut at a line boundary) of the prose outside the
+ * markers, then the file path. Notes are appended at the end of the file, so the
+ * newest prose is what survives the cut.
+ */
+export function boundedHandoffView(
+  content: string,
+  file: string,
+  tail: number = HANDOFF_PROSE_TAIL_CHARS,
+): string {
+  const start = content.indexOf(HANDOFF_BEGIN);
+  const end = content.indexOf(HANDOFF_END);
+  let block = '';
+  let prose = content;
+  if (start !== -1 && end !== -1 && end >= start) {
+    block = content.slice(start, end + HANDOFF_END.length);
+    prose = content.slice(0, start) + content.slice(end + HANDOFF_END.length);
+  }
+  prose = prose.trim();
+  if (prose.length > tail) {
+    const cut = prose.slice(prose.length - tail);
+    const nl = cut.indexOf('\n');
+    prose = `[earlier notes omitted; use --full]\n${nl === -1 ? cut : cut.slice(nl + 1)}`.trimEnd();
+  }
+  return [block, prose, file].filter((p) => p).join('\n\n');
 }

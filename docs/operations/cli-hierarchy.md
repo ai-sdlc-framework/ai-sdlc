@@ -484,12 +484,16 @@ cli-hierarchy handoff read  --role <planner|operator-dispatch|executor> [--name 
 | `--role <r>`   | `planner`, `operator-dispatch` (alias `dispatch`) or `executor`.                             |
 | `--name <n>`   | Session name; default the calling session's roster name, else the role.                      |
 | `--out <path>` | Use another file location.                                                                   |
+| `--full`       | `read` only: print the whole file instead of the bounded view.                               |
 
 Files: dispatch and executors write `.ai-sdlc/dispatch/handoff/<session-name>.md`; the planner
 writes its dated memory file, `.claude/memory/project_planner_handoff_YYYY_MM_DD.md` (an
 existing dated file is reused). The generated text sits between
 `<!-- ai-sdlc-handoff:begin -->` and `<!-- ai-sdlc-handoff:end -->` with a hash of the state it
 was built from; text outside the markers (the planner's own notes) is kept on every rewrite.
+A file without markers gets the block right after its frontmatter. Put notes at the end of the
+file: `read` prints the generated block, then the last 8000 characters (cut at a line boundary)
+of the prose outside the markers, then the file path; `--full` prints the whole file.
 
 Call `write` after each state change (a ruling recorded, a task claimed, a verdict written, a
 brief sent). `read` recomputes the hash first and regenerates a missing or stale file, so a
@@ -545,7 +549,7 @@ Three pieces work for all three roles; none of them blocks or refuses anything.
   percentage falls below the warn threshold. `AI_SDLC_CONTEXT_WARN=off` silences it. The warning
   only appears once the status line has run for the session.
 - **Reload.** SessionStart for sources `clear` and `compact` re-injects the role block and the
-  output of `handoff read` (truncated to 12000 characters) for a roster session; for the planner
+  output of `handoff read` (bounded view; when still over 12000 characters the middle is dropped, keeping the state block and the newest notes) for a roster session; for the planner
   it also says to list scheduled jobs and recreate lost ones. The planner's routine is in
   `commands/planner.md`; dispatch batches non-blocking reports to the planner into one hourly
   digest (`commands/operator-dispatch.md`). The executor's clear-between-tasks flow is unchanged.

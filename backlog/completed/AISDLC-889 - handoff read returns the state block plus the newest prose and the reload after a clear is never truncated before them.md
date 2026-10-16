@@ -1,7 +1,7 @@
 ---
 id: AISDLC-889
 title: 'fix(hierarchy): handoff read returns the state block plus the newest prose, and the SessionStart reload after a clear is never truncated before them'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [hierarchy, reliability, planner, velocity]

@@ -76,6 +76,7 @@ import {
   clearExecutor,
   clearSelf,
   decideAutoClear,
+  boundedHandoffView,
   readHandoff as readGeneratedHandoff,
   writeHandoff,
   createGitRunner,
@@ -258,6 +259,7 @@ Options for handoff:
   --role <r>               planner, operator-dispatch (or dispatch), or executor
   --name <n>               Session name (default the calling session's roster name, else the role)
   --out <path>             Alternative file location
+  --full                   read: print the whole file (default: block plus last 8000 chars of prose)
 
 Options for auto-clear:
   --transcript <path>      Session transcript whose usage fields give the context size
@@ -883,10 +885,16 @@ export async function runHierarchyCli(
           deps.log(JSON.stringify({ ok: true, file: r.file, stateHash: r.stateHash }));
         } else {
           const r = readGeneratedHandoff(opts);
-          deps.log(r.content.trimEnd());
-          process.stderr.write(
-            `cli-hierarchy handoff: ${r.file}${r.regenerated ? ' (was missing or stale; regenerated from live state)' : ''}\n`,
+          deps.log(
+            argv.includes('--full')
+              ? `${r.content.trimEnd()}\n\n${r.file}`
+              : boundedHandoffView(r.content, r.file),
           );
+          if (r.regenerated) {
+            process.stderr.write(
+              `cli-hierarchy handoff: ${r.file} (was missing or stale; regenerated from live state)\n`,
+            );
+          }
         }
         return 0;
       }
