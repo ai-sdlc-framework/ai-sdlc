@@ -388,8 +388,12 @@ async function watchVerdicts(
     const verdictState = stateOf(raw);
     const key = `${verdictState}:${raw.taskId}:${raw.completedAt}`;
     if (state.handled.includes(key)) continue;
-    state.handled.push(key);
-    saveState(deps.boardDir, state);
+    // Held, the clear and the playbook do not run, so the verdict stays unhandled
+    // and is processed on the first tick after `resume`.
+    if (!held) {
+      state.handled.push(key);
+      saveState(deps.boardDir, state);
+    }
 
     // Everything below this line, and everything printed for the session, comes
     // from the checked copy: a hand-written verdict file never reaches the model,

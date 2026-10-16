@@ -20,7 +20,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { writeHeartbeat, writeVerdict } from '../dispatch/board.js';
 import { requeueFailed } from '../dispatch/requeue.js';
@@ -1036,6 +1036,32 @@ describe('hold (AISDLC-899)', () => {
     );
   });
 
+  it('processes a verdict that arrived during a hold on the first tick after resume', async () => {
+    hold();
+    verdict('AISDLC-3', {
+      outcome: 'failed',
+      workerId: 'executor-beta',
+      completedAt: new Date(clock + 1).toISOString(),
+    });
+    verdict('AISDLC-1');
+    await runDispatchTick(deps());
+    expect(cleared).toEqual([]);
+    expect(playbooked).toEqual([]);
+    clearHold(board, 'planner', 'x');
+    const after = await runDispatchTick(deps());
+    expect(after.verdicts).toHaveLength(2);
+    expect(cleared.length).toBeGreaterThan(0);
+    expect(playbooked).toHaveLength(1);
+  });
+
+  it('does not reap stalled claims while held', async () => {
+    hold();
+    const reap = vi.fn();
+    const r = await runDispatchTick({ ...deps(), stall: { clear: reap } });
+    expect(r.stalled ?? []).toEqual([]);
+    expect(reap).not.toHaveBeenCalled();
+  });
+
   it('has no held field once resumed, and a held board with queued work wakes as active', async () => {
     hold();
     writeBrief('b.md', ['AISDLC-5']);
@@ -1068,10 +1094,11 @@ describe('hold (AISDLC-899)', () => {
   });
 
   it('readHold ignores a malformed flag and clearHold reports nothing lifted', () => {
+    expect(readHold(board)).toBeNull();
     writeFileSync(path.join(board, '.hold'), 'not json');
-    expect(readHold(board)).toBeNull();
+    expect(readHold(board)).toMatchObject({ by: 'unresolved' });
     writeFileSync(path.join(board, '.hold'), '{"reason":""}');
-    expect(readHold(board)).toBeNull();
+    expect(readHold(board)).toMatchObject({ by: 'unresolved' });
     writeFileSync(path.join(board, '.hold'), '{"reason":"r"}');
     expect(readHold(board)).toEqual({ reason: 'r', since: '', by: '' });
     expect(clearHold(board, 'planner', 'x')).not.toBeNull();

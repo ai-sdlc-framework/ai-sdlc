@@ -699,7 +699,7 @@ export async function runHierarchyCli(
           );
           return 1;
         }
-        const by = who?.name ?? 'operator';
+        const by = who?.name ?? 'unresolved';
         if (subcommand === 'hold') {
           const reason = flags.reason;
           if (!reason || reason === 'true') {

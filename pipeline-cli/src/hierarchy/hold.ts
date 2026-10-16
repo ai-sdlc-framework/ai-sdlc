@@ -9,6 +9,7 @@
 
 import {
   appendFileSync,
+  existsSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -36,18 +37,23 @@ export function holdPath(boardDir: string): string {
   return path.join(boardDir, HOLD_FILENAME);
 }
 
-/** The active hold, or null when the board is not held or the flag is unreadable. */
+/**
+ * The active hold, or null when the board is not held. A flag file that exists
+ * but cannot be read fails closed: the board stays held until the file is fixed
+ * or removed.
+ */
 export function readHold(boardDir: string): Hold | null {
+  if (!existsSync(holdPath(boardDir))) return null;
   try {
     const doc = JSON.parse(readFileSync(holdPath(boardDir), 'utf-8')) as Partial<Hold>;
-    if (typeof doc.reason !== 'string' || doc.reason === '') return null;
+    if (typeof doc.reason !== 'string' || doc.reason === '') throw new Error('no reason');
     return {
       reason: doc.reason,
       since: typeof doc.since === 'string' ? doc.since : '',
       by: typeof doc.by === 'string' ? doc.by : '',
     };
   } catch {
-    return null;
+    return { reason: 'the hold flag is unreadable; fix or remove it', since: '', by: 'unresolved' };
   }
 }
 
