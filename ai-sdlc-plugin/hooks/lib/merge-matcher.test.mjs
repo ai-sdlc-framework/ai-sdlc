@@ -1121,3 +1121,15 @@ describe('$$ is the PID, not an ANSI-C opener (AISDLC-605.1 security review)', (
     assert.equal(m.splitShellSegments(`echo $$'\\'; ls ';' x`).length, 2);
   });
 });
+
+describe('brace expansion caps stay refused (AISDLC-605.1 review)', () => {
+  const verb = ['mer', 'ge'].join('');
+  const alts = Array.from({ length: 70 }, (_, i) => `x${i}`).join(',');
+  it('refuses the verb after more than 64 alternatives', () => {
+    assert.equal(m.commandRunsGhPrMerge(`gh pr {--repo=o/r ${alts},${verb}} 5`), true);
+  });
+  it('refuses the verb after a sequence longer than 32', () => {
+    assert.equal(m.commandRunsGhPrMerge(`gh pr {a..~} ${verb} 5`), true);
+    assert.equal(m.commandRunsGhPrMerge(`gh pr {!..~,${verb}} 5`), true);
+  });
+});

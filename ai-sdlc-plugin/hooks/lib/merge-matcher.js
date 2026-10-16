@@ -374,7 +374,11 @@ function stripParenSubstitutions(text) {
 /** Brace-expansion variants of a text (`{a,b}`, single-char `{x..y}`), capped. */
 function expandBraces(text, budget = { n: 64 }) {
   const m = /\{([^{}]*)\}/.exec(text);
-  if (!m || budget.n <= 0) return [text];
+  if (!m) return [text];
+  if (budget.n <= 0) {
+    budget.capped = true;
+    return [text];
+  }
   const body = m[1];
   let alts = null;
   const seq = /^(.)\.\.(.)$/.exec(body);
@@ -382,17 +386,25 @@ function expandBraces(text, budget = { n: 64 }) {
     const a = seq[1].charCodeAt(0);
     const b = seq[2].charCodeAt(0);
     alts = [];
-    for (let c = Math.min(a, b); c <= Math.max(a, b) && alts.length < 32; c++)
+    for (let c = Math.min(a, b); c <= Math.max(a, b); c++) {
+      if (alts.length >= 32) {
+        budget.capped = true;
+        break;
+      }
       alts.push(String.fromCharCode(c));
+    }
   } else if (body.includes(',')) alts = body.split(',');
   const pre = text.slice(0, m.index);
   const post = text.slice(m.index + m[0].length);
   if (!alts) return expandBraces(pre + '\u0001' + body + '\u0002' + post, budget).map(unmark);
   const out = [];
-  for (const a of alts) {
+  for (let i = 0; i < alts.length; i++) {
     budget.n--;
-    out.push(...expandBraces(pre + a + post, budget));
-    if (budget.n <= 0) break;
+    out.push(...expandBraces(pre + alts[i] + post, budget));
+    if (budget.n <= 0) {
+      if (i < alts.length - 1) budget.capped = true;
+      break;
+    }
   }
   return out;
 }
@@ -612,10 +624,19 @@ function braceVariants(canon) {
   if (!canon.includes('{')) return [canon];
   const words = canon
     .split(/(\s+)/)
-    .map((w) => (/\$|^\s*$/.test(w) ? w : expandBraces(w).map(unmark).join(' ')))
+    .map((w) => {
+      if (/\$|^\s*$/.test(w)) return w;
+      const b = { n: 64, capped: false };
+      const ex = expandBraces(w, b).map(unmark);
+      // A capped expansion is incomplete: keep the word verbatim (still brace-opaque).
+      return b.capped ? w : ex.join(' ');
+    })
     .join('');
-  const vs = [...new Set([words, ...expandBraces(canon).map(unmark)])];
-  return vs.length > 1 ? vs : [canon];
+  const whole = { n: 64, capped: false };
+  const vs = [...new Set([words, ...expandBraces(canon, whole).map(unmark)])];
+  // Truncated expansion would hide words past the cap; keep the original (brace-opaque) too.
+  if (whole.capped) vs.push(canon);
+  return vs.length > 1 ? [...new Set(vs)] : [canon];
 }
 
 /**
