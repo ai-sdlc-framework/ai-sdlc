@@ -1,7 +1,7 @@
 ---
 id: AISDLC-867
 title: 'ci: records-only fast lane in ai-sdlc-gate.yml, PRs touching only backlog/**, .ai-sdlc/_decisions/**, spec/** skip build/test/attestation'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [ci, velocity, gate]
@@ -34,11 +34,11 @@ Existing state to verify first: `scripts/is-docs-only-changeset.mjs` already tre
 
 ## Acceptance Criteria
 
-- [ ] AC-1: classifier unit tests cover records-only, mixed (one record file plus one code file, one record file plus one workflow file), docs-only, code, and empty input.
-- [ ] AC-2: a workflow test in `.github/workflows/__tests__/` asserts which jobs the fast lane runs and skips and that `ai-sdlc/pr-ready` still posts.
-- [ ] AC-3: `docs/operations/quality-gate.md` documents the records-only lane and its allowlist.
-- [ ] AC-4: the PR body records the investigation result from Context (why record PRs were slow) and the measured gate time for a records-only PR.
-- [ ] AC-5: the lockstep test between the script and `review-scope-core.mjs` stays green.
+- [x] AC-1: classifier unit tests cover records-only, mixed (one record file plus one code file, one record file plus one workflow file), docs-only, code, and empty input.
+- [x] AC-2: a workflow test in `.github/workflows/__tests__/` asserts which jobs the fast lane runs and skips and that `ai-sdlc/pr-ready` still posts.
+- [x] AC-3: `docs/operations/quality-gate.md` documents the records-only lane and its allowlist.
+- [x] AC-4: the PR body records the investigation result from Context (why record PRs were slow) and the measured gate time for a records-only PR.
+- [x] AC-5: the lockstep test between the script and `review-scope-core.mjs` stays green.
 
 ## Velocity impact
 

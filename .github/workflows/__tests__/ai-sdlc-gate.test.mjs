@@ -716,6 +716,11 @@ describe('ai-sdlc-gate.yml — archetype detection (AC #2, AISDLC-484)', () => {
         join(repo, 'pipeline-cli', 'attestation-core', 'docs-only-paths.mjs'),
         readFileSync(join(REPO_ROOT, 'pipeline-cli', 'attestation-core', 'docs-only-paths.mjs')),
       );
+      // AISDLC-867: the script also imports the trust-chain list.
+      writeFileSync(
+        join(repo, 'pipeline-cli', 'attestation-core', 'review-scope-core.mjs'),
+        readFileSync(join(REPO_ROOT, 'pipeline-cli', 'attestation-core', 'review-scope-core.mjs')),
+      );
       git('init', '-q');
       git('config', 'user.email', 't@example.com');
       git('config', 'user.name', 't');
@@ -749,11 +754,48 @@ describe('ai-sdlc-gate.yml — archetype detection (AC #2, AISDLC-484)', () => {
       return text.trim();
     }
 
+    function runRecords(base, head) {
+      return run(base, head)
+        .split('\n')
+        .find((l) => l.startsWith('records_only='));
+    }
+
+    it('records-only commit -> docs_only=false, records_only=true (AISDLC-867)', () => {
+      try {
+        const base = setup();
+        const head = commit({ 'backlog/config.yml': 'x', 'spec/schemas/a.json': '{}' });
+        assert.equal(run(base, head).split('\n')[0], 'docs_only=false');
+        assert.equal(runRecords(base, head), 'records_only=true');
+      } finally {
+        rmSync(repo, { recursive: true, force: true });
+      }
+    });
+
+    it('records plus workflow file -> records_only=false (AISDLC-867)', () => {
+      try {
+        const base = setup();
+        const head = commit({ 'backlog/config.yml': 'x', '.github/workflows/a.yml': 'x' });
+        assert.equal(runRecords(base, head), 'records_only=false');
+      } finally {
+        rmSync(repo, { recursive: true, force: true });
+      }
+    });
+
+    it('unavailable base -> records_only=false (AISDLC-867)', () => {
+      try {
+        setup();
+        const head = commit({ 'backlog/config.yml': 'x' });
+        assert.equal(runRecords('0'.repeat(40), head), 'records_only=false');
+      } finally {
+        rmSync(repo, { recursive: true, force: true });
+      }
+    });
+
     it('docs-only commit -> docs_only=true', () => {
       try {
         const base = setup();
         const head = commit({ 'docs/a.md': 'x' });
-        assert.equal(run(base, head), 'docs_only=true');
+        assert.equal(run(base, head).split('\n')[0], 'docs_only=true');
       } finally {
         rmSync(repo, { recursive: true, force: true });
       }
@@ -763,7 +805,7 @@ describe('ai-sdlc-gate.yml — archetype detection (AC #2, AISDLC-484)', () => {
       try {
         const base = setup();
         const head = commit({ 'docs/a.md': 'x', 'src/a.ts': 'x' });
-        assert.equal(run(base, head), 'docs_only=false');
+        assert.equal(run(base, head).split('\n')[0], 'docs_only=false');
       } finally {
         rmSync(repo, { recursive: true, force: true });
       }
@@ -773,7 +815,7 @@ describe('ai-sdlc-gate.yml — archetype detection (AC #2, AISDLC-484)', () => {
       try {
         setup();
         const head = commit({ 'docs/a.md': 'x' });
-        assert.equal(run('0'.repeat(40), head), 'docs_only=false');
+        assert.equal(run('0'.repeat(40), head).split('\n')[0], 'docs_only=false');
       } finally {
         rmSync(repo, { recursive: true, force: true });
       }
@@ -783,7 +825,7 @@ describe('ai-sdlc-gate.yml — archetype detection (AC #2, AISDLC-484)', () => {
       try {
         setup();
         const head = commit({ 'src/a.ts': 'x' });
-        assert.equal(run('', head), 'docs_only=false');
+        assert.equal(run('', head).split('\n')[0], 'docs_only=false');
       } finally {
         rmSync(repo, { recursive: true, force: true });
       }
@@ -1053,5 +1095,45 @@ describe('AISDLC-833: attestation-post.yml never fetches or checks out the PR he
     }
     const stage = post.steps.find((st) => /Stage head envelope/.test(String(st.name ?? '')));
     assert.match(String(stage.run), /stage-attestation-data-api\.sh/);
+  });
+});
+
+describe('ai-sdlc-gate.yml — records-only fast lane (AISDLC-867)', () => {
+  const SKIPPED = ['build-test', 'integration', 'attestation-gate', 'independence-policy-gate'];
+  const RUNS = ['backlog-drift', 'dor-readiness-gate', 'governance-gate', 'lint'];
+
+  it('detect exports records_only', () => {
+    assert.equal(
+      workflow.jobs.detect.outputs.records_only,
+      '${{ steps.classify.outputs.records_only }}',
+    );
+  });
+
+  it('build, integration, attestation and independence skip when records_only', () => {
+    for (const id of SKIPPED) {
+      assert.match(
+        String(workflow.jobs[id].if),
+        /needs\.detect\.outputs\.records_only\s*!=\s*'true'/,
+        `${id} must skip on the records-only lane`,
+      );
+    }
+  });
+
+  it('format and drift, DoR and governance checks do not skip on records_only', () => {
+    for (const id of RUNS) {
+      assert.doesNotMatch(String(workflow.jobs[id].if ?? ''), /records_only/, `${id} must run`);
+    }
+    assert.match(String(workflow.jobs.lint.if), /docs_only/);
+  });
+
+  it('ai-sdlc/pr-ready still posts: always() and every skipped job is allowed', () => {
+    const rollup = workflow.jobs['pr-ready'];
+    assert.equal(rollup.name, 'ai-sdlc/pr-ready');
+    assert.match(String(rollup.if), /always\(\)/);
+    for (const id of SKIPPED) assert.ok(ALLOWED_SKIPS.has(id), `${id} must be an allowed skip`);
+    const needs = Object.fromEntries(
+      rollup.needs.map((n) => [n, { result: SKIPPED.includes(n) ? 'skipped' : 'success' }]),
+    );
+    assert.equal(allsGreenDecision(needs).passed, true);
   });
 });

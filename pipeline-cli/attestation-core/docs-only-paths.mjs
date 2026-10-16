@@ -13,3 +13,12 @@
  */
 export const DOCS_ONLY_PATTERN =
   /^(spec\/rfcs\/|docs\/|backlog\/tasks\/|backlog\/completed\/|\.ai-sdlc\/attestations\/[^/]+\.dsse\.json$|\.ai-sdlc\/_decisions\/|\.ai-sdlc\/dispatch\/briefs\/|\.claude\/memory\/|\.github\/dependabot\.yml$|\.github\/[^/]+\.md$|[^/]+\.md$)/;
+
+/**
+ * The records-only allowlist (AISDLC-867): paths that carry records (task
+ * files, decision events, RFC and spec text), not executable code. Prefix match
+ * only, no globbing past the prefix. A consumer must also reject trust-chain
+ * paths (`isTrustChainPath` in `review-scope-core.mjs`), for example
+ * `spec/schemas/agent-role.schema.json`.
+ */
+export const RECORDS_ONLY_PATTERN = /^(backlog\/|\.ai-sdlc\/_decisions\/|spec\/)/;
