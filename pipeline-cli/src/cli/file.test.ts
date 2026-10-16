@@ -16,6 +16,7 @@ import {
   fileDecision,
   fileRebase,
   fileTask,
+  removeSourceCopy,
   buildPrCreateArgs,
   parseLogStrict,
   runFileCli,
@@ -119,6 +120,55 @@ describe('cli-file', () => {
     const title = ghCalls[0][ghCalls[0].indexOf('--title') + 1];
     expect(title.endsWith('(AISDLC-900)')).toBe(true);
     expect(ghCalls[0]).not.toContain('--draft');
+  });
+
+  describe('AISDLC-950 post-push cleanup of the source copy', () => {
+    it('removes an untracked source identical to the committed copy', () => {
+      const p = writeTask();
+      fileTask(repo, p, { pr: true, brief: false }, deps);
+      expect(existsSync(join(repo, p))).toBe(false);
+    });
+
+    it('keeps a tracked source and says why', () => {
+      const p = writeTask();
+      sh(repo, 'add', '--', p);
+      const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+      expect(removeSourceCopy(deps, repo, join(repo, p), p, 'main')).toBe(false);
+      expect(existsSync(join(repo, p))).toBe(true);
+      expect(String(err.mock.calls[0][0])).toContain('tracked');
+      err.mockRestore();
+    });
+
+    it('keeps a source that differs from the committed copy', () => {
+      const p = writeTask();
+      const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const diverging: FileDeps = {
+        ...deps,
+        exec(cmd, args, cwd) {
+          if (cmd === 'git' && args[0] === 'show')
+            return { status: 0, stdout: 'other', stderr: '' };
+          return deps.exec(cmd, args, cwd);
+        },
+      };
+      expect(removeSourceCopy(diverging, repo, join(repo, p), p, 'main')).toBe(false);
+      expect(existsSync(join(repo, p))).toBe(true);
+      expect(String(err.mock.calls[0][0])).toContain('differs');
+      err.mockRestore();
+    });
+
+    it('keeps a source the branch cannot supply', () => {
+      const p = writeTask();
+      const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+      expect(removeSourceCopy(deps, repo, join(repo, p), p, 'no-such-branch')).toBe(false);
+      expect(String(err.mock.calls[0][0])).toContain('cannot read');
+      err.mockRestore();
+    });
+
+    it('returns false when the source is already gone', () => {
+      expect(removeSourceCopy(deps, repo, join(repo, 'backlog/tasks/gone.md'), 'x', 'main')).toBe(
+        false,
+      );
+    });
   });
 
   it('AISDLC-878: the gh pr create argv never contains --draft', () => {

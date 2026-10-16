@@ -14,7 +14,14 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import yargs from 'yargs';
@@ -289,6 +296,36 @@ function writeEventFiles(worktree: string, lines: string[]): string[] {
   });
 }
 
+/**
+ * AISDLC-950: after a successful push, remove the untracked source copy in the parent when it is
+ * byte-identical to the committed copy, so Step 0.5 never tries to re-file it. Otherwise keep it
+ * and print why. Returns true when removed.
+ */
+export function removeSourceCopy(
+  deps: FileDeps,
+  repo: string,
+  abs: string,
+  rel: string,
+  branch: string,
+): boolean {
+  const keep = (why: string) => {
+    console.error(`[cli-file] kept ${rel}: ${why}`);
+    return false;
+  };
+  if (!existsSync(abs)) return false;
+  if (deps.exec('git', ['ls-files', '--error-unmatch', '--', rel], repo).status === 0) {
+    return keep('it is tracked');
+  }
+  const committed = deps.exec('git', ['show', `${branch}:${rel}`], repo);
+  if (committed.status !== 0) return keep(`cannot read it from ${branch}`);
+  if (committed.stdout !== readFileSync(abs, 'utf8')) {
+    return keep(`it differs from the copy on ${branch}`);
+  }
+  unlinkSync(abs);
+  console.error(`[cli-file] removed ${rel} (identical to the copy on ${branch})`);
+  return true;
+}
+
 // -- Subcommands ----------------------------------------------------------------
 
 export interface ValidatedTask {
@@ -389,6 +426,8 @@ export function fileTask(
   // AISDLC-930: a one-task brief on the local board (gitignored), so dispatch ingests the task
   // without a hand-written brief. Only for a PR filing; `--no-brief` opts out.
   if (opts.pr && opts.brief !== false) writeAutoBrief(repo, abs);
+  // Only a source inside the parent's own backlog/tasks is a leftover (AISDLC-931 sources are elsewhere).
+  if (abs === join(repo, rel)) removeSourceCopy(deps, repo, abs, rel, res.branch);
   return res;
 }
 
@@ -463,7 +502,7 @@ export function fileDecision(
   // Legacy log only when this repo has no events/ directory and still keeps a legacy log.
   const useLegacy = !existsSync(resolveEventsDir(repo)) && (hasLegacy || mainShow.status === 0);
   const slug = decisionId.toLowerCase();
-  return publish(deps, {
+  const res = publish(deps, {
     repo,
     branch: `ai-sdlc/file-${slug}`,
     worktreeDir: `file-${slug}`,
@@ -478,6 +517,14 @@ export function fileDecision(
       return writeEventFiles(wt, fresh);
     },
   });
+  // AISDLC-950: per-event files only; the legacy log is tracked and appended to, so it is kept.
+  if (!useLegacy) {
+    for (const line of fresh) {
+      const rel = `${EVENTS_DIR_REL}/${eventFileName(JSON.parse(line) as DecisionEvent, line)}`;
+      removeSourceCopy(deps, repo, join(repo, rel), rel, res.branch);
+    }
+  }
+  return res;
 }
 
 /**
