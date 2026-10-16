@@ -988,6 +988,19 @@ describe('real tokenizer normalisation (AISDLC-605.1)', () => {
   const mg = ['mer', 'ge'].join('');
   const gh = ['g', 'h'].join('');
 
+  it('refuses reassigned, conditional and escaped-space-comment bypasses (review round 1)', () => {
+    for (const c of [
+      `A=${mg}; ${gh} pr $A 5; A=view`,
+      `A=${mg}; false && A=view; ${gh} pr $A 5`,
+      `${gh} pr $A 5; A=${mg}`,
+      `if true; then A=${mg}; fi; ${gh} pr $A 5`,
+      `true \\ #; ${gh} pr ${mg} 5`,
+    ]) {
+      assert.equal(m.commandRunsGhPrMerge(c), true, c);
+    }
+    assert.equal(m.commandRunsGhPrMerge(`A=view; ${gh} pr $A 5`), false);
+  });
+
   it('allows harmless opaque commands that mention the phrase', () => {
     for (const c of [
       `${gh} api repos/o/r/pulls/5 -q $'.x' # pr ${mg}`,

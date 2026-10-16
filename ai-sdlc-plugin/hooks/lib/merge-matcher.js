@@ -460,8 +460,11 @@ function canonicalizeCommand(command) {
   const stripComments = !/<<|[`(]|\$\{/.test(command);
   let out = '';
   let quote = null;
+  let escaped = false; // last emitted char came from a backslash escape (`\ ` is not a boundary)
   for (let i = 0; i < command.length; i++) {
     const c = command[i];
+    const wasEscaped = escaped;
+    escaped = false;
     if (quote === "'") {
       out += c;
       if (c === "'") quote = null;
@@ -479,7 +482,10 @@ function canonicalizeCommand(command) {
     }
     if (c === '\\' && i + 1 < command.length) {
       if (command[i + 1] === '\n') i++;
-      else out += c + command[++i];
+      else {
+        out += c + command[++i];
+        escaped = true;
+      }
       continue;
     }
     if (c === '$' && command[i + 1] === "'") {
@@ -493,21 +499,37 @@ function canonicalizeCommand(command) {
       }
     }
     if (c === "'" || c === '"') quote = c;
-    else if (c === '#' && stripComments && (out === '' || /\s/.test(out[out.length - 1]))) {
+    else if (
+      c === '#' &&
+      stripComments &&
+      (out === '' || (!wasEscaped && /\s/.test(out[out.length - 1])))
+    ) {
       while (i + 1 < command.length && command[i + 1] !== '\n') i++;
       continue;
     }
     out += c;
   }
   out = out.replace(/\$\{IFS\}(\$[1-9])?|\$IFS(?![A-Za-z0-9_])(\$[1-9])?/g, ' ');
-  const vars = new Map();
-  for (const m of out.matchAll(LITERAL_ASSIGN)) {
-    vars.set(m[1], m[2].replace(/^(['"])(.*)\1$/s, '$2'));
-  }
-  if (vars.size) {
-    out = out.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (all, a, b) =>
-      vars.has(a || b) ? vars.get(a || b) : all,
-    );
+  // Substitute only an unconditional, never-reassigned literal assignment, and only into
+  // text AFTER it; anything else keeps $NAME opaque (fail closed).
+  const assigns = [...out.matchAll(LITERAL_ASSIGN)];
+  const refRe = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
+  for (const m of assigns) {
+    const name = m[1];
+    const delim = m[0].trimStart()[0];
+    const before = out.slice(0, m.index);
+    const occurrences = out.match(new RegExp('(?:^|[^A-Za-z0-9_])' + name + '\\+?=', 'g')) || [];
+    const conditional =
+      !(m.index === 0 || delim === ';' || delim === '\n') ||
+      /\b(?:if|then|else|elif|while|until|for|case|do|select|function)\b|[{(]|&&|\|\||&|\|/.test(
+        before,
+      );
+    if (occurrences.length !== 1 || conditional) continue;
+    const value = m[2].replace(/^(['"])(.*)\1$/s, '$2');
+    const end = m.index + m[0].length;
+    out =
+      out.slice(0, end) +
+      out.slice(end).replace(refRe, (all, a, b) => ((a || b) === name ? value : all));
   }
   return out;
 }
