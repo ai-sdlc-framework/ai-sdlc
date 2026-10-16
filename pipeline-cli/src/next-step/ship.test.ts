@@ -207,10 +207,47 @@ describe('preSignRebase (AISDLC-102)', () => {
     );
     const r = await preSignRebase(h.ctx, state);
     expect(r).toEqual({ kind: 'unchanged', hash: 'A' });
-    const commit = indexOfCall(/git commit -m chore: commit pending transcript leaves/);
+    const commit = indexOfCall(
+      /git commit -m chore: commit pending transcript leaves and review ledger/,
+    );
     expect(commit).toBeGreaterThan(-1);
     expect(indexOfCall(/git add -- \.ai-sdlc\/transcript-leaves\//)).toBeLessThan(commit);
     expect(commit).toBeLessThan(indexOfCall(/git rebase origin\/main/));
+  });
+
+  it('commits a dirty review ledger with the leaves in one commit before the rebase (AISDLC-951)', async () => {
+    hashes('A', 'A');
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    h.runner.on(
+      /status --porcelain -- \.ai-sdlc\/transcript-leaves\//,
+      ok(` M .ai-sdlc/reviews/${state.taskId}.jsonl\n`),
+    );
+    const r = await preSignRebase(h.ctx, state);
+    expect(r).toEqual({ kind: 'unchanged', hash: 'A' });
+    expect(cmds().filter((c) => c.startsWith('git commit'))).toHaveLength(1);
+    expect(indexOfCall(new RegExp(`git add -- .*reviews/${state.taskId}\\.jsonl`))).toBeGreaterThan(
+      -1,
+    );
+    expect(indexOfCall(/git commit/)).toBeLessThan(indexOfCall(/git rebase origin\/main/));
+  });
+
+  it('converges on a later attempt when the ledger re-dirties after the rebase', async () => {
+    hashes('A', 'A', 'A', 'A');
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    h.runner.on(/status --porcelain/, ok(` M .ai-sdlc/reviews/${state.taskId}.jsonl\n`));
+    const r1 = await preSignRebase(h.ctx, state);
+    const r2 = await preSignRebase(h.ctx, state);
+    expect(r1.kind).not.toBe('failed');
+    expect(r2.kind).not.toBe('failed');
+    expect(cmds().filter((c) => c.startsWith('git commit'))).toHaveLength(2);
+  });
+
+  it('makes no commit when leaves and ledger are clean (AISDLC-951)', async () => {
+    hashes('A', 'A');
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    h.runner.on(/status --porcelain/, ok(''));
+    await preSignRebase(h.ctx, state);
+    expect(cmds().filter((c) => c.startsWith('git commit'))).toEqual([]);
   });
 
   it('treats a base that moved during the rebase as success', async () => {
