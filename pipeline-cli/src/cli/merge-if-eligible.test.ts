@@ -360,12 +360,10 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
     expect(JSON.parse(out.join(''))).toMatchObject({ ok: false, armed: false });
   });
 
-  it('production path: an unverifiable cwd refuses with zero gh calls, whatever argv/env say', async () => {
-    const plain = mkdtempSync(join(tmpdir(), 'aisdlc-663-5-cwd-'));
+  it('production path: a cwd with no resolvable origin and no --repo refuses', async () => {
+    const plain = mkdtempSync(join(tmpdir(), 'aisdlc-897-cwd-'));
     try {
-      process.env['AI_SDLC_MERGE_POLICY_ROOT_FOR_TESTS'] = '1';
-      process.env['CLAUDE_PLUGIN_ROOT'] = plain;
-      const fake = makeFakeRunner({});
+      const fake = makeFakeRunner({ 'gh repo view': { code: 1, stderr: 'not a git repository' } });
       const msg = await runCli(
         ['42', '--source-kind', 'backlog', '--cwd', plain, '--format', 'json'],
         fake.runner,
@@ -373,11 +371,55 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
       expect(msg).toBe('process.exit(1)');
       const parsed = JSON.parse(out.join(''));
       expect(parsed.ok).toBe(false);
-      expect(parsed.reason).toMatch(/verified main checkout/);
-      expect(fake.calls).toEqual([]);
+      expect(parsed.reason).toMatch(/target repository/);
     } finally {
       rmSync(plain, { recursive: true, force: true });
     }
+  });
+
+  it('AISDLC-897: non-git cwd + --repo evaluates from main via the API, never from disk', async () => {
+    const plain = mkdtempSync(join(tmpdir(), 'aisdlc-897-nongit-'));
+    try {
+      const fake = makeFakeRunner({
+        'gh repo view': { code: 1, stderr: 'not a git repository' },
+        'git/ref/heads/main': { stdout: JSON.stringify({ type: 'commit', sha: 'c'.repeat(40) }) },
+        'contents/.ai-sdlc/agent-role.yaml': { stdout: NEVER_YAML },
+      });
+      const msg = await runCli(
+        [
+          '42',
+          '--source-kind',
+          'backlog',
+          '--dry-run',
+          '--repo',
+          'org/adopter',
+          '--cwd',
+          plain,
+          '--format',
+          'json',
+        ],
+        fake.runner,
+      );
+      expect(msg).toBe('process.exit(1)');
+      const parsed = JSON.parse(out.join(''));
+      expect(parsed.reason).toMatch(/governance\.allowMerge is never/);
+      expect(parsed.reason).not.toMatch(/containing this CLI/);
+      expect(fake.calls.some((c) => c.args.join(' ').includes('repos/org/adopter/contents/'))).toBe(
+        true,
+      );
+    } finally {
+      rmSync(plain, { recursive: true, force: true });
+    }
+  });
+
+  it('AISDLC-897: a cwd whose origin is a different repository than --repo is refused', async () => {
+    const fake = makeFakeRunner({ 'gh repo view': { stdout: 'evil/repo\n' } });
+    const msg = await runCli(
+      ['42', '--source-kind', 'backlog', '--repo', 'org/adopter', '--format', 'json'],
+      fake.runner,
+    );
+    expect(msg).toBe('process.exit(1)');
+    expect(JSON.parse(out.join('')).reason).toMatch(/not the PR's repository/);
   });
 
   const RELEASE_YAML =
@@ -464,18 +506,18 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
     expect(fake.calls.some((c) => c.args.includes('merge'))).toBe(false);
   });
 
-  it('--source-kind release refuses fail-closed with no verified main checkout (zero gh calls)', async () => {
+  it('--source-kind release refuses fail-closed when the repository cannot be established', async () => {
     const plain = mkdtempSync(join(tmpdir(), 'aisdlc-702-cwd-'));
     try {
       process.env['AI_SDLC_CALLER_ROLE'] = 'operator';
-      const fake = makeFakeRunner({});
+      const fake = makeFakeRunner({ 'gh repo view': { code: 1, stderr: 'no repo' } });
       const msg = await runCli(
         ['7', '--source-kind', 'release', '--arm', '--cwd', plain, '--format', 'json'],
         fake.runner,
       );
       expect(msg).toBe('process.exit(1)');
-      expect(JSON.parse(out.join('')).reason).toMatch(/verified main checkout.*Next step:/);
-      expect(fake.calls).toEqual([]);
+      expect(JSON.parse(out.join('')).reason).toMatch(/target repository.*Next step:/);
+      expect(fake.calls.some((c) => c.args.includes('merge'))).toBe(false);
     } finally {
       rmSync(plain, { recursive: true, force: true });
     }
@@ -499,21 +541,15 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
     }
   });
 
-  it('--repo-root and --repo no longer exist: yargs rejects them (exit 1) and nothing runs', async () => {
-    for (const extra of [
-      ['--repo-root', '/tmp/x'],
-      ['--repo', 'org/repo'],
-    ]) {
-      out = [];
-      err = [];
-      const fake = makeFakeRunner(repoView);
-      const msg = await runCli(['42', '--source-kind', 'backlog', ...extra], fake.runner, {
-        root: '/main',
-        policyYaml: GREEN_YAML,
-      });
-      expect(msg).toBe('process.exit(1)');
-      expect(out.join('')).not.toContain('MERGED');
-      expect(fake.calls).toEqual([]);
-    }
+  it('--repo-root no longer exists: yargs rejects it (exit 1) and nothing runs', async () => {
+    const fake = makeFakeRunner(repoView);
+    const msg = await runCli(
+      ['42', '--source-kind', 'backlog', '--repo-root', '/tmp/x'],
+      fake.runner,
+      { root: '/main', policyYaml: GREEN_YAML },
+    );
+    expect(msg).toBe('process.exit(1)');
+    expect(out.join('')).not.toContain('MERGED');
+    expect(fake.calls).toEqual([]);
   });
 });

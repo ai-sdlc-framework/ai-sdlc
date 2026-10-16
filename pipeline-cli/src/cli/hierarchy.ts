@@ -56,7 +56,6 @@
 
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
 import { promoteExpiredDecisions } from '../decisions/escalation-chain.js';
@@ -758,10 +757,7 @@ export async function runHierarchyCli(
                   repoRoot,
                   (y) => resolveGovernanceFromYaml(y).mergeAuthors,
                 ),
-                land: createLander({
-                  repoRoot,
-                  anchorDir: path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..'),
-                }),
+                land: createLander({ repoRoot }),
               })),
           promoteExpired: () =>
             isDecisionCatalogEnabled()

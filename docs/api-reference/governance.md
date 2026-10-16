@@ -265,8 +265,8 @@ spec:
     caller role, PR, head, whether all commits are verified, outcome, reason) to
     `$ARTIFACTS_DIR/_governance/merge-audit-YYYY-MM-DD.jsonl`. `caller` is `$USER`
     and advisory only; `ghLogin` is the authenticated identity. Refusals that
-    happen before the release path runs (no verified main checkout, repository slug
-    not resolvable) are printed but not audited.
+    happen before the release path runs (repository slug
+    not resolvable or mismatched) are printed but not audited.
 - **What is authoritative (policy trust):** the policy
   (`spec.governance.allowMerge` + `mergeAuthors`), `backlog/config.yml`
   (`task_prefix`) and the task-file existence check are read from GitHub
@@ -279,14 +279,15 @@ spec:
   forged local `origin/main`, an uncommitted edit, `GIT_COMMON_DIR` and friends
   have no effect, and a revocation on `main` applies on the very next run with no
   local fetch. Any gh/API failure, non-200 answer or empty body refuses. The slug
-  comes only from `gh repo view` in the verified main checkout (a real `.git`
-  directory matching the git common dir, not a file or symlink, which must be the
-  same checkout as the invocation's working directory); that checkout is an extra
-  anchor, not the policy source. The policy is resolved by code inside the CLI
+  comes from `gh repo view` in the working directory (its `origin`), so the CLI
+  works from the plugin cache, an adopter checkout or a non-git directory
+  (AISDLC-897); outside a checkout pass `--repo <owner/name>`. A working
+  directory whose origin is a DIFFERENT repository than `--repo` is refused
+  (fail closed). No on-disk policy is ever consulted. The policy is resolved by code inside the CLI
   itself: no plugin file selected through `CLAUDE_PLUGIN_ROOT` /
   `CLAUDE_PLUGIN_DIR` is loaded for the merge decision. There is **no** flag or
   environment variable that overrides the policy root or the repository
-  (`--repo-root` and `--repo` were removed). Tests inject a root and policy text
+  (`--repo-root` was removed; `--repo` only names the PR repository and is cross-checked against the cwd origin). Tests inject a root and policy text
   programmatically through the exported
   `buildMergeIfEligibleCli({ trustedRootOverride })`, which argv and the
   environment cannot reach, and the hook refuses any shell command that names the

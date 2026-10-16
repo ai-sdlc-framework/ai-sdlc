@@ -194,11 +194,10 @@ describe('readMergeAuthors', () => {
 });
 
 describe('createLander', () => {
-  it('refuses, without a merge call, when no verified main checkout exists', async () => {
+  it('refuses, without a merge call, when the repository cannot be resolved', async () => {
     const calls: string[][] = [];
     const land = createLander({
       repoRoot: board,
-      anchorDir: board,
       runner: async (_f, args) => {
         calls.push([...args]);
         return { stdout: '', stderr: '', code: 1 };
@@ -207,8 +206,8 @@ describe('createLander', () => {
     const r = await land(1, 'merge');
     expect(r.merged).toBe(false);
     expect(r.armed).toBe(false);
-    expect(r.reason).toMatch(/verified main checkout/);
-    expect(calls).toEqual([]);
+    expect(r.reason).toMatch(/could not determine the repository/);
+    expect(calls.some((c) => c[0] === 'pr')).toBe(false);
   });
 });
 

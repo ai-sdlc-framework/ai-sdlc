@@ -41,9 +41,8 @@
  * @module governance/merge-if-eligible
  */
 
-import { execFileSync } from 'node:child_process';
-import { appendFileSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { DOCS_ONLY_PATTERN } from '../../attestation-core/docs-only-paths.mjs';
 import { now } from '../clock.js';
 import type { Runner } from '../runtime/exec.js';
@@ -69,107 +68,51 @@ export const STRICT_DEFAULTS: GovernancePolicy = Object.freeze({
   allowResetHard: false,
 });
 
-// ── Verified main checkout (native; never loads plugin code) ────────────
+// ── Target repository resolution (AISDLC-897) ──────────────────────────
 
-/** Sync git runner used only to verify the main checkout; null on any failure. */
-export type GitSync = (args: string[], cwd: string) => string | null;
-
-/** Environment variables that can redirect or forge git's view of a repository. */
-const GIT_REDIRECT_ENV = [
-  'GIT_COMMON_DIR',
-  'GIT_DIR',
-  'GIT_WORK_TREE',
-  'GIT_OBJECT_DIRECTORY',
-  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
-  'GIT_REPLACE_REF_BASE',
-];
-
-/** `process.env` without the git-redirecting variables (defense in depth). */
-function cleanGitEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  for (const key of GIT_REDIRECT_ENV) delete env[key];
-  return env;
-}
-
-const defaultGitSync: GitSync = (args, cwd) => {
-  try {
-    return (
-      execFileSync('git', ['--no-replace-objects', ...args], {
-        cwd,
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-        timeout: 5000,
-        env: cleanGitEnv(),
-      }).trim() || null
-    );
-  } catch {
-    return null;
-  }
-};
-
-function safeReal(p: string): string {
-  try {
-    return realpathSync(p);
-  } catch {
-    return p;
-  }
-}
-
-/**
- * Main checkout root of the repo `dir` belongs to: the parent of the git COMMON
- * dir, accepted only when `<root>/.git` is a real directory (not a file or
- * symlink: the `.git` file / gitdir / commondir chain of a worktree is
- * writable by the governed agent). Anything else returns null (fail closed).
- */
-export function verifiedMainRoot(dir: string, git: GitSync = defaultGitSync): string | null {
-  const common = git(['rev-parse', '--git-common-dir'], dir);
-  if (!common) return null;
-  const dotGit = resolve(dir, common);
-  if (basename(dotGit) !== '.git') return null;
-  try {
-    const st = lstatSync(dotGit);
-    if (!st.isDirectory() || st.isSymbolicLink()) return null;
-  } catch {
-    return null;
-  }
-  return dirname(dotGit);
-}
-
-export interface TrustedRootResult {
-  /** The verified main checkout, or `null` when none could be established. */
-  root: string | null;
-  /** Why `root` is null (empty when it is set). */
+export interface TargetRepoResult {
+  /** `owner/name` of the repository the PR belongs to, or `null` (refuse). */
+  slug: string | null;
+  /** Why `slug` is null (empty when it is set). */
   reason: string;
 }
 
 /**
- * Establish the trusted root: the MAIN checkout of the repo that contains the
- * running CLI (`anchorDir`), which must be the SAME main checkout the
- * invocation's `cwd` belongs to, otherwise an agent could `cd` into a repo it
- * controls. A missing or unverifiable root yields `root: null` (refuse). There
- * is deliberately no flag or environment variable that supplies a root.
+ * Establish the repository the PR belongs to WITHOUT any on-disk policy: the
+ * policy and task files are read through the GitHub API at the resolved `main`
+ * sha, so the CLI works from the plugin cache, an adopter checkout or a
+ * non-git directory. Fail closed:
+ *   - no `--repo`: the slug is the cwd's `origin` (`gh repo view`); none → refuse;
+ *   - `--repo` given: a cwd whose origin resolves to a DIFFERENT repository is
+ *     refused; a cwd with no origin (non-git directory) uses the given slug.
  */
-export function resolveTrustedMainRoot(opts: {
+export async function resolveTargetRepo(opts: {
+  runner: Runner;
   cwd: string;
-  anchorDir: string;
-  git?: GitSync;
-}): TrustedRootResult {
-  const anchorMain = verifiedMainRoot(opts.anchorDir, opts.git);
-  if (!anchorMain) {
+  repo?: string;
+}): Promise<TargetRepoResult> {
+  const explicit = opts.repo?.trim();
+  if (explicit !== undefined && explicit !== '' && !/^[\w.-]+\/[\w.-]+$/.test(explicit)) {
+    return { slug: null, reason: `--repo "${explicit}" is not of the form owner/name` };
+  }
+  const origin = await resolveRepoSlug(opts.runner, opts.cwd);
+  if (!explicit) {
+    return origin
+      ? { slug: origin, reason: '' }
+      : {
+          slug: null,
+          reason:
+            'could not determine the repository (owner/name) of the working directory with ' +
+            '`gh repo view`; pass --repo <owner/name> when running outside a checkout',
+        };
+  }
+  if (origin !== null && origin.toLowerCase() !== explicit.toLowerCase()) {
     return {
-      root: null,
-      reason: 'could not verify the main checkout of the repo containing this CLI',
+      slug: null,
+      reason: `the working directory's origin (${origin}) is not the PR's repository (${explicit})`,
     };
   }
-  const cwdMain = verifiedMainRoot(opts.cwd, opts.git);
-  if (!cwdMain || safeReal(cwdMain) !== safeReal(anchorMain)) {
-    return {
-      root: null,
-      reason:
-        'the working directory does not belong to the same verified main checkout as this CLI',
-    };
-  }
-  return { root: anchorMain, reason: '' };
+  return { slug: explicit, reason: '' };
 }
 
 /**
@@ -1321,8 +1264,9 @@ export interface RunMergeIfEligibleOptions {
   sourceKind: SourceKind | undefined;
   repoSlug: string;
   /**
-   * The VERIFIED main checkout (see `resolveTrustedMainRoot`). `null` = none
-   * could be established → refuse (fail closed); `rootRefusal` carries the reason.
+   * Non-null once the target repository was established (see
+   * `resolveTargetRepo`); `null` = refuse (fail closed), `rootRefusal` carries
+   * the reason. Never a path the policy is read from: policy comes from GitHub.
    */
   repoRoot: string | null;
   rootRefusal?: string;
@@ -1420,7 +1364,7 @@ export function refusalResult(
 /**
  * Compose policy resolution + PR-state fetch + evaluation + (conditionally)
  * the merge call. Order, each step failing closed:
- *   1. verified main checkout (else refuse);
+ *   1. target repository established (else refuse);
  *   2. policy on main (per GitHub), `allowMerge` and caller `sourceKind`
  *      (no `gh` calls spent on a refusal);
  *   3. ONE `gh pr view` read (head commit, merge state, fork/author/base/title/files)
@@ -1438,9 +1382,9 @@ export async function runMergeIfEligible(
   if (opts.repoRoot === null) {
     return refusalResult(
       opts.prNumber,
-      'could not establish a verified main checkout to read the governance policy from' +
+      'could not establish the target repository to read the governance policy from' +
         (opts.rootRefusal ? ` (${opts.rootRefusal})` : '') +
-        ' — refusing (fail-closed; the worktree/cwd copy is never trusted)',
+        ' — refusing (fail-closed; no on-disk policy copy is ever trusted)',
       opts.dryRun,
     );
   }

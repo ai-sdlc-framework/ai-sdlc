@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -30,12 +30,11 @@ import {
   resolveMainSha,
   resolveGovernanceFromYaml,
   resolveRepoSlug,
-  resolveTrustedMainRoot,
+  resolveTargetRepo,
   runMergeIfEligible,
   STRICT_DEFAULTS,
   stateForRequired,
   taskFileOnMain,
-  verifiedMainRoot,
   type GovernancePolicy,
   type PrSnapshot,
   type RunMergeIfEligibleOptions,
@@ -1009,73 +1008,34 @@ describe('verified main root + policy read from git', () => {
     rmSync(base, { recursive: true, force: true });
   });
 
-  const real = (p: string | null) => (p ? realpathSync(p) : p);
-
-  it('verifiedMainRoot resolves the main checkout from a worktree and refuses non-repos and odd layouts', () => {
-    expect(real(verifiedMainRoot(worktree))).toBe(realpathSync(main));
-    expect(real(verifiedMainRoot(main))).toBe(realpathSync(main));
-    const plain = join(base, 'plain');
-    mkdirSync(plain);
-    expect(verifiedMainRoot(plain)).toBeNull();
-    // A symlinked .git is refused.
-    const linked = join(base, 'linked');
-    mkdirSync(linked);
-    symlinkSync(join(main, '.git'), join(linked, '.git'));
-    expect(verifiedMainRoot(linked)).toBeNull();
-    // A bare layout (common dir not named .git) is refused.
-    expect(verifiedMainRoot(main, () => join(base, 'main.git'))).toBeNull();
-    expect(verifiedMainRoot(main, () => null)).toBeNull();
-    // A reported common dir that does not exist on disk is refused (lstat fails).
-    expect(verifiedMainRoot(main, () => join(base, 'missing', '.git'))).toBeNull();
-  });
-
-  it('resolveTrustedMainRoot: worktree CLI + worktree cwd resolve to the MAIN checkout', () => {
-    const res = resolveTrustedMainRoot({
-      cwd: worktree,
-      anchorDir: join(worktree, 'pipeline-cli'),
+  it('resolveTargetRepo: origin slug, explicit --repo, mismatch refusal, non-git fallback', async () => {
+    const view = (stdout: string, code = 0) =>
+      (async () => ({ code, stdout, stderr: '' })) as unknown as Runner;
+    // origin only
+    expect(await resolveTargetRepo({ runner: view('org/repo\n'), cwd: '/x' })).toEqual({
+      slug: 'org/repo',
+      reason: '',
     });
-    expect(real(res.root)).toBe(realpathSync(main));
-  });
-
-  it('refuses when cwd belongs to a DIFFERENT repo than the CLI, or either is not a checkout', () => {
-    const evil = join(base, 'evil');
-    initRepo(evil, GREEN_YAML);
-    const anchorDir = join(worktree, 'pipeline-cli');
-    const r = resolveTrustedMainRoot({ cwd: evil, anchorDir });
-    expect(r.root).toBeNull();
-    expect(r.reason).toMatch(/same verified main checkout/);
-    const plain = join(base, 'plain');
-    mkdirSync(plain);
-    expect(resolveTrustedMainRoot({ cwd: main, anchorDir: plain }).reason).toMatch(
-      /containing this CLI/,
+    // no origin and no --repo: refuse
+    const none = await resolveTargetRepo({ runner: view('', 1), cwd: '/x' });
+    expect(none.slug).toBeNull();
+    expect(none.reason).toMatch(/--repo/);
+    // non-git cwd + --repo: use it
+    expect((await resolveTargetRepo({ runner: view('', 1), cwd: '/x', repo: 'a/b' })).slug).toBe(
+      'a/b',
     );
-    expect(resolveTrustedMainRoot({ cwd: plain, anchorDir }).root).toBeNull();
-  });
-
-  it('no environment variable (old override name, plugin root/dir) changes the trusted root', () => {
-    const attacker = join(base, 'attacker');
-    initRepo(attacker, GREEN_YAML);
-    process.env['AI_SDLC_MERGE_POLICY_ROOT_FOR_TESTS'] = '1';
-    process.env['CLAUDE_PLUGIN_ROOT'] = attacker;
-    process.env['CLAUDE_PLUGIN_DIR'] = attacker;
-    process.env['GIT_DIR'] = join(attacker, '.git');
-    const anchorDir = join(worktree, 'pipeline-cli');
-    expect(real(resolveTrustedMainRoot({ cwd: worktree, anchorDir }).root)).toBe(
-      realpathSync(main),
+    // matching origin + --repo (case-insensitive)
+    expect((await resolveTargetRepo({ runner: view('A/B\n'), cwd: '/x', repo: 'a/b' })).slug).toBe(
+      'a/b',
     );
-    expect(resolveTrustedMainRoot({ cwd: attacker, anchorDir }).root).toBeNull();
-  });
-
-  it('git environment variables cannot redirect the root verification', () => {
-    const attacker = join(base, 'attacker');
-    initRepo(attacker, GREEN_YAML);
-    process.env['GIT_COMMON_DIR'] = join(attacker, '.git');
-    process.env['GIT_OBJECT_DIRECTORY'] = join(attacker, '.git', 'objects');
-    process.env['GIT_ALTERNATE_OBJECT_DIRECTORIES'] = join(attacker, '.git', 'objects');
-    process.env['GIT_REPLACE_REF_BASE'] = 'refs/forged/';
-    process.env['GIT_WORK_TREE'] = attacker;
-    expect(real(verifiedMainRoot(worktree))).toBe(realpathSync(main));
-    expect(real(verifiedMainRoot(main))).toBe(realpathSync(main));
+    // cwd origin is another repository: refuse
+    const other = await resolveTargetRepo({ runner: view('evil/repo\n'), cwd: '/x', repo: 'a/b' });
+    expect(other.slug).toBeNull();
+    expect(other.reason).toMatch(/not the PR's repository/);
+    // malformed --repo
+    expect(
+      (await resolveTargetRepo({ runner: view('a/b\n'), cwd: '/x', repo: 'nope' })).slug,
+    ).toBeNull();
   });
 
   // The policy is authoritative from GitHub: a forged local origin/main ref, a worktree
@@ -1225,7 +1185,7 @@ describe('runMergeIfEligible — hardened trust + head pin', () => {
       expect(calls).toEqual([]);
     }
     const noRoot = await run({}, { repoRoot: null, rootRefusal: 'because' }).promise;
-    expect(noRoot.eligibility.reason).toMatch(/verified main checkout.*because/);
+    expect(noRoot.eligibility.reason).toMatch(/target repository.*because/);
     expect(noRoot.policy).toEqual(STRICT_DEFAULTS);
   });
 

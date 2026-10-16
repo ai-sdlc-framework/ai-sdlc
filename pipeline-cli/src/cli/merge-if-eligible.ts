@@ -9,33 +9,19 @@
  * @module cli/merge-if-eligible
  */
 
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import {
   defaultBacklogAuditWriter,
   refusalResult,
-  resolveRepoSlug,
-  resolveTrustedMainRoot,
+  resolveTargetRepo,
   runMergeIfEligible,
   type RunMergeIfEligibleResult,
   type SourceKind,
 } from '../governance/merge-if-eligible.js';
 import { isRebaseOnlyPush, type RebaseOnlyResult } from '../governance/rebase-rearm.js';
 import { NEXT_STEP_PREFIX, runReleaseMerge } from '../governance/release-merge.js';
-
-/**
- * This package's root directory, used to locate the sibling
- * `ai-sdlc-plugin/hooks/lib/governance-resolver.js` module. Computed
- * relative to THIS file so it resolves identically whether running from
- * `src/cli/` (ts-node / vitest) or the compiled `dist/cli/` (bin shim).
- */
-function packageRoot(): string {
-  const here = dirname(fileURLToPath(import.meta.url));
-  return join(here, '..', '..');
-}
 
 /**
  * Returns a refusal reason when the PR head is not provably a rebase-only
@@ -70,7 +56,7 @@ export function renderResult(result: RunMergeIfEligibleResult): string {
   const prefix = `PR #${result.prNumber}`;
   if (result.dryRun) {
     lines.push(
-      `${prefix} | DRY-RUN | eligible=${result.eligibility.eligible} | ${result.eligibility.reason}`,
+      `${prefix} | DRY-RUN | eligible=${result.eligibility.eligible} | ${result.eligibility.reason} | policy source: target repo origin/main via GitHub API`,
     );
   } else if (result.merged) {
     lines.push(`${prefix} | MERGED | ${result.eligibility.reason}`);
@@ -154,6 +140,12 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
             type: 'string',
             describe: 'Working directory for gh calls (default: process.cwd()).',
           })
+          .option('repo', {
+            type: 'string',
+            describe:
+              'owner/name of the PR repository. Needed only outside a checkout; a cwd whose ' +
+              'origin is a different repository is refused.',
+          })
           .option('merge-method', {
             type: 'string',
             choices: ['squash', 'merge', 'rebase'] as const,
@@ -194,16 +186,19 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
         const mode = argv.arm || previousHead ? ('arm' as const) : ('merge' as const);
         const format = String(argv.format) as 'text' | 'json';
 
-        // The policy root is the VERIFIED main checkout only. There is no flag
-        // or environment variable that supplies one; the override below is a
-        // programmatic option of this builder.
+        // The policy is read from the target repo's main via the GitHub API;
+        // no on-disk checkout is consulted. The override is a programmatic seam.
         const override = opts.trustedRootOverride;
-        const trusted = override
-          ? { root: override.root, reason: '' }
-          : resolveTrustedMainRoot({ cwd, anchorDir: packageRoot() });
-
-        // The repository slug comes only from `gh repo view` in the verified checkout.
-        const repoSlug = trusted.root === null ? null : await resolveRepoSlug(runner, trusted.root);
+        const target = await resolveTargetRepo({
+          runner,
+          cwd: override?.root ?? cwd,
+          repo: argv.repo as string | undefined,
+        });
+        const repoSlug = target.slug;
+        const trusted = {
+          root: repoSlug === null ? null : (override?.root ?? cwd),
+          reason: target.reason,
+        };
 
         let rebaseRefusal: string | null = null;
         if (previousHead !== undefined) {
@@ -230,27 +225,20 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
                   mode,
                   policyYaml: override?.policyYaml,
                 })
-              : trusted.root !== null && repoSlug === null
-                ? refusalResult(
-                    prNumber,
-                    'could not determine the repository (owner/name) with `gh repo view` in the verified ' +
-                      'main checkout — refusing (fail-closed)',
-                    dryRun,
-                  )
-                : await runMergeIfEligible({
-                    prNumber,
-                    sourceKind,
-                    repoSlug: repoSlug ?? '',
-                    repoRoot: trusted.root,
-                    rootRefusal: trusted.reason,
-                    runner,
-                    cwd,
-                    mergeMethod,
-                    dryRun,
-                    mode,
-                    policyYaml: override?.policyYaml,
-                    auditWriter: defaultBacklogAuditWriter(),
-                  });
+              : await runMergeIfEligible({
+                  prNumber,
+                  sourceKind,
+                  repoSlug: repoSlug ?? '',
+                  repoRoot: trusted.root,
+                  rootRefusal: trusted.reason,
+                  runner,
+                  cwd,
+                  mergeMethod,
+                  dryRun,
+                  mode,
+                  policyYaml: override?.policyYaml,
+                  auditWriter: defaultBacklogAuditWriter(),
+                });
 
         if (sourceKind === 'release' && !result.eligibility.eligible) {
           const reason = result.eligibility.reason;
@@ -258,7 +246,7 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
             result.eligibility = {
               ...result.eligibility,
               reason:
-                `${reason} ${NEXT_STEP_PREFIX} run this from the verified main checkout with ` +
+                `${reason} ${NEXT_STEP_PREFIX} run this with ` +
                 'gh authenticated for the repository, or escalate to the dispatch/planner session.',
             };
           }
