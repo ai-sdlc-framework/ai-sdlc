@@ -1,19 +1,38 @@
 ---
 id: AISDLC-883
-title: 'feat(dispatch): same-head loop guard for PR follow-ups; remove the 823 stale-claim row in favour of 826; delete ci-failure-watcher as a duplicate poller'
+title: >-
+  feat(dispatch): same-head loop guard for PR follow-ups; remove the 823
+  stale-claim row in favour of 826; delete ci-failure-watcher as a duplicate
+  poller
 status: To Do
 assignee: []
 created_date: '2026-10-14'
-labels: [rfc-0054, phase-1, dispatch]
-dependencies: [AISDLC-829]
+labels:
+  - rfc-0054
+  - phase-1
+  - dispatch
+dependencies:
+  - AISDLC-829
 references:
   - spec/rfcs/RFC-0054-pr-lifecycle-event-driven-dispatch.md
   - pipeline-cli/src/dispatch/requeue.ts
   - pipeline-cli/src/hierarchy/pr-state.ts
   - pipeline-cli/src/hierarchy/stall.ts
-  - pipeline-cli/src/runtime/ci-failure-watcher.ts
 priority: high
 dispatchable: true
+drift_status: flagged
+drift_checked: '2026-10-16'
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/src/runtime/ci-failure-watcher.ts
+    resolution: flagged
+  - date: '2026-10-16'
+    type: dep-resolved
+    detail: Dependency AISDLC-829 has been completed
+    resolution: flagged
 ---
 
 ## Context
