@@ -16,4 +16,3 @@ export * from './exec.js';
 // AISDLC-202.2 — Codex harness adapter (Phase 2 of the Codex execution path).
 export * from './spawners/codex-harness.js';
 // AISDLC-460 — CI-failure watcher (auto-rebase agent + cool-down + dedup comment).
-export * from './ci-failure-watcher.js';

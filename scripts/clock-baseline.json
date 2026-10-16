@@ -168,7 +168,6 @@
     "pipeline-cli/src/pipeline/ucvg-threat-fixtures.ts": 4,
     "pipeline-cli/src/review-risk-map/build.ts": 1,
     "pipeline-cli/src/routing/resolve-model.ts": 1,
-    "pipeline-cli/src/runtime/ci-failure-watcher.ts": 3,
     "pipeline-cli/src/runtime/claude-code-sdk-spawner.ts": 5,
     "pipeline-cli/src/runtime/shell-claude-p-spawner.ts": 5,
     "pipeline-cli/src/runtime/spawners/codex-harness.ts": 3,

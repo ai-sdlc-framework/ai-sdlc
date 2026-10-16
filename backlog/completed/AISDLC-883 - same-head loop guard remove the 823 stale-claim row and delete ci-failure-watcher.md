@@ -1,19 +1,38 @@
 ---
 id: AISDLC-883
-title: 'feat(dispatch): same-head loop guard for PR follow-ups; remove the 823 stale-claim row in favour of 826; delete ci-failure-watcher as a duplicate poller'
+title: >-
+  feat(dispatch): same-head loop guard for PR follow-ups; remove the 823
+  stale-claim row in favour of 826; delete ci-failure-watcher as a duplicate
+  poller
 status: To Do
 assignee: []
 created_date: '2026-10-14'
-labels: [rfc-0054, phase-1, dispatch]
-dependencies: [AISDLC-829]
+labels:
+  - rfc-0054
+  - phase-1
+  - dispatch
+dependencies:
+  - AISDLC-829
 references:
   - spec/rfcs/RFC-0054-pr-lifecycle-event-driven-dispatch.md
   - pipeline-cli/src/dispatch/requeue.ts
   - pipeline-cli/src/hierarchy/pr-state.ts
   - pipeline-cli/src/hierarchy/stall.ts
-  - pipeline-cli/src/runtime/ci-failure-watcher.ts
 priority: high
 dispatchable: true
+drift_status: flagged
+drift_checked: '2026-10-16'
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/src/runtime/ci-failure-watcher.ts
+    resolution: flagged
+  - date: '2026-10-16'
+    type: dep-resolved
+    detail: Dependency AISDLC-829 has been completed
+    resolution: flagged
 ---
 
 ## Context
@@ -33,12 +52,12 @@ RFC-0054 OQ-3 and OQ-9 (resolved 2026-10-14). AISDLC-847 bypasses the retry cap 
 
 ## Acceptance Criteria
 
-- [ ] Config: no convention value (path pattern, branch prefix, timer, port, threshold) appears as a literal in source, workflow or command body touched by this task; each is read from `.ai-sdlc/pr-lifecycle.yaml`, and one test shows that changing a config value changes the behaviour.
-- [ ] A fixture where `rebase` on head H leaves the PR DIRTY twice: the second classification yields `route-to-planner` with note `rebase@H x2` and no second rebase runs; after a push to head H2 the guard allows one rebase again.
-- [ ] A PR-less task still parks after the configured retry count (847 behaviour preserved for `prUrl: null`).
-- [ ] `pr-state.ts` has no `stale-claim` state; `stall.ts` tests cover the 30-minute and 10-minute-idle cases alone.
-- [ ] `ci-failure-watcher.ts` is gone; `grep -r ci-failure-watcher pipeline-cli/src orchestrator/src` returns only the docs and this task; the dark-code gate passes without a baseline addition.
-- [ ] `docs/operations/cli-hierarchy.md` describes the guard.
+- [x] Config: no convention value (path pattern, branch prefix, timer, port, threshold) appears as a literal in source, workflow or command body touched by this task; each is read from `.ai-sdlc/pr-lifecycle.yaml`, and one test shows that changing a config value changes the behaviour.
+- [x] A fixture where `rebase` on head H leaves the PR DIRTY twice: the second classification yields `route-to-planner` with note `rebase@H x2` and no second rebase runs; after a push to head H2 the guard allows one rebase again.
+- [x] A PR-less task still parks after the configured retry count (847 behaviour preserved for `prUrl: null`).
+- [x] `pr-state.ts` has no `stale-claim` state; `stall.ts` tests cover the 30-minute and 10-minute-idle cases alone.
+- [x] `ci-failure-watcher.ts` is gone; `grep -r ci-failure-watcher pipeline-cli/src orchestrator/src` returns only the docs and this task; the dark-code gate passes without a baseline addition.
+- [x] `docs/operations/cli-hierarchy.md` describes the guard.
 
 ## Verification
 

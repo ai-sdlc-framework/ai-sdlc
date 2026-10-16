@@ -211,6 +211,7 @@ import {
 } from '../hierarchy/reconcile.js';
 import { gatherPrFacts } from '../hierarchy/pr-facts.js';
 import { reenter } from '../hierarchy/reenter.js';
+import { loadPrLifecycleConfig } from '../hierarchy/pr-lifecycle-config.js';
 import { startScheduler } from '../hierarchy/scheduler.js';
 import { createSystemRunner } from '../hierarchy/system-runner.js';
 import type { CommandRunner } from '../hierarchy/types.js';
@@ -468,6 +469,7 @@ export async function runDispatchCli(
         process.stderr.write('cli-dispatch reconcile: --pr must be a number\n');
         return 2;
       }
+      const { maxSameHeadActions } = loadPrLifecycleConfig(cwd);
       const pass = (): ReconcilePr[] | undefined => {
         let facts: ReconcilePr[] | undefined;
         if (flags['facts']) {
@@ -493,6 +495,7 @@ export async function runDispatchCli(
                 boardDir,
                 execute,
                 mainHealth: gatherMainHealth(createSystemRunner(), cwd),
+                maxSameHeadActions,
               }),
             );
             return listLanding(boardDir).filter((r) => !r.landed).length;
@@ -510,6 +513,7 @@ export async function runDispatchCli(
           boardDir,
           execute,
           mainHealth: gatherMainHealth(createSystemRunner(), cwd),
+          maxSameHeadActions,
         }),
       );
       return 0;

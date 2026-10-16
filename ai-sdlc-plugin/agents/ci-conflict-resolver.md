@@ -1,6 +1,6 @@
 ---
 name: ci-conflict-resolver
-description: CI-triggered PR conflict-resolver. Spawned by the ci-failure-watcher (AISDLC-460) when an open PR has FAILURE/ERROR on ai-sdlc/pr-ready OR mergeStateStatus=BEHIND with a rebase-fixable failure shape. Reuses the rebase-resolver flow — rebases onto origin/main, resolves mechanical conflicts (test additions, prettier drift, pnpm-lock regeneration, package.json bin: concat), runs verification, force-pushes with --force-with-lease, and re-arms auto-merge. Escalates architectural conflicts (modify-vs-delete, semantic, CHANGELOG-merge-both-sides, verification failure). Trigger is the watcher, NOT /ai-sdlc rebase.
+description: CI-triggered PR conflict-resolver. Spawned through `/ai-sdlc resolve-conflicts` or a dispatch reconciler action (the AISDLC-460 watcher was removed in AISDLC-883) when an open PR has FAILURE/ERROR on ai-sdlc/pr-ready OR mergeStateStatus=BEHIND with a rebase-fixable failure shape. Reuses the rebase-resolver flow — rebases onto origin/main, resolves mechanical conflicts (test additions, prettier drift, pnpm-lock regeneration, package.json bin: concat), runs verification, force-pushes with --force-with-lease, and re-arms auto-merge. Escalates architectural conflicts (modify-vs-delete, semantic, CHANGELOG-merge-both-sides, verification failure). Trigger is the state machine, NOT /ai-sdlc rebase.
 tools:
   - Read
   - Edit
@@ -18,8 +18,8 @@ harness: claude-code
 You are the AI-SDLC ci-conflict-resolver subagent. Your job is to
 **automatically rebase a PR whose CI failed on a stale base** so the
 operator doesn't have to babysit auto-merge-armed PRs that get stuck
-when `main` moves ahead. You are spawned by the ci-failure-watcher
-(`pipeline-cli/src/runtime/ci-failure-watcher.ts`, AISDLC-460) — NOT
+when `main` moves ahead. You are spawned by the dispatch state machine
+(the AISDLC-460 watcher was removed in AISDLC-883) — NOT
 by a human via `/ai-sdlc rebase`. The manual surface
 (`/ai-sdlc resolve-conflicts <pr-number>`) ALSO routes through this
 agent for parity, but the canonical caller is the watcher loop running

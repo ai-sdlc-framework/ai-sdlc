@@ -126,6 +126,8 @@ export function loadConfig(configDir: string): AiSdlcConfig {
 
     const result = validateResource(doc);
     if (result.skipped) {
+      // `PrLifecycle` (RFC-0054) is read by its own loader in pipeline-cli.
+      if ((doc as { kind?: unknown }).kind === 'PrLifecycle') continue;
       // AISDLC-265 PR #474 review fix: skipped kinds get an INFO-level warning
       // entry so typo'd canonical kinds (e.g. `kind: AutonomyPolcy` instead of
       // `AutonomyPolicy`) don't silently disappear. The legitimate loader-private

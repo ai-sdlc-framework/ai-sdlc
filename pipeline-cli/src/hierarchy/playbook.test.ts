@@ -11,7 +11,6 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { requeueFailed } from '../dispatch/requeue.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
-import { isRebaseFixable } from '../runtime/ci-failure-watcher.js';
 import type { HierarchyEvent } from './emit.js';
 import {
   classifyFailure,
@@ -109,10 +108,6 @@ beforeEach(() => {
 describe('classifyFailure', () => {
   it.each(MECHANICAL_SHAPES)('treats %s as a mechanical conflict shape', (shape) => {
     expect(classifyFailure(verdict({ cause: shape }))).toEqual({ kind: 'rebase-push', shape });
-  });
-
-  it('only lists shapes the conflict resolver treats as rebase-fixable', () => {
-    for (const shape of MECHANICAL_SHAPES) expect(isRebaseFixable(shape)).toBe(true);
   });
 
   it('sends a stale merge ref to a CI retrigger and transient causes to a re-queue', () => {
