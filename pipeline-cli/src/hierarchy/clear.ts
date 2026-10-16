@@ -250,6 +250,8 @@ export const SELF_CLEAR_LEAD_SECONDS = 20;
 export const SELF_CLEAR_IDLE_TIMEOUT_SECONDS = 120;
 /** Default longest wait for the session to start a turn after the resume command. */
 export const SELF_CLEAR_COMEBACK_TIMEOUT_SECONDS = 60;
+/** Default resume hold for the planner: it has no board to wait for, so only a short settle. */
+export const PLANNER_RESUME_AFTER_SECONDS = 3;
 /** Where a session that did not come back after a clear is recorded, under the board dir. */
 export const AUTO_CLEAR_LOG = path.join('handoff', 'auto-clear.log');
 /** The command the dispatch session re-issues after its own clear. */
@@ -284,8 +286,8 @@ export interface ClearSelfOptions {
   role?: 'operator-dispatch' | 'executor' | 'planner';
   /**
    * Optional seconds to hold the resume command after `/clear` (dispatch uses it as a
-   * wake-on-board upper bound). Default 0: the resume command is typed as soon as the
-   * pane is idle after `/clear`.
+   * wake-on-board upper bound). Default 0 (the resume command is typed as soon as the
+   * pane is idle after `/clear`), except the planner, which defaults to 3.
    */
   resumeAfterSeconds?: number;
   /** Longest wait for an idle pane before typing (default 120). */
@@ -325,7 +327,8 @@ export function clearSelf(opts: ClearSelfOptions, deps: ClearSelfDeps): ClearSel
   if (typeof name !== 'string' || !EXECUTOR_NAME_RE.test(name)) {
     throw new Error(`'${String(name)}' is not a valid session name`);
   }
-  const resumeAfterSeconds = opts.resumeAfterSeconds ?? 0;
+  const resumeAfterSeconds =
+    opts.resumeAfterSeconds ?? (opts.role === 'planner' ? PLANNER_RESUME_AFTER_SECONDS : 0);
   const idleTimeoutSeconds = opts.idleTimeoutSeconds ?? SELF_CLEAR_IDLE_TIMEOUT_SECONDS;
   const comebackTimeoutSeconds = opts.comebackTimeoutSeconds ?? SELF_CLEAR_COMEBACK_TIMEOUT_SECONDS;
   const leadSeconds = opts.leadSeconds ?? SELF_CLEAR_LEAD_SECONDS;

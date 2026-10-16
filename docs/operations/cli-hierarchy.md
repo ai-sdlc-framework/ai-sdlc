@@ -439,6 +439,10 @@ cli-hierarchy clear --self [--resume-after <seconds>]
 | `--self`                   | Schedule the calling session's own pane to receive `/clear`, then `/ai-sdlc operator-dispatch` (dispatch session), `/ai-sdlc:planner` (planner) or `/ai-sdlc executor` (an idle executor). |
 | `--resume-after <seconds>` | With `--self`: upper bound on the delay before the resume command (default 60); a new brief or verdict file wakes it sooner; `/clear` is typed after 20 s. Refused when `TMUX_PANE` is unset. |
 
+Default resume delay per role when `--resume-after` is not given: the dispatch session holds
+60 s (a new brief or verdict file wakes it sooner), the planner 3 s (it has no board to wait
+for), an idle executor 0 s. An explicit `--resume-after` wins for every role.
+
 `clear <executor>` is a dispatch-session command; `clear --self` is also open to the planner
 and to an executor that holds no inflight task, which is how an idle executor returns to the
 context floor.

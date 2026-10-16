@@ -650,6 +650,38 @@ esac
     });
   });
 
+  describe('default resume delay per role', () => {
+    const planner = () =>
+      entry({ role: 'planner', name: 'planner', tmuxWindow: 'planner', paneId: '%5' });
+    const plannerRun = (file: string, args: readonly string[]) => {
+      const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
+      if (args[0] === 'list-windows') return ok('planner\n');
+      if (args[0] === 'display-message') return ok('%5\n');
+      return ok();
+    };
+
+    it('holds the planner resume for 3 seconds by default', () => {
+      seedRoster(planner(), dispatch());
+      const r = clearSelf({ self: 'planner', role: 'planner' }, { ...selfDeps(), run: plannerRun });
+      expect(r.resumeAfterSeconds).toBe(3);
+      expect(spawned[0]!.args[6]).toBe('3');
+    });
+
+    it('lets an explicit resume delay win for the planner', () => {
+      seedRoster(planner(), dispatch());
+      const r = clearSelf(
+        { self: 'planner', role: 'planner', resumeAfterSeconds: 0 },
+        { ...selfDeps(), run: plannerRun },
+      );
+      expect(r.resumeAfterSeconds).toBe(0);
+    });
+
+    it('leaves the dispatch default unchanged', () => {
+      const r = clearSelf({ self: 'operator-dispatch' }, selfDeps());
+      expect(r.resumeAfterSeconds).toBe(0);
+    });
+  });
+
   describe('as an idle executor', () => {
     const executorDeps = () => {
       const d = selfDeps();

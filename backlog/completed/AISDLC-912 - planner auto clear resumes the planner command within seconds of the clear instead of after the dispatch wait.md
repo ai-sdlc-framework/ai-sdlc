@@ -1,7 +1,7 @@
 ---
 id: AISDLC-912
 title: 'fix: the planner auto clear re-issues /ai-sdlc:planner within seconds of the clear instead of after the 60 second dispatch wait'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [bug, pipeline-cli, hierarchy]
