@@ -166,6 +166,24 @@ export interface TranscriptLeaf {
    * `merkle-core.mjs`). Leaves without it verify unchanged.
    */
   stage?: StagedLeafStage;
+  /**
+   * AISDLC-725: the commit range a DELTA review round covered
+   * (`git diff baseSha headSha`). Present ONLY on delta rounds; a full round
+   * omits it so its leaf hashes exactly as before this field existed (the
+   * AISDLC-588 additive-compat invariant: never `null`/`{}`).
+   *
+   * Scope note: a v6 envelope whose reviewer leaves are all delta leaves proves only
+   * that the delta (plus the earlier findings) was reviewed. The coverage of the base
+   * commit rests on the earlier round's leaves and the reviews ledger, which the
+   * verifier does not cross-check; read a delta leaf as "delta coverage" only.
+   */
+  reviewRange?: {
+    mode: 'delta';
+    /** Commit the earlier review covered; the delta starts here. */
+    baseSha: string;
+    /** Commit the delta ends at (the leaf's head). */
+    headSha: string;
+  };
 }
 
 /** The stages of the staged review that run a model and so produce a leaf. */

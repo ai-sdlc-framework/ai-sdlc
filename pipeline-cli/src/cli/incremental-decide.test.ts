@@ -204,7 +204,7 @@ describe('decide() — integration over file inputs + injected runGit', () => {
     expect(stderrChunks.join('')).toMatch(/failed to read --comments-file/);
   });
 
-  it('falls back when --numstat-file is unreadable: routes to delta-too-large (safer side)', () => {
+  it('falls back when --numstat-file is unreadable: routes to delta-uncomputable (never a zero-line delta)', () => {
     const commentsFile = join(tmp, 'comments.txt');
     writeFileSync(
       commentsFile,
@@ -216,7 +216,7 @@ describe('decide() — integration over file inputs + injected runGit', () => {
     );
     const d = decide(baseArgs({ commentsFile, numstatFile: join(tmp, 'missing.txt') }));
     expect(d.deltaOnly).toBe(false);
-    expect(d.reason).toBe('delta-too-large');
+    expect(d.reason).toBe('delta-uncomputable');
     expect(stderrChunks.join('')).toMatch(/failed to read --numstat-file/);
   });
 

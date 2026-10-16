@@ -163,7 +163,21 @@ export type IncrementalReason =
   | 'unchanged'
   | 'delta-too-large'
   | 'new-top-level-dir'
-  | 'delta-only';
+  | 'delta-only'
+  /** AISDLC-725: the recorded review state failed validation. */
+  | 'marker-invalid'
+  /** AISDLC-725: the last-reviewed commit is gone (rebase) and the content differs. */
+  | 'last-reviewed-unreachable'
+  /** AISDLC-725: the delta diff could not be computed, or came back empty. */
+  | 'delta-uncomputable'
+  /** AISDLC-725: content is unchanged but the prior round was rejected, so no auto-approve. */
+  | 'unchanged-after-rejection'
+  /**
+   * AISDLC-725: the reviews ledger does not corroborate the local round state (no ledger
+   * record that a review ran at the base commit, or that every reviewer approved), so
+   * neither skip nor delta is allowed.
+   */
+  | 'review-uncorroborated';
 
 // ── Marker parse / format ────────────────────────────────────────────
 
@@ -761,6 +775,13 @@ export interface DecideInputs {
   fullDiffTopLevelDirs: Set<string>;
   /** Threshold for the `delta-too-large` branch. Defaults `DEFAULT_MAX_DELTA_LINES`. */
   maxDeltaLines?: number;
+  /**
+   * AISDLC-725: `false` when the delta diff could not be computed (git failed,
+   * numstat unreadable). A failed computation is NEVER a zero-line delta: the
+   * decision is a full review with reason `delta-uncomputable`. Defaults to
+   * `true` for callers that already hold real stats.
+   */
+  deltaComputed?: boolean;
 }
 
 /**
@@ -769,6 +790,8 @@ export interface DecideInputs {
  * Branches (in order):
  *   1. no marker          → deltaOnly: false, reason: 'no-marker' (full review)
  *   2. hash unchanged     → skip: true, reason: 'unchanged' (auto-approve)
+ *   2b. delta not computed, or empty while the hash differs
+ *                         → deltaOnly: false, reason: 'delta-uncomputable'
  *   3. delta over cap     → deltaOnly: false, reason: 'delta-too-large'
  *   4. new top-level dir  → deltaOnly: false, reason: 'new-top-level-dir'
  *   5. otherwise          → deltaOnly: true, reason: 'delta-only'
@@ -800,6 +823,18 @@ export function decideIncrementalReview(inputs: DecideInputs): IncrementalDecisi
       lastReviewedSha: inputs.prior.reviewedSha,
       priorContentHash: inputs.prior.contentHash,
       reason: 'unchanged',
+    };
+  }
+  // AISDLC-725: the hash differs, so the delta cannot honestly be empty. An
+  // uncomputed or empty delta is a failed diff, never "zero lines".
+  if (inputs.deltaComputed === false || inputs.deltaStats.filesChanged === 0) {
+    return {
+      ...baseDecision,
+      skip: false,
+      deltaOnly: false,
+      lastReviewedSha: inputs.prior.reviewedSha,
+      priorContentHash: inputs.prior.contentHash,
+      reason: 'delta-uncomputable',
     };
   }
   if (inputs.deltaStats.totalLines > maxDeltaLines) {

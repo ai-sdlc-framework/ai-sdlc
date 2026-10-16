@@ -49,7 +49,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import {
@@ -68,6 +68,15 @@ import {
   type MarkerPayload,
   type RunGit,
 } from '../incremental-review/incremental.js';
+import {
+  formatRoundLogLine,
+  planReviewRound,
+  loadReviewState,
+  recordDeveloperResponse,
+  recordRoundFromVerdicts,
+  type RecordableVerdict,
+  type ReviewRoundPlan,
+} from '../incremental-review/review-rounds.js';
 
 /**
  * Emit a CLI result as a single line of JSON followed by `\n`.
@@ -192,6 +201,123 @@ export function buildIncrementalDecideCli(opts: BuildOptions = {}): Argv {
           runGit,
         });
         emit(decision);
+      },
+    )
+    .command(
+      'plan',
+      'AISDLC-725: plan the next review round from the local per-task review state ' +
+        '(every review path calls this; never build a later-round prompt without it).',
+      (y) =>
+        y
+          .option('task-id', { type: 'string', demandOption: true })
+          .option('repo-root', { type: 'string', default: process.cwd() })
+          .option('base-ref', { type: 'string', default: 'origin/main' })
+          .option('head-ref', { type: 'string', default: 'HEAD' })
+          .option('max-delta-lines', { type: 'number', default: DEFAULT_MAX_DELTA_LINES })
+          .option('comments-json-file', {
+            type: 'string',
+            describe: 'PR comments JSON; the marker mirror, used only without local state.',
+          })
+          .option('diff-out', {
+            type: 'string',
+            describe: 'Write the delta diff here (delta rounds only).',
+          })
+          .option('skip', {
+            type: 'boolean',
+            default: true,
+            describe: 'Pass --no-skip to never choose skip (a caller that cannot auto-approve).',
+          }),
+      (parsed) => {
+        let mirrorMarker: MarkerPayload | null = null;
+        const commentsFile = parsed['comments-json-file'] as string | undefined;
+        if (commentsFile) {
+          mirrorMarker = findTrustedMarkerInComments(readCommentsJsonFile(commentsFile));
+        }
+        const plan = planReviewRound({
+          taskId: String(parsed['task-id']),
+          repoRoot: parsed['repo-root'] as string,
+          baseRef: parsed['base-ref'] as string,
+          headRef: parsed['head-ref'] as string,
+          maxDeltaLines: parsed['max-delta-lines'] as number,
+          runGit,
+          mirrorMarker,
+          allowSkip: parsed['skip'] !== false,
+        });
+        const diffOut = parsed['diff-out'] as string | undefined;
+        if (diffOut && plan.deltaDiff !== null) writeFileSync(diffOut, plan.deltaDiff);
+        process.stderr.write(`[ai-sdlc-progress] ${formatRoundLogLine(plan)}\n`);
+        emit({ ...plan, deltaDiff: undefined, deltaDiffFile: diffOut ?? null });
+      },
+    )
+    .command(
+      'record-round',
+      'AISDLC-725: record a finished review round (any verdict) in the local review state.',
+      (y) =>
+        y
+          .option('task-id', { type: 'string', demandOption: true })
+          .option('repo-root', { type: 'string', default: process.cwd() })
+          .option('plan-file', {
+            type: 'string',
+            demandOption: true,
+            describe: 'The JSON `plan` printed for this round.',
+          })
+          .option('verdicts-file', {
+            type: 'string',
+            demandOption: true,
+            describe: 'JSON array of {reviewer, approved, findings[]} for the round.',
+          })
+          .option('tokens', { type: 'number', describe: 'Tokens the round spent, when known.' }),
+      (parsed) => {
+        const plan = JSON.parse(
+          readFileSync(parsed['plan-file'] as string, 'utf-8'),
+        ) as ReviewRoundPlan;
+        const rawVerdicts: unknown = JSON.parse(
+          readFileSync(parsed['verdicts-file'] as string, 'utf-8'),
+        );
+        const verdicts = coerceRecordableVerdicts(rawVerdicts);
+        if (verdicts === null) {
+          warn(
+            'record-round: --verdicts-file must be a NON-EMPTY JSON array of ' +
+              '{reviewer, approved, findings[]}; nothing recorded.',
+          );
+          process.exit(1);
+        }
+        const taskId = String(parsed['task-id']);
+        const repoRoot = parsed['repo-root'] as string;
+        // Same approval rule as every other recorder: a reviewer approval with a critical or
+        // major finding, or an empty set of verdicts, is a rejected round.
+        const ok = recordRoundFromVerdicts(
+          repoRoot,
+          taskId,
+          plan,
+          verdicts,
+          typeof parsed['tokens'] === 'number' ? (parsed['tokens'] as number) : undefined,
+        );
+        if (!ok) {
+          warn('record-round: round not recorded (plan lacks a head or content hash).');
+          process.exit(1);
+        }
+        const record = loadReviewState(taskId, repoRoot).rounds.at(-1);
+        emit(record);
+      },
+    )
+    .command(
+      'record-response',
+      "AISDLC-725: record the developer's response to a round's findings.",
+      (y) =>
+        y
+          .option('task-id', { type: 'string', demandOption: true })
+          .option('repo-root', { type: 'string', default: process.cwd() })
+          .option('round', { type: 'number', demandOption: true })
+          .option('text-file', { type: 'string', demandOption: true }),
+      (parsed) => {
+        recordDeveloperResponse(
+          parsed['repo-root'] as string,
+          String(parsed['task-id']),
+          parsed['round'] as number,
+          readFileSync(parsed['text-file'] as string, 'utf-8'),
+        );
+        emit({ ok: true });
       },
     )
     .command(
@@ -343,6 +469,33 @@ function readCommentsJsonFile(path: string): CommentWithAuthor[] {
   return out;
 }
 
+/** Shape-check a verdicts file; null for anything but a non-empty array of well-formed verdicts. */
+function coerceRecordableVerdicts(raw: unknown): RecordableVerdict[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const out: RecordableVerdict[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') return null;
+    const r = item as Record<string, unknown>;
+    const name = typeof r.reviewer === 'string' ? r.reviewer : r.agentId;
+    if (typeof name !== 'string' || name === '' || typeof r.approved !== 'boolean') return null;
+    if (!Array.isArray(r.findings)) return null;
+    const findings: RecordableVerdict['findings'] = [];
+    for (const f of r.findings) {
+      if (!f || typeof f !== 'object') return null;
+      const fr = f as Record<string, unknown>;
+      if (typeof fr.severity !== 'string' || typeof fr.message !== 'string') return null;
+      findings.push({
+        severity: fr.severity,
+        message: fr.message,
+        ...(typeof fr.file === 'string' ? { file: fr.file } : {}),
+        ...(typeof fr.line === 'number' ? { line: fr.line } : {}),
+      });
+    }
+    out.push({ agentId: name, approved: r.approved, findings });
+  }
+  return out;
+}
+
 export function decide(args: DecideArgs): IncrementalDecision {
   // ── Locate prior marker (if any) ─────────────────────────────────
   let prior: MarkerPayload | null = null;
@@ -397,10 +550,13 @@ export function decide(args: DecideArgs): IncrementalDecision {
     topLevelDirs: new Set<string>(),
     filesChanged: 0,
   };
+  // AISDLC-725: an unread or absent numstat is NOT a zero-line delta.
+  let deltaComputed = prior === null;
   if (prior !== null && args.numstatFile) {
     try {
       const numstat = readFileSync(args.numstatFile, 'utf-8');
       deltaStats = parseNumstatForDelta(numstat);
+      deltaComputed = true;
     } catch (err) {
       warn(`failed to read --numstat-file: ${(err as Error).message}`);
       // Fall through with empty stats. The contentHash mismatch will still
@@ -444,6 +600,7 @@ export function decide(args: DecideArgs): IncrementalDecision {
     deltaStats,
     fullDiffTopLevelDirs,
     maxDeltaLines: args.maxDeltaLines,
+    deltaComputed,
   });
 }
 

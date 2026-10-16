@@ -5,3 +5,4 @@
  * reports on the actual logic.
  */
 export * from './incremental.js';
+export * from './review-rounds.js';

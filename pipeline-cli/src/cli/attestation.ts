@@ -667,6 +667,28 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
                 'AISDLC-616: GitHub PR number, when already known at emit-leaf time. Recorded ' +
                 'on the reviews ledger record as `prNumber` (nullable — omit when the PR has not ' +
                 'been opened yet).',
+            })
+            .option('review-mode', {
+              type: 'string',
+              choices: ['full', 'delta'] as const,
+              describe:
+                'AISDLC-725: whether this round read the full diff or only a delta. A delta ' +
+                'round also needs --review-base-sha; its leaf then binds to the commit range.',
+            })
+            .option('review-base-sha', {
+              type: 'string',
+              describe:
+                'AISDLC-725: 40-hex commit a delta round read from (the last-reviewed commit).',
+            })
+            .option('review-head-sha', {
+              type: 'string',
+              describe:
+                'AISDLC-725: commit the delta round actually reviewed, when it differs from ' +
+                '--head-sha (reconcile signs the post-rebase head). Defaults to --head-sha.',
+            })
+            .option('review-reason', {
+              type: 'string',
+              describe: 'AISDLC-725: why the round was full or delta (the plan reason).',
             }),
         (args) => {
           const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
@@ -980,6 +1002,34 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           const independenceTier: 'attested' | undefined =
             verdictClass === 'independent' ? 'attested' : undefined;
 
+          // AISDLC-725: a delta round's leaf binds to the commit range it covered.
+          const reviewMode = args['review-mode'] as 'full' | 'delta' | undefined;
+          const reviewBaseSha = (args['review-base-sha'] as string | undefined)?.toLowerCase();
+          if (reviewMode === 'delta' && !(reviewBaseSha && /^[0-9a-f]{40}$/.test(reviewBaseSha))) {
+            process.stderr.write(
+              `[cli-attestation] emit-leaf: --review-mode delta requires --review-base-sha ` +
+                `(40 lowercase hex characters)\n`,
+            );
+            process.exit(1);
+          }
+          const reviewHeadArg = args['review-head-sha'] as string | undefined;
+          if (reviewHeadArg !== undefined && !/^[0-9a-f]{40}$/.test(reviewHeadArg.toLowerCase())) {
+            process.stderr.write(
+              `[cli-attestation] emit-leaf: --review-head-sha must be 40 hex characters\n`,
+            );
+            process.exit(1);
+          }
+          const reviewRange: TranscriptLeaf['reviewRange'] =
+            reviewMode === 'delta' && reviewBaseSha
+              ? {
+                  mode: 'delta',
+                  baseSha: reviewBaseSha,
+                  headSha: (
+                    (args['review-head-sha'] as string | undefined) ?? headSha
+                  ).toLowerCase(),
+                }
+              : undefined;
+
           const leaf: TranscriptLeaf = {
             leafIndex,
             taskId,
@@ -997,6 +1047,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             anchorEvidence,
             // Never written as null or empty: spread only when a stage was given.
             ...(stage ? { stage } : {}),
+            reviewRange,
           };
 
           // Append atomically via write-to-tmp + renameSync to the per-patch-id file.
@@ -1034,6 +1085,15 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
                 timestamp: signedAt,
                 verdict: verdictApproved ? 'approved' : 'rejected',
                 findings: normalizedFindings,
+                ...(reviewMode
+                  ? {
+                      reviewMode,
+                      reviewBaseSha: reviewMode === 'delta' ? (reviewBaseSha ?? null) : null,
+                      ...(args['review-reason']
+                        ? { reviewReason: args['review-reason'] as string }
+                        : {}),
+                    }
+                  : {}),
               },
               repoRoot,
             );

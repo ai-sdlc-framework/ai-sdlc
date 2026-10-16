@@ -14,19 +14,21 @@
  * @module next-step/review-prepare
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync } from 'node:fs';
 import { buildAutoApprovedVerdict } from '../incremental-review/index.js';
+import { join } from 'node:path';
 import {
   TRUSTED_MARKER_AUTHOR_ASSOCIATIONS,
   TRUSTED_MARKER_AUTHOR_LOGINS,
-  findTrustedMarkerInComments,
   type CommentWithAuthor,
 } from '../incremental-review/incremental.js';
 import { defaultArtifactsDir, resolveProjectRoot } from '../routing/artifacts-dir.js';
 import { resolveModel } from '../routing/resolve-model.js';
 import { taskClassOf } from '../routing/task-class.js';
-import { buildReviewPrompts } from '../steps/07-build-review-prompts.js';
+import {
+  buildReviewPrompts,
+  type BuildReviewPromptsOptions,
+} from '../steps/07-build-review-prompts.js';
 import type { ReviewerType, ReviewerVerdict } from '../types.js';
 import { requiredReviewerKind } from '../../attestation-core/review-scope-core.mjs';
 import { writeRunFile } from './init.js';
@@ -181,24 +183,6 @@ async function runClassifier(
   }
 }
 
-interface IncrementalJson {
-  skip: boolean;
-  deltaOnly: boolean;
-  reason: string;
-  lastReviewedSha: string | null;
-  currentContentHash: string;
-  deltaSize: number;
-}
-
-const INCREMENTAL_FALLBACK: IncrementalJson = {
-  skip: false,
-  deltaOnly: false,
-  reason: 'no-marker',
-  lastReviewedSha: null,
-  currentContentHash: '',
-  deltaSize: 0,
-};
-
 /** Fetch PR comments and keep only trusted-author ones (AISDLC-142 round 2). */
 export async function fetchTrustedComments(
   ctx: NextStepContext,
@@ -233,50 +217,6 @@ export async function fetchTrustedComments(
   }
 }
 
-async function runIncrementalGate(
-  ctx: NextStepContext,
-  state: NextStepState,
-  pathsFile: string,
-): Promise<IncrementalJson> {
-  const comments = await fetchTrustedComments(ctx, state.branch);
-  const commentsFile = writeRunFile(ctx, 'pr-comments.json', JSON.stringify(comments));
-  const prior = comments.length > 0 ? findTrustedMarkerInComments(comments) : null;
-  const numstatFile = writeRunFile(ctx, 'pr-delta-numstat.txt', '');
-  if (prior?.reviewedSha) {
-    const n = await ctx.runner('git', ['diff', `${prior.reviewedSha}...HEAD`, '--numstat'], {
-      cwd: state.worktreePath,
-      allowFailure: true,
-    });
-    if (n.code === 0) writeFileSync(numstatFile, n.stdout, 'utf8');
-  }
-  const r = await ctx.runner(
-    'node',
-    [
-      join(ctx.cliBinDir, 'cli-incremental-decide.mjs'),
-      'decide',
-      '--comments-json-file',
-      commentsFile,
-      '--base-ref',
-      'origin/main',
-      '--head-ref',
-      'HEAD',
-      '--repo-root',
-      state.worktreePath,
-      '--numstat-file',
-      numstatFile,
-      '--full-diff-paths-file',
-      pathsFile,
-    ],
-    { cwd: ctx.workDir, allowFailure: true },
-  );
-  if (r.code !== 0) return INCREMENTAL_FALLBACK;
-  try {
-    return { ...INCREMENTAL_FALLBACK, ...(JSON.parse(r.stdout) as Partial<IncrementalJson>) };
-  } catch {
-    return INCREMENTAL_FALLBACK;
-  }
-}
-
 function classifierLineFor(c: ClassifierDecision): string {
   return c.fellOpen
     ? `Classifier decision: [${c.reviewers.join(' ')}] (fellOpen: ${c.fellOpenReason ?? 'low-confidence'})`
@@ -290,7 +230,11 @@ export async function prepareReview(
   ctx: NextStepContext,
   state: NextStepState,
   round: number,
-  opts: { noStaged?: boolean } = {},
+  opts: {
+    noStaged?: boolean;
+    /** Test seam: inject the round plan. */
+    planRound?: BuildReviewPromptsOptions['planRound'];
+  } = {},
 ): Promise<ReviewPrepareResult> {
   const artifactsDir =
     ctx.env.ARTIFACTS_DIR || defaultArtifactsDir(resolveProjectRoot(state.worktreePath));
@@ -305,6 +249,8 @@ export async function prepareReview(
     runner: ctx.runner,
     sourceKind: 'backlog',
     iteration: round,
+    allowSkip: true,
+    ...(opts.planRound ? { planRound: opts.planRound } : {}),
   });
   if (built.diffUnavailable) {
     return {
@@ -363,7 +309,22 @@ export async function prepareReview(
   const classifierLine = classifierLineFor(classifier);
   const selected = selectForReview(built.prompts, classifier.reviewers, built.changedFiles);
 
-  const incremental = await runIncrementalGate(ctx, state, pathsFile);
+  // AISDLC-725: the shared round plan (built with the prompts) is the one incremental decision.
+  const roundPlan = built.roundPlan;
+  const { deltaDiff: _omitDiff, ...planForState } = roundPlan ?? {
+    deltaDiff: null,
+    round: 0,
+    mode: 'full' as const,
+    reason: 'first-round' as const,
+    baseSha: null,
+    headSha: '',
+    deltaSize: 0,
+    contentHash: '',
+    headBlobHash: '',
+    prior: null,
+    deltaReviewers: [],
+  };
+  void _omitDiff;
   const headSha = (
     await ctx.runner('git', ['rev-parse', 'HEAD'], { cwd: state.worktreePath, allowFailure: true })
   ).stdout.trim();
@@ -392,18 +353,19 @@ export async function prepareReview(
       fellOpen: classifier.fellOpen,
     },
     incremental: {
-      reason: incremental.reason,
-      skip: incremental.skip,
-      deltaOnly: incremental.deltaOnly,
-      deltaSize: incremental.deltaSize,
-      lastReviewedSha: incremental.lastReviewedSha,
-      contentHash: incremental.currentContentHash,
+      reason: planForState.reason,
+      skip: planForState.mode === 'skip',
+      deltaOnly: planForState.mode === 'delta',
+      deltaSize: planForState.deltaSize,
+      lastReviewedSha: planForState.baseSha,
+      contentHash: planForState.contentHash,
     },
+    ...(roundPlan ? { roundPlan: { ...planForState } } : {}),
   };
 
-  // Incremental `unchanged`: reuse the prior approval, spawn nothing.
-  if (incremental.skip && incremental.lastReviewedSha) {
-    const reviewedSha = incremental.lastReviewedSha;
+  // Unchanged content after an approval the committed ledger corroborates: reuse it, spawn nothing.
+  if (planForState.mode === 'skip' && planForState.baseSha) {
+    const reviewedSha = planForState.baseSha;
     const verdicts: ReviewerVerdict[] = selected.map((p) => ({
       agentId: resolveReviewerAgent(p.reviewer, ctx.env),
       harness: reviewerHarness(p.reviewer, ctx.env, codex),
@@ -420,56 +382,12 @@ export async function prepareReview(
     };
   }
   const stagedWanted =
-    built.reviewerSetMode === 'staged' && opts.noStaged !== true && !incremental.skip;
+    built.reviewerSetMode === 'staged' && opts.noStaged !== true && planForState.mode !== 'skip';
   if (selected.length === 0 && !stagedWanted) {
     return { kind: 'nothing-to-spawn', review: baseReview, classifierLine, verdicts: [] };
   }
 
-  // Delta-only: reviewers read the delta; the verdict still covers the whole PR.
-  let promptPreamble = '';
-  let promptDiff: string | undefined;
-  if (incremental.deltaOnly && incremental.lastReviewedSha) {
-    const d = await ctx.runner('git', ['diff', `${incremental.lastReviewedSha}...HEAD`], {
-      cwd: state.worktreePath,
-      allowFailure: true,
-    });
-    if (d.code === 0) {
-      promptDiff = d.stdout;
-      writeRunFile(ctx, 'pr-delta-diff.txt', d.stdout);
-      promptPreamble =
-        `**Incremental review (AISDLC-142):** the FULL PR diff was reviewed earlier at SHA ` +
-        `\`${incremental.lastReviewedSha}\`. This incremental review only covers the delta from ` +
-        `\`${incremental.lastReviewedSha}\` to HEAD (${incremental.deltaSize} lines). Your verdict ` +
-        `still applies to the WHOLE PR; only the diff you read is scoped down.\n\n`;
-    }
-  }
-  const rebuilt = async (reviewers: ReviewerType[], names: readonly string[]) =>
-    selectForReview(
-      (
-        await buildReviewPrompts({
-          taskId: state.taskId,
-          task: state.task,
-          branch: state.branch,
-          worktreePath: state.worktreePath,
-          workDir: ctx.workDir,
-          runner: ctx.runner,
-          sourceKind: 'backlog',
-          iteration: round,
-          promptDiff,
-          recordRouting: false,
-          reviewers,
-        })
-      ).prompts,
-      names,
-      built.changedFiles,
-    );
-  const prompts =
-    promptDiff === undefined
-      ? selected
-      : await rebuilt(
-          selected.map((p) => p.reviewer),
-          classifier.reviewers,
-        );
+  const prompts = selected;
 
   // One nonce per round, shared by every reviewer (they all review the same head).
   const nonceRun = await ctx.runner(
@@ -508,7 +426,7 @@ export async function prepareReview(
       const promptFile = writeRunFile(
         ctx,
         `review-r${round}-${agent}.md`,
-        `${promptPreamble}${p.prompt}\n\n` +
+        `${p.prompt}\n\n` +
           `Diff-binding token (for attestation, do not omit from your response): ${nonceMarker}\n`,
       );
       out.push({
@@ -525,23 +443,17 @@ export async function prepareReview(
 
   if (stagedWanted) {
     // The standalone security reviewer runs beside the staged set, last (RFC-0052 OQ-1).
-    const securityPrompts = (
-      promptDiff === undefined
-        ? built.prompts
-        : await rebuilt(['security-reviewer'], ALL_CLASSIFIER_NAMES)
-    ).filter((p) => p.reviewer === 'security-reviewer');
+    const securityPrompts = built.prompts.filter((p) => p.reviewer === 'security-reviewer');
     const security = spawnedFor(securityPrompts)[0] ?? null;
     // DEC-0149: staged leaves are advisory and never satisfy the reviewer-set requirement, so
     // the classifier's normal set runs beside the staged pipeline and is what the envelope covers.
     const beside = spawnedFor(prompts);
-    const diffFile = promptDiff !== undefined ? join(ctx.filesDir, 'pr-delta-diff.txt') : undefined;
     const stagedReview = await startStagedRound(ctx, state, {
       round,
       artifactsDir,
       baseReview,
       security,
       beside,
-      ...(diffFile ? { diffFile } : {}),
       nonce,
     });
     if (stagedReview) return { kind: 'spawn', review: stagedReview, classifierLine };

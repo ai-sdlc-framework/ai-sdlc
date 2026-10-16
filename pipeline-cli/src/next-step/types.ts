@@ -98,6 +98,8 @@ export interface ReviewRoundState {
     lastReviewedSha: string | null;
     contentHash: string;
   };
+  /** AISDLC-725: the shared round plan (without the delta diff) this round was built from. */
+  roundPlan?: Omit<import('../incremental-review/review-rounds.js').ReviewRoundPlan, 'deltaDiff'>;
   /** Set while the staged review (RFC-0052) is driving this round. */
   staged?: StagedRoundState;
 }

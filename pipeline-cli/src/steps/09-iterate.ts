@@ -18,6 +18,11 @@ import { buildDeveloperPrompt } from './05-build-dev-prompt.js';
 import { parseDeveloperReturnWithRetry } from './06-parse-dev-return.js';
 import { buildReviewPrompts } from './07-build-review-prompts.js';
 import { aggregateVerdicts, formatFeedback } from './08-aggregate-verdicts.js';
+import {
+  recordDeveloperResponse,
+  loadReviewState,
+  recordRoundFromVerdicts,
+} from '../incremental-review/review-rounds.js';
 import type {
   IterateReviewLoopOptions,
   IterateReviewLoopResult,
@@ -123,8 +128,19 @@ export async function iterateReviewLoop(
       break;
     }
     currentDev = parsedDev.developer;
+    // AISDLC-725: the next round's reviewers see the developer's reply to their findings.
+    try {
+      recordDeveloperResponse(
+        opts.worktreePath,
+        opts.taskId,
+        lastRecordedRound(opts.worktreePath, opts.taskId),
+        [currentDev.summary, currentDev.notes].filter(Boolean).join('\n\n'),
+      );
+    } catch {
+      // A missing worktree only costs the reply; the delta round still runs.
+    }
 
-    const { prompts, diffUnavailable } = await buildReviewPrompts({
+    const { prompts, diffUnavailable, roundPlan } = await buildReviewPrompts({
       taskId: opts.taskId,
       task: opts.task,
       branch: opts.branch,
@@ -156,6 +172,8 @@ export async function iterateReviewLoop(
       verdicts: newVerdicts,
       harnessNote: opts.initialVerdict.harnessNote,
     });
+    // AISDLC-725: record the round whatever the verdict, so the next round can be a delta.
+    if (roundPlan) recordRoundFromVerdicts(opts.worktreePath, opts.taskId, roundPlan, newVerdicts);
 
     if (opts.onIteration) {
       await opts.onIteration(iteration, currentVerdict);
@@ -321,4 +339,13 @@ export async function spawnReviewerWithRetry(
   }
 
   return coerceReviewerVerdict(agentId, retryResult);
+}
+
+/** The newest recorded review round number (the round whose findings the developer just answered). */
+function lastRecordedRound(worktreePath: string, taskId: string): number {
+  try {
+    return loadReviewState(taskId, worktreePath).rounds.at(-1)?.round ?? 1;
+  } catch {
+    return 1;
+  }
 }

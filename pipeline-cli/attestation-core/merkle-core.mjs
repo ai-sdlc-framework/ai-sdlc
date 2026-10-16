@@ -125,6 +125,17 @@ export function hashLeaf(leaf) {
     // `null` or an empty string, which would change the hash (the same
     // additive-compat rule as `independenceTier` and `anchorEvidence`).
     stage: leaf.stage,
+    // AISDLC-725: trailing field, present ONLY on delta review rounds. Binds the
+    // leaf to the commit range it covered. `undefined` drops out of
+    // JSON.stringify, so every full-round and legacy leaf hashes unchanged.
+    // Fixed internal key order.
+    reviewRange: leaf.reviewRange
+      ? {
+          mode: leaf.reviewRange.mode,
+          baseSha: leaf.reviewRange.baseSha,
+          headSha: leaf.reviewRange.headSha,
+        }
+      : undefined,
   };
   return hashLeafData(JSON.stringify(ordered));
 }

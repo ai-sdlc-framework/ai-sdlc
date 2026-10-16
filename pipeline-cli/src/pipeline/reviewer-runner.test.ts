@@ -903,3 +903,68 @@ describe('reviewer-runner.test.ts — no shared /tmp/.ai-sdlc pollution', () => 
     }
   });
 });
+
+describe('runReviewerMatrix — shared round plan (AISDLC-725)', () => {
+  const plan = {
+    round: 2,
+    mode: 'delta' as const,
+    reason: 'delta-only' as const,
+    baseSha: 'a'.repeat(40),
+    headSha: 'b'.repeat(40),
+    deltaSize: 3,
+    deltaDiff: 'diff --git a/x b/x\n+DELTA_ONLY_LINE\n',
+    contentHash: 'c'.repeat(64),
+    headBlobHash: 'd'.repeat(64),
+    deltaReviewers: ['code', 'test', 'security'],
+    prior: {
+      round: 1,
+      developerResponse: 'fixed it',
+      reviewers: [
+        {
+          reviewer: 'code',
+          approved: false,
+          findings: [{ severity: 'major', message: 'EARLIER_CODE_FINDING' }],
+        },
+      ],
+    },
+  };
+
+  it('a delta round reads the delta diff and hands each reviewer its own earlier findings', async () => {
+    const client = new FakeModelClient();
+    await runReviewerMatrix({
+      prDiff: CLEAN_DIFF,
+      prNumber: 42,
+      differentialTest: DIFFERENTIAL_TEST_RESULT,
+      modelClient: client,
+      roundPlan: { ...plan, deltaDiff: plan.deltaDiff },
+    });
+    expect(client.calls).toHaveLength(3);
+    const [code, test] = client.calls;
+    expect(code.userMessage).toContain('DELTA_ONLY_LINE');
+    expect(code.userMessage).not.toContain(CLEAN_DIFF.slice(0, 40));
+    expect(code.userMessage).toContain('EARLIER_CODE_FINDING');
+    expect(code.userMessage).toContain('fixed it');
+    expect(code.userMessage).toContain('Review ONLY that delta');
+    expect(test.userMessage).not.toContain('EARLIER_CODE_FINDING');
+  });
+
+  it('a full round plan leaves the diff untouched', async () => {
+    const client = new FakeModelClient();
+    await runReviewerMatrix({
+      prDiff: CLEAN_DIFF,
+      prNumber: 42,
+      differentialTest: DIFFERENTIAL_TEST_RESULT,
+      modelClient: client,
+      roundPlan: {
+        ...plan,
+        mode: 'full',
+        deltaDiff: null,
+        baseSha: null,
+        prior: null,
+        deltaReviewers: [],
+      },
+    });
+    expect(client.calls[0].userMessage).toContain(CLEAN_DIFF.slice(0, 40));
+    expect(client.calls[0].userMessage).not.toContain('Incremental review');
+  });
+});

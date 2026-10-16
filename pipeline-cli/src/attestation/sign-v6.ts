@@ -92,6 +92,16 @@ export interface V6TranscriptLeafSummary {
    * every leaf that has none: it is never written as `null` or an empty string.
    */
   stage?: StagedLeafStage;
+  /**
+   * AISDLC-725: the commit range a delta review round covered, carried through
+   * as-is from the source leaf. Present only on delta rounds; a full round omits
+   * it. The leaf hash binds it, so the Merkle root signature covers the value.
+   */
+  reviewRange?: {
+    mode: 'delta';
+    baseSha: string;
+    headSha: string;
+  };
 }
 
 /** A single entry in the `merkleProofs` array of the v6 envelope. */
@@ -247,6 +257,8 @@ export function buildV6Envelope(opts: BuildV6EnvelopeOptions): AttestationEnvelo
     anchorEvidence: leaf.anchorEvidence,
     // Staged review: carried through only when the source leaf has one.
     ...(leaf.stage ? { stage: leaf.stage } : {}),
+    // AISDLC-725: carried through as-is; undefined on full rounds.
+    reviewRange: leaf.reviewRange,
   }));
 
   // Build merkleProofs for each prLeaf.

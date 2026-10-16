@@ -66,6 +66,7 @@ import {
   type RunReconcileOptions,
 } from '../orchestrator/reconcile.js';
 import { readFileSync } from 'node:fs';
+import type { ReviewRoundPlan } from '../incremental-review/review-rounds.js';
 import { beginTask } from '../steps/04-flip-status.js';
 import { buildDeveloperPrompt } from '../steps/05-build-dev-prompt.js';
 import { buildReviewPrompts } from '../steps/07-build-review-prompts.js';
@@ -181,6 +182,13 @@ export function buildCli(): Argv {
                 'BEFORE spawning them. Passed through verbatim to every `emit-leaf --nonce` ' +
                 'call so harnessTranscriptHash can find it in the reviewer transcripts.',
             })
+            .option('review-plan-file', {
+              type: 'string',
+              describe:
+                'AISDLC-725: the JSON round plan `cli-incremental-decide plan` printed for this ' +
+                "reconcile pass. Reconcile records the round in the task's local review state " +
+                'and tags every emitted leaf and ledger record with full/delta + the base commit.',
+            })
             .option('reviewers', {
               type: 'string',
               describe:
@@ -207,6 +215,11 @@ export function buildCli(): Argv {
           if (argv['reviewer-model']) opts.reviewerModel = argv['reviewer-model'] as string;
           if (argv['harness']) opts.harness = argv['harness'] as string;
           if (argv['reviewer-nonce']) opts.reviewerNonce = argv['reviewer-nonce'] as string;
+          if (argv['review-plan-file']) {
+            opts.reviewRoundPlan = JSON.parse(
+              readFileSync(argv['review-plan-file'] as string, 'utf-8'),
+            ) as ReviewRoundPlan;
+          }
           if (argv['reviewers']) {
             const parsed = parseReviewersArg(argv['reviewers'] as string);
             if (parsed) opts.reviewers = parsed;

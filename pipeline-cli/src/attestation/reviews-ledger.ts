@@ -104,6 +104,13 @@ export interface ReviewLedgerRecord {
   timestamp: string;
   verdict: 'approved' | 'rejected';
   findings: ReviewLedgerFinding[];
+  /**
+   * AISDLC-725: whether the round read the full diff or only the delta since
+   * `reviewBaseSha`, and why. Optional: records written before this field omit it.
+   */
+  reviewMode?: 'full' | 'delta';
+  reviewBaseSha?: string | null;
+  reviewReason?: string;
 }
 
 const REVIEWS_DIR_RELATIVE = join('.ai-sdlc', 'reviews');
