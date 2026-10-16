@@ -1,0 +1,121 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "9af216eeb7e8acb360ae9f447608cb3e68559d49"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "58cc18bbeb38e44ab552845f4356dbbe9f2103c61b372bdb4c260845f401fa26",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer-codex",
+      "transcriptHash": "102d319c30a6aa7fca77394b0a5c5d195ba275227d35301c360a0290dac84794",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "d8828c56545dd5bbb0bd2215572319841257c85d6ea065329864a59621b71087",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "d8828c56545dd5bbb0bd2215572319841257c85d6ea065329864a59621b71087",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 3,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "34a584510775b367c4858d8f64edf8bbf55ef8c7b06f6a29a80dd6c3dbebf304",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 4,
+      "reviewerName": "test-reviewer-codex",
+      "transcriptHash": "90ab19be51b25eba90e165b571d80a963dff6c34ead77463eef99b300f32b3c3",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 5,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "673b7d959c4d7b115f2550c2cf24a3098e866cf4bf492bdd211bec52f80e3a5a",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "673b7d959c4d7b115f2550c2cf24a3098e866cf4bf492bdd211bec52f80e3a5a",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "695c62cbf98d5b508e12ee18097b520a5e5364bf7272da496136f3acf029645b",
+        "10b03d9ae1ad40a3850ccf0cea21aaec01c2051ff6fb64f0f50364baee9064a9",
+        "07a5dc315bd7e51f00d371cc47945f383d57598ff2627a0b895b01663f865d1c"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "8e9364f92a5fe57420ca9db8183b1bdf9db75e41146dbe6fc622a9090be6cace",
+        "10b03d9ae1ad40a3850ccf0cea21aaec01c2051ff6fb64f0f50364baee9064a9",
+        "07a5dc315bd7e51f00d371cc47945f383d57598ff2627a0b895b01663f865d1c"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "723118c6983f5182298a88be68686ff85ce507271b59cac11d7bf12c59d6dffe",
+        "25c1efa9a300d3aa366967f0d25f1e8a07f98c419b89a72f8d95dc18e9efa0ce",
+        "07a5dc315bd7e51f00d371cc47945f383d57598ff2627a0b895b01663f865d1c"
+      ]
+    },
+    {
+      "leafIndex": 3,
+      "proof": [
+        "253dd335f1e74067685085ada6a7f50fe03b9618f95962e1dbb0b92b81d02e2c",
+        "25c1efa9a300d3aa366967f0d25f1e8a07f98c419b89a72f8d95dc18e9efa0ce",
+        "07a5dc315bd7e51f00d371cc47945f383d57598ff2627a0b895b01663f865d1c"
+      ]
+    },
+    {
+      "leafIndex": 4,
+      "proof": [
+        "f46b3e38176d62724f592f13b6184984833fc4de154844446ec285318d6ebfde",
+        "273470918c4a9f37c40a82bb3b10f6be087853da243b6c8685a18bbc98dcca8e",
+        "743169da2599d0d1ff5d6fa98770b354ad5fce24ebe3c462e8e7c24387db9223"
+      ]
+    },
+    {
+      "leafIndex": 5,
+      "proof": [
+        "256f5121b4cb267ca32f5af43b78392dde505d782385fe1e6156fb10dba8a368",
+        "273470918c4a9f37c40a82bb3b10f6be087853da243b6c8685a18bbc98dcca8e",
+        "743169da2599d0d1ff5d6fa98770b354ad5fce24ebe3c462e8e7c24387db9223"
+      ]
+    }
+  ],
+  "rootHash": "b89a4dec3147cfea1ef4e7c9bbf111982cee87efb71500635500e54c00488ec1",
+  "rootSignature": "X2gyQ/jN6fR2mreetr88IVIHWpNylIa2hnusYrLTqOoAT3ZAic8c+CgSveQJQMS1dBImx3jMULM9QziBBFyaDQ==",
+  "nonce": "6218ffbdf5b90f0292793ccdcb84639bf7d77b12fd71f82331c1a81276bc70db",
+  "leafCount": 6,
+  "signedAt": "2026-10-16T02:24:35.147Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      ".github/workflows/__tests__/trust-marker.test.mjs",
+      "pipeline-cli/src/hierarchy/operational.ts"
+    ],
+    "appliedReviewers": ["code-reviewer-codex", "test-reviewer-codex", "security-reviewer"]
+  }
+}
