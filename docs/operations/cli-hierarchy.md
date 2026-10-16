@@ -763,12 +763,14 @@ the action is `none`, except stale claims and takeover after executor death post
 | `manifest-branch-mismatch` | `rewrite-manifest` | left to a session (`write-manifest` with the PR head ref) |
 | `behind-or-dirty` | `land-prep` | until AISDLC-881: `reenter` (rebases a BEHIND PR; a DIRTY one goes to an executor) ([hand-review-path.md](hand-review-path.md)) |
 | `attestation-content-hash-mismatch` | `push-only-resign` | `reenter` (push-only re-sign manifest, AISDLC-821) |
-| `rate-limited` | `rerun-rate-limited` | every failing job (the `pr-ready` rollup aside) ran under 30 s and its annotation or log says `API rate limit exceeded for installation` (AISDLC-949); `gh run list --commit <sha> --workflow ai-sdlc-gate.yml` for the run id, then `gh run rerun <id> --failed` (no gate run for the head: no-op with a note) once per head SHA, at or after the next full hour; never `reenter` |
+| `rate-limited` | `rerun-rate-limited` | every failing job (the `pr-ready` rollup aside) ran under 30 s and its annotation or log says `API rate limit exceeded for installation` (AISDLC-949), or, with no summary at all, the only failed gate jobs are `Detect Changes` (optionally plus `ai-sdlc/issue-link`) and every other gate job was skipped (AISDLC-953; no test ran); `gh run list --commit <sha> --workflow ai-sdlc-gate.yml` for the run id, then `gh run rerun <id> --failed` (no gate run for the head: no-op with a note) once per head SHA, at or after the next full hour; never `reenter` |
 | `real-failure` | `reenter` | `cli-dispatch reenter <pr>` (manifest with the failing line and head SHA) |
 | `cancelled-or-infra` | `retrigger-once` | `gh run list --commit <sha> --workflow ai-sdlc-gate.yml` for the run id, then `gh run rerun <id> --failed` (no gate run for the head: no-op with a note); once per head SHA |
 | `ready-to-flip` | `flip-ready-takeover` | `gh pr ready <n>`, only after executor death post-sign |
 | `armed-clean`, `pending` | `none` | nothing |
 | `no-match` | `route-to-planner` | the only state routed to the planner |
+
+Design note (AISDLC-953): `cli-hierarchy` has no dequeue for a wrong `reenter` manifest, so a misclassified red costs a full review round. Any such command needs a governance review before it is built; none exists today.
 
 **PR follow-up loop guard (AISDLC-883).** The reconciler (`pipeline-cli/src/hierarchy/reconcile.ts`) is the only PR poller, and a stalled claim has one owner, the stall check (`stall.ts`). Unlike failures must not add up, so a PR follow-up is bounded by what the action did, not by a retry count. Before any machine action on a PR, the reconciler reads `landing/<pr>.json` history; if the same `(action, headSha)` was already taken and the PR returned to it on the same head, the action is not run again and the record becomes `route-to-planner` with a note such as `rebase@<sha> x2`. A push that moves the head resets the guard. The limit is `loopGuard.maxSameHeadActions` in `.ai-sdlc/pr-lifecycle.yaml`. A task with no PR keeps the retry cap in `requeue.ts`.
 

@@ -19,6 +19,8 @@ export interface PrCheck {
   detailsUrl?: string;
   /** Job duration in seconds (completedAt - startedAt), when known. */
   durationSec?: number;
+  /** The job was skipped (the rollup reports it as success; this keeps the fact). */
+  skipped?: boolean;
 }
 
 /** REST facts for one open (or just merged) task PR. */
@@ -106,6 +108,21 @@ function rateLimitSignature(failedChecks: readonly PrCheck[]): boolean {
   );
 }
 
+/**
+ * AISDLC-953 structural shape: the only failed gate jobs are `Detect Changes`
+ * (and optionally `ai-sdlc/issue-link`, plus the `pr-ready` rollup) and every
+ * other check was skipped. No test ran, so nothing the code can fix was seen.
+ */
+function detectChangesOnlyShape(checks: readonly PrCheck[]): boolean {
+  const failedJobs = checks.filter((c) => c.conclusion === 'failure' && c.name !== PR_READY);
+  if (!failedJobs.some((c) => c.name === 'Detect Changes')) return false;
+  if (!failedJobs.every((c) => c.name === 'Detect Changes' || c.name === 'ai-sdlc/issue-link')) {
+    return false;
+  }
+  const others = checks.filter((c) => c.conclusion !== 'failure');
+  return others.every((c) => c.skipped === true || c.name === PR_READY);
+}
+
 function failed(c: PrCheck): boolean {
   return c.conclusion === 'failure';
 }
@@ -135,6 +152,7 @@ export function classifyPr(f: PrFacts): PrClassification {
   const failedChecks = checks.filter(failed);
   if (
     rateLimitSignature(failedChecks) ||
+    detectChangesOnlyShape(checks) ||
     (failedChecks.length > 0 &&
       failedChecks.every((c) => RATE_LIMIT_CHECKS.includes(c.name)) &&
       failedChecks.some((c) => RATE_LIMIT_RE.test(c.summary ?? '')))

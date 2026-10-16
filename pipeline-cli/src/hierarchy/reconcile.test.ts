@@ -307,6 +307,10 @@ describe('helpers', () => {
       conclusion: 'failure',
       summary: 'd',
     });
+    expect(normaliseCheck({ name: 'a', conclusion: 'SKIPPED' })).toMatchObject({
+      conclusion: 'success',
+      skipped: true,
+    });
     expect(normaliseCheck({ name: 'a', conclusion: 'CANCELLED' }).conclusion).toBe('cancelled');
     expect(normaliseCheck({ name: 'a', conclusion: 'TIMED_OUT' }).conclusion).toBe('infra');
   });

@@ -180,3 +180,41 @@ describe('classifyAndRecord event shape (AC-4)', () => {
     ]);
   });
 });
+
+describe('Detect Changes structural shape (AISDLC-953)', () => {
+  const red = (name: string): PrCheck => ({ name, conclusion: 'failure' });
+  const skipped = (name: string): PrCheck => ({ name, conclusion: 'success', skipped: true });
+  const downstream = ['Build and Test', 'Lint', 'Attestation', 'Governance', 'Integration'].map(
+    skipped,
+  );
+  const rollup = red('ai-sdlc/pr-ready');
+
+  // Runs 38968818462 (PR 1701), 38970090869 (PR 1701 new head), 38968758154 (PR 1698):
+  // Detect Changes plus issue-link failed, everything else skipped, no summaries.
+  it.each([
+    ['38968818462', [red('Detect Changes'), red('ai-sdlc/issue-link'), ...downstream, rollup]],
+    ['38970090869', [red('Detect Changes'), red('ai-sdlc/issue-link'), ...downstream, rollup]],
+    ['38968758154', [red('Detect Changes'), ...downstream, rollup]],
+  ])('run %s is rate-limited with empty summaries', (_run, checks) => {
+    expect(classifyPr({ ...base, checks }).state).toBe('rate-limited');
+  });
+
+  it('stays real-failure when a later gate job ran and failed', () => {
+    const checks = [red('Detect Changes'), red('Build and Test'), ...downstream.slice(1), rollup];
+    expect(classifyPr({ ...base, checks }).state).toBe('real-failure');
+  });
+
+  it('stays real-failure when a later gate job ran and passed', () => {
+    const checks = [
+      red('Detect Changes'),
+      { name: 'Build and Test', conclusion: 'success' as const },
+      rollup,
+    ];
+    expect(classifyPr({ ...base, checks }).state).toBe('real-failure');
+  });
+
+  it('is not the shape when Detect Changes did not fail', () => {
+    const checks = [red('ai-sdlc/issue-link'), ...downstream, rollup];
+    expect(classifyPr({ ...base, checks }).state).toBe('real-failure');
+  });
+});
