@@ -1,7 +1,7 @@
 ---
 id: AISDLC-922
 title: 'fix: cli-file decision warns on duplicate pairs already on main instead of refusing the log'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [bug, decisions, cli-file, pipeline-cli, velocity]
