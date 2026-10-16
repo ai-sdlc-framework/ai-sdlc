@@ -146,6 +146,48 @@ describe('gatherPrFacts', () => {
     expect(classifyPr({ ...facts![0]!, taskId: 'AISDLC-1' }).state).toBe('rate-limited');
   });
 
+  it('fills the summary from job annotations when the rollup has none (AISDLC-953)', () => {
+    const ok = (stdout: string) => ({ status: 0, stdout, stderr: '' });
+    const run: CommandRunner = (_file, args) => {
+      const a = args.join(' ');
+      if (a.startsWith('pr list'))
+        return ok(
+          JSON.stringify([
+            {
+              number: 7,
+              title: 'chore(docs): file x',
+              headRefName: 'ai-sdlc/file-x',
+              isCrossRepository: false,
+              author: { login: 'me' },
+              mergeStateStatus: 'CLEAN',
+              files: [],
+            },
+          ]),
+        );
+      if (a.startsWith('api user')) return ok('me');
+      if (a === 'api repos/{owner}/{repo}/check-runs/9/annotations --jq .[].message')
+        return ok('\nAPI rate limit exceeded for installation\n');
+      if (a.startsWith('pr view 7'))
+        return ok(
+          JSON.stringify({
+            statusCheckRollup: [
+              {
+                name: 'Detect Changes',
+                status: 'COMPLETED',
+                conclusion: 'FAILURE',
+                detailsUrl: 'https://github.com/o/r/actions/runs/555/job/9',
+              },
+              { name: 'Build and Test', status: 'COMPLETED', conclusion: 'SKIPPED' },
+            ],
+          }),
+        );
+      return { status: 1, stdout: '', stderr: '' };
+    };
+    const facts = gatherPrFacts(run, '/', board);
+    expect(facts![0]!.checks![0]!.summary).toBe('API rate limit exceeded for installation');
+    expect(classifyPr({ ...facts![0]!, taskId: 'AISDLC-1' }).state).toBe('rate-limited');
+  });
+
   it('falls back to the single-PR resource when the list has no merge state', () => {
     expect(gatherPrFacts(make(undefined), '/', board)?.[0]?.mergeStateStatus).toBe('BEHIND');
     expect(gatherPrFacts(make('UNKNOWN'), '/', board)?.[0]?.mergeStateStatus).toBe('BEHIND');

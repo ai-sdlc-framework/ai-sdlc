@@ -1,7 +1,7 @@
 ---
 id: AISDLC-953
 title: 'PR-state classifier recognises the "Detect Changes failed, every downstream gate job skipped" shape as rate-limited when the facts builder carries no job summary'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels:

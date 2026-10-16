@@ -859,9 +859,26 @@ export function normaliseCheck(c: RollupItem): PrCheck {
     ...(Number.isFinite(t0) && Number.isFinite(t1) && t1 >= t0
       ? { durationSec: Math.round((t1 - t0) / 1000) }
       : {}),
+    ...(raw === 'SKIPPED' ? { skipped: true } : {}),
     ...(summary ? { summary } : {}),
     ...(c.detailsUrl ? { detailsUrl: c.detailsUrl } : {}),
   };
+}
+
+/** AISDLC-953: first annotation message of a failed job, when the rollup gave no summary. */
+function fillSummaryFromAnnotations(run: CommandRunner, cwd: string, checks: PrCheck[]): void {
+  for (const c of checks) {
+    if (c.conclusion !== 'failure' || c.summary || c.name === 'ai-sdlc/pr-ready') continue;
+    const jid = /\/job\/(\d+)/.exec(c.detailsUrl ?? '')?.[1];
+    if (!jid) continue;
+    const r = run(
+      'gh',
+      ['api', `repos/{owner}/{repo}/check-runs/${jid}/annotations`, '--jq', '.[].message'],
+      { cwd },
+    );
+    const msg = r.status === 0 ? r.stdout.split('\n').find((l) => l.trim()) : undefined;
+    if (msg) c.summary = msg.trim().slice(0, 300);
+  }
 }
 
 /** List open PRs and their checks. Returns undefined when GitHub cannot be read. */
@@ -910,6 +927,8 @@ export function gatherFacts(
     const rollup =
       view.status === 0 ? parse<{ statusCheckRollup?: RollupItem[] }>(view.stdout) : undefined;
     const files = p.files?.map((x) => x.path) ?? [];
+    const checks = (rollup?.statusCheckRollup ?? []).map(normaliseCheck);
+    fillSummaryFromAnnotations(run, cwd, checks);
     const queuedManifest = kind === 'task' ? readQueuedManifest(boardDir, taskId) : undefined;
     const inflightManifest = kind === 'task' ? readInflightManifest(boardDir, taskId) : undefined;
     const onBoard = inflightManifest ?? queuedManifest;
@@ -929,7 +948,7 @@ export function gatherFacts(
       ...(p.mergeStateStatus === undefined ? {} : { mergeStateStatus: p.mergeStateStatus }),
       autoMergeArmed: p.autoMergeRequest != null,
       docsOnly: files.length > 0 && files.every((x) => DOCS_FILE_RE.test(x)),
-      checks: (rollup?.statusCheckRollup ?? []).map(normaliseCheck),
+      checks,
     });
   }
   // A record not yet landed whose PR left the open list: ask whether it merged.
