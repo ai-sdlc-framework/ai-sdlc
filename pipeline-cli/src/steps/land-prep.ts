@@ -89,11 +89,36 @@ export function envelopeSubjectSha(file: string): string | null {
  * Remove (and commit the removal of) envelopes whose subject commit is no longer
  * an ancestor of HEAD, so the pre-push hook signs a fresh one. Returns removed paths.
  */
-async function dropStaleEnvelopes(runner: Runner, cwd: string): Promise<string[]> {
+async function dropStaleEnvelopes(
+  runner: Runner,
+  cwd: string,
+  targetBranch: string,
+): Promise<string[]> {
   const dir = join(cwd, '.ai-sdlc', 'attestations');
   if (!existsSync(dir)) return [];
   const dropped: string[] = [];
-  for (const name of readdirSync(dir).filter((n) => n.endsWith('.dsse.json'))) {
+  // Only envelopes this branch added: earlier PRs' envelopes on main are history, not ours.
+  const added = await runner(
+    'git',
+    [
+      'diff',
+      '--name-only',
+      '--diff-filter=A',
+      `origin/${targetBranch}..HEAD`,
+      '--',
+      '.ai-sdlc/attestations/',
+    ],
+    { cwd, allowFailure: true },
+  );
+  if (added.code !== 0) return [];
+  const ours = new Set(
+    added.stdout
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.endsWith('.dsse.json'))
+      .map((l) => l.slice(l.lastIndexOf('/') + 1)),
+  );
+  for (const name of readdirSync(dir).filter((n) => ours.has(n))) {
     const sha = envelopeSubjectSha(join(dir, name));
     if (!sha) continue;
     const anc = await runner('git', ['merge-base', '--is-ancestor', sha, 'HEAD'], {
@@ -148,7 +173,9 @@ export async function landPrep(opts: LandPrepOptions): Promise<LandPrepResult> {
   }
   const afterRebase = (await runner('git', ['rev-parse', 'HEAD'], { cwd })).stdout.trim();
   const rebased = afterRebase !== before;
-  const droppedEnvelopes = rebased ? await dropStaleEnvelopes(runner, cwd) : [];
+  const droppedEnvelopes = rebased
+    ? await dropStaleEnvelopes(runner, cwd, opts.targetBranch ?? 'main')
+    : [];
   const base = { rebased, droppedEnvelopes, resolvedFiles: rebase.resolvedFiles };
   if (opts.push === false) return { ok: true, pushed: false, conflictingFiles: [], ...base };
 
