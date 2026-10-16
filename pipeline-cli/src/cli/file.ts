@@ -118,20 +118,36 @@ export function parseLogStrict(text: string, label: string): ParsedLog {
   return { lines, events };
 }
 
-export function assertNoDuplicatePairs(
-  events: Array<Record<string, unknown>>,
-  label: string,
-): void {
-  const seen = new Set<string>();
+/** Count of each (decisionId, type) pair. */
+export function pairCounts(events: Array<Record<string, unknown>>): Map<string, number> {
+  const counts = new Map<string, number>();
   for (const e of events) {
     if (typeof e.decisionId !== 'string') continue;
     const key = `${e.decisionId}|${String(e.type)}`;
-    if (seen.has(key)) {
-      throw new FileRefusal(
-        `${label}: duplicate (decisionId, type) pair ${e.decisionId} ${String(e.type)}`,
-      );
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/**
+ * Refuses a duplicate (decisionId, type) pair, except a pair already duplicated
+ * on origin/main (`onMain` counts): that one is warned about, never grown (AISDLC-922).
+ */
+export function assertNoDuplicatePairs(
+  events: Array<Record<string, unknown>>,
+  label: string,
+  onMain: Map<string, number> = new Map(),
+): void {
+  for (const [key, n] of pairCounts(events)) {
+    if (n < 2) continue;
+    const allowed = onMain.get(key) ?? 1;
+    const pretty = key.replace('|', ' ');
+    if (n > allowed) {
+      throw new FileRefusal(`${label}: duplicate (decisionId, type) pair ${pretty}`);
     }
-    seen.add(key);
+    console.error(
+      `warning: ${label}: duplicate (decisionId, type) pair ${pretty} already on origin/main`,
+    );
   }
 }
 
@@ -220,13 +236,18 @@ export function buildPrCreateArgs(p: Pick<Publish, 'branch' | 'subject' | 'prBod
   ];
 }
 
-function appendEvents(worktree: string, newLines: string[], label: string): void {
+function appendEvents(
+  worktree: string,
+  newLines: string[],
+  label: string,
+  onMain: Map<string, number> = new Map(),
+): void {
   const p = join(worktree, EVENT_LOG_REL);
   mkdirSync(dirname(p), { recursive: true });
   let text = existsSync(p) ? readFileSync(p, 'utf8') : '';
   if (text !== '' && !text.endsWith('\n')) text += '\n';
   const combined = text + newLines.map((l) => l + '\n').join('');
-  assertNoDuplicatePairs(parseLogStrict(combined, label).events, label);
+  assertNoDuplicatePairs(parseLogStrict(combined, label).events, label, onMain);
   writeFileSync(p, combined);
 }
 
@@ -370,7 +391,27 @@ export function fileDecision(
   const legacy = parseLogStrict(hasLegacy ? readFileSync(logPath, 'utf8') : '', 'local log');
   // Per-event store (AISDLC-719), read through the shared event-log module.
   const local = mergeEvents(legacy, readStoreEvents(repo));
-  assertNoDuplicatePairs(local.events, 'local log');
+  git(deps, repo, 'fetch', 'origin', 'main');
+  const mainEvents: Array<Record<string, unknown>> = [];
+  const mainShow = deps.exec('git', ['show', `origin/main:${EVENT_LOG_REL}`], repo);
+  if (mainShow.status === 0) {
+    mainEvents.push(...parseLogStrict(mainShow.stdout, 'origin/main log').events);
+  }
+  const tree = deps.exec(
+    'git',
+    ['ls-tree', '--name-only', 'origin/main', `${EVENTS_DIR_REL}/`],
+    repo,
+  );
+  const treeShown: string[] = [];
+  for (const f of tree.status === 0 ? tree.stdout.split('\n').filter(Boolean) : []) {
+    const shown = deps.exec('git', ['show', `origin/main:${f}`], repo);
+    if (shown.status === 0) {
+      treeShown.push(shown.stdout);
+      mainEvents.push(...parseLogStrict(shown.stdout, `origin/main ${f}`).events);
+    }
+  }
+  const onMainPairs = pairCounts(mainEvents);
+  assertNoDuplicatePairs(local.events, 'local log', onMainPairs);
   const own = local.events.filter((e) => e.decisionId === decisionId);
   const opened = own.find((e) => e.type === 'decision-opened');
   if (!opened) {
@@ -397,23 +438,12 @@ export function fileDecision(
       }),
     );
   }
-  // Append only events origin/main does not already contain.
-  git(deps, repo, 'fetch', 'origin', 'main');
-  const mainShow = deps.exec('git', ['show', `origin/main:${EVENT_LOG_REL}`], repo);
   const onMainHashes = new Set(
     (mainShow.status === 0 ? parseLogStrict(mainShow.stdout, 'origin/main log').lines : []).map(
       eventContentHash,
     ),
   );
-  const tree = deps.exec(
-    'git',
-    ['ls-tree', '--name-only', 'origin/main', `${EVENTS_DIR_REL}/`],
-    repo,
-  );
-  for (const f of tree.status === 0 ? tree.stdout.split('\n').filter(Boolean) : []) {
-    const shown = deps.exec('git', ['show', `origin/main:${f}`], repo);
-    if (shown.status === 0) onMainHashes.add(eventContentHash(shown.stdout));
-  }
+  for (const t of treeShown) onMainHashes.add(eventContentHash(t));
   const fresh = lines.filter((l) => !onMainHashes.has(eventContentHash(l)));
   if (fresh.length === 0) {
     throw new FileRefusal(`origin/main already has every ${decisionId} event; nothing to file`);
@@ -430,7 +460,7 @@ export function fileDecision(
     pr: opts.pr,
     materialise(wt) {
       if (useLegacy) {
-        appendEvents(wt, fresh, `log for ${decisionId}`);
+        appendEvents(wt, fresh, `log for ${decisionId}`, onMainPairs);
         return [EVENT_LOG_REL];
       }
       return writeEventFiles(wt, fresh);

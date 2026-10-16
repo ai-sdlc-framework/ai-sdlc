@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -260,6 +260,28 @@ describe('cli-file', () => {
     expect(() => fileDecision(repo, 'DEC-0001', { taskId: 'T-1', pr: false }, d)).toThrow(
       /not a JSON object/,
     );
+  });
+
+  it('warns on a pair duplicated on origin/main and files; refuses to grow it (AISDLC-922)', () => {
+    const open = (ts: string) => ev('DEC-0001', 'decision-opened', { ts, options: [{ id: 'a' }] });
+    const dup = [open('t1'), open('t2')].join('\n') + '\n';
+    commitMain(EVENT_LOG_REL, dup);
+    const d = withOptions();
+    writeFileSync(join(repo, EVENT_LOG_REL), dup);
+    const warn = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const r = fileDecision(repo, 'DEC-0001', { taskId: 'T-1', answer: 'a', pr: false }, d);
+      expect(r).toBeDefined();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringMatching(/warning:.*DEC-0001 decision-opened/),
+      );
+      writeFileSync(join(repo, EVENT_LOG_REL), dup + open('t3') + '\n');
+      expect(() => fileDecision(repo, 'DEC-0001', { taskId: 'T-1', pr: false }, d)).toThrow(
+        /duplicate \(decisionId, type\) pair DEC-0001 decision-opened/,
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('rebase rebuilds a conflicting branch in place: same branch, same PR, re-armed (DEC-0088)', () => {
