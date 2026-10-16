@@ -9,7 +9,8 @@
  *  3. Check the instructing sender is the roster's dispatch session (`check-sender`,
  *     AISDLC-764): it always runs, so it cannot be skipped. The sender pid or ref the
  *     harness reports is passed in; without either the check accepts and logs a loud UNCHECKED START warning.
- *  4. Claim the next eligible task under that name, blocking up to `waitSec`
+ *  4. When the board is held (`cli-hierarchy hold`), print the reason and claim nothing.
+ *     Otherwise claim the next eligible task under that name, blocking up to `waitSec`
  *     seconds (`cli-dispatch claim --wait`).
  *  5. Write `inflight/<task>.state.json` naming the worker, before returning and so
  *     before any model call: the lease-push hook binds an executor to its task by
@@ -28,6 +29,7 @@ import { formatResumeFeedback } from '../dispatch/resume.js';
 import type { DispatchManifest } from '../dispatch/types.js';
 import { resolveCaller, type IdentityDeps } from './caller-identity.js';
 import { claimPreflight, type LeasePreflight } from './lease-preflight.js';
+import { readHold } from './hold.js';
 import { checkDispatchSender, checkRepoMatch, rosterProject } from './peer-guard.js';
 import { readRosterChecked } from './roster.js';
 import type { GitRunner } from './trusted-root.js';
@@ -70,8 +72,10 @@ export interface ExecutorStartResult {
   project: string;
   /** The dispatch session's roster name, or '' when there is none. */
   dispatch: string;
-  /** The claimed task, or null when the wait lapsed with nothing eligible. */
+  /** The claimed task, or null when the wait lapsed with nothing eligible or the board is held. */
   taskId: string | null;
+  /** The hold reason when the board is held (AISDLC-899); nothing was claimed. */
+  held?: string;
   manifest?: DispatchManifest;
   /** The lease-push preflight of the claim; absent when nothing was claimed. */
   leasePreflight?: LeasePreflight;
@@ -118,6 +122,11 @@ export async function executorStart(
     deps.log?.(
       `[executor] WARNING: UNCHECKED START: no --sender-pid or --sender-ref was given, so who instructed this start was NOT verified against the dispatch session. Pass the pid or ref the harness reports. (${sender.warning})`,
     );
+  }
+  const hold = readHold(opts.boardDir);
+  if (hold) {
+    deps.log?.(`[executor] BOARD HELD: ${hold.reason} (since ${hold.since}); not claiming.`);
+    return { name: self.name, project: project.project, dispatch, taskId: null, held: hold.reason };
   }
   const result = await (deps.claim ?? claimWithWait)(opts.boardDir, 'in-session-agent', {
     waitSec: opts.waitSec ?? DEFAULT_EXECUTOR_WAIT_SEC,

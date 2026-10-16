@@ -114,6 +114,8 @@ import {
   readParentHead,
   runDispatchTick,
   endsWithQuestion,
+  clearHold,
+  writeHold,
   findOpenPrNumber,
   paneTail,
   fetchHumanAttentionPrs,
@@ -157,6 +159,8 @@ Commands:
   register   Re-record an executor whose process was restarted by hand (register <executor>)
   stall-notice  Alert once when queued work has not moved for N minutes (no relaunch, no model)
   webhook    Local GitHub webhook receiver: webhook up|down|status (needs AI_SDLC_WEBHOOK_SECRET)
+  hold       Pause claims and relaunches, never reporting (--reason <text>); planner or operator only
+  resume     Lift the hold set by hold
   tick       One wake-up of the dispatch loop (ingest, verdict watch, playbook, reports)
   route-decision  Record that a decision was routed to a tier
   handoff         Write or read a session's handoff file (handoff write|read --role <r>)
@@ -242,6 +246,9 @@ Usage for restart and register (dispatch session only, executors only):
   register re-records an executor that is already running under a new pid, after checking
   its tmux pane, the ownership marker, the pane's launch environment and a live harness session.
   A mistake guard refuses any caller but the dispatch session; it is not authentication.
+
+Options for hold:
+  --reason <text>          Why the board is held (required); shown by tick and executor-start
 
 Options for tick:
   --worker <name>          Optional; when given it must equal the calling session's own roster name
@@ -677,6 +684,34 @@ export async function runHierarchyCli(
           deps,
         );
         deps.log(JSON.stringify(result));
+        return 0;
+      }
+      case 'hold':
+      case 'resume': {
+        // The planner (or a human at a shell, who is no roster session) pauses the drain;
+        // dispatch and executors never do.
+        const who = resolveCaller(
+          extras.identity ?? createSystemIdentity(deps.boardDir, extras.processLookup),
+        );
+        if (who && who.role !== 'planner') {
+          process.stderr.write(
+            `cli-hierarchy ${subcommand}: only the planner or the operator may ${subcommand} the board; this session is '${who.name}' (${who.role}). Message the planner instead.\n`,
+          );
+          return 1;
+        }
+        const by = who?.name ?? 'operator';
+        if (subcommand === 'hold') {
+          const reason = flags.reason;
+          if (!reason || reason === 'true') {
+            process.stderr.write('cli-hierarchy hold: --reason <text> is required\n');
+            return 2;
+          }
+          writeHold(deps.boardDir, { reason, since: deps.now().toISOString(), by });
+          deps.log(JSON.stringify({ ok: true, held: { reason, by } }));
+        } else {
+          const lifted = clearHold(deps.boardDir, by, deps.now().toISOString());
+          deps.log(JSON.stringify({ ok: true, resumed: lifted !== null }));
+        }
         return 0;
       }
       case 'tick': {

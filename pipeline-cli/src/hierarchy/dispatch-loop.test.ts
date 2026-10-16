@@ -24,6 +24,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { writeHeartbeat, writeVerdict } from '../dispatch/board.js';
 import { requeueFailed } from '../dispatch/requeue.js';
+import { clearHold, readHold, writeHold } from './hold.js';
 import type { LiveState } from './status.js';
 import { enqueueTasks, type EnqueueEntry } from '../dispatch/enqueue.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
@@ -1007,5 +1008,73 @@ describe('stall check (AISDLC-826)', () => {
       },
     });
     expect(result.humanAttention).toBeUndefined();
+  });
+});
+
+describe('hold (AISDLC-899)', () => {
+  const hold = () =>
+    writeHold(board, { reason: 'spend paused', since: '2026-09-30T12:00:00.000Z', by: 'planner' });
+
+  it('still reports and escalates but skips clears and the playbook', async () => {
+    hold();
+    verdict('AISDLC-1');
+    verdict('AISDLC-3', {
+      outcome: 'failed',
+      workerId: 'executor-beta',
+      completedAt: new Date(clock + 1).toISOString(),
+    });
+    const result = await runDispatchTick(deps());
+    expect(cleared).toEqual([]);
+    expect(playbooked).toEqual([]);
+    expect(result.held).toMatchObject({ reason: 'spend paused', by: 'planner' });
+    expect(result.verdicts).toHaveLength(2);
+    expect(result.reports.length).toBeGreaterThan(0);
+    expect(result.escalations).toHaveLength(1);
+    expect(result.escalations[0]!.message).toContain('held');
+    expect(result.blockers).toEqual(
+      expect.arrayContaining(['held: spend paused', 'AISDLC-3: failure awaits the planner']),
+    );
+  });
+
+  it('has no held field once resumed, and a held board with queued work wakes as active', async () => {
+    hold();
+    writeBrief('b.md', ['AISDLC-5']);
+    enqueueImpl = (entries) => {
+      mkdirSync(path.join(board, 'queue'), { recursive: true });
+      for (const e of entries) {
+        writeFileSync(
+          path.join(board, 'queue', `${e.taskId}.dispatch.json`),
+          JSON.stringify({ taskId: e.taskId, after: ['AISDLC-4'] }),
+        );
+      }
+      return [];
+    };
+    const held = await runDispatchTick(deps());
+    expect(held.blockers).toContain('AISDLC-5: waits on AISDLC-4');
+    clearHold(board, 'planner', 'x');
+    const free = await runDispatchTick(deps());
+    expect(free.held).toBeUndefined();
+  });
+
+  it('lists queued work with no running executor', async () => {
+    writeRoster(board, {
+      schemaVersion: 'v1',
+      sessions: [rosterEntry('operator-dispatch', 'operator-dispatch')],
+    });
+    mkdirSync(path.join(board, 'queue'), { recursive: true });
+    writeFileSync(path.join(board, 'queue', 'AISDLC-7.dispatch.json'), '{"taskId":"AISDLC-7"}');
+    const r = await runDispatchTick(deps());
+    expect(r.blockers).toContain('1 task(s) queued and no executor running');
+  });
+
+  it('readHold ignores a malformed flag and clearHold reports nothing lifted', () => {
+    writeFileSync(path.join(board, '.hold'), 'not json');
+    expect(readHold(board)).toBeNull();
+    writeFileSync(path.join(board, '.hold'), '{"reason":""}');
+    expect(readHold(board)).toBeNull();
+    writeFileSync(path.join(board, '.hold'), '{"reason":"r"}');
+    expect(readHold(board)).toEqual({ reason: 'r', since: '', by: '' });
+    expect(clearHold(board, 'planner', 'x')).not.toBeNull();
+    expect(clearHold(board, 'planner', 'x')).toBeNull();
   });
 });

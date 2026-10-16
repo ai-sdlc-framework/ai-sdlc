@@ -20,6 +20,10 @@ You are an **executor** session: one task at a time, taken from the dispatch boa
 Your context is emptied after every task; this command (re-issued by the dispatch session after a
 clear) starts the next one; after any clear, `handoff read --role executor` shows where you stood.
 
+<!-- prompt-rules:begin ids=hold-reporting -->
+- **A hold limits actions, never reporting:** the planner pauses the drain with `cli-hierarchy hold --reason <text>` (never a prose "stay idle"), which blocks claims and relaunches only; every blocker, verdict and merge sha still goes to the parent tier by `SendMessage` as it happens, and pane text is not a report.
+<!-- prompt-rules:end -->
+
 ## Hard rules
 
 Tool, message, decision and task-id limits are enforced by a PreToolUse hook, and Step 1 prints them
@@ -71,6 +75,7 @@ When the notification arrives, read its output; the last line is JSON
 `{"name", "project", "dispatch", "taskId", "manifest"}`: take `MY_NAME` from `name`, `DISPATCH_NAME`
 from `dispatch`, `TASK_ID` from `taskId`. If it exits non-zero (not an executor, not the project's
 repository, or a sender that is not your dispatch session), stop and say what it printed: no claim, no worktree, no pull request.
+A `held` field (and a `BOARD HELD` line) with `taskId: null` means the planner paused claims: claim nothing, then take the idle path; keep reporting as usual.
 A resumed task also prints a `RESUMED TASK` block (its feedback note) before that JSON line: read it; the pipeline re-enters the existing worktree and branch.
 
 **Residual gap.** The start has no inbound message to identify, so with neither `--sender-pid` nor

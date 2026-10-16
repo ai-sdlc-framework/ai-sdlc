@@ -1,7 +1,7 @@
 ---
 id: AISDLC-899
 title: 'feat(hierarchy): a hold is a board state set by cli-hierarchy, never a chat message, and never stops reporting'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-14'
 labels: [hierarchy, governance, velocity, token-cost]

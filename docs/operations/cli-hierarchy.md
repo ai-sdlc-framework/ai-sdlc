@@ -625,6 +625,39 @@ can only print a line to paste. A mod could call `$.session.compact({ instructio
 button (the `context-meter` mod calls it without instructions today), and whether a mod can run
 `/clear` is unverified, so clearing stays a human action (or the 150k auto-clear above).
 
+### `hold`
+
+Pause the drain without silencing it (AISDLC-899). `hold` writes `<board>/.hold`
+(`{reason, since, by}`); `resume` removes it. Only the planner or the operator at a shell may run
+either; dispatch and executors are refused.
+
+```bash
+cli-hierarchy hold --reason <text>
+cli-hierarchy resume
+```
+
+While held, `tick` still ingests briefs, watches verdicts, classifies PRs and returns `reports`
+and `escalations`, plus `held` (`reason`, `since`, `by`); it does not clear executors, run the
+playbook, re-queue failures or reap stalled claims (a failure becomes an escalation instead).
+`executor-start` claims nothing, prints `BOARD HELD: <reason>` and returns `taskId: null` with
+`held`. A held board with open work wakes on the `active` cadence. The tick JSON also carries
+`blockers`: the hold, failures awaiting the planner, queued tasks waiting on an unfinished
+prerequisite, and queued work with no running executor; dispatch sends it to the planner whenever
+it differs from `<board>/.blockers-sent.json`. Holds and resumes are appended to
+`<board>/hold-events.jsonl`.
+
+| State   | Claims | Relaunches / re-queues | Reports and escalations |
+| ------- | ------ | ---------------------- | ----------------------- |
+| running | yes    | yes                    | yes                     |
+| held    | no     | no                     | yes                     |
+
+A hold limits actions, never reporting; the rule is rendered once from `prompt-rules.js` into the
+planner, dispatch and executor commands.
+
+### `resume`
+
+Remove the hold set by `cli-hierarchy hold`; see [`hold`](#hold). Prints `{"ok": true, "resumed": <bool>}`.
+
 ### `tick`
 
 One wake-up of the dispatch loop: ingest briefs, handle new verdicts (clear the finished
