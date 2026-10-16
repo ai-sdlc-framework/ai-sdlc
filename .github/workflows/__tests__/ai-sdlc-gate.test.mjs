@@ -763,7 +763,7 @@ describe('ai-sdlc-gate.yml — archetype detection (AC #2, AISDLC-484)', () => {
     it('records-only commit -> docs_only=false, records_only=true (AISDLC-867)', () => {
       try {
         const base = setup();
-        const head = commit({ 'backlog/config.yml': 'x', 'spec/schemas/a.json': '{}' });
+        const head = commit({ 'backlog/config.yml': 'x', 'spec/notes/a.json': '{}' });
         assert.equal(run(base, head).split('\n')[0], 'docs_only=false');
         assert.equal(runRecords(base, head), 'records_only=true');
       } finally {

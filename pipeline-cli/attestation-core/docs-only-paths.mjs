@@ -19,6 +19,7 @@ export const DOCS_ONLY_PATTERN =
  * files, decision events, RFC and spec text), not executable code. Prefix match
  * only, no globbing past the prefix. A consumer must also reject trust-chain
  * paths (`isTrustChainPath` in `review-scope-core.mjs`), for example
- * `spec/schemas/agent-role.schema.json`.
+ * `spec/schemas/agent-role.schema.json`. `spec/schemas/` is excluded outright:
+ * those schemas are compiled into generated runtime validators by `pnpm build`.
  */
-export const RECORDS_ONLY_PATTERN = /^(backlog\/|\.ai-sdlc\/_decisions\/|spec\/)/;
+export const RECORDS_ONLY_PATTERN = /^(backlog\/|\.ai-sdlc\/_decisions\/|spec\/(?!schemas\/))/;

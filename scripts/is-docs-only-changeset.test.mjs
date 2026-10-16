@@ -556,7 +556,7 @@ describe('AISDLC-876 decision event files and gate concurrency', () => {
 
 describe('AISDLC-867 records-only classifier', () => {
   it('records-only: backlog, decisions and spec paths', () => {
-    const files = ['backlog/config.yml', '.ai-sdlc/_decisions/x.json', 'spec/schemas/a.json'];
+    const files = ['backlog/config.yml', '.ai-sdlc/_decisions/x.json', 'spec/notes/a.json'];
     assert.equal(isRecordsOnly(files), true);
     assert.equal(classifyChangeset(files), 'records-only');
   });
@@ -568,6 +568,7 @@ describe('AISDLC-867 records-only classifier', () => {
   });
   it('trust-chain spec path is not records-only', () => {
     assert.equal(classifyChangeset(['spec/schemas/agent-role.schema.json']), 'code');
+    assert.equal(classifyChangeset(['spec/schemas/pipeline.schema.json']), 'code');
   });
   it('docs-only wins over records-only', () => {
     assert.equal(classifyChangeset(['backlog/tasks/a.md', 'docs/a.md']), 'docs-only');
