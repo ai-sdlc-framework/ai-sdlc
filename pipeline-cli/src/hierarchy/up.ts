@@ -315,6 +315,7 @@ export async function launchSession(
       model: s.model,
       permissionMode: s.permissionMode,
       startedAt: spawnedAt.toISOString(),
+      ...(nodeVersion && /^\d+\.\d+\.\d+$/.test(nodeVersion) ? { nodeVersion } : {}),
       status: registered ? 'running' : 'starting',
     },
   };
