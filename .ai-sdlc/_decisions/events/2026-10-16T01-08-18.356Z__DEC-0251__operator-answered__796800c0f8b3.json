@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-16T01:08:18.356Z","decisionId":"DEC-0251","chosenOptionId":"rebase","rationale":"Operational: PR 1608 green and approved, only DIRTY vs main; rebase the remote head, no developer rerun (rebase-own-branch, answer-operational-decisions)","by":"ai-sdlc-operator-dispatch"}
