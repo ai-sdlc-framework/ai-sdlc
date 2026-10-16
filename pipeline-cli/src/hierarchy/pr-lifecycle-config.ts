@@ -8,7 +8,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import yaml from 'js-yaml';
+import { load as yamlLoad } from 'js-yaml';
 
 export interface PrLifecycleConfig {
   /** How many times one `(action, headSha)` may run; the next one parks to the planner. */
@@ -21,7 +21,7 @@ export function loadPrLifecycleConfig(projectDir: string): PrLifecycleConfig {
   const file = path.join(projectDir, '.ai-sdlc', 'pr-lifecycle.yaml');
   if (!existsSync(file)) return { ...PR_LIFECYCLE_DEFAULTS };
   try {
-    const doc = yaml.load(readFileSync(file, 'utf-8')) as {
+    const doc = yamlLoad(readFileSync(file, 'utf-8')) as {
       spec?: { loopGuard?: { maxSameHeadActions?: unknown } };
     } | null;
     const n = doc?.spec?.loopGuard?.maxSameHeadActions;
