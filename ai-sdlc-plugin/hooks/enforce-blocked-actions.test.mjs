@@ -2981,3 +2981,35 @@ blockedActions: []
     it(`does not block ${rel} (a folded '**x' glob would)`, () => assert.ok(!denied(rel)));
   }
 });
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605.1 $$ quote-state)', () => {
+  let dir;
+  const mg = ['mer', 'ge'].join('');
+
+  before(() => {
+    dir = join(tmpdir(), `enforce-blocked-pid-${Date.now()}`);
+    mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(dir, '.ai-sdlc', 'agent-role.yaml'),
+      'role: coding-agent\ngoal: Test agent\nblockedActions: []\n',
+    );
+  });
+
+  after(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function run(command) {
+    const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command } });
+    return runHookRaw(input, { CLAUDE_PROJECT_DIR: dir });
+  }
+
+  it('refuses the $$ plus backslash-quote comment-cut forms (CLI and API)', () => {
+    for (const c of [
+      `echo $$'\\' x ' #' ; gh pr ${mg} 5`,
+      `echo $$'\\' x ' #' ; gh api -X PUT repos/o/r/pulls/5/${mg}`,
+    ]) {
+      assert.ok(isDenied(run(c)), c);
+    }
+  });
+});

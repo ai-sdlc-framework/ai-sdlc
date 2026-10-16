@@ -1106,3 +1106,16 @@ describe('canonicalizeCommand keeps shell-set names and non-bare values opaque (
     assert.ok(m.canonicalizeCommand(`A=${word}; gh pr $A 5`).endsWith(`gh pr ${word} 5`));
   });
 });
+
+describe('$$ is the PID, not an ANSI-C opener (AISDLC-605.1 security review)', () => {
+  const mg = ['mer', 'ge'].join('');
+  const form = `echo $$'\\' x ' #' ; gh pr ${mg} 5`;
+  it('keeps the executed tail after $$ + plain single quote', () => {
+    assert.equal(m.commandRunsGhPrMerge(form), true);
+    assert.ok(m.canonicalizeCommand(form).includes(`gh pr ${mg}`));
+  });
+  it('splitter and comment stripper treat $$ as a unit', () => {
+    assert.equal(m.stripComment(`echo $$'\\' x # c`), `echo $$'\\' x`);
+    assert.equal(m.splitShellSegments(`echo $$'\\'; ls ';' x`).length, 2);
+  });
+});

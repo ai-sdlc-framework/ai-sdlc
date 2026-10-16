@@ -123,6 +123,10 @@ function splitShellSegmentsEx(command) {
       cur += c + command[++i];
       continue;
     }
+    if (c === '$' && command[i + 1] === '$') {
+      cur += c + command[++i]; // `$$` is the PID, not the start of `$'...'`
+      continue;
+    }
     if (c === '$' && command[i + 1] === "'") {
       quote = "$'";
       cur += c + command[++i];
@@ -184,6 +188,10 @@ function stripComment(segment) {
     }
     if (c === '\\') {
       i++;
+      continue;
+    }
+    if (c === '$' && segment[i + 1] === '$') {
+      i++; // `$$` is the PID
       continue;
     }
     if (c === '$' && segment[i + 1] === "'") {
@@ -492,6 +500,11 @@ function canonicalizeCommand(command) {
         out += c + command[++i];
         escaped = true;
       }
+      continue;
+    }
+    if (c === '$' && command[i + 1] === '$') {
+      out += '$$'; // `$$` is the PID; a following quote is a plain quote
+      i++;
       continue;
     }
     if (c === '$' && command[i + 1] === "'") {
@@ -862,9 +875,19 @@ function mentionsApiMergePieces(text) {
 const GRAPHQL_UNSEEN = /graphql/i;
 
 function commandHasUninertMatch(command, matches, mentions) {
-  return braceVariants(canonicalizeCommand(command)).some((v) =>
-    variantHasUninertMatch(v, matches, mentions),
-  );
+  const canonical = canonicalizeCommand(command);
+  // Defense in depth: when an ANSI-C / PID quote form is still present and the canonical
+  // text is opaque, the tokenizer may have mis-read quote state and cut executed text, so
+  // the raw command is mention-checked too.
+  if (
+    mentions &&
+    command !== canonical &&
+    /\$\$'|\$'/.test(canonical) &&
+    commandIsOpaque(canonical) &&
+    mentionVariants(command).some((v) => mentions(v))
+  )
+    return true;
+  return braceVariants(canonical).some((v) => variantHasUninertMatch(v, matches, mentions));
 }
 
 function variantHasUninertMatch(command, matches, mentions) {
