@@ -1,34 +1,14 @@
 ---
 id: AISDLC-855
-title: >-
-  Correct stale product references in the published docs (tutorial 08,
-  onboarding, tutorial 10, concepts, PRD, install instructions)
-status: To Do
+title: Correct stale product references in the published docs (tutorial 08, onboarding, tutorial 10, concepts, PRD, install instructions)
+status: Done
 assignee: []
 created_date: '2026-10-13'
-labels:
-  - docs
-dependencies:
-  - AISDLC-853
-references:
-  - docs/tutorials/08-claude-code-plugin.md
-  - docs/getting-started/onboarding.md
-  - docs/tutorials/10-spec-kit-bridge.md
-  - docs/prd-claude-code-native-integration.md
-  - docs/getting-started/README.md
-  - README.md
-  - ai-sdlc-plugin/CHANGELOG.md
-  - ai-sdlc-plugin/plugin.json
-  - docs/operations/cli-hierarchy.md
+labels: [docs]
+dependencies: [AISDLC-853]
+references: [docs/tutorials/08-claude-code-plugin.md, docs/getting-started/onboarding.md, docs/tutorials/10-spec-kit-bridge.md, docs/prd-claude-code-native-integration.md, docs/getting-started/README.md, README.md, ai-sdlc-plugin/CHANGELOG.md, ai-sdlc-plugin/plugin.json, docs/operations/cli-hierarchy.md]
 priority: high
 dispatchable: true
-drift_status: flagged
-drift_checked: '2026-10-23'
-drift_log:
-  - date: '2026-10-23'
-    type: dep-resolved
-    detail: Dependency AISDLC-853 has been completed
-    resolution: flagged
 ---
 
 ## Description

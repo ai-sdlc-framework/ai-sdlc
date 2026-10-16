@@ -31,7 +31,7 @@ When the gate flags a task:
 
 1. The task gets `status: Needs Clarification` and a comment with the failed gates + suggested edits.
 2. You edit the task to address the gaps (or close it if it was a bad idea).
-3. Run `/ai-sdlc dor-recheck <task-id>` (or wait for the auto-recheck on body edit).
+3. Run `node pipeline-cli/bin/cli-dor-check.mjs --task <path>` (or wait for the auto-recheck on body edit).
 4. If the gate passes, the orchestrator picks it up on the next tick.
 
 ## Configuration
