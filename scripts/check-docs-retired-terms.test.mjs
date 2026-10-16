@@ -39,38 +39,10 @@ const EXCLUDED_DIRS = new Set(['audits', 'upstream-bug-reports', 'whitepapers'])
 export const ALLOWLIST = {
   'docs/concepts/autonomous-orchestrator.md':
     'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/operations/README.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/operations/auto-rebase-stale-prs.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
   'docs/operations/backlog-and-execution-reference.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/operations/billing-and-cost-optimization.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/operations/ci-conflict-resolver.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/operations/claude-cli-spawner-removed.md':
-    'migration page that describes the removed spawner by its old commands',
-  'docs/operations/cli-hierarchy.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/operations/copilot-execution-path.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/operations/copilot-spawner.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/operations/dispatched-session-decisions.md':
     'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
   'docs/operations/gate-audit-2026-10.md':
     'historical audit record naming the workflows it audited',
-  'docs/operations/pre-push-and-ci-reference.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/operations/release-and-plugin-reference.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/operations/remote-agents-readonly.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/operations/reviewer-dispatch-defaults.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/operations/usage-ledger.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
   'docs/tutorials/10-spec-kit-bridge.md':
     'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
 };
