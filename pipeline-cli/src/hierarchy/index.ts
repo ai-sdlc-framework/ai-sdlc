@@ -95,6 +95,7 @@ export {
   type AutoClearDecision,
 } from './auto-clear.js';
 export {
+  boundedHandoffView,
   collectHandoffState,
   readHandoff,
   writeHandoff,

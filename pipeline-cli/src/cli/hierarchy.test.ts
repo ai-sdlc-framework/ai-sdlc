@@ -1439,7 +1439,7 @@ describe('handoff and auto-clear subcommands (AISDLC-766)', () => {
   });
 
   it('handoff write then read round-trips through --out, accepting the dispatch alias', async () => {
-    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
     const file = path.join(tmp, 'out', 'handoff.md');
     const identity = { identity: asCaller('operator-dispatch') };
     expect(
@@ -1460,7 +1460,7 @@ describe('handoff and auto-clear subcommands (AISDLC-766)', () => {
       ),
     ).toBe(0);
     expect(logs.at(-1)).toContain('# Handoff');
-    expect(String(err.mock.calls.at(-1)?.[0])).toContain(file);
+    expect(logs.at(-1)).toContain(file);
   });
 
   it('handoff read regenerates a missing file and says so; --name wins over the caller', async () => {

@@ -255,9 +255,11 @@ function readHandoffText(self, { bin, boardDir, run = spawnSync }) {
     );
     const text = res && res.status === 0 ? String(res.stdout || '').trim() : '';
     if (!text) return null;
-    return text.length > HANDOFF_MAX_CHARS
-      ? `${text.slice(0, HANDOFF_MAX_CHARS)}\n[handoff truncated]`
-      : text;
+    if (text.length <= HANDOFF_MAX_CHARS) return text;
+    // Keep the head (state block) and the tail (newest notes); drop the middle.
+    const head = Math.floor(HANDOFF_MAX_CHARS / 3);
+    const tail = HANDOFF_MAX_CHARS - head;
+    return `${text.slice(0, head)}\n[handoff middle omitted]\n${text.slice(text.length - tail)}`;
   } catch {
     return null;
   }
