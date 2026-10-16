@@ -36,6 +36,7 @@ function overrides(over: Partial<HierarchyDeps> = {}): Partial<HierarchyDeps> {
   };
   return {
     run,
+    env: {},
     boardDir: path.join(tmp, 'dispatch'),
     registryDir: path.join(tmp, 'sessions'),
     settingsFiles: [path.join(tmp, 'settings.json')],
@@ -242,6 +243,12 @@ describe('runHierarchyCli', () => {
     expect(await runHierarchyCli(['webhook', 'up'], overrides())).toBe(0);
     vi.spyOn(process.stderr, 'write').mockReturnValue(true);
     expect(await runHierarchyCli(['webhook'], overrides())).toBe(2);
+  });
+
+  it('webhook status reports off (not running) with a secret and no receiver', async () => {
+    const env = { AI_SDLC_WEBHOOK_SECRET: 'x' };
+    expect(await runHierarchyCli(['webhook', 'status'], overrides({ env }))).toBe(0);
+    expect(logs).toEqual(['webhook: off (not running)']);
   });
 
   it('down reports an unknown role with exit 1', async () => {
