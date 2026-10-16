@@ -2,7 +2,7 @@
   "schemaVersion": "v6",
   "subject": {
     "digest": {
-      "sha1": "7d61a8a761294713ed9aa1ccb8d4807a0317b8dd"
+      "sha1": "c2d32f99a1fe6e7d5418202fd60ef2369a6cb5b6"
     }
   },
   "transcriptLeaves": [
@@ -29,6 +29,28 @@
       "verdictClass": "independent",
       "harnessTranscriptHash": "89f2ba58157fd808d2c55c878fe849863a27729adf9670824ea19fb1708ad756",
       "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 3,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "61be949054fffc3bee342db920ee8e10bb77676c648fa9da8be6e88ce6bd1a03",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 4,
+      "reviewerName": "test-reviewer-codex",
+      "transcriptHash": "78c8d39f3b887d7c6ad7dd418de77e4c45cb8b74f928b75bcfac856f30f38f0f",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 5,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "4c0c2a7536a7a9ec65c42eae3c5795e2a5187ab9fd3ecb842025752b9c875bfa",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "4c0c2a7536a7a9ec65c42eae3c5795e2a5187ab9fd3ecb842025752b9c875bfa",
+      "independenceTier": "attested"
     }
   ],
   "merkleProofs": [
@@ -36,29 +58,56 @@
       "leafIndex": 0,
       "proof": [
         "8eee711652d2640906348425f9da8a3a7b2a4c6061afa86b599304349306b836",
-        "e1f119dcaa75c472556f4ba1cd1bd8b6417dcd713f4ccc920b8d73508ec0fb24"
+        "f7ef7f84962ae6fc550356e334e9b33c5cf575adc12629e5f958e771c6232e4d",
+        "871164d8e80c548e9eaab58f570d07c5c45072a25085828f6796cacdcc97df24"
       ]
     },
     {
       "leafIndex": 1,
       "proof": [
         "8ed1f6107dc9cf35ba6bbeb1a9c5a91b33f1965009f6b5e2ab3b0adeb5e5cad5",
-        "e1f119dcaa75c472556f4ba1cd1bd8b6417dcd713f4ccc920b8d73508ec0fb24"
+        "f7ef7f84962ae6fc550356e334e9b33c5cf575adc12629e5f958e771c6232e4d",
+        "871164d8e80c548e9eaab58f570d07c5c45072a25085828f6796cacdcc97df24"
       ]
     },
     {
       "leafIndex": 2,
       "proof": [
+        "3430c124d29ac6e549eafba4f1b255bb6c313e1f2f48dd6337c3c1065f5e113c",
+        "95124269521a5647408fadaccd30c5f89603f42faa267fab682941773540da35",
+        "871164d8e80c548e9eaab58f570d07c5c45072a25085828f6796cacdcc97df24"
+      ]
+    },
+    {
+      "leafIndex": 3,
+      "proof": [
         "e3cb427e2b9f7f83efb4d0c043feaf66efcb1958caaad55531a9aed8a76c99c3",
-        "95124269521a5647408fadaccd30c5f89603f42faa267fab682941773540da35"
+        "95124269521a5647408fadaccd30c5f89603f42faa267fab682941773540da35",
+        "871164d8e80c548e9eaab58f570d07c5c45072a25085828f6796cacdcc97df24"
+      ]
+    },
+    {
+      "leafIndex": 4,
+      "proof": [
+        "d931d70d0d1d9d6b834092901ade6259a4ab84044637f875eeada21725ca78ec",
+        "877ee0b909010ef4f9517f62ba6c80ea803dcae3f9d4bda2b2495872c8648e46",
+        "2f8a3f6aa5403f9454f4658e86637695b179ebc325a67f69cbf8cc6d94346fff"
+      ]
+    },
+    {
+      "leafIndex": 5,
+      "proof": [
+        "7a874c2b2cb90b7b86233733f7c81996a277eedeaafc47e83aeb93903ed9cbee",
+        "877ee0b909010ef4f9517f62ba6c80ea803dcae3f9d4bda2b2495872c8648e46",
+        "2f8a3f6aa5403f9454f4658e86637695b179ebc325a67f69cbf8cc6d94346fff"
       ]
     }
   ],
-  "rootHash": "b834d218fc9ab4a735bf6d8dca81b64039fabe2d50da4d50040cd0ff758ec20f",
-  "rootSignature": "XC0OHlMNVKqKmlFfq7yMMGPnm2+B1tiJnswqeILPg43zqbhRnKOVFZueP5+6QMjoTqniEe1to4xrvGLZcFBYCw==",
-  "nonce": "44e88d550c84959c3bcd0065fa8309b1550e96fa53ae365ce9ebed441b5418b6",
-  "leafCount": 3,
-  "signedAt": "2026-10-16T22:15:12.830Z",
+  "rootHash": "961c4d5d60d709d2463071463c7ec734272d8415cf02ca2328e8f9df66e93efe",
+  "rootSignature": "INjmWP4kOT4o405BuYKQD94ImwlYnO0p7JxHeuSNwuREMV0+/H80y75+1OKvWAZm680j1Jin0uZzH+ySCEchAg==",
+  "nonce": "74a133e34af94505fbf9c9d48053b01e096c833c2abc2a299bb256ea48bfc826",
+  "leafCount": 6,
+  "signedAt": "2026-10-16T22:41:33.103Z",
   "signerIdentity": "dominique@local:doms-macbook",
   "reviewScope": {
     "classification": "full",
@@ -79,6 +128,12 @@
       "pipeline-cli/src/orchestrator/reconcile.ts",
       "pipeline-cli/src/steps/07-build-review-prompts.ts"
     ],
-    "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
+    "appliedReviewers": [
+      "code-reviewer",
+      "test-reviewer",
+      "security-reviewer",
+      "code-reviewer-codex",
+      "test-reviewer-codex"
+    ]
   }
 }
