@@ -1,7 +1,7 @@
 ---
 id: AISDLC-865
 title: 'chore(deps): bump vitest 4.1.11 to 5.0.3 under the repo identity (replaces dependabot #1446)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [chore, deps, testing]

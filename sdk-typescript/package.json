@@ -119,9 +119,9 @@
     "@ai-sdlc/reference": "workspace:*"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^5.0.3",
     "typescript": "^6.0.3",
     "vite": "^6.0.0",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.3"
   }
 }
