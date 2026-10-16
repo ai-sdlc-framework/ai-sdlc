@@ -758,6 +758,7 @@ the action is `none`, except stale claims and takeover after executor death post
 | `manifest-branch-mismatch` | `rewrite-manifest` | left to a session (`write-manifest` with the PR head ref) |
 | `behind-or-dirty` | `land-prep` | until AISDLC-881: `reenter` (rebases a BEHIND PR; a DIRTY one goes to an executor) ([hand-review-path.md](hand-review-path.md)) |
 | `attestation-content-hash-mismatch` | `push-only-resign` | `reenter` (push-only re-sign manifest, AISDLC-821) |
+| `rate-limited` | `rerun-rate-limited` | every failing job (the `pr-ready` rollup aside) ran under 30 s and its annotation or log says `API rate limit exceeded for installation` (AISDLC-949); `gh run rerun --failed --commit <sha>` once per head SHA, at or after the next full hour; never `reenter` |
 | `real-failure` | `reenter` | `cli-dispatch reenter <pr>` (manifest with the failing line and head SHA) |
 | `cancelled-or-infra` | `retrigger-once` | `gh run rerun --failed --commit <sha>`; once per head SHA |
 | `ready-to-flip` | `flip-ready-takeover` | `gh pr ready <n>`, only after executor death post-sign |

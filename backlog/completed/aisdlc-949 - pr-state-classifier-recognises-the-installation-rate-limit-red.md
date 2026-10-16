@@ -1,7 +1,7 @@
 ---
 id: AISDLC-949
 title: 'PR-state classifier recognises the installation rate-limit red (short Detect Changes or issue-link job with "API rate limit exceeded for installation") as rate-limited, never as real-failure'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels:
