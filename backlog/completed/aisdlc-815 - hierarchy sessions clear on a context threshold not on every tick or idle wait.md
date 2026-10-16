@@ -2,7 +2,7 @@
 id: AISDLC-815
 title: >-
   Hierarchy sessions clear on a context threshold, not on every dispatch tick or every idle executor wait
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-11'
 labels:

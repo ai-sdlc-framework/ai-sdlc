@@ -227,7 +227,11 @@ describe('runHierarchyCli', () => {
 
   it('status prints an empty roster as text and json', async () => {
     expect(await runHierarchyCli(['status'], overrides())).toBe(0);
-    expect(logs).toEqual(['no sessions in the roster', 'webhook: off (no secret)']);
+    expect(logs).toEqual([
+      'no sessions in the roster',
+      'webhook: off (no secret)',
+      'context clear thresholds (tokens): planner 150000, operator-dispatch 120000, executor 120000',
+    ]);
     logs.length = 0;
     expect(await runHierarchyCli(['status', '--json'], overrides())).toBe(0);
     expect(JSON.parse(logs[0] as string).rows).toEqual([]);

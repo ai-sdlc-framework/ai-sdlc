@@ -35,11 +35,7 @@ measurable and gives the dispatch session the same context hygiene it enforces o
 executors.
 
 ## Scope
-1. **Self-clear**: when a brief completes (every manifest from it in `done/` or
-   `failed/`), the dispatch loop records the completion, then sends `/clear` and
-   `/ai-sdlc operator-dispatch` to its own pane through the same `cli-hierarchy clear`
-   path used for executors (the roster has its pane). Refused while any inflight
-   manifest is unreconciled.
+1. **Self-clear (dropped)**: superseded by AISDLC-815; sessions clear only on a context threshold or a finished task, never per tick.
 2. **Tick markers**: each dispatch tick writes a `DispatchTick` marker (tick id, step
    list, start and end) to the orchestrator events so the usage ledger can bucket the
    dispatch session's calls per tick.
@@ -56,7 +52,6 @@ executors.
    the judgment calls.
 
 ## Acceptance Criteria
-- [ ] A completed brief triggers exactly one self-clear through the injected runner; an unreconciled inflight manifest prevents it.
 - [ ] Each tick emits a `DispatchTick` marker that validates against the events schema.
 - [ ] The scorecard reports turns per tick from a fixture ledger and marker set, and the budget is read from config.
 - [ ] A rolling median above budget files one Decision naming the costliest step; a second overrun while it is open files none.

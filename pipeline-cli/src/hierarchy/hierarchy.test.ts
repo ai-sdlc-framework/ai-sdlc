@@ -791,6 +791,14 @@ describe('hierarchy status', () => {
     expect(text).toContain('board: 0 queued, 1 inflight');
     expect(text).toContain('HIERARCHY_SESSION');
     expect(text).not.toContain('unbriefed');
+    expect(result.contextThresholds).toEqual({
+      planner: 150000,
+      'operator-dispatch': 120000,
+      executor: 120000,
+    });
+    expect(text).toContain(
+      'context clear thresholds (tokens): planner 150000, operator-dispatch 120000, executor 120000',
+    );
     const withGap = formatStatus({ ...result, unbriefed: ['AISDLC-5'] }).join('\n');
     expect(withGap).toContain('unbriefed');
     expect(withGap).toContain('AISDLC-5');
@@ -894,7 +902,11 @@ describe('hierarchy status', () => {
 
   it('handles an empty roster', () => {
     const result = hierarchyStatus(deps);
-    expect(formatStatus(result)).toEqual(['no sessions in the roster', 'webhook: off (no secret)']);
+    expect(formatStatus(result)).toEqual([
+      'no sessions in the roster',
+      'webhook: off (no secret)',
+      'context clear thresholds (tokens): planner 150000, operator-dispatch 120000, executor 120000',
+    ]);
   });
 
   it('shows an ATTACHED column per session, yes only when a client is attached', async () => {

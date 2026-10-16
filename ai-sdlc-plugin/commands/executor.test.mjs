@@ -47,15 +47,15 @@ describe('executor command', () => {
     assert.doesNotMatch(body, /cli-dispatch\.mjs" claim/);
   });
 
-  it('clears itself when nothing is eligible and only then falls back to a wake-up', () => {
+  it('keeps its context and re-issues the blocking wait when nothing is eligible (AISDLC-815)', () => {
     assert.match(body, /"taskId": null/);
-    assert.match(body, /cli-hierarchy\.mjs" clear --self --resume-after 30/);
-    assert.ok(body.indexOf('clear --self') < body.indexOf('ScheduleWakeup'));
+    assert.doesNotMatch(body, /clear --self --resume-after/);
+    assert.match(body, /Do not clear and do not poll/);
+    assert.match(body, /re-issue the same `executor-start` call with `run_in_background: true`/);
+    assert.match(body, /--wait 1500/);
     assert.match(body, /idle-backoff/);
-    assert.match(body, /sleepSec/);
     assert.match(body, /RESUMED TASK/);
     assert.match(body, /emptyQueueHibernateSec/);
-    assert.match(body, /Do not poll/);
   });
 
   it('runs execute with the task id and no other argument', () => {
