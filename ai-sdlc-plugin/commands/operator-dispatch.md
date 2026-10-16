@@ -129,4 +129,4 @@ echo "$NEXT_WAKE_SEC"
 
 Call `ScheduleWakeup` with that delay and the prompt `/ai-sdlc operator-dispatch`, or simply end the turn and wait
 for the next message (a brief or verdict). `nextWakeSec` is 30 busy, 300 working, 1800 empty. End the turn with one
-line saying so.
+line saying so. Right after any clear, print your own section of `.claude/memory/LAST_MESSAGE.md` (the Stop hook saves your last reply there) so the operator can read it.
