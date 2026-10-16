@@ -16,6 +16,8 @@
 
 import { requiredReviewerKind } from '../../attestation-core/review-scope-core.mjs';
 import { computePatchId } from '../attestation/patch-id.js';
+import { loadVerifyCore } from '../attestation/verify-core-loader.js';
+import { loadAttestationRuntime } from '../attestation/verify-runtime.js';
 import { resolveTargetBranch } from '../steps/02-compute-branch.js';
 import { explicitReviewerSetMode } from '../steps/reviewer-set.js';
 import type { ReviewerType } from '../types.js';
@@ -41,6 +43,30 @@ export interface ResumeDecisionOpts {
   currentPatchId?: (base: string, head: string, cwd: string) => string | null;
   /** Test injection: true when the repository requires the three-reviewer set. */
   requireThree?: boolean;
+  /**
+   * Test injection: verify the signed attestation for `headSha` (signature against the trusted
+   * reviewers, Merkle proof, patch-id binding, review scope). Default: the trusted verifier core.
+   */
+  verifyAt?: (headSha: string, baseSha: string, cwd: string) => Promise<boolean>;
+}
+
+/**
+ * Run the same verifier CI runs (`cli-attestation verify`) against `headSha`. The runtime is
+ * resolved from OUTSIDE the checkout, so a forged envelope committed on the branch cannot
+ * vouch for itself. Any failure (including an unresolvable runtime) is "not verified".
+ */
+async function verifyAttestationAt(
+  headSha: string,
+  baseSha: string,
+  cwd: string,
+): Promise<boolean> {
+  try {
+    const core = await loadVerifyCore();
+    core.bindRuntime(await loadAttestationRuntime(cwd));
+    return core.runVerifier({ headSha, baseSha, repoRoot: cwd }).status === 'valid';
+  } catch {
+    return false;
+  }
 }
 
 /** Decide what a resumed task's review does. Never throws: any doubt returns `full`. */
@@ -93,10 +119,14 @@ async function decide(
   if (!base) return FULL;
   const current = (opts.currentPatchId ?? computePatchId)(base, head, cwd);
   if (current === null) return FULL;
+  const verify = opts.verifyAt ?? verifyAttestationAt;
   if (current.toLowerCase() === attestedPatchId) {
+    if (!(await verify(head, base, cwd))) return FULL;
     return { branch: 'unchanged', note: 'review-skipped: unchanged', lastHead };
   }
 
+  // The delta base (`lastHead`) comes from the envelope, so the envelope must verify first.
+  if (!(await verify(lastHead, base, cwd))) return FULL;
   const names = await git([
     'diff',
     '--name-only',

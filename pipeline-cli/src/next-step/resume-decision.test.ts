@@ -15,9 +15,12 @@ beforeEach(() => {
 });
 afterEach(() => h.cleanup());
 
-function script(delta = 'docs/readme.md\0', envelope = true): void {
+function script(delta = 'docs/readme.md\0', envelope: boolean | string = true): void {
   const r = h.runner;
-  r.on(/log .*--diff-filter=A/, ok(envelope ? `${ENVELOPE}\n` : ''));
+  r.on(
+    /log .*--diff-filter=A/,
+    ok(typeof envelope === 'string' ? envelope : envelope ? `${ENVELOPE}\n` : ''),
+  );
   r.on(/show HEAD:/, ok(JSON.stringify({ subject: { digest: { sha1: LAST } } })));
   r.on(/cat-file -e/, ok());
   r.on(/rev-parse HEAD/, ok(`${SHA}\n`));
@@ -25,7 +28,11 @@ function script(delta = 'docs/readme.md\0', envelope = true): void {
   r.on(/diff --name-only/, ok(delta));
 }
 
-const opts = (pid: string | null) => ({ currentPatchId: () => pid, requireThree: false });
+const opts = (pid: string | null, verified = true) => ({
+  currentPatchId: () => pid,
+  requireThree: false,
+  verifyAt: async () => verified,
+});
 
 describe('decideResumeReview (AISDLC-947)', () => {
   it('unchanged patch id skips every agent', async () => {
@@ -54,6 +61,7 @@ describe('decideResumeReview (AISDLC-947)', () => {
     const d = await decideResumeReview(h.ctx, h.root, {
       currentPatchId: () => 'e'.repeat(40),
       requireThree: true,
+      verifyAt: async () => true,
     });
     expect(d.branch === 'delta' && d.reviewers.includes('security-reviewer')).toBe(true);
   });
@@ -66,14 +74,45 @@ describe('decideResumeReview (AISDLC-947)', () => {
     });
   });
 
-  it('falls back to full when the patch id or the delta cannot be read', async () => {
+  it('falls back to full when the patch id cannot be computed', async () => {
     script();
     expect((await decideResumeReview(h.ctx, h.root, opts(null))).branch).toBe('full');
-    h.cleanup();
-    h = makeHarness();
+  });
+
+  it('falls back to full when the delta cannot be read', async () => {
     h.runner.on(/diff --name-only/, fail('x'));
     script();
     expect((await decideResumeReview(h.ctx, h.root, opts('e'.repeat(40)))).branch).toBe('full');
+  });
+
+  it('a forged or unverifiable envelope never skips review (unchanged)', async () => {
+    script();
+    expect((await decideResumeReview(h.ctx, h.root, opts(PID, false))).branch).toBe('full');
+  });
+
+  it('a forged or unverifiable envelope never bases a delta', async () => {
+    script();
+    expect((await decideResumeReview(h.ctx, h.root, opts('e'.repeat(40), false))).branch).toBe(
+      'full',
+    );
+  });
+
+  it('verifies the unchanged envelope at HEAD and the delta base at the attested head', async () => {
+    script();
+    const seen: string[] = [];
+    const verifyAt = async (head: string) => (seen.push(head), true);
+    await decideResumeReview(h.ctx, h.root, { ...opts(PID), verifyAt });
+    await decideResumeReview(h.ctx, h.root, { ...opts('e'.repeat(40)), verifyAt });
+    expect(seen).toEqual([SHA, LAST]);
+  });
+
+  it('picks the newest of two envelopes on the branch (git log is newest first)', async () => {
+    const OLD = 'f'.repeat(40);
+    script('docs/readme.md\0', `${ENVELOPE}\n.ai-sdlc/attestations/${OLD}.v6.dsse.json\n`);
+    const d = await decideResumeReview(h.ctx, h.root, opts(PID));
+    expect(d.branch).toBe('unchanged');
+    const d2 = await decideResumeReview(h.ctx, h.root, opts(OLD));
+    expect(d2.branch).toBe('delta');
   });
 
   it('prepareReview spawns nothing and records the note on an unchanged resume', async () => {
