@@ -34,6 +34,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 
+import { now as clockNow } from '../clock.js';
 import { reportCapabilityOutcome } from '@ai-sdlc/reference';
 
 import {
@@ -189,6 +190,46 @@ export function replaceQueuedBranch(boardDir: string, taskId: string, branch: st
   writeFileSync(tmp, JSON.stringify({ ...current, branch }, null, 2) + '\n', 'utf-8');
   renameSync(tmp, target);
   return target;
+}
+
+/**
+ * Retire a queued, unclaimed manifest (AISDLC-907): move it to `retired/` with the
+ * reason and time recorded, so a stale manifest never needs a hand `rm`. Refuses,
+ * leaving the queue file untouched, while the task is inflight (claimed) or has a
+ * verdict in `done/`.
+ *
+ * @throws with a named cause on refusal or when nothing is queued.
+ */
+export function retireQueued(boardDir: string, taskId: string, reason: string): string {
+  ensureBoardDirs(boardDir);
+  if (existsSync(manifestPathIn(boardDir, 'inflight', taskId))) {
+    throw new Error(
+      `dispatch.dequeue: ${taskId} is inflight (claimed); release it or write a verdict instead`,
+    );
+  }
+  if (
+    [VERDICT_SUFFIX, COMPLETED_SUFFIX].some((x) =>
+      existsSync(path.join(boardDir, 'done', `${taskId}${x}`)),
+    )
+  ) {
+    throw new Error(
+      `dispatch.dequeue: ${taskId} has a verdict in done/; use reenter or remove-verdict instead`,
+    );
+  }
+  const src = manifestPathIn(boardDir, 'queue', taskId);
+  const current = existsSync(src) ? readManifest(src) : undefined;
+  if (!current) {
+    throw new Error(`dispatch.dequeue: no queued manifest for ${taskId}`);
+  }
+  const retiredDir = path.join(boardDir, 'retired');
+  mkdirSync(retiredDir, { recursive: true });
+  const dst = path.join(retiredDir, `${taskId}${MANIFEST_SUFFIX}`);
+  const record = { ...current, retiredAt: clockNow().toISOString(), retiredReason: reason };
+  const tmp = `${dst}.tmp-${process.pid}-${process.hrtime.bigint()}`;
+  writeFileSync(tmp, JSON.stringify(record, null, 2) + '\n', 'utf-8');
+  renameSync(tmp, dst);
+  rmSync(src);
+  return dst;
 }
 
 /** Read one queued manifest (undefined when absent or unparseable). */

@@ -45,6 +45,7 @@ export {
   TASK_ID_RE,
   requeueInflight,
   sweepStaleHeartbeats,
+  retireQueued,
   unblockManifest,
   writeDiagnostic,
   writeHeartbeat,

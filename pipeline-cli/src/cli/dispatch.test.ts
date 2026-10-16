@@ -1677,6 +1677,56 @@ describe('runDispatchCli ordering commands', () => {
     err.mockRestore();
   });
 
+  describe('dequeue (AISDLC-907)', () => {
+    const run = (...a: string[]) => runDispatchCli(['dequeue', ...a, '--board-dir', boardDir]);
+    const q = (id: string) => path.join(boardDir, 'queue', `${id}.dispatch.json`);
+
+    it('retires a queued manifest with the reason, lowers the peek count, and allows re-emit', async () => {
+      writeFileSync(q('T-1'), JSON.stringify(mkManifest('T-1')));
+      const { exit } = await captureStdout(() => run('--task-id', 'T-1', '--reason', 'stale'));
+      expect(exit).toBe(0);
+      expect(existsSync(q('T-1'))).toBe(false);
+      const retired = JSON.parse(
+        readFileSync(path.join(boardDir, 'retired', 'T-1.dispatch.json'), 'utf-8'),
+      );
+      expect(retired.retiredReason).toBe('stale');
+      const peek = await captureStdout(() => runDispatchCli(['peek', '--board-dir', boardDir]));
+      expect((readLastJson(peek.captured) as { queued: number }).queued).toBe(0);
+      const file = path.join(boardDir, 'new.json');
+      writeFileSync(file, JSON.stringify(mkManifest('T-1')));
+      const w = await captureStdout(() =>
+        runDispatchCli(['write-manifest', '--json', file, '--board-dir', boardDir]),
+      );
+      expect(w.exit).toBe(0);
+      expect(existsSync(q('T-1'))).toBe(true);
+    });
+
+    it('requires --reason', async () => {
+      writeFileSync(q('T-1'), JSON.stringify(mkManifest('T-1')));
+      const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      expect(await run('--task-id', 'T-1')).toBe(2);
+      err.mockRestore();
+      expect(existsSync(q('T-1'))).toBe(true);
+    });
+
+    it('refuses an inflight task, a done verdict, and an unqueued task', async () => {
+      const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      writeFileSync(q('T-1'), JSON.stringify(mkManifest('T-1')));
+      writeFileSync(
+        path.join(boardDir, 'inflight', 'T-1.dispatch.json'),
+        JSON.stringify(mkManifest('T-1')),
+      );
+      expect(await run('--task-id', 'T-1', '--reason', 'x')).toBe(1);
+      expect(existsSync(q('T-1'))).toBe(true);
+      rmSync(path.join(boardDir, 'inflight', 'T-1.dispatch.json'));
+      writeFileSync(path.join(boardDir, 'done', 'T-1.verdict.json'), '{}');
+      expect(await run('--task-id', 'T-1', '--reason', 'x')).toBe(1);
+      expect(existsSync(q('T-1'))).toBe(true);
+      expect(await run('--task-id', 'T-9', '--reason', 'x')).toBe(1);
+      err.mockRestore();
+    });
+  });
+
   it('reaps a stale inflight manifest back to the queue', async () => {
     dispatchWriteManifest(boardDir, mkManifest('T-1'));
     await captureStdout(() =>
