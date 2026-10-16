@@ -1,4 +1,10 @@
+---
+status: historical
+---
+
 # PRD: AI-SDLC Native Claude Code Integration
+
+> **Historical document.** This PRD (April 2026) is kept for design context only. The plugin shipped and has since diverged: install with `/plugin marketplace add ai-sdlc-framework/ai-sdlc` then `/plugin install ai-sdlc@ai-sdlc`, and see [Tutorial 8](tutorials/08-claude-code-plugin.md) and `ai-sdlc-plugin/plugin.json` for the current hooks, commands and agents.
 
 **Status:** Draft
 **Author:** AI-SDLC Team

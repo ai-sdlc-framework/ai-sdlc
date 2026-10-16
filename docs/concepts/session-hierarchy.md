@@ -5,7 +5,7 @@ description: "Three tiers of Claude Code sessions (planner, dispatch, executors)
 
 Three tiers of Claude Code sessions with fixed names and one job each: a planner where backlog work is designed, a dispatch session that owns throughput, and N executors that each run exactly one task at a time. The tiers are peers technically. The hierarchy is a protocol: an authority matrix, a durable assignment channel, an escalation chain that ends at the operator only as a last resort, and a rule that empties an executor's context between tasks.
 
-> **RFC:** [RFC-0051 — Session Hierarchy for Parallel Dispatch](https://github.com/ai-sdlc-framework/ai-sdlc/blob/main/spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md) · **Status:** Signed off; roster schema, the bootstrap command and the dispatch brief shipped October 2026 · **Companion:** [RFC-0041 Conductor/Worker](https://github.com/ai-sdlc-framework/ai-sdlc/blob/main/spec/rfcs/RFC-0041-conductor-worker-process-architecture.md)
+> **RFC:** [RFC-0051 — Session Hierarchy for Parallel Dispatch](https://github.com/ai-sdlc-framework/ai-sdlc/blob/main/spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md) · **Status:** Signed off; roster schema, the bootstrap command and the dispatch brief shipped October 2026 · **Companion:** [RFC-0041 Conductor/Worker (historical, superseded by this RFC)](https://github.com/ai-sdlc-framework/ai-sdlc/blob/main/spec/rfcs/RFC-0041-conductor-worker-process-architecture.md)
 
 ## How the operator got here
 
