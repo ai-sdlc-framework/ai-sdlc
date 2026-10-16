@@ -8,10 +8,10 @@
 [![CI](https://github.com/ai-sdlc-framework/ai-sdlc/actions/workflows/ci.yml/badge.svg)](https://github.com/ai-sdlc-framework/ai-sdlc/actions/workflows/ci.yml)
 [![Spec Version](https://img.shields.io/badge/spec-v1alpha1-orange.svg)](#specification--versioning)
 [![Coverage](https://codecov.io/gh/ai-sdlc-framework/ai-sdlc/branch/main/graph/badge.svg)](https://codecov.io/gh/ai-sdlc-framework/ai-sdlc)
-[![Docs](https://img.shields.io/badge/docs-ai--sdlc.io-0a0a0a.svg)](https://ai-sdlc.io/docs)
+[![Docs](https://img.shields.io/badge/docs-ai--sdlc.io-0a0a0a.svg)](https://ai-sdlc.io/docs?utm_source=github&utm_medium=readme&utm_campaign=ai-sdlc-repo&utm_content=badge-docs)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-[Website](https://ai-sdlc.io) · [Documentation](https://ai-sdlc.io/docs) · [Specification](https://ai-sdlc.io/docs/spec/spec) · [Getting Started](https://ai-sdlc.io/docs/getting-started) · [Vision](VISION.md) · [Contributing](CONTRIBUTING.md)
+[Website](https://ai-sdlc.io?utm_source=github&utm_medium=readme&utm_campaign=ai-sdlc-repo&utm_content=header-home) · [Documentation](https://ai-sdlc.io/docs?utm_source=github&utm_medium=readme&utm_campaign=ai-sdlc-repo&utm_content=header-docs) · [Specification](https://ai-sdlc.io/docs/spec/spec?utm_source=github&utm_medium=readme&utm_campaign=ai-sdlc-repo&utm_content=header-docs-spec-spec) · [Getting Started](https://ai-sdlc.io/docs/getting-started?utm_source=github&utm_medium=readme&utm_campaign=ai-sdlc-repo&utm_content=header-docs-getting-started) · [Vision](VISION.md) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -19,7 +19,7 @@
 
 ## What this is
 
-AI-SDLC is the **Decision Engine** for spec-driven AI workflows — the execution-and-governance half of a spec-driven development stack. Operators frontload the load-bearing decisions through a Definition-of-Ready gate; an autonomous orchestrator dispatches developer subagents through the dependency graph; cross-harness reviewers (Claude × Codex × …) verify the work in parallel; DSSE attestations seal every change; pull requests open themselves.
+AI-SDLC is the **Decision Engine** for spec-driven AI workflows — the execution-and-governance half of a spec-driven development stack. Operators frontload the load-bearing decisions through a Definition-of-Ready gate; a session hierarchy (`cli-hierarchy`) dispatches developer subagents through the dependency graph; cross-harness reviewers (Claude × Codex × …) verify the work in parallel; DSSE attestations seal every change; pull requests open themselves.
 
 The leverage move is **cost asymmetry**: operator decisions made upfront — with full context, time to think, and access to stakeholders — are cheap and (mostly) correct. AI decisions made mid-execution under uncertainty are expensive and often wrong. The framework's value is not "AI writes code"; it's **"AI executes well-specified contracts deterministically."** Those are different products with different reliability profiles.
 
@@ -50,19 +50,19 @@ The framework is one cohesive system, but it ships as five pillars you can adopt
 
 ### 1. The Decision Engine — [RFC-0011](spec/rfcs/RFC-0011-definition-of-ready-gate.md) · [RFC-0035](spec/rfcs/RFC-0035-decision-catalog-operator-routing.md)
 
-A Definition-of-Ready gate (RFC-0011) refuses to dispatch tasks the operator hasn't actually decided yet. A forthcoming Decision Catalog (RFC-0035, Draft) makes the operator's open-question queue a first-class resource — ranked by leverage, routed to the right actor, surfaced with framework recommendations + counter-arguments + sub-decision graphs. The framework recommends; the operator decides; the orchestrator executes. → [Concept page](https://ai-sdlc.io/docs/concepts/dor-gate)
+A Definition-of-Ready gate (RFC-0011) refuses to dispatch tasks the operator hasn't actually decided yet. The shipped Decision Catalog (RFC-0035, `cli-decisions`) makes the operator's open-question queue a first-class resource — ranked by leverage, routed to the right actor, surfaced with framework recommendations + counter-arguments + sub-decision graphs. The framework recommends; the operator decides; the dispatch session executes. → [Concept page](https://ai-sdlc.io/docs/concepts/dor-gate?utm_source=github&utm_medium=readme&utm_campaign=ai-sdlc-repo&utm_content=body-docs-concepts-dor-gate)
 
-### 2. Autonomous Pipeline Orchestrator — [RFC-0015](spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md)
+### 2. Session Hierarchy — [RFC-0051](spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md)
 
-`cli-orchestrator tick` walks the dependency graph (RFC-0014), runs admission filters (blocked, in-flight, DoR, dispatchability), dispatches admitted tasks into isolated git worktrees, runs the Step 0-13 pipeline (dev agent → 3 reviewers → attestation sign → PR open), quarantines failures, and resumes from checkpoint commits on interruption. Operators monitor; they don't type. Feature flag: `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental`. → [Concept page](https://ai-sdlc.io/docs/concepts/autonomous-orchestrator) · [Runbook](docs/operations/orchestrator-runbook.md)
+`cli-hierarchy up` starts a planner, a dispatch session and up to five executors, each a Claude Code session in its own tmux session. Dispatch walks the dependency graph (RFC-0014), admits tasks past the blocked, in-flight, DoR and dispatchability filters, and hands each to an executor in an isolated git worktree, which runs the Step 0-13 pipeline (dev agent → configured reviewers → attestation sign → PR open). Operators monitor; they don't type. → [Concept page](https://ai-sdlc.io/docs/concepts/autonomous-orchestrator?utm_source=github&utm_medium=readme&utm_campaign=ai-sdlc-repo&utm_content=body-docs-concepts-autonomous-orchestrator) · [Runbook](docs/operations/cli-hierarchy.md)
 
 ### 3. Cross-Harness Review — [RFC-0010](spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md) §13
 
-Three reviewer subagents run in parallel on every change. DSSE envelopes carry a `harness` field that identifies the execution harness behind each review, and `verify-attestation` enforces **independence by construction**: if Claude implemented, Claude cannot also be the code or test reviewer. Codex reviews Claude's work and vice versa. Reviewer collusion is mechanically impossible. → [Concept page](https://ai-sdlc.io/docs/concepts/cross-harness-review) · [Runbook](docs/operations/cross-harness-review.md)
+The configured reviewer set (`.ai-sdlc/review-policy.md`, `reviewer-set-flag`) runs in parallel on every change. DSSE envelopes carry a `harness` field that identifies the execution harness behind each review, and `verify-attestation` enforces **independence by construction**: if Claude implemented, Claude cannot also be the code or test reviewer. Codex reviews Claude's work and vice versa. Reviewer collusion is mechanically impossible. → [Concept page](https://ai-sdlc.io/docs/concepts/cross-harness-review?utm_source=github&utm_medium=readme&utm_campaign=ai-sdlc-repo&utm_content=body-docs-concepts-cross-harness-review) · [Runbook](docs/operations/cross-harness-review.md)
 
-### 4. Operator TUI — [RFC-0023](spec/rfcs/RFC-0023-operator-tui-pipeline-monitoring.md)
+### 4. Operator Surface — [RFC-0051](spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md) · [RFC-0035](spec/rfcs/RFC-0035-decision-catalog-operator-routing.md)
 
-A live terminal interface with five panes: decisions-pending (RFC-0035), pipeline + PRs, dependency graph, configuration, and analytics. Foregrounds load-bearing decisions and stays out of the way for the rest. → [Concept page](https://ai-sdlc.io/docs/concepts/operator-tui)
+The operator works through `cli-hierarchy` (`status`, `attach`, `brief`, `down`) and the Decision Catalog (`cli-decisions`), which foregrounds load-bearing decisions and stays out of the way for the rest. → [Reference](docs/operations/cli-hierarchy.md)
 
 ### 5. Declarative Governance
 
@@ -88,11 +88,11 @@ ai-sdlc doctor
 /ai-sdlc execute AISDLC-42
 ```
 
-Full setup, runner configuration, agent-runner reference, and the autonomous-orchestrator opt-in are in the documentation:
+Full setup, runner configuration, agent-runner reference, and the session-hierarchy setup are in the documentation:
 
-→ [Getting Started](https://ai-sdlc.io/docs/getting-started) · [Tutorials](https://ai-sdlc.io/docs/tutorials) · [API Reference](https://ai-sdlc.io/docs/api-reference) · [Operations Runbooks](docs/operations/)
+→ [Getting Started](https://ai-sdlc.io/docs/getting-started?utm_source=github&utm_medium=readme&utm_campaign=ai-sdlc-repo&utm_content=body-docs-getting-started) · [Tutorials](https://ai-sdlc.io/docs/tutorials?utm_source=github&utm_medium=readme&utm_campaign=ai-sdlc-repo&utm_content=body-docs-tutorials) · [API Reference](https://ai-sdlc.io/docs/api-reference?utm_source=github&utm_medium=readme&utm_campaign=ai-sdlc-repo&utm_content=body-docs-api-reference) · [Operations Runbooks](docs/operations/)
 
-The framework is agent-agnostic — Claude Code, Codex, Cursor, Copilot, Aider, or any OpenAI-compatible API. See the [Agent Runner Reference](https://ai-sdlc.io/docs/api-reference/runners).
+The framework is agent-agnostic — Claude Code, Codex, Cursor, Copilot, Aider, or any OpenAI-compatible API. See the [Agent Runner Reference](https://ai-sdlc.io/docs/api-reference/runners?utm_source=github&utm_medium=readme&utm_campaign=ai-sdlc-repo&utm_content=body-docs-api-reference-runners).
 
 ---
 
@@ -112,7 +112,7 @@ Canonical execution paths (when working inside a Claude Code session):
 |---|---|---|
 | Internal dogfood (backlog tasks) | `/ai-sdlc execute <task-id>` | Subscription |
 | Manual cleanup | `/ai-sdlc cleanup [<task-id>]` | n/a |
-| Shell-driven autonomous tick | `cli-orchestrator tick --spawner claude` | Subscription |
+| Autonomous drain (session hierarchy) | `/ai-sdlc hierarchy up` | Subscription |
 | GitHub issue / unattended / CI | `pnpm --filter @ai-sdlc/dogfood watch --issue <id>` | API key |
 
 Rules of thumb to internalize before pushing code:
@@ -164,7 +164,7 @@ Architectural changes go through the [RFC process](spec/rfcs/README.md). The reg
 
 <div align="center">
 
-**[Website](https://ai-sdlc.io)** · **[Documentation](https://ai-sdlc.io/docs)** · **[Specification](https://ai-sdlc.io/docs/spec/spec)** · **[Vision](VISION.md)** · **[Pricing](https://ai-sdlc.io/pricing)**
+**[Website](https://ai-sdlc.io?utm_source=github&utm_medium=readme&utm_campaign=ai-sdlc-repo&utm_content=footer-home)** · **[Documentation](https://ai-sdlc.io/docs?utm_source=github&utm_medium=readme&utm_campaign=ai-sdlc-repo&utm_content=footer-docs)** · **[Specification](https://ai-sdlc.io/docs/spec/spec?utm_source=github&utm_medium=readme&utm_campaign=ai-sdlc-repo&utm_content=footer-docs-spec-spec)** · **[Vision](VISION.md)** · **[Pricing](https://ai-sdlc.io/pricing?utm_source=github&utm_medium=readme&utm_campaign=ai-sdlc-repo&utm_content=footer-pricing)**
 
 If you find this project useful, please consider giving it a star.
 

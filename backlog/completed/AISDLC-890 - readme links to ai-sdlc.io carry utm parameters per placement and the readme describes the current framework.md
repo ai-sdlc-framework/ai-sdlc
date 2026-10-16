@@ -1,7 +1,7 @@
 ---
 id: AISDLC-890
 title: 'docs(readme): every ai-sdlc.io link in README.md carries UTM parameters per placement, and the README describes the current framework'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-14'
 labels: [docs, readme, analytics, velocity]
