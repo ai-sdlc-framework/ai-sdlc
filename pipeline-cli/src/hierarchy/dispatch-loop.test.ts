@@ -26,6 +26,7 @@ import { requeueFailed } from '../dispatch/requeue.js';
 import type { LiveState } from './status.js';
 import { enqueueTasks, type EnqueueEntry } from '../dispatch/enqueue.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
+import { listUnbriefed, writeAutoBrief } from './auto-brief.js';
 import { renderBriefBlock, type BriefEntry } from './brief-format.js';
 import type { ClearResult } from './clear.js';
 import {
@@ -140,6 +141,61 @@ beforeEach(() => {
   });
 });
 afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+
+describe('auto-brief (AISDLC-930)', () => {
+  const taskFile = (id: string, extra = '') => {
+    const dir = path.join(tmp, 'backlog', 'tasks');
+    mkdirSync(dir, { recursive: true });
+    const f = path.join(dir, `${id} - t.md`);
+    writeFileSync(f, `---\nid: ${id}\nstatus: To Do\npriority: high\n${extra}---\nbody\n`);
+    return f;
+  };
+
+  it('writes a one-entry brief that the next tick ingests', async () => {
+    const written = writeAutoBrief(tmp, taskFile('AISDLC-77'), board);
+    expect(path.basename(written!)).toBe('tasks-aisdlc-77.md');
+    const text = readFileSync(written!, 'utf8');
+    expect(text).toContain('wave: 1');
+    expect(text).toContain('priority: 1');
+    expect(text).not.toMatch(/after: \[[^\]]/);
+    const r = await runDispatchTick(deps());
+    expect(r.ingested).toEqual([{ file: 'tasks-aisdlc-77.md', tasks: ['AISDLC-77'] }]);
+    expect(enqueued[0]![0]).toMatchObject({ taskId: 'AISDLC-77', wave: 1, priority: 1 });
+  });
+
+  it('does not overwrite an existing brief', () => {
+    const f = taskFile('AISDLC-77');
+    expect(writeAutoBrief(tmp, f, board)).toBeDefined();
+    expect(writeAutoBrief(tmp, f, board)).toBeUndefined();
+  });
+
+  it('writes nothing for dispatchable: false, blocked.reason, or a task without frontmatter', () => {
+    expect(
+      writeAutoBrief(tmp, taskFile('AISDLC-78', 'dispatchable: false\n'), board),
+    ).toBeUndefined();
+    expect(
+      writeAutoBrief(tmp, taskFile('AISDLC-79', 'blocked:\n  reason: waiting\n'), board),
+    ).toBeUndefined();
+    const bare = path.join(tmp, 'bare.md');
+    writeFileSync(bare, 'no frontmatter');
+    expect(writeAutoBrief(tmp, bare, board)).toBeUndefined();
+  });
+
+  it('lists dispatchable tasks on no brief and not on the board', () => {
+    taskFile('AISDLC-80');
+    taskFile('AISDLC-81');
+    taskFile('AISDLC-82');
+    taskFile('AISDLC-83', 'dispatchable: false\n');
+    writeBrief('b.md', ['AISDLC-81']);
+    enqueueTasks(board, [{ taskId: 'AISDLC-82', wave: 1 }], {
+      baseSha: 'a'.repeat(40),
+      dispatchedBy: 'operator-dispatch',
+      resolveTaskFile: (id) => `backlog/tasks/${id.toLowerCase()}.md`,
+    });
+    expect(listUnbriefed(tmp, board)).toEqual(['AISDLC-80']);
+    expect(listUnbriefed(path.join(tmp, 'nowhere'), board)).toEqual([]);
+  });
+});
 
 describe('brief ingestion', () => {
   it('enqueues a brief once; a second tick does not enqueue it again', async () => {

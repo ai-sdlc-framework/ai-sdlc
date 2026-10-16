@@ -790,6 +790,13 @@ describe('hierarchy status', () => {
     expect(text).toContain('busy');
     expect(text).toContain('board: 0 queued, 1 inflight');
     expect(text).toContain('HIERARCHY_SESSION');
+    expect(text).not.toContain('unbriefed');
+    const withGap = formatStatus({ ...result, unbriefed: ['AISDLC-5'] }).join('\n');
+    expect(withGap).toContain('unbriefed');
+    expect(withGap).toContain('AISDLC-5');
+    expect(formatStatus({ ...result, rows: [], unbriefed: ['AISDLC-5'] }).join('\n')).toContain(
+      'AISDLC-5',
+    );
     expect(text).toContain('HIERARCHY_ROLE');
     const alphaLine = text.split('\n').find((l) => l.includes(Q('executor-alpha')));
     expect(alphaLine).toMatch(new RegExp(`${Q('executor-alpha')}\\s+executor$`));

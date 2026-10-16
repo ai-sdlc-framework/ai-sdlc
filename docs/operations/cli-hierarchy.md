@@ -245,6 +245,8 @@ The `NODE` column is the Node version the pane's processes run, read from the pr
 table. It is `-` when no nvm-managed node process runs under the pane or `ps` cannot be read.
 The last line is the webhook receiver: `webhook: up (port N)` when running, `webhook: off (no secret)`
 when `AI_SDLC_WEBHOOK_SECRET` is unset, `webhook: off (not running)` otherwise.
+A final `unbriefed` line lists dispatchable open tasks under `backlog/tasks/` that are on no
+brief and not on the board (nothing would ever queue them); write a brief for them.
 
 ```bash
 cli-hierarchy status [--json]
@@ -342,6 +344,15 @@ running dispatch session for `--notify`).
 ```bash
 cli-hierarchy brief --rfc RFC-0051 --notify
 ```
+
+**Auto-brief (AISDLC-930).** `cli-file task <path> --pr` also writes
+`.ai-sdlc/dispatch/briefs/tasks-<id>.md` on the local board: one entry, no `after`, wave 1,
+priority from the task frontmatter. The next tick ingests it, so a filed task reaches the
+board without a planner pass. `--no-brief` skips it. A `dispatchable: false` task, one with
+`blocked.reason`, and an existing brief of that name get none. A task already on the board is
+skipped on ingest, so a later hand-written brief naming it is harmless. Still write a brief by
+hand when the task has dependencies (`after`), belongs to a sequence group, or needs a hold:
+use `--no-brief` and `cli-hierarchy brief`.
 
 ### `down`
 

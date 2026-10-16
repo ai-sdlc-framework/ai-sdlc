@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -126,6 +126,44 @@ describe('cli-file', () => {
     expect(args.slice(0, 2)).toEqual(['pr', 'create']);
     expect(args).not.toContain('--draft');
     expect(args.join(' ')).not.toMatch(/draft/i);
+  });
+
+  describe('auto-brief (AISDLC-930)', () => {
+    const briefPath = () => join(repo, '.ai-sdlc/dispatch/briefs/tasks-aisdlc-900.md');
+    const writeFm = (extra: string) => {
+      mkdirSync(join(repo, 'backlog/tasks'), { recursive: true });
+      const p = 'backlog/tasks/aisdlc-900 - thing.md';
+      writeFileSync(join(repo, p), `---\nid: AISDLC-900\npriority: low\n${extra}---\nbody\n`);
+      return p;
+    };
+
+    it('writes a one-entry brief with --pr', () => {
+      fileTask(repo, writeFm(''), { pr: true }, deps);
+      const text = readFileSync(briefPath(), 'utf8');
+      expect(text).toContain('task: AISDLC-900');
+      expect(text).toContain('wave: 1');
+      expect(text).toContain('priority: 3');
+    });
+
+    it('--no-brief and a plain (no --pr) filing write none', () => {
+      fileTask(repo, writeFm(''), { pr: true, brief: false }, deps);
+      expect(existsSync(briefPath())).toBe(false);
+    });
+
+    it('writes none without --pr', () => {
+      fileTask(repo, writeFm(''), { pr: false }, deps);
+      expect(existsSync(briefPath())).toBe(false);
+    });
+
+    it('writes none for dispatchable: false or blocked.reason', () => {
+      fileTask(repo, writeFm('dispatchable: false\n'), { pr: true }, deps);
+      expect(existsSync(briefPath())).toBe(false);
+      sh(repo, 'worktree', 'remove', '--force', join(repo, '.worktrees/file-aisdlc-900'));
+      sh(repo, 'branch', '-D', 'ai-sdlc/file-aisdlc-900');
+      sh(remote, 'branch', '-D', 'ai-sdlc/file-aisdlc-900');
+      fileTask(repo, writeFm('blocked:\n  reason: hold\n'), { pr: true }, deps);
+      expect(existsSync(briefPath())).toBe(false);
+    });
   });
 
   it('files without a PR when --pr is absent', () => {
