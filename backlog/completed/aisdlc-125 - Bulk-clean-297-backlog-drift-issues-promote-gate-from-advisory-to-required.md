@@ -15,7 +15,6 @@ dependencies: []
 references:
   - .github/workflows/ci.yml
   - CLAUDE.md
-  - docs/upstream-bug-reports/backlog-drift-url-fragment-false-positive.md
 priority: high
 drift_log:
   - date: '2026-10-05'
@@ -32,7 +31,7 @@ AISDLC-119 was scoped as "stop the bleeding" — the gate landed advisory (`cont
 
 **Two-stage cleanup:**
 
-1. **Land the upstream backlog-drift fix** for the URL-fragment false-positive (separate task — see docs/upstream-bug-reports/backlog-drift-url-fragment-false-positive.md). Once `backlog-drift@0.1.3+` ships and lands in our package.json (or our CI pin), 70% of issues evaporate.
+1. **Land the upstream backlog-drift fix** for the URL-fragment false-positive (upstream bug report, since landed in `backlog-drift@0.1.3` and removed from `docs/`). Once `backlog-drift@0.1.3+` ships and lands in our package.json (or our CI pin), 70% of issues evaporate.
 
 2. **Bulk-fix the remaining genuine drift** (~90 issues after the upstream fix). Per CLAUDE.md, `npx backlog-drift fix --task <id>` rewrites in-place. Two sub-passes:
    - Per-task: walk the offender list, run `fix` on each, manually review the diff
