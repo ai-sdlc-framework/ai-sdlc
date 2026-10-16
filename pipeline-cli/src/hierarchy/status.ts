@@ -13,7 +13,8 @@ import { readSessionRegistry } from './registry.js';
 import { readRosterChecked } from './roster.js';
 import { formatWebhookStatus, webhookStatus, type WebhookStatus } from './webhook.js';
 import { listWindows, paneInfo, paneStartCommand, sessionAttached } from './tmux.js';
-import type { HierarchyDeps, RosterEntry } from './types.js';
+import { resolveThresholds } from './auto-clear.js';
+import type { HierarchyDeps, HierarchyRole, RosterEntry } from './types.js';
 
 /** Live state of one roster entry. */
 export type LiveState = 'busy' | 'idle' | 'starting' | 'gone' | 'unknown';
@@ -45,6 +46,8 @@ export interface StatusResult {
   board: QueueCounts;
   /** The local webhook receiver (AISDLC-880). */
   webhook: WebhookStatus;
+  /** Per-role context-clear thresholds in tokens (AISDLC-815), from `<board-dir>/config.json`. */
+  contextThresholds?: Record<HierarchyRole, number>;
   /** Dispatchable tasks on no brief and not on the board (AISDLC-930); absent when none. */
   unbriefed?: string[];
 }
@@ -122,19 +125,31 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     rows,
     board: peekQueue(deps.boardDir),
     webhook: webhookStatus(deps),
+    contextThresholds: resolveThresholds(deps.boardDir),
     ...(unbriefed.length > 0 ? { unbriefed } : {}),
   };
 }
 
 /** Render the status result as a plain-text table. */
 export function formatStatus(result: StatusResult): string[] {
+  const t = result.contextThresholds;
+  const thresholds = t
+    ? [
+        `context clear thresholds (tokens): planner ${t.planner}, operator-dispatch ${t['operator-dispatch']}, executor ${t.executor}`,
+      ]
+    : [];
   const unbriefed = result.unbriefed?.length
     ? [
         `unbriefed (dispatchable, on no brief, not on the board): ${result.unbriefed.join(', ')}; write a brief with \`cli-hierarchy brief --tasks <id,...>\``,
       ]
     : [];
   if (result.rows.length === 0)
-    return ['no sessions in the roster', formatWebhookStatus(result.webhook), ...unbriefed];
+    return [
+      'no sessions in the roster',
+      formatWebhookStatus(result.webhook),
+      ...thresholds,
+      ...unbriefed,
+    ];
   const header = [
     'ROLE',
     'NAME',
@@ -185,6 +200,7 @@ export function formatStatus(result: StatusResult): string[] {
     '',
     `board: ${queued} queued, ${inflight} inflight, ${done} done, ${failed} failed`,
     formatWebhookStatus(result.webhook),
+    ...thresholds,
     ...unbriefed,
   ];
 }

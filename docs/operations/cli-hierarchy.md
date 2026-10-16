@@ -468,11 +468,16 @@ tool's `run_in_background: true`, stops its turn, and reads the JSON when the co
 notification re-invokes the session. Exit `1` when the session is not an executor or the working directory is not the project's
 repository.
 
-**Idle path.** When `taskId` is `null` the executor runs `cli-hierarchy clear --self --resume-after 30`
-and stops; 20 s later its context is cleared and `/ai-sdlc executor` restarts it from the
-context floor, so an idle executor costs one short turn per ~25 minutes rather than a poll
-every 30 s on a large context. With no tmux pane to clear it falls back to `ScheduleWakeup`
-after `spec.inSessionAgent.emptyQueueHibernateSec` (default 1800 seconds).
+**Idle path.** When `taskId` is `null` the executor keeps its context and re-issues the same blocking
+`executor-start` call (a 25-minute cadence, no clear). With no background option it falls back to
+`ScheduleWakeup` after `spec.inSessionAgent.emptyQueueHibernateSec` (default 1800 seconds).
+
+**Single clear rule (AISDLC-815).** A hierarchy session clears when its context passes its role threshold (the
+AISDLC-766 Stop hook: planner 150k, dispatch 120k, executor 120k tokens, set under `contextThresholds` in
+`<board-dir>/config.json` and printed by `cli-hierarchy status`), or when an executor's task finishes (dispatch
+clears it on the verdict). There is no per-tick clear for dispatch and no idle-wait clear for executors. Motivation:
+in the 24 h to 2026-10-11 the ledger recorded 375 task-less sessions under 300k weighted units each, 49M units
+(11% of the day), spent re-reading the fixed prefix after per-tick and per-idle clears.
 
 ### `handoff`
 

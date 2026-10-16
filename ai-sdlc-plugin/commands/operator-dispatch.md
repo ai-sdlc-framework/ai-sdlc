@@ -2,7 +2,7 @@
 name: operator-dispatch
 description: >-
   The dispatch session loop: one `cli-hierarchy tick` per wake-up, relay to the planner,
-  route decisions, self-clear and sleep. Never answers a design decision, never touches main.
+  route decisions and sleep. Never answers a design decision, never touches main.
 argument-hint: ''
 allowed-tools:
   - Read
@@ -73,7 +73,7 @@ a name. The JSON holds:
 - `markReady`: `readied` flipped after clean CodeQL, `failedAnalyze` go back to an executor
   as a fix round, `skipped` are listed for the operator. A finished task whose pull request goes red returns to its executor, not to a push from here: `cli-dispatch.mjs reenter --board-dir "$BOARD_DIR" <pr-number|task-id>`. It reads the PR, runs the machine action itself for BEHIND or a cancelled check, and for a real failure or a semantic conflict writes one queue manifest (branch, head SHA, failing line) and moves the old `failed/` and `done/` files to `landing/<pr>/history/`. `--note "<what to fix, in prose>"` adds feedback (a line starting `cli-`, `git ` or `gh ` is rejected). The same `(action, head SHA)` twice is refused by the loop guard: route it to the planner (docs/operations/cli-hierarchy.md).
 - A failed task whose verdict names an OPEN PR is PR follow-up, not an escalation: `cli-dispatch.mjs reenter --board-dir "$BOARD_DIR" <pr-number|task-id> --note "<what to finish, in prose>"`; it uses no retry. `requeue` is for failures with no PR only and takes no `--note`.
-- `nextWakeSec`, `selfClear`: Step 5.
+- `nextWakeSec`: Step 5.
 
 ## PRs
 
@@ -110,22 +110,18 @@ node "$PIPELINE_CLI_BIN/cli-decisions.mjs" show "<decision-id>"
 
 Silence never resolves a decision downward.
 
-## Step 5 - Self-clear and sleep
+## Step 5 - Sleep with context intact
 
-Every wake-up ends with a clear (your last Bash call):
+A tick does not end with a clear. The only clear between ticks is the Stop hook past 120k tokens. Read the next wake from the tick and sleep:
 
 ```bash
 BOARD_DIR="${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}"
-PIPELINE_CLI_BIN=$(cat "$BOARD_DIR/.cli-bin")
-MY_NAME=$(node -pe "JSON.parse(require('fs').readFileSync('$BOARD_DIR/.tick.json','utf8')).identity.name")
 NEXT_WAKE_SEC=$(node -pe "JSON.parse(require('fs').readFileSync('$BOARD_DIR/.tick.json','utf8')).nextWakeSec")
 # With work or an open PR, wake within 15 minutes.
 [ -f "$BOARD_DIR/.work-open" ] && [ "$NEXT_WAKE_SEC" -gt 900 ] && NEXT_WAKE_SEC=900
-node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" clear --self --resume-after "$NEXT_WAKE_SEC" \
-  --board-dir "$BOARD_DIR" --worker "$MY_NAME"
+echo "$NEXT_WAKE_SEC"
 ```
 
-A detached process types `/clear` about 20 seconds later and `/ai-sdlc operator-dispatch`
-after `nextWakeSec` (30 busy, 300 working, 1800 empty), sooner when a brief or verdict lands.
-End the turn with one line saying so. A Stop hook also clears this session past 120k tokens. Never `ScheduleWakeup`. Without tmux (`TMUX_PANE`
-unset) the command refuses: stop, tell the operator to restart with `cli-hierarchy up`.
+Call `ScheduleWakeup` with that delay and the prompt `/ai-sdlc operator-dispatch`, or simply end the turn and wait
+for the next message (a brief or verdict). `nextWakeSec` is 30 busy, 300 working, 1800 empty. End the turn with one
+line saying so.

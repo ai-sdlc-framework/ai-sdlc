@@ -91,17 +91,12 @@ describe('operator-dispatch command', () => {
     assert.match(body, /Route `design`/);
   });
 
-  it('self-clears after every wake-up with the resume delay the tick chose', () => {
-    assert.match(body, /## Step 5 - Self-clear and sleep/);
+  it('ends a tick by sleeping with context intact, no per-tick clear (AISDLC-815)', () => {
+    assert.match(body, /## Step 5 - Sleep with context intact/);
     assert.match(body, /nextWakeSec/);
-    assert.match(body, /clear --self --resume-after "\$NEXT_WAKE_SEC"/);
-    assert.match(body, /Never `ScheduleWakeup`/);
-  });
-
-  it('refuses to loop without tmux instead of falling back to ScheduleWakeup', () => {
-    assert.match(body, /Without tmux[\s\S]*the command refuses/);
-    assert.match(body, /restart with `cli-hierarchy up`/);
-    assert.doesNotMatch(body, /falling back to ScheduleWakeup/);
+    assert.doesNotMatch(body, /clear --self --resume-after/);
+    assert.doesNotMatch(body, /Every wake-up ends with a clear/);
+    assert.match(body, /ScheduleWakeup/);
   });
 
   it('states the hard rules plainly', () => {
