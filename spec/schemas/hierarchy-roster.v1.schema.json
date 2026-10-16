@@ -89,6 +89,11 @@
           "format": "date-time",
           "description": "ISO-8601 timestamp the window was created."
         },
+        "nodeVersion": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "description": "Full Node version (for example '22.23.2') cli-hierarchy up activated for the session. status reads it instead of probing the process table. Absent when up did not pin a full version."
+        },
         "status": {
           "type": "string",
           "enum": ["starting", "running"],

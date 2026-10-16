@@ -57,9 +57,10 @@ export function nvmActivationPrefix(version: string): string {
 }
 
 /**
- * Node version the processes under a pane's pid run, read from the process table
- * (an nvm-managed node path contains `/versions/node/v<version>/`). Undefined when
- * no such process is found or `ps` cannot be read.
+ * Node version of the pane's own session, read from the process table (an nvm-managed
+ * node path contains `/versions/node/v<version>/`). Takes the shallowest process in the
+ * pane's tree, so child processes such as MCP servers are ignored. Undefined when no
+ * such process is found or `ps` cannot be read.
  */
 export function paneNodeVersion(run: CommandRunner, panePid: number): string | undefined {
   if (panePid <= 0) return undefined;
@@ -70,20 +71,25 @@ export function paneNodeVersion(run: CommandRunner, panePid: number): string | u
     const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
     if (m) procs.push({ pid: Number(m[1]), ppid: Number(m[2]), comm: (m[3] ?? '').trim() });
   }
-  const family = new Set<number>([panePid]);
-  for (let grew = true; grew;) {
-    grew = false;
+  // Breadth-first from the pane: the session's own shell/claude sits at the shallowest
+  // depth that runs an nvm node; MCP servers and other tools it spawns sit deeper and
+  // may run under a different Node (AISDLC-906).
+  let level = new Set<number>([panePid]);
+  const seen = new Set<number>(level);
+  while (level.size > 0) {
     for (const p of procs) {
-      if (family.has(p.ppid) && !family.has(p.pid)) {
-        family.add(p.pid);
-        grew = true;
+      if (!level.has(p.pid)) continue;
+      const m = /\/versions\/node\/v(\d+\.\d+\.\d+)\//.exec(p.comm);
+      if (m) return m[1];
+    }
+    const next = new Set<number>();
+    for (const p of procs) {
+      if (level.has(p.ppid) && !seen.has(p.pid)) {
+        seen.add(p.pid);
+        next.add(p.pid);
       }
     }
-  }
-  for (const p of procs) {
-    if (!family.has(p.pid)) continue;
-    const m = /\/versions\/node\/v(\d+\.\d+\.\d+)\//.exec(p.comm);
-    if (m) return m[1];
+    level = next;
   }
   return undefined;
 }
