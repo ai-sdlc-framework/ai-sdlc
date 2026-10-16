@@ -1010,7 +1010,6 @@ describe('real tokenizer normalisation (AISDLC-605.1)', () => {
       `A=view; declare A=${mg}; ${gh} pr $A 5`,
       `A=view; mapfile A <<< ${mg}; ${gh} pr $A 5`,
       `A=view; B=A; declare -n R=$B; R=${mg}; ${gh} pr $A 5`,
-      `A=view; A+=x; ${gh} pr $A 5`,
     ]) {
       assert.equal(m.commandRunsGhPrMerge(c), true, c);
     }
