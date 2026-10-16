@@ -1,7 +1,7 @@
 ---
 id: AISDLC-911
 title: 'fix: attestation leaf and verdict carry the harness of the reviewer that actually ran, not the planned -codex agent, when codex quota forces a Claude-native fallback'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-14'
 labels: [bug, pipeline-cli, attestation, review]

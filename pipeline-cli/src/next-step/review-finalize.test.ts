@@ -209,6 +209,24 @@ describe('finalizeReview', () => {
     );
   });
 
+  it('labels a Claude-native fallback report as claude-code with the planned harness (AISDLC-911)', async () => {
+    const dir = join(state.worktreePath, '.ai-sdlc');
+    h.present.add(join(dir, 'transcripts', 'aisdlc-900', 'code-reviewer.jsonl'));
+    h.present.add(join(dir, 'verdicts', 'code-reviewer-aisdlc-900.json'));
+    const reports: ReviewerReport[] = [
+      { agent: 'code-reviewer', agentId: 'a0', approved: true, model: 'sonnet-x' },
+    ];
+    const res = await finalizeReview(h.ctx, state, reports);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const v = res.verdict.verdicts.find((x) => x.agentId === 'code-reviewer');
+    expect(v).toMatchObject({ harness: 'claude-code', plannedHarness: 'codex' });
+    const leaf = h.runner.calls.find((c) => c.args.includes('emit-leaf'))!.args;
+    expect(leaf[leaf.indexOf('--harness') + 1]).toBe('claude-code');
+    expect(leaf[leaf.indexOf('--model') + 1]).toBe('sonnet-x');
+    expect(leaf[leaf.indexOf('--reviewer') + 1]).toBe('code-reviewer');
+  });
+
   it('requests changes when a reviewer reports a critical finding', async () => {
     markPersisted();
     const reports = approvals();
