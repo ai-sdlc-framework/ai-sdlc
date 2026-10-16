@@ -25,7 +25,7 @@ A 2026-05-30 cost incident traced 26% of weekly Claude usage to a single session
 
 ### Force Claude-native for all reviewers
 
-Set the env var before invoking `/ai-sdlc execute` or `/ai-sdlc orchestrator-tick`:
+Set the env var before invoking `/ai-sdlc execute` (or before `cli-hierarchy up`):
 
 ```bash
 export AI_SDLC_REVIEWER_HARNESS=claude
@@ -51,7 +51,7 @@ AI_SDLC_REVIEWER_HARNESS=claude /ai-sdlc execute AISDLC-NNN
 
 ### Override developer model per invocation
 
-The developer agent frontmatter pins `model: sonnet`. To use a different model for a single dispatch (e.g. opus for a particularly complex task), set `AI_SDLC_DEV_MODEL=opus` — the `orchestrator-tick` command body forwards this as a per-invocation hint in the developer prompt. (Not enforced by the dispatch layer; the agent honors it if present.)
+The developer agent frontmatter pins `model: sonnet`. To use a different model for a single dispatch (e.g. opus for a particularly complex task), set `AI_SDLC_DEV_MODEL=opus` — the executor forwards this as a per-invocation hint in the developer prompt. (Not enforced by the dispatch layer; the agent honors it if present.)
 
 ## Programmatic access
 

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-892
 title: 'docs(operations): the living operations pages stop describing cli-orchestrator tick, the AUTONOMOUS_ORCHESTRATOR flag, the TUI and deleted workflows as current'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [docs, docs-platform, velocity]

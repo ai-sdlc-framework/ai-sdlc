@@ -434,10 +434,6 @@ Window modes: `first-use` opens at the first call after the previous window ende
 
 A config that fails validation is skipped with a warning and the next source is tried. A bad config never stops a report.
 
-## Operator TUI
-
-The operator TUI (`AI_SDLC_TUI=experimental`) has a usage pane, opened with `u`, that shows the window view, the top consumers of the current weekly window, the latest limit event and any suspected allotment change.
-
 ---
 
 ## Troubleshooting

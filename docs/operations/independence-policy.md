@@ -267,7 +267,7 @@ dispatches. Set the policy and wire the gate, per the sections above.
 ### How to get `attested`
 
 Run each reviewer as its own subagent and emit its leaf with the nonce and reviewer
-identity (the `/ai-sdlc execute` and retired `/ai-sdlc orchestrator-tick` fan-out did this).
+identity (the `/ai-sdlc execute` and retired (AISDLC-763) `/ai-sdlc orchestrator-tick` fan-out did this).
 If a leaf still comes out `self-authored`, check the troubleshooting notes under "How
 a leaf is bound to its reviewer", including `--project-dir` for sessions started
 outside the repo root.

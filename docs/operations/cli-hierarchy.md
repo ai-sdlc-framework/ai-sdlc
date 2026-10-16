@@ -2,7 +2,7 @@
 
 `cli-hierarchy` starts, inspects and stops the session hierarchy: a planner, a dispatch
 session and up to five executors, each a Claude Code session in its own tmux session.
-It replaces `/ai-sdlc execute-parallel`; the executor loop, the dispatch loop, liveness and
+It replaces the retired `/ai-sdlc execute-parallel` (AISDLC-763); the executor loop, the dispatch loop, liveness and
 the cancel back-channel are documented at the end of this page. RFC: [RFC-0051](../../spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md).
 
 The documented entry point is the plugin command, which runs `cli-hierarchy` from the
@@ -1298,12 +1298,12 @@ windows.
 
 ### Two-substrate reconciliation
 
-The execute-parallel coordination layer has two independent substrates that
+The session coordination layer (the retired execute-parallel, AISDLC-763, left these files in place) has two independent substrates that
 track session state:
 
 | Substrate                    | File location                                                     | Purpose                                    |
 | ---------------------------- | ----------------------------------------------------------------- | ------------------------------------------ |
-| **Session file substrate**   | `.ai-sdlc/dispatch/sessions/<task>.session.json`                  | tmux/execute-parallel coordination         |
+| **Session file substrate**   | `.ai-sdlc/dispatch/sessions/<task>.session.json`                  | tmux session coordination                 |
 | **Dispatch Board substrate** | `.ai-sdlc/dispatch/inflight/<task>.dispatch.json` + `.state.json` | Conductor/Worker Dispatch Board (RFC-0041) |
 
 When a session dies, both substrates must be updated consistently — an orphan
@@ -1321,13 +1321,12 @@ The reaper reconciles both:
    to `failed/` so the Conductor's verdict poll records the event.
 3. **Board-only orphan sweep**: after the session-file pass, a board-level
    sweep catches inflight entries that have no corresponding session file
-   (Workers that don't use execute-parallel). These appear in
+   (Workers without a session file). These appear in
    `SessionReaperResult.boardOnlyReaped`.
 
 ### When the reaper runs
 
-The reaper is invoked automatically by `execute-parallel-status` on every
-status table refresh. You can also invoke it programmatically:
+The reaper runs from the session status refresh. You can also invoke it programmatically:
 
 ```typescript
 import { reapStaleSessions } from '@ai-sdlc/pipeline-cli';
@@ -1352,11 +1351,7 @@ cat .ai-sdlc/dispatch/inflight/AISDLC-462.state.json | jq '.lastHeartbeat'
 ```
 
 If a session appears stuck (heartbeat age > 30 min), the reaper will clean it
-up on the next status refresh. You can force a reap cycle by running:
-
-```bash
-/ai-sdlc execute-parallel-status
-```
+up on the next status refresh; `cli-hierarchy status` shows the current state.
 
 ---
 
@@ -1512,7 +1507,7 @@ One pass of the loop:
    the board (`cli-hierarchy executor-start`, up to 1,500 s, no model calls
    while it waits); if still nothing is eligible it clears its own context and restarts
    (`cli-hierarchy clear --self --resume-after 30`), or, with no tmux pane to clear, schedules a
-   wake-up after `spec.inSessionAgent.emptyQueueHibernateSec` (default 1800 seconds; this default intentionally applies to Pattern Z Workers running `/ai-sdlc dispatch-worker` too).
+   wake-up after `spec.inSessionAgent.emptyQueueHibernateSec` (default 1800 seconds; the retired `/ai-sdlc dispatch-worker`, AISDLC-763, shared this default).
 3. **Execute.** It runs `/ai-sdlc execute <task-id>` with the task id and no other
    argument. The pipeline is not modified for executors.
 4. **Report.** `cli-dispatch complete --task-id <id> --outcome <outcome>

@@ -240,8 +240,7 @@ Each escalation record carries:
 
 `cli-decisions escalate` is a thin CLI wrapper over the same `makeDecisionOpenedEvent` + `appendDecisionEvent` primitives that the interactive `cli-decisions add` uses. It works identically regardless of the dispatch mechanism:
 
-- **Native background-Agent dispatch** (Pattern X v2, `/ai-sdlc orchestrator-tick`): the developer subagent calls the CLI directly from within its worktree.
-- **tmux execute-parallel**: each pane session calls the CLI; all writes go to the same `.ai-sdlc/_decisions/events.jsonl` log (append-only, no lock needed for single-writer per call).
+- **Executor sessions under `cli-hierarchy`** (the tick and tmux fan-out it replaced are retired, AISDLC-763): each session calls the CLI from its worktree; all writes go to the same `.ai-sdlc/_decisions/events.jsonl` log (append-only, no lock needed for single-writer per call).
 - **`claude -p` workers** (Pattern Y / claude-p-shell): workers call the CLI via shell; the event log path is resolved from `--work-dir` (defaults to `cwd` which is the worktree).
 
 ## Related runbooks

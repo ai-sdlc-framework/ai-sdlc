@@ -17,9 +17,8 @@ If you're new to AI-SDLC, start with [`docs/operations/cli-hierarchy.md`](./cli-
 | You want to… | Run | Bills against |
 |---|---|---|
 | Type a one-off task interactively | `/ai-sdlc execute <task-id>` in Claude Code | Your **interactive Max-20x quota** |
-| **Continuous autonomous loop — zero incremental cost (post-2026-06-15)** | `/ai-sdlc orchestrator-tick` in an active Claude Code session | Your **interactive Max-20x quota** (Agent SDK credit NOT drawn) |
+| **Continuous autonomous loop — zero incremental cost (post-2026-06-15)** | `cli-hierarchy up` (executors run in interactive Claude Code sessions) | Your **interactive Max-20x quota** (Agent SDK credit NOT drawn) |
 | Dispatch a single backlog task headless from a terminal | `node pipeline-cli/bin/ai-sdlc-pipeline.mjs execute <task-id> --run --spawner api-key` | **$200/mo Agent SDK credit** (Max-20x), then API-key overflow |
-| Run an autonomous loop on the dispatch frontier (cron/daemon) | `cli-orchestrator tick --spawner claude` | **$200/mo Agent SDK credit** (Max-20x), then API-key overflow (post-2026-06-15; uses `claude -p` which the credit covers) |
 | Run reviewers + attestation IN CI on every push | `ai-sdlc-review.yml` GitHub Actions | **$200/mo Agent SDK credit** (Max-20x), then API-key overflow |
 | Skip CI-side reviewers when local attestation already signed | Sign locally first; CI's `ai-sdlc-gate.yml (attestation-gate job)` short-circuits | Local sign uses no LLM (pure crypto). **FREE.** |
 
@@ -67,87 +66,13 @@ Unused credit doesn't roll over. Once exhausted, traffic falls through to API-ke
 
 **Cost shape**: each dispatch fans out 1 dev subagent + (up to) 3 reviewer subagents + signing. On a typical task that's roughly 100K–500K tokens of interactive quota.
 
-**Resume on failure**: limited. If the slash command body fails mid-pipeline, the recovery path is `cli-orchestrator tick` (autonomous orchestrator). See [`recovery-flows.md`](./recovery-flows.md) (filed as AISDLC-273 — pending).
+**Resume on failure**: limited. If the slash command body fails mid-pipeline, the recovery path is a resumed executor under `cli-hierarchy`. See [`recovery-flows.md`](./recovery-flows.md) (filed as AISDLC-273 — pending).
 
 ---
 
-### 1b. `/ai-sdlc orchestrator-tick` (subscription-only autonomous loop) — recommended post-2026-06-15
+### 1b. Continuous autonomous loop
 
-> **This is the preferred high-throughput path post-2026-06-15.** It runs an
-> unlimited autonomous dispatch loop at zero incremental cost as long as one
-> Claude Code session stays alive.
-
-**Where it runs**: inside an active Claude Code session, started by typing the slash command once. `ScheduleWakeup` fires the next tick every 30 seconds automatically.
-
-**Bills against**: your **interactive Max-20x quota** — the same pool as your normal Claude Code chatting. The Agent SDK credit pool ($200/mo) is NOT drawn, because the dispatch happens inside a human-driven interactive session turn, not a non-interactive Agent SDK invocation.
-
-**When to use it**: continuous autonomous backlog churning on Max-20x subscription where you want zero cost above your existing subscription fee.
-
-**How it works**:
-
-The `/ai-sdlc orchestrator-tick` slash command is the Conductor side of the RFC-0041 Dispatch Board protocol (the pre-RFC-0041 inline-manifest path via `--spawner claude-cli` was removed in AISDLC-377.6):
-
-1. The command runs `cli-dispatch sweep` + `cli-dispatch collect-verdicts` to reconcile completed Worker dispatches and surface any `done/<task-id>.verdict.json` payloads from the previous tick.
-2. For each `success` verdict, the slash command body fans out the three reviewer subagents via foreground `Agent` calls (these draw from the operator's interactive quota — NOT the Agent SDK credit pool — because they run inside an interactive session turn).
-3. The reviewer verdicts are written to `.ai-sdlc/verdicts/<task-id-lower>.json`; the slash command body signs the DSSE attestation and force-pushes the chore commit on top of the dev's branch.
-4. The command then peeks the frontier, fires `cli-dispatch write-manifest` to enqueue new work to `.ai-sdlc/dispatch/queue/`, and writes a `bg-agent-request` for each admitted task — Pattern X v2's Phase B fires a `run_in_background:true` `Agent(developer)` for the request on the next tick, and Phase A reconciles its completion notification one or more ticks later.
-5. `ScheduleWakeup(30s)` fires — the next tick starts automatically 30 seconds later.
-
-For headless / CI contexts (no operator CC session available), use `cli-orchestrator tick --spawner claude` from cron / daemon / sidecar — that path bills against the Agent SDK credit pool instead of the interactive quota.
-
-**Trade-off**: requires ONE active Claude Code session to remain open. The session can hibernate (no keyboard activity) between ticks; `ScheduleWakeup` wakes it automatically. If the session terminates, the loop stops until you restart it.
-
-**Side-by-side comparison**:
-
-| | `/ai-sdlc orchestrator-tick` (subscription loop) | `cli-orchestrator tick --spawner claude` (cron/daemon) |
-|---|---|---|
-| **Billing pool** | Interactive Max-20x quota | Agent SDK credit pool ($200/mo), then API overflow |
-| **Post-2026-06-15 incremental cost** | **$0** (part of subscription) | First $200/mo free, then pay-as-you-go per token |
-| **Requires active session?** | Yes — one terminal with Claude Code open | No — runs headless from cron/daemon/sidecar |
-| **Recovery on session crash** | Operator restarts session + fires command again | Loop auto-restarts via cron/daemon |
-| **Max throughput** | Bounded by interactive quota | Bounded by SDK credit pool ($200/mo) |
-| **Setup complexity** | One command | Requires cron/systemd/daemon setup |
-
-**Operator quickstart**:
-
-```bash
-# 1. Enable the experimental orchestrator flag (add to your shell profile):
-export AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental
-
-# 2. Open a dedicated terminal and start Claude Code in your project root:
-cd /path/to/your/project
-claude
-
-# 3. Fire the tick once — ScheduleWakeup handles the rest:
-/ai-sdlc orchestrator-tick
-
-# The loop now runs indefinitely every 30 seconds.
-# To run a single tick without looping:
-/ai-sdlc orchestrator-tick --once
-```
-
-**Cost projection — 20 tasks/day throughput**:
-
-| Path | Monthly tasks | Incremental cost (post-2026-06-15) |
-|---|---|---|
-| Subscription loop (`/ai-sdlc orchestrator-tick`) | ~600/mo | **$0** — subscription covers it |
-| SDK credit pool (`cli-orchestrator tick --spawner claude`) | ~600/mo | First $200/mo free; typical ~$0.50–$2 per task → $300–$1,200/mo overflow after credit exhausted |
-| Pure API-key (`--spawner api-key`) | ~600/mo | ~$0.50–$2 per task direct = $300–$1,200/mo |
-
-> **Note**: the "incremental cost $0" assumes your Max-20x subscription's interactive quota is not already saturated by other use. If you run heavy interactive workloads in parallel, the autonomous loop competes for the same pool. In practice, between-tick hibernation means the loop's share of the interactive quota is small relative to the dispatch subagent's wall-clock time.
-
-**What happens if the Claude Code session crashes or closes mid-loop?**
-
-1. **Worktrees survive on disk.** Any in-flight task's worktree at `.worktrees/<task-id>/` is preserved. No code is lost.
-2. **Recovery detection.** The next `cli-orchestrator tick` run detects in-flight tasks via the AISDLC-242 recoverable-abort path (or the AISDLC-273 resume-from-draft mechanism when the task already has a PR).
-3. **Restart.** Open a new Claude Code session in the same project directory, set `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental`, and fire `/ai-sdlc orchestrator-tick` again. The orchestrator's tick loop picks up where it left off — unfinished tasks re-enter the dispatch frontier.
-
-```bash
-# Recovery after session crash:
-export AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental
-claude  # open new session in project root
-/ai-sdlc orchestrator-tick  # loop resumes
-```
+The subscription-only autonomous loop is `cli-hierarchy up` ([`cli-hierarchy.md`](./cli-hierarchy.md)): a planner, a dispatch session and executors, each an interactive Claude Code session billed against your interactive Max-20x quota. The earlier `/ai-sdlc orchestrator-tick` loop and the `cli-orchestrator` cron/daemon path are retired (AISDLC-763).
 
 ---
 
@@ -183,69 +108,15 @@ The `--run` flag is required to actually execute (default is `--dry-run` for saf
 
 ---
 
-### 3. `cli-orchestrator start` (autonomous polling loop)
-
-**Where it runs**: long-lived process (terminal, systemd, Docker, GitHub Actions self-hosted runner).
-
-**Bills against**:
-- **Default spawner is `ShellClaudePSpawner` → `claude -p`**
-- **Pre-2026-06-15**: same pool as your interactive Max-20x (or pay-as-you-go if `ANTHROPIC_API_KEY` is set in env)
-- **Post-2026-06-15**: $200/mo Agent SDK credit (the Anthropic article explicitly lists `claude -p` as covered)
-
-**When to use it**: continuous dogfood / production dispatch — orchestrator polls the backlog, picks up tasks as they become DoR-ready, dispatches in parallel up to the configured concurrency.
-
-**Cost shape**: per-tick cost depends on dispatch rate. With `maxConcurrent=1` and one ready task per minute, ~1 dev + 3 reviewer subagent invocations per minute. Most tasks take 5–15 minutes wall-clock.
-
-**Setup**:
-
-```bash
-# Required: opt into the experimental flag.
-export AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental
-
-# Start the loop:
-node pipeline-cli/bin/cli-orchestrator.mjs start
-```
-
-The loop respects `AISDLC-242` recoverable-abort detection — interrupted dispatches resume on the next tick. See [`pipeline-cli/docs/orchestrator.md`](../../pipeline-cli/docs/orchestrator.md) for the full operator runbook.
-
----
-
-### 4. CI-side reviewers — `ai-sdlc-review.yml` + `ai-sdlc-gate.yml (attestation-gate job)` GitHub Actions
-
-**Where it runs**: GitHub Actions runners on every push / PR / merge_group event.
-
-**Bills against**:
-- The runner must have `ANTHROPIC_API_KEY` set in repo secrets to run reviewers
-- **Pre-2026-06-15**: API-key pay-as-you-go
-- **Post-2026-06-15**: $200/mo Agent SDK credit (the SDK is what the workflow uses internally)
-
-**When it fires**:
-- `ai-sdlc-gate.yml (attestation-gate job)` runs on every PR; if the local DSSE envelope at `.ai-sdlc/attestations/<head-sha>.dsse.json` is valid → posts `ai-sdlc/attestation: success` and **skips CI-side reviewers**
-- `ai-sdlc-review.yml`'s `Post Review Results` runs CI-side reviewers ONLY when local attestation is missing (cost-saver fallback)
-
-**Cost shape**: 3 reviewer subagent runs per PR with no local attestation. Avoidable by signing locally.
-
-**Setup**:
-
-```yaml
-# .github/workflows/ — both files come from `ai-sdlc init --with-workflows`
-# Repo secret `ANTHROPIC_API_KEY` only needs to be set if you want the
-# CI-side fallback reviewers to actually fire. If unset, the fallback
-# silently skips ("Post Review Results: skipped (budget exhausted)") — at
-# the cost of any PR without a local attestation NEVER getting reviewed.
-```
-
----
-
 ## Billing-safety checklist (AISDLC-352)
 
 Run through this before every autonomous tick session to avoid surprise API-key charges:
 
 1. **Use `--spawner claude` (or rely on the default).**
-   Since AISDLC-352, `cli-orchestrator tick` defaults to `--spawner claude`. You no longer need to pass the flag explicitly for cron/daemon dispatch. The legacy `--spawner claude-cli` inline-manifest path was removed in RFC-0041 Phase 3.3 (AISDLC-377.6); any script that still passes it will be rejected at parse time with `Invalid values: Choices: "mock", "api-key", "claude", "codex"`. Drop the flag (or replace with `--spawner claude`) — see [`docs/operations/claude-cli-spawner-removed.md`](./claude-cli-spawner-removed.md).
+   Since AISDLC-352, `claude` is the default spawner. The legacy `--spawner claude-cli` inline-manifest path was removed in RFC-0041 Phase 3.3 (AISDLC-377.6); any script that still passes it will be rejected at parse time with `Invalid values: Choices: "mock", "api-key", "claude", "codex"`. Drop the flag (or replace with `--spawner claude`) — see [`docs/operations/claude-cli-spawner-removed.md`](./claude-cli-spawner-removed.md).
 
 2. **Unset `ANTHROPIC_API_KEY` unless you intend to use API-key billing.**
-   When `ANTHROPIC_API_KEY` is set and you run `cli-orchestrator tick --spawner claude`, the CLI emits this warning to stderr:
+   When `ANTHROPIC_API_KEY` is set and you run with `--spawner claude`, the CLI emits this warning to stderr:
 
    ```
    [orchestrator] warning: ANTHROPIC_API_KEY is set but --spawner claude is requested.
@@ -366,7 +237,7 @@ Yes — same architecture, just smaller credit pool ($20/mo). One dispatch consu
 
 **Q. Does `ai-sdlc-pipeline execute --spawner claude-cli` use the SDK credit?**
 
-The `claude-cli` spawner was removed in RFC-0041 Phase 3.3 (AISDLC-377.6) and is no longer a valid `--spawner` choice — see [`docs/operations/claude-cli-spawner-removed.md`](./claude-cli-spawner-removed.md). For subscription billing without an interactive operator session, use `--spawner claude` (shell-out to `claude -p`, draws Agent SDK credit pool). For interactive-quota dispatch with zero incremental cost, use the Dispatch Board model: `/ai-sdlc orchestrator-tick` + N `/ai-sdlc dispatch-worker` sessions.
+The `claude-cli` spawner was removed in RFC-0041 Phase 3.3 (AISDLC-377.6) and is no longer a valid `--spawner` choice — see [`docs/operations/claude-cli-spawner-removed.md`](./claude-cli-spawner-removed.md). For subscription billing without an interactive operator session, use `--spawner claude` (shell-out to `claude -p`, draws Agent SDK credit pool). For interactive-quota dispatch with zero incremental cost, use `cli-hierarchy up` (the tick and dispatch-worker commands are retired, AISDLC-763).
 
 **Q. My CI is silently skipping reviewers — is that a problem?**
 
@@ -393,4 +264,4 @@ Not today — the spawner choice is per-dispatch, not per-step. If this matters,
 
 ---
 
-*Last updated: 2026-05-17 (AISDLC-353: added subscription-only autonomous loop via `/ai-sdlc orchestrator-tick`; cost-projection table; failure-mode docs).*
+*Last updated: 2026-05-17 (AISDLC-353; the orchestrator-tick loop it added was retired by AISDLC-763).*

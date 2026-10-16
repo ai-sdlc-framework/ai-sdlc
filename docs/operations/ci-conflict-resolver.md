@@ -68,14 +68,14 @@ node pipeline-cli/bin/cli-orchestrator.mjs ci-failure-watch --list-cooldowns
 > **Note on `--enable-dispatch`** — the standalone CLI does NOT have
 > the Claude Code `Agent` tool. `--enable-dispatch` is reserved for
 > the future hosting surface that wires the watcher into a session
-> that DOES (e.g. an autonomous orchestrator-tick reconciliation
+> that DOES (e.g. a `cli-hierarchy` dispatch tick reconciliation
 > step). Until then the standalone CLI runs classify-only dry-runs;
 > use the slash command for foreground dispatch.
 
-### 3. Recommended (Phase 1 simplest): inside `/ai-sdlc orchestrator-tick`
+### 3. Recommended (Phase 1 simplest): inside the `cli-hierarchy` dispatch tick
 
-The autonomous orchestrator tick already runs every 20-30 minutes when
-the operator is overnight-draining the backlog. Extending Step 4
+The dispatch tick (`cli-hierarchy tick`) already runs on a cadence while
+the backlog drains (the old orchestrator tick it replaced is retired, AISDLC-763). Extending Step 4
 (`failed/` verdict poll) to also poll GitHub via `runWatcherTick` is
 the lowest-friction wiring — no extra cron, no extra daemon.
 
@@ -214,9 +214,8 @@ The watcher writes a structured result per tick:
 }
 ```
 
-When wired into `orchestrator-tick`, the tick's `events.jsonl` writer
-will emit one event per dispatched/escalated PR for the dashboard
-TUI's CI-watcher pane (RFC-0023 future work).
+When wired into the dispatch tick, its `events.jsonl` writer
+will emit one event per dispatched/escalated PR.
 
 ## Troubleshooting
 
