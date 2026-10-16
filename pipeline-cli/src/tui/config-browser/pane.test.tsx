@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, cleanup } from 'ink-testing-library';
 
 import { ConfigBrowserPane } from './pane.js';
+import { NOOP_SCHEMA_VALIDATOR } from './validator.js';
 
 afterEach(() => {
   cleanup();
@@ -46,7 +47,12 @@ async function flush(): Promise<void> {
 describe('ConfigBrowserPane — list view (AC#4)', () => {
   it('renders every YAML file with status icons', async () => {
     const { lastFrame } = render(
-      <ConfigBrowserPane workDir="/proj" walker={makeWalker()} fileReader={makeReader()} />,
+      <ConfigBrowserPane
+        schemaValidator={NOOP_SCHEMA_VALIDATOR}
+        workDir="/proj"
+        walker={makeWalker()}
+        fileReader={makeReader()}
+      />,
     );
     await flush();
     const frame = lastFrame() ?? '';
@@ -57,7 +63,12 @@ describe('ConfigBrowserPane — list view (AC#4)', () => {
 
   it('shows ✓ for valid files and ✗ for invalid', async () => {
     const { lastFrame } = render(
-      <ConfigBrowserPane workDir="/proj" walker={makeWalker()} fileReader={makeReader()} />,
+      <ConfigBrowserPane
+        schemaValidator={NOOP_SCHEMA_VALIDATOR}
+        workDir="/proj"
+        walker={makeWalker()}
+        fileReader={makeReader()}
+      />,
     );
     await flush();
     const frame = lastFrame() ?? '';
@@ -68,7 +79,12 @@ describe('ConfigBrowserPane — list view (AC#4)', () => {
   it('renders the source-unavailable banner when walker errors', async () => {
     const walker = vi.fn().mockReturnValue({ files: [], error: 'source-unavailable' });
     const { lastFrame } = render(
-      <ConfigBrowserPane workDir="/proj" walker={walker} fileReader={makeReader()} />,
+      <ConfigBrowserPane
+        schemaValidator={NOOP_SCHEMA_VALIDATOR}
+        workDir="/proj"
+        walker={walker}
+        fileReader={makeReader()}
+      />,
     );
     await flush();
     expect(lastFrame() ?? '').toContain('unable to list .ai-sdlc/');
@@ -77,7 +93,12 @@ describe('ConfigBrowserPane — list view (AC#4)', () => {
   it('shows empty-state copy when no YAML files', async () => {
     const walker = vi.fn().mockReturnValue({ files: [], error: null });
     const { lastFrame } = render(
-      <ConfigBrowserPane workDir="/proj" walker={walker} fileReader={makeReader()} />,
+      <ConfigBrowserPane
+        schemaValidator={NOOP_SCHEMA_VALIDATOR}
+        workDir="/proj"
+        walker={walker}
+        fileReader={makeReader()}
+      />,
     );
     await flush();
     expect(lastFrame() ?? '').toContain('No .yaml files');
@@ -87,7 +108,12 @@ describe('ConfigBrowserPane — list view (AC#4)', () => {
 describe('ConfigBrowserPane — detail view (AC#5)', () => {
   it('Enter on a file opens the syntax-highlighted detail view', async () => {
     const { stdin, lastFrame } = render(
-      <ConfigBrowserPane workDir="/proj" walker={makeWalker()} fileReader={makeReader()} />,
+      <ConfigBrowserPane
+        schemaValidator={NOOP_SCHEMA_VALIDATOR}
+        workDir="/proj"
+        walker={makeWalker()}
+        fileReader={makeReader()}
+      />,
     );
     await flush();
     stdin.write('\r'); // Enter on the first row (a.yaml)
@@ -100,7 +126,12 @@ describe('ConfigBrowserPane — detail view (AC#5)', () => {
 
   it('shows the validation summary in the detail view', async () => {
     const { stdin, lastFrame } = render(
-      <ConfigBrowserPane workDir="/proj" walker={makeWalker()} fileReader={makeReader()} />,
+      <ConfigBrowserPane
+        schemaValidator={NOOP_SCHEMA_VALIDATOR}
+        workDir="/proj"
+        walker={makeWalker()}
+        fileReader={makeReader()}
+      />,
     );
     await flush();
     stdin.write('\r');
@@ -110,7 +141,12 @@ describe('ConfigBrowserPane — detail view (AC#5)', () => {
 
   it('shows annotated line errors for malformed YAML', async () => {
     const { stdin, lastFrame } = render(
-      <ConfigBrowserPane workDir="/proj" walker={makeWalker()} fileReader={makeReader()} />,
+      <ConfigBrowserPane
+        schemaValidator={NOOP_SCHEMA_VALIDATOR}
+        workDir="/proj"
+        walker={makeWalker()}
+        fileReader={makeReader()}
+      />,
     );
     await flush();
     stdin.write('j'); // move down to b.yaml
@@ -125,7 +161,12 @@ describe('ConfigBrowserPane — detail view (AC#5)', () => {
 
   it('Esc returns to list view from detail', async () => {
     const { stdin, lastFrame } = render(
-      <ConfigBrowserPane workDir="/proj" walker={makeWalker()} fileReader={makeReader()} />,
+      <ConfigBrowserPane
+        schemaValidator={NOOP_SCHEMA_VALIDATOR}
+        workDir="/proj"
+        walker={makeWalker()}
+        fileReader={makeReader()}
+      />,
     );
     await flush();
     stdin.write('\r');
@@ -149,6 +190,7 @@ describe('ConfigBrowserPane — editor handoff (AC#6)', () => {
     });
     const { stdin, lastFrame } = render(
       <ConfigBrowserPane
+        schemaValidator={NOOP_SCHEMA_VALIDATOR}
         workDir="/proj"
         walker={walker}
         fileReader={fileReader}
@@ -171,6 +213,7 @@ describe('ConfigBrowserPane — editor handoff (AC#6)', () => {
     const editorLauncher = vi.fn().mockReturnValue({ outcome: 'EDITOR_NOT_SET', editor: null });
     const { stdin, lastFrame } = render(
       <ConfigBrowserPane
+        schemaValidator={NOOP_SCHEMA_VALIDATOR}
         workDir="/proj"
         walker={makeWalker()}
         fileReader={makeReader()}
@@ -193,6 +236,7 @@ describe('ConfigBrowserPane — editor handoff (AC#6)', () => {
     });
     const { stdin, lastFrame } = render(
       <ConfigBrowserPane
+        schemaValidator={NOOP_SCHEMA_VALIDATOR}
         workDir="/proj"
         walker={makeWalker()}
         fileReader={makeReader()}
@@ -216,6 +260,7 @@ describe('ConfigBrowserPane — editor handoff (AC#6)', () => {
     });
     const { stdin, lastFrame } = render(
       <ConfigBrowserPane
+        schemaValidator={NOOP_SCHEMA_VALIDATOR}
         workDir="/proj"
         walker={makeWalker()}
         fileReader={fileReader}
@@ -235,6 +280,7 @@ describe('ConfigBrowserPane — search filter (AC#9)', () => {
   it('filterQuery prunes the list to matching files only', async () => {
     const { lastFrame } = render(
       <ConfigBrowserPane
+        schemaValidator={NOOP_SCHEMA_VALIDATOR}
         workDir="/proj"
         walker={makeWalker()}
         fileReader={makeReader()}
@@ -250,6 +296,7 @@ describe('ConfigBrowserPane — search filter (AC#9)', () => {
   it('shows "no matches" when filter excludes everything', async () => {
     const { lastFrame } = render(
       <ConfigBrowserPane
+        schemaValidator={NOOP_SCHEMA_VALIDATOR}
         workDir="/proj"
         walker={makeWalker()}
         fileReader={makeReader()}
