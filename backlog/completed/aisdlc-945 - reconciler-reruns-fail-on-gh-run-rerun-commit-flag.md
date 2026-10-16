@@ -1,7 +1,7 @@
 ---
 id: AISDLC-945
 title: 'Reconciler reruns fail: gh run rerun has no --commit flag, so retrigger-once, rerun-rate-limited and rerun-dor never run'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels:
