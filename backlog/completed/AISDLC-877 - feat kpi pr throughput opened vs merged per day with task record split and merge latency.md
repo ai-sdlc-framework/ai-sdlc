@@ -32,12 +32,12 @@ No task owns this metric. AISDLC-831 owns only the closed-unmerged KPI; this tas
 
 ## Acceptance Criteria
 
-- [ ] #1 The command exists with Vitest tests on fixture PR lists covering all four classes (task, record, dependency, other) and the ratio and latency math
-- [ ] #2 Output on a recorded fixture matches the 10-11..10-14 numbers above (task 59/52, record 84/77, median 4h, p90 21h, max 67h) within +-1
-- [ ] #3 The KPI page has a "PR throughput" section refreshed by the command, and the digest receives one summary line
-- [ ] #4 The docs/operations page documents the metric definitions and states that a landed/opened ratio below 1.0 for two consecutive days is the "backlog growing" signal
-- [ ] #5 No model calls and no new dependencies
-- [ ] #6 The dark-code gate passes (the command has a non-test importer: the CLI bin)
+- [x] #1 The command exists with Vitest tests on fixture PR lists covering all four classes (task, record, dependency, other) and the ratio and latency math
+- [x] #2 Output on a recorded fixture matches the 10-11..10-14 numbers above (task 59/52, record 84/77, median 4h, p90 21h, max 67h) within +-1
+- [x] #3 The KPI page has a "PR throughput" section refreshed by the command, and the digest receives one summary line
+- [x] #4 The docs/operations page documents the metric definitions and states that a landed/opened ratio below 1.0 for two consecutive days is the "backlog growing" signal
+- [x] #5 No model calls and no new dependencies
+- [x] #6 The dark-code gate passes (the command has a non-test importer: the CLI bin)
 
 ## Verification
 
