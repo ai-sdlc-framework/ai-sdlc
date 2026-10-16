@@ -10,6 +10,7 @@
  */
 
 import type { Runner } from '../runtime/exec.js';
+import type { ResumeReviewDecision } from './resume-decision.js';
 import type {
   AggregatedVerdict,
   DeveloperReturn,
@@ -119,6 +120,8 @@ export interface NextStepState {
   iteration: number;
   maxIterations: number;
   developer: DeveloperReturn | null;
+  /** AISDLC-947: the resume review decision, set only when the task resumed. */
+  resumeReview?: ResumeReviewDecision;
   review: ReviewRoundState | null;
   verdict: AggregatedVerdict | null;
   /** Set once the post-rebase re-review has been used, so it never loops. */

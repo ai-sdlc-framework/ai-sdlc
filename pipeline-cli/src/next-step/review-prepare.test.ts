@@ -270,6 +270,36 @@ describe('prepareReview', () => {
     expect(res.review.spawned.every((s) => s.harness === 'claude-code')).toBe(true);
   });
 
+  it('delta resume without a trust-chain path overrides the classifier to testing+critic (AISDLC-947)', async () => {
+    script();
+    state.resumeReview = {
+      branch: 'delta',
+      note: 'review-delta: correctness-reviewer',
+      lastHead: 'b'.repeat(40),
+      reviewers: ['correctness-reviewer'],
+      deltaPaths: ['docs/a.md'],
+    };
+    const res = await prepareReview(h.ctx, state, 1);
+    if (res.kind !== 'spawn') throw new Error('expected spawn');
+    expect(res.review.spawned.map((s) => s.agent)).not.toContain('security-reviewer');
+    expect(res.review.classifier.reviewers).toEqual(['testing', 'critic']);
+    expect(res.review.harnessNote).toContain('review-delta: correctness-reviewer');
+  });
+
+  it('delta resume touching the trust chain keeps the security reviewer (AISDLC-947)', async () => {
+    script({ classifier: { reviewers: ['testing'], confidence: 0.9, fellOpen: false } });
+    state.resumeReview = {
+      branch: 'delta',
+      note: 'review-delta: code-reviewer, test-reviewer, security-reviewer',
+      lastHead: 'b'.repeat(40),
+      reviewers: ['code-reviewer', 'test-reviewer', 'security-reviewer'],
+      deltaPaths: ['.github/workflows/ci.yml'],
+    };
+    const res = await prepareReview(h.ctx, state, 1);
+    if (res.kind !== 'spawn') throw new Error('expected spawn');
+    expect(res.review.spawned.map((s) => s.agent)).toContain('security-reviewer');
+  });
+
   it('honours the classifier subset', async () => {
     script({ classifier: { reviewers: ['security'], confidence: 0.95, fellOpen: false } });
     const res = await prepareReview(h.ctx, state, 1);

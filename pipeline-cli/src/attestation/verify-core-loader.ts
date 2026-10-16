@@ -32,6 +32,8 @@ export interface VerifyCoreModule {
      * downgrade, when omitted or unresolved.
      */
     agentDir?: string;
+    /** AISDLC-947: trusted-reviewers.yaml text from a trusted ref; default is the checkout copy. */
+    trustedReviewersYaml?: string;
   }): {
     status: 'valid' | 'invalid';
     reason: string;
