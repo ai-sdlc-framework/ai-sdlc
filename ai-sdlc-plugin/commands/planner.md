@@ -55,7 +55,7 @@ then pushes `ai-sdlc/file-<id>` from `origin/main` as a plain fast-forward and o
 It never force-pushes.
 
 ```bash
-node "$PIPELINE_CLI_BIN/cli-file.mjs" task "backlog/tasks/<file>.md" --pr
+node "$PIPELINE_CLI_BIN/cli-file.mjs" task "<scratchpad>/AISDLC-N - title.md" --pr   # source may live anywhere; never write into the parent tree
 node "$PIPELINE_CLI_BIN/cli-file.mjs" decision DEC-NNNN --task-id AISDLC-N [--answer <option>] --pr
 node "$PIPELINE_CLI_BIN/cli-file.mjs" rebase <id> --pr   # branch conflicted on main: new -r<n> branch + PR, no lease push
 ```

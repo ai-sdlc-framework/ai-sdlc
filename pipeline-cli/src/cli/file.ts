@@ -340,10 +340,17 @@ export function validateTaskFile(
   deps: FileDeps = defaultDeps,
 ): ValidatedTask {
   const abs = isAbsolute(taskPath) ? taskPath : resolve(repo, taskPath);
-  const rel = relative(repo, abs);
+  const relFromRepo = relative(repo, abs);
+  // A source anywhere on disk (e.g. a scratchpad, AISDLC-931) is filed under
+  // backlog/tasks/<basename>; the parent tree is never touched.
+  const inTasksDir =
+    !relFromRepo.startsWith('..') &&
+    !isAbsolute(relFromRepo) &&
+    relFromRepo.startsWith('backlog/tasks/');
+  const rel = inTasksDir ? relFromRepo : `backlog/tasks/${basename(abs)}`;
   assertAscii(rel);
-  if (rel.startsWith('..') || isAbsolute(rel) || !rel.startsWith('backlog/tasks/')) {
-    throw new FileRefusal(`task path must be inside backlog/tasks/ of the repo: ${rel}`);
+  if (!rel.toLowerCase().endsWith('.md')) {
+    throw new FileRefusal(`task source must be a .md file: ${basename(abs)}`);
   }
   if (!existsSync(abs)) throw new FileRefusal(`task file not found: ${abs}`);
   const id = taskIdOf(abs);
