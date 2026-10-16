@@ -24,12 +24,13 @@
 'use strict';
 
 const { spawnSync } = require('node:child_process');
-const { existsSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs');
+const { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } = require('node:fs');
 const { dirname, join, resolve } = require('node:path');
 
 const BIN_NAME = 'cli-hierarchy.mjs';
 const PIPELINE_CLI_REL = join('node_modules', '@ai-sdlc', 'pipeline-cli', 'bin');
 const TIMEOUT_MS = 15_000;
+const SECTION_START = /^(?=## [^\n]+ \(\d{4}-\d{2}-\d{2}T[^\n]*\)$)/m;
 
 function isOff(env) {
   return ['off', '0', 'false', 'no', 'disabled'].includes(
@@ -136,17 +137,17 @@ function persistLastMessage(transcript, boardDir, env, now = new Date()) {
     const file = join(dirname(dirname(boardDir)), '.claude', 'memory', 'LAST_MESSAGE.md');
     const heading = `## ${session.name}`;
     const existing = existsSync(file) ? readFileSync(file, 'utf-8') : '';
+    // Only an exact `## <name> (<iso>)` line starts a session section; the saved body
+    // has its own `## ` lines demoted so a reply can never forge or split a section.
     const sections = existing
-      .split(/^(?=## )/m)
-      .filter(
-        (sec) =>
-          sec.startsWith('## ') &&
-          !sec.startsWith(`${heading} `) &&
-          !sec.startsWith(`${heading}\n`),
-      );
-    sections.push(`${heading} (${now.toISOString()})\n\n${text}\n`);
+      .split(SECTION_START)
+      .filter((sec) => sec.startsWith('## ') && !sec.startsWith(`${heading} (`));
+    const body = text.replace(/^##(?= )/gm, '###');
+    sections.push(`${heading} (${now.toISOString()})\n\n${body}\n`);
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, `# Last messages\n\n${sections.join('\n')}`);
+    const tmp = `${file}.${process.pid}.tmp`;
+    writeFileSync(tmp, `# Last messages\n\n${sections.join('\n')}`);
+    renameSync(tmp, file);
     return true;
   } catch {
     return false;
