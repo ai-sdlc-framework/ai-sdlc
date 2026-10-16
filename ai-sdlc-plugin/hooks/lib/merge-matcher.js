@@ -448,6 +448,10 @@ function decodeAnsiC(body) {
 const LITERAL_ASSIGN =
   /(?:^|[;&|\n])[ \t]*([A-Za-z_][A-Za-z0-9_]*)=([A-Za-z0-9_./:@+,%-]*|'[^'$`\\]*'|"[^"$`\\]*")(?=[ \t]*(?:[;&|\n]|$))/g;
 
+/** Names the shell itself interprets; assigning them is never a plain literal binding. */
+const SHELL_SET_NAMES =
+  /^(?:IFS|PATH|ENV|CDPATH|SHELLOPTS|BASHOPTS|PS[1-4]|PROMPT_COMMAND|GLOBIGNORE|FIGNORE|HISTFILE|MAIL|MAILPATH|TMPDIR|SHELL|HOME|OPTIND|OPTARG|REPLY|LINENO|RANDOM|SECONDS)$/;
+
 /**
  * Real-tokenizer normalisation (AISDLC-605.1): one quote-aware pass that removes
  * backslash-newlines, decodes ANSI-C `$'...'` strings into plain single-quoted strings and
@@ -511,7 +515,11 @@ function canonicalizeCommand(command) {
     }
     out += c;
   }
-  out = out.replace(/\$\{IFS\}(\$[1-9])?|\$IFS(?![A-Za-z0-9_])(\$[1-9])?/g, ' ');
+  // `$IFS` is a space only while IFS is unassigned; any mention of `IFS` as a bare name
+  // (`IFS=merge`, `read IFS`, `declare IFS`) leaves it opaque.
+  if (!/(?<!\$|\$\{)\bIFS\b/.test(out)) {
+    out = out.replace(/\$\{IFS\}(\$[1-9])?|\$IFS(?![A-Za-z0-9_])(\$[1-9])?/g, ' ');
+  }
   // Substitute only an unconditional, never-reassigned literal assignment, and only into
   // text AFTER it; anything else keeps $NAME opaque (fail closed).
   const assigns = [...out.matchAll(LITERAL_ASSIGN)];
@@ -530,7 +538,13 @@ function canonicalizeCommand(command) {
         before,
       );
     if (occurrences.length !== 1 || conditional) continue;
+    // Shell-managed names (word splitting, lookup paths, startup files) change shell
+    // behaviour when assigned, so their text is never a faithful stand-in.
+    if (SHELL_SET_NAMES.test(name) || /^(?:LC_|BASH_)/.test(name)) continue;
     const value = m[2].replace(/^(['"])(.*)\1$/s, '$2');
+    // Only a bare-word value is substituted: a quoted value with spaces or metacharacters
+    // would word-split or re-parse differently in place, so it stays opaque (fail closed).
+    if (!/^[A-Za-z0-9_./:@+,%-]*$/.test(value)) continue;
     const end = m.index + m[0].length;
     out =
       out.slice(0, end) +

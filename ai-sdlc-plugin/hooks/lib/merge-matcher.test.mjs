@@ -1084,3 +1084,25 @@ describe('canonicalizeCommand escaped space across continuations (AISDLC-605.1)'
     assert.equal(m.canonicalizeCommand(`echo \\\n# ${tail}`), 'echo ');
   });
 });
+
+describe('canonicalizeCommand keeps shell-set names and non-bare values opaque (AISDLC-605.1)', () => {
+  const word = 'mer' + 'ge';
+  const run = (rest) => `gh pr ${word} ${rest}`;
+  it('does not substitute shell-managed names', () => {
+    for (const name of ['IFS', 'PATH', 'PS4', 'BASH_ENV', 'LC_ALL', 'HOME']) {
+      const c = `${name}=${word}; gh pr $${name} 5`;
+      assert.ok(m.canonicalizeCommand(c).includes(`$${name}`), c);
+      assert.equal(m.commandRunsGhPrMerge(c), true, c);
+    }
+    assert.ok(m.canonicalizeCommand(run('5')).includes('5'));
+  });
+  it('does not substitute quoted values holding spaces or metacharacters', () => {
+    for (const v of [`'x ${word}'`, `"a;b"`, `'a|b'`, `'a>b'`]) {
+      const c = `A=${v}; echo $A`;
+      assert.ok(m.canonicalizeCommand(c).endsWith('echo $A'), c);
+    }
+  });
+  it('still substitutes a plain bare literal', () => {
+    assert.ok(m.canonicalizeCommand(`A=${word}; gh pr $A 5`).endsWith(`gh pr ${word} 5`));
+  });
+});
