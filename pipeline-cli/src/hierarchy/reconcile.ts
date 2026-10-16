@@ -257,10 +257,16 @@ export interface ActionContext {
 export type ActionExecutor = (ctx: ActionContext) => ActionResult;
 
 /** The argv an action runs, or null when it is record-only or left to a session. Pure. */
-export function actionCommands(
-  ctx: ActionContext,
-  cliBin: string,
-): { file: string; args: string[] }[] | null {
+export const RUN_ID_PLACEHOLDER = '{runId}';
+
+export interface ActionCommand {
+  file: string;
+  args: string[];
+  /** Stdout is the gate run id; it replaces `{runId}` in later commands. Empty means no run. */
+  captureRunId?: boolean;
+}
+
+export function actionCommands(ctx: ActionContext, cliBin: string): ActionCommand[] | null {
   const dispatch = (...a: string[]) => ({
     file: 'node',
     args: [path.join(cliBin, 'cli-dispatch.mjs'), ...a, '--board-dir', ctx.boardDir],
@@ -300,7 +306,26 @@ export function actionCommands(
     case 'rerun-rate-limited':
     case 'rerun-dor':
       return ctx.headSha
-        ? [{ file: 'gh', args: ['run', 'rerun', '--failed', '--commit', ctx.headSha] }]
+        ? [
+            // `gh run rerun` takes a run id, not a commit: look the gate run up first.
+            {
+              file: 'gh',
+              args: [
+                'run',
+                'list',
+                '--commit',
+                ctx.headSha,
+                '--workflow',
+                'ai-sdlc-gate.yml',
+                '--json',
+                'databaseId',
+                '--jq',
+                '.[0].databaseId',
+              ],
+              captureRunId: true,
+            },
+            { file: 'gh', args: ['run', 'rerun', RUN_ID_PLACEHOLDER, '--failed'] },
+          ]
         : null;
     default:
       return null;
@@ -312,8 +337,15 @@ export function commandExecutor(run: CommandRunner, cwd: string, cliBin: string)
   return (ctx) => {
     const cmds = actionCommands(ctx, cliBin);
     if (!cmds) return { ran: false, note: 'record-only or left to a session' };
+    let runId: string | undefined;
     for (const c of cmds) {
-      const r = run(c.file, c.args, { cwd });
+      const args = c.args.map((a) => (a === RUN_ID_PLACEHOLDER && runId ? runId : a));
+      const r = run(c.file, args, { cwd });
+      if (r.status === 0 && c.captureRunId) {
+        runId = (r.stdout ?? '').trim();
+        if (!runId || runId === 'null') return { ran: false, note: 'no gate run for head' };
+        continue;
+      }
       if (r.status !== 0) {
         return {
           ran: true,

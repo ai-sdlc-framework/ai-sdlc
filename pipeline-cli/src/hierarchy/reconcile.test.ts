@@ -326,7 +326,14 @@ describe('helpers', () => {
     expect(run('flip-ready-takeover')![0]).toEqual({ file: 'gh', args: ['pr', 'ready', '3'] });
     expect(run('rebase-in-place')![0]!.args).toContain('rebase');
     expect(run('arm')![0]!.args).toContain('--arm');
-    expect(run('retrigger-once')![0]!.args).toContain('sha');
+    for (const a of ['retrigger-once', 'rerun-rate-limited', 'rerun-dor']) {
+      const cmds = run(a)!;
+      expect(cmds).toHaveLength(2);
+      expect(cmds[0]!.args.slice(0, 4)).toEqual(['run', 'list', '--commit', 'sha']);
+      expect(cmds[0]!.captureRunId).toBe(true);
+      expect(cmds[1]!.args).toEqual(['run', 'rerun', '{runId}', '--failed']);
+      expect(cmds.flatMap((c) => (c.args[1] === 'rerun' ? c.args : []))).not.toContain('--commit');
+    }
     expect(run('rerun-dor', { headSha: undefined })).toBeNull();
     for (const a of ['land-prep', 'push-only-resign', 'reenter']) {
       expect(run(a)![0]!.args.slice(1, 3)).toEqual(['reenter', '3']);
@@ -548,6 +555,38 @@ describe('gatherFacts trust filter', () => {
   });
 });
 
+describe('rerun is run-id based (AISDLC-945)', () => {
+  const ctx: ActionContext = {
+    pr: 3,
+    taskId: 'AISDLC-1',
+    kind: 'task',
+    action: 'retrigger-once',
+    state: 'pending',
+    headSha: 'sha',
+    boardDir: '/b',
+  };
+  const stub = (listOut: string) => {
+    const calls: string[][] = [];
+    const runner = ((_f: string, args: string[]) => {
+      calls.push(args);
+      return { status: 0, stdout: args[1] === 'list' ? listOut : '', stderr: '' };
+    }) as unknown as Parameters<typeof commandExecutor>[0];
+    return { calls, result: commandExecutor(runner, '/cwd', '/bin')(ctx) };
+  };
+
+  it('looks up the run id then reruns it', () => {
+    const { calls, result } = stub('777\n');
+    expect(result).toEqual({ ran: true });
+    expect(calls[1]).toEqual(['run', 'rerun', '777', '--failed']);
+  });
+
+  it('returns a note, not a failure, when no gate run exists for the head', () => {
+    const { calls, result } = stub('');
+    expect(result).toEqual({ ran: false, note: 'no gate run for head' });
+    expect(calls).toHaveLength(1);
+  });
+});
+
 describe('rate-limited wait-and-rerun (AISDLC-926)', () => {
   const limited = (over: Partial<ReconcilePr> = {}) =>
     taskPr({
@@ -580,13 +619,7 @@ describe('rate-limited wait-and-rerun (AISDLC-926)', () => {
     expect(execute).toHaveBeenCalledTimes(1);
     const ctx = (execute.mock.calls[0] as unknown as [ActionContext])[0];
     expect(ctx.action).toBe('rerun-rate-limited');
-    expect(actionCommands(ctx, '/bin')![0]!.args).toEqual([
-      'run',
-      'rerun',
-      '--failed',
-      '--commit',
-      'abc123',
-    ]);
+    expect(actionCommands(ctx, '/bin')![1]!.args).toEqual(['run', 'rerun', '{runId}', '--failed']);
     reconcile([limited()], { boardDir: board, execute, now: at('2026-10-14T03:00:00.000Z') });
     expect(execute).toHaveBeenCalledTimes(1);
     expect(readLanding(board, 10)!.rerunHeadSha).toBe('abc123');
