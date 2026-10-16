@@ -3,7 +3,7 @@
  * and the clear-and-resume contract. A temp repository holds the board; no session runs.
  */
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -101,7 +101,9 @@ describe('handoff write', () => {
     expect(second.file).toBe(
       path.join(repo, '.claude', 'memory', 'project_planner_handoff_2026_10_12.md'),
     );
-    expect(second.content).toContain('my notes');
+    // prose before the markers is rolled into the archive file (AISDLC-933)
+    expect(second.content).not.toContain('my notes');
+    expect(readFileSync(second.archiveFile!, 'utf-8')).toContain('my notes');
     expect(second.content).toContain('trailing notes');
     expect(second.content).toContain('AISDLC-2');
     expect(second.content.split(HANDOFF_BEGIN)).toHaveLength(2);
@@ -205,6 +207,78 @@ describe('handoff bounded view and marker placement (AISDLC-889)', () => {
     const fmEnd = r.content.indexOf('---\n', 4) + 4;
     expect(r.content.indexOf(HANDOFF_BEGIN)).toBe(fmEnd);
     expect(r.content.endsWith('some notes\n')).toBe(true);
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('handoff archive of older notes (AISDLC-933)', () => {
+  const setup = (): { dir: string; file: string; archive: string; board: string } => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'ho-arch-'));
+    const board = path.join(dir, '.ai-sdlc', 'dispatch');
+    mkdirSync(board, { recursive: true });
+    const file = path.join(dir, 'planner.md');
+    writeFileSync(
+      file,
+      [
+        '---',
+        'name: planner',
+        '---',
+        '# Title',
+        'loose prose',
+        '',
+        HANDOFF_BEGIN,
+        HANDOFF_END,
+        '',
+        '## RESUME HERE one',
+        'first',
+        '',
+        '## Other',
+        'keep me',
+        '',
+        '## RESUME HERE two',
+        'second',
+        '',
+        '## RESUME HERE three',
+        'third',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+    return { dir, file, archive: path.join(dir, 'planner_archive.md'), board };
+  };
+
+  it('keeps one block, archives the rest and loose prose, and is idempotent', () => {
+    const { dir, file, archive, board } = setup();
+    const o = { role: 'planner' as const, boardDir: board, now: NOW, file };
+    const r = writeHandoff(o);
+    expect(r.archivedBlocks).toBe(3);
+    expect(r.archiveFile).toBe(archive);
+    const live = readFileSync(file, 'utf-8');
+    expect(live.match(/## RESUME HERE/g)).toHaveLength(1);
+    expect(live).toContain('## RESUME HERE three');
+    expect(live).toContain('keep me');
+    expect(live).not.toContain('loose prose');
+    expect(live.indexOf('# Title')).toBeLessThan(live.indexOf(HANDOFF_BEGIN));
+    expect(live.slice(live.indexOf('# Title')).split('\n')[1]).toBe(HANDOFF_BEGIN);
+    const arch = readFileSync(archive, 'utf-8');
+    expect(arch).toContain('loose prose');
+    expect(arch).toContain('## RESUME HERE one');
+    expect(arch).toContain('## RESUME HERE two');
+    const again = writeHandoff(o);
+    expect(again.archivedBlocks).toBe(0);
+    expect(readFileSync(file, 'utf-8')).toBe(live);
+    expect(readFileSync(archive, 'utf-8')).toBe(arch);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('--no-archive writes the block only', () => {
+    const { dir, file, archive, board } = setup();
+    const before = readFileSync(file, 'utf-8');
+    const r = writeHandoff({ role: 'planner', boardDir: board, now: NOW, file, archive: false });
+    expect(r.archivedBlocks).toBeUndefined();
+    expect(readFileSync(file, 'utf-8').match(/## RESUME HERE/g)).toHaveLength(3);
+    expect(existsSync(archive)).toBe(false);
+    expect(before).toContain('loose prose');
     rmSync(dir, { recursive: true, force: true });
   });
 });

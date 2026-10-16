@@ -496,13 +496,20 @@ cli-hierarchy handoff read  --role <planner|operator-dispatch|executor> [--name 
 | `--name <n>`   | Session name; default the calling session's roster name, else the role.                      |
 | `--out <path>` | Use another file location.                                                                   |
 | `--full`       | `read` only: print the whole file instead of the bounded view.                               |
+| `--no-archive` | `write` only (planner): write the block without rolling older notes into the archive file.   |
 
 Files: dispatch and executors write `.ai-sdlc/dispatch/handoff/<session-name>.md`; the planner
 writes its dated memory file, `.claude/memory/project_planner_handoff_YYYY_MM_DD.md` (an
 existing dated file is reused). The generated text sits between
 `<!-- ai-sdlc-handoff:begin -->` and `<!-- ai-sdlc-handoff:end -->` with a hash of the state it
 was built from; text outside the markers (the planner's own notes) is kept on every rewrite.
-A file without markers gets the block right after its frontmatter. Put notes at the end of the
+A file without markers gets the block right after its frontmatter.
+**One current notes block (AISDLC-933).** For the planner, `write` keeps exactly one
+`## RESUME HERE` section in the live file (the last one) and appends the older ones, plus any
+prose before the markers that is not frontmatter or the `# ` title, to
+`<basename>_archive.md` beside it, so the generated block is the first content after the
+header. The output reports `archivedBlocks` and `archiveFile`; a write with nothing new to
+archive touches neither file. Pass `--no-archive` for the old block-only behaviour. Put notes at the end of the
 file: `read` prints the generated block, then the last 8000 characters (cut at a line boundary)
 of the prose outside the markers, then the file path; `--full` prints the whole file.
 

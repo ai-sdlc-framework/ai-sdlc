@@ -227,7 +227,10 @@ at the next turn boundary, never mid-task.
 1. Run `handoff write --role planner --board-dir "$BOARD_DIR"` (regenerates the part between
    the markers from board and catalog state).
 2. Edit the same file OUTSIDE the markers (text there is kept on every rewrite); put new notes
-   at the END of the file, because `handoff read` shows only the generated block plus the last
+   at the END of the file as ONE `## RESUME HERE` block (replace it, never append a second:
+   `handoff write` keeps the last one and rolls older blocks and loose prose before the markers
+   into `<basename>_archive.md`, reporting `archivedBlocks` and `archiveFile`; `--no-archive`
+   skips that), because `handoff read` shows only the generated block plus the last
    8000 characters of the prose (`--full` prints everything). Write down
    what the CLI cannot know: open rulings, owed items, scheduled jobs and the exact prompt of
    each, the next free task id and decision id, and what each peer session is waiting on.
