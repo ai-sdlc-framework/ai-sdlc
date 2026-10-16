@@ -9617,6 +9617,62 @@ export const substrateContractV1Schema = {
   },
 } as const;
 
+export const trustedReviewersSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/trusted-reviewers.schema.json',
+  title: 'AI-SDLC TrustedReviewers',
+  description:
+    'Shape of .ai-sdlc/trusted-reviewers.yaml (AISDLC-74, AISDLC-593, RFC-0043): the operator signing-key allowlist that CI verifies review attestations against, plus the optional author allowlist. Validated by `ai-sdlc doctor` (AISDLC-582) after the YAML is parsed. The file has no apiVersion/kind envelope.',
+  type: 'object',
+  properties: {
+    reviewers: {
+      type: 'array',
+      description:
+        'Trusted signing keys. Historical entries with `type: reviewer` are inert and allowed.',
+      items: {
+        type: 'object',
+        required: ['identity', 'pubkey'],
+        properties: {
+          identity: { type: 'string', minLength: 1 },
+          machine: { type: 'string' },
+          pubkey: {
+            type: 'string',
+            description: 'PEM-encoded ed25519 public key.',
+            pattern: '-----BEGIN PUBLIC KEY-----[\\s\\S]+-----END PUBLIC KEY-----',
+          },
+          addedAt: { type: 'string' },
+          addedBy: { type: 'string' },
+          ciOnly: {
+            type: 'boolean',
+            description:
+              'True marks a key whose private half lives only in a protected CI environment (AISDLC-593).',
+          },
+          type: { type: 'string' },
+        },
+      },
+    },
+    allowlist: {
+      type: 'object',
+      description: 'RFC-0043 author allowlist read by the trust classifier.',
+      properties: {
+        authors: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['login'],
+            properties: {
+              login: { type: 'string', minLength: 1 },
+              name: { type: 'string' },
+              addedAt: { type: 'string' },
+              addedBy: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+  },
+} as const;
+
 export const untrustedPrReportV1Schema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/schemas/v1alpha1/untrusted-pr-report.v1.schema.json',
@@ -10441,6 +10497,7 @@ export const SCHEMAS: Record<string, object> = {
   'signal-source-adapter.v1.schema.json': signalSourceAdapterV1Schema,
   'subscription-plan.schema.json': subscriptionPlanSchema,
   'substrate-contract.v1.schema.json': substrateContractV1Schema,
+  'trusted-reviewers.schema.json': trustedReviewersSchema,
   'untrusted-pr-report.v1.schema.json': untrustedPrReportV1Schema,
   'usage-config.v1.schema.json': usageConfigV1Schema,
   'variant-config.schema.json': variantConfigSchema,

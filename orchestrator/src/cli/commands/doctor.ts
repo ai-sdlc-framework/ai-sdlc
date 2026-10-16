@@ -85,6 +85,8 @@ export interface BranchProtectionCheck {
    * required on its own).
    */
   requiresAttestationDirectly?: boolean;
+  /** `required_status_checks.contexts` includes `Backlog Drift` (AISDLC-582). */
+  requiresBacklogDrift?: boolean;
   /** Branch-protection API returned 403 (GitHub Free private repo): client-side enforcement only (AISDLC-748). */
   apiUnavailable?: boolean;
   /** Reason the check could not run, or that the API call failed. */

@@ -242,6 +242,9 @@ importers:
       '@inquirer/prompts':
         specifier: ^8.7.2
         version: 8.7.2(@types/node@26.6.5)
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
       better-sqlite3:
         specifier: ^12.11.1
         version: 12.11.1

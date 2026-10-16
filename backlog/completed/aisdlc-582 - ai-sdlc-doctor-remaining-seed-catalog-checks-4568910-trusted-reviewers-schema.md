@@ -49,12 +49,12 @@ The `fetchBranchProtectionStatus` helper in `branch-protection-shared.ts` curren
 - The shared `branch-protection-shared.ts` helper for check 7's Backlog-Drift extension.
 
 ## Acceptance Criteria
-- [ ] Checks 4, 5, 6, 8, 9, 10 implemented as registry modules with hermetic tests (known-good passes; each seeded misconfig detected with the right severity + remediation).
-- [ ] `trusted-reviewers.schema.json` added under `spec/schemas/` and wired into check 6.
-- [ ] JSON-schema validator dependency added (ajv or equivalent) and used by checks 4/5/6.
-- [ ] `requiresBacklogDrift` signal added to `fetchBranchProtectionStatus`; check 7 flags a repo missing the `Backlog Drift` required context (read-only).
-- [ ] `--fix` extended only where mechanically safe (e.g. add missing husky snippet); never touches `.ai-sdlc/**` content it shouldn't.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] Checks 4, 5, 6, 8, 9, 10 implemented as registry modules with hermetic tests (known-good passes; each seeded misconfig detected with the right severity + remediation).
+- [x] `trusted-reviewers.schema.json` added under `spec/schemas/` and wired into check 6.
+- [x] JSON-schema validator dependency added (ajv or equivalent) and used by checks 4/5/6.
+- [x] `requiresBacklogDrift` signal added to `fetchBranchProtectionStatus`; check 7 flags a repo missing the `Backlog Drift` required context (read-only).
+- [x] `--fix` extended only where mechanically safe (e.g. add missing husky snippet); never touches `.ai-sdlc/**` content it shouldn't.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 
 ## Note
 Follow-up to AISDLC-578 (merged via PR #1012). Local audit only — upstream reporting remains the separate RFC-0045 layer (do NOT build phone-home/telemetry here). Composes with the RFC-0045 reporting seam already stubbed in doctor's typed result set.
