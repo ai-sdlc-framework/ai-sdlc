@@ -1,7 +1,7 @@
 ---
 id: AISDLC-936
 title: 'test: hierarchy.test.ts isolates AI_SDLC_WEBHOOK_SECRET from the shell environment'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-15'
 labels: [hierarchy, pipeline-cli, tests, velocity]
