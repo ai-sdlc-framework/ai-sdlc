@@ -81,6 +81,38 @@ describe('classifyPr (AISDLC-823)', () => {
   });
 });
 
+describe('rate-limited (AISDLC-926)', () => {
+  const rl = 'API rate limit exceeded for installation 123';
+  const red = (name: string, summary?: string): PrCheck => ({
+    name,
+    conclusion: 'failure',
+    ...(summary ? { summary } : {}),
+  });
+
+  it('classifies known checks failing with the installation reason', () => {
+    const c = classifyPr({
+      ...base,
+      checks: [red('Detect Changes', rl), red('ai-sdlc/issue-link'), red('ai-sdlc/pr-ready', rl)],
+    });
+    expect(c.state).toBe('rate-limited');
+    expect(c.action).toBe('wait-and-rerun');
+  });
+
+  it('a failed check outside the known set keeps the old classification', () => {
+    const c = classifyPr({
+      ...base,
+      checks: [red('ai-sdlc/pr-ready', rl), red('Build & Test', 'boom')],
+    });
+    expect(c.state).toBe('real-failure');
+  });
+
+  it('a known failed check without the reason is still a real failure', () => {
+    expect(classifyPr({ ...base, checks: [red('ai-sdlc/pr-ready', 'tests failed')] }).state).toBe(
+      'real-failure',
+    );
+  });
+});
+
 describe('classifyAndRecord event shape (AC-4)', () => {
   it('writes one DispatchPrClassified event per PR', () => {
     const events: Array<Record<string, unknown>> = [];

@@ -162,6 +162,15 @@ describe('action table (AC2)', () => {
         { name: 'ai-sdlc/attestation', conclusion: 'failure', summary: 'content hash mismatch' },
       ],
     }),
+    'rate-limited': taskPr({
+      checks: [
+        {
+          name: 'ai-sdlc/pr-ready',
+          conclusion: 'failure',
+          summary: 'API rate limit exceeded for installation',
+        },
+      ],
+    }),
     'real-failure': taskPr({
       checks: [{ name: 'ai-sdlc/pr-ready', conclusion: 'failure', summary: 'x' }],
     }),
@@ -536,5 +545,67 @@ describe('gatherFacts trust filter', () => {
     expect([...allowedAuthors(r, '/', {})!]).toEqual(['me']);
     const bad: CommandRunner = () => ({ status: 1, stdout: '', stderr: '' });
     expect(allowedAuthors(bad, '/', {})).toBeUndefined();
+  });
+});
+
+describe('rate-limited wait-and-rerun (AISDLC-926)', () => {
+  const limited = (over: Partial<ReconcilePr> = {}) =>
+    taskPr({
+      checks: [
+        {
+          name: 'ai-sdlc/pr-ready',
+          conclusion: 'failure',
+          summary: 'API rate limit exceeded for installation',
+        },
+      ],
+      ...over,
+    });
+  const at = (iso: string) => () => new Date(iso);
+
+  it('waits first: no action, no manifest, summary shows count and reset', () => {
+    const execute = vi.fn(() => ({ ran: true }));
+    const report = reconcile([limited()], { boardDir: board, execute, now: fixedNow });
+    expect(execute).not.toHaveBeenCalled();
+    expect(report.records[0]!.state).toBe('rate-limited');
+    expect(report.records[0]!.rateLimitResetAt).toBe('2026-10-14T01:00:00.000Z');
+    expect(summariseLanding(board)).toContain('rate-limited: 1 (reset 2026-10-14T01:00:00.000Z)');
+  });
+
+  it('reruns once per head sha after the reset, never before', () => {
+    const execute = vi.fn(() => ({ ran: true }));
+    reconcile([limited()], { boardDir: board, execute, now: fixedNow });
+    reconcile([limited()], { boardDir: board, execute, now: at('2026-10-14T00:30:00.000Z') });
+    expect(execute).not.toHaveBeenCalled();
+    reconcile([limited()], { boardDir: board, execute, now: at('2026-10-14T01:05:00.000Z') });
+    expect(execute).toHaveBeenCalledTimes(1);
+    const ctx = (execute.mock.calls[0] as unknown as [ActionContext])[0];
+    expect(ctx.action).toBe('rerun-rate-limited');
+    expect(actionCommands(ctx, '/bin')![0]!.args).toEqual([
+      'run',
+      'rerun',
+      '--failed',
+      '--commit',
+      'abc123',
+    ]);
+    reconcile([limited()], { boardDir: board, execute, now: at('2026-10-14T03:00:00.000Z') });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(readLanding(board, 10)!.rerunHeadSha).toBe('abc123');
+  });
+
+  it('a new head sha gets its own rerun', () => {
+    const execute = vi.fn(() => ({ ran: true }));
+    reconcile([limited()], { boardDir: board, execute, now: fixedNow });
+    reconcile([limited()], { boardDir: board, execute, now: at('2026-10-14T01:05:00.000Z') });
+    reconcile([limited({ headSha: 'new999' })], {
+      boardDir: board,
+      execute,
+      now: at('2026-10-14T02:00:00.000Z'),
+    });
+    reconcile([limited({ headSha: 'new999' })], {
+      boardDir: board,
+      execute,
+      now: at('2026-10-14T03:05:00.000Z'),
+    });
+    expect(execute).toHaveBeenCalledTimes(2);
   });
 });

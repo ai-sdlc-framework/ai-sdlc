@@ -35,6 +35,7 @@ export const TASK_ACTIONS: Record<PrState, string> = {
   // `land-prep` (AISDLC-881) is not built yet: `reenter` runs its rebase for a BEHIND PR.
   'behind-or-dirty': 'land-prep',
   'attestation-content-hash-mismatch': 'push-only-resign',
+  'rate-limited': 'wait-and-rerun',
   'real-failure': 'reenter',
   'cancelled-or-infra': 'retrigger-once',
   'ready-to-flip': 'flip-ready-takeover',
@@ -50,6 +51,7 @@ export const DOCS_ACTIONS: Record<PrState, string> = {
   'stale-claim': 'none',
   'behind-or-dirty': 'rebase-in-place',
   'attestation-content-hash-mismatch': 'none',
+  'rate-limited': 'wait-and-rerun',
   'real-failure': 'route-to-planner',
   'cancelled-or-infra': 'retrigger-once',
   'ready-to-flip': 'none',
@@ -95,6 +97,10 @@ export interface LandingRecord {
   failingLine?: string;
   /** Set when the last run of `action` failed; the next pass retries without a new history entry. */
   actionFailed?: boolean;
+  /** `rate-limited` only: when the installation limit resets and the rerun may fire. */
+  rateLimitResetAt?: string;
+  /** `rate-limited` only: the head sha already rerun once; never rerun it again. */
+  rerunHeadSha?: string;
   delivered?: string;
   landed?: string;
   history: LandingEntry[];
@@ -229,6 +235,7 @@ export function actionCommands(
         },
       ];
     case 'retrigger-once':
+    case 'rerun-rate-limited':
     case 'rerun-dor':
       return ctx.headSha
         ? [{ file: 'gh', args: ['run', 'rerun', '--failed', '--commit', ctx.headSha] }]
@@ -304,8 +311,19 @@ export interface ReconcileReport {
 /** One-line summary of the open landing records, for the tick's progress line. */
 export function summariseLanding(boardDir: string): string {
   const open = listLanding(boardDir).filter((r) => !r.landed);
-  return open.map((r) => `#${r.pr} ${r.kind} ${r.state}`).join(', ');
+  const line = open.map((r) => `#${r.pr} ${r.kind} ${r.state}`).join(', ');
+  const limited = open.filter((r) => r.state === 'rate-limited');
+  if (limited.length === 0) return line;
+  const resets = limited
+    .map((r) => r.rateLimitResetAt ?? '')
+    .filter(Boolean)
+    .sort();
+  const reset = resets.length > 0 ? ` (reset ${resets[resets.length - 1]})` : '';
+  return `${line}; rate-limited: ${limited.length}${reset}`;
 }
+
+/** The installation limit resets hourly; wait this long from first sight before the rerun. */
+export const RATE_LIMIT_WAIT_MS = 60 * 60 * 1000;
 
 export interface ReconcileOpts {
   boardDir: string;
@@ -365,6 +383,39 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
       });
       continue;
     }
+    if (unchanged && d.action === 'wait-and-rerun') {
+      // One rerun per head sha, after the recorded reset time.
+      const due =
+        existing.rateLimitResetAt !== undefined &&
+        Date.parse(existing.rateLimitResetAt) <= now().getTime();
+      if (due && f.headSha !== undefined && existing.rerunHeadSha !== f.headSha) {
+        const r = opts.execute({
+          pr: f.prNumber,
+          taskId: f.taskId,
+          kind: d.kind,
+          action: 'rerun-rate-limited',
+          state: d.state,
+          headSha: f.headSha,
+          boardDir: opts.boardDir,
+        });
+        const updated: LandingRecord = {
+          ...existing,
+          rerunHeadSha: f.headSha,
+          ...(r.failed ? { actionFailed: true } : {}),
+        };
+        writeLanding(opts.boardDir, updated);
+        report.records.push(updated);
+        report.acted.push({
+          pr: f.prNumber,
+          action: 'rerun-rate-limited',
+          ran: r.ran,
+          ...(r.note ? { note: r.note } : {}),
+        });
+        continue;
+      }
+      report.records.push(existing);
+      continue;
+    }
     if (unchanged) {
       report.records.push(existing);
       continue;
@@ -386,12 +437,17 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
       action: d.action,
       ...(f.headSha === undefined ? {} : { headSha: f.headSha }),
       ...(d.failingLine === undefined ? {} : { failingLine: d.failingLine }),
+      ...(d.state === 'rate-limited'
+        ? {
+            rateLimitResetAt: new Date(now().getTime() + RATE_LIMIT_WAIT_MS).toISOString(),
+          }
+        : {}),
       ...(deliveredAt === undefined ? {} : { delivered: deliveredAt }),
       ...(landedAt === undefined ? {} : { landed: landedAt }),
       history: [...(existing?.history ?? []), entry],
     };
     let result: ActionResult = { ran: false };
-    if (d.action !== 'none' && d.action !== 'mark-landed') {
+    if (d.action !== 'none' && d.action !== 'mark-landed' && d.action !== 'wait-and-rerun') {
       result = opts.execute({
         pr: f.prNumber,
         taskId: f.taskId,
