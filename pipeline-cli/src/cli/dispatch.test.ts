@@ -23,7 +23,7 @@ import { computePatchId } from '../attestation/patch-id.js';
 import { dispatchEnsureBoardDirs, dispatchWriteManifest } from '../index.js';
 import type { DispatchManifest } from '../index.js';
 
-import { approvalEnvelopeMatches, parseArgv, runDispatchCli } from './dispatch.js';
+import { approvalEnvelopeMatches, findTaskFile, parseArgv, runDispatchCli } from './dispatch.js';
 
 describe('parseArgv', () => {
   it('parses subcommand + key/value flag pairs', () => {
@@ -1869,5 +1869,24 @@ describe('push-only-check (AISDLC-849)', () => {
     );
     expect(exit).toBe(0);
     expect(captured.raw).toContain('"verdictMissing":true');
+  });
+});
+
+describe('findTaskFile', () => {
+  it('resolves both filename shapes and avoids prefix collisions', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'find-task-'));
+    try {
+      const tasks = path.join(dir, 'backlog', 'tasks');
+      mkdirSync(tasks, { recursive: true });
+      writeFileSync(path.join(tasks, 'aisdlc-954-some-slug.md'), '');
+      writeFileSync(path.join(tasks, 'AISDLC-962 - Titled task.md'), '');
+      writeFileSync(path.join(tasks, 'aisdlc-631.1 - Subtask.md'), '');
+      expect(findTaskFile(dir, 'AISDLC-954')).toBe('backlog/tasks/aisdlc-954-some-slug.md');
+      expect(findTaskFile(dir, 'AISDLC-962')).toBe('backlog/tasks/AISDLC-962 - Titled task.md');
+      expect(findTaskFile(dir, 'AISDLC-95')).toBeUndefined();
+      expect(findTaskFile(dir, 'AISDLC-631')).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
