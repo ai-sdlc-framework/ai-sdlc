@@ -8,7 +8,7 @@
  * lease-pushes the SAME branch (DEC-0088), so the PR number stays and is re-armed
  * through the docs lane (`--source-kind docs`); no replacement PR is opened.
  *
- *   cli-file task <path> [--pr]
+ *   cli-file task <path> [--pr] [--no-brief]
  *   cli-file decision <DEC-NNNN> --task-id <ID> [--answer <option>] [--rationale <t>] [--pr]
  *   cli-file rebase <id> [--pr]
  */
@@ -26,6 +26,7 @@ import {
   readDecisionEvents,
   resolveEventsDir,
 } from '../decisions/event-log.js';
+import { writeAutoBrief } from '../hierarchy/auto-brief.js';
 import type { DecisionEvent } from '../decisions/decision-record.js';
 
 export const EVENT_LOG_REL = '.ai-sdlc/_decisions/events.jsonl';
@@ -359,12 +360,12 @@ export function validateTaskFile(
 export function fileTask(
   repo: string,
   taskPath: string,
-  opts: { pr: boolean; validated?: ValidatedTask },
+  opts: { pr: boolean; brief?: boolean; validated?: ValidatedTask },
   deps: FileDeps = defaultDeps,
 ) {
   const { abs, rel, id } = opts.validated ?? validateTaskFile(repo, taskPath, deps);
   const slug = id.toLowerCase();
-  return publish(deps, {
+  const res = publish(deps, {
     repo,
     branch: `ai-sdlc/file-${slug}`,
     worktreeDir: `file-${slug}`,
@@ -378,6 +379,10 @@ export function fileTask(
       return [rel];
     },
   });
+  // AISDLC-930: a one-task brief on the local board (gitignored), so dispatch ingests the task
+  // without a hand-written brief. Only for a PR filing; `--no-brief` opts out.
+  if (opts.pr && opts.brief !== false) writeAutoBrief(repo, abs);
+  return res;
 }
 
 export function fileDecision(
@@ -598,9 +603,16 @@ export async function runFileCli(argv: string[] = hideBin(process.argv)): Promis
       (y) =>
         y
           .positional('path', { type: 'string', demandOption: true })
-          .option('pr', { type: 'boolean', default: false }),
+          .option('pr', { type: 'boolean', default: false })
+          .option('brief', {
+            type: 'boolean',
+            default: true,
+            describe: 'write a one-task dispatch brief with --pr; --no-brief skips it',
+          }),
       (a) => {
-        const r = guard(() => fileTask(repo, a.path as string, { pr: a.pr as boolean }));
+        const r = guard(() =>
+          fileTask(repo, a.path as string, { pr: a.pr as boolean, brief: a.brief as boolean }),
+        );
         if (r) report(r);
       },
     )

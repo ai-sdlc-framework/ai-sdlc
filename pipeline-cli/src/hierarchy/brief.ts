@@ -78,7 +78,7 @@ const FIXED_GROUPS: { match: (file: string) => boolean; name: string }[] = [
  * Lower runs earlier (claim order: wave, then priority, then enqueue time).
  * Any other value yields no priority.
  */
-const PRIORITY_RANK: Readonly<Record<string, number>> = { high: 1, medium: 2, low: 3 };
+export const PRIORITY_RANK: Readonly<Record<string, number>> = { high: 1, medium: 2, low: 3 };
 
 /** Control, bidi-override and line-separator characters that must not reach the Markdown. */
 // eslint-disable-next-line no-control-regex -- matching control characters is the point

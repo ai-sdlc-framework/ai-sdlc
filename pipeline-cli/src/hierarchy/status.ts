@@ -4,6 +4,7 @@
  */
 
 import { peekQueue } from '../dispatch/board.js';
+import { listUnbriefed } from './auto-brief.js';
 import type { QueueCounts } from '../dispatch/types.js';
 import { listInflight } from './inflight.js';
 import { paneNodeVersion, readNvmrc, versionMatches } from './node-pin.js';
@@ -44,6 +45,8 @@ export interface StatusResult {
   board: QueueCounts;
   /** The local webhook receiver (AISDLC-880). */
   webhook: WebhookStatus;
+  /** Dispatchable tasks on no brief and not on the board (AISDLC-930); absent when none. */
+  unbriefed?: string[];
 }
 
 /** Join the roster with the registry, tmux and the board. */
@@ -109,13 +112,29 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
         : {}),
     };
   });
-  return { rows, board: peekQueue(deps.boardDir), webhook: webhookStatus(deps) };
+  let unbriefed: string[] = [];
+  try {
+    unbriefed = listUnbriefed(deps.cwd, deps.boardDir);
+  } catch {
+    /* an unreadable backlog must not break status */
+  }
+  return {
+    rows,
+    board: peekQueue(deps.boardDir),
+    webhook: webhookStatus(deps),
+    ...(unbriefed.length > 0 ? { unbriefed } : {}),
+  };
 }
 
 /** Render the status result as a plain-text table. */
 export function formatStatus(result: StatusResult): string[] {
+  const unbriefed = result.unbriefed?.length
+    ? [
+        `unbriefed (dispatchable, on no brief, not on the board): ${result.unbriefed.join(', ')}; write a brief with \`cli-hierarchy brief --tasks <id,...>\``,
+      ]
+    : [];
   if (result.rows.length === 0)
-    return ['no sessions in the roster', formatWebhookStatus(result.webhook)];
+    return ['no sessions in the roster', formatWebhookStatus(result.webhook), ...unbriefed];
   const header = [
     'ROLE',
     'NAME',
@@ -166,5 +185,6 @@ export function formatStatus(result: StatusResult): string[] {
     '',
     `board: ${queued} queued, ${inflight} inflight, ${done} done, ${failed} failed`,
     formatWebhookStatus(result.webhook),
+    ...unbriefed,
   ];
 }

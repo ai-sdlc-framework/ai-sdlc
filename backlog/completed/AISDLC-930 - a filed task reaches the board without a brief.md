@@ -1,7 +1,7 @@
 ---
 id: AISDLC-930
 title: 'fix: a filed task reaches the dispatch board without a hand-written brief'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [hierarchy, dispatch, pipeline-cli, velocity]
@@ -21,12 +21,12 @@ The board is fed only by briefs (`ingestBriefs` in `dispatch-loop.ts`). A task f
 
 ## Acceptance Criteria
 
-- [ ] `cli-file task --pr` writes `.ai-sdlc/dispatch/briefs/tasks-<id>.md` with a one-entry `dispatchBrief` block (no `after`, wave 1, priority from frontmatter); `--no-brief` skips it.
-- [ ] A `dispatchable: false` task or one with `blocked.reason` gets no brief.
-- [ ] `cli-hierarchy status` (or the planner orientation) lists dispatchable tasks on `main` that are on no brief and not on the board.
-- [ ] Tests in `file.test.ts` and `dispatch-loop.test.ts` cover the brief write, the opt-out, the blocked skip and the ingest.
-- [ ] `docs/operations/cli-hierarchy.md` describes the auto-brief and when a hand-written brief is still needed (dependencies, sequence groups, holds).
-- [ ] Task file moved to `backlog/completed/` in the PR.
+- [x] `cli-file task --pr` writes `.ai-sdlc/dispatch/briefs/tasks-<id>.md` with a one-entry `dispatchBrief` block (no `after`, wave 1, priority from frontmatter); `--no-brief` skips it.
+- [x] A `dispatchable: false` task or one with `blocked.reason` gets no brief.
+- [x] `cli-hierarchy status` (or the planner orientation) lists dispatchable tasks on `main` that are on no brief and not on the board.
+- [x] Tests in `file.test.ts` and `dispatch-loop.test.ts` cover the brief write, the opt-out, the blocked skip and the ingest.
+- [x] `docs/operations/cli-hierarchy.md` describes the auto-brief and when a hand-written brief is still needed (dependencies, sequence groups, holds).
+- [x] Task file moved to `backlog/completed/` in the PR.
 
 ## Notes
 
