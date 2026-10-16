@@ -1787,6 +1787,20 @@ describe('runDispatchCli ordering commands', () => {
     err.mockRestore();
   });
 
+  it('classify-prs without --input and pr-facts fail closed when GitHub cannot be read', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const empty = mkdtempSync(path.join(tmpdir(), 'no-gh-'));
+    const savedPath = process.env['PATH'];
+    process.env['PATH'] = empty; // nothing on PATH, so the GitHub CLI cannot run
+    try {
+      expect(await runDispatchCli(['classify-prs', '--board-dir', boardDir])).toBe(2);
+      expect(await runDispatchCli(['pr-facts', '--board-dir', boardDir])).toBe(1);
+    } finally {
+      process.env['PATH'] = savedPath;
+      err.mockRestore();
+    }
+  });
+
   it('rejects non-integer numeric flags and a malformed roster', async () => {
     const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const run = (args: string[]) => runDispatchCli([...args, '--board-dir', boardDir]);

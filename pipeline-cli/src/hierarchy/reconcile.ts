@@ -555,6 +555,7 @@ interface RollupItem {
   state?: string;
   description?: string;
   title?: string;
+  detailsUrl?: string;
 }
 
 function parse<T>(text: string): T | undefined {
@@ -579,7 +580,12 @@ export function normaliseCheck(c: RollupItem): PrCheck {
     else if (['FAILURE', 'ERROR', 'ACTION_REQUIRED'].includes(raw)) conclusion = 'failure';
   }
   const summary = c.description ?? c.title;
-  return { name: c.name ?? c.context ?? '', conclusion, ...(summary ? { summary } : {}) };
+  return {
+    name: c.name ?? c.context ?? '',
+    conclusion,
+    ...(summary ? { summary } : {}),
+    ...(c.detailsUrl ? { detailsUrl: c.detailsUrl } : {}),
+  };
 }
 
 /** List open PRs and their checks. Returns undefined when GitHub cannot be read. */
