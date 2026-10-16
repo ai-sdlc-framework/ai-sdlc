@@ -1169,11 +1169,6 @@ describe('Step 7 — shared incremental round plan (AISDLC-725)', () => {
       reviewers: ['code-reviewer', 'test-reviewer', 'security-reviewer'],
       planRound: () => deltaPlan,
     });
-    console.log(
-      'REVIEWERS',
-      r.prompts.map((p) => p.reviewer),
-      r.reviewerSet,
-    );
     const code = r.prompts.find((p) => p.reviewer === 'code-reviewer')!.prompt;
     const test = r.prompts.find((p) => p.reviewer === 'test-reviewer')!.prompt;
     expect(code).toContain('DELTA_MARKER');
