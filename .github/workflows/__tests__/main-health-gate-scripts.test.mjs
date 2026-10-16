@@ -1,6 +1,6 @@
 /**
  * AISDLC-797: main-health-monitor runs the PR gate scripts against main and
- * pages through the existing [main-health] issue when one fails.
+ * fails the run when one fails (the dispatch tick surfaces red main, AISDLC-929).
  *
  * Run with: node --test .github/workflows/__tests__/main-health-gate-scripts.test.mjs
  */
@@ -53,14 +53,11 @@ describe('main-health-monitor gate-scripts job (AISDLC-797)', () => {
     assert.match(gate, /Determine gate outcome[\s\S]*exit 1/);
   });
 
-  it('feeds the [main-health] alert job', () => {
-    const alert = job('alert');
-    assert.match(SRC, /needs: \[health-check, gate-scripts, test-python, test-go\]/);
-    assert.match(alert, /if: failure\(\)/);
-    assert.match(alert, /contents: read/);
-    assert.match(alert, /issues: write/);
-    assert.match(alert, /GATE_RESULT: \$\{\{ needs\.gate-scripts\.result \}\}/);
-    assert.match(SRC, /\[main-health\] main is RED/);
+  it('is surfaced by the dispatch tick: no alert job, no issue creation (AISDLC-929)', () => {
+    assert.doesNotMatch(SRC, /\n {2}alert:\n/);
+    assert.doesNotMatch(SRC, /gh issue create/);
+    assert.doesNotMatch(SRC, /issues: write/);
+    assert.doesNotMatch(SRC, /\[main-health\] main is RED/);
   });
 
   it('runs with read-only contents permission and no issues write', () => {

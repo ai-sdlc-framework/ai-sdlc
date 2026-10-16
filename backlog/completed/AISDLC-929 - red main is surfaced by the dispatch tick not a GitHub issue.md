@@ -1,7 +1,7 @@
 ---
 id: AISDLC-929
 title: 'fix: red main is surfaced by the dispatch tick, not a GitHub issue'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [ci, hierarchy, governance, pipeline-cli, velocity]

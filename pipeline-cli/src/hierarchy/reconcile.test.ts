@@ -14,6 +14,7 @@ import {
   DOCS_ACTIONS,
   allowedAuthors,
   gatherFacts,
+  gatherMainHealth,
   prBelongsToTask,
   listLanding,
   normaliseCheck,
@@ -652,5 +653,64 @@ describe('route-to-planner dedupe (AISDLC-924)', () => {
     expect(JSON.parse(raw).sent).toHaveLength(1);
     // A fresh reconcile call holds no memory: only the file carries the state.
     expect(run(failing()).suppressed).toBe(1);
+  });
+});
+
+describe('main health (AISDLC-929)', () => {
+  const runner =
+    (head: string | number, runs: string | number): CommandRunner =>
+    (_f, args) => {
+      const v = args[0] === 'api' ? head : runs;
+      return typeof v === 'number'
+        ? { status: v, stdout: '', stderr: 'err' }
+        : { status: 0, stdout: v, stderr: '' };
+    };
+  const red = JSON.stringify([{ conclusion: 'failure', url: 'https://x/runs/1' }]);
+
+  it('reads red, green and unknown', () => {
+    expect(gatherMainHealth(runner('abcdef123456\n', red), '/')).toEqual({
+      status: 'red',
+      sha: 'abcdef123456',
+      runUrl: 'https://x/runs/1',
+    });
+    expect(
+      gatherMainHealth(runner('abc', JSON.stringify([{ conclusion: 'success' }])), '/'),
+    ).toEqual({ status: 'green', sha: 'abc' });
+    expect(gatherMainHealth(runner('abc', '[]'), '/')).toEqual({ status: 'unknown', sha: 'abc' });
+    expect(gatherMainHealth(runner('abc', 'nope'), '/').status).toBe('unknown');
+    expect(
+      gatherMainHealth(runner('abc', JSON.stringify([{ conclusion: 'cancelled' }])), '/').status,
+    ).toBe('unknown');
+    expect(gatherMainHealth(runner(1, red), '/').status).toBe('unknown');
+    expect(gatherMainHealth(runner('', red), '/').status).toBe('unknown');
+  });
+
+  it('routes a red sha once and routes nothing for green or unknown', () => {
+    const health = { status: 'red' as const, sha: 'abcdef123456', runUrl: 'https://x/runs/1' };
+    const opts = { boardDir: board, execute: () => ({ ran: false }), now: fixedNow };
+    const first = reconcile([], { ...opts, mainHealth: health });
+    expect(first.main).toBe('main: RED at abcdef12 https://x/runs/1');
+    expect(first.routed).toEqual({ action: 'route-to-planner', text: first.main });
+    const again = reconcile([], { ...opts, mainHealth: health });
+    expect(again.main).toBe(first.main);
+    expect(again.routed).toBeUndefined();
+    const next = reconcile([], { ...opts, mainHealth: { ...health, sha: '999999999999' } });
+    expect(next.routed).toBeDefined();
+    const green = reconcile([], { ...opts, mainHealth: { status: 'green', sha: 'a' } });
+    expect(green).toMatchObject({ main: 'main: green' });
+    expect(green.routed).toBeUndefined();
+    const unknown = reconcile([], { ...opts, mainHealth: { status: 'unknown' } });
+    expect(unknown.main).toBe('main: unknown');
+    expect(unknown.routed).toBeUndefined();
+    expect(reconcile([], opts).main).toBeUndefined();
+  });
+
+  it('red without a run url still routes', () => {
+    const r = reconcile([], {
+      boardDir: board,
+      execute: () => ({ ran: false }),
+      mainHealth: { status: 'red', sha: 'abcdef123456' },
+    });
+    expect(r.main).toBe('main: RED at abcdef12');
   });
 });

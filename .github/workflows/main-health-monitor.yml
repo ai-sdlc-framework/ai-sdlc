@@ -3,8 +3,9 @@ name: Main Health Monitor
 # AISDLC-406: Reactive complement to the no-queue direct-merge model introduced
 # by AISDLC-400. Without a merge queue, concurrent merges can combine to break
 # main even when each individual PR was green at merge time. This workflow runs
-# the FULL test suite on every push to main and creates a GitHub issue when main
-# goes red, giving the operator immediate signal to bisect + revert.
+# the FULL test suite on every push to main and goes red and fails the run when main
+# is red. AISDLC-929: the dispatch tick reads the run conclusion and routes a red
+# sha to the planner once; no GitHub issue or label is created.
 #
 # Motivating incident: AISDLC-398 + AISDLC-400 + AISDLC-405 all had green CI
 # individually but combined to break main's test suite (AISDLC-405 was the
@@ -30,14 +31,13 @@ on:
 # Rationale: if push N is failing and push N+1 lands (a fix attempt), we want
 # BOTH health checks to complete so we can confirm the fix resolved the failure.
 # Cancelling N when N+1 arrives would leave the failure unconfirmed and the
-# GitHub issue open with no follow-up evidence.
+# failure unrecorded.
 concurrency:
   group: main-health-monitor
   cancel-in-progress: false
 
 permissions:
   contents: read
-  issues: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -46,7 +46,7 @@ jobs:
   health-check:
     name: Full Suite Health Check
     runs-on: ubuntu-latest
-    # Output the test result so the alert job can read it.
+    # Output the test result for downstream readers.
     outputs:
       test_status: ${{ steps.test-outcome.outputs.status }}
       commit_sha: ${{ github.sha }}
@@ -73,7 +73,7 @@ jobs:
       # is to catch cross-package skew that per-PR affected-package CI misses.
       - name: Test (full suite)
         id: full-test
-        # Don't fail-fast — capture the outcome and let the alert job decide.
+        # Don't fail-fast — capture the outcome and let the outcome step decide.
         continue-on-error: true
         run: pnpm -r test
 
@@ -156,12 +156,17 @@ jobs:
             echo "[main-health] FAIL — full-test=$full workflow-test=$workflow $extra"
           fi
 
-      # Exit non-zero when any suite failed so this job itself is marked red.
-      # The alert job will also fire. This makes the health check visible in the
-      # GitHub Actions run list as a failing job (not just an issue being filed).
+      # Exit non-zero when any suite failed so this job itself is marked red;
+      # the dispatch tick reads the run conclusion (AISDLC-929).
       - name: Fail on test failure
         if: steps.test-outcome.outputs.status == 'failure'
         run: |
+          {
+            echo "## main is RED at ${GITHUB_SHA:0:8}"
+            echo ""
+            echo "full-test=${{ steps.full-test.outcome }} workflow-test=${{ steps.workflow-test.outcome }} plugin-test=${{ steps.plugin-test.outcome }}"
+            echo "Runbook: docs/operations/main-health-monitor.md"
+          } >> "$GITHUB_STEP_SUMMARY"
           echo "::error::main health check FAILED — full-test=${{ steps.full-test.outcome }} workflow-test=${{ steps.workflow-test.outcome }} plugin-test=${{ steps.plugin-test.outcome }}"
           echo "::error::See the steps above for failing test output."
           echo "::error::Runbook: docs/operations/main-health-monitor.md"
@@ -296,123 +301,3 @@ jobs:
       - name: Test sdk-go/operator
         working-directory: sdk-go/operator
         run: go test ./... -v -count=1
-
-  # AC-2: On failure, create a GitHub issue to page the operator.
-  alert:
-    name: File Red-Main Issue
-    needs: [health-check, gate-scripts, test-python, test-go]
-    # Only fire when the health check failed. `if: failure()` matches when ANY
-    # upstream job in `needs` has result=failure. This includes the case where
-    # the health-check job itself exits non-zero on the "Fail on test failure"
-    # step (which is the intended path).
-    if: failure()
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      issues: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Create red-main issue
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          COMMIT_SHA: ${{ github.sha }}
-          EVENT_NAME: ${{ github.event_name }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          HEALTH_RESULT: ${{ needs.health-check.result }}
-          GATE_RESULT: ${{ needs.gate-scripts.result }}
-        run: |
-          set -euo pipefail
-          SHORT_SHA="${COMMIT_SHA:0:8}"
-          TITLE="[main-health] main is RED at ${SHORT_SHA}"
-          # head_commit is empty on schedule events; read the subject from the
-          # checked-out main head instead (AISDLC-768).
-          COMMIT_MSG="$(git log -1 --format=%s)"
-
-          # Check if an open issue with this title already exists to avoid duplicates.
-          # (Two quick successive pushes could race — idempotent check prevents noise.)
-          EXISTING=$(gh issue list \
-            --state open \
-            --search "in:title [main-health] main is RED" \
-            --json number,title \
-            --jq 'length')
-          if [[ "$EXISTING" != "0" ]]; then
-            echo "[main-health] open red-main issue already exists — skipping duplicate creation"
-            exit 0
-          fi
-
-          BODY="## Main branch is RED
-
-          **Commit:** [\`${SHORT_SHA}\`](${{ github.server_url }}/${{ github.repository }}/commit/${COMMIT_SHA})
-          **Message:** ${COMMIT_MSG}
-          **CI run:** ${RUN_URL}
-
-          ## What failed
-
-          A job failed on the ${EVENT_NAME} run against main (health-check: ${HEALTH_RESULT}, gate-scripts: ${GATE_RESULT}).
-
-          - If health-check failed, the full test suite is red on main: a merge-skew regression where individual PRs were green but their combined effect breaks the suite.
-          - If gate-scripts failed, a gate script (backlog drift, docs-only classifier, DoR violations, dark-code, or patch-id exclusions parity) failed on main. The failing gate is the step in the gate-scripts job whose outcome is not success.
-
-          Check the [CI run](${RUN_URL}) for the failing step, test names and stack traces.
-
-          ## Triage steps
-
-          See [docs/operations/main-health-monitor.md](https://github.com/${{ github.repository }}/blob/main/docs/operations/main-health-monitor.md) for the full runbook.
-
-          Quick-start:
-          \`\`\`bash
-          # Find the last green commit before this one
-          git log --oneline main -20
-
-          # Bisect the regression
-          git bisect start
-          git bisect bad ${COMMIT_SHA}
-          # Mark the last known-good commit:
-          git bisect good <last-green-sha>
-          git bisect run pnpm test
-          \`\`\`
-
-          ## References
-
-          - Motivating incident: AISDLC-398 + AISDLC-400 + AISDLC-405
-          - Runbook: \`docs/operations/main-health-monitor.md\`
-          - AISDLC-406 — this monitoring workflow
-          "
-
-          fail_issue() {
-            echo "::error::main-health: could not file the red-main issue: $1"
-            {
-              echo "## main-health alert FAILED to file an issue"
-              echo ""
-              echo "Reason: $1"
-              echo ""
-              echo "Main is RED at ${SHORT_SHA}. See ${RUN_URL} and file the issue by hand."
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          }
-
-          # AISDLC-768: labels are created here so a fresh repo never breaks the
-          # alert (the monitor silently never filed an issue before this).
-          # `--force` makes creation idempotent. If creation is refused, the
-          # issue is filed without labels rather than not at all.
-          LABEL_ARGS=()
-          if gh label create "ci" --color "0e8a16" --description "CI and workflow health" --force \
-            && gh label create "main-red" --color "b60205" --description "main branch is red" --force; then
-            LABEL_ARGS=(--label "ci,main-red")
-          else
-            echo "::warning::label creation refused; filing issue without labels"
-          fi
-
-          if ! gh issue create \
-            --title "${TITLE}" \
-            --body "${BODY}" \
-            --assignee "deefactorial" \
-            "${LABEL_ARGS[@]}"; then
-            echo "::warning::issue creation with labels failed; retrying without labels"
-            gh issue create \
-              --title "${TITLE}" \
-              --body "${BODY}" \
-              --assignee "deefactorial" \
-              || fail_issue "gh issue create failed (with and without labels)"
-          fi
