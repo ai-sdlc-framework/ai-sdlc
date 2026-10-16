@@ -20,6 +20,7 @@ const BRANCH = 'ai-sdlc/aisdlc-950-the-real-branch';
 
 let root: string;
 let board: string;
+let warnings: string[];
 let calls: { file: string; args: readonly string[] }[];
 
 beforeEach(() => {
@@ -27,6 +28,7 @@ beforeEach(() => {
   board = path.join(root, '.ai-sdlc', 'dispatch');
   ensureBoardDirs(board);
   calls = [];
+  warnings = [];
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
@@ -56,11 +58,17 @@ interface View {
   merge?: string;
   state?: string;
   checks?: unknown[];
+  origin?: string | null;
 }
 
 /** A GitHub stand-in: answers the PR read, records every other command. */
 function gh(v: View = {}): CommandRunner {
   return (file, args) => {
+    if (file === 'git' && args[0] === 'ls-remote') {
+      if (v.origin === null) return { status: 128, stdout: '', stderr: 'no route' };
+      const sha = v.origin ?? v.sha ?? 'aaaaaaa1111111';
+      return { status: 0, stdout: `${sha}\trefs/heads/${BRANCH}\n`, stderr: '' };
+    }
     if (args[0] === 'pr' && args[1] === 'view') {
       return {
         status: 0,
@@ -95,6 +103,7 @@ const deps = (run: CommandRunner): ReenterDeps => ({
   cwd: root,
   reenteredBy: 'operator-dispatch',
   now: () => new Date('2026-10-15T10:00:00.000Z'),
+  warn: (l) => warnings.push(l),
 });
 
 const queued = (): string[] => readdirSync(path.join(board, 'queue'));
@@ -228,6 +237,40 @@ describe('reenter loop guard (AISDLC-883)', () => {
     reenter({ target: '7' }, deps(gh({ merge: 'BEHIND' })));
     expect(() => reenter({ target: '7' }, deps(gh({ merge: 'BEHIND' })))).toThrow(/loop guard/);
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe('reenter origin head (AISDLC-937)', () => {
+  const ORIGIN = 'ccccccc3333333';
+  const full = ORIGIN;
+
+  it('a record that lags origin is accepted and the guard carries the origin head', () => {
+    failTask();
+    const r = reenter({ target: '7' }, deps(gh({ origin: ORIGIN })));
+    expect(r).toMatchObject({ kind: 'manifest', headSha: full });
+    const g = JSON.parse(
+      readFileSync(path.join(board, 'landing', '7', 'reentered.json'), 'utf-8'),
+    ) as { headSha: string }[];
+    expect(g[0]?.headSha).toBe(full);
+    expect(warnings).toEqual([]);
+  });
+
+  it('refuses the same origin head and route twice', () => {
+    failTask();
+    reenter({ target: '7' }, deps(gh({ origin: ORIGIN })));
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-b' });
+    completeTask(board, { taskId: TASK, outcome: 'failed', workerId: 'exec-b', prNumber: 7 });
+    expect(() => reenter({ target: '7' }, deps(gh({ origin: ORIGIN })))).toThrow(
+      /loop guard: executor@ccccccc x2/,
+    );
+  });
+
+  it('falls back to the recorded head and says so when ls-remote fails', () => {
+    failTask();
+    const r = reenter({ target: '7' }, deps(gh({ origin: null })));
+    expect(r).toMatchObject({ kind: 'manifest', headSha: 'aaaaaaa1111111' });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/ls-remote.*recorded head aaaaaaa/);
   });
 });
 

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-937
 title: 'reenter loop guard keys on the origin ref so a head GitHub has not yet recorded is a new head'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels: [bug, dispatch, hierarchy, pipeline-cli, velocity]
