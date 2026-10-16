@@ -195,7 +195,7 @@ function stripComment(segment) {
       quote = c;
       continue;
     }
-    if (c === '#' && (i === 0 || /\s/.test(segment[i - 1]))) {
+    if (c === '#' && (i === 0 || IS_WS(segment[i - 1]))) {
       return segment.slice(0, i).trimEnd();
     }
   }
@@ -502,7 +502,7 @@ function canonicalizeCommand(command) {
     else if (
       c === '#' &&
       stripComments &&
-      (out === '' || (!wasEscaped && /\s/.test(out[out.length - 1])))
+      (out === '' || (!wasEscaped && IS_WS(out[out.length - 1])))
     ) {
       while (i + 1 < command.length && command[i + 1] !== '\n') i++;
       continue;

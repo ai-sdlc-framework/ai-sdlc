@@ -1052,6 +1052,16 @@ describe('real tokenizer normalisation (AISDLC-605.1)', () => {
     assert.deepEqual(m.splitShellSegments(`echo $'a\\'; b' ; ls`), [`echo $'a\\'; b'`, 'ls']);
     assert.equal(m.stripComment(`echo $'a\\' # x' # y`), `echo $'a\\' # x'`);
   });
+  it('only space, tab and newline start a comment (CR, FF, VT, NBSP do not)', () => {
+    const gh = 'gh';
+    for (const ws of ['\r', '\f', '\v', ' ', ' ', '﻿']) {
+      const c = `echo hi${ws}# ; ${gh} pr merge 5`;
+      assert.equal(m.commandRunsGhPrMerge(c), true, JSON.stringify(c));
+      assert.ok(m.canonicalizeCommand(c).includes('merge'), JSON.stringify(c));
+    }
+    assert.equal(m.stripComment(`echo hi\r# x`), `echo hi\r# x`);
+    assert.equal(m.stripComment(`echo hi # x`), `echo hi`);
+  });
   it('decodes ANSI-C strings and keeps NUL or quote results raw', () => {
     assert.equal(
       m.canonicalizeCommand(`echo $'a\\tb\\u0041\\U00000042\\cA\\q'`),
