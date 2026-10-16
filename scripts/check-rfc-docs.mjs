@@ -75,21 +75,6 @@ export const SURFACE_TO_SUBDIR = {
 export const ENFORCED_STATUSES = new Set(['Approved', 'Implemented', 'Final']);
 
 /**
- * Statuses recognised by the RFC schema. Used to give a clearer error
- * when a frontmatter has a typo'd status — we'd rather report that than
- * silently skip an unknown status.
- */
-export const KNOWN_STATUSES = new Set([
-  'Draft',
-  'Under Review',
-  'Approved',
-  'Implemented',
-  'Final',
-  'Rejected',
-  'Withdrawn',
-]);
-
-/**
  * The template file is always skipped — it has placeholder values
  * (`id: RFC-NNNN`, `created: YYYY-MM-DD`) that fail validation by design.
  */
@@ -430,6 +415,21 @@ export const ASSUMES_OK_LIFECYCLES = new Set([
   'Signed Off',
   'Implemented',
   'Superseded',
+]);
+
+/**
+ * Statuses recognised by the RFC schema. Used to give a clearer error
+ * when a frontmatter has a typo'd status. Derived from the enforced statuses
+ * and the lifecycle set (plus the legacy non-enforced words) so the sets
+ * cannot drift apart (AISDLC-900).
+ */
+export const KNOWN_STATUSES = new Set([
+  'Draft',
+  'Under Review',
+  'Rejected',
+  'Withdrawn',
+  ...ENFORCED_STATUSES,
+  ...ASSUMES_OK_LIFECYCLES,
 ]);
 
 /**
