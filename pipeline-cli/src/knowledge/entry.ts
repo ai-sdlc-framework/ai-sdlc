@@ -8,7 +8,7 @@
  * `inferred`, confidence 0.85, and must carry a `reverify` note (OQ-3).
  */
 import { createHash } from 'node:crypto';
-import yaml from 'js-yaml';
+import * as yaml from '../util/yaml.js';
 import type { Ontology } from './ontology.js';
 
 export const SCOPES = ['internal', 'universal', 'protected'] as const;

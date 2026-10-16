@@ -17,7 +17,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { validateModelRouting } from '@ai-sdlc/reference';
-import yaml from 'js-yaml';
+import * as yaml from '../util/yaml.js';
 import { DEFAULT_ROLE_MODELS, SECURITY_REVIEWER_ROLE, type RoutingTable } from './default-table.js';
 
 export const MODEL_ROUTING_PATH = '.ai-sdlc/model-routing.yaml';

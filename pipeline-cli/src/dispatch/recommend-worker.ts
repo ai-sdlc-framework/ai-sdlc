@@ -32,7 +32,7 @@
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { load as yamlLoad } from 'js-yaml';
+import { load as yamlLoad } from '../util/yaml.js';
 
 import type { ManifestWorkerKind } from './types.js';
 

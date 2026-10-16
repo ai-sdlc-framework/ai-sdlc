@@ -18,7 +18,7 @@
  * save, the editor wrote to disk; we just refresh the in-pane view.
  */
 
-import yaml from 'js-yaml';
+import * as yaml from '../../util/yaml.js';
 
 export interface YamlValidationIssue {
   /** 1-based line number when known, else null. */

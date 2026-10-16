@@ -29,7 +29,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import yaml from 'js-yaml';
+import * as yaml from '../util/yaml.js';
 
 import type { DecisionTier } from './decision-record.js';
 import { resolveFatigueConfig, type FatigueConfig } from './decisions-config.js';

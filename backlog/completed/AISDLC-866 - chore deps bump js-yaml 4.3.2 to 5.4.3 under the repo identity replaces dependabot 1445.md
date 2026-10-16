@@ -1,7 +1,7 @@
 ---
 id: AISDLC-866
 title: 'chore(deps): bump js-yaml 4.3.2 to 5.4.3 under the repo identity (replaces dependabot #1445)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [chore, deps]

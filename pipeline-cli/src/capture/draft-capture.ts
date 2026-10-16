@@ -36,7 +36,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, join } from 'node:path';
-import { load as yamlLoad } from 'js-yaml';
+import { load as yamlLoad } from '../util/yaml.js';
 
 import {
   validateCaptureRecord,

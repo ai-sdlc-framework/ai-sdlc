@@ -20,7 +20,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import yaml from 'js-yaml';
+import * as yaml from '../util/yaml.js';
 import type { PlanLimits } from './types.js';
 
 export const REVIEW_CONFIG_PATH = '.ai-sdlc/review-config.yaml';

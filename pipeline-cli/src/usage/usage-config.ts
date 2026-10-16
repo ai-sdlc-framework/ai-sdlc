@@ -18,7 +18,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveUsageDir, validateUsageConfig, type UsageStoreOptions } from '@ai-sdlc/reference';
-import yaml from 'js-yaml';
+import * as yaml from '../util/yaml.js';
 import type { TokenClass } from './units.js';
 
 export type BudgetRole = 'planner' | 'operator-dispatch' | 'executor';

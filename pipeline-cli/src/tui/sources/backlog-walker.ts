@@ -17,7 +17,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { useEffect, useRef, useState } from 'react';
-import { load as loadYaml } from 'js-yaml';
+import { load as loadYaml } from '../../util/yaml.js';
 
 import { classifyFsError } from './types.js';
 import type { SourceErrorKind, SourceState } from './types.js';

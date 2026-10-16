@@ -53,7 +53,7 @@
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { load as parseYaml } from 'js-yaml';
+import { load as parseYaml } from '../util/yaml.js';
 
 // ── Constants ─────────────────────────────────────────────────────────
 

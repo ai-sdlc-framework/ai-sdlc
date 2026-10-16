@@ -20,7 +20,7 @@ describe('validateYaml — parse layer', () => {
   });
 
   it('malformed YAML surfaces a parse-source issue with line number', () => {
-    const result = validateYaml({ text: 'foo:\n  - bar\n  - : baz\n' });
+    const result = validateYaml({ text: 'foo: [bar\nbaz: 1\n' });
     expect(result.valid).toBe(false);
     expect(result.issues).toHaveLength(1);
     expect(result.issues[0].source).toBe('parse');

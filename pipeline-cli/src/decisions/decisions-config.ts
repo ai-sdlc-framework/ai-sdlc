@@ -20,7 +20,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import yaml from 'js-yaml';
+import * as yaml from '../util/yaml.js';
 
 // Import PillarOwnerConfig from stage-b (Phase 3 export); do NOT re-export
 // it here to avoid the "already exported" ambiguity when index.ts barrel

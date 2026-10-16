@@ -18,7 +18,7 @@
  * re-implementing the format.
  */
 
-import { dump, load } from 'js-yaml';
+import { dump, load } from '../util/yaml.js';
 
 import { isValidTaskId } from './validate.js';
 
