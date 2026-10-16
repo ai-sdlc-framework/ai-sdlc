@@ -110,8 +110,8 @@ and `pipeline-cli`, run `pnpm lint` and `pnpm format:check` (fix format drift wi
 it as `style:`), then sign from the existing `.ai-sdlc/verdicts/<task-id-lower>.json` and transcript
 leaves, lease-push from your own session (never a subagent), run `gh pr ready`, and report the verdict.
 After the rebase run `node pipeline-cli/bin/cli-dispatch.mjs push-only-check --task-id <task-id> --worktree <worktree>` (it wraps
-`evaluatePushOnly` in `pipeline-cli/src/dispatch/resume.ts`). Exit 1 means refuse the mode, say why in your status line, and run the normal
-pipeline below (the verdict is not an approval, or the branch content no longer matches an approval after the rebase). A missing verdict file
+`evaluatePushOnly` in `pipeline-cli/src/dispatch/resume.ts`). Exit 1 means refuse the mode, say why in your status line, and continue in this same run with the normal
+pipeline below (a refusal is never a failure on its own) (the verdict is not an approval, or the branch content no longer matches an approval after the rebase). A missing verdict file
 alone is not a refusal: the JSON carries `verdictMissing`, so run the verdict step (sign from the approval envelope) rather than a developer. Never write a new verdict file and never set an `AI_SDLC_SKIP_*` variable.
 
 Run `/ai-sdlc execute <task-id>` with the task id and **nothing else**: invoke the plugin's `execute`

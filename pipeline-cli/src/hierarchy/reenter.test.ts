@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -296,5 +304,39 @@ describe('reenter refusals', () => {
     expect(() => reenter({ target: '7' }, deps(gh()))).toThrow(/not in done/);
     expect(queued()).toEqual([]);
     expect(existsSync(path.join(board, 'landing', '7', 'reentered.json'))).toBe(false);
+  });
+});
+
+describe('reenter, local HEAD ahead of the PR head (AISDLC-946)', () => {
+  const ahead = (): ReenterDeps => ({
+    ...deps(gh({ merge: 'DIRTY', checks: [] })),
+    resolveLocalAheadHead: () => 'bbbbbbb2222222',
+  });
+
+  it('routes to the executor with a push-pending note, keyed on the local HEAD', () => {
+    failTask();
+    const r = reenter({ target: '7' }, ahead());
+    expect(r).toMatchObject({ kind: 'manifest', headSha: 'bbbbbbb2222222' });
+    const m = JSON.parse(
+      readFileSync(path.join(board, 'queue', `${TASK}.dispatch.json`), 'utf-8'),
+    ) as DispatchManifest;
+    expect(m.resume?.note).toContain('push pending');
+    expect(m.resume?.note).toContain('lease-push');
+  });
+
+  it('is not blocked by a guard entry recorded for the unchanged PR head', () => {
+    failTask();
+    const guard = path.join(board, 'landing', '7', 'reentered.json');
+    mkdirSync(path.dirname(guard), { recursive: true });
+    writeFileSync(
+      guard,
+      JSON.stringify([
+        { action: 'executor', headSha: 'aaaaaaa1111111', at: '2026-10-15T09:00:00Z' },
+      ]),
+    );
+    expect(() => reenter({ target: '7' }, deps(gh({ merge: 'DIRTY', checks: [] })))).toThrow(
+      /loop guard/,
+    );
+    expect(reenter({ target: '7' }, ahead())).toMatchObject({ kind: 'manifest' });
   });
 });

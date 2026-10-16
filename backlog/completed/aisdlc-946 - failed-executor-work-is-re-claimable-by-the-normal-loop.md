@@ -1,7 +1,7 @@
 ---
 id: AISDLC-946
 title: 'Failed executor work is re-claimable by the normal loop: resume finds a completed task file and a push-only refusal falls through to a full resume'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels:
