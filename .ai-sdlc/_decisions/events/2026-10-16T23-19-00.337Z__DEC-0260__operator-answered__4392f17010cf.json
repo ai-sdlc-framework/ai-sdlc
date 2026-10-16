@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-16T23:19:00.337Z","decisionId":"DEC-0260","chosenOptionId":"recover","rationale":"Class (a): every action is reversible and small-blast-radius; waiting burns one executor run per queued task until #1731 lands.","by":"planner"}
