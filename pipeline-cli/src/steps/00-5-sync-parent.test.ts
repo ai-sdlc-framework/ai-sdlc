@@ -33,6 +33,7 @@ import {
   findCompletedCounterpartOnOrigin,
   readOriginMainFile,
   readConfiguredTaskPrefix,
+  removeUntrackedIdenticalToMain,
 } from './00-5-sync-parent.js';
 import type { FileDeps } from '../cli/file.js';
 import { FakeRunner, ok, fail as fakeRunnerFail } from '../__test-helpers/fake-runner.js';
@@ -1025,5 +1026,50 @@ describe('AISDLC-860 step 0.5 files through the cli-file path', () => {
     expect(r.ok).toBe(false);
     expect(r.verdict).toBeUndefined();
     expect(r.reason).toContain('filing');
+  });
+});
+
+describe('removeUntrackedIdenticalToMain (AISDLC-874)', () => {
+  const rel = '.ai-sdlc/_decisions/events/e1.json';
+  const setup = (content: string) => {
+    mkdirSync(join(workDir, '.ai-sdlc', '_decisions', 'events'), { recursive: true });
+    writeFileSync(join(workDir, rel), content);
+  };
+
+  it('removes an untracked event identical to origin/main', async () => {
+    setup('x');
+    const fake = new FakeRunner()
+      .on(/^git rev-parse --verify/, ok('abc123\n'))
+      .on(/^git hash-object/, ok('abc123\n'));
+    const removed = await removeUntrackedIdenticalToMain([rel], workDir, fake.toRunner());
+    expect(removed).toEqual([rel]);
+    expect(existsSync(join(workDir, rel))).toBe(false);
+  });
+
+  it('keeps and reports an untracked event that differs from origin/main', async () => {
+    setup('x');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fake = new FakeRunner()
+      .on(/^git rev-parse --verify/, ok('abc123\n'))
+      .on(/^git hash-object/, ok('def456\n'));
+    const removed = await removeUntrackedIdenticalToMain([rel], workDir, fake.toRunner());
+    expect(removed).toEqual([]);
+    expect(existsSync(join(workDir, rel))).toBe(true);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('differs from origin/main'));
+    warn.mockRestore();
+  });
+
+  it('ignores files absent on origin/main and files outside the events dir', async () => {
+    setup('x');
+    writeFileSync(join(workDir, 'other.txt'), 'x');
+    const fake = new FakeRunner().on(/^git rev-parse --verify/, fakeRunnerFail('', 1));
+    const removed = await removeUntrackedIdenticalToMain(
+      [rel, 'other.txt'],
+      workDir,
+      fake.toRunner(),
+    );
+    expect(removed).toEqual([]);
+    expect(existsSync(join(workDir, rel))).toBe(true);
+    expect(existsSync(join(workDir, 'other.txt'))).toBe(true);
   });
 });

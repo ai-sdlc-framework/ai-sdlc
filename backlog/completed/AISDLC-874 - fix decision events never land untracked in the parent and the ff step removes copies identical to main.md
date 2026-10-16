@@ -1,7 +1,7 @@
 ---
 id: AISDLC-874
 title: 'fix(decisions): events never land untracked in the parent; the ff step removes copies identical to main'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [decisions, hierarchy, reliability]
@@ -32,11 +32,11 @@ Executors and `cli-decisions` wrote DEC-0212..0218 opened/answered events into t
 
 ## Acceptance Criteria
 
-- [ ] #1 Run from a Pattern-C parent with no active task, `cli-decisions add` and `answer` refuse and write nothing.
-- [ ] #2 With an active task, events land in that task's worktree store.
-- [ ] #3 An untracked file identical to origin/main is removed and the ff succeeds; an untracked file that differs is not deleted and the step reports it (tests for both).
-- [ ] #4 Only untracked files are ever deleted; tracked or modified files are never touched, and no hard reset is introduced.
-- [ ] #5 Docs describe the refusal and the ff cleanup.
+- [x] #1 Run from a Pattern-C parent with no active task, `cli-decisions add` and `answer` refuse and write nothing.
+- [x] #2 With an active task, events land in that task's worktree store.
+- [x] #3 An untracked file identical to origin/main is removed and the ff succeeds; an untracked file that differs is not deleted and the step reports it (tests for both).
+- [x] #4 Only untracked files are ever deleted; tracked or modified files are never touched, and no hard reset is introduced.
+- [x] #5 Docs describe the refusal and the ff cleanup.
 
 ## Out of scope
 

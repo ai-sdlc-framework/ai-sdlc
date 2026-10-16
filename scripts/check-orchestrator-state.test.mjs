@@ -416,4 +416,32 @@ describe('check-orchestrator-state.sh', () => {
     assert.match(r.stdout, /pipeline-cli\/dist is stale/);
     assert.match(r.stdout, /pnpm --filter @ai-sdlc\/pipeline-cli build/);
   });
+
+  it('[AISDLC-874] untracked file identical to origin/main is removed and the reset proceeds', () => {
+    advanceOrigin('adv-ident', { '.ai-sdlc/_decisions/events/e1.json': 'same\n' });
+    mkdirSync(join(env.local, '.ai-sdlc', '_decisions', 'events'), { recursive: true });
+    const f = join(env.local, '.ai-sdlc', '_decisions', 'events', 'e1.json');
+    writeFileSync(f, 'same\n');
+    const origin = sh(`git -C "${env.local}" ls-remote origin main`).split(/\s/)[0];
+    const r = runScript(env.local);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /removed untracked .*e1\.json \(identical to origin\/main\)/);
+    assert.equal(sh(`git -C "${env.local}" rev-parse HEAD`), origin);
+    assert.equal(sh(`cat "${f}"`), 'same');
+    assert.equal(sh(`git -C "${env.local}" status --porcelain`), '');
+  });
+
+  it('[AISDLC-874] untracked file that differs from origin/main is kept, reported, no reset', () => {
+    advanceOrigin('adv-diff', { '.ai-sdlc/_decisions/events/e2.json': 'main\n' });
+    mkdirSync(join(env.local, '.ai-sdlc', '_decisions', 'events'), { recursive: true });
+    const f = join(env.local, '.ai-sdlc', '_decisions', 'events', 'e2.json');
+    writeFileSync(f, 'local\n');
+    const head = sh(`git -C "${env.local}" rev-parse HEAD`);
+    const r = runScript(env.local);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /untracked files differ from origin\/main/);
+    assert.match(r.stdout, /e2\.json/);
+    assert.equal(sh(`git -C "${env.local}" rev-parse HEAD`), head);
+    assert.equal(sh(`cat "${f}"`), 'local');
+  });
 });

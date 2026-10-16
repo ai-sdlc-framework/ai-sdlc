@@ -18,7 +18,7 @@
  * @module cli/decisions
  */
 
-import { resolveCatalogRoot } from '../decisions/catalog-root.js';
+import { resolveCatalogRoot, resolveWriteRoot } from '../decisions/catalog-root.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { join as joinPath } from 'node:path';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
@@ -587,6 +587,15 @@ export interface DecisionsCliDeps {
 
 export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
   const chainFor = cliDeps.chain ?? createSystemChainDeps;
+  // AISDLC-874: writes resolve from the raw --work-dir, not the read root.
+  let rawWorkDir = process.cwd();
+  const writeRoot = (): string => {
+    try {
+      return resolveWriteRoot(rawWorkDir);
+    } catch (e) {
+      return fail((e as Error).message);
+    }
+  };
   return yargs(hideBin(process.argv))
     .scriptName('cli-decisions')
     .usage('Usage: $0 <command> [options]\n\nRFC-0035 Decision Catalog CLI (Phase 1).')
@@ -596,7 +605,10 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
         'Project root (defaults to cwd). Resolves the event log under <work-dir>/.ai-sdlc/_decisions/events/. From a linked worktree the main checkout is used instead (AISDLC-825).',
       type: 'string',
       default: process.cwd(),
-      coerce: (v: string) => resolveCatalogRoot(v),
+      coerce: (v: string) => {
+        rawWorkDir = v;
+        return resolveCatalogRoot(v);
+      },
     })
     .command(
       'list',
@@ -822,7 +834,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             default: 'text' as const,
           }),
       async (argv) => {
-        const workDir = String(argv['work-dir']);
+        const workDir = writeRoot();
         if (!isDecisionCatalogEnabled()) {
           // AC#6 — degrade-open is read-only; the mutating path refuses.
           fail(
@@ -1026,7 +1038,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             default: 'text' as const,
           }),
       async (argv) => {
-        const workDir = String(argv['work-dir']);
+        const workDir = writeRoot();
 
         if (!isDecisionCatalogEnabled()) {
           // When the catalog is off: print to stderr and exit with the
@@ -1826,7 +1838,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             default: 'text' as const,
           }),
       async (argv) => {
-        const workDir = String(argv['work-dir']);
+        const workDir = writeRoot();
         const id = String(argv.id);
         const optionId = String(argv.optionId);
         if (!/^DEC-\d{4,}$/.test(id)) {
