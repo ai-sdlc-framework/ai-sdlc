@@ -22,9 +22,13 @@ jobs:
     name: Post attestation status
     # Only for PR runs. A cancelled gate run (newer push) records no verdict
     # and must not post (AISDLC-412), so skip cancelled conclusions.
+    # AISDLC-927: the gate run-name marks draft and dependabot runs (attestation
+    # job skipped); those start no runner and make no API call. Docs-only skips
+    # still resolve through the jobs check below.
     if: >-
       github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.conclusion != 'cancelled'
+      github.event.workflow_run.conclusion != 'cancelled' &&
+      !contains(github.event.workflow_run.display_title, '[no-attestation]')
     runs-on: ubuntu-latest
     permissions:
       contents: read
