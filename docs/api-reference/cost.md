@@ -227,5 +227,5 @@ Implementations MUST populate `inputTokens` and `outputTokens` from the model AP
 ## See also
 
 - [Tutorial: Cost Governance with CostPolicy](../tutorials/cost-governance.md) — worked example walking a team through declaring `costPolicy`, `budget`, and `modelSelection`.
-- [Operator Runbook — Quota and cost events](../operations/operator-runbook.md#quota-and-cost-events) — operational response when a `BudgetExceeded` event fires.
+- [Operator Runbook — Quota and cost events](../operations/cli-hierarchy.md) — operational response when a `BudgetExceeded` event fires.
 - [RFC-0004 — Cost Governance and Attribution](../../spec/rfcs/RFC-0004-cost-governance-and-attribution.md) — full normative spec, alternatives considered, open questions.

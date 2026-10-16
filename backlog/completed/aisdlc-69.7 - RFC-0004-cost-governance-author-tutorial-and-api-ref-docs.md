@@ -17,17 +17,24 @@ references:
   - spec/rfcs/RFC-0004-cost-governance-and-attribution.md
   - docs/tutorials/
   - docs/api-reference/
-  - docs/operations/operator-runbook.md
 parent_task_id: AISDLC-69
 priority: medium
 drift_status: flagged
-drift_checked: '2026-05-03'
+drift_checked: '2026-10-16'
 drift_log:
   - date: '2026-05-03'
     type: dep-resolved
     detail: Dependency AISDLC-69.2 has been completed
     resolution: flagged
   - date: '2026-05-03'
+    type: dep-resolved
+    detail: Dependency AISDLC-69.2 has been completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/operator-runbook.md'
+    resolution: flagged
+  - date: '2026-10-16'
     type: dep-resolved
     detail: Dependency AISDLC-69.2 has been completed
     resolution: flagged

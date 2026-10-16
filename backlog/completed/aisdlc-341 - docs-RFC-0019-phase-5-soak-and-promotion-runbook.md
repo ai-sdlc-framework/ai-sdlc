@@ -1,6 +1,8 @@
 ---
 id: AISDLC-341
-title: 'docs: RFC-0019 Phase 5 — soak + promotion runbook for `AI_SDLC_EMBEDDING_PROVIDER` default-on flip'
+title: >-
+  docs: RFC-0019 Phase 5 — soak + promotion runbook for
+  `AI_SDLC_EMBEDDING_PROVIDER` default-on flip
 status: Done
 assignee:
   - '@claude-opus-4-7'
@@ -16,11 +18,23 @@ dependencies:
 references:
   - spec/rfcs/RFC-0019-embedding-provider-adapter.md
   - docs/operations/dor-promotion.md
-  - docs/operations/orchestrator-promotion.md
   - docs/operations/deps-composition-promotion.md
-  - docs/operations/embedding-substrate-promotion.md
   - docs/operations/embedding-providers.md
 priority: low
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/orchestrator-promotion.md
+    resolution: flagged
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/embedding-substrate-promotion.md
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description

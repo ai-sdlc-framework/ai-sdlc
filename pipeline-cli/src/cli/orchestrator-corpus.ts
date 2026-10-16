@@ -36,7 +36,7 @@
  * Hybrid promotion model (mirrors AISDLC-161 / AISDLC-167.5):
  *   - `recommendation: 'safe-to-promote'`  → operator can flip the
  *     `AI_SDLC_AUTONOMOUS_ORCHESTRATOR` default OFF → ON (single PR,
- *     runbook in `docs/operations/orchestrator-promotion.md`).
+ *     runbook in `docs/operations/cli-hierarchy.md`).
  *   - `recommendation: 'continue-soak'`     → keep gathering data; the
  *     `reason` field names the failing metric.
  *   - `recommendation: 'insufficient-data'` → use the operator-override
@@ -523,7 +523,7 @@ export function aggregateOrchestratorCorpus(
       `dispatched=${dispatched} < minTasks=${minTasks}` +
       ` OR distinctTaskIds=${allTaskIds.size} < minDistinctTasks=${minDistinctTasks}` +
       ` — operator may use the spot-check promotion path` +
-      ` (see docs/operations/orchestrator-promotion.md)`;
+      ` (see docs/operations/cli-hierarchy.md)`;
   } else if (unattendedRate < unattendedThreshold) {
     recommendation = 'continue-soak';
     reason =

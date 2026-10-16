@@ -123,4 +123,3 @@ capacity-planning decisions, spurious Slack noise, etc.):
 - RFC-0016 §7.4 bias drift detection (`EstimateBiasOverCorrected`)
 - RFC-0016 §7.3 calibration state token enum (Q6 resolution)
 - `docs/operations/dor-promotion.md` — same corpus-driven pattern for the DoR gate
-- `docs/operations/orchestrator-promotion.md` — same pattern for the orchestrator

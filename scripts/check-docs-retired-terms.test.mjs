@@ -41,8 +41,6 @@ export const ALLOWLIST = {
     'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
   'docs/operations/README.md':
     'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/operations/adopter-authoring-promotion.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
   'docs/operations/auto-rebase-stale-prs.md':
     'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
   'docs/operations/backlog-and-execution-reference.md':
@@ -59,28 +57,10 @@ export const ALLOWLIST = {
     'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
   'docs/operations/copilot-spawner.md':
     'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/operations/decision-catalog-promotion.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/operations/dispatch-profiling.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/operations/dispatch-supervisor-install.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
   'docs/operations/dispatched-session-decisions.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/operations/embedding-substrate-promotion.md':
     'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
   'docs/operations/gate-audit-2026-10.md':
     'historical audit record naming the workflows it audited',
-  'docs/operations/operator-runbook.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/operations/operator-tui-promotion.md':
-    'promotion page for the retired TUI flag, documents the flag by name',
-  'docs/operations/orchestrator-promotion.md':
-    'promotion page for the retired orchestrator flag, documents the flag by name',
-  'docs/operations/orchestrator-runbook.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/operations/parallel-dispatch.md':
-    'runbook body still written around execute-parallel; sibling stale-sentence sweep owns the rewrite',
   'docs/operations/pre-push-and-ci-reference.md':
     'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
   'docs/operations/release-and-plugin-reference.md':
@@ -88,10 +68,6 @@ export const ALLOWLIST = {
   'docs/operations/remote-agents-readonly.md':
     'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
   'docs/operations/reviewer-dispatch-defaults.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/operations/signal-ingestion-promotion.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/operations/untrusted-pr-gate-promotion.md':
     'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
   'docs/operations/usage-ledger.md':
     'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',

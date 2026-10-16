@@ -214,7 +214,6 @@ The `ai-sdlc/untrusted-pr-gate` commit status is posted by the UCVG workflow. Th
 
 - [Operator Runbook](../operations/untrusted-contributor-pr-verification.md)
 - [API Reference — RFC-0043 UCVG](../api-reference/rfc-0043-ucvg.md)
-- [Promotion Runbook](../operations/untrusted-pr-gate-promotion.md)
 - [RFC-0043 — Untrusted-Contributor PR Verification](../../spec/rfcs/RFC-0043-untrusted-contributor-pr-verification.md)
 - [RFC-0042 — Proof-of-Execution Attestation](../../spec/rfcs/RFC-0042-proof-of-execution-attestation.md)
 - [RFC-0022 — Compliance Posture + Audit Surface](../../spec/rfcs/RFC-0022-compliance-posture-audit-surface.md)

@@ -8,7 +8,7 @@
 > Claude account / billing pool each one consumes, and the recommended pattern
 > for keeping cost low.
 
-If you're new to AI-SDLC, start with [`docs/operations/operator-runbook.md`](./operator-runbook.md). Come here when you need to understand the cost implications of each dispatch path or you're wiring CI / GitHub Actions and want to avoid surprise bills.
+If you're new to AI-SDLC, start with [`docs/operations/cli-hierarchy.md`](./cli-hierarchy.md). Come here when you need to understand the cost implications of each dispatch path or you're wiring CI / GitHub Actions and want to avoid surprise bills.
 
 ---
 
@@ -385,8 +385,8 @@ Not today — the spawner choice is per-dispatch, not per-step. If this matters,
 ## See also
 
 - [`pipeline-cli/docs/spawner.md`](../../pipeline-cli/docs/spawner.md) — engineer-facing reference for the `SubagentSpawner` interface, custom spawner howto, and per-spawner contract details
-- [`docs/operations/operator-runbook.md`](./operator-runbook.md) — high-level operator workflows
-- [`docs/operations/orchestrator-runbook.md`](./orchestrator-runbook.md) — `cli-orchestrator` setup + monitoring
+- [`docs/operations/cli-hierarchy.md`](./cli-hierarchy.md) — high-level operator workflows
+- [`docs/operations/cli-hierarchy.md`](./cli-hierarchy.md) — `cli-orchestrator` setup + monitoring
 - [`docs/operations/claude-cli-spawner-removed.md`](./claude-cli-spawner-removed.md) — RFC-0041 Phase 3.3 (AISDLC-377.6) `--spawner claude-cli` removal & migration breadcrumb
 - [`spec/rfcs/RFC-0012-shared-pipeline-core.md`](../../spec/rfcs/RFC-0012-shared-pipeline-core.md) — Tier 1 vs Tier 2 architectural rationale
 - [`spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md`](../../spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md) §14 — subscription scheduling + token-budget governance

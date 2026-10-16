@@ -7,7 +7,7 @@
  * The CLI aggregates downloaded orchestrator events.jsonl artifacts into
  * an unattended-completion + quota-burn report and recommendation
  * envelope. See `pipeline-cli/src/cli/orchestrator-corpus.ts` for the
- * full contract and `docs/operations/orchestrator-promotion.md` for how
+ * full contract and `docs/operations/cli-hierarchy.md` for how
  * the recommendation drives the AI_SDLC_AUTONOMOUS_ORCHESTRATOR
  * default-on promotion decision.
  */

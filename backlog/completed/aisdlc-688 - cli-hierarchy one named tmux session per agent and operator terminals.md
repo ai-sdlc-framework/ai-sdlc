@@ -1,7 +1,8 @@
 ---
 id: AISDLC-688
 title: >-
-  cli-hierarchy: one named tmux session per agent, terminal titles that match the agent name, and an attach / open-terminals surface for the operator
+  cli-hierarchy: one named tmux session per agent, terminal titles that match
+  the agent name, and an attach / open-terminals surface for the operator
 status: Done
 assignee:
   - dispatch-executor-beta
@@ -19,10 +20,15 @@ references:
   - pipeline-cli/src/hierarchy/status.ts
   - pipeline-cli/src/hierarchy/brief-notify.ts
   - pipeline-cli/src/cli/hierarchy.ts
-  - docs/operations/parallel-dispatch.md
   - spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/parallel-dispatch.md'
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description

@@ -14,14 +14,31 @@ labels:
 dependencies:
   - AISDLC-293
 blocked:
-  reason: 'RFC-0035 OQ status acknowledged — RFC is Ready for Review with all 14 OQs resolved (operator walkthrough 2026-05-15); Phase 11 docs ship while the RFC awaits per-owner sign-off per the documented critical path. RFC-0011 OQ-10 is a cost-estimation question, non-blocking for a Phase 11 docs PR that only references RFC-0011.'
+  reason: >-
+    RFC-0035 OQ status acknowledged — RFC is Ready for Review with all 14 OQs
+    resolved (operator walkthrough 2026-05-15); Phase 11 docs ship while the RFC
+    awaits per-owner sign-off per the documented critical path. RFC-0011 OQ-10
+    is a cost-estimation question, non-blocking for a Phase 11 docs PR that only
+    references RFC-0011.
 references:
   - spec/rfcs/RFC-0035-decision-catalog-operator-routing.md
   - docs/operations/dor-promotion.md
-  - docs/operations/orchestrator-promotion.md
-  - docs/operations/decision-catalog-promotion.md
   - docs/operations/deps-composition-promotion.md
 priority: medium
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/orchestrator-promotion.md
+    resolution: flagged
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/decision-catalog-promotion.md
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description

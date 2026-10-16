@@ -1,6 +1,8 @@
 ---
 id: AISDLC-373
-title: 'feat(orchestrator): collapse 2-PR pattern — task file + implementation land in single PR'
+title: >-
+  feat(orchestrator): collapse 2-PR pattern — task file + implementation land in
+  single PR
 status: Done
 assignee: []
 created_date: '2026-05-19'
@@ -13,7 +15,12 @@ dependencies: []
 priority: critical
 references:
   - pipeline-cli/bin/cli-orchestrator.mjs
-  - docs/operations/operator-runbook.md
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/operator-runbook.md'
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Problem

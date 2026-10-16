@@ -14,7 +14,7 @@ name: AI-SDLC PR Review
 # branch's checkout by default — NOT the PR's HEAD. To run reviewers
 # against the fork's diff we must read fork content as DATA only.
 #
-# ── 5-point safety guard (AISDLC-381 — see docs/operations/operator-runbook.md
+# ── 5-point safety guard (AISDLC-381 — see docs/operations/cli-hierarchy.md
 #    § Fork-PR workflow safety pattern) ────────────────────────────────
 #
 # 1. Workflow logic checks out the TARGET repo's main (via the default

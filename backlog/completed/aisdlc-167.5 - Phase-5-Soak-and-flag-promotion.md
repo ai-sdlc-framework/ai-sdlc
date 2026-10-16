@@ -17,12 +17,11 @@ dependencies:
 parent_task_id: AISDLC-167
 references:
   - spec/rfcs/RFC-0014-dependency-graph-composition.md
-  - docs/operations/operator-runbook.md
   - docs/operations/deps-composition-promotion.md
   - pipeline-cli/docs/deps.md
 priority: high
 drift_status: flagged
-drift_checked: '2026-05-03'
+drift_checked: '2026-10-16'
 drift_log:
   - date: '2026-05-03'
     type: post-complete-change
@@ -47,6 +46,10 @@ drift_log:
     detail: >-
       Referenced file pipeline-cli/docs/deps.md was modified after task was
       completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/operator-runbook.md'
     resolution: flagged
 ---
 

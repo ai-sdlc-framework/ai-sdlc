@@ -1,6 +1,8 @@
 ---
 id: AISDLC-396
-title: 'feat: orchestrator-tick dispatches dev via in-session background Agent (single-session autonomy)'
+title: >-
+  feat: orchestrator-tick dispatches dev via in-session background Agent
+  (single-session autonomy)
 status: Done
 labels:
   - orchestrator
@@ -12,9 +14,16 @@ references:
   - pipeline-cli/src/orchestrator/loop.ts
   - pipeline-cli/src/orchestrator/dispatch-bg-agent.ts
   - pipeline-cli/src/cli/dispatch.ts
-  - docs/operations/orchestrator-promotion.md
   - CLAUDE.md
 priority: high
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/orchestrator-promotion.md
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description

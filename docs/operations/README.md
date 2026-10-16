@@ -12,8 +12,6 @@ The orchestrator runs a continuous reconciliation loop over your backlog, dispat
 
 | Runbook | Description |
 |---------|-------------|
-| [`orchestrator-runbook.md`](orchestrator-runbook.md) | Day-to-day operations: auto-rebuild, in-flight detection, blocking tasks, quarantine recovery, worktree mutex, resume from interrupted runs |
-| [`orchestrator-promotion.md`](orchestrator-promotion.md) | Hybrid promotion runbook — soak corpus + spot-check evidence to flip `AI_SDLC_AUTONOMOUS_ORCHESTRATOR` default-on |
 | [`claude-cli-spawner-removed.md`](claude-cli-spawner-removed.md) | RFC-0041 Phase 3.3 (AISDLC-377.6) removal of the `--spawner claude-cli` inline-manifest path — migration breadcrumb for legacy scripts |
 
 **Feature flag:** `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental`
@@ -30,7 +28,6 @@ A planner, a dispatch session and up to five executors, each in its own tmux ses
 |---------|-------------|
 | [`session-hierarchy.md`](session-hierarchy.md) | Operator runbook: the three tiers, starting and stopping, roster, board and sequence groups, escalation chain and timeboxes, context clearing, permission modes, governance values, troubleshooting |
 | [`cli-hierarchy.md`](cli-hierarchy.md) | `cli-hierarchy` reference: all eleven subcommands and the `up` options, roster file, operating cycle (brief, tick, clear), restart rule, troubleshooting |
-| [`parallel-dispatch.md`](parallel-dispatch.md) | Shared runbook for the hierarchy (executor loop, dispatch loop, liveness reaper, cancel back-channel); `/ai-sdlc execute-parallel` is superseded |
 
 **RFC:** [`spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md`](../../spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md)
 
@@ -92,7 +89,6 @@ Pluggable adapters fetch raw customer signals (support tickets, community thread
 | Runbook | Description |
 |---------|-------------|
 | [`signal-ingestion.md`](signal-ingestion.md) | Operator runbook — adapter setup, tier-multiplier tuning, SA-resonance threshold calibration, flooding-detection sensitivity, manual signal entry, governance-event audit |
-| [`signal-ingestion-promotion.md`](signal-ingestion-promotion.md) | Hybrid promotion runbook — corpus + spot-check evidence to flip `AI_SDLC_SIGNAL_INGESTION` default-on |
 
 **Feature flag:** `AI_SDLC_SIGNAL_INGESTION` (off — soak window)
 
@@ -126,7 +122,6 @@ Pluggable adapters fetch raw customer signals (support tickets, community thread
 
 | Runbook | Description |
 |---------|-------------|
-| [`operator-runbook.md`](operator-runbook.md) | What the Pipeline Operator role is, daily/weekly/monthly cadence, event triage |
 | [`stacked-prs.md`](stacked-prs.md) | Managing stacked PRs in the merge queue |
 | [`adapter-authoring.md`](adapter-authoring.md) | Authoring a new harness adapter (`AgentRunner` / `HarnessAdapter` extension point) |
 

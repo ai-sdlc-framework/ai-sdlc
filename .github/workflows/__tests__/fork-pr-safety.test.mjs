@@ -15,7 +15,7 @@
  * checkout fork content AND have an elevated GITHUB_TOKEN + repo
  * secrets, which would let a malicious fork PR exfiltrate secrets or
  * push to the upstream main. The 5-point safety guard documented in
- * `docs/operations/operator-runbook.md` § "Fork-PR workflow safety
+ * `docs/operations/cli-hierarchy.md` § "Fork-PR workflow safety
  * pattern" prevents this; these tests assert the workflows comply
  * with the guard:
  *
@@ -116,7 +116,7 @@ describe('AISDLC-381: AC #1 — fork-impacted workflows use pull_request_target'
 });
 
 describe('AISDLC-381: AC #2 — every migrated workflow documents the 5-point safety guard inline', () => {
-  // The guard is documented in operator-runbook.md; each workflow MUST
+  // The guard is documented in cli-hierarchy.md; each workflow MUST
   // reference it inline so future editors don't accidentally regress
   // the safety pattern. We grep the raw YAML text (not the parsed
   // structure) so comment text counts.
@@ -136,8 +136,8 @@ describe('AISDLC-381: AC #2 — every migrated workflow documents the 5-point sa
       );
       assert.match(
         raw,
-        /operator-runbook\.md/,
-        `${name} must point readers to docs/operations/operator-runbook.md`,
+        /cli-hierarchy\.md/,
+        `${name} must point readers to docs/operations/cli-hierarchy.md`,
       );
     });
   }

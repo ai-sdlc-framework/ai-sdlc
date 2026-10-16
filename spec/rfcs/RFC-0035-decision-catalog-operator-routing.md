@@ -511,7 +511,7 @@ Phased rollout behind feature flag `AI_SDLC_DECISION_CATALOG=experimental` (mirr
 - [ ] **Phase 10.** Optional: research subagent integration; visual decision graphs (Mermaid → richer); NotebookLM-style infographics
 - [ ] **Phase 11.** Hybrid promotion runbook to flip default-on (`docs/operations/decision-catalog-promotion.md`)
 
-Per the project's promotion convention (`docs/operations/dor-promotion.md`, `docs/operations/orchestrator-promotion.md`), the operator dispatches the default-on flip from the runbook once corpus or spot-check evidence supports it.
+Per the project's promotion convention (`docs/operations/dor-promotion.md`, `docs/operations/cli-hierarchy.md`), the operator dispatches the default-on flip from the runbook once corpus or spot-check evidence supports it.
 
 ## 15. Open Questions
 

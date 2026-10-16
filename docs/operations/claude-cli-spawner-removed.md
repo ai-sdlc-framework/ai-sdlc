@@ -116,7 +116,7 @@ operator's existing Claude Code Max subscription.
 For headless / CI contexts where no operator CC session is available, use the
 supervisor path: `cli-dispatch-supervisor` spawns `env -u CLAUDECODE claude -p`
 subprocess Workers with operator-controlled 30 min watchdogs. See
-[`dispatch-supervisor-install.md`](./dispatch-supervisor-install.md).
+[`cli-hierarchy.md`](./cli-hierarchy.md).
 
 ### Programmatic callers (custom dispatchers, integration scripts)
 
@@ -177,7 +177,7 @@ Pattern X v2's documented design.
 
 ## See also
 
-- [`docs/operations/operator-runbook.md`](./operator-runbook.md) — full operator playbook for the Conductor/Worker model
+- [`docs/operations/cli-hierarchy.md`](./cli-hierarchy.md) — session hierarchy reference
 - [`docs/operations/billing-and-cost-optimization.md`](./billing-and-cost-optimization.md) — billing model breakdown across spawners
 - [`pipeline-cli/docs/spawner.md`](../../pipeline-cli/docs/spawner.md) — engineer-facing SubagentSpawner reference
 - [`spec/rfcs/RFC-0041-conductor-worker-process-architecture.md`](../../spec/rfcs/RFC-0041-conductor-worker-process-architecture.md) — architecture reference

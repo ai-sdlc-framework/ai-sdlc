@@ -410,7 +410,7 @@ setInterval(() => {
 }, POLL_MS);
 ```
 
-The supervisor is run via the operator's choice of process manager: `launchd` (macOS), `systemd --user` (Linux), `pm2`, or just `pnpm supervisor:start` in a tmux pane. RFC-0041 ships a reference `launchd` plist + `systemd` unit at `docs/operations/dispatch-supervisor-install.md`. The supervisor is RFC-0041's only new long-running process; the Conductor is the operator's existing Claude Code session.
+The supervisor is run via the operator's choice of process manager: `launchd` (macOS), `systemd --user` (Linux), `pm2`, or just `pnpm supervisor:start` in a tmux pane. RFC-0041 ships a reference `launchd` plist + `systemd` unit at `docs/operations/cli-hierarchy.md`. The supervisor is RFC-0041's only new long-running process; the Conductor is the operator's existing Claude Code session.
 
 ### 4.6 Conductor changes
 
@@ -505,7 +505,7 @@ Three phases, each shippable independently. **Phase 1 prioritizes the `in-sessio
 
 - [ ] `pipeline-cli/bin/cli-dispatch-supervisor.mjs` — ~150 LOC daemon: atomic claim, `env -u CLAUDECODE claude -p` spawn, heartbeat sweep, exit handling
 - [ ] `pnpm supervisor:start` / `supervisor:status` / `supervisor:stop` scripts
-- [ ] `docs/operations/dispatch-supervisor-install.md` with `launchd` plist + `systemd --user` unit
+- [ ] `docs/operations/cli-hierarchy.md` with `launchd` plist + `systemd --user` unit
 - [ ] Conductor logic: detect `.ai-sdlc/dispatch/.supervisor.pid` presence + use it for manifests tagged `workerKind: claude-p-shell` or `any`
 - [ ] Cost-warning UX: Conductor prints projected Agent SDK credit cost when first manifest with `claude-p-shell` is queued in a session
 - [ ] Hermetic test: 3 mock manifests, supervisor spawns 3 mock workers (subprocess stubs), all 3 verdicts collected

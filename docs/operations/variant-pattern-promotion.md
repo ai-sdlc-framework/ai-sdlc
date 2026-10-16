@@ -38,8 +38,7 @@ the override path relies on operator judgment when corpus is sparse.
 | **Corpus path** | ≥3 adopters have run variant declarations through the full admission pipeline with no `VariantInheritanceViolation` regressions |
 | **Override path** | InternalAdopter validation complete + operator has personally spot-checked admission scoring on 3+ real work items |
 
-This mirrors the [`adopter-authoring-promotion.md`](adopter-authoring-promotion.md) /
-[`orchestrator-promotion.md`](orchestrator-promotion.md) hybrid-promotion convention.
+This mirrors the hybrid-promotion convention of [`dor-promotion.md`](dor-promotion.md).
 
 ### Promotion procedure
 

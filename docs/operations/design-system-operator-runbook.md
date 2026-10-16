@@ -3,7 +3,7 @@
 **Audience:** the design system maintainer and the AI-SDLC pipeline operator
 who together own the day-to-day operation of a `DesignSystemBinding`
 governed under [RFC-0006](../../spec/rfcs/RFC-0006-design-system-governance-v5-final.md).
-**Companion to:** [`docs/operations/operator-runbook.md`](operator-runbook.md)
+**Companion to:** [`docs/operations/cli-hierarchy.md`](cli-hierarchy.md)
 (general AI-SDLC pipeline operations) and the
 [design system tutorial](../tutorials/design-system-getting-started.md)
 (initial setup).
@@ -80,7 +80,7 @@ AS-NEEDED  • Approve `pinnedVersion` bumps when design lead applies a breaking
 ## Event triage reference
 
 The orchestrator surfaces design system events alongside the general event
-stream documented in `docs/operations/operator-runbook.md`. The events below
+stream documented in `docs/operations/cli-hierarchy.md`. The events below
 are specific to RFC-0006 governance.
 
 | Event                          | Severity  | Meaning                                                                      | Response                                                                                                                                              |
@@ -189,5 +189,5 @@ the binding by editing them yourself.
   how to author the binding in the first place.
 - [Adapter authoring](adapter-authoring.md) — implementing a custom
   `DesignTokenProvider`, `ComponentCatalog`, or `VisualRegressionRunner`.
-- [General operator runbook](operator-runbook.md) — non-design-system
+- [`cli-hierarchy` reference](cli-hierarchy.md) — non-design-system
   operator responsibilities.

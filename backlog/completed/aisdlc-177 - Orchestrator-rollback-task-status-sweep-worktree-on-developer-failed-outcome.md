@@ -15,8 +15,15 @@ references:
   - pipeline-cli/src/orchestrator/loop.ts
   - pipeline-cli/src/orchestrator/playbook/
   - spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md
-  - docs/operations/orchestrator-promotion.md
 priority: high
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/orchestrator-promotion.md
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description

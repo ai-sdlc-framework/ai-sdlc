@@ -804,6 +804,5 @@ OpenShell sandbox policy (Stage 2/3). This file is read by the OpenShell runtime
 
 - [Operator Runbook](../operations/untrusted-contributor-pr-verification.md)
 - [Adopter Explainer](../concepts/untrusted-contributor-verification.md)
-- [Promotion Runbook](../operations/untrusted-pr-gate-promotion.md)
 - [RFC-0043](../../spec/rfcs/RFC-0043-untrusted-contributor-pr-verification.md)
 - [RFC-0042 API Reference](rfc-0042-attestation.md) (signing key resolution, Merkle tree construction)

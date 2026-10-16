@@ -521,7 +521,7 @@ spec:
   blocks, and a malformed list is ignored (defaults apply). The policy is read from the verified main checkout's copy
   when available. A session whose role cannot be resolved from the roster is treated
   as the operator and never blocked. See
-  [parallel dispatch](../operations/parallel-dispatch.md#role-tool-rules).
+  [parallel dispatch](../operations/cli-hierarchy.md).
 - **Fail-closed:** any unknown key, unknown preset name, or malformed value
   (wrong type / not in the enumerated set) is ignored — the resolved value
   falls back to whatever the preset/default already produced. Malformed

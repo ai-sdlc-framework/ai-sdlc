@@ -1,31 +1,99 @@
 ---
 id: AISDLC-891
-title: 'docs(operations): delete the completed promotion runbooks and the retired orchestrator, Conductor and TUI runbooks, redirecting their inbound links'
-status: To Do
+title: >-
+  docs(operations): delete the completed promotion runbooks and the retired
+  orchestrator, Conductor and TUI runbooks, redirecting their inbound links
+status: Done
 assignee: []
 created_date: '2026-10-14'
-labels: [docs, docs-platform, velocity]
+labels:
+  - docs
+  - docs-platform
+  - velocity
 dependencies:
   - AISDLC-853
   - AISDLC-854
 references:
   - docs/operations/README.md
-  - docs/operations/orchestrator-runbook.md
-  - docs/operations/orchestrator-promotion.md
-  - docs/operations/operator-tui-promotion.md
-  - docs/operations/dispatch-supervisor-install.md
-  - docs/operations/dispatch-profiling.md
-  - docs/operations/operator-runbook.md
-  - docs/operations/parallel-dispatch.md
-  - docs/operations/decision-catalog-promotion.md
-  - docs/operations/adopter-authoring-promotion.md
-  - docs/operations/embedding-substrate-promotion.md
-  - docs/operations/signal-ingestion-promotion.md
-  - docs/operations/untrusted-pr-gate-promotion.md
   - docs/operations/cli-hierarchy.md
   - scripts/check-rfc-docs.mjs
 priority: medium
 dispatchable: true
+drift_status: flagged
+drift_checked: '2026-10-16'
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/orchestrator-runbook.md'
+    resolution: flagged
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/orchestrator-promotion.md
+    resolution: flagged
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/operator-tui-promotion.md
+    resolution: flagged
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/dispatch-supervisor-install.md
+    resolution: flagged
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/dispatch-profiling.md'
+    resolution: flagged
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/operator-runbook.md'
+    resolution: flagged
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/parallel-dispatch.md'
+    resolution: flagged
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/decision-catalog-promotion.md
+    resolution: flagged
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/adopter-authoring-promotion.md
+    resolution: flagged
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/embedding-substrate-promotion.md
+    resolution: flagged
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/signal-ingestion-promotion.md
+    resolution: flagged
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/untrusted-pr-gate-promotion.md
+    resolution: flagged
+  - date: '2026-10-16'
+    type: dep-resolved
+    detail: Dependency AISDLC-853 has been completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: dep-resolved
+    detail: Dependency AISDLC-854 has been completed
+    resolution: flagged
 ---
 
 ## Context

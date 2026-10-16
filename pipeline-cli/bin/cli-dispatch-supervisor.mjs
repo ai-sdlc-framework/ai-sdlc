@@ -5,7 +5,7 @@
  * Drives the Worker Supervisor daemon — polls the Dispatch Board, spawns
  * `env -u CLAUDECODE claude -p` subprocesses for `claude-p-shell` manifests,
  * sweeps stale heartbeats. Operators run this under launchd/systemd or in
- * a tmux pane (see `docs/operations/dispatch-supervisor-install.md`).
+ * a tmux pane (see `docs/operations/cli-hierarchy.md`).
  *
  * Usage:
  *   node pipeline-cli/bin/cli-dispatch-supervisor.mjs start

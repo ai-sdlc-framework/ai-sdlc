@@ -13,13 +13,18 @@ labels:
 dependencies: []
 references:
   - spec/rfcs/RFC-0008-ppa-triad-integration-final-combined.md
-  - docs/operations/operator-runbook.md
   - orchestrator/src/admission-hc.ts
   - orchestrator/src/design-authority.ts
   - >-
     backlog/completed/aisdlc-171 -
     HC-composite-design-pillar-wiring-investigate-stewardship-designAuthority-to-HC_design-propagation-gap.md
 priority: medium
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/operator-runbook.md'
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description

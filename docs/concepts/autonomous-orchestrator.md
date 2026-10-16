@@ -7,7 +7,7 @@ The autonomous orchestrator dispatches AI coding agents end-to-end against the d
 
 > **RFC:** [RFC-0015 — Autonomous Pipeline Orchestrator](https://github.com/ai-sdlc-framework/ai-sdlc/blob/main/spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md)
 >
-> **Operational runbook:** [`docs/operations/orchestrator-promotion.md`](https://github.com/ai-sdlc-framework/ai-sdlc/blob/main/docs/operations/orchestrator-promotion.md)
+> **Operational runbook:** [`docs/operations/cli-hierarchy.md`](https://github.com/ai-sdlc-framework/ai-sdlc/blob/main/docs/operations/cli-hierarchy.md)
 >
 > **CLI docs:** [`pipeline-cli/docs/orchestrator.md`](https://github.com/ai-sdlc-framework/ai-sdlc/blob/main/pipeline-cli/docs/orchestrator.md)
 

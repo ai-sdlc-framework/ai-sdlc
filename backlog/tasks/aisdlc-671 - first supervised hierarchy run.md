@@ -1,10 +1,12 @@
 ---
 id: AISDLC-671
 title: >-
-  RFC-0051 operator task: first supervised run of the session hierarchy, per-role usage, stall log
+  RFC-0051 operator task: first supervised run of the session hierarchy,
+  per-role usage, stall log
 status: To Do
 assignee: []
 created_date: '2026-09-30'
+updated_date: '2026-10-16 18:29'
 labels:
   - rfc-0051
   - dispatch
@@ -16,10 +18,30 @@ dependencies:
   - AISDLC-669
 references:
   - spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md
-  - docs/operations/parallel-dispatch.md
 priority: high
-dispatchable: false
-dispatchableReason: "Operator-only: needs live sessions, the operator watching, and judgment about what counts as a stall"
+drift_status: flagged
+drift_checked: '2026-10-16'
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/parallel-dispatch.md'
+    resolution: flagged
+  - date: '2026-10-16'
+    type: dep-resolved
+    detail: Dependency AISDLC-666 has been completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: dep-resolved
+    detail: Dependency AISDLC-667 has been completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: dep-resolved
+    detail: Dependency AISDLC-668 has been completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: dep-resolved
+    detail: Dependency AISDLC-669 has been completed
+    resolution: flagged
 ---
 
 ## Description

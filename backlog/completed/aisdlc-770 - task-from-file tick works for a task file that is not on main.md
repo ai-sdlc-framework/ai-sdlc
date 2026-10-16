@@ -1,7 +1,6 @@
 ---
 id: AISDLC-770
-title: >-
-  task-from-file tick works for a task file that is not on main
+title: task-from-file tick works for a task file that is not on main
 status: Done
 assignee: []
 created_date: '2026-10-09'
@@ -13,10 +12,15 @@ references:
   - pipeline-cli/src/steps/03-setup-worktree.ts
   - pipeline-cli/src/steps/04-flip-status.ts
   - pipeline-cli/src/orchestrator/loop.ts
-  - docs/operations/operator-runbook.md
   - docs/audits/2026-10-09-clock-dependent-test-red-main-rca.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/operator-runbook.md'
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Description

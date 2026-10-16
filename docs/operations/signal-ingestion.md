@@ -1008,9 +1008,8 @@ pre-RFC-0030 backlog-only D1 path; no dispatcher work is rejected.
 
 ## 11. Promotion
 
-See the [Signal-ingestion promotion runbook](signal-ingestion-promotion.md)
-for the procedure to flip `AI_SDLC_SIGNAL_INGESTION` from default-OFF to
-default-ON.
+`AI_SDLC_SIGNAL_INGESTION` has been promoted to default-ON; the promotion
+runbook is retired and remains in git history.
 
 ---
 
@@ -1085,5 +1084,3 @@ node -e "
   operator-override pattern)
 - [Deps composition promotion runbook](deps-composition-promotion.md) —
   RFC-0014 flag-flip runbook (same hybrid model)
-- [Orchestrator promotion runbook](orchestrator-promotion.md) — RFC-0015
-  flag-flip runbook (same hybrid model)

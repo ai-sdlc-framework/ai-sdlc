@@ -232,7 +232,7 @@ disable attestation verification; etc.
 
 - [`docs/operations/quality-gate.md`](./quality-gate.md) — the
   `ai-sdlc/pr-ready` rollup architecture this init scaffolds.
-- [`docs/operations/operator-runbook.md`](./operator-runbook.md) — day-2
+- [`docs/operations/cli-hierarchy.md`](./cli-hierarchy.md) — day-2
   operations for AI-SDLC repos.
 - The `init-features.ts` source — for adopters extending the wizard
   with custom features (the `FeatureTemplateSet` interface is the

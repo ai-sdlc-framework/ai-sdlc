@@ -19,8 +19,5 @@ export function isTuiEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
 }
 
 export function tuiDisabledMessage(): string {
-  return (
-    `cli-tui is not enabled. Set ${TUI_FLAG}=experimental to opt in.\n` +
-    `See: docs/operations/operator-tui-promotion.md (once Phase 7 ships)`
-  );
+  return `cli-tui is not enabled. Set ${TUI_FLAG}=experimental to opt in.`;
 }

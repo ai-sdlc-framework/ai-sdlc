@@ -1,19 +1,30 @@
 ---
 id: AISDLC-882
-title: 'feat(dispatch): reenter <pr|task> keyed on PR state replaces resume and requeue --note; the claim becomes an output of re-entry, not a precondition'
+title: >-
+  feat(dispatch): reenter <pr|task> keyed on PR state replaces resume and
+  requeue --note; the claim becomes an output of re-entry, not a precondition
 status: Done
 assignee: []
 created_date: '2026-10-14'
-labels: [rfc-0054, phase-2, dispatch]
-dependencies: [AISDLC-829]
+labels:
+  - rfc-0054
+  - phase-2
+  - dispatch
+dependencies:
+  - AISDLC-829
 references:
   - spec/rfcs/RFC-0054-pr-lifecycle-event-driven-dispatch.md
   - pipeline-cli/src/dispatch/requeue.ts
   - pipeline-cli/src/cli/dispatch.ts
   - pipeline-cli/src/hierarchy/stall.ts
-  - docs/operations/parallel-dispatch.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/parallel-dispatch.md'
+    resolution: flagged
+drift_checked: '2026-10-16'
 ---
 
 ## Context

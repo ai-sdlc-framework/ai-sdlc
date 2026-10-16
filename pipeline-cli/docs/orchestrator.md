@@ -749,7 +749,7 @@ node pipeline-cli/bin/cli-orchestrator-corpus.mjs aggregate ./orchestrator-corpu
 
 The `--format table` output is operator-eyeball friendly; default
 JSON output is for CI pipelines / `jq`-driven dispatch decisions. See
-[`docs/operations/orchestrator-promotion.md`](../../docs/operations/orchestrator-promotion.md)
+[`docs/operations/cli-hierarchy.md`](../../docs/operations/cli-hierarchy.md)
 for the full runbook including the override path, the flag-flip PR
 template, and the rollback procedure.
 
@@ -893,7 +893,7 @@ such outcomes. No existing test code changes are required.
 |---|---|
 | `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` | Originally a retry hook for the `--spawner claude-cli` "manifest not consumed" failure mode. RFC-0041 Phase 3.3 (AISDLC-377.6) removed the `claude-cli` spawner; the retry guard never fires now (left in place as a configuration hook for future spawners with analogous transient-unavailability modes). Setting it still triggers the `FALLBACK_BILLING_WARNING` from `emitBillingSafetyWarnings` so operators see the same diagnostic. |
 
-See `docs/operations/orchestrator-runbook.md` for runbook coverage of
+See `docs/operations/cli-hierarchy.md` for runbook coverage of
 spawner-unavailable failures and what to do when the umbrella fails mid-tick.
 
 ## Phase plan
@@ -914,5 +914,5 @@ spawner-unavailable failures and what to do when the umbrella fails mid-tick.
 - [`pipeline-cli/docs/spawner.md`](./spawner.md) — picking the right `SubagentSpawner` for your environment.
 - [`pipeline-cli/docs/dependency-graph.md`](./dependency-graph.md) — the cli-deps frontier query the orchestrator drives.
 - [`docs/operations/deps-composition.md`](../../docs/operations/deps-composition.md) — RFC-0014 composition layer + `AI_SDLC_DEPS_COMPOSITION`.
-- [`docs/operations/orchestrator-promotion.md`](../../docs/operations/orchestrator-promotion.md) — Phase 5 hybrid promotion runbook (corpus path + override path + flag flip + rollback).
-- [`docs/operations/operator-runbook.md`](../../docs/operations/operator-runbook.md) — orchestrator-specific failure-mode triage (UnknownFailureMode, parked-worker, OrchestratorStuckCandidate, chaos-test rerun).
+- [`docs/operations/cli-hierarchy.md`](../../docs/operations/cli-hierarchy.md) — Phase 5 hybrid promotion runbook (corpus path + override path + flag flip + rollback).
+- [`docs/operations/cli-hierarchy.md`](../../docs/operations/cli-hierarchy.md) — orchestrator-specific failure-mode triage (UnknownFailureMode, parked-worker, OrchestratorStuckCandidate, chaos-test rerun).

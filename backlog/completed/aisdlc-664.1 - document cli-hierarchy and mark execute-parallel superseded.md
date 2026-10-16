@@ -1,7 +1,8 @@
 ---
 id: AISDLC-664.1
 title: >-
-  RFC-0051: cli-hierarchy reference page in operations docs and mark execute-parallel as superseded
+  RFC-0051: cli-hierarchy reference page in operations docs and mark
+  execute-parallel as superseded
 status: Done
 assignee: []
 created_date: '2026-09-30'
@@ -16,12 +17,54 @@ references:
   - spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md
   - pipeline-cli/src/hierarchy/
   - pipeline-cli/bin/cli-hierarchy.mjs
-  - docs/operations/parallel-dispatch.md
   - ai-sdlc-plugin/commands/planner.md
   - ai-sdlc-plugin/commands/operator-dispatch.md
   - ai-sdlc-plugin/commands/executor.md
 priority: medium
 dispatchable: true
+drift_status: flagged
+drift_checked: '2026-10-16'
+drift_log:
+  - date: '2026-10-16'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: docs/operations/parallel-dispatch.md'
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md
+      was modified after task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file pipeline-cli/src/hierarchy/ was modified after task was
+      completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file pipeline-cli/bin/cli-hierarchy.mjs was modified after task
+      was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file ai-sdlc-plugin/commands/planner.md was modified after task
+      was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file ai-sdlc-plugin/commands/operator-dispatch.md was modified
+      after task was completed
+    resolution: flagged
+  - date: '2026-10-16'
+    type: post-complete-change
+    detail: >-
+      Referenced file ai-sdlc-plugin/commands/executor.md was modified after
+      task was completed
+    resolution: flagged
 ---
 
 ## Description

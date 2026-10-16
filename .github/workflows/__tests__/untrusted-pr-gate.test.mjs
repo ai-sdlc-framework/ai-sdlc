@@ -122,11 +122,11 @@ describe('AC#1 — trigger on pull_request_target (AISDLC-381 fork-PR hardening)
     );
   });
 
-  it('workflow references operator-runbook.md', () => {
+  it('workflow references cli-hierarchy.md', () => {
     assert.match(
       raw,
-      /operator-runbook\.md/,
-      `${WORKFLOW_NAME} must point readers to docs/operations/operator-runbook.md`,
+      /cli-hierarchy\.md/,
+      `${WORKFLOW_NAME} must point readers to docs/operations/cli-hierarchy.md`,
     );
   });
 });

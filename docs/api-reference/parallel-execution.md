@@ -8,7 +8,7 @@ Every interface signature, field table, enum, default, and example YAML on this
 page MUST match the RFC's normative sections (§6, §8, §9.1, §11, §13, §14, §15,
 §16). Any divergence is a doc bug — file a follow-up to bring the doc back in
 line with the RFC, do not edit the RFC to match the doc. The operator-facing
-companion lives in [operator-runbook.md](../operations/operator-runbook.md);
+companion lives in [cli-hierarchy.md](../operations/cli-hierarchy.md);
 the harness-author companion lives in [adapter-authoring.md](../operations/adapter-authoring.md).
 
 > **Status note.** RFC-0010 is Draft (v20). All interfaces below are normative
@@ -591,6 +591,6 @@ naming the validator error before failing the stage with
 ## See also
 
 - [RFC-0010 — Parallel Execution and Worktree Pooling](../../spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md) — full normative spec
-- [Operator runbook](../operations/operator-runbook.md) — operator workflow that consumes these interfaces
+- [Operator runbook](../operations/cli-hierarchy.md) — operator workflow that consumes these interfaces
 - [Adapter authoring guide](../operations/adapter-authoring.md) — how to author a new HarnessAdapter or DatabaseBranchAdapter
 - [Runners](runners.md) — the legacy single-agent runner abstraction RFC-0010 generalizes from
