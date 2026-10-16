@@ -108,7 +108,10 @@ describe('landPrep (real git)', () => {
     mkdirSync(attDir, { recursive: true });
     const envFile = join(attDir, 'abc.v6.dsse.json');
     // v6 shape: no DSSE payload, subject at the top level
-    writeFileSync(envFile, JSON.stringify({ subject: [{ digest: { sha1: subject } }] }));
+    writeFileSync(
+      envFile,
+      JSON.stringify({ schemaVersion: 'v6', subject: { digest: { sha1: subject } } }),
+    );
     git(wt, 'add', '.ai-sdlc/attestations/abc.v6.dsse.json');
     git(wt, 'commit', '-q', '-m', 'chore: sign');
     git(wt, 'push', '-q', '-u', 'origin', 'feat/x');
