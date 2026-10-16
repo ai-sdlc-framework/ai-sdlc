@@ -428,6 +428,8 @@ describe('round-7: globs in the subcommand slot and word-boundary gh fallback (A
       `${gh} pr \`true #\` ${mg} 42`,
       `${gh} pr \${x:+ #} ${mg} 42`,
       `${gh} pr $(true #) ${mg} 42`,
+      `${gh} pr $[ 1 #] ${mg} 42`,
+      `${gh} pr $[ 1 # ] ${mg} 42`,
     ]) {
       assert.equal(m.commandRunsGhPrMerge(c), true, c);
     }

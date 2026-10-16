@@ -469,7 +469,7 @@ const SHELL_SET_NAMES =
  * substituted. Other expansions are left alone and stay opaque.
  */
 function canonicalizeCommand(command) {
-  const stripComments = !/<<|[`(]|\$\{/.test(command);
+  const stripComments = !/<<|[`(]|\$[{[]/.test(command);
   let out = '';
   let quote = null;
   let escaped = false; // last emitted char came from a backslash escape (`\ ` is not a boundary)
