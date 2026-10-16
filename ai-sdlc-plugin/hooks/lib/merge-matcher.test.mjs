@@ -1071,3 +1071,16 @@ describe('real tokenizer normalisation (AISDLC-605.1)', () => {
     assert.equal(m.canonicalizeCommand(`echo $'unterminated`), `echo $'unterminated`);
   });
 });
+
+describe('canonicalizeCommand escaped space across continuations (AISDLC-605.1)', () => {
+  const tail = `gh pr ${'mer' + 'ge'} 5`;
+  it('keeps an escaped space before backslash-newline so # is not a comment', () => {
+    for (const n of [1, 2, 3]) {
+      const cmd = `echo \\ ${'\\\n'.repeat(n)}#; ${tail}`;
+      assert.ok(m.canonicalizeCommand(cmd).includes(tail));
+    }
+  });
+  it('still cuts a comment after an unescaped continuation', () => {
+    assert.equal(m.canonicalizeCommand(`echo \\\n# ${tail}`), 'echo ');
+  });
+});

@@ -481,8 +481,10 @@ function canonicalizeCommand(command) {
       continue;
     }
     if (c === '\\' && i + 1 < command.length) {
-      if (command[i + 1] === '\n') i++;
-      else {
+      if (command[i + 1] === '\n') {
+        i++;
+        escaped = wasEscaped; // a removed continuation must not clear an escaped space before it
+      } else {
         out += c + command[++i];
         escaped = true;
       }
