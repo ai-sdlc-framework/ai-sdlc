@@ -32,6 +32,8 @@ export interface InitSuccess {
   fromStatus: string;
   promptFile: string;
   model?: string;
+  /** True when the task re-entered an existing branch or worktree (AISDLC-947). */
+  resumed?: boolean;
 }
 
 export interface InitFailure {
@@ -174,6 +176,7 @@ export async function initTask(
     task,
     fromStatus: statusOf(task),
     promptFile,
+    ...(resume ? { resumed: true } : {}),
     ...(built.model && built.modelArm !== 'default' ? { model: built.model } : {}),
   };
 }

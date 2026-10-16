@@ -1,7 +1,7 @@
 ---
 id: AISDLC-947
 title: 'Resume with an unchanged or chore-only diff skips the reviewer fan-out and re-signs instead of re-running developer plus three reviewers'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels:

@@ -315,7 +315,51 @@ export async function prepareReview(
   writeRunFile(ctx, 'pr-diff.txt', built.diff);
   const pathsFile = writeRunFile(ctx, 'pr-files.txt', built.changedFiles.join('\n') + '\n');
 
+  // AISDLC-947: on a resume, the patch id decides what reviews. Only the first round is covered;
+  // a later round follows a developer fix and reviews as before.
+  const resumeDecision = round === 1 ? state.resumeReview : undefined;
+  if (resumeDecision?.branch === 'unchanged') {
+    const reviewedSha = resumeDecision.lastHead;
+    const verdicts: ReviewerVerdict[] = built.prompts.map((p) => ({
+      agentId: resolveReviewerAgent(p.reviewer, ctx.env),
+      harness: reviewerHarness(p.reviewer, ctx.env, false),
+      ...buildAutoApprovedVerdict(reviewedSha),
+    }));
+    const head = await ctx.runner('git', ['rev-parse', 'HEAD'], {
+      cwd: state.worktreePath,
+      allowFailure: true,
+    });
+    return {
+      kind: 'nothing-to-spawn',
+      review: {
+        round,
+        spawned: [],
+        autoApproved: verdicts.map((v) => ({ agent: String(v.agentId), reviewedSha })),
+        headSha: head.stdout.trim(),
+        nonce: '',
+        harnessNote: `${built.harnessNote}; ${resumeDecision.note}`,
+        classifier: { reviewers: [], confidence: 1, fellOpen: false },
+        incremental: {
+          reason: 'resume-unchanged',
+          skip: true,
+          deltaOnly: false,
+          deltaSize: 0,
+          lastReviewedSha: reviewedSha,
+          contentHash: '',
+        },
+      },
+      classifierLine: `Resume: ${resumeDecision.note}`,
+      verdicts,
+    };
+  }
+
   const classifier = await runClassifier(ctx, state, pathsFile, artifactsDir);
+  // Delta branch: the reviewer set comes from the last-attested-head delta, not the whole PR.
+  if (resumeDecision?.branch === 'delta') {
+    classifier.reviewers = resumeDecision.reviewers.includes('security-reviewer')
+      ? ALL_CLASSIFIER_NAMES
+      : ['testing', 'critic'];
+  }
   const classifierLine = classifierLineFor(classifier);
   const selected = selectForReview(built.prompts, classifier.reviewers, built.changedFiles);
 
@@ -327,9 +371,13 @@ export async function prepareReview(
   const codex =
     forcesClaudeNative(ctx.env) ||
     (await ctx.runner('which', ['codex'], { allowFailure: true })).code === 0;
-  const harnessNote = forcesClaudeNative(ctx.env)
+  const baseHarnessNote = forcesClaudeNative(ctx.env)
     ? 'AI_SDLC_REVIEWER_HARNESS=claude — using Claude-native agents for all reviewers'
     : built.harnessNote;
+  const harnessNote =
+    round === 1 && state.resumeReview
+      ? `${baseHarnessNote}; ${state.resumeReview.note}`
+      : baseHarnessNote;
 
   const baseReview: ReviewRoundState = {
     round,

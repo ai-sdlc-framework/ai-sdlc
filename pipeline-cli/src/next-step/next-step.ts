@@ -29,6 +29,7 @@ import { ccrRefusalMessage, detectCcr, parseExecuteArg } from './args.js';
 import { runGhIssue, type GhIssueDeps, defaultGhIssueDeps } from './gh-issue.js';
 import { initTask, writeRunFile, type InitFailure, type InitSuccess } from './init.js';
 import { defaultArtifactsDir, resolveProjectRoot } from '../routing/artifacts-dir.js';
+import { decideResumeReview } from './resume-decision.js';
 import { prepareReview, type ReviewPrepareResult } from './review-prepare.js';
 import {
   aggregateRound,
@@ -242,6 +243,27 @@ class Machine {
         'aborted',
         'cancelled by operator signal at step boundary (AISDLC-481)',
       );
+    }
+    if (init.resumed) {
+      // AISDLC-947: an unchanged patch id needs no developer and no reviewer.
+      const decision = await decideResumeReview(ctx, init.worktreePath);
+      state.resumeReview = decision;
+      ctx.logger.info(`[resume] ${decision.note}`);
+      if (decision.branch === 'unchanged') {
+        const head = await ctx.runner('git', ['rev-parse', 'HEAD'], {
+          cwd: init.worktreePath,
+          allowFailure: true,
+        });
+        state.developer = {
+          summary: 'Resume: patch id unchanged since the last attestation; no developer run.',
+          filesChanged: [],
+          commitSha: head.code === 0 ? head.stdout.trim() : null,
+          verifications: { build: 'skipped', test: 'skipped', lint: 'skipped', format: 'skipped' },
+          acceptanceCriteriaMet: [],
+          notes: decision.note,
+        };
+        return this.review(state);
+      }
     }
     return this.spawnDeveloper(state, init.promptFile, init.model);
   }
