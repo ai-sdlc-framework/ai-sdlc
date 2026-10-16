@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-16T22:48:11.077Z","decisionId":"DEC-0259","chosenOptionId":"fix-dor","rationale":"958 and 961 now name their affected surface and are filed as #1721/#1722; the parent checkout is clean, re-queue 859 and 953"}
