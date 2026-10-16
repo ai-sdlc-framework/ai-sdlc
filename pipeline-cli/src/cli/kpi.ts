@@ -66,6 +66,7 @@ export async function runKpiCli(argv: string[] = hideBin(process.argv)): Promise
         if (args.write) {
           const page = join(args.dir, KPI_PAGE);
           const current = existsSync(page) ? readFileSync(page, 'utf8') : '# KPIs\n';
+          mkdirSync(dirname(page), { recursive: true });
           writeFileSync(page, refreshPage(current, report));
         }
         process.stdout.write(
