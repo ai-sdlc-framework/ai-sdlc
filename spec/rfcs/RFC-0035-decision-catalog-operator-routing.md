@@ -509,7 +509,7 @@ Phased rollout behind feature flag `AI_SDLC_DECISION_CATALOG=experimental` (mirr
 - [ ] **Phase 8.** RFC-0023 TUI decisions-pending pane integration (depends on RFC-0023 Phase 1)
 - [ ] **Phase 9.** Override-driven calibration loop (`pending-exemplars.yaml` workflow)
 - [ ] **Phase 10.** Optional: research subagent integration; visual decision graphs (Mermaid → richer); NotebookLM-style infographics
-- [ ] **Phase 11.** Hybrid promotion runbook to flip default-on (`docs/operations/decision-catalog-promotion.md`)
+- [ ] **Phase 11.** Hybrid promotion runbook to flip default-on (`docs/operations/cli-hierarchy.md`)
 
 Per the project's promotion convention (`docs/operations/dor-promotion.md`, `docs/operations/cli-hierarchy.md`), the operator dispatches the default-on flip from the runbook once corpus or spot-check evidence supports it.
 

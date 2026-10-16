@@ -458,7 +458,7 @@ Phased rollout behind feature flag `AI_SDLC_ADOPTER_AUTHORING=experimental` (mir
 - [ ] **Phase 8.** Position-update PR sweep: README, top-level positioning, `content/docs/concepts/` (ai-sdlc-io repo)
 - [ ] **Phase 9.** Optional `ai-sdlc rfc index` integration with RFC-0035 Decision Catalog (depends on RFC-0035 Phase 1+)
 - [ ] **Phase 10.** Adapter-pattern documentation for non-spec-kit upstreams (Linear, Notion, plain markdown templates)
-- [ ] **Phase 11.** Hybrid promotion runbook to flip default-on (`docs/operations/adopter-authoring-promotion.md`)
+- [ ] **Phase 11.** Hybrid promotion runbook to flip default-on (`docs/operations/cli-hierarchy.md`)
 
 ## 14. Open Questions — resolved (operator walkthrough 2026-05-16)
 

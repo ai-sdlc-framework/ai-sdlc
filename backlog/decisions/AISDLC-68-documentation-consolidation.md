@@ -82,7 +82,7 @@ Three artifacts implement this decision:
 
 ## Operator runbook check
 
-`docs/operations/operator-runbook.md` is verified to publish correctly through the new mechanism: running `pnpm docs:sync` produces `ai-sdlc-io/content/docs/operations/operator-runbook.mdx` byte-identical to the existing published version (modulo title-frontmatter normalization).
+The operator runbook (since removed) was verified to publish correctly through the new mechanism: running `pnpm docs:sync` produces its published `.mdx` counterpart byte-identical to the existing published version (modulo title-frontmatter normalization).
 
 ## Follow-up
 
