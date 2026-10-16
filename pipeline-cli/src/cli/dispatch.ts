@@ -149,7 +149,14 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -200,6 +207,7 @@ import {
   reconcile,
   type ReconcilePr,
 } from '../hierarchy/reconcile.js';
+import { gatherPrFacts } from '../hierarchy/pr-facts.js';
 import { reenter } from '../hierarchy/reenter.js';
 import { startScheduler } from '../hierarchy/scheduler.js';
 import { createSystemRunner } from '../hierarchy/system-runner.js';
@@ -413,13 +421,17 @@ export async function runDispatchCli(
 
   switch (subcommand) {
     case 'classify-prs': {
-      const input = requireFlag(flags, 'input');
       let facts: unknown;
       try {
-        facts = JSON.parse(readFileSync(path.resolve(input), 'utf-8'));
+        if (flags['input'] === undefined) {
+          facts = gatherPrFacts(createSystemRunner(), deps.cwd ?? process.cwd(), boardDir);
+          if (facts === undefined) throw new Error('GitHub could not be read');
+        } else {
+          facts = JSON.parse(readFileSync(path.resolve(flags['input']), 'utf-8'));
+        }
       } catch (err) {
         process.stderr.write(
-          `cli-dispatch: --input must be a readable JSON file (${err instanceof Error ? err.message : String(err)})\n`,
+          `cli-dispatch: classify-prs needs PR facts: --input must be a readable JSON file, or omit it to gather from GitHub (${err instanceof Error ? err.message : String(err)})\n`,
         );
         return 2;
       }
@@ -428,6 +440,19 @@ export async function runDispatchCli(
         return 2;
       }
       out(classifyAndRecord(facts as PrFacts[]));
+      return 0;
+    }
+
+    case 'pr-facts': {
+      // AISDLC-913: the classify-prs input, built here with a real mergeStateStatus and failing line.
+      const facts = gatherPrFacts(createSystemRunner(), deps.cwd ?? process.cwd(), boardDir);
+      if (facts === undefined) {
+        process.stderr.write('cli-dispatch pr-facts: GitHub could not be read\n');
+        return 1;
+      }
+      const dest = path.resolve(flags['out'] ?? '.pr-facts.json');
+      writeFileSync(dest, `${JSON.stringify(facts, null, 2)}\n`);
+      out({ written: dest, count: facts.length });
       return 0;
     }
 
@@ -1529,7 +1554,8 @@ Subcommands:
           [--priority <n>] [--wave <n>] [--base-sha <sha>] | --from-brief <path>
   board [--json]
   unblock --task-id <id>
-  classify-prs --input <facts.json>
+  classify-prs [--input <facts.json>]   (without --input, gathers the facts itself)
+  pr-facts [--out <path>]   (writes .pr-facts.json: mergeStateStatus and failing line filled in)
   reconcile [--pr <n>] [--facts <facts.json>] [--watch]
       Classify each open task PR (array of REST facts) into one state and action;
       writes one DispatchPrClassified event each (AISDLC-823).

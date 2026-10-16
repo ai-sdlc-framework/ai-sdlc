@@ -1,7 +1,7 @@
 ---
 id: AISDLC-913
 title: 'fix: cli-dispatch pr-facts builds the classify-prs input itself, with a real mergeStateStatus and the failing line, so the tick stops hand-assembling REST payloads'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [bug, pipeline-cli, dispatch, hierarchy]
@@ -21,11 +21,11 @@ Reported by the dispatch session on 2026-10-14, two ticks in a row. The dispatch
 
 ## Acceptance Criteria
 
-- [ ] `cli-dispatch pr-facts` writes `.pr-facts.json` with `mergeStateStatus` in the GraphQL vocabulary for every open task PR; a mapping test covers all six values.
-- [ ] For a PR whose `ai-sdlc/pr-ready` check failed, `failingLine` holds the first failing line from the job log and is non-empty; a test uses a fixture log.
-- [ ] `classify-prs` without `--input` gathers facts itself; `--input` still works.
-- [ ] `ai-sdlc-plugin/commands/operator-dispatch.md` and `docs/operations/cli-hierarchy.md` drop the hand-assembly steps and name the one call.
-- [ ] Task file moved to `backlog/completed/` in the PR.
+- [x] `cli-dispatch pr-facts` writes `.pr-facts.json` with `mergeStateStatus` in the GraphQL vocabulary for every open task PR; a mapping test covers all six values.
+- [x] For a PR whose `ai-sdlc/pr-ready` check failed, `failingLine` holds the first failing line from the job log and is non-empty; a test uses a fixture log.
+- [x] `classify-prs` without `--input` gathers facts itself; `--input` still works.
+- [x] `ai-sdlc-plugin/commands/operator-dispatch.md` and `docs/operations/cli-hierarchy.md` drop the hand-assembly steps and name the one call.
+- [x] Task file moved to `backlog/completed/` in the PR.
 
 ## Notes
 

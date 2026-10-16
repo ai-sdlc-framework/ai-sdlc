@@ -776,8 +776,12 @@ lane of their own:
 
 Rows are checked in this precedence: landed, manifest mismatch, stale claim, BEHIND/DIRTY,
 attestation, pr-ready, cancelled/infra, then the green and pending rows.
-`cli-dispatch classify-prs --input <facts.json>` remains for fixtures and writes one
-`DispatchPrClassified` event per PR.
+`cli-dispatch classify-prs` gathers the facts itself (AISDLC-913) and writes one
+`DispatchPrClassified` event per PR; `--input <facts.json>` still classifies a fixture.
+`cli-dispatch pr-facts [--out <path>]` writes the gathered facts, with `mergeStateStatus` in
+the GraphQL vocabulary (REST `mergeable_state` is mapped when the list omits it) and, for a
+failed `ai-sdlc/pr-ready`, the first failing line of the job log as `failingLine`. Nobody
+assembles REST payloads by hand.
 
 ## Restarting after a plugin upgrade
 

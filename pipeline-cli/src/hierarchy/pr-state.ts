@@ -18,6 +18,8 @@ export interface PrCheck {
   conclusion: CheckConclusion;
   /** Failure summary line; for attestation, the text naming the mismatch. */
   summary?: string;
+  /** Link to the check run; names the workflow run whose log holds the failing line. */
+  detailsUrl?: string;
 }
 
 /** REST facts for one open (or just merged) task PR. */
