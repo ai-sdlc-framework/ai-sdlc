@@ -2,7 +2,7 @@
   "schemaVersion": "v6",
   "subject": {
     "digest": {
-      "sha1": "e304164578f9a3ac51d6cf28e1fbb34ada5641cd"
+      "sha1": "8506f449fb4befdfba13b729010ae0c2de5ffd24"
     }
   },
   "transcriptLeaves": [
@@ -27,6 +27,28 @@
       "verdictClass": "independent",
       "harnessTranscriptHash": "98d421192129362b8c77172c72bee029e5a8f89b640d5b31c5eb440745baf8b3",
       "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 3,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "9e93b743517c0438183c7ac80e3359a124fc4291010bc937ca5f0d1c9781e5e1",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 4,
+      "reviewerName": "test-reviewer-codex",
+      "transcriptHash": "46f6cfbb74adf59574fd644cd1ef848d870f074b31642e0d8824656347ec14cb",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 5,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "b94f3714fcdb4f6dbaba25a96ab5c7803221aa74b1fe567e3d2cdabfc7085ef2",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "b94f3714fcdb4f6dbaba25a96ab5c7803221aa74b1fe567e3d2cdabfc7085ef2",
+      "independenceTier": "attested"
     }
   ],
   "merkleProofs": [
@@ -34,29 +56,56 @@
       "leafIndex": 0,
       "proof": [
         "ec5def25014638efd9ec1a1381b5e4793b4638f8c38a7983b45e893fca7be458",
-        "db687ef96948c615b27afc146c195be99c83f66d1e7ea9070d6c405ffd83b057"
+        "0561ea22694c1aa77dd92c5da1c59355ee145a4aa52b144f7bca5e33cc2de631",
+        "52d1d0f7e2e2dde5524bd6ce0f697ddb8269682930a7e225e50d20e77c4475d0"
       ]
     },
     {
       "leafIndex": 1,
       "proof": [
         "ee1131c05a5871d6274f9b7029f5c210814d060960f5b98c7d8801c7c984e78e",
-        "db687ef96948c615b27afc146c195be99c83f66d1e7ea9070d6c405ffd83b057"
+        "0561ea22694c1aa77dd92c5da1c59355ee145a4aa52b144f7bca5e33cc2de631",
+        "52d1d0f7e2e2dde5524bd6ce0f697ddb8269682930a7e225e50d20e77c4475d0"
       ]
     },
     {
       "leafIndex": 2,
       "proof": [
+        "0a1b99e5fba9adb0b3574798bb3e51f22430878c7b4db1d5cfad9fffe41faec9",
+        "188b972d167a7264cc59495d90b3b69f7ac823bf8c3a645655e3845978d07025",
+        "52d1d0f7e2e2dde5524bd6ce0f697ddb8269682930a7e225e50d20e77c4475d0"
+      ]
+    },
+    {
+      "leafIndex": 3,
+      "proof": [
         "58ba023cde2497f27951923a5492a44821ba9d37e18d6777fc091e9f0f396f63",
-        "188b972d167a7264cc59495d90b3b69f7ac823bf8c3a645655e3845978d07025"
+        "188b972d167a7264cc59495d90b3b69f7ac823bf8c3a645655e3845978d07025",
+        "52d1d0f7e2e2dde5524bd6ce0f697ddb8269682930a7e225e50d20e77c4475d0"
+      ]
+    },
+    {
+      "leafIndex": 4,
+      "proof": [
+        "4c5722d289f2bb60f2cc54826a996d1235eea334d6ef1323e38c3a56bbe32741",
+        "4c7ca8ac25eaf1163345bdbeb6ad97b28d4282007ca8b24163235b05d967c697",
+        "91245c209f463428dc35e22957b831a32372ca4666cf9e6abe1aae69ab333eda"
+      ]
+    },
+    {
+      "leafIndex": 5,
+      "proof": [
+        "3025939d37e9eab258677ebcfd0bfe0fd86a9053c59081254ba9a42bbca324b5",
+        "4c7ca8ac25eaf1163345bdbeb6ad97b28d4282007ca8b24163235b05d967c697",
+        "91245c209f463428dc35e22957b831a32372ca4666cf9e6abe1aae69ab333eda"
       ]
     }
   ],
-  "rootHash": "6cc06d6c10ebfa5a839da72320334e485d6f32e4d65ad37d01a739590fdd737e",
-  "rootSignature": "0caoysz/RLFNzpF5T1jOCpcxpgrLERjI7cAumyeWxJfE78iQwTmFvdOgYfe62HQ6A1nJkw9lc42h27QbF49VBg==",
-  "nonce": "59bb4def5e4da5932abd6e8bb358062336011b0045812745e921529d108574c1",
-  "leafCount": 3,
-  "signedAt": "2026-10-16T03:05:50.039Z",
+  "rootHash": "e868fad360176e6cac2322648f0de11ae684237ccd05e65d500c4017eda831f9",
+  "rootSignature": "rFLxFugQAIgWSx2qGpenDOLbaG7+bkfbxrlTOooNGUO93FTt7RWWlC/PbOtsBOiehcU1SMF2H7UoVyXzBKIzAA==",
+  "nonce": "841ec09d42ca48db01e5df4e98f5e99368eaac78fbc5df437968d9fc2f127e9f",
+  "leafCount": 6,
+  "signedAt": "2026-10-16T03:10:48.547Z",
   "signerIdentity": "dominique@local:doms-macbook",
   "reviewScope": {
     "classification": "full",
@@ -69,6 +118,13 @@
       ".github/workflows/attestation-post.yml",
       ".github/workflows/codeql.yml"
     ],
-    "appliedReviewers": ["code-reviewer-codex", "test-reviewer-codex", "security-reviewer"]
+    "appliedReviewers": [
+      "code-reviewer-codex",
+      "test-reviewer-codex",
+      "security-reviewer",
+      "code-reviewer-codex",
+      "test-reviewer-codex",
+      "security-reviewer"
+    ]
   }
 }
