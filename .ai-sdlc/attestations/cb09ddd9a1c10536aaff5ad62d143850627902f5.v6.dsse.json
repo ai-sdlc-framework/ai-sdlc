@@ -1,0 +1,69 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "36c6a6456769497413e877fb3531cde120a7938f"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "9909ec8a4a8ec1c15c8caf63c6b55b42c3497f3f9be58c1c831727a96d7a1321",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer-codex",
+      "transcriptHash": "98ad327c4458f8d9542c9cf241e5172bdfa1e003f05083af5286f75ca17abe11",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "3604597c58ade736fbbba620dc8935a49cc10ac799547349dfb80aceb7aa1417",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "3604597c58ade736fbbba620dc8935a49cc10ac799547349dfb80aceb7aa1417",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "ef71cdaa2a0e164203261df816809580f1b6c5ffd55355bc0a8f244dfd0a68bf",
+        "7d91a6c48788ea8c533ea8e01bea68649609378f330c02748e35e8d5a7d39654"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "276caee099b047e6dcdf53d5c068e68ba2c688989487bce8890abd57aaf20fd1",
+        "7d91a6c48788ea8c533ea8e01bea68649609378f330c02748e35e8d5a7d39654"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "5a542fe6bed92bad36c1092bac21ce86c234236d5148d4afff8739bf79ad04d9",
+        "9ce7b0c5413f39d46562127a237229906dd82b6cfe82c2a3c387501371230bb4"
+      ]
+    }
+  ],
+  "rootHash": "85851f810d2d06b9209aeddbcb2c994a9d2f5ad266d0f4e9c8dac776e5d02ae5",
+  "rootSignature": "dyVcg/lJW+8bweg77K00nzWI7qje1qpN0M/2M0P6/6keqmNa5iqNIGy4CeKth90zZikyqrGNRUgmRo3AQD5FBg==",
+  "nonce": "1c25a04aa21dd87e39b77f15a6256b2698f0a741e09bd99a0372828db312f41a",
+  "leafCount": 3,
+  "signedAt": "2026-10-16T22:35:35.897Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": ["ai-sdlc-plugin/scripts/check-orchestrator-state.sh"],
+    "appliedReviewers": ["code-reviewer-codex", "test-reviewer-codex", "security-reviewer"]
+  }
+}
