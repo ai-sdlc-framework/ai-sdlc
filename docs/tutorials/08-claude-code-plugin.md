@@ -23,7 +23,7 @@ claude --plugin-dir ./ai-sdlc-plugin
 This registers all components automatically:
 - **6 hooks** for governance enforcement and telemetry
 - **5 slash commands** for pipeline operations
-- **3 review agents** with restricted tool pools
+- **Review agents** (the configured set, see [reviewer-set-flag.md](../operations/reviewer-set-flag.md)) with restricted tool pools
 - **1 governance skill** auto-loaded at session start
 - **1 MCP server** with 5 governance tools
 
@@ -62,7 +62,7 @@ Goal: Fix bugs and implement small features
 The plugin adds five slash commands:
 
 ### `/review <pr-number>`
-Runs a comprehensive three-perspective review on a pull request:
+Runs a comprehensive multi-perspective review on a pull request, using the configured reviewer set ([reviewer-set-flag.md](../operations/reviewer-set-flag.md)):
 - **Testing** — coverage, edge cases, test quality
 - **Code Quality** — logic errors, readability, conventions
 - **Security** — injection, auth, secrets, OWASP top 10
@@ -163,7 +163,7 @@ const result = await runParallelSdkReviews({
   workDir: '/path/to/repo',
 });
 
-console.log(result.allApproved);     // true if all 3 reviewers approved
+console.log(result.allApproved);     // true if all configured reviewers approved
 console.log(result.verdicts);         // Individual verdicts
 console.log(result.totalTokenUsage);  // Combined token usage
 ```

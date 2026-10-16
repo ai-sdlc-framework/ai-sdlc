@@ -126,7 +126,7 @@ ai-sdlc-pipeline execute <task-id> \
 2. Reads PR comments with `<!-- ai-sdlc:reviewer-findings -->` marker.
 3. Builds a developer prompt with the original task context PLUS the reviewer findings as additional context ("fix these specific issues").
 4. Dispatches the developer subagent to rework the branch.
-5. Re-runs all 3 reviewers.
+5. Re-runs the configured reviewer set ([reviewer-set-flag.md](./reviewer-set-flag.md)).
 6. Iterates up to `--max-iterations` rounds if reviewers still find issues.
 7. Finalizes (writes summary + AC check + attestation).
 8. Force-pushes (`--force-with-lease`) the rebased + re-attested HEAD.
@@ -158,7 +158,7 @@ The `--rework-pr` path uses the same `--max-iterations` cap as the normal execut
 
 ## Step 9 iteration loop (within a single session)
 
-This is not a cross-session recovery — it is the NORMAL flow within a single `executePipeline()` invocation. When reviewers return CHANGES_REQUESTED, `iterateReviewLoop()` re-dispatches the developer and re-runs all 3 reviewers. The iteration cap (default 2) limits the number of rounds before the PR is flagged `[needs-human-attention]`.
+This is not a cross-session recovery — it is the NORMAL flow within a single `executePipeline()` invocation. When reviewers return CHANGES_REQUESTED, `iterateReviewLoop()` re-dispatches the developer and re-runs the configured reviewer set. The iteration cap (default 2) limits the number of rounds before the PR is flagged `[needs-human-attention]`.
 
 **This path is always active and requires no operator action.** It is documented here for completeness.
 
@@ -174,7 +174,7 @@ This is not a cross-session recovery — it is the NORMAL flow within a single `
 [ai-sdlc-progress] resume-from-draft: PR #42 flipped to ready
 
 [ai-sdlc-progress] rework-pr: fetching PR #42 metadata
-[ai-sdlc-progress] rework-pr: running 3 reviewers after rework
+[ai-sdlc-progress] rework-pr: running reviewers after rework
 [ai-sdlc-progress] rework-pr: outcome=approved iterations=1 verdict=APPROVED
 
 [ai-sdlc-progress] execute: recoverable-abort detected: 3 commit(s) on branch; re-run with --resume-from-draft AISDLC-NNN to continue
@@ -201,7 +201,7 @@ The `draft PR` vs `ready PR` distinction in the trace is the AISDLC-273 Step 3 p
 | `--dry-run` | — | Validate + compute plan, no mutation |
 | `--spawner mock` | — | Dry-run/plumbing fixture; refused for `--run`/`--resume-from-draft`/`--rework-pr` |
 | `--spawner api-key` | `ANTHROPIC_API_KEY` env | Real API-key billed dispatch |
-| `--spawner claude` | `claude` CLI on PATH | Subscription-billed shell-out (`claude -p`, AISDLC-349) — default for `cli-orchestrator tick` since AISDLC-352 |
+| `--spawner claude` | `claude` CLI on PATH | Subscription-billed shell-out (`claude -p`, AISDLC-349) — default for the retired `cli-orchestrator tick` since AISDLC-352 |
 | `--spawner codex` | `CODEX_SPAWN_AGENT_BIN` env | Codex CLI host-bridge dispatch (AISDLC-202.2) |
 | `--max-iterations N` | — | Cap for Step 9 + rework loops (default 2) |
 

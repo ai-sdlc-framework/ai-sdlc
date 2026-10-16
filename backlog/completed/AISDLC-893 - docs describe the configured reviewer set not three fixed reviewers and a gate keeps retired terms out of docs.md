@@ -1,7 +1,7 @@
 ---
 id: AISDLC-893
 title: 'docs: pages describe the configured reviewer set, not three fixed reviewers, and a test keeps retired terms out of docs/'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [docs, docs-platform, velocity]
@@ -41,10 +41,10 @@ No script checks docs currency today: `pnpm docs:check` compares trees (deleted 
 
 ## Acceptance Criteria
 
-- [ ] No page under `docs/` (outside the three excluded folders) states a fixed reviewer count; the five pages in Context reference `docs/operations/reviewer-set-flag.md` for the set.
-- [ ] `docs/getting-started/onboarding.md` has no Conductor or RFC-0041 narrative; it describes the executor loop and `cli-hierarchy`.
-- [ ] `scripts/check-docs-retired-terms.test.mjs` exists, runs under `pnpm test`, passes on the PR, and fails (verified in its own test case against a fixture string) on a line that uses a retired token without a retirement word.
-- [ ] The PR body lists any line kept via allowlist with the reason.
+- [x] No page under `docs/` (outside the three excluded folders) states a fixed reviewer count; the five pages in Context reference `docs/operations/reviewer-set-flag.md` for the set.
+- [x] `docs/getting-started/onboarding.md` has no Conductor or RFC-0041 narrative; it describes the executor loop and `cli-hierarchy`.
+- [x] `scripts/check-docs-retired-terms.test.mjs` exists, runs under `pnpm test`, passes on the PR, and fails (verified in its own test case against a fixture string) on a line that uses a retired token without a retirement word.
+- [x] The PR body lists any line kept via allowlist with the reason.
 
 **Velocity impact.** Positive: the gate replaces a recurring manual survey; adopters reading onboarding and tutorial 08 get the current reviewer model.
 

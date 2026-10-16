@@ -13,7 +13,7 @@ discovered during guide development are listed in [Found Gaps](#found-gaps).
 > should link it here so AC#2 can be checked off.
 
 > **Substrate boundary note:** AI-SDLC's pipeline harness — the autonomous
-> orchestrator, three-tier reviewer fan-out, and DSSE attestation signer — requires
+> executor loop, configured reviewer fan-out, and DSSE attestation signer — requires
 > **Claude Code** (`claude` on PATH) today. Validation steps (schema checks,
 > resource building, lint) are harness-neutral and run in any Node.js environment.
 > Section [Step 5 — What Requires Claude Code](#step-5--what-requires-claude-code-today)
@@ -256,7 +256,7 @@ pipeline to its current requirement:
 | `ai-sdlc run --issue <n>` (single issue) | No | SDK spawner; can use API key |
 | `/ai-sdlc init-signing-key` | **Yes** | Claude Code slash command |
 | `/ai-sdlc execute <task-id>` (full pipeline) | **Yes** | Orchestrator + worktree + attestation |
-| Three-tier reviewer fan-out | **Yes** | `developer`, `code-reviewer`, `test-reviewer`, `security-reviewer` agents |
+| Configured reviewer fan-out ([reviewer-set-flag.md](../operations/reviewer-set-flag.md)) | **Yes** | `developer` and the reviewer agents of the configured set |
 | DSSE attestation signing | **Yes** | Operator's machine + signing key |
 | `cli-hierarchy up` (replaces retired `/ai-sdlc orchestrator-tick`) | **Yes** | Autonomous loop requires CC sessions |
 
@@ -270,7 +270,7 @@ API-key spawner CLI (tracked as a follow-up). The signing key and attestation
 signing also remain operator-machine-local today regardless of substrate.
 
 The framework is designed to be substrate-agnostic at the pipeline orchestration
-level (RFC-0041 Conductor/Worker Architecture). The Claude Code coupling exists
+level (the executor loop and `cli-hierarchy`). The Claude Code coupling exists
 in the subscription-billed autonomous drain path; the API-key path (`api-key`
 spawner) is available for adopters who cannot use the CC CLI directly.
 
@@ -340,8 +340,8 @@ What happens next (you will see progress lines in the session):
 [ai-sdlc-progress] pr: opened https://github.com/<org>/<repo>/pull/N
 ```
 
-The PR opens as a **draft**. The Conductor's next tick fans out three reviewer
-subagents (code, test, security), signs the attestation envelope, and flips the
+The PR opens as a **draft**. The executor loop fans out the configured reviewer set
+(see [reviewer-set-flag.md](../operations/reviewer-set-flag.md)), signs the attestation envelope, and flips the
 PR from draft to ready-for-review — triggering CI exactly once on the
 fully-attested HEAD.
 
@@ -411,7 +411,7 @@ and is not available in adopter repositories.
 
 ### Confirming the envelope was written
 
-Once the Conductor has signed and flipped the PR to ready-for-review, confirm
+Once the executor loop has signed and flipped the PR to ready-for-review, confirm
 the attestation envelope was committed:
 
 ```bash
@@ -591,10 +591,10 @@ require a signing key.
 
 ### `[verify-attestation] No envelope found`
 
-The attestation envelope is written by the Conductor's reconcile step (after the
-three reviewer subagents complete). If you pushed the branch before the Conductor
-ran, the envelope will not be present. Wait for the Conductor tick (or run
-`cli-hierarchy tick` manually) and re-push.
+The attestation envelope is written by the executor's reconcile step (after the
+configured reviewers complete). If you pushed the branch before the executor
+ran, the envelope will not be present. Wait for the executor loop to finish the review step (see
+[`cli-hierarchy.md`](../operations/cli-hierarchy.md)) and re-push.
 
 ### Branch protection rejected: missing required checks
 

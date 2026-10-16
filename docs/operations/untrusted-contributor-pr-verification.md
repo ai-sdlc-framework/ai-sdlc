@@ -39,7 +39,7 @@ Enable UCVG when **all** of the following are true:
 
 UCVG does **not replace** RFC-0042 attestation — it extends it:
 
-- For **trusted PRs**: the existing sign-attestation path (`/ai-sdlc execute` → three reviewers → DSSE envelope) is unchanged.
+- For **trusted PRs**: the existing sign-attestation path (`/ai-sdlc execute` → configured reviewer set → DSSE envelope; see [reviewer-set-flag.md](./reviewer-set-flag.md)) is unchanged.
 - For **untrusted PRs**: UCVG runs Stages 0-4, with Stage 4 producing the same RFC-0042 v6 DSSE envelope via the clean-room signer. The resulting attestation is verifiable by the same `verify-attestation.mjs` script.
 
 The trust boundary is explicit: the signing key is only present in Stage 4, which runs in a separate CI job (or local signing step) that never touched the untrusted code.
@@ -473,7 +473,7 @@ Additionally, `promptInjectionDetected: true` is set in the reviewer verdict.
 
 ### Reviewer execution model (in-sandbox, inference.local)
 
-The three reviewers (`code-reviewer`, `test-reviewer`, `security-reviewer`) run
+The reviewers of the configured set (see [reviewer-set-flag.md](./reviewer-set-flag.md); `security-reviewer` always runs) run
 **inside the same sandbox as Stage 2** so they are subject to the same
 credential-stripping and network isolation. Provider credentials are injected
 by the `inference.local` proxy out-of-process — the reviewer process connects
