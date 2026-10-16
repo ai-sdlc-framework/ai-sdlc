@@ -59,7 +59,7 @@ import {
   type UpOptions,
   unsafeEntryReason,
 } from './index.js';
-import { isNodeInstalled, readNvmrc } from './node-pin.js';
+import { isNodeInstalled, paneNodeVersion, readNvmrc } from './node-pin.js';
 
 const NOW = new Date('2026-09-30T12:00:00.000Z');
 
@@ -1662,6 +1662,12 @@ describe('pinned Node (AISDLC-812)', () => {
     writeFileSync(path.join(repo, '.nvmrc'), '22.23.2\n');
     const d = { ...deps, cwd: repo, nodeInstalled: () => true };
     await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, d);
+    // Rosters written before AISDLC-906 carry no recorded version, so status probes.
+    const rec = readRoster(deps.boardDir);
+    writeRoster(deps.boardDir, {
+      ...rec,
+      sessions: rec.sessions.map(({ nodeVersion: _drop, ...e }) => e),
+    });
     const home = '/h/.nvm/versions/node';
     const realRun = fake.run;
     d.run = (f, a, o) =>
@@ -1691,6 +1697,46 @@ describe('pinned Node (AISDLC-812)', () => {
     // ps unreadable: no version, no flag.
     d.run = realRun;
     expect(hierarchyStatus(d).rows.every((r) => r.nodeVersion === undefined)).toBe(true);
+  });
+});
+
+describe('paneNodeVersion (AISDLC-906)', () => {
+  const home = '/h/.nvm/versions/node';
+  const psRun = (lines: string[]) => () => ({ status: 0, stdout: lines.join('\n'), stderr: '' });
+
+  it('ignores a child MCP server running a different Node', () => {
+    const run = psRun([
+      `  4000     1 /bin/zsh`,
+      `  4100  4000 ${home}/v22.23.2/bin/node`,
+      `  4200  4100 ${home}/v22.19.0/bin/node`,
+    ]);
+    expect(paneNodeVersion(run, 4000)).toBe('22.23.2');
+  });
+
+  it('is undefined for a bad pid, unreadable ps or no nvm node', () => {
+    expect(paneNodeVersion(psRun([]), 0)).toBeUndefined();
+    expect(paneNodeVersion(() => ({ status: 1, stdout: '', stderr: '' }), 5)).toBeUndefined();
+    expect(paneNodeVersion(psRun(['  5     1 /bin/zsh']), 5)).toBeUndefined();
+  });
+
+  it('up records the full version and status reads it without probing', async () => {
+    const repo = path.join(tmp, 'repo-rec');
+    mkdirSync(repo);
+    writeFileSync(path.join(repo, '.nvmrc'), '22.23.2\n');
+    const d = { ...deps, cwd: repo, nodeInstalled: () => true };
+    await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, d);
+    const realRun = fake.run;
+    d.run = (f, a, o) => {
+      if (f === 'ps') throw new Error('must not probe');
+      return realRun(f, a, o);
+    };
+    const result = hierarchyStatus(d);
+    expect(result.rows.length).toBeGreaterThan(0);
+    for (const r of result.rows) {
+      expect(r.entry.nodeVersion).toBe('22.23.2');
+      expect(r.nodeVersion).toBe('22.23.2');
+      expect(r.nodeMismatch).toBeUndefined();
+    }
   });
 });
 
