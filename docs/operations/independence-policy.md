@@ -21,7 +21,7 @@ GitHub branch protection or a procedural (no-branch-protection) ship flow.
 
 RFC-0046 Phase 3's first `isolated` implementation attempt (AISDLC-590)
 anchored the claim on a self-asserted `provenance.deployment: 'ci'` string
-signed with the *operator's own key* — a 3-reviewer reconcile found this
+signed with the *operator's own key* — a multi-reviewer reconcile found this
 CRITICAL-forgeable by exactly the threat model RFC-0046 OQ-1 defends against
 (a determined same-machine coordinator). That anchor design was deferred to
 [RFC-0047](../../spec/rfcs/RFC-0047-re-derivable-isolated-anchor.md), which
@@ -250,7 +250,7 @@ Consequences for a coordinator that holds the signing key (a main-session
 - A verdict the coordinator writes or relays itself is `self-authored`, so the
   envelope's `overallIndependenceTier` is `none`. A coordinator cannot certify its
   own independence, which is the point of the design.
-- The best a main-session run can reach is `attested`: the three reviewers run as
+- The best a main-session run can reach is `attested`: the reviewers of the configured set (see [reviewer-set-flag.md](./reviewer-set-flag.md)) run as
   real subagents, each leaf is bound to its own reviewer run through the marker and
   nonce, and the weakest leaf decides the envelope tier. `attested` is a
   heuristic-grade signal and is not tamper-proof against a determined
@@ -267,7 +267,7 @@ dispatches. Set the policy and wire the gate, per the sections above.
 ### How to get `attested`
 
 Run each reviewer as its own subagent and emit its leaf with the nonce and reviewer
-identity (the `/ai-sdlc execute` and `/ai-sdlc orchestrator-tick` fan-out does this).
+identity (the `/ai-sdlc execute` and retired `/ai-sdlc orchestrator-tick` fan-out did this).
 If a leaf still comes out `self-authored`, check the troubleshooting notes under "How
 a leaf is bound to its reviewer", including `--project-dir` for sessions started
 outside the repo root.
