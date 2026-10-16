@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveCatalogRoot } from './catalog-root.js';
+import { resolveCatalogRoot, resolveWriteRoot } from './catalog-root.js';
 import { appendDecisionEvent, makeDecisionOpenedEvent } from './event-log.js';
 import { projectDecision } from './projection.js';
 
@@ -50,5 +50,29 @@ describe('resolveCatalogRoot (AISDLC-825)', () => {
       { workDir: root },
     );
     expect(projectDecision('DEC-0001', { workDir: main })).toBeTruthy();
+  });
+});
+
+describe('resolveWriteRoot (AISDLC-874)', () => {
+  it('refuses from a Pattern-C parent with no active task', () => {
+    mkdirSync(join(main, '.worktrees'));
+    expect(() => resolveWriteRoot(main, {})).toThrow(/refusing to write/);
+  });
+  it('routes to the active task worktree from the parent', () => {
+    mkdirSync(join(main, '.worktrees', 'aisdlc-9'), { recursive: true });
+    expect(resolveWriteRoot(main, { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-9' })).toBe(
+      join(main, '.worktrees', 'aisdlc-9'),
+    );
+  });
+  it('refuses when the active task has no worktree', () => {
+    mkdirSync(join(main, '.worktrees'));
+    expect(() => resolveWriteRoot(main, { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-9' })).toThrow(
+      /no worktree/,
+    );
+  });
+  it('writes into a linked worktree itself, and leaves non-Pattern-C dirs unchanged', () => {
+    expect(resolveWriteRoot(wt, {})).toBe(wt);
+    expect(resolveWriteRoot(main, {})).toBe(main);
+    expect(resolveWriteRoot(base, {})).toBe(base);
   });
 });

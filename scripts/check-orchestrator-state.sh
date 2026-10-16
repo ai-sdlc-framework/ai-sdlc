@@ -241,6 +241,29 @@ if [ -n "$DIRTY_TRACKED" ]; then
   git status --porcelain | grep -vE "^\?\?" | head -10 | sed 's/^/[orchestrator-state]   staging: /'
 fi
 
+# AISDLC-874: an untracked file whose path origin/main now tracks would be
+# silently overwritten by the reset below. Remove it only when it is byte-identical
+# to origin/main (nothing lost); a differing untracked file is never deleted: report
+# it and skip the reset. Only untracked files are touched, never tracked ones.
+DIFFERING_UNTRACKED=""
+while IFS= read -r -d '' up; do
+  [ -z "$up" ] && continue
+  OID_MAIN=$(git rev-parse --verify -q "${ORIGIN_MAIN}:${up}" 2>/dev/null || true)
+  [ -z "$OID_MAIN" ] && continue
+  if [ -f "$up" ] && [ "$(git hash-object -- "$up")" = "$OID_MAIN" ]; then
+    rm -f -- "$up"
+    echo "[orchestrator-state] removed untracked ${up} (identical to origin/main)"
+  else
+    DIFFERING_UNTRACKED="${DIFFERING_UNTRACKED}${up}"$'\n'
+  fi
+done < <(git ls-files --others --exclude-standard -z 2>/dev/null)
+if [ -n "$DIFFERING_UNTRACKED" ]; then
+  echo "[orchestrator-state] WARN: untracked files differ from origin/main (not deleted); skipping reset"
+  printf '%s' "$DIFFERING_UNTRACKED" | head -10 | sed 's/^/[orchestrator-state]         /'
+  echo "[orchestrator-state] Resolve manually: move or delete them, then re-run."
+  exit 0
+fi
+
 # Reset HEAD + working tree in one op (also moves refs/heads/main since HEAD
 # is the symref pointing at it). Untracked files survive.
 echo "[orchestrator-state] resetting parent working tree: $HEAD_SHA -> $ORIGIN_MAIN"

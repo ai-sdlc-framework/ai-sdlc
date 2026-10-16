@@ -60,3 +60,7 @@ Recovery (operator): stash or commit your changes in the parent, then run `git c
 
 **Sanctioned vs. ad-hoc reset (AISDLC-450):** `git reset --hard origin/main` is ONLY permitted when invoked by `scripts/check-orchestrator-state.sh` on a verifiably clean working tree. Ad-hoc `git reset --hard` by the Conductor or a subagent (outside the script) is forbidden — if the script refuses (dirty parent), escalate to the Decision Catalog (see `cli-hierarchy tick`).
 
+
+**Decision events never land in the parent (AISDLC-874):** `cli-decisions add`, `answer` and `escalate` write to the linked worktree they run in, or to `.worktrees/<task-id>/` when run from the Pattern-C parent with `AI_SDLC_ACTIVE_TASK_ID` set. From the parent with no active task they refuse (nothing is written) and name the next step: run from the task worktree or set the active task. Reads still use the main checkout (AISDLC-825).
+
+**Parent ff cleanup (AISDLC-874):** before the sync, `check-orchestrator-state.sh` deletes an untracked file whose path `origin/main` now tracks only when it is byte-identical to the `origin/main` copy (logged as `removed untracked <path>`). An untracked file that differs is never deleted: the script reports it and skips the reset. Step 0.5 (`00-5-sync-parent.ts`) applies the same rule to untracked `.ai-sdlc/_decisions/events/` files. Only untracked files are removed; tracked or modified files are never touched and no new hard reset is introduced.

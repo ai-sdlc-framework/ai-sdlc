@@ -266,6 +266,41 @@ export async function isFileOnOriginMainInAnyDir(
 }
 
 /**
+ * AISDLC-874 — delete untracked decision-event files whose content is
+ * byte-identical to the same path on `origin/main` (they would otherwise block
+ * the fast-forward once the record lands). A differing file is never deleted;
+ * it stays untracked and the caller still tolerates it. Tracked files are never
+ * touched: the input is the untracked list only. Returns the removed paths.
+ */
+export async function removeUntrackedIdenticalToMain(
+  untracked: string[],
+  workDir: string,
+  runner: Runner,
+): Promise<string[]> {
+  const removed: string[] = [];
+  for (const f of untracked.filter((u) => u.startsWith(DECISION_EVENTS_PREFIX))) {
+    const main = await runner('git', ['rev-parse', '--verify', '-q', `origin/main:${f}`], {
+      cwd: workDir,
+      allowFailure: true,
+    });
+    if (main.code !== 0 || main.stdout.trim() === '') continue;
+    const local = await runner('git', ['hash-object', '--', f], {
+      cwd: workDir,
+      allowFailure: true,
+    });
+    if (local.code !== 0 || !existsSync(join(workDir, f))) continue;
+    if (local.stdout.trim() !== main.stdout.trim()) {
+      console.warn(`[step-0.5] untracked ${f} differs from origin/main; left in place`);
+      continue;
+    }
+    unlinkSync(join(workDir, f));
+    console.log(`[step-0.5] removed untracked ${f} (identical to origin/main)`);
+    removed.push(f);
+  }
+  return removed;
+}
+
+/**
  * Core Step 0.5 implementation.
  *
  * 1. Lists all untracked files in `workDir`.
@@ -287,7 +322,12 @@ export async function syncParentUntrackedFiles(opts: SyncParentOptions): Promise
   const autoReconcile = process.env['AI_SDLC_STEP_0_5_AUTO_RECONCILE'] === '1';
 
   // 1. List untracked files
-  const untracked = await listUntrackedFiles(workDir, runner);
+  let untracked = await listUntrackedFiles(workDir, runner);
+
+  // AISDLC-874: untracked decision events byte-identical to origin/main would
+  // block a fast-forward; delete those (only those) before anything else.
+  const removed = await removeUntrackedIdenticalToMain(untracked, workDir, runner);
+  if (removed.length > 0) untracked = untracked.filter((f) => !removed.includes(f));
 
   if (untracked.length === 0) {
     return { ok: true, syncedFiles: [] };
