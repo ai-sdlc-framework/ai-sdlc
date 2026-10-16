@@ -12,18 +12,32 @@
  * `<board-dir>/config.json` under `contextThresholds` (keys are the role names).
  */
 
-import { closeSync, existsSync, fstatSync, openSync, readFileSync, readSync } from 'node:fs';
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 
 import { now as clock } from '../clock.js';
 import {
   AUTO_CLEAR_DEBOUNCE_MS,
+  AUTO_CLEAR_LOG,
   holdsInflight,
   markScheduled,
   recentlyScheduled,
 } from './clear.js';
 
 export { AUTO_CLEAR_DEBOUNCE_MS, markScheduled, recentlyScheduled };
+import { handoffPath } from './handoff.js';
 import type { HierarchyRole } from './types.js';
 
 export const DEFAULT_CONTEXT_THRESHOLDS: Record<HierarchyRole, number> = {
@@ -31,6 +45,58 @@ export const DEFAULT_CONTEXT_THRESHOLDS: Record<HierarchyRole, number> = {
   'operator-dispatch': 120_000,
   executor: 120_000,
 };
+
+/** The hard cap: a clear is issued without a fresh handoff past threshold times this. */
+export const HARD_CAP_FACTOR = 1.25;
+
+/** Message the Stop hook returns to the session at the warn threshold. */
+export const WARN_MESSAGE =
+  'Context is over the auto-clear threshold. Run your handoff routine now ' +
+  '(`cli-hierarchy handoff write`, then add anything the CLI cannot regenerate to your handoff ' +
+  'file) and do not start new work. The session is cleared once the handoff file is rewritten.';
+
+function warnFile(boardDir: string, name: string): string {
+  return path.join(boardDir, 'handoff', `.auto-clear-warned-${name}`);
+}
+
+/** Record that the warning was given now. */
+export function markWarned(boardDir: string, name: string): void {
+  const f = warnFile(boardDir, name);
+  mkdirSync(path.dirname(f), { recursive: true });
+  writeFileSync(f, '', 'utf-8');
+}
+
+/** Forget a warning (after a clear, or when the context is back under the threshold). */
+export function clearWarned(boardDir: string, name: string): void {
+  rmSync(warnFile(boardDir, name), { force: true });
+}
+
+/** Append a line to the board's auto-clear log. */
+export function logAutoClear(boardDir: string, line: string, nowMs: number): void {
+  try {
+    const f = path.join(boardDir, AUTO_CLEAR_LOG);
+    mkdirSync(path.dirname(f), { recursive: true });
+    appendFileSync(f, `${new Date(nowMs).toISOString()} ${line}\n`, 'utf-8');
+  } catch {
+    // logging never blocks a clear
+  }
+}
+
+/** True when the role's own handoff file was rewritten after the warning. */
+function handoffRewrittenSinceWarn(
+  boardDir: string,
+  role: HierarchyRole,
+  name: string,
+  now: Date,
+): boolean {
+  try {
+    const warnedAt = statSync(warnFile(boardDir, name)).mtimeMs;
+    const file = handoffPath({ role, name, boardDir }, now);
+    return existsSync(file) && statSync(file).mtimeMs > warnedAt;
+  } catch {
+    return false;
+  }
+}
 
 /** Largest tail of the transcript examined. */
 const TAIL_BYTES = 512 * 1024;
@@ -104,7 +170,8 @@ export function readContextTokens(transcriptPath: string): number | null {
 export type AutoClearDecision =
   | { action: 'none'; reason: string; tokens: number | null; threshold: number }
   | { action: 'defer'; reason: string; tokens: number; threshold: number; taskId: string }
-  | { action: 'clear'; tokens: number; threshold: number };
+  | { action: 'warn'; reason: string; tokens: number; threshold: number; message: string }
+  | { action: 'clear'; tokens: number; threshold: number; reason?: string };
 
 /** Inputs of {@link decideAutoClear}. */
 export interface AutoClearInputs {
@@ -124,6 +191,7 @@ export function decideAutoClear(inputs: AutoClearInputs): AutoClearDecision {
     return { action: 'none', reason: 'no usage in the transcript', tokens, threshold };
   }
   if (tokens <= threshold) {
+    clearWarned(inputs.boardDir, inputs.name);
     return { action: 'none', reason: 'under the threshold', tokens, threshold };
   }
   if (recentlyScheduled(inputs.boardDir, inputs.name, nowMs)) {
@@ -141,5 +209,32 @@ export function decideAutoClear(inputs: AutoClearInputs): AutoClearDecision {
       };
     }
   }
-  return { action: 'clear', tokens, threshold };
+  if (!existsSync(warnFile(inputs.boardDir, inputs.name))) {
+    markWarned(inputs.boardDir, inputs.name);
+    return {
+      action: 'warn',
+      reason: 'over the threshold; asked the session to write its handoff',
+      tokens,
+      threshold,
+      message: WARN_MESSAGE,
+    };
+  }
+  if (handoffRewrittenSinceWarn(inputs.boardDir, inputs.role, inputs.name, new Date(nowMs))) {
+    return { action: 'clear', tokens, threshold, reason: 'handoff rewritten after the warning' };
+  }
+  if (tokens > threshold * HARD_CAP_FACTOR) {
+    const reason = `hard cap (${HARD_CAP_FACTOR}x threshold) reached without a handoff rewrite`;
+    logAutoClear(
+      inputs.boardDir,
+      `${inputs.name} (${inputs.role}) cleared at ${tokens} tokens: ${reason}`,
+      nowMs,
+    );
+    return { action: 'clear', tokens, threshold, reason };
+  }
+  return {
+    action: 'none',
+    reason: 'waiting for the handoff file to be rewritten',
+    tokens,
+    threshold,
+  };
 }

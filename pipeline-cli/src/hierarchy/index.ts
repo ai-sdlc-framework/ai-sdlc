@@ -87,6 +87,7 @@ export {
 } from './land-eligible.js';
 export { markReadyAfterCodeql, repoHasCodeql, type MarkReadyReport } from './mark-ready.js';
 export {
+  clearWarned,
   decideAutoClear,
   markScheduled,
   readContextTokens,

@@ -7,7 +7,9 @@
  * it with the role's threshold (planner 150k, dispatch and executors 120k;
  * `contextThresholds` in the board's config.json overrides), and when it is over,
  * refreshes the handoff file and schedules `clear --self` with the role's resume
- * command. An executor holding an inflight task is deferred until its verdict is
+ * command. At the warn threshold the CLI first answers `warn` and this hook returns a
+ * Stop `block` message telling the session to run its handoff routine; the clear comes
+ * once the handoff file is rewritten (or at threshold plus 25%). An executor holding an inflight task is deferred until its verdict is
  * written. Every failure is swallowed: a session is never delayed or failed by this.
  *
  * Bin resolution is file-existence only ($PIPELINE_CLI_BIN, the plugin's own
@@ -67,10 +69,30 @@ function gitCommonDir(cwd) {
 }
 
 /**
+ * The warn message in the CLI's output (one JSON decision per line), or ''. At the warn
+ * threshold the CLI answers `action: warn`; the Stop hook relays it so the session gets
+ * a turn to run its handoff routine before any clear (AISDLC-870).
+ */
+function warnMessageOf(stdout) {
+  const lines = String(stdout || '').split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line.startsWith('{')) continue;
+    try {
+      const d = JSON.parse(line);
+      return d && d.action === 'warn' && typeof d.message === 'string' ? d.message : '';
+    } catch {
+      return '';
+    }
+  }
+  return '';
+}
+
+/**
  * Run the auto-clear check for one Stop payload. Returns a short reason string;
  * never throws.
  * @param {object} payload parsed Stop hook input
- * @param {object} [options] { env, cwd, pluginDir, run }
+ * @param {object} [options] { env, cwd, pluginDir, run, onWarn(message) }
  */
 function runAutoClear(payload, options = {}) {
   try {
@@ -93,7 +115,13 @@ function runAutoClear(payload, options = {}) {
       [bin, 'auto-clear', '--transcript', transcript, '--board-dir', boardDir],
       { cwd, env, encoding: 'utf-8', timeout: TIMEOUT_MS },
     );
-    return res && res.status === 0 ? 'ran' : 'failed';
+    if (!res || res.status !== 0) return 'failed';
+    const message = warnMessageOf(res.stdout);
+    if (message) {
+      if (typeof options.onWarn === 'function') options.onWarn(message);
+      return 'warned';
+    }
+    return 'ran';
   } catch {
     return 'failed';
   }
@@ -109,11 +137,14 @@ function readStdin() {
 
 if (require.main === module) {
   try {
-    runAutoClear(readStdin());
+    runAutoClear(readStdin(), {
+      onWarn: (message) =>
+        process.stdout.write(JSON.stringify({ decision: 'block', reason: message })),
+    });
   } catch {
     // never fail the session
   }
   process.exit(0);
 }
 
-module.exports = { runAutoClear, resolveBin, boardDirOf };
+module.exports = { runAutoClear, warnMessageOf, resolveBin, boardDirOf };
