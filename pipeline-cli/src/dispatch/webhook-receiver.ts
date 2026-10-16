@@ -43,7 +43,7 @@ export interface EventRecord {
 export const DEFAULT_DEBOUNCE_MS = 5000;
 export const WEBHOOK_PATH = '/webhooks/github';
 /** Touched by the receiver to wake the reconciler, under the board dir. */
-export const WAKE_FILE = 'wake';
+export const WAKE_FILE = '.reconcile-wake';
 
 const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const SHA_RE = /^[0-9a-f]{7,64}$/;
@@ -107,7 +107,7 @@ export function writeEventRecord(eventsDir: string, record: EventRecord): boolea
 
 export interface ReceiverOptions {
   secret: string;
-  /** Dispatch board dir; records go to `<boardDir>/events/`, the wake file to `<boardDir>/wake`. */
+  /** Dispatch board dir; records go to `<boardDir>/events/`, the wake file to `<boardDir>/.reconcile-wake`. */
   boardDir: string;
   /** 0 picks a free port. */
   port: number;

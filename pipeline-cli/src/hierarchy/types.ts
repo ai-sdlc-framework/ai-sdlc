@@ -129,6 +129,8 @@ export interface HierarchyDeps {
   nodeInstalled?: (version: string) => boolean;
   /** Parent of a process, or null when unreadable (register's pane ancestry check). Absent: `ps`. */
   parentPid?: (pid: number) => number | null;
+  /** Starts the detached reconcile scheduler and returns its pid. Absent: a real detached spawn. */
+  spawnScheduler?: (file: string, args: readonly string[]) => number | undefined;
   /** Records orchestrator events (session started, context cleared). Absent: nothing is recorded. */
   emit?: EventEmitter;
 }

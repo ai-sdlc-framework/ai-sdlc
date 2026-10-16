@@ -115,6 +115,16 @@ describe('webhook receiver (AISDLC-880)', () => {
     expect(wake).toHaveBeenCalledTimes(1);
   });
 
+  it('touches nothing for a replayed delivery id or a failed signature', async () => {
+    const body = checkRun();
+    await post(body, good(body, 'r-1'));
+    await vi.waitFor(() => expect(wake).toHaveBeenCalledTimes(1));
+    await post(body, good(body, 'r-1'));
+    await post(body, { 'x-github-event': 'check_run', 'x-github-delivery': 'r-2' });
+    await new Promise((r) => setTimeout(r, 120));
+    expect(wake).toHaveBeenCalledTimes(1);
+  });
+
   it('records pull_request and status deliveries; drops unknown kinds and malformed payloads with 200', async () => {
     const pr = JSON.stringify({
       repository: { full_name: 'o/r' },
@@ -133,6 +143,6 @@ describe('webhook receiver (AISDLC-880)', () => {
 
   it('touchWakeFile creates the wake file', () => {
     touchWakeFile(dir);
-    expect(readdirSync(dir)).toContain('wake');
+    expect(readdirSync(dir)).toContain('.reconcile-wake');
   });
 });
