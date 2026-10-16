@@ -165,6 +165,11 @@
         "additionalProperties": false
       }
     },
+    "fixesPr": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "PR number this task fixes; exempts the claim from the undelivered-PR pause (AISDLC-816)."
+    },
     "ruling": {
       "type": "object",
       "description": "A planner ruling kept on the task so it survives the dispatch session's clears (AISDLC-903).",
