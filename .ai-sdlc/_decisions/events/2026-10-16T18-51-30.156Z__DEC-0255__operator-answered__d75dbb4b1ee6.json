@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-16T18:51:30.156Z","decisionId":"DEC-0255","chosenOptionId":"move-aside","rationale":"LAST_MESSAGE.md belongs in .claude/memory/ (gitignored) per the 2026-10-14 operator rule; the parent-root copy (written by dispatch) was moved there at 18:50Z. Step 0.5 passes again; 881 can resume.","by":"ai-sdlc-planner"}
