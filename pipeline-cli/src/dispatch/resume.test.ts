@@ -25,6 +25,8 @@ import {
   evaluatePushOnly,
   formatResumeFeedback,
   looksLikeCommand,
+  MAX_NOTE_CHARS,
+  PUSH_INSTRUCTION,
   readResumeFeedback,
   resumeDone,
   stripControl,
@@ -97,6 +99,20 @@ function ghFor(
 const opts = { resumedBy: 'dispatch', now: () => new Date('2026-10-09T10:00:00.000Z') };
 
 describe('resumeDone', () => {
+  it('appends the push instruction to the note (AISDLC-905)', () => {
+    finish('AISDLC-905');
+    const r = resumeDone(board, 'AISDLC-905', { note: 'fix it' }, opts);
+    expect(r.resume.note).toBe(`fix it\n\n${PUSH_INSTRUCTION}`);
+    expect(r.resume.note).toContain('never by a hand-typed push from another directory');
+  });
+
+  it('keeps the note within MAX_NOTE_CHARS when it already fills the limit (AISDLC-905)', () => {
+    finish('AISDLC-906');
+    const long = resumeDone(board, 'AISDLC-906', { note: 'x'.repeat(MAX_NOTE_CHARS) }, opts);
+    expect(long.resume.note.length).toBeLessThanOrEqual(MAX_NOTE_CHARS);
+    expect(long.resume.note.endsWith(PUSH_INSTRUCTION)).toBe(true);
+  });
+
   it('records the PR head ref as the branch when a --pr head is supplied (AISDLC-762.2)', () => {
     finish('AISDLC-803', 9);
     const r = resumeDone(
@@ -130,7 +146,7 @@ describe('resumeDone', () => {
     expect(queued.branch).toBe('ai-sdlc/aisdlc-801-slug');
     expect(queued.workerId).toBeUndefined();
     expect(queued.resume).toMatchObject({
-      note: 'Raise coverage',
+      note: `Raise coverage\n\n${PUSH_INSTRUCTION}`,
       prNumber: 7,
       failingChecks: ['coverage', 'attestation'],
       findings: ['no test'],
@@ -314,7 +330,7 @@ describe('resumeDone', () => {
       },
       opts,
     );
-    expect(r.resume.note).toBe('fix coverage');
+    expect(r.resume.note).toBe(`fix coverage\n\n${PUSH_INSTRUCTION}`);
     expect(r.resume.findings).toEqual(['ab']);
     expect(r.resume.failingChecks).toEqual(['cd']);
   });
@@ -350,7 +366,9 @@ describe('resumeDone', () => {
       iterate('AISDLC-843');
       const r = resumeDone(board, 'AISDLC-843', {}, opts);
       const queued = JSON.parse(readFileSync(r.queuePath, 'utf-8')) as DispatchManifest;
-      expect(queued.resume?.note).toBe('Reviewer wants a test for the edge case');
+      expect(queued.resume?.note).toBe(
+        `Reviewer wants a test for the edge case\n\n${PUSH_INSTRUCTION}`,
+      );
       expect(queued.resume?.priorOutcome).toBe('iterate-needed');
       expect(queued.priority).toBe(2);
       expect(queued.wave).toBeUndefined();
@@ -359,7 +377,9 @@ describe('resumeDone', () => {
 
     it('drops command-looking lines from the verdict notes and falls back when none remain', () => {
       iterate('AISDLC-844', 'Add a test\ngit push --force\n');
-      expect(resumeDone(board, 'AISDLC-844', {}, opts).resume.note).toBe('Add a test');
+      expect(resumeDone(board, 'AISDLC-844', {}, opts).resume.note).toBe(
+        `Add a test\n\n${PUSH_INSTRUCTION}`,
+      );
     });
 
     it('falls back to a fixed sentence when no prose is left', () => {
@@ -370,7 +390,7 @@ describe('resumeDone', () => {
     it('lets an explicit note override the verdict notes', () => {
       iterate('AISDLC-846');
       expect(resumeDone(board, 'AISDLC-846', { note: 'Do this instead' }, opts).resume.note).toBe(
-        'Do this instead',
+        `Do this instead\n\n${PUSH_INSTRUCTION}`,
       );
     });
   });
@@ -393,7 +413,7 @@ describe('resume from iterate-needed and failed verdicts (AISDLC-807)', () => {
     runTo('AISDLC-831', 'iterate-needed');
     const r = resumeDone(board, 'AISDLC-831', { note: 'Fix it', prNumber: 12 }, opts);
     expect(r.resume).toMatchObject({
-      note: 'Fix it',
+      note: `Fix it\n\n${PUSH_INSTRUCTION}`,
       prNumber: 12,
       fromVerdictOutcome: 'iterate-needed',
     });
@@ -408,7 +428,7 @@ describe('resume from iterate-needed and failed verdicts (AISDLC-807)', () => {
     expect(existsSync(path.join(board, 'failed', 'AISDLC-832.verdict.json'))).toBe(true);
     const r = resumeDone(board, 'AISDLC-832', { note: 'Try again' }, opts);
     expect(r.resume).toMatchObject({
-      note: 'Try again',
+      note: `Try again\n\n${PUSH_INSTRUCTION}`,
       prNumber: 9,
       fromVerdictOutcome: 'failed',
     });
@@ -434,7 +454,7 @@ describe('resume from iterate-needed and failed verdicts (AISDLC-807)', () => {
 describe('feedback reaches the executor', () => {
   it('formats the note, PR, failing checks and findings', () => {
     const text = formatResumeFeedback({
-      note: 'Fix it',
+      note: `Fix it\n\n${PUSH_INSTRUCTION}`,
       prNumber: 12,
       failingChecks: ['coverage'],
       findings: ['missing test'],
@@ -466,7 +486,7 @@ describe('feedback reaches the executor', () => {
     resumeDone(board, 'AISDLC-810', { note: 'again' }, opts);
     expect(readResumeFeedback(board, 'AISDLC-810')).toBeUndefined(); // queued, not claimed
     claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-b' });
-    expect(readResumeFeedback(board, 'AISDLC-810')?.note).toBe('again');
+    expect(readResumeFeedback(board, 'AISDLC-810')?.note).toBe(`again\n\n${PUSH_INSTRUCTION}`);
     expect(readResumeFeedback(board, 'bad id')).toBeUndefined();
     expect(readInflightManifest(board, 'AISDLC-810')?.workerId).toBe('exec-b');
   });
@@ -501,7 +521,7 @@ describe('authoriseResume', () => {
   it('accepts a block left by a dispatch session, claimed by this session', () => {
     resumedAndClaimed('AISDLC-830');
     const r = authoriseResume(board, 'AISDLC-830', roster([dispatch, executor]));
-    expect(r).toMatchObject({ ok: true, feedback: { note: 'again' } });
+    expect(r).toMatchObject({ ok: true, feedback: { note: `again\n\n${PUSH_INSTRUCTION}` } });
   });
 
   it('says nothing when the manifest has no resume block', () => {
@@ -717,7 +737,7 @@ describe('cli-dispatch reenter and claim', () => {
     const queued = JSON.parse(
       readFileSync(path.join(board, 'queue', 'AISDLC-821.dispatch.json'), 'utf-8'),
     ) as DispatchManifest;
-    expect(queued.resume?.note).toBe('from file');
+    expect(queued.resume?.note).toBe(`from file\n\n${PUSH_INSTRUCTION}`);
   });
 
   it('reads a note file under the board dir, and refuses outside files and oversized ones', async () => {
@@ -827,7 +847,7 @@ describe('cli-dispatch reenter, requeue and release (AISDLC-807)', () => {
     expect([a.exit, a.stderr]).toEqual([0, '']);
     expect(queued('AISDLC-841').resume).toMatchObject({
       prNumber: 5,
-      note: 'T',
+      note: `T\n\n${PUSH_INSTRUCTION}`,
       fromVerdictOutcome: 'iterate-needed',
     });
     const b = await cli(

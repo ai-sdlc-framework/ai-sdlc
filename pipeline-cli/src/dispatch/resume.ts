@@ -99,6 +99,17 @@ export function normaliseNote(raw: string): string {
   return note;
 }
 
+/** Appended to every resume note (AISDLC-905): where and how the rebased commit is pushed. */
+export const PUSH_INSTRUCTION =
+  'Push: a rebased commit is pushed through the pipeline push step from the task worktree, never by a hand-typed push from another directory; if the push is refused, report the hook message verbatim.';
+
+/** Append {@link PUSH_INSTRUCTION}, trimming the caller's text so the result stays within MAX_NOTE_CHARS. */
+export function appendPushInstruction(note: string): string {
+  if (note.includes(PUSH_INSTRUCTION)) return note;
+  const suffix = `\n\n${PUSH_INSTRUCTION}`;
+  return `${note.slice(0, MAX_NOTE_CHARS - suffix.length).trimEnd()}${suffix}`;
+}
+
 /** What the caller supplies when resuming a task. */
 export interface ResumeInput {
   /** Prose for the executor. Optional only when resuming an iterate-needed verdict, whose notes stand in. */
@@ -272,6 +283,7 @@ export function resumeDone(
     }
   }
   if (note.length === 0) throw new Error('a resume needs a feedback note');
+  note = appendPushInstruction(note);
   let base: DispatchManifest;
   let branchGuessed = false;
   if (saved && saved.taskId === taskId) {

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-905
 title: 'fix: a resumed push never runs from the main checkout and the lease-push refusal names the cwd cause'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [hooks, hierarchy, velocity]

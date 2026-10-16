@@ -290,6 +290,26 @@ describe('Step 11 resume', () => {
     expect(fake.calls.some((c) => c.command === 'gh' && c.args[1] === 'create')).toBe(false);
   });
 
+  it('pushes a developer-returned rebased commit itself, from the task worktree (AISDLC-905)', async () => {
+    const fake = new FakeRunner()
+      .on(/^gh pr list/, ok('[]'))
+      .on(/^gh pr create/, ok('https://github.com/x/y/pull/14\n'));
+    await pushAndPr({ ...common(), resume: true, runner: fake.toRunner() });
+    const push = fake.calls.find((c) => c.args[0] === 'push');
+    expect(push).toBeDefined();
+    expect(push?.opts?.cwd).toBe(tmp);
+  });
+
+  it('reports a refused push with the hook message (AISDLC-905)', async () => {
+    const hookMsg =
+      'worktree-location: found the main checkout; fix: run it as a lone command from that worktree';
+    const fake = new FakeRunner().on(/^git push/, fail(hookMsg));
+    const r = await pushAndPr({ ...common(), resume: true, runner: fake.toRunner() });
+    expect(r.pushed).toBe(false);
+    expect(r.prUrl).toBeNull();
+    expect(r.reason).toContain(hookMsg);
+  });
+
   it('opens a PR when the resumed branch has none', async () => {
     const fake = new FakeRunner()
       .on(/^gh pr list/, ok('[]'))
