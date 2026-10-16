@@ -9,6 +9,8 @@
  *     session named after the agent, and write the roster. Idempotent.
  *   - `status [--json]` — the roster with each session's live state, whether a
  *     client is attached, and the board's inflight task.
+ *   - `stall-notice [--minutes <n>]` — one notification and one digest line when queued work has
+ *     not moved for n minutes (default 45); never relaunches or messages a session.
  *   - `attach <name>` — show one agent in this terminal (`switch-client` inside
  *     tmux, `attach-session` outside).
  *   - `terminals --vscode [--out <dir>] [--force] [--print]` — generate a VS Code
@@ -115,6 +117,8 @@ import {
   fetchHumanAttentionPrs,
   stallThresholdsFromEnv,
   runPlaybook,
+  runStallNotice,
+  DEFAULT_STALL_NOTICE_MINUTES,
   SAFE_SESSION_NAME,
   systemResourceSnapshot,
   type AsyncCommandRunner,
@@ -149,6 +153,7 @@ Commands:
   clear      Empty an executor's context between tasks and restart its loop
   restart    Stop and start one executor, updating its roster entry (restart <executor>)
   register   Re-record an executor whose process was restarted by hand (register <executor>)
+  stall-notice  Alert once when queued work has not moved for N minutes (no relaunch, no model)
   webhook    Local GitHub webhook receiver: webhook up|down|status (needs AI_SDLC_WEBHOOK_SECRET)
   tick       One wake-up of the dispatch loop (ingest, verdict watch, playbook, reports)
   route-decision  Record that a decision was routed to a tier
@@ -182,6 +187,9 @@ Options for up:
 
 Options for status:
   --json                   Print machine-readable output
+
+Options for stall-notice:
+  --minutes <n>            Minutes without a verdict or heartbeat before alerting (default 45)
 
 Options for webhook:
   --port <n>               Local port, bound to 127.0.0.1 (default 8765, or AI_SDLC_WEBHOOK_PORT)
@@ -486,6 +494,25 @@ export async function runHierarchyCli(
         const result = hierarchyStatus(deps);
         if (flags.json === 'true') deps.log(JSON.stringify(result));
         else for (const line of formatStatus(result)) deps.log(line);
+        return 0;
+      }
+      case 'stall-notice': {
+        const minutes = intFlag(flags, 'minutes');
+        if (minutes === null) return 2;
+        if (minutes !== undefined && minutes < 1) {
+          process.stderr.write('cli-hierarchy: --minutes must be at least 1\n');
+          return 2;
+        }
+        deps.log(
+          JSON.stringify(
+            runStallNotice({
+              boardDir: deps.boardDir,
+              now: deps.now,
+              run: deps.run,
+              minutes: minutes ?? DEFAULT_STALL_NOTICE_MINUTES,
+            }),
+          ),
+        );
         return 0;
       }
       case 'webhook': {
