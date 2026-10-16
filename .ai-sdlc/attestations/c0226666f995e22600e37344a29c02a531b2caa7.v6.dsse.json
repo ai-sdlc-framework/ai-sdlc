@@ -1,0 +1,84 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "7d61a8a761294713ed9aa1ccb8d4807a0317b8dd"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "ca7f18e8b17eeeba98b2a82e29d0b81e6dc6ee878264bb636331dbf96be85c85",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "ca7f18e8b17eeeba98b2a82e29d0b81e6dc6ee878264bb636331dbf96be85c85",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "dec8c28414084127c35af92cd50dcad0c211288a295b3535b6a490d14107003a",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "dec8c28414084127c35af92cd50dcad0c211288a295b3535b6a490d14107003a",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "89f2ba58157fd808d2c55c878fe849863a27729adf9670824ea19fb1708ad756",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "89f2ba58157fd808d2c55c878fe849863a27729adf9670824ea19fb1708ad756",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "8eee711652d2640906348425f9da8a3a7b2a4c6061afa86b599304349306b836",
+        "e1f119dcaa75c472556f4ba1cd1bd8b6417dcd713f4ccc920b8d73508ec0fb24"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "8ed1f6107dc9cf35ba6bbeb1a9c5a91b33f1965009f6b5e2ab3b0adeb5e5cad5",
+        "e1f119dcaa75c472556f4ba1cd1bd8b6417dcd713f4ccc920b8d73508ec0fb24"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "e3cb427e2b9f7f83efb4d0c043feaf66efcb1958caaad55531a9aed8a76c99c3",
+        "95124269521a5647408fadaccd30c5f89603f42faa267fab682941773540da35"
+      ]
+    }
+  ],
+  "rootHash": "b834d218fc9ab4a735bf6d8dca81b64039fabe2d50da4d50040cd0ff758ec20f",
+  "rootSignature": "XC0OHlMNVKqKmlFfq7yMMGPnm2+B1tiJnswqeILPg43zqbhRnKOVFZueP5+6QMjoTqniEe1to4xrvGLZcFBYCw==",
+  "nonce": "44e88d550c84959c3bcd0065fa8309b1550e96fa53ae365ce9ebed441b5418b6",
+  "leafCount": 3,
+  "signedAt": "2026-10-16T22:15:12.830Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      ".ai-sdlc/agent-role.yaml",
+      ".ai-sdlc/gates.yaml",
+      "ai-sdlc-plugin/commands/executor.md",
+      "pipeline-cli/attestation-core/merkle-core.d.mts",
+      "pipeline-cli/attestation-core/merkle-core.mjs",
+      "pipeline-cli/src/attestation/merkle.test.ts",
+      "pipeline-cli/src/attestation/merkle.ts",
+      "pipeline-cli/src/attestation/reviews-ledger.ts",
+      "pipeline-cli/src/attestation/sign-v6.ts",
+      "pipeline-cli/src/cli/attestation.ts",
+      "pipeline-cli/src/orchestrator/reconcile.ts",
+      "pipeline-cli/src/steps/07-build-review-prompts.ts"
+    ],
+    "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
+  }
+}
