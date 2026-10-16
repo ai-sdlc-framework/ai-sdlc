@@ -605,6 +605,14 @@ run is still pending waits up to the idle interval (1800 s) before mark-ready fl
 a standing failed Analyze job does not shorten the sleep. Exit `0`; `1` on a guard refusal; `2` on a malformed number or a retry limit above
 the cap.
 
+**Rejected briefs (AISDLC-952).** A brief the board refuses is recorded in
+`operator-dispatch.state.json` as `rejected[<file>] = { mtime, error, parentHead }` (the older
+number-only value, an mtime, is still read). Every tick lists each still-rejected brief in
+`ingestErrors` with its stored error, so the handoff and status line keep showing it until it
+ingests. A rejected brief is retried when its mtime changes (the planner edited it) or when
+the parent `HEAD` differs from the one recorded at rejection (a fast-forward that brings the
+missing task file); otherwise it is not retried.
+
 **Landing step (AISDLC-894).** With the `land-eligible-prs` operational action granted in
 `.ai-sdlc/agent-role.yaml`, every tick lists the open, non-draft pull requests whose author
 is on the policy's `mergeAuthors` list and passes each through `runMergeIfEligible`, the one

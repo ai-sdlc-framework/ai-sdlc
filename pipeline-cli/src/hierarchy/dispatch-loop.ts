@@ -30,6 +30,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
 import type { PromotedDecision } from '../decisions/escalation-chain.js';
@@ -73,11 +74,37 @@ export interface LoopState {
   schemaVersion: 'v1';
   /** Brief filename -> the tasks it enqueued. */
   ingested: Record<string, { tasks: string[]; summarised: boolean }>;
-  /** Brief filename -> modification time (ms) at which the board refused it. */
-  rejected: Record<string, number>;
+  /**
+   * Brief filename -> the refusal record (AISDLC-952). A bare number is the older
+   * format (mtime only) and is still read.
+   */
+  rejected: Record<string, number | RejectedBrief>;
   /** Verdicts already handled, as `<state>:<task>:<completedAt>`. */
   handled: string[];
   lastReportAt?: string;
+}
+
+/** Why and when the board refused a brief. */
+export interface RejectedBrief {
+  /** Modification time (ms) of the brief when it was refused. */
+  mtime: number;
+  /** The refusal message. */
+  error: string;
+  /** Parent `HEAD` at refusal; absent when it could not be read. */
+  parentHead?: string;
+}
+
+/** Parent repository `HEAD`, or undefined when it cannot be read. */
+export function readParentHead(cwd: string): string | undefined {
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return undefined;
+  }
 }
 
 function emptyState(): LoopState {
@@ -234,6 +261,8 @@ export interface LoopDeps {
   stall?: Partial<Omit<StallDeps, 'boardDir' | 'now'>>;
   /** Open PRs for the human-attention section (AISDLC-888); undefined when GitHub cannot be read. */
   listPrs?: () => HumanAttentionPr[] | undefined;
+  /** Parent `HEAD`; a rejected brief is retried when it moves (AISDLC-952). */
+  parentHead?: () => string | undefined;
 }
 
 function ingestBriefs(
@@ -247,13 +276,24 @@ function ingestBriefs(
   } = { ingested: [], ingestErrors: [], skipped: [] };
   const dir = path.join(deps.boardDir, 'briefs');
   if (!existsSync(dir)) return result;
+  const head = deps.parentHead?.();
   for (const file of readdirSync(dir).sort()) {
     const full = path.join(dir, file);
     // lstat: a symlink named like a brief is never followed.
     if (!file.endsWith('.md') || !lstatSync(full).isFile()) continue;
     if (state.ingested[file]) continue;
     const mtime = statSync(full).mtimeMs;
-    if (state.rejected[file] === mtime) continue;
+    const prior = state.rejected[file];
+    if (prior !== undefined) {
+      const rec: RejectedBrief =
+        typeof prior === 'number' ? { mtime: prior, error: '(error text not recorded)' } : prior;
+      const headMoved =
+        rec.parentHead !== undefined && head !== undefined && rec.parentHead !== head;
+      if (rec.mtime === mtime && !headMoved) {
+        result.ingestErrors.push({ file, error: rec.error });
+        continue;
+      }
+    }
     try {
       const all = briefToEnqueueEntries(parseBrief(readFileSync(full, 'utf-8')));
       const entries = all.filter((e) => {
@@ -267,12 +307,10 @@ function ingestBriefs(
       saveState(deps.boardDir, state);
       result.ingested.push({ file, tasks: entries.map((e) => e.taskId) });
     } catch (err) {
-      state.rejected[file] = mtime;
+      const error = err instanceof Error ? err.message : String(err);
+      state.rejected[file] = { mtime, error, ...(head !== undefined ? { parentHead: head } : {}) };
       saveState(deps.boardDir, state);
-      result.ingestErrors.push({
-        file,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      result.ingestErrors.push({ file, error });
     }
   }
   return result;

@@ -10,6 +10,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  statSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -263,6 +264,68 @@ describe('brief ingestion', () => {
     const third = await runDispatchTick(deps());
     expect(third.ingested).toHaveLength(1);
     expect(enqueued).toHaveLength(2);
+  });
+
+  describe('rejection record (AISDLC-952)', () => {
+    const refuse = (): void => {
+      enqueueImpl = () => {
+        throw new Error('task file missing');
+      };
+    };
+
+    it('persists mtime, error and parent head', async () => {
+      const file = writeBrief('b1.md', ['AISDLC-1']);
+      refuse();
+      await runDispatchTick(deps({ parentHead: () => 'aaa' }));
+      const state = JSON.parse(
+        readFileSync(path.join(board, 'operator-dispatch.state.json'), 'utf-8'),
+      );
+      expect(state.rejected['b1.md']).toEqual({
+        mtime: statSync(file).mtimeMs,
+        error: 'task file missing',
+        parentHead: 'aaa',
+      });
+    });
+
+    it('reports the stored error on every tick', async () => {
+      writeBrief('b1.md', ['AISDLC-1']);
+      refuse();
+      await runDispatchTick(deps({ parentHead: () => 'aaa' }));
+      for (let i = 0; i < 2; i++) {
+        const again = await runDispatchTick(deps({ parentHead: () => 'aaa' }));
+        expect(again.ingestErrors).toEqual([{ file: 'b1.md', error: 'task file missing' }]);
+      }
+      expect(enqueued).toHaveLength(1);
+    });
+
+    it('retries when the parent head moves, not otherwise', async () => {
+      writeBrief('b1.md', ['AISDLC-1']);
+      refuse();
+      await runDispatchTick(deps({ parentHead: () => 'aaa' }));
+      await runDispatchTick(deps({ parentHead: () => 'aaa' }));
+      expect(enqueued).toHaveLength(1);
+      enqueueImpl = (entries) => entries.map((e) => e.taskId);
+      const moved = await runDispatchTick(deps({ parentHead: () => 'bbb' }));
+      expect(moved.ingested).toHaveLength(1);
+      expect(moved.ingestErrors).toEqual([]);
+      expect(enqueued).toHaveLength(2);
+    });
+
+    it('reads a number-only record from an older state file', async () => {
+      const file = writeBrief('b1.md', ['AISDLC-1']);
+      writeFileSync(
+        path.join(board, 'operator-dispatch.state.json'),
+        JSON.stringify({
+          schemaVersion: 'v1',
+          ingested: {},
+          rejected: { 'b1.md': statSync(file).mtimeMs },
+          handled: [],
+        }),
+      );
+      const result = await runDispatchTick(deps({ parentHead: () => 'aaa' }));
+      expect(result.ingestErrors).toHaveLength(1);
+      expect(enqueued).toEqual([]);
+    });
   });
 
   it('skips a task already on the board, reports it and ingests the rest (AISDLC-868)', async () => {
