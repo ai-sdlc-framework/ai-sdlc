@@ -1,0 +1,112 @@
+name: Docs source bump
+
+# AISDLC-859 (DEC-0001 in ai-sdlc-io): the docs site pins this repository at a
+# commit via `docs-source.lock.json`. When docs/ or spec/ change on main, open
+# (or update) ONE PR in ai-sdlc-framework/ai-sdlc-io that moves the pin, then
+# arm it through cli-merge-if-eligible (the only permitted arming path; this
+# workflow never calls a GitHub merge endpoint directly).
+#
+# Safety: no pull_request trigger; the PAT is referenced only by the bump job,
+# which runs on push to main or manual dispatch (trusted refs only).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'spec/**'
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Commit sha of ai-sdlc-framework/ai-sdlc to pin (40 hex)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-source-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    if: github.repository == 'ai-sdlc-framework/ai-sdlc'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SITE_REPO: ai-sdlc-framework/ai-sdlc-io
+      BUMP_BRANCH: docs-source/bump
+      BUMP_LABEL: docs-source-bump
+      INPUT_SHA: ${{ inputs.sha }}
+      PUSH_SHA: ${{ github.sha }}
+    steps:
+      - name: Resolve sha to pin
+        id: sha
+        run: |
+          SHA="${INPUT_SHA:-$PUSH_SHA}"
+          if ! printf '%s' "$SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::sha must be 40 lowercase hex characters"
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Build pipeline-cli
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @ai-sdlc/pipeline-cli... build
+
+      - name: Open or update the bump PR in the site repository
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
+          SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${SITE_REPO}.git" "$RUNNER_TEMP/site"
+          cd "$RUNNER_TEMP/site"
+          git config user.name "ai-sdlc-bot"
+          git config user.email "noreply@ai-sdlc.io"
+          git checkout -B "$BUMP_BRANCH"
+          printf '{\n  "repo": "ai-sdlc-framework/ai-sdlc",\n  "sha": "%s"\n}\n' "$SHA" > docs-source.lock.json
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "Default branch already pins $SHA; nothing to bump."
+            echo "number=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git add docs-source.lock.json
+          git commit -m "chore(docs): pin docs source to ${SHA:0:12}"
+          git push --force origin "$BUMP_BRANCH"
+          gh label create "$BUMP_LABEL" --repo "$SITE_REPO" --color 0E8A16 \
+            --description "Automated docs-source.lock.json bump" 2>/dev/null || true
+          BODY="Automated by ai-sdlc-framework/ai-sdlc (docs-source-bump workflow). Moves docs-source.lock.json to ${SHA}."
+          NUMBER=$(gh pr list --repo "$SITE_REPO" --head "$BUMP_BRANCH" --state open \
+            --json number --jq '.[0].number // empty')
+          if [ -z "$NUMBER" ]; then
+            URL=$(gh pr create --repo "$SITE_REPO" --head "$BUMP_BRANCH" --base main \
+              --title "chore(docs): bump docs source pin" --body "$BODY" --label "$BUMP_LABEL")
+            NUMBER="${URL##*/}"
+          else
+            gh pr edit "$NUMBER" --repo "$SITE_REPO" --body "$BODY"
+          fi
+          echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Arm the bump PR
+        if: steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          node pipeline-cli/bin/cli-merge-if-eligible.mjs "$PR_NUMBER" \
+            --source-kind backlog --repo "$SITE_REPO" --arm
