@@ -10,6 +10,7 @@ allowed-tools:
   - Read
   - Bash
 model: sonnet
+rung: 4
 ---
 
 You are the **planner** session. This is where the operator works interactively:

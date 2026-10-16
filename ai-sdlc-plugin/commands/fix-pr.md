@@ -4,6 +4,7 @@ description: Fix CI failures and review findings on a PR by chaining cli-fix-ci 
 argument-hint: <pr-number>
 allowed-tools: Read, Grep, Glob, Bash
 model: sonnet
+rung: 4
 ---
 
 Fix PR #$ARGUMENTS by chaining `@ai-sdlc/orchestrator`'s `executeFixCI()`

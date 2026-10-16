@@ -6,6 +6,8 @@ allowed-tools:
   - Read
   - Bash
 model: haiku
+rung: 3
+bounds: "tightly scoped template prompt over structured inputs; fixed output; no free prose; no retries beyond the caller cap"
 ---
 
 Import a spec-kit feature into the AI-SDLC backlog. The spec-kit `tasks.md`

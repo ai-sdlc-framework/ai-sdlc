@@ -1,7 +1,7 @@
 ---
 id: AISDLC-884
 title: 'feat(plugin): automation ladder - rung: frontmatter key on every agent and command, checked by the model-pins gate; migration; ladder text names the RFC-0049 judgment layer'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [rfc-0054, phase-1, plugin, governance]

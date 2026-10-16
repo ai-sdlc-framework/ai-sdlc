@@ -3,6 +3,8 @@ name: version
 description: Show installed vs latest ai-sdlc plugin version. Bypasses the 24h SessionStart cache.
 allowed-tools: Bash
 model: haiku
+rung: 3
+bounds: "tightly scoped template prompt over structured inputs; fixed output; no free prose; no retries beyond the caller cap"
 ---
 
 Show the installed ai-sdlc plugin version, the latest published version on

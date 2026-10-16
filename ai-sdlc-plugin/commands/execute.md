@@ -12,6 +12,7 @@ allowed-tools:
   - mcp__plugin_ai-sdlc_ai-sdlc__task_edit
   - mcp__plugin_ai-sdlc_ai-sdlc__task_complete
 model: sonnet
+rung: 4
 ---
 
 Execute work item `$ARGUMENTS` end-to-end. `$ARGUMENTS` is a backlog task ID (`AISDLC-393`, `INGEST-42`) or a GitHub issue (`612`, `#612`, `gh:612`).

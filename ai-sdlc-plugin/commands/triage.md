@@ -4,6 +4,8 @@ description: Score and triage an issue with the RFC-0008 admission composite (PP
 argument-hint: <issue-id>
 allowed-tools: Read, Grep, Glob, Bash, mcp__backlog__task_view
 model: haiku
+rung: 3
+bounds: "tightly scoped template prompt over structured inputs; fixed output; no free prose; no retries beyond the caller cap"
 ---
 
 Triage issue `$ARGUMENTS` by running it through `@ai-sdlc/orchestrator`'s

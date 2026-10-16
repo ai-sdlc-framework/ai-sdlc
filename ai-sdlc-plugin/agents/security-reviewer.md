@@ -11,6 +11,7 @@ disallowedTools:
   - Edit
   - AgentTool
 model: opus
+rung: 4
 harness: claude-code
 requiresIndependentHarnessFrom:
   - implement

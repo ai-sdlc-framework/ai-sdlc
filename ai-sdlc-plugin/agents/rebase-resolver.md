@@ -12,6 +12,7 @@ disallowedTools:
   - AgentTool
   - Write
 model: sonnet
+rung: 4
 harness: claude-code
 ---
 

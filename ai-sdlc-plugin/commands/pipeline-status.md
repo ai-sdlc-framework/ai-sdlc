@@ -4,6 +4,8 @@ description: Show AI-SDLC pipeline status for the current branch or a specific i
 argument-hint: [issue-id]
 allowed-tools: Read, Bash, mcp__backlog__task_view
 model: haiku
+rung: 3
+bounds: "tightly scoped template prompt over structured inputs; fixed output; no free prose; no retries beyond the caller cap"
 ---
 
 Show the current AI-SDLC pipeline status. Auto-detects the issue

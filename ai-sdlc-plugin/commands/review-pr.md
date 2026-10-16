@@ -4,6 +4,7 @@ description: Run AI-SDLC review agents on a pull request (testing + critic + sec
 argument-hint: <pr-number>
 allowed-tools: Read, Grep, Glob, Bash
 model: sonnet
+rung: 4
 ---
 
 Review PR #$ARGUMENTS by invoking `@ai-sdlc/orchestrator`'s

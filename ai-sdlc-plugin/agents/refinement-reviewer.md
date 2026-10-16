@@ -12,6 +12,7 @@ disallowedTools:
   - Edit
   - Write
 model: sonnet
+rung: 4
 harness: claude-code
 ---
 

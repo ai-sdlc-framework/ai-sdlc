@@ -4,6 +4,8 @@ description: Consolidate, prune and refine the agent memory folder into a new re
 argument-hint: "run [--dry-run] [--instructions \"<text>\"] | apply <output-folder> | undo"
 allowed-tools: Bash, Read
 model: haiku
+rung: 3
+bounds: "tightly scoped template prompt over structured inputs; fixed output; no free prose; no retries beyond the caller cap"
 ---
 
 Run a memory dream (AISDLC-729): a synthesis pass over the memory folder that merges duplicates, replaces superseded notes with the latest value, moves finished work into an on-disk archive, condenses large notes and rewrites index lines. It is modelled on a managed-agents "dream": the input is never modified, and you review the output before swapping it in. Nothing here refuses or blocks anything.
