@@ -185,7 +185,23 @@ export function parseSimpleYaml(raw: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-export async function validateTask(opts: ValidateTaskOptions): Promise<ValidateResult> {
+export async function validateTask(options: ValidateTaskOptions): Promise<ValidateResult> {
+  // AISDLC-946 — one resume path for every entry point (next-step init, the
+  // validate-task step tool, execute, reenter): an existing task worktree means
+  // prior work exists, so a task file found only in backlog/completed/ (of the
+  // parent or of the worktree) is accepted. `no task file` is for first runs.
+  let opts = options;
+  if (!opts.taskFilePathOverride) {
+    const wt = join(opts.workDir, '.worktrees', opts.taskId.toLowerCase());
+    if (existsSync(join(wt, '.git'))) {
+      const parentHas = findTaskFile(opts.taskId, opts.workDir, { includeCompleted: true });
+      opts = {
+        ...opts,
+        resume: true,
+        workDir: parentHas ? opts.workDir : wt,
+      };
+    }
+  }
   // AISDLC-373 — honour the explicit path override before falling back to
   // the default backlog/tasks scan. The override path must exist on disk;
   // a missing override is treated identically to a missing default-scan

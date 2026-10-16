@@ -944,6 +944,15 @@ pane uses when the queue is empty.
 
 No-CodeQL repositories (AISDLC-896): mark-ready flips any `ai-sdlc/` task draft whose PR checks are all green. `governance.openTaskPrsReady: true` opens task PRs ready from Step 11 and `ship`; the default stays draft.
 
+### Failed executor work is re-claimed (AISDLC-946)
+
+Work an executor finished locally but could not push is never hand-pushed. The normal loop re-claims it:
+
+- Every resume entry point (`next-step` init, the `validate-task` step tool, `execute`) treats an existing task worktree as prior work, so a task file found only in `backlog/completed/` (of the worktree or the parent) is accepted. `no task file for <id>` is reserved for first runs.
+- A `push-only-check` refusal (exit 1) is not terminal: the executor continues into a normal resume (review round, sign, lease push) in the same run.
+- `reenter` with the task worktree HEAD ahead of the PR head is not blocked by the loop guard. The guard keys on the local HEAD, and the manifest note says the local commits are pending a push and must be reviewed, signed and lease-pushed.
+- No session other than an executor pushes. The lease-push hook refuses dispatch and planner sessions by design.
+
 ## Quota and cost events
 
 Admission order for the events below follows the Product Priority Algorithm ([RFC-0005](../../spec/rfcs/RFC-0005-product-priority-algorithm.md)).

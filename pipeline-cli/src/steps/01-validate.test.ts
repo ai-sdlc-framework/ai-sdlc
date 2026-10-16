@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { findTaskFile, parseSimpleYaml, parseTaskFile, validateTask } from './01-validate.js';
 import { cleanupTmpProject, makeTmpProject, writeTaskFile } from '../__test-helpers/make-task.js';
@@ -144,6 +144,32 @@ describe('Step 1 — resume with task file in backlog/completed (AISDLC-822)', (
     writeTaskFile(tmp, { id: 'AISDLC-824', title: 'y', completed: true });
     expect(findTaskFile('AISDLC-824', tmp)).toBeNull();
     expect(findTaskFile('AISDLC-824', tmp, { includeCompleted: true })).toContain('completed');
+  });
+});
+
+describe('Step 1 — worktree implies resume (AISDLC-946)', () => {
+  it('accepts a parent completed-only file when the task worktree exists', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-946', title: 'x', completed: true });
+    mkdirSync(join(tmp, '.worktrees', 'aisdlc-946'), { recursive: true });
+    writeFileSync(join(tmp, '.worktrees', 'aisdlc-946', '.git'), 'gitdir: x\n');
+    const r = await validateTask({ taskId: 'AISDLC-946', workDir: tmp });
+    expect(r.ok).toBe(true);
+  });
+
+  it('falls through to the worktree copy when the parent has no file', async () => {
+    const wt = join(tmp, '.worktrees', 'aisdlc-946');
+    mkdirSync(wt, { recursive: true });
+    writeFileSync(join(wt, '.git'), 'gitdir: x\n');
+    mkdirSync(join(wt, 'backlog', 'completed'), { recursive: true });
+    writeTaskFile(wt, { id: 'AISDLC-946', title: 'x', completed: true });
+    const r = await validateTask({ taskId: 'AISDLC-946', workDir: tmp });
+    expect(r.ok).toBe(true);
+    expect(r.task?.filePath).toContain('.worktrees');
+  });
+
+  it('a first run (no worktree) still refuses', async () => {
+    const r = await validateTask({ taskId: 'AISDLC-946', workDir: tmp });
+    expect(r.reason).toBe('no task file for AISDLC-946');
   });
 });
 

@@ -15,7 +15,7 @@
  * resets it.
  */
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { now as clockNow } from '../clock.js';
@@ -57,6 +57,11 @@ export interface ReenterDeps {
   now?: () => Date;
   resolveTaskFile?: (taskId: string) => string | undefined;
   resolveBaseSha?: () => string | undefined;
+  /**
+   * Local HEAD of the task worktree when it holds commits ahead of the PR head
+   * (AISDLC-946); defaults to a `git rev-parse` inside `<cwd>/.worktrees/<id>`.
+   */
+  resolveLocalAheadHead?: (taskId: string, prHead: string) => string | undefined;
   /** Where the origin-lookup fallback notice goes; defaults to stderr. */
   warn?: (line: string) => void;
 }
@@ -77,6 +82,19 @@ interface PrView {
   mergeStateStatus?: string;
   autoMergeRequest?: unknown;
   statusCheckRollup?: Parameters<typeof normaliseCheck>[0][];
+}
+
+/** Default probe: the task worktree's HEAD when it strictly descends from the PR head. */
+function localAheadHead(deps: ReenterDeps): (taskId: string, prHead: string) => string | undefined {
+  return (taskId, prHead) => {
+    const wt = path.join(deps.cwd, '.worktrees', taskId.toLowerCase());
+    if (!existsSync(path.join(wt, '.git'))) return undefined;
+    const head = deps.run('git', ['rev-parse', 'HEAD'], { cwd: wt });
+    const sha = head.status === 0 ? head.stdout.trim() : '';
+    if (!sha || sha === prHead) return undefined;
+    const anc = deps.run('git', ['merge-base', '--is-ancestor', prHead, sha], { cwd: wt });
+    return anc.status === 0 ? sha : undefined;
+  };
 }
 
 const short = (sha: string): string => sha.slice(0, 7);
@@ -186,6 +204,11 @@ export function reenter(input: ReenterInput, deps: ReenterDeps): ReenterResult {
     throw new Error(`pull request #${pr} names no task id; pass the task id`);
   }
 
+  // AISDLC-946: finished-but-unpushed local work (HEAD ahead of the PR head) is
+  // pending a push, not a repeat of the last re-entry: guard on the local HEAD.
+  const localHead = (deps.resolveLocalAheadHead ?? localAheadHead(deps))(taskId, headSha);
+  if (localHead) headSha = localHead;
+
   const checks = (view.statusCheckRollup ?? []).map(normaliseCheck);
   const facts: PrFacts = {
     prNumber: pr,
@@ -197,11 +220,16 @@ export function reenter(input: ReenterInput, deps: ReenterDeps): ReenterResult {
     ...(view.mergeStateStatus === undefined ? {} : { mergeStateStatus: view.mergeStateStatus }),
   };
   const c = classifyPr(facts);
-  const note = input.note?.trim() || undefined;
+  const pushNote = localHead
+    ? `push pending: the worktree has local commits ahead of the PR head (${short(localHead)}); review, sign and lease-push them from the executor session.`
+    : undefined;
+  const note = input.note?.trim() || pushNote;
 
   type Route = 'rebase' | 'rerun' | 'executor';
   let route: Route;
-  if (c.state === 'behind-or-dirty') {
+  if (localHead) {
+    route = 'executor';
+  } else if (c.state === 'behind-or-dirty') {
     route = view.mergeStateStatus === 'BEHIND' ? 'rebase' : 'executor';
   } else if (c.state === 'cancelled-or-infra') {
     route = 'rerun';
