@@ -14,7 +14,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import yaml from 'js-yaml';
+import * as yaml from '../util/yaml.js';
 
 export type ArtifactGranularity = 'tasks-md-only';
 export type DorStrictness = 'strict' | 'warn';

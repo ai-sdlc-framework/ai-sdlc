@@ -10,7 +10,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { load as yamlLoad } from 'js-yaml';
+import { load as yamlLoad } from '../util/yaml.js';
 
 /** Longest an idle executor sleeps between queue checks. */
 export const IDLE_BACKOFF_MAX_SEC = 60;

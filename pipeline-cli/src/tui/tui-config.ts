@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import yaml from 'js-yaml';
+import * as yaml from '../util/yaml.js';
 
 export interface TuiConfig {
   /** Override OQ-9 affirming empty-state copy on the Blockers pane. */

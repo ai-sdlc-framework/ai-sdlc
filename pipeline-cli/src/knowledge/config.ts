@@ -4,7 +4,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import yaml from 'js-yaml';
+import * as yaml from '../util/yaml.js';
 
 export const DEFAULT_TRACKED_ROOT = '.ai-sdlc/knowledge';
 export const DEFAULT_PROTECTED_ROOT = '.ai-sdlc/knowledge-protected';

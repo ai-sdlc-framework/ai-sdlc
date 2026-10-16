@@ -444,7 +444,9 @@ export function extractRuntimeEvidence(source) {
   const yaml = getJsYaml();
   if (yaml) {
     try {
-      const parsed = yaml.load(block);
+      // js-yaml 5 dropped the implicit timestamp tag: re-add it so an unquoted
+      // date still parses to a Date and is refused by the entry check (AISDLC-866).
+      const parsed = yaml.load(block, { schema: yaml.CORE_SCHEMA.withTags(yaml.timestampTag) });
       if (parsed && typeof parsed === 'object' && 'runtimeEvidence' in parsed) {
         return { present: true, value: parsed['runtimeEvidence'] };
       }

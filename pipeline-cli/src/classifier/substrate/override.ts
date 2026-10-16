@@ -31,7 +31,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { load as yamlLoad } from 'js-yaml';
+import { load as yamlLoad } from '../../util/yaml.js';
 
 import { readCorpus, resolveCorpusDir, setCorpusEntryPolarity } from './corpus.js';
 import type { CalibrationCorpusEntry, ClassifierTaskType } from './types.js';

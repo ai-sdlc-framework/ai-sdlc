@@ -67,7 +67,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { dump as yamlDump, load as yamlLoad } from 'js-yaml';
+import { dump as yamlDump, load as yamlLoad } from '../util/yaml.js';
 
 import type { CalibrationCorpusEntry, ClassifierTaskType } from '../classifier/substrate/index.js';
 

@@ -11,7 +11,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { load } from 'js-yaml';
+import { load } from '../util/yaml.js';
 
 import type { ForcePushMode } from './lease-policy.js';
 import { runGit, trustedPolicyRoot, type GitRunner } from './trusted-root.js';
