@@ -175,6 +175,7 @@ import {
   listBoard,
   listResumeSignals,
   OneClaimPerWorkerError,
+  UndeliveredPrError,
   peekQueue,
   peekQueueOrder,
   reprioritizeQueued,
@@ -645,7 +646,9 @@ export async function runDispatchCli(
                 ...(workerId === undefined ? {} : { workerId }),
               });
       } catch (err) {
-        if (!(err instanceof OneClaimPerWorkerError)) throw err;
+        if (!(err instanceof OneClaimPerWorkerError) && !(err instanceof UndeliveredPrError)) {
+          throw err;
+        }
         process.stderr.write(`cli-dispatch claim: ${err.message}\n`);
         return 1;
       }

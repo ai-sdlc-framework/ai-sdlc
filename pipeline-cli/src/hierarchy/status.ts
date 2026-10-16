@@ -7,6 +7,7 @@ import { peekQueue } from '../dispatch/board.js';
 import { listUnbriefed } from './auto-brief.js';
 import type { QueueCounts } from '../dispatch/types.js';
 import { listInflight } from './inflight.js';
+import { listLanding } from './reconcile.js';
 import { paneNodeVersion, readNvmrc, versionMatches } from './node-pin.js';
 import { hasLaunchEnv } from './up.js';
 import { readSessionRegistry } from './registry.js';
@@ -32,6 +33,8 @@ export interface StatusRow {
   attached: boolean;
   /** Task the session holds in `inflight/`, when its heartbeat names it. */
   inflightTask?: string;
+  /** The PR this executor is landing and its state, e.g. `#12 ci-pending` (AISDLC-816). */
+  landing?: string;
   /**
    * Whether the running session was launched with the env the lease-push hook binds it by.
    * Absent when the window is gone or tmux cannot report its start command.
@@ -69,6 +72,12 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     for (const w of listWindows(deps.run, tmuxSession)) windows.add(`${tmuxSession}:${w}`);
   }
   const inflight = listInflight(deps.boardDir);
+  let landings: ReturnType<typeof listLanding> = [];
+  try {
+    landings = listLanding(deps.boardDir).filter((l) => !l.landed);
+  } catch {
+    /* an unreadable landing dir must not break status */
+  }
   const attachedBySession = new Map<string, boolean>();
   const isAttached = (tmuxSession: string): boolean => {
     let v = attachedBySession.get(tmuxSession);
@@ -91,6 +100,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
       state = live.status === 'busy' ? 'busy' : live.status === 'idle' ? 'idle' : 'unknown';
     } else state = 'starting';
     const held = inflight.find((i) => i.workerId === entry.name);
+    const owned = landings.find((l) => l.owner === `executor:${entry.name}`);
     const startCommand = alive
       ? paneStartCommand(deps.run, entry.tmuxSession, entry.tmuxWindow)
       : '';
@@ -114,6 +124,11 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
       ...(nodeMismatch ? { nodeMismatch } : {}),
       attached: alive && isAttached(entry.tmuxSession),
       inflightTask: held?.taskId,
+      ...(owned
+        ? {
+            landing: `#${owned.pr} ${owned.delivered ? 'delivered' : 'undelivered'}:${owned.state}`,
+          }
+        : {}),
       ...(launchEnv ? { launchEnv } : {}),
       ...(launchEnv === 'missing'
         ? {
@@ -167,6 +182,7 @@ export function formatStatus(result: StatusResult): string[] {
     'MODEL',
     'MODE',
     'INFLIGHT',
+    'LANDING',
     'ENV',
     'NODE',
     'HIERARCHY_SESSION',
@@ -180,6 +196,7 @@ export function formatStatus(result: StatusResult): string[] {
     r.entry.model,
     r.entry.permissionMode,
     r.inflightTask ?? '-',
+    r.landing ?? '-',
     r.launchEnv ?? '-',
     r.nodeVersion ? `${r.nodeVersion}${r.nodeMismatch ? ' MISMATCH' : ''}` : '-',
     r.entry.tmuxSession,

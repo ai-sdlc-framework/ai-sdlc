@@ -846,7 +846,7 @@ describe('hierarchy status', () => {
     const json = JSON.parse(JSON.stringify(result)) as { rows: { launchEnv: string }[] };
     expect(json.rows.map((r) => r.launchEnv)).toEqual(['ok', 'missing']);
     const lines = formatStatus(result);
-    expect(lines[0]).toMatch(/INFLIGHT\s+ENV\s+NODE\s+HIERARCHY_SESSION/);
+    expect(lines[0]).toMatch(/INFLIGHT\s+LANDING\s+ENV\s+NODE\s+HIERARCHY_SESSION/);
     expect(lines.find((l) => l.includes('env missing on'))).toContain(
       'cli-hierarchy down --role executor',
     );

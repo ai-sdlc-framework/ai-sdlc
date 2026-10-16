@@ -4037,6 +4037,12 @@ export const dispatchManifestV1Schema = {
         additionalProperties: false,
       },
     },
+    fixesPr: {
+      type: 'integer',
+      minimum: 1,
+      description:
+        'PR number this task fixes; exempts the claim from the undelivered-PR pause (AISDLC-816).',
+    },
     ruling: {
       type: 'object',
       description:

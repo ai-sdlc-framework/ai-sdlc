@@ -866,6 +866,14 @@ headSha}` per change). `owner` is `executor:<name>` until `delivered` (the PR fl
 then `machine`; docs PRs are `machine` from creation, so no PR is ever unowned. `cli-dispatch
 peek` and the brief-progress loop read `done/` only.
 
+**Definition of done (AISDLC-816).** `delivered` means the PR is non-draft and armed; that is the
+executor's hand-back and frees its slot, and a PR that is not ready and armed at hand-back is
+`iterate-needed`, naming the unmet condition. `landed` means merged, and only the state machine
+writes `done/` for it, from `landing/<pr>.json`. `cli-dispatch claim` refuses a fresh task for an
+executor whose own record (`owner: executor:<name>`) has no `delivered` timestamp, naming the PR,
+unless the fresh manifest carries `fixesPr` (or is a resume); a delivered-but-unlanded PR does not
+block. `cli-hierarchy status` shows the PR each executor is landing in the `LANDING` column.
+
 **Scheduler** (`pipeline-cli/src/hierarchy/scheduler.ts`, `reconcile --watch`): a reconcile
 runs at start (session start or machine wake), within a 2 s debounce after the webhook
 receiver touches `<board>/.reconcile-wake`, and on a timer of 60 s while any task or docs PR

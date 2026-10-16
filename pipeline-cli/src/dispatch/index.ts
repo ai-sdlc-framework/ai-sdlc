@@ -33,6 +33,7 @@ export {
   listResumeSignals,
   loadEligibilityContext,
   OneClaimPerWorkerError,
+  UndeliveredPrError,
   peekQueue,
   peekQueueOrder,
   probeIterationBudget,
