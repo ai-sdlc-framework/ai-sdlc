@@ -100,8 +100,8 @@ describe('commandRunsGhPrMerge', () => {
         assert.equal(m.commandRunsGhPrMerge(c), true, c);
       }
     }
-    // Planner grammar ruling: `>&` is opaque, so quoted data that mentions the phrase over-blocks (AISDLC-605.1).
-    assert.equal(m.commandRunsGhPrMerge(`echo "${phrase}" 2>&1 | cat`), true);
+    // Redirections are normalised away (AISDLC-605.1): inert prose piped to inert stages is allowed.
+    assert.equal(m.commandRunsGhPrMerge(`echo "${phrase}" 2>&1 | cat`), false);
     assert.equal(m.commandRunsGhPrMerge(`echo "${phrase}" | cat`), false);
   });
   it('still treats && , & and background & as operators (AISDLC-605)', () => {
@@ -420,8 +420,8 @@ describe('round-7: globs in the subcommand slot and word-boundary gh fallback (A
     ]) {
       assert.equal(m.commandRunsGhPrMerge(c), false, c);
     }
-    // Planner grammar ruling: `#` is opaque, so the raw-mention rule refuses (AISDLC-605.1 tracks the over-block).
-    assert.equal(m.commandRunsGhPrMerge(`${gh} pr view $N --json state # no ${mg}`), true);
+    // Comments are cut by the tokenizer (AISDLC-605.1), so the mention is not judged.
+    assert.equal(m.commandRunsGhPrMerge(`${gh} pr view $N --json state # no ${mg}`), false);
   });
   it('distrusts the comment boundary around substitutions (round 9)', () => {
     for (const c of [
@@ -431,12 +431,12 @@ describe('round-7: globs in the subcommand slot and word-boundary gh fallback (A
     ]) {
       assert.equal(m.commandRunsGhPrMerge(c), true, c);
     }
-    // Over-blocked by the grammar ruling (`#` is opaque, comment text still mentions the phrase).
-    assert.equal(m.commandRunsGhPrMerge(`${gh} pr view 5 --json state # no ${mg}`), true);
-    assert.equal(m.commandRunsGhPrMerge(`echo hi # ${gh} pr ${mg} 5`), true);
+    // A real comment is cut (AISDLC-605.1).
+    assert.equal(m.commandRunsGhPrMerge(`${gh} pr view 5 --json state # no ${mg}`), false);
+    assert.equal(m.commandRunsGhPrMerge(`echo hi # ${gh} pr ${mg} 5`), false);
   });
   it('keeps refusing when the quote state is untrusted', () => {
-    assert.equal(m.commandRunsGhPrMerge(`${gh} pr view $N $'x' # no ${mg}`), true);
+    assert.equal(m.commandRunsGhPrMerge(`${gh} pr view $N "x # no ${mg}`), true);
   });
 });
 
@@ -789,8 +789,10 @@ describe('positive plain-segment grammar (AISDLC-605)', () => {
   });
   it('refuses renamed binaries and escape-decoded opaque mentions (round 12)', () => {
     for (const c of escapeRefused(gh, mg)) {
+      const apiMatch = (t) =>
+        /pulls\/[^\s/]*\/merge/i.test(m.normalizePathDots(m.decodeEscapes(t)));
       const hit =
-        m.commandRunsGhPrMerge(c) || m.commandHasUninertMatch(c, () => false, m.mentionsApiMerge);
+        m.commandRunsGhPrMerge(c) || m.commandHasUninertMatch(c, apiMatch, m.mentionsApiMerge);
       assert.equal(hit, true, c);
     }
   });
@@ -979,5 +981,56 @@ describe('curl URL glob groups (AISDLC-605)', () => {
     ]) {
       assert.equal(hit(c), false, c);
     }
+  });
+});
+
+describe('real tokenizer normalisation (AISDLC-605.1)', () => {
+  const mg = ['mer', 'ge'].join('');
+  const gh = ['g', 'h'].join('');
+
+  it('allows harmless opaque commands that mention the phrase', () => {
+    for (const c of [
+      `${gh} api repos/o/r/pulls/5 -q $'.x' # pr ${mg}`,
+      `${gh} release create v1 --notes $'x' # pr ${mg}`,
+      `${gh} pr view 5 2>&1 # ${mg}`,
+      `${gh} pr view 5 > out.txt # pr ${mg}`,
+      `A=1 ${gh} pr view 5`,
+      `${gh} pr view 5 \\\n --json state`,
+    ]) {
+      assert.equal(m.commandRunsGhPrMerge(c), false, c);
+    }
+  });
+  it('still refuses the spliced forms it now normalises', () => {
+    for (const c of [
+      `${gh}\${IFS}pr\${IFS}${mg}\${IFS}5`,
+      `${gh}$IFS$9pr$IFS$9${mg} 5`,
+      `${gh} pr $'${mg}' 5`,
+      `${gh} pr $'\\x6d${mg.slice(1)}' 5`,
+      `${gh} pr $'\\155${mg.slice(1)}' 5`,
+      `${gh} pr ${mg.slice(0, 3)}\\\n${mg.slice(3)} 5`,
+      `${gh} {pr,${mg}} 5`,
+      `${gh} pr {${mg},view} 5`,
+      `A=${mg}; ${gh} pr $A 5`,
+      `A='${mg}'; ${gh} pr \${A} 5`,
+      `${gh} pr ${mg} 5 >/dev/null # ok`,
+      `${gh} pr ${mg} 5 2>&1`,
+      `echo hi $'\\'' ; ${gh} pr ${mg} 5`,
+      `${gh} pr $'\\'' ${mg} 5`,
+      `${gh} pr $(true #) ${mg} 5`,
+    ]) {
+      assert.equal(m.commandRunsGhPrMerge(c), true, c);
+    }
+  });
+  it('splitter and comment stripper honour escaped quotes inside ANSI-C strings', () => {
+    assert.deepEqual(m.splitShellSegments(`echo $'a\\'; b' ; ls`), [`echo $'a\\'; b'`, 'ls']);
+    assert.equal(m.stripComment(`echo $'a\\' # x' # y`), `echo $'a\\' # x'`);
+  });
+  it('decodes ANSI-C strings and keeps NUL or quote results raw', () => {
+    assert.equal(
+      m.canonicalizeCommand(`echo $'a\\tb\\u0041\\U00000042\\cA\\q'`),
+      `echo 'a\tbAB\x01\\q'`,
+    );
+    assert.equal(m.canonicalizeCommand(`echo $'a\\x00b'`), `echo $'a\\x00b'`);
+    assert.equal(m.canonicalizeCommand(`echo $'unterminated`), `echo $'unterminated`);
   });
 });

@@ -2446,9 +2446,9 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 opaque-segment
     }
   });
 
-  it('refuses comments that mention the phrase (planner grammar ruling: # is opaque; AISDLC-605.1 tracks the over-block)', () => {
+  it('allows comments that mention the phrase (real tokenizer, AISDLC-605.1)', () => {
     for (const c of [`${gh} pr view 5 --json state # no ${mg}`, `echo hi # ${gh} pr ${mg} 5`]) {
-      assert.ok(isDenied(run(c)), c);
+      assert.ok(!isDenied(run(c)), c);
     }
     assert.ok(!isDenied(run(`${gh} pr view 5 --json state # ok`)));
   });
@@ -2486,7 +2486,7 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 opaque-segment
       assert.ok(!isDenied(run(c)), c);
     }
     // Over-blocked by the grammar ruling: the comment mentions the phrase.
-    assert.ok(isDenied(run(`${gh} pr view $N --json state # no ${mg}`)));
+    assert.ok(!isDenied(run(`${gh} pr view $N --json state # no ${mg}`)));
   });
 
   it('still allows prose, read-only gh', () => {

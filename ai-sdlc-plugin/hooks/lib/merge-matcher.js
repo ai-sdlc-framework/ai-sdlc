@@ -14,7 +14,9 @@
  * later stage of its pipeline is inert too. Any OPAQUE segment (every other character or
  * construct: `$`, backtick, parens, braces, redirections, `#`, backslash, ...) cannot be
  * judged, so the whole command is refused whenever its raw text mentions a merge phrase.
- * Over-blocking that is accepted here is tracked by AISDLC-605.1 (real tokenizer).
+ * A tokenizer pass (canonicalizeCommand, AISDLC-605.1) runs first: it normalises ANSI-C
+ * quotes, comments, IFS, backslash-newline, brace lists, literal assignments and redirections,
+ * so harmless commands that merely contain those constructs are no longer opaque.
  * Heredocs get no special treatment (DEC-0085): every line of the command text,
  * heredoc bodies included, is matched, so a command containing a heredoc that
  * quotes the merge phrase is refused. Stripping "inert" bodies kept spawning
@@ -110,14 +112,19 @@ function splitShellSegmentsEx(command) {
     const c = command[i];
     if (quote) {
       cur += c;
-      if (c === '\\' && quote === '"' && i + 1 < command.length) {
+      if (c === '\\' && (quote === '"' || quote === "$'") && i + 1 < command.length) {
         cur += command[++i];
-      } else if (c === quote) {
+      } else if (c === (quote === "$'" ? "'" : quote)) {
         quote = null;
       }
       continue;
     }
     if (c === '\\' && i + 1 < command.length) {
+      cur += c + command[++i];
+      continue;
+    }
+    if (c === '$' && command[i + 1] === "'") {
+      quote = "$'";
       cur += c + command[++i];
       continue;
     }
@@ -171,11 +178,16 @@ function stripComment(segment) {
   for (let i = 0; i < segment.length; i++) {
     const c = segment[i];
     if (quote) {
-      if (c === '\\' && quote === '"') i++;
-      else if (c === quote) quote = null;
+      if (c === '\\' && (quote === '"' || quote === "$'")) i++;
+      else if (c === (quote === "$'" ? "'" : quote)) quote = null;
       continue;
     }
     if (c === '\\') {
+      i++;
+      continue;
+    }
+    if (c === '$' && segment[i + 1] === "'") {
+      quote = "$'";
       i++;
       continue;
     }
@@ -377,6 +389,180 @@ function expandBraces(text, budget = { n: 64 }) {
   return out;
 }
 const unmark = (t) => t.replace(/\u0001/g, '{').replace(/\u0002/g, '}');
+
+const ANSI_SIMPLE = {
+  a: '\x07',
+  b: '\b',
+  e: '\x1b',
+  E: '\x1b',
+  f: '\f',
+  n: '\n',
+  r: '\r',
+  t: '\t',
+  v: '\v',
+  '\\': '\\',
+  '"': '"',
+  '?': '?',
+};
+
+/**
+ * Decodes the body of an ANSI-C `$'...'` string. Returns null (caller keeps the raw text,
+ * fail closed) when the result holds a NUL (bash truncates there) or an embedded `'`.
+ */
+function decodeAnsiC(body) {
+  let out = '';
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (c !== '\\' || i + 1 >= body.length) {
+      out += c;
+      continue;
+    }
+    const d = body[++i];
+    let m;
+    if (d in ANSI_SIMPLE) out += ANSI_SIMPLE[d];
+    else if (d === "'") return null;
+    else if (d === 'x' && (m = /^[0-9a-fA-F]{1,2}/.exec(body.slice(i + 1)))) {
+      out += String.fromCharCode(parseInt(m[0], 16));
+      i += m[0].length;
+    } else if (d === 'u' && (m = /^[0-9a-fA-F]{1,4}/.exec(body.slice(i + 1)))) {
+      out += String.fromCharCode(parseInt(m[0], 16));
+      i += m[0].length;
+    } else if (d === 'U' && (m = /^[0-9a-fA-F]{1,8}/.exec(body.slice(i + 1)))) {
+      const cp = parseInt(m[0], 16);
+      if (cp > 0x10ffff) return null;
+      out += String.fromCodePoint(cp);
+      i += m[0].length;
+    } else if (/[0-7]/.test(d)) {
+      m = /^[0-7]{1,3}/.exec(body.slice(i));
+      out += String.fromCharCode(parseInt(m[0], 8) & 0xff);
+      i += m[0].length - 1;
+    } else if (d === 'c' && i + 1 < body.length) {
+      out += String.fromCharCode(body[++i].charCodeAt(0) & 0x1f);
+    } else out += '\\' + d;
+  }
+  if (out.includes('\0') || out.includes("'")) return null;
+  return out;
+}
+
+/** Literal value of a simple assignment (`A=merge`, `A='x y'`), or null when not literal. */
+const LITERAL_ASSIGN =
+  /(?:^|[;&|\n])[ \t]*([A-Za-z_][A-Za-z0-9_]*)=([A-Za-z0-9_./:@+,%-]*|'[^'$`\\]*'|"[^"$`\\]*")(?=[ \t]*(?:[;&|\n]|$))/g;
+
+/**
+ * Real-tokenizer normalisation (AISDLC-605.1): one quote-aware pass that removes
+ * backslash-newlines, decodes ANSI-C `$'...'` strings into plain single-quoted strings and
+ * cuts unquoted comments (skipped, fail closed, when the command holds a heredoc, backtick,
+ * paren or `${`, where `#` may sit inside a nested construct); then `$IFS`/`${IFS}` become a
+ * space and `$NAME`/`${NAME}` of a literal standalone assignment in the same command are
+ * substituted. Other expansions are left alone and stay opaque.
+ */
+function canonicalizeCommand(command) {
+  const stripComments = !/<<|[`(]|\$\{/.test(command);
+  let out = '';
+  let quote = null;
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i];
+    if (quote === "'") {
+      out += c;
+      if (c === "'") quote = null;
+      continue;
+    }
+    if (quote === '"') {
+      if (c === '\\' && i + 1 < command.length) {
+        if (command[i + 1] === '\n') i++;
+        else out += c + command[++i];
+        continue;
+      }
+      if (c === '"') quote = null;
+      out += c;
+      continue;
+    }
+    if (c === '\\' && i + 1 < command.length) {
+      if (command[i + 1] === '\n') i++;
+      else out += c + command[++i];
+      continue;
+    }
+    if (c === '$' && command[i + 1] === "'") {
+      let j = i + 2;
+      while (j < command.length && command[j] !== "'") j += command[j] === '\\' ? 2 : 1;
+      if (j < command.length) {
+        const decoded = decodeAnsiC(command.slice(i + 2, j));
+        out += decoded === null ? command.slice(i, j + 1) : "'" + decoded + "'";
+        i = j;
+        continue;
+      }
+    }
+    if (c === "'" || c === '"') quote = c;
+    else if (c === '#' && stripComments && (out === '' || /\s/.test(out[out.length - 1]))) {
+      while (i + 1 < command.length && command[i + 1] !== '\n') i++;
+      continue;
+    }
+    out += c;
+  }
+  out = out.replace(/\$\{IFS\}(\$[1-9])?|\$IFS(?![A-Za-z0-9_])(\$[1-9])?/g, ' ');
+  const vars = new Map();
+  for (const m of out.matchAll(LITERAL_ASSIGN)) {
+    vars.set(m[1], m[2].replace(/^(['"])(.*)\1$/s, '$2'));
+  }
+  if (vars.size) {
+    out = out.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (all, a, b) =>
+      vars.has(a || b) ? vars.get(a || b) : all,
+    );
+  }
+  return out;
+}
+
+const REDIRECTION = /[0-9]*&?(?:>>?|<)(?![<(>])(?:&(?:[0-9]+-?|-)|[ \t]*[A-Za-z0-9_./=:@+,%-]+)/g;
+
+/**
+ * Replaces file-descriptor and file redirections (`> f`, `2>&1`, `&>f`, `< f`) in the
+ * UNQUOTED parts of a segment with a space. Process substitution, heredocs and here-strings
+ * are not matched and keep the segment opaque. Unbalanced quotes: unchanged.
+ */
+function stripRedirections(segment) {
+  if (!/[<>]/.test(segment)) return segment;
+  let out = '';
+  let chunk = '';
+  let quote = null;
+  for (let i = 0; i < segment.length; i++) {
+    const c = segment[i];
+    if (quote) {
+      out += c;
+      if (c === '\\' && quote === '"' && i + 1 < segment.length) out += segment[++i];
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '\\' && i + 1 < segment.length) {
+      chunk += c + segment[++i];
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      out += chunk.replace(REDIRECTION, ' ');
+      chunk = '';
+      quote = c;
+      out += c;
+      continue;
+    }
+    chunk += c;
+  }
+  if (quote) return segment;
+  return out + chunk.replace(REDIRECTION, ' ');
+}
+
+/**
+ * Brace-expanded variants of a canonical command (just the command when nothing expands).
+ * The first variant expands each whitespace-delimited word into the space-joined words bash
+ * would produce (a brace list of two words becomes two words); the others substitute per alternative.
+ */
+function braceVariants(canon) {
+  if (!canon.includes('{')) return [canon];
+  const words = canon
+    .split(/(\s+)/)
+    .map((w) => (/\$|^\s*$/.test(w) ? w : expandBraces(w).map(unmark).join(' ')))
+    .join('');
+  const vs = [...new Set([words, ...expandBraces(canon).map(unmark)])];
+  return vs.length > 1 ? vs : [canon];
+}
 
 /**
  * Normalised copies of a command for the opaque-mention test (AISDLC-605): command,
@@ -631,8 +817,20 @@ function mentionsApiMergePieces(text) {
  * special trust: `#` is opaque by grammar, so a comment that mentions the phrase
  * over-blocks (tracked by AISDLC-605.1).
  */
+/** `gh api graphql` fed from stdin / a file: the mutation is unseen, so a non-inert segment is refused. */
+const GRAPHQL_UNSEEN = /graphql/i;
+
 function commandHasUninertMatch(command, matches, mentions) {
-  const segs = splitShellSegmentsEx(command);
+  return braceVariants(canonicalizeCommand(command)).some((v) =>
+    variantHasUninertMatch(v, matches, mentions),
+  );
+}
+
+function variantHasUninertMatch(command, matches, mentions) {
+  const segs = splitShellSegmentsEx(command).map((s) => ({
+    ...s,
+    text: stripRedirections(s.text),
+  }));
   if (mentions && commandIsOpaque(command, segs)) {
     if (mentionVariants(command).some((v) => mentions(v))) return true;
   }
@@ -648,7 +846,17 @@ function commandHasUninertMatch(command, matches, mentions) {
   for (let i = 0; i < segs.length; i++) {
     if (!isPlainSegment(segs[i].text)) continue;
     const clean = segs[i].text;
-    if (!matches(clean) && !matches(clean.replace(/['"]/g, ''))) continue;
+    const unseen =
+      mentions === mentionsApiMerge &&
+      GRAPHQL_UNSEEN.test(clean) &&
+      (/--input\b/.test(clean) || /query=@/.test(clean));
+    if (
+      !unseen &&
+      !matches(clean) &&
+      !matches(clean.replace(/['"]/g, '')) &&
+      !matches(decodeEscapes(clean))
+    )
+      continue;
     if (!isInertSegment(segs[i].text)) return true;
     for (let j = i + 1; j < segs.length && segs[j].pipe; j++) {
       if (!isInertSegment(segs[j].text)) return true;
@@ -734,5 +942,6 @@ module.exports = {
   expandBrackets,
   httpClientGlobsPulls,
   commandHasUninertMatch,
+  canonicalizeCommand,
   commandRunsGhPrMerge,
 };
