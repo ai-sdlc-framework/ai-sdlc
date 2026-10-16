@@ -71,8 +71,6 @@ export const ALLOWLIST = {
     'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
   'docs/operations/usage-ledger.md':
     'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
-  'docs/tutorials/10-spec-kit-bridge.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
 };
 
 /** Returns the retired tokens a single line uses without a retirement word. */

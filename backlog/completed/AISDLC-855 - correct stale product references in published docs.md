@@ -1,7 +1,7 @@
 ---
 id: AISDLC-855
 title: Correct stale product references in the published docs (tutorial 08, onboarding, tutorial 10, concepts, PRD, install instructions)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels: [docs]

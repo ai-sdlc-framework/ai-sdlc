@@ -294,8 +294,8 @@ Once the imported tasks are in `backlog/tasks/` (passing DoR), the rest of the A
 # Pick a specific task and dispatch it
 /ai-sdlc execute AISDLC-512
 
-# Or, drive the autonomous loop and let the orchestrator drain the frontier
-/ai-sdlc orchestrator-tick
+# Or, drive the autonomous loop with the session hierarchy (RFC-0051)
+node pipeline-cli/bin/cli-hierarchy.mjs up
 ```
 
 The autonomous orchestrator's admission chain (RFC-0015) admits the imported tasks just like any other task. Each task carries its `specRef:` back-reference; the developer subagent can read `spec.md`, `plan.md`, and `contracts/auth-api.yaml` for context when implementing.
@@ -452,7 +452,7 @@ First-party adapter demand for additional upstreams becomes a Decision in the ca
 
 ### A clarification task back upstream sits ignored
 
-The Decision Catalog (`/ai-sdlc decisions list`) shows every open `import-blocked-on-dor` Decision. If a clarification has been ignored for too long, the catalog's batch-review surface will flag it. The framework deliberately does not auto-close ignored clarifications — silent closure would mask spec quality regressions.
+The Decision Catalog (`node pipeline-cli/bin/cli-decisions.mjs list`) shows every open `import-blocked-on-dor` Decision. If a clarification has been ignored for too long, the catalog's batch-review surface will flag it. The framework deliberately does not auto-close ignored clarifications — silent closure would mask spec quality regressions.
 
 ### Two PRs touching `tasks.md` create conflict during import
 
