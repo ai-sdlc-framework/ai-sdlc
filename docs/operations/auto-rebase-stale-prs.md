@@ -6,14 +6,13 @@ on every push to `main` and rebases every open same-repo non-draft PR whose
 the former `auto-rebase-open-prs.yml` (AISDLC-138 / AISDLC-189, deleted by AISDLC-727): Option A
 performs the rebase **locally in a temp worktree** instead of via
 `gh pr update-branch`, which gives the operator a structured JSON summary the
-[orchestrator-tick](../../pipeline-cli/docs/orchestrator.md) can consume.
+session hierarchy (`cli-hierarchy`) can consume.
 
 **Critically, the workflow does NOT re-sign attestation envelopes.** The
 v6 envelope's `subject.digest.sha1` binding is invalidated by any rebase, so
 after this workflow pushes the rebased branch the PR's attestation goes red.
 That is by design — only the operator's local signing key can produce a new
-envelope. The next `/ai-sdlc orchestrator-tick` includes a sweep step that
-walks red-attestation PRs and re-signs them in the operator's worktrees.
+envelope. The executor that owns the PR re-signs it in its worktree (the retired tick sweep, AISDLC-763, no longer exists).
 
 ## What this workflow does
 
@@ -26,7 +25,7 @@ walks red-attestation PRs and re-signs them in the operator's worktrees.
    - `git rebase origin/main`.
    - **On clean rebase**: `git push --force-with-lease origin HEAD:<branch>`
      and comment on the PR with
-     `auto-rebased onto main (operator must re-sign locally — run /ai-sdlc orchestrator-tick to sweep)`.
+     `auto-rebased onto main (operator must re-sign locally — re-sign from the PR's executor)`.
    - **On conflict**: `git rebase --abort`, comment on the PR with the
      conflicting files, add label `needs-manual-rebase`.
    - **Always**: remove the temp worktree (success or failure path).
@@ -83,10 +82,7 @@ node ai-sdlc-plugin/scripts/sign-attestation.mjs \
 git push --force-with-lease
 ```
 
-The next `/ai-sdlc orchestrator-tick` automates this loop across every
-red-attestation PR — that is the canonical recovery path. See
-[`pipeline-cli/docs/orchestrator.md`](../../pipeline-cli/docs/orchestrator.md)
-for the tick's red-attestation sweep step.
+The executor for the PR runs this loop; `cli-hierarchy` replaced the retired tick sweep (AISDLC-763).
 
 ## Conflict failure mode
 

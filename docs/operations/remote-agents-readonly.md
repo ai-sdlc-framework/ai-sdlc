@@ -94,7 +94,7 @@ The local operator session can then route via `/ai-sdlc execute <issue-number>` 
 
 ### Step 3 — Local operator session picks it up
 
-On the next `/ai-sdlc orchestrator-tick`, the autonomous orchestrator reads the new task from the frontier and dispatches a developer subagent. Or the operator manually runs:
+On the next `cli-hierarchy` dispatch tick, the dispatch session reads the new task from the frontier and dispatches a developer subagent. Or the operator manually runs:
 
 ```bash
 /ai-sdlc execute AISDLC-NNN
@@ -172,7 +172,7 @@ When a CCR `/schedule` task detects work that requires local execution:
 
 1. **File a backlog task** via `mcp__backlog__task_create` — or a GitHub issue via `mcp__github__create_issue` if the work is broad.
 2. **Include full context** in the task body: what triggered the work, what the expected outcome is, any relevant file paths.
-3. **The local operator session picks it up** on the next `/ai-sdlc orchestrator-tick` or manually via `/ai-sdlc execute <task-id>`.
+3. **The local operator session picks it up** on the next `cli-hierarchy` dispatch tick or manually via `/ai-sdlc execute <task-id>`.
 
 > `/ai-sdlc execute` detects CCR sandboxes at startup (AISDLC-442) and refuses with a clear error pointing here. See `docs/operations/remote-agents-readonly.md` for the full runbook.
 

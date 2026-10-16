@@ -3,8 +3,7 @@
 **Status:** Operational. AISDLC-429.1 (design map), AISDLC-429.2
 (`CopilotHarnessAdapter` + `--spawner copilot` resolver), and AISDLC-429.3
 (orchestrator wiring + operator docs) have shipped. The GitHub Copilot CLI
-is now a supported `SubagentSpawner` for `cli-execute` and the
-`cli-orchestrator tick` umbrella dispatcher.
+is now a supported `SubagentSpawner` for `cli-execute` (the umbrella tick dispatcher is retired, AISDLC-763).
 
 **Applies to:** RFC-0012 Step 0-13 execution backed by the **standalone
 `copilot` CLI** (GitHub Copilot CLI, GA 2025). It does NOT cover the
@@ -51,7 +50,7 @@ needs write access to the worktree.
 | Env var | Required | Purpose |
 |---|---|---|
 | `COPILOT_SPAWN_AGENT_BIN` | **Yes** for `--spawner copilot` (CLI form) | Absolute path to the bridge script. Unset → resolver throws `COPILOT_BRIDGE_MISSING_MESSAGE` before any pipeline mutation. Programmatic constructors can skip this. |
-| `AI_SDLC_ORCHESTRATOR_SPAWNER=copilot` | No | Default umbrella spawner kind for `cli-orchestrator tick`. Equivalent to passing `--spawner copilot` on every tick. AISDLC-429.3. |
+| `AI_SDLC_ORCHESTRATOR_SPAWNER=copilot` | No | Default umbrella spawner kind (the tick consumer is retired, AISDLC-763). AISDLC-429.3. |
 
 ## Quickstart
 
@@ -60,21 +59,6 @@ needs write access to the worktree.
 ```bash
 export COPILOT_SPAWN_AGENT_BIN="$(pwd)/scripts/your-copilot-bridge.mjs"
 node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs execute AISDLC-NNN --run --spawner copilot
-```
-
-### `cli-orchestrator tick` (autonomous umbrella)
-
-```bash
-export COPILOT_SPAWN_AGENT_BIN="$(pwd)/scripts/your-copilot-bridge.mjs"
-node ./pipeline-cli/bin/cli-orchestrator.mjs tick --spawner copilot
-```
-
-Or set the env var so every tick uses Copilot without re-passing the flag:
-
-```bash
-export COPILOT_SPAWN_AGENT_BIN="$(pwd)/scripts/your-copilot-bridge.mjs"
-export AI_SDLC_ORCHESTRATOR_SPAWNER=copilot
-node ./pipeline-cli/bin/cli-orchestrator.mjs tick
 ```
 
 ### Programmatic injection (no bridge, no env var)

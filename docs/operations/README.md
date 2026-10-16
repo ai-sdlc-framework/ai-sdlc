@@ -14,8 +14,6 @@ The orchestrator runs a continuous reconciliation loop over your backlog, dispat
 |---------|-------------|
 | [`claude-cli-spawner-removed.md`](claude-cli-spawner-removed.md) | RFC-0041 Phase 3.3 (AISDLC-377.6) removal of the `--spawner claude-cli` inline-manifest path — migration breadcrumb for legacy scripts |
 
-**Feature flag:** `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental`
-
 **RFC:** [`spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md`](../../spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md)
 
 ---
@@ -160,13 +158,11 @@ Token usage per model call, plan allotment tracking, and evidence-based choice o
 
 | Flag | Default | Gates |
 |------|---------|-------|
-| `AI_SDLC_AUTONOMOUS_ORCHESTRATOR` | off | Autonomous orchestrator (`cli-orchestrator tick/start`) |
 | `AI_SDLC_DEPS_COMPOSITION` | off | Dependency graph composition (`cli-deps snapshot/gc/inspect`) |
-| `AI_SDLC_TUI` | off | Operator TUI dashboard (`cli-tui`) |
 | `AI_SDLC_DOR_GATE` | warn-only | Definition of Ready admission gate |
 | `AI_SDLC_SIGNAL_INGESTION` | off | RFC-0030 signal ingestion pipeline (composes with `.ai-sdlc/signal-ingestion.yaml` `spec.enabled`) |
 
-Canonical truthy values for all flags: `1`, `true`, `yes`, `on` (case-insensitive). `AI_SDLC_AUTONOMOUS_ORCHESTRATOR` also accepts `experimental` as the recommended opt-in value.
+Canonical truthy values for all flags: `1`, `true`, `yes`, `on` (case-insensitive).
 
 ### Key CLI Commands
 
@@ -175,9 +171,6 @@ Canonical truthy values for all flags: `1`, `true`, `yes`, `on` (case-insensitiv
 node pipeline-cli/bin/cli-orchestrator.mjs tick       # single tick
 node pipeline-cli/bin/cli-orchestrator.mjs start      # continuous loop
 node pipeline-cli/bin/cli-orchestrator.mjs status     # current state
-
-# Operator TUI
-AI_SDLC_TUI=experimental node pipeline-cli/bin/cli-tui.mjs
 
 # Dependency graph
 node pipeline-cli/bin/cli-deps.mjs snapshot

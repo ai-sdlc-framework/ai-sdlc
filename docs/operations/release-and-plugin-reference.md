@@ -49,14 +49,14 @@ The typical Pattern C setup: `/ai-sdlc execute <task-id>` automatically writes `
 
 ### Pattern C hard guards (AISDLC-358)
 
-The parent working tree MUST be on `main` at all times. This is enforced by `scripts/check-orchestrator-state.sh` (called at Step 0 of every `/ai-sdlc execute` and by `cli-orchestrator tick`) and by the inline `runParentBranchGuard()` check at the top of every `runOrchestratorTick()` call in `pipeline-cli/src/orchestrator/loop.ts`.
+The parent working tree MUST be on `main` at all times. This is enforced by `scripts/check-orchestrator-state.sh` (called at Step 0 of every `/ai-sdlc execute` and by `cli-hierarchy tick`).
 
 Guard logic (two outcomes):
 
 - **Parent on non-main branch, clean working tree** → auto-recover: `git checkout main && git reset --hard origin/main`. Logs `[orchestrator-state] auto-recovered parent from '<branch>' to main`.
-- **Parent on non-main branch, dirty working tree** → REFUSE. Prints the offending branch name, the dirty paths, and the manual recovery command. Exits non-zero (`check-orchestrator-state.sh`) or throws `ParentNotOnMainError` (TypeScript loop). The orchestrator tick is aborted; no frontier work proceeds.
+- **Parent on non-main branch, dirty working tree** → REFUSE. Prints the offending branch name, the dirty paths, and the manual recovery command. Exits non-zero (`check-orchestrator-state.sh`) The tick is aborted; no frontier work proceeds.
 
 Recovery (operator): stash or commit your changes in the parent, then run `git checkout main && git reset --hard origin/main`.
 
-**Sanctioned vs. ad-hoc reset (AISDLC-450):** `git reset --hard origin/main` is ONLY permitted when invoked by `scripts/check-orchestrator-state.sh` on a verifiably clean working tree. Ad-hoc `git reset --hard` by the Conductor or a subagent (outside the script) is forbidden — if the script refuses (dirty parent), escalate to the Decision Catalog (see `/ai-sdlc orchestrator-tick` Step 0).
+**Sanctioned vs. ad-hoc reset (AISDLC-450):** `git reset --hard origin/main` is ONLY permitted when invoked by `scripts/check-orchestrator-state.sh` on a verifiably clean working tree. Ad-hoc `git reset --hard` by the Conductor or a subagent (outside the script) is forbidden — if the script refuses (dirty parent), escalate to the Decision Catalog (see `cli-hierarchy tick`).
 

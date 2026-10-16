@@ -71,7 +71,7 @@ Total wall-clock time: ~5-10 min (CI time) vs ~15-25 min with the queue (CI + qu
 
 Current rule: a PR is rebased only when it conflicts with `main`, by its executor or the `ci-conflict-resolver` / `/ai-sdlc rebase` path. A PR that is merely BEHIND merges as-is once required checks pass. AISDLC-491 / AISDLC-448 keep the v6 attestation valid for disjoint PRs across any later rebase.
 
-`auto-rebase-on-queue-kick.yml` was also deleted: it triggered only on `ai-sdlc/attestation` failures on `gh-readonly-queue/main/pr-*` probe SHAs, which no longer exist. `auto-rearm-on-dequeue.yml` was deleted too (AISDLC-832, DEC-0099): its dequeue trigger cannot fire without a merge queue. To restore it, see the rollback procedure below.
+`auto-rebase-on-queue-kick.yml` was also deleted: it triggered only on `ai-sdlc/attestation` failures on `gh-readonly-queue/main/pr-*` probe SHAs, which no longer exist. `auto-rearm-on-dequeue.yml` was deleted too (AISDLC-832, DEC-0099): its dequeue trigger cannot fire without a merge queue.
 
 If you flip branch protection back to `strict=true`, restore the proactive rebase from git history (`git log --diff-filter=D -- .github/workflows/auto-rebase-open-prs.yml`) or rebase PRs by hand.
 
@@ -148,8 +148,6 @@ After re-enabling the queue via UI, restore the `merge_group` triggers in:
 - `.github/workflows/auto-enable-auto-merge.yml` — remove `--squash` flag (the queue enforces its own strategy)
 
 Use `git log --oneline -- .github/workflows/` to find the AISDLC-400 commit and cherry-pick the reverse diff if needed.
-
-**Restore `auto-rearm-on-dequeue.yml`** (deleted by AISDLC-832): `git show 4b07a2b6:.github/workflows/auto-rearm-on-dequeue.yml > .github/workflows/auto-rearm-on-dequeue.yml` (4b07a2b6 is the last `main` commit that contains it).
 
 **Note:** The `auto-rebase-on-queue-kick.yml` workflow (deleted by AISDLC-727) would need to be restored from git history for queue-kick recovery automation.
 

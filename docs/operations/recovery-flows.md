@@ -201,7 +201,7 @@ The `draft PR` vs `ready PR` distinction in the trace is the AISDLC-273 Step 3 p
 | `--dry-run` | — | Validate + compute plan, no mutation |
 | `--spawner mock` | — | Dry-run/plumbing fixture; refused for `--run`/`--resume-from-draft`/`--rework-pr` |
 | `--spawner api-key` | `ANTHROPIC_API_KEY` env | Real API-key billed dispatch |
-| `--spawner claude` | `claude` CLI on PATH | Subscription-billed shell-out (`claude -p`, AISDLC-349) — default for the retired `cli-orchestrator tick` since AISDLC-352 |
+| `--spawner claude` | `claude` CLI on PATH | Subscription-billed shell-out (`claude -p`, AISDLC-349) — default spawner since AISDLC-352 (the old tick command is retired, AISDLC-763) |
 | `--spawner codex` | `CODEX_SPAWN_AGENT_BIN` env | Codex CLI host-bridge dispatch (AISDLC-202.2) |
 | `--max-iterations N` | — | Cap for Step 9 + rework loops (default 2) |
 

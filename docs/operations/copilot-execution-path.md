@@ -26,7 +26,7 @@ Codex CLI does:
 | Tier | Claude Code path | Copilot CLI status |
 |---|---|---|
 | Tier 1 attended | `/ai-sdlc execute <task-id>` runs in the main Claude Code session and dispatches plugin agents with `Agent(developer, code-reviewer, test-reviewer, security-reviewer)`. | Copilot CLI can be the attended driver from a terminal session, but it does not expose Claude Code's plugin `Agent` tool. The operator-driven attended path needs either (a) a documented "run reviewer prompts one-at-a-time by hand" procedure or (b) the Phase 2 `CopilotHarnessAdapter` available as a programmatic dispatcher invoked from outside the Copilot session. |
-| Tier 2 unattended | `executePipeline()` runs deterministic steps and uses an injected `SubagentSpawner` for LLM boundaries. | Once the Phase 2 `CopilotHarnessAdapter` ships, `--spawner copilot` becomes selectable from `cli-execute` / `cli-orchestrator tick`. A TypeScript spawner CAN call the `copilot` CLI because it advertises a non-interactive prompt mode (see Step 5b row below) — unlike Codex's `spawn_agent`, which is a host tool reachable only from within a Codex session. |
+| Tier 2 unattended | `executePipeline()` runs deterministic steps and uses an injected `SubagentSpawner` for LLM boundaries. | Once the Phase 2 `CopilotHarnessAdapter` ships, `--spawner copilot` becomes selectable from `cli-execute`. A TypeScript spawner CAN call the `copilot` CLI because it advertises a non-interactive prompt mode (see Step 5b row below) — unlike Codex's `spawn_agent`, which is a host tool reachable only from within a Codex session. |
 
 The Copilot path must preserve the RFC-0012 boundary: deterministic work
 stays in `@ai-sdlc/pipeline-cli` and MCP tools; LLM work is the only
@@ -290,7 +290,7 @@ The Tier 1 attended path is meaningfully different from Claude Code:
   parent session's slash-command-body context.
 - **Copilot Tier 1 (this design):** the operator's primary terminal is
   NOT a Copilot CLI session. Step 0-13 are driven by `cli-execute`
-  (or `cli-orchestrator tick`) shelling out to `copilot` *per
+  shelling out to `copilot` *per
   dispatch* — every developer + reviewer call is a fresh `copilot`
   invocation. There is no long-lived Copilot session that wraps the
   pipeline. This is closer to how `--spawner claude` (`claude -p`)
@@ -614,7 +614,7 @@ Per the parent task (AISDLC-429) and the AISDLC-202 precedent:
 | Phase 2 (AISDLC-429.2) | Phase 3 (AISDLC-429.3) |
 |---|---|
 | `pipeline-cli/src/runtime/spawners/copilot-harness.{ts,test.ts}` | `pipeline-cli/README.md` spawner-kinds table row |
-| `SpawnerKind` extension to include `'copilot'` | `CLAUDE.md` "Spawner kinds for `cli-orchestrator tick --spawner <kind>`" list entry |
+| `SpawnerKind` extension to include `'copilot'` | `docs/operations/backlog-and-execution-reference.md` spawner-kinds list entry |
 | `SPAWNER_KINDS` array update | `docs/operations/copilot-spawner.md` operator runbook (mirroring `cross-harness-review.md`'s pilot procedure section) |
 | `resolveSpawner('copilot')` resolver + missing-binary pre-flight | Orchestrator umbrella flag wiring in `pipeline-cli/src/orchestrator/loop.ts` (`umbrellaSpawnerKind` / `resolveUmbrellaSpawnerKind`) |
 | Hermetic tests (no real `copilot` binary required) | Cross-link from this design doc to the new runbook |
