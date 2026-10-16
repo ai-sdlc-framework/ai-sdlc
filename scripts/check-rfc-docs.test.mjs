@@ -11,7 +11,7 @@
 
 import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -904,16 +904,31 @@ describe('module exports', () => {
     ]);
   });
 
-  it('exports the known statuses set matching the RFC schema enum', () => {
+  it('exports the known statuses set matching the RFC schema enum and lifecycle', () => {
     assert.deepEqual([...KNOWN_STATUSES].sort(), [
       'Approved',
       'Draft',
       'Final',
       'Implemented',
+      'Ready for Review',
       'Rejected',
+      'Signed Off',
+      'Superseded',
       'Under Review',
       'Withdrawn',
     ]);
+  });
+
+  it('every status value under spec/rfcs is a known status', () => {
+    const dir = join(dirname(fileURLToPath(import.meta.url)), '..', 'spec', 'rfcs');
+    const bad = [];
+    for (const f of readdirSync(dir)) {
+      if (!/^RFC-\d+.*\.md$/.test(f) || f === TEMPLATE_FILENAME) continue;
+      const fm = readFileSync(join(dir, f), 'utf8').match(/^---\n([\s\S]*?)\n---/);
+      const m = fm && fm[1].match(/^status:\s*['"]?([^'"\n]+?)['"]?\s*$/m);
+      if (m && !KNOWN_STATUSES.has(m[1])) bad.push(`${f}: ${m[1]}`);
+    }
+    assert.deepEqual(bad, []);
   });
 
   it('exports the assumes-ok lifecycle set matching the AISDLC-311 contract', () => {

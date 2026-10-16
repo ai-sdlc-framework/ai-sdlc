@@ -1,7 +1,7 @@
 ---
 id: AISDLC-900
 title: 'fix(scripts): check-rfc-docs KNOWN_STATUSES matches the documented RFC lifecycle (main red since an RFC landed as Ready for Review)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [ci, rfc, velocity, main-red]
@@ -34,9 +34,9 @@ Since the session-hierarchy RFC (registry number 0054, not yet signed off, so no
 
 ## Acceptance Criteria
 
-- [ ] #1 `node --test scripts/check-rfc-docs.test.mjs` passes on the current `main` with no RFC edits.
-- [ ] #2 A fixture RFC with `status: Bogus` still fails with the "invalid or missing 'status'" message.
-- [ ] #3 `KNOWN_STATUSES` is derived from the other two sets, not a third hand-written list.
-- [ ] #4 `pnpm build && pnpm test && pnpm lint && pnpm format:check` green.
+- [x] #1 `node --test scripts/check-rfc-docs.test.mjs` passes on the current `main` with no RFC edits.
+- [x] #2 A fixture RFC with `status: Bogus` still fails with the "invalid or missing 'status'" message.
+- [x] #3 `KNOWN_STATUSES` is derived from the other two sets, not a third hand-written list.
+- [x] #4 `pnpm build && pnpm test && pnpm lint && pnpm format:check` green.
 
 **Velocity impact.** Positive and urgent: every PR's test run is red until this lands; the fix is a few lines with no behaviour change for existing RFCs.
