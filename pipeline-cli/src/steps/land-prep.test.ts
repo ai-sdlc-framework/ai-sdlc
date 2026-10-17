@@ -179,6 +179,32 @@ describe('landPrep (real git)', () => {
     expect(res.ok).toBe(false);
   });
 
+  it('fails when origin/<branch> is unknown locally (no lease value)', async () => {
+    const { root, wt } = setup();
+    dirs.push(root);
+    const res = await landPrep({ worktreePath: wt, branch: 'feat/never-pushed', env: {} });
+    expect(res.ok).toBe(false);
+    expect(res.pushed).toBe(false);
+    expect(res.reason).toMatch(/lease has no expected value/);
+  });
+
+  it('reports a push that the hook rejects without changing anything', async () => {
+    const { root, wt } = setup();
+    dirs.push(root);
+    writeFileSync(join(wt, 'b.txt'), 'mine\n');
+    git(wt, 'add', 'b.txt');
+    git(wt, 'commit', '-q', '-m', 'mine');
+    git(wt, 'push', '-q', '-u', 'origin', 'feat/x');
+    const hook = join(wt, '.git', 'hooks', 'pre-push');
+    mkdirSync(join(wt, '.git', 'hooks'), { recursive: true });
+    writeFileSync(hook, '#!/bin/sh\necho nope >&2\nexit 1\n');
+    chmodSync(hook, 0o755);
+    const res = await landPrep({ worktreePath: wt, branch: 'feat/x', env: {} });
+    expect(res.ok).toBe(false);
+    expect(res.pushed).toBe(false);
+    expect(res.reason).toMatch(/git push failed/);
+  });
+
   it('exits non-zero on a semantic conflict, naming paths, branch unchanged', async () => {
     const { root, wt, other } = setup();
     dirs.push(root);
@@ -376,6 +402,62 @@ describe('flipReady', () => {
     });
     expect(r.ok).toBe(true);
     expect(calls.some((c) => c[1] === 'pr' && c[2] === 'ready')).toBe(true);
+  });
+
+  it('refuses when the PR cannot be read', async () => {
+    const runner: Runner = async () => ({ stdout: '', stderr: 'boom', code: 1 });
+    const r = await flipReady({
+      prNumber: 9,
+      taskId: 'AISDLC-1',
+      worktreePath: fixture(approved),
+      runner,
+    });
+    expect(r.reason).toMatch(/cannot read PR #9/);
+  });
+
+  it('refuses when reviews cannot be read', async () => {
+    const base = runnerFor({ codeql: 'success' }).runner;
+    const runner: Runner = async (cmd, args, o) =>
+      args.join(' ').includes('/reviews')
+        ? { stdout: '', stderr: 'x', code: 1 }
+        : base(cmd, args, o);
+    const r = await flipReady({
+      prNumber: 1,
+      taskId: 'AISDLC-1',
+      worktreePath: fixture(approved),
+      runner,
+    });
+    expect(r.reason).toMatch(/cannot read reviews/);
+  });
+
+  it('refuses when check-runs output is unparseable', async () => {
+    const base = runnerFor({ codeql: 'success' }).runner;
+    const runner: Runner = async (cmd, args, o) =>
+      args.join(' ').includes('check-runs')
+        ? { stdout: '{"check_runs": [', stderr: '', code: 0 }
+        : base(cmd, args, o);
+    const r = await flipReady({
+      prNumber: 1,
+      taskId: 'AISDLC-1',
+      worktreePath: fixture(approved),
+      runner,
+    });
+    expect(r.reason).toMatch(/CodeQL is not green/);
+  });
+
+  it('reports a failed flip when REST and the ready command both fail', async () => {
+    const base = runnerFor({ codeql: 'success', patchDraft: true }).runner;
+    const runner: Runner = async (cmd, args, o) =>
+      cmd === 'gh' && args[0] === 'pr'
+        ? { stdout: '', stderr: 'denied', code: 1 }
+        : base(cmd, args, o);
+    const r = await flipReady({
+      prNumber: 1,
+      taskId: 'AISDLC-1',
+      worktreePath: fixture(approved),
+      runner,
+    });
+    expect(r).toEqual({ ok: false, reason: expect.stringMatching(/flip failed: denied/) });
   });
 
   it('is a no-op for a PR already ready', async () => {
