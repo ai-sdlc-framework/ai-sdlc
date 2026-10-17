@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.36.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.35.0...pipeline-cli-v0.36.0) (2026-10-17)
+
+
+### Features
+
+* cli-dispatch reprioritize and peek --order show and change claim order (AISDLC-904) ([#1709](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1709)) ([853967e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/853967e167dc090d55637986ed85017638f3df16))
+* cli-file task --update edits an existing task on main (AISDLC-921) ([#1742](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1742)) ([98ef1ed](https://github.com/ai-sdlc-framework/ai-sdlc/commit/98ef1ed33dd4f567617c3627c45a7af2f675d4ce))
+* **orchestrator:** hold is a board state set by cli-hierarchy, never stops reporting (AISDLC-899) ([#1660](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1660)) ([b8284f7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b8284f7651b8b3efecbfb03422135940a0ee591f))
+* report rejected briefs every tick and retry on parent head change (AISDLC-952) ([#1702](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1702)) ([a60b32b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a60b32b7f3a8cb6ad419e920aeb2135461ffb3c7))
+
+
+### Bug Fixes
+
+* **orchestrator:** step 0 sweep makes one batched gh call and caches landed branches (AISDLC-958) ([#1739](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1739)) ([ce2a182](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ce2a182981bc66ab8d85cc49ffe75561a604b103))
+* **orchestrator:** up owns the reconcile scheduler; receiver touches .reconcile-wake (AISDLC-932) ([#1729](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1729)) ([191a3cc](https://github.com/ai-sdlc-framework/ai-sdlc/commit/191a3cca193432f832c095e229b26dfe025437a2))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.36.0
+
 ## [0.35.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.34.0...pipeline-cli-v0.35.0) (2026-10-17)
 
 

@@ -1,5 +1,12 @@
 # @ai-sdlc/reference
 
+## [0.36.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.35.0...reference-v0.36.0) (2026-10-17)
+
+
+### Bug Fixes
+
+* atomic generated-schemas write, drop dogfood pretest:coverage build (AISDLC-920) ([#1741](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1741)) ([ee1f008](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ee1f0084b0b7feda300ce7a3529f72aa166c1f39))
+
 ## [0.35.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.34.0...reference-v0.35.0) (2026-10-17)
 
 
