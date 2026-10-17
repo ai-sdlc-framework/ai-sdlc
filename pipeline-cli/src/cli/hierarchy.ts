@@ -77,6 +77,7 @@ import {
   checkOwnWorktreeForOperator,
   clearExecutor,
   clearSelf,
+  clearWarned,
   decideAutoClear,
   boundedHandoffView,
   readHandoff as readGeneratedHandoff,
@@ -991,6 +992,7 @@ export async function runHierarchyCli(
             ...(extras.spawnDetached ? { spawnDetached: extras.spawnDetached } : {}),
           },
         );
+        clearWarned(deps.boardDir, self.name);
         deps.log(JSON.stringify({ ...decision, handoff: handoff.file, scheduled: result }));
         return 0;
       }

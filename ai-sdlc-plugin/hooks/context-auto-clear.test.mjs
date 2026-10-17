@@ -72,6 +72,20 @@ describe('context-auto-clear hook', () => {
     ]);
   });
 
+  it('relays the warn message so the session gets a handoff turn', () => {
+    writeFileSync(join(board, 'hierarchy.json'), '{}');
+    const seen = [];
+    const out = JSON.stringify({ action: 'warn', message: 'run your handoff routine' });
+    const r = runAutoClear(payload, {
+      env: env(),
+      cwd: root,
+      run: () => ({ status: 0, stdout: `${out}\n` }),
+      onWarn: (m) => seen.push(m),
+    });
+    assert.equal(r, 'warned');
+    assert.deepEqual(seen, ['run your handoff routine']);
+  });
+
   it('skips on a missing transcript, remote sandbox, opt-out and missing CLI', () => {
     const run = () => assert.fail('must not run');
     assert.equal(runAutoClear({}, { env: env(), cwd: root, run }), 'no-transcript');

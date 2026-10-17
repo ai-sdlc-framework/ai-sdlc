@@ -2,7 +2,7 @@
 id: AISDLC-870
 title: >-
   auto-clear gives the session a handoff turn before /clear; a clear never discards unsaved session context
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels:

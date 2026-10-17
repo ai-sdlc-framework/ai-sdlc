@@ -567,6 +567,20 @@ cleared within one turn without the operator. An executor that holds an inflight
 cleared: the command reports `defer`, and the first turn after its verdict is written clears it.
 A clear scheduled in the last two minutes is not scheduled again.
 
+**Handoff turn before the clear (AISDLC-870).** A clear never discards unsaved session context.
+
+- **Warn threshold.** The first turn over the role threshold answers `action: warn` and records a
+  stamp (`<board-dir>/handoff/.auto-clear-warned-<name>`). The Stop hook relays the message as a
+  `block` reason: run the handoff routine and do not start new work. Nothing is cleared that turn.
+- **mtime gate.** A later turn clears only once the role's own handoff file was rewritten after the
+  stamp: `<board-dir>/handoff/<name>.md` for dispatch and executors, the dated
+  `.claude/memory/project_planner_handoff_*.md` that `handoff write --role planner` writes for the
+  planner. Until then the command reports `none` (waiting for the handoff).
+- **Hard cap.** At more than 125% of the threshold the clear is issued without a handoff rewrite,
+  and the reason is appended to `<board-dir>/handoff/auto-clear.log`.
+- The stamp is removed when the clear is scheduled or the context is back under the threshold. An
+  executor holding an inflight task is deferred before any of this, as before.
+
 | Role                | Default threshold (tokens) | Resume command              |
 | ------------------- | -------------------------- | --------------------------- |
 | planner             | 150000                     | `/ai-sdlc:planner`          |

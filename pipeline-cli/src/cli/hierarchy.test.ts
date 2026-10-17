@@ -7,6 +7,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -1542,16 +1543,25 @@ describe('handoff and auto-clear subcommands (AISDLC-766)', () => {
     };
     const errSpy = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
     const spawned: string[][] = [];
-    const code = await runHierarchyCli(
-      ['auto-clear', '--transcript', transcript],
-      overrides({ run, env: { TMUX_PANE: '%3' } }),
-      {
-        identity: asCaller('operator-dispatch'),
-        spawnDetached: (_file, args) => {
-          spawned.push([...args]);
+    const go = () =>
+      runHierarchyCli(
+        ['auto-clear', '--transcript', transcript],
+        overrides({ run, env: { TMUX_PANE: '%3' } }),
+        {
+          identity: asCaller('operator-dispatch'),
+          spawnDetached: (_file, args) => {
+            spawned.push([...args]);
+          },
         },
-      },
-    );
+      );
+    await go();
+    expect(JSON.parse(logs.at(-1) as string)).toMatchObject({ action: 'warn' });
+    expect(spawned).toHaveLength(0);
+    const handoffDir = path.join(tmp, 'dispatch', 'handoff');
+    const past = Date.now() / 1000 - 100;
+    utimesSync(path.join(handoffDir, '.auto-clear-warned-operator-dispatch'), past, past);
+    writeFileSync(path.join(handoffDir, 'operator-dispatch.md'), 'handoff');
+    const code = await go();
     expect(errSpy.mock.calls.map((c) => String(c[0])).join('')).toBe('');
     expect(code).toBe(0);
     const out = JSON.parse(logs.at(-1) as string);
