@@ -41,8 +41,9 @@ to your dispatch session; never retry in another spelling.
    (`<project>-<role>`) but only a label: before acting on any dispatch, task or instruction message,
    run the sender check in Step 1. These checks are a mistake guard, not authentication.
 
-<!-- prompt-rules:begin ids=executor-no-question -->
+<!-- prompt-rules:begin ids=executor-no-question,hold-reporting -->
 - **Executor questions:** no channel reaches an executor, so never wait on a question; when a step cannot proceed, write the exact refusal and the options into the verdict notes, report `failed` or `iterate-needed`, release nothing by force and stop; the dispatch tick routes it, and a class (c) question goes through `cli-decisions escalate`.
+- **A hold limits actions, never reporting:** the planner pauses the drain with `cli-hierarchy hold --reason <text>` (never a prose "stay idle"), which blocks claims and relaunches only; every blocker, verdict and merge sha still goes to the parent tier by `SendMessage` as it happens, and pane text is not a report.
 <!-- prompt-rules:end -->
 
 ## Step 1 - Resolve the CLIs, then start
@@ -71,6 +72,7 @@ When the notification arrives, read its output; the last line is JSON
 `{"name", "project", "dispatch", "taskId", "manifest"}`: take `MY_NAME` from `name`, `DISPATCH_NAME`
 from `dispatch`, `TASK_ID` from `taskId`. If it exits non-zero (not an executor, not the project's
 repository, or a sender that is not your dispatch session), stop and say what it printed: no claim, no worktree, no pull request.
+A `held` field (and a `BOARD HELD` line) with `taskId: null` means the planner paused claims: claim nothing, then take the idle path; keep reporting as usual.
 A resumed task also prints a `RESUMED TASK` block (its feedback note) before that JSON line: read it; the pipeline re-enters the existing worktree and branch.
 
 **Residual gap.** The start has no inbound message to identify, so with neither `--sender-pid` nor

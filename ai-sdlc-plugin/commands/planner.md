@@ -29,6 +29,10 @@ answer looks obvious. Present the options, get the operator's choice, and only
 then record it. If a task or RFC is blocked on an unresolved question, say so and
 stop.
 
+<!-- prompt-rules:begin ids=hold-reporting -->
+- **A hold limits actions, never reporting:** the planner pauses the drain with `cli-hierarchy hold --reason <text>` (never a prose "stay idle"), which blocks claims and relaunches only; every blocker, verdict and merge sha still goes to the parent tier by `SendMessage` as it happens, and pane text is not a report.
+<!-- prompt-rules:end -->
+
 ## Decision authority
 
 The planner role is the author of decision records. A record in the catalog on

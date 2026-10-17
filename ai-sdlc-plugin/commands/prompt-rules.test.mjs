@@ -91,6 +91,20 @@ describe('executor command', () => {
   });
 });
 
+describe('hold-and-reporting rule (AISDLC-899)', () => {
+  for (const rel of [
+    'commands/operator-dispatch.md',
+    'commands/executor.md',
+    'commands/planner.md',
+  ]) {
+    it(`${rel} carries the rendered rule exactly once`, () => {
+      const found = findPromptRulesBlock(read(rel));
+      assert.ok(found?.ids.includes('hold-reporting'), `${rel} must carry hold-reporting`);
+      assert.equal(countRuleRestatements(read(rel))['hold-reporting'], 1);
+    });
+  }
+});
+
 describe('prompts carrying a rules block', () => {
   for (const rel of GUARDED) {
     it(`${rel} carries a block`, () => {

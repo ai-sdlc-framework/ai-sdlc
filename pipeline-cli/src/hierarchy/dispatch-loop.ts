@@ -39,6 +39,7 @@ import type { EnqueueEntry } from '../dispatch/enqueue.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
 import { sanitizeVerdict } from '../dispatch/verdict-fields.js';
 import { parseBrief, type ParsedBrief } from './brief-format.js';
+import { readHold, type Hold } from './hold.js';
 import {
   classifyHumanAttention,
   formatHumanAttentionRow,
@@ -204,6 +205,10 @@ export interface TickResult {
   landed?: LandReport;
   /** Decisions moved up a tier this tick because their timebox lapsed. */
   promotions?: PromotedDecision[];
+  /** Present while the board is held (AISDLC-899): claims and relaunches are skipped, reporting is not. */
+  held?: Hold;
+  /** Deterministic list of what stops the drain; the dispatch command sends it to the planner when it changes. */
+  blockers: string[];
 }
 
 /**
@@ -231,6 +236,54 @@ export function computeNextWake(
   const c = peekQueue(boardDir);
   if (c.queued + c.inflight > 0) return { nextWakeSec: WAKE_ACTIVE_SEC, wakeReason: 'active' };
   return { nextWakeSec: WAKE_IDLE_SEC, wakeReason: 'idle' };
+}
+
+/**
+ * What stops the drain, as plain lines (AISDLC-899): the hold, failures awaiting the
+ * planner, queued tasks whose prerequisite has not finished, and queued work with no
+ * running executor. Deterministic, so the command can send it whenever it changes.
+ */
+export function computeBlockers(
+  boardDir: string,
+  held: Hold | null,
+  escalations: readonly { taskId: string }[],
+): string[] {
+  const out: string[] = [];
+  if (held) out.push(`held: ${held.reason}`);
+  for (const e of escalations) out.push(`${e.taskId}: failure awaits the planner`);
+  const queueDir = path.join(boardDir, 'queue');
+  let queued = 0;
+  if (existsSync(queueDir)) {
+    for (const f of readdirSync(queueDir).sort()) {
+      if (!f.endsWith('.json')) continue;
+      queued += 1;
+      try {
+        const m = JSON.parse(readFileSync(path.join(queueDir, f), 'utf-8')) as {
+          taskId?: string;
+          after?: unknown;
+        };
+        const waiting = (Array.isArray(m.after) ? m.after : []).filter(
+          (a): a is string => typeof a === 'string' && !isDone(boardDir, a),
+        );
+        if (m.taskId && waiting.length > 0) {
+          out.push(`${m.taskId}: waits on ${waiting.join(', ')}`);
+        }
+      } catch {
+        /* an unreadable manifest is not a blocker line */
+      }
+    }
+  }
+  if (queued > 0) {
+    try {
+      const running = readRosterChecked(boardDir).roster.sessions.filter(
+        (s) => s.role === 'executor' && s.status === 'running',
+      );
+      if (running.length === 0) out.push(`${queued} task(s) queued and no executor running`);
+    } catch {
+      /* no roster: nothing to say */
+    }
+  }
+  return out;
 }
 
 /** Collaborators of {@link runDispatchTick}; every one is injected in tests. */
@@ -323,6 +376,7 @@ function stateOf(verdict: DispatchVerdict): 'done' | 'failed' {
 async function watchVerdicts(
   deps: LoopDeps,
   state: LoopState,
+  held: Hold | null,
 ): Promise<Pick<TickResult, 'verdicts' | 'escalations'>> {
   const out: Pick<TickResult, 'verdicts' | 'escalations'> = { verdicts: [], escalations: [] };
   const executors = new Set(
@@ -334,8 +388,12 @@ async function watchVerdicts(
     const verdictState = stateOf(raw);
     const key = `${verdictState}:${raw.taskId}:${raw.completedAt}`;
     if (state.handled.includes(key)) continue;
-    state.handled.push(key);
-    saveState(deps.boardDir, state);
+    // Held, the clear and the playbook do not run, so the verdict stays unhandled
+    // and is processed on the first tick after `resume`.
+    if (!held) {
+      state.handled.push(key);
+      saveState(deps.boardDir, state);
+    }
 
     // Everything below this line, and everything printed for the session, comes
     // from the checked copy: a hand-written verdict file never reaches the model,
@@ -350,13 +408,24 @@ async function watchVerdicts(
       ...(verdict.decisionIds ? { decisionIds: verdict.decisionIds } : {}),
       ...(dropped.length > 0 ? { rejectedFields: dropped } : {}),
     };
-    if (executors.has(verdict.workerId)) {
-      report.clear = await clearOnce(deps, verdict);
-    }
-    if (verdictState === 'failed') {
-      const outcome = await deps.playbook(verdict);
-      report.playbook = outcome;
-      if (outcome.escalation) out.escalations.push(outcome.escalation);
+    if (held) {
+      report.clear = { status: 'skipped', reason: `the board is held: ${held.reason}` };
+      if (verdictState === 'failed') {
+        // The playbook re-queues and relaunches; held, the planner decides instead.
+        out.escalations.push({
+          taskId: verdict.taskId,
+          message: `${verdict.taskId} failed (${verdict.outcome}) while the board is held (${held.reason}); the playbook did not run.`,
+        });
+      }
+    } else {
+      if (executors.has(verdict.workerId)) {
+        report.clear = await clearOnce(deps, verdict);
+      }
+      if (verdictState === 'failed') {
+        const outcome = await deps.playbook(verdict);
+        report.playbook = outcome;
+        if (outcome.escalation) out.escalations.push(outcome.escalation);
+      }
     }
     out.verdicts.push(report);
   }
@@ -444,9 +513,13 @@ function buildReports(deps: LoopDeps, state: LoopState, handledCount: number): P
  * Reap stalled claims. The failure record is marked handled first, so the
  * verdict watch never clears the holder a second time.
  */
-async function checkStalls(deps: LoopDeps, state: LoopState): Promise<StalledReport[]> {
+async function checkStalls(
+  deps: LoopDeps,
+  state: LoopState,
+  held: Hold | null,
+): Promise<StalledReport[]> {
   const stall = deps.stall;
-  if (!stall) return [];
+  if (!stall || held) return [];
   try {
     return await reapStalledClaims(
       {
@@ -479,8 +552,9 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   const state = readLoopState(deps.boardDir);
   const { skipped, ...ingestRest } = ingestBriefs(deps, state);
   const ingest = { ...ingestRest, ...(skipped.length > 0 ? { skipped } : {}) };
-  const watch = await watchVerdicts(deps, state);
-  const stalled = await checkStalls(deps, state);
+  const held = readHold(deps.boardDir);
+  const watch = await watchVerdicts(deps, state, held);
+  const stalled = await checkStalls(deps, state, held);
   const reports = buildReports(deps, state, watch.verdicts.length);
   for (const s of stalled) reports.push({ kind: 'progress', text: formatStall(s) });
   let humanAttention: HumanAttentionRow[] = [];
@@ -517,7 +591,10 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     /* an unreadable decision log must not stop the dispatch loop */
   }
   const wake = computeNextWake(deps.boardDir, { ...ingest, ...watch, reports, stalled }, markReady);
+  const blockers = computeBlockers(deps.boardDir, held, watch.escalations);
   return {
+    blockers,
+    ...(held ? { held } : {}),
     ...ingest,
     ...watch,
     reports,

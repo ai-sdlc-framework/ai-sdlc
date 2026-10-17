@@ -84,6 +84,11 @@ const PROMPT_RULES = [
     text: '**Executor questions:** no channel reaches an executor, so never wait on a question; when a step cannot proceed, write the exact refusal and the options into the verdict notes, report `failed` or `iterate-needed`, release nothing by force and stop; the dispatch tick routes it, and a class (c) question goes through `cli-decisions escalate`.',
     detect: /never wait on a question/g,
   },
+  {
+    id: 'hold-reporting',
+    text: '**A hold limits actions, never reporting:** the planner pauses the drain with `cli-hierarchy hold --reason <text>` (never a prose "stay idle"), which blocks claims and relaunches only; every blocker, verdict and merge sha still goes to the parent tier by `SendMessage` as it happens, and pane text is not a report.',
+    detect: /hold limits actions/g,
+  },
 ];
 
 const BEGIN_RE = /<!-- prompt-rules:begin ids=([a-z0-9,-]+) -->/;

@@ -1,0 +1,75 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "2d245e7151beb6f88e66dcb1f4648315e9897b25"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "bc6927ebbf11cf214ad58cd12ec1eb4df9a01bcbef93597c1434fa2fae57d5ee",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer-codex",
+      "transcriptHash": "ec62e4c081af027c41f1400e511c9248c802c089efdda8f22ff80010dfa51441",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "cd597187fd88042c6c738c9e40ab8c5a172a697f4695e0d77645e88d9fd5a6b5",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "cd597187fd88042c6c738c9e40ab8c5a172a697f4695e0d77645e88d9fd5a6b5",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "409be1764931bde9fbcf879b4961ad7add40a5c0a6b552aff4b5746e50653ca8",
+        "b8c8ae9242fb9721bf674eccf2462b4e0b088c6c3227fd27fd34774344bfda3a"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "67ea0e4dfcdf6b7af6dd86b53d2caee052b5f35f2791db0405ac247c7859dc79",
+        "b8c8ae9242fb9721bf674eccf2462b4e0b088c6c3227fd27fd34774344bfda3a"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "1f22a0f9b77ecc467968bd00a99cdfa6dc072e9de8bdd76b0f9a7ca8061ff252",
+        "67a95d67334201d95dbfa16adc6c7000f8aa396c728a997d9a46660c5334e43a"
+      ]
+    }
+  ],
+  "rootHash": "19b63bb4b271fd56ac81c752721454bf7c9083b0b9b88995b0fe67655b7b4048",
+  "rootSignature": "pst9EizemSu8XT3uY88840fKx11OHSjjZhZnEopMz0KDU0csKydBFT3nqWB8l7LVksQ4KQDcQIDIwoRvOMWMCg==",
+  "nonce": "75107276fd5eebfe79a18de980bd7438de79f355d6f3b0408a08ee83adb2b0fa",
+  "leafCount": 3,
+  "signedAt": "2026-10-17T02:13:39.247Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      "ai-sdlc-plugin/commands/executor.md",
+      "ai-sdlc-plugin/commands/operator-dispatch.md",
+      "ai-sdlc-plugin/commands/planner.md",
+      "ai-sdlc-plugin/commands/prompt-rules.test.mjs",
+      "ai-sdlc-plugin/hooks/lib/prompt-rules.js"
+    ],
+    "appliedReviewers": ["code-reviewer-codex", "test-reviewer-codex", "security-reviewer"]
+  }
+}

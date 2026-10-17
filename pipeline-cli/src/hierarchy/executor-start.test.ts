@@ -14,6 +14,7 @@ import { readHeartbeat, releaseInflight, writeManifest } from '../dispatch/board
 import type { DispatchManifest } from '../dispatch/types.js';
 import type { IdentityDeps } from './caller-identity.js';
 import { executorStart } from './executor-start.js';
+import { readHold, writeHold } from './hold.js';
 import { writeRoster } from './roster.js';
 import type { RosterEntry } from './types.js';
 
@@ -82,6 +83,27 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   rmSync(tmp, { recursive: true, force: true });
+});
+
+describe('executorStart on a held board (AISDLC-899)', () => {
+  it('claims nothing and prints the hold reason', async () => {
+    writeManifest(board, mkManifest('AISDLC-9'));
+    writeHold(board, { reason: 'spend paused', since: 'now', by: 'planner' });
+    const claim = vi.fn();
+    const lines: string[] = [];
+    const r = await executorStart(
+      { boardDir: board, cwd: tmp, waitSec: 0, senderRef: 'proj-operator-dispatch' },
+      {
+        identity: identityFor('executor', 'proj-executor-alpha'),
+        repoGit: gitAt(tmp),
+        claim,
+        log: (l) => lines.push(l),
+      },
+    );
+    expect(claim).not.toHaveBeenCalled();
+    expect(r).toMatchObject({ taskId: null, held: 'spend paused' });
+    expect(lines.join('\n')).toContain('BOARD HELD: spend paused');
+  });
 });
 
 describe('executorStart', () => {
@@ -329,6 +351,24 @@ describe('cli-hierarchy executor-start and clear --self (executor)', () => {
     expect(r.code).toBe(0);
     expect(r.out[0]).toContain("[executor] I am 'proj-executor-alpha'");
     expect(JSON.parse(r.out[r.out.length - 1]!)).toMatchObject({ taskId: 'AISDLC-4' });
+  });
+
+  it('hold then resume round-trips; dispatch and executors are refused (AISDLC-899)', async () => {
+    const planner = { identity: identityFor('planner', 'proj-planner') };
+    const held = await run(['hold', '--reason', 'spend paused'], planner);
+    expect(held.code).toBe(0);
+    expect(readHold(board)).toMatchObject({ reason: 'spend paused', by: 'proj-planner' });
+    const refused = await run(['resume'], {
+      identity: identityFor('executor', 'proj-executor-alpha'),
+    });
+    expect(refused.code).toBe(1);
+    expect(refused.err).toMatch(/only the planner or the operator/);
+    expect(readHold(board)).not.toBeNull();
+    expect((await run(['hold'], planner)).code).toBe(2);
+    const resumed = await run(['resume'], planner);
+    expect(resumed.code).toBe(0);
+    expect(JSON.parse(resumed.out[0]!)).toEqual({ ok: true, resumed: true });
+    expect(readHold(board)).toBeNull();
   });
 
   it('exits 1 with a message when the session is not an executor', async () => {
