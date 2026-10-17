@@ -1,0 +1,69 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "053a7aad11d5d1900d54c9dbd174755e2d8f9784"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "9c213b5fa0f182ec6bd05def6afcd9bd473094069a048a34d30da1bf0d1278e1",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer-codex",
+      "transcriptHash": "7204a7e8f0d72c1fde5e0e9d990f7fa2e2beae6b43e459b4cf58f78e7ce34fda",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "d88688c42e2805287ba54d9c66d0d6e3cf63a3e9190fcd6cb152a2ad474b801d",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "d88688c42e2805287ba54d9c66d0d6e3cf63a3e9190fcd6cb152a2ad474b801d",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "c9950ba0921dcc3ab9beb47613b1bf2d23d7f41b72bbe8ce92813e1004b40fb3",
+        "5a01bc4fa288e010e23aab92650e78d63a4a48466ae0ab1d5a6540970a80e131"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "076a14d895ddf976ddb922bd62cd5f263a4182fcd6e7fbcf58062898fd79381e",
+        "5a01bc4fa288e010e23aab92650e78d63a4a48466ae0ab1d5a6540970a80e131"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "604bded4b5484d7c7644f393b409438769332918762f930adbf05849c65f2a4a",
+        "68e23c570b8dcb4bcbaae4f8cba64a1b2a09d1b31a8cca38a6abb2b83735cb87"
+      ]
+    }
+  ],
+  "rootHash": "2883b268d39e396510621c1f1ad2af47b251bb89459212dbc095bd7f6d8bc037",
+  "rootSignature": "TfVZZPJgnaTijFqYZR4uBQcdC2Z6VwWKUZi1fmHwWOtv9pWbxQZPTf6WSF6fSDtSFlRwaXnBmZAUtSjxxUqnAQ==",
+  "nonce": "b6440f40bbd68e9e176f98722dad795cd4a301cb4698cc4763ae89b8ef07a613",
+  "leafCount": 3,
+  "signedAt": "2026-10-17T03:44:02.844Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [".github/workflows/dor-rerun-on-filing-merge.yml"],
+    "appliedReviewers": ["code-reviewer-codex", "test-reviewer-codex", "security-reviewer"]
+  }
+}
