@@ -374,3 +374,8 @@ When the attestation envelope verifies on a `pull_request_target` run, the `Appr
 2. **API returns 403 (GitHub Free private repo).** Init falls back to client-side enforcement: `cli-merge-if-eligible` refuses unless the attestation verifies and checks are green, and the governance hook keeps blocking direct agent merges. `ai-sdlc doctor` reports `enforcement: client-side only; the server cannot block a manual merge` as an error-level finding, because a human can still merge manually in the GitHub UI.
 
 Both paths print what was installed and the opt-out flag, `--no-branch-protection`. `--yes` follows the same detection. Re-run `ai-sdlc init --add branch-protection` after making the repo public or upgrading the plan.
+
+## API-call reductions (AISDLC-955)
+
+- The three `dorny/paths-filter` steps in `Detect Changes` pass `token: ''`, so they diff with git (the job checks out with `fetch-depth: 0`) and make no `pulls/<n>/files` API request.
+- `require-issue-link.yml` runs on `opened`, `synchronize`, `reopened`, `ready_for_review` and `edited` only (no `labeled`/`unlabeled`), under a per-PR concurrency group with `cancel-in-progress`, and lists changed files at `per_page=100`.

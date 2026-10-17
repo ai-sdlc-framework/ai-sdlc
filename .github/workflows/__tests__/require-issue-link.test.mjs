@@ -85,15 +85,12 @@ describe('require-issue-link.yml — workflow structure (AISDLC-443)', () => {
       'must use pull_request_target so fork PRs get elevated GITHUB_TOKEN for status posting',
     );
     const types = triggers.pull_request_target?.types ?? [];
-    for (const required of [
-      'opened',
-      'synchronize',
-      'reopened',
-      'edited',
-      'labeled',
-      'unlabeled',
-    ]) {
+    for (const required of ['opened', 'synchronize', 'reopened', 'edited']) {
       assert.ok(types.includes(required), `pull_request_target types must include '${required}'`);
+    }
+    // AISDLC-955: label flips no longer start a run.
+    for (const dropped of ['labeled', 'unlabeled']) {
+      assert.ok(!types.includes(dropped), `types must not include '${dropped}'`);
     }
   });
 

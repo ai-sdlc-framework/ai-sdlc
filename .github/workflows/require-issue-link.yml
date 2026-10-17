@@ -34,7 +34,12 @@ name: Require Linked Issue
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled, edited]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+# AISDLC-955: one run per PR at a time; a newer event supersedes the older.
+concurrency:
+  group: require-issue-link-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -80,7 +85,7 @@ jobs:
           # both the new and previous path). PR text stays in env vars above.
           # Passed by file path: a large PR's list can exceed the env size limit.
           PR_FILES_FILE="$RUNNER_TEMP/pr-files.txt"
-          gh api --paginate "/repos/$REPO/pulls/$PR_NUMBER/files" \
+          gh api --paginate "/repos/$REPO/pulls/$PR_NUMBER/files?per_page=100" \
             --jq '.[] | .filename, (.previous_filename // empty)' > "$PR_FILES_FILE"
           export PR_FILES_FILE
 
