@@ -105,6 +105,7 @@ jobs:
       python: ${{ steps.sdk-filter.outputs.python }}
       go: ${{ steps.sdk-filter.outputs.go }}
       first_run: ${{ steps.sdk-filter.outputs.first_run }}
+      rfcs: ${{ steps.rfcs-filter.outputs.rfcs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -171,6 +172,15 @@ jobs:
           filters: |
             tasks:
               - 'backlog/tasks/*.md'
+      # Fifth filter (AISDLC-934): true when the PR touches an RFC file. Drives the
+      # rfc-lifecycle job (folded in from the removed rfc-lifecycle-check.yml).
+      - id: rfcs-filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          token: ''
+          filters: |
+            rfcs:
+              - 'spec/rfcs/*.md'
       # Fourth filter (AISDLC-727): SDK + first-run-smoke path filters moved
       # here from ci.yml so this workflow is the only one that runs the suite
       # on pull_request events.
@@ -1115,6 +1125,320 @@ jobs:
             --approving-logins-file "$RUNNER_TEMP/approving-logins.json" \
             --pr-author "$PR_AUTHOR"
 
+  # ── Issue / task link (AISDLC-934) ──────────────────────────────────────
+  # Folded in from the removed require-issue-link.yml (AISDLC-443, AISDLC-700).
+  # The decision logic stays in scripts/issue-link-decision.mjs, taken from the
+  # BASE commit so a PR cannot weaken its own check. Title, body and labels are
+  # read live from the API, so editing the PR body and re-running the job picks
+  # up the new link (the gate does not trigger on `edited`). The job name keeps
+  # the old context name; a missing link fails the job and so ai-sdlc/pr-ready.
+  issue-link:
+    name: ai-sdlc/issue-link
+    needs: detect
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout base (decision script + task listing)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          sparse-checkout: |
+            scripts/issue-link-decision.mjs
+            backlog/tasks
+            backlog/completed
+          persist-credentials: false
+
+      - name: Check for linked issue, backlog task or bypass label
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # Changed paths from the API (adds, modifies, moves; renames list both
+          # the new and previous path). Passed by file path: a large PR's list
+          # can exceed the env size limit.
+          PR_FILES_FILE="$RUNNER_TEMP/pr-files.txt"
+          gh api --paginate "/repos/$REPO/pulls/$PR_NUMBER/files?per_page=100" \
+            --jq '.[] | .filename, (.previous_filename // empty)' > "$PR_FILES_FILE"
+          export PR_FILES_FILE
+
+          # Live PR text (not the event payload, which is stale on a rerun).
+          PR_JSON_FILE="$RUNNER_TEMP/pr.json"
+          gh api "/repos/$REPO/pulls/$PR_NUMBER" > "$PR_JSON_FILE"
+          PR_TITLE=$(jq -r '.title // ""' "$PR_JSON_FILE")
+          PR_BODY=$(jq -r '.body // ""' "$PR_JSON_FILE")
+          PR_LABELS=$(jq -c '[.labels[].name]' "$PR_JSON_FILE")
+          export PR_TITLE PR_BODY PR_LABELS
+
+          # AISDLC-797: JSON goes to a file, never a `$(...)` capture.
+          DECISION_FILE="$RUNNER_TEMP/issue-link-decision.json"
+          decision_rc=0
+          node scripts/issue-link-decision.mjs > "$DECISION_FILE" || decision_rc=$?
+          if ! jq -e 'type == "array" or type == "object"' "$DECISION_FILE" >/dev/null 2>&1; then
+            echo "::error::issue-link decision ${DECISION_FILE} is not valid JSON (issue-link-decision exit code ${decision_rc})."
+            exit 1
+          fi
+          STATE=$(jq -r '.state' "$DECISION_FILE")
+          RULE=$(jq -r '.rule' "$DECISION_FILE")
+          DESCRIPTION=$(jq -r '.description' "$DECISION_FILE")
+          TARGET_URL=$(jq -r '.targetUrl' "$DECISION_FILE")
+          echo "[issue-link] rule=$RULE state=$STATE ($DESCRIPTION)"
+          if [ "$STATE" != "success" ]; then
+            echo "::error::ai-sdlc/issue-link: $DESCRIPTION ${TARGET_URL}"
+            exit 1
+          fi
+
+  # ── RFC lifecycle (AISDLC-934) ──────────────────────────────────────────
+  # Folded in from the removed rfc-lifecycle-check.yml (AISDLC-350, AISDLC-417):
+  # validates spec/rfcs/*.md changes against Draft -> Ready for Review ->
+  # Signed Off -> Implemented, plus the allowlist-mutation and audit-log guards.
+  # Runs only when the PR touches an RFC file; feeds the pr-ready rollup, so a
+  # forbidden transition fails ai-sdlc/pr-ready with the same messages as before.
+  rfc-lifecycle:
+    name: RFC Lifecycle Gate
+    needs: detect
+    if: >-
+      github.event_name == 'pull_request' &&
+      needs.detect.outputs.rfcs == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout (full history for diff + base ref)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch (PR context)
+        run: |
+          git fetch --no-tags --depth=1 origin \
+            "${{ github.event.pull_request.base.sha }}" || true
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies (root only, for js-yaml)
+        run: pnpm install --filter "." --frozen-lockfile
+
+      - name: Detect changed RFC files
+        id: rfc-changes
+        run: |
+          set -euo pipefail
+
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+
+          # List RFC files that changed between base and head.
+          changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- 'spec/rfcs/*.md' 2>/dev/null || true)"
+
+          # Sanitise: remove template file (not a real RFC).
+          changed="$(printf '%s\n' "$changed" | grep -v 'RFC-0001-template.md' || true)"
+
+          echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+          if [ -z "$changed" ]; then
+            echo "has_rfcs=false" >> "$GITHUB_OUTPUT"
+            echo "[rfc-lifecycle] No RFC files changed — gate passes unconditionally."
+          else
+            echo "has_rfcs=true" >> "$GITHUB_OUTPUT"
+            echo "changed_rfcs<<EOF" >> "$GITHUB_OUTPUT"
+            echo "$changed" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+            echo "[rfc-lifecycle] Changed RFC files:"
+            echo "$changed" | sed 's/^/  /'
+          fi
+
+      - name: Fetch PR body for override marker
+        id: pr-body
+        if: steps.rfc-changes.outputs.has_rfcs == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          pr_body="$(gh pr view "${{ github.event.pull_request.number }}" \
+            --json body --jq '.body // ""' 2>/dev/null || echo "")"
+          # Write to file to avoid shell quoting issues with multi-line bodies.
+          printf '%s' "$pr_body" > /tmp/pr-body.txt
+          echo "[rfc-lifecycle] Fetched PR body (${#pr_body} chars)."
+
+      # AISDLC-417 guard 1: allowlist same-PR mutation
+      # A PR that modifies lifecycle-approvers.yaml AND uses an override marker
+      # can self-approve a bypass. Fail if both are true simultaneously.
+      - name: Guard — allowlist same-PR mutation
+        id: allowlist-mutation-guard
+        run: |
+          set -euo pipefail
+
+          BASE_SHA="${{ steps.rfc-changes.outputs.base_sha }}"
+          HEAD_SHA="${{ steps.rfc-changes.outputs.head_sha }}"
+
+          ALLOWLIST_DIFF="$(git diff "$BASE_SHA" "$HEAD_SHA" -- \
+            .ai-sdlc/lifecycle-approvers.yaml 2>/dev/null || true)"
+
+          if [ -z "$ALLOWLIST_DIFF" ]; then
+            echo "[rfc-lifecycle] allowlist-mutation-guard: no allowlist changes — skip."
+            exit 0
+          fi
+
+          echo "[rfc-lifecycle] allowlist-mutation-guard: lifecycle-approvers.yaml changed."
+
+          # Check for an override marker in the PR body.
+          PR_BODY_FILE="/tmp/pr-body.txt"
+          if [ ! -f "$PR_BODY_FILE" ]; then
+            echo "[rfc-lifecycle] allowlist-mutation-guard: no PR body file — skip marker check."
+            exit 0
+          fi
+
+          if grep -qP '<!--\s*ai-sdlc:lifecycle-jump-approved-by:[a-zA-Z0-9_-]{1,32}\s+reason:.+-->' \
+              "$PR_BODY_FILE" 2>/dev/null; then
+            echo "::error::[rfc-lifecycle] FAIL: This PR modifies .ai-sdlc/lifecycle-approvers.yaml AND contains an override marker. Allowing a PR to both expand the approvers allowlist and use that allowlist to bypass the lifecycle ladder in the same diff is a privilege-escalation vector. Split into two PRs: one that adds the approver, and a separate PR (after the first merges) that uses the override marker."
+            exit 1
+          fi
+
+          echo "[rfc-lifecycle] allowlist-mutation-guard: allowlist changed but no override marker — OK."
+
+      # AISDLC-417 guard 2: audit log append-only integrity
+      # The lifecycle-overrides.jsonl audit log is append-only by contract.
+      # Any line removal in a PR diff is a policy violation.
+      - name: Guard — audit log append-only integrity
+        id: audit-log-integrity-guard
+        run: |
+          set -euo pipefail
+
+          BASE_SHA="${{ steps.rfc-changes.outputs.base_sha }}"
+          HEAD_SHA="${{ steps.rfc-changes.outputs.head_sha }}"
+
+          AUDIT_DIFF="$(git diff "$BASE_SHA" "$HEAD_SHA" -- \
+            .ai-sdlc/_audit/lifecycle-overrides.jsonl 2>/dev/null || true)"
+
+          if [ -z "$AUDIT_DIFF" ]; then
+            echo "[rfc-lifecycle] audit-log-integrity-guard: no audit log changes — skip."
+            exit 0
+          fi
+
+          # Look for removed content lines (starts with '-' but not '---' diff header).
+          REMOVED="$(printf '%s\n' "$AUDIT_DIFF" | grep -E '^-[^-]' || true)"
+
+          if [ -z "$REMOVED" ]; then
+            echo "[rfc-lifecycle] audit-log-integrity-guard: only additions — OK."
+            exit 0
+          fi
+
+          REMOVED_COUNT="$(printf '%s\n' "$REMOVED" | wc -l | tr -d ' ')"
+          echo "::error::[rfc-lifecycle] FAIL: The audit log .ai-sdlc/_audit/lifecycle-overrides.jsonl is append-only — existing entries must never be removed. This PR removes ${REMOVED_COUNT} line(s). Audit log tampering undermines the governance trail. Restore the removed entries and re-push."
+          exit 1
+
+      - name: Check RFC lifecycle transitions
+        id: lifecycle-check
+        if: steps.rfc-changes.outputs.has_rfcs == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          BASE_SHA="${{ steps.rfc-changes.outputs.base_sha }}"
+          PR_NUMBER="${{ github.event.pull_request.number || '' }}"
+          HEAD_SHA="${{ steps.rfc-changes.outputs.head_sha }}"
+          REPO_ROOT="$(pwd)"
+
+          # GH review-based override path was REMOVED 2026-05-23 (security review
+          # PR #652). The implementation had multiple critical gaps:
+          #   - ALLOWLIST check was a dead no-op (imported non-existent
+          #     /tmp/lccheck.mjs, silently swallowed via .catch(() => {})).
+          #   - REVIEW_LOGIN was fetched but never compared to the allowlist.
+          #   - parseOverrideMarker read the operator NAME from the marker text
+          #     (which the reviewer wrote) — not from review.user.login. So any
+          #     user with approve-permission could paste an allowlisted name and
+          #     bypass the gate.
+          #   - the PR body was silently replaced with the review body, which transformed the
+          #     dual-location requirement into (review-body AND RFC-body),
+          #     contradicting the AC.
+          # The PR body + RFC body dual-location path remains and works
+          # correctly. Operators wanting to override should use that path.
+
+          EXIT_CODE=0
+
+          while IFS= read -r rfc_file; do
+            [ -z "$rfc_file" ] && continue
+
+            echo ""
+            echo "[rfc-lifecycle] Checking: $rfc_file"
+
+            # Extract RFC ID from filename (e.g. RFC-0011).
+            rfc_id="$(basename "$rfc_file" .md | grep -oE '^RFC-[0-9]+'  || echo "RFC-unknown")"
+
+            # Write before-content to a temp file (git show may fail for new files).
+            before_file="/tmp/rfc-before-${rfc_id}.md"
+            after_file="/tmp/rfc-after-${rfc_id}.md"
+
+            if git show "${BASE_SHA}:${rfc_file}" > "$before_file" 2>/dev/null; then
+              echo "[rfc-lifecycle]   Before content: extracted from git ($BASE_SHA)"
+            else
+              # New file — no before content.
+              rm -f "$before_file"
+              echo "[rfc-lifecycle]   Before content: (none — new file)"
+            fi
+
+            # After content is the current working tree.
+            if [ -f "$rfc_file" ]; then
+              cp "$rfc_file" "$after_file"
+            else
+              rm -f "$after_file"
+              echo "[rfc-lifecycle]   After content: (none — file deleted)"
+            fi
+
+            # Build args for the check script.
+            CHECK_ARGS=""
+            if [ -f "$before_file" ]; then
+              CHECK_ARGS="$CHECK_ARGS --before $before_file"
+            fi
+            if [ -f "$after_file" ]; then
+              CHECK_ARGS="$CHECK_ARGS --after $after_file"
+            fi
+            CHECK_ARGS="$CHECK_ARGS --rfc-id $rfc_id"
+            CHECK_ARGS="$CHECK_ARGS --repo-root $REPO_ROOT"
+            if [ -n "$PR_NUMBER" ]; then
+              CHECK_ARGS="$CHECK_ARGS --pr-number $PR_NUMBER"
+            fi
+            CHECK_ARGS="$CHECK_ARGS --commit-sha $HEAD_SHA"
+
+            # Use --pr-body-file to avoid command-substitution injection with
+            # multi-line / special-char PR bodies (AISDLC-417).
+            PR_BODY_FILE_ARG=""
+            if [ -f /tmp/pr-body.txt ]; then
+              PR_BODY_FILE_ARG="--pr-body-file /tmp/pr-body.txt"
+            fi
+
+            # Run the lifecycle checker.
+            # shellcheck disable=SC2086
+            if ! node scripts/check-rfc-lifecycle-transitions.mjs \
+              $CHECK_ARGS \
+              $PR_BODY_FILE_ARG; then
+              EXIT_CODE=1
+              echo "::error file=${rfc_file}::RFC lifecycle transition violation detected for ${rfc_id}. See job log for details."
+            fi
+
+          done <<< "${{ steps.rfc-changes.outputs.changed_rfcs }}"
+
+          echo ""
+          if [ "$EXIT_CODE" -eq 0 ]; then
+            echo "[rfc-lifecycle] All RFC lifecycle transitions are valid."
+          else
+            echo "[rfc-lifecycle] One or more forbidden lifecycle transitions detected."
+          fi
+
+          exit "$EXIT_CODE"
+
   pr-ready:
     name: ai-sdlc/pr-ready
     needs:
@@ -1132,6 +1456,8 @@ jobs:
         dependency-review-gate,
         dor-readiness-gate,
         governance-gate,
+        issue-link,
+        rfc-lifecycle,
       ]
     # AISDLC-218: skip the rollup on draft PRs. With all upstream jobs skipped
     # (per their own draft guards), `re-actors/alls-green` treats all-skipped
@@ -1182,7 +1508,8 @@ jobs:
             attestation-gate,
             independence-policy-gate,
             dependency-review-gate,
-            dor-readiness-gate
+            dor-readiness-gate,
+            rfc-lifecycle
 
       # AISDLC-927: surface the shared installation quota so an exhausted budget
       # is visible in the run summary. /rate_limit itself is not metered.

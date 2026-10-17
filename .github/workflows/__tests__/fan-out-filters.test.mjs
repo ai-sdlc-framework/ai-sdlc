@@ -16,15 +16,9 @@ const load = (n) => yaml.load(readFileSync(resolve(dir, n), 'utf8'));
 const onOf = (wf) => wf.on ?? wf[true];
 
 describe('fan-out filters (AISDLC-927)', () => {
-  it('codeql ignores record and docs paths on pull_request only', () => {
+  it('codeql has no pull_request trigger and scans push to main and the schedule', () => {
     const on = onOf(load('codeql.yml'));
-    assert.deepEqual(on.pull_request['paths-ignore'], [
-      'backlog/**',
-      '.ai-sdlc/_decisions/**',
-      'docs/**',
-      'spec/**',
-    ]);
-    assert.equal(on.push['paths-ignore'], undefined);
+    assert.equal(on.pull_request, undefined);
     assert.equal(on.push.branches[0], 'main');
     assert.ok(on.schedule);
   });

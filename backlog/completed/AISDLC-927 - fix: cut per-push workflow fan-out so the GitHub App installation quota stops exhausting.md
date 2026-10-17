@@ -1,14 +1,32 @@
 ---
 id: AISDLC-927
-title: 'fix: cut per-push workflow fan-out so the GitHub App installation quota stops exhausting every hour'
+title: >-
+  fix: cut per-push workflow fan-out so the GitHub App installation quota stops
+  exhausting every hour
 status: Done
 assignee: []
 created_date: '2026-10-15'
-labels: [bug, ci, velocity, token-cost, github-actions]
+labels:
+  - bug
+  - ci
+  - velocity
+  - token-cost
+  - github-actions
 dependencies: []
-references: [.github/workflows/codeql.yml, .github/workflows/attestation-post.yml, .github/workflows/ai-sdlc-gate.yml, .github/workflows/main-health-monitor.yml, .github/workflows/require-issue-link.yml, docs/operations/quality-gate.md]
+references:
+  - .github/workflows/codeql.yml
+  - .github/workflows/attestation-post.yml
+  - .github/workflows/ai-sdlc-gate.yml
+  - .github/workflows/main-health-monitor.yml
+  - docs/operations/quality-gate.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-17'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: .github/workflows/require-issue-link.yml'
+    resolution: flagged
+drift_checked: '2026-10-17'
 ---
 
 ## Description

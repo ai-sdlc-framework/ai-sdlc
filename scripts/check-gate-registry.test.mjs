@@ -115,8 +115,6 @@ const BASELINE_IDS = [
   'gate-job:pr-ready',
   'workflow:ai-sdlc-review.yml',
   'workflow:auto-enable-auto-merge.yml',
-  'workflow:require-issue-link.yml',
-  'workflow:rfc-lifecycle-check.yml',
   'workflow:untrusted-pr-gate.yml',
   'pre-push:scripts/check-substrate-contract.mjs',
   'pre-push:scripts/check-skip-ci-marker.sh',

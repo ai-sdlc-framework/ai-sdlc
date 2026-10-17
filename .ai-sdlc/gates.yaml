@@ -113,18 +113,18 @@ gates:
     owner: engineering
     property: arms auto-merge (squash) on same-repo PRs; not a quality gate
     baseline: true
-  - id: workflow:require-issue-link.yml
-    surface: pr-workflow
-    origin: AISDLC-443, AISDLC-700
+  - id: gate-job:issue-link
+    surface: pr-ready-job
+    origin: AISDLC-443, AISDLC-700, AISDLC-934
     owner: engineering
-    property: external PRs link an issue; posts ai-sdlc/issue-link
-    baseline: true
-  - id: workflow:rfc-lifecycle-check.yml
-    surface: pr-workflow
-    origin: AISDLC-350, AISDLC-417
+    property: PRs link an issue or backlog task; a missing link fails ai-sdlc/pr-ready (folded in from require-issue-link.yml)
+    decision: DEC-0250
+  - id: gate-job:rfc-lifecycle
+    surface: pr-ready-job
+    origin: AISDLC-350, AISDLC-417, AISDLC-934
     owner: engineering
-    property: RFC lifecycle promotions follow the allowed ladder
-    baseline: true
+    property: RFC lifecycle promotions follow the allowed ladder (folded in from rfc-lifecycle-check.yml)
+    decision: DEC-0250
   - id: workflow:untrusted-pr-gate.yml
     surface: pr-workflow
     origin: RFC-0043 Phase 5, AISDLC-501, AISDLC-704.6, AISDLC-740
@@ -353,9 +353,3 @@ gates:
     owner: security
     property: agent under review cannot rewrite the local review state that decides delta reviews
     decision: DEC-0219
-  - id: workflow:codeql.yml
-    surface: pr-workflow
-    origin: AISDLC-840
-    owner: security
-    property: CodeQL code scanning; go, python and actions run per PR only when their paths change, weekly and main push scan all four languages
-    decision: DEC-0161

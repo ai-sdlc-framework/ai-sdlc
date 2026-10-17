@@ -94,6 +94,7 @@ const ALLOWED_SKIPS = new Set([
   'independence-policy-gate',
   'dependency-review-gate',
   'dor-readiness-gate',
+  'rfc-lifecycle',
 ]);
 
 function allsGreenDecision(needs) {
@@ -174,6 +175,9 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       'dor-readiness-gate',
       // AISDLC-764: changelog, scope-creep, OQ-marker and reviewer-set checks.
       'governance-gate',
+      // AISDLC-934: folded in from require-issue-link.yml and rfc-lifecycle-check.yml.
+      'issue-link',
+      'rfc-lifecycle',
       'pr-ready',
     ];
     assert.deepEqual(Object.keys(workflow.jobs).sort(), expectedJobs.sort());

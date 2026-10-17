@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 import { decide } from '../../../scripts/issue-link-decision.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const WORKFLOW_PATH = resolve(__dirname, '..', 'require-issue-link.yml');
+const WORKFLOW_PATH = resolve(__dirname, '..', 'ai-sdlc-gate.yml');
 
 // ── YAML loader (shells out to python3 + PyYAML) ─────────────────────────
 function loadYaml(path) {
@@ -65,87 +65,30 @@ let checkJob;
 
 before(() => {
   workflow = loadYaml(WORKFLOW_PATH);
-  checkJob = workflow.jobs['check-issue-link'];
+  checkJob = workflow.jobs['issue-link'];
 });
 
 // ─────────────────────────────────────────────────────────────────────────
 // 1. Workflow structure
 // ─────────────────────────────────────────────────────────────────────────
 
-describe('require-issue-link.yml — workflow structure (AISDLC-443)', () => {
-  it('parses as valid YAML', () => {
-    assert.ok(workflow, 'workflow must parse');
+describe('ai-sdlc-gate.yml issue-link job — structure (AISDLC-443, AISDLC-934)', () => {
+  it('require-issue-link.yml is gone; the check is a gate job', () => {
+    assert.ok(checkJob, 'issue-link job must exist in ai-sdlc-gate.yml');
+    assert.equal(checkJob.name, 'ai-sdlc/issue-link');
   });
 
-  it('triggers on pull_request_target with expected event types (AC #2)', () => {
-    const triggers = workflow.on ?? workflow[true] ?? workflow['on'];
-    assert.ok(triggers, 'workflow must declare triggers');
-    assert.ok(
-      'pull_request_target' in triggers,
-      'must use pull_request_target so fork PRs get elevated GITHUB_TOKEN for status posting',
-    );
-    const types = triggers.pull_request_target?.types ?? [];
-    for (const required of ['opened', 'synchronize', 'reopened', 'edited']) {
-      assert.ok(types.includes(required), `pull_request_target types must include '${required}'`);
-    }
-    // AISDLC-955: label flips no longer start a run.
-    for (const dropped of ['labeled', 'unlabeled']) {
-      assert.ok(!types.includes(dropped), `types must not include '${dropped}'`);
-    }
+  it('feeds the pr-ready rollup and is not an allowed skip', () => {
+    const prReady = workflow.jobs['pr-ready'];
+    assert.ok(prReady.needs.includes('issue-link'));
+    const skips = prReady.steps.find((s) => s.uses?.startsWith('re-actors/alls-green'));
+    assert.doesNotMatch(String(skips.with['allowed-skips']), /issue-link/);
   });
 
-  it('declares check-issue-link job (AC #2)', () => {
-    assert.ok(checkJob, 'check-issue-link job must exist');
-  });
-
-  it('job name is ai-sdlc/issue-link (the posted status context name, AC #2)', () => {
-    assert.equal(
-      checkJob.name,
-      'ai-sdlc/issue-link',
-      'job name must be "ai-sdlc/issue-link" — this is the status context displayed in PR checks UI',
-    );
-  });
-
-  it('workflow top-level permissions are least-privilege (contents:read only) (AC #2)', () => {
-    const perms = workflow.permissions ?? {};
-    assert.equal(
-      perms.contents,
-      'read',
-      'top-level permissions must be contents:read (least-privilege default)',
-    );
-    assert.notEqual(
-      perms.contents,
-      'write',
-      'must NOT have contents:write at top-level (unnecessary; security hygiene)',
-    );
-  });
-
-  it('check-issue-link job permissions include statuses:write and pull-requests:read (AC #2)', () => {
-    const jobPerms = checkJob.permissions ?? {};
-    assert.equal(
-      jobPerms.statuses,
-      'write',
-      'check-issue-link job must have statuses:write to post ai-sdlc/issue-link',
-    );
-    assert.equal(
-      jobPerms['pull-requests'],
-      'read',
-      'check-issue-link job must have pull-requests:read to read PR metadata',
-    );
-  });
-
-  it('job skips on draft PRs', () => {
-    assert.ok(checkJob.if, 'check-issue-link must have an if: guard to skip draft PRs');
-    assert.match(
-      String(checkJob.if),
-      /draft\s*==\s*false/,
-      'if: must skip draft PRs (informational check — not needed on drafts)',
-    );
-  });
-
-  it('check step id is "check" (AC #2 — step output referenced by id)', () => {
-    const checkStep = (checkJob.steps ?? []).find((s) => s.id === 'check');
-    assert.ok(checkStep, 'must have a step with id: check');
+  it('has least-privilege permissions (no statuses:write)', () => {
+    assert.equal(checkJob.permissions.contents, 'read');
+    assert.equal(checkJob.permissions['pull-requests'], 'read');
+    assert.equal(checkJob.permissions.statuses, undefined);
   });
 
   it('workflow is valid YAML when validated by python3 + PyYAML', () => {
@@ -292,45 +235,31 @@ describe('require-issue-link.yml — bypass label: ci:no-issue-required → succ
 //    scripts/issue-link-decision.mjs (AISDLC-700) and posts its result.
 // ─────────────────────────────────────────────────────────────────────────
 
-describe('require-issue-link.yml — script body sanity (AC #2, #5)', () => {
-  const runScript = () => String((checkJob.steps ?? []).find((s) => s.id === 'check')?.run ?? '');
+describe('ai-sdlc-gate.yml issue-link job — script body sanity (AC #2)', () => {
+  const runScript = () =>
+    String((checkJob.steps ?? []).find((s) => /issue-link-decision/.test(s.run ?? ''))?.run ?? '');
 
-  it('check step delegates the decision to scripts/issue-link-decision.mjs', () => {
+  it('delegates the decision to scripts/issue-link-decision.mjs', () => {
     assert.match(runScript(), /node scripts\/issue-link-decision\.mjs/);
   });
 
-  it('workflow checks out the base ref sparsely and never persists credentials', () => {
-    const checkout = (checkJob.steps ?? []).find((s) =>
+  it('checks out the BASE sha sparsely and never persists credentials', () => {
+    const checkout = checkJob.steps.find((s) =>
       String(s.uses ?? '').startsWith('actions/checkout@'),
     );
-    assert.ok(checkout, 'a checkout step must provide the decision script');
     assert.equal(checkout.with['persist-credentials'], false);
     assert.match(checkout.with['sparse-checkout'], /scripts\/issue-link-decision\.mjs/);
-    assert.equal(
-      checkout.with.ref,
-      undefined,
-      'pull_request_target must keep the default base ref',
-    );
+    assert.match(String(checkout.with.ref), /pull_request\.base\.sha/);
   });
 
-  it('PR text reaches the script only through env, never interpolated into run:', () => {
-    const checkStep = (checkJob.steps ?? []).find((s) => s.id === 'check');
-    assert.ok(checkStep.env.PR_TITLE && checkStep.env.PR_BODY && checkStep.env.PR_LABELS);
-    assert.doesNotMatch(runScript(), /\$\{\{/, 'run script must not interpolate expressions');
-  });
-
-  it('check step lists changed files via the API', () => {
+  it('PR text is read live from the API, never interpolated into run:', () => {
+    assert.doesNotMatch(runScript(), /\$\{\{/);
+    assert.match(runScript(), /pulls\/\$PR_NUMBER"/);
     assert.match(runScript(), /pulls\/\$PR_NUMBER\/files/);
   });
 
-  it('check step posts ai-sdlc/issue-link with the script-chosen state and description', () => {
-    const run = runScript();
-    assert.match(run, /context="ai-sdlc\/issue-link"/);
-    assert.match(run, /state="\$STATE"/);
-    assert.match(run, /description="\$DESCRIPTION"/);
-  });
-
-  it('check step uses gh api to post statuses (not curl — leverages GITHUB_TOKEN auth)', () => {
-    assert.match(runScript(), /gh api/);
+  it('fails the job when the decision state is not success', () => {
+    assert.match(runScript(), /"\$STATE" != "success"/);
+    assert.match(runScript(), /exit 1/);
   });
 });

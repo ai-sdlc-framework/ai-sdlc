@@ -26,27 +26,17 @@ describe('codeql.yml', () => {
     ]);
   });
 
-  it('runs on PR, push to main, and a weekly schedule', () => {
+  it('runs on push to main and a weekly schedule, never on pull_request (AISDLC-934)', () => {
     const on = wf.on ?? wf[true];
-    assert.ok(on.pull_request);
+    assert.equal(on.pull_request, undefined);
+    assert.equal(on.pull_request_target, undefined);
     assert.deepEqual(on.push.branches, ['main']);
     assert.ok(on.schedule?.[0]?.cron);
   });
 
-  it('filters per language only on pull_request, never on schedule or push', () => {
-    const scope = job.steps.find((s) => s.id === 'scope');
-    assert.match(scope.run, /\$EVENT" = "pull_request"/);
-    assert.match(scope.run, /go\) pattern='\^sdk-go\/'/);
-    assert.match(scope.run, /python\) pattern='\\\.py\$'/);
-    assert.match(scope.run, /run=true\n/);
-  });
-
-  it('gates init and analyze on the scope step', () => {
-    for (const step of job.steps.filter((s) =>
-      /codeql-action\/(init|analyze)/.test(s.uses ?? ''),
-    )) {
-      assert.equal(step.if, "steps.scope.outputs.run == 'true'");
-    }
+  it('scans every language unfiltered', () => {
+    assert.ok(!job.steps.some((s) => s.id === 'scope'));
+    for (const step of job.steps) assert.equal(step.if, undefined);
   });
 
   it('pins every action to a commit SHA', () => {

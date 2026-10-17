@@ -18,18 +18,12 @@ test('no dorny/paths-filter step passes a token', () => {
   for (const s of dorny) assert.equal(s.with.token, '');
 });
 
-test('require-issue-link has a concurrency group and no label triggers', () => {
-  const doc = load('require-issue-link.yml');
-  assert.ok(doc.concurrency?.group);
-  assert.equal(doc.concurrency['cancel-in-progress'], true);
-  const on = doc.on ?? doc[true];
-  assert.deepEqual(on.pull_request_target.types, [
-    'opened',
-    'synchronize',
-    'reopened',
-    'ready_for_review',
-    'edited',
-  ]);
+test('issue-link and rfc-lifecycle are gate jobs feeding pr-ready (AISDLC-934)', () => {
+  const doc = load('ai-sdlc-gate.yml');
+  for (const job of ['issue-link', 'rfc-lifecycle']) {
+    assert.ok(doc.jobs[job], `${job} job exists`);
+    assert.ok(doc.jobs['pr-ready'].needs.includes(job), `pr-ready needs ${job}`);
+  }
 });
 
 test('ai-sdlc-gate has a concurrency group', () => {

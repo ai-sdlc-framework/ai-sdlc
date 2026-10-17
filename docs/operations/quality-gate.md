@@ -338,9 +338,9 @@ This is overkill for AI-SDLC's own dogfood repo (single-dev, low PR volume, fast
 
 For repos with a merge queue enabled (GHMQ, Mergify, Aviator), add `merge_group: types: [checks_requested]` back to `ai-sdlc-gate.yml`'s `on:` block — the aggregator was written to handle both events and the logic is preserved in git history (AISDLC-400 removed it for the direct-merge path). Repeat the shadow-mode comparison for `merge_group` events in that case.
 
-## CodeQL scope (AISDLC-840, DEC-0161)
+## CodeQL scope (AISDLC-840, DEC-0161; AISDLC-934, DEC-0250)
 
-CodeQL runs from `.github/workflows/codeql.yml` (advanced setup), not GitHub default setup. Per pull request: `javascript-typescript` always runs; `go` runs only when `sdk-go/**` changes; `python` only when a `.py` file changes; `actions` only when `.github/workflows/**` or `.github/actions/**` changes. A weekly schedule (Mondays 05:17 UTC) and every push to `main` scan all four languages unfiltered, so a skipped PR scan is never a permanent gap. The per-language check is a step inside the job (not a workflow `paths:` filter), so each `Analyze (<language>)` check always reports.
+CodeQL runs from `.github/workflows/codeql.yml` (advanced setup), not GitHub default setup. It has no `pull_request` trigger (AISDLC-934): a PR starts no CodeQL run, which saves the repository Actions token bucket during a drain. Every push to `main` and a weekly schedule (Mondays 05:17 UTC) scan all four languages (`actions`, `go`, `javascript-typescript`, `python`) unfiltered, so a vulnerable diff is scanned minutes after landing. The attestation reviewers still gate landing. This timing change is a recorded governance weakening (DEC-0250).
 
 Operator action: default setup must be disabled or both setups upload duplicate alerts: `gh api -X PATCH repos/ai-sdlc-framework/ai-sdlc/code-scanning/default-setup -f state=not-configured`.
 
@@ -378,4 +378,13 @@ Both paths print what was installed and the opt-out flag, `--no-branch-protectio
 ## API-call reductions (AISDLC-955)
 
 - The three `dorny/paths-filter` steps in `Detect Changes` pass `token: ''`, so they diff with git (the job checks out with `fetch-depth: 0`) and make no `pulls/<n>/files` API request.
-- `require-issue-link.yml` runs on `opened`, `synchronize`, `reopened`, `ready_for_review` and `edited` only (no `labeled`/`unlabeled`), under a per-PR concurrency group with `cancel-in-progress`, and lists changed files at `per_page=100`.
+- The `issue-link` job (formerly `require-issue-link.yml`) lists changed files at `per_page=100` and reads the live PR text, so it runs under the gate's concurrency group and a rerun picks up an edited body.
+
+## Consolidated gate (AISDLC-934, DEC-0250)
+
+Two standalone PR workflows became jobs of `ai-sdlc-gate.yml`, so one checkout and one token budget serve them and both feed `ai-sdlc/pr-ready`:
+
+- `issue-link` (check name `ai-sdlc/issue-link`): runs `scripts/issue-link-decision.mjs` from the base commit. A PR with no issue or backlog task link (and no `ci:no-issue-required` label) fails the job and so `ai-sdlc/pr-ready`, with the same description as before. It no longer posts a separate commit status.
+- `rfc-lifecycle` (check name `RFC Lifecycle Gate`): runs only when `Detect Changes` reports a changed `spec/rfcs/*.md` (`rfcs` output; an allowed skip otherwise). It keeps the transition check and the AISDLC-417 guards, and a forbidden transition fails `ai-sdlc/pr-ready`.
+
+A trusted PR push starts two workflows: the gate and the auto-arm workflow. `untrusted-pr-gate.yml` and `ai-sdlc-review.yml` also start but every job is skipped by a job-level trust condition (fork, non-collaborator or bot only), so no runner starts and no API call is made. `no-new-pr-gate.test.mjs` fails if any other workflow gains a `pull_request` or `pull_request_target` trigger.
