@@ -147,6 +147,9 @@ jobs:
       - id: deps-filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
+          # AISDLC-955: empty token makes dorny diff with git (fetch-depth: 0),
+          # not the pulls/<n>/files API.
+          token: ''
           filters: |
             deps:
               - '**/package.json'
@@ -162,6 +165,9 @@ jobs:
       - id: tasks-filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
+          # AISDLC-955: empty token makes dorny diff with git (fetch-depth: 0),
+          # not the pulls/<n>/files API.
+          token: ''
           filters: |
             tasks:
               - 'backlog/tasks/*.md'
@@ -171,6 +177,9 @@ jobs:
       - id: sdk-filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
+          # AISDLC-955: empty token makes dorny diff with git (fetch-depth: 0),
+          # not the pulls/<n>/files API.
+          token: ''
           filters: |
             python:
               - 'sdk-python/**'
