@@ -1,7 +1,7 @@
 ---
 id: AISDLC-920
 title: 'fix: coverage sweep corrupts reference generated-schemas.ts by rebuilding the workspace mid-run'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [bug, ci, build, reference, dogfood, velocity]
