@@ -1,7 +1,7 @@
 ---
 id: AISDLC-952
 title: 'Rejected dispatch briefs are reported on every tick and retried after a parent fast-forward, instead of being silently skipped until their mtime changes'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels:

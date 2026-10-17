@@ -66,6 +66,7 @@ export {
   WAKE_ACTIVE_SEC,
   WAKE_IDLE_SEC,
   WAKE_PENDING_SEC,
+  readParentHead,
   type WakeReason,
   type ClearReport,
   type LoopDeps,

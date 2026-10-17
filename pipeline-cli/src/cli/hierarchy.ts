@@ -111,6 +111,7 @@ import {
   checkRepoMatch,
   readRosterChecked,
   rosterProject,
+  readParentHead,
   runDispatchTick,
   endsWithQuestion,
   findOpenPrNumber,
@@ -783,6 +784,7 @@ export async function runHierarchyCli(
             },
             findPr: (id) => findOpenPrNumber(extras.ghRun ?? deps.run, repoRoot, id),
           },
+          parentHead: () => readParentHead(repoRoot),
           listPrs: () => fetchHumanAttentionPrs(extras.ghRun ?? deps.run, repoRoot, deps.boardDir),
           markReady: () =>
             markReadyAfterCodeql(extras.ghRun ?? deps.run, repoRoot, {
