@@ -1508,8 +1508,13 @@ export function resolveBaseSha(workDir: string): string {
 export function findTaskFile(workDir: string, taskId: string): string | undefined {
   const dir = path.join(workDir, 'backlog', 'tasks');
   if (!existsSync(dir)) return undefined;
-  const prefix = `${taskId.toLowerCase()} - `;
-  const hit = readdirSync(dir).find((f) => f.toLowerCase().startsWith(prefix) && f.endsWith('.md'));
+  // Accept both `<id> - <title>.md` and the cli-file shape `<id>-<slug>.md`.
+  // A bare `<id>.md` or `<id>.1 - ...` (subtask) must not match.
+  const prefixes = [`${taskId.toLowerCase()} - `, `${taskId.toLowerCase()}-`];
+  const hit = readdirSync(dir).find((f) => {
+    const lower = f.toLowerCase();
+    return f.endsWith('.md') && prefixes.some((p) => lower.startsWith(p));
+  });
   return hit ? path.posix.join('backlog', 'tasks', hit) : undefined;
 }
 

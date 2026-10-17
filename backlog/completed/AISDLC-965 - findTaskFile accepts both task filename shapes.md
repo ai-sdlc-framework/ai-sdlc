@@ -1,7 +1,7 @@
 ---
 id: AISDLC-965
 title: 'findTaskFile accepts both task filename shapes so cli-file briefs ingest'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-16'
 labels:
