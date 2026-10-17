@@ -1,7 +1,7 @@
 ---
 id: AISDLC-956
 title: 'The release workflow updates the release-please branch with one push per merge to main instead of two'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels:
