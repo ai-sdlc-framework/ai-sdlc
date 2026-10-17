@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.6.1...sdk-go-v0.7.0) (2026-10-17)
+
+
+### Features
+
+* **orchestrator:** dispatch tick lands eligible own-author PRs (AISDLC-894) ([#1612](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1612)) ([ec657c0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ec657c0bd5cf6ef33a6f52333c6b4e146ac7b829))
+
 ## [0.6.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.6.0...sdk-go-v0.6.1) (2026-10-13)
 
 

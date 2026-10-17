@@ -5,6 +5,23 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.35.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.34.0...orchestrator-v0.35.0) (2026-10-17)
+
+
+### Features
+
+* **orchestrator:** add doctor seed-catalog checks 4,5,6,8,9,10 (AISDLC-582) ([#1521](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1521)) ([264f2c4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/264f2c4836800ebd6c0fff8f61408aa9b0b9efcb))
+* **orchestrator:** init scaffolds required consumer config from one manifest (AISDLC-910) ([#1606](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1606)) ([6f3bffc](https://github.com/ai-sdlc-framework/ai-sdlc/commit/6f3bffc94705144e779dda6a2ddacacf313cd626))
+* **orchestrator:** reenter &lt;pr|task&gt; replaces resume and requeue --note (AISDLC-882) ([#1603](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1603)) ([30b7326](https://github.com/ai-sdlc-framework/ai-sdlc/commit/30b7326991e68a876075d6b33b138b0fb173930f))
+* **orchestrator:** same-head loop guard; drop stale-claim row and ci-failure-watcher (AISDLC-883) ([#1608](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1608)) ([30cf5ca](https://github.com/ai-sdlc-framework/ai-sdlc/commit/30cf5ca5bd7eae959bdffb8e336ed2ceeb876ccb))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.35.0
+
 ## [0.34.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.33.0...orchestrator-v0.34.0) (2026-10-15)
 
 

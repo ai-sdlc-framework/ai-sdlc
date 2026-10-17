@@ -1,5 +1,75 @@
 # Changelog
 
+## [0.35.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.34.0...pipeline-cli-v0.35.0) (2026-10-17)
+
+
+### Features
+
+* add memory dream command to consolidate agent memory (AISDLC-729) ([#1522](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1522)) ([f7c7cb3](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f7c7cb317e1fdf4914501eb2f2383d693b2f27cc))
+* alert-only stall notice (AISDLC-871) ([#1728](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1728)) ([e8d736d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e8d736d31a770462a60dd814719eccb48e9b58a3))
+* **ci:** docs lane skips lint, DoR treats sibling filing PR refs as pending (AISDLC-879) ([#1621](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1621)) ([1e2bb5a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1e2bb5ab98a3f1116147e7ebf8f389bed925c9c6))
+* decisions-sync PR opens ready; trusted decisions-sync source kind (AISDLC-895) ([#1601](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1601)) ([65713e6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/65713e6cce015bba62e622e65c8ffd0ee5cc0d34))
+* **docs:** an executor never parks on a question (AISDLC-948) ([#1694](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1694)) ([ec7319c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ec7319cf7a3a348b8f0764eed17b79b7a46e774b))
+* Failed executor work is re-claimable by the normal loop: resume finds a completed task file and a push-only refusal falls through to a full resume (AISDLC-946) ([#1699](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1699)) ([91ffb7f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/91ffb7f9bb77d1937a8db9f3518f80ea516cc1ac))
+* incremental review works in every case [needs-human-attention] (AISDLC-725) ([#1346](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1346)) ([0080319](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0080319f4c5b94cadf908710fe433f40643378da))
+* **orchestrator:** add pr throughput kpi command and page (AISDLC-877) ([#1599](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1599)) ([791f547](https://github.com/ai-sdlc-framework/ai-sdlc/commit/791f5470e788f94f157026e479688726bacb3c56))
+* **orchestrator:** clear on context threshold only, not per tick or idle wait (AISDLC-815) ([#1696](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1696)) ([efb32d7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/efb32d707fa56eb53ae40100b00388d81c29eab8))
+* **orchestrator:** dispatch tick lands eligible own-author PRs (AISDLC-894) ([#1612](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1612)) ([ec657c0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ec657c0bd5cf6ef33a6f52333c6b4e146ac7b829))
+* **orchestrator:** docs lane for cli-file filing PRs (AISDLC-878) ([#1622](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1622)) ([ebd5f8e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ebd5f8e662aff32f3a6df3a795946aa3deb4ea15))
+* **orchestrator:** init scaffolds required consumer config from one manifest (AISDLC-910) ([#1606](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1606)) ([6f3bffc](https://github.com/ai-sdlc-framework/ai-sdlc/commit/6f3bffc94705144e779dda6a2ddacacf313cd626))
+* **orchestrator:** reenter &lt;pr|task&gt; replaces resume and requeue --note (AISDLC-882) ([#1603](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1603)) ([30b7326](https://github.com/ai-sdlc-framework/ai-sdlc/commit/30b7326991e68a876075d6b33b138b0fb173930f))
+* **orchestrator:** resume skips review when the patch id is unchanged (AISDLC-947) ([#1700](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1700)) ([301b9cc](https://github.com/ai-sdlc-framework/ai-sdlc/commit/301b9ccc48f10d04d0ebb64a4889c136d384fb85))
+* **orchestrator:** same-head loop guard; drop stale-claim row and ci-failure-watcher (AISDLC-883) ([#1608](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1608)) ([30cf5ca](https://github.com/ai-sdlc-framework/ai-sdlc/commit/30cf5ca5bd7eae959bdffb8e336ed2ceeb876ccb))
+* **orchestrator:** surface PRs needing a human in tick report and digest (AISDLC-888) ([#1607](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1607)) ([eec20c6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/eec20c6946c7996f7fd02970f5b5a3c97b295122))
+* **orchestrator:** webhook receiver and event records (AISDLC-880) ([#1602](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1602)) ([39b1493](https://github.com/ai-sdlc-framework/ai-sdlc/commit/39b14937cf9894fd29197a32652d290f3443d509))
+
+
+### Bug Fixes
+
+* **ci:** format the mcp tarball envelope writer like the others (AISDLC-875) ([#1568](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1568)) ([c1eca71](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c1eca71364a687039478796438068883faa7f77f))
+* classify installation rate-limit red as rate-limited (AISDLC-949) ([#1695](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1695)) ([be1e14b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/be1e14b5e2fb4815eb9d20e082508dbec507bd63))
+* cli-file task accepts a task file written outside the parent tree (AISDLC-931) ([#1668](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1668)) ([d8da92e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d8da92e0c1579f5e31dda998b8b4713caea2e471))
+* commit review ledger with leaves before step 10.5 rebase (AISDLC-951) ([#1701](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1701)) ([7df782c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7df782c1f44acaf5c23c93c083886e0933a7e01a))
+* **docs:** handoff write keeps one notes block and archives older prose (AISDLC-933) ([#1725](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1725)) ([1d72025](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1d72025c3e6461e4b4740a8f728d8222ef5f6c80))
+* isolate CODEX_HOME for every bin-invocation test (AISDLC-908) ([#1595](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1595)) ([7305525](https://github.com/ai-sdlc-framework/ai-sdlc/commit/73055259bad3cf338920363409c657c6b3bdd3c9))
+* make cli-usage ingest tests hermetic against real codex home (AISDLC-915) ([#1590](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1590)) ([a8f9c7c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a8f9c7c2fddc810aaac9324de5ade41ea2178a0b))
+* **orchestrator:** auto-brief a filed task so it reaches the dispatch board (AISDLC-930) ([#1666](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1666)) ([a80de7b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a80de7b2872e3d11199907993b86a0528fdec5f8))
+* **orchestrator:** classify Detect Changes failed + downstream skipped as rate-limited (AISDLC-953) ([#1708](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1708)) ([0f8b4d5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0f8b4d5e3042fc607698637cce9e9219c019204a))
+* **orchestrator:** cli-file decision reads and writes the per-event decisions store (AISDLC-852) ([#1597](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1597)) ([02f5e3c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/02f5e3c224b8027800a3480b040bafce34bd2c75))
+* **orchestrator:** cli-file removes its source copy after push (AISDLC-950) ([#1697](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1697)) ([9b39cb4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9b39cb47d60f6690c7cdc6c0ecfde3023585ca80))
+* **orchestrator:** close three dispatch board gaps from the 2026-10-14 hand-off (AISDLC-868) ([#1598](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1598)) ([dc67ee9](https://github.com/ai-sdlc-framework/ai-sdlc/commit/dc67ee94a8580d63b01f01a273566074047eaaf2))
+* **orchestrator:** decision events skip the parent; ff cleans identical copies (AISDLC-874) ([#1710](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1710)) ([857308c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/857308c6bd0bc77ccedee3f1075e72fa8ac3fac1))
+* **orchestrator:** decisions-sync commit uses the session git identity (AISDLC-928) ([#1631](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1631)) ([888f554](https://github.com/ai-sdlc-framework/ai-sdlc/commit/888f554031d472d08e6a6ddcca753209cd72843b))
+* **orchestrator:** dequeue retires a stale queued manifest with a reason (AISDLC-907) ([#1638](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1638)) ([fd39caf](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fd39caf11458e19e5532298063d3feaaecdb6251))
+* **orchestrator:** dispatch facts gatherer fills state mapping and failing line (AISDLC-913) ([#1645](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1645)) ([f1937a6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f1937a6785bd5f7ca8473504947ad03d040671dd))
+* **orchestrator:** dispatch keeps planner rulings and drains its inbox first (AISDLC-903) ([#1609](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1609)) ([8e134ab](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8e134abd64ca39a1fdc8e7d3aedda54f33f2a136))
+* **orchestrator:** enqueue and Step 2 share one branch name (AISDLC-851) ([#1571](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1571)) ([642e281](https://github.com/ai-sdlc-framework/ai-sdlc/commit/642e281f4e863f459c4147d48c61c90df9bf990c))
+* **orchestrator:** envelope formatter counts key prefix in line width (AISDLC-916) ([#1637](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1637)) ([f87e3ae](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f87e3aedee911233d28c48c84322020dedafa183))
+* **orchestrator:** findTaskFile accepts both task filename shapes (AISDLC-965) ([#1734](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1734)) ([2f48fe0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2f48fe03013cb46c7431a9a6c4325a8a6444bf4a))
+* **orchestrator:** gate 3 ignores task ids in body prose (AISDLC-898) ([#1604](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1604)) ([7dfbfda](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7dfbfda25e081f03b9674cac1f9042a6234ff70e))
+* **orchestrator:** handoff read shows state block plus newest prose (AISDLC-889) ([#1679](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1679)) ([af0c9ed](https://github.com/ai-sdlc-framework/ai-sdlc/commit/af0c9ed28aa64453cfd79818d6439643a4c014e0))
+* **orchestrator:** label attestation leaf with real reviewer harness (AISDLC-911) ([#1614](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1614)) ([388de20](https://github.com/ai-sdlc-framework/ai-sdlc/commit/388de204509c571114eddf4181f8af1c4b49734c))
+* **orchestrator:** mark-ready flips task PRs ready when the repo has no CodeQL (AISDLC-896) ([#1636](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1636)) ([9cb8ff0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9cb8ff009b4307a3809b85f433c33baf33e49e4e))
+* **orchestrator:** name the cwd cause on a lease-push refusal (AISDLC-905) ([#1650](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1650)) ([ff2015a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ff2015a19ad728ab2556392150ac5117b115b361))
+* **orchestrator:** planner auto clear resumes after 3s, not 60s (AISDLC-912) ([#1724](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1724)) ([30b4162](https://github.com/ai-sdlc-framework/ai-sdlc/commit/30b4162d6f131d252002aa901eed3b3ea3eeb01c))
+* **orchestrator:** reconciler reruns resolve the gate run id (AISDLC-945) ([#1706](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1706)) ([9b7f048](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9b7f048b93835b703234aaf0bf32fcd8d3e114d7))
+* **orchestrator:** requeue counts prNumber-only OPEN PR as follow-up (AISDLC-857) ([#1573](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1573)) ([30033a9](https://github.com/ai-sdlc-framework/ai-sdlc/commit/30033a9320b34f495550160197ef73a0290ff086))
+* **orchestrator:** resolve target repo via GitHub (AISDLC-897) ([#1580](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1580)) ([c6392f6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c6392f62df9e4813c5e868554a0244ff1ab1ef0c))
+* **orchestrator:** rewrite queued manifest branch from PR head (AISDLC-901) ([#1615](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1615)) ([541495a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/541495a5ae94e3d97383e32c09a18d22914ddaf2))
+* **orchestrator:** treat installation rate-limit reds as wait-and-rerun (AISDLC-926) ([#1642](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1642)) ([a386cd8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a386cd85e085fa73285097b75ec9ac11cd1a01f4))
+* red main is surfaced by the dispatch tick, not a GitHub issue (AISDLC-929) ([#1662](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1662)) ([e983ef2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e983ef2a2a0e1f304cd17cc65339164530afb819))
+* reenter loop guard keys on the origin head (AISDLC-937) ([#1693](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1693)) ([81075ff](https://github.com/ai-sdlc-framework/ai-sdlc/commit/81075fff380c1764374c9983baec7e0cd01255a3))
+* send route-to-planner once per PR, head sha and reason (AISDLC-924) ([#1664](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1664)) ([cd65a33](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cd65a3389736790c9ff7aa84551e528d9557b66d))
+* **test:** cli-usage ingest tests no longer walk real codex sessions (AISDLC-887) ([#1585](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1585)) ([36d3ab6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/36d3ab626516bc6661ec0b60f12b4de4f42a04b7))
+* warn on pre-existing duplicate pairs on main in cli-file (AISDLC-922) ([#1661](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1661)) ([2a57859](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2a578596a5d14606723a72f5095a9721045e977c))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.35.0
+
 ## [0.34.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.33.0...pipeline-cli-v0.34.0) (2026-10-15)
 
 
