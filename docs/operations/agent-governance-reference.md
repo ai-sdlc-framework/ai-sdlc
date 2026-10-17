@@ -69,7 +69,7 @@ Every file under `ai-sdlc-plugin/agents/` and `ai-sdlc-plugin/commands/` declare
 
 | Rung | Files |
 |---|---|
-| 3 (Haiku, with `bounds:`) | every `model: haiku` file: `review-executor`, `review-executor-codex`, and the commands `version`, `doctor`, `init`, `hierarchy`, `cleanup`, `pipeline-status`, `triage`, `import-spec`, `rfc-init`, `init-signing-key`, `memory-dream`, `execute-parallel`, `execute-parallel-status`, `execute-parallel-cleanup`, `orchestrator-tick`, `dispatch-worker` |
+| 3 (Haiku, with `bounds:`) | every `model: haiku` file: `review-executor`, `review-executor-codex`, and the commands `version`, `doctor`, `init`, `hierarchy`, `cleanup`, `pipeline-status`, `triage`, `import-spec`, `rfc-init`, `init-signing-key`, `memory-dream`, `execute-parallel`, `execute-parallel-status`, `execute-parallel-cleanup`, `orchestrator-tick`, `dispatch-worker` (the last five are retired stubs) |
 | 4 (strong model, plan/execute/synthesize) | every `model: sonnet` or `model: opus` file: all other agents (`developer`, the reviewers, `review-planner`, `review-synthesizer`, `rebase-resolver`, `ci-conflict-resolver`, `refinement-reviewer`) and commands (`execute`, `executor`, `operator-dispatch`, `planner`, `fix-pr`, `review-pr`, `detect-patterns`, `rebase`, `resolve-conflicts`) |
 
 On dispatch paths (`/ai-sdlc execute`, `/ai-sdlc executor`), code-review and test-review SHOULD be routed to the `-codex` variants (`code-reviewer-codex` / `test-reviewer-codex`) by default — Codex plan billing is zero Claude usage. Security review stays on the Claude-native `security-reviewer` at opus. Mechanical work (sign, reconcile, rebase) MUST NOT be wrapped in subagents.
