@@ -385,6 +385,50 @@ export class OneClaimPerWorkerError extends Error {
   }
 }
 
+/** Thrown by {@link claimNext} when the worker has a PR it has not yet delivered (AISDLC-816). */
+export class UndeliveredPrError extends Error {
+  constructor(
+    readonly workerId: string,
+    readonly pr: number,
+    readonly taskId?: string,
+  ) {
+    super(
+      `undelivered-pr: '${workerId}' still owns PR #${pr}${taskId ? ` (${taskId})` : ''} that is not delivered ` +
+        `(ready and armed); deliver it, or claim a task whose manifest carries fixesPr, before taking a fresh task`,
+    );
+    this.name = 'UndeliveredPrError';
+  }
+}
+
+/**
+ * The PR `workerId` owns that has no `delivered` timestamp, read from `landing/<pr>.json`
+ * (AISDLC-816). A delivered-but-unlanded PR does not count.
+ */
+export function findUndeliveredPr(
+  boardDir: string,
+  workerId: string,
+): { pr: number; taskId?: string } | undefined {
+  const dir = path.join(boardDir, 'landing');
+  for (const entry of safeReaddir(dir).sort()) {
+    if (!/^\d+\.json$/.test(entry)) continue;
+    try {
+      const r = JSON.parse(readFileSync(path.join(dir, entry), 'utf-8')) as {
+        pr?: number;
+        owner?: string;
+        taskId?: string;
+        delivered?: string;
+        landed?: string;
+      };
+      if (r.owner === `executor:${workerId}` && !r.delivered && !r.landed && r.pr !== undefined) {
+        return { pr: r.pr, ...(r.taskId ? { taskId: r.taskId } : {}) };
+      }
+    } catch {
+      /* unreadable record: not a blocker */
+    }
+  }
+  return undefined;
+}
+
 /** Task id of the inflight manifest `workerId` holds, if any. */
 export function findHeldClaim(boardDir: string, workerId: string): string | undefined {
   const inflightDir = path.join(boardDir, 'inflight');
@@ -443,6 +487,18 @@ export function claimNext(
     throw err;
   }
   const eligible = orderEligible(boardDir, candidates, workerKind, now);
+
+  if (hooks.workerId !== undefined && eligible.length > 0) {
+    const undelivered = findUndeliveredPr(boardDir, hooks.workerId);
+    if (undelivered) {
+      // Only a task that fixes an existing PR (or resumes one) may be claimed meanwhile.
+      const allowed = eligible.filter((e) => e.manifest.fixesPr !== undefined || e.manifest.resume);
+      if (allowed.length === 0) {
+        throw new UndeliveredPrError(hooks.workerId, undelivered.pr, undelivered.taskId);
+      }
+      eligible.splice(0, eligible.length, ...allowed);
+    }
+  }
 
   const claimedGroups = new Set<string>();
   for (const { fullPath, manifest } of eligible) {
