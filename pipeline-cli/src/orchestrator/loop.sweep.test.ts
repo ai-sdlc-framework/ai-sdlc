@@ -83,27 +83,23 @@ function makeRunner(branchStates: Record<string, 'MERGED' | 'OPEN' | null>): {
   const runner: Runner = async (command, args, opts: ExecOptions = {}): Promise<ExecResult> => {
     calls.push({ command, args: [...args] });
 
-    // Stub: gh pr list --head <branch> --state all ...
+    // Stub: batched `gh pr list --state all --limit 200 --json ...` (AISDLC-958)
     if (command === 'gh' && args[0] === 'pr' && args[1] === 'list') {
-      const headIdx = args.indexOf('--head');
-      const branch = headIdx >= 0 ? args[headIdx + 1] : undefined;
-      const state = branch ? (branchStates[branch] ?? null) : null;
-      if (state === 'MERGED') {
-        return {
-          stdout: JSON.stringify({ state: 'MERGED', mergedAt: '2026-05-09T12:00:00Z', number: 1 }),
-          stderr: '',
-          code: 0,
-        };
+      const list: Array<{
+        number: number;
+        state: string;
+        headRefName: string;
+        mergedAt: string | null;
+      }> = [];
+      let n = 1;
+      for (const [headRefName, state] of Object.entries(branchStates)) {
+        if (state === 'MERGED') {
+          list.push({ number: n++, state, headRefName, mergedAt: '2026-05-09T12:00:00Z' });
+        } else if (state === 'OPEN') {
+          list.push({ number: n++, state, headRefName, mergedAt: null });
+        }
       }
-      if (state === 'OPEN') {
-        return {
-          stdout: JSON.stringify({ state: 'OPEN', mergedAt: null, number: 2 }),
-          stderr: '',
-          code: 0,
-        };
-      }
-      // null = no PR found
-      return { stdout: 'null', stderr: '', code: 0 };
+      return { stdout: JSON.stringify(list), stderr: '', code: 0 };
     }
 
     // Real git execution — allows rev-parse to work against the fixture repos
