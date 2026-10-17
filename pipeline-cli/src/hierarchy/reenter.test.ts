@@ -67,6 +67,7 @@ interface View {
   state?: string;
   checks?: unknown[];
   origin?: string | null;
+  runId?: string | null;
 }
 
 /** A GitHub stand-in: answers the PR read, records every other command. */
@@ -99,6 +100,9 @@ function gh(v: View = {}): CommandRunner {
           ],
         }),
       };
+    }
+    if (args[0] === 'run' && args[1] === 'list') {
+      return { status: 0, stdout: v.runId === null ? '\n' : `${v.runId ?? '4242'}\n`, stderr: '' };
     }
     calls.push({ file, args });
     return { status: 0, stdout: '', stderr: '' };
@@ -214,8 +218,24 @@ describe('reenter, a machine action', () => {
       deps(gh({ checks: [{ name: 'build', status: 'COMPLETED', conclusion: 'CANCELLED' }] })),
     );
     expect(r).toMatchObject({ kind: 'machine', action: 'rerun' });
-    expect(calls[0]?.args).toEqual(['run', 'rerun', '--failed', '--commit', 'aaaaaaa1111111']);
+    expect(calls).toEqual([{ file: 'gh', args: ['run', 'rerun', '4242', '--failed'] }]);
+    expect(calls.flatMap((c) => c.args)).not.toContain('--commit');
     expect(queued()).toEqual([]);
+  });
+
+  it('falls back to executor re-entry only when no gate run id resolves', () => {
+    failTask();
+    const r = reenter(
+      { target: '7' },
+      deps(
+        gh({
+          runId: null,
+          checks: [{ name: 'build', status: 'COMPLETED', conclusion: 'CANCELLED' }],
+        }),
+      ),
+    );
+    expect(r).toMatchObject({ kind: 'manifest', state: 'cancelled-or-infra' });
+    expect(calls).toEqual([]);
   });
 
   it('reports a failing machine action and does not record it', () => {
