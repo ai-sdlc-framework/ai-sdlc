@@ -1,5 +1,18 @@
 # @ai-sdlc/reference
 
+## [0.35.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.34.0...reference-v0.35.0) (2026-10-17)
+
+
+### Features
+
+* **orchestrator:** add doctor seed-catalog checks 4,5,6,8,9,10 (AISDLC-582) ([#1521](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1521)) ([264f2c4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/264f2c4836800ebd6c0fff8f61408aa9b0b9efcb))
+* **orchestrator:** dispatch tick lands eligible own-author PRs (AISDLC-894) ([#1612](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1612)) ([ec657c0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ec657c0bd5cf6ef33a6f52333c6b4e146ac7b829))
+
+
+### Bug Fixes
+
+* **orchestrator:** dispatch keeps planner rulings and drains its inbox first (AISDLC-903) ([#1609](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1609)) ([8e134ab](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8e134abd64ca39a1fdc8e7d3aedda54f33f2a136))
+
 ## [0.34.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.33.0...reference-v0.34.0) (2026-10-15)
 
 
