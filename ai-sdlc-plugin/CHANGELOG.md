@@ -5,6 +5,14 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.31.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.30.0...ai-sdlc-plugin-v0.31.0) (2026-10-17)
+
+
+### Features
+
+* add rung frontmatter gated by model pins (AISDLC-884) ([#1647](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1647)) ([2f4acef](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2f4acef900a011213029b78c7a5813503d51aded))
+* **orchestrator:** hold is a board state set by cli-hierarchy, never stops reporting (AISDLC-899) ([#1660](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1660)) ([b8284f7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b8284f7651b8b3efecbfb03422135940a0ee591f))
+
 ## [0.30.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.29.0...ai-sdlc-plugin-v0.30.0) (2026-10-17)
 
 
