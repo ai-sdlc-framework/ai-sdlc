@@ -11,6 +11,7 @@ tools:
 disallowedTools:
   - AgentTool
 model: sonnet
+rung: 4
 harness: claude-code
 ---
 

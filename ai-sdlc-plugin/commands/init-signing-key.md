@@ -4,6 +4,8 @@ description: Generate this contributor's ed25519 signing key for review attestat
 argument-hint: '[--force]'
 allowed-tools: Bash, Read
 model: haiku
+rung: 3
+bounds: "tightly scoped template prompt over structured inputs; fixed output; no free prose; no retries beyond the caller cap"
 ---
 
 Generate a per-machine ed25519 signing key used by `/ai-sdlc execute` Step 10

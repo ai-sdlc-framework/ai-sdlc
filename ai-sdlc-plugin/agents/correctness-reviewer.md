@@ -11,6 +11,7 @@ disallowedTools:
   - Edit
   - AgentTool
 model: sonnet
+rung: 4
 harness: claude-code
 requiresIndependentHarnessFrom:
   - implement

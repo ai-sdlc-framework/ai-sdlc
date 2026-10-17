@@ -7,6 +7,7 @@ allowed-tools:
   - Bash
   - Agent(ci-conflict-resolver)
 model: sonnet
+rung: 4
 ---
 
 Manually invoke the `ci-conflict-resolver` subagent for PR

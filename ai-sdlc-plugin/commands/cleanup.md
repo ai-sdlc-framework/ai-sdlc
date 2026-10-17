@@ -4,6 +4,8 @@ description: Remove worktrees under .worktrees/ — defaults to merged-PR sweep,
 argument-hint: '[<task-id>]'
 allowed-tools: Bash, Read
 model: haiku
+rung: 3
+bounds: "tightly scoped template prompt over structured inputs; fixed output; no free prose; no retries beyond the caller cap"
 ---
 
 Companion to `/ai-sdlc execute`. Two modes:

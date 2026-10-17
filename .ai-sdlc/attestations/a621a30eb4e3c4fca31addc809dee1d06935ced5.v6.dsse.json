@@ -1,0 +1,92 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "79507be54a65919bb22b182bd4c390004f66b277"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer-codex",
+      "transcriptHash": "fd80127b243aa46d59767f8f4a2f33112ae4f7539aca826aa925ef1b6b76ae42",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "fd80127b243aa46d59767f8f4a2f33112ae4f7539aca826aa925ef1b6b76ae42",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer-codex",
+      "transcriptHash": "67fef6f33e32b87e213bd9f9869516fd2d9338c6a4249ba55e99808d386aca0d",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "67fef6f33e32b87e213bd9f9869516fd2d9338c6a4249ba55e99808d386aca0d",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "6c9187d8e9d5875b8459951876740637ca136a5abf0ed0421990640131663e8c",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "6c9187d8e9d5875b8459951876740637ca136a5abf0ed0421990640131663e8c",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "87e7002d11290bcd4846ade1fdc06cf73fd808bd126875372149c3a291a6ad31",
+        "b102ab5ef1a1640802e963e0448e57240ecd40cbe2f32950e066bc4ab5998a16"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "bf2d7bac45b81575e153fb0940ee39321df766778c60d4b611074e5871c9a93e",
+        "b102ab5ef1a1640802e963e0448e57240ecd40cbe2f32950e066bc4ab5998a16"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "6ea0e1c7239d0a4b427771a97a5b801c0675872dcd9aed8511c56f9908fda356",
+        "56948a6fa8e4068fa13ed4122811348ac4046a866df7b81b290d8250a5310d1b"
+      ]
+    }
+  ],
+  "rootHash": "1665fb58592b09228af477f19f53b4dc72cb955ac4c33e92c7393fc46069ed21",
+  "rootSignature": "6fFLdKamwPbNy1KgfKnjubUMyrjPDNX/MSwkC/U02NdCIUFr0aCs3uBMddocMxsCMhE1l4yyqbx7G0BNgOG9DA==",
+  "nonce": "a7e833dc57973f74c2fc187b39568b17720e7380b573f347d6dcc9d1f0956beb",
+  "leafCount": 3,
+  "signedAt": "2026-10-16T01:39:46.067Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      "ai-sdlc-plugin/agents/ci-conflict-resolver.md",
+      "ai-sdlc-plugin/agents/code-reviewer-codex.md",
+      "ai-sdlc-plugin/agents/code-reviewer.md",
+      "ai-sdlc-plugin/agents/correctness-reviewer.md",
+      "ai-sdlc-plugin/agents/developer.md",
+      "ai-sdlc-plugin/agents/rebase-resolver.md",
+      "ai-sdlc-plugin/agents/refinement-reviewer.md",
+      "ai-sdlc-plugin/agents/review-executor-codex.md",
+      "ai-sdlc-plugin/agents/review-executor.md",
+      "ai-sdlc-plugin/agents/review-planner.md",
+      "ai-sdlc-plugin/agents/review-synthesizer.md",
+      "ai-sdlc-plugin/agents/security-reviewer.md",
+      "ai-sdlc-plugin/agents/test-reviewer-codex.md",
+      "ai-sdlc-plugin/agents/test-reviewer.md",
+      "ai-sdlc-plugin/commands/cleanup.md",
+      "ai-sdlc-plugin/commands/detect-patterns.md",
+      "ai-sdlc-plugin/commands/dispatch-worker.md",
+      "ai-sdlc-plugin/commands/doctor.md",
+      "ai-sdlc-plugin/commands/execute-parallel-cleanup.md",
+      "ai-sdlc-plugin/commands/execute-parallel-status.md"
+    ],
+    "appliedReviewers": ["code-reviewer-codex", "test-reviewer-codex", "security-reviewer"]
+  }
+}

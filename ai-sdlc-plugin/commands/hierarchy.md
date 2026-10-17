@@ -4,6 +4,8 @@ description: Drive the session hierarchy (planner, dispatch, executors) from Cla
 argument-hint: '<up|status|attach|terminals|brief|down> [options]'
 allowed-tools: Bash
 model: haiku
+rung: 3
+bounds: "tightly scoped template prompt over structured inputs; fixed output; no free prose; no retries beyond the caller cap"
 ---
 
 Run `cli-hierarchy $ARGUMENTS` (reference:

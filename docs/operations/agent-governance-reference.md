@@ -63,6 +63,15 @@ Agent frontmatter pins model by role to prevent session-model bleed (Opus inheri
 - Commands pin too (AISDLC-761): relay/status commands (`version`, `doctor`, `hierarchy`, `cleanup`, `pipeline-status`, `triage`, `import-spec`, `rfc-init`, `init-signing-key`, and the pointers retired by AISDLC-763: `execute-parallel`, `execute-parallel-status`, `execute-parallel-cleanup`, `orchestrator-tick`, `dispatch-worker`) → **haiku**; orchestration/session-driving commands (`execute`, `executor`, `operator-dispatch`, `planner`, `fix-pr`, `review-pr`, `detect-patterns`, `rebase`, `resolve-conflicts`) → **sonnet**.
 - No command or agent may carry `model: inherit` or omit `model:`; `ai-sdlc-plugin/commands/model-pins.test.mjs` (`pnpm test:plugin-model-pins-gate`) enforces it.
 
+### Automation ladder rung (AISDLC-884)
+
+Every file under `ai-sdlc-plugin/agents/` and `ai-sdlc-plugin/commands/` declares `rung:` (0 to 4) in its frontmatter, the lowest rung of the RFC-0054 automation ladder at which that prompt runs. Rung 3 (Haiku, tightly scoped) also requires a `bounds:` key naming the parameter bounds. `pnpm test:plugin-model-pins-gate` fails naming the file and field when `rung:` is missing or invalid, or a `rung: 3` file lacks `bounds:`. Rung 2 is the RFC-0049 judgment layer (provider chosen by config, Jev by default; see `judgment-layer.md`); no prompt file runs there, so none carries `rung: 2`.
+
+| Rung | Files |
+|---|---|
+| 3 (Haiku, with `bounds:`) | every `model: haiku` file: `review-executor`, `review-executor-codex`, and the commands `version`, `doctor`, `init`, `hierarchy`, `cleanup`, `pipeline-status`, `triage`, `import-spec`, `rfc-init`, `init-signing-key`, `memory-dream`, `execute-parallel`, `execute-parallel-status`, `execute-parallel-cleanup`, `orchestrator-tick`, `dispatch-worker` (the last five are retired stubs) |
+| 4 (strong model, plan/execute/synthesize) | every `model: sonnet` or `model: opus` file: all other agents (`developer`, the reviewers, `review-planner`, `review-synthesizer`, `rebase-resolver`, `ci-conflict-resolver`, `refinement-reviewer`) and commands (`execute`, `executor`, `operator-dispatch`, `planner`, `fix-pr`, `review-pr`, `detect-patterns`, `rebase`, `resolve-conflicts`) |
+
 On dispatch paths (`/ai-sdlc execute`, `/ai-sdlc executor`), code-review and test-review SHOULD be routed to the `-codex` variants (`code-reviewer-codex` / `test-reviewer-codex`) by default — Codex plan billing is zero Claude usage. Security review stays on the Claude-native `security-reviewer` at opus. Mechanical work (sign, reconcile, rebase) MUST NOT be wrapped in subagents.
 
 ## Subagent Governance — OQ-resolution prohibition (AISDLC-298)

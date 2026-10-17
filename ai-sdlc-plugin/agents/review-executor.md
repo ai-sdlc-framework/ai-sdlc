@@ -14,6 +14,8 @@ disallowedTools:
   - WebFetch
   - WebSearch
 model: haiku
+rung: 3
+bounds: "tightly scoped template prompt over structured inputs; fixed output; no free prose; no retries beyond the caller cap"
 harness: claude-code
 requiresIndependentHarnessFrom:
   - implement

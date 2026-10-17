@@ -7,6 +7,7 @@ allowed-tools:
   - Bash
   - Agent(rebase-resolver)
 model: sonnet
+rung: 4
 ---
 
 Rebase PR #$ARGUMENTS onto latest `origin/main` by spawning the

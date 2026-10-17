@@ -38,6 +38,31 @@ export function checkModelPin(content) {
   return null;
 }
 
+/** Returns the value of a top-level frontmatter key, or null. */
+export function readKey(content, key) {
+  const match = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!match) return null;
+  const line = match[1].split('\n').find((l) => l.startsWith(`${key}:`));
+  if (!line) return null;
+  return (
+    line
+      .slice(key.length + 1)
+      .replace(/^\s*["']|["']\s*$/g, '')
+      .trim() || null
+  );
+}
+
+/** Automation-ladder contract (AISDLC-884): returns a problem description, or null. */
+export function checkRung(content) {
+  const rung = readKey(content, 'rung');
+  if (rung === null) return 'has no `rung:` in its frontmatter';
+  if (!/^[0-4]$/.test(rung)) return `has invalid \`rung: ${rung}\` (expected 0 to 4)`;
+  if (rung === '3' && readKey(content, 'bounds') === null) {
+    return 'has `rung: 3` but no `bounds:` in its frontmatter';
+  }
+  return null;
+}
+
 function listFiles(dir) {
   return readdirSync(join(pluginDir, dir))
     .filter((f) => f.endsWith('.md'))
@@ -60,6 +85,31 @@ describe('checkModelPin (self-test)', () => {
   it('accepts a pinned model', () => {
     assert.equal(checkModelPin('---\nname: x\nmodel: haiku\n---\n'), null);
   });
+});
+
+describe('checkRung (self-test)', () => {
+  it('rejects a file with no rung', () => {
+    assert.match(checkRung('---\nname: x\n---\n'), /no `rung:`/);
+  });
+  it('rejects rung 3 without bounds', () => {
+    assert.match(checkRung('---\nrung: 3\n---\n'), /no `bounds:`/);
+  });
+  it('rejects an out-of-range rung', () => {
+    assert.match(checkRung('---\nrung: 7\n---\n'), /invalid/);
+  });
+  it('accepts rung 3 with bounds and rung 4 alone', () => {
+    assert.equal(checkRung('---\nrung: 3\nbounds: "x"\n---\n'), null);
+    assert.equal(checkRung('---\nrung: 4\n---\n'), null);
+  });
+});
+
+describe('every command and agent declares a rung', () => {
+  for (const f of files) {
+    it(`${f.dir}/${f.name}.md declares rung (and bounds for rung 3)`, () => {
+      const problem = checkRung(readFileSync(f.path, 'utf-8'));
+      assert.equal(problem, null, `${f.dir}/${f.name}.md ${problem}`);
+    });
+  }
 });
 
 describe('every command and agent pins a model', () => {

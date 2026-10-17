@@ -14,6 +14,7 @@ allowed-tools:
   - SendMessage
   - Skill
 model: sonnet
+rung: 4
 ---
 
 You are an **executor** session: one task at a time, taken from the dispatch board, no other way.

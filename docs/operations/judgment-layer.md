@@ -61,6 +61,8 @@ silently; run `doctor` to see `judgment layer: disabled`. The schema is
 
 ## Providers
 
+The provider is selected by configuration (`spec.provider` in `.ai-sdlc/judgment-config.yaml`), not in code. Jev is the default provider; `openai-compatible` (for example a local Qwen 27B behind an OpenAI-compatible endpoint) is the sanctioned alternative and needs no new code. Each typed question declares its confidence floor, below which the case escalates to the next rung, and shadow-first comparison is mandatory before any provider decides anything. This is rung 2 of the automation ladder in RFC-0054.
+
 ### `jev`
 
 Posts to the Jev system-one endpoint with a bearer key. Reads `TYPESAFE_API_KEY`

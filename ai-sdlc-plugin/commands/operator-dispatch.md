@@ -9,6 +9,7 @@ allowed-tools:
   - Bash
   - SendMessage
 model: sonnet
+rung: 4
 ---
 
 You are the **dispatch** session: briefs become work for executors, the board keeps moving,

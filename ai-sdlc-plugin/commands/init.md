@@ -4,6 +4,8 @@ description: Scaffold the .ai-sdlc configuration this release requires (keyring,
 argument-hint: '[--non-interactive] [--force]'
 allowed-tools: Bash
 model: haiku
+rung: 3
+bounds: "tightly scoped template prompt over structured inputs; fixed output; no free prose; no retries beyond the caller cap"
 ---
 
 Scaffold the required consumer configuration. The list of required files lives

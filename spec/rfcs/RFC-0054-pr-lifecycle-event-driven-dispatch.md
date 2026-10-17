@@ -43,7 +43,7 @@ event source, poll-based reconciliation, and a hybrid of webhook and poll) and r
 of work that starts with deletions that need no new code. The operator's leading candidate, a
 webhook that triggers the state machine, is evaluated on equal terms with the others.
 
-Every automation proposed here follows the [Automation ladder](#automation-ladder-normative): deterministic first, structural second, a cheap decision model (JEV) only where structure cannot decide, and strong models only to plan and synthesize what a cheaper model executes.
+Every automation proposed here follows the [Automation ladder](#automation-ladder-normative): deterministic first, structural second, the judgment layer (RFC-0049) only where structure cannot decide, and strong models only to plan and synthesize what a cheaper model executes.
 
 The lifecycle, its watchdog dwell times and the happy and recovery sequences are drawn in
 [Lifecycle and anti-stagnation](#lifecycle-and-anti-stagnation).
@@ -651,7 +651,7 @@ resolution of any Open Question.
 > Haiku, then `review-synthesizer`). Keep prose automations to a minimum, with tightly scoped
 > parameters.
 
-**JEV.** The repository defines Jev as the first provider of the System One Judgment Layer: a
+**Judgment layer.** The repository defines Jev as the first provider of the System One Judgment Layer: a
 cheap closed-set classifier behind typed questions, pinned to an exact model version (for example
 `jev-1.13.0`), shadow-first (`spec/rfcs/RFC-0049-system-one-judgment-layer.md`,
 `docs/operations/judgment-layer.md`). RFC-0052 states its limit: "Jev cannot write a finding or
@@ -677,11 +677,11 @@ the cheap model never decides the verdict.
    no model. Inputs: typed records. Outputs: a state-machine transition or a typed reaction.
    Cost class: free. Move up when: the answer depends on meaning the structure does not carry
    (for example whether a red check is a real failure) after the structured fields are exhausted.
-2. **Cheap decision model (JEV).** Bounded classification over structured fields with a fixed
+2. **Judgment layer (RFC-0049; cheap decision model, provider chosen by config, Jev by default).** Bounded classification over structured fields with a fixed
    label set, asked as a typed question. Inputs: rung-1 fields, never raw logs. Outputs: one label
    from the closed set plus a confidence, validated by schema. Cost class: fractions of a cent per
    question, shadow-first. Move up when: the labels are not enough because the case needs text
-   the structured fields lack, or JEV is unavailable or below its confidence floor.
+   the structured fields lack, or the provider is unavailable or below its confidence floor.
 3. **Haiku, tightly scoped.** Only when rung 2 lacks context or as its fallback. The prompt is a
    template whose parameters are the rung-1 structured data; the output has a fixed schema; no
    free prose in or out. Cost class: cents per call, bounded by input size. Move up when: the task
@@ -715,7 +715,7 @@ the rung is 0 the "why not lower" column explains why no model is needed.
 | Signed | rebase, build, re-sign, lease push | 0 | Exit-code driven commands; the pre-push hook already re-signs |
 | DraftPR | flip ready by state test | 0 | Draft flag, verdict file and CodeQL conclusion are read directly |
 | CIRunning | retrigger once, then reclassify | 1 | Pending age against the dwell is a timer, the retrigger count a counter on the record |
-| Red (skew, real, flake) | classify the failure | 2 | Check names and changed paths decide most cases at rung 1 (a known-name table: stale attestation, cancelled, superseded). The residue (a check name not in the table, a diff touching both a failing test and unrelated paths) needs a closed-set judgment, which is JEV's job |
+| Red (skew, real, flake) | classify the failure | 2 | Check names and changed paths decide most cases at rung 1 (a known-name table: stale attestation, cancelled, superseded). The residue (a check name not in the table, a diff touching both a failing test and unrelated paths) needs a closed-set judgment, which is the judgment layer's job |
 | RedSkew | requeue follow-up: rebase, drop stale envelope, lease push | 0 | Fixed command sequence once classified |
 | RedFlake | retrigger once | 0 | One gh call once classified |
 | RedReal | name the failing line and a fix hint from the log | 3 | Needs text from the log that no structured field holds; Haiku with check name, log tail and diff paths as parameters, output `{line, file, hint}` |
