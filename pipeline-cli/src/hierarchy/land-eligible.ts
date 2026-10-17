@@ -20,6 +20,7 @@ import { now as clock } from '../clock.js';
 import { patchDoneVerdict } from '../dispatch/board.js';
 import { resolveTargetRepo, runMergeIfEligible } from '../governance/merge-if-eligible.js';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
+import { prFingerprint, recordRefusal, refusalStillValid } from './pr-snapshot.js';
 import { taskIdFrom } from './reconcile.js';
 import type { CommandRunner } from './types.js';
 
@@ -60,6 +61,7 @@ interface ListedPr {
   headRefOid?: string;
   isDraft?: boolean;
   author?: { login?: string };
+  statusCheckRollup?: unknown;
 }
 
 const SHA_RE = /^[0-9a-f]{40}$/i;
@@ -99,7 +101,7 @@ export async function landEligiblePrs(deps: LandDeps): Promise<LandReport> {
       '--limit',
       '100',
       '--json',
-      'number,headRefName,headRefOid,isDraft,author',
+      'number,headRefName,headRefOid,isDraft,author,statusCheckRollup',
     ],
     { cwd: deps.repoRoot },
   );
@@ -132,6 +134,9 @@ export async function landEligiblePrs(deps: LandDeps): Promise<LandReport> {
     if (mode === 'arm' && sha && existsSync(notesPath(deps.boardDir, pr.number, sha, 'armed'))) {
       continue;
     }
+    // A PR refused on this same fingerprint (head, events, checks) is not re-read for 15 minutes.
+    const fingerprint = prFingerprint(deps.boardDir, pr);
+    if (refusalStillValid(deps.boardDir, pr.number, fingerprint, now())) continue;
     let outcome: LandOutcome;
     try {
       outcome = await deps.land(pr.number, mode);
@@ -143,6 +148,7 @@ export async function landEligiblePrs(deps: LandDeps): Promise<LandReport> {
       };
     }
     if (outcome.merged || outcome.armed) {
+      recordRefusal(deps.boardDir, pr.number, undefined, now());
       const taskId = taskIdFrom(pr.headRefName) || undefined;
       if (taskId) patchDoneVerdict(deps.boardDir, taskId, { landed: now().toISOString() });
       if (outcome.armed && sha) {
@@ -152,6 +158,7 @@ export async function landEligiblePrs(deps: LandDeps): Promise<LandReport> {
       continue;
     }
     report.refused.push({ pr: pr.number, reason: outcome.reason });
+    recordRefusal(deps.boardDir, pr.number, fingerprint, now());
     if (sha) {
       writeOnce(
         notesPath(deps.boardDir, pr.number, sha, 'refused'),
