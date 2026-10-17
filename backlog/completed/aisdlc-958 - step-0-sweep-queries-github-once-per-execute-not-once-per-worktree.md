@@ -1,7 +1,7 @@
 ---
 id: AISDLC-958
 title: 'Step 0 sweep queries GitHub once per execute and caches landed results, instead of one gh pr list per worktree'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels:
@@ -29,6 +29,6 @@ Step 0 (`pipeline-cli/src/steps/00-sweep.ts`, called from `pipeline-cli/src/next
 
 ## Acceptance Criteria
 
-- [ ] Step 0 makes at most one GitHub call per execute regardless of the number of worktrees, and zero when every worktree is cached as landed or closed.
-- [ ] Removed worktrees drop out of the cache; a worktree whose branch gets a new PR is re-queried.
-- [ ] The execution reference documents the cache file and how to clear it.
+- [x] Step 0 makes at most one GitHub call per execute regardless of the number of worktrees, and zero when every worktree is cached as landed or closed.
+- [x] Removed worktrees drop out of the cache; a worktree whose branch gets a new PR is re-queried.
+- [x] The execution reference documents the cache file and how to clear it.

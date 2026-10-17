@@ -129,6 +129,10 @@ The PreToolUse hook reads `<worktree>/.active-task` (per-worktree sentinel, AISD
 
 After `cli-file task` / `cli-file decision` pushes the filing branch, it removes the untracked source copy from the parent when it is byte-identical to the committed copy (for decisions, the per-event files). A tracked or differing file is kept and a `[cli-file] kept ...` line says why. Step 0.5 (`00-5-sync-parent.ts`) skips an untracked `backlog/tasks/` file whose `ai-sdlc/file-<id>` branch already exists (local or `origin`) and names the branch, instead of aborting on `git worktree add -b`.
 
+### Step 0 sweep GitHub cost and cache (AISDLC-958)
+
+Step 0 (`pipeline-cli/src/steps/00-sweep.ts`) makes at most one GitHub call per run, however many worktrees exist: a single `gh pr list --state all --limit 200 --json number,state,headRefName,mergedAt`, matched to worktree branches locally. Branches whose PR is `MERGED` or `CLOSED` are recorded in `.ai-sdlc/sweep-landed-cache.json` (gitignored) together with the worktree HEAD sha, and are never queried again while the sha is unchanged; a run where every worktree is cached makes zero calls. Entries drop out when the worktree is removed or swept, and a branch whose HEAD moved (for example a new PR after new commits) is re-queried. Open and PR-less branches are never cached. Limitation: only the 200 most recent PRs are visible, so an older PR is treated as "no PR" until it is found. To clear the cache, delete `.ai-sdlc/sweep-landed-cache.json`; the next sweep rebuilds it with one call.
+
 ### Parallel runs
 
 Each `/ai-sdlc execute` runs in its own Claude Code session with its own per-worktree sentinel. Fan out via `/loop /ai-sdlc execute <task-id>` or multiple terminals — no shared mutable state to race on. Pre-push hook serializes only at push (Step 11); Steps 5-10 run fully in parallel across runs.

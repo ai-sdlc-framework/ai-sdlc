@@ -1,26 +1,15 @@
 /**
- * Tests for Step 0 — sweepMergedWorktrees + lookupPrState.
+ * Tests for Step 0 — sweepMergedWorktrees + listPrStatesByBranch.
  *
- * Coverage:
- *   (a) merged-with-deleted-branch case (squash-merged, --state all returns MERGED)
- *   (b) still-open PR case (state=OPEN — must NOT sweep)
- *   (c) no PR exists case (gh returns null — must NOT sweep)
- *   (d) detached HEAD case (branch=HEAD — must NOT sweep)
- *   (e) CLOSED (abandoned) PR — must NOT sweep (only MERGED sweeps)
- *   (f) non-zero git exit — skip silently
- *   (g) no .worktrees directory — return empty
- *   (h) PR lookup network failure (gh exits non-zero) — skip silently
- *
- * AISDLC-204: The sweep now uses `--state all` so squash-merged PRs with
- * deleted source branches (the normal case on this repo) are correctly
- * identified as merged via the `state` field rather than the empty array
- * returned by the old `--state merged` query.
+ * AISDLC-204: `--state all` so squash-merged PRs with deleted source branches
+ * are found. AISDLC-958: one batched `gh pr list` per sweep (never one per
+ * worktree) plus an on-disk cache of landed/closed branches.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { sweepMergedWorktrees, lookupPrState } from './00-sweep.js';
+import { sweepMergedWorktrees, listPrStatesByBranch, SWEEP_CACHE_FILE } from './00-sweep.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
 import { FakeRunner, ok, fail as fakeRunnerFail } from '../__test-helpers/fake-runner.js';
 
@@ -33,173 +22,114 @@ afterEach(() => {
   cleanupTmpProject(tmp);
 });
 
-// ── lookupPrState unit tests ──────────────────────────────────────────
+type Pr = { number: number; state: string; headRefName: string; mergedAt: string | null };
+const pr = (number: number, state: string, headRefName: string, mergedAt: string | null = null) =>
+  ({ number, state, headRefName, mergedAt }) as Pr;
+const list = (...prs: Pr[]) => ok(JSON.stringify(prs));
 
-describe('lookupPrState (AISDLC-204 helper)', () => {
-  it('(a) squash-merged with deleted branch: --state all returns MERGED state', async () => {
-    // This simulates the root cause: after squash-merge + branch deletion,
-    // `gh pr list --head <branch> --state merged` would return [] (the old
-    // broken behaviour). The new query uses `--state all` which still finds
-    // the PR via its head ref association. The API returns state=MERGED.
-    const fake = new FakeRunner().on(
-      /^gh pr list --head ai-sdlc\/aisdlc-204-test --state all/,
-      ok(JSON.stringify({ number: 328, state: 'MERGED', mergedAt: '2026-05-05T12:00:00Z' })),
-    );
-    const { state, mergedAt } = await lookupPrState(
-      'ai-sdlc/aisdlc-204-test',
-      tmp,
-      fake.toRunner(),
-    );
-    expect(state).toBe('MERGED');
-    expect(mergedAt).toBe('2026-05-05T12:00:00Z');
-  });
+/** Runner where worktree dir `<name>` has branch `branch-of(name)` and sha `sha-<name>`. */
+function wtRunner(prs: Pr[], ghCalls?: string[][]) {
+  return new FakeRunner()
+    .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, (args) =>
+      ok(`ai-sdlc/${(args[1] ?? '').split('/').pop()}\n`),
+    )
+    .on(/^git -C .+ rev-parse HEAD/, (args) => ok(`sha-${(args[1] ?? '').split('/').pop()}\n`))
+    .on(/^git -C .+ status --porcelain/, ok(''))
+    .on(/^git worktree remove/, ok())
+    .on(/^gh pr list/, (args) => {
+      ghCalls?.push(args);
+      return list(...prs);
+    })
+    .on(/^gh run list/, ok('[]'));
+}
 
-  it('(b) still-open PR: state=OPEN — must return OPEN, not MERGED', async () => {
-    const fake = new FakeRunner().on(
-      /^gh pr list/,
-      ok(JSON.stringify({ number: 400, state: 'OPEN', mergedAt: null })),
-    );
-    const { state, mergedAt } = await lookupPrState(
-      'ai-sdlc/aisdlc-in-flight',
-      tmp,
-      fake.toRunner(),
-    );
-    expect(state).toBe('OPEN');
-    expect(mergedAt).toBeNull();
-  });
+const mk = (name: string) => mkdirSync(join(tmp, '.worktrees', name), { recursive: true });
+const cachePath = () => join(tmp, SWEEP_CACHE_FILE);
 
-  it('(c) no PR exists: gh returns null — state is null', async () => {
-    const fake = new FakeRunner().on(/^gh pr list/, ok('null'));
-    const { state, mergedAt } = await lookupPrState('ai-sdlc/aisdlc-no-pr', tmp, fake.toRunner());
-    expect(state).toBeNull();
-    expect(mergedAt).toBeNull();
-  });
-
-  it('(e) CLOSED (abandoned) PR: state=CLOSED — must return CLOSED, not MERGED', async () => {
-    const fake = new FakeRunner().on(
-      /^gh pr list/,
-      ok(JSON.stringify({ number: 300, state: 'CLOSED', mergedAt: null })),
-    );
-    const { state } = await lookupPrState('ai-sdlc/abandoned-work', tmp, fake.toRunner());
-    expect(state).toBe('CLOSED');
-  });
-
-  it('(h) gh exits non-zero: returns null state (network/auth failure)', async () => {
-    const fake = new FakeRunner().on(/^gh pr list/, fakeRunnerFail('auth failed', 1));
-    const { state } = await lookupPrState('ai-sdlc/any-branch', tmp, fake.toRunner());
-    expect(state).toBeNull();
-  });
-
-  it('passes --state all so the query works with deleted source branches', async () => {
+describe('listPrStatesByBranch', () => {
+  it('one batched call with --state all, matched by headRefName', async () => {
     const calls: string[][] = [];
     const fake = new FakeRunner().on(/^gh pr list/, (args) => {
       calls.push(args);
-      return ok('null');
+      return list(pr(1, 'MERGED', 'a', '2026-05-05T12:00:00Z'), pr(2, 'OPEN', 'b'));
     });
-    await lookupPrState('some/branch', tmp, fake.toRunner());
+    const m = await listPrStatesByBranch(tmp, fake.toRunner());
     expect(calls).toHaveLength(1);
-    // Verify --state all is present (not --state merged)
-    expect(calls[0]).toContain('all');
-    expect(calls[0]).toContain('--state');
-    const stateIdx = calls[0].indexOf('--state');
-    expect(calls[0][stateIdx + 1]).toBe('all');
+    expect(calls[0]![calls[0]!.indexOf('--state') + 1]).toBe('all');
+    expect(calls[0]).not.toContain('--head');
+    expect(m?.get('a')).toEqual({ state: 'MERGED', mergedAt: '2026-05-05T12:00:00Z' });
+    expect(m?.get('b')?.state).toBe('OPEN');
+    expect(m?.get('c')).toBeUndefined();
+  });
+
+  it('prefers an OPEN PR, else the newest, for a branch with several PRs', async () => {
+    const fake = new FakeRunner().on(
+      /^gh pr list/,
+      list(
+        pr(5, 'MERGED', 'x', 't'),
+        pr(9, 'OPEN', 'x'),
+        pr(7, 'CLOSED', 'x'),
+        pr(3, 'CLOSED', 'y'),
+        pr(4, 'MERGED', 'y', 't'),
+        pr(2, 'CLOSED', 'y'),
+      ),
+    );
+    const m = await listPrStatesByBranch(tmp, fake.toRunner());
+    expect(m?.get('x')?.state).toBe('OPEN');
+    expect(m?.get('y')?.state).toBe('MERGED');
+  });
+
+  it('returns null on gh failure, empty map on empty output', async () => {
+    expect(
+      await listPrStatesByBranch(
+        tmp,
+        new FakeRunner().on(/^gh pr list/, fakeRunnerFail('auth', 1)).toRunner(),
+      ),
+    ).toBeNull();
+    expect(
+      (await listPrStatesByBranch(tmp, new FakeRunner().on(/^gh pr list/, ok('null')).toRunner()))
+        ?.size,
+    ).toBe(0);
+    expect(
+      await listPrStatesByBranch(tmp, new FakeRunner().on(/^gh pr list/, ok('{bad')).toRunner()),
+    ).toBeNull();
   });
 });
 
-// ── sweepMergedWorktrees integration tests ────────────────────────────
-
 describe('Step 0 — sweepMergedWorktrees', () => {
-  it('(g) returns empty when .worktrees does not exist', async () => {
+  it('returns empty when .worktrees does not exist', async () => {
     const result = await sweepMergedWorktrees({ workDir: '/nonexistent/path/abcdef' });
     expect(result.swept).toEqual([]);
   });
 
-  it('(b) skips worktrees with still-open PR (state=OPEN)', async () => {
-    mkdirSync(join(tmp, '.worktrees', 'aisdlc-1'), { recursive: true });
-    const fake = new FakeRunner()
-      .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, ok('ai-sdlc/aisdlc-1-test\n'))
-      .on(/^gh pr list/, ok(JSON.stringify({ number: 1, state: 'OPEN', mergedAt: null })));
-
+  it('skips OPEN, no-PR and CLOSED worktrees', async () => {
+    mk('wt-open');
+    mk('wt-none');
+    mk('wt-closed');
+    const fake = wtRunner([pr(1, 'OPEN', 'ai-sdlc/wt-open'), pr(2, 'CLOSED', 'ai-sdlc/wt-closed')]);
     const result = await sweepMergedWorktrees({ workDir: tmp, runner: fake.toRunner() });
     expect(result.swept).toEqual([]);
   });
 
-  it('(c) skips worktrees with no PR (gh returns null)', async () => {
-    mkdirSync(join(tmp, '.worktrees', 'aisdlc-2'), { recursive: true });
-    const fake = new FakeRunner()
-      .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, ok('ai-sdlc/aisdlc-2-test\n'))
-      .on(/^gh pr list/, ok('null'));
-
-    const result = await sweepMergedWorktrees({ workDir: tmp, runner: fake.toRunner() });
-    expect(result.swept).toEqual([]);
-  });
-
-  it('(d) skips detached HEAD worktrees (branch === "HEAD")', async () => {
-    mkdirSync(join(tmp, '.worktrees', 'detached'), { recursive: true });
+  it('skips detached HEAD worktrees', async () => {
+    mk('detached');
     const fake = new FakeRunner().on(/^git -C .+ rev-parse --abbrev-ref HEAD/, ok('HEAD\n'));
-
     const result = await sweepMergedWorktrees({ workDir: tmp, runner: fake.toRunner() });
     expect(result.swept).toEqual([]);
+    expect(fake.calls.some((c) => c.command === 'gh')).toBe(false);
   });
 
-  it('(a) removes worktrees whose PR is squash-merged (state=MERGED, deleted source branch)', async () => {
-    // This is the primary regression test for AISDLC-204. The worktree's
-    // branch has been deleted from the remote after squash-merge. The old
-    // `--state merged` query would return [] (empty) for this case. The new
-    // `--state all` query returns the PR with state=MERGED.
-    mkdirSync(join(tmp, '.worktrees', 'aisdlc-204'), { recursive: true });
-    const fake = new FakeRunner()
-      .on(
-        /^git -C .+ rev-parse --abbrev-ref HEAD/,
-        ok('ai-sdlc/aisdlc-204-step-0-worktree-sweep\n'),
-      )
-      .on(
-        /^gh pr list/,
-        ok(JSON.stringify({ number: 328, state: 'MERGED', mergedAt: '2026-05-05T12:00:00Z' })),
-      )
-      .on(/^git worktree remove/, ok());
-
+  it('removes squash-merged worktrees (AISDLC-204)', async () => {
+    mk('aisdlc-204');
+    const fake = wtRunner([pr(328, 'MERGED', 'ai-sdlc/aisdlc-204', '2026-05-05T12:00:00Z')]);
     const result = await sweepMergedWorktrees({ workDir: tmp, runner: fake.toRunner() });
     expect(result.swept).toHaveLength(1);
-    expect(result.swept[0]?.branch).toBe('ai-sdlc/aisdlc-204-step-0-worktree-sweep');
+    expect(result.swept[0]?.branch).toBe('ai-sdlc/aisdlc-204');
     expect(result.swept[0]?.mergedAt).toBe('2026-05-05T12:00:00Z');
   });
 
-  it('(e) does NOT remove CLOSED (abandoned) worktrees — operator-only cleanup', async () => {
-    mkdirSync(join(tmp, '.worktrees', 'aisdlc-abandoned'), { recursive: true });
-    const fake = new FakeRunner()
-      .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, ok('ai-sdlc/aisdlc-abandoned\n'))
-      .on(/^gh pr list/, ok(JSON.stringify({ number: 200, state: 'CLOSED', mergedAt: null })));
-
-    const result = await sweepMergedWorktrees({ workDir: tmp, runner: fake.toRunner() });
-    expect(result.swept).toEqual([]);
-  });
-
-  it('uses --state all in the gh pr list call (regression guard for AISDLC-204)', async () => {
-    mkdirSync(join(tmp, '.worktrees', 'aisdlc-3'), { recursive: true });
-    const calls: Array<{ command: string; args: string[] }> = [];
-    const fake = new FakeRunner()
-      .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, ok('ai-sdlc/aisdlc-3-test\n'))
-      .on(/^gh/, (args) => {
-        calls.push({ command: 'gh', args });
-        return ok('null');
-      });
-
-    await sweepMergedWorktrees({ workDir: tmp, runner: fake.toRunner() });
-
-    const ghCalls = calls.filter((c) => c.command === 'gh');
-    expect(ghCalls.length).toBeGreaterThan(0);
-    // The --state all arg must be present; --state merged must NOT be present
-    const allArgs = ghCalls.flatMap((c) => c.args);
-    const stateIdx = allArgs.indexOf('--state');
-    expect(stateIdx).toBeGreaterThan(-1);
-    expect(allArgs[stateIdx + 1]).toBe('all');
-    // Belt-and-braces: never use the old broken value
-    expect(allArgs).not.toContain('merged');
-  });
-
-  it('(f) handles non-zero git exit by skipping the entry silently', async () => {
-    mkdirSync(join(tmp, '.worktrees', 'broken'), { recursive: true });
+  it('handles non-zero git exit by skipping the entry silently', async () => {
+    mk('broken');
     const fake = new FakeRunner().on(/^git -C .+ rev-parse --abbrev-ref HEAD/, {
       stdout: '',
       stderr: 'fatal: not a git repository',
@@ -209,101 +139,156 @@ describe('Step 0 — sweepMergedWorktrees', () => {
     expect(result.swept).toEqual([]);
   });
 
+  it('gh failure: nothing swept, nothing cached', async () => {
+    mk('a');
+    const failing = new FakeRunner()
+      .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, ok('ai-sdlc/a\n'))
+      .on(/^gh pr list/, fakeRunnerFail('boom', 1));
+    const result = await sweepMergedWorktrees({ workDir: tmp, runner: failing.toRunner() });
+    expect(result.swept).toEqual([]);
+    expect(existsSync(cachePath())).toBe(false);
+  });
+
   it('sweeps multiple merged worktrees in a single pass', async () => {
-    mkdirSync(join(tmp, '.worktrees', 'aisdlc-10'), { recursive: true });
-    mkdirSync(join(tmp, '.worktrees', 'aisdlc-11'), { recursive: true });
-    mkdirSync(join(tmp, '.worktrees', 'aisdlc-12'), { recursive: true });
-
-    const fake = new FakeRunner()
-      // All three report a branch
-      .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, (args) => {
-        // Extract the worktree path from args to return different branch names
-        const wt = args[1] ?? '';
-        if (wt.endsWith('aisdlc-10')) return ok('ai-sdlc/aisdlc-10-feat\n');
-        if (wt.endsWith('aisdlc-11')) return ok('ai-sdlc/aisdlc-11-feat\n');
-        return ok('ai-sdlc/aisdlc-12-feat\n');
-      })
-      // aisdlc-10 and aisdlc-11 are merged; aisdlc-12 is still open
-      .on(
-        /^gh pr list --head ai-sdlc\/aisdlc-10/,
-        ok(JSON.stringify({ number: 10, state: 'MERGED', mergedAt: '2026-05-01T00:00:00Z' })),
-      )
-      .on(
-        /^gh pr list --head ai-sdlc\/aisdlc-11/,
-        ok(JSON.stringify({ number: 11, state: 'MERGED', mergedAt: '2026-05-02T00:00:00Z' })),
-      )
-      .on(
-        /^gh pr list --head ai-sdlc\/aisdlc-12/,
-        ok(JSON.stringify({ number: 12, state: 'OPEN', mergedAt: null })),
-      )
-      .on(/^git worktree remove/, ok());
-
+    mk('aisdlc-10');
+    mk('aisdlc-11');
+    mk('aisdlc-12');
+    const fake = wtRunner([
+      pr(10, 'MERGED', 'ai-sdlc/aisdlc-10', '2026-05-01T00:00:00Z'),
+      pr(11, 'MERGED', 'ai-sdlc/aisdlc-11', '2026-05-02T00:00:00Z'),
+      pr(12, 'OPEN', 'ai-sdlc/aisdlc-12'),
+    ]);
     const result = await sweepMergedWorktrees({ workDir: tmp, runner: fake.toRunner() });
-    expect(result.swept).toHaveLength(2);
-    const branches = result.swept.map((s) => s.branch).sort();
-    expect(branches).toEqual(['ai-sdlc/aisdlc-10-feat', 'ai-sdlc/aisdlc-11-feat']);
+    expect(result.swept.map((s) => s.branch).sort()).toEqual([
+      'ai-sdlc/aisdlc-10',
+      'ai-sdlc/aisdlc-11',
+    ]);
   });
 
-  // ── AISDLC-256 dirty-worktree guard (security review minor) ────────────
-  //
-  // The sweep MUST refuse `git worktree remove --force` when the worktree
-  // has uncommitted changes. Mirrors the AISDLC-224 hadUncommittedChanges
-  // guard. Defends against spurious MERGED states (gh API race, cached
-  // stale response, accidental early merge of in-progress work).
-
-  it('AISDLC-256 dirty-worktree guard: skips removal when status --porcelain has changes', async () => {
-    mkdirSync(join(tmp, '.worktrees', 'aisdlc-dirty'), { recursive: true });
-    let removeCalled = false;
-    const fake = new FakeRunner()
-      .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, ok('ai-sdlc/aisdlc-dirty-feat\n'))
-      .on(
-        /^gh pr list/,
-        ok(JSON.stringify({ number: 999, state: 'MERGED', mergedAt: '2026-05-10T00:00:00Z' })),
-      )
-      .on(/^git -C .+ status --porcelain/, ok(' M src/file.ts\n?? src/new.ts\n'))
+  // AISDLC-256 dirty-worktree guard
+  it('dirty worktree: skips removal when status --porcelain has changes', async () => {
+    mk('dirty');
+    let removed = false;
+    const dedicated = new FakeRunner()
+      .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, ok('ai-sdlc/dirty\n'))
+      .on(/^git -C .+ rev-parse HEAD/, ok('sha\n'))
+      .on(/^gh pr list/, list(pr(9, 'MERGED', 'ai-sdlc/dirty', 't')))
+      .on(/^git -C .+ status --porcelain/, ok(' M src/file.ts\n'))
       .on(/^git worktree remove/, () => {
-        removeCalled = true;
+        removed = true;
         return ok();
       });
-
-    const result = await sweepMergedWorktrees({ workDir: tmp, runner: fake.toRunner() });
-    expect(result.swept).toEqual([]); // NOT removed
-    expect(removeCalled).toBe(false); // remove never invoked
+    const result = await sweepMergedWorktrees({ workDir: tmp, runner: dedicated.toRunner() });
+    expect(result.swept).toEqual([]);
+    expect(removed).toBe(false);
   });
 
-  it('AISDLC-256 dirty-worktree guard: removes when status --porcelain is clean', async () => {
-    mkdirSync(join(tmp, '.worktrees', 'aisdlc-clean'), { recursive: true });
+  it('status check failure: skips removal conservatively', async () => {
+    mk('status-err');
+    let removed = false;
     const fake = new FakeRunner()
-      .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, ok('ai-sdlc/aisdlc-clean-feat\n'))
-      .on(
-        /^gh pr list/,
-        ok(JSON.stringify({ number: 1000, state: 'MERGED', mergedAt: '2026-05-10T00:00:00Z' })),
-      )
-      .on(/^git -C .+ status --porcelain/, ok('')) // clean
-      .on(/^git worktree remove/, ok());
-
-    const result = await sweepMergedWorktrees({ workDir: tmp, runner: fake.toRunner() });
-    expect(result.swept).toHaveLength(1);
-    expect(result.swept[0]?.branch).toBe('ai-sdlc/aisdlc-clean-feat');
-  });
-
-  it('AISDLC-256 dirty-worktree guard: skips removal when status check itself fails', async () => {
-    mkdirSync(join(tmp, '.worktrees', 'aisdlc-status-err'), { recursive: true });
-    let removeCalled = false;
-    const fake = new FakeRunner()
-      .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, ok('ai-sdlc/aisdlc-status-err-feat\n'))
-      .on(
-        /^gh pr list/,
-        ok(JSON.stringify({ number: 1001, state: 'MERGED', mergedAt: '2026-05-10T00:00:00Z' })),
-      )
-      .on(/^git -C .+ status --porcelain/, fakeRunnerFail('fatal: not a repo', 128))
+      .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, ok('ai-sdlc/status-err\n'))
+      .on(/^gh pr list/, list(pr(9, 'MERGED', 'ai-sdlc/status-err', 't')))
+      .on(/^git -C .+ status --porcelain/, fakeRunnerFail('fatal', 128))
       .on(/^git worktree remove/, () => {
-        removeCalled = true;
+        removed = true;
         return ok();
       });
-
     const result = await sweepMergedWorktrees({ workDir: tmp, runner: fake.toRunner() });
-    expect(result.swept).toEqual([]); // conservative: skip on status failure
-    expect(removeCalled).toBe(false);
+    expect(result.swept).toEqual([]);
+    expect(removed).toBe(false);
+  });
+});
+
+describe('Step 0 — batched query and landed cache (AISDLC-958)', () => {
+  it('80 worktrees cost at most one gh pr list call', async () => {
+    const prs: Pr[] = [];
+    for (let i = 0; i < 80; i++) {
+      mk(`wt-${i}`);
+      prs.push(pr(i + 1, i % 2 ? 'OPEN' : 'MERGED', `ai-sdlc/wt-${i}`, i % 2 ? null : 't'));
+    }
+    const ghCalls: string[][] = [];
+    const fake = wtRunner(prs, ghCalls);
+    const result = await sweepMergedWorktrees({ workDir: tmp, runner: fake.toRunner() });
+    expect(ghCalls).toHaveLength(1);
+    expect(result.swept).toHaveLength(40);
+  });
+
+  it('a second run with every worktree cached as closed makes zero gh pr list calls', async () => {
+    for (let i = 0; i < 80; i++) mk(`wt-${i}`);
+    const prs = Array.from({ length: 80 }, (_, i) => pr(i + 1, 'CLOSED', `ai-sdlc/wt-${i}`));
+    const ghCalls: string[][] = [];
+    await sweepMergedWorktrees({ workDir: tmp, runner: wtRunner(prs, ghCalls).toRunner() });
+    expect(ghCalls).toHaveLength(1);
+    expect(Object.keys(JSON.parse(readFileSync(cachePath(), 'utf8')))).toHaveLength(80);
+
+    await sweepMergedWorktrees({ workDir: tmp, runner: wtRunner(prs, ghCalls).toRunner() });
+    expect(ghCalls).toHaveLength(1); // no second call
+  });
+
+  it('OPEN and no-PR branches are never cached and are re-queried', async () => {
+    mk('o');
+    const ghCalls: string[][] = [];
+    const prs = [pr(1, 'OPEN', 'ai-sdlc/o')];
+    await sweepMergedWorktrees({ workDir: tmp, runner: wtRunner(prs, ghCalls).toRunner() });
+    await sweepMergedWorktrees({ workDir: tmp, runner: wtRunner(prs, ghCalls).toRunner() });
+    expect(ghCalls).toHaveLength(2);
+    expect(existsSync(cachePath())).toBe(false);
+  });
+
+  it('removed worktrees drop out of the cache', async () => {
+    mk('keep');
+    mk('gone');
+    const prs = [pr(1, 'CLOSED', 'ai-sdlc/keep'), pr(2, 'CLOSED', 'ai-sdlc/gone')];
+    await sweepMergedWorktrees({ workDir: tmp, runner: wtRunner(prs).toRunner() });
+    expect(Object.keys(JSON.parse(readFileSync(cachePath(), 'utf8'))).sort()).toEqual([
+      'ai-sdlc/gone',
+      'ai-sdlc/keep',
+    ]);
+    // Operator removes the 'gone' worktree directory.
+    const { rmSync } = await import('node:fs');
+    rmSync(join(tmp, '.worktrees', 'gone'), { recursive: true });
+    await sweepMergedWorktrees({ workDir: tmp, runner: wtRunner(prs).toRunner() });
+    expect(Object.keys(JSON.parse(readFileSync(cachePath(), 'utf8')))).toEqual(['ai-sdlc/keep']);
+  });
+
+  it('merged branches swept this run are removed from the cache', async () => {
+    mk('m');
+    const prs = [pr(1, 'MERGED', 'ai-sdlc/m', 't')];
+    await sweepMergedWorktrees({ workDir: tmp, runner: wtRunner(prs).toRunner() });
+    expect(existsSync(cachePath())).toBe(false);
+  });
+
+  it('a branch whose HEAD moved (new PR) is re-queried despite a cache entry', async () => {
+    mk('r');
+    const ghCalls: string[][] = [];
+    await sweepMergedWorktrees({
+      workDir: tmp,
+      runner: wtRunner([pr(1, 'CLOSED', 'ai-sdlc/r')], ghCalls).toRunner(),
+    });
+    // New commit on the branch and a new OPEN PR.
+    const moved = new FakeRunner()
+      .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, ok('ai-sdlc/r\n'))
+      .on(/^git -C .+ rev-parse HEAD/, ok('new-sha\n'))
+      .on(/^gh pr list/, (a) => {
+        ghCalls.push(a);
+        return list(pr(1, 'CLOSED', 'ai-sdlc/r'), pr(2, 'OPEN', 'ai-sdlc/r'));
+      });
+    const result = await sweepMergedWorktrees({ workDir: tmp, runner: moved.toRunner() });
+    expect(ghCalls).toHaveLength(2);
+    expect(result.swept).toEqual([]);
+    expect(JSON.parse(readFileSync(cachePath(), 'utf8'))).toEqual({});
+  });
+
+  it('a corrupt cache file is ignored', async () => {
+    mk('c');
+    mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+    writeFileSync(cachePath(), '{not json');
+    const ghCalls: string[][] = [];
+    await sweepMergedWorktrees({
+      workDir: tmp,
+      runner: wtRunner([pr(1, 'CLOSED', 'ai-sdlc/c')], ghCalls).toRunner(),
+    });
+    expect(ghCalls).toHaveLength(1);
   });
 });
