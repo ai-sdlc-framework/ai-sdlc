@@ -53,6 +53,7 @@ pnpm-debug.log*
 .ai-sdlc/state.db-shm
 .ai-sdlc/state.db-wal
 .ai-sdlc/state/
+.ai-sdlc/sweep-landed-cache.json
 .ai-sdlc/memory/
 # AISDLC-320: RFC-0024 Refit Phase 1 — draft captures are operator-local (OQ-1).
 # Explicit submit (`cli-capture submit`) promotes to team-shared backlog/captures/.

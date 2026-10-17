@@ -31,8 +31,8 @@
  * @module steps/00-sweep
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import type { SweepResult } from '../types.js';
 
@@ -126,45 +126,102 @@ export async function deriveCiWaitMs(
   }
 }
 
+export interface PrInfo {
+  state: string | null;
+  mergedAt: string | null;
+}
+
+const NO_PR: PrInfo = { state: null, mergedAt: null };
+
+/** Max PRs fetched by the single batched query (AISDLC-958). */
+export const SWEEP_PR_LIST_LIMIT = 200;
+
+/** On-disk cache of branches whose PR is permanently landed or closed. */
+export const SWEEP_CACHE_FILE = join('.ai-sdlc', 'sweep-landed-cache.json');
+
+interface CacheEntry {
+  state: 'MERGED' | 'CLOSED';
+  mergedAt: string | null;
+  /** Worktree HEAD sha when cached; a different sha means new work, so re-query. */
+  headSha: string;
+}
+type SweepCache = Record<string, CacheEntry>;
+
+function readCache(path: string): SweepCache {
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as SweepCache;
+    }
+  } catch {
+    // missing or corrupt cache: start empty
+  }
+  return {};
+}
+
+function writeCache(path: string, cache: SweepCache): void {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(cache, null, 2) + '\n');
+  } catch {
+    // best-effort
+  }
+}
+
 /**
- * Look up the PR state for `branch` using `--state all` so squash-merged PRs
- * (whose source branch was deleted from the remote) are still found.
+ * AISDLC-958 — ONE `gh pr list --state all` for the whole sweep, matched to
+ * branches locally. `--state all` keeps squash-merged PRs whose source branch
+ * was deleted visible (AISDLC-204). When a branch has several PRs, an OPEN one
+ * wins (the branch is back in flight), otherwise the most recently listed.
  *
- * Returns `{ state, mergedAt }` where `state` is `"MERGED"`, `"OPEN"`,
- * `"CLOSED"`, or `null` (no PR found / network failure).
+ * Returns `null` on any gh/parse failure so the caller skips silently.
  */
-export async function lookupPrState(
-  branch: string,
+export async function listPrStatesByBranch(
   workDir: string,
   runner: Runner,
-): Promise<{ state: string | null; mergedAt: string | null }> {
+): Promise<Map<string, PrInfo> | null> {
   try {
     const r = await runner(
       'gh',
       [
         'pr',
         'list',
-        '--head',
-        branch,
         '--state',
         'all',
+        '--limit',
+        String(SWEEP_PR_LIST_LIMIT),
         '--json',
-        'number,state,mergedAt',
-        '--jq',
-        '.[0]',
+        'number,state,headRefName,mergedAt',
       ],
       { allowFailure: true, cwd: workDir },
     );
-    if (r.code !== 0) return { state: null, mergedAt: null };
+    if (r.code !== 0) return null;
     const raw = r.stdout.trim();
-    if (!raw || raw === 'null') return { state: null, mergedAt: null };
-    const parsed = JSON.parse(raw) as { state?: string; mergedAt?: string | null };
-    const state = parsed.state ?? null;
-    const mergedAt = parsed.mergedAt ?? null;
-    return { state, mergedAt };
+    if (!raw || raw === 'null') return new Map();
+    const prs = JSON.parse(raw) as Array<{
+      number?: number;
+      state?: string;
+      headRefName?: string;
+      mergedAt?: string | null;
+    }>;
+    const byBranch = new Map<string, { info: PrInfo; number: number }>();
+    for (const pr of prs) {
+      if (!pr.headRefName || !pr.state) continue;
+      const num = pr.number ?? 0;
+      const prev = byBranch.get(pr.headRefName);
+      if (prev) {
+        const prevOpen = prev.info.state === 'OPEN';
+        const open = pr.state === 'OPEN';
+        if (prevOpen !== open ? prevOpen : num < prev.number) continue;
+      }
+      byBranch.set(pr.headRefName, {
+        info: { state: pr.state, mergedAt: pr.mergedAt ?? null },
+        number: num,
+      });
+    }
+    return new Map([...byBranch].map(([k, v]) => [k, v.info]));
   } catch {
-    // network/auth/parse failure — caller skips silently
-    return { state: null, mergedAt: null };
+    return null;
   }
 }
 
@@ -186,6 +243,8 @@ export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepRes
     return { swept: [] };
   }
 
+  // Pass 1 (local git only): resolve each worktree's branch and HEAD sha.
+  const found: Array<{ entry: string; wt: string; branch: string; headSha: string }> = [];
   for (const entry of entries) {
     const wt = join(worktreesDir, entry);
     let isDir: boolean;
@@ -209,9 +268,45 @@ export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepRes
 
     if (!branch || branch === 'HEAD') continue; // detached, skip
 
-    // Query with --state all so squash-merged PRs with deleted source branches
-    // are found (AISDLC-204). Filter client-side: only remove MERGED, not CLOSED.
-    const { state, mergedAt } = await lookupPrState(branch, opts.workDir, runner);
+    let headSha = '';
+    try {
+      const r = await runner('git', ['-C', wt, 'rev-parse', 'HEAD'], { allowFailure: true });
+      if (r.code === 0) headSha = r.stdout.trim();
+    } catch {
+      // no sha: entry is never served from cache
+    }
+    found.push({ entry, wt, branch, headSha });
+  }
+
+  // Cache: drop entries for branches with no worktree any more (AC2), serve
+  // landed/closed branches without a GitHub call (AISDLC-958).
+  const cachePath = join(opts.workDir, SWEEP_CACHE_FILE);
+  const oldCache = readCache(cachePath);
+  const cache: SweepCache = {};
+  const resolved = new Map<string, PrInfo>();
+  const uncached: typeof found = [];
+  for (const f of found) {
+    const hit = oldCache[f.branch];
+    if (hit && f.headSha !== '' && hit.headSha === f.headSha) {
+      cache[f.branch] = hit;
+      resolved.set(f.branch, { state: hit.state, mergedAt: hit.mergedAt });
+    } else {
+      uncached.push(f);
+    }
+  }
+  if (uncached.length > 0) {
+    const listed = await listPrStatesByBranch(opts.workDir, runner);
+    for (const f of uncached) {
+      const info = listed?.get(f.branch) ?? NO_PR;
+      resolved.set(f.branch, info);
+      if ((info.state === 'MERGED' || info.state === 'CLOSED') && f.headSha !== '') {
+        cache[f.branch] = { state: info.state, mergedAt: info.mergedAt, headSha: f.headSha };
+      }
+    }
+  }
+  for (const { entry, wt, branch } of found) {
+    // Only remove MERGED, not CLOSED (abandoned work may be salvageable).
+    const { state, mergedAt } = resolved.get(branch) ?? NO_PR;
     if (state !== 'MERGED') continue;
 
     // AISDLC-256 security minor: don't `--force` remove a worktree that has
@@ -284,6 +379,10 @@ export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepRes
       // remove may fail if path no longer registered — already swept by sibling run
     }
   }
+
+  // Removed worktrees drop out of the cache immediately.
+  for (const s of swept) delete cache[s.branch];
+  if (JSON.stringify(cache) !== JSON.stringify(oldCache)) writeCache(cachePath, cache);
 
   return { swept };
 }
