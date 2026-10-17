@@ -212,6 +212,7 @@ import {
   type ReconcilePr,
 } from '../hierarchy/reconcile.js';
 import { gatherPrFacts } from '../hierarchy/pr-facts.js';
+import { createSnapshotRunner } from '../hierarchy/pr-snapshot.js';
 import { reenter } from '../hierarchy/reenter.js';
 import { loadPrLifecycleConfig } from '../hierarchy/pr-lifecycle-config.js';
 import { startScheduler } from '../hierarchy/scheduler.js';
@@ -482,7 +483,11 @@ export async function runDispatchCli(
             facts = undefined;
           }
         } else {
-          facts = gatherFacts(createSystemRunner(), cwd, boardDir);
+          facts = gatherFacts(
+            createSnapshotRunner(createSystemRunner(), { boardDir }),
+            cwd,
+            boardDir,
+          );
         }
         return facts && only !== undefined ? facts.filter((f) => f.prNumber === only) : facts;
       };

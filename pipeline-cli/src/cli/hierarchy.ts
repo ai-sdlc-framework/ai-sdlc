@@ -140,6 +140,7 @@ import {
   webhookStatus,
   formatWebhookStatus,
 } from '../hierarchy/index.js';
+import { createSnapshotRunner } from '../hierarchy/pr-snapshot.js';
 import { findTaskFile, parseArgv, resolveBaseSha } from './dispatch.js';
 
 /** Dispatch holds its resume this long (upper bound; a new board file wakes it sooner). */
@@ -745,6 +746,8 @@ export async function runHierarchyCli(
         };
         const gitRun = extras.gitRun ?? createGitRunner();
         const emit = deps.emit ?? (() => {});
+        // One PR snapshot per wake, shared by every consumer below (AISDLC-959).
+        const wakeGh = createSnapshotRunner(extras.ghRun ?? deps.run, { boardDir: deps.boardDir });
         const result = await runDispatchTick({
           boardDir: deps.boardDir,
           workerId: worker,
@@ -820,9 +823,9 @@ export async function runHierarchyCli(
             findPr: (id) => findOpenPrNumber(extras.ghRun ?? deps.run, repoRoot, id),
           },
           parentHead: () => readParentHead(repoRoot),
-          listPrs: () => fetchHumanAttentionPrs(extras.ghRun ?? deps.run, repoRoot, deps.boardDir),
+          listPrs: () => fetchHumanAttentionPrs(wakeGh, repoRoot, deps.boardDir),
           markReady: () =>
-            markReadyAfterCodeql(extras.ghRun ?? deps.run, repoRoot, {
+            markReadyAfterCodeql(wakeGh, repoRoot, {
               hasCodeql: repoHasCodeql(repoRoot),
             }),
           landEligible:
@@ -831,7 +834,7 @@ export async function runHierarchyCli(
               landEligiblePrs({
                 boardDir: deps.boardDir,
                 repoRoot,
-                run: extras.ghRun ?? deps.run,
+                run: wakeGh,
                 mergeAuthors: readMergeAuthors(
                   repoRoot,
                   (y) => resolveGovernanceFromYaml(y).mergeAuthors,

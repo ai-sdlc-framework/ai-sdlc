@@ -107,6 +107,8 @@ export interface LandingRecord {
   rerunHeadSha?: string;
   delivered?: string;
   landed?: string;
+  /** Set once the PR is confirmed closed without landing; the record is not re-checked. */
+  closedUnlanded?: string;
   history: LandingEntry[];
 }
 
@@ -954,9 +956,14 @@ export function gatherFacts(
   // A record not yet landed whose PR left the open list: ask whether it merged.
   const open = new Set(facts.map((x) => x.prNumber));
   for (const r of listLanding(boardDir)) {
-    if (r.landed || open.has(r.pr)) continue;
+    if (r.landed || r.closedUnlanded || open.has(r.pr)) continue;
     const v = run('gh', ['pr', 'view', String(r.pr), '--json', 'state'], { cwd });
     const state = v.status === 0 ? parse<{ state?: string }>(v.stdout)?.state : undefined;
+    if (state === 'CLOSED') {
+      // Closed without landing: one confirmation, then the record expires (AISDLC-959).
+      writeLanding(boardDir, { ...r, closedUnlanded: clockNow().toISOString() });
+      continue;
+    }
     if (state === 'MERGED') {
       facts.push({
         prNumber: r.pr,
