@@ -17,6 +17,12 @@ on:
 permissions:
   contents: read
 
+# AISDLC-954: overlapping gate completions on one PR run once (head branch keys
+# fork PRs too, where workflow_run.pull_requests is empty).
+concurrency:
+  group: attestation-post-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
 jobs:
   post:
     name: Post attestation status
@@ -62,14 +68,6 @@ jobs:
             echo "ran=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Stage head envelope (DATA-ONLY, GitHub API; no fetch or checkout of the head)
-        if: steps.gate.outputs.ran == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: bash scripts/stage-attestation-data-api.sh
-
       # Same-repo release-please branches only; a fork with that prefix is verified.
       - name: Detect release-please PR
         id: release_please
@@ -84,21 +82,6 @@ jobs:
             release-please--*) [ "$HEAD_REPO_FULL" = "$REPO" ] && IS_RP=true ;;
           esac
           echo "is_release_please=${IS_RP}" >> "$GITHUB_OUTPUT"
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        if: steps.gate.outputs.ran == 'true' && steps.release_please.outputs.is_release_please != 'true'
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: steps.gate.outputs.ran == 'true' && steps.release_please.outputs.is_release_please != 'true'
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install and build the verifier (default-branch code)
-        if: steps.gate.outputs.ran == 'true' && steps.release_please.outputs.is_release_please != 'true'
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm --filter "@ai-sdlc/orchestrator..." build
 
       # workflow_run.pull_requests is empty for fork PRs, so the base SHA is
       # resolved from the API by head SHA (trusted: the base repo's own PR record).
@@ -121,6 +104,48 @@ jobs:
             echo "::error::could not resolve the PR base sha for ${HEAD_SHA}"; exit 1
           fi
           echo "base_sha=${BASE}" >> "$GITHUB_OUTPUT"
+
+      # AISDLC-954: the Actions token allows 1,000 requests/hour/repo; print the
+      # remaining quota before and after staging so the cost is visible.
+      - name: Quota before staging
+        if: steps.gate.outputs.ran == 'true' && steps.release_please.outputs.is_release_please != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          R=$(gh api rate_limit --jq '.resources.core.remaining' || echo unknown)
+          echo "rate-limit remaining before staging: ${R}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Stage head envelope, leaf index and leaves (AISDLC-954; DATA-ONLY, GitHub API; no fetch or checkout of the head)
+        if: steps.gate.outputs.ran == 'true' && steps.release_please.outputs.is_release_please != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          BASE_SHA: ${{ steps.base.outputs.base_sha }}
+        run: bash scripts/stage-attestation-data-api.sh
+
+      - name: Quota after staging
+        if: steps.gate.outputs.ran == 'true' && steps.release_please.outputs.is_release_please != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          R=$(gh api rate_limit --jq '.resources.core.remaining' || echo unknown)
+          echo "rate-limit remaining after staging: ${R}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        if: steps.gate.outputs.ran == 'true' && steps.release_please.outputs.is_release_please != 'true'
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.gate.outputs.ran == 'true' && steps.release_please.outputs.is_release_please != 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install and build the verifier (default-branch code)
+        if: steps.gate.outputs.ran == 'true' && steps.release_please.outputs.is_release_please != 'true'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter "@ai-sdlc/orchestrator..." build
 
       - name: Verify attestation
         id: verify

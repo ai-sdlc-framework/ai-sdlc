@@ -1,7 +1,7 @@
 ---
 id: AISDLC-954
 title: 'attestation-post stages only the head envelope, the leaf index and the leaves it references, under one concurrency group per PR'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels:
