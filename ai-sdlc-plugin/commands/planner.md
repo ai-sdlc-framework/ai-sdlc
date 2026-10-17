@@ -224,7 +224,9 @@ It regenerates the dated planner handoff memory file from board and catalog stat
 clear at any moment loses nothing. A Stop hook clears this session by itself when its
 context passes 150k tokens (`cli-hierarchy auto-clear`) and restarts it with
 `/ai-sdlc:planner`; after any clear, run `handoff read --role planner` first and resume
-from it. ### Handoff routine
+from it. The Stop hook also saves your last reply under your roster name in
+`.claude/memory/LAST_MESSAGE.md`; right after a clear, print your own section of that file so the
+operator can read it. ### Handoff routine
 
 Trigger: the operator says "handoff", or the context warning ("Context is at N%") appears; act
 at the next turn boundary, never mid-task.

@@ -10,7 +10,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -142,5 +142,132 @@ describe('context-auto-clear hook', () => {
       encoding: 'utf-8',
     });
     assert.equal(res.status, 0);
+  });
+
+  describe('last message persistence (AISDLC-914)', () => {
+    const line = (type, content) => JSON.stringify({ type, message: { role: type, content } });
+    const transcriptOf = (...lines) => {
+      const f = join(root, `t-${Math.random().toString(36).slice(2)}.jsonl`);
+      writeFileSync(f, lines.join('\n') + '\n');
+      return f;
+    };
+    const lastFile = () => join(root, '.claude', 'memory', 'LAST_MESSAGE.md');
+    const roster = (names) =>
+      writeFileSync(
+        join(board, 'hierarchy.json'),
+        JSON.stringify({
+          sessions: names.map((n, i) => ({ name: n, paneId: `%${i + 1}`, role: 'planner' })),
+        }),
+      );
+    const stop = (t, pane, extra = {}) =>
+      runAutoClear(
+        { transcript_path: t },
+        { env: { ...env(), TMUX_PANE: pane, ...extra }, cwd: root, run: () => ({ status: 0 }) },
+      );
+
+    it('writes text blocks only, and replaces only its own section', () => {
+      roster(['planner-a', 'dispatch-b']);
+      stop(
+        transcriptOf(
+          line('user', 'hi'),
+          line('assistant', [
+            { type: 'thinking', thinking: 'SECRET' },
+            { type: 'text', text: 'first A' },
+            { type: 'tool_use', name: 'Bash', input: { command: 'TOOLCALL' } },
+          ]),
+          line('user', [{ type: 'tool_result', content: 'TOOLRESULT' }]),
+          line('assistant', [{ type: 'text', text: 'final A' }]),
+        ),
+        '%1',
+      );
+      stop(transcriptOf(line('assistant', [{ type: 'text', text: 'final B' }])), '%2');
+      stop(transcriptOf(line('assistant', [{ type: 'text', text: 'newer A' }])), '%1');
+      const out = readFileSync(lastFile(), 'utf-8');
+      assert.match(out, /## planner-a \(\d{4}-/);
+      assert.match(out, /newer A/);
+      assert.match(out, /## dispatch-b/);
+      assert.match(out, /final B/);
+      assert.doesNotMatch(out, /final A|SECRET|TOOLCALL|TOOLRESULT/);
+    });
+
+    it('excludes non-text blocks from the last turn', () => {
+      roster(['planner-a']);
+      stop(
+        transcriptOf(
+          line('assistant', [
+            { type: 'thinking', thinking: 'THINK2' },
+            { type: 'text', text: 'visible' },
+            { type: 'tool_use', name: 'X', input: {} },
+          ]),
+        ),
+        '%1',
+      );
+      const out = readFileSync(lastFile(), 'utf-8');
+      assert.match(out, /visible/);
+      assert.doesNotMatch(out, /THINK2|tool_use/);
+    });
+
+    const textT = () => transcriptOf(line('assistant', [{ type: 'text', text: 'x' }]));
+    const reset = () => rmSync(join(root, '.claude'), { recursive: true, force: true });
+
+    it('positive control: a normal Stop writes the file', () => {
+      roster(['planner-a']);
+      reset();
+      stop(textT(), '%1');
+      assert.equal(existsSync(lastFile()), true);
+    });
+
+    it('writes nothing off-roster', () => {
+      roster(['planner-a']);
+      reset();
+      stop(textT(), '%9');
+      assert.equal(existsSync(lastFile()), false);
+    });
+
+    it('writes nothing for a missing transcript', () => {
+      roster(['planner-a']);
+      reset();
+      stop(join(root, 'missing.jsonl'), '%1');
+      assert.equal(existsSync(lastFile()), false);
+    });
+
+    it('writes nothing when switched off', () => {
+      roster(['planner-a']);
+      reset();
+      stop(textT(), '%1', { AI_SDLC_LAST_MESSAGE: 'off' });
+      assert.equal(existsSync(lastFile()), false);
+    });
+
+    it('does not let a prefix-sharing session name collide', () => {
+      roster(['planner-a', 'planner-ab']);
+      reset();
+      stop(transcriptOf(line('assistant', [{ type: 'text', text: 'AB one' }])), '%2');
+      stop(transcriptOf(line('assistant', [{ type: 'text', text: 'A one' }])), '%1');
+      stop(transcriptOf(line('assistant', [{ type: 'text', text: 'A two' }])), '%1');
+      const out = readFileSync(lastFile(), 'utf-8');
+      assert.match(out, /AB one/);
+      assert.match(out, /A two/);
+      assert.doesNotMatch(out, /A one/);
+    });
+
+    it('a reply with ## lines cannot orphan, truncate or spoof sections', () => {
+      roster(['planner-a', 'dispatch-b']);
+      reset();
+      stop(transcriptOf(line('assistant', [{ type: 'text', text: 'B real' }])), '%2');
+      const evil =
+        'intro\n## Status\nok\n## dispatch-b (fake)\nforged\n## dispatch-b (2026-01-01T00:00:00.000Z)\nforged2\ntail';
+      stop(transcriptOf(line('assistant', [{ type: 'text', text: evil }])), '%1');
+      // rewrite by another session: planner-a section must survive intact
+      stop(transcriptOf(line('assistant', [{ type: 'text', text: 'B newer' }])), '%2');
+      const out = readFileSync(lastFile(), 'utf-8');
+      assert.match(
+        out,
+        /intro\n### Status\nok\n### dispatch-b \(fake\)\nforged\n### dispatch-b \(2026[^\n]*\nforged2\ntail/,
+      );
+      assert.equal((out.match(/^## dispatch-b /gm) || []).length, 1);
+      assert.equal((out.match(/^## planner-a /gm) || []).length, 1);
+      assert.doesNotMatch(out, /B real/);
+      assert.match(out, /B newer/);
+    });
   });
 });

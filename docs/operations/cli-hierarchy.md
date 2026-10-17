@@ -597,6 +597,15 @@ Thresholds are configurable in `.ai-sdlc/dispatch/config.json`:
 Missing or invalid values fall back to the defaults. Set `AI_SDLC_AUTO_CLEAR=off` to switch the
 hook off for a session.
 
+#### `LAST_MESSAGE.md` (AISDLC-914)
+
+A clear wipes the scrollback, so the same Stop hook first writes the last assistant turn's text
+blocks (no tool use, thinking or tool results) to `.claude/memory/LAST_MESSAGE.md` in the
+project root. Each roster session owns one `## <roster name> (<time>)` section; a later Stop
+replaces that section and leaves the others. The session is matched by `TMUX_PANE` against the
+roster `paneId`; no roster entry, no transcript or an unreadable one writes nothing. Planner and
+dispatch print their own section right after a clear. Set `AI_SDLC_LAST_MESSAGE=off` to disable.
+
 ### Context usage: status line, warning, handoff (AISDLC-728)
 
 Three pieces work for all three roles; none of them blocks or refuses anything.

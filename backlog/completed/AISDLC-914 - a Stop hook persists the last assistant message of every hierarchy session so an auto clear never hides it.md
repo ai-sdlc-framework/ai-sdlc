@@ -1,7 +1,7 @@
 ---
 id: AISDLC-914
 title: 'feat: a Stop hook persists the last assistant message of every hierarchy session to .claude/memory/LAST_MESSAGE.md so an auto clear never hides it'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [feature, plugin, hierarchy]

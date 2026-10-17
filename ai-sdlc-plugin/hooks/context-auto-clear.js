@@ -12,6 +12,10 @@
  * once the handoff file is rewritten (or at threshold plus 25%). An executor holding an inflight task is deferred until its verdict is
  * written. Every failure is swallowed: a session is never delayed or failed by this.
  *
+ * Before that check it also persists the session's last assistant text to
+ * `.claude/memory/LAST_MESSAGE.md` (AISDLC-914), so a clear never hides the final reply.
+ * `AI_SDLC_LAST_MESSAGE=off` switches that off.
+ *
  * Bin resolution is file-existence only ($PIPELINE_CLI_BIN, the plugin's own
  * node_modules, the plugin-relative monorepo checkout); nothing is derived from the
  * project being worked on.
@@ -20,12 +24,13 @@
 'use strict';
 
 const { spawnSync } = require('node:child_process');
-const { existsSync, readFileSync } = require('node:fs');
+const { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } = require('node:fs');
 const { dirname, join, resolve } = require('node:path');
 
 const BIN_NAME = 'cli-hierarchy.mjs';
 const PIPELINE_CLI_REL = join('node_modules', '@ai-sdlc', 'pipeline-cli', 'bin');
 const TIMEOUT_MS = 15_000;
+const SECTION_START = /^(?=## [^\n]+ \(\d{4}-\d{2}-\d{2}T[^\n]*\)$)/m;
 
 function isOff(env) {
   return ['off', '0', 'false', 'no', 'disabled'].includes(
@@ -68,6 +73,87 @@ function gitCommonDir(cwd) {
   }
 }
 
+function isLastMessageOff(env) {
+  return ['off', '0', 'false', 'no', 'disabled'].includes(
+    String(env.AI_SDLC_LAST_MESSAGE || '').toLowerCase(),
+  );
+}
+
+/** Text blocks of the trailing run of assistant entries in a JSONL transcript. */
+function lastAssistantText(raw) {
+  const entries = [];
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      entries.push(JSON.parse(line));
+    } catch {
+      // skip a torn line
+    }
+  }
+  const parts = [];
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    const role = e && (e.type || (e.message && e.message.role));
+    if (role !== 'assistant') {
+      if (parts.length) break;
+      continue;
+    }
+    const content = e.message && e.message.content;
+    const texts =
+      typeof content === 'string'
+        ? [content]
+        : Array.isArray(content)
+          ? content
+              .filter((b) => b && b.type === 'text' && typeof b.text === 'string')
+              .map((b) => b.text)
+          : [];
+    parts.unshift(...texts);
+  }
+  return parts.join('\n\n').trim();
+}
+
+function currentSession(boardDir, env) {
+  try {
+    const roster = JSON.parse(readFileSync(join(boardDir, 'hierarchy.json'), 'utf-8'));
+    const pane = env.TMUX_PANE;
+    if (!pane || !Array.isArray(roster.sessions)) return undefined;
+    return roster.sessions.find((s) => s && s.paneId === pane && typeof s.name === 'string');
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Replace this session's section of LAST_MESSAGE.md, keeping other sessions' sections.
+ * Returns true when written. Never throws.
+ */
+function persistLastMessage(transcript, boardDir, env, now = new Date()) {
+  try {
+    if (isLastMessageOff(env)) return false;
+    const session = currentSession(boardDir, env);
+    if (!session || !existsSync(transcript)) return false;
+    const text = lastAssistantText(readFileSync(transcript, 'utf-8'));
+    if (!text) return false;
+    const file = join(dirname(dirname(boardDir)), '.claude', 'memory', 'LAST_MESSAGE.md');
+    const heading = `## ${session.name}`;
+    const existing = existsSync(file) ? readFileSync(file, 'utf-8') : '';
+    // Only an exact `## <name> (<iso>)` line starts a session section; the saved body
+    // has its own `## ` lines demoted so a reply can never forge or split a section.
+    const sections = existing
+      .split(SECTION_START)
+      .filter((sec) => sec.startsWith('## ') && !sec.startsWith(`${heading} (`));
+    const body = text.replace(/^##(?= )/gm, '###');
+    sections.push(`${heading} (${now.toISOString()})\n\n${body}\n`);
+    mkdirSync(dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.tmp`;
+    writeFileSync(tmp, `# Last messages\n\n${sections.join('\n')}`);
+    renameSync(tmp, file);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The warn message in the CLI's output (one JSON decision per line), or ''. At the warn
  * threshold the CLI answers `action: warn`; the Stop hook relays it so the session gets
@@ -107,6 +193,7 @@ function runAutoClear(payload, options = {}) {
     const boardDir = resolve(boardDirOf(env, cwd));
     // Cheap exit for every session that is not in a hierarchy roster.
     if (!existsSync(join(boardDir, 'hierarchy.json'))) return 'no-roster';
+    persistLastMessage(transcript, boardDir, env, options.now);
     const bin = resolveBin(env, pluginDir);
     if (!bin) return 'no-cli';
     const run = options.run || spawnSync;
@@ -147,4 +234,11 @@ if (require.main === module) {
   process.exit(0);
 }
 
-module.exports = { runAutoClear, warnMessageOf, resolveBin, boardDirOf };
+module.exports = {
+  runAutoClear,
+  persistLastMessage,
+  lastAssistantText,
+  warnMessageOf,
+  resolveBin,
+  boardDirOf,
+};
