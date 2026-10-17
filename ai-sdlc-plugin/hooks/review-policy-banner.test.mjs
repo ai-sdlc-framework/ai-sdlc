@@ -5,7 +5,15 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, writeFileSync, rmSync, mkdtempSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+} from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -111,8 +119,13 @@ describe('session-start hook end to end (fake ai-sdlc doctor)', () => {
   });
   after(() => rmSync(root, { recursive: true, force: true }));
 
-  function ctxFor(bin) {
-    const env = { ...process.env, CLAUDE_PROJECT_DIR: project, AI_SDLC_DOCTOR_BIN: bin };
+  function ctxFor(bin, cacheDir) {
+    const env = {
+      ...process.env,
+      CLAUDE_PROJECT_DIR: project,
+      AI_SDLC_DOCTOR_BIN: bin,
+      AI_SDLC_PLUGIN_CACHE_DIR: cacheDir || mkdtempSync(join(tmpdir(), 'banner-cache-')),
+    };
     delete env.CLAUDE_PLUGIN_ROOT;
     delete env.CLAUDE_PLUGIN_DIR;
     const out = execFileSync('node', [hookScript], {
@@ -145,5 +158,27 @@ describe('session-start hook end to end (fake ai-sdlc doctor)', () => {
     const ctx = ctxFor(join(root, 'does-not-exist'));
     assert.match(ctx, /could NOT be confirmed/);
     assert.doesNotMatch(ctx, /Review policy is active/);
+  });
+
+  it('second start within TTL spawns no doctor (cache hit), AISDLC-961', () => {
+    const counter = join(root, 'count');
+    const bin = fakeBin('doctor-count', `echo x >> '${counter}'\necho '${doctorJson('pass')}'`);
+    const cacheDir = mkdtempSync(join(tmpdir(), 'banner-cache-'));
+    assert.match(ctxFor(bin, cacheDir), /Review policy is ENFORCED/);
+    assert.match(ctxFor(bin, cacheDir), /Review policy is ENFORCED/);
+    assert.equal(readFileSync(counter, 'utf-8').trim().split('\n').length, 1);
+  });
+
+  it('a stale cache probes again', () => {
+    const counter = join(root, 'count2');
+    const bin = fakeBin('doctor-count2', `echo x >> '${counter}'\necho '${doctorJson('pass')}'`);
+    const cacheDir = mkdtempSync(join(tmpdir(), 'banner-cache-'));
+    ctxFor(bin, cacheDir);
+    const f = join(cacheDir, readdirSync(cacheDir)[0]);
+    const c = JSON.parse(readFileSync(f, 'utf-8'));
+    c.checkedAt = new Date(Date.now() - 25 * 3600 * 1000).toISOString();
+    writeFileSync(f, JSON.stringify(c));
+    ctxFor(bin, cacheDir);
+    assert.equal(readFileSync(counter, 'utf-8').trim().split('\n').length, 2);
   });
 });

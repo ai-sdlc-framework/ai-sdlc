@@ -22,6 +22,10 @@ Reference material moved out of `CLAUDE.md` by AISDLC-651.2 to keep the per-turn
 
 The Definition-of-Ready check and the backlog-drift check are no longer local hooks (AISDLC-712, DEC-0056 row 3): they run in CI (the `dor-readiness-gate` job, "Backlog Drift"). Agents may still run `node pipeline-cli/bin/cli-dor-check.mjs --task <path>` and `npx backlog-drift check` by hand.
 
+## SessionStart review-policy banner cache (AISDLC-961)
+
+The SessionStart banner probes branch protection via `ai-sdlc doctor --only attestation-governance` (GitHub API). The result is cached at `~/.cache/ai-sdlc-plugin/review-banner-<owner>_<repo>.json` (override the directory with `AI_SDLC_PLUGIN_CACHE_DIR`) with a 24-hour TTL; a missing or stale entry probes once, and an `unknown` result is never cached. Only the banner reads the cache: `ai-sdlc doctor` run by hand always probes live. Delete the file to force a re-probe.
+
 ## CI behavior
 
 **One CI run per PR (AISDLC-727, DEC-0056).** `ai-sdlc-gate.yml` is the only workflow that runs lint, build, test, coverage and integration on `pull_request` events; `ci.yml` runs on pushes to `main` and the nightly schedule only. The old `auto-rebase-open-prs.yml` and `auto-rebase-on-queue-kick.yml` workflows are deleted: open PRs are not rebased after each merge (`strict=false`); a PR is rebased only when it conflicts, by its executor or the conflict-resolver agent.
