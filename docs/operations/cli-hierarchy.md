@@ -115,7 +115,7 @@ malformed argument). `--help`, `-h` or `help` prints the usage and exits 0.
 
 Start the planner, the dispatch session and up to five executors, each in its own detached
 tmux session, and write the roster. Idempotent: sessions already running are left alone and
-only the missing ones are started.
+only the missing ones are started. It also starts the reconcile scheduler (`cli-dispatch reconcile --watch`, which polls `<board>/.reconcile-wake`) as a detached process and records its pid in `<board>/reconcile-scheduler.json`; a second `up` with a live scheduler starts no other.
 
 ```bash
 cli-hierarchy up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
@@ -251,6 +251,7 @@ The `NODE` column is the Node version the pane's processes run, read from the pr
 table. It is `-` when no nvm-managed node process runs under the pane or `ps` cannot be read.
 The last line is the webhook receiver: `webhook: up (port N)` when running, `webhook: off (no secret)`
 when `AI_SDLC_WEBHOOK_SECRET` is unset, `webhook: off (not running)` otherwise.
+The line after it is the reconcile scheduler (the poller of `<board>/.reconcile-wake`): `scheduler: up (pid N)` or `scheduler: off`.
 A final `unbriefed` line lists dispatchable open tasks under `backlog/tasks/` that are on no
 brief and not on the board (nothing would ever queue them); write a brief for them.
 
@@ -261,7 +262,7 @@ cli-hierarchy status [--json]
 `--json` prints one JSON object: `{ "rows": [ { "entry": <roster entry>, "state": "...",
 "attached": true|false, "inflightTask": "AISDLC-N", "launchEnv": "ok|missing",
 "nodeVersion": "22.23.2", "nodeMismatch": true, "nextStep": "..." } ], "board": { "queued": n,
-"inflight": n, "done": n, "failed": n }, "webhook": { "state": "up", "port": n, "pid": n } }`. Read-only. Exit code `0`.
+"inflight": n, "done": n, "failed": n }, "webhook": { "state": "up", "port": n, "pid": n }, "scheduler": { "state": "up", "pid": n } }`. Read-only. Exit code `0`.
 
 ### `stall-notice`
 
@@ -297,7 +298,7 @@ after the `X-Hub-Signature-256` HMAC check the receiver writes one event record 
 URL-encoded) holding `repo`, `pr`, `headSha`, `kind`, `deliveryId` and `receivedAt`, and nothing else.
 A replay of a delivery id returns 200 and writes nothing; a missing or wrong signature returns 401 and
 writes nothing. After a record is written, deliveries for the same `(pr, headSha)` are debounced for 5 s
-and then the file `.ai-sdlc/dispatch/wake` is touched, once. The receiver never classifies or acts.
+and then the file `.ai-sdlc/dispatch/.reconcile-wake` (the file `reconcile --watch` polls) is touched, once. A replayed delivery id or a failed signature touches nothing. The receiver never classifies or acts.
 
 ```bash
 AI_SDLC_WEBHOOK_SECRET=... cli-hierarchy webhook up [--port 8765]
@@ -308,7 +309,7 @@ cli-hierarchy webhook down
 The secret comes only from the `AI_SDLC_WEBHOOK_SECRET` environment variable, never a file in the
 repository. Without it `webhook up` does nothing and dispatch stays poll-only (not an error). The
 receiver binds to `127.0.0.1` only, on `--port` or `AI_SDLC_WEBHOOK_PORT` (default 8765), at path
-`/webhooks/github`. `cli-hierarchy up` starts it when the secret is set. Subscribed event kinds:
+`/webhooks/github`. `cli-hierarchy up` starts it when the secret is set (and always starts the reconcile scheduler that consumes its wake file, see `up`). Subscribed event kinds:
 `pull_request`, `check_suite`, `check_run`, `workflow_run`, `status`, `pull_request_review`.
 
 Reaching it from GitHub, with the repository webhook's secret equal to `AI_SDLC_WEBHOOK_SECRET`:
@@ -396,7 +397,7 @@ cli-hierarchy down [--role <name-or-role>]
 ```
 
 `--role` stops one session by name (`executor-beta`) or a role (`executor` selects all
-executors); with no option every session stops. Each session is asked to exit and gets a
+executors); with no option every session stops and the reconcile scheduler (the poller of `<board>/.reconcile-wake`) is stopped too. Each session is asked to exit and gets a
 grace period; a window that stays open is closed by pane id. A session that does not carry
 the ownership marker, or whose recorded pane no longer belongs to it, is refused and left
 in the roster. Effects: manifests held by a stopped session move from `inflight/` to

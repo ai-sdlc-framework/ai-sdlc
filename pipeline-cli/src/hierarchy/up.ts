@@ -8,6 +8,7 @@
 
 import path from 'node:path';
 
+import { schedulerUp } from './reconcile-scheduler.js';
 import { webhookUp } from './webhook.js';
 import { attachEntry } from './attach.js';
 import { findStartedSession, readSessionRegistry } from './registry.js';
@@ -503,6 +504,13 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
   for (const e of existing)
     deps.log(`already running ${e.role} '${e.tmuxWindow}' (session left alone)`);
   for (const w of warnings) deps.log(`warning: ${w}`);
+
+  // The consumer of the webhook wake file; runs whether or not a secret is set (AISDLC-932).
+  try {
+    schedulerUp(deps, deps.spawnScheduler);
+  } catch (err) {
+    deps.log(`warning: reconcile scheduler not started: ${(err as Error).message}`);
+  }
 
   if (opts.vscodeTasks) {
     let owner: 'absent' | 'ours' | 'foreign' = 'absent';

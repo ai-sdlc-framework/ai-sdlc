@@ -17,6 +17,7 @@
 
 import { releaseInflight } from '../dispatch/board.js';
 import { listInflight } from './inflight.js';
+import { schedulerDown } from './reconcile-scheduler.js';
 import { readRosterChecked, writeRoster } from './roster.js';
 import { splitSessionName } from './validate.js';
 import {
@@ -132,5 +133,7 @@ export async function hierarchyDown(
       `stopped ${entry.role} '${entry.name}'${forced ? ' (window closed after no exit)' : ''}${requeued ? `; returned ${requeued} to the queue` : ''}`,
     );
   }
+  // Stopping the whole hierarchy also stops its reconcile scheduler (AISDLC-932).
+  if (!options.role) schedulerDown(deps);
   return { stopped, refused };
 }

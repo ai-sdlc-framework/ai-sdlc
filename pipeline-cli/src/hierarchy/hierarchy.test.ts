@@ -11,7 +11,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { validateHierarchyRoster } from '@ai-sdlc/reference';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { schedulerDown, schedulerStatus } from './reconcile-scheduler.js';
 
 import {
   ensureBoardDirs,
@@ -239,6 +241,8 @@ const baseOpts: UpOptions = {
   attach: false,
 };
 
+let schedulerSpawns: string[][];
+
 beforeEach(() => {
   tmp = mkdtempSync(path.join(tmpdir(), 'hierarchy-'));
   boardDir = path.join(tmp, 'dispatch');
@@ -269,7 +273,12 @@ beforeEach(() => {
     pollIntervalMs: 1,
     // No registry entry is a live foreign process unless a test says so.
     isAlive: () => false,
+    spawnScheduler: (f, a) => {
+      schedulerSpawns.push([f, ...a]);
+      return 4242;
+    },
   };
+  schedulerSpawns = [];
 });
 
 afterEach(() => {
@@ -905,6 +914,7 @@ describe('hierarchy status', () => {
     expect(formatStatus(result)).toEqual([
       'no sessions in the roster',
       'webhook: off (no secret)',
+      'scheduler: off',
       'context clear thresholds (tokens): planner 150000, operator-dispatch 120000, executor 120000',
     ]);
   });
@@ -2269,5 +2279,61 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
         /AI_SDLC_HIERARCHY_SESSION/,
       );
     });
+  });
+});
+
+describe('reconcile scheduler ownership (AISDLC-932)', () => {
+  const opts = { ...baseOpts, executors: 0, noPlanner: true };
+
+  it('up starts reconcile --watch detached and records its pid', async () => {
+    await hierarchyUp(opts, deps);
+    expect(schedulerSpawns).toHaveLength(1);
+    expect(schedulerSpawns[0]?.slice(1)).toEqual([
+      path.join(path.dirname(process.argv[1] ?? ''), 'cli-dispatch.mjs'),
+      'reconcile',
+      '--watch',
+      '--board-dir',
+      boardDir,
+    ]);
+    deps.isAlive = (p) => p === 4242;
+    expect(schedulerStatus(deps)).toEqual({ state: 'up', pid: 4242 });
+  });
+
+  it('a second up with a live scheduler starts no other', async () => {
+    await hierarchyUp(opts, deps);
+    deps.isAlive = (p) => p === 4242;
+    await hierarchyUp(opts, deps);
+    expect(schedulerSpawns).toHaveLength(1);
+  });
+
+  it('a failed spawn warns and does not fail up', async () => {
+    deps.spawnScheduler = () => undefined;
+    await hierarchyUp(opts, deps);
+    expect(logs.some((l) => l.includes('reconcile scheduler not started'))).toBe(true);
+  });
+
+  it('status reports it in text and json', async () => {
+    await hierarchyUp(opts, deps);
+    deps.isAlive = (p) => p === 4242;
+    const result = hierarchyStatus(deps);
+    expect(result.scheduler).toEqual({ state: 'up', pid: 4242 });
+    expect(formatStatus(result)).toContain('scheduler: up (pid 4242)');
+  });
+
+  it('down stops it, a role-limited down leaves it', async () => {
+    await hierarchyUp(opts, deps);
+    deps.isAlive = (p) => p === 4242;
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    try {
+      await hierarchyDown({ role: 'operator-dispatch' }, deps);
+      expect(kill).not.toHaveBeenCalledWith(4242, 'SIGTERM');
+      await hierarchyDown({}, deps);
+      expect(kill).toHaveBeenCalledWith(4242, 'SIGTERM');
+    } finally {
+      kill.mockRestore();
+    }
+    deps.isAlive = () => false;
+    expect(schedulerStatus(deps)).toEqual({ state: 'off' });
+    expect(schedulerDown(deps)).toBe(false);
   });
 });

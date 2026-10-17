@@ -231,6 +231,7 @@ describe('runHierarchyCli', () => {
     expect(logs).toEqual([
       'no sessions in the roster',
       'webhook: off (no secret)',
+      'scheduler: off',
       'context clear thresholds (tokens): planner 150000, operator-dispatch 120000, executor 120000',
     ]);
     logs.length = 0;

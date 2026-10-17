@@ -11,6 +11,11 @@ import { paneNodeVersion, readNvmrc, versionMatches } from './node-pin.js';
 import { hasLaunchEnv } from './up.js';
 import { readSessionRegistry } from './registry.js';
 import { readRosterChecked } from './roster.js';
+import {
+  formatSchedulerStatus,
+  schedulerStatus,
+  type SchedulerStatus,
+} from './reconcile-scheduler.js';
 import { formatWebhookStatus, webhookStatus, type WebhookStatus } from './webhook.js';
 import { listWindows, paneInfo, paneStartCommand, sessionAttached } from './tmux.js';
 import { resolveThresholds } from './auto-clear.js';
@@ -46,6 +51,8 @@ export interface StatusResult {
   board: QueueCounts;
   /** The local webhook receiver (AISDLC-880). */
   webhook: WebhookStatus;
+  /** The detached reconcile scheduler (AISDLC-932). */
+  scheduler: SchedulerStatus;
   /** Per-role context-clear thresholds in tokens (AISDLC-815), from `<board-dir>/config.json`. */
   contextThresholds?: Record<HierarchyRole, number>;
   /** Dispatchable tasks on no brief and not on the board (AISDLC-930); absent when none. */
@@ -125,6 +132,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     rows,
     board: peekQueue(deps.boardDir),
     webhook: webhookStatus(deps),
+    scheduler: schedulerStatus(deps),
     contextThresholds: resolveThresholds(deps.boardDir),
     ...(unbriefed.length > 0 ? { unbriefed } : {}),
   };
@@ -147,6 +155,7 @@ export function formatStatus(result: StatusResult): string[] {
     return [
       'no sessions in the roster',
       formatWebhookStatus(result.webhook),
+      formatSchedulerStatus(result.scheduler),
       ...thresholds,
       ...unbriefed,
     ];
@@ -200,6 +209,7 @@ export function formatStatus(result: StatusResult): string[] {
     '',
     `board: ${queued} queued, ${inflight} inflight, ${done} done, ${failed} failed`,
     formatWebhookStatus(result.webhook),
+    formatSchedulerStatus(result.scheduler),
     ...thresholds,
     ...unbriefed,
   ];
