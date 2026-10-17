@@ -109,6 +109,46 @@ describe('cli-file', () => {
     expect(() => fileTask(repo, p, { pr: true }, deps)).toThrow(FileRefusal);
   });
 
+  describe('AISDLC-921 --update', () => {
+    it('without --update an existing id is still refused', () => {
+      commitMain('backlog/tasks/aisdlc-900 - thing.md', '---\nid: AISDLC-900\n---\nold\n');
+      expect(() => fileTask(repo, writeTask(), { pr: true }, deps)).toThrow(
+        /already exists on origin\/main/,
+      );
+    });
+
+    it('with --update an id not on main is refused', () => {
+      expect(() => fileTask(repo, writeTask(), { pr: true, update: true }, deps)).toThrow(
+        /--update needs task id AISDLC-900 to exist/,
+      );
+      expect(ghCalls).toHaveLength(0);
+    });
+
+    it('with --update an existing id is edited on a branch from main and a PR opens', () => {
+      commitMain('backlog/tasks/aisdlc-900 - thing.md', '---\nid: AISDLC-900\n---\nold\n');
+      const p = writeTask();
+      const r = fileTask(repo, p, { pr: true, brief: false, update: true }, deps);
+      expect(r.branch).toBe('ai-sdlc/update-aisdlc-900');
+      expect(r.prUrl).toBe('https://github.com/o/r/pull/1');
+      expect(sh(remote, 'show', `${r.branch}:backlog/tasks/aisdlc-900 - thing.md`)).toContain(
+        'body',
+      );
+      expect(sh(remote, 'log', '-1', '--format=%s', r.branch)).toBe(
+        'chore(docs): update backlog task AISDLC-900 (AISDLC-900)',
+      );
+    });
+
+    it('with --update the drift and DoR checks still run', () => {
+      commitMain('backlog/tasks/aisdlc-900 - thing.md', '---\nid: AISDLC-900\n---\nold\n');
+      const p = writeTask();
+      drift = 'backlog-drift: bad ref';
+      expect(() => fileTask(repo, p, { pr: true, update: true }, deps)).toThrow(/backlog-drift/);
+      drift = null;
+      dor = 'dor: not ready';
+      expect(() => fileTask(repo, p, { pr: true, update: true }, deps)).toThrow(FileRefusal);
+    });
+  });
+
   it('files a task: branch fast-forward pushed and PR opened', () => {
     const p = writeTask();
     const r = fileTask(repo, p, { pr: true }, deps);

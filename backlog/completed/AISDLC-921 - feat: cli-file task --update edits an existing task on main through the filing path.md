@@ -1,7 +1,7 @@
 ---
 id: AISDLC-921
 title: 'feat: cli-file task --update edits an existing task on main through the filing path'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [enhancement, cli-file, backlog, pipeline-cli, velocity]
