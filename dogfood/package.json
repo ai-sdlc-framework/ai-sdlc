@@ -21,7 +21,6 @@
     "build": "tsc",
     "clean": "rm -rf dist *.tsbuildinfo",
     "pretest": "pnpm build",
-    "pretest:coverage": "pnpm -w --filter '@ai-sdlc/dogfood...' build",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",

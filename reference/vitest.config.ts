@@ -4,7 +4,7 @@ import { sharedTestConfig } from '../vitest.shared.mjs';
 export default defineConfig({
   test: {
     ...sharedTestConfig,
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'scripts/**/*.test.ts'],
     exclude: ['node_modules/**', 'dist/**', '**/*.flaky.test.ts'],
     coverage: {
       provider: 'v8',
