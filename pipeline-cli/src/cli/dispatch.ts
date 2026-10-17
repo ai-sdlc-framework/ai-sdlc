@@ -176,6 +176,8 @@ import {
   listResumeSignals,
   OneClaimPerWorkerError,
   peekQueue,
+  peekQueueOrder,
+  reprioritizeQueued,
   probeIterationBudget,
   readEmptyQueueHibernateSec,
   readInflightManifest,
@@ -556,7 +558,41 @@ export async function runDispatchCli(
       }
     }
 
+    case 'reprioritize': {
+      const positional = argv[1] && !argv[1].startsWith('--') ? argv[1] : undefined;
+      const taskId = flags['task-id'] ?? positional;
+      const rawPriority = flags['priority'];
+      const priority = rawPriority === undefined ? NaN : Number(rawPriority);
+      if (!taskId || !Number.isFinite(priority)) {
+        process.stderr.write(
+          'cli-dispatch reprioritize: <task-id> and --priority <n> are required\n',
+        );
+        return 2;
+      }
+      const note = flags['note'];
+      try {
+        out({
+          ok: true,
+          path: reprioritizeQueued(boardDir, taskId, {
+            priority,
+            ...(note !== undefined ? { note } : {}),
+          }),
+          priority,
+        });
+        return 0;
+      } catch (err) {
+        process.stderr.write(
+          `cli-dispatch reprioritize: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+        return 1;
+      }
+    }
+
     case 'peek': {
+      if (flags['order'] !== undefined) {
+        out(peekQueueOrder(boardDir));
+        return 0;
+      }
       out(peekQueue(boardDir));
       return 0;
     }
@@ -1596,7 +1632,8 @@ Usage:
   cli-dispatch <subcommand> [--board-dir <path>] [...]
 
 Subcommands:
-  peek
+  peek [--order]   (--order lists eligible queue entries in claim order: wave, priority, dispatchedAt)
+  reprioritize <task-id> --priority <n> [--note "<text>"]   (queued tasks only; lower claims first)
   claim --worker-kind {in-session-agent|claude-p-shell} [--worker <name>] [--wait <sec>]
   collect-verdicts [--include-failed]
   write-verdict --task-id <id> --outcome <enum> [--worker <name>; required for executors]

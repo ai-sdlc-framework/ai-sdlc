@@ -34,6 +34,7 @@ export {
   loadEligibilityContext,
   OneClaimPerWorkerError,
   peekQueue,
+  peekQueueOrder,
   probeIterationBudget,
   readHeartbeat,
   readInflightManifest,
@@ -119,6 +120,9 @@ export {
 export type { BoardEntry, Eligibility, EligibilityContext } from './board.js';
 
 export { DEFAULT_VERIFY_COMMANDS, enqueueTasks } from './enqueue.js';
+
+export { reprioritizeQueued } from './reprioritize.js';
+export type { ReprioritizeOptions } from './reprioritize.js';
 
 export { completeTask, splitIdList } from './complete.js';
 export type { CompleteOptions, CompleteResult } from './complete.js';

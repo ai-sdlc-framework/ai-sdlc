@@ -936,6 +936,30 @@ session; `unknown` means it is open but absent from the registry. `inflightTask`
 task the session's heartbeat holds; an executor with `idle` and no `inflightTask` is ready
 to claim. `board.queued` of 0 with all executors idle means the queue is drained.
 
+## Claim order and reprioritize (AISDLC-904)
+
+A worker claims the eligible queue entry that sorts first by: `wave` ascending (absent is 0),
+then `priority` ascending (any finite number; an absent priority sorts last), then enqueue time
+(file mtime, oldest first). Inside one priority band the order is first-in-first-out, so a late
+critical task waits behind everything filed before it unless its priority is lowered. A resume
+manifest has no special rank. `peek --order` prints the eligible entries in exactly this order,
+each with `wave`, `priority` and `dispatchedAt`:
+
+```bash
+node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" peek --order --board-dir "$BOARD_DIR"
+```
+
+To move a queued task, never hand-edit the manifest:
+
+```bash
+node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" reprioritize <task-id> --priority 0 [--note "<text>"] --board-dir "$BOARD_DIR"
+```
+
+`reprioritize` rewrites only `priority` on `queue/<id>.dispatch.json` (the enqueue time is kept).
+`--note` also sets `resume.note`, bounded by the same 4000-character limit as a resume note. It
+exits 1, leaving the file untouched, when the task is inflight, has a verdict in `done/` or a
+diagnostic in `failed/`, or is not queued.
+
 ## Correcting a stale queued manifest (dequeue)
 
 A queued, unclaimed manifest that names a wrong field (for example a branch that no longer
