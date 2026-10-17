@@ -1,7 +1,7 @@
 ---
 id: AISDLC-859
 title: Workflow that opens a docs-source.lock.json bump PR in ai-sdlc-io when docs/ or spec/ change on main and arms it through cli-merge-if-eligible
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels: [docs-platform, ci]
