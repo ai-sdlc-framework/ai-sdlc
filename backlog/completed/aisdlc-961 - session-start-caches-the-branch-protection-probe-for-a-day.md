@@ -1,7 +1,7 @@
 ---
 id: AISDLC-961
 title: 'SessionStart caches the branch-protection probe behind the review-policy banner for 24 hours'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-16'
 labels:
