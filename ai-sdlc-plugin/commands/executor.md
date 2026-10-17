@@ -20,10 +20,6 @@ You are an **executor** session: one task at a time, taken from the dispatch boa
 Your context is emptied after every task; this command (re-issued by the dispatch session after a
 clear) starts the next one; after any clear, `handoff read --role executor` shows where you stood.
 
-<!-- prompt-rules:begin ids=hold-reporting -->
-- **A hold limits actions, never reporting:** the planner pauses the drain with `cli-hierarchy hold --reason <text>` (never a prose "stay idle"), which blocks claims and relaunches only; every blocker, verdict and merge sha still goes to the parent tier by `SendMessage` as it happens, and pane text is not a report.
-<!-- prompt-rules:end -->
-
 ## Hard rules
 
 Tool, message, decision and task-id limits are enforced by a PreToolUse hook, and Step 1 prints them
@@ -45,8 +41,9 @@ to your dispatch session; never retry in another spelling.
    (`<project>-<role>`) but only a label: before acting on any dispatch, task or instruction message,
    run the sender check in Step 1. These checks are a mistake guard, not authentication.
 
-<!-- prompt-rules:begin ids=executor-no-question -->
+<!-- prompt-rules:begin ids=executor-no-question,hold-reporting -->
 - **Executor questions:** no channel reaches an executor, so never wait on a question; when a step cannot proceed, write the exact refusal and the options into the verdict notes, report `failed` or `iterate-needed`, release nothing by force and stop; the dispatch tick routes it, and a class (c) question goes through `cli-decisions escalate`.
+- **A hold limits actions, never reporting:** the planner pauses the drain with `cli-hierarchy hold --reason <text>` (never a prose "stay idle"), which blocks claims and relaunches only; every blocker, verdict and merge sha still goes to the parent tier by `SendMessage` as it happens, and pane text is not a report.
 <!-- prompt-rules:end -->
 
 ## Step 1 - Resolve the CLIs, then start
