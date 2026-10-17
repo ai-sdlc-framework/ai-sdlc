@@ -38,7 +38,7 @@ Contrast this with the issue-first path:
 
 ### The CI check
 
-Every PR automatically receives an `ai-sdlc/issue-link` status check that scans the PR title and body for a linked-issue reference. Accepted forms:
+Every PR runs an `ai-sdlc/issue-link` job in the PR Ready Gate (part of `ai-sdlc/pr-ready`) that scans the PR title and body for a linked-issue reference. Accepted forms:
 
 - GitHub-issue keywords: `Closes #N`, `Fixes #N`, `Resolves #N`, or cross-repo `org/repo#N`
 - Backlog-task references (for backlog-track PRs): `References AISDLC-N`, `Closes AISDLC-N`, or hierarchical `AISDLC-N.M`

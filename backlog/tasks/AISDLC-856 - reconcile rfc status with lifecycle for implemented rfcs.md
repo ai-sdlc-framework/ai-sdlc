@@ -1,16 +1,42 @@
 ---
 id: AISDLC-856
-title: Reconcile RFC frontmatter status with lifecycle for the eight RFCs that are Implemented in lifecycle but Draft in status
+title: >-
+  Reconcile RFC frontmatter status with lifecycle for the eight RFCs that are
+  Implemented in lifecycle but Draft in status
 status: To Do
 assignee: []
 created_date: '2026-10-13'
-labels: [docs, rfc]
+labels:
+  - docs
+  - rfc
 dependencies: []
-assumes: [RFC-0009, RFC-0010, RFC-0016, RFC-0019, RFC-0022, RFC-0024, RFC-0035, RFC-0036, RFC-0048]
-references: [scripts/check-rfc-docs.mjs, .github/workflows/rfc-lifecycle-check.yml, .ai-sdlc/lifecycle-approvers.yaml]
+assumes:
+  - RFC-0009
+  - RFC-0010
+  - RFC-0016
+  - RFC-0019
+  - RFC-0022
+  - RFC-0024
+  - RFC-0035
+  - RFC-0036
+  - RFC-0048
+references:
+  - scripts/check-rfc-docs.mjs
+  - .ai-sdlc/lifecycle-approvers.yaml
 priority: low
 dispatchable: false
-dispatchableReason: Promoting an RFC's status is a lifecycle sign-off governed by .ai-sdlc/lifecycle-approvers.yaml; an approver applies it after confirming runtime evidence.
+dispatchableReason: >-
+  Promoting an RFC's status is a lifecycle sign-off governed by
+  .ai-sdlc/lifecycle-approvers.yaml; an approver applies it after confirming
+  runtime evidence.
+drift_log:
+  - date: '2026-10-17'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .github/workflows/rfc-lifecycle-check.yml
+    resolution: flagged
+drift_checked: '2026-10-17'
 ---
 
 ## Description

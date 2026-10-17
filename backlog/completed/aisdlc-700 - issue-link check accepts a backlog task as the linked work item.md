@@ -1,7 +1,8 @@
 ---
 id: AISDLC-700
 title: >-
-  require-issue-link: a pull request tied to a backlog task passes without a GitHub issue
+  require-issue-link: a pull request tied to a backlog task passes without a
+  GitHub issue
 status: Done
 assignee: []
 created_date: '2026-10-03'
@@ -10,26 +11,47 @@ labels:
   - dx
 dependencies: []
 references:
-  - .github/workflows/require-issue-link.yml
   - CONTRIBUTING.md
 priority: low
-finalSummary: |-
+finalSummary: >-
   ## Summary
-  The require-issue-link check now passes a pull request tied to a backlog task. The decision logic lives in scripts/issue-link-decision.mjs (tested under pnpm test); the workflow runs it from the base checkout with PR text only via env.
+
+  The require-issue-link check now passes a pull request tied to a backlog task.
+  The decision logic lives in scripts/issue-link-decision.mjs (tested under pnpm
+  test); the workflow runs it from the base checkout with PR text only via env.
+
 
   ## Changes
-  - `scripts/issue-link-decision.mjs` (new): bypass, linked issue, backlog task by diff, backlog task by title id.
-  - `scripts/issue-link-decision.test.mjs` (new): each case, plus shell-metacharacter title.
-  - `.github/workflows/require-issue-link.yml` (modified): sparse base checkout, API file list, delegates to the script.
+
+  - `scripts/issue-link-decision.mjs` (new): bypass, linked issue, backlog task
+  by diff, backlog task by title id.
+
+  - `scripts/issue-link-decision.test.mjs` (new): each case, plus
+  shell-metacharacter title.
+
+  - `.github/workflows/require-issue-link.yml` (modified): sparse base checkout,
+  API file list, delegates to the script.
+
   - `CONTRIBUTING.md` (modified): one sentence on the backlog-task rule.
 
+
   ## Verification
+
   - `pnpm test:require-issue-link` - 58 pass
+
   - `pnpm lint`, `pnpm format:check`, dark-code check - clean
 
+
   ## Follow-up
+
   (none)
 dispatchable: true
+drift_log:
+  - date: '2026-10-17'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: .github/workflows/require-issue-link.yml'
+    resolution: flagged
+drift_checked: '2026-10-17'
 ---
 
 ## Description

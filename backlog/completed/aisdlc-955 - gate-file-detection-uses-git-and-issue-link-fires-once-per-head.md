@@ -1,6 +1,8 @@
 ---
 id: AISDLC-955
-title: 'Gate file detection uses git instead of the API, and require-issue-link fires once per head with a concurrency group'
+title: >-
+  Gate file detection uses git instead of the API, and require-issue-link fires
+  once per head with a concurrency group
 status: In Progress
 assignee: []
 created_date: '2026-10-16'
@@ -10,10 +12,15 @@ labels:
 dependencies: []
 references:
   - .github/workflows/ai-sdlc-gate.yml
-  - .github/workflows/require-issue-link.yml
   - docs/operations/quality-gate.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-17'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: .github/workflows/require-issue-link.yml'
+    resolution: flagged
+drift_checked: '2026-10-17'
 ---
 
 ## Description

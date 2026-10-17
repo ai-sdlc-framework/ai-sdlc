@@ -61,6 +61,8 @@ AISDLC-398 changed the content hash to be base-independent (`headBlobSha` only).
 
 CI runs once per pull request (AISDLC-727): `ai-sdlc-gate.yml` is the only workflow that runs the suite on `pull_request` events. `ci.yml` runs on pushes to `main` and the nightly schedule only (the post-merge full run). The jobs that used to exist only in `ci.yml` (`Backlog Drift`, first-run smoke, Python SDK, Go SDK) moved into the gate workflow and feed `ai-sdlc/pr-ready`; `Backlog Drift` is a `needs:` of the rollup, not a separately required context.
 
+Per push, a trusted PR starts two workflows: `ai-sdlc-gate.yml` and `auto-enable-auto-merge.yml` (AISDLC-934, DEC-0250). The issue-link and RFC lifecycle checks are jobs of the gate and feed `ai-sdlc/pr-ready`; CodeQL scans `main` and a weekly schedule, not PRs. The untrusted-contributor workflows start only to skip their jobs for trusted PRs. See the "Consolidated gate" section of `docs/operations/quality-gate.md`.
+
 Total wall-clock time: ~5-10 min (CI time) vs ~15-25 min with the queue (CI + queue probe + update-branch CI re-run).
 
 ---

@@ -32,17 +32,15 @@ const WORKFLOWS_DIR = resolve(__dirname, '..');
 const PR_TRIGGER_ALLOWLIST = new Map([
   ['ai-sdlc-gate.yml', 'produces the ai-sdlc/pr-ready required rollup check'],
   ['ai-sdlc-review.yml', 'CI-side review of untrusted contributor PRs only (AISDLC-824)'],
-  ['require-issue-link.yml', 'enforces the issue-first workflow (Closes #N)'],
-  ['rfc-lifecycle-check.yml', 'validates RFC lifecycle transitions on PRs'],
   ['auto-enable-auto-merge.yml', 'arms --auto --squash on same-repo PRs'],
   [
     'untrusted-pr-gate.yml',
     'zero-trust verification gate for untrusted-contributor PRs (posts the ai-sdlc/untrusted-pr-gate status; gated behind the AI_SDLC_UNTRUSTED_PR_GATE feature flag, default off)',
   ],
-  [
-    'codeql.yml',
-    'CodeQL advanced setup (AISDLC-840, DEC-0161): go, python and actions analyse per PR only when their paths change; replaces default setup',
-  ],
+  // AISDLC-934 (DEC-0250): codeql.yml, require-issue-link.yml and
+  // rfc-lifecycle-check.yml no longer trigger on PRs. CodeQL scans main and a
+  // weekly schedule; the issue-link and RFC lifecycle checks are jobs of
+  // ai-sdlc-gate.yml. Do not add them back.
   // NOTE: dependency-review was folded into ai-sdlc-gate.yml's pr-ready rollup
   // (dependency-review-gate job) so it is a real blocking gate — the standalone
   // dependency-review.yml workflow was removed (issue #791 follow-up).
@@ -80,6 +78,21 @@ function triggersOnPr(workflow) {
 }
 
 describe('no new per-PR CI gate without sign-off (issue #780)', () => {
+  it('only the four deliberate workflows start on a PR event (AISDLC-934)', () => {
+    const expected = [
+      'ai-sdlc-gate.yml',
+      'ai-sdlc-review.yml',
+      'auto-enable-auto-merge.yml',
+      'untrusted-pr-gate.yml',
+    ];
+    assert.deepEqual([...PR_TRIGGER_ALLOWLIST.keys()].sort(), expected);
+    const actual = workflowFiles()
+      .filter((f) => triggersOnPr(loadYaml(f)))
+      .map((f) => f.split('/').pop())
+      .sort();
+    assert.deepEqual(actual, expected);
+  });
+
   for (const file of workflowFiles()) {
     const name = file.split('/').pop();
     it(`${name}: PR-triggered only if allowlisted`, () => {

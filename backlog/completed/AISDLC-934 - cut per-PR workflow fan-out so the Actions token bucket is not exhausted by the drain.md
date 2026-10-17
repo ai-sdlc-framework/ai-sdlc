@@ -1,15 +1,18 @@
 ---
 id: AISDLC-934
-title: 'fix(ci): cut per-PR workflow fan-out so the Actions token bucket is not exhausted by the drain (DEC-0250)'
-status: To Do
+title: >-
+  fix(ci): cut per-PR workflow fan-out so the Actions token bucket is not
+  exhausted by the drain (DEC-0250)
+status: Done
 assignee: []
 created_date: '2026-10-15'
-labels: [ci, velocity, governance]
+labels:
+  - ci
+  - velocity
+  - governance
 dependencies: []
 references:
   - .github/workflows/codeql.yml
-  - .github/workflows/require-issue-link.yml
-  - .github/workflows/rfc-lifecycle-check.yml
   - .github/workflows/untrusted-pr-gate.yml
   - .github/workflows/ai-sdlc-review.yml
   - .github/workflows/ai-sdlc-gate.yml
@@ -17,6 +20,18 @@ references:
   - docs/operations/merge-without-queue.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-17'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: .github/workflows/require-issue-link.yml'
+    resolution: flagged
+  - date: '2026-10-17'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .github/workflows/rfc-lifecycle-check.yml
+    resolution: flagged
+drift_checked: '2026-10-17'
 ---
 
 ## Context
@@ -37,12 +52,12 @@ Decision: DEC-0250 (operator-answered `full`, 2026-10-15), continuing the D1-D15
 
 ## Acceptance Criteria
 
-- [ ] #1 A trusted (same-repo collaborator) PR push starts the `AI-SDLC PR Ready Gate` and `Auto-enable auto-merge on PR open` workflows only, plus at most the trust-check entry job of `Untrusted-Contributor PR Verification Gate` and `AI-SDLC PR Review`; no run of `CodeQL`, `Require Linked Issue` or `RFC Lifecycle Gate`.
-- [ ] #2 `ai-sdlc/pr-ready` still fails when the PR body lacks an issue/task link, and when an RFC file skips a lifecycle state, with the same messages as today.
-- [ ] #3 CodeQL runs on `push` to `main` and on the weekly schedule; `codeql.yml` has no `pull_request` trigger.
-- [ ] #4 A fork or Dependabot PR still runs `untrusted-pr-gate.yml` and `ai-sdlc-review.yml` as before.
-- [ ] #5 The new test fails if a workflow outside the allow-list gains a `pull_request`/`pull_request_target` trigger.
-- [ ] #6 `docs/operations/quality-gate.md` and `docs/operations/merge-without-queue.md` describe the consolidated gate.
+- [x] #1 A trusted (same-repo collaborator) PR push starts the `AI-SDLC PR Ready Gate` and `Auto-enable auto-merge on PR open` workflows only, plus at most the trust-check entry job of `Untrusted-Contributor PR Verification Gate` and `AI-SDLC PR Review`; no run of `CodeQL`, `Require Linked Issue` or `RFC Lifecycle Gate`.
+- [x] #2 `ai-sdlc/pr-ready` still fails when the PR body lacks an issue/task link, and when an RFC file skips a lifecycle state, with the same messages as today.
+- [x] #3 CodeQL runs on `push` to `main` and on the weekly schedule; `codeql.yml` has no `pull_request` trigger.
+- [x] #4 A fork or Dependabot PR still runs `untrusted-pr-gate.yml` and `ai-sdlc-review.yml` as before.
+- [x] #5 The new test fails if a workflow outside the allow-list gains a `pull_request`/`pull_request_target` trigger.
+- [x] #6 `docs/operations/quality-gate.md` and `docs/operations/merge-without-queue.md` describe the consolidated gate.
 
 **Velocity impact.** Positive: removes the recurring rate-limit reds on docs PRs during a drain (each cost a reconciler route, a planner diagnosis and two wasted reruns on #1634 alone) and cuts per-push CI starts from 7-8 to 2 for trusted PRs.
 
