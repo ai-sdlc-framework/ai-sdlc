@@ -263,6 +263,32 @@ cli-hierarchy status [--json]
 "nodeVersion": "22.23.2", "nodeMismatch": true, "nextStep": "..." } ], "board": { "queued": n,
 "inflight": n, "done": n, "failed": n }, "webhook": { "state": "up", "port": n, "pid": n } }`. Read-only. Exit code `0`.
 
+### `stall-notice`
+
+An alert-only check for a drain that stopped moving (AISDLC-871). With eligible queued work and
+no new verdict and no moved heartbeat for N minutes it raises one desktop notification
+(`osascript` on macOS, `notify-send` elsewhere) and appends one line to
+`<board-dir>/stall-digest.log`. The same stall is reported once: the progress timestamp it was
+reported for is kept in `<board-dir>/stall-notice.json`, so a second run says nothing until
+something moves and stalls again. An empty queue or recent progress sends nothing. It never
+relaunches a session, never sends keys or messages to one and never starts a model, so it spends
+no tokens.
+
+```bash
+cli-hierarchy stall-notice [--minutes <n>]
+```
+
+`--minutes` overrides the default of 45. It prints one JSON object (`action`, `reason`,
+`idleMinutes`). Exit code `0`. Run it on a timer, for example every 10 minutes from cron:
+
+```cron
+*/10 * * * * cd /path/to/repo && node pipeline-cli/bin/cli-hierarchy.mjs stall-notice >> /tmp/stall-notice.log 2>&1
+```
+
+or from a launchd agent (`~/Library/LaunchAgents/io.ai-sdlc.stall-notice.plist`) with
+`ProgramArguments` of `node`, `pipeline-cli/bin/cli-hierarchy.mjs`, `stall-notice`,
+`WorkingDirectory` set to the repository and `StartInterval` `600`.
+
 ### `webhook`
 
 The local GitHub webhook receiver (RFC-0054, AISDLC-880). A delivery is a trigger, never a fact:

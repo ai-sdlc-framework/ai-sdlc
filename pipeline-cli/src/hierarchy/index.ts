@@ -283,6 +283,11 @@ export {
   stallThresholdsFromEnv,
   type StalledReport,
 } from './stall.js';
+export {
+  DEFAULT_STALL_NOTICE_MINUTES,
+  runStallNotice,
+  type StallNoticeResult,
+} from './stall-notice.js';
 export { paneTail } from './tmux.js';
 export {
   DEFAULT_WEBHOOK_PORT,

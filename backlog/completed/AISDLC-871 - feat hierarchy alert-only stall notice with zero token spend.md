@@ -1,7 +1,7 @@
 ---
 id: AISDLC-871
 title: 'feat(hierarchy): alert-only stall notice (zero token spend)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [hierarchy, reliability, feature]
