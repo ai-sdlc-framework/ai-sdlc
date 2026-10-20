@@ -1,0 +1,7 @@
+# Single source of truth for the patch-coverage gate (AISDLC-976).
+# target: the coverage percentage patches are held to (codecov.yml targets must equal it).
+# tolerance: points of slack; the gate passes at target - tolerance. It exists because
+# codecov's patch computation and scripts/check-pr-patch-coverage.mjs count executable
+# lines differently, so the two methods disagree by a point or two.
+target: 90
+tolerance: 1

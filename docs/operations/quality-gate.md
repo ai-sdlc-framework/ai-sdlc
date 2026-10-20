@@ -143,15 +143,17 @@ Per Q3 in the AISDLC-140 redesign decision and the industry consensus documented
 
 **AISDLC-214 cleanup (follow-up PR):** Once the operator updates branch protection (AISDLC-388 AC-2), the "short-circuit — post ai-sdlc/attestation success (docs-only)" step in `ai-sdlc-gate.yml (attestation-gate job)` can be deleted. It is intentionally retained until then to avoid a race where the merge queue still requires the status. Do NOT delete before the branch-protection update.
 
-## Patch coverage — the 90% gate (AISDLC-376, AISDLC-726)
+## Patch coverage — one target with a stored tolerance (AISDLC-376, AISDLC-726, AISDLC-976)
+
+**Single source of truth:** `.ai-sdlc/patch-coverage.yaml` holds `target` (90) and `tolerance` (1). The gate passes at `target - tolerance`. The tolerance exists because the two measuring methods disagree by a point or two: codecov's patch computation and the script's unified-diff walk count executable lines differently, so a single hard number turns measurement noise into red checks. `check-pr-patch-coverage.mjs` reads the file as its default (no `--threshold` in CI), and `codecov.yml` patch and project targets are asserted equal to `target` by `scripts/check-pr-patch-coverage.test.mjs`.
 
 **Coverage is gated once, in CI (AISDLC-726).** There is no local pre-push or Stop-hook coverage run and no skip variable; nothing runs coverage automatically on a developer machine. CI enforces two things:
 
 | Layer | Where | Bypassable | Authority |
 |---|---|---|---|
 | Package line floors | `thresholds.lines` in each package's `vitest.config.ts` (90 for reference, orchestrator, pipeline-cli, mcp-server, mcp-advisor, sdk-typescript; 85 for dogfood, dashboard, conformance runner), enforced by `pnpm test:coverage` in CI | No | **Authoritative** |
-| CI patch gate | `scripts/check-pr-patch-coverage.mjs` (PR-diff patch coverage, threshold 90) | No (no skip env var) | **Authoritative merge gate** |
-| Informational | codecov.io (PR comment + dashboard, patch target 90) | Not a check | Visibility only |
+| CI patch gate | `scripts/check-pr-patch-coverage.mjs` (PR-diff patch coverage, threshold `target - tolerance`) | No (no skip env var) | **Authoritative merge gate** |
+| Informational | codecov.io (PR comment + dashboard, patch target = `target`) | Not a check | Visibility only |
 
 Developers are asked (developer agent instructions) to hold the packages they touch to 95% lines and to run coverage for those packages once before their first push; that is a working target, not a CI gate.
 
@@ -160,7 +162,7 @@ The CI patch gate runs in two places that both must pass:
 1. **`ci.yml` → `Patch coverage gate (≥90%)` step** — runs after `vitest --coverage` has produced `coverage-final.json` fixtures for the affected packages.
 2. **`ai-sdlc-gate.yml` → `build-test` job → `Patch coverage gate (≥90%)` step** (the suite runs once, with coverage on) — runs as part of the `ai-sdlc/pr-ready` rollup, so any failure cascades into the single required check.
 
-Both layers parse the unified diff (`git diff --unified=0 base..head`) per file, compute the union of NEW line numbers added/modified by the PR, then check each line against vitest's istanbul-format `coverage-final.json` statement map + hit counts. A line is "covered" when any statement on it was hit at least once. The aggregate ratio `covered / executable_changed_lines` must be ≥ 90%.
+Both layers parse the unified diff (`git diff --unified=0 base..head`) per file, compute the union of NEW line numbers added/modified by the PR, then check each line against vitest's istanbul-format `coverage-final.json` statement map + hit counts. A line is "covered" when any statement on it was hit at least once. The aggregate ratio `covered / executable_changed_lines` must be ≥ `target - tolerance` from `.ai-sdlc/patch-coverage.yaml`.
 
 ### When the gate skips (intentional)
 

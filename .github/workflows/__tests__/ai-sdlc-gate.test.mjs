@@ -436,7 +436,7 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     assert.ok(cov >= 0, 'build-test must run pnpm test:coverage');
     const gate = runs.findIndex((r) => r.includes('check-pr-patch-coverage.mjs'));
     assert.ok(gate > cov, 'patch gate must run after coverage');
-    assert.match(runs[gate], /--threshold 90/);
+    assert.doesNotMatch(runs[gate], /--threshold/);
     assert.ok(workflow.jobs['pr-ready'].needs.includes('build-test'));
   });
 

@@ -379,8 +379,7 @@ jobs:
         run: |
           node scripts/check-pr-patch-coverage.mjs \
             --base "${{ github.event.pull_request.base.sha }}" \
-            --head "${{ github.event.pull_request.head.sha }}" \
-            --threshold 90
+            --head "${{ github.event.pull_request.head.sha }}"
 
   integration:
     name: Integration Tests

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-976
 title: 'One patch-coverage target with a stored tolerance'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-20'
 labels:
