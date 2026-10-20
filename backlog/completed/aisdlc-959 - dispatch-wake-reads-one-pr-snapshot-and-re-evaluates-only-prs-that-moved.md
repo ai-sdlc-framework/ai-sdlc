@@ -1,7 +1,7 @@
 ---
 id: AISDLC-959
 title: 'A dispatch wake reads one PR snapshot and re-evaluates only PRs whose head or checks moved since the last wake'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels:

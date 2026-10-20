@@ -837,6 +837,23 @@ action. A PR that merged is detected through its record and marked `landed`.
 no task id is a docs PR; one with a task id (branch or title) is a task PR; the release-please
 PR (`chore: release`, `release-please--*`) is reported and never acted on.
 
+**One PR snapshot per wake (AISDLC-959).** The four PR consumers of a wake (human-attention,
+mark-ready, land-eligible, reconcile) share one open-PR list call that asks for the union of
+their fields, including `statusCheckRollup`; the per-PR check-rollup reads are answered from the
+same snapshot (`pipeline-cli/src/hierarchy/pr-snapshot.ts`). The snapshot is stored as
+`<board>/pr-snapshot.json`. When the webhook receiver is up (its `events/` directory exists), a
+later wake reuses the stored snapshot, with no GitHub call, as long as no event record is newer
+than it; a recorded event, or a snapshot older than the 15 minute refresh interval, makes the
+next wake list once. A lost delivery therefore costs latency, not correctness. Without a
+receiver every wake lists once. A command that changes a PR (marking it ready, arming it)
+drops the stored snapshot.
+
+**Fingerprint.** Each PR has a fingerprint: head sha, newest event id for the PR, and a digest of
+its check rollup. land-eligible records a refused PR's fingerprint in
+`<board>/pr-fingerprints.json` and does not re-read that PR until the fingerprint changes or 15
+minutes pass. A landing record whose PR was closed without landing is marked `closedUnlanded`
+after one confirmation and is not checked again.
+
 **Trust filter.** Facts gathering skips cross-repository (fork) PRs and PRs whose author is not
 in the allow-list (`AI_SDLC_RECONCILE_AUTHORS`, comma separated, else the authenticated `gh`
 user; unknown means no facts). A task PR is acted on only when the task's own board record

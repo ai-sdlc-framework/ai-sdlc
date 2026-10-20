@@ -125,7 +125,7 @@ describe('landEligiblePrs', () => {
     }
   });
 
-  it('records a refusal once per head sha but tries again every pass', async () => {
+  it('records a refusal once per head sha and does not re-read it until the fingerprint changes', async () => {
     const gh = fakeGh([pr(1)], 'false');
     let tries = 0;
     const land = async (): Promise<LandOutcome> => {
@@ -134,6 +134,13 @@ describe('landEligiblePrs', () => {
     };
     const r1 = await landEligiblePrs(deps(gh, land));
     await landEligiblePrs(deps(gh, land));
+    expect(tries).toBe(1);
+    // A check that moved changes the fingerprint, so the PR is evaluated again.
+    const moved = fakeGh(
+      [pr(1, { statusCheckRollup: [{ name: 'a', conclusion: 'SUCCESS' }] })],
+      'false',
+    );
+    await landEligiblePrs(deps(moved, land));
     expect(tries).toBe(2);
     expect(r1.refused).toEqual([{ pr: 1, reason: 'checks pending' }]);
     const notes = readdirSync(path.join(board, 'notes'));
