@@ -1,0 +1,119 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "131ba07a054806d6caf6897b50c73245d565361e"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "correctness-reviewer",
+      "transcriptHash": "c924ec7f0f9b67c20be78b834f7cde118ddca01b85b06d13f851be80da823099",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "57337117dbe25e3e8cdc1f9c69a49cded970c0e868867af306e0bbbe926ffe8d",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "57337117dbe25e3e8cdc1f9c69a49cded970c0e868867af306e0bbbe926ffe8d",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "correctness-reviewer",
+      "transcriptHash": "8567f9ec4b4cad96d347b9cdc97266cd096bb51f17517f544f4de3087be3c333",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 3,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "e06178b87981cfcb76af2e06ade7440dd71758f7bcb2694e415a62ebd8a36722",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "e06178b87981cfcb76af2e06ade7440dd71758f7bcb2694e415a62ebd8a36722",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 4,
+      "reviewerName": "correctness-reviewer",
+      "transcriptHash": "3cd51a0ed8139399263d24cc1b17446dd3532cf0b6d6bc78e7ec58e7f44bdf0d",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 5,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "73f42f712b81fcccc7493180c49dec17cfff3d9cc732df14b97319630e4f56c1",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "73f42f712b81fcccc7493180c49dec17cfff3d9cc732df14b97319630e4f56c1",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "46342f19814a16dc4762574bf0c7aae45c8d8b05924859abafe65e4896a46198",
+        "711fc723cfc469fdef074ba9c4cba2cf6758981e2ee552d29c128c60183f6de8",
+        "c61da950890e995a00e22b3c68c3a938f145308befb9c8a542cc2d70b6f55c4b"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "2d8a69c5a1d8bb3f2dfc55b7a96a2e97973253bdd6c0c7ad8bef8a0e343f383c",
+        "711fc723cfc469fdef074ba9c4cba2cf6758981e2ee552d29c128c60183f6de8",
+        "c61da950890e995a00e22b3c68c3a938f145308befb9c8a542cc2d70b6f55c4b"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "c48b254bc8f86ac175d1fff2af9f272d4a67456207ccbeac1d926eb7f86cee9a",
+        "0e374e7ecc537ee821e7e62bb25d18d0856087b199d74ac93c13a451020658c7",
+        "c61da950890e995a00e22b3c68c3a938f145308befb9c8a542cc2d70b6f55c4b"
+      ]
+    },
+    {
+      "leafIndex": 3,
+      "proof": [
+        "3ac79bc95d928cb93c1bde963d0a420d00c45f2136c2f02742dbfa0577e7862f",
+        "0e374e7ecc537ee821e7e62bb25d18d0856087b199d74ac93c13a451020658c7",
+        "c61da950890e995a00e22b3c68c3a938f145308befb9c8a542cc2d70b6f55c4b"
+      ]
+    },
+    {
+      "leafIndex": 4,
+      "proof": [
+        "a6020ce1db154593c0b7cd0f823415ae4f43760dc209209c8c2b9519a2cce658",
+        "779b8620f42df930eefb6253852f610b80d259faf8eb610e9a4e9290f5a5dfdd",
+        "5ed408cf89ae8201780cee5e28657820a95fba1a99ae91870e7a5d8b6575a5db"
+      ]
+    },
+    {
+      "leafIndex": 5,
+      "proof": [
+        "e6c924bd69562950a6577e1844d01f49a46a4312f9b688fbe3909bec1b27b13e",
+        "779b8620f42df930eefb6253852f610b80d259faf8eb610e9a4e9290f5a5dfdd",
+        "5ed408cf89ae8201780cee5e28657820a95fba1a99ae91870e7a5d8b6575a5db"
+      ]
+    }
+  ],
+  "rootHash": "0561a7ad2db98dc9c4e1495d6b9f3082909c1cd032e5192f6293c54fac0a1a58",
+  "rootSignature": "jdPiAg6T0FChgRdh/X3M+EfcMdeQuMflX1c9StZm1zZM5BefGeDgR0TUop/sjUqSrfBVj8ZMRymo2b1J3muxAA==",
+  "nonce": "b5f59a2b202bb8e144ef3750b78c35d4b3f9bed013ae67cc3c12573ff3bf2f55",
+  "leafCount": 6,
+  "signedAt": "2026-10-17T01:49:44.677Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "two",
+    "reason": "diff touches non-test, non-docs paths",
+    "triggeringPaths": [],
+    "appliedReviewers": ["correctness-reviewer", "security-reviewer"]
+  }
+}
