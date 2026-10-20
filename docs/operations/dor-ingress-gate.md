@@ -140,9 +140,9 @@ still fails Gate 3. The `dor-readiness-gate` job builds the id-to-PR map before
 evaluating and passes it to `dor-evaluate` as `AI_SDLC_DOR_PENDING_REFS` (JSON);
 ids already on `main` count as resolved too.
 
-When the referenced filing PR lands, `dor-rerun-on-filing-merge.yml` re-runs the
-latest gate run of every other open filing PR, so the dependent PR
-re-evaluates without a push.
+Recovery: if a filing PR is red on a sibling that has not landed yet, then once
+the sibling lands the hierarchy reconciler reenters the red PR (reenter path)
+and it re-evaluates without a push. No workflow reruns other filing PRs.
 
 No-draft rule: PRs that carry no task (the `ai-sdlc/decisions-sync` PR, filing
 and chore PRs) open ready and are armed on open by `auto-enable-auto-merge.yml`;

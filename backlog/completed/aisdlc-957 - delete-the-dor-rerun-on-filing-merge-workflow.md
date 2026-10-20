@@ -1,7 +1,9 @@
 ---
 id: AISDLC-957
-title: 'Delete the dor-rerun-on-filing-merge workflow: the reconciler already re-enters a red filing PR when its blocker lands'
-status: To Do
+title: >-
+  Delete the dor-rerun-on-filing-merge workflow: the reconciler already
+  re-enters a red filing PR when its blocker lands
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels:
@@ -10,10 +12,17 @@ labels:
   - cost
 dependencies: []
 references:
-  - .github/workflows/dor-rerun-on-filing-merge.yml
   - docs/operations/dor-ingress-gate.md
 priority: medium
 dispatchable: true
+drift_log:
+  - date: '2026-10-17'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .github/workflows/dor-rerun-on-filing-merge.yml
+    resolution: flagged
+drift_checked: '2026-10-17'
 ---
 
 ## Description
