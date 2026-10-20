@@ -473,6 +473,38 @@ describe('shipTask: approved path', () => {
   });
 });
 
+describe('shipTask: head envelope (AISDLC-984)', () => {
+  const PID = 'a'.repeat(40);
+  const patchId = (): string => PID;
+  beforeEach(() => {
+    giveKey();
+    writeDemoTaskFile(state.worktreePath);
+  });
+
+  it('returns the sign step, never done, when the head has no v6 envelope', async () => {
+    scriptShip();
+    h.runner.on(/cat-file -e HEAD:\.ai-sdlc\/attestations\//, fail('missing', 128));
+    h.runner.on(/-base origin\/main HEAD/, ok('b'.repeat(40) + '\n'));
+    const res = await shipTask(h.ctx, state, { patchId });
+    expect(res.action).toBe('stop');
+    if (res.action !== 'stop') return;
+    expect(res.reason).toContain('Sign step required');
+    expect(res.reason).toContain('headsha');
+    expect(res.reason).toContain(`${PID}.v6.dsse.json`);
+    expect(indexOfCall(/gh pr create/)).toBe(-1);
+  });
+
+  it('reports done when the matching v6 envelope is on the head', async () => {
+    scriptShip();
+    h.runner.on(/-base origin\/main HEAD/, ok('b'.repeat(40) + '\n'));
+    const res = await shipTask(h.ctx, state, { patchId });
+    expect(res.action).toBe('done');
+    expect(cmds().some((c) => c.includes(`HEAD:.ai-sdlc/attestations/${PID}.v6.dsse.json`))).toBe(
+      true,
+    );
+  });
+});
+
 describe('shipTask: needs-human-attention', () => {
   it('opens the PR flagged, skips Done/sign/marker/ready and keeps the task file', async () => {
     writeDemoTaskFile(state.worktreePath);

@@ -132,6 +132,14 @@ If present, `agentFileHash` was not enforced for the named reviewer(s) on that r
 
 ---
 
+## Symptom: `Sign step required: head <sha> has no v6 attestation envelope` (AISDLC-984)
+
+`next-step` (the ship step, and the resume decision) refuses to report a pushed head as done when `.ai-sdlc/attestations/<patch-id>.v6.dsse.json` for the head's patch id is not in the head commit. The message names the head sha and the exact file it looked for. Typical cause: an earlier session rebased and pushed, so the head's patch id no longer matches any envelope on the branch.
+
+**Remedy:** run the sign step on the head (`bash ai-sdlc-plugin/scripts/sign-attestation-if-consumer.sh` in a consumer repo, or push so the pre-push hook signs and commits the envelope), confirm with `git ls-tree HEAD -- .ai-sdlc/attestations/`, then re-run `/ai-sdlc execute <task-id>`. On resume the decision note reads `re-sign required` and the run goes straight to reconcile and re-sign.
+
+---
+
 ## Diagnostic checklist
 
 1. `git ls-tree HEAD -- .ai-sdlc/attestations/` — confirms an envelope is committed.

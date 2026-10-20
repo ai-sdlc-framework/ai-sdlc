@@ -42,6 +42,17 @@ describe('decideResumeReview (AISDLC-947)', () => {
     expect(d).toEqual({ branch: 'unchanged', note: 'review-skipped: unchanged', lastHead: LAST });
   });
 
+  it('unchanged patch id with no v6 envelope on the head is routed to re-sign (AISDLC-984)', async () => {
+    h.runner.on(/cat-file -e HEAD:\.ai-sdlc\/attestations\//, fail('missing', 128));
+    script();
+    const d = await decideResumeReview(h.ctx, h.root, opts(PID));
+    expect(d.branch).toBe('unchanged');
+    if (d.branch !== 'unchanged') return;
+    expect(d.resign).toBe(true);
+    expect(d.note).toContain('re-sign required');
+    expect(d.note).toContain(`${PID}.v6.dsse.json`);
+  });
+
   it('chore-only delta gets the correctness reviewer alone', async () => {
     script('docs/readme.md\0');
     const d = await decideResumeReview(h.ctx, h.root, opts('e'.repeat(40)));
