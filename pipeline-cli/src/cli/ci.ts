@@ -83,7 +83,7 @@ export interface QueueSummary {
 }
 
 const RUN_FIELDS = 'databaseId,workflowName,event,headBranch,headSha,createdAt,status';
-const RUN_LIMIT = '100';
+const RUN_LIMIT = '500';
 
 /** Exact `name:` of the auto-enable workflow (bound to the yaml by a test). */
 export const AUTO_ENABLE_WORKFLOW = 'Auto-enable auto-merge on PR open';

@@ -70,17 +70,6 @@ The design choices are mine, so check them in review:
 - 3 parallel reviews approved
 
 ## Follow-up
-I ran build, test, lint and format:check before committing, and all passed. I did not run the coverage command. After the rebase onto origin/main I did not re-run the checks.
-
-Push failed: I tried `git push --force-with-lease -u origin HEAD:refs/heads/ai-sdlc/aisdlc-960-the-ci-sweep-runs-on-its-own-15-minute-interval-an` three ways: from the worktree in the same call, after a standalone `cd`, and with `git -C`. All three were refused with the AISDLC-905 worktree-location error: the hook sees the working directory as the main checkout /Users/dominique/Documents/dev/ai-sdlc/ai-sdlc, not .worktrees/aisdlc-960. The shell cwd resets between calls, and `git -C` does not change what the hook sees. An operator or a session rooted in the worktree needs to run the lease push and then `gh pr create --draft`.
-
-The backlog task file in the worktree has a local, uncommitted status change to In Progress. I left it out of the commit.
-
-The design choices are mine, so check them in review:
-- `cli-ci sweep --board-dir` skips with a `sweep skipped` line when the stamp in `<board>/.ci-sweep.json` is under 15 minutes old. Without `--board-dir` it behaves as before.
-- The sweep now uses `--limit 100` instead of 500. I did not add the stop-paging-at-the-oldest-open-PR-head step; the code never pages, so this is a single call.
-- `cli-ci queue` uses the same run-list helper, so it also drops from 500 to 100 runs. This is unintended.
-- The tick records `lastGithubReadAt` in `operator-dispatch.state.json`. It skips human-attention, mark-ready and landing for 5 minutes unless `.reconcile-wake` is newer than the last read.
-- I added tests for both and advanced the clock in four existing tick tests that expected a GitHub read on every tick.
-- The dispatch command body now passes `--board-dir` to the sweep and describes the two cadences. `docs/operations/cli-hierarchy.md` has a new "Two cadences" paragraph.
-
+- declined: stop-paging-at-oldest-open-PR-head step; the sweep makes a single non-paged call, so there is nothing to stop.
+- declined: lowering the run-list limit from 500 to 100; out of scope, restored to 500 in `cli-ci` (queue and sweep).
+- (none) otherwise; push and draft PR are done by the executor session.
