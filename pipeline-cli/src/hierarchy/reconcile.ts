@@ -23,6 +23,7 @@ import {
 import path from 'node:path';
 
 import { now as clockNow } from '../clock.js';
+import { gateRunListArgs, parseGateRunId } from './gate-run.js';
 import { classifyPr, type PrCheck, type PrFacts, type PrState } from './pr-state.js';
 import { collectVerdicts, readInflightManifest, readQueuedManifest } from '../dispatch/board.js';
 import { clearRuling, readRuling } from '../dispatch/ruling.js';
@@ -312,18 +313,7 @@ export function actionCommands(ctx: ActionContext, cliBin: string): ActionComman
             // `gh run rerun` takes a run id, not a commit: look the gate run up first.
             {
               file: 'gh',
-              args: [
-                'run',
-                'list',
-                '--commit',
-                ctx.headSha,
-                '--workflow',
-                'ai-sdlc-gate.yml',
-                '--json',
-                'databaseId',
-                '--jq',
-                '.[0].databaseId',
-              ],
+              args: gateRunListArgs(ctx.headSha),
               captureRunId: true,
             },
             { file: 'gh', args: ['run', 'rerun', RUN_ID_PLACEHOLDER, '--failed'] },
@@ -344,8 +334,8 @@ export function commandExecutor(run: CommandRunner, cwd: string, cliBin: string)
       const args = c.args.map((a) => (a === RUN_ID_PLACEHOLDER && runId ? runId : a));
       const r = run(c.file, args, { cwd });
       if (r.status === 0 && c.captureRunId) {
-        runId = (r.stdout ?? '').trim();
-        if (!runId || runId === 'null') return { ran: false, note: 'no gate run for head' };
+        runId = parseGateRunId(r.stdout);
+        if (!runId) return { ran: false, note: 'no gate run for head' };
         continue;
       }
       if (r.status !== 0) {

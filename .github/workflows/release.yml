@@ -171,6 +171,29 @@ jobs:
           # -braces global switch honored by both npm and pnpm.
           NPM_CONFIG_PROVENANCE: 'true'
 
+      # AISDLC-983: rebuild the plugin cache from what was just published, so a
+      # fresh install never carries a runtime older than the sources it ships
+      # with. Installs the pinned runtimeDependencies into a scratch copy of the
+      # plugin and fails when any package still resolves to an older version.
+      # Retries because the registry can lag a few minutes behind `publish`.
+      - name: Rebuild plugin cache from the published runtime
+        run: |
+          CACHE_DIR="$(mktemp -d)"
+          cp -R ai-sdlc-plugin/. "$CACHE_DIR/"
+          for attempt in 1 2 3 4 5; do
+            bash "$CACHE_DIR/scripts/install-runtime-deps.sh" "$CACHE_DIR" --force
+            STALE="$(node "$CACHE_DIR/scripts/check-stale-runtime-deps.mjs" "$CACHE_DIR")"
+            if [ -z "$STALE" ]; then
+              echo "[release] plugin cache rebuilt; no stale runtime dependency"
+              exit 0
+            fi
+            echo "[release] attempt $attempt: stale after rebuild:"
+            echo "$STALE"
+            sleep 30
+          done
+          echo "::error::plugin cache still lags the published runtime"
+          exit 1
+
       # ── AISDLC-439 (DEC-0001): Sign MCP server tarball after publish ──
       #
       # After pnpm -r publish succeeds, the @ai-sdlc/plugin-mcp-server
