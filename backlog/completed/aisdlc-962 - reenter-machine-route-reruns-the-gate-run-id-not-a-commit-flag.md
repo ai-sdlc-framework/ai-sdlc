@@ -1,7 +1,7 @@
 ---
 id: AISDLC-962
 title: 'The reenter machine route reruns the resolved gate run id; gh run rerun has no --commit flag'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels:

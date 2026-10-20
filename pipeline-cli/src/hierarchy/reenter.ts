@@ -138,6 +138,28 @@ function proseLine(text: string): string {
   return `Fix: ${text.replace(/\s+/g, ' ').trim().slice(0, 400)}`;
 }
 
+/** The gate workflow run id for a head, or undefined when none resolves. */
+function gateRunId(deps: ReenterDeps, headSha: string): string | undefined {
+  const out = deps.run(
+    'gh',
+    [
+      'run',
+      'list',
+      '--commit',
+      headSha,
+      '--workflow',
+      'ai-sdlc-gate.yml',
+      '--json',
+      'databaseId',
+      '--jq',
+      '.[0].databaseId',
+    ],
+    { cwd: deps.cwd },
+  );
+  const id = out.status === 0 ? out.stdout.trim() : '';
+  return /^\d+$/.test(id) ? id : undefined;
+}
+
 /**
  * Re-enter one PR. Throws, writing nothing, when the PR cannot be resolved, is merged or
  * closed, needs nothing, or the loop guard refuses.
@@ -227,12 +249,15 @@ export function reenter(input: ReenterInput, deps: ReenterDeps): ReenterResult {
 
   type Route = 'rebase' | 'rerun' | 'executor';
   let route: Route;
+  let rerunId: string | undefined;
   if (localHead) {
     route = 'executor';
   } else if (c.state === 'behind-or-dirty') {
     route = view.mergeStateStatus === 'BEHIND' ? 'rebase' : 'executor';
   } else if (c.state === 'cancelled-or-infra') {
-    route = 'rerun';
+    // `gh run rerun` takes a run id, not a commit: resolve the gate run for this head.
+    rerunId = gateRunId(deps, headSha);
+    route = rerunId ? 'rerun' : 'executor';
   } else if (c.state === 'real-failure' || c.state === 'attestation-content-hash-mismatch') {
     route = 'executor';
   } else if (note) {
@@ -258,7 +283,7 @@ export function reenter(input: ReenterInput, deps: ReenterDeps): ReenterResult {
     const cmd =
       route === 'rebase'
         ? { file: 'gh', args: ['pr', 'update-branch', String(pr), '--rebase'] }
-        : { file: 'gh', args: ['run', 'rerun', '--failed', '--commit', headSha] };
+        : { file: 'gh', args: ['run', 'rerun', rerunId ?? '', '--failed'] };
     const out = deps.run(cmd.file, cmd.args, { cwd: deps.cwd });
     if (out.status !== 0) {
       throw new Error(
