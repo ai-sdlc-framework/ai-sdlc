@@ -1,7 +1,7 @@
 ---
 id: AISDLC-964
 title: 'A tooling-limitations register tracks every external ceiling (GitHub API, gh, git, Actions) we work around, with its headroom metric'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels:
@@ -29,7 +29,7 @@ The gate went down for part of every hour on two consecutive days because the Ac
 
 ## Acceptance Criteria
 
-- [ ] `docs/operations/tooling-limitations.md` exists with at least these rows: GitHub user token core and GraphQL budgets, secondary limits, Actions GITHUB_TOKEN per repository (and the enterprise tier), search API, `gh run rerun` argument shape, git loose-object gc stall, worktree count per repository.
-- [ ] Each row names its headroom metric and where it is read, or is marked unmeasured.
-- [ ] `CLAUDE.md` carries one pointer line to the page (within the size budget).
-- [ ] A test keeps the rows and their instrumentation pointers consistent.
+- [x] `docs/operations/tooling-limitations.md` exists with at least these rows: GitHub user token core and GraphQL budgets, secondary limits, Actions GITHUB_TOKEN per repository (and the enterprise tier), search API, `gh run rerun` argument shape, git loose-object gc stall, worktree count per repository.
+- [x] Each row names its headroom metric and where it is read, or is marked unmeasured.
+- [x] `CLAUDE.md` carries one pointer line to the page (within the size budget).
+- [x] A test keeps the rows and their instrumentation pointers consistent.
