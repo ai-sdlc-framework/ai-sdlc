@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { now as clockNow } from '../clock.js';
 import {
   appendGhCall,
+  redactArgv,
   GH_CALL_LOGGED_ENV,
   GH_CALL_LOG_ENV,
   parseRemaining,
@@ -68,7 +69,7 @@ export const defaultRunner: Runner = async (command, args, opts = {}) => {
     appendGhCall(logPath, {
       at: clockNow().toISOString(),
       session: process.env.AI_SDLC_HIERARCHY_SESSION ?? '-',
-      argv: args,
+      argv: redactArgv(args),
       exit: r?.code ?? 1,
       ...(remaining !== undefined ? { remaining } : {}),
     });

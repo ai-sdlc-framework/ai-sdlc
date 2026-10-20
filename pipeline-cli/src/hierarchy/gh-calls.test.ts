@@ -11,7 +11,9 @@ import {
   installGhShim,
   lowestRemaining,
   parseQuota,
+  parseQuotaFloor,
   parseRemaining,
+  redactArgv,
   pruneGhCalls,
   readGhCalls,
 } from './gh-calls.js';
@@ -125,5 +127,21 @@ describe('gh call log (AISDLC-963)', () => {
     expect(lowestRemaining(undefined)).toBeUndefined();
     expect(parseQuota('nope')).toBeUndefined();
     expect(parseQuota('{}')).toBeUndefined();
+  });
+
+  it('quota floor: valid override is used, invalid or empty falls back to 300', () => {
+    expect(parseQuotaFloor('50')).toBe(50);
+    expect(parseQuotaFloor('0')).toBe(0);
+    expect(parseQuotaFloor(undefined)).toBe(300);
+    expect(parseQuotaFloor('')).toBe(300);
+    expect(parseQuotaFloor('abc')).toBe(300);
+    expect(parseQuotaFloor('-5')).toBe(300);
+    expect(parseQuotaFloor('Infinity')).toBe(300);
+  });
+
+  it('redacts header, field and body values from logged argv', () => {
+    expect(
+      redactArgv(['api', 'x', '-H', 'Authorization: tok', '-f', 'a=b', '--body=hi', '--jq', '.a']),
+    ).toEqual(['api', 'x', '-H', '***', '-f', '***', '--body=***', '--jq', '.a']);
   });
 });

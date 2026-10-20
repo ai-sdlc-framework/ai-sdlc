@@ -13,6 +13,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
@@ -26,6 +27,46 @@ export const GH_CALL_LOGGED_ENV = 'AI_SDLC_GH_CALL_LOGGED';
 export const DEFAULT_QUOTA_FLOOR = 300;
 const HOUR_MS = 3_600_000;
 const RETENTION_MS = 24 * HOUR_MS;
+
+/** Flags whose value can carry a credential or private text; the value is never logged. */
+const SECRET_FLAGS = new Set([
+  '-H',
+  '--header',
+  '-f',
+  '-F',
+  '--raw-field',
+  '--field',
+  '-b',
+  '--body',
+  '--input',
+]);
+
+/** Argv safe to keep on disk: values of header, field and body flags are replaced. */
+export function redactArgv(argv: string[]): string[] {
+  const out: string[] = [];
+  let hide = false;
+  for (const a of argv) {
+    if (hide) {
+      out.push('***');
+      hide = false;
+    } else if (SECRET_FLAGS.has(a)) {
+      out.push(a);
+      hide = true;
+    } else if (/^--(header|raw-field|field|body|input)=/.test(a)) {
+      out.push(`${a.slice(0, a.indexOf('='))}=***`);
+    } else {
+      out.push(a);
+    }
+  }
+  return out;
+}
+
+/** Parse the quota floor env value; anything but a non-negative number gives the default. */
+export function parseQuotaFloor(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === '') return DEFAULT_QUOTA_FLOOR;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_QUOTA_FLOOR;
+}
 
 export interface GhCall {
   at: string;
@@ -87,7 +128,10 @@ export function pruneGhCalls(logPath: string, now: Date): number {
   const kept = calls.filter((c) => Date.parse(c.at) >= cutoff);
   const dropped = calls.length - kept.length;
   if (dropped > 0) {
-    writeFileSync(logPath, kept.map((c) => `${JSON.stringify(c)}\n`).join(''));
+    // Write beside the log and rename so a reader never sees a half-written file.
+    const tmp = `${logPath}.${process.pid}.tmp`;
+    writeFileSync(tmp, kept.map((c) => `${JSON.stringify(c)}\n`).join(''));
+    renameSync(tmp, logPath);
   }
   return dropped;
 }
@@ -129,19 +173,27 @@ export const GH_SHIM = `#!/bin/sh
 self_dir=$(cd "$(dirname "$0")" && pwd)
 PATH=$(printf %s "$PATH" | tr ':' '\\n' | grep -vxF "$self_dir" | paste -sd: -)
 real=$(command -v gh) || { echo "gh: not found" >&2; exit 127; }
-if [ -n "$${GH_CALL_LOGGED_ENV}" ] || [ -z "$${GH_CALL_LOG_ENV}" ]; then exec "$real" "$@"; fi
+if [ -n "$${GH_CALL_LOGGED_ENV}" ] || [ -z "$${GH_CALL_LOG_ENV}" ] || [ "$1" = auth ]; then exec "$real" "$@"; fi
 out=$(mktemp)
+trap 'rm -f "$out"' EXIT INT TERM HUP
 "$real" "$@" > "$out"
 code=$?
 cat "$out"
 node -e '
 const fs = require("fs");
 const m = /^x-ratelimit-remaining:\\s*(\\d+)/im.exec(fs.readFileSync(process.argv[1], "utf8"));
-const c = { at: (new Date).toISOString(), session: process.env.AI_SDLC_HIERARCHY_SESSION || "-", argv: process.argv.slice(3), exit: Number(process.argv[2]) };
+const secret = new Set(${JSON.stringify([...SECRET_FLAGS])});
+const argv = []; let hide = false;
+for (const a of process.argv.slice(3)) {
+  if (hide) { argv.push("***"); hide = false; }
+  else if (secret.has(a)) { argv.push(a); hide = true; }
+  else if (/^--(header|raw-field|field|body|input)=/.test(a)) argv.push(a.slice(0, a.indexOf("=")) + "=***");
+  else argv.push(a);
+}
+const c = { at: (new Date).toISOString(), session: process.env.AI_SDLC_HIERARCHY_SESSION || "-", argv, exit: Number(process.argv[2]) };
 if (m) c.remaining = Number(m[1]);
 fs.appendFileSync(process.env.${GH_CALL_LOG_ENV}, JSON.stringify(c) + "\\n");
 ' "$out" "$code" "$@" 2>/dev/null
-rm -f "$out"
 exit $code
 `;
 
