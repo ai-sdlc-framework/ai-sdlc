@@ -252,6 +252,14 @@ table. It is `-` when no nvm-managed node process runs under the pane or `ps` ca
 The last line is the webhook receiver: `webhook: up (port N)` when running, `webhook: off (no secret)`
 when `AI_SDLC_WEBHOOK_SECRET` is unset, `webhook: off (not running)` otherwise.
 The line after it is the reconcile scheduler (the poller of `<board>/.reconcile-wake`): `scheduler: up (pid N)` or `scheduler: off`.
+A `gh calls last hour` line (AISDLC-963) gives each `HIERARCHY_SESSION`'s `gh` calls in the last hour and the live remaining
+quota for the core and graphql buckets (`gh api rate_limit`, not metered). The source is `<board-dir>/gh-calls.jsonl`, one
+JSON line per call (`at`, `session`, `argv`, `exit`, `remaining` when `gh api -i` printed it), written by the runner in
+`runtime/exec.ts` and by a `gh` shim that `up` puts first on each session PATH (`<board-dir>/bin/gh`, which execs the real
+binary) for callers that spawn `gh` directly. Lines older than 24 hours are dropped on each `status`. The dispatch tick skips its
+GitHub reads (human-attention list, mark-ready, landing) and reports the skip when the lowest remaining bucket is below the floor
+(default 300, override with `AI_SDLC_GH_QUOTA_FLOOR`). The gate workflow prints the Actions quota at the start (`detect`) and end
+(`pr-ready`) of each run in the job summary.
 A final `unbriefed` line lists dispatchable open tasks under `backlog/tasks/` that are on no
 brief and not on the board (nothing would ever queue them); write a brief for them.
 

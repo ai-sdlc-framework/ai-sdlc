@@ -107,6 +107,13 @@ jobs:
       first_run: ${{ steps.sdk-filter.outputs.first_run }}
       rfcs: ${{ steps.rfcs-filter.outputs.rfcs }}
     steps:
+      # AISDLC-963: Actions bucket remaining at the start of the run (end: pr-ready).
+      - name: Report API quota remaining (start of run)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api rate_limit --jq '.resources.core | "Actions quota remaining at start: \(.remaining)/\(.limit), resets at \(.reset | todate)"' | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history so the PR base SHA is present for `git diff`.
@@ -1513,10 +1520,10 @@ jobs:
 
       # AISDLC-927: surface the shared installation quota so an exhausted budget
       # is visible in the run summary. /rate_limit itself is not metered.
-      - name: Report API quota remaining
+      - name: Report API quota remaining (end of run)
         if: always()
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api rate_limit --jq '.resources.core | "API quota remaining: \(.remaining)/\(.limit), resets at \(.reset | todate)"' | tee -a "$GITHUB_STEP_SUMMARY"
+          gh api rate_limit --jq '.resources.core | "Actions quota remaining at end: \(.remaining)/\(.limit), resets at \(.reset | todate)"' | tee -a "$GITHUB_STEP_SUMMARY"

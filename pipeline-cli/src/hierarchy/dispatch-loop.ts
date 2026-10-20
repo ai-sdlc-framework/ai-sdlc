@@ -20,6 +20,7 @@
  * a clear, but can never send a second one.
  */
 
+import { DEFAULT_QUOTA_FLOOR, lowestRemaining, type Quota } from './gh-calls.js';
 import {
   existsSync,
   mkdirSync,
@@ -207,6 +208,8 @@ export interface TickResult {
   promotions?: PromotedDecision[];
   /** Present while the board is held (AISDLC-899): claims and relaunches are skipped, reporting is not. */
   held?: Hold;
+  /** Present when the tick skipped its GitHub reads for low quota (AISDLC-963). */
+  quotaSkip?: { remaining: number; floor: number };
   /** Deterministic list of what stops the drain; the dispatch command sends it to the planner when it changes. */
   blockers: string[];
 }
@@ -316,6 +319,10 @@ export interface LoopDeps {
   listPrs?: () => HumanAttentionPr[] | undefined;
   /** Parent `HEAD`; a rejected brief is retried when it moves (AISDLC-952). */
   parentHead?: () => string | undefined;
+  /** Live remaining quota (AISDLC-963); below `quotaFloor` the tick skips its GitHub reads. */
+  quota?: () => Quota | undefined;
+  /** Floor of remaining quota; default 300. */
+  quotaFloor?: number;
 }
 
 function ingestBriefs(
@@ -553,13 +560,27 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   const { skipped, ...ingestRest } = ingestBriefs(deps, state);
   const ingest = { ...ingestRest, ...(skipped.length > 0 ? { skipped } : {}) };
   const held = readHold(deps.boardDir);
+  let quotaSkip: TickResult['quotaSkip'];
+  try {
+    const remaining = lowestRemaining(deps.quota?.());
+    const floor = deps.quotaFloor ?? DEFAULT_QUOTA_FLOOR;
+    if (remaining !== undefined && remaining < floor) quotaSkip = { remaining, floor };
+  } catch {
+    /* an unreadable quota must not stop the dispatch loop */
+  }
   const watch = await watchVerdicts(deps, state, held);
   const stalled = await checkStalls(deps, state, held);
   const reports = buildReports(deps, state, watch.verdicts.length);
+  if (quotaSkip) {
+    reports.push({
+      kind: 'progress',
+      text: `skipped GitHub reads: remaining quota ${quotaSkip.remaining} is below the floor ${quotaSkip.floor}`,
+    });
+  }
   for (const s of stalled) reports.push({ kind: 'progress', text: formatStall(s) });
   let humanAttention: HumanAttentionRow[] = [];
   try {
-    humanAttention = classifyHumanAttention(deps.listPrs?.() ?? [], deps.now());
+    humanAttention = quotaSkip ? [] : classifyHumanAttention(deps.listPrs?.() ?? [], deps.now());
   } catch {
     /* an unreadable PR list must not stop the dispatch loop */
   }
@@ -569,11 +590,11 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   }
   saveState(deps.boardDir, state);
   const markReady =
-    deps.markReady && deps.operational.has('mark-ready-after-codeql')
+    !quotaSkip && deps.markReady && deps.operational.has('mark-ready-after-codeql')
       ? deps.markReady()
       : undefined;
   let landed: LandReport | undefined;
-  if (deps.landEligible && deps.operational.has('land-eligible-prs')) {
+  if (!quotaSkip && deps.landEligible && deps.operational.has('land-eligible-prs')) {
     try {
       landed = await deps.landEligible();
     } catch (err) {
@@ -598,6 +619,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     ...ingest,
     ...watch,
     reports,
+    ...(quotaSkip ? { quotaSkip } : {}),
     ...(stalled.length > 0 ? { stalled } : {}),
     ...(humanAttention.length > 0 ? { humanAttention } : {}),
     ...wake,

@@ -6,6 +6,7 @@
  * agents; clients attached to one shared session would follow the same window.
  */
 
+import { ghCallsPath, GH_CALL_LOG_ENV, installGhShim } from './gh-calls.js';
 import path from 'node:path';
 
 import { schedulerUp } from './reconcile-scheduler.js';
@@ -148,11 +149,19 @@ export function buildClaudeCommand(
   bin: string,
   s: Pick<PlannedSession, 'role' | 'name' | 'model' | 'permissionMode' | 'prompt'>,
   nodeVersion?: string,
+  ghLog?: { shimDir: string; logPath: string },
 ): string {
   // Exported ahead of the command so the plugin hook sees them at launch (the agent's
   // own Bash commands cannot change them); the lease-push guard binds an executor by them.
   return [
     ...(nodeVersion ? [nvmActivationPrefix(nodeVersion)] : []),
+    // AISDLC-963: a `gh` shim first on PATH logs calls that bypass the runner.
+    ...(ghLog
+      ? [
+          `PATH=${shellQuote(ghLog.shimDir)}:"$PATH"`,
+          `${GH_CALL_LOG_ENV}=${shellQuote(ghLog.logPath)}`,
+        ]
+      : []),
     `AI_SDLC_HIERARCHY_SESSION=${shellQuote(s.name)}`,
     `AI_SDLC_HIERARCHY_ROLE=${shellQuote(s.role)}`,
     shellQuote(bin),
@@ -271,7 +280,13 @@ export async function launchSession(
   nodeVersion?: string,
 ): Promise<{ entry: RosterEntry } | { failure: string; countable: boolean }> {
   const spawnedAt = deps.now();
-  const command = buildClaudeCommand(deps.claudeBin, s, nodeVersion);
+  let ghLog: { shimDir: string; logPath: string } | undefined;
+  try {
+    ghLog = { shimDir: installGhShim(deps.boardDir), logPath: ghCallsPath(deps.boardDir) };
+  } catch (err) {
+    warnings.push(`could not install the gh call-log shim: ${(err as Error).message}`);
+  }
+  const command = buildClaudeCommand(deps.claudeBin, s, nodeVersion, ghLog);
   // Impossible by construction; asserted because a bare launch only fails at push time.
   if (!hasLaunchEnv(command, s.name, s.role)) {
     return {

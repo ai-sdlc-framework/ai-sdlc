@@ -56,6 +56,7 @@
  * not authentication; a session running as the same user can defeat it.
  */
 
+import { parseQuota } from '../hierarchy/gh-calls.js';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -823,6 +824,13 @@ export async function runHierarchyCli(
             findPr: (id) => findOpenPrNumber(extras.ghRun ?? deps.run, repoRoot, id),
           },
           parentHead: () => readParentHead(repoRoot),
+          quota: () => {
+            const r = (extras.ghRun ?? deps.run)('gh', ['api', 'rate_limit'], { cwd: repoRoot });
+            return r?.status === 0 ? parseQuota(r.stdout) : undefined;
+          },
+          ...(process.env.AI_SDLC_GH_QUOTA_FLOOR
+            ? { quotaFloor: Number(process.env.AI_SDLC_GH_QUOTA_FLOOR) }
+            : {}),
           listPrs: () => fetchHumanAttentionPrs(wakeGh, repoRoot, deps.boardDir),
           markReady: () =>
             markReadyAfterCodeql(wakeGh, repoRoot, {

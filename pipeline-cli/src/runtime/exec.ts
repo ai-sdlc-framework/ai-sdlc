@@ -5,6 +5,13 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { now as clockNow } from '../clock.js';
+import {
+  appendGhCall,
+  GH_CALL_LOGGED_ENV,
+  GH_CALL_LOG_ENV,
+  parseRemaining,
+} from '../hierarchy/gh-calls.js';
 
 const execFileP = promisify(execFile);
 
@@ -54,11 +61,39 @@ function augmentedPath(): string {
  * receive an injected runner default to this.
  */
 export const defaultRunner: Runner = async (command, args, opts = {}) => {
+  const log = (r: ExecResult | undefined): void => {
+    const logPath = process.env[GH_CALL_LOG_ENV];
+    if (!logPath || command !== 'gh') return;
+    const remaining = r ? parseRemaining(r.stdout) : undefined;
+    appendGhCall(logPath, {
+      at: clockNow().toISOString(),
+      session: process.env.AI_SDLC_HIERARCHY_SESSION ?? '-',
+      argv: args,
+      exit: r?.code ?? 1,
+      ...(remaining !== undefined ? { remaining } : {}),
+    });
+  };
+  try {
+    const result = await runCommand(command, args, opts);
+    log(result);
+    return result;
+  } catch (err) {
+    log((err as { result?: ExecResult }).result);
+    throw err;
+  }
+};
+
+const runCommand: Runner = async (command, args, opts = {}) => {
   try {
     const result = await execFileP(command, args, {
       cwd: opts.cwd,
       timeout: opts.timeout ?? 60_000,
-      env: { ...process.env, PATH: augmentedPath(), ...opts.env },
+      env: {
+        ...process.env,
+        PATH: augmentedPath(),
+        ...(command === 'gh' ? { [GH_CALL_LOGGED_ENV]: '1' } : {}),
+        ...opts.env,
+      },
       maxBuffer: 32 * 1024 * 1024,
     });
     const stdout = result.stdout as string | Buffer;
