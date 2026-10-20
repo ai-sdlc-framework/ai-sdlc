@@ -20,6 +20,12 @@ import { join } from 'node:path';
 import { loadDecisionsConfig, resolveTimeboxConfig } from './decisions-config.js';
 import { readDecisionEvents, resolveDecisionsDir } from './event-log.js';
 import { formatHumanAttentionRow, type HumanAttentionRow } from '../hierarchy/human-attention.js';
+import {
+  filterSpend,
+  readSpendEvents,
+  renderSpendDigestBlock,
+  type SpendEvent,
+} from '../kpi/spend.js';
 import type {
   AutoExpiredEvent,
   DecisionEvent,
@@ -172,6 +178,8 @@ export interface OperatorDigest {
   governanceChanges?: GovernanceChange[];
   /** Open PRs that need a human (AISDLC-888); the section is omitted when empty or absent. */
   humanPrs?: HumanAttentionRow[];
+  /** Model-call spend events since the cutoff (AISDLC-885); report only. */
+  spend?: SpendEvent[];
   /** Default class (b) timebox in hours, from config (DEC-0059). */
   defaultTimeboxHours?: number;
 }
@@ -358,6 +366,7 @@ export function renderOperatorDigestMarkdown(d: OperatorDigest): string {
     );
   }
   lines.push('');
+  if (d.spend !== undefined) lines.push(renderSpendDigestBlock(d.spend, d.since));
   return lines.join('\n');
 }
 
@@ -410,6 +419,7 @@ export function runOperatorDigest(opts: RunOperatorDigestOpts): OperatorDigest {
   digest.governanceChanges = (opts.governanceChanges ?? gitGovernanceChangeResolver(opts.workDir))(
     since,
   );
+  digest.spend = filterSpend(readSpendEvents(opts.workDir), { since });
   const humanPrs = opts.humanPrs?.(now) ?? [];
   if (humanPrs.length > 0) digest.humanPrs = humanPrs;
   if (opts.mark) {

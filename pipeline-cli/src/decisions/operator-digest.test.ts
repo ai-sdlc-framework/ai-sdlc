@@ -10,6 +10,7 @@ import {
   resolveDecisionsDir,
 } from './event-log.js';
 import type { DecisionEvent } from './decision-record.js';
+import { recordSpendEvent } from '../kpi/spend.js';
 import {
   buildOperatorDigest,
   gitProvenanceResolver,
@@ -466,6 +467,33 @@ describe('PRs needing a human section (AISDLC-888)', () => {
     try {
       expect(runOperatorDigest({ ...common, humanPrs: () => [row] }).humanPrs).toEqual([row]);
       expect(runOperatorDigest({ ...common, humanPrs: () => [] }).humanPrs).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('spend block (AISDLC-885)', () => {
+  it('lists spend since the cutoff and mark resets the window', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dg-spend-'));
+    try {
+      const t1 = new Date('2026-10-16T12:00:00Z');
+      recordSpendEvent(dir, {
+        prNumber: 3,
+        rung: 4,
+        agent: 'developer',
+        model: 'sonnet',
+        inputTokens: 10,
+        outputTokens: 5,
+        ts: '2026-10-16T10:00:00Z',
+      });
+      const opts = { workDir: dir, provenance: () => null, governanceChanges: () => [] };
+      const first = runOperatorDigest({ ...opts, now: t1, mark: true });
+      const md = renderOperatorDigestMarkdown(first);
+      expect(md).toContain('Spend since last digest');
+      expect(md).toContain('#3: 15 tokens');
+      const next = runOperatorDigest({ ...opts, now: new Date(t1.getTime() + 1000) });
+      expect(next.spend).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

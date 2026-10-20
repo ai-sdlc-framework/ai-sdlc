@@ -72,6 +72,16 @@ Every file under `ai-sdlc-plugin/agents/` and `ai-sdlc-plugin/commands/` declare
 | 3 (Haiku, with `bounds:`) | every `model: haiku` file: `review-executor`, `review-executor-codex`, and the commands `version`, `doctor`, `init`, `hierarchy`, `cleanup`, `pipeline-status`, `triage`, `import-spec`, `rfc-init`, `init-signing-key`, `memory-dream`, `execute-parallel`, `execute-parallel-status`, `execute-parallel-cleanup`, `orchestrator-tick`, `dispatch-worker` (the last five are retired stubs) |
 | 4 (strong model, plan/execute/synthesize) | every `model: sonnet` or `model: opus` file: all other agents (`developer`, the reviewers, `review-planner`, `review-synthesizer`, `rebase-resolver`, `ci-conflict-resolver`, `refinement-reviewer`) and commands (`execute`, `executor`, `operator-dispatch`, `planner`, `fix-pr`, `review-pr`, `detect-patterns`, `rebase`, `resolve-conflicts`) |
 
+### Per-PR, per-rung spend report (AISDLC-885)
+
+Every model call (developer round, reviewers, judgment layer, staged review, Agent spawns) is appended with `cli-kpi record-spend` to `.ai-sdlc/kpi/spend.jsonl` as `{prNumber|taskId, rung, agent, model, inputTokens, outputTokens, calls, state, outcome, linkedTo}`. `rung` defaults to the `rung:` frontmatter of `--agent` (AISDLC-884). `outcome` (rung 2 and 3 only) is `answered`, `below-floor` or `escalated`; a rung-3 call recorded after an `escalated` rung-2 call on the same PR is linked to it through `linkedTo`.
+
+- `cli-kpi spend --pr <n>` shows per-call detail, spend by rung and by agent, developer round as its own line. `cli-kpi spend --since <date> [--json]` adds the distribution (median, p90, max) of total, rung-4 and developer-round tokens per PR.
+- The operator digest ends with "Spend since last digest": totals by rung and the five most expensive PRs; `--mark` resets the window.
+- v1 is report only. No cap, refusal or throttle exists anywhere.
+
+Phase 3 rule (target, not built): a per-PR token budget, where rung-4 spend beyond the budget requires a logged rung-3 failure for the same typed question. The fields it needs are all in the report: `rung` and `agent` (rung-4 tokens per PR), `outcome` plus `linkedTo` (the logged rung-3 and rung-2 outcomes per typed question), `state` (budget by PR stage) and the per-PR distribution that sets the budget from data.
+
 On dispatch paths (`/ai-sdlc execute`, `/ai-sdlc executor`), code-review and test-review SHOULD be routed to the `-codex` variants (`code-reviewer-codex` / `test-reviewer-codex`) by default — Codex plan billing is zero Claude usage. Security review stays on the Claude-native `security-reviewer` at opus. Mechanical work (sign, reconcile, rebase) MUST NOT be wrapped in subagents.
 
 ## Subagent Governance — OQ-resolution prohibition (AISDLC-298)
