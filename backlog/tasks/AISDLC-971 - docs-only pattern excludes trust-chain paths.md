@@ -10,7 +10,7 @@ labels:
 dependencies:
   - AISDLC-969
 references:
-  - scripts/docs-only-paths.mjs
+  - pipeline-cli/attestation-core/docs-only-paths.mjs
   - pipeline-cli/attestation-core/review-scope-core.mjs
   - docs/operations/quality-gate.md
 priority: high
@@ -19,7 +19,7 @@ dispatchable: true
 
 ## Description
 
-`scripts/docs-only-paths.mjs` (lines 14-25) classifies as docs-only any root `*.md` (so `CLAUDE.md` and `AGENTS.md`, the agents' standing instructions), `.claude/memory/**`, `.ai-sdlc/dispatch/briefs/**` (the files that drive the autonomous hierarchy), `.github/*.md`, `.github/dependabot.yml` and committed envelopes. `pipeline-cli/attestation-core/review-scope-core.mjs` (lines 33-34, 71, 78) classifies the same paths as trust-chain and demands three reviewers for them. The two lists disagree, and the lane wins: a "docs" PR rewrites governance or a brief with zero review. The records-only lane already applies the right rule (records AND not a trust-chain exception); docs-only should match it. Introduced across AISDLC-534 (commit 9eca1d336) with no decision record.
+`pipeline-cli/attestation-core/docs-only-paths.mjs` (lines 14-25) classifies as docs-only any root `*.md` (so `CLAUDE.md` and `AGENTS.md`, the agents' standing instructions), `.claude/memory/**`, `.ai-sdlc/dispatch/briefs/**` (the files that drive the autonomous hierarchy), `.github/*.md`, `.github/dependabot.yml` and committed envelopes. `pipeline-cli/attestation-core/review-scope-core.mjs` (lines 33-34, 71, 78) classifies the same paths as trust-chain and demands three reviewers for them. The two lists disagree, and the lane wins: a "docs" PR rewrites governance or a brief with zero review. The records-only lane already applies the right rule (records AND not a trust-chain exception); docs-only should match it. Introduced across AISDLC-534 (commit 9eca1d336) with no decision record.
 
 **Five-step review (requirements first).**
 1. Requirement questioned: must RFCs, docs/ and backlog stay cheap? Yes; those stay in the lane. The question is only whether instruction and governance files are docs. They are inputs to agents, so they are code for review purposes.
