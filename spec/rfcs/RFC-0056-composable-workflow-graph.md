@@ -5,7 +5,7 @@ status: Draft
 lifecycle: Draft
 author: 'Dominique Legault'
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-20
 requires: []
 assumes: [RFC-0012, RFC-0050, RFC-0051, RFC-0052, RFC-0054]
 requiresDocs: []
@@ -29,17 +29,25 @@ with file and line citations).
 
 ## Motivation
 
-1. ai-sdlc is opinionated by hard-coding. Step order, reviewer sets (an enum of
-   three), `MAX_ITERATIONS = 2`, the severity rule, timers and models live in code.
-   Adopters cannot reshape the graph without forking.
+1. ai-sdlc is opinionated by hard-coding. Step order, the reviewer-set mode (an
+   enum of three: `three`, `code-test-merged`, `staged`; `steps/reviewer-set.ts:97`),
+   `MAX_ITERATIONS = 2` (`next-step.ts:107`, duplicated as `DEFAULT_MAX_ITERATIONS`
+   in `steps/09-iterate.ts:37`), the severity rule (`steps/08-aggregate-verdicts.ts:54`),
+   timers and models (`dispatch/reviewer-harness.ts:58-113`, beside
+   `model-routing.yaml`) live in code. Adopters cannot reshape the graph without
+   forking.
 2. Config already claims to describe the pipeline and does not. `pipeline.yaml
-   spec.stages` is never executed by pipeline-cli; `pr-lifecycle.yaml` declares
-   itself normative and one of about ten key groups is read. Config that lies is
-   worse than no config.
-3. Three orchestrators (next-step, `executePipeline()`, the MCP step tools) run the
+   spec.stages` is never executed by pipeline-cli (the orchestrator looks single
+   stages up by name); `pr-lifecycle.yaml` declares itself normative and one of its
+   nine `spec` key groups is read by code (`loopGuard.maxSameHeadActions`), a second
+   (`noTaskBranchPrefixes`) by CI. Config that lies is worse than no config.
+3. Three orchestrators (next-step, `executePipeline()` in
+   `pipeline-cli/src/execute-pipeline.ts`, the MCP `pipeline_step_*` tools) run the
    same step library and have drifted; the composite path still arms the GitHub
    auto-land flag with the raw gh command (`execute-pipeline.ts:600-613`), which the
-   live path forbids.
+   live path forbids. The same raw call sits in `cli/resume-from-draft.ts:135,596`
+   and `orchestrator/reconcile.ts:931`; those sites are fixed by a task outside this
+   RFC.
 4. Enterprise adopters need bounded spend with an auditable shape: static topology,
    dynamic width inside declared caps, anchors on every path to ship. Claude Code's
    dynamic workflows give width without shape; a graph document gives both.
@@ -54,7 +62,9 @@ with file and line citations).
 - Fan-out nodes declare `over`, `cap` and `expect`; a missing return fails the join.
 - `anchor` nodes carry non-LLM truth; validation refuses a graph where a path to
   `ship` crosses no anchor.
-- `frozen` nodes cannot be changed by an override without a DEC id.
+- `frozen` nodes cannot be changed by an override without a decision record already
+  on `main` (a record in an unmerged PR is not authority; CLAUDE.md, Decision
+  authority).
 
 ## Non-Goals
 
@@ -117,7 +127,12 @@ spec:
 | `agent` | returned to the Claude session as one `spawn` instruction (today's next-step contract) | `role` resolved by `model-routing.yaml`; `fresh: true` forbids context reuse; output validated against the role's envelope schema |
 | `anchor` | in process | output accepted only from code (command exit status, CI check, coverage script); the engine rejects an anchor whose impl is an agent |
 | `fanout` | the engine expands `over` into at most `cap` child nodes | `expect: all`, `n`, or `quorum(k)`; the join fails closed when fewer returns arrive |
-| `human` | pauses the run and writes a decision record | class (c) only; never on the default execute path |
+| `human` | pauses the run and writes a decision record | class (c) only; never on the default execute path. A paused run still reports to the parent tier: a hold limits actions, never reporting (RFC-0051) |
+
+Class (a) and (b) decisions are not nodes. They happen inside `agent` nodes through
+`cli-decisions add` + `answer` (class (a)) or `--timebox` + `--autonomous-fallback`
+(class (b)), and only the record persists; the engine never waits on them. RFC Open
+Questions are outside the engine entirely: they are resolved only with the operator.
 
 ### Edges
 
@@ -133,14 +148,23 @@ boolean expression over upstream outputs. `loop` declares a back edge with a har
    `review-config.yaml` and `model-routing.yaml`.
 2. Validate: acyclic except declared loops; every `agent` output has a schema; every
    path to `ship` crosses an anchor; `frozen` nodes are byte-equal to the plugin
-   default unless the change references a DEC id; `cap` and `budget` are present on
-   every fanout.
+   default unless the change references a decision record on `main`; `cap` and
+   `budget` are present on every fanout.
 3. Per call: compute the ready set (all inbound edges satisfied), run `step` and
    `anchor` nodes in process, return the first `agent` node as one spawn
    instruction. Same `--result` reply protocol as next-step today, so
    `commands/execute.md` stays a thin loop and no new permission surface opens.
 4. Persist one record per node run in the existing state JSON; resume replays
    records. Include `sha256(workflow.yaml)` in the attestation leaf set (OQ-4).
+
+### Board, briefs and resume
+
+A workflow run is one board manifest (RFC-0051): the brief is the unit of hand-off,
+the board the unit of execution, the verdict file the unit of completion. The
+engine's per-node records live in that manifest's state JSON, and a resume
+(DEC-0187 re-enqueue or `reenter`) replays them from the last persisted node
+instead of restarting the run. Phase 5 turns the dispatch tick into the third
+document only on those terms; nothing in phases 1 to 4 touches the board format.
 
 ### Overrides
 
@@ -151,10 +175,21 @@ the last anchor on a path, declare an agent as an anchor.
 
 ### Reused pieces
 
-`deps/dependency-graph.ts` (topological order, cycle detection),
+`deps/dependency-graph.ts` (cycle detection; it has no topological order, so the
+engine adds a Kahn sort),
 `spec/schemas/pipeline.schema.json` stage fields (`condition`, `agent`, `harness`,
 `maxBudgetUsd`, `requiresIndependentHarnessFrom`), the next-step instruction
 protocol, `config-manifest` versioning (`since`, additive scaffolding).
+
+### What this does not solve
+
+1. A graph in config is still a graph of prompts; node quality is the step and
+   agent library's problem, not the engine's.
+2. The trust-chain path list (`review-scope-core.mjs`) is versioned with the
+   attestation schema, because the CI verifier re-derives the reviewer set from it.
+   It is therefore not a phase 4 knob; a change to it is a schema change.
+3. Staged-planner width stays model-decided inside a `fanout`; only `cap` and the
+   join rule make that acceptable.
 
 ### Velocity impact (DEC-0048)
 
@@ -191,14 +226,24 @@ release, then removed.
 
 Phase 1 has no dependencies and no behaviour change; it may be filed before sign-off.
 
+Audit findings that are standalone defects (coverage threshold drift, verifier not
+checking leaf approval, `emit-leaf` failing late, dead nodes, parent mutations in
+the per-task path, model-routing holes, hard-coded leftovers, doc drift) are filed
+as tasks outside this RFC and do not block it.
+
 ## Open Questions
 
 ### OQ-1: Staged review placement
 
 Today the staged diamond runs beside the full classic set and both verdicts block
-(`review-finalize.ts:202-203`, DEC-0149), while RFC-0052 calls it "shadow".
+(`review-finalize.ts:202-203`: the staged verdict seeds the array the classic
+verdicts join at `:231` and `:246`, all aggregated at `:334`). DEC-0149 decided the
+opposite (`drop-verifier`: staged is advisory and never credited), and RFC-0052
+calls it "shadow"; the blocking behaviour is a defect against a decision on `main`,
+fixed by a task outside this RFC. What stays open is whether staged ever gates.
 Options: (a) staged replaces the code/test lens, security stays beside; (b) staged
-is sampled one in N and never blocks; (c) keep both at full cost.
+stays advisory and is sampled one in N. Keeping both at full cost is already ruled
+out by DEC-0149.
 
 ### OQ-2: Expression grammar for `when`
 
@@ -207,8 +252,13 @@ function calls? Leaning minimal.
 
 ### OQ-3: The frozen set
 
-Proposed: `aggregate` (severity rule), `ship` (never land, lease-only push), every
-anchor, attestation signing. Anything else?
+Proposed, from the audit's list of what is already right: `aggregate` (severity
+rule, unanimity fail-closed), `ship` (never land, lease-only push; the audit calls
+this rule `never-merge`), every anchor, attestation signing, fresh contexts proven
+by hook markers, the nonce bound to the head SHA, the planner's inability to weaken
+the baseline checklist, the grounding drop, one worktree per task, atomic board
+claims, the reconciler loop guard, base-branch-only config loading. Anything to add
+or drop?
 
 ### OQ-4: Document hash in the attestation
 
@@ -235,11 +285,14 @@ section here?
 | Version | Date | Change |
 |---|---|---|
 | v0.1 | 2026-10-18 | Draft from the workflow graph audit; five Open Questions, none resolved. |
+| v0.2 | 2026-10-20 | Planner accuracy review: DEC-0149 cited correctly in OQ-1 (option (c) dropped), RFC-0012 title, dependency-graph has no topo sort, `pr-lifecycle.yaml` 1 of 9 keys, extra raw arming sites; added class (a)/(b) handling, hold-reporting, board/brief/resume section, "What this does not solve", frozen set carried from the audit. No OQ resolved. |
 
 ## References
 
 - Workflow graph, audit and proposal: https://claude.ai/artifact/WDYWRxGSnYUUn7cy8GphWZ
-- RFC-0012 (pipeline steps as tools), RFC-0050 (model routing), RFC-0051 (session
-  hierarchy), RFC-0052 (staged review), RFC-0054 (PR lifecycle).
+- RFC-0012 (two-tier pipeline architecture with shared core library), RFC-0050
+  (usage ledger and model routing), RFC-0051 (session hierarchy), RFC-0052 (staged
+  review), RFC-0054 (PR lifecycle as event-driven dispatch); DEC-0149 (staged
+  review advisory), DEC-0187 (re-enqueue procedure).
 - Kopadze, "Graph Engineering explained" (fake-edge test, diamond, fresh-context
   checker, anchors, silent node failure).
