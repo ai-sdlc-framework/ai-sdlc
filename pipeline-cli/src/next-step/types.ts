@@ -211,6 +211,8 @@ export interface StopInstruction {
   taskId: string;
   outcome: 'aborted' | 'developer-failed' | 'developer-parked' | 'developer-json-contract-violated';
   reason: string;
+  /** Cause code the executor passes to `cli-dispatch complete --cause` so the playbook can pick a step. */
+  cause?: string;
   branch?: string;
   worktreePath?: string;
   prUrl: null;

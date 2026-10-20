@@ -29,6 +29,7 @@ export const REFUSED = [
   'tick',
   'restart',
   'register',
+  'playbook',
   'route-decision',
   'check-sender',
   'check-repo',

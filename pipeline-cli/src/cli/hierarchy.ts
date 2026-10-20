@@ -44,12 +44,13 @@
  *     (from board and catalog state) or read (regenerating when stale) a session's handoff file.
  *   - `auto-clear --transcript <path>` — Stop-hook entry: when the session's context is over
  *     its role threshold, refresh its handoff and schedule `clear --self`.
+ *   - `playbook --task <id> --action <step>` — run one named playbook step (AISDLC-918).
  *   - `route-decision --decision-id <id> --route operational|design --to <name>`
  *     — record that a decision was routed to a tier.
  *
  * All subcommands accept `--board-dir <path>` (default `.ai-sdlc/dispatch`).
  *
- * `clear`, `tick`, `restart`, `register` and `route-decision` are dispatch-session commands. A mistake
+ * `clear`, `tick`, `restart`, `register`, `playbook` and `route-decision` are dispatch-session commands. A mistake
  * guard keeps other sessions from running them by accident: it finds the calling
  * session from the process tree and the roster and refuses unless that is the running
  * dispatch session. A `--worker` value is only compared with that result. The guard is
@@ -64,7 +65,8 @@ import process from 'node:process';
 import { promoteExpiredDecisions } from '../decisions/escalation-chain.js';
 import { isDecisionCatalogEnabled } from '../decisions/feature-flag.js';
 import { persistDecisionLog } from '../decisions/remote-persist.js';
-import { DEFAULT_BOARD_DIR, TASK_ID_RE } from '../dispatch/board.js';
+import { collectVerdicts, DEFAULT_BOARD_DIR, TASK_ID_RE } from '../dispatch/board.js';
+import { sanitizeVerdict } from '../dispatch/verdict-fields.js';
 import { enqueueTasks, type EnqueueEntry } from '../dispatch/enqueue.js';
 import { requeueFailed } from '../dispatch/requeue.js';
 import { reenter } from '../hierarchy/reenter.js';
@@ -122,6 +124,8 @@ import {
   fetchHumanAttentionPrs,
   stallThresholdsFromEnv,
   runPlaybook,
+  NAMED_STEPS,
+  type PlaybookDeps,
   runStallNotice,
   DEFAULT_STALL_NOTICE_MINUTES,
   SAFE_SESSION_NAME,
@@ -165,6 +169,7 @@ Commands:
   resume     Lift the hold set by hold
   tick       One wake-up of the dispatch loop (ingest, verdict watch, playbook, reports)
   route-decision  Record that a decision was routed to a tier
+  playbook   Run one named playbook step for one task (playbook --task <id> --action <step>)
   handoff         Write or read a session's handoff file (handoff write|read --role <r>)
   auto-clear      Clear this session when its context is over the role threshold (Stop hook)
   executor-start  Executor identity, repository check and a blocking claim, as one call
@@ -287,6 +292,11 @@ Options for auto-clear:
   --transcript <path>      Session transcript whose usage fields give the context size
                            Thresholds: planner 150000, dispatch 120000, executor 120000 tokens;
                            override with contextThresholds in <board-dir>/config.json
+
+Options for playbook:
+  --task <id>              Task whose failure record the step is run for
+  --action <step>          rebase-push, retrigger-ci or requeue; refused when the role lacks the grant
+  --worker <name>          Optional; when given it must equal the calling session's own roster name
 
 Options for route-decision:
   --decision-id <id>       Decision Catalog id
@@ -475,6 +485,35 @@ export async function runHierarchyCli(
       trustedBoard: extras.trustedBoard,
       installDir: extras.installDir,
     });
+
+  /** Policy, runners and playbook dependencies shared by `tick` and `playbook`. */
+  const playbookSetup = (repoRoot: string, worker: string) => {
+    let policy: OperationalPolicy | undefined;
+    const readPolicy = (): OperationalPolicy =>
+      (policy ??= loadOperationalPolicy(repoRoot, deps.cwd));
+    const operational = extras.operational ?? readPolicy().operational;
+    const lease = extras.lease ?? {
+      forcePushMode: readPolicy().forcePushMode,
+      protectedBranches: readPolicy().protectedBranches,
+      ownWorktree: (worktree: string) => checkOwnWorktreeForOperator(repoRoot, worktree),
+    };
+    const gitRun = extras.gitRun ?? createGitRunner();
+    const emit = deps.emit ?? (() => {});
+    const playbookDeps = (retryLimit: number | undefined): PlaybookDeps => ({
+      run: gitRun,
+      repoRoot,
+      operational,
+      forcePushMode: lease.forcePushMode,
+      protectedBranches: lease.protectedBranches,
+      ownWorktree: lease.ownWorktree,
+      requeue: (id) =>
+        requeueFailed(deps.boardDir, id, retryLimit === undefined ? {} : { retryLimit }),
+      emit,
+      workerId: worker,
+      correctBranch: (id, b) => void correctManifestBranch(deps.boardDir, id, b),
+    });
+    return { operational, emit, playbookDeps };
+  };
 
   try {
     switch (subcommand) {
@@ -736,17 +775,7 @@ export async function runHierarchyCli(
           return 2;
         }
         const repoRoot = path.resolve(flags['work-dir'] ?? deps.cwd);
-        let policy: OperationalPolicy | undefined;
-        const readPolicy = (): OperationalPolicy =>
-          (policy ??= loadOperationalPolicy(repoRoot, deps.cwd));
-        const operational = extras.operational ?? readPolicy().operational;
-        const lease = extras.lease ?? {
-          forcePushMode: readPolicy().forcePushMode,
-          protectedBranches: readPolicy().protectedBranches,
-          ownWorktree: (worktree: string) => checkOwnWorktreeForOperator(repoRoot, worktree),
-        };
-        const gitRun = extras.gitRun ?? createGitRunner();
-        const emit = deps.emit ?? (() => {});
+        const { operational, emit, playbookDeps } = playbookSetup(repoRoot, worker);
         // One PR snapshot per wake, shared by every consumer below (AISDLC-959).
         const wakeGh = createSnapshotRunner(extras.ghRun ?? deps.run, { boardDir: deps.boardDir });
         const result = await runDispatchTick({
@@ -772,20 +801,7 @@ export async function runHierarchyCli(
               },
               { run: deps.run, boardDir: deps.boardDir, sleep: deps.sleep, emit },
             ),
-          playbook: (verdict) =>
-            runPlaybook(verdict, {
-              run: gitRun,
-              repoRoot,
-              operational,
-              forcePushMode: lease.forcePushMode,
-              protectedBranches: lease.protectedBranches,
-              ownWorktree: lease.ownWorktree,
-              requeue: (id) =>
-                requeueFailed(deps.boardDir, id, retryLimit === undefined ? {} : { retryLimit }),
-              emit,
-              workerId: worker,
-              correctBranch: (id, b) => void correctManifestBranch(deps.boardDir, id, b),
-            }),
+          playbook: (verdict) => runPlaybook(verdict, playbookDeps(retryLimit)),
           operational,
           stall: {
             ...stallThresholdsFromEnv(deps.env),
@@ -1087,6 +1103,44 @@ export async function runHierarchyCli(
         });
         deps.log(JSON.stringify({ ok: true, decisionId, route, routedTo: to }));
         return 0;
+      }
+      case 'playbook': {
+        const caller = dispatchCaller('playbook');
+        if (!caller.ok) {
+          process.stderr.write(`${caller.reason}\n`);
+          return 1;
+        }
+        const taskId = flags['task'];
+        const action = flags['action'];
+        if (!taskId || !TASK_ID_RE.test(taskId)) {
+          process.stderr.write('cli-hierarchy playbook: --task <task-id> is required\n');
+          return 2;
+        }
+        if (!NAMED_STEPS.includes(action as (typeof NAMED_STEPS)[number])) {
+          process.stderr.write(
+            `cli-hierarchy playbook: --action must be one of ${NAMED_STEPS.join(', ')}\n`,
+          );
+          return 2;
+        }
+        const step = action as (typeof NAMED_STEPS)[number];
+        const failure = collectVerdicts(deps.boardDir)
+          .filter((v) => v.taskId === taskId && v.outcome !== 'success')
+          .at(-1);
+        if (!failure) {
+          process.stderr.write(
+            `cli-hierarchy playbook: ${taskId} has no failure record on the board\n`,
+          );
+          return 1;
+        }
+        const repoRoot = path.resolve(flags['work-dir'] ?? deps.cwd);
+        const { playbookDeps } = playbookSetup(repoRoot, caller.name);
+        const outcome = await runPlaybook(
+          sanitizeVerdict(failure).verdict,
+          playbookDeps(undefined),
+          step,
+        );
+        deps.log(JSON.stringify({ ok: outcome.result === 'done', outcome }));
+        return outcome.result === 'done' ? 0 : 1;
       }
       default:
         process.stderr.write(`cli-hierarchy: unknown command '${subcommand}'\n\n${USAGE}`);

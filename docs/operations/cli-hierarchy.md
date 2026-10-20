@@ -15,7 +15,7 @@ resolved pipeline-cli bin (works from an installed plugin, not only the dogfood 
 It passes `up`, `status`, `attach`, `terminals`, `brief` and `down` through unchanged,
 with these differences: `attach` and `up --attach` print the shell command to run (a
 Claude Code session cannot switch your terminal); `down` with no `--role` asks you to
-confirm first; `clear`, `tick`, `restart`, `register`, `route-decision`, `check-sender`, `check-repo` and
+confirm first; `clear`, `tick`, `restart`, `register`, `playbook`, `route-decision`, `check-sender`, `check-repo` and
 `executor-start` are refused (they belong to the dispatch and executor loop bodies); with no arguments it
 prints `--help` plus a common-recipes block.
 
@@ -752,6 +752,23 @@ finding count (read from the PR body). The tick result carries the same rows as
 for Nh`; no new notification channel is involved. The operator digest prints a
 "PRs needing a human" section with the same rows and omits it when there are none. Both use
 the single classifier `classifyHumanAttention` (`hierarchy/human-attention.ts`).
+
+### `playbook`
+
+```
+cli-hierarchy playbook --task <task-id> --action <rebase-push|retrigger-ci|requeue> [--worker <dispatch-name>]
+```
+
+Runs one named playbook step for one task (AISDLC-918), through the same guarded runner and
+grant checks as `tick`, and records an `OperatorPlaybookAction` event like a tick-driven step.
+It reads the task's failure record from `failed/`; a task with no failure record exits 1, and an
+`--action` outside the three steps exits 2. A step whose operational grants the role lacks
+(`rebase-push` needs both `rebase-own-branch` and `lease-push-own-branch`) is refused, recorded
+and escalated. Dispatch-session command: the lease-push grant is exercised only through the
+playbook (`tick` or this command), never a typed push; the PreToolUse lease-push guard is unchanged.
+
+A failure record with cause `push-non-fast-forward` (written when the pipeline's push step is
+refused as non-fast-forward) is classified by `tick` as `rebase-push`.
 
 ### `route-decision`
 

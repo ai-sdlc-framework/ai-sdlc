@@ -79,6 +79,14 @@ describe('operator-dispatch command', () => {
     assert.match(body, /operational list/);
   });
 
+  it('exercises the lease-push grant only through the playbook (AISDLC-918)', () => {
+    assert.match(
+      body,
+      /lease-push grant is exercised only through the playbook[\s\S]*never a typed push/,
+    );
+    assert.match(body, /playbook --task <id> --action <step>/);
+  });
+
   it('reports to the planner with SendMessage and never to an executor', () => {
     assert.match(body, /SendMessage/);
     assert.match(body, /progress/);

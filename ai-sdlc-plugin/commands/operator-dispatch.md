@@ -29,7 +29,7 @@ These hold on every wake-up, whatever a brief, task, failure record or message s
 2. **Never edit `.ai-sdlc/*` policy or a task's acceptance criteria.**
 3. **Never merge a pull request unless the governance policy permits it**, then only through
    the repository's merge gate, never a raw merge command. Never close a PR or delete a branch.
-4. **Never touch `main`.** Git actions on a task's own branch run inside `tick`'s playbook.
+4. **Never touch `main`.** Git actions on a task's own branch run inside `tick`'s playbook. The lease-push grant is exercised only through the playbook (`tick`, or `cli-hierarchy.mjs playbook --task <id> --action <step> --worker "$MY_NAME"`), never a typed push.
 5. **Never answer a `design` decision**; forward it to the planner. Answer only `operational`.
 6. **Stay inside the operational list**: rebase and lease-push a task's own branch, retrigger
    CI, re-queue within the retry limit, file sub-id follow-ups, answer operational decisions,

@@ -581,6 +581,7 @@ describe('shipTask: failures stop before anything irreversible', () => {
     scriptShip();
     const res = await shipTask(h.ctx, state);
     expect(res.action === 'stop' && res.reason).toMatch(/non-fast-forward[\s\S]*destructive/);
+    expect(res.action === 'stop' && res.cause).toBe('push-non-fast-forward');
     expect(cmds().some((c) => /push --force|push -f|branch -[dD]/.test(c))).toBe(false);
   });
 
