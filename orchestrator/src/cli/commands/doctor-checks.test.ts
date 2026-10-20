@@ -51,6 +51,7 @@ import {
   checkJudgmentLayer,
   checkRuntimeGitignore,
   checkHierarchyLaunchEnv,
+  checkStaleRepoBuild,
   checkLeasePushPreflight,
   checkCiQueue,
   checkWorktreeHooks,
@@ -2059,6 +2060,31 @@ describe('hierarchy-launch-env check', () => {
 
   it('is registered', () => {
     expect(DOCTOR_CHECKS.find((x) => x.id === 'hierarchy-launch-env')).toBeDefined();
+  });
+});
+
+describe('checkStaleRepoBuild (AISDLC-988)', () => {
+  const withScript = (exitCode: number) =>
+    makeAdapters({
+      exists: (p) => p.endsWith('resolve-pipeline-cli.sh'),
+      runCommand: () => ({ stdout: '', exitCode }),
+    });
+
+  it('warns with the rebuild command when the strict resolve check fails', () => {
+    const results = checkStaleRepoBuild(makeCtx(withScript(1)));
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe('stale-repo-build');
+    expect(results[0].severity).toBe('warn');
+    expect(results[0].remediation).toContain('pnpm --filter @ai-sdlc/pipeline-cli build');
+  });
+
+  it('is quiet when the build is fresh or the repo has no resolve script', () => {
+    expect(checkStaleRepoBuild(makeCtx(withScript(0)))).toEqual([]);
+    expect(checkStaleRepoBuild(makeCtx(makeAdapters({ exists: () => false })))).toEqual([]);
+  });
+
+  it('is registered', () => {
+    expect(DOCTOR_CHECKS.find((x) => x.id === 'stale-repo-build')).toBeDefined();
   });
 });
 

@@ -121,7 +121,7 @@ only the missing ones are started. It also starts the reconcile scheduler (`cli-
 cli-hierarchy up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
                  [--executor-model <m>] [--no-planner] [--project <name>]
                  [--attach] [--planner-permission-mode <m>] [--allow-planner-bypass]
-                 [--no-vscode-tasks] [--node <version>]
+                 [--no-vscode-tasks] [--node <version>] [--rebuild]
 ```
 
 | Option                   | Meaning                                                                      |
@@ -137,6 +137,16 @@ cli-hierarchy up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
 | `--allow-planner-bypass` | Deprecated, no effect (prints a deprecation line); every session starts in `bypassPermissions`. |
 | `--no-vscode-tasks`      | Do not regenerate `.vscode/tasks.json` (see below).                          |
 | `--node <version>`       | Node version every session runs under (default: the version in `.nvmrc`).    |
+| `--rebuild`              | Rebuild a stale or missing `pipeline-cli` build, then launch (see below).    |
+
+**Stale build refusal (AISDLC-988).** In the ai-sdlc monorepo `up` first runs
+`resolve-pipeline-cli.sh --strict` (also `AI_SDLC_RESOLVE_STRICT=1`). When the repo's own
+`pipeline-cli/dist` is missing or older than its sources, `up` exits non-zero and prints
+`pnpm --filter @ai-sdlc/pipeline-cli build`; it never falls through to the plugin cache,
+which holds the last release and lacks newer subcommands. With `--rebuild`, `up` runs that
+command itself and then launches. Other callers of the resolve script, without `--strict`,
+keep the warning and the cache fallback. `ai-sdlc doctor` reports the same condition as
+`stale-repo-build`.
 
 **Pinned Node (AISDLC-812).** Every session command starts by loading nvm and running
 `nvm use <version>`, so the Node a session runs under never depends on the launching

@@ -1353,6 +1353,34 @@ export function checkHierarchyLaunchEnv(ctx: DoctorRunContext): DoctorCheckResul
   ];
 }
 
+/**
+ * AISDLC-988: inside the monorepo, a pipeline-cli build that is missing or older than
+ * its sources makes dispatch run old code. Asks the resolve script's single freshness
+ * check (`--strict`, which exits 1 on a stale repo build); quiet in repos without the
+ * script and when the build is fresh.
+ */
+export function checkStaleRepoBuild(ctx: DoctorRunContext): DoctorCheckResult[] {
+  const script = join(ctx.projectDir, 'ai-sdlc-plugin', 'scripts', 'resolve-pipeline-cli.sh');
+  if (!ctx.adapters.exists(script)) return [];
+  const r = ctx.adapters.runCommand('bash', [
+    '-c',
+    'cd "$1" && bash "$2" --strict',
+    '_',
+    ctx.projectDir,
+    script,
+  ]);
+  if (r.exitCode === 0) return [];
+  return [
+    {
+      id: 'stale-repo-build',
+      severity: 'warn',
+      title: "this repo's pipeline-cli build is missing or older than its sources (build: stale)",
+      remediation:
+        'Run `pnpm --filter @ai-sdlc/pipeline-cli build` (or `cli-hierarchy up --rebuild`); until then dispatch runs old code.',
+    },
+  ];
+}
+
 /** Prints the plugin's own `evaluateLeasePush` result as JSON (args: module, projectDir, cwd, branch). */
 const LEASE_PREFLIGHT_SCRIPT =
   'const m=require(process.argv[1]);const r=m.evaluateLeasePush({projectDir:process.argv[2],cwd:process.argv[3],env:process.env,...(process.argv[4]?{branch:process.argv[4]}:{})});console.log(JSON.stringify({allowed:r.allowed,failing:r.failing}));';
@@ -2596,6 +2624,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     description:
       'Running hierarchy sessions whose tmux start command lacks the AI_SDLC_HIERARCHY_SESSION/ROLE launch env the lease-push hook binds executors by (AISDLC-791).',
     run: checkHierarchyLaunchEnv,
+  },
+  {
+    id: 'stale-repo-build',
+    description:
+      "The repo's own pipeline-cli build is missing or older than its sources, so dispatch would run old code (AISDLC-988).",
+    run: checkStaleRepoBuild,
   },
   {
     id: 'lease-push-preflight',
