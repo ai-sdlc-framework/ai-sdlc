@@ -14,6 +14,8 @@ deferredDocsDeadline: 2026-12-31
 targetSpecVersion: v1alpha1
 ---
 
+<!-- ai-sdlc:lifecycle-jump-approved-by:deefactorial reason:operator resolved all five OQs with the full rubric and signed Engineering and Operator in the 2026-10-20 walkthrough; Ready for Review is skipped because the same operator is author, engineering and operator authority -->
+
 # RFC-0056: Composable Workflow Graph
 
 **Status:** Signed Off, v0.3 (2026-10-20). All five Open Questions resolved with the
