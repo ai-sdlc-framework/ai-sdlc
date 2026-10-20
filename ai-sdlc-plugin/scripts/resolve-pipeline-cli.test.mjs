@@ -693,6 +693,43 @@ describe('AISDLC-716: repo-own build preferred over plugin cache', () => {
     rmSync(base, { recursive: true, force: true });
   });
 
+  it('AISDLC-988: --strict (and the env) exit 1 on a stale dist instead of using the plugin cache', () => {
+    const base = mkdtempSync(join(tmpdir(), 'aisdlc-988-strict-'));
+    const repo = join(base, 'repo');
+    makeDogfoodRepo(repo, { dist: true });
+    const t = new Date(Date.now() + 60000);
+    utimesSync(join(repo, 'pipeline-cli', 'src', 'a.ts'), t, t);
+    for (const [env, args] of [
+      [{}, ['--strict']],
+      [{ AI_SDLC_RESOLVE_STRICT: '1' }, []],
+    ]) {
+      const r = spawnSync('bash', [SCRIPT, ...args], {
+        cwd: repo,
+        encoding: 'utf-8',
+        env: { ...process.env, HOME: cacheHome(base), ...env },
+      });
+      assert.equal(r.status, 1);
+      assert.equal(r.stdout, '');
+      assert.match(r.stderr, /ERROR/);
+      assert.match(r.stderr, /pnpm --filter @ai-sdlc\/pipeline-cli build/);
+    }
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it('AISDLC-988: --strict still resolves a fresh dist', () => {
+    const base = mkdtempSync(join(tmpdir(), 'aisdlc-988-fresh-'));
+    const repo = join(base, 'repo');
+    makeDogfoodRepo(repo, { dist: true });
+    const r = spawnSync('bash', [SCRIPT, '--strict'], {
+      cwd: repo,
+      encoding: 'utf-8',
+      env: { ...process.env, HOME: cacheHome(base) },
+    });
+    assert.equal(r.status, 0);
+    assert.equal(normPath(r.stdout), normPath(join(repo, 'pipeline-cli', 'bin')));
+    rmSync(base, { recursive: true, force: true });
+  });
+
   it('worktree without dist uses the main checkout fresh build', () => {
     const base = mkdtempSync(join(tmpdir(), 'aisdlc-716-wt-'));
     const main = join(base, 'main');

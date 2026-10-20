@@ -187,6 +187,9 @@ Options for up:
                            value, when sessions with the same role names already run
                            for another project on this machine.
   --attach                 Show the planner (or the dispatch session) when done
+  --rebuild                In the ai-sdlc monorepo, rebuild a stale or missing pipeline-cli
+                           build before launching (otherwise up refuses and prints the
+                           command: pnpm --filter @ai-sdlc/pipeline-cli build)
   --no-vscode-tasks        Do not regenerate .vscode/tasks.json. By default up rewrites it
                            when it starts a session or the roster changes, but only if the
                            file is absent or carries the "ai-sdlc" generated marker; inside
@@ -535,6 +538,7 @@ export async function runHierarchyCli(
             allowPlannerBypass: flags['allow-planner-bypass'] === 'true',
             ...(flags.node === undefined ? {} : { node: flags.node === 'true' ? '' : flags.node }),
             vscodeTasks: flags['no-vscode-tasks'] !== 'true',
+            rebuild: flags.rebuild === 'true',
           },
           deps,
         );

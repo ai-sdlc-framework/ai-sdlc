@@ -7,6 +7,7 @@
  */
 
 import { ghCallsPath, GH_CALL_LOG_ENV, installGhShim } from './gh-calls.js';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 import { schedulerUp } from './reconcile-scheduler.js';
@@ -81,6 +82,37 @@ export interface UpOptions {
    * repository root names; with neither, sessions inherit the launching shell's Node.
    */
   node?: string;
+  /** Rebuild a stale or missing repo build (`--rebuild`) instead of refusing to launch. */
+  rebuild?: boolean;
+}
+
+/** The one command that rebuilds the repo's own pipeline-cli. */
+export const REBUILD_COMMAND = 'pnpm --filter @ai-sdlc/pipeline-cli build';
+
+/**
+ * AISDLC-988: inside this monorepo the repo's own pipeline-cli build must be fresh.
+ * Runs the resolve script's single freshness check in strict mode; a stale or missing
+ * build refuses (naming the rebuild command) or, with `rebuild`, is rebuilt first.
+ * Repos without the script (adopters) skip the check.
+ */
+export function ensureFreshRepoBuild(deps: HierarchyDeps, rebuild: boolean): void {
+  const script = path.join(deps.cwd, 'ai-sdlc-plugin', 'scripts', 'resolve-pipeline-cli.sh');
+  if (!existsSync(script)) return;
+  const check = (): boolean =>
+    deps.run('bash', [script, '--strict'], { cwd: deps.cwd }).status === 0;
+  if (check()) return;
+  if (!rebuild) {
+    throw new Error(
+      `the pipeline-cli build in ${deps.cwd} is missing or older than its sources; refusing to launch on a stale build. Run: ${REBUILD_COMMAND} (or pass --rebuild)`,
+    );
+  }
+  deps.log(`rebuilding: ${REBUILD_COMMAND}`);
+  const built = deps.run('pnpm', ['--filter', '@ai-sdlc/pipeline-cli', 'build'], { cwd: deps.cwd });
+  if (built.status !== 0 || !check()) {
+    throw new Error(
+      `--rebuild failed; run ${REBUILD_COMMAND} by hand and fix the error: ${(built.stderr || built.stdout || '').trim().slice(0, 500)}`,
+    );
+  }
 }
 
 /** Result of `up`. */
@@ -342,6 +374,7 @@ export async function launchSession(
  *   resource gate refuses; after a partial start when a window cannot be created.
  */
 export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise<UpResult> {
+  ensureFreshRepoBuild(deps, opts.rebuild === true);
   const count = parseExecutorCount(opts.executors);
   assertModel(opts.plannerModel, '--planner-model');
   assertModel(opts.dispatchModel, '--dispatch-model');

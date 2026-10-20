@@ -40,6 +40,12 @@
 #
 #   PIPELINE_CLI_BIN=$(bash "$PLUGIN_SCRIPTS_DIR/resolve-pipeline-cli.sh") || exit 1
 #
+# Flags (AISDLC-988):
+#   --strict  (or AI_SDLC_RESOLVE_STRICT=1) inside a repo that ships the pipeline-cli
+#             workspace, a missing or stale repo build exits 1 with the rebuild
+#             command instead of falling back to the plugin cache. cli-hierarchy up
+#             and ai-sdlc doctor use it; every other caller keeps the fallback.
+#
 # Environment variables read:
 #   CLAUDE_PLUGIN_DIR  — set by Claude Code harness for marketplace installs
 #   CLAUDE_PLUGIN_ROOT — always set by Claude Code harness (same dir as CLAUDE_PLUGIN_DIR
@@ -48,6 +54,11 @@
 # The script is idempotent and safe to call multiple times.
 
 set -euo pipefail
+
+STRICT="${AI_SDLC_RESOLVE_STRICT:-}"
+for arg in "$@"; do
+  [ "$arg" = "--strict" ] && STRICT=1
+done
 
 PIPELINE_CLI_REL="node_modules/@ai-sdlc/pipeline-cli/bin"
 
@@ -166,6 +177,10 @@ if [ -n "$REPO_WORKTREE_ROOT" ] && _is_pipeline_cli_workspace "$REPO_WORKTREE_RO
     fi
     REPO_WARN="${REPO_WARN:+$REPO_WARN; }$LABEL build at $ROOT/pipeline-cli is missing or older than its sources"
   done
+  if [ -n "$STRICT" ] && [ "$STRICT" != "0" ]; then
+    echo "resolve-pipeline-cli.sh: ERROR — $REPO_WARN; refusing to fall back to the plugin install (--strict). $REBUILD_HINT" >&2
+    exit 1
+  fi
   echo "resolve-pipeline-cli.sh: WARNING — $REPO_WARN; falling back to the plugin install, which may be older than this repo's sources ($REBUILD_HINT)" >&2
 fi
 
