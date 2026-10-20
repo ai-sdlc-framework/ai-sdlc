@@ -75,6 +75,7 @@ function applyEvent(current: Decision | null, event: DecisionEvent): Decision | 
           ? { governanceChange: opened.governanceChange }
           : {}),
         ...(opened.escalation !== undefined ? { escalation: opened.escalation } : {}),
+        ...(opened.standingRule !== undefined ? { standingRule: opened.standingRule } : {}),
       },
       status: {
         lifecycle: 'open',

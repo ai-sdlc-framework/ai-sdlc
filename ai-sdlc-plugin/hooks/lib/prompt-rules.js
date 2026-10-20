@@ -156,8 +156,115 @@ function countRuleRestatements(content) {
   return counts;
 }
 
+// ── Standing decision rules (AISDLC-873) ─────────────────────────────────────
+
+const STANDING_BEGIN = '<!-- standing-rules:begin -->';
+const STANDING_END = '<!-- standing-rules:end -->';
+
+/**
+ * Projects the catalog events to the standing rules that may render: a decision
+ * whose `decision-opened` event carries a one-line `standingRule`, that has an
+ * `operator-answered` event, and that is not superseded, archived or overridden.
+ * A rule tagged as a weakening governance change never renders (a standing rule
+ * can narrow what a session does, never loosen a control). Pure and
+ * deterministic; sorted by decision id. Calls no model.
+ * @param {Array<Record<string, any>>} events
+ * @returns {Array<{ decisionId: string, rule: string }>}
+ */
+function projectStandingRules(events) {
+  /** @type {Map<string, { rule?: string, weakening: boolean, answered: boolean, dead: boolean }>} */
+  const byId = new Map();
+  for (const e of events) {
+    if (!e || typeof e.decisionId !== 'string') continue;
+    const cur = byId.get(e.decisionId) || { weakening: false, answered: false, dead: false };
+    if (e.type === 'decision-opened') {
+      const rule = typeof e.standingRule === 'string' ? e.standingRule.trim() : '';
+      cur.rule = rule && !/[\r\n\u2028\u2029]/.test(rule) ? rule : undefined;
+      cur.weakening = e.governanceChange?.kind === 'weakening';
+    } else if (e.type === 'operator-answered') {
+      cur.answered = true;
+    } else if (e.type === 'superseded' || e.type === 'archived' || e.type === 'overridden') {
+      cur.dead = true;
+    }
+    byId.set(e.decisionId, cur);
+  }
+  return [...byId.entries()]
+    .filter(([, d]) => d.rule && d.answered && !d.dead && !d.weakening)
+    .map(([decisionId, d]) => ({ decisionId, rule: /** @type {string} */ (d.rule) }))
+    .sort((a, b) => (a.decisionId < b.decisionId ? -1 : a.decisionId > b.decisionId ? 1 : 0));
+}
+
+/**
+ * Reads the decision events that are ON MAIN (`<root>/.ai-sdlc/_decisions/events/*.json`
+ * as committed at `origin/main`, else `main`), in file-name order. A record that
+ * exists only in the working tree or on a feature branch is never read, so it
+ * cannot render. Returns [] when no main ref resolves or the catalog is absent.
+ * @param {string} root repository root
+ * @param {{ ref?: string }} [opts] override the ref (tests)
+ * @returns {Array<Record<string, any>>}
+ */
+function loadCatalogEvents(root, opts = {}) {
+  const { execFileSync } = require('node:child_process');
+  const git = (/** @type {string[]} */ args) =>
+    execFileSync('git', args, {
+      cwd: root,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  const dir = '.ai-sdlc/_decisions/events';
+  for (const ref of opts.ref ? [opts.ref] : ['origin/main', 'main']) {
+    let names;
+    try {
+      names = git(['ls-tree', '--name-only', `${ref}:${dir}`]);
+    } catch {
+      continue;
+    }
+    return names
+      .split('\n')
+      .filter((f) => f.endsWith('.json'))
+      .sort()
+      .map((f) => JSON.parse(git(['show', `${ref}:${dir}/${f}`])));
+  }
+  return [];
+}
+
+/**
+ * Renders the standing-rules block (markers included): one line per rule.
+ * @param {Array<Record<string, any>>} events
+ */
+function renderStandingRulesBlock(events) {
+  const lines = projectStandingRules(events).map(
+    (r) => `- **Standing (${r.decisionId}):** ${r.rule}`,
+  );
+  // No rules: one line, so an empty block costs a prompt a single line.
+  if (lines.length === 0) return STANDING_BEGIN + STANDING_END;
+  return [STANDING_BEGIN, ...lines, STANDING_END].join('\n');
+}
+
+/**
+ * Regenerates the standing-rules block in `content`; unchanged when it has none.
+ * @param {string} content
+ * @param {Array<Record<string, any>>} events
+ */
+function syncStandingRules(content, events) {
+  const start = content.indexOf(STANDING_BEGIN);
+  if (start === -1) return content;
+  const endIdx = content.indexOf(STANDING_END, start);
+  if (endIdx === -1) return content;
+  return (
+    content.slice(0, start) +
+    renderStandingRulesBlock(events) +
+    content.slice(endIdx + STANDING_END.length)
+  );
+}
+
 module.exports = {
   PROMPT_RULES,
+  projectStandingRules,
+  loadCatalogEvents,
+  renderStandingRulesBlock,
+  syncStandingRules,
   getRule,
   renderPromptRulesBlock,
   findPromptRulesBlock,

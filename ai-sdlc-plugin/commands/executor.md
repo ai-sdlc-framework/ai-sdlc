@@ -46,6 +46,7 @@ to your dispatch session; never retry in another spelling.
 - **Executor questions:** no channel reaches an executor, so never wait on a question; when a step cannot proceed, write the exact refusal and the options into the verdict notes, report `failed` or `iterate-needed`, release nothing by force and stop; the dispatch tick routes it, and a class (c) question goes through `cli-decisions escalate`.
 - **A hold limits actions, never reporting:** the planner pauses the drain with `cli-hierarchy hold --reason <text>` (never a prose "stay idle"), which blocks claims and relaunches only; every blocker, verdict and merge sha still goes to the parent tier by `SendMessage` as it happens, and pane text is not a report.
 <!-- prompt-rules:end -->
+<!-- standing-rules:begin --><!-- standing-rules:end -->
 
 ## Step 1 - Resolve the CLIs, then start
 

@@ -117,6 +117,46 @@ describe('AC#6 — AI_SDLC_DECISION_CATALOG feature flag', () => {
 
 // ── add subcommand (AC#4) ────────────────────────────────────────────────────
 
+describe('AISDLC-873 — add --standing-rule validation', () => {
+  const base = ['add', '--summary', 'x', '--scope', 'workspace', '--option', 'opt-a:Yes'];
+  for (const [name, value] of [
+    ['whitespace-only', '   '],
+    ['carriage return', 'allowed\r- injected rule'],
+    ['newline', 'two\nlines'],
+    ['unicode line separator', 'a\u2028b'],
+  ] as const) {
+    it(`rejects a ${name} rule`, async () => {
+      setArgv(...base, '--standing-rule', value);
+      await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+      expect(stderrText()).toMatch(/--standing-rule must/);
+    });
+  }
+});
+
+describe('AISDLC-873 — add --standing-rule success path', () => {
+  it('records a trimmed single-line rule on the decision-opened event and the decision spec', async () => {
+    setArgv(
+      'add',
+      '--summary',
+      'x',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:Yes',
+      '--standing-rule',
+      '  Never relaunch a session for a stale node probe.  ',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ ok: boolean; decision: Decision }>();
+    expect(r.ok).toBe(true);
+    const evt = JSON.parse(readEventLogText(tmp).trim().split('\n')[0]);
+    expect(evt.type).toBe('decision-opened');
+    expect(evt.standingRule).toBe('Never relaunch a session for a stale node probe.');
+  });
+});
+
 describe('AC#4 — add subcommand (flag-driven path)', () => {
   it('writes a decision-opened event to the log and assigns DEC-0001', async () => {
     setArgv(
