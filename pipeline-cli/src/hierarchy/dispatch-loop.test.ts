@@ -786,11 +786,13 @@ describe('nextWakeSec (idle hibernation)', () => {
     const denied = await runDispatchTick(deps({ landEligible }));
     expect(denied.landed).toBeUndefined();
     expect(calls).toBe(0);
+    clock += 300_000;
     const granted = await runDispatchTick(
       deps({ landEligible, operational: new Set([...GRANTS, 'land-eligible-prs']) }),
     );
     expect(granted.landed?.landed).toEqual([{ pr: 9, mode: 'arm' }]);
     expect(calls).toBe(1);
+    clock += 300_000;
     const failing = await runDispatchTick(
       deps({
         landEligible: async () => {
@@ -1061,6 +1063,34 @@ describe('stall check (AISDLC-826)', () => {
   });
 });
 
+describe('busy tick makes no GitHub call (AISDLC-960)', () => {
+  it('reads GitHub once, then not again inside 5 minutes, then again after', async () => {
+    const listPrs = vi.fn(() => []);
+    const landEligible = vi.fn(async () => ({ landed: [], refused: [] }));
+    const d = () => deps({ listPrs, landEligible, operational: new Set(['land-eligible-prs']) });
+    await runDispatchTick(d());
+    clock += 30_000;
+    await runDispatchTick(d());
+    clock += 30_000;
+    await runDispatchTick(d());
+    expect(listPrs).toHaveBeenCalledTimes(1);
+    expect(landEligible).toHaveBeenCalledTimes(1);
+    clock += 300_000;
+    await runDispatchTick(d());
+    expect(listPrs).toHaveBeenCalledTimes(2);
+  });
+
+  it('reads again early when a webhook wake is newer than the last read', async () => {
+    const listPrs = vi.fn(() => []);
+    await runDispatchTick(deps({ listPrs }));
+    clock += 30_000;
+    writeFileSync(path.join(board, '.reconcile-wake'), '');
+    utimesSync(path.join(board, '.reconcile-wake'), new Date(clock), new Date(clock));
+    await runDispatchTick(deps({ listPrs }));
+    expect(listPrs).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('quota floor (AISDLC-963)', () => {
   const created = () => new Date(clock - 30 * 3_600_000).toISOString();
   it('skips GitHub reads below the floor and says so', async () => {
@@ -1090,10 +1120,12 @@ describe('quota floor (AISDLC-963)', () => {
         throw new Error('gh down');
       },
     ]) {
+      clock += 300_000;
       const r = await runDispatchTick({ ...deps(), listPrs, quota });
       expect(r.quotaSkip).toBeUndefined();
     }
     expect(listPrs).toHaveBeenCalledTimes(3);
+    clock += 300_000;
     const r = await runDispatchTick({
       ...deps(),
       quota: () => ({ core: 400 }),

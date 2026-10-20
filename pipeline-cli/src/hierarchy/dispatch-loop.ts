@@ -85,6 +85,8 @@ export interface LoopState {
   /** Verdicts already handled, as `<state>:<task>:<completedAt>`. */
   handled: string[];
   lastReportAt?: string;
+  /** When the tick last read GitHub (AISDLC-960). */
+  lastGithubReadAt?: string;
 }
 
 /** Why and when the board refused a brief. */
@@ -130,6 +132,7 @@ export function readLoopState(boardDir: string): LoopState {
       rejected: parsed.rejected ?? {},
       handled: Array.isArray(parsed.handled) ? parsed.handled : [],
       ...(parsed.lastReportAt ? { lastReportAt: parsed.lastReportAt } : {}),
+      ...(parsed.lastGithubReadAt ? { lastGithubReadAt: parsed.lastGithubReadAt } : {}),
     };
   } catch {
     return emptyState();
@@ -562,6 +565,21 @@ async function checkStalls(
   }
 }
 
+/** GitHub reads happen at most this often unless a webhook wake is newer (AISDLC-960). */
+export const GITHUB_READ_INTERVAL_MS = 5 * 60 * 1000;
+
+/** True when the last GitHub read is under the interval old and no webhook wake followed it. */
+function githubReadFresh(deps: LoopDeps, state: LoopState): boolean {
+  const last = state.lastGithubReadAt ? Date.parse(state.lastGithubReadAt) : Number.NaN;
+  if (!Number.isFinite(last)) return false;
+  if (deps.now().getTime() - last >= GITHUB_READ_INTERVAL_MS) return false;
+  try {
+    return statSync(path.join(deps.boardDir, '.reconcile-wake')).mtimeMs <= last;
+  } catch {
+    return true;
+  }
+}
+
 /** Run one wake-up of the dispatch loop. */
 export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   const state = readLoopState(deps.boardDir);
@@ -588,6 +606,8 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
       };
     }
   }
+  const githubFresh = githubReadFresh(deps, state);
+  const readGithub = !quotaSkip && !githubFresh;
   const watch = await watchVerdicts(deps, state, held);
   const stalled = await checkStalls(deps, state, held);
   const reports = buildReports(deps, state, watch.verdicts.length);
@@ -603,7 +623,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   for (const s of stalled) reports.push({ kind: 'progress', text: formatStall(s) });
   let humanAttention: HumanAttentionRow[] = [];
   try {
-    humanAttention = quotaSkip ? [] : classifyHumanAttention(deps.listPrs?.() ?? [], deps.now());
+    humanAttention = !readGithub ? [] : classifyHumanAttention(deps.listPrs?.() ?? [], deps.now());
   } catch {
     /* an unreadable PR list must not stop the dispatch loop */
   }
@@ -611,13 +631,16 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     reports.push({ kind: 'progress', text: formatHumanAttentionRow(r) });
     if (r.stalled) reports.push({ kind: 'progress', text: formatHumanAttentionStall(r) });
   }
+  if (readGithub && (deps.listPrs || deps.markReady || deps.landEligible)) {
+    state.lastGithubReadAt = deps.now().toISOString();
+  }
   saveState(deps.boardDir, state);
   const markReady =
-    !quotaSkip && deps.markReady && deps.operational.has('mark-ready-after-codeql')
+    readGithub && deps.markReady && deps.operational.has('mark-ready-after-codeql')
       ? deps.markReady()
       : undefined;
   let landed: LandReport | undefined;
-  if (!quotaSkip && deps.landEligible && deps.operational.has('land-eligible-prs')) {
+  if (readGithub && deps.landEligible && deps.operational.has('land-eligible-prs')) {
     try {
       landed = await deps.landEligible();
     } catch (err) {
