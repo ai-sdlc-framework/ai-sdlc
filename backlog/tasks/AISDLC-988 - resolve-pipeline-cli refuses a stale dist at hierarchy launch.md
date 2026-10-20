@@ -1,7 +1,7 @@
 ---
 id: AISDLC-988
 title: 'resolve-pipeline-cli refuses a stale dist at hierarchy launch'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-20'
 labels:
