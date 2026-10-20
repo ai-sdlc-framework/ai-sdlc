@@ -16,6 +16,12 @@
  */
 
 const { spawnSync } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+// AISDLC-961: the probe calls the GitHub API; cache it 24h per repo slug (banner only).
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 const CHECK_ID = 'attestation-governance';
 const POLICY_PATH = '.ai-sdlc/review-policy.md';
@@ -34,6 +40,56 @@ function classifyDoctorOutput(stdout) {
   } catch {
     return { state: 'unknown' };
   }
+}
+
+function repoKey(projectDir) {
+  let id = path.resolve(projectDir);
+  try {
+    const r = spawnSync('git', ['remote', 'get-url', 'origin'], {
+      cwd: projectDir,
+      encoding: 'utf-8',
+      timeout: 2000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const m = /[:/]([^/:]+\/[^/]+?)(?:\.git)?\s*$/.exec(r.stdout || '');
+    if (m) id = m[1];
+  } catch {
+    /* fall back to path */
+  }
+  return id.replace(/[^A-Za-z0-9._-]+/g, '_');
+}
+
+function cacheFile(projectDir, opts) {
+  const dir =
+    opts.cacheDir ||
+    process.env.AI_SDLC_PLUGIN_CACHE_DIR ||
+    path.join(os.homedir(), '.cache', 'ai-sdlc-plugin');
+  return path.join(dir, `review-banner-${repoKey(projectDir)}.json`);
+}
+
+/** Cached probe (24h TTL); only definite answers are cached. Never throws. */
+function detectEnforcementCached(projectDir, opts = {}) {
+  let file;
+  try {
+    file = cacheFile(projectDir, opts);
+    const c = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    const age = Date.now() - Date.parse(c.checkedAt);
+    if (c.enforcement && c.enforcement.state !== 'unknown' && age >= 0 && age < CACHE_TTL_MS) {
+      return c.enforcement;
+    }
+  } catch {
+    /* miss */
+  }
+  const enforcement = detectEnforcement(projectDir, opts);
+  if (file && enforcement.state !== 'unknown') {
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify({ checkedAt: new Date().toISOString(), enforcement }));
+    } catch {
+      /* non-critical */
+    }
+  }
+  return enforcement;
 }
 
 /** Run the doctor check. Never throws. `bin` is overridable for tests. */
@@ -81,4 +137,10 @@ function renderReviewPolicyBanner(policyExists, enforcement) {
   return `\n${head}\n${REVIEWER_SET_TEXT}`;
 }
 
-module.exports = { classifyDoctorOutput, detectEnforcement, renderReviewPolicyBanner, CHECK_ID };
+module.exports = {
+  classifyDoctorOutput,
+  detectEnforcement,
+  detectEnforcementCached,
+  renderReviewPolicyBanner,
+  CHECK_ID,
+};
