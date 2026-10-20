@@ -159,6 +159,52 @@ describe('resolveAgentIdFromMarkers', () => {
 });
 
 describe('finalizeReview', () => {
+  const stagedRejection = {
+    agentId: 'staged-synthesizer',
+    harness: 'claude-code' as const,
+    approved: false,
+    findings: [{ severity: 'major' as const, message: 'staged false positive' }],
+    summary: 'staged says no',
+  };
+
+  it('keeps a staged CHANGES_REQUESTED advisory next to classic approvals (DEC-0149)', async () => {
+    markPersisted();
+    const st = makeState(h.root, {
+      review: review({
+        staged: { verdict: stagedRejection } as unknown as ReviewRoundState['staged'],
+      }),
+      iteration: 2,
+    });
+    const res = await finalizeReview(h.ctx, st, approvals());
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.verdict.decision).toBe('APPROVED');
+    expect(res.verdict.verdicts.map((v) => v.agentId)).not.toContain('staged-synthesizer');
+    expect(res.verdict.stagedAdvisory).toEqual(stagedRejection);
+  });
+
+  it('still blocks on a classic CHANGES_REQUESTED beside a staged verdict', async () => {
+    markPersisted();
+    const st = makeState(h.root, {
+      review: review({
+        staged: {
+          verdict: { ...stagedRejection, approved: true, findings: [] },
+        } as unknown as ReviewRoundState['staged'],
+      }),
+      iteration: 2,
+    });
+    const reports = approvals();
+    reports[0] = {
+      ...reports[0],
+      approved: false,
+      findings: [{ severity: 'major', message: 'bad' }],
+    };
+    const res = await finalizeReview(h.ctx, st, reports);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.verdict.decision).toBe('CHANGES_REQUESTED');
+  });
+
   it('persists, emits one leaf per reviewer and approves', async () => {
     markPersisted();
     const res = await finalizeReview(h.ctx, state, approvals());

@@ -519,7 +519,7 @@ describe('advanceStagedRound, synthesize stage', () => {
   });
 });
 
-// ── Step 8: a set of one aggregates with today's blocking rules ───────
+// ── Step 8: the staged verdict is advisory ───────
 
 describe('finalizeReview with the staged verdict', () => {
   function securityRound(staged: ReviewerVerdict): void {
@@ -544,16 +544,14 @@ describe('finalizeReview with the staged verdict', () => {
     h.present.add(join(dir, 'verdicts', 'security-reviewer-aisdlc-900.json'));
   });
 
-  it('blocks on a critical staged finding', async () => {
+  it('keeps a critical staged finding advisory (DEC-0149)', async () => {
     securityRound(stagedVerdict(false));
     const fin = await finalizeReview(h.ctx, state, secReport);
     if (!fin.ok) throw new Error(fin.reason);
-    expect(fin.verdict.decision).not.toBe('APPROVED');
-    expect(fin.verdict.counts.critical).toBe(1);
-    expect(fin.verdict.verdicts.map((v) => v.agentId)).toEqual([
-      'staged-review',
-      'security-reviewer',
-    ]);
+    expect(fin.verdict.decision).toBe('APPROVED');
+    expect(fin.verdict.counts.critical).toBe(0);
+    expect(fin.verdict.verdicts.map((v) => v.agentId)).toEqual(['security-reviewer']);
+    expect(fin.verdict.stagedAdvisory?.agentId).toBe('staged-review');
   });
 
   it('approves when the staged verdict and the security reviewer approve', async () => {
