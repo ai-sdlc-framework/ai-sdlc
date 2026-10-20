@@ -324,8 +324,15 @@ describe('brief ingestion', () => {
         }),
       );
       const result = await runDispatchTick(deps({ parentHead: () => 'aaa' }));
-      expect(result.ingestErrors).toHaveLength(1);
+      expect(result.ingestErrors).toEqual([{ file: 'b1.md', error: '(error text not recorded)' }]);
       expect(enqueued).toEqual([]);
+    });
+
+    it('records the parse error message on a fresh rejection, not the fallback', async () => {
+      writeBrief('b1.md', ['AISDLC-1']);
+      refuse();
+      const result = await runDispatchTick(deps());
+      expect(result.ingestErrors).toEqual([{ file: 'b1.md', error: 'task file missing' }]);
     });
   });
 
