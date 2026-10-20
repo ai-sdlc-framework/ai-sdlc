@@ -1,7 +1,7 @@
 ---
 id: AISDLC-935
 title: 'fix(hierarchy): reconciler classifies the decisions-sync PR as its own kind and arms it with --source-kind decisions-sync'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [hierarchy, reliability, velocity]

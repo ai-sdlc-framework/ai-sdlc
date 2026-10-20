@@ -833,8 +833,10 @@ the table names. `--facts` reads a JSON array of PR facts instead of GitHub. It 
 facts that match the stored state, action, head SHA and owner change no file and run no
 action. A PR that merged is detected through its record and marked `landed`.
 
-**Kinds.** A PR on a docs branch (`ai-sdlc/file-*`, `ai-sdlc/decisions-sync*`, `docs/*`) or with
-no task id is a docs PR; one with a task id (branch or title) is a task PR; the release-please
+**Kinds.** A PR on a docs branch (`ai-sdlc/file-*`, `docs/*`) or with
+no task id is a docs PR; the PR on branch `ai-sdlc/decisions-sync` is its own `decisions-sync` kind
+(AISDLC-935): it follows the docs action set, but `arm` runs
+`cli-merge-if-eligible <pr> --source-kind decisions-sync --arm`, and a head change re-arms it on the next tick; one with a task id (branch or title) is a task PR; the release-please
 PR (`chore: release`, `release-please--*`) is reported and never acted on.
 
 **One PR snapshot per wake (AISDLC-959).** The four PR consumers of a wake (human-attention,
