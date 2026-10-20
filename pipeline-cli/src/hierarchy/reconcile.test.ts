@@ -222,6 +222,36 @@ describe('action table (AC2)', () => {
     expect(decide(docsPr({ mergeStateStatus: 'BLOCKED' })).action).toBe('route-to-planner');
   });
 
+  it('decisions-sync: armed with its own source kind, never routed on a green CLEAN head, re-armed on head change', () => {
+    const sync = (over: Partial<ReconcilePr> = {}) =>
+      docsPr({ headBranch: 'ai-sdlc/decisions-sync', title: 'chore: sync decisions', ...over });
+    const d = decide(sync());
+    expect(d).toMatchObject({ kind: 'decisions-sync', action: 'arm' });
+    const ctx: ActionContext = {
+      pr: 20,
+      taskId: '',
+      kind: 'decisions-sync',
+      action: 'arm',
+      state: d.state,
+      boardDir: '/b',
+    };
+    expect(actionCommands(ctx, '/bin')![0]!.args).toEqual([
+      '/bin/cli-merge-if-eligible.mjs',
+      '20',
+      '--source-kind',
+      'decisions-sync',
+      '--arm',
+    ]);
+    const execute = vi.fn((_c: ActionContext) => ({ ran: true }));
+    reconcile([sync()], { boardDir: board, execute, now: fixedNow });
+    reconcile([sync({ headSha: 'new999' })], { boardDir: board, execute, now: fixedNow });
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute.mock.calls.map((c) => [c[0].kind, c[0].action, c[0].headSha])).toEqual([
+      ['decisions-sync', 'arm', 'def456'],
+      ['decisions-sync', 'arm', 'new999'],
+    ]);
+  });
+
   it('an undelivered draft task PR is left to its executor', () => {
     const d = decide(
       taskPr({ draft: true, checks: [{ name: 'ai-sdlc/pr-ready', conclusion: 'failure' }] }),
@@ -289,7 +319,8 @@ describe('ownership (AC4)', () => {
 describe('helpers', () => {
   it('detects kinds and task ids', () => {
     expect(detectKind({ headBranch: 'docs/x', taskId: 'A-1' })).toBe('docs');
-    expect(detectKind({ headBranch: 'ai-sdlc/decisions-sync-1' })).toBe('docs');
+    expect(detectKind({ headBranch: 'ai-sdlc/decisions-sync' })).toBe('decisions-sync');
+    expect(detectKind({ headBranch: 'ai-sdlc/file-x' })).toBe('docs');
     expect(detectKind({ taskId: 'A-1' })).toBe('task');
     expect(detectKind({ title: 'chore: release main' })).toBe('release');
     expect(taskIdFrom('ai-sdlc/aisdlc-12.3-foo')).toBe('AISDLC-12.3');

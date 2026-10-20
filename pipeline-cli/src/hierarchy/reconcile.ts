@@ -25,6 +25,7 @@ import path from 'node:path';
 import { now as clockNow } from '../clock.js';
 import { classifyPr, type PrCheck, type PrFacts, type PrState } from './pr-state.js';
 import { collectVerdicts, readInflightManifest, readQueuedManifest } from '../dispatch/board.js';
+import { DECISIONS_SYNC_BRANCH } from '../decisions/remote-persist.js';
 import { clearRuling, readRuling } from '../dispatch/ruling.js';
 import type { TaskRuling } from '../dispatch/types.js';
 import type { CommandRunner } from './types.js';
@@ -63,7 +64,7 @@ export const DOCS_ACTIONS: Record<PrState, string> = {
 /** Docs action used instead of `route-to-planner` when the failing check is the DoR gate. */
 export const DOCS_DOR_ACTION = 'rerun-dor';
 
-export type PrKind = 'task' | 'docs' | 'release';
+export type PrKind = 'task' | 'docs' | 'decisions-sync' | 'release';
 
 /** Facts for one PR as the reconciler gathers them. */
 export interface ReconcilePr extends PrFacts {
@@ -112,7 +113,7 @@ export interface LandingRecord {
   history: LandingEntry[];
 }
 
-export const DOCS_BRANCH_PREFIXES = ['ai-sdlc/file-', 'ai-sdlc/decisions-sync', 'docs/'] as const;
+export const DOCS_BRANCH_PREFIXES = ['ai-sdlc/file-', 'docs/'] as const;
 const TASK_ID_IN_TEXT = /\b[A-Z][A-Z0-9]*-\d+(?:\.\d+)*\b/;
 const RELEASE_RE = /^chore: release\b|^release-please--/i;
 
@@ -120,6 +121,7 @@ const RELEASE_RE = /^chore: release\b|^release-please--/i;
 export function detectKind(f: { title?: string; headBranch?: string; taskId?: string }): PrKind {
   if (RELEASE_RE.test(f.title ?? '') || RELEASE_RE.test(f.headBranch ?? '')) return 'release';
   const branch = f.headBranch ?? '';
+  if (branch === DECISIONS_SYNC_BRANCH) return 'decisions-sync';
   if (DOCS_BRANCH_PREFIXES.some((p) => branch.startsWith(p))) return 'docs';
   return f.taskId ? 'task' : 'docs';
 }
@@ -170,7 +172,7 @@ export function decide(
     state: c.state,
     ...(c.failingLine === undefined ? {} : { failingLine: c.failingLine }),
   };
-  if (kind === 'docs') {
+  if (kind === 'docs' || kind === 'decisions-sync') {
     const checks = f.checks ?? [];
     let action = DOCS_ACTIONS[c.state];
     if (checks.some((k) => /dor/i.test(k.name) && k.conclusion === 'failure')) {
@@ -299,7 +301,7 @@ export function actionCommands(ctx: ActionContext, cliBin: string): ActionComman
             path.join(cliBin, 'cli-merge-if-eligible.mjs'),
             String(ctx.pr),
             '--source-kind',
-            'backlog',
+            ctx.kind === 'decisions-sync' ? 'decisions-sync' : 'backlog',
             '--arm',
           ],
         },
@@ -590,6 +592,7 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
     const delivered = f.merged === true || f.draft === false;
     const machineOwned =
       d.kind === 'docs' ||
+      d.kind === 'decisions-sync' ||
       delivered ||
       existing?.owner === 'machine' ||
       (f.executorDead === true && d.action !== 'none');
@@ -674,7 +677,9 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
       action: d.action,
       ...(f.headSha === undefined ? {} : { headSha: f.headSha }),
     };
-    const deliveredAt = existing?.delivered ?? (delivered || d.kind === 'docs' ? ts : undefined);
+    const deliveredAt =
+      existing?.delivered ??
+      (delivered || d.kind === 'docs' || d.kind === 'decisions-sync' ? ts : undefined);
     const landedAt = existing?.landed ?? (d.state === 'merged' ? ts : undefined);
     const record: LandingRecord = {
       pr: f.prNumber,
