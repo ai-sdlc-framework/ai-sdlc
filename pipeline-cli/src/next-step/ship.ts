@@ -33,6 +33,7 @@ import {
   TRUSTED_MARKER_AUTHOR_LOGINS,
   MARKER_PREFIX,
 } from '../incremental-review/incremental.js';
+import { checkHeadEnvelope, type HeadEnvelopeOpts } from './head-envelope.js';
 import { markTaskDone } from './task-done.js';
 import { recordSessionPr, updateSessionState } from './session.js';
 import type { DoneInstruction, NextStepContext, NextStepState, StopInstruction } from './types.js';
@@ -270,9 +271,10 @@ const PUSH_TIMEOUT_MS = 30 * 60_000;
 export async function shipTask(
   ctx: NextStepContext,
   state: NextStepState,
+  opts: HeadEnvelopeOpts = {},
 ): Promise<DoneInstruction | StopInstruction> {
   try {
-    return await shipInner(ctx, state);
+    return await shipInner(ctx, state, opts);
   } finally {
     try {
       await cleanupTask({ taskId: state.taskId, worktreePath: state.worktreePath });
@@ -285,6 +287,7 @@ export async function shipTask(
 async function shipInner(
   ctx: NextStepContext,
   state: NextStepState,
+  envelopeOpts: HeadEnvelopeOpts,
 ): Promise<DoneInstruction | StopInstruction> {
   const { runner } = ctx;
   const wt = state.worktreePath;
@@ -396,6 +399,13 @@ async function shipInner(
         ? `non-fast-forward push to '${state.branch}'; cleanup is to delete the remote branch and rerun, but that is destructive, confirm with the operator first (no force-push is attempted)`
         : `${PUSH_ATTEMPTS} push attempts failed (last exit ${pushRc}): ${pushErr}`,
     );
+  }
+
+  // Step 11a.1 — fail closed (AISDLC-984): a pushed head with no v6 envelope is never done.
+  if (!needsHuman) {
+    const env = await checkHeadEnvelope(ctx, wt, envelopeOpts);
+    if (env.status === 'missing')
+      return stop(state, 'aborted', `Sign step required: ${env.reason}`);
   }
 
   // Step 11b — DRAFT PR (CI must not fire until Step 13).

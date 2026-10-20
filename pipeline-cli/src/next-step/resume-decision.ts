@@ -18,13 +18,14 @@ import { requiredReviewerKind } from '../../attestation-core/review-scope-core.m
 import { computePatchId } from '../attestation/patch-id.js';
 import { loadVerifyCore } from '../attestation/verify-core-loader.js';
 import { loadAttestationRuntime } from '../attestation/verify-runtime.js';
+import { checkHeadEnvelope } from './head-envelope.js';
 import { resolveTargetBranch } from '../steps/02-compute-branch.js';
 import { explicitReviewerSetMode } from '../steps/reviewer-set.js';
 import type { ReviewerType } from '../types.js';
 import type { NextStepContext } from './types.js';
 
 export type ResumeReviewDecision =
-  | { branch: 'unchanged'; note: 'review-skipped: unchanged'; lastHead: string }
+  | { branch: 'unchanged'; note: string; lastHead: string; resign?: true }
   | {
       branch: 'delta';
       note: string;
@@ -135,6 +136,16 @@ async function decide(
     (opts.verifyAt ?? verifyAttestationAt)(h, b, c, trustedYaml);
   if (current.toLowerCase() === attestedPatchId) {
     if (!(await verify(head, base, cwd))) return FULL;
+    // AISDLC-984: the same predicate ship uses; a head without its v6 envelope goes to re-sign.
+    const env = await checkHeadEnvelope(ctx, cwd, { patchId: () => current });
+    if (env.status === 'missing') {
+      return {
+        branch: 'unchanged',
+        note: `review-skipped: unchanged; re-sign required: ${env.reason}`,
+        lastHead,
+        resign: true,
+      };
+    }
     return { branch: 'unchanged', note: 'review-skipped: unchanged', lastHead };
   }
 

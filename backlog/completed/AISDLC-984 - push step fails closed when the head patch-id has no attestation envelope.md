@@ -1,7 +1,7 @@
 ---
 id: AISDLC-984
 title: 'Push step fails closed when the head patch-id has no attestation envelope'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-20'
 labels:
