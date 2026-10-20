@@ -894,6 +894,38 @@ describe('hierarchy status', () => {
     expect(hierarchyStatus(deps).rows[0]?.state).toBe('starting');
   });
 
+  it('shows the executor-owned undelivered and delivered PR in LANDING and omits landed', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 3, noPlanner: true }, deps);
+    const put = (pr: number, owner: string, extra: Record<string, unknown>): void => {
+      mkdirSync(path.join(boardDir, 'landing'), { recursive: true });
+      writeFileSync(
+        path.join(boardDir, 'landing', `${pr}.json`),
+        JSON.stringify({
+          pr,
+          kind: 'backlog',
+          owner,
+          state: 'green',
+          action: 'none',
+          history: [],
+          ...extra,
+        }),
+      );
+    };
+    put(11, `executor:${Q('executor-alpha')}`, {});
+    put(12, `executor:${Q('executor-beta')}`, {
+      delivered: '2026-10-20T00:00:00Z',
+      state: 'armed',
+    });
+    put(13, `executor:${Q('executor-gamma')}`, { delivered: 'x', landed: 'y', state: 'landed' });
+    const rows = hierarchyStatus(deps).rows;
+    const landing = (n: string) => rows.find((r) => r.entry.name === Q(n))?.landing;
+    expect(landing('executor-alpha')).toBe('#11 undelivered:green');
+    expect(landing('executor-beta')).toBe('#12 delivered:armed');
+    expect(landing('executor-gamma')).toBeUndefined();
+    const text = formatStatus(hierarchyStatus(deps)).join('\n');
+    expect(text).toContain('#11 undelivered:green');
+  });
+
   it('reports gone when the window is dead even if a registry file exists', async () => {
     await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
     fake.windows = fake.windows.filter((w) => w !== Q('executor-alpha'));
