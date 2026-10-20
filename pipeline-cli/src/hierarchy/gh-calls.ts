@@ -173,12 +173,19 @@ export const GH_SHIM = `#!/bin/sh
 self_dir=$(cd "$(dirname "$0")" && pwd)
 PATH=$(printf %s "$PATH" | tr ':' '\\n' | grep -vxF "$self_dir" | paste -sd: -)
 real=$(command -v gh) || { echo "gh: not found" >&2; exit 127; }
-if [ -n "$${GH_CALL_LOGGED_ENV}" ] || [ -z "$${GH_CALL_LOG_ENV}" ] || [ "$1" = auth ]; then exec "$real" "$@"; fi
-out=$(mktemp)
-trap 'rm -f "$out"' EXIT INT TERM HUP
-"$real" "$@" > "$out"
-code=$?
-cat "$out"
+if [ -n "$${GH_CALL_LOGGED_ENV}" ] || [ -z "$${GH_CALL_LOG_ENV}" ] ; then exec "$real" "$@"; fi
+if [ "$1" = auth ]; then
+  # Logged too, but unbuffered so interactive prompts (gh auth login) keep working.
+  out=/dev/null
+  "$real" "$@"
+  code=$?
+else
+  out=$(mktemp)
+  trap 'rm -f "$out"' EXIT INT TERM HUP
+  "$real" "$@" > "$out"
+  code=$?
+  cat "$out"
+fi
 node -e '
 const fs = require("fs");
 const m = /^x-ratelimit-remaining:\\s*(\\d+)/im.exec(fs.readFileSync(process.argv[1], "utf8"));

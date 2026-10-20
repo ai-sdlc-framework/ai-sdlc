@@ -102,6 +102,13 @@ describe('gh call log (AISDLC-963)', () => {
       /* exit 3 */
     }
     expect(readGhCalls(log)).toHaveLength(1);
+    // auth subcommands are logged too.
+    try {
+      execFileSync('gh', ['auth', 'status'], { env, stdio: 'pipe' });
+    } catch {
+      /* exit 3 */
+    }
+    expect(readGhCalls(log)[1]).toMatchObject({ argv: ['auth', 'status'], exit: 3 });
   });
 
   it('prunes to 24 hours and counts the last hour per session', () => {
