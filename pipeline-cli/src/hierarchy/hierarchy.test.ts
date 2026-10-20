@@ -846,7 +846,7 @@ describe('hierarchy status', () => {
     const json = JSON.parse(JSON.stringify(result)) as { rows: { launchEnv: string }[] };
     expect(json.rows.map((r) => r.launchEnv)).toEqual(['ok', 'missing']);
     const lines = formatStatus(result);
-    expect(lines[0]).toMatch(/INFLIGHT\s+ENV\s+NODE\s+HIERARCHY_SESSION/);
+    expect(lines[0]).toMatch(/INFLIGHT\s+LANDING\s+ENV\s+NODE\s+HIERARCHY_SESSION/);
     expect(lines.find((l) => l.includes('env missing on'))).toContain(
       'cli-hierarchy down --role executor',
     );
@@ -892,6 +892,38 @@ describe('hierarchy status', () => {
     fake.register = false;
     await hierarchyUp({ ...baseOpts, executors: 0, noPlanner: true }, deps);
     expect(hierarchyStatus(deps).rows[0]?.state).toBe('starting');
+  });
+
+  it('shows the executor-owned undelivered and delivered PR in LANDING and omits landed', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 3, noPlanner: true }, deps);
+    const put = (pr: number, owner: string, extra: Record<string, unknown>): void => {
+      mkdirSync(path.join(boardDir, 'landing'), { recursive: true });
+      writeFileSync(
+        path.join(boardDir, 'landing', `${pr}.json`),
+        JSON.stringify({
+          pr,
+          kind: 'backlog',
+          owner,
+          state: 'green',
+          action: 'none',
+          history: [],
+          ...extra,
+        }),
+      );
+    };
+    put(11, `executor:${Q('executor-alpha')}`, {});
+    put(12, `executor:${Q('executor-beta')}`, {
+      delivered: '2026-10-20T00:00:00Z',
+      state: 'armed',
+    });
+    put(13, `executor:${Q('executor-gamma')}`, { delivered: 'x', landed: 'y', state: 'landed' });
+    const rows = hierarchyStatus(deps).rows;
+    const landing = (n: string) => rows.find((r) => r.entry.name === Q(n))?.landing;
+    expect(landing('executor-alpha')).toBe('#11 undelivered:green');
+    expect(landing('executor-beta')).toBe('#12 delivered:armed');
+    expect(landing('executor-gamma')).toBeUndefined();
+    const text = formatStatus(hierarchyStatus(deps)).join('\n');
+    expect(text).toContain('#11 undelivered:green');
   });
 
   it('reports gone when the window is dead even if a registry file exists', async () => {

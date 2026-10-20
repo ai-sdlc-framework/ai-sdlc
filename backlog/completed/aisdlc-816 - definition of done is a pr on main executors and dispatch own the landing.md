@@ -2,7 +2,7 @@
 id: AISDLC-816
 title: >-
   Definition of done: delivered (ready and armed) frees the executor, landed (merged) writes done/; fresh claims pause while this executor has an undelivered PR (amended 2026-10-14 under RFC-0054)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-11'
 labels:

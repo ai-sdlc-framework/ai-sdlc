@@ -74,6 +74,8 @@ export interface DispatchManifest {
   priority?: number;
   /** Lower is claimed first (default 0). Never set on a resume manifest (AISDLC-800). */
   wave?: number;
+  /** PR number this task fixes; exempts the claim from the undelivered-PR pause (AISDLC-816). */
+  fixesPr?: number;
   /** Decision id this manifest is waiting on; such a manifest is never claimed. */
   blockedBy?: string;
   /** Times the reaper has returned this manifest to `queue/`. */

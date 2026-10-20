@@ -1426,6 +1426,41 @@ describe('runDispatchCli ordering commands', () => {
     expect(code).toBe(2);
   });
 
+  it('claim blocked by an undelivered PR exits 1 and names the PR on stderr', async () => {
+    mkdirSync(path.join(boardDir, 'landing'), { recursive: true });
+    writeFileSync(
+      path.join(boardDir, 'landing', '7.json'),
+      JSON.stringify({
+        pr: 7,
+        owner: 'executor:alpha',
+        taskId: 'AISDLC-1',
+        state: 'ci-pending',
+        history: [],
+      }),
+    );
+    await runDispatchCli(['enqueue', '--task', 'T-2', ...base()]);
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    let code: number;
+    let text: string;
+    try {
+      code = await runDispatchCli([
+        'claim',
+        '--worker-kind',
+        'in-session-agent',
+        '--worker',
+        'alpha',
+        '--board-dir',
+        boardDir,
+      ]);
+      text = err.mock.calls.join('');
+    } finally {
+      err.mockRestore();
+    }
+    expect(code).toBe(1);
+    expect(text).toContain('cli-dispatch claim:');
+    expect(text).toContain('#7');
+  });
+
   describe('write-verdict claim-holder check (executor callers only)', () => {
     async function claim(taskId: string, worker?: string): Promise<void> {
       dispatchWriteManifest(boardDir, mkManifest(taskId));
