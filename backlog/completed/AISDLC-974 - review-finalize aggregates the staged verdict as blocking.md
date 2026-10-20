@@ -1,7 +1,7 @@
 ---
 id: AISDLC-974
 title: 'review-finalize aggregates the staged verdict as blocking; DEC-0149 made staged advisory'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-20'
 labels:

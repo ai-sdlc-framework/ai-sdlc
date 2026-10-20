@@ -547,6 +547,11 @@ export interface AggregatedVerdict {
    * judgment layer ran. Never affects `approved`, `counts` or `decision`.
    */
   groundingAnnotations?: FindingGroundingAnnotation[];
+  /**
+   * The staged set's verdict (RFC-0052). Advisory per DEC-0149: reported next to the
+   * classic verdicts but never part of `verdicts`, `approved`, `counts` or `decision`.
+   */
+  stagedAdvisory?: ReviewerVerdict;
 }
 
 // ── Step 9 — Iteration loop ──────────────────────────────────────────

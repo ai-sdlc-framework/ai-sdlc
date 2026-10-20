@@ -199,8 +199,9 @@ export async function finalizeReview(
   const review = state.review;
   if (!review) return { ok: false, reason: 'review-finalize called with no review round in state' };
   const warnings: string[] = [];
-  // The staged set's one grounded verdict (RFC-0052) joins the standalone reviewers'.
-  const verdicts: ReviewerVerdict[] = review.staged?.verdict ? [review.staged.verdict] : [];
+  // Blocking verdicts only. The staged verdict (RFC-0052) is advisory per DEC-0149 and is
+  // carried beside the aggregate, never in this list.
+  const verdicts: ReviewerVerdict[] = [];
   const wtAiSdlc = join(state.worktreePath, '.ai-sdlc');
 
   // Resolve every reviewer's harness agent id BEFORE touching disk, so a reporting slip
@@ -332,6 +333,7 @@ export async function finalizeReview(
   }
 
   const verdict = await aggregateRound(verdicts, review.harnessNote);
+  if (review.staged?.verdict) verdict.stagedAdvisory = review.staged.verdict;
   writeRunFile(ctx, 'aggregate.json', JSON.stringify(verdict, null, 2));
   return { ok: true, verdict, warnings };
 }
