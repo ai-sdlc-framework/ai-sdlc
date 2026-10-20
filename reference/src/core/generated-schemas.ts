@@ -2121,7 +2121,7 @@ export const decisionV1Schema = {
         standingRule: {
           type: 'string',
           minLength: 1,
-          pattern: '^[^\\n]+$',
+          pattern: '^[^\\r\\n\\u2028\\u2029]+$',
           description:
             'AISDLC-873 — one-line standing rule rendered into the dispatch and executor prompts once the decision is answered and on main.',
         },

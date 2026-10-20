@@ -179,7 +179,7 @@ function projectStandingRules(events) {
     const cur = byId.get(e.decisionId) || { weakening: false, answered: false, dead: false };
     if (e.type === 'decision-opened') {
       const rule = typeof e.standingRule === 'string' ? e.standingRule.trim() : '';
-      cur.rule = rule && !rule.includes('\n') ? rule : undefined;
+      cur.rule = rule && !/[\r\n\u2028\u2029]/.test(rule) ? rule : undefined;
       cur.weakening = e.governanceChange?.kind === 'weakening';
     } else if (e.type === 'operator-answered') {
       cur.answered = true;

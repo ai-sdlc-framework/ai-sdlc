@@ -172,6 +172,10 @@ describe('standing decision rules (AISDLC-873)', () => {
       answered('DEC-0005'),
       opened('DEC-0006', { standingRule: 'two\nlines' }),
       answered('DEC-0006'),
+      opened('DEC-0007', { standingRule: 'one\rinjected' }),
+      answered('DEC-0007'),
+      opened('DEC-0008', { standingRule: 'a\u2028b' }),
+      answered('DEC-0008'),
       { type: 'operator-answered' },
     ];
     assert.deepEqual(projectStandingRules(events), []);

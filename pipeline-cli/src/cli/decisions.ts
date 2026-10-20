@@ -578,7 +578,8 @@ function gatherAddInputsFromFlags(argv: Record<string, unknown>): AddInputs {
 
   if (typeof argv['standing-rule'] === 'string' && argv['standing-rule']) {
     const rule = String(argv['standing-rule']).trim();
-    if (rule.includes('\n')) throw new Error('--standing-rule must be a single line');
+    if (rule === '') throw new Error('--standing-rule must not be blank');
+    if (/[\r\n\u2028\u2029]/.test(rule)) throw new Error('--standing-rule must be a single line');
     inputs.standingRule = rule;
   }
 
