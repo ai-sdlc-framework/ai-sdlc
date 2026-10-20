@@ -74,11 +74,13 @@ Every file under `ai-sdlc-plugin/agents/` and `ai-sdlc-plugin/commands/` declare
 
 ### Per-PR, per-rung spend report (AISDLC-885)
 
-Every model call (developer round, reviewers, judgment layer, staged review, Agent spawns) is appended with `cli-kpi record-spend` to `.ai-sdlc/kpi/spend.jsonl` as `{prNumber|taskId, rung, agent, model, inputTokens, outputTokens, calls, state, outcome, linkedTo}`. `rung` defaults to the `rung:` frontmatter of `--agent` (AISDLC-884). `outcome` (rung 2 and 3 only) is `answered`, `below-floor` or `escalated`; a rung-3 call recorded after an `escalated` rung-2 call on the same PR is linked to it through `linkedTo`.
+This change ships the ledger and its readers only. A model call is appended with `cli-kpi record-spend` (or `recordSpendEvent`) to `.ai-sdlc/kpi/spend.jsonl` as `{prNumber|taskId, rung, agent, model, inputTokens, outputTokens, calls, state, outcome, linkedTo}`. `rung` defaults to the `rung:` frontmatter of `--agent` (AISDLC-884). `outcome` (rung 2 and 3 only) is `answered`, `below-floor` or `escalated`; a rung-3 call recorded after an `escalated` rung-2 call on the same PR is linked to it through `linkedTo`.
 
 - `cli-kpi spend --pr <n>` shows per-call detail, spend by rung and by agent, developer round as its own line. `cli-kpi spend --since <date> [--json]` adds the distribution (median, p90, max) of total, rung-4 and developer-round tokens per PR.
 - The operator digest ends with "Spend since last digest": totals by rung and the five most expensive PRs; `--mark` resets the window.
 - v1 is report only. No cap, refusal or throttle exists anywhere.
+
+Wiring status: no pipeline stage calls `record-spend` yet, so the report is empty until the developer round, reviewers, judgment layer and staged review are wired to it (follow-up work, not part of this change). Callers record spend by invoking `cli-kpi record-spend` after each call.
 
 Phase 3 rule (target, not built): a per-PR token budget, where rung-4 spend beyond the budget requires a logged rung-3 failure for the same typed question. The fields it needs are all in the report: `rung` and `agent` (rung-4 tokens per PR), `outcome` plus `linkedTo` (the logged rung-3 and rung-2 outcomes per typed question), `state` (budget by PR stage) and the per-PR distribution that sets the budget from data.
 
