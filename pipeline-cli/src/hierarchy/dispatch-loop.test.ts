@@ -1018,6 +1018,48 @@ describe('stall check (AISDLC-826)', () => {
   });
 });
 
+describe('quota floor (AISDLC-963)', () => {
+  const created = () => new Date(clock - 30 * 3_600_000).toISOString();
+  it('skips GitHub reads below the floor and says so', async () => {
+    const listPrs = vi.fn(() => [
+      { number: 5, title: 'x [needs-human-attention]', createdAt: created(), isDraft: false },
+    ]);
+    const landEligible = vi.fn(async () => ({ landed: [], refused: [] }));
+    const result = await runDispatchTick({
+      ...deps(),
+      listPrs,
+      landEligible,
+      operational: new Set(['land-eligible-prs']),
+      quota: () => ({ core: 5000, graphql: 120 }),
+    });
+    expect(result.quotaSkip).toEqual({ remaining: 120, floor: 300 });
+    expect(listPrs).not.toHaveBeenCalled();
+    expect(landEligible).not.toHaveBeenCalled();
+    expect(result.reports.some((r) => r.text.includes('skipped GitHub reads'))).toBe(true);
+  });
+
+  it('reads normally at or above the floor, with a custom floor, or when quota is unknown', async () => {
+    const listPrs = vi.fn(() => []);
+    for (const quota of [
+      () => ({ core: 300 }),
+      () => undefined,
+      () => {
+        throw new Error('gh down');
+      },
+    ]) {
+      const r = await runDispatchTick({ ...deps(), listPrs, quota });
+      expect(r.quotaSkip).toBeUndefined();
+    }
+    expect(listPrs).toHaveBeenCalledTimes(3);
+    const r = await runDispatchTick({
+      ...deps(),
+      quota: () => ({ core: 400 }),
+      quotaFloor: 500,
+    });
+    expect(r.quotaSkip).toEqual({ remaining: 400, floor: 500 });
+  });
+});
+
 describe('hold (AISDLC-899)', () => {
   const hold = () =>
     writeHold(board, { reason: 'spend paused', since: '2026-09-30T12:00:00.000Z', by: 'planner' });

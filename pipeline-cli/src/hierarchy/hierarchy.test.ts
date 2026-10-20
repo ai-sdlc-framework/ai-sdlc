@@ -430,7 +430,13 @@ describe('hierarchy up', () => {
       Q('executor-alpha'),
       Q('executor-beta'),
     ]);
-    expect(newWindowCommands()).toEqual([
+    // AISDLC-963: every launch puts the gh shim first on PATH and names the call log.
+    for (const c of newWindowCommands()) {
+      expect(c).toMatch(/^PATH='[^']+\/bin':"\$PATH" AI_SDLC_GH_CALL_LOG='[^']+gh-calls\.jsonl' /);
+    }
+    expect(
+      newWindowCommands().map((c) => c.replace(/^PATH=\S+ AI_SDLC_GH_CALL_LOG=\S+ /, '')),
+    ).toEqual([
       `AI_SDLC_HIERARCHY_SESSION='${Q('planner')}' AI_SDLC_HIERARCHY_ROLE='planner' 'claude' --name '${Q('planner')}' --model 'fable' --permission-mode 'bypassPermissions' '/ai-sdlc planner'`,
       `AI_SDLC_HIERARCHY_SESSION='${Q('operator-dispatch')}' AI_SDLC_HIERARCHY_ROLE='operator-dispatch' 'claude' --name '${Q('operator-dispatch')}' --model 'opus' --permission-mode 'bypassPermissions' '/ai-sdlc operator-dispatch'`,
       `AI_SDLC_HIERARCHY_SESSION='${Q('executor-alpha')}' AI_SDLC_HIERARCHY_ROLE='executor' 'claude' --name '${Q('executor-alpha')}' --model 'sonnet' --permission-mode 'bypassPermissions' '/ai-sdlc executor'`,
@@ -2367,5 +2373,19 @@ describe('reconcile scheduler ownership (AISDLC-932)', () => {
     deps.isAlive = () => false;
     expect(schedulerStatus(deps)).toEqual({ state: 'off' });
     expect(schedulerDown(deps)).toBe(false);
+  });
+});
+
+describe('hierarchy status gh calls (AISDLC-963)', () => {
+  it('prints calls per session in the last hour and live remaining quota', () => {
+    const lines = formatStatus({
+      rows: [],
+      board: { queued: 0, inflight: 0, done: 0, failed: 0 },
+      webhook: { state: 'off', reason: 'no secret' },
+      scheduler: { state: 'off' },
+      ghCallsPerHour: { a: 2, b: 9 },
+      quota: { core: 4000, graphql: 12 },
+    } as Parameters<typeof formatStatus>[0]);
+    expect(lines).toContain('gh calls last hour: b 9, a 2; remaining core 4000, graphql 12');
   });
 });

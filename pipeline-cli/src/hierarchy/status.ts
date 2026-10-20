@@ -10,6 +10,14 @@ import { listInflight } from './inflight.js';
 import { listLanding } from './reconcile.js';
 import { paneNodeVersion, readNvmrc, versionMatches } from './node-pin.js';
 import { hasLaunchEnv } from './up.js';
+import {
+  callsPerSession,
+  ghCallsPath,
+  parseQuota,
+  pruneGhCalls,
+  readGhCalls,
+  type Quota,
+} from './gh-calls.js';
 import { readSessionRegistry } from './registry.js';
 import { readRosterChecked } from './roster.js';
 import {
@@ -60,6 +68,10 @@ export interface StatusResult {
   contextThresholds?: Record<HierarchyRole, number>;
   /** Dispatchable tasks on no brief and not on the board (AISDLC-930); absent when none. */
   unbriefed?: string[];
+  /** `gh` calls in the last hour by HIERARCHY_SESSION (AISDLC-963). */
+  ghCallsPerHour?: Record<string, number>;
+  /** Live remaining quota for the core and graphql buckets; absent when `gh` cannot say. */
+  quota?: Quota;
 }
 
 /** Join the roster with the registry, tmux and the board. */
@@ -143,8 +155,25 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
   } catch {
     /* an unreadable backlog must not break status */
   }
+  let ghCallsPerHour: Record<string, number> = {};
+  try {
+    const log = ghCallsPath(deps.boardDir);
+    pruneGhCalls(log, deps.now());
+    ghCallsPerHour = callsPerSession(readGhCalls(log), deps.now());
+  } catch {
+    /* an unreadable call log must not break status */
+  }
+  let quota: Quota | undefined;
+  try {
+    const r = deps.run('gh', ['api', 'rate_limit'], { cwd: deps.cwd });
+    if (r?.status === 0) quota = parseQuota(r.stdout);
+  } catch {
+    /* gh missing or offline */
+  }
   return {
     rows,
+    ...(Object.keys(ghCallsPerHour).length > 0 ? { ghCallsPerHour } : {}),
+    ...(quota ? { quota } : {}),
     board: peekQueue(deps.boardDir),
     webhook: webhookStatus(deps),
     scheduler: schedulerStatus(deps),
@@ -166,6 +195,7 @@ export function formatStatus(result: StatusResult): string[] {
         `unbriefed (dispatchable, on no brief, not on the board): ${result.unbriefed.join(', ')}; write a brief with \`cli-hierarchy brief --tasks <id,...>\``,
       ]
     : [];
+  const ghLines = formatGhCalls(result);
   if (result.rows.length === 0)
     return [
       'no sessions in the roster',
@@ -173,6 +203,7 @@ export function formatStatus(result: StatusResult): string[] {
       formatSchedulerStatus(result.scheduler),
       ...thresholds,
       ...unbriefed,
+      ...ghLines,
     ];
   const header = [
     'ROLE',
@@ -229,5 +260,22 @@ export function formatStatus(result: StatusResult): string[] {
     formatSchedulerStatus(result.scheduler),
     ...thresholds,
     ...unbriefed,
+    ...ghLines,
   ];
+}
+
+function formatGhCalls(result: StatusResult): string[] {
+  if (!result.ghCallsPerHour && !result.quota) return [];
+  const calls = result.ghCallsPerHour;
+  const per = calls
+    ? Object.entries(calls)
+        .sort(([, a], [, b]) => b - a)
+        .map(([s, n]) => `${s} ${n}`)
+        .join(', ')
+    : 'none';
+  const q = result.quota;
+  const quota = q
+    ? `remaining core ${q.core ?? '?'}, graphql ${q.graphql ?? '?'}`
+    : 'remaining unknown';
+  return [`gh calls last hour: ${per}; ${quota}`];
 }

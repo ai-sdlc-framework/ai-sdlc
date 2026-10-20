@@ -1,7 +1,7 @@
 ---
 id: AISDLC-963
 title: 'Every gh call from the hierarchy is logged with its session and remaining quota, and status reports calls per hour per session'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels:
