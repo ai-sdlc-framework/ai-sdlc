@@ -9,7 +9,9 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -203,8 +205,41 @@ describe('standing decision rules (AISDLC-873)', () => {
     assert.ok(out.startsWith('a\n') && out.endsWith('\nb'));
   });
 
-  it('loadCatalogEvents returns [] for a root without a catalog', () => {
+  it('loadCatalogEvents returns [] for a root that is not a git repo', () => {
     assert.deepEqual(loadCatalogEvents('/nonexistent-root-873'), []);
+  });
+
+  it('loadCatalogEvents reads only records committed on main, not branch or working-tree ones', () => {
+    const root = mkdtempSync(join(tmpdir(), 'standing-873-'));
+    const sh = (...a) => execFileSync('git', a, { cwd: root, stdio: 'ignore' });
+    const evDir = join(root, '.ai-sdlc', '_decisions', 'events');
+    const write = (name, ev) => writeFileSync(join(evDir, name), JSON.stringify(ev));
+    try {
+      sh('init', '-q', '-b', 'main');
+      sh('config', 'user.email', 't@example.com');
+      sh('config', 'user.name', 't');
+      sh('config', 'commit.gpgsign', 'false');
+      mkdirSync(evDir, { recursive: true });
+      write('a__DEC-0001__decision-opened.json', opened('DEC-0001'));
+      write('b__DEC-0001__operator-answered.json', answered('DEC-0001'));
+      sh('add', '.');
+      sh('commit', '-q', '-m', 'main catalog');
+      sh('checkout', '-q', '-b', 'feature');
+      write('c__DEC-0002__decision-opened.json', opened('DEC-0002'));
+      write('d__DEC-0002__operator-answered.json', answered('DEC-0002'));
+      sh('add', '.');
+      sh('commit', '-q', '-m', 'branch-only catalog');
+      write('e__DEC-0003__decision-opened.json', opened('DEC-0003'));
+      write('f__DEC-0003__operator-answered.json', answered('DEC-0003'));
+      const loaded = loadCatalogEvents(root);
+      assert.deepEqual(
+        projectStandingRules(loaded).map((r) => r.decisionId),
+        ['DEC-0001'],
+      );
+      assert.deepEqual(loadCatalogEvents(root, { ref: 'no-such-ref' }), []);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   const repoRoot = join(pluginDir, '..');

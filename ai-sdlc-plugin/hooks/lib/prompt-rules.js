@@ -195,21 +195,38 @@ function projectStandingRules(events) {
 }
 
 /**
- * Reads the checked-in decision events (`<root>/.ai-sdlc/_decisions/events/*.json`),
- * in file-name order. Returns [] when the catalog is absent.
+ * Reads the decision events that are ON MAIN (`<root>/.ai-sdlc/_decisions/events/*.json`
+ * as committed at `origin/main`, else `main`), in file-name order. A record that
+ * exists only in the working tree or on a feature branch is never read, so it
+ * cannot render. Returns [] when no main ref resolves or the catalog is absent.
  * @param {string} root repository root
+ * @param {{ ref?: string }} [opts] override the ref (tests)
  * @returns {Array<Record<string, any>>}
  */
-function loadCatalogEvents(root) {
-  const fs = require('node:fs');
-  const path = require('node:path');
-  const dir = path.join(root, '.ai-sdlc', '_decisions', 'events');
-  if (!fs.existsSync(dir)) return [];
-  return fs
-    .readdirSync(dir)
-    .filter((f) => f.endsWith('.json'))
-    .sort()
-    .map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8')));
+function loadCatalogEvents(root, opts = {}) {
+  const { execFileSync } = require('node:child_process');
+  const git = (/** @type {string[]} */ args) =>
+    execFileSync('git', args, {
+      cwd: root,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  const dir = '.ai-sdlc/_decisions/events';
+  for (const ref of opts.ref ? [opts.ref] : ['origin/main', 'main']) {
+    let names;
+    try {
+      names = git(['ls-tree', '--name-only', `${ref}:${dir}`]);
+    } catch {
+      continue;
+    }
+    return names
+      .split('\n')
+      .filter((f) => f.endsWith('.json'))
+      .sort()
+      .map((f) => JSON.parse(git(['show', `${ref}:${dir}/${f}`])));
+  }
+  return [];
 }
 
 /**

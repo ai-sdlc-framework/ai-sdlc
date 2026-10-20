@@ -133,6 +133,30 @@ describe('AISDLC-873 — add --standing-rule validation', () => {
   }
 });
 
+describe('AISDLC-873 — add --standing-rule success path', () => {
+  it('records a trimmed single-line rule on the decision-opened event and the decision spec', async () => {
+    setArgv(
+      'add',
+      '--summary',
+      'x',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:Yes',
+      '--standing-rule',
+      '  Never relaunch a session for a stale node probe.  ',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ ok: boolean; decision: Decision }>();
+    expect(r.ok).toBe(true);
+    const evt = JSON.parse(readEventLogText(tmp).trim().split('\n')[0]);
+    expect(evt.type).toBe('decision-opened');
+    expect(evt.standingRule).toBe('Never relaunch a session for a stale node probe.');
+  });
+});
+
 describe('AC#4 — add subcommand (flag-driven path)', () => {
   it('writes a decision-opened event to the log and assigns DEC-0001', async () => {
     setArgv(
