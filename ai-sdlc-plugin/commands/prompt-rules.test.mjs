@@ -22,6 +22,10 @@ const {
   findPromptRulesBlock,
   syncPromptRules,
   countRuleRestatements,
+  projectStandingRules,
+  loadCatalogEvents,
+  renderStandingRulesBlock,
+  syncStandingRules,
 } = require(join(pluginDir, 'hooks', 'lib', 'prompt-rules.js'));
 
 /** Prompts that MUST carry the block (they used to hold hand-pasted copies). */
@@ -135,6 +139,81 @@ describe('prompts carrying a rules block', () => {
           `${rel}: rule "${rule.id}" appears ${counts[rule.id]} times (expected ${expected})`,
         );
       }
+    });
+  }
+});
+
+describe('standing decision rules (AISDLC-873)', () => {
+  const opened = (id, extra = {}) => ({
+    type: 'decision-opened',
+    decisionId: id,
+    standingRule: `rule for ${id}`,
+    ...extra,
+  });
+  const answered = (id) => ({ type: 'operator-answered', decisionId: id });
+
+  it('renders exactly one line for an answered standing decision', () => {
+    const block = renderStandingRulesBlock([opened('DEC-0002'), answered('DEC-0002')]);
+    assert.equal(
+      block,
+      '<!-- standing-rules:begin -->\n- **Standing (DEC-0002):** rule for DEC-0002\n<!-- standing-rules:end -->',
+    );
+  });
+
+  it('renders nothing for unanswered, non-standing, superseded or weakening decisions', () => {
+    const events = [
+      opened('DEC-0001'),
+      opened('DEC-0003', { standingRule: undefined }),
+      answered('DEC-0003'),
+      opened('DEC-0004'),
+      answered('DEC-0004'),
+      { type: 'superseded', decisionId: 'DEC-0004' },
+      opened('DEC-0005', { governanceChange: { kind: 'weakening' } }),
+      answered('DEC-0005'),
+      opened('DEC-0006', { standingRule: 'two\nlines' }),
+      answered('DEC-0006'),
+      { type: 'operator-answered' },
+    ];
+    assert.deepEqual(projectStandingRules(events), []);
+  });
+
+  it('is deterministic and sorted by decision id, independent of input order', () => {
+    const a = [opened('DEC-0009'), answered('DEC-0009'), opened('DEC-0002'), answered('DEC-0002')];
+    const first = renderStandingRulesBlock(a);
+    assert.equal(renderStandingRulesBlock([...a].reverse()), first);
+    assert.equal(renderStandingRulesBlock(a), first);
+    assert.ok(first.indexOf('DEC-0002') < first.indexOf('DEC-0009'));
+  });
+
+  it('syncStandingRules leaves block-less text alone and rewrites a drifted block', () => {
+    assert.equal(syncStandingRules('plain', []), 'plain');
+    assert.equal(
+      syncStandingRules('<!-- standing-rules:begin -->\nx', []),
+      '<!-- standing-rules:begin -->\nx',
+    );
+    const out = syncStandingRules(
+      'a\n<!-- standing-rules:begin -->\nold\n<!-- standing-rules:end -->\nb',
+      [opened('DEC-0001'), answered('DEC-0001')],
+    );
+    assert.match(out, /Standing \(DEC-0001\)/);
+    assert.ok(out.startsWith('a\n') && out.endsWith('\nb'));
+  });
+
+  it('loadCatalogEvents returns [] for a root without a catalog', () => {
+    assert.deepEqual(loadCatalogEvents('/nonexistent-root-873'), []);
+  });
+
+  const repoRoot = join(pluginDir, '..');
+  const events = loadCatalogEvents(repoRoot);
+  for (const rel of ['commands/operator-dispatch.md', 'commands/executor.md']) {
+    it(`${rel} carries the standing-rules block, in sync with the catalog`, () => {
+      const content = read(rel);
+      assert.equal(
+        syncStandingRules(content, events),
+        content,
+        `${rel}: run sync-prompt-rules.mjs`,
+      );
+      assert.ok(content.includes('<!-- standing-rules:begin -->'));
     });
   }
 });

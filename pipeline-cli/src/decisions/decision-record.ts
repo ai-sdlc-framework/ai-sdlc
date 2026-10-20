@@ -186,6 +186,11 @@ export interface DecisionSpec {
   contextRef?: string;
   /** RFC-0051 — escalation-chain routing; absent on decisions not raised by `escalate`. */
   escalation?: DecisionEscalation;
+  /**
+   * AISDLC-873 — one-line standing rule. When set on a decision that is answered
+   * and on main, `prompt-rules.js` renders it into the dispatch and executor prompts.
+   */
+  standingRule?: string;
 }
 
 export interface DecisionRouting {
@@ -311,6 +316,11 @@ export interface DecisionOpenedEvent extends DecisionEventEnvelope {
   contextRef?: string;
   /** RFC-0051 — escalation-chain routing (see {@link DecisionEscalation}). */
   escalation?: DecisionEscalation;
+  /**
+   * AISDLC-873 — one-line standing rule. When set on a decision that is answered
+   * and on main, `prompt-rules.js` renders it into the dispatch and executor prompts.
+   */
+  standingRule?: string;
 }
 
 /**

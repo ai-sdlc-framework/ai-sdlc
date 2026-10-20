@@ -1,7 +1,7 @@
 ---
 id: AISDLC-873
 title: 'feat(decisions): render standing decision rules into dispatch and executor prompts'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [decisions, hierarchy, prompts]

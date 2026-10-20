@@ -499,6 +499,8 @@ export interface OpenDecisionInput {
   governanceChange?: GovernanceChange;
   /** RFC-0051 — escalation-chain routing. */
   escalation?: DecisionEscalation;
+  /** AISDLC-873 — one-line standing rule rendered into dispatch and executor prompts. */
+  standingRule?: string;
   by?: string;
   now?: Date;
 }
@@ -536,6 +538,7 @@ export function makeDecisionOpenedEvent(input: OpenDecisionInput): DecisionOpene
   if (input.contextRef !== undefined) event.contextRef = input.contextRef;
   if (input.governanceChange !== undefined) event.governanceChange = input.governanceChange;
   if (input.escalation !== undefined) event.escalation = input.escalation;
+  if (input.standingRule !== undefined) event.standingRule = input.standingRule;
   if (input.by !== undefined) event.by = input.by;
   return event;
 }

@@ -31,3 +31,22 @@ AISDLC-651.2. "Never do X" rules used to be pasted (and sometimes escalated in l
 ## Measurement
 
 Before/after prefix sizes: [prefix-diet-measurements.md](./prefix-diet-measurements.md).
+
+## Standing decision rules (AISDLC-873)
+
+A decision can become a standing rule that the dispatch and executor prompts carry, without hand-editing either prompt.
+
+- **The marker.** Open the decision with `cli-decisions add ... --standing-rule "<one line>"` (event field and spec field `standingRule`, single line). The rule is a separate sentence from the decision body, so it states the behaviour, not the history.
+- **When it renders.** `projectStandingRules` in `ai-sdlc-plugin/hooks/lib/prompt-rules.js` renders exactly one line, `- **Standing (DEC-NNNN):** <rule>`, for a decision that carries `standingRule`, has an `operator-answered` event, and is not superseded, archived or overridden. The catalog read is the checked-in tree (`.ai-sdlc/_decisions/events/`), so a record that is not yet on `main` renders nothing. Unanswered and non-standing decisions render nothing.
+- **Where.** The generated `<!-- standing-rules:begin -->...<!-- standing-rules:end -->` block in `commands/operator-dispatch.md` and `commands/executor.md`. Regenerate with `node ai-sdlc-plugin/scripts/sync-prompt-rules.mjs` (`--check` exits 1 on drift; `prompt-rules.test.mjs` fails on drift). Output is sorted by decision id, byte-identical for the same catalog, and calls no model. With no rules the block is a single line.
+- **Authority limit.** A standing rule narrows what a session does; it never loosens a control. A decision tagged `--governance-change weakening` never renders, and a rule can only be authorized by the same record authority as the decision itself (a planner-authored record on `main` for classes (a) and (b); class (c) stays operator-only; see [decision-authority.md](./decision-authority.md)). Hard rules still live in `PROMPT_RULES`, not in the catalog.
+
+### First three standing rules
+
+The first three records to carry `--standing-rule` are the planner's to author, from rulings the operator has already given and the memory notes record:
+
+1. Lease pushes on a session's own task branch are always authorized; never ask.
+2. Executors run one task per context and are cleared once they report done.
+3. Dispatch reports every blocker, brief and verdict to the planner, even under a hold.
+
+Until each record is answered on `main`, the blocks stay empty.

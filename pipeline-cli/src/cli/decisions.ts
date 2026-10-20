@@ -340,6 +340,8 @@ interface AddInputs {
   governanceChange?: GovernanceChange;
   /** AISDLC-463 — surfacing-context backlink. */
   contextRef?: string;
+  /** AISDLC-873 — one-line standing rule. */
+  standingRule?: string;
 }
 
 /**
@@ -572,6 +574,12 @@ function gatherAddInputsFromFlags(argv: Record<string, unknown>): AddInputs {
 
   if (typeof argv['context-ref'] === 'string' && argv['context-ref']) {
     inputs.contextRef = String(argv['context-ref']);
+  }
+
+  if (typeof argv['standing-rule'] === 'string' && argv['standing-rule']) {
+    const rule = String(argv['standing-rule']).trim();
+    if (rule.includes('\n')) throw new Error('--standing-rule must be a single line');
+    inputs.standingRule = rule;
   }
 
   return inputs;
@@ -828,6 +836,11 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             describe:
               'AISDLC-463 — surfacing-context backlink (a PR url, `pr:N`, or task id) recorded for the audit trail.',
           })
+          .option('standing-rule', {
+            type: 'string',
+            describe:
+              'AISDLC-873 — one-line standing rule; once answered and on main it renders into the dispatch and executor prompts.',
+          })
           .option('format', {
             type: 'string',
             choices: ['json', 'text'] as const,
@@ -927,6 +940,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             ? { autonomousFallbackOptionId: inputs.autonomousFallbackOptionId }
             : {}),
           ...(inputs.contextRef !== undefined ? { contextRef: inputs.contextRef } : {}),
+          ...(inputs.standingRule !== undefined ? { standingRule: inputs.standingRule } : {}),
           ...(inputs.governanceChange !== undefined
             ? { governanceChange: inputs.governanceChange }
             : {}),

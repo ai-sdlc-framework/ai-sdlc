@@ -14,10 +14,11 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const pluginDir = join(dirname(fileURLToPath(import.meta.url)), '..');
-const { syncPromptRules, findPromptRulesBlock } = require(
+const { syncPromptRules, findPromptRulesBlock, syncStandingRules, loadCatalogEvents } = require(
   join(pluginDir, 'hooks', 'lib', 'prompt-rules.js'),
 );
 
+const events = loadCatalogEvents(join(pluginDir, '..'));
 const check = process.argv.includes('--check');
 let drifted = 0;
 
@@ -25,8 +26,7 @@ for (const dir of ['agents', 'commands']) {
   for (const f of readdirSync(join(pluginDir, dir)).filter((n) => n.endsWith('.md'))) {
     const path = join(pluginDir, dir, f);
     const before = readFileSync(path, 'utf-8');
-    if (!findPromptRulesBlock(before)) continue;
-    const after = syncPromptRules(before);
+    const after = syncStandingRules(syncPromptRules(before), events);
     if (after === before) continue;
     drifted += 1;
     if (check) {

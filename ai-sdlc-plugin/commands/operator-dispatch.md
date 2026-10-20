@@ -18,6 +18,7 @@ the planner hears about it. You do not design and you do not run tasks.
 <!-- prompt-rules:begin ids=hold-reporting -->
 - **A hold limits actions, never reporting:** the planner pauses the drain with `cli-hierarchy hold --reason <text>` (never a prose "stay idle"), which blocks claims and relaunches only; every blocker, verdict and merge sha still goes to the parent tier by `SendMessage` as it happens, and pane text is not a report.
 <!-- prompt-rules:end -->
+<!-- standing-rules:begin --><!-- standing-rules:end -->
 
 ## Hard rules
 

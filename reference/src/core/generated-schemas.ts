@@ -2118,6 +2118,13 @@ export const decisionV1Schema = {
           description:
             "RFC-0035 AISDLC-463 — backlink to the surfacing context (a PR url, 'pr:N', or a task id).",
         },
+        standingRule: {
+          type: 'string',
+          minLength: 1,
+          pattern: '^[^\\n]+$',
+          description:
+            'AISDLC-873 — one-line standing rule rendered into the dispatch and executor prompts once the decision is answered and on main.',
+        },
         escalation: {
           type: 'object',
           required: ['route', 'taskId', 'parked'],
