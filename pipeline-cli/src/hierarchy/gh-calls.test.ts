@@ -42,14 +42,25 @@ describe('gh call log (AISDLC-963)', () => {
     });
   });
 
-  it('logs a failing call and ignores non-gh commands', async () => {
+  it('logs a failing gh call with its exit status and ignores non-gh commands', async () => {
     const dir = tmp();
+    const bin = path.join(dir, 'bin');
+    mkdirSync(bin);
+    writeFileSync(path.join(bin, 'gh'), '#!/bin/sh\necho boom >&2\nexit 4\n');
+    chmodSync(path.join(bin, 'gh'), 0o755);
     const log = ghCallsPath(dir);
     vi.stubEnv('AI_SDLC_GH_CALL_LOG', log);
+    vi.stubEnv('AI_SDLC_HIERARCHY_SESSION', 's2');
+    vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
     await defaultRunner('git', ['--version']);
     expect(readGhCalls(log)).toHaveLength(0);
-    await expect(defaultRunner('gh-nonexistent-bin', [])).rejects.toThrow();
-    await defaultRunner('gh', ['--no-such-flag-xyz'], { allowFailure: true }).catch(() => {});
+    await expect(defaultRunner('gh', ['pr', 'view'])).rejects.toThrow(/boom/);
+    const r = await defaultRunner('gh', ['issue', 'list'], { allowFailure: true });
+    expect(r.code).toBe(4);
+    const calls = readGhCalls(log);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({ session: 's2', argv: ['pr', 'view'], exit: 4 });
+    expect(calls[1]).toMatchObject({ argv: ['issue', 'list'], exit: 4 });
   });
 
   it('the shim logs a direct call once and passes output and exit through', () => {
