@@ -45,8 +45,18 @@ export type PlaybookAction = 'rebase-push' | 'retrigger-ci' | 'requeue' | 'escal
 /** Cause code written on a failure record when CI is stuck on a stale merge ref. */
 export const STALE_MERGE_REF_CAUSE = 'stale-merge-ref';
 
+/**
+ * Cause code written on a failure record when the pipeline's push step is refused as
+ * non-fast-forward (the remote holds the pre-rebase copy of the same patch).
+ */
+export const PUSH_NON_FAST_FORWARD_CAUSE = 'push-non-fast-forward';
+
+/** Subject prefix of the commit the pre-push hook makes when it signs an envelope. */
+const AUTO_SIGN_SUBJECT_PREFIX = 'chore: auto-sign attestation for ';
+
 /** Conflict shapes a plain rebase onto `origin/main` is expected to fix. */
 export const MECHANICAL_SHAPES: readonly string[] = [
+  PUSH_NON_FAST_FORWARD_CAUSE,
   'test-additions-overlap',
   'prettier-drift',
   'pnpm-lock-regen',
@@ -62,6 +72,9 @@ export const REQUEUEABLE_CAUSES: readonly string[] = [
   'quota-exhausted',
   'transient',
 ];
+
+/** Steps that can be run by name; each needs the grants in {@link REQUIRED_GRANTS}. */
+export const NAMED_STEPS = ['rebase-push', 'retrigger-ci', 'requeue'] as const;
 
 type StepAction = Exclude<PlaybookAction, 'escalate'>;
 
@@ -132,6 +145,7 @@ const GIT_SUBCOMMANDS = new Set([
   'rebase',
   'commit',
   'push',
+  'log',
 ]);
 
 /** Collaborators of {@link runPlaybook}; every one is injected in tests. */
@@ -185,6 +199,8 @@ export interface PlaybookOutcome {
 export async function runPlaybook(
   verdict: DispatchVerdict,
   deps: PlaybookDeps,
+  /** A step named by the caller (`cli-hierarchy playbook --action`); skips classification. */
+  forced?: StepAction,
 ): Promise<PlaybookOutcome> {
   const taskId = verdict.taskId;
   // The id comes from a file on the board; it builds a worktree path and a branch
@@ -308,7 +324,14 @@ export async function runPlaybook(
     return { taskId, action: 'escalate', result: 'escalated', reason };
   }
 
-  const c = classifyFailure(verdict);
+  const c: Classification =
+    forced === undefined
+      ? classifyFailure(verdict)
+      : forced === 'rebase-push'
+        ? { kind: 'rebase-push', shape: verdict.cause ?? 'named-step' }
+        : forced === 'requeue'
+          ? { kind: 'requeue', cause: verdict.cause ?? 'named-step' }
+          : { kind: 'retrigger-ci' };
 
   if (c.kind === 'escalate') return escalate(c.reason);
 
@@ -373,14 +396,33 @@ export async function runPlaybook(
     const why = `the rebase onto origin/main did not apply cleanly (${c.shape}); it was aborted`;
     return giveUp('rebase-push', 'failed', why, branch);
   }
-  const pushed = await git(
+  // A rebased copy of the auto-sign commit makes the pre-push hook skip signing, so
+  // the envelope would describe the pre-rebase patch. Drop that commit; the hook
+  // then signs again (and exits 1 once, so the push is tried a second time).
+  let droppedEnvelope = false;
+  const subject = await git(['log', '-1', '--format=%s'], worktree);
+  if (subject.status === 0 && subject.stdout.trim().startsWith(AUTO_SIGN_SUBJECT_PREFIX)) {
+    const dropped = await git(['rebase', '--onto', 'HEAD~1', 'HEAD'], worktree);
+    if (dropped.status !== 0) {
+      await git(['rebase', '--abort'], worktree);
+      return giveUp('rebase-push', 'failed', 'dropping the stale envelope commit failed', branch);
+    }
+    droppedEnvelope = true;
+  }
+  let pushed = await git(
     ['push', '--force-with-lease', 'origin', `HEAD:refs/heads/${branch}`],
     worktree,
   );
+  if (pushed.status !== 0 && droppedEnvelope) {
+    pushed = await git(
+      ['push', '--force-with-lease', 'origin', `HEAD:refs/heads/${branch}`],
+      worktree,
+    );
+  }
   if (pushed.status !== 0) {
     return giveUp('rebase-push', 'failed', `push failed: ${oneLine(pushed.stderr, 200)}`, branch);
   }
-  const reason = `rebased onto origin/main (${c.shape}) and lease-pushed`;
+  const reason = `rebased onto origin/main (${c.shape})${droppedEnvelope ? ', dropped the stale envelope commit' : ''} and lease-pushed`;
   record('rebase-push', 'done', reason, branch);
   return { taskId, action: 'rebase-push', result: 'done', reason, branch };
 }

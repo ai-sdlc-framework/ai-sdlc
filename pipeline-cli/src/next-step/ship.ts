@@ -18,6 +18,7 @@
  */
 
 import { join } from 'node:path';
+import { PUSH_NON_FAST_FORWARD_CAUSE } from '../hierarchy/playbook.js';
 import { loadOperationalPolicy } from '../hierarchy/operational.js';
 import { leasePushPreflight, type LeasePreflight } from '../hierarchy/lease-preflight.js';
 import { writeVerdictFile } from '../cli/execute.js';
@@ -231,8 +232,10 @@ function stop(
   state: NextStepState,
   outcome: StopInstruction['outcome'],
   reason: string,
+  extra: { cause?: string } = {},
 ): StopInstruction {
   return {
+    ...extra,
     action: 'stop',
     taskId: state.taskId,
     outcome,
@@ -398,6 +401,7 @@ async function shipInner(
       nonFf
         ? `non-fast-forward push to '${state.branch}'; cleanup is to delete the remote branch and rerun, but that is destructive, confirm with the operator first (no force-push is attempted)`
         : `${PUSH_ATTEMPTS} push attempts failed (last exit ${pushRc}): ${pushErr}`,
+      nonFf ? { cause: PUSH_NON_FAST_FORWARD_CAUSE } : {},
     );
   }
 

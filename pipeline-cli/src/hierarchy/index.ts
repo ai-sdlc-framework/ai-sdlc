@@ -186,6 +186,7 @@ export {
   type Classification,
   type PlaybookAction,
   type PlaybookDeps,
+  NAMED_STEPS,
   type PlaybookOutcome,
 } from './playbook.js';
 export {

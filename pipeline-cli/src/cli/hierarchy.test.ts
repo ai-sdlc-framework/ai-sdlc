@@ -24,6 +24,7 @@ import {
   type IdentityDeps,
   type RosterEntry,
 } from '../hierarchy/index.js';
+import { writeVerdict } from '../dispatch/board.js';
 import { defaultHierarchyDeps, firstPositional, runHierarchyCli } from './hierarchy.js';
 
 let tmp: string;
@@ -558,6 +559,83 @@ describe('clear, tick and route-decision', () => {
     expect(enqueued).toEqual([]);
     expect(calls).toEqual([]);
     expect(boardListing()).toEqual(before);
+  });
+
+  describe('playbook (AISDLC-918)', () => {
+    const run = async (
+      args: string[],
+      operational: string[],
+      gitCalls: string[][] = [],
+    ): Promise<number> => {
+      seedBoardWithBrief();
+      return runHierarchyCli(['playbook', '--worker', 'operator-dispatch', ...args], overrides(), {
+        identity: asCaller('operator-dispatch'),
+        operational: new Set(operational),
+        lease: { ...lease, forcePushMode: 'leaseOnOwnBranch' as const, ownWorktree: () => null },
+        gitRun: (_f, a) => {
+          gitCalls.push([...a]);
+          return {
+            status: 0,
+            stdout: a[0] === 'branch' ? 'ai-sdlc/aisdlc-9-slug\n' : '',
+            stderr: '',
+          };
+        },
+      });
+    };
+    const seedFailure = (): void => {
+      writeVerdict(path.join(tmp, 'dispatch'), {
+        schemaVersion: 'v1',
+        taskId: 'AISDLC-9',
+        outcome: 'failed',
+        completedAt: '2026-09-30T12:00:00.000Z',
+        workerId: 'executor-alpha',
+      });
+    };
+
+    it('refuses an action that is not a playbook step, and a missing task', async () => {
+      vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      expect(await run(['--task', 'AISDLC-9', '--action', 'merge'], [])).toBe(2);
+      expect(await run(['--action', 'rebase-push'], [])).toBe(2);
+    });
+
+    it('exits 1 for a task id with no failure record', async () => {
+      vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      expect(await run(['--task', 'AISDLC-404', '--action', 'rebase-push'], ['requeue'])).toBe(1);
+    });
+
+    it('refuses a step the role is not granted', async () => {
+      seedFailure();
+      vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      const git: string[][] = [];
+      expect(
+        await run(
+          ['--task', 'AISDLC-9', '--action', 'rebase-push', '--work-dir', tmp],
+          ['rebase-own-branch'],
+          git,
+        ),
+      ).toBe(1);
+      expect(JSON.parse(logs.at(-1) as string).outcome.result).toBe('escalated');
+      expect(git).toEqual([]);
+    });
+
+    it('runs the named step and reports it', async () => {
+      seedFailure();
+      vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      mkdirSync(path.join(tmp, '.worktrees', 'aisdlc-9'), { recursive: true });
+      const git: string[][] = [];
+      expect(
+        await run(
+          ['--task', 'AISDLC-9', '--action', 'rebase-push', '--work-dir', tmp],
+          ['rebase-own-branch', 'lease-push-own-branch'],
+          git,
+        ),
+      ).toBe(0);
+      expect(JSON.parse(logs.at(-1) as string)).toMatchObject({
+        ok: true,
+        outcome: { action: 'rebase-push', result: 'done' },
+      });
+      expect(git.some((a) => a[0] === 'push' && a.includes('--force-with-lease'))).toBe(true);
+    });
   });
 
   describe('idle hibernation and self-clear (no tmux)', () => {

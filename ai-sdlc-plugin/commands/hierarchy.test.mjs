@@ -70,6 +70,7 @@ describe('hierarchy dispatch script', () => {
       'tick',
       'restart',
       'register',
+      'playbook',
       'route-decision',
       'check-sender',
       'check-repo',

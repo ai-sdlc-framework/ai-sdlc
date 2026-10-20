@@ -1,7 +1,7 @@
 ---
 id: AISDLC-918
 title: 'fix: tick playbook runs rebase-push on a non-fast-forward push failure instead of escalating'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [hierarchy, dispatch, velocity]
@@ -22,9 +22,9 @@ The escalation then cost three planner round-trips: the planner verified the bra
 
 ## Acceptance Criteria
 
-- [ ] When the pipeline push step fails with git's non-fast-forward rejection, the failed verdict carries a cause code (`push-non-fast-forward`) and the playbook's `classify` maps it to `rebase-push`; a playbook test covers the mapping and a push-step test covers the code being written.
-- [ ] `rebase-push` on that shape rebases the task branch onto `origin/main`, drops a stale-subject envelope when the hook would re-sign, and lease-pushes through the playbook's guarded runner only when the role holds both `rebase-own-branch` and `lease-push-own-branch`; test asserts the refusal when either grant is missing.
-- [ ] `cli-hierarchy playbook --task <id> --action <step>` runs one named step for one task, records the outcome on the board like a tick-driven step, and refuses an action not in the role's operational list; test covers success, refusal and an unknown task id.
-- [ ] `ai-sdlc-plugin/commands/operator-dispatch.md` states that the lease-push grant is exercised only through the playbook (tick or the named-step command), never a typed push; its command test asserts the sentence. `docs/operations/cli-hierarchy.md` documents the subcommand.
-- [ ] The PreToolUse lease-push guard is unchanged.
-- [ ] Task file moved to `backlog/completed/` in the PR.
+- [x] When the pipeline push step fails with git's non-fast-forward rejection, the failed verdict carries a cause code (`push-non-fast-forward`) and the playbook's `classify` maps it to `rebase-push`; a playbook test covers the mapping and a push-step test covers the code being written.
+- [x] `rebase-push` on that shape rebases the task branch onto `origin/main`, drops a stale-subject envelope when the hook would re-sign, and lease-pushes through the playbook's guarded runner only when the role holds both `rebase-own-branch` and `lease-push-own-branch`; test asserts the refusal when either grant is missing.
+- [x] `cli-hierarchy playbook --task <id> --action <step>` runs one named step for one task, records the outcome on the board like a tick-driven step, and refuses an action not in the role's operational list; test covers success, refusal and an unknown task id.
+- [x] `ai-sdlc-plugin/commands/operator-dispatch.md` states that the lease-push grant is exercised only through the playbook (tick or the named-step command), never a typed push; its command test asserts the sentence. `docs/operations/cli-hierarchy.md` documents the subcommand.
+- [x] The PreToolUse lease-push guard is unchanged.
+- [x] Task file moved to `backlog/completed/` in the PR.

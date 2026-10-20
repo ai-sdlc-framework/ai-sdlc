@@ -17,6 +17,7 @@ import {
   isOwnTaskBranch,
   isSafeTaskPush,
   MECHANICAL_SHAPES,
+  PUSH_NON_FAST_FORWARD_CAUSE,
   REQUIRED_GRANTS,
   runPlaybook,
   type PlaybookDeps,
@@ -142,6 +143,7 @@ describe('mechanical conflict shape: rebase and lease push', () => {
       ['status', '--porcelain'],
       ['fetch', 'origin', 'main'],
       ['rebase', 'origin/main'],
+      ['log', '-1', '--format=%s'],
       ['push', '--force-with-lease', 'origin', `HEAD:refs/heads/${BRANCH}`],
     ]);
     for (const c of calls) {
@@ -609,5 +611,78 @@ describe('hostile verdict strings', () => {
       deps(),
     );
     expect(outcome.reason).toBe('waiting on decision DEC-0002; routed by the decisions step');
+  });
+});
+
+describe('push-non-fast-forward (AISDLC-918)', () => {
+  const nonFf = () => verdict({ cause: PUSH_NON_FAST_FORWARD_CAUSE });
+
+  it('classifies the cause code as rebase-push', () => {
+    expect(PUSH_NON_FAST_FORWARD_CAUSE).toBe('push-non-fast-forward');
+    expect(classifyFailure(nonFf())).toEqual({
+      kind: 'rebase-push',
+      shape: 'push-non-fast-forward',
+    });
+  });
+
+  it('rebases and lease-pushes when the role holds both grants', async () => {
+    const outcome = await runPlaybook(nonFf(), deps());
+    expect(outcome).toMatchObject({ action: 'rebase-push', result: 'done' });
+    expect(pushes().map((c) => c.args)).toEqual([
+      ['push', '--force-with-lease', 'origin', `HEAD:refs/heads/${BRANCH}`],
+    ]);
+  });
+
+  it.each(['rebase-own-branch', 'lease-push-own-branch'])(
+    'refuses without %s and pushes nothing',
+    async (missing) => {
+      const operational = new Set(ALL_GRANTS.filter((g) => g !== missing));
+      const outcome = await runPlaybook(nonFf(), deps({ operational }));
+      expect(outcome.result).toBe('escalated');
+      expect(outcome.reason).toContain(missing);
+      expect(calls).toEqual([]);
+    },
+  );
+
+  it('drops a rebased auto-sign commit so the hook signs again, and retries the push once', async () => {
+    let logged = false;
+    let pushed = 0;
+    const base = deps();
+    const outcome = await runPlaybook(
+      nonFf(),
+      deps({
+        run: (file, args, options) => {
+          if (args[0] === 'log') {
+            logged = true;
+            return ok('chore: auto-sign attestation for AISDLC-9 (AISDLC-133)\n');
+          }
+          if (args[0] === 'push' && ++pushed === 1) {
+            calls.push({ file, args: [...args], cwd: options?.cwd });
+            return { status: 1, stdout: '', stderr: 'hook signed, push aborted' };
+          }
+          return base.run(file, args, options) as CommandResult;
+        },
+      }),
+    );
+    expect(logged).toBe(true);
+    expect(outcome.result).toBe('done');
+    expect(outcome.reason).toContain('dropped the stale envelope commit');
+    expect(calls.some((c) => c.args.join(' ') === 'rebase --onto HEAD~1 HEAD')).toBe(true);
+    expect(pushes()).toHaveLength(2);
+  });
+
+  it('runs a named step regardless of the cause code', async () => {
+    const outcome = await runPlaybook(verdict({ cause: undefined }), deps(), 'rebase-push');
+    expect(outcome).toMatchObject({ action: 'rebase-push', result: 'done' });
+    const refused = await runPlaybook(
+      verdict({ cause: undefined }),
+      deps({ operational: new Set(['requeue']) }),
+      'rebase-push',
+    );
+    expect(refused.result).toBe('escalated');
+    const requeued1 = await runPlaybook(verdict({ cause: undefined }), deps(), 'requeue');
+    expect(requeued1).toMatchObject({ action: 'requeue', result: 'done' });
+    const ci = await runPlaybook(verdict({ cause: undefined }), deps(), 'retrigger-ci');
+    expect(ci).toMatchObject({ action: 'retrigger-ci', result: 'done' });
   });
 });
