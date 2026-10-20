@@ -6,7 +6,7 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, readFileSync, rmSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, rmSync, mkdtempSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -243,6 +243,29 @@ describe('CLI end-to-end (--check and write modes)', () => {
     // parallel drift-guard test.
     const res = spawnSync(process.execPath, [SCRIPT, '--check'], { encoding: 'utf-8' });
     assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  });
+
+  it('--check tolerates pin drift only on the release-please branch (AISDLC-956)', () => {
+    const root = buildFixtureRepo({
+      orchestratorVersion: '0.20.5',
+      pipelineCliVersion: '0.20.5',
+      pins: { orchestrator: '>=0.19.0 <1.0.0', pipelineCli: '>=0.19.0 <1.0.0' },
+    });
+    try {
+      mkdirSync(join(root, 'scripts'), { recursive: true });
+      const script = join(realpathSync(root), 'scripts', 'sync-plugin-runtime-deps.mjs');
+      writeFileSync(script, readFileSync(SCRIPT, 'utf-8'));
+      const run = (env) =>
+        spawnSync(process.execPath, [script, '--check'], {
+          encoding: 'utf-8',
+          env: { ...process.env, GITHUB_HEAD_REF: '', GITHUB_REF_NAME: '', ...env },
+        });
+      assert.equal(run({}).status, 1);
+      assert.equal(run({ GITHUB_HEAD_REF: 'feat/other' }).status, 1);
+      assert.equal(run({ GITHUB_HEAD_REF: 'release-please--branches--main' }).status, 0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('write mode updates a fixture manifest end-to-end', () => {

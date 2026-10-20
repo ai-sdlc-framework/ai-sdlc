@@ -52,6 +52,9 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = join(__dirname, '..');
 
+/** Branch release-please force-pushes; its pins lag until the post-merge sync (AISDLC-956). */
+export const RELEASE_PR_BRANCH = 'release-please--branches--main';
+
 /** The runtimeDependencies entries this script keeps in sync. */
 export const SYNCED_PACKAGES = [
   { pkgDir: 'orchestrator', pkgName: '@ai-sdlc/orchestrator' },
@@ -172,7 +175,13 @@ async function main() {
   }
 
   if (checkOnly) {
-    if (anyDrift) {
+    const branch = process.env.GITHUB_HEAD_REF || process.env.GITHUB_REF_NAME;
+    if (anyDrift && branch === RELEASE_PR_BRANCH) {
+      console.error(
+        `sync-plugin-runtime-deps: drift tolerated on ${RELEASE_PR_BRANCH} (AISDLC-956); ` +
+          'the post-merge sync-plugin-runtime-deps job lands the pins on main.',
+      );
+    } else if (anyDrift) {
       console.error(
         'sync-plugin-runtime-deps: drift detected (see above). Run without --check to fix.',
       );

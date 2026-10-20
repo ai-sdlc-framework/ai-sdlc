@@ -32,6 +32,17 @@ a collision rate that became visible once the merge queue was dropped (AISDLC-40
    - The rolling PR accumulates: version bumps in `package.json` files +
      CHANGELOG.md entries for each package.
 
+   **Single push (AISDLC-956):** the release branch receives exactly one push
+   per push to `main` (release-please's own). There is no second fixup push.
+   release-please cannot source a sibling component's version into the plugin's
+   `runtimeDependencies` pins, so they lag on that branch;
+   `scripts/sync-plugin-runtime-deps.mjs --check` (in `pnpm test`) tolerates
+   that lag when the branch is `release-please--branches--main`. After the
+   release lands, the `sync-plugin-runtime-deps` job commits the pins to
+   `main`, and `publish-npm` syncs them in its working tree before testing.
+   Plugin `version` fields still ride on the one release-please commit via
+   `extra-files`.
+
 4. **Operator merges the rolling release PR** when ready to cut a release.
    After merge, `release.yml`'s `publish-npm` job runs and pushes to npm.
 
