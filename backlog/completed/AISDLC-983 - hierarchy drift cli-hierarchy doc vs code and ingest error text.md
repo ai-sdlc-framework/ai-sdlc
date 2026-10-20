@@ -1,7 +1,7 @@
 ---
 id: AISDLC-983
 title: 'Hierarchy drift: cli-hierarchy.md vs code, reenter rerun path, ingest error text'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-20'
 labels:
