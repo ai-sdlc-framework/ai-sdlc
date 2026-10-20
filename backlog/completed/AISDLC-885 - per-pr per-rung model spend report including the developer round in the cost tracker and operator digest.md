@@ -1,7 +1,7 @@
 ---
 id: AISDLC-885
 title: 'feat(cost): per-PR, per-rung model spend report (developer round included) in the cost tracker and the operator digest; no cap in v1'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [rfc-0054, phase-1, cost, kpi]
@@ -30,11 +30,11 @@ RFC-0054 OQ-14 (resolved 2026-10-14): no development trio in this RFC, but per-P
 
 ## Acceptance Criteria
 
-- [ ] After one `/ai-sdlc execute` run, `cli-kpi spend --pr <n>` shows developer-round tokens, reviewer tokens and any judgment-layer calls, each tagged with the rung from the caller's frontmatter.
-- [ ] A rung-2 call below its confidence floor appears with `outcome: escalated` and the rung-3 call that followed is linked to it.
-- [ ] `cli-decisions operator-digest` prints the spend block; `--mark` resets its window.
-- [ ] No cap or refusal is introduced anywhere (test asserts the pipeline completes with a spend above any configured value, since none exists).
-- [ ] Docs name the Phase 3 rule and the fields it needs.
+- [x] After one `/ai-sdlc execute` run, `cli-kpi spend --pr <n>` shows developer-round tokens, reviewer tokens and any judgment-layer calls, each tagged with the rung from the caller's frontmatter.
+- [x] A rung-2 call below its confidence floor appears with `outcome: escalated` and the rung-3 call that followed is linked to it.
+- [x] `cli-decisions operator-digest` prints the spend block; `--mark` resets its window.
+- [x] No cap or refusal is introduced anywhere (test asserts the pipeline completes with a spend above any configured value, since none exists).
+- [x] Docs name the Phase 3 rule and the fields it needs.
 
 ## Verification
 
