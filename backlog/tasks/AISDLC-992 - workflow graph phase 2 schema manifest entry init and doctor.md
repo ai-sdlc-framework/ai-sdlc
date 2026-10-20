@@ -1,5 +1,5 @@
 ---
-id: AISDLC-990
+id: AISDLC-992
 title: 'Workflow graph phase 2: `Workflow` schema, config-manifest entry, rendered default, `init` scaffold and `doctor` check'
 status: To Do
 assignee: []
@@ -10,7 +10,7 @@ labels:
   - schema
   - plugin
 dependencies:
-  - AISDLC-989
+  - AISDLC-991
 references:
   - spec/rfcs/RFC-0056-composable-workflow-graph.md
   - spec/schemas/pipeline.schema.json

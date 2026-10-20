@@ -1,5 +1,5 @@
 ---
-id: AISDLC-992
+id: AISDLC-994
 title: 'Workflow graph phase 4: open knobs, `extends` overrides and frozen-set enforcement with cited enforcers'
 status: To Do
 assignee: []
@@ -10,7 +10,7 @@ labels:
   - pipeline-cli
   - governance
 dependencies:
-  - AISDLC-991
+  - AISDLC-993
 references:
   - spec/rfcs/RFC-0056-composable-workflow-graph.md
   - pipeline-cli/src/steps/08-aggregate-verdicts.ts

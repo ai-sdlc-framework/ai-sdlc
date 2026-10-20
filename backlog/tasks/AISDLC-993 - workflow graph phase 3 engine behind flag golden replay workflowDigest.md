@@ -1,5 +1,5 @@
 ---
-id: AISDLC-991
+id: AISDLC-993
 title: 'Workflow graph phase 3: engine behind `AI_SDLC_WORKFLOW_ENGINE=1`, golden replay test, `workflowDigest` envelope field, delete the composite landing call and MCP step tools'
 status: To Do
 assignee: []
@@ -10,7 +10,7 @@ labels:
   - pipeline-cli
   - attestation
 dependencies:
-  - AISDLC-990
+  - AISDLC-992
 references:
   - spec/rfcs/RFC-0056-composable-workflow-graph.md
   - pipeline-cli/src/next-step/next-step.ts
