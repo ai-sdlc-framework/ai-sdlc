@@ -24,7 +24,7 @@ full rubric: staged review is a non-gating shadow node with a `sample` knob (OQ-
 code-backed list plus the fanout join rule (OQ-3); the document digest is an optional v6
 envelope field (OQ-4); the operator-dispatch role is retired by its own RFC-0057, which
 phase 5 requires (OQ-5). Engineering and Operator signed 2026-10-20; phase tasks
-AISDLC-993 to 995 filed with this revision.
+AISDLC-991 to 995 filed with this revision.
 
 ## Summary
 
@@ -231,7 +231,7 @@ release, then removed.
 - **General DAG runner.** Over-general for three small loops; adds a runtime
   dependency to a plugin that must run inside a Claude Code session.
 
-## Implementation Plan (tasks AISDLC-993 to 994 for phases 1 to 4; AISDLC-995 for the OQ-3 fresh-context enforcer; phase 5 after RFC-0057)
+## Implementation Plan (tasks AISDLC-991 to 994 for phases 1 to 4; AISDLC-995 for the OQ-3 fresh-context enforcer; phase 5 after RFC-0057)
 
 | Phase | Deliverable | Behaviour change |
 |---|---|---|
@@ -417,7 +417,7 @@ that forwarded the hard cases unchanged; **over as-is** by the automation ladder
 | Version | Date | Change |
 |---|---|---|
 | v0.1 | 2026-10-18 | Draft from the workflow graph audit; five Open Questions, none resolved. |
-| v0.3 | 2026-10-20 | OQ walkthrough with the operator, full rubric, all five resolved: OQ-1 staged as shadow node (`gating: false`, `sample`), premise about DEC-0149 corrected; OQ-2 `when` reuses the reference expression grammar with identifier validation; OQ-3 frozen set pruned to code-backed entries plus the fanout join, enforcers cited; OQ-4 `workflowDigest` optional v6 envelope field; OQ-5 reframed to retiring the operator-dispatch role, own RFC-0057, phase 5 requires it. Engineering and Operator signed; Draft to Signed Off; tasks AISDLC-993 to 995 filed. |
+| v0.3 | 2026-10-20 | OQ walkthrough with the operator, full rubric, all five resolved: OQ-1 staged as shadow node (`gating: false`, `sample`), premise about DEC-0149 corrected; OQ-2 `when` reuses the reference expression grammar with identifier validation; OQ-3 frozen set pruned to code-backed entries plus the fanout join, enforcers cited; OQ-4 `workflowDigest` optional v6 envelope field; OQ-5 reframed to retiring the operator-dispatch role, own RFC-0057, phase 5 requires it. Engineering and Operator signed; Draft to Signed Off; tasks AISDLC-991 to 995 filed. |
 | v0.2 | 2026-10-20 | Planner accuracy review: DEC-0149 cited correctly in OQ-1 (option (c) dropped), RFC-0012 title, dependency-graph has no topo sort, `pr-lifecycle.yaml` 1 of 9 keys, extra raw arming sites; added class (a)/(b) handling, hold-reporting, board/brief/resume section, "What this does not solve", frozen set carried from the audit. No OQ resolved. |
 
 ## References
