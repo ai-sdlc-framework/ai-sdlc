@@ -68,6 +68,24 @@ describe('undelivered PR claim pause (AISDLC-816)', () => {
     expect(findUndeliveredPr(dir, 'beta')).toBeUndefined();
   });
 
+  it('lets a resume manifest through ahead of a fresh task', () => {
+    const dir = board(rec);
+    writeManifest(dir, mk('AISDLC-2'));
+    writeManifest(
+      dir,
+      mk('AISDLC-4', {
+        resume: {
+          note: 'fix CI',
+          prNumber: 7,
+          resumedAt: '2026-10-16T10:00:00.000Z',
+          resumedBy: 'test',
+        } as DispatchManifest['resume'],
+      }),
+    );
+    const r = claimNext(dir, 'in-session-agent', undefined, { workerId: 'alpha' });
+    expect(r.manifest?.taskId).toBe('AISDLC-4');
+  });
+
   it('does not block on a delivered PR', () => {
     const dir = board({ ...rec, delivered: '2026-10-16T10:00:00Z' });
     writeManifest(dir, mk('AISDLC-2'));
