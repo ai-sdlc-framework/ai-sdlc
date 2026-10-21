@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-21T17:49:33.836Z","decisionId":"DEC-0267","chosenOptionId":"delete-text-matcher","rationale":"Operator, 2026-10-21 18:50Z: the server-side controls hold with or without the local text guard; the guard only produces false refusals.","by":"dominique@reliablegenius.io"}
