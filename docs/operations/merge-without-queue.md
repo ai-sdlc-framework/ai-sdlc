@@ -59,6 +59,17 @@ AISDLC-398 changed the content hash to be base-independent (`headBlobSha` only).
    by its executor or the conflict-resolver agent (AISDLC-727 / DEC-0056).
 ```
 
+### Two repository shapes for `--arm` (AISDLC-1009)
+
+`cli-merge-if-eligible --arm` reads the repository's `allow_auto_merge` once per run and reports what GitHub shows, never what it was asked to do.
+
+| Shape | `allow_auto_merge` | What `--arm` does | Report |
+|---|---|---|---|
+| Auto-merge available | `true` | Asks GitHub to merge later, then reads the PR back | `ARMED` only when the read-back shows an `autoMergeRequest`; `LANDED` if GitHub merged at once; otherwise `REFUSED` with the observed state |
+| Auto-merge unavailable (GitHub Free private repository) | `false` | There is no "later": an eligible PR (green, CLEAN, trusted) takes the direct landing path | `LANDED` with the merge sha; a PR not yet eligible reports `NOT-ARMABLE: auto-merge unavailable on this repository (<reason>)` and nothing is armed, so dispatch retries next tick |
+
+The audit record carries the observed outcome (`armed`, `landed`, `not-armable`, `refused`) and the `allow_auto_merge` value (`null` when unreadable, which keeps the arm path). See the GitHub Free row in `docs/operations/tooling-limitations.md`.
+
 CI runs once per pull request (AISDLC-727): `ai-sdlc-gate.yml` is the only workflow that runs the suite on `pull_request` events. `ci.yml` runs on pushes to `main` and the nightly schedule only (the post-merge full run). The jobs that used to exist only in `ci.yml` (`Backlog Drift`, first-run smoke, Python SDK, Go SDK) moved into the gate workflow and feed `ai-sdlc/pr-ready`; `Backlog Drift` is a `needs:` of the rollup, not a separately required context.
 
 Per push, a trusted PR starts two workflows: `ai-sdlc-gate.yml` and `auto-enable-auto-merge.yml` (AISDLC-934, DEC-0250). The issue-link and RFC lifecycle checks are jobs of the gate and feed `ai-sdlc/pr-ready`; CodeQL scans `main` and a weekly schedule, not PRs. The untrusted-contributor workflows start only to skip their jobs for trusted PRs. See the "Consolidated gate" section of `docs/operations/quality-gate.md`.

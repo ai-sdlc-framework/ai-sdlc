@@ -58,6 +58,10 @@ export function renderResult(result: RunMergeIfEligibleResult): string {
     lines.push(
       `${prefix} | DRY-RUN | eligible=${result.eligibility.eligible} | ${result.eligibility.reason} | policy source: target repo origin/main via GitHub API`,
     );
+  } else if (result.outcome === 'landed') {
+    lines.push(`${prefix} | LANDED | ${result.eligibility.reason}`);
+  } else if (result.outcome === 'not-armable') {
+    lines.push(`${prefix} | NOT-ARMABLE | ${result.eligibility.reason}`);
   } else if (result.merged) {
     lines.push(`${prefix} | MERGED | ${result.eligibility.reason}`);
   } else if (result.armed) {
@@ -76,6 +80,9 @@ export function renderJsonResult(result: RunMergeIfEligibleResult): string {
         prNumber: result.prNumber,
         merged: result.merged,
         armed: Boolean(result.armed),
+        ...(result.outcome ? { outcome: result.outcome } : {}),
+        ...(result.allowAutoMerge !== undefined ? { allowAutoMerge: result.allowAutoMerge } : {}),
+        ...(result.mergeSha ? { mergeSha: result.mergeSha } : {}),
         dryRun: result.dryRun,
         policy: result.policy,
         reason: result.eligibility.reason,

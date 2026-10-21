@@ -58,6 +58,17 @@ function makeFakeRunner(handlers: Record<string, Partial<ExecResult> | Error>) {
   const runner: Runner = async (command, args, opts) => {
     calls.push({ command, args });
     const key = `${command} ${args.join(' ')}`;
+    // Default PR read-back (AISDLC-1009): an explicit handler naming autoMergeRequest wins.
+    if (
+      key.includes('autoMergeRequest,state,mergeCommit') &&
+      !Object.keys(handlers).some((h) => h.includes('autoMergeRequest'))
+    ) {
+      return {
+        stdout: JSON.stringify({ autoMergeRequest: { enabledAt: 'now' }, state: 'OPEN' }),
+        stderr: '',
+        code: 0,
+      };
+    }
     for (const [pattern, response] of Object.entries(handlers)) {
       if (key.includes(pattern)) {
         if (response instanceof Error) throw response;
@@ -2226,5 +2237,111 @@ describe('runMergeIfEligible - docs lane (AISDLC-878)', () => {
       docsLanePathRefusal([{ path: DOC, previousPath: 'scripts/x.sh', status: 'renamed' }]),
     ).toMatch(/scripts\/x\.sh/);
     expect(docsLanePathRefusal([{ path: 'docs/../src/x.ts', status: 'added' }])).toMatch(/\.\./);
+  });
+});
+
+describe('runMergeIfEligible — arm reports what GitHub shows (AISDLC-1009)', () => {
+  const SHA = 'c'.repeat(40);
+  const readback = (v: Record<string, unknown>) => ({
+    'gh pr view 42 --json autoMergeRequest': { stdout: JSON.stringify(v) },
+  });
+  const base = (allow: string, extra: Record<string, Partial<ExecResult>> = {}) =>
+    Object.fromEntries([
+      ...Object.entries(extra),
+      ...Object.entries(defaults(allow)).filter(([k]) => !(k in extra)),
+    ]);
+  const defaults = (allow: string): Record<string, Partial<ExecResult>> => ({
+    ...readback({ autoMergeRequest: null, state: 'MERGED', mergeCommit: { oid: SHA } }),
+    'gh api repos/org/repo --jq': { stdout: `${allow}\n` },
+    'gh pr view 42': { stdout: prView() },
+    ...MAIN_REF,
+    ...CLEAN_FILES,
+    'gh pr checks 42 --required': { stdout: JSON.stringify([{ name: 'ci', state: 'SUCCESS' }]) },
+    ...COMMIT_OPERATOR,
+    ...shaChecks(HEAD_A, [['ci', 'completed', 'success']]),
+    'gh pr merge 42': {},
+  });
+  const armedView = readback({ autoMergeRequest: { enabledAt: 'x' }, state: 'OPEN' });
+  const blocked = { 'gh pr view 42': { stdout: prView({ mergeStateStatus: 'BLOCKED' }) } };
+  function run(handlers: Record<string, Partial<ExecResult> | Error>, audits?: unknown[]) {
+    const fake = makeFakeRunner(handlers);
+    const promise = runMergeIfEligible({
+      prNumber: 42,
+      sourceKind: 'backlog',
+      repoSlug: 'org/repo',
+      repoRoot: '/unused',
+      runner: fake.runner,
+      policyYaml: GREEN_YAML,
+      taskPrefix: 'AISDLC',
+      mode: 'arm',
+      auditWriter: audits ? (r) => audits.push(r) : undefined,
+    });
+    return { promise, calls: fake.calls };
+  }
+  const autoCalls = (calls: RecordedCall[]) => calls.filter((c) => c.args.includes('--auto'));
+
+  it('allow_auto_merge=false + eligible PR: lands directly, reports landed with the sha, never arms', async () => {
+    const { promise, calls } = run(base('false'));
+    const r = await promise;
+    expect(r).toMatchObject({
+      merged: true,
+      outcome: 'landed',
+      mergeSha: SHA,
+      allowAutoMerge: false,
+    });
+    expect(r.armed).toBeFalsy();
+    expect(r.eligibility.reason).toContain(SHA);
+    expect(autoCalls(calls)).toEqual([]);
+    expect(calls.some((c) => c.args.includes('merge') && c.args.includes('42'))).toBe(true);
+  });
+
+  it('allow_auto_merge=false + PR not yet eligible: not-armable naming the reason, nothing merged or armed', async () => {
+    const { promise, calls } = run(base('false', blocked));
+    const r = await promise;
+    expect(r).toMatchObject({ merged: false, outcome: 'not-armable', allowAutoMerge: false });
+    expect(r.eligibility.eligible).toBe(false);
+    expect(r.eligibility.reason).toMatch(/^not-armable: auto-merge unavailable on this repository/);
+    expect(r.eligibility.reason).toContain('BLOCKED');
+    expect(calls.some((c) => c.args.includes('merge'))).toBe(false);
+  });
+
+  it('allow_auto_merge=true: ARMED only after the read-back shows an autoMergeRequest', async () => {
+    const armed = await run(base('true', armedView)).promise;
+    expect(armed).toMatchObject({ armed: true, outcome: 'armed', allowAutoMerge: true });
+  });
+
+  it('allow_auto_merge=true: a read-back without autoMergeRequest reports the observed state, not ARMED', async () => {
+    const open = await run(base('true', readback({ autoMergeRequest: null, state: 'OPEN' })))
+      .promise;
+    expect(open.armed).toBeFalsy();
+    expect(open.outcome).toBe('refused');
+    expect(open.eligibility.reason).toMatch(/state=OPEN, no autoMergeRequest/);
+    const landed = await run(base('true')).promise;
+    expect(landed).toMatchObject({ merged: true, outcome: 'landed', mergeSha: SHA });
+    expect(landed.armed).toBeFalsy();
+    const broken = await run(base('true', { 'gh pr view 42 --json autoMergeRequest': { code: 1 } }))
+      .promise;
+    expect(broken.eligibility.reason).toMatch(/could not read the PR back/);
+  });
+
+  it('an unreadable allow_auto_merge keeps the arm path (null recorded)', async () => {
+    const r = await run(base('', { ...armedView, 'gh api repos/org/repo --jq': { code: 1 } }))
+      .promise;
+    expect(r).toMatchObject({ armed: true, allowAutoMerge: null });
+    const odd = await run(base('maybe', armedView)).promise;
+    expect(odd.allowAutoMerge).toBeNull();
+  });
+
+  it('the audit record carries the observed outcome and allow_auto_merge', async () => {
+    const files = changedFiles([['.ai-sdlc/agent-role.yaml', 'modified']]);
+    const audits: Array<Record<string, unknown>> = [];
+    await run({ ...base('false'), ...files }, audits).promise;
+    await run({ ...base('true', armedView), ...files }, audits).promise;
+    await run({ ...base('false', blocked), ...files }, audits).promise;
+    expect(audits.map((a) => [a['outcome'], a['allowAutoMerge']])).toEqual([
+      ['landed', false],
+      ['armed', true],
+      ['not-armable', false],
+    ]);
   });
 });

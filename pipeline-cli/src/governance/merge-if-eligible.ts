@@ -1245,6 +1245,69 @@ export async function armPr(
   return { ok: out.code === 0, error: out.stderr.trim() };
 }
 
+/**
+ * Repository `allow_auto_merge` setting (GitHub Free private repos: false, so
+ * `--auto` lands a clean PR at once instead of waiting). `null` = unreadable
+ * (callers keep the arm path, whose read-back then reports what GitHub shows).
+ */
+export async function fetchAllowAutoMerge(
+  repoSlug: string,
+  runner: Runner,
+  cwd?: string,
+): Promise<boolean | null> {
+  try {
+    const out = await runner('gh', ['api', `repos/${repoSlug}`, '--jq', '.allow_auto_merge'], {
+      cwd,
+      allowFailure: true,
+    });
+    if (out.code !== 0) return null;
+    const v = out.stdout.trim();
+    return v === 'true' ? true : v === 'false' ? false : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface PrObservedState {
+  state: string;
+  autoMergeArmed: boolean;
+  mergeSha: string | null;
+}
+
+/** Read back what GitHub shows after an arm or merge; `null` when unreadable. */
+export async function fetchObservedState(
+  prNumber: number,
+  repoSlug: string,
+  runner: Runner,
+  cwd?: string,
+): Promise<PrObservedState | null> {
+  try {
+    const out = await runner(
+      'gh',
+      [
+        'pr',
+        'view',
+        String(prNumber),
+        '--json',
+        'autoMergeRequest,state,mergeCommit',
+        '--repo',
+        repoSlug,
+      ],
+      { cwd, allowFailure: true },
+    );
+    if (out.code !== 0) return null;
+    const p = JSON.parse(out.stdout) as Record<string, unknown>;
+    const mc = p['mergeCommit'] as { oid?: unknown } | null | undefined;
+    return {
+      state: typeof p['state'] === 'string' ? p['state'] : 'UNKNOWN',
+      autoMergeArmed: p['autoMergeRequest'] != null,
+      mergeSha: typeof mc?.oid === 'string' ? mc.oid : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** `owner/repo` of the checkout at `cwd` via `gh repo view`; `null` on failure or empty output. */
 export async function resolveRepoSlug(runner: Runner, cwd?: string): Promise<string | null> {
   const out = await runner(
@@ -1297,13 +1360,21 @@ export interface RunMergeIfEligibleOptions {
   auditWriter?: BacklogAuditWriter;
 }
 
+export type ArmOutcome = 'armed' | 'landed' | 'not-armable' | 'refused';
+
 export interface RunMergeIfEligibleResult {
   prNumber: number;
   policy: GovernancePolicy;
   eligibility: MergeEligibilityResult;
   merged: boolean;
-  /** True when auto-merge was armed (`mode: 'arm'`). */
+  /** True when auto-merge was armed (`mode: 'arm'`) and the read-back shows an autoMergeRequest. */
   armed?: boolean;
+  /** Observed outcome in `mode: 'arm'` (AISDLC-1009). */
+  outcome?: ArmOutcome;
+  /** Repository `allow_auto_merge`; `null` = unreadable (arm mode only). */
+  allowAutoMerge?: boolean | null;
+  /** Merge commit sha when the CLI landed the PR itself. */
+  mergeSha?: string;
   dryRun: boolean;
   /** DEC-0072: governance-sensitive paths a trusted PR changed (audited, not refused). */
   governanceSensitivePaths?: string[];
@@ -1319,7 +1390,9 @@ export interface BacklogMergeAuditRecord {
   mode: 'merge' | 'arm';
   headSha: string;
   governanceSensitivePaths: string[];
-  outcome: 'merged' | 'armed' | 'refused' | 'dry-run';
+  outcome: 'merged' | 'armed' | 'landed' | 'not-armable' | 'refused' | 'dry-run';
+  /** Repository `allow_auto_merge` at decision time (arm mode); `null` = unreadable. */
+  allowAutoMerge?: boolean | null;
   reason: string;
 }
 
@@ -1511,6 +1584,7 @@ export async function runMergeIfEligible(
       ? ` — governance-sensitive paths changed (audited, DEC-0072): ${sensitive.join(', ')}`
       : '';
   const mode = opts.mode === 'arm' ? 'arm' : 'merge';
+  let allowAutoMerge: boolean | null | undefined;
   const audit = (outcome: BacklogMergeAuditRecord['outcome'], reason: string): void => {
     if (sensitive.length === 0 || !opts.auditWriter) return;
     try {
@@ -1524,6 +1598,7 @@ export async function runMergeIfEligible(
         headSha: snapshot.headRefOid,
         governanceSensitivePaths: sensitive,
         outcome,
+        ...(allowAutoMerge !== undefined ? { allowAutoMerge } : {}),
         reason,
       });
     } catch {
@@ -1534,6 +1609,13 @@ export async function runMergeIfEligible(
     sensitive.length > 0 ? { ...r, governanceSensitivePaths: sensitive } : r;
 
   if (opts.mode === 'arm') {
+    allowAutoMerge = await fetchAllowAutoMerge(opts.repoSlug, opts.runner, opts.cwd);
+  }
+
+  // Auto-merge unavailable: there is no "later", so --arm on a clean PR is a direct landing.
+  const directLanding = opts.mode === 'arm' && allowAutoMerge === false;
+
+  if (opts.mode === 'arm' && !directLanding) {
     const armEligibility: MergeEligibilityResult = {
       eligible: true,
       reason:
@@ -1561,7 +1643,6 @@ export async function runMergeIfEligible(
           'checks — refusing to arm; re-run for the new head',
       );
     }
-    audit('armed', armEligibility.reason);
     const armResult = await armPr(
       opts.prNumber,
       opts.repoSlug,
@@ -1576,12 +1657,38 @@ export async function runMergeIfEligible(
           (armResult.error || '(no error text)'),
       );
     }
+    const observed = await fetchObservedState(opts.prNumber, opts.repoSlug, opts.runner, opts.cwd);
+    if (observed?.state === 'MERGED') {
+      const reason = `${armEligibility.reason} — GitHub landed the PR at once (sha ${observed.mergeSha ?? 'unknown'}); nothing was left to arm`;
+      audit('landed', reason);
+      return withPaths({
+        prNumber: opts.prNumber,
+        policy,
+        eligibility: { eligible: true, reason },
+        merged: true,
+        outcome: 'landed',
+        allowAutoMerge,
+        ...(observed.mergeSha ? { mergeSha: observed.mergeSha } : {}),
+        dryRun: false,
+      });
+    }
+    if (!observed?.autoMergeArmed) {
+      const shown = observed
+        ? `state=${observed.state}, no autoMergeRequest`
+        : 'could not read the PR back';
+      const reason = `the arm call succeeded but GitHub shows ${shown} — not armed`;
+      audit('refused', reason);
+      return { ...refuse(reason), outcome: 'refused', allowAutoMerge };
+    }
+    audit('armed', armEligibility.reason);
     return withPaths({
       prNumber: opts.prNumber,
       policy,
       eligibility: armEligibility,
       merged: false,
       armed: true,
+      outcome: 'armed',
+      allowAutoMerge,
       dryRun: false,
     });
   }
@@ -1633,6 +1740,19 @@ export async function runMergeIfEligible(
 
   if (!eligibility.eligible || opts.dryRun) {
     if (eligibility.eligible) audit('dry-run', eligibility.reason);
+    if (directLanding && !eligibility.eligible) {
+      const reason = `not-armable: auto-merge unavailable on this repository (${eligibility.reason})`;
+      audit('not-armable', reason);
+      return withPaths({
+        prNumber: opts.prNumber,
+        policy,
+        eligibility: { eligible: false, reason },
+        merged: false,
+        outcome: 'not-armable',
+        allowAutoMerge,
+        dryRun: Boolean(opts.dryRun),
+      });
+    }
     return withPaths({
       prNumber: opts.prNumber,
       policy,
@@ -1672,6 +1792,23 @@ export async function runMergeIfEligible(
       `the merge was refused by GitHub (head pinned to ${snapshot.headRefOid}; a head that moved ` +
         `after the check fails closed): ${mergeResult.error || '(no error text)'}`,
     );
+  }
+
+  if (directLanding) {
+    const observed = await fetchObservedState(opts.prNumber, opts.repoSlug, opts.runner, opts.cwd);
+    const mergeSha = observed?.mergeSha ?? undefined;
+    const reason = `${eligibility.reason} — auto-merge unavailable on this repository, landed directly${mergeSha ? ` (sha ${mergeSha})` : ''}`;
+    audit('landed', reason);
+    return withPaths({
+      prNumber: opts.prNumber,
+      policy,
+      eligibility: { eligible: true, reason },
+      merged: true,
+      outcome: 'landed',
+      allowAutoMerge,
+      ...(mergeSha ? { mergeSha } : {}),
+      dryRun: false,
+    });
   }
 
   audit('merged', eligibility.reason);

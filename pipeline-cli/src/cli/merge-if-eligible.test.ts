@@ -87,6 +87,17 @@ function makeFakeRunner(handlers: Record<string, Partial<ExecResult> | Error>) {
   const runner: Runner = async (command, args, opts) => {
     calls.push({ command, args });
     const key = `${command} ${args.join(' ')}`;
+    // Default PR read-back (AISDLC-1009): an explicit handler naming autoMergeRequest wins.
+    if (
+      key.includes('autoMergeRequest,state,mergeCommit') &&
+      !Object.keys(handlers).some((h) => h.includes('autoMergeRequest'))
+    ) {
+      return {
+        stdout: JSON.stringify({ autoMergeRequest: { enabledAt: 'now' }, state: 'OPEN' }),
+        stderr: '',
+        code: 0,
+      };
+    }
     for (const [pattern, response] of Object.entries(handlers)) {
       if (key.includes(pattern)) {
         if (response instanceof Error) throw response;
