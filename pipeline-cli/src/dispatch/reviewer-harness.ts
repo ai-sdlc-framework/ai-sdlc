@@ -15,6 +15,8 @@
  * Developer dispatch is never affected by this override.
  */
 
+import { routedModel } from '../routing/role-model.js';
+
 /** The four dispatchable roles. */
 export type ReviewerRole = 'code' | 'test' | 'security' | 'developer';
 
@@ -37,10 +39,9 @@ export interface ResolvedReviewer {
   harness: 'codex' | 'claude-code';
   /**
    * The model the agent should use.
-   * 'inherit' means the agent frontmatter governs (used when the agent already
-   * pins its model, e.g. security-reviewer = opus, developer = sonnet).
+   * Resolved from `.ai-sdlc/model-routing.yaml` through `routedModel`.
    */
-  model: 'inherit' | 'sonnet' | 'opus';
+  model: string;
 }
 
 /**
@@ -55,7 +56,7 @@ export interface ResolvedReviewer {
 export function resolveReviewer(role: ReviewerRole, overrideHarness?: string): ResolvedReviewer {
   // Developer dispatch is never affected by the reviewer-harness override.
   if (role === 'developer') {
-    return { agentName: 'developer', harness: 'claude-code', model: 'sonnet' };
+    return { agentName: 'developer', harness: 'claude-code', model: routedModel('developer') };
   }
 
   // Security review always stays on Claude-native opus — reasoning-heavy work
@@ -64,7 +65,7 @@ export function resolveReviewer(role: ReviewerRole, overrideHarness?: string): R
     return {
       agentName: 'security-reviewer',
       harness: 'claude-code',
-      model: 'opus',
+      model: routedModel('security-reviewer'),
     };
   }
 
@@ -74,16 +75,32 @@ export function resolveReviewer(role: ReviewerRole, overrideHarness?: string): R
 
   if (role === 'code') {
     if (forceClaudeNative) {
-      return { agentName: 'code-reviewer', harness: 'claude-code', model: 'sonnet' };
+      return {
+        agentName: 'code-reviewer',
+        harness: 'claude-code',
+        model: routedModel('code-reviewer'),
+      };
     }
-    return { agentName: 'code-reviewer-codex', harness: 'codex', model: 'inherit' };
+    return {
+      agentName: 'code-reviewer-codex',
+      harness: 'codex',
+      model: routedModel('code-reviewer-codex'),
+    };
   }
 
   // role === 'test'
   if (forceClaudeNative) {
-    return { agentName: 'test-reviewer', harness: 'claude-code', model: 'sonnet' };
+    return {
+      agentName: 'test-reviewer',
+      harness: 'claude-code',
+      model: routedModel('test-reviewer'),
+    };
   }
-  return { agentName: 'test-reviewer-codex', harness: 'codex', model: 'inherit' };
+  return {
+    agentName: 'test-reviewer-codex',
+    harness: 'codex',
+    model: routedModel('test-reviewer-codex'),
+  };
 }
 
 /**
@@ -110,6 +127,10 @@ export function resolveReviewerByClassifierName(
     default:
       // Unknown classifier name — fall back to claude-native with sonnet so
       // the pipeline doesn't silently drop an unknown reviewer.
-      return { agentName: classifierName, harness: 'claude-code', model: 'sonnet' };
+      return {
+        agentName: classifierName,
+        harness: 'claude-code',
+        model: routedModel('code-reviewer'),
+      };
   }
 }

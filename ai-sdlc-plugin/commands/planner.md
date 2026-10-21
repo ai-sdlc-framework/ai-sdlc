@@ -9,7 +9,7 @@ argument-hint: ''
 allowed-tools:
   - Read
   - Bash
-model: sonnet
+model: fable
 rung: 4
 ---
 

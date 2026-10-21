@@ -6,3 +6,4 @@ export * from './resolve-model.js';
 export * from './task-class.js';
 export * from './artifacts-dir.js';
 export * from './revert.js';
+export * from './role-model.js';

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-982
 title: 'model-routing.yaml is the single source for role to model; fill the cells; pins gate asserts frontmatter equals the table'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-20'
 labels:

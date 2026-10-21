@@ -34,7 +34,8 @@ import type {
   SubagentSpawner,
 } from '../types.js';
 
-const DEFAULT_MAX_ITERATIONS = 2;
+/** The review-iteration cap; the single definition (AISDLC-982). */
+export const DEFAULT_MAX_ITERATIONS = 2;
 
 /**
  * Run the review-iteration loop. The first iteration's developer return

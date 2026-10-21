@@ -86,6 +86,12 @@
 
 set -euo pipefail
 
+# Capitalised developer model from .ai-sdlc/model-routing.yaml for the commit trailer (AISDLC-982).
+routed_model_name() {
+  sed -n '/^    developer:/,/model:/s/.*model: *\([A-Za-z0-9._-]*\).*/\1/p' .ai-sdlc/model-routing.yaml 2>/dev/null \
+    | head -1 | awk '{print toupper(substr($0,1,1)) substr($0,2)}'
+}
+
 # ── Master bypasses ───────────────────────────────────────────────────
 if [ "${AI_SDLC_BYPASS_ALL_GATES:-0}" = "1" ]; then
   echo "[sign-attestation-if-consumer] AI_SDLC_BYPASS_ALL_GATES=1 — skipping" >&2
@@ -435,7 +441,7 @@ Signed in-process by scripts/sign-attestation-if-consumer.sh because this
 repo's push path does not reach the ai-sdlc attestation signer hook.
 Reviewers' verdicts at .ai-sdlc/verdicts/$TASK_ID_LOWER.json.
 
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>" >&2
+Co-Authored-By: Claude $(routed_model_name) <noreply@anthropic.com>" >&2
 ) || {
   echo "[sign-attestation-if-consumer] ERROR: git add/commit of attestation failed; aborting" >&2
   exit 2

@@ -146,6 +146,7 @@ import {
   formatWebhookStatus,
 } from '../hierarchy/index.js';
 import { createSnapshotRunner } from '../hierarchy/pr-snapshot.js';
+import { routedModel } from '../routing/role-model.js';
 import { findTaskFile, parseArgv, resolveBaseSha } from './dispatch.js';
 
 /** Dispatch holds its resume this long (upper bound; a new board file wakes it sooner). */
@@ -178,7 +179,7 @@ Commands:
 
 Options for up:
   --executors <n>          Number of executors, 0 to 5 (default 5)
-  --planner-model <m>      Planner model (default fable)
+  --planner-model <m>      Planner model (default: the planner cell of model-routing.yaml)
   --dispatch-model <m>     Dispatch model (default sonnet)
   --executor-model <m>     Executor model (default sonnet)
   --no-planner             Do not start a planner
@@ -524,7 +525,7 @@ export async function runHierarchyCli(
         const result = await hierarchyUp(
           {
             executors: flags.executors ?? '5',
-            plannerModel: flags['planner-model'] ?? 'fable',
+            plannerModel: flags['planner-model'] ?? routedModel('planner'),
             dispatchModel: flags['dispatch-model'] ?? 'sonnet',
             executorModel: flags['executor-model'] ?? 'sonnet',
             noPlanner: flags['no-planner'] === 'true',
