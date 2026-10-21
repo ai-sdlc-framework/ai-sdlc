@@ -33,6 +33,12 @@ task-breakdown PR (the AISDLC-377 phase files) shipped with Gate-3
 unresolved-reference violations on every task and the merge state was
 CLEAN — auto-merge armed against the violations.
 
+## Issue path and Stage B call graph (AISDLC-979)
+
+External GitHub issues enter only through `/ai-sdlc execute gh:<n>` run by a local agent; no CI trigger fires on an issue label (the `ai-eligible` label is removed).
+
+DoR Stage B (`evaluateStageB`, `pipeline-cli/src/dor/stage-b.ts:321`) has a production path: `cli-dor-check` (`pipeline-cli/src/cli/dor-check.ts:23`) calls `refineBacklogTask` (`dor/ingress-claude.ts:209`), which calls `evaluateIssueE2EDetailed` (`ingress-claude.ts:280`), which calls `evaluateStageB` (`dor/composite.ts:227`). `import-spec/dor-at-import.ts:40` and `cli/index.ts:42` reach the same chain. `corpus-e2e.ts:159` is the corpus harness only.
+
 ## Gate 3 reference scope (AISDLC-898)
 
 Gate 3 resolves only intentional references: frontmatter `references:`, markdown

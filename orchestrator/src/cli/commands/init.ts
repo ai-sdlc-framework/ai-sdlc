@@ -66,10 +66,7 @@ metadata:
   name: default
 spec:
   triggers:
-    - event: issue.labeled
-      filter:
-        labels:
-          - ai-eligible
+    - event: issue.assigned
   providers:
     sourceControl:
       type: github

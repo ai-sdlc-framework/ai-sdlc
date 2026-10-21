@@ -41,7 +41,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
       '2',
     ].join('\n'),
     status: 'open',
-    labels: ['ai-eligible', 'bug'],
+    labels: ['ready', 'bug'],
     url: 'https://github.com/ai-sdlc-framework/ai-sdlc/issues/42',
     ...overrides,
   };
