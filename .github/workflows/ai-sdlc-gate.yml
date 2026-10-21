@@ -128,7 +128,7 @@ jobs:
           # Fail safe: any inability to compute the PR diff resolves to
           # docs_only=false (run the full matrix), never true.
           if [ -n "$BASE_SHA" ]; then
-            if FILES=$(git -c core.quotePath=false diff --name-only "$BASE_SHA" "$HEAD_SHA"); then
+            if FILES=$(git -c core.quotePath=false diff --name-only "$BASE_SHA...$HEAD_SHA"); then
               RESULT=$(printf '%s\n' "$FILES" | node scripts/is-docs-only-changeset.mjs)
               CLASS=$(printf '%s\n' "$FILES" | node scripts/is-docs-only-changeset.mjs --class)
             else
@@ -1245,7 +1245,7 @@ jobs:
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
 
           # List RFC files that changed between base and head.
-          changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- 'spec/rfcs/*.md' 2>/dev/null || true)"
+          changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA" -- 'spec/rfcs/*.md' 2>/dev/null || true)"
 
           # Sanitise: remove template file (not a real RFC).
           changed="$(printf '%s\n' "$changed" | grep -v 'RFC-0001-template.md' || true)"

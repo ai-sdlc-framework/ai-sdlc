@@ -1,7 +1,7 @@
 ---
 id: AISDLC-996
 title: 'Gate classify uses a three-dot diff; rfc-check regression test stops inheriting GITHUB_BASE_REF'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-20'
 labels:

@@ -500,6 +500,12 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     assert.equal(classify.env.HEAD_SHA, '${{ github.event.pull_request.head.sha }}');
     assert.ok(!classify.run.includes('${{'), 'no expression interpolation inside the script');
     assert.match(classify.run, /set -euo pipefail/);
+    assert.match(
+      classify.run,
+      /diff --name-only "\$BASE_SHA\.\.\.\$HEAD_SHA"/,
+      'three-dot diff from the fork point',
+    );
+    assert.doesNotMatch(classify.run, /diff --name-only "\$BASE_SHA" "\$HEAD_SHA"/);
   });
 
   it('deps and tasks dorny filters are still present and wired to outputs', () => {
