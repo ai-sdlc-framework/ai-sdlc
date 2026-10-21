@@ -1130,6 +1130,13 @@ jobs:
             --base-ref "$MB" --head-ref "$HEAD_SHA" \
             --approving-logins-file "$RUNNER_TEMP/approving-logins.json" \
             --pr-author "$PR_AUTHOR"
+      # AISDLC-987: RFC Registry view and completed-task statuses (docs lane).
+      # Hygiene check, not a trust control: runs the PR's own scripts on its tree.
+      - name: RFC Registry and completed-task status drift
+        run: |
+          set -euo pipefail
+          node scripts/check-rfc-registry.mjs
+          node scripts/check-completed-status.mjs
 
   # ── Issue / task link (AISDLC-934) ──────────────────────────────────────
   # Folded in from the removed require-issue-link.yml (AISDLC-443, AISDLC-700).

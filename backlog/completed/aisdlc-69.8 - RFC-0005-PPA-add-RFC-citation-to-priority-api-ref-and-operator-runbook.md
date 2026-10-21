@@ -1,7 +1,7 @@
 ---
 id: AISDLC-69.8
 title: RFC-0005 PPA — add RFC citation to priority api-ref and operator runbook
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-30 17:35'
 updated_date: '2026-04-30 17:35'

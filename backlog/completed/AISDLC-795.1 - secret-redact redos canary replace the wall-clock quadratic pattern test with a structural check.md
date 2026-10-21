@@ -2,7 +2,7 @@
 id: AISDLC-795.1
 title: >-
   secret-redact ReDoS canary: replace the wall-clock quadratic-pattern test with a structural check
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-11'
 labels:

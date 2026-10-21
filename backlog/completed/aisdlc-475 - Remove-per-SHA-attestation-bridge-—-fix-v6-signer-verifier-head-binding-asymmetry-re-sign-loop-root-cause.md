@@ -3,7 +3,7 @@ id: AISDLC-475
 title: >-
   Remove per-SHA attestation bridge — fix v6 signer/verifier head-binding
   asymmetry (re-sign loop root cause)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-29 17:42'
 labels:

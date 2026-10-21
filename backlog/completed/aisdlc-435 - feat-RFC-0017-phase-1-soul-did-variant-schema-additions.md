@@ -1,7 +1,7 @@
 ---
 id: AISDLC-435
 title: 'feat: RFC-0017 Phase 1 — Soul DID + Work Item schema additions (variants[] + targetedVariants) + inheritance validator'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-18'
 labels:

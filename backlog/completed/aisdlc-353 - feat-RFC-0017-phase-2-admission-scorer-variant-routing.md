@@ -1,7 +1,7 @@
 ---
 id: AISDLC-353
 title: 'feat: RFC-0017 Phase 2 — admission scorer composition (Sα₁ + Sα₂ variant routing) + cross-variant aggregation'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-18'
 labels:

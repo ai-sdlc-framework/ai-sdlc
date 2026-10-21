@@ -3,7 +3,7 @@ id: AISDLC-483
 title: >-
   feat: default code/test review dispatch to the Codex harness and dev/subagent
   dispatch to Sonnet (cost control)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-30 20:30'
 labels:

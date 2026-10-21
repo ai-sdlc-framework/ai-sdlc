@@ -1,7 +1,7 @@
 ---
 id: AISDLC-327
 title: 'feat: RFC-0036 Phase 2 — `ai-sdlc rfc init` CLI + adopter RFC template + tutorial'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-16'
 labels:

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-326
 title: 'feat: RFC-0036 Phase 1 — spec-driven concepts doc + three-tier authoring model'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-16'
 labels:

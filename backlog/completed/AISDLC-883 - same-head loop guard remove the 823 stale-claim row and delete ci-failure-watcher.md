@@ -4,7 +4,7 @@ title: >-
   feat(dispatch): same-head loop guard for PR follow-ups; remove the 823
   stale-claim row in favour of 826; delete ci-failure-watcher as a duplicate
   poller
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels:

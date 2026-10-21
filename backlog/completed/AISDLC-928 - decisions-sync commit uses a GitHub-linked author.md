@@ -1,7 +1,7 @@
 ---
 id: AISDLC-928
 title: 'fix: decisions-sync commit uses a GitHub-linked author so the sanctioned landing path accepts it'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [bug, decisions, governance, pipeline-cli, velocity]

@@ -3,7 +3,7 @@ id: AISDLC-537
 title: >-
   chore(deps): bump Next.js in dashboard to resolve high-severity advisories
   (SSRF, DoS, middleware/proxy bypass)
-status: To Do
+status: Done
 assignee: []
 labels:
   - security

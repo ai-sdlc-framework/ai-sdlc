@@ -1,7 +1,7 @@
 ---
 id: AISDLC-368
 title: 'perf(ci): collapse Node matrix + isolate flaky tests + pre-commit short-circuit for ~50% CI throughput'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-19'
 labels:

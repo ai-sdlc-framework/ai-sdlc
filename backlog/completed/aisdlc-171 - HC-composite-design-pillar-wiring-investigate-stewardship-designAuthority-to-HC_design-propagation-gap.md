@@ -1,7 +1,7 @@
 ---
 id: AISDLC-171
 title: 'HC composite design pillar wiring: investigate stewardship.designAuthority → HC_design propagation gap'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-03'
 labels:

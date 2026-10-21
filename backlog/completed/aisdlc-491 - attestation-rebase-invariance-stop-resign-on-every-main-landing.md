@@ -3,7 +3,7 @@ id: AISDLC-491
 title: >-
   Attestation rebase-invariance — stop forcing a re-sign on every main landing
   (merge-queue OR v6-verifier-rebase-fallback bug)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-31'
 labels:

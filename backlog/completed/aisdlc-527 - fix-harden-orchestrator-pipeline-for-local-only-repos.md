@@ -3,7 +3,7 @@ id: AISDLC-527
 title: >-
   fix(orchestrator): harden pipeline for local-only repos — guard git remote,
   ABAC write-perms, and AgentResult.filesChanged
-status: In Progress
+status: Done
 assignee: []
 labels:
   - bug

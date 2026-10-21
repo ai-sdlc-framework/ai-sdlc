@@ -1,7 +1,7 @@
 ---
 id: AISDLC-480
 title: 'feat: surface dispatched-session decisions to the Decision Catalog (async escape hatch for AskUserQuestion + blocked OQs)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-30 09:12'
 labels:

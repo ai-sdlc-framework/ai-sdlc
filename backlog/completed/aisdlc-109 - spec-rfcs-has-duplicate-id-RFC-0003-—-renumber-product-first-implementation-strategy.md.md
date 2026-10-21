@@ -3,7 +3,7 @@ id: AISDLC-109
 title: >-
   spec/rfcs/ has duplicate id: RFC-0003 — renumber
   product-first-implementation-strategy.md
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-01 05:47'
 labels:

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-361
 title: 'bug(orchestrator): admission filter ignores existing open PR for branch — admits task, aborts at Step 3 worktree-create, burns tick slot'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-17'
 labels:

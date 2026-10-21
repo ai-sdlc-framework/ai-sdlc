@@ -3,7 +3,7 @@ id: AISDLC-542
 title: >-
   fix(test): de-flake orchestrator execute.test.ts — ERR_IPC_CHANNEL_CLOSED
   worker-pool teardown race fails the full-suite gate
-status: To Do
+status: Done
 assignee: []
 labels:
   - bug

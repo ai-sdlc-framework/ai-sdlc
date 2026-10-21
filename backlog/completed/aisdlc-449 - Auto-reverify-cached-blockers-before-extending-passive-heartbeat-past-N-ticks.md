@@ -1,7 +1,7 @@
 ---
 id: AISDLC-449
 title: Auto-reverify cached blockers before extending passive heartbeat past N ticks
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-27 22:09'
 labels:

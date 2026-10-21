@@ -1,7 +1,7 @@
 ---
 id: AISDLC-875
 title: 'fix(attestation): the signed envelope always passes the prettier format check'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [attestation, ci, reliability]

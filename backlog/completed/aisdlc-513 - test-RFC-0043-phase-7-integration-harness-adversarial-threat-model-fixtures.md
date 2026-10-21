@@ -1,7 +1,7 @@
 ---
 id: AISDLC-513
 title: 'test(sandbox): RFC-0043 Phase 7 — integration harness + adversarial threat-model fixtures'
-status: To Do
+status: Done
 assignee: []
 labels:
   - rfc-0043

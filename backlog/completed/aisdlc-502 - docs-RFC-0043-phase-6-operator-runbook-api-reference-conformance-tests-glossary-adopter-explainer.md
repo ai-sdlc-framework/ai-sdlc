@@ -1,7 +1,7 @@
 ---
 id: AISDLC-502
 title: 'docs: RFC-0043 Phase 6 — operator runbook + API reference + conformance test suite + glossary + adopter explainer'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-06-02'
 labels:

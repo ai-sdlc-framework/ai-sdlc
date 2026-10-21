@@ -2,7 +2,7 @@
 id: AISDLC-825
 title: >-
   Decisions filed from a task worktree land in the parent catalog so dispatch can route them
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-12'
 labels:

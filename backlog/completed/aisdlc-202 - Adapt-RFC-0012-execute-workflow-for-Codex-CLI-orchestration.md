@@ -1,7 +1,7 @@
 ---
 id: AISDLC-202
 title: Adapt RFC-0012 execute workflow for Codex CLI orchestration
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-05 19:11'
 updated_date: '2026-05-05 20:15'

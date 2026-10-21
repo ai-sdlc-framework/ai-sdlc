@@ -3,7 +3,7 @@ id: AISDLC-357
 title: >-
   fix(infra): mcp-server stale-bundle auto-rebuild + coverage-gate flake +
   envelope-deletion safety
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-17'
 labels:

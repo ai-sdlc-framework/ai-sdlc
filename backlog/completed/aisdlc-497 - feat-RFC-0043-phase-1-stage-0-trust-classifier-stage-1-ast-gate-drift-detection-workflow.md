@@ -1,7 +1,7 @@
 ---
 id: AISDLC-497
 title: 'feat: RFC-0043 Phase 1 — Stage 0 trust classifier + Stage 1 AST gate + drift-detection workflow + trusted-reviewers.yaml author allowlist extension'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-06-02'
 labels:

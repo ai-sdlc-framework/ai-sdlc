@@ -1,7 +1,7 @@
 ---
 id: AISDLC-916
 title: 'fix: envelope formatter counts the key prefix in its line width and applied reviewers are a set'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [bug, attestation, pipeline-cli, velocity]

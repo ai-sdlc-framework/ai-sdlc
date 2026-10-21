@@ -1,7 +1,7 @@
 ---
 id: AISDLC-511
 title: 'feat(reviewers): RFC-0043 Phase 7 — in-sandbox 3-reviewer execution + real verdicts'
-status: To Do
+status: Done
 assignee: []
 labels:
   - rfc-0043

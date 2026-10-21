@@ -1,7 +1,7 @@
 ---
 id: AISDLC-508
 title: 'feat(sandbox): RFC-0043 Phase 7 — real Docker sandbox driver (isolation + resource enforcement)'
-status: To Do
+status: Done
 assignee: []
 labels:
   - rfc-0043

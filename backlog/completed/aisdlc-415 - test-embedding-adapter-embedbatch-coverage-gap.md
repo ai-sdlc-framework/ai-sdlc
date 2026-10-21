@@ -1,7 +1,7 @@
 ---
 id: AISDLC-415
 title: 'test(embedding): close embedBatch coverage gap (AISDLC-337 follow-up)'
-status: In Progress
+status: Done
 labels: [test, embedding, follow-up-aisdlc-337]
 dependencies:
   - AISDLC-337

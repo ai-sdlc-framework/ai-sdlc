@@ -3,7 +3,7 @@ id: AISDLC-224
 title: >-
   Orchestrator Step 3 should auto-cleanup stale worktree branches before
   retrying dispatch
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-06 19:49'
 labels:

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-69.7
 title: RFC-0004 cost governance — author tutorial and api-ref docs
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-30 17:35'
 updated_date: '2026-04-30 17:35'

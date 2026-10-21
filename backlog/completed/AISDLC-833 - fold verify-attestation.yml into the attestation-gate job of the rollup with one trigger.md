@@ -2,7 +2,7 @@
 id: AISDLC-833
 title: >-
   fold verify-attestation.yml into the attestation-gate job of the rollup with one trigger
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:

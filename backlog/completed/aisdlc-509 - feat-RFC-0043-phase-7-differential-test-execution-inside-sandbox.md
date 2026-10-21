@@ -1,7 +1,7 @@
 ---
 id: AISDLC-509
 title: 'feat(sandbox): RFC-0043 Phase 7 — differential test execution inside the container'
-status: To Do
+status: Done
 assignee: []
 labels:
   - rfc-0043

@@ -2,7 +2,7 @@
 id: AISDLC-821
 title: >-
   Push-only resume: when a task already holds an approved verdict, the resume rebases, builds, signs and pushes without a developer or reviewer round
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-12'
 labels:

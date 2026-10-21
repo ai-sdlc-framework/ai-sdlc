@@ -1,7 +1,7 @@
 ---
 id: AISDLC-950
 title: 'cli-file removes its untracked source copy from the parent after pushing the filing branch, so Step 0.5 does not try to re-file it under an existing branch'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels:

@@ -3,7 +3,7 @@ id: AISDLC-203
 title: >-
   Codex workflow must complete backlog tasks atomically instead of copy-only
   completed files
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-05 19:56'
 labels:

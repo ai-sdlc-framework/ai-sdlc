@@ -3,7 +3,7 @@ id: AISDLC-247
 title: >-
   Add Codex reviewer subagents to plugin for cross-harness review (Claude
   develops, Codex reviews — and inverse)
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-09 17:30'
 updated_date: '2026-05-10 14:57'

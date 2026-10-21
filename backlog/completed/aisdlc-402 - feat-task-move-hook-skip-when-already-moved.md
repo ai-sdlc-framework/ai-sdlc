@@ -1,7 +1,7 @@
 ---
 id: AISDLC-402
 title: 'fix(hooks): check-task-moved.sh skip silently when file already in backlog/completed/'
-status: In Progress
+status: Done
 labels: [hooks, operator-merge, throughput]
 references:
   - scripts/check-task-moved.sh

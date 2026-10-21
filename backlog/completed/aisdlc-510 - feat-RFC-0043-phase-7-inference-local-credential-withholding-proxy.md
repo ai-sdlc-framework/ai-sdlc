@@ -1,7 +1,7 @@
 ---
 id: AISDLC-510
 title: 'feat(sandbox): RFC-0043 Phase 7 — inference.local credential-withholding model proxy'
-status: To Do
+status: Done
 assignee: []
 labels:
   - rfc-0043

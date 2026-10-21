@@ -1,7 +1,7 @@
 ---
 id: AISDLC-374
 title: 'test(orchestrator): audit + fix float-equality .toBe() in tessellation-admission tests'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-19'
 labels:

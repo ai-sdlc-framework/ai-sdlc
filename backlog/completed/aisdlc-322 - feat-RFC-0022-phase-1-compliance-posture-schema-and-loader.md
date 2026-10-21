@@ -1,7 +1,7 @@
 ---
 id: AISDLC-322
 title: 'feat: RFC-0022 Phase 1 — CompliancePosture schema + loader + override-notes validation'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-16'
 labels:

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-512
 title: 'feat(ucvg): RFC-0043 Phase 7 — integration glue: real report → clean-room sign → attestation'
-status: To Do
+status: Done
 assignee: []
 labels:
   - rfc-0043

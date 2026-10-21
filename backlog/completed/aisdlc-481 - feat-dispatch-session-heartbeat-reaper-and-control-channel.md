@@ -1,7 +1,7 @@
 ---
 id: AISDLC-481
 title: 'feat: dispatch-session heartbeat liveness reaper + back-channel for parallel-execute sessions'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-30 09:14'
 labels:

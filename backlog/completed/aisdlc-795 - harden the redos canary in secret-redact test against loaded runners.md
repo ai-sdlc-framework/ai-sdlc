@@ -2,7 +2,7 @@
 id: AISDLC-795
 title: >-
   Harden the ReDoS canary in secret-redact.test.ts so a loaded runner cannot fail it while a quadratic pattern still does
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-10'
 labels:

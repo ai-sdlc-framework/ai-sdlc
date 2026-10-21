@@ -1,7 +1,7 @@
 ---
 id: AISDLC-467
 title: 'feat: RFC-0018 Phase 3 — RFC-0009 §13 fourth rule (JourneyStateIdDriftRule via AST scan + Tessellation§13RuleRegistry)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-28'
 labels:

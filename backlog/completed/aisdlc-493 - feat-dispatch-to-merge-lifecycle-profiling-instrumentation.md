@@ -3,7 +3,7 @@ id: AISDLC-493
 title: >-
   feat: dispatch→merge lifecycle profiling — phase-event instrumentation +
   full dispatch-to-merge timing + estimate calibration
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-31'
 labels:

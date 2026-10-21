@@ -1,7 +1,7 @@
 ---
 id: AISDLC-376
 title: 'feat(ci): add server-side 80% patch-coverage gate (replaces dropped codecov/patch as required)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-19'
 labels:

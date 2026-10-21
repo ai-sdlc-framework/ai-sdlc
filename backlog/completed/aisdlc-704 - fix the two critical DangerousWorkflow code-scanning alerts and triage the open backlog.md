@@ -3,7 +3,7 @@ id: AISDLC-704
 title: >-
   Fix the two critical DangerousWorkflow code-scanning alerts and triage the
   open backlog
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-03'
 labels:

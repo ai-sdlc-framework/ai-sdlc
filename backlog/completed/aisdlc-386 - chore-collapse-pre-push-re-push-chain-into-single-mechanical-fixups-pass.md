@@ -1,7 +1,7 @@
 ---
 id: AISDLC-386
 title: 'chore: collapse pre-push "re-push required" chain into single mechanical-fixups pass'
-status: To Do
+status: Done
 labels:
   - architecture
   - hooks
