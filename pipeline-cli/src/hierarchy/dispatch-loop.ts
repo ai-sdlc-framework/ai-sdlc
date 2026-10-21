@@ -54,6 +54,7 @@ import type { MarkReadyReport } from './mark-ready.js';
 import type { PlaybookOutcome } from './playbook.js';
 import { summariseLanding, takeSuppressedNote } from './reconcile.js';
 import { readRosterChecked } from './roster.js';
+import type { ParentUpkeepResult } from '../steps/00-parent-upkeep.js';
 import { formatStall, reapStalledClaims, type StallDeps, type StalledReport } from './stall.js';
 
 /** Filename of the loop's state under the board directory. */
@@ -210,6 +211,8 @@ export interface TickResult {
   held?: Hold;
   /** Present when the tick skipped its GitHub reads for low quota (AISDLC-963). */
   quotaSkip?: { remaining: number; floor: number };
+  /** Present when the parent upkeep ran this tick (AISDLC-981). */
+  parentUpkeep?: ParentUpkeepResult;
   /** Deterministic list of what stops the drain; the dispatch command sends it to the planner when it changes. */
   blockers: string[];
 }
@@ -323,6 +326,11 @@ export interface LoopDeps {
   quota?: () => Quota | undefined;
   /** Floor of remaining quota; default 300. */
   quotaFloor?: number;
+  /**
+   * Parent upkeep (AISDLC-981): orchestrator-state recovery, merged-worktree sweep and
+   * untracked-file sync, once per tick. The executors only assert the parent.
+   */
+  parentUpkeep?: () => Promise<ParentUpkeepResult>;
 }
 
 function ingestBriefs(
@@ -568,6 +576,18 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   } catch {
     /* an unreadable quota must not stop the dispatch loop */
   }
+  let parentUpkeep: ParentUpkeepResult | undefined;
+  if (deps.parentUpkeep) {
+    try {
+      parentUpkeep = quotaSkip ? undefined : await deps.parentUpkeep();
+    } catch (err) {
+      parentUpkeep = {
+        ok: false,
+        swept: 0,
+        reason: `parent upkeep threw: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
   const watch = await watchVerdicts(deps, state, held);
   const stalled = await checkStalls(deps, state, held);
   const reports = buildReports(deps, state, watch.verdicts.length);
@@ -576,6 +596,9 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
       kind: 'progress',
       text: `skipped GitHub reads: remaining quota ${quotaSkip.remaining} is below the floor ${quotaSkip.floor}`,
     });
+  }
+  if (parentUpkeep && !parentUpkeep.ok) {
+    reports.push({ kind: 'progress', text: `parent upkeep refused: ${parentUpkeep.reason}` });
   }
   for (const s of stalled) reports.push({ kind: 'progress', text: formatStall(s) });
   let humanAttention: HumanAttentionRow[] = [];
@@ -620,6 +643,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     ...watch,
     reports,
     ...(quotaSkip ? { quotaSkip } : {}),
+    ...(parentUpkeep ? { parentUpkeep } : {}),
     ...(stalled.length > 0 ? { stalled } : {}),
     ...(humanAttention.length > 0 ? { humanAttention } : {}),
     ...wake,

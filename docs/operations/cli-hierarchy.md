@@ -773,6 +773,19 @@ for Nh`; no new notification channel is involved. The operator digest prints a
 "PRs needing a human" section with the same rows and omits it when there are none. Both use
 the single classifier `classifyHumanAttention` (`hierarchy/human-attention.ts`).
 
+**Parent upkeep (AISDLC-981).** The tick owns the shared parent checkout. Once per tick it
+runs the orchestrator-state recovery (`check-orchestrator-state.sh`), the merged-worktree
+sweep and the untracked-file sync with stale-debris prune; the sweep reuses the wake's
+open-PR snapshot, so branches with an open PR cost no `gh` call. A refusal is a progress line
+(`parent upkeep refused: ...`) and the `parentUpkeep` field of the tick result. The tick skips
+the upkeep for low quota. Executors no longer repair the parent: `initTask` (Step 0) only
+asserts the parent is on `main`, has no tracked changes and is at or behind `origin/main`, and
+otherwise refuses with a reason that points at the dispatch tick.
+
+A standalone `/ai-sdlc execute` (no `AI_SDLC_HIERARCHY_SESSION` in the environment) still runs
+the repairs inline. Set `AI_SDLC_PARENT_UPKEEP=inline` to force that inside a hierarchy
+session, or `AI_SDLC_PARENT_UPKEEP=assert` to force the assertion outside one.
+
 ### `playbook`
 
 ```

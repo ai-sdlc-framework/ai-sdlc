@@ -153,6 +153,49 @@ describe('auto-brief (AISDLC-930)', () => {
     return f;
   };
 
+  it('runs the parent upkeep once per tick and reports a refusal (AISDLC-981)', async () => {
+    let calls = 0;
+    const r = await runDispatchTick(
+      deps({
+        parentUpkeep: async () => {
+          calls += 1;
+          return { ok: false, swept: 0, reason: 'parent dirty' };
+        },
+      }),
+    );
+    expect(calls).toBe(1);
+    expect(r.parentUpkeep).toEqual({ ok: false, swept: 0, reason: 'parent dirty' });
+    expect(r.reports.map((x) => x.text)).toContain('parent upkeep refused: parent dirty');
+    await runDispatchTick(deps({ parentUpkeep: async () => ({ ok: true, swept: 2 }) }));
+  });
+
+  it('a throwing parent upkeep does not stop the tick (AISDLC-981)', async () => {
+    const r = await runDispatchTick(
+      deps({
+        parentUpkeep: async () => {
+          throw new Error('boom');
+        },
+      }),
+    );
+    expect(r.parentUpkeep).toMatchObject({ ok: false, reason: 'parent upkeep threw: boom' });
+  });
+
+  it('skips the parent upkeep for low quota and omits it when not wired (AISDLC-981)', async () => {
+    let calls = 0;
+    const low = await runDispatchTick(
+      deps({
+        quota: () => ({ core: 1 }),
+        parentUpkeep: async () => {
+          calls += 1;
+          return { ok: true, swept: 0 };
+        },
+      }),
+    );
+    expect(low.parentUpkeep).toBeUndefined();
+    expect((await runDispatchTick(deps())).parentUpkeep).toBeUndefined();
+    expect(calls).toBe(0);
+  });
+
   it('writes a one-entry brief that the next tick ingests', async () => {
     const written = writeAutoBrief(tmp, taskFile('AISDLC-77'), board);
     expect(path.basename(written!)).toBe('tasks-aisdlc-77.md');

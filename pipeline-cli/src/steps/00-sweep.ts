@@ -44,6 +44,12 @@ export interface SweepOptions {
    * Defaults to `<workDir>/.ai-sdlc/dispatch`. Tests inject a tmp path.
    */
   boardDir?: string;
+  /**
+   * AISDLC-981 — branches already known to have an OPEN PR (the dispatch tick's
+   * reconciler snapshot). They are resolved as OPEN without a gh call, so a sweep
+   * whose worktrees are all in flight makes none.
+   */
+  knownOpenBranches?: ReadonlySet<string>;
 }
 
 // ── AISDLC-493 profiling helpers ──────────────────────────────────────────
@@ -287,7 +293,9 @@ export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepRes
   const uncached: typeof found = [];
   for (const f of found) {
     const hit = oldCache[f.branch];
-    if (hit && f.headSha !== '' && hit.headSha === f.headSha) {
+    if (opts.knownOpenBranches?.has(f.branch)) {
+      resolved.set(f.branch, { state: 'OPEN', mergedAt: null });
+    } else if (hit && f.headSha !== '' && hit.headSha === f.headSha) {
       cache[f.branch] = hit;
       resolved.set(f.branch, { state: hit.state, mergedAt: hit.mergedAt });
     } else {

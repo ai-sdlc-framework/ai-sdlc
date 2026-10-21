@@ -159,6 +159,55 @@ describe('initTask', () => {
     expect(res.ok).toBe(true);
   });
 
+  describe('under a dispatch session (AISDLC-981)', () => {
+    const session = () => ({ ...h.ctx, env: { AI_SDLC_HIERARCHY_SESSION: 'alpha' } });
+
+    it('only asserts the parent: no recovery, sweep or sync runs', async () => {
+      h.present.add(join(h.ctx.pluginScriptsDir, 'check-orchestrator-state.sh'));
+      writeFileSync(join(h.root, 'stray.txt'), 'untouched');
+      const res = await initTask(session(), 'AISDLC-900');
+      expect(res.ok).toBe(true);
+      expect(calls.some((c) => c.includes('check-orchestrator-state.sh'))).toBe(false);
+      expect(calls.some((c) => c.startsWith('gh pr list'))).toBe(false);
+      expect(existsSync(join(h.root, 'stray.txt'))).toBe(true);
+    });
+
+    it('refuses a dirty parent and names the dispatch tick', async () => {
+      writeFileSync(join(h.root, '.gitignore'), 'changed\n');
+      const res = await initTask(session(), 'AISDLC-900');
+      expect(res).toEqual({ ok: false, reason: expect.stringContaining('dispatch tick') });
+      expect(calls.some((c) => c.includes('worktree add'))).toBe(false);
+    });
+
+    it('refuses a parent that is not on main', async () => {
+      git(h.root, 'checkout', '-q', '-b', 'side');
+      const res = await initTask(session(), 'AISDLC-900');
+      expect(res).toEqual({ ok: false, reason: expect.stringContaining('not main') });
+    });
+
+    it('refuses a parent ahead of origin/main', async () => {
+      writeFileSync(join(h.root, 'extra.txt'), 'x');
+      git(h.root, 'add', 'extra.txt');
+      git(h.root, 'commit', '-q', '-m', 'local only');
+      const res = await initTask(session(), 'AISDLC-900');
+      expect(res).toEqual({ ok: false, reason: expect.stringContaining('origin/main') });
+    });
+
+    it('runs the repairs inline when AI_SDLC_PARENT_UPKEEP=inline', async () => {
+      stateScriptExit = 1;
+      h.present.add(join(h.ctx.pluginScriptsDir, 'check-orchestrator-state.sh'));
+      const ctx = {
+        ...h.ctx,
+        env: { AI_SDLC_HIERARCHY_SESSION: 'alpha', AI_SDLC_PARENT_UPKEEP: 'inline' },
+      };
+      const res = await initTask(ctx, 'AISDLC-900');
+      expect(res).toEqual({
+        ok: false,
+        reason: expect.stringContaining('orchestrator-state check refused'),
+      });
+    });
+  });
+
   it('refuses an unknown task', async () => {
     const res = await initTask(h.ctx, 'AISDLC-404');
     expect(res.ok).toBe(false);
