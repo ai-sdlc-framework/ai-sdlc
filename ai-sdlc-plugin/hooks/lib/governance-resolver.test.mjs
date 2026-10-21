@@ -493,3 +493,28 @@ describe('AISDLC-730: untrusted marker file', () => {
     assert.equal(isUntrustedRun({}).untrusted, false);
   });
 });
+
+describe('allowForcePush: lease (AISDLC-1005, DEC-0264)', () => {
+  it('resolves explicitly to lease, with source and the boolean view', () => {
+    assert.equal(resolveForcePushMode({ allowForcePush: 'lease' }), 'lease');
+    assert.deepEqual(
+      describeForcePushPolicyFromYaml('spec:\n  governance:\n    allowForcePush: lease\n'),
+      { mode: 'lease', source: 'explicit', raw: 'lease' },
+    );
+    const resolved = resolveGovernanceFromYaml('spec:\n  governance:\n    allowForcePush: lease\n');
+    assert.equal(resolved.allowForcePush, true);
+    assert.equal(resolved.forcePushMode, 'lease');
+  });
+
+  it('renders the lease rule text naming the mode; other modes are unchanged', () => {
+    const lease = renderSubagentHardRules({
+      ...STRICT_DEFAULTS,
+      allowForcePush: true,
+      forcePushMode: 'lease',
+    });
+    assert.match(lease, /allowForcePush: lease/);
+    assert.match(lease, /any non-protected branch/);
+    const own = renderSubagentHardRules({ ...STRICT_DEFAULTS, allowForcePush: true });
+    assert.match(own, /allowForcePush: leaseOnOwnBranch/);
+  });
+});

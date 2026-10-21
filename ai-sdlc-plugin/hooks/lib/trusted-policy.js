@@ -324,6 +324,15 @@ function evaluateLeasePush({ projectDir, cwd, env = process.env, branch, boardDi
     failing.push({ condition, found, expected, fix });
   const done = (extra = {}) => ({ allowed: failing.length === 0, failing, ...extra });
   try {
+    // AISDLC-1005 (DEC-0264): under `allowForcePush: lease` (project copy AND trusted
+    // main-checkout policy agree) no task binding applies, so nothing can be unmet.
+    const trustedPolicy = loadTrustedExtras(projectDir, cwd, run);
+    if (trustedPolicy && trustedPolicy.forcePushMode === 'lease') {
+      const local = resolveGovernanceExtrasFromYaml(
+        readPolicyText(join(projectDir, '.ai-sdlc', 'agent-role.yaml')),
+      );
+      if (local.forcePushMode === 'lease') return done();
+    }
     const mainRoot = verifiedMainRoot(projectDir, run);
     if (!mainRoot) {
       fail(
@@ -469,15 +478,25 @@ function resolveLeaseWorktree(projectDir, cwd, run = runGit) {
  */
 function bannerGovernance(yamlText, resolved, projectDir, cwd, hierarchyRole, run = runGit) {
   const copy = resolveGovernanceExtrasFromYaml(yamlText);
-  const wantsLease = copy.forcePushMode === 'leaseOnOwnBranch';
+  const wantsLease = copy.forcePushMode !== 'never';
   const wantsOps = hierarchyRole === 'operator-dispatch' && copy.operational.length > 0;
   if (!wantsLease && !wantsOps) return { resolved, operational: copy.operational };
   const trusted = loadTrustedExtras(projectDir, cwd, run);
+  const mode = trusted ? minForcePushMode(copy.forcePushMode, trusted.forcePushMode) : 'never';
   const effective =
-    wantsLease && !(trusted && trusted.forcePushMode === 'leaseOnOwnBranch')
+    wantsLease && mode === 'never'
       ? { ...resolved, allowForcePush: false }
-      : resolved;
+      : wantsLease && mode !== copy.forcePushMode
+        ? { ...resolved, forcePushMode: mode }
+        : resolved;
   return { resolved: effective, operational: trusted ? trusted.operational : [] };
+}
+
+const FORCE_PUSH_RANK = { never: 0, leaseOnOwnBranch: 1, lease: 2 };
+
+/** The stricter of two force-push modes: a PR-tree copy can only tighten the trusted grant. */
+function minForcePushMode(a, b) {
+  return (FORCE_PUSH_RANK[a] ?? 0) <= (FORCE_PUSH_RANK[b] ?? 0) ? a : b;
 }
 
 /**
@@ -498,6 +517,7 @@ function readTaskId(worktreeRoot) {
 
 module.exports = {
   GIT_TIMEOUT_MS,
+  minForcePushMode,
   runGit,
   probeRef,
   readPolicyText,

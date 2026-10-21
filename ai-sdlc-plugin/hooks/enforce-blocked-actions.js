@@ -114,6 +114,7 @@ const {
   evaluateLeasePush: evaluateLeasePreflight,
   renderLeaseFailing,
   readTaskId,
+  minForcePushMode,
 } = require('./lib/trusted-policy');
 
 // AISDLC-720: untrusted runs fail closed (exit 2 = block) on any internal error.
@@ -228,19 +229,30 @@ function loadLeasePolicy(rawCommand) {
     // A missing policy file means the repo sets nothing: the default
     // (`leaseOnOwnBranch`, AISDLC-710) applies. Any other read failure fails closed.
     const localText = readPolicyText(join(projectDir, '.ai-sdlc', 'agent-role.yaml'));
-    if (resolveGovernanceExtrasFromYaml(localText).forcePushMode !== 'leaseOnOwnBranch') {
-      return closed('policy-never');
-    }
+    const localMode = resolveGovernanceExtrasFromYaml(localText).forcePushMode;
+    if (localMode === 'never') return closed('policy-never');
     // The lease needs an EXPLICIT, absolute CLAUDE_PROJECT_DIR: the toplevel
     // fallback used for blockedActions would make the own-session binding pass
     // trivially (project dir == whatever the cwd is in).
     const envDir = process.env.CLAUDE_PROJECT_DIR;
-    if (!envDir || !isAbsolute(envDir)) return closed('no-project-dir');
+    if (localMode !== 'lease' && (!envDir || !isAbsolute(envDir))) return closed('no-project-dir');
     const target = resolveLeaseTarget(rawCommand);
     const cwd = target.cwd || toolCwd || process.cwd();
     const trusted = loadTrustedExtras(projectDir, cwd);
     if (!trusted) return closed('trusted-policy-unavailable');
-    if (trusted.forcePushMode !== 'leaseOnOwnBranch') return closed('policy-never');
+    // A PR-tree copy can only tighten the trusted grant: the stricter mode wins.
+    const mode = minForcePushMode(localMode, trusted.forcePushMode);
+    if (mode === 'never') return closed('policy-never');
+    // AISDLC-1005 (DEC-0264): `lease` needs no task worktree, sentinel or claim; the
+    // lease itself plus the protected-branch refusal are the safeguards.
+    if (mode === 'lease') {
+      return {
+        mode: 'lease',
+        protectedBranches: trusted.protectedBranches,
+        cwd,
+        command: target.command,
+      };
+    }
     // The cwd must be a genuine dispatched worktree under <main>/.worktrees/
     // (realpath), else no lease: operator main-checkout sessions get none.
     const wt = evaluateLeasePreflight({ projectDir, cwd, env: process.env });
@@ -580,7 +592,20 @@ function enforceBash(command) {
       );
     }
     const lease = loadLeasePolicy(trimmed);
-    if (lease.mode === 'leaseOnOwnBranch') {
+    if (lease.mode === 'lease') {
+      const verdict = evaluateLeasePush(
+        lease.command,
+        {
+          ownRef: gitOut(['symbolic-ref', '-q', 'HEAD'], lease.cwd),
+          protectedBranches: lease.protectedBranches,
+          remotes: (gitOut(['remote'], lease.cwd) || '').split('\n').filter(Boolean),
+          aliasLookup: (name) => gitOut(['config', '--get', `alias.${name}`], lease.cwd),
+        },
+        'lease',
+      );
+      if (verdict.decision === 'deny') deny(verdict.reason);
+      leasePushAllowed = verdict.decision === 'allow';
+    } else if (lease.mode === 'leaseOnOwnBranch') {
       const top = lease.top;
       const verdict = evaluateLeasePush(lease.command, {
         ownRef: gitOut(['symbolic-ref', '-q', 'HEAD'], lease.cwd),
@@ -597,7 +622,7 @@ function enforceBash(command) {
     // Default policy (`never`/unset): also catch the common non-prefix shapes the
     // anchored blockedActions globs miss (`git push origin --force main`,
     // `git push origin -f HEAD:main`, `+refspec`). Runs no git subprocess.
-    if (lease.mode !== 'leaseOnOwnBranch' && hasForcePushOption(trimmed)) {
+    if (lease.mode === 'never' && hasForcePushOption(trimmed)) {
       deny(forcePushRefusal(lease.why, lease.failing));
     }
   } catch {

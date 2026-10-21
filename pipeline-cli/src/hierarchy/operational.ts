@@ -91,6 +91,8 @@ export function parseOperationalPolicy(yamlText: string): OperationalPolicy {
   // governance-resolver. An explicit `never`/`false` or any malformed value stays `never`.
   if (mode === undefined || mode === true || mode === 'leaseOnOwnBranch') {
     policy.forcePushMode = 'leaseOnOwnBranch';
+  } else if (mode === 'lease') {
+    policy.forcePushMode = 'lease';
   }
   policy.openTaskPrsReady = gov?.openTaskPrsReady === true;
   const listed = gov?.protectedBranches;

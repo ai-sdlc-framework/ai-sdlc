@@ -11,7 +11,9 @@
  *   governance:
  *     preset: strict | operator-trusted   # sugar layer, see below
  *     allowMerge: never | onGreenClean    # default: never
- *     allowForcePush: never | leaseOnOwnBranch | bool   # default: leaseOnOwnBranch
+ *     allowForcePush: never | leaseOnOwnBranch | lease | bool   # default: leaseOnOwnBranch
+ *                                         # (lease = any non-protected branch, any
+ *                                         # session; AISDLC-1005, DEC-0264)
  *                                         # (true = leaseOnOwnBranch, false = never;
  *                                         # AISDLC-710: lease push on the agent's OWN
  *                                         # task branch is the default, an explicit
@@ -232,7 +234,9 @@ function resolveGovernance(rawGovernance) {
   // allowForcePush is the boolean view of resolveForcePushMode: absent keeps the
   // `leaseOnOwnBranch` default (AISDLC-710), an explicit value wins, and any
   // present-but-malformed value fails closed to false (`never`).
-  resolved.allowForcePush = resolveForcePushMode(rawGovernance) === 'leaseOnOwnBranch';
+  const forceMode = resolveForcePushMode(rawGovernance);
+  resolved.allowForcePush = forceMode !== 'never';
+  if (forceMode === 'lease') resolved.forcePushMode = 'lease';
 
   return resolved;
 }
@@ -252,7 +256,10 @@ function resolveForcePushMode(rawGovernance) {
  * Same resolution as resolveForcePushMode, plus where the value came from, so
  * `/ai-sdlc doctor` and refusal messages can say why a mode is in effect.
  *
- * @returns {{mode: 'never'|'leaseOnOwnBranch', source: 'default'|'explicit'|'malformed', raw: unknown}}
+ * `lease` (AISDLC-1005, DEC-0264) is an explicit-only mode: a lease push to any
+ * non-protected branch from any session.
+ *
+ * @returns {{mode: 'never'|'leaseOnOwnBranch'|'lease', source: 'default'|'explicit'|'malformed', raw: unknown}}
  */
 function describeForcePushPolicy(rawGovernance) {
   const v =
@@ -261,6 +268,7 @@ function describeForcePushPolicy(rawGovernance) {
   if (v === true || v === 'leaseOnOwnBranch') {
     return { mode: 'leaseOnOwnBranch', source: 'explicit', raw: v };
   }
+  if (v === 'lease') return { mode: 'lease', source: 'explicit', raw: v };
   if (v === false || v === 'never') return { mode: 'never', source: 'explicit', raw: v };
   return { mode: 'never', source: 'malformed', raw: v };
 }
@@ -384,8 +392,15 @@ const LEASE_FORCE_PUSH_TEXT =
   '**Force-push is allowed per repo policy** (`.ai-sdlc/agent-role.yaml` governance: `allowForcePush: leaseOnOwnBranch`) — ' +
   "force-with-lease permitted on this task's own branch only; never on main.";
 
+const ANY_BRANCH_LEASE_FORCE_PUSH_TEXT =
+  '**Force-push is allowed per repo policy** (`.ai-sdlc/agent-role.yaml` governance: `allowForcePush: lease`) — ' +
+  'force-with-lease permitted to any non-protected branch from any session; never on main, master or a protected branch.';
+
 function renderForcePushRuleText(resolved) {
-  return resolved.allowForcePush ? LEASE_FORCE_PUSH_TEXT : '**NEVER force push.**';
+  if (!resolved.allowForcePush) return '**NEVER force push.**';
+  return resolved.forcePushMode === 'lease'
+    ? ANY_BRANCH_LEASE_FORCE_PUSH_TEXT
+    : LEASE_FORCE_PUSH_TEXT;
 }
 
 /**

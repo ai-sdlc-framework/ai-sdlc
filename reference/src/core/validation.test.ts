@@ -278,13 +278,13 @@ describe('AgentRole spec.governance (RFC-0048 / AISDLC-601)', () => {
     expect(validateResource(doc).valid).toBe(false);
   });
 
-  it.each([true, false, 'never', 'leaseOnOwnBranch'])('accepts allowForcePush=%s', (v) => {
+  it.each([true, false, 'never', 'leaseOnOwnBranch', 'lease'])('accepts allowForcePush=%s', (v) => {
     const doc = baseAgentRole();
     (doc.spec as Record<string, unknown>).governance = { allowForcePush: v };
     expect(validateResource(doc).valid).toBe(true);
   });
 
-  it.each(['always', 'lease', 'true', 1, null])('rejects allowForcePush=%s', (v) => {
+  it.each(['always', 'leases', 'true', 1, null])('rejects allowForcePush=%s', (v) => {
     const doc = baseAgentRole();
     (doc.spec as Record<string, unknown>).governance = { allowForcePush: v };
     expect(validateResource(doc).valid).toBe(false);

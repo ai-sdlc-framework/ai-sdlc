@@ -7,7 +7,7 @@ Only rules that change behaviour in every session live here (budget 15k characte
 ## Git Flow
 
 - **Always rebase** feature branches onto main; never merge main in. Keep history linear (no `update-branch` merge).
-- Update: `git fetch origin && git rebase origin/main`, then `git push --force-with-lease origin HEAD:refs/heads/<branch>`. Only that explicit spelling (and `--force-with-lease=<branch>:<sha>`) is accepted. `leaseOnOwnBranch` is the default `allowForcePush` (AISDLC-710); `never` blocks every lease push.
+- Update: `git fetch origin && git rebase origin/main`, then `git push --force-with-lease origin HEAD:refs/heads/<branch>`. Modes (DEC-0264): `lease` (this repo) = any non-protected branch, any session; `leaseOnOwnBranch` (adopter default, AISDLC-710) = the task's own worktree only; `never` = no lease push. `main`/`master`/protected stay refused.
 - `/ai-sdlc rebase <pr>` automates mechanical conflicts and escalates semantic ones. Never force-push `main`/`master`.
 - CHANGELOG.md is owned by release-please: never edit it on a feature branch; remove such a diff on rebase conflict (AISDLC-401).
 
@@ -27,7 +27,7 @@ Only rules that change behaviour in every session live here (budget 15k characte
 
 ## Hooks (pre-push chain)
 
-`.husky/pre-push` runs, in order: dark-code check (`AI_SDLC_SKIP_DARK_CODE_GATE=1`), then `pre-push-fixups.sh` once, which runs squash-attestation-chores, check-task-moved (task file to `backlog/completed/`, BEFORE sign) and check-attestation-sign (signs/verifies the DSSE envelope) in that order. Per-gate skips are `AI_SDLC_SKIP_*` and are never a routine shortcut. Emergency only: `AI_SDLC_BYPASS_ALL_GATES=1` (document in the PR body; [`docs/operations/emergency-bypass.md`](docs/operations/emergency-bypass.md)).
+`.husky/pre-push` runs, in order: dark-code check (`AI_SDLC_SKIP_DARK_CODE_GATE=1`), then `pre-push-fixups.sh` once, which runs squash-attestation-chores, check-task-moved (task file to `backlog/completed/`, BEFORE sign) and check-attestation-sign (signs/verifies the DSSE envelope) in that order. Per-gate skips (`AI_SDLC_SKIP_*`) are never routine. Emergency only: `AI_SDLC_BYPASS_ALL_GATES=1` (document in the PR body; [`docs/operations/emergency-bypass.md`](docs/operations/emergency-bypass.md)).
 
 - **Worktree hooks (AISDLC-693):** `core.hooksPath` is `.husky/_` (gitignored, made by `prepare`); a worktree without it runs NO gate. Never disable install scripts. `ai-sdlc doctor` check `worktree-hooks` lists affected worktrees.
 - DoR and backlog-drift run in CI only; run by hand: `node pipeline-cli/bin/cli-dor-check.mjs --task <path>`, `npx backlog-drift check`.

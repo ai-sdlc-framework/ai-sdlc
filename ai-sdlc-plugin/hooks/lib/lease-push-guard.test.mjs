@@ -601,3 +601,50 @@ describe('hasForcePushOption (default `never` policy)', () => {
     }
   });
 });
+
+describe('evaluateLeasePush mode lease (AISDLC-1005)', () => {
+  const any = (cmd, over) =>
+    evaluateLeasePush(cmd, ctx({ taskId: null, worktreeName: null, ...over }), 'lease');
+  it('allows any non-protected branch with no task binding', () => {
+    for (const cmd of [
+      'git push --force-with-lease origin HEAD:refs/heads/docs/x',
+      'git push --force-with-lease origin docs/x',
+      'git push --force-with-lease origin HEAD',
+      'git push -u --force-with-lease=docs/x:abcdef1 fork docs/x:refs/heads/docs/y',
+    ]) {
+      assert.equal(any(cmd).decision, 'allow', cmd);
+    }
+  });
+  it('refuses protected branches, force shapes and unparseable pushes, naming the mode', () => {
+    for (const cmd of [
+      'git push --force-with-lease origin HEAD:refs/heads/main',
+      'git push --force-with-lease origin HEAD:release/1',
+      'git push --force-with-lease origin prod',
+      'git push --force origin docs/x',
+      'git push --force-with-lease origin +docs/x',
+      'git push --force-with-lease origin --delete docs/x',
+      'git push --force-with-lease --mirror origin',
+      'git push --force-with-lease origin',
+      'git push --force-with-lease nowhere docs/x',
+      'git push --force-with-lease origin docs/x:a:b',
+      'git push --force-with-lease=$X origin docs/x',
+      'git push --force-with-lease origin heads/main',
+      'git push --force-with-lease docs/x origin',
+      'env git push --force-with-lease origin docs/x',
+      'git push --force-with-lease=a:b:c origin docs/x',
+      'git push --force-with-lease origin docs/x:',
+    ]) {
+      const v = any(cmd);
+      assert.equal(v.decision, 'deny', cmd);
+      assert.match(v.reason, /allowForcePush=lease/);
+    }
+  });
+  it('HEAD on a protected or detached checkout is refused', () => {
+    const cmd = 'git push --force-with-lease origin HEAD';
+    assert.equal(any(cmd, { ownRef: 'refs/heads/main' }).decision, 'deny');
+    assert.equal(any(cmd, { ownRef: null }).decision, 'deny');
+  });
+  it('a non-force push stays none', () => {
+    assert.equal(any('git push origin docs/x').decision, 'none');
+  });
+});

@@ -645,7 +645,7 @@ export interface FinalizeTaskResult {
 /** The rules a resume lease push must satisfy; see Step 11. */
 export interface ResumeLeasePolicy {
   /** The trusted policy's `allowForcePush`; the push is refused unless `leaseOnOwnBranch`. */
-  forcePushMode: 'never' | 'leaseOnOwnBranch';
+  forcePushMode: 'never' | 'leaseOnOwnBranch' | 'lease';
   /** The trusted policy's extra protected branch names. */
   protectedBranches: readonly string[];
   /** Null when the worktree is a genuine one of this repository, else the reason it is not. */

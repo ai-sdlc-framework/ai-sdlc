@@ -424,10 +424,13 @@ export const agentRoleSchema = {
             'Whether agents may merge PRs. `never` (default) = agents do not merge; it is a configurable value, not a project rule. `onGreenClean` = merge allowed once all required checks are green AND mergeStateStatus == CLEAN, for trusted-tier (internal backlog) work only.',
         },
         allowForcePush: {
-          oneOf: [{ type: 'boolean' }, { type: 'string', enum: ['never', 'leaseOnOwnBranch'] }],
+          oneOf: [
+            { type: 'boolean' },
+            { type: 'string', enum: ['never', 'leaseOnOwnBranch', 'lease'] },
+          ],
           default: 'leaseOnOwnBranch',
           description:
-            "Force-push policy. When unset the default is `leaseOnOwnBranch`. `leaseOnOwnBranch` (boolean `true` is read the same way) = `git push --force-with-lease` is permitted only to the dispatched task's own branch (the worktree's `.active-task`, its directory name under `<repo>/.worktrees/` and the `ai-sdlc/<task-id>-*` branch must agree), never to `main`, `master`, a default deploy branch or a protected branch. Operator sessions without a task sentinel get no lease push. `never` (boolean `false`) = no force pushes; set it explicitly to opt out. Any other value is malformed and fails closed to `never`.",
+            "Force-push policy. When unset the default is `leaseOnOwnBranch`. `leaseOnOwnBranch` (boolean `true` is read the same way) = `git push --force-with-lease` is permitted only to the dispatched task's own branch (the worktree's `.active-task`, its directory name under `<repo>/.worktrees/` and the `ai-sdlc/<task-id>-*` branch must agree), never to `main`, `master`, a default deploy branch or a protected branch. Operator sessions without a task sentinel get no lease push. `lease` (explicit only; DEC-0264) = `git push --force-with-lease` is permitted to any non-protected branch from any session, with no task-worktree binding. `never` (boolean `false`) = no force pushes; set it explicitly to opt out. Any other value is malformed and fails closed to `never`.",
         },
         protectedBranches: {
           type: 'array',

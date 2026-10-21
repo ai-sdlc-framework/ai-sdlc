@@ -334,7 +334,74 @@ function parseAllowedShape(command, ctx) {
   return null;
 }
 
-function evaluateLeasePush(command, ctx) {
+/**
+ * `allowForcePush: lease` (AISDLC-1005, DEC-0264): returns null when the command is
+ * a plain lease push (force-with-lease) to non-protected branches only, else the
+ * reason. No task binding: any cwd, any session. Same positive-parse posture:
+ * no metacharacters, wrapper, env prefix or git global option; no plain force,
+ * `+refspec`, delete, mirror or alias. The remote must be a configured remote and an
+ * explicit refspec is required. A destination is a plain branch name or
+ * `refs/heads/<name>`; a no-colon refspec means the same-named branch, and `HEAD`
+ * means the current branch (ctx.ownRef).
+ */
+function parseAnyBranchShape(command, ctx) {
+  if (/[^\x20-\x7e\t]/.test(command)) return 'non-printable or non-ASCII characters present';
+  if (META_RE.test(command)) return 'shell metacharacters, quoting or expansion present';
+  const toks = command.trim().split(/[ \t]+/);
+  if (toks[0] !== 'git' || toks[1] !== 'push') {
+    return 'must be exactly `git push ...` (no wrapper, env prefix or git global options)';
+  }
+  let lease = false;
+  const positionals = [];
+  for (const t of toks.slice(2)) {
+    if (t === '--force-with-lease') {
+      lease = true;
+    } else if (t.startsWith('--force-with-lease=')) {
+      const val = t.slice('--force-with-lease='.length);
+      if (!/^[A-Za-z0-9._/-]+(?::[0-9a-fA-F]{7,64})?$/.test(val)) {
+        return 'malformed --force-with-lease value';
+      }
+      lease = true;
+    } else if (SAFE_COMPANION_FLAGS.has(t)) {
+      // safe companions
+    } else if (t.startsWith('-')) {
+      return `flag ${describeFlag(t)} is not permitted with a lease push`;
+    } else {
+      positionals.push(t);
+    }
+  }
+  if (!lease) return 'no --force-with-lease';
+  const [remote, ...refspecs] = positionals;
+  if (!remote || refspecs.length === 0) {
+    return 'the remote and an explicit refspec are required (git resolves an omitted one through git config)';
+  }
+  if (!/^[A-Za-z0-9._-]+$/.test(remote) || !(ctx.remotes || []).includes(remote)) {
+    return `remote '${remote}' is not a configured remote name`;
+  }
+  for (const spec of refspecs) {
+    const parts = spec.split(':');
+    if (parts.length > 2) return `refspec '${spec}' is not a simple branch refspec`;
+    const [src, dstRaw] = parts;
+    if (!src || (parts.length === 2 && !dstRaw)) return `refspec '${spec}' is empty or a delete`;
+    let dst = parts.length === 2 ? dstRaw : src;
+    if (dst === 'HEAD') {
+      const own = branchFromRef(ctx.ownRef);
+      if (!own) return 'HEAD is not on a branch (cannot determine the destination)';
+      dst = own;
+    }
+    dst = dst.replace(/^refs\/heads\//, '');
+    if (!isPlainBranchName(dst)) return `destination '${dstRaw || src}' is not a plain branch name`;
+    if (isProtectedBranch(dst, ctx.protectedBranches)) {
+      return `destination '${dst}' is protected`;
+    }
+    if (parts.length === 2 && !/^[A-Za-z0-9._/-]+$/.test(src)) {
+      return `refspec source '${src}' is not a plain ref`;
+    }
+  }
+  return null;
+}
+
+function evaluateLeasePush(command, ctx, mode = 'leaseOnOwnBranch') {
   if (typeof command !== 'string' || !command.trim()) return { decision: 'none' };
   const segments = toSegments(command);
   let anyForcePush = false;
@@ -346,6 +413,19 @@ function evaluateLeasePush(command, ctx) {
     if (forceish) anyForcePush = true;
   }
   if (!anyForcePush) return { decision: 'none' };
+  if (mode === 'lease') {
+    const whyAny = parseAnyBranchShape(command, ctx);
+    if (whyAny === null) return { decision: 'allow' };
+    return {
+      decision: 'deny',
+      reason:
+        `force-push under spec.governance.allowForcePush=lease (.ai-sdlc/agent-role.yaml) ` +
+        `is limited to a lease push (git push, force-with-lease flag, <remote> <branch-or-HEAD>[:refs/heads/<branch>]) to a ` +
+        `non-protected branch (${whyAny}). Plain force pushes, +refspecs, deletes, mirror, aliases and ` +
+        `pushes to main/master or protected branches are never permitted. Next step: spell the push as ` +
+        `the lease flag, then 'origin HEAD:refs/heads/<branch>'.`,
+    };
+  }
   const why = parseAllowedShape(command, ctx);
   if (why === null) return { decision: 'allow' };
   const ownName = branchFromRef(ctx.ownRef);

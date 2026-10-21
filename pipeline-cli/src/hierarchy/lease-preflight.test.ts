@@ -6,6 +6,7 @@
  * covers the blocking rules.
  */
 
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -123,5 +124,39 @@ describe('claimPreflight', () => {
   it('reaches the real predicate: no launch env is reported as hierarchy-env', () => {
     const r = claimPreflight(tmp, 'AISDLC-9', {}, [repoRoot]);
     expect(r.failing.map((f) => f.condition)).toEqual(['hierarchy-env']);
+  });
+});
+
+describe('leasePushPreflight under allowForcePush: lease (AISDLC-1005)', () => {
+  const policy = (mode: string) =>
+    `apiVersion: ai-sdlc.io/v1alpha1\nkind: AgentRole\nspec:\n  governance:\n    allowForcePush: ${mode}\n`;
+  const makeRepo = (mode: string) => {
+    execFileSync('git', ['init', '-q', '-b', 'main', tmp]);
+    mkdirSync(path.join(tmp, '.ai-sdlc'), { recursive: true });
+    writeFileSync(path.join(tmp, '.ai-sdlc', 'agent-role.yaml'), policy(mode));
+  };
+
+  it('is allowed from the main checkout with no task worktree, sentinel or claim', () => {
+    makeRepo('lease');
+    const r = leasePushPreflight({
+      projectDir: tmp,
+      cwd: tmp,
+      taskId: 'AISDLC-9',
+      env: { AI_SDLC_HIERARCHY_ROLE: 'executor' },
+      load: () => loadPolicyModule([repoRoot], {}),
+    });
+    expect(r).toMatchObject({ status: 'allowed', blocking: false, failing: [] });
+  });
+
+  it('leaseOnOwnBranch still refuses the same session', () => {
+    makeRepo('leaseOnOwnBranch');
+    const r = leasePushPreflight({
+      projectDir: tmp,
+      cwd: tmp,
+      taskId: 'AISDLC-9',
+      env: { AI_SDLC_HIERARCHY_ROLE: 'executor' },
+      load: () => loadPolicyModule([repoRoot], {}),
+    });
+    expect(r.status).toBe('refused');
   });
 });
