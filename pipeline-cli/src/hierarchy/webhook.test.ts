@@ -19,6 +19,7 @@ let lines: string[];
 const mk = (env: NodeJS.ProcessEnv, alive = true): HierarchyDeps =>
   ({
     boardDir: dir,
+    cwd: dir,
     env,
     log: (l: string) => lines.push(l),
     isAlive: () => alive,

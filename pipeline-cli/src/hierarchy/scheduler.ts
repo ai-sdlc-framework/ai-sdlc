@@ -13,8 +13,12 @@ export const DEFAULT_DEBOUNCE_MS = 2_000;
 export const WAKE_POLL_MS = 1_000;
 
 /** Timer delay until the next reconcile, given how many PRs are open. Pure. */
-export function nextIntervalMs(openPrs: number): number {
-  return openPrs > 0 ? BUSY_INTERVAL_MS : IDLE_INTERVAL_MS;
+export function nextIntervalMs(
+  openPrs: number,
+  busyMs: number = BUSY_INTERVAL_MS,
+  idleMs: number = IDLE_INTERVAL_MS,
+): number {
+  return openPrs > 0 ? busyMs : idleMs;
 }
 
 export interface SchedulerDeps {
@@ -22,6 +26,9 @@ export interface SchedulerDeps {
   /** Runs one reconcile and returns the number of open PRs afterwards. */
   reconcile: () => Promise<number> | number;
   debounceMs?: number;
+  /** Timer delay while PRs are open / idle (pr-lifecycle.yaml `reconcile`). */
+  timerOpenMs?: number;
+  timerIdleMs?: number;
   pollMs?: number;
   /** Modification time of the wake file in ms, or undefined when it does not exist. */
   mtime?: (file: string) => number | undefined;
@@ -61,7 +68,11 @@ export function startScheduler(deps: SchedulerDeps): Scheduler {
     } finally {
       running = false;
     }
-    if (!stopped) tickTimer = setTimeout(() => void run(), nextIntervalMs(open));
+    if (!stopped)
+      tickTimer = setTimeout(
+        () => void run(),
+        nextIntervalMs(open, deps.timerOpenMs, deps.timerIdleMs),
+      );
   };
 
   const poll = setInterval(() => {

@@ -473,7 +473,7 @@ export async function runDispatchCli(
         process.stderr.write('cli-dispatch reconcile: --pr must be a number\n');
         return 2;
       }
-      const { maxSameHeadActions } = loadPrLifecycleConfig(cwd);
+      const { maxSameHeadActions, reconcile: timers } = loadPrLifecycleConfig(cwd);
       const pass = (): ReconcilePr[] | undefined => {
         let facts: ReconcilePr[] | undefined;
         if (flags['facts']) {
@@ -495,6 +495,8 @@ export async function runDispatchCli(
       if (flags['watch'] === 'true') {
         startScheduler({
           wakeFile: path.join(boardDir, '.reconcile-wake'),
+          timerOpenMs: timers.timerOpenMs,
+          timerIdleMs: timers.timerIdleMs,
           reconcile: () => {
             const facts = pass();
             if (!facts) return listLanding(boardDir).filter((r) => !r.landed).length;
