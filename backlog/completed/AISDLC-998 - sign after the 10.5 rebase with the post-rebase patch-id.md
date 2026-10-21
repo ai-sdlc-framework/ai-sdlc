@@ -67,5 +67,5 @@ The push was a plain `git push -u` of a new branch, not `--force-with-lease`. Th
 - 3 parallel reviews approved
 
 ## Follow-up
-The push was a plain `git push -u` of a new branch, not `--force-with-lease`. The PreToolUse hook refused the lease push because the agent shell's cwd kept resetting to the main checkout. The branch did not exist on the remote, so no lease was needed. The patch-id comparison uses `headPatchId` in ship.ts, built on `computeMergeBase` and `computePatchId`, not `isRebaseOnlyPush`, because `isRebaseOnlyPush` does not return the ids and the note needs them. If either id cannot be computed, the existing contentHash oracle decides. The commit scope had to be dropped because commitlint rejected `attestation` as a scope. The backlog task file change is the status flip to In Progress.
+(none)
 
