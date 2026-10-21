@@ -480,8 +480,10 @@ binding is the session name, not the pid. Same caller and role rules as `restart
 
 ### `clear`
 
-Empty an executor's context between tasks: send `/clear`, wait for the settle time, then
-send `/ai-sdlc executor` so the loop restarts.
+Empty an executor's context between tasks: send `/clear`, poll until the pane is idle, then
+send `/ai-sdlc executor` and poll for the identity line, so the loop restarts. Each wait is
+bounded by one ceiling (default 30000 ms), read from `clear.handshakeCeilingMs` in
+`.ai-sdlc/pr-lifecycle.yaml`; `--settle-ms` overrides it. There is no unconditional sleep.
 
 ```bash
 cli-hierarchy clear <executor-name> [--settle-ms <n>]
@@ -490,7 +492,7 @@ cli-hierarchy clear --self [--resume-after <seconds>]
 
 | Option                     | Meaning                                                                                       |
 | -------------------------- | --------------------------------------------------------------------------------------------- |
-| `--settle-ms <n>`          | Wait between the two keystrokes (default 8000).                                               |
+| `--settle-ms <n>`          | Ceiling for each wait (default 30000, config `clear.handshakeCeilingMs`).                      |
 | `--self`                   | Schedule the calling session's own pane to receive `/clear`, then `/ai-sdlc operator-dispatch` (dispatch session), `/ai-sdlc:planner` (planner) or `/ai-sdlc executor` (an idle executor). |
 | `--resume-after <seconds>` | With `--self`: delay before the resume command (default: 3 s for the planner, `PLANNER_RESUME_AFTER_SECONDS` at `clear.ts:254`; 0 s for the dispatch session and an executor, `clear.ts:330-331`); `/clear` is typed after the 20 s lead. Refused when `TMUX_PANE` is unset. |
 
@@ -709,7 +711,7 @@ cli-hierarchy tick [--worker <dispatch-name>] [--report-every-ms <n>] [--settle-
 | ----------------------- | ------------------------------------------------------------------------- |
 | `--worker <name>`       | Optional; when given it must equal the calling session's own roster name. |
 | `--report-every-ms <n>` | Spacing of progress reports (default 900000).                             |
-| `--settle-ms <n>`       | Settle time used for clears (default 8000).                               |
+| `--settle-ms <n>`       | Ceiling for each clear wait (default 30000, config `clear.handshakeCeilingMs`). |
 | `--retry-limit <n>`     | Re-queues allowed per failed task (default 2; a larger value is refused). |
 | `--work-dir <path>`     | Repository root (default the current directory).                          |
 
@@ -1995,8 +1997,9 @@ including a human at a plain shell (it is not authentication; see "The caller bi
 directly (`tmux send-keys -t <pane> -l -- /clear`, then `Enter`), after checking with
 `cli-hierarchy status` that the executor holds no inflight task.
 
-Looks up the executor in the roster and sends `/clear` and Enter to its pane, waits
-for the settle time (8000 ms by default), then sends `/ai-sdlc executor` and Enter.
+Looks up the executor in the roster and sends `/clear` and Enter to its pane, polls
+until the pane is idle (up to the ceiling, 30000 ms by default, key `clear.handshakeCeilingMs` in
+`.ai-sdlc/pr-lifecycle.yaml`), then sends `/ai-sdlc executor` and Enter and polls for the identity line.
 It refuses, sending nothing, when the name is not a running executor, the name or
 pane id is malformed, the window is not open, or the executor holds an inflight
 task, or the executor's tmux session does not carry the `@ai-sdlc-hierarchy` marker
@@ -2008,8 +2011,8 @@ never replaced by the window name. An `ExecutorContextCleared` event records the
 clear.
 
 The `hierarchy.clear` capability is reported `live` when the restart command was
-sent and the executor printed its identity line again within the settle time, and
-`degraded`, with the reason, when it did not or a keystroke could not be sent. A
+sent and the executor printed its identity line again within the ceiling, and
+`degraded`, with the reason (the ceiling and the last pane line seen, so a slow start can be told from a dead session), when it did not or a keystroke could not be sent. A
 degraded clear shows up in `doctor`; check the executor's window with
 `cli-hierarchy status`.
 
