@@ -870,6 +870,82 @@ export function v6ResolveLeavesForEnvelope(repoRoot, envelope, patchIdHint) {
 }
 
 /**
+ * AISDLC-970: verify the chain behind a delta review. A leaf with
+ * `reviewRange.mode === 'delta'` reviewed only `baseSha..head`; the range from
+ * the PR base to `baseSha` counts as reviewed only when the envelope whose
+ * subject is `baseSha` verifies too, recursively, down to a full review (no
+ * delta leaf) whose subject is the PR base commit or an ancestor of it.
+ * A missing link, an unverifiable link, a non-ancestor link or a cycle is
+ * `invalid`, naming the first offending sha.
+ *
+ * `verifyLink(sha)` returns `null` when no envelope has that subject, else the
+ * verifyV6Envelope result (with `deltaBaseShas`) of the first one that verifies
+ * (or the last failure). `isAncestor(a, b)` is true when `a` is `b` or its ancestor.
+ * Results are cached by subject sha for the run.
+ *
+ * @returns {{ status: 'valid' } | { status: 'invalid', reason: string }}
+ */
+export function verifyDeltaChain({ deltaBaseShas, subjectSha, prBaseSha, verifyLink, isAncestor }) {
+  const cache = new Map();
+  const walk = (baseSha, subject, trail) => {
+    const sha = baseSha.toLowerCase();
+    const short = shortSha(sha);
+    if (!/^[0-9a-f]{40}$/.test(sha)) {
+      return {
+        status: 'invalid',
+        reason: `v6 delta chain: reviewRange.baseSha '${safeForReason(baseSha)}' is not a 40-char sha`,
+      };
+    }
+    if (trail.includes(sha)) {
+      return { status: 'invalid', reason: `v6 delta chain: cycle at ${short}` };
+    }
+    if (!isAncestor(sha, subject)) {
+      return {
+        status: 'invalid',
+        reason: `v6 delta chain: ${short} is not an ancestor of ${shortSha(subject)}`,
+      };
+    }
+    if (cache.has(sha)) return cache.get(sha);
+    const link = verifyLink(sha);
+    let out;
+    if (link === null || link === undefined) {
+      out = {
+        status: 'invalid',
+        reason: `v6 delta chain: no attestation envelope found for ${short}`,
+      };
+    } else if (link.status !== 'valid') {
+      out = {
+        status: 'invalid',
+        reason: `v6 delta chain: envelope for ${short} does not verify (${link.reason})`,
+      };
+    } else if (Array.isArray(link.deltaBaseShas) && link.deltaBaseShas.length > 0) {
+      out = { status: 'valid' };
+      for (const next of link.deltaBaseShas) {
+        const r = walk(next, sha, [...trail, sha]);
+        if (r.status !== 'valid') {
+          out = r;
+          break;
+        }
+      }
+    } else if (isAncestor(sha, prBaseSha)) {
+      out = { status: 'valid' };
+    } else {
+      out = {
+        status: 'invalid',
+        reason: `v6 delta chain: full review at ${short} is not at or before the PR base ${shortSha(prBaseSha)}`,
+      };
+    }
+    cache.set(sha, out);
+    return out;
+  };
+  for (const base of deltaBaseShas) {
+    const r = walk(base, subjectSha, []);
+    if (r.status !== 'valid') return r;
+  }
+  return { status: 'valid' };
+}
+
+/**
  * AISDLC-723 (DEC-0055): the reviewer set a v6 attestation must carry.
  *
  * Before this check the v6 path only required a non-empty, correctly signed
@@ -1224,6 +1300,7 @@ export function verifyV6Envelope({
   // AISDLC-723: reviewer names are taken from the ON-DISK leaves each summary
   // resolves to (never from the envelope copy), and a leafIndex may appear once.
   const verifiedReviewerNames = [];
+  const deltaBaseShas = new Set();
   const seenLeafIndexes = new Set();
   for (let i = 0; i < envelope.transcriptLeaves.length; i++) {
     const leafSummary = envelope.transcriptLeaves[i];
@@ -1291,6 +1368,12 @@ export function verifyV6Envelope({
     }
     if (typeof onDiskLeaf.reviewerName === 'string') {
       verifiedReviewerNames.push(onDiskLeaf.reviewerName);
+    }
+    // AISDLC-970: a delta leaf (Merkle-proved, so not editable) reviewed only
+    // `baseSha..head`; the caller must prove the chain behind `baseSha`.
+    if (onDiskLeaf.reviewRange?.mode === 'delta') {
+      const b = onDiskLeaf.reviewRange.baseSha;
+      deltaBaseShas.add(typeof b === 'string' ? b.toLowerCase() : String(b));
     }
 
     // ── 7b. Verify verdictClass matches on-disk leaf (AISDLC-568) ─────────
@@ -1475,6 +1558,7 @@ export function verifyV6Envelope({
     status: 'valid',
     reason: 'ok',
     verifiedReviewerNames,
+    deltaBaseShas: [...deltaBaseShas],
     verdictClasses,
     overallVerdictClass,
     independenceTiers,
@@ -2738,6 +2822,41 @@ export function runVerifier({
       repoRoot,
       patchIdHint,
     });
+    // AISDLC-970: delta leaves must chain back to a full review at the PR base.
+    if (
+      v6Result.status === 'valid' &&
+      Array.isArray(v6Result.deltaBaseShas) &&
+      v6Result.deltaBaseShas.length > 0
+    ) {
+      const isAncestor = (a, b) =>
+        a.toLowerCase() === b.toLowerCase() ||
+        spawnSync('git', ['merge-base', '--is-ancestor', a, b], { cwd: repoRoot }).status === 0;
+      const verifyLink = (sha) => {
+        let last = null;
+        for (const entry of all) {
+          if (!entry.isV6 || entry.envelope.subject?.digest?.sha1?.toLowerCase() !== sha) continue;
+          const m = entry.fileName.toLowerCase().match(/^([0-9a-f]{40})\.v6\.dsse\.json$/);
+          last = verifyV6Envelope({
+            envelope: entry.envelope,
+            envelopeFileName: `${sha}.v6.dsse.json`,
+            headSha: sha,
+            trustedReviewers,
+            repoRoot,
+            patchIdHint: m && m[1] !== sha ? m[1] : null,
+          });
+          if (last.status === 'valid') return last;
+        }
+        return last;
+      };
+      const chain = verifyDeltaChain({
+        deltaBaseShas: v6Result.deltaBaseShas,
+        subjectSha: lowerHead,
+        prBaseSha: baseSha,
+        verifyLink,
+        isAncestor,
+      });
+      if (chain.status !== 'valid') return chain;
+    }
     // AISDLC-723: required-reviewer-set check, re-derived from the PR diff.
     return v6Result.status === 'valid'
       ? enforceReviewScope(v6Result, {

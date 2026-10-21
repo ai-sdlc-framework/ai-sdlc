@@ -1,7 +1,7 @@
 ---
 id: AISDLC-970
 title: 'The attestation verifier requires a verified chain of envelopes back to the base commit when a leaf carries a delta reviewRange'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-17'
 labels:
