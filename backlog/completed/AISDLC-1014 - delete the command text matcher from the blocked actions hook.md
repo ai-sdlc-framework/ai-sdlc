@@ -2,7 +2,7 @@
 id: AISDLC-1014
 title: >-
   Delete the command-text matcher from the blocked-actions hook; branch protection, pr-ready and cli-merge-if-eligible are the controls
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-21'
 labels:
@@ -41,15 +41,19 @@ dispatchable: true
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 A Bash command whose text contains any blocked-action phrase inside a `--jq` expression, a path, an echo string or a heredoc body is not refused by any PreToolUse hook (regression corpus from today's false refusals in the hook test suite)
-- [ ] #2 The `blockedPaths` refusal for untrusted runs and the lease-push guard behave exactly as before (`enforce-lease-push.test.mjs`, `enforce-lease-any-branch.test.mjs` and the path tests unchanged and green)
-- [ ] #3 The session hard rules rendered at SessionStart no longer present "Blocked actions (NEVER execute)" as hook-enforced; the prompt line in `prompt-rules.js` names the sanctioned paths and names branch protection and `cli-merge-if-eligible` as the controls
-- [ ] #4 `docs/operations/prompt-rules.md` and `agent-governance-reference.md` describe the controls as server-side; no doc claims the hook blocks the raw commands
-- [ ] #5 AISDLC-1012 is moved to `backlog/completed/` as superseded by AISDLC-1014 in the same PR
-- [ ] #6 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
+- [x] #1 A Bash command whose text contains any blocked-action phrase inside a `--jq` expression, a path, an echo string or a heredoc body is not refused by any PreToolUse hook (regression corpus from today's false refusals in the hook test suite)
+- [x] #2 The `blockedPaths` refusal for untrusted runs and the lease-push guard behave exactly as before (`enforce-lease-push.test.mjs`, `enforce-lease-any-branch.test.mjs` and the path tests unchanged and green)
+- [x] #3 The session hard rules rendered at SessionStart no longer present "Blocked actions (NEVER execute)" as hook-enforced; the prompt line in `prompt-rules.js` names the sanctioned paths and names branch protection and `cli-merge-if-eligible` as the controls
+- [x] #4 `docs/operations/prompt-rules.md` and `agent-governance-reference.md` describe the controls as server-side; no doc claims the hook blocks the raw commands
+- [x] #5 AISDLC-1012 is moved to `backlog/completed/` as superseded by AISDLC-1014 in the same PR
+- [x] #6 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
 <!-- AC:END -->
 
 ## Verification
 
 - `node --test ai-sdlc-plugin/hooks/`
 - `pnpm build && pnpm test && pnpm lint && pnpm format:check`
+
+## Final Summary
+
+Deleted the command-text matcher from enforce-blocked-actions.js; kept blockedPaths for untrusted runs and the lease-push guard. Session and subagent hooks no longer render a blocked-actions line; prompt rules name branch protection and the cli-merge-if-eligible helper as the controls. AISDLC-1012 closed as superseded.

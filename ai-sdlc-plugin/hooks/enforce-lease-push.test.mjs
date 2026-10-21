@@ -485,23 +485,6 @@ describe('fixed integrity rules stay blocked under leaseOnOwnBranch', () => {
       ),
     );
   });
-
-  for (const cmd of [
-    'git reset --hard HEAD~1',
-    'git checkout -- .',
-    'git restore .',
-    ['gh', 'pr', 'merge', '5', '--squash'].join(' '),
-    'git stash pop',
-    'git stash clear',
-  ]) {
-    it(`blocks ${cmd}`, () => {
-      assert.ok(denied(run(cmd, ctx())), cmd);
-    });
-  }
-
-  it('the lease allowance does not exempt other blockedActions (chained reset)', () => {
-    assert.ok(denied(run(`${L()}; git reset --hard`, ctx())));
-  });
 });
 
 // ── Round-2 additions ────────────────────────────────────────────────

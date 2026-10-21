@@ -1,9 +1,9 @@
 /**
  * AI-SDLC Action Enforcement Hook (PreToolUse)
  *
- * Enforces governance from .ai-sdlc/agent-role.yaml across three tool families:
+ * Enforces governance from .ai-sdlc/agent-role.yaml across two tool families:
  *
- * 1. **Bash** — checks `tool_input.command` against `blockedActions` patterns.
+ * 1. **Bash** — untrusted-run shell writes and the own-branch lease push guard (no command-text matching, AISDLC-1014).
  * 2. **Write / Edit** — checks `tool_input.file_path` against `blockedPaths` globs
  *    (relative to the agent's "home" — the active worktree when resolvable, else
  *    the project root; see AISDLC-567). AISDLC-720: there is no hardcoded
@@ -26,53 +26,15 @@
  * Fail-safe: allows everything on any error — never block a session because
  * the policy file couldn't be parsed.
  *
- * 4. **Merge governance (AISDLC-602)** — reconciles the `blockedActions`
- *    mechanism (Bash-command glob matching against `git merge*` etc.) with
- *    the resolved `spec.governance` policy (AISDLC-601's resolver). EVERY
- *    `gh pr merge` invocation is blocked here regardless of the resolved
- *    `allowMerge` policy and regardless of flags: that includes arming
- *    (`--auto`), `--squash`/`--rebase`/`--admin`/`--delete-branch` and
- *    `--disable-auto`. The only sanctioned routes are the
- *    `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr>` helper (merge mode)
- *    and `... <pr> --arm` (arming), which own the real policy, fork, author,
- *    base, task and head-commit checks (never reimplemented in this hook).
- *    Arming used to be allowed as "not merging", but an armed PR merges as
- *    soon as GitHub's checks pass, so it is a merge in waiting and must
- *    pass the same gate.
+ * 4. **Own-branch lease push** (AISDLC-1005, lib/lease-push-guard.js).
  *
- * 4b. **API-merge governance** — merging through the GitHub API (the REST
- *    `.../pulls/<n>/merge` endpoint via `gh api`, `curl` or `wget`, or the
- *    GraphQL `mergePullRequest` mutation) is denied under every `allowMerge`
- *    value (see `enforceApiMergeGovernance`); the sanctioned helper stays allowed.
- *
- * 5. **Destructive-stash governance (AISDLC-611)** — the git stash stack is
- *    shared across the main checkout, all worktrees, and concurrent
- *    sessions. A `git stash pop` can silently apply-and-drop a PRE-EXISTING
- *    stash belonging to the operator or a sibling session (real data-loss
- *    incident: local-trades LT-595, HIGH-3). Round-5 scope (operator
- *    decision): this hook BLOCKS ONLY the genuinely destructive shared-stack
- *    ops — `git stash pop`, `git stash clear`, and a bare `git stash drop`
- *    (no explicit ref). It ALLOWS everything else: bare `git stash`, tagged
- *    OR untagged `push`/`save`, `apply`, `list`, `show`, and
- *    `git stash drop <ref>` (explicit ref). Tagging (`-m`) is still strongly
- *    recommended but no longer enforced. Obfuscated invocations are caught by
- *    normalizing the command with a single shell-accurate pass — `$IFS`
- *    (including `${IFS:0:1}`-style parameter expansions) → whitespace
- *    (word-split), every other `$VAR`/`${VAR}` → empty (unset var
- *    concatenates) — plus quote/backslash/wrapper stripping, then blocking if
- *    the result is a destructive op (see
- *    `enforceStashGovernance`/`normalizeStashObfuscation`).
- *
- *    SCOPE (operator decision, AISDLC-611 / LT-595): this guard prevents a
- *    cooperative agent from ACCIDENTALLY running a destructive stash op (the
- *    actual incident it exists for). It is NOT — and a static PreToolUse regex
- *    matcher fundamentally CANNOT be — proof against a DELIBERATELY-obfuscating
- *    agent: inline shell-variable state (`X=pop; git stash $X`), `eval`,
- *    `base64 | sh`, and a leading `sudo`/`env` prefix all execute a real op
- *    that no static normalizer can resolve. Those are a different threat model
- *    (a hostile agent, not an accidental one) and are accepted as out of scope
- *    here; defense against a hostile agent belongs at the sandbox/permission
- *    layer, not this hook.
+ * AISDLC-1014 (DEC-0267): the command-text matcher (blockedActions glob
+ * patterns, the raw landing, API landing, stash and policy-root text checks) is
+ * deleted. It matched free text and refused JSON field names, paths, echo
+ * strings and heredoc bodies. The controls that hold are server-side: GitHub
+ * branch protection on main (no direct push, no force push, required
+ * pr-ready rollup), and cli-merge-if-eligible. The prompt rule stays as
+ * instruction (lib/prompt-rules.js).
  */
 
 const {
@@ -90,22 +52,11 @@ const { createHash } = require('crypto');
 const { join, resolve, isAbsolute, relative, sep, dirname, basename } = require('path');
 const { execSync, execFileSync } = require('child_process');
 const {
-  resolveGovernanceFromYaml,
   resolveGovernanceExtrasFromYaml,
-  STRICT_DEFAULTS,
   isUntrustedRun,
   UNTRUSTED_MARKER_FILE,
 } = require('./lib/governance-resolver');
 const { evaluateLeasePush, hasForcePushOption } = require('./lib/lease-push-guard');
-const {
-  commandRunsGhPrMerge,
-  commandHasUninertMatch,
-  mentionsApiMerge,
-  normalizePathDots,
-  normalizeExpansions,
-  httpClientGlobsPulls,
-  stripCommentAndQuotes: libStripCommentAndQuotes,
-} = require('./lib/merge-matcher');
 const {
   runGit: gitOut,
   probeRef,
@@ -170,26 +121,15 @@ const projectDir =
 
 const agentRolePath = join(projectDir, '.ai-sdlc', 'agent-role.yaml');
 
-let blockedActions = [];
 let blockedPaths = [];
-// AISDLC-602: resolved governance policy, used by the merge-governance check
-// below. Falls back to STRICT_DEFAULTS (the schema default, allowMerge: 'never',
-// which is a configurable value rather than a project rule) on any parse
-// error or absent agent-role.yaml — mirrors the trust-boundary contract
-// documented in governance-resolver.js (resolved from the trusted on-disk
-// project root, never PR-tree content).
-let resolvedGovernance = { ...STRICT_DEFAULTS };
 try {
   const yaml = readFileSync(agentRolePath, 'utf-8');
-  blockedActions = parseListField(yaml, 'blockedActions');
   blockedPaths = parseListField(yaml, 'blockedPaths');
-  resolvedGovernance = resolveGovernanceFromYaml(yaml);
 } catch {
   // No agent-role.yaml (or unreadable) — fall through with empty config.
   // `.ai-sdlc/**` and the outside-worktree/permittedExternalPaths rules are
   // hardcoded floors enforced regardless of config (AISDLC-567), so we must
   // NOT exit early here the way the Bash-only enforcement used to.
-  // resolvedGovernance stays at STRICT_DEFAULTS (fail-closed).
 }
 
 // ── Own-branch lease policy (RFC-0051 §10) ───────────────────────────
@@ -342,16 +282,6 @@ function looksLikeGitPush(command) {
 // Declared BEFORE the top-level dispatch below so they are initialized before
 // enforceBash() runs at module load — a `const` in the temporal dead zone here
 // would crash the hook (fail-OPEN). Do not move these below the dispatch.
-
-// AISDLC-611: same temporal-dead-zone constraint applies to the stash
-// governance constants — must be initialized before enforceBash() →
-// enforceStashGovernance() runs at module load.
-const GIT_GLOBAL_VALUE_FLAGS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace']);
-const SAFE_STASH_PATTERN =
-  'prefer a temporary WIP commit to set work aside; if you must stash, tag it uniquely ' +
-  `('git stash push -u -m "<unique-tag>"'), restore it by exact ref/SHA ` +
-  `('git stash apply <ref>'), and only then drop it by that same tag/ref ` +
-  `('git stash drop <ref>')`;
 
 // ── AISDLC-720: untrusted-run enforcement ───────────────────────────
 // Signal is read ONCE from this hook process's own environment. Nothing in the
@@ -553,35 +483,9 @@ function enforceBash(command) {
   // AISDLC-720: untrusted runs may not write governance config / workflows via shell.
   enforceUntrustedShellWrites(trimmed);
 
-  // AISDLC-602: merge governance is enforced unconditionally — independent
-  // of whatever blockedActions patterns the project has (or hasn't)
-  // configured. See enforceMergeGovernance() for the exact rules.
-  enforceMergeGovernance(trimmed);
-
-  // Merging through the REST/GraphQL API is the same act as a raw merge
-  // command and must not be a side door around the sanctioned helper (denied
-  // under every allowMerge value).
-  enforceApiMergeGovernance(trimmed);
-
-  // Defense in depth: no legitimate command mentions the removed policy-root
-  // override, so any attempt to name it is refused.
-  if (/AI_SDLC_MERGE_POLICY_ROOT/i.test(trimmed)) {
-    deny(
-      "rule 'merge policy root is fixed': overriding it is not a permitted action. Next step: remove the " +
-        'override; the merge policy is read from the trusted checkout, and a different policy is set through ' +
-        'spec.governance.allowMerge in .ai-sdlc/agent-role.yaml (record the need with ' +
-        "'node pipeline-cli/bin/cli-decisions.mjs escalate' to route it).",
-    );
-  }
-
-  // AISDLC-611: no-bare-stash governance is enforced unconditionally too —
-  // independent of whatever blockedActions patterns the project configured.
-  enforceStashGovernance(trimmed);
-
   // RFC-0051 §10: own-branch force-with-lease. Only active when the TRUSTED
   // policy resolved to `leaseOnOwnBranch`; under `never` (default, absent,
-  // malformed) this is a no-op and the blockedActions patterns below behave
-  // exactly as before.
+  // malformed) this is a no-op.
   let leasePushAllowed = false;
   try {
     // AISDLC-861: a `-C` path built by shell expansion cannot be resolved, so the
@@ -619,9 +523,7 @@ function enforceBash(command) {
       if (verdict.decision === 'deny') deny(verdict.reason);
       leasePushAllowed = verdict.decision === 'allow';
     }
-    // Default policy (`never`/unset): also catch the common non-prefix shapes the
-    // anchored blockedActions globs miss (`git push origin --force main`,
-    // `git push origin -f HEAD:main`, `+refspec`). Runs no git subprocess.
+    // Default policy (`never`/unset): refuse force-push shapes found by the lease guard's own tokenizer.
     if (lease.mode === 'never' && hasForcePushOption(trimmed)) {
       deny(forcePushRefusal(lease.why, lease.failing));
     }
@@ -635,477 +537,6 @@ function enforceBash(command) {
       );
     }
   }
-
-  if (blockedActions.length === 0) return;
-
-  const withoutLeaseFlags = trimmed
-    .replace(/\s--force-with-lease(=\S*)?/g, '')
-    .replace(/\s--force-if-includes/g, '');
-
-  for (const pattern of blockedActions) {
-    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
-    const regexStr = escaped.replace(/\*/g, '.*');
-    const regex = new RegExp(`^${regexStr}$`, 'i');
-    // The one command shape the lease policy positively allowed is exempt only
-    // from `git push` patterns that match PURELY because of the lease flags
-    // (e.g. `git push --force*`). A pattern that still matches once those flags
-    // are removed (e.g. `git push *develop*`) keeps applying.
-    if (leasePushAllowed && /^git\s+push\b/i.test(pattern) && !regex.test(withoutLeaseFlags)) {
-      continue;
-    }
-    if (regex.test(trimmed)) {
-      const forceHint =
-        !leasePushAllowed && /^git\s+push\b/i.test(pattern) && hasForcePushOption(trimmed);
-      deny(
-        `command matches blockedActions pattern '${pattern}' (.ai-sdlc/agent-role.yaml); use the sanctioned ` +
-          `alternative for the same goal, or record the need with 'node pipeline-cli/bin/cli-decisions.mjs escalate'` +
-          (forceHint
-            ? ` (a force-with-lease push on a task's own branch is allowed by spec.governance.allowForcePush = leaseOnOwnBranch in .ai-sdlc/agent-role.yaml, when the push is spelled 'git push --force-with-lease origin HEAD:refs/heads/<own-branch>' from the task worktree)`
-            : ''),
-      );
-    }
-  }
-}
-
-// ── Merge governance (AISDLC-602) ────────────────────────────────────
-
-/**
- * Denies every raw `gh pr merge` invocation (any flags, including arming) so the
- * only route is `node pipeline-cli/bin/cli-merge-if-eligible.mjs` (merge mode
- * or `--arm`). The deny does not depend on the resolved `allowMerge` value.
- *
- * This runs against a raw shell command STRING, not a parsed argv, so the match
- * is best-effort defense-in-depth, NOT an impenetrable sandbox; the real backstop
- * is GitHub-side branch protection. It FAILS CLOSED (see lib/merge-matcher.js):
- * the command is split on shell control operators (quote-aware) and, when the
- * merge phrase appears in a segment (quote-aware comment stripping, quotes kept
- * or removed, case ignored), the command is denied unless that segment's command
- * word is on a short positive allowlist of inert commands (echo, grep, cat,
- * git commit, ...) and every later pipe stage is inert too. Shells, interpreters,
- * `env`/`sudo`/`pnpm exec` prefixes, reserved words, substitutions and unknown
- * commands all deny. Heredoc bodies are never dropped (DEC-0085): every line
- * of the command text is matched.
- *
- * Commands that don't contain the merge phrase are untouched; they still flow
- * through the generic `blockedActions` pattern matching in enforceBash().
- */
-function enforceMergeGovernance(trimmed) {
-  // AISDLC-605: fail closed unless the phrase is inert data (see lib/merge-matcher.js).
-  if (commandRunsGhPrMerge(trimmed)) {
-    deny(
-      `raw 'gh pr merge' (including 'gh pr merge --auto') is not a permitted merge path ` +
-        `(resolved governance allowMerge="${resolvedGovernance.allowMerge}"). Merges go through ` +
-        `'node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr>' and arming auto-merge goes ` +
-        `through 'node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --arm'; both enforce the ` +
-        `real policy, fork, author, base, task and head-commit checks. The release-please PR ` +
-        `('chore: release main') is landed with ` +
-        `'node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind release --arm'.`,
-    );
-  }
-}
-
-// ── API-merge governance ─────────────────────────────────────────────
-
-/**
- * Denies merging a PR through the GitHub API instead of the sanctioned
- * `node pipeline-cli/bin/cli-merge-if-eligible.mjs` helper, under EVERY
- * `allowMerge` value (the helper, not the hook, owns the real eligibility
- * gate and performs the merge itself, so nothing legitimate needs the API
- * route from a Bash tool call). Covered:
- *   - the REST endpoint `.../pulls/<n>/merge`, any HTTP method (a GET only
- *     reads, but the whole path is denied: simpler and safer), in the
- *     `gh api repos/<o>/<r>/pulls/<n>/merge` and `gh api /repos/...` spellings,
- *     flags in any order (`-X PUT`, `--method=PUT`, `-f merge_method=...`),
- *     `curl`/`wget`/`http` to `https://api.github.com/repos/<o>/<r>/pulls/<n>/merge`,
- *     and script-runner (`node -e`, `python -c`, ...) spellings;
- *   - the GraphQL `mergePullRequest` and `enablePullRequestAutoMerge` (arming)
- *     mutations sent through `gh api graphql` / `curl`.
- * Raw `gh pr merge` in every form is denied separately; see enforceMergeGovernance().
- *
- * Detection runs on a normalized copy of the command (variables collapsed like
- * a default shell, quotes/backslashes/percent-escapes removed; heredoc bodies
- * stay in view, see enforceMergeGovernance) and is deliberately text-level:
- * like every matcher here it cannot defeat base64 pipelines or constructed
- * strings; branch protection + required checks remain the backstop. Like the raw
- * merge check it FAILS CLOSED: a segment containing a merge path or mutation is
- * denied unless its command word is on the inert allowlist (echo, grep, cat,
- * git commit, ...) and every later pipe stage is inert, so `grep`/`cat`/`git log`
- * on text that merely mentions such a path stay allowed.
- */
-function enforceApiMergeGovernance(command) {
-  const mergePath = /(?:^|[/\s])pulls\/[^\s/]*\/merge(?![A-Za-z0-9_-])/i;
-  const mergeMutation = /\b(?:mergePullRequest|enablePullRequestAutoMerge)\b/i;
-  const matches = (segment) => {
-    return [segment, ...normalizeExpansions(segment)].some((v) => {
-      const text = normalizePathDots(normalizeForApiMerge(v));
-      return mergePath.test(text) || mergeMutation.test(text);
-    });
-  };
-  if (httpClientGlobsPulls(command) || commandHasUninertMatch(command, matches, mentionsApiMerge)) {
-    deny(
-      `merging a PR through the GitHub API ('.../pulls/<n>/merge' or the mergePullRequest ` +
-        `mutation) is not a permitted merge path under any governance allowMerge value. ` +
-        `Merges must go through 'node pipeline-cli/bin/cli-merge-if-eligible.mjs', which ` +
-        `enforces the real eligibility gate, and arming auto-merge goes through the same helper with --arm.`,
-    );
-  }
-}
-
-/**
- * Normalizes a command for API-merge DETECTION only (never alters what runs).
- * Mirrors a default shell for variables (`$IFS` splits, any other `$VAR` is
- * empty so its neighbours concatenate), drops quotes and backslashes (so
- * `pu''lls` / `pulls\/5` collapse), and decodes `%XX` escapes. Unlike the stash
- * normalizer it KEEPS braces/parens so `{owner}` placeholders and URLs stay intact.
- */
-function normalizeForApiMerge(text) {
-  let out = text;
-  out = out.replace(/\$\{IFS\}/g, ' ');
-  out = out.replace(/\$\{IFS[^}A-Za-z0-9_][^}]*\}/g, ' ');
-  out = out.replace(/\$IFS\b/g, ' ');
-  out = out.replace(/\$\{[^}]*\}/g, '');
-  out = out.replace(/\$[A-Za-z_][A-Za-z0-9_]*/g, '');
-  out = out.replace(/['"]/g, '');
-  out = out.replace(/\\\n/g, '');
-  out = out.replace(/\\/g, '');
-  try {
-    out = decodeURIComponent(out);
-  } catch {
-    out = out.replace(/%([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
-  }
-  return out;
-}
-
-/**
- * Splits a command into segments on shell control operators so a `gh pr merge`
- * embedded in a chain (`x && gh pr merge 5`) is evaluated on its own. `&&` and
- * `||` are matched before the single-char `&`/`|` forms.
- *
- * Note: the split runs on the RAW command, BEFORE comment stripping — so a `#`
- * comment that itself contains `&&`/`;`/`|` splits into extra pseudo-segments.
- * This can only ever OVER-block (an inert comment fragment is treated as its
- * own segment), never under-block, which is the safe bias for this boundary.
- */
-function splitShellSegments(command) {
-  return command
-    .split(/(?:&&|\|\||;|\||&|\n)/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-/** Removes an unquoted trailing shell comment and all quote characters. */
-function stripCommentAndQuotes(segment) {
-  // Shared with lib/merge-matcher.js: quote-aware, `#` only starts a comment at a word boundary.
-  return libStripCommentAndQuotes(segment);
-}
-
-// ── No-bare-stash governance (AISDLC-611) ────────────────────────────
-
-/**
- * Enforces the no-bare-stash rule. The git stash stack is a single shared
- * resource across the main checkout, every `.worktrees/<id>/` isolate, and
- * any concurrent session — a bare `git stash` followed by `git stash pop`
- * can silently apply-and-drop a stash that belongs to someone else (the
- * motivating incident: a dev subagent's own stash captured nothing, so its
- * `pop` applied+dropped a pre-existing operator stash — local-trades LT-595,
- * HIGH-3, a REAL data-loss incident).
- *
- * Heredoc bodies are stripped BEFORE segment-splitting so a heredoc that
- * merely CONTAINS the text `git stash pop` (e.g. documentation piped via
- * `cat <<EOF`) is not mistaken for an actual invocation (AC-3 no-over-block).
- * The remaining text is then aggressively NORMALIZED (see
- * `normalizeStashObfuscation`) to collapse the many shell-level ways of
- * spelling the same invocation — quotes, backslashes, subshell/brace/
- * command-substitution wrappers, and `$VAR`/`${VAR}` word-splitting tricks —
- * down to their plain-text equivalent BEFORE segment-splitting and
- * detection. This is deliberately NOT an enumerate-every-obfuscation
- * strategy (security review found that approach keeps producing new
- * bypasses — `/usr/bin/git`, `git st''ash`, `git${IFS}stash`, `git st\ash`,
- * `\git stash`, `(git stash pop)`, etc. were each patched individually and
- * each left a sibling bypass). Instead: normalize the obfuscation-capable
- * characters away FIRST, then run ONE fail-closed subcommand-position
- * detector (`evaluateStashSegment`) over the clean text — see that
- * function's docstring for the fail-closed contract.
- */
-function enforceStashGovernance(command) {
-  const withoutHeredocs = stripHeredocBodies(command);
-  // AISDLC-611: normalize the command with a SINGLE shell-accurate pass (see
-  // `normalizeStashObfuscation`) — `$IFS` → whitespace (word-split), every
-  // other `$VAR`/`${VAR}` → empty (an unset var concatenates its neighbors).
-  // This models what a real default shell actually does to EACH variable
-  // INDEPENDENTLY, so a mixed splice like `g${x}it${IFS}stash pop` (empty $x
-  // joins `git`, $IFS splits `stash`/`pop`) collapses to `git stash pop` and
-  // is caught. (An earlier two-uniform-corner approach — all-space OR
-  // all-empty — could not represent mixed expansions and let that form
-  // through; security round-5 finding.)
-  const normalized = normalizeStashObfuscation(withoutHeredocs);
-  for (const segment of splitShellSegments(normalized)) {
-    const verdict = evaluateStashSegment(segment);
-    if (verdict && verdict.blocked) {
-      deny(verdict.reason);
-    }
-  }
-}
-
-/**
- * Aggressively normalizes a command string for stash-governance DETECTION
- * (never used to alter what the shell/Bash tool actually executes — only
- * this local copy is transformed). Collapses the shell mechanisms that can
- * be used to obfuscate a `git stash` invocation down to their plain-text
- * equivalent, in order:
- *
- * 1. `stripCommentAndQuotes` — drops a trailing `#` comment and EVERY quote
- *    character, so a real shell's word-concatenation behavior is mirrored:
- *    `git st''ash pop` / `git sta"sh" pop` both collapse to the literal
- *    text `git stash pop` (closes the mid-token quote-splice bypass).
- * 2. `${...}` / `$VAR` → a single space. Bash's default `$IFS` is
- *    whitespace, so `git${IFS}stash${IFS}pop` really does word-split into
- *    `git stash pop` at execution time — detection must mirror that
- *    (closes the `$IFS`-splice bypass) rather than leave a stray `IFS`
- *    token that corrupts subcommand-position detection.
- * 3. Backslashes removed entirely (not replaced with a space) — a real
- *    shell drops an unescaped `\` and joins what's on either side of it,
- *    so `git st\ash pop` → `git stash pop` and `\git stash pop` →
- *    `git stash pop` (closes the backslash-splice bypass).
- * 4. Subshell / brace-group / backtick / remaining `$` wrapper punctuation
- *    (`(`, `)`, `{`, `}`, `` ` ``, `$`) replaced with a space — all of
- *    these EXECUTE their contents, so `(git stash pop)` /
- *    `{ git stash pop; }` / `` `git stash pop` `` / `$(git stash pop)`
- *    are exactly as dangerous as a bare invocation (closes the shell-
- *    wrapper bypass). The bare `$` catches command substitution's opening
- *    `$(` after step 4 already removed the parens — without it, a stray
- *    `$` token survives and corrupts subcommand-position detection by
- *    displacing the `git` token from index 0.
- *
- * This is a coarse CHARACTER-LEVEL transform, not balanced shell parsing —
- * it can only ever ADD false-positive detections (e.g. turning an unrelated
- * `foo(bar)` into two harmless tokens) or expose a hidden invocation for
- * correct detection; it can never HIDE a real one. That is the deliberate
- * safe bias for this boundary.
- */
-function normalizeStashObfuscation(text) {
-  // ORDER MATTERS (3rd security round finding): `${VAR}`/`$VAR` collapse
-  // MUST run BEFORE quote-stripping. In a real shell, an unescaped quote
-  // TERMINATES a `$VAR` name — `$IFS'stash'` expands `$IFS` then emits the
-  // literal `stash`. If quotes were stripped FIRST, `$IFS'stash'` would
-  // already read as `$IFSstash`, and the greedy `/\$[A-Za-z_][A-Za-z0-9_]*/`
-  // variable-name regex would swallow the whole thing as ONE (bogus)
-  // variable reference — silently deleting the `stash` token itself rather
-  // than collapsing `$IFS` to whitespace and leaving `stash` intact. That
-  // was the exact bypass in `git$IFS'stash'${IFS}pop`.
-  //
-  // SHELL-ACCURATE per-variable resolution (round-5): each variable is
-  // resolved INDEPENDENTLY, mirroring a real default shell —
-  //   • `$IFS` / `${IFS}` → a single space (its default value is whitespace,
-  //     so it word-splits its neighbors);
-  //   • every OTHER `$VAR` / `${VAR}` → the empty string (an unset variable
-  //     expands to nothing, so its neighbors CONCATENATE).
-  // A two-uniform-corner sweep (all-space OR all-empty) could not represent a
-  // MIXED command like `g${x}it${IFS}stash pop` (unset `$x` joins → `git`,
-  // `$IFS` splits → `stash`/`pop`); this single pass does, because it applies
-  // the correct rule to each variable at once. IFS is handled BEFORE the
-  // generic `$VAR` rules so it isn't swallowed by the empty-collapse.
-  let out = text;
-  out = out.replace(/\$\{IFS\}/g, ' '); // ${IFS} → space (whitespace word-split)
-  // ${IFS:0:1} / ${IFS#x} / ${IFS/a/b} / ${IFS:-x} … — any PARAMETER EXPANSION
-  // of the IFS var (IFS followed by an operator char, not a name char) yields
-  // whitespace in a real shell, so → space. Must run BEFORE the generic
-  // `${...}`→empty rule (which would otherwise delete it). `${IFSX}` (name
-  // char after IFS = a DISTINCT var) is intentionally NOT matched and falls to
-  // the empty rule below. (Security round-6 finding: `git${IFS:0:1}stash pop`.)
-  out = out.replace(/\$\{IFS[^}A-Za-z0-9_][^}]*\}/g, ' ');
-  out = out.replace(/\$IFS\b/g, ' '); // $IFS → space (\b so $IFStash is NOT matched here)
-  out = out.replace(/\$\{[^}]*\}/g, ''); // any other ${VAR} → empty (concatenate)
-  out = out.replace(/\$[A-Za-z_][A-Za-z0-9_]*/g, ''); // any other $VAR → empty (concatenate)
-  out = stripCommentAndQuotes(out); // NOW strip comment + quotes, after $VAR is already gone
-  out = out.replace(/\\/g, ''); // drop backslashes; join adjoining text
-  // Unwrap subshell/brace/backtick/`$(` execution forms. Note: this also
-  // strips the `{`/`}` in a stash ref like `stash@{0}` (→ `stash@0` after
-  // the surrounding space collapse), which is harmless for OUR purposes —
-  // every safety check below only asks "is there a non-flag token present"
-  // (`hasPositionalArg`), never inspects the ref's exact contents — but a
-  // future editor adding ref-content validation here would need to reverse
-  // this stripping first.
-  out = out.replace(/[(){}`$]/g, ' ');
-  return out;
-}
-
-/** True when `tok` is `git` or a path ending in `/git` (e.g. `/usr/bin/git`, `./git`). */
-function isGitToken(tok) {
-  return typeof tok === 'string' && /(^|\/)git$/.test(tok);
-}
-
-/**
- * Removes heredoc BODY lines (the content between a `<<[-~]MARKER` opener and
- * its closing `MARKER` line) from a multi-line command, replacing them with
- * nothing. The opener line itself (which contains the real shell redirect,
- * e.g. `cat <<EOF`) is preserved — only the inert body text is dropped. This
- * prevents a heredoc that quotes `git stash pop` as documentation/example
- * text from being mistaken for a real invocation once the command is split
- * on newlines by splitShellSegments().
- *
- * Handles the common forms: `<<EOF`, `<<'EOF'`, `<<"EOF"`, `<<-EOF` (tab-
- * stripped closing delimiter). Best-effort — an unterminated heredoc simply
- * consumes the remainder of the command, which can only ever cause
- * under-inspection of trailing content, never a false BLOCK.
- */
-function stripHeredocBodies(command) {
-  const lines = command.split('\n');
-  const kept = [];
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    const match = line.match(/<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/);
-    if (!match) {
-      kept.push(line);
-      i++;
-      continue;
-    }
-    const marker = match[2];
-    const dashed = /<<-/.test(line);
-    kept.push(line);
-    i++;
-    while (i < lines.length) {
-      const bodyLine = dashed ? lines[i].replace(/^\t+/, '') : lines[i];
-      i++;
-      if (bodyLine === marker) break;
-    }
-  }
-  return kept.join('\n');
-}
-
-/**
- * Locates the index of the `stash` token in a git invocation's token list,
- * starting the scan just after the `git` token at `gitIdx`, tolerating
- * global flags (`-C <dir>`, `-c <key=val>`, etc.) in between. Returns -1 when
- * the invocation is `git <something-else>` (not stash) — e.g. `git commit`.
- */
-function findGitStashIndex(tokens, gitIdx) {
-  let j = gitIdx + 1;
-  while (j < tokens.length) {
-    const tok = tokens[j];
-    if (tok === 'stash') return j;
-    if (GIT_GLOBAL_VALUE_FLAGS.has(tok)) {
-      j += 2;
-      continue;
-    }
-    if (tok.startsWith('-')) {
-      j += 1;
-      continue;
-    }
-    return -1; // some other git subcommand — not stash
-  }
-  return -1;
-}
-
-/** True when a non-flag (positional) token appears from `fromIdx` onward. */
-function hasPositionalArg(tokens, fromIdx) {
-  for (let i = fromIdx; i < tokens.length; i++) {
-    if (!tokens[i].startsWith('-')) return true;
-  }
-  return false;
-}
-
-/**
- * Evaluates a single shell segment for a `git stash` invocation and decides
- * whether it should be blocked. Returns `null` when the segment does not
- * invoke `git stash` at all (not a stash command → no opinion, caller
- * moves on).
- *
- * The caller (`enforceStashGovernance`) already ran `normalizeStashObfuscation`
- * over the WHOLE command before segment-splitting, so by the time a segment
- * reaches this function, quotes/backslashes/`$VAR`/wrapper punctuation are
- * already gone. `stripCommentAndQuotes()` runs again here (idempotent — no
- * quotes remain, so this is a defensive no-op) before splitting on
- * whitespace, and the `git` token itself is matched by BASENAME
- * (`isGitToken`, e.g. `/usr/bin/git`) rather than exact string equality, so a
- * path-qualified invocation is treated exactly like a bare `git`.
- *
- * DETECTION IS BY SUBCOMMAND POSITION, not "the word stash appears
- * anywhere": `findGitStashIndex` walks forward from the `git` token, skips
- * recognized GLOBAL git flags (`-C <dir>`, `-c <k=v>`, etc.), and returns
- * the index of the very next non-flag token. Only when THAT token is
- * literally `stash` do we treat this as a stash invocation at all — so
- * `git commit -m stash`, `git branch stash-experiment`, and
- * `git log --grep stash` (where `stash` is an ARGUMENT, not the subcommand)
- * correctly return `null` (not a stash invocation, no opinion) rather than
- * being blocked.
- *
- * SCOPE (round 5, operator decision): once the subcommand IS `stash`, block
- * ONLY the genuinely destructive stack ops — `pop`, `clear`, and bare `drop`
- * (no ref). All other stash forms (bare `git stash`, `push`/`save` tagged or
- * untagged, `apply`/`list`/`show`, `drop <ref>`) are non-destructive to other
- * sessions' stashes and are allowed. Obfuscation is handled UPSTREAM by the
- * caller running `normalizeStashObfuscation`, whose single shell-accurate pass
- * (`$IFS` → space, every other `$VAR` → empty) collapses splices inside the
- * `git`/`stash`/subcommand tokens to their real executed form before this
- * function sees them, so a mixed `g${x}it${IFS}stash pop` is caught.
- */
-function evaluateStashSegment(segment) {
-  const tokens = stripCommentAndQuotes(segment).trim().split(/\s+/).filter(Boolean);
-  let i = 0;
-  // Skip a leading run of `VAR=value` env assignments.
-  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
-  if (!isGitToken(tokens[i])) return null; // not a git invocation at all (basename-tolerant)
-
-  const stashIdx = findGitStashIndex(tokens, i);
-  if (stashIdx === -1) return null; // `git <something-else>` — stash isn't the subcommand
-
-  const subIdx = stashIdx + 1;
-  const sub = tokens[subIdx];
-
-  // AISDLC-611 (round 5, operator scope decision): block ONLY the genuinely
-  // DESTRUCTIVE stash-stack ops — `pop`, `clear`, and bare `drop` (no ref).
-  // Everything else, including bare `git stash` and untagged `push`/`save`, is
-  // ALLOWED: once `pop`/`clear`/bare-`drop` are blocked, an untagged stash can
-  // never be accidentally destroyed, so the old "push/save must be -m tagged"
-  // requirement was redundant defense-in-depth. Dropping it also removes the
-  // tag-VALUE parsing that a `$VAR`-valued tag (`-m "$TAG"`) turned into a
-  // false-block regression. Tagging remains RECOMMENDED (SAFE_STASH_PATTERN),
-  // just not enforced.
-
-  // Bare `git stash` (no subcommand / next token is a flag like `-u`) is a
-  // push — not destructive to anyone else's stash. Allow.
-  if (!sub || sub.startsWith('-')) {
-    return { blocked: false };
-  }
-
-  if (sub === 'pop') {
-    return {
-      blocked: true,
-      reason:
-        `'git stash pop' applies AND drops in one step on the SHARED stash stack (main ` +
-        `checkout + all worktrees + concurrent sessions) — if your own stash captured nothing ` +
-        `(e.g. nothing was staged/dirty), the pop can silently apply-and-drop a PRE-EXISTING ` +
-        `stash belonging to the operator or a sibling session, permanently losing their work ` +
-        `(real incident: local-trades LT-595, HIGH-3). Safe pattern: ${SAFE_STASH_PATTERN}.`,
-    };
-  }
-
-  if (sub === 'clear') {
-    return {
-      blocked: true,
-      reason:
-        `'git stash clear' DELETES every entry on the SHARED stash stack (main checkout + all ` +
-        `worktrees + concurrent sessions), destroying stashes that may belong to the operator ` +
-        `or a sibling session. Safe pattern: ${SAFE_STASH_PATTERN}.`,
-    };
-  }
-
-  if (sub === 'drop') {
-    if (hasPositionalArg(tokens, subIdx + 1)) return { blocked: false }; // explicit ref → allowed
-    return {
-      blocked: true,
-      reason:
-        `bare 'git stash drop' (no explicit ref) drops whatever is CURRENTLY on top of the ` +
-        `SHARED stash stack, which may not be yours. Safe pattern: ${SAFE_STASH_PATTERN}.`,
-    };
-  }
-
-  // Every other subcommand (push/save tagged OR untagged, apply, list, show,
-  // branch, create, store, export, drop <ref>, ...) is non-destructive to
-  // other sessions' stashes — allow. (Operator scope: destructive-ops-only.)
-  return { blocked: false };
 }
 
 // ── Write/Edit enforcement (new behavior) ────────────────────────────

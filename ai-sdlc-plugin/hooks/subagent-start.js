@@ -93,7 +93,6 @@ try {
   process.exit(0);
 }
 
-const blockedActions = parseListField(yaml, 'blockedActions');
 const blockedPaths = parseListField(yaml, 'blockedPaths');
 // Render from the SAME trusted source the PreToolUse hook enforces (see
 // lib/trusted-policy.js): a worktree copy cannot make the banner claim a grant.
@@ -132,10 +131,6 @@ ${renderSubagentHardRules(resolvedGovernance)}${operationalRules ? `\n- ${operat
 
 if (blockedPaths.length > 0) {
   context += `\nBlocked paths (PreToolUse hook, no edits): ${blockedPaths.map((p) => `\`${p}\``).join(', ')}`;
-}
-
-if (blockedActions.length > 0) {
-  context += `\nBlocked Bash actions (PreToolUse hook, no execution): ${blockedActions.map((a) => `\`${a}\``).join(', ')}`;
 }
 
 context += `\nCross-repo writes: the \`permittedExternalPaths\` of the task in \`AI_SDLC_ACTIVE_TASK_ID\` allowlists sibling repos; other writes outside your cwd are denied.`;

@@ -133,6 +133,12 @@ Dev subagents that hit an OQ-class architectural question during implementation 
 
 The `code-reviewer` and `test-reviewer` subagents check for inline OQ resolutions in every PR diff. A new `**Resolution:**` marker added by a developer in an RFC's `## Open Questions` section is a **critical** finding that blocks approval.
 
+## Where "never do X" rules are enforced (AISDLC-1014, DEC-0267)
+
+Operator decision, five steps. (1) Requirement questioned: "a local hook must refuse the raw landing, close and force-push commands"; the outcome it protects is enforced on the server. (2) Delete: the command-text matcher in `enforce-blocked-actions.js` (the `blockedActions` patterns, raw merge, API merge and stash checks). (3) Simplify: one source for the rule, the line in `lib/prompt-rules.js`; one enforcement point, the server. (4) Accelerate: no refusals on JSON field names, paths, echo strings or heredoc bodies. (5) Automate: nothing new.
+
+The controls that hold: branch protection on `main` (no direct push, no force push, required `ai-sdlc/pr-ready`), the `ai-sdlc/pr-ready` rollup, and `cli-merge-if-eligible`. The hook still enforces `blockedPaths` for untrusted runs and the lease-push guard (`allowForcePush` modes). Session and subagent hard rules no longer list a "Blocked actions" line, and the plugin hooks no longer read `blockedActions` from `agent-role.yaml`. This is a governance weakening recorded as DEC-0267, compensated by the server-side controls above.
+
 ## Five-step production algorithm (operator rule, 2026-10-10)
 
 Every fix, prevention task, governance rule and process change is worked in this order, and its write-up names the steps (DEC-0090):

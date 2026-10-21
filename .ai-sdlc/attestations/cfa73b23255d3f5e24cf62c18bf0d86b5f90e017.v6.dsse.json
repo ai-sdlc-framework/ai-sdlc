@@ -1,0 +1,88 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "b352c1d98bddeb62201b75ffa2cb3e88c4b4840c"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "6b1721d150b1c90d08f4f2be8805f0d8013f89fb1f35d5495bba3bafff21f650",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "6b1721d150b1c90d08f4f2be8805f0d8013f89fb1f35d5495bba3bafff21f650",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "a0720ecaa7b3d37dd45009d83134b036269a2e4f296370ea8196a22b8797e51e",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "a0720ecaa7b3d37dd45009d83134b036269a2e4f296370ea8196a22b8797e51e",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "772698e2fb58aa2abf564c630aa9eea1a8a295fd7062d801b7644894ebafb769",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "772698e2fb58aa2abf564c630aa9eea1a8a295fd7062d801b7644894ebafb769",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "6b152f5d1764b30a89cd289681ef8183d0f4395f4ccf8c5097c756eb01a4ca21",
+        "6b032f0799f94e7c7b8d857f2dc89f683bc1163a784540a562db1078d040845c"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "2b8d9bf5c9f18306ba4c5e4af53d4906898e4303cbd7f5a47dea8c987c1b3cf3",
+        "6b032f0799f94e7c7b8d857f2dc89f683bc1163a784540a562db1078d040845c"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "a5dd3afac591cc81c25897191d3a04fb92f5b53c6ee7eee824a297c2d77fd48e",
+        "a4f626477650326ba5146045dfd18a5f3401cc7554d0a5959d5dd02da60fdb8e"
+      ]
+    }
+  ],
+  "rootHash": "4ae9633316d48e5cde02263a04549a1af63428ecea1aca4acd211a3978b37d53",
+  "rootSignature": "36sTXldoHViBuFx8HZCH9drCl9hFw5k9IjK18da/j57muNJ0niSNoAtSG2dYyaDBw/OhxUKA9OcCNgdvtsXbAQ==",
+  "nonce": "5bb0ef281df3f6331717a6e9195198dda0f38625c6cbdd87a33244cad72b43c0",
+  "leafCount": 3,
+  "signedAt": "2026-10-21T18:31:30.558Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      "ai-sdlc-plugin/agents/ci-conflict-resolver.md",
+      "ai-sdlc-plugin/agents/developer.md",
+      "ai-sdlc-plugin/agents/rebase-resolver.md",
+      "ai-sdlc-plugin/hooks/enforce-blocked-actions.js",
+      "ai-sdlc-plugin/hooks/enforce-blocked-actions.test.mjs",
+      "ai-sdlc-plugin/hooks/enforce-lease-push.test.mjs",
+      "ai-sdlc-plugin/hooks/governance-refusal-messages.test.mjs",
+      "ai-sdlc-plugin/hooks/lib/governance-resolver.js",
+      "ai-sdlc-plugin/hooks/lib/merge-matcher.js",
+      "ai-sdlc-plugin/hooks/lib/merge-matcher.test.mjs",
+      "ai-sdlc-plugin/hooks/lib/prompt-rules.js",
+      "ai-sdlc-plugin/hooks/session-start.js",
+      "ai-sdlc-plugin/hooks/session-start.test.mjs",
+      "ai-sdlc-plugin/hooks/subagent-start.js",
+      "ai-sdlc-plugin/hooks/subagent-start.test.mjs",
+      "pipeline-cli/src/attestation/verdict-class.integration.test.ts"
+    ],
+    "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
+  }
+}
