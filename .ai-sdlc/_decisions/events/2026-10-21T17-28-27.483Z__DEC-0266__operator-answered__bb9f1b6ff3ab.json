@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-21T17:28:27.483Z","decisionId":"DEC-0266","chosenOptionId":"superseded-close","rationale":"Operator 2026-10-21: no human step in the landing loop; closing content-identical superseded CLI PRs is bookkeeping.","by":"planner"}
