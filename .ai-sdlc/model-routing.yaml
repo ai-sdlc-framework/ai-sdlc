@@ -13,6 +13,9 @@ spec:
   # The security reviewer must stay on opus or stronger. fable is listed last
   # for the planner; the security reviewer stays on opus.
   strength: [haiku, sonnet, opus, fable]
+  # Default harness for code and test review (AISDLC-1003): codex | claude.
+  # Codex plan quota is out until 2026-11-19. AI_SDLC_REVIEWER_HARNESS overrides per run.
+  harness: claude
   exploreShare: 0
   salt: ai-sdlc-2026-10
   cells:

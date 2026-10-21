@@ -39,6 +39,8 @@ export interface RoutingTable {
   strength: string[];
   exploreShare: number;
   salt: string;
+  /** Default reviewer harness; absent means `codex`. */
+  harness?: 'codex' | 'claude';
   /** role -> task class (or '*') -> cell. */
   cells: Record<string, Record<string, RoutingCell>>;
 }

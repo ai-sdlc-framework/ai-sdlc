@@ -10,12 +10,15 @@
  *   - security      → security-reviewer     (Claude-native, opus)
  *   - developer     → developer             (Claude-native, sonnet)
  *
+ * Repo default: `harness: claude` in `.ai-sdlc/model-routing.yaml` (AISDLC-1003)
+ * applies when the env var is unset.
+ *
  * Override: set `AI_SDLC_REVIEWER_HARNESS=claude` to force all three review
  * roles onto the Claude-native agents (e.g. when Codex is not installed).
  * Developer dispatch is never affected by this override.
  */
 
-import { routedModel } from '../routing/role-model.js';
+import { resolveReviewerHarnessSetting, routedModel } from '../routing/role-model.js';
 
 /** The four dispatchable roles. */
 export type ReviewerRole = 'code' | 'test' | 'security' | 'developer';
@@ -70,8 +73,9 @@ export function resolveReviewer(role: ReviewerRole, overrideHarness?: string): R
   }
 
   // Determine whether the caller has requested a Claude-native override.
-  const envVal = overrideHarness ?? process.env[REVIEWER_HARNESS_ENV] ?? '';
-  const forceClaudeNative = envVal.toLowerCase() === CLAUDE_HARNESS_OVERRIDE;
+  const forceClaudeNative =
+    resolveReviewerHarnessSetting(overrideHarness ?? process.env[REVIEWER_HARNESS_ENV]).harness ===
+    CLAUDE_HARNESS_OVERRIDE;
 
   if (role === 'code') {
     if (forceClaudeNative) {

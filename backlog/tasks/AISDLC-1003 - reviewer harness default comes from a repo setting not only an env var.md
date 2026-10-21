@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1003
 title: 'reviewer harness default comes from a repo setting, not only an env var'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-21'
 labels:

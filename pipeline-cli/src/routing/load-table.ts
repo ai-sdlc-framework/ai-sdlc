@@ -106,6 +106,7 @@ export function parseRoutingTable(text: string): ParseTableResult {
       strength,
       exploreShare: typeof spec.exploreShare === 'number' ? spec.exploreShare : 0,
       salt: typeof spec.salt === 'string' ? spec.salt : '',
+      ...(spec.harness === 'codex' || spec.harness === 'claude' ? { harness: spec.harness } : {}),
       cells,
     },
   };

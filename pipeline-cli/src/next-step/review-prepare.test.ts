@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fail, ok } from '../__test-helpers/fake-runner.js';
 import { makeHarness, makeState, type Harness } from '../__test-helpers/next-step-fixtures.js';
 import {
@@ -19,6 +19,17 @@ import {
 } from '../../attestation-core/review-scope-core.mjs';
 import type { ReviewRoundPlan } from '../incremental-review/review-rounds.js';
 import type { NextStepState } from './types.js';
+
+// The routing table is read from origin/main; pin it for hermetic tests.
+let tableText: string | null = null;
+vi.mock('../routing/load-table.js', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../routing/load-table.js')>();
+  return {
+    ...real,
+    loadRoutingTable: (opts: Parameters<typeof real.loadRoutingTable>[0]) =>
+      real.loadRoutingTable({ ...opts, readBaseTable: () => tableText }),
+  };
+});
 
 const DIFF = 'diff --git a/src/a.ts b/src/a.ts\n+const a = 1;\n';
 const NONCE = 'nonce-abc';
@@ -81,6 +92,7 @@ function script(
 }
 
 beforeEach(() => {
+  tableText = null;
   h = makeHarness();
   state = makeState(h.root, { developer: null });
 });
@@ -269,6 +281,52 @@ describe('prepareReview', () => {
     ]);
     expect(res.review.harnessNote).toMatch(/AI_SDLC_REVIEWER_HARNESS=claude/);
     expect(res.review.spawned.every((s) => s.harness === 'claude-code')).toBe(true);
+  });
+
+  it('uses the yaml harness key and reports its source (AISDLC-1003)', async () => {
+    tableText = `apiVersion: ai-sdlc.io/v1alpha1
+kind: ModelRouting
+metadata:
+  name: model-routing
+spec:
+  strength: [haiku, sonnet, opus]
+  harness: claude
+  cells:
+    developer:
+      '*': { model: sonnet }
+`;
+    h = makeHarness();
+    state = makeState(h.root);
+    script();
+    const res = await prepareReview(h.ctx, state, 1);
+    if (res.kind !== 'spawn') throw new Error('expected spawn');
+    expect(res.review.spawned.map((s) => s.agent).sort()).toEqual([
+      'code-reviewer',
+      'security-reviewer',
+      'test-reviewer',
+    ]);
+    expect(res.review.harnessNote).toMatch(/source: yaml/);
+  });
+
+  it('the env var overrides the yaml harness key', async () => {
+    tableText = `apiVersion: ai-sdlc.io/v1alpha1
+kind: ModelRouting
+metadata:
+  name: model-routing
+spec:
+  strength: [haiku, sonnet, opus]
+  harness: claude
+  cells:
+    developer:
+      '*': { model: sonnet }
+`;
+    h = makeHarness({ env: { AI_SDLC_REVIEWER_HARNESS: 'codex' } });
+    state = makeState(h.root);
+    script();
+    const res = await prepareReview(h.ctx, state, 1);
+    if (res.kind !== 'spawn') throw new Error('expected spawn');
+    expect(res.review.spawned.map((s) => s.agent)).toContain('code-reviewer-codex');
+    expect(res.review.harnessNote).toMatch(/source: env/);
   });
 
   it('delta resume without a trust-chain path overrides the classifier to testing+critic (AISDLC-947)', async () => {
