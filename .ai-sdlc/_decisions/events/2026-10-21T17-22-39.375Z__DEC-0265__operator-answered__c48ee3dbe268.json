@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-21T17:22:39.375Z","decisionId":"DEC-0265","chosenOptionId":"widen-docs-prefixes","rationale":"Operator 2026-10-21: no human step in the landing loop; the lane's real controls are unchanged.","by":"planner"}
