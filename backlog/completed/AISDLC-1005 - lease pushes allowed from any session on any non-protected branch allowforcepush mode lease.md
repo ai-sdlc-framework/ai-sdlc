@@ -2,7 +2,7 @@
 id: AISDLC-1005
 title: >-
   Lease pushes are allowed from any session on any non-protected branch: new allowForcePush mode `lease`, this repo switched to it
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-21'
 labels:

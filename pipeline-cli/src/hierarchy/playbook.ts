@@ -350,10 +350,7 @@ export async function runPlaybook(
     return giveUp(c.kind, 'refused', `not permitted by policy (${missing.join(', ')})`);
   }
 
-  if (
-    (c.kind === 'rebase-push' || c.kind === 'drop-chores') &&
-    deps.forcePushMode !== 'leaseOnOwnBranch'
-  ) {
+  if ((c.kind === 'rebase-push' || c.kind === 'drop-chores') && deps.forcePushMode === 'never') {
     return giveUp(
       c.kind,
       'refused',

@@ -14,7 +14,7 @@ import path from 'node:path';
 import { runGit, verifiedMainRoot, type GitRunner } from './trusted-root.js';
 
 /** `allowForcePush` as the trusted policy resolves it. */
-export type ForcePushMode = 'never' | 'leaseOnOwnBranch';
+export type ForcePushMode = 'never' | 'leaseOnOwnBranch' | 'lease';
 
 /** Always protected, merged with the policy's `protectedBranches` (`*` matches any run). */
 export const DEFAULT_PROTECTED_BRANCHES: readonly string[] = [

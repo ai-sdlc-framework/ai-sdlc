@@ -19,7 +19,8 @@ spec:
   # lease-push their own task branches; pushes to main/master stay denied and
   # the blockedActions entries below remain in force for every other form.
   governance:
-    allowForcePush: leaseOnOwnBranch
+    # AISDLC-1005 (DEC-0264): lease push to any non-protected branch from any session.
+    allowForcePush: lease
     # AISDLC-753: this repository permits agent merges through the gated helper
     # (cli-merge-if-eligible: green + CLEAN + trusted source + author on the list).
     allowMerge: onGreenClean

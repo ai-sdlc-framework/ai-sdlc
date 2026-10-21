@@ -64,7 +64,17 @@ Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered 
 
 Governance-sensitive paths (plugin hooks, agents, commands, `.ai-sdlc/**`, `.github/**`, CLAUDE.md and the like) no longer force a human merge for trusted PRs (DEC-0072, AISDLC-789): `cli-merge-if-eligible` merges or arms a trusted same-repo PR that changes them once it is green, CLEAN and attested, and lists the sensitive paths in the eligibility reason and the merge audit entry. Untrusted PRs (fork head, author outside `mergeAuthors`) are still refused by trust evaluation, and an incomplete changed-file list (fetch failure or the 300-file cap) still fails closed.
 
+### Lease-push modes (`spec.governance.allowForcePush`, DEC-0264)
+
+- `lease`: a `git push --force-with-lease` to any non-protected branch is allowed from any session and any cwd, with no task-worktree, sentinel or claim binding (this repository, AISDLC-1005).
+- `leaseOnOwnBranch`: the adopter default (AISDLC-710); a lease push is allowed only for a dispatched task's own branch from its task worktree (below).
+- `never`: no lease push.
+
+In every mode `main`, `master` and protected branches, a plain `--force`/`-f`, a `+refspec`, `--mirror`, `--delete` and alias or `$`-expansion pushes are refused. `lease` is an explicit-only value and a worktree copy of the policy can only tighten it.
+
 ### Lease-push refusal: `not-task-worktree`
+
+This refusal applies under `leaseOnOwnBranch` only.
 
 The default lease policy allows a lease push of a dispatched task's own branch from its task worktree. From a session rooted at the main checkout the cwd worktree must be bound to ONE task: either `AI_SDLC_ACTIVE_TASK_ID` equals its `.active-task`, or the session is a hierarchy executor (`AI_SDLC_HIERARCHY_ROLE=executor`, set by `cli-hierarchy up`) holding exactly one inflight claim on the dispatch board, for that task (AISDLC-756, DEC-0067). The refusal names both bindings and the next step: claim the task through the executor loop, or run the push from a session rooted in the worktree. This applies the "own branch" definition of DEC-0047; it does not widen what may be pushed.
 

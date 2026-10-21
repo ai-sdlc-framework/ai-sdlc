@@ -1751,7 +1751,7 @@ export function checkForcePushPolicy(ctx: DoctorRunContext): DoctorCheckResult {
       severity: 'warn',
       title: `allowForcePush effective value: never (${where})`,
       remediation:
-        "Set spec.governance.allowForcePush in .ai-sdlc/agent-role.yaml to `leaseOnOwnBranch` (the default; lease push of a task's own branch after a rebase) or `never`.",
+        "Set spec.governance.allowForcePush in .ai-sdlc/agent-role.yaml to `leaseOnOwnBranch` (the default; lease push of a task's own branch after a rebase), `lease` (lease push to any non-protected branch, DEC-0264) or `never`.",
       anonymizableEvidence: evidence,
     };
   }

@@ -228,7 +228,7 @@ export function checkResumeLeasePush(
       ownWorktree: (worktree) => checkOwnWorktreeForOperator(opts.workDir, worktree),
     };
   }
-  if (policy.forcePushMode !== 'leaseOnOwnBranch') {
+  if (policy.forcePushMode === 'never') {
     return (
       `resume push to '${opts.branch}' refused: the trusted policy does not allow a lease push ` +
       `(spec.governance.allowForcePush in .ai-sdlc/agent-role.yaml on the main checkout must be ` +
