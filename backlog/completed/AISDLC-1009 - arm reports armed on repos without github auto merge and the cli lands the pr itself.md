@@ -2,7 +2,7 @@
 id: AISDLC-1009
 title: >-
   `--arm` reports ARMED on repositories without GitHub auto-merge, while the CLI has in fact landed the PR itself
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-21'
 labels:
