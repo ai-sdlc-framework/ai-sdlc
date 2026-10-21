@@ -461,7 +461,11 @@ async function clearOnce(deps: LoopDeps, verdict: DispatchVerdict): Promise<Clea
     const r = await deps.clear({ executor, ...(taskId ? { taskId } : {}) });
     return r.resumed
       ? { status: 'cleared', executor }
-      : { status: 'degraded', executor, reason: 'the executor did not report back in time' };
+      : {
+          status: 'degraded',
+          executor,
+          reason: `the executor did not report back within the ${r.settleMs} ms ceiling; last pane line: ${r.lastLine || '(none)'}`,
+        };
   } catch (err) {
     return {
       status: 'refused',

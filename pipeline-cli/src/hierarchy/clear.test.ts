@@ -132,8 +132,8 @@ describe('clearExecutor', () => {
       ['send-keys', '-t', '%7', '-l', '--', '/ai-sdlc executor'],
       ['send-keys', '-t', '%7', 'Enter'],
     ]);
-    // The settle time passes between the two keystrokes.
-    expect(sleeps[0]).toBe(1000);
+    // The cleared-prompt poll runs between the two keystrokes, not a fixed settle.
+    expect(sleeps[0]).toBe(250);
     expect(result).toMatchObject({ executor: 'executor-alpha', paneId: '%7', resumed: true });
   });
 
@@ -213,8 +213,78 @@ describe('clearExecutor', () => {
     expect(sends()).toHaveLength(4);
     const row = capability();
     expect(row?.status).toBe('degraded');
-    expect(row?.lastDegradedReason).toContain('did not report back within 500 ms');
+    expect(row?.lastDegradedReason).toContain('did not report back within the 500 ms ceiling');
     expect(events[0]).toMatchObject({ type: 'ExecutorContextCleared', resumed: false });
+  });
+
+  describe('handshake timing (AISDLC-1000)', () => {
+    /** A virtual clock: sleep advances it, and the identity line appears at `appearAt` after the restart. */
+    function clocked(appearAt: number | undefined) {
+      let now = 0;
+      let restartAt = -1;
+      const timed: CommandRunner = (file, args) => {
+        const literal = args[args.indexOf('--') + 1];
+        if (args[0] === 'send-keys' && args.includes('-l') && literal === '/ai-sdlc executor') {
+          restartAt = now;
+        }
+        if (args[0] === 'capture-pane' && restartAt >= 0 && appearAt !== undefined) {
+          const shown = now - restartAt >= appearAt;
+          return {
+            status: 0,
+            stdout: shown
+              ? `${screen}[executor] I am 'executor-alpha'; x\n`
+              : `${screen}starting...\n`,
+            stderr: '',
+          };
+        }
+        return run(file, args);
+      };
+      return {
+        run: timed,
+        sleep: async (ms: number) => {
+          now += ms;
+        },
+        elapsed: () => now,
+      };
+    }
+
+    it('returns well before 2 s on a fast restart', async () => {
+      const c = clocked(0);
+      resumes = false;
+      const r = await clearExecutor(
+        { executor: 'executor-alpha' },
+        deps({ run: c.run, sleep: c.sleep }),
+      );
+      expect(r.resumed).toBe(true);
+      expect(c.elapsed()).toBeLessThan(2000);
+    });
+
+    it('is not degraded when the identity line appears at 20 s', async () => {
+      const c = clocked(20_000);
+      resumes = false;
+      const r = await clearExecutor(
+        { executor: 'executor-alpha' },
+        deps({ run: c.run, sleep: c.sleep }),
+      );
+      expect(r.resumed).toBe(true);
+      expect(c.elapsed()).toBeGreaterThanOrEqual(20_000);
+      expect(c.elapsed()).toBeLessThan(30_000);
+    });
+
+    it('degrades at the ceiling for a dead session, naming the ceiling and last line', async () => {
+      const c = clocked(undefined);
+      resumes = false;
+      screen = 'frozen last line\n';
+      const r = await clearExecutor(
+        { executor: 'executor-alpha' },
+        deps({ run: c.run, sleep: c.sleep }),
+      );
+      expect(r.resumed).toBe(false);
+      expect(r.lastLine).toBe('frozen last line');
+      expect(capability()?.lastDegradedReason).toContain('30000 ms ceiling');
+      expect(capability()?.lastDegradedReason).toContain('frozen last line');
+      expect(c.elapsed()).toBeGreaterThanOrEqual(30_000);
+    });
   });
 
   it('refuses an executor that holds an inflight manifest and sends nothing', async () => {

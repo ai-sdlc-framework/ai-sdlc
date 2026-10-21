@@ -2,9 +2,9 @@
  * `cli-hierarchy clear <executor-name>`: empty an executor's context between
  * tasks.
  *
- * The dispatch session sends `/clear` to the executor's tmux pane, waits for the
- * settle time, then types `/ai-sdlc executor` so the executor starts its loop
- * again. `/clear` keeps the session's name and permission mode and fires the
+ * The dispatch session sends `/clear` to the executor's tmux pane, polls until the
+ * cleared prompt is idle, then types `/ai-sdlc executor` and polls until the executor
+ * prints its identity line, each wait bounded by one ceiling (AISDLC-1000). `/clear` keeps the session's name and permission mode and fires the
  * plugin's SessionStart hook, which re-injects the role from the roster.
  *
  * Safety:
@@ -16,7 +16,7 @@
  *    pane still belongs to the executor's window.
  *
  * The `hierarchy.clear` capability is `live` when the restart command was sent
- * and the executor reported back within the settle time, `degraded` otherwise.
+ * and the executor reported back within the ceiling, `degraded` otherwise.
  */
 
 import { spawn } from 'node:child_process';
@@ -35,8 +35,11 @@ import type { CommandRunner, RosterEntry } from './types.js';
 /** Capability id for the executor context clear. */
 export const HIERARCHY_CLEAR_CAPABILITY = 'hierarchy.clear';
 
-/** Default wait, in milliseconds, between the two keystrokes and for the executor to report back. */
-export const DEFAULT_SETTLE_MS = 8000;
+/**
+ * Default ceiling, in milliseconds, for each of the two waits (cleared prompt, then identity
+ * line). Overridable in `.ai-sdlc/pr-lifecycle.yaml` (`clear.handshakeCeilingMs`) or `--settle-ms`.
+ */
+export const DEFAULT_SETTLE_MS = 30_000;
 /** Default spacing of the "did the executor report back" polls. */
 export const DEFAULT_POLL_INTERVAL_MS = 500;
 
@@ -59,7 +62,7 @@ export interface ClearDeps {
 export interface ClearOptions {
   /** Roster name of the executor. */
   executor: string;
-  /** Wait between the two keystrokes and for the executor to report back. */
+  /** Ceiling for each of the two waits (cleared prompt, identity line); default {@link DEFAULT_SETTLE_MS}. */
   settleMs?: number;
   pollIntervalMs?: number;
   /** Task whose verdict triggered the clear; recorded on the event. */
@@ -72,9 +75,11 @@ export interface ClearOptions {
 export interface ClearResult {
   executor: string;
   paneId: string;
-  /** The executor reported back within the settle time. */
+  /** The executor reported back within the ceiling. */
   resumed: boolean;
   settleMs: number;
+  /** Last non-empty pane line seen while waiting; set when the executor did not report back. */
+  lastLine?: string;
 }
 
 function artifactsDirFor(boardDir: string, override?: string): string {
@@ -101,6 +106,17 @@ function countMarker(run: CommandRunner, target: string, name: string): number {
     1 +
     (r.stdout.match(EXECUTOR_START_MARKER)?.length ?? 0)
   );
+}
+
+/** Text of the pane, or undefined when it cannot be read. */
+function readPane(run: CommandRunner, target: string): string | undefined {
+  const r = run('tmux', ['capture-pane', '-p', '-t', target]);
+  return r.status === 0 ? r.stdout : undefined;
+}
+
+function lastLineOf(text: string | undefined): string {
+  const lines = (text ?? '').split('\n').filter((l) => l.trim() !== '');
+  return lines.length ? lines[lines.length - 1].trim() : '';
 }
 
 /** The task the named session holds inflight, or undefined. */
@@ -182,7 +198,17 @@ export async function clearExecutor(opts: ClearOptions, deps: ClearDeps): Promis
     reportClear(deps, 'degraded', `could not send /clear to '${name}': ${clearFailure}`);
     throw new Error(`could not send /clear to '${name}': ${clearFailure}`);
   }
-  await deps.sleep(settleMs);
+  // Wait for the cleared prompt: the pane shows no running turn and is unchanged across two
+  // polls. A pane that never settles within the ceiling does not stop the restart command.
+  const polls = Math.max(1, Math.ceil(settleMs / pollIntervalMs));
+  let prev = readPane(deps.run, target);
+  for (let i = 0; i < polls; i++) {
+    await deps.sleep(pollIntervalMs);
+    const cur = readPane(deps.run, target);
+    const settled = cur !== undefined && cur === prev && !cur.includes('esc to interrupt');
+    prev = cur;
+    if (settled) break;
+  }
   const restartFailure = type(deps.run, target, '/ai-sdlc executor');
   if (restartFailure) {
     reportClear(deps, 'degraded', `could not restart '${name}': ${restartFailure}`);
@@ -191,10 +217,11 @@ export async function clearExecutor(opts: ClearOptions, deps: ClearDeps): Promis
 
   // The executor reports back by printing its identity line again.
   let resumed = false;
-  const polls = Math.max(1, Math.ceil(settleMs / pollIntervalMs));
+  let lastLine = lastLineOf(prev);
   for (let i = 0; i < polls && !resumed; i++) {
     await deps.sleep(pollIntervalMs);
     resumed = countMarker(deps.run, target, name) > before;
+    if (!resumed) lastLine = lastLineOf(readPane(deps.run, target)) || lastLine;
   }
 
   if (resumed) reportClear(deps, 'live');
@@ -202,7 +229,7 @@ export async function clearExecutor(opts: ClearOptions, deps: ClearDeps): Promis
     reportClear(
       deps,
       'degraded',
-      `'${name}' did not report back within ${settleMs} ms of the restart command`,
+      `'${name}' did not report back within the ${settleMs} ms ceiling after the restart command; last pane line: ${lastLine || '(none)'}`,
     );
   }
   deps.emit?.({
@@ -215,9 +242,15 @@ export async function clearExecutor(opts: ClearOptions, deps: ClearDeps): Promis
     ...(opts.workerId ? { workerId: opts.workerId } : {}),
   });
   deps.log?.(
-    `cleared '${name}'${resumed ? '' : ' (it did not report back within the settle time)'}`,
+    `cleared '${name}'${resumed ? '' : ` (it did not report back within the ${settleMs} ms ceiling; last pane line: ${lastLine || '(none)'})`}`,
   );
-  return { executor: name, paneId: entry.paneId, resumed, settleMs };
+  return {
+    executor: name,
+    paneId: entry.paneId,
+    resumed,
+    settleMs,
+    ...(resumed ? {} : { lastLine }),
+  };
 }
 
 /** After a clear is scheduled, further turns inside this window do not schedule another. */

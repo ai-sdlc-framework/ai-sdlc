@@ -4,7 +4,7 @@
 # the generic config walk would otherwise warn "unknown kind". Readers take `spec`.
 #
 # Two kinds of keys exist, and only the first kind belongs in this file:
-#   - Operational keys (webhook, stall, reconcile, loopGuard, noTaskBranchPrefixes) are
+#   - Operational keys (webhook, stall, reconcile, clear, loopGuard, noTaskBranchPrefixes) are
 #     read by real consumers through `loadPrLifecycleConfig`
 #     (pipeline-cli/src/hierarchy/pr-lifecycle-config.ts) or `scripts/read-pr-lifecycle.mjs`;
 #     the code constants are the defaults when a key is absent.
@@ -24,5 +24,7 @@ spec:
   stall:
     staleMs: 1800000
     graceMs: 600000
+  clear:
+    handshakeCeilingMs: 30000
   loopGuard:
     maxSameHeadActions: 1

@@ -246,8 +246,7 @@ Usage for clear:
   file lands on the board, for dispatch), the resume command: /ai-sdlc operator-dispatch
   for the dispatch session, /ai-sdlc:planner for the planner, /ai-sdlc executor for an idle
   executor (which is refused while it holds an inflight task). Refuses without TMUX_PANE.
-  Sends /clear to the executor's pane, waits for the settle time (default 8000 ms),
-  then sends /ai-sdlc executor. Refuses an executor that holds an inflight task.
+  Sends /clear to the executor's pane, polls until the pane is idle, then sends /ai-sdlc executor. Refuses an executor that holds an inflight task.
   clear <executor-name> is for the dispatch session only. A mistake guard refuses any other caller, a human
   at a plain shell included; it is not authentication and a same-user session can defeat
   it. Outside the hierarchy, use tmux directly.
@@ -269,7 +268,7 @@ Options for hold:
 Options for tick:
   --worker <name>          Optional; when given it must equal the calling session's own roster name
   --report-every-ms <n>    Spacing of progress reports (default 900000)
-  --settle-ms <n>          Settle time used for clears (default 8000)
+  --settle-ms <n>          Ceiling for each clear wait (default 30000, config clear.handshakeCeilingMs)
   --retry-limit <n>        Re-queues allowed per failed task (default 2; a larger value is refused)
   --work-dir <path>        Repository root (default the current directory)
 
@@ -691,8 +690,9 @@ export async function runHierarchyCli(
           process.stderr.write('cli-hierarchy clear: an executor name is required\n');
           return 2;
         }
-        const settleMs = intFlag(flags, 'settle-ms');
-        if (settleMs === null) return 2;
+        const flagSettleMs = intFlag(flags, 'settle-ms');
+        if (flagSettleMs === null) return 2;
+        const settleMs = flagSettleMs ?? loadPrLifecycleConfig(deps.cwd).clear.handshakeCeilingMs;
         const result = await clearExecutor(
           { executor, workerId: caller.name, ...(settleMs === undefined ? {} : { settleMs }) },
           {
@@ -774,10 +774,10 @@ export async function runHierarchyCli(
           return 1;
         }
         const worker = caller.name;
-        const settleMs = intFlag(flags, 'settle-ms');
+        const flagSettleMs = intFlag(flags, 'settle-ms');
         const reportEveryMs = intFlag(flags, 'report-every-ms');
         const retryLimit = intFlag(flags, 'retry-limit');
-        if (settleMs === null || reportEveryMs === null || retryLimit === null) return 2;
+        if (flagSettleMs === null || reportEveryMs === null || retryLimit === null) return 2;
         // Refused, not clamped; checked after the caller guard, like `cli-dispatch requeue`,
         // and before anything is read, written or sent.
         if (retryLimit !== undefined && retryLimit > DEFAULT_REQUEUE_RETRY_LIMIT) {
@@ -787,6 +787,7 @@ export async function runHierarchyCli(
           return 2;
         }
         const repoRoot = path.resolve(flags['work-dir'] ?? deps.cwd);
+        const settleMs = flagSettleMs ?? loadPrLifecycleConfig(deps.cwd).clear.handshakeCeilingMs;
         const { operational, emit, playbookDeps } = playbookSetup(repoRoot, worker);
         // One PR snapshot per wake, shared by every consumer below (AISDLC-959).
         const wakeGh = createSnapshotRunner(extras.ghRun ?? deps.run, { boardDir: deps.boardDir });
