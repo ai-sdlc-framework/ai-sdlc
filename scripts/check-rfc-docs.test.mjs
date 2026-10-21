@@ -809,7 +809,11 @@ describe('CLI', () => {
     // Run without args; defaults to the repo's spec/rfcs and docs/. Per
     // AISDLC-69.3 task spec this should pass (RFC-0006 deferred, RFC-0008
     // covered, all others Draft and skipped).
-    const r = spawnSync('node', [SCRIPT], { encoding: 'utf-8' });
+    // GITHUB_BASE_REF is dropped so the lifecycle check (owned by the RFC
+    // Lifecycle Gate job, which has the PR body) does not run here.
+    const env = { ...process.env };
+    delete env.GITHUB_BASE_REF;
+    const r = spawnSync('node', [SCRIPT], { encoding: 'utf-8', env });
     assert.equal(
       r.status,
       0,
