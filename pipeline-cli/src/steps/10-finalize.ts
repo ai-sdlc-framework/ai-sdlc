@@ -26,6 +26,7 @@ import { basename, dirname, join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { findTaskFile, isTaskFileCompleted, parseTaskFile } from './01-validate.js';
 import { patchFrontmatterStatus } from './04-flip-status.js';
+import { checkFollowups, formatFollowupViolations } from '../backlog/followup-rule.js';
 import { completeTaskAtomically } from '../cli/complete-task.js';
 import type { DeveloperReturn, FinalizeTaskOptions, FinalizeTaskResult } from '../types.js';
 
@@ -118,7 +119,7 @@ export function buildFinalSummary(opts: FinalizeTaskOptions): {
     `- \`pnpm lint\` — ${opts.developerReturn.verifications.lint}\n` +
     `- \`pnpm format:check\` — ${opts.developerReturn.verifications.format}\n` +
     `- 3 parallel reviews approved${harnessLine}\n\n` +
-    `## Follow-up\n${notesText(opts.developerReturn.notes)}\n`;
+    `## Follow-up\n${followupsText(opts.developerReturn.followups)}\n`;
 
   return { finalSummary, acceptanceCriteriaCheck };
 }
@@ -153,6 +154,16 @@ export async function finalizeTask(opts: FinalizeStepOptions): Promise<FinalizeT
   const runner = opts.runner ?? defaultRunner;
 
   const { finalSummary, acceptanceCriteriaCheck } = buildFinalSummary(opts);
+
+  // AISDLC-997 - fail closed at finalize, not at the pre-push follow-up gate.
+  const prefix = /^([A-Za-z][A-Za-z0-9]*)-/.exec(opts.taskId)?.[1];
+  const followupCheck = checkFollowups(finalSummary, prefix ? { taskPrefix: prefix } : {});
+  if (!followupCheck.ok) {
+    throw new Error(
+      `finalize: invalid Follow-up section for ${opts.taskId}\n` +
+        formatFollowupViolations(followupCheck.violations, prefix ? { taskPrefix: prefix } : {}),
+    );
+  }
 
   // AISDLC-393 — GH-issue path skips steps 1-2 entirely (backlog file move
   // + frontmatter patch). The issue is the source of truth and closes via
@@ -279,6 +290,11 @@ export async function finalizeTask(opts: FinalizeStepOptions): Promise<FinalizeT
     choreCommitSha,
     skipped: false,
   };
+}
+
+function followupsText(followups: DeveloperReturn['followups']): string {
+  if (!followups || followups.length === 0) return '(none)';
+  return followups.map((f) => `- ${f}`).join('\n');
 }
 
 function notesText(notes: DeveloperReturn['notes']): string {
