@@ -82,6 +82,8 @@ When the tick reports `main: RED at <sha>`:
 
 Click the run URL in the report. Look for the `Test (full suite)` step output. The failing test names are listed there.
 
+When `coverage=failure` is the only non-success outcome, read the `Coverage (full)` step log, not the rollup step (`Fail on test failure`): the rollup only reports the outcome, the failing test and its error are in the coverage step.
+
 ### Step 2 — Identify the candidate PRs
 
 ```bash

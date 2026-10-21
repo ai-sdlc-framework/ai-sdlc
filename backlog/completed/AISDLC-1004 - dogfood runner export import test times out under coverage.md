@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1004
 title: 'Dogfood runner export import test times out under coverage and keeps main-health red'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-21'
 labels:
