@@ -125,12 +125,20 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          # AISDLC-969: run the classifier from the BASE sha, never the PR tree.
+          # A PR that edits the classifier must not decide its own lane.
+          CLS="$RUNNER_TEMP/classifier"
+          mkdir -p "$CLS/scripts" "$CLS/pipeline-cli/attestation-core"
+          SRC="${BASE_SHA:-HEAD}"
+          git show "$SRC:scripts/is-docs-only-changeset.mjs" > "$CLS/scripts/is-docs-only-changeset.mjs"
+          git show "$SRC:pipeline-cli/attestation-core/docs-only-paths.mjs" > "$CLS/pipeline-cli/attestation-core/docs-only-paths.mjs"
+          git show "$SRC:pipeline-cli/attestation-core/review-scope-core.mjs" > "$CLS/pipeline-cli/attestation-core/review-scope-core.mjs"
           # Fail safe: any inability to compute the PR diff resolves to
           # docs_only=false (run the full matrix), never true.
           if [ -n "$BASE_SHA" ]; then
             if FILES=$(git -c core.quotePath=false diff --name-only "$BASE_SHA...$HEAD_SHA"); then
-              RESULT=$(printf '%s\n' "$FILES" | node scripts/is-docs-only-changeset.mjs)
-              CLASS=$(printf '%s\n' "$FILES" | node scripts/is-docs-only-changeset.mjs --class)
+              RESULT=$(printf '%s\n' "$FILES" | node "$CLS/scripts/is-docs-only-changeset.mjs")
+              CLASS=$(printf '%s\n' "$FILES" | node "$CLS/scripts/is-docs-only-changeset.mjs" --class)
             else
               echo "::warning::git diff failed; treating changeset as not docs-only"
               RESULT=false
@@ -138,7 +146,12 @@ jobs:
             fi
           else
             # Non-PR event (no base SHA): classify every tracked file.
-            RESULT=$(git -c core.quotePath=false ls-files | node scripts/is-docs-only-changeset.mjs)
+            RESULT=$(git -c core.quotePath=false ls-files | node "$CLS/scripts/is-docs-only-changeset.mjs")
+            CLASS=code
+          fi
+          # AISDLC-969: touching the classifier or this workflow is always code.
+          if printf '%s\n' "${FILES:-}" | grep -qxE 'scripts/is-docs-only-changeset\.mjs|pipeline-cli/attestation-core/docs-only-paths\.mjs|\.github/workflows/ai-sdlc-gate\.yml'; then
+            RESULT=false
             CLASS=code
           fi
           if [ "$RESULT" != "true" ]; then RESULT=false; fi
