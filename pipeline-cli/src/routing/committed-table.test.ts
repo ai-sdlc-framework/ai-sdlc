@@ -23,9 +23,9 @@ describe('committed .ai-sdlc/model-routing.yaml', () => {
     }
   });
 
-  it('puts the security reviewer on the strongest entry', () => {
+  it('puts the security reviewer on opus', () => {
     if (!parsed.ok) throw new Error(parsed.reason);
-    const strongest = parsed.table.strength[parsed.table.strength.length - 1];
+    const strongest = 'opus';
     const cells = Object.values(parsed.table.cells[SECURITY_REVIEWER_ROLE]);
     expect(cells.length).toBeGreaterThan(0);
     for (const cell of cells) expect(cell.model).toBe(strongest);

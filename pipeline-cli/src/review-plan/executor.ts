@@ -54,6 +54,7 @@ import {
   type CommandRunner,
   type GitRunner,
 } from './executor-git.js';
+import { routedModel } from '../routing/role-model.js';
 import type { PlanLimits, Probe, ProbeFileRef, ProbeType, ReviewPlan } from './types.js';
 import { DEFAULT_MAX_RUN_PROBES, escapesRoot, isSafeRelativePath } from './validate.js';
 
@@ -292,7 +293,6 @@ export interface ExecutorHooks {
 
 // ── Constants ────────────────────────────────────────────────────────────
 
-export const DEFAULT_EXECUTOR_MODEL = 'sonnet';
 export const DEFAULT_EXECUTOR_WIDTH = 4;
 export const DEFAULT_PER_PROBE_BYTES = 32_000;
 export const DEFAULT_COMMAND_OUTPUT_BYTES = 8_000;
@@ -1016,7 +1016,8 @@ export async function executePlan(
     typeof limits.maxRunProbes === 'number' && Number.isInteger(limits.maxRunProbes)
       ? Math.max(0, limits.maxRunProbes)
       : DEFAULT_MAX_RUN_PROBES;
-  const model = limits.model && limits.model.length > 0 ? limits.model : DEFAULT_EXECUTOR_MODEL;
+  const model =
+    limits.model && limits.model.length > 0 ? limits.model : routedModel('review-executor');
   const dataBytes = positiveInt(limits.dataBytes, DEFAULT_DATA_BYTES);
   const runTimeoutMs = positiveInt(limits.runTimeoutMs, DEFAULT_RUN_TIMEOUT_MS);
   const git = hooks.git ?? runGit;

@@ -69,6 +69,23 @@ function listFiles(dir) {
     .map((f) => ({ dir, name: f.replace(/\.md$/, ''), path: join(pluginDir, dir, f) }));
 }
 
+/** Role to wildcard-cell model from the routing table text. */
+export function parseCells(text) {
+  const cells = {};
+  let role = null;
+  let inCells = false;
+  for (const line of text.split('\n')) {
+    if (/^ {2}cells:/.test(line)) inCells = true;
+    else if (inCells) {
+      const r = line.match(/^ {4}([A-Za-z0-9_-]+):\s*$/);
+      if (r) role = r[1];
+      const m = line.match(/^ {6}'\*':\s*\{\s*model:\s*([A-Za-z0-9._-]+)/);
+      if (m && role) cells[role] = m[1];
+    }
+  }
+  return cells;
+}
+
 const files = [...listFiles('commands'), ...listFiles('agents')];
 const modelOf = (dir, name) => readModel(readFileSync(join(pluginDir, dir, `${name}.md`), 'utf-8'));
 
@@ -124,74 +141,31 @@ describe('every command and agent pins a model', () => {
   }
 });
 
-describe('role pins', () => {
-  const haikuCommands = [
-    'version',
-    'doctor',
-    'init',
-    'hierarchy',
-    'cleanup',
-    'pipeline-status',
-    'triage',
-    'import-spec',
-    'rfc-init',
-    'init-signing-key',
-    'memory-dream',
-    'execute-parallel-status',
-    'execute-parallel',
-    'orchestrator-tick',
-    'dispatch-worker',
-    'execute-parallel-cleanup',
-  ];
-  const sonnetCommands = [
-    'execute',
-    'executor',
-    'operator-dispatch',
-    'planner',
-    'fix-pr',
-    'review-pr',
-    'detect-patterns',
-    'rebase',
-    'resolve-conflicts',
-  ];
-  const haikuAgents = ['review-executor', 'review-executor-codex'];
-  const opusAgents = ['security-reviewer', 'review-planner', 'review-synthesizer'];
-  const sonnetAgents = [
-    'developer',
-    'code-reviewer',
-    'test-reviewer',
-    'correctness-reviewer',
-    'rebase-resolver',
-    'ci-conflict-resolver',
-    'refinement-reviewer',
-    'code-reviewer-codex',
-    'test-reviewer-codex',
-  ];
+describe('role pins equal .ai-sdlc/model-routing.yaml (AISDLC-982)', () => {
+  const tablePath = join(pluginDir, '..', '.ai-sdlc', 'model-routing.yaml');
+  const cells = parseCells(readFileSync(tablePath, 'utf-8'));
 
-  for (const [dir, names, model] of [
-    ['commands', haikuCommands, 'haiku'],
-    ['commands', sonnetCommands, 'sonnet'],
-    ['agents', haikuAgents, 'haiku'],
-    ['agents', sonnetAgents, 'sonnet'],
-    ['agents', opusAgents, 'opus'],
-  ]) {
-    for (const name of names) {
-      it(`${dir}/${name}.md pins ${model}`, () => {
-        assert.equal(modelOf(dir, name), model);
-      });
-    }
+  it('the table has cells', () => {
+    assert.ok(Object.keys(cells).length > 20);
+  });
+
+  for (const f of files) {
+    it(`${f.dir}/${f.name}.md pins the model of its cell`, () => {
+      const cell = cells[f.name];
+      assert.ok(cell, `${f.dir}/${f.name}.md has no cell in .ai-sdlc/model-routing.yaml`);
+      assert.equal(modelOf(f.dir, f.name), cell);
+    });
   }
 
-  it('the role lists cover every command and agent file', () => {
-    const covered = new Set([
-      ...[...haikuCommands, ...sonnetCommands].map((n) => `commands/${n}`),
-      ...[...haikuAgents, ...sonnetAgents, ...opusAgents].map((n) => `agents/${n}`),
-    ]);
-    const missing = files.filter((f) => !covered.has(`${f.dir}/${f.name}`));
-    assert.deepEqual(
-      missing.map((f) => `${f.dir}/${f.name}`),
-      [],
-      'add new files to a role list',
-    );
+  it('every cell names an existing agent or command', () => {
+    const names = new Set(files.map((f) => f.name));
+    const stray = Object.keys(cells).filter((n) => !names.has(n));
+    assert.deepEqual(stray, [], 'remove cells with no agent or command file');
+  });
+
+  it('parseCells reads the wildcard cell of each role', () => {
+    const text =
+      "  cells:\n    a:\n      '*': { model: haiku }\n    b:\n      '*': { model: opus }\n";
+    assert.deepEqual(parseCells(text), { a: 'haiku', b: 'opus' });
   });
 });

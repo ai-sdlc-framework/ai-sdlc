@@ -89,8 +89,10 @@ Emit one progress line per stage: `echo "[ai-sdlc-progress] <stage>: <one-line s
 
 <optional 1-2 sentence body explaining why>
 
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude <Model> <noreply@anthropic.com>
 ```
+
+`<Model>` is the capitalised `developer` cell of `.ai-sdlc/model-routing.yaml` (for example `Sonnet`).
 
 `<type>` is `feat`, `fix`, `test`, `docs`, `chore`, `style` or `refactor`; end the subject with the task ID in parens: `feat: add docs sync (AISDLC-68)`.
 

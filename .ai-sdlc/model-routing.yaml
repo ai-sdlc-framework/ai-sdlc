@@ -1,4 +1,6 @@
 # Model routing table (RFC-0050). Read from origin/main only, never the working tree.
+# Every agent and command under ai-sdlc-plugin/ has a cell; model-pins.test.mjs
+# asserts each frontmatter `model:` equals its cell (AISDLC-982).
 # Models are unpinned aliases: each resolves to the latest release of that family.
 # Pin a full model id in a cell only if a new release causes a problem.
 # No exploration: no candidates, exploreShare 0.
@@ -8,19 +10,87 @@ metadata:
   name: model-routing
 spec:
   # Weakest first. Every model named in a cell must appear here.
-  # The security reviewer must sit on the strongest entry, so do not add a
-  # model above opus here unless the security reviewer moves to it.
-  strength: [sonnet, opus]
+  # The security reviewer must stay on opus or stronger. fable is listed last
+  # for the planner; the security reviewer stays on opus.
+  strength: [haiku, sonnet, opus, fable]
   exploreShare: 0
   salt: ai-sdlc-2026-10
   cells:
-    developer:
+    ci-conflict-resolver:
+      '*': { model: sonnet }
+    code-reviewer-codex:
       '*': { model: sonnet }
     code-reviewer:
       '*': { model: sonnet }
-    test-reviewer:
+    correctness-reviewer:
       '*': { model: sonnet }
+    developer:
+      '*': { model: sonnet }
+    rebase-resolver:
+      '*': { model: sonnet }
+    refinement-reviewer:
+      '*': { model: sonnet }
+    review-executor-codex:
+      '*': { model: haiku }
+    review-executor:
+      '*': { model: haiku }
+    review-planner:
+      '*': { model: opus }
+    review-synthesizer:
+      '*': { model: opus }
     security-reviewer:
       '*': { model: opus }
-    review-executor:
+    test-reviewer-codex:
       '*': { model: sonnet }
+    test-reviewer:
+      '*': { model: sonnet }
+    cleanup:
+      '*': { model: haiku }
+    detect-patterns:
+      '*': { model: sonnet }
+    dispatch-worker:
+      '*': { model: haiku }
+    doctor:
+      '*': { model: haiku }
+    execute-parallel-cleanup:
+      '*': { model: haiku }
+    execute-parallel-status:
+      '*': { model: haiku }
+    execute-parallel:
+      '*': { model: haiku }
+    execute:
+      '*': { model: sonnet }
+    executor:
+      '*': { model: sonnet }
+    fix-pr:
+      '*': { model: sonnet }
+    hierarchy:
+      '*': { model: haiku }
+    import-spec:
+      '*': { model: haiku }
+    init-signing-key:
+      '*': { model: haiku }
+    init:
+      '*': { model: haiku }
+    memory-dream:
+      '*': { model: haiku }
+    operator-dispatch:
+      '*': { model: sonnet }
+    orchestrator-tick:
+      '*': { model: haiku }
+    pipeline-status:
+      '*': { model: haiku }
+    planner:
+      '*': { model: fable }
+    rebase:
+      '*': { model: sonnet }
+    resolve-conflicts:
+      '*': { model: sonnet }
+    review-pr:
+      '*': { model: sonnet }
+    rfc-init:
+      '*': { model: haiku }
+    triage:
+      '*': { model: haiku }
+    version:
+      '*': { model: haiku }

@@ -86,6 +86,12 @@
 
 set -euo pipefail
 
+# Capitalised developer model from .ai-sdlc/model-routing.yaml for the commit trailer (AISDLC-982).
+routed_model_name() {
+  sed -n '/^    developer:/,/model:/s/.*model: *\([A-Za-z0-9._-]*\).*/\1/p' .ai-sdlc/model-routing.yaml 2>/dev/null \
+    | head -1 | awk '{print toupper(substr($0,1,1)) substr($0,2)}'
+}
+
 if [ "${AI_SDLC_BYPASS_ALL_GATES:-0}" = "1" ]; then
   echo "[attestation-sign] AI_SDLC_BYPASS_ALL_GATES=1 — skipping" >&2
   exit 0
@@ -499,7 +505,7 @@ Reviewers' verdicts at .ai-sdlc/verdicts/$TASK_ID_LOWER.json.
 AISDLC-398: primary filename content-addressed via git patch-id.
 AISDLC-471: per-patch-id transcript-leaves committed alongside envelope.
 
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>" >&2
+Co-Authored-By: Claude $(routed_model_name) <noreply@anthropic.com>" >&2
 ) || {
   echo "[attestation-sign] ERROR: git add/commit of attestation failed; aborting push" >&2
   exit 2

@@ -20,6 +20,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { buildDeveloperPrompt } from '../steps/05-build-dev-prompt.js';
+import { DEFAULT_MAX_ITERATIONS } from '../steps/09-iterate.js';
 import { findTaskFile } from '../steps/01-validate.js';
 import { patchFrontmatterStatus } from '../steps/04-flip-status.js';
 import { cleanupTask } from '../steps/13-cleanup.js';
@@ -104,7 +105,6 @@ export interface NextStepOutput {
   exitCode: number;
 }
 
-const MAX_ITERATIONS = 2;
 /** A fixable reviewer-report slip may be corrected this many times per run. */
 const MAX_REPORT_RETRIES = 2;
 
@@ -229,7 +229,7 @@ class Machine {
       task: init.task,
       fromStatus: init.fromStatus,
       iteration: 1,
-      maxIterations: MAX_ITERATIONS,
+      maxIterations: DEFAULT_MAX_ITERATIONS,
       developer: null,
       review: null,
       verdict: null,
