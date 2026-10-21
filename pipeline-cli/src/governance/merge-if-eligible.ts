@@ -349,8 +349,11 @@ export function decisionsSyncPathRefusal(files: ChangedFile[]): string | null {
     : `decisions-sync PR changes paths outside ${DECISIONS_EVENTS_PREFIX}**: ${bad.join(', ')}`;
 }
 
-/** AISDLC-878: head-branch prefix of every `cli-file` filing PR (the docs lane). */
-export const DOCS_LANE_HEAD_PREFIX = 'ai-sdlc/file-';
+/**
+ * AISDLC-878 / AISDLC-1006 (DEC-0265): head-branch prefixes the docs lane accepts:
+ * `cli-file` filing PRs and RFC / docs branches.
+ */
+export const DOCS_LANE_HEAD_PREFIXES: readonly string[] = ['ai-sdlc/file-', 'docs/'];
 
 /**
  * AISDLC-878: refusal reason for a docs-lane PR whose diff touches a path outside
@@ -775,8 +778,8 @@ export async function evaluatePrTrust(args: {
       return `PR head branch is "${pr.headRefName}" - decisions-sync landing is limited to "${DECISIONS_SYNC_HEAD}"`;
     }
   } else if (args.sourceKind === 'docs') {
-    if (!pr.headRefName.startsWith(DOCS_LANE_HEAD_PREFIX)) {
-      return `PR head branch is "${pr.headRefName}" - docs-lane landing is limited to "${DOCS_LANE_HEAD_PREFIX}*"`;
+    if (!DOCS_LANE_HEAD_PREFIXES.some((p) => pr.headRefName.startsWith(p))) {
+      return `PR head branch is "${pr.headRefName}" - docs-lane landing is limited to ${DOCS_LANE_HEAD_PREFIXES.map((p) => `"${p}*"`).join(' or ')}`;
     }
   } else {
     const derived = deriveTaskId(pr.headRefName, pr.title, args.taskPrefix);
