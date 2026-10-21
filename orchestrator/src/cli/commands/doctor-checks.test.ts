@@ -56,6 +56,7 @@ import {
   checkCiQueue,
   checkWorktreeHooks,
   checkUntrackedReviewLedgers,
+  checkPipelineOwnedNotIgnored,
   checkBacklogDriftWarnings,
   fixUntrackedReviewLedgers,
   checkParentCheckoutState,
@@ -2415,5 +2416,27 @@ describe('config-manifest check (AISDLC-910)', () => {
       makeCtx(makeAdapters({ runCommand: () => ({ stdout: '', exitCode: 0 }) })),
     );
     expect(none.applied).toBe(false);
+  });
+});
+
+describe('pipeline-owned-ignored check (AISDLC-967)', () => {
+  it('passes when git reports neither path ignored', () => {
+    const a = makeAdapters({ runCommand: () => ({ stdout: '', exitCode: 1 }) });
+    const r = checkPipelineOwnedNotIgnored(makeCtx(a));
+    expect(r.id).toBe('pipeline-owned-ignored');
+    expect(r.severity).toBe('pass');
+  });
+
+  it('fails naming the ignoring rule', () => {
+    const a = makeAdapters({
+      runCommand: (_c, args) =>
+        args.includes('.ai-sdlc/reviews/x.jsonl')
+          ? { stdout: '.gitignore:12:.ai-sdlc/reviews/\t.ai-sdlc/reviews/x.jsonl\n', exitCode: 0 }
+          : { stdout: '', exitCode: 1 },
+    });
+    const r = checkPipelineOwnedNotIgnored(makeCtx(a));
+    expect(r.severity).toBe('fail');
+    expect(r.title).toContain('.gitignore:12:.ai-sdlc/reviews/');
+    expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('pipeline-owned-ignored');
   });
 });

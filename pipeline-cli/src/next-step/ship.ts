@@ -17,6 +17,7 @@
  * @module next-step/ship
  */
 
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { computeMergeBase, computePatchId } from '../attestation/patch-id.js';
 import { PUSH_NON_FAST_FORWARD_CAUSE } from '../hierarchy/playbook.js';
@@ -69,7 +70,7 @@ export type PreSignRebaseResult =
       kind: 'failed';
       reason: string;
       conflictingFiles?: string[];
-      cause?: 'rebase-conflict' | 'dirty-worktree' | 'rebase-failed';
+      cause?: 'rebase-conflict' | 'dirty-worktree' | 'rebase-failed' | 'ledger-not-staged';
     };
 
 async function contentHash(ctx: NextStepContext, worktreePath: string): Promise<string> {
@@ -187,6 +188,30 @@ export async function preSignRebase(
       ],
       { cwd: wt, allowFailure: true, timeout: 300_000 },
     );
+  }
+  // AISDLC-967: an ignored ledger makes the add above a silent no-op and the PR
+  // would ship without it (the incremental review reads committed ledgers only).
+  const ledger = owned[1];
+  if (existsSync(join(wt, ledger))) {
+    const tracked = await ctx.runner('git', ['ls-files', '--error-unmatch', '--', ledger], {
+      cwd: wt,
+      allowFailure: true,
+    });
+    if (tracked.code !== 0) {
+      const rule = await ctx.runner('git', ['check-ignore', '-v', '--no-index', '--', ledger], {
+        cwd: wt,
+        allowFailure: true,
+      });
+      const named = rule.stdout.trim() || '(no ignore rule reported; git add did not stage it)';
+      return {
+        kind: 'failed',
+        reason:
+          `Step 10.5 cannot stage the review ledger ${ledger} (ledger-not-staged): ${named}. ` +
+          `Remove the ignore rule, then re-run /ai-sdlc execute ${state.taskId}`,
+        conflictingFiles: [],
+        cause: 'ledger-not-staged',
+      };
+    }
   }
   const rb = await ctx.runner('git', ['rebase', `origin/${target}`], {
     cwd: wt,

@@ -1895,6 +1895,50 @@ export function checkJudgmentLayer(ctx: DoctorRunContext): DoctorCheckResult[] {
   return results;
 }
 
+// ── Ignored pipeline-owned paths (AISDLC-967) ────────────────────────────
+
+const PIPELINE_OWNED_PROBES = [
+  '.ai-sdlc/reviews/x.jsonl',
+  '.ai-sdlc/transcript-leaves/x.jsonl',
+] as const;
+
+/**
+ * The review ledger and the transcript leaves must be committed with the PR. An
+ * ignore rule covering them (a .gitignore or .git/info/exclude entry, inherited by
+ * every worktree) makes `git add` a silent no-op, so the PR ships without them and
+ * the incremental review falls back to a full one every round. Fails with the rule.
+ */
+export function checkPipelineOwnedNotIgnored(ctx: DoctorRunContext): DoctorCheckResult {
+  const hits: string[] = [];
+  for (const probe of PIPELINE_OWNED_PROBES) {
+    const r = ctx.adapters.runCommand('git', [
+      '-C',
+      ctx.projectDir,
+      'check-ignore',
+      '-v',
+      '--no-index',
+      '--',
+      probe,
+    ]);
+    if (r.exitCode === 0) hits.push(r.stdout.trim().replace(/\t/g, ' -> ') || probe);
+  }
+  if (hits.length === 0) {
+    return {
+      id: 'pipeline-owned-ignored',
+      severity: 'pass',
+      title: 'review ledgers and transcript leaves are not ignored',
+    };
+  }
+  return {
+    id: 'pipeline-owned-ignored',
+    severity: 'fail',
+    title: `ignore rule covers committed pipeline files: ${hits.join('; ')}`,
+    remediation:
+      'Remove the rule from .gitignore / .git/info/exclude (or add a `!` re-include); otherwise PRs ship without their review ledger and Step 10.5 fails with ledger-not-staged.',
+    anonymizableEvidence: { ignoredCount: hits.length },
+  };
+}
+
 // ── Untracked review ledgers (AISDLC-793) ───────────────────────────────
 
 function strandedTitle(stranded: string[]): string {
@@ -2695,6 +2739,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     description:
       'Orchestrator parent checkout on main whose index or working tree differs from HEAD, with the path count (AISDLC-708).',
     run: checkParentCheckoutState,
+  },
+  {
+    id: 'pipeline-owned-ignored',
+    description:
+      'An ignore rule covering .ai-sdlc/reviews/ or .ai-sdlc/transcript-leaves/, which would ship PRs without their ledger (AISDLC-967).',
+    run: checkPipelineOwnedNotIgnored,
   },
   {
     id: 'untracked-review-ledgers',
