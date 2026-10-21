@@ -1,7 +1,7 @@
 ---
 id: AISDLC-990
 title: 'Autonomy tracker caps promotion at level 3 to match the 0-3 spec'
-status: Done
+status: To Do
 assignee: []
 created_date: '2026-10-20'
 labels:
