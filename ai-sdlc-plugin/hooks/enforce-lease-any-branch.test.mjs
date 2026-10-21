@@ -115,11 +115,10 @@ describe('allowForcePush: lease - allowed', () => {
     }
   });
 
-  it('accepts a named branch, a lease with an explicit ref, and companion flags', () => {
+  it('accepts a named source, a lease with an explicit ref, and companion flags', () => {
     for (const cmd of [
-      `${P} some-branch`,
       `${P} some-branch:refs/heads/other`,
-      `git push --force-with-lease=other:abcdef1 -u origin HEAD`,
+      `git push --force-with-lease=other:abcdef1 -u origin HEAD:refs/heads/other`,
     ]) {
       const o = run(cmd, { cwd: lease.wt, projectDir: lease.root });
       assert.ok(!denied(o), `${cmd}: ${o}`);
@@ -132,6 +131,11 @@ describe('allowForcePush: lease - still refused, naming the mode', () => {
     'push to main': `${P} HEAD:refs/heads/main`,
     'push to master (short)': `${P} HEAD:master`,
     'bare main': `${P} main`,
+    'no-colon branch (remote.push remap)': `${P} docs/x`,
+    'no-colon HEAD': `${P} HEAD`,
+    'no-colon with -u': `git push --force-with-lease=other:abcdef1 -u origin HEAD`,
+    'unqualified destination (tag ambiguity)': `${P} HEAD:v0.26.0`,
+    'tag destination': `${P} HEAD:refs/tags/v0.26.0`,
     'configured protected branch': `${P} HEAD:refs/heads/keep/x`,
     'default protected glob': `${P} HEAD:refs/heads/release/1.0`,
     'plain --force': 'git push --force origin docs/x',
@@ -157,9 +161,14 @@ describe('allowForcePush: lease - still refused, naming the mode', () => {
     assert.match(o, /allowForcePush=lease/);
   });
 
-  it('from main checkout HEAD on main, the HEAD destination is protected', () => {
-    const o = run(`${P} HEAD`, { cwd: lease.root, projectDir: lease.root });
-    assert.ok(denied(o), o);
+  it('a remote.origin.push remap to main cannot be reached via a no-colon refspec', () => {
+    git(lease.root, 'config', 'remote.origin.push', 'refs/heads/docs/x:refs/heads/main');
+    try {
+      const o = run(`${P} docs/x`, { cwd: lease.root, projectDir: lease.root });
+      assert.ok(denied(o), o);
+    } finally {
+      git(lease.root, 'config', '--unset', 'remote.origin.push');
+    }
   });
 });
 

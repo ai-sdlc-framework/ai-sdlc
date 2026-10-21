@@ -608,8 +608,6 @@ describe('evaluateLeasePush mode lease (AISDLC-1005)', () => {
   it('allows any non-protected branch with no task binding', () => {
     for (const cmd of [
       'git push --force-with-lease origin HEAD:refs/heads/docs/x',
-      'git push --force-with-lease origin docs/x',
-      'git push --force-with-lease origin HEAD',
       'git push -u --force-with-lease=docs/x:abcdef1 fork docs/x:refs/heads/docs/y',
     ]) {
       assert.equal(any(cmd).decision, 'allow', cmd);
@@ -619,7 +617,11 @@ describe('evaluateLeasePush mode lease (AISDLC-1005)', () => {
     for (const cmd of [
       'git push --force-with-lease origin HEAD:refs/heads/main',
       'git push --force-with-lease origin HEAD:release/1',
-      'git push --force-with-lease origin prod',
+      'git push --force-with-lease origin HEAD:refs/heads/prod',
+      'git push --force-with-lease origin docs/x',
+      'git push --force-with-lease origin HEAD',
+      'git push --force-with-lease origin HEAD:v0.26.0',
+      'git push --force-with-lease origin HEAD:refs/tags/v1',
       'git push --force origin docs/x',
       'git push --force-with-lease origin +docs/x',
       'git push --force-with-lease origin --delete docs/x',
@@ -639,7 +641,7 @@ describe('evaluateLeasePush mode lease (AISDLC-1005)', () => {
       assert.match(v.reason, /allowForcePush=lease/);
     }
   });
-  it('HEAD on a protected or detached checkout is refused', () => {
+  it('a no-colon HEAD is refused regardless of checkout', () => {
     const cmd = 'git push --force-with-lease origin HEAD';
     assert.equal(any(cmd, { ownRef: 'refs/heads/main' }).decision, 'deny');
     assert.equal(any(cmd, { ownRef: null }).decision, 'deny');

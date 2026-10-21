@@ -340,9 +340,9 @@ function parseAllowedShape(command, ctx) {
  * reason. No task binding: any cwd, any session. Same positive-parse posture:
  * no metacharacters, wrapper, env prefix or git global option; no plain force,
  * `+refspec`, delete, mirror or alias. The remote must be a configured remote and an
- * explicit refspec is required. A destination is a plain branch name or
- * `refs/heads/<name>`; a no-colon refspec means the same-named branch, and `HEAD`
- * means the current branch (ctx.ownRef).
+ * explicit refspec is required, in the colon form with a fully qualified
+ * `refs/heads/<name>` destination (no-colon and unqualified destinations are
+ * resolved by git through config or against remote tags, so they are refused).
  */
 function parseAnyBranchShape(command, ctx) {
   if (/[^\x20-\x7e\t]/.test(command)) return 'non-printable or non-ASCII characters present';
@@ -383,18 +383,26 @@ function parseAnyBranchShape(command, ctx) {
     if (parts.length > 2) return `refspec '${spec}' is not a simple branch refspec`;
     const [src, dstRaw] = parts;
     if (!src || (parts.length === 2 && !dstRaw)) return `refspec '${spec}' is empty or a delete`;
-    let dst = parts.length === 2 ? dstRaw : src;
-    if (dst === 'HEAD') {
-      const own = branchFromRef(ctx.ownRef);
-      if (!own) return 'HEAD is not on a branch (cannot determine the destination)';
-      dst = own;
+    if (parts.length === 1) {
+      // A no-colon refspec is mapped by git through remote.<name>.push /
+      // push.default, so it can land on another ref (even main) via config.
+      return (
+        `the no-colon refspec '${spec}' is refused (git may map it through git config to another ` +
+        `ref); spell it 'HEAD:refs/heads/<branch>'`
+      );
     }
-    dst = dst.replace(/^refs\/heads\//, '');
-    if (!isPlainBranchName(dst)) return `destination '${dstRaw || src}' is not a plain branch name`;
+    // A destination that is not fully qualified is resolved by git against the
+    // REMOTE with every rule, tags before heads, so it could rewrite a tag. Only
+    // `refs/heads/<name>` is unambiguous.
+    if (!dstRaw.startsWith('refs/heads/')) {
+      return `destination '${dstRaw}' must be spelled refs/heads/<branch> (e.g. HEAD:refs/heads/<branch>)`;
+    }
+    const dst = dstRaw.slice('refs/heads/'.length);
+    if (!isPlainBranchName(dst)) return `destination '${dstRaw}' is not a plain branch name`;
     if (isProtectedBranch(dst, ctx.protectedBranches)) {
       return `destination '${dst}' is protected`;
     }
-    if (parts.length === 2 && !/^[A-Za-z0-9._/-]+$/.test(src)) {
+    if (!/^[A-Za-z0-9._/-]+$/.test(src)) {
       return `refspec source '${src}' is not a plain ref`;
     }
   }
@@ -420,7 +428,7 @@ function evaluateLeasePush(command, ctx, mode = 'leaseOnOwnBranch') {
       decision: 'deny',
       reason:
         `force-push under spec.governance.allowForcePush=lease (.ai-sdlc/agent-role.yaml) ` +
-        `is limited to a lease push (git push, force-with-lease flag, <remote> <branch-or-HEAD>[:refs/heads/<branch>]) to a ` +
+        `is limited to a lease push (git push, force-with-lease flag, <remote> <src>:refs/heads/<branch>) to a ` +
         `non-protected branch (${whyAny}). Plain force pushes, +refspecs, deletes, mirror, aliases and ` +
         `pushes to main/master or protected branches are never permitted. Next step: spell the push as ` +
         `the lease flag, then 'origin HEAD:refs/heads/<branch>'.`,
