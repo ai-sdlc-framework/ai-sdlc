@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { StateStore } from './state/store.js';
-import { AutonomyTracker } from './autonomy-tracker.js';
+import { AutonomyTracker, MAX_LEVEL } from './autonomy-tracker.js';
 
 describe('AutonomyTracker', () => {
   let store: StateStore;
@@ -81,10 +81,10 @@ describe('AutonomyTracker', () => {
     });
 
     it('denies promotion at max level', () => {
-      // Manually set level to 4
+      // Manually set level to the spec maximum
       store.upsertAutonomyLedger({
         agentName: 'agent-a',
-        currentLevel: 4,
+        currentLevel: MAX_LEVEL,
         totalTasks: 100,
         successCount: 95,
         failureCount: 5,
@@ -92,6 +92,24 @@ describe('AutonomyTracker', () => {
       const result = tracker.evaluateAndPersistPromotion('agent-a');
       expect(result.eligible).toBe(false);
       expect(result.unmetConditions).toContain('Already at maximum level');
+    });
+
+    it('refuses promotion from level 3 even when every criterion is met', () => {
+      store.upsertAutonomyLedger({
+        agentName: 'agent-a',
+        currentLevel: 3,
+        totalTasks: 100,
+        successCount: 100,
+        failureCount: 0,
+        securityIncidents: 0,
+        timeAtLevelMs: 30 * 24 * 60 * 60 * 1000,
+      });
+      const result = tracker.evaluateAndPersistPromotion('agent-a');
+      expect(result.eligible).toBe(false);
+      expect(result.toLevel).toBe(3);
+      expect(result.unmetConditions).toContain('Already at maximum level');
+      expect(store.getAutonomyLedger('agent-a')!.currentLevel).toBe(3);
+      expect(store.getAutonomyEvents('agent-a')).toHaveLength(0);
     });
 
     it('denies promotion with security incidents', () => {
