@@ -316,6 +316,39 @@ describe('preSignRebase (AISDLC-102)', () => {
     expect(cmds().filter((c) => c.startsWith('git commit'))).toHaveLength(2);
   });
 
+  const writeLedger = (): void => {
+    const dir = join(state.worktreePath, '.ai-sdlc', 'reviews');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${state.taskId}.jsonl`), '{}\n');
+  };
+
+  it('fails ledger-not-staged naming the ignore rule, without rebasing (AISDLC-967)', async () => {
+    hashes('A', 'A');
+    writeLedger();
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    h.runner.on(/ls-files --error-unmatch/, fail('error: pathspec', 1));
+    h.runner.on(
+      /check-ignore -v/,
+      ok(`.gitignore:3:.ai-sdlc/reviews/\t.ai-sdlc/reviews/x.jsonl\n`),
+    );
+    const r = await preSignRebase(h.ctx, state);
+    expect(r).toMatchObject({ kind: 'failed', cause: 'ledger-not-staged' });
+    expect((r as { reason: string }).reason).toContain('ledger-not-staged');
+    expect((r as { reason: string }).reason).toContain('.gitignore:3:.ai-sdlc/reviews/');
+    expect(cmds().some((c) => c.startsWith('git rebase'))).toBe(false);
+  });
+
+  it('is unchanged when the ledger exists and is tracked (AISDLC-967)', async () => {
+    hashes('A', 'A');
+    writeLedger();
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    h.runner.on(/status --porcelain/, ok(` M .ai-sdlc/reviews/${state.taskId}.jsonl\n`));
+    const r = await preSignRebase(h.ctx, state);
+    expect(r).toEqual({ kind: 'unchanged', hash: 'A' });
+    expect(cmds().filter((c) => c.startsWith('git commit'))).toHaveLength(1);
+    expect(indexOfCall(/ls-files --error-unmatch/)).toBeLessThan(indexOfCall(/git rebase/));
+  });
+
   it('makes no commit when leaves and ledger are clean (AISDLC-951)', async () => {
     hashes('A', 'A');
     h.runner.on(/merge-base --is-ancestor/, fail('', 1));

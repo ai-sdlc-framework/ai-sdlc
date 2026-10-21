@@ -1,7 +1,7 @@
 ---
 id: AISDLC-967
 title: 'Step 10.5 fails loudly when the review ledger or transcript leaves cannot be staged, instead of shipping without them'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-17'
 labels:
