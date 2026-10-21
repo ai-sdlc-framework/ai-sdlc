@@ -257,4 +257,44 @@ describe('AutonomyTracker', () => {
       expect(proximity.conditionProgress.every((c) => c.met)).toBe(true);
     });
   });
+
+  describe('loadPolicy', () => {
+    const policy = (level: number) => ({
+      apiVersion: 'ai-sdlc.io/v1alpha1',
+      kind: 'AutonomyPolicy',
+      metadata: { name: 'p' },
+      spec: {
+        levels: [
+          {
+            level: 0,
+            name: 'Intern',
+            permissions: { read: ['*'], write: [], execute: [] },
+            guardrails: { requireApproval: 'all' },
+            monitoring: 'continuous',
+          },
+        ],
+        promotionCriteria: {},
+        demotionTriggers: [{ trigger: 'security-incident', action: 'demote-to-0', cooldown: '7d' }],
+      },
+      status: { agents: [{ name: 'agent-x', currentLevel: level }] },
+    });
+
+    it.each([2, 3])('rejects initial level %i naming agent, level and spec line', (level) => {
+      expect(() => tracker.loadPolicy(policy(level))).toThrow(
+        new RegExp(`agent-x.*initial level ${level}.*spec/autonomy.md:116-117`),
+      );
+    });
+
+    it.each([0, 1])('accepts initial level %i and seeds the ledger', (level) => {
+      tracker.loadPolicy(policy(level));
+      tracker.recordTaskOutcome('agent-x', true);
+      expect(store.getAutonomyLedger('agent-x')!.currentLevel).toBe(level);
+    });
+
+    it('rejects a policy failing schema validation', () => {
+      expect(() => tracker.loadPolicy({ kind: 'AutonomyPolicy' })).toThrow(
+        /Invalid AutonomyPolicy/,
+      );
+    });
+  });
 });

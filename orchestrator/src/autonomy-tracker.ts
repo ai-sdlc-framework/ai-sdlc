@@ -6,6 +6,7 @@
  * RFC reference: Lines 264-280 (autonomy metrics).
  */
 
+import { validateResource } from '@ai-sdlc/reference';
 import type { StateStore } from './state/store.js';
 import type { AutonomyLedgerEntry } from './state/types.js';
 
@@ -72,8 +73,39 @@ const PROMOTION_SUCCESS_RATE: Record<number, number> = {
 /** Minimum time at level (ms) before promotion. */
 const MIN_TIME_AT_LEVEL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
+/** Highest level an agent may be initialised at (spec/autonomy.md:116-117). */
+export const MAX_INITIAL_LEVEL = 1;
+
 export class AutonomyTracker {
+  private initialLevels = new Map<string, number>();
+
   constructor(private store: StateStore) {}
+
+  /**
+   * Validate an AutonomyPolicy against its schema and register each agent's
+   * initial level. Rejects any agent initialised above level 1:
+   * spec/autonomy.md:116-117 ("Implementations MUST enforce this by rejecting
+   * AutonomyPolicy resources that set an agent's initial level above 1").
+   */
+  loadPolicy(policy: unknown): void {
+    const result = validateResource(policy);
+    if (!result.valid) {
+      const detail = (result.errors ?? []).map((e) => `${e.path}: ${e.message}`).join('; ');
+      throw new Error(`Invalid AutonomyPolicy: ${detail}`);
+    }
+    const agents =
+      (policy as { status?: { agents?: Array<{ name: string; currentLevel: number }> } }).status
+        ?.agents ?? [];
+    for (const agent of agents) {
+      if (agent.currentLevel > MAX_INITIAL_LEVEL) {
+        throw new Error(
+          `AutonomyPolicy rejected: agent "${agent.name}" has initial level ${agent.currentLevel}; ` +
+            `agents MUST start at level 0 or 1 (spec/autonomy.md:116-117)`,
+        );
+      }
+    }
+    for (const agent of agents) this.initialLevels.set(agent.name, agent.currentLevel);
+  }
 
   /**
    * Record a task outcome and update the autonomy ledger.
@@ -94,7 +126,7 @@ export class AutonomyTracker {
 
     const entry: AutonomyLedgerEntry = {
       agentName,
-      currentLevel: existing?.currentLevel ?? 0,
+      currentLevel: existing?.currentLevel ?? this.initialLevels.get(agentName) ?? 0,
       totalTasks: (existing?.totalTasks ?? 0) + 1,
       successCount: (existing?.successCount ?? 0) + (success ? 1 : 0),
       failureCount: (existing?.failureCount ?? 0) + (success ? 0 : 1),
