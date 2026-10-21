@@ -386,6 +386,11 @@ export interface DeveloperReturn {
    * hit its turn budget and returned its work in progress instead of finishing.
    */
   notes?: string | DeveloperNotes;
+  /**
+   * Follow-up items (AISDLC-997). Each is a task id, an issue reference, or
+   * `declined: <reason>`. Rendered under `## Follow-up`; absent or empty means `(none)`.
+   */
+  followups?: string[];
 }
 
 /** Structured developer notes; only `parked` has meaning to the pipeline. */

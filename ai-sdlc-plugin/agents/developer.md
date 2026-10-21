@@ -117,9 +117,12 @@ Return a JSON object as your final message (no other text):
   },
   "acceptanceCriteriaMet": [1, 2, 3],
   "testWaiver": {"tests": ["<test name>"], "passesAlone": "<evidence>", "untouched": true},
-  "notes": "anything the reviewers or operator should know (optional)"
+  "notes": "anything the reviewers or operator should know (optional)",
+  "followups": ["AISDLC-123", "#456", "declined: <reason of at least 10 characters>"]
 }
 ```
+
+`followups` (optional) lists follow-up work that surfaced. Each entry is a task id, an issue reference, or `declined: <reason>`; prose is rejected at finalize. Omit it when there is none. Free-form commentary belongs in `notes`, never in `followups`.
 
 ### Local test waiver (DEC-0202)
 

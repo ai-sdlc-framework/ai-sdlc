@@ -1,3 +1,4 @@
+import { checkFollowups } from '../backlog/followup-rule.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -104,6 +105,43 @@ describe('Step 10 — buildFinalSummary', () => {
       iterations: 1,
     });
     expect(r.finalSummary).toContain('⚠ test note');
+  });
+});
+
+describe('Step 10 — follow-up section (AISDLC-997)', () => {
+  const base = {
+    taskId: 'AISDLC-1',
+    workDir: tmp,
+    worktreePath: tmp,
+    task,
+    verdict: approved(),
+    iterations: 1,
+  };
+
+  it('never copies notes under Follow-up and writes (none)', () => {
+    const r = buildFinalSummary({
+      ...base,
+      developerReturn: { ...dev, notes: 'para one\n\nSome prose follow-up here' },
+    });
+    expect(r.finalSummary.split('## Follow-up')[1]).toBe('\n(none)\n');
+    expect(checkFollowups(r.finalSummary).ok).toBe(true);
+  });
+
+  it('renders followups as a list', () => {
+    const r = buildFinalSummary({
+      ...base,
+      developerReturn: { ...dev, followups: ['AISDLC-5', 'declined: not worth doing now'] },
+    });
+    expect(r.finalSummary).toContain('## Follow-up\n- AISDLC-5\n- declined: not worth doing now\n');
+  });
+
+  it('finalizeTask fails closed on a bad followups entry', async () => {
+    await expect(
+      finalizeTask({
+        ...base,
+        developerReturn: { ...dev, followups: ['someday refactor this'] },
+      }),
+    ).rejects.toThrow(/someday refactor this/);
   });
 });
 
