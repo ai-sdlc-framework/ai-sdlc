@@ -10,11 +10,12 @@ import path from 'node:path';
 import process from 'node:process';
 
 import { createReceiver } from '../dispatch/webhook-receiver.js';
+import { DEFAULT_WEBHOOK_PORT, loadPrLifecycleConfig } from './pr-lifecycle-config.js';
 import type { HierarchyDeps } from './types.js';
 
 export const WEBHOOK_SECRET_ENV = 'AI_SDLC_WEBHOOK_SECRET';
 export const WEBHOOK_PORT_ENV = 'AI_SDLC_WEBHOOK_PORT';
-export const DEFAULT_WEBHOOK_PORT = 8765;
+export { DEFAULT_WEBHOOK_PORT };
 const STATE_FILE = 'webhook.json';
 
 /** What `status` reports about the receiver. */
@@ -64,7 +65,7 @@ export function formatWebhookStatus(w: WebhookStatus): string {
 
 function resolvePort(deps: HierarchyDeps, flag: string | undefined): number {
   const raw = flag ?? deps.env[WEBHOOK_PORT_ENV];
-  if (raw === undefined || raw === '') return DEFAULT_WEBHOOK_PORT;
+  if (raw === undefined || raw === '') return loadPrLifecycleConfig(deps.cwd).webhook.port;
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 0 || n > 65535) throw new Error(`invalid webhook port '${raw}'`);
   return n;
@@ -129,6 +130,7 @@ export async function webhookServe(deps: HierarchyDeps, portFlag?: string): Prom
     secret,
     boardDir: deps.boardDir,
     port: resolvePort(deps, portFlag),
+    debounceMs: loadPrLifecycleConfig(deps.cwd).webhook.debounceMs,
   });
   await receiver.start();
   mkdirSync(deps.boardDir, { recursive: true });

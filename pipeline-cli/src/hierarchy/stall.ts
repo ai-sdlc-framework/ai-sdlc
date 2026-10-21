@@ -89,7 +89,13 @@ export function endsWithQuestion(paneTail: string): boolean {
 }
 
 /** Read a positive millisecond value from the environment, else the default. */
-export function stallThresholdsFromEnv(env: NodeJS.ProcessEnv): {
+export function stallThresholdsFromEnv(
+  env: NodeJS.ProcessEnv,
+  defaults: { staleMs: number; graceMs: number } = {
+    staleMs: DEFAULT_STALL_STALE_MS,
+    graceMs: DEFAULT_STALL_GRACE_MS,
+  },
+): {
   staleMs: number;
   graceMs: number;
 } {
@@ -98,8 +104,8 @@ export function stallThresholdsFromEnv(env: NodeJS.ProcessEnv): {
     return Number.isFinite(n) && n > 0 ? n : d;
   };
   return {
-    staleMs: read(env.AI_SDLC_DISPATCH_STALE_MS, DEFAULT_STALL_STALE_MS),
-    graceMs: read(env.AI_SDLC_DISPATCH_STALL_GRACE_MS, DEFAULT_STALL_GRACE_MS),
+    staleMs: read(env.AI_SDLC_DISPATCH_STALE_MS, defaults.staleMs),
+    graceMs: read(env.AI_SDLC_DISPATCH_STALL_GRACE_MS, defaults.graceMs),
   };
 }
 

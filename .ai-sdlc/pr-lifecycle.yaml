@@ -2,28 +2,22 @@
 # lifecycle. Consumers read them from here; a literal in code is a defect.
 # apiVersion/kind (PrLifecycle) are deliberately omitted until a schema lands:
 # the generic config walk would otherwise warn "unknown kind". Readers take `spec`.
+#
+# Two kinds of keys exist, and only the first kind belongs in this file:
+#   - Operational keys (webhook, stall, reconcile, loopGuard, noTaskBranchPrefixes) are
+#     read by real consumers through `loadPrLifecycleConfig`
+#     (pipeline-cli/src/hierarchy/pr-lifecycle-config.ts) or `scripts/read-pr-lifecycle.mjs`;
+#     the code constants are the defaults when a key is absent.
+#   - Trust constants (docs-only paths, release branch prefix, task-id pattern) are NOT here.
+#     The CI verifier re-derives them from code on the base ref
+#     (pipeline-cli/attestation-core/docs-only-paths.mjs and the branch / task-id helpers);
+#     a yaml copy a PR can edit must never be what the gate trusts.
+# A test (pr-lifecycle-config.test.ts) fails when a key under `spec` has no registered reader.
 spec:
-  docsOnlyPaths:
-    - spec/rfcs/
-    - docs/
-    - backlog/tasks/
-    - backlog/completed/
-    - .ai-sdlc/_decisions/
-    - .ai-sdlc/attestations/*.dsse.json
-    - .ai-sdlc/dispatch/briefs/
-    - .claude/memory/
-    - .github/dependabot.yml
-    - .github/*.md
-    - '*.md'
   noTaskBranchPrefixes: [ai-sdlc/file-, ai-sdlc/decisions-sync, docs/]
-  releaseBranchPrefix: release-please--
-  taskIdPattern: '[A-Z][A-Z0-9]+-[0-9]+(\.[0-9]+)*'
   webhook:
-    port: 8787
-    bind: 127.0.0.1
-    secretEnv: AI_SDLC_WEBHOOK_SECRET
+    port: 8765
     debounceMs: 5000
-    events: [pull_request, check_suite, check_run, workflow_run, status, pull_request_review]
   reconcile:
     timerOpenMs: 60000
     timerIdleMs: 900000
@@ -32,6 +26,3 @@ spec:
     graceMs: 600000
   loopGuard:
     maxSameHeadActions: 1
-  flipPreconditions:
-    requireCodeql: true
-    requireApprovedVerdict: true

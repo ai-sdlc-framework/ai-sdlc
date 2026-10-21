@@ -145,6 +145,7 @@ import {
   webhookStatus,
   formatWebhookStatus,
 } from '../hierarchy/index.js';
+import { loadPrLifecycleConfig } from '../hierarchy/pr-lifecycle-config.js';
 import { createSnapshotRunner } from '../hierarchy/pr-snapshot.js';
 import { routedModel } from '../routing/role-model.js';
 import { findTaskFile, parseArgv, resolveBaseSha } from './dispatch.js';
@@ -809,7 +810,7 @@ export async function runHierarchyCli(
           playbook: (verdict) => runPlaybook(verdict, playbookDeps(retryLimit)),
           operational,
           stall: {
-            ...stallThresholdsFromEnv(deps.env),
+            ...stallThresholdsFromEnv(deps.env, loadPrLifecycleConfig(deps.cwd).stall),
             liveness: () =>
               new Map(hierarchyStatus(deps).rows.map((r) => [r.entry.name, r.state] as const)),
             lastOutputIsQuestion: (name) => {

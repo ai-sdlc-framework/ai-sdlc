@@ -1,7 +1,7 @@
 ---
 id: AISDLC-980
 title: 'pr-lifecycle.yaml: wire the operational keys, drop the trust constants, test every key has a reader'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-20'
 labels:
