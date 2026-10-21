@@ -1,7 +1,7 @@
 ---
 id: AISDLC-969
 title: 'The gate detect job runs the docs-only classifier from the base sha, never from the PR tree, and a PR touching the classifier is code'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-17'
 labels:
