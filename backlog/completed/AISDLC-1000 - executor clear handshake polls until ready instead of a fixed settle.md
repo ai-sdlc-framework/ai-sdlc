@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1000
 title: 'Executor clear handshake polls until the identity line appears instead of a fixed 8 s settle'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-20'
 labels:
