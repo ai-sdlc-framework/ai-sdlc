@@ -50,3 +50,7 @@ The first three records to carry `--standing-rule` are the planner's to author, 
 3. Dispatch reports every blocker, brief and verdict to the planner, even under a hold.
 
 Until each record is answered on `main`, the blocks stay empty.
+
+## Enforcement is server-side (AISDLC-1014, DEC-0267)
+
+The PreToolUse hook `enforce-blocked-actions.js` no longer matches command text. A rule line for merge, close, branch-delete, destructive-git or stash is instruction only. What holds the outcome is GitHub branch protection on `main` (no direct push, no force push, required `ai-sdlc/pr-ready`), the pr-ready rollup, and `cli-merge-if-eligible`. The hook keeps two checks that are not text matches: the `blockedPaths` refusal for untrusted runs and the lease-push guard (`lib/lease-push-guard.js`). A rule line may say "hook" only for those two.

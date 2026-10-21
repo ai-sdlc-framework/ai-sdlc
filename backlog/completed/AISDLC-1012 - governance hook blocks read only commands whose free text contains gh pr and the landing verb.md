@@ -2,7 +2,7 @@
 id: AISDLC-1012
 title: >-
   Governance hook blocks read-only commands whose free text contains "gh pr" and the landing verb; match the gh subcommand, not prose
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-21'
 labels:
@@ -47,3 +47,7 @@ dispatchable: true
 
 - `node --test ai-sdlc-plugin/hooks/`
 - `pnpm lint && pnpm format:check`
+
+## Final Summary
+
+Superseded by AISDLC-1014 (DEC-0267): the command-text matcher is deleted instead of narrowed.

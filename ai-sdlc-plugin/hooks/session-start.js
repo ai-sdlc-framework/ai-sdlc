@@ -311,7 +311,6 @@ const role = extractField(yaml, 'role') || 'agent';
 const goal = extractField(yaml, 'goal') || '';
 const maxFiles = extractField(yaml, 'maxFilesPerChange') || '15';
 const requireTests = extractField(yaml, 'requireTests') || 'true';
-const blockedActions = parseListField(yaml, 'blockedActions');
 const blockedPaths = parseListField(yaml, 'blockedPaths');
 // Render the force-push rule / operational grants from the SAME trusted source
 // the PreToolUse hook enforces (a worktree copy of agent-role.yaml cannot make
@@ -419,7 +418,6 @@ let context = `## AI-SDLC Governance Active
 Limits: max ${maxFiles} files per change; tests required: ${requireTests}${
   blockedPaths.length > 0 ? `; blocked paths: ${blockedPaths.join(', ')}` : ''
 }.
-Blocked actions (NEVER execute): ${blockedActions.map((a) => `\`${a}\``).join(', ')}
 Before EVERY commit run and fix: \`pnpm build\`, \`pnpm test\`, \`pnpm lint\`, \`pnpm format:check\` (\`pnpm format\` fixes). CI is the only coverage gate (per-package floors plus a 90% patch gate); nothing runs coverage locally.
 
 ${renderSessionStartHardRules(resolvedGovernance)}${operationalRules ? `\n${operationalRules}` : ''}${reviewPolicySummary}`;

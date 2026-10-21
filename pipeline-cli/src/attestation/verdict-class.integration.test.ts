@@ -102,7 +102,7 @@ describe('SubagentStart hook -> determineVerdictClass integration (AISDLC-571)',
     // works once the hook is actually registered/invoked.
     const parsed = JSON.parse(stdout);
     expect(parsed.hookSpecificOutput.hookEventName).toBe('SubagentStart');
-    expect(parsed.hookSpecificOutput.additionalContext).toContain('gh pr merge*');
+    expect(parsed.hookSpecificOutput.additionalContext).toContain('AI-SDLC Governance');
 
     // The marker (AISDLC-568's structural signal) was actually written to
     // disk by the real hook script — not hand-synthesized by the test.

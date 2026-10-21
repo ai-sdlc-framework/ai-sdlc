@@ -99,7 +99,6 @@ describe('ai-sdlc-plugin session-start hook', () => {
     assert.ok(ctx.includes('AI-SDLC Governance Active'), 'should include governance header');
     assert.ok(ctx.includes('coding-agent'), 'should include the role');
     assert.ok(ctx.includes('Fix bugs'), 'should include the goal');
-    assert.ok(ctx.includes('gh pr merge'), 'should list blocked actions');
     assert.ok(ctx.includes('forbids agent merges'), 'should include merge warning');
   });
 
@@ -613,11 +612,11 @@ describe('ai-sdlc-plugin session-start hook — version-aware self-heal gate (AI
 });
 
 describe('ai-sdlc-plugin session-start hook — compact form (AISDLC-651.2)', () => {
-  it('renders limits, blocked actions and the checklist as single lines', () => {
+  it('renders limits and the checklist as single lines (no blocked-actions line, AISDLC-1014)', () => {
     const ctx = JSON.parse(runHook(tempDirWithConfig).output).hookSpecificOutput.additionalContext;
     const lines = ctx.split('\n');
     assert.equal(lines.filter((l) => l.startsWith('Limits:')).length, 1);
-    assert.equal(lines.filter((l) => l.startsWith('Blocked actions')).length, 1);
+    assert.equal(lines.filter((l) => l.startsWith('Blocked actions')).length, 0);
     assert.equal(lines.filter((l) => l.startsWith('Before EVERY commit')).length, 1);
     assert.ok(!ctx.includes('### Pre-Commit Checklist'), 'no multi-line checklist section');
     assert.ok(!ctx.includes('### Blocked Actions'), 'no per-action bullet section');

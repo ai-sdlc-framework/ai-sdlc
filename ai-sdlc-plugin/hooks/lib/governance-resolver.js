@@ -363,9 +363,9 @@ function resolveGovernanceFromYaml(yamlText) {
 
 // The merge rule text is derived ONLY from the resolved `allowMerge` value
 // (`never` is one configured value, not a project rule). Under both values the
-// raw merge subcommand (every form, `--auto` included) and the API/curl merge
-// routes stay blocked by enforce-blocked-actions.js because they skip the
-// cli-merge-if-eligible gate.
+// raw merge subcommand and the API merge routes skip the cli-merge-if-eligible
+// gate; branch protection and the pr-ready rollup are the server-side controls
+// (AISDLC-1014, DEC-0267), not a local command-text hook.
 const ONGREENCLEAN_MERGE_TEXT =
   "**Merge:** this repository's `.ai-sdlc/agent-role.yaml` sets `governance.allowMerge: onGreenClean`. " +
   'Merges and auto-merge arming go ONLY through ' +

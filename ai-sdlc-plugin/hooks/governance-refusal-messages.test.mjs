@@ -270,27 +270,6 @@ const bash = (command, extra = {}) => ({ input: { command }, cwd: wt, ...extra }
 /** name, how to trigger, `rule` the message must name, `resolver` it must offer. */
 const SCENARIOS = [
   [
-    'raw merge',
-    () => viaBlocked(bash('gh pr merge 5')),
-    /gh pr merge/,
-    /cli-merge-if-eligible\.mjs/,
-  ],
-  [
-    'api merge',
-    () => viaBlocked(bash('gh api repos/o/r/pulls/5/merge -X PUT')),
-    /GitHub API/,
-    /cli-merge-if-eligible\.mjs/,
-  ],
-  [
-    'merge policy root override',
-    () => viaBlocked(bash('AI_SDLC_MERGE_POLICY_ROOT=/x git status')),
-    /merge policy root/,
-    /spec\.governance\.allowMerge/,
-  ],
-  ['stash pop', () => viaBlocked(bash('git stash pop')), /git stash pop/, /git stash push/],
-  ['stash clear', () => viaBlocked(bash('git stash clear')), /git stash clear/, /git stash push/],
-  ['stash drop', () => viaBlocked(bash('git stash drop')), /git stash drop/, /git stash push/],
-  [
     'force push, explicit never',
     () =>
       viaBlocked({ ...bash('git push --force origin main'), project: neverRoot, cwd: neverRoot }),
@@ -313,12 +292,6 @@ const SCENARIOS = [
       ),
     /allowForcePush/,
     /--force-with-lease origin HEAD:refs\/heads\//,
-  ],
-  [
-    'blockedActions pattern',
-    () => viaBlocked(bash('git reset --hard HEAD')),
-    /blockedActions pattern 'git reset --hard\*'/,
-    /cli-decisions\.mjs escalate/,
   ],
   [
     'blockedPaths',

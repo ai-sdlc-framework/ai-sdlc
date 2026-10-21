@@ -31,32 +31,32 @@
 const PROMPT_RULES = [
   {
     id: 'merge',
-    text: '**Merge:** only via `cli-merge-if-eligible` when `governance.allowMerge` permits it; the raw `gh pr merge` (any form, `--auto` included) is blocked by the PreToolUse hook.',
+    text: '**Merge:** only via `cli-merge-if-eligible` when `governance.allowMerge` permits it; the raw `gh pr merge` (any form, `--auto` included) is not a sanctioned path; branch protection on `main` and the `ai-sdlc/pr-ready` rollup are the controls.',
     detect: /gh pr merge/g,
   },
   {
     id: 'force-push',
-    text: '**Force-push:** only `git push --force-with-lease origin HEAD:refs/heads/<your-branch>` to your own task branch after a rebase (from the parent cwd, prefix `git -C <main>/.worktrees/<task-id>`); plain `git push --force`/`-f` and any push to `main`/`master` are blocked by the PreToolUse hook.',
+    text: '**Force-push:** only `git push --force-with-lease origin HEAD:refs/heads/<your-branch>` to your own task branch after a rebase (from the parent cwd, prefix `git -C <main>/.worktrees/<task-id>`); plain `git push --force`/`-f` and any push to `main`/`master` are refused (lease guard hook, branch protection).',
     detect: /git push --force(?!-with-lease)/g,
   },
   {
     id: 'close',
-    text: '**Close:** never close PRs or issues (`gh pr close`, `gh issue close`); report in `notes` instead (hook-enforced unless repo policy grants it).',
+    text: '**Close:** never close PRs or issues (`gh pr close`, `gh issue close`); report in `notes` instead (instruction only, no hook).',
     detect: /gh pr close/g,
   },
   {
     id: 'branch-delete',
-    text: '**Delete branches:** never (`git branch -D`/`-d`); leave cleanup to `/ai-sdlc cleanup` (hook-enforced unless repo policy grants it).',
+    text: '**Delete branches:** never (`git branch -D`/`-d`); leave cleanup to `/ai-sdlc cleanup` (instruction only, no hook).',
     detect: /git branch -D/g,
   },
   {
     id: 'destructive-git',
-    text: '**Destructive git:** never `git reset --hard`, `git checkout -- .` or `git restore .`; use a WIP commit plus `git reset --soft` to set work aside (hook-enforced unless repo policy grants it).',
+    text: '**Destructive git:** never `git reset --hard`, `git checkout -- .` or `git restore .`; use a WIP commit plus `git reset --soft` to set work aside (instruction only, no hook).',
     detect: /git reset --hard/g,
   },
   {
     id: 'stash',
-    text: '**Stash:** never `git stash pop`, `git stash clear` or a bare `git stash drop`; the stack is shared across worktrees, so prefer a WIP commit, or `git stash push -u -m <tag>` then `git stash apply <ref>` (pop, clear and bare drop are hook-blocked).',
+    text: '**Stash:** never `git stash pop`, `git stash clear` or a bare `git stash drop`; the stack is shared across worktrees, so prefer a WIP commit, or `git stash push -u -m <tag>` then `git stash apply <ref>` (instruction only, no hook).',
     detect: /git stash pop/g,
   },
   {

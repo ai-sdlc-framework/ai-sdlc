@@ -92,14 +92,6 @@ describe('ai-sdlc-plugin subagent-start hook', () => {
     assert.ok(ctx.includes('.ai-sdlc/**'), 'ai-sdlc blocked path');
   });
 
-  it('lists blocked actions from agent-role.yaml', () => {
-    const result = runHook(tempDirWithConfig);
-    const parsed = JSON.parse(result.output);
-    const ctx = parsed.hookSpecificOutput?.additionalContext;
-    assert.ok(ctx.includes('gh pr merge*'), 'merge blocked action');
-    assert.ok(ctx.includes('git push --force*'), 'force-push blocked action');
-  });
-
   it('mentions permittedExternalPaths cross-repo allowlist', () => {
     const result = runHook(tempDirWithConfig);
     const parsed = JSON.parse(result.output);
@@ -371,11 +363,11 @@ describe('ai-sdlc-plugin subagent-start hook — AISDLC-572 agent_type capture',
 });
 
 describe('ai-sdlc-plugin subagent-start hook — compact form (AISDLC-651.2)', () => {
-  it('renders blocked paths and actions as one line each, not one bullet per entry', () => {
+  it('renders blocked paths as one line, with no blocked-actions line (AISDLC-1014)', () => {
     const ctx = JSON.parse(runHook(tempDirWithConfig).output).hookSpecificOutput.additionalContext;
     const lines = ctx.split('\n');
     assert.equal(lines.filter((l) => l.startsWith('Blocked paths')).length, 1);
-    assert.equal(lines.filter((l) => l.startsWith('Blocked Bash actions')).length, 1);
+    assert.equal(lines.filter((l) => l.startsWith('Blocked Bash actions')).length, 0);
     assert.equal(lines.filter((l) => l.startsWith('Cross-repo writes')).length, 1);
     // Only the hard-rule list renders bullets; the other lists are inline.
     const bullets = lines.filter((l) => l.startsWith('- '));
