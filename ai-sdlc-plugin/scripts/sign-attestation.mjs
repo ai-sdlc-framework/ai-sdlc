@@ -419,6 +419,21 @@ function git(args, cwd) {
   });
 }
 
+// AISDLC-998: the PR base ref, not a hard-coded origin/main, so the signer
+// computes the same patch-id key the verifier does. GITHUB_BASE_REF (CI) or
+// AI_SDLC_BASE_REF override; otherwise origin/HEAD's branch; else origin/main.
+function resolveBaseRef(repoRoot) {
+  const fromEnv = process.env['AI_SDLC_BASE_REF'] || process.env['GITHUB_BASE_REF'];
+  if (fromEnv) return fromEnv.startsWith('origin/') ? fromEnv : `origin/${fromEnv}`;
+  try {
+    const head = git(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], repoRoot).trim();
+    if (head) return head;
+  } catch {
+    // fall through
+  }
+  return 'origin/main';
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
 
@@ -549,7 +564,11 @@ async function main() {
       // filename, exactly like the pre-AISDLC-610 behaviour.
       const patchIdModule = await tryLoadPipelineCliPatchId(repoRoot);
       if (patchIdModule) {
-        const v6MergeBase = patchIdModule.computeMergeBase('origin/main', 'HEAD', repoRoot);
+        const v6MergeBase = patchIdModule.computeMergeBase(
+          resolveBaseRef(repoRoot),
+          'HEAD',
+          repoRoot,
+        );
         v6PatchId = v6MergeBase
           ? patchIdModule.computePatchId(v6MergeBase, headSha, repoRoot)
           : null;

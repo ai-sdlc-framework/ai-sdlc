@@ -18,6 +18,7 @@
  */
 
 import { join } from 'node:path';
+import { computeMergeBase, computePatchId } from '../attestation/patch-id.js';
 import { PUSH_NON_FAST_FORWARD_CAUSE } from '../hierarchy/playbook.js';
 import { loadOperationalPolicy } from '../hierarchy/operational.js';
 import { leasePushPreflight, type LeasePreflight } from '../hierarchy/lease-preflight.js';
@@ -80,16 +81,31 @@ async function contentHash(ctx: NextStepContext, worktreePath: string): Promise<
 }
 
 /**
+ * Content patch-id of HEAD against its merge-base with `baseRef` (the key the
+ * transcript leaves and the envelope are written under). Null when it cannot
+ * be computed, in which case the contentHash oracle alone decides (AISDLC-998).
+ */
+export function headPatchId(worktreePath: string, baseRef: string): string | null {
+  const mergeBase = computeMergeBase(baseRef, 'HEAD', worktreePath);
+  // merge-base of HEAD with itself resolves HEAD to a full sha.
+  const head = computeMergeBase('HEAD', 'HEAD', worktreePath);
+  if (!mergeBase || !head) return null;
+  return computePatchId(mergeBase, head, worktreePath);
+}
+
+/**
  * Rebase onto the latest target branch before signing. Fetch trouble skips the
  * rebase (a flaky network must not block signing); a conflict fails the run, because conflict resolution is the operator's.
  */
 export async function preSignRebase(
   ctx: NextStepContext,
   state: NextStepState,
+  patchIdOf: (worktreePath: string, baseRef: string) => string | null = headPatchId,
 ): Promise<PreSignRebaseResult> {
   const wt = state.worktreePath;
   const target = resolveTargetBranch(ctx.workDir);
   const before = await contentHash(ctx, wt);
+  const patchIdBefore = patchIdOf(wt, `origin/${target}`);
 
   const fetch = await ctx.runner('git', ['fetch', 'origin', target], {
     cwd: wt,
@@ -190,6 +206,13 @@ export async function preSignRebase(
       'step-10.5',
       `origin/${target} moved during the rebase (now ${baseAfter.stdout.trim()}); not an error under strict=false`,
     );
+  }
+  // AISDLC-998: leaves are keyed on the pre-rebase content patch-id. A changed
+  // patch-id means the reviewed diff is not the diff being signed, so the run
+  // returns to review rather than signing with orphaned leaves.
+  const patchIdAfter = patchIdOf(wt, `origin/${target}`);
+  if (patchIdBefore && patchIdAfter && patchIdBefore !== patchIdAfter) {
+    return { kind: 'changed', before: patchIdBefore, after: patchIdAfter };
   }
   const after = await contentHash(ctx, wt);
   if (before !== '' && before === after) return { kind: 'unchanged', hash: before };

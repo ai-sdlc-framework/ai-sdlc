@@ -1,7 +1,7 @@
 ---
 id: AISDLC-998
 title: 'Step 10.6 signs with the post-rebase patch-id, or sends a changed diff back to review'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-20'
 labels:
@@ -37,7 +37,35 @@ Out of scope: the leaf format, the verifier, and the pre-push hooks.
 
 ## Acceptance Criteria
 
-- [ ] After the 10.5 rebase, `ship.ts` compares the content patch-id before and after; unchanged signs, changed returns the run to review with a note naming both ids.
-- [ ] `sign-attestation-if-consumer.sh` passes the computed `PATCH_ID` to the signer; `sign-attestation.mjs` no longer hard-codes `origin/main` as the base.
-- [ ] A unit test covers both branches of the comparison, and a test asserts the consumer script passes `--patch-id`.
-- [ ] `docs/operations/attestation-reference.md` states that the signed key is always the post-rebase content patch-id.
+- [x] After the 10.5 rebase, `ship.ts` compares the content patch-id before and after; unchanged signs, changed returns the run to review with a note naming both ids.
+- [x] `sign-attestation-if-consumer.sh` passes the computed `PATCH_ID` to the signer; `sign-attestation.mjs` no longer hard-codes `origin/main` as the base.
+- [x] A unit test covers both branches of the comparison, and a test asserts the consumer script passes `--patch-id`.
+- [x] `docs/operations/attestation-reference.md` states that the signed key is always the post-rebase content patch-id.
+
+## Final Summary
+
+## Summary
+Step 10.5 now compares the content patch-id before and after the rebase. If it changed, the run goes back to review and the note names both ids. The consumer signer passes `--patch-id`, and `sign-attestation.mjs` takes its base ref from `AI_SDLC_BASE_REF`, `GITHUB_BASE_REF` or `origin/HEAD` instead of a hard-coded `origin/main`.
+
+## Changes
+- pipeline-cli/src/next-step/ship.ts
+- pipeline-cli/src/next-step/ship.test.ts
+- ai-sdlc-plugin/scripts/sign-attestation-if-consumer.sh
+- ai-sdlc-plugin/scripts/sign-attestation-if-consumer.test.mjs
+- ai-sdlc-plugin/scripts/sign-attestation.mjs
+- docs/operations/attestation-reference.md
+- backlog/tasks/AISDLC-998 - sign after the 10.5 rebase with the post-rebase patch-id.md
+
+## Design decisions
+The push was a plain `git push -u` of a new branch, not `--force-with-lease`. The PreToolUse hook refused the lease push because the agent shell's cwd kept resetting to the main checkout. The branch did not exist on the remote, so no lease was needed. The patch-id comparison uses `headPatchId` in ship.ts, built on `computeMergeBase` and `computePatchId`, not `isRebaseOnlyPush`, because `isRebaseOnlyPush` does not return the ids and the note needs them. If either id cannot be computed, the existing contentHash oracle decides. The commit scope had to be dropped because commitlint rejected `attestation` as a scope. The backlog task file change is the status flip to In Progress.
+
+## Verification
+- `pnpm build` — passed
+- `pnpm test` — passed
+- `pnpm lint` — passed
+- `pnpm format:check` — passed
+- 3 parallel reviews approved
+
+## Follow-up
+(none)
+

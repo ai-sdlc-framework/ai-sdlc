@@ -1,4 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { fail, ok } from '../__test-helpers/fake-runner.js';
@@ -10,7 +12,13 @@ import {
   type Harness,
 } from '../__test-helpers/next-step-fixtures.js';
 import { approvedWithoutReviewers } from './review-finalize.js';
-import { choreCommitMessage, preSignRebase, sanitizeCiSkipTokens, shipTask } from './ship.js';
+import {
+  choreCommitMessage,
+  headPatchId,
+  preSignRebase,
+  sanitizeCiSkipTokens,
+  shipTask,
+} from './ship.js';
 import type { NextStepState } from './types.js';
 
 let h: Harness;
@@ -150,6 +158,22 @@ describe('preSignRebase (AISDLC-102)', () => {
     h.runner.on(/merge-base --is-ancestor/, fail('', 1));
     const r = await preSignRebase(h.ctx, state);
     expect(r).toEqual({ kind: 'changed', before: 'A', after: 'B' });
+  });
+
+  it('signs (unchanged) when the content patch-id survives the rebase (AISDLC-998)', async () => {
+    hashes('A', 'A');
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    const r = await preSignRebase(h.ctx, state, () => 'p'.repeat(40));
+    expect(r).toEqual({ kind: 'unchanged', hash: 'A' });
+  });
+
+  it('returns to review naming both patch-ids when the rebase changes it (AISDLC-998)', async () => {
+    hashes('A', 'A');
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    const ids = ['1'.repeat(40), '2'.repeat(40)];
+    let i = 0;
+    const r = await preSignRebase(h.ctx, state, () => ids[i++]);
+    expect(r).toEqual({ kind: 'changed', before: ids[0], after: ids[1] });
   });
 
   it('names the conflicting files, aborts, and does not retry', async () => {
@@ -606,5 +630,27 @@ describe('shipTask: failures stop before anything irreversible', () => {
     const res = await shipTask(h2.ctx, s2);
     expect(res.action === 'stop' && res.reason).toContain('cannot locate task file');
     h2.cleanup();
+  });
+});
+
+describe('headPatchId (AISDLC-998)', () => {
+  const git = (cwd: string, ...args: string[]) =>
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
+      cwd,
+      encoding: 'utf-8',
+    });
+
+  it('computes a 40-hex patch-id against the base and null for an unknown base', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hpid-'));
+    git(dir, 'init', '-q', '-b', 'main');
+    writeFileSync(join(dir, 'a.txt'), 'a\n');
+    git(dir, 'add', 'a.txt');
+    git(dir, 'commit', '-q', '-m', 'base');
+    git(dir, 'checkout', '-q', '-b', 'feat');
+    writeFileSync(join(dir, 'b.txt'), 'b\n');
+    git(dir, 'add', 'b.txt');
+    git(dir, 'commit', '-q', '-m', 'change');
+    expect(headPatchId(dir, 'main')).toMatch(/^[0-9a-f]{40}$/);
+    expect(headPatchId(dir, 'no-such-ref')).toBeNull();
   });
 });
