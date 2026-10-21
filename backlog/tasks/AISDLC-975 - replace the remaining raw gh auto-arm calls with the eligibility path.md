@@ -1,7 +1,7 @@
 ---
 id: AISDLC-975
 title: 'Replace the remaining raw gh auto-arm calls with the merge-if-eligible path'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-20'
 labels:
