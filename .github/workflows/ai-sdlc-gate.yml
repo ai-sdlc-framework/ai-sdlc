@@ -1152,7 +1152,8 @@ jobs:
   issue-link:
     name: ai-sdlc/issue-link
     needs: detect
-    if: github.event_name == 'pull_request'
+    # AISDLC-1013: runs only on PRs that change code; docs and records PRs are the traceability artifacts.
+    if: github.event_name == 'pull_request' && needs.detect.outputs.docs_only != 'true' && needs.detect.outputs.records_only != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read

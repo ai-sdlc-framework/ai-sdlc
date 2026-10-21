@@ -2,7 +2,7 @@
 id: AISDLC-1013
 title: >-
   issue-link runs only on PRs that touch the code base; docs-only and records-only PRs skip it
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-21'
 labels:
