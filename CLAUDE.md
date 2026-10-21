@@ -15,7 +15,7 @@ Only rules that change behaviour in every session live here (budget 15k characte
 
 - Branches: `feat/<desc>`, `fix/<desc>`, or `ai-sdlc/issue-<n>`. Conventional commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `style:`) with `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>`.
 - **Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command.** The release-please PR (`chore: release main`) lands only via `cli-merge-if-eligible --source-kind release` on explicit operator instruction (see Releases).
-- **Never close** issues or PRs. Dismiss stale reviews only with a documented reason (truncation, API errors).
+- **Never close** issues or PRs, except the one mechanical close of a CLI-opened PR whose every file is already byte-identical on main via a landed PR with the same task or decision id (`cli-dispatch close-superseded`, DEC-0266). Dismiss stale reviews only with a documented reason (truncation, API errors).
 - `auto-enable-auto-merge.yml` sets `--auto --squash` (no merge queue); `--auto` is NOT merging. PRs merge once `ai-sdlc/pr-ready` passes ([`docs/operations/merge-without-queue.md`](docs/operations/merge-without-queue.md)).
 
 ## Testing

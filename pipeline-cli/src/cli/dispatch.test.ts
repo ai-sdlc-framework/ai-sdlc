@@ -120,6 +120,13 @@ describe('runDispatchCli', () => {
     }
   });
 
+  it('close-superseded rejects a non-numeric PR before touching GitHub (DEC-0266)', async () => {
+    const { exit } = await captureStdout(() =>
+      runDispatchCli(['close-superseded', 'abc', '--board-dir', boardDir]),
+    );
+    expect(exit).toBe(2);
+  });
+
   it('peek returns zero counts on a fresh board', async () => {
     const { exit, captured } = await captureStdout(() =>
       runDispatchCli(['peek', '--board-dir', boardDir]),

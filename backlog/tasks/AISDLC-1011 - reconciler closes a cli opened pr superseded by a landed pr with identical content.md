@@ -2,7 +2,7 @@
 id: AISDLC-1011
 title: >-
   Reconciler closes a CLI-opened PR that a landed PR with the same task id and identical content has superseded
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-21'
 labels:

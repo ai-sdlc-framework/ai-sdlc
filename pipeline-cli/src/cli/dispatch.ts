@@ -217,6 +217,8 @@ import { createSnapshotRunner } from '../hierarchy/pr-snapshot.js';
 import { reenter } from '../hierarchy/reenter.js';
 import { loadPrLifecycleConfig } from '../hierarchy/pr-lifecycle-config.js';
 import { startScheduler } from '../hierarchy/scheduler.js';
+import { now as clockNow } from '../clock.js';
+import { closeSupersededPr } from '../hierarchy/superseded.js';
 import { createSystemRunner } from '../hierarchy/system-runner.js';
 import type { CommandRunner } from '../hierarchy/types.js';
 import { DEFAULT_REQUEUE_RETRY_LIMIT } from '../dispatch/session-reaper.js';
@@ -468,6 +470,25 @@ export async function runDispatchCli(
       const cliBin = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin');
       const cwd = deps.cwd ?? process.cwd();
       const execute = commandExecutor(createSystemRunner(), cwd, cliBin);
+      // DEC-0266: the reconciler's only close goes through the `close-superseded` subcommand.
+      const closeSuperseded = (pr: number): number | undefined => {
+        const r = createSystemRunner()(
+          'node',
+          [
+            path.join(cliBin, 'cli-dispatch.mjs'),
+            'close-superseded',
+            String(pr),
+            '--board-dir',
+            boardDir,
+          ],
+          { cwd },
+        );
+        if (r.status !== 0) return undefined;
+        const by = (
+          JSON.parse(r.stdout.trim().split('\n').pop() ?? '{}') as { supersededBy?: number }
+        ).supersededBy;
+        return typeof by === 'number' ? by : undefined;
+      };
       const only = flags['pr'] === undefined ? undefined : Number.parseInt(flags['pr'], 10);
       if (only !== undefined && Number.isNaN(only)) {
         process.stderr.write('cli-dispatch reconcile: --pr must be a number\n');
@@ -506,6 +527,7 @@ export async function runDispatchCli(
                 execute,
                 mainHealth: gatherMainHealth(createSystemRunner(), cwd),
                 maxSameHeadActions,
+                closeSuperseded,
               }),
             );
             return listLanding(boardDir).filter((r) => !r.landed).length;
@@ -524,8 +546,30 @@ export async function runDispatchCli(
           execute,
           mainHealth: gatherMainHealth(createSystemRunner(), cwd),
           maxSameHeadActions,
+          closeSuperseded,
         }),
       );
+      return 0;
+    }
+
+    case 'close-superseded': {
+      // AISDLC-1011 (DEC-0266): the one close path; exit 3 when the PR is not provably superseded.
+      const pr = Number.parseInt(argv[1] ?? '', 10);
+      if (Number.isNaN(pr)) {
+        process.stderr.write('cli-dispatch close-superseded: <pr> must be a number\n');
+        return 2;
+      }
+      const r = closeSupersededPr(createSystemRunner(), {
+        cwd: deps.cwd ?? process.cwd(),
+        boardDir,
+        pr,
+        now: clockNow,
+      });
+      if (!r.closed) {
+        process.stderr.write(`cli-dispatch close-superseded: not closed: ${r.reason}\n`);
+        return 3;
+      }
+      out({ closed: pr, supersededBy: r.supersededBy });
       return 0;
     }
 
@@ -1669,6 +1713,7 @@ Subcommands:
   reconcile [--pr <n>] [--facts <facts.json>] [--watch]
       Classify each open task PR (array of REST facts) into one state and action;
       writes one DispatchPrClassified event each (AISDLC-823).
+  close-superseded <pr>   (DEC-0266: close a CLI-opened PR whose every file is already on main via a landed PR; exit 3 otherwise)
   reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]
   requeue --task-id <id> [--retry-limit <n>]   (PR-less failures; meant for the dispatch session; limit at most 2)
   reenter <pr|task-id> [--note <text>]   (re-enter a PR keyed on its state; replaces resume)
