@@ -20,6 +20,7 @@
 import { join } from 'node:path';
 import { computeMergeBase, computePatchId } from '../attestation/patch-id.js';
 import { PUSH_NON_FAST_FORWARD_CAUSE } from '../hierarchy/playbook.js';
+import { dropAttestationChores } from '../attestation/drop-chores.js';
 import { loadOperationalPolicy } from '../hierarchy/operational.js';
 import { leasePushPreflight, type LeasePreflight } from '../hierarchy/lease-preflight.js';
 import { writeVerdictFile } from '../cli/execute.js';
@@ -115,12 +116,42 @@ export async function preSignRebase(
   if (fetch.code !== 0) {
     return { kind: 'skipped', reason: `git fetch origin ${target} failed (timeout/network)` };
   }
+  // A retried ship leaves the previous attempt's sign and leaves commits in the
+  // stack; the retry owns the stack, so drop them before anything else is
+  // committed or rebased. The leaf files they carried come back staged and are
+  // committed again below (AISDLC-999). A refusal or failure is not fatal here:
+  // the ship carries on with the stack as it is.
+  const dropped = await dropAttestationChores(
+    async (args) => {
+      const r = await ctx.runner('git', [...args], {
+        cwd: wt,
+        allowFailure: true,
+        timeout: 120_000,
+      });
+      return { status: r.code, stdout: r.stdout, stderr: r.stderr };
+    },
+    { target, taskId: state.taskId },
+  );
+  if (dropped.kind === 'dropped') {
+    ctx.logger.info(
+      `Step 10.5 dropped ${dropped.dropped.length} earlier attestation chore commit(s) before re-signing`,
+    );
+  }
   const anc = await ctx.runner('git', ['merge-base', '--is-ancestor', `origin/${target}`, 'HEAD'], {
     cwd: wt,
     allowFailure: true,
   });
-  if (anc.code === 0)
+  if (anc.code === 0) {
+    if (dropped.kind === 'dropped' && dropped.restored.length > 0) {
+      // No rebase follows, so commit the restored leaf files here.
+      await ctx.runner(
+        'git',
+        ['commit', '-m', `chore: commit pending transcript leaves (${state.taskId})`],
+        { cwd: wt, allowFailure: true, timeout: 300_000 },
+      );
+    }
     return { kind: 'skipped', reason: `origin/${target} already ancestor of HEAD` };
+  }
 
   // One rebase per run. A non-zero exit is a conflict, never a moved base:
   // under strict=false (AISDLC-727) a PR need not be current with the target,

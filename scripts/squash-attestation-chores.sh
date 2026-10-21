@@ -37,7 +37,7 @@ if [ "${AI_SDLC_BYPASS_ALL_GATES:-0}" = "1" ]; then
 fi
 
 # Subject pattern for chore-sign commits.
-CHORE_SIGN_RE='^chore(\(.*\))?: (sign|auto-sign) (v5 |review )?attestation'
+CHORE_SIGN_RE='^(chore(\(.*\))?: (sign|auto-sign) (v5 |review )?attestation|chore: commit pending transcript leaves)'
 
 # Maximum depth to inspect (prevents O(N) log scan on large branches).
 MAX_DEPTH=${AI_SDLC_SQUASH_MAX_DEPTH:-20}

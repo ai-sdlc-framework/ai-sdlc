@@ -282,6 +282,14 @@ else
   SCHEMA_VERSION="${AI_SDLC_SCHEMA_VERSION:-v6}"
 fi
 
+# AISDLC-999: a retry must not sign on top of a previous attempt's attestation
+# chore commits (their envelope subject is no longer in history). Drop them
+# first; --if-stale leaves a healthy stack alone. A refusal is not fatal here.
+if [ -x "$SELF_SCRIPT_DIR/drop-attestation-chores.sh" ]; then
+  "$SELF_SCRIPT_DIR/drop-attestation-chores.sh" --if-stale --base "$BASE_REF" || \
+    echo "[sign-attestation-if-consumer] WARN: drop-attestation-chores did not complete; signing on the current stack" >&2
+fi
+
 HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo '')
 if [ -z "$HEAD_SHA" ]; then
   echo "[sign-attestation-if-consumer] WARN: cannot resolve HEAD; skipping" >&2

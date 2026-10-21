@@ -27,6 +27,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 import { TASK_ID_RE } from '../dispatch/board.js';
+import { dropAttestationChores } from '../attestation/drop-chores.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
 import {
   INVALID_TASK_ID,
@@ -40,7 +41,12 @@ import type { OperationalAction } from './operational.js';
 import type { AsyncCommandRunner, CommandResult, CommandRunner } from './types.js';
 
 /** Steps the playbook can take or refuse. */
-export type PlaybookAction = 'rebase-push' | 'retrigger-ci' | 'requeue' | 'escalate';
+export type PlaybookAction =
+  | 'rebase-push'
+  | 'retrigger-ci'
+  | 'requeue'
+  | 'drop-chores'
+  | 'escalate';
 
 /** Cause code written on a failure record when CI is stuck on a stale merge ref. */
 export const STALE_MERGE_REF_CAUSE = 'stale-merge-ref';
@@ -74,7 +80,7 @@ export const REQUEUEABLE_CAUSES: readonly string[] = [
 ];
 
 /** Steps that can be run by name; each needs the grants in {@link REQUIRED_GRANTS}. */
-export const NAMED_STEPS = ['rebase-push', 'retrigger-ci', 'requeue'] as const;
+export const NAMED_STEPS = ['rebase-push', 'retrigger-ci', 'requeue', 'drop-chores'] as const;
 
 type StepAction = Exclude<PlaybookAction, 'escalate'>;
 
@@ -83,6 +89,7 @@ export const REQUIRED_GRANTS: Record<StepAction, readonly OperationalAction[]> =
   'rebase-push': ['rebase-own-branch', 'lease-push-own-branch'],
   'retrigger-ci': ['retrigger-ci'],
   requeue: ['requeue'],
+  'drop-chores': ['rebase-own-branch', 'lease-push-own-branch'],
 };
 
 /** The step chosen for a failure. */
@@ -90,6 +97,7 @@ export type Classification =
   | { kind: 'rebase-push'; shape: string }
   | { kind: 'retrigger-ci' }
   | { kind: 'requeue'; cause: string }
+  | { kind: 'drop-chores' }
   | { kind: 'escalate'; reason: string };
 
 /** Choose the step for a failure record. Pure; touches nothing. */
@@ -331,7 +339,9 @@ export async function runPlaybook(
         ? { kind: 'rebase-push', shape: verdict.cause ?? 'named-step' }
         : forced === 'requeue'
           ? { kind: 'requeue', cause: verdict.cause ?? 'named-step' }
-          : { kind: 'retrigger-ci' };
+          : forced === 'drop-chores'
+            ? { kind: 'drop-chores' }
+            : { kind: 'retrigger-ci' };
 
   if (c.kind === 'escalate') return escalate(c.reason);
 
@@ -340,7 +350,10 @@ export async function runPlaybook(
     return giveUp(c.kind, 'refused', `not permitted by policy (${missing.join(', ')})`);
   }
 
-  if (c.kind === 'rebase-push' && deps.forcePushMode !== 'leaseOnOwnBranch') {
+  if (
+    (c.kind === 'rebase-push' || c.kind === 'drop-chores') &&
+    deps.forcePushMode !== 'leaseOnOwnBranch'
+  ) {
     return giveUp(
       c.kind,
       'refused',
@@ -379,6 +392,56 @@ export async function runPlaybook(
     const reason = 'pushed an empty commit';
     record('retrigger-ci', 'done', reason, branch);
     return { taskId, action: 'retrigger-ci', result: 'done', reason, branch };
+  }
+
+  if (c.kind === 'drop-chores') {
+    const clean = await git(['status', '--porcelain'], worktree);
+    if (clean.status !== 0 || clean.stdout.trim() !== '') {
+      return giveUp('drop-chores', 'refused', 'the worktree has uncommitted changes', branch);
+    }
+    const fetchedMain = await git(['fetch', 'origin', 'main'], worktree);
+    if (fetchedMain.status !== 0) {
+      const why = `fetch failed: ${oneLine(fetchedMain.stderr, 200)}`;
+      return giveUp('drop-chores', 'failed', why, branch);
+    }
+    // The routine runs fixed arguments (including `-c`), so it bypasses the
+    // subcommand allow-list that guards free-form playbook git calls.
+    const r = await dropAttestationChores(
+      async (args) => {
+        const out = await deps.run('git', args, { cwd: worktree });
+        return { status: out.status ?? 1, stdout: out.stdout, stderr: out.stderr };
+      },
+      { target: 'main', taskId },
+    );
+    if (r.kind === 'refused') {
+      const why = `commit ${r.sha.slice(0, 7)} touches other paths (${oneLine(r.paths.join(', '), 120)})`;
+      return giveUp('drop-chores', 'refused', why, branch);
+    }
+    if (r.kind === 'failed') return giveUp('drop-chores', 'failed', oneLine(r.reason, 200), branch);
+    if (r.kind === 'none') {
+      const reason = 'no earlier attestation chore commits to drop';
+      record('drop-chores', 'done', reason, branch);
+      return { taskId, action: 'drop-chores', result: 'done', reason, branch };
+    }
+    if (r.restored.length > 0) {
+      const msg = `chore: commit pending transcript leaves (${taskId})`;
+      const committed = await git(['commit', '-m', msg], worktree);
+      if (committed.status !== 0) {
+        const why = `committing the restored leaves failed: ${oneLine(committed.stderr, 200)}`;
+        return giveUp('drop-chores', 'failed', why, branch);
+      }
+    }
+    const pushedDrop = await git(
+      ['push', '--force-with-lease', 'origin', `HEAD:refs/heads/${branch}`],
+      worktree,
+    );
+    if (pushedDrop.status !== 0) {
+      const why = `push failed: ${oneLine(pushedDrop.stderr, 200)}`;
+      return giveUp('drop-chores', 'failed', why, branch);
+    }
+    const reason = `dropped ${r.dropped.length} earlier attestation chore commit(s) and lease-pushed`;
+    record('drop-chores', 'done', reason, branch);
+    return { taskId, action: 'drop-chores', result: 'done', reason, branch };
   }
 
   // rebase-push
