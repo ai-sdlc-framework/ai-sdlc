@@ -2,7 +2,7 @@
 id: AISDLC-1007
 title: >-
   Planner over-budget Stop did not auto-clear and resume; context-auto-clear leaves no trace of the branch it took
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-21'
 labels:
