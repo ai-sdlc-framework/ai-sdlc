@@ -23,6 +23,7 @@ import {
   type CommentWithAuthor,
 } from '../incremental-review/incremental.js';
 import { defaultArtifactsDir, resolveProjectRoot } from '../routing/artifacts-dir.js';
+import { resolveReviewerHarnessSetting } from '../routing/role-model.js';
 import { resolveModel } from '../routing/resolve-model.js';
 import { taskClassOf } from '../routing/task-class.js';
 import {
@@ -240,6 +241,15 @@ export async function prepareReview(
     ctx.env.ARTIFACTS_DIR || defaultArtifactsDir(resolveProjectRoot(state.worktreePath));
   mkdirSync(artifactsDir, { recursive: true });
 
+  // Harness default: env var wins, else the table's `harness:` key (AISDLC-1003).
+  const harnessSetting = resolveReviewerHarnessSetting(ctx.env.AI_SDLC_REVIEWER_HARNESS, {
+    workDir: ctx.workDir,
+  });
+  const env: NodeJS.ProcessEnv =
+    harnessSetting.source === 'yaml' && harnessSetting.harness === 'claude'
+      ? { ...ctx.env, AI_SDLC_REVIEWER_HARNESS: 'claude' }
+      : ctx.env;
+
   const built = await buildReviewPrompts({
     taskId: state.taskId,
     task: state.task,
@@ -267,8 +277,8 @@ export async function prepareReview(
   if (resumeDecision?.branch === 'unchanged') {
     const reviewedSha = resumeDecision.lastHead;
     const verdicts: ReviewerVerdict[] = built.prompts.map((p) => ({
-      agentId: resolveReviewerAgent(p.reviewer, ctx.env),
-      harness: reviewerHarness(p.reviewer, ctx.env, false),
+      agentId: resolveReviewerAgent(p.reviewer, env),
+      harness: reviewerHarness(p.reviewer, env, false),
       ...buildAutoApprovedVerdict(reviewedSha),
     }));
     const head = await ctx.runner('git', ['rev-parse', 'HEAD'], {
@@ -330,11 +340,11 @@ export async function prepareReview(
   ).stdout.trim();
 
   const codex =
-    forcesClaudeNative(ctx.env) ||
+    forcesClaudeNative(env) ||
     (await ctx.runner('which', ['codex'], { allowFailure: true })).code === 0;
-  const baseHarnessNote = forcesClaudeNative(ctx.env)
-    ? 'AI_SDLC_REVIEWER_HARNESS=claude — using Claude-native agents for all reviewers'
-    : built.harnessNote;
+  const baseHarnessNote = forcesClaudeNative(env)
+    ? `${harnessSetting.source === 'yaml' ? 'harness: claude in model-routing.yaml' : 'AI_SDLC_REVIEWER_HARNESS=claude'} (source: ${harnessSetting.source}) — using Claude-native agents for all reviewers`
+    : `${built.harnessNote}; reviewer harness=${harnessSetting.harness} (source: ${harnessSetting.source})`;
   const harnessNote =
     round === 1 && state.resumeReview
       ? `${baseHarnessNote}; ${state.resumeReview.note}`
@@ -367,8 +377,8 @@ export async function prepareReview(
   if (planForState.mode === 'skip' && planForState.baseSha) {
     const reviewedSha = planForState.baseSha;
     const verdicts: ReviewerVerdict[] = selected.map((p) => ({
-      agentId: resolveReviewerAgent(p.reviewer, ctx.env),
-      harness: reviewerHarness(p.reviewer, ctx.env, codex),
+      agentId: resolveReviewerAgent(p.reviewer, env),
+      harness: reviewerHarness(p.reviewer, env, codex),
       ...buildAutoApprovedVerdict(reviewedSha),
     }));
     return {
@@ -413,7 +423,7 @@ export async function prepareReview(
   const spawnedFor = (ps: typeof prompts): SpawnedReviewer[] => {
     const out: SpawnedReviewer[] = [];
     for (const p of ps) {
-      const agent = resolveReviewerAgent(p.reviewer, ctx.env);
+      const agent = resolveReviewerAgent(p.reviewer, env);
       const routed = resolveModel({
         role: agent,
         taskClass,
@@ -432,7 +442,7 @@ export async function prepareReview(
       out.push({
         reviewer: p.reviewer,
         agent,
-        harness: reviewerHarness(p.reviewer, ctx.env, codex),
+        harness: reviewerHarness(p.reviewer, env, codex),
         leafModel: ctx.env.AISDLC_REVIEWER_MODEL || routed.model || fallbackLeafModel(agent),
         ...(routed.model && routed.arm !== 'default' ? { model: routed.model } : {}),
         promptFile,

@@ -21,6 +21,12 @@
           "items": { "type": "string", "minLength": 1 },
           "description": "Models ordered weakest to strongest. Defines what 'stronger' means for overrides; every model named in the table must appear here."
         },
+        "harness": {
+          "type": "string",
+          "enum": ["codex", "claude"],
+          "default": "codex",
+          "description": "Default harness for code and test review. 'claude' routes them to the Claude-native agents; 'codex' (default) to the -codex variants. The AI_SDLC_REVIEWER_HARNESS env var overrides it per run."
+        },
         "exploreShare": {
           "type": "number",
           "minimum": 0,

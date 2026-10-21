@@ -16,7 +16,19 @@
  *   - Unknown classifier names produce a safe fallback (no panic).
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// The table is read from origin/main; pin it so the suite never depends on the
+// repository's own `harness:` setting.
+let tableText: string | null = null;
+vi.mock('../routing/load-table.js', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../routing/load-table.js')>();
+  return {
+    ...real,
+    loadRoutingTable: (opts: Parameters<typeof real.loadRoutingTable>[0]) =>
+      real.loadRoutingTable({ ...opts, readBaseTable: () => tableText }),
+  };
+});
 
 import {
   resolveReviewer,
@@ -28,6 +40,7 @@ import {
 const ORIGINAL_ENV = process.env[REVIEWER_HARNESS_ENV];
 
 beforeEach(() => {
+  tableText = null;
   delete process.env[REVIEWER_HARNESS_ENV];
 });
 
@@ -174,5 +187,36 @@ describe('resolveReviewerByClassifierName — AI_SDLC_REVIEWER_HARNESS=claude ov
     const result = resolveReviewerByClassifierName('security');
     expect(result.agentName).toBe('security-reviewer');
     expect(result.model).toBe('opus');
+  });
+});
+
+describe('resolveReviewer — yaml harness key (AISDLC-1003)', () => {
+  const table = (h: string): string => `apiVersion: ai-sdlc.io/v1alpha1
+kind: ModelRouting
+metadata:
+  name: model-routing
+spec:
+  strength: [haiku, sonnet, opus]
+  harness: ${h}
+  cells:
+    developer:
+      '*': { model: sonnet }
+`;
+
+  it('no key and no env: codex agents', () => {
+    expect(resolveReviewer('code').agentName).toBe('code-reviewer-codex');
+  });
+
+  it('key only: claude agents', () => {
+    tableText = table('claude');
+    expect(resolveReviewer('code').agentName).toBe('code-reviewer');
+    expect(resolveReviewer('test').agentName).toBe('test-reviewer');
+    expect(resolveReviewer('security').agentName).toBe('security-reviewer');
+  });
+
+  it('env overrides the key', () => {
+    tableText = table('claude');
+    process.env[REVIEWER_HARNESS_ENV] = 'codex';
+    expect(resolveReviewer('code').agentName).toBe('code-reviewer-codex');
   });
 });
