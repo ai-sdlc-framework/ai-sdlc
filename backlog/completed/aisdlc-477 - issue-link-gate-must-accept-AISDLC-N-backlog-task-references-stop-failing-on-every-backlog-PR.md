@@ -3,7 +3,7 @@ id: AISDLC-477
 title: >-
   issue-link gate must accept AISDLC-N backlog-task references (stop failing on
   every backlog PR)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-29 17:43'
 labels:

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-507
 title: 'docs(rfc): RFC-0043 Phase 7 amendment — Docker v1 reference runtime + in-sandbox reviewer via inference.local'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-06-04'
 labels:

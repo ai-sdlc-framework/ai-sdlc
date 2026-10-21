@@ -1,7 +1,7 @@
 ---
 id: AISDLC-353
 title: 'docs(operations): document the subscription-only autonomous-tick path post 2026-06-15 Agent SDK credit change (/ai-sdlc orchestrator-tick + ScheduleWakeup)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-17'
 labels:

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-877
 title: 'feat(kpi): PR throughput KPI - opened vs merged per day (task/record split), merge latency, and the merge-to-production ratio'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels: [kpi, velocity, rfc-0054]

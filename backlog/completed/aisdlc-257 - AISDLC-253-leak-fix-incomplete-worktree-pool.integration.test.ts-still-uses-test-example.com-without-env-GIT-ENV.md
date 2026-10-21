@@ -1,7 +1,7 @@
 ---
 id: AISDLC-257
 title: AISDLC-253 leak fix incomplete — worktree-pool.integration.test.ts still uses test@example.com without env GIT_ENV
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 10:30'
 labels:

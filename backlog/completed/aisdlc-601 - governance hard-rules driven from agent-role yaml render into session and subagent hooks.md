@@ -2,7 +2,7 @@
 id: AISDLC-601
 title: >-
   Governance hard-rules: single per-repo source of truth in agent-role.yaml, rendered into session-start + subagent-start (defaults strict)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-07'
 labels:

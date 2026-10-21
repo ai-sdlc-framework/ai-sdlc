@@ -1,7 +1,7 @@
 ---
 id: AISDLC-932
 title: 'fix: cli-hierarchy up owns the reconcile scheduler and the webhook receiver touches its wake file'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [hierarchy, pipeline-cli, velocity]

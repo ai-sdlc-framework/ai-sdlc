@@ -2,7 +2,7 @@
 id: AISDLC-485
 title: >-
   Fix execute-parallel spawned sessions hang on permission prompts
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-31 00:00'
 labels:

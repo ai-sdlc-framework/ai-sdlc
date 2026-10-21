@@ -1,7 +1,7 @@
 ---
 id: AISDLC-395
 title: 'feat: wire emitDorDecisions into orchestrator DorReadiness admission filter (RFC-0035 Phase 5)'
-status: To Do
+status: Done
 labels:
   - decision-catalog
   - orchestrator

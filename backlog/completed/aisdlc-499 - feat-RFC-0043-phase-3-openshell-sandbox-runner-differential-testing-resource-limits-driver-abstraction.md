@@ -1,7 +1,7 @@
 ---
 id: AISDLC-499
 title: 'feat: RFC-0043 Phase 3 — OpenShell sandbox runner + differential testing + resource limits + driver abstraction (Docker/Kata/MicroVM) + RFC-0022 regime override'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-06-02'
 labels:

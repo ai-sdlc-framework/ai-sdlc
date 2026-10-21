@@ -1,7 +1,7 @@
 ---
 id: AISDLC-442
 title: 'docs: clarify remote-sandbox read-only constraint + improve error path when CCR tries /ai-sdlc execute (closes GH issue 701)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-26'
 labels:

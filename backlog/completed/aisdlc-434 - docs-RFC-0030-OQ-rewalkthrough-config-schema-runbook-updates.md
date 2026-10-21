@@ -1,7 +1,7 @@
 ---
 id: AISDLC-434
 title: 'docs: RFC-0030 re-walkthrough — §11 config schema + operator runbook updates rolling up AISDLC-430..433 refinements'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-26'
 labels:

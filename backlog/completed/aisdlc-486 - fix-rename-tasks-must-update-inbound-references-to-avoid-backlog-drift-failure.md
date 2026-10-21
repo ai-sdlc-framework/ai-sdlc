@@ -3,7 +3,7 @@ id: AISDLC-486
 title: >-
   fix: dev subagent must update inbound references when renaming/moving a
   referenced file (avoid Backlog Drift gate failure)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-31 00:00'
 labels:

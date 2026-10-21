@@ -3,7 +3,7 @@ id: AISDLC-471
 title: >-
   fix(attestation): auto-sign hook must commit per-patch-id leaves file
   alongside envelope
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-28 23:21'
 labels:

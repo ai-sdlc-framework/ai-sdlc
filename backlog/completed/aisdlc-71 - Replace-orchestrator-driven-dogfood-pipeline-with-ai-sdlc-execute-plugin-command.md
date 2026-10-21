@@ -3,7 +3,7 @@ id: AISDLC-71
 title: >-
   Replace orchestrator-driven dogfood pipeline with /ai-sdlc execute plugin
   command
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-04-27 21:57'
 updated_date: '2026-04-27 21:58'

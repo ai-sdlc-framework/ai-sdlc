@@ -3,7 +3,7 @@ id: AISDLC-464
 title: >-
   polish: AISDLC-462 follow-ups — adopter-prefix regex, heartbeat sync guard,
   defense-in-depth taskId validation
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-28 20:23'
 labels:

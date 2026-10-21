@@ -1,7 +1,7 @@
 ---
 id: AISDLC-255
 title: 'Width-pinned TUI snapshot tests — catch overflow + rendering bugs ink-testing-library misses'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 09:30'
 labels:

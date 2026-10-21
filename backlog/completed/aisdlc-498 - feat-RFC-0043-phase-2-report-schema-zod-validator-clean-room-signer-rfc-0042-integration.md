@@ -1,7 +1,7 @@
 ---
 id: AISDLC-498
 title: 'feat: RFC-0043 Phase 2 — Report schema + Zod validator + clean-room signer wiring to RFC-0042 v6'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-06-02'
 labels:

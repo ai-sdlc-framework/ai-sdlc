@@ -3,7 +3,7 @@ id: AISDLC-134
 title: >-
   init-workspace.test.ts > 'falls back to your-org placeholder' is
   git-origin-sensitive — fails inside any worktree with a real origin
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-02 03:20'
 labels:

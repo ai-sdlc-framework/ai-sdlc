@@ -3,7 +3,7 @@ id: AISDLC-582
 title: >-
   ai-sdlc doctor — remaining seed-catalog checks (4,5,6,8,9,10) +
   trusted-reviewers schema
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-05 22:38'
 labels:

@@ -3,7 +3,7 @@ id: AISDLC-530
 title: >-
   feat(orchestrator): resolve source-control adapter from adapter-binding.yaml
   (unhardcode GitHub; wire GitLab; local-only mode)
-status: In Progress
+status: Done
 assignee: []
 labels:
   - enhancement

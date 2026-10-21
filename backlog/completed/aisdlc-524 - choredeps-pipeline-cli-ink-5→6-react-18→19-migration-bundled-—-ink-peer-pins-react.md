@@ -3,7 +3,7 @@ id: AISDLC-524
 title: >-
   chore(deps): pipeline-cli ink 5→6 + react 18→19 migration (bundled — ink
   peer-pins react)
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-06-08 16:37'
 labels:

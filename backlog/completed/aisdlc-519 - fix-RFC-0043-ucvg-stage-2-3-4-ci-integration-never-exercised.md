@@ -1,7 +1,7 @@
 ---
 id: AISDLC-519
 title: 'fix(ci): harden RFC-0043 UCVG Stage 2/3→4 CI integration end-to-end (never exercised; 5 bugs found in live e2e)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-06-04'
 labels:

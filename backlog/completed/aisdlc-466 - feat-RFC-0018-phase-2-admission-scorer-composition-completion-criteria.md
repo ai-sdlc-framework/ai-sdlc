@@ -1,7 +1,7 @@
 ---
 id: AISDLC-466
 title: 'feat: RFC-0018 Phase 2 — admission scorer composition (Sα₂ + Cκ + Eρ₅ journey routing) + completion-criteria closed enum + cross-journey aggregation'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-28'
 labels:

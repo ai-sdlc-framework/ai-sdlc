@@ -2,7 +2,7 @@
 id: AISDLC-827
 title: >-
   check-sender accepts the harness uds socket ref by deriving the pid, so executors stop refusing their own dispatch session
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-12'
 labels:

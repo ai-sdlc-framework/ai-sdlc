@@ -1,7 +1,7 @@
 ---
 id: AISDLC-501
 title: 'feat: RFC-0043 Phase 5 — untrusted-pr-gate.yml workflow + AISDLC-381 layering + AI_SDLC_UNTRUSTED_PR_GATE flag + degradation path + CI default deployment mode'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-06-02'
 labels:

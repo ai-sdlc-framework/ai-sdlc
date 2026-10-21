@@ -1,7 +1,7 @@
 ---
 id: AISDLC-436
 title: 'feat: RFC-0017 Phase 3 — variant deprecation lifecycle (catalog-routed) + Eτ_tessellation_drift extension + Engineering review routing'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-18'
 labels:

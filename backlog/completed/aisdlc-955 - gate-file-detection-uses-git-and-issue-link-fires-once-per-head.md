@@ -3,7 +3,7 @@ id: AISDLC-955
 title: >-
   Gate file detection uses git instead of the API, and require-issue-link fires
   once per head with a concurrency group
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels:

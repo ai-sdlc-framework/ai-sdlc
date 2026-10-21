@@ -1,7 +1,7 @@
 ---
 id: AISDLC-520
 title: 'feat(sandbox): RFC-0043 AQ2 — wire in-sandbox reviewers via the inference.local credential-withholding proxy (assemble 508+510+511 into a real Stage 2/3)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-06-05'
 labels:

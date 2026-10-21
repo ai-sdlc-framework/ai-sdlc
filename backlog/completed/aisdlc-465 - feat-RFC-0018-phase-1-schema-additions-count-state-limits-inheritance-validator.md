@@ -1,7 +1,7 @@
 ---
 id: AISDLC-465
 title: 'feat: RFC-0018 Phase 1 — Soul DID + Variant + Work Item schema additions (journeys[] + targetedJourneys) + journey count / state limits + inheritance validator + nested-journey rejection'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-28'
 labels:

@@ -2,7 +2,7 @@
 id: AISDLC-600
 title: >-
   Bump install-runtime-deps.sh pipeline-cli pin to the current runtime (off the caret-0.x trap) so execute's produce stamps independent
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-07'
 labels:

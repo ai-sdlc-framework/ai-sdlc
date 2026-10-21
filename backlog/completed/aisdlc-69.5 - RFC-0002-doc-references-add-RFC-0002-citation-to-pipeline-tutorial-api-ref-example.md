@@ -3,7 +3,7 @@ id: AISDLC-69.5
 title: >-
   RFC-0002 doc references — add RFC-0002 citation to pipeline tutorial / api-ref
   / example
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-30 17:35'
 updated_date: '2026-04-30 17:35'

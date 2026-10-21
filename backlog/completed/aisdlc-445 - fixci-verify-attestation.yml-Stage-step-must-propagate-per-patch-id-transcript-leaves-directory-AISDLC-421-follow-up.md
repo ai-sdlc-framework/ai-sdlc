@@ -3,7 +3,7 @@ id: AISDLC-445
 title: >-
   fix(ci): verify-attestation.yml Stage step must propagate per-patch-id
   transcript-leaves directory (AISDLC-421 follow-up)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-27 01:39'
 labels:

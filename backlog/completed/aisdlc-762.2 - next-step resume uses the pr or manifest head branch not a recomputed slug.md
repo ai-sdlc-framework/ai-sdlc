@@ -2,7 +2,7 @@
 id: AISDLC-762.2
 title: >-
   next-step resume checks out the PR or manifest head branch instead of recomputing the slug branch
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-11'
 labels:

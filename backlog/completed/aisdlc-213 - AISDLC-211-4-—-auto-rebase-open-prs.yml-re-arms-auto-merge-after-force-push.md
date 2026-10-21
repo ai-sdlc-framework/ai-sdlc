@@ -1,7 +1,7 @@
 ---
 id: AISDLC-213
 title: 'AISDLC-211 #4 — auto-rebase-open-prs.yml re-arms auto-merge after force-push'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-06 13:54'
 labels:

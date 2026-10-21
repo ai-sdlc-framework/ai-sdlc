@@ -3,7 +3,7 @@ id: AISDLC-252
 title: >-
   verify-attestation must accept codex reviewer variants as satisfying required
   reviewer set (cross-harness gap)
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-09 19:55'
 labels:

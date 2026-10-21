@@ -1,7 +1,7 @@
 ---
 id: AISDLC-383.4
 title: 'feat(attestation): RFC-0042 Phase 2 — v6 verifier in verify-attestation.yml'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-20'
 labels:

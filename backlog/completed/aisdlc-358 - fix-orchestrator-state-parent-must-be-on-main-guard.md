@@ -1,7 +1,7 @@
 ---
 id: AISDLC-358
 title: 'fix(orchestrator): pre-tick + pre-execute guard — parent worktree MUST be on `main` (Pattern-C contract enforcement)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-17'
 labels:

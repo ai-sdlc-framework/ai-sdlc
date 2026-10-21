@@ -3,7 +3,7 @@ id: AISDLC-505
 title: >-
   fix: globToRegex over-matches '**/'-prefixed and '**/.github/**' patterns
   (RFC-0043 ast-gate false-positive)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-06-03 01:26'
 labels:

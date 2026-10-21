@@ -1,7 +1,7 @@
 ---
 id: AISDLC-516
 title: 'docs(rfc-0043): align signing-key secret name to AISDLC_SIGNING_KEY_CONTENT across remaining docs'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-06-04'
 labels:

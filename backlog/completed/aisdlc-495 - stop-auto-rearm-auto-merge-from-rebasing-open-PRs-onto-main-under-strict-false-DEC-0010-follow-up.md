@@ -3,7 +3,7 @@ id: AISDLC-495
 title: >-
   stop auto-rearm-auto-merge from rebasing open PRs onto main under strict-false
   (DEC-0010 follow-up)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-06-01 22:34'
 updated_date: '2026-06-01 22:38'

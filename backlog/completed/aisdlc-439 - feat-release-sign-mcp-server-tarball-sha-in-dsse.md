@@ -1,7 +1,7 @@
 ---
 id: AISDLC-439
 title: 'feat(release): sign MCP server npm tarball SHA inside DSSE attestation predicate at release time (DEC-0001)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-26'
 labels:

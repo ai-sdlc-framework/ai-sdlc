@@ -1,7 +1,7 @@
 ---
 id: AISDLC-355
 title: 'fix(orchestrator): resume-from-draft stale verdict reuse + verdict-shape mismatch + degenerate-reviewer retry'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-17'
 labels:

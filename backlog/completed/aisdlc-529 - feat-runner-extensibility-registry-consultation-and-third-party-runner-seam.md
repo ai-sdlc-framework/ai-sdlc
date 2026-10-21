@@ -3,7 +3,7 @@ id: AISDLC-529
 title: >-
   feat(orchestrator): runner extensibility — consult runner-registry in
   execute.ts + third-party runner extension point (--runner / AI_SDLC_RUNNER_PLUGIN)
-status: In Progress
+status: Done
 assignee: []
 labels:
   - enhancement

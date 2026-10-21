@@ -3,7 +3,7 @@ id: AISDLC-548
 title: >-
   chore(deps): align @eslint/js 9 → 10 (eslint core already 10) and resolve the
   lint findings blocking Dependabot PR #899
-status: To Do
+status: Done
 assignee: []
 labels:
   - chore

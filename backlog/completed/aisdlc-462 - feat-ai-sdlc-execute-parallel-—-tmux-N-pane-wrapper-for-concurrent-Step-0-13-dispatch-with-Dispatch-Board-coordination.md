@@ -3,7 +3,7 @@ id: AISDLC-462
 title: >-
   feat: /ai-sdlc execute-parallel — tmux N-pane wrapper for concurrent Step 0-13
   dispatch with Dispatch Board coordination
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-28 19:02'
 labels:

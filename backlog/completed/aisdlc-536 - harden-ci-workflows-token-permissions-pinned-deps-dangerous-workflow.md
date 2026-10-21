@@ -3,7 +3,7 @@ id: AISDLC-536
 title: >-
   fix(ci): harden workflows — explicit token permissions, SHA-pin actions,
   triage remaining DangerousWorkflowID CodeQL alerts
-status: To Do
+status: Done
 assignee: []
 labels:
   - security

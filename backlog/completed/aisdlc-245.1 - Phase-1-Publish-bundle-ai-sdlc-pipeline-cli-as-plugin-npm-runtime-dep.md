@@ -1,7 +1,7 @@
 ---
 id: AISDLC-245.1
 title: 'Phase 1: Publish + bundle @ai-sdlc/pipeline-cli as plugin npm runtime dep'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 12:10'
 updated_date: '2026-05-10 14:57'

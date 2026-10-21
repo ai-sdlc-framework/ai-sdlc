@@ -1,7 +1,7 @@
 ---
 id: AISDLC-253
 title: AISDLC-242 checkpoint test fixtures leak commits into sibling worktrees — root-cause + fix
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 00:15'
 labels:

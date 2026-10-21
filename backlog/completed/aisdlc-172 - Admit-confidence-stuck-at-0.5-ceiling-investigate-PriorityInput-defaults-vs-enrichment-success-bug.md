@@ -1,7 +1,7 @@
 ---
 id: AISDLC-172
 title: 'Admit confidence stuck at 0.5 ceiling: investigate PriorityInput-defaults-vs-enrichment-success bug'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-03'
 labels:

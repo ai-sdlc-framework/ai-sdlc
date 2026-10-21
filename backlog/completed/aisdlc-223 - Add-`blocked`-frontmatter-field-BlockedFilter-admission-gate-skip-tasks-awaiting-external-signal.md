@@ -3,7 +3,7 @@ id: AISDLC-223
 title: >-
   Add `blocked` frontmatter field + BlockedFilter admission gate (skip tasks
   awaiting external signal)
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-06 19:49'
 labels:
