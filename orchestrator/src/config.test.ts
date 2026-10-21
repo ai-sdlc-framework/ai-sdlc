@@ -38,7 +38,7 @@ describe('loadConfig()', () => {
   it('returns correct pipeline triggers', () => {
     const config = loadConfig(CONFIG_DIR);
     expect(config.pipeline!.spec.triggers[0].event).toBe('issue.labeled');
-    expect(config.pipeline!.spec.triggers[0].filter?.labels).toContain('ai-eligible');
+    expect(Array.isArray(config.pipeline!.spec.triggers[0].filter?.labels)).toBe(true);
   });
 
   it('returns correct agent constraints', () => {
@@ -111,7 +111,7 @@ spec:
   triggers:
     - event: issue.labeled
       filter:
-        labels: [ai-eligible]
+        labels: [ready]
   providers: {}
   stages:
     - name: validate
@@ -147,7 +147,7 @@ spec:
   triggers:
     - event: issue.labeled
       filter:
-        labels: [ai-eligible]
+        labels: [ready]
   providers: {}
   stages:
     - name: validate
@@ -199,7 +199,7 @@ spec:
   triggers:
     - event: issue.labeled
       filter:
-        labels: [ai-eligible]
+        labels: [ready]
   providers: {}
   stages:
     - name: validate
@@ -342,7 +342,7 @@ spec:
   triggers:
     - event: issue.labeled
       filter:
-        labels: [ai-eligible]
+        labels: [ready]
   providers: {}
   stages:
     - name: validate
@@ -400,7 +400,7 @@ spec:
   triggers:
     - event: issue.labeled
       filter:
-        labels: [ai-eligible]
+        labels: [ready]
   providers: {}
   stages:
     - name: validate

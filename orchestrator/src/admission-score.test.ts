@@ -85,11 +85,6 @@ describe('mapIssueToPriorityInput', () => {
     expect(result.demandSignal).toBe(1);
   });
 
-  it('maps ai-eligible label to high builder conviction', () => {
-    const result = mapIssueToPriorityInput(makeInput({ labels: ['ai-eligible'] }));
-    expect(result.builderConviction).toBe(0.8);
-  });
-
   it('maps high label to explicit priority 0.8', () => {
     const result = mapIssueToPriorityInput(makeInput({ labels: ['high'] }));
     expect(result.explicitPriority).toBe(0.8);

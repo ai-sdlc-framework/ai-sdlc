@@ -21,7 +21,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
       '2',
     ].join('\n'),
     status: 'open',
-    labels: ['ai-eligible'],
+    labels: ['ready'],
     url: 'https://github.com/test/repo/issues/1',
     ...overrides,
   };

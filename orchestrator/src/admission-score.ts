@@ -279,15 +279,8 @@ export function mapIssueToPriorityInput(input: AdmissionInput): PriorityInput {
   // ── Builder conviction ─────────────────────────────────────────
   // Trusted: high conviction (they're the builders)
   // Contributor: moderate (proven track record)
-  // ai-eligible label: explicit signal
   // Default: low (needs validation)
-  let builderConviction = labels.includes('ai-eligible')
-    ? 0.8
-    : isTrusted
-      ? 0.8
-      : isContributor
-        ? 0.6
-        : 0.4;
+  let builderConviction = isTrusted ? 0.8 : isContributor ? 0.6 : 0.4;
   // Backlog tasks blocked by other work get a conviction penalty — the team
   // can't confidently dispatch them until upstream lands.
   if (backlog?.dependencyCount && backlog.dependencyCount > 0) {

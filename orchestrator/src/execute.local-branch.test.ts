@@ -43,7 +43,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
       '2',
     ].join('\n'),
     status: 'open',
-    labels: ['ai-eligible', 'test'],
+    labels: ['ready', 'test'],
     url: 'https://example.local/issues/530',
     ...overrides,
   };

@@ -99,10 +99,7 @@ metadata:
   name: ${repo}-pipeline
 spec:
   triggers:
-    - event: issue.labeled
-      filter:
-        labels:
-          - ai-eligible
+    - event: issue.assigned
   providers:
     github:
       type: github

@@ -87,7 +87,9 @@ The decision is computed by `pipeline-cli dor-pr-has-violations`, which consumes
 | Internal dogfood (GitHub issues, subscription billing) | `/ai-sdlc execute <issue-number>` (e.g. `612`, `#612`, `gh:612`) | Subscription (Agent SDK credit pool post-2026-06-15; refuses to fall back to API key) — AISDLC-393 |
 | **Autonomous loop — hierarchy (RFC-0051; supersedes orchestrator-tick / dispatch-worker / execute-parallel, AISDLC-763)** | `cli-hierarchy up` (planner + dispatch + executors); see [`docs/operations/cli-hierarchy.md`](docs/operations/cli-hierarchy.md). The old `/ai-sdlc orchestrator-tick`, `dispatch-worker` and `execute-parallel*` commands are one-paragraph pointers to it. | Subscription interactive quota only — Sonnet for dev/code/test, Opus only for security. |
 | Manual cleanup | `/ai-sdlc cleanup [<task-id>]` | n/a |
-| GitHub issue / unattended / CI | `pnpm --filter @ai-sdlc/dogfood watch --issue <id>` | API key |
+| Unattended watcher (API key; not an external-issue trigger) | `pnpm --filter @ai-sdlc/dogfood watch --issue <id>` | API key |
+
+**External issues (AISDLC-979).** The only external-issue path is `/ai-sdlc execute gh:<n>` run by a local agent. No CI workflow triggers on an issue label (the former `ai-eligible` label is removed from admission scoring and the generated config).
 
 `/ai-sdlc execute` is the default for internal work. Worktree-isolated, auto-creates sibling-repo PRs from `permittedExternalPaths`, marks Done + moves task file in the same PR.
 
