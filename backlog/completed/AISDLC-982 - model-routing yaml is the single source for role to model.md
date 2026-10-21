@@ -1,7 +1,7 @@
 ---
 id: AISDLC-982
 title: 'model-routing.yaml is the single source for role to model; fill the cells; pins gate asserts frontmatter equals the table'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-20'
 labels:
@@ -33,7 +33,45 @@ Operator decision (2026-10-20): the table is the source. Every agent and command
 
 ## Acceptance Criteria
 
-- [ ] `.ai-sdlc/model-routing.yaml` has a cell for every agent under `ai-sdlc-plugin/agents/` and every command under `ai-sdlc-plugin/commands/`, with `review-executor: haiku` and `planner: fable`.
-- [ ] `model-pins.test.mjs` reads the yaml and fails when any agent or command `model:` differs from its cell or has no cell.
-- [ ] `reviewer-harness.ts`, `review-plan/executor.ts` and the hierarchy launch resolve models through one table lookup; no model literal remains in those files.
-- [ ] The `Claude Opus 4.6` trailer is gone from the four plugin files and the trailer is derived from the routed model; one iteration-cap constant remains.
+- [x] `.ai-sdlc/model-routing.yaml` has a cell for every agent under `ai-sdlc-plugin/agents/` and every command under `ai-sdlc-plugin/commands/`, with `review-executor: haiku` and `planner: fable`.
+- [x] `model-pins.test.mjs` reads the yaml and fails when any agent or command `model:` differs from its cell or has no cell.
+- [x] `reviewer-harness.ts`, `review-plan/executor.ts` and the hierarchy launch resolve models through one table lookup; no model literal remains in those files.
+- [x] The `Claude Opus 4.6` trailer is gone from the four plugin files and the trailer is derived from the routed model; one iteration-cap constant remains.
+
+## Final Summary
+
+## Summary
+Implemented and committed locally, but not pushed and no PR opened: the push hook refused every push attempt. `.ai-sdlc/model-routing.yaml` now has a cell for every agent and command, with `review-executor: haiku` and `planner: fable`. The pins gate, reviewer harness, review-plan executor and hierarchy launch all read the table, the `Claude Opus 4.6` trailer is gone, and one iteration-cap constant remains.
+
+## Changes
+- .ai-sdlc/model-routing.yaml
+- ai-sdlc-plugin/agents/developer.md
+- ai-sdlc-plugin/commands/model-pins.test.mjs
+- ai-sdlc-plugin/commands/planner.md
+- ai-sdlc-plugin/commands/rebase.md
+- ai-sdlc-plugin/scripts/check-attestation-sign.sh
+- ai-sdlc-plugin/scripts/sign-attestation-if-consumer.sh
+- pipeline-cli/src/cli/hierarchy.ts
+- pipeline-cli/src/dispatch/reviewer-harness.ts
+- pipeline-cli/src/next-step/next-step.ts
+- pipeline-cli/src/review-plan/executor.ts
+- pipeline-cli/src/routing/committed-table.test.ts
+- pipeline-cli/src/routing/index.ts
+- pipeline-cli/src/routing/role-model.ts
+- pipeline-cli/src/routing/role-model.test.ts
+- pipeline-cli/src/steps/09-iterate.ts
+- backlog/tasks/AISDLC-982 - model-routing yaml is the single source for role to model.md
+
+## Design decisions
+PUSH BLOCKED, so there is no PR. The commit is rebased onto origin/main (a4893990e, one commit ahead). The PreToolUse hook refused the lease push three times (not-task-worktree: hook saw cwd as the main checkout). The push is left to the executor loop from .worktrees/aisdlc-982. Design: routedModel(role) in pipeline-cli/src/routing/role-model.ts; codex variants resolve to sonnet instead of inherit; strength list now [haiku, sonnet, opus, fable]; planner.md repinned to fable; DEFAULT_MAX_ITERATIONS exported from steps/09-iterate.ts.
+
+## Verification
+- `pnpm build` — passed
+- `pnpm test` — passed
+- `pnpm lint` — passed
+- `pnpm format:check` — passed
+- 3 parallel reviews approved
+
+## Follow-up
+PUSH BLOCKED, so there is no PR. The commit is rebased onto origin/main (a4893990e, one commit ahead). The PreToolUse hook refused the lease push three times (not-task-worktree: hook saw cwd as the main checkout). The push is left to the executor loop from .worktrees/aisdlc-982. Design: routedModel(role) in pipeline-cli/src/routing/role-model.ts; codex variants resolve to sonnet instead of inherit; strength list now [haiku, sonnet, opus, fable]; planner.md repinned to fable; DEFAULT_MAX_ITERATIONS exported from steps/09-iterate.ts.
+
