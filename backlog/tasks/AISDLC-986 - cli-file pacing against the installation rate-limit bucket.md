@@ -1,7 +1,7 @@
 ---
 id: AISDLC-986
 title: 'cli-file pacing against the installation rate-limit bucket'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-20'
 labels:

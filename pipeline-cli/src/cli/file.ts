@@ -8,7 +8,7 @@
  * lease-pushes the SAME branch (DEC-0088), so the PR number stays and is re-armed
  * through the docs lane (`--source-kind docs`); no replacement PR is opened.
  *
- *   cli-file task <path> [--pr] [--no-brief]
+ *   cli-file task <path> [--pr] [--no-brief] [--queue] [--spacing-minutes <n>]
  *   cli-file decision <DEC-NNNN> --task-id <ID> [--answer <option>] [--rationale <t>] [--pr]
  *   cli-file rebase <id> [--pr]
  */
@@ -24,7 +24,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import yargs from 'yargs';
+import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { now as clockNow } from '../clock.js';
 import {
@@ -33,6 +33,7 @@ import {
   readDecisionEvents,
   resolveEventsDir,
 } from '../decisions/event-log.js';
+import { paceFiling, recordFiling } from './file-pacing.js';
 import { writeAutoBrief } from '../hierarchy/auto-brief.js';
 import type { DecisionEvent } from '../decisions/decision-record.js';
 
@@ -224,6 +225,7 @@ function publish(
     const r = deps.exec('gh', buildPrCreateArgs(p), wt);
     if (r.status !== 0) throw new Error(`gh pr create failed: ${r.stderr.trim()}`);
     prUrl = r.stdout.trim().split('\n').pop() ?? null;
+    recordFiling(p.repo);
   }
   return { branch: p.branch, prUrl };
 }
@@ -683,13 +685,41 @@ export async function runFileCli(argv: string[] = hideBin(process.argv)): Promis
       return undefined;
     }
   };
+  /** AISDLC-986: pace a `--pr` filing; false when it was queued instead. */
+  const paced = async (a: Record<string, unknown>, id: string, cmd: string): Promise<boolean> => {
+    if (!a.pr) return true;
+    try {
+      const outcome = await paceFiling(repo, {
+        id,
+        command: cmd,
+        spacingMinutes: a.spacingMinutes as number | undefined,
+        queue: a.queue as boolean,
+      });
+      return outcome === 'proceed';
+    } catch (err) {
+      process.stderr.write(`[cli-file] error: ${(err as Error).message}\n`);
+      code = 2;
+      return false;
+    }
+  };
+  const pacingOptions = <T>(y: Argv<T>) =>
+    y
+      .option('queue', {
+        type: 'boolean',
+        default: false,
+        describe: 'with --pr: queue a brief for the next window instead of waiting on the spacing',
+      })
+      .option('spacing-minutes', {
+        type: 'number',
+        describe: 'minutes between PR filings (default 15; env AI_SDLC_FILE_SPACING_MINUTES)',
+      });
   await yargs(argv)
     .scriptName('cli-file')
     .command(
       'task <path>',
       'validate and file a backlog task',
       (y) =>
-        y
+        pacingOptions(y)
           .positional('path', { type: 'string', demandOption: true })
           .option('pr', { type: 'boolean', default: false })
           .option('update', {
@@ -702,7 +732,8 @@ export async function runFileCli(argv: string[] = hideBin(process.argv)): Promis
             default: true,
             describe: 'write a one-task dispatch brief with --pr; --no-brief skips it',
           }),
-      (a) => {
+      async (a) => {
+        if (!(await paced(a, basename(a.path as string), `cli-file task ${a.path} --pr`))) return;
         const r = guard(() =>
           fileTask(repo, a.path as string, {
             pr: a.pr as boolean,
@@ -717,13 +748,19 @@ export async function runFileCli(argv: string[] = hideBin(process.argv)): Promis
       'decision <id>',
       'validate and file decision-log events',
       (y) =>
-        y
-          .positional('id', { type: 'string', demandOption: true })
-          .option('task-id', { type: 'string', demandOption: true })
-          .option('answer', { type: 'string' })
-          .option('rationale', { type: 'string' })
-          .option('pr', { type: 'boolean', default: false }),
-      (a) => {
+        pacingOptions(
+          y
+            .positional('id', { type: 'string', demandOption: true })
+            .option('task-id', { type: 'string', demandOption: true })
+            .option('answer', { type: 'string' })
+            .option('rationale', { type: 'string' })
+            .option('pr', { type: 'boolean', default: false }),
+        ),
+      async (a) => {
+        if (
+          !(await paced(a, a.id as string, `cli-file decision ${a.id} --task-id ${a.taskId} --pr`))
+        )
+          return;
         const r = guard(() =>
           fileDecision(repo, a.id as string, {
             taskId: a.taskId as string,
@@ -739,10 +776,13 @@ export async function runFileCli(argv: string[] = hideBin(process.argv)): Promis
       'rebase <id>',
       'rebuild a conflicting filing branch in place (lease push, same PR) and re-arm it',
       (y) =>
-        y
-          .positional('id', { type: 'string', demandOption: true })
-          .option('pr', { type: 'boolean', default: false }),
-      (a) => {
+        pacingOptions(
+          y
+            .positional('id', { type: 'string', demandOption: true })
+            .option('pr', { type: 'boolean', default: false }),
+        ),
+      async (a) => {
+        if (!(await paced(a, a.id as string, `cli-file rebase ${a.id} --pr`))) return;
         const r = guard(() => fileRebase(repo, a.id as string, { pr: a.pr as boolean }));
         if (r) report(r);
       },
