@@ -50,6 +50,9 @@ export interface PromotionProximity {
   }>;
 }
 
+/** Highest autonomy level defined by spec/autonomy.md (levels 0-3). */
+export const MAX_LEVEL = 3;
+
 /** Minimum tasks required per level for promotion. */
 const PROMOTION_TASK_THRESHOLDS: Record<number, number> = {
   0: 3,
@@ -187,7 +190,7 @@ export class AutonomyTracker {
     const currentLevel = ledger?.currentLevel ?? 0;
     const nextLevel = currentLevel + 1;
 
-    if (nextLevel > 4) {
+    if (nextLevel > MAX_LEVEL) {
       return {
         eligible: false,
         fromLevel: currentLevel,
@@ -335,7 +338,7 @@ export class AutonomyTracker {
     const metrics = this.getAgentMetrics(agentName);
     const ledger = this.store.getAutonomyLedger(agentName);
     const currentLevel = ledger?.currentLevel ?? 0;
-    const nextLevel = Math.min(currentLevel + 1, 4);
+    const nextLevel = Math.min(currentLevel + 1, MAX_LEVEL);
 
     const taskThreshold = PROMOTION_TASK_THRESHOLDS[currentLevel] ?? 50;
     const rateThreshold = PROMOTION_SUCCESS_RATE[currentLevel] ?? 0.9;
