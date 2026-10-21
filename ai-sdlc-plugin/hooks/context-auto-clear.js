@@ -10,7 +10,10 @@
  * command. At the warn threshold the CLI first answers `warn` and this hook returns a
  * Stop `block` message telling the session to run its handoff routine; the clear comes
  * once the handoff file is rewritten (or at threshold plus 25%). An executor holding an inflight task is deferred until its verdict is
- * written. Every failure is swallowed: a session is never delayed or failed by this.
+ * written. A session is never delayed or failed by this, but every exit after the roster check
+ * writes one reason line (`no-cli`, `below-threshold`, `handoff-stale`, `warned`, `scheduled`,
+ * `failed:<message>`) to `<board>/log/context-auto-clear.log` (AISDLC-1007). Planner and
+ * dispatch with a current handoff clear at the threshold, with no warning turn.
  *
  * Before that check it also persists the session's last assistant text to
  * `.claude/memory/LAST_MESSAGE.md` (AISDLC-914), so a clear never hides the final reply.
@@ -24,7 +27,14 @@
 'use strict';
 
 const { spawnSync } = require('node:child_process');
-const { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } = require('node:fs');
+const {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} = require('node:fs');
 const { dirname, join, resolve } = require('node:path');
 
 const BIN_NAME = 'cli-hierarchy.mjs';
@@ -159,6 +169,20 @@ function persistLastMessage(transcript, boardDir, env, now = new Date()) {
  * threshold the CLI answers `action: warn`; the Stop hook relays it so the session gets
  * a turn to run its handoff routine before any clear (AISDLC-870).
  */
+function decisionOf(stdout) {
+  const lines = String(stdout || '').split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line.startsWith('{')) continue;
+    try {
+      return JSON.parse(line);
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
 function warnMessageOf(stdout) {
   const lines = String(stdout || '').split('\n');
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -194,23 +218,60 @@ function runAutoClear(payload, options = {}) {
     // Cheap exit for every session that is not in a hierarchy roster.
     if (!existsSync(join(boardDir, 'hierarchy.json'))) return 'no-roster';
     persistLastMessage(transcript, boardDir, env, options.now);
+    const log = (line) => {
+      try {
+        if (typeof options.log === 'function') options.log(line, boardDir);
+      } catch {
+        // logging never fails a session
+      }
+    };
     const bin = resolveBin(env, pluginDir);
-    if (!bin) return 'no-cli';
+    if (!bin) {
+      log('no-cli');
+      return 'no-cli';
+    }
     const run = options.run || spawnSync;
     const res = run(
       process.execPath,
       [bin, 'auto-clear', '--transcript', transcript, '--board-dir', boardDir],
       { cwd, env, encoding: 'utf-8', timeout: TIMEOUT_MS },
     );
-    if (!res || res.status !== 0) return 'failed';
+    if (!res || res.status !== 0) {
+      const err = String((res && (res.stderr || (res.error && res.error.message))) || '')
+        .trim()
+        .split('\n')[0];
+      log(`failed:${err || `exit ${res ? res.status : 'none'}`}`);
+      return 'failed';
+    }
     const message = warnMessageOf(res.stdout);
+    const decision = decisionOf(res.stdout);
+    log((decision && decision.code) || (message ? 'warned' : 'below-threshold'));
     if (message) {
       if (typeof options.onWarn === 'function') options.onWarn(message);
       return 'warned';
     }
     return 'ran';
-  } catch {
+  } catch (e) {
+    try {
+      if (typeof options.log === 'function')
+        options.log(`failed:${e && e.message ? e.message : e}`, undefined);
+    } catch {
+      // ignore
+    }
     return 'failed';
+  }
+}
+
+/** Append one reason line to `<board>/log/context-auto-clear.log`, else print it. */
+function logReason(line, boardDir) {
+  const stamped = `${new Date().toISOString()} context-auto-clear ${line}\n`;
+  try {
+    if (!boardDir || !existsSync(boardDir)) throw new Error('no board');
+    const dir = join(boardDir, 'log');
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(join(dir, 'context-auto-clear.log'), stamped);
+  } catch {
+    process.stdout.write(stamped);
   }
 }
 
@@ -225,6 +286,7 @@ function readStdin() {
 if (require.main === module) {
   try {
     runAutoClear(readStdin(), {
+      log: logReason,
       onWarn: (message) =>
         process.stdout.write(JSON.stringify({ decision: 'block', reason: message })),
     });
@@ -236,6 +298,8 @@ if (require.main === module) {
 
 module.exports = {
   runAutoClear,
+  logReason,
+  decisionOf,
   persistLastMessage,
   lastAssistantText,
   warnMessageOf,

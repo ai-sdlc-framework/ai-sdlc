@@ -98,6 +98,23 @@ function handoffRewrittenSinceWarn(
   }
 }
 
+/** A handoff file rewritten within this window counts as current (AISDLC-1007). */
+export const HANDOFF_FRESH_MS = 15 * 60 * 1000;
+
+/**
+ * True when the role's handoff file exists and was rewritten recently. Planner and
+ * dispatch handoffs are regenerated from board state on every state change, so a
+ * current file means there is nothing left to wait for.
+ */
+function handoffIsCurrent(boardDir: string, role: HierarchyRole, name: string, now: Date): boolean {
+  try {
+    const file = handoffPath({ role, name, boardDir }, now);
+    return existsSync(file) && now.getTime() - statSync(file).mtimeMs <= HANDOFF_FRESH_MS;
+  } catch {
+    return false;
+  }
+}
+
 /** Largest tail of the transcript examined. */
 const TAIL_BYTES = 512 * 1024;
 
@@ -166,12 +183,32 @@ export function readContextTokens(transcriptPath: string): number | null {
   return null;
 }
 
+/** The one-word reason line the Stop hook logs for a decision (AISDLC-1007). */
+export type AutoClearCode =
+  | 'below-threshold'
+  | 'handoff-stale'
+  | 'warned'
+  | 'scheduled'
+  | 'deferred';
+
 /** What {@link decideAutoClear} concluded. */
-export type AutoClearDecision =
+export type AutoClearDecision = (
   | { action: 'none'; reason: string; tokens: number | null; threshold: number }
   | { action: 'defer'; reason: string; tokens: number; threshold: number; taskId: string }
   | { action: 'warn'; reason: string; tokens: number; threshold: number; message: string }
-  | { action: 'clear'; tokens: number; threshold: number; reason?: string };
+  | { action: 'clear'; tokens: number; threshold: number; reason?: string }
+) & { code: AutoClearCode };
+
+type Decision = AutoClearDecision extends infer D
+  ? D extends unknown
+    ? Omit<D, 'code'>
+    : never
+  : never;
+
+const CODE_BY_REASON: Record<string, AutoClearCode> = {
+  'waiting for the handoff file to be rewritten': 'handoff-stale',
+  'a clear is already scheduled': 'scheduled',
+};
 
 /** Inputs of {@link decideAutoClear}. */
 export interface AutoClearInputs {
@@ -184,6 +221,19 @@ export interface AutoClearInputs {
 
 /** Decide whether the session should clear itself now. Pure apart from reads. */
 export function decideAutoClear(inputs: AutoClearInputs): AutoClearDecision {
+  const d = decideRaw(inputs);
+  const code: AutoClearCode =
+    d.action === 'clear'
+      ? 'scheduled'
+      : d.action === 'warn'
+        ? 'warned'
+        : d.action === 'defer'
+          ? 'deferred'
+          : (CODE_BY_REASON[d.reason] ?? 'below-threshold');
+  return { ...d, code } as AutoClearDecision;
+}
+
+function decideRaw(inputs: AutoClearInputs): Decision {
   const nowMs = (inputs.now ?? clock)().getTime();
   const threshold = resolveThresholds(inputs.boardDir)[inputs.role];
   const tokens = readContextTokens(inputs.transcriptPath);
@@ -208,6 +258,19 @@ export function decideAutoClear(inputs: AutoClearInputs): AutoClearDecision {
         taskId: held,
       };
     }
+  }
+  // Planner and dispatch regenerate their handoff on every state change: a current file
+  // means the clear can fire at the threshold, with no warning turn (AISDLC-1007).
+  if (
+    inputs.role !== 'executor' &&
+    handoffIsCurrent(inputs.boardDir, inputs.role, inputs.name, new Date(nowMs))
+  ) {
+    return {
+      action: 'clear',
+      tokens,
+      threshold,
+      reason: 'over the threshold with a current handoff',
+    };
   }
   if (!existsSync(warnFile(inputs.boardDir, inputs.name))) {
     markWarned(inputs.boardDir, inputs.name);

@@ -274,6 +274,23 @@ describe('buildHierarchyRoleBlock', () => {
     }
   });
 
+  it('always points at handoff read and the resume command (AISDLC-1007)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ss-clear-unit-'));
+    try {
+      writeRoster(dir, [entry('planner', 'planner', 4242)]);
+      const block = buildHierarchyRoleBlock({
+        source: 'clear',
+        boardDir: join(dir, '.ai-sdlc', 'dispatch'),
+        pids: [1, 4242],
+        commOf: () => 'claude',
+      });
+      assert.match(block, /handoff read --role planner/);
+      assert.match(block, /\/ai-sdlc planner/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('drops roster entries with unsafe names or unknown roles', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ss-clear-unit-'));
     try {
