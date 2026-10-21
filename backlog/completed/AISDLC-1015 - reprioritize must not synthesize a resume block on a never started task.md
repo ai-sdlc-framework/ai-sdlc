@@ -2,7 +2,7 @@
 id: AISDLC-1015
 title: >-
   cli-dispatch reprioritize must not synthesize a resume block on a never-started queued task
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-21'
 labels:
@@ -39,11 +39,11 @@ dispatchable: true
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `reprioritizeQueued` on a queued manifest with no `resume` block never writes one; the note (if kept) lands in a non-execution field and `next-step` ignores it
-- [ ] #2 `reprioritizeQueued` on a manifest with an existing `resume` block updates only `resume.note` (regression test)
-- [ ] #3 The claim path refuses a `resume` manifest whose branch is missing with a message that names the manifest and field, and leaves the manifest queued (no silent failed claim)
-- [ ] #4 `docs/operations/cli-hierarchy.md` reprioritize section states that `--note` does not create a resume
-- [ ] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
+- [x] #1 `reprioritizeQueued` on a queued manifest with no `resume` block never writes one; the note (if kept) lands in a non-execution field and `next-step` ignores it
+- [x] #2 `reprioritizeQueued` on a manifest with an existing `resume` block updates only `resume.note` (regression test)
+- [x] #3 The claim path refuses a `resume` manifest whose branch is missing with a message that names the manifest and field, and leaves the manifest queued (no silent failed claim)
+- [x] #4 `docs/operations/cli-hierarchy.md` reprioritize section states that `--note` does not create a resume
+- [x] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
 <!-- AC:END -->
 
 ## Verification

@@ -83,6 +83,19 @@ export async function initTask(
   const knownWorktree = join(workDir, '.worktrees', taskId.toLowerCase());
   const priorWork = known !== undefined || existsSync(join(knownWorktree, '.git'));
 
+  // AISDLC-1015: a manifest `resume` block claims a previous attempt left a branch. When
+  // it did not, refuse in one line naming the manifest field instead of failing deep in Step 3.
+  if (known?.source === 'manifest' && !(await hasExistingWork(ctx, known.branch, knownWorktree))) {
+    return {
+      ok: false,
+      reason:
+        `${taskId}: inflight/${taskId}.dispatch.json has a \`resume\` block but its branch ` +
+        `'${known.branch}' (field \`branch\`) exists neither locally nor on origin, and the task ` +
+        `has no worktree; the task never ran. Remove the \`resume\` block (cli-dispatch dequeue, ` +
+        `then enqueue again without it) or correct \`branch\`.`,
+    };
+  }
+
   // Step 1 — validate.
   let validation = await validateTask({ taskId, workDir, ...(priorWork ? { resume: true } : {}) });
   if (!validation.ok && priorWork && validation.reason === `no task file for ${taskId}`) {
