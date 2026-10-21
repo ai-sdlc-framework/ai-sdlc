@@ -14,6 +14,7 @@
  *   merkle-proof <index>          — print inclusion proof for a leaf by index
  *   emit-leaf                     — append a transcript leaf for one reviewer run
  *   print-patch-id-exclusions     — print the canonical patch-id exclusion pathspecs
+ *   reset-stack                   — drop earlier attestation chore commits (AISDLC-999)
  *
  * Output is plain text by default; pass `--json` for machine-readable JSON
  * on the merkle-* subcommands; transcripts list accepts `--json` for the same.
@@ -21,6 +22,7 @@
  * @module cli/attestation
  */
 
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { hostname, userInfo } from 'node:os';
@@ -41,6 +43,7 @@ import {
   type TranscriptLeaf,
   verifyInclusion,
 } from '../attestation/merkle.js';
+import { dropAttestationChores, type GitFn } from '../attestation/drop-chores.js';
 import { computeMergeBase, computePatchId, PATCH_ID_EXCLUSIONS } from '../attestation/patch-id.js';
 import {
   formatV6Envelope,
@@ -99,6 +102,17 @@ export function readAgentIdSidecar(transcriptPath: string): string | undefined {
  */
 function resolveRepoRoot(cwd?: string): string {
   return resolve(cwd ?? process.env['REPO_ROOT'] ?? process.cwd());
+}
+
+/** `git` in `cwd`, never throwing; a spawn failure is a non-zero status. */
+export function gitIn(cwd: string): GitFn {
+  return (args) =>
+    new Promise((resolveP) => {
+      execFile('git', [...args], { cwd, timeout: 120_000 }, (err, stdout, stderr) => {
+        const code = err && typeof (err as { code?: unknown }).code === 'number' ? err.code : 1;
+        resolveP({ status: err ? (code as number) : 0, stdout, stderr });
+      });
+    });
 }
 
 // ── Output helpers ────────────────────────────────────────────────────────────
@@ -352,6 +366,45 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             emitJson([...PATCH_ID_EXCLUSIONS]);
           } else {
             emitText(PATCH_ID_EXCLUSIONS.join('\n'));
+          }
+        },
+      )
+      // ── reset-stack (AISDLC-999) ──────────────────────────────────────────────
+      .command(
+        'reset-stack',
+        "Drop this task's earlier attestation chore commits (`chore: sign attestation` and " +
+          '`chore: commit pending transcript leaves`) from the branch non-interactively, so a ' +
+          'retry re-signs on a clean stack. Refuses (exit 1, nothing changed) when a candidate ' +
+          'commit touches any path other than .ai-sdlc/attestations/ and the transcript leaves. ' +
+          'Leaf files the dropped commits carried are restored staged; commit them, then sign.',
+        (y: Argv) =>
+          y
+            .option('target', {
+              type: 'string',
+              default: 'main',
+              describe: 'Target branch the stack is measured against (origin/<target>).',
+            })
+            .option('task-id', { type: 'string', describe: 'Task id (allows its review ledger).' })
+            .option('repo-root', { type: 'string', describe: 'Worktree to operate in.' }),
+        async (args) => {
+          const root = resolveRepoRoot(args['repo-root'] as string | undefined);
+          const r = await dropAttestationChores(gitIn(root), {
+            target: args['target'] as string,
+            taskId: args['task-id'] as string | undefined,
+          });
+          if (r.kind === 'none')
+            emitText('[cli-attestation] reset-stack: no attestation chore commits to drop');
+          else if (r.kind === 'dropped')
+            emitText(
+              `[cli-attestation] reset-stack: dropped ${r.dropped.length} commit(s); restored ${r.restored.length} file(s) (staged)`,
+            );
+          else {
+            const why =
+              r.kind === 'refused'
+                ? `commit ${r.sha.slice(0, 7)} touches other paths: ${r.paths.join(', ')}`
+                : r.reason;
+            process.stderr.write(`[cli-attestation] reset-stack: refused: ${why}\n`);
+            process.exitCode = 1;
           }
         },
       )
@@ -1417,7 +1470,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
       )
       .demandCommand(
         1,
-        'Specify a subcommand (e.g. transcripts list, merkle-root, merkle-proof, sign-v6, inspect-v6, emit-leaf, generate-nonce, nonce-marker, verify, independence-policy, print-patch-id-exclusions, reviewer-set, reviewer-set-window)',
+        'Specify a subcommand (e.g. transcripts list, merkle-root, merkle-proof, sign-v6, inspect-v6, emit-leaf, generate-nonce, nonce-marker, verify, independence-policy, print-patch-id-exclusions, reset-stack, reviewer-set, reviewer-set-window)',
       )
       .help()
       .alias('h', 'help')

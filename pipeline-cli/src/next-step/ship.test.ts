@@ -146,6 +146,18 @@ describe('preSignRebase (AISDLC-102)', () => {
     expect(h.runner.calls.find((c) => c.args[0] === 'fetch')?.opts?.timeout).toBe(30_000);
   });
 
+  it('drops earlier attestation chore commits before the rebase (AISDLC-999)', async () => {
+    hashes('A', 'A');
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    h.runner.on(/merge-base HEAD origin\/main/, ok('b'.repeat(40) + '\n'));
+    h.runner.on(/git log --reverse/, ok(`${'a'.repeat(40)}\tchore: sign attestation for x\n`));
+    h.runner.on(/diff-tree/, ok('.ai-sdlc/attestations/x.v6.dsse.json\n'));
+    await preSignRebase(h.ctx, state);
+    const dropAt = indexOfCall(/sequence\.editor=.* rebase --interactive/);
+    expect(dropAt).toBeGreaterThanOrEqual(0);
+    expect(dropAt).toBeLessThan(indexOfCall(/git rebase origin\/main/));
+  });
+
   it('reuses the approval when the rebase leaves the contentHash unchanged', async () => {
     hashes('A', 'A');
     h.runner.on(/merge-base --is-ancestor/, fail('', 1));

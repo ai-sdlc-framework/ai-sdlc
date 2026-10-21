@@ -140,6 +140,23 @@ If present, `agentFileHash` was not enforced for the named reviewer(s) on that r
 
 ---
 
+## Symptom: a retry re-signs on top of the previous attempt's chore commits (AISDLC-999)
+
+The stack holds `chore: commit pending transcript leaves` mid-stack and `chore: sign attestation` on top, and the envelope's `subject.digest.sha1` is a commit no longer in history. Every re-sign fails the same way.
+
+Do not hand-edit the stack with an interactive rebase and do not write one into a resume note. Run the subcommand, which drops those commits with a scripted (non-interactive) sequence editor and stages the leaf files they carried:
+
+```bash
+node pipeline-cli/bin/cli-attestation.mjs reset-stack --task-id <TASK-ID>   # --target main by default
+git commit -m "chore: commit pending transcript leaves (<TASK-ID>)"           # if it restored leaf files
+```
+
+A commit counts as ours only when its subject is `chore: sign attestation` or `chore: commit pending transcript leaves` and it touches only `.ai-sdlc/attestations/`, the transcript leaves and the task's review ledger. If a candidate touches any other path the command refuses (exit 1) and changes nothing.
+
+The same drop runs automatically before the ship step's rebase (10.5), as the `drop-chores` dispatch playbook action (`cli-hierarchy playbook --action drop-chores`, which also lease-pushes), and in consumer repos before `sign-attestation-if-consumer.sh` signs (`ai-sdlc-plugin/scripts/drop-attestation-chores.sh --if-stale`).
+
+---
+
 ## Diagnostic checklist
 
 1. `git ls-tree HEAD -- .ai-sdlc/attestations/` — confirms an envelope is committed.

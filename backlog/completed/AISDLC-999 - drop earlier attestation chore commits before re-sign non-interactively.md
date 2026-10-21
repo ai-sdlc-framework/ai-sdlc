@@ -1,7 +1,7 @@
 ---
 id: AISDLC-999
 title: 'Drop this task''s earlier attestation chore commits before re-signing, as a non-interactive playbook action'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-20'
 labels:

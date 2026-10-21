@@ -686,3 +686,44 @@ describe('push-non-fast-forward (AISDLC-918)', () => {
     expect(ci).toMatchObject({ action: 'retrigger-ci', result: 'done' });
   });
 });
+
+describe('drop-chores (AISDLC-999)', () => {
+  const SHA = 'a'.repeat(40);
+  const scripted = (paths: string): void => {
+    results['merge-base'] = ok('b'.repeat(40) + '\n');
+    results['log'] = ok(`${SHA}\tchore: sign attestation for X\n`);
+    results['diff-tree'] = ok(paths);
+    results['rev-parse'] = ok('c'.repeat(40) + '\n');
+    results['cat-file'] = { status: 1, stdout: '', stderr: '' };
+  };
+
+  it('drops the chore commits non-interactively and lease-pushes the task branch', async () => {
+    scripted('.ai-sdlc/attestations/x.v6.dsse.json\n');
+    const outcome = await runPlaybook(verdict(), deps(), 'drop-chores');
+    expect(outcome).toMatchObject({ action: 'drop-chores', result: 'done', branch: BRANCH });
+    const rebase = calls.find((c) => c.args.includes('rebase'));
+    expect(rebase?.args.join(' ')).toContain('sequence.editor=');
+    expect(rebase?.args).toContain('--interactive');
+    expect(pushes().map((c) => c.args)).toEqual([
+      ['push', '--force-with-lease', 'origin', `HEAD:refs/heads/${BRANCH}`],
+    ]);
+  });
+
+  it('refuses, without rewriting or pushing, when a candidate touches another path', async () => {
+    scripted('src/real-work.ts\n');
+    const outcome = await runPlaybook(verdict(), deps(), 'drop-chores');
+    expect(outcome.result).toBe('escalated');
+    expect(calls.some((c) => c.args.includes('rebase'))).toBe(false);
+    expect(pushes()).toEqual([]);
+  });
+
+  it('is refused without the rebase and lease-push grants', async () => {
+    const outcome = await runPlaybook(verdict(), deps({ operational: new Set() }), 'drop-chores');
+    expect(outcome.result).toBe('escalated');
+    expect(calls).toEqual([]);
+  });
+
+  it('declares its grants', () => {
+    expect(REQUIRED_GRANTS['drop-chores']).toEqual(['rebase-own-branch', 'lease-push-own-branch']);
+  });
+});
