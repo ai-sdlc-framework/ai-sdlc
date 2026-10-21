@@ -25,7 +25,14 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync, realpathSync 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isInstrumentableFile, resolveDiffBase } from './check-pr-patch-coverage.mjs';
+import { readFileSync } from 'node:fs';
+import {
+  isInstrumentableFile,
+  resolveDiffBase,
+  parsePatchCoverageConfig,
+  loadPatchCoverageConfig,
+  effectiveThreshold,
+} from './check-pr-patch-coverage.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(__dirname, 'check-pr-patch-coverage.mjs');
@@ -1089,7 +1096,7 @@ describe('check-pr-patch-coverage — AISDLC-726', () => {
         { encoding: 'utf-8' },
       );
 
-    it('passes at exactly 90% and reports a threshold of 90 when --threshold is omitted', () => {
+    it('passes at 90% and reports target minus tolerance as the threshold when --threshold is omitted', () => {
       const base = commitFile(repo, 'README.md', '# x\n', 'init');
       const head = commitFile(repo, 'pkg/src/a.ts', body + '\n', 'feat: add a');
       const lines = {};
@@ -1097,7 +1104,7 @@ describe('check-pr-patch-coverage — AISDLC-726', () => {
       writeCoverageFile(repo, { 'pkg/src/a.ts': { lines } });
       const r = runDefault(base, head);
       assert.equal(r.status, 0, r.stdout + r.stderr);
-      assert.equal(JSON.parse(r.stdout).threshold, 90);
+      assert.equal(JSON.parse(r.stdout).threshold, effectiveThreshold(loadPatchCoverageConfig()));
     });
 
     it('fails at 80% when --threshold is omitted', () => {
@@ -1109,5 +1116,37 @@ describe('check-pr-patch-coverage — AISDLC-726', () => {
       const r = runDefault(base, head);
       assert.equal(r.status, 1, r.stdout + r.stderr);
     });
+  });
+});
+
+describe('stored patch-coverage target and tolerance (AISDLC-976)', () => {
+  const cfg = loadPatchCoverageConfig();
+
+  it('threshold is target minus tolerance: passes at exactly it, fails just below', () => {
+    const threshold = effectiveThreshold({ target: 90, tolerance: 1 });
+    assert.equal(threshold, 89);
+    assert.ok(89 >= threshold);
+    assert.ok(!(88.99 >= threshold));
+  });
+
+  it('rejects a config missing a key', () => {
+    assert.throws(() => parsePatchCoverageConfig('target: 90\n'));
+    assert.deepEqual(parsePatchCoverageConfig('target: 90 # x\ntolerance: 2\n'), {
+      target: 90,
+      tolerance: 2,
+    });
+  });
+
+  it('codecov.yml project and patch targets equal the stored target', () => {
+    const text = readFileSync(join(__dirname, '..', 'codecov.yml'), 'utf-8');
+    const targets = [...text.matchAll(/target:\s*(\d+(?:\.\d+)?)%/g)].map((m) => Number(m[1]));
+    assert.equal(targets.length, 2);
+    for (const t of targets) assert.equal(t, cfg.target);
+  });
+
+  it('policy prose carries no literal 80% patch number', () => {
+    const text = readFileSync(join(__dirname, '..', '.ai-sdlc', 'review-policy.md'), 'utf-8');
+    assert.ok(!/80% patch/.test(text));
+    assert.match(text, /patch-coverage\.yaml/);
   });
 });

@@ -35,7 +35,7 @@ When you encounter a pattern similar to an exemplar, follow the exemplar's verdi
 | Prettier (`pnpm format:check`) | Formatting, whitespace, semicolons | No |
 | TypeScript (`pnpm build`) | Type errors, missing types, generics | No |
 | Vitest (`pnpm test`) | Test failures, broken assertions | No |
-| Codecov (`codecov/patch`) | Line coverage on changed code (80% patch) | No |
+| Codecov (`codecov/patch`) | Line coverage on changed code (`target` minus `tolerance` in `.ai-sdlc/patch-coverage.yaml`) | No |
 | Schema validation | YAML/JSON schema conformance | No |
 
 ## Threat Model

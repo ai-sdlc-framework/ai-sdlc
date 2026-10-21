@@ -4,7 +4,8 @@
  *
  * Server-side patch-coverage gate. Computes the percentage of NEWLY added /
  * modified lines (the "patch") in a PR diff that are covered by tests, and
- * fails when the result drops below a configurable threshold (default 90%).
+ * fails when the result drops below a configurable threshold (default: target minus tolerance from
+ * .ai-sdlc/patch-coverage.yaml).
  *
  * Replaces `codecov/patch` as the merge-blocking patch-coverage signal after
  * AISDLC-372 dropped codecov/patch from required branch-protection contexts.
@@ -18,8 +19,7 @@
  *
  *   node scripts/check-pr-patch-coverage.mjs \
  *     --base "<base-sha>" \
- *     --head "<head-sha>" \
- *     --threshold 90
+ *     --head "<head-sha>"
  *
  * Optional flags:
  *
@@ -90,6 +90,35 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT_DEFAULT = resolve(__dirname, '..');
+export const PATCH_COVERAGE_CONFIG_PATH = join(
+  REPO_ROOT_DEFAULT,
+  '.ai-sdlc',
+  'patch-coverage.yaml',
+);
+
+/**
+ * Parse the stored `target` / `tolerance` pair (AISDLC-976). Flat `key: number`
+ * lines only, so no yaml dependency is needed.
+ */
+export function parsePatchCoverageConfig(text) {
+  const out = {};
+  for (const m of text.matchAll(/^(target|tolerance):\s*(\d+(?:\.\d+)?)\s*(?:#.*)?$/gm)) {
+    out[m[1]] = Number(m[2]);
+  }
+  if (!Number.isFinite(out.target) || !Number.isFinite(out.tolerance)) {
+    throw new Error('patch-coverage config must define numeric target and tolerance');
+  }
+  return { target: out.target, tolerance: out.tolerance };
+}
+
+export function loadPatchCoverageConfig(path = PATCH_COVERAGE_CONFIG_PATH) {
+  return parsePatchCoverageConfig(readFileSync(path, 'utf-8'));
+}
+
+/** The gate passes at target minus tolerance. */
+export function effectiveThreshold({ target, tolerance }) {
+  return target - tolerance;
+}
 
 // Extensions we consider "instrumentable code" — matches the include globs
 // used by every vitest.config.ts in this repo (src/**/*.{ts,tsx} primarily,
@@ -742,11 +771,11 @@ if (isMain) {
   const head = args.head;
   if (!base || !head || base === true || head === true) {
     process.stderr.write(
-      '[patch-coverage] usage: --base <sha> --head <sha> [--threshold 90] [--coverage-root <dir>] [--json]\n',
+      '[patch-coverage] usage: --base <sha> --head <sha> [--threshold <pct>] [--coverage-root <dir>] [--json]\n',
     );
     process.exit(2);
   }
-  const threshold = Number(args.threshold ?? 90);
+  const threshold = Number(args.threshold ?? effectiveThreshold(loadPatchCoverageConfig()));
   if (!Number.isFinite(threshold) || threshold < 0 || threshold > 100) {
     process.stderr.write(`[patch-coverage] invalid --threshold: ${args.threshold}\n`);
     process.exit(2);

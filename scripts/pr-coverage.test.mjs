@@ -155,6 +155,7 @@ test('ci.yml coverage step calls the script and no longer shallow-fetches main',
   assert.match(step, /run: bash scripts\/pr-coverage\.sh/);
   assert.doesNotMatch(step, /fetch --no-tags --depth=1/);
   assert.doesNotMatch(step, /vitest run --coverage --changed origin\/main/);
-  // the patch-coverage gate is wired at the 90% threshold (AISDLC-726)
-  assert.match(ci, /check-pr-patch-coverage\.mjs[\s\S]*--threshold 90/);
+  // the patch-coverage gate reads its threshold from .ai-sdlc/patch-coverage.yaml (AISDLC-976)
+  assert.match(ci, /check-pr-patch-coverage\.mjs/);
+  assert.doesNotMatch(ci, /--threshold 90/);
 });
