@@ -252,6 +252,8 @@ The ledger belongs in the task's PR, so `cli-attestation emit-leaf` never writes
 
 `ai-sdlc doctor` check `untracked-review-ledgers` warns when `.ai-sdlc/reviews/*.jsonl` files are untracked in the main checkout (residue from before the routing above). They block fast-forward pulls once the same file lands on main. `ai-sdlc doctor --fix` deletes the untracked copies (tracked ledgers are never touched).
 
+The same check also scans `.worktrees/*/.ai-sdlc/reviews/*.jsonl` and warns when a ledger's task is in `backlog/completed/` but main's copy does not start with the worktree copy (AISDLC-966). Such rows exist only on disk and a worktree sweep would delete them; copy them into `.ai-sdlc/reviews/` on a chore PR first. `--fix` never touches worktrees.
+
 Runtime state in the parent (`.ai-sdlc/dispatch/`, `.agents/`, `.codex/`, `AGENTS.md`) is gitignored (AISDLC-811), so Step 0.5 no longer refuses over it; the planner's interim lines for those paths in the parent's local `.git/info/exclude` are redundant and can be removed.
 
 ### Running the analysis
