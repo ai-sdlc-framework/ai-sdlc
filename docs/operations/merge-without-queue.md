@@ -67,6 +67,12 @@ Total wall-clock time: ~5-10 min (CI time) vs ~15-25 min with the queue (CI + qu
 
 ---
 
+## Docs lane head prefixes (AISDLC-1006, DEC-0265)
+
+`cli-merge-if-eligible --source-kind docs` accepts a PR whose head branch starts with `ai-sdlc/file-` (`cli-file` filing PRs) or `docs/` (RFC walkthroughs, RFC filings, docs corrections). Any other head is refused with a message naming both prefixes. The author allow-list, the green `ai-sdlc/pr-ready` rollup, `mergeStateStatus == CLEAN` and the docs-only path check are unchanged, so a code change on a `docs/*` branch is still refused by the lane.
+
+---
+
 ## Open PR handling (AISDLC-727 / DEC-0056)
 
 `auto-rebase-open-prs.yml` was deleted. It rebased every other open PR after every merge to `main`; each rebase restarted CI, cancelled runs in flight, disarmed auto-merge and invalidated the attestation envelope's head binding (a 50-PR sample showed ~37 workflow runs per PR, 343 cancelled runs and auto-merge toggled about 350 times). The up-to-date requirement on `main` is off (`strict=false`, DEC-0010), so those rebases were not needed to merge.

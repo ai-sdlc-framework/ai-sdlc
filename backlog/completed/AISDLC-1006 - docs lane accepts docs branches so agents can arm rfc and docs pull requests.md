@@ -2,7 +2,7 @@
 id: AISDLC-1006
 title: >-
   Docs lane of merge-if-eligible accepts `docs/*` head branches so agents can arm RFC and docs PRs
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-21'
 labels:
@@ -36,10 +36,10 @@ dispatchable: true
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `--source-kind docs` accepts a PR whose head branch starts with `ai-sdlc/file-` or `docs/` and refuses any other head with a message naming both prefixes; unit tests cover `docs/rfc-0056-oq-walkthrough`, `ai-sdlc/file-aisdlc-975` (accepted) and `feat/x`, `ai-sdlc/aisdlc-1-x` (refused under the docs kind)
-- [ ] #2 The author allow-list, green rollup and CLEAN checks are unchanged for the docs kind (existing tests pass unmodified)
-- [ ] #3 `docs/operations/merge-without-queue.md` states the accepted docs-lane prefixes and cites DEC-0265
-- [ ] #4 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
+- [x] #1 `--source-kind docs` accepts a PR whose head branch starts with `ai-sdlc/file-` or `docs/` and refuses any other head with a message naming both prefixes; unit tests cover `docs/rfc-0056-oq-walkthrough`, `ai-sdlc/file-aisdlc-975` (accepted) and `feat/x`, `ai-sdlc/aisdlc-1-x` (refused under the docs kind)
+- [x] #2 The author allow-list, green rollup and CLEAN checks are unchanged for the docs kind (existing tests pass unmodified)
+- [x] #3 `docs/operations/merge-without-queue.md` states the accepted docs-lane prefixes and cites DEC-0265
+- [x] #4 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
 <!-- AC:END -->
 
 ## Verification

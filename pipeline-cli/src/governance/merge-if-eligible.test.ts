@@ -2208,6 +2208,18 @@ describe('runMergeIfEligible - docs lane (AISDLC-878)', () => {
     expect(r.eligibility.reason).toMatch(/ai-sdlc\/aisdlc-9-x/);
   });
 
+  it('accepts docs/* and ai-sdlc/file-* heads, refuses others naming both prefixes (AISDLC-1006)', async () => {
+    for (const head of ['docs/rfc-0056-oq-walkthrough', 'ai-sdlc/file-aisdlc-975']) {
+      const r = await run(base(changedFiles([[DOC]]), { headRefName: head })).promise;
+      expect(r.armed).toBe(true);
+    }
+    for (const head of ['feat/x', 'ai-sdlc/aisdlc-1-x']) {
+      const r = await run(base(changedFiles([[DOC]]), { headRefName: head })).promise;
+      expect(r.armed).toBeFalsy();
+      expect(r.eligibility.reason).toMatch(/"ai-sdlc\/file-\*" or "docs\/\*"/);
+    }
+  });
+
   it('docsLanePathRefusal handles renames and traversal', () => {
     expect(docsLanePathRefusal([{ path: DOC, status: 'added' }])).toBeNull();
     expect(
