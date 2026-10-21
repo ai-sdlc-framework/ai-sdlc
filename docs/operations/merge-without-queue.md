@@ -206,6 +206,12 @@ Recommendation: keep enabled; the code rule removes the manual step without weak
 
 ---
 
+## Decision-catalog sync commits (AISDLC-1008)
+
+The `ai-sdlc/decisions-sync` commit written by `remote-persist.ts` uses the operator's own git identity (`git config user.name` / `user.email`, the same identity `cli-file` uses). There is no synthetic bot identity: the landing gate in `merge-if-eligible.ts` refuses any head commit whose author is not linked to a GitHub account on the `mergeAuthors` allow-list, so a synthetic author meant every sync PR needed a human to re-author and land it. With the configured identity the existing author check passes with no new exemption, and `--source-kind decisions-sync` keeps its branch-name check. If the identity is unset, the sync refuses and pushes nothing.
+
+---
+
 ## References
 
 - AISDLC-400 — task that dropped the queue
