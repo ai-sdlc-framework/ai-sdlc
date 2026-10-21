@@ -1,7 +1,7 @@
 ---
 id: AISDLC-990.1
 title: 'Autonomy tracker reads the AutonomyPolicy and rejects an initial level above 1'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-21'
 labels:
