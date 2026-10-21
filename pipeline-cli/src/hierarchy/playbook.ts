@@ -36,6 +36,7 @@ import {
   oneLine,
 } from '../dispatch/verdict-fields.js';
 import type { EventEmitter } from './emit.js';
+import { onlyAttestationArtifacts } from '../attestation-artifacts.js';
 import { isProtectedBranch, type ForcePushMode } from './lease-policy.js';
 import type { OperationalAction } from './operational.js';
 import type { AsyncCommandRunner, CommandResult, CommandRunner } from './types.js';
@@ -393,7 +394,7 @@ export async function runPlaybook(
 
   if (c.kind === 'drop-chores') {
     const clean = await git(['status', '--porcelain'], worktree);
-    if (clean.status !== 0 || clean.stdout.trim() !== '') {
+    if (clean.status !== 0 || !onlyAttestationArtifacts(clean.stdout)) {
       return giveUp('drop-chores', 'refused', 'the worktree has uncommitted changes', branch);
     }
     const fetchedMain = await git(['fetch', 'origin', 'main'], worktree);
@@ -443,14 +444,19 @@ export async function runPlaybook(
 
   // rebase-push
   const status = await git(['status', '--porcelain'], worktree);
-  if (status.status !== 0 || status.stdout.trim() !== '') {
+  if (status.status !== 0 || !onlyAttestationArtifacts(status.stdout)) {
     return giveUp('rebase-push', 'refused', 'the worktree has uncommitted changes', branch);
   }
   const fetched = await git(['fetch', 'origin', 'main'], worktree);
   if (fetched.status !== 0) {
     return giveUp('rebase-push', 'failed', `fetch failed: ${oneLine(fetched.stderr, 200)}`, branch);
   }
-  const rebased = await git(['rebase', 'origin/main'], worktree);
+  // AISDLC-1016: attestation artifacts alone may be pending; carry them across the rebase.
+  const rebaseArgs =
+    status.stdout.trim() === ''
+      ? ['rebase', 'origin/main']
+      : ['rebase', '--autostash', 'origin/main'];
+  const rebased = await git(rebaseArgs, worktree);
   if (rebased.status !== 0) {
     await git(['rebase', '--abort'], worktree);
     const why = `the rebase onto origin/main did not apply cleanly (${c.shape}); it was aborted`;

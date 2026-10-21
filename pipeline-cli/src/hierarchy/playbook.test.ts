@@ -22,7 +22,7 @@ import {
   runPlaybook,
   type PlaybookDeps,
 } from './playbook.js';
-import type { CommandResult } from './types.js';
+import type { CommandResult, CommandRunner } from './types.js';
 
 const REPO = '/repo';
 const BRANCH = 'ai-sdlc/aisdlc-9-some-slug';
@@ -183,6 +183,23 @@ describe('mechanical conflict shape: rebase and lease push', () => {
     expect(subcommands()).not.toContain('fetch origin');
     expect(pushes()).toEqual([]);
     expect(events[0]).toMatchObject({ action: 'rebase-push', result: 'refused' });
+  });
+
+  it('does not call attestation artifacts uncommitted changes (AISDLC-1016)', async () => {
+    results['status'] = ok(
+      '?? .ai-sdlc/transcript-leaves/abc.json\n M .ai-sdlc/transcript-leaves.jsonl\n?? .ai-sdlc/reviews/AISDLC-9.json\n',
+    );
+    const outcome = await runPlaybook(verdict(), deps());
+    expect(outcome).toMatchObject({ action: 'rebase-push', result: 'done' });
+    expect(subcommands()).toContain('rebase --autostash');
+    expect(pushes().length).toBe(1);
+  });
+
+  it('still refuses when a source file is dirty beside the artifacts (AISDLC-1016)', async () => {
+    results['status'] = ok('?? .ai-sdlc/reviews/x.json\n M src/a.ts\n');
+    const outcome = await runPlaybook(verdict(), deps());
+    expect(events[0]).toMatchObject({ action: 'rebase-push', result: 'refused' });
+    expect(outcome.result).toBe('escalated');
   });
 
   it('escalates when the fetch or the push fails', async () => {
@@ -696,6 +713,22 @@ describe('drop-chores (AISDLC-999)', () => {
     results['rev-parse'] = ok('c'.repeat(40) + '\n');
     results['cat-file'] = { status: 1, stdout: '', stderr: '' };
   };
+
+  it('is not refused by a tree dirty only with attestation artifacts (AISDLC-1016)', async () => {
+    scripted('.ai-sdlc/attestations/x.v6.dsse.json\n');
+    results['status'] = ok('?? .ai-sdlc/transcript-leaves/a.json\n?? .ai-sdlc/reviews/r.json\n');
+    const base = deps();
+    const withUntracked: PlaybookDeps = {
+      ...base,
+      // the routine's own tracked-only check sees no tracked change
+      run: (file, args, options) =>
+        args.includes('--untracked-files=no')
+          ? ok('')
+          : (base.run as CommandRunner)(file, args, options),
+    };
+    const outcome = await runPlaybook(verdict(), withUntracked, 'drop-chores');
+    expect(outcome).toMatchObject({ action: 'drop-chores', result: 'done' });
+  });
 
   it('drops the chore commits non-interactively and lease-pushes the task branch', async () => {
     scripted('.ai-sdlc/attestations/x.v6.dsse.json\n');

@@ -2,7 +2,7 @@
 id: AISDLC-1016
 title: >-
   Step 11 lease-pushes its own pre-sign rebase and commits review artifacts first, ending the push-non-fast-forward resume loop
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-21'
 labels:
@@ -39,12 +39,12 @@ dispatchable: true
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 Step 11, on a non-fast-forward rejection where the remote head is the pre-rebase copy of the same patch set and the role policy is `allowForcePush: lease`, pushes with `--force-with-lease` against the observed remote head and reports `pushed: true`
-- [ ] #2 Step 11 still aborts with `pushed: false` when the remote holds a commit not in the local patch set, or when the policy is `leaseOnOwnBranch` outside the task worktree or `never`
-- [ ] #3 Review transcript leaves and review records are committed (or part of the attestation chore commit) before the pre-sign rebase, so `git status --porcelain` is clean when Step 11 runs
-- [ ] #4 Playbook `rebase-push` and `drop-chores` no longer refuse a worktree whose only changes are attestation artifacts (test)
-- [ ] #5 `docs/operations/backlog-and-execution-reference.md` documents the lease push in Step 11 and the policy modes it honours
-- [ ] #6 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
+- [x] #1 Step 11, on a non-fast-forward rejection where the remote head is the pre-rebase copy of the same patch set and the role policy is `allowForcePush: lease`, pushes with `--force-with-lease` against the observed remote head and reports `pushed: true`
+- [x] #2 Step 11 still aborts with `pushed: false` when the remote holds a commit not in the local patch set, or when the policy is `leaseOnOwnBranch` outside the task worktree or `never`
+- [x] #3 Review transcript leaves and review records are committed (or part of the attestation chore commit) before the pre-sign rebase, so `git status --porcelain` is clean when Step 11 runs
+- [x] #4 Playbook `rebase-push` and `drop-chores` no longer refuse a worktree whose only changes are attestation artifacts (test)
+- [x] #5 `docs/operations/backlog-and-execution-reference.md` documents the lease push in Step 11 and the policy modes it honours
+- [x] #6 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
 <!-- AC:END -->
 
 ## Verification
