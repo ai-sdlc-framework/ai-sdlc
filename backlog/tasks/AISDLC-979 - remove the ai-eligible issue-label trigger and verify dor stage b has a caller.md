@@ -1,7 +1,7 @@
 ---
 id: AISDLC-979
 title: 'Remove the ai-eligible issue-label trigger; verify DoR stage B has a caller'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-20'
 labels:
