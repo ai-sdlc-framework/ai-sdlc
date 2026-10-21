@@ -29,5 +29,6 @@ describe('package.json exports', () => {
   it('runner subpath re-exports expected symbols', async () => {
     const runner = await import(resolve(PKG_ROOT, pkg.exports['./runner'].import));
     expect(runner.GitHubActionsRunner).toBeDefined();
-  });
+    // Dynamic import of dist under V8 coverage instrumentation exceeds the 5s default on CI.
+  }, 30_000);
 });
