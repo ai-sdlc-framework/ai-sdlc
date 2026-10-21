@@ -1,7 +1,7 @@
 ---
 id: AISDLC-605.1
 title: 'merge matcher: reduce over-blocking with a real tokenizer'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-10'
 labels:

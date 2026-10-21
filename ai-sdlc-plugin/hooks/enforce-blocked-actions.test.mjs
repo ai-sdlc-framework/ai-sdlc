@@ -2446,9 +2446,9 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 opaque-segment
     }
   });
 
-  it('refuses comments that mention the phrase (planner grammar ruling: # is opaque; AISDLC-605.1 tracks the over-block)', () => {
+  it('allows comments that mention the phrase (real tokenizer, AISDLC-605.1)', () => {
     for (const c of [`${gh} pr view 5 --json state # no ${mg}`, `echo hi # ${gh} pr ${mg} 5`]) {
-      assert.ok(isDenied(run(c)), c);
+      assert.ok(!isDenied(run(c)), c);
     }
     assert.ok(!isDenied(run(`${gh} pr view 5 --json state # ok`)));
   });
@@ -2486,7 +2486,7 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605 opaque-segment
       assert.ok(!isDenied(run(c)), c);
     }
     // Over-blocked by the grammar ruling: the comment mentions the phrase.
-    assert.ok(isDenied(run(`${gh} pr view $N --json state # no ${mg}`)));
+    assert.ok(!isDenied(run(`${gh} pr view $N --json state # no ${mg}`)));
   });
 
   it('still allows prose, read-only gh', () => {
@@ -2980,4 +2980,36 @@ blockedActions: []
   for (const rel of ['fooopencode.json', 'foo.opencode/x.js']) {
     it(`does not block ${rel} (a folded '**x' glob would)`, () => assert.ok(!denied(rel)));
   }
+});
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-605.1 $$ quote-state)', () => {
+  let dir;
+  const mg = ['mer', 'ge'].join('');
+
+  before(() => {
+    dir = join(tmpdir(), `enforce-blocked-pid-${Date.now()}`);
+    mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(dir, '.ai-sdlc', 'agent-role.yaml'),
+      'role: coding-agent\ngoal: Test agent\nblockedActions: []\n',
+    );
+  });
+
+  after(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function run(command) {
+    const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command } });
+    return runHookRaw(input, { CLAUDE_PROJECT_DIR: dir });
+  }
+
+  it('refuses the $$ plus backslash-quote comment-cut forms (CLI and API)', () => {
+    for (const c of [
+      `echo $$'\\' x ' #' ; gh pr ${mg} 5`,
+      `echo $$'\\' x ' #' ; gh api -X PUT repos/o/r/pulls/5/${mg}`,
+    ]) {
+      assert.ok(isDenied(run(c)), c);
+    }
+  });
 });
