@@ -66,5 +66,4 @@ I ran only the two touched test files with `node --test` (194 tests, all pass), 
 - 3 parallel reviews approved
 
 ## Follow-up
-I ran only the two touched test files with `node --test` (194 tests, all pass), plus `pnpm lint` and `pnpm format:check`. I did not run `pnpm build` or the full `pnpm test`. AC 2 was not run against a real PR that is behind main. It follows from the three-dot diff and is not tested directly. The rebase onto origin/main finished without conflicts. The lease push was blocked by the hook because the session cwd resolves to the main checkout. The branch did not exist on origin, so I pushed it with a plain `git push -u`, which succeeded. The backlog task file change (status set to In Progress) is included in the commit.
-
+(none)
