@@ -34,6 +34,31 @@ describe('Step 3 — setupWorktree', () => {
     expect(fake.calls.find((c) => c.command === 'git' && c.args[0] === 'fetch')).toBeDefined();
   });
 
+  it('builds pipeline-cli once in the new worktree via the ensure-built helper (AISDLC-1001)', async () => {
+    const wt = join(tmp, '.worktrees', 'aisdlc-1001');
+    const helperDir = join(wt, 'ai-sdlc-plugin', 'scripts');
+    const fake = new FakeRunner()
+      .on(/^git fetch origin main/, ok())
+      .on(/^git worktree add/, () => {
+        mkdirSync(helperDir, { recursive: true });
+        mkdirSync(join(wt, 'node_modules'), { recursive: true });
+        writeFileSync(join(helperDir, 'ensure-pipeline-cli-built.sh'), '#!/usr/bin/env bash\n');
+        return ok();
+      })
+      .on(/^git -C .+ rev-parse HEAD/, ok('abc123\n'))
+      .on(/^bash /, ok());
+    await setupWorktree({
+      taskId: 'AISDLC-1001',
+      branch: 'b1001',
+      worktreePath: wt,
+      workDir: tmp,
+      runner: fake.toRunner(),
+    });
+    const builds = fake.calls.filter((c) => c.command === 'bash');
+    expect(builds).toHaveLength(1);
+    expect(builds[0].args).toEqual([join(helperDir, 'ensure-pipeline-cli-built.sh'), wt]);
+  });
+
   it('skips fetch when skipFetch is true', async () => {
     const fake = new FakeRunner()
       .on(/^git worktree add/, ok())

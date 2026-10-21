@@ -315,3 +315,51 @@ describe('range mode judges only follow-up items the push changes (AISDLC-733)',
     assert.match(r.stderr, /declined:/);
   });
 });
+
+describe('missing dist in a checkout with pipeline-cli/src (AISDLC-1001)', () => {
+  it('builds once via pnpm, then evaluates the rule; a failed build refuses', () => {
+    const root = mkdtempSync(join(tmpdir(), 'followup-nodist-'));
+    mkdirSync(join(root, 'scripts'));
+    mkdirSync(join(root, 'ai-sdlc-plugin', 'scripts'), { recursive: true });
+    mkdirSync(join(root, 'pipeline-cli', 'src'), { recursive: true });
+    writeFileSync(join(root, 'pipeline-cli', 'package.json'), '{}');
+    writeFileSync(join(root, 'pipeline-cli', 'src', 'a.ts'), 'export {};\n');
+    const helper = join(root, 'ai-sdlc-plugin', 'scripts', 'ensure-pipeline-cli-built.sh');
+    writeFileSync(
+      helper,
+      readFileSync(join(REPO_ROOT, 'ai-sdlc-plugin/scripts/ensure-pipeline-cli-built.sh')),
+    );
+    writeFileSync(join(root, 'scripts', 'check-followups.mjs'), readFileSync(CHECK));
+    const bin = join(root, 'fakebin');
+    mkdirSync(bin);
+    const pnpm = (body) => {
+      writeFileSync(join(bin, 'pnpm'), `#!/usr/bin/env bash\n${body}`);
+      execFileSync('chmod', ['+x', join(bin, 'pnpm'), helper]);
+    };
+    const taskFile = join(root, 't.md');
+    writeFileSync(taskFile, task('\n### Follow-up\n(none)\n'));
+    const exec = () =>
+      spawnSync('node', [join(root, 'scripts', 'check-followups.mjs'), '--task', taskFile], {
+        cwd: root,
+        encoding: 'utf-8',
+        env: env({ PATH: `${bin}:${process.env.PATH}` }),
+      });
+    try {
+      pnpm('echo "TS2322: boom" >&2\nexit 1\n');
+      const bad = exec();
+      assert.equal(bad.status, 1);
+      assert.match(bad.stderr, /build failed/);
+      assert.match(bad.stderr, /TS2322: boom/);
+
+      // The fake build installs the real compiled rule next to the copied script.
+      const dest = join(root, 'pipeline-cli', 'dist');
+      pnpm(
+        `mkdir -p "${dest}" && cp -R "${join(REPO_ROOT, 'pipeline-cli', 'dist')}/." "${dest}/"\n`,
+      );
+      const ok = exec();
+      assert.equal(ok.status, 0, ok.stderr);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

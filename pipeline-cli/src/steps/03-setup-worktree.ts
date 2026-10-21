@@ -649,6 +649,21 @@ export async function setupWorktree(opts: SetupWorktreeOptions): Promise<SetupWo
   if (hooks.status === 'missing') {
     throw new Error(`Step 3 refused to continue for ${opts.taskId}: ${hooks.message}`);
   }
+  // AISDLC-1001: build pipeline-cli once after install so the developer step and the
+  // pre-push follow-up gate find a dist. A failed build is not fatal here: the gate
+  // runs the same helper and refuses, with the build output, only if it fails again.
+  const ensureBuilt = join(
+    opts.worktreePath,
+    'ai-sdlc-plugin',
+    'scripts',
+    'ensure-pipeline-cli-built.sh',
+  );
+  if (existsSync(ensureBuilt) && existsSync(join(opts.worktreePath, 'node_modules'))) {
+    await runner('bash', [ensureBuilt, opts.worktreePath], {
+      timeout: 600_000,
+      allowFailure: true,
+    });
+  }
   if (opts.taskFilePathOverride && existsSync(opts.taskFilePathOverride)) {
     const destDir = join(opts.worktreePath, 'backlog', 'tasks');
     const dest = join(destDir, basename(opts.taskFilePathOverride));
