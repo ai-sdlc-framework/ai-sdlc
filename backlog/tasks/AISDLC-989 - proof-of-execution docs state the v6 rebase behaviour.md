@@ -1,7 +1,7 @@
 ---
 id: AISDLC-989
 title: 'Proof of Execution docs state the v6 rebase behaviour instead of "survives rebases"'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-20'
 labels:

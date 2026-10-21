@@ -18,7 +18,7 @@ Proof of Execution makes the absence of a review visible. If a reviewer never ra
 1. Each reviewer subagent runs with transcript capture on. The transcript is hashed and emitted as a leaf, with the reviewer role, the verdict and the content hash of the diff it looked at.
 2. The leaves are combined into a Merkle root. The root, the subject commit and the leaf index go into a DSSE envelope.
 3. The operator's ed25519 key signs the envelope. The envelope is committed in the repository under the attestations directory.
-4. CI recomputes the root from the committed leaves and checks the signature. The check is patch-scoped, so a rebase that does not touch the reviewed files does not invalidate the attestation.
+4. CI recomputes the root from the committed leaves and checks the signature. The check is patch-scoped. The evidence is bound to the diff's content, so a rebase that leaves the diff unchanged is re-signed without re-running the reviewers; one that changes the diff requires a new review. It can be verified later against any commit that is still reachable. The v6 head-binding rule is in [attestation-reference](../operations/attestation-reference.md).
 
 ## What it does and does not prove
 
