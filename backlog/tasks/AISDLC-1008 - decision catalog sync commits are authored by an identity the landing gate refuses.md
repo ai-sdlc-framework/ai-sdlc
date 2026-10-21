@@ -2,7 +2,7 @@
 id: AISDLC-1008
 title: >-
   Decision-catalog sync commits are authored by an identity the landing gate refuses, so every sync PR needs a human
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-21'
 labels:
