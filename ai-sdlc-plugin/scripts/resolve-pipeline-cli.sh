@@ -9,8 +9,8 @@
 #   0. AISDLC-716: the current repository contains the pipeline-cli workspace
 #      package itself (dogfood) → use THAT repo's build, never the plugin cache:
 #      the main checkout's pipeline-cli (dist present and not older than src),
-#      else the worktree's, else fall through to 1-6 with a stderr warning that
-#      names the rebuild command. Adopter repos have no such workspace and skip
+#      else the worktree's; a missing or stale build is rebuilt (AISDLC-1001), and a
+#      failed build exits 1; there is no cache fallback for this topology. Adopter repos have no such workspace and skip
 #      this step entirely. AISDLC-791: when the main checkout has the hierarchy
 #      source (src/hierarchy/up.ts) its dist/hierarchy/up.js must exist and be at
 #      least as new, or the script exits 1 with the build command: a worktree's
@@ -40,11 +40,12 @@
 #
 #   PIPELINE_CLI_BIN=$(bash "$PLUGIN_SCRIPTS_DIR/resolve-pipeline-cli.sh") || exit 1
 #
-# Flags (AISDLC-988):
-#   --strict  (or AI_SDLC_RESOLVE_STRICT=1) inside a repo that ships the pipeline-cli
-#             workspace, a missing or stale repo build exits 1 with the rebuild
-#             command instead of falling back to the plugin cache. cli-hierarchy up
-#             and ai-sdlc doctor use it; every other caller keeps the fallback.
+# Flags (AISDLC-988, AISDLC-1001):
+#   --strict  (or AI_SDLC_RESOLVE_STRICT=1) accepted for compatibility. Inside a repo
+#             that ships pipeline-cli/src the resolver now ALWAYS builds a missing or
+#             stale repo build once (ensure-pipeline-cli-built.sh) and never falls
+#             back to the plugin cache; a failed build exits 1 with the build error.
+#             The plugin-cache fallback remains only for consumer repos.
 #
 # Environment variables read:
 #   CLAUDE_PLUGIN_DIR  — set by Claude Code harness for marketplace installs
@@ -151,6 +152,15 @@ if [ -n "$REPO_WORKTREE_ROOT" ] && _is_pipeline_cli_workspace "$REPO_WORKTREE_RO
     [ "$(basename "$GIT_COMMON")" = ".git" ] && REPO_MAIN_ROOT="$(dirname "$GIT_COMMON")"
   fi
   REBUILD_HINT="run: pnpm --filter @ai-sdlc/pipeline-cli build"
+  # AISDLC-1001: a missing or stale repo build is built here (once), never replaced by
+  # the plugin cache; a failed build exits 1 with the build error line.
+  ENSURE_BUILT="$SELF_SCRIPT_DIR/ensure-pipeline-cli-built.sh"
+  for BUILD_ROOT in "$REPO_MAIN_ROOT" "$REPO_WORKTREE_ROOT"; do
+    [ -n "$BUILD_ROOT" ] && _is_pipeline_cli_workspace "$BUILD_ROOT" || continue
+    # Build the first checkout that exists; the main checkout wins when it is a workspace.
+    if bash "$ENSURE_BUILT" "$BUILD_ROOT" >&2; then break; fi
+    exit 1
+  done
   # AISDLC-791: a main checkout that ships the hierarchy source must hold a build of it.
   if [ -n "$REPO_MAIN_ROOT" ] && _is_pipeline_cli_workspace "$REPO_MAIN_ROOT" \
     && [ -f "$REPO_MAIN_ROOT/pipeline-cli/src/hierarchy/up.ts" ]; then
@@ -177,11 +187,9 @@ if [ -n "$REPO_WORKTREE_ROOT" ] && _is_pipeline_cli_workspace "$REPO_WORKTREE_RO
     fi
     REPO_WARN="${REPO_WARN:+$REPO_WARN; }$LABEL build at $ROOT/pipeline-cli is missing or older than its sources"
   done
-  if [ -n "$STRICT" ] && [ "$STRICT" != "0" ]; then
-    echo "resolve-pipeline-cli.sh: ERROR — $REPO_WARN; refusing to fall back to the plugin install (--strict). $REBUILD_HINT" >&2
-    exit 1
-  fi
-  echo "resolve-pipeline-cli.sh: WARNING — $REPO_WARN; falling back to the plugin install, which may be older than this repo's sources ($REBUILD_HINT)" >&2
+  # AISDLC-1001: the monorepo never runs on the plugin-cache CLI.
+  echo "resolve-pipeline-cli.sh: ERROR — ${REPO_WARN:-the repo pipeline-cli build is unusable}; refusing to fall back to the plugin install. $REBUILD_HINT" >&2
+  exit 1
 fi
 
 # ── Topology 1: CLAUDE_PLUGIN_DIR set + deps bundled ────────────────────────

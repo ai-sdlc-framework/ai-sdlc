@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1001
 title: 'pipeline-cli dist goes stale after every main fast-forward: resolver falls back to the plugin cache and the follow-up gate fails closed in fresh worktrees'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-21'
 labels:

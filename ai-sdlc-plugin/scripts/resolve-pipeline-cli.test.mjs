@@ -84,6 +84,10 @@ function installScriptCopy(cwd) {
   const copy = join(scriptsDir, 'resolve-pipeline-cli.sh');
   copyFileSync(SCRIPT, copy);
   chmodSync(copy, 0o755);
+  // AISDLC-1001: the resolver calls its sibling ensure-built helper.
+  const helper = join(scriptsDir, 'ensure-pipeline-cli-built.sh');
+  copyFileSync(join(__dirname, 'ensure-pipeline-cli-built.sh'), helper);
+  chmodSync(helper, 0o755);
   return copy;
 }
 
@@ -679,39 +683,55 @@ describe('AISDLC-716: repo-own build preferred over plugin cache', () => {
     rmSync(base, { recursive: true, force: true });
   });
 
-  it('stale dist: warns with the rebuild command and falls back to the plugin cache', () => {
-    const base = mkdtempSync(join(tmpdir(), 'aisdlc-716-stale-'));
-    const repo = join(base, 'repo');
-    makeDogfoodRepo(repo, { dist: true });
-    const t = new Date(Date.now() + 60000);
-    utimesSync(join(repo, 'pipeline-cli', 'src', 'a.ts'), t, t);
-    const { stdout, stderr, exitCode } = runScript({ HOME: cacheHome(base) }, repo);
-    assert.equal(exitCode, 0);
-    assert.match(stdout, /plugins\/cache\/mp\/ai-sdlc\/1\.0\.0/);
-    assert.match(stderr, /WARNING/);
-    assert.match(stderr, /pnpm --filter @ai-sdlc\/pipeline-cli build/);
-    rmSync(base, { recursive: true, force: true });
+  /** A PATH dir holding a fake `pnpm` that either "builds" (touches dist) or fails. */
+  function fakePnpm(base, { ok }) {
+    const bin = join(base, 'fakebin');
+    mkdirSync(bin, { recursive: true });
+    const body = ok
+      ? 'mkdir -p pipeline-cli/dist && echo built > pipeline-cli/dist/a.js && touch -t 203001010000 pipeline-cli/dist/a.js\n'
+      : 'echo "TS2322: boom" >&2\nexit 1\n';
+    writeFileSync(join(bin, 'pnpm'), `#!/usr/bin/env bash\n${body}`);
+    chmodSync(join(bin, 'pnpm'), 0o755);
+    return `${bin}:${process.env.PATH}`;
+  }
+
+  it('AISDLC-1001: stale or deleted dist is rebuilt and the repo bin printed, never the plugin cache', () => {
+    for (const mode of ['stale', 'deleted']) {
+      const base = mkdtempSync(join(tmpdir(), `aisdlc-1001-${mode}-`));
+      const repo = join(base, 'repo');
+      makeDogfoodRepo(repo, { dist: true });
+      if (mode === 'stale') {
+        const t = new Date(Date.now() + 60000);
+        utimesSync(join(repo, 'pipeline-cli', 'src', 'a.ts'), t, t);
+      } else {
+        rmSync(join(repo, 'pipeline-cli', 'dist'), { recursive: true, force: true });
+      }
+      const r = spawnSync('bash', [SCRIPT], {
+        cwd: repo,
+        encoding: 'utf-8',
+        env: { ...process.env, HOME: cacheHome(base), PATH: fakePnpm(base, { ok: true }) },
+      });
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(normPath(r.stdout), normPath(join(repo, 'pipeline-cli', 'bin')));
+      assert.doesNotMatch(r.stdout, /plugins\/cache/);
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 
-  it('AISDLC-988: --strict (and the env) exit 1 on a stale dist instead of using the plugin cache', () => {
-    const base = mkdtempSync(join(tmpdir(), 'aisdlc-988-strict-'));
+  it('AISDLC-1001: a broken build exits 1 with the build error line, no cache fallback', () => {
+    const base = mkdtempSync(join(tmpdir(), 'aisdlc-1001-broken-'));
     const repo = join(base, 'repo');
-    makeDogfoodRepo(repo, { dist: true });
-    const t = new Date(Date.now() + 60000);
-    utimesSync(join(repo, 'pipeline-cli', 'src', 'a.ts'), t, t);
-    for (const [env, args] of [
-      [{}, ['--strict']],
-      [{ AI_SDLC_RESOLVE_STRICT: '1' }, []],
-    ]) {
+    makeDogfoodRepo(repo, { dist: false });
+    for (const args of [[], ['--strict']]) {
       const r = spawnSync('bash', [SCRIPT, ...args], {
         cwd: repo,
         encoding: 'utf-8',
-        env: { ...process.env, HOME: cacheHome(base), ...env },
+        env: { ...process.env, HOME: cacheHome(base), PATH: fakePnpm(base, { ok: false }) },
       });
       assert.equal(r.status, 1);
       assert.equal(r.stdout, '');
-      assert.match(r.stderr, /ERROR/);
-      assert.match(r.stderr, /pnpm --filter @ai-sdlc\/pipeline-cli build/);
+      assert.match(r.stderr, /pipeline-cli build failed/);
+      assert.match(r.stderr, /TS2322: boom/);
     }
     rmSync(base, { recursive: true, force: true });
   });

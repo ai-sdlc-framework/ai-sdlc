@@ -148,6 +148,16 @@ command itself and then launches. Other callers of the resolve script, without `
 keep the warning and the cache fallback. `ai-sdlc doctor` reports the same condition as
 `stale-repo-build`.
 
+**The monorepo never runs on the plugin-cache CLI (AISDLC-1001).** Superseding the
+non-strict fallback above: in a repo that has `pipeline-cli/src`, `resolve-pipeline-cli.sh`
+runs `ensure-pipeline-cli-built.sh` (one `pnpm --filter @ai-sdlc/pipeline-cli build`, only
+when `dist` is missing or older than `src`) and prints the repo bin. If the build fails it
+exits 1 with the build error line on stderr, which the dispatch tick's resolve step shows;
+it never prints a plugin-cache path. `--strict` is accepted and now implied. The cache
+fallback remains only for consumer repos without `pipeline-cli/src`. The same helper runs
+in worktree setup (once, after install) and in `scripts/check-followups.mjs` when its rule
+module is missing, so a fresh executor worktree no longer fails the push on a missing dist.
+
 **Pinned Node (AISDLC-812).** Every session command starts by loading nvm and running
 `nvm use <version>`, so the Node a session runs under never depends on the launching
 shell's default. The version is `--node <version>` when given, otherwise the first line of

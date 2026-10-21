@@ -13,16 +13,19 @@
  * branch's inheritance, not its work, so touching a completed task for another
  * reason (a dead script reference) never re-judges its old prose (AISDLC-733).
  *
- * Fails closed: a missing build, unreadable file or git error exits non-zero.
+ * A missing build in a checkout with pipeline-cli/src is built once (AISDLC-1001).
+ * Fails closed: a failed build, unreadable file or git error exits non-zero.
  * Exit codes: 0 pass, 1 violation or error, 2 usage.
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const RULE_DIST = join(SCRIPT_DIR, '..', 'pipeline-cli', 'dist', 'backlog', 'followup-rule.js');
+const REPO_DIR = join(SCRIPT_DIR, '..');
+const ENSURE_BUILT = join(REPO_DIR, 'ai-sdlc-plugin', 'scripts', 'ensure-pipeline-cli-built.sh');
+const RULE_DIST = join(REPO_DIR, 'pipeline-cli', 'dist', 'backlog', 'followup-rule.js');
 
 function fail(msg, code = 1) {
   process.stderr.write(`[followup-gate] ${msg}\n`);
@@ -104,6 +107,13 @@ async function main() {
     : completedFilesInRange(args.range);
   if (files.length === 0) return 0;
 
+  if (!existsSync(RULE_DIST) && existsSync(join(REPO_DIR, 'pipeline-cli', 'src'))) {
+    // AISDLC-1001: a fresh worktree has no dist; build once rather than refuse.
+    const built = spawnSync('bash', [ENSURE_BUILT, REPO_DIR], { encoding: 'utf-8' });
+    if (built.status !== 0) {
+      fail(`pipeline-cli build failed, cannot load the rule: ${(built.stderr || '').trim()}`);
+    }
+  }
   if (!existsSync(RULE_DIST)) {
     fail(
       `pipeline-cli is not built (missing ${RULE_DIST}). Run: pnpm --filter @ai-sdlc/pipeline-cli build`,
