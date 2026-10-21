@@ -60,6 +60,7 @@
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 import {
@@ -281,6 +282,11 @@ export interface RunReconcileOptions {
    * `pipeline-cli/bin/cli-attestation.mjs` relative to workDir.
    */
   cliAttestationBin?: string;
+  /**
+   * Override the `cli-merge-if-eligible.mjs` path used to arm auto-merge
+   * (AISDLC-975). Defaults to the bin shipped beside this module.
+   */
+  mergeIfEligibleScriptPath?: string;
   /**
    * Optional shim — overrides `spawnSync` for hermetic tests. The shim
    * mirrors the spawnSync signature but only the fields reconcile
@@ -928,9 +934,16 @@ function runReconcileInner(
   // Step 5: arm auto-merge.
   // -------------------------------------------------------------------------
   if (!options.skipArmAutoMerge && prNumber) {
-    const arm = spawn('gh', ['pr', 'merge', '--auto', '--squash', prNumber], {
-      cwd: worktreePath,
-    });
+    // AISDLC-975: arm through the merge-if-eligible gate (same code as the CLI),
+    // so a refusal carries the gate's reason in the step output.
+    const armScript =
+      options.mergeIfEligibleScriptPath ??
+      fileURLToPath(new URL('../../bin/cli-merge-if-eligible.mjs', import.meta.url));
+    const arm = spawn(
+      'node',
+      [armScript, prNumber, '--source-kind', 'backlog', '--arm', '--format', 'text'],
+      { cwd: worktreePath },
+    );
     steps.push({
       name: 'gh-pr-merge-auto',
       status: arm.status === 0 ? 'success' : 'failed',
