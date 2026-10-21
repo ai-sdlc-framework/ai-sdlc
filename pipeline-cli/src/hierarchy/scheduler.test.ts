@@ -15,6 +15,8 @@ describe('scheduler (AC3)', () => {
   it('picks the busy interval while PRs are open, else the idle one', () => {
     expect(nextIntervalMs(2)).toBe(BUSY_INTERVAL_MS);
     expect(nextIntervalMs(0)).toBe(IDLE_INTERVAL_MS);
+    expect(nextIntervalMs(1, 5, 9)).toBe(5);
+    expect(nextIntervalMs(0, 5, 9)).toBe(9);
   });
 
   it('reconciles at start, once per debounced wake-file touch, and on the timer, with no model', async () => {

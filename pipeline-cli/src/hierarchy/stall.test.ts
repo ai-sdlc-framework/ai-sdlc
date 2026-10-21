@@ -19,6 +19,12 @@ describe('stallThresholdsFromEnv', () => {
     expect(DEFAULT_STALL_STALE_MS).toBe(30 * 60_000);
     expect(DEFAULT_STALL_GRACE_MS).toBe(10 * 60_000);
   });
+  it('uses the supplied defaults when the environment is empty', () => {
+    expect(stallThresholdsFromEnv({}, { staleMs: 7, graceMs: 3 })).toEqual({
+      staleMs: 7,
+      graceMs: 3,
+    });
+  });
   it('reads positive numbers and ignores junk', () => {
     expect(
       stallThresholdsFromEnv({
