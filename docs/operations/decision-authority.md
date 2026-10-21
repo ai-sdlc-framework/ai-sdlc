@@ -166,3 +166,7 @@ DEC-0183 (dispatch corrects a manifest whose branch differs from the PR head wit
 ## Superseded: DEC-0187 re-enqueue procedure
 
 DEC-0187 (hand-editing the verdict and writing a manifest to re-enqueue a failed task that hit the retry cap) is superseded by AISDLC-857. `requeueFailed` now reads `prNumber` as well as `prUrl` from the failed verdict, so an OPEN PR always counts as follow-up and consumes no retry. A failed verdict with neither field at the cap is still refused.
+
+## Superseded-PR close (AISDLC-1011, DEC-0266)
+
+The never-close rule has one mechanical exception: the reconciler closes a PR the CLI opened (`ai-sdlc/file-*`, `ai-sdlc/decisions-sync`, or an `ai-sdlc/<task-id>-*` branch whose task is Done) only when a landed PR carries the same task or decision id and every file in its diff has the same blob sha on GitHub's main (or is absent on both), through `cli-dispatch close-superseded` alone, which posts a comment naming the landed PR and appends a `superseded-close` audit record (pr, superseding pr, content hashes) under the board's `audit/` directory; sessions still cannot run the raw close subcommand.

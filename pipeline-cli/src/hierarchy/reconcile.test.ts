@@ -830,3 +830,37 @@ describe('same-head loop guard (AISDLC-883)', () => {
     expect(rebases()).toBe(2);
   });
 });
+
+describe('superseded close (AISDLC-1011)', () => {
+  it('closes a would-be route-to-planner PR once and records it as closed-unlanded', () => {
+    const f = docsPr({ checks: [{ name: 'ai-sdlc/pr-ready', conclusion: 'failure' }] });
+    const execute = vi.fn(() => ({ ran: true }));
+    const closeSuperseded = vi.fn(() => 99);
+    const r = reconcile([f], { boardDir: board, execute, now: fixedNow, closeSuperseded });
+    expect(closeSuperseded).toHaveBeenCalledWith(20);
+    expect(r.acted[0]).toMatchObject({ action: 'superseded-close', note: 'superseded by #99' });
+    expect(execute).not.toHaveBeenCalled();
+    expect(readLanding(board, 20)?.closedUnlanded).toBeDefined();
+  });
+
+  it('keeps route-to-planner when the closer declines, and never asks for other actions', () => {
+    const failing = docsPr({ checks: [{ name: 'ai-sdlc/pr-ready', conclusion: 'failure' }] });
+    const closeSuperseded = vi.fn(() => undefined);
+    const r = reconcile([failing], {
+      boardDir: board,
+      execute: () => ({ ran: false }),
+      now: fixedNow,
+      closeSuperseded,
+    });
+    expect(r.acted[0]?.action).toBe('route-to-planner');
+    const g = docsPr({ prNumber: 21 });
+    closeSuperseded.mockClear();
+    reconcile([g], {
+      boardDir: board,
+      execute: () => ({ ran: true }),
+      now: fixedNow,
+      closeSuperseded,
+    });
+    expect(closeSuperseded).not.toHaveBeenCalled();
+  });
+});

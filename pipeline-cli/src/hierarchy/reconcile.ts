@@ -547,6 +547,11 @@ export interface ReconcileOpts {
   mainHealth?: MainHealth;
   /** `loopGuard.maxSameHeadActions` from `.ai-sdlc/pr-lifecycle.yaml`; default 1. */
   maxSameHeadActions?: number;
+  /**
+   * AISDLC-1011 (DEC-0266): asked for a PR that would otherwise go to the planner.
+   * Returns the superseding PR number when it closed the PR, else undefined.
+   */
+  closeSuperseded?: (pr: number) => number | undefined;
 }
 
 /** Reconcile a set of PR facts: update the records and run the actions. Idempotent. */
@@ -562,7 +567,38 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
   for (const f of facts) {
     const existing = readLanding(opts.boardDir, f.prNumber);
     const ruled = rulingFacts(opts.boardDir, f, facts);
-    const d = decide(f, existing, ruled, opts.maxSameHeadActions);
+    let d = decide(f, existing, ruled, opts.maxSameHeadActions);
+    if (d.action === 'route-to-planner' && opts.closeSuperseded && f.merged !== true) {
+      const by = opts.closeSuperseded(f.prNumber);
+      if (by !== undefined) {
+        d = { ...d, action: 'superseded-close', note: `superseded by #${by}` };
+        const ts0 = now().toISOString();
+        const closedRecord: LandingRecord = {
+          pr: f.prNumber,
+          kind: d.kind === 'release' ? 'docs' : d.kind,
+          ...(f.taskId ? { taskId: f.taskId } : {}),
+          owner: 'machine',
+          state: d.state,
+          action: d.action,
+          ...(f.headSha === undefined ? {} : { headSha: f.headSha }),
+          note: d.note ?? '',
+          closedUnlanded: ts0,
+          history: [
+            ...(existing?.history ?? []),
+            {
+              ts: ts0,
+              state: d.state,
+              action: d.action,
+              ...(f.headSha === undefined ? {} : { headSha: f.headSha }),
+            },
+          ],
+        };
+        writeLanding(opts.boardDir, closedRecord);
+        report.records.push(closedRecord);
+        report.acted.push({ pr: f.prNumber, action: d.action, ran: true, note: d.note ?? '' });
+        continue;
+      }
+    }
     // The hold is lifted: drop the ruling so it is not carried past the task it waited on.
     if (d.action === 'ready-to-requeue') {
       try {
