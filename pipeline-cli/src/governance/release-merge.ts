@@ -57,6 +57,7 @@
 
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { auditGovernanceDir } from './audit-dir.js';
 import type { Runner } from '../runtime/exec.js';
 import {
   armPr,
@@ -552,10 +553,7 @@ export type AuditWriter = (record: ReleaseAuditRecord) => void;
 export function defaultAuditWriter(artifactsDir?: string): AuditWriter {
   return (record) => {
     try {
-      const dir = join(
-        artifactsDir ?? process.env.ARTIFACTS_DIR ?? join(process.cwd(), 'artifacts'),
-        '_governance',
-      );
+      const dir = auditGovernanceDir(artifactsDir);
       mkdirSync(dir, { recursive: true });
       appendFileSync(
         join(dir, `merge-audit-${record.ts.slice(0, 10)}.jsonl`),

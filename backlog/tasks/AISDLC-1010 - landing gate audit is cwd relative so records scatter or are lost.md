@@ -2,7 +2,7 @@
 id: AISDLC-1010
 title: >-
   Landing-gate audit is cwd-relative, so records scatter across worktrees or are lost
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-21'
 labels:
