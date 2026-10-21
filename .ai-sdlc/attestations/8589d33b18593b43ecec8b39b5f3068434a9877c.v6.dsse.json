@@ -1,0 +1,85 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "7ea6bbb77602d6265abd3d19af0d59c5a8f21fce"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "19396b2699a560b75621af287c71564ea29a7ba5314613e0bddb59a855c201ad",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "19396b2699a560b75621af287c71564ea29a7ba5314613e0bddb59a855c201ad",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "5c1df8fa2fda4a31beb97618565c78b508e7c04e74f129677638b5cc71798ff2",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "5c1df8fa2fda4a31beb97618565c78b508e7c04e74f129677638b5cc71798ff2",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "9c147c55c4caeaef217f4abe9cf183484ab2817e17fb89f59d00a4fe6a47cd6f",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "9c147c55c4caeaef217f4abe9cf183484ab2817e17fb89f59d00a4fe6a47cd6f",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "675bac969d4e18a74640a5b7cb376105b976aff565ddeec0b3d79f423a52b0c3",
+        "847749d829fc58b0a60eea30d6212f5deba284614efe930b8c2ea884f3a87578"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "3a5af20d732d2ce9ac7239c1f8d76b9a55639a2f63c5eeebdf3f40f7175f2a68",
+        "847749d829fc58b0a60eea30d6212f5deba284614efe930b8c2ea884f3a87578"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "9cb61689eaf52107b10e4dbec8266ff3d4064719dc4fbd9025444cc638b8aacf",
+        "905b015435421427838fb9f51c074887feedf4f3ac315e5cf8015389d1ee7c30"
+      ]
+    }
+  ],
+  "rootHash": "83e7e6afaf74ec7dcb19888a68bcd1a482771c386cc9a76803199be4af764958",
+  "rootSignature": "3WgLKB6s059+WKl7MGR/hntXp6poGw0w9RqiKpwzQMvtGmWefUk1Sj4cO8FTJ35HEFzhhah/fvTqvERUyOxpCw==",
+  "nonce": "2bafd621766cb037410aa9b1d046150e6f7feea28a06c93177816ec0ea20206b",
+  "leafCount": 3,
+  "signedAt": "2026-10-21T16:26:48.729Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      ".ai-sdlc/agent-role.yaml",
+      "CLAUDE.md",
+      "ai-sdlc-plugin/hooks/enforce-blocked-actions.js",
+      "ai-sdlc-plugin/hooks/enforce-lease-any-branch.test.mjs",
+      "ai-sdlc-plugin/hooks/lib/governance-resolver.js",
+      "ai-sdlc-plugin/hooks/lib/governance-resolver.test.mjs",
+      "ai-sdlc-plugin/hooks/lib/lease-push-guard.js",
+      "ai-sdlc-plugin/hooks/lib/lease-push-guard.test.mjs",
+      "ai-sdlc-plugin/hooks/lib/trusted-policy.js",
+      "pipeline-cli/src/hierarchy/lease-policy.ts",
+      "pipeline-cli/src/hierarchy/operational.ts",
+      "reference/src/core/generated-schemas.ts",
+      "spec/schemas/agent-role.schema.json"
+    ],
+    "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
+  }
+}
