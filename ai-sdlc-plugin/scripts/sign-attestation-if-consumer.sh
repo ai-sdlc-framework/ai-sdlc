@@ -373,6 +373,12 @@ fi
 ITERATION_COUNT="${AI_SDLC_ITERATION_COUNT:-1}"
 HARNESS_NOTE="${AI_SDLC_HARNESS_NOTE:-}"
 
+# AISDLC-998: hand the post-rebase content patch-id (computed above against
+# BASE_REF) to the signer so signer and verifier share one key.
+PATCH_ID_ARGS=()
+if [ -n "$PATCH_ID" ]; then
+  PATCH_ID_ARGS=(--patch-id "$PATCH_ID")
+fi
 HARNESS_ARGS=()
 if [ -n "${CODEX_VERSION:-}" ]; then
   CODEX_VERSION_NUM="${CODEX_VERSION#codex@}"
@@ -403,6 +409,7 @@ if [ -n "${AI_SDLC_SIGN_ATTESTATION_CMD:-}" ]; then
       --iteration-count "$ITERATION_COUNT" \
       --harness-note "$HARNESS_NOTE" \
       --schema-version "$SCHEMA_VERSION" \
+      ${PATCH_ID_ARGS[@]+"${PATCH_ID_ARGS[@]}"} \
       ${HARNESS_ARGS[@]+"${HARNESS_ARGS[@]}"}; then
     echo "[sign-attestation-if-consumer] ERROR: signer invocation (override) failed; aborting" >&2
     exit 2
@@ -417,6 +424,7 @@ else
       --iteration-count "$ITERATION_COUNT" \
       --harness-note "$HARNESS_NOTE" \
       --schema-version "$SCHEMA_VERSION" \
+      ${PATCH_ID_ARGS[@]+"${PATCH_ID_ARGS[@]}"} \
       ${HARNESS_ARGS[@]+"${HARNESS_ARGS[@]}"}; then
     echo "[sign-attestation-if-consumer] ERROR: sign-attestation.mjs failed; aborting" >&2
     exit 2

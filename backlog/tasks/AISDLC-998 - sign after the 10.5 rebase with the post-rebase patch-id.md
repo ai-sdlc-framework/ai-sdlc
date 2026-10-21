@@ -1,7 +1,7 @@
 ---
 id: AISDLC-998
 title: 'Step 10.6 signs with the post-rebase patch-id, or sends a changed diff back to review'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-20'
 labels:

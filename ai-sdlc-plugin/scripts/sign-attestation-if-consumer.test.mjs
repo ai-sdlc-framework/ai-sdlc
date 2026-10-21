@@ -352,6 +352,26 @@ describe('sign-attestation-if-consumer.sh (AISDLC-598)', () => {
   });
 
   describe('consumer push path — signs in-process', () => {
+    it('AISDLC-998: passes the computed --patch-id to the signer', () => {
+      installConsumerPushPath(root);
+      writeFileSync(join(root, 'feature.txt'), 'feature\n');
+      git(['add', 'feature.txt'], root);
+      git(['commit', '-q', '-m', 'feature'], root);
+      writeFileSync(join(root, '.active-task'), 'AISDLC-598\n');
+      writeVerdictFile(root, 'AISDLC-598');
+      const { cmd: signCmd, logPath: signLog } = installFakeSigner(root);
+      const { cmd: verifyCmd } = installFakeVerifier(root, { valid: true });
+
+      const r = runScript(root, {
+        AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+        AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+        AI_SDLC_VERIFY_ATTESTATION_CMD: verifyCmd,
+      });
+
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(readFileSync(signLog, 'utf8'), /--patch-id [0-9a-f]{40}/);
+    });
+
     it('AC #1: signs + commits + self-verifies (status=valid) when no signer is on the push path', () => {
       installConsumerPushPath(root);
       writeFileSync(join(root, '.active-task'), 'AISDLC-598\n');

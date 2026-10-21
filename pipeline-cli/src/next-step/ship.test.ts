@@ -152,6 +152,22 @@ describe('preSignRebase (AISDLC-102)', () => {
     expect(r).toEqual({ kind: 'changed', before: 'A', after: 'B' });
   });
 
+  it('signs (unchanged) when the content patch-id survives the rebase (AISDLC-998)', async () => {
+    hashes('A', 'A');
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    const r = await preSignRebase(h.ctx, state, () => 'p'.repeat(40));
+    expect(r).toEqual({ kind: 'unchanged', hash: 'A' });
+  });
+
+  it('returns to review naming both patch-ids when the rebase changes it (AISDLC-998)', async () => {
+    hashes('A', 'A');
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    const ids = ['1'.repeat(40), '2'.repeat(40)];
+    let i = 0;
+    const r = await preSignRebase(h.ctx, state, () => ids[i++]);
+    expect(r).toEqual({ kind: 'changed', before: ids[0], after: ids[1] });
+  });
+
   it('names the conflicting files, aborts, and does not retry', async () => {
     hashes('A');
     h.runner.on(/merge-base --is-ancestor/, fail('', 1));
