@@ -86,6 +86,77 @@ describe('context-auto-clear hook', () => {
     assert.deepEqual(seen, ['run your handoff routine']);
   });
 
+  it('logs exactly one reason line per exit after the roster check (AISDLC-1007)', () => {
+    writeFileSync(join(board, 'hierarchy.json'), '{}');
+    const lines = [];
+    const log = (l) => lines.push(l);
+    const d = (o) => ({ status: 0, stdout: `${JSON.stringify(o)}\n` });
+    runAutoClear(payload, {
+      env: env(),
+      cwd: root,
+      log,
+      run: () => d({ action: 'clear', code: 'scheduled' }),
+    });
+    runAutoClear(payload, {
+      env: env(),
+      cwd: root,
+      log,
+      run: () => d({ action: 'none', code: 'handoff-stale' }),
+    });
+    runAutoClear(payload, {
+      env: env(),
+      cwd: root,
+      log,
+      run: () => d({ action: 'none', code: 'below-threshold' }),
+    });
+    runAutoClear(payload, {
+      env: env(),
+      cwd: root,
+      log,
+      run: () => d({ action: 'warn', message: 'm', code: 'warned' }),
+      onWarn: () => {},
+    });
+    runAutoClear(payload, {
+      env: env(),
+      cwd: root,
+      log,
+      run: () => ({ status: 1, stderr: 'bad thing\nmore' }),
+    });
+    runAutoClear(payload, {
+      env: { PIPELINE_CLI_BIN: join(root, 'missing') },
+      cwd: root,
+      pluginDir: join(root, 'no-plugin'),
+      log,
+      run: () => assert.fail('no'),
+    });
+    assert.deepEqual(lines, [
+      'scheduled',
+      'handoff-stale',
+      'below-threshold',
+      'warned',
+      'failed:bad thing',
+      'no-cli',
+    ]);
+  });
+
+  it('logReason appends to the board log, else prints', () => {
+    const { logReason } = require('./context-auto-clear.js');
+    logReason('scheduled', board);
+    assert.match(
+      readFileSync(join(board, 'log', 'context-auto-clear.log'), 'utf-8'),
+      /scheduled\n$/,
+    );
+    const orig = process.stdout.write;
+    let out = '';
+    process.stdout.write = (c) => ((out += c), true);
+    try {
+      logReason('no-cli', join(root, 'absent-board'));
+    } finally {
+      process.stdout.write = orig;
+    }
+    assert.match(out, /no-cli/);
+  });
+
   it('skips on a missing transcript, remote sandbox, opt-out and missing CLI', () => {
     const run = () => assert.fail('must not run');
     assert.equal(runAutoClear({}, { env: env(), cwd: root, run }), 'no-transcript');

@@ -611,6 +611,17 @@ A clear scheduled in the last two minutes is not scheduled again.
 - The stamp is removed when the clear is scheduled or the context is back under the threshold. An
   executor holding an inflight task is deferred before any of this, as before.
 
+**Threshold rule and reason lines (AISDLC-1007).** For planner and dispatch the handoff is
+regenerated from board state on every state change, so a handoff file rewritten in the last 15
+minutes means the clear fires at the threshold itself (no warning turn). With a stale handoff the
+warn and mtime-gate flow above applies, and the 125% hard cap is the ceiling. Executors always
+use the warn flow. Every exit of the Stop hook after the roster check appends one line to
+`<board-dir>/log/context-auto-clear.log` (`.ai-sdlc/dispatch/log/`), or prints it to hook stdout
+when the board is absent: `no-cli`, `below-threshold`, `handoff-stale`, `warned`, `scheduled`,
+`failed:<message>` (an executor with an inflight task logs `deferred`). SessionStart in a roster
+session after any clear, scheduled or manual, prints `handoff read --role <role>` and the resume
+command.
+
 | Role                | Default threshold (tokens) | Resume command              |
 | ------------------- | -------------------------- | --------------------------- |
 | planner             | 150000                     | `/ai-sdlc:planner`          |

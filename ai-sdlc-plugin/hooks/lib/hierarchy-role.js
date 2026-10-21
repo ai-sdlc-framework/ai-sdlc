@@ -218,6 +218,7 @@ function buildHierarchyRoleBlock({ source, boardDir, pids, commOf = commOfPid, r
     `- Name: ${self.name}`,
     `- Dispatch session: ${dispatch ? dispatch.name : '(not in the roster)'}`,
     `- Run now: ${ROLE_SKILL[self.role]}`,
+    `- First, run \`handoff read --role ${self.role}\` (cli-hierarchy), then the resume command ${ROLE_SKILL[self.role]}`,
   ];
   const handoff = typeof readHandoff === 'function' ? readHandoff(self) : null;
   if (handoff) {

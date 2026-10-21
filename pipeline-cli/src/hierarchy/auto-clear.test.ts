@@ -172,8 +172,41 @@ describe('decideAutoClear', () => {
     touch(handoffFile(role, name), Date.now() / 1000);
     expect(decideAutoClear(base(role, name))).toMatchObject({
       action: 'clear',
-      reason: 'handoff rewritten after the warning',
+      reason: 'over the threshold with a current handoff',
     });
+  });
+
+  it('planner at 166161 tokens with a current handoff clears at once (AISDLC-1007)', () => {
+    setTranscript(usageLine(166_161));
+    touch(handoffFile('planner', 'p'), Date.now() / 1000 - 30);
+    expect(decideAutoClear(base('planner', 'p'))).toMatchObject({
+      action: 'clear',
+      code: 'scheduled',
+      threshold: 150_000,
+    });
+  });
+
+  it('planner at 166161 tokens with a stale handoff defers and codes handoff-stale', () => {
+    setTranscript(usageLine(166_161));
+    touch(handoffFile('planner', 'p'), Date.now() / 1000 - 3600);
+    expect(decideAutoClear(base('planner', 'p'))).toMatchObject({ action: 'warn', code: 'warned' });
+    expect(decideAutoClear(base('planner', 'p'))).toMatchObject({
+      action: 'none',
+      code: 'handoff-stale',
+    });
+    setTranscript(usageLine(190_000)); // past 150k * 1.25
+    expect(decideAutoClear(base('planner', 'p'))).toMatchObject({ action: 'clear' });
+  });
+
+  it('codes below-threshold, scheduled debounce and executor deferral', () => {
+    setTranscript(usageLine(1_000));
+    expect(decideAutoClear(base('planner', 'p')).code).toBe('below-threshold');
+    setTranscript(usageLine(200_000));
+    markScheduled(board, 'd');
+    expect(decideAutoClear(base('operator-dispatch', 'd')).code).toBe('scheduled');
+    writeManifest(board, manifest('AISDLC-9'));
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'p-exec' });
+    expect(decideAutoClear(base('executor')).code).toBe('deferred');
   });
 
   it('an older handoff file does not satisfy the gate', () => {
