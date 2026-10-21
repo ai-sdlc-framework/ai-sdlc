@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1002
 title: 'main is red: executor.test.ts pins a sonnet default while model-routing.yaml routes review-executor to haiku'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-21'
 labels:
