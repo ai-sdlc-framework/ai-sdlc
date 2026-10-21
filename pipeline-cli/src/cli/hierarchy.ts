@@ -58,6 +58,7 @@
  */
 
 import { parseQuota, parseQuotaFloor } from '../hierarchy/gh-calls.js';
+import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -147,6 +148,9 @@ import {
 } from '../hierarchy/index.js';
 import { createSnapshotRunner } from '../hierarchy/pr-snapshot.js';
 import { routedModel } from '../routing/role-model.js';
+import { defaultRunner } from '../runtime/exec.js';
+import { runParentUpkeep, type ParentUpkeepResult } from '../steps/00-parent-upkeep.js';
+import { resolvePluginScriptsDir } from './next-step.js';
 import { findTaskFile, parseArgv, resolveBaseSha } from './dispatch.js';
 
 /** Dispatch holds its resume this long (upper bound; a new board file wakes it sooner). */
@@ -457,6 +461,8 @@ export async function runHierarchyCli(
     ghRun?: CommandRunner;
     /** Replaces the landing pass of the `land-eligible-prs` action (tests). */
     landEligible?: () => Promise<LandReport>;
+    /** Replaces the parent upkeep pass of the tick (tests). */
+    parentUpkeep?: () => Promise<ParentUpkeepResult>;
   } = {},
 ): Promise<number> {
   const { subcommand, flags } = parseArgv(argv);
@@ -845,6 +851,32 @@ export async function runHierarchyCli(
             findPr: (id) => findOpenPrNumber(extras.ghRun ?? deps.run, repoRoot, id),
           },
           parentHead: () => readParentHead(repoRoot),
+          // AISDLC-981: the tick owns the parent; the open-PR list is the wake's snapshot.
+          parentUpkeep:
+            extras.parentUpkeep ??
+            (async () => {
+              const open = new Set<string>();
+              const listed = wakeGh(
+                'gh',
+                ['pr', 'list', '--state', 'open', '--limit', '100', '--json', 'number,headRefName'],
+                { cwd: repoRoot },
+              );
+              try {
+                const rows = listed.status === 0 ? JSON.parse(listed.stdout) : [];
+                for (const r of rows as { headRefName?: string }[]) {
+                  if (r.headRefName) open.add(r.headRefName);
+                }
+              } catch {
+                /* unreadable list: the sweep asks gh for every branch */
+              }
+              return runParentUpkeep({
+                workDir: repoRoot,
+                runner: defaultRunner,
+                pluginScriptsDir: resolvePluginScriptsDir(deps.env, repoRoot),
+                exists: existsSync,
+                knownOpenBranches: open,
+              });
+            }),
           quota: () => {
             const r = (extras.ghRun ?? deps.run)('gh', ['api', 'rate_limit'], { cwd: repoRoot });
             return r?.status === 0 ? parseQuota(r.stdout) : undefined;

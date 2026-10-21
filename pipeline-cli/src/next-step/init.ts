@@ -1,8 +1,8 @@
 /**
  * First `next-step` call: Steps 0-5 of the pipeline, all deterministic.
  *
- *   0    parent self-heal + merged-worktree sweep
- *   0.5  sync untracked parent task files, prune stale debris
+ *   0/0.5 parent: asserted clean under dispatch; self-heal, sweep, untracked sync,
+ *         debris prune inline when standalone (AISDLC-981)
  *   1    validate the backlog task, dependency pre-flight (AISDLC-117)
  *   2-4  branch name, worktree (+ hooks check, AISDLC-693), In Progress + sentinel
  *   5    developer prompt (written to a file for the model to hand to the agent)
@@ -18,8 +18,7 @@ import { setupWorktree } from '../steps/03-setup-worktree.js';
 import { beginTask, patchFrontmatterStatus } from '../steps/04-flip-status.js';
 import { cleanupTask } from '../steps/13-cleanup.js';
 import { buildDeveloperPrompt } from '../steps/05-build-dev-prompt.js';
-import { sweepMergedWorktrees } from '../steps/00-sweep.js';
-import { pruneStaleParentDebris, syncParentUntrackedFiles } from '../steps/00-5-sync-parent.js';
+import { assertParentClean, parentUpkeepMode, runParentUpkeep } from '../steps/00-parent-upkeep.js';
 import { findTaskFile, validateTask } from '../steps/01-validate.js';
 import type { NextStepContext } from './types.js';
 import type { TaskSpec } from '../types.js';
@@ -60,35 +59,21 @@ export async function initTask(
 ): Promise<InitSuccess | InitFailure> {
   const { workDir, runner } = ctx;
 
-  // Step 0 — self-heal the parent (Pattern C: parent stays on a clean main).
-  const stateScript = join(ctx.pluginScriptsDir, 'check-orchestrator-state.sh');
-  if (ctx.exists(stateScript)) {
-    const heal = await runner('bash', [stateScript], {
-      cwd: workDir,
-      allowFailure: true,
-      timeout: 120_000,
+  // Steps 0 / 0.5 — the parent belongs to the dispatch tick (AISDLC-981): under a
+  // hierarchy session only assert it; standalone (or AI_SDLC_PARENT_UPKEEP=inline)
+  // run the repairs here.
+  if (parentUpkeepMode(ctx.env) === 'inline') {
+    const upkeep = await runParentUpkeep({
+      workDir,
+      runner,
+      pluginScriptsDir: ctx.pluginScriptsDir,
+      exists: ctx.exists,
+      logger: ctx.logger,
     });
-    if (heal.code !== 0) {
-      return {
-        ok: false,
-        reason: `Step 0 orchestrator-state check refused: ${(heal.stderr || heal.stdout).trim()}`,
-      };
-    }
-  }
-  const sweep = await sweepMergedWorktrees({ workDir, runner });
-  for (const s of sweep.swept) ctx.logger.info(`Sweeping merged worktree: ${JSON.stringify(s)}`);
-
-  // Step 0.5 — non-backlog untracked files in the parent are a hard stop.
-  const sync = await syncParentUntrackedFiles({ workDir, runner });
-  if (!sync.ok) {
-    return { ok: false, reason: sync.reason ?? 'Step 0.5 sync-parent failed' };
-  }
-  ctx.logger.info(`[Step 0.5] ${JSON.stringify(sync)}`);
-  try {
-    const pruned = await pruneStaleParentDebris({ workDir, runner });
-    if (!pruned.ok) ctx.logger.warn(`Step 0.5b: prune-stale-parent-debris reported failure`);
-  } catch (err) {
-    ctx.logger.warn(`Step 0.5b: prune failed (non-fatal): ${(err as Error).message}`);
+    if (!upkeep.ok) return { ok: false, reason: upkeep.reason };
+  } else {
+    const parent = await assertParentClean(workDir, runner);
+    if (!parent.ok) return { ok: false, reason: parent.reason };
   }
 
   // AISDLC-849: decide resume before validating, so a task file the dev already

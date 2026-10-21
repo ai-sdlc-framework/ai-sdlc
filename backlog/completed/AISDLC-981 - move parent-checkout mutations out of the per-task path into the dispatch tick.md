@@ -1,7 +1,7 @@
 ---
 id: AISDLC-981
 title: 'Move parent-checkout mutations out of the per-task path into the dispatch tick'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-20'
 labels:
