@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { validateReviewEvidence } from '@ai-sdlc/reference';
 import { afterAll, describe, expect, it } from 'vitest';
+import { routedModel } from '../routing/role-model.js';
 import {
   disposeScratchHome,
   dropPartialLine,
@@ -801,12 +802,12 @@ describe('executePlan: tools by probe type', () => {
     );
   });
 
-  it('passes the routed model, defaulting to sonnet, and the repository as cwd', async () => {
+  it('passes the routed model, defaulting to the routed model, and the repository as cwd', async () => {
     const { dir } = makeRepo();
     const a = mockSpawner();
     await executePlan(plan([read('r1')]), a.spawner, limits(dir), noAdded);
     expect(a.calls[0]).toMatchObject({
-      model: 'sonnet',
+      model: routedModel('review-executor'),
       agent: 'review-executor',
       harness: 'claude-code',
       cwd: dir,
