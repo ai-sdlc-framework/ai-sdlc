@@ -63,8 +63,12 @@ First, drain the inbox: read every pending message; apply each ruling it carries
 BOARD_DIR="${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}"
 PIPELINE_CLI_BIN=$(cat "$BOARD_DIR/.cli-bin")
 node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" tick --board-dir "$BOARD_DIR" > "$BOARD_DIR/.tick.json" || exit 1
-cat "$BOARD_DIR/.tick.json"; node "$PIPELINE_CLI_BIN/cli-ci.mjs" sweep || echo "cli-ci sweep failed"
+cat "$BOARD_DIR/.tick.json"; node "$PIPELINE_CLI_BIN/cli-ci.mjs" sweep --board-dir "$BOARD_DIR" || echo "cli-ci sweep failed"
 ```
+
+Two cadences: the 30 s busy tick touches only the board (no GitHub call); GitHub reads run
+every 5 minutes or on a webhook wake, and `cli-ci sweep --board-dir` runs at most once per 15
+minutes (a call inside that window prints `sweep skipped`).
 
 `tick` checks who is calling (the nearest roster ancestor must hold the `operator-dispatch`
 role, in the main checkout) and otherwise exits non-zero. On a non-zero exit stop; never guess

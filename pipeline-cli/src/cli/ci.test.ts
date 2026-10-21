@@ -3,7 +3,9 @@
  * touches the network.
  */
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import {
   AUTO_ENABLE_WORKFLOW,
   VERIFY_WORKFLOWS,
@@ -12,6 +14,8 @@ import {
   renderQueue,
   runQueue,
   runSweep,
+  runThrottledSweep,
+  SWEEP_INTERVAL_MS,
   summarizeQueue,
   type OpenPr,
   type WorkflowRun,
@@ -335,5 +339,28 @@ describe('buildCiCli', () => {
   it('treats an empty gh stdout as an empty list', async () => {
     const runner: Runner = async () => ({ stdout: '', stderr: '', code: 0 });
     expect(await runQueue(runner, new Date())).toMatchObject({ queued: 0, inProgress: 0 });
+  });
+});
+
+describe('throttled sweep (AISDLC-960)', () => {
+  it('runs at most once per 15 minutes per board', async () => {
+    const boardDir = mkdtempSync(path.join(tmpdir(), 'ci-sweep-'));
+    let calls = 0;
+    const runner: Runner = async () => {
+      calls++;
+      return { code: 0, stdout: '[]', stderr: '' } as ExecResult;
+    };
+    const lines: string[] = [];
+    const base = { runner, dryRun: false, boardDir, write: (l: string) => void lines.push(l) };
+    const t0 = new Date('2026-10-20T12:00:00Z');
+    expect(await runThrottledSweep({ ...base, now: t0 })).toBeDefined();
+    const first = calls;
+    expect(first).toBeGreaterThan(0);
+    const t1 = new Date(t0.getTime() + SWEEP_INTERVAL_MS - 1000);
+    expect(await runThrottledSweep({ ...base, now: t1 })).toBeUndefined();
+    expect(calls).toBe(first);
+    const t2 = new Date(t0.getTime() + SWEEP_INTERVAL_MS);
+    expect(await runThrottledSweep({ ...base, now: t2 })).toBeDefined();
+    expect(calls).toBe(first * 2);
   });
 });

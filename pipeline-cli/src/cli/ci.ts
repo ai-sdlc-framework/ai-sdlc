@@ -32,6 +32,8 @@
  * @module cli/ci
  */
 
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { now as clockNow } from '../clock.js';
@@ -281,6 +283,40 @@ export async function runSweep(opts: SweepOptions): Promise<SweepDecision[]> {
   return decisions;
 }
 
+/** The sweep runs at most once per this long per board (AISDLC-960). */
+export const SWEEP_INTERVAL_MS = 15 * 60 * 1000;
+const SWEEP_STAMP = '.ci-sweep.json';
+
+/** True when the board's last sweep is younger than the interval. */
+export function sweepIsFresh(boardDir: string, now: Date): boolean {
+  try {
+    const at = Date.parse(
+      (JSON.parse(readFileSync(path.join(boardDir, SWEEP_STAMP), 'utf-8')) as { at?: string }).at ??
+        '',
+    );
+    return Number.isFinite(at) && now.getTime() - at < SWEEP_INTERVAL_MS;
+  } catch {
+    return false;
+  }
+}
+
+/** Sweep unless the board's last sweep is fresh; records the time on the board. */
+export async function runThrottledSweep(
+  opts: SweepOptions & { boardDir?: string; now: Date },
+): Promise<SweepDecision[] | undefined> {
+  const { boardDir } = opts;
+  if (boardDir && !opts.dryRun && sweepIsFresh(boardDir, opts.now)) {
+    opts.write('sweep skipped: last sweep is under 15 minutes old');
+    return undefined;
+  }
+  const decisions = await runSweep(opts);
+  if (boardDir && !opts.dryRun) {
+    mkdirSync(boardDir, { recursive: true });
+    writeFileSync(path.join(boardDir, SWEEP_STAMP), JSON.stringify({ at: opts.now.toISOString() }));
+  }
+  return decisions;
+}
+
 export function renderQueue(s: QueueSummary): string {
   const lines = [
     `queued: ${s.queued}`,
@@ -320,15 +356,22 @@ export function buildCiCli(argv: string[] = hideBin(process.argv), deps: CiCliDe
       'sweep',
       'Cancel queued runs on a stale head or older duplicates',
       (y) =>
-        y.option('dry-run', {
-          type: 'boolean',
-          default: false,
-          describe: 'Print what would be cancelled; cancel nothing.',
-        }),
+        y
+          .option('dry-run', {
+            type: 'boolean',
+            default: false,
+            describe: 'Print what would be cancelled; cancel nothing.',
+          })
+          .option('board-dir', {
+            type: 'string',
+            describe: 'Dispatch board; the sweep runs at most once per 15 minutes per board.',
+          }),
       async (args) => {
-        await runSweep({
+        await runThrottledSweep({
           runner,
           dryRun: Boolean(args['dry-run']),
+          boardDir: args['board-dir'] as string | undefined,
+          now: now(),
           write: (l) => out(l + '\n'),
         });
       },

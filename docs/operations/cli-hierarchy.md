@@ -726,6 +726,14 @@ run is still pending waits up to the idle interval (1800 s) before mark-ready fl
 a standing failed Analyze job does not shorten the sleep. Exit `0`; `1` on a guard refusal; `2` on a malformed number or a retry limit above
 the cap.
 
+**Two cadences (AISDLC-960).** The busy 30 s tick works on the board alone: it claims, clears and
+reissues from local files and makes no GitHub call. Its GitHub reads (human-attention list,
+mark-ready, landing) run at most once per 5 minutes (`GITHUB_READ_INTERVAL_MS`, stamped as
+`lastGithubReadAt` in `operator-dispatch.state.json`), earlier only when the webhook receiver
+touched `<board>/.reconcile-wake` after the last read. The CI sweep runs on its own timer:
+`cli-ci sweep --board-dir "$BOARD_DIR"` runs at most once per 15 minutes per board (stamp
+`<board>/.ci-sweep.json`) and lists runs with `--limit 500`.
+
 **Rejected briefs (AISDLC-952).** A brief the board refuses is recorded in
 `operator-dispatch.state.json` as `rejected[<file>] = { mtime, error, parentHead }` (the older
 number-only value, an mtime, is still read). Every tick lists each still-rejected brief in
