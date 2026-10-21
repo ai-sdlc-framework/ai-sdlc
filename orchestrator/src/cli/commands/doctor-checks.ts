@@ -1897,6 +1897,40 @@ export function checkJudgmentLayer(ctx: DoctorRunContext): DoctorCheckResult[] {
 
 // ── Untracked review ledgers (AISDLC-793) ───────────────────────────────
 
+function strandedTitle(stranded: string[]): string {
+  return `${stranded.length} completed-task review ledger(s) in worktrees have rows missing from main: ${stranded.join(', ')}`;
+}
+
+/**
+ * Ledgers inside `.worktrees/<wt>/.ai-sdlc/reviews/` whose task is in
+ * `backlog/completed/` and whose rows are not all on main (AISDLC-966). Main's copy
+ * must start with the worktree copy; otherwise a worktree sweep would lose rows.
+ */
+function findStrandedWorktreeLedgers(ctx: DoctorRunContext): string[] {
+  const { listDir, listFiles, readFile, runCommand } = ctx.adapters;
+  if (!listFiles) return [];
+  const completed = listFiles(join(ctx.projectDir, 'backlog', 'completed')).map((f) =>
+    f.toLowerCase(),
+  );
+  const out: string[] = [];
+  for (const wt of listDir(join(ctx.projectDir, '.worktrees'))) {
+    const dir = join(ctx.projectDir, '.worktrees', wt, '.ai-sdlc', 'reviews');
+    for (const f of listFiles(dir).filter((n) => n.endsWith('.jsonl'))) {
+      const task = basename(f, '.jsonl').toLowerCase();
+      const isCompleted = completed.some(
+        (c) => c.startsWith(`${task} - `) || c.startsWith(`${task}.md`),
+      );
+      if (!isCompleted) continue;
+      const local = readFile(join(dir, f));
+      if (!local) continue;
+      const main = runCommand('git', ['-C', ctx.projectDir, 'show', `HEAD:.ai-sdlc/reviews/${f}`]);
+      const onMain = main.exitCode === 0 ? main.stdout : '';
+      if (!onMain.startsWith(local)) out.push(`${wt}/${f}`);
+    }
+  }
+  return out;
+}
+
 /**
  * The reviews ledger (`.ai-sdlc/reviews/<task-id>.jsonl`) is a committed artifact
  * that belongs in the task's PR. An untracked one in the main checkout is residue
@@ -1920,18 +1954,31 @@ export function checkUntrackedReviewLedgers(ctx: DoctorRunContext): DoctorCheckR
           .map((l) => l.trim())
           .filter((l) => l.endsWith('.jsonl'))
       : [];
-  if (files.length === 0) {
+  const stranded = findStrandedWorktreeLedgers(ctx);
+  if (files.length === 0 && stranded.length === 0) {
     return {
       id: 'untracked-review-ledgers',
       severity: 'pass',
       title: 'no untracked review ledgers in the main checkout',
     };
   }
+  if (files.length === 0) {
+    return {
+      id: 'untracked-review-ledgers',
+      severity: 'warn',
+      title: strandedTitle(stranded),
+      remediation:
+        'Copy each listed worktree ledger into .ai-sdlc/reviews/ on a chore PR before any worktree sweep; `/ai-sdlc:cleanup` deletes them otherwise.',
+      anonymizableEvidence: { strandedCount: stranded.length },
+    };
+  }
   const taskIds = files.map((f) => basename(f, '.jsonl'));
   return {
     id: 'untracked-review-ledgers',
     severity: 'warn',
-    title: `${files.length} untracked review ledger(s) in the main checkout: ${files.join(', ')} (tasks: ${taskIds.join(', ')})`,
+    title:
+      `${files.length} untracked review ledger(s) in the main checkout: ${files.join(', ')} (tasks: ${taskIds.join(', ')})` +
+      (stranded.length > 0 ? `; ${strandedTitle(stranded)}` : ''),
     remediation:
       'Untracked ledgers are residue; `ai-sdlc doctor --fix` deletes them (tracked ledgers are never touched). See "Untracked ledgers in the main checkout" in docs/operations/transcript-management.md.',
     anonymizableEvidence: { untrackedCount: files.length },

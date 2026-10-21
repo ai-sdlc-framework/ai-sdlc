@@ -1931,6 +1931,71 @@ describe('untracked-review-ledgers check (AISDLC-793)', () => {
     expect(r.remediation).toContain('transcript-management.md');
   });
 
+  describe('stranded worktree ledgers (AISDLC-966)', () => {
+    const strandedAdapters = (opts: { completed: string[]; local: string; main: string | null }) =>
+      makeAdapters({
+        runCommand: (_c, args) =>
+          args.includes('show')
+            ? opts.main === null
+              ? { stdout: '', exitCode: 128 }
+              : { stdout: opts.main, exitCode: 0 }
+            : { stdout: '', exitCode: 0 },
+        listDir: (p) => (p.endsWith('.worktrees') ? ['aisdlc-7'] : []),
+        listFiles: (p) =>
+          p.endsWith('completed')
+            ? opts.completed
+            : p.includes('.worktrees')
+              ? ['aisdlc-7.jsonl']
+              : [],
+        readFile: () => opts.local,
+      });
+    const done = ['AISDLC-7 - some task.md'];
+
+    it('warns when a completed task ledger in a worktree is absent from main', () => {
+      const r = checkUntrackedReviewLedgers(
+        makeCtx(strandedAdapters({ completed: done, local: 'a\n', main: null })),
+      );
+      expect(r.severity).toBe('warn');
+      expect(r.title).toContain('rows missing from main');
+      expect(r.title).toContain('aisdlc-7/aisdlc-7.jsonl');
+    });
+
+    it('warns when main has fewer rows than the worktree copy', () => {
+      const r = checkUntrackedReviewLedgers(
+        makeCtx(strandedAdapters({ completed: done, local: 'a\nb\n', main: 'a\n' })),
+      );
+      expect(r.severity).toBe('warn');
+    });
+
+    it('passes when main already holds every row, or the task is not completed', () => {
+      expect(
+        checkUntrackedReviewLedgers(
+          makeCtx(strandedAdapters({ completed: done, local: 'a\n', main: 'a\nb\n' })),
+        ).severity,
+      ).toBe('pass');
+      expect(
+        checkUntrackedReviewLedgers(
+          makeCtx(strandedAdapters({ completed: [], local: 'a\n', main: null })),
+        ).severity,
+      ).toBe('pass');
+    });
+
+    it('combines with untracked parent files in one warning', () => {
+      const base = strandedAdapters({ completed: done, local: 'a\n', main: null });
+      const r = checkUntrackedReviewLedgers(
+        makeCtx({
+          ...base,
+          runCommand: (_c, args) =>
+            args.includes('show')
+              ? { stdout: '', exitCode: 128 }
+              : { stdout: '.ai-sdlc/reviews/aisdlc-9.jsonl\n', exitCode: 0 },
+        }),
+      );
+      expect(r.title).toContain('1 untracked review ledger(s)');
+      expect(r.title).toContain('rows missing from main');
+    });
+  });
+
   it('is registered, and --fix reports nothing to do when clean', () => {
     expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('untracked-review-ledgers');
     expect(fixUntrackedReviewLedgers(makeCtx(adaptersWith(''))).detail).toContain('no untracked');

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-966
 title: 'Recover the .ai-sdlc/reviews ledgers stranded in completed-task worktrees into one chore PR before any worktree sweep'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-17'
 labels:
