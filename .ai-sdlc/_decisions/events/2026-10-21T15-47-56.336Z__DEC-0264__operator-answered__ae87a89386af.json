@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-21T15:47:56.336Z","decisionId":"DEC-0264","chosenOptionId":"remove-binding","rationale":"Operator, 2026-10-21: the guardrail was agent-added, never requested, and adds only process friction; the lease itself plus protected-branch refusal is the control we want.","by":"planner"}
