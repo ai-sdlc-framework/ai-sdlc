@@ -1510,6 +1510,7 @@ jobs:
           #   - dependency-review-gate: skips on non-dep PRs (deps==false)
           #   - dor-readiness-gate: skips on PRs that touch no backlog/tasks/*.md
           #     file (AISDLC-712.1); on task-file PRs it must be success
+          #   - issue-link: skips on docs-only and records-only PRs (AISDLC-1013)
           #
           # The skipped-job deadlock bug (discovered 2026-05-31): alls-green
           # treats skipped as FAILURE for jobs not in allowed-skips. Adding
@@ -1527,7 +1528,8 @@ jobs:
             independence-policy-gate,
             dependency-review-gate,
             dor-readiness-gate,
-            rfc-lifecycle
+            rfc-lifecycle,
+            issue-link
 
       # AISDLC-927: surface the shared installation quota so an exhausted budget
       # is visible in the run summary. /rate_limit itself is not metered.
