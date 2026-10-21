@@ -72,4 +72,3 @@ The design choices are mine, so check them in review:
 ## Follow-up
 - declined: stop-paging-at-oldest-open-PR-head step; the sweep makes a single non-paged call, so there is nothing to stop.
 - declined: lowering the run-list limit from 500 to 100; out of scope, restored to 500 in `cli-ci` (queue and sweep).
-- (none) otherwise; push and draft PR are done by the executor session.
