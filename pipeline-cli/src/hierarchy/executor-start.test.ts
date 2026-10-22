@@ -3,7 +3,7 @@
  * roster and board, an injected git runner. No session, tmux or network.
  */
 
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -169,6 +169,54 @@ describe('executorStart', () => {
       ),
     ).rejects.toThrow(/^unchecked-start: /);
     expect(claim).not.toHaveBeenCalled();
+  });
+
+  describe('start token (AISDLC-1028)', () => {
+    const tokenFile = () => path.join(board, 'starts', 'proj-executor-alpha.json');
+    const issue = (over: { issuerPid?: number; issuedAt?: string } = {}) => {
+      mkdirSync(path.join(board, 'starts'), { recursive: true });
+      writeFileSync(
+        tokenFile(),
+        JSON.stringify({
+          issuerPid: 4000,
+          issuerName: 'proj-operator-dispatch',
+          issuedAt: new Date().toISOString(),
+          ...over,
+        }),
+      );
+    };
+    const start = () =>
+      executorStart(
+        { boardDir: board, cwd: tmp, waitSec: 0 },
+        { identity: identityFor('executor', 'proj-executor-alpha'), repoGit: gitAt(tmp) },
+      );
+
+    it('proceeds on a fresh token and deletes it, so a second start refuses', async () => {
+      issue();
+      await expect(start()).resolves.toMatchObject({ name: 'proj-executor-alpha' });
+      expect(existsSync(tokenFile())).toBe(false);
+      await expect(start()).rejects.toThrow(/^unchecked-start: /);
+    });
+
+    it('refuses a missing token', async () => {
+      await expect(start()).rejects.toThrow(/^unchecked-start: /);
+    });
+
+    it('refuses a stale token', async () => {
+      issue({ issuedAt: new Date(Date.now() - 31 * 60 * 1000).toISOString() });
+      await expect(start()).rejects.toThrow(/^unchecked-start: /);
+    });
+
+    it('refuses a token from a different pid', async () => {
+      issue({ issuerPid: 9999 });
+      await expect(start()).rejects.toThrow(/^unchecked-start: /);
+    });
+
+    it('refuses an unreadable token', async () => {
+      mkdirSync(path.join(board, 'starts'), { recursive: true });
+      writeFileSync(tokenFile(), 'not json');
+      await expect(start()).rejects.toThrow(/^unchecked-start: /);
+    });
   });
 
   it('writes the heartbeat naming the worker as part of the claim, before the task is returned (AISDLC-791)', async () => {
