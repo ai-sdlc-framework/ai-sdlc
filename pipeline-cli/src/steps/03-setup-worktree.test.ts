@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { manifestPathIn } from '../dispatch/board.js';
 import { setupWorktree } from './03-setup-worktree.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
 import { FakeRunner, fail, ok } from '../__test-helpers/fake-runner.js';
@@ -1015,5 +1016,74 @@ describe('Step 3 — setupWorktree hooks check (AISDLC-693)', () => {
     });
     expect(r.baseSha).toBe('abc123');
     expect(fake.calls.find((c) => c.command === 'pnpm')).toBeUndefined();
+  });
+});
+
+describe('Step 3 — one worktree per task (AISDLC-995)', () => {
+  it('refuses a second worktree for a task already in git worktree list, naming the first', async () => {
+    const other = join(tmp, '.worktrees', 'aisdlc-995-old');
+    const fake = new FakeRunner()
+      .on(
+        /^git worktree list/,
+        ok(`worktree ${other}\nHEAD abc\nbranch refs/heads/ai-sdlc/aisdlc-995-x\n\n`),
+      )
+      .on(/^git worktree add/, ok());
+    await expect(
+      setupWorktree({
+        taskId: 'AISDLC-995',
+        branch: 'ai-sdlc/aisdlc-995-new',
+        worktreePath: join(tmp, '.worktrees', 'aisdlc-995'),
+        workDir: tmp,
+        runner: fake.toRunner(),
+        skipFetch: true,
+      }),
+    ).rejects.toThrow(new RegExp(`already exists for this task at ${other}`));
+    expect(fake.calls.some((c) => c.args[0] === 'worktree' && c.args[1] === 'add')).toBe(false);
+  });
+
+  it('refuses when the board manifest names a different existing worktree', async () => {
+    const other = join(tmp, '.worktrees', 'elsewhere');
+    mkdirSync(other, { recursive: true });
+    const inflight = join(tmp, '.ai-sdlc', 'dispatch', 'inflight');
+    mkdirSync(inflight, { recursive: true });
+    writeFileSync(
+      manifestPathIn(join(tmp, '.ai-sdlc', 'dispatch'), 'inflight', 'AISDLC-995'),
+      JSON.stringify({ taskId: 'AISDLC-995', branch: 'b', worktree: other }),
+    );
+    const fake = new FakeRunner();
+    await expect(
+      setupWorktree({
+        taskId: 'AISDLC-995',
+        branch: 'b2',
+        worktreePath: join(tmp, '.worktrees', 'aisdlc-995'),
+        workDir: tmp,
+        runner: fake.toRunner(),
+        skipFetch: true,
+      }),
+    ).rejects.toThrow(other);
+  });
+
+  it('a resume reuses the existing worktree instead of refusing', async () => {
+    const wt = join(tmp, '.worktrees', 'aisdlc-995');
+    mkdirSync(wt, { recursive: true });
+    writeFileSync(join(wt, '.git'), 'gitdir: x');
+    const fake = new FakeRunner()
+      .on(
+        /^git worktree list/,
+        ok(`worktree ${wt}\nHEAD abc\nbranch refs/heads/ai-sdlc/aisdlc-995-x\n\n`),
+      )
+      .on(/abbrev-ref|show-current/, ok('ai-sdlc/aisdlc-995-x\n'))
+      .on(/rev-parse/, ok('abc123\n'));
+    const r = await setupWorktree({
+      taskId: 'AISDLC-995',
+      branch: 'ai-sdlc/aisdlc-995-x',
+      worktreePath: wt,
+      workDir: tmp,
+      runner: fake.toRunner(),
+      skipFetch: true,
+      resume: true,
+      ownWorktreeCheck: () => null,
+    });
+    expect(r.worktreePath).toBe(wt);
   });
 });

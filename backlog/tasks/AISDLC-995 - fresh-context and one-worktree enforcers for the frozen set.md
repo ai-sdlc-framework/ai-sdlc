@@ -1,7 +1,7 @@
 ---
 id: AISDLC-995
 title: 'Fresh-context and one-worktree-per-task become enforced invariants so they can join the frozen set'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-20'
 labels:
