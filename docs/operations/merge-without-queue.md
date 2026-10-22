@@ -70,6 +70,10 @@ AISDLC-398 changed the content hash to be base-independent (`headBlobSha` only).
 
 The audit record carries the observed outcome (`armed`, `landed`, `not-armable`, `refused`) and the `allow_auto_merge` value (`null` when unreadable, which keeps the arm path). See the GitHub Free row in `docs/operations/tooling-limitations.md`.
 
+### Audit record location (AISDLC-1010)
+
+The landing gate appends its audit record to `<main checkout>/artifacts/_governance/merge-audit-<date>.jsonl`. The main checkout is the parent of the repository's git common dir, so a run from a linked worktree writes to the same file as a run from the main checkout, and the worktree sweep cannot delete it. `$ARTIFACTS_DIR` still overrides the location when set (the file is then `$ARTIFACTS_DIR/_governance/merge-audit-<date>.jsonl`).
+
 CI runs once per pull request (AISDLC-727): `ai-sdlc-gate.yml` is the only workflow that runs the suite on `pull_request` events. `ci.yml` runs on pushes to `main` and the nightly schedule only (the post-merge full run). The jobs that used to exist only in `ci.yml` (`Backlog Drift`, first-run smoke, Python SDK, Go SDK) moved into the gate workflow and feed `ai-sdlc/pr-ready`; `Backlog Drift` is a `needs:` of the rollup, not a separately required context.
 
 Per push, a trusted PR starts two workflows: `ai-sdlc-gate.yml` and `auto-enable-auto-merge.yml` (AISDLC-934, DEC-0250). The issue-link and RFC lifecycle checks are jobs of the gate and feed `ai-sdlc/pr-ready`; CodeQL scans `main` and a weekly schedule, not PRs. The untrusted-contributor workflows start only to skip their jobs for trusted PRs. See the "Consolidated gate" section of `docs/operations/quality-gate.md`.

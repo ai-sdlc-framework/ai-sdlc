@@ -43,6 +43,7 @@
 
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { auditGovernanceDir } from './audit-dir.js';
 import { DOCS_ONLY_PATTERN } from '../../attestation-core/docs-only-paths.mjs';
 import { now } from '../clock.js';
 import type { Runner } from '../runtime/exec.js';
@@ -1406,10 +1407,7 @@ export type BacklogAuditWriter = (record: BacklogMergeAuditRecord) => void;
 export function defaultBacklogAuditWriter(artifactsDir?: string): BacklogAuditWriter {
   return (record) => {
     try {
-      const dir = join(
-        artifactsDir ?? process.env.ARTIFACTS_DIR ?? join(process.cwd(), 'artifacts'),
-        '_governance',
-      );
+      const dir = auditGovernanceDir(artifactsDir);
       mkdirSync(dir, { recursive: true });
       appendFileSync(
         join(dir, `merge-audit-${record.ts.slice(0, 10)}.jsonl`),
