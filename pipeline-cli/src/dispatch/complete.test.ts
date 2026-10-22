@@ -96,6 +96,13 @@ describe('completeLandedIterateNeeded (AISDLC-1030)', () => {
     expect(readInflightManifest(board, 'AISDLC-701')).toBeUndefined();
   });
 
+  it('ignores a merged PR that is not the one the verdict names', () => {
+    claim('AISDLC-701');
+    completeTask(board, { ...base, outcome: 'iterate-needed', prNumber: 5 });
+    expect(completeLandedIterateNeeded(board, 'AISDLC-701', 6)).toBe(false);
+    expect(readInflightManifest(board, 'AISDLC-701')).toBeDefined();
+  });
+
   it('leaves a task that already holds a success verdict alone', () => {
     claim('AISDLC-701');
     completeTask(board, { ...base, outcome: 'success', prNumber: 5 });

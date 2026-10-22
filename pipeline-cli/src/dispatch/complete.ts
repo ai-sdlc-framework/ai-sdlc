@@ -22,6 +22,7 @@ import { snapshotDoneManifest } from './resume.js';
 import { markSessionOutcome } from './sessions.js';
 import type { DispatchVerdict, VerdictOutcome } from './types.js';
 import { isValidCause, isValidDecisionId, MAX_DECISION_IDS, oneLine } from './verdict-fields.js';
+import { now as clockNow } from '../clock.js';
 
 const OUTCOMES: readonly VerdictOutcome[] = [
   'success',
@@ -205,13 +206,16 @@ export function completeLandedIterateNeeded(
   boardDir: string,
   taskId: string,
   prNumber: number,
-  now: () => Date = () => new Date(),
+  now: () => Date = clockNow,
 ): boolean {
   if (!TASK_ID_RE.test(taskId)) return false;
   const inflight = readInflightManifest(boardDir, taskId);
   if (!inflight?.workerId) return false;
   const last = collectVerdicts(boardDir, { includeFailed: false }).find((v) => v.taskId === taskId);
   if (last?.outcome !== 'iterate-needed') return false;
+  // Only the PR the verdict names completes the task; a different PR whose title
+  // merely mentions the id must not.
+  if (last.prNumber !== prNumber) return false;
   completeTask(boardDir, {
     taskId,
     outcome: 'success',
