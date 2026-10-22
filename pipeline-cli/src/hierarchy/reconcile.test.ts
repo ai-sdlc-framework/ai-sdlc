@@ -410,6 +410,43 @@ describe('helpers', () => {
     expect(run('none')).toBeNull();
   });
 
+  it('arm: source kind follows the PR (decisions-sync, backlog, else planner)', () => {
+    const base: ActionContext = {
+      pr: 9,
+      taskId: '',
+      kind: 'docs',
+      action: 'arm',
+      state: 'pending',
+      boardDir: '/b',
+    };
+    expect(actionCommands({ ...base, kind: 'decisions-sync' }, '/bin')![0]!.args).toContain(
+      'decisions-sync',
+    );
+    const backlog = actionCommands({ ...base, taskId: 'AISDLC-5' }, '/bin')![0]!.args;
+    expect(backlog[backlog.indexOf('--source-kind') + 1]).toBe('backlog');
+    expect(actionCommands(base, '/bin')).toBeNull();
+    const r = commandExecutor(() => ({ status: 0, stdout: '', stderr: '' }), '/', '/bin')(base);
+    expect(r.ran).toBe(false);
+    expect(r.note).toContain('planner');
+  });
+
+  it('commandExecutor records a stdout-only refusal reason', () => {
+    const out: CommandRunner = () => ({
+      status: 1,
+      stdout: '\nrefused: not linked\nx',
+      stderr: '',
+    });
+    const ctx: ActionContext = {
+      pr: 3,
+      taskId: 'T-1',
+      kind: 'task',
+      action: 'flip-ready-takeover',
+      state: 'ready-to-flip',
+      boardDir: '/b',
+    };
+    expect(commandExecutor(out, '/', '/bin')(ctx).note).toBe('gh failed: refused: not linked');
+  });
+
   it('commandExecutor runs argv and reports failures', () => {
     const calls: string[] = [];
     const ok: CommandRunner = (f, a) => (
