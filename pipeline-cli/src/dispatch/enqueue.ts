@@ -8,6 +8,7 @@
  */
 
 import path from 'node:path';
+import { parseTaskFrontmatter } from '../deps/dependency-graph.js';
 import { parseTaskFile } from '../steps/01-validate.js';
 import { buildBranchName, DEFAULT_PATTERN, readBranchPattern } from '../steps/02-compute-branch.js';
 import { isOnBoard, TASK_ID_RE, writeManifest } from './board.js';
@@ -51,6 +52,20 @@ function branchFor(id: string, taskFile: string, workDir: string | undefined): s
     title = path.posix.basename(taskFile, '.md').replace(/^[^ ]+ - /, '');
   }
   return buildBranchName(pattern, id, title).branch;
+}
+
+/**
+ * The `dependencies:` of a task file that are valid task ids (AISDLC-1027). The queue carries
+ * them as `after` so the board never offers a claim the executor preflight will refuse.
+ */
+export function dependenciesOfTaskFile(workDir: string | undefined, taskFile: string): string[] {
+  if (!workDir) return [];
+  try {
+    const node = parseTaskFrontmatter(path.join(workDir, taskFile), 'open');
+    return (node?.dependencies ?? []).map((d) => d.toUpperCase()).filter((d) => TASK_ID_RE.test(d));
+  } catch {
+    return [];
+  }
 }
 
 /** Default verification commands copied onto each manifest. */
@@ -99,7 +114,11 @@ export function enqueueTasks(
       dispatchedBy: defaults.dispatchedBy,
       spec: { taskFile, verifyCommands: defaults.verifyCommands ?? DEFAULT_VERIFY_COMMANDS },
     };
-    if (entry.after && entry.after.length > 0) manifest.after = [...entry.after];
+    const after =
+      entry.after && entry.after.length > 0
+        ? entry.after
+        : dependenciesOfTaskFile(defaults.workDir, taskFile);
+    if (after.length > 0) manifest.after = [...after];
     if (entry.sequenceGroup) manifest.sequenceGroup = entry.sequenceGroup;
     if (entry.priority !== undefined) manifest.priority = entry.priority;
     if (entry.wave !== undefined) manifest.wave = entry.wave;

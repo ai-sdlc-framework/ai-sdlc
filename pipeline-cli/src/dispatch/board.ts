@@ -34,6 +34,8 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 
+import { buildDependencyGraph } from '../deps/dependency-graph.js';
+
 import { now as clockNow } from '../clock.js';
 import { reportCapabilityOutcome } from '@ai-sdlc/reference';
 
@@ -262,8 +264,16 @@ export type Eligibility = { eligible: true } | { eligible: false; reason: string
 
 /** Board facts the eligibility rules read. Build once per claim / listing. */
 export interface EligibilityContext {
-  /** Task ids that finished with success (a verdict or a completion marker in `done/`). */
+  /**
+   * Task ids that have LANDED (AISDLC-1027): a completion marker in `done/`, a success verdict
+   * stamped `landed`, or (with a repo root) a task file that is Done. A delivered-only verdict
+   * is not here: the executor preflight refuses a dependency that is not Done on main.
+   */
   doneTaskIds: ReadonlySet<string>;
+  /** Task ids with a success verdict in `done/` that has not landed yet. */
+  deliveredTaskIds?: ReadonlySet<string>;
+  /** Whether the task file for `id` is Done on main; absent when the repo root is unknown. */
+  isDoneOnMain?: (id: string) => boolean;
   /** Task ids with a failure verdict or diagnostic in `failed/`. */
   failedTaskIds: ReadonlySet<string>;
   /** Task ids present on the board in any state. */
@@ -273,8 +283,9 @@ export interface EligibilityContext {
 }
 
 /** Read the board facts the eligibility rules need. */
-export function loadEligibilityContext(boardDir: string): EligibilityContext {
+export function loadEligibilityContext(boardDir: string, workDir?: string): EligibilityContext {
   const doneTaskIds = new Set<string>();
+  const deliveredTaskIds = new Set<string>();
   const failedTaskIds = new Set<string>();
   const onBoardTaskIds = new Set<string>();
   for (const sub of ['queue', 'inflight', 'blocked'] as const) {
@@ -295,8 +306,19 @@ export function loadEligibilityContext(boardDir: string): EligibilityContext {
     const id = entry.slice(0, -VERDICT_SUFFIX.length);
     onBoardTaskIds.add(id);
     const verdict = readVerdict(path.join(boardDir, 'done', entry));
-    if (verdict && verdict.outcome === 'success') doneTaskIds.add(id);
+    if (verdict && verdict.outcome === 'success') {
+      if (verdict.landed) doneTaskIds.add(id);
+      else deliveredTaskIds.add(id);
+    }
   }
+  const root = workDir ?? repoRootOfBoard(boardDir);
+  let graph: ReturnType<typeof buildDependencyGraph> | undefined;
+  const isDoneOnMain = root
+    ? (id: string): boolean => {
+        graph ??= buildDependencyGraph({ workDir: root });
+        return graph.nodes.get(id.toLowerCase())?.status === 'completed';
+      }
+    : undefined;
   for (const entry of safeReaddir(path.join(boardDir, 'failed'))) {
     const suffix = [VERDICT_SUFFIX, DIAGNOSTIC_SUFFIX].find((x) => entry.endsWith(x));
     if (!suffix) continue;
@@ -313,7 +335,24 @@ export function loadEligibilityContext(boardDir: string): EligibilityContext {
       busyGroups.set(manifest.sequenceGroup, manifest.taskId);
     }
   }
-  return { doneTaskIds, failedTaskIds, onBoardTaskIds, busyGroups };
+  return {
+    doneTaskIds,
+    deliveredTaskIds,
+    ...(isDoneOnMain ? { isDoneOnMain } : {}),
+    failedTaskIds,
+    onBoardTaskIds,
+    busyGroups,
+  };
+}
+
+/** `<root>/.ai-sdlc/dispatch` -> `<root>` when that root has a backlog; else undefined. */
+export function repoRootOfBoard(boardDir: string): string | undefined {
+  const resolved = path.resolve(boardDir);
+  if (path.basename(resolved) !== 'dispatch') return undefined;
+  const parent = path.dirname(resolved);
+  if (path.basename(parent) !== '.ai-sdlc') return undefined;
+  const root = path.dirname(parent);
+  return existsSync(path.join(root, 'backlog')) ? root : undefined;
 }
 
 /**
@@ -326,17 +365,21 @@ export function checkEligibility(manifest: DispatchManifest, ctx: EligibilityCon
     return { eligible: false, reason: `blocked by decision ${manifest.blockedBy}` };
   }
   const until = manifest.ruling?.until;
-  if (until !== undefined && !ctx.doneTaskIds.has(until)) {
+  if (until !== undefined && !ctx.doneTaskIds.has(until) && !ctx.deliveredTaskIds?.has(until)) {
     return { eligible: false, reason: `ruled: held until ${until} has a done/ verdict` };
   }
-  const unmet = (manifest.after ?? []).filter((id) => !ctx.doneTaskIds.has(id));
+  const unmet = (manifest.after ?? []).filter(
+    (id) => !ctx.doneTaskIds.has(id) && !ctx.isDoneOnMain?.(id),
+  );
   if (unmet.length > 0) {
     const reasons = unmet.map((id) =>
-      ctx.failedTaskIds.has(id)
-        ? `task ${id} failed`
-        : !ctx.onBoardTaskIds.has(id)
-          ? `task ${id} is not on the board`
-          : `waiting for ${id} to finish`,
+      ctx.deliveredTaskIds?.has(id)
+        ? `waiting for ${id} to land`
+        : ctx.failedTaskIds.has(id)
+          ? `task ${id} failed`
+          : !ctx.onBoardTaskIds.has(id)
+            ? `task ${id} is not on the board`
+            : `waiting for ${id} to finish`,
     );
     return { eligible: false, reason: reasons.join('; ') };
   }
@@ -984,7 +1027,8 @@ export function peekQueueOrder(
 export function updateQueuedManifest(
   boardDir: string,
   taskId: string,
-  patch: Pick<DispatchManifest, 'priority' | 'resume' | 'reorderNote'>,
+  patch: Pick<DispatchManifest, 'priority' | 'resume' | 'reorderNote'> &
+    Partial<Pick<DispatchManifest, 'after'>>,
 ): string {
   ensureBoardDirs(boardDir);
   if (existsSync(manifestPathIn(boardDir, 'inflight', taskId))) {
@@ -1009,6 +1053,7 @@ export function updateQueuedManifest(
   if (patch.priority !== undefined) next.priority = patch.priority;
   if (patch.resume !== undefined) next.resume = patch.resume;
   if (patch.reorderNote !== undefined) next.reorderNote = patch.reorderNote;
+  if (patch.after !== undefined) next.after = [...patch.after];
   const mtime = statSync(target).mtime;
   const tmp = `${target}.tmp-${process.pid}`;
   writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n', 'utf-8');

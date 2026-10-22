@@ -83,6 +83,12 @@ describe('claim rules', () => {
     writeManifest(board, mk('T-2', { after: ['T-1'] }));
     expect(claimNext(board, 'in-session-agent').claimed).toBe(false);
     succeed(board, 'T-1');
+    // Delivered is not landed (AISDLC-1027): the executor preflight would still refuse T-2.
+    expect(claimNext(board, 'in-session-agent').claimed).toBe(false);
+    expect(listBoard(board).find((e) => e.taskId === 'T-2')?.reason).toBe(
+      'waiting for T-1 to land',
+    );
+    expect(patchDoneVerdict(board, 'T-1', { landed: '2026-05-20T12:00:00.000Z' })).toBe(true);
     const r = claimNext(board, 'in-session-agent');
     expect(r.claimed && r.manifest?.taskId).toBe('T-2');
   });

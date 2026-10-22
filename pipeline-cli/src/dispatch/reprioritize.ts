@@ -7,7 +7,8 @@
  * `reorderNote`. A `resume` block means "a previous attempt left a branch" and is never fabricated.
  */
 
-import { readQueuedManifest, updateQueuedManifest } from './board.js';
+import { dependenciesOfTaskFile } from './enqueue.js';
+import { readQueuedManifest, repoRootOfBoard, updateQueuedManifest } from './board.js';
 import { normaliseNote } from './resume.js';
 import type { ResumeFeedback } from './types.js';
 
@@ -36,8 +37,14 @@ export function reprioritizeQueued(
     if (existing) resume = { ...existing, note };
     else reorderNote = note;
   }
+  const queued = readQueuedManifest(boardDir, taskId);
+  const derived =
+    queued && (!queued.after || queued.after.length === 0)
+      ? dependenciesOfTaskFile(repoRootOfBoard(boardDir), queued.spec.taskFile)
+      : [];
   return updateQueuedManifest(boardDir, taskId, {
     priority: opts.priority,
+    ...(derived.length > 0 ? { after: derived } : {}),
     ...(resume ? { resume } : {}),
     ...(reorderNote !== undefined ? { reorderNote } : {}),
   });
