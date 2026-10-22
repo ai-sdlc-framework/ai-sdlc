@@ -2,7 +2,7 @@
 id: AISDLC-1029
 title: >-
   `cli-hierarchy clear` confirms the resume command was submitted and fails loudly instead of reporting a degraded clear
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-22'
 labels:

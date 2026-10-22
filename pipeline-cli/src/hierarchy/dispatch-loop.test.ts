@@ -126,7 +126,13 @@ beforeEach(() => {
   cleared = [];
   playbooked = [];
   enqueueImpl = (entries) => entries.map((e) => `queue/${e.taskId}.dispatch.json`);
-  clearImpl = async (o) => ({ executor: o.executor, paneId: '%1', resumed: true, settleMs: 0 });
+  clearImpl = async (o) => ({
+    executor: o.executor,
+    paneId: '%1',
+    ok: true,
+    resumed: true,
+    settleMs: 0,
+  });
   playbookImpl = (v) => ({
     taskId: v.taskId,
     action: 'requeue',
@@ -549,11 +555,17 @@ describe('verdict watch and clears', () => {
     expect(cleared).toHaveLength(1);
   });
 
-  it('reports a clear the executor did not answer as degraded', async () => {
-    clearImpl = async (o) => ({ executor: o.executor, paneId: '%1', resumed: false, settleMs: 0 });
+  it('reports a clear the executor did not answer as failed', async () => {
+    clearImpl = async (o) => ({
+      executor: o.executor,
+      paneId: '%1',
+      ok: false,
+      resumed: false,
+      settleMs: 0,
+    });
     verdict('AISDLC-7');
     const result = await runDispatchTick(deps());
-    expect(result.verdicts[0]!.clear.status).toBe('degraded');
+    expect(result.verdicts[0]!.clear.status).toBe('failed');
   });
 
   it('does not clear without the clear-executor-context grant', async () => {

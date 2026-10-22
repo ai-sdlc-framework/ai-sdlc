@@ -15,8 +15,13 @@
  *  - Keys go only to the pane the roster names, and only when tmux confirms the
  *    pane still belongs to the executor's window.
  *
- * The `hierarchy.clear` capability is `live` when the restart command was sent
- * and the executor reported back within the ceiling, `degraded` otherwise.
+ * After the resume command is typed the pane is read: while the input line still holds
+ * it, `Enter` is sent again (at most twice, 2 s apart); if it still holds it, `Escape` and
+ * one retype follow (AISDLC-1029). A clear is then either confirmed (identity line seen) or
+ * fails with `ok: false` and reason `resume command not submitted`, plus the last pane line.
+ *
+ * The `hierarchy.clear` capability is `live` when the executor reported back within the
+ * ceiling; otherwise the failure reason is recorded against it.
  */
 
 import { spawn } from 'node:child_process';
@@ -44,6 +49,10 @@ export const HIERARCHY_CLEAR_CAPABILITY = 'hierarchy.clear';
 export const DEFAULT_SETTLE_MS = 30_000;
 /** Default spacing of the "did the executor report back" polls. */
 export const DEFAULT_POLL_INTERVAL_MS = 500;
+/** Spacing of the re-sent `Enter` presses while the input line still holds the resume command. */
+export const SUBMIT_RETRY_SPACING_MS = 2000;
+/** Failure reason of a clear whose resume command never started the session. */
+export const RESUME_NOT_SUBMITTED = 'resume command not submitted';
 
 const EXECUTOR_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const PANE_ID_RE = /^%[0-9]+$/;
@@ -77,10 +86,14 @@ export interface ClearOptions {
 export interface ClearResult {
   executor: string;
   paneId: string;
-  /** The executor reported back within the ceiling. */
+  /** The clear restarted the session; false means it failed, and `reason` says why. */
+  ok: boolean;
+  /** The executor reported back within the ceiling (same as `ok`). */
   resumed: boolean;
   settleMs: number;
-  /** Last non-empty pane line seen while waiting; set when the executor did not report back. */
+  /** Set when `ok` is false: {@link RESUME_NOT_SUBMITTED}. */
+  reason?: string;
+  /** Last non-empty pane line seen while waiting; set when the clear failed. */
   lastLine?: string;
 }
 
@@ -121,6 +134,25 @@ function lastLineOf(text: string | undefined): string {
   return lines.length ? lines[lines.length - 1].trim() : '';
 }
 
+const PROMPT_LINE_RE = /^(?:\s|\||│)*(?:>|❯)\s?(.*?)(?:\s|\||│)*$/;
+
+/**
+ * True when the pane's input line still holds `command`: the lowest prompt line among the
+ * last ten non-empty lines decides; with no prompt line there, the last non-empty line does.
+ */
+export function inputLineHolds(pane: string | undefined, command: string): boolean {
+  const tail = (pane ?? '')
+    .split('\n')
+    .filter((l) => l.trim() !== '')
+    .slice(-10);
+  for (let i = tail.length - 1; i >= 0; i--) {
+    const m = PROMPT_LINE_RE.exec(tail[i]);
+    if (m) return m[1].trim() === command;
+  }
+  const last = tail[tail.length - 1];
+  return last !== undefined && last.replace(/^(?:\s|\||│)+|(?:\s|\||│)+$/g, '') === command;
+}
+
 /** The task the named session holds inflight, or undefined. */
 export function holdsInflight(boardDir: string, name: string): string | undefined {
   for (const item of listInflight(boardDir)) {
@@ -136,6 +168,36 @@ function type(run: CommandRunner, target: string, text: string): string | undefi
   if (typed.status !== 0) return typed.stderr.trim() || 'tmux send-keys failed';
   const sent = run('tmux', ['send-keys', '-t', target, 'Enter']);
   if (sent.status !== 0) return sent.stderr.trim() || 'tmux send-keys failed';
+  return undefined;
+}
+
+/**
+ * Type `command` and make sure the session took it: while the input line still holds it,
+ * send `Enter` again (at most twice, 2 s apart), then `Escape` and one retype. Returns an
+ * error text only when a keystroke could not be sent.
+ */
+async function typeAndSubmit(
+  deps: ClearDeps,
+  target: string,
+  command: string,
+  firstCheckMs: number,
+): Promise<string | undefined> {
+  const failure = type(deps.run, target, command);
+  if (failure) return failure;
+  const holds = () => inputLineHolds(readPane(deps.run, target), command);
+  await deps.sleep(firstCheckMs);
+  if (!holds()) return undefined;
+  for (let i = 0; i < 2; i++) {
+    const sent = deps.run('tmux', ['send-keys', '-t', target, 'Enter']);
+    if (sent.status !== 0) return sent.stderr.trim() || 'tmux send-keys failed';
+    await deps.sleep(SUBMIT_RETRY_SPACING_MS);
+    if (!holds()) return undefined;
+  }
+  deps.run('tmux', ['send-keys', '-t', target, 'Escape']);
+  deps.run('tmux', ['send-keys', '-t', target, 'C-u']);
+  const retried = type(deps.run, target, command);
+  if (retried) return retried;
+  await deps.sleep(SUBMIT_RETRY_SPACING_MS);
   return undefined;
 }
 
@@ -222,7 +284,7 @@ export async function clearExecutor(opts: ClearOptions, deps: ClearDeps): Promis
       issuedAt: now().toISOString(),
     });
   }
-  const restartFailure = type(deps.run, target, '/ai-sdlc executor');
+  const restartFailure = await typeAndSubmit(deps, target, '/ai-sdlc executor', pollIntervalMs);
   if (restartFailure) {
     reportClear(deps, 'degraded', `could not restart '${name}': ${restartFailure}`);
     throw new Error(`could not send /ai-sdlc executor to '${name}': ${restartFailure}`);
@@ -237,14 +299,9 @@ export async function clearExecutor(opts: ClearOptions, deps: ClearDeps): Promis
     if (!resumed) lastLine = lastLineOf(readPane(deps.run, target)) || lastLine;
   }
 
+  const reason = `${RESUME_NOT_SUBMITTED}: '${name}' did not report back within the ${settleMs} ms ceiling; last pane line: ${lastLine || '(none)'}`;
   if (resumed) reportClear(deps, 'live');
-  else {
-    reportClear(
-      deps,
-      'degraded',
-      `'${name}' did not report back within the ${settleMs} ms ceiling after the restart command; last pane line: ${lastLine || '(none)'}`,
-    );
-  }
+  else reportClear(deps, 'degraded', reason);
   deps.emit?.({
     type: 'ExecutorContextCleared',
     executor: name,
@@ -254,15 +311,14 @@ export async function clearExecutor(opts: ClearOptions, deps: ClearDeps): Promis
     ...(opts.taskId ? { taskId: opts.taskId } : {}),
     ...(opts.workerId ? { workerId: opts.workerId } : {}),
   });
-  deps.log?.(
-    `cleared '${name}'${resumed ? '' : ` (it did not report back within the ${settleMs} ms ceiling; last pane line: ${lastLine || '(none)'})`}`,
-  );
+  deps.log?.(resumed ? `cleared '${name}'` : `clear of '${name}' failed: ${reason}`);
   return {
     executor: name,
     paneId: entry.paneId,
+    ok: resumed,
     resumed,
     settleMs,
-    ...(resumed ? {} : { lastLine }),
+    ...(resumed ? {} : { reason: RESUME_NOT_SUBMITTED, lastLine }),
   };
 }
 
@@ -441,6 +497,14 @@ export function clearSelf(opts: ClearSelfOptions, deps: ClearSelfDeps): ClearSel
       'prev=$cur; sleep 0.5; n=$((n+1)); done; return 1; }',
     // type: empty the input line first so nothing is appended to text already there
     'type() { tmux send-keys -t "$pane" C-u; tmux send-keys -t "$pane" -l -- "$1"; tmux send-keys -t "$pane" Enter; }',
+    // holds: the input line (lowest prompt line of the last ten non-empty lines) still has the command
+    'holds() { tmux capture-pane -p -t "$pane" 2>/dev/null | awk -v cmd="$1" \'NF{l[++n]=$0} END{' +
+      'for(i=n;i>0&&i>n-10;i--){s=l[i]; if(s ~ /^( |[|]|│)*(>|❯)/){sub(/^( |[|]|│)*(>|❯) ?/,"",s); sub(/( |[|]|│)*$/,"",s); exit (s==cmd)?0:1}} ' +
+      's=l[n]; sub(/^( |[|]|│)*/,"",s); sub(/( |[|]|│)*$/,"",s); exit (s==cmd)?0:1}\'; }',
+    // submit: type the command; re-send Enter (twice, 2 s apart) while it sits in the input line, then Escape and one retype
+    'submit() { type "$1"; sleep 1; holds "$1" || return 0; k=0; while [ "$k" -lt 2 ]; do ' +
+      'tmux send-keys -t "$pane" Enter; sleep 2; holds "$1" || return 0; k=$((k+1)); done; ' +
+      'tmux send-keys -t "$pane" Escape; type "$1"; sleep 2; holds "$1" || return 0; return 1; }',
     'sleep "$lead"',
     'idle || { log "pane never became idle; did not send: $clr then $cmd"; exit 0; }',
     'type "$clr"',
@@ -449,7 +513,7 @@ export function clearSelf(opts: ClearSelfOptions, deps: ClearSelfDeps): ClearSel
       'if [ -n "$(find "$watch/briefs" "$watch/done" "$watch/failed" -type f -newer "$m" 2>/dev/null | head -n 1)" ]; ' +
       'then break; fi; sleep 2; i=$((i+2)); done; rm -f "$m"; else sleep "$hold"; fi',
     'idle || { log "pane not idle after /clear; did not send: $cmd"; exit 0; }',
-    'type "$cmd"',
+    'submit "$cmd" || { log "resume command not submitted; last pane line: $(tmux capture-pane -p -t "$pane" 2>/dev/null | grep . | tail -n 1)"; exit 0; }',
     'n=0; while [ "$n" -lt $(( backt * 2 )) ]; do ' +
       'tmux capture-pane -p -t "$pane" 2>/dev/null | grep -q "esc to interrupt" && exit 0; ' +
       'sleep 0.5; n=$((n+1)); done',

@@ -163,7 +163,7 @@ export function briefToEnqueueEntries(brief: ParsedBrief): EnqueueEntry[] {
 
 /** What a clear attempt did for one verdict. */
 export interface ClearReport {
-  status: 'cleared' | 'degraded' | 'refused' | 'not-permitted' | 'skipped';
+  status: 'cleared' | 'failed' | 'refused' | 'not-permitted' | 'skipped';
   executor?: string;
   reason?: string;
 }
@@ -464,12 +464,12 @@ async function clearOnce(deps: LoopDeps, verdict: DispatchVerdict): Promise<Clea
     // The task id goes on the clear event only when it is well formed.
     const taskId = TASK_ID_RE.test(verdict.taskId) ? verdict.taskId : undefined;
     const r = await deps.clear({ executor, ...(taskId ? { taskId } : {}) });
-    return r.resumed
+    return r.ok
       ? { status: 'cleared', executor }
       : {
-          status: 'degraded',
+          status: 'failed',
           executor,
-          reason: `the executor did not report back within the ${r.settleMs} ms ceiling; last pane line: ${r.lastLine || '(none)'}`,
+          reason: `${r.reason ?? 'resume command not submitted'}: the executor did not report back within the ${r.settleMs} ms ceiling; last pane line: ${r.lastLine || '(none)'}`,
         };
   } catch (err) {
     return {
