@@ -151,6 +151,23 @@ See `docs/operations/merge-without-queue.md` — Rollback procedure.
 
 The tick routes a red sha once. A later red sha routes again; a stale record can never disarm the report, because there is no issue to go stale.
 
+## Pipeline canary (AISDLC-1023)
+
+The suite above proves main's tests pass; it does not prove the pipeline can still ship a PR. After a merge broke Step 10.5 (2026-10-21) nothing on main noticed: the first-run smoke drives the legacy path, and Linux hid the filesystem-case bug. The `pipeline-canary` job ("Pipeline Canary (macOS)") runs on `macos-latest` on every push to main and is not `continue-on-error`.
+
+`node scripts/pipeline-canary.mjs` builds a throwaway repo (local bare remote, a fake task, a fake attestation, a review ledger written by the real `appendReviewLedgerRecord`), then runs Step 10.5 (`preSignRebase`) and the Step 11 push against the local remote. `gh` is never called. A failure exits non-zero with `FAIL step=<step> cause=<cause>`. `--pipeline-cli <dir>` points it at another checkout's built pipeline-cli: against commit fce26ed50 it fails with `step-10.5 cause=ledger-not-staged`.
+
+### Hold and hotfix
+
+On every run the job posts `pipeline-canary-red` or `pipeline-canary-green` (with the sha and, on red, the last 3500 bytes of canary output) to the RFC-0054 webhook, signed with `AI_SDLC_WEBHOOK_SECRET`, to `AI_SDLC_WEBHOOK_URL` (both repository secrets; without them the notify step is a no-op). The receiver stores the event under `<board>/events/`. On the next tick (`src/hierarchy/canary.ts`):
+
+- red: the board is held with reason `pipeline canary red at <sha>` (executors stop claiming; reporting continues) and a hotfix task labelled `pipeline-hotfix`, carrying the canary output, is filed through `cli-file task --pr`. Task id `HOTFIX-<n>` is derived from the sha, so one sha files one task.
+- green: the hold is lifted, but only when its reason starts with `pipeline canary red at`; an operator hold is never lifted by the canary.
+
+Each delivery id is processed once (`<board>/canary-state.json`). If the webhook is unreachable, the run is still red and the failing job is the only signal.
+
+Manual lift (the hotfix landed and you do not want to wait for the next push): `node pipeline-cli/bin/cli-hierarchy.mjs resume`. Run the canary by hand with `pnpm canary:pipeline` after `pnpm --filter @ai-sdlc/pipeline-cli... build`.
+
 ---
 
 ## References

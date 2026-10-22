@@ -58,9 +58,11 @@
  */
 
 import { parseQuota, parseQuotaFloor } from '../hierarchy/gh-calls.js';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { hotfixTaskId, hotfixTaskMarkdown } from '../hierarchy/canary.js';
 import process from 'node:process';
 
 import { promoteExpiredDecisions } from '../decisions/escalation-chain.js';
@@ -902,6 +904,25 @@ export async function runHierarchyCli(
                 ),
                 land: createLander({ repoRoot }),
               })),
+          // AISDLC-1023: a red pipeline canary files its hotfix through cli-file.
+          fileHotfix: ({ sha, detail }) => {
+            const id = hotfixTaskId(sha);
+            const dir = path.join(deps.boardDir, 'hotfix');
+            mkdirSync(dir, { recursive: true });
+            const file = path.join(
+              dir,
+              `${id.toLowerCase()} - pipeline canary red at ${sha.slice(0, 8)}.md`,
+            );
+            writeFileSync(file, hotfixTaskMarkdown(id, sha, detail), 'utf-8');
+            const bin = fileURLToPath(new URL('../../bin/cli-file.mjs', import.meta.url));
+            const r = (extras.ghRun ?? deps.run)(process.execPath, [bin, 'task', file, '--pr'], {
+              cwd: repoRoot,
+            });
+            if (r?.status !== 0) {
+              throw new Error(`cli-file task failed: ${(r?.stderr ?? '').trim() || 'no output'}`);
+            }
+            return id;
+          },
           promoteExpired: () =>
             isDecisionCatalogEnabled()
               ? promoteExpiredDecisions(

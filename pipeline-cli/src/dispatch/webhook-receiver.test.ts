@@ -141,6 +141,27 @@ describe('webhook receiver (AISDLC-880)', () => {
     expect(eventFiles()).toHaveLength(2);
   });
 
+  it('records pipeline canary events with the sha, and the capped output on red (AISDLC-1023)', async () => {
+    const red = JSON.stringify({
+      repository: { full_name: 'o/r' },
+      sha: SHA,
+      detail: 'x'.repeat(5000),
+    });
+    const green = JSON.stringify({ repository: { full_name: 'o/r' }, sha: SHA });
+    await post(red, good(red, 'c-1', 'pipeline-canary-red'));
+    await post(green, good(green, 'c-2', 'pipeline-canary-green'));
+    expect(eventFiles()).toHaveLength(2);
+    const recs = eventFiles().map(
+      (f) =>
+        JSON.parse(readFileSync(path.join(dir, 'events', f), 'utf-8')) as Record<string, unknown>,
+    );
+    const r = recs.find((x) => x.kind === 'pipeline-canary-red')!;
+    expect(r.headSha).toBe(SHA);
+    expect(r.pr).toBeNull();
+    expect((r.detail as string).length).toBe(4000);
+    expect(recs.find((x) => x.kind === 'pipeline-canary-green')).not.toHaveProperty('detail');
+  });
+
   it('touchWakeFile creates the wake file', () => {
     touchWakeFile(dir);
     expect(readdirSync(dir)).toContain('.reconcile-wake');

@@ -266,6 +266,69 @@ jobs:
             exit 1
           fi
 
+  # AISDLC-1023: prove the pipeline can still ship a PR, on the filesystem the
+  # executors run on (macOS is case-insensitive; Linux hid the 2026-10-21 Step
+  # 10.5 outage). Not continue-on-error: a red canary is a red run. The notify
+  # step posts pipeline-canary-red / -green with the sha to the RFC-0054 webhook
+  # (secrets AI_SDLC_WEBHOOK_URL and AI_SDLC_WEBHOOK_SECRET); the dispatch tick
+  # holds the board and files a hotfix. See docs/operations/main-health-monitor.md.
+  pipeline-canary:
+    name: Pipeline Canary (macOS)
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build pipeline-cli
+        run: pnpm --filter @ai-sdlc/pipeline-cli... build
+
+      - name: Run pipeline canary
+        id: canary
+        continue-on-error: true
+        run: node scripts/pipeline-canary.mjs 2>&1 | tee "$RUNNER_TEMP/canary.log"; exit "${PIPESTATUS[0]}"
+
+      - name: Notify dispatch webhook
+        if: always()
+        env:
+          WEBHOOK_URL: ${{ secrets.AI_SDLC_WEBHOOK_URL }}
+          WEBHOOK_SECRET: ${{ secrets.AI_SDLC_WEBHOOK_SECRET }}
+          CANARY_OUTCOME: ${{ steps.canary.outcome }}
+        run: |
+          if [ -z "$WEBHOOK_URL" ] || [ -z "$WEBHOOK_SECRET" ]; then
+            echo "[pipeline-canary] no webhook configured; skipping notify"
+            exit 0
+          fi
+          if [ "$CANARY_OUTCOME" = "success" ]; then kind=pipeline-canary-green; else kind=pipeline-canary-red; fi
+          detail="$(tail -c 3500 "$RUNNER_TEMP/canary.log" 2>/dev/null || true)"
+          body="$(jq -nc --arg repo "$GITHUB_REPOSITORY" --arg sha "$GITHUB_SHA" --arg detail "$detail" '{repository: {full_name: $repo}, sha: $sha, detail: $detail}')"
+          sig="sha256=$(printf '%s' "$body" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" | sed 's/^.* //')"
+          curl -sS --max-time 20 -X POST "$WEBHOOK_URL" \
+            -H "content-type: application/json" \
+            -H "x-github-event: $kind" \
+            -H "x-github-delivery: canary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            -H "x-hub-signature-256: $sig" \
+            --data "$body" || echo "::warning::could not reach the dispatch webhook"
+
+      - name: Fail on canary failure
+        if: steps.canary.outcome != 'success'
+        run: |
+          echo "## pipeline canary is RED at ${GITHUB_SHA:0:8}" >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::pipeline canary FAILED; see 'Run pipeline canary'. Runbook: docs/operations/main-health-monitor.md"
+          exit 1
+
   # AISDLC-842: SDK suites ci.yml ran on push (unfiltered here: a push has no
   # reliable path diff for a post-merge health check).
   test-python:
