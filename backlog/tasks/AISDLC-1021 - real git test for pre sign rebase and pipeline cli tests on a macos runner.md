@@ -2,7 +2,7 @@
 id: AISDLC-1021
 title: >-
   Step 10.5 gets a real-git test with the real ledger writer, and pipeline-cli tests also run on a macOS runner
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-22'
 labels:
