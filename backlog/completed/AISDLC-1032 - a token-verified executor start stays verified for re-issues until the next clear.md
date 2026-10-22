@@ -2,7 +2,7 @@
 id: AISDLC-1032
 title: >-
   A token-verified executor start stays verified for re-issued starts until the next clear
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22'
 labels:
@@ -38,14 +38,40 @@ dispatchable: true
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 A second `executor-start` from the same session after a `taskId: null` wait is accepted without a sender flag (unit test)
-- [ ] #2 A start token verified once is refused after `cli-hierarchy clear` rewrites it for another dispatch pid, and after a claim removed it (unit tests)
-- [ ] #3 The age ceiling applies to the first verification only; a verified token is accepted after the ceiling (unit test)
-- [ ] #4 `ai-sdlc-plugin/commands/executor.md` and `docs/operations/cli-hierarchy.md` state that re-issued starts need no flag until the next clear
-- [ ] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
+- [x] #1 A second `executor-start` from the same session after a `taskId: null` wait is accepted without a sender flag (unit test)
+- [x] #2 A start token verified once is refused after `cli-hierarchy clear` rewrites it for another dispatch pid, and after a claim removed it (unit tests)
+- [x] #3 The age ceiling applies to the first verification only; a verified token is accepted after the ceiling (unit test)
+- [x] #4 `ai-sdlc-plugin/commands/executor.md` and `docs/operations/cli-hierarchy.md` state that re-issued starts need no flag until the next clear
+- [x] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
 <!-- AC:END -->
 
 ## Verification
 
 - `pnpm build && pnpm test && pnpm lint && pnpm format:check` green.
 - Manual: clear an executor on an empty queue; after its first wait lapses, the re-issued `executor-start` in the same session claims the next queued task instead of refusing with `unchecked-start`.
+
+## Final Summary
+
+## Summary
+`executor-start` now verifies the start token and keeps it instead of consuming it. A flagless re-issued start after a `taskId: null` wait is accepted until the next `clear` rewrites the token or a claim removes it. The refusal text now names both ways in: a clear, or the harness-reported sender flag.
+
+## Changes
+- pipeline-cli/src/hierarchy/start-token.ts
+- pipeline-cli/src/hierarchy/executor-start.ts
+- pipeline-cli/src/hierarchy/executor-start.test.ts
+- ai-sdlc-plugin/commands/executor.md
+- docs/operations/cli-hierarchy.md
+
+## Design decisions
+The task body already named the five steps (AC5), so I did not change it. I added one sentence to `executor.md` about re-issued starts. A repo test caps that file at 165 lines, so I folded it into the existing unchecked-start paragraph; the file is 163 lines.
+
+## Verification
+- `pnpm build` — passed
+- `pnpm test` — passed
+- `pnpm lint` — passed
+- `pnpm format:check` — passed
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+

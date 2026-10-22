@@ -1054,9 +1054,12 @@ and no valid start token.
 
 **Start token (AISDLC-1028).** `clear` types the executor command, which has no harness envelope, so a
 clear run by the dispatch caller first writes `<boardDir>/starts/<executor>.json`
-(`{ issuerPid, issuerName, issuedAt }`); the planner writes none. A flagless `executor-start` reads and
-deletes its own token (single use) and proceeds only when `issuerPid` is the roster's running dispatch
-pid and `issuedAt` is within 30 minutes; otherwise it refuses with `unchecked-start`. The
+(`{ issuerPid, issuerName, issuedAt }`); the planner writes none. A flagless `executor-start` verifies its own token
+and proceeds only when `issuerPid` is the roster's running dispatch pid and `issuedAt` is within 30
+minutes (first start only); it then records `verifiedAt` in the file, so re-issued starts (for example
+after a `taskId: null` wait) need no flag until the next `clear` rewrites the token or a claim removes
+it; otherwise it refuses with `unchecked-start`, naming the two ways in (a clear, or the harness-reported
+sender flag). The
 `--sender-pid` / `--sender-ref` path and `check-sender` for later messages are unchanged.
 
 ## Restarting after a plugin upgrade
