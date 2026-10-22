@@ -12,7 +12,7 @@ labels:
 dependencies: []
 references:
   - spec/rfcs/RFC-0058-session-hierarchy-on-mods.md
-  - ai-sdlc-plugin/hooks/hooks.json
+  - ai-sdlc-plugin/.claude-plugin/plugin.json
   - pipeline-cli/src/hierarchy/clear.ts
   - docs/operations/cli-hierarchy.md
 priority: high
@@ -24,7 +24,7 @@ dispatchable: true
 RFC-0058 phase 0 (Signed Off 2026-10-22). A one-day spike with no production change that answers the two facts the design depends on and records the measured saving.
 
 **Scope.**
-1. A minimal hooks module under `ai-sdlc-plugin/hooks/hierarchy-spike/` (listed in `hooks/hooks.json` `modules` only behind an `AI_SDLC_HIERARCHY_SPIKE=1` guard, so no adopter loads it) registering `session.start`, `turn.complete`, `session.measure`, `session.receive` and `session.end`, each appending one JSON line to `.ai-sdlc/hierarchy-spike.log`, plus a `/hier-ping` command that replies with the session id.
+1. A minimal hooks module under `ai-sdlc-plugin/hooks/hierarchy-spike/` (listed in the plugin's hooks manifest `modules` list (`.claude-plugin/plugin.json`, or `hooks/hooks.json` if the Mods loader requires it) only behind an `AI_SDLC_HIERARCHY_SPIKE=1` guard, so no adopter loads it) registering `session.start`, `turn.complete`, `session.measure`, `session.receive` and `session.end`, each appending one JSON line to `.ai-sdlc/hierarchy-spike.log`, plus a `/hier-ping` command that replies with the session id.
 2. OQ-1 fact: call `$.command.run({ command: 'clear' })` then `$.prompt.submit({ text: '/hier-ping' })` from the module; record whether the clear runs, whether the module reloads, whether a value written to `$.store` before the clear is readable after it, and whether the prompt starts a turn once the session is idle. If `clear` resolves `{ drop }`, run the same sequence with `$.session.compact` and record the result as the first fallback.
 3. Receive fact: from a second session, `$.session.send` to the first by roster name; record that `session.receive` fires before the model sees the text and that returning `{ consumed }` leaves the model silent (no turn in `turn.start`).
 4. Measurement: tokens and wall-clock seconds for one mod-consumed message against one model-relayed SendMessage, repeated five times each, written to the log and summarised in the task's PR body.

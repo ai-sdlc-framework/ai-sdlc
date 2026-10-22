@@ -13,7 +13,7 @@ dependencies:
   - AISDLC-1033
 references:
   - spec/rfcs/RFC-0058-session-hierarchy-on-mods.md
-  - ai-sdlc-plugin/hooks/hooks.json
+  - ai-sdlc-plugin/.claude-plugin/plugin.json
   - ai-sdlc-plugin/commands/executor.md
   - pipeline-cli/src/hierarchy/executor-start.ts
   - pipeline-cli/src/hierarchy/start-token.ts
@@ -26,7 +26,7 @@ dispatchable: true
 RFC-0058 phase 1 (Signed Off 2026-10-22). The `hierarchy` hooks module ships in the ai-sdlc plugin (OQ-2) with the executor role only; the spike module is removed.
 
 **Scope.**
-1. `ai-sdlc-plugin/hooks/hierarchy/register.tsx` exported `register(on, options)`; `hooks/hooks.json` lists it under `modules`. At `session.start` it reads the role from `hierarchy.json` or `HIERARCHY_ROLE` exactly as `hierarchy-role.js` does and returns without registering anything when no role is set.
+1. `ai-sdlc-plugin/hooks/hierarchy/register.tsx` exported `register(on, options)`; the plugin's hooks manifest lists it under `modules`. At `session.start` it reads the role from `hierarchy.json` or `HIERARCHY_ROLE` exactly as `hierarchy-role.js` does and returns without registering anything when no role is set.
 2. OQ-5 guard: before registering, compare `$.session.version()` with the floor recorded by the phase 0 spike and probe every primitive the role uses (`prompt.submit`, `command.run`, `session.compact`, `session.measure`, `session.send`); on a miss register nothing and log one line naming the missing primitive and the floor.
 3. OQ-4 probe: when `$.session.identity()` answers, record it as an informational field in the start line beside the role and the detected tier; never use it as authority.
 4. Executor role: `session.receive` consumes an enqueue message from the dispatch roster name and calls `$.prompt.submit({ text: '/ai-sdlc:executor' })`; status noise is consumed; anything else passes through. After the verdict (`turn.complete` of the task's last step, never mid-task) the module rotates per OQ-1: handoff write, `$.command.run('clear')` with `$.store` carrying role, resume command and last reply; on `{ drop }`, `$.session.compact` with the hierarchy summary prompt; on a second failure, end the session for `cli-hierarchy up`. `session.measure` triggers the same rotation at 120k tokens.

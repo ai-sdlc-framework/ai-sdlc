@@ -13,7 +13,7 @@ dependencies:
   - AISDLC-1034
 references:
   - spec/rfcs/RFC-0058-session-hierarchy-on-mods.md
-  - ai-sdlc-plugin/hooks/hooks.json
+  - ai-sdlc-plugin/.claude-plugin/plugin.json
   - ai-sdlc-plugin/commands/operator-dispatch.md
   - pipeline-cli/src/hierarchy/clear.ts
   - docs/operations/cli-hierarchy.md

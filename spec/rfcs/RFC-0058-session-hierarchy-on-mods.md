@@ -15,6 +15,8 @@ deferredDocsDeadline: 2026-12-31
 targetSpecVersion: v1alpha1
 ---
 
+<!-- ai-sdlc:lifecycle-jump-approved-by:deefactorial reason:operator resolved all six OQs with the full rubric and signed Engineering and Operator in the 2026-10-22 walkthrough; Ready for Review is skipped because the same operator is author, engineering and operator authority -->
+
 # RFC-0058: Session Hierarchy on the Claude Code Mods API
 
 **Status:** Signed Off, v0.2 (2026-10-22). Six Open Questions, all resolved with the
