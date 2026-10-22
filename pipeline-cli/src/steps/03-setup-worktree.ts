@@ -754,3 +754,10 @@ export async function detectDraftPrForBranch(
     return null;
   }
 }
+
+/** Workflow registry metadata (RFC-0056). */
+export const SETUP_WORKTREE_STEP: import('./step-meta.js').StepMeta = {
+  id: 'setup-worktree',
+  inputs: 'local:branch-name',
+  outputs: 'local:worktree',
+};

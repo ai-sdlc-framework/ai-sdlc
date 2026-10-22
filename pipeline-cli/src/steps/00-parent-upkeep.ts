@@ -127,3 +127,10 @@ export async function assertParentClean(
   }
   return { ok: true };
 }
+
+/** Workflow registry metadata (RFC-0056). */
+export const PARENT_UPKEEP_STEP: import('./step-meta.js').StepMeta = {
+  id: 'parent-upkeep',
+  inputs: 'local:repo-state',
+  outputs: 'local:repo-state',
+};

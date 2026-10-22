@@ -277,3 +277,10 @@ export async function validateTask(options: ValidateTaskOptions): Promise<Valida
 
   return { ok: true, task };
 }
+
+/** Workflow registry metadata (RFC-0056). */
+export const VALIDATE_STEP: import('./step-meta.js').StepMeta = {
+  id: 'validate-task',
+  inputs: 'backlog-task.v1',
+  outputs: 'local:validated-task',
+};

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-991
 title: 'Workflow graph phase 1: step metadata and `cli-workflow graph` emits the current Machine as Mermaid and YAML'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-20'
 labels:

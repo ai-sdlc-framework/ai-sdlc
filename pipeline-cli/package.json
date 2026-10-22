@@ -68,7 +68,8 @@
     "cli-cost-report": "bin/cli-cost-report.mjs",
     "cli-memory-dream": "bin/cli-memory-dream.mjs",
     "cli-merge-if-eligible": "bin/cli-merge-if-eligible.mjs",
-    "cli-usage": "bin/cli-usage.mjs"
+    "cli-usage": "bin/cli-usage.mjs",
+    "cli-workflow": "bin/cli-workflow.mjs"
   },
   "exports": {
     ".": {

@@ -144,3 +144,10 @@ export async function buildDeveloperPrompt(
     modelArm: routed.arm,
   };
 }
+
+/** Workflow registry metadata (RFC-0056). */
+export const BUILD_DEV_PROMPT_STEP: import('./step-meta.js').StepMeta = {
+  id: 'build-dev-prompt',
+  inputs: 'backlog-task.v1',
+  outputs: 'local:developer-prompt',
+};

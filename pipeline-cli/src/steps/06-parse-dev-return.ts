@@ -393,3 +393,10 @@ function buildRetryPrompt(initialOutputPreview: string): string {
     'Return the JSON object and NOTHING else.',
   ].join('\n');
 }
+
+/** Workflow registry metadata (RFC-0056). */
+export const PARSE_DEV_RETURN_STEP: import('./step-meta.js').StepMeta = {
+  id: 'parse-dev-return',
+  inputs: 'local:developer-envelope',
+  outputs: 'local:developer-return',
+};
