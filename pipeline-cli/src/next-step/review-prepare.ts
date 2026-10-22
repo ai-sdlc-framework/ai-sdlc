@@ -474,3 +474,14 @@ export async function prepareReview(
   const spawned = spawnedFor(prompts);
   return { kind: 'spawn', review: { ...baseReview, spawned, nonce }, classifierLine };
 }
+
+/**
+ * Short prompt the loop driver hands a reviewer instead of relaying the full prompt text
+ * (AISDLC-1031). It names the prompt file only; the diff and the nonce marker stay in the file.
+ */
+export function bootstrapPromptFor(promptFile: string): string {
+  return (
+    `Read \`${promptFile}\` with the Read tool and carry out every instruction in it. ` +
+    'The file holds your full review prompt, including the review marker you must echo in your response.'
+  );
+}

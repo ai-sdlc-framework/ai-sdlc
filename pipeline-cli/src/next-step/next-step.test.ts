@@ -20,6 +20,7 @@ import {
 import type { AggregatedVerdict, ReviewerVerdict } from '../types.js';
 import { loadReviewState } from '../incremental-review/review-rounds.js';
 import { approvedWithoutReviewers } from './review-finalize.js';
+import { bootstrapPromptFor } from './review-prepare.js';
 import { extractJson, nextStep, readState, writeState, type NextStepDeps } from './next-step.js';
 import type {
   DoneInstruction,
@@ -242,9 +243,20 @@ describe('happy path', () => {
     const rv = instructions[1];
     if (rv.action !== 'spawn-reviewers') throw new Error('unreachable');
     expect(rv.reviewers).toEqual([
-      { agent: 'code-reviewer-codex', promptFile: '/files/review-r1-code.md' },
-      { agent: 'security-reviewer', promptFile: '/files/review-r1-sec.md', model: 'opus' },
+      {
+        agent: 'code-reviewer-codex',
+        promptFile: '/files/review-r1-code.md',
+        bootstrapPrompt: bootstrapPromptFor('/files/review-r1-code.md'),
+      },
+      {
+        agent: 'security-reviewer',
+        promptFile: '/files/review-r1-sec.md',
+        bootstrapPrompt: bootstrapPromptFor('/files/review-r1-sec.md'),
+        model: 'opus',
+      },
     ]);
+    expect(rv.reviewers[0].bootstrapPrompt).toContain('/files/review-r1-code.md');
+    expect(rv.reviewers[0].bootstrapPrompt).not.toMatch(/Diff-binding|nonce/i);
     expect(rv.replyShape).toContain('agentId');
 
     expect(instructions[2]).toMatchObject({

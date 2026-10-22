@@ -142,6 +142,11 @@ describe('/ai-sdlc execute body is a thin next-step loop (AISDLC-762)', () => {
     assert.ok(lines <= 250, `execute.md is ${lines} lines; the budget is 250`);
   });
 
+  it('hands each reviewer its bootstrapPrompt, never the file contents (AISDLC-1031)', () => {
+    assert.match(cmdBody, /`prompt` = its `bootstrapPrompt`/);
+    assert.match(cmdBody, /never read and relay the file contents/);
+  });
+
   it('drives the pipeline through `next-step` with --task, --state and --fresh', () => {
     assert.match(
       cmdBody,
@@ -165,7 +170,7 @@ describe('/ai-sdlc execute body is a thin next-step loop (AISDLC-762)', () => {
   it('spawns all reviewers in a single message and never edits the nonce-bearing prompt', () => {
     assert.match(cmdBody, /Issue ALL of them in a single message/);
     assert.match(cmdBody, /agentId/);
-    assert.match(cmdBody, /never edit or drop it/);
+    assert.match(cmdBody, /never edit the file/);
   });
 
   it('does not narrate the pipeline steps any more', () => {
