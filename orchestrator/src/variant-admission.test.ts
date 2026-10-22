@@ -33,15 +33,15 @@ import {
 
 function makeVariants(): Record<string, VariantOverlay[]> {
   return {
-    'spry-engage': [
+    'acme-app': [
       {
-        id: 'small-utility',
+        id: 'small-org',
         audienceCharacteristics: {
-          segments: ['municipal-small', 'water-district-small'],
+          segments: ['small-business', 'small-nonprofit'],
           sizeRange: { minStaff: 1, maxStaff: 50 },
         },
         designOverrides: {
-          colorPaletteOverlay: 'small-utility-warm',
+          colorPaletteOverlay: 'small-org-warm',
           densityProfile: 'comfortable',
           typographyScale: 'large-print',
           motionProfile: 'reduced',
@@ -55,7 +55,7 @@ function makeVariants(): Record<string, VariantOverlay[]> {
       {
         id: 'enterprise',
         audienceCharacteristics: {
-          segments: ['municipal-large', 'regional-utility'],
+          segments: ['mid-market', 'large-enterprise'],
           sizeRange: { minStaff: 51, maxStaff: 5000 },
         },
         designOverrides: {
@@ -68,22 +68,22 @@ function makeVariants(): Record<string, VariantOverlay[]> {
         designImperatives: ['bulk-operation-efficiency', 'multi-tab-workflow-tolerance'],
       },
       {
-        id: 'county-regional',
+        id: 'regional',
         audienceCharacteristics: {
-          segments: ['county-government', 'regional-coordinator'],
+          segments: ['regional-office', 'regional-coordinator'],
           sizeRange: { minStaff: 20, maxStaff: 200 },
         },
         designOverrides: { radiusProfile: 'sharp' },
       },
     ],
-    'spry-billing': [
+    'acme-billing': [
       {
-        id: 'billing-clerk',
+        id: 'back-office-clerk',
         audienceCharacteristics: { segments: ['billing-staff'] },
         designOverrides: { densityProfile: 'compact' },
       },
       {
-        id: 'customer-portal',
+        id: 'self-service',
         audienceCharacteristics: { segments: ['end-customer'] },
         designOverrides: { densityProfile: 'spacious' },
       },
@@ -93,14 +93,14 @@ function makeVariants(): Record<string, VariantOverlay[]> {
 
 function makeVariantScores(): VariantContext['variantScores'] {
   return {
-    'spry-engage': {
-      'small-utility': { sa1: 0.9, sa2: 0.85 }, // high — well-aligned variant
+    'acme-app': {
+      'small-org': { sa1: 0.9, sa2: 0.85 }, // high — well-aligned variant
       enterprise: { sa1: 0.4, sa2: 0.5 }, // medium-low — mismatch
-      'county-regional': { sa1: 0.7, sa2: 0.65 },
+      regional: { sa1: 0.7, sa2: 0.65 },
     },
-    'spry-billing': {
-      'billing-clerk': { sa1: 0.8, sa2: 0.6 },
-      'customer-portal': { sa1: 0.3, sa2: 0.4 },
+    'acme-billing': {
+      'back-office-clerk': { sa1: 0.8, sa2: 0.6 },
+      'self-service': { sa1: 0.3, sa2: 0.4 },
     },
   };
 }
@@ -109,36 +109,36 @@ function makeVariantScores(): VariantContext['variantScores'] {
 
 describe('parseTargetedVariantRef', () => {
   it('parses slug-pair form (RFC-0017 §6.1 schema pattern)', () => {
-    const result = parseTargetedVariantRef('spry-engage/small-utility');
+    const result = parseTargetedVariantRef('acme-app/small-org');
     expect(result).toEqual({
-      soulId: 'spry-engage',
-      variantId: 'small-utility',
-      raw: 'spry-engage/small-utility',
+      soulId: 'acme-app',
+      variantId: 'small-org',
+      raw: 'acme-app/small-org',
     });
   });
 
   it('parses full DID form (RFC-0017 OQ-6 URI)', () => {
-    const result = parseTargetedVariantRef('did:platform-x:soul:spry-engage/variant:small-utility');
+    const result = parseTargetedVariantRef('did:platform-x:soul:acme-app/variant:small-org');
     expect(result).toEqual({
-      soulId: 'spry-engage',
-      variantId: 'small-utility',
-      raw: 'did:platform-x:soul:spry-engage/variant:small-utility',
+      soulId: 'acme-app',
+      variantId: 'small-org',
+      raw: 'did:platform-x:soul:acme-app/variant:small-org',
     });
   });
 
   it('returns undefined for malformed input (no slash)', () => {
-    expect(parseTargetedVariantRef('spry-engage-small-utility')).toBeUndefined();
+    expect(parseTargetedVariantRef('acme-app-small-org')).toBeUndefined();
   });
 
   it('returns undefined for malformed input (slug violates pattern)', () => {
-    expect(parseTargetedVariantRef('Spry-Engage/small-utility')).toBeUndefined(); // capital S
-    expect(parseTargetedVariantRef('spry-engage/Small-Utility')).toBeUndefined();
+    expect(parseTargetedVariantRef('Acme-App/small-org')).toBeUndefined(); // capital A
+    expect(parseTargetedVariantRef('acme-app/Small-Org')).toBeUndefined();
     expect(parseTargetedVariantRef('1bad/start')).toBeUndefined(); // starts with digit
   });
 
   it('returns undefined for full-DID with malformed segments', () => {
     expect(
-      parseTargetedVariantRef('did:platform-x:soul:Spry-Engage/variant:small-utility'),
+      parseTargetedVariantRef('did:platform-x:soul:Acme-App/variant:small-org'),
     ).toBeUndefined();
   });
 
@@ -156,11 +156,11 @@ describe('resolveTargetedVariants', () => {
     const ctx: VariantContext = {
       variantsBySoul,
       variantScores: makeVariantScores(),
-      workItemTargeting: [{ id: 'AISDLC-313', targetedVariants: ['spry-engage/small-utility'] }],
+      workItemTargeting: [{ id: 'AISDLC-313', targetedVariants: ['acme-app/small-org'] }],
     };
     const result = resolveTargetedVariants('AISDLC-313', ctx);
     expect(result).toEqual([
-      { soulId: 'spry-engage', variantId: 'small-utility', raw: 'spry-engage/small-utility' },
+      { soulId: 'acme-app', variantId: 'small-org', raw: 'acme-app/small-org' },
     ]);
   });
 
@@ -168,7 +168,7 @@ describe('resolveTargetedVariants', () => {
     const ctx: VariantContext = {
       variantsBySoul,
       variantScores: makeVariantScores(),
-      workItemTargeting: [{ id: 'AISDLC-313', targetedVariants: ['spry-engage/small-utility'] }],
+      workItemTargeting: [{ id: 'AISDLC-313', targetedVariants: ['acme-app/small-org'] }],
     };
     expect(resolveTargetedVariants('aisdlc-313', ctx)).toHaveLength(1);
   });
@@ -177,7 +177,7 @@ describe('resolveTargetedVariants', () => {
     const ctx: VariantContext = {
       variantsBySoul,
       variantScores: makeVariantScores(),
-      workItemTargeting: [{ id: 'AISDLC-100', targetedVariants: ['spry-engage/enterprise'] }],
+      workItemTargeting: [{ id: 'AISDLC-100', targetedVariants: ['acme-app/enterprise'] }],
     };
     expect(resolveTargetedVariants('AISDLC-999', ctx)).toEqual([]);
   });
@@ -207,7 +207,7 @@ describe('resolveTargetedVariants', () => {
     const ctx: VariantContext = {
       variantsBySoul,
       variantScores: makeVariantScores(),
-      workItemTargeting: [{ id: 'AISDLC-313', targetedVariants: ['unknown-soul/small-utility'] }],
+      workItemTargeting: [{ id: 'AISDLC-313', targetedVariants: ['unknown-soul/small-org'] }],
     };
     expect(resolveTargetedVariants('AISDLC-313', ctx)).toEqual([]);
   });
@@ -216,9 +216,7 @@ describe('resolveTargetedVariants', () => {
     const ctx: VariantContext = {
       variantsBySoul,
       variantScores: makeVariantScores(),
-      workItemTargeting: [
-        { id: 'AISDLC-313', targetedVariants: ['spry-engage/nonexistent-variant'] },
-      ],
+      workItemTargeting: [{ id: 'AISDLC-313', targetedVariants: ['acme-app/nonexistent-variant'] }],
     };
     expect(resolveTargetedVariants('AISDLC-313', ctx)).toEqual([]);
   });
@@ -230,12 +228,12 @@ describe('resolveTargetedVariants', () => {
       workItemTargeting: [
         {
           id: 'AISDLC-313',
-          targetedVariants: ['spry-engage/small-utility', 'spry-engage/enterprise'],
+          targetedVariants: ['acme-app/small-org', 'acme-app/enterprise'],
         },
       ],
     };
     const result = resolveTargetedVariants('AISDLC-313', ctx);
-    expect(result.map((r) => r.variantId)).toEqual(['small-utility', 'enterprise']);
+    expect(result.map((r) => r.variantId)).toEqual(['small-org', 'enterprise']);
   });
 
   it('AC #3: resolves cross-Soul variants when work item targets variants in multiple Souls', () => {
@@ -245,14 +243,14 @@ describe('resolveTargetedVariants', () => {
       workItemTargeting: [
         {
           id: 'AISDLC-cross',
-          targetedVariants: ['spry-engage/small-utility', 'spry-billing/billing-clerk'],
+          targetedVariants: ['acme-app/small-org', 'acme-billing/back-office-clerk'],
         },
       ],
     };
     const result = resolveTargetedVariants('AISDLC-cross', ctx);
     expect(result.map((r) => `${r.soulId}/${r.variantId}`)).toEqual([
-      'spry-engage/small-utility',
-      'spry-billing/billing-clerk',
+      'acme-app/small-org',
+      'acme-billing/back-office-clerk',
     ]);
   });
 
@@ -264,15 +262,15 @@ describe('resolveTargetedVariants', () => {
         {
           id: 'AISDLC-mix',
           targetedVariants: [
-            'did:platform-x:soul:spry-engage/variant:small-utility',
-            'spry-billing/billing-clerk',
+            'did:platform-x:soul:acme-app/variant:small-org',
+            'acme-billing/back-office-clerk',
           ],
         },
       ],
     };
     const result = resolveTargetedVariants('AISDLC-mix', ctx);
     expect(result).toHaveLength(2);
-    expect(result.map((r) => r.variantId).sort()).toEqual(['billing-clerk', 'small-utility']);
+    expect(result.map((r) => r.variantId).sort()).toEqual(['back-office-clerk', 'small-org']);
   });
 });
 
@@ -342,9 +340,9 @@ describe('computeVariantScopedScores', () => {
     const ctx: VariantContext = {
       variantsBySoul,
       variantScores,
-      workItemTargeting: [{ id: 'AISDLC-313', targetedVariants: ['spry-engage/small-utility'] }],
+      workItemTargeting: [{ id: 'AISDLC-313', targetedVariants: ['acme-app/small-org'] }],
     };
-    // small-utility: sa1=0.9, sa2=0.85 — both higher than soul-aggregate 0.5
+    // small-org: sa1=0.9, sa2=0.85 — both higher than soul-aggregate 0.5
     const result = computeVariantScopedScores('AISDLC-313', 0.5, 0.5, ctx);
     expect(result.routingPath).toBe('single-variant');
     expect(result.targetedVariants).toHaveLength(1);
@@ -356,7 +354,7 @@ describe('computeVariantScopedScores', () => {
     const ctx: VariantContext = {
       variantsBySoul,
       variantScores,
-      workItemTargeting: [{ id: 'AISDLC-313', targetedVariants: ['spry-engage/enterprise'] }],
+      workItemTargeting: [{ id: 'AISDLC-313', targetedVariants: ['acme-app/enterprise'] }],
     };
     // enterprise: sa1=0.4, sa2=0.5 — work item mismatched against this variant
     const result = computeVariantScopedScores('AISDLC-313', 0.7, 0.7, ctx);
@@ -369,7 +367,7 @@ describe('computeVariantScopedScores', () => {
     const ctx: VariantContext = {
       variantsBySoul,
       variantScores: {}, // no precomputed scores for any variant
-      workItemTargeting: [{ id: 'AISDLC-313', targetedVariants: ['spry-engage/small-utility'] }],
+      workItemTargeting: [{ id: 'AISDLC-313', targetedVariants: ['acme-app/small-org'] }],
     };
     const result = computeVariantScopedScores('AISDLC-313', 0.55, 0.65, ctx);
     expect(result.routingPath).toBe('single-variant');
@@ -384,12 +382,12 @@ describe('computeVariantScopedScores', () => {
       workItemTargeting: [
         {
           id: 'AISDLC-313',
-          targetedVariants: ['spry-engage/small-utility', 'spry-engage/enterprise'],
+          targetedVariants: ['acme-app/small-org', 'acme-app/enterprise'],
         },
       ],
     };
-    // small-utility sa1=0.9, enterprise sa1=0.4 → min = 0.4
-    // small-utility sa2=0.85, enterprise sa2=0.5 → min = 0.5
+    // small-org sa1=0.9, enterprise sa1=0.4 → min = 0.4
+    // small-org sa2=0.85, enterprise sa2=0.5 → min = 0.5
     const result = computeVariantScopedScores('AISDLC-313', 0.55, 0.6, ctx);
     expect(result.routingPath).toBe('multi-variant');
     expect(result.targetedVariants).toHaveLength(2);
@@ -405,15 +403,15 @@ describe('computeVariantScopedScores', () => {
       workItemTargeting: [
         {
           id: 'AISDLC-313',
-          targetedVariants: ['spry-engage/small-utility', 'spry-engage/enterprise'],
+          targetedVariants: ['acme-app/small-org', 'acme-app/enterprise'],
         },
       ],
       configBySoul: {
-        'spry-engage': { crossVariantAggregation: 'max' },
+        'acme-app': { crossVariantAggregation: 'max' },
       },
     };
-    // small-utility sa1=0.9, enterprise sa1=0.4 → max = 0.9
-    // small-utility sa2=0.85, enterprise sa2=0.5 → max = 0.85
+    // small-org sa1=0.9, enterprise sa1=0.4 → max = 0.9
+    // small-org sa2=0.85, enterprise sa2=0.5 → max = 0.85
     const result = computeVariantScopedScores('AISDLC-313', 0.55, 0.6, ctx);
     expect(result.routingPath).toBe('multi-variant');
     expect(result.aggregationRule).toBe('max');
@@ -428,14 +426,10 @@ describe('computeVariantScopedScores', () => {
       workItemTargeting: [
         {
           id: 'AISDLC-313',
-          targetedVariants: [
-            'spry-engage/small-utility',
-            'spry-engage/enterprise',
-            'spry-engage/county-regional',
-          ],
+          targetedVariants: ['acme-app/small-org', 'acme-app/enterprise', 'acme-app/regional'],
         },
       ],
-      configBySoul: { 'spry-engage': { crossVariantAggregation: 'mean' } },
+      configBySoul: { 'acme-app': { crossVariantAggregation: 'mean' } },
     };
     // sa1: (0.9 + 0.4 + 0.7) / 3 = 0.6667
     // sa2: (0.85 + 0.5 + 0.65) / 3 = 0.6667
@@ -454,28 +448,28 @@ describe('computeVariantScopedScores', () => {
         {
           id: 'AISDLC-cross',
           targetedVariants: [
-            // Soul spry-engage: small-utility (sa1=0.9) + enterprise (sa1=0.4) → min = 0.4
-            'spry-engage/small-utility',
-            'spry-engage/enterprise',
-            // Soul spry-billing: billing-clerk only (sa1=0.8)
-            'spry-billing/billing-clerk',
+            // Soul acme-app: small-org (sa1=0.9) + enterprise (sa1=0.4) → min = 0.4
+            'acme-app/small-org',
+            'acme-app/enterprise',
+            // Soul acme-billing: back-office-clerk only (sa1=0.8)
+            'acme-billing/back-office-clerk',
           ],
         },
       ],
       configBySoul: {
-        'spry-engage': { crossVariantAggregation: 'min' },
-        'spry-billing': { crossVariantAggregation: 'min' },
+        'acme-app': { crossVariantAggregation: 'min' },
+        'acme-billing': { crossVariantAggregation: 'min' },
       },
     };
     const result = computeVariantScopedScores('AISDLC-cross', 0.55, 0.6, ctx);
-    // Per-soul sa1: [0.4 (engage min), 0.8 (billing-clerk)] → cross-soul min = 0.4
+    // Per-soul sa1: [0.4 (acme-app min), 0.8 (back-office-clerk)] → cross-soul min = 0.4
     expect(result.routingPath).toBe('multi-variant');
     expect(result.sa1).toBeCloseTo(0.4, 8);
-    // Per-soul sa2: [0.5 (engage min), 0.6 (billing-clerk)] → cross-soul min = 0.5
+    // Per-soul sa2: [0.5 (acme-app min), 0.6 (back-office-clerk)] → cross-soul min = 0.5
     expect(result.sa2).toBeCloseTo(0.5, 8);
   });
 
-  it('cross-Soul multi-variant: per-Soul rule override respected (engage=max, billing=min)', () => {
+  it('cross-Soul multi-variant: per-Soul rule override respected (acme-app=max, billing=min)', () => {
     const ctx: VariantContext = {
       variantsBySoul,
       variantScores,
@@ -483,30 +477,30 @@ describe('computeVariantScopedScores', () => {
         {
           id: 'AISDLC-cross',
           targetedVariants: [
-            'spry-engage/small-utility',
-            'spry-engage/enterprise',
-            'spry-billing/billing-clerk',
-            'spry-billing/customer-portal',
+            'acme-app/small-org',
+            'acme-app/enterprise',
+            'acme-billing/back-office-clerk',
+            'acme-billing/self-service',
           ],
         },
       ],
       configBySoul: {
-        'spry-engage': { crossVariantAggregation: 'max' }, // engage: max → 0.9 / 0.85
-        'spry-billing': { crossVariantAggregation: 'min' }, // billing: min → 0.3 / 0.4
+        'acme-app': { crossVariantAggregation: 'max' }, // acme-app: max → 0.9 / 0.85
+        'acme-billing': { crossVariantAggregation: 'min' }, // billing: min → 0.3 / 0.4
       },
     };
     const result = computeVariantScopedScores('AISDLC-cross', 0.5, 0.5, ctx);
     expect(result.routingPath).toBe('multi-variant');
-    // Per-soul sa1: [0.9 (engage max), 0.3 (billing min)] → cross-soul min = 0.3
+    // Per-soul sa1: [0.9 (acme-app max), 0.3 (billing min)] → cross-soul min = 0.3
     expect(result.sa1).toBeCloseTo(0.3, 8);
-    // Per-soul sa2: [0.85 (engage max), 0.4 (billing min)] → cross-soul min = 0.4
+    // Per-soul sa2: [0.85 (acme-app max), 0.4 (billing min)] → cross-soul min = 0.4
     expect(result.sa2).toBeCloseTo(0.4, 8);
   });
 
   it('multi-variant: falls back per-variant when one variant has no precomputed score', () => {
     const partialScores = {
-      'spry-engage': {
-        'small-utility': { sa1: 0.9, sa2: 0.85 },
+      'acme-app': {
+        'small-org': { sa1: 0.9, sa2: 0.85 },
         // enterprise missing → falls back to fallbackSa1 (0.55) / fallbackSa2 (0.6)
       },
     };
@@ -516,7 +510,7 @@ describe('computeVariantScopedScores', () => {
       workItemTargeting: [
         {
           id: 'AISDLC-313',
-          targetedVariants: ['spry-engage/small-utility', 'spry-engage/enterprise'],
+          targetedVariants: ['acme-app/small-org', 'acme-app/enterprise'],
         },
       ],
     };
@@ -533,10 +527,10 @@ describe('computeVariantScopedScores', () => {
     // score (computed upstream by the Sα₂ scorer) is consumed here. This test
     // ensures the type carries the field shape and the router copes.
     const variantsWithExt: Record<string, VariantOverlay[]> = {
-      'spry-engage': [
+      'acme-app': [
         {
-          id: 'small-utility',
-          audienceCharacteristics: { segments: ['municipal-small'] },
+          id: 'small-org',
+          audienceCharacteristics: { segments: ['small-business'] },
           designOverrides: { densityProfile: 'comfortable' },
           designOverridesExt: {
             'acme.com/accessibilityProfile': 'low-tech-fluency',
@@ -549,9 +543,9 @@ describe('computeVariantScopedScores', () => {
     const ctx: VariantContext = {
       variantsBySoul: variantsWithExt,
       variantScores: {
-        'spry-engage': { 'small-utility': { sa1: 0.88, sa2: 0.77 } },
+        'acme-app': { 'small-org': { sa1: 0.88, sa2: 0.77 } },
       },
-      workItemTargeting: [{ id: 'AISDLC-313', targetedVariants: ['spry-engage/small-utility'] }],
+      workItemTargeting: [{ id: 'AISDLC-313', targetedVariants: ['acme-app/small-org'] }],
     };
     const result = computeVariantScopedScores('AISDLC-313', 0.5, 0.5, ctx);
     expect(result.routingPath).toBe('single-variant');

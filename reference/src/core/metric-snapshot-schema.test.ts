@@ -26,7 +26,7 @@ const WELL_FORMED = {
   apiVersion: 'ai-sdlc.io/v1alpha1',
   kind: 'MetricSnapshot',
   metadata: {
-    journey: 'spry-engage/onboarding',
+    journey: 'acme-app/onboarding',
     metricId: 'completion-rate',
   },
   spec: {

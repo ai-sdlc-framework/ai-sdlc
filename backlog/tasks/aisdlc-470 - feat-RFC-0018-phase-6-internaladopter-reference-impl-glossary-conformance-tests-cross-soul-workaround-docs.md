@@ -30,10 +30,10 @@ Phase 6 of RFC-0018 §11 practitioner validation + glossary + conformance test s
 
 Implement the InternalAdopter accessibility audit pipeline as the reference implementation:
 
-- **ProductA**: journeys `onboarding`, `daily-task-management`, `billing-inquiry-resolution` — multi-flow per soul; completion-rate + time-to-completion metrics
-- **ProductB**: journeys `shift-start`, `route-completion`, `end-of-shift-handoff` — mobile form-factor accessibility (touch targets, voice commands)
-- **ProductC**: journeys `csr-onboarding`, `customer-self-service`, `dispute-resolution` — variant-scoped journeys (csr vs customer-portal use same product but different journeys)
-- **ProductD / annual-test variant**: journeys `submit-test-results`, `request-extension`, `view-historical-tests` — regulatory journey with elevated WCAG (`AAA` per state requirement)
+- **ProductA**: journeys `onboarding`, `daily-task-management`, `account-inquiry-resolution` — multi-flow per soul; completion-rate + time-to-completion metrics
+- **ProductB**: journeys `shift-start`, `task-completion`, `end-of-shift-handoff` — mobile form-factor accessibility (touch targets, voice commands)
+- **ProductC**: journeys `agent-onboarding`, `customer-self-service`, `dispute-resolution` — variant-scoped journeys (agent vs self-service use same product but different journeys)
+- **ProductD / annual-review variant**: journeys `submit-review-results`, `request-extension`, `view-review-history` — regulatory journey with elevated WCAG (`AAA` per state requirement)
 
 ## Scope (validation criteria)
 
@@ -80,10 +80,10 @@ Implement the InternalAdopter accessibility audit pipeline as the reference impl
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 ProductA journey declarations ship with `onboarding` / `daily-task-management` / `billing-inquiry-resolution`
-- [ ] #2 ProductB journey declarations ship with `shift-start` / `route-completion` / `end-of-shift-handoff`
-- [ ] #3 ProductC variant-scoped journey declarations ship (csr vs customer-portal)
-- [ ] #4 ProductD annual-test variant journey declarations ship with WCAG `AAA` elevation
+- [ ] #1 ProductA journey declarations ship with `onboarding` / `daily-task-management` / `account-inquiry-resolution`
+- [ ] #2 ProductB journey declarations ship with `shift-start` / `task-completion` / `end-of-shift-handoff`
+- [ ] #3 ProductC variant-scoped journey declarations ship (agent vs self-service)
+- [ ] #4 ProductD annual-review variant journey declarations ship with WCAG `AAA` elevation
 - [ ] #5 Each journey passes state-machine validation (no unreachable states, terminal states correctly marked)
 - [ ] #6 WCAG audit reports map 1:1 to journey declarations (verified via sample audit)
 - [ ] #7 Glossary additions ship (6 terms)

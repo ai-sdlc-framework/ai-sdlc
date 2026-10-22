@@ -114,7 +114,7 @@ describe('OQ-1: Variant count limits (soft warn at 5, hard limit at 20)', () => 
 
   it('emits no events for ≤4 variants (below soft threshold)', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: makeVariants(4),
       now: FIXED_TS,
     });
@@ -124,7 +124,7 @@ describe('OQ-1: Variant count limits (soft warn at 5, hard limit at 20)', () => 
 
   it('emits soft warning at exactly 5 variants (threshold crossed)', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: makeVariants(5),
       now: FIXED_TS,
     });
@@ -135,7 +135,7 @@ describe('OQ-1: Variant count limits (soft warn at 5, hard limit at 20)', () => 
 
   it('emits hard limit violation at exactly 20 variants (blocks)', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: makeVariants(20),
       now: FIXED_TS,
     });
@@ -147,7 +147,7 @@ describe('OQ-1: Variant count limits (soft warn at 5, hard limit at 20)', () => 
   it('per-org override: custom softWarnAt=10 / hardLimit=30 applies correctly', () => {
     // 8 variants: below custom soft threshold (10)
     const eventsBelow = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: makeVariants(8),
       now: FIXED_TS,
       limits: { softWarnAt: 10, hardLimit: 30 },
@@ -158,7 +158,7 @@ describe('OQ-1: Variant count limits (soft warn at 5, hard limit at 20)', () => 
 
     // 10 variants: at custom soft threshold
     const eventsAt = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: makeVariants(10),
       now: FIXED_TS,
       limits: { softWarnAt: 10, hardLimit: 30 },
@@ -172,11 +172,11 @@ describe('OQ-1: Variant count limits (soft warn at 5, hard limit at 20)', () => 
 describe('OQ-2: Nested variant rejection (schema-enforced flat)', () => {
   it('accepts a valid variant round-trip (write → in-memory validate)', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: [
-        makeVariant('small-utility', {
+        makeVariant('small-org', {
           designOverrides: {
-            colorPaletteOverlay: 'small-utility-warm',
+            colorPaletteOverlay: 'small-org-warm',
             densityProfile: 'comfortable',
             typographyScale: 'large-print',
             motionProfile: 'reduced',
@@ -193,9 +193,9 @@ describe('OQ-2: Nested variant rejection (schema-enforced flat)', () => {
 
   it('rejects nested variants[] inside a variant (NestedVariantRejected)', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: [
-        makeVariant('small-utility', {
+        makeVariant('small-org', {
           // Simulated: caller passes in a variant object containing a `variants` key
           // (this tests the runtime check in the inheritance validator for OQ-2)
           variants: [{ id: 'sub-variant' }],
@@ -210,12 +210,8 @@ describe('OQ-2: Nested variant rejection (schema-enforced flat)', () => {
 
   it('flat variant array (no nesting) passes validation', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
-      variants: [
-        makeVariant('small-utility'),
-        makeVariant('enterprise'),
-        makeVariant('county-regional'),
-      ],
+      soulId: 'acme-app',
+      variants: [makeVariant('small-org'), makeVariant('enterprise'), makeVariant('regional')],
       now: FIXED_TS,
     });
     expect(events.find((e: VariantEvent) => e.kind === 'NestedVariantRejected')).toBeUndefined();
@@ -232,8 +228,8 @@ describe('OQ-3: Deprecation lifecycle (declared → approaching → degraded-mod
 
   it('resolves "declared" state when removal is far away', () => {
     const decl: DeprecatedVariantDeclaration = {
-      soulId: 'spry-engage',
-      variantId: 'small-utility',
+      soulId: 'acme-app',
+      variantId: 'small-org',
       deprecationDeclaredAt: daysAgo(5, NOW_DATE),
       removalDate: daysFromNow(25, NOW_DATE),
     };
@@ -242,8 +238,8 @@ describe('OQ-3: Deprecation lifecycle (declared → approaching → degraded-mod
 
   it('resolves "approaching" state when within approaching window', () => {
     const decl: DeprecatedVariantDeclaration = {
-      soulId: 'spry-engage',
-      variantId: 'small-utility',
+      soulId: 'acme-app',
+      variantId: 'small-org',
       deprecationDeclaredAt: daysAgo(28, NOW_DATE),
       removalDate: daysFromNow(4, NOW_DATE),
     };
@@ -252,8 +248,8 @@ describe('OQ-3: Deprecation lifecycle (declared → approaching → degraded-mod
 
   it('emits variant-deprecation-declared Decision when deprecation declared (non-blocking)', () => {
     const decl: DeprecatedVariantDeclaration = {
-      soulId: 'spry-engage',
-      variantId: 'small-utility',
+      soulId: 'acme-app',
+      variantId: 'small-org',
       deprecationDeclaredAt: daysAgo(2, NOW_DATE),
       removalDate: daysFromNow(25, NOW_DATE),
     };
@@ -265,8 +261,8 @@ describe('OQ-3: Deprecation lifecycle (declared → approaching → degraded-mod
 
   it('emits variant-deprecation-approaching Decision when approaching window starts', () => {
     const decl: DeprecatedVariantDeclaration = {
-      soulId: 'spry-engage',
-      variantId: 'small-utility',
+      soulId: 'acme-app',
+      variantId: 'small-org',
       deprecationDeclaredAt: daysAgo(25, NOW_DATE),
       removalDate: daysFromNow(4, NOW_DATE),
     };
@@ -277,8 +273,8 @@ describe('OQ-3: Deprecation lifecycle (declared → approaching → degraded-mod
 
   it('enters degraded mode + emits migration tasks when consumers pending at removal', () => {
     const decl: DeprecatedVariantDeclaration = {
-      soulId: 'spry-engage',
-      variantId: 'small-utility',
+      soulId: 'acme-app',
+      variantId: 'small-org',
       deprecationDeclaredAt: daysAgo(35, NOW_DATE),
       removalDate: daysAgo(2, NOW_DATE), // past removal date
       activeConsumers: ['work-item-1', 'work-item-2'],
@@ -293,8 +289,8 @@ describe('OQ-3: Deprecation lifecycle (declared → approaching → degraded-mod
 
   it('per-Soul deprecation window override: 60d window produces "declared" when 32d remain', () => {
     const decl: DeprecatedVariantDeclaration = {
-      soulId: 'spry-engage',
-      variantId: 'county-regional',
+      soulId: 'acme-app',
+      variantId: 'regional',
       deprecationDeclaredAt: daysAgo(28, NOW_DATE),
       removalDate: daysFromNow(32, NOW_DATE),
     };
@@ -331,23 +327,23 @@ describe('OQ-4: Cross-variant aggregation (default min; per-Soul override)', () 
     const targeting: WorkItemVariantTargeting[] = [
       {
         id: 'AISDLC-999',
-        targetedVariants: ['spry-engage/small-utility'],
+        targetedVariants: ['acme-app/small-org'],
       },
     ];
     const ctx: VariantContext = {
       variantsBySoul: {
-        'spry-engage': [
+        'acme-app': [
           {
-            id: 'small-utility',
-            audienceCharacteristics: { segments: ['municipal-small'] },
+            id: 'small-org',
+            audienceCharacteristics: { segments: ['small-business'] },
             designOverrides: { densityProfile: 'comfortable' },
             designImperatives: ['low-tech-fluency'],
           },
         ],
       },
       variantScores: {
-        'spry-engage': {
-          'small-utility': { sa1: 0.9, sa2: 0.75 },
+        'acme-app': {
+          'small-org': { sa1: 0.9, sa2: 0.75 },
         },
       },
       workItemTargeting: targeting,
@@ -363,27 +359,27 @@ describe('OQ-4: Cross-variant aggregation (default min; per-Soul override)', () 
     const targeting: WorkItemVariantTargeting[] = [
       {
         id: 'AISDLC-999',
-        targetedVariants: ['spry-engage/small-utility', 'spry-engage/enterprise'],
+        targetedVariants: ['acme-app/small-org', 'acme-app/enterprise'],
       },
     ];
     const ctx: VariantContext = {
       variantsBySoul: {
-        'spry-engage': [
+        'acme-app': [
           {
-            id: 'small-utility',
-            audienceCharacteristics: { segments: ['municipal-small'] },
+            id: 'small-org',
+            audienceCharacteristics: { segments: ['small-business'] },
             designImperatives: [],
           },
           {
             id: 'enterprise',
-            audienceCharacteristics: { segments: ['municipal-large'] },
+            audienceCharacteristics: { segments: ['mid-market'] },
             designImperatives: [],
           },
         ],
       },
       variantScores: {
-        'spry-engage': {
-          'small-utility': { sa1: 0.9, sa2: 0.6 },
+        'acme-app': {
+          'small-org': { sa1: 0.9, sa2: 0.6 },
           enterprise: { sa1: 0.7, sa2: 0.8 },
         },
       },
@@ -493,17 +489,17 @@ describe('OQ-5: designOverrides closed enum + vendor-prefix extension', () => {
 
 describe('OQ-6: Variant ID path-style URI parsing', () => {
   it('parseTargetedVariantRef accepts slug-pair format (soulId/variantId)', () => {
-    const ref = parseTargetedVariantRef('spry-engage/small-utility');
+    const ref = parseTargetedVariantRef('acme-app/small-org');
     expect(ref).toBeDefined();
-    expect(ref?.soulId).toBe('spry-engage');
-    expect(ref?.variantId).toBe('small-utility');
+    expect(ref?.soulId).toBe('acme-app');
+    expect(ref?.variantId).toBe('small-org');
   });
 
   it('parseTargetedVariantRef accepts full DID path-style URI (OQ-6 canonical form)', () => {
-    const ref = parseTargetedVariantRef('did:platform-x:soul:spry-engage/variant:small-utility');
+    const ref = parseTargetedVariantRef('did:platform-x:soul:acme-app/variant:small-org');
     expect(ref).toBeDefined();
-    expect(ref?.soulId).toBe('spry-engage');
-    expect(ref?.variantId).toBe('small-utility');
+    expect(ref?.soulId).toBe('acme-app');
+    expect(ref?.variantId).toBe('small-org');
   });
 
   it('parseTargetedVariantRef returns undefined for malformed input (no slash)', () => {
@@ -512,15 +508,15 @@ describe('OQ-6: Variant ID path-style URI parsing', () => {
   });
 
   it('parseTargetedVariantRef round-trips the raw string', () => {
-    const raw = 'spry-engage/small-utility';
+    const raw = 'acme-app/small-org';
     const ref = parseTargetedVariantRef(raw);
     expect(ref?.raw).toBe(raw);
   });
 
   it('path-style URI preserves explicit hierarchy (Soul → Variant)', () => {
     // OQ-6 resolution: option (a) path-style preserves structural inheritance
-    const ref = parseTargetedVariantRef('did:platform-x:soul:spry-engage/variant:enterprise');
-    expect(ref?.soulId).toBe('spry-engage');
+    const ref = parseTargetedVariantRef('did:platform-x:soul:acme-app/variant:enterprise');
+    expect(ref?.soulId).toBe('acme-app');
     expect(ref?.variantId).toBe('enterprise');
   });
 
@@ -529,29 +525,29 @@ describe('OQ-6: Variant ID path-style URI parsing', () => {
       {
         id: 'AISDLC-123',
         targetedVariants: [
-          'did:platform-x:soul:spry-engage/variant:small-utility',
-          'did:platform-x:soul:spry-engage/variant:enterprise',
+          'did:platform-x:soul:acme-app/variant:small-org',
+          'did:platform-x:soul:acme-app/variant:enterprise',
         ],
       },
     ];
     const ctx: VariantContext = {
       variantsBySoul: {
-        'spry-engage': [
+        'acme-app': [
           {
-            id: 'small-utility',
-            audienceCharacteristics: { segments: ['municipal-small'] },
+            id: 'small-org',
+            audienceCharacteristics: { segments: ['small-business'] },
             designImperatives: [],
           },
           {
             id: 'enterprise',
-            audienceCharacteristics: { segments: ['municipal-large'] },
+            audienceCharacteristics: { segments: ['mid-market'] },
             designImperatives: [],
           },
         ],
       },
       variantScores: {
-        'spry-engage': {
-          'small-utility': { sa1: 0.9, sa2: 0.6 },
+        'acme-app': {
+          'small-org': { sa1: 0.9, sa2: 0.6 },
           enterprise: { sa1: 0.7, sa2: 0.8 },
         },
       },
@@ -568,24 +564,22 @@ describe('OQ-6: Variant ID path-style URI parsing', () => {
 describe('OQ-7: Engineering review routing (Design owns + Decision Catalog)', () => {
   it('triggerEngineeringReview emits variant-substrate-cost-review for each declaration', () => {
     const events = triggerEngineeringReview([
-      { soulId: 'spry-engage', variantId: 'small-utility' },
-      { soulId: 'spry-engage', variantId: 'enterprise' },
+      { soulId: 'acme-app', variantId: 'small-org' },
+      { soulId: 'acme-app', variantId: 'enterprise' },
     ]);
     expect(events).toHaveLength(2);
     expect(events.every((e) => e.kind === 'variant-substrate-cost-review')).toBe(true);
   });
 
   it('all emitted Engineering review events are non-blocking (RFC-0035 G0)', () => {
-    const events = triggerEngineeringReview([
-      { soulId: 'spry-engage', variantId: 'small-utility' },
-    ]);
+    const events = triggerEngineeringReview([{ soulId: 'acme-app', variantId: 'small-org' }]);
     expect(events.every((e) => e.routing.blocking === false)).toBe(true);
   });
 
   it('triggerEngineeringReview additionally emits variant-substrate-cost-block when blocked', () => {
     const events = triggerEngineeringReview([
       {
-        soulId: 'spry-engage',
+        soulId: 'acme-app',
         variantId: 'enterprise',
         substrateCostAssessment: { blocked: true, rationale: 'Requires new layout engine' },
       },
@@ -599,18 +593,18 @@ describe('OQ-7: Engineering review routing (Design owns + Decision Catalog)', ()
 
   it('checkReviewerGate flags as critical when Engineering review Decision is missing', () => {
     const result = checkReviewerGate({
-      stagedVariants: [{ soulId: 'spry-engage', variantId: 'new-variant' }],
+      stagedVariants: [{ soulId: 'acme-app', variantId: 'new-variant' }],
       existingReviewDecisions: [],
     });
     expect(result.hasCriticalFlags).toBe(true);
     expect(result.flags[0].severity).toBe('critical');
-    expect(result.flags[0].soulId).toBe('spry-engage');
+    expect(result.flags[0].soulId).toBe('acme-app');
   });
 
   it('checkReviewerGate passes when Engineering review Decision is present', () => {
     const result = checkReviewerGate({
-      stagedVariants: [{ soulId: 'spry-engage', variantId: 'new-variant' }],
-      existingReviewDecisions: [{ soulId: 'spry-engage', variantId: 'new-variant' }],
+      stagedVariants: [{ soulId: 'acme-app', variantId: 'new-variant' }],
+      existingReviewDecisions: [{ soulId: 'acme-app', variantId: 'new-variant' }],
     });
     expect(result.hasCriticalFlags).toBe(false);
     expect(result.flags).toHaveLength(0);
@@ -619,11 +613,11 @@ describe('OQ-7: Engineering review routing (Design owns + Decision Catalog)', ()
   it('checkReviewerGate flags only the missing variant when one of two is reviewed', () => {
     const result = checkReviewerGate({
       stagedVariants: [
-        { soulId: 'spry-engage', variantId: 'variant-a' },
-        { soulId: 'spry-engage', variantId: 'variant-b' },
+        { soulId: 'acme-app', variantId: 'variant-a' },
+        { soulId: 'acme-app', variantId: 'variant-b' },
       ],
       existingReviewDecisions: [
-        { soulId: 'spry-engage', variantId: 'variant-a' }, // reviewed
+        { soulId: 'acme-app', variantId: 'variant-a' }, // reviewed
         // variant-b missing
       ],
     });
@@ -643,7 +637,7 @@ describe('OQ-8: Cardinality activation Decision wiring (Stage A counter + auto-p
   it('tracks a single adopter cardinality request without promoting (below threshold)', () => {
     const request: CardinalityActivationRequest = {
       requestedBy: 'acme-corp',
-      soulId: 'acme-engage',
+      soulId: 'acme-store',
       variantId: 'enterprise',
       rationale: 'Need primary/secondary distinction for variant lifecycle',
       requestedAt: FIXED_TS,
@@ -660,7 +654,7 @@ describe('OQ-8: Cardinality activation Decision wiring (Stage A counter + auto-p
     const requests: CardinalityActivationRequest[] = [
       {
         requestedBy: 'acme-corp',
-        soulId: 'acme-engage',
+        soulId: 'acme-store',
         variantId: 'enterprise',
         rationale: 'Need primary/secondary lifecycle',
         requestedAt: FIXED_TS,
@@ -686,14 +680,14 @@ describe('OQ-8: Cardinality activation Decision wiring (Stage A counter + auto-p
     const requests: CardinalityActivationRequest[] = [
       {
         requestedBy: 'acme-corp',
-        soulId: 'acme-engage',
+        soulId: 'acme-store',
         variantId: 'enterprise',
         rationale: 'first',
         requestedAt: FIXED_TS,
       },
       {
         requestedBy: 'acme-corp',
-        soulId: 'acme-engage',
+        soulId: 'acme-store',
         variantId: 'trial',
         rationale: 'second',
         requestedAt: FIXED_TS,
@@ -770,7 +764,7 @@ describe('Inheritance enforcement: complianceFloor escape + substrate divergence
 
   it('emits VariantInheritanceViolation when a variant attempts to override complianceRegimes', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: [makeVariant('bad-variant', { complianceRegimes: ['HIPAA'] })],
       now: FIXED_TS,
     });
@@ -781,7 +775,7 @@ describe('Inheritance enforcement: complianceFloor escape + substrate divergence
 
   it('emits VariantInheritanceViolation when a variant overrides substrateInvariants', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: [makeVariant('bad-variant', { substrateInvariants: { eventBus: 'kafka-v2' } })],
       now: FIXED_TS,
     });
@@ -791,7 +785,7 @@ describe('Inheritance enforcement: complianceFloor escape + substrate divergence
 
   it('emits VariantInheritanceViolation when tenantQuotaShare is overridden', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: [makeVariant('bad-variant', { tenantQuotaShare: 0.5 })],
       now: FIXED_TS,
     });
@@ -802,13 +796,13 @@ describe('Inheritance enforcement: complianceFloor escape + substrate divergence
 
   it('clean variant with only specializable fields emits no violations', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: [
         makeVariant('clean-variant', {
           designOverrides: { densityProfile: 'comfortable', motionProfile: 'reduced' },
           designImperatives: ['low-tech-fluency'],
           targetAudience: {
-            segments: ['municipal-small'],
+            segments: ['small-business'],
             sizeRange: { minStaff: 1, maxStaff: 50 },
           },
         }),
@@ -834,7 +828,7 @@ describe('Inheritance enforcement: complianceFloor escape + substrate divergence
       complianceFloor: 'HIPAA' as 'inherit', // malformed — simulates bypass
     };
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: [badVariant],
       now: FIXED_TS,
     });

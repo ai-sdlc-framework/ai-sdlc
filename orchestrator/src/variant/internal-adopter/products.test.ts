@@ -3,10 +3,10 @@
  * (AISDLC-437).
  *
  * Coverage map:
- *   - AC #1 ProductA ships small-utility / enterprise / county-regional
- *   - AC #2 ProductB ships field-tech-on-truck / field-tech-handheld /
+ *   - AC #1 ProductA ships small-org / enterprise / regional
+ *   - AC #2 ProductB ships mobile-in-vehicle / mobile-handheld /
  *           supervisor-tablet
- *   - AC #3 ProductC ships billing-clerk / customer-portal / csr-dashboard
+ *   - AC #3 ProductC ships back-office-clerk / self-service / support-dashboard
  *   - AC #4 ProductD scope removed (no ProductD entry in the catalog;
  *           documented in `products.ts` header)
  *   - AC #5 Each variant has ≤ 5 designImperatives (closed-enum discipline)
@@ -45,30 +45,26 @@ describe('InternalAdopter reference impl — product/variant declarations', () =
     ]);
   });
 
-  it('AC #1: ProductA declares small-utility / enterprise / county-regional', () => {
+  it('AC #1: ProductA declares small-org / enterprise / regional', () => {
     expect(productA.soulId).toBe('product-a');
-    expect(productA.variants.map((v) => v.id)).toEqual([
-      'small-utility',
-      'enterprise',
-      'county-regional',
-    ]);
+    expect(productA.variants.map((v) => v.id)).toEqual(['small-org', 'enterprise', 'regional']);
   });
 
-  it('AC #2: ProductB declares field-tech-on-truck / field-tech-handheld / supervisor-tablet', () => {
+  it('AC #2: ProductB declares mobile-in-vehicle / mobile-handheld / supervisor-tablet', () => {
     expect(productB.soulId).toBe('product-b');
     expect(productB.variants.map((v) => v.id)).toEqual([
-      'field-tech-on-truck',
-      'field-tech-handheld',
+      'mobile-in-vehicle',
+      'mobile-handheld',
       'supervisor-tablet',
     ]);
   });
 
-  it('AC #3: ProductC declares billing-clerk / customer-portal / csr-dashboard', () => {
+  it('AC #3: ProductC declares back-office-clerk / self-service / support-dashboard', () => {
     expect(productC.soulId).toBe('product-c');
     expect(productC.variants.map((v) => v.id)).toEqual([
-      'billing-clerk',
-      'customer-portal',
-      'csr-dashboard',
+      'back-office-clerk',
+      'self-service',
+      'support-dashboard',
     ]);
   });
 

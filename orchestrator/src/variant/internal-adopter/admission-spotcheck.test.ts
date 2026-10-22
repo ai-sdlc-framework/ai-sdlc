@@ -8,7 +8,7 @@
  * soul-aggregate design intent, which underweights the variant's specific
  * design imperatives.
  *
- * The spot-check exercises a representative work item ("small-utility
+ * The spot-check exercises a representative work item ("small-org
  * onboarding improvement") on ProductA. The variant-routed score is
  * compared against the soul-aggregate baseline; the variant-routed score MUST
  * differ from the baseline by ≥ 20% on both Sα₁ and Sα₂.
@@ -50,7 +50,7 @@ const MIN_DEVIATION = 0.2;
 
 /**
  * Representative work item ID for the spot-check. The task body cites
- * "small-utility onboarding improvement" — we use a stable AISDLC-shaped ID
+ * "small-org onboarding improvement" — we use a stable AISDLC-shaped ID
  * so the fixture round-trips through the admission router's case-insensitive
  * lookup faithfully.
  */
@@ -61,13 +61,13 @@ describe('InternalAdopter admission spot-check (AC #6)', () => {
   const variantScores = buildVariantScores();
 
   it('AC #6: variant-routed score for a well-aligned variant differs from soul-aggregate by ≥ 20%', () => {
-    // Representative work item: a "small-utility onboarding improvement"
-    // targets `product-a/small-utility` — the well-aligned variant.
+    // Representative work item: a "small-org onboarding improvement"
+    // targets `product-a/small-org` — the well-aligned variant.
     const ctx: VariantContext = {
       variantsBySoul,
       variantScores,
       workItemTargeting: [
-        { id: SPOTCHECK_WORK_ITEM_ID, targetedVariants: ['product-a/small-utility'] },
+        { id: SPOTCHECK_WORK_ITEM_ID, targetedVariants: ['product-a/small-org'] },
       ],
     };
 
@@ -106,9 +106,9 @@ describe('InternalAdopter admission spot-check (AC #6)', () => {
 
   it('AC #6: variant-routed score for a misaligned variant deviates DOWN from soul-aggregate', () => {
     // The complementary case: a work item that targets the MISALIGNED
-    // variant (enterprise) on a small-utility-shaped concern should score
+    // variant (enterprise) on a small-org-shaped concern should score
     // LOWER than the soul-aggregate baseline — soul-aggregate would
-    // OVER-weight the work because it blends in the small-utility intent.
+    // OVER-weight the work because it blends in the small-org intent.
     const ctx: VariantContext = {
       variantsBySoul,
       variantScores,
@@ -156,9 +156,9 @@ describe('InternalAdopter admission spot-check (AC #6)', () => {
   // ── Multi-variant cross-product spot-check (composes with §6.2 layering) ─
 
   it('AC #6: multi-variant targeting on ProductB applies min aggregation (OQ-4 default)', () => {
-    // A ProductB work item that spans field-tech-on-truck + supervisor-tablet
+    // A ProductB work item that spans mobile-in-vehicle + supervisor-tablet
     // should aggregate via `min` (the per-org default per OQ-4 + RFC-0009 §7.2).
-    // Per the buildVariantScores fixture: field-tech-on-truck=0.9/0.85,
+    // Per the buildVariantScores fixture: mobile-in-vehicle=0.9/0.85,
     // supervisor-tablet=0.3/0.35 → min=0.3/0.35.
     const ctx: VariantContext = {
       variantsBySoul,
@@ -166,7 +166,7 @@ describe('InternalAdopter admission spot-check (AC #6)', () => {
       workItemTargeting: [
         {
           id: 'AISDLC-SPOTCHECK-B1',
-          targetedVariants: ['product-b/field-tech-on-truck', 'product-b/supervisor-tablet'],
+          targetedVariants: ['product-b/mobile-in-vehicle', 'product-b/supervisor-tablet'],
         },
       ],
     };

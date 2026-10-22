@@ -48,7 +48,7 @@ import {
 
 function makeJourneys(): Record<string, JourneyDeclaration[]> {
   return {
-    'spry-engage': [
+    'acme-app': [
       {
         id: 'onboarding',
         scope: 'soul',
@@ -73,16 +73,16 @@ function makeJourneys(): Record<string, JourneyDeclaration[]> {
       },
       {
         id: 'regulatory-submission',
-        scope: 'variant:annual-test',
+        scope: 'variant:annual-review',
         completionCriteria: { kind: 'terminal-success-state', target: 'submitted' },
         accessibility: { wcagLevel: 'AAA', wcagVersion: '2.2', conformanceTarget: 100 },
         successMetrics: [],
         designImperatives: ['single-click submission', 'confirmation email required'],
       },
     ],
-    'spry-billing': [
+    'acme-billing': [
       {
-        id: 'billing-inquiry-resolution',
+        id: 'account-inquiry-resolution',
         scope: 'soul',
         completionCriteria: { kind: 'terminal-success-state', target: 'resolved' },
         accessibility: { wcagLevel: 'AA', wcagVersion: '2.1', conformanceTarget: 90 },
@@ -95,13 +95,13 @@ function makeJourneys(): Record<string, JourneyDeclaration[]> {
 
 function makeJourneyScores(): JourneyContext['journeyScores'] {
   return {
-    'spry-engage': {
+    'acme-app': {
       onboarding: { sa2: 0.85, ck: 0.9, er5Elevated: false }, // high — well-aligned journey
       'daily-task-management': { sa2: 0.7, ck: 0.6, er5Elevated: true }, // AAA > soul AA floor
       'regulatory-submission': { sa2: 0.6, ck: 0.5, er5Elevated: true }, // AAA variant-scoped
     },
-    'spry-billing': {
-      'billing-inquiry-resolution': { sa2: 0.75, ck: 0.8, er5Elevated: false },
+    'acme-billing': {
+      'account-inquiry-resolution': { sa2: 0.75, ck: 0.8, er5Elevated: false },
     },
   };
 }
@@ -249,37 +249,37 @@ describe('isWcagElevated — Eρ₅ journey WCAG vs soul floor (AC #3)', () => {
 
 describe('parseTargetedJourneyRef', () => {
   it('parses soul-scoped form (soul-id/journey-id)', () => {
-    const result = parseTargetedJourneyRef('spry-engage/onboarding');
+    const result = parseTargetedJourneyRef('acme-app/onboarding');
     expect(result).toEqual({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeyId: 'onboarding',
-      raw: 'spry-engage/onboarding',
+      raw: 'acme-app/onboarding',
     });
     expect(result?.variantId).toBeUndefined();
   });
 
   it('parses variant-scoped form (soul-id/variant-id/journey-id)', () => {
-    const result = parseTargetedJourneyRef('spry-engage/annual-test/regulatory-submission');
+    const result = parseTargetedJourneyRef('acme-app/annual-review/regulatory-submission');
     expect(result).toEqual({
-      soulId: 'spry-engage',
-      variantId: 'annual-test',
+      soulId: 'acme-app',
+      variantId: 'annual-review',
       journeyId: 'regulatory-submission',
-      raw: 'spry-engage/annual-test/regulatory-submission',
+      raw: 'acme-app/annual-review/regulatory-submission',
     });
   });
 
   it('returns undefined for slug starting with digit', () => {
     expect(parseTargetedJourneyRef('1bad/onboarding')).toBeUndefined();
-    expect(parseTargetedJourneyRef('spry-engage/1bad')).toBeUndefined();
+    expect(parseTargetedJourneyRef('acme-app/1bad')).toBeUndefined();
   });
 
   it('returns undefined for uppercase slug', () => {
-    expect(parseTargetedJourneyRef('Spry-Engage/onboarding')).toBeUndefined();
-    expect(parseTargetedJourneyRef('spry-engage/Onboarding')).toBeUndefined();
+    expect(parseTargetedJourneyRef('Acme-App/onboarding')).toBeUndefined();
+    expect(parseTargetedJourneyRef('acme-app/Onboarding')).toBeUndefined();
   });
 
   it('returns undefined for bare soul-id with no slash', () => {
-    expect(parseTargetedJourneyRef('spry-engage')).toBeUndefined();
+    expect(parseTargetedJourneyRef('acme-app')).toBeUndefined();
   });
 
   it('returns undefined for empty string', () => {
@@ -291,8 +291,8 @@ describe('parseTargetedJourneyRef', () => {
   });
 
   it('handles kebab slugs correctly', () => {
-    const result = parseTargetedJourneyRef('spry-engage/daily-task-management');
-    expect(result?.soulId).toBe('spry-engage');
+    const result = parseTargetedJourneyRef('acme-app/daily-task-management');
+    expect(result?.soulId).toBe('acme-app');
     expect(result?.journeyId).toBe('daily-task-management');
   });
 });
@@ -311,7 +311,7 @@ describe('resolveTargetedJourneys', () => {
 
   it('returns empty array when work item not in targeting list', () => {
     const ctx = makeJourneyContext({
-      workItemTargeting: [{ id: 'AISDLC-200', targetedJourneys: ['spry-engage/onboarding'] }],
+      workItemTargeting: [{ id: 'AISDLC-200', targetedJourneys: ['acme-app/onboarding'] }],
     });
     expect(resolveTargetedJourneys('AISDLC-100', ctx)).toEqual([]);
   });
@@ -325,14 +325,14 @@ describe('resolveTargetedJourneys', () => {
 
   it('resolves single valid soul-scoped journey', () => {
     const ctx = makeJourneyContext({
-      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['spry-engage/onboarding'] }],
+      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['acme-app/onboarding'] }],
     });
     const result = resolveTargetedJourneys('AISDLC-100', ctx);
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeyId: 'onboarding',
-      raw: 'spry-engage/onboarding',
+      raw: 'acme-app/onboarding',
     });
   });
 
@@ -341,13 +341,13 @@ describe('resolveTargetedJourneys', () => {
       workItemTargeting: [
         {
           id: 'AISDLC-100',
-          targetedJourneys: ['spry-engage/annual-test/regulatory-submission'],
+          targetedJourneys: ['acme-app/annual-review/regulatory-submission'],
         },
       ],
     });
     const result = resolveTargetedJourneys('AISDLC-100', ctx);
     expect(result).toHaveLength(1);
-    expect(result[0].variantId).toBe('annual-test');
+    expect(result[0].variantId).toBe('annual-review');
     expect(result[0].journeyId).toBe('regulatory-submission');
   });
 
@@ -356,13 +356,13 @@ describe('resolveTargetedJourneys', () => {
       workItemTargeting: [
         {
           id: 'AISDLC-100',
-          targetedJourneys: ['nonexistent-soul/onboarding', 'spry-engage/onboarding'],
+          targetedJourneys: ['nonexistent-soul/onboarding', 'acme-app/onboarding'],
         },
       ],
     });
     const result = resolveTargetedJourneys('AISDLC-100', ctx);
     expect(result).toHaveLength(1);
-    expect(result[0].soulId).toBe('spry-engage');
+    expect(result[0].soulId).toBe('acme-app');
   });
 
   it('filters out references to non-existent journey (within valid soul)', () => {
@@ -370,7 +370,7 @@ describe('resolveTargetedJourneys', () => {
       workItemTargeting: [
         {
           id: 'AISDLC-100',
-          targetedJourneys: ['spry-engage/nonexistent-journey'],
+          targetedJourneys: ['acme-app/nonexistent-journey'],
         },
       ],
     });
@@ -379,7 +379,7 @@ describe('resolveTargetedJourneys', () => {
 
   it('matches work item ID case-insensitively', () => {
     const ctx = makeJourneyContext({
-      workItemTargeting: [{ id: 'aisdlc-100', targetedJourneys: ['spry-engage/onboarding'] }],
+      workItemTargeting: [{ id: 'aisdlc-100', targetedJourneys: ['acme-app/onboarding'] }],
     });
     expect(resolveTargetedJourneys('AISDLC-100', ctx)).toHaveLength(1);
     expect(resolveTargetedJourneys('aisdlc-100', ctx)).toHaveLength(1);
@@ -390,7 +390,7 @@ describe('resolveTargetedJourneys', () => {
       workItemTargeting: [
         {
           id: 'AISDLC-100',
-          targetedJourneys: ['spry-engage/onboarding', 'spry-engage/daily-task-management'],
+          targetedJourneys: ['acme-app/onboarding', 'acme-app/daily-task-management'],
         },
       ],
     });
@@ -457,7 +457,7 @@ describe('computeJourneyScopedScores — backward-compat: no targetedJourneys (A
 
   it('returns soul/variant fallback when work item not in targeting list', () => {
     const ctx = makeJourneyContext({
-      workItemTargeting: [{ id: 'AISDLC-999', targetedJourneys: ['spry-engage/onboarding'] }],
+      workItemTargeting: [{ id: 'AISDLC-999', targetedJourneys: ['acme-app/onboarding'] }],
     });
     const result = computeJourneyScopedScores('AISDLC-100', 0.5, 0.5, false, ctx);
     expect(result.routingPath).toBe('no-journey-routing');
@@ -467,7 +467,7 @@ describe('computeJourneyScopedScores — backward-compat: no targetedJourneys (A
 describe('computeJourneyScopedScores — single-journey routing (AC #1, AC #2, AC #3)', () => {
   it('routes Sα₂ through journey designImperatives (AC #1)', () => {
     const ctx = makeJourneyContext({
-      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['spry-engage/onboarding'] }],
+      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['acme-app/onboarding'] }],
     });
     // onboarding journey has sa2=0.85 (pre-computed with most-specific-wins)
     const result = computeJourneyScopedScores('AISDLC-100', 0.5, 0.5, false, ctx);
@@ -479,7 +479,7 @@ describe('computeJourneyScopedScores — single-journey routing (AC #1, AC #2, A
 
   it('routes Cκ through journey successMetrics (AC #2)', () => {
     const ctx = makeJourneyContext({
-      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['spry-engage/onboarding'] }],
+      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['acme-app/onboarding'] }],
     });
     // onboarding journey has ck=0.9 (boosted because completion-rate can be < alertBelow)
     const result = computeJourneyScopedScores('AISDLC-100', 0.5, 0.5, false, ctx);
@@ -489,7 +489,7 @@ describe('computeJourneyScopedScores — single-journey routing (AC #1, AC #2, A
   it('elevates Eρ₅ when journey WCAG > soul-default (AC #3)', () => {
     const ctx = makeJourneyContext({
       workItemTargeting: [
-        { id: 'AISDLC-100', targetedJourneys: ['spry-engage/daily-task-management'] },
+        { id: 'AISDLC-100', targetedJourneys: ['acme-app/daily-task-management'] },
       ],
     });
     // daily-task-management has wcagLevel: AAA > soul-default AA → er5Elevated=true
@@ -499,7 +499,7 @@ describe('computeJourneyScopedScores — single-journey routing (AC #1, AC #2, A
 
   it('does not elevate Eρ₅ when journey WCAG == soul-default', () => {
     const ctx = makeJourneyContext({
-      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['spry-engage/onboarding'] }],
+      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['acme-app/onboarding'] }],
     });
     // onboarding has wcagLevel: AA == soul-default → er5Elevated=false
     const result = computeJourneyScopedScores('AISDLC-100', 0.5, 0.5, false, ctx);
@@ -509,7 +509,7 @@ describe('computeJourneyScopedScores — single-journey routing (AC #1, AC #2, A
   it('falls back to soul/variant scores when journey has no pre-computed scores', () => {
     const ctx = makeJourneyContext({
       journeyScores: {}, // no pre-computed scores
-      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['spry-engage/onboarding'] }],
+      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['acme-app/onboarding'] }],
     });
     const result = computeJourneyScopedScores('AISDLC-100', 0.6, 0.7, false, ctx);
     expect(result.routingPath).toBe('single-journey');
@@ -523,7 +523,7 @@ describe('computeJourneyScopedScores — single-journey routing (AC #1, AC #2, A
       workItemTargeting: [
         {
           id: 'AISDLC-100',
-          targetedJourneys: ['spry-engage/annual-test/regulatory-submission'],
+          targetedJourneys: ['acme-app/annual-review/regulatory-submission'],
         },
       ],
     });
@@ -542,7 +542,7 @@ describe('computeJourneyScopedScores — multi-journey aggregation (AC #4)', () 
       workItemTargeting: [
         {
           id: 'AISDLC-100',
-          targetedJourneys: ['spry-engage/onboarding', 'spry-engage/daily-task-management'],
+          targetedJourneys: ['acme-app/onboarding', 'acme-app/daily-task-management'],
         },
       ],
     });
@@ -558,12 +558,12 @@ describe('computeJourneyScopedScores — multi-journey aggregation (AC #4)', () 
   it('respects per-Soul max aggregation override (AC #4)', () => {
     const ctx = makeJourneyContext({
       configBySoul: {
-        'spry-engage': { crossJourneyAggregation: 'max' },
+        'acme-app': { crossJourneyAggregation: 'max' },
       },
       workItemTargeting: [
         {
           id: 'AISDLC-100',
-          targetedJourneys: ['spry-engage/onboarding', 'spry-engage/daily-task-management'],
+          targetedJourneys: ['acme-app/onboarding', 'acme-app/daily-task-management'],
         },
       ],
     });
@@ -577,12 +577,12 @@ describe('computeJourneyScopedScores — multi-journey aggregation (AC #4)', () 
   it('respects per-Soul mean aggregation override', () => {
     const ctx = makeJourneyContext({
       configBySoul: {
-        'spry-engage': { crossJourneyAggregation: 'mean' },
+        'acme-app': { crossJourneyAggregation: 'mean' },
       },
       workItemTargeting: [
         {
           id: 'AISDLC-100',
-          targetedJourneys: ['spry-engage/onboarding', 'spry-engage/daily-task-management'],
+          targetedJourneys: ['acme-app/onboarding', 'acme-app/daily-task-management'],
         },
       ],
     });
@@ -599,7 +599,7 @@ describe('computeJourneyScopedScores — multi-journey aggregation (AC #4)', () 
       workItemTargeting: [
         {
           id: 'AISDLC-100',
-          targetedJourneys: ['spry-engage/onboarding', 'spry-engage/daily-task-management'],
+          targetedJourneys: ['acme-app/onboarding', 'acme-app/daily-task-management'],
         },
       ],
     });
@@ -612,7 +612,7 @@ describe('computeJourneyScopedScores — multi-journey aggregation (AC #4)', () 
       workItemTargeting: [
         {
           id: 'AISDLC-100',
-          targetedJourneys: ['spry-engage/onboarding', 'spry-billing/billing-inquiry-resolution'],
+          targetedJourneys: ['acme-app/onboarding', 'acme-billing/account-inquiry-resolution'],
         },
       ],
     });
@@ -622,12 +622,12 @@ describe('computeJourneyScopedScores — multi-journey aggregation (AC #4)', () 
   });
 
   it('cross-Soul multi-journey uses min between souls (RFC-0009 §7.2)', () => {
-    // spry-engage/onboarding: sa2=0.85, spry-billing/billing-inquiry-resolution: sa2=0.75
+    // acme-app/onboarding: sa2=0.85, acme-billing/account-inquiry-resolution: sa2=0.75
     const ctx = makeJourneyContext({
       workItemTargeting: [
         {
           id: 'AISDLC-100',
-          targetedJourneys: ['spry-engage/onboarding', 'spry-billing/billing-inquiry-resolution'],
+          targetedJourneys: ['acme-app/onboarding', 'acme-billing/account-inquiry-resolution'],
         },
       ],
     });
@@ -642,7 +642,7 @@ describe('computeJourneyScopedScores — multi-journey aggregation (AC #4)', () 
       workItemTargeting: [
         {
           id: 'AISDLC-100',
-          targetedJourneys: ['spry-engage/onboarding', 'spry-engage/daily-task-management'],
+          targetedJourneys: ['acme-app/onboarding', 'acme-app/daily-task-management'],
         },
       ],
     });
@@ -663,7 +663,7 @@ describe('computeJourneyScopedScores — conflict resolution + Sα₂ compositio
     // This test verifies the router uses journeyScores.sa2 not the fallback.
     const ctx = makeJourneyContext({
       journeyScores: {
-        'spry-engage': {
+        'acme-app': {
           onboarding: {
             sa2: 0.92, // journey-resolved value (higher than soul-agg fallback)
             ck: 0.85,
@@ -671,7 +671,7 @@ describe('computeJourneyScopedScores — conflict resolution + Sα₂ compositio
           },
         },
       },
-      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['spry-engage/onboarding'] }],
+      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['acme-app/onboarding'] }],
     });
     const result = computeJourneyScopedScores('AISDLC-100', 0.5, 0.5, false, ctx);
     expect(result.sa2).toBe(0.92); // journey-scope wins over fallback 0.5
@@ -681,12 +681,12 @@ describe('computeJourneyScopedScores — conflict resolution + Sα₂ compositio
     // Simulates a journey declared in journeysBySoul but not yet scored
     const ctx = makeJourneyContext({
       journeyScores: {
-        'spry-engage': {
+        'acme-app': {
           // onboarding not scored — missing key
           'daily-task-management': { sa2: 0.7, ck: 0.6, er5Elevated: true },
         },
       },
-      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['spry-engage/onboarding'] }],
+      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['acme-app/onboarding'] }],
     });
     const fallbackSa2 = 0.55;
     const result = computeJourneyScopedScores('AISDLC-100', fallbackSa2, 0.5, false, ctx);
@@ -702,7 +702,7 @@ describe('computeJourneyScopedScores — Cκ boost when completion-rate < alertB
     // The loader computes the boost; the router trusts journeyScores.ck.
     const ctx = makeJourneyContext({
       journeyScores: {
-        'spry-engage': {
+        'acme-app': {
           onboarding: {
             sa2: 0.85,
             ck: 0.9, // boosted: completion-rate was 0.42 < alertBelow 0.5
@@ -710,7 +710,7 @@ describe('computeJourneyScopedScores — Cκ boost when completion-rate < alertB
           },
         },
       },
-      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['spry-engage/onboarding'] }],
+      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['acme-app/onboarding'] }],
     });
     const fallbackCk = 0.5;
     const result = computeJourneyScopedScores('AISDLC-100', 0.5, fallbackCk, false, ctx);
@@ -721,7 +721,7 @@ describe('computeJourneyScopedScores — Cκ boost when completion-rate < alertB
   it('uses non-boosted ck score when journey metrics are healthy', () => {
     const ctx = makeJourneyContext({
       journeyScores: {
-        'spry-engage': {
+        'acme-app': {
           onboarding: {
             sa2: 0.85,
             ck: 0.4, // NOT boosted: completion-rate is healthy above alertBelow
@@ -729,7 +729,7 @@ describe('computeJourneyScopedScores — Cκ boost when completion-rate < alertB
           },
         },
       },
-      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['spry-engage/onboarding'] }],
+      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['acme-app/onboarding'] }],
     });
     const fallbackCk = 0.5;
     const result = computeJourneyScopedScores('AISDLC-100', 0.5, fallbackCk, false, ctx);
@@ -745,7 +745,7 @@ describe('computeJourneyScopedScores — Eρ₅ elevation (AC #3)', () => {
       workItemTargeting: [
         {
           id: 'AISDLC-100',
-          targetedJourneys: ['spry-engage/annual-test/regulatory-submission'],
+          targetedJourneys: ['acme-app/annual-review/regulatory-submission'],
         },
       ],
     });
@@ -755,7 +755,7 @@ describe('computeJourneyScopedScores — Eρ₅ elevation (AC #3)', () => {
 
   it('onboarding journey (AA) does not elevate when soul-default is also AA', () => {
     const ctx = makeJourneyContext({
-      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['spry-engage/onboarding'] }],
+      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['acme-app/onboarding'] }],
     });
     const result = computeJourneyScopedScores('AISDLC-100', 0.5, 0.5, false, ctx);
     expect(result.er5Elevated).toBe(false);
@@ -767,7 +767,7 @@ describe('computeJourneyScopedScores — Eρ₅ elevation (AC #3)', () => {
 describe('JourneyScopedResult return shape (AC #8)', () => {
   it('single-journey result has aggregationRule undefined', () => {
     const ctx = makeJourneyContext({
-      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['spry-engage/onboarding'] }],
+      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['acme-app/onboarding'] }],
     });
     const result = computeJourneyScopedScores('AISDLC-100', 0.5, 0.5, false, ctx);
     expect(result.routingPath).toBe('single-journey');
@@ -785,7 +785,7 @@ describe('JourneyScopedResult return shape (AC #8)', () => {
       workItemTargeting: [
         {
           id: 'AISDLC-100',
-          targetedJourneys: ['spry-engage/onboarding', 'spry-engage/daily-task-management'],
+          targetedJourneys: ['acme-app/onboarding', 'acme-app/daily-task-management'],
         },
       ],
     });
@@ -799,7 +799,7 @@ describe('JourneyScopedResult return shape (AC #8)', () => {
     expect(Array.isArray(r1.targetedJourneys)).toBe(true);
 
     const ctx = makeJourneyContext({
-      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['spry-engage/onboarding'] }],
+      workItemTargeting: [{ id: 'AISDLC-100', targetedJourneys: ['acme-app/onboarding'] }],
     });
     const r2 = computeJourneyScopedScores('AISDLC-100', 0.5, 0.5, false, ctx);
     expect(Array.isArray(r2.targetedJourneys)).toBe(true);

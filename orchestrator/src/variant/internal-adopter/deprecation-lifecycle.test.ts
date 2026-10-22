@@ -3,9 +3,9 @@
  * variant (AISDLC-437 AC #8).
  *
  * Walks the full G0-routed lifecycle (declared → approaching → removal-pending
- * → removed) for ProductA's `county-regional` variant. The chosen variant is
+ * → removed) for ProductA's `regional` variant. The chosen variant is
  * the lowest-cardinality of ProductA's three (smaller audience-segment match
- * surface than small-utility or enterprise) so the deprecation is a realistic
+ * surface than small-org or enterprise) so the deprecation is a realistic
  * scenario for the reference impl.
  *
  * The lifecycle test verifies (per RFC-0017 §6.3 + OQ-3 resolution):
@@ -50,9 +50,9 @@ function daysFromNow(n: number, from: Date): string {
 const NOW = new Date('2026-06-01T00:00:00Z');
 
 /** The ProductA variant under deprecation in this lifecycle test. */
-const SUBJECT_VARIANT_ID = 'county-regional';
+const SUBJECT_VARIANT_ID = 'regional';
 
-describe('InternalAdopter end-to-end deprecation lifecycle on ProductA/county-regional (AC #8)', () => {
+describe('InternalAdopter end-to-end deprecation lifecycle on ProductA/regional (AC #8)', () => {
   // Sanity: the variant the lifecycle test exercises actually exists in the
   // reference impl. Catches the case where someone renames/removes a variant
   // upstream without updating this test.

@@ -24,8 +24,8 @@ describe('triggerEngineeringReview', () => {
   it('AC #5: emits variant-substrate-cost-review for each declared variant', () => {
     const declarations: VariantDeclarationForReview[] = [
       {
-        soulId: 'spry-engage',
-        variantId: 'small-utility',
+        soulId: 'acme-app',
+        variantId: 'small-org',
         designOverrides: { densityProfile: 'comfortable', motionProfile: 'reduced' },
       },
     ];
@@ -33,17 +33,17 @@ describe('triggerEngineeringReview', () => {
     expect(events).toHaveLength(1);
     const ev = events[0];
     expect(ev.kind).toBe('variant-substrate-cost-review');
-    expect(ev.soulId).toBe('spry-engage');
-    expect(ev.variantId).toBe('small-utility');
+    expect(ev.soulId).toBe('acme-app');
+    expect(ev.variantId).toBe('small-org');
     expect(ev.routing.blocking).toBe(false);
     expect(ev.routing.assignedPillar).toBe('engineering');
   });
 
   it('AC #5: emits variant-substrate-cost-review for multiple declarations', () => {
     const declarations: VariantDeclarationForReview[] = [
-      { soulId: 'spry-engage', variantId: 'small-utility' },
-      { soulId: 'spry-engage', variantId: 'enterprise' },
-      { soulId: 'fleet-manage', variantId: 'field-tech' },
+      { soulId: 'acme-app', variantId: 'small-org' },
+      { soulId: 'acme-app', variantId: 'enterprise' },
+      { soulId: 'fleet-manage', variantId: 'field-mobile' },
     ];
     const events = triggerEngineeringReview(declarations, NOW);
     expect(events).toHaveLength(3);
@@ -53,7 +53,7 @@ describe('triggerEngineeringReview', () => {
   it('AC #6: emits variant-substrate-cost-block when Engineering flags a concern', () => {
     const declarations: VariantDeclarationForReview[] = [
       {
-        soulId: 'spry-engage',
+        soulId: 'acme-app',
         variantId: 'experimental-3d',
         designOverrides: { densityProfile: 'spacious' },
         substrateCostAssessment: {
@@ -70,7 +70,7 @@ describe('triggerEngineeringReview', () => {
 
     const blockEvent = events[1];
     expect(blockEvent.kind).toBe('variant-substrate-cost-block');
-    expect(blockEvent.soulId).toBe('spry-engage');
+    expect(blockEvent.soulId).toBe('acme-app');
     expect(blockEvent.variantId).toBe('experimental-3d');
     // AC #6: routes via RFC-0029 Design+Engineering actor model
     expect(blockEvent.routing.assignedPillar).toBe('design-engineering-operator');
@@ -85,8 +85,8 @@ describe('triggerEngineeringReview', () => {
   it('AC #6: does NOT emit block event when assessment.blocked is false', () => {
     const declarations: VariantDeclarationForReview[] = [
       {
-        soulId: 'spry-engage',
-        variantId: 'small-utility',
+        soulId: 'acme-app',
+        variantId: 'small-org',
         substrateCostAssessment: {
           blocked: false,
           rationale: 'No additional substrate cost — tokens only.',
@@ -101,7 +101,7 @@ describe('triggerEngineeringReview', () => {
   it('emitDecision callback receives all events', () => {
     const declarations: VariantDeclarationForReview[] = [
       {
-        soulId: 'spry-engage',
+        soulId: 'acme-app',
         variantId: 'v1',
         substrateCostAssessment: {
           blocked: true,
@@ -119,7 +119,7 @@ describe('triggerEngineeringReview', () => {
   it('ALL emitted events have blocking: false (G0 non-blocking contract)', () => {
     const declarations: VariantDeclarationForReview[] = [
       {
-        soulId: 'spry-engage',
+        soulId: 'acme-app',
         variantId: 'v1',
         substrateCostAssessment: { blocked: true, rationale: 'Cost.' },
       },
@@ -143,12 +143,12 @@ describe('checkReviewerGate', () => {
   it('AC #7: no flags when all staged variants have Engineering review Decisions', () => {
     const result = checkReviewerGate({
       stagedVariants: [
-        { soulId: 'spry-engage', variantId: 'small-utility' },
-        { soulId: 'spry-engage', variantId: 'enterprise' },
+        { soulId: 'acme-app', variantId: 'small-org' },
+        { soulId: 'acme-app', variantId: 'enterprise' },
       ],
       existingReviewDecisions: [
-        { soulId: 'spry-engage', variantId: 'small-utility' },
-        { soulId: 'spry-engage', variantId: 'enterprise' },
+        { soulId: 'acme-app', variantId: 'small-org' },
+        { soulId: 'acme-app', variantId: 'enterprise' },
       ],
     });
     expect(result.hasCriticalFlags).toBe(false);
@@ -158,8 +158,8 @@ describe('checkReviewerGate', () => {
   it('AC #7: critical flag for each staged variant without an Engineering review Decision', () => {
     const result = checkReviewerGate({
       stagedVariants: [
-        { soulId: 'spry-engage', variantId: 'new-variant' },
-        { soulId: 'spry-engage', variantId: 'another-new' },
+        { soulId: 'acme-app', variantId: 'new-variant' },
+        { soulId: 'acme-app', variantId: 'another-new' },
       ],
       existingReviewDecisions: [],
     });
@@ -173,10 +173,10 @@ describe('checkReviewerGate', () => {
   it('AC #7: flags only the variants missing review — partial coverage', () => {
     const result = checkReviewerGate({
       stagedVariants: [
-        { soulId: 'spry-engage', variantId: 'reviewed-variant' },
-        { soulId: 'spry-engage', variantId: 'unreviewed-variant' },
+        { soulId: 'acme-app', variantId: 'reviewed-variant' },
+        { soulId: 'acme-app', variantId: 'unreviewed-variant' },
       ],
-      existingReviewDecisions: [{ soulId: 'spry-engage', variantId: 'reviewed-variant' }],
+      existingReviewDecisions: [{ soulId: 'acme-app', variantId: 'reviewed-variant' }],
     });
     expect(result.hasCriticalFlags).toBe(true);
     expect(result.flags).toHaveLength(1);
@@ -186,9 +186,9 @@ describe('checkReviewerGate', () => {
 
   it('AC #7: soul mismatch means no review match (different soul same variant ID)', () => {
     const result = checkReviewerGate({
-      stagedVariants: [{ soulId: 'soul-b', variantId: 'small-utility' }],
+      stagedVariants: [{ soulId: 'soul-b', variantId: 'small-org' }],
       existingReviewDecisions: [
-        { soulId: 'soul-a', variantId: 'small-utility' }, // different soul
+        { soulId: 'soul-a', variantId: 'small-org' }, // different soul
       ],
     });
     expect(result.hasCriticalFlags).toBe(true);
@@ -206,7 +206,7 @@ describe('checkReviewerGate', () => {
 
   it('flag message references RFC-0017 OQ-7 and AISDLC-298', () => {
     const result = checkReviewerGate({
-      stagedVariants: [{ soulId: 'spry-engage', variantId: 'v1' }],
+      stagedVariants: [{ soulId: 'acme-app', variantId: 'v1' }],
       existingReviewDecisions: [],
     });
     const msg = result.flags[0].message;
@@ -223,7 +223,7 @@ describe('full Engineering review loop integration (AC #8)', () => {
     // Step 1: New variant declared — trigger cost review
     const declarations: VariantDeclarationForReview[] = [
       {
-        soulId: 'spry-engage',
+        soulId: 'acme-app',
         variantId: 'new-3d-variant',
         designOverrides: { densityProfile: 'spacious', motionProfile: 'full' },
       },
@@ -234,16 +234,16 @@ describe('full Engineering review loop integration (AC #8)', () => {
 
     // Step 2: Reviewer-subagent gate check — before Engineering review exists in catalog
     const gateResultBefore = checkReviewerGate({
-      stagedVariants: [{ soulId: 'spry-engage', variantId: 'new-3d-variant' }],
+      stagedVariants: [{ soulId: 'acme-app', variantId: 'new-3d-variant' }],
       existingReviewDecisions: [], // catalog empty
     });
     expect(gateResultBefore.hasCriticalFlags).toBe(true);
 
     // Step 3: Engineering files the review Decision in catalog — gate passes
     const gateResultAfter = checkReviewerGate({
-      stagedVariants: [{ soulId: 'spry-engage', variantId: 'new-3d-variant' }],
+      stagedVariants: [{ soulId: 'acme-app', variantId: 'new-3d-variant' }],
       existingReviewDecisions: [
-        { soulId: 'spry-engage', variantId: 'new-3d-variant' }, // review now in catalog
+        { soulId: 'acme-app', variantId: 'new-3d-variant' }, // review now in catalog
       ],
     });
     expect(gateResultAfter.hasCriticalFlags).toBe(false);
@@ -251,7 +251,7 @@ describe('full Engineering review loop integration (AC #8)', () => {
     // Step 4: Engineering flags a substrate cost concern (block scenario)
     const blockedDeclarations: VariantDeclarationForReview[] = [
       {
-        soulId: 'spry-engage',
+        soulId: 'acme-app',
         variantId: 'new-3d-variant',
         substrateCostAssessment: {
           blocked: true,

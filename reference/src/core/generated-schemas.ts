@@ -5586,7 +5586,7 @@ export const metricSnapshotV1Schema = {
           pattern: '^[a-z][a-z0-9-]*/([a-z][a-z0-9-]*/)?[a-z][a-z0-9-]*$',
           description:
             "Path-style journey URI. Soul-scoped: '<soul-id>/<journey-id>'. Variant-scoped: '<soul-id>/<variant-id>/<journey-id>'. Mirrors the targetedJourneys URI format from RFC-0018 §5.4.",
-          examples: ['spry-engage/onboarding', 'spry-engage/annual-test/submit-results'],
+          examples: ['acme-app/onboarding', 'acme-app/annual-review/submit-results'],
         },
         metricId: {
           type: 'string',
@@ -10380,7 +10380,7 @@ export const workItemSchema = {
       items: {
         type: 'string',
         description:
-          "Soul DID URI (e.g. 'did:platform-x:soul:spry-engage') or soul slug (e.g. 'spry-engage').",
+          "Soul DID URI (e.g. 'did:platform-x:soul:acme-app') or soul slug (e.g. 'acme-app').",
       },
     },
     targetedVariants: {
@@ -10402,7 +10402,7 @@ export const workItemSchema = {
         type: 'string',
         pattern: '^[a-z][a-z0-9-]*/([a-z][a-z0-9-]*/)?[a-z][a-z0-9-]*$',
         description:
-          "Path-style journey URI per RFC-0018 §6.1: '<soul-id>/<journey-id>' (soul-scoped) OR '<soul-id>/<variant-id>/<journey-id>' (variant-scoped). All segments are kebab-case. Examples: 'spry-engage/onboarding', 'spry-engage/annual-test/backflow-submit'.",
+          "Path-style journey URI per RFC-0018 §6.1: '<soul-id>/<journey-id>' (soul-scoped) OR '<soul-id>/<variant-id>/<journey-id>' (variant-scoped). All segments are kebab-case. Examples: 'acme-app/onboarding', 'acme-app/annual-review/review-submit'.",
       },
     },
   },

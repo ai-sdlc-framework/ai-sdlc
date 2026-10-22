@@ -67,7 +67,7 @@ function makeJourneys(n: number): JourneyDeclarationInput[] {
 describe('validateJourneyDeclarations — inheritance violations (AC #5)', () => {
   it('emits no events for clean journey declarations', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [makeJourney('onboarding')],
       now: FIXED_TS,
     });
@@ -78,7 +78,7 @@ describe('validateJourneyDeclarations — inheritance violations (AC #5)', () =>
   it('detects violations for all locked field names', () => {
     for (const field of JOURNEY_INHERITED_LOCKED_FIELDS) {
       const events = validateJourneyDeclarations({
-        soulId: 'spry-engage',
+        soulId: 'acme-app',
         journeys: [makeJourney('test-journey', 2, { [field]: 'any-value' })],
         now: FIXED_TS,
       });
@@ -94,7 +94,7 @@ describe('validateJourneyDeclarations — inheritance violations (AC #5)', () =>
 
   it('violation class 1: emits JourneyInheritanceViolation when complianceRegimes overridden', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [makeJourney('onboarding', 2, { complianceRegimes: ['HIPAA'] })],
       now: FIXED_TS,
     });
@@ -105,7 +105,7 @@ describe('validateJourneyDeclarations — inheritance violations (AC #5)', () =>
     expect(v?.blocking).toBe(true);
     if (v?.kind === 'JourneyInheritanceViolation') {
       expect(v.journeyId).toBe('onboarding');
-      expect(v.soulId).toBe('spry-engage');
+      expect(v.soulId).toBe('acme-app');
       expect(v.message).toContain('complianceRegimes');
       expect(v.message).toContain('inherited-and-locked');
     }
@@ -114,7 +114,7 @@ describe('validateJourneyDeclarations — inheritance violations (AC #5)', () =>
 
   it('violation class 2: emits JourneyInheritanceViolation when targetAudience overridden', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [makeJourney('onboarding', 2, { targetAudience: 'enterprise' })],
       now: FIXED_TS,
     });
@@ -131,7 +131,7 @@ describe('validateJourneyDeclarations — inheritance violations (AC #5)', () =>
 
   it('violation class 3: emits JourneyInheritanceViolation when substrateInvariants overridden', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [makeJourney('onboarding', 2, { substrateInvariants: ['kafka-v2'] })],
       now: FIXED_TS,
     });
@@ -144,12 +144,12 @@ describe('validateJourneyDeclarations — inheritance violations (AC #5)', () =>
   });
 
   it('violation class 4: emits JourneyInheritanceViolation when variant-scoped complianceFloor is not "inherit"', () => {
-    const journey = makeJourney('annual-test', 2, {
-      scope: 'variant:annual-test',
+    const journey = makeJourney('annual-review', 2, {
+      scope: 'variant:annual-review',
       complianceFloor: 'strict',
     });
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [journey],
       now: FIXED_TS,
     });
@@ -166,12 +166,12 @@ describe('validateJourneyDeclarations — inheritance violations (AC #5)', () =>
   });
 
   it('does NOT emit complianceFloor violation when variant-scoped and complianceFloor is "inherit"', () => {
-    const journey = makeJourney('annual-test', 2, {
-      scope: 'variant:annual-test',
+    const journey = makeJourney('annual-review', 2, {
+      scope: 'variant:annual-review',
       complianceFloor: 'inherit',
     });
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [journey],
       now: FIXED_TS,
     });
@@ -182,7 +182,7 @@ describe('validateJourneyDeclarations — inheritance violations (AC #5)', () =>
   it('does NOT emit complianceFloor violation for soul-scoped journey (no complianceFloor required)', () => {
     const journey = makeJourney('onboarding', 2, { scope: 'soul' });
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [journey],
       now: FIXED_TS,
     });
@@ -195,7 +195,7 @@ describe('validateJourneyDeclarations — inheritance violations (AC #5)', () =>
       accessibility: { wcagLevel: 'A', wcagVersion: '2.1', conformanceTarget: 100 },
     });
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [journey],
       parentWcagLevel: 'AA',
       now: FIXED_TS,
@@ -220,7 +220,7 @@ describe('validateJourneyDeclarations — inheritance violations (AC #5)', () =>
       accessibility: { wcagLevel: 'AAA', wcagVersion: '2.1', conformanceTarget: 100 },
     });
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [journey],
       parentWcagLevel: 'AA',
       now: FIXED_TS,
@@ -234,7 +234,7 @@ describe('validateJourneyDeclarations — inheritance violations (AC #5)', () =>
       accessibility: { wcagLevel: 'A', wcagVersion: '2.1', conformanceTarget: 100 },
     });
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [journey],
       // parentWcagLevel not provided
       now: FIXED_TS,
@@ -249,7 +249,7 @@ describe('validateJourneyDeclarations — inheritance violations (AC #5)', () =>
       substrateInvariants: ['kafka-v2'],
     });
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [journey],
       now: FIXED_TS,
     });
@@ -289,7 +289,7 @@ describe('validateJourneyDeclarations — inheritance violations (AC #5)', () =>
 describe('validateJourneyDeclarations — journey count limits (AC #7)', () => {
   it('emits no warning below soft-warn threshold (9 journeys)', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: makeJourneys(9),
       now: FIXED_TS,
     });
@@ -299,7 +299,7 @@ describe('validateJourneyDeclarations — journey count limits (AC #7)', () => {
 
   it('emits non-blocking JourneyCountSoftWarning at exactly softWarnAt (10 journeys)', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: makeJourneys(DEFAULT_JOURNEY_SOFT_WARN_AT),
       now: FIXED_TS,
     });
@@ -310,14 +310,14 @@ describe('validateJourneyDeclarations — journey count limits (AC #7)', () => {
       expect(w.journeyCount).toBe(DEFAULT_JOURNEY_SOFT_WARN_AT);
       expect(w.threshold).toBe(DEFAULT_JOURNEY_SOFT_WARN_AT);
       expect(w.message).toContain('journey-count-soft-warning');
-      expect(w.soulId).toBe('spry-engage');
+      expect(w.soulId).toBe('acme-app');
     }
     expect(hasBlockingJourneyViolations(events)).toBe(false);
   });
 
   it('emits soft warning at 15 journeys (mid-range)', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: makeJourneys(15),
       now: FIXED_TS,
     });
@@ -327,7 +327,7 @@ describe('validateJourneyDeclarations — journey count limits (AC #7)', () => {
 
   it('emits no hard-limit event at 49 journeys (just below)', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: makeJourneys(49),
       now: FIXED_TS,
     });
@@ -336,7 +336,7 @@ describe('validateJourneyDeclarations — journey count limits (AC #7)', () => {
 
   it('emits blocking JourneyCountHardLimitExceeded at exactly hardLimit (50 journeys)', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: makeJourneys(DEFAULT_JOURNEY_HARD_LIMIT),
       now: FIXED_TS,
     });
@@ -347,7 +347,7 @@ describe('validateJourneyDeclarations — journey count limits (AC #7)', () => {
       expect(exceeded.journeyCount).toBe(DEFAULT_JOURNEY_HARD_LIMIT);
       expect(exceeded.limit).toBe(DEFAULT_JOURNEY_HARD_LIMIT);
       expect(exceeded.message).toContain('journey-count-hard-limit-exceeded');
-      expect(exceeded.soulId).toBe('spry-engage');
+      expect(exceeded.soulId).toBe('acme-app');
     }
     expect(hasBlockingJourneyViolations(events)).toBe(true);
     // No soft warning when hard limit fires
@@ -356,7 +356,7 @@ describe('validateJourneyDeclarations — journey count limits (AC #7)', () => {
 
   it('respects per-org softWarnAt override', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: makeJourneys(7),
       limits: { softWarnAt: 7, hardLimit: 100 },
       now: FIXED_TS,
@@ -402,7 +402,7 @@ describe('validateJourneyDeclarations — journey count limits (AC #7)', () => {
 describe('validateJourneyDeclarations — state count limits (AC #8)', () => {
   it('emits no warning for journey with 11 states (below soft-warn)', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [makeJourney('onboarding', 11)],
       now: FIXED_TS,
     });
@@ -412,7 +412,7 @@ describe('validateJourneyDeclarations — state count limits (AC #8)', () => {
 
   it('emits JourneyStateCountSoftWarning at exactly stateSoftWarnAt (12 states)', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [makeJourney('onboarding', DEFAULT_STATE_SOFT_WARN_AT)],
       now: FIXED_TS,
     });
@@ -432,7 +432,7 @@ describe('validateJourneyDeclarations — state count limits (AC #8)', () => {
 
   it('soft-warn message includes v1 workaround reference', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [makeJourney('regulatory', 20)],
       now: FIXED_TS,
     });
@@ -446,7 +446,7 @@ describe('validateJourneyDeclarations — state count limits (AC #8)', () => {
 
   it('emits no hard-limit event at 99 states (just below)', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [makeJourney('complex', 99)],
       now: FIXED_TS,
     });
@@ -455,7 +455,7 @@ describe('validateJourneyDeclarations — state count limits (AC #8)', () => {
 
   it('emits blocking JourneyStateCountHardLimitExceeded at exactly stateHardLimit (100 states)', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [makeJourney('runaway', DEFAULT_STATE_HARD_LIMIT)],
       now: FIXED_TS,
     });
@@ -474,7 +474,7 @@ describe('validateJourneyDeclarations — state count limits (AC #8)', () => {
 
   it('respects per-org stateSoftWarnAt override', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [makeJourney('regulated', 8)],
       stateLimits: { softWarnAt: 8, hardLimit: 200 },
       now: FIXED_TS,
@@ -489,7 +489,7 @@ describe('validateJourneyDeclarations — state count limits (AC #8)', () => {
   it('respects per-org custom softWarnMessage', () => {
     const customMessage = 'Custom v1 workaround: use handoff states';
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [makeJourney('flow', 15)],
       stateLimits: { softWarnAt: 12, hardLimit: 100, softWarnMessage: customMessage },
       now: FIXED_TS,
@@ -503,7 +503,7 @@ describe('validateJourneyDeclarations — state count limits (AC #8)', () => {
 
   it('reports state count per-journey (multiple journeys with high state counts)', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [
         makeJourney('flow-a', 15),
         makeJourney('flow-b', 13),
@@ -527,7 +527,7 @@ describe('validateJourneyDeclarations — state count limits (AC #8)', () => {
 describe('validateJourneyDeclarations — nested journey rejection (AC #9)', () => {
   it('emits NestedJourneyRejected when a journey contains a nested journeys[] field', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [
         makeJourney('checkout', 2, {
           journeys: [{ id: 'payment', scope: 'soul' }], // FORBIDDEN
@@ -540,7 +540,7 @@ describe('validateJourneyDeclarations — nested journey rejection (AC #9)', () 
     expect(rejected?.blocking).toBe(true);
     if (rejected?.kind === 'NestedJourneyRejected') {
       expect(rejected.journeyId).toBe('checkout');
-      expect(rejected.soulId).toBe('spry-engage');
+      expect(rejected.soulId).toBe('acme-app');
       expect(rejected.message).toContain('nested');
       expect(rejected.message).toContain('sub-journeys');
       expect(rejected.message).toContain('journey-sub-flow-activation-request');
@@ -550,7 +550,7 @@ describe('validateJourneyDeclarations — nested journey rejection (AC #9)', () 
 
   it('does NOT emit NestedJourneyRejected for clean journey declarations', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [makeJourney('onboarding')],
       now: FIXED_TS,
     });
@@ -559,7 +559,7 @@ describe('validateJourneyDeclarations — nested journey rejection (AC #9)', () 
 
   it('emits NestedJourneyRejected for each journey that has nested journeys', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [
         makeJourney('checkout', 2, { journeys: [{ id: 'payment' }] }),
         makeJourney('onboarding'), // clean
@@ -573,7 +573,7 @@ describe('validateJourneyDeclarations — nested journey rejection (AC #9)', () 
 
   it('nested journey rejection message includes v1 workaround guidance', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [makeJourney('checkout', 2, { journeys: [] })],
       now: FIXED_TS,
     });
@@ -590,7 +590,7 @@ describe('validateJourneyDeclarations — nested journey rejection (AC #9)', () 
 describe('trackSubFlowActivationRequests — Stage A counter (AC #10)', () => {
   it('returns correct count for a single request', () => {
     const result = trackSubFlowActivationRequests([
-      { requestedBy: 'adopter-acme', journeyId: 'checkout', soulId: 'spry-engage' },
+      { requestedBy: 'adopter-acme', journeyId: 'checkout', soulId: 'acme-app' },
     ]);
     expect(result.decision).toBe('journey-sub-flow-activation-request');
     expect(result.distinctAdopterCount).toBe(1);
@@ -657,19 +657,19 @@ describe('trackSubFlowActivationRequests — Stage A counter (AC #10)', () => {
 
 describe('parseTargetedJourneyRef — URI parsing (AC #11)', () => {
   it('parses soul-scoped URI: soul-id/journey-id', () => {
-    const ref = parseTargetedJourneyRef('spry-engage/onboarding');
+    const ref = parseTargetedJourneyRef('acme-app/onboarding');
     expect(ref).not.toBeNull();
-    expect(ref?.soulId).toBe('spry-engage');
+    expect(ref?.soulId).toBe('acme-app');
     expect(ref?.variantId).toBeUndefined();
     expect(ref?.journeyId).toBe('onboarding');
   });
 
   it('parses variant-scoped URI: soul-id/variant-id/journey-id', () => {
-    const ref = parseTargetedJourneyRef('spry-engage/annual-test/backflow-submit');
+    const ref = parseTargetedJourneyRef('acme-app/annual-review/review-submit');
     expect(ref).not.toBeNull();
-    expect(ref?.soulId).toBe('spry-engage');
-    expect(ref?.variantId).toBe('annual-test');
-    expect(ref?.journeyId).toBe('backflow-submit');
+    expect(ref?.soulId).toBe('acme-app');
+    expect(ref?.variantId).toBe('annual-review');
+    expect(ref?.journeyId).toBe('review-submit');
   });
 
   it('returns null for empty string', () => {
@@ -677,19 +677,19 @@ describe('parseTargetedJourneyRef — URI parsing (AC #11)', () => {
   });
 
   it('returns null for malformed URI (no separator)', () => {
-    expect(parseTargetedJourneyRef('spryengage')).toBeNull();
+    expect(parseTargetedJourneyRef('acmeapp')).toBeNull();
   });
 
   it('returns null for URI with uppercase characters', () => {
-    expect(parseTargetedJourneyRef('SpryEngage/Onboarding')).toBeNull();
+    expect(parseTargetedJourneyRef('AcmeApp/Onboarding')).toBeNull();
   });
 
   it('returns null for URI with trailing slash', () => {
-    expect(parseTargetedJourneyRef('spry-engage/')).toBeNull();
+    expect(parseTargetedJourneyRef('acme-app/')).toBeNull();
   });
 
   it('returns null for URI with leading slash', () => {
-    expect(parseTargetedJourneyRef('/spry-engage/onboarding')).toBeNull();
+    expect(parseTargetedJourneyRef('/acme-app/onboarding')).toBeNull();
   });
 
   it('parses soul-scoped URI with numeric suffix: soul-id/journey-id', () => {
@@ -721,7 +721,7 @@ describe('parseTargetedJourneyRef — URI parsing (AC #11)', () => {
 describe('validateJourneyDeclarations — combined scenarios', () => {
   it('returns empty events for empty journeys array', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [],
       now: FIXED_TS,
     });
@@ -735,7 +735,7 @@ describe('validateJourneyDeclarations — combined scenarios', () => {
     // 10 journeys: triggers soft-warn; bad-j has inheritance violation
 
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: journeyList,
       now: FIXED_TS,
     });
@@ -749,7 +749,7 @@ describe('validateJourneyDeclarations — combined scenarios', () => {
   it('stamps events with the provided timestamp', () => {
     const ts = '2026-01-15T12:00:00.000Z';
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: makeJourneys(DEFAULT_JOURNEY_SOFT_WARN_AT),
       now: ts,
     });
@@ -760,7 +760,7 @@ describe('validateJourneyDeclarations — combined scenarios', () => {
   it('defaults timestamp to a non-empty ISO string when now not provided', () => {
     const before = Date.now();
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: makeJourneys(DEFAULT_JOURNEY_SOFT_WARN_AT),
     });
     const after = Date.now();
@@ -774,7 +774,7 @@ describe('validateJourneyDeclarations — combined scenarios', () => {
 
   it('handles journey with undefined id gracefully', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [{ id: undefined as unknown as string, complianceRegimes: ['GDPR'] }],
       now: FIXED_TS,
     });
@@ -795,7 +795,7 @@ describe('hasBlockingJourneyViolations', () => {
 
   it('returns false when all events are non-blocking (soft warn only)', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: makeJourneys(DEFAULT_JOURNEY_SOFT_WARN_AT),
       now: FIXED_TS,
     });
@@ -804,7 +804,7 @@ describe('hasBlockingJourneyViolations', () => {
 
   it('returns true when any event is blocking', () => {
     const events = validateJourneyDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       journeys: [makeJourney('j1', 2, { complianceRegimes: ['GDPR'] })],
       now: FIXED_TS,
     });

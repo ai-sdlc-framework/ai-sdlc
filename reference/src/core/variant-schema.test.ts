@@ -38,7 +38,7 @@ function makeAjv() {
 const MINIMAL_SOUL_DID = {
   apiVersion: 'ai-sdlc.io/v1alpha1',
   kind: 'DesignIntentDocument',
-  metadata: { name: 'spry-engage' },
+  metadata: { name: 'acme-app' },
   spec: {
     stewardship: {
       productAuthority: {
@@ -53,7 +53,7 @@ const MINIMAL_SOUL_DID = {
       },
     },
     soulPurpose: {
-      mission: { value: 'Serve municipal government with clear, efficient tools.' },
+      mission: { value: 'Serve business customers with clear, efficient tools.' },
       designPrinciples: [
         {
           id: 'clarity',
@@ -70,7 +70,7 @@ const MINIMAL_SOUL_DID = {
         },
       ],
     },
-    designSystemRef: { name: 'spry-design-system' },
+    designSystemRef: { name: 'acme-design-system' },
     triad: {
       design: { authority: 'morgan' },
       engineering: { authority: 'dom' },
@@ -95,8 +95,8 @@ describe('Soul DID schema — variants[] additions (AC #1)', () => {
         ...MINIMAL_SOUL_DID.spec,
         variants: [
           {
-            id: 'small-utility',
-            targetAudience: { segments: ['municipal-small'] },
+            id: 'small-org',
+            targetAudience: { segments: ['small-business'] },
             complianceFloor: 'inherit',
           },
         ],
@@ -113,13 +113,13 @@ describe('Soul DID schema — variants[] additions (AC #1)', () => {
         ...MINIMAL_SOUL_DID.spec,
         variants: [
           {
-            id: 'small-utility',
+            id: 'small-org',
             targetAudience: {
-              segments: ['municipal-small'],
+              segments: ['small-business'],
               sizeRange: { minStaff: 1, maxStaff: 50 },
             },
             designOverrides: {
-              colorPaletteOverlay: 'small-utility-warm',
+              colorPaletteOverlay: 'small-org-warm',
               densityProfile: 'comfortable',
               typographyScale: 'large-print',
               motionProfile: 'reduced',
@@ -132,7 +132,7 @@ describe('Soul DID schema — variants[] additions (AC #1)', () => {
           {
             id: 'enterprise',
             targetAudience: {
-              segments: ['municipal-large'],
+              segments: ['mid-market'],
               sizeRange: { minStaff: 51, maxStaff: 5000 },
             },
             designOverrides: {
@@ -157,7 +157,7 @@ describe('Soul DID schema — variants[] additions (AC #1)', () => {
         variants: [
           {
             // missing id
-            targetAudience: { segments: ['municipal-small'] },
+            targetAudience: { segments: ['small-business'] },
             complianceFloor: 'inherit',
           },
         ],
@@ -172,7 +172,7 @@ describe('Soul DID schema — variants[] additions (AC #1)', () => {
       ...MINIMAL_SOUL_DID,
       spec: {
         ...MINIMAL_SOUL_DID.spec,
-        variants: [{ id: 'small-utility', complianceFloor: 'inherit' }],
+        variants: [{ id: 'small-org', complianceFloor: 'inherit' }],
       },
     };
     const result = validate('DesignIntentDocument', doc);
@@ -184,7 +184,7 @@ describe('Soul DID schema — variants[] additions (AC #1)', () => {
       ...MINIMAL_SOUL_DID,
       spec: {
         ...MINIMAL_SOUL_DID.spec,
-        variants: [{ id: 'small-utility', targetAudience: { segments: [] } }],
+        variants: [{ id: 'small-org', targetAudience: { segments: [] } }],
       },
     };
     const result = validate('DesignIntentDocument', doc);
@@ -216,7 +216,7 @@ describe('Soul DID schema — variants[] additions (AC #1)', () => {
         ...MINIMAL_SOUL_DID.spec,
         variants: [
           {
-            id: 'SmallUtility', // PascalCase — not allowed
+            id: 'SmallOrg', // PascalCase — not allowed
             targetAudience: { segments: [] },
             complianceFloor: 'inherit',
           },
@@ -411,11 +411,11 @@ describe('Work Item schema — targetedVariants[] (AC #2)', () => {
     const validator = ajv.compile(workItemSchema);
     const workItem = {
       id: 'AISDLC-313',
-      title: 'Small-utility onboarding improvement',
-      targetedSouls: ['spry-engage'],
+      title: 'Small-org onboarding improvement',
+      targetedSouls: ['acme-app'],
       targetedVariants: [
-        'did:platform-x:soul:spry-engage/variant:small-utility',
-        'did:ai-sdlc:prod:soul:acme-engage/variant:enterprise',
+        'did:platform-x:soul:acme-app/variant:small-org',
+        'did:ai-sdlc:prod:soul:acme-store/variant:enterprise',
       ],
     };
     expect(validator(workItem)).toBe(true);
@@ -427,7 +427,7 @@ describe('Work Item schema — targetedVariants[] (AC #2)', () => {
     const workItem = {
       id: 'AISDLC-313',
       title: 'Test',
-      targetedVariants: ['spry-engage/small-utility'], // slug-pair not a valid URI
+      targetedVariants: ['acme-app/small-org'], // slug-pair not a valid URI
     };
     const valid = validator(workItem);
     expect(valid).toBe(false);
@@ -439,7 +439,7 @@ describe('Work Item schema — targetedVariants[] (AC #2)', () => {
     const workItem = {
       id: 'AISDLC-313',
       title: 'Test',
-      targetedVariants: ['did:platform-x:soul:spry-engage/small-utility'], // missing "variant:"
+      targetedVariants: ['did:platform-x:soul:acme-app/small-org'], // missing "variant:"
     };
     const valid = validator(workItem);
     expect(valid).toBe(false);
@@ -463,8 +463,8 @@ describe('Soul DID schema — nested variants rejection (AC #6)', () => {
         ...MINIMAL_SOUL_DID.spec,
         variants: [
           {
-            id: 'small-utility',
-            targetAudience: { segments: ['municipal-small'] },
+            id: 'small-org',
+            targetAudience: { segments: ['small-business'] },
             complianceFloor: 'inherit',
             variants: [{ id: 'sub-variant' }], // additionalProperties: false rejects this
           },
@@ -483,8 +483,8 @@ describe('Soul DID schema — nested variants rejection (AC #6)', () => {
         ...MINIMAL_SOUL_DID.spec,
         variants: [
           {
-            id: 'small-utility',
-            targetAudience: { segments: ['municipal-small'] },
+            id: 'small-org',
+            targetAudience: { segments: ['small-business'] },
             complianceFloor: 'inherit',
             variants: [], // still forbidden — any key is rejected by additionalProperties: false
           },

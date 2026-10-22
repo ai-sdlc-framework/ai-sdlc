@@ -163,8 +163,8 @@ export type VariantAggregationRule = 'min' | 'max' | 'mean';
  * the schema; we accept the trimmed slug form here because the DID prefix
  * `did:platform-x:soul:` is platform-scoped, not router-scoped).
  *
- * The `did:platform-x:soul:engage/variant:small-utility` URI form from
- * OQ-6 reduces to `engage/small-utility` after the schema's URI parser
+ * The `did:platform-x:soul:acme-app/variant:small-org` URI form from
+ * OQ-6 reduces to `acme-app/small-org` after the schema's URI parser
  * extracts the soul-id + variant-id segments.
  */
 export interface WorkItemVariantTargeting {
@@ -234,8 +234,8 @@ const SLUG_RE = /^[a-z][a-z0-9-]*$/;
 /**
  * Parse a targeted-variant reference. Accepts both the schema's accepted forms:
  *
- *   1. Slug-pair: `engage/small-utility` (RFC-0017 §6.1 Work Item schema pattern)
- *   2. Full DID: `did:platform-x:soul:engage/variant:small-utility` (OQ-6)
+ *   1. Slug-pair: `acme-app/small-org` (RFC-0017 §6.1 Work Item schema pattern)
+ *   2. Full DID: `did:platform-x:soul:acme-app/variant:small-org` (OQ-6)
  *
  * Returns `undefined` for any malformed input — caller's responsibility to
  * surface diagnostics. The schema-side validator is Phase 1's responsibility;

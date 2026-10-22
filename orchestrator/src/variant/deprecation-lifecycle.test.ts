@@ -38,8 +38,8 @@ const NOW = new Date('2026-06-01T00:00:00Z');
 describe('resolveDeprecationState', () => {
   it('returns "declared" when removal date is far in the future', () => {
     const decl: DeprecatedVariantDeclaration = {
-      soulId: 'spry-engage',
-      variantId: 'small-utility',
+      soulId: 'acme-app',
+      variantId: 'small-org',
       deprecationDeclaredAt: daysAgo(2, NOW),
       removalDate: daysFromNow(20, NOW),
     };
@@ -48,8 +48,8 @@ describe('resolveDeprecationState', () => {
 
   it('returns "approaching" when within approachingWindowDays of removal', () => {
     const decl: DeprecatedVariantDeclaration = {
-      soulId: 'spry-engage',
-      variantId: 'small-utility',
+      soulId: 'acme-app',
+      variantId: 'small-org',
       deprecationDeclaredAt: daysAgo(25, NOW),
       removalDate: daysFromNow(5, NOW), // 5d away, within 7d threshold
     };
@@ -58,8 +58,8 @@ describe('resolveDeprecationState', () => {
 
   it('returns "approaching" exactly at the approaching threshold boundary', () => {
     const decl: DeprecatedVariantDeclaration = {
-      soulId: 'spry-engage',
-      variantId: 'small-utility',
+      soulId: 'acme-app',
+      variantId: 'small-org',
       deprecationDeclaredAt: daysAgo(23, NOW),
       removalDate: daysFromNow(DEFAULT_APPROACHING_WINDOW_DAYS, NOW),
     };
@@ -69,7 +69,7 @@ describe('resolveDeprecationState', () => {
 
   it('returns "removal-pending" at removal date with active consumers', () => {
     const decl: DeprecatedVariantDeclaration = {
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variantId: 'enterprise',
       deprecationDeclaredAt: daysAgo(35, NOW),
       removalDate: daysAgo(2, NOW), // past removal date
@@ -80,7 +80,7 @@ describe('resolveDeprecationState', () => {
 
   it('returns "removed" at removal date with no active consumers', () => {
     const decl: DeprecatedVariantDeclaration = {
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variantId: 'enterprise',
       deprecationDeclaredAt: daysAgo(35, NOW),
       removalDate: daysAgo(2, NOW),
@@ -92,8 +92,8 @@ describe('resolveDeprecationState', () => {
   it('computes removalDate from deprecationWindowDays when not explicit', () => {
     // Declared 20 days ago; default window is 30d → removal in 10d → 'declared'
     const decl: DeprecatedVariantDeclaration = {
-      soulId: 'spry-engage',
-      variantId: 'small-utility',
+      soulId: 'acme-app',
+      variantId: 'small-org',
       deprecationDeclaredAt: daysAgo(20, NOW),
     };
     expect(resolveDeprecationState(decl, {}, NOW)).toBe('declared');
@@ -102,8 +102,8 @@ describe('resolveDeprecationState', () => {
   it('uses per-Soul deprecationWindowDays override', () => {
     // Declared 10 days ago; per-Soul window = 7d → removal date is 3d AGO → removal-pending
     const decl: DeprecatedVariantDeclaration = {
-      soulId: 'spry-engage',
-      variantId: 'small-utility',
+      soulId: 'acme-app',
+      variantId: 'small-org',
       deprecationDeclaredAt: daysAgo(10, NOW),
       activeConsumers: ['AISDLC-999'],
     };
@@ -115,8 +115,8 @@ describe('resolveDeprecationState', () => {
     // Removal in 3d; default approaching = 7d (should be 'approaching'),
     // but per-Soul override = 2d → 3d away > 2d threshold → 'declared'
     const decl: DeprecatedVariantDeclaration = {
-      soulId: 'spry-engage',
-      variantId: 'small-utility',
+      soulId: 'acme-app',
+      variantId: 'small-org',
       deprecationDeclaredAt: daysAgo(27, NOW),
       removalDate: daysFromNow(3, NOW),
     };
@@ -131,8 +131,8 @@ describe('evaluateDeprecationLifecycle — AC #1, #2, #3', () => {
   it('AC #1: emits variant-deprecation-declared for a freshly-deprecated variant', () => {
     const declarations: DeprecatedVariantDeclaration[] = [
       {
-        soulId: 'spry-engage',
-        variantId: 'small-utility',
+        soulId: 'acme-app',
+        variantId: 'small-org',
         deprecationDeclaredAt: NOW.toISOString(),
         removalDate: daysFromNow(30, NOW),
       },
@@ -142,14 +142,14 @@ describe('evaluateDeprecationLifecycle — AC #1, #2, #3', () => {
     const ev = result.events[0];
     expect(ev.kind).toBe('variant-deprecation-declared');
     expect(ev.state).toBe('declared');
-    expect(ev.soulId).toBe('spry-engage');
-    expect(ev.variantId).toBe('small-utility');
+    expect(ev.soulId).toBe('acme-app');
+    expect(ev.variantId).toBe('small-org');
   });
 
   it('AC #1: emits variant-deprecation-approaching when within window', () => {
     const declarations: DeprecatedVariantDeclaration[] = [
       {
-        soulId: 'spry-engage',
+        soulId: 'acme-app',
         variantId: 'enterprise',
         deprecationDeclaredAt: daysAgo(25, NOW),
         removalDate: daysFromNow(4, NOW),
@@ -168,7 +168,7 @@ describe('evaluateDeprecationLifecycle — AC #1, #2, #3', () => {
     const consumers = ['AISDLC-100', 'AISDLC-200'];
     const declarations: DeprecatedVariantDeclaration[] = [
       {
-        soulId: 'spry-engage',
+        soulId: 'acme-app',
         variantId: 'legacy',
         deprecationDeclaredAt: daysAgo(40, NOW),
         removalDate: daysAgo(5, NOW),
@@ -206,7 +206,7 @@ describe('evaluateDeprecationLifecycle — AC #1, #2, #3', () => {
     // With 60d window, a declaration from 35d ago shouldn't even be approaching
     const declarations: DeprecatedVariantDeclaration[] = [
       {
-        soulId: 'spry-engage',
+        soulId: 'acme-app',
         variantId: 'beta',
         deprecationDeclaredAt: daysAgo(35, NOW),
       },
@@ -220,7 +220,7 @@ describe('evaluateDeprecationLifecycle — AC #1, #2, #3', () => {
   it('AC #2: 30d default window — declared 31d ago → removal-pending with consumers', () => {
     const declarations: DeprecatedVariantDeclaration[] = [
       {
-        soulId: 'spry-engage',
+        soulId: 'acme-app',
         variantId: 'old',
         deprecationDeclaredAt: daysAgo(31, NOW),
         activeConsumers: ['AISDLC-50'],
@@ -263,7 +263,7 @@ describe('evaluateDeprecationLifecycle — AC #1, #2, #3', () => {
   it('emits no event for "removed" state (clean terminal)', () => {
     const declarations: DeprecatedVariantDeclaration[] = [
       {
-        soulId: 'spry-engage',
+        soulId: 'acme-app',
         variantId: 'gone',
         deprecationDeclaredAt: daysAgo(60, NOW),
         removalDate: daysAgo(10, NOW),
@@ -337,8 +337,8 @@ describe('full deprecation lifecycle integration', () => {
     // Day 0: deprecation declared
     const declaredAt = new Date('2026-05-01T00:00:00Z');
     const decl: DeprecatedVariantDeclaration = {
-      soulId: 'spry-engage',
-      variantId: 'small-utility',
+      soulId: 'acme-app',
+      variantId: 'small-org',
       deprecationDeclaredAt: declaredAt.toISOString(),
       activeConsumers: ['AISDLC-300'],
     };

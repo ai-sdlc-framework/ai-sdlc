@@ -9,7 +9,7 @@
  *
  * **ProductD is INTENTIONALLY OMITTED** — per RFC-0017 §11 v0.4 (2026-05-26
  * Design Authority editorial pass), ProductD's proposed variants
- * (`annual-test`, `repair-event`, `regulatory-audit-mode`) are temporal-context-
+ * (`annual-review`, `incident-response`, `audit-mode`) are temporal-context-
  * bound operational modes activated by *when* and *why* a user is in the
  * system. Same user, different operational moment = Journey shape (RFC-0018),
  * not Variant shape. ProductD's validation is deferred to RFC-0018 §11 as a
@@ -44,7 +44,7 @@ import type { VariantOverlay, VariantScores } from '../../variant-admission.js';
  * of every product) at the type/declaration level rather than via runtime
  * spot-check alone.
  *
- * `complianceRegimes: ['WCAG-2.1-AA']` is the field-tech-deployed baseline
+ * `complianceRegimes: ['WCAG-2.1-AA']` is the field-deployed baseline
  * documented in RFC-0017 §1: "all sharing the soul's WCAG 2.1 AA compliance
  * floor and shared design system tokens."
  */
@@ -120,7 +120,7 @@ export interface InternalAdopterProduct {
   readonly soulDesignImperatives: readonly string[];
 }
 
-// ── ProductA — small-utility / enterprise / county-regional ──────────────────
+// ── ProductA — small-org / enterprise / regional ──────────────────
 //
 // Validates audience-segment specialization across the v0.4 visual-token
 // surface. The three variants serve dramatically different audience sizes
@@ -129,20 +129,20 @@ export interface InternalAdopterProduct {
 const PRODUCT_A: InternalAdopterProduct = {
   soulId: 'product-a',
   description:
-    'Utility-operations management for water + electricity service providers. ' +
-    'Validates audience-segment specialization (small ↔ enterprise ↔ county).',
+    'Operations management for service providers. ' +
+    'Validates audience-segment specialization (small ↔ enterprise ↔ regional).',
   validationAxis: 'audience-segment specialization (RFC-0017 §11)',
   substrate: INTERNAL_ADOPTER_SUBSTRATE,
   soulDesignImperatives: ['compliance-first-information-architecture', 'audit-trail-visibility'],
   variants: [
     {
-      id: 'small-utility',
+      id: 'small-org',
       audienceCharacteristics: {
-        segments: ['municipal-small', 'water-district-small'],
+        segments: ['small-business', 'small-nonprofit'],
         sizeRange: { minStaff: 1, maxStaff: 50 },
       },
       designOverrides: {
-        colorPaletteOverlay: 'small-utility-warm',
+        colorPaletteOverlay: 'small-org-warm',
         densityProfile: 'comfortable',
         typographyScale: 'large-print',
         motionProfile: 'reduced',
@@ -158,7 +158,7 @@ const PRODUCT_A: InternalAdopterProduct = {
     {
       id: 'enterprise',
       audienceCharacteristics: {
-        segments: ['municipal-large', 'regional-utility'],
+        segments: ['mid-market', 'large-enterprise'],
         sizeRange: { minStaff: 51, maxStaff: 5000 },
       },
       designOverrides: {
@@ -176,28 +176,28 @@ const PRODUCT_A: InternalAdopterProduct = {
       ],
     },
     {
-      id: 'county-regional',
+      id: 'regional',
       audienceCharacteristics: {
-        segments: ['county-government', 'regional-coordinator'],
+        segments: ['regional-office', 'regional-coordinator'],
         sizeRange: { minStaff: 20, maxStaff: 200 },
       },
       designOverrides: {
-        colorPaletteOverlay: 'county-civic',
+        colorPaletteOverlay: 'regional-civic',
         densityProfile: 'comfortable',
         typographyScale: 'default',
         motionProfile: 'reduced',
         radiusProfile: 'sharp',
       },
       designImperatives: [
-        'cross-jurisdiction-reconciliation-clarity',
-        'inter-agency-handoff-explicit',
+        'cross-region-reconciliation-clarity',
+        'inter-team-handoff-explicit',
         'official-record-defensibility',
       ],
     },
   ],
 };
 
-// ── ProductB — field-tech-on-truck / field-tech-handheld / supervisor-tablet ─
+// ── ProductB — mobile-in-vehicle / mobile-handheld / supervisor-tablet ─
 //
 // Validates density profile + form-factor specialization. Same role (field
 // operations) at different form-factors / contexts of use — density profile
@@ -206,16 +206,16 @@ const PRODUCT_A: InternalAdopterProduct = {
 const PRODUCT_B: InternalAdopterProduct = {
   soulId: 'product-b',
   description:
-    'Field-operations dispatch + workflow execution for utility field crews. ' +
+    'Field-operations dispatch + workflow execution for field teams. ' +
     'Validates density profile + form-factor specialization.',
   validationAxis: 'density profile + form-factor specialization (RFC-0017 §11)',
   substrate: INTERNAL_ADOPTER_SUBSTRATE,
   soulDesignImperatives: ['offline-first-resilience', 'one-handed-operation-where-possible'],
   variants: [
     {
-      id: 'field-tech-on-truck',
+      id: 'mobile-in-vehicle',
       audienceCharacteristics: {
-        segments: ['field-crew-mounted', 'service-truck-operator'],
+        segments: ['field-mounted', 'vehicle-operator'],
         sizeRange: { minStaff: 1, maxStaff: 4 },
       },
       designOverrides: {
@@ -233,9 +233,9 @@ const PRODUCT_B: InternalAdopterProduct = {
       ],
     },
     {
-      id: 'field-tech-handheld',
+      id: 'mobile-handheld',
       audienceCharacteristics: {
-        segments: ['field-crew-handheld', 'meter-reader'],
+        segments: ['field-handheld', 'site-inspector'],
         sizeRange: { minStaff: 1, maxStaff: 1 },
       },
       designOverrides: {
@@ -255,7 +255,7 @@ const PRODUCT_B: InternalAdopterProduct = {
     {
       id: 'supervisor-tablet',
       audienceCharacteristics: {
-        segments: ['field-supervisor', 'crew-dispatch-coordinator'],
+        segments: ['field-supervisor', 'dispatch-coordinator'],
         sizeRange: { minStaff: 1, maxStaff: 10 },
       },
       designOverrides: {
@@ -275,11 +275,11 @@ const PRODUCT_B: InternalAdopterProduct = {
   ],
 };
 
-// ── ProductC — billing-clerk / customer-portal / csr-dashboard ───────────────
+// ── ProductC — back-office-clerk / self-service / support-dashboard ───────────────
 //
 // Validates role-based audience + workflow-density specialization. Same
 // domain (billing) but radically different roles (internal staff vs end
-// customer vs CSR) on shared substrate.
+// customer vs support agent) on shared substrate.
 
 const PRODUCT_C: InternalAdopterProduct = {
   soulId: 'product-c',
@@ -292,7 +292,7 @@ const PRODUCT_C: InternalAdopterProduct = {
   soulDesignImperatives: ['financial-accuracy-first', 'data-provenance-traceable'],
   variants: [
     {
-      id: 'billing-clerk',
+      id: 'back-office-clerk',
       audienceCharacteristics: {
         segments: ['billing-staff', 'accounts-receivable'],
         sizeRange: { minStaff: 1, maxStaff: 20 },
@@ -312,13 +312,13 @@ const PRODUCT_C: InternalAdopterProduct = {
       ],
     },
     {
-      id: 'customer-portal',
+      id: 'self-service',
       audienceCharacteristics: {
-        segments: ['end-customer', 'self-service-billpayer'],
+        segments: ['end-customer', 'self-service-payer'],
         sizeRange: { minStaff: 1, maxStaff: 1 },
       },
       designOverrides: {
-        colorPaletteOverlay: 'customer-portal-friendly',
+        colorPaletteOverlay: 'self-service-friendly',
         densityProfile: 'spacious',
         typographyScale: 'default',
         motionProfile: 'full',
@@ -332,13 +332,13 @@ const PRODUCT_C: InternalAdopterProduct = {
       ],
     },
     {
-      id: 'csr-dashboard',
+      id: 'support-dashboard',
       audienceCharacteristics: {
         segments: ['customer-service-representative', 'call-center-agent'],
         sizeRange: { minStaff: 5, maxStaff: 500 },
       },
       designOverrides: {
-        colorPaletteOverlay: 'csr-action-oriented',
+        colorPaletteOverlay: 'support-action-oriented',
         densityProfile: 'compact',
         typographyScale: 'data-dense',
         motionProfile: 'full',
@@ -403,24 +403,24 @@ export function buildVariantsBySoul(): Record<string, VariantOverlay[]> {
  * §2 documents: soul-aggregate scoring underweights variant-specific intent.
  *
  * The spot-check test in `admission-spotcheck.test.ts` exercises this against
- * a representative ProductA work item ("small-utility onboarding improvement").
+ * a representative ProductA work item ("small-org onboarding improvement").
  */
 export function buildVariantScores(): Record<string, Record<string, VariantScores>> {
   return {
     'product-a': {
-      'small-utility': { sa1: 0.92, sa2: 0.88 },
+      'small-org': { sa1: 0.92, sa2: 0.88 },
       enterprise: { sa1: 0.35, sa2: 0.4 },
-      'county-regional': { sa1: 0.4, sa2: 0.45 },
+      regional: { sa1: 0.4, sa2: 0.45 },
     },
     'product-b': {
-      'field-tech-on-truck': { sa1: 0.9, sa2: 0.85 },
-      'field-tech-handheld': { sa1: 0.6, sa2: 0.55 },
+      'mobile-in-vehicle': { sa1: 0.9, sa2: 0.85 },
+      'mobile-handheld': { sa1: 0.6, sa2: 0.55 },
       'supervisor-tablet': { sa1: 0.3, sa2: 0.35 },
     },
     'product-c': {
-      'billing-clerk': { sa1: 0.88, sa2: 0.82 },
-      'customer-portal': { sa1: 0.3, sa2: 0.35 },
-      'csr-dashboard': { sa1: 0.55, sa2: 0.6 },
+      'back-office-clerk': { sa1: 0.88, sa2: 0.82 },
+      'self-service': { sa1: 0.3, sa2: 0.35 },
+      'support-dashboard': { sa1: 0.55, sa2: 0.6 },
     },
   };
 }

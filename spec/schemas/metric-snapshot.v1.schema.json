@@ -27,7 +27,7 @@
           "type": "string",
           "pattern": "^[a-z][a-z0-9-]*/([a-z][a-z0-9-]*/)?[a-z][a-z0-9-]*$",
           "description": "Path-style journey URI. Soul-scoped: '<soul-id>/<journey-id>'. Variant-scoped: '<soul-id>/<variant-id>/<journey-id>'. Mirrors the targetedJourneys URI format from RFC-0018 §5.4.",
-          "examples": ["spry-engage/onboarding", "spry-engage/annual-test/submit-results"]
+          "examples": ["acme-app/onboarding", "acme-app/annual-review/submit-results"]
         },
         "metricId": {
           "type": "string",

@@ -16,9 +16,9 @@ import {
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 const variantsBySoul = {
-  'spry-engage': [
-    { id: 'small-utility', audienceCharacteristics: { segments: ['municipal-small'] } },
-    { id: 'enterprise', audienceCharacteristics: { segments: ['municipal-large'] } },
+  'acme-app': [
+    { id: 'small-org', audienceCharacteristics: { segments: ['small-business'] } },
+    { id: 'enterprise', audienceCharacteristics: { segments: ['mid-market'] } },
   ],
 };
 
@@ -37,7 +37,7 @@ const variantLeakingFile = {
 // Theme configuration for all products
 function getTheme(soulId: string) {
   // TODO: migrate these variant-specific branches
-  if (variant === 'small-utility') {
+  if (variant === 'small-org') {
     return { density: 'comfortable', radius: 'rounded' };
   }
   return { density: 'compact', radius: 'default' };
@@ -49,7 +49,7 @@ const literalLeakingFile = {
   path: 'src/shared/routing.ts',
   contents: `
 const VARIANT_ROUTES = {
-  'small-utility': '/utility',
+  'small-org': '/small-org',
   'enterprise': '/enterprise',
   default: '/',
 };
@@ -106,13 +106,13 @@ describe('detectVariantDrift', () => {
     expect(ev.decisionKind).toBe('variant-design-intent-drift');
     expect(ev.routing.blocking).toBe(false);
     expect(ev.routing.catalogStage).toBe('A');
-    expect(ev.involvedSouls).toContain('spry-engage');
+    expect(ev.involvedSouls).toContain('acme-app');
 
     const findings = ev.details.findings;
     expect(findings.length).toBeGreaterThan(0);
     const conditionalFinding = findings.find((f) => f.pattern === 'variant-conditional');
     expect(conditionalFinding).toBeDefined();
-    expect(conditionalFinding!.variantSlug).toBe('small-utility');
+    expect(conditionalFinding!.variantSlug).toBe('small-org');
     expect(conditionalFinding!.filePath).toBe('src/shared/theme-provider.ts');
   });
 
@@ -130,7 +130,7 @@ describe('detectVariantDrift', () => {
     expect(literalFindings.length).toBeGreaterThanOrEqual(2);
 
     const slugs = literalFindings.map((f) => f.variantSlug).sort();
-    expect(slugs).toContain('small-utility');
+    expect(slugs).toContain('small-org');
     expect(slugs).toContain('enterprise');
   });
 
@@ -171,12 +171,12 @@ describe('detectVariantDrift', () => {
 
   it('includes all involved soul slugs in the event', async () => {
     const multiSoulVariants = {
-      'soul-a': [{ id: 'small-utility' }],
+      'soul-a': [{ id: 'small-org' }],
       'soul-b': [{ id: 'enterprise' }],
     };
     const fileWithBoth = {
       path: 'src/shared/utils.ts',
-      contents: `const v1 = 'small-utility'; const v2 = 'enterprise';`,
+      contents: `const v1 = 'small-org'; const v2 = 'enterprise';`,
     };
     const input: VariantDriftExtensionInput = {
       tessellatedDid: 'did:platform-x:platform',
@@ -202,7 +202,7 @@ describe('detectVariantDrift', () => {
 
   it('skips invalid variant slugs gracefully', async () => {
     const variantsWithInvalidSlug = {
-      'spry-engage': [
+      'acme-app': [
         { id: '' }, // empty slug — invalid
         { id: 'UPPER-CASE' }, // uppercase — invalid
         { id: 'valid-variant' }, // valid

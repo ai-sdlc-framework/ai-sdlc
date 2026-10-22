@@ -605,7 +605,7 @@ export interface SubFlowActivationRequest {
  *
  * ```ts
  * const result = trackSubFlowActivationRequests([
- *   { requestedBy: 'adopter-acme', journeyId: 'onboarding', soulId: 'spry-engage' },
+ *   { requestedBy: 'adopter-acme', journeyId: 'onboarding', soulId: 'acme-app' },
  *   { requestedBy: 'adopter-beta' },
  * ], { distinctAdopterRequestsThreshold: 2 });
  *

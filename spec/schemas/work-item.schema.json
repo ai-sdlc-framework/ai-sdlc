@@ -30,7 +30,7 @@
       "description": "Soul DID URIs this work item explicitly targets per RFC-0009 §5.3 (targetedSouls field). Drives soul-scope admission scoring. Empty = substrate-only (min-over-all-souls degenerate case per RFC-0009 §6).",
       "items": {
         "type": "string",
-        "description": "Soul DID URI (e.g. 'did:platform-x:soul:spry-engage') or soul slug (e.g. 'spry-engage')."
+        "description": "Soul DID URI (e.g. 'did:platform-x:soul:acme-app') or soul slug (e.g. 'acme-app')."
       }
     },
     "targetedVariants": {
@@ -48,7 +48,7 @@
       "items": {
         "type": "string",
         "pattern": "^[a-z][a-z0-9-]*/([a-z][a-z0-9-]*/)?[a-z][a-z0-9-]*$",
-        "description": "Path-style journey URI per RFC-0018 §6.1: '<soul-id>/<journey-id>' (soul-scoped) OR '<soul-id>/<variant-id>/<journey-id>' (variant-scoped). All segments are kebab-case. Examples: 'spry-engage/onboarding', 'spry-engage/annual-test/backflow-submit'."
+        "description": "Path-style journey URI per RFC-0018 §6.1: '<soul-id>/<journey-id>' (soul-scoped) OR '<soul-id>/<variant-id>/<journey-id>' (variant-scoped). All segments are kebab-case. Examples: 'acme-app/onboarding', 'acme-app/annual-review/review-submit'."
       }
     }
   },

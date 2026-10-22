@@ -666,7 +666,7 @@ import type { VariantContext } from './variant-admission.js';
 
 describe('computeAdmissionComposite — RFC-0017 Phase 2 variant routing (AISDLC-353)', () => {
   // InternalAdopter four-product suite (RFC-0017 §11): ProductA Soul DID with
-  // small-utility / enterprise / county-regional variants. AC #6 — end-to-end
+  // small-org / enterprise / regional variants. AC #6 — end-to-end
   // admission scoring on a work item targeting one of InternalAdopter's
   // variants produces a variant-specific score (different from soul-aggregate).
 
@@ -675,13 +675,13 @@ describe('computeAdmissionComposite — RFC-0017 Phase 2 variant routing (AISDLC
       variantsBySoul: {
         'product-a': [
           {
-            id: 'small-utility',
+            id: 'small-org',
             audienceCharacteristics: {
-              segments: ['municipal-small', 'water-district-small'],
+              segments: ['small-business', 'small-nonprofit'],
               sizeRange: { minStaff: 1, maxStaff: 50 },
             },
             designOverrides: {
-              colorPaletteOverlay: 'small-utility-warm',
+              colorPaletteOverlay: 'small-org-warm',
               densityProfile: 'comfortable',
               typographyScale: 'large-print',
               motionProfile: 'reduced',
@@ -691,7 +691,7 @@ describe('computeAdmissionComposite — RFC-0017 Phase 2 variant routing (AISDLC
           {
             id: 'enterprise',
             audienceCharacteristics: {
-              segments: ['municipal-large', 'regional-utility'],
+              segments: ['mid-market', 'large-enterprise'],
               sizeRange: { minStaff: 51, maxStaff: 5000 },
             },
             designOverrides: {
@@ -705,15 +705,15 @@ describe('computeAdmissionComposite — RFC-0017 Phase 2 variant routing (AISDLC
       },
       variantScores: {
         'product-a': {
-          // Work item is "small-utility onboarding improvement" — variant-bound
-          'small-utility': { sa1: 0.92, sa2: 0.88 }, // strong fit
+          // Work item is "small-org onboarding improvement" — variant-bound
+          'small-org': { sa1: 0.92, sa2: 0.88 }, // strong fit
           enterprise: { sa1: 0.35, sa2: 0.42 }, // poor fit
         },
       },
       workItemTargeting: [
         {
           id: 'AISDLC-onboard-su',
-          targetedVariants: ['product-a/small-utility'],
+          targetedVariants: ['product-a/small-org'],
         },
         {
           id: 'AISDLC-bulk-ent',
@@ -721,7 +721,7 @@ describe('computeAdmissionComposite — RFC-0017 Phase 2 variant routing (AISDLC
         },
         {
           id: 'AISDLC-cross-variant',
-          targetedVariants: ['product-a/small-utility', 'product-a/enterprise'],
+          targetedVariants: ['product-a/small-org', 'product-a/enterprise'],
         },
       ],
       configBySoul: {
@@ -738,8 +738,8 @@ describe('computeAdmissionComposite — RFC-0017 Phase 2 variant routing (AISDLC
     return {
       issueNumber,
       workItemId,
-      title: 'feat: small-utility onboarding improvement',
-      body: '### Complexity\n5\n\n### Acceptance Criteria\n- Onboarding flow works for small-utility variant',
+      title: 'feat: small-org onboarding improvement',
+      body: '### Complexity\n5\n\n### Acceptance Criteria\n- Onboarding flow works for small-org variant',
       labels: ['spec'],
       reactionCount: 0,
       commentCount: 0,
@@ -753,7 +753,7 @@ describe('computeAdmissionComposite — RFC-0017 Phase 2 variant routing (AISDLC
     const ctx = makeInternalAdopterVariantCtx();
     const input = makeAdmissionInput(1, 'AISDLC-onboard-su');
 
-    // With variant routing: small-utility sa1=0.92, sa2=0.88 → SA = 0.90
+    // With variant routing: small-org sa1=0.92, sa2=0.88 → SA = 0.90
     const withVariant = computeAdmissionComposite(input, undefined, {
       variantContext: ctx,
       // Pin SA at 0.5 to make the variant-driven lift unambiguous
@@ -777,7 +777,7 @@ describe('computeAdmissionComposite — RFC-0017 Phase 2 variant routing (AISDLC
     // Breakdown must surface the variant routing path
     expect(withVariant.breakdown.variant?.routingPath).toBe('single-variant');
     expect(withVariant.breakdown.variant?.targetedVariants).toHaveLength(1);
-    expect(withVariant.breakdown.variant?.targetedVariants[0].variantId).toBe('small-utility');
+    expect(withVariant.breakdown.variant?.targetedVariants[0].variantId).toBe('small-org');
 
     // Composite is strictly higher for the variant-aligned work item
     expect(withVariant.score.composite).toBeGreaterThan(withoutVariant.score.composite);
@@ -787,7 +787,7 @@ describe('computeAdmissionComposite — RFC-0017 Phase 2 variant routing (AISDLC
     const ctx = makeInternalAdopterVariantCtx();
     // Same onboarding work item but mis-targeted to enterprise — variant misfit
     const input = makeAdmissionInput(2, 'AISDLC-bulk-ent', {
-      title: 'feat: small-utility onboarding (mistargeted as enterprise)',
+      title: 'feat: small-org onboarding (mistargeted as enterprise)',
     });
 
     const withVariant = computeAdmissionComposite(input, undefined, {
@@ -808,7 +808,7 @@ describe('computeAdmissionComposite — RFC-0017 Phase 2 variant routing (AISDLC
   it('AC #3 [multi-variant default min]: aggregates per-Soul cross-variant via min', () => {
     const ctx = makeInternalAdopterVariantCtx();
     const input = makeAdmissionInput(3, 'AISDLC-cross-variant', {
-      title: 'feat: feature touching both small-utility and enterprise',
+      title: 'feat: feature touching both small-org and enterprise',
     });
 
     const result = computeAdmissionComposite(input, undefined, {
@@ -818,8 +818,8 @@ describe('computeAdmissionComposite — RFC-0017 Phase 2 variant routing (AISDLC
 
     expect(result.breakdown.variant?.routingPath).toBe('multi-variant');
     expect(result.breakdown.variant?.aggregationRule).toBe('min');
-    // min(small-utility sa1=0.92, enterprise sa1=0.35) = 0.35
-    // min(small-utility sa2=0.88, enterprise sa2=0.42) = 0.42
+    // min(small-org sa1=0.92, enterprise sa1=0.35) = 0.35
+    // min(small-org sa2=0.88, enterprise sa2=0.42) = 0.42
     expect(result.breakdown.variant?.sa1).toBeCloseTo(0.35, 6);
     expect(result.breakdown.variant?.sa2).toBeCloseTo(0.42, 6);
     expect(result.breakdown.soulAlignment).toBeCloseTo(

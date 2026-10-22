@@ -45,9 +45,9 @@ function makeVariants(n: number): VariantDeclarationInput[] {
 describe('validateVariantDeclarations — inheritance violations (AC #3)', () => {
   it('emits no events for clean variant declarations', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: [
-        makeVariant('small-utility', {
+        makeVariant('small-org', {
           designOverrides: { densityProfile: 'comfortable' },
           designImperatives: ['low-tech-fluency-tolerance'],
         }),
@@ -61,7 +61,7 @@ describe('validateVariantDeclarations — inheritance violations (AC #3)', () =>
 
   it('emits VariantInheritanceViolation when variant overrides complianceRegimes', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: [
         makeVariant('bad-variant', {
           complianceRegimes: ['HIPAA'], // locked field — must inherit
@@ -84,7 +84,7 @@ describe('validateVariantDeclarations — inheritance violations (AC #3)', () =>
 
   it('emits VariantInheritanceViolation when variant overrides substrateInvariants', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: [
         makeVariant('bad-variant', {
           substrateInvariants: ['kafka-v2-required'],
@@ -97,14 +97,14 @@ describe('validateVariantDeclarations — inheritance violations (AC #3)', () =>
     expect(violation).toBeDefined();
     if (violation?.kind === 'VariantInheritanceViolation') {
       expect(violation.field).toBe('substrateInvariants');
-      expect(violation.soulId).toBe('spry-engage');
+      expect(violation.soulId).toBe('acme-app');
     }
     expect(hasBlockingViolations(events)).toBe(true);
   });
 
   it('emits VariantInheritanceViolation when variant overrides performanceBudgets', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: [
         makeVariant('bad-variant', {
           performanceBudgets: { p95: 200 },
@@ -120,7 +120,7 @@ describe('validateVariantDeclarations — inheritance violations (AC #3)', () =>
 
   it('emits separate violation events for each locked field attempted', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: [
         makeVariant('multi-violation', {
           complianceRegimes: ['GDPR'],
@@ -146,7 +146,7 @@ describe('validateVariantDeclarations — inheritance violations (AC #3)', () =>
     // Verify every locked field triggers a violation
     for (const field of INHERITED_LOCKED_FIELDS) {
       const events = validateVariantDeclarations({
-        soulId: 'spry-engage',
+        soulId: 'acme-app',
         variants: [makeVariant('test-variant', { [field]: 'any-value' })],
         now: FIXED_TS,
       });
@@ -178,7 +178,7 @@ describe('validateVariantDeclarations — inheritance violations (AC #3)', () =>
 describe('validateVariantDeclarations — soft warning (AC #4)', () => {
   it('emits no warning below soft-warn threshold (4 variants)', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: makeVariants(4),
       now: FIXED_TS,
     });
@@ -188,7 +188,7 @@ describe('validateVariantDeclarations — soft warning (AC #4)', () => {
 
   it('emits non-blocking VariantCountSoftWarning at exactly softWarnAt (5 variants)', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: makeVariants(DEFAULT_SOFT_WARN_AT),
       now: FIXED_TS,
     });
@@ -199,13 +199,13 @@ describe('validateVariantDeclarations — soft warning (AC #4)', () => {
       expect(warning.variantCount).toBe(DEFAULT_SOFT_WARN_AT);
       expect(warning.threshold).toBe(DEFAULT_SOFT_WARN_AT);
       expect(warning.message).toContain('variant-count-soft-warning');
-      expect(warning.soulId).toBe('spry-engage');
+      expect(warning.soulId).toBe('acme-app');
     }
   });
 
   it('emits non-blocking soft warning at 7 variants', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: makeVariants(7),
       now: FIXED_TS,
     });
@@ -218,7 +218,7 @@ describe('validateVariantDeclarations — soft warning (AC #4)', () => {
 
   it('does NOT block on soft warning — hasBlockingViolations returns false', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: makeVariants(DEFAULT_SOFT_WARN_AT),
       now: FIXED_TS,
     });
@@ -227,7 +227,7 @@ describe('validateVariantDeclarations — soft warning (AC #4)', () => {
 
   it('respects per-org softWarnAt override', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: makeVariants(3),
       limits: { softWarnAt: 3, hardLimit: 30 },
       now: FIXED_TS,
@@ -245,7 +245,7 @@ describe('validateVariantDeclarations — soft warning (AC #4)', () => {
 describe('validateVariantDeclarations — hard limit (AC #5)', () => {
   it('emits no hard-limit event at 19 variants (just below)', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: makeVariants(19),
       now: FIXED_TS,
     });
@@ -254,7 +254,7 @@ describe('validateVariantDeclarations — hard limit (AC #5)', () => {
 
   it('emits blocking VariantCountHardLimitExceeded at exactly hardLimit (20 variants)', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: makeVariants(DEFAULT_HARD_LIMIT),
       now: FIXED_TS,
     });
@@ -266,14 +266,14 @@ describe('validateVariantDeclarations — hard limit (AC #5)', () => {
       expect(exceeded.limit).toBe(DEFAULT_HARD_LIMIT);
       expect(exceeded.message).toContain('variant-count-hard-limit-exceeded');
       expect(exceeded.message).toContain('re-architecting');
-      expect(exceeded.soulId).toBe('spry-engage');
+      expect(exceeded.soulId).toBe('acme-app');
     }
     expect(hasBlockingViolations(events)).toBe(true);
   });
 
   it('emits hard-limit event at 25 variants (above limit)', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: makeVariants(25),
       now: FIXED_TS,
     });
@@ -317,9 +317,9 @@ describe('validateVariantDeclarations — hard limit (AC #5)', () => {
 describe('validateVariantDeclarations — nested variants rejection (AC #6)', () => {
   it('emits NestedVariantRejected when a variant contains a nested variants[] field', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: [
-        makeVariant('small-utility', {
+        makeVariant('small-org', {
           variants: [{ id: 'sub-variant', complianceFloor: 'inherit' }], // FORBIDDEN
         }),
       ],
@@ -330,8 +330,8 @@ describe('validateVariantDeclarations — nested variants rejection (AC #6)', ()
     expect(rejected).toBeDefined();
     expect(rejected?.blocking).toBe(true);
     if (rejected?.kind === 'NestedVariantRejected') {
-      expect(rejected.variantId).toBe('small-utility');
-      expect(rejected.soulId).toBe('spry-engage');
+      expect(rejected.variantId).toBe('small-org');
+      expect(rejected.soulId).toBe('acme-app');
       expect(rejected.message).toContain('nested');
       expect(rejected.message).toContain('sub-variants');
     }
@@ -340,7 +340,7 @@ describe('validateVariantDeclarations — nested variants rejection (AC #6)', ()
 
   it('does NOT emit NestedVariantRejected for variants with no nested variants field', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: [makeVariant('clean-variant', { designImperatives: ['some-imperative'] })],
       now: FIXED_TS,
     });
@@ -349,7 +349,7 @@ describe('validateVariantDeclarations — nested variants rejection (AC #6)', ()
 
   it('emits NestedVariantRejected for each variant that has nested variants', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: [
         makeVariant('v1', { variants: [{ id: 'sub-1' }] }),
         makeVariant('v2', {}), // clean
@@ -368,7 +368,7 @@ describe('validateVariantDeclarations — per-org override + combined (AC #8)', 
   it('applies defaults when limits not provided', () => {
     // 5 clean variants — should trigger soft warn with default threshold
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: makeVariants(5),
       now: FIXED_TS,
     });
@@ -385,7 +385,7 @@ describe('validateVariantDeclarations — per-org override + combined (AC #8)', 
     variantList.push(makeVariant('bad', { substrateInvariants: ['kafka-v2'] }));
 
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: variantList,
       now: FIXED_TS,
     });
@@ -400,7 +400,7 @@ describe('validateVariantDeclarations — per-org override + combined (AC #8)', 
 
   it('returns empty events for empty variants array', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: [],
       now: FIXED_TS,
     });
@@ -411,7 +411,7 @@ describe('validateVariantDeclarations — per-org override + combined (AC #8)', 
   it('stamps events with the provided timestamp', () => {
     const ts = '2026-01-15T12:00:00.000Z';
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: makeVariants(DEFAULT_SOFT_WARN_AT),
       now: ts,
     });
@@ -421,7 +421,7 @@ describe('validateVariantDeclarations — per-org override + combined (AC #8)', 
   it('defaults timestamp to a non-empty ISO string when now not provided', () => {
     const before = Date.now();
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: makeVariants(5),
     });
     const after = Date.now();
@@ -435,7 +435,7 @@ describe('validateVariantDeclarations — per-org override + combined (AC #8)', 
 
   it('handles variant with undefined id gracefully', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: [{ id: undefined as unknown as string, complianceRegimes: ['GDPR'] }],
       now: FIXED_TS,
     });
@@ -456,7 +456,7 @@ describe('hasBlockingViolations', () => {
 
   it('returns false when all events are non-blocking', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: makeVariants(DEFAULT_SOFT_WARN_AT),
       now: FIXED_TS,
     });
@@ -466,7 +466,7 @@ describe('hasBlockingViolations', () => {
 
   it('returns true when any event is blocking', () => {
     const events = validateVariantDeclarations({
-      soulId: 'spry-engage',
+      soulId: 'acme-app',
       variants: [makeVariant('v1', { complianceRegimes: ['GDPR'] })],
       now: FIXED_TS,
     });

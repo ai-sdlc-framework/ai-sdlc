@@ -146,7 +146,7 @@ export type MetricFreshness = 'fresh' | 'stale' | 'missing';
  * - When `freshness === 'missing'`: no snapshot; Cκ scores as unknown input
  */
 export interface MetricSnapshotResult {
-  /** Journey path URI (e.g. 'spry-engage/onboarding'). */
+  /** Journey path URI (e.g. 'acme-app/onboarding'). */
   readonly journey: string;
   /** Metric ID (e.g. 'completion-rate'). */
   readonly metricId: string;
@@ -208,7 +208,7 @@ export interface GetLatestMetricSnapshotOptions {
  * the Cκ scorer treats a stale metric as an unknown input (same behavior as
  * `freshness: 'missing'`), NOT as a hard fail. The pipeline continues.
  *
- * @param journey   Path-style journey URI (e.g. 'spry-engage/onboarding')
+ * @param journey   Path-style journey URI (e.g. 'acme-app/onboarding')
  * @param metricId  Metric identifier (e.g. 'completion-rate')
  * @param options   Snapshot collection + optional per-Soul config
  */

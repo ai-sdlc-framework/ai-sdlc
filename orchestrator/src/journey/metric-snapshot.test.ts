@@ -62,7 +62,7 @@ function makeSnapshot(
 
 describe('getLatestMetricSnapshot — round-trip', () => {
   it('returns missing when no snapshots exist', () => {
-    const result = getLatestMetricSnapshot('spry-engage/onboarding', 'completion-rate', {
+    const result = getLatestMetricSnapshot('acme-app/onboarding', 'completion-rate', {
       snapshots: [],
       now: NOW,
     });
@@ -76,7 +76,7 @@ describe('getLatestMetricSnapshot — round-trip', () => {
     const snapshots = [
       makeSnapshot('other-soul/other-journey', 'completion-rate', 0.7, daysAgo(5)),
     ];
-    const result = getLatestMetricSnapshot('spry-engage/onboarding', 'completion-rate', {
+    const result = getLatestMetricSnapshot('acme-app/onboarding', 'completion-rate', {
       snapshots,
       now: NOW,
     });
@@ -85,9 +85,9 @@ describe('getLatestMetricSnapshot — round-trip', () => {
 
   it('returns missing when no snapshot matches the metricId', () => {
     const snapshots = [
-      makeSnapshot('spry-engage/onboarding', 'median-time-to-done', 1200, daysAgo(5)),
+      makeSnapshot('acme-app/onboarding', 'median-time-to-done', 1200, daysAgo(5)),
     ];
-    const result = getLatestMetricSnapshot('spry-engage/onboarding', 'completion-rate', {
+    const result = getLatestMetricSnapshot('acme-app/onboarding', 'completion-rate', {
       snapshots,
       now: NOW,
     });
@@ -95,10 +95,8 @@ describe('getLatestMetricSnapshot — round-trip', () => {
   });
 
   it('returns fresh when snapshot is within threshold', () => {
-    const snapshots = [
-      makeSnapshot('spry-engage/onboarding', 'completion-rate', 0.65, daysAgo(10)),
-    ];
-    const result = getLatestMetricSnapshot('spry-engage/onboarding', 'completion-rate', {
+    const snapshots = [makeSnapshot('acme-app/onboarding', 'completion-rate', 0.65, daysAgo(10))];
+    const result = getLatestMetricSnapshot('acme-app/onboarding', 'completion-rate', {
       snapshots,
       now: NOW,
     });
@@ -110,11 +108,11 @@ describe('getLatestMetricSnapshot — round-trip', () => {
 
   it('selects the latest snapshot when multiple exist for same journey+metricId', () => {
     const snapshots = [
-      makeSnapshot('spry-engage/onboarding', 'completion-rate', 0.55, daysAgo(20)),
-      makeSnapshot('spry-engage/onboarding', 'completion-rate', 0.65, daysAgo(5)), // latest
-      makeSnapshot('spry-engage/onboarding', 'completion-rate', 0.6, daysAgo(12)),
+      makeSnapshot('acme-app/onboarding', 'completion-rate', 0.55, daysAgo(20)),
+      makeSnapshot('acme-app/onboarding', 'completion-rate', 0.65, daysAgo(5)), // latest
+      makeSnapshot('acme-app/onboarding', 'completion-rate', 0.6, daysAgo(12)),
     ];
-    const result = getLatestMetricSnapshot('spry-engage/onboarding', 'completion-rate', {
+    const result = getLatestMetricSnapshot('acme-app/onboarding', 'completion-rate', {
       snapshots,
       now: NOW,
     });
@@ -124,10 +122,10 @@ describe('getLatestMetricSnapshot — round-trip', () => {
 
   it('handles variant-scoped journey URI', () => {
     const snapshots = [
-      makeSnapshot('spry-engage/annual-test/submit-results', 'completion-rate', 0.9, daysAgo(5)),
+      makeSnapshot('acme-app/annual-review/submit-results', 'completion-rate', 0.9, daysAgo(5)),
     ];
     const result = getLatestMetricSnapshot(
-      'spry-engage/annual-test/submit-results',
+      'acme-app/annual-review/submit-results',
       'completion-rate',
       { snapshots, now: NOW },
     );
@@ -141,10 +139,8 @@ describe('getLatestMetricSnapshot — round-trip', () => {
 describe('getLatestMetricSnapshot — stale-metric detection', () => {
   it('returns fresh at exactly threshold boundary (threshold = 30)', () => {
     // Age exactly equal to threshold is NOT stale (> threshold, not >=)
-    const snapshots = [
-      makeSnapshot('spry-engage/onboarding', 'completion-rate', 0.65, daysAgo(30)),
-    ];
-    const result = getLatestMetricSnapshot('spry-engage/onboarding', 'completion-rate', {
+    const snapshots = [makeSnapshot('acme-app/onboarding', 'completion-rate', 0.65, daysAgo(30))];
+    const result = getLatestMetricSnapshot('acme-app/onboarding', 'completion-rate', {
       snapshots,
       now: NOW,
     });
@@ -156,9 +152,9 @@ describe('getLatestMetricSnapshot — stale-metric detection', () => {
     // 30 days + 1 minute past threshold = stale
     const justPastThreshold = new Date(nowMs - (30 * 24 * 60 + 1) * 60 * 1000).toISOString();
     const snapshots = [
-      makeSnapshot('spry-engage/onboarding', 'completion-rate', 0.65, justPastThreshold),
+      makeSnapshot('acme-app/onboarding', 'completion-rate', 0.65, justPastThreshold),
     ];
-    const result = getLatestMetricSnapshot('spry-engage/onboarding', 'completion-rate', {
+    const result = getLatestMetricSnapshot('acme-app/onboarding', 'completion-rate', {
       snapshots,
       now: NOW,
     });
@@ -168,10 +164,8 @@ describe('getLatestMetricSnapshot — stale-metric detection', () => {
   });
 
   it('emits Decision: journey-metric-stale for stale snapshot', () => {
-    const snapshots = [
-      makeSnapshot('spry-engage/onboarding', 'completion-rate', 0.65, daysAgo(45)),
-    ];
-    const result = getLatestMetricSnapshot('spry-engage/onboarding', 'completion-rate', {
+    const snapshots = [makeSnapshot('acme-app/onboarding', 'completion-rate', 0.65, daysAgo(45))];
+    const result = getLatestMetricSnapshot('acme-app/onboarding', 'completion-rate', {
       snapshots,
       now: NOW,
     });
@@ -183,10 +177,8 @@ describe('getLatestMetricSnapshot — stale-metric detection', () => {
   });
 
   it('respects per-Soul staleness threshold override (thresholdDays=7)', () => {
-    const snapshots = [
-      makeSnapshot('spry-engage/onboarding', 'completion-rate', 0.65, daysAgo(10)),
-    ];
-    const result = getLatestMetricSnapshot('spry-engage/onboarding', 'completion-rate', {
+    const snapshots = [makeSnapshot('acme-app/onboarding', 'completion-rate', 0.65, daysAgo(10))];
+    const result = getLatestMetricSnapshot('acme-app/onboarding', 'completion-rate', {
       snapshots,
       stalenessConfig: { thresholdDays: 7 },
       now: NOW,
@@ -197,10 +189,8 @@ describe('getLatestMetricSnapshot — stale-metric detection', () => {
   });
 
   it('respects per-Soul staleness threshold override (thresholdDays=90)', () => {
-    const snapshots = [
-      makeSnapshot('spry-engage/onboarding', 'completion-rate', 0.65, daysAgo(60)),
-    ];
-    const result = getLatestMetricSnapshot('spry-engage/onboarding', 'completion-rate', {
+    const snapshots = [makeSnapshot('acme-app/onboarding', 'completion-rate', 0.65, daysAgo(60))];
+    const result = getLatestMetricSnapshot('acme-app/onboarding', 'completion-rate', {
       snapshots,
       stalenessConfig: { thresholdDays: 90 },
       now: NOW,
@@ -211,10 +201,8 @@ describe('getLatestMetricSnapshot — stale-metric detection', () => {
   });
 
   it('warn-and-unknown: stale result still includes snapshot value (not fail-closed)', () => {
-    const snapshots = [
-      makeSnapshot('spry-engage/onboarding', 'completion-rate', 0.42, daysAgo(60)),
-    ];
-    const result = getLatestMetricSnapshot('spry-engage/onboarding', 'completion-rate', {
+    const snapshots = [makeSnapshot('acme-app/onboarding', 'completion-rate', 0.42, daysAgo(60))];
+    const result = getLatestMetricSnapshot('acme-app/onboarding', 'completion-rate', {
       snapshots,
       now: NOW,
     });
@@ -229,7 +217,7 @@ describe('getLatestMetricSnapshot — stale-metric detection', () => {
 // ── 3. Graduated Eρ₅ degradation ─────────────────────────────────────
 
 describe('computeAuditOverdueErho5 — graduated policy', () => {
-  const soul = 'spry-engage';
+  const soul = 'acme-app';
   const journey = 'onboarding';
 
   it('returns warn at daysOverdue=0 (cadence+0d fires graduated warn, no grace)', () => {
@@ -549,8 +537,8 @@ describe('getLatestMetricSnapshot — future-dated recordedAt guard', () => {
     // A snapshot with recordedAt in the future would yield negative ageInDays,
     // making it appear perpetually fresh. The guard clamps this to stale.
     const futureDate = new Date(new Date(NOW).getTime() + 10 * 24 * 60 * 60 * 1000).toISOString();
-    const snapshots = [makeSnapshot('spry-engage/onboarding', 'completion-rate', 0.99, futureDate)];
-    const result = getLatestMetricSnapshot('spry-engage/onboarding', 'completion-rate', {
+    const snapshots = [makeSnapshot('acme-app/onboarding', 'completion-rate', 0.99, futureDate)];
+    const result = getLatestMetricSnapshot('acme-app/onboarding', 'completion-rate', {
       snapshots,
       now: NOW,
     });
@@ -559,8 +547,8 @@ describe('getLatestMetricSnapshot — future-dated recordedAt guard', () => {
   });
 
   it('treats present-day recordedAt (equal to now) as fresh (age=0, within threshold)', () => {
-    const snapshots = [makeSnapshot('spry-engage/onboarding', 'completion-rate', 0.5, NOW)];
-    const result = getLatestMetricSnapshot('spry-engage/onboarding', 'completion-rate', {
+    const snapshots = [makeSnapshot('acme-app/onboarding', 'completion-rate', 0.5, NOW)];
+    const result = getLatestMetricSnapshot('acme-app/onboarding', 'completion-rate', {
       snapshots,
       now: NOW,
     });
