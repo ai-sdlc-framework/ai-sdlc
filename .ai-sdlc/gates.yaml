@@ -35,6 +35,12 @@ gates:
     owner: engineering
     property: build and test of affected packages on Node 22
     baseline: true
+  - id: gate-job:pipeline-cli-macos
+    surface: pr-ready-job
+    origin: AISDLC-1021
+    owner: engineering
+    property: pipeline-cli tests on macOS (case-insensitive filesystem like the executors), only when pipeline-cli/** changes
+    decision: DEC-0056
   - id: gate-job:integration
     surface: pr-ready-job
     origin: AISDLC-727, AISDLC-400

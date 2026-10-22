@@ -1,9 +1,11 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { appendReviewLedgerRecord } from '../attestation/reviews-ledger.js';
 import { fail, ok } from '../__test-helpers/fake-runner.js';
+import type { Runner } from '../runtime/exec.js';
 import {
   DEV_RETURN,
   makeHarness,
@@ -410,6 +412,112 @@ describe('preSignRebase (AISDLC-102)', () => {
     const r = await preSignRebase(h.ctx, state);
     expect(r).toEqual({ kind: 'changed', before: 'A', after: 'B' });
     expect(cmds().filter((c) => c === 'git rebase origin/main')).toHaveLength(1);
+  });
+});
+
+describe('preSignRebase against real git and the real ledger writer (AISDLC-1021)', () => {
+  const TASK_ID = 'AISDLC-1021';
+  let base: string;
+  let clone: string;
+
+  const gitEnv = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 't',
+    GIT_AUTHOR_EMAIL: 't@example.com',
+    GIT_COMMITTER_NAME: 't',
+    GIT_COMMITTER_EMAIL: 't@example.com',
+  };
+  const git = (cwd: string, ...args: string[]): string =>
+    execFileSync('git', args, {
+      cwd,
+      env: gitEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+  /** Real git; the content-hash oracle (a node script) is answered with a constant. */
+  const realRunner: Runner = async (command, args, opts) => {
+    if (command !== 'git') return { stdout: 'H\n', stderr: '', code: 0 };
+    try {
+      const stdout = execFileSync('git', args, {
+        cwd: opts?.cwd,
+        env: gitEnv,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      return { stdout, stderr: '', code: 0 };
+    } catch (err) {
+      const e = err as { status?: number; stdout?: string; stderr?: string };
+      return { stdout: e.stdout ?? '', stderr: e.stderr ?? '', code: e.status ?? 1 };
+    }
+  };
+
+  /** origin + a task clone on a feature branch, with origin/main one commit ahead of the branch point. */
+  const setup = (ignoreRule?: string): void => {
+    base = mkdtempSync(join(tmpdir(), 'ship-real-git-'));
+    const origin = join(base, 'origin.git');
+    clone = join(base, 'clone');
+    const other = join(base, 'other');
+    git(base, 'init', '--bare', '-b', 'main', origin);
+    git(base, 'clone', origin, clone);
+    writeFileSync(join(clone, 'README.md'), 'one\n');
+    if (ignoreRule) writeFileSync(join(clone, '.gitignore'), `${ignoreRule}\n`);
+    git(clone, 'add', '-A');
+    git(clone, 'commit', '-m', 'init');
+    git(clone, 'push', 'origin', 'HEAD:refs/heads/main');
+    git(clone, 'checkout', '-b', 'feature');
+    writeFileSync(join(clone, 'feature.txt'), 'f\n');
+    git(clone, 'add', '-A');
+    git(clone, 'commit', '-m', 'feature work');
+    git(base, 'clone', origin, other);
+    writeFileSync(join(other, 'main-moved.txt'), 'm\n');
+    git(other, 'add', '-A');
+    git(other, 'commit', '-m', 'main moves');
+    git(other, 'push', 'origin', 'HEAD:refs/heads/main');
+  };
+
+  const writeRealLedger = (): void =>
+    appendReviewLedgerRecord(
+      {
+        taskId: TASK_ID,
+        prNumber: null,
+        commitSha: 'a'.repeat(40),
+        iteration: 1,
+        role: 'code',
+        harness: 'claude-code',
+        timestamp: '2026-10-22T00:00:00.000Z',
+        verdict: 'approved',
+        findings: [],
+      },
+      clone,
+    );
+
+  const run = (): ReturnType<typeof preSignRebase> =>
+    preSignRebase(
+      { ...h.ctx, runner: realRunner },
+      { ...state, taskId: TASK_ID, taskIdLower: TASK_ID.toLowerCase(), worktreePath: clone },
+      () => null,
+    );
+
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it('stages and tracks the ledger the real writer wrote for a mixed-case task id', async () => {
+    setup();
+    writeRealLedger();
+    const r = await run();
+    expect(r).not.toMatchObject({ cause: 'ledger-not-staged' });
+    const tracked = git(clone, 'ls-files', '--', '.ai-sdlc/reviews/');
+    expect(tracked.trim()).toBe('.ai-sdlc/reviews/aisdlc-1021.jsonl');
+  });
+
+  it('fails ledger-not-staged naming the ignore rule when the ledger is ignored', async () => {
+    setup('.ai-sdlc/reviews/');
+    writeRealLedger();
+    const r = await run();
+    expect(r).toMatchObject({ kind: 'failed', cause: 'ledger-not-staged' });
+    expect((r as { reason: string }).reason).toContain('.gitignore:1:.ai-sdlc/reviews/');
   });
 });
 
