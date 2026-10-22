@@ -1,7 +1,7 @@
 ---
 id: AISDLC-917
 title: 'fix: decisions-sync commits under the repository git identity so the trust gate accepts the sync branch'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [bug, decisions, governance, pipeline-cli, velocity]
@@ -21,11 +21,11 @@ Every decisions-sync PR (branch `ai-sdlc/decisions-sync`, the catalog event log)
 
 ## Acceptance Criteria
 
-- [ ] `remote-persist.ts` no longer passes `user.name` or `user.email` overrides to git; the decisions-sync commit author is the repository's configured identity.
-- [ ] `remote-persist.test.ts` covers the author of a produced commit and fails if a synthetic identity is reintroduced.
-- [ ] A unit test on the gate's author resolution shows the new author shape passes the linked-account check for the `decisions-sync` source kind (no live GitHub call).
-- [ ] The existing open PR #1594 is not touched by this task; the next decisions-sync run supersedes its head and lands on its own.
-- [ ] Task file moved to `backlog/completed/` in the PR.
+- [x] `remote-persist.ts` no longer passes `user.name` or `user.email` overrides to git; the decisions-sync commit author is the repository's configured identity.
+- [x] `remote-persist.test.ts` covers the author of a produced commit and fails if a synthetic identity is reintroduced.
+- [x] A unit test on the gate's author resolution shows the new author shape passes the linked-account check for the `decisions-sync` source kind (no live GitHub call).
+- [x] The existing open PR #1594 is not touched by this task; the next decisions-sync run supersedes its head and lands on its own.
+- [x] Task file moved to `backlog/completed/` in the PR.
 
 ## Notes
 
