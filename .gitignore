@@ -148,3 +148,6 @@ AGENTS.md
 
 # AISDLC-877: cached PR list for cli-kpi
 .ai-sdlc/kpi/
+
+# AISDLC-1024: pinned pipeline-cli scratch worktrees (hotfix lane)
+.ai-sdlc/pipeline-builds/

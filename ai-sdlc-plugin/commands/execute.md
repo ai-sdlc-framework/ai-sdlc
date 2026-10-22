@@ -59,6 +59,11 @@ Resolve the pipeline CLI once (every later call uses the absolute `reply` comman
 
 ```bash
 PLUGIN_SCRIPTS_DIR="${CLAUDE_PLUGIN_DIR:-${CLAUDE_PLUGIN_ROOT:-$(pwd)/ai-sdlc-plugin}}/scripts"
+# AISDLC-1024: a task labelled pipeline-hotfix runs on the last canary-green build, not HEAD.
+if [ -z "${AI_SDLC_PIPELINE_REF:-}" ] && [ -f "$PLUGIN_SCRIPTS_DIR/hotfix-pipeline-ref.mjs" ]; then
+  AI_SDLC_PIPELINE_REF=$(node "$PLUGIN_SCRIPTS_DIR/hotfix-pipeline-ref.mjs" "$ARGUMENTS" 2>/dev/null || true)
+  [ -n "$AI_SDLC_PIPELINE_REF" ] && export AI_SDLC_PIPELINE_REF || unset AI_SDLC_PIPELINE_REF
+fi
 if [ -z "${PIPELINE_CLI_BIN:-}" ]; then
   if [ -f "$PLUGIN_SCRIPTS_DIR/resolve-pipeline-cli.sh" ]; then
     PIPELINE_CLI_BIN=$(bash "$PLUGIN_SCRIPTS_DIR/resolve-pipeline-cli.sh") || { echo "ERROR: @ai-sdlc/pipeline-cli not found; export PIPELINE_CLI_BIN=/path/to/pipeline-cli/bin" >&2; exit 1; }

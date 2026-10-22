@@ -109,6 +109,15 @@ The decision is computed by `pipeline-cli dor-pr-has-violations`, which consumes
 
 The Step 0-13 pipeline lives in `pipeline-cli/` (`@ai-sdlc/pipeline-cli`). Tier 1 = slash command body (subscription). Tier 2 = `executePipeline()` library + `SubagentSpawner` injection (API-key, MockSpawner, etc.). Refs: `pipeline-cli/{README,docs/spawner,docs/steps}.md`, RFC-0012.
 
+### Pipeline hotfix lane (AISDLC-1024)
+
+Executors run pipeline-cli from this repo's build at `main` HEAD; that stays the default. The one exception is a task labelled `pipeline-hotfix` (filed by the canary handler, AISDLC-1023), so a fix for a broken pipeline never ships through its own bug.
+
+- **Known-good file:** the canary green handler writes `.ai-sdlc/dispatch/pipeline-known-good.json` (`{"sha", "recordedAt"}`), the last canary-green sha.
+- **Claim side:** `/ai-sdlc execute` runs `ai-sdlc-plugin/scripts/hotfix-pipeline-ref.mjs <task>`; for a `pipeline-hotfix` task whose known-good sha differs from HEAD it exports `AI_SDLC_PIPELINE_REF=<sha>` for the whole run. Step 11 records the sha under "Pipeline build" in the PR body.
+- **Resolver:** with `AI_SDLC_PIPELINE_REF` set, `resolve-pipeline-cli.sh` builds (or reuses) pipeline-cli at that commit in a detached scratch worktree `.ai-sdlc/pipeline-builds/<sha>/` (gitignored, outside `.worktrees/`) and prints the build it chose on stderr. Unset, it uses HEAD.
+- **Verifier:** the envelope's `pipelineVersion` is forensic only, so an envelope signed by the older build verifies.
+
 ### Done semantics
 
 All paths: task file is moved to `backlog/completed/` in the originating PR's own diff via the `scripts/check-task-moved.sh` pre-push hook (AISDLC-220). The hook detects `(AISDLC-N)` in any commit subject in the push range, invokes the AISDLC-203 atomic helper, and commits the move as a chore commit — so the lifecycle close lands atomically with the work commit in the same PR.

@@ -207,6 +207,10 @@ describe('auto-brief (AISDLC-930)', () => {
     expect(green.held).toBeUndefined();
     expect(green.canary?.lifted).toBe(`pipeline canary red at ${sha}`);
     expect(green.reports.map((x) => x.text).join('\n')).toContain('pipeline canary green');
+    // AISDLC-1024: the green handler records the known-good sha for the hotfix lane.
+    expect(
+      JSON.parse(readFileSync(path.join(board, 'pipeline-known-good.json'), 'utf-8')).sha,
+    ).toBe(sha);
   });
 
   it('a throwing parent upkeep does not stop the tick (AISDLC-981)', async () => {

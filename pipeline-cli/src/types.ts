@@ -653,6 +653,8 @@ export interface ResumeLeasePolicy {
 }
 
 export interface PushAndPrOptions {
+  /** Pinned pipeline build sha of the hotfix lane (AISDLC-1024); defaults to `AI_SDLC_PIPELINE_REF`. */
+  pipelineRef?: string;
   taskId: string;
   workDir: string;
   worktreePath: string;

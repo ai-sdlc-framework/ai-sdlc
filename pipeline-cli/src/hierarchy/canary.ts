@@ -32,6 +32,8 @@ export const CANARY_GREEN_KIND = 'pipeline-canary-green';
 export const CANARY_HOLD_PREFIX = 'pipeline canary red at ';
 export const CANARY_STATE_FILENAME = 'canary-state.json';
 export const HOTFIX_LABEL = 'pipeline-hotfix';
+/** The last canary-green sha (AISDLC-1024); the hotfix lane pins `AI_SDLC_PIPELINE_REF` to it. */
+export const KNOWN_GOOD_FILENAME = 'pipeline-known-good.json';
 
 interface CanaryEvent {
   kind: typeof CANARY_RED_KIND | typeof CANARY_GREEN_KIND;
@@ -90,6 +92,14 @@ function writeState(boardDir: string, state: CanaryState): void {
   renameSync(tmp, target);
 }
 
+function writeKnownGood(boardDir: string, sha: string, recordedAt: string): void {
+  mkdirSync(boardDir, { recursive: true });
+  const target = path.join(boardDir, KNOWN_GOOD_FILENAME);
+  const tmp = `${target}.tmp-${process.pid}`;
+  writeFileSync(tmp, JSON.stringify({ sha, recordedAt }) + '\n', 'utf-8');
+  renameSync(tmp, target);
+}
+
 function readCanaryEvents(boardDir: string): CanaryEvent[] {
   const dir = path.join(boardDir, 'events');
   if (!existsSync(dir)) return [];
@@ -144,6 +154,7 @@ export function processCanaryEvents(deps: CanaryDeps): CanaryReport {
         );
       }
     } else {
+      writeKnownGood(deps.boardDir, ev.headSha, at);
       const hold = readHold(deps.boardDir);
       if (hold?.reason.startsWith(CANARY_HOLD_PREFIX)) {
         clearHold(deps.boardDir, 'pipeline-canary', at);
