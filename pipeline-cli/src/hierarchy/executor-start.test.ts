@@ -3,7 +3,7 @@
  * roster and board, an injected git runner. No session, tmux or network.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -191,9 +191,37 @@ describe('executorStart', () => {
         { identity: identityFor('executor', 'proj-executor-alpha'), repoGit: gitAt(tmp) },
       );
 
-    it('proceeds on a fresh token and deletes it, so a second start refuses', async () => {
+    it('verifies a fresh token and keeps it, so a re-issued start is accepted', async () => {
       issue();
       await expect(start()).resolves.toMatchObject({ name: 'proj-executor-alpha' });
+      expect(JSON.parse(readFileSync(tokenFile(), 'utf-8')).verifiedAt).toBeTruthy();
+      await expect(start()).resolves.toMatchObject({ taskId: null });
+    });
+
+    it('accepts a verified token past the age ceiling', async () => {
+      issue({
+        issuedAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+        verifiedAt: new Date().toISOString(),
+      } as never);
+      await expect(start()).resolves.toMatchObject({ name: 'proj-executor-alpha' });
+    });
+
+    it('refuses a verified token after clear rewrote it for another pid', async () => {
+      issue();
+      await start();
+      issue({ issuerPid: 9999 });
+      await expect(start()).rejects.toThrow(/^unchecked-start: /);
+    });
+
+    it('refuses a start after a claim removed the token', async () => {
+      issue();
+      writeManifest(board, mkManifest('AISDLC-9'));
+      await expect(
+        executorStart(
+          { boardDir: board, cwd: tmp, waitSec: 5 },
+          { identity: identityFor('executor', 'proj-executor-alpha'), repoGit: gitAt(tmp) },
+        ),
+      ).resolves.toMatchObject({ taskId: 'AISDLC-9' });
       expect(existsSync(tokenFile())).toBe(false);
       await expect(start()).rejects.toThrow(/^unchecked-start: /);
     });

@@ -37,7 +37,7 @@ import {
   rosterProject,
 } from './peer-guard.js';
 import { readRosterChecked } from './roster.js';
-import { consumeStartToken } from './start-token.js';
+import { clearStartToken, verifyStartToken } from './start-token.js';
 import type { GitRunner } from './trusted-root.js';
 
 /** Default seconds an idle executor blocks on the board before it hibernates. */
@@ -118,7 +118,7 @@ export async function executorStart(
   const flagged = opts.senderPid !== undefined || opts.senderRef !== undefined;
   // A start typed by `cli-hierarchy clear` carries a token instead of a sender flag (AISDLC-1028).
   const tokenOk =
-    !flagged && consumeStartToken(opts.boardDir, self.name, dispatchPid, now().getTime());
+    !flagged && verifyStartToken(opts.boardDir, self.name, dispatchPid, now().getTime());
   const sender: SenderCheck = tokenOk
     ? { ok: true, name: dispatch }
     : checkDispatchSender(roster.sessions, {
@@ -129,7 +129,7 @@ export async function executorStart(
   if (sender.warning !== undefined) {
     // No claim: the start cannot say who issued it (AISDLC-1025).
     throw new Error(
-      `unchecked-start: no --sender-pid or --sender-ref was given and there is no fresh start token from cli-hierarchy clear, so the sender is unverified; nothing claimed. Report 'unchecked-start' to ${dispatch || 'dispatch'} and pass the pid or ref the harness reports.`,
+      `unchecked-start: no --sender-pid or --sender-ref was given and there is no valid start token, so the sender is unverified; nothing claimed. A start is verified either by a clear (cli-hierarchy clear writes the token) or by the sender flag the harness reports. Report 'unchecked-start' to ${dispatch || 'dispatch'} and pass the pid or ref the harness reports.`,
     );
   }
 
@@ -154,6 +154,7 @@ export async function executorStart(
     );
   }
   if (result.claimed && result.manifest) {
+    clearStartToken(opts.boardDir, self.name);
     const stamp = now().toISOString();
     try {
       (deps.heartbeat ?? writeHeartbeat)(opts.boardDir, {
