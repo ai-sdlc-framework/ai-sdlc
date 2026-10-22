@@ -180,7 +180,7 @@ export function validateReport(data: unknown): ReportValidationResult {
     return { valid: true, report: parsed.data };
   }
   // Flatten Zod errors into a concise single-line string for signer logs.
-  const messages = parsed.error.errors
+  const messages = parsed.error.issues
     .map((e) => `${e.path.join('.') || '<root>'}: ${e.message}`)
     .join('; ');
   return { valid: false, error: messages };

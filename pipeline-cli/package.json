@@ -153,7 +153,7 @@
     "tree-sitter-wasms": "^0.1.13",
     "web-tree-sitter": "^0.25.10",
     "yargs": "^18.1.0",
-    "zod": "^3.23.0"
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

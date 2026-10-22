@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1038
 title: 'Dependency: migrate pipeline-cli to zod 4 (ZodError.errors to .issues) so the Dependabot zod bump can land'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-22'
 labels:
