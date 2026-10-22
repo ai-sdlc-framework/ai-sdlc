@@ -847,3 +847,66 @@ describe('AISDLC-791: main checkout dist preferred; stale or missing up.js refus
     rmSync(base, { recursive: true, force: true });
   });
 });
+
+// ── AISDLC-1024: AI_SDLC_PIPELINE_REF pins the build (pipeline hotfix lane) ──
+
+describe('AISDLC-1024: AI_SDLC_PIPELINE_REF builds or reuses the pinned commit', () => {
+  function fakePnpmOk(base) {
+    const bin = join(base, 'fakebin');
+    mkdirSync(bin, { recursive: true });
+    const body =
+      'mkdir -p node_modules pipeline-cli/dist && echo built > pipeline-cli/dist/a.js && touch -t 203001010000 pipeline-cli/dist/a.js\n';
+    writeFileSync(join(bin, 'pnpm'), `#!/usr/bin/env bash\n${body}`);
+    chmodSync(join(bin, 'pnpm'), 0o755);
+    return `${bin}:${process.env.PATH}`;
+  }
+
+  function run(repo, base, ref) {
+    return spawnSync('bash', [SCRIPT], {
+      cwd: repo,
+      encoding: 'utf-8',
+      env: { ...process.env, PATH: fakePnpmOk(base), AI_SDLC_PIPELINE_REF: ref },
+    });
+  }
+
+  it('builds at the sha outside .worktrees/, prints the choice, and reuses it next time', () => {
+    const base = mkdtempSync(join(tmpdir(), 'aisdlc-1024-'));
+    const repo = join(base, 'repo');
+    makeDogfoodRepo(repo, { dist: true });
+    git(repo, 'add', '-A');
+    git(repo, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'good');
+    const good = git(repo, 'rev-parse', 'HEAD');
+    writeFileSync(join(repo, 'pipeline-cli', 'src', 'b.ts'), 'export const b = 2;\n');
+    git(repo, 'add', '-A');
+    git(repo, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'bad');
+
+    const r = run(repo, base, good.slice(0, 10));
+    assert.equal(r.status, 0, r.stderr);
+    const expected = join(repo, '.ai-sdlc', 'pipeline-builds', good, 'pipeline-cli', 'bin');
+    assert.equal(normPath(r.stdout), normPath(expected));
+    assert.ok(!r.stdout.includes('.worktrees'));
+    assert.match(r.stderr, /PINNED pipeline-cli build/);
+    assert.match(r.stderr, new RegExp(good));
+    // The pinned checkout is the old commit: the later source file is absent.
+    assert.ok(
+      !existsSync(join(repo, '.ai-sdlc', 'pipeline-builds', good, 'pipeline-cli', 'src', 'b.ts')),
+    );
+
+    const again = run(repo, base, good);
+    assert.equal(again.status, 0, again.stderr);
+    assert.equal(normPath(again.stdout), normPath(expected));
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it('exits 1 naming the variable when the ref is not a commit', () => {
+    const base = mkdtempSync(join(tmpdir(), 'aisdlc-1024-bad-'));
+    const repo = join(base, 'repo');
+    makeDogfoodRepo(repo, { dist: true });
+    git(repo, 'add', '-A');
+    git(repo, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'x');
+    const r = run(repo, base, 'deadbeefdeadbeef');
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /AI_SDLC_PIPELINE_REF=deadbeefdeadbeef is not a commit/);
+    rmSync(base, { recursive: true, force: true });
+  });
+});

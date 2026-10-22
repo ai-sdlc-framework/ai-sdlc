@@ -2266,6 +2266,25 @@ describe('runVerifier (AISDLC-100.6 — pipelineVersion forensic logging)', () =
     );
   });
 
+  it('accepts an envelope from a known-good build older than HEAD (pipeline-hotfix lane, AISDLC-1024)', () => {
+    // The hotfix lane signs with the last canary-green build, so the envelope names an
+    // older pipelineVersion than HEAD's. The field is forensic only: the verifier never
+    // compares it, with or without the pipeline-hotfix label on the PR.
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      keys.privateKeyPem,
+      { pipelineVersion: '0.0.1' },
+    );
+    const { result, logs } = withCapturedLogs(() =>
+      runVerifier({ headSha: fixture.headSha, baseSha: fixture.baseSha, repoRoot: fixture.root }),
+    );
+    assert.equal(result.status, 'valid', `expected valid, got: ${result.reason}`);
+    assert.ok(logs.some((l) => l.includes('pipelineVersion: 0.0.1')));
+  });
+
   it('logs <missing> marker when the envelope omits pipelineVersion (legacy envelope)', () => {
     // Sign a legacy-shape envelope (no pipelineVersion). Verifier still
     // accepts AND surfaces the absence so an operator scanning logs can

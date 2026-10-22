@@ -243,6 +243,22 @@ describe('Step 11 — composeTitle', () => {
 });
 
 describe('Step 11 — composeBody', () => {
+  it('records the pinned pipeline sha of the hotfix lane (AISDLC-1024)', () => {
+    const base = {
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: dev,
+      verdict: approved,
+    };
+    expect(composeBody({ ...base, pipelineRef: 'abc1234' })).toContain(
+      'pinned pipeline-cli build abc1234',
+    );
+    expect(composeBody(base)).not.toContain('Pipeline build');
+  });
+
   it('produces a body with summary, files, and code-reviewer block', () => {
     const body = composeBody({
       taskId: 'AISDLC-1',

@@ -193,6 +193,12 @@ export function composeBody(opts: PushAndPrOptions): string {
           .join('\n')}\n\nPasses-alone evidence: ${waiver.passesAlone}\n`
       : '';
 
+  // AISDLC-1024: the hotfix lane runs on a pinned pipeline build; the PR says which.
+  const pipelineRef = opts.pipelineRef ?? process.env.AI_SDLC_PIPELINE_REF;
+  const pipelineBlock = pipelineRef
+    ? `\n## Pipeline build\n\nThis run used the pinned pipeline-cli build ${pipelineRef} (pipeline hotfix lane, AI_SDLC_PIPELINE_REF), not main HEAD.\n`
+    : '';
+
   const footer = isGhIssue ? `\nCloses #${opts.issueNumber}\n` : `\nReferences ${opts.taskId}\n`;
 
   return (
@@ -203,6 +209,7 @@ export function composeBody(opts: PushAndPrOptions): string {
     reviewBlock +
     notesBlock +
     waiverBlock +
+    pipelineBlock +
     footer
   );
 }

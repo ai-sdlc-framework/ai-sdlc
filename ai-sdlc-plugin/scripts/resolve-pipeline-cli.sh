@@ -155,6 +155,38 @@ if [ -n "$REPO_WORKTREE_ROOT" ] && _is_pipeline_cli_workspace "$REPO_WORKTREE_RO
   # AISDLC-1001: a missing or stale repo build is built here (once), never replaced by
   # the plugin cache; a failed build exits 1 with the build error line.
   ENSURE_BUILT="$SELF_SCRIPT_DIR/ensure-pipeline-cli-built.sh"
+  # AISDLC-1024: the pipeline hotfix lane pins the build. AI_SDLC_PIPELINE_REF=<sha>
+  # builds (or reuses) pipeline-cli at that commit in a detached scratch worktree under
+  # <main>/.ai-sdlc/pipeline-builds/<sha>/ (outside .worktrees/) and prints that bin.
+  # Unset keeps the default: this repo's HEAD build.
+  if [ -n "${AI_SDLC_PIPELINE_REF:-}" ]; then
+    ANCHOR="${REPO_MAIN_ROOT:-$REPO_WORKTREE_ROOT}"
+    FULL_REF="$(git -C "$ANCHOR" rev-parse --verify "${AI_SDLC_PIPELINE_REF}^{commit}" 2>/dev/null || true)"
+    if [ -z "$FULL_REF" ]; then
+      echo "resolve-pipeline-cli.sh: ERROR — AI_SDLC_PIPELINE_REF=$AI_SDLC_PIPELINE_REF is not a commit in $ANCHOR; unset it to use HEAD" >&2
+      exit 1
+    fi
+    PIN_DIR="$ANCHOR/.ai-sdlc/pipeline-builds/$FULL_REF"
+    if [ ! -d "$PIN_DIR/pipeline-cli" ]; then
+      mkdir -p "$ANCHOR/.ai-sdlc/pipeline-builds"
+      git -C "$ANCHOR" worktree prune >&2 2>&1 || true
+      if ! git -C "$ANCHOR" worktree add --detach "$PIN_DIR" "$FULL_REF" >&2 2>&1; then
+        echo "resolve-pipeline-cli.sh: ERROR — could not create the scratch worktree $PIN_DIR for $FULL_REF" >&2
+        exit 1
+      fi
+    fi
+    if [ ! -d "$PIN_DIR/node_modules" ]; then
+      echo "resolve-pipeline-cli.sh: installing dependencies for pinned build $FULL_REF" >&2
+      if ! (cd "$PIN_DIR" && pnpm install --frozen-lockfile >&2); then
+        echo "resolve-pipeline-cli.sh: ERROR — pnpm install failed in $PIN_DIR" >&2
+        exit 1
+      fi
+    fi
+    bash "$ENSURE_BUILT" "$PIN_DIR" >&2 || { echo "resolve-pipeline-cli.sh: ERROR — pinned build at $FULL_REF failed" >&2; exit 1; }
+    echo "resolve-pipeline-cli.sh: using PINNED pipeline-cli build $FULL_REF ($PIN_DIR/pipeline-cli) from AI_SDLC_PIPELINE_REF, not HEAD" >&2
+    printf '%s' "$PIN_DIR/pipeline-cli/bin"
+    exit 0
+  fi
   for BUILD_ROOT in "$REPO_MAIN_ROOT" "$REPO_WORKTREE_ROOT"; do
     [ -n "$BUILD_ROOT" ] && _is_pipeline_cli_workspace "$BUILD_ROOT" || continue
     # Build the first checkout that exists; the main checkout wins when it is a workspace.
