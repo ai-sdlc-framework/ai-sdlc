@@ -225,6 +225,17 @@ describe('preSignRebase (AISDLC-102)', () => {
     expect((r as { reason: string }).reason).not.toContain('unknown');
   });
 
+  it('lists the dirty paths in a dirty-worktree refusal (AISDLC-1026)', async () => {
+    hashes('A');
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    h.runner.on(/git rebase origin\/main/, fail('error: You have unstaged changes.', 1));
+    h.runner.on(/git status --porcelain$/, ok(' M backlog/completed/aisdlc-1 - x.md\n'));
+    const r = await preSignRebase(h.ctx, state);
+    expect((r as { reason: string }).reason).toContain(
+      'Dirty paths: M backlog/completed/aisdlc-1 - x.md',
+    );
+  });
+
   it('labels other refusals rebase-failed', async () => {
     hashes('A');
     h.runner.on(/merge-base --is-ancestor/, fail('', 1));

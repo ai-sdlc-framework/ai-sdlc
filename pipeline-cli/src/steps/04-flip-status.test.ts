@@ -46,6 +46,18 @@ describe('Step 4 — patchFrontmatterStatus', () => {
   });
 });
 
+describe('Step 4 — beginTask on a resumed completed task (AISDLC-1026)', () => {
+  it('leaves the backlog/completed task file byte-identical', async () => {
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-9');
+    mkdirSync(join(worktreePath, 'backlog', 'completed'), { recursive: true });
+    const f = join(worktreePath, 'backlog', 'completed', 'aisdlc-9 - done.md');
+    const bytes = `---\nid: AISDLC-9\nstatus: Done\n---\n\nbody\n`;
+    writeFileSync(f, bytes, 'utf8');
+    await beginTask({ taskId: 'AISDLC-9', worktreePath, workDir: tmp, resume: true });
+    expect(readFileSync(f, 'utf8')).toBe(bytes);
+  });
+});
+
 describe('Step 4 — beginTask', () => {
   it('flips status + writes per-worktree sentinel', async () => {
     const taskFile = writeTaskFile(tmp, { id: 'AISDLC-1', title: 'demo', status: 'To Do' });

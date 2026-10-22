@@ -354,7 +354,18 @@ export async function rollbackDispatch(opts: RollbackOptions): Promise<RollbackR
   let statusReverted = false;
   try {
     const taskFile = findTaskFile(opts.taskId, opts.workDir);
-    if (!taskFile) {
+    if (!opts.fromStatus) {
+      // AISDLC-1026 — the pre-dispatch read failed; never synthesize a status.
+      warnings.push(`status revert skipped for ${opts.taskId}: pre-dispatch status unknown`);
+      logger.warn(
+        `[orchestrator-rollback] status revert skipped for ${opts.taskId}: pre-dispatch status unknown`,
+      );
+    } else if (taskFile && /[\\/]backlog[\\/]completed[\\/]/.test(taskFile)) {
+      // AISDLC-1026 — a delivered task's file is final; a resume never touched it.
+      logger.info?.(
+        `[orchestrator-rollback] ${opts.taskId} is under backlog/completed/; left alone`,
+      );
+    } else if (!taskFile) {
       warnings.push(`task file not found for ${opts.taskId}`);
     } else if (!existsSync(taskFile)) {
       warnings.push(`task file disappeared at ${taskFile}`);
