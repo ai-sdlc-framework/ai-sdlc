@@ -2,7 +2,7 @@
 id: AISDLC-1023
 title: >-
   Post-merge pipeline canary on macOS runs Steps 10.5 to 11 on a fixture repo; red holds the drain and files a hotfix task
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22'
 labels:
@@ -43,11 +43,11 @@ dispatchable: true
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `scripts/pipeline-canary.mjs` runs `next-step` Steps 10.5 to 11 (push stubbed) on a generated fixture repo whose ledger is written by the real writer, exits non-zero with the step and cause on failure, and reproduces the 2026-10-21 bug when run against commit fce26ed50
-- [ ] #2 `main-health-monitor.yml` runs the canary as a non-optional job on `macos-latest` on every push to `main` (workflow YAML test added)
-- [ ] #3 A red canary sends a `pipeline-canary-red` event with the sha to the webhook; the dispatch tick sets a hold with that reason and files a hotfix task labelled `pipeline-hotfix` through `cli-file`; a green canary after a red one lifts the hold (unit tests on the tick handler)
-- [ ] #4 `docs/operations/main-health-monitor.md` documents the canary, the hold and the hotfix filing, with the manual lift command
-- [ ] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
+- [x] #1 `scripts/pipeline-canary.mjs` runs `next-step` Steps 10.5 to 11 (push stubbed) on a generated fixture repo whose ledger is written by the real writer, exits non-zero with the step and cause on failure, and reproduces the 2026-10-21 bug when run against commit fce26ed50
+- [x] #2 `main-health-monitor.yml` runs the canary as a non-optional job on `macos-latest` on every push to `main` (workflow YAML test added)
+- [x] #3 A red canary sends a `pipeline-canary-red` event with the sha to the webhook; the dispatch tick sets a hold with that reason and files a hotfix task labelled `pipeline-hotfix` through `cli-file`; a green canary after a red one lifts the hold (unit tests on the tick handler)
+- [x] #4 `docs/operations/main-health-monitor.md` documents the canary, the hold and the hotfix filing, with the manual lift command
+- [x] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
 <!-- AC:END -->
 
 ## Verification
@@ -55,3 +55,7 @@ dispatchable: true
 - `node scripts/pipeline-canary.mjs` on a clean checkout of `main`
 - `pnpm build && pnpm test && pnpm lint && pnpm format:check`
 - `node --test .github/workflows/__tests__/`
+
+## Final Summary
+
+Added scripts/pipeline-canary.mjs (real git, real ledger writer; reproduces fce26ed50 as step-10.5 ledger-not-staged), a macOS pipeline-canary job in main-health-monitor.yml that posts pipeline-canary-red/green to the webhook, a tick handler (pipeline-cli/src/hierarchy/canary.ts) that holds the board and files a pipeline-hotfix task via cli-file, and docs.
