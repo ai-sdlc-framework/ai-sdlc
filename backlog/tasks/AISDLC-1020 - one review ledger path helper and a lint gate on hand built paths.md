@@ -2,7 +2,7 @@
 id: AISDLC-1020
 title: >-
   One review-ledger path helper everywhere, and a lint gate that bans hand-built `.ai-sdlc/reviews/` paths
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-22'
 labels:
