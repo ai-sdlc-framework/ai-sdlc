@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1039
 title: 'Dependency: web-tree-sitter 0.27 no longer loads the grammars in tree-sitter-provider; fix the loader or pin the package out of the production group'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22'
 labels:
