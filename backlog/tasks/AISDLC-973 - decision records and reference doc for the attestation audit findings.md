@@ -1,7 +1,7 @@
 ---
 id: AISDLC-973
 title: 'Decision records for the AISDLC-484, 725 and 947 trust impacts, and the attestation reference documents the unverified post-sign backlog edits'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-17'
 labels:
