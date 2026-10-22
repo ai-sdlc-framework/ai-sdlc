@@ -607,6 +607,31 @@ describe('reports for the planner', () => {
     expect((await runDispatchTick(deps({ reportEveryMs: 1 }))).reports).toHaveLength(1);
   });
 
+  it('carries closedUnmerged in the result and progress line (AISDLC-831)', async () => {
+    verdict('AISDLC-1');
+    const closedAt = new Date(clock + 1000).toISOString();
+    const result = await runDispatchTick(
+      deps({
+        listAllPrs: () => [
+          { number: 3, state: 'CLOSED', closedAt, headRefName: 'ai-sdlc/aisdlc-1-x' },
+        ],
+      }),
+    );
+    expect(result.closedUnmerged).toBe(1);
+    expect(result.reports[0]!.text).toContain('closedUnmerged: 1');
+  });
+
+  it('survives a throwing all-PR list (AISDLC-831)', async () => {
+    const result = await runDispatchTick(
+      deps({
+        listAllPrs: () => {
+          throw new Error('gh down');
+        },
+      }),
+    );
+    expect(result.closedUnmerged).toBeUndefined();
+  });
+
   it('sends nothing when the board is empty', async () => {
     expect((await runDispatchTick(deps())).reports).toEqual([]);
   });
