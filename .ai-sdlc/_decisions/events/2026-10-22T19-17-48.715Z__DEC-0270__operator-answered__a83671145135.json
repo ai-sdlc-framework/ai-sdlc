@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-22T19:17:48.715Z","decisionId":"DEC-0270","chosenOptionId":"accept-as-shipped","rationale":"Operator 2026-10-22: keep the shipped classifier while AISDLC-969 (#1852) lands; restore-now would revert CI for every docs PR for a gap #1852 closes.","by":"planner"}
