@@ -2,7 +2,7 @@
 id: AISDLC-1017
 title: >-
   Step 10.5 stages the review ledger by its real lowercase path (ledger-not-staged on every task since AISDLC-967)
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-21'
 labels:
