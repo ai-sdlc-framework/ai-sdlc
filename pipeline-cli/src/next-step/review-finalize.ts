@@ -199,6 +199,8 @@ export async function finalizeReview(
   const review = state.review;
   if (!review) return { ok: false, reason: 'review-finalize called with no review round in state' };
   const warnings: string[] = [];
+  // v6 is the default: a missing leaf fails the round here, not at signing. v5 needs no leaves.
+  const v5Legacy = process.env.AI_SDLC_V5_LEGACY === '1';
   // Blocking verdicts only. The staged verdict (RFC-0052) is advisory per DEC-0149 and is
   // carried beside the aggregate, never in this list.
   const verdicts: ReviewerVerdict[] = [];
@@ -292,9 +294,9 @@ export async function finalizeReview(
     const transcript = join(wtAiSdlc, 'transcripts', state.taskIdLower, `${actual.agent}.jsonl`);
     const verdictFile = join(wtAiSdlc, 'verdicts', `${actual.agent}-${state.taskIdLower}.json`);
     if (!ctx.exists(transcript) || !ctx.exists(verdictFile)) {
-      warnings.push(
-        `Step 7c: transcript or verdict missing for ${sp.agent} after persistence; leaf not emitted (the v6 sign step will block)`,
-      );
+      const msg = `Step 7c: transcript or verdict missing for ${sp.agent} after persistence; leaf not emitted`;
+      if (!v5Legacy) return { ok: false, reason: msg };
+      warnings.push(`${msg} (AI_SDLC_V5_LEGACY=1: v5 needs no leaves)`);
       continue;
     }
     const emit = await ctx.runner(
@@ -326,9 +328,9 @@ export async function finalizeReview(
       { cwd: ctx.workDir, allowFailure: true },
     );
     if (emit.code !== 0) {
-      warnings.push(
-        `Step 7c: emit-leaf for ${sp.agent} exited non-zero (${emit.stderr.trim()}); the v6-default sign step will block (AI_SDLC_V5_LEGACY=1 falls back to v5)`,
-      );
+      const msg = `Step 7c: emit-leaf for ${sp.agent} exited non-zero (${emit.stderr.trim()})`;
+      if (!v5Legacy) return { ok: false, reason: msg };
+      warnings.push(`${msg} (AI_SDLC_V5_LEGACY=1: v5 needs no leaves)`);
     }
   }
 

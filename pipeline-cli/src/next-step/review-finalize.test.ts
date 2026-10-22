@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fail, ok } from '../__test-helpers/fake-runner.js';
 import { makeHarness, makeState, type Harness } from '../__test-helpers/next-step-fixtures.js';
 import {
@@ -66,7 +66,13 @@ const approvals = (): ReviewerReport[] =>
 /** Pretend the persist helper wrote transcript + verdict for every reviewer. */
 function markPersisted(): void {
   const dir = join(state.worktreePath, '.ai-sdlc');
-  for (const a of ['code-reviewer-codex', 'test-reviewer-codex', 'security-reviewer']) {
+  for (const a of [
+    'code-reviewer-codex',
+    'test-reviewer-codex',
+    'code-reviewer',
+    'test-reviewer',
+    'security-reviewer',
+  ]) {
     h.present.add(join(dir, 'transcripts', 'aisdlc-900', `${a}.jsonl`));
     h.present.add(join(dir, 'verdicts', `${a}-aisdlc-900.json`));
   }
@@ -328,7 +334,13 @@ describe('finalizeReview', () => {
     markPersisted();
     const dir = join(state.worktreePath, '.ai-sdlc', 'subagent-sessions');
     mkdirSync(dir, { recursive: true });
-    for (const a of ['code-reviewer-codex', 'test-reviewer-codex', 'security-reviewer']) {
+    for (const a of [
+      'code-reviewer-codex',
+      'test-reviewer-codex',
+      'code-reviewer',
+      'test-reviewer',
+      'security-reviewer',
+    ]) {
       writeFileSync(
         join(dir, `id-${a}.json`),
         JSON.stringify({ agentId: `id-${a}`, agentType: a }),
@@ -352,23 +364,43 @@ describe('finalizeReview', () => {
     });
   });
 
-  it('warns (and skips the leaf) when emit-leaf fails or files are missing', async () => {
+  it('fails the round when emit-leaf fails or files are missing (v6 default)', async () => {
     markPersisted();
     h.runner.on(/emit-leaf/, fail('boom', 1));
     const res = await finalizeReview(h.ctx, state, approvals());
-    expect(res.ok).toBe(true);
-    if (res.ok) expect(res.warnings.filter((w) => w.includes('emit-leaf'))).toHaveLength(3);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toMatch(/emit-leaf for .* exited non-zero \(boom\)/);
 
     const h2 = makeHarness();
     const s2 = makeState(h2.root, { review: review() });
     const res2 = await finalizeReview(h2.ctx, s2, approvals());
-    expect(res2.ok).toBe(true);
-    if (res2.ok)
-      expect(res2.warnings.filter((w) => w.includes('transcript or verdict missing'))).toHaveLength(
-        3,
-      );
+    expect(res2.ok).toBe(false);
+    if (!res2.ok) expect(res2.reason).toContain('transcript or verdict missing');
     expect(h2.runner.calls.some((c) => c.args.includes('emit-leaf'))).toBe(false);
     h2.cleanup();
+  });
+
+  it('warns and continues when AI_SDLC_V5_LEGACY=1', async () => {
+    vi.stubEnv('AI_SDLC_V5_LEGACY', '1');
+    try {
+      markPersisted();
+      h.runner.on(/emit-leaf/, fail('boom', 1));
+      const res = await finalizeReview(h.ctx, state, approvals());
+      expect(res.ok).toBe(true);
+      if (res.ok) expect(res.warnings.filter((w) => w.includes('emit-leaf'))).toHaveLength(3);
+
+      const h2 = makeHarness();
+      const s2 = makeState(h2.root, { review: review() });
+      const res2 = await finalizeReview(h2.ctx, s2, approvals());
+      expect(res2.ok).toBe(true);
+      if (res2.ok)
+        expect(
+          res2.warnings.filter((w) => w.includes('transcript or verdict missing')),
+        ).toHaveLength(3);
+      h2.cleanup();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('errors without a review round in state', async () => {
