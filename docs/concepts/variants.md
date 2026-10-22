@@ -19,13 +19,13 @@ Think of Variants as flavors of the same product face — not different products
 
 ### Concrete example
 
-InternalAdopter's **spry-engage** soul targets municipal government. Within that soul, three distinct audience segments exist:
+InternalAdopter's **acme-app** soul targets business customers. Within that soul, three distinct audience segments exist:
 
 | Variant | Audience | Visual specialization |
 |---|---|---|
-| `small-utility` | Water districts, small municipalities (1–50 staff) | Large print, comfortable density, warm palette |
-| `enterprise` | Large municipalities, regional utilities (51–5000 staff) | Compact density, cool palette, full motion |
-| `county-regional` | County government, regional coordinators (20–200 staff) | Sharp corners, regional brand tokens |
+| `small-org` | Small organizations (1–50 staff) | Large print, comfortable density, warm palette |
+| `enterprise` | Large organizations (51–5000 staff) | Compact density, cool palette, full motion |
+| `regional` | Regional offices and coordinators (20–200 staff) | Sharp corners, regional brand tokens |
 
 All three variants share the same WCAG 2.1 AA compliance floor, the same event bus, and the same design system foundation. Only the visual specialization and audience targeting differ.
 
@@ -65,7 +65,7 @@ Framework-owned `designOverrides` fields are a closed enum (see table above). Ad
 
 ```yaml
 designOverrides:
-  colorPaletteOverlay: "small-utility-warm"
+  colorPaletteOverlay: "small-org-warm"
   acme.com/accessibilityProfile: "wcag-aa-plus"
   acme.com/animationBudget: "100ms"
 ```

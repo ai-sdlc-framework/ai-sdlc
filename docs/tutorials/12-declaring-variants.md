@@ -36,7 +36,7 @@ Checklist:
 
 If all three are yes, proceed. If any is no, create a separate Soul.
 
-**Example:** spry-engage serves municipal government. Small utilities (1–50 staff) and large municipalities (51–5000 staff) share the same WCAG 2.1 AA floor and the same Postgres + Redis substrate. They are the same product face from the operator's perspective. Variants are the right model.
+**Example:** acme-app serves business customers. Small organizations (1–50 staff) and large organizations (51–5000 staff) share the same WCAG 2.1 AA floor and the same Postgres + Redis substrate. They are the same product face from the operator's perspective. Variants are the right model.
 
 ---
 
@@ -48,16 +48,16 @@ Open your Soul DID file (typically in your project's `souls/` directory). Add a 
 apiVersion: ai-sdlc.io/v1alpha1
 kind: DesignIntentDocument
 metadata:
-  name: spry-engage
+  name: acme-app
 spec:
   # ... existing Soul DID fields ...
   variants:
-    - id: small-utility
+    - id: small-org
       targetAudience:
-        segments: [municipal-small, water-district-small]
+        segments: [small-business, small-nonprofit]
         sizeRange: { minStaff: 1, maxStaff: 50 }
       designOverrides:
-        colorPaletteOverlay: "small-utility-warm"
+        colorPaletteOverlay: "small-org-warm"
         densityProfile: "comfortable"
         typographyScale: "large-print"
         motionProfile: "reduced"
@@ -69,7 +69,7 @@ spec:
 
     - id: enterprise
       targetAudience:
-        segments: [municipal-large, regional-utility]
+        segments: [mid-market, large-enterprise]
         sizeRange: { minStaff: 51, maxStaff: 5000 }
       designOverrides:
         colorPaletteOverlay: "enterprise-cool"
@@ -100,7 +100,7 @@ The `designOverrides` fields are a closed framework enum. If you need an adopter
 
 ```yaml
 designOverrides:
-  colorPaletteOverlay: "small-utility-warm"
+  colorPaletteOverlay: "small-org-warm"
   acme.com/accessibilityProfile: "wcag-aa-plus"
 ```
 
@@ -111,12 +111,12 @@ designOverrides:
 Run schema validation to confirm the variant declarations are schema-valid:
 
 ```bash
-node pipeline-cli/bin/cli-validate.mjs --resource spry-engage.yaml
+node pipeline-cli/bin/cli-validate.mjs --resource acme-app.yaml
 ```
 
 Expected output:
 ```
-✓ spry-engage.yaml: valid (2 variants declared; complianceFloor: inherit on all)
+✓ acme-app.yaml: valid (2 variants declared; complianceFloor: inherit on all)
 ```
 
 If you see a validation error, common causes:
@@ -135,12 +135,12 @@ When a work item is specific to one audience segment, tag it with `targetedVaria
 apiVersion: ai-sdlc.io/v1alpha1
 kind: WorkItem
 metadata:
-  name: small-utility-onboarding-improvement
+  name: small-org-onboarding-improvement
 spec:
-  title: "Improve onboarding flow for small utility operators"
-  targetedSouls: [spry-engage]
+  title: "Improve onboarding flow for small organizations"
+  targetedSouls: [acme-app]
   targetedVariants:
-    - "did:platform-x:soul:spry-engage/variant:small-utility"
+    - "did:platform-x:soul:acme-app/variant:small-org"
 ```
 
 The `targetedVariants` format is: `did:{method}:{platform}:soul:{soul-id}/variant:{variant-id}`.
@@ -154,15 +154,15 @@ A work item without `targetedVariants` continues to score at soul scope — back
 Run the admission composite for the work item:
 
 ```bash
-node pipeline-cli/bin/cli-admit.mjs --work-item small-utility-onboarding-improvement.yaml
+node pipeline-cli/bin/cli-admit.mjs --work-item small-org-onboarding-improvement.yaml
 ```
 
 Observe the scoring breakdown:
-- **Sα₁ source:** `small-utility.targetAudience` (not soul-aggregate)
-- **Sα₂ source:** `small-utility.designImperatives` UNION `spry-engage.designImperatives`
+- **Sα₁ source:** `small-org.targetAudience` (not soul-aggregate)
+- **Sα₂ source:** `small-org.designImperatives` UNION `acme-app.designImperatives`
 - **Cκ, Eρ_n, Dπ_n:** soul-level (unchanged)
 
-Compare with the soul-aggregate score (remove `targetedVariants`, re-run). You should see a higher Sα₁ score — the small-utility variant's narrow audience definition makes audience resonance sharper.
+Compare with the soul-aggregate score (remove `targetedVariants`, re-run). You should see a higher Sα₁ score — the small-org variant's narrow audience definition makes audience resonance sharper.
 
 ---
 
@@ -182,12 +182,12 @@ variants:
 Run validation:
 
 ```bash
-node pipeline-cli/bin/cli-validate.mjs --resource spry-engage.yaml
+node pipeline-cli/bin/cli-validate.mjs --resource acme-app.yaml
 ```
 
 Expected error:
 ```
-✗ spry-engage.yaml: VariantInheritanceViolation
+✗ acme-app.yaml: VariantInheritanceViolation
   variant "test-violation" declares locked field "complianceRegimes"
   Variants cannot override inherited fields. See RFC-0017 §5.3.
 ```
@@ -202,7 +202,7 @@ Per RFC-0017 OQ-7, every new variant declaration triggers an Engineering review 
 
 ```bash
 node pipeline-cli/bin/cli-decisions.mjs add \
-  --summary "Engineering substrate-cost review: spry-engage/small-utility variant" \
+  --summary "Engineering substrate-cost review: acme-app/small-org variant" \
   --scope "rfc:RFC-0017" \
   --option "approve:Substrate shared; no new cost" \
   --option "block:New layout engine required"
