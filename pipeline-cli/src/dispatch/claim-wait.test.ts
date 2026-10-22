@@ -65,7 +65,7 @@ describe('claimWithWait', () => {
     const r = await claimWithWait(board, 'in-session-agent', {
       waitSec: 60,
       workerId: 'w1',
-      pollMs: 60_000,
+      pollMs: 50,
       claim: (dir, kind, workerId) => {
         attempts += 1;
         if (attempts === 1) {
