@@ -415,6 +415,14 @@ skipped on ingest, so a later hand-written brief naming it is harmless. Still wr
 hand when the task has dependencies (`after`), belongs to a sequence group, or needs a hold:
 use `--no-brief` and `cli-hierarchy brief`.
 
+**`after` is derived from `dependencies:` (AISDLC-1027).** A manifest written by `enqueue`,
+`requeue` or `reprioritize` with no explicit `after` carries the task file's `dependencies:` as
+`after`, so a hand requeue cannot skip them. A dependency counts as met only once it has
+**landed**: a completion marker or a success verdict stamped `landed` in `done/`, or its task
+file Done on `main`. A delivered-but-unlanded dependency holds the claim (`waiting for <id> to
+land`), the same test the executor's dependency preflight applies, so the board never offers a
+claim the preflight will refuse.
+
 ### `down`
 
 End sessions, return their inflight manifests to `queue/`, close their windows and update

@@ -73,6 +73,7 @@ function failTask(taskId: string, extra: Partial<DispatchManifest> = {}): void {
         outcome: 'success',
         completedAt: '2026-05-20T10:30:00.000Z',
         workerId: 'executor-a',
+        landed: '2026-05-20T10:31:00.000Z',
       });
     }
   }

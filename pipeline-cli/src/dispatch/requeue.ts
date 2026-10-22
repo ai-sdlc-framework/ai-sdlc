@@ -15,7 +15,8 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { ensureBoardDirs, TASK_ID_RE, writeManifest } from './board.js';
+import { ensureBoardDirs, repoRootOfBoard, TASK_ID_RE, writeManifest } from './board.js';
+import { dependenciesOfTaskFile } from './enqueue.js';
 import { DEFAULT_REQUEUE_RETRY_LIMIT } from './session-reaper.js';
 import type { DispatchManifest, DispatchVerdict } from './types.js';
 
@@ -152,6 +153,10 @@ export function requeueFailed(
   }
 
   const next: DispatchManifest = { ...manifest, retryCount };
+  if (!next.after || next.after.length === 0) {
+    const derived = dependenciesOfTaskFile(repoRootOfBoard(boardDir), manifest.spec.taskFile);
+    if (derived.length > 0) next.after = derived;
+  }
   delete next.workerId;
   delete next.blockedBy;
   const queuePath = writeManifest(boardDir, next);
