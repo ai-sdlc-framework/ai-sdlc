@@ -40,6 +40,7 @@ import type { EnqueueEntry } from '../dispatch/enqueue.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
 import { sanitizeVerdict } from '../dispatch/verdict-fields.js';
 import { parseBrief, type ParsedBrief } from './brief-format.js';
+import { processCanaryEvents, type CanaryReport } from './canary.js';
 import { readHold, type Hold } from './hold.js';
 import {
   classifyHumanAttention,
@@ -216,6 +217,8 @@ export interface TickResult {
   quotaSkip?: { remaining: number; floor: number };
   /** Present when the parent upkeep ran this tick (AISDLC-981). */
   parentUpkeep?: ParentUpkeepResult;
+  /** Present when a pipeline canary event set or lifted the hold this tick (AISDLC-1023). */
+  canary?: CanaryReport;
   /** Deterministic list of what stops the drain; the dispatch command sends it to the planner when it changes. */
   blockers: string[];
 }
@@ -334,6 +337,8 @@ export interface LoopDeps {
    * untracked-file sync, once per tick. The executors only assert the parent.
    */
   parentUpkeep?: () => Promise<ParentUpkeepResult>;
+  /** Files the hotfix task for a red pipeline canary (AISDLC-1023); absent means events are not processed. */
+  fileHotfix?: (opts: { sha: string; detail: string }) => string;
 }
 
 function ingestBriefs(
@@ -589,6 +594,20 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   const state = readLoopState(deps.boardDir);
   const { skipped, ...ingestRest } = ingestBriefs(deps, state);
   const ingest = { ...ingestRest, ...(skipped.length > 0 ? { skipped } : {}) };
+  // AISDLC-1023: a canary event sets or lifts the hold before this tick reads it.
+  let canary: CanaryReport | undefined;
+  if (deps.fileHotfix) {
+    try {
+      const r = processCanaryEvents({
+        boardDir: deps.boardDir,
+        now: deps.now,
+        fileHotfix: deps.fileHotfix,
+      });
+      if (r.held || r.lifted || r.filed || r.errors.length > 0) canary = r;
+    } catch {
+      /* an unreadable event must not stop the dispatch loop */
+    }
+  }
   const held = readHold(deps.boardDir);
   let quotaSkip: TickResult['quotaSkip'];
   try {
@@ -615,6 +634,16 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   const watch = await watchVerdicts(deps, state, held);
   const stalled = await checkStalls(deps, state, held);
   const reports = buildReports(deps, state, watch.verdicts.length);
+  if (canary?.held) {
+    reports.push({
+      kind: 'progress',
+      text: `${canary.held}: board held${canary.filed ? `, hotfix ${canary.filed.task} filed` : ''}`,
+    });
+  }
+  if (canary?.lifted) {
+    reports.push({ kind: 'progress', text: `pipeline canary green: lifted "${canary.lifted}"` });
+  }
+  for (const e of canary?.errors ?? []) reports.push({ kind: 'progress', text: e });
   if (quotaSkip) {
     reports.push({
       kind: 'progress',
@@ -671,6 +700,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     reports,
     ...(quotaSkip ? { quotaSkip } : {}),
     ...(parentUpkeep ? { parentUpkeep } : {}),
+    ...(canary ? { canary } : {}),
     ...(stalled.length > 0 ? { stalled } : {}),
     ...(humanAttention.length > 0 ? { humanAttention } : {}),
     ...wake,

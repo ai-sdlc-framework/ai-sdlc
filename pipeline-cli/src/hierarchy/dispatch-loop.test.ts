@@ -169,6 +169,40 @@ describe('auto-brief (AISDLC-930)', () => {
     await runDispatchTick(deps({ parentUpkeep: async () => ({ ok: true, swept: 2 }) }));
   });
 
+  it('a red canary event holds the tick and files the hotfix; green lifts it (AISDLC-1023)', async () => {
+    const dir = path.join(board, 'events');
+    mkdirSync(dir, { recursive: true });
+    const sha = 'abcdef0123456789abcdef0123456789abcdef01';
+    const write = (kind: string, id: string, at: string) =>
+      writeFileSync(
+        path.join(dir, `${id}.json`),
+        JSON.stringify({
+          repo: 'o/r',
+          pr: null,
+          headSha: sha,
+          kind,
+          deliveryId: id,
+          receivedAt: at,
+        }),
+      );
+    write('pipeline-canary-red', 'r1', '2026-10-22T10:00:00Z');
+    const filed: string[] = [];
+    const fileHotfix = (o: { sha: string }) => {
+      filed.push(o.sha);
+      return 'HOTFIX-1';
+    };
+    const red = await runDispatchTick(deps({ fileHotfix }));
+    expect(red.held?.reason).toBe(`pipeline canary red at ${sha}`);
+    expect(red.canary?.filed?.task).toBe('HOTFIX-1');
+    expect(filed).toEqual([sha]);
+    expect(red.blockers.join('\n')).toContain('pipeline canary red');
+    write('pipeline-canary-green', 'g1', '2026-10-22T11:00:00Z');
+    const green = await runDispatchTick(deps({ fileHotfix }));
+    expect(green.held).toBeUndefined();
+    expect(green.canary?.lifted).toBe(`pipeline canary red at ${sha}`);
+    expect(green.reports.map((x) => x.text).join('\n')).toContain('pipeline canary green');
+  });
+
   it('a throwing parent upkeep does not stop the tick (AISDLC-981)', async () => {
     const r = await runDispatchTick(
       deps({

@@ -26,6 +26,9 @@ export const WEBHOOK_EVENT_KINDS = [
   'workflow_run',
   'status',
   'pull_request_review',
+  // AISDLC-1023: posted by main-health-monitor.yml, not by GitHub itself.
+  'pipeline-canary-red',
+  'pipeline-canary-green',
 ] as const;
 export type WebhookEventKind = (typeof WEBHOOK_EVENT_KINDS)[number];
 
@@ -38,10 +41,13 @@ export interface EventRecord {
   kind: WebhookEventKind;
   deliveryId: string;
   receivedAt: string;
+  /** Canary events only: the failing step and output (capped). */
+  detail?: string;
 }
 
 export const DEFAULT_DEBOUNCE_MS = 5000;
 export const WEBHOOK_PATH = '/webhooks/github';
+const MAX_DETAIL = 4000;
 /** Touched by the receiver to wake the reconciler, under the board dir. */
 export const WAKE_FILE = '.reconcile-wake';
 
@@ -64,7 +70,10 @@ function extractTarget(
   if (typeof repo !== 'string' || !REPO_RE.test(repo)) return undefined;
   let pr: number | null | undefined;
   let sha: unknown;
-  if (kind === 'pull_request' || kind === 'pull_request_review') {
+  if (kind === 'pipeline-canary-red' || kind === 'pipeline-canary-green') {
+    pr = null;
+    sha = p.sha;
+  } else if (kind === 'pull_request' || kind === 'pull_request_review') {
     const pull = obj(p.pull_request);
     pr = posInt(pull?.number);
     sha = obj(pull?.head)?.sha;
@@ -170,6 +179,9 @@ export function createReceiver(opts: ReceiverOptions): Receiver {
         kind,
         deliveryId,
         receivedAt: now().toISOString(),
+        ...(kind === 'pipeline-canary-red' && typeof payload.detail === 'string'
+          ? { detail: payload.detail.slice(0, MAX_DETAIL) }
+          : {}),
       };
       if (writeEventRecord(eventsDir, record)) {
         scheduleWake(`${record.repo}#${record.pr ?? 'none'}@${record.headSha}`);
