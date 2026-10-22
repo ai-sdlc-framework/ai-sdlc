@@ -76,3 +76,30 @@ describe('aggregateQualityCorpus', () => {
     expect(report.metrics.recurrenceByWindow[0]!.window).toBe('7d');
   });
 });
+
+describe('aggregateQualityCorpus prs-closed-unmerged (AISDLC-831)', () => {
+  it('emits the metric when PRs are supplied and omits it otherwise', () => {
+    const now = () => new Date('2026-10-14T00:00:00Z');
+    const withPrs = aggregateQualityCorpus({
+      artifactsDir: '/nonexistent-artifacts',
+      workDir: '/nonexistent-work',
+      now,
+      prs: [
+        {
+          number: 7,
+          state: 'CLOSED',
+          closedAt: '2026-10-13T00:00:00Z',
+          headRefName: 'ai-sdlc/aisdlc-1-x',
+        },
+      ],
+    });
+    expect(withPrs['prs-closed-unmerged']?.total).toBe(1);
+    expect(withPrs['prs-closed-unmerged']?.byCause.unknown).toBe(1);
+    const without = aggregateQualityCorpus({
+      artifactsDir: '/nonexistent-artifacts',
+      workDir: '/nonexistent-work',
+      now,
+    });
+    expect(without['prs-closed-unmerged']).toBeUndefined();
+  });
+});

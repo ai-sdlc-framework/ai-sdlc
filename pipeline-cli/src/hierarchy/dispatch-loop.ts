@@ -63,6 +63,11 @@ import type { ClearResult } from './clear.js';
 import type { LandReport } from './land-eligible.js';
 import type { MarkReadyReport } from './mark-ready.js';
 import type { PlaybookOutcome } from './playbook.js';
+import {
+  classifyClosedUnmerged,
+  type ClosedUnmergedReport,
+  type ListedClosedPr,
+} from '../kpi/closed-unmerged.js';
 import { summariseLanding, takeSuppressedNote } from './reconcile.js';
 import { rotateRequestPath } from './rotate-request.js';
 import { readRosterChecked } from './roster.js';
@@ -101,11 +106,16 @@ export interface LoopState {
   lastGithubReadAt?: string;
   /** Executors whose rotate request this loop wrote; the next tick reports whether each was consumed (AISDLC-1099). */
   pendingClears?: string[];
+<<<<<<< HEAD
   /** Whether the board was held at the last tick; a held-to-free change is `holdLifted` (AISDLC-1089). */
   wasHeld?: boolean;
   /** When a tick last ran, and who ran it (AISDLC-1096). */
   lastTickAt?: string;
   lastTickBy?: 'host' | 'scheduler';
+=======
+  /** When this drain window began (AISDLC-831); set on the first tick. */
+  drainStartedAt?: string;
+>>>>>>> ef55368bc (feat: track PRs closed unmerged as a waste KPI (AISDLC-831))
 }
 
 /** Why and when the board refused a brief. */
@@ -172,15 +182,17 @@ function saveState(boardDir: string, state: LoopState): void {
 
 /** Map a parsed brief to the entries the board enqueues (the same mapping `cli-dispatch enqueue --from-brief` uses). */
 export function briefToEnqueueEntries(brief: ParsedBrief): EnqueueEntry[] {
-  return brief.entries.map((e): EnqueueEntry => ({
-    taskId: e.task,
-    ...(e.after.length > 0 ? { after: e.after } : {}),
-    ...(e.sequenceGroup ? { sequenceGroup: e.sequenceGroup } : {}),
-    ...(e.priority !== undefined ? { priority: e.priority } : {}),
-    wave: e.wave,
-    ...(e.fixesPr !== undefined ? { fixesPr: e.fixesPr } : {}),
-    ...(e.prHeadRef ? { prHeadRef: e.prHeadRef } : {}),
-  }));
+  return brief.entries.map(
+    (e): EnqueueEntry => ({
+      taskId: e.task,
+      ...(e.after.length > 0 ? { after: e.after } : {}),
+      ...(e.sequenceGroup ? { sequenceGroup: e.sequenceGroup } : {}),
+      ...(e.priority !== undefined ? { priority: e.priority } : {}),
+      wave: e.wave,
+      ...(e.fixesPr !== undefined ? { fixesPr: e.fixesPr } : {}),
+      ...(e.prHeadRef ? { prHeadRef: e.prHeadRef } : {}),
+    }),
+  );
 }
 
 /** What a clear attempt did for one verdict. */
@@ -243,12 +255,17 @@ export interface TickResult {
   canary?: CanaryReport;
   /** Present when the ephemeral steps downed or spawned an executor, or a spawn failed (RFC-0059). */
   ephemeral?: EphemeralReport;
+<<<<<<< HEAD
   /** True on the first tick after a hold was lifted (AISDLC-1089). */
   holdLifted?: boolean;
   /** Task ids queued and eligible to claim, in claim order; filled by `cli-hierarchy tick` (AISDLC-1089). */
   eligibleQueued?: string[];
   /** Names of idle executor sessions; filled by `cli-hierarchy tick` (AISDLC-1089). */
   idleExecutors?: string[];
+=======
+  /** PRs closed unmerged in the drain window (AISDLC-831); absent when GitHub was not read. */
+  closedUnmerged?: number;
+>>>>>>> ef55368bc (feat: track PRs closed unmerged as a waste KPI (AISDLC-831))
   /** Deterministic list of what stops the drain; the dispatch command sends it to the planner when it changes. */
   blockers: string[];
 }
@@ -369,6 +386,8 @@ export interface LoopDeps {
   parentUpkeep?: () => Promise<ParentUpkeepResult>;
   /** Ephemeral executors (RFC-0059): down on verdict, sweep, spawn per claim; absent means standing executors only. */
   ephemeral?: EphemeralDeps;
+  /** PRs for the closed-unmerged KPI (AISDLC-831); undefined when GitHub cannot be read. */
+  listAllPrs?: () => ListedClosedPr[] | undefined;
   /** Files the hotfix task for a red pipeline canary (AISDLC-1023); absent means events are not processed. */
   fileHotfix?: (opts: { sha: string; detail: string }) => string;
   /** Idle executors holding no inflight task (AISDLC-1101); absent means no drain-stall check runs. */
@@ -554,7 +573,12 @@ function isFailed(boardDir: string, taskId: string): boolean {
   );
 }
 
-function buildReports(deps: LoopDeps, state: LoopState, handledCount: number): PlannerReport[] {
+function buildReports(
+  deps: LoopDeps,
+  state: LoopState,
+  handledCount: number,
+  closedUnmerged?: ClosedUnmergedReport,
+): PlannerReport[] {
   const reports: PlannerReport[] = [];
   for (const [file, brief] of Object.entries(state.ingested)) {
     if (brief.summarised || brief.tasks.length === 0) continue;
@@ -582,7 +606,8 @@ function buildReports(deps: LoopDeps, state: LoopState, handledCount: number): P
         text:
           `Progress: ${c.queued} queued, ${c.inflight} inflight, ${c.done} done, ${c.failed} failed` +
           (handledCount > 0 ? `; ${handledCount} new verdict(s) this wake-up` : '') +
-          (prs === '' ? '' : `; PRs: ${prs}`),
+          (prs === '' ? '' : `; PRs: ${prs}`) +
+          (closedUnmerged ? `; closedUnmerged: ${closedUnmerged.total}` : ''),
       });
       state.lastReportAt = deps.now().toISOString();
     }
@@ -749,7 +774,18 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     return stalled;
   });
   const stalled = ephemeral.stalled;
-  const reports = [...clearAcks, ...buildReports(deps, state, watch.verdicts.length)];
+  state.drainStartedAt ??= deps.now().toISOString();
+  let closedUnmerged: ClosedUnmergedReport | undefined;
+  try {
+    const all = readGithub ? deps.listAllPrs?.() : undefined;
+    if (all) closedUnmerged = classifyClosedUnmerged(all, new Date(state.drainStartedAt));
+  } catch {
+    /* an unreadable PR list must not stop the dispatch loop */
+  }
+  const reports = [
+    ...clearAcks,
+    ...buildReports(deps, state, watch.verdicts.length, closedUnmerged),
+  ];
   if (canary?.held) {
     reports.push({
       kind: 'progress',
@@ -849,6 +885,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   const blockers = computeBlockers(deps.boardDir, held, watch.escalations);
   return {
     blockers,
+    ...(closedUnmerged ? { closedUnmerged: closedUnmerged.total } : {}),
     ...(held ? { held } : {}),
     ...(holdLifted ? { holdLifted } : {}),
     ...ingest,
