@@ -23,7 +23,7 @@ requiresDocs: []
 **Lifecycle:** Signed Off
 **Created:** 2026-05-04
 **Updated:** 2026-05-26
-**Authors:** Morgan Hirtle (Design Authority, InternalAdopter)
+**Authors:** Morgan Hirtle (Design Authority)
 **Engineering pass:** Dominique Legault, Claude Opus 4.7 (orchestrator), 2026-05-04 — fleshed §3-§13 from Mo's v0.1 stub.
 **OQ walkthrough:** Dominique Legault (Operator), 2026-05-18 — full-rubric resolution of all 8 §10 OQs.
 **Requires:** RFC-0009 (Tessellated Design Intent Documents), RFC-0024 (Emergent Capture — catalog substrate), RFC-0025 (Framework Quality Monitoring — over-blocking audit), RFC-0029 (Product Pillar Architectural Vision — pillar model + Engineering/Design ownership), RFC-0035 (Decision Catalog — G0 non-blocking routing)
@@ -72,17 +72,17 @@ This RFC defines the **In-Soul Variant Pattern** — how variants are declared o
 
 The pattern is **configuration-based, not flow-based**. Flow-based sub-divisions (sequences of states + transitions) are RFC-0018's concern; this RFC handles the static configuration overlay.
 
-**Practitioner validation source:** InternalAdopter's four-product suite (ProductA, ProductB, ProductC, ProductD). Each product is a distinct soul on shared substrate. Within each product, audience-specific variants emerge — e.g., ProductA has variants for small-utility-municipality vs. large-municipality vs. county-level deployments — each with distinct visual specializations and audience profiles, but all sharing the soul's WCAG 2.1 AA compliance floor and shared design system tokens.
+**Practitioner validation source:** InternalAdopter's four-product suite (ProductA, ProductB, ProductC, ProductD). Each product is a distinct soul on shared substrate. Within each product, audience-specific variants emerge — e.g., ProductA has variants for small-organization vs. large-organization vs. regional deployments — each with distinct visual specializations and audience profiles, but all sharing the soul's WCAG 2.1 AA compliance floor and shared design system tokens.
 
 ## 2. Motivation
 
 Today, the Soul DID model (RFC-0009) gives a single design intent surface per product face. This is correct for cases where a product has one cohesive identity. But practitioners report:
 
-- A product targets multiple audience segments with distinct visual specializations (e.g., small-utility vs. enterprise) that share the same compliance regime + design system foundation
+- A product targets multiple audience segments with distinct visual specializations (e.g., small-org vs. enterprise) that share the same compliance regime + design system foundation
 - Forcing each audience-segment to be its own Soul DID creates platform-level fragmentation: the substrate doesn't actually differ; only the visual + audience specialization does
 - Forcing them to share one Soul DID collapses the per-segment design intent into platform-aggregate scoring (the same observed failure mode as multi-product platforms in RFC-0009 §3, applied one scope down)
 
-Specifically observed: **a Soul DID's `design.imperatives` field feeds Sα₂ Vibe Coherence scoring at soul scope. When a soul has multiple audience-specific variants, soul-aggregate Sα₂ scoring produces the same misallocation pattern RFC-0009 documented at the platform↔soul boundary** — work that's variant-bounded (e.g., a small-utility-only feature) gets scored against the soul-aggregate design intent, which underweights the variant's specific design imperatives.
+Specifically observed: **a Soul DID's `design.imperatives` field feeds Sα₂ Vibe Coherence scoring at soul scope. When a soul has multiple audience-specific variants, soul-aggregate Sα₂ scoring produces the same misallocation pattern RFC-0009 documented at the platform↔soul boundary** — work that's variant-bounded (e.g., a small-org-only feature) gets scored against the soul-aggregate design intent, which underweights the variant's specific design imperatives.
 
 The framework needs an in-soul partition for this case that:
 
@@ -117,16 +117,16 @@ Add `variants[]` to Soul DID `spec`:
 apiVersion: ai-sdlc.io/v1alpha1
 kind: SoulDID
 metadata:
-  name: spry-engage
+  name: acme-app
 spec:
   # ... existing Soul DID fields ...
   variants:
-    - id: small-utility
+    - id: small-org
       targetAudience:
-        segments: [municipal-small, water-district-small]
+        segments: [small-business, small-nonprofit]
         sizeRange: { minStaff: 1, maxStaff: 50 }
       designOverrides:
-        colorPaletteOverlay: "small-utility-warm"
+        colorPaletteOverlay: "small-org-warm"
         densityProfile: "comfortable"
         typographyScale: "large-print"
         motionProfile: "reduced"
@@ -137,7 +137,7 @@ spec:
         - "single-task-focus-per-screen"
     - id: enterprise
       targetAudience:
-        segments: [municipal-large, regional-utility]
+        segments: [mid-market, large-enterprise]
         sizeRange: { minStaff: 51, maxStaff: 5000 }
       designOverrides:
         colorPaletteOverlay: "enterprise-cool"
@@ -186,10 +186,10 @@ Work items target a variant via `targetedVariants` (parallel to RFC-0009 `target
 apiVersion: ai-sdlc.io/v1alpha1
 kind: WorkItem
 metadata:
-  name: small-utility-onboarding-improvement
+  name: small-org-onboarding-improvement
 spec:
-  targetedSouls: [spry-engage]
-  targetedVariants: [spry-engage/small-utility]   # Soul-id/Variant-id
+  targetedSouls: [acme-app]
+  targetedVariants: [acme-app/small-org]   # Soul-id/Variant-id
 ```
 
 Scoring composes per-variant:
@@ -363,9 +363,9 @@ The "use the existing Soul DID model" answer. **Rejected for the homogeneous-sub
 
    **Revisit (2026-05-26, Mo's editorial pass):** **Closed framework enum revised to `[colorPaletteOverlay, densityProfile, typographyScale, motionProfile, radiusProfile]`** — `voiceRegister` cut. **Load-bearing rationale:** variant-overridable fields correspond to the theming surface that leading design systems expose as token-level customization. 6/6 systems surveyed (Tailwind, Radix, Material, Carbon, Spectrum, Atlassian) converge on **color, spacing, typography, motion, and radii** as the core theming surface; **none include content register at the visual token layer.** Content/voice belongs in a separate doc surface (Adobe brand guidelines pattern, Carbon Content pattern, Atlassian voice-and-tone-as-principles pattern). If a future content-layer RFC needs voice-register specialization, it should model it properly (e.g., `microcopyTone`, `errorVoice`) in a sibling `contentOverrides` block, gated by the same ≥2-adopter activation threshold OQ-8 uses for `cardinality`. **`radiusProfile` naming:** controls corner-rounding character (`sharp` / `default` / `rounded`), not border stroke weight — distinct properties. Naming follows the `densityProfile` / `motionProfile` pattern and is unambiguous about what it governs. **Vendor-prefix extension contract intact.**
 
-**OQ-6 — Variant ID URI representation in DID:** RFC-0009 uses `did:platform-x:soul:engage`. What's the variant URI? Options: (a) `did:platform-x:soul:engage/variant:small-utility`, (b) `did:platform-x:soul:engage:small-utility` (slug-concat), (c) `did:platform-x:variant:engage/small-utility`. Recommendation: (a) — preserves explicit hierarchy.
+**OQ-6 — Variant ID URI representation in DID:** RFC-0009 uses `did:platform-x:soul:acme-app`. What's the variant URI? Options: (a) `did:platform-x:soul:acme-app/variant:small-org`, (b) `did:platform-x:soul:acme-app:small-org` (slug-concat), (c) `did:platform-x:variant:acme-app/small-org`. Recommendation: (a) — preserves explicit hierarchy.
 
-   **Resolution (2026-05-18):** **Option (a) — `did:platform-x:soul:engage/variant:small-utility`** (path-style with explicit `variant:` keyword) per author rec. Matches Kubernetes resource paths / HTTP REST / AWS ARN / DID Web conventions (hierarchical resource systems consistently use path-style with explicit kind keywords). Preserves the structural inheritance relationship (variant is a CHILD of soul per §3.2). Composes naturally with future nested-variant extension AND with future in-soul partition types from RFC-0018 (`/journey:onboarding-flow`). **Selected over slug-concat (b)** because (b) has parser ambiguity; **selected over option (c)** because (c) treats variant as peer of soul, contradicting the inheritance model.
+   **Resolution (2026-05-18):** **Option (a) — `did:platform-x:soul:acme-app/variant:small-org`** (path-style with explicit `variant:` keyword) per author rec. Matches Kubernetes resource paths / HTTP REST / AWS ARN / DID Web conventions (hierarchical resource systems consistently use path-style with explicit kind keywords). Preserves the structural inheritance relationship (variant is a CHILD of soul per §3.2). Composes naturally with future nested-variant extension AND with future in-soul partition types from RFC-0018 (`/journey:onboarding-flow`). **Selected over slug-concat (b)** because (b) has parser ambiguity; **selected over option (c)** because (c) treats variant as peer of soul, contradicting the inheritance model.
 
 **OQ-7 — Engineering authority on variant declarations:** RFC-0009 makes Design Authority the owner of `design.*` fields with Engineering as reviewer. Same model for variant declarations? Or does Engineering own `targetAudience` (since audience determines load characteristics)? Recommendation: Design owns variant declaration; Engineering reviews + may block on substrate-cost grounds.
 
@@ -429,15 +429,15 @@ InternalAdopter's four-product suite drives the validation pass:
 
 | Soul | Variants (proposed) | Validates |
 |---|---|---|
-| ProductA | small-utility, enterprise, county-regional | Audience-segment specialization; voice register variation |
-| ProductB | field-tech-on-truck, field-tech-handheld, supervisor-tablet | Density profile + form-factor specialization |
-| ProductC | billing-clerk, customer-portal, csr-dashboard | Role-based audience + workflow-density specialization |
-| ProductD | (deferred to RFC-0018) | Proposed variants (annual-test, repair-event, regulatory-audit-mode) are temporal-context-bound operational modes activated by *when* and *why* a user is in the system — not static audience or visual specializations. This case illustrates the Variant/Journey boundary: same user, different operational moment = Journey. Deferred to RFC-0018 §11 as a validation case for that pattern. |
+| ProductA | small-org, enterprise, regional | Audience-segment specialization; voice register variation |
+| ProductB | mobile-in-vehicle, mobile-handheld, supervisor-tablet | Density profile + form-factor specialization |
+| ProductC | back-office-clerk, self-service, support-dashboard | Role-based audience + workflow-density specialization |
+| ProductD | (deferred to RFC-0018) | Proposed variants (annual-review, incident-response, audit-mode) are temporal-context-bound operational modes activated by *when* and *why* a user is in the system — not static audience or visual specializations. This case illustrates the Variant/Journey boundary: same user, different operational moment = Journey. Deferred to RFC-0018 §11 as a validation case for that pattern. |
 
 Validation criteria (Mo's edits welcome):
 1. Each variant's design intent is articulable in ≤ 5 `designImperatives` strings
 2. No variant requires a field NOT in the §6.1 schema (closed-enum holds)
-3. Admission scoring on a real work item (e.g., "small-utility onboarding improvement") produces a different + better-justified score than soul-aggregate scoring
+3. Admission scoring on a real work item (e.g., "small-org onboarding improvement") produces a different + better-justified score than soul-aggregate scoring
 4. Engineering vertex confirms substrate is genuinely shared across all variants of each soul (no hidden divergence)
 
 ## 12. References
@@ -456,4 +456,5 @@ Validation criteria (Mo's edits welcome):
 | v0.4.1 | 2026-05-26 | Morgan Hirtle (Design Authority sign-off) | **Authoritative conditional sign-off recorded in §Sign-Off table** following v0.4 editorial pass landing (PR #707). Mo's sign-off statement: core pattern, bounded inheritance model, boundary guidance (§5.5), and admission scoring composition ratified. Conditions for full (unconditional) sign-off: (1) §11 practitioner validation gates resolved on InternalAdopter implementation pass (tracked under AISDLC-437, formerly AISDLC-355); (2) no material changes to the pattern prior to that pass without Design Authority review. RFC is ready for Engineering and Product Authority to move toward ratification. |
 | v0.4.3 | 2026-05-26 | Alexander Kline (Product Authority sign-off) + lifecycle promotion | **Authoritative Product Authority sign-off on v0.4 recorded in §Sign-Off table.** v0.2 PPA-composability sign-off carries through; v0.4 editorial changes (closed `designOverrides` enum revision, `designImperatives` conflict-resolution clarification, §11 ProductD deferral to RFC-0018) do not touch PPA scoring, `targetedVariants` semantics, or audience model — no new Product Authority concerns surfaced. With all three Authority pillars signed on v0.4 (Mo conditional v0.4.1, Dominique Engineering v0.4.2, Alex Product this entry), **lifecycle promotes from Ready for Review → Signed Off**. Mo's condition #1 (§11 practitioner validation) discharges when AISDLC-437 (Phase 4 InternalAdopter reference impl) ships; condition #2 (no material spec changes pre-validation) remains a Design-Authority review gate until then. The four phase tasks (AISDLC-435, 436, 437, 438) are now naturally DoR-clean — `blocked.reason` overrides removed in this PR. |
 | v0.4.2 | 2026-05-26 | Dominique Legault (Engineering Authority sign-off) | **Authoritative Engineering Authority sign-off on v0.4 recorded in §Sign-Off table.** Engineering pillar concerns ratified: substrate sharing across variants holds per §5.3 inheritance table; complianceFloor inheritance locked; admission scoring composition decomposes cleanly per §5.4. v0.4 editorial changes (closed `designOverrides` enum, `designImperatives` conflict-resolution clarification, §11 ProductD deferral to RFC-0018) introduce no new substrate, runtime, or compute requirements — pure visual-token-surface and scope refinements. Vendor-prefix extension (OQ-5) composes with RFC-0025 OQ-10 pattern. Variant count limits (§10.1) bound substrate-divergence blast radius. Engineering review remains in scope for AISDLC-435 (Phase 1 schema; formerly AISDLC-352) and AISDLC-437 (Phase 4 reference impl; formerly AISDLC-355) at dispatch time. With Mo's conditional sign-off (v0.4.1) + this Engineering ratification, RFC is one Product Authority sign-off (Alex, v0.4) away from lifecycle promotion to Signed Off. Mo's condition #1 (§11 practitioner validation) discharges when AISDLC-437 ships; condition #2 (no material changes pre-validation) remains a Design-Authority review gate until then. |
-| v0.4 | 2026-05-26 | Morgan Hirtle (Design Authority editorial pass) | **§6.1 `designOverrides` closed enum revised:** `voiceRegister` cut; `typographyScale` (default / large-print / data-dense), `motionProfile` (full / reduced / none), `radiusProfile` (sharp / default / rounded) added. Load-bearing rationale documented in OQ-5 revisit: 6/6 leading design systems (Tailwind, Radix, Material, Carbon, Spectrum, Atlassian) converge on color, spacing, typography, motion, and radii as the core theming surface; none include content register at the visual token layer. If a future content-layer RFC needs voice/register, it should model it in a sibling `contentOverrides` block, gated by the same ≥2-adopter threshold OQ-8 uses. **`radiusProfile` naming:** controls corner-rounding character, not border stroke weight (distinct properties); naming follows `densityProfile`/`motionProfile` pattern. **§5.2 + §5.4 add `designImperatives` conflict-resolution language:** variant-wins applies when imperatives address the same design dimension; conflict identification is a Design-Authority practitioner judgment call at declaration time, not schema-enforced. Schema does not attempt to automate design judgment. **§11 ProductD row deferred to RFC-0018:** proposed variants (annual-test, repair-event, regulatory-audit-mode) are temporal-context-bound operational modes (Journey shape per RFC-0018), not static specializations (Variant shape). Illustrates the Variant/Journey boundary as a validation case for the companion RFC. **§5.1 example YAML + §5.3 inheritance table updated** to reflect the revised enum. **Sign-off:** Mo's conditional v0.3 sign-off added in §Sign-Off table — approved pending (1) this editorial pass landing + (2) §11 practitioner validation gates resolved on InternalAdopter implementation pass. Core pattern, inheritance model, boundary guidance, and admission scoring composition ratified. v0.3 operator OQ resolutions otherwise intact. |
+| v0.4 | 2026-05-26 | Morgan Hirtle (Design Authority editorial pass) | **§6.1 `designOverrides` closed enum revised:** `voiceRegister` cut; `typographyScale` (default / large-print / data-dense), `motionProfile` (full / reduced / none), `radiusProfile` (sharp / default / rounded) added. Load-bearing rationale documented in OQ-5 revisit: 6/6 leading design systems (Tailwind, Radix, Material, Carbon, Spectrum, Atlassian) converge on color, spacing, typography, motion, and radii as the core theming surface; none include content register at the visual token layer. If a future content-layer RFC needs voice/register, it should model it in a sibling `contentOverrides` block, gated by the same ≥2-adopter threshold OQ-8 uses. **`radiusProfile` naming:** controls corner-rounding character, not border stroke weight (distinct properties); naming follows `densityProfile`/`motionProfile` pattern. **§5.2 + §5.4 add `designImperatives` conflict-resolution language:** variant-wins applies when imperatives address the same design dimension; conflict identification is a Design-Authority practitioner judgment call at declaration time, not schema-enforced. Schema does not attempt to automate design judgment. **§11 ProductD row deferred to RFC-0018:** proposed variants (annual-review, incident-response, audit-mode) are temporal-context-bound operational modes (Journey shape per RFC-0018), not static specializations (Variant shape). Illustrates the Variant/Journey boundary as a validation case for the companion RFC. **§5.1 example YAML + §5.3 inheritance table updated** to reflect the revised enum. **Sign-off:** Mo's conditional v0.3 sign-off added in §Sign-Off table — approved pending (1) this editorial pass landing + (2) §11 practitioner validation gates resolved on InternalAdopter implementation pass. Core pattern, inheritance model, boundary guidance, and admission scoring composition ratified. v0.3 operator OQ resolutions otherwise intact. |
+| v0.4.4 | 2026-10-22 | Morgan Hirtle | Editorial: example identifiers replaced with neutral placeholders. No normative change. |

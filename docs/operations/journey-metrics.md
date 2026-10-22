@@ -27,7 +27,7 @@ A MetricSnapshot is a plain JSON document matching `spec/schemas/metric-snapshot
   "apiVersion": "ai-sdlc.io/v1alpha1",
   "kind": "MetricSnapshot",
   "metadata": {
-    "journey": "spry-engage/onboarding",
+    "journey": "acme-app/onboarding",
     "metricId": "completion-rate"
   },
   "spec": {

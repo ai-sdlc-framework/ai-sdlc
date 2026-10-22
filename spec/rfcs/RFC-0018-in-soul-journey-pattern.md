@@ -21,7 +21,7 @@ requiresDocs: []
 **Lifecycle:** Ready for Review
 **Created:** 2026-05-04
 **Updated:** 2026-05-28
-**Authors:** Morgan Hirtle (Design Authority, InternalAdopter)
+**Authors:** Morgan Hirtle (Design Authority)
 **Engineering pass:** Dominique Legault, Claude Opus 4.7 (orchestrator), 2026-05-04 — fleshed §3-§13 from Mo's v0.1 stub. Design + accessibility-vertex semantics (specifically §5.4 success metrics + §10 OQs) deferred to Mo for editorial pass.
 **OQ walkthrough:** Dominique Legault (Operator), 2026-05-28 — full-rubric resolution of all 10 §10 OQs.
 **Requires:** RFC-0009 (Tessellated Design Intent Documents), RFC-0017 (In-Soul Variant Pattern), RFC-0035 (Decision Catalog — G0 non-blocking routing for journey lifecycle Decisions)
@@ -65,7 +65,7 @@ This RFC defines the **In-Soul Journey Pattern** — how journeys are declared o
 
 The pattern is **flow-based, not configuration-based**. Static configuration overlays are RFC-0017's concern; this RFC handles temporal sequences that have entry, intermediate, terminal, and (sometimes) failure states.
 
-**Practitioner validation source:** InternalAdopter's accessibility audit pipeline. The WCAG 2.1 AA audit surface maps naturally to journey-level design intent: each product flow (onboarding, payment, backflow reporting, regulatory submission) is a journey with distinct completion criteria and accessibility requirements that cannot be collapsed to soul-level aggregate scoring without losing precision. A WCAG failure on the ProductA onboarding journey doesn't tell you anything useful about ProductA's billing journey — they have different states, different transitions, different audiences, different success criteria.
+**Practitioner validation source:** InternalAdopter's accessibility audit pipeline. The WCAG 2.1 AA audit surface maps naturally to journey-level design intent: each product flow (onboarding, payment, annual review, compliance submission) is a journey with distinct completion criteria and accessibility requirements that cannot be collapsed to soul-level aggregate scoring without losing precision. A WCAG failure on the ProductA onboarding journey doesn't tell you anything useful about ProductA's payment journey — they have different states, different transitions, different audiences, different success criteria.
 
 ## 2. Motivation
 
@@ -83,7 +83,7 @@ The framework needs a temporal partition for this case that:
 1. Names the user flow at a scope the framework can score against
 2. Captures completion criteria the framework can verify (work item that "improves onboarding" scores higher when onboarding completion-rate has regressed)
 3. Routes accessibility + design imperatives at journey scope (not collapsed to soul)
-4. Composes with RFC-0017 (a journey can live within a Variant — e.g., the small-utility variant has a different onboarding flow than the enterprise variant)
+4. Composes with RFC-0017 (a journey can live within a Variant — e.g., the small-org variant has a different onboarding flow than the enterprise variant)
 
 ## 3. Goals
 
@@ -113,7 +113,7 @@ Add `journeys[]` to Soul DID `spec` AND to Variant (RFC-0017 §5.1):
 apiVersion: ai-sdlc.io/v1alpha1
 kind: SoulDID
 metadata:
-  name: spry-engage
+  name: acme-app
 spec:
   # ... existing Soul DID fields including variants[] from RFC-0017 ...
   journeys:
@@ -163,8 +163,8 @@ spec:
       designImperatives:
         - "first-task-done within 30 min of account creation"
         - "profile-form is single-screen (no pagination)"
-    - id: backflow-annual-test
-      scope: variant:annual-test  # journey applies only to a specific variant
+    - id: annual-review-submission
+      scope: variant:annual-review  # journey applies only to a specific variant
       # ... fields as above ...
 ```
 
@@ -205,9 +205,9 @@ kind: WorkItem
 metadata:
   name: onboarding-profile-form-pagination-removal
 spec:
-  targetedSouls: [spry-engage]
-  targetedVariants: [spry-engage/small-utility]
-  targetedJourneys: [spry-engage/onboarding]   # Soul-id/Journey-id
+  targetedSouls: [acme-app]
+  targetedVariants: [acme-app/small-org]
+  targetedJourneys: [acme-app/onboarding]   # Soul-id/Journey-id
                                                 # OR Soul-id/Variant-id/Journey-id
 ```
 
@@ -534,16 +534,16 @@ InternalAdopter's accessibility audit pipeline drives the validation pass:
 
 | Soul / Variant | Journeys (proposed) | Validates |
 |---|---|---|
-| ProductA | onboarding, daily-task-management, billing-inquiry-resolution | Multi-flow per soul; completion-rate + time-to-completion metrics |
-| ProductB | shift-start, route-completion, end-of-shift-handoff | Mobile-form-factor accessibility (touch targets, voice commands) |
-| ProductC | csr-onboarding, customer-self-service, dispute-resolution | Variant-scoped journeys (csr vs. customer-portal use the same product but different journeys) |
-| ProductD / annual-test (variant) | submit-test-results, request-extension, view-historical-tests | Regulatory journey with elevated WCAG (`AAA` per state requirement) |
+| ProductA | onboarding, daily-task-management, account-inquiry-resolution | Multi-flow per soul; completion-rate + time-to-completion metrics |
+| ProductB | shift-start, task-completion, end-of-shift-handoff | Mobile-form-factor accessibility (touch targets, voice commands) |
+| ProductC | agent-onboarding, customer-self-service, dispute-resolution | Variant-scoped journeys (agent vs. self-service use the same product but different journeys) |
+| ProductD / annual-review (variant) | submit-review-results, request-extension, view-review-history | Compliance journey with elevated WCAG (`AAA`) |
 
 Validation criteria (Mo's edits welcome):
 1. Each journey's states + transitions form a valid state machine (no unreachable states, terminal states correctly marked)
 2. WCAG audit reports map 1:1 to journey declarations (each audit has a target journey ID)
 3. Admission scoring on a real work item (e.g., "improve onboarding completion-rate") produces a higher score when the targeted journey's `completion-rate` metric is below `alertBelow`
-4. Variant-scoped journeys (e.g., backflow `annual-test` variant journeys) demonstrate journey-level WCAG elevation working independently of soul-level
+4. Variant-scoped journeys (e.g., `annual-review` variant journeys) demonstrate journey-level WCAG elevation working independently of soul-level
 
 ## 12. References
 
@@ -559,3 +559,4 @@ Validation criteria (Mo's edits welcome):
 | v0.1 | 2026-05-04 | Morgan Hirtle | Initial stub (carve-out from RFC-0009 OQ-3). Established summary + practitioner-validation source. |
 | v0.2 | 2026-05-04 | Engineering pass (Dominique + Claude Opus 4.7) | Filled §3-§13 from boilerplate. Schema sketch with state machines + accessibility + success metrics; inheritance table; admission-scoring composition (Sα₂ + Cκ + Eρ₅); boundary-vs-just-a-feature; alternatives; 10 open questions; InternalAdopter validation plan. Awaiting Mo's design-authority editorial pass on §5.4 success metrics + §10 OQs. |
 | v0.3 | 2026-05-28 | dominique (Operator OQ walkthrough) | Full-rubric resolution of all 10 §10 OQs (problem statement → industry research → 3-4 options with tradeoffs → recommendation + counter-argument per OQ). Resolutions: **(OQ-1)** per-org configurable journey count limits with defaults soft 10 / hard 50 (matches RFC-0017 OQ-1 per-org-config pattern; higher than variant 5/20 because journey count tracks user-flow surface). **(OQ-2)** per-org configurable state cardinality limits with defaults soft 12 / hard 100 (sanity guard, not architectural); concrete operator-actionable warning message pointing at v1 workaround. **(OQ-3)** schema-enforced flat (no nested journeys); future RFC via `Decision: journey-sub-flow-activation-request` at ≥2 distinct adopter requests (matches RFC-0017 OQ-2 + OQ-8 pattern). **(OQ-4)** closed enum for completion-criteria v1 (`terminal-success-state`, `all-states-reached`); future Decision-Catalog auto-promote on ≥2 requests; pre-recommended CEL (Google Common Expression Language) for v2 — captures industry consensus + signals adopters the answer is known. **(OQ-5)** operator-supplied `MetricSnapshot` resource for v1 + `Decision: journey-metric-stale` on stale data (>30d default, per-Soul configurable; warn-and-unknown, NOT fail-closed) + v2 trajectory pre-recommends `MetricsAdapter` pattern parallel to RFC-0030 SignalSourceAdapter. **(OQ-6)** graduated Eρ₅ degradation (0-30d warn / 30-60d -25% / 60-90d -50% / 90d+ blocking) + threshold Decisions + per-Soul `accessibility.auditOverdueGracePolicy` config (preserves stricter `binary-30d` / `hard-block` modes for SOC2/HIPAA shops). **(OQ-7)** additive WCAG-version enum + pre-documented scoring-model shift for WCAG 3.0 (binary → Silver framework graduated; may require `scoringModel` discriminant in future RFC) + `Decision: wcag-version-superseded` advisory on W3C-superseded version use. **(OQ-8)** AST scan from v1 reusing RFC-0009 §13 Rule #1 infrastructure (NOT string match — engine already exists; deprecation cost dominates). **(OQ-9)** v1 limitation with concrete per-soul-with-handoff workaround documented (shared `userId` / `sessionId` correlation, framework scores per-soul only) + future RFC via `Decision: cross-soul-journey-coordination-request`. **(OQ-10)** 4th rule in same §13 engine + concrete registration mechanism (`Tessellation§13RuleRegistry.register(rule)` + standard interface) — composes with OQ-8 + RFC-0028 OQ-7.2 unified-drift-detection direction. §10.1 added consolidating per-Soul / per-org `.ai-sdlc/journey-config.yaml` schema. Cross-cutting framing: operator-impacting journey-lifecycle events route through RFC-0035 G0 catalog. Frontmatter `requires` expanded: added RFC-0035 (catalog routing for journey Decisions). Lifecycle promoted Draft → Ready for Review. Implementation broken into 6 phase tasks: AISDLC-465 (Phase 1 schema additions + count/state limits + inheritance validator + nested rejection), AISDLC-466 (Phase 2 admission scorer composition + completion criteria), AISDLC-467 (Phase 3 §13 4th rule integration — JourneyStateIdDriftRule + Tessellation§13RuleRegistry), AISDLC-468 (Phase 4 MetricSnapshot resource + stale-metric Decision + accessibility cadence graduated degradation), AISDLC-469 (Phase 5 WCAG version evolution + superseded Decision + WCAG 3.0 forward-compat documentation), AISDLC-470 (Phase 6 InternalAdopter reference impl + glossary + conformance tests + cross-soul workaround docs). Engineering + Operator sign-off (Dominique) added; pending Design editorial pass from Mo + Practitioner validation per §11. |
+| v0.3.1 | 2026-10-22 | Morgan Hirtle | Editorial: example identifiers replaced with neutral placeholders. No normative change. |

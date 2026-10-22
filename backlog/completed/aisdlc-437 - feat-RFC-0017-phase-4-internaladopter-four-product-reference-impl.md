@@ -37,16 +37,16 @@ Phase 4 of RFC-0017 §9 + §11 practitioner validation. Implements InternalAdopt
 
 ## Scope (§11 validation criteria)
 
-- **ProductA**: variants `small-utility`, `enterprise`, `county-regional` — validates audience-segment specialization across the v0.4 visual-token surface (color/density/typography/motion/radius).
-- **ProductB**: variants `field-tech-on-truck`, `field-tech-handheld`, `supervisor-tablet` — validates density profile + form-factor specialization.
-- **ProductC**: variants `billing-clerk`, `customer-portal`, `csr-dashboard` — validates role-based audience + workflow-density specialization.
-- **ProductD**: **DEFERRED to RFC-0018 §11** per v0.4 Design Authority editorial pass. Proposed variants (`annual-test`, `repair-event`, `regulatory-audit-mode`) are temporal-context-bound operational modes activated by *when* and *why* a user is in the system — same user, different operational moment = Journey shape (RFC-0018), not Variant shape. ProductD validates the Variant/Journey boundary as a validation case for the companion RFC, not this one. **Scope of this task is now three products (A, B, C), not four.**
+- **ProductA**: variants `small-org`, `enterprise`, `regional` — validates audience-segment specialization across the v0.4 visual-token surface (color/density/typography/motion/radius).
+- **ProductB**: variants `mobile-in-vehicle`, `mobile-handheld`, `supervisor-tablet` — validates density profile + form-factor specialization.
+- **ProductC**: variants `back-office-clerk`, `self-service`, `support-dashboard` — validates role-based audience + workflow-density specialization.
+- **ProductD**: **DEFERRED to RFC-0018 §11** per v0.4 Design Authority editorial pass. Proposed variants (`annual-review`, `incident-response`, `audit-mode`) are temporal-context-bound operational modes activated by *when* and *why* a user is in the system — same user, different operational moment = Journey shape (RFC-0018), not Variant shape. ProductD validates the Variant/Journey boundary as a validation case for the companion RFC, not this one. **Scope of this task is now three products (A, B, C), not four.**
 
 ## Validation criteria (Mo's editorial welcome)
 
 1. Each variant's design intent articulable in ≤ 5 `designImperatives` strings
 2. No variant uses a field outside the §6.1 schema (closed-enum holds; OR validates the vendor-prefix extension path from OQ-5 if a real bespoke field surfaces)
-3. Admission scoring on a real work item (e.g., "small-utility onboarding improvement") produces a different + better-justified score than soul-aggregate scoring
+3. Admission scoring on a real work item (e.g., "small-org onboarding improvement") produces a different + better-justified score than soul-aggregate scoring
 4. Engineering vertex confirms substrate is genuinely shared across all variants of each soul (no hidden divergence)
 5. Deprecation lifecycle test: deprecate a variant; verify consumers degrade gracefully through full G0-routed lifecycle.
 <!-- SECTION:DESCRIPTION:END -->
@@ -54,9 +54,9 @@ Phase 4 of RFC-0017 §9 + §11 practitioner validation. Implements InternalAdopt
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [x] #1 ProductA variant declarations ship with `small-utility` / `enterprise` / `county-regional`
-- [x] #2 ProductB variant declarations ship with `field-tech-on-truck` / `field-tech-handheld` / `supervisor-tablet`
-- [x] #3 ProductC variant declarations ship with `billing-clerk` / `customer-portal` / `csr-dashboard`
+- [x] #1 ProductA variant declarations ship with `small-org` / `enterprise` / `regional`
+- [x] #2 ProductB variant declarations ship with `mobile-in-vehicle` / `mobile-handheld` / `supervisor-tablet`
+- [x] #3 ProductC variant declarations ship with `back-office-clerk` / `self-service` / `support-dashboard`
 - [x] #4 ProductD scope removed from this task per v0.4 (deferred to RFC-0018 §11 — temporal-context-bound modes are Journey shape, not Variant). File follow-up task against RFC-0018 once that RFC's implementation plan is broken down.
 - [x] #5 Each variant has ≤ 5 `designImperatives` strings (validates closed-enum discipline OR exercises vendor-prefix extension)
 - [x] #6 Admission scoring spot-check: variant-routed score differs from soul-aggregate by ≥ X% on a representative work item
@@ -71,6 +71,6 @@ Shipped as `orchestrator/src/variant/internal-adopter/` module:
 - `products.ts` — declarative ProductA/B/C fixtures with shared `INTERNAL_ADOPTER_SUBSTRATE` constant (single-reference substrate-sharing proof for AC #7); 9 variants total, each ≤ 5 `designImperatives` per AC #5
 - `products.test.ts` — AC #1, #2, #3, #5, #7 coverage; runs `validateVariantDeclarations()` as defense-in-depth
 - `admission-spotcheck.test.ts` — AC #6 with 20% deviation threshold (X parameter justified inline against RFC-0008 Sα₂ calibration ranges); exercises `computeVariantScopedScores()` on representative work items
-- `deprecation-lifecycle.test.ts` — AC #8 end-to-end lifecycle (declared → approaching → removal-pending → removed) on ProductA's `county-regional` variant; verifies G0 non-blocking invariant + 60d per-Soul override
+- `deprecation-lifecycle.test.ts` — AC #8 end-to-end lifecycle (declared → approaching → removal-pending → removed) on ProductA's `regional` variant; verifies G0 non-blocking invariant + 60d per-Soul override
 
 ProductD follow-up under RFC-0018 §11 is intentionally NOT filed here — RFC-0018's implementation plan must land first before its phase tasks are broken down (per CLAUDE.md scope-creep prevention guidance: present recommendation, don't self-authorize). Operator can file it when RFC-0018 OQ walkthrough closes.

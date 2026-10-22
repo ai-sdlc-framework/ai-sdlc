@@ -45,13 +45,13 @@ Add a `deprecatedAt` timestamp and `removalDate` to the variant in the Soul DID:
 
 ```yaml
 variants:
-  - id: small-utility
+  - id: small-org
     # ... existing fields ...
     deprecatedAt: "2026-06-01T00:00:00Z"
     removalDate: "2026-07-01T00:00:00Z"    # 30d from now (org default)
     deprecationReason: >
-      Migrating to consolidated 'municipal' variant that covers both small
-      and medium municipalities. Consumers should switch to spry-engage/municipal.
+      Migrating to consolidated 'standard' variant that covers both small
+      and medium organizations. Consumers should switch to acme-app/standard.
 ```
 
 Commit and push. The deprecation lifecycle engine emits `variant-deprecation-declared` to the Decision Catalog immediately on the next pipeline tick.
@@ -60,7 +60,7 @@ Commit and push. The deprecation lifecycle engine emits `variant-deprecation-dec
 
 The Decision Catalog entry surfaces in the next operator batch review. The operator should:
 
-1. Identify all work items with `targetedVariants: [.../variant:small-utility]` in their spec
+1. Identify all work items with `targetedVariants: [.../variant:small-org]` in their spec
 2. Notify relevant work item owners (by team convention — no automated notification yet)
 3. Set a migration milestone
 
@@ -68,7 +68,7 @@ A sweep query to find consumers:
 
 ```bash
 # Find all open work items targeting the deprecated variant
-grep -r "small-utility" backlog/tasks/ --include="*.yaml" --include="*.md" -l
+grep -r "small-org" backlog/tasks/ --include="*.yaml" --include="*.md" -l
 ```
 
 ### Step 3: Approaching window
@@ -127,7 +127,7 @@ The migration task generator requires `consumersStillReferencing` to be populate
 
 ```bash
 node pipeline-cli/bin/cli-variant-lifecycle.mjs scan-consumers \
-  --soul spry-engage --variant small-utility
+  --soul acme-app --variant small-org
 ```
 
 ---
