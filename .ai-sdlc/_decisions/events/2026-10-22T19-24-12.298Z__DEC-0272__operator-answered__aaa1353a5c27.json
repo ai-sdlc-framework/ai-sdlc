@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-22T19:24:12.298Z","decisionId":"DEC-0272","chosenOptionId":"accept-as-shipped","rationale":"Operator 2026-10-22: control already restored by AISDLC-970 (#1853); acceptance closes the retroactive record.","by":"planner"}
