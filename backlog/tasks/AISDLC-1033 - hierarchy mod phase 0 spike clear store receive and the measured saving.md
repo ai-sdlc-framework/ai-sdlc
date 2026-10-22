@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1033
 title: 'Hierarchy mod phase 0: spike a minimal hooks module (clear, $.store, session.receive, prompt.submit) and measure the saving'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-22'
 labels:
