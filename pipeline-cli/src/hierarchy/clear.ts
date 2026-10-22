@@ -25,9 +25,11 @@ import path from 'node:path';
 
 import { reportCapabilityOutcome } from '@ai-sdlc/reference';
 
+import { now } from '../clock.js';
 import { readInflightManifest } from '../dispatch/board.js';
 import type { EventEmitter } from './emit.js';
 import { listInflight } from './inflight.js';
+import { writeStartToken } from './start-token.js';
 import { readRosterChecked, unsafeEntryReason } from './roster.js';
 import { listWindows, ownershipRefusal, resolveSendTarget } from './tmux.js';
 import type { CommandRunner, RosterEntry } from './types.js';
@@ -208,6 +210,17 @@ export async function clearExecutor(opts: ClearOptions, deps: ClearDeps): Promis
     const settled = cur !== undefined && cur === prev && !cur.includes('esc to interrupt');
     prev = cur;
     if (settled) break;
+  }
+  // A typed start has no harness envelope: leave the token executor-start consumes (AISDLC-1028).
+  const issuer = roster.sessions.find(
+    (e) => e.name === opts.workerId && e.role === 'operator-dispatch' && e.status === 'running',
+  );
+  if (issuer) {
+    writeStartToken(deps.boardDir, name, {
+      issuerPid: issuer.pid,
+      issuerName: issuer.name,
+      issuedAt: now().toISOString(),
+    });
   }
   const restartFailure = type(deps.run, target, '/ai-sdlc executor');
   if (restartFailure) {

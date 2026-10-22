@@ -1044,7 +1044,15 @@ before the tick, and its digest never repeats an item that carries a ruling.
 **A rule gates the claim (AISDLC-1025).** A manifest whose ruling names an `--until` task without a
 success verdict in `done/` is skipped by `claim` (and listed as ineligible, with the reason), so no
 executor spends a run on it; the hold lifts by itself once that task is done. Likewise
-`executor-start` refuses with `unchecked-start` when it has neither `--sender-pid` nor `--sender-ref`.
+`executor-start` refuses with `unchecked-start` when it has neither `--sender-pid` nor `--sender-ref`
+and no valid start token.
+
+**Start token (AISDLC-1028).** `clear` types the executor command, which has no harness envelope, so a
+clear run by the dispatch caller first writes `<boardDir>/starts/<executor>.json`
+(`{ issuerPid, issuerName, issuedAt }`); the planner writes none. A flagless `executor-start` reads and
+deletes its own token (single use) and proceeds only when `issuerPid` is the roster's running dispatch
+pid and `issuedAt` is within 30 minutes; otherwise it refuses with `unchecked-start`. The
+`--sender-pid` / `--sender-ref` path and `check-sender` for later messages are unchanged.
 
 ## Restarting after a plugin upgrade
 

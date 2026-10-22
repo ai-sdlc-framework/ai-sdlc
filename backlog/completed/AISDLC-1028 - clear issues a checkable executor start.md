@@ -2,7 +2,7 @@
 id: AISDLC-1028
 title: >-
   A start issued by `cli-hierarchy clear` is checkable: the clear writes a start token that executor-start consumes when no sender flag is given
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22'
 labels:
@@ -41,11 +41,11 @@ dispatchable: true
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `cli-hierarchy clear` of an executor, run by the dispatch caller, writes `<boardDir>/starts/<executor-name>.json` with the issuer pid, name and time before typing the resume command (unit test); a planner caller writes none
-- [ ] #2 `executor-start` with no `--sender-pid` and no `--sender-ref` proceeds when a fresh single-use token for its own name carries the roster dispatch pid, and deletes the token; it refuses with `unchecked-start` on a missing, consumed, stale (older than 30 min) or mismatched token (unit tests for each)
-- [ ] #3 The `--sender-pid` / `--sender-ref` path is unchanged and still tested
-- [ ] #4 `ai-sdlc-plugin/commands/executor.md` and `docs/operations/cli-hierarchy.md` describe the token path and keep `check-sender` for later messages
-- [ ] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
+- [x] #1 `cli-hierarchy clear` of an executor, run by the dispatch caller, writes `<boardDir>/starts/<executor-name>.json` with the issuer pid, name and time before typing the resume command (unit test); a planner caller writes none
+- [x] #2 `executor-start` with no `--sender-pid` and no `--sender-ref` proceeds when a fresh single-use token for its own name carries the roster dispatch pid, and deletes the token; it refuses with `unchecked-start` on a missing, consumed, stale (older than 30 min) or mismatched token (unit tests for each)
+- [x] #3 The `--sender-pid` / `--sender-ref` path is unchanged and still tested
+- [x] #4 `ai-sdlc-plugin/commands/executor.md` and `docs/operations/cli-hierarchy.md` describe the token path and keep `check-sender` for later messages
+- [x] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
 <!-- AC:END -->
 
 ## Verification

@@ -30,8 +30,14 @@ import type { DispatchManifest } from '../dispatch/types.js';
 import { resolveCaller, type IdentityDeps } from './caller-identity.js';
 import { claimPreflight, type LeasePreflight } from './lease-preflight.js';
 import { readHold } from './hold.js';
-import { checkDispatchSender, checkRepoMatch, rosterProject } from './peer-guard.js';
+import {
+  checkDispatchSender,
+  type SenderCheck,
+  checkRepoMatch,
+  rosterProject,
+} from './peer-guard.js';
 import { readRosterChecked } from './roster.js';
+import { consumeStartToken } from './start-token.js';
 import type { GitRunner } from './trusted-root.js';
 
 /** Default seconds an idle executor blocks on the board before it hibernates. */
@@ -106,15 +112,24 @@ export async function executorStart(
     ...(deps.repoGit ? { git: deps.repoGit } : {}),
   });
   if (!repo.ok) throw new Error(repo.reason);
-  const sender = checkDispatchSender(roster.sessions, {
-    ...(opts.senderPid === undefined ? {} : { pid: opts.senderPid }),
-    ...(opts.senderRef === undefined ? {} : { ref: opts.senderRef }),
-  });
+  const dispatchPid = roster.sessions.find(
+    (s) => s.role === 'operator-dispatch' && s.status === 'running',
+  )?.pid;
+  const flagged = opts.senderPid !== undefined || opts.senderRef !== undefined;
+  // A start typed by `cli-hierarchy clear` carries a token instead of a sender flag (AISDLC-1028).
+  const tokenOk =
+    !flagged && consumeStartToken(opts.boardDir, self.name, dispatchPid, now().getTime());
+  const sender: SenderCheck = tokenOk
+    ? { ok: true, name: dispatch }
+    : checkDispatchSender(roster.sessions, {
+        ...(opts.senderPid === undefined ? {} : { pid: opts.senderPid }),
+        ...(opts.senderRef === undefined ? {} : { ref: opts.senderRef }),
+      });
   if (!sender.ok) throw new Error(sender.reason);
   if (sender.warning !== undefined) {
     // No claim: the start cannot say who issued it (AISDLC-1025).
     throw new Error(
-      `unchecked-start: no --sender-pid or --sender-ref was given, so the sender is unverified; nothing claimed. Report 'unchecked-start' to ${dispatch || 'dispatch'} and pass the pid or ref the harness reports.`,
+      `unchecked-start: no --sender-pid or --sender-ref was given and there is no fresh start token from cli-hierarchy clear, so the sender is unverified; nothing claimed. Report 'unchecked-start' to ${dispatch || 'dispatch'} and pass the pid or ref the harness reports.`,
     );
   }
 
