@@ -2,7 +2,7 @@
 id: AISDLC-1019
 title: >-
   Developer subagent must never push from the parent checkout: a stray push of main HEAD over a task branch auto-closed PR #1852
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22'
 labels:
@@ -39,14 +39,43 @@ dispatchable: true
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 The developer agent prompt carries one rendered rule (from `prompt-rules.js`) that git writes run from the task worktree cwd and that `gh pr reopen` is never run by the subagent
-- [ ] #2 The PreToolUse Bash hook denies a `git push` issued with the Pattern C parent as cwd to any `refs/heads/ai-sdlc/aisdlc-*` branch, naming the worktree path in the refusal (hook test)
-- [ ] #3 The pipeline's push helper refuses to push when `HEAD` equals `origin/main` and the target branch already has commits ahead of main (unit test)
-- [ ] #4 `docs/operations/backlog-and-execution-reference.md` documents the guard and the recovery for a clobbered task branch (lease push from the worktree, then `gh pr ready`)
-- [ ] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
+- [x] #1 The developer agent prompt carries one rendered rule (from `prompt-rules.js`) that git writes run from the task worktree cwd and that `gh pr reopen` is never run by the subagent
+- [x] #2 The PreToolUse Bash hook denies a `git push` issued with the Pattern C parent as cwd to any `refs/heads/ai-sdlc/aisdlc-*` branch, naming the worktree path in the refusal (hook test)
+- [x] #3 The pipeline's push helper refuses to push when `HEAD` equals `origin/main` and the target branch already has commits ahead of main (unit test)
+- [x] #4 `docs/operations/backlog-and-execution-reference.md` documents the guard and the recovery for a clobbered task branch (lease push from the worktree, then `gh pr ready`)
+- [x] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
 <!-- AC:END -->
 
 ## Verification
 
 - `node --test ai-sdlc-plugin/hooks/*.test.js`
 - `pnpm build && pnpm test && pnpm lint && pnpm format:check`
+
+## Final Summary
+
+## Summary
+Added the worktree-cwd prompt rule (rendered into developer.md). The parent-on-main PreToolUse hook now denies a task-branch push from the Pattern C parent and names the worktree. Step 11 now refuses a push that matches the clobber signature. The guard and the recovery steps are documented. Draft PR #1870 is open.
+
+## Changes
+- ai-sdlc-plugin/agents/developer.md
+- ai-sdlc-plugin/hooks/lib/parent-on-main.js
+- ai-sdlc-plugin/hooks/lib/prompt-rules.js
+- ai-sdlc-plugin/hooks/parent-on-main.test.mjs
+- pipeline-cli/src/steps/11-push-and-pr.ts
+- pipeline-cli/src/steps/11-push-and-pr.test.ts
+- docs/operations/backlog-and-execution-reference.md
+- backlog/tasks/AISDLC-1019 - developer subagent must never push from the parent checkout.md
+
+## Design decisions
+I made the stray-push mistake this task targets. My first push ran with the parent checkout as cwd. It created the remote task branch at main's HEAD (defe4b29f) and set the parent's upstream to that branch. I restored the parent's upstream to origin/main. I then lease-pushed from the worktree with git -C, and the remote branch is now 1820832fe. No PR existed at the time, so nothing was closed. The new hook would have denied that parent push. The task file diff is only the status change to In Progress. I did not run the coverage command.
+
+## Verification
+- `pnpm build` — passed
+- `pnpm test` — passed
+- `pnpm lint` — passed
+- `pnpm format:check` — passed
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+

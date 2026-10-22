@@ -177,6 +177,45 @@ describe('PreToolUse deny: evasion forms (round 2)', () => {
   });
 });
 
+describe('PreToolUse deny: push from the parent (AISDLC-1019)', () => {
+  const bash = (command, cwd) => pre('Bash', { command }, cwd);
+  it('denies a push to a task branch from the parent, naming the worktree', () => {
+    for (const c of [
+      'git push -u origin ai-sdlc/aisdlc-1',
+      'git push --force-with-lease origin HEAD:refs/heads/ai-sdlc/aisdlc-1-slug',
+      `git -C ${root} push origin main:refs/heads/ai-sdlc/aisdlc-1`,
+    ]) {
+      const r = bash(c, root);
+      assert.match(r, /Pushing 'ai-sdlc\/aisdlc-1/, c);
+      assert.ok(r.includes(wt), c);
+    }
+  });
+  it('falls back to .worktrees/<task-id> when the branch is not checked out', () => {
+    const r = bash('git push origin ai-sdlc/aisdlc-77-x', root);
+    assert.ok(r.includes(join(root, '.worktrees', 'aisdlc-77')));
+  });
+  it('allows pushes from the worktree, of main and of filing branches, and in plain repos', () => {
+    assert.equal(bash('git push origin ai-sdlc/aisdlc-1', wt), null);
+    assert.equal(bash('git push origin main', root), null);
+    assert.equal(bash('git push -u origin chore/file-task', root), null);
+    assert.equal(bash('git push origin ai-sdlc/aisdlc-1', plain), null);
+    assert.equal(bash('git status', root), null);
+  });
+  it('denies a bare push whose upstream is a task branch', () => {
+    git(root, 'update-ref', 'refs/remotes/origin/ai-sdlc/aisdlc-1', 'HEAD');
+    git(root, 'config', 'remote.origin.url', root);
+    git(root, 'config', 'remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*');
+    git(root, 'config', 'branch.main.remote', 'origin');
+    git(root, 'config', 'branch.main.merge', 'refs/heads/ai-sdlc/aisdlc-1');
+    try {
+      assert.match(bash('git push', root), /Pushing 'ai-sdlc\/aisdlc-1'/);
+    } finally {
+      git(root, 'config', '--unset', 'branch.main.merge');
+      git(root, 'config', '--unset', 'branch.main.remote');
+    }
+  });
+});
+
 describe('SessionStart check', () => {
   it('is ok on main, skips a worktree session and a plain repo', () => {
     assert.equal(lib.checkParentOnMain(root).status, 'ok');

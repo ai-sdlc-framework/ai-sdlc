@@ -212,6 +212,46 @@ function isLocalBranch(dir, name, git) {
   }
 }
 
+const TASK_BRANCH = /^(?:refs\/heads\/)?(ai-sdlc\/aisdlc-[A-Za-z0-9._-]*)$/;
+
+/** The task branch a push argument list targets from the parent, or null (AISDLC-1019). */
+function pushedTaskBranch(args, dir, git) {
+  const pos = args.filter((a) => !a.startsWith('-'));
+  const refspecs = pos.slice(1);
+  for (const spec of refspecs) {
+    const dst = spec.includes(':') ? spec.slice(spec.lastIndexOf(':') + 1) : spec;
+    const m = TASK_BRANCH.exec(dst.replace(/^\+/, ''));
+    if (m) return m[1];
+  }
+  if (refspecs.length === 0) {
+    // A bare push follows the parent's upstream; a stray upstream on a task branch clobbers it.
+    try {
+      const up = git(dir, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']);
+      const m = TASK_BRANCH.exec(up.replace(/^[^/]+\//, ''));
+      if (m) return m[1];
+    } catch {
+      /* no upstream */
+    }
+  }
+  return null;
+}
+
+/** The worktree path for a task branch: where it is checked out, else .worktrees/<task-id>. */
+function worktreeForBranch(root, branch, git) {
+  try {
+    const out = git(root, ['worktree', 'list', '--porcelain']);
+    let path = null;
+    for (const line of out.split('\n')) {
+      if (line.startsWith('worktree ')) path = line.slice(9);
+      else if (line === `branch refs/heads/${branch}` && path) return path;
+    }
+  } catch {
+    /* fall through */
+  }
+  const id = /^ai-sdlc\/(aisdlc-\d+(?:\.\d+)*)/.exec(branch);
+  return join(root, '.worktrees', id ? id[1] : '<task-id>');
+}
+
 /**
  * Inspect a Bash command for a branch create or a switch to a non-main branch
  * whose working directory is the parent checkout. Returns a reason or null.
@@ -226,6 +266,23 @@ function evaluateBashCommand(cmd, cwd, git) {
       continue;
     }
     const call = parseGitCall(words, dir);
+    if (call && call.sub === 'push') {
+      const root = findParentRoot(call.dir, git);
+      if (!root) continue;
+      let top = '';
+      try {
+        top = git(call.dir, ['rev-parse', '--show-toplevel']);
+      } catch {
+        top = '';
+      }
+      if (!top || realish(top) !== realish(root)) continue;
+      const branch = pushedTaskBranch(call.args, call.dir, git);
+      if (branch) {
+        const wtPath = worktreeForBranch(root, branch, git);
+        return `Pushing '${branch}' from the parent checkout (${root}) is refused: the parent holds main's commits and the push would overwrite the task branch (AISDLC-1019). Run the push from the task worktree: use cwd ${wtPath} (or git -C ${wtPath}).`;
+      }
+      continue;
+    }
     if (!call || (call.sub !== 'checkout' && call.sub !== 'switch')) continue;
     const creating = createsBranch(call.sub, call.args);
     const target = creating ? null : firstPositional(call.args);
