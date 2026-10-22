@@ -184,6 +184,16 @@ describe('UntrustedPrReportSchema — tamper rejection (AC#10)', () => {
     expect(result.error).toContain('schemaVersion');
   });
 
+  it('reports every zod issue, joined, from ZodError.issues (zod 4)', () => {
+    const tampered = { ...VALID_REPORT, schemaVersion: 'bad', headSha: 'abc123' };
+    const result = validateReport(tampered);
+    if (result.valid) throw new Error('Expected invalid');
+    const parts = result.error.split('; ');
+    expect(parts.length).toBeGreaterThanOrEqual(2);
+    expect(parts.some((p) => p.startsWith('schemaVersion: '))).toBe(true);
+    expect(parts.some((p) => p.startsWith('headSha: '))).toBe(true);
+  });
+
   it('rejects missing schemaVersion', () => {
     const { schemaVersion: _, ...noVersion } = VALID_REPORT;
     const result = validateReport(noVersion);
