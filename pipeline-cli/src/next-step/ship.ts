@@ -236,10 +236,22 @@ export async function preSignRebase(
       const cause = /uncommitted|unstaged|local changes|dirty/i.test(err)
         ? 'dirty-worktree'
         : 'rebase-failed';
+      let dirtyNote = '';
+      if (cause === 'dirty-worktree') {
+        const dirty = await ctx.runner('git', ['status', '--porcelain'], {
+          cwd: wt,
+          allowFailure: true,
+        });
+        const paths = dirty.stdout
+          .split('\n')
+          .map((l) => l.trim())
+          .filter((l) => l !== '');
+        dirtyNote = paths.length > 0 ? ` Dirty paths: ${paths.join(', ')}.` : '';
+      }
       return {
         kind: 'failed',
         reason:
-          `Step 10.5 rebase refused (${cause}): ${err || '(no git output)'}. ` +
+          `Step 10.5 rebase refused (${cause}): ${err || '(no git output)'}.${dirtyNote} ` +
           `Fix in ${wt}, then re-run /ai-sdlc execute ${state.taskId} (${cause})`,
         conflictingFiles: [],
         cause,

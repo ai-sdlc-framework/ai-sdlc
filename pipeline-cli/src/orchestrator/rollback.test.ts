@@ -177,6 +177,32 @@ describe('rollbackDispatch — status revert', () => {
   });
 });
 
+describe('rollbackDispatch — AISDLC-1026 completed / unknown status', () => {
+  it('leaves a backlog/completed task file byte-identical', async () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'rollback-test-'));
+    mkdirSync(join(workDir, 'backlog', 'completed'), { recursive: true });
+    const f = join(workDir, 'backlog', 'completed', 'aisdlc-70 - done.md');
+    const bytes = `---\nid: AISDLC-70\nstatus: Done\n---\n\nbody\n`;
+    writeFileSync(f, bytes, 'utf8');
+    const { runner } = makeRunner({});
+    const result = await rollbackDispatch(makeOptions({ workDir, runner, fromStatus: 'Done' }));
+    expect(result.statusReverted).toBe(false);
+    expect(readFileSync(f, 'utf8')).toBe(bytes);
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  it('writes no synthesized status when the pre-dispatch read failed', async () => {
+    const { workDir, taskFile } = makeFakeWorkDir('AISDLC-70', 'In Progress');
+    const before = readFileSync(taskFile, 'utf8');
+    const { runner } = makeRunner({});
+    const result = await rollbackDispatch(makeOptions({ workDir, runner, fromStatus: '' }));
+    expect(result.statusReverted).toBe(false);
+    expect(readFileSync(taskFile, 'utf8')).toBe(before);
+    expect(result.warnings.join(' ')).toMatch(/pre-dispatch status unknown/);
+    rmSync(workDir, { recursive: true, force: true });
+  });
+});
+
 describe('rollbackDispatch — worktree removal', () => {
   it('invokes `git worktree remove --force <path>` when the path exists', async () => {
     const wt = mkdtempSync(join(tmpdir(), 'rollback-wt-'));

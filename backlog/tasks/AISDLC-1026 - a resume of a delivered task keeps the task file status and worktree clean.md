@@ -2,7 +2,7 @@
 id: AISDLC-1026
 title: >-
   A resume of a delivered task never rewrites the completed task file, so the worktree stays clean for Step 10.5
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-22'
 labels:

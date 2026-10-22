@@ -177,11 +177,10 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
     expect(events[3]).toMatchObject({
       type: 'OrchestratorRollback',
       taskId: 'AISDLC-FAIL',
-      // Default fallback is "To Do" — the synthetic /tmp workDir has no
-      // backlog/ so readTaskStatus returns null and maybeRollback uses
-      // the conservative default.
-      fromStatus: 'To Do',
-      toStatus: 'To Do',
+      // AISDLC-1026 — the synthetic /tmp workDir has no backlog/, so the
+      // pre-dispatch read fails and no status is synthesized.
+      fromStatus: '',
+      toStatus: '',
       branchQuarantined: false,
     });
   });

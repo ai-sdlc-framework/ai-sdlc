@@ -1171,7 +1171,7 @@ export async function runOrchestratorTick(
   const settled = await Promise.allSettled(
     picks.map(async (taskId) => {
       const startedAt = now().toISOString();
-      const preDispatchStatus = readTaskStatus(config.workDir, taskId) ?? 'To Do';
+      const preDispatchStatus = readTaskStatus(config.workDir, taskId) ?? '';
       const claim = claimInFlight(inFlight, taskId, {
         startedAt,
         worktreePath: join(config.workDir, '.worktrees', taskId.toLowerCase()),
@@ -1889,7 +1889,7 @@ function detectAndEmitResumes(
  * AISDLC-177 — read the current `status:` value from a task file. Used
  * by the orchestrator to capture the pre-dispatch status BEFORE Step 4
  * flips it, so a later rollback knows what to revert TO. Returns null
- * when the file is missing / malformed (caller falls back to "To Do",
+ * when the file is missing / malformed (caller leaves the status empty so rollback skips the revert,
  * the conservative default).
  */
 function readTaskStatus(workDir: string, taskId: string): string | null {
