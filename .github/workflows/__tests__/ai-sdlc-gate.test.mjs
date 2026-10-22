@@ -89,6 +89,7 @@ function loadYaml(path) {
 // This oracle matches the workflow's actual `allowed-skips:` list.
 const ALLOWED_SKIPS = new Set([
   'build-test',
+  'pipeline-cli-macos',
   'integration',
   'attestation-gate',
   'independence-policy-gate',
@@ -163,6 +164,8 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       'detect',
       'lint',
       'build-test',
+      // AISDLC-1021: macOS run of the pipeline-cli suite on pipeline-cli/** changes.
+      'pipeline-cli-macos',
       'integration',
       // AISDLC-727: jobs moved from ci.yml so the gate is the only PR workflow.
       'backlog-drift',
@@ -438,6 +441,23 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     assert.ok(gate > cov, 'patch gate must run after coverage');
     assert.doesNotMatch(runs[gate], /--threshold/);
     assert.ok(workflow.jobs['pr-ready'].needs.includes('build-test'));
+  });
+
+  it('AISDLC-1021: pipeline-cli tests run on macos-latest only when pipeline-cli/** changes, feeding pr-ready', () => {
+    const job = workflow.jobs['pipeline-cli-macos'];
+    assert.equal(job['runs-on'], 'macos-latest');
+    assert.ok(job.needs === 'detect' || [].concat(job.needs).includes('detect'));
+    assert.match(job.if, /needs\.detect\.outputs\.pipeline_cli == 'true'/);
+    const filter = workflow.jobs.detect.steps.find((s) => s.id === 'pipeline-cli-filter');
+    assert.match(filter.with.filters, /pipeline-cli\/\*\*/);
+    assert.ok(workflow.jobs.detect.outputs.pipeline_cli);
+    assert.ok(workflow.jobs['pr-ready'].needs.includes('pipeline-cli-macos'));
+    const skips = workflow.jobs['pr-ready'].steps
+      .map((s) => String(s.with?.['allowed-skips'] ?? ''))
+      .join(',');
+    assert.match(skips, /pipeline-cli-macos/);
+    const runs = job.steps.map((s) => String(s.run ?? ''));
+    assert.ok(runs.some((r) => r.includes('@ai-sdlc/pipeline-cli') && r.includes('test')));
   });
 
   it('AC #3 (docs-only): only Detect Changes + Lint & Format are required when docs_only=true', () => {

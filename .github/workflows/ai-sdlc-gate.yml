@@ -106,6 +106,7 @@ jobs:
       go: ${{ steps.sdk-filter.outputs.go }}
       first_run: ${{ steps.sdk-filter.outputs.first_run }}
       rfcs: ${{ steps.rfcs-filter.outputs.rfcs }}
+      pipeline_cli: ${{ steps.pipeline-cli-filter.outputs.pipeline_cli }}
     steps:
       # AISDLC-963: Actions bucket remaining at the start of the run (end: pr-ready).
       - name: Report API quota remaining (start of run)
@@ -190,6 +191,14 @@ jobs:
           filters: |
             rfcs:
               - 'spec/rfcs/*.md'
+      # AISDLC-1021: drives the pipeline-cli-macos job (executors run macOS).
+      - id: pipeline-cli-filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          token: ''
+          filters: |
+            pipeline_cli:
+              - 'pipeline-cli/**'
       # Fourth filter (AISDLC-727): SDK + first-run-smoke path filters moved
       # here from ci.yml so this workflow is the only one that runs the suite
       # on pull_request events.
@@ -283,6 +292,26 @@ jobs:
           node scripts/check-pr-patch-coverage.mjs \
             --base "${{ github.event.pull_request.base.sha }}" \
             --head "${{ github.event.pull_request.head.sha }}"
+
+  # ── pipeline-cli on macOS (AISDLC-1021) ─────────────────────────────────
+  # Executors run on macOS (case-insensitive filesystem); ubuntu hides case
+  # mismatches such as the 2026-10-21 Step 10.5 outage. Runs only when
+  # pipeline-cli/** changes; feeds the pr-ready rollup (skip allowed).
+  pipeline-cli-macos:
+    name: pipeline-cli tests (macOS)
+    needs: detect
+    if: needs.detect.outputs.pipeline_cli == 'true' && needs.detect.outputs.docs_only != 'true' && needs.detect.outputs.records_only != 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm --filter @ai-sdlc/pipeline-cli test
 
   integration:
     name: Integration Tests
@@ -1464,6 +1493,7 @@ jobs:
         detect,
         lint,
         build-test,
+        pipeline-cli-macos,
         integration,
         backlog-drift,
         first-run-smoke,
@@ -1520,6 +1550,7 @@ jobs:
           allowed-skips: >-
             lint,
             build-test,
+            pipeline-cli-macos,
             integration,
             first-run-smoke,
             test-python,
