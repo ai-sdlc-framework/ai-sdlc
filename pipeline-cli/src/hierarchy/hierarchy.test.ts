@@ -954,6 +954,7 @@ describe('hierarchy status', () => {
       'webhook: off (no secret)',
       'scheduler: off',
       'context clear thresholds (tokens): planner 150000, operator-dispatch 120000, executor 120000',
+      expect.stringContaining('attestation and leaf files:'),
     ]);
   });
 

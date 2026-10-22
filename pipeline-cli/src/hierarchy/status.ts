@@ -6,6 +6,11 @@
 import { peekQueue } from '../dispatch/board.js';
 import { listUnbriefed } from './auto-brief.js';
 import type { QueueCounts } from '../dispatch/types.js';
+import {
+  attestationGrowth,
+  formatAttestationGrowth,
+  type AttestationGrowth,
+} from './attestation-growth.js';
 import { listInflight } from './inflight.js';
 import { listLanding } from './reconcile.js';
 import { paneNodeVersion, readNvmrc, versionMatches } from './node-pin.js';
@@ -72,6 +77,8 @@ export interface StatusResult {
   ghCallsPerHour?: Record<string, number>;
   /** Live remaining quota for the core and graphql buckets; absent when `gh` cannot say. */
   quota?: Quota;
+  /** Committed attestation envelope and leaf growth (AISDLC-968). */
+  attestationGrowth?: AttestationGrowth;
 }
 
 /** Join the roster with the registry, tmux and the board. */
@@ -170,8 +177,15 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
   } catch {
     /* gh missing or offline */
   }
+  let growth: AttestationGrowth | undefined;
+  try {
+    growth = attestationGrowth(deps.cwd, deps.run);
+  } catch {
+    /* unreadable directories must not break status */
+  }
   return {
     rows,
+    ...(growth ? { attestationGrowth: growth } : {}),
     ...(Object.keys(ghCallsPerHour).length > 0 ? { ghCallsPerHour } : {}),
     ...(quota ? { quota } : {}),
     board: peekQueue(deps.boardDir),
@@ -265,7 +279,10 @@ export function formatStatus(result: StatusResult): string[] {
 }
 
 function formatGhCalls(result: StatusResult): string[] {
-  if (!result.ghCallsPerHour && !result.quota) return [];
+  const growth = result.attestationGrowth
+    ? [formatAttestationGrowth(result.attestationGrowth)]
+    : [];
+  if (!result.ghCallsPerHour && !result.quota) return growth;
   const calls = result.ghCallsPerHour;
   const per = calls
     ? Object.entries(calls)
@@ -277,5 +294,5 @@ function formatGhCalls(result: StatusResult): string[] {
   const quota = q
     ? `remaining core ${q.core ?? '?'}, graphql ${q.graphql ?? '?'}`
     : 'remaining unknown';
-  return [`gh calls last hour: ${per}; ${quota}`];
+  return [`gh calls last hour: ${per}; ${quota}`, ...growth];
 }
