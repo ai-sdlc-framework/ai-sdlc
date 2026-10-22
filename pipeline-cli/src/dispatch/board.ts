@@ -980,7 +980,7 @@ export function peekQueueOrder(
 export function updateQueuedManifest(
   boardDir: string,
   taskId: string,
-  patch: Pick<DispatchManifest, 'priority' | 'resume'>,
+  patch: Pick<DispatchManifest, 'priority' | 'resume' | 'reorderNote'>,
 ): string {
   ensureBoardDirs(boardDir);
   if (existsSync(manifestPathIn(boardDir, 'inflight', taskId))) {
@@ -1004,6 +1004,7 @@ export function updateQueuedManifest(
   const next: DispatchManifest = { ...current };
   if (patch.priority !== undefined) next.priority = patch.priority;
   if (patch.resume !== undefined) next.resume = patch.resume;
+  if (patch.reorderNote !== undefined) next.reorderNote = patch.reorderNote;
   const mtime = statSync(target).mtime;
   const tmp = `${target}.tmp-${process.pid}`;
   writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n', 'utf-8');

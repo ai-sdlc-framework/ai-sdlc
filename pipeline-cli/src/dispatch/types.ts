@@ -91,6 +91,8 @@ export interface DispatchManifest {
    * task's existing worktree and branch instead of creating new ones.
    */
   resume?: ResumeFeedback;
+  /** Audit note from `reprioritize` on a manifest with no resume block; never read at execution (AISDLC-1015). */
+  reorderNote?: string;
   /** A planner ruling that holds the task; survives dispatch clears (AISDLC-903). */
   ruling?: TaskRuling;
   /** Forced releases of this task, with the reason given (AISDLC-800). */

@@ -4066,6 +4066,13 @@ export const dispatchManifestV1Schema = {
       },
       additionalProperties: false,
     },
+    reorderNote: {
+      type: 'string',
+      minLength: 1,
+      maxLength: 4000,
+      description:
+        'Audit note left by a reprioritize on a manifest with no resume block (AISDLC-1015). Never read at execution time.',
+    },
     resume: {
       type: 'object',
       description:

@@ -340,6 +340,16 @@ describe('resume branch sources (AISDLC-762.2)', () => {
     expect(h.logs.join('\n')).toContain('source: manifest');
   });
 
+  it('refuses a resume block whose branch does not exist, naming the manifest field (AISDLC-1015)', async () => {
+    writeInflight({}, 'ai-sdlc/aisdlc-900-never-ran');
+    const res = await initTask(h.ctx, 'AISDLC-900');
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.reason).toContain('inflight/AISDLC-900.dispatch.json has a `resume` block');
+    expect(res.reason).toContain("'ai-sdlc/aisdlc-900-never-ran' (field `branch`)");
+    expect(existsSync(join(h.root, '.worktrees', 'aisdlc-900'))).toBe(false);
+  });
+
   it('prefers the PR head ref recorded in the manifest over manifest.branch', async () => {
     pushShortBranch('feat/recorded');
     writeInflight({ prNumber: 5, prHeadRef: 'feat/recorded' }, 'ai-sdlc/other');

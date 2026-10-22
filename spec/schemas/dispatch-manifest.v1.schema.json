@@ -182,6 +182,12 @@
       },
       "additionalProperties": false
     },
+    "reorderNote": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000,
+      "description": "Audit note left by a reprioritize on a manifest with no resume block (AISDLC-1015). Never read at execution time."
+    },
     "resume": {
       "type": "object",
       "description": "Present when a finished task is sent back for another round. The executor reads it before running the task and the pipeline re-enters the task's existing worktree and branch.",

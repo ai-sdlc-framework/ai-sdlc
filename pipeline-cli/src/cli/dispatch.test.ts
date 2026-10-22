@@ -1786,15 +1786,26 @@ describe('runDispatchCli ordering commands', () => {
       expect(after).toBe(before.replace('"priority": 3', '"priority": 0'));
     });
 
-    it('sets resume.note, and refuses a note over the limit', async () => {
+    it('stores the note in reorderNote without creating a resume block, and refuses a note over the limit', async () => {
       put('T-1', {}, 10);
       const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
       expect(await run('T-1', '--priority', '0', '--note', 'do the fix first')).toBe(0);
-      expect(JSON.parse(readFileSync(q('T-1'), 'utf-8')).resume.note).toBe('do the fix first');
+      const written = JSON.parse(readFileSync(q('T-1'), 'utf-8'));
+      expect(written.resume).toBeUndefined();
+      expect(written.reorderNote).toBe('do the fix first');
       const before = readFileSync(q('T-1'), 'utf-8');
       expect(await run('T-1', '--priority', '5', '--note', 'x'.repeat(4001))).toBe(1);
       expect(readFileSync(q('T-1'), 'utf-8')).toBe(before);
       err.mockRestore();
+    });
+
+    it('updates only resume.note when a resume block already exists (AISDLC-1015)', async () => {
+      const resume = { note: 'old', resumedAt: '2026-10-11T00:00:00.000Z', resumedBy: 'dispatch' };
+      put('T-1', { resume }, 10);
+      expect(await run('T-1', '--priority', '0', '--note', 'new')).toBe(0);
+      const written = JSON.parse(readFileSync(q('T-1'), 'utf-8'));
+      expect(written.resume).toEqual({ ...resume, note: 'new' });
+      expect(written.reorderNote).toBeUndefined();
     });
 
     it('refuses inflight, done, failed, unqueued and a missing priority', async () => {
