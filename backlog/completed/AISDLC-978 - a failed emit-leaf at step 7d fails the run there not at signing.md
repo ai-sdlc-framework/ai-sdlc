@@ -48,7 +48,7 @@ The old test that expected warnings is now two tests: v6 default fails closed, a
 
 ## Verification
 - `pnpm build` — passed
-- `pnpm test` — waived
+- `pnpm test` — passed (pipeline-cli: 521 files, 11928 passed, 13 skipped, 0 failed; orchestrator: 5192 passed, 2 skipped; plugin hooks: 3534 tests, 3533 pass, 0 fail)
 - `pnpm lint` — passed
 - `pnpm format:check` — passed
 - 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
