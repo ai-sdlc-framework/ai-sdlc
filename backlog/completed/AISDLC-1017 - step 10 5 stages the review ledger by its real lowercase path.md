@@ -2,7 +2,7 @@
 id: AISDLC-1017
 title: >-
   Step 10.5 stages the review ledger by its real lowercase path (ledger-not-staged on every task since AISDLC-967)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-21'
 labels:
@@ -38,14 +38,26 @@ dispatchable: true
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `ship.ts` derives the ledger path from `reviewsLedgerPath` (or the same lowercase helper) and no longer concatenates `state.taskId` into a `.jsonl` filename
-- [ ] #2 Step 10.5 on a worktree with an untracked, unignored `.ai-sdlc/reviews/<id-lower>.jsonl` stages and commits it and does not return `ledger-not-staged` (test with an uppercase task id)
-- [ ] #3 Step 10.5 on an ignored ledger still returns `ledger-not-staged` naming the ignore rule (AISDLC-967 test stays green)
-- [ ] #4 The `ledger-not-staged` message prints the exact path checked
-- [ ] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
+- [x] #1 `ship.ts` derives the ledger path from `reviewsLedgerPath` (or the same lowercase helper) and no longer concatenates `state.taskId` into a `.jsonl` filename
+- [x] #2 Step 10.5 on a worktree with an untracked, unignored `.ai-sdlc/reviews/<id-lower>.jsonl` stages and commits it and does not return `ledger-not-staged` (test with an uppercase task id)
+- [x] #3 Step 10.5 on an ignored ledger still returns `ledger-not-staged` naming the ignore rule (AISDLC-967 test stays green)
+- [x] #4 The `ledger-not-staged` message prints the exact path checked
+- [x] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
 <!-- AC:END -->
 
 ## Verification
 
 - `pnpm --filter @ai-sdlc/pipeline-cli test -- ship`
 - `pnpm build && pnpm test && pnpm lint && pnpm format:check`
+
+## Final Summary
+
+Step 10.5 now derives the review ledger path from `reviewsLedgerPath` (lowercase, worktree-relative) instead of concatenating the uppercase task id, so the ledger is staged under its real name and the AISDLC-967 `ledger-not-staged` check no longer fires on a stageable file.
+
+Tests: `writeLedger()` writes the lowercase file; a mixed-case task id test asserts `git add` and `ls-files --error-unmatch` use `.ai-sdlc/reviews/aisdlc-900.jsonl`; a second test asserts the `ledger-not-staged` reason and the `check-ignore` argv carry the exact path checked.
+
+Five steps (DEC-0090): requirement questioned, hand-built path deleted, one spelling via `reviewsLedgerPath`, one-time recovery recorded, regression tests automated.
+
+Reviews: correctness approved in round 2 after two test findings were fixed; security approved in both rounds.
+
+One-time recovery: this task ran on the parent build that still had the bug, so the lowercase ledger was committed by hand and sign, push and `gh pr ready` were done manually (planner ruling 2026-10-21).
