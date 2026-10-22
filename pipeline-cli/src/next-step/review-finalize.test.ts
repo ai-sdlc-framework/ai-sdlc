@@ -9,6 +9,7 @@ import {
   finalizeReview,
   parseReviewReports,
   resolveAgentIdFromMarkers,
+  detectReusedContexts,
   type ReviewerReport,
 } from './review-finalize.js';
 import type { NextStepState, ReviewRoundState, SpawnedReviewer } from './types.js';
@@ -164,6 +165,50 @@ describe('resolveAgentIdFromMarkers', () => {
   });
 });
 
+describe('fresh-context enforcement (AISDLC-995)', () => {
+  const mk = (id: string, seq?: number): void => {
+    const dir = join(state.worktreePath, '.ai-sdlc', 'subagent-sessions');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, `${id}.json`),
+      JSON.stringify({ agentId: id, agentType: 'r', parentSessionId: 's', spawnSeq: seq }),
+    );
+  };
+
+  it('refuses a duplicate agent id', () => {
+    mk('a', 1);
+    const r = detectReusedContexts(state.worktreePath, [
+      { agent: 'x', agentId: 'a' },
+      { agent: 'y', agentId: 'a' },
+    ]);
+    expect([...r.keys()]).toEqual(['y']);
+    expect(r.get('y')).toMatch(/reused agent id/);
+  });
+
+  it('refuses a non-increasing spawn sequence', () => {
+    mk('a', 5);
+    mk('b', 3);
+    const r = detectReusedContexts(state.worktreePath, [
+      { agent: 'x', agentId: 'a' },
+      { agent: 'y', agentId: 'b' },
+    ]);
+    expect(r.get('y')).toMatch(/not greater/);
+  });
+
+  it('accepts increasing sequences and markers without a sequence', () => {
+    mk('a', 1);
+    mk('b', 2);
+    mk('c');
+    expect(
+      detectReusedContexts(state.worktreePath, [
+        { agent: 'x', agentId: 'a' },
+        { agent: 'y', agentId: 'b' },
+        { agent: 'z', agentId: 'c' },
+      ]).size,
+    ).toBe(0);
+  });
+});
+
 describe('finalizeReview', () => {
   const stagedRejection = {
     agentId: 'staged-synthesizer',
@@ -172,6 +217,21 @@ describe('finalizeReview', () => {
     findings: [{ severity: 'major' as const, message: 'staged false positive' }],
     summary: 'staged says no',
   };
+
+  it('fails the round closed with a critical finding when two reviewers share an agent id (AISDLC-995)', async () => {
+    markPersisted();
+    const st = makeState(h.root, { review: review(), iteration: 1 });
+    const reports = approvals().map((r) => ({ ...r, agentId: 'same-id' }));
+    const res = await finalizeReview(h.ctx, st, reports);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.verdict.decision).not.toBe('APPROVED');
+    const crit = res.verdict.verdicts
+      .flatMap((v) => v.findings)
+      .filter((f) => f.severity === 'critical');
+    expect(crit.length).toBeGreaterThan(0);
+    expect(crit[0].message).toMatch(/context is not fresh/);
+  });
 
   it('keeps a staged CHANGES_REQUESTED advisory next to classic approvals (DEC-0149)', async () => {
     markPersisted();

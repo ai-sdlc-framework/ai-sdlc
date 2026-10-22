@@ -20,6 +20,7 @@ import { execSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { checkOwnWorktreeForOperator } from '../hierarchy/lease-policy.js';
+import { readInflightManifest, readQueuedManifest, TASK_ID_RE } from '../dispatch/board.js';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { withWorktreeMutex, type WithWorktreeMutexOptions } from '../runtime/worktree-mutex.js';
 import type { SetupWorktreeResult } from '../types.js';
@@ -33,6 +34,8 @@ function isFlagEnabled(value: string | undefined): boolean {
 }
 
 export interface SetupWorktreeOptions {
+  /** AISDLC-995 — dispatch board dir for the one-worktree-per-task check (default `<workDir>/.ai-sdlc/dispatch`). */
+  boardDir?: string;
   /**
    * AISDLC-770 — `--task-from-file` path. The file is not on main, so the
    * fresh `origin/main` worktree does not hold it; Step 3 copies it to
@@ -116,6 +119,41 @@ export interface SetupWorktreeOptions {
  */
 export function isAutoCleanupEnabled(): boolean {
   return isFlagEnabled(process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP);
+}
+
+/**
+ * AISDLC-995 — one worktree per task id. Returns the path of an existing
+ * worktree bound to the task (named on the board, or listed by
+ * `git worktree list` under a branch/dir carrying the task id) that is not
+ * the one being created; null when there is none.
+ */
+export async function findExistingTaskWorktree(
+  runner: Runner,
+  opts: SetupWorktreeOptions,
+): Promise<string | null> {
+  const want = resolve(opts.worktreePath);
+  const boardDir = opts.boardDir ?? join(opts.workDir, '.ai-sdlc', 'dispatch');
+  const boardManifest = TASK_ID_RE.test(opts.taskId)
+    ? (readInflightManifest(boardDir, opts.taskId) ?? readQueuedManifest(boardDir, opts.taskId))
+    : undefined;
+  if (boardManifest?.worktree) {
+    const wt = resolve(opts.workDir, boardManifest.worktree);
+    if (wt !== want && existsSync(wt)) return wt;
+  }
+  const lower = opts.taskId.toLowerCase();
+  const list = await runner('git', ['worktree', 'list', '--porcelain'], {
+    cwd: opts.workDir,
+    allowFailure: true,
+  });
+  if (list.code !== 0) return null;
+  const bound = (v: string): boolean => v === lower || v.startsWith(`${lower}-`);
+  for (const block of list.stdout.split(/\n\s*\n/)) {
+    const path = /^worktree (.+)$/m.exec(block)?.[1];
+    if (!path || resolve(path) === want) continue;
+    const branch = /^branch refs\/heads\/(.+)$/m.exec(block)?.[1] ?? '';
+    if (bound(basename(path)) || bound(basename(branch))) return path;
+  }
+  return null;
 }
 
 /** AISDLC-224 — detect "branch already exists" stderr pattern. */
@@ -583,6 +621,14 @@ export async function setupWorktree(opts: SetupWorktreeOptions): Promise<SetupWo
       timeout: 30_000,
       allowFailure: true,
     });
+  }
+
+  const existing = await findExistingTaskWorktree(runner, opts);
+  if (existing) {
+    throw new Error(
+      `Step 3 refused for ${opts.taskId}: a worktree already exists for this task at ${existing}. ` +
+        `One worktree per task: resume it (\`resume: true\`) or run \`/ai-sdlc cleanup ${opts.taskId}\` first.`,
+    );
   }
 
   // Idempotent mkdir of `.worktrees/`

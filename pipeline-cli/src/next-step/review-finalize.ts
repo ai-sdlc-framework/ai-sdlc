@@ -107,18 +107,7 @@ export function parseReviewReports(text: string): ReviewerReport[] {
  * the role (another task's reviewer, an earlier round) returns `null`.
  */
 export function resolveAgentIdFromMarkers(worktreePath: string, agent: string): string | null {
-  const roots = [worktreePath];
-  try {
-    const common = execFileSync('git', ['rev-parse', '--git-common-dir'], {
-      cwd: worktreePath,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-    const main = dirname(resolve(worktreePath, common));
-    if (!roots.includes(main)) roots.push(main);
-  } catch {
-    // not a git checkout (tests): worktree only
-  }
+  const roots = markerRoots(worktreePath);
   const bare = (t: unknown): string =>
     String(t ?? '')
       .split(':')
@@ -146,6 +135,84 @@ export function resolveAgentIdFromMarkers(worktreePath: string, agent: string): 
     }
   }
   return found.size === 1 ? [...found][0] : null;
+}
+
+/**
+ * AISDLC-995: fresh-context enforcer. A reviewer is refused when its agent id
+ * was already used by an earlier reviewer of the round, or its marker's spawn
+ * sequence is not greater than the previous reviewer's. Markers without a
+ * `spawnSeq` (written before AISDLC-995) skip the sequence check only.
+ * Returns agent name -> refusal message.
+ */
+export function detectReusedContexts(
+  worktreePath: string,
+  ordered: Array<{ agent: string; agentId: string }>,
+): Map<string, string> {
+  const refused = new Map<string, string>();
+  const seqById = new Map<string, number>();
+  for (const root of markerRoots(worktreePath)) {
+    const dir = join(root, '.ai-sdlc', 'subagent-sessions');
+    let files: string[];
+    try {
+      files = readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const f of files) {
+      if (!f.endsWith('.json')) continue;
+      try {
+        const m = JSON.parse(readFileSync(join(dir, f), 'utf8')) as {
+          agentId?: string;
+          spawnSeq?: unknown;
+        };
+        if (m.agentId && typeof m.spawnSeq === 'number') seqById.set(m.agentId, m.spawnSeq);
+      } catch {
+        // skip unreadable marker
+      }
+    }
+  }
+  const seen = new Map<string, string>();
+  let prevSeq: number | null = null;
+  let prevAgent = '';
+  for (const { agent, agentId } of ordered) {
+    const dup = seen.get(agentId);
+    if (dup !== undefined) {
+      refused.set(
+        agent,
+        `reviewer ${agent} reused agent id ${agentId} already used by ${dup}; context is not fresh`,
+      );
+    } else {
+      seen.set(agentId, agent);
+    }
+    const seq = seqById.get(agentId);
+    if (seq !== undefined) {
+      if (prevSeq !== null && seq <= prevSeq && !refused.has(agent)) {
+        refused.set(
+          agent,
+          `reviewer ${agent} spawn sequence ${seq} is not greater than ${prevAgent}'s ${prevSeq}; context is not fresh`,
+        );
+      }
+      prevSeq = seq;
+      prevAgent = agent;
+    }
+  }
+  return refused;
+}
+
+function markerRoots(worktreePath: string): string[] {
+  const roots = [worktreePath];
+  try {
+    const common = execFileSync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: worktreePath,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    const main = dirname(resolve(worktreePath, common));
+    if (!roots.includes(main)) roots.push(main);
+  } catch {
+    // not a git checkout (tests): worktree only
+  }
+  return roots;
 }
 
 export type ReviewFinalizeResult =
@@ -226,6 +293,10 @@ export async function finalizeReview(
     }
     agentIds.set(sp.agent, id);
   }
+  const reused = detectReusedContexts(
+    state.worktreePath,
+    [...agentIds].map(([agent, agentId]) => ({ agent, agentId })),
+  );
 
   for (const sp of review.spawned) {
     const report = reports.find((r) => r.agent === sp.agent || r.agent === sp.reviewer);
@@ -242,6 +313,18 @@ export async function finalizeReview(
           },
         ],
         summary: 'no verdict reported',
+      });
+      continue;
+    }
+    const refusal = reused.get(sp.agent);
+    if (refusal) {
+      // Same shape as the missing-reviewer path: a critical finding, round fails closed.
+      verdicts.push({
+        agentId: sp.agent,
+        harness: sp.harness,
+        approved: false,
+        findings: [{ severity: 'critical', message: refusal }],
+        summary: 'reviewer context not fresh',
       });
       continue;
     }

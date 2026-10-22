@@ -122,6 +122,10 @@ spec:
                  node: { kind: agent, role: "${item.role}", fresh: true } }
     aggregate: { kind: step,   impl: aggregate-verdicts, frozen: true }
     ship:      { kind: step,   impl: ship, frozen: [never-land] }
+    # Frozen entries pending activation (AISDLC-995 built the enforcers; phase 4 adds the labels):
+    #   fresh-context        -> pipeline-cli/src/next-step/review-finalize.ts (detectReusedContexts)
+    #                           + ai-sdlc-plugin/hooks/subagent-start.js (parentSessionId, spawnSeq)
+    #   one-worktree-per-task -> pipeline-cli/src/steps/03-setup-worktree.ts (findExistingTaskWorktree)
   edges:
     - validate -> deps -> branch -> worktree -> develop -> verify
     - verify -> select -> review -> aggregate

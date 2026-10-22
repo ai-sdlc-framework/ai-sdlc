@@ -382,3 +382,27 @@ describe('ai-sdlc-plugin subagent-start hook — compact form (AISDLC-651.2)', (
     assert.ok(ctx.length < 2200, `subagent governance block grew to ${ctx.length} chars`);
   });
 });
+
+describe('ai-sdlc-plugin subagent-start hook — AISDLC-995 fresh-context fields', () => {
+  it('records parentSessionId and a strictly increasing spawnSeq per spawn', () => {
+    const projectDir = join(tmpdir(), `subagent-start-seq-${Date.now()}`);
+    mkdirSync(projectDir, { recursive: true });
+    try {
+      for (const id of ['r1', 'r2', 'r3']) {
+        runHook(
+          projectDir,
+          JSON.stringify({ agent_id: id, agent_type: 'code-reviewer', session_id: 'sess-9' }),
+        );
+      }
+      const dir = join(projectDir, '.ai-sdlc', 'subagent-sessions');
+      const seqs = ['r1', 'r2', 'r3'].map((id) => {
+        const m = JSON.parse(readFileSync(join(dir, `${id}.json`), 'utf-8'));
+        assert.equal(m.parentSessionId, 'sess-9');
+        return m.spawnSeq;
+      });
+      assert.ok(seqs[0] < seqs[1] && seqs[1] < seqs[2], `not increasing: ${seqs}`);
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+});

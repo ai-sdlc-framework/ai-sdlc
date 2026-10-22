@@ -38,7 +38,7 @@
  * absent stdin still fails safe) fixes the hook itself.
  */
 
-const { readFileSync, readSync, existsSync, mkdirSync, writeFileSync } = require('fs');
+const { readFileSync, readSync, existsSync, mkdirSync, writeFileSync, readdirSync } = require('fs');
 const { join } = require('path');
 const { execSync } = require('child_process');
 const { randomUUID } = require('crypto');
@@ -253,6 +253,27 @@ function parseListField(yaml, field) {
  * `agentType` is already reviewer-eligible-looking (non-null) is not
  * overwritten with one that has no `agentType`.
  */
+function nextSpawnSeq(sessionsDir) {
+  const dir = join(sessionsDir, '..', 'subagent-spawn-seq');
+  mkdirSync(dir, { recursive: true });
+  // Claim the next free `.seq-<n>` file with exclusive create; atomic across
+  // parallel reviewer spawns. Kept outside subagent-sessions/ so marker readers never see it.
+  let n = 0;
+  for (const f of readdirSync(dir)) {
+    const m = /^\.seq-(\d+)$/.exec(f);
+    if (m) n = Math.max(n, Number(m[1]));
+  }
+  for (;;) {
+    n += 1;
+    try {
+      writeFileSync(join(dir, `.seq-${n}`), '', { flag: 'wx' });
+      return n;
+    } catch (e) {
+      if (!e || e.code !== 'EEXIST') throw e;
+    }
+  }
+}
+
 function writeSubagentSessionMarker(projectDir, stdinRaw) {
   try {
     let agentId;
@@ -291,9 +312,26 @@ function writeSubagentSessionMarker(projectDir, stdinRaw) {
       }
     }
 
+    // AISDLC-995: fresh-context evidence. `parentSessionId` is the spawning
+    // session; `spawnSeq` is unique and monotonic per project (atomic claim).
+    let parentSessionId = null;
+    try {
+      const payload = JSON.parse(stdinRaw);
+      if (payload && typeof payload.session_id === 'string' && payload.session_id) {
+        parentSessionId = payload.session_id;
+      }
+    } catch {
+      // not JSON
+    }
     writeFileSync(
       markerPath,
-      JSON.stringify({ agentId, agentType, firedAt: new Date().toISOString() }) + '\n',
+      JSON.stringify({
+        agentId,
+        agentType,
+        firedAt: new Date().toISOString(),
+        parentSessionId,
+        spawnSeq: nextSpawnSeq(dir),
+      }) + '\n',
       { encoding: 'utf-8' },
     );
   } catch {
