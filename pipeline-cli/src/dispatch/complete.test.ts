@@ -9,7 +9,9 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { completeTask } from './complete.js';
+import { claimNext, collectVerdicts, readInflightManifest, writeManifest } from './board.js';
+import { completeLandedIterateNeeded, completeTask } from './complete.js';
+import type { DispatchManifest } from './types.js';
 
 let board: string;
 beforeEach(() => {
@@ -63,5 +65,41 @@ describe('completeTask validation', () => {
       expect(message.includes('\n') || message.includes('\u001b')).toBe(false);
       expect(message.length).toBeLessThan(200);
     }
+  });
+});
+
+describe('completeLandedIterateNeeded (AISDLC-1030)', () => {
+  function claim(taskId: string): void {
+    const m: DispatchManifest = {
+      schemaVersion: 'v1',
+      taskId,
+      branch: `ai-sdlc/${taskId.toLowerCase()}`,
+      worktree: `.worktrees/${taskId.toLowerCase()}`,
+      baseSha: 'abc1234',
+      workerKind: 'in-session-agent',
+      dispatchedAt: '2026-05-20T10:00:00.000Z',
+      dispatchedBy: 'test',
+      spec: { taskFile: `backlog/tasks/${taskId.toLowerCase()}.md`, verifyCommands: [] },
+    };
+    writeManifest(board, m);
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'executor-a' });
+  }
+
+  it('completes an inflight iterate-needed task as success with landed', () => {
+    claim('AISDLC-701');
+    completeTask(board, { ...base, outcome: 'iterate-needed', prNumber: 5 });
+    expect(readInflightManifest(board, 'AISDLC-701')).toBeDefined();
+    expect(completeLandedIterateNeeded(board, 'AISDLC-701', 5)).toBe(true);
+    const v = collectVerdicts(board).find((x) => x.taskId === 'AISDLC-701');
+    expect(v).toMatchObject({ outcome: 'success', prNumber: 5, workerId: 'executor-a' });
+    expect(v?.landed).toBeDefined();
+    expect(readInflightManifest(board, 'AISDLC-701')).toBeUndefined();
+  });
+
+  it('leaves a task that already holds a success verdict alone', () => {
+    claim('AISDLC-701');
+    completeTask(board, { ...base, outcome: 'success', prNumber: 5 });
+    expect(completeLandedIterateNeeded(board, 'AISDLC-701', 5)).toBe(false);
+    expect(completeLandedIterateNeeded(board, 'bad id', 5)).toBe(false);
   });
 });

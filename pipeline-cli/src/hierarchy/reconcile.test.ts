@@ -4,7 +4,8 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { writeVerdict } from '../dispatch/board.js';
+import { claimNext, collectVerdicts, writeManifest, writeVerdict } from '../dispatch/board.js';
+import { completeTask } from '../dispatch/complete.js';
 import { PR_STATES, type PrState } from './pr-state.js';
 import {
   actionCommands,
@@ -301,6 +302,39 @@ describe('ownership (AC4)', () => {
     expect(readLanding(board, 10)?.landed).toBe('2026-10-14T00:00:00.000Z');
     expect(execute).not.toHaveBeenCalled();
     expect(summariseLanding(board)).toBe('');
+  });
+
+  it('completes an inflight iterate-needed task whose PR merged and names it', () => {
+    writeManifest(board, {
+      schemaVersion: 'v1',
+      taskId: 'AISDLC-1',
+      branch: 'ai-sdlc/aisdlc-1-x',
+      worktree: '.worktrees/aisdlc-1',
+      baseSha: 'abc1234',
+      workerKind: 'in-session-agent',
+      dispatchedAt: '2026-10-13T00:00:00.000Z',
+      dispatchedBy: 'test',
+      spec: { taskFile: 'backlog/tasks/aisdlc-1.md', verifyCommands: [] },
+    });
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'executor-1' });
+    completeTask(board, {
+      taskId: 'AISDLC-1',
+      outcome: 'iterate-needed',
+      prNumber: 10,
+      workerId: 'executor-1',
+    });
+    const report = reconcile([taskPr({ merged: true })], {
+      boardDir: board,
+      execute: () => ({ ran: true }),
+      now: fixedNow,
+    });
+    expect(report.acted).toContainEqual(
+      expect.objectContaining({ pr: 10, action: 'auto-complete', ran: true }),
+    );
+    expect(collectVerdicts(board).find((v) => v.taskId === 'AISDLC-1')).toMatchObject({
+      outcome: 'success',
+      prNumber: 10,
+    });
   });
 
   it('takes over from a dead executor', () => {

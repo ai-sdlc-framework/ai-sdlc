@@ -27,6 +27,7 @@ import { gateRunListArgs, parseGateRunId } from './gate-run.js';
 import { classifyPr, type PrCheck, type PrFacts, type PrState } from './pr-state.js';
 import { collectVerdicts, readInflightManifest, readQueuedManifest } from '../dispatch/board.js';
 import { DECISIONS_SYNC_BRANCH } from '../decisions/remote-persist.js';
+import { completeLandedIterateNeeded } from '../dispatch/complete.js';
 import { clearRuling, readRuling } from '../dispatch/ruling.js';
 import type { TaskRuling } from '../dispatch/types.js';
 import type { CommandRunner } from './types.js';
@@ -743,6 +744,19 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
     if (result.failed) record.actionFailed = true;
     writeLanding(opts.boardDir, record);
     report.records.push(record);
+    // A merged PR completes an iterate-needed task and frees its slot (AISDLC-1030).
+    if (
+      d.state === 'merged' &&
+      f.taskId &&
+      completeLandedIterateNeeded(opts.boardDir, f.taskId, f.prNumber, now)
+    ) {
+      report.acted.push({
+        pr: f.prNumber,
+        action: 'auto-complete',
+        ran: true,
+        note: `${f.taskId} completed as success: PR merged while iterate-needed`,
+      });
+    }
     const withheld =
       d.action === 'route-to-planner' &&
       !routeOnce(f.prNumber, f.headSha, d.failingLine ?? d.state);

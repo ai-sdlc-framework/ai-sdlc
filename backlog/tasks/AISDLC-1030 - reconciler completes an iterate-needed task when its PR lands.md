@@ -2,7 +2,7 @@
 id: AISDLC-1030
 title: >-
   The landing transition completes a task whose last verdict is iterate-needed when its PR merges
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-22'
 labels:

@@ -12,7 +12,8 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { writeVerdict } from '../dispatch/board.js';
+import { claimNext, collectVerdicts, writeManifest, writeVerdict } from '../dispatch/board.js';
+import { completeTask } from '../dispatch/complete.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
 import {
   createLander,
@@ -188,6 +189,36 @@ describe('landEligiblePrs', () => {
       })),
     );
     expect(existsSync(path.join(board, 'notes'))).toBe(false);
+  });
+});
+
+describe('landing an iterate-needed task (AISDLC-1030)', () => {
+  it('completes it as success when its PR is squashed, and names it', async () => {
+    writeManifest(board, {
+      schemaVersion: 'v1',
+      taskId: 'AISDLC-7',
+      branch: 'ai-sdlc/aisdlc-7-thing',
+      worktree: '.worktrees/aisdlc-7',
+      baseSha: 'abc1234',
+      workerKind: 'in-session-agent',
+      dispatchedAt: '2026-10-15T00:00:00.000Z',
+      dispatchedBy: 'test',
+      spec: { taskFile: 'backlog/tasks/aisdlc-7.md', verifyCommands: [] },
+    });
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'executor-1' });
+    completeTask(board, {
+      taskId: 'AISDLC-7',
+      outcome: 'iterate-needed',
+      prNumber: 7,
+      workerId: 'executor-1',
+    });
+    const r = await landEligiblePrs(
+      deps(fakeGh([pr(7)], 'false'), async () => ({ merged: true, armed: false, reason: 'ok' })),
+    );
+    expect(r.autoCompleted).toEqual(['AISDLC-7']);
+    const v = collectVerdicts(board).find((x) => x.taskId === 'AISDLC-7');
+    expect(v).toMatchObject({ outcome: 'success', prNumber: 7 });
+    expect(v?.landed).toBeDefined();
   });
 });
 

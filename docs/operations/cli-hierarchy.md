@@ -917,7 +917,12 @@ list` and `gh pr view` for checks), classifies each with `pipeline-cli/src/hiera
 (`classifyPr`, unchanged), writes `landing/<pr>.json` under the board and runs the one action
 the table names. `--facts` reads a JSON array of PR facts instead of GitHub. It is idempotent:
 facts that match the stored state, action, head SHA and owner change no file and run no
-action. A PR that merged is detected through its record and marked `landed`.
+action. A PR that merged is detected through its record and marked `landed`. When the merged
+PR's task is inflight with an `iterate-needed` verdict, the reconciler completes it as `success`
+(inflight worker, PR number, `landed` stamp), which frees the executor's slot; the pass names
+the task in `acted` (`auto-complete`). The landing step does the same for a PR it squashes now
+(`autoCompleted` in the tick's `landed` report). A task already in `done/` only gets the stamp
+(AISDLC-1030).
 
 **Kinds.** A PR on a docs branch (`ai-sdlc/file-*`, `docs/*`) or with
 no task id is a docs PR; the PR on branch `ai-sdlc/decisions-sync` is its own `decisions-sync` kind
