@@ -1,8 +1,8 @@
 ---
 id: RFC-0058
 title: Session Hierarchy on the Claude Code Mods API (retire the tmux keystroke layer)
-status: Draft
-lifecycle: Draft
+status: Signed Off
+lifecycle: Signed Off
 author: 'Dominique Legault'
 created: 2026-10-22
 updated: 2026-10-22
@@ -17,11 +17,19 @@ targetSpecVersion: v1alpha1
 
 # RFC-0058: Session Hierarchy on the Claude Code Mods API
 
-**Status:** Draft, v0.1 (2026-10-22). Six Open Questions, none resolved. Authored from
-the ai-sdlc-io planner's report of 2026-10-22 ("replace the tmux session hierarchy
-with a Claude Code Mod"), written at the operator's request.
+**Status:** Signed Off, v0.2 (2026-10-22). Six Open Questions, all resolved with the
+operator on 2026-10-22 (full rubric; see the `**Resolution**` blocks in §Open
+Questions): rotation order clear > compact > relaunch (OQ-1); one role-gated hooks
+module inside the ai-sdlc plugin (OQ-2); tmux kept as a window manager only, sessions
+stay separate (OQ-3); user tier by default, managed features when present (OQ-4); version
+floor plus a capability probe that refuses with a named reason (OQ-5); the model-less
+dispatch session hosts the RFC-0057 scheduler (OQ-6). Cross-cutting rule added: a Mods
+gap is reported upstream first and any workaround is interim and cites the issue.
+Engineering + Operator signed 2026-10-22; implementation tasks AISDLC-1033 to 1037.
+Authored from the ai-sdlc-io planner's report of 2026-10-22 ("replace the tmux session
+hierarchy with a Claude Code Mod"), written at the operator's request.
 
-**Lifecycle:** Draft
+**Lifecycle:** Signed Off
 **Author:** Dominique Legault
 **Created:** 2026-10-22
 **Updated:** 2026-10-22
@@ -254,6 +262,14 @@ other modules; `next.to(e, tier)` and `prependPlugins` order the chain (OQ-4).
 
 ### Upstream gaps this RFC does not close
 
+**Rule (operator, 2026-10-22 walkthrough, applies to every phase):** when a need of
+this design cannot be met with the Mods API, the action path is to report the gap
+upstream (the Mods design thread, anthropics/claude-code 91870, or a new issue) and, if
+the phase cannot wait, to ship a workaround marked interim that cites the upstream
+issue and is removed when the upstream fix lands. A permanent heuristic over the
+harness (pane text, pid walks, typed keys) is never the answer; that is the layer this
+RFC deletes.
+
 - No verified sender on cross-session messages (both the SendMessage envelope and
   `SessionReceiveOrigin.plugin` are self-asserted). Ask for a harness-signed sender
   session id in the Mods thread 91870.
@@ -320,8 +336,9 @@ other modules; `next.to(e, tier)` and `prependPlugins` order the chain (OQ-4).
   deterministic scheduler RFC-0057 specifies; this RFC does not decide the role's
   retirement.
 
-Tasks are filed after the OQ walkthrough (rfc-oq-walkthrough skill), not with this
-draft.
+Tasks: AISDLC-1033 (phase 0 spike), 1034 (phase 1), 1035 (phase 2), 1036 (phase 3),
+1037 (phase 4), filed with the 2026-10-22 walkthrough. Phase 5 is the scheduler body
+RFC-0057 specifies and is filed with that RFC.
 
 ## Open Questions
 
@@ -336,6 +353,24 @@ prompt (fully documented, context not fresh, summary quality varies); (c) end th
 session and let `cli-hierarchy up` relaunch it (loses in-session state, keeps today's
 semantics). Phase 0 answers (a); the operator picks the fallback order.
 
+**Resolution (2026-10-22, full rubric):** **(a) with a fixed fallback order: clear >
+compact > relaunch.** The mod writes the handoff first, then `$.command.run({ command:
+'clear' })` with `$.store` carrying the role, the resume command and the last reply;
+when that resolves `{ drop }` it runs `$.session.compact` with a hierarchy summary
+prompt; only when both fail does it end the session for `cli-hierarchy up` to relaunch.
+Industry research: `/compact` is the documented in-session path and `/clear` ends the
+session (`session.end` reason `clear`); long-running agent frameworks (LangGraph
+checkpointers, OpenAI Agents SDK sessions) keep state outside the context window and
+treat the window as disposable, which is the board plus `$.store`. **Shipped
+substrate:** today's rotation already runs handoff write, then clear, then resume; the
+mod keeps that order and `$.store` replaces only `LAST_MESSAGE.md`. **Counter-argument:**
+"compact is the documented contract; building on an unconfirmed clear invites the
+heuristic layer this RFC deletes." Rebuttal: the phase 0 spike settles clear with a hard
+yes or no in a day, and the fallback order makes compact the first path with no design
+change if the answer is no. **Selected over compact-only because executors need an
+empty window per task, not a growing summary; over relaunch-only and clear-only because
+both leave a session dependent on an outside relauncher or an operator.**
+
 ### OQ-2: Ship inside the ai-sdlc plugin or as a separate mod?
 
 (a) One hooks module in the ai-sdlc plugin: one install, versioned with the CLI it
@@ -343,12 +378,43 @@ calls, same release train; a hierarchy bug ships with every plugin release. (b) 
 separate `ai-sdlc-hierarchy` mod: installable alone, smaller blast radius, its own
 version pin, and a second thing for adopters to install and keep in step.
 
+**Resolution (2026-10-22, full rubric):** **(a) one hooks module in the ai-sdlc plugin,
+registering nothing unless a hierarchy role is set.** Split-out trigger recorded: only
+when a consumer outside ai-sdlc appears. Industry research: the plugin already gates
+behaviour on the role (`hierarchy-role.js` no-ops without `HIERARCHY_ROLE`); editors
+(VS Code, JetBrains) bundle tightly coupled parts in one extension and split only on an
+independent release cadence or audience, which the hierarchy lacks; the repo's one
+release train (release-please, `lint:publishable`) and the plugin-version check exist
+because pins drift. **Counter-argument:** "a broken hooks module crashes session start
+for every adopter, including those who never run the hierarchy." Rebuttal: `register`
+reads the role before touching any primitive and returns on no role; `claude plugin test`
+covers that path in CI. The CLI/mod skew of a second pin (b) would hit every hierarchy
+user on every release. **Selected over (b) because the module calls `cli-dispatch` and
+`cli-hierarchy`, whose contracts change with every pipeline-cli release; an opt-in
+`hierarchy.json` listing adds a switch the role env already provides.**
+
 ### OQ-3: Keep tmux as a window manager, or go headless with `ui` panes?
 
 (a) Keep tmux windows for human visibility; the mod never sends keys. (b) Replace
 panes with `$.ui.open` views in one session and run executors as `$.agent.spawn`
 teammates or background sessions. (c) Both, chosen by `hierarchy.json`. Affects
 `cli-hierarchy up`, `attach`, `terminals` and the operator runbook.
+
+**Resolution (2026-10-22, full rubric):** **(a) tmux stays as a window manager only;
+sessions stay separate OS sessions; the mod never sends keys.** The dispatch session
+gains a `ui.render` board pane. Re-evaluate headless (b) when upstream teammates stop
+depending on tmux and gain a lifecycle independent of the parent session. Industry
+research: agent teams are tmux-bound upstream today (31901, 26572, 23669); `$.agent.spawn`
+teammates share the parent's lifecycle, so a parent clear or crash takes every executor
+down, against RFC-0051's one-task-per-context rule; supervisors elsewhere (Kubernetes,
+systemd) keep the viewer replaceable and the process model fixed. **Counter-argument:**
+"tmux is what this RFC retires; keeping it keeps the install burden and the habit of
+typing into panes." Rebuttal: the RFC retires typing into panes, not windows; every
+failure class in §Motivation is a keystroke failure, and a window that is only read has
+none. **Selected over (b) because teammates are parent-coupled and tmux-bound upstream;
+over (c) because one adopter does not justify two process models.** The operator added
+the cross-cutting rule recorded under "Upstream gaps": a Mods gap is reported upstream
+first, and a workaround is interim and cites the issue.
 
 ### OQ-4: Require a managed (organization) install?
 
@@ -358,6 +424,23 @@ install for the hierarchy (operator identity in attestations, mods cannot be sha
 (b) user tier is enough and identity comes from the login record as today; (c) user
 tier by default, managed features used when present.
 
+**Resolution (2026-10-22, full rubric):** **(c) user tier by default; managed features
+used when present, never required.** At `session.start` the module probes: when
+`$.session.identity()` answers, the identity is recorded as an informational field
+beside the signed attestation (RFC-0042), never as authority; when `plugin.register`
+refusal is available the hierarchy refuses modules it does not know, else it logs the
+loaded chain. The start line names the detected tier and the active guards next to the
+role. Industry research: attestation identity already comes from the ed25519 key and
+the DSSE envelope, so harness identity would be a second, weaker claim beside a signed
+one; enterprise-only gating (Slack, GitHub rulesets) is accepted for organisational
+policy, not basic function; progressive enhancement (browser feature detection) is the
+normal shape for optional platform capabilities. **Counter-argument:** "the security
+story then differs by install tier and adopters will not know which they have."
+Rebuttal: the mod states the tier at start, and nothing security-relevant depends on
+it because authority stays on the board and in decision records on `main`. **Selected
+over (a) because this repository could not adopt on its own user-tier install; over (b)
+because the probe is cheap and the identity field feeds RFC-0042 later.**
+
 ### OQ-5: Minimum Claude Code version
 
 The operator's build is 2.1.304; background work after an interruption is handled from
@@ -365,6 +448,25 @@ The operator's build is 2.1.304; background work after an interruption is handle
 on and raise it per phase; (b) a floor plus a capability probe at `session.start`
 (`$.session.version()`) that refuses to register with a named reason; (c) track
 latest and accept breakage.
+
+**Resolution (2026-10-22, full rubric):** **(b) a version floor plus a capability probe
+at `session.start` that refuses to register with a named reason.** The floor is the
+build the phase 0 spike passes on (recorded by that task; the operator's build moved
+from 2.1.304 to 2.1.307 while this RFC was drafted). The module checks
+`$.session.version()` against the floor and probes each primitive it registers for
+(`prompt.submit`, `command.run`, `session.compact`, `session.measure`, `session.send`,
+`clock.every`, `ui.render`); on any miss it registers nothing and logs one line naming
+the missing primitive and the floor. The floor is raised only when a phase depends on a
+newer primitive. Industry research: npm `engines` plus runtime feature detection; VS
+Code `engines.vscode` floor plus proposed-API checks at activation; the repo's own
+`check-plugin-version.js` and DEC-0264 (pins enforced with a named reason, never
+silently). **Counter-argument:** "a probe proves a function exists, not that its
+semantics held; a renamed `reason` enum breaks rotation with the probe green."
+Rebuttal: true, which is why `claude plugin test` against engine-written types runs in
+CI; the probe covers the runtime half, the typed test the semantic half, and an exact
+pin (a) would not catch semantics either. **Selected over (a) because adopters must be
+able to upgrade Claude Code without waiting on a plugin release; over (c) because
+silent wedges in unattended runs are the problem being solved.**
 
 ### OQ-6: Relation to RFC-0057 (retire the operator-dispatch role)
 
@@ -376,6 +478,27 @@ but its model is never prompted (model on standby, zero turns); (b) RFC-0057 run
 scheduler as a daemon outside any session and this RFC ships only planner and
 executor roles; (c) this RFC absorbs RFC-0057 and the reserved number is released.
 Sequencing: phases 0 to 1 are independent of the answer; phase 2 depends on it.
+
+**Resolution (2026-10-22, full rubric):** **(a) the model-less dispatch session hosts
+the RFC-0057 scheduler.** The hierarchy module in the dispatch role runs the scheduler
+on `$.clock.every`, consumes board events in `session.receive`, renders the board pane
+and sends wakes with `$.session.send`; it never submits a prompt to its model.
+RFC-0057 specifies the scheduler's policy tables and escalation files and `requires:`
+phases 0 to 2 of this RFC. Phase 2 here ships the host with today's `cli-hierarchy
+tick` as its body; RFC-0057 replaces the body. Industry research: supervisors live
+inside the thing they supervise when the control primitives are reachable only from
+inside (Erlang supervisors, Kubernetes controllers as pods) and move to a sidecar when
+an API exists; `$.session.send` and `$.prompt.submit` are callable only from a mod
+inside a session, and the programmatic-session-control issues (17428, 27242, 11455,
+19877, 89783) have no staff reply; a session whose model is never prompted costs zero
+turns on the subscription. **Counter-argument:** "a session that never prompts its
+model is a daemon in a costume; when upstream ships session control over an API the
+design is wrong." Rebuttal: the costume is what makes the primitives reachable today,
+and the "Upstream gaps" rule names the exit: policy lives in RFC-0057 and
+`cli-dispatch`, so the scheduler body moves out unchanged when an external API can
+wake and send. **Selected over (b) because it cannot be built today; over (c) because
+policy and transport belong in separate RFCs and RFC-0056 phase 5 depends on RFC-0057
+by number.**
 
 ## References
 
@@ -403,8 +526,8 @@ Sequencing: phases 0 to 1 are independent of the answer; phase 2 depends on it.
 
 | Role | Owner | Status | Date |
 |---|---|---|---|
-| Engineering | Dominique Legault | pending | |
-| Operator | Dominique Legault | pending | |
+| Engineering | Dominique Legault | ✅ Signed (six OQs resolved with the full rubric; keystroke layer retired by design, authority stays on the board) | 2026-10-22 |
+| Operator | Dominique Legault | ✅ Signed (tmux kept as a window manager only; Mods gaps go upstream first, workarounds are interim) | 2026-10-22 |
 | Product | | pending | |
 | Design | | not applicable | |
 
@@ -413,3 +536,4 @@ Sequencing: phases 0 to 1 are independent of the answer; phase 2 depends on it.
 | Version | Date | Change |
 |---|---|---|
 | v0.1 | 2026-10-22 | Draft from the ai-sdlc-io planner's Mods report; six Open Questions, none resolved; phase 0 spike before Ready for Review. |
+| v0.2 | 2026-10-22 | OQ walkthrough with the operator (full rubric, 6/6 resolved): OQ-1 clear > compact > relaunch with `$.store`; OQ-2 one role-gated hooks module in the plugin; OQ-3 tmux as window manager only, separate sessions, headless revisited when upstream teammates leave tmux; OQ-4 user tier default, managed features when present; OQ-5 version floor plus capability probe refusing with a named reason; OQ-6 model-less dispatch session hosts the RFC-0057 scheduler, phase 2 ships the host. Cross-cutting rule under "Upstream gaps": report Mods gaps upstream first, workarounds interim. Lifecycle Signed Off; Engineering + Operator signed; tasks AISDLC-1033 to 1037. |
