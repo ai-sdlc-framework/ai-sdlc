@@ -264,6 +264,10 @@ describe('reviewers check', () => {
       [],
     );
     assert.deepEqual(
+      checkReviewers({ base: a.base, head: a.head, repoRoot: a.d, git: a.git, recordsOnly: true }),
+      [],
+    );
+    assert.deepEqual(
       checkReviewers({ base: a.base, head: a.head, repoRoot: a.d, git: a.git, skip: true }),
       [],
     );

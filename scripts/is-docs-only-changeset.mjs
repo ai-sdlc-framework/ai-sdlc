@@ -93,6 +93,15 @@ export function isRecordsOnly(files) {
 export function classifyChangeset(files) {
   if (isDocsOnly(files)) return 'docs-only';
   if (isRecordsOnly(files)) return 'records-only';
+  // AISDLC-1018: docs plus records contains no code, so it is docs-only.
+  if (
+    files.length > 0 &&
+    files.every(
+      (f) => DOCS_ONLY_PATTERN.test(f) || (RECORDS_ONLY_PATTERN.test(f) && !isTrustChainPath(f)),
+    )
+  ) {
+    return 'docs-only';
+  }
   return 'code';
 }
 
