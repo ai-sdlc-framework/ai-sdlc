@@ -116,9 +116,12 @@ venue.
 ## Non-Goals
 
 - Changing what the board, the briefs, `cli-dispatch` or the decision catalog mean.
-- Deciding whether the operator-dispatch role survives: that is RFC-0057 (reserved by
-  RFC-0056 OQ-5). This RFC gives RFC-0057's scheduler its wake and send primitives and
-  states the relation as OQ-6.
+- Re-deciding the operator-dispatch role. RFC-0056 OQ-5 (resolved 2026-10-20, on
+  `main`) retires it: a deterministic scheduler runs `tick`, `sweep` and `reconcile`,
+  escalations are board files, the planner is the only LLM in the control loop and
+  executors stay sessions. RFC-0057 (reserved) specifies that scheduler. This RFC never
+  prompts a dispatch model; it gives the scheduler its wake and send primitives, and
+  OQ-6 asks only where the scheduler process lives.
 - Verified sender identity across sessions. The Mods origin field is self-asserted;
   closing that gap is an upstream request (see "Upstream gaps").
 - Signed proof of what a subagent ran (RFC-0042 §267-279 limits); a separate feature
@@ -154,15 +157,17 @@ The ai-sdlc plugin gains a `hierarchy` hooks module (`hooks/hooks.json` lists it
 as `hierarchy-role.js` does today, and registers only that role's behaviour. A session
 without a role registers nothing.
 
-### Dispatch becomes event-driven
+### The scheduler role has no model
 
-The dispatch role runs `$.clock.every` for the reconcile tick and calls the existing
-`cli-dispatch` and `cli-hierarchy tick` through `$.process.run`. Board events arrive by
-`session.receive`; routine ones (verdict written, PR landed, status digest) are
-consumed by the hook (`{ consumed }`), written to the board and to a `ui.render` pane,
-and never reach the model. A prompt is submitted to the dispatch model only when the
-tick reports something the policy tables cannot classify. Whether that model is kept
-at all is RFC-0057's question (OQ-6).
+The operator-dispatch role is retired (RFC-0056 OQ-5). What remains is a deterministic
+scheduler, specified by RFC-0057, that runs `$.clock.every` for the tick and calls the
+existing `cli-dispatch` and `cli-hierarchy tick` through `$.process.run`. Board events
+arrive by `session.receive` and are consumed by the hook (`{ consumed }`), written to
+the board and to a `ui.render` pane, and never reach a model. An unclassified failure
+shape becomes an escalation file on the board for the planner (failure record, log
+tail, PR check summary), never a prompt to a dispatch model. OQ-6 asks only whether
+this scheduler is hosted by a mod in a model-less session or runs as a daemon outside
+any session.
 
 ### Executors are woken, not cleared into life
 
@@ -234,10 +239,10 @@ session, read from the board. tmux is kept, if at all, as a window manager (OQ-3
   rulings and escalations through to the model unchanged (they need judgement) and
   consumes status noise. The "only your own roster" rule becomes a `to` check in the
   send wrapper.
-- **Dispatch.** `$.clock.every` tick; `session.receive` consumes verdicts, PR events
-  and executor status lines, applies them with `cli-dispatch` and updates the pane;
-  submits a prompt only for an unclassified failure shape (or, under RFC-0057, writes
-  an escalation file for the planner instead). Rotation at 120k.
+- **Scheduler (RFC-0057, replaces dispatch).** `$.clock.every` tick; `session.receive`
+  consumes verdicts, PR events and executor status lines, applies them with
+  `cli-dispatch` and updates the pane; writes an escalation file for the planner on an
+  unclassified failure shape. No prompt is ever submitted, so no rotation.
 - **Executor.** Idle until `session.receive` carries an enqueue from the dispatch
   roster name; then `$.prompt.submit('/ai-sdlc:executor')`. The executor command keeps
   its one-task-per-context rule; the mod clears after the verdict and re-registers.
@@ -307,18 +312,18 @@ other modules; `next.to(e, tier)` and `prependPlugins` order the chain (OQ-4).
   enqueue message consumed, `$.prompt.submit` wake, in-session clear or compact,
   `session.measure` rotation. `executor-start` loses `--wait`, the token and the
   sender flags. Delete `start-token.ts`.
-- **Phase 2, dispatch event loop.** Dispatch role: `$.clock.every` tick, consumed
-  board events, `ui.render` status pane, `$.session.send` wake of executors. Delete
-  `idle-backoff` and the dispatch half of `clear.ts`.
+- **Phase 2, scheduler event loop (with RFC-0057).** Scheduler role: `$.clock.every`
+  tick, consumed board events, `ui.render` status pane, `$.session.send` wake of
+  executors, escalation files for the planner. Delete `idle-backoff`, the dispatch
+  half of `clear.ts` and the `/ai-sdlc:operator-dispatch` command. Depends on OQ-6.
 - **Phase 3, planner rotation and roster guard.** Planner role: rotation with handoff
   write first, roster-name send wrapper, `$.store` last reply. Delete `LAST_MESSAGE.md`
   persistence and the Stop-hook auto-clear.
 - **Phase 4, delete the keystroke layer.** Remove `clear.ts` pane script,
   `caller-identity.ts` pid walk, `check-sender` flags; `cli-hierarchy clear` becomes a
   rotate request. Docs: `docs/operations/cli-hierarchy.md` and the operator runbook.
-- **Phase 5, hand-off to RFC-0057.** Expose the mod's wake and send primitives to the
-  deterministic scheduler RFC-0057 specifies; this RFC does not decide the role's
-  retirement.
+- **Phase 5, RFC-0056 phase 5 unblocked.** With the scheduler in place and the
+  dispatch role gone, RFC-0056 phase 5 (which requires RFC-0057) can proceed.
 
 Tasks are filed after the OQ walkthrough (rfc-oq-walkthrough skill), not with this
 draft.
@@ -366,16 +371,17 @@ on and raise it per phase; (b) a floor plus a capability probe at `session.start
 (`$.session.version()`) that refuses to register with a named reason; (c) track
 latest and accept breakage.
 
-### OQ-6: Relation to RFC-0057 (retire the operator-dispatch role)
+### OQ-6: Where does the RFC-0057 scheduler run?
 
-RFC-0056 OQ-5 reserved RFC-0057 for a deterministic scheduler that runs `tick`,
-`sweep` and `reconcile`, with the planner as the only LLM in the control loop and
-executors staying sessions. This RFC's dispatch role is the same loop hosted in a mod.
-(a) The dispatch mod is RFC-0057's scheduler host: the dispatch session keeps running
-but its model is never prompted (model on standby, zero turns); (b) RFC-0057 runs the
-scheduler as a daemon outside any session and this RFC ships only planner and
-executor roles; (c) this RFC absorbs RFC-0057 and the reserved number is released.
-Sequencing: phases 0 to 1 are independent of the answer; phase 2 depends on it.
+The retirement of the operator-dispatch role is decided (RFC-0056 OQ-5, on `main`)
+and is not reopened here. What is open is the host of the deterministic scheduler.
+(a) A mod in a model-less session: the scheduler gets `$.session.send`, `$.clock` and
+`ui.render` for free, a session slot is held with zero model turns, and the hierarchy
+has one runtime; (b) a daemon outside any session (the reconcile scheduler already is
+one): no session held, but it needs its own wake path to executors (today's clear, or
+a socket the executor mod listens on) and no `ui` pane; (c) this RFC absorbs the
+RFC-0057 specification and the reserved number is released. Sequencing: phases 0 and 1
+are independent of the answer; phase 2 depends on it.
 
 ## References
 
