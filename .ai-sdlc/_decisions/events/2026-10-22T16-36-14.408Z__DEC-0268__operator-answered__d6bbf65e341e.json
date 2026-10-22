@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-22T16:36:14.408Z","decisionId":"DEC-0268","chosenOptionId":"canary-hotfix-lane","rationale":"Operator choice 2026-10-22 via the decision rubric after the Step 10.5 ledger-casing outage RCA; see the decision body.","by":"planner"}
