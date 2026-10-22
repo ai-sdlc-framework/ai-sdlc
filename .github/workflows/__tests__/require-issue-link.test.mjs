@@ -78,11 +78,13 @@ describe('ai-sdlc-gate.yml issue-link job — structure (AISDLC-443, AISDLC-934)
     assert.equal(checkJob.name, 'ai-sdlc/issue-link');
   });
 
-  it('feeds the pr-ready rollup and is not an allowed skip', () => {
+  it('feeds the pr-ready rollup and is an allowed skip for docs-only/records-only (AISDLC-1013)', () => {
     const prReady = workflow.jobs['pr-ready'];
     assert.ok(prReady.needs.includes('issue-link'));
     const skips = prReady.steps.find((s) => s.uses?.startsWith('re-actors/alls-green'));
-    assert.doesNotMatch(String(skips.with['allowed-skips']), /issue-link/);
+    assert.match(String(skips.with['allowed-skips']), /issue-link/);
+    assert.match(checkJob.if, /docs_only != 'true'/);
+    assert.match(checkJob.if, /records_only != 'true'/);
   });
 
   it('has least-privilege permissions (no statuses:write)', () => {
