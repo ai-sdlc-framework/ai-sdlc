@@ -62,6 +62,13 @@ updates:
       - dependency-name: '@types/react-dom'
         update-types:
           - 'version-update:semver-patch'
+      # AISDLC-1039: web-tree-sitter 0.27 requires grammars with a `dylink.0` section;
+      # tree-sitter-wasms (latest 0.1.13) ships the older `dylink` section, so
+      # Language.load fails and every grammar reports `no-grammar`. Not fixable in
+      # the loader. Remove this ignore once a compatible grammar package is adopted.
+      - dependency-name: 'web-tree-sitter'
+        update-types:
+          - 'version-update:semver-minor'
     commit-message:
       prefix: 'chore(deps)'
       prefix-development: 'chore(deps-dev)'
