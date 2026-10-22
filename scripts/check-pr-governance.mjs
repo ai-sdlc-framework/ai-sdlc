@@ -26,6 +26,10 @@
  *                 transcript verification belong to verify-attestation and
  *                 the attestation-gate job. It catches a missing reviewer, not
  *                 a forged one.
+ *   waived-tests  fail when a diff under pipeline-cli/src, orchestrator/src or
+ *                 ai-sdlc-plugin/hooks ships with a completed task file that
+ *                 records `pnpm test` as waived or skipped (AISDLC-1022). The
+ *                 code every executor runs next is never merged on an unrun suite.
  *
  * Usage:
  *   node scripts/check-pr-governance.mjs <check|all> --base <sha> --head <sha>
@@ -200,6 +204,44 @@ export function checkScopeCreep({ base, head, branch, title, git }) {
   return failures;
 }
 
+export const PIPELINE_CODE_PREFIXES = [
+  'pipeline-cli/src/',
+  'orchestrator/src/',
+  'ai-sdlc-plugin/hooks/',
+];
+
+/** True when a task summary line records the test suite as waived or skipped. */
+export const recordsWaivedTests = (text) =>
+  /^\s*[-*]\s*`pnpm test`\s*(?:[:\u2014\u2013-]+\s*)?(?:waived|skipped)\b/im.test(String(text));
+
+/** Fail when pipeline code changes alongside a completed task that waived the suite. */
+export function checkWaivedTests({ base, head, git }) {
+  let files;
+  try {
+    files = lines(git(['diff', '--name-only', '--no-renames', `${base}...${head}`]));
+  } catch (err) {
+    return [`waived-tests: cannot diff ${base}...${head}: ${err.message}`];
+  }
+  const touched = files.filter((f) => PIPELINE_CODE_PREFIXES.some((p) => f.startsWith(p)));
+  if (touched.length === 0) return [];
+  const failures = [];
+  for (const f of files.filter((n) => n.startsWith('backlog/completed/') && n.endsWith('.md'))) {
+    let text;
+    try {
+      text = git(['show', `${head}:${f}`]);
+    } catch (err) {
+      failures.push(`waived-tests: cannot read ${f}: ${err.message}`);
+      continue;
+    }
+    if (recordsWaivedTests(text)) {
+      failures.push(
+        `${f} records \`pnpm test\` as waived or skipped while this PR touches pipeline code (${touched[0]}${touched.length > 1 ? ` and ${touched.length - 1} more` : ''}). Run the suite and record the command and its summary line; a waiver is not allowed for pipeline-cli/src, orchestrator/src or ai-sdlc-plugin/hooks (AISDLC-1022).`,
+      );
+    }
+  }
+  return failures;
+}
+
 /** Which required reviewer set the envelope's reviewer names satisfy, or null. */
 export function satisfiedReviewerSet(names) {
   const present = new Set(names);
@@ -309,7 +351,7 @@ export function run(
     return 2;
   }
   const { check, flags } = args;
-  const names = ['changelog', 'scope-creep', 'reviewers'];
+  const names = ['changelog', 'scope-creep', 'reviewers', 'waived-tests'];
   if (!['all', ...names].includes(check)) {
     log.error(
       `[pr-governance] usage: check-pr-governance.mjs <${names.join('|')}|all> --base <sha> --head <sha>`,
@@ -332,6 +374,7 @@ export function run(
   const results = {
     changelog: () => checkChangelog(common),
     'scope-creep': () => checkScopeCreep({ ...common, title: flags.title ?? '' }),
+    'waived-tests': () => checkWaivedTests(common),
     reviewers: () =>
       checkReviewers({
         ...common,

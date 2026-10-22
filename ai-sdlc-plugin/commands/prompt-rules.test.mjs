@@ -97,6 +97,17 @@ describe('executor command', () => {
   });
 });
 
+describe('waived-tests rule (AISDLC-1022)', () => {
+  for (const rel of ['agents/developer.md', 'agents/correctness-reviewer.md']) {
+    it(`${rel} carries the rendered rule exactly once`, () => {
+      const found = findPromptRulesBlock(read(rel));
+      assert.ok(found?.ids.includes('waived-tests'), `${rel} must carry waived-tests`);
+      assert.match(found.block, /critical finding/);
+      assert.equal(countRuleRestatements(read(rel))['waived-tests'], 1);
+    });
+  }
+});
+
 describe('hold-and-reporting rule (AISDLC-899)', () => {
   for (const rel of [
     'commands/operator-dispatch.md',

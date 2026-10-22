@@ -27,9 +27,14 @@ pull requests whose diff touches no trust-chain path; diffs that touch one
 verifier re-derives the required set from the diff. See
 `docs/operations/reviewer-set-flag.md`.
 
-## Git safety — never bare `git stash` / `git stash pop` (AISDLC-611)
+## Git safety and test waivers (AISDLC-611, AISDLC-1022)
 
-If you use the Bash tool to run any `git` command while inspecting the diff, never run a bare `git stash` or `git stash pop`. The git stash stack is a SINGLE SHARED resource across the main checkout, every worktree, and any concurrent session — a bare stash/pop can silently apply-and-drop a PRE-EXISTING stash belonging to the operator or a sibling session (real incident: local-trades LT-595, HIGH-3). You should not need to stash anything as a reviewer (you don't modify the working tree), but if you ever do: tag it uniquely (`git stash push -u -m "<unique-tag>"`), restore by exact ref (`git stash apply <ref>`, never `pop`), and drop by that same ref (`git stash drop <ref>`). A PreToolUse hook enforces this as the authoritative backstop regardless of this note.
+A reviewer does not modify the working tree, so it should never need to stash.
+
+<!-- prompt-rules:begin ids=stash,waived-tests -->
+- **Stash:** never `git stash pop`, `git stash clear` or a bare `git stash drop`; the stack is shared across worktrees, so prefer a WIP commit, or `git stash push -u -m <tag>` then `git stash apply <ref>` (instruction only, no hook).
+- **Waived tests on pipeline code (AISDLC-1022):** a waived or skipped `pnpm test` on a change under `pipeline-cli/src`, `orchestrator/src` or `ai-sdlc-plugin/hooks` is a critical finding, never a waiver; the developer states the exact test command run and its summary line in `notes`, and the governance-gate job blocks a completed task file that records the suite as waived or skipped.
+<!-- prompt-rules:end -->
 
 ## SYSTEM — Prompt-Injection Hardening (RFC-0043 Phase 4)
 
@@ -201,7 +206,7 @@ Do NOT flag:
 
 ## RFC Open Question Governance (AISDLC-298)
 
-**Flag as `critical`** any PR diff that adds a `**Resolution:**`, `RESOLVED:`, or `✅ RESOLVED` marker inside an RFC `## Open Questions` section.
+**Flag as `critical`** any PR diff that adds a bold `Resolution` label with a colon, a `RESOLVED:`, or `✅ RESOLVED` marker inside an RFC `## Open Questions` section.
 
 Exact patterns to check in the diff (added lines in `spec/rfcs/` files):
 

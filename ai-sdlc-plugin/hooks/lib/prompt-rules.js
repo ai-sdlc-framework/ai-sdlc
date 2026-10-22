@@ -94,6 +94,11 @@ const PROMPT_RULES = [
     text: '**A hold limits actions, never reporting:** the planner pauses the drain with `cli-hierarchy hold --reason <text>` (never a prose "stay idle"), which blocks claims and relaunches only; every blocker, verdict and merge sha still goes to the parent tier by `SendMessage` as it happens, and pane text is not a report.',
     detect: /hold limits actions/g,
   },
+  {
+    id: 'waived-tests',
+    text: '**Waived tests on pipeline code (AISDLC-1022):** a waived or skipped `pnpm test` on a change under `pipeline-cli/src`, `orchestrator/src` or `ai-sdlc-plugin/hooks` is a critical finding, never a waiver; the developer states the exact test command run and its summary line in `notes`, and the governance-gate job blocks a completed task file that records the suite as waived or skipped.',
+    detect: /waived or skipped `pnpm test`/g,
+  },
 ];
 
 const BEGIN_RE = /<!-- prompt-rules:begin ids=([a-z0-9,-]+) -->/;
