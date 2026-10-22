@@ -295,7 +295,9 @@ export function actionCommands(ctx: ActionContext, cliBin: string): ActionComman
           args: [path.join(cliBin, 'cli-file.mjs'), 'rebase', ctx.taskId || String(ctx.pr), '--pr'],
         },
       ];
-    case 'arm':
+    case 'arm': {
+      // A docs PR with no task id has no sanctioned source kind: route it to the planner.
+      if (ctx.kind !== 'decisions-sync' && !ctx.taskId) return null;
       return [
         {
           file: 'node',
@@ -308,6 +310,7 @@ export function actionCommands(ctx: ActionContext, cliBin: string): ActionComman
           ],
         },
       ];
+    }
     case 'retrigger-once':
     case 'rerun-rate-limited':
     case 'rerun-dor':
@@ -327,11 +330,25 @@ export function actionCommands(ctx: ActionContext, cliBin: string): ActionComman
   }
 }
 
+/** First non-empty line; the CLI prints refusal reasons on stdout, so callers try both streams. */
+function firstLine(text: string): string {
+  return (
+    text
+      .split('\n')
+      .map((l) => l.trim())
+      .find((l) => l !== '') ?? ''
+  );
+}
+
 /** Default executor: runs the argv the action names through the injected runner. */
 export function commandExecutor(run: CommandRunner, cwd: string, cliBin: string): ActionExecutor {
   return (ctx) => {
     const cmds = actionCommands(ctx, cliBin);
-    if (!cmds) return { ran: false, note: 'record-only or left to a session' };
+    if (!cmds) {
+      return ctx.action === 'arm'
+        ? { ran: false, note: 'route to planner: no task id and not the decisions-sync branch' }
+        : { ran: false, note: 'record-only or left to a session' };
+    }
     let runId: string | undefined;
     for (const c of cmds) {
       const args = c.args.map((a) => (a === RUN_ID_PLACEHOLDER && runId ? runId : a));
@@ -345,7 +362,7 @@ export function commandExecutor(run: CommandRunner, cwd: string, cliBin: string)
         return {
           ran: true,
           failed: true,
-          note: `${c.file} failed: ${r.stderr.trim().split('\n')[0] ?? ''}`.trim(),
+          note: `${c.file} failed: ${firstLine(r.stderr) || firstLine(r.stdout)}`.trim(),
         };
       }
     }

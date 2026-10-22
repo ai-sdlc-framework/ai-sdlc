@@ -1,7 +1,7 @@
 ---
 id: AISDLC-919
 title: 'fix: decisions-sync PR lands: merge-if-eligible trusts the sync commit and the docs lane arm passes the right source kind'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [governance, decisions, hierarchy, velocity]
