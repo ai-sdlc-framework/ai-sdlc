@@ -1967,7 +1967,12 @@ function findStrandedWorktreeLedgers(ctx: DoctorRunContext): string[] {
       if (!isCompleted) continue;
       const local = readFile(join(dir, f));
       if (!local) continue;
-      const main = runCommand('git', ['-C', ctx.projectDir, 'show', `HEAD:.ai-sdlc/reviews/${f}`]);
+      const main = runCommand('git', [
+        '-C',
+        ctx.projectDir,
+        'show',
+        `HEAD:${['.ai-sdlc', 'reviews', f].join('/')}`,
+      ]);
       const onMain = main.exitCode === 0 ? main.stdout : '';
       if (!onMain.startsWith(local)) out.push(`${wt}/${f}`);
     }

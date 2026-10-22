@@ -17,6 +17,8 @@
  * @module attestation/drop-chores
  */
 
+import { reviewsLedgerRelativePath } from './reviews-ledger.js';
+
 /** Result of one git call. */
 export interface GitResult {
   status: number;
@@ -42,7 +44,7 @@ export function isAttestationChorePath(file: string, taskId?: string): boolean {
   if (file.startsWith('.ai-sdlc/attestations/')) return true;
   if (file === '.ai-sdlc/transcript-leaves.jsonl') return true;
   if (file.startsWith('.ai-sdlc/transcript-leaves/')) return true;
-  return taskId !== undefined && file === `.ai-sdlc/reviews/${taskId}.jsonl`;
+  return taskId !== undefined && file === reviewsLedgerRelativePath(taskId);
 }
 
 export type DropChoresResult =

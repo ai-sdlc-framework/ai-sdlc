@@ -45,7 +45,7 @@ import {
   readFileSync,
   statSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { STAGED_REVIEWER_NAME } from './merkle.js';
 
 /**
@@ -196,8 +196,15 @@ export function normalizeFindings(
  * `<repoRoot>/.ai-sdlc/reviews/<task-id-lower>.jsonl`.
  */
 export function reviewsLedgerPath(taskId: string, repoRoot?: string): string {
-  const taskIdLower = taskId.toLowerCase();
-  return join(repoRoot ?? process.cwd(), REVIEWS_DIR_RELATIVE, `${taskIdLower}.jsonl`);
+  return join(repoRoot ?? process.cwd(), reviewsLedgerRelativePath(taskId));
+}
+
+/**
+ * Repo-relative, forward-slash ledger path (`.ai-sdlc/reviews/<task-id-lower>.jsonl`),
+ * the form git reports. The only sanctioned way to name the ledger (AISDLC-1020).
+ */
+export function reviewsLedgerRelativePath(taskId: string): string {
+  return `${REVIEWS_DIR_RELATIVE.split(sep).join('/')}/${taskId.toLowerCase()}.jsonl`;
 }
 
 /**

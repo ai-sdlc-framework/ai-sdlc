@@ -32,6 +32,10 @@ The helper lives in `scripts/verify-attestation.mjs` (`isAttestationOnlyDescenda
 
 
 
+## Review-ledger path (AISDLC-1020)
+
+`reviewsLedgerPath()` and `reviewsLedgerRelativePath()` in `pipeline-cli/src/attestation/reviews-ledger.ts` are the only way to locate the review ledger (the task id is lowercased there). Never build `.ai-sdlc/reviews/<id>.jsonl` by string template; `scripts/check-no-handbuilt-ledger-paths.test.mjs` fails `pnpm test` on any such literal in non-test source.
+
 ## Resume review decision (AISDLC-947)
 
 On a resume, `next-step` makes one decision before it spawns anything, read from the newest attestation envelope added on the branch (`pipeline-cli/src/next-step/resume-decision.ts`). The envelope filename is the attested patch id and `subject.digest.sha1` is the attested head; there is no new state file. The envelope is never trusted on its filename or contents alone: before choosing `unchanged` (verified at HEAD) or `delta` (verified at the attested head that bases the diff), the decision runs the same trusted verifier as `cli-attestation verify` (signature against `trusted-reviewers.yaml`, Merkle proof, patch-id binding, review scope; runtime resolved from outside the checkout). Any verification failure returns `full`.
