@@ -44,8 +44,10 @@ describe('identification rule', () => {
   it('allows attestation and leaf paths only', () => {
     expect(isAttestationChorePath('.ai-sdlc/attestations/a.dsse.json')).toBe(true);
     expect(isAttestationChorePath('.ai-sdlc/transcript-leaves.jsonl')).toBe(true);
-    expect(isAttestationChorePath('.ai-sdlc/reviews/AISDLC-1.jsonl', 'AISDLC-1')).toBe(true);
-    expect(isAttestationChorePath('.ai-sdlc/reviews/AISDLC-1.jsonl')).toBe(false);
+    expect(isAttestationChorePath('.ai-sdlc/reviews/aisdlc-1.jsonl', 'AISDLC-1')).toBe(true);
+    expect(isAttestationChorePath('.ai-sdlc/reviews/aisdlc-1.jsonl', 'aisdlc-1')).toBe(true);
+    expect(isAttestationChorePath('.ai-sdlc/reviews/AISDLC-1.jsonl', 'AISDLC-1')).toBe(false);
+    expect(isAttestationChorePath('.ai-sdlc/reviews/aisdlc-1.jsonl')).toBe(false);
     expect(isAttestationChorePath('src/a.ts')).toBe(false);
   });
 });
