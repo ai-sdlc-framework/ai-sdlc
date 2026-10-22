@@ -111,18 +111,17 @@ export async function executorStart(
     ...(opts.senderRef === undefined ? {} : { ref: opts.senderRef }),
   });
   if (!sender.ok) throw new Error(sender.reason);
+  if (sender.warning !== undefined) {
+    // No claim: the start cannot say who issued it (AISDLC-1025).
+    throw new Error(
+      `unchecked-start: no --sender-pid or --sender-ref was given, so the sender is unverified; nothing claimed. Report 'unchecked-start' to ${dispatch || 'dispatch'} and pass the pid or ref the harness reports.`,
+    );
+  }
 
   // The identity line is how `cli-hierarchy clear` sees an executor report back.
   deps.log?.(
     `[executor] I am '${self.name}' (project '${project.project}'); dispatch session is '${dispatch || 'none'}'`,
   );
-  if (sender.warning !== undefined) {
-    // Accepting is deliberate: a start has no inbound message to identify. It is
-    // still a gap (anyone able to start this session is trusted), so say so loudly.
-    deps.log?.(
-      `[executor] WARNING: UNCHECKED START: no --sender-pid or --sender-ref was given, so who instructed this start was NOT verified against the dispatch session. Pass the pid or ref the harness reports. (${sender.warning})`,
-    );
-  }
   const hold = readHold(opts.boardDir);
   if (hold) {
     deps.log?.(`[executor] BOARD HELD: ${hold.reason} (since ${hold.since}); not claiming.`);

@@ -1033,6 +1033,11 @@ pass clears the ruling and reports `ready-to-requeue`. `handoff write --role ope
 lists every ruling under "Rulings in force". Dispatch drains its inbox (and applies each ruling)
 before the tick, and its digest never repeats an item that carries a ruling.
 
+**A rule gates the claim (AISDLC-1025).** A manifest whose ruling names an `--until` task without a
+success verdict in `done/` is skipped by `claim` (and listed as ineligible, with the reason), so no
+executor spends a run on it; the hold lifts by itself once that task is done. Likewise
+`executor-start` refuses with `unchecked-start` when it has neither `--sender-pid` nor `--sender-ref`.
+
 ## Restarting after a plugin upgrade
 
 Sessions load the plugin once, when they start. A new plugin version (commands, hooks,

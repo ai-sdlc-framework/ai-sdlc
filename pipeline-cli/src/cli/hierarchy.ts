@@ -279,7 +279,7 @@ Options for executor-start:
                            session, the working directory is not the project's repository, or
                            the sender is not the dispatch session. It runs the repository and
                            sender checks itself (AISDLC-764); the sender is checked from
-                           --sender-pid / --sender-ref (accepts with a loud UNCHECKED START warning when neither).
+                           --sender-pid / --sender-ref (refuses with unchecked-start, claiming nothing, when neither).
   --sender-pid <n>, --sender-ref <ref>   as for check-sender
 
 Options for check-sender:
