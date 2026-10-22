@@ -2,7 +2,7 @@
 id: AISDLC-1025
 title: >-
   A task carrying a `--until` rule is never claimable, and an executor start without sender pid and ref is refused
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-22'
 labels:
@@ -38,12 +38,41 @@ dispatchable: true
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `claim` never returns a manifest whose `--until` rule names a task without a `done/` verdict (unit test with one ruled and one free manifest)
-- [ ] #2 The executor command refuses an unchecked start and reports it to dispatch in one line (hook or unit test)
-- [ ] #3 `docs/operations/cli-hierarchy.md` states that a rule gates the claim
-- [ ] #4 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
+- [x] #1 `claim` never returns a manifest whose `--until` rule names a task without a `done/` verdict (unit test with one ruled and one free manifest)
+- [x] #2 The executor command refuses an unchecked start and reports it to dispatch in one line (hook or unit test)
+- [x] #3 `docs/operations/cli-hierarchy.md` states that a rule gates the claim
+- [x] #4 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
 <!-- AC:END -->
 
 ## Verification
 
 - `pnpm build && pnpm test && pnpm lint && pnpm format:check`
+
+## Final Summary
+
+## Summary
+A manifest whose ruling `--until` task has no success verdict in `done/` is now skipped by `claim` and shown as ineligible with a reason. `executor-start` refuses with `unchecked-start` and claims nothing when neither `--sender-pid` nor `--sender-ref` is given. A draft PR is open.
+
+## Changes
+- pipeline-cli/src/dispatch/board.ts
+- pipeline-cli/src/dispatch/board-ordering.test.ts
+- pipeline-cli/src/hierarchy/executor-start.ts
+- pipeline-cli/src/hierarchy/executor-start.test.ts
+- pipeline-cli/src/cli/hierarchy.ts
+- ai-sdlc-plugin/commands/executor.md
+- docs/operations/cli-hierarchy.md
+- backlog/tasks/AISDLC-1025 - a ruled task is not claimable and an executor start is always checked.md
+
+## Design decisions
+The rule is enforced in `checkEligibility`, so `claim` and the board listing share it. The refusal is a thrown error starting with `unchecked-start`. The executor sends the one-line report to dispatch, as `executor.md` now instructs. I removed the task id from `executor.md` because a gate rejects internal task ids in adopter-visible text. The task file diff is only the status change to In Progress. The PR is a draft, so `/ai-sdlc execute` still has to run the reviewers and mark it ready. I did not run coverage locally.
+
+## Verification
+- `pnpm build` — passed
+- `pnpm test` — passed
+- `pnpm lint` — passed
+- `pnpm format:check` — passed
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
