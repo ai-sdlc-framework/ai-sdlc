@@ -57,25 +57,36 @@ export interface CanaryDeps {
   fileHotfix: (opts: { sha: string; detail: string }) => string;
 }
 
-function readProcessed(boardDir: string): string[] {
+interface CanaryState {
+  processed: string[];
+  /** Newest receivedAt already handled; older events are never replayed, even once their id ages out. */
+  highWater: string;
+}
+
+function readState(boardDir: string): CanaryState {
   try {
     const doc = JSON.parse(readFileSync(path.join(boardDir, CANARY_STATE_FILENAME), 'utf-8')) as {
       processed?: unknown;
+      highWater?: unknown;
     };
-    return Array.isArray(doc.processed)
-      ? doc.processed.filter((x): x is string => typeof x === 'string')
-      : [];
+    return {
+      processed: Array.isArray(doc.processed)
+        ? doc.processed.filter((x): x is string => typeof x === 'string')
+        : [],
+      highWater: typeof doc.highWater === 'string' ? doc.highWater : '',
+    };
   } catch {
-    return [];
+    return { processed: [], highWater: '' };
   }
 }
 
-function writeProcessed(boardDir: string, processed: string[]): void {
+function writeState(boardDir: string, state: CanaryState): void {
   mkdirSync(boardDir, { recursive: true });
   const target = path.join(boardDir, CANARY_STATE_FILENAME);
   const tmp = `${target}.tmp-${process.pid}`;
-  // Bounded: only the recent deliveries matter for replay protection.
-  writeFileSync(tmp, JSON.stringify({ processed: processed.slice(-200) }) + '\n', 'utf-8');
+  // Ids are bounded (same-timestamp replay protection); the high-water mark covers the rest.
+  const doc = { processed: state.processed.slice(-200), highWater: state.highWater };
+  writeFileSync(tmp, JSON.stringify(doc) + '\n', 'utf-8');
   renameSync(tmp, target);
 }
 
@@ -108,12 +119,15 @@ function readCanaryEvents(boardDir: string): CanaryEvent[] {
 /** Process the canary events not yet seen. Never throws. */
 export function processCanaryEvents(deps: CanaryDeps): CanaryReport {
   const report: CanaryReport = { errors: [] };
-  const processed = readProcessed(deps.boardDir);
+  const state = readState(deps.boardDir);
+  const processed = state.processed;
   const seen = new Set(processed);
   for (const ev of readCanaryEvents(deps.boardDir)) {
     if (seen.has(ev.deliveryId)) continue;
+    if (ev.receivedAt < state.highWater) continue;
     seen.add(ev.deliveryId);
     processed.push(ev.deliveryId);
+    if (ev.receivedAt > state.highWater) state.highWater = ev.receivedAt;
     const at = deps.now().toISOString();
     if (ev.kind === CANARY_RED_KIND) {
       const reason = `${CANARY_HOLD_PREFIX}${ev.headSha}`;
@@ -138,7 +152,7 @@ export function processCanaryEvents(deps: CanaryDeps): CanaryReport {
       }
     }
   }
-  writeProcessed(deps.boardDir, processed);
+  writeState(deps.boardDir, state);
   return report;
 }
 

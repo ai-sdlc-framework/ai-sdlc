@@ -47,8 +47,8 @@ export interface EventRecord {
 
 export const DEFAULT_DEBOUNCE_MS = 5000;
 export const WEBHOOK_PATH = '/webhooks/github';
-/** Touched by the receiver to wake the reconciler, under the board dir. */
 const MAX_DETAIL = 4000;
+/** Touched by the receiver to wake the reconciler, under the board dir. */
 export const WAKE_FILE = '.reconcile-wake';
 
 const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;

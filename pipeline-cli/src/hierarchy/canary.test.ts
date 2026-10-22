@@ -42,6 +42,10 @@ function event(
   writeFileSync(path.join(dir, eventFileName(rec)), JSON.stringify(rec) + '\n');
 }
 
+function clearBoardHold(): void {
+  rmSync(path.join(board, '.hold'), { force: true });
+}
+
 const run = (fail = false) =>
   processCanaryEvents({
     boardDir: board,
@@ -66,7 +70,22 @@ describe('processCanaryEvents (AISDLC-1023)', () => {
     expect(filed).toHaveLength(1);
     expect(JSON.parse(readFileSync(path.join(board, CANARY_STATE_FILENAME), 'utf-8'))).toEqual({
       processed: ['r1'],
+      highWater: '2026-10-22T10:00:00Z',
     });
+  });
+
+  it('never replays an old event once its delivery id has aged out of the state', () => {
+    event('pipeline-canary-red', 'old', '2026-10-22T09:00:00Z');
+    run();
+    expect(filed).toHaveLength(1);
+    // 250 later deliveries push 'old' out of the bounded id list.
+    const statePath = path.join(board, CANARY_STATE_FILENAME);
+    const ids = Array.from({ length: 250 }, (_, i) => `d${i}`);
+    writeFileSync(statePath, JSON.stringify({ processed: ids, highWater: '2026-10-22T11:00:00Z' }));
+    clearBoardHold();
+    expect(run()).toEqual({ errors: [] });
+    expect(filed).toHaveLength(1);
+    expect(readHold(board)).toBeNull();
   });
 
   it('a green canary after a red one lifts the hold', () => {
