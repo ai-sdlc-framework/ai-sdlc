@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fail, ok } from '../__test-helpers/fake-runner.js';
 import { makeHarness, makeState, type Harness } from '../__test-helpers/next-step-fixtures.js';
 import {
+  bootstrapPromptFor,
   CLASSIFIER_FAIL_OPEN,
   fallbackLeafModel,
   fetchTrustedComments,
@@ -232,6 +233,11 @@ describe('prepareReview', () => {
       const text = readFileSync(s.promptFile, 'utf8');
       expect(text).toContain(MARKER);
       expect(text).toContain('src/a.ts');
+      const boot = bootstrapPromptFor(s.promptFile);
+      expect(boot).toContain(s.promptFile);
+      expect(boot).not.toContain(MARKER);
+      expect(boot).not.toContain(NONCE);
+      expect(boot).not.toContain('src/a.ts');
     }
     const security = res.review.spawned.find((s) => s.agent === 'security-reviewer')!;
     expect(security.harness).toBe('claude-code');

@@ -35,7 +35,7 @@ import { runGhIssue, type GhIssueDeps, defaultGhIssueDeps } from './gh-issue.js'
 import { initTask, writeRunFile, type InitFailure, type InitSuccess } from './init.js';
 import { defaultArtifactsDir, resolveProjectRoot } from '../routing/artifacts-dir.js';
 import { decideResumeReview } from './resume-decision.js';
-import { prepareReview, type ReviewPrepareResult } from './review-prepare.js';
+import { bootstrapPromptFor, prepareReview, type ReviewPrepareResult } from './review-prepare.js';
 import {
   aggregateRound,
   finalizeReview,
@@ -416,6 +416,7 @@ class Machine {
       reviewers: review.spawned.map((r) => ({
         agent: r.agent,
         promptFile: r.promptFile,
+        bootstrapPrompt: bootstrapPromptFor(r.promptFile),
         ...(r.model ? { model: r.model } : {}),
       })),
       replyShape:

@@ -161,7 +161,13 @@ export interface SpawnReviewersInstruction {
   action: 'spawn-reviewers';
   taskId: string;
   round: number;
-  reviewers: Array<{ agent: string; promptFile: string; model?: string }>;
+  reviewers: Array<{
+    agent: string;
+    promptFile: string;
+    /** Short prompt to pass as the Agent `prompt`; it names `promptFile` for the reviewer to read. */
+    bootstrapPrompt: string;
+    model?: string;
+  }>;
   /** Shape of the result JSON the model must report. */
   replyShape: string;
   reply: string;

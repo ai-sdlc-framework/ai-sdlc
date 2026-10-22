@@ -2,7 +2,7 @@
 id: AISDLC-1031
 title: >-
   The execute loop hands a reviewer its prompt by file path, so a model that refuses to relay a long prompt no longer skips the reviewer
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-22'
 labels:
