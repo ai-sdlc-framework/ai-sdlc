@@ -706,7 +706,7 @@ export async function runHierarchyCli(
           },
         );
         deps.log(JSON.stringify(result));
-        return 0;
+        return result.ok ? 0 : 1;
       }
       case 'restart':
       case 'register': {

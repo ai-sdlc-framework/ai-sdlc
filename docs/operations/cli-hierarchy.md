@@ -2052,11 +2052,23 @@ belongs to that window; a recorded pane id that no longer belongs to it is refus
 never replaced by the window name. An `ExecutorContextCleared` event records the
 clear.
 
-The `hierarchy.clear` capability is reported `live` when the restart command was
-sent and the executor printed its identity line again within the ceiling, and
-`degraded`, with the reason (the ceiling and the last pane line seen, so a slow start can be told from a dead session), when it did not or a keystroke could not be sent. A
-degraded clear shows up in `doctor`; check the executor's window with
-`cli-hierarchy status`.
+**Submission check (AISDLC-1029).** After typing the resume command and `Enter`, `clear` reads the
+pane. While the input line still holds the command (a swallowed `Enter`, for example under a
+slash-command completion popup), it sends `Enter` again, at most twice, 2 s apart; if the
+command is still there it sends `Escape`, empties the line and retypes the command once. Only
+then does it wait for the identity line. `clear --self` and `auto-clear` (the Stop-hook
+self-clear) run the same check in their delivery script and log
+`resume command not submitted; last pane line: ...` to `handoff/auto-clear.log` when it fails.
+
+**Failure result.** A clear either restarted the session (identity line seen within the
+ceiling, `ok: true`) or failed: the JSON result carries `ok: false`, `reason: "resume command
+not submitted"` and `lastLine` (the last non-empty pane line), the command exits `1`, and a
+dispatch tick reports the clear as `failed`, a blocker, rather than moving on.
+
+The `hierarchy.clear` capability is reported `live` when the executor printed its identity line
+again within the ceiling; otherwise the failure reason (the ceiling and the last pane line seen,
+so a slow start can be told from a dead session) is recorded against it, and it shows up in
+`doctor`. Check the executor's window with `cli-hierarchy status`.
 
 ### Per-tick self-clear
 

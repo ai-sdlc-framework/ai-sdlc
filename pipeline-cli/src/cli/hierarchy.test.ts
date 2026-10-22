@@ -444,7 +444,7 @@ describe('clear, tick and route-decision', () => {
           overrides({ run, emit: (e) => events.push(e) }),
           dispatchCaller,
         ),
-      ).toBe(0);
+      ).toBe(1); // the fake pane never prints the identity line: the clear fails;
     } finally {
       delete process.env.ARTIFACTS_DIR;
     }

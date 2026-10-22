@@ -15,6 +15,7 @@ import { claimNext, writeManifest } from '../dispatch/board.js';
 import type { DispatchManifest } from '../dispatch/types.js';
 import {
   clearExecutor,
+  inputLineHolds,
   clearSelf,
   HIERARCHY_CLEAR_CAPABILITY,
   recentlyScheduled,
@@ -241,12 +242,103 @@ describe('clearExecutor', () => {
     resumes = false;
     const result = await clearExecutor({ executor: 'executor-alpha', settleMs: 500 }, deps());
     expect(result.resumed).toBe(false);
+    expect(result).toMatchObject({ ok: false, reason: 'resume command not submitted' });
+    expect(JSON.stringify(result)).not.toContain('degraded');
     // Both keystrokes were still sent.
     expect(sends()).toHaveLength(4);
     const row = capability();
     expect(row?.status).toBe('degraded');
     expect(row?.lastDegradedReason).toContain('did not report back within the 500 ms ceiling');
     expect(events[0]).toMatchObject({ type: 'ExecutorContextCleared', resumed: false });
+  });
+
+  describe('submission check (AISDLC-1029)', () => {
+    const CMD = '/ai-sdlc executor';
+    /**
+     * A pane that keeps the resume command in its input line until the Nth Enter after the
+     * command was typed (`submitOnEnter`), or until Escape + retype (`submitAfterEscape`).
+     */
+    function sticky(opts: { submitOnEnter?: number; submitAfterEscape?: boolean }) {
+      let typed = false;
+      let enters = 0;
+      let escaped = false;
+      let submitted = false;
+      const keys: string[] = [];
+      const r: CommandRunner = (file, args) => {
+        if (args[0] === 'send-keys') {
+          const lit = args[args.indexOf('--') + 1];
+          if (args.includes('-l') && lit === CMD) {
+            typed = true;
+            enters = 0;
+            if (escaped && opts.submitAfterEscape) submitted = false;
+          }
+          if (args.includes('-l')) keys.push(`text:${lit}`);
+          else keys.push(args[args.length - 1]);
+          if (typed && args[args.length - 1] === 'Enter') {
+            enters++;
+            if (opts.submitOnEnter !== undefined && enters >= opts.submitOnEnter) submitted = true;
+            if (opts.submitAfterEscape && escaped && enters >= 1) submitted = true;
+          }
+          if (args[args.length - 1] === 'Escape') escaped = true;
+          return { status: 0, stdout: '', stderr: '' };
+        }
+        if (args[0] === 'capture-pane' && typed) {
+          const tail = submitted
+            ? "[executor] I am 'executor-alpha'; x\n> \n"
+            : `previous output\n> ${CMD}\n  ? for shortcuts\n`;
+          return { status: 0, stdout: `${screen}${tail}`, stderr: '' };
+        }
+        return run(file, args);
+      };
+      return { r, keys };
+    }
+
+    it('re-sends Enter while the input line holds the command and stops once it is submitted', async () => {
+      resumes = false;
+      const s = sticky({ submitOnEnter: 2 });
+      const result = await clearExecutor(
+        { executor: 'executor-alpha', settleMs: 500 },
+        deps({ run: s.r }),
+      );
+      expect(result.ok).toBe(true);
+      expect(s.keys.filter((k) => k === 'Enter')).toHaveLength(3); // /clear, typed, one re-send
+      expect(s.keys).not.toContain('Escape');
+      expect(sleeps).toContain(2000);
+    });
+
+    it('falls back to Escape and one retype after two re-sent Enters', async () => {
+      resumes = false;
+      const s = sticky({ submitAfterEscape: true });
+      const result = await clearExecutor(
+        { executor: 'executor-alpha', settleMs: 500 },
+        deps({ run: s.r }),
+      );
+      expect(result.ok).toBe(true);
+      const i = s.keys.indexOf('Escape');
+      expect(i).toBeGreaterThan(0);
+      expect(s.keys.filter((k) => k === `text:${CMD}`)).toHaveLength(2);
+      expect(s.keys.slice(0, i).filter((k) => k === 'Enter')).toHaveLength(4); // /clear, typed, two re-sends
+    });
+
+    it('fails with the reason and last pane line when it is never submitted', async () => {
+      resumes = false;
+      const s = sticky({});
+      const result = await clearExecutor(
+        { executor: 'executor-alpha', settleMs: 500 },
+        deps({ run: s.r }),
+      );
+      expect(result).toMatchObject({ ok: false, reason: 'resume command not submitted' });
+      expect(result.lastLine).toBe('? for shortcuts');
+      expect(capability()?.lastDegradedReason).toContain('resume command not submitted');
+    });
+
+    it('inputLineHolds tells a typed command from an echoed one', () => {
+      expect(inputLineHolds(`out\n> ${CMD}\n`, CMD)).toBe(true);
+      expect(inputLineHolds(`\u2502 > ${CMD}   \u2502\nfooter\n`, CMD)).toBe(true);
+      expect(inputLineHolds(`> ${CMD}\nrunning\n> \n`, CMD)).toBe(false);
+      expect(inputLineHolds(`working\n${CMD}\n`, CMD)).toBe(true);
+      expect(inputLineHolds(undefined, CMD)).toBe(false);
+    });
   });
 
   describe('handshake timing (AISDLC-1000)', () => {
@@ -710,6 +802,33 @@ esac
       const log = readFileSync(path.join(board, 'handoff', 'auto-clear.log'), 'utf-8');
       expect(log).toContain('planner: pane never became idle');
       expect(log).toContain('/ai-sdlc:planner');
+    });
+
+    it('re-sends Enter, then Escape and a retype, and logs when the command is never submitted (AISDLC-1029)', () => {
+      writeFileSync(
+        path.join(dir, 'tmux'),
+        `#!/bin/sh
+case "$1" in
+  send-keys) echo "$*" >> "${tlog}"; if [ "$4" = "-l" ] && [ "$6" = "/ai-sdlc:planner" ]; then touch "${dir}/typed"; fi ;;
+  capture-pane) if [ -f "${dir}/typed" ]; then printf 'old output\\n> /ai-sdlc:planner\\n  footer\\n'; else echo "idle prompt"; fi ;;
+esac
+`,
+        { mode: 0o755 },
+      );
+      const sent = deliver();
+      expect(sent.slice(3)).toEqual([
+        'send-keys -t %5 C-u',
+        'send-keys -t %5 -l -- /ai-sdlc:planner',
+        'send-keys -t %5 Enter',
+        'send-keys -t %5 Enter',
+        'send-keys -t %5 Enter',
+        'send-keys -t %5 Escape',
+        'send-keys -t %5 C-u',
+        'send-keys -t %5 -l -- /ai-sdlc:planner',
+        'send-keys -t %5 Enter',
+      ]);
+      const log = readFileSync(path.join(board, 'handoff', 'auto-clear.log'), 'utf-8');
+      expect(log).toMatch(/planner: resume command not submitted; last pane line:\s+footer/);
     });
 
     it('logs one line naming the session and command when it does not come back', () => {
