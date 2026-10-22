@@ -32,6 +32,10 @@ The helper lives in `scripts/verify-attestation.mjs` (`isAttestationOnlyDescenda
 
 
 
+## What the envelope does not prove (AISDLC-973)
+
+Edits under `backlog/**` and `.ai-sdlc/reviews/**` after signing are not covered by the envelope. Both path sets are excluded from the patch id and from the attestation-only-descendant diff (the allowlist in `pipeline-cli/attestation-core/verify-core.mjs`), by design: the task file moves to `backlog/completed/` and the review ledger is appended after the review and before the push, so including them would invalidate every envelope on its own signing step. The consequence is that a task file edited after signing, including its `permittedExternalPaths` and `blocked.reason` frontmatter, leaves the envelope valid. Treat those fields as unattested; review them in the PR diff. Trust-chain loosenings found by the 2026-10-17 audit (AISDLC-484 lane classifier, AISDLC-725 delta leaves, AISDLC-947 local-only anchor) are recorded as weakening decisions in the Decision Catalog, restored by AISDLC-969 and AISDLC-970.
+
 ## Review-ledger path (AISDLC-1020)
 
 `reviewsLedgerPath()` and `reviewsLedgerRelativePath()` in `pipeline-cli/src/attestation/reviews-ledger.ts` are the only way to locate the review ledger (the task id is lowercased there). Never build `.ai-sdlc/reviews/<id>.jsonl` by string template; `scripts/check-no-handbuilt-ledger-paths.test.mjs` fails `pnpm test` on any such literal in non-test source.
