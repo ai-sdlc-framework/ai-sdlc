@@ -57,7 +57,7 @@
     "@ai-sdlc/reference": "workspace:*",
     "@inquirer/prompts": "^8.7.2",
     "ajv": "^8.20.0",
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.3",
     "commander": "^15.0.0",
     "franc": "^6.2.0",
     "yaml": "^2.9.1"
