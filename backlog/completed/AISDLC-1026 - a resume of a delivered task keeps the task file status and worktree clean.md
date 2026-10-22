@@ -2,7 +2,7 @@
 id: AISDLC-1026
 title: >-
   A resume of a delivered task never rewrites the completed task file, so the worktree stays clean for Step 10.5
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-22'
 labels:
@@ -38,13 +38,43 @@ dispatchable: true
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 Step 4 leaves a task file under `backlog/completed/` byte-identical when Step 1 reports a resumed completed task (unit test)
-- [ ] #2 The rollback never writes `To Do` to a file whose pre-dispatch status was `Done`, and never writes a synthesized status when the pre-dispatch read failed (unit test)
-- [ ] #3 The Step 10.5 dirty-tree refusal lists the dirty paths
-- [ ] #4 `docs/operations/backlog-and-execution-reference.md` states that a resume of a delivered task does not touch the task file
-- [ ] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
+- [x] #1 Step 4 leaves a task file under `backlog/completed/` byte-identical when Step 1 reports a resumed completed task (unit test)
+- [x] #2 The rollback never writes `To Do` to a file whose pre-dispatch status was `Done`, and never writes a synthesized status when the pre-dispatch read failed (unit test)
+- [x] #3 The Step 10.5 dirty-tree refusal lists the dirty paths
+- [x] #4 `docs/operations/backlog-and-execution-reference.md` states that a resume of a delivered task does not touch the task file
+- [x] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
 <!-- AC:END -->
 
 ## Verification
 
 - `pnpm build && pnpm test && pnpm lint && pnpm format:check`
+
+## Final Summary
+
+## Summary
+The rollback no longer writes a synthesized To Do status or touches a task file under backlog/completed/. The Step 10.5 dirty-worktree refusal now lists the dirty paths. The docs now state that a resume of a delivered task leaves the task file alone. Step 4 already skipped the flip on a resumed completed file, so I only added a byte-identity test for it.
+
+## Changes
+- pipeline-cli/src/orchestrator/rollback.ts
+- pipeline-cli/src/orchestrator/rollback.test.ts
+- pipeline-cli/src/orchestrator/loop.ts
+- pipeline-cli/src/orchestrator/loop.events.test.ts
+- pipeline-cli/src/next-step/ship.ts
+- pipeline-cli/src/next-step/ship.test.ts
+- pipeline-cli/src/steps/04-flip-status.test.ts
+- docs/operations/backlog-and-execution-reference.md
+- backlog/tasks/AISDLC-1026 - a resume of a delivered task keeps the task file status and worktree clean.md
+
+## Design decisions
+The commit scope is `orchestrator` because commitlint rejected `pipeline-cli`. loop.ts now passes an empty pre-dispatch status when the read fails, so the OrchestratorRollback event shows fromStatus '' instead of 'To Do'. I updated loop.events.test.ts to match. The pipeline-cli suite passed, apart from that one loop.events.test.ts assertion, which I fixed and re-ran. Build, lint and format:check passed. After a rebase and re-commit the SHA changed. The pushed head is HEAD at `5c47854a7`.
+
+## Verification
+- `pnpm build` — passed
+- `pnpm test` — passed
+- `pnpm lint` — passed
+- `pnpm format:check` — passed
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
