@@ -161,6 +161,9 @@ A push typed in the Pattern C parent (on `main`, same remote) overwrites the tas
 ### `finalSummary` template
 
 ```markdown
+
+**AISDLC-1016 - Step 11 lease push of its own rebase.** Step 11 rebases onto `origin/main` before it pushes, so a branch already on the remote (an earlier push or a resume) is rewritten and the plain push is rejected non-fast-forward. When that happens Step 11 fetches the branch and checks that the remote head is an ancestor of the ref it held before its own rebase, which makes it the pre-rebase copy of the same patch and not foreign work. If so, and the trusted `spec.governance.allowForcePush` policy (read by `loadOperationalPolicy`, the reader the hook shares) allows it, it pushes once with `--force-with-lease=refs/heads/<branch>:<observed remote head>` and reports `pushed: true`. Modes honoured: `lease` = any non-protected branch; `leaseOnOwnBranch` = only from the task's own registered worktree; `never` = no push. A foreign commit on the remote, a protected branch, or an unverifiable remote head keeps the abort with `pushed: false`. Step 10 now stages the reviewer transcript leaves and review records (`ATTESTATION_ARTIFACT_PATHS`) in the attestation chore commit, and the playbook `rebase-push` and `drop-chores` actions treat a tree holding only those paths as clean (`rebase-push` rebases with `--autostash`).
+
 ## Summary
 <one-paragraph: what shipped>
 

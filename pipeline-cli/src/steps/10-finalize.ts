@@ -25,6 +25,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { basename, dirname, join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { findTaskFile, isTaskFileCompleted, parseTaskFile } from './01-validate.js';
+import { ATTESTATION_ARTIFACT_PATHS } from '../attestation-artifacts.js';
 import { patchFrontmatterStatus } from './04-flip-status.js';
 import { checkFollowups, formatFollowupViolations } from '../backlog/followup-rule.js';
 import { completeTaskAtomically } from '../cli/complete-task.js';
@@ -249,6 +250,11 @@ export async function finalizeTask(opts: FinalizeStepOptions): Promise<FinalizeT
       addArgs.push('backlog/tasks', 'backlog/completed');
     }
     if (attestationPath) addArgs.push('.ai-sdlc/attestations');
+    // AISDLC-1016: reviewer transcript leaves and review records written during the review
+    // loop ride in this chore commit, so the tree is clean before the Step 11 rebase.
+    for (const p of ATTESTATION_ARTIFACT_PATHS) {
+      if (p !== '.ai-sdlc/attestations' && existsSync(join(opts.worktreePath, p))) addArgs.push(p);
+    }
 
     // For gh-issue with no attestation: skip the commit (nothing to stage).
     if (addArgs.length > 1) {

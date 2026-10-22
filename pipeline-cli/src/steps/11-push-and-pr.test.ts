@@ -513,6 +513,74 @@ describe('Step 11 — pushAndPr', () => {
     expect(r.reason).toMatch(/non-fast-forward/);
   });
 
+  describe('lease push of its own pre-rebase copy (AISDLC-1016)', () => {
+    const PRE = 'a'.repeat(40);
+    const REMOTE = 'b'.repeat(40);
+    const rejected = fail('! [rejected] b -> b (non-fast-forward)', 1);
+    const policyOf = (
+      forcePushMode: 'never' | 'leaseOnOwnBranch' | 'lease',
+      notOwn: string | null = null,
+    ) => ({ forcePushMode, protectedBranches: [], ownWorktree: () => notOwn });
+    const run = async (
+      ancestor: boolean,
+      mode: 'never' | 'leaseOnOwnBranch' | 'lease',
+      notOwn: string | null = null,
+    ) => {
+      const fake = new FakeRunner()
+        .on(/^git rev-parse HEAD$/, ok(PRE + '\n'))
+        .on(/^git push -u origin b$/, rejected)
+        .on(/^git rev-parse refs\/remotes/, ok(REMOTE + '\n'))
+        .on(/^git merge-base --is-ancestor/, ancestor ? ok() : fail('', 1))
+        .on(/^gh pr create/, ok('https://example/1'));
+      const r = await pushAndPr({
+        taskId: 'AISDLC-1',
+        workDir: tmp,
+        worktreePath: tmp,
+        branch: 'b',
+        task,
+        developerReturn: dev,
+        verdict: approved,
+        runner: fake.toRunner(),
+        resumeLeasePolicy: policyOf(mode, notOwn),
+      });
+      return { r, fake };
+    };
+    const leasePushes = (fake: FakeRunner) =>
+      fake.calls.filter(
+        (c) => c.command === 'git' && c.args.some((a) => a.startsWith('--force-with-lease')),
+      );
+
+    it('leases against the observed remote head when it is the pre-rebase copy', async () => {
+      const { r, fake } = await run(true, 'lease');
+      expect(r.pushed).toBe(true);
+      expect(leasePushes(fake)).toHaveLength(1);
+      expect(leasePushes(fake)[0]!.args).toContain(`--force-with-lease=refs/heads/b:${REMOTE}`);
+    });
+
+    it('honours leaseOnOwnBranch inside the task worktree', async () => {
+      expect((await run(true, 'leaseOnOwnBranch')).r.pushed).toBe(true);
+    });
+
+    it('aborts when the remote holds a foreign commit', async () => {
+      const { r, fake } = await run(false, 'lease');
+      expect(r.pushed).toBe(false);
+      expect(r.reason).toMatch(/non-fast-forward/);
+      expect(leasePushes(fake)).toHaveLength(0);
+    });
+
+    it('aborts under leaseOnOwnBranch outside the task worktree', async () => {
+      const { r, fake } = await run(true, 'leaseOnOwnBranch', 'not registered');
+      expect(r.pushed).toBe(false);
+      expect(leasePushes(fake)).toHaveLength(0);
+    });
+
+    it('aborts when the policy is never', async () => {
+      const { r, fake } = await run(true, 'never');
+      expect(r.pushed).toBe(false);
+      expect(leasePushes(fake)).toHaveLength(0);
+    });
+  });
+
   it('returns prUrl=null when gh pr create fails', async () => {
     const fake = new FakeRunner()
       .on(/^git push -u origin/, ok())

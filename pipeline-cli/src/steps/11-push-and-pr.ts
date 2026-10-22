@@ -22,7 +22,8 @@
  *   - No `git push --force` / `-f`
  *   - No `gh pr merge`
  *   - No `git branch -D` / `-d`
- *   - On non-fast-forward push: abort cleanly with `pushed: false` + reason
+ *   - On non-fast-forward push: abort cleanly with `pushed: false` + reason, unless the remote
+ *     head is the pre-rebase copy of this branch and the policy allows a lease (AISDLC-1016)
  *
  * @module steps/11-push-and-pr
  */
@@ -309,6 +310,65 @@ export async function checkClobberSignature(
   return null;
 }
 
+/**
+ * AISDLC-1016: after a non-fast-forward rejection, lease-push once when the remote head is
+ * an ancestor of the ref this step held before its own rebase (the pre-rebase copy of the
+ * same patch, so no foreign commit) and the trusted policy permits a lease push. The lease
+ * names the observed remote head. Returns the push result, or null to keep the abort.
+ */
+async function leasePushOwnRebase(
+  opts: PushAndPrStepOptions,
+  runner: Runner,
+  preRebaseSha: string,
+): Promise<Awaited<ReturnType<Runner>> | null> {
+  if (!/^[0-9a-f]{7,64}$/i.test(preRebaseSha)) return null;
+  const trusted = opts.resumeLeasePolicy ? null : loadOperationalPolicy(opts.workDir, opts.workDir);
+  const policy = opts.resumeLeasePolicy ?? {
+    forcePushMode: trusted!.forcePushMode,
+    protectedBranches: trusted!.protectedBranches,
+    ownWorktree: (worktree: string) => checkOwnWorktreeForOperator(opts.workDir, worktree),
+  };
+  if (policy.forcePushMode === 'never') return null;
+  if (
+    !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(opts.branch) ||
+    opts.branch.includes('..') ||
+    isProtectedBranch(opts.branch, policy.protectedBranches)
+  ) {
+    return null;
+  }
+  if (policy.forcePushMode === 'leaseOnOwnBranch' && policy.ownWorktree(opts.worktreePath)) {
+    return null;
+  }
+  const cwd = opts.worktreePath;
+  const fetched = await runner('git', ['fetch', 'origin', opts.branch], {
+    cwd,
+    allowFailure: true,
+  });
+  if (fetched.code !== 0) return null;
+  const remote = await runner('git', ['rev-parse', `refs/remotes/origin/${opts.branch}`], {
+    cwd,
+    allowFailure: true,
+  });
+  const remoteSha = remote.code === 0 ? remote.stdout.trim() : '';
+  if (!/^[0-9a-f]{40,64}$/i.test(remoteSha)) return null;
+  const ancestor = await runner('git', ['merge-base', '--is-ancestor', remoteSha, preRebaseSha], {
+    cwd,
+    allowFailure: true,
+  });
+  if (ancestor.code !== 0) return null;
+  return runner(
+    'git',
+    [
+      'push',
+      '-u',
+      `--force-with-lease=refs/heads/${opts.branch}:${remoteSha}`,
+      'origin',
+      `HEAD:refs/heads/${opts.branch}`,
+    ],
+    { cwd, allowFailure: true },
+  );
+}
+
 export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrResult> {
   const runner = opts.runner ?? defaultRunner;
 
@@ -343,6 +403,12 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
   //    auto-resolved in-place; semantic conflicts abort + return the conflict
   //    files so the orchestrator can record `rebase-conflict` and continue.
   const targetBranch = resolveTargetBranch(opts.workDir, opts.logger);
+  // AISDLC-1016: the ref before this step rewrites the branch, to recognise the remote's copy of it.
+  const preRebase = await runner('git', ['rev-parse', 'HEAD'], {
+    cwd: opts.worktreePath,
+    allowFailure: true,
+  });
+  const preRebaseSha = preRebase.code === 0 ? preRebase.stdout.trim() : '';
   const rebase = await landPrep({
     worktreePath: opts.worktreePath,
     branch: opts.branch,
@@ -426,10 +492,15 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
         `HEAD:refs/heads/${opts.branch}`,
       ]
     : ['push', '-u', 'origin', opts.branch];
-  const pushResult = await runner('git', pushArgs, {
+  let pushResult = await runner('git', pushArgs, {
     cwd: opts.worktreePath,
     allowFailure: true,
   });
+  if (pushResult.code !== 0 && /non-fast-forward|rejected/i.test(pushResult.stderr)) {
+    // AISDLC-1016: the remote may hold only the pre-rebase copy of this very branch.
+    const retry = await leasePushOwnRebase(opts, runner, preRebaseSha);
+    if (retry) pushResult = retry;
+  }
   if (pushResult.code !== 0) {
     const stderr = pushResult.stderr.trim();
     const reason = /non-fast-forward|rejected/i.test(stderr)
