@@ -18,6 +18,7 @@ import path from 'node:path';
 
 import { now as clock } from '../clock.js';
 import { patchDoneVerdict } from '../dispatch/board.js';
+import { completeLandedIterateNeeded } from '../dispatch/complete.js';
 import { resolveTargetRepo, runMergeIfEligible } from '../governance/merge-if-eligible.js';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { prFingerprint, recordRefusal, refusalStillValid } from './pr-snapshot.js';
@@ -40,6 +41,8 @@ export interface LandReport {
   landed: { pr: number; taskId?: string; mode: 'merge' | 'arm' }[];
   /** PRs refused, with the reason. */
   refused: { pr: number; reason: string }[];
+  /** Tasks completed as success because their PR merged on an iterate-needed verdict. */
+  autoCompleted?: string[];
   /** Set when GitHub could not be read; nothing was attempted. */
   error?: string;
 }
@@ -150,7 +153,13 @@ export async function landEligiblePrs(deps: LandDeps): Promise<LandReport> {
     if (outcome.merged || outcome.armed) {
       recordRefusal(deps.boardDir, pr.number, undefined, now());
       const taskId = taskIdFrom(pr.headRefName) || undefined;
-      if (taskId) patchDoneVerdict(deps.boardDir, taskId, { landed: now().toISOString() });
+      if (taskId) {
+        // A PR squashed now has merged: an iterate-needed task is complete (AISDLC-1030).
+        const completed =
+          outcome.merged && completeLandedIterateNeeded(deps.boardDir, taskId, pr.number, now);
+        if (completed) report.autoCompleted = [...(report.autoCompleted ?? []), taskId];
+        else patchDoneVerdict(deps.boardDir, taskId, { landed: now().toISOString() });
+      }
       if (outcome.armed && sha) {
         writeOnce(notesPath(deps.boardDir, pr.number, sha, 'armed'), `${outcome.reason}\n`);
       }

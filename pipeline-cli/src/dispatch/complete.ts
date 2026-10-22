@@ -10,12 +10,19 @@
  * manifest stays so the worker keeps the slot across the iteration.
  */
 
-import { readInflightManifest, TASK_ID_RE, writeVerdict } from './board.js';
+import {
+  collectVerdicts,
+  patchDoneVerdict,
+  readInflightManifest,
+  TASK_ID_RE,
+  writeVerdict,
+} from './board.js';
 import { snapshotFailedManifest } from './requeue.js';
 import { snapshotDoneManifest } from './resume.js';
 import { markSessionOutcome } from './sessions.js';
 import type { DispatchVerdict, VerdictOutcome } from './types.js';
 import { isValidCause, isValidDecisionId, MAX_DECISION_IDS, oneLine } from './verdict-fields.js';
+import { now as clockNow } from '../clock.js';
 
 const OUTCOMES: readonly VerdictOutcome[] = [
   'success',
@@ -187,4 +194,36 @@ export function completeTask(boardDir: string, opts: CompleteOptions): CompleteR
   if (opts.outcome !== 'iterate-needed')
     markSessionOutcome(boardDir, opts.taskId, state, opts.prUrl);
   return { verdictPath, state, verdict };
+}
+
+/**
+ * A merged PR completes its task (AISDLC-1030). When the task is inflight and its
+ * last verdict is `iterate-needed`, nothing is left to iterate: complete it as
+ * `success` with the inflight worker and the PR, and stamp `landed`. A task with any
+ * other state is left alone. Returns true when it completed the task.
+ */
+export function completeLandedIterateNeeded(
+  boardDir: string,
+  taskId: string,
+  prNumber: number,
+  now: () => Date = clockNow,
+): boolean {
+  if (!TASK_ID_RE.test(taskId)) return false;
+  const inflight = readInflightManifest(boardDir, taskId);
+  if (!inflight?.workerId) return false;
+  const last = collectVerdicts(boardDir, { includeFailed: false }).find((v) => v.taskId === taskId);
+  if (last?.outcome !== 'iterate-needed') return false;
+  // Only the PR the verdict names completes the task; a different PR whose title
+  // merely mentions the id must not.
+  if (last.prNumber !== prNumber) return false;
+  completeTask(boardDir, {
+    taskId,
+    outcome: 'success',
+    prNumber,
+    workerId: inflight.workerId,
+    notes: `auto-completed: PR #${prNumber} merged while the last verdict was iterate-needed`,
+    now,
+  });
+  patchDoneVerdict(boardDir, taskId, { landed: now().toISOString() });
+  return true;
 }
