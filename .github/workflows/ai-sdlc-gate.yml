@@ -132,12 +132,17 @@ jobs:
           CLS="$RUNNER_TEMP/classifier"
           mkdir -p "$CLS/scripts" "$CLS/pipeline-cli/attestation-core"
           SRC="${BASE_SHA:-HEAD}"
-          git show "$SRC:scripts/is-docs-only-changeset.mjs" > "$CLS/scripts/is-docs-only-changeset.mjs"
-          git show "$SRC:pipeline-cli/attestation-core/docs-only-paths.mjs" > "$CLS/pipeline-cli/attestation-core/docs-only-paths.mjs"
-          git show "$SRC:pipeline-cli/attestation-core/review-scope-core.mjs" > "$CLS/pipeline-cli/attestation-core/review-scope-core.mjs"
+          CLS_OK=true
+          for f in scripts/is-docs-only-changeset.mjs pipeline-cli/attestation-core/docs-only-paths.mjs pipeline-cli/attestation-core/review-scope-core.mjs; do
+            git show "$SRC:$f" > "$CLS/$f" || CLS_OK=false
+          done
           # Fail safe: any inability to compute the PR diff resolves to
           # docs_only=false (run the full matrix), never true.
-          if [ -n "$BASE_SHA" ]; then
+          if [ "$CLS_OK" != "true" ]; then
+            echo "::warning::classifier unavailable at base; treating changeset as not docs-only"
+            RESULT=false
+            CLASS=code
+          elif [ -n "$BASE_SHA" ]; then
             if FILES=$(git -c core.quotePath=false diff --name-only "$BASE_SHA...$HEAD_SHA"); then
               RESULT=$(printf '%s\n' "$FILES" | node "$CLS/scripts/is-docs-only-changeset.mjs")
               CLASS=$(printf '%s\n' "$FILES" | node "$CLS/scripts/is-docs-only-changeset.mjs" --class)

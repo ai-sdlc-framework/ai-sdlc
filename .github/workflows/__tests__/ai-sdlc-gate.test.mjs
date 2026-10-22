@@ -37,7 +37,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync, mkdirSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -778,7 +778,13 @@ describe('ai-sdlc-gate.yml — archetype detection (AC #2, AISDLC-484)', () => {
       writeFileSync(out, '');
       execFileSync('bash', ['-c', runScript], {
         cwd: repo,
-        env: { ...process.env, BASE_SHA: base, HEAD_SHA: head, GITHUB_OUTPUT: out },
+        env: {
+          ...process.env,
+          BASE_SHA: base,
+          HEAD_SHA: head,
+          GITHUB_OUTPUT: out,
+          RUNNER_TEMP: realpathSync(tmpdir()),
+        },
         encoding: 'utf-8',
       });
       const text = readFileSync(out, 'utf-8');
