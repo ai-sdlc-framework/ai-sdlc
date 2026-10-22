@@ -27,7 +27,7 @@
  * @module steps/11-push-and-pr
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkOwnWorktreeForOperator, isProtectedBranch } from '../hierarchy/lease-policy.js';
 import { leasePushPreflight, type LeasePreflight } from '../hierarchy/lease-preflight.js';
@@ -261,6 +261,54 @@ export function checkResumeLeasePush(
   return null;
 }
 
+/**
+ * AISDLC-1019 - refuse a push that would clobber the task branch. Two signatures:
+ *  - the git toplevel of the push cwd is not the task worktree (a push typed in the
+ *    Pattern C parent carries main's content);
+ *  - `HEAD` equals `origin/<target>` while `origin/<branch>` already has commits ahead
+ *    of it (pushing would reset the remote branch to main and auto-close the PR).
+ * Probes that return nothing (git unavailable, branch not on origin) never refuse.
+ * Returns the refusal, or null when the push may go ahead.
+ */
+export async function checkClobberSignature(
+  opts: Pick<PushAndPrStepOptions, 'worktreePath' | 'branch'>,
+  targetBranch: string,
+  runner: Runner,
+): Promise<string | null> {
+  const git = async (args: string[]): Promise<string> => {
+    const r = await runner('git', args, { cwd: opts.worktreePath, allowFailure: true });
+    return r.code === 0 ? r.stdout.trim() : '';
+  };
+  const real = (p: string): string => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return p;
+    }
+  };
+  const top = await git(['rev-parse', '--show-toplevel']);
+  if (top && real(top) !== real(opts.worktreePath)) {
+    return (
+      `push refused: the git toplevel of the push cwd is ${top}, not the task worktree ${opts.worktreePath} ` +
+      `(a push from the Pattern C parent overwrites the task branch with main); run it from ${opts.worktreePath}`
+    );
+  }
+  const head = await git(['rev-parse', 'HEAD']);
+  const mainSha = await git(['rev-parse', `origin/${targetBranch}`]);
+  if (!head || head !== mainSha) return null;
+  const ahead = Number.parseInt(
+    await git(['rev-list', '--count', `origin/${targetBranch}..origin/${opts.branch}`]),
+    10,
+  );
+  if (ahead > 0) {
+    return (
+      `push refused: HEAD equals origin/${targetBranch} but origin/${opts.branch} has ${ahead} commit(s) ahead of it; ` +
+      `pushing would reset the task branch to ${targetBranch} and auto-close its PR. Check out the task branch in ${opts.worktreePath} and retry`
+    );
+  }
+  return null;
+}
+
 export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrResult> {
   const runner = opts.runner ?? defaultRunner;
 
@@ -360,6 +408,10 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
       // better than silently pushing an invalid envelope).
     }
   }
+
+  // 0c. AISDLC-1019 - refuse the clobber signature before anything is pushed.
+  const clobber = await checkClobberSignature(opts, targetBranch, runner);
+  if (clobber) return { pushed: false, prUrl: null, reason: clobber };
 
   // 1. Push -u origin <branch>. NEVER a bare force. A resumed task already has
   //    commits on origin and the late rebase changed their SHAs, so it pushes

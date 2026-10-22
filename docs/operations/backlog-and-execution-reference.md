@@ -141,6 +141,16 @@ Each `/ai-sdlc execute` runs in its own Claude Code session with its own per-wor
 
 Plugin subagents cannot use the `Agent` tool (Claude Code filters it one level deep — verified via AISDLC-69.2 test). The pipeline therefore lives inline in the slash command body, not in a subagent middleman (AISDLC-82 reverted by AISDLC-98).
 
+### Developer pushes only from the task worktree (AISDLC-1019)
+
+A push typed in the Pattern C parent (on `main`, same remote) overwrites the task branch with main's content; GitHub then auto-closes the PR because its head equals its base. Three layers stop it:
+
+- The `worktree-cwd` prompt rule (rendered into `developer.md`) says every git write runs with the task worktree as cwd and the subagent never runs `gh pr reopen`; a closed PR is reported in `notes` and routed to dispatch.
+- The PreToolUse hook `parent-on-main.sh` denies a push to a `refs/heads/ai-sdlc/aisdlc-*` branch (explicit refspec, or a bare push whose upstream is such a branch) when the cwd is the parent, and names the worktree to use. Filing branches and `main` are not affected.
+- Step 11 (`checkClobberSignature`) refuses to push when the git toplevel of the push cwd is not the task worktree, or when `HEAD` equals `origin/main` while `origin/<branch>` already has commits ahead of main.
+
+**Recovery for a clobbered task branch.** Do not reopen the PR from the parent. From the task worktree (its `HEAD` still holds the real commits), run the lease push `git push --force-with-lease origin HEAD:refs/heads/<branch>`, confirm the remote head matches `git rev-parse HEAD`, then `gh pr ready <pr>` (reopen is an operator or dispatch action). If the parent's upstream was changed, restore it with `git -C <parent> branch --set-upstream-to=origin/main main`.
+
 ### Lifecycle rules
 
 - **Create-before-execution**: when a plan spans multiple tasks, create them ALL before dispatching. In Pattern C projects (non-bare parent repo + `.worktrees/` isolates), use `mcp__plugin_ai-sdlc_ai-sdlc__task_create` — it routes writes to the active worktree so files survive the next `git reset --hard` on the parent. In plain (non-Pattern-C) projects `mcp__backlog__task_create` is fine.

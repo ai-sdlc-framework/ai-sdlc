@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { composeBody, composeTitle, pushAndPr, readTitleTemplate } from './11-push-and-pr.js';
+import {
+  checkClobberSignature,
+  composeBody,
+  composeTitle,
+  pushAndPr,
+  readTitleTemplate,
+} from './11-push-and-pr.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
 import { FakeRunner, fail, ok } from '../__test-helpers/fake-runner.js';
 import type { AggregatedVerdict, DeveloperReturn, TaskSpec } from '../types.js';
@@ -653,5 +659,57 @@ describe('Step 11 lease-push preflight (AISDLC-798)', () => {
       .on(/^gh pr create/, ok('https://github.com/x/y/pull/1\n'));
     const r = await pushAndPr({ ...base(), runner: fake.toRunner() });
     expect(r.pushed).toBe(true);
+  });
+});
+
+describe('Step 11 clobber-signature guard (AISDLC-1019)', () => {
+  const o = { worktreePath: '/wt/aisdlc-1', branch: 'ai-sdlc/aisdlc-1' };
+
+  it('refuses when HEAD equals origin/main and the task branch has commits ahead', async () => {
+    const fake = new FakeRunner()
+      .on(/rev-parse --show-toplevel/, ok('/wt/aisdlc-1\n'))
+      .on(/rev-parse HEAD/, ok('aaa\n'))
+      .on(/rev-parse origin\/main/, ok('aaa\n'))
+      .on(/rev-list --count/, ok('3\n'));
+    const r = await checkClobberSignature(o, 'main', fake.toRunner());
+    expect(r).toMatch(/HEAD equals origin\/main.*3 commit/);
+  });
+
+  it('allows a new branch (nothing ahead on origin) and a HEAD that differs from main', async () => {
+    const same = new FakeRunner()
+      .on(/rev-parse HEAD/, ok('aaa\n'))
+      .on(/rev-parse origin\/main/, ok('aaa\n'))
+      .on(/rev-list --count/, fail('unknown revision'));
+    expect(await checkClobberSignature(o, 'main', same.toRunner())).toBeNull();
+    const differ = new FakeRunner()
+      .on(/rev-parse HEAD/, ok('bbb\n'))
+      .on(/rev-parse origin\/main/, ok('aaa\n'));
+    expect(await checkClobberSignature(o, 'main', differ.toRunner())).toBeNull();
+  });
+
+  it('refuses when the push cwd toplevel is not the task worktree', async () => {
+    const fake = new FakeRunner().on(/rev-parse --show-toplevel/, ok('/parent\n'));
+    const r = await checkClobberSignature(o, 'main', fake.toRunner());
+    expect(r).toMatch(/not the task worktree \/wt\/aisdlc-1/);
+  });
+
+  it('stops pushAndPr before any push', async () => {
+    const fake = new FakeRunner()
+      .on(/rev-parse HEAD/, ok('aaa\n'))
+      .on(/rev-parse origin\/main/, ok('aaa\n'))
+      .on(/rev-list --count/, ok('2\n'));
+    const r = await pushAndPr({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: dev,
+      verdict: approved,
+      runner: fake.toRunner(),
+    });
+    expect(r.pushed).toBe(false);
+    expect(r.reason).toMatch(/push refused/);
+    expect(fake.calls.some((c) => c.args[0] === 'push')).toBe(false);
   });
 });

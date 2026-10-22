@@ -2,7 +2,7 @@
 id: AISDLC-1019
 title: >-
   Developer subagent must never push from the parent checkout: a stray push of main HEAD over a task branch auto-closed PR #1852
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-22'
 labels:
