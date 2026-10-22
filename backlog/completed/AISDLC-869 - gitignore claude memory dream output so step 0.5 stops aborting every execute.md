@@ -2,7 +2,7 @@
 id: AISDLC-869
 title: >-
   gitignore claude memory dream output so step 0.5 stops aborting every execute
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-14'
 labels:
