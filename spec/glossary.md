@@ -230,7 +230,7 @@ A guardrail field in [AutonomyPolicy](#autonomy-policy) that specifies maximum c
 
 ### Variant {#variant}
 
-A soul-scoped sub-theme within a [Soul DID](#soul-did) that carries distinct visual identity specializations and audience targeting while inheriting the parent Soul DID's foundational triad (E × P × D) and compliance regime. Variants are declared in `soul.spec.variants[]` and identified by kebab-case `id` (e.g. `small-org`, `enterprise`). A Variant is NOT a separate Soul — it shares the parent Soul's substrate, compliance floor, and tenant quota. Use a Variant when the same product face targets multiple audience segments with different visual specializations but the same compliance regime. Use a separate Soul when compliance regimes or substrates differ. See [RFC-0017](rfcs/RFC-0017-in-soul-variant-pattern.md) and [docs/concepts/variants.md](../docs/concepts/variants.md).
+A soul-scoped sub-theme within a [Soul DID](#soul-did) that carries distinct visual identity specializations and audience targeting while inheriting the parent Soul DID's foundational triad (E × P × D) and compliance regime. Variants are declared in `soul.spec.variants[]` and identified by kebab-case `id` (e.g. `small-utility`, `enterprise`). A Variant is NOT a separate Soul — it shares the parent Soul's substrate, compliance floor, and tenant quota. Use a Variant when the same product face targets multiple audience segments with different visual specializations but the same compliance regime. Use a separate Soul when compliance regimes or substrates differ. See [RFC-0017](rfcs/RFC-0017-in-soul-variant-pattern.md) and [docs/concepts/variants.md](../docs/concepts/variants.md).
 
 ### targetedVariants {#targeted-variants}
 
