@@ -2,7 +2,7 @@
 id: AISDLC-1024
 title: >-
   Pipeline hotfix lane: a task labelled `pipeline-hotfix` executes with the last canary-green pipeline-cli build, never through its own bug
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22'
 labels:
@@ -40,11 +40,11 @@ dispatchable: true
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `resolve-pipeline-cli.sh` with `AI_SDLC_PIPELINE_REF=<sha>` builds or reuses pipeline-cli at that sha outside `.worktrees/` and prints the chosen build (shell test)
-- [ ] #2 `/ai-sdlc execute` on a task labelled `pipeline-hotfix` exports `AI_SDLC_PIPELINE_REF` from `.ai-sdlc/dispatch/pipeline-known-good.json` when that sha differs from HEAD, and the PR body states the pipeline sha used (unit test)
-- [ ] #3 The attestation verifier accepts an envelope produced by a known-good build older than HEAD when the PR carries the `pipeline-hotfix` label (unit test)
-- [ ] #4 `docs/operations/backlog-and-execution-reference.md` documents the lane: label, env var, known-good file, and that the default stays HEAD
-- [ ] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
+- [x] #1 `resolve-pipeline-cli.sh` with `AI_SDLC_PIPELINE_REF=<sha>` builds or reuses pipeline-cli at that sha outside `.worktrees/` and prints the chosen build (shell test)
+- [x] #2 `/ai-sdlc execute` on a task labelled `pipeline-hotfix` exports `AI_SDLC_PIPELINE_REF` from `.ai-sdlc/dispatch/pipeline-known-good.json` when that sha differs from HEAD, and the PR body states the pipeline sha used (unit test)
+- [x] #3 The attestation verifier accepts an envelope produced by a known-good build older than HEAD when the PR carries the `pipeline-hotfix` label (unit test)
+- [x] #4 `docs/operations/backlog-and-execution-reference.md` documents the lane: label, env var, known-good file, and that the default stays HEAD
+- [x] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
 <!-- AC:END -->
 
 ## Verification
