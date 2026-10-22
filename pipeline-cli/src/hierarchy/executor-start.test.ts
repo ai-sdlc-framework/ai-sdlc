@@ -111,7 +111,7 @@ describe('executorStart', () => {
     writeManifest(board, mkManifest('AISDLC-9'));
     const lines: string[] = [];
     const r = await executorStart(
-      { boardDir: board, cwd: tmp, waitSec: 5 },
+      { boardDir: board, senderRef: 'proj-operator-dispatch', cwd: tmp, waitSec: 5 },
       {
         identity: identityFor('executor', 'proj-executor-alpha'),
         repoGit: gitAt(tmp),
@@ -143,7 +143,7 @@ describe('executorStart', () => {
     expect(claim).not.toHaveBeenCalled();
   });
 
-  it('accepts the dispatch session as sender and warns when none is reported (AISDLC-764)', async () => {
+  it('accepts the dispatch session as sender (AISDLC-764)', async () => {
     writeManifest(board, mkManifest('AISDLC-9'));
     const lines: string[] = [];
     const ok = await executorStart(
@@ -157,23 +157,25 @@ describe('executorStart', () => {
     expect(ok.taskId).toBe('AISDLC-9');
     expect(lines.some((l) => l.includes('UNCHECKED START'))).toBe(false);
     releaseInflight(board, 'AISDLC-9');
-    const warned: string[] = [];
-    await executorStart(
-      { boardDir: board, cwd: tmp, waitSec: 0 },
-      {
-        identity: identityFor('executor', 'proj-executor-alpha'),
-        repoGit: gitAt(tmp),
-        log: (l) => warned.push(l),
-      },
-    );
-    expect(warned.some((l) => l.includes('WARNING: UNCHECKED START'))).toBe(true);
+  });
+
+  it('refuses an unchecked start and claims nothing (AISDLC-1025)', async () => {
+    writeManifest(board, mkManifest('AISDLC-9'));
+    const claim = vi.fn();
+    await expect(
+      executorStart(
+        { boardDir: board, cwd: tmp, waitSec: 0 },
+        { identity: identityFor('executor', 'proj-executor-alpha'), repoGit: gitAt(tmp), claim },
+      ),
+    ).rejects.toThrow(/^unchecked-start: /);
+    expect(claim).not.toHaveBeenCalled();
   });
 
   it('writes the heartbeat naming the worker as part of the claim, before the task is returned (AISDLC-791)', async () => {
     writeManifest(board, mkManifest('AISDLC-9'));
     expect(readHeartbeat(board, 'AISDLC-9')).toBeUndefined();
     const r = await executorStart(
-      { boardDir: board, cwd: tmp, waitSec: 5 },
+      { boardDir: board, senderRef: 'proj-operator-dispatch', cwd: tmp, waitSec: 5 },
       { identity: identityFor('executor', 'proj-executor-alpha'), repoGit: gitAt(tmp) },
     );
     expect(r.taskId).toBe('AISDLC-9');
@@ -194,7 +196,7 @@ describe('executorStart', () => {
       message: 'lease-push preflight (claim of AISDLC-9): hierarchy-env unmet',
     });
     const r = await executorStart(
-      { boardDir: board, cwd: tmp, waitSec: 5 },
+      { boardDir: board, senderRef: 'proj-operator-dispatch', cwd: tmp, waitSec: 5 },
       {
         identity: identityFor('executor', 'proj-executor-alpha'),
         repoGit: gitAt(tmp),
@@ -217,7 +219,7 @@ describe('executorStart', () => {
     writeManifest(board, mkManifest('AISDLC-9'));
     await expect(
       executorStart(
-        { boardDir: board, cwd: tmp, waitSec: 5 },
+        { boardDir: board, senderRef: 'proj-operator-dispatch', cwd: tmp, waitSec: 5 },
         {
           identity: identityFor('executor', 'proj-executor-alpha'),
           repoGit: gitAt(tmp),
@@ -232,7 +234,7 @@ describe('executorStart', () => {
   it('writes no heartbeat when nothing is claimed', async () => {
     const hb = vi.fn();
     const r = await executorStart(
-      { boardDir: board, cwd: tmp, waitSec: 0 },
+      { boardDir: board, senderRef: 'proj-operator-dispatch', cwd: tmp, waitSec: 0 },
       {
         identity: identityFor('executor', 'proj-executor-alpha'),
         repoGit: gitAt(tmp),
@@ -257,7 +259,7 @@ describe('executorStart', () => {
     });
     const lines: string[] = [];
     const r = await executorStart(
-      { boardDir: board, cwd: tmp, waitSec: 5 },
+      { boardDir: board, senderRef: 'proj-operator-dispatch', cwd: tmp, waitSec: 5 },
       {
         identity: identityFor('executor', 'proj-executor-alpha'),
         repoGit: gitAt(tmp),
@@ -276,7 +278,7 @@ describe('executorStart', () => {
     writeManifest(board, mkManifest('AISDLC-9'));
     const lines: string[] = [];
     await executorStart(
-      { boardDir: board, cwd: tmp, waitSec: 5 },
+      { boardDir: board, senderRef: 'proj-operator-dispatch', cwd: tmp, waitSec: 5 },
       {
         identity: identityFor('executor', 'proj-executor-alpha'),
         repoGit: gitAt(tmp),
@@ -288,7 +290,7 @@ describe('executorStart', () => {
 
   it('returns taskId null when the wait lapses with nothing eligible', async () => {
     const r = await executorStart(
-      { boardDir: board, cwd: tmp, waitSec: 0 },
+      { boardDir: board, senderRef: 'proj-operator-dispatch', cwd: tmp, waitSec: 0 },
       { identity: identityFor('executor', 'proj-executor-alpha'), repoGit: gitAt(tmp) },
     );
     expect(r.taskId).toBeNull();
@@ -300,7 +302,7 @@ describe('executorStart', () => {
     const claim = vi.fn();
     await expect(
       executorStart(
-        { boardDir: board, cwd: tmp, waitSec: 0 },
+        { boardDir: board, senderRef: 'proj-operator-dispatch', cwd: tmp, waitSec: 0 },
         {
           identity: identityFor('operator-dispatch', 'proj-operator-dispatch'),
           repoGit: gitAt(tmp),
@@ -315,7 +317,7 @@ describe('executorStart', () => {
     const claim = vi.fn();
     await expect(
       executorStart(
-        { boardDir: board, cwd: '/elsewhere', waitSec: 0 },
+        { boardDir: board, senderRef: 'proj-operator-dispatch', cwd: '/elsewhere', waitSec: 0 },
         {
           identity: identityFor('executor', 'proj-executor-alpha'),
           repoGit: gitAt('/elsewhere'),
@@ -344,10 +346,13 @@ describe('cli-hierarchy executor-start and clear --self (executor)', () => {
 
   it('prints the identity line then one JSON line', async () => {
     writeManifest(board, mkManifest('AISDLC-4'));
-    const r = await run(['executor-start', '--wait', '5'], {
-      identity: identityFor('executor', 'proj-executor-alpha'),
-      repoGit: gitAt(tmp),
-    });
+    const r = await run(
+      ['executor-start', '--wait', '5', '--sender-ref', 'proj-operator-dispatch'],
+      {
+        identity: identityFor('executor', 'proj-executor-alpha'),
+        repoGit: gitAt(tmp),
+      },
+    );
     expect(r.code).toBe(0);
     expect(r.out[0]).toContain("[executor] I am 'proj-executor-alpha'");
     expect(JSON.parse(r.out[r.out.length - 1]!)).toMatchObject({ taskId: 'AISDLC-4' });

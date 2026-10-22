@@ -739,3 +739,19 @@ describe('legacy manifests', () => {
     expect(order).toEqual(['T-3', 'T-2', 'T-1']);
   });
 });
+
+describe('ruling --until is a claim predicate (AISDLC-1025)', () => {
+  it('never claims a manifest whose ruling until-task has no done/ verdict', () => {
+    const ruled = mk('T-2', {
+      ruling: { text: 'hotfix first', until: 'T-1', at: '2026-10-22T00:00:00.000Z' },
+    });
+    writeManifest(board, ruled);
+    writeManifest(board, mk('T-3'));
+    const first = claimNext(board, 'in-session-agent');
+    expect(first.claimed && first.manifest?.taskId).toBe('T-3');
+    expect(claimNext(board, 'in-session-agent').claimed).toBe(false);
+    succeed(board, 'T-1');
+    const second = claimNext(board, 'in-session-agent');
+    expect(second.claimed && second.manifest?.taskId).toBe('T-2');
+  });
+});

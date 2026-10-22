@@ -2,7 +2,7 @@
 id: AISDLC-1025
 title: >-
   A task carrying a `--until` rule is never claimable, and an executor start without sender pid and ref is refused
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-22'
 labels:

@@ -318,12 +318,16 @@ export function loadEligibilityContext(boardDir: string): EligibilityContext {
 
 /**
  * Apply the ordering rules to one queued manifest: a decision blocker, an
- * unmet `after`, or a busy `sequenceGroup` each hold it back. A manifest
+ * unmet `after`, a planner ruling with an unmet `--until`, or a busy `sequenceGroup` each hold it back. A manifest
  * without the ordering fields is always eligible (as before).
  */
 export function checkEligibility(manifest: DispatchManifest, ctx: EligibilityContext): Eligibility {
   if (manifest.blockedBy) {
     return { eligible: false, reason: `blocked by decision ${manifest.blockedBy}` };
+  }
+  const until = manifest.ruling?.until;
+  if (until !== undefined && !ctx.doneTaskIds.has(until)) {
+    return { eligible: false, reason: `ruled: held until ${until} has a done/ verdict` };
   }
   const unmet = (manifest.after ?? []).filter((id) => !ctx.doneTaskIds.has(id));
   if (unmet.length > 0) {
