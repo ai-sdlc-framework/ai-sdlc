@@ -394,11 +394,14 @@ describe('runReconcile — orchestration', () => {
       (c) => c.file === 'gh' && c.args[0] === 'pr' && c.args[1] === 'ready',
     );
     expect(readyCall?.args).toContain('4321');
-    // gh pr merge --auto --squash <prNumber>
-    const mergeCall = calls.find(
-      (c) => c.file === 'gh' && c.args[0] === 'pr' && c.args[1] === 'merge',
+    // AISDLC-975: arming goes through cli-merge-if-eligible --arm, never raw gh.
+    expect(calls.find((c) => c.file === 'gh' && c.args[1] === 'merge')).toBeUndefined();
+    const armCall = calls.find(
+      (c) => c.file === 'node' && c.args[0].endsWith('cli-merge-if-eligible.mjs'),
     );
-    expect(mergeCall?.args).toEqual(expect.arrayContaining(['--auto', '--squash', '4321']));
+    expect(armCall?.args).toEqual(
+      expect.arrayContaining(['4321', '--source-kind', 'backlog', '--arm']),
+    );
   });
 
   // AISDLC-617 — reconcile's per-reviewer loop must honor an explicit

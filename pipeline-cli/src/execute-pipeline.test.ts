@@ -7,6 +7,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fakeArmViaGate } from './__test-helpers/fake-arm-gate.js';
+
+vi.mock('./governance/arm-via-gate.js', () => ({ armViaGate: fakeArmViaGate }));
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -987,7 +990,7 @@ describe('integration — executePipeline (full Step 0-13)', () => {
     expect(result.prUrl).toBe('https://github.com/owner/repo/pull/42');
 
     // logger.warn must have been called with the non-zero exit message
-    expect(warnings.some((w) => /gh pr merge --auto exited non-zero/.test(w))).toBe(true);
+    expect(warnings.some((w) => /auto-merge arm refused/.test(w))).toBe(true);
     expect(warnings.some((w) => /already armed for auto-merge/.test(w))).toBe(true);
   });
 

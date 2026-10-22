@@ -44,6 +44,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
+import { armViaGate } from '../governance/arm-via-gate.js';
 import { detectDraftPrForBranch } from '../steps/03-setup-worktree.js';
 import {
   aggregateVerdicts,
@@ -121,10 +122,10 @@ export async function detectPrByTaskIdTitle(
  * Bug 1 (AISDLC-356) — re-arm auto-merge after a force-push clears it.
  *
  * GitHub clears the PR's auto-merge request on every force-push. This helper
- * calls `gh pr merge <n> --auto` after every force-push to re-arm it.
+ * re-arms it after every force-push through the merge-if-eligible gate
+ * (AISDLC-975).
  *
- * Non-fatal: swallows non-zero exits (PR may already be armed, may not have
- * auto-merge enabled in repo settings, or the PR number may not exist yet).
+ * Non-fatal: a refusal is logged with the gate's reason.
  */
 async function rearmAutoMerge(
   runner: Runner,
@@ -132,13 +133,10 @@ async function rearmAutoMerge(
   prNumber: number,
   logger: PipelineLogger,
 ): Promise<void> {
-  const result = await runner('gh', ['pr', 'merge', String(prNumber), '--auto'], {
-    cwd: workDir,
-    allowFailure: true,
-  });
-  if (result.code !== 0) {
+  const result = await armViaGate({ prNumber, runner, cwd: workDir });
+  if (!result.ok) {
     logger.info(
-      `[ai-sdlc] resume-from-draft: auto-merge rearm for PR #${prNumber} failed (non-fatal): ${result.stderr.trim() || result.stdout.trim() || 'unknown error'}`,
+      `[ai-sdlc] resume-from-draft: auto-merge rearm for PR #${prNumber} refused (non-fatal): ${result.reason}`,
     );
   } else {
     logger.progress('resume-from-draft', `auto-merge re-armed for PR #${prNumber}`);
@@ -593,14 +591,10 @@ export async function runResumeFromDraft(
   // Bug 2 (AISDLC-354) — auto-promote to ready + arm auto-merge when verdict is APPROVED.
   // Both calls swallow non-zero exits: PR may already be ready, queue may already be armed.
   if (aggregated.decision === 'APPROVED') {
-    const mergeResult = await runner('gh', ['pr', 'merge', String(prNumber), '--auto'], {
-      cwd: opts.workDir,
-      allowFailure: true,
-    });
-    if (mergeResult.code !== 0) {
+    const armResult = await armViaGate({ prNumber, runner, cwd: opts.workDir });
+    if (!armResult.ok) {
       logger.warn(
-        `[ai-sdlc] resume-from-draft: gh pr merge --auto exited non-zero (non-fatal): ` +
-          `${mergeResult.stderr.trim() || mergeResult.stdout.trim() || 'unknown error'}`,
+        `[ai-sdlc] resume-from-draft: auto-merge arm refused (non-fatal): ${armResult.reason}`,
       );
     }
   }

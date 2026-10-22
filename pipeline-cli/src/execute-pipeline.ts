@@ -33,6 +33,7 @@ import {
 } from './steps/index.js';
 import { existsSync, unlinkSync } from 'node:fs';
 import { defaultRunner } from './runtime/exec.js';
+import { armViaGate } from './governance/arm-via-gate.js';
 import { authoriseResume, formatResumeFeedback } from './dispatch/resume.js';
 import { join } from 'node:path';
 import {
@@ -607,14 +608,10 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
               `${readyResult.stderr.trim() || readyResult.stdout.trim() || 'unknown error'}`,
           );
         }
-        const mergeResult = await runner('gh', ['pr', 'merge', String(prNum), '--auto'], {
-          cwd: opts.workDir,
-          allowFailure: true,
-        });
-        if (mergeResult.code !== 0) {
+        const armResult = await armViaGate({ prNumber: prNum, runner, cwd: opts.workDir });
+        if (!armResult.ok) {
           logger.warn(
-            `[ai-sdlc] Step 11 auto-promote: gh pr merge --auto exited non-zero (non-fatal): ` +
-              `${mergeResult.stderr.trim() || mergeResult.stdout.trim() || 'unknown error'}`,
+            `[ai-sdlc] Step 11 auto-promote: auto-merge arm refused (non-fatal): ${armResult.reason}`,
           );
         }
       }

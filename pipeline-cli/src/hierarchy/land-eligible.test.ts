@@ -236,11 +236,7 @@ describe('the governed merge path', () => {
       }
     };
     walk(path.join(root, 'pipeline-cli', 'src'));
-    // Grandfathered call sites that predate this gate; the list only shrinks.
-    expect(offenders).toEqual([
-      'pipeline-cli/src/cli/resume-from-draft.ts',
-      'pipeline-cli/src/execute-pipeline.ts',
-      'pipeline-cli/src/orchestrator/reconcile.ts',
-    ]);
+    // AISDLC-975 emptied the grandfather list; every arm goes through the gate.
+    expect(offenders).toEqual([]);
   });
 });
