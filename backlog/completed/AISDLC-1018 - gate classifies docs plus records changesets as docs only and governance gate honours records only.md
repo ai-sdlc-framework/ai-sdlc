@@ -2,7 +2,7 @@
 id: AISDLC-1018
 title: >-
   Gate classifies docs-plus-records changesets as docs-only and the governance gate honours records_only
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22'
 labels:
@@ -39,11 +39,11 @@ dispatchable: true
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `is-docs-only-changeset.mjs --class` returns `docs-only` for the #1860 file list (docs, RFCs, a completed task file and `spec/glossary.md`) and `code` once any non-allowlisted file is added
-- [ ] #2 `governance-gate` in `ai-sdlc-gate.yml` passes `records_only` to `check-pr-governance.mjs`, and `checkReviewers` returns no finding when it is true
-- [ ] #3 PR #1861 (glossary only) passes `Governance gate` without an attestation envelope once this lands (rerun or rebase)
-- [ ] #4 `docs/operations/quality-gate.md` states that docs plus records is docs-only and lists the governance gate among the jobs that skip the reviewer check on records-only PRs
-- [ ] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
+- [x] #1 `is-docs-only-changeset.mjs --class` returns `docs-only` for the #1860 file list (docs, RFCs, a completed task file and `spec/glossary.md`) and `code` once any non-allowlisted file is added
+- [x] #2 `governance-gate` in `ai-sdlc-gate.yml` passes `records_only` to `check-pr-governance.mjs`, and `checkReviewers` returns no finding when it is true
+- [x] #3 PR #1861 (glossary only) passes `Governance gate` without an attestation envelope once this lands (rerun or rebase)
+- [x] #4 `docs/operations/quality-gate.md` states that docs plus records is docs-only and lists the governance gate among the jobs that skip the reviewer check on records-only PRs
+- [x] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
 <!-- AC:END -->
 
 ## Verification
