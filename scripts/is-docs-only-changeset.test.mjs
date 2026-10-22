@@ -570,6 +570,12 @@ describe('AISDLC-867 records-only classifier', () => {
     assert.equal(classifyChangeset(['spec/schemas/agent-role.schema.json']), 'code');
     assert.equal(classifyChangeset(['spec/schemas/pipeline.schema.json']), 'code');
   });
+  it('docs plus records is docs-only; adding code makes it code (AISDLC-1018)', () => {
+    const f = ['docs/a.md', 'spec/rfcs/RFC-1.md', 'backlog/completed/t.md', 'spec/glossary.md'];
+    assert.equal(classifyChangeset(f), 'docs-only');
+    assert.equal(classifyChangeset([...f, 'src/a.ts']), 'code');
+    assert.equal(classifyChangeset(['spec/glossary.md']), 'records-only');
+  });
   it('docs-only wins over records-only', () => {
     assert.equal(classifyChangeset(['backlog/tasks/a.md', 'docs/a.md']), 'docs-only');
   });

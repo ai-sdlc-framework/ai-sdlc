@@ -144,6 +144,8 @@ jobs:
           if [ "$RESULT" != "true" ]; then RESULT=false; fi
           # AISDLC-867: records-only fast lane (backlog/**, .ai-sdlc/_decisions/**,
           # spec/** minus trust-chain paths). Fail safe to false.
+          # AISDLC-1018: docs plus records is docs-only for every gate.
+          if [ "$CLASS" = "docs-only" ]; then RESULT=true; fi
           RECORDS=false
           if [ "$CLASS" = "records-only" ]; then RECORDS=true; fi
           echo "docs_only=$RESULT" >> "$GITHUB_OUTPUT"
@@ -1099,6 +1101,7 @@ jobs:
           BASE_REPO: ${{ github.repository }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           DOCS_ONLY: ${{ needs.detect.outputs.docs_only }}
+          RECORDS_ONLY: ${{ needs.detect.outputs.records_only }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           set -euo pipefail
@@ -1108,7 +1111,8 @@ jobs:
             --base "$BASE_SHA" --head "$HEAD_SHA" \
             --branch "$HEAD_REF" --head-repo "$HEAD_REPO" --base-repo "$BASE_REPO" \
             --title "$PR_TITLE" \
-            --docs-only "$DOCS_ONLY" --skip-reviewers "$SKIP_REVIEWERS"
+            --docs-only "$DOCS_ONLY" --records-only "$RECORDS_ONLY" \
+            --skip-reviewers "$SKIP_REVIEWERS"
       - name: RFC Open Questions resolution markers
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

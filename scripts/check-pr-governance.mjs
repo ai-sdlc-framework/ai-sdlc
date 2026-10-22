@@ -30,7 +30,7 @@
  * Usage:
  *   node scripts/check-pr-governance.mjs <check|all> --base <sha> --head <sha>
  *        [--branch <name>] [--head-repo <owner/repo>] [--base-repo <owner/repo>]
- *        [--title <text>] [--docs-only true|false] [--skip-reviewers true|false]
+ *        [--title <text>] [--docs-only true|false] [--records-only true|false] [--skip-reviewers true|false]
  */
 
 import { execFileSync } from 'node:child_process';
@@ -230,8 +230,8 @@ export function envelopeReviewerNames(envelopeText) {
  * envelope is genuine (signature, Merkle transcript) is verify-attestation's
  * and the attestation-gate job's job.
  */
-export function checkReviewers({ base, head, repoRoot, git, docsOnly, skip }) {
-  if (docsOnly || skip) return [];
+export function checkReviewers({ base, head, repoRoot, git, docsOnly, recordsOnly, skip }) {
+  if (docsOnly || recordsOnly || skip) return [];
   let mergeBase;
   try {
     mergeBase = git(['merge-base', base, head]).trim();
@@ -336,6 +336,7 @@ export function run(
       checkReviewers({
         ...common,
         docsOnly: flags['docs-only'] === 'true',
+        recordsOnly: flags['records-only'] === 'true',
         // The release-please rolling PR carries no envelope (same-repo guard).
         skip: flags['skip-reviewers'] === 'true' || isReleasePleasePr(common),
       }),
