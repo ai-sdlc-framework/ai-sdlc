@@ -151,3 +151,7 @@ AGENTS.md
 
 # AISDLC-1024: pinned pipeline-cli scratch worktrees (hotfix lane)
 .ai-sdlc/pipeline-builds/
+
+# AISDLC-869: Claude Code memory dream output (.claude/memory.dream-<ts>.*) is machine-local;
+# untracked, it made Step 0.5 abort every execute on a non-backlog untracked file.
+.claude/memory.dream-*

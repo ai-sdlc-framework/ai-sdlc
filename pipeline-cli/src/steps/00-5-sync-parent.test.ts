@@ -19,7 +19,15 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -1071,5 +1079,44 @@ describe('removeUntrackedIdenticalToMain (AISDLC-874)', () => {
     expect(removed).toEqual([]);
     expect(existsSync(join(workDir, rel))).toBe(true);
     expect(existsSync(join(workDir, 'other.txt'))).toBe(true);
+  });
+});
+
+describe('Step 0.5 — claude memory dream output (AISDLC-869)', () => {
+  async function initRepo(): Promise<void> {
+    const { execFileSync } = await import('node:child_process');
+    execFileSync('git', ['init', '-q'], { cwd: workDir });
+    writeFileSync(
+      join(workDir, '.gitignore'),
+      readFileSync(join(__dirname, '..', '..', '..', '.gitignore'), 'utf8'),
+    );
+    // The copied .gitignore itself is untracked in the scratch repo; hide it.
+    appendFileSync(join(workDir, '.git', 'info', 'exclude'), '.gitignore\n');
+  }
+
+  function writeDreamFiles(): void {
+    const ts = '2026-10-22T00-00-00';
+    mkdirSync(join(workDir, '.claude', `memory.dream-${ts}`), { recursive: true });
+    writeFileSync(join(workDir, '.claude', `memory.dream-${ts}`, 'a.md'), 'x');
+    for (const ext of ['meta.json', 'report.json', 'report.md']) {
+      writeFileSync(join(workDir, '.claude', `memory.dream-${ts}.${ext}`), 'x');
+    }
+  }
+
+  it('does not abort when only dream output is untracked', async () => {
+    await initRepo();
+    writeDreamFiles();
+    const result = await syncParentUntrackedFiles({ workDir });
+    expect(result.ok).toBe(true);
+    expect(result.syncedFiles).toEqual([]);
+  });
+
+  it('still aborts on a genuinely stray untracked file', async () => {
+    await initRepo();
+    writeDreamFiles();
+    writeFileSync(join(workDir, 'stray.txt'), 'x');
+    const result = await syncParentUntrackedFiles({ workDir });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/stray\.txt/);
   });
 });
