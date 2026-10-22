@@ -189,16 +189,20 @@ export function planBrief(
 
   const external: BriefPlan['external'] = [];
   const afterOf = new Map<string, string[]>();
+  const waveDepsOf = new Map<string, string[]>();
   for (const t of tasks) {
     const after: string[] = [];
+    const waveDeps: string[] = [];
     for (const dep of t.dependencies) {
       const key = dep.toLowerCase();
       const inSet = byId.get(key);
       if (inSet?.dispatchable) {
         after.push(inSet.id);
+        waveDeps.push(inSet.id);
         continue;
       }
       if (inSet) {
+        after.push(inSet.id);
         external.push({
           task: t.id,
           prerequisite: inSet.id,
@@ -208,6 +212,7 @@ export function planBrief(
       }
       const done = isCompleted(dep);
       if (done === true) continue;
+      after.push(dep);
       external.push({
         task: t.id,
         prerequisite: dep,
@@ -215,6 +220,7 @@ export function planBrief(
       });
     }
     afterOf.set(t.id.toLowerCase(), after);
+    waveDepsOf.set(t.id.toLowerCase(), waveDeps);
   }
 
   // Waves: longest dependency chain within the dispatchable set.
@@ -228,7 +234,7 @@ export function planBrief(
     }
     visiting.add(key);
     let w = 1;
-    for (const dep of afterOf.get(key) ?? []) {
+    for (const dep of waveDepsOf.get(key) ?? []) {
       w = Math.max(w, resolve(dep.toLowerCase(), [...trail, key]) + 1);
     }
     visiting.delete(key);
@@ -390,6 +396,9 @@ export function selectTasks(workDir: string, selection: BriefSelection): Selecte
     .split(',')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+  // The slug comes from the full list (done tasks included) so a re-run after
+  // one task completes still names the same brief file.
+  const uniqueIds = [...new Set(ids.map((i) => i.toLowerCase()))];
   if (ids.length === 0) throw new Error('--tasks needs at least one task id');
   const tasks: BriefTask[] = [];
   for (const id of ids) {
@@ -403,8 +412,9 @@ export function selectTasks(workDir: string, selection: BriefSelection): Selecte
     if (!tasks.some((t) => t.id === node.id)) tasks.push(readFrontmatterMeta(node));
   }
   if (tasks.length === 0) throw new Error('every selected task is already completed');
-  const first = tasks[0]!.id.toLowerCase();
-  const slug = tasks.length > 1 ? `tasks-${first}-plus-${tasks.length - 1}` : `tasks-${first}`;
+  const first = uniqueIds[0]!;
+  const slug =
+    uniqueIds.length > 1 ? `tasks-${first}-plus-${uniqueIds.length - 1}` : `tasks-${first}`;
   return { tasks, warnings, isCompleted, slug, title: tasks.map((t) => t.id).join(', ') };
 }
 

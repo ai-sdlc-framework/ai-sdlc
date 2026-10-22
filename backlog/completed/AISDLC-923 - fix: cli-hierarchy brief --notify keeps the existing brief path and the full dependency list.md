@@ -1,7 +1,7 @@
 ---
 id: AISDLC-923
 title: 'fix: cli-hierarchy brief --notify keeps the existing brief path and the full dependency list'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [bug, hierarchy, brief, pipeline-cli, velocity]

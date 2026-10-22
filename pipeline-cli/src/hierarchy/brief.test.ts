@@ -7,6 +7,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -148,7 +149,8 @@ describe('waves and external prerequisites', () => {
     expect(plan.entries.find((e) => e.task === 'DEMO-4')?.after).toEqual(['DEMO-2', 'DEMO-3']);
     // DEMO-0 is completed: not a prerequisite. EXT-9 is open and outside the set.
     expect(plan.external.map((x) => x.prerequisite).sort()).toEqual(['DEMO-5', 'EXT-9']);
-    expect(plan.entries.find((e) => e.task === 'DEMO-6')?.after).toEqual([]);
+    // after is the union of the task file's open dependencies, in or out of the set.
+    expect(plan.entries.find((e) => e.task === 'DEMO-6')?.after).toEqual(['DEMO-5', 'EXT-9']);
   });
 
   it('reports an unknown dependency as not found', () => {
@@ -262,11 +264,28 @@ describe('brief file and contract with the ingester', () => {
 
   it('handles --tasks, skips completed tasks and refuses to overwrite without force', () => {
     const r = brief({ tasks: 'DEMO-0,DEMO-1,DEMO-1,DEMO-2' });
-    expect(r.file).toMatch(/tasks-demo-1-plus-1\.md$/);
+    expect(r.file).toMatch(/tasks-demo-0-plus-2\.md$/);
     expect(r.plan.entries.map((e) => e.task)).toEqual(['DEMO-1', 'DEMO-2']);
     expect(logs.join('\n')).toMatch(/DEMO-0 is already completed/);
     expect(() => brief({ tasks: 'DEMO-0,DEMO-1,DEMO-1,DEMO-2' })).toThrow(/--force/);
     expect(() => brief({ tasks: 'DEMO-0,DEMO-1,DEMO-1,DEMO-2' }, { force: true })).not.toThrow();
+  });
+
+  it('keeps the slug of the full --tasks list when a listed task is done', () => {
+    const r = brief({ tasks: 'DEMO-0,DEMO-1,DEMO-2' });
+    expect(path.basename(r.file)).toBe('tasks-demo-0-plus-2.md');
+    writeFileSync(r.file, 'edited by the planner\n');
+    const again = generateBrief({ tasks: 'DEMO-0,DEMO-1,DEMO-2', keepExisting: true }, deps);
+    expect(again.file).toBe(r.file);
+    expect(again.reused).toBe(true);
+    expect(readdirSync(path.dirname(r.file))).toEqual(['tasks-demo-0-plus-2.md']);
+  });
+
+  it('keeps every open dependency in a regenerated after list', () => {
+    const r = brief({ tasks: 'DEMO-4,DEMO-6' });
+    const e = (id: string) => r.plan.entries.find((x) => x.task === id)?.after;
+    expect(e('DEMO-4')).toEqual(['DEMO-2', 'DEMO-3']);
+    expect(e('DEMO-6')).toEqual(['DEMO-5', 'EXT-9']);
   });
 
   it('keeps an edited brief when asked to notify', () => {
