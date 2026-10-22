@@ -2,7 +2,7 @@
 id: AISDLC-1030
 title: >-
   The landing transition completes a task whose last verdict is iterate-needed when its PR merges
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-22'
 labels:
@@ -38,13 +38,36 @@ dispatchable: true
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 A merged PR whose task is inflight with an `iterate-needed` verdict is completed as `success` (worker, pr, `landed` stamp) by the landing or reconcile transition (unit test)
-- [ ] #2 A merged PR whose task already holds a `done/` verdict only receives the `landed` stamp, as today (unit test)
-- [ ] #3 The tick output names the auto-completed task
-- [ ] #4 `docs/operations/cli-hierarchy.md` states that a landed PR completes an iterate-needed task
-- [ ] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
+- [x] #1 A merged PR whose task is inflight with an `iterate-needed` verdict is completed as `success` (worker, pr, `landed` stamp) by the landing or reconcile transition (unit test)
+- [x] #2 A merged PR whose task already holds a `done/` verdict only receives the `landed` stamp, as today (unit test)
+- [x] #3 The tick output names the auto-completed task
+- [x] #4 `docs/operations/cli-hierarchy.md` states that a landed PR completes an iterate-needed task
+- [x] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
 <!-- AC:END -->
 
 ## Verification
 
 - `pnpm build && pnpm test && pnpm lint && pnpm format:check` green.
+
+## Final Summary
+
+## Summary
+Fixed the security finding. `completeLandedIterateNeeded` now returns false unless the merged PR number equals the `prNumber` named by the task's `iterate-needed` verdict. A merged PR that only mentions the task id in its title no longer completes the task or frees its slot. I also replaced the default `new Date()` with the package clock seam to satisfy the clock-discipline lint.
+
+## Changes
+- pipeline-cli/src/dispatch/complete.ts
+- pipeline-cli/src/dispatch/complete.test.ts
+
+## Design decisions
+Added a test where the merged PR number (6) differs from the verdict's PR (5). The task stays inflight and the function returns false. The earlier commit (81388f7d1) is unchanged. This commit is rebased onto origin/main and lease-pushed to the existing PR #1903.
+
+## Verification
+- `pnpm build` — passed
+- `pnpm test` — passed
+- `pnpm lint` — passed
+- `pnpm format:check` — passed
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
