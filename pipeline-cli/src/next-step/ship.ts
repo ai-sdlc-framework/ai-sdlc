@@ -19,6 +19,7 @@
 
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { reviewsLedgerPath } from '../attestation/reviews-ledger.js';
 import { computeMergeBase, computePatchId } from '../attestation/patch-id.js';
 import { PUSH_NON_FAST_FORWARD_CAUSE } from '../hierarchy/playbook.js';
 import { dropAttestationChores } from '../attestation/drop-chores.js';
@@ -168,7 +169,9 @@ export async function preSignRebase(
   // so the content hash is unchanged (AISDLC-848). A non-empty porcelain means
   // a real change, so no empty commit is made when the ledger equals HEAD
   // (AISDLC-951).
-  const owned = ['.ai-sdlc/transcript-leaves/', `.ai-sdlc/reviews/${state.taskId}.jsonl`];
+  // Empty root keeps the ledger path worktree-relative; the writer owns the
+  // (lowercase) spelling, so it is never rebuilt by hand (AISDLC-1017).
+  const owned = ['.ai-sdlc/transcript-leaves/', reviewsLedgerPath(state.taskId, '')];
   const pending = await ctx.runner('git', ['status', '--porcelain', '--', ...owned], {
     cwd: wt,
     allowFailure: true,

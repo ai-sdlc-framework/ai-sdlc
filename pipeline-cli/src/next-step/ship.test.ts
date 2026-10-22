@@ -256,12 +256,12 @@ describe('preSignRebase (AISDLC-102)', () => {
     h.runner.on(/merge-base --is-ancestor/, fail('', 1));
     h.runner.on(
       /status --porcelain -- \.ai-sdlc\/transcript-leaves\//,
-      ok(` M .ai-sdlc/reviews/${state.taskId}.jsonl\n`),
+      ok(` M .ai-sdlc/reviews/${state.taskId.toLowerCase()}.jsonl\n`),
     );
     const r = await preSignRebase(h.ctx, state);
     expect(r).toEqual({ kind: 'unchanged', hash: 'A' });
     expect(cmds().filter((c) => c.startsWith('git commit'))).toHaveLength(1);
-    expect(cmds()).toContain(`git add -- .ai-sdlc/reviews/${state.taskId}.jsonl`);
+    expect(cmds()).toContain(`git add -- .ai-sdlc/reviews/${state.taskId.toLowerCase()}.jsonl`);
     expect(cmds()).toContain('git add -- .ai-sdlc/transcript-leaves/');
     expect(indexOfCall(/git commit/)).toBeLessThan(indexOfCall(/git rebase origin\/main/));
   });
@@ -271,14 +271,14 @@ describe('preSignRebase (AISDLC-102)', () => {
     h.runner.on(/merge-base --is-ancestor/, fail('', 1));
     h.runner.on(/status --porcelain/, ok('?? .ai-sdlc/transcript-leaves/abc.jsonl\n'));
     h.runner.on(
-      new RegExp(`git add -- \\.ai-sdlc/reviews/${state.taskId}\\.jsonl`),
+      new RegExp(`git add -- \\.ai-sdlc/reviews/${state.taskId.toLowerCase()}\\.jsonl`),
       fail('fatal: pathspec did not match any files', 128),
     );
     const r = await preSignRebase(h.ctx, state);
     expect(r).toEqual({ kind: 'unchanged', hash: 'A' });
     expect(cmds().filter((c) => c.startsWith('git add'))).toEqual([
       'git add -- .ai-sdlc/transcript-leaves/',
-      `git add -- .ai-sdlc/reviews/${state.taskId}.jsonl`,
+      `git add -- .ai-sdlc/reviews/${state.taskId.toLowerCase()}.jsonl`,
     ]);
     expect(cmds().filter((c) => c.startsWith('git commit'))).toHaveLength(1);
   });
@@ -286,10 +286,13 @@ describe('preSignRebase (AISDLC-102)', () => {
   it('still stages the ledger when the leaves add fails (only-ledger-dirty)', async () => {
     hashes('A', 'A');
     h.runner.on(/merge-base --is-ancestor/, fail('', 1));
-    h.runner.on(/status --porcelain/, ok(` M .ai-sdlc/reviews/${state.taskId}.jsonl\n`));
+    h.runner.on(
+      /status --porcelain/,
+      ok(` M .ai-sdlc/reviews/${state.taskId.toLowerCase()}.jsonl\n`),
+    );
     h.runner.on(/git add -- \.ai-sdlc\/transcript-leaves\//, fail('no match', 128));
     await preSignRebase(h.ctx, state);
-    expect(cmds()).toContain(`git add -- .ai-sdlc/reviews/${state.taskId}.jsonl`);
+    expect(cmds()).toContain(`git add -- .ai-sdlc/reviews/${state.taskId.toLowerCase()}.jsonl`);
     expect(cmds().filter((c) => c.startsWith('git commit'))).toHaveLength(1);
   });
 
@@ -308,7 +311,10 @@ describe('preSignRebase (AISDLC-102)', () => {
   it('converges on a later attempt when the ledger re-dirties after the rebase', async () => {
     hashes('A', 'A', 'A', 'A');
     h.runner.on(/merge-base --is-ancestor/, fail('', 1));
-    h.runner.on(/status --porcelain/, ok(` M .ai-sdlc/reviews/${state.taskId}.jsonl\n`));
+    h.runner.on(
+      /status --porcelain/,
+      ok(` M .ai-sdlc/reviews/${state.taskId.toLowerCase()}.jsonl\n`),
+    );
     const r1 = await preSignRebase(h.ctx, state);
     const r2 = await preSignRebase(h.ctx, state);
     expect(r1.kind).not.toBe('failed');
@@ -342,7 +348,10 @@ describe('preSignRebase (AISDLC-102)', () => {
     hashes('A', 'A');
     writeLedger();
     h.runner.on(/merge-base --is-ancestor/, fail('', 1));
-    h.runner.on(/status --porcelain/, ok(` M .ai-sdlc/reviews/${state.taskId}.jsonl\n`));
+    h.runner.on(
+      /status --porcelain/,
+      ok(` M .ai-sdlc/reviews/${state.taskId.toLowerCase()}.jsonl\n`),
+    );
     const r = await preSignRebase(h.ctx, state);
     expect(r).toEqual({ kind: 'unchanged', hash: 'A' });
     expect(cmds().filter((c) => c.startsWith('git commit'))).toHaveLength(1);
