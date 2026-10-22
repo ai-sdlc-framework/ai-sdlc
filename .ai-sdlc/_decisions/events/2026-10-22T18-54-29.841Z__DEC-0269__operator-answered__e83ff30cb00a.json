@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-22T18:54:29.841Z","decisionId":"DEC-0269","chosenOptionId":"nudge","rationale":"Class (a): reversible, board-only blast radius; the uds ref path is the one the shipped executor command documents; the message carries no assignment. Ends when AISDLC-1028 lands.","by":"planner"}
