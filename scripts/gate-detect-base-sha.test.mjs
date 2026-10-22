@@ -38,9 +38,10 @@ test('detect extracts each classifier file from the base sha before running it',
     'pipeline-cli/attestation-core/docs-only-paths.mjs',
     'pipeline-cli/attestation-core/review-scope-core.mjs',
   ]) {
-    const idx = job.indexOf(`git show "$SRC:${f}"`);
-    assert.ok(idx >= 0 && idx < firstNode, `${f} read via git show before use`);
+    assert.ok(job.includes(f), `${f} is listed in the extraction loop`);
   }
+  const show = job.indexOf('git show "$SRC:$f"');
+  assert.ok(show >= 0 && show < firstNode, 'classifier files read via git show before use');
   assert.match(job, /SRC="\$\{BASE_SHA:-HEAD\}"/);
 });
 
