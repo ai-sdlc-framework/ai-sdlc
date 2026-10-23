@@ -261,97 +261,114 @@ function taskRunning(state: ExecutorState): boolean {
   return state.active;
 }
 
-/** Register the executor hooks. Called from the gate once the role, version and probes passed. */
-export function registerExecutor(on: Any, state: ExecutorState): void {
-  // Each handler builds its own ports: `$` stays spelled `$.noun.verb(...)` at every call site.
-  on('session.receive', async ($: Any, e: Any, next: Any) => {
-    const p: Ports = {
-      storeGet: (k) => $.store.get(k),
-      storeSet: (k, v) => $.store.set(k, v),
-      runCommand: (a) => $.command.run(a),
-      compact: (a) => $.session.compact(a),
-      submit: (a) => $.prompt.submit(a),
-    };
-    // A failure in this gating hook must never swallow a message: fall through to the model.
-    const handle = async () => {
-      if (!state.enabled) return next(e);
-      await resumeAfterClear(p, state);
-      const raw = String(e?.text ?? '');
-      const sender = senderOf(raw);
-      const text = innerText(raw);
-      if (!DISPATCH_NAME.test(sender)) return next(e);
-      if (/^enqueue\b/i.test(text)) {
-        if (!taskRunning(state)) {
-          const r = await safe(() => p.runCommand({ command: RESUME_COMMAND }));
-          if (ran(r)) {
-            state.active = true;
-            state.lastActivity = Date.now();
-          } else await log(p, `wake refused: ${JSON.stringify(r.value ?? null)}`);
-        }
-        return { consumed: 'hierarchy:enqueue' };
-      }
-      // `cli-hierarchy clear <name>` (RFC-0058 phase 4): the dispatch host delivers a rotate request.
-      if (/^rotate\b/i.test(text)) {
-        if (taskRunning(state)) state.pendingRotate = true;
-        else await rotate(p, state);
-        return { consumed: 'hierarchy:rotate' };
-      }
-      if (STATUS_NOISE.test(text)) return { consumed: 'hierarchy:status' };
-      return next(e);
-    };
-    return handle().catch(() => next(e));
-  });
-
-  on('turn.start', async ($: Any, e: Any, next: Any) => {
+/** Event handlers, called by the module's single registration point (register.tsx) for the armed role. */
+export async function executorSessionReceive(
+  state: ExecutorState,
+  $: Any,
+  e: Any,
+  next: Any,
+): Promise<Any> {
+  const p: Ports = {
+    storeGet: (k) => $.store.get(k),
+    storeSet: (k, v) => $.store.set(k, v),
+    runCommand: (a) => $.command.run(a),
+    compact: (a) => $.session.compact(a),
+    submit: (a) => $.prompt.submit(a),
+  };
+  // A failure in this gating hook must never swallow a message: fall through to the model.
+  const handle = async () => {
     if (!state.enabled) return next(e);
-    const p: Ports = {
-      storeGet: (k) => $.store.get(k),
-      storeSet: (k, v) => $.store.set(k, v),
-      runCommand: (a) => $.command.run(a),
-      compact: (a) => $.session.compact(a),
-      submit: (a) => $.prompt.submit(a),
-    };
     await resumeAfterClear(p, state);
-    if (!e?.agentId) {
-      state.active = true;
-      state.lastActivity = Date.now();
+    const raw = String(e?.text ?? '');
+    const sender = senderOf(raw);
+    const text = innerText(raw);
+    if (!DISPATCH_NAME.test(sender)) return next(e);
+    if (/^enqueue\b/i.test(text)) {
+      if (!taskRunning(state)) {
+        const r = await safe(() => p.runCommand({ command: RESUME_COMMAND }));
+        if (ran(r)) {
+          state.active = true;
+          state.lastActivity = Date.now();
+        } else await log(p, `wake refused: ${JSON.stringify(r.value ?? null)}`);
+      }
+      return { consumed: 'hierarchy:enqueue' };
     }
-    return next(e);
-  });
-
-  on('turn.complete', async ($: Any, e: Any, next: Any) => {
-    if (!state.enabled) return next(e);
-    const p: Ports = {
-      storeGet: (k) => $.store.get(k),
-      storeSet: (k, v) => $.store.set(k, v),
-      runCommand: (a) => $.command.run(a),
-      compact: (a) => $.session.compact(a),
-      submit: (a) => $.prompt.submit(a),
-    };
-    if (e?.agentId) return next(e);
-    const reply = String(e?.text ?? e?.reply ?? '');
-    if (reply) state.lastReply = reply;
-    state.lastActivity = Date.now();
-    const verdict = endsWithMarker(reply, VERDICT_MARKER);
-    if (verdict || endsWithMarker(reply, IDLE_MARKER)) state.active = false;
-    if (verdict || (state.pendingRotate && !taskRunning(state))) await rotate(p, state);
-    return next(e);
-  });
-
-  on('session.measure', async ($: Any, e: Any, next: Any) => {
-    if (!state.enabled) return next(e);
-    const p: Ports = {
-      storeGet: (k) => $.store.get(k),
-      storeSet: (k, v) => $.store.set(k, v),
-      runCommand: (a) => $.command.run(a),
-      compact: (a) => $.session.compact(a),
-      submit: (a) => $.prompt.submit(a),
-    };
-    await resumeAfterClear(p, state);
-    if (measuredTokens(e) >= ROTATE_AT_TOKENS) {
+    // `cli-hierarchy clear <name>` (RFC-0058 phase 4): the dispatch host delivers a rotate request.
+    if (/^rotate\b/i.test(text)) {
       if (taskRunning(state)) state.pendingRotate = true;
       else await rotate(p, state);
+      return { consumed: 'hierarchy:rotate' };
     }
+    if (STATUS_NOISE.test(text)) return { consumed: 'hierarchy:status' };
     return next(e);
-  });
+  };
+  return handle().catch(() => next(e));
+}
+
+export async function executorTurnStart(
+  state: ExecutorState,
+  $: Any,
+  e: Any,
+  next: Any,
+): Promise<Any> {
+  if (!state.enabled) return next(e);
+  const p: Ports = {
+    storeGet: (k) => $.store.get(k),
+    storeSet: (k, v) => $.store.set(k, v),
+    runCommand: (a) => $.command.run(a),
+    compact: (a) => $.session.compact(a),
+    submit: (a) => $.prompt.submit(a),
+  };
+  await resumeAfterClear(p, state);
+  if (!e?.agentId) {
+    state.active = true;
+    state.lastActivity = Date.now();
+  }
+  return next(e);
+}
+
+export async function executorTurnComplete(
+  state: ExecutorState,
+  $: Any,
+  e: Any,
+  next: Any,
+): Promise<Any> {
+  if (!state.enabled) return next(e);
+  const p: Ports = {
+    storeGet: (k) => $.store.get(k),
+    storeSet: (k, v) => $.store.set(k, v),
+    runCommand: (a) => $.command.run(a),
+    compact: (a) => $.session.compact(a),
+    submit: (a) => $.prompt.submit(a),
+  };
+  if (e?.agentId) return next(e);
+  const reply = String(e?.text ?? e?.reply ?? '');
+  if (reply) state.lastReply = reply;
+  state.lastActivity = Date.now();
+  const verdict = endsWithMarker(reply, VERDICT_MARKER);
+  if (verdict || endsWithMarker(reply, IDLE_MARKER)) state.active = false;
+  if (verdict || (state.pendingRotate && !taskRunning(state))) await rotate(p, state);
+  return next(e);
+}
+
+export async function executorSessionMeasure(
+  state: ExecutorState,
+  $: Any,
+  e: Any,
+  next: Any,
+): Promise<Any> {
+  if (!state.enabled) return next(e);
+  const p: Ports = {
+    storeGet: (k) => $.store.get(k),
+    storeSet: (k, v) => $.store.set(k, v),
+    runCommand: (a) => $.command.run(a),
+    compact: (a) => $.session.compact(a),
+    submit: (a) => $.prompt.submit(a),
+  };
+  await resumeAfterClear(p, state);
+  if (measuredTokens(e) >= ROTATE_AT_TOKENS) {
+    if (taskRunning(state)) state.pendingRotate = true;
+    else await rotate(p, state);
+  }
+  return next(e);
 }

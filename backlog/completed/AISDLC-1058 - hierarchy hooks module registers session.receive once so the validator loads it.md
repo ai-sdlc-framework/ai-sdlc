@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1058
 title: 'hierarchy hooks module registers session.receive once per module, so the plugin validator accepts it and the roster sessions load it'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-23'
 labels:

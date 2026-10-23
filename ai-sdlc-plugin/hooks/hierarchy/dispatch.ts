@@ -361,45 +361,54 @@ export async function rotateHost(p: DispatchPorts, state: DispatchState): Promis
   await safe(() => p.runCommand({ command: 'clear' }));
 }
 
-/**
- * Register the dispatch event hooks. Called from the gate once the role, version and probes passed.
- * The timer and the pane are armed by the gate itself (`$.clock.every`, `$.ui.open`), which owns `$`.
- * Each handler builds its own ports so `$` stays spelled `$.noun.verb(...)` at every call site.
- */
-export function registerDispatch(on: Any, state: DispatchState): void {
-  on('session.receive', async ($: Any, e: Any, next: Any) => {
-    const p: DispatchPorts = {
-      storeGet: (k) => $.store.get(k),
-      storeSet: (k, v) => $.store.set(k, v),
-      runCommand: (a) => $.command.run(a),
-      runProcess: (a) => $.process.run(a),
-      send: (a) => $.session.send(a),
-      uiOpen: (a) => $.ui.open(a),
-    };
-    if (!state.enabled) return next(e);
-    // A failure here must never prompt the model: consume the message and let the next tick show the state.
-    return handleMessage(p, state, String(e?.text ?? '')).then(
-      (consumed) => ({ consumed }),
-      () => ({ consumed: 'hierarchy:error' }),
-    );
-  });
+/** Event handlers, called by the module's single registration point (register.tsx) for the armed role. */
+export async function dispatchSessionReceive(
+  state: DispatchState,
+  $: Any,
+  e: Any,
+  next: Any,
+): Promise<Any> {
+  const p: DispatchPorts = {
+    storeGet: (k) => $.store.get(k),
+    storeSet: (k, v) => $.store.set(k, v),
+    runCommand: (a) => $.command.run(a),
+    runProcess: (a) => $.process.run(a),
+    send: (a) => $.session.send(a),
+    uiOpen: (a) => $.ui.open(a),
+  };
+  if (!state.enabled) return next(e);
+  // A failure here must never prompt the model: consume the message and let the next tick show the state.
+  return handleMessage(p, state, String(e?.text ?? '')).then(
+    (consumed) => ({ consumed }),
+    () => ({ consumed: 'hierarchy:error' }),
+  );
+}
 
-  on('ui.render', async (_$: Any, e: Any, next: Any) => {
-    if (!state.enabled) return next(e);
-    return { lines: state.pane, text: state.pane.join('\n') };
-  });
+export async function dispatchUiRender(
+  state: DispatchState,
+  _$: Any,
+  e: Any,
+  next: Any,
+): Promise<Any> {
+  if (!state.enabled) return next(e);
+  return { lines: state.pane, text: state.pane.join('\n') };
+}
 
-  on('session.measure', async ($: Any, e: Any, next: Any) => {
-    if (!state.enabled) return next(e);
-    const p: DispatchPorts = {
-      storeGet: (k) => $.store.get(k),
-      storeSet: (k, v) => $.store.set(k, v),
-      runCommand: (a) => $.command.run(a),
-      runProcess: (a) => $.process.run(a),
-      send: (a) => $.session.send(a),
-      uiOpen: (a) => $.ui.open(a),
-    };
-    if (measuredTokens(e) >= DISPATCH_ROTATE_AT_TOKENS) await rotateHost(p, state);
-    return next(e);
-  });
+export async function dispatchSessionMeasure(
+  state: DispatchState,
+  $: Any,
+  e: Any,
+  next: Any,
+): Promise<Any> {
+  if (!state.enabled) return next(e);
+  const p: DispatchPorts = {
+    storeGet: (k) => $.store.get(k),
+    storeSet: (k, v) => $.store.set(k, v),
+    runCommand: (a) => $.command.run(a),
+    runProcess: (a) => $.process.run(a),
+    send: (a) => $.session.send(a),
+    uiOpen: (a) => $.ui.open(a),
+  };
+  if (measuredTokens(e) >= DISPATCH_ROTATE_AT_TOKENS) await rotateHost(p, state);
+  return next(e);
 }
