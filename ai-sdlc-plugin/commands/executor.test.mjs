@@ -108,16 +108,9 @@ describe('executor peer binding (project-scoped names)', () => {
     assert.ok(body.indexOf('executor-start') < body.indexOf('## Step 2'));
   });
 
-  it('refuses a sender that is not its own dispatch session with one line', () => {
-    assert.match(body, /cli-hierarchy\.mjs" check-sender/);
-    assert.match(body, /check-sender[^\n]*\n?[^\n]*--sender-pid/);
-    assert.match(body, /whole reply is the single line `not my dispatch session`/);
-    assert.match(body, /no claim, no worktree, no pull request/);
-  });
-
-  it('compares the sender by what the harness reports, never by the claimed name', () => {
-    assert.match(body, /never by the name the message text claims/);
-    assert.match(body, /accepts\s+and warns/);
+  it('has no sender check: work comes from the board and the module guards the sender', () => {
+    assert.doesNotMatch(body, /check-sender/);
+    assert.match(body, /the claim is the authority/);
   });
 
   it('keeps the qualified name the roster has', () => {

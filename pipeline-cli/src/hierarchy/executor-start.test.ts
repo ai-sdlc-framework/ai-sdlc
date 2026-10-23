@@ -353,13 +353,20 @@ describe('cli-hierarchy executor-start and clear --self (executor)', () => {
     expect(JSON.parse(ok.out[ok.out.length - 1]!)).toMatchObject({ taskId: 'AISDLC-4' });
   });
 
-  it('lets an executor clear itself and sends any other caller through the roster check', async () => {
-    const r = await run(['clear', '--self', '--resume-after', 'x'], {
+  it("clear --self asks for the calling session's own rotation without waiting, and a caller outside the roster is refused", async () => {
+    const e = await run(['clear', '--self'], {
       identity: identityFor('executor', 'proj-executor-alpha'),
     });
-    expect(r.code).toBe(2);
-    const p = await run(['clear', '--self'], { identity: identityFor('planner', 'proj-planner') });
-    expect(p.code).toBe(1);
-    expect(p.err).not.toMatch(/only the dispatch session may run this command/);
+    expect(e.code).toBe(0);
+    expect(JSON.parse(e.out.at(-1)!)).toMatchObject({
+      executor: 'proj-executor-alpha',
+      ok: true,
+      acknowledged: false,
+    });
+    const nobody = await run(['clear', '--self'], {
+      identity: { ...identityFor('executor', 'proj-executor-alpha'), startPid: 1 },
+    });
+    expect(nobody.code).toBe(1);
+    expect(nobody.err).toMatch(/not a running session in the roster/);
   });
 });

@@ -1,38 +1,29 @@
 /**
- * Tests for `cli-hierarchy clear`. tmux is a recording fake behind the injected
- * runner; the roster and board are temp directories; no session is started.
+ * Tests for `cli-hierarchy clear` (RFC-0058 phase 4): one rotate request and one acknowledgement.
+ * The roster and board are temp directories; nothing is typed into a pane.
  */
 
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import { getCapability, readCapabilityState } from '@ai-sdlc/reference';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { claimNext, writeManifest } from '../dispatch/board.js';
 import type { DispatchManifest } from '../dispatch/types.js';
-import {
-  clearExecutor,
-  inputLineHolds,
-  clearSelf,
-  HIERARCHY_CLEAR_CAPABILITY,
-  recentlyScheduled,
-  type ClearDeps,
-} from './clear.js';
+import { clearExecutor, type ClearDeps } from './clear.js';
 import type { HierarchyEvent } from './emit.js';
+import { rotateRequestPath } from './rotate-request.js';
 import { writeRoster } from './roster.js';
-import type { CommandRunner, Roster, RosterEntry } from './types.js';
+import type { Roster, RosterEntry } from './types.js';
 
 let tmp: string;
 let board: string;
-let artifacts: string;
 let events: HierarchyEvent[];
-let calls: { file: string; args: string[] }[];
-let screen: string;
-let resumes: boolean;
 let sleeps: number[];
+/** Called on each sleep; a test uses it to play the dispatch host consuming the request. */
+let onSleep: () => void;
 
 const entry = (over: Partial<RosterEntry> = {}): RosterEntry => ({
   role: 'executor',
@@ -48,50 +39,32 @@ const entry = (over: Partial<RosterEntry> = {}): RosterEntry => ({
   ...over,
 });
 
+const dispatch = (over: Partial<RosterEntry> = {}) =>
+  entry({
+    role: 'operator-dispatch',
+    name: 'operator-dispatch',
+    tmuxWindow: 'operator-dispatch',
+    paneId: '%1',
+    ...over,
+  });
+
 function seedRoster(...sessions: RosterEntry[]): void {
   const roster: Roster = { schemaVersion: 'v1', sessions };
   writeRoster(board, roster);
 }
 
-/** A tmux that knows one window and one pane and records every call. */
-const run: CommandRunner = (file, args) => {
-  calls.push({ file, args: [...args] });
-  const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
-  if (file !== 'tmux') return { status: 1, stdout: '', stderr: 'unexpected binary' };
-  switch (args[0]) {
-    case 'list-windows':
-      return ok('executor-alpha\nexecutor-beta\n');
-    case 'display-message':
-      return ok('%7\n');
-    case 'capture-pane':
-      return ok(screen);
-    case 'send-keys': {
-      const literal = args[args.indexOf('--') + 1];
-      if (args.includes('-l') && literal === '/ai-sdlc executor' && resumes) {
-        // The executor prints its identity line once its loop restarts.
-        screen += "[executor] I am 'executor-alpha'; dispatch session is 'operator-dispatch'\n";
-      }
-      return ok();
-    }
-    default:
-      return { status: 1, stdout: '', stderr: 'unknown' };
-  }
-};
-
 function deps(over: Partial<ClearDeps> = {}): ClearDeps {
   return {
-    run,
     boardDir: board,
     sleep: async (ms) => {
       sleeps.push(ms);
+      onSleep();
     },
+    now: () => new Date('2026-10-23T00:00:00.000Z'),
     emit: (e) => events.push(e),
-    artifactsDir: artifacts,
     ...over,
   };
 }
-
-const sends = () => calls.filter((c) => c.args[0] === 'send-keys');
 
 const mkManifest = (taskId: string): DispatchManifest => ({
   schemaVersion: 'v1',
@@ -105,79 +78,60 @@ const mkManifest = (taskId: string): DispatchManifest => ({
   spec: { taskFile: 'backlog/tasks/x.md', verifyCommands: ['pnpm build'] },
 });
 
+const requests = () =>
+  existsSync(path.join(board, 'handoff'))
+    ? readdirSync(path.join(board, 'handoff')).filter((f) => f.startsWith('rotate-request-'))
+    : [];
+
 beforeEach(() => {
   tmp = mkdtempSync(path.join(tmpdir(), 'clear-'));
   board = path.join(tmp, 'dispatch');
-  artifacts = path.join(tmp, 'artifacts');
   mkdirSync(board, { recursive: true });
   events = [];
-  calls = [];
   sleeps = [];
-  screen = "old scrollback\n[executor] I am 'executor-alpha'; dispatch session is 'x'\n";
-  resumes = true;
-  seedRoster(entry(), entry({ name: 'executor-beta', tmuxWindow: 'executor-beta', paneId: '%8' }));
+  onSleep = () => {};
+  seedRoster(
+    dispatch(),
+    entry(),
+    entry({ name: 'executor-beta', tmuxWindow: 'executor-beta', paneId: '%8' }),
+  );
 });
 afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 
-const capability = () => readCapabilityState(artifacts).find((r) => r.id === 'hierarchy.clear');
-
 describe('clearExecutor', () => {
-  it('sends /clear, Enter, waits, then /ai-sdlc executor, Enter, to the executor pane', async () => {
-    const result = await clearExecutor(
-      { executor: 'executor-alpha', settleMs: 1000, pollIntervalMs: 250, taskId: 'AISDLC-1' },
-      deps(),
-    );
-    expect(sends().map((c) => c.args)).toEqual([
-      ['send-keys', '-t', '%7', '-l', '--', '/clear'],
-      ['send-keys', '-t', '%7', 'Enter'],
-      ['send-keys', '-t', '%7', '-l', '--', '/ai-sdlc executor'],
-      ['send-keys', '-t', '%7', 'Enter'],
-    ]);
-    // The cleared-prompt poll runs between the two keystrokes, not a fixed settle.
-    expect(sleeps[0]).toBe(250);
-    expect(result).toMatchObject({ executor: 'executor-alpha', paneId: '%7', resumed: true });
+  it('writes a rotate request and reports the acknowledgement once the host consumed it', async () => {
+    onSleep = () => rmSync(rotateRequestPath(board, 'executor-alpha'), { force: true });
+    const r = await clearExecutor({ executor: 'executor-alpha', settleMs: 5000 }, deps());
+    expect(r).toMatchObject({ executor: 'executor-alpha', ok: true, acknowledged: true });
+    expect(r.reason).toBeUndefined();
+    expect(sleeps).toEqual([500]);
+    expect(requests()).toEqual([]);
   });
 
-  it('counts a restarted executor blocked in executor-start as reported back', async () => {
-    resumes = false;
-    const base = run;
-    const blockedRun: CommandRunner = (file, args) => {
-      const literal = args[args.indexOf('--') + 1];
-      if (args[0] === 'send-keys' && args.includes('-l') && literal === '/ai-sdlc executor') {
-        screen += 'Bash(node cli-hierarchy.mjs executor-start --board-dir /b)\n';
-      }
-      return base(file, args);
-    };
-    const result = await clearExecutor(
-      { executor: 'executor-alpha', settleMs: 500 },
-      deps({ run: blockedRun }),
-    );
-    expect(result.resumed).toBe(true);
+  it('refuses with a named reason when no module consumes the request within the ceiling', async () => {
+    const r = await clearExecutor({ executor: 'executor-alpha', settleMs: 1500 }, deps());
+    expect(r.ok).toBe(false);
+    expect(r.acknowledged).toBe(false);
+    expect(r.reason).toMatch(/not acknowledged within 1500 ms.*no module loaded/);
+    expect(sleeps).toEqual([500, 500, 500]);
+    expect(requests()).toEqual(['rotate-request-executor-alpha.json']);
+    const body = JSON.parse(readFileSync(rotateRequestPath(board, 'executor-alpha'), 'utf-8'));
+    expect(body).toEqual({
+      kind: 'rotate',
+      name: 'executor-alpha',
+      requestedAt: '2026-10-23T00:00:00.000Z',
+    });
   });
 
-  it('does not count a bare mention of executor-start (no --board-dir) as reported back', async () => {
-    resumes = false;
-    const base = run;
-    const mentionRun: CommandRunner = (file, args) => {
-      const literal = args[args.indexOf('--') + 1];
-      if (args[0] === 'send-keys' && args.includes('-l') && literal === '/ai-sdlc executor') {
-        screen += 'reading about cli-hierarchy.mjs executor-start in the docs\n';
-      }
-      return base(file, args);
-    };
-    const result = await clearExecutor(
-      { executor: 'executor-alpha', settleMs: 500 },
-      deps({ run: mentionRun }),
-    );
-    expect(result.resumed).toBe(false);
-  });
-
-  it('never sends keys to another pane', async () => {
-    await clearExecutor({ executor: 'executor-alpha', settleMs: 0 }, deps());
-    for (const c of sends()) expect(c.args[2]).toBe('%7');
+  it('writes the request and does not wait with a ceiling of 0', async () => {
+    const r = await clearExecutor({ executor: 'executor-alpha', settleMs: 0 }, deps());
+    expect(r).toMatchObject({ ok: true, acknowledged: false });
+    expect(sleeps).toEqual([]);
+    expect(requests()).toHaveLength(1);
   });
 
   it('records an ExecutorContextCleared event', async () => {
+    onSleep = () => rmSync(rotateRequestPath(board, 'executor-alpha'), { force: true });
     await clearExecutor(
       {
         executor: 'executor-alpha',
@@ -200,361 +154,71 @@ describe('clearExecutor', () => {
     ]);
   });
 
-  it('registers hierarchy.clear and reports it live after a clear the executor answered', async () => {
-    expect(getCapability(HIERARCHY_CLEAR_CAPABILITY)).toBeDefined();
-    await clearExecutor({ executor: 'executor-alpha', settleMs: 500 }, deps());
-    expect(capability()?.status).toBe('live');
+  it('rotates the planner and the dispatch session too', async () => {
+    seedRoster(dispatch(), entry({ role: 'planner', name: 'planner', tmuxWindow: 'planner' }));
+    expect((await clearExecutor({ executor: 'planner', settleMs: 0 }, deps())).ok).toBe(true);
+    expect((await clearExecutor({ executor: 'operator-dispatch', settleMs: 0 }, deps())).ok).toBe(
+      true,
+    );
+    expect(requests().sort()).toEqual([
+      'rotate-request-operator-dispatch.json',
+      'rotate-request-planner.json',
+    ]);
   });
 
-  it('reports hierarchy.clear degraded with a reason when the executor does not resume in time', async () => {
-    resumes = false;
-    const result = await clearExecutor({ executor: 'executor-alpha', settleMs: 500 }, deps());
-    expect(result.resumed).toBe(false);
-    expect(result).toMatchObject({ ok: false, reason: 'resume command not submitted' });
-    expect(JSON.stringify(result)).not.toContain('degraded');
-    // Both keystrokes were still sent.
-    expect(sends()).toHaveLength(4);
-    const row = capability();
-    expect(row?.status).toBe('degraded');
-    expect(row?.lastDegradedReason).toContain('did not report back within the 500 ms ceiling');
-    expect(events[0]).toMatchObject({ type: 'ExecutorContextCleared', resumed: false });
-  });
-
-  describe('submission check (AISDLC-1029)', () => {
-    const CMD = '/ai-sdlc executor';
-    /**
-     * A pane that keeps the resume command in its input line until the Nth Enter after the
-     * command was typed (`submitOnEnter`), or until Escape + retype (`submitAfterEscape`).
-     */
-    function sticky(opts: { submitOnEnter?: number; submitAfterEscape?: boolean }) {
-      let typed = false;
-      let enters = 0;
-      let escaped = false;
-      let submitted = false;
-      const keys: string[] = [];
-      const r: CommandRunner = (file, args) => {
-        if (args[0] === 'send-keys') {
-          const lit = args[args.indexOf('--') + 1];
-          if (args.includes('-l') && lit === CMD) {
-            typed = true;
-            enters = 0;
-            if (escaped && opts.submitAfterEscape) submitted = false;
-          }
-          if (args.includes('-l')) keys.push(`text:${lit}`);
-          else keys.push(args[args.length - 1]);
-          if (typed && args[args.length - 1] === 'Enter') {
-            enters++;
-            if (opts.submitOnEnter !== undefined && enters >= opts.submitOnEnter) submitted = true;
-            if (opts.submitAfterEscape && escaped && enters >= 1) submitted = true;
-          }
-          if (args[args.length - 1] === 'Escape') escaped = true;
-          return { status: 0, stdout: '', stderr: '' };
-        }
-        if (args[0] === 'capture-pane' && typed) {
-          const tail = submitted
-            ? "[executor] I am 'executor-alpha'; x\n> \n"
-            : `previous output\n> ${CMD}\n  ? for shortcuts\n`;
-          return { status: 0, stdout: `${screen}${tail}`, stderr: '' };
-        }
-        return run(file, args);
-      };
-      return { r, keys };
-    }
-
-    it('re-sends Enter while the input line holds the command and stops once it is submitted', async () => {
-      resumes = false;
-      const s = sticky({ submitOnEnter: 2 });
-      const result = await clearExecutor(
-        { executor: 'executor-alpha', settleMs: 500 },
-        deps({ run: s.r }),
-      );
-      expect(result.ok).toBe(true);
-      expect(s.keys.filter((k) => k === 'Enter')).toHaveLength(3); // /clear, typed, one re-send
-      expect(s.keys).not.toContain('Escape');
-      expect(sleeps).toContain(2000);
-    });
-
-    it('falls back to Escape and one retype after two re-sent Enters', async () => {
-      resumes = false;
-      const s = sticky({ submitAfterEscape: true });
-      const result = await clearExecutor(
-        { executor: 'executor-alpha', settleMs: 500 },
-        deps({ run: s.r }),
-      );
-      expect(result.ok).toBe(true);
-      const i = s.keys.indexOf('Escape');
-      expect(i).toBeGreaterThan(0);
-      expect(s.keys.filter((k) => k === `text:${CMD}`)).toHaveLength(2);
-      expect(s.keys.slice(0, i).filter((k) => k === 'Enter')).toHaveLength(4); // /clear, typed, two re-sends
-    });
-
-    it('fails with the reason and last pane line when it is never submitted', async () => {
-      resumes = false;
-      const s = sticky({});
-      const result = await clearExecutor(
-        { executor: 'executor-alpha', settleMs: 500 },
-        deps({ run: s.r }),
-      );
-      expect(result).toMatchObject({ ok: false, reason: 'resume command not submitted' });
-      expect(result.lastLine).toBe('? for shortcuts');
-      expect(capability()?.lastDegradedReason).toContain('resume command not submitted');
-    });
-
-    it('inputLineHolds tells a typed command from an echoed one', () => {
-      expect(inputLineHolds(`out\n> ${CMD}\n`, CMD)).toBe(true);
-      expect(inputLineHolds(`\u2502 > ${CMD}   \u2502\nfooter\n`, CMD)).toBe(true);
-      expect(inputLineHolds(`> ${CMD}\nrunning\n> \n`, CMD)).toBe(false);
-      expect(inputLineHolds(`working\n${CMD}\n`, CMD)).toBe(true);
-      expect(inputLineHolds(undefined, CMD)).toBe(false);
-    });
-  });
-
-  describe('handshake timing (AISDLC-1000)', () => {
-    /** A virtual clock: sleep advances it, and the identity line appears at `appearAt` after the restart. */
-    function clocked(appearAt: number | undefined) {
-      let now = 0;
-      let restartAt = -1;
-      const timed: CommandRunner = (file, args) => {
-        const literal = args[args.indexOf('--') + 1];
-        if (args[0] === 'send-keys' && args.includes('-l') && literal === '/ai-sdlc executor') {
-          restartAt = now;
-        }
-        if (args[0] === 'capture-pane' && restartAt >= 0 && appearAt !== undefined) {
-          const shown = now - restartAt >= appearAt;
-          return {
-            status: 0,
-            stdout: shown
-              ? `${screen}[executor] I am 'executor-alpha'; x\n`
-              : `${screen}starting...\n`,
-            stderr: '',
-          };
-        }
-        return run(file, args);
-      };
-      return {
-        run: timed,
-        sleep: async (ms: number) => {
-          now += ms;
-        },
-        elapsed: () => now,
-      };
-    }
-
-    it('returns well before 2 s on a fast restart', async () => {
-      const c = clocked(0);
-      resumes = false;
-      const r = await clearExecutor(
-        { executor: 'executor-alpha' },
-        deps({ run: c.run, sleep: c.sleep }),
-      );
-      expect(r.resumed).toBe(true);
-      expect(c.elapsed()).toBeLessThan(2000);
-    });
-
-    it('is not degraded when the identity line appears at 20 s', async () => {
-      const c = clocked(20_000);
-      resumes = false;
-      const r = await clearExecutor(
-        { executor: 'executor-alpha' },
-        deps({ run: c.run, sleep: c.sleep }),
-      );
-      expect(r.resumed).toBe(true);
-      expect(c.elapsed()).toBeGreaterThanOrEqual(20_000);
-      expect(c.elapsed()).toBeLessThan(30_000);
-    });
-
-    it('degrades at the ceiling for a dead session, naming the ceiling and last line', async () => {
-      const c = clocked(undefined);
-      resumes = false;
-      screen = 'frozen last line\n';
-      const r = await clearExecutor(
-        { executor: 'executor-alpha' },
-        deps({ run: c.run, sleep: c.sleep }),
-      );
-      expect(r.resumed).toBe(false);
-      expect(r.lastLine).toBe('frozen last line');
-      expect(capability()?.lastDegradedReason).toContain('30000 ms ceiling');
-      expect(capability()?.lastDegradedReason).toContain('frozen last line');
-      expect(c.elapsed()).toBeGreaterThanOrEqual(30_000);
-    });
-  });
-
-  it('refuses an executor that holds an inflight manifest and sends nothing', async () => {
+  it('refuses an executor that holds an inflight manifest and writes nothing', async () => {
     writeManifest(board, mkManifest('AISDLC-5'));
     claimNext(board, 'in-session-agent', undefined, { workerId: 'executor-alpha' });
     await expect(clearExecutor({ executor: 'executor-alpha' }, deps())).rejects.toThrow(
       /holds AISDLC-5, which is still inflight/,
     );
-    expect(sends()).toEqual([]);
+    expect(requests()).toEqual([]);
     expect(events).toEqual([]);
   });
 
   it('still clears an executor when only another executor holds a task', async () => {
     writeManifest(board, mkManifest('AISDLC-6'));
     claimNext(board, 'in-session-agent', undefined, { workerId: 'executor-beta' });
-    await clearExecutor({ executor: 'executor-alpha', settleMs: 0 }, deps());
-    expect(sends().length).toBe(4);
+    expect((await clearExecutor({ executor: 'executor-alpha', settleMs: 0 }, deps())).ok).toBe(
+      true,
+    );
   });
 
-  it('refuses an invalid name before any tmux call', async () => {
+  it('refuses an invalid name, a name not in the roster, and a stopped session', async () => {
     for (const bad of ['', 'a b', 'x;y', '../x', 'a\nb', '$(id)']) {
-      await expect(clearExecutor({ executor: bad }, deps())).rejects.toThrow(
-        /not a valid executor name/,
-      );
+      await expect(clearExecutor({ executor: bad }, deps())).rejects.toThrow(/not a valid/);
     }
-    expect(calls).toEqual([]);
-  });
-
-  it('refuses a name that is not an executor in the roster before any tmux call', async () => {
-    seedRoster(entry(), entry({ role: 'operator-dispatch', name: 'operator-dispatch' }));
-    await expect(clearExecutor({ executor: 'operator-dispatch' }, deps())).rejects.toThrow(
-      /not an executor in the roster/,
-    );
     await expect(clearExecutor({ executor: 'executor-zeta' }, deps())).rejects.toThrow(
-      /not an executor in the roster/,
+      /not in the roster/,
     );
-    expect(calls).toEqual([]);
-  });
-
-  it('refuses an executor that is not running', async () => {
-    seedRoster(entry({ status: 'starting' }));
+    seedRoster(dispatch(), entry({ status: 'starting' }));
     await expect(clearExecutor({ executor: 'executor-alpha' }, deps())).rejects.toThrow(
       /not running/,
     );
-    expect(calls).toEqual([]);
-  });
-
-  it('refuses a missing or malformed pane id before any tmux call', async () => {
-    seedRoster(entry({ paneId: '' }));
-    await expect(clearExecutor({ executor: 'executor-alpha' }, deps())).rejects.toThrow(
-      /no valid pane id/,
-    );
-    // A roster that bypasses the writer, with a pane id that is not '%<digits>'.
-    writeFileSync(
-      path.join(board, 'hierarchy.json'),
-      JSON.stringify({
-        schemaVersion: 'v1',
-        sessions: [{ ...entry(), paneId: '%7; rm -rf /' }],
-      }),
-    );
-    await expect(clearExecutor({ executor: 'executor-alpha' }, deps())).rejects.toThrow(
-      /not an executor in the roster/,
-    );
-    expect(calls).toEqual([]);
+    expect(requests()).toEqual([]);
   });
 
   it('refuses an entry that names a tmux session other than the hierarchy session', async () => {
-    writeFileSync(
-      path.join(board, 'hierarchy.json'),
-      JSON.stringify({
-        schemaVersion: 'v1',
-        sessions: [{ ...entry(), tmuxSession: 'work' }],
-      }),
-    );
-    await expect(clearExecutor({ executor: 'executor-alpha' }, deps())).rejects.toThrow(
-      /not an executor in the roster/,
-    );
-    expect(calls).toEqual([]);
+    seedRoster(dispatch(), entry({ tmuxSession: 'my-personal-session' }));
+    await expect(clearExecutor({ executor: 'executor-alpha' }, deps())).rejects.toThrow();
+    expect(requests()).toEqual([]);
   });
 
-  it('refuses when the executor window is not open, sending nothing', async () => {
-    seedRoster(entry({ name: 'executor-gamma', tmuxWindow: 'executor-gamma', paneId: '%9' }));
-    await expect(clearExecutor({ executor: 'executor-gamma' }, deps())).rejects.toThrow(
-      /window for 'executor-gamma' is not open/,
+  it('refuses when no dispatch session is running, naming the missing module', async () => {
+    seedRoster(entry());
+    await expect(clearExecutor({ executor: 'executor-alpha' }, deps())).rejects.toThrow(
+      /no running dispatch session.*no hooks module is loaded/,
     );
-    expect(sends()).toEqual([]);
+    expect(requests()).toEqual([]);
   });
 
   it('validates the settle time and poll interval', async () => {
     await expect(
       clearExecutor({ executor: 'executor-alpha', settleMs: -1 }, deps()),
-    ).rejects.toThrow(/settle time/);
+    ).rejects.toThrow(/whole number of milliseconds/);
     await expect(
       clearExecutor({ executor: 'executor-alpha', pollIntervalMs: 0 }, deps()),
-    ).rejects.toThrow(/poll interval/);
-    expect(calls).toEqual([]);
-  });
-
-  it('degrades the capability and stops when /clear cannot be typed', async () => {
-    const failing: CommandRunner = (file, args) =>
-      args[0] === 'send-keys' ? { status: 1, stdout: '', stderr: 'no such pane' } : run(file, args);
-    await expect(
-      clearExecutor({ executor: 'executor-alpha', settleMs: 0 }, deps({ run: failing })),
-    ).rejects.toThrow(/could not send \/clear/);
-    expect(capability()?.status).toBe('degraded');
-    expect(events).toEqual([]);
-  });
-
-  it('degrades the capability when the restart command cannot be typed', async () => {
-    let n = 0;
-    const failSecond: CommandRunner = (file, args) => {
-      if (args[0] === 'send-keys' && ++n > 2) return { status: 1, stdout: '', stderr: 'gone' };
-      return run(file, args);
-    };
-    await expect(
-      clearExecutor({ executor: 'executor-alpha', settleMs: 0 }, deps({ run: failSecond })),
-    ).rejects.toThrow(/could not send \/ai-sdlc executor/);
-    expect(capability()?.status).toBe('degraded');
-  });
-
-  it('degrades when the pane cannot be read, rather than assuming it resumed', async () => {
-    const blind: CommandRunner = (file, args) =>
-      args[0] === 'capture-pane' ? { status: 1, stdout: '', stderr: 'x' } : run(file, args);
-    const result = await clearExecutor(
-      { executor: 'executor-alpha', settleMs: 100, pollIntervalMs: 50 },
-      deps({ run: blind }),
-    );
-    expect(result.resumed).toBe(false);
-    expect(capability()?.status).toBe('degraded');
-  });
-
-  it('refuses, sending nothing, when tmux says the recorded pane id was recycled', async () => {
-    const recycled: CommandRunner = (file, args) =>
-      args[0] === 'display-message' ? { status: 0, stdout: '%99\n', stderr: '' } : run(file, args);
-    await expect(
-      clearExecutor({ executor: 'executor-alpha', settleMs: 0 }, deps({ run: recycled })),
-    ).rejects.toThrow(/does not belong to window/);
-    expect(sends()).toEqual([]);
-  });
-
-  describe('one session per agent', () => {
-    const own = () =>
-      seedRoster(entry({ tmuxSession: 'executor-alpha', tmuxWindow: 'executor-alpha' }));
-    const withMarker =
-      (marker: string | null): CommandRunner =>
-      (file, args) => {
-        if (args[0] === 'show-options') {
-          calls.push({ file, args: [...args] });
-          return marker === null
-            ? { status: 1, stdout: '', stderr: 'unknown option' }
-            : { status: 0, stdout: marker, stderr: '' };
-        }
-        return run(file, args);
-      };
-
-    it('refuses a session without the ownership marker and sends nothing', async () => {
-      own();
-      await expect(
-        clearExecutor({ executor: 'executor-alpha', settleMs: 0 }, deps({ run: withMarker(null) })),
-      ).rejects.toThrow(/does not carry the @ai-sdlc-hierarchy marker/);
-      expect(sends()).toEqual([]);
-      expect(events).toEqual([]);
-    });
-
-    it('clears a session that carries the marker', async () => {
-      own();
-      const result = await clearExecutor(
-        { executor: 'executor-alpha', settleMs: 0 },
-        deps({ run: withMarker('1\n') }),
-      );
-      expect(result.resumed).toBe(true);
-      expect(sends()).toHaveLength(4);
-    });
-
-    it('does not ask a legacy single-session entry for the marker', async () => {
-      await clearExecutor({ executor: 'executor-alpha', settleMs: 0 }, deps());
-      expect(calls.some((c) => c.args[0] === 'show-options')).toBe(false);
-    });
+    ).rejects.toThrow(/positive whole number/);
   });
 
   it('reports to the log when given one', async () => {
@@ -563,354 +227,37 @@ describe('clearExecutor', () => {
       { executor: 'executor-alpha', settleMs: 0 },
       deps({ log: (l) => lines.push(l) }),
     );
-    expect(lines).toEqual(["cleared 'executor-alpha'"]);
-    resumes = false;
     await clearExecutor(
-      { executor: 'executor-alpha', settleMs: 0 },
+      { executor: 'executor-alpha', settleMs: 500 },
       deps({ log: (l) => lines.push(l) }),
     );
-    expect(lines[1]).toContain('did not report back');
+    expect(lines[0]).toMatch(/rotate requested for 'executor-alpha'/);
+    expect(lines[1]).toMatch(/clear of 'executor-alpha' failed/);
   });
 });
 
-describe('clearSelf', () => {
-  const dispatch = (over: Partial<RosterEntry> = {}): RosterEntry =>
-    entry({
-      role: 'operator-dispatch',
-      name: 'operator-dispatch',
-      tmuxWindow: 'operator-dispatch',
-      paneId: '%3',
-      ...over,
-    });
-  let spawned: { file: string; args: readonly string[] }[];
-  const selfDeps = () => ({
-    run: (file: string, args: readonly string[]) => {
-      calls.push({ file, args: [...args] });
-      const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
-      if (args[0] === 'list-windows') return ok('operator-dispatch\nexecutor-alpha\n');
-      if (args[0] === 'display-message') return ok('%3\n');
-      return ok();
-    },
-    boardDir: board,
-    spawnDetached: (file: string, args: readonly string[]) => {
-      spawned.push({ file, args });
-    },
-  });
-  beforeEach(() => {
-    spawned = [];
-    seedRoster(entry(), dispatch());
+describe('the keystroke layer is gone (RFC-0058 phase 4)', () => {
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  // brief-notify.ts (`send`, `brief --notify`, escalation messages) and tmux.ts (`down` /exit)
+  // still deliver by key; the module transport cannot be called from a CLI, so they remain.
+  const REMAINING = new Set(['brief-notify.ts', 'tmux.ts']);
+
+  it('clear.ts holds no tmux call, no pane-text diffing and no key sending', () => {
+    const src = readFileSync(path.join(dir, 'clear.ts'), 'utf-8');
+    expect(src).not.toMatch(/send-keys|capture-pane|tmux|spawn\(/);
   });
 
-  const planner = (over: Partial<RosterEntry> = {}): RosterEntry =>
-    entry({ role: 'planner', name: 'planner', tmuxWindow: 'planner', paneId: '%5', ...over });
-  const plannerDeps = () => {
-    const d = selfDeps();
-    const run = (file: string, args: readonly string[]) =>
-      args[0] === 'list-windows'
-        ? { status: 0, stdout: 'planner\n', stderr: '' }
-        : args[0] === 'display-message'
-          ? { status: 0, stdout: '%5\n', stderr: '' }
-          : d.run(file, args);
-    return { ...d, run };
-  };
-
-  it('schedules /clear then the resume command on the caller own roster pane', () => {
-    seedRoster(entry(), dispatch(), planner());
-    const r = clearSelf(
-      { self: 'planner', role: 'planner', resumeAfterSeconds: 45 },
-      plannerDeps(),
-    );
-    expect(r).toMatchObject({ self: 'planner', paneId: '%5', resumeAfterSeconds: 45 });
-    expect(spawned).toHaveLength(1);
-    const a = spawned[0]!.args;
-    expect(spawned[0]!.file).toBe('sh');
-    // lead delay, pane, /clear, resume hold, resume command, log, name, timeouts
-    expect(a.slice(3)).toEqual([
-      '20',
-      '%5',
-      '/clear',
-      '45',
-      '/ai-sdlc:planner',
-      path.join(board, 'handoff', 'auto-clear.log'),
-      'planner',
-      '120',
-      '60',
-    ]);
-    expect(a[1]).toMatch(/send-keys -t "\$pane" -l -- "\$1"/);
-    // nothing is typed synchronously
-    expect(sends()).toHaveLength(0);
+  it('no non-test file under hierarchy/ invokes send-keys except the two named delivery files', () => {
+    const offenders = readdirSync(dir)
+      .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts') && !REMAINING.has(f))
+      .filter((f) => /send-keys/.test(readFileSync(path.join(dir, f), 'utf-8')));
+    expect(offenders).toEqual([]);
   });
 
-  it('stamps the auto-clear debounce so the Stop hook skips this turn', () => {
-    seedRoster(entry(), dispatch(), planner());
-    expect(recentlyScheduled(board, 'planner', Date.now())).toBe(false);
-    clearSelf({ self: 'planner', role: 'planner' }, plannerDeps());
-    expect(recentlyScheduled(board, 'planner', Date.now())).toBe(true);
-  });
-
-  it('refuses the dispatch session: a model-less host rotates through its hooks module (AISDLC-1035)', () => {
-    expect(() =>
-      clearSelf({ self: 'operator-dispatch', role: 'operator-dispatch' as never }, selfDeps()),
-    ).toThrow(/model-less host/);
-    expect(spawned).toHaveLength(0);
-  });
-
-  it('refuses a caller that is not the planner', () => {
-    seedRoster(entry(), dispatch(), planner());
-    expect(() => clearSelf({ self: 'executor-alpha', role: 'planner' }, plannerDeps())).toThrow(
-      /not the planner/,
-    );
-    expect(spawned).toHaveLength(0);
-  });
-
-  it('refuses when TMUX_PANE is not the roster pane', () => {
-    seedRoster(entry(), dispatch(), planner());
-    expect(() =>
-      clearSelf({ self: 'planner', role: 'planner', callerPane: '%9' }, plannerDeps()),
-    ).toThrow(/not the roster pane/);
-    expect(spawned).toHaveLength(0);
-  });
-
-  it('refuses a stopped session, a bad pane id and a bad delay', () => {
-    const go = (extra: object = {}) =>
-      clearSelf({ self: 'planner', role: 'planner', ...extra }, plannerDeps());
-    seedRoster(planner({ status: 'starting' }));
-    expect(() => go()).toThrow(/not running/);
-    seedRoster(planner({ paneId: '' }));
-    expect(() => go()).toThrow(/pane id/);
-    seedRoster(planner());
-    expect(() => go({ resumeAfterSeconds: -1 })).toThrow(/whole number/);
-    expect(spawned).toHaveLength(0);
-  });
-
-  it('refuses a pane tmux no longer attributes to the window', () => {
-    seedRoster(planner());
-    const d = plannerDeps();
-    const run = (file: string, args: readonly string[]) =>
-      args[0] === 'display-message'
-        ? { status: 0, stdout: '%99\n', stderr: '' }
-        : d.run(file, args);
-    expect(() => clearSelf({ self: 'planner', role: 'planner' }, { ...d, run })).toThrow(/stale/);
-    expect(spawned).toHaveLength(0);
-  });
-
-  describe('delivery with a fake tmux (real sh)', { timeout: 30_000 }, () => {
-    let dir: string;
-    let tlog: string;
-    beforeEach(() => {
-      dir = mkdtempSync(path.join(tmpdir(), 'fake-tmux-'));
-      tlog = path.join(dir, 'tmux.log');
-    });
-    afterEach(() => rmSync(dir, { recursive: true, force: true }));
-
-    /** Fake tmux: `busyPolls` capture-pane calls show a running turn; then the pane is quiet. */
-    function fakeTmux(busyPolls: number, comesBack: boolean): void {
-      writeFileSync(path.join(dir, 'n'), '0');
-      writeFileSync(
-        path.join(dir, 'tmux'),
-        `#!/bin/sh
-case "$1" in
-  send-keys) echo "$*" >> "${tlog}"; if [ "$4" = "-l" ] && [ "$6" = "/ai-sdlc:planner" ]; then touch "${dir}/resumed"; fi ;;
-  capture-pane)
-    n=$(cat "${dir}/n"); echo $((n+1)) > "${dir}/n"
-    if [ "$n" -lt ${busyPolls} ]; then echo "working (esc to interrupt) $n"
-    elif [ -f "${dir}/resumed" ] && ${comesBack}; then echo "esc to interrupt"
-    else echo "idle prompt"; fi ;;
-esac
-`,
-        { mode: 0o755 },
-      );
-    }
-
-    function deliver(): string[] {
-      seedRoster(
-        entry({ role: 'planner', name: 'planner', tmuxWindow: 'planner', paneId: '%5' }),
-        dispatch(),
-      );
-      const d = selfDeps();
-      const run2 = (file: string, args: readonly string[]) =>
-        args[0] === 'list-windows'
-          ? { status: 0, stdout: 'planner\n', stderr: '' }
-          : args[0] === 'display-message'
-            ? { status: 0, stdout: '%5\n', stderr: '' }
-            : d.run(file, args);
-      clearSelf(
-        {
-          self: 'planner',
-          role: 'planner',
-          leadSeconds: 0,
-          idleTimeoutSeconds: 4,
-          comebackTimeoutSeconds: 2,
-        },
-        { ...d, run: run2 },
-      );
-      const a = spawned[0]!.args;
-      const r = spawnSync('sh', ['-c', a[1]!, ...a.slice(2)], {
-        env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
-        encoding: 'utf-8',
-        timeout: 60_000,
-      });
-      expect(r.stderr).toBe('');
-      expect(r.status).toBe(0);
-      return existsSync(tlog) ? readFileSync(tlog, 'utf-8').trim().split('\n') : [];
-    }
-
-    it('waits for a running turn, empties the input line first and runs the resume command', () => {
-      fakeTmux(3, true);
-      const sent = deliver();
-      expect(sent).toEqual([
-        'send-keys -t %5 C-u',
-        'send-keys -t %5 -l -- /clear',
-        'send-keys -t %5 Enter',
-        'send-keys -t %5 C-u',
-        'send-keys -t %5 -l -- /ai-sdlc:planner',
-        'send-keys -t %5 Enter',
-      ]);
-      expect(existsSync(path.join(board, 'handoff', 'auto-clear.log'))).toBe(false);
-    });
-
-    it('sends nothing and logs when the pane never goes idle', () => {
-      fakeTmux(1000, true);
-      expect(deliver()).toEqual([]);
-      const log = readFileSync(path.join(board, 'handoff', 'auto-clear.log'), 'utf-8');
-      expect(log).toContain('planner: pane never became idle');
-      expect(log).toContain('/ai-sdlc:planner');
-    });
-
-    it('re-sends Enter, then Escape and a retype, and logs when the command is never submitted (AISDLC-1029)', () => {
-      writeFileSync(
-        path.join(dir, 'tmux'),
-        `#!/bin/sh
-case "$1" in
-  send-keys) echo "$*" >> "${tlog}"; if [ "$4" = "-l" ] && [ "$6" = "/ai-sdlc:planner" ]; then touch "${dir}/typed"; fi ;;
-  capture-pane) if [ -f "${dir}/typed" ]; then printf 'old output\\n> /ai-sdlc:planner\\n  footer\\n'; else echo "idle prompt"; fi ;;
-esac
-`,
-        { mode: 0o755 },
-      );
-      const sent = deliver();
-      expect(sent.slice(3)).toEqual([
-        'send-keys -t %5 C-u',
-        'send-keys -t %5 -l -- /ai-sdlc:planner',
-        'send-keys -t %5 Enter',
-        'send-keys -t %5 Enter',
-        'send-keys -t %5 Enter',
-        'send-keys -t %5 Escape',
-        'send-keys -t %5 C-u',
-        'send-keys -t %5 -l -- /ai-sdlc:planner',
-        'send-keys -t %5 Enter',
-      ]);
-      const log = readFileSync(path.join(board, 'handoff', 'auto-clear.log'), 'utf-8');
-      expect(log).toMatch(/planner: resume command not submitted; last pane line:\s+footer/);
-    });
-
-    it('logs one line naming the session and command when it does not come back', () => {
-      fakeTmux(0, false);
-      expect(deliver()).toHaveLength(6);
-      const lines = readFileSync(path.join(board, 'handoff', 'auto-clear.log'), 'utf-8')
-        .trim()
-        .split('\n');
-      expect(lines).toHaveLength(1);
-      expect(lines[0]).toMatch(/planner: did not come back; command sent: \/ai-sdlc:planner$/);
-    });
-  });
-
-  describe('as the planner', () => {
-    it('schedules /clear then /ai-sdlc:planner on its own pane', () => {
-      seedRoster(
-        entry({ role: 'planner', name: 'planner', tmuxWindow: 'planner', paneId: '%5' }),
-        dispatch(),
-      );
-      const d = selfDeps();
-      const run = (file: string, args: readonly string[]) => {
-        calls.push({ file, args: [...args] });
-        const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
-        if (args[0] === 'list-windows') return ok('planner\n');
-        if (args[0] === 'display-message') return ok('%5\n');
-        return ok();
-      };
-      const r = clearSelf(
-        { self: 'planner', role: 'planner', resumeAfterSeconds: 30 },
-        { ...d, run },
-      );
-      expect(r).toMatchObject({ self: 'planner', paneId: '%5' });
-      expect(spawned[0]!.args.slice(3, 8)).toEqual([
-        '20',
-        '%5',
-        '/clear',
-        '30',
-        '/ai-sdlc:planner',
-      ]);
-    });
-  });
-
-  describe('default resume delay per role', () => {
-    const planner = () =>
-      entry({ role: 'planner', name: 'planner', tmuxWindow: 'planner', paneId: '%5' });
-    const plannerRun = (file: string, args: readonly string[]) => {
-      const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
-      if (args[0] === 'list-windows') return ok('planner\n');
-      if (args[0] === 'display-message') return ok('%5\n');
-      return ok();
-    };
-
-    it('holds the planner resume for 3 seconds by default', () => {
-      seedRoster(planner(), dispatch());
-      const r = clearSelf({ self: 'planner', role: 'planner' }, { ...selfDeps(), run: plannerRun });
-      expect(r.resumeAfterSeconds).toBe(3);
-      expect(spawned[0]!.args[6]).toBe('3');
-    });
-
-    it('lets an explicit resume delay win for the planner', () => {
-      seedRoster(planner(), dispatch());
-      const r = clearSelf(
-        { self: 'planner', role: 'planner', resumeAfterSeconds: 0 },
-        { ...selfDeps(), run: plannerRun },
-      );
-      expect(r.resumeAfterSeconds).toBe(0);
-    });
-  });
-
-  describe('as an idle executor', () => {
-    const executorDeps = () => {
-      const d = selfDeps();
-      const run = (file: string, args: readonly string[]) =>
-        args[0] === 'display-message'
-          ? { status: 0, stdout: '%7\n', stderr: '' }
-          : d.run(file, args);
-      return { ...d, run };
-    };
-
-    it('schedules /clear then /ai-sdlc executor on its own pane', () => {
-      const r = clearSelf(
-        { self: 'executor-alpha', role: 'executor', resumeAfterSeconds: 30 },
-        executorDeps(),
-      );
-      expect(r).toMatchObject({ self: 'executor-alpha', paneId: '%7', resumeAfterSeconds: 30 });
-      expect(spawned[0]!.args.slice(3, 8)).toEqual([
-        '20',
-        '%7',
-        '/clear',
-        '30',
-        '/ai-sdlc executor',
-      ]);
-      expect(sends()).toHaveLength(0);
-    });
-
-    it('refuses an executor that holds an inflight task', () => {
-      writeManifest(board, mkManifest('AISDLC-5'));
-      claimNext(board, 'in-session-agent', undefined, { workerId: 'executor-alpha' });
-      expect(() => clearSelf({ self: 'executor-alpha', role: 'executor' }, executorDeps())).toThrow(
-        /holds AISDLC-5, which is still inflight/,
-      );
-      expect(spawned).toHaveLength(0);
-    });
-
-    it('refuses a name that is not an executor in the roster', () => {
-      expect(() =>
-        clearSelf({ self: 'operator-dispatch', role: 'executor' }, executorDeps()),
-      ).toThrow(/not an executor/);
-      expect(spawned).toHaveLength(0);
-    });
+  it('check-sender flags are deleted from the CLI and the peer guard', () => {
+    const peer = readFileSync(path.join(dir, 'peer-guard.ts'), 'utf-8');
+    expect(peer).not.toMatch(/checkDispatchSender|sender-pid|sender-ref/);
+    const cli = readFileSync(path.join(dir, '..', 'cli', 'hierarchy.ts'), 'utf-8');
+    expect(cli).not.toMatch(/case 'check-sender'|--sender-pid|--sender-ref/);
   });
 });

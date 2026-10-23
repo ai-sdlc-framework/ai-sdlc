@@ -41,16 +41,9 @@ export {
 } from './brief-notify.js';
 export {
   clearExecutor,
-  clearSelf,
-  EXECUTOR_RESUME_COMMAND,
-  PLANNER_RESUME_COMMAND,
   holdsInflight,
-  type ClearSelfDeps,
-  type ClearSelfOptions,
-  type ClearSelfResult,
   DEFAULT_POLL_INTERVAL_MS,
   DEFAULT_SETTLE_MS,
-  HIERARCHY_CLEAR_CAPABILITY,
   type ClearDeps,
   type ClearOptions,
   type ClearResult,
@@ -86,7 +79,6 @@ export {
   type LandReport,
 } from './land-eligible.js';
 export { markReadyAfterCodeql, repoHasCodeql, type MarkReadyReport } from './mark-ready.js';
-export { markScheduled } from './clear.js';
 export { checkSendTarget, sendToRoster, type SendCheck } from './send.js';
 export { resolveThresholds, DEFAULT_CONTEXT_THRESHOLDS } from './thresholds.js';
 export {
@@ -182,16 +174,7 @@ export {
   NAMED_STEPS,
   type PlaybookOutcome,
 } from './playbook.js';
-export {
-  checkDispatchSender,
-  checkRepoMatch,
-  NOT_MY_DISPATCH,
-  SENDER_UNVERIFIED_WARNING,
-  rosterProject,
-  type RepoCheck,
-  type SenderCheck,
-  type SenderIdentity,
-} from './peer-guard.js';
+export { checkRepoMatch, rosterProject, type RepoCheck } from './peer-guard.js';
 export { findStartedSession, readSessionRegistry } from './registry.js';
 export { resolveCallerRole, type SessionRoleDeps } from './session-role.js';
 export {

@@ -72,7 +72,6 @@ describe('hierarchy dispatch script', () => {
       'register',
       'playbook',
       'route-decision',
-      'check-sender',
       'check-repo',
       'executor-start',
     ]);

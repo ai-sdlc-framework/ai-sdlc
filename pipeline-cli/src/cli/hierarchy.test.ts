@@ -416,46 +416,59 @@ describe('clear, tick and route-decision', () => {
     expect(calls).toEqual([]);
   });
 
-  it('clear refuses a name that is not an executor in the roster and sends no keys', async () => {
+  it('clear refuses a name that is not in the roster and writes no request', async () => {
     const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
     expect(await runHierarchyCli(['clear', 'executor-alpha'], overrides(), dispatchCaller)).toBe(1);
-    expect(String(err.mock.calls[0]?.[0])).toContain('not an executor in the roster');
-    expect(calls.some((a) => a[0] === 'send-keys')).toBe(false);
+    expect(String(err.mock.calls[0]?.[0])).toContain('not in the roster');
+    expect(calls).toEqual([]);
   });
 
-  it('clear sends /clear then /ai-sdlc executor to the executor pane', async () => {
-    writeRoster(path.join(tmp, 'dispatch'), {
+  it('clear sends a rotate request, types nothing, and reports the acknowledgement (RFC-0058 phase 4)', async () => {
+    const board = path.join(tmp, 'dispatch');
+    writeRoster(board, {
       schemaVersion: 'v1',
-      sessions: [entry('executor', 'executor-alpha')],
+      sessions: [
+        entry('operator-dispatch', 'operator-dispatch'),
+        entry('executor', 'executor-alpha'),
+      ],
     });
-    const run: CommandRunner = (_f, args) => {
-      calls.push([...args]);
-      if (args[0] === 'list-windows') return { status: 0, stdout: 'executor-alpha\n', stderr: '' };
-      if (args[0] === 'display-message') return { status: 0, stdout: '%3\n', stderr: '' };
-      return { status: 0, stdout: '', stderr: '' };
-    };
     const events: { type: string }[] = [];
-    process.env.ARTIFACTS_DIR = path.join(tmp, 'artifacts');
-    try {
-      expect(
-        await runHierarchyCli(
-          ['clear', 'executor-alpha', '--settle-ms', '0'],
-          overrides({ run, emit: (e) => events.push(e) }),
-          dispatchCaller,
-        ),
-      ).toBe(1); // the fake pane never prints the identity line: the clear fails;
-    } finally {
-      delete process.env.ARTIFACTS_DIR;
-    }
-    const typed = calls
-      .filter((a) => a[0] === 'send-keys' && a.includes('-l'))
-      .map((a) => a.at(-1));
-    expect(typed).toEqual(['/clear', '/ai-sdlc executor']);
+    const request = path.join(board, 'handoff', 'rotate-request-executor-alpha.json');
+    // The dispatch host consumes the request while the command waits.
+    const sleep = async () => rmSync(request, { force: true });
+    expect(
+      await runHierarchyCli(
+        ['clear', 'executor-alpha', '--settle-ms', '500'],
+        overrides({ sleep, emit: (e) => events.push(e) }),
+        dispatchCaller,
+      ),
+    ).toBe(0);
+    expect(calls).toEqual([]);
     expect(events.map((e) => e.type)).toEqual(['ExecutorContextCleared']);
     expect(JSON.parse(logs.at(-1) as string)).toMatchObject({
       executor: 'executor-alpha',
-      paneId: '%3',
+      ok: true,
+      acknowledged: true,
     });
+  });
+
+  it('clear exits 1 with the named refusal when nothing consumes the request', async () => {
+    writeRoster(path.join(tmp, 'dispatch'), {
+      schemaVersion: 'v1',
+      sessions: [
+        entry('operator-dispatch', 'operator-dispatch'),
+        entry('executor', 'executor-alpha'),
+      ],
+    });
+    expect(
+      await runHierarchyCli(
+        ['clear', 'executor-alpha', '--settle-ms', '500'],
+        overrides({ sleep: async () => {} }),
+        dispatchCaller,
+      ),
+    ).toBe(1);
+    expect(JSON.parse(logs.at(-1) as string).reason).toMatch(/no module loaded/);
+    expect(calls).toEqual([]);
   });
 
   /** Every file under the board, so a refused command can be shown to have written nothing. */
@@ -694,7 +707,7 @@ describe('clear, tick and route-decision', () => {
       expect(code).toBe(0);
       expect(calls).toEqual([]);
       const out = JSON.parse(logs.at(-1) as string);
-      expect(out).toMatchObject({ requested: 'rotate', self: 'operator-dispatch' });
+      expect(out).toMatchObject({ executor: 'operator-dispatch', ok: true });
       expect(existsSync(out.file)).toBe(true);
     });
 
@@ -704,9 +717,9 @@ describe('clear, tick and route-decision', () => {
         identity: asCaller('operator-dispatch'),
       });
       expect(await runHierarchyCli(['rotate-pending'], overrides())).toBe(0);
-      expect(JSON.parse(logs.at(-1) as string)).toEqual({ pending: true });
+      expect(JSON.parse(logs.at(-1) as string)).toEqual({ pending: true, forward: [] });
       await runHierarchyCli(['rotate-pending'], overrides());
-      expect(JSON.parse(logs.at(-1) as string)).toEqual({ pending: false });
+      expect(JSON.parse(logs.at(-1) as string)).toEqual({ pending: false, forward: [] });
       const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
       expect(await runHierarchyCli(['escalation-file'], overrides())).toBe(2);
       expect(
@@ -1394,79 +1407,6 @@ describe('peer binding: two hierarchies on one machine', () => {
     expect(names(dirA())).toEqual(['proj-a-operator-dispatch', 'proj-a-executor-alpha']);
     expect(names(dirB())).toEqual(['proj-b-operator-dispatch', 'proj-b-executor-alpha']);
     expect(names(dirA()).some((n) => names(dirB()).includes(n))).toBe(false);
-  });
-
-  it('check-sender accepts the own dispatch session by pid and by ref', async () => {
-    seedBoth();
-    expect(
-      await runHierarchyCli(
-        ['check-sender', '--sender-pid', '700'],
-        overrides({ boardDir: dirA() }),
-      ),
-    ).toBe(0);
-    expect(logs.at(-1)).toContain('proj-a-operator-dispatch');
-    expect(
-      await runHierarchyCli(
-        ['check-sender', '--sender-ref', 'proj-a-operator-dispatch'],
-        overrides({ boardDir: dirA() }),
-      ),
-    ).toBe(0);
-  });
-
-  it('check-sender derives the pid from a harness uds socket ref', async () => {
-    seedBoth();
-    expect(
-      await runHierarchyCli(
-        ['check-sender', '--sender-ref', 'uds:/tmp/cc-socks/700.sock'],
-        overrides({ boardDir: dirA() }),
-      ),
-    ).toBe(0);
-    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
-    expect(
-      await runHierarchyCli(
-        ['check-sender', '--sender-ref', 'uds:/tmp/cc-socks/800.sock'],
-        overrides({ boardDir: dirA() }),
-      ),
-    ).toBe(1);
-    expect(err.mock.calls.map((c) => String(c[0]))).toEqual(['not my dispatch session\n']);
-  });
-
-  it('check-sender fails open with a logged warning when the envelope has no sender id', async () => {
-    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
-    expect(await runHierarchyCli(['check-sender'], overrides({ boardDir: dirA() }))).toBe(0);
-    const lines = err.mock.calls.map((c) => String(c[0]));
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toMatch(/no sender pid and no sender session ref/);
-    expect(logs).toEqual([JSON.stringify({ ok: true, verified: false })]);
-  });
-
-  it('check-sender refuses the foreign dispatch session with one line and nothing else', async () => {
-    seedBoth();
-    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
-    logs.length = 0;
-    // The foreign dispatch session (pid 800, ref proj-b-...) messages the proj-a executor.
-    expect(
-      await runHierarchyCli(
-        ['check-sender', '--sender-pid', '800'],
-        overrides({ boardDir: dirA() }),
-      ),
-    ).toBe(1);
-    expect(
-      await runHierarchyCli(
-        ['check-sender', '--sender-ref', 'proj-b-operator-dispatch'],
-        overrides({ boardDir: dirA() }),
-      ),
-    ).toBe(1);
-    // The own executor is not the dispatch session either.
-    expect(
-      await runHierarchyCli(
-        ['check-sender', '--sender-pid', '701'],
-        overrides({ boardDir: dirA() }),
-      ),
-    ).toBe(1);
-    const lines = err.mock.calls.map((c) => String(c[0]));
-    expect(lines).toEqual(Array(3).fill('not my dispatch session\n'));
-    expect(logs).toEqual([]);
   });
 
   it('check-repo stops a session whose working directory is another project repository', async () => {

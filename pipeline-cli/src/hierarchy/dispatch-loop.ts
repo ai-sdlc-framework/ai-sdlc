@@ -469,7 +469,7 @@ async function clearOnce(deps: LoopDeps, verdict: DispatchVerdict): Promise<Clea
       : {
           status: 'failed',
           executor,
-          reason: `${r.reason ?? 'resume command not submitted'}: the executor did not report back within the ${r.settleMs} ms ceiling; last pane line: ${r.lastLine || '(none)'}`,
+          reason: r.reason ?? 'rotate request not acknowledged',
         };
   } catch (err) {
     return {

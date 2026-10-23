@@ -26,18 +26,14 @@
  *     checking its tmux pane and process.
  *   - `executor-start` — an executor's identity, repository check and one claim
  *     in one call; prints `{taskId|null, ...}`.
- *   - `clear <executor-name> [--settle-ms <n>]` — empty an executor's context:
- *     `/clear`, wait, then `/ai-sdlc executor`. Refuses an executor that holds
+ *   - `clear <name> [--settle-ms <n>]` / `clear --self` — ask a session to rotate its context:
+ *     writes a rotate request that the dispatch hooks module delivers, and reports the
+ *     acknowledgement or a named refusal. Types nothing. Refuses an executor that holds
  *     an inflight task.
  *   - `tick [--worker <dispatch-name>] [--report-every-ms <n>] [--settle-ms <n>]
  *     [--retry-limit <n>] [--work-dir <path>]` — one wake-up of the dispatch
  *     loop: ingest briefs, handle new verdicts (clear, unblocking playbook),
  *     and print the escalations and reports to send, as JSON.
- *   - `check-sender [--sender-pid <n>] [--sender-ref <ref>]` — exit 0 only when the
- *     sender is this roster's running dispatch session (compared by pid or harness ref,
- *     never by a name written in a message); otherwise print `not my dispatch session`
- *     and exit 1. When the harness reports neither a pid nor a ref it fails open: a warning
- *     on stderr, exit 0. Used by the executor skill before acting on an instruction.
  *   - `check-repo` — exit 0 only when the working directory is in the repository that
  *     owns this roster's board; otherwise print why and exit 1.
  *   - `handoff write|read --role <planner|operator-dispatch|executor> [--name <n>]` — write
@@ -74,7 +70,7 @@ import { enqueueTasks, type EnqueueEntry } from '../dispatch/enqueue.js';
 import { requeueFailed } from '../dispatch/requeue.js';
 import { reenter } from '../hierarchy/reenter.js';
 import { writeEscalationFile } from '../hierarchy/escalation-file.js';
-import { consumeRotateRequests, requestDispatchRotate } from '../hierarchy/rotate-request.js';
+import { consumeRotateRequests } from '../hierarchy/rotate-request.js';
 import { correctManifestBranch } from '../dispatch/resume.js';
 import { DEFAULT_REQUEUE_RETRY_LIMIT } from '../dispatch/session-reaper.js';
 import { DECISION_ID_RE } from '../dispatch/verdict-fields.js';
@@ -84,7 +80,6 @@ import {
   checkDispatchCaller,
   checkOwnWorktreeForOperator,
   clearExecutor,
-  clearSelf,
   boundedHandoffView,
   readHandoff as readGeneratedHandoff,
   writeHandoff,
@@ -114,7 +109,6 @@ import {
   landEligiblePrs,
   readMergeAuthors,
   type LandReport,
-  checkDispatchSender,
   checkRepoMatch,
   readRosterChecked,
   sendToRoster,
@@ -182,7 +176,6 @@ Commands:
   handoff         Write or read a session's handoff file (handoff write|read --role <r>)
   send            Message a session listed in this project's roster; refuses any other name
   executor-start  Executor identity, repository check and a blocking claim, as one call
-  check-sender    Exit 0 only when a message sender is this roster's dispatch session
   check-repo      Exit 0 only when the working directory is this roster's repository
 
 Options for up:
@@ -241,19 +234,14 @@ Options for down:
   --role <name-or-role>    Stop one session by name (executor-beta) or a role (executor)
 
 Usage for clear:
-  cli-hierarchy clear <executor-name> [--settle-ms <n>]
-  cli-hierarchy clear --self [--resume-after <seconds>]
-  --self schedules the calling session's own pane (from its roster entry) to receive
-  /clear after 20 s (waiting for an idle pane, input line emptied first) and then, once the
-  pane is idle again (or --resume-after seconds later), the resume command: /ai-sdlc:planner
-  for the planner, /ai-sdlc executor for an idle executor (which is refused while it holds an
-  inflight task). Refuses without TMUX_PANE. For the dispatch session, a model-less host
-  (AISDLC-1035), --self types nothing: it writes a rotate request under the board that the
-  hierarchy hooks module consumes.
-  Sends /clear to the executor's pane, polls until the pane is idle, then sends /ai-sdlc executor. Refuses an executor that holds an inflight task.
-  clear <executor-name> is for the dispatch session only. A mistake guard refuses any other caller, a human
-  at a plain shell included; it is not authentication and a same-user session can defeat
-  it. Outside the hierarchy, use tmux directly.
+  cli-hierarchy clear <name> [--settle-ms <n>]
+  cli-hierarchy clear --self
+  Asks the named roster session to rotate its context (RFC-0058 phase 4). Nothing is typed into a
+  pane: the command writes a rotate request under the board, the dispatch hooks module delivers it
+  with $.session.send, and the command reports the acknowledgement (the request consumed within the
+  ceiling) or a named refusal (unknown or stopped session, an executor that holds an inflight task, no
+  running dispatch session, or no module consuming the request). --self asks for the calling
+  session's own rotation. --settle-ms 0 writes the request and does not wait.
 
 Usage for restart and register (dispatch session only, executors only):
   cli-hierarchy restart <executor> [--after-task] [--wait <seconds>]
@@ -272,7 +260,7 @@ Options for hold:
 Options for tick:
   --worker <name>          Optional; when given it must equal the calling session's own roster name
   --report-every-ms <n>    Spacing of progress reports (default 900000)
-  --settle-ms <n>          Ceiling for each clear wait (default 30000, config clear.handshakeCeilingMs)
+  --settle-ms <n>          Ceiling for the rotate acknowledgement (default 30000, config clear.handshakeCeilingMs)
   --retry-limit <n>        Re-queues allowed per failed task (default 2; a larger value is refused)
   --work-dir <path>        Repository root (default the current directory)
 
@@ -281,11 +269,6 @@ Options for executor-start:
                            taskId|null, manifest?}. Claims once and does not wait: the hierarchy
                            hooks module wakes an idle executor. Exit 1 when this is not an executor
                            session or the working directory is not the project's repository.
-
-Options for check-sender:
-  --sender-pid <n>         Pid the harness reports for the sender
-  --sender-ref <ref>       Session ref the harness reports for the sender
-  (a name written in the message text is never used)
 
 Options for handoff:
   write | read             write regenerates the file from board and catalog state; read
@@ -454,8 +437,6 @@ export async function runHierarchyCli(
     gitRun?: CommandRunner | AsyncCommandRunner;
     /** Replaces the git lookup `check-repo` uses for the working directory's repository (tests). */
     repoGit?: GitRunner;
-    /** Replaces the detached process that types the self-clear keystrokes (tests). */
-    spawnDetached?: (file: string, args: readonly string[]) => void;
     /** Replaces the board enqueue (tests). */
     enqueue?: (entries: EnqueueEntry[]) => string[];
     /** Replaces the `gh` runner the mark-ready pass uses (tests). */
@@ -639,59 +620,58 @@ export async function runHierarchyCli(
         return result.refused.length > 0 ? 1 : 0;
       }
       case 'clear': {
-        // An idle executor and the planner may clear themselves; any other `--self` caller is the dispatch session.
-        const executorSelf =
-          flags.self === 'true'
-            ? resolveCaller(
-                extras.identity ?? createSystemIdentity(deps.boardDir, extras.processLookup),
-              )
-            : null;
-        if (executorSelf?.role === 'executor' || executorSelf?.role === 'planner') {
-          const resumeAfter = intFlag(flags, 'resume-after');
-          if (resumeAfter === null) return 2;
-          const result = clearSelf(
-            {
-              self: executorSelf.name,
-              role: executorSelf.role,
-              ...(resumeAfter === undefined ? {} : { resumeAfterSeconds: resumeAfter }),
-              ...(deps.env.TMUX_PANE ? { callerPane: deps.env.TMUX_PANE } : {}),
-            },
-            { run: deps.run, boardDir: deps.boardDir, log: deps.log },
-          );
-          deps.log(JSON.stringify(result));
-          return 0;
-        }
-        const caller = dispatchCaller('clear');
-        if (!caller.ok) {
+        const caller = flags.self === 'true' ? null : dispatchCaller('clear');
+        if (caller && !caller.ok) {
           process.stderr.write(`${caller.reason}\n`);
           return 1;
         }
+        let target = firstPositional(argv);
+        let worker = caller?.ok ? caller.name : undefined;
         if (flags.self === 'true') {
-          // The dispatch session is a model-less host (AISDLC-1035): its hooks module rotates it.
-          const file = requestDispatchRotate(deps.boardDir, caller.name, deps.now());
-          deps.log(JSON.stringify({ requested: 'rotate', self: caller.name, file }));
-          return 0;
+          const me = resolveCaller(
+            extras.identity ?? createSystemIdentity(deps.boardDir, extras.processLookup),
+          );
+          if (!me) {
+            process.stderr.write(
+              'cli-hierarchy clear --self: the calling session is not a running session in the roster; name the session instead: cli-hierarchy clear <name>\n',
+            );
+            return 1;
+          }
+          target = me.name;
+          worker = me.name;
         }
-        const executor = firstPositional(argv);
-        if (!executor) {
-          process.stderr.write('cli-hierarchy clear: an executor name is required\n');
+        if (!target) {
+          process.stderr.write('cli-hierarchy clear: a session name is required\n');
           return 2;
         }
         const flagSettleMs = intFlag(flags, 'settle-ms');
         if (flagSettleMs === null) return 2;
-        const settleMs = flagSettleMs ?? loadPrLifecycleConfig(deps.cwd).clear.handshakeCeilingMs;
-        const result = await clearExecutor(
-          { executor, workerId: caller.name, ...(settleMs === undefined ? {} : { settleMs }) },
-          {
-            run: deps.run,
-            boardDir: deps.boardDir,
-            sleep: deps.sleep,
-            ...(deps.emit ? { emit: deps.emit } : {}),
-            log: deps.log,
-          },
-        );
-        deps.log(JSON.stringify(result));
-        return result.ok ? 0 : 1;
+        // `--self` never waits: the calling session is mid-turn, so its own rotation cannot be acknowledged until the turn ends.
+        const settleMs =
+          flags.self === 'true'
+            ? 0
+            : (flagSettleMs ?? loadPrLifecycleConfig(deps.cwd).clear.handshakeCeilingMs);
+        try {
+          const result = await clearExecutor(
+            {
+              executor: target,
+              ...(worker ? { workerId: worker } : {}),
+              ...(settleMs === undefined ? {} : { settleMs }),
+            },
+            {
+              boardDir: deps.boardDir,
+              sleep: deps.sleep,
+              now: deps.now,
+              ...(deps.emit ? { emit: deps.emit } : {}),
+              log: deps.log,
+            },
+          );
+          deps.log(JSON.stringify(result));
+          return result.ok ? 0 : 1;
+        } catch (err) {
+          process.stderr.write(`cli-hierarchy clear: ${(err as Error).message}\n`);
+          return 1;
+        }
       }
       case 'restart':
       case 'register': {
@@ -755,7 +735,11 @@ export async function runHierarchyCli(
         return 0;
       }
       case 'rotate-pending': {
-        deps.log(JSON.stringify({ pending: consumeRotateRequests(deps.boardDir) }));
+        const hosts = readRosterChecked(deps.boardDir)
+          .roster.sessions.filter((e) => e.role === 'operator-dispatch')
+          .map((e) => e.name);
+        const { self, forward } = consumeRotateRequests(deps.boardDir, hosts);
+        deps.log(JSON.stringify({ pending: self, forward }));
         return 0;
       }
       case 'escalation-file': {
@@ -829,7 +813,7 @@ export async function runHierarchyCli(
                 workerId: worker,
                 ...(settleMs === undefined ? {} : { settleMs }),
               },
-              { run: deps.run, boardDir: deps.boardDir, sleep: deps.sleep, emit },
+              { boardDir: deps.boardDir, sleep: deps.sleep, now: deps.now, emit },
             ),
           playbook: (verdict) => runPlaybook(verdict, playbookDeps(retryLimit)),
           operational,
@@ -986,24 +970,6 @@ export async function runHierarchyCli(
           process.stderr.write(`cli-hierarchy executor-start: ${(err as Error).message}\n`);
           return 1;
         }
-      }
-      case 'check-sender': {
-        const pid = intFlag(flags, 'sender-pid');
-        if (pid === null) return 2;
-        const ref = flags['sender-ref'] === 'true' ? undefined : flags['sender-ref'];
-        const { roster } = readRosterChecked(deps.boardDir);
-        const check = checkDispatchSender(roster.sessions, { pid, ref });
-        if (!check.ok) {
-          process.stderr.write(`${check.reason}\n`);
-          return 1;
-        }
-        if (check.warning !== undefined) {
-          process.stderr.write(`cli-hierarchy check-sender: ${check.warning}\n`);
-          deps.log(JSON.stringify({ ok: true, verified: false }));
-          return 0;
-        }
-        deps.log(JSON.stringify({ ok: true, dispatch: check.name }));
-        return 0;
       }
       case 'check-repo': {
         const { roster } = readRosterChecked(deps.boardDir);

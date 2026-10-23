@@ -234,6 +234,19 @@ describe('dispatch host (AISDLC-1035)', () => {
     expect(sends(s)).toEqual([{ to: 'executor-alpha', text: 'enqueue AISDLC-20' }]);
   });
 
+  it('delivers a rotate request for another session with $.session.send and rotates only itself for its own', async () => {
+    const s = setup(EMPTY_TICK);
+    await s.start();
+    s.$.process.run.mockImplementation(async (a: any) => ({
+      exitCode: 0,
+      stdout:
+        a.args[1] === 'rotate-pending' ? '{"pending":false,"forward":["executor-alpha"]}' : '{}',
+    }));
+    await s.timer();
+    expect(sends(s)).toEqual([{ to: 'executor-alpha', text: 'rotate' }]);
+    expect(s.$.command.run).not.toHaveBeenCalledWith({ command: 'clear' });
+  });
+
   it('forwards reports and a changed blocker list to the planner once', async () => {
     const s = setup({ ...EMPTY_TICK, blockers: ['b1'], reports: [{ text: 'weekly' }, 'plain'] });
     await s.start();
