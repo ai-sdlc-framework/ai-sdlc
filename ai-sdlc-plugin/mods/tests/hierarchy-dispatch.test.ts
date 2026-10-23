@@ -160,6 +160,7 @@ describe('dispatch host (AISDLC-1035)', () => {
   it('consumes a verdict, applies it with cli-dispatch and refreshes the pane', async () => {
     const s = setup();
     await s.start();
+    await flush(); // AISDLC-1064: registration fires its first tick and pane refresh unawaited
     const r = await s.receive('executor-alpha', 'verdict AISDLC-5 success');
     expect(r).toEqual({ consumed: 'hierarchy:verdict' });
     expect(s.next).not.toHaveBeenCalled();
@@ -173,10 +174,11 @@ describe('dispatch host (AISDLC-1035)', () => {
   it('consumes a PR-landed message with reconcile and a status message with a pane refresh only', async () => {
     const s = setup();
     await s.start();
+    await flush(); // AISDLC-1064: registration fires its first tick and pane refresh unawaited
     expect(await s.receive('executor-alpha', 'landed #42')).toEqual({
       consumed: 'hierarchy:landed',
     });
-    expect(s.runs.find((a) => a[1] === 'reconcile')).toEqual(
+    expect(s.runs.find((a) => a[1] === 'reconcile' && a.includes('--pr'))).toEqual(
       expect.arrayContaining(['reconcile', '--pr', '42']),
     );
     s.runs.length = 0;
