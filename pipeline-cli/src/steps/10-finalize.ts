@@ -307,3 +307,10 @@ function notesText(notes: DeveloperReturn['notes']): string {
   if (notes === undefined) return '(none)';
   return typeof notes === 'string' ? notes : JSON.stringify(notes);
 }
+
+/** Workflow registry metadata (RFC-0056). */
+export const FINALIZE_STEP: import('./step-meta.js').StepMeta = {
+  id: 'finalize-task',
+  inputs: 'local:verdict',
+  outputs: 'backlog-task.v1',
+};

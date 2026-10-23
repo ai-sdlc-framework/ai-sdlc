@@ -162,3 +162,10 @@ export async function siblingPrs(opts: SiblingPrStepOptions): Promise<SiblingPrR
 
   return { prs };
 }
+
+/** Workflow registry metadata (RFC-0056). */
+export const SIBLING_PRS_STEP: import('./step-meta.js').StepMeta = {
+  id: 'sibling-prs',
+  inputs: 'local:pull-request',
+  outputs: 'local:sibling-prs',
+};

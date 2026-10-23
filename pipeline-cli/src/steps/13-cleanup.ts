@@ -64,3 +64,10 @@ function resolveSyntheticPath(opts: CleanupOptions): string | null {
   }
   return null;
 }
+
+/** Workflow registry metadata (RFC-0056). */
+export const CLEANUP_STEP: import('./step-meta.js').StepMeta = {
+  id: 'cleanup-task',
+  inputs: 'local:sibling-prs',
+  outputs: 'local:cleanup',
+};

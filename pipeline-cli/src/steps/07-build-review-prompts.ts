@@ -455,3 +455,10 @@ function buildPrompt(reviewer: ReviewerType, inputs: PromptInputs): string {
     `${inputs.nonceMarker}\n`
   );
 }
+
+/** Workflow registry metadata (RFC-0056). */
+export const BUILD_REVIEW_PROMPTS_STEP: import('./step-meta.js').StepMeta = {
+  id: 'build-review-prompts',
+  inputs: 'local:developer-return',
+  outputs: 'review-plan.v1',
+};

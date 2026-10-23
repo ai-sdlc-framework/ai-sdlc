@@ -593,3 +593,10 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
 
   return { pushed: true, prUrl };
 }
+
+/** Workflow registry metadata (RFC-0056). */
+export const PUSH_AND_PR_STEP: import('./step-meta.js').StepMeta = {
+  id: 'push-and-pr',
+  inputs: 'local:verdict',
+  outputs: 'local:pull-request',
+};

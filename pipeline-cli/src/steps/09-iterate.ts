@@ -350,3 +350,10 @@ function lastRecordedRound(worktreePath: string, taskId: string): number {
     return 1;
   }
 }
+
+/** Workflow registry metadata (RFC-0056). */
+export const ITERATE_STEP: import('./step-meta.js').StepMeta = {
+  id: 'iterate-review',
+  inputs: 'local:verdict',
+  outputs: 'local:developer-prompt',
+};

@@ -95,3 +95,10 @@ export function formatFeedback(verdicts: ReviewerVerdict[]): string {
   }
   return lines.join('\n').trim();
 }
+
+/** Workflow registry metadata (RFC-0056). */
+export const AGGREGATE_VERDICTS_STEP: import('./step-meta.js').StepMeta = {
+  id: 'aggregate-verdicts',
+  inputs: 'review-evidence.v1',
+  outputs: 'local:verdict',
+};

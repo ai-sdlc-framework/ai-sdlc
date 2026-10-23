@@ -1,0 +1,125 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: Workflow
+metadata:
+  name: execute-task
+spec:
+  nodes:
+    upkeep:
+      kind: step
+      impl: parent-upkeep
+      inputs: local:repo-state
+      outputs: local:repo-state
+    validate:
+      kind: step
+      impl: validate-task
+      inputs: backlog-task.v1
+      outputs: local:validated-task
+    branch:
+      kind: step
+      impl: compute-branch
+      inputs: local:validated-task
+      outputs: local:branch-name
+    worktree:
+      kind: step
+      impl: setup-worktree
+      inputs: local:branch-name
+      outputs: local:worktree
+    flip:
+      kind: step
+      impl: flip-status
+      inputs: local:worktree
+      outputs: backlog-task.v1
+    prompt:
+      kind: step
+      impl: build-dev-prompt
+      inputs: backlog-task.v1
+      outputs: local:developer-prompt
+    develop:
+      kind: agent
+      role: developer
+    parse:
+      kind: step
+      impl: parse-dev-return
+      inputs: local:developer-envelope
+      outputs: local:developer-return
+    plan:
+      kind: step
+      impl: build-review-prompts
+      inputs: local:developer-return
+      outputs: review-plan.v1
+    review:
+      kind: fanout
+      over: plan.reviewers
+      cap: 4
+      expect: all
+      node:
+        kind: agent
+        role: ${item.role}
+        fresh: true
+    aggregate:
+      kind: step
+      impl: aggregate-verdicts
+      inputs: review-evidence.v1
+      outputs: local:verdict
+    iterate:
+      kind: step
+      impl: iterate-review
+      inputs: local:verdict
+      outputs: local:developer-prompt
+    finalize:
+      kind: step
+      impl: finalize-task
+      inputs: local:verdict
+      outputs: backlog-task.v1
+    ship:
+      kind: step
+      impl: push-and-pr
+      inputs: local:verdict
+      outputs: local:pull-request
+    siblings:
+      kind: step
+      impl: sibling-prs
+      inputs: local:pull-request
+      outputs: local:sibling-prs
+    cleanup:
+      kind: step
+      impl: cleanup-task
+      inputs: local:sibling-prs
+      outputs: local:cleanup
+  edges:
+    - from: upkeep
+      to: validate
+    - from: validate
+      to: branch
+    - from: branch
+      to: worktree
+    - from: worktree
+      to: flip
+    - from: flip
+      to: prompt
+    - from: prompt
+      to: develop
+    - from: develop
+      to: parse
+    - from: parse
+      to: plan
+    - from: plan
+      to: review
+    - from: review
+      to: aggregate
+    - from: aggregate
+      to: iterate
+      when: decision == CHANGES_REQUESTED
+    - from: iterate
+      to: develop
+      loop:
+        max: 2
+    - from: aggregate
+      to: finalize
+      when: decision == APPROVED
+    - from: finalize
+      to: ship
+    - from: ship
+      to: siblings
+    - from: siblings
+      to: cleanup

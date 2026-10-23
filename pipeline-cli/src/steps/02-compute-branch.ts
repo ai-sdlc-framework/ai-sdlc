@@ -304,3 +304,10 @@ export async function computeBranchName(opts: ComputeBranchOptions): Promise<Com
   const worktreePath = join(opts.workDir, '.worktrees', taskIdLower);
   return { branch, worktreePath, slug, taskIdLower };
 }
+
+/** Workflow registry metadata (RFC-0056). */
+export const COMPUTE_BRANCH_STEP: import('./step-meta.js').StepMeta = {
+  id: 'compute-branch',
+  inputs: 'local:validated-task',
+  outputs: 'local:branch-name',
+};

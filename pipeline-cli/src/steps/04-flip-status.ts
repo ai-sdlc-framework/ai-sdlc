@@ -245,3 +245,10 @@ export async function beginTask(opts: BeginTaskOptions): Promise<BeginTaskResult
     ...(syntheticTaskFile ? { syntheticTaskFile } : {}),
   };
 }
+
+/** Workflow registry metadata (RFC-0056). */
+export const FLIP_STATUS_STEP: import('./step-meta.js').StepMeta = {
+  id: 'flip-status',
+  inputs: 'local:worktree',
+  outputs: 'backlog-task.v1',
+};
