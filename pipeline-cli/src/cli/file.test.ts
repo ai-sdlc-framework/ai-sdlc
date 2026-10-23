@@ -235,6 +235,35 @@ describe('cli-file', () => {
       expect(text).toContain('priority: 3');
     });
 
+    it('--fixes-pr writes fixesPr and the PR head branch into the entry (AISDLC-1054)', () => {
+      const withView: FileDeps = {
+        ...deps,
+        exec(cmd, args, cwd) {
+          if (cmd === 'gh' && args[1] === 'view') {
+            return { status: 0, stdout: '{"headRefName":"feat/the-pr"}', stderr: '' };
+          }
+          return deps.exec(cmd, args, cwd);
+        },
+      };
+      fileTask(repo, writeFm(''), { pr: true, fixesPr: 1907 }, withView);
+      const text = readFileSync(briefPath(), 'utf8');
+      expect(text).toContain('fixesPr: 1907');
+      expect(text).toContain('prHeadRef: feat/the-pr');
+    });
+
+    it('--fixes-pr refuses when the PR head branch cannot be read', () => {
+      const noView: FileDeps = {
+        ...deps,
+        exec(cmd, args, cwd) {
+          if (cmd === 'gh' && args[1] === 'view') return { status: 1, stdout: '', stderr: 'no' };
+          return deps.exec(cmd, args, cwd);
+        },
+      };
+      expect(() => fileTask(repo, writeFm(''), { pr: true, fixesPr: 5 }, noView)).toThrow(
+        /could not read the head branch of PR #5/,
+      );
+    });
+
     it('--no-brief and a plain (no --pr) filing write none', () => {
       fileTask(repo, writeFm(''), { pr: true, brief: false }, deps);
       expect(existsSync(briefPath())).toBe(false);

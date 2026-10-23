@@ -49,6 +49,10 @@ export interface BriefEntry {
    * Backlog priorities map high=1, medium=2, low=3; absent when the task has none.
    */
   priority?: number;
+  /** PR this task fixes (AISDLC-1054): the task runs on and pushes to that PR's head branch. */
+  fixesPr?: number;
+  /** Head branch of `fixesPr`, so no executor has to look it up. */
+  prHeadRef?: string;
 }
 
 /** A parsed brief. */
@@ -63,6 +67,8 @@ export function renderBriefBlock(entries: readonly BriefEntry[]): string {
     if (e.sequenceGroup !== undefined) out.sequenceGroup = e.sequenceGroup;
     out.wave = e.wave;
     if (e.priority !== undefined) out.priority = e.priority;
+    if (e.fixesPr !== undefined) out.fixesPr = e.fixesPr;
+    if (e.prHeadRef !== undefined) out.prHeadRef = e.prHeadRef;
     return out;
   });
   const body = dump({ [BRIEF_BLOCK_KEY]: list }, { flowLevel: 3, lineWidth: 120 }).trimEnd();
@@ -101,6 +107,20 @@ function validateEntry(raw: unknown, index: number): BriefEntry {
       throw new Error(`${label}.priority must be a whole number`);
     }
     entry.priority = r.priority;
+  }
+  if (r.fixesPr !== undefined && r.fixesPr !== null) {
+    if (typeof r.fixesPr !== 'number' || !Number.isInteger(r.fixesPr) || r.fixesPr < 1) {
+      throw new Error(`${label}.fixesPr must be a PR number`);
+    }
+    entry.fixesPr = r.fixesPr;
+  }
+  if (r.prHeadRef !== undefined && r.prHeadRef !== null) {
+    if (typeof r.prHeadRef !== 'string' || !GROUP_PATTERN.test(r.prHeadRef)) {
+      throw new Error(`${label}.prHeadRef is not a valid branch name`);
+    }
+    if (r.prHeadRef.includes('..'))
+      throw new Error(`${label}.prHeadRef is not a valid branch name`);
+    entry.prHeadRef = r.prHeadRef;
   }
   return entry;
 }

@@ -21,6 +21,9 @@ export interface EnqueueEntry {
   sequenceGroup?: string;
   priority?: number;
   wave?: number;
+  /** PR this task fixes (AISDLC-1054); the manifest then runs on that PR's head branch. */
+  fixesPr?: number;
+  prHeadRef?: string;
 }
 
 /** Values shared by every manifest in a batch. */
@@ -106,7 +109,10 @@ export function enqueueTasks(
     const manifest: DispatchManifest = {
       schemaVersion: 'v1',
       taskId: id,
-      branch: branchFor(id, taskFile, defaults.workDir),
+      branch:
+        entry.fixesPr !== undefined && entry.prHeadRef
+          ? entry.prHeadRef
+          : branchFor(id, taskFile, defaults.workDir),
       worktree: `.worktrees/${lower}`,
       baseSha: defaults.baseSha,
       workerKind: defaults.workerKind ?? 'any',
@@ -122,6 +128,8 @@ export function enqueueTasks(
     if (entry.sequenceGroup) manifest.sequenceGroup = entry.sequenceGroup;
     if (entry.priority !== undefined) manifest.priority = entry.priority;
     if (entry.wave !== undefined) manifest.wave = entry.wave;
+    if (entry.fixesPr !== undefined) manifest.fixesPr = entry.fixesPr;
+    if (entry.fixesPr !== undefined && entry.prHeadRef) manifest.prHeadRef = entry.prHeadRef;
     manifests.push(manifest);
   }
   return manifests.map((m) => writeManifest(boardDir, m));
