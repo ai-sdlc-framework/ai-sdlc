@@ -38,7 +38,7 @@
   },
   "dependencies": {
     "@ai-sdlc/orchestrator": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.32.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "better-sqlite3": "^13.0.3",
     "zod": "^4.0.0"
   },
