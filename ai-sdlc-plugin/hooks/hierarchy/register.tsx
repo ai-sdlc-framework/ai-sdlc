@@ -26,6 +26,7 @@ import {
   dispatchSessionReceive,
   dispatchUiRender,
   tick,
+  writeModuleHealth,
 } from './dispatch.ts';
 import type { DispatchPorts, DispatchState } from './dispatch.ts';
 import {
@@ -127,6 +128,15 @@ export const register = (on: Any, options?: Any): void => {
     if (!role) return next(e);
 
     const version = (await safe(() => $.session.version())).value;
+    // AISDLC-1061: the name keys the heartbeat file `cli-hierarchy status`, `up` and `doctor` read.
+    const named = (await safe(() => $.env.get('AI_SDLC_HIERARCHY_SESSION'))).value;
+    const sessionName = typeof named === 'string' && named ? named : role;
+    const versionText = typeof version === 'string' ? version : '';
+    const health = (h: { state: 'loaded' | 'refused'; reason?: string }): Promise<void> =>
+      writeModuleHealth((a) => $.process.run(a), options?.boardDir, sessionName, {
+        ...h,
+        ...(versionText ? { version: versionText } : {}),
+      });
     // OQ-5: the validator refuses `typeof $.noun.verb`, so each primitive is probed by one call whose
     // argument is a bare string, never an object with fields: a typed boundary rejects it before any
     // action (no compaction, no blank turn), and only an absent primitive counts as missing. A host that
@@ -155,6 +165,7 @@ export const register = (on: Any, options?: Any): void => {
     );
     if (miss) {
       await log(p, miss);
+      await health({ state: 'refused', reason: miss });
       return next(e);
     }
 
@@ -169,6 +180,9 @@ export const register = (on: Any, options?: Any): void => {
       wire(true);
       router.current = 'operator-dispatch';
       dispatch.enabled = true;
+      dispatch.sessionName = sessionName;
+      if (versionText) dispatch.hostVersion = versionText;
+      await health({ state: 'loaded' });
       const tickMs = Number(options?.tickMs) > 0 ? Number(options.tickMs) : DEFAULT_TICK_MS;
       await safe(() => $.ui.open({ id: 'board', title: 'Dispatch board' }));
       await safe(() =>
@@ -202,8 +216,8 @@ export const register = (on: Any, options?: Any): void => {
       return next(e);
     }
     if (role === 'planner') {
+      await health({ state: 'loaded' });
       // The roster name keys the stored last reply; the launcher sets it, the role is the fallback.
-      const named = (await safe(() => $.env.get('AI_SDLC_HIERARCHY_SESSION'))).value;
       planner.name = typeof named === 'string' && named ? named : 'planner';
       wire(false);
       router.current = 'planner';
@@ -212,6 +226,7 @@ export const register = (on: Any, options?: Any): void => {
       return next(e);
     }
     if (role !== 'executor') return next(e);
+    await health({ state: 'loaded' });
     wire(false);
     router.current = 'executor';
     state.enabled = true;

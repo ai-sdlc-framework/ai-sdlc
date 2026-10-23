@@ -23,6 +23,7 @@ import {
   readGhCalls,
   type Quota,
 } from './gh-calls.js';
+import { formatModuleHealth, readModuleHealth, type ModuleHealth } from './module-health.js';
 import { readSessionRegistry } from './registry.js';
 import { readRosterChecked } from './roster.js';
 import {
@@ -57,6 +58,8 @@ export interface StatusRow {
   nodeVersion?: string;
   /** True when `nodeVersion` does not satisfy the version `.nvmrc` pins (AISDLC-812). */
   nodeMismatch?: boolean;
+  /** Hooks-module heartbeat (AISDLC-1061); `absent` when the session never wrote one. */
+  module: ModuleHealth;
   /** Present with `launchEnv: 'missing'`: how to repair it. */
   nextStep?: string;
 }
@@ -143,6 +146,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
       state,
       ...(nodeVersion ? { nodeVersion } : {}),
       ...(nodeMismatch ? { nodeMismatch } : {}),
+      module: readModuleHealth(deps.boardDir, entry, deps.now()),
       attached: alive && isAttached(entry.tmuxSession),
       inflightTask: held?.taskId,
       ...(owned
@@ -243,6 +247,7 @@ export function formatStatus(result: StatusResult): string[] {
     'LANDING',
     'ENV',
     'NODE',
+    'MODULE',
     'HIERARCHY_SESSION',
     'HIERARCHY_ROLE',
   ];
@@ -257,6 +262,7 @@ export function formatStatus(result: StatusResult): string[] {
     r.landing ?? '-',
     r.launchEnv ?? '-',
     r.nodeVersion ? `${r.nodeVersion}${r.nodeMismatch ? ' MISMATCH' : ''}` : '-',
+    formatModuleHealth(r.module),
     r.entry.tmuxSession,
     r.entry.role,
   ]);

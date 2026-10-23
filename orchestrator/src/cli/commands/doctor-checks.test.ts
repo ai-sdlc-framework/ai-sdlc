@@ -51,6 +51,7 @@ import {
   checkJudgmentLayer,
   checkRuntimeGitignore,
   checkHierarchyLaunchEnv,
+  checkHierarchyModule,
   checkStaleRepoBuild,
   checkLeasePushPreflight,
   checkCiQueue,
@@ -2473,5 +2474,51 @@ describe('pipeline-owned-ignored check (AISDLC-967)', () => {
     expect(r.severity).toBe('fail');
     expect(r.title).toContain('.gitignore:12:.ai-sdlc/reviews/');
     expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('pipeline-owned-ignored');
+  });
+});
+
+// ── hierarchy-module (AISDLC-1061) ─────────────────────────────────
+
+describe('hierarchy-module check', () => {
+  const roster = JSON.stringify({
+    sessions: [{ name: 'p-dispatch', role: 'operator-dispatch', status: 'running' }],
+  });
+  const ctxFor = (file: string | null | undefined, rosterText: string | null = roster) =>
+    makeCtx(
+      makeAdapters({
+        readFile: (p) =>
+          p.endsWith('hierarchy.json')
+            ? rosterText
+            : p.endsWith('module-p-dispatch.json')
+              ? (file ?? null)
+              : null,
+      }),
+    );
+
+  it('is quiet without a roster or on a bad one', () => {
+    expect(checkHierarchyModule(ctxFor(null, null))).toEqual([]);
+    expect(checkHierarchyModule(ctxFor(null, 'nope'))).toEqual([]);
+    expect(checkHierarchyModule(ctxFor(null, '{}'))).toEqual([]);
+  });
+
+  it('passes on a fresh loaded heartbeat', () => {
+    const f = JSON.stringify({ state: 'loaded', at: new Date().toISOString() });
+    expect(checkHierarchyModule(ctxFor(f))).toEqual([]);
+  });
+
+  it('fails on refused, absent, stale and unreadable files', () => {
+    const refused = checkHierarchyModule(
+      ctxFor(JSON.stringify({ state: 'refused', reason: 'boom' })),
+    );
+    expect(refused[0]?.title).toContain('p-dispatch refused: boom');
+    expect(refused[0]?.id).toBe('hierarchy-module');
+    expect(checkHierarchyModule(ctxFor(null))[0]?.title).toContain('p-dispatch absent');
+    expect(checkHierarchyModule(ctxFor('garbage'))[0]?.title).toContain('absent');
+    const stale = JSON.stringify({ state: 'loaded', at: '2020-01-01T00:00:00Z' });
+    expect(checkHierarchyModule(ctxFor(stale))[0]?.title).toContain('stale');
+  });
+
+  it('is registered', () => {
+    expect(DOCTOR_CHECKS.find((x) => x.id === 'hierarchy-module')).toBeDefined();
   });
 });

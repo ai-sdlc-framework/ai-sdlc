@@ -280,6 +280,14 @@ binary) for callers that spawn `gh` directly. Lines older than 24 hours are drop
 GitHub reads (human-attention list, mark-ready, landing) and reports the skip when the lowest remaining bucket is below the floor
 (default 300, override with `AI_SDLC_GH_QUOTA_FLOOR`). The gate workflow prints the Actions quota at the start (`detect`) and end
 (`pr-ready`) of each run in the job summary.
+The `MODULE` column (AISDLC-1061) is the hierarchy hooks module's heartbeat for the session, read from
+`<board-dir>/handoff/module-<name>.json` (`{state, reason, version, at}`): `loaded`, `refused: <reason>`,
+`absent` (no file: the session has no hierarchy role, or the module never ran in it) or, for the dispatch
+host only, `stale: ...` when its per-tick refresh stopped for two minutes. The module's `session.start`
+gate writes the file through `$.process.run`; the dispatch role refreshes it on every tick. `up` ends by
+waiting up to 60 seconds (two tick intervals) for the dispatch host to report `loaded`, else exits 1 naming
+the reason and the fix (`--no-module-check` skips it); `ai-sdlc doctor` has the same check
+(`hierarchy-module`). See Troubleshooting, "Module absent".
 A final `unbriefed` line lists dispatchable open tasks under `backlog/tasks/` that are on no
 brief and not on the board (nothing would ever queue them); write a brief for them.
 
@@ -289,7 +297,7 @@ cli-hierarchy status [--json]
 
 `--json` prints one JSON object: `{ "rows": [ { "entry": <roster entry>, "state": "...",
 "attached": true|false, "inflightTask": "AISDLC-N", "launchEnv": "ok|missing",
-"nodeVersion": "22.23.2", "nodeMismatch": true, "nextStep": "..." } ], "board": { "queued": n,
+"nodeVersion": "22.23.2", "nodeMismatch": true, "module": { "state": "loaded|refused|absent|stale", "reason": "..." }, "nextStep": "..." } ], "board": { "queued": n,
 "inflight": n, "done": n, "failed": n }, "webhook": { "state": "up", "port": n, "pid": n }, "scheduler": { "state": "up", "pid": n } }`. Read-only. Exit code `0`.
 
 ### `stall-notice`
@@ -1139,6 +1147,14 @@ session (the dispatch and planner sessions still need `down` then `up`);
 restart loses no queued work, but finish or accept the loss of any task in flight first.
 
 ## Troubleshooting
+
+**Module absent (AISDLC-1061).** `status` shows `MODULE absent`, `refused: <reason>` or `stale` for the
+dispatch host, or `up` exits 1 with `the hierarchy hooks module is not loaded on the dispatch host`. With
+no module the hierarchy is inert: no ticks, no executor wakes, no rotations, while `STATE` still reads
+`busy`/`idle`. Look at the one-line refusal in the dispatch pane (the host validator names the offending
+file and construct, or the primitive or version floor that failed), fix
+`ai-sdlc-plugin/hooks/hierarchy/`, rebuild, then `cli-hierarchy down --role operator-dispatch` and
+`cli-hierarchy up`. `absent` on a planner or executor launched without a hierarchy role is expected.
 
 **`up` refuses over a stale roster.** The message `the roster uses the old single-session
 layout` means `hierarchy.json` came from before one-session-per-agent; run `down`, then `up`.

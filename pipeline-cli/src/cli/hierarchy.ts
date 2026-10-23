@@ -192,6 +192,8 @@ Options for up:
   --rebuild                In the ai-sdlc monorepo, rebuild a stale or missing pipeline-cli
                            build before launching (otherwise up refuses and prints the
                            command: pnpm --filter @ai-sdlc/pipeline-cli build)
+  --no-module-check        Skip the final check that the dispatch host's hooks module reports
+                           loaded within 60 seconds (otherwise up exits 1 when it does not)
   --no-vscode-tasks        Do not regenerate .vscode/tasks.json. By default up rewrites it
                            when it starts a session or the roster changes, but only if the
                            file is absent or carries the "ai-sdlc" generated marker; inside
@@ -528,6 +530,7 @@ export async function runHierarchyCli(
             ...(flags.node === undefined ? {} : { node: flags.node === 'true' ? '' : flags.node }),
             vscodeTasks: flags['no-vscode-tasks'] !== 'true',
             rebuild: flags.rebuild === 'true',
+            verifyModule: flags['no-module-check'] !== 'true',
           },
           deps,
         );
