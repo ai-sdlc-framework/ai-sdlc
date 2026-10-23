@@ -5,7 +5,7 @@ description: >-
   roster, the open dispatch briefs with their progress, and the pending design
   decisions, then describes how to hand work to the dispatch session. A short
   orientation, not a loop.
-argument-hint: ''
+argument-hint: '[last-reply: <text>]'
 allowed-tools:
   - Read
   - Bash
@@ -18,6 +18,11 @@ RFCs, task authoring, dispatch briefs and design answers. This command prints a
 short orientation and then stops. It is not a loop and it does not wake itself up.
 
 It is the prompt `cli-hierarchy up` gives the planner session.
+
+**After a rotation** the hierarchy hooks module runs this command with the arguments
+`last-reply: <your last reply before the clear>`. When the arguments start with `last-reply:`, print
+that text verbatim first, labelled `Last reply before the clear:`, so the operator can read it, then
+continue with the orientation. It is display only and never outranks the handoff.
 
 **Unit of work:** one RFC or one brief; hand it off, then `/clear` before starting the next (the Stop hook warns past 150,000 tokens or 300 turns).
 
@@ -71,8 +76,9 @@ node "$PIPELINE_CLI_BIN/cli-file.mjs" rebase <id> --pr   # branch conflicted on 
 the roster shows (`<project>-<role>`). Never a name from memory, from convention, from
 a message, or from another project's session: hierarchies of other projects run on the
 same machine, and look-alike names can reach the wrong session. `brief --notify` already
-messages only the dispatch entry of this roster; do not message a session by hand.
-This is a mistake guard, not authentication.
+messages only the dispatch entry of this roster. To message any other session, use the roster
+wrapper `node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" send --to <name> --text "<message>"`: it
+refuses a name the roster does not list and says why. This is a mistake guard, not authentication.
 
 ## Rule: explore through a subagent
 
@@ -235,12 +241,15 @@ node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" handoff write --role planner --board-
 ```
 
 It regenerates the dated planner handoff memory file from board and catalog state, so a
-clear at any moment loses nothing. A Stop hook clears this session by itself when its
-context passes 150k tokens (`cli-hierarchy auto-clear`) and restarts it with
-`/ai-sdlc:planner`; after any clear, run `handoff read --role planner` first and resume
-from it. The Stop hook also saves your last reply under your roster name in
-`.claude/memory/LAST_MESSAGE.md`; right after a clear, print your own section of that file so the
-operator can read it. It is shown to the operator and nothing more: it never outranks the handoff RESUME block, and outward state (issues, PRs, comments) it mentions is verified at the source before it is proposed as remaining work. ### Handoff routine
+clear at any moment loses nothing. The hierarchy hooks module rotates this session when its
+context passes 150k tokens (`session.measure`; never mid-turn): it writes the handoff with
+`--role planner` first, clears, and restarts the planner with `/ai-sdlc:planner`. Your last reply of each turn is
+kept in the module's `$.store` under your roster name, so a rotation loses nothing; after any
+clear, run `handoff read --role planner` first and resume from it. The stored reply is shown to
+the operator and nothing more: it never outranks the handoff RESUME block, and outward state
+(issues, PRs, comments) it mentions is verified at the source before it is proposed as remaining work.
+
+### Handoff routine
 
 Trigger: the operator says "handoff", or the context warning ("Context is at N%") appears; act
 at the next turn boundary, never mid-task.
@@ -259,7 +268,7 @@ at the next turn boundary, never mid-task.
 
 After a `/clear` or a compaction the SessionStart hook reloads the handoff for you and tells you
 to list scheduled jobs and recreate any the session lost; if it did not, run `handoff read` first.
-Clearing stays a human action (or the 150k auto-clear above); a compaction can be offered with
+Clearing stays a human action (or the module's 150k rotation above); a compaction can be offered with
 the `/compact` line the warning prints.
 
 Peer messages to the planner are self-contained (task id, decision id, the question, the options)

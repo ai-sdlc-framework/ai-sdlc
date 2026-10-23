@@ -593,7 +593,7 @@ Interim assumptions (a hooks module has no process or file API and the host cont
 `$.clock.every({ ms, run })`, `$.process.run({ command, args })` (result `stdout` plus `exitCode`) and the
 `ui.render` return value are verified by `claude plugin test` fixtures against engine-written types when available.
 
-## The hierarchy hooks module (executor role)
+## The hierarchy hooks module (executor and planner roles)
 
 `ai-sdlc-plugin/hooks/hierarchy/register.tsx`, listed under `modules` in `ai-sdlc-plugin/hooks/hooks.json`
 (RFC-0058, OQ-2). It replaces the 25-minute `--wait` poll and the typed `/clear` for an executor.
@@ -618,10 +618,20 @@ Interim assumptions (a hooks module has no process or file API and the host cont
   `session.receive`, since `session.start` does not fire after a mod-run clear; a record older than 10 minutes is dropped). On `{ drop }` it runs `$.session.compact` with the hierarchy
   summary prompt; on a second failure it ends the session so `cli-hierarchy up` starts a fresh one. `session.measure`
   over 120k tokens triggers the same rotation, and during a task it waits for the task's last reply (never mid-task).
+- **Planner role (AISDLC-1036).** The same rotation function serves the planner, differing in threshold and handoff
+  role. `session.measure` at 150k tokens runs `handoff write --role planner` first, then `clear` (compact, then session
+  end as fallbacks); a measure that lands during a turn waits for the main thread's `turn.complete`, so the planner
+  never rotates mid-turn. The last reply of each main-thread turn is stored in `$.store` under the roster name
+  (`hierarchy/last-reply/<name>`, the launcher's `AI_SDLC_HIERARCHY_SESSION`), and the resume runs
+  `/ai-sdlc:planner` with `last-reply: <text>` as its arguments, which the planner command prints for the operator.
+  This replaces `LAST_MESSAGE.md`. `session.receive` passes rulings and escalations (including the escalation-file
+  notices dispatch announces) to the model unchanged and consumes only status noise from the dispatch session.
+- **Roster wrapper.** A planner messages a session by hand only through [`send`](#send), which refuses a name the
+  roster does not list.
 - **Mixed fleets.** A tmux-driven dispatch session can still enqueue for a mod-driven executor: both read the same board.
 
 **Single clear rule (AISDLC-815).** A hierarchy session clears when its context passes its role threshold (the
-AISDLC-766 Stop hook: planner 150k, dispatch 120k, executor 120k tokens, set under `contextThresholds` in
+module rotation: planner 150k, dispatch 120k, executor 120k tokens, set under `contextThresholds` in
 `<board-dir>/config.json` and printed by `cli-hierarchy status`), or when an executor's task finishes (dispatch
 clears it on the verdict). There is no per-tick clear for dispatch and no idle-wait clear for executors. Motivation:
 in the 24 h to 2026-10-11 the ledger recorded 375 task-less sessions under 300k weighted units each, 49M units
@@ -678,46 +688,11 @@ and `read` prints them with the block. The ledger is append-only: `write` never 
 `handoff read --role <r>`; the file and the board are all a fresh context needs. The resume
 command per role is `/ai-sdlc:planner`, `/ai-sdlc operator-dispatch` and `/ai-sdlc executor`.
 
-### `auto-clear`
+### Context thresholds (AISDLC-815, AISDLC-1036)
 
-The Stop hook of the plugin (`context-auto-clear`) runs this after each turn of a session that
-is in the roster; any other session is a no-op.
-
-```bash
-cli-hierarchy auto-clear --transcript <path>
-```
-
-It reads the session's current context size (input plus cache tokens of the newest assistant
-usage entry in `--transcript`) and compares it with the role's threshold. Over it, it writes
-the handoff and runs the `clear --self` machinery with the role's resume command; the result is
-cleared within one turn without the operator. An executor that holds an inflight task is never
-cleared: the command reports `defer`, and the first turn after its verdict is written clears it.
-A clear scheduled in the last two minutes is not scheduled again.
-
-**Handoff turn before the clear (AISDLC-870).** A clear never discards unsaved session context.
-
-- **Warn threshold.** The first turn over the role threshold answers `action: warn` and records a
-  stamp (`<board-dir>/handoff/.auto-clear-warned-<name>`). The Stop hook relays the message as a
-  `block` reason: run the handoff routine and do not start new work. Nothing is cleared that turn.
-- **mtime gate.** A later turn clears only once the role's own handoff file was rewritten after the
-  stamp: `<board-dir>/handoff/<name>.md` for dispatch and executors, the dated
-  `.claude/memory/project_planner_handoff_*.md` that `handoff write --role planner` writes for the
-  planner. Until then the command reports `none` (waiting for the handoff).
-- **Hard cap.** At more than 125% of the threshold the clear is issued without a handoff rewrite,
-  and the reason is appended to `<board-dir>/handoff/auto-clear.log`.
-- The stamp is removed when the clear is scheduled or the context is back under the threshold. An
-  executor holding an inflight task is deferred before any of this, as before.
-
-**Threshold rule and reason lines (AISDLC-1007).** For planner and dispatch the handoff is
-regenerated from board state on every state change, so a handoff file rewritten in the last 15
-minutes means the clear fires at the threshold itself (no warning turn). With a stale handoff the
-warn and mtime-gate flow above applies, and the 125% hard cap is the ceiling. Executors always
-use the warn flow. Every exit of the Stop hook after the roster check appends one line to
-`<board-dir>/log/context-auto-clear.log` (`.ai-sdlc/dispatch/log/`), or prints it to hook stdout
-when the board is absent: `no-cli`, `below-threshold`, `handoff-stale`, `warned`, `scheduled`,
-`failed:<message>` (an executor with an inflight task logs `deferred`). SessionStart in a roster
-session after any clear, scheduled or manual, prints `handoff read --role <role>` and the resume
-command.
+The auto-clear Stop hook, `cli-hierarchy auto-clear` and `LAST_MESSAGE.md` persistence are gone
+(AISDLC-1036): the [hierarchy hooks module](#the-hierarchy-hooks-module-executor-and-planner-roles) rotates a
+session when `session.measure` pushes a token count over the role's threshold, so nothing parses a transcript.
 
 | Role                | Default threshold (tokens) | Resume command              |
 | ------------------- | -------------------------- | --------------------------- |
@@ -725,23 +700,13 @@ command.
 | operator-dispatch   | 120000                     | `/ai-sdlc operator-dispatch` |
 | executor            | 120000                     | `/ai-sdlc executor`         |
 
-Thresholds are configurable in `.ai-sdlc/dispatch/config.json`:
+`cli-hierarchy status` prints the configured thresholds from `.ai-sdlc/dispatch/config.json`:
 
 ```json
 { "contextThresholds": { "planner": 150000, "operator-dispatch": 120000, "executor": 120000 } }
 ```
 
-Missing or invalid values fall back to the defaults. Set `AI_SDLC_AUTO_CLEAR=off` to switch the
-hook off for a session.
-
-#### `LAST_MESSAGE.md` (AISDLC-914)
-
-A clear wipes the scrollback, so the same Stop hook first writes the last assistant turn's text
-blocks (no tool use, thinking or tool results) to `.claude/memory/LAST_MESSAGE.md` in the
-project root. Each roster session owns one `## <roster name> (<time>)` section; a later Stop
-replaces that section and leaves the others. The session is matched by `TMUX_PANE` against the
-roster `paneId`; no roster entry, no transcript or an unreadable one writes nothing. Planner and
-dispatch print their own section right after a clear. Set `AI_SDLC_LAST_MESSAGE=off` to disable.
+Missing or invalid values fall back to the defaults.
 
 ### Context usage: status line, warning, handoff (AISDLC-728)
 
@@ -769,7 +734,7 @@ output field, and the SessionStart `compact` source name are taken from the task
 must be checked against current Claude Code docs. A hook cannot run `/compact` or `/clear`; it
 can only print a line to paste. A mod could call `$.session.compact({ instructions })` from a
 button (the `context-meter` mod calls it without instructions today), and whether a mod can run
-`/clear` is unverified, so clearing stays a human action (or the 150k auto-clear above).
+`/clear` is unverified, so clearing stays a human action (or the module's 150k rotation above).
 
 ### `hold`
 
@@ -955,6 +920,20 @@ cli-hierarchy route-decision --decision-id <id> --route operational|design --to 
 Dispatch-session command, guarded like `clear`. Prints `{ok, decisionId, route, routedTo}`.
 Exit `0`, `1` on a guard refusal, `2` on a missing or invalid argument.
 
+### `send`
+
+Message one roster session, the planner's roster guard (AISDLC-1036).
+
+```bash
+cli-hierarchy send --to <name> --text "<message>"
+```
+
+`--to` must be a session name listed in this project's roster (`<board-dir>/hierarchy.json`, the list
+`status` prints). Any other name is refused with exit 1 and a reason that names the roster source and
+the names it does list, so a look-alike or another project's session never receives the text. The
+message is typed into the session's pane with the same ownership checks `brief --notify` applies.
+Exit `2` on a missing `--to` or `--text`. A mistake guard, not authentication.
+
 ### `check-sender`
 
 Exit 0 only when the sender of a message is this roster's running dispatch session. The
@@ -996,7 +975,7 @@ The cycle is **brief, tick, clear**:
 Self-clear rule: **one task per executor context**, and **the dispatch session does not clear
 itself between ticks** (the model-less host runs the tick on a timer, see [the dispatch role](#the-hierarchy-hooks-module-dispatch-role-model-less-host)).
 It rotates through its hooks module at 120k tokens or on the rotate request `clear --self` writes. Every role, the
-planner included, also clears itself automatically when its context passes its [threshold](#auto-clear);
+planner included, also clears itself automatically when its context passes its [threshold](#context-thresholds-aisdlc-815-aisdlc-1036);
 handoff files are regenerated by the CLI, so a session can be cleared at any moment.
 
 How `clear` interacts with an executor's loop: the executor's loop ends after it reports a
@@ -2173,8 +2152,7 @@ clear.
 pane. While the input line still holds the command (a swallowed `Enter`, for example under a
 slash-command completion popup), it sends `Enter` again, at most twice, 2 s apart; if the
 command is still there it sends `Escape`, empties the line and retypes the command once. Only
-then does it wait for the identity line. `clear --self` and `auto-clear` (the Stop-hook
-self-clear) run the same check in their delivery script and log
+then does it wait for the identity line. `clear --self` runs the same check in their delivery script and log
 `resume command not submitted; last pane line: ...` to `handoff/auto-clear.log` when it fails.
 
 **Failure result.** A clear either restarted the session (identity line seen within the

@@ -86,15 +86,9 @@ export {
   type LandReport,
 } from './land-eligible.js';
 export { markReadyAfterCodeql, repoHasCodeql, type MarkReadyReport } from './mark-ready.js';
-export {
-  clearWarned,
-  decideAutoClear,
-  markScheduled,
-  readContextTokens,
-  resolveThresholds,
-  DEFAULT_CONTEXT_THRESHOLDS,
-  type AutoClearDecision,
-} from './auto-clear.js';
+export { markScheduled } from './clear.js';
+export { checkSendTarget, sendToRoster, type SendCheck } from './send.js';
+export { resolveThresholds, DEFAULT_CONTEXT_THRESHOLDS } from './thresholds.js';
 export {
   boundedHandoffView,
   collectHandoffState,

@@ -23,14 +23,24 @@ import {
   tick,
 } from './dispatch.ts';
 import type { DispatchPorts } from './dispatch.ts';
+import { registerPlanner } from './planner.ts';
+import type { PlannerState } from './planner.ts';
 
 type Any = any;
 
 export const register = (on: Any, options?: Any): void => {
   let armed = false;
+  let plannerArmed = false;
   const state: ExecutorState = { active: false, pendingRotate: false, lastReply: '' };
   const dispatch = newDispatchState(options);
   let dispatchArmed = false;
+  const planner: PlannerState = {
+    active: false,
+    pendingRotate: false,
+    lastReply: '',
+    name: 'planner',
+    inTurn: false,
+  };
 
   on('session.start', async ($: Any, e: Any, next: Any) => {
     const p: Ports = {
@@ -125,6 +135,18 @@ export const register = (on: Any, options?: Any): void => {
       const kept = (await safe(() => dp.storeGet(BOARD_KEY))).value as string[] | undefined;
       if (Array.isArray(kept)) dispatch.pane = kept;
       await refreshPane(dp, dispatch);
+      return next(e);
+    }
+    if (role === 'planner') {
+      // The roster name keys the stored last reply; the launcher sets it, the role is the fallback.
+      const named = (await safe(() => $.env.get('AI_SDLC_HIERARCHY_SESSION'))).value;
+      planner.name = typeof named === 'string' && named ? named : 'planner';
+      if (!plannerArmed) {
+        plannerArmed = true;
+        registerPlanner(on, planner);
+      }
+      planner.enabled = true;
+      if (planner.resumePending) await resumeAfterClear(p, planner);
       return next(e);
     }
     if (role !== 'executor') return next(e);

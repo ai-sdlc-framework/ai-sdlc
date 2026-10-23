@@ -23,8 +23,8 @@ const {
   ancestorPids,
   readHandoffText,
   RESET_SOURCES,
+  resolveBin,
 } = require('./lib/hierarchy-role');
-const { resolveBin } = require('./context-auto-clear');
 
 // ── Read stdin ───────────────────────────────────────────────────────
 

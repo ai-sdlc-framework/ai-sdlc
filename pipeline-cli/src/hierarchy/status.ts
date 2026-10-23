@@ -32,7 +32,7 @@ import {
 } from './reconcile-scheduler.js';
 import { formatWebhookStatus, webhookStatus, type WebhookStatus } from './webhook.js';
 import { listWindows, paneInfo, paneStartCommand, sessionAttached } from './tmux.js';
-import { resolveThresholds } from './auto-clear.js';
+import { resolveThresholds } from './thresholds.js';
 import type { HierarchyDeps, HierarchyRole, RosterEntry } from './types.js';
 
 /** Live state of one roster entry. */

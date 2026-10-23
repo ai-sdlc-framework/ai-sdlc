@@ -208,7 +208,7 @@ Other clearing paths:
   executor costs one short turn about every 25 minutes.
 - Every session also clears itself automatically when its context passes a threshold
   (defaults: planner 150000 tokens, dispatch and executor 120000), configurable in
-  `.ai-sdlc/dispatch/config.json`; `AI_SDLC_AUTO_CLEAR=off` disables it for a session.
+  `.ai-sdlc/dispatch/config.json`; the hierarchy hooks module does it from `session.measure`.
 - Before any clear the CLI regenerates a handoff file from board and catalog state
   (`cli-hierarchy handoff write|read`), so a session can be cleared at any moment.
 

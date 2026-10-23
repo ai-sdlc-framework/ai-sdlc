@@ -12,6 +12,11 @@ import {
   measuredTokens,
   senderOf,
 } from '../../hooks/hierarchy/executor.ts';
+import {
+  PLANNER_RESUME_COMMAND,
+  PLANNER_ROTATE_AT_TOKENS,
+  lastReplyKey,
+} from '../../hooks/hierarchy/planner.ts';
 import { register } from '../../hooks/hierarchy/register.tsx';
 
 const env = (from: string, text: string) =>
@@ -24,6 +29,7 @@ function setup(
     drop?: string[];
     omit?: string;
     identity?: unknown;
+    name?: string;
   } = {},
 ) {
   const handlers = new Map<string, any>();
@@ -34,7 +40,13 @@ function setup(
   const $: any = {
     env: {
       get: (k: string) =>
-        k === 'HIERARCHY_ROLE' ? (over.role === undefined ? 'executor' : over.role) : undefined,
+        k === 'HIERARCHY_ROLE'
+          ? over.role === undefined
+            ? 'executor'
+            : over.role
+          : k === 'AI_SDLC_HIERARCHY_SESSION'
+            ? over.name
+            : undefined,
     },
     session: {
       version: async () => over.version ?? '2.1.309',
@@ -110,7 +122,7 @@ describe('hierarchy module: gate', () => {
   });
 
   it('records a user tier without identity, and registers nothing for another role', async () => {
-    const s = setup({ role: 'planner' });
+    const s = setup({ role: 'operator-dispatch' });
     await s.start();
     expect(logOf(s.kv)[0]).toContain('tier=user identity=none');
     expect([...s.handlers.keys()]).toEqual(['session.start']);
@@ -328,5 +340,109 @@ describe('hierarchy module: rotation', () => {
     await s.handlers.get('turn.complete')(s.$, { reply: IDLE_MARKER }, s.next);
     expect(ran(s)).toContain('clear');
     expect(logOf(s.kv).some((l) => l.includes('handoff write was refused'))).toBe(true);
+  });
+});
+
+describe('hierarchy module: planner role (AISDLC-1036)', () => {
+  const planner = () => setup({ role: 'planner', name: 'proj-planner' });
+  const handoffs = (s: ReturnType<typeof setup>) =>
+    s.$.command.run.mock.calls
+      .map((c: any[]) => c[0])
+      .filter((a: any) => a?.command === 'ai-sdlc:hierarchy');
+
+  it('registers the planner hooks and nothing for the executor wake', async () => {
+    const s = planner();
+    await s.start();
+    for (const h of ['turn.start', 'session.receive', 'turn.complete', 'session.measure'])
+      expect(s.handlers.has(h)).toBe(true);
+    expect(logOf(s.kv)[0]).toContain('role=planner');
+  });
+
+  it('at 150k writes the planner handoff, clears, and shows the stored last reply after the clear', async () => {
+    const s = planner();
+    await s.start();
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    await s.handlers.get('turn.complete')(s.$, { text: 'ruling recorded' }, s.next);
+    expect(s.kv.get(lastReplyKey('proj-planner'))).toBe('ruling recorded');
+    expect(ran(s)).toEqual([]);
+    await s.handlers.get('session.measure')(s.$, { tokens: PLANNER_ROTATE_AT_TOKENS }, s.next);
+    expect(handoffs(s)).toEqual([
+      { command: 'ai-sdlc:hierarchy', args: 'handoff write --role planner' },
+    ]);
+    expect(ran(s)).toEqual(['ai-sdlc:hierarchy', 'clear']);
+    expect(s.kv.get(ROTATION_KEY)).toMatchObject({
+      role: 'planner',
+      resume: PLANNER_RESUME_COMMAND,
+    });
+    // the new session: the resume command receives the stored reply, which is still readable
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    expect(s.$.command.run).toHaveBeenLastCalledWith({
+      command: PLANNER_RESUME_COMMAND,
+      args: 'last-reply: ruling recorded',
+    });
+    expect(s.kv.get(lastReplyKey('proj-planner'))).toBe('ruling recorded');
+  });
+
+  it('never rotates mid-turn: a measure during a turn waits for turn.complete', async () => {
+    const s = planner();
+    await s.start();
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    await s.handlers.get('session.measure')(s.$, { tokens: 200_000 }, s.next);
+    expect(ran(s)).toEqual([]);
+    // a subagent's turn does not end the main thread's turn
+    await s.handlers.get('turn.complete')(s.$, { agentId: 'a1', text: 'x' }, s.next);
+    expect(ran(s)).toEqual([]);
+    await s.handlers.get('turn.complete')(s.$, { text: 'final' }, s.next);
+    expect(ran(s)).toEqual(['ai-sdlc:hierarchy', 'clear']);
+  });
+
+  it('ignores a measure under the threshold', async () => {
+    const s = planner();
+    await s.start();
+    await s.handlers.get('session.measure')(s.$, { tokens: 1000 }, s.next);
+    expect(ran(s)).toEqual([]);
+  });
+
+  it('falls back to compact, then ends the session, through the shared rotation', async () => {
+    const s = setup({ role: 'planner', name: 'proj-planner', drop: ['clear'] });
+    await s.start();
+    await s.handlers.get('session.measure')(s.$, { tokens: 200_000 }, s.next);
+    expect(compacts(s)).toHaveLength(1);
+    expect(compacts(s)[0][0].instructions).toContain('planner');
+    const t = setup({ role: 'planner', drop: ['clear', 'compact'] });
+    await t.start();
+    await t.handlers.get('session.measure')(t.$, { tokens: 200_000 }, t.next);
+    expect(ran(t)).toEqual(['ai-sdlc:hierarchy', 'clear', 'exit']);
+  });
+
+  it('passes rulings and escalations through unchanged and consumes status noise from dispatch', async () => {
+    const s = planner();
+    await s.start();
+    const recv = (from: string, text: string) =>
+      s.handlers.get('session.receive')(s.$, { text: env(from, text) }, s.next);
+    const ruling = env(
+      'proj-operator-dispatch',
+      'escalation: .ai-sdlc/dispatch/escalations/DEC-1.md',
+    );
+    const out = await s.handlers.get('session.receive')(s.$, { text: ruling }, s.next);
+    expect(out).toEqual({ text: ruling });
+    const r2 = await recv('proj-operator-dispatch', 'ruling needed: DEC-0300');
+    expect(r2.text).toContain('ruling needed: DEC-0300');
+    expect(await recv('proj-operator-dispatch', 'status: tick 4 idle')).toEqual({
+      consumed: 'hierarchy:status',
+    });
+    expect(await recv('proj-operator-dispatch', 'ack')).toEqual({ consumed: 'hierarchy:status' });
+    // status text from anyone else is not noise
+    expect((await recv('someone-else', 'status: urgent')).text).toContain('status: urgent');
+  });
+
+  it('a receive failure never swallows the message', async () => {
+    const s = planner();
+    await s.start();
+    s.$.store.get = async () => {
+      throw new Error('boom');
+    };
+    const out = await s.handlers.get('session.receive')(s.$, { text: 'plain' }, s.next);
+    expect(out).toEqual({ text: 'plain' });
   });
 });
