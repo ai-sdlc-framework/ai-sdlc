@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.7.0...sdk-go-v0.8.0) (2026-10-23)
+
+
+### Features
+
+* allowForcePush mode lease for any non-protected branch (AISDLC-1005) ([#1828](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1828)) ([3820bda](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3820bda7b65c19203fc41fee5e7a68331527e717))
+
+
+### Bug Fixes
+
+* **deps:** raise Go to 1.25, bump x/net 0.55, CodeQL Go autobuild (AISDLC-1041) ([#1929](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1929)) ([c7d3d69](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c7d3d692f279a009bbd6244aa834dd5eba1a53d5))
+
 ## [0.7.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.6.1...sdk-go-v0.7.0) (2026-10-17)
 
 

@@ -5,6 +5,31 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.36.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.35.0...orchestrator-v0.36.0) (2026-10-23)
+
+
+### Features
+
+* add Workflow schema, manifest entry, init scaffold and doctor check (AISDLC-992) ([#1955](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1955)) ([d35dc12](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d35dc12d787759b9ba0e430ab326cfef40c5ddb2))
+* allowForcePush mode lease for any non-protected branch (AISDLC-1005) ([#1828](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1828)) ([3820bda](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3820bda7b65c19203fc41fee5e7a68331527e717))
+* autonomy tracker rejects AutonomyPolicy initial level above 1 (AISDLC-990.1) ([#1818](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1818)) ([6e755e8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/6e755e86b877c6ed7affcfdd1416161fa173a5c2))
+* refuse a stale pipeline-cli build at hierarchy launch (AISDLC-988) ([#1781](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1781)) ([cedd846](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cedd8466eac01e79a2ec4cbb94e6ab92dea7948b))
+* workflow engine behind AI_SDLC_WORKFLOW_ENGINE=1 with workflowDigest (AISDLC-993) ([#1958](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1958)) ([6e1e469](https://github.com/ai-sdlc-framework/ai-sdlc/commit/6e1e469f128bdf4a7da0d4a6d97fa46e214f89ae))
+
+
+### Bug Fixes
+
+* cap autonomy promotion at spec max level 3 (AISDLC-990) ([#1807](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1807)) ([35a3fa8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/35a3fa88a0bec754c111f4364c47e499b8e4309b))
+* one review-ledger path helper and a lint gate on hand-built paths (AISDLC-1020) ([#1879](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1879)) ([3bb16d6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3bb16d6752e8940c53545af80963b08184b7476d))
+* **orchestrator:** fail Step 10.5 when the review ledger cannot be staged (AISDLC-967) ([#1848](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1848)) ([fce26ed](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fce26ed503f940a6c2aa0d9f41ec9bf5ba99a554))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.36.0
+
 ## [0.35.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.34.0...orchestrator-v0.35.0) (2026-10-17)
 
 

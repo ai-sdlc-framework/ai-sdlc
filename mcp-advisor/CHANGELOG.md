@@ -1,5 +1,19 @@
 # @ai-sdlc/mcp-advisor
 
+## [0.36.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/mcp-advisor-v0.35.0...mcp-advisor-v0.36.0) (2026-10-23)
+
+
+### Bug Fixes
+
+* **deps:** migrate to zod 4, ZodError.errors to .issues (AISDLC-1038) ([#1916](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1916)) ([5487fa5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5487fa5509659688225a26ad69db85615bc01b72))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/orchestrator bumped to 0.36.0
+
 ## [0.35.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/mcp-advisor-v0.34.0...mcp-advisor-v0.35.0) (2026-10-17)
 
 
