@@ -65,8 +65,32 @@ export const PRIMITIVES = [
   'session.send',
 ] as const;
 
+/**
+ * The host's `$.session.version()` is a string on some builds and `{ version: { VERSION, BUILD_TIME, ... } }`
+ * on others (2.1.309). Read the known fields in order; never stringify the object (the build date matches too).
+ */
+export function versionString(v: unknown): string | null {
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number') return String(v);
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Any;
+  const inner = o.version;
+  if (inner && typeof inner === 'object' && typeof inner.VERSION === 'string') return inner.VERSION;
+  if (typeof inner === 'string') return inner;
+  if (typeof o.VERSION === 'string') return o.VERSION;
+  return null;
+}
+
+/** What a refusal line prints for the host value: the extracted string, else the object's keys, never `[object Object]`. */
+export function describeVersion(v: unknown): string {
+  const s = versionString(v);
+  if (s) return s;
+  if (v && typeof v === 'object') return `{${Object.keys(v).join(',')}}`;
+  return v == null ? 'unknown' : String(v);
+}
+
 export function parseVersion(v: unknown): number[] | null {
-  const m = /(\d+)\.(\d+)\.(\d+)/.exec(String(v ?? ''));
+  const m = /(\d+)\.(\d+)\.(\d+)/.exec(versionString(v) ?? '');
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
 }
 
@@ -142,11 +166,11 @@ export function guard(
   names: readonly string[] = PRIMITIVES,
 ): string | null {
   if (!atLeast(version, VERSION_FLOOR)) {
-    return `not registering: Claude Code ${version ?? 'unknown'} is below the floor ${VERSION_FLOOR} (session.version)`;
+    return `not registering: Claude Code ${describeVersion(version)} is below the floor ${VERSION_FLOOR} (session.version)`;
   }
   for (const name of names) {
     if (!present[name]) {
-      return `not registering: primitive ${name} is missing (floor ${VERSION_FLOOR}, running ${version})`;
+      return `not registering: primitive ${name} is missing (floor ${VERSION_FLOOR}, running ${describeVersion(version)})`;
     }
   }
   return null;

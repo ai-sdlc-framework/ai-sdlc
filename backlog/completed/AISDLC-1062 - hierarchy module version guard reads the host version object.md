@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1062
 title: 'hierarchy hooks module version guard reads the object $.session.version() returns, so a current host is no longer refused as below the floor'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-23'
 labels:

@@ -8,6 +8,7 @@ import {
   VERDICT_MARKER,
   VERSION_FLOOR,
   atLeast,
+  guard,
   innerText,
   measuredTokens,
   senderOf,
@@ -474,5 +475,43 @@ describe('hierarchy module: planner role (AISDLC-1036)', () => {
     };
     const out = await s.handlers.get('session.receive')(s.$, { text: 'plain' }, s.next);
     expect(out).toEqual({ text: 'plain' });
+  });
+});
+
+describe('version guard (AISDLC-1062)', () => {
+  const present = {
+    'prompt.submit': true,
+    'command.run': true,
+    'session.compact': true,
+    'session.measure': true,
+    'session.send': true,
+  };
+  const obj = (VERSION: string) => ({
+    version: { VERSION, BUILD_TIME: '2026-10-01T00:00:00Z', GIT_SHA: 'abc' },
+  });
+  it('accepts the string form and the 2.1.309 object form', () => {
+    expect(guard('2.1.309', present)).toBeNull();
+    expect(guard(obj('2.1.309'), present)).toBeNull();
+    expect(guard({ version: '2.1.309' }, present)).toBeNull();
+    expect(guard({ VERSION: '2.1.309' }, present)).toBeNull();
+  });
+  it('refuses a version below the floor without printing [object Object]', () => {
+    const line = guard(obj('2.1.300'), present)!;
+    expect(line).toContain('2.1.300');
+    expect(line).not.toContain('[object Object]');
+  });
+  it('refuses null and an object without a version, naming keys', () => {
+    expect(guard(null, present)).toContain('unknown');
+    const line = guard({ foo: 1, bar: 2 }, present)!;
+    expect(line).toContain('{foo,bar}');
+    expect(line).not.toContain('[object Object]');
+  });
+  it('does not match the build date', () => {
+    expect(atLeast({ version: { BUILD_TIME: '2026.10.23' } }, '2.1.307')).toBe(false);
+  });
+  it('names a missing primitive with the extracted version', () => {
+    const line = guard(obj('2.1.309'), { ...present, 'session.send': false })!;
+    expect(line).toContain('session.send');
+    expect(line).toContain('2.1.309');
   });
 });
