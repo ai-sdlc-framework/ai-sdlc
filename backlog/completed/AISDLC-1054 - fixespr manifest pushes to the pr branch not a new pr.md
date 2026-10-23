@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1054
 title: 'A manifest with fixesPr runs on and pushes to that PR''s head branch; the pipeline opens no new PR'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22'
 labels:
