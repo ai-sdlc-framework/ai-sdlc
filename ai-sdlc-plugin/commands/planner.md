@@ -240,7 +240,7 @@ context passes 150k tokens (`cli-hierarchy auto-clear`) and restarts it with
 `/ai-sdlc:planner`; after any clear, run `handoff read --role planner` first and resume
 from it. The Stop hook also saves your last reply under your roster name in
 `.claude/memory/LAST_MESSAGE.md`; right after a clear, print your own section of that file so the
-operator can read it. ### Handoff routine
+operator can read it. It is shown to the operator and nothing more: it never outranks the handoff RESUME block, and outward state (issues, PRs, comments) it mentions is verified at the source before it is proposed as remaining work. ### Handoff routine
 
 Trigger: the operator says "handoff", or the context warning ("Context is at N%") appears; act
 at the next turn boundary, never mid-task.

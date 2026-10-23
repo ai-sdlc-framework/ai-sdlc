@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const { runAutoClear, boardDirOf } = require('./context-auto-clear.js');
+const { runAutoClear, boardDirOf, lastAssistantText } = require('./context-auto-clear.js');
 const pluginJson = JSON.parse(readFileSync(join(here, '..', 'plugin.json'), 'utf-8'));
 
 let root;
@@ -233,7 +233,12 @@ describe('context-auto-clear hook', () => {
     const stop = (t, pane, extra = {}) =>
       runAutoClear(
         { transcript_path: t },
-        { env: { ...env(), TMUX_PANE: pane, ...extra }, cwd: root, run: () => ({ status: 0 }) },
+        {
+          env: { ...env(), TMUX_PANE: pane, ...extra },
+          cwd: root,
+          run: () => ({ status: 0 }),
+          sleep: () => {},
+        },
       );
 
     it('writes text blocks only, and replaces only its own section', () => {
@@ -276,6 +281,76 @@ describe('context-auto-clear hook', () => {
       const out = readFileSync(lastFile(), 'utf-8');
       assert.match(out, /visible/);
       assert.doesNotMatch(out, /THINK2|tool_use/);
+    });
+
+    it('2026-10-22 shape: unflushed final line records the no-reply marker, never the interim text', () => {
+      roster(['planner-a']);
+      reset();
+      const tc = (i) => [
+        line('assistant', [{ type: 'tool_use', id: `t${i}`, name: 'Bash', input: {} }]),
+        line('user', [{ type: 'tool_result', tool_use_id: `t${i}`, content: 'r' }]),
+      ];
+      const lines = [
+        line('user', 'go'),
+        line('assistant', [{ type: 'text', text: 'Reading near-duplicates first.' }]),
+        ...[1, 2, 3, 4, 5, 6].flatMap(tc),
+      ];
+      stop(transcriptOf(...lines), '%1');
+      const out = readFileSync(lastFile(), 'utf-8');
+      assert.match(out, /no final reply recorded/);
+      assert.doesNotMatch(out, /near-duplicates/);
+      assert.equal(lastAssistantText(lines.join('\n')).includes('near-duplicates'), false);
+    });
+
+    it('returns the final reply, stamped final with its entry timestamp', () => {
+      roster(['planner-a']);
+      reset();
+      const stamped = JSON.stringify({
+        type: 'assistant',
+        timestamp: '2026-10-22T22:34:44.000Z',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'The feature request is filed' }],
+        },
+      });
+      stop(
+        transcriptOf(
+          line('assistant', [{ type: 'text', text: 'interim words' }]),
+          line('assistant', [{ type: 'tool_use', name: 'Bash', input: {} }]),
+          line('user', [{ type: 'tool_result', content: 'r' }]),
+          stamped,
+        ),
+        '%1',
+      );
+      const out = readFileSync(lastFile(), 'utf-8');
+      assert.match(out, /_final, entry 2026-10-22T22:34:44.000Z_/);
+      assert.match(out, /The feature request is filed/);
+      assert.doesNotMatch(out, /interim words/);
+    });
+
+    it('marks text followed by a tool call interim, and prefers the payload message', () => {
+      roster(['planner-a']);
+      reset();
+      const t = transcriptOf(
+        line('assistant', [
+          { type: 'text', text: 'before call' },
+          { type: 'tool_use', name: 'X', input: {} },
+        ]),
+      );
+      stop(t, '%1');
+      assert.match(readFileSync(lastFile(), 'utf-8'), /_interim/);
+      runAutoClear(
+        { transcript_path: t, last_assistant_message: 'from payload' },
+        {
+          env: { ...env(), TMUX_PANE: '%1' },
+          cwd: root,
+          run: () => ({ status: 0 }),
+          sleep: () => {},
+        },
+      );
+      const out = readFileSync(lastFile(), 'utf-8');
+      assert.match(out, /_final_/);
+      assert.match(out, /from payload/);
     });
 
     const textT = () => transcriptOf(line('assistant', [{ type: 'text', text: 'x' }]));
