@@ -184,6 +184,7 @@ import {
   probeIterationBudget,
   readEmptyQueueHibernateSec,
   readInflightManifest,
+  readQueuedManifest,
   readResumeSignal,
   removeResumeSignal,
   requeueFailed,
@@ -626,13 +627,16 @@ export async function runDispatchCli(
       }
       const note = flags['note'];
       try {
+        const written = reprioritizeQueued(boardDir, taskId, {
+          priority,
+          ...(note !== undefined ? { note } : {}),
+        });
+        const resumeNote = readQueuedManifest(boardDir, taskId)?.resume?.note;
         out({
           ok: true,
-          path: reprioritizeQueued(boardDir, taskId, {
-            priority,
-            ...(note !== undefined ? { note } : {}),
-          }),
+          path: written,
           priority,
+          ...(resumeNote !== undefined ? { resumeNote: resumeNote.split('\n')[0] } : {}),
         });
         return 0;
       } catch (err) {

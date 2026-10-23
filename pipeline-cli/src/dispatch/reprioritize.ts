@@ -2,25 +2,24 @@
  * `cli-dispatch reprioritize` (AISDLC-904): change the priority of a queued task and
  * optionally attach a note, without hand-editing board files.
  *
- * AISDLC-1015: a note is audit metadata and never changes how the task executes. It updates
- * `resume.note` only when the manifest already carries a resume block; otherwise it lands in
- * `reorderNote`. A `resume` block means "a previous attempt left a branch" and is never fabricated.
+ * AISDLC-1015/1047: a note is audit metadata and never changes how the task executes. It always
+ * lands in `reorderNote`; `resume` (owned by the reconciler and the reenter path) is never written,
+ * so an audit note cannot overwrite an execution instruction.
  */
 
 import { dependenciesOfTaskFile } from './enqueue.js';
 import { readQueuedManifest, repoRootOfBoard, updateQueuedManifest } from './board.js';
 import { normaliseNote } from './resume.js';
-import type { ResumeFeedback } from './types.js';
 
 export interface ReprioritizeOptions {
   priority: number;
-  /** Replaces `resume.note` when a resume block exists, else sets `reorderNote` (validated like a resume note). */
+  /** Audit note stored in `reorderNote` only (validated like a resume note); never touches `resume`. */
   note?: string;
   /** Who made the change (audit only). */
   by?: string;
 }
 
-/** Rewrite `priority` (and `resume.note` when given) on `queue/<taskId>.dispatch.json`. */
+/** Rewrite `priority` (and `reorderNote` when given) on `queue/<taskId>.dispatch.json`. */
 export function reprioritizeQueued(
   boardDir: string,
   taskId: string,
@@ -29,14 +28,7 @@ export function reprioritizeQueued(
   if (!Number.isFinite(opts.priority)) {
     throw new Error('reprioritize: --priority must be a finite number');
   }
-  let resume: ResumeFeedback | undefined;
-  let reorderNote: string | undefined;
-  if (opts.note !== undefined) {
-    const note = normaliseNote(opts.note);
-    const existing = readQueuedManifest(boardDir, taskId)?.resume;
-    if (existing) resume = { ...existing, note };
-    else reorderNote = note;
-  }
+  const reorderNote = opts.note !== undefined ? normaliseNote(opts.note) : undefined;
   const queued = readQueuedManifest(boardDir, taskId);
   const derived =
     queued && (!queued.after || queued.after.length === 0)
@@ -45,7 +37,6 @@ export function reprioritizeQueued(
   return updateQueuedManifest(boardDir, taskId, {
     priority: opts.priority,
     ...(derived.length > 0 ? { after: derived } : {}),
-    ...(resume ? { resume } : {}),
     ...(reorderNote !== undefined ? { reorderNote } : {}),
   });
 }

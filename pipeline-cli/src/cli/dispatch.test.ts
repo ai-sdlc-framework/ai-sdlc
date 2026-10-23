@@ -1799,13 +1799,22 @@ describe('runDispatchCli ordering commands', () => {
       err.mockRestore();
     });
 
-    it('updates only resume.note when a resume block already exists (AISDLC-1015)', async () => {
-      const resume = { note: 'old', resumedAt: '2026-10-11T00:00:00.000Z', resumedBy: 'dispatch' };
+    it('leaves resume byte-identical and stores the note in reorderNote (AISDLC-1047)', async () => {
+      const resume = {
+        note: 'cleanup first\nthen fix',
+        resumedAt: '2026-10-11T00:00:00.000Z',
+        resumedBy: 'dispatch',
+      };
       put('T-1', { resume }, 10);
+      const out = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
       expect(await run('T-1', '--priority', '0', '--note', 'new')).toBe(0);
+      const printed = out.mock.calls.map((c) => String(c[0])).join('');
+      out.mockRestore();
       const written = JSON.parse(readFileSync(q('T-1'), 'utf-8'));
-      expect(written.resume).toEqual({ ...resume, note: 'new' });
-      expect(written.reorderNote).toBeUndefined();
+      expect(written.resume).toEqual(resume);
+      expect(written.resume.note).toBe('cleanup first\nthen fix');
+      expect(written.reorderNote).toBe('new');
+      expect(printed).toContain('"resumeNote":"cleanup first"');
     });
 
     it('refuses inflight, done, failed, unqueued and a missing priority', async () => {
