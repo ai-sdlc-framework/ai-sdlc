@@ -40,10 +40,11 @@ function outcome(r: Any): Record<string, unknown> {
 }
 
 // session.receive hands the hook the whole cross-session envelope
-// (`<cross-session-message ...><agent-message ...>hier:consume</agent-message></cross-session-message>`),
+// (`<cross-session-message ...><agent-message ...>hier:consume</agent-message></cross-session-message>`;
+// a subagent sender escapes the inner tags as `<\agent-message ...>` and `<\/agent-message>`),
 // not the sender's text, so every `hier:` command matches on the inner text.
 export function innerText(raw: string): string {
-  return raw.replace(/<\/?(?:cross-session-message|agent-message)\b[^>]*>/g, '').trim();
+  return raw.replace(/<\\?\/?(?:cross-session-message|agent-message)\b[^>]*>/g, '').trim();
 }
 
 export const register = (on: Any): void => {
@@ -126,14 +127,14 @@ export const register = (on: Any): void => {
         ...((await $.store.get(STORE_LOG_KEY)) ?? []),
         line('session.receive.consumed', { returned: 'consumed' }),
       ]);
-      return { consumed: true };
+      return { consumed: 'hier:consume' };
     }
 
     if (text.startsWith('hier:dump')) {
       const log = ((await $.store.get(STORE_LOG_KEY)) ?? []) as string[];
       const r = await safe(() => $.prompt.submit({ text: log.join('\n') }));
       await $.store.set(STORE_LOG_KEY, [...log, line('dump', outcome(r))]);
-      return { consumed: true };
+      return { consumed: 'hier:dump' };
     }
 
     const run = /^hier:run (clear|compact)/.exec(text);
@@ -149,7 +150,7 @@ export const register = (on: Any): void => {
         ...((await $.store.get(STORE_LOG_KEY)) ?? []),
         line(`${how}.result`, outcome(r)),
       ]);
-      return { consumed: true };
+      return { consumed: `hier:${how}` };
     }
 
     return next(e);
