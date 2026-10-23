@@ -7,5 +7,5 @@
   "pipeline-cli": "0.36.0",
   "sdk-python": "0.2.1",
   "sdk-go": "0.8.0",
-  "ai-sdlc-plugin": "0.31.0"
+  "ai-sdlc-plugin": "0.31.1"
 }

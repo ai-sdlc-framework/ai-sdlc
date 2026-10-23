@@ -5,6 +5,14 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.31.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.31.0...ai-sdlc-plugin-v0.31.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* **ci:** release pin-sync job opens a PR instead of pushing to protected main (AISDLC-1059) ([#1971](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1971)) ([7460883](https://github.com/ai-sdlc-framework/ai-sdlc/commit/74608832241959f7a9b147a4935ec6e5035bc9dc))
+* register each hierarchy hook event once so the plugin validator loads the module (AISDLC-1058) ([#1967](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1967)) ([ce5a2d2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ce5a2d25aef6f1e38f326622131016087f06e128))
+
 ## [0.31.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.30.0...ai-sdlc-plugin-v0.31.0) (2026-10-23)
 
 
