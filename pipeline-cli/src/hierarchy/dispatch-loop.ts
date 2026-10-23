@@ -157,6 +157,8 @@ export function briefToEnqueueEntries(brief: ParsedBrief): EnqueueEntry[] {
       ...(e.sequenceGroup ? { sequenceGroup: e.sequenceGroup } : {}),
       ...(e.priority !== undefined ? { priority: e.priority } : {}),
       wave: e.wave,
+      ...(e.fixesPr !== undefined ? { fixesPr: e.fixesPr } : {}),
+      ...(e.prHeadRef ? { prHeadRef: e.prHeadRef } : {}),
     }),
   );
 }

@@ -76,6 +76,8 @@ export interface DispatchManifest {
   wave?: number;
   /** PR number this task fixes; exempts the claim from the undelivered-PR pause (AISDLC-816). */
   fixesPr?: number;
+  /** Head branch of `fixesPr`; Step 2 uses it instead of asking GitHub (AISDLC-1054). */
+  prHeadRef?: string;
   /** Decision id this manifest is waiting on; such a manifest is never claimed. */
   blockedBy?: string;
   /** Planner park written by `cli-dispatch block` (AISDLC-1043); `unblock` removes it. */

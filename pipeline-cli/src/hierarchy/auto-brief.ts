@@ -60,6 +60,7 @@ export function writeAutoBrief(
   repo: string,
   taskFile: string,
   boardDir: string = path.join(repo, DEFAULT_BOARD_DIR),
+  fixes?: { fixesPr: number; prHeadRef: string },
 ): string | undefined {
   const facts = readDispatchFacts(readFileSync(taskFile, 'utf8'));
   if (!facts?.eligible) return undefined;
@@ -72,6 +73,7 @@ export function writeAutoBrief(
       after: [],
       wave: 1,
       ...(facts.priority !== undefined ? { priority: facts.priority } : {}),
+      ...(fixes ? { fixesPr: fixes.fixesPr, prHeadRef: fixes.prHeadRef } : {}),
     },
   ]);
   writeFileSync(

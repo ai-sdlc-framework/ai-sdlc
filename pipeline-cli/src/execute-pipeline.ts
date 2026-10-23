@@ -34,6 +34,7 @@ import {
 import { existsSync, unlinkSync } from 'node:fs';
 import { defaultRunner } from './runtime/exec.js';
 import { armViaGate } from './governance/arm-via-gate.js';
+import { readInflightManifest, TASK_ID_RE } from './dispatch/board.js';
 import { authoriseResume, formatResumeFeedback } from './dispatch/resume.js';
 import { join } from 'node:path';
 import {
@@ -171,7 +172,20 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
 
   // Step 2
   logger.progress('02-compute-branch', 'computing branch name');
-  const branch = await computeBranchName({ taskId: opts.taskId, task, workDir: opts.workDir });
+  // AISDLC-1054: a manifest with fixesPr runs on that PR's head branch and opens no new PR.
+  const claimed =
+    resume || opts.taskSpec || !TASK_ID_RE.test(opts.taskId)
+      ? undefined
+      : readInflightManifest(dispatchBoardDir(opts.workDir), opts.taskId);
+  const fixesPr = claimed?.fixesPr;
+  const branch = await computeBranchName({
+    taskId: opts.taskId,
+    task,
+    workDir: opts.workDir,
+    runner: opts.runner,
+    ...(fixesPr !== undefined ? { fixesPr } : {}),
+    ...(fixesPr !== undefined && claimed?.prHeadRef ? { prHeadRef: claimed.prHeadRef } : {}),
+  });
 
   // AISDLC-200 — Wrap Steps 3-13 (NOT just 5-13) in a try/finally so that
   // any throw from Step 4 (status flip + sentinel write) AFTER Step 3
@@ -223,7 +237,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       worktreePath: branch.worktreePath,
       workDir: opts.workDir,
       runner: opts.runner,
-      ...(resume ? { resume: true } : {}),
+      ...(resume || fixesPr !== undefined ? { resume: true } : {}),
       ...(resume?.branchGuessed ? { branchGuessed: true } : {}),
       ...(resume && opts.resumeLeasePolicy
         ? { ownWorktreeCheck: opts.resumeLeasePolicy.ownWorktree }
@@ -558,9 +572,14 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
         ? { groundingAnnotations: initialVerdict.groundingAnnotations }
         : {}),
       runner: opts.runner,
-      ...(resume ? { resume: true } : {}),
-      ...(resume && setup.remoteSha ? { resumeRemoteSha: setup.remoteSha } : {}),
-      ...(resume && opts.resumeLeasePolicy ? { resumeLeasePolicy: opts.resumeLeasePolicy } : {}),
+      ...(resume || fixesPr !== undefined ? { resume: true } : {}),
+      ...(fixesPr !== undefined ? { fixesPr } : {}),
+      ...((resume || fixesPr !== undefined) && setup.remoteSha
+        ? { resumeRemoteSha: setup.remoteSha }
+        : {}),
+      ...((resume || fixesPr !== undefined) && opts.resumeLeasePolicy
+        ? { resumeLeasePolicy: opts.resumeLeasePolicy }
+        : {}),
       // AISDLC-393 — `'gh-issue'` formats the PR title with `(closes #N)` and
       // prepends `Closes #N` to the body so the issue auto-closes on merge.
       sourceKind,

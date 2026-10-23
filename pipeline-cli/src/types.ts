@@ -685,6 +685,11 @@ export interface PushAndPrOptions {
    */
   resume?: boolean;
   /**
+   * AISDLC-1054 — the PR this task fixes. Set together with `resume`: the push is a lease
+   * push to the PR's head branch, and the PR body gets a "fixed by <task id>" line; no PR is created.
+   */
+  fixesPr?: number;
+  /**
    * AISDLC-738 — resume only: the `origin/<branch>` SHA Step 3 recorded. The
    * push leases against it (`--force-with-lease=refs/heads/<branch>:<sha>`), so
    * a `git fetch` made mid-run cannot widen the lease. A resume push without it

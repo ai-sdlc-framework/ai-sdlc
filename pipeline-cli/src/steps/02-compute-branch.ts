@@ -18,6 +18,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { load as yamlLoad } from '../util/yaml.js';
+import type { Runner } from '../runtime/exec.js';
 import {
   DEFAULT_LOGGER,
   type ComputeBranchResult,
@@ -37,6 +38,14 @@ export interface ComputeBranchOptions {
    * assert the warning fires without polluting test output.
    */
   logger?: PipelineLogger;
+  /**
+   * AISDLC-1054: the PR this task fixes. The branch is then that PR's head branch,
+   * not one derived from the task id.
+   */
+  fixesPr?: number;
+  /** Head branch of `fixesPr` from the manifest; when absent it is read with `gh pr view`. */
+  prHeadRef?: string;
+  runner?: Runner;
 }
 
 export const DEFAULT_PATTERN = 'ai-sdlc/{issueIdLower}-{slug}';
@@ -293,8 +302,42 @@ export function buildBranchName(
   return { branch, slug };
 }
 
+function parseHeadRef(stdout: string): string {
+  try {
+    return String((JSON.parse(stdout) as { headRefName?: unknown }).headRefName);
+  } catch {
+    return '';
+  }
+}
+
+/** AISDLC-1054: the head branch of a PR, which must be a plain git ref name. */
+async function readPrHeadRef(pr: number, opts: ComputeBranchOptions): Promise<string> {
+  const runner = opts.runner ?? (await import('../runtime/exec.js')).defaultRunner;
+  const r = await runner('gh', ['pr', 'view', String(pr), '--json', 'headRefName'], {
+    cwd: opts.workDir,
+    allowFailure: true,
+  });
+  const ref = parseHeadRef(r.code === 0 ? r.stdout : '');
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(ref) || ref.includes('..')) {
+    throw new Error(
+      `Step 2 for ${opts.taskId}: could not resolve the head branch of PR #${pr} (fixesPr); ` +
+        `check \`gh pr view ${pr}\` or set prHeadRef on the manifest`,
+    );
+  }
+  return ref;
+}
+
 export async function computeBranchName(opts: ComputeBranchOptions): Promise<ComputeBranchResult> {
   const taskIdLower = opts.taskId.toLowerCase();
+  if (opts.fixesPr !== undefined) {
+    const branch = opts.prHeadRef ?? (await readPrHeadRef(opts.fixesPr, opts));
+    return {
+      branch,
+      worktreePath: join(opts.workDir, '.worktrees', taskIdLower),
+      slug: '',
+      taskIdLower,
+    };
+  }
   const pattern = readBranchPattern(
     opts.workDir,
     opts.defaultPattern ?? DEFAULT_PATTERN,

@@ -8,7 +8,7 @@
  * lease-pushes the SAME branch (DEC-0088), so the PR number stays and is re-armed
  * through the docs lane (`--source-kind docs`); no replacement PR is opened.
  *
- *   cli-file task <path> [--pr] [--no-brief] [--queue] [--spacing-minutes <n>]
+ *   cli-file task <path> [--pr] [--no-brief] [--fixes-pr <n>] [--queue] [--spacing-minutes <n>]
  *   cli-file decision <DEC-NNNN> --task-id <ID> [--answer <option>] [--rationale <t>] [--pr]
  *   cli-file rebase <id> [--pr]
  */
@@ -451,10 +451,40 @@ function onlyOnFilingBranch(deps: FileDeps, repo: string, taskPath: string): boo
   return deps.exec('git', ['rev-parse', '--verify', '--quiet', ref], repo).status === 0;
 }
 
+/** AISDLC-1054: the head branch of the PR a task fixes, from GitHub; refuses when it cannot be read. */
+function fixesOf(
+  deps: FileDeps,
+  repo: string,
+  fixesPr: number | undefined,
+): { fixesPr: number; prHeadRef: string } | undefined {
+  if (fixesPr === undefined) return undefined;
+  const r = deps.exec('gh', ['pr', 'view', String(fixesPr), '--json', 'headRefName'], repo);
+  let ref: string;
+  try {
+    ref =
+      r.status === 0 ? String((JSON.parse(r.stdout) as { headRefName?: string }).headRefName) : '';
+  } catch {
+    ref = '';
+  }
+  if (!ref || ref === 'undefined') {
+    throw new FileRefusal(
+      `--fixes-pr ${fixesPr}: could not read the head branch of PR #${fixesPr}`,
+    );
+  }
+  return { fixesPr, prHeadRef: ref };
+}
+
 export function fileTask(
   repo: string,
   taskPath: string,
-  opts: { pr: boolean; brief?: boolean; update?: boolean; validated?: ValidatedTask },
+  opts: {
+    pr: boolean;
+    brief?: boolean;
+    update?: boolean;
+    validated?: ValidatedTask;
+    /** AISDLC-1054: the PR this task fixes; its head branch goes into the brief entry. */
+    fixesPr?: number;
+  },
   deps: FileDeps = defaultDeps,
 ) {
   const update = opts.update === true;
@@ -486,7 +516,9 @@ export function fileTask(
   });
   // AISDLC-930: a one-task brief on the local board (gitignored), so dispatch ingests the task
   // without a hand-written brief. Only for a PR filing; `--no-brief` opts out.
-  if (opts.pr && opts.brief !== false) writeAutoBrief(repo, abs);
+  if (opts.pr && opts.brief !== false) {
+    writeAutoBrief(repo, abs, undefined, fixesOf(deps, repo, opts.fixesPr));
+  }
   // Only a source inside the parent's own backlog/tasks is a leftover (AISDLC-931 sources are elsewhere).
   if (abs === join(repo, rel)) removeSourceCopy(deps, repo, abs, rel, res.branch);
   return res;
@@ -784,6 +816,11 @@ export async function runFileCli(argv: string[] = hideBin(process.argv)): Promis
             describe:
               'edit a task on origin/main, or on its open filing branch (then same as rebase --source)',
           })
+          .option('fixes-pr', {
+            type: 'number',
+            describe:
+              'PR this task fixes: the brief entry carries fixesPr and the PR head branch, so the task lands on that PR',
+          })
           .option('brief', {
             type: 'boolean',
             default: true,
@@ -796,6 +833,7 @@ export async function runFileCli(argv: string[] = hideBin(process.argv)): Promis
             pr: a.pr as boolean,
             brief: a.brief as boolean,
             update: a.update as boolean,
+            ...(a.fixesPr !== undefined ? { fixesPr: a.fixesPr as number } : {}),
           }),
         );
         if (r) report(r);

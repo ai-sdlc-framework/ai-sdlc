@@ -376,6 +376,46 @@ async function leasePushOwnRebase(
   );
 }
 
+/** AISDLC-1054: append "Fixed by <task id>" to the body of the PR this task fixes; creates no PR. */
+async function noteFixedBy(opts: PushAndPrStepOptions, runner: Runner): Promise<PushAndPrResult> {
+  const pr = String(opts.fixesPr);
+  const view = await runner('gh', ['pr', 'view', pr, '--json', 'body,url'], {
+    cwd: opts.worktreePath,
+    allowFailure: true,
+  });
+  let info: { body?: string; url?: string } = {};
+  try {
+    info = view.code === 0 ? (JSON.parse(view.stdout) as typeof info) : {};
+  } catch {
+    info = {};
+  }
+  if (!info.url) {
+    return {
+      pushed: true,
+      prUrl: null,
+      reason: `pushed to the head branch of PR #${pr}, but gh pr view failed: ${view.stderr.trim() || 'unreadable output'}`,
+    };
+  }
+  const line = `Fixed by ${opts.taskId}`;
+  const body = info.body ?? '';
+  if (!body.includes(line)) {
+    const edit = await runner(
+      'gh',
+      ['pr', 'edit', pr, '--body', `${body.trimEnd()}\n\n${line}\n`],
+      {
+        cwd: opts.worktreePath,
+        allowFailure: true,
+      },
+    );
+    if (edit.code !== 0) {
+      (opts.logger ?? DEFAULT_LOGGER).warn(
+        `[ai-sdlc] Step 11: gh pr edit on #${pr} failed (non-fatal): ${edit.stderr.trim() || 'unknown error'}`,
+      );
+    }
+  }
+  return { pushed: true, prUrl: info.url };
+}
+
 export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrResult> {
   const runner = opts.runner ?? defaultRunner;
 
@@ -516,6 +556,9 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
       : `git push failed: ${stderr || pushResult.stdout.trim() || 'unknown error'}`;
     return { pushed: false, prUrl: null, reason };
   }
+
+  // 1a. AISDLC-1054: a task that fixes a PR lands on it; the PR body gains a "fixed by" line.
+  if (opts.fixesPr !== undefined) return noteFixedBy(opts, runner);
 
   // 1b. A resumed task updates its existing PR: the push above already did.
   if (opts.resume) {

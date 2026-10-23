@@ -1015,6 +1015,16 @@ executor whose own record (`owner: executor:<name>`) has no `delivered` timestam
 unless the fresh manifest carries `fixesPr` (or is a resume); a delivered-but-unlanded PR does not
 block. `cli-hierarchy status` shows the PR each executor is landing in the `LANDING` column.
 
+**Fix-on-PR flow (AISDLC-1054).** A red PR that needs code is fixed by one task that lands on the
+same PR. File it with `cli-file task <path> --pr --fixes-pr <n>`: the brief entry carries `fixesPr`
+and `prHeadRef` (the PR's head branch, read with `gh pr view`), and `cli-dispatch enqueue
+--from-brief` copies both into the manifest, with `branch` set to `prHeadRef`, so no manifest is
+rewritten by hand. For a manifest with `fixesPr`, Step 2 uses `prHeadRef` (else `gh pr view <n>
+--json headRefName`) as the branch, Step 3 checks that branch out, and Step 11 lease-pushes to it
+(DEC-0264), appends `Fixed by <task id>` to the existing PR body and creates no PR; the task file
+moves to `backlog/completed/` in that push and the verdict's PR is the fixed PR. A manifest without
+`fixesPr` behaves as before. A fork PR head is not supported.
+
 **Scheduler** (`pipeline-cli/src/hierarchy/scheduler.ts`, `reconcile --watch`): a reconcile
 runs at start (session start or machine wake), within a 2 s debounce after the webhook
 receiver touches `<board>/.reconcile-wake`, and on a timer of 60 s (`BUSY_INTERVAL_MS`, `scheduler.ts:10`) while any task or docs PR
