@@ -2120,3 +2120,15 @@ orchestration loops instead of running them in its own context.
 `HierarchySessionStarted` (from `cli-hierarchy up`), `ExecutorContextCleared`,
 `DecisionRouted` (`cli-hierarchy route-decision`) and `OperatorPlaybookAction` are
 written to the orchestrator events stream.
+
+## How `close-superseded` names the superseding PR (AISDLC-1055)
+
+`cli-dispatch close-superseded <pr>` (DEC-0266) never takes the superseding PR from a title
+search. After step (c) proves every diff path is byte-identical on main, it runs
+`git log -1 origin/main -- <path>` per path and maps the last-touching commit to its PR (the
+`(#NNNN)` in a squash subject, else `gh pr list --search <sha>` matched on the merge commit).
+All paths must resolve to one PR; paths landing through different PRs, or a path that cannot be
+attributed, refuse the close with that reason. The comment and the
+`audit/superseded-close.jsonl` line carry the PR number and its merge commit sha. The
+id-based search remains only as a pre-check for `ai-sdlc/<task-id>-*` branches, restricted to
+that branch's own task id.
