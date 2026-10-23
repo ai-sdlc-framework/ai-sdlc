@@ -317,7 +317,10 @@ class ExecuteHost implements EngineHost {
     const { ctx, deps } = this;
     const state = this.s;
     state.reviewRound += 1;
-    const noStaged = run.scratch.noStaged === true;
+    // `with.lenses` on the plan node is the document knob: without `staged` the staged review is off.
+    const lenses = this.prepared.nodes.plan?.with?.lenses;
+    const lensesOptOut = Array.isArray(lenses) && !lenses.includes('staged');
+    const noStaged = run.scratch.noStaged === true || lensesOptOut;
     delete run.scratch.noStaged;
     const prep = await deps.prepareReview(
       ctx,

@@ -3,12 +3,14 @@
  * holds operational keys only; a missing file or key falls back to the code
  * default. Trust constants (docs-only paths, release branch prefix, task-id
  * pattern) are code-owned and deliberately not readable from here. Every
- * top-level `spec` key must have a reader registered in
+ * Read from the BASE branch only (`git show <baseRef>:<path>`), like
+ * `steps/reviewer-set.ts` and `routing/load-table.ts`: a working-tree edit has
+ * no effect, so a PR cannot loosen the loop guard for its own run (RFC-0056
+ * OQ-3, AISDLC-994). Every top-level `spec` key must have a reader registered in
  * {@link PR_LIFECYCLE_KEY_READERS}; a test fails the build on an unread key.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
-import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 import { load as yamlLoad } from 'js-yaml';
 
@@ -60,7 +62,25 @@ const obj = (v: unknown): Raw =>
     ? (v as Record<string, unknown>)
     : undefined;
 
-export function loadPrLifecycleConfig(projectDir: string): PrLifecycleConfig {
+export const PR_LIFECYCLE_PATH = '.ai-sdlc/pr-lifecycle.yaml';
+
+/** The file text as committed on `baseRef`, or null on any failure. */
+export function readPrLifecycleFromBaseRef(projectDir: string, baseRef: string): string | null {
+  try {
+    return execFileSync('git', ['show', `${baseRef}:${PR_LIFECYCLE_PATH}`], {
+      cwd: projectDir,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    return null;
+  }
+}
+
+export function loadPrLifecycleConfig(
+  projectDir: string,
+  baseRef = 'origin/main',
+): PrLifecycleConfig {
   const d = PR_LIFECYCLE_DEFAULTS;
   const defaults = (): PrLifecycleConfig => ({
     maxSameHeadActions: d.maxSameHeadActions,
@@ -69,10 +89,10 @@ export function loadPrLifecycleConfig(projectDir: string): PrLifecycleConfig {
     reconcile: { ...d.reconcile },
     clear: { ...d.clear },
   });
-  const file = path.join(projectDir, '.ai-sdlc', 'pr-lifecycle.yaml');
-  if (!existsSync(file)) return defaults();
+  const text = readPrLifecycleFromBaseRef(projectDir, baseRef);
+  if (text === null) return defaults();
   try {
-    const spec = obj(obj(yamlLoad(readFileSync(file, 'utf-8')))?.spec);
+    const spec = obj(obj(yamlLoad(text))?.spec);
     const webhook = obj(spec?.webhook);
     const stall = obj(spec?.stall);
     const reconcile = obj(spec?.reconcile);

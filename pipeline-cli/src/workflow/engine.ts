@@ -23,7 +23,8 @@ import {
 import type { Instruction } from '../next-step/types.js';
 import type { Runner } from '../runtime/exec.js';
 import { BUILTIN_WORKFLOW_PATH, WORKFLOW_PATH, sha256Hex } from './digest.js';
-import { buildExecuteGraph, renderYaml } from './graph.js';
+import { buildExecuteGraph, renderYaml, type WorkflowDocument } from './graph.js';
+import { applyOverlay, checkFullDocument, decisionLookup, isOverlay } from './overlay.js';
 import { normalizeEdge, validateWorkflowDocument } from './validate.js';
 
 // ── refusals ────────────────────────────────────────────────────────
@@ -35,7 +36,8 @@ export type RefusalRule =
   | 'ship-without-anchor'
   | 'no-ship-node'
   | 'unknown-impl'
-  | 'unsupported-expect';
+  | 'unsupported-expect'
+  | 'frozen-set';
 
 /** The engine will not run this document. `rule` names why; `message` is for the operator. */
 export class WorkflowRefusal extends Error {
@@ -59,6 +61,7 @@ export interface EngineNode {
   over?: string;
   cap?: number;
   expect?: string;
+  with?: Record<string, unknown>;
   node?: { kind: 'agent'; role: string; fresh?: boolean };
 }
 
@@ -281,6 +284,26 @@ export interface LoadOptions {
   expect?: { path: string; sha256: string; baseSha: string };
 }
 
+/** Decision ids that resolve in the catalog as committed on the base SHA (never the working tree). */
+async function baseDecisionLookup(
+  opts: LoadOptions,
+  baseSha: string,
+): Promise<(id: string) => boolean> {
+  const dir = '.ai-sdlc/_decisions/events';
+  const tree = await opts.runner('git', ['ls-tree', '--name-only', baseSha, `${dir}/`], {
+    cwd: opts.workDir,
+    allowFailure: true,
+  });
+  const legacy = await opts.runner('git', ['show', `${baseSha}:.ai-sdlc/_decisions/events.jsonl`], {
+    cwd: opts.workDir,
+    allowFailure: true,
+  });
+  return decisionLookup(
+    tree.code === 0 ? tree.stdout.split('\n') : [],
+    legacy.code === 0 ? legacy.stdout : '',
+  );
+}
+
 /**
  * Read `.ai-sdlc/workflow.yaml` from the base ref with `git show`, never from the working
  * tree, and prepare it. No document on the base ref means the plugin default runs.
@@ -313,7 +336,13 @@ export async function loadWorkflowFromBase(opts: LoadOptions): Promise<PreparedW
     });
   }
   const text = shown.stdout;
-  const prepared = prepareWorkflow(load(text), {
+  const parsed = load(text) as WorkflowDocument;
+  const ctx = { decisionExists: await baseDecisionLookup(opts, baseSha) };
+  const resolved = isOverlay(parsed) ? applyOverlay(parsed, ctx) : checkFullDocument(parsed, ctx);
+  if (!resolved.ok) {
+    throw new WorkflowRefusal('frozen-set', resolved.errors.join('; '));
+  }
+  const prepared = prepareWorkflow(resolved.doc, {
     origin: { kind: 'base', baseSha, path: WORKFLOW_PATH },
     knownImpls,
     text,

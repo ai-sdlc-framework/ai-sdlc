@@ -51,3 +51,20 @@ codes and collaborator calls. Add a fixture for every Machine behaviour before f
 - The MCP `pipeline_step_*` tools (`next-step` is the one orchestrator).
 - `pipeline.yaml spec.stages` and `stages[].condition` are deprecated: still accepted for one
   release, with one warning per process when a Pipeline sets them.
+
+## Overlays and the frozen set (RFC-0056 phase 4)
+
+A document with `metadata.extends: ai-sdlc/execute-task@<version>` is applied over the plugin
+default (`workflow/overlay.ts`). Allowed: add nodes and edges, change `with` (for example
+`plan.with.lenses`, which must keep `security`; without `staged` the staged review is off), lower
+caps and `loop.max`, remove non-frozen nodes (a removed mid-chain node is bridged). Refused, each
+message `<rule>: <what>; enforcer: <file>`: touching a frozen node, a fanout `cap` or loop `max`
+above the plugin ceiling (`REVIEW_FANOUT_CAP`, `DEFAULT_MAX_ITERATIONS`), loosening `expect`,
+removing the last anchor before `ship`, an agent as an anchor.
+
+The frozen list is `FROZEN_SET`; a test asserts every cited enforcer file exists. A frozen entry
+changes only when `metadata.decisions: [DEC-NNNN]` names ids that resolve in the catalog on the
+base branch (never the working tree); the last-anchor rule has no such override. Full documents
+without `extends` are checked against the default the same way. Promoting the staged lens or a
+`gating: false` node to gating is a tightening, accepted with the authorizing reference
+(RFC-0052 OQ-2) logged. `pr-lifecycle.yaml` is read from the base branch like the other configs.
