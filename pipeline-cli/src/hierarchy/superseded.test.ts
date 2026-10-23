@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { carriedIds, closeSupersededPr, isCliBranchShape, taskIsDone } from './superseded.js';
+import { closeSupersededPr, isCliBranchShape, taskIsDone } from './superseded.js';
 import type { CommandRunner } from './types.js';
 
 let dir: string;
@@ -17,6 +17,8 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const SHA_A = 'a'.repeat(40);
 const SHA_B = 'b'.repeat(40);
+const SHA_C = 'c'.repeat(40);
+const SHA_D = 'd'.repeat(40);
 
 interface Scenario {
   branch?: string;
@@ -28,6 +30,9 @@ interface Scenario {
   headSha?: Record<string, string | null>;
   mainSha?: Record<string, string | null>;
   commentFails?: boolean;
+  /** path -> `git log` line (sha, subject); undefined path = default PR #99; null = no output. */
+  landed?: Record<string, { sha: string; subject: string } | null>;
+  byShaList?: { number: number; mergeCommit: { oid: string } }[];
 }
 
 function runnerFor(s: Scenario) {
@@ -48,6 +53,14 @@ function runnerFor(s: Scenario) {
           files: files.map((p) => ({ path: p })),
         }),
       );
+    }
+    if (file === 'git') {
+      const p = args[args.length - 1]!;
+      const e = s.landed && p in s.landed ? s.landed[p] : { sha: SHA_C, subject: 'chore: x (#99)' };
+      return e ? ok(`${e.sha}\t${e.subject}\n`) : ok('');
+    }
+    if (a.startsWith('pr list') && a.includes('mergeCommit')) {
+      return ok(JSON.stringify(s.byShaList ?? []));
     }
     if (a.startsWith('pr list')) {
       return ok(JSON.stringify(s.merged ?? [{ number: 99, title: 'chore: record DEC-0266' }]));
@@ -82,16 +95,22 @@ const go = (s: Scenario) => {
 };
 
 describe('closeSupersededPr (AISDLC-1011, DEC-0266)', () => {
-  it('closes when all three conditions hold, with a comment and an audit record', () => {
+  it('closes when all conditions hold, with a comment and an audit record', () => {
     const { result, closeCalls, calls } = go({});
     expect(result).toMatchObject({ closed: true, supersededBy: 99 });
     expect(closeCalls).toHaveLength(1);
     const comment = calls.find((c) => c[2] === 'comment')!;
     expect(comment.join(' ')).toContain('#99');
+    expect(comment.join(' ')).toContain(SHA_C);
     const audit = JSON.parse(
       readFileSync(path.join(dir, 'audit', 'superseded-close.jsonl'), 'utf-8').trim(),
     );
-    expect(audit).toMatchObject({ type: 'superseded-close', pr: 5, supersededBy: 99 });
+    expect(audit).toMatchObject({
+      type: 'superseded-close',
+      pr: 5,
+      supersededBy: 99,
+      mergeCommit: SHA_C,
+    });
     expect(Object.values(audit.contentHashes)).toEqual([SHA_A]);
   });
 
@@ -104,6 +123,7 @@ describe('closeSupersededPr (AISDLC-1011, DEC-0266)', () => {
       merged: [{ number: 40, title: 'feat: thing (AISDLC-7)' }],
       headSha: { [f]: null },
       mainSha: { [f]: null },
+      landed: { [f]: { sha: SHA_D, subject: 'feat: thing (#40)' } },
     });
     expect(result).toMatchObject({ closed: true, supersededBy: 40 });
   });
@@ -124,15 +144,74 @@ describe('closeSupersededPr (AISDLC-1011, DEC-0266)', () => {
     expect(closeCalls).toHaveLength(0);
   });
 
-  it('does not close when no landed PR carries the same id', () => {
-    const { result, closeCalls } = go({ merged: [{ number: 99, title: 'chore: DEC-0267' }] });
+  it('does not close a task branch when no landed PR carries its id', () => {
+    const { result, closeCalls } = go({
+      branch: 'ai-sdlc/aisdlc-7-thing',
+      title: 'feat: thing (AISDLC-7)',
+      merged: [{ number: 99, title: 'chore: AISDLC-70' }],
+    });
     expect(result).toMatchObject({ closed: false, reason: 'no landed PR carries the same id' });
     expect(closeCalls).toHaveLength(0);
   });
 
   it('does not count the PR itself as the landed one', () => {
-    const { result } = go({ merged: [{ number: 5, title: 'chore: DEC-0266' }] });
+    const { result } = go({
+      branch: 'ai-sdlc/aisdlc-7-thing',
+      title: 'feat: thing (AISDLC-7)',
+      merged: [{ number: 5, title: 'chore: AISDLC-7' }],
+    });
     expect(result.closed).toBe(false);
+  });
+
+  it('names the PR that landed the content, not a title match on a shared id', () => {
+    const f = 'docs/x.md';
+    const { result, calls } = go({
+      branch: 'ai-sdlc/aisdlc-7-thing',
+      title: 'feat: thing (AISDLC-7)',
+      files: [f],
+      merged: [{ number: 1298, title: 'docs: RFC-0053 (AISDLC-7)' }],
+      landed: { [f]: { sha: SHA_D, subject: 'feat: thing (#1950)' } },
+    });
+    expect(result).toMatchObject({ closed: true, supersededBy: 1950, mergeCommit: SHA_D });
+    const comment = calls.find((c) => c[2] === 'comment')!.join(' ');
+    expect(comment).toContain('#1950');
+    expect(comment).not.toContain('#1298');
+  });
+
+  it('refuses when paths landed through different PRs', () => {
+    const { result, closeCalls } = go({
+      files: ['a.md', 'b.md'],
+      landed: {
+        'a.md': { sha: SHA_C, subject: 'x (#10)' },
+        'b.md': { sha: SHA_D, subject: 'y (#11)' },
+      },
+    });
+    expect(result.closed).toBe(false);
+    expect((result as { reason: string }).reason).toContain('#10');
+    expect((result as { reason: string }).reason).toContain('#11');
+    expect(closeCalls).toHaveLength(0);
+  });
+
+  it('refuses when a path cannot be attributed, and falls back to a sha search', () => {
+    expect(
+      go({ landed: { '.ai-sdlc/_decisions/events/x__DEC-0266__a.json': null } }).result.closed,
+    ).toBe(false);
+    const f = 'a.md';
+    const noSubject = { sha: SHA_D, subject: 'squash without number' };
+    expect(go({ files: [f], landed: { [f]: noSubject } }).result.closed).toBe(false);
+    expect(
+      go({
+        files: [f],
+        landed: { [f]: noSubject },
+        byShaList: [{ number: 77, mergeCommit: { oid: SHA_D } }],
+      }).result,
+    ).toMatchObject({
+      closed: true,
+      supersededBy: 77,
+    });
+    expect(
+      go({ files: [f], landed: { [f]: { sha: SHA_D, subject: 'z (#5)' } } }).result.closed,
+    ).toBe(false);
   });
 
   it('does not close when one path differs on main', () => {
@@ -161,8 +240,7 @@ describe('closeSupersededPr (AISDLC-1011, DEC-0266)', () => {
     expect(closeCalls).toHaveLength(0);
   });
 
-  it('does not close when the PR names no id or GitHub cannot be read', () => {
-    expect(go({ title: 'chore: sync', files: ['a.md'] }).result.closed).toBe(false);
+  it('does not close when GitHub cannot be read', () => {
     const bad = closeSupersededPr(() => ({ status: 1, stdout: '', stderr: 'down' }), {
       cwd: dir,
       boardDir: dir,
@@ -184,8 +262,5 @@ describe('helpers', () => {
     expect(taskIsDone(dir, 'AISDLC-7')).toBe(true);
     expect(taskIsDone(dir, 'AISDLC-70')).toBe(false);
     expect(taskIsDone(path.join(dir, 'nope'), 'AISDLC-7')).toBe(false);
-    expect(carriedIds('a DEC-0266', 'ai-sdlc/file-x', ['p/AISDLC-9.md'])).toEqual(
-      expect.arrayContaining(['DEC-0266', 'AISDLC-9']),
-    );
   });
 });

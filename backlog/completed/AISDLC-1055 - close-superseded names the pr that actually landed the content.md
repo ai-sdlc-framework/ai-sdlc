@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1055
 title: 'close-superseded names the merged PR that actually landed the content, never the first merged PR sharing any id'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22'
 labels:
