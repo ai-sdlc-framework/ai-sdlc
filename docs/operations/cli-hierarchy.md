@@ -631,8 +631,8 @@ Interim assumptions (a hooks module has no process or file API and the host cont
 - **Mixed fleets.** A tmux-driven dispatch session can still enqueue for a mod-driven executor: both read the same board.
 
 **Single clear rule (AISDLC-815).** A hierarchy session clears when its context passes its role threshold (the
-module rotation: planner 150k, dispatch 120k, executor 120k tokens, set under `contextThresholds` in
-`<board-dir>/config.json` and printed by `cli-hierarchy status`), or when an executor's task finishes (dispatch
+module rotation: planner 150k, dispatch 120k, executor 120k tokens; the module uses these built-in values, and
+`contextThresholds` in `<board-dir>/config.json` only changes what `cli-hierarchy status` prints), or when an executor's task finishes (dispatch
 clears it on the verdict). There is no per-tick clear for dispatch and no idle-wait clear for executors. Motivation:
 in the 24 h to 2026-10-11 the ledger recorded 375 task-less sessions under 300k weighted units each, 49M units
 (11% of the day), spent re-reading the fixed prefix after per-tick and per-idle clears.
@@ -700,7 +700,7 @@ session when `session.measure` pushes a token count over the role's threshold, s
 | operator-dispatch   | 120000                     | `/ai-sdlc operator-dispatch` |
 | executor            | 120000                     | `/ai-sdlc executor`         |
 
-`cli-hierarchy status` prints the configured thresholds from `.ai-sdlc/dispatch/config.json`:
+`cli-hierarchy status` prints the thresholds from `.ai-sdlc/dispatch/config.json` (display only: the hooks module rotates at the built-in values in the table above):
 
 ```json
 { "contextThresholds": { "planner": 150000, "operator-dispatch": 120000, "executor": 120000 } }

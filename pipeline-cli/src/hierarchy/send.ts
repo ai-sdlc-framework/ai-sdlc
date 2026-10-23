@@ -37,6 +37,11 @@ export function sendToRoster(
   text: string,
   send: BriefSender,
 ): void {
+  if (/[\r\n]/.test(text)) {
+    throw new Error(
+      'refusing to send: the text contains a newline (a pane would run it as separate input)',
+    );
+  }
   const check = checkSendTarget(sessions, to);
   if (!check.ok) throw new Error(check.reason);
   send(check.entry, text);

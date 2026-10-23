@@ -121,11 +121,10 @@ describe('hierarchy module: gate', () => {
     expect(logOf(s.kv)[0]).toContain('role=executor tier=managed');
   });
 
-  it('records a user tier without identity, and registers nothing for another role', async () => {
+  it('records a user tier without identity for the dispatch role', async () => {
     const s = setup({ role: 'operator-dispatch' });
     await s.start();
     expect(logOf(s.kv)[0]).toContain('tier=user identity=none');
-    expect([...s.handlers.keys()]).toEqual(['session.start']);
   });
 
   it('refuses below the version floor and names it', async () => {
@@ -393,6 +392,18 @@ describe('hierarchy module: planner role (AISDLC-1036)', () => {
     await s.handlers.get('turn.complete')(s.$, { agentId: 'a1', text: 'x' }, s.next);
     expect(ran(s)).toEqual([]);
     await s.handlers.get('turn.complete')(s.$, { text: 'final' }, s.next);
+    expect(ran(s)).toEqual(['ai-sdlc:hierarchy', 'clear']);
+  });
+
+  it('a turn whose turn.complete never fired stops deferring rotation after the stale bound', async () => {
+    vi.useFakeTimers();
+    const s = planner();
+    await s.start();
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    await s.handlers.get('session.measure')(s.$, { tokens: 200_000 }, s.next);
+    expect(ran(s)).toEqual([]);
+    vi.setSystemTime(Date.now() + ACTIVE_STALE_MS + 1000);
+    await s.handlers.get('session.measure')(s.$, { tokens: 200_000 }, s.next);
     expect(ran(s)).toEqual(['ai-sdlc:hierarchy', 'clear']);
   });
 

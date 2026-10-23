@@ -1641,6 +1641,36 @@ describe('handoff and send subcommands (AISDLC-766, AISDLC-1036)', () => {
     expect(sent).toHaveLength(1);
   });
 
+  it('send refuses a mixed-project roster and a text with a newline', async () => {
+    writeRoster(path.join(tmp, 'dispatch'), {
+      schemaVersion: 'v1',
+      sessions: [
+        projectEntry('alpha', 'planner', 'planner', 1),
+        projectEntry('beta', 'operator-dispatch', 'operator-dispatch', 2),
+      ],
+    });
+    const sent: string[] = [];
+    const sendBrief = (_e: RosterEntry, m: string) => void sent.push(m);
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(
+      await runHierarchyCli(['send', '--to', 'alpha-planner', '--text', 'hi'], overrides(), {
+        sendBrief,
+      }),
+    ).toBe(1);
+    expect(String(err.mock.calls.at(-1)?.[0])).toContain('mixes projects');
+    writeRoster(path.join(tmp, 'dispatch'), {
+      schemaVersion: 'v1',
+      sessions: [projectEntry('alpha', 'planner', 'planner', 1)],
+    });
+    expect(
+      await runHierarchyCli(['send', '--to', 'alpha-planner', '--text', 'a\nb'], overrides(), {
+        sendBrief,
+      }),
+    ).toBe(1);
+    expect(String(err.mock.calls.at(-1)?.[0])).toContain('newline');
+    expect(sent).toEqual([]);
+  });
+
   it('send needs --to and --text', async () => {
     const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
     expect(await runHierarchyCli(['send', '--to', 'x'], overrides())).toBe(2);
