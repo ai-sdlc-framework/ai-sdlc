@@ -13,12 +13,24 @@ import {
   safe,
 } from './executor.ts';
 import type { ExecutorState, Ports } from './executor.ts';
+import {
+  DEFAULT_TICK_MS,
+  DISPATCH_PRIMITIVES,
+  BOARD_KEY,
+  newDispatchState,
+  refreshPane,
+  registerDispatch,
+  tick,
+} from './dispatch.ts';
+import type { DispatchPorts } from './dispatch.ts';
 
 type Any = any;
 
 export const register = (on: Any, options?: Any): void => {
   let armed = false;
   const state: ExecutorState = { active: false, pendingRotate: false, lastReply: '' };
+  const dispatch = newDispatchState(options);
+  let dispatchArmed = false;
 
   on('session.start', async ($: Any, e: Any, next: Any) => {
     const p: Ports = {
@@ -44,14 +56,27 @@ export const register = (on: Any, options?: Any): void => {
     // action (no compaction, no blank turn), and only an absent primitive counts as missing. A host that
     // does not validate would see no `text` / `instructions` field to act on. `session.measure` is an
     // event; its read-only pull-side twin `$.session.usage` stands in for it.
-    const present = {
-      'prompt.submit': await exists(() => $.prompt.submit('probe'), 'submit'),
-      'command.run': await exists(() => $.command.run('probe'), 'run'),
-      'session.compact': await exists(() => $.session.compact('probe'), 'compact'),
-      'session.measure': await exists(() => $.session.usage(), 'usage'),
-      'session.send': await exists(() => $.session.send('probe'), 'send'),
-    };
-    const miss = guard(version, present);
+    const present: Record<string, boolean> =
+      role === 'operator-dispatch'
+        ? {
+            'clock.every': await exists(() => $.clock.every('probe'), 'every'),
+            'process.run': await exists(() => $.process.run('probe'), 'run'),
+            'session.send': await exists(() => $.session.send('probe'), 'send'),
+            'ui.open': await exists(() => $.ui.open('probe'), 'open'),
+            'session.measure': await exists(() => $.session.usage(), 'usage'),
+          }
+        : {
+            'prompt.submit': await exists(() => $.prompt.submit('probe'), 'submit'),
+            'command.run': await exists(() => $.command.run('probe'), 'run'),
+            'session.compact': await exists(() => $.session.compact('probe'), 'compact'),
+            'session.measure': await exists(() => $.session.usage(), 'usage'),
+            'session.send': await exists(() => $.session.send('probe'), 'send'),
+          };
+    const miss = guard(
+      version,
+      present,
+      role === 'operator-dispatch' ? DISPATCH_PRIMITIVES : undefined,
+    );
     if (miss) {
       await log(p, miss);
       return next(e);
@@ -63,6 +88,45 @@ export const register = (on: Any, options?: Any): void => {
       p,
       `role=${role} tier=${identity ? 'managed' : 'user'} identity=${identity ? JSON.stringify(identity) : 'none'}`,
     );
+    if (role === 'operator-dispatch') {
+      // AISDLC-1035: a model-less host. No prompt.submit port exists in the dispatch module.
+      if (!dispatchArmed) {
+        dispatchArmed = true;
+        registerDispatch(on, dispatch);
+      }
+      dispatch.enabled = true;
+      const tickMs = Number(options?.tickMs) > 0 ? Number(options.tickMs) : DEFAULT_TICK_MS;
+      await safe(() => $.ui.open({ id: 'board', title: 'Dispatch board' }));
+      await safe(() =>
+        $.clock.every({
+          ms: tickMs,
+          run: async () => {
+            const dp: DispatchPorts = {
+              storeGet: (k) => $.store.get(k),
+              storeSet: (k, v) => $.store.set(k, v),
+              runCommand: (a) => $.command.run(a),
+              runProcess: (a) => $.process.run(a),
+              send: (a) => $.session.send(a),
+              uiOpen: (a) => $.ui.open(a),
+            };
+            await tick(dp, dispatch);
+          },
+        }),
+      );
+      const dp: DispatchPorts = {
+        storeGet: (k) => $.store.get(k),
+        storeSet: (k, v) => $.store.set(k, v),
+        runCommand: (a) => $.command.run(a),
+        runProcess: (a) => $.process.run(a),
+        send: (a) => $.session.send(a),
+        uiOpen: (a) => $.ui.open(a),
+      };
+      // A rotation keeps the last pane in $.store; show it until the first tick replaces it.
+      const kept = (await safe(() => dp.storeGet(BOARD_KEY))).value as string[] | undefined;
+      if (Array.isArray(kept)) dispatch.pane = kept;
+      await refreshPane(dp, dispatch);
+      return next(e);
+    }
     if (role !== 'executor') return next(e);
     if (!armed) {
       armed = true;

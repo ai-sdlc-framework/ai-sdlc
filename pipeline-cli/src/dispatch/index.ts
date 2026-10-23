@@ -141,11 +141,6 @@ export {
   snapshotDoneManifest,
 } from './resume.js';
 export type { ResumeAuthority, ResumeDoneOptions, ResumeInput, ResumeResult } from './resume.js';
-export {
-  IDLE_BACKOFF_MAX_SEC,
-  idleBackoffSec,
-  readEmptyQueueHibernateSec,
-} from './idle-backoff.js';
 export { nextSubId } from './subid.js';
 export type { NextSubIdInput } from './subid.js';
 

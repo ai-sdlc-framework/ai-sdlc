@@ -53,9 +53,8 @@ describe('executor command', () => {
     assert.match(body, /Do not clear, poll or wait/);
     assert.match(body, /\[executor\] idle/);
     assert.match(body, /\[executor\] verdict reported/);
-    assert.match(body, /idle-backoff/);
+    assert.doesNotMatch(body, /idle-backoff/);
     assert.match(body, /RESUMED TASK/);
-    assert.match(body, /emptyQueueHibernateSec/);
   });
 
   it('runs execute with the task id and no other argument', () => {

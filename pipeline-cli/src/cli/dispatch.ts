@@ -86,11 +86,6 @@
  *     refused by the loop guard (AISDLC-883). Notes are prose: a line starting with `cli-`,
  *     `git ` or `gh ` is rejected (AISDLC-800). Same caller check and `requeue` grant as `requeue`.
  *
- *   - `idle-backoff [--work-dir <path>]` — print `{"sleepSec":n}`, how long an
- *     idle executor waits before its next `claim`: the dispatch config's
- *     `emptyQueueHibernateSec` (default 30) clamped to 5..60, so a new manifest is
- *     claimed within a minute (AISDLC-738).
- *
  * Executor loop (RFC-0051 section 5):
  *
  *   - `record-agent` / `sessions` (AISDLC-564) — persist and read the subagent recovery key.
@@ -172,7 +167,6 @@ import {
   enqueueTasks,
   evaluatePushOnly,
   formatResumeFeedback,
-  idleBackoffSec,
   MAX_NOTE_CHARS,
   listBoard,
   listResumeSignals,
@@ -182,7 +176,6 @@ import {
   peekQueueOrder,
   reprioritizeQueued,
   probeIterationBudget,
-  readEmptyQueueHibernateSec,
   readInflightManifest,
   readQueuedManifest,
   readResumeSignal,
@@ -1523,16 +1516,6 @@ export async function runDispatchCli(
         );
         return 1;
       }
-    }
-
-    case 'idle-backoff': {
-      // How long an idle executor sleeps before the next claim: never more than a minute.
-      out({
-        sleepSec: idleBackoffSec(
-          readEmptyQueueHibernateSec(path.resolve(flags['work-dir'] ?? '.')),
-        ),
-      });
-      return 0;
     }
 
     case 'reenter': {

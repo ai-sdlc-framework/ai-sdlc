@@ -685,17 +685,45 @@ describe('clear, tick and route-decision', () => {
       expect(out.handoff).toContain('Queue, eligible: (none)');
     });
 
-    it('clear --self refuses without TMUX_PANE and schedules nothing', async () => {
+    it('clear --self from the dispatch session types nothing and writes a rotate request (AISDLC-1035)', async () => {
       seedBoardWithBrief();
-      const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
       const code = await runHierarchyCli(
         ['clear', '--self', '--worker', 'operator-dispatch'],
         overrides({ env: {} }),
         { identity: asCaller('operator-dispatch') },
       );
-      expect(code).toBe(1);
-      expect(String(err.mock.calls.at(-1)?.[0])).toContain('TMUX_PANE is unset');
+      expect(code).toBe(0);
       expect(calls).toEqual([]);
+      const out = JSON.parse(logs.at(-1) as string);
+      expect(out).toMatchObject({ requested: 'rotate', self: 'operator-dispatch' });
+      expect(existsSync(out.file)).toBe(true);
+    });
+
+    it('rotate-pending consumes the request once, and escalation-file validates its flags', async () => {
+      seedBoardWithBrief();
+      await runHierarchyCli(['clear', '--self'], overrides({ env: {} }), {
+        identity: asCaller('operator-dispatch'),
+      });
+      expect(await runHierarchyCli(['rotate-pending'], overrides())).toBe(0);
+      expect(JSON.parse(logs.at(-1) as string)).toEqual({ pending: true });
+      await runHierarchyCli(['rotate-pending'], overrides());
+      expect(JSON.parse(logs.at(-1) as string)).toEqual({ pending: false });
+      const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      expect(await runHierarchyCli(['escalation-file'], overrides())).toBe(2);
+      expect(
+        await runHierarchyCli(
+          ['escalation-file', '--task-id', '../x', '--message', 'm'],
+          overrides(),
+        ),
+      ).toBe(1);
+      expect(
+        await runHierarchyCli(
+          ['escalation-file', '--task-id', 'AISDLC-1', '--message', 'm'],
+          overrides(),
+        ),
+      ).toBe(0);
+      expect(JSON.parse(logs.at(-1) as string).file).toContain('escalations');
+      expect(err).toHaveBeenCalled();
     });
   });
 
@@ -1674,8 +1702,9 @@ describe('handoff and auto-clear subcommands (AISDLC-766)', () => {
     expect(out).toMatchObject({ action: 'clear', tokens: 5_000_000 });
     expect(out.handoff).toContain('operator-dispatch');
     expect(existsSync(out.handoff)).toBe(true);
-    expect(out.scheduled).toMatchObject({ self: 'operator-dispatch', paneId: '%3' });
-    expect(spawned).toHaveLength(1);
+    // the model-less dispatch host rotates through a request file, never keystrokes (AISDLC-1035)
+    expect(existsSync(out.rotateRequest)).toBe(true);
+    expect(spawned).toHaveLength(0);
   });
 });
 

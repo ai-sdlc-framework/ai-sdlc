@@ -92,7 +92,7 @@ function ran(r: { ok: boolean; value?: unknown }): boolean {
 }
 
 /** Append one line to the module log (`$.store`, since there is no file API) and echo it when possible. */
-export async function log(p: Ports, line: string): Promise<void> {
+export async function log(p: Pick<Ports, 'storeGet' | 'storeSet'>, line: string): Promise<void> {
   const msg = `[hierarchy] ${line}`;
   await safe(async () =>
     p.storeSet(LOG_KEY, [...(((await p.storeGet(LOG_KEY)) as string[]) ?? []), msg]),
@@ -116,11 +116,15 @@ export function pickRole(candidates: unknown[]): string | null {
  * OQ-5 guard. Returns null when the host is new enough and offers every primitive the role uses, else
  * the one log line that names the miss and the floor. `present` maps each primitive to whether it exists.
  */
-export function guard(version: unknown, present: Record<string, boolean>): string | null {
+export function guard(
+  version: unknown,
+  present: Record<string, boolean>,
+  names: readonly string[] = PRIMITIVES,
+): string | null {
   if (!atLeast(version, VERSION_FLOOR)) {
     return `not registering: Claude Code ${version ?? 'unknown'} is below the floor ${VERSION_FLOOR} (session.version)`;
   }
-  for (const name of PRIMITIVES) {
+  for (const name of names) {
     if (!present[name]) {
       return `not registering: primitive ${name} is missing (floor ${VERSION_FLOOR}, running ${version})`;
     }

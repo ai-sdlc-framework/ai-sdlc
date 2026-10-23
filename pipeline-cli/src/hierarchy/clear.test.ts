@@ -601,22 +601,38 @@ describe('clearSelf', () => {
     seedRoster(entry(), dispatch());
   });
 
+  const planner = (over: Partial<RosterEntry> = {}): RosterEntry =>
+    entry({ role: 'planner', name: 'planner', tmuxWindow: 'planner', paneId: '%5', ...over });
+  const plannerDeps = () => {
+    const d = selfDeps();
+    const run = (file: string, args: readonly string[]) =>
+      args[0] === 'list-windows'
+        ? { status: 0, stdout: 'planner\n', stderr: '' }
+        : args[0] === 'display-message'
+          ? { status: 0, stdout: '%5\n', stderr: '' }
+          : d.run(file, args);
+    return { ...d, run };
+  };
+
   it('schedules /clear then the resume command on the caller own roster pane', () => {
-    const r = clearSelf({ self: 'operator-dispatch', resumeAfterSeconds: 45 }, selfDeps());
-    expect(r).toMatchObject({ self: 'operator-dispatch', paneId: '%3', resumeAfterSeconds: 45 });
+    seedRoster(entry(), dispatch(), planner());
+    const r = clearSelf(
+      { self: 'planner', role: 'planner', resumeAfterSeconds: 45 },
+      plannerDeps(),
+    );
+    expect(r).toMatchObject({ self: 'planner', paneId: '%5', resumeAfterSeconds: 45 });
     expect(spawned).toHaveLength(1);
     const a = spawned[0]!.args;
     expect(spawned[0]!.file).toBe('sh');
-    // lead delay, pane, /clear, resume hold, resume command, watch dir, log, name, timeouts
+    // lead delay, pane, /clear, resume hold, resume command, log, name, timeouts
     expect(a.slice(3)).toEqual([
       '20',
-      '%3',
+      '%5',
       '/clear',
       '45',
-      '/ai-sdlc operator-dispatch',
-      '',
+      '/ai-sdlc:planner',
       path.join(board, 'handoff', 'auto-clear.log'),
-      'operator-dispatch',
+      'planner',
       '120',
       '60',
     ]);
@@ -626,66 +642,55 @@ describe('clearSelf', () => {
   });
 
   it('stamps the auto-clear debounce so the Stop hook skips this turn', () => {
-    expect(recentlyScheduled(board, 'operator-dispatch', Date.now())).toBe(false);
-    clearSelf({ self: 'operator-dispatch' }, selfDeps());
-    expect(recentlyScheduled(board, 'operator-dispatch', Date.now())).toBe(true);
+    seedRoster(entry(), dispatch(), planner());
+    expect(recentlyScheduled(board, 'planner', Date.now())).toBe(false);
+    clearSelf({ self: 'planner', role: 'planner' }, plannerDeps());
+    expect(recentlyScheduled(board, 'planner', Date.now())).toBe(true);
   });
 
-  it('wakes early on a new brief or verdict file when given the board to watch', () => {
-    clearSelf(
-      { self: 'operator-dispatch', resumeAfterSeconds: 1800, wakeOnBoardDir: '/board' },
-      selfDeps(),
-    );
-    const a = spawned[0]!.args;
-    expect(a.slice(3, 9)).toEqual([
-      '20',
-      '%3',
-      '/clear',
-      '1800',
-      '/ai-sdlc operator-dispatch',
-      '/board',
-    ]);
-    // the marker is made before the lead delay; the wait ends on a newer file in the board
-    expect(a[1]).toMatch(/\[ -n "\$watch" \] && \{ m=\$\(mktemp\)/);
-    expect(a[1]).toMatch(
-      /find "\$watch\/briefs" "\$watch\/done" "\$watch\/failed" -type f -newer "\$m"/,
-    );
-    expect(a[1]).toMatch(/-lt "\$hold"/);
+  it('refuses the dispatch session: a model-less host rotates through its hooks module (AISDLC-1035)', () => {
+    expect(() =>
+      clearSelf({ self: 'operator-dispatch', role: 'operator-dispatch' as never }, selfDeps()),
+    ).toThrow(/model-less host/);
+    expect(spawned).toHaveLength(0);
   });
 
-  it('refuses a caller that is not the dispatch session', () => {
-    expect(() => clearSelf({ self: 'executor-alpha' }, selfDeps())).toThrow(
-      /not the dispatch session/,
+  it('refuses a caller that is not the planner', () => {
+    seedRoster(entry(), dispatch(), planner());
+    expect(() => clearSelf({ self: 'executor-alpha', role: 'planner' }, plannerDeps())).toThrow(
+      /not the planner/,
     );
     expect(spawned).toHaveLength(0);
   });
 
   it('refuses when TMUX_PANE is not the roster pane', () => {
-    expect(() => clearSelf({ self: 'operator-dispatch', callerPane: '%9' }, selfDeps())).toThrow(
-      /not the roster pane/,
-    );
+    seedRoster(entry(), dispatch(), planner());
+    expect(() =>
+      clearSelf({ self: 'planner', role: 'planner', callerPane: '%9' }, plannerDeps()),
+    ).toThrow(/not the roster pane/);
     expect(spawned).toHaveLength(0);
   });
 
   it('refuses a stopped session, a bad pane id and a bad delay', () => {
-    seedRoster(dispatch({ status: 'starting' }));
-    expect(() => clearSelf({ self: 'operator-dispatch' }, selfDeps())).toThrow(/not running/);
-    seedRoster(dispatch({ paneId: '' }));
-    expect(() => clearSelf({ self: 'operator-dispatch' }, selfDeps())).toThrow(/pane id/);
-    seedRoster(dispatch());
-    expect(() =>
-      clearSelf({ self: 'operator-dispatch', resumeAfterSeconds: -1 }, selfDeps()),
-    ).toThrow(/whole number/);
+    const go = (extra: object = {}) =>
+      clearSelf({ self: 'planner', role: 'planner', ...extra }, plannerDeps());
+    seedRoster(planner({ status: 'starting' }));
+    expect(() => go()).toThrow(/not running/);
+    seedRoster(planner({ paneId: '' }));
+    expect(() => go()).toThrow(/pane id/);
+    seedRoster(planner());
+    expect(() => go({ resumeAfterSeconds: -1 })).toThrow(/whole number/);
     expect(spawned).toHaveLength(0);
   });
 
   it('refuses a pane tmux no longer attributes to the window', () => {
-    const d = selfDeps();
+    seedRoster(planner());
+    const d = plannerDeps();
     const run = (file: string, args: readonly string[]) =>
       args[0] === 'display-message'
         ? { status: 0, stdout: '%99\n', stderr: '' }
         : d.run(file, args);
-    expect(() => clearSelf({ self: 'operator-dispatch' }, { ...d, run })).toThrow(/stale/);
+    expect(() => clearSelf({ self: 'planner', role: 'planner' }, { ...d, run })).toThrow(/stale/);
     expect(spawned).toHaveLength(0);
   });
 
@@ -862,11 +867,6 @@ esac
         { self: 'planner', role: 'planner', resumeAfterSeconds: 0 },
         { ...selfDeps(), run: plannerRun },
       );
-      expect(r.resumeAfterSeconds).toBe(0);
-    });
-
-    it('leaves the dispatch default unchanged', () => {
-      const r = clearSelf({ self: 'operator-dispatch' }, selfDeps());
       expect(r.resumeAfterSeconds).toBe(0);
     });
   });

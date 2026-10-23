@@ -42,7 +42,6 @@ export {
 export {
   clearExecutor,
   clearSelf,
-  DISPATCH_RESUME_COMMAND,
   EXECUTOR_RESUME_COMMAND,
   PLANNER_RESUME_COMMAND,
   holdsInflight,

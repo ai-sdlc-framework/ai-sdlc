@@ -343,8 +343,6 @@ export const SELF_CLEAR_COMEBACK_TIMEOUT_SECONDS = 60;
 export const PLANNER_RESUME_AFTER_SECONDS = 3;
 /** Where a session that did not come back after a clear is recorded, under the board dir. */
 export const AUTO_CLEAR_LOG = path.join('handoff', 'auto-clear.log');
-/** The command the dispatch session re-issues after its own clear. */
-export const DISPATCH_RESUME_COMMAND = '/ai-sdlc operator-dispatch';
 /** The command an idle executor re-issues after its own clear. */
 export const EXECUTOR_RESUME_COMMAND = '/ai-sdlc executor';
 /** The command the planner re-issues after its own clear. */
@@ -371,12 +369,11 @@ export interface ClearSelfDeps {
 export interface ClearSelfOptions {
   /** Roster name of the calling session, already proven to be a session of `role`. */
   self: string;
-  /** Role of the calling session (default the dispatch session). */
-  role?: 'operator-dispatch' | 'executor' | 'planner';
+  /** Role of the calling session. The dispatch session is a model-less host (AISDLC-1035) and rotates through a hook. */
+  role: 'executor' | 'planner';
   /**
-   * Optional seconds to hold the resume command after `/clear` (dispatch uses it as a
-   * wake-on-board upper bound). Default 0 (the resume command is typed as soon as the
-   * pane is idle after `/clear`), except the planner, which defaults to 3.
+   * Optional seconds to hold the resume command after `/clear`. Default 0 (the resume command
+   * is typed as soon as the pane is idle after `/clear`), except the planner, which defaults to 3.
    */
   resumeAfterSeconds?: number;
   /** Longest wait for an idle pane before typing (default 120). */
@@ -387,12 +384,6 @@ export interface ClearSelfOptions {
   leadSeconds?: number;
   /** The `TMUX_PANE` of the calling process; when set it must equal the roster pane. */
   callerPane?: string;
-  /**
-   * Board directory to watch. When set, the resume command is typed as soon as a file
-   * newer than this call appears in `briefs/`, `done/` or `failed/`, instead of after
-   * the full resume delay (which then acts as the upper bound).
-   */
-  wakeOnBoardDir?: string;
 }
 
 /** What {@link clearSelf} scheduled. */
@@ -404,11 +395,11 @@ export interface ClearSelfResult {
 }
 
 /**
- * Schedule the dispatch session, the planner or an idle executor to clear its own context and resume its loop.
+ * Schedule the planner or an idle executor to clear its own context and resume its loop.
  * Only the pane the calling session's own roster entry names is ever typed into.
  * The keystrokes are delivered by a detached process after a lead delay, because
  * `/clear` typed while this turn runs would only be queued behind it.
- * @throws, scheduling nothing, when the entry is not a running dispatch session,
+ * @throws, scheduling nothing, when the entry is not a running session of the role,
  *   its pane or window cannot be confirmed, or `TMUX_PANE` names another pane.
  */
 export function clearSelf(opts: ClearSelfOptions, deps: ClearSelfDeps): ClearSelfResult {
@@ -432,11 +423,16 @@ export function clearSelf(opts: ClearSelfOptions, deps: ClearSelfDeps): ClearSel
     }
   }
   const { roster } = readRosterChecked(deps.boardDir);
-  const role = opts.role ?? 'operator-dispatch';
+  const role = opts.role;
+  if (role !== 'executor' && role !== 'planner') {
+    throw new Error(
+      `'${name}' cannot clear itself with keystrokes: the dispatch session is a model-less host and rotates through its hooks module (cli-hierarchy clear --self writes a rotate request)`,
+    );
+  }
   const entry = roster.sessions.find((e) => e.name === name && e.role === role);
   if (!entry) {
     throw new Error(
-      `'${name}' is not ${role === 'executor' ? 'an executor' : role === 'planner' ? 'the planner' : 'the dispatch session'} in the roster`,
+      `'${name}' is not ${role === 'executor' ? 'an executor' : 'the planner'} in the roster`,
     );
   }
   if (entry.status !== 'running') {
@@ -465,16 +461,13 @@ export function clearSelf(opts: ClearSelfOptions, deps: ClearSelfDeps): ClearSel
   }
   const target = resolveSendTarget(deps.run, entry.tmuxSession, entry.tmuxWindow, entry.paneId);
 
-  const watchDir = opts.wakeOnBoardDir;
   // Every value is passed as an argument, never interpolated into the script. The marker
   // is made before the lead delay, so a file written while this turn ends still wakes us.
   // Positional arguments: 1 lead, 2 pane, 3 /clear, 4 resume hold, 5 resume command,
-  // 6 board to watch ('' for none), 7 log file, 8 session name, 9 idle timeout,
-  // 10 comeback timeout. Polls run every 0.5 s.
+  // 6 log file, 7 session name, 8 idle timeout, 9 comeback timeout. Polls run every 0.5 s.
   const script = [
     // functions see their own $1, so every argument is copied to a named variable first
-    'lead=$1; pane=$2; clr=$3; hold=$4; cmd=$5; watch=$6; logf=$7; who=$8; idlet=$9; backt=${10}',
-    '[ -n "$watch" ] && { m=$(mktemp) || exit 1; }',
+    'lead=$1; pane=$2; clr=$3; hold=$4; cmd=$5; logf=$6; who=$7; idlet=$8; backt=$9',
     'log() { mkdir -p "$(dirname "$logf")"; printf "%s %s: %s\\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$who" "$1" >> "$logf"; }',
     // idle: the pane text is unchanged across two polls and shows no running turn
     'idle() { n=0; prev=; st=0; while [ "$n" -lt $(( idlet * 2 )) ]; do ' +
@@ -496,9 +489,7 @@ export function clearSelf(opts: ClearSelfOptions, deps: ClearSelfDeps): ClearSel
     'idle || { log "pane never became idle; did not send: $clr then $cmd"; exit 0; }',
     'type "$clr"',
     'sleep 1',
-    'if [ -n "$watch" ]; then sleep 5; i=0; while [ "$i" -lt "$hold" ]; do ' +
-      'if [ -n "$(find "$watch/briefs" "$watch/done" "$watch/failed" -type f -newer "$m" 2>/dev/null | head -n 1)" ]; ' +
-      'then break; fi; sleep 2; i=$((i+2)); done; rm -f "$m"; else sleep "$hold"; fi',
+    'sleep "$hold"',
     'idle || { log "pane not idle after /clear; did not send: $cmd"; exit 0; }',
     'submit "$cmd" || { log "resume command not submitted; last pane line: $(tmux capture-pane -p -t "$pane" 2>/dev/null | grep . | tail -n 1)"; exit 0; }',
     'n=0; while [ "$n" -lt $(( backt * 2 )) ]; do ' +
@@ -515,12 +506,7 @@ export function clearSelf(opts: ClearSelfOptions, deps: ClearSelfDeps): ClearSel
     target,
     '/clear',
     String(resumeAfterSeconds),
-    role === 'executor'
-      ? EXECUTOR_RESUME_COMMAND
-      : role === 'planner'
-        ? PLANNER_RESUME_COMMAND
-        : DISPATCH_RESUME_COMMAND,
-    watchDir ?? '',
+    role === 'executor' ? EXECUTOR_RESUME_COMMAND : PLANNER_RESUME_COMMAND,
     logFile,
     name,
     String(idleTimeoutSeconds),
