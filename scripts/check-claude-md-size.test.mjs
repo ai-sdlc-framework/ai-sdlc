@@ -8,12 +8,18 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const claudeMd = readFileSync(join(root, 'CLAUDE.md'), 'utf-8');
+// Path-bound sections moved to .claude/rules/*.md load deterministically (AISDLC-782).
+const rulesDir = join(root, '.claude/rules');
+const rules = readdirSync(rulesDir)
+  .filter((f) => f.endsWith('.md'))
+  .map((f) => readFileSync(join(rulesDir, f), 'utf-8'))
+  .join('\n');
 
 /** Budget in characters (not bytes). */
 export const CLAUDE_MD_BUDGET = 15_000;
@@ -43,7 +49,7 @@ describe('CLAUDE.md size budget', () => {
       'PATCH_ID_EXCLUSIONS',
       'read-only',
     ]) {
-      assert.ok(claudeMd.includes(needle), `CLAUDE.md lost rule text: ${needle}`);
+      assert.ok((claudeMd + rules).includes(needle), `CLAUDE.md lost rule text: ${needle}`);
     }
   });
 });

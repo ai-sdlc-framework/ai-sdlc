@@ -25,14 +25,6 @@ Only rules that change behaviour in every session live here (budget 15k characte
 - Hook scripts (`ai-sdlc-plugin/hooks/*.js`) use `node --test`; orchestrator and MCP server use Vitest.
 - Do NOT remove the `pretest` build hook in `dogfood/package.json` (AISDLC-404).
 
-## Hooks (pre-push chain)
-
-`.husky/pre-push` runs, in order: dark-code check (`AI_SDLC_SKIP_DARK_CODE_GATE=1`), then `pre-push-fixups.sh` once, which runs squash-attestation-chores, check-task-moved (task file to `backlog/completed/`, BEFORE sign) and check-attestation-sign (signs/verifies the DSSE envelope) in that order. Per-gate skips (`AI_SDLC_SKIP_*`) are never routine. Emergency only: `AI_SDLC_BYPASS_ALL_GATES=1` (document in the PR body; [`docs/operations/emergency-bypass.md`](docs/operations/emergency-bypass.md)).
-
-- **Worktree hooks (AISDLC-693):** `core.hooksPath` is `.husky/_` (gitignored, made by `prepare`); a worktree without it runs NO gate. Never disable install scripts. `ai-sdlc doctor` check `worktree-hooks` lists affected worktrees.
-- DoR and backlog-drift run in CI only; run by hand: `node pipeline-cli/bin/cli-dor-check.mjs --task <path>`, `npx backlog-drift check`.
-- Per-hook behaviour and skips: [`docs/operations/pre-push-and-ci-reference.md`](docs/operations/pre-push-and-ci-reference.md).
-
 ## CI behavior
 
 - One CI run per PR (AISDLC-727): only `ai-sdlc-gate.yml` runs CI on `pull_request`; open PRs are rebased only on conflict.
@@ -40,6 +32,10 @@ Only rules that change behaviour in every session live here (budget 15k characte
 - Tooling ceilings we work around (rate limits, git): [`docs/operations/tooling-limitations.md`](docs/operations/tooling-limitations.md).
 - Workflows MUST call pipeline-cli via `node pipeline-cli/bin/cli-XXX.mjs`, never `pnpm --filter @ai-sdlc/pipeline-cli exec cli-XXX` (workspace own-bins do not resolve; AISDLC-156).
 - **Dark-code gate (AISDLC-552):** `pnpm dark-code:check` (in `pnpm test`) fails on a module with no non-test importer and on non-test source using a test double. `.ai-sdlc/dark-code-baseline.json` only shrinks; never silence a finding with a token import.
+
+## Path-bound rules
+
+Sections that bind to named files live in `.claude/rules/*.md` with `paths:` frontmatter and load when a matching file is opened (AISDLC-782): `pre-push-hooks.md`, `review-attestations.md`, `rfcs.md`, `releases.md`. Releases: CHANGELOG.md is owned by release-please; never edit it.
 
 ## Five-step algorithm (DEC-0090)
 
@@ -73,22 +69,9 @@ TypeScript strict, ESM. Prettier + ESLint. No premature abstractions: three simi
 - **Model defaults:** every agent and command pins `model:` (never `inherit`; `pnpm test:plugin-model-pins-gate`): developer and reviewers sonnet, `review-executor*` haiku, `security-reviewer` opus. Route code/test review to `-codex` variants on dispatch paths; never wrap mechanical work (sign, reconcile, rebase) in subagents. List: [`docs/operations/agent-governance-reference.md`](docs/operations/agent-governance-reference.md).
 - **Prompt rules live in one source (AISDLC-651.2):** "never do X" rules are defined once in `ai-sdlc-plugin/hooks/lib/prompt-rules.js` and rendered as one line per agent/command; do not restate them in prose ([`docs/operations/prompt-rules.md`](docs/operations/prompt-rules.md)).
 
-## Review attestations
-
-- **Required for code PRs.** `/ai-sdlc execute` runs three reviewers and writes a DSSE envelope `.ai-sdlc/attestations/<patch-id>.v6.dsse.json`. The `attestation-gate` job of `ai-sdlc-gate.yml` posts `ai-sdlc/attestation`, which feeds the `ai-sdlc/pr-ready` rollup; branch protection requires only `ai-sdlc/pr-ready`. Docs-only PRs skip it.
-- **v6 is the default schema** (RFC-0042): Merkle tree over `.ai-sdlc/transcript-leaves.jsonl` (`cli-attestation.mjs emit-leaf`). Opt out with `--schema-version v5` or `AI_SDLC_V5_LEGACY=1`.
-- **Lockstep (AISDLC-618):** `PATCH_ID_EXCLUSIONS` (`pipeline-cli/src/attestation/patch-id.ts`) has THREE copies that change together: `ATTESTATION_PATH_EXCLUSIONS` in `scripts/verify-attestation.mjs` and `PATCH_ID_EXCLUSIONS_FALLBACK` in `scripts/check-attestation-sign.sh`. Never add source, tests, configs or RFCs to `CONTENTHASH_SHARED_CHURN_FILES`.
-- A v6 envelope proves a real review ran against the exact code, not reviewer independence (AISDLC-568).
-- Algorithms, rebase relaxations, history: [`docs/operations/attestation-reference.md`](docs/operations/attestation-reference.md), [`docs/operations/attestation-troubleshooting.md`](docs/operations/attestation-troubleshooting.md).
-- `ai-sdlc-review.yml` (`Analyze PR`, `Post Review Results`) is the CI review tier for UNTRUSTED PRs only (fork, non-collaborator, or a bot such as Dependabot; AISDLC-824); trusted PRs never enter it.
-
 ## Remote agents (`/schedule`) are read-only (AISDLC-442)
 
 CCR sandboxes lack the signing key, plugin and worktrees. Allowed: PR/CI surveys, digests, `mcp__backlog__task_create`, `mcp__github__create_issue`. Prohibited: `/ai-sdlc execute`, signing, plugin subagents, worktree ops, sibling-repo writes. For local work, file a backlog task with full context. Tables and detection heuristics: [`docs/operations/remote-agents-readonly.md`](docs/operations/remote-agents-readonly.md).
-
-## RFCs
-
-`spec/rfcs/RFC-NNNN-*.md` ([process](spec/rfcs/README.md)). Lifecycle: `Draft` → `Ready for Review` → `Signed Off` → `Implemented` (or `Superseded`). Next number: the README Registry's "Next available number" line, never a file scan. `requires:` = runtime-code dependency (must be `Implemented`); `assumes:` = design-contract dependency (must exist); the DoR upstream-OQ gate blocks on `requires:` only. Semantics: [`docs/operations/backlog-and-execution-reference.md`](docs/operations/backlog-and-execution-reference.md).
 
 ## Backlog Workflow
 
@@ -101,10 +84,6 @@ Tasks live in `backlog/tasks/` (open) and `backlog/completed/` (closed); managed
 - **Done semantics:** `delivered` = PR ready and armed (frees the executor); `landed` = merged, the only trigger for `done/`. Undelivered PR blocks a fresh claim unless `fixesPr`. Task file moves to `backlog/completed/` in the PR. Never leave `To Do`.
 - **Cross-repo writes:** a task declares `permittedExternalPaths` in frontmatter; the PreToolUse hook resolves it from `<worktree>/.active-task`. Without it, cross-repo writes are denied. The dev subagent writes; it never commits in the sibling repo.
 - **Lifecycle:** create ALL tasks of a plan before dispatching (in Pattern C use `mcp__plugin_ai-sdlc_ai-sdlc__task_create`); claim on start; complete = `task_edit` then `task_complete`, after tests + lint. No tasks for inline review fixes, chores or spikes. `finalSummary` template: reference above.
-
-## Releases
-
-**CHANGELOG.md is managed exclusively by release-please; never edit it** (one rolling `chore: release main` PR; [`docs/operations/release-flow.md`](docs/operations/release-flow.md)). Land the release PR only on explicit operator instruction: `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind release --arm` (drop `--arm` to merge now). Every non-private workspace package needs `publishConfig` (`pnpm lint:publishable`). See [`docs/operations/release-and-plugin-reference.md`](docs/operations/release-and-plugin-reference.md).
 
 ## Plugin MCP server root and Pattern C
 

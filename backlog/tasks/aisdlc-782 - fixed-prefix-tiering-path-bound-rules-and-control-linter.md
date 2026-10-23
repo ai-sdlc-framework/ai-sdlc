@@ -2,7 +2,7 @@
 id: AISDLC-782
 title: >-
   fixed-prefix tiering, path-bound rules and control linter
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-09'
 labels:
@@ -35,10 +35,10 @@ Sequencing: listed in `dependencies:` (AISDLC-773, AISDLC-742).
 
 ## Acceptance Criteria
 
-- [ ] The rendered fixed prefix is at most `prefix.maxBytes` bytes and a test fails when it grows past it.
-- [ ] The prefix contains governance controls rendered from configuration, the role and task frame, and pointers, and nothing else (test on the renderer).
-- [ ] Each path-bound section moved to `.claude/rules/*.md` carries `paths:` frontmatter and loads when a matching file is opened (fixture test).
-- [ ] The linter fails on a control-shaped sentence outside the prefix that is not rendered from configuration and passes when it is (test per case).
-- [ ] Explanatory sections are ingested as knowledge entries with trunk, source and decay (test).
-- [ ] No control present in the prior CLAUDE.md is lost: a test maps each control sentence to the prefix or to a rule file.
-- [ ] The task states it supersedes the AISDLC-742 one-time diet, and the AISDLC-742 task file points here.
+- [x] The rendered fixed prefix is at most `prefix.maxBytes` bytes and a test fails when it grows past it.
+- [x] The prefix contains governance controls rendered from configuration, the role and task frame, and pointers, and nothing else (test on the renderer).
+- [x] Each path-bound section moved to `.claude/rules/*.md` carries `paths:` frontmatter and loads when a matching file is opened (fixture test).
+- [x] The linter fails on a control-shaped sentence outside the prefix that is not rendered from configuration and passes when it is (test per case).
+- [x] Explanatory sections are ingested as knowledge entries with trunk, source and decay (test).
+- [x] No control present in the prior CLAUDE.md is lost: a test maps each control sentence to the prefix or to a rule file.
+- [x] The task states it supersedes the AISDLC-742 one-time diet, and the AISDLC-742 task file points here.
