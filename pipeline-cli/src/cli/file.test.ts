@@ -495,6 +495,51 @@ describe('cli-file', () => {
     expect(() => fileRebase(repo, 'empty', { pr: false }, deps)).toThrow(/no changes/);
   });
 
+  describe('AISDLC-1045 corrected source', () => {
+    const corrected = (id = 'AISDLC-900') => {
+      const p = join(root, `${id.toLowerCase()} - thing.md`);
+      writeFileSync(p, `---\nid: ${id}\n---\nfixed\n`);
+      return p;
+    };
+
+    it('rebase --source replaces the branch copy and keeps the same branch and PR', () => {
+      fileTask(repo, writeTask(), { pr: false }, deps);
+      const r = fileRebase(repo, 'AISDLC-900', { pr: true, source: corrected() }, deps);
+      expect(r.branch).toBe('ai-sdlc/file-aisdlc-900');
+      expect(r.prUrl).toBe('https://github.com/o/r/pull/1');
+      const body = sh(remote, 'show', `${r.branch}:backlog/tasks/aisdlc-900 - thing.md`);
+      expect(body).toContain('fixed');
+      expect(body).not.toContain('body');
+    });
+
+    it('refuses a source whose id does not match, or that fails drift', () => {
+      fileTask(repo, writeTask(), { pr: false }, deps);
+      expect(() =>
+        fileRebase(repo, 'AISDLC-900', { pr: false, source: corrected('AISDLC-901') }, deps),
+      ).toThrow(/does not match/);
+      drift = 'backlog-drift: bad ref';
+      expect(() =>
+        fileRebase(repo, 'AISDLC-900', { pr: false, source: corrected() }, deps),
+      ).toThrow(/backlog-drift/);
+    });
+
+    it('--update on a task only on its filing branch delegates to the rebase', () => {
+      fileTask(repo, writeTask(), { pr: false }, deps);
+      const r = fileTask(repo, corrected(), { pr: false, update: true }, deps);
+      expect(r.branch).toBe('ai-sdlc/file-aisdlc-900');
+      expect(sh(remote, 'show', `${r.branch}:backlog/tasks/aisdlc-900 - thing.md`)).toContain(
+        'fixed',
+      );
+    });
+
+    it('--update on a task on main keeps the update branch', () => {
+      fileTask(repo, writeTask(), { pr: false }, deps);
+      commitMain('backlog/tasks/aisdlc-900 - thing.md', '---\nid: AISDLC-900\n---\nold\n');
+      const r = fileTask(repo, corrected(), { pr: false, update: true }, deps);
+      expect(r.branch).toBe('ai-sdlc/update-aisdlc-900');
+    });
+  });
+
   it('answers a decision already opened on main, appending only the new event', () => {
     const opened = ev('DEC-0005', 'decision-opened', { options: [{ id: 'a' }] });
     commitMain(EVENT_LOG_REL, ev('DEC-0001', 'decision-opened') + '\n' + opened + '\n');
