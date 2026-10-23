@@ -173,6 +173,7 @@ describe('ConfigBrowserPane — detail view (AC#5)', () => {
     await flush();
     expect(lastFrame() ?? '').toContain('CONFIG —');
     stdin.write('\x1B'); // Esc
+    await new Promise<void>((resolve) => setTimeout(resolve, 50)); // ink 8 flushes a lone ESC after 20ms
     await flush();
     expect(lastFrame() ?? '').toContain('CONFIGURATION');
   });

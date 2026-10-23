@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1046
 title: 'Dependency: upgrade ink from 6 to the current 8 line and fix the Escape key handling it breaks in four TUI panes'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22'
 labels:

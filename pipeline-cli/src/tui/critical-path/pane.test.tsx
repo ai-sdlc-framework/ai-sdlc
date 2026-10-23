@@ -168,6 +168,7 @@ describe('CriticalPathPaneContent — keyboard navigation', () => {
     stdin.write('\r'); // open detail
     await flush();
     stdin.write('\x1b'); // Escape to close
+    await new Promise<void>((resolve) => setTimeout(resolve, 50)); // ink 8 flushes a lone ESC after 20ms
     await flush();
 
     expect(lastFrame()).toContain('CRITICAL PATH');
