@@ -1172,7 +1172,11 @@ there first when `resolve-pipeline-cli.sh` refuses as stale). `clear` does not f
 
 **`clear <name>` exits 1 with `not acknowledged within N ms ... no module loaded`.** Nothing consumed the rotate request:
 the dispatch session's hooks module is not loaded or has refused to register. Open its pane; the module logs one line naming
-the missing primitive and the version floor (`hierarchy/log` in `$.store`). Fix the host (Claude Code at or above the floor,
+the missing primitive and the version floor (`hierarchy/log` in `$.store`, and the plugin store log). The line
+`[hierarchy] not registering: Claude Code <version> is below the floor 2.1.307 (session.version)` means the host's
+`$.session.version()` was read as older than the floor; since AISDLC-1062 the guard reads both the string form and the
+2.1.309 object form `{ version: { VERSION } }`, and prints the object's keys when it finds no version, so a line showing
+a current version or `{...}` keys points at a new host shape to add to `versionString` in `hooks/hierarchy/executor.ts`. Fix the host (Claude Code at or above the floor,
 the plugin installed with its `modules` entry), then run `clear` again; the stale request is consumed by the first tick that
 runs. The old entries about an unsubmitted resume command and an `unknown` state after a degraded clear no longer exist:
 no command is typed, so none can be left unsubmitted in an input line.
