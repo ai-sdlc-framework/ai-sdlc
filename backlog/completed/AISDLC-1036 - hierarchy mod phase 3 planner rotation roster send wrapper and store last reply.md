@@ -1,7 +1,10 @@
 ---
 id: AISDLC-1036
-title: 'Hierarchy mod phase 3: planner role (rotation with handoff write first, roster-name send wrapper, $.store last reply); delete LAST_MESSAGE.md persistence and the Stop-hook auto-clear'
-status: To Do
+title: >-
+  Hierarchy mod phase 3: planner role (rotation with handoff write first,
+  roster-name send wrapper, $.store last reply); delete LAST_MESSAGE.md
+  persistence and the Stop-hook auto-clear
+status: Done
 assignee: []
 created_date: '2026-10-22'
 labels:
@@ -13,12 +16,27 @@ dependencies:
   - AISDLC-1034
 references:
   - spec/rfcs/RFC-0058-session-hierarchy-on-mods.md
-  - ai-sdlc-plugin/hooks/context-auto-clear.js
   - ai-sdlc-plugin/commands/planner.md
-  - pipeline-cli/src/hierarchy/auto-clear.ts
   - docs/operations/cli-hierarchy.md
 priority: medium
 dispatchable: true
+drift_status: flagged
+drift_checked: '2026-10-23'
+drift_log:
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/hooks/context-auto-clear.js
+    resolution: flagged
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/hierarchy/auto-clear.ts'
+    resolution: flagged
+  - date: '2026-10-23'
+    type: dep-resolved
+    detail: Dependency AISDLC-1034 has been completed
+    resolution: flagged
 ---
 
 ## Description

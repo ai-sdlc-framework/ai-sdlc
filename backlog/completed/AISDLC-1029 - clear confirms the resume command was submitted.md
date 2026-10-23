@@ -1,7 +1,8 @@
 ---
 id: AISDLC-1029
 title: >-
-  `cli-hierarchy clear` confirms the resume command was submitted and fails loudly instead of reporting a degraded clear
+  `cli-hierarchy clear` confirms the resume command was submitted and fails
+  loudly instead of reporting a degraded clear
 status: Done
 assignee: []
 created_date: '2026-10-22'
@@ -11,10 +12,15 @@ labels:
 dependencies: []
 references:
   - pipeline-cli/src/hierarchy/clear.ts
-  - pipeline-cli/src/hierarchy/auto-clear.ts
   - docs/operations/cli-hierarchy.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/hierarchy/auto-clear.ts'
+    resolution: flagged
+drift_checked: '2026-10-23'
 ---
 
 ## Description

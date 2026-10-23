@@ -1,6 +1,8 @@
 ---
 id: AISDLC-1048
-title: 'LAST_MESSAGE.md saves the final reply, stamped final or interim, never a mid-turn progress line'
+title: >-
+  LAST_MESSAGE.md saves the final reply, stamped final or interim, never a
+  mid-turn progress line
 status: Done
 assignee: []
 created_date: '2026-10-22'
@@ -10,12 +12,24 @@ labels:
   - hooks
 dependencies: []
 references:
-  - ai-sdlc-plugin/hooks/context-auto-clear.js
-  - ai-sdlc-plugin/hooks/context-auto-clear.test.mjs
   - ai-sdlc-plugin/commands/planner.md
   - ai-sdlc-plugin/commands/operator-dispatch.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/hooks/context-auto-clear.js
+    resolution: flagged
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/hooks/context-auto-clear.test.mjs
+    resolution: flagged
+drift_checked: '2026-10-23'
 ---
 
 ## Description

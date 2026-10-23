@@ -1,7 +1,8 @@
 ---
 id: AISDLC-870
 title: >-
-  auto-clear gives the session a handoff turn before /clear; a clear never discards unsaved session context
+  auto-clear gives the session a handoff turn before /clear; a clear never
+  discards unsaved session context
 status: Done
 assignee: []
 created_date: '2026-10-14'
@@ -11,13 +12,23 @@ labels:
   - planner
 dependencies: []
 references:
-  - pipeline-cli/src/hierarchy/auto-clear.ts
   - pipeline-cli/src/hierarchy/clear.ts
-  - ai-sdlc-plugin/hooks/context-auto-clear.js
   - ai-sdlc-plugin/commands/planner.md
   - docs/operations/cli-hierarchy.md
 priority: critical
 dispatchable: true
+drift_log:
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/hierarchy/auto-clear.ts'
+    resolution: flagged
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/hooks/context-auto-clear.js
+    resolution: flagged
+drift_checked: '2026-10-23'
 ---
 
 ## Description

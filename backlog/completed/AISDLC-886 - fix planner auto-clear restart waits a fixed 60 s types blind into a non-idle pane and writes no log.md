@@ -1,19 +1,38 @@
 ---
 id: AISDLC-886
-title: 'fix(hierarchy): planner auto-clear restart waits a fixed 60 s, types blind into a non-idle pane with text in the prompt, writes no log, and the handoff lands in a stale dated file'
+title: >-
+  fix(hierarchy): planner auto-clear restart waits a fixed 60 s, types blind
+  into a non-idle pane with text in the prompt, writes no log, and the handoff
+  lands in a stale dated file
 status: Done
 assignee: []
 created_date: '2026-10-14'
-labels: [hierarchy, planner, bug, velocity]
+labels:
+  - hierarchy
+  - planner
+  - bug
+  - velocity
 dependencies: []
 references:
   - pipeline-cli/src/hierarchy/clear.ts
   - pipeline-cli/src/cli/hierarchy.ts
   - pipeline-cli/src/hierarchy/handoff.ts
-  - ai-sdlc-plugin/hooks/context-auto-clear.sh
-  - ai-sdlc-plugin/hooks/context-auto-clear.js
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/hooks/context-auto-clear.sh
+    resolution: flagged
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/hooks/context-auto-clear.js
+    resolution: flagged
+drift_checked: '2026-10-23'
 ---
 
 ## Context
