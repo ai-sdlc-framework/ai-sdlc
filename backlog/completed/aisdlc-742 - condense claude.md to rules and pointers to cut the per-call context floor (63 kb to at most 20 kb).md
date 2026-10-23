@@ -36,6 +36,8 @@ Out of scope: changing any rule's meaning; editing the plugin's hook or skill te
 - [x] The PR body reports the byte size and an approximate token count before and after (use `wc -c` and bytes/4).
 - [x] The three reviewers' prompts (`/ai-sdlc execute` step 7) still pass: run every test that references CLAUDE.md content (`grep -rl "CLAUDE.md" --include=*.test.* .` and run those), and they pass.
 - [x] Velocity impact paragraph in the PR body.
+
+**Superseded by AISDLC-782:** the one-time diet is now a structural rule (fixed prefix under `prefix.maxBytes`, path-bound `.claude/rules/*.md`, control linter). See AISDLC-782.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Final Summary

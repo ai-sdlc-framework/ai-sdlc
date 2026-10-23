@@ -2,6 +2,8 @@
  * `cli-context` — RFC-0053 knowledge layer tooling.
  *
  * Subcommands:
+ *   ingest-sections — write each `##` section of a markdown file as a knowledge entry
+ *                     (trunk, source, decay) under the tracked root (AISDLC-782).
  *   validate        — validate entries in both knowledge roots and the ontology.
  *                     Exit 1 on any error; `--strict` also fails on classification
  *                     warnings (likely mis-scoped entries).
@@ -11,12 +13,16 @@
  *                     configured protected root is tracked / not git-ignored. With `--rev`, also
  *                     scans every commit in the pushed range, not only HEAD/the index.
  */
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join } from 'node:path';
 import process from 'node:process';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
+import { now } from '../clock.js';
 import { loadKnowledgeConfig } from '../knowledge/config.js';
 import { checkKnowledgeScope, checkKnowledgeScopeRange } from '../knowledge/scope-check.js';
+import { sectionsToEntries } from '../knowledge/ingest-sections.js';
+import { loadOntology } from '../knowledge/ontology.js';
 import { findProtectedCitations, validateKnowledge } from '../knowledge/store.js';
 
 export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
@@ -72,6 +78,35 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           process.stderr.write(`error: PR body cites protected knowledge: ${cited.join(', ')}\n`);
           process.exitCode = 1;
         }
+      },
+    )
+    .command(
+      'ingest-sections <file>',
+      'Ingest the ## sections of a markdown file as knowledge entries',
+      (y) =>
+        y
+          .positional('file', { type: 'string', demandOption: true })
+          .option('heading', { type: 'string', array: true })
+          .option('observed', { type: 'string', default: now().toISOString().slice(0, 10) }),
+      (args) => {
+        const projectDir = String(args['project-dir']);
+        const config = loadKnowledgeConfig(projectDir);
+        const trackedAbs = isAbsolute(config.trackedRoot)
+          ? config.trackedRoot
+          : join(projectDir, config.trackedRoot);
+        const { ontology } = loadOntology(trackedAbs);
+        const file = String(args.file);
+        const entries = sectionsToEntries(readFileSync(join(projectDir, file), 'utf-8'), ontology, {
+          source: file,
+          observed: String(args.observed),
+          headings: args.heading as string[] | undefined,
+        });
+        for (const e of entries) {
+          const out = join(trackedAbs, e.path);
+          mkdirSync(dirname(out), { recursive: true });
+          writeFileSync(out, e.text);
+        }
+        process.stdout.write(`${entries.length} entries written\n`);
       },
     )
     .demandCommand(1, 'A subcommand is required. Run with --help for the list.')
