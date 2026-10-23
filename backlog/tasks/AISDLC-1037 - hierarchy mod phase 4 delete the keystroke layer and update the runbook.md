@@ -42,7 +42,7 @@ RFC-0058 phase 4 (Signed Off 2026-10-22). With all three roles on the module, th
 ## Acceptance Criteria
 
 - [ ] `clear.ts` holds no pane-text diffing and no key sending; `cli-hierarchy clear <name>` sends a rotate request and reports the acknowledgement or a named refusal (tests).
-- [ ] `caller-identity.ts` and every `check-sender` flag are deleted with their tests; a test asserts no `send-keys` invocation remains under `pipeline-cli/src/hierarchy/`.
+- [ ] Every `check-sender` flag is deleted with its tests; a ratchet test confines `send-keys` under `pipeline-cli/src/hierarchy/` to the two remaining sites (`tmux.ts` sendExit, `brief-notify.ts`). DEFERRED: deleting `caller-identity.ts` (still the roster identity source for dispatch, resume, executor-start and escalation-chain) and the last two send-keys sites need a module-side replacement and are a follow-up.
 - [ ] `cli-hierarchy up`, `attach` and `terminals` still create and attach tmux windows (existing tests pass).
 - [ ] `docs/operations/cli-hierarchy.md` and the operator runbook are updated as in Scope 4; `requiresDocs: operator-runbook` of RFC-0058 is satisfied and `deferredDocs` is cleared in the RFC frontmatter.
-- [ ] The dark-code baseline shrinks by the deleted modules; `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [ ] The dark-code baseline has no hierarchy entries to remove (none were listed; no module became dark); `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
