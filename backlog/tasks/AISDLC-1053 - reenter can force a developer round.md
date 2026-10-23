@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1053
 title: 'A reenter can force a developer round: the resume note reaches the developer instead of being skipped on an unchanged patch id'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-22'
 labels:
