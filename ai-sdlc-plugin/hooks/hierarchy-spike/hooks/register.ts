@@ -1,18 +1,16 @@
-// RFC-0058 phase 0 spike (AISDLC-1033). Inert unless AI_SDLC_HIERARCHY_SPIKE=1.
+// RFC-0058 phase 0 spike (AISDLC-1033). Standalone mod folder, loaded only via --plugin-dir; the hooks-module sandbox has no
+// process global, so there is no env gate.
 // Every hook appends one JSON line to the $.store list below (dumped to .ai-sdlc/hierarchy-spike.log). Control messages
 // (received text) drive the experiments:
 //   hier:consume       -> session.receive returns { consumed } (model must stay silent)
 //   hier:run clear     -> store a marker, $.command.run clear, then (next session.start) submit /hier-ping
 //   hier:run compact   -> same sequence with $.session.compact (fallback when clear drops)
+//   hier:dump          -> submits the accumulated $.store log as a prompt (no file API in a hooks module)
 //   hier:relay-bench   -> not consumed: the model relays (baseline for the saving measurement)
 type Any = any;
 
 export const MARKER_KEY = 'hierarchy-spike/marker';
 export const PENDING_KEY = 'hierarchy-spike/pending';
-
-export function spikeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.AI_SDLC_HIERARCHY_SPIKE === '1';
-}
 
 // A hooks module may import only relative files and "claude-code" (claude plugin validate
 // refuses node:fs) and may never pass `$` around, so there is no shared sink: each call site
@@ -42,8 +40,6 @@ function outcome(r: Any): Record<string, unknown> {
 }
 
 export const register = (on: Any): void => {
-  if (!spikeEnabled()) return;
-
   on('session.start', async ($: Any, e: Any, next: Any) => {
     // A second module_loaded after a clear means the module reloaded.
     await $.store.set(STORE_LOG_KEY, [
@@ -122,6 +118,13 @@ export const register = (on: Any): void => {
         ...((await $.store.get(STORE_LOG_KEY)) ?? []),
         line('session.receive.consumed', { returned: 'consumed' }),
       ]);
+      return { consumed: true };
+    }
+
+    if (text.startsWith('hier:dump')) {
+      const log = ((await $.store.get(STORE_LOG_KEY)) ?? []) as string[];
+      const r = await safe(() => $.prompt.submit({ text: log.join('\n') }));
+      await $.store.set(STORE_LOG_KEY, [...log, line('dump', outcome(r))]);
       return { consumed: true };
     }
 

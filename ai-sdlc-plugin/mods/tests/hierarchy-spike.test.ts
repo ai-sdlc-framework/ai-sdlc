@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { register, STORE_LOG_KEY } from '../../hooks/hierarchy-spike/hooks/register.ts';
 
 function setup() {
@@ -18,16 +18,18 @@ function setup() {
 }
 
 describe('hierarchy-spike', () => {
-  afterEach(() => {
-    delete process.env.AI_SDLC_HIERARCHY_SPIKE;
-  });
-
-  it('registers nothing without the env guard', () => {
-    expect(setup().handlers.size).toBe(0);
+  it('registers all six handlers without touching process', () => {
+    expect([...setup().handlers.keys()].sort()).toEqual([
+      'session.end',
+      'session.measure',
+      'session.receive',
+      'session.start',
+      'turn.complete',
+      'turn.start',
+    ]);
   });
 
   it('logs hooks, consumes, and runs the clear then ping sequence', async () => {
-    process.env.AI_SDLC_HIERARCHY_SPIKE = '1';
     const { handlers, $, next, kv } = setup();
     const recv = handlers.get('session.receive');
     expect(await recv($, { text: 'hier:consume' }, next)).toEqual({ consumed: true });
@@ -46,5 +48,44 @@ describe('hierarchy-spike', () => {
       ran: false,
       drop: 'unsupported',
     });
+  });
+
+  it('hier:dump submits the log, and records a refused submit', async () => {
+    const { handlers, $, next, kv } = setup();
+    const recv = handlers.get('session.receive');
+    expect(await recv($, { text: 'hier:dump' }, next)).toEqual({ consumed: true });
+    expect($.prompt.submit).toHaveBeenCalledTimes(1);
+    expect(($.prompt.submit.mock.calls[0] as any)[0].text).toContain('session.receive');
+    $.prompt.submit.mockResolvedValueOnce({ drop: 'busy' } as any);
+    await recv($, { text: 'hier:dump' }, next);
+    $.prompt.submit.mockRejectedValueOnce(new Error('boom'));
+    await recv($, { text: 'hier:dump' }, next);
+    const dumps = (kv.get(STORE_LOG_KEY) as string[])
+      .map((l) => JSON.parse(l))
+      .filter((l) => l.event === 'dump');
+    expect(dumps).toMatchObject([
+      { ran: true },
+      { ran: false, drop: 'busy' },
+      { ran: false, threw: 'boom' },
+    ]);
+  });
+
+  it('records the pending ping outcome and tolerates thrown host calls', async () => {
+    const { handlers, $, next, kv } = setup();
+    $.command.run.mockRejectedValueOnce(new Error('no clear'));
+    $.session.id = async () => {
+      throw new Error('no id');
+    };
+    await handlers.get('session.receive')($, { text: 'hier:run clear' }, next);
+    $.prompt.submit.mockResolvedValueOnce({ drop: 'busy' } as any);
+    await handlers.get('session.start')($, undefined, next);
+    const lines = (kv.get(STORE_LOG_KEY) as string[]).map((l) => JSON.parse(l));
+    expect(lines.find((l) => l.event === 'clear.result')).toMatchObject({ threw: 'no clear' });
+    expect(lines.find((l) => l.event === 'session.start')).toMatchObject({ sessionId: null });
+    expect(lines.find((l) => l.event === 'prompt.submit')).toMatchObject({
+      after: 'clear',
+      drop: 'busy',
+    });
+    expect(kv.get('hierarchy-spike/pending')).toBeNull();
   });
 });

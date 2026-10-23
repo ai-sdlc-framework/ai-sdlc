@@ -21,7 +21,12 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'json-summary', 'json'],
       reportsDirectory: './coverage',
-      include: ['context-meter/hooks/**/*.ts', 'context-meter/hooks/**/*.tsx'],
+      allowExternal: true,
+      include: [
+        'context-meter/hooks/**/*.ts',
+        'context-meter/hooks/**/*.tsx',
+        '../hooks/hierarchy-spike/hooks/**/*.ts',
+      ],
       thresholds: { lines: 90 },
     },
   },

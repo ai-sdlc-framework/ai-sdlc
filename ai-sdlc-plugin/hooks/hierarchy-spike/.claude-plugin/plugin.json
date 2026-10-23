@@ -1,7 +1,7 @@
 {
   "name": "hierarchy-spike",
   "version": "0.0.1",
-  "description": "RFC-0058 phase 0 spike: logs session hooks and tests clear, store, consumed receive (AISDLC-1033). Inert unless AI_SDLC_HIERARCHY_SPIKE=1; removed by phase 1.",
+  "description": "RFC-0058 phase 0 spike: logs session hooks and tests clear, store, consumed receive (AISDLC-1033). Standalone folder, loaded only via --plugin-dir; removed by phase 1.",
   "author": { "name": "AI-SDLC Framework", "url": "https://ai-sdlc.io" },
   "license": "Apache-2.0"
 }
