@@ -66,12 +66,24 @@ describe('release.yml — single push to the release-please branch (AISDLC-956)'
     assert.equal(rp.length, 1);
   });
 
-  it('the post-merge sync-plugin-runtime-deps job pushes pins to main', () => {
+  it('the post-merge sync job opens a PR and never pushes to main (AISDLC-1059)', () => {
     const job = workflow.jobs['sync-plugin-runtime-deps'];
     assert.ok(job, 'post-merge sync job must remain');
-    const pushes = job.steps.filter((s) => /git push/.test(s.run ?? ''));
-    assert.equal(pushes.length, 1);
-    assert.match(pushes[0].run, /git push origin HEAD:main/);
+    const runs = job.steps.map((s) => s.run ?? '').join('\n');
+    assert.doesNotMatch(runs, /git push[^\n]*\bmain\b/);
+    assert.doesNotMatch(runs, /HEAD:main/);
+    assert.match(runs, /git push -u origin "HEAD:refs\/heads\/\$\{BRANCH\}"/);
+    assert.match(runs, /BRANCH="chore\/sync-runtime-pins-/);
+    assert.match(runs, /gh pr create/);
+    assert.doesNotMatch(runs, /gh pr create[^\n]*--draft/);
+    assert.equal(job.permissions['pull-requests'], 'write');
+  });
+
+  it('the cache-rebuild step retries instead of aborting on an install failure', () => {
+    const step = workflow.jobs['publish-npm'].steps.find((s) =>
+      /Rebuild plugin cache/.test(s.name ?? ''),
+    );
+    assert.match(step.run, /install-runtime-deps\.sh"[^\n]*\|\|/);
   });
 
   it('publish-npm syncs pins in its working tree before running pnpm test', () => {
