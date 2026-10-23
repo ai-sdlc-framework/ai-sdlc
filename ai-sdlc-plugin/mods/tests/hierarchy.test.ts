@@ -121,8 +121,8 @@ describe('hierarchy module: gate', () => {
     expect(logOf(s.kv)[0]).toContain('role=executor tier=managed');
   });
 
-  it('records a user tier without identity for the dispatch role', async () => {
-    const s = setup({ role: 'operator-dispatch' });
+  it('records a user tier without identity for the planner role', async () => {
+    const s = setup({ role: 'planner' });
     await s.start();
     expect(logOf(s.kv)[0]).toContain('tier=user identity=none');
   });
