@@ -24,8 +24,8 @@
  *     replace its roster entry; refuses while it holds a task unless `--after-task`.
  *   - `register <executor>` — re-record an executor restarted by hand under a new pid, after
  *     checking its tmux pane and process.
- *   - `executor-start [--wait <sec>]` — an executor's identity, repository check and a
- *     blocking claim in one call; prints `{taskId|null, ...}`.
+ *   - `executor-start` — an executor's identity, repository check and one claim
+ *     in one call; prints `{taskId|null, ...}`.
  *   - `clear <executor-name> [--settle-ms <n>]` — empty an executor's context:
  *     `/clear`, wait, then `/ai-sdlc executor`. Refuses an executor that holds
  *     an inflight task.
@@ -276,14 +276,10 @@ Options for tick:
   --work-dir <path>        Repository root (default the current directory)
 
 Options for executor-start:
-  --wait <seconds>         How long to block waiting for a task (default 1500). Prints the
-                           identity line, then one JSON line: {name, project, dispatch,
-                           taskId|null, manifest?}. Exit 1 when this is not an executor
-                           session, the working directory is not the project's repository, or
-                           the sender is not the dispatch session. It runs the repository and
-                           sender checks itself (AISDLC-764); the sender is checked from
-                           --sender-pid / --sender-ref, or a start token written by clear (refuses with unchecked-start, claiming nothing, when neither).
-  --sender-pid <n>, --sender-ref <ref>   as for check-sender
+  (none)                   Prints the identity line, then one JSON line: {name, project, dispatch,
+                           taskId|null, manifest?}. Claims once and does not wait: the hierarchy
+                           hooks module wakes an idle executor. Exit 1 when this is not an executor
+                           session or the working directory is not the project's repository.
 
 Options for check-sender:
   --sender-pid <n>         Pid the harness reports for the sender
@@ -955,18 +951,11 @@ export async function runHierarchyCli(
         return 0;
       }
       case 'executor-start': {
-        const waitSec = intFlag(flags, 'wait');
-        const startPid = intFlag(flags, 'sender-pid');
-        if (waitSec === null || startPid === null) return 2;
-        const startRef = flags['sender-ref'] === 'true' ? undefined : flags['sender-ref'];
         try {
           const result = await executorStart(
             {
               boardDir: deps.boardDir,
               cwd: deps.cwd,
-              ...(startPid === undefined ? {} : { senderPid: startPid }),
-              ...(startRef === undefined ? {} : { senderRef: startRef }),
-              ...(waitSec === undefined ? {} : { waitSec }),
             },
             {
               identity:

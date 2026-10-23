@@ -520,25 +520,45 @@ refusal, `2` on a malformed number or missing name.
 
 ### `executor-start`
 
-An executor's whole start-up in one call that costs no model calls while it waits: roster
-identity (the calling session must be a running executor), the `check-repo` test, then a
-blocking claim (`cli-dispatch claim --wait`, which wakes on a change to `queue/` and re-checks
-every 2 s).
+An executor's whole start-up in one call: roster identity (the calling session must be a running
+executor), the `check-repo` test, then one claim (`cli-dispatch claim`, no wait). The board claim is the
+authority (RFC-0051).
 
 ```bash
-cli-hierarchy executor-start [--wait <seconds>]
+cli-hierarchy executor-start
 ```
 
 Prints the `[executor] I am '<name>'` identity line, then one JSON line
-`{"name", "project", "dispatch", "taskId": "<id>"|null, "manifest": {...}}`. `--wait` defaults to
-1500. Because that exceeds the Bash tool's 600 s foreground cap, the executor runs it with the Bash
-tool's `run_in_background: true`, stops its turn, and reads the JSON when the completion
-notification re-invokes the session. Exit `1` when the session is not an executor or the working directory is not the project's
-repository.
+`{"name", "project", "dispatch", "taskId": "<id>"|null, "manifest": {...}}`. Exit `1` when the session is not an
+executor or the working directory is not the project's repository.
 
-**Idle path.** When `taskId` is `null` the executor keeps its context and re-issues the same blocking
-`executor-start` call (a 25-minute cadence, no clear). With no background option it falls back to
-`ScheduleWakeup` after `spec.inSessionAgent.emptyQueueHibernateSec` (default 1800 seconds).
+**Removed flags (AISDLC-1034, RFC-0058 phase 1).** `--wait`, `--sender-pid` and `--sender-ref` are gone, and so is
+the start token (`start-token.ts`, `<board-dir>/starts/`): an executor no longer blocks in a background call, and
+the start no longer checks who typed it. `check-sender` stays for later instruction messages until phase 4.
+
+**Idle path.** When `taskId` is `null` the executor ends its reply with `[executor] idle` and keeps its context.
+
+## The hierarchy hooks module (executor role)
+
+`ai-sdlc-plugin/hooks/hierarchy/register.tsx`, listed under `modules` in `ai-sdlc-plugin/hooks/hooks.json`
+(RFC-0058, OQ-2). It replaces the 25-minute `--wait` poll and the typed `/clear` for an executor.
+
+- **Role gate.** At `session.start` it reads the role (`HIERARCHY_ROLE` or `AI_SDLC_HIERARCHY_ROLE`, the module option
+  `role`, or the role carried across a clear in `$.store`). With no role it registers no role hook.
+- **Version and primitive guard (OQ-5).** It compares `$.session.version()` with the floor recorded by the phase 0 spike
+  (2.1.307) and probes `prompt.submit`, `command.run`, `session.compact`, `session.measure` and `session.send`. On a miss it
+  registers nothing and logs one line naming the missing primitive and the floor (the `hierarchy/log` list in `$.store`).
+- **Start line (OQ-4).** The line names the role and the detected tier; when `$.session.identity()` answers, the identity
+  is recorded as an informational field, never as authority.
+- **Wake.** `session.receive` consumes an `enqueue` message from the dispatch roster name (no model turn) and calls
+  `$.prompt.submit({ text: '/ai-sdlc:executor' })`, which runs once the session is idle. Status noise from dispatch is
+  consumed; anything else passes through.
+- **Rotation (OQ-1).** After the verdict (a main-loop reply ending in `[executor] verdict reported`) the module writes the
+  handoff, runs `$.command.run({ command: 'clear' })` with `$.store` carrying the role, resume command and last reply, and
+  submits the resume command at the next `session.start`. On `{ drop }` it runs `$.session.compact` with the hierarchy
+  summary prompt; on a second failure it ends the session so `cli-hierarchy up` starts a fresh one. `session.measure`
+  over 120k tokens triggers the same rotation, and during a task it waits for the task's last reply (never mid-task).
+- **Mixed fleets.** A tmux-driven dispatch session can still enqueue for a mod-driven executor: both read the same board.
 
 **Single clear rule (AISDLC-815).** A hierarchy session clears when its context passes its role threshold (the
 AISDLC-766 Stop hook: planner 150k, dispatch 120k, executor 120k tokens, set under `contextThresholds` in
@@ -1071,19 +1091,9 @@ before the tick, and its digest never repeats an item that carries a ruling.
 
 **A rule gates the claim (AISDLC-1025).** A manifest whose ruling names an `--until` task without a
 success verdict in `done/` is skipped by `claim` (and listed as ineligible, with the reason), so no
-executor spends a run on it; the hold lifts by itself once that task is done. Likewise
-`executor-start` refuses with `unchecked-start` when it has neither `--sender-pid` nor `--sender-ref`
-and no valid start token.
+executor spends a run on it; the hold lifts by itself once that task is done. 
 
-**Start token (AISDLC-1028).** `clear` types the executor command, which has no harness envelope, so a
-clear run by the dispatch caller first writes `<boardDir>/starts/<executor>.json`
-(`{ issuerPid, issuerName, issuedAt }`); the planner writes none. A flagless `executor-start` verifies its own token
-and proceeds only when `issuerPid` is the roster's running dispatch pid and `issuedAt` is within 30
-minutes (first start only); it then records `verifiedAt` in the file, so re-issued starts (for example
-after a `taskId: null` wait) need no flag until the next `clear` rewrites the token or a claim removes
-it; otherwise it refuses with `unchecked-start`, naming the two ways in (a clear, or the harness-reported
-sender flag). The
-`--sender-pid` / `--sender-ref` path and `check-sender` for later messages are unchanged.
+**Start token (AISDLC-1028), removed (AISDLC-1034).** `clear` no longer writes `<boardDir>/starts/<executor>.json` and `executor-start` no longer verifies one.
 
 ## Restarting after a plugin upgrade
 
@@ -1802,9 +1812,8 @@ One pass of the loop:
    moves the next eligible manifest to `inflight/` with `workerId` equal to the
    roster name. That equality is what lets `cli-hierarchy status` and `down` join an
    inflight task to its session. When nothing is eligible, the executor blocks on
-   the board (`cli-hierarchy executor-start`, up to 1,500 s, no model calls
-   while it waits); if still nothing is eligible it clears its own context and restarts
-   (`cli-hierarchy clear --self --resume-after 30`), or, with no tmux pane to clear, schedules a
+   the board (`cli-hierarchy executor-start`, one claim); if nothing is eligible it stays idle and the hierarchy
+   hooks module wakes it on the next enqueue message, or, without the module, it schedules a
    wake-up after `spec.inSessionAgent.emptyQueueHibernateSec` (default 1800 seconds; the retired `/ai-sdlc dispatch-worker`, AISDLC-763, shared this default).
 3. **Execute.** It runs `/ai-sdlc execute <task-id>` with the task id and no other
    argument. The pipeline is not modified for executors.

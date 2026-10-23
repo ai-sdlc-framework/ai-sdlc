@@ -157,7 +157,6 @@ export {
 } from './operational.js';
 export {
   DEFAULT_EMPTY_QUEUE_HIBERNATE_SEC,
-  DEFAULT_EXECUTOR_WAIT_SEC,
   executorStart,
   type ExecutorStartDeps,
   type ExecutorStartOptions,
