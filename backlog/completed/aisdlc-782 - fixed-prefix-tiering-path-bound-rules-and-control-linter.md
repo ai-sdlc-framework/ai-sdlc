@@ -2,7 +2,7 @@
 id: AISDLC-782
 title: >-
   fixed-prefix tiering, path-bound rules and control linter
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-09'
 labels:
