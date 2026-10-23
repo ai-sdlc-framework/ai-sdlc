@@ -38,8 +38,12 @@ a collision rate that became visible once the merge queue was dropped (AISDLC-40
    `runtimeDependencies` pins, so they lag on that branch;
    `scripts/sync-plugin-runtime-deps.mjs --check` (in `pnpm test`) tolerates
    that lag when the branch is `release-please--branches--main`. After the
-   release lands, the `sync-plugin-runtime-deps` job commits the pins to
-   `main`, and `publish-npm` syncs them in its working tree before testing.
+   release lands, the `sync-plugin-runtime-deps` job commits the pins to a
+   `chore/sync-runtime-pins-<version>` branch and opens a PR (AISDLC-1059;
+   `main` is protected, so a direct push is refused). The auto-enable workflow
+   arms it and it lands through `ai-sdlc/pr-ready`. `publish-npm` syncs the pins
+   in its working tree before testing. The cache-rebuild step retries a failed
+   install, since the registry can lag `publish` by minutes.
    Plugin `version` fields still ride on the one release-please commit via
    `extra-files`.
 

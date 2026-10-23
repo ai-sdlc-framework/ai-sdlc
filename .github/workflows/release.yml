@@ -82,7 +82,8 @@ jobs:
     # each time). It is gone: the release branch now takes exactly ONE push
     # (release-please's), `scripts/sync-plugin-runtime-deps.mjs --check`
     # tolerates the expected pin lag on that branch, and this job lands the
-    # pins on main right after the release lands.
+    # pins on main right after the release lands, through a PR (AISDLC-1059):
+    # main is protected, so a direct push is refused.
     name: Sync plugin runtimeDependencies pins
     needs: release-please
     if: |
@@ -91,6 +92,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -104,17 +106,25 @@ jobs:
           node-version: 22
       - name: Sync runtimeDependencies pins to released versions
         run: node scripts/sync-plugin-runtime-deps.mjs
-      - name: Commit pin updates if any
+      - name: Open a PR with the pin updates if any
+        env:
+          GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
         run: |
           if git diff --quiet -- ai-sdlc-plugin/plugin.json ai-sdlc-plugin/.claude-plugin/plugin.json; then
-            echo "[sync-plugin-runtime-deps] no drift — nothing to commit"
+            echo "[sync-plugin-runtime-deps] no drift, nothing to commit"
             exit 0
           fi
+          VERSION="$(node -p "require('./ai-sdlc-plugin/plugin.json').version")"
+          BRANCH="chore/sync-runtime-pins-${VERSION}"
           git config user.email "release-bot@ai-sdlc.io"
           git config user.name "AI-SDLC Release Bot"
+          git checkout -b "$BRANCH"
           git add ai-sdlc-plugin/plugin.json ai-sdlc-plugin/.claude-plugin/plugin.json
           git commit -m "chore(plugin): sync runtimeDependencies pins to released runtime (AISDLC-574)"
-          git push origin HEAD:main
+          git push -u origin "HEAD:refs/heads/${BRANCH}"
+          gh pr create --base main --head "$BRANCH" \
+            --title "chore(plugin): sync runtimeDependencies pins to ${VERSION} (AISDLC-574)" \
+            --body "Post-release pin sync. Main is protected, so the pins land through this PR (AISDLC-1059)."
 
   publish-npm:
     name: Publish npm packages
@@ -181,7 +191,9 @@ jobs:
           CACHE_DIR="$(mktemp -d)"
           cp -R ai-sdlc-plugin/. "$CACHE_DIR/"
           for attempt in 1 2 3 4 5; do
-            bash "$CACHE_DIR/scripts/install-runtime-deps.sh" "$CACHE_DIR" --force
+            # The step shell is bash -e: an ETARGET from a registry that has
+            # not propagated yet must retry, not abort.
+            bash "$CACHE_DIR/scripts/install-runtime-deps.sh" "$CACHE_DIR" --force || echo "[release] attempt $attempt: install failed (registry lag?)"
             STALE="$(node "$CACHE_DIR/scripts/check-stale-runtime-deps.mjs" "$CACHE_DIR")"
             if [ -z "$STALE" ]; then
               echo "[release] plugin cache rebuilt; no stale runtime dependency"
