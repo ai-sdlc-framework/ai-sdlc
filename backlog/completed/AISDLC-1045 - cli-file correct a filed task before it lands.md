@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1045
 title: 'cli-file: correct a filed-but-unmerged task through the sanctioned path (rebase takes a corrected source, update accepts an open filing branch)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22'
 labels:

@@ -104,6 +104,10 @@ The five-step production algorithm (DEC-0090) is applied as rubric judgment at t
 **Five-step review (requirements first).** 1. Requirement questioned: <the requirement and who or which decision set it>. 2. Deleted: <the part or process removed, or "nothing to delete" and why>. 3. Simplified or optimised: <what, after the deletion>. 4. Accelerated: <cycle-time change, after steps 1 to 3>. 5. Automated: <what, last>.
 ```
 
+## Correcting a filed task before it lands (AISDLC-1045)
+
+A filing PR that goes red because the task body is wrong (a path that does not exist on main) is corrected, never re-filed: `cli-file rebase <id> --source <corrected.md> --pr` checks the source (ASCII filename, matching id, drift, DoR), rebuilds `ai-sdlc/file-<id>` in place from current `origin/main` with the corrected file, lease pushes the same branch and keeps the same PR. `cli-file task <path> --update --pr` does the same when the task exists only on its open filing branch; a task already on `origin/main` keeps the `ai-sdlc/update-<id>` flow.
+
 ## Roles
 
 - **Planner** authors decision records, and runs the digest for the operator.

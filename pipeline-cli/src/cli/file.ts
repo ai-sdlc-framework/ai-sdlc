@@ -435,6 +435,22 @@ export function validateTaskFile(
   return { abs, rel, id };
 }
 
+function resolveSource(repo: string, taskPath: string): string {
+  return isAbsolute(taskPath) ? taskPath : resolve(repo, taskPath);
+}
+
+/** AISDLC-1045: true when the task is absent from origin/main but `origin/ai-sdlc/file-<id>` exists. */
+function onlyOnFilingBranch(deps: FileDeps, repo: string, taskPath: string): boolean {
+  const abs = resolveSource(repo, taskPath);
+  if (!existsSync(abs)) return false;
+  const id = taskIdOf(abs);
+  const fm = readFileSync(abs, 'utf8').match(/^id:\s*['"]?([A-Za-z]+-\d+(?:\.\d+)?)['"]?\s*$/m);
+  const rel = `backlog/tasks/${basename(abs)}`;
+  if (findOnMain(deps, repo, rel, id, fm ? [fm[1]] : []) !== null) return false;
+  const ref = `refs/remotes/origin/ai-sdlc/file-${id.toLowerCase()}`;
+  return deps.exec('git', ['rev-parse', '--verify', '--quiet', ref], repo).status === 0;
+}
+
 export function fileTask(
   repo: string,
   taskPath: string,
@@ -442,6 +458,15 @@ export function fileTask(
   deps: FileDeps = defaultDeps,
 ) {
   const update = opts.update === true;
+  if (update && !opts.validated && onlyOnFilingBranch(deps, repo, taskPath)) {
+    // AISDLC-1045: the task is not on main but sits on its open filing branch; correct it there.
+    return fileRebase(
+      repo,
+      taskIdOf(resolveSource(repo, taskPath)),
+      { pr: opts.pr, source: taskPath },
+      deps,
+    );
+  }
   const { abs, rel, id } = opts.validated ?? validateTaskFile(repo, taskPath, deps, update);
   const slug = id.toLowerCase();
   const verb = update ? 'update' : 'file';
@@ -570,10 +595,29 @@ export function fileDecision(
 export function fileRebase(
   repo: string,
   id: string,
-  opts: { pr: boolean },
+  opts: { pr: boolean; source?: string },
   deps: FileDeps = defaultDeps,
 ) {
   const slug = id.toLowerCase();
+  // AISDLC-1045: a corrected source replaces the branch's copy of the task file; checked first.
+  let source: { abs: string; content: string } | undefined;
+  if (opts.source !== undefined) {
+    const abs = resolveSource(repo, opts.source);
+    assertAscii(`backlog/tasks/${basename(abs)}`);
+    if (!abs.toLowerCase().endsWith('.md')) {
+      throw new FileRefusal(`task source must be a .md file: ${basename(abs)}`);
+    }
+    if (!existsSync(abs)) throw new FileRefusal(`task file not found: ${abs}`);
+    const sourceId = taskIdOf(abs);
+    if (sourceId.toLowerCase() !== slug) {
+      throw new FileRefusal(`source task id ${sourceId} does not match ${id}`);
+    }
+    const drift = deps.drift(sourceId, repo);
+    if (drift) throw new FileRefusal(drift);
+    const dor = deps.dor(abs, repo);
+    if (dor) throw new FileRefusal(dor);
+    source = { abs, content: readFileSync(abs, 'utf8') };
+  }
   const oldBranch = `ai-sdlc/file-${slug}`;
   const old = `origin/${oldBranch}`;
   git(deps, repo, 'fetch', 'origin');
@@ -602,6 +646,14 @@ export function fileRebase(
       throw new FileRefusal(`refusing to rebuild path outside the filing scope: ${f}`);
     }
   }
+  const taskFile = source
+    ? changed.find(
+        (f) => f.startsWith('backlog/tasks/') && basename(f).toLowerCase().startsWith(`${slug} `),
+      )
+    : undefined;
+  if (source && !taskFile) {
+    throw new FileRefusal(`branch ${old} has no task file for ${id} to replace`);
+  }
   const subjectOld = git(deps, repo, 'log', '-1', '--format=%s', old).trim();
   let own: string[] = [];
   if (changed.includes(EVENT_LOG_REL)) {
@@ -627,9 +679,13 @@ export function fileRebase(
     inPlace: { remoteBranch: oldBranch, leaseSha },
     materialise(wt) {
       for (const f of changed.filter((c) => c !== EVENT_LOG_REL)) {
+        mkdirSync(dirname(join(wt, f)), { recursive: true });
+        if (source && f === taskFile) {
+          writeFileSync(join(wt, f), source.content);
+          continue;
+        }
         const out = deps.exec('git', ['show', `${old}:${f}`], repo);
         if (out.status !== 0) throw new Error(`cannot read ${f} from ${old}`);
-        mkdirSync(dirname(join(wt, f)), { recursive: true });
         writeFileSync(join(wt, f), out.stdout);
       }
       if (own.length > 0) appendEvents(wt, own, `rebuilt log for ${id}`);
@@ -725,7 +781,8 @@ export async function runFileCli(argv: string[] = hideBin(process.argv)): Promis
           .option('update', {
             type: 'boolean',
             default: false,
-            describe: 'edit a task that already exists on origin/main (refused if it does not)',
+            describe:
+              'edit a task on origin/main, or on its open filing branch (then same as rebase --source)',
           })
           .option('brief', {
             type: 'boolean',
@@ -779,11 +836,20 @@ export async function runFileCli(argv: string[] = hideBin(process.argv)): Promis
         pacingOptions(
           y
             .positional('id', { type: 'string', demandOption: true })
+            .option('source', {
+              type: 'string',
+              describe: 'corrected task file that replaces the branch copy (same id required)',
+            })
             .option('pr', { type: 'boolean', default: false }),
         ),
       async (a) => {
         if (!(await paced(a, a.id as string, `cli-file rebase ${a.id} --pr`))) return;
-        const r = guard(() => fileRebase(repo, a.id as string, { pr: a.pr as boolean }));
+        const r = guard(() =>
+          fileRebase(repo, a.id as string, {
+            pr: a.pr as boolean,
+            source: a.source as string | undefined,
+          }),
+        );
         if (r) report(r);
       },
     )
