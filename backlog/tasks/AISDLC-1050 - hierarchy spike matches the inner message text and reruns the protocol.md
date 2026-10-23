@@ -10,7 +10,7 @@ labels:
   - spike
 dependencies: []
 references:
-  - spec/rfcs/RFC-0058-session-hierarchy-as-mods.md
+  - spec/rfcs/RFC-0058-session-hierarchy-on-mods.md
   - ai-sdlc-plugin/hooks/hierarchy-spike/hooks/register.ts
   - ai-sdlc-plugin/hooks/hierarchy-spike/README.md
 priority: high
