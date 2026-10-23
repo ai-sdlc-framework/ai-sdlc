@@ -49,110 +49,6 @@ function turnRunning(state: PlannerState): boolean {
   return state.inTurn;
 }
 
-interface RoleConfig {
-  threshold: number;
-  plan: RotationPlan;
-  /** Consume status noise from dispatch in session.receive (planner only). */
-  receive: boolean;
-}
-
-/** Register the planner hooks. Called from the gate once the role, version and probes passed. */
-export function registerPlanner(on: Any, state: PlannerState): void {
-  registerRotating(on, state, {
-    threshold: PLANNER_ROTATE_AT_TOKENS,
-    plan: PLANNER_PLAN,
-    receive: true,
-  });
-}
-
-function registerRotating(on: Any, state: PlannerState, cfg: RoleConfig): void {
-  // Planner-addressed rulings and escalations (also the phase 2 escalation-file notices from dispatch)
-  // pass through unchanged; only status noise from dispatch is consumed.
-  if (cfg.receive)
-    on('session.receive', async ($: Any, e: Any, next: Any) => {
-      const p: Ports = {
-        storeGet: (k) => $.store.get(k),
-        storeSet: (k, v) => $.store.set(k, v),
-        runCommand: (a) => $.command.run(a),
-        compact: (a) => $.session.compact(a),
-        submit: (a) => $.prompt.submit(a),
-      };
-      // A failure in this gating hook must never swallow a message: fall through to the model.
-      const handle = async () => {
-        if (!state.enabled) return next(e);
-        await resumeAfterClear(p, state);
-        const raw = String(e?.text ?? '');
-        if (DISPATCH_NAME.test(senderOf(raw))) {
-          const text = innerText(raw);
-          // `cli-hierarchy clear planner` (RFC-0058 phase 4): rotate now, or at the end of the turn.
-          if (/^rotate\b/i.test(text)) {
-            if (turnRunning(state)) state.pendingRotate = true;
-            else await rotatePlanner(p, state, cfg.plan);
-            return { consumed: 'hierarchy:rotate' };
-          }
-          if (STATUS_NOISE.test(text)) return { consumed: 'hierarchy:status' };
-        }
-        return next(e);
-      };
-      return handle().catch(() => next(e));
-    });
-
-  on('turn.start', async ($: Any, e: Any, next: Any) => {
-    if (!state.enabled) return next(e);
-    const p: Ports = {
-      storeGet: (k) => $.store.get(k),
-      storeSet: (k, v) => $.store.set(k, v),
-      runCommand: (a) => $.command.run(a),
-      compact: (a) => $.session.compact(a),
-      submit: (a) => $.prompt.submit(a),
-    };
-    await resumeAfterClear(p, state);
-    if (!e?.agentId) {
-      state.inTurn = true;
-      state.turnStartedAt = Date.now();
-    }
-    return next(e);
-  });
-
-  on('turn.complete', async ($: Any, e: Any, next: Any) => {
-    if (!state.enabled) return next(e);
-    const p: Ports = {
-      storeGet: (k) => $.store.get(k),
-      storeSet: (k, v) => $.store.set(k, v),
-      runCommand: (a) => $.command.run(a),
-      compact: (a) => $.session.compact(a),
-      submit: (a) => $.prompt.submit(a),
-    };
-    if (e?.agentId) return next(e);
-    state.inTurn = false;
-    const reply = String(e?.text ?? e?.reply ?? '');
-    if (reply) {
-      state.lastReply = reply;
-      await safe(() => p.storeSet(lastReplyKey(state.name), reply));
-    }
-    if (state.pendingRotate) await rotatePlanner(p, state, cfg.plan);
-    return next(e);
-  });
-
-  on('session.measure', async ($: Any, e: Any, next: Any) => {
-    if (!state.enabled) return next(e);
-    const p: Ports = {
-      storeGet: (k) => $.store.get(k),
-      storeSet: (k, v) => $.store.set(k, v),
-      runCommand: (a) => $.command.run(a),
-      compact: (a) => $.session.compact(a),
-      submit: (a) => $.prompt.submit(a),
-    };
-    await resumeAfterClear(p, state);
-    if (measuredTokens(e) >= cfg.threshold) {
-      // Never mid-turn: a measure that lands while the main thread runs waits for its turn.complete.
-      if (turnRunning(state)) state.pendingRotate = true;
-      else await rotatePlanner(p, state, cfg.plan);
-    }
-    return next(e);
-  });
-}
-
 /** The shared rotation with the planner's plan; the stored last reply is read back if memory lost it. */
 export async function rotatePlanner(
   p: Ports,
@@ -165,4 +61,108 @@ export async function rotatePlanner(
   }
   const path = await rotate(p, state, plan);
   if (path === 'exit') await log(p, `${plan.role} rotation ended the session`);
+}
+
+/** Event handlers, called by the module's single registration point (register.tsx) for the armed role. */
+export async function plannerSessionReceive(
+  state: PlannerState,
+  $: Any,
+  e: Any,
+  next: Any,
+): Promise<Any> {
+  const p: Ports = {
+    storeGet: (k) => $.store.get(k),
+    storeSet: (k, v) => $.store.set(k, v),
+    runCommand: (a) => $.command.run(a),
+    compact: (a) => $.session.compact(a),
+    submit: (a) => $.prompt.submit(a),
+  };
+  // A failure in this gating hook must never swallow a message: fall through to the model.
+  const handle = async () => {
+    if (!state.enabled) return next(e);
+    await resumeAfterClear(p, state);
+    const raw = String(e?.text ?? '');
+    if (DISPATCH_NAME.test(senderOf(raw))) {
+      const text = innerText(raw);
+      // `cli-hierarchy clear planner` (RFC-0058 phase 4): rotate now, or at the end of the turn.
+      if (/^rotate\b/i.test(text)) {
+        if (turnRunning(state)) state.pendingRotate = true;
+        else await rotatePlanner(p, state, PLANNER_PLAN);
+        return { consumed: 'hierarchy:rotate' };
+      }
+      if (STATUS_NOISE.test(text)) return { consumed: 'hierarchy:status' };
+    }
+    return next(e);
+  };
+  return handle().catch(() => next(e));
+}
+
+export async function plannerTurnStart(
+  state: PlannerState,
+  $: Any,
+  e: Any,
+  next: Any,
+): Promise<Any> {
+  if (!state.enabled) return next(e);
+  const p: Ports = {
+    storeGet: (k) => $.store.get(k),
+    storeSet: (k, v) => $.store.set(k, v),
+    runCommand: (a) => $.command.run(a),
+    compact: (a) => $.session.compact(a),
+    submit: (a) => $.prompt.submit(a),
+  };
+  await resumeAfterClear(p, state);
+  if (!e?.agentId) {
+    state.inTurn = true;
+    state.turnStartedAt = Date.now();
+  }
+  return next(e);
+}
+
+export async function plannerTurnComplete(
+  state: PlannerState,
+  $: Any,
+  e: Any,
+  next: Any,
+): Promise<Any> {
+  if (!state.enabled) return next(e);
+  const p: Ports = {
+    storeGet: (k) => $.store.get(k),
+    storeSet: (k, v) => $.store.set(k, v),
+    runCommand: (a) => $.command.run(a),
+    compact: (a) => $.session.compact(a),
+    submit: (a) => $.prompt.submit(a),
+  };
+  if (e?.agentId) return next(e);
+  state.inTurn = false;
+  const reply = String(e?.text ?? e?.reply ?? '');
+  if (reply) {
+    state.lastReply = reply;
+    await safe(() => p.storeSet(lastReplyKey(state.name), reply));
+  }
+  if (state.pendingRotate) await rotatePlanner(p, state, PLANNER_PLAN);
+  return next(e);
+}
+
+export async function plannerSessionMeasure(
+  state: PlannerState,
+  $: Any,
+  e: Any,
+  next: Any,
+): Promise<Any> {
+  if (!state.enabled) return next(e);
+  const p: Ports = {
+    storeGet: (k) => $.store.get(k),
+    storeSet: (k, v) => $.store.set(k, v),
+    runCommand: (a) => $.command.run(a),
+    compact: (a) => $.session.compact(a),
+    submit: (a) => $.prompt.submit(a),
+  };
+  await resumeAfterClear(p, state);
+  if (measuredTokens(e) >= PLANNER_ROTATE_AT_TOKENS) {
+    // Never mid-turn: a measure that lands while the main thread runs waits for its turn.complete.
+    if (turnRunning(state)) state.pendingRotate = true;
+    else await rotatePlanner(p, state, PLANNER_PLAN);
+  }
+  return next(e);
 }

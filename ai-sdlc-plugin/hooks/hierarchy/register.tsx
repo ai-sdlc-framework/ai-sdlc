@@ -8,7 +8,10 @@ import {
   guard,
   log,
   pickRole,
-  registerExecutor,
+  executorSessionMeasure,
+  executorSessionReceive,
+  executorTurnComplete,
+  executorTurnStart,
   resumeAfterClear,
   safe,
 } from './executor.ts';
@@ -19,29 +22,92 @@ import {
   BOARD_KEY,
   newDispatchState,
   refreshPane,
-  registerDispatch,
+  dispatchSessionMeasure,
+  dispatchSessionReceive,
+  dispatchUiRender,
   tick,
 } from './dispatch.ts';
-import type { DispatchPorts } from './dispatch.ts';
-import { registerPlanner } from './planner.ts';
+import type { DispatchPorts, DispatchState } from './dispatch.ts';
+import {
+  plannerSessionMeasure,
+  plannerSessionReceive,
+  plannerTurnComplete,
+  plannerTurnStart,
+} from './planner.ts';
 import type { PlannerState } from './planner.ts';
 
 type Any = any;
 
-export const register = (on: Any, options?: Any): void => {
-  let armed = false;
-  let plannerArmed = false;
-  const state: ExecutorState = { active: false, pendingRotate: false, lastReply: '' };
-  const dispatch = newDispatchState(options);
-  let dispatchArmed = false;
-  const planner: PlannerState = {
-    active: false,
-    pendingRotate: false,
-    lastReply: '',
-    name: 'planner',
-    inTurn: false,
-  };
+interface Router {
+  current: string;
+  executor: ExecutorState;
+  dispatch: DispatchState;
+  planner: PlannerState;
+}
 
+// The validator follows `$` only into functions declared at the top of the file or imported from the
+// module's own files, so the forwarders are plain top-level functions that call each role's handler
+// by name. They are the one place that decides which role receives an event.
+function onReceive(r: Router, $: Any, e: Any, next: Any): Any {
+  if (r.current === 'operator-dispatch') return dispatchSessionReceive(r.dispatch, $, e, next);
+  if (r.current === 'planner') return plannerSessionReceive(r.planner, $, e, next);
+  if (r.current === 'executor') return executorSessionReceive(r.executor, $, e, next);
+  return next(e);
+}
+function onTurnStart(r: Router, $: Any, e: Any, next: Any): Any {
+  if (r.current === 'planner') return plannerTurnStart(r.planner, $, e, next);
+  if (r.current === 'executor') return executorTurnStart(r.executor, $, e, next);
+  return next(e);
+}
+function onTurnComplete(r: Router, $: Any, e: Any, next: Any): Any {
+  if (r.current === 'planner') return plannerTurnComplete(r.planner, $, e, next);
+  if (r.current === 'executor') return executorTurnComplete(r.executor, $, e, next);
+  return next(e);
+}
+function onRender(r: Router, $: Any, e: Any, next: Any): Any {
+  return r.dispatch.enabled ? dispatchUiRender(r.dispatch, $, e, next) : next(e);
+}
+function onMeasure(r: Router, $: Any, e: Any, next: Any): Any {
+  if (r.current === 'operator-dispatch') return dispatchSessionMeasure(r.dispatch, $, e, next);
+  if (r.current === 'planner') return plannerSessionMeasure(r.planner, $, e, next);
+  if (r.current === 'executor') return executorSessionMeasure(r.executor, $, e, next);
+  return next(e);
+}
+
+export const register = (on: Any, options?: Any): void => {
+  // Each event is registered once per module (the validator is static and refuses a duplicate), and only
+  // when a role arms, so a session without a role registers nothing but the gate.
+  let wiredBase = false;
+  let wiredRender = false;
+  const router: Router = {
+    current: '',
+    executor: { active: false, pendingRotate: false, lastReply: '' },
+    dispatch: newDispatchState(options),
+    planner: {
+      active: false,
+      pendingRotate: false,
+      lastReply: '',
+      name: 'planner',
+      inTurn: false,
+    },
+  };
+  const state = router.executor;
+  const dispatch = router.dispatch;
+  const planner = router.planner;
+  const wire = (withRender: boolean): void => {
+    if (wiredBase) return wireRender(withRender);
+    wiredBase = true;
+    on('session.receive', ($: Any, e: Any, next: Any) => onReceive(router, $, e, next));
+    on('turn.start', ($: Any, e: Any, next: Any) => onTurnStart(router, $, e, next));
+    on('turn.complete', ($: Any, e: Any, next: Any) => onTurnComplete(router, $, e, next));
+    on('session.measure', ($: Any, e: Any, next: Any) => onMeasure(router, $, e, next));
+    wireRender(withRender);
+  };
+  const wireRender = (withRender: boolean): void => {
+    if (!withRender || wiredRender) return;
+    wiredRender = true;
+    on('ui.render', ($: Any, e: Any, next: Any) => onRender(router, $, e, next));
+  };
   on('session.start', async ($: Any, e: Any, next: Any) => {
     const p: Ports = {
       storeGet: (k) => $.store.get(k),
@@ -100,10 +166,8 @@ export const register = (on: Any, options?: Any): void => {
     );
     if (role === 'operator-dispatch') {
       // AISDLC-1035: a model-less host. No prompt.submit port exists in the dispatch module.
-      if (!dispatchArmed) {
-        dispatchArmed = true;
-        registerDispatch(on, dispatch);
-      }
+      wire(true);
+      router.current = 'operator-dispatch';
       dispatch.enabled = true;
       const tickMs = Number(options?.tickMs) > 0 ? Number(options.tickMs) : DEFAULT_TICK_MS;
       await safe(() => $.ui.open({ id: 'board', title: 'Dispatch board' }));
@@ -141,19 +205,15 @@ export const register = (on: Any, options?: Any): void => {
       // The roster name keys the stored last reply; the launcher sets it, the role is the fallback.
       const named = (await safe(() => $.env.get('AI_SDLC_HIERARCHY_SESSION'))).value;
       planner.name = typeof named === 'string' && named ? named : 'planner';
-      if (!plannerArmed) {
-        plannerArmed = true;
-        registerPlanner(on, planner);
-      }
+      wire(false);
+      router.current = 'planner';
       planner.enabled = true;
       if (planner.resumePending) await resumeAfterClear(p, planner);
       return next(e);
     }
     if (role !== 'executor') return next(e);
-    if (!armed) {
-      armed = true;
-      registerExecutor(on, state);
-    }
+    wire(false);
+    router.current = 'executor';
     state.enabled = true;
     // INTERIM: if a host fires session.start after a mod-run clear, resume from here as well.
     if (state.resumePending) await resumeAfterClear(p, state);
