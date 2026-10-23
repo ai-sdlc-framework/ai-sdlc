@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1056
 title: 'Step 10 runs the waived-tests governance check locally so a task file that waives pnpm test on pipeline code never reaches CI'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-23'
 labels:

@@ -22,7 +22,8 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { findTaskFile, isTaskFileCompleted, parseTaskFile } from './01-validate.js';
 import { ATTESTATION_ARTIFACT_PATHS } from '../attestation-artifacts.js';
@@ -66,6 +67,10 @@ export interface FinalizeStepOptions extends FinalizeTaskOptions {
    * first PR); attestation signing and the chore commit still run.
    */
   resume?: boolean;
+  /** AISDLC-1056 - path to check-pr-governance.mjs (defaults to `<worktree>/scripts/...`). */
+  governanceScript?: string;
+  /** AISDLC-1056 - base ref the waived-tests check diffs against (default origin/main). */
+  governanceBase?: string;
   /** AISDLC-556 — sink for the no-signer warning (defaults to stderr). */
   warn?: (message: string) => void;
 }
@@ -141,6 +146,53 @@ export function moveTaskToCompleted(taskFilePath: string): string {
   return destPath;
 }
 
+/**
+ * AISDLC-1056 - run the CI `waived-tests` governance check (AISDLC-1022) locally,
+ * through the same `checkWaivedTests` the Governance gate uses, against the
+ * completed task file plus the final summary. Returns the gate's failure
+ * messages (empty = pass or checker absent, e.g. an adopter repo).
+ */
+export async function runWaivedTestsCheck(args: {
+  runner: Runner;
+  worktreePath: string;
+  scriptPath?: string;
+  base: string;
+  completedPath: string | null;
+  finalSummary: string;
+  taskId: string;
+}): Promise<string[]> {
+  const script = args.scriptPath ?? join(args.worktreePath, 'scripts', 'check-pr-governance.mjs');
+  if (!existsSync(script)) return [];
+  const mod = (await import(pathToFileURL(script).href)) as {
+    checkWaivedTests?: (a: {
+      base: string;
+      head: string;
+      git: (argv: string[]) => string;
+    }) => string[];
+  };
+  if (typeof mod.checkWaivedTests !== 'function') return [];
+  const git = async (gitArgs: string[]): Promise<string> =>
+    (await args.runner('git', gitArgs, { cwd: args.worktreePath })).stdout;
+  const changed = new Set<string>();
+  for (const list of [
+    await git(['diff', '--name-only', '--no-renames', args.base]),
+    await git(['ls-files', '--others', '--exclude-standard']),
+  ]) {
+    for (const l of list.split('\n')) if (l.trim()) changed.add(l.trim());
+  }
+  const rel = args.completedPath
+    ? relative(args.worktreePath, args.completedPath).split('\\').join('/')
+    : `backlog/completed/${args.taskId}.md`;
+  changed.add(rel);
+  const fileText = args.completedPath ? readFileSync(args.completedPath, 'utf8') : '';
+  const text = `${fileText}\n${args.finalSummary}`;
+  return mod.checkWaivedTests({
+    base: args.base,
+    head: 'HEAD',
+    git: (argv) => (argv[0] === 'diff' ? [...changed].join('\n') : text),
+  });
+}
+
 export async function finalizeTask(opts: FinalizeStepOptions): Promise<FinalizeTaskResult> {
   if (opts.verdict.decision !== 'APPROVED') {
     return {
@@ -173,6 +225,7 @@ export async function finalizeTask(opts: FinalizeStepOptions): Promise<FinalizeT
   // envelope lands at HEAD before push.
   const alreadyCompleted =
     opts.resume === true && isTaskFileCompleted(opts.taskId, opts.worktreePath);
+  let waivedCompletedPath: string | null = null;
   if (opts.sourceKind !== 'gh-issue' && !alreadyCompleted) {
     // 1. Flip status to Done in the on-disk task file (key-preserving patch).
     // Prefer the worktree-local copy (that's what gets committed in the chore
@@ -209,6 +262,23 @@ export async function finalizeTask(opts: FinalizeStepOptions): Promise<FinalizeT
     }
     // Re-parse to make sure the on-disk shape stayed valid (defensive).
     parseTaskFile(completedPath);
+    waivedCompletedPath = completedPath;
+  }
+
+  // AISDLC-1056 - shift the CI `waived-tests` check left: fail before sign and push.
+  const waivedFailures = await runWaivedTestsCheck({
+    runner,
+    worktreePath: opts.worktreePath,
+    ...(opts.governanceScript ? { scriptPath: opts.governanceScript } : {}),
+    base: opts.governanceBase ?? 'origin/main',
+    completedPath: waivedCompletedPath,
+    finalSummary,
+    taskId: opts.taskId,
+  });
+  if (waivedFailures.length > 0) {
+    throw new Error(
+      `finalize: waived-tests governance check failed for ${opts.taskId}\n${waivedFailures.join('\n')}`,
+    );
   }
 
   // 3. Attestation signing — best-effort. The helper script lives in the
