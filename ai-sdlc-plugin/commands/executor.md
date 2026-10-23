@@ -95,9 +95,7 @@ board needs no sender: the claim is the authority.
 `[executor] idle` and stop the turn: the hierarchy hooks module consumes the next enqueue message from
 the dispatch session and starts `/ai-sdlc:executor` again once you are idle. The context threshold (120k tokens, the
 module's `session.measure` rotation) is the only clear trigger besides a finished task's verdict. Without the module
-(a tmux-driven fleet), `ScheduleWakeup` for the `sleepSec` printed by
-`cli-dispatch.mjs idle-backoff --work-dir "$(pwd)"` (at most 60; `emptyQueueHibernateSec`) with the prompt
-`/ai-sdlc executor`, then stop.
+the executor stays idle until the dispatch session types `/ai-sdlc executor` (`cli-hierarchy up` starts it with the module).
 
 ## Step 2 - Run the pipeline, unmodified
 

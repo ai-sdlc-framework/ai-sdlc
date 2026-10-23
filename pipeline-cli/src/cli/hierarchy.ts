@@ -73,6 +73,8 @@ import { sanitizeVerdict } from '../dispatch/verdict-fields.js';
 import { enqueueTasks, type EnqueueEntry } from '../dispatch/enqueue.js';
 import { requeueFailed } from '../dispatch/requeue.js';
 import { reenter } from '../hierarchy/reenter.js';
+import { writeEscalationFile } from '../hierarchy/escalation-file.js';
+import { consumeRotateRequests, requestDispatchRotate } from '../hierarchy/rotate-request.js';
 import { correctManifestBranch } from '../dispatch/resume.js';
 import { DEFAULT_REQUEUE_RETRY_LIMIT } from '../dispatch/session-reaper.js';
 import { DECISION_ID_RE } from '../dispatch/verdict-fields.js';
@@ -157,9 +159,6 @@ import { runParentUpkeep, type ParentUpkeepResult } from '../steps/00-parent-upk
 import { resolvePluginScriptsDir } from './next-step.js';
 import { findTaskFile, parseArgv, resolveBaseSha } from './dispatch.js';
 
-/** Dispatch holds its resume this long (upper bound; a new board file wakes it sooner). */
-const DISPATCH_RESUME_HOLD_SECONDS = 60;
-
 const USAGE = `Usage: cli-hierarchy <command> [options]
 
 Commands:
@@ -177,6 +176,8 @@ Commands:
   hold       Pause claims and relaunches, never reporting (--reason <text>); planner or operator only
   resume     Lift the hold set by hold
   tick       One wake-up of the dispatch loop (ingest, verdict watch, playbook, reports)
+  rotate-pending  Print {pending} and consume the dispatch host's rotate requests
+  escalation-file  Write a board file for the planner: failure record, log tail, PR check summary
   route-decision  Record that a decision was routed to a tier
   playbook   Run one named playbook step for one task (playbook --task <id> --action <step>)
   handoff         Write or read a session's handoff file (handoff write|read --role <r>)
@@ -245,10 +246,11 @@ Usage for clear:
   cli-hierarchy clear --self [--resume-after <seconds>]
   --self schedules the calling session's own pane (from its roster entry) to receive
   /clear after 20 s (waiting for an idle pane, input line emptied first) and then, once the
-  pane is idle again (or --resume-after seconds later, or sooner when a new brief or verdict
-  file lands on the board, for dispatch), the resume command: /ai-sdlc operator-dispatch
-  for the dispatch session, /ai-sdlc:planner for the planner, /ai-sdlc executor for an idle
-  executor (which is refused while it holds an inflight task). Refuses without TMUX_PANE.
+  pane is idle again (or --resume-after seconds later), the resume command: /ai-sdlc:planner
+  for the planner, /ai-sdlc executor for an idle executor (which is refused while it holds an
+  inflight task). Refuses without TMUX_PANE. For the dispatch session, a model-less host
+  (AISDLC-1035), --self types nothing: it writes a rotate request under the board that the
+  hierarchy hooks module consumes.
   Sends /clear to the executor's pane, polls until the pane is idle, then sends /ai-sdlc executor. Refuses an executor that holds an inflight task.
   clear <executor-name> is for the dispatch session only. A mistake guard refuses any other caller, a human
   at a plain shell included; it is not authentication and a same-user session can defeat
@@ -667,23 +669,9 @@ export async function runHierarchyCli(
           return 1;
         }
         if (flags.self === 'true') {
-          const resumeAfter = intFlag(flags, 'resume-after');
-          if (resumeAfter === null) return 2;
-          const availability = selfClearAvailability(deps.env);
-          if (!availability.available) {
-            process.stderr.write(`cli-hierarchy clear --self: ${availability.reason}\n`);
-            return 1;
-          }
-          const result = clearSelf(
-            {
-              self: caller.name,
-              resumeAfterSeconds: resumeAfter ?? DISPATCH_RESUME_HOLD_SECONDS,
-              ...(deps.env.TMUX_PANE ? { callerPane: deps.env.TMUX_PANE } : {}),
-              wakeOnBoardDir: deps.boardDir,
-            },
-            { run: deps.run, boardDir: deps.boardDir, log: deps.log },
-          );
-          deps.log(JSON.stringify(result));
+          // The dispatch session is a model-less host (AISDLC-1035): its hooks module rotates it.
+          const file = requestDispatchRotate(deps.boardDir, caller.name, deps.now());
+          deps.log(JSON.stringify({ requested: 'rotate', self: caller.name, file }));
           return 0;
         }
         const executor = firstPositional(argv);
@@ -767,6 +755,36 @@ export async function runHierarchyCli(
           deps.log(JSON.stringify({ ok: true, resumed: lifted !== null }));
         }
         return 0;
+      }
+      case 'rotate-pending': {
+        deps.log(JSON.stringify({ pending: consumeRotateRequests(deps.boardDir) }));
+        return 0;
+      }
+      case 'escalation-file': {
+        const taskId = flags['task-id'];
+        const message = flags.message;
+        if (!taskId || taskId === 'true' || !message || message === 'true') {
+          process.stderr.write(
+            'cli-hierarchy escalation-file: --task-id and --message are required\n',
+          );
+          return 2;
+        }
+        try {
+          const { file } = writeEscalationFile({
+            boardDir: deps.boardDir,
+            taskId,
+            message,
+            now: deps.now(),
+            run: extras.ghRun ?? deps.run,
+          });
+          deps.log(JSON.stringify({ file }));
+          return 0;
+        } catch (err) {
+          process.stderr.write(
+            `cli-hierarchy escalation-file: ${err instanceof Error ? err.message : String(err)}\n`,
+          );
+          return 1;
+        }
       }
       case 'tick': {
         const caller = dispatchCaller('tick');
@@ -1105,6 +1123,13 @@ export async function runHierarchyCli(
           boardDir: deps.boardDir,
           now: deps.now,
         });
+        if (role === 'operator-dispatch') {
+          // The model-less host rotates through its hooks module, not by typed keystrokes (AISDLC-1035).
+          const file = requestDispatchRotate(deps.boardDir, self.name, deps.now());
+          clearWarned(deps.boardDir, self.name);
+          deps.log(JSON.stringify({ ...decision, handoff: handoff.file, rotateRequest: file }));
+          return 0;
+        }
         const result = clearSelf(
           {
             self: self.name,

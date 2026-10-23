@@ -501,11 +501,12 @@ cli-hierarchy clear --self [--resume-after <seconds>]
 | Option                     | Meaning                                                                                       |
 | -------------------------- | --------------------------------------------------------------------------------------------- |
 | `--settle-ms <n>`          | Ceiling for each wait (default 30000, config `clear.handshakeCeilingMs`).                      |
-| `--self`                   | Schedule the calling session's own pane to receive `/clear`, then `/ai-sdlc operator-dispatch` (dispatch session), `/ai-sdlc:planner` (planner) or `/ai-sdlc executor` (an idle executor). |
-| `--resume-after <seconds>` | With `--self`: delay before the resume command (default: 3 s for the planner, `PLANNER_RESUME_AFTER_SECONDS` at `clear.ts:254`; 0 s for the dispatch session and an executor, `clear.ts:330-331`); `/clear` is typed after the 20 s lead. Refused when `TMUX_PANE` is unset. |
+| `--self`                   | Schedule the calling session's own pane to receive `/clear`, then `/ai-sdlc:planner` (planner) or `/ai-sdlc executor` (an idle executor). For the dispatch session (a model-less host, AISDLC-1035) it types nothing: it writes a rotate request that the hierarchy hooks module consumes. |
+| `--resume-after <seconds>` | With `--self`, planner and executor: delay before the resume command (default: 3 s for the planner, 0 s for an idle executor); `/clear` is typed after the 20 s lead. Refused when `TMUX_PANE` is unset. |
 
-Default resume delay per role when `--resume-after` is not given (`clear.ts:330-331`): the planner 3 s (it has no board to wait
-for), the dispatch session and an idle executor 0 s. An explicit `--resume-after` wins for every role.
+Default resume delay per role when `--resume-after` is not given: the planner 3 s (it has no board to wait
+for), an idle executor 0 s. An explicit `--resume-after` wins. The dispatch half of `clearSelf` (the wake-on-board
+watcher and the `/ai-sdlc operator-dispatch` resume) was deleted with the model-less host.
 
 `clear <executor>` is a dispatch-session command; `clear --self` is also open to the planner
 and to an executor that holds no inflight task, which is how an idle executor returns to the
@@ -517,6 +518,29 @@ marker, and sends keys only to the pane the roster names. Prints a JSON result a
 an `ExecutorContextCleared` event. After a clear the plugin's `SessionStart` hook
 re-injects the role, so the executor's loop resumes with no re-briefing. Exit `0`, `1` on a
 refusal, `2` on a malformed number or missing name.
+
+### `rotate-pending`
+
+Prints `{"pending": true|false}` and deletes any `<board-dir>/handoff/rotate-request-*.json`, so one request
+rotates once. The dispatch host's timer calls it before each tick; `clear --self` from the dispatch session
+writes the request.
+
+```bash
+cli-hierarchy rotate-pending
+```
+
+### `escalation-file`
+
+Writes `<board-dir>/escalations/<task-id>-<epoch-ms>.json` for the planner: the task's failure record
+(`failed/<id>.diagnostic.json`, else its verdict), a log tail (the last 20 lines of the record's `notes`) and a
+PR check summary (`gh pr checks <pr>`, first 40 lines, when the record names a PR). The dispatch host calls it for a
+tick result the policy tables cannot classify, then announces the file to the planner with `$.session.send`.
+
+```bash
+cli-hierarchy escalation-file --task-id <id> --message <text>
+```
+
+Prints `{"file": "<path>"}`. Exit `2` on a missing flag, `1` on an invalid task id.
 
 ### `executor-start`
 
@@ -537,6 +561,37 @@ the start token (`start-token.ts`, `<board-dir>/starts/`): an executor no longer
 the start no longer checks who typed it. `check-sender` stays for later instruction messages until phase 4.
 
 **Idle path.** When `taskId` is `null` the executor ends its reply with `[executor] idle` and keeps its context.
+
+## The hierarchy hooks module (dispatch role, model-less host)
+
+RFC-0058 phase 2 (AISDLC-1035, OQ-6). With `HIERARCHY_ROLE=operator-dispatch` the same module hosts the dispatch
+loop and **never submits a prompt to the dispatch model**; its dispatch code has no `prompt.submit` port.
+
+- **Guard.** The version floor plus a probe of `clock.every`, `process.run`, `session.send`, `ui.open` and
+  `session.measure`; a miss registers nothing and logs one line naming it.
+- **Timer.** `$.clock.every` (default 30 s, module option `tickMs`) runs `node pipeline-cli/bin/cli-hierarchy.mjs tick`
+  through `$.process.run`. The result goes to the board and the pane, never to the model. Ticks do not overlap.
+- **Consumed events.** `session.receive` consumes `verdict <task-id> ...` (applied with `cli-dispatch collect-verdicts`,
+  then an immediate tick), `landed #<pr>` (`cli-dispatch reconcile --pr <n>`) and `status ...` messages, then refreshes
+  the pane. A message starting `planner:` or `to planner:` is forwarded with `$.session.send` to the planner roster
+  name (module option `plannerName`, default `planner`). A message of an unknown shape becomes an escalation file.
+- **Escalation file.** A tick `escalations` entry, a tick that returns no result, or an unclassified message is written
+  with [`escalation-file`](#escalation-file) (failure record, log tail, PR check summary, the RFC-0056 OQ-5 shape) and announced to the
+  planner by one `$.session.send`. The dispatch model is not prompted. Tick `reports` and a changed `blockers` list
+  are sent to the planner the same way.
+- **Board pane.** `$.ui.open` plus an `ui.render` handler show roster, queue, inflight, done, failed and blockers from
+  `cli-hierarchy status --json`, then the last ten events; it is rebuilt on every tick and consumed event and replaces
+  the model-written tick notes.
+- **Executor wake.** When a tick ingests tasks, the host sends `enqueue <task-id>` with `$.session.send` to one idle
+  executor per task; the executor module consumes it.
+- **Rotation.** At 120k tokens (`session.measure`) or on a rotate request (`rotate-pending`) the host writes the
+  handoff and runs `clear`. It rarely happens: the host has no model turns.
+- **Deleted.** `cli-dispatch idle-backoff`, the dispatch half of `clear.ts`, and the loop prose of the
+  operator-dispatch command, which is now a role description.
+
+Interim assumptions (a hooks module has no process or file API and the host contract is read from the RFC): the payload shapes of
+`$.clock.every({ ms, run })`, `$.process.run({ command, args })` (result `stdout` plus `exitCode`) and the
+`ui.render` return value are verified by `claude plugin test` fixtures against engine-written types when available.
 
 ## The hierarchy hooks module (executor role)
 
@@ -935,13 +990,12 @@ The cycle is **brief, tick, clear**:
 2. **tick.** The dispatch session runs `cli-hierarchy tick` on a schedule. Each tick ingests
    briefs into `queue/`, handles new verdicts, and returns the reports and escalations to
    send. Executors claim from `queue/` on their own.
-3. **clear.** When an executor's task reaches a verdict, the tick clears that executor
-   (`clear <executor>`), which restarts its loop with an empty context.
+3. **clear.** When an executor's task reaches a verdict, the executor module clears its own context
+   (RFC-0058 phase 1); `clear <executor>` stays for a tmux-driven fleet.
 
 Self-clear rule: **one task per executor context**, and **the dispatch session does not clear
-itself between ticks** (`ai-sdlc-plugin/commands/operator-dispatch.md` Step 5: the tick ends with `ScheduleWakeup` at the tick's `nextWakeSec`,
-30 busy, 300 working, 1800 empty, `dispatch-loop.ts:64-68` and `computeNextWake`). The only clear it takes is the Stop hook
-past 120k tokens, and `clear --self` is available for that case; it needs tmux (`TMUX_PANE`) and is refused outside tmux. Every role, the
+itself between ticks** (the model-less host runs the tick on a timer, see [the dispatch role](#the-hierarchy-hooks-module-dispatch-role-model-less-host)).
+It rotates through its hooks module at 120k tokens or on the rotate request `clear --self` writes. Every role, the
 planner included, also clears itself automatically when its context passes its [threshold](#auto-clear);
 handoff files are regenerated by the CLI, so a session can be cleared at any moment.
 
@@ -1261,9 +1315,6 @@ to discard the verdict first.
   example) instead of refusing the whole brief. The tick result lists each one under `skipped`
   as `{ file, taskId, state }` and ingests the rest; the exit code is unchanged. A brief whose
   tasks are all on the board is marked ingested with no tasks.
-
-`cli-dispatch idle-backoff` prints the sleep (5 to 60 seconds) an executor without a tmux
-pane uses when the queue is empty.
 
 
 No-CodeQL repositories (AISDLC-896): mark-ready flips any `ai-sdlc/` task draft whose PR checks are all green. `governance.openTaskPrsReady: true` opens task PRs ready from Step 11 and `ship`; the default stays draft.

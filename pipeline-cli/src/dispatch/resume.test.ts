@@ -15,11 +15,6 @@ import type { CommandRunner } from '../hierarchy/types.js';
 import { claimNext, ensureBoardDirs, readInflightManifest, writeManifest } from './board.js';
 import { completeTask } from './complete.js';
 import {
-  IDLE_BACKOFF_MAX_SEC,
-  idleBackoffSec,
-  readEmptyQueueHibernateSec,
-} from './idle-backoff.js';
-import {
   authoriseResume,
   correctManifestBranch,
   evaluatePushOnly,
@@ -901,49 +896,6 @@ describe('cli-dispatch reenter, requeue and release (AISDLC-807)', () => {
     const r = await cli(['release', '--board-dir', board, '--task-id', 'AISDLC-846']);
     expect(r.exit).toBe(0);
     expect(existsSync(path.join(board, 'queue', 'AISDLC-846.dispatch.json'))).toBe(true);
-  });
-});
-
-describe('idle back-off', () => {
-  it('stays within a minute whatever the config asks for', () => {
-    expect(idleBackoffSec()).toBe(30);
-    expect(idleBackoffSec(1800)).toBe(IDLE_BACKOFF_MAX_SEC);
-    expect(idleBackoffSec(1)).toBe(5);
-    expect(idleBackoffSec(Number.NaN)).toBe(30);
-    expect(idleBackoffSec(45)).toBe(45);
-  });
-
-  it('reads emptyQueueHibernateSec from the dispatch config', () => {
-    expect(readEmptyQueueHibernateSec(root)).toBeUndefined();
-    mkdirSync(path.join(root, '.ai-sdlc'), { recursive: true });
-    const file = path.join(root, '.ai-sdlc', 'dispatch-config.yaml');
-    writeFileSync(file, 'spec:\n  inSessionAgent:\n    emptyQueueHibernateSec: 1800\n');
-    expect(readEmptyQueueHibernateSec(root)).toBe(1800);
-    writeFileSync(file, 'spec: [broken');
-    expect(readEmptyQueueHibernateSec(root)).toBeUndefined();
-    writeFileSync(file, 'spec:\n  inSessionAgent:\n    emptyQueueHibernateSec: soon\n');
-    expect(readEmptyQueueHibernateSec(root)).toBeUndefined();
-  });
-
-  it('idle-backoff prints a sleep of at most a minute, and claim output is unchanged', async () => {
-    mkdirSync(path.join(root, '.ai-sdlc'), { recursive: true });
-    writeFileSync(
-      path.join(root, '.ai-sdlc', 'dispatch-config.yaml'),
-      'spec:\n  inSessionAgent:\n    emptyQueueHibernateSec: 1800\n',
-    );
-    let stdout = '';
-    vi.spyOn(process.stdout, 'write').mockImplementation(((c: string | Uint8Array) => {
-      stdout += c.toString();
-      return true;
-    }) as typeof process.stdout.write);
-    expect(await runDispatchCli(['idle-backoff', '--work-dir', root], {})).toBe(0);
-    expect(JSON.parse(stdout.trim())).toEqual({ sleepSec: 60 });
-    stdout = '';
-    await runDispatchCli(
-      ['claim', '--board-dir', board, '--worker-kind', 'in-session-agent', '--work-dir', root],
-      {},
-    );
-    expect(JSON.parse(stdout.trim())).toEqual({ claimed: false });
   });
 });
 
