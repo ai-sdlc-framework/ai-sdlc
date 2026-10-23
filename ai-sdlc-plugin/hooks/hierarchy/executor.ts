@@ -116,12 +116,20 @@ export async function safe<T>(fn: () => Promise<T> | T): Promise<{ ok: boolean; 
  * call with an argument of the wrong type (a bare string, never an object with fields); a host that rejects
  * it, by throwing or by `{ drop }`, has the primitive and the probe did nothing.
  */
+const PROBE_TIMEOUT_MS = 2_000;
+
 export async function exists(
   call: () => Promise<unknown> | unknown,
   verb: string,
 ): Promise<boolean> {
   try {
-    await call();
+    // AISDLC-1064: a probe that never settles still proves the primitive exists; do not wait on it.
+    let timer: any;
+    const limit = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, PROBE_TIMEOUT_MS);
+    });
+    await Promise.race([Promise.resolve().then(call), limit]);
+    clearTimeout(timer);
     return true;
   } catch (err) {
     const m = err instanceof TypeError ? err.message : '';

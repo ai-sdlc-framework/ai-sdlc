@@ -1197,6 +1197,15 @@ the plugin installed with its `modules` entry), then run `clear` again; the stal
 runs. The old entries about an unsubmitted resume command and an `unknown` state after a degraded clear no longer exist:
 no command is typed, so none can be left unsubmitted in an input line.
 
+Since AISDLC-1064 the dispatch registration logs one line per step to the plugin store log (and `hierarchy/log`), in
+this order after the `role=... identity=...` line: `tick registered every <ms>`, `ui.open ok|failed <reason>`,
+`first tick ran at <iso>`, `refreshPane ok|failed <reason>`. The planner and executor branches end with
+`registered role=<role>`. Reading what is missing: no `tick registered` means `$.clock.every` rejected or never
+returned (a `tick registration failed <reason>` line names it) and nothing will forward a rotate request; `tick registered`
+without `first tick ran` means the host never called the timer; no `ui.open` line means the pane open is still pending
+(harmless, the tick runs regardless); `refreshPane failed timed out` means `cli-hierarchy status` hung and the board key
+was not written. The first tick runs at registration, so a pending rotate request is consumed within seconds of `up`.
+
 **An executor's heartbeat.** `executor-start` writes `inflight/<task>.state.json` naming the
 worker right after the claim, before any model call, because the hook's second condition is
 that file; it exits non-zero when the write fails, leaving the claim for the reaper.
