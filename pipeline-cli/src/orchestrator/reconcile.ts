@@ -92,10 +92,7 @@ import { writeEvent, type WriteEventOpts } from './events.js';
  * set via `RunReconcileOptions.reviewers`.
  */
 export type ReviewerName =
-  | 'code-reviewer'
-  | 'test-reviewer'
-  | 'security-reviewer'
-  | 'correctness-reviewer';
+  'code-reviewer' | 'test-reviewer' | 'security-reviewer' | 'correctness-reviewer';
 
 /** Default reviewers the reconcile flow expects, in fixed order (matches Step 3 fan-out). */
 export const RECONCILE_REVIEWERS: readonly ReviewerName[] = [

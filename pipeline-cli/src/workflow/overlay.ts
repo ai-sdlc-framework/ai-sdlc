@@ -348,8 +348,7 @@ export function enforceFrozenSet(
         );
       } else if (lenses.includes('staged')) {
         const was = (base.spec.nodes[id] as unknown as AnyNode | undefined)?.with as unknown as
-          | AnyNode
-          | undefined;
+          AnyNode | undefined;
         if (!Array.isArray(was?.lenses) || !(was.lenses as string[]).includes('staged')) {
           notes.push(
             `staged lens promoted to gating on '${id}' (tightening; authorized by ${STAGED_PROMOTION_REF})`,

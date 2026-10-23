@@ -63,10 +63,7 @@ export interface OpenPr {
 
 export type CancelReason = 'stale-head' | 'duplicate';
 export type KeepReason =
-  | 'current-head'
-  | 'unarmed-auto-enable'
-  | 'verify-not-duplicate'
-  | 'no-rule-matched';
+  'current-head' | 'unarmed-auto-enable' | 'verify-not-duplicate' | 'no-rule-matched';
 
 export interface SweepDecision {
   run: WorkflowRun;

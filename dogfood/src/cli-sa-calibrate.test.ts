@@ -162,9 +162,8 @@ describe('cli-sa-calibrate', () => {
 
   it('shadowFromRealStore skips dimensions without persisted rows', async () => {
     // Return existing row only for SA-1; SA-2 absent
-    mocks.realStore.getSaPhaseWeights.mockImplementation(
-      (dim: string): MockRow =>
-        dim === 'SA-1' ? { dimension: dim, wStructural: 0.4, wLlm: 0.6 } : undefined,
+    mocks.realStore.getSaPhaseWeights.mockImplementation((dim: string): MockRow =>
+      dim === 'SA-1' ? { dimension: dim, wStructural: 0.4, wLlm: 0.6 } : undefined,
     );
 
     const mod = await import('./cli-sa-calibrate.js');

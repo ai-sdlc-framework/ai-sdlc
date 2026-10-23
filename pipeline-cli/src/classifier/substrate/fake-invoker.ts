@@ -24,8 +24,7 @@ import type {
 } from './types.js';
 
 export type FakeInvokerFixture =
-  | LlmInvocationResponse
-  | ((req: LlmInvocationRequest, callIndex: number) => LlmInvocationResponse);
+  LlmInvocationResponse | ((req: LlmInvocationRequest, callIndex: number) => LlmInvocationResponse);
 
 export class FakeLlmInvoker implements LlmInvoker {
   private callCounts: Partial<Record<ClassifierTaskType, number>> = {};

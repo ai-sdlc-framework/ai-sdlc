@@ -137,8 +137,7 @@ export class ClaudeCodeSdkRunner implements AgentRunner {
         // Emit progress events
         if (msgType === 'assistant' && ctx.onProgress) {
           const blocks = (msg.message as Record<string, unknown>)?.content as
-            | Array<Record<string, unknown>>
-            | undefined;
+            Array<Record<string, unknown>> | undefined;
           if (blocks) {
             for (const block of blocks) {
               if (block.type === 'tool_use') {

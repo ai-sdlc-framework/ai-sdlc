@@ -70,11 +70,7 @@ import { extractBlockedReason } from './upstream-oq-gate.js';
  * filter) so adding a new variant is an API change.
  */
 export type DispatchReadiness =
-  | 'ready'
-  | 'stale-shipped'
-  | 'closed-prior-pr'
-  | 'blocked'
-  | 'missing-id';
+  'ready' | 'stale-shipped' | 'closed-prior-pr' | 'blocked' | 'missing-id';
 
 /**
  * Per-task verdict with the supporting evidence. Evidence shape is

@@ -165,10 +165,7 @@ export interface ShouldSampleDeterminismCompositeOpts {
  * orchestrator's events.jsonl audit trail.
  */
 export type DeterminismSampleReason =
-  | 'requires-determinism-flag'
-  | 'top-decile-blast-radius'
-  | 'flat-sample-rate'
-  | 'not-sampled';
+  'requires-determinism-flag' | 'top-decile-blast-radius' | 'flat-sample-rate' | 'not-sampled';
 
 export interface DeterminismCompositeDecision {
   sample: boolean;

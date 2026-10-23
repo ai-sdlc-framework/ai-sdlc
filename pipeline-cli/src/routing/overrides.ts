@@ -40,8 +40,7 @@ export interface RoutingOverride {
 }
 
 export type WriteOverrideResult =
-  | { ok: true; override: RoutingOverride }
-  | { ok: false; reason: string };
+  { ok: true; override: RoutingOverride } | { ok: false; reason: string };
 
 export function overridesPath(artifactsDir: string): string {
   return join(artifactsDir, '_routing', 'overrides.json');

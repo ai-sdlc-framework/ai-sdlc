@@ -5,12 +5,7 @@
  */
 
 export type RegulatoryFramework =
-  | 'eu-ai-act'
-  | 'nist-ai-rmf'
-  | 'iso-42001'
-  | 'iso-12207'
-  | 'owasp-asi'
-  | 'csa-atf';
+  'eu-ai-act' | 'nist-ai-rmf' | 'iso-42001' | 'iso-12207' | 'owasp-asi' | 'csa-atf';
 
 export interface ComplianceControl {
   id: string;

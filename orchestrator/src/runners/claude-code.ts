@@ -437,8 +437,7 @@ function runClaude(
               resultText = parsed.result as string;
               resultCost = parsed.total_cost_usd as number;
               const modelUsage = parsed.modelUsage as
-                | Record<string, Record<string, unknown>>
-                | undefined;
+                Record<string, Record<string, unknown>> | undefined;
               if (modelUsage) {
                 const firstModel = Object.keys(modelUsage)[0];
                 if (firstModel) {

@@ -142,8 +142,7 @@ export function parsePipelineBacklogKey<T>(
   if (parsed === null || typeof parsed !== 'object') return undefined;
   const root = parsed as Record<string, unknown>;
   const backlog = (root.backlog ?? (root.spec as Record<string, unknown> | undefined)?.backlog) as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   if (!backlog || typeof backlog !== 'object') return undefined;
   return walkKeyPath<T>(backlog, keyPath);
 }
@@ -259,8 +258,7 @@ export function parsePipelineBranchingKey<T>(
   const root = parsed as Record<string, unknown>;
   const branching = (root.branching ??
     (root.spec as Record<string, unknown> | undefined)?.branching) as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   if (!branching || typeof branching !== 'object') return undefined;
   return walkKeyPath<T>(branching, keyPath);
 }

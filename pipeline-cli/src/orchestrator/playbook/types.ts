@@ -294,10 +294,7 @@ export interface WorkerParkedEvent {
 }
 
 export type PlaybookEvent =
-  | WorkerStateTransitionEvent
-  | RemediationAppliedEvent
-  | RemediationFailedEvent
-  | WorkerParkedEvent;
+  WorkerStateTransitionEvent | RemediationAppliedEvent | RemediationFailedEvent | WorkerParkedEvent;
 
 // ── Per-worker state file (Phase 4 forensic surface) ──────────────────
 

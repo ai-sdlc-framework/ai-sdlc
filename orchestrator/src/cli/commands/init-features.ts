@@ -760,12 +760,7 @@ export interface WizardFlags {
    * the wizard short-circuits to scaffold ONLY this feature.
    */
   add?:
-    | 'dor'
-    | 'attestation'
-    | 'classifier'
-    | 'branch-protection'
-    | 'workflows'
-    | 'signal-ingestion';
+    'dor' | 'attestation' | 'classifier' | 'branch-protection' | 'workflows' | 'signal-ingestion';
   /** `--dry-run` — print what would be done, don't write. */
   dryRun: boolean;
   /**

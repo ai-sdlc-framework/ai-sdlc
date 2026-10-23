@@ -871,8 +871,7 @@ export function computeStageACoverage(
   for (const d of decisions) {
     // Use stored result if already scored.
     const stored = (d.status.evaluation as Record<string, unknown> | undefined)?.stageA as
-      | { resolvedByStageA?: boolean }
-      | undefined;
+      { resolvedByStageA?: boolean } | undefined;
     if (stored?.resolvedByStageA !== undefined) {
       if (stored.resolvedByStageA) resolved++;
       continue;

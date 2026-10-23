@@ -36,8 +36,7 @@
  * Decision summary keys for Engineering review routing (OQ-7 resolution).
  */
 export type EngineeringReviewDecisionKind =
-  | 'variant-substrate-cost-review'
-  | 'variant-substrate-cost-block';
+  'variant-substrate-cost-review' | 'variant-substrate-cost-block';
 
 // ── Input shapes ──────────────────────────────────────────────────────────────
 
@@ -119,8 +118,7 @@ export interface VariantSubstrateCostBlockEvent {
 }
 
 export type EngineeringReviewEvent =
-  | VariantSubstrateCostReviewEvent
-  | VariantSubstrateCostBlockEvent;
+  VariantSubstrateCostReviewEvent | VariantSubstrateCostBlockEvent;
 
 // ── Reviewer-gate flag ────────────────────────────────────────────────────────
 

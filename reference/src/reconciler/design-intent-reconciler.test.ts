@@ -358,8 +358,7 @@ describe('createDesignIntentReconciler', () => {
 
 describe('DesignChangePlanned event (AISDLC-52)', () => {
   type AnyPlannedChange = DesignIntentDocument['spec']['plannedChanges'] extends
-    | (infer T)[]
-    | undefined
+    (infer T)[] | undefined
     ? T
     : never;
 

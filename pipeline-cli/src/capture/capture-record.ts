@@ -38,11 +38,7 @@ export type CaptureTriageValue =
 
 /** Agent roles that can file captures. */
 export type AgentRole =
-  | 'code-reviewer'
-  | 'test-reviewer'
-  | 'security-reviewer'
-  | 'developer'
-  | 'orchestrator';
+  'code-reviewer' | 'test-reviewer' | 'security-reviewer' | 'developer' | 'orchestrator';
 
 // ── Audit trail entry ────────────────────────────────────────────────────────
 

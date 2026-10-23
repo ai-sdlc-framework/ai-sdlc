@@ -99,17 +99,15 @@ export function buildLeafManifest(opts: BuildLeafManifestOpts): {
     },
     ...[...opts.executeLeaves]
       .sort((a, b) => (a.probeId < b.probeId ? -1 : 1))
-      .map(
-        (e): LeafManifestEntry => ({
-          stage: 'execute',
-          reviewer: STAGED_REVIEWER_NAME,
-          probeId: e.probeId,
-          transcriptPath: e.transcriptPath,
-          verdictPath: e.verdictPath,
-          harness: e.harness,
-          model: e.model,
-        }),
-      ),
+      .map((e): LeafManifestEntry => ({
+        stage: 'execute',
+        reviewer: STAGED_REVIEWER_NAME,
+        probeId: e.probeId,
+        transcriptPath: e.transcriptPath,
+        verdictPath: e.verdictPath,
+        harness: e.harness,
+        model: e.model,
+      })),
     {
       stage: 'synthesize',
       reviewer: STAGED_REVIEWER_NAME,

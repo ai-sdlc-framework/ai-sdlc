@@ -71,7 +71,7 @@ export function paneNodeVersion(run: CommandRunner, panePid: number): string | u
     if (m) procs.push({ pid: Number(m[1]), ppid: Number(m[2]), comm: (m[3] ?? '').trim() });
   }
   const family = new Set<number>([panePid]);
-  for (let grew = true; grew; ) {
+  for (let grew = true; grew;) {
     grew = false;
     for (const p of procs) {
       if (family.has(p.ppid) && !family.has(p.pid)) {

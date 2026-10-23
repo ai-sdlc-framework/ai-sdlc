@@ -182,8 +182,7 @@ async function runSingleReview(
 
     if (msgType === 'assistant') {
       const blocks = (msg.message as Record<string, unknown>)?.content as
-        | Array<Record<string, unknown>>
-        | undefined;
+        Array<Record<string, unknown>> | undefined;
       if (blocks) {
         for (const block of blocks) {
           if (block.type === 'text') {

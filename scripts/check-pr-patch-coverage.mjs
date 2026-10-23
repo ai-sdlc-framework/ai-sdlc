@@ -220,6 +220,11 @@ const NON_INSTRUMENTED_PATTERNS = [
   // UCVG live-demo differential testing. Runs under `node --test`, not Vitest,
   // so no istanbul/v8 coverage data is produced for it by Vitest instrumentation.
   /(^|\/)ucvg-demo\//,
+  // orchestrator type-only modules: no runtime code, so v8 emits no coverage entry.
+  // Mirrors orchestrator/vitest.config.ts `coverage.exclude`.
+  /^orchestrator\/src\/deploy\/rollout-types\.ts$/,
+  /^orchestrator\/src\/deploy\/types\.ts$/,
+  /^orchestrator\/src\/harness\/types\.ts$/,
 ];
 
 // ── Argv parsing ─────────────────────────────────────────────────────────────

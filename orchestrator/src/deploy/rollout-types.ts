@@ -44,13 +44,7 @@ export type RolloutStrategy = CanaryConfig | BlueGreenConfig | RollingConfig;
 // ── Rollout status ──────────────────────────────────────────────────
 
 export type RolloutPhase =
-  | 'pending'
-  | 'progressing'
-  | 'soaking'
-  | 'paused'
-  | 'completed'
-  | 'rolled-back'
-  | 'failed';
+  'pending' | 'progressing' | 'soaking' | 'paused' | 'completed' | 'rolled-back' | 'failed';
 
 export interface RolloutStatus {
   /** Unique rollout identifier. */

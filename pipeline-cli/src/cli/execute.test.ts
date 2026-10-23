@@ -860,8 +860,7 @@ describe('runExecuteCommand — real-run mode', () => {
 
     let rollbackInvoked = false;
     let rollbackArgs:
-      | Parameters<typeof import('../orchestrator/rollback.js').rollbackDispatch>[0]
-      | null = null;
+      Parameters<typeof import('../orchestrator/rollback.js').rollbackDispatch>[0] | null = null;
     const result = await runExecuteCommand({
       taskId: 'AISDLC-210',
       workDir: tmp,

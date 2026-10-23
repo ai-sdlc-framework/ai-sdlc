@@ -153,8 +153,7 @@ export type Finding = z.infer<typeof FindingSchema>;
  * and include in rejection reasons (no key material, no secrets).
  */
 export type ReportValidationResult =
-  | { valid: true; report: UntrustedPrReport }
-  | { valid: false; error: string };
+  { valid: true; report: UntrustedPrReport } | { valid: false; error: string };
 
 /**
  * Validate an untrusted-PR report artifact against the Zod boundary schema.

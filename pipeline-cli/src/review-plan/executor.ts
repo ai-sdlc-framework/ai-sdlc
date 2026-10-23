@@ -1188,8 +1188,7 @@ export async function executePlan(
 
     // 3b. Data only the executor can produce. The probe never runs any of it.
     let runRecord:
-      | { command: string; exitStatus: number; output: string; omitted: number }
-      | undefined;
+      { command: string; exitStatus: number; output: string; omitted: number } | undefined;
     if (probe.type === 'trace') {
       let result = 'No dependency graph data was available for this probe.';
       if (hooks.dependencyQuery) {

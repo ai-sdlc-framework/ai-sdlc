@@ -32,8 +32,7 @@ export function handleGetContext(
     if (profile) {
       // Parse raw data if available to reconstruct CodebaseProfile
       const rawData = (profile.rawData ? safeJsonParse(profile.rawData) : undefined) as
-        | Record<string, unknown>
-        | undefined;
+        Record<string, unknown> | undefined;
       const hotspots = (
         profile.hotspots ? safeJsonParse(profile.hotspots) : []
       ) as CodebaseProfile['hotspots'];

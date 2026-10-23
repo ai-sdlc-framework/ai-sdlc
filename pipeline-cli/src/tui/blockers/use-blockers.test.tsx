@@ -98,12 +98,10 @@ describe('useBlockers (hook)', () => {
   it('runs the detector on mount and returns items', async () => {
     const item = makeBlockerItem();
     const detector = vi.fn((_opts: DetectBlockersOpts): BlockerItem[] => [item]);
-    const taskWalker = vi.fn(
-      (): ReadBacklogTasksResult => ({
-        tasks: [makeTask()],
-        error: null,
-      }),
-    );
+    const taskWalker = vi.fn((): ReadBacklogTasksResult => ({
+      tasks: [makeTask()],
+      error: null,
+    }));
     const prFetcher = vi.fn((): FetchGhPrsResult => ({ prs: [], error: null }));
 
     let captured: UseBlockersState | null = null;

@@ -81,8 +81,7 @@ export class StateStore {
     // Check current schema version
     try {
       const row = this.db.prepare('SELECT MAX(version) as v FROM schema_version').get() as
-        | { v: number | null }
-        | undefined;
+        { v: number | null } | undefined;
       const current = row?.v ?? 0;
       if (current >= CURRENT_SCHEMA_VERSION) return;
 
@@ -344,8 +343,7 @@ export class StateStore {
 
   getPipelineRun(runId: string): PipelineRun | undefined {
     const row = this.db.prepare('SELECT * FROM pipeline_runs WHERE run_id = ?').get(runId) as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     return row ? this.mapPipelineRun(row) : undefined;
   }
 
@@ -963,8 +961,7 @@ export class StateStore {
 
   getAuditEntry(entryId: string): AuditEntryRecord | undefined {
     const row = this.db.prepare('SELECT * FROM audit_entries WHERE entry_id = ?').get(entryId) as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     return row ? this.mapAuditEntry(row) : undefined;
   }
 

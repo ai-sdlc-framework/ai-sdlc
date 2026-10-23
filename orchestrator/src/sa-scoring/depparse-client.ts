@@ -45,11 +45,7 @@ export interface DepparseClient {
 // ── Error types ──────────────────────────────────────────────────────
 
 export type DepparseErrorKind =
-  | 'network'
-  | 'bad-request'
-  | 'server-error'
-  | 'model-unavailable'
-  | 'timeout';
+  'network' | 'bad-request' | 'server-error' | 'model-unavailable' | 'timeout';
 
 export class DepparseError extends Error {
   readonly kind: DepparseErrorKind;

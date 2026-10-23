@@ -115,8 +115,7 @@ describe('score-a with the judgment layer', () => {
     expect(provider.requests.length).toBeGreaterThan(0);
     const { projectDecision } = await import('../decisions/index.js');
     const stored = projectDecision(id, { workDir: tmp })?.status.evaluation?.stageA as
-      | { blastRadius: { affectedPillars: string[] } }
-      | undefined;
+      { blastRadius: { affectedPillars: string[] } } | undefined;
     expect(stored?.blastRadius.affectedPillars).toEqual(['engineering', 'product']);
   });
 });

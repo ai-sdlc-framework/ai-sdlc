@@ -38,8 +38,7 @@ export interface ParentUpkeepOptions {
 }
 
 export type ParentUpkeepResult =
-  | { ok: true; swept: number }
-  | { ok: false; reason: string; swept: number };
+  { ok: true; swept: number } | { ok: false; reason: string; swept: number };
 
 /** Where the parent mutations run for this process. */
 export function parentUpkeepMode(env: NodeJS.ProcessEnv): 'inline' | 'assert' {

@@ -161,8 +161,7 @@ export interface ConfigValidationError {
 }
 
 export type ConfigValidationResult =
-  | { valid: true }
-  | { valid: false; errors: ConfigValidationError[] };
+  { valid: true } | { valid: false; errors: ConfigValidationError[] };
 
 /**
  * Validate a partial calibration config against the RFC-0031 §12.6 rules.

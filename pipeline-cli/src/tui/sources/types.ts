@@ -18,10 +18,7 @@ import { join } from 'node:path';
  * that switch on the union exhaustively.
  */
 export type SourceErrorKind =
-  | 'source-unavailable'
-  | 'source-permission-denied'
-  | 'source-corrupt'
-  | 'source-timeout';
+  'source-unavailable' | 'source-permission-denied' | 'source-corrupt' | 'source-timeout';
 
 /**
  * Uniform return shape for every TUI data-source hook. `data` is the

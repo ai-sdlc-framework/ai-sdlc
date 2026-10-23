@@ -108,7 +108,14 @@ describe('buildJudgmentContext', () => {
     const files = readdirSync(join(dir, '_judgment'));
     expect(files.some((f) => f.startsWith('log-2026-10-01'))).toBe(true);
     expect(
-      readFileSync(join(dir, '_judgment', files.find((f) => f.startsWith('log-'))!), 'utf8'),
+      readFileSync(
+        join(
+          dir,
+          '_judgment',
+          files.find((f) => f.startsWith('log-'))!,
+        ),
+        'utf8',
+      ),
     ).toContain('"judgmentId":"ctx.test"');
   });
 

@@ -5,11 +5,7 @@
  */
 
 export type DatabaseAdapterName =
-  | 'sqlite-copy'
-  | 'neon'
-  | 'pg-snapshot-restore'
-  | 'supabase'
-  | 'external';
+  'sqlite-copy' | 'neon' | 'pg-snapshot-restore' | 'supabase' | 'external';
 
 export interface DatabaseBranchCapabilities {
   branchCreationLatencyP50Ms: number;

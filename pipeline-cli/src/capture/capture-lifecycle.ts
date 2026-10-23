@@ -808,11 +808,7 @@ export function checkRateCeiling(opts: {
 // ── OQ-9: Stale notification ladder ──────────────────────────────────────────
 
 export type StaleLadderActionKind =
-  | 'tui-highlight'
-  | 'slack-notify'
-  | 'email-notify'
-  | 'archive'
-  | 'none';
+  'tui-highlight' | 'slack-notify' | 'email-notify' | 'archive' | 'none';
 
 export interface StaleLadderAction {
   captureId: string;

@@ -196,8 +196,7 @@ describe('ClaudeCodeRunner', () => {
       execFileMock as unknown as { mockImplementation: (fn: (...a: unknown[]) => unknown) => void }
     ).mockImplementation((..._args: unknown[]) => {
       const cb = _args.find((a) => typeof a === 'function') as
-        | ((...a: unknown[]) => void)
-        | undefined;
+        ((...a: unknown[]) => void) | undefined;
       if (cb) cb(null, { stdout: '', stderr: '' });
       return undefined;
     });

@@ -1042,7 +1042,7 @@ export function parseNameStatusZ(out) {
   const tokens = String(out ?? '').split('\0');
   if (tokens[tokens.length - 1] === '') tokens.pop();
   const entries = [];
-  for (let i = 0; i < tokens.length; ) {
+  for (let i = 0; i < tokens.length;) {
     const status = tokens[i++];
     if (!status) continue;
     if (status[0] === 'R' || status[0] === 'C') {

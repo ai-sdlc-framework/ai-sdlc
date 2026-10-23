@@ -675,8 +675,7 @@ describe('AC#4 — recommendation-issued stored on Decision record', () => {
 
     const updated = getDecision('DEC-0001');
     const stored = (updated.status.evaluation as Record<string, unknown>)?.stageA as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
 
     expect(stored).not.toBeUndefined();
     expect(stored?.resolvedByStageA).toBe(stageA.resolvedByStageA);

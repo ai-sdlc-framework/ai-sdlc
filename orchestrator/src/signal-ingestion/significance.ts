@@ -106,11 +106,7 @@ export interface Tier2SignificanceReasons {
  *                        from D1 by default (fail-closed).
  */
 export type SaResonanceBucket =
-  | 'full'
-  | 'discounted'
-  | 'low-sa-review'
-  | 'out-of-scope'
-  | 'pending';
+  'full' | 'discounted' | 'low-sa-review' | 'out-of-scope' | 'pending';
 
 /** Per-bucket D1 weight multiplier per RFC-0030 §9. */
 export const SA_WEIGHT_MULTIPLIERS: Readonly<Record<SaResonanceBucket, number>> = Object.freeze({
@@ -945,8 +941,7 @@ export interface ResidencyRegimeDeclaration {
  *     the Decision + emits the regimeOverrides clarification task.
  */
 export type SignalResidencyCheck =
-  | { permitted: true }
-  | { permitted: false; decision: SignalResidencyViolationDecision };
+  { permitted: true } | { permitted: false; decision: SignalResidencyViolationDecision };
 
 /**
  * Check a single signal against the adopter's declared residency regimes.

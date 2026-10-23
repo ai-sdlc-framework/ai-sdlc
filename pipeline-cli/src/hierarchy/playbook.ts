@@ -43,11 +43,7 @@ import type { AsyncCommandRunner, CommandResult, CommandRunner } from './types.j
 
 /** Steps the playbook can take or refuse. */
 export type PlaybookAction =
-  | 'rebase-push'
-  | 'retrigger-ci'
-  | 'requeue'
-  | 'drop-chores'
-  | 'escalate';
+  'rebase-push' | 'retrigger-ci' | 'requeue' | 'drop-chores' | 'escalate';
 
 /** Cause code written on a failure record when CI is stuck on a stale merge ref. */
 export const STALE_MERGE_REF_CAUSE = 'stale-merge-ref';

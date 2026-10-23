@@ -23,12 +23,7 @@ export interface HealthCheckConfig {
 }
 
 export type DeploymentState =
-  | 'pending'
-  | 'deploying'
-  | 'healthy'
-  | 'unhealthy'
-  | 'rolled-back'
-  | 'failed';
+  'pending' | 'deploying' | 'healthy' | 'unhealthy' | 'rolled-back' | 'failed';
 
 export interface DeploymentResult {
   id: string;
