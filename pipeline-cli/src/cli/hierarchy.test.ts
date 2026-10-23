@@ -1515,6 +1515,32 @@ describe('handoff and auto-clear subcommands (AISDLC-766)', () => {
   const usage = (tokens: number): string =>
     JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: tokens } } });
 
+  it('handoff note appends to the ledger and refuses a bad kind', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const ok = await runHierarchyCli(
+      [
+        'handoff',
+        'note',
+        '--role',
+        'planner',
+        '--kind',
+        'filed',
+        '--url',
+        'https://x/1',
+        '--summary',
+        's',
+      ],
+      overrides(),
+    );
+    expect(ok).toBe(0);
+    const bad = await runHierarchyCli(
+      ['handoff', 'note', '--role', 'planner', '--kind', 'zzz', '--url', 'https://x/1'],
+      overrides(),
+    );
+    expect(bad).toBe(2);
+    expect(String(err.mock.calls.at(-1)?.[0])).toContain('allowed: filed, commented');
+  });
+
   it('handoff rejects a missing action or an unknown role', async () => {
     const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
     expect(await runHierarchyCli(['handoff', '--role', 'executor'], overrides())).toBe(2);

@@ -76,6 +76,7 @@ a name. The JSON holds:
 
 - `identity.name` (`$MY_NAME`) and `identity.planner` (`$PLANNER_NAME`, empty when none).
 - `handoff`: this session's handoff, regenerated from board and catalog state at the end of the tick (what `cli-hierarchy.mjs handoff read --role operator-dispatch` returns after a clear); nothing to write by hand.
+- Outward posts (an issue, a comment, a PR body, a message to another project's session): relay the operator's go only on the exact title and first line, never an option label; right after the post run `cli-hierarchy.mjs handoff note --role operator-dispatch --kind filed|commented|opened|closed|sent --url <url> --board-dir "$BOARD_DIR"` in the same turn.
 - `ingested`, `ingestErrors`: each new brief once. Tell the planner about an error. `skipped`: brief tasks already on the board, left alone; the rest of the brief was ingested.
 - `verdicts`: each new verdict once, with the executor `clear` result (`degraded`: check
   `cli-hierarchy status`) and validated `decisionIds`; a `blocked` one awaits Step 4.

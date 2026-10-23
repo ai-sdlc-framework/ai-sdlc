@@ -101,6 +101,7 @@ export {
   collectHandoffState,
   readHandoff,
   writeHandoff,
+  noteLedger,
   RESUME_COMMANDS,
   type HandoffOptions,
   type HandoffResult,

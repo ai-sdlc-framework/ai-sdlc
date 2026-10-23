@@ -88,6 +88,7 @@ import {
   boundedHandoffView,
   readHandoff as readGeneratedHandoff,
   writeHandoff,
+  noteLedger,
   createGitRunner,
   createStreamEmitter,
   createSystemIdentity,
@@ -296,6 +297,8 @@ Options for handoff:
   --name <n>               Session name (default the calling session's roster name, else the role)
   --out <path>             Alternative file location
   --no-archive             write (planner): do not roll older notes blocks into <basename>_archive.md
+  note                     append one outward action to the role's ledger (AISDLC-1049):
+                           --kind filed|commented|opened|closed|sent --url <url> [--summary <text>]
   --full                   read: print the whole file (default: block plus last 8000 chars of prose)
 
 Options for auto-clear:
@@ -1020,9 +1023,9 @@ export async function runHierarchyCli(
       case 'handoff': {
         const action = firstPositional(argv);
         const role = parseRoleFlag(flags.role);
-        if ((action !== 'write' && action !== 'read') || !role) {
+        if ((action !== 'write' && action !== 'read' && action !== 'note') || !role) {
           process.stderr.write(
-            `cli-hierarchy handoff: use 'handoff write|read --role planner|operator-dispatch|executor'\n`,
+            `cli-hierarchy handoff: use 'handoff write|read|note --role planner|operator-dispatch|executor'\n`,
           );
           return 2;
         }
@@ -1043,7 +1046,19 @@ export async function runHierarchyCli(
           ...(flags.out && flags.out !== 'true' ? { file: flags.out } : {}),
           ...(flags['no-archive'] === 'true' ? { archive: false } : {}),
         };
-        if (action === 'write') {
+        if (action === 'note') {
+          try {
+            const r = noteLedger(opts, {
+              kind: flags.kind ?? '',
+              url: flags.url ?? '',
+              ...(flags.summary && flags.summary !== 'true' ? { summary: flags.summary } : {}),
+            });
+            deps.log(JSON.stringify({ ok: true, file: r.file, entry: r.entry }));
+          } catch (e) {
+            process.stderr.write(`cli-hierarchy handoff note: ${(e as Error).message}\n`);
+            return 2;
+          }
+        } else if (action === 'write') {
           const r = writeHandoff(opts);
           deps.log(
             JSON.stringify({
