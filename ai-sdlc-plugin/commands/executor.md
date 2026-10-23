@@ -81,7 +81,7 @@ A resumed task also prints a `RESUMED TASK` block (its feedback note) before tha
 `[executor] idle` and stop the turn: the hierarchy hooks module consumes the next enqueue message from
 the dispatch session and starts `/ai-sdlc:executor` again once you are idle. The context threshold (120k tokens, the
 module's `session.measure` rotation) is the only clear trigger besides a finished task's verdict. Without the module
-the executor stays idle until the dispatch session types `/ai-sdlc executor` (`cli-hierarchy up` starts it with the module).
+the executor stays idle until the dispatch session types `/ai-sdlc executor` (`cli-hierarchy up` starts it with the module). A second `executor-start` in an idle turn is a defect (it returns `repeat: true`): stop the turn.
 
 ## Step 2 - Run the pipeline, unmodified
 

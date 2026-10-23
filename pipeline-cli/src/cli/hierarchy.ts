@@ -267,6 +267,8 @@ Options for tick:
   --work-dir <path>        Repository root (default the current directory)
 
 Options for executor-start:
+  --wait <sec>             Refused (exit 1) when this session has no hooks-module heartbeat; a repeat
+                           call within 60 s with no new enqueue returns {"taskId":null,"repeat":true}.
   (none)                   Prints the identity line, then one JSON line: {name, project, dispatch,
                            taskId|null, manifest?}. Claims once and does not wait: the hierarchy
                            hooks module wakes an idle executor. Exit 1 when this is not an executor
@@ -954,11 +956,14 @@ export async function runHierarchyCli(
         return 0;
       }
       case 'executor-start': {
+        const startWait = intFlag(flags, 'wait');
+        if (startWait === null) return 2;
         try {
           const result = await executorStart(
             {
               boardDir: deps.boardDir,
               cwd: deps.cwd,
+              ...(startWait === undefined ? {} : { waitSec: startWait }),
             },
             {
               identity:
