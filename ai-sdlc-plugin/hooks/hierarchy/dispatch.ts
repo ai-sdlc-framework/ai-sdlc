@@ -24,6 +24,7 @@ export const DISPATCH_ROTATE_AT_TOKENS = 120_000;
 
 const NODE = 'node';
 const HIERARCHY_BIN = 'pipeline-cli/bin/cli-hierarchy.mjs';
+const CI_BIN = 'pipeline-cli/bin/cli-ci.mjs';
 const DISPATCH_BIN = 'pipeline-cli/bin/cli-dispatch.mjs';
 const TASK_ID = /\b[A-Z][A-Z0-9]*-\d+(?:\.\d+)*\b/;
 const PLANNER_ADDRESSED = /^(?:to\s+planner|planner)\s*[:,-]\s*/i;
@@ -56,6 +57,8 @@ export interface DispatchState {
   uiOpened?: boolean;
   /** Last blockers text sent to the planner; a changed list is announced once. */
   lastBlockers: string;
+  /** Text of the last tick failure escalated; the same failure is escalated once, not on every timer fire. */
+  lastTickFailure: string;
   /** Number of in-flight ticks: a slow tick must not overlap the next. */
   ticking: boolean;
 }
@@ -68,6 +71,7 @@ export function newDispatchState(options?: DispatchOptions): DispatchState {
     plannerName: options?.plannerName ?? 'planner',
     ...(options?.boardDir ? { boardDir: options.boardDir } : {}),
     lastBlockers: '',
+    lastTickFailure: '',
     ticking: false,
   };
 }
@@ -208,15 +212,18 @@ export async function tick(p: DispatchPorts, state: DispatchState): Promise<void
     const result = parseJson(r.stdout) as Any;
     if (!r.ok || !result || typeof result !== 'object') {
       note(state, `tick failed: ${(r.stderr || r.stdout).split('\n')[0] || 'no output'}`);
-      await escalate(
-        p,
-        state,
-        'TICK',
-        `cli-hierarchy tick did not return a result: ${r.stderr || r.stdout}`.slice(0, 500),
+      const failure = `cli-hierarchy tick did not return a result: ${r.stderr || r.stdout}`.slice(
+        0,
+        500,
       );
+      if (failure !== state.lastTickFailure) {
+        state.lastTickFailure = failure;
+        await escalate(p, state, 'TICK', failure);
+      }
       await refreshPane(p, state);
       return;
     }
+    state.lastTickFailure = '';
     state.blockers = Array.isArray(result.blockers) ? result.blockers.map(String) : [];
     const ingested: string[] = ((result.ingested ?? []) as Any[]).flatMap((x) => x.tasks ?? []);
     note(
@@ -238,6 +245,14 @@ export async function tick(p: DispatchPorts, state: DispatchState): Promise<void
       state.lastBlockers = blockersText;
       if (blockersText) await tellPlanner(p, state, `blockers changed:\n${blockersText}`);
     }
+    // The old loop ran the PR reconciler and the CI sweep after every tick; `cli-ci sweep` throttles itself to 15 minutes.
+    const rec = await runCli(p, DISPATCH_BIN, ['reconcile', ...boardArgs(state)]);
+    if (!rec.ok) note(state, 'reconcile failed');
+    else if (rec.stdout.includes('route-to-planner')) {
+      await tellPlanner(p, state, `reconciler routed a PR to you:\n${rec.stdout.slice(0, 1500)}`);
+    }
+    const sweep = await runCli(p, CI_BIN, ['sweep', ...boardArgs(state)]);
+    if (!sweep.ok) note(state, 'cli-ci sweep failed');
     const status = await refreshPane(p, state);
     if (ingested.length) {
       await wakeIdleExecutors(p, state, status, ingested);

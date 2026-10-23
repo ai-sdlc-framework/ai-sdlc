@@ -181,6 +181,22 @@ describe('dispatch host (AISDLC-1035)', () => {
     expect(s.runs.some((a) => a[1] === 'escalation-file' && a.includes('AISDLC-3'))).toBe(true);
   });
 
+  it('escalates a persistent tick failure once and runs reconcile and sweep after a good tick', async () => {
+    const s = setup();
+    await s.start();
+    await s.timer();
+    expect(s.runs.some((a) => a[0].endsWith('cli-dispatch.mjs') && a[1] === 'reconcile')).toBe(
+      true,
+    );
+    expect(s.runs.some((a) => a[0].endsWith('cli-ci.mjs') && a[1] === 'sweep')).toBe(true);
+    s.setTick(undefined);
+    s.runs.length = 0;
+    await s.timer();
+    await s.timer();
+    await s.timer();
+    expect(s.runs.filter((a) => a[1] === 'escalation-file')).toHaveLength(1);
+  });
+
   it('renders roster, queue, inflight, done, failed and blockers, refreshed on tick and event', async () => {
     const s = setup({ ...EMPTY_TICK, blockers: ['gh quota low'] });
     await s.start();
