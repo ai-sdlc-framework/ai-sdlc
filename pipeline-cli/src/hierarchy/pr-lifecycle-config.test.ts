@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,15 +13,31 @@ import {
   PR_LIFECYCLE_KEY_READERS,
 } from './pr-lifecycle-config.js';
 
+const git = (cwd: string, ...args: string[]): void => {
+  execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
+    cwd,
+    stdio: 'ignore',
+  });
+};
+
+/** A repo whose `origin/main` ref holds `body` as `.ai-sdlc/pr-lifecycle.yaml` (no file when undefined). */
+function repoWithBase(body: string | undefined): string {
+  const d = mkdtempSync(path.join(os.tmpdir(), 'prlc-'));
+  git(d, 'init', '-q', '-b', 'main');
+  mkdirSync(path.join(d, '.ai-sdlc'));
+  writeFileSync(path.join(d, '.ai-sdlc', 'keep'), 'x');
+  if (body !== undefined) writeFileSync(path.join(d, '.ai-sdlc', 'pr-lifecycle.yaml'), body);
+  git(d, 'add', '-A');
+  git(d, 'commit', '-q', '-m', 'base');
+  git(d, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+  return d;
+}
+
 describe('loadPrLifecycleConfig', () => {
   const dirs: string[] = [];
   const project = (body?: string): string => {
-    const d = mkdtempSync(path.join(os.tmpdir(), 'prlc-'));
+    const d = repoWithBase(body);
     dirs.push(d);
-    if (body !== undefined) {
-      mkdirSync(path.join(d, '.ai-sdlc'));
-      writeFileSync(path.join(d, '.ai-sdlc', 'pr-lifecycle.yaml'), body);
-    }
     return d;
   };
   afterEach(() => {
@@ -40,6 +57,26 @@ describe('loadPrLifecycleConfig', () => {
   it('reads loopGuard.maxSameHeadActions', () => {
     const d = project('spec:\n  loopGuard:\n    maxSameHeadActions: 3\n');
     expect(loadPrLifecycleConfig(d).maxSameHeadActions).toBe(3);
+  });
+
+  it('ignores a working-tree edit: the base branch is the only source (AISDLC-994)', () => {
+    const d = project('spec:\n  loopGuard:\n    maxSameHeadActions: 3\n');
+    writeFileSync(
+      path.join(d, '.ai-sdlc', 'pr-lifecycle.yaml'),
+      'spec:\n  loopGuard:\n    maxSameHeadActions: 99\n',
+    );
+    expect(loadPrLifecycleConfig(d).maxSameHeadActions).toBe(3);
+  });
+
+  it('defaults when the base ref cannot be resolved', () => {
+    const d = mkdtempSync(path.join(os.tmpdir(), 'prlc-'));
+    dirs.push(d);
+    mkdirSync(path.join(d, '.ai-sdlc'));
+    writeFileSync(
+      path.join(d, '.ai-sdlc', 'pr-lifecycle.yaml'),
+      'spec:\n  loopGuard:\n    maxSameHeadActions: 9\n',
+    );
+    expect(loadPrLifecycleConfig(d).maxSameHeadActions).toBe(1);
   });
 });
 
@@ -62,10 +99,7 @@ describe('pr-lifecycle.yaml operational keys', () => {
   });
 
   it('reads overrides and ignores invalid values', () => {
-    const d = mkdtempSync(path.join(os.tmpdir(), 'prlc-'));
-    mkdirSync(path.join(d, '.ai-sdlc'));
-    writeFileSync(
-      path.join(d, '.ai-sdlc', 'pr-lifecycle.yaml'),
+    const d = repoWithBase(
       'spec:\n  webhook: {port: 9000, debounceMs: -1}\n  stall: {staleMs: 5}\n  reconcile: {timerOpenMs: 7}\n',
     );
     const c = loadPrLifecycleConfig(d);

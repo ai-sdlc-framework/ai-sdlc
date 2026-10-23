@@ -54,6 +54,8 @@ export interface WorkflowNode {
   cap?: number;
   expect?: string;
   fresh?: boolean;
+  /** Open knobs read by the engine (RFC-0056 phase 4), for example `lenses` on `plan`. */
+  with?: Record<string, unknown>;
   node?: { kind: 'agent'; role: string; fresh: boolean };
 }
 
@@ -67,12 +69,12 @@ export interface WorkflowEdge {
 export interface WorkflowDocument {
   apiVersion: string;
   kind: 'Workflow';
-  metadata: { name: string };
+  metadata: { name: string; extends?: string; decisions?: string[] };
   spec: { nodes: Record<string, WorkflowNode>; edges: WorkflowEdge[]; anchors?: string[] };
 }
 
 /** Reviewer fan-out cap of the Machine (security + code + test + staged slot). */
-const REVIEW_FANOUT_CAP = 4;
+export const REVIEW_FANOUT_CAP = 4;
 
 function step(meta: StepMeta): WorkflowNode {
   return { kind: 'step', impl: meta.id, inputs: meta.inputs, outputs: meta.outputs };

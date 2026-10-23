@@ -10465,7 +10465,14 @@ export const workflowSchema = {
         name: { type: 'string', minLength: 1 },
         extends: {
           type: 'string',
-          description: 'Name of the Workflow document this one extends.',
+          description:
+            'Name of the Workflow document this one extends, `ai-sdlc/execute-task@<version>`. The plugin default is resolved and this document is applied as an overlay (RFC-0056 phase 4).',
+        },
+        decisions: {
+          type: 'array',
+          description:
+            'Decision ids that authorize touching a frozen node. Each must resolve in the catalog on the base branch.',
+          items: { type: 'string', pattern: '^DEC-[0-9]+$' },
         },
       },
     },
@@ -10489,10 +10496,21 @@ export const workflowSchema = {
           items: { type: 'string' },
         },
         budget: { $ref: '#/$defs/budget' },
+        remove: {
+          type: 'array',
+          description:
+            'Overlay only: node ids removed from the extended document. A frozen node cannot be removed.',
+          items: { type: 'string' },
+        },
       },
     },
   },
   $defs: {
+    with: {
+      type: 'object',
+      description:
+        'Node knobs read by the engine (for example `lenses` on the review plan node). Open knobs only; a frozen rule has no key here.',
+    },
     budget: {
       type: 'object',
       additionalProperties: false,
@@ -10527,6 +10545,7 @@ export const workflowSchema = {
         impl: { type: 'string', minLength: 1 },
         inputs: { type: 'string' },
         outputs: { type: 'string' },
+        with: { $ref: '#/$defs/with' },
         frozen: { $ref: '#/$defs/frozen' },
       },
     },
@@ -10553,6 +10572,7 @@ export const workflowSchema = {
           description:
             'Run the node on one PR in N (RFC-0056 OQ-1): the integer N, or the string 1/N. The engine skips the node, and records the skip, on a PR whose number is not a multiple of N. Default 1 (every PR).',
         },
+        with: { $ref: '#/$defs/with' },
         frozen: { $ref: '#/$defs/frozen' },
       },
     },
@@ -10578,6 +10598,7 @@ export const workflowSchema = {
             ],
           },
         },
+        with: { $ref: '#/$defs/with' },
         frozen: { $ref: '#/$defs/frozen' },
       },
     },
@@ -10588,6 +10609,7 @@ export const workflowSchema = {
       properties: {
         kind: { const: 'human' },
         prompt: { type: 'string' },
+        with: { $ref: '#/$defs/with' },
         frozen: { $ref: '#/$defs/frozen' },
       },
     },
@@ -10606,6 +10628,7 @@ export const workflowSchema = {
           description: 'all | n | quorum(k).',
         },
         node: { $ref: '#/$defs/agentNode' },
+        with: { $ref: '#/$defs/with' },
         frozen: { $ref: '#/$defs/frozen' },
       },
     },

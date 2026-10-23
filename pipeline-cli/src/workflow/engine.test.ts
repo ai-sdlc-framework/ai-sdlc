@@ -530,9 +530,7 @@ describe('workflowNextStep host paths', () => {
     runnerFor(dump(doc));
     const out = await workflowNextStep(ctx, { task: 'AISDLC-900' }, deps());
     expect(out.exitCode).toBe(1);
-    expect(out.instruction.action === 'stop' && out.instruction.reason).toContain(
-      'ship-without-anchor',
-    );
+    expect(out.instruction.action === 'stop' && out.instruction.reason).toContain('last-anchor');
     expect(() => readFileSync(ctx.statePath)).toThrow();
   });
 
