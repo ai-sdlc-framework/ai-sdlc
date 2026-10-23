@@ -1,21 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerCheckPrStatus } from './check-pr-status.js';
 import * as child_process from 'node:child_process';
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof child_process>('node:child_process');
-  return { ...actual, execSync: vi.fn() };
+  return { ...actual, execFileSync: vi.fn() };
 });
 
 describe('check_pr_status', () => {
+  let registeredSchema: Record<string, z.ZodTypeAny>;
   let registeredHandler: (
     args: Record<string, unknown>,
   ) => Promise<{ content: { type: string; text: string }[]; isError?: boolean }>;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     const server = {
-      tool: vi.fn((_name, _desc, _schema, handler) => {
+      tool: vi.fn((_name, _desc, schema, handler) => {
+        registeredSchema = schema;
         registeredHandler = handler;
       }),
     } as unknown as McpServer;
@@ -24,7 +28,7 @@ describe('check_pr_status', () => {
   });
 
   it('returns formatted summary for a successful PR status', async () => {
-    vi.mocked(child_process.execSync).mockReturnValue(
+    vi.mocked(child_process.execFileSync).mockReturnValue(
       JSON.stringify({
         title: 'Add feature X',
         state: 'OPEN',
@@ -58,8 +62,8 @@ describe('check_pr_status', () => {
     expect(result.isError).toBeUndefined();
   });
 
-  it('handles execSync error gracefully', async () => {
-    vi.mocked(child_process.execSync).mockImplementation(() => {
+  it('handles execFileSync error gracefully', async () => {
+    vi.mocked(child_process.execFileSync).mockImplementation(() => {
       throw new Error('gh: command not found');
     });
 
@@ -68,5 +72,40 @@ describe('check_pr_status', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Error fetching PR #99');
     expect(result.content[0].text).toContain('gh: command not found');
+  });
+
+  it('passes an exact argument array with --repo when repo is given', async () => {
+    vi.mocked(child_process.execFileSync).mockReturnValue(JSON.stringify({ title: 'T' }));
+    await registeredHandler({ prNumber: 5, repo: 'owner/name' });
+    const call = vi.mocked(child_process.execFileSync).mock.calls[0];
+    expect(call[0]).toBe('gh');
+    expect(call[1]).toEqual([
+      'pr',
+      'view',
+      '5',
+      '--repo',
+      'owner/name',
+      '--json',
+      'title,state,headRefName,mergeable,statusCheckRollup,reviews,labels',
+    ]);
+  });
+
+  it('omits --repo when repo is not given', async () => {
+    vi.mocked(child_process.execFileSync).mockReturnValue(JSON.stringify({ title: 'T' }));
+    await registeredHandler({ prNumber: 5 });
+    const args = vi.mocked(child_process.execFileSync).mock.calls[0][1] as string[];
+    expect(args).not.toContain('--repo');
+  });
+
+  it.each(['foo/bar; echo pwned', '$(id)'])('refuses malicious repo %s before spawning', (repo) => {
+    const parsed = z.object(registeredSchema).safeParse({ prNumber: 5, repo });
+    expect(parsed.success).toBe(false);
+    expect(child_process.execFileSync).not.toHaveBeenCalled();
+  });
+
+  it('accepts owner/name', () => {
+    expect(z.object(registeredSchema).safeParse({ prNumber: 5, repo: 'owner/name' }).success).toBe(
+      true,
+    );
   });
 });
