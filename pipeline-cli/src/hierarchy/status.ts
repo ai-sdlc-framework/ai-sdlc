@@ -129,9 +129,10 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
         : hasLaunchEnv(startCommand, entry.name, entry.role)
           ? 'ok'
           : 'missing';
-    const nodeVersion = alive
-      ? paneNodeVersion(deps.run, paneInfo(deps.run, entry.tmuxSession, entry.tmuxWindow).panePid)
-      : undefined;
+    const nodeVersion = !alive
+      ? undefined
+      : (entry.nodeVersion ??
+        paneNodeVersion(deps.run, paneInfo(deps.run, entry.tmuxSession, entry.tmuxWindow).panePid));
     const nodeMismatch =
       nodeVersion !== undefined &&
       wantedNode !== undefined &&

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-906
 title: 'fix: cli-hierarchy status reads the Node version of the session shell, not of an MCP child process'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-15'
 labels: [hierarchy, bug]

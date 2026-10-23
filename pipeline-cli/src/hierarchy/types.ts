@@ -29,6 +29,8 @@ export interface RosterEntry {
   model: string;
   permissionMode: string;
   startedAt: string;
+  /** Full Node version `up` activated for the session (AISDLC-906); absent when not pinned. */
+  nodeVersion?: string;
   status: RosterStatus;
 }
 
