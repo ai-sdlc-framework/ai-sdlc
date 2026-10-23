@@ -1,7 +1,8 @@
 ---
 id: AISDLC-1032
 title: >-
-  A token-verified executor start stays verified for re-issued starts until the next clear
+  A token-verified executor start stays verified for re-issued starts until the
+  next clear
 status: Done
 assignee: []
 created_date: '2026-10-22'
@@ -11,11 +12,18 @@ labels:
 dependencies: []
 references:
   - pipeline-cli/src/hierarchy/executor-start.ts
-  - pipeline-cli/src/hierarchy/start-token.ts
   - ai-sdlc-plugin/commands/executor.md
   - docs/operations/cli-hierarchy.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/src/hierarchy/start-token.ts
+    resolution: flagged
+drift_checked: '2026-10-23'
 ---
 
 ## Description
