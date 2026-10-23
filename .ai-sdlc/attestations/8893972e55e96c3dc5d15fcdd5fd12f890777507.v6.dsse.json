@@ -1,0 +1,76 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "b3371bdf70a4a6db19cc72561e6959b40d8a01df"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "a1bde09567c3d9478c300d41065c49d4f9e54c9f911f525b16bfd80d6b3deb7d",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "a1bde09567c3d9478c300d41065c49d4f9e54c9f911f525b16bfd80d6b3deb7d",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "d37eddb1e815938590847537cd5294ebb1eb451f3a5f414e6cf8cdb465abd6f4",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "d37eddb1e815938590847537cd5294ebb1eb451f3a5f414e6cf8cdb465abd6f4",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "23576739eed7a7db80ae7d42aee5a4661898ca61a1b5744a3f0c6d4e8594c041",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "23576739eed7a7db80ae7d42aee5a4661898ca61a1b5744a3f0c6d4e8594c041",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "265a09933b63714cd5b3de15833c604a58be5760c4279e7898012e7013e609e8",
+        "f1081cd82affe620b37cf151a0145bbf03522c1fff56abfc9e1007757da52517"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "7abe5b4112feddbd068093c8f781d71d4352a8a5258693166af46b58fc1a793c",
+        "f1081cd82affe620b37cf151a0145bbf03522c1fff56abfc9e1007757da52517"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "d9d316c07f60f60a6d3b1cedc840d949e421793bea07c1dbb54e1f7feb7ec120",
+        "e9665befebc2efff17c709d78832d52e7445671a4155feeb2f1a7509649d9517"
+      ]
+    }
+  ],
+  "rootHash": "eb5eda058688adadc11476cb6520ee4ead28755ed843aa58e254da493db80b55",
+  "rootSignature": "fGHNNLZTllSJmAjnc9LiErixR4Hp9rZ8nHAGsavcOIHEY2HLCnZdEz95ION49sxsrXzPAVwE22EmVKfpu0ZZCA==",
+  "nonce": "0a4027e9d44e0fc11bb550f10939cffa80b63211ebd96f94c8ba5caef0a62425",
+  "leafCount": 3,
+  "signedAt": "2026-10-23T02:40:56.024Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      ".github/workflows/ai-sdlc-gate.yml",
+      ".github/workflows/ci.yml",
+      ".github/workflows/codeql.yml",
+      ".github/workflows/main-health-monitor.yml"
+    ],
+    "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
+  }
+}
