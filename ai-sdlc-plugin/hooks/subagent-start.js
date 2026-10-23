@@ -254,7 +254,7 @@ function parseListField(yaml, field) {
  * overwritten with one that has no `agentType`.
  */
 function nextSpawnSeq(sessionsDir) {
-  const dir = join(sessionsDir, '..', 'subagent-spawn-seq');
+  const dir = join(sessionsDir, '..', 'state', 'subagent-spawn-seq'); // AISDLC-1044: .ai-sdlc/state/ is gitignored
   mkdirSync(dir, { recursive: true });
   // Claim the next free `.seq-<n>` file with exclusive create; atomic across
   // parallel reviewer spawns. Kept outside subagent-sessions/ so marker readers never see it.

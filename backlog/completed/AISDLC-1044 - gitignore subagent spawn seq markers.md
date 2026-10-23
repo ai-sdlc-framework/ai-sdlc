@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1044
 title: 'subagent-start hook: keep its spawn-sequence markers out of the checkout (gitignore or state dir) so a clean parent stays clean'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22'
 labels:
