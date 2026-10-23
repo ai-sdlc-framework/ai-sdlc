@@ -1,6 +1,6 @@
 module github.com/ai-sdlc-framework/ai-sdlc/sdk-go
 
-go 1.24.0
+go 1.25.0
 
 require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2

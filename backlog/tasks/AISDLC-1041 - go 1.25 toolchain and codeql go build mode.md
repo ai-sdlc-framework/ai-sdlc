@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1041
 title: 'Dependency: raise the Go toolchain to 1.25 in CI and the Go SDK so golang.org/x/net 0.55 lands, and fix the CodeQL Go build mode'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-22'
 labels:
