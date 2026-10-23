@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1040
 title: 'Dependency: land the dev-dependency group (prettier 3.9, eslint 10.13, typescript-eslint 8.72) with the repo-wide reformat it requires'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-22'
 labels:
