@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.37.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.36.0...pipeline-cli-v0.37.0) (2026-10-23)
+
+
+### Features
+
+* **orchestrator:** fixed-prefix tiering, path-bound rules and control linter (AISDLC-782) ([#1988](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1988)) ([45aba26](https://github.com/ai-sdlc-framework/ai-sdlc/commit/45aba2643c32e4e9adec40cd3174c0ec78eba00a))
+* show hooks-module health in status and fail up when dispatch has none (AISDLC-1061) ([#1980](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1980)) ([5965c97](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5965c972fa780201fb419ba8c1a4bf0efd12f62e))
+
+
+### Bug Fixes
+
+* refuse executor-start --wait without a module and guard idle repeats (AISDLC-1065) ([#1991](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1991)) ([89d5c53](https://github.com/ai-sdlc-framework/ai-sdlc/commit/89d5c53933e3f9556cc9df6329989f201efec50b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.37.0
+
 ## [0.36.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.35.0...pipeline-cli-v0.36.0) (2026-10-23)
 
 
