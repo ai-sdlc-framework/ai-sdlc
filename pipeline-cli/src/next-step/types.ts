@@ -124,6 +124,8 @@ export interface NextStepState {
   developer: DeveloperReturn | null;
   /** AISDLC-947: the resume review decision, set only when the task resumed. */
   resumeReview?: ResumeReviewDecision;
+  /** AISDLC-1053: a `reenter --developer-round` developer round is pending; consumed once it runs. */
+  developerRoundPending?: boolean;
   review: ReviewRoundState | null;
   verdict: AggregatedVerdict | null;
   /** Set once the post-rebase re-review has been used, so it never loops. */

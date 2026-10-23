@@ -889,6 +889,23 @@ export function readInflightManifest(
   return existsSync(p) ? readManifest(p) : undefined;
 }
 
+/**
+ * Clear `resume.developerRound` on the inflight manifest once the developer round has run
+ * (AISDLC-1053), so a later resume of the same manifest takes the normal path.
+ * Returns true when a flag was cleared.
+ */
+export function consumeDeveloperRound(boardDir: string, taskId: string): boolean {
+  const p = manifestPathIn(boardDir, 'inflight', taskId);
+  const current = existsSync(p) ? readManifest(p) : undefined;
+  if (!current?.resume?.developerRound) return false;
+  const resume = { ...current.resume };
+  delete resume.developerRound;
+  const tmp = `${p}.tmp-${process.pid}`;
+  writeFileSync(tmp, JSON.stringify({ ...current, resume }, null, 2) + '\n', 'utf-8');
+  renameSync(tmp, p);
+  return true;
+}
+
 /** One manifest or verdict on the board, with its state and eligibility. */
 export interface BoardEntry {
   taskId: string;

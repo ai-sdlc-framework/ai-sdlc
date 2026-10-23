@@ -47,6 +47,8 @@ export interface ReenterInput {
   target: string;
   /** Prose for the executor; with a note, a PR in any open state gets a round. */
   note?: string;
+  /** Order a developer round even when the patch id is unchanged (AISDLC-1053). */
+  developerRound?: boolean;
 }
 
 export interface ReenterDeps {
@@ -293,6 +295,7 @@ export function reenter(input: ReenterInput, deps: ReenterDeps): ReenterResult {
       ...(failingLine ? { failingLine: proseLine(failingLine).slice(5) } : {}),
       failingChecks: failedChecks.map((k) => `${k.name}${k.summary ? `: ${k.summary}` : ''}`),
       pushOnly: c.state === 'attestation-content-hash-mismatch',
+      ...(input.developerRound ? { developerRound: true } : {}),
     },
     {
       resumedBy: deps.reenteredBy,

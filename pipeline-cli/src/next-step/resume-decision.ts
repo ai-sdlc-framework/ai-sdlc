@@ -10,6 +10,8 @@
  *   - `delta`: the patch id changed. The reviewer set is chosen from the diff between the
  *     last attested head and the current head, not the whole PR.
  *   - `full`: no usable prior attestation; today's behaviour.
+ *   - `developer-round` (AISDLC-1053): `reenter --developer-round` set the manifest flag; the
+ *     developer runs with the resume note, then the delta review takes the new patch id.
  *
  * @module next-step/resume-decision
  */
@@ -33,13 +35,17 @@ export type ResumeReviewDecision =
       reviewers: ReviewerType[];
       deltaPaths: string[];
     }
-  | { branch: 'full'; note: 'review-full' };
+  | { branch: 'full'; note: 'review-full' }
+  /** AISDLC-1053: the reenter ordered a developer round; the unchanged shortcut is bypassed. */
+  | { branch: 'developer-round'; note: string };
 
 const FULL: ResumeReviewDecision = { branch: 'full', note: 'review-full' };
 const ENVELOPE_RE = /^(?:.*\/)?([0-9a-f]{40})(?:\.v\d+)?\.dsse\.json$/i;
 const ATTESTATION_DIR = '.ai-sdlc/attestations/';
 
 export interface ResumeDecisionOpts {
+  /** `resume.developerRound` of the inflight manifest: force the developer branch (AISDLC-1053). */
+  developerRound?: boolean;
   /** Test injection: current patch id (default: computed against the target branch merge-base). */
   currentPatchId?: (base: string, head: string, cwd: string) => string | null;
   /** Test injection: true when the repository requires the three-reviewer set. */
@@ -84,6 +90,9 @@ export async function decideResumeReview(
   worktreePath: string,
   opts: ResumeDecisionOpts = {},
 ): Promise<ResumeReviewDecision> {
+  if (opts.developerRound) {
+    return { branch: 'developer-round', note: 'developer-round: ordered by reenter' };
+  }
   try {
     return await decide(ctx, worktreePath, opts);
   } catch {

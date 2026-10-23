@@ -53,6 +53,18 @@ describe('decideResumeReview (AISDLC-947)', () => {
     expect(d.note).toContain(`${PID}.v6.dsse.json`);
   });
 
+  it('developerRound bypasses the unchanged shortcut even with an equal patch id (AISDLC-1053)', async () => {
+    script();
+    const d = await decideResumeReview(h.ctx, h.root, { ...opts(PID), developerRound: true });
+    expect(d.branch).toBe('developer-round');
+  });
+
+  it('once the flag is consumed the same tree takes the normal path (AISDLC-1053)', async () => {
+    script();
+    const d = await decideResumeReview(h.ctx, h.root, opts(PID));
+    expect(d.branch).toBe('unchanged');
+  });
+
   it('chore-only delta gets the correctness reviewer alone', async () => {
     script('docs/readme.md\0');
     const d = await decideResumeReview(h.ctx, h.root, opts('e'.repeat(40)));

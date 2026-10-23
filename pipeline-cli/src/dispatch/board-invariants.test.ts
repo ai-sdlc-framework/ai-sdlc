@@ -17,6 +17,7 @@ import {
   findHeldClaim,
   listBoard,
   OneClaimPerWorkerError,
+  consumeDeveloperRound,
   readInflightManifest,
   writeManifest,
 } from './board.js';
@@ -52,6 +53,25 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   rmSync(root, { recursive: true, force: true });
+});
+
+describe('consumeDeveloperRound (AISDLC-1053)', () => {
+  it('clears resume.developerRound once, leaving the rest of the manifest', () => {
+    writeManifest(
+      board,
+      mk('AISDLC-1053', {
+        resume: { note: 'add the test', resumedAt: 't', resumedBy: 'd', developerRound: true },
+      }),
+    );
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-a' });
+    expect(readInflightManifest(board, 'AISDLC-1053')?.resume?.developerRound).toBe(true);
+    expect(consumeDeveloperRound(board, 'AISDLC-1053')).toBe(true);
+    const after = readInflightManifest(board, 'AISDLC-1053');
+    expect(after?.resume?.developerRound).toBeUndefined();
+    expect(after?.resume?.note).toBe('add the test');
+    expect(consumeDeveloperRound(board, 'AISDLC-1053')).toBe(false);
+    expect(consumeDeveloperRound(board, 'AISDLC-9999')).toBe(false);
+  });
 });
 
 describe('one claim per worker', () => {

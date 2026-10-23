@@ -194,6 +194,18 @@ describe('reenter, a real failure on the head', () => {
     expect(r.kind === 'manifest' && r.resume.resumeMode).toBe('push-only');
   });
 
+  it('--developer-round sets resume.developerRound on the manifest (AISDLC-1053)', () => {
+    failTask();
+    const r = reenter({ target: '7', developerRound: true }, deps(gh()));
+    expect(r.kind === 'manifest' && r.resume.developerRound).toBe(true);
+  });
+
+  it('without the flag the manifest carries no developerRound', () => {
+    failTask();
+    const r = reenter({ target: '7' }, deps(gh()));
+    expect(r.kind === 'manifest' && r.resume.developerRound).toBeUndefined();
+  });
+
   it('a DIRTY PR is a semantic conflict for an executor', () => {
     failTask();
     const r = reenter({ target: '7' }, deps(gh({ merge: 'DIRTY', checks: [] })));

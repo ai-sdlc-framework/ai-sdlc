@@ -1187,7 +1187,7 @@ the task's own worktree, which only its executor holds. One command, keyed on PR
 
 ```bash
 node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" reenter "<pr-number|task-id>" --board-dir "$BOARD_DIR" \
-  [--note "<what the executor must fix>" | --note-file <path>]
+  [--note "<what the executor must fix>" | --note-file <path>] [--developer-round]
 ```
 
 It needs the `requeue` grant and runs only from the dispatch session. It reads the PR from
@@ -1204,6 +1204,16 @@ GitHub, classifies it (`pr-state.ts`) and then:
   task runs; the pipeline re-enters the existing worktree, injects the note into the developer
   prompt, re-runs the reviewers, re-signs, lease-pushes from that worktree and updates the PR.
 - A state that needs nothing (green, pending, armed): refused, unless `--note` orders a round.
+- `--developer-round` (AISDLC-1053) sets `resume.developerRound: true` on the manifest. By
+  default `next-step` skips the developer and reviewers when the patch id equals the newest
+  attested envelope (`review-skipped: unchanged`), so a note asking for new code (a missing
+  test, say) reaches nobody. With the flag, `next-step` bypasses that shortcut, builds the
+  developer prompt with the resume note as the feedback block, runs the developer, then clears
+  the flag from the inflight manifest and takes the normal delta review on the new patch id. A
+  later resume of the same manifest takes the normal path. Without the flag nothing changes.
+  The command output carries `resumePath` (`unchanged`, `delta`, `full` or `developer-round`)
+  for a manifest it writes: the path the next resume takes, so you see before the executor
+  runs whether the note will be acted on.
 - Loop guard (AISDLC-883): the same `(action, head SHA)` is never taken twice. The second call
   exits 1 with `loop guard: <action>@<sha> x2 ...`; a push (new head) resets it. Route a
   refused loop to the planner with `cli-decisions escalate`.

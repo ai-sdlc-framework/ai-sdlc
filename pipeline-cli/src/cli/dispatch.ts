@@ -219,6 +219,9 @@ import {
 import { gatherPrFacts } from '../hierarchy/pr-facts.js';
 import { createSnapshotRunner } from '../hierarchy/pr-snapshot.js';
 import { reenter } from '../hierarchy/reenter.js';
+import { decideResumeReview } from '../next-step/resume-decision.js';
+import { defaultRunner } from '../runtime/exec.js';
+import type { NextStepContext } from '../next-step/types.js';
 import { loadPrLifecycleConfig } from '../hierarchy/pr-lifecycle-config.js';
 import { startScheduler } from '../hierarchy/scheduler.js';
 import { now as clockNow } from '../clock.js';
@@ -308,6 +311,21 @@ function intFlag(flags: Record<string, string>, name: string): number | undefine
     return null;
   }
   return value;
+}
+
+/**
+ * AISDLC-1053: the path the next resume of `taskId` takes, from the resume decision run in
+ * the task worktree. No worktree, or any doubt, is `full` (the decision's own fallback).
+ */
+async function predictResumePath(
+  workDir: string,
+  taskId: string,
+): Promise<'unchanged' | 'delta' | 'full'> {
+  const worktree = path.join(workDir, '.worktrees', taskId.toLowerCase());
+  if (!existsSync(path.join(worktree, '.git'))) return 'full';
+  const ctx = { workDir, runner: defaultRunner } as unknown as NextStepContext;
+  const d = await decideResumeReview(ctx, worktree);
+  return d.branch === 'developer-round' ? 'full' : d.branch;
 }
 
 /**
@@ -1567,20 +1585,31 @@ export async function runDispatchCli(
       }
       const workDir = path.resolve(flags['work-dir'] ?? '.');
       try {
-        out({
-          ok: true,
-          ...reenter(
-            { target, ...(note === undefined ? {} : { note }) },
-            {
-              boardDir,
-              run: deps.ghRun ?? createSystemRunner(),
-              cwd: workDir,
-              reenteredBy: caller.name,
-              resolveBaseSha: () => flags['base-sha'] ?? resolveBaseSha(workDir),
-              resolveTaskFile: (id) => findTaskFile(workDir, id),
-            },
-          ),
-        });
+        const developerRound = flags['developer-round'] !== undefined;
+        const result = reenter(
+          {
+            target,
+            ...(note === undefined ? {} : { note }),
+            ...(developerRound ? { developerRound: true } : {}),
+          },
+          {
+            boardDir,
+            run: deps.ghRun ?? createSystemRunner(),
+            cwd: workDir,
+            reenteredBy: caller.name,
+            resolveBaseSha: () => flags['base-sha'] ?? resolveBaseSha(workDir),
+            resolveTaskFile: (id) => findTaskFile(workDir, id),
+          },
+        );
+        // AISDLC-1053: say which path the next resume takes, so dispatch sees whether the note
+        // reaches a developer.
+        const resumePath =
+          result.kind === 'manifest'
+            ? developerRound
+              ? 'developer-round'
+              : await predictResumePath(workDir, result.taskId)
+            : undefined;
+        out({ ok: true, ...result, ...(resumePath ? { resumePath } : {}) });
         return 0;
       } catch (err) {
         process.stderr.write(
@@ -1741,7 +1770,7 @@ Subcommands:
   close-superseded <pr>   (DEC-0266: close a CLI-opened PR whose every file is already on main via a landed PR; exit 3 otherwise)
   reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]
   requeue --task-id <id> [--retry-limit <n>]   (PR-less failures; meant for the dispatch session; limit at most 2)
-  reenter <pr|task-id> [--note <text>]   (re-enter a PR keyed on its state; replaces resume)
+  reenter <pr|task-id> [--note <text>] [--developer-round]   (re-enter a PR keyed on its state; replaces resume)
   complete --task-id <id> --outcome <enum> --worker <name> [--pr <number>] [--pr-url <url>]
            [--follow-ups <ids>] [--decisions <ids>] [--notes <s>] [--cause <s>]
   next-subid <task-id> [--work-dir <path>]
