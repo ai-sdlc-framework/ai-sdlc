@@ -18,7 +18,12 @@ export interface Ports {
 export const VERSION_FLOOR = '2.1.307';
 /** Context size, in tokens, at which an executor rotates (the 120k executor threshold). */
 export const ROTATE_AT_TOKENS = 120_000;
-export const RESUME_COMMAND = '/ai-sdlc:executor';
+/** A slash command is run with `$.command.run` (the host refuses `$.prompt.submit` of a text starting with `/`). */
+export const RESUME_COMMAND = 'ai-sdlc:executor';
+/** A carried rotation record older than this is stale (a clear that never reached a new session). */
+export const ROTATION_TTL_MS = 10 * 60 * 1000;
+/** A task with no turn activity for this long is treated as ended, so a lost verdict cannot mute wakes. */
+export const ACTIVE_STALE_MS = 30 * 60 * 1000;
 /** Printed as the last line of a reply by the executor command (Step 5 / idle path). */
 export const VERDICT_MARKER = '[executor] verdict reported';
 export const IDLE_MARKER = '[executor] idle';
@@ -61,13 +66,22 @@ export async function safe<T>(fn: () => Promise<T> | T): Promise<{ ok: boolean; 
   }
 }
 
-/** False only when calling the primitive failed because it does not exist (a TypeError "not a function"). */
-export async function exists(call: () => Promise<unknown> | unknown): Promise<boolean> {
+/**
+ * False only when the primitive itself is absent: a TypeError "is not a function", or one reading the verb
+ * off a missing noun (`reading 'submit'`). The validator refuses `typeof $.noun.verb`, so the probe is a
+ * call with an argument of the wrong type (a bare string, never an object with fields); a host that rejects
+ * it, by throwing or by `{ drop }`, has the primitive and the probe did nothing.
+ */
+export async function exists(
+  call: () => Promise<unknown> | unknown,
+  verb: string,
+): Promise<boolean> {
   try {
     await call();
     return true;
   } catch (err) {
-    return !(err instanceof TypeError && /not a function|undefined|not defined/.test(err.message));
+    const m = err instanceof TypeError ? err.message : '';
+    return !(m.includes('is not a function') || m.includes(`reading '${verb}'`));
   }
 }
 
@@ -123,6 +137,11 @@ export function senderOf(raw: string): string {
   return /<cross-session-message\b[^>]*\bfrom="([^"]*)"/.exec(raw)?.[1] ?? '';
 }
 
+/** True when the reply's last line is the marker (a marker quoted mid-reply must not trigger rotation). */
+export function endsWithMarker(reply: string, marker: string): boolean {
+  return reply.trimEnd().endsWith(marker);
+}
+
 const DISPATCH_NAME = /(?:^|-)operator-dispatch(?:-\d+)?$/;
 const STATUS_NOISE = /^(status|ack|ping)\b/i;
 
@@ -138,8 +157,14 @@ export function measuredTokens(e: Any): number {
 }
 
 export interface ExecutorState {
+  /** Set by the session.start gate once the role, version and probes passed; every handler checks it. */
+  enabled?: boolean;
   /** A task is in progress: from the first main-loop turn after a wake to its verdict or idle marker. */
   active: boolean;
+  /** Epoch ms of the last main-loop turn event while a task runs; a stale task no longer mutes wakes. */
+  lastActivity?: number;
+  /** A mod-run clear ended the session and the resume command has not run in the new one yet. */
+  resumePending?: boolean;
   /** A measure crossed the threshold while a task ran; rotate at the task's last turn. */
   pendingRotate: boolean;
   lastReply: string;
@@ -161,7 +186,9 @@ export async function rotate(
     role: 'executor',
     resume: RESUME_COMMAND,
     lastReply: state.lastReply,
+    at: Date.now(),
   });
+  state.resumePending = true;
   state.pendingRotate = false;
   if (ran(await safe(() => p.runCommand({ command: 'clear' })))) {
     await log(p, 'rotated with clear');
@@ -169,13 +196,39 @@ export async function rotate(
   }
   if (ran(await safe(() => p.compact({ instructions: SUMMARY_PROMPT })))) {
     await p.storeSet(ROTATION_KEY, null);
+    state.resumePending = false;
     await log(p, 'clear refused; rotated with compact');
     return 'compact';
   }
   await p.storeSet(ROTATION_KEY, null);
+  state.resumePending = false;
   await log(p, 'clear and compact refused; ending the session for cli-hierarchy up');
   await safe(() => p.runCommand({ command: 'exit' }));
   return 'exit';
+}
+
+/**
+ * Run the resume command in the fresh session after a mod-run clear. `session.start` does not fire after
+ * that clear (three live runs), so this runs from the first hook of the new session that does fire
+ * (`turn.start`, `session.measure`, `session.receive`) and from `session.start` if a host ever fires it.
+ */
+export async function resumeAfterClear(p: Ports, state: ExecutorState): Promise<void> {
+  if (!state.resumePending) return;
+  state.resumePending = false;
+  const carried = (await safe(() => p.storeGet(ROTATION_KEY))).value as Any;
+  await safe(() => p.storeSet(ROTATION_KEY, null));
+  if (!carried?.resume || Date.now() - Number(carried.at ?? 0) > ROTATION_TTL_MS) return;
+  state.lastReply = String(carried.lastReply ?? '');
+  const r = await safe(() => p.runCommand({ command: carried.resume }));
+  if (ran(r)) state.active = true;
+  else await log(p, `resume after clear refused: ${JSON.stringify(r.value ?? null)}`);
+}
+
+/** True while a task is believed to run: set at a wake, cleared at the verdict, stale after ACTIVE_STALE_MS. */
+function taskRunning(state: ExecutorState): boolean {
+  if (!state.active) return false;
+  if (Date.now() - (state.lastActivity ?? 0) > ACTIVE_STALE_MS) state.active = false;
+  return state.active;
 }
 
 /** Register the executor hooks. Called from the gate once the role, version and probes passed. */
@@ -191,15 +244,19 @@ export function registerExecutor(on: Any, state: ExecutorState): void {
     };
     // A failure in this gating hook must never swallow a message: fall through to the model.
     const handle = async () => {
+      if (!state.enabled) return next(e);
+      await resumeAfterClear(p, state);
       const raw = String(e?.text ?? '');
       const sender = senderOf(raw);
       const text = innerText(raw);
       if (!DISPATCH_NAME.test(sender)) return next(e);
       if (/^enqueue\b/i.test(text)) {
-        if (!state.active) {
-          const r = await safe(() => p.submit({ text: RESUME_COMMAND }));
-          if (ran(r)) state.active = true;
-          else await log(p, `wake refused: ${JSON.stringify(r.value ?? null)}`);
+        if (!taskRunning(state)) {
+          const r = await safe(() => p.runCommand({ command: RESUME_COMMAND }));
+          if (ran(r)) {
+            state.active = true;
+            state.lastActivity = Date.now();
+          } else await log(p, `wake refused: ${JSON.stringify(r.value ?? null)}`);
         }
         return { consumed: 'hierarchy:enqueue' };
       }
@@ -210,11 +267,24 @@ export function registerExecutor(on: Any, state: ExecutorState): void {
   });
 
   on('turn.start', async ($: Any, e: Any, next: Any) => {
-    if (!e?.agentId) state.active = true;
+    if (!state.enabled) return next(e);
+    const p: Ports = {
+      storeGet: (k) => $.store.get(k),
+      storeSet: (k, v) => $.store.set(k, v),
+      runCommand: (a) => $.command.run(a),
+      compact: (a) => $.session.compact(a),
+      submit: (a) => $.prompt.submit(a),
+    };
+    await resumeAfterClear(p, state);
+    if (!e?.agentId) {
+      state.active = true;
+      state.lastActivity = Date.now();
+    }
     return next(e);
   });
 
   on('turn.complete', async ($: Any, e: Any, next: Any) => {
+    if (!state.enabled) return next(e);
     const p: Ports = {
       storeGet: (k) => $.store.get(k),
       storeSet: (k, v) => $.store.set(k, v),
@@ -225,13 +295,15 @@ export function registerExecutor(on: Any, state: ExecutorState): void {
     if (e?.agentId) return next(e);
     const reply = String(e?.text ?? e?.reply ?? '');
     if (reply) state.lastReply = reply;
-    const verdict = reply.includes(VERDICT_MARKER);
-    if (verdict || reply.includes(IDLE_MARKER)) state.active = false;
-    if (verdict || (state.pendingRotate && !state.active)) await rotate(p, state);
+    state.lastActivity = Date.now();
+    const verdict = endsWithMarker(reply, VERDICT_MARKER);
+    if (verdict || endsWithMarker(reply, IDLE_MARKER)) state.active = false;
+    if (verdict || (state.pendingRotate && !taskRunning(state))) await rotate(p, state);
     return next(e);
   });
 
   on('session.measure', async ($: Any, e: Any, next: Any) => {
+    if (!state.enabled) return next(e);
     const p: Ports = {
       storeGet: (k) => $.store.get(k),
       storeSet: (k, v) => $.store.set(k, v),
@@ -239,8 +311,9 @@ export function registerExecutor(on: Any, state: ExecutorState): void {
       compact: (a) => $.session.compact(a),
       submit: (a) => $.prompt.submit(a),
     };
+    await resumeAfterClear(p, state);
     if (measuredTokens(e) >= ROTATE_AT_TOKENS) {
-      if (state.active) state.pendingRotate = true;
+      if (taskRunning(state)) state.pendingRotate = true;
       else await rotate(p, state);
     }
     return next(e);

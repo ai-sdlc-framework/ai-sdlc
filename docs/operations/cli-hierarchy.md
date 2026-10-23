@@ -544,18 +544,23 @@ the start no longer checks who typed it. `check-sender` stays for later instruct
 (RFC-0058, OQ-2). It replaces the 25-minute `--wait` poll and the typed `/clear` for an executor.
 
 - **Role gate.** At `session.start` it reads the role (`HIERARCHY_ROLE` or `AI_SDLC_HIERARCHY_ROLE`, the module option
-  `role`, or the role carried across a clear in `$.store`). With no role it registers no role hook.
+  `role`; a record carried in `$.store` is never a role source and `session.start` clears a stale one). With no role it
+  registers no role hook.
 - **Version and primitive guard (OQ-5).** It compares `$.session.version()` with the floor recorded by the phase 0 spike
-  (2.1.307) and probes `prompt.submit`, `command.run`, `session.compact`, `session.measure` and `session.send`. On a miss it
+  (2.1.307) and probes `prompt.submit`, `command.run`, `session.compact`, `session.measure` and `session.send`. The validator
+  refuses `typeof $.noun.verb`, so each probe is one call with a bare-string argument (never an object with fields) that
+  a typed host rejects before acting; only an absent primitive counts as missing. On a miss it
   registers nothing and logs one line naming the missing primitive and the floor (the `hierarchy/log` list in `$.store`).
 - **Start line (OQ-4).** The line names the role and the detected tier; when `$.session.identity()` answers, the identity
   is recorded as an informational field, never as authority.
 - **Wake.** `session.receive` consumes an `enqueue` message from the dispatch roster name (no model turn) and calls
-  `$.prompt.submit({ text: '/ai-sdlc:executor' })`, which runs once the session is idle. Status noise from dispatch is
+  `$.command.run({ command: 'ai-sdlc:executor' })` (the host refuses `$.prompt.submit` of a text starting with `/`). A task
+  with no turn activity for 30 minutes no longer mutes later wakes. Status noise from dispatch is
   consumed; anything else passes through.
-- **Rotation (OQ-1).** After the verdict (a main-loop reply ending in `[executor] verdict reported`) the module writes the
-  handoff, runs `$.command.run({ command: 'clear' })` with `$.store` carrying the role, resume command and last reply, and
-  submits the resume command at the next `session.start`. On `{ drop }` it runs `$.session.compact` with the hierarchy
+- **Rotation (OQ-1).** After the verdict (a main-loop reply whose last line is `[executor] verdict reported`) the module writes the
+  handoff, runs `$.command.run({ command: 'clear' })` with `$.store` carrying the role, resume command, last reply and a
+  timestamp, and runs the resume command from the first hook of the new session (`turn.start`, `session.measure` or
+  `session.receive`, since `session.start` does not fire after a mod-run clear; a record older than 10 minutes is dropped). On `{ drop }` it runs `$.session.compact` with the hierarchy
   summary prompt; on a second failure it ends the session so `cli-hierarchy up` starts a fresh one. `session.measure`
   over 120k tokens triggers the same rotation, and during a task it waits for the task's last reply (never mid-task).
 - **Mixed fleets.** A tmux-driven dispatch session can still enqueue for a mod-driven executor: both read the same board.

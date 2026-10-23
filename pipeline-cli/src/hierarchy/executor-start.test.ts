@@ -344,7 +344,11 @@ describe('cli-hierarchy executor-start and clear --self (executor)', () => {
       identity: identityFor('executor', 'proj-executor-alpha'),
       repoGit: gitAt(tmp),
     };
-    const ok = await run(['executor-start'], extras);
+    // removed flags are ignored, not waited on: the claim returns at once
+    const ok = await run(
+      ['executor-start', '--wait', '600', '--sender-pid', '1', '--sender-ref', 'x'],
+      extras,
+    );
     expect(ok.code).toBe(0);
     expect(JSON.parse(ok.out[ok.out.length - 1]!)).toMatchObject({ taskId: 'AISDLC-4' });
   });
