@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1057
 title: 'decisions-persist.test.ts no longer times out under machine load, so executors stop needing a verification waiver for it'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-23'
 labels:
