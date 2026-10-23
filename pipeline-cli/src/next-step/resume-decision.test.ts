@@ -59,12 +59,6 @@ describe('decideResumeReview (AISDLC-947)', () => {
     expect(d.branch).toBe('developer-round');
   });
 
-  it('once the flag is consumed the same tree takes the normal path (AISDLC-1053)', async () => {
-    script();
-    const d = await decideResumeReview(h.ctx, h.root, opts(PID));
-    expect(d.branch).toBe('unchanged');
-  });
-
   it('chore-only delta gets the correctness reviewer alone', async () => {
     script('docs/readme.md\0');
     const d = await decideResumeReview(h.ctx, h.root, opts('e'.repeat(40)));

@@ -966,3 +966,68 @@ describe('staged review stages (RFC-0052)', () => {
     }
   });
 });
+
+describe('ordered developer round on a resume (AISDLC-1053)', () => {
+  const manifestPath = (): string =>
+    join(h.root, '.ai-sdlc', 'dispatch', 'inflight', 'AISDLC-900.dispatch.json');
+  const writeManifest = (developerRound: boolean): void => {
+    mkdirSync(dirname(manifestPath()), { recursive: true });
+    writeFileSync(
+      manifestPath(),
+      JSON.stringify({
+        schemaVersion: 'v1',
+        taskId: 'AISDLC-900',
+        branch: 'ai-sdlc/aisdlc-900-demo-task',
+        worktree: '.worktrees/aisdlc-900',
+        baseSha: 'a'.repeat(40),
+        workerKind: 'any',
+        dispatchedAt: '2026-10-11T00:00:00.000Z',
+        dispatchedBy: 'dispatch',
+        spec: { taskFile: 'backlog/tasks/x.md', verifyCommands: [] },
+        resume: {
+          note: 'add the test',
+          resumedAt: '2026-10-11T00:00:00.000Z',
+          resumedBy: 'dispatch',
+          ...(developerRound ? { developerRound: true } : {}),
+        },
+      }),
+    );
+  };
+  const resumedDeps = (developerRound: boolean): Partial<NextStepDeps> => ({
+    ...deps(),
+    initTask: async () => ({
+      ok: true,
+      branch: 'ai-sdlc/aisdlc-900-demo-task',
+      worktreePath: worktree,
+      task: makeTask(),
+      fromStatus: 'In Progress',
+      promptFile: '/files/developer-prompt-1.md',
+      resumed: true,
+      ...(developerRound ? { developerRound: true } : {}),
+    }),
+  });
+  const flag = (): unknown =>
+    (JSON.parse(readFileSync(manifestPath(), 'utf8')) as { resume: { developerRound?: boolean } })
+      .resume.developerRound;
+
+  it('runs the developer, clears the flag once it has run, then reviews', async () => {
+    writeManifest(true);
+    const first = await nextStep(ctx, { task: 'AISDLC-900' }, resumedDeps(true));
+    expect(first.instruction.action).toBe('spawn-developer');
+    expect(persisted().developerRoundPending).toBe(true);
+    expect(flag()).toBe(true);
+
+    const second = await nextStep(ctx, { task: 'AISDLC-900', result: DEV_JSON }, resumedDeps(true));
+    expect(second.instruction.action).toBe('spawn-reviewers');
+    expect(flag()).toBeUndefined();
+    expect(persisted().developerRoundPending).toBeUndefined();
+    expect(persisted().resumeReview).toBeDefined();
+  });
+
+  it('without the flag a resume does not set the pending round or touch the manifest', async () => {
+    writeManifest(false);
+    await nextStep(ctx, { task: 'AISDLC-900' }, resumedDeps(false));
+    expect(persisted().developerRoundPending).toBeUndefined();
+    expect(flag()).toBeUndefined();
+  });
+});

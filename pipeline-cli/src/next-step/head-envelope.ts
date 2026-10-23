@@ -22,7 +22,7 @@ export interface HeadEnvelopeOpts {
 }
 
 export async function checkHeadEnvelope(
-  ctx: NextStepContext,
+  ctx: Pick<NextStepContext, 'workDir' | 'runner'>,
   cwd: string,
   opts: HeadEnvelopeOpts = {},
 ): Promise<HeadEnvelopeStatus> {

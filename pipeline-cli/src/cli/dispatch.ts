@@ -221,7 +221,6 @@ import { createSnapshotRunner } from '../hierarchy/pr-snapshot.js';
 import { reenter } from '../hierarchy/reenter.js';
 import { decideResumeReview } from '../next-step/resume-decision.js';
 import { defaultRunner } from '../runtime/exec.js';
-import type { NextStepContext } from '../next-step/types.js';
 import { loadPrLifecycleConfig } from '../hierarchy/pr-lifecycle-config.js';
 import { startScheduler } from '../hierarchy/scheduler.js';
 import { now as clockNow } from '../clock.js';
@@ -323,8 +322,7 @@ async function predictResumePath(
 ): Promise<'unchanged' | 'delta' | 'full'> {
   const worktree = path.join(workDir, '.worktrees', taskId.toLowerCase());
   if (!existsSync(path.join(worktree, '.git'))) return 'full';
-  const ctx = { workDir, runner: defaultRunner } as unknown as NextStepContext;
-  const d = await decideResumeReview(ctx, worktree);
+  const d = await decideResumeReview({ workDir, runner: defaultRunner }, worktree);
   return d.branch === 'developer-round' ? 'full' : d.branch;
 }
 
@@ -1609,6 +1607,11 @@ export async function runDispatchCli(
               ? 'developer-round'
               : await predictResumePath(workDir, result.taskId)
             : undefined;
+        if (developerRound && result.kind !== 'manifest') {
+          process.stderr.write(
+            'cli-dispatch reenter: --developer-round ignored; the PR was routed to the machine, not a manifest\n',
+          );
+        }
         out({ ok: true, ...result, ...(resumePath ? { resumePath } : {}) });
         return 0;
       } catch (err) {

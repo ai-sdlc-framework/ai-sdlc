@@ -43,6 +43,9 @@ const FULL: ResumeReviewDecision = { branch: 'full', note: 'review-full' };
 const ENVELOPE_RE = /^(?:.*\/)?([0-9a-f]{40})(?:\.v\d+)?\.dsse\.json$/i;
 const ATTESTATION_DIR = '.ai-sdlc/attestations/';
 
+/** The slice of the context the decision reads (AISDLC-1053: callers outside next-step pass just these). */
+export type ResumeDecisionCtx = Pick<NextStepContext, 'workDir' | 'runner'>;
+
 export interface ResumeDecisionOpts {
   /** `resume.developerRound` of the inflight manifest: force the developer branch (AISDLC-1053). */
   developerRound?: boolean;
@@ -86,7 +89,7 @@ async function verifyAttestationAt(
 
 /** Decide what a resumed task's review does. Never throws: any doubt returns `full`. */
 export async function decideResumeReview(
-  ctx: NextStepContext,
+  ctx: ResumeDecisionCtx,
   worktreePath: string,
   opts: ResumeDecisionOpts = {},
 ): Promise<ResumeReviewDecision> {
@@ -101,7 +104,7 @@ export async function decideResumeReview(
 }
 
 async function decide(
-  ctx: NextStepContext,
+  ctx: ResumeDecisionCtx,
   cwd: string,
   opts: ResumeDecisionOpts,
 ): Promise<ResumeReviewDecision> {
