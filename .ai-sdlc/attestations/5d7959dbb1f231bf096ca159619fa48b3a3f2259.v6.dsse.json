@@ -1,0 +1,76 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "3322a6675f7b2e54d01045b140adf09680b9d216"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "b43b2d226956a715f34e77a81a1de311ea1c2165869f655e69131d1ab73d095e",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "b43b2d226956a715f34e77a81a1de311ea1c2165869f655e69131d1ab73d095e",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "bf2fa0372475523ec4cb85de8be4e283740068d575e10d9a2997e824ebfde0f5",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "bf2fa0372475523ec4cb85de8be4e283740068d575e10d9a2997e824ebfde0f5",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "0378d43d542b65c924f65b2bc3638ed7da27dbe7bf6968761cbdb5843da092e5",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "0378d43d542b65c924f65b2bc3638ed7da27dbe7bf6968761cbdb5843da092e5",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "d9d3ed367f2facb22a5b78832d663ef13c7f6649f46c883f85be3c94e883b346",
+        "0b1108852cce80c17dfbd93e44c5e63f2a2e19f67c2aee9f49e9995e14556d34"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "206fce3b1ea1bbccbb702eae4d3e0962813a0de96827c2507705a4f8fa8f3190",
+        "0b1108852cce80c17dfbd93e44c5e63f2a2e19f67c2aee9f49e9995e14556d34"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "7d8f20a86eddbbe6dc9daf3e17e32d9e99c46fa3ca141974d769068369fb3a90",
+        "f717c466d22ef638440d5641906baefdf5fdeb76e43f25e16b42547370733788"
+      ]
+    }
+  ],
+  "rootHash": "1864ab9d108948f296c57c21953e8e68ccb1e63bac087e9a85d14655f14b3f02",
+  "rootSignature": "c1sGka5BmJctU3UesNvmSmR69Xkzn2/O27r8j4C43P7fxqcoizsMimLjdAb5h4O7oG38QdpNsorlfoHPMbN6DA==",
+  "nonce": "02061c568b22e8e248d2e3d859c940a3f2234f8b5ec51fec67c6e1121f670af8",
+  "leafCount": 3,
+  "signedAt": "2026-10-23T16:19:15.610Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      ".github/workflows/__tests__/release-yml-pin-sync.test.mjs",
+      ".github/workflows/release.yml",
+      "ai-sdlc-plugin/.claude-plugin/plugin.json",
+      "ai-sdlc-plugin/plugin.json"
+    ],
+    "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
+  }
+}
