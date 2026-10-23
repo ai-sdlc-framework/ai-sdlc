@@ -89,8 +89,10 @@ function isLastMessageOff(env) {
   );
 }
 
-/** Text blocks of the trailing run of assistant entries in a JSONL transcript. */
-function lastAssistantText(raw) {
+const NO_REPLY = '(turn ended on a tool call; no final reply recorded, see the handoff file)';
+const REREAD_DELAY_MS = 400;
+
+function parseEntries(raw) {
   const entries = [];
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
@@ -100,26 +102,64 @@ function lastAssistantText(raw) {
       // skip a torn line
     }
   }
-  const parts = [];
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const e = entries[i];
-    const role = e && (e.type || (e.message && e.message.role));
-    if (role !== 'assistant') {
-      if (parts.length) break;
-      continue;
-    }
-    const content = e.message && e.message.content;
-    const texts =
-      typeof content === 'string'
-        ? [content]
-        : Array.isArray(content)
-          ? content
-              .filter((b) => b && b.type === 'text' && typeof b.text === 'string')
-              .map((b) => b.text)
-          : [];
-    parts.unshift(...texts);
+  return entries;
+}
+
+const roleOf = (e) => e && (e.type || (e.message && e.message.role));
+const blocksOf = (e) => {
+  const c = e && e.message && e.message.content;
+  return Array.isArray(c) ? c.filter((b) => b && typeof b === 'object') : [];
+};
+const textsOf = (e) => {
+  const c = e && e.message && e.message.content;
+  if (typeof c === 'string') return [c];
+  return blocksOf(e)
+    .filter((b) => b.type === 'text' && typeof b.text === 'string')
+    .map((b) => b.text);
+};
+const hasToolResult = (e) => blocksOf(e).some((b) => b.type === 'tool_result');
+const hasToolUse = (e) => blocksOf(e).some((b) => b.type === 'tool_use');
+
+/**
+ * Final reply of a JSONL transcript: text only from the trailing run of assistant entries
+ * after the last tool result or user entry (AISDLC-1048). Never falls back to earlier text.
+ * Returns { text, timestamp, final, endsOnTool }; text is '' when the run has none.
+ */
+function analyzeTranscript(raw) {
+  const roleEntries = parseEntries(raw).filter((e) => {
+    const r = roleOf(e);
+    return r === 'assistant' || r === 'user';
+  });
+  const last = roleEntries[roleEntries.length - 1];
+  const endsOnTool =
+    !!last && (roleOf(last) === 'assistant' ? hasToolUse(last) : hasToolResult(last));
+  const run = [];
+  for (let i = roleEntries.length - 1; i >= 0; i--) {
+    if (roleOf(roleEntries[i]) !== 'assistant') break;
+    run.unshift(roleEntries[i]);
   }
-  return parts.join('\n\n').trim();
+  const withText = run.filter((e) => textsOf(e).length);
+  const parts = withText.flatMap(textsOf);
+  const lastText = withText[withText.length - 1];
+  return {
+    text: parts.join('\n\n').trim(),
+    timestamp: lastText && typeof lastText.timestamp === 'string' ? lastText.timestamp : '',
+    final: !!lastText && lastText === last && !hasToolUse(last),
+    endsOnTool,
+  };
+}
+
+/** The final reply text, or the no-reply marker when the turn ended on a tool call. */
+function lastAssistantText(raw) {
+  return analyzeTranscript(raw).text || NO_REPLY;
+}
+
+function sleepMs(ms) {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    // no delay available
+  }
 }
 
 function currentSession(boardDir, env) {
@@ -137,13 +177,31 @@ function currentSession(boardDir, env) {
  * Replace this session's section of LAST_MESSAGE.md, keeping other sessions' sections.
  * Returns true when written. Never throws.
  */
-function persistLastMessage(transcript, boardDir, env, now = new Date()) {
+function persistLastMessage(
+  transcript,
+  boardDir,
+  env,
+  now = new Date(),
+  payload = {},
+  sleep = sleepMs,
+) {
   try {
     if (isLastMessageOff(env)) return false;
     const session = currentSession(boardDir, env);
     if (!session || !existsSync(transcript)) return false;
-    const text = lastAssistantText(readFileSync(transcript, 'utf-8'));
-    if (!text) return false;
+    let info = analyzeTranscript(readFileSync(transcript, 'utf-8'));
+    if (info.endsOnTool) {
+      // The final text line may not be flushed yet: one bounded re-read (AISDLC-1048).
+      sleep(REREAD_DELAY_MS);
+      info = analyzeTranscript(readFileSync(transcript, 'utf-8'));
+    }
+    const supplied =
+      payload && typeof payload.last_assistant_message === 'string'
+        ? payload.last_assistant_message.trim()
+        : '';
+    const text = supplied || info.text || NO_REPLY;
+    const marker = supplied || info.final ? 'final' : 'interim';
+    const stamp = info.text && !supplied && info.timestamp ? `, entry ${info.timestamp}` : '';
     const file = join(dirname(dirname(boardDir)), '.claude', 'memory', 'LAST_MESSAGE.md');
     const heading = `## ${session.name}`;
     const existing = existsSync(file) ? readFileSync(file, 'utf-8') : '';
@@ -153,7 +211,8 @@ function persistLastMessage(transcript, boardDir, env, now = new Date()) {
       .split(SECTION_START)
       .filter((sec) => sec.startsWith('## ') && !sec.startsWith(`${heading} (`));
     const body = text.replace(/^##(?= )/gm, '###');
-    sections.push(`${heading} (${now.toISOString()})\n\n${body}\n`);
+    const note = text === NO_REPLY ? '' : `_${marker}${stamp}_\n\n`;
+    sections.push(`${heading} (${now.toISOString()})\n\n${note}${body}\n`);
     mkdirSync(dirname(file), { recursive: true });
     const tmp = `${file}.${process.pid}.tmp`;
     writeFileSync(tmp, `# Last messages\n\n${sections.join('\n')}`);
@@ -217,7 +276,7 @@ function runAutoClear(payload, options = {}) {
     const boardDir = resolve(boardDirOf(env, cwd));
     // Cheap exit for every session that is not in a hierarchy roster.
     if (!existsSync(join(boardDir, 'hierarchy.json'))) return 'no-roster';
-    persistLastMessage(transcript, boardDir, env, options.now);
+    persistLastMessage(transcript, boardDir, env, options.now, payload, options.sleep);
     const log = (line) => {
       try {
         if (typeof options.log === 'function') options.log(line, boardDir);
@@ -302,6 +361,7 @@ module.exports = {
   decisionOf,
   persistLastMessage,
   lastAssistantText,
+  analyzeTranscript,
   warnMessageOf,
   resolveBin,
   boardDirOf,
