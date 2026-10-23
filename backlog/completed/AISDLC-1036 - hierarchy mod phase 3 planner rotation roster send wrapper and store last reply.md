@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1036
 title: 'Hierarchy mod phase 3: planner role (rotation with handoff write first, roster-name send wrapper, $.store last reply); delete LAST_MESSAGE.md persistence and the Stop-hook auto-clear'
-status: Done
+status: To Do
 assignee: []
 created_date: '2026-10-22'
 labels:
