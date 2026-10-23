@@ -32,7 +32,7 @@ describe('hierarchy-spike', () => {
   it('logs hooks, consumes, and runs the clear then ping sequence', async () => {
     const { handlers, $, next, kv } = setup();
     const recv = handlers.get('session.receive');
-    expect(await recv($, { text: 'hier:consume' }, next)).toEqual({ consumed: true });
+    expect(await recv($, { text: 'hier:consume' }, next)).toEqual({ consumed: 'hier:consume' });
     expect(await recv($, { text: 'hello' }, next)).toEqual({ text: 'hello' });
     await recv($, { text: 'hier:run clear' }, next);
     await recv($, { text: 'hier:run compact' }, next);
@@ -52,12 +52,23 @@ describe('hierarchy-spike', () => {
 
   it('matches commands on the inner text of the real cross-session envelope', async () => {
     const env = (t: string) =>
+      `<cross-session-message from="alpha" id="1"><\\agent-message from="beta" kind="text">${t}<\\/agent-message></cross-session-message>`;
+    const plain = (t: string) =>
       `<cross-session-message from="alpha" id="1"><agent-message kind="text">${t}</agent-message></cross-session-message>`;
     expect(innerText(env('hier:consume 1'))).toBe('hier:consume 1');
-    for (const cmd of ['hier:consume 1', 'hier:dump', 'hier:run clear', 'hier:run compact']) {
-      const { handlers, $, next } = setup();
-      const recv = handlers.get('session.receive');
-      expect(await recv($, { text: env(cmd) }, next)).toEqual({ consumed: true });
+    expect(innerText(plain('hier:consume 1'))).toBe('hier:consume 1');
+    const cases: [string, string][] = [
+      ['hier:consume 1', 'hier:consume'],
+      ['hier:dump', 'hier:dump'],
+      ['hier:run clear', 'hier:clear'],
+      ['hier:run compact', 'hier:compact'],
+    ];
+    for (const wrap of [env, plain]) {
+      for (const [cmd, consumed] of cases) {
+        const { handlers, $, next } = setup();
+        const recv = handlers.get('session.receive');
+        expect(await recv($, { text: wrap(cmd) }, next)).toEqual({ consumed });
+      }
     }
     const { handlers, $, next, kv } = setup();
     const raw = env('hello');
@@ -68,7 +79,7 @@ describe('hierarchy-spike', () => {
   it('hier:dump submits the log, and records a refused submit', async () => {
     const { handlers, $, next, kv } = setup();
     const recv = handlers.get('session.receive');
-    expect(await recv($, { text: 'hier:dump' }, next)).toEqual({ consumed: true });
+    expect(await recv($, { text: 'hier:dump' }, next)).toEqual({ consumed: 'hier:dump' });
     expect($.prompt.submit).toHaveBeenCalledTimes(1);
     expect(($.prompt.submit.mock.calls[0] as any)[0].text).toContain('session.receive');
     $.prompt.submit.mockResolvedValueOnce({ drop: 'busy' } as any);

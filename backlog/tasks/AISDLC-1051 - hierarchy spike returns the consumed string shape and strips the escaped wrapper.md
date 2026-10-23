@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1051
 title: 'RFC-0058 phase 0: the hierarchy spike returns the host consumed shape, strips the escaped agent-message wrapper, and the live protocol finally measures a silent consume'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-22'
 labels:

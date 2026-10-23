@@ -16,3 +16,6 @@ Protocol notes (rerun, AISDLC-1050):
 - The command is namespaced: the mod submits `/hierarchy-spike:hier-ping`.
 - `$.store` persists under `~/.claude/plugins/store/`; recover the log there if `hier:dump` never reaches the hook.
 - Order: five consumes, five baseline messages, `hier:run clear`, `hier:run compact`, `hier:dump`.
+- Subagent sends arrive with a backslash-escaped inner wrapper (`<\agent-message ...>`); headless `claude -p` sends carry none. The mod strips both.
+- `session.receive` must return `{ consumed: <string> }` (not `true`) or the host skips the hook and the model takes a turn.
+- Open point for phase 1: after the mod-run clear no post-clear `session.start` hook fired, so the `/hierarchy-spike:hier-ping` follow-up submission is unverified.
