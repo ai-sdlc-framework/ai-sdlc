@@ -12,6 +12,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildDecisionsCli } from './decisions.js';
 import { DECISIONS_SYNC_BRANCH } from '../decisions/remote-persist.js';
 
+// Every case runs real git (bare origin, clone, pushes, fetches); under machine load that
+// exceeds vitest's 5 s default (AISDLC-1057). Explicit budget, assertions unchanged.
+const LOAD_TIMEOUT_MS = 60_000;
+
 const git = (cwd: string, ...args: string[]): string =>
   execFileSync('git', args, {
     cwd,
@@ -69,7 +73,7 @@ beforeEach(() => {
   process.exit = ((code?: number) => {
     throw new Error(`process.exit(${code})`);
   }) as typeof process.exit;
-});
+}, LOAD_TIMEOUT_MS);
 
 afterEach(() => {
   process.argv = savedArgv;
@@ -109,41 +113,49 @@ const ADD = [
 ];
 
 describe('cli-decisions remote persistence (AISDLC-546)', () => {
-  it('add, escalate and answer each persist to origin', async () => {
-    await run(...ADD);
-    expect(remoteLedger()).toContain('DEC-0001');
+  it(
+    'add, escalate and answer each persist to origin',
+    async () => {
+      await run(...ADD);
+      expect(remoteLedger()).toContain('DEC-0001');
 
-    await run(
-      'escalate',
-      '--task-id',
-      'AISDLC-546',
-      '--source-worktree',
-      parent,
-      '--summary',
-      'blocked',
-      '--option',
-      'x:X',
-      '--option',
-      'y:Y',
-      '--format',
-      'json',
-    );
-    expect(remoteLedger()).toContain('DEC-0002');
+      await run(
+        'escalate',
+        '--task-id',
+        'AISDLC-546',
+        '--source-worktree',
+        parent,
+        '--summary',
+        'blocked',
+        '--option',
+        'x:X',
+        '--option',
+        'y:Y',
+        '--format',
+        'json',
+      );
+      expect(remoteLedger()).toContain('DEC-0002');
 
-    await run('answer', 'DEC-0001', 'opt-b', '--by', 'op@test', '--format', 'json');
-    expect(remoteLedger()).toContain('operator-answered');
-  });
+      await run('answer', 'DEC-0001', 'opt-b', '--by', 'op@test', '--format', 'json');
+      expect(remoteLedger()).toContain('operator-answered');
+    },
+    LOAD_TIMEOUT_MS,
+  );
 
-  it('refuses an explicit --id already consumed on origin', async () => {
-    await run(...ADD);
-    // simulate a parent reset wiping the local append; origin still holds DEC-0001
-    rmSync(join(parent, '.ai-sdlc', '_decisions', 'events'), { recursive: true, force: true });
-    const errs: string[] = [];
-    process.stderr.write = ((c: string | Uint8Array) => {
-      errs.push(String(c));
-      return true;
-    }) as typeof process.stderr.write;
-    await expect(run(...ADD, '--id', 'DEC-0001')).rejects.toThrow('process.exit(1)');
-    expect(errs.join('')).toMatch(/refusing to reuse a consumed decision number/);
-  });
+  it(
+    'refuses an explicit --id already consumed on origin',
+    async () => {
+      await run(...ADD);
+      // simulate a parent reset wiping the local append; origin still holds DEC-0001
+      rmSync(join(parent, '.ai-sdlc', '_decisions', 'events'), { recursive: true, force: true });
+      const errs: string[] = [];
+      process.stderr.write = ((c: string | Uint8Array) => {
+        errs.push(String(c));
+        return true;
+      }) as typeof process.stderr.write;
+      await expect(run(...ADD, '--id', 'DEC-0001')).rejects.toThrow('process.exit(1)');
+      expect(errs.join('')).toMatch(/refusing to reuse a consumed decision number/);
+    },
+    LOAD_TIMEOUT_MS,
+  );
 });
