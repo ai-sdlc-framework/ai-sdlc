@@ -46,7 +46,7 @@ const OUTPUT_FIELDS = new Map<string, readonly string[]>(
   MACHINE_STEPS.map((s) => [s.id, s.outputFields ?? []]),
 );
 
-function normalizeEdge(e: unknown): Edge | undefined {
+export function normalizeEdge(e: unknown): Edge | undefined {
   if (typeof e === 'string') {
     const m = e.match(/^\s*([A-Za-z0-9_-]+)\s*->\s*([A-Za-z0-9_-]+)\s*$/);
     return m ? { from: m[1], to: m[2] } : undefined;

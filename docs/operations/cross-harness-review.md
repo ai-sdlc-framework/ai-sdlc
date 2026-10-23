@@ -414,7 +414,7 @@ codex
 
 # Inside the Codex session:
 # 3. Sweep merged worktrees (Step 0)
-#    Run MCP pipeline_step_0_sweep or: node pipeline-cli/bin/ai-sdlc-pipeline.mjs step-sweep
+#    Run `next-step` (Step 0) or: node pipeline-cli/bin/ai-sdlc-pipeline.mjs step-sweep
 
 # 4. Dispatch the developer subagent (Step 5b) — Codex host spawn_agent
 #    Load the full developer agent body from:

@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { resolve } from 'node:path';
-import { loadConfig } from './config.js';
+import { loadConfig, resetStagesDeprecationWarning } from './config.js';
 
 const CONFIG_DIR = resolve(import.meta.dirname, '../../.ai-sdlc');
 
@@ -442,6 +442,43 @@ examples:
       );
       expect(config.pipeline).toBeDefined();
     } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
+});
+
+describe('loadConfig() — spec.stages deprecation (RFC-0056 phase 3)', () => {
+  it('logs one deprecation warning however many stages set it, and still loads the pipeline', async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmp = mkdtempSync(join(tmpdir(), 'config-stages-'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    resetStagesDeprecationWarning();
+    try {
+      writeFileSync(
+        join(tmp, 'pipeline.yaml'),
+        `apiVersion: ai-sdlc.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: p
+spec:
+  triggers:
+    - event: issue.labeled
+  providers: {}
+  stages:
+    - name: a
+      condition: 'true'
+    - name: b
+`,
+      );
+      expect(loadConfig(tmp).pipeline?.spec.stages).toHaveLength(2);
+      loadConfig(tmp);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toContain('spec.stages');
+      expect(String(warn.mock.calls[0][0])).toContain('stages[].condition');
+    } finally {
+      warn.mockRestore();
       rmSync(tmp, { recursive: true });
     }
   });

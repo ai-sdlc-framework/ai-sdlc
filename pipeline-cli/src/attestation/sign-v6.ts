@@ -43,6 +43,7 @@ import {
 } from './merkle.js';
 import type { StagedLeafStage, TranscriptLeaf } from './merkle.js';
 import { formatEnvelopeJson } from './format-json.js';
+import type { WorkflowDigest } from '../workflow/digest.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -134,6 +135,11 @@ export interface AttestationEnvelopeV6 {
    * diff and never reads this field.
    */
   reviewScope?: EnvelopeReviewScope;
+  /**
+   * RFC-0056 phase 3 (OQ-4): the Workflow document that drove the run, present only when the
+   * workflow engine ran. The verifier recomputes it from `baseSha`.
+   */
+  workflowDigest?: WorkflowDigest;
 }
 
 // ── Key resolution ────────────────────────────────────────────────────────────
@@ -210,6 +216,8 @@ export interface BuildV6EnvelopeOptions {
   signerIdentity?: string;
   /** AISDLC-723: recorded review scope (informational). */
   reviewScope?: EnvelopeReviewScope;
+  /** RFC-0056: the workflow document digest, when the engine ran. */
+  workflowDigest?: WorkflowDigest;
 }
 
 /**
@@ -296,6 +304,9 @@ export function buildV6Envelope(opts: BuildV6EnvelopeOptions): AttestationEnvelo
   if (opts.reviewScope) {
     envelope.reviewScope = opts.reviewScope;
   }
+  if (opts.workflowDigest) {
+    envelope.workflowDigest = opts.workflowDigest;
+  }
 
   return envelope;
 }
@@ -353,6 +364,8 @@ export interface SignAndWriteV6EnvelopeOptions {
    * The primary path is returned.
    */
   patchId?: string;
+  /** RFC-0056: the workflow document digest to bind, when the engine ran. */
+  workflowDigest?: WorkflowDigest;
 }
 
 /**
@@ -411,7 +424,8 @@ export function findOrphanedLeafFiles(
  * @throws {Error} when no leaves can be found via either path.
  */
 export function signAndWriteV6Envelope(opts: SignAndWriteV6EnvelopeOptions): string {
-  const { repoRoot, headSha, taskId, privateKeyPem, signerIdentity, patchId } = opts;
+  const { repoRoot, headSha, taskId, privateKeyPem, signerIdentity, patchId, workflowDigest } =
+    opts;
 
   // AISDLC-543 (folded from AISDLC-545): subject.sha1 MUST be the commit being
   // pushed. A subject older than HEAD can be orphaned by a rebase and is
@@ -499,6 +513,7 @@ export function signAndWriteV6Envelope(opts: SignAndWriteV6EnvelopeOptions): str
       headSha,
       prLeaves.map((l) => l.reviewerName),
     ),
+    workflowDigest,
   });
 
   const serialized = formatEnvelopeJson(envelope);

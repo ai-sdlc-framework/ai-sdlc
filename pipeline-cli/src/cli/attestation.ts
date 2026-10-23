@@ -52,6 +52,7 @@ import {
   type AttestationEnvelopeV6,
 } from '../attestation/sign-v6.js';
 import { resolveInstalledPluginAgentDir } from '../attestation/agent-dir-resolver.js';
+import { workflowDigestFromStateFile } from '../workflow/digest.js';
 import {
   appendReviewLedgerRecord,
   normalizeFindings,
@@ -448,6 +449,13 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
               describe:
                 'AISDLC-610: base ref for the auto-computed patch-id (default: origin/main). ' +
                 'Only consulted when --patch-id is omitted.',
+            })
+            .option('workflow-state', {
+              type: 'string',
+              describe:
+                'RFC-0056: `next-step` state file of the run. When it holds workflow-engine ' +
+                'records the envelope gains workflowDigest { path, sha256, baseSha }. ' +
+                'Defaults to AI_SDLC_WORKFLOW_STATE (set by the engine).',
             }),
         (args) => {
           const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
@@ -512,6 +520,11 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
               privateKeyPem,
               signerIdentity,
               patchId,
+              workflowDigest: workflowDigestFromStateFile(
+                (args['workflow-state'] as string | undefined) ??
+                  process.env['AI_SDLC_WORKFLOW_STATE'] ??
+                  '',
+              ),
             });
           } catch (err) {
             process.stderr.write(`[cli-attestation] sign-v6: ${(err as Error).message}\n`);

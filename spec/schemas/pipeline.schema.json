@@ -77,7 +77,8 @@
         },
         "stages": {
           "type": "array",
-          "description": "Ordered list of execution stages.",
+          "description": "Ordered list of execution stages. Deprecated (RFC-0056 phase 3): pipeline-cli never executed it; the Workflow document (`.ai-sdlc/workflow.yaml`) replaces it. Still accepted for one release; loading a Pipeline that sets it logs one deprecation warning.",
+          "deprecated": true,
           "minItems": 1,
           "items": {
             "type": "object",
@@ -115,7 +116,8 @@
               },
               "condition": {
                 "type": "string",
-                "description": "Expression that must evaluate to true for the stage to execute. Deprecated (RFC-0056): replaced by Workflow edge `when` and removed in phase 3 with spec.stages."
+                "deprecated": true,
+                "description": "Expression that must evaluate to true for the stage to execute. Deprecated (RFC-0056): replaced by Workflow edge `when`; accepted for one release with spec.stages, then removed."
               },
               "context": {
                 "type": "object",

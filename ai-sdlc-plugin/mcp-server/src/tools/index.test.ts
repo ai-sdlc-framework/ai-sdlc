@@ -26,9 +26,6 @@ vi.mock('./task-edit.js', () => ({
 vi.mock('./task-complete.js', () => ({
   registerTaskComplete: vi.fn(),
 }));
-vi.mock('./pipeline-tools.js', () => ({
-  registerPipelineTools: vi.fn(),
-}));
 
 describe('registerAllTools', () => {
   it('calls server.tool() once per tool registration helper (9 total)', async () => {
@@ -48,7 +45,6 @@ describe('registerAllTools', () => {
     const { registerTaskCreate } = vi.mocked(await import('./task-create.js'));
     const { registerTaskEdit } = vi.mocked(await import('./task-edit.js'));
     const { registerTaskComplete } = vi.mocked(await import('./task-complete.js'));
-    const { registerPipelineTools } = vi.mocked(await import('./pipeline-tools.js'));
 
     expect(registerCheckPrStatus).toHaveBeenCalledOnce();
     expect(registerCheckIssue).toHaveBeenCalledOnce();
@@ -58,7 +54,6 @@ describe('registerAllTools', () => {
     expect(registerTaskCreate).toHaveBeenCalledOnce();
     expect(registerTaskEdit).toHaveBeenCalledOnce();
     expect(registerTaskComplete).toHaveBeenCalledOnce();
-    expect(registerPipelineTools).toHaveBeenCalledOnce();
   });
 
   it('passes server and deps to each register function', async () => {

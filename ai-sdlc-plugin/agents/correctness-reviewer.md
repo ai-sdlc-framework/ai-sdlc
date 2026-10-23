@@ -229,7 +229,7 @@ Do NOT flag:
 
 ## Output Format
 
-Return a JSON object — SAME envelope shape as `code-reviewer` / `test-reviewer` so aggregation (`pipeline_step_8_aggregate_verdicts`) and the AISDLC-616 findings ledger are unchanged:
+Return a JSON object — SAME envelope shape as `code-reviewer` / `test-reviewer` so aggregation (the Step 8 aggregator) and the AISDLC-616 findings ledger are unchanged:
 
 ```json
 {

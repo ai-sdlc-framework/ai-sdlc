@@ -107,9 +107,9 @@ export interface NextStepOutput {
 }
 
 /** A fixable reviewer-report slip may be corrected this many times per run. */
-const MAX_REPORT_RETRIES = 2;
+export const MAX_REPORT_RETRIES = 2;
 
-const REPORT_SHAPE =
+export const REPORT_SHAPE =
   '{"reviewers":[{"agent":"<agent name>","agentId":"<agentId the Agent tool returned>","approved":true|false,"findings":[{"severity":"critical|major|minor|suggestion","file":"","line":0,"message":""}],"summary":""}]}';
 
 // ── state persistence ───────────────────────────────────────────────
@@ -131,15 +131,170 @@ export function writeState(path: string, state: NextStepState): void {
   renameSync(`${path}.tmp`, path);
 }
 
-function exitCodeFor(i: Instruction): number {
+export function exitCodeFor(i: Instruction): number {
   return i.action === 'stop' ? 1 : 0;
 }
 
-function resumeCommand(ctx: NextStepContext, taskId: string): string {
+export function resumeCommand(ctx: NextStepContext, taskId: string): string {
   return (
     `node ${ctx.cliBinDir}/ai-sdlc-pipeline.mjs next-step --task ${taskId} ` +
     `--state ${ctx.statePath} --result -`
   );
+}
+
+/** AISDLC-725: record this round (any verdict) so the next round can be a delta round. */
+export function recordRound(state: NextStepState): void {
+  const plan = state.review?.roundPlan;
+  if (!plan || !state.verdict) return;
+  try {
+    recordRoundFromVerdicts(
+      state.worktreePath,
+      state.taskId,
+      { ...plan, deltaDiff: null },
+      state.verdict.verdicts.map((v) => ({
+        agentId: String(v.agentId),
+        approved: v.approved,
+        findings: v.findings,
+      })),
+    );
+  } catch {
+    // a recording gap only costs a full review next round
+  }
+}
+
+/** AISDLC-725: the developer's reply to the last round's findings, for the next reviewers. */
+export function recordDeveloperResponseOf(state: NextStepState): void {
+  const dev = state.developer;
+  if (!dev || !state.review?.roundPlan) return;
+  try {
+    recordDeveloperResponse(
+      state.worktreePath,
+      state.taskId,
+      state.review.round,
+      [dev.summary, typeof dev.notes === 'string' ? dev.notes : ''].filter(Boolean).join('\n\n'),
+    );
+  } catch {
+    // only costs the reply
+  }
+}
+
+/** Revert the task to its pre-dispatch status; the worktree stays for inspection. */
+export async function rollbackStatus(ctx: NextStepContext, state: NextStepState): Promise<void> {
+  try {
+    const file = findTaskFile(state.taskId, state.worktreePath, { includeCompleted: true });
+    if (!file) return;
+    const raw = readFileSync(file, 'utf8');
+    writeFileSync(file, patchFrontmatterStatus(raw, state.fromStatus), 'utf8');
+  } catch (err) {
+    ctx.logger.warn(
+      `could not revert ${state.taskId} to ${state.fromStatus}: ${(err as Error).message}`,
+    );
+  }
+}
+
+/**
+ * Stop the run: drop the sentinel (the implicit try/finally of Step 4), persist the
+ * stop as the result and return it. Shared by the Machine and the workflow engine.
+ */
+export async function failRun(
+  ctx: NextStepContext,
+  state: NextStepState,
+  outcome: StopInstruction['outcome'],
+  reason: string,
+  opts: { persist?: boolean; developer?: NextStepState['developer'] } = {},
+): Promise<StopInstruction> {
+  const stop: StopInstruction = {
+    action: 'stop',
+    taskId: state.taskId,
+    outcome,
+    reason,
+    branch: state.branch,
+    worktreePath: state.worktreePath,
+    prUrl: null,
+    developer: opts.developer ?? state.developer,
+    notes: reason,
+  };
+  if (opts.persist !== false) {
+    try {
+      await cleanupTask({ taskId: state.taskId, worktreePath: state.worktreePath });
+    } catch (err) {
+      ctx.logger.warn(`sentinel cleanup failed (non-fatal): ${(err as Error).message}`);
+    }
+    state.phase = 'aborted';
+    state.result = stop;
+    delete state.pending;
+    writeState(ctx.statePath, state);
+  }
+  return stop;
+}
+
+/**
+ * The report was unusable but nothing irreversible happened: ask for a corrected
+ * report (twice at most) instead of burning the reviewer fan-out.
+ */
+export async function fixReportOrFail(
+  ctx: NextStepContext,
+  state: NextStepState,
+  reason: string,
+  replyShape: string = REPORT_SHAPE,
+): Promise<Instruction> {
+  const retries = state.reportRetries ?? 0;
+  if (retries >= MAX_REPORT_RETRIES) {
+    return failRun(ctx, state, 'aborted', `${reason} (after ${retries} corrected reports)`);
+  }
+  state.reportRetries = retries + 1;
+  const instruction: FixReportInstruction = {
+    action: 'fix-report',
+    taskId: state.taskId,
+    round: state.review?.round ?? 0,
+    reason,
+    replyShape,
+    reply: resumeCommand(ctx, state.taskId),
+  };
+  state.pending = instruction;
+  writeState(ctx.statePath, state);
+  return instruction;
+}
+
+/** The `spawn-developer` instruction for the current iteration. */
+export function buildSpawnDeveloper(
+  ctx: NextStepContext,
+  state: NextStepState,
+  promptFile: string,
+  model?: string,
+): SpawnDeveloperInstruction {
+  return {
+    action: 'spawn-developer',
+    taskId: state.taskId,
+    agent: 'developer',
+    iteration: state.iteration,
+    promptFile,
+    cwd: state.worktreePath,
+    ...(model ? { model } : {}),
+    reply: resumeCommand(ctx, state.taskId),
+  };
+}
+
+/** The `spawn-reviewers` instruction for one review round. */
+export function buildSpawnReviewers(
+  ctx: NextStepContext,
+  state: NextStepState,
+  review: ReviewRoundState,
+): SpawnReviewersInstruction {
+  return {
+    action: 'spawn-reviewers',
+    taskId: state.taskId,
+    round: review.round,
+    reviewers: review.spawned.map((r) => ({
+      agent: r.agent,
+      promptFile: r.promptFile,
+      bootstrapPrompt: bootstrapPromptFor(r.promptFile),
+      ...(r.model ? { model: r.model } : {}),
+    })),
+    replyShape:
+      review.staged && review.staged.stage !== 'security' ? STAGED_REPORT_SHAPE : REPORT_SHAPE,
+    reply: resumeCommand(ctx, state.taskId),
+  };
 }
 
 // ── the machine ─────────────────────────────────────────────────────
@@ -294,16 +449,7 @@ class Machine {
     model?: string,
   ): Promise<SpawnDeveloperInstruction> {
     await updateSessionState(this.ctx, state.taskIdLower, '05-dev-running');
-    const instruction: SpawnDeveloperInstruction = {
-      action: 'spawn-developer',
-      taskId: state.taskId,
-      agent: 'developer',
-      iteration: state.iteration,
-      promptFile,
-      cwd: state.worktreePath,
-      ...(model ? { model } : {}),
-      reply: resumeCommand(this.ctx, state.taskId),
-    };
+    const instruction = buildSpawnDeveloper(this.ctx, state, promptFile, model);
     state.phase = 'awaiting-developer';
     state.pending = instruction;
     this.save(state);
@@ -354,54 +500,16 @@ class Machine {
     return this.review(state);
   }
 
-  /** AISDLC-725: record this round (any verdict) so the next round can be a delta round. */
   private recordRound(state: NextStepState): void {
-    const plan = state.review?.roundPlan;
-    if (!plan || !state.verdict) return;
-    try {
-      recordRoundFromVerdicts(
-        state.worktreePath,
-        state.taskId,
-        { ...plan, deltaDiff: null },
-        state.verdict.verdicts.map((v) => ({
-          agentId: String(v.agentId),
-          approved: v.approved,
-          findings: v.findings,
-        })),
-      );
-    } catch {
-      // a recording gap only costs a full review next round
-    }
+    recordRound(state);
   }
 
-  /** AISDLC-725: the developer's reply to the last round's findings, for the next reviewers. */
   private recordDeveloperResponse(state: NextStepState): void {
-    const dev = state.developer;
-    if (!dev || !state.review?.roundPlan) return;
-    try {
-      recordDeveloperResponse(
-        state.worktreePath,
-        state.taskId,
-        state.review.round,
-        [dev.summary, typeof dev.notes === 'string' ? dev.notes : ''].filter(Boolean).join('\n\n'),
-      );
-    } catch {
-      // only costs the reply
-    }
+    recordDeveloperResponseOf(state);
   }
 
-  /** Revert the task to its pre-dispatch status; the worktree stays for inspection. */
   private async rollbackStatus(state: NextStepState): Promise<void> {
-    try {
-      const file = findTaskFile(state.taskId, state.worktreePath, { includeCompleted: true });
-      if (!file) return;
-      const raw = readFileSync(file, 'utf8');
-      writeFileSync(file, patchFrontmatterStatus(raw, state.fromStatus), 'utf8');
-    } catch (err) {
-      this.ctx.logger.warn(
-        `could not revert ${state.taskId} to ${state.fromStatus}: ${(err as Error).message}`,
-      );
-    }
+    await rollbackStatus(this.ctx, state);
   }
 
   // ── review ────────────────────────────────────────────────────────
@@ -426,20 +534,7 @@ class Machine {
 
   private spawnReviewers(state: NextStepState, review: ReviewRoundState): Instruction {
     const { ctx } = this;
-    const instruction: SpawnReviewersInstruction = {
-      action: 'spawn-reviewers',
-      taskId: state.taskId,
-      round: review.round,
-      reviewers: review.spawned.map((r) => ({
-        agent: r.agent,
-        promptFile: r.promptFile,
-        bootstrapPrompt: bootstrapPromptFor(r.promptFile),
-        ...(r.model ? { model: r.model } : {}),
-      })),
-      replyShape:
-        review.staged && review.staged.stage !== 'security' ? STAGED_REPORT_SHAPE : REPORT_SHAPE,
-      reply: resumeCommand(ctx, state.taskId),
-    };
+    const instruction = buildSpawnReviewers(ctx, state, review);
     state.review = review;
     state.phase = 'awaiting-reviewers';
     state.pending = instruction;
@@ -508,31 +603,12 @@ class Machine {
     return this.spawnReviewers(state, next.review);
   }
 
-  /**
-   * The report was unusable but nothing irreversible happened: ask for a corrected
-   * report (twice at most) instead of burning the reviewer fan-out.
-   */
   private async fixReport(
     state: NextStepState,
     reason: string,
     replyShape: string = REPORT_SHAPE,
   ): Promise<Instruction> {
-    const retries = state.reportRetries ?? 0;
-    if (retries >= MAX_REPORT_RETRIES) {
-      return this.fail(state, 'aborted', `${reason} (after ${retries} corrected reports)`);
-    }
-    state.reportRetries = retries + 1;
-    const instruction: FixReportInstruction = {
-      action: 'fix-report',
-      taskId: state.taskId,
-      round: state.review?.round ?? 0,
-      reason,
-      replyShape,
-      reply: resumeCommand(this.ctx, state.taskId),
-    };
-    state.pending = instruction;
-    this.save(state);
-    return instruction;
+    return fixReportOrFail(this.ctx, state, reason, replyShape);
   }
 
   /** Gate decision (Step 8) then Step 9 iteration or Step 10.5 + ship. */
@@ -604,30 +680,7 @@ class Machine {
     reason: string,
     opts: { persist?: boolean; developer?: NextStepState['developer'] } = {},
   ): Promise<StopInstruction> {
-    const stop: StopInstruction = {
-      action: 'stop',
-      taskId: state.taskId,
-      outcome,
-      reason,
-      branch: state.branch,
-      worktreePath: state.worktreePath,
-      prUrl: null,
-      developer: opts.developer ?? state.developer,
-      notes: reason,
-    };
-    if (opts.persist !== false) {
-      // The implicit try/finally of Step 4: the sentinel never outlives the run.
-      try {
-        await cleanupTask({ taskId: state.taskId, worktreePath: state.worktreePath });
-      } catch (err) {
-        this.ctx.logger.warn(`sentinel cleanup failed (non-fatal): ${(err as Error).message}`);
-      }
-      state.phase = 'aborted';
-      state.result = stop;
-      delete state.pending;
-      this.save(state);
-    }
-    return stop;
+    return failRun(this.ctx, state, outcome, reason, opts);
   }
 
   private save(state: NextStepState): void {

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-993
 title: 'Workflow graph phase 3: engine behind `AI_SDLC_WORKFLOW_ENGINE=1`, golden replay test, `workflowDigest` envelope field, delete the composite landing call and MCP step tools'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-20'
 labels:
@@ -42,9 +42,18 @@ RFC-0056 phase 3 (Signed Off 2026-10-20). The engine runs the document; the flag
 
 ## Acceptance Criteria
 
-- [ ] With `AI_SDLC_WORKFLOW_ENGINE=1` the golden replay test produces the same instruction sequence as the Machine for every recorded fixture, including the `CHANGES_REQUESTED` loop at its cap and a reviewer fan-out with a missing return (join fails closed).
-- [ ] The engine refuses a document not loaded from the base branch, an agent declared as anchor, a path to `ship` crossing no anchor, and an undeclared cycle; each refusal has a test.
-- [ ] A `gating: false` node's verdict never reaches `aggregate`, is written to the comparison ledger with `gating: false`, and `sample: 1/2` runs it on half the fixture PRs with the skip recorded.
-- [ ] `workflowDigest` is optional in the v6 schema; `verify-core.mjs` accepts the 576 existing envelopes unchanged, accepts a new envelope with a correct digest, refuses a wrong digest, and refuses engine records with no digest; `scripts/verify-attestation.mjs` and `check-attestation-sign.sh` exclusion lists are unchanged or changed together.
-- [ ] `execute-pipeline.ts` contains no raw gh arming call; the MCP `pipeline_step_*` tools are removed from the plugin manifest and docs; `spec.stages` use logs one deprecation warning.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] With `AI_SDLC_WORKFLOW_ENGINE=1` the golden replay test produces the same instruction sequence as the Machine for every recorded fixture, including the `CHANGES_REQUESTED` loop at its cap and a reviewer fan-out with a missing return (join fails closed).
+- [x] The engine refuses a document not loaded from the base branch, an agent declared as anchor, a path to `ship` crossing no anchor, and an undeclared cycle; each refusal has a test.
+- [x] A `gating: false` node's verdict never reaches `aggregate`, is written to the comparison ledger with `gating: false`, and `sample: 1/2` runs it on half the fixture PRs with the skip recorded.
+- [x] `workflowDigest` is optional in the v6 schema; `verify-core.mjs` accepts the 576 existing envelopes unchanged, accepts a new envelope with a correct digest, refuses a wrong digest, and refuses engine records with no digest; `scripts/verify-attestation.mjs` and `check-attestation-sign.sh` exclusion lists are unchanged or changed together.
+- [x] `execute-pipeline.ts` contains no raw gh arming call; the MCP `pipeline_step_*` tools are removed from the plugin manifest and docs; `spec.stages` use logs one deprecation warning.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+
+## Design decisions
+The engine is `pipeline-cli/src/workflow/engine.ts` (generic: base-branch load, refusals, ready set, loop cap, non-gating nodes, ledger) with the execute host in `execute-host.ts` (the Machine's collaborators as step implementations). Choices: (1) A loop edge's `max` is the cap on developer passes, which equals the Machine's `maxIterations`; at the cap the run opens the PR flagged for a human, as the Machine does. (2) The plugin default document now carries `anchors: [aggregate]` (step 8 is code), so it passes the ship-crosses-an-anchor rule and the scaffold the init writes is runnable. (3) A bare `APPROVED` on the right of a `when` is an enum literal: the engine's evaluation context defines `APPROVED` and `CHANGES_REQUESTED` (the follow-up the phase 2 summary asked for). (4) `sample` accepts `N` or `1/N`; with no PR yet the task number is the key and the record says so. (5) A run on the plugin default records `workflowDigest.path = builtin:execute-task`; the verifier requires that the base holds no document. The state file the engine sets in `AI_SDLC_WORKFLOW_STATE` is how the pre-push signer and the local verifier see the run. (6) `execute-pipeline.ts` already used `armViaGate`; it has no raw gh arming call, so nothing was deleted there. (7) The comparison ledger is `<state>.files/workflow-comparison-ledger.jsonl`; no ledger existed.
+
+## Verification
+- `pnpm build` — passed
+- `pnpm test` — passed
+- `pnpm lint` — passed
+- `pnpm format:check` — passed

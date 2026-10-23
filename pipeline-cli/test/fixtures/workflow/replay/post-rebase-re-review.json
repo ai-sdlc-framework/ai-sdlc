@@ -1,0 +1,5 @@
+{
+  "name": "post-rebase-re-review",
+  "rebases": ["changed"],
+  "approvals": [true, true]
+}

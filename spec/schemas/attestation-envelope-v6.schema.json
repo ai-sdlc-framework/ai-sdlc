@@ -163,6 +163,29 @@
       "type": "string",
       "format": "date-time",
       "description": "ISO-8601 UTC timestamp when this envelope was signed."
+    },
+    "workflowDigest": {
+      "type": "object",
+      "description": "RFC-0056 phase 3 (OQ-4). Present when the workflow engine ran: which Workflow document drove the run. The verifier recomputes sha256 from `git show <baseSha>:<path>` (a `builtin:` path must find no document at baseSha) and refuses an envelope whose run state shows engine records but no digest. Absent on every envelope signed without the engine; those verify unchanged.",
+      "required": ["path", "sha256", "baseSha"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repo path of the document (`.ai-sdlc/workflow.yaml`), or `builtin:execute-task` when the base branch has none and the plugin default ran."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 hex of the document text as committed at baseSha."
+        },
+        "baseSha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$",
+          "description": "Base-branch commit the document was read from."
+        }
+      }
     }
   }
 }

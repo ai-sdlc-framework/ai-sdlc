@@ -9,7 +9,6 @@ import { registerTaskCreate } from './task-create.js';
 import { registerTaskEdit } from './task-edit.js';
 import { registerTaskComplete } from './task-complete.js';
 import { registerNextTaskId } from './next-task-id.js';
-import { registerPipelineTools } from './pipeline-tools.js';
 
 export function registerAllTools(server: McpServer, deps: ToolDeps): void {
   registerCheckPrStatus(server, deps);
@@ -26,9 +25,5 @@ export function registerAllTools(server: McpServer, deps: ToolDeps): void {
   // (both are independent tools); task_create itself also consumes the
   // scanner + lock directly for its own cross-source collision refusal.
   registerNextTaskId(server, deps);
-  // RFC-0012 Phase 3 (AISDLC-100.3): wrap each pipeline-cli step function
-  // as an MCP tool (`pipeline_step_<N>_<name>`). The 14 tools live in their
-  // own file because the registration block is large + uses the same
-  // injection pattern as the existing tools above.
-  registerPipelineTools(server);
+  // RFC-0056 phase 3 (AISDLC-993): the pipeline_step_* tools are removed; `next-step` is the one orchestrator.
 }
