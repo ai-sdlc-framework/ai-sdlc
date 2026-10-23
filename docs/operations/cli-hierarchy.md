@@ -124,20 +124,20 @@ cli-hierarchy up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
                  [--no-vscode-tasks] [--node <version>] [--rebuild]
 ```
 
-| Option                          | Meaning                                                                                         |
-| ------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `--executors <n>`               | Number of executors, 0 to 5 (default 5).                                                        |
-| `--planner-model <m>`           | Planner model (default `fable`).                                                                |
-| `--dispatch-model <m>`          | Dispatch model (default `sonnet`, per DEC-0068).                                                |
-| `--executor-model <m>`          | Executor model (default `sonnet`).                                                              |
-| `--no-planner`                  | Do not start a planner.                                                                         |
-| `--project <name>`              | Project the names are qualified with (default the repository basename).                         |
-| `--attach`                      | Show the planner (or the dispatch session when there is none) when done.                        |
-| `--planner-permission-mode <m>` | Planner permission mode (default `bypassPermissions`); `default` gives a prompting planner.     |
-| `--allow-planner-bypass`        | Deprecated, no effect (prints a deprecation line); every session starts in `bypassPermissions`. |
-| `--no-vscode-tasks`             | Do not regenerate `.vscode/tasks.json` (see below).                                             |
-| `--node <version>`              | Node version every session runs under (default: the version in `.nvmrc`).                       |
-| `--rebuild`                     | Rebuild a stale or missing `pipeline-cli` build, then launch (see below).                       |
+| Option                   | Meaning                                                                      |
+| ------------------------ | ---------------------------------------------------------------------------- |
+| `--executors <n>`        | Number of executors, 0 to 5 (default 5).                                     |
+| `--planner-model <m>`    | Planner model (default `fable`).                                             |
+| `--dispatch-model <m>`   | Dispatch model (default `sonnet`, per DEC-0068).                             |
+| `--executor-model <m>`   | Executor model (default `sonnet`).                                           |
+| `--no-planner`           | Do not start a planner.                                                      |
+| `--project <name>`       | Project the names are qualified with (default the repository basename).      |
+| `--attach`               | Show the planner (or the dispatch session when there is none) when done.     |
+| `--planner-permission-mode <m>` | Planner permission mode (default `bypassPermissions`); `default` gives a prompting planner. |
+| `--allow-planner-bypass` | Deprecated, no effect (prints a deprecation line); every session starts in `bypassPermissions`. |
+| `--no-vscode-tasks`      | Do not regenerate `.vscode/tasks.json` (see below).                          |
+| `--node <version>`       | Node version every session runs under (default: the version in `.nvmrc`).    |
+| `--rebuild`              | Rebuild a stale or missing `pipeline-cli` build, then launch (see below).    |
 
 **Stale build refusal (AISDLC-988).** In the ai-sdlc monorepo `up` first runs
 `resolve-pipeline-cli.sh --strict` (also `AI_SDLC_RESOLVE_STRICT=1`). When the repo's own
@@ -498,10 +498,10 @@ cli-hierarchy clear <executor-name> [--settle-ms <n>]
 cli-hierarchy clear --self [--resume-after <seconds>]
 ```
 
-| Option                     | Meaning                                                                                                                                                                                                                                                                      |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--settle-ms <n>`          | Ceiling for each wait (default 30000, config `clear.handshakeCeilingMs`).                                                                                                                                                                                                    |
-| `--self`                   | Schedule the calling session's own pane to receive `/clear`, then `/ai-sdlc operator-dispatch` (dispatch session), `/ai-sdlc:planner` (planner) or `/ai-sdlc executor` (an idle executor).                                                                                   |
+| Option                     | Meaning                                                                                       |
+| -------------------------- | --------------------------------------------------------------------------------------------- |
+| `--settle-ms <n>`          | Ceiling for each wait (default 30000, config `clear.handshakeCeilingMs`).                      |
+| `--self`                   | Schedule the calling session's own pane to receive `/clear`, then `/ai-sdlc operator-dispatch` (dispatch session), `/ai-sdlc:planner` (planner) or `/ai-sdlc executor` (an idle executor). |
 | `--resume-after <seconds>` | With `--self`: delay before the resume command (default: 3 s for the planner, `PLANNER_RESUME_AFTER_SECONDS` at `clear.ts:254`; 0 s for the dispatch session and an executor, `clear.ts:330-331`); `/clear` is typed after the 20 s lead. Refused when `TMUX_PANE` is unset. |
 
 Default resume delay per role when `--resume-after` is not given (`clear.ts:330-331`): the planner 3 s (it has no board to wait
@@ -530,7 +530,8 @@ cli-hierarchy executor-start [--wait <seconds>]
 ```
 
 Prints the `[executor] I am '<name>'` identity line, then one JSON line
-`{"name", "project", "dispatch", "taskId": "<id>"|null, "manifest": {...}}`. `--wait` defaults to 1500. Because that exceeds the Bash tool's 600 s foreground cap, the executor runs it with the Bash
+`{"name", "project", "dispatch", "taskId": "<id>"|null, "manifest": {...}}`. `--wait` defaults to
+1500. Because that exceeds the Bash tool's 600 s foreground cap, the executor runs it with the Bash
 tool's `run_in_background: true`, stops its turn, and reads the JSON when the completion
 notification re-invokes the session. Exit `1` when the session is not an executor or the working directory is not the project's
 repository.
@@ -558,13 +559,13 @@ cli-hierarchy handoff read  --role <planner|operator-dispatch|executor> [--name 
 cli-hierarchy handoff note  --role <r> --kind filed|commented|opened|closed|sent --url <url> [--summary <text>] --board-dir <dir>
 ```
 
-| Option         | Meaning                                                                                    |
-| -------------- | ------------------------------------------------------------------------------------------ |
-| `--role <r>`   | `planner`, `operator-dispatch` (alias `dispatch`) or `executor`.                           |
-| `--name <n>`   | Session name; default the calling session's roster name, else the role.                    |
-| `--out <path>` | Use another file location.                                                                 |
-| `--full`       | `read` only: print the whole file instead of the bounded view.                             |
-| `--no-archive` | `write` only (planner): write the block without rolling older notes into the archive file. |
+| Option         | Meaning                                                                                      |
+| -------------- | -------------------------------------------------------------------------------------------- |
+| `--role <r>`   | `planner`, `operator-dispatch` (alias `dispatch`) or `executor`.                             |
+| `--name <n>`   | Session name; default the calling session's roster name, else the role.                      |
+| `--out <path>` | Use another file location.                                                                   |
+| `--full`       | `read` only: print the whole file instead of the bounded view.                               |
+| `--no-archive` | `write` only (planner): write the block without rolling older notes into the archive file.   |
 
 Files: dispatch and executors write `.ai-sdlc/dispatch/handoff/<session-name>.md`; the planner
 writes its dated memory file, `.claude/memory/project_planner_handoff_YYYY_MM_DD.md` (an
@@ -638,11 +639,11 @@ when the board is absent: `no-cli`, `below-threshold`, `handoff-stale`, `warned`
 session after any clear, scheduled or manual, prints `handoff read --role <role>` and the resume
 command.
 
-| Role              | Default threshold (tokens) | Resume command               |
-| ----------------- | -------------------------- | ---------------------------- |
-| planner           | 150000                     | `/ai-sdlc:planner`           |
-| operator-dispatch | 120000                     | `/ai-sdlc operator-dispatch` |
-| executor          | 120000                     | `/ai-sdlc executor`          |
+| Role                | Default threshold (tokens) | Resume command              |
+| ------------------- | -------------------------- | --------------------------- |
+| planner             | 150000                     | `/ai-sdlc:planner`          |
+| operator-dispatch   | 120000                     | `/ai-sdlc operator-dispatch` |
+| executor            | 120000                     | `/ai-sdlc executor`         |
 
 Thresholds are configurable in `.ai-sdlc/dispatch/config.json`:
 
@@ -748,13 +749,13 @@ cli-hierarchy tick [--worker <dispatch-name>] [--report-every-ms <n>] [--settle-
                    [--retry-limit <n>] [--work-dir <path>]
 ```
 
-| Option                  | Meaning                                                                         |
-| ----------------------- | ------------------------------------------------------------------------------- |
-| `--worker <name>`       | Optional; when given it must equal the calling session's own roster name.       |
-| `--report-every-ms <n>` | Spacing of progress reports (default 900000).                                   |
+| Option                  | Meaning                                                                   |
+| ----------------------- | ------------------------------------------------------------------------- |
+| `--worker <name>`       | Optional; when given it must equal the calling session's own roster name. |
+| `--report-every-ms <n>` | Spacing of progress reports (default 900000).                             |
 | `--settle-ms <n>`       | Ceiling for each clear wait (default 30000, config `clear.handshakeCeilingMs`). |
-| `--retry-limit <n>`     | Re-queues allowed per failed task (default 2; a larger value is refused).       |
-| `--work-dir <path>`     | Repository root (default the current directory).                                |
+| `--retry-limit <n>`     | Re-queues allowed per failed task (default 2; a larger value is refused). |
+| `--work-dir <path>`     | Repository root (default the current directory).                          |
 
 Dispatch-session command, guarded like `clear`. Effects: moves manifests into `queue/`,
 requeues failed tasks within the retry limit, clears executors whose tasks reached a
@@ -1009,18 +1010,18 @@ is open, else 15 min (`IDLE_INTERVAL_MS`, `scheduler.ts:11`). It is code, not a 
 **Task action set** (acted on from `ready` on; before delivery the executor owns the PR, so
 the action is `none`, except stale claims and takeover after executor death post-sign):
 
-| Classifier state                    | Action                | What runs                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| ----------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `merged`                            | `mark-landed`         | record `landed`; done verdict, parent sync and dependants stay with the tick playbook                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `manifest-branch-mismatch`          | `rewrite-manifest`    | left to a session (`write-manifest` with the PR head ref)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `behind-or-dirty`                   | `land-prep`           | `land-prep` (AISDLC-881) is not built yet and is served by `reenter` (`reconcile.ts` `TASK_ACTIONS`): `reenter` rebases a BEHIND PR; a DIRTY one goes to an executor) ([hand-review-path.md](hand-review-path.md))                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `attestation-content-hash-mismatch` | `push-only-resign`    | `reenter` (push-only re-sign manifest, AISDLC-821)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `rate-limited`                      | `wait-and-rerun`      | recorded as `wait-and-rerun`, executed as `rerun-rate-limited`: every failing job (the `pr-ready` rollup aside) ran under 30 s and its annotation or log says `API rate limit exceeded for installation` (AISDLC-949), or, with no summary at all, the only failed gate jobs are `Detect Changes` (optionally plus `ai-sdlc/issue-link`) and every other gate job was skipped (AISDLC-953; no test ran); `gh run list --commit <sha> --workflow ai-sdlc-gate.yml` for the run id, then `gh run rerun <id> --failed` (no gate run for the head: no-op with a note) once per head SHA, at or after the next full hour; never `reenter` |
-| `real-failure`                      | `reenter`             | `cli-dispatch reenter <pr>` (manifest with the failing line and head SHA)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `cancelled-or-infra`                | `retrigger-once`      | `gh run list --commit <sha> --workflow ai-sdlc-gate.yml` for the run id, then `gh run rerun <id> --failed` (no gate run for the head: no-op with a note); once per head SHA                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `ready-to-flip`                     | `flip-ready-takeover` | `gh pr ready <n>`, only after executor death post-sign                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `armed-clean`, `pending`            | `none`                | nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `no-match`                          | `route-to-planner`    | the only state routed to the planner                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Classifier state | Action | What runs |
+|---|---|---|
+| `merged` | `mark-landed` | record `landed`; done verdict, parent sync and dependants stay with the tick playbook |
+| `manifest-branch-mismatch` | `rewrite-manifest` | left to a session (`write-manifest` with the PR head ref) |
+| `behind-or-dirty` | `land-prep` | `land-prep` (AISDLC-881) is not built yet and is served by `reenter` (`reconcile.ts` `TASK_ACTIONS`): `reenter` rebases a BEHIND PR; a DIRTY one goes to an executor) ([hand-review-path.md](hand-review-path.md)) |
+| `attestation-content-hash-mismatch` | `push-only-resign` | `reenter` (push-only re-sign manifest, AISDLC-821) |
+| `rate-limited` | `wait-and-rerun` | recorded as `wait-and-rerun`, executed as `rerun-rate-limited`: every failing job (the `pr-ready` rollup aside) ran under 30 s and its annotation or log says `API rate limit exceeded for installation` (AISDLC-949), or, with no summary at all, the only failed gate jobs are `Detect Changes` (optionally plus `ai-sdlc/issue-link`) and every other gate job was skipped (AISDLC-953; no test ran); `gh run list --commit <sha> --workflow ai-sdlc-gate.yml` for the run id, then `gh run rerun <id> --failed` (no gate run for the head: no-op with a note) once per head SHA, at or after the next full hour; never `reenter` |
+| `real-failure` | `reenter` | `cli-dispatch reenter <pr>` (manifest with the failing line and head SHA) |
+| `cancelled-or-infra` | `retrigger-once` | `gh run list --commit <sha> --workflow ai-sdlc-gate.yml` for the run id, then `gh run rerun <id> --failed` (no gate run for the head: no-op with a note); once per head SHA |
+| `ready-to-flip` | `flip-ready-takeover` | `gh pr ready <n>`, only after executor death post-sign |
+| `armed-clean`, `pending` | `none` | nothing |
+| `no-match` | `route-to-planner` | the only state routed to the planner |
 
 Design note (AISDLC-953): `cli-hierarchy` has no dequeue for a wrong `reenter` manifest, so a misclassified red costs a full review round. Any such command needs a governance review before it is built; none exists today.
 
@@ -1028,16 +1029,16 @@ Design note (AISDLC-953): `cli-hierarchy` has no dequeue for a wrong `reenter` m
 
 **Docs action set** (machine-owned from birth):
 
-| Situation                            | Action             | What runs                                                                                                                                                |
-| ------------------------------------ | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `behind-or-dirty`                    | `rebase-in-place`  | `cli-file rebase <id> --pr` (same branch, same PR number; lease push, then re-armed)                                                                     |
-| failing DoR check                    | `rerun-dor`        | `gh run list --commit <sha> --workflow ai-sdlc-gate.yml` for the run id, then `gh run rerun <id> --failed` (no gate run for the head: no-op with a note) |
-| `rate-limited`                       | `wait-and-rerun`   | same as the task set: one rerun per head SHA after the recorded reset time                                                                               |
-| green, CLEAN, not armed              | `arm`              | `cli-merge-if-eligible <pr> --source-kind docs` with the arm flag                                                                                        |
-| other real check failure, `no-match` | `route-to-planner` | planner                                                                                                                                                  |
-| `cancelled-or-infra`                 | `retrigger-once`   | rerun once per head SHA                                                                                                                                  |
-| `merged`                             | `mark-landed`      | record `landed`                                                                                                                                          |
-| remaining states                     | `none`             | nothing                                                                                                                                                  |
+| Situation | Action | What runs |
+|---|---|---|
+| `behind-or-dirty` | `rebase-in-place` | `cli-file rebase <id> --pr` (same branch, same PR number; lease push, then re-armed) |
+| failing DoR check | `rerun-dor` | `gh run list --commit <sha> --workflow ai-sdlc-gate.yml` for the run id, then `gh run rerun <id> --failed` (no gate run for the head: no-op with a note) |
+| `rate-limited` | `wait-and-rerun` | same as the task set: one rerun per head SHA after the recorded reset time |
+| green, CLEAN, not armed | `arm` | `cli-merge-if-eligible <pr> --source-kind docs` with the arm flag |
+| other real check failure, `no-match` | `route-to-planner` | planner |
+| `cancelled-or-infra` | `retrigger-once` | rerun once per head SHA |
+| `merged` | `mark-landed` | record `landed` |
+| remaining states | `none` | nothing |
 
 **Docs lane (AISDLC-878).** Filing PRs made by `cli-file` (head branch `ai-sdlc/file-*`) travel a
 lane of their own:
@@ -1239,6 +1240,7 @@ to discard the verdict first.
 `cli-dispatch idle-backoff` prints the sleep (5 to 60 seconds) an executor without a tmux
 pane uses when the queue is empty.
 
+
 No-CodeQL repositories (AISDLC-896): mark-ready flips any `ai-sdlc/` task draft whose PR checks are all green. `governance.openTaskPrsReady: true` opens task PRs ready from Step 11 and `ship`; the default stays draft.
 
 ### Failed executor work is re-claimed (AISDLC-946)
@@ -1254,15 +1256,15 @@ Work an executor finished locally but could not push is never hand-pushed. The n
 
 Admission order for the events below follows the Product Priority Algorithm ([RFC-0005](../../spec/rfcs/RFC-0005-product-priority-algorithm.md)).
 
-| Event                     | Severity | Meaning                                                                               | Response                                                                                                                                    |
-| ------------------------- | -------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BurnDownReport`          | Info     | Periodic (5-min) snapshot of subscription utilization                                 | Read in `cli-status --subscriptions`. No action unless `recommendation` is `under-pacing` or `over-pacing` for multiple consecutive periods |
-| `QuotaContention`         | Advisory | High-PPA stage blocked on `hardCap`; pipeline did not cede priority to lower-PPA work | If frequent, consider tier upgrade or raising `hardCap`                                                                                     |
-| `BudgetExceeded`          | Warning  | Stage exceeded its `maxBudgetUsd` circuit breaker                                     | Review `estimatedTokens` for the stage; either raise `maxBudgetUsd` or investigate why the stage ran long                                   |
-| `AdmissionDenied`         | Info     | Stage couldn't admit (which cap blocked is in the event detail)                       | Inform tuning, not action                                                                                                                   |
-| `OffPeakDeferralExceeded` | Advisory | `schedule: off-peak` stage waited longer than `offPeakMaxWait` and dispatched on-peak | Check off-peak schedule freshness; consider extending `offPeakMaxWait` if dispatching on-peak is unacceptable                               |
-| `LedgerSourceFallback`    | Advisory | Authoritative quota API was unavailable; ledger fell back to self-tracked             | Check vendor API status; resolve once API recovers                                                                                          |
-| `TierAnalysis`            | Advisory | Weekly tier recommendation                                                            | Review in Slack digest. If `recommendedPlan != currentPlan` and `confidence: high`, evaluate the upgrade/downgrade                          |
+| Event | Severity | Meaning | Response |
+|---|---|---|---|
+| `BurnDownReport` | Info | Periodic (5-min) snapshot of subscription utilization | Read in `cli-status --subscriptions`. No action unless `recommendation` is `under-pacing` or `over-pacing` for multiple consecutive periods |
+| `QuotaContention` | Advisory | High-PPA stage blocked on `hardCap`; pipeline did not cede priority to lower-PPA work | If frequent, consider tier upgrade or raising `hardCap` |
+| `BudgetExceeded` | Warning | Stage exceeded its `maxBudgetUsd` circuit breaker | Review `estimatedTokens` for the stage; either raise `maxBudgetUsd` or investigate why the stage ran long |
+| `AdmissionDenied` | Info | Stage couldn't admit (which cap blocked is in the event detail) | Inform tuning, not action |
+| `OffPeakDeferralExceeded` | Advisory | `schedule: off-peak` stage waited longer than `offPeakMaxWait` and dispatched on-peak | Check off-peak schedule freshness; consider extending `offPeakMaxWait` if dispatching on-peak is unacceptable |
+| `LedgerSourceFallback` | Advisory | Authoritative quota API was unavailable; ledger fell back to self-tracked | Check vendor API status; resolve once API recovers |
+| `TierAnalysis` | Advisory | Weekly tier recommendation | Review in Slack digest. If `recommendedPlan != currentPlan` and `confidence: high`, evaluate the upgrade/downgrade |
 
 ## HC_design three-state diagnostic (AISDLC-171)
 
@@ -1276,12 +1278,12 @@ The disambiguating signal is the `designAuthorityConfigured` field on `pillarBre
 
 The implementation surfaces **three distinct flag values** (`undefined`, `false`, `true`) in combination with `hcDesign`, producing four observable states. The two "no Design Authority configured" rows below collapse into a single operator response — they differ only in whether the DSB resource exists at all — but tooling that scans the breakdown must handle both flag values to avoid silently dropping the DSB-with-empty-principals case into an "unknown" bucket.
 
-| State                                                     | `designAuthorityConfigured`                    | `hcDesign`                      | Distinguishing test                                                                                                                                                                                                                          | What it means                                                                                                                                                                   |
-| --------------------------------------------------------- | ---------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **none** — DSB absent                                     | `undefined` (field omitted)                    | `0`                             | No `DesignSystemBinding` resource exists for the project (the `preDesignSystem` lifecycle phase per RFC-0008 §6.2). `buildDesignAuthoritySignal` short-circuits to `undefined`, and `computeAdmissionHumanCurve` omits the field entirely    | The project has not opted into Design Authority signal routing. Common for early-stage adopters                                                                                 |
-| **none** — DSB present, principals empty                  | `false` (field present and explicitly `false`) | `0`                             | A DSB exists but `spec.stewardship.designAuthority.principals` is empty or absent. `buildDesignAuthoritySignal` returns `principalsDeclared: false`, which propagates through to the breakdown                                               | Operationally equivalent to DSB-absent — no Design Authority is declared. The distinct flag value lets you see that a DSB exists but has not been populated with principals yet |
-| **configured-but-silent** — DA configured, did not review | `true`                                         | `0`                             | DSB declares one or more principals, but none of them appears as the issue's author or as a commenter. The channel is wired; design leadership simply did not weigh in on this particular issue                                              | The operationally interesting case — see "Operator response" below                                                                                                              |
-| **engaged** — DA reviewed                                 | `true`                                         | non-zero (positive or negative) | At least one declared principal participated as the issue's author or as a commenter; the signal type is resolved from issue labels (`design/advances-coherence`, `design/fills-gap`, `design/fragments-catalog`, `design/misaligned-brand`) | Steady-state goal for projects with a mature design system                                                                                                                      |
+| State | `designAuthorityConfigured` | `hcDesign` | Distinguishing test | What it means |
+|---|---|---|---|---|
+| **none** — DSB absent | `undefined` (field omitted) | `0` | No `DesignSystemBinding` resource exists for the project (the `preDesignSystem` lifecycle phase per RFC-0008 §6.2). `buildDesignAuthoritySignal` short-circuits to `undefined`, and `computeAdmissionHumanCurve` omits the field entirely | The project has not opted into Design Authority signal routing. Common for early-stage adopters |
+| **none** — DSB present, principals empty | `false` (field present and explicitly `false`) | `0` | A DSB exists but `spec.stewardship.designAuthority.principals` is empty or absent. `buildDesignAuthoritySignal` returns `principalsDeclared: false`, which propagates through to the breakdown | Operationally equivalent to DSB-absent — no Design Authority is declared. The distinct flag value lets you see that a DSB exists but has not been populated with principals yet |
+| **configured-but-silent** — DA configured, did not review | `true` | `0` | DSB declares one or more principals, but none of them appears as the issue's author or as a commenter. The channel is wired; design leadership simply did not weigh in on this particular issue | The operationally interesting case — see "Operator response" below |
+| **engaged** — DA reviewed | `true` | non-zero (positive or negative) | At least one declared principal participated as the issue's author or as a commenter; the signal type is resolved from issue labels (`design/advances-coherence`, `design/fills-gap`, `design/fragments-catalog`, `design/misaligned-brand`) | Steady-state goal for projects with a mature design system |
 
 ### When each state appears
 
@@ -1299,12 +1301,12 @@ The principal-participation gate (only listed principals may emit full-weight `H
 
 ### Operator response
 
-| State                                                     | Operator response                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **none**                                                  | No action. Expected for early-stage adopters and any project that has not formalized Design Authority                                                                                                                                                                                                                                                                                                                                                                                             |
-| **configured-but-silent** (occasional)                    | No action. Design leadership simply chose not to weigh in on this particular issue                                                                                                                                                                                                                                                                                                                                                                                                                |
+| State | Operator response |
+|---|---|
+| **none** | No action. Expected for early-stage adopters and any project that has not formalized Design Authority |
+| **configured-but-silent** (occasional) | No action. Design leadership simply chose not to weigh in on this particular issue |
 | **configured-but-silent** (persistent across many issues) | **Review your DA assignment.** The most common causes are: (a) the principal list on the DSB names someone who has left the team, (b) the principals are real but were never told about their reviewer role, (c) DA notification is not wired into the principal's working environment (no GitHub `@mentions`, no Slack ping). Confirm the principals listed under `DesignSystemBinding.spec.stewardship.designAuthority.principals` are accurate, then either re-onboard them or update the list |
-| **engaged**                                               | No action — this is the steady-state goal                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| **engaged** | No action — this is the steady-state goal |
 
 ### How to inspect the flag
 
@@ -1335,7 +1337,7 @@ Sample output for the configured-but-silent state:
   "consensus": -1,
   "decision": 0,
   "design": 0,
-  "value": -0.421899,
+  "value": -0.4218990,
   "designAuthorityConfigured": true
 }
 ```
@@ -1434,7 +1436,7 @@ WRONG (executes fork code with target's secrets):
 ```yaml
 - uses: actions/checkout@v4
   with:
-    ref: ${{ github.event.pull_request.head.sha }} # fork content
+    ref: ${{ github.event.pull_request.head.sha }}  # fork content
 ```
 
 #### Guard 2 — Fork PR content is read as DATA only, never checked out
@@ -1476,15 +1478,15 @@ workflow's install step MUST run against MAIN's `package.json` and
 CORRECT:
 
 ```yaml
-- run: pnpm install --frozen-lockfile # main's lockfile (default cwd)
-- run: pnpm build # main's package.json
+- run: pnpm install --frozen-lockfile  # main's lockfile (default cwd)
+- run: pnpm build                       # main's package.json
 ```
 
 WRONG:
 
 ```yaml
-- run: cd pr-content && pnpm install # fork's preinstall fires
-- run: pnpm install --filter ./pr-content/... # same
+- run: cd pr-content && pnpm install   # fork's preinstall fires
+- run: pnpm install --filter ./pr-content/...  # same
 ```
 
 The hermetic test greps for these patterns and fails the PR if found.
@@ -1499,14 +1501,14 @@ content:
 WRONG:
 
 ```yaml
-- uses: ./pr-content/.github/actions/my-action # fork-controlled
+- uses: ./pr-content/.github/actions/my-action  # fork-controlled
 ```
 
 CORRECT:
 
 ```yaml
-- uses: actions/checkout@v4 # vetted publisher
-- uses: some-org/some-action@a1b2c3d # pinned SHA
+- uses: actions/checkout@v4                     # vetted publisher
+- uses: some-org/some-action@a1b2c3d            # pinned SHA
 ```
 
 #### Guard 5 — Minimum-needed secrets; NEVER signing keys into fork context
@@ -1514,13 +1516,13 @@ CORRECT:
 Workflows under `pull_request_target` MUST declare exactly the
 permissions and secrets they need. Suggested matrix:
 
-| Workflow                                  | `permissions:`                                          | Secrets allowed                           |
-| ----------------------------------------- | ------------------------------------------------------- | ----------------------------------------- |
-| `ai-sdlc-gate.yml (attestation-gate job)` | `contents:read`, `statuses:write`, `pull-requests:read` | `github.token` only                       |
-| `ai-sdlc-review.yml` (docs-only-check)    | `contents:read`, `statuses:write`, `pull-requests:read` | `github.token` only                       |
-| `ai-sdlc-review.yml` (analyze)            | `contents:read`, `pull-requests:read`                   | `ANTHROPIC_API_KEY`, `MARKER_HMAC_SECRET` |
-| `ai-sdlc-review.yml` (report)             | `pull-requests:write`, `issues:read`, `statuses:write`  | `github.token`, `SLACK_BOT_TOKEN`         |
-| `auto-enable-auto-merge.yml`              | `pull-requests:write`                                   | `AI_SDLC_PAT`                             |
+| Workflow | `permissions:` | Secrets allowed |
+|---|---|---|
+| `ai-sdlc-gate.yml (attestation-gate job)` | `contents:read`, `statuses:write`, `pull-requests:read` | `github.token` only |
+| `ai-sdlc-review.yml` (docs-only-check) | `contents:read`, `statuses:write`, `pull-requests:read` | `github.token` only |
+| `ai-sdlc-review.yml` (analyze) | `contents:read`, `pull-requests:read` | `ANTHROPIC_API_KEY`, `MARKER_HMAC_SECRET` |
+| `ai-sdlc-review.yml` (report) | `pull-requests:write`, `issues:read`, `statuses:write` | `github.token`, `SLACK_BOT_TOKEN` |
+| `auto-enable-auto-merge.yml` | `pull-requests:write` | `AI_SDLC_PAT` |
 
 NEVER:
 
@@ -1609,7 +1611,7 @@ track session state:
 
 | Substrate                    | File location                                                     | Purpose                                    |
 | ---------------------------- | ----------------------------------------------------------------- | ------------------------------------------ |
-| **Session file substrate**   | `.ai-sdlc/dispatch/sessions/<task>.session.json`                  | tmux session coordination                  |
+| **Session file substrate**   | `.ai-sdlc/dispatch/sessions/<task>.session.json`                  | tmux session coordination                 |
 | **Dispatch Board substrate** | `.ai-sdlc/dispatch/inflight/<task>.dispatch.json` + `.state.json` | Conductor/Worker Dispatch Board (RFC-0041) |
 
 When a session dies, both substrates must be updated consistently — an orphan
@@ -1817,7 +1819,7 @@ One pass of the loop:
 3. **Execute.** It runs `/ai-sdlc execute <task-id>` with the task id and no other
    argument. The pipeline is not modified for executors.
 4. **Report.** `cli-dispatch complete --task-id <id> --outcome <outcome>
---worker <name> [--pr <n>] [--follow-ups <ids>] [--decisions <ids>]` writes the
+   --worker <name> [--pr <n>] [--follow-ups <ids>] [--decisions <ids>]` writes the
    verdict. `success` and `iterate-needed` land in `done/`; every other outcome
    lands in `failed/`. Every outcome except `iterate-needed` also removes the task
    from `inflight/`; on `iterate-needed` the inflight manifest stays, so the worker
@@ -2033,13 +2035,13 @@ Every step is gated by the `operational` list in `spec.governance` of
 `OperatorPlaybookAction` event. A step the policy does not grant is refused and
 becomes an escalation.
 
-| Failure record                                                                                                                      | Action                                                                                                                                                                                        | Grant needed                                 |
-| ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| Mechanical conflict shape (`test-additions-overlap`, `prettier-drift`, `pnpm-lock-regen`, `package-json-bin-concat`, `behind-only`) | Rebase the task branch onto `origin/main`, then lease-push to that branch                                                                                                                     | `rebase-own-branch`, `lease-push-own-branch` |
-| `stale-merge-ref`                                                                                                                   | Push an empty commit to the task branch                                                                                                                                                       | `retrigger-ci`                               |
-| `stale-heartbeat`, `spawn-rejected`, `quota-exhausted`, `transient`, within the retry limit                                         | `cli-dispatch requeue --task-id <id>`                                                                                                                                                         | `requeue`                                    |
-| Failed task whose verdict names an OPEN PR (PR follow-up: rebase, re-sign, push, ready flip)                                        | `cli-dispatch reenter <pr-or-task> --note "<what to finish>"`; no retry is used, no escalation. A second `reenter` on the same `(action, head SHA)` is refused by the loop guard (AISDLC-883) | `requeue`                                    |
-| Anything else                                                                                                                       | Escalate: the planner is messaged with the task id and the failure. No git action is taken.                                                                                                   | none                                         |
+| Failure record | Action | Grant needed |
+| --- | --- | --- |
+| Mechanical conflict shape (`test-additions-overlap`, `prettier-drift`, `pnpm-lock-regen`, `package-json-bin-concat`, `behind-only`) | Rebase the task branch onto `origin/main`, then lease-push to that branch | `rebase-own-branch`, `lease-push-own-branch` |
+| `stale-merge-ref` | Push an empty commit to the task branch | `retrigger-ci` |
+| `stale-heartbeat`, `spawn-rejected`, `quota-exhausted`, `transient`, within the retry limit | `cli-dispatch requeue --task-id <id>` | `requeue` |
+| Failed task whose verdict names an OPEN PR (PR follow-up: rebase, re-sign, push, ready flip) | `cli-dispatch reenter <pr-or-task> --note "<what to finish>"`; no retry is used, no escalation. A second `reenter` on the same `(action, head SHA)` is refused by the loop guard (AISDLC-883) | `requeue` |
+| Anything else | Escalate: the planner is messaged with the task id and the failure. No git action is taken. | none |
 
 The playbook can push to one place: `HEAD:refs/heads/<the task's own branch>`.
 `main`, `master`, any other branch, any forced or deleting push and any other
