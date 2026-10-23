@@ -78,6 +78,8 @@ export interface DispatchManifest {
   fixesPr?: number;
   /** Decision id this manifest is waiting on; such a manifest is never claimed. */
   blockedBy?: string;
+  /** Planner park written by `cli-dispatch block` (AISDLC-1043); `unblock` removes it. */
+  block?: { blockedAt: string; blockedBy: string; reason: string };
   /** Times the reaper has returned this manifest to `queue/`. */
   retryCount?: number;
   /**

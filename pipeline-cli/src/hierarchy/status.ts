@@ -3,7 +3,7 @@
  * and the board's inflight view.
  */
 
-import { peekQueue } from '../dispatch/board.js';
+import { listBoard, peekQueue } from '../dispatch/board.js';
 import { listUnbriefed } from './auto-brief.js';
 import type { QueueCounts } from '../dispatch/types.js';
 import {
@@ -73,6 +73,8 @@ export interface StatusResult {
   contextThresholds?: Record<HierarchyRole, number>;
   /** Dispatchable tasks on no brief and not on the board (AISDLC-930); absent when none. */
   unbriefed?: string[];
+  /** Tasks parked in `blocked/` with the reason (AISDLC-1043); absent when none. */
+  blocked?: { taskId: string; reason: string }[];
   /** `gh` calls in the last hour by HIERARCHY_SESSION (AISDLC-963). */
   ghCallsPerHour?: Record<string, number>;
   /** Live remaining quota for the core and graphql buckets; absent when `gh` cannot say. */
@@ -162,6 +164,14 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
   } catch {
     /* an unreadable backlog must not break status */
   }
+  let blocked: { taskId: string; reason: string }[] = [];
+  try {
+    blocked = listBoard(deps.boardDir, deps.now)
+      .filter((e) => e.state === 'blocked')
+      .map((e) => ({ taskId: e.taskId, reason: e.reason ?? 'no reason recorded' }));
+  } catch {
+    /* an unreadable board must not break status */
+  }
   let ghCallsPerHour: Record<string, number> = {};
   try {
     const log = ghCallsPath(deps.boardDir);
@@ -193,6 +203,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     scheduler: schedulerStatus(deps),
     contextThresholds: resolveThresholds(deps.boardDir),
     ...(unbriefed.length > 0 ? { unbriefed } : {}),
+    ...(blocked.length > 0 ? { blocked } : {}),
   };
 }
 
@@ -210,6 +221,7 @@ export function formatStatus(result: StatusResult): string[] {
       ]
     : [];
   const ghLines = formatGhCalls(result);
+  const blockedLines = (result.blocked ?? []).map((b) => `blocked: ${b.taskId}: ${b.reason}`);
   if (result.rows.length === 0)
     return [
       'no sessions in the roster',
@@ -217,6 +229,7 @@ export function formatStatus(result: StatusResult): string[] {
       formatSchedulerStatus(result.scheduler),
       ...thresholds,
       ...unbriefed,
+      ...blockedLines,
       ...ghLines,
     ];
   const header = [
@@ -274,6 +287,7 @@ export function formatStatus(result: StatusResult): string[] {
     formatSchedulerStatus(result.scheduler),
     ...thresholds,
     ...unbriefed,
+    ...blockedLines,
     ...ghLines,
   ];
 }

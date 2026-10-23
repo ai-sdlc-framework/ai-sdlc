@@ -57,6 +57,8 @@
  *     board in any state; nothing is written when any task is refused.
  *   - `board [--json]` — print every manifest by state, with eligibility and
  *     the holding rule for queued manifests that cannot be claimed yet.
+ *   - `block --task-id <id> --reason <text> [--by <name>]` — park a queued manifest in
+ *     blocked/ with {blockedAt, blockedBy, reason}; refuses inflight/done tasks, idempotent.
  *   - `unblock --task-id <id>` — return a parked manifest from blocked/ to
  *     queue/.
  *   - `reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]` — return
@@ -191,6 +193,7 @@ import {
   sweepStaleHeartbeats,
   retireQueued,
   unblockManifest,
+  blockQueued,
   writeHeartbeat,
   writeIterationExhaustedDiagnostic,
   replaceQueuedBranch,
@@ -1384,6 +1387,23 @@ export async function runDispatchCli(
       return 0;
     }
 
+    case 'block': {
+      const taskId = requireFlag(flags, 'task-id');
+      const reason = requireFlag(flags, 'reason');
+      if (!TASK_ID_RE.test(taskId)) {
+        process.stderr.write(`cli-dispatch block: '${taskId}' is not a valid task id\n`);
+        return 2;
+      }
+      const by = flags['by'] || process.env['HIERARCHY_SESSION'] || 'dispatch';
+      const result = blockQueued(boardDir, taskId, reason, by);
+      if (!result.ok) {
+        process.stderr.write(`cli-dispatch block: ${result.reason}\n`);
+        return 1;
+      }
+      out({ ok: true, taskId, alreadyBlocked: result.alreadyBlocked });
+      return 0;
+    }
+
     case 'unblock': {
       const taskId = requireFlag(flags, 'task-id');
       if (!TASK_ID_RE.test(taskId)) {
@@ -1704,6 +1724,7 @@ Subcommands:
   enqueue --task <id> [--task <id> ...] [--after <ids>] [--group <name>]
           [--priority <n>] [--wave <n>] [--base-sha <sha>] | --from-brief <path>
   board [--json]
+  block --task-id <id> --reason <text> [--by <name>]   (park a queued task in blocked/)
   unblock --task-id <id>
   classify-prs [--input <facts.json>]   (without --input, gathers the facts itself)
   pr-facts [--out <path>]   (writes .pr-facts.json: mergeStateStatus and failing line filled in)
