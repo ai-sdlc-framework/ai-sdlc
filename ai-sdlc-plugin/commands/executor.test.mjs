@@ -58,6 +58,45 @@ describe('executor command', () => {
     assert.match(body, /emptyQueueHibernateSec/);
   });
 
+  it('runs execute with the task id and no other argument', () => {
+    assert.match(body, /`\$TASK_ID` as the only argument/);
+    assert.match(body, /\/ai-sdlc execute <task-id>/);
+  });
+
+  it('reports through complete and messages the dispatch session once', () => {
+    assert.match(body, /cli-dispatch\.mjs" complete/);
+    assert.match(body, /--follow-ups/);
+    assert.match(body, /--decisions/);
+    assert.match(body, /SendMessage/);
+    assert.match(body, /\*\*one\*\* status line/);
+  });
+
+  it('stops and waits for the clear', () => {
+    assert.match(body, /## Step 5 - Stop and wait/);
+    assert.match(body, /clears this context/);
+  });
+
+  it('states the hand-written hard rules', () => {
+    assert.match(body, /Never edit an RFC's Open Questions/);
+    assert.match(body, /cli-decisions\.mjs" escalate/);
+    assert.match(body, /next-subid/);
+  });
+
+  it('renders the tool rules from the resolved policy instead of restating them', () => {
+    assert.match(body, /render-role-tool-rules\.mjs" --role executor/);
+    // No rule text of the policy appears in the body: it is printed at run time.
+    for (const r of DEFAULT_ROLE_BLOCKED_TOOLS.executor) {
+      assert.ok(!body.includes(describeRule(r)), `rule ${r.id} must not be restated`);
+    }
+    assert.doesNotMatch(body, /Never message another executor/);
+    assert.doesNotMatch(body, /Never answer a decision/);
+    assert.doesNotMatch(body, /Never file a top-level task id/);
+  });
+
+  it('carries no internal task ids in adopter-visible text', () => {
+    assert.doesNotMatch(raw, /\b[A-Z]{3,}-\d+\b/);
+  });
+
   it('invokes pipeline CLIs through the resolved bin directory only', () => {
     assert.doesNotMatch(body, /^\s*node\s+pipeline-cli\/bin\//m);
   });

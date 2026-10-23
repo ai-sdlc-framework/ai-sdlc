@@ -38,15 +38,16 @@ export const register = (on: Any, options?: Any): void => {
     if (!role) return next(e);
 
     const version = (await safe(() => $.session.version())).value;
-    // The validator refuses reading `$.noun.verb` as a value, so each primitive is probed by a call with an
-    // empty payload the host rejects without acting; only a TypeError "not a function" counts as missing.
+    // The validator refuses reading `$.noun.verb` as a value, so each primitive is probed by a call. The
+    // payloads are wrong-typed (null fields), never empty or valid, so the host's typed boundary rejects them
+    // before any action (no compaction, no blank turn); only a TypeError "not a function" counts as missing.
     const present = {
-      'prompt.submit': await exists(() => $.prompt.submit({ text: '' })),
-      'command.run': await exists(() => $.command.run({ command: '' })),
-      'session.compact': await exists(() => $.session.compact({})),
+      'prompt.submit': await exists(() => $.prompt.submit({ text: null })),
+      'command.run': await exists(() => $.command.run({ command: null })),
+      'session.compact': await exists(() => $.session.compact({ instructions: null })),
       // `session.measure` is an event; its pull-side twin `$.session.usage` stands in for it.
       'session.measure': await exists(() => $.session.usage()),
-      'session.send': await exists(() => $.session.send({ to: '', text: '' })),
+      'session.send': await exists(() => $.session.send({ to: null, text: null })),
     };
     const miss = guard(version, present);
     if (miss) {

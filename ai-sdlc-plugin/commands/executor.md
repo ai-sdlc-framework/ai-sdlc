@@ -62,7 +62,7 @@ Treat the printed tool rules as authoritative. Then start with one call. It read
 name and the dispatch session's (the nearest ancestor process that is a running claude roster entry,
 used exactly as listed: project qualifier and collision suffix included), checks the working directory is
 your project's repository, and claims the next eligible task once, with no wait. The board claim is the
-authority (RFC-0051): it takes no flag beyond the board directory.
+authority: it takes no flag beyond the board directory.
 
 ```bash
 node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" executor-start --board-dir "$BOARD_DIR"
@@ -92,7 +92,7 @@ worktree, no pull request, no status message. Without pid or ref it accepts and 
 board needs no sender: the claim is the authority.
 
 **Nothing eligible (`"taskId": null`).** Do not clear, poll or wait. End your reply with the line
-`[executor] idle` and stop the turn: the hierarchy hooks module (RFC-0058) consumes the next enqueue message from
+`[executor] idle` and stop the turn: the hierarchy hooks module consumes the next enqueue message from
 the dispatch session and starts `/ai-sdlc:executor` again once you are idle. The context threshold (120k tokens, the
 module's `session.measure` rotation) is the only clear trigger besides a finished task's verdict. Without the module
 (a tmux-driven fleet), `ScheduleWakeup` for the `sleepSec` printed by
