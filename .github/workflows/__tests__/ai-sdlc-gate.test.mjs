@@ -170,6 +170,8 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       // AISDLC-727: jobs moved from ci.yml so the gate is the only PR workflow.
       'backlog-drift',
       'first-run-smoke',
+      // AISDLC-1060: Claude plugin validator on ai-sdlc-plugin/** changes.
+      'plugin-validate',
       'test-python',
       'test-go',
       'attestation-gate',

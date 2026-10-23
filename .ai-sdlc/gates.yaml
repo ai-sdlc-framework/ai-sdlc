@@ -65,6 +65,12 @@ gates:
     owner: engineering
     property: fresh-repo install, init, doctor and one task, per PR only on adopter-surface paths (plugin, init, doctor, templates) plus nightly and workflow_dispatch
     baseline: true
+  - id: gate-job:plugin-validate
+    surface: pr-ready-job
+    origin: AISDLC-1060
+    owner: engineering
+    property: the Claude Code plugin validator accepts ai-sdlc-plugin, run only when the changeset touches ai-sdlc-plugin/**
+    decision: DEC-0056
   - id: gate-job:test-python
     surface: pr-ready-job
     origin: unknown (SDK matrix; no task id in the job)
