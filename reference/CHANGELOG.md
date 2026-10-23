@@ -1,5 +1,24 @@
 # @ai-sdlc/reference
 
+## [0.36.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.35.0...reference-v0.36.0) (2026-10-23)
+
+
+### Features
+
+* add Workflow schema, manifest entry, init scaffold and doctor check (AISDLC-992) ([#1955](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1955)) ([d35dc12](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d35dc12d787759b9ba0e430ab326cfef40c5ddb2))
+* allowForcePush mode lease for any non-protected branch (AISDLC-1005) ([#1828](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1828)) ([3820bda](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3820bda7b65c19203fc41fee5e7a68331527e717))
+* delivered vs landed definition of done, claim pause on undelivered PR (AISDLC-816) ([#1707](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1707)) ([2bd9cb6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2bd9cb637e3762272febd3e7031dba42327b7d95))
+* reviewer harness default from model-routing.yaml (AISDLC-1003) ([#1821](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1821)) ([10ba9a7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/10ba9a7fbc92f00ed6b74c24d50597e476d957aa))
+* **spec:** render standing decision rules into prompts (AISDLC-873) ([#1765](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1765)) ([196cd9f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/196cd9f667a463c965f88b3b427a2a03a375125f))
+* workflow engine behind AI_SDLC_WORKFLOW_ENGINE=1 with workflowDigest (AISDLC-993) ([#1958](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1958)) ([6e1e469](https://github.com/ai-sdlc-framework/ai-sdlc/commit/6e1e469f128bdf4a7da0d4a6d97fa46e214f89ae))
+* workflow overlays, frozen set with cited enforcers, base-branch pr-lifecycle (AISDLC-994) ([#1960](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1960)) ([9cfcde3](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9cfcde3d3aa0e78faeb077e0fe171fd04da876e3))
+
+
+### Bug Fixes
+
+* atomic generated-schemas write, drop dogfood pretest:coverage build (AISDLC-920) ([#1741](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1741)) ([ee1f008](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ee1f0084b0b7feda300ce7a3529f72aa166c1f39))
+* **orchestrator:** reprioritize must not create a resume block (AISDLC-1015) ([#1857](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1857)) ([4726e20](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4726e207146f86a34c407d88166491b2edab5cd0))
+
 ## [0.35.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.34.0...reference-v0.35.0) (2026-10-17)
 
 
