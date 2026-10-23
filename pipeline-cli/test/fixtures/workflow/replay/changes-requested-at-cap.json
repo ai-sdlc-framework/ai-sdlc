@@ -1,0 +1,5 @@
+{
+  "name": "changes-requested-at-cap",
+  "note": "CHANGES_REQUESTED on the last pass opens the PR flagged for a human",
+  "approvals": [false, false]
+}

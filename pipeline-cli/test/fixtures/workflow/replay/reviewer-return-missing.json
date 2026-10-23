@@ -1,0 +1,5 @@
+{
+  "name": "reviewer-return-missing",
+  "note": "security reviewer never reports: the join fails closed (two corrected reports, then stop)",
+  "reviewResult": "missing-security"
+}

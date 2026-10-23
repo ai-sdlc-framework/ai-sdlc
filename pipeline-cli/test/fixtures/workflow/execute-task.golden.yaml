@@ -123,3 +123,5 @@ spec:
       to: siblings
     - from: siblings
       to: cleanup
+  anchors:
+    - aggregate

@@ -833,6 +833,31 @@ export const attestationEnvelopeV6Schema = {
       format: 'date-time',
       description: 'ISO-8601 UTC timestamp when this envelope was signed.',
     },
+    workflowDigest: {
+      type: 'object',
+      description:
+        'RFC-0056 phase 3 (OQ-4). Present when the workflow engine ran: which Workflow document drove the run. The verifier recomputes sha256 from `git show <baseSha>:<path>` (a `builtin:` path must find no document at baseSha) and refuses an envelope whose run state shows engine records but no digest. Absent on every envelope signed without the engine; those verify unchanged.',
+      required: ['path', 'sha256', 'baseSha'],
+      additionalProperties: false,
+      properties: {
+        path: {
+          type: 'string',
+          minLength: 1,
+          description:
+            'Repo path of the document (`.ai-sdlc/workflow.yaml`), or `builtin:execute-task` when the base branch has none and the plugin default ran.',
+        },
+        sha256: {
+          type: 'string',
+          pattern: '^[0-9a-f]{64}$',
+          description: 'SHA-256 hex of the document text as committed at baseSha.',
+        },
+        baseSha: {
+          type: 'string',
+          pattern: '^[0-9a-f]{40}$',
+          description: 'Base-branch commit the document was read from.',
+        },
+      },
+    },
   },
 } as const;
 
@@ -6581,7 +6606,9 @@ export const pipelineSchema = {
         },
         stages: {
           type: 'array',
-          description: 'Ordered list of execution stages.',
+          description:
+            'Ordered list of execution stages. Deprecated (RFC-0056 phase 3): pipeline-cli never executed it; the Workflow document (`.ai-sdlc/workflow.yaml`) replaces it. Still accepted for one release; loading a Pipeline that sets it logs one deprecation warning.',
+          deprecated: true,
           minItems: 1,
           items: {
             type: 'object',
@@ -6620,8 +6647,9 @@ export const pipelineSchema = {
               },
               condition: {
                 type: 'string',
+                deprecated: true,
                 description:
-                  'Expression that must evaluate to true for the stage to execute. Deprecated (RFC-0056): replaced by Workflow edge `when` and removed in phase 3 with spec.stages.',
+                  'Expression that must evaluate to true for the stage to execute. Deprecated (RFC-0056): replaced by Workflow edge `when`; accepted for one release with spec.stages, then removed.',
               },
               context: {
                 type: 'object',
@@ -10517,10 +10545,13 @@ export const workflowSchema = {
           description: "Whether this agent's verdict gates the run.",
         },
         sample: {
-          type: 'integer',
-          minimum: 1,
+          oneOf: [
+            { type: 'integer', minimum: 1 },
+            { type: 'string', pattern: '^1/[1-9][0-9]*$' },
+          ],
           default: 1,
-          description: 'Number of independent samples taken (RFC-0056 OQ-1).',
+          description:
+            'Run the node on one PR in N (RFC-0056 OQ-1): the integer N, or the string 1/N. The engine skips the node, and records the skip, on a PR whose number is not a multiple of N. Default 1 (every PR).',
         },
         frozen: { $ref: '#/$defs/frozen' },
       },

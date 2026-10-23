@@ -162,6 +162,7 @@ export function loadConfig(configDir: string): AiSdlcConfig {
     } else if (resource.kind === 'DesignIntentDocument') {
       (config.designIntentDocuments ??= []).push(resource as DesignIntentDocument);
     } else if (resource.kind === 'Pipeline') {
+      warnStagesDeprecated(file, resource as Pipeline);
       (config.pipelines ??= []).push(resource as Pipeline);
       // Backward-compat: `config.pipeline` (singular) = the canonical one.
       // Prefer the file literally named `pipeline.yaml` (the default workflow).
@@ -193,6 +194,31 @@ export function loadConfig(configDir: string): AiSdlcConfig {
   }
 
   return config;
+}
+
+let stagesWarned = false;
+
+/**
+ * RFC-0056 phase 3 (AISDLC-993): `spec.stages` and `stages[].condition` are deprecated for one
+ * release (pipeline-cli never executed them). Logs ONE warning per process, however many
+ * pipelines or stages set them.
+ */
+function warnStagesDeprecated(file: string, pipeline: Pipeline): void {
+  if (stagesWarned) return;
+  const stages = (pipeline.spec as { stages?: Array<{ condition?: unknown }> }).stages;
+  if (!Array.isArray(stages) || stages.length === 0) return;
+  stagesWarned = true;
+  const withCondition = stages.some((st) => st.condition !== undefined);
+  console.warn(
+    `[ai-sdlc] deprecated: ${file} sets spec.stages${withCondition ? ' (and stages[].condition)' : ''}; ` +
+      'pipeline-cli never executed it and the Workflow document (.ai-sdlc/workflow.yaml, RFC-0056) ' +
+      'replaces it. It is accepted for one release, then removed.',
+  );
+}
+
+/** Test seam: forget that the deprecation warning was already logged. */
+export function resetStagesDeprecationWarning(): void {
+  stagesWarned = false;
 }
 
 /**

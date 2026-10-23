@@ -1,0 +1,4 @@
+{
+  "name": "rebase-unchanged",
+  "rebases": ["unchanged"]
+}

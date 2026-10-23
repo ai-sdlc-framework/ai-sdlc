@@ -1,0 +1,4 @@
+{
+  "name": "rebase-failed",
+  "rebases": ["failed"]
+}

@@ -102,7 +102,7 @@
 
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { randomBytes, verify as cryptoVerify, createPublicKey } from 'node:crypto';
+import { createHash, randomBytes, verify as cryptoVerify, createPublicKey } from 'node:crypto';
 import { join } from 'node:path';
 import {
   hashLeaf as coreHashLeaf,
@@ -1065,6 +1065,95 @@ export function enforceReviewScope(result, { repoRoot, baseSha, headSha, mergeBa
 }
 
 /**
+ * RFC-0056 phase 3 (AISDLC-993, OQ-4) — the workflow document digest.
+ *
+ * `workflowDigest: { path, sha256, baseSha }` is optional. Envelopes without it verify
+ * exactly as before. When it is present the verifier recomputes `sha256` from the document
+ * as committed at `baseSha` (`git show <baseSha>:<path>`); a run that used the plugin
+ * default records `path: 'builtin:execute-task'` and must find NO document at `baseSha`.
+ * When the run's `next-step` state shows workflow-engine records and the envelope carries
+ * no digest, the envelope is refused: the engine ran but the signer did not bind its document.
+ *
+ * `workflowState` is the parsed state JSON (the signer's and the local pre-push verifier's
+ * view; CI has none and so only runs the recompute). Returns `null` when nothing is wrong.
+ *
+ * Exported for hermetic tests.
+ */
+export function verifyWorkflowDigest({ envelope, repoRoot, workflowState, gitFn = git }) {
+  const digest = envelope.workflowDigest;
+  const engineRan =
+    Array.isArray(workflowState?.workflow?.records) && workflowState.workflow.records.length > 0;
+  if (digest === undefined) {
+    return engineRan
+      ? {
+          status: 'invalid',
+          reason:
+            'v6: the run state shows workflow-engine records but the envelope has no ' +
+            'workflowDigest (RFC-0056 OQ-4); re-run sign-v6 with the run state',
+        }
+      : null;
+  }
+  const HEX64 = /^[0-9a-f]{64}$/;
+  const HEX40 = /^[0-9a-f]{40}$/;
+  if (
+    digest === null ||
+    typeof digest !== 'object' ||
+    typeof digest.path !== 'string' ||
+    digest.path === '' ||
+    typeof digest.sha256 !== 'string' ||
+    !HEX64.test(digest.sha256) ||
+    typeof digest.baseSha !== 'string' ||
+    !HEX40.test(digest.baseSha)
+  ) {
+    return {
+      status: 'invalid',
+      reason: 'v6: workflowDigest must be { path, sha256 (64 hex), baseSha (40 hex) }',
+    };
+  }
+  if (digest.path.startsWith('builtin:')) {
+    try {
+      gitFn(['show', `${digest.baseSha}:.ai-sdlc/workflow.yaml`], repoRoot);
+    } catch {
+      return null; // no document at the base: the plugin default really was the document
+    }
+    return {
+      status: 'invalid',
+      reason: `v6: workflowDigest claims the built-in workflow but ${digest.baseSha.slice(0, 7)} holds .ai-sdlc/workflow.yaml`,
+    };
+  }
+  let text;
+  try {
+    text = gitFn(['show', `${digest.baseSha}:${digest.path}`], repoRoot);
+  } catch {
+    return {
+      status: 'invalid',
+      reason: `v6: workflowDigest cannot be recomputed: ${digest.path} is not readable at base ${digest.baseSha.slice(0, 7)}`,
+    };
+  }
+  const actual = createHash('sha256').update(text, 'utf8').digest('hex');
+  if (actual !== digest.sha256) {
+    return {
+      status: 'invalid',
+      reason:
+        `v6: workflowDigest mismatch for ${digest.path} at base ${digest.baseSha.slice(0, 7)}: ` +
+        `envelope ${digest.sha256.slice(0, 12)}, recomputed ${actual.slice(0, 12)}`,
+    };
+  }
+  return null;
+}
+
+/** The run state named by `AI_SDLC_WORKFLOW_STATE` (set by the engine), or `undefined`. */
+function readWorkflowStateFromEnv() {
+  const path = process.env['AI_SDLC_WORKFLOW_STATE'];
+  if (!path || !existsSync(path)) return undefined;
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Verify a v6 attestation envelope against trusted reviewers and on-disk
  * transcript-leaves. Returns `{ status, reason }`.
  *
@@ -1094,6 +1183,8 @@ export function enforceReviewScope(result, { repoRoot, baseSha, headSha, mergeBa
  * @param {string} opts.repoRoot — path to the repo root
  * @param {string} [opts.patchIdHint] — AISDLC-421: optional patch-id (40-hex)
  *   extracted from the envelope filename, when patch-id-named.
+ * @param {object} [opts.workflowState] — RFC-0056: parsed `next-step` state JSON; defaults to the
+ *   file named by AI_SDLC_WORKFLOW_STATE. See `verifyWorkflowDigest`.
  *
  * Exported for hermetic tests.
  */
@@ -1104,6 +1195,7 @@ export function verifyV6Envelope({
   trustedReviewers,
   repoRoot,
   patchIdHint,
+  workflowState,
 }) {
   // ── 1. Schema validation ────────────────────────────────────────────────
   if (typeof envelope.schemaVersion !== 'string' || envelope.schemaVersion !== 'v6') {
@@ -1141,6 +1233,14 @@ export function verifyV6Envelope({
   if (typeof envelopeSubjectSha !== 'string' || !HEX40.test(envelopeSubjectSha)) {
     return { status: 'invalid', reason: 'v6: subject.digest.sha1 must be a 40-char hex string' };
   }
+
+  // ── 1b. Workflow document digest (RFC-0056 OQ-4) ───────────────────────
+  const digestVerdict = verifyWorkflowDigest({
+    envelope,
+    repoRoot,
+    workflowState: workflowState ?? readWorkflowStateFromEnv(),
+  });
+  if (digestVerdict) return digestVerdict;
 
   // ── 2. Head-commit binding (defence-in-depth) ──────────────────────────
   // Two independent checks must agree for the envelope to belong to this PR:

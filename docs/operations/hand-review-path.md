@@ -13,11 +13,11 @@ done and was approved before the rebase. In .worktrees/<id>:
 2. Spawn code-reviewer, test-reviewer and security-reviewer yourself via the Agent
    tool, Claude-native (AI_SDLC_REVIEWER_HARNESS=claude; Codex quota is out until
    2026-10-25), on `git diff origin/main...HEAD`, prompts as /ai-sdlc execute Step 7
-   builds them (pipeline_step_7_build_review_prompts). If next-step or the planner
+   builds them (the Step 7 review-prompt builder in pipeline-cli). If next-step or the planner
    produced fewer than three, run the missing ones by hand.
 3. Write the verdicts to .ai-sdlc/verdicts/code-reviewer-<id>.json,
    test-reviewer-<id>.json, security-reviewer-<id>.json; aggregate to <id>.json
-   (pipeline_step_8_aggregate_verdicts).
+   (the Step 8 aggregator in pipeline-cli).
 4. Any critical/major finding: fix with the developer agent, re-review. Otherwise continue.
 5. `cli-attestation emit-leaf` for each reviewer at the current patch-id.
 6. Commit the decision log and review artifacts; two-call lease push of your own

@@ -1,7 +1,8 @@
 ---
 id: AISDLC-654
 title: >-
-  RFC-0050 Part B: model-routing table, resolveModel, deterministic exploration, assignment log, wiring
+  RFC-0050 Part B: model-routing table, resolveModel, deterministic exploration,
+  assignment log, wiring
 status: Done
 assignee: []
 created_date: '2026-09-30'
@@ -18,12 +19,19 @@ references:
   - pipeline-cli/src/runtime/shell-claude-p-spawner.ts
   - pipeline-cli/src/steps/05-build-dev-prompt.ts
   - pipeline-cli/src/steps/07-build-review-prompts.ts
-  - ai-sdlc-plugin/mcp-server/src/tools/pipeline-tools.ts
   - ai-sdlc-plugin/commands/execute.md
   - pipeline-cli/src/steps/reviewer-set.ts
   - pipeline-cli/src/estimation/types.ts
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/mcp-server/src/tools/pipeline-tools.ts
+    resolution: flagged
+drift_checked: '2026-10-23'
 ---
 
 ## Description

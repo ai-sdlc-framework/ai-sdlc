@@ -11,6 +11,7 @@
 
 import type { Runner } from '../runtime/exec.js';
 import type { ResumeReviewDecision } from './resume-decision.js';
+import type { WorkflowRunState } from '../workflow/engine.js';
 import type {
   AggregatedVerdict,
   DeveloperReturn,
@@ -143,6 +144,8 @@ export interface NextStepState {
   pending?: SpawnDeveloperInstruction | SpawnReviewersInstruction | FixReportInstruction;
   /** Final result once `phase` is `done` or `aborted`. */
   result?: DoneInstruction | StopInstruction;
+  /** RFC-0056 phase 3: node records of a run driven by the workflow engine; absent for the Machine. */
+  workflow?: WorkflowRunState;
 }
 
 /** Ask the model to spawn the developer agent. */

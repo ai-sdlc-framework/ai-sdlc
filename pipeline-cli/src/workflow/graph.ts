@@ -43,6 +43,9 @@ export const MACHINE_STEPS: readonly StepMeta[] = [
 
 export interface WorkflowNode {
   kind: 'step' | 'agent' | 'fanout';
+  /** Agent nodes only (RFC-0056 OQ-1). */
+  gating?: boolean;
+  sample?: number | string;
   impl?: string;
   role?: string;
   inputs?: string;
@@ -65,7 +68,7 @@ export interface WorkflowDocument {
   apiVersion: string;
   kind: 'Workflow';
   metadata: { name: string };
-  spec: { nodes: Record<string, WorkflowNode>; edges: WorkflowEdge[] };
+  spec: { nodes: Record<string, WorkflowNode>; edges: WorkflowEdge[]; anchors?: string[] };
 }
 
 /** Reviewer fan-out cap of the Machine (security + code + test + staged slot). */
@@ -114,7 +117,8 @@ export function buildExecuteGraph(): WorkflowDocument {
     apiVersion: 'ai-sdlc.io/v1alpha1',
     kind: 'Workflow',
     metadata: { name: 'execute-task' },
-    spec: { nodes, edges },
+    // Step 8 is code (the severity rule), not a model: the one anchor on every path to `ship`.
+    spec: { nodes, edges, anchors: ['aggregate'] },
   };
 }
 

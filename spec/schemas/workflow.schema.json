@@ -97,10 +97,12 @@
           "description": "Whether this agent's verdict gates the run."
         },
         "sample": {
-          "type": "integer",
-          "minimum": 1,
+          "oneOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "string", "pattern": "^1/[1-9][0-9]*$" }
+          ],
           "default": 1,
-          "description": "Number of independent samples taken (RFC-0056 OQ-1)."
+          "description": "Run the node on one PR in N (RFC-0056 OQ-1): the integer N, or the string 1/N. The engine skips the node, and records the skip, on a PR whose number is not a multiple of N. Default 1 (every PR)."
         },
         "frozen": { "$ref": "#/$defs/frozen" }
       }
