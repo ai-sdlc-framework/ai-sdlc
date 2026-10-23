@@ -804,10 +804,7 @@ export interface Permissions {
 }
 
 export type ApprovalRequirement =
-  | 'all'
-  | 'security-critical-only'
-  | 'architecture-changes-only'
-  | 'none';
+  'all' | 'security-critical-only' | 'architecture-changes-only' | 'none';
 
 export type DesignReviewRequirement = 'always' | 'conditional' | 'never';
 
@@ -953,9 +950,7 @@ export type DesignReviewScope =
 
 export type DesignReviewAlwaysOn = 'new-component' | 'token-schema-change';
 export type DesignReviewCondition =
-  | 'semantic-token-cascade'
-  | 'visual-regression-diff'
-  | 'complexity-score';
+  'semantic-token-cascade' | 'visual-regression-diff' | 'complexity-score';
 
 export interface AuthorityBlock {
   principals: string[];
@@ -1154,10 +1149,7 @@ export interface MissionField {
 }
 
 export type ConstraintRelationship =
-  | 'must-not-require'
-  | 'must-require'
-  | 'must-not-include'
-  | 'must-include';
+  'must-not-require' | 'must-require' | 'must-not-include' | 'must-include';
 
 export interface Constraint {
   id: string;

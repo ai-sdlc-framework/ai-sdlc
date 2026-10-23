@@ -36,9 +36,7 @@ export const DEFAULT_TREND_CONFIG: TrendAnalysisConfig = {
 };
 
 export type TrendCondition =
-  | 'designCIPassRate'
-  | 'designReviewRejectionRate'
-  | 'tokenComplianceTrend';
+  'designCIPassRate' | 'designReviewRejectionRate' | 'tokenComplianceTrend';
 
 // ── Parsed design metrics blob ─────────────────────────────────────────
 

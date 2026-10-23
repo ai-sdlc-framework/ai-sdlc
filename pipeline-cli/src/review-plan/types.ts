@@ -24,14 +24,7 @@ export const SECURITY_CATEGORIES = [
 export type SecurityCategory = (typeof SECURITY_CATEGORIES)[number];
 
 export type FileClass =
-  | 'source'
-  | 'test'
-  | 'config'
-  | 'workflow'
-  | 'docs'
-  | 'lockfile'
-  | 'migration'
-  | 'manifest';
+  'source' | 'test' | 'config' | 'workflow' | 'docs' | 'lockfile' | 'migration' | 'manifest';
 
 export interface ProbeFileRef {
   path: string;

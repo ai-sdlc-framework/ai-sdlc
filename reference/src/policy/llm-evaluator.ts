@@ -4,12 +4,7 @@
  */
 
 export type LLMEvaluationDimension =
-  | 'factuality'
-  | 'hallucination'
-  | 'relevance'
-  | 'toxicity'
-  | 'bias'
-  | 'completeness';
+  'factuality' | 'hallucination' | 'relevance' | 'toxicity' | 'bias' | 'completeness';
 
 export interface LLMEvaluationResult {
   dimension: LLMEvaluationDimension;

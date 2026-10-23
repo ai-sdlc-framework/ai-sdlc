@@ -53,9 +53,7 @@ export function loadDeclaredAgents(configDir: string): DeclaredAgent[] {
         .filter(Boolean);
       for (const docText of docs) {
         const doc = parseYaml(docText) as
-          | { kind?: string; metadata?: { name?: string } }
-          | null
-          | undefined;
+          { kind?: string; metadata?: { name?: string } } | null | undefined;
         if (!doc || doc.kind !== 'AgentRole') continue;
         const name = doc.metadata?.name;
         if (!name) continue;

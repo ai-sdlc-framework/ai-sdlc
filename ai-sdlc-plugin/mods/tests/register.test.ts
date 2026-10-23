@@ -20,12 +20,10 @@ function setup(options: Record<string, unknown> = {}) {
     prompt: { submit: vi.fn(async () => undefined) },
     session: {
       compact: vi.fn(async () => undefined),
-      usage: vi.fn(
-        async (): Promise<any> => ({
-          context: { tokens: 160_000, window: 1_000_000 },
-          cost: { usd: 1.234 },
-        }),
-      ),
+      usage: vi.fn(async (): Promise<any> => ({
+        context: { tokens: 160_000, window: 1_000_000 },
+        cost: { usd: 1.234 },
+      })),
     },
     ui: { resolve: () => ({ Box, Text, Button }) },
   };

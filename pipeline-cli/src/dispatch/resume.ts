@@ -426,8 +426,7 @@ export function formatResumeFeedback(resume: ResumeFeedback): string {
 
 /** The outcome of {@link evaluatePushOnly}. */
 export type PushOnlyDecision =
-  | { mode: 'push-only'; verdictMissing?: true }
-  | { mode: 'normal'; reason: string };
+  { mode: 'push-only'; verdictMissing?: true } | { mode: 'normal'; reason: string };
 
 /** Collaborators of {@link evaluatePushOnly}. */
 export interface PushOnlyDeps {
@@ -486,8 +485,7 @@ export function readResumeFeedback(boardDir: string, taskId: string): ResumeFeed
 
 /** The outcome of {@link authoriseResume}. */
 export type ResumeAuthority =
-  | { ok: true; feedback: ResumeFeedback }
-  | { ok: false; reason: string };
+  { ok: true; feedback: ResumeFeedback } | { ok: false; reason: string };
 
 /**
  * Decide whether the resume block on a task's claimed manifest may start resume

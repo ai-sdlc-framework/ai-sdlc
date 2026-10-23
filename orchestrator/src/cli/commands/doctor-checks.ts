@@ -245,8 +245,7 @@ function readJson(ctx: DoctorRunContext, path: string): unknown {
 
 function readPluginVersion(ctx: DoctorRunContext, pluginDir: string): string | undefined {
   const manifest = readJson(ctx, join(pluginDir, 'plugin.json')) as
-    | { version?: string }
-    | undefined;
+    { version?: string } | undefined;
   return manifest?.version;
 }
 
@@ -425,8 +424,7 @@ export function checkRuntimeDepsPins(ctx: DoctorRunContext): DoctorCheckResult[]
   }
 
   const manifest = readJson(ctx, join(pluginDir, 'plugin.json')) as
-    | { runtimeDependencies?: Record<string, string> }
-    | undefined;
+    { runtimeDependencies?: Record<string, string> } | undefined;
   if (!manifest) {
     return [
       {
@@ -529,11 +527,9 @@ export function checkManifestsAgree(ctx: DoctorRunContext): DoctorCheckResult {
   const rootPath = join(pluginDir, 'plugin.json');
   const nestedPath = join(pluginDir, '.claude-plugin', 'plugin.json');
   const root = readJson(ctx, rootPath) as
-    | { version?: string; runtimeDependencies?: Record<string, string> }
-    | undefined;
+    { version?: string; runtimeDependencies?: Record<string, string> } | undefined;
   const nested = readJson(ctx, nestedPath) as
-    | { version?: string; runtimeDependencies?: Record<string, string> }
-    | undefined;
+    { version?: string; runtimeDependencies?: Record<string, string> } | undefined;
 
   if (!root || !nested) {
     return {
@@ -858,8 +854,7 @@ export function checkNpmDistTagReachability(ctx: DoctorRunContext): DoctorCheckR
   }
 
   const manifest = readJson(ctx, join(pluginDir, 'plugin.json')) as
-    | { runtimeDependencies?: Record<string, string> }
-    | undefined;
+    { runtimeDependencies?: Record<string, string> } | undefined;
   if (!manifest) {
     return [
       {
@@ -1499,8 +1494,7 @@ export function checkDispatchBoard(ctx: DoctorRunContext): DoctorCheckResult[] {
   for (const { file, m } of inflight) {
     const id = String(m.taskId ?? file.replace(/\.dispatch\.json$/, ''));
     const state = readJson(ctx, join(board, 'inflight', `${id}.state.json`)) as
-      | { lastHeartbeat?: string }
-      | undefined;
+      { lastHeartbeat?: string } | undefined;
     const beat = state?.lastHeartbeat ? Date.parse(state.lastHeartbeat) : Number.NaN;
     if (!Number.isFinite(beat)) noBeat.push(`${id} (no heartbeat)`);
     else if (nowMs - beat > DISPATCH_HEARTBEAT_STALE_MS) noBeat.push(`${id} (stale heartbeat)`);
@@ -1515,8 +1509,7 @@ export function checkDispatchBoard(ctx: DoctorRunContext): DoctorCheckResult[] {
   for (const file of listFiles(join(board, 'done'))) {
     if (!file.endsWith('.verdict.json')) continue;
     const verdict = readJson(ctx, join(board, 'done', file)) as
-      | { taskId?: string; outcome?: string; completedAt?: string }
-      | undefined;
+      { taskId?: string; outcome?: string; completedAt?: string } | undefined;
     if (verdict?.outcome !== 'iterate-needed') continue;
     const id = verdict.taskId ?? file.replace(/\.verdict\.json$/, '');
     const at = verdict.completedAt

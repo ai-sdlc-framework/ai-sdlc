@@ -1663,8 +1663,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
           fail(`decision not found: ${id}`);
         }
         const evaluation = decision!.status.evaluation as
-          | { stageC?: import('../decisions/index.js').StageCOutput }
-          | undefined;
+          { stageC?: import('../decisions/index.js').StageCOutput } | undefined;
         const stageC = evaluation?.stageC;
         const graph = buildSubDecisionGraph(decision!, stageC);
         const mermaid = renderSubDecisionGraphMermaid(graph, id);
@@ -1733,8 +1732,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
           const loaded = loadDecisionsConfig({ workDir });
           effectiveThreshold = resolveResearchSubagentThreshold(loaded);
           const evaluation = decision!.status.evaluation as
-            | { stageC?: import('../decisions/index.js').StageCOutput }
-            | undefined;
+            { stageC?: import('../decisions/index.js').StageCOutput } | undefined;
           gateResult = shouldInvokeResearchSubagent({
             stageC: evaluation?.stageC ?? null,
             threshold: effectiveThreshold,

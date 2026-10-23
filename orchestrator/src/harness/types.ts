@@ -6,12 +6,7 @@
  */
 
 export type HarnessName =
-  | 'claude-code'
-  | 'codex'
-  | 'gemini-cli'
-  | 'opencode'
-  | 'aider'
-  | 'generic-api';
+  'claude-code' | 'codex' | 'gemini-cli' | 'opencode' | 'aider' | 'generic-api';
 
 export interface HarnessCapabilities {
   /** Can spawn a clean session per invocation (no leaked context). */
@@ -76,11 +71,7 @@ export interface ToolDefinition {
 }
 
 export type HarnessResultStatus =
-  | 'success'
-  | 'failure'
-  | 'timeout'
-  | 'budget-exceeded'
-  | 'unavailable';
+  'success' | 'failure' | 'timeout' | 'budget-exceeded' | 'unavailable';
 
 export interface HarnessResult {
   status: HarnessResultStatus;

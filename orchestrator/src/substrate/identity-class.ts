@@ -152,8 +152,7 @@ export type LockedBoolean = true;
  * helper catches loosening at runtime/authoring time.
  */
 export type BoundedNumericCap =
-  | { kind: 'inherited'; max: number }
-  | { kind: 'tightened'; max: number; previousMax: number };
+  { kind: 'inherited'; max: number } | { kind: 'tightened'; max: number; previousMax: number };
 
 /** Run-time assertion that a {@link BoundedNumericCap} tightening is valid. */
 export function assertTightenedCap(cap: BoundedNumericCap): void {

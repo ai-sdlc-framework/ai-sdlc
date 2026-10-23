@@ -491,8 +491,7 @@ describe('AC#11 mid-migration concurrent reads (true atomicity proof)', () => {
     // Anything else (partial line, corrupted JSON, missing trailing newline)
     // is a torn-read and a failure of atomicity.
     type ReadOutcome =
-      | { phase: 'source-intact'; content: string }
-      | { phase: 'post-rename'; missing: true };
+      { phase: 'source-intact'; content: string } | { phase: 'post-rename'; missing: true };
     const reads: ReadOutcome[] = [];
 
     const readUntilDone = async (): Promise<void> => {

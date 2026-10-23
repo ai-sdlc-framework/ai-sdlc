@@ -618,8 +618,7 @@ function extractDifferentialTestResult(sandboxResult: unknown): DifferentialTest
 
   // Primary key (success outcome shape): r.differentialTest
   const dt = (r['differentialTest'] ?? r['differentialTestResult']) as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
 
   if (dt && typeof dt === 'object') {
     return {

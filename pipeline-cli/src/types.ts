@@ -469,10 +469,7 @@ export interface ParseDeveloperReturnResult {
 // reviewer (reviewerSet: code-test-merged). Default reviewer set is
 // unchanged (three: code-reviewer, test-reviewer, security-reviewer).
 export type ReviewerType =
-  | 'code-reviewer'
-  | 'test-reviewer'
-  | 'security-reviewer'
-  | 'correctness-reviewer';
+  'code-reviewer' | 'test-reviewer' | 'security-reviewer' | 'correctness-reviewer';
 
 export interface ReviewPrompt {
   reviewer: ReviewerType;

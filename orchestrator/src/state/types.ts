@@ -188,12 +188,7 @@ export interface PriorityCalibrationSample {
 }
 
 export type DeploymentRecordState =
-  | 'pending'
-  | 'deploying'
-  | 'healthy'
-  | 'unhealthy'
-  | 'rolled-back'
-  | 'failed';
+  'pending' | 'deploying' | 'healthy' | 'unhealthy' | 'rolled-back' | 'failed';
 
 export interface DeploymentRecord {
   id?: number;

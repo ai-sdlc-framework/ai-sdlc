@@ -88,10 +88,7 @@ const _DEFAULT_AMBIGUOUS_THRESHOLD = 0.3;
 // ── §5 Taxonomy ───────────────────────────────────────────────────────
 
 export type FailureClass =
-  | 'operator-under-decided'
-  | 'framework-misbehaved'
-  | 'ambiguous'
-  | 'external-dependency-failed';
+  'operator-under-decided' | 'framework-misbehaved' | 'ambiguous' | 'external-dependency-failed';
 
 /**
  * Built-in `framework-misbehaved` subclasses per RFC-0025 §5.2.

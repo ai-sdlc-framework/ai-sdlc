@@ -437,11 +437,7 @@ export async function loadProjectAliases(repoPath: string): Promise<PathAliasMap
 // ── Import style detection ──────────────────────────────────────
 
 type ImportStyle =
-  | 'relative'
-  | 'path-alias'
-  | 'barrel-re-exports'
-  | 'mixed-relative-and-aliases'
-  | 'mixed';
+  'relative' | 'path-alias' | 'barrel-re-exports' | 'mixed-relative-and-aliases' | 'mixed';
 
 interface ImportStyleResult {
   style: ImportStyle;

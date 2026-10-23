@@ -15,14 +15,7 @@ const PR_READY = 'ai-sdlc/pr-ready';
 
 /** GraphQL `MergeStateStatus` values. */
 export type MergeStateStatus =
-  | 'BEHIND'
-  | 'BLOCKED'
-  | 'CLEAN'
-  | 'DIRTY'
-  | 'DRAFT'
-  | 'HAS_HOOKS'
-  | 'UNKNOWN'
-  | 'UNSTABLE';
+  'BEHIND' | 'BLOCKED' | 'CLEAN' | 'DIRTY' | 'DRAFT' | 'HAS_HOOKS' | 'UNKNOWN' | 'UNSTABLE';
 
 const REST_TO_GRAPHQL: Record<string, MergeStateStatus> = {
   behind: 'BEHIND',

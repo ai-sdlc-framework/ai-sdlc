@@ -18,11 +18,7 @@ import { isTelemetryEnabled } from './feature-flag.js';
 
 /** The interaction kinds the writer recognizes. Open-ended on purpose. */
 export type InteractionKind =
-  | 'pane-opened'
-  | 'drill-down'
-  | 'refresh'
-  | 'search-opened'
-  | 'search-committed';
+  'pane-opened' | 'drill-down' | 'refresh' | 'search-opened' | 'search-committed';
 
 export interface InteractionRecord {
   /** ISO-8601 wall-clock. */

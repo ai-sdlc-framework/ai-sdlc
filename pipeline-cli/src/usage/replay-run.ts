@@ -55,11 +55,7 @@ export function reviewerTypeFor(role: ReplayRole): ReviewerType {
 }
 
 export type StopReason =
-  | 'completed'
-  | 'max-items'
-  | 'max-units'
-  | 'interrupted'
-  | 'usage-unreported';
+  'completed' | 'max-items' | 'max-units' | 'interrupted' | 'usage-unreported';
 export type ReplayOutcome = 'block' | 'approve' | 'error';
 
 export interface ItemResult {
@@ -158,8 +154,7 @@ interface Verdict {
 export function verdictOf(result: SubagentResult): Verdict {
   if (result.status !== 'success') return { outcome: 'error' };
   const p = result.parsed as
-    | { approved?: unknown; findings?: Array<{ severity?: unknown }> }
-    | undefined;
+    { approved?: unknown; findings?: Array<{ severity?: unknown }> } | undefined;
   if (!p || typeof p !== 'object' || typeof p.approved !== 'boolean') return { outcome: 'error' };
   const findings = Array.isArray(p.findings) ? p.findings : [];
   const severe = findings.some((f) => {

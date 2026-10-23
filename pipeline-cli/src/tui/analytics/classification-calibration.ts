@@ -196,10 +196,7 @@ export interface ClassificationOverrideOpts {
 }
 
 export type ClassificationOverrideReason =
-  | 'no-corpus-entry-id'
-  | 'entry-not-found'
-  | 'window-expired'
-  | 'already-resolved';
+  'no-corpus-entry-id' | 'entry-not-found' | 'window-expired' | 'already-resolved';
 
 export interface ClassificationOverrideResult {
   flipped: boolean;

@@ -6,9 +6,7 @@ export type Totals = {
 };
 
 export type HandoffState =
-  | { phase: 'idle' }
-  | { phase: 'armed' }
-  | { phase: 'running'; turnId: string };
+  { phase: 'idle' } | { phase: 'armed' } | { phase: 'running'; turnId: string };
 
 export type MeterAction = 'compact' | 'clear' | 'handoff';
 

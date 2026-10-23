@@ -42,8 +42,7 @@ import type {
 } from './types.js';
 
 export type FallbackResult =
-  | { ok: true; plan: ReviewPlan; rejections: [] }
-  | { ok: false; rejections: Rejection[] };
+  { ok: true; plan: ReviewPlan; rejections: [] } | { ok: false; rejections: Rejection[] };
 
 function needsCoverage(h: RiskHunk, threshold: number): boolean {
   return isHighRisk(h, threshold) || h.flags.length > 0;

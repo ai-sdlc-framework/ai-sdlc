@@ -150,17 +150,15 @@ function saveState(boardDir: string, state: LoopState): void {
 
 /** Map a parsed brief to the entries the board enqueues (the same mapping `cli-dispatch enqueue --from-brief` uses). */
 export function briefToEnqueueEntries(brief: ParsedBrief): EnqueueEntry[] {
-  return brief.entries.map(
-    (e): EnqueueEntry => ({
-      taskId: e.task,
-      ...(e.after.length > 0 ? { after: e.after } : {}),
-      ...(e.sequenceGroup ? { sequenceGroup: e.sequenceGroup } : {}),
-      ...(e.priority !== undefined ? { priority: e.priority } : {}),
-      wave: e.wave,
-      ...(e.fixesPr !== undefined ? { fixesPr: e.fixesPr } : {}),
-      ...(e.prHeadRef ? { prHeadRef: e.prHeadRef } : {}),
-    }),
-  );
+  return brief.entries.map((e): EnqueueEntry => ({
+    taskId: e.task,
+    ...(e.after.length > 0 ? { after: e.after } : {}),
+    ...(e.sequenceGroup ? { sequenceGroup: e.sequenceGroup } : {}),
+    ...(e.priority !== undefined ? { priority: e.priority } : {}),
+    wave: e.wave,
+    ...(e.fixesPr !== undefined ? { fixesPr: e.fixesPr } : {}),
+    ...(e.prHeadRef ? { prHeadRef: e.prHeadRef } : {}),
+  }));
 }
 
 /** What a clear attempt did for one verdict. */

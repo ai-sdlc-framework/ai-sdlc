@@ -28,12 +28,7 @@ export type ManifestWorkerKind = WorkerKind | 'any';
 
 /** Verdict outcome enum (matches schema). */
 export type VerdictOutcome =
-  | 'success'
-  | 'iterate-needed'
-  | 'iteration-exhausted'
-  | 'failed'
-  | 'quota-exhausted'
-  | 'blocked';
+  'success' | 'iterate-needed' | 'iteration-exhausted' | 'failed' | 'quota-exhausted' | 'blocked';
 
 /** Per-verification status returned by Worker (matches schema). */
 export type VerificationStatus = 'passed' | 'failed' | 'skipped';

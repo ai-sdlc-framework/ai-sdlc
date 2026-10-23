@@ -79,12 +79,7 @@ import { parseTasksMd, type SpecKitTaskEntry } from './parser.js';
  * the auto-sync vs defer-24h-window action.
  */
 export type DriftSeverity =
-  | 'no-change'
-  | 'typo'
-  | 'cosmetic'
-  | 'semantic'
-  | 'scope'
-  | 'removed-upstream';
+  'no-change' | 'typo' | 'cosmetic' | 'semantic' | 'scope' | 'removed-upstream';
 
 /**
  * Classify a drift between an imported task's snapshot of an upstream
@@ -231,10 +226,7 @@ export interface ReconcileResult {
  * still emitted; the task body is unchanged).
  */
 export type ReconcileAction =
-  | 'no-op'
-  | 'auto-sync-applied'
-  | 'defer-24h-window-opened'
-  | 'superseded-marker-added';
+  'no-op' | 'auto-sync-applied' | 'defer-24h-window-opened' | 'superseded-marker-added';
 
 export interface ReconcileOpts {
   /** Project root (`backlog/` lives here). Defaults to cwd. */

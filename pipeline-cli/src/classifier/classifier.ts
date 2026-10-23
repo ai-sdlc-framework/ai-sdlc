@@ -49,11 +49,7 @@ export interface ClassifierOutput {
 }
 
 export type FellOpenReason =
-  | 'parse-error'
-  | 'schema-validation'
-  | 'confident-false'
-  | 'invocation-failed'
-  | 'low-confidence';
+  'parse-error' | 'schema-validation' | 'confident-false' | 'invocation-failed' | 'low-confidence';
 
 export interface ClassifierDecision {
   reviewers: readonly ReviewerName[];

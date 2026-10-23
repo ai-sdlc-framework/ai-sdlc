@@ -121,8 +121,7 @@ export interface LoadTableOptions {
 }
 
 export type LoadTableResult =
-  | { source: 'repo'; table: RoutingTable }
-  | { source: 'default'; reason: string };
+  { source: 'repo'; table: RoutingTable } | { source: 'default'; reason: string };
 
 /** Load the repo table, or report why the built-in default applies. */
 export function loadRoutingTable(opts: LoadTableOptions): LoadTableResult {

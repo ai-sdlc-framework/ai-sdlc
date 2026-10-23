@@ -57,9 +57,7 @@ export function resolveThresholds(options: Record<string, unknown> | undefined):
  * its own turn has not started yet. `running`: that turn started with `turnId`.
  */
 export type HandoffState =
-  | { phase: 'idle' }
-  | { phase: 'armed' }
-  | { phase: 'running'; turnId: string };
+  { phase: 'idle' } | { phase: 'armed' } | { phase: 'running'; turnId: string };
 
 export type HandoffEvent =
   | { kind: 'submit' }

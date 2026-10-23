@@ -1,11 +1,5 @@
 export type JudgmentProviderErrorKind =
-  | 'auth'
-  | 'validation'
-  | 'rate-limited'
-  | 'overloaded'
-  | 'timeout'
-  | 'network'
-  | 'bad-response';
+  'auth' | 'validation' | 'rate-limited' | 'overloaded' | 'timeout' | 'network' | 'bad-response';
 
 export class JudgmentProviderError extends Error {
   readonly kind: JudgmentProviderErrorKind;

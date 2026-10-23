@@ -62,8 +62,7 @@ export function validateJudgmentDefinitionSafety(definition: AnyDefinition): str
 }
 
 export type DefinitionSnapshot =
-  | { ok: true; definition: AnyDefinition }
-  | { ok: false; id: string; error: string };
+  { ok: true; definition: AnyDefinition } | { ok: false; id: string; error: string };
 
 /**
  * Read every field of the definition exactly once, validate that copy, and return a

@@ -135,7 +135,7 @@ export function isCandidate(path) {
 export function stripComments(text) {
   let out = '';
   let state = 'code'; // code | line | block | single | double | template
-  for (let i = 0; i < text.length; ) {
+  for (let i = 0; i < text.length;) {
     const c = text[i];
     const d = text[i + 1];
     if (state === 'code') {
