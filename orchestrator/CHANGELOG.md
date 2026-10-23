@@ -5,6 +5,20 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.37.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.36.0...orchestrator-v0.37.0) (2026-10-23)
+
+
+### Features
+
+* show hooks-module health in status and fail up when dispatch has none (AISDLC-1061) ([#1980](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1980)) ([5965c97](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5965c972fa780201fb419ba8c1a4bf0efd12f62e))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.37.0
+
 ## [0.36.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.35.0...orchestrator-v0.36.0) (2026-10-23)
 
 
