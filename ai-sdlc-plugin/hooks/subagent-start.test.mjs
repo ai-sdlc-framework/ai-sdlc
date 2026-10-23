@@ -405,4 +405,27 @@ describe('ai-sdlc-plugin subagent-start hook — AISDLC-995 fresh-context fields
       rmSync(projectDir, { recursive: true, force: true });
     }
   });
+
+  it('AISDLC-1044: spawn leaves a clean checkout clean (markers under ignored state dir)', () => {
+    const projectDir = join(tmpdir(), `subagent-start-clean-${Date.now()}`);
+    mkdirSync(projectDir, { recursive: true });
+    try {
+      const git = (...args) => execFileSync('git', args, { cwd: projectDir, encoding: 'utf-8' });
+      git('init', '-q');
+      writeFileSync(
+        join(projectDir, '.gitignore'),
+        readFileSync(join(__dirname, '..', '..', '.gitignore')),
+      );
+      git('add', '.gitignore');
+      git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init');
+      for (const id of ['c1', 'c2']) {
+        runHook(projectDir, JSON.stringify({ agent_id: id, agent_type: 'code-reviewer' }));
+      }
+      assert.equal(git('status', '--porcelain').trim(), '');
+      assert.ok(existsSync(join(projectDir, '.ai-sdlc', 'state', 'subagent-spawn-seq', '.seq-2')));
+      assert.equal(existsSync(join(projectDir, '.ai-sdlc', 'subagent-spawn-seq')), false);
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
 });
