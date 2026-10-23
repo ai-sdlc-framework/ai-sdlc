@@ -15,7 +15,14 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 
 import { now as clock } from '../clock.js';
@@ -45,7 +52,25 @@ export interface HandoffState {
   openDecisions: { id: string; lifecycle: string; summary: string }[];
   /** Planner rulings in force on the board (AISDLC-903). */
   rulings: BoardRuling[];
+  /** The newest {@link LEDGER_RENDER_LIMIT} outward actions, newest first (AISDLC-1049). */
+  ledger?: LedgerEntry[];
 }
+
+/** Kinds of outward action a session can record. */
+export const LEDGER_KINDS = ['filed', 'commented', 'opened', 'closed', 'sent'] as const;
+export type LedgerKind = (typeof LEDGER_KINDS)[number];
+
+/** One line of the append-only outward-action ledger. */
+export interface LedgerEntry {
+  at: string;
+  role: string;
+  kind: LedgerKind;
+  url: string;
+  summary?: string;
+}
+
+/** How many ledger lines the generated block renders. */
+export const LEDGER_RENDER_LIMIT = 20;
 
 /** Inputs of {@link writeHandoff} / {@link readHandoff}. */
 export interface HandoffOptions {
@@ -80,7 +105,11 @@ function repoRootOf(boardDir: string): string {
 }
 
 /** Collect the live state. Never throws on a missing catalog. */
-export function collectHandoffState(boardDir: string, now: () => Date = clock): HandoffState {
+export function collectHandoffState(
+  boardDir: string,
+  now: () => Date = clock,
+  ledgerFile?: string,
+): HandoffState {
   let roster: HandoffState['roster'];
   try {
     roster = readRoster(boardDir).sessions.map((s) => ({
@@ -114,7 +143,59 @@ export function collectHandoffState(boardDir: string, now: () => Date = clock): 
     const workerId = i.workerId ?? readInflightManifest(boardDir, i.taskId)?.workerId;
     return { taskId: i.taskId, ...(workerId ? { workerId } : {}) };
   });
-  return { roster, board, inflight, openDecisions, rulings: listRulings(boardDir) };
+  return {
+    roster,
+    board,
+    inflight,
+    openDecisions,
+    rulings: listRulings(boardDir),
+    ledger: ledgerFile ? readLedger(ledgerFile, LEDGER_RENDER_LIMIT) : [],
+  };
+}
+
+/** Path of the per-role ledger, next to the handoff file (AISDLC-1049). */
+export function ledgerPath(opts: HandoffOptions, now: Date = clock()): string {
+  const dir = path.dirname(handoffPath(opts, now));
+  return path.join(dir, `handoff_ledger_${opts.role}.jsonl`);
+}
+
+/** The newest `limit` ledger entries, newest first. Malformed lines are skipped. */
+export function readLedger(file: string, limit: number): LedgerEntry[] {
+  if (!existsSync(file)) return [];
+  const out: LedgerEntry[] = [];
+  for (const line of readFileSync(file, 'utf-8').split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const e = JSON.parse(line) as LedgerEntry;
+      if (e && typeof e.url === 'string' && typeof e.kind === 'string') out.push(e);
+    } catch {
+      // skip a damaged line; the file is never rewritten
+    }
+  }
+  return out.slice(-limit).reverse();
+}
+
+/** Append one outward action to the role's ledger. Refuses an unknown kind. */
+export function noteLedger(
+  opts: HandoffOptions,
+  entry: { kind: string; url: string; summary?: string },
+): { file: string; entry: LedgerEntry } {
+  if (!(LEDGER_KINDS as readonly string[]).includes(entry.kind)) {
+    throw new Error(`invalid --kind '${entry.kind}'; allowed: ${LEDGER_KINDS.join(', ')}`);
+  }
+  if (!entry.url.trim()) throw new Error('--url is required');
+  const at = (opts.now ?? clock)();
+  const file = ledgerPath(opts, at);
+  const line: LedgerEntry = {
+    at: at.toISOString(),
+    role: opts.role,
+    kind: entry.kind as LedgerKind,
+    url: entry.url,
+    ...(entry.summary ? { summary: entry.summary } : {}),
+  };
+  mkdirSync(path.dirname(file), { recursive: true });
+  appendFileSync(file, JSON.stringify(line) + '\n', 'utf-8');
+  return { file, entry: line };
 }
 
 /** Hash of the state; identical state always gives the identical hash. */
@@ -197,6 +278,11 @@ export function renderHandoff(
             : ['- (none)']),
         ]
       : []),
+    '',
+    '## Outward actions',
+    ...(state.ledger?.length
+      ? state.ledger.map((e) => `- ${e.at} ${e.kind} ${e.url}${e.summary ? ` (${e.summary})` : ''}`)
+      : ['- (none)']),
     HANDOFF_END,
   ];
   return lines.join('\n') + '\n';
@@ -327,7 +413,7 @@ export function writeHandoff(opts: HandoffOptions): HandoffResult {
   const now = (opts.now ?? clock)();
   const name = opts.name ?? opts.role;
   const file = handoffPath(opts, now);
-  const state = collectHandoffState(opts.boardDir, () => now);
+  const state = collectHandoffState(opts.boardDir, () => now, ledgerPath(opts, now));
   const block = renderHandoff(opts.role, name, state, now.toISOString());
   const carried = existsSync(file) ? file : newestPlannerHandoff(file, opts);
   const existing = carried ? readFileSync(carried, 'utf-8') : undefined;
@@ -367,7 +453,9 @@ export function writeHandoff(opts: HandoffOptions): HandoffResult {
 export function readHandoff(opts: HandoffOptions): HandoffResult {
   const now = (opts.now ?? clock)();
   const file = handoffPath(opts, now);
-  const live = hashHandoffState(collectHandoffState(opts.boardDir, () => now));
+  const live = hashHandoffState(
+    collectHandoffState(opts.boardDir, () => now, ledgerPath(opts, now)),
+  );
   if (existsSync(file)) {
     const content = readFileSync(file, 'utf-8');
     const recorded = HASH_RE.exec(content)?.[1];

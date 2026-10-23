@@ -556,6 +556,7 @@ so it cannot go stale by omission.
 ```bash
 cli-hierarchy handoff write --role <planner|operator-dispatch|executor> [--name <n>] [--out <path>]
 cli-hierarchy handoff read  --role <planner|operator-dispatch|executor> [--name <n>] [--out <path>]
+cli-hierarchy handoff note  --role <r> --kind filed|commented|opened|closed|sent --url <url> [--summary <text>] --board-dir <dir>
 ```
 
 | Option         | Meaning                                                                                      |
@@ -584,6 +585,14 @@ of the prose outside the markers, then the file path; `--full` prints the whole 
 Call `write` after each state change (a ruling recorded, a task claimed, a verdict written, a
 brief sent). `read` recomputes the hash first and regenerates a missing or stale file, so a
 stale file is never read as current.
+
+**Outward-action ledger (AISDLC-1049).** `handoff note` appends one JSON line
+(`at`, `role`, `kind`, `url`, optional `summary`) to `handoff_ledger_<role>.jsonl` beside the
+handoff (`.claude/memory/` for the planner, `<board-dir>/handoff/` otherwise). Use it in the same
+turn as any post outside the repository (an issue filed, a comment, a hand-opened PR, a message
+to another project's session). An unknown `--kind` is refused with the allowed list. `write`
+renders the newest 20 lines, newest first, under `## Outward actions` inside the generated block,
+and `read` prints them with the block. The ledger is append-only: `write` never rewrites it.
 
 **Resume contract.** After any `/clear`, the first thing a loop body does is
 `handoff read --role <r>`; the file and the board are all a fresh context needs. The resume

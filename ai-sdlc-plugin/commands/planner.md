@@ -211,6 +211,20 @@ never carry assignments.
 Print the roster, briefs and decisions, summarize them in a few lines for the
 operator, and wait for their direction.
 
+## Outward posts: exact-text gate
+
+Before any action that posts outside this repository (an issue, a comment, a PR body, a message
+to another project's session), show the operator the exact title and first line you will post and
+get a go on that text, never on an option label or a summary; a multi-select option label is not
+consent for a public post. After the post, in the same turn, record it:
+
+```bash
+node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" handoff note --role planner --kind filed|commented|opened|closed|sent --url <url> --summary "<text>" --board-dir "$BOARD_DIR"
+```
+
+`handoff read` lists these under `## Outward actions`; check it before filing anything outward, and
+trust it over any saved progress line.
+
 ## Context and handoff
 
 The handoff is kept by the CLI, not by you. After every state change (a ruling recorded, a
