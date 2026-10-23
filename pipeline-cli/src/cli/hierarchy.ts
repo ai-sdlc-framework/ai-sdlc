@@ -57,6 +57,7 @@
  * not authentication; a session running as the same user can defeat it.
  */
 
+import { fetchClosedUnmergedPrs } from '../kpi/closed-unmerged.js';
 import { parseQuota, parseQuotaFloor } from '../hierarchy/gh-calls.js';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -902,6 +903,7 @@ export async function runHierarchyCli(
           },
           quotaFloor: parseQuotaFloor(process.env.AI_SDLC_GH_QUOTA_FLOOR),
           listPrs: () => fetchHumanAttentionPrs(wakeGh, repoRoot, deps.boardDir),
+          listAllPrs: () => fetchClosedUnmergedPrs(wakeGh, repoRoot),
           markReady: () =>
             markReadyAfterCodeql(wakeGh, repoRoot, {
               hasCodeql: repoHasCodeql(repoRoot),

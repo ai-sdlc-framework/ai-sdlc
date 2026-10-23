@@ -53,6 +53,11 @@ import type { ClearResult } from './clear.js';
 import type { LandReport } from './land-eligible.js';
 import type { MarkReadyReport } from './mark-ready.js';
 import type { PlaybookOutcome } from './playbook.js';
+import {
+  classifyClosedUnmerged,
+  type ClosedUnmergedReport,
+  type ListedClosedPr,
+} from '../kpi/closed-unmerged.js';
 import { summariseLanding, takeSuppressedNote } from './reconcile.js';
 import { readRosterChecked } from './roster.js';
 import type { ParentUpkeepResult } from '../steps/00-parent-upkeep.js';
@@ -88,6 +93,8 @@ export interface LoopState {
   lastReportAt?: string;
   /** When the tick last read GitHub (AISDLC-960). */
   lastGithubReadAt?: string;
+  /** When this drain window began (AISDLC-831); set on the first tick. */
+  drainStartedAt?: string;
 }
 
 /** Why and when the board refused a brief. */
@@ -221,6 +228,8 @@ export interface TickResult {
   parentUpkeep?: ParentUpkeepResult;
   /** Present when a pipeline canary event set or lifted the hold this tick (AISDLC-1023). */
   canary?: CanaryReport;
+  /** PRs closed unmerged in the drain window (AISDLC-831); absent when GitHub was not read. */
+  closedUnmerged?: number;
   /** Deterministic list of what stops the drain; the dispatch command sends it to the planner when it changes. */
   blockers: string[];
 }
@@ -339,6 +348,8 @@ export interface LoopDeps {
    * untracked-file sync, once per tick. The executors only assert the parent.
    */
   parentUpkeep?: () => Promise<ParentUpkeepResult>;
+  /** PRs for the closed-unmerged KPI (AISDLC-831); undefined when GitHub cannot be read. */
+  listAllPrs?: () => ListedClosedPr[] | undefined;
   /** Files the hotfix task for a red pipeline canary (AISDLC-1023); absent means events are not processed. */
   fileHotfix?: (opts: { sha: string; detail: string }) => string;
 }
@@ -502,7 +513,12 @@ function isFailed(boardDir: string, taskId: string): boolean {
   );
 }
 
-function buildReports(deps: LoopDeps, state: LoopState, handledCount: number): PlannerReport[] {
+function buildReports(
+  deps: LoopDeps,
+  state: LoopState,
+  handledCount: number,
+  closedUnmerged?: ClosedUnmergedReport,
+): PlannerReport[] {
   const reports: PlannerReport[] = [];
   for (const [file, brief] of Object.entries(state.ingested)) {
     if (brief.summarised || brief.tasks.length === 0) continue;
@@ -530,7 +546,8 @@ function buildReports(deps: LoopDeps, state: LoopState, handledCount: number): P
         text:
           `Progress: ${c.queued} queued, ${c.inflight} inflight, ${c.done} done, ${c.failed} failed` +
           (handledCount > 0 ? `; ${handledCount} new verdict(s) this wake-up` : '') +
-          (prs === '' ? '' : `; PRs: ${prs}`),
+          (prs === '' ? '' : `; PRs: ${prs}`) +
+          (closedUnmerged ? `; closedUnmerged: ${closedUnmerged.total}` : ''),
       });
       state.lastReportAt = deps.now().toISOString();
     }
@@ -635,7 +652,15 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   const readGithub = !quotaSkip && !githubFresh;
   const watch = await watchVerdicts(deps, state, held);
   const stalled = await checkStalls(deps, state, held);
-  const reports = buildReports(deps, state, watch.verdicts.length);
+  state.drainStartedAt ??= deps.now().toISOString();
+  let closedUnmerged: ClosedUnmergedReport | undefined;
+  try {
+    const all = readGithub ? deps.listAllPrs?.() : undefined;
+    if (all) closedUnmerged = classifyClosedUnmerged(all, new Date(state.drainStartedAt));
+  } catch {
+    /* an unreadable PR list must not stop the dispatch loop */
+  }
+  const reports = buildReports(deps, state, watch.verdicts.length, closedUnmerged);
   if (canary?.held) {
     reports.push({
       kind: 'progress',
@@ -696,6 +721,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   const blockers = computeBlockers(deps.boardDir, held, watch.escalations);
   return {
     blockers,
+    ...(closedUnmerged ? { closedUnmerged: closedUnmerged.total } : {}),
     ...(held ? { held } : {}),
     ...ingest,
     ...watch,
