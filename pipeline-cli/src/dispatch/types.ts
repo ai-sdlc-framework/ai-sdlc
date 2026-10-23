@@ -154,6 +154,12 @@ export interface ResumeFeedback {
    * developer or reviewer round. Absent means a normal resume.
    */
   resumeMode?: 'push-only';
+  /**
+   * AISDLC-1053: order a developer round even when the patch id is unchanged. `next-step`
+   * bypasses the unchanged shortcut, gives the developer this note, and clears the flag once
+   * the developer round has run. Absent means the normal resume decision.
+   */
+  developerRound?: true;
 }
 
 /**

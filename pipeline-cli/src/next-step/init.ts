@@ -13,6 +13,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { computeBranchName } from '../steps/02-compute-branch.js';
+import { readInflightManifest } from '../dispatch/board.js';
+import { formatResumeFeedback } from '../dispatch/resume.js';
 import { resolveResumeBranch } from './resume-branch.js';
 import { setupWorktree } from '../steps/03-setup-worktree.js';
 import { beginTask, patchFrontmatterStatus } from '../steps/04-flip-status.js';
@@ -33,6 +35,8 @@ export interface InitSuccess {
   model?: string;
   /** True when the task re-entered an existing branch or worktree (AISDLC-947). */
   resumed?: boolean;
+  /** AISDLC-1053: the manifest orders a developer round despite an unchanged patch id. */
+  developerRound?: boolean;
 }
 
 export interface InitFailure {
@@ -150,6 +154,12 @@ export async function initTask(
     ...(resume ? { resume: true } : {}),
   });
 
+  const manifestResume = readInflightManifest(
+    join(workDir, '.ai-sdlc', 'dispatch'),
+    taskId,
+  )?.resume;
+  const developerRound = resume && manifestResume?.developerRound === true;
+
   let built: Awaited<ReturnType<typeof buildDeveloperPrompt>>;
   let promptFile: string;
   try {
@@ -161,6 +171,9 @@ export async function initTask(
       worktreePath: branch.worktreePath,
       iteration: 1,
       sourceKind: 'backlog',
+      ...(developerRound && manifestResume
+        ? { resumeFeedback: formatResumeFeedback(manifestResume) }
+        : {}),
     });
     promptFile = writeRunFile(ctx, 'developer-prompt-1.md', built.prompt);
   } catch (err) {
@@ -175,6 +188,7 @@ export async function initTask(
     fromStatus: statusOf(task),
     promptFile,
     ...(resume ? { resumed: true } : {}),
+    ...(developerRound ? { developerRound: true } : {}),
     ...(built.model && built.modelArm !== 'default' ? { model: built.model } : {}),
   };
 }

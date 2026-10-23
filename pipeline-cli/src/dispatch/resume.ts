@@ -121,6 +121,8 @@ export interface ResumeInput {
   findings?: readonly string[];
   /** Resume without a developer or reviewer round (AISDLC-821). */
   pushOnly?: boolean;
+  /** Order a developer round despite an unchanged patch id (AISDLC-1053). */
+  developerRound?: boolean;
   /** Head commit of the pull request when the round was ordered (`reenter`, AISDLC-882). */
   headSha?: string;
   /** The failing check line the round must fix (`reenter`). */
@@ -327,6 +329,7 @@ export function resumeDone(
     ...(input.failingLine ? { failingLine: input.failingLine } : {}),
     ...(branchGuessed && !prHeadRef ? { branchGuessed: true } : {}),
     ...(input.pushOnly ? { resumeMode: 'push-only' as const } : {}),
+    ...(input.developerRound && !input.pushOnly ? { developerRound: true as const } : {}),
   };
   // A resume has no wave: it sorts by the priority it carries ahead of wave-less
   // entries, and its retry count is explicit (AISDLC-800).

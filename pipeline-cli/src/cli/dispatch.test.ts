@@ -2030,3 +2030,96 @@ describe('findTaskFile', () => {
     }
   });
 });
+
+describe('reenter --developer-round resumePath (AISDLC-1053)', () => {
+  const TASK = 'AISDLC-950';
+  const BRANCH = 'ai-sdlc/aisdlc-950-x';
+  let root: string;
+  let board: string;
+
+  const gh = (file: string, args: readonly string[]) => {
+    if (file === 'git' && args[0] === 'ls-remote') {
+      return { status: 0, stdout: `aaaaaaa1111111\trefs/heads/${BRANCH}\n`, stderr: '' };
+    }
+    if (args[0] === 'pr' && args[1] === 'view') {
+      return {
+        status: 0,
+        stderr: '',
+        stdout: JSON.stringify({
+          number: 7,
+          title: `feat: thing (${TASK})`,
+          state: 'OPEN',
+          headRefName: BRANCH,
+          headRefOid: 'aaaaaaa1111111',
+          isDraft: true,
+          mergeStateStatus: 'BLOCKED',
+          statusCheckRollup: [
+            {
+              name: 'ai-sdlc/pr-ready',
+              status: 'COMPLETED',
+              conclusion: 'FAILURE',
+              title: 'test foo failed',
+            },
+          ],
+        }),
+      };
+    }
+    if (args[0] === 'run' && args[1] === 'list') return { status: 0, stdout: '4242\n', stderr: '' };
+    return { status: 0, stdout: '', stderr: '' };
+  };
+
+  beforeEach(async () => {
+    root = mkdtempSync(path.join(tmpdir(), 'dispatch-reenter-'));
+    board = path.join(root, '.ai-sdlc', 'dispatch');
+    dispatchEnsureBoardDirs(board);
+    const { claimNext } = await import('../dispatch/board.js');
+    const { completeTask } = await import('../dispatch/complete.js');
+    dispatchWriteManifest(board, mkManifest(TASK, { branch: BRANCH }));
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-a' });
+    completeTask(board, { taskId: TASK, outcome: 'failed', workerId: 'exec-a', prNumber: 7 });
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  const run = async (extra: string[]): Promise<Record<string, unknown>> => {
+    const { exit, captured } = await captureStdout(() =>
+      runDispatchCli(
+        [
+          'reenter',
+          '7',
+          '--board-dir',
+          board,
+          '--work-dir',
+          root,
+          '--base-sha',
+          'abc1234',
+          ...extra,
+        ],
+        {
+          ghRun: gh,
+          operational: new Set(['requeue']),
+          identity: {
+            readSessions: () => [
+              { name: 'operator-dispatch', role: 'operator-dispatch', pid: 400, status: 'running' },
+            ],
+            parentPid: (pid: number) => (pid === 500 ? 400 : null),
+            comm: (pid: number) => (pid === 400 ? 'claude' : 'zsh'),
+            startPid: 500,
+          },
+        },
+      ),
+    );
+    expect(exit).toBe(0);
+    return readLastJson(captured) as Record<string, unknown>;
+  };
+
+  it('prints resumePath developer-round when the flag is set', async () => {
+    const r = await run(['--developer-round']);
+    expect(r.resumePath).toBe('developer-round');
+    expect((r.resume as { developerRound?: boolean }).developerRound).toBe(true);
+  });
+
+  it('prints full without the flag when the task has no worktree', async () => {
+    const r = await run([]);
+    expect(r.resumePath).toBe('full');
+  });
+});

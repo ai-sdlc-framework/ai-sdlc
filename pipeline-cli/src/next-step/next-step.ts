@@ -18,7 +18,8 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
+import { consumeDeveloperRound } from '../dispatch/board.js';
 import { buildDeveloperPrompt } from '../steps/05-build-dev-prompt.js';
 import { DEFAULT_MAX_ITERATIONS } from '../steps/09-iterate.js';
 import { findTaskFile } from '../steps/01-validate.js';
@@ -250,9 +251,17 @@ class Machine {
     }
     if (init.resumed) {
       // AISDLC-947: an unchanged patch id needs no developer and no reviewer.
-      const decision = await decideResumeReview(ctx, init.worktreePath);
-      state.resumeReview = decision;
+      const decision = await decideResumeReview(ctx, init.worktreePath, {
+        ...(init.developerRound ? { developerRound: true } : {}),
+      });
       ctx.logger.info(`[resume] ${decision.note}`);
+      if (decision.branch === 'developer-round') {
+        // The developer prompt already carries the resume note; the delta review is decided
+        // after the developer has run (onDeveloper).
+        state.developerRoundPending = true;
+      } else {
+        state.resumeReview = decision;
+      }
       if (decision.branch === 'unchanged') {
         const head = await ctx.runner('git', ['rev-parse', 'HEAD'], {
           cwd: init.worktreePath,
@@ -334,6 +343,14 @@ class Machine {
     }
     state.developer = parsed.developer;
     this.recordDeveloperResponse(state);
+    if (state.developerRoundPending) {
+      // AISDLC-1053: the ordered round ran. Clear the flag so a later resume of this manifest
+      // takes the normal path, then pick the review from the new patch id (delta, or full).
+      delete state.developerRoundPending;
+      consumeDeveloperRound(join(state.workDir, '.ai-sdlc', 'dispatch'), state.taskId);
+      state.resumeReview = await decideResumeReview(ctx, state.worktreePath);
+      ctx.logger.info(`[resume] ${state.resumeReview.note}`);
+    }
     return this.review(state);
   }
 
