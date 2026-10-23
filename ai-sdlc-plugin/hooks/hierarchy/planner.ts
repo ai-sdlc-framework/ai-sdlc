@@ -82,8 +82,15 @@ function registerRotating(on: Any, state: PlannerState, cfg: RoleConfig): void {
         if (!state.enabled) return next(e);
         await resumeAfterClear(p, state);
         const raw = String(e?.text ?? '');
-        if (DISPATCH_NAME.test(senderOf(raw)) && STATUS_NOISE.test(innerText(raw))) {
-          return { consumed: 'hierarchy:status' };
+        if (DISPATCH_NAME.test(senderOf(raw))) {
+          const text = innerText(raw);
+          // `cli-hierarchy clear planner` (RFC-0058 phase 4): rotate now, or at the end of the turn.
+          if (/^rotate\b/i.test(text)) {
+            if (turnRunning(state)) state.pendingRotate = true;
+            else await rotatePlanner(p, state, cfg.plan);
+            return { consumed: 'hierarchy:rotate' };
+          }
+          if (STATUS_NOISE.test(text)) return { consumed: 'hierarchy:status' };
         }
         return next(e);
       };

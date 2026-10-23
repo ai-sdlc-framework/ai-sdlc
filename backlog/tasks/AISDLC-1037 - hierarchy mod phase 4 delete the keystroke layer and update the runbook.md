@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1037
 title: 'Hierarchy mod phase 4: delete the keystroke layer (clear.ts pane script, caller-identity.ts pid walk, check-sender flags); cli-hierarchy clear becomes a rotate request; runbook update'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-22'
 labels:

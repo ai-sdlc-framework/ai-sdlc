@@ -10,8 +10,6 @@ requires: []
 assumes: [RFC-0041, RFC-0042, RFC-0051, RFC-0054, RFC-0056]
 requiresDocs:
   - operator-runbook
-deferredDocs: true
-deferredDocsDeadline: 2026-12-31
 targetSpecVersion: v1alpha1
 ---
 

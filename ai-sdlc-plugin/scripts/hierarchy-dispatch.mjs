@@ -31,7 +31,6 @@ export const REFUSED = [
   'register',
   'playbook',
   'route-decision',
-  'check-sender',
   'check-repo',
   'executor-start',
 ];

@@ -290,6 +290,12 @@ export function registerExecutor(on: Any, state: ExecutorState): void {
         }
         return { consumed: 'hierarchy:enqueue' };
       }
+      // `cli-hierarchy clear <name>` (RFC-0058 phase 4): the dispatch host delivers a rotate request.
+      if (/^rotate\b/i.test(text)) {
+        if (taskRunning(state)) state.pendingRotate = true;
+        else await rotate(p, state);
+        return { consumed: 'hierarchy:rotate' };
+      }
       if (STATUS_NOISE.test(text)) return { consumed: 'hierarchy:status' };
       return next(e);
     };

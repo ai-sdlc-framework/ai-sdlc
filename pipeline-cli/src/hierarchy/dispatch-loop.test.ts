@@ -128,9 +128,8 @@ beforeEach(() => {
   enqueueImpl = (entries) => entries.map((e) => `queue/${e.taskId}.dispatch.json`);
   clearImpl = async (o) => ({
     executor: o.executor,
-    paneId: '%1',
     ok: true,
-    resumed: true,
+    acknowledged: true,
     settleMs: 0,
   });
   playbookImpl = (v) => ({
@@ -562,10 +561,10 @@ describe('verdict watch and clears', () => {
   it('reports a clear the executor did not answer as failed', async () => {
     clearImpl = async (o) => ({
       executor: o.executor,
-      paneId: '%1',
       ok: false,
-      resumed: false,
+      acknowledged: false,
       settleMs: 0,
+      reason: 'rotate request not acknowledged',
     });
     verdict('AISDLC-7');
     const result = await runDispatchTick(deps());

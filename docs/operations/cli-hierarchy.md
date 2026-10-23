@@ -15,7 +15,7 @@ resolved pipeline-cli bin (works from an installed plugin, not only the dogfood 
 It passes `up`, `status`, `attach`, `terminals`, `brief` and `down` through unchanged,
 with these differences: `attach` and `up --attach` print the shell command to run (a
 Claude Code session cannot switch your terminal); `down` with no `--role` asks you to
-confirm first; `clear`, `tick`, `restart`, `register`, `playbook`, `route-decision`, `check-sender`, `check-repo` and
+confirm first; `clear`, `tick`, `restart`, `register`, `playbook`, `route-decision`, `check-repo` and
 `executor-start` are refused (they belong to the dispatch and executor loop bodies); with no arguments it
 prints `--help` plus a common-recipes block.
 
@@ -488,42 +488,42 @@ binding is the session name, not the pid. Same caller and role rules as `restart
 
 ### `clear`
 
-Empty an executor's context between tasks: send `/clear`, poll until the pane is idle, then
-send `/ai-sdlc executor` and poll for the identity line, so the loop restarts. Each wait is
-bounded by one ceiling (default 30000 ms), read from `clear.handshakeCeilingMs` in
-`.ai-sdlc/pr-lifecycle.yaml`; `--settle-ms` overrides it. There is no unconditional sleep.
+Ask a roster session to rotate its context (RFC-0058 phase 4). Nothing is typed into a pane and no pane
+text is read: the command writes a rotate request under the board, the dispatch session's hooks module
+delivers it with `$.session.send`, and the command reports the acknowledgement.
 
 ```bash
-cli-hierarchy clear <executor-name> [--settle-ms <n>]
-cli-hierarchy clear --self [--resume-after <seconds>]
+cli-hierarchy clear <name> [--settle-ms <n>]
+cli-hierarchy clear --self
 ```
 
-| Option                     | Meaning                                                                                       |
-| -------------------------- | --------------------------------------------------------------------------------------------- |
-| `--settle-ms <n>`          | Ceiling for each wait (default 30000, config `clear.handshakeCeilingMs`).                      |
-| `--self`                   | Schedule the calling session's own pane to receive `/clear`, then `/ai-sdlc:planner` (planner) or `/ai-sdlc executor` (an idle executor). For the dispatch session (a model-less host, AISDLC-1035) it types nothing: it writes a rotate request that the hierarchy hooks module consumes. |
-| `--resume-after <seconds>` | With `--self`, planner and executor: delay before the resume command (default: 3 s for the planner, 0 s for an idle executor); `/clear` is typed after the 20 s lead. Refused when `TMUX_PANE` is unset. |
+| Option            | Meaning                                                                                                                                      |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--settle-ms <n>` | Ceiling for the acknowledgement (default 30000, config `clear.handshakeCeilingMs`). `0` writes the request and does not wait.                |
+| `--self`          | Rotate the calling session (found from the roster). It never waits: the caller is mid-turn, so its own rotation cannot be acknowledged yet. |
 
-Default resume delay per role when `--resume-after` is not given: the planner 3 s (it has no board to wait
-for), an idle executor 0 s. An explicit `--resume-after` wins. The dispatch half of `clearSelf` (the wake-on-board
-watcher and the `/ai-sdlc operator-dispatch` resume) was deleted with the model-less host.
+The flow, end to end: `clear` writes `<board-dir>/handoff/rotate-request-<name>.json`; the dispatch host reads it on its
+next tick through [`rotate-pending`](#rotate-pending) and either rotates itself (the request names the host) or sends the named
+session a `rotate` message; that session's hooks module runs the one rotation (handoff, clear, resume; an executor that is
+mid-task rotates at its last turn). The request file being consumed is the acknowledgement.
 
-`clear <executor>` is a dispatch-session command; `clear --self` is also open to the planner
-and to an executor that holds no inflight task, which is how an idle executor returns to the
-context floor.
-A mistake guard resolves the caller from the process tree and the
-roster and exits 1 for anyone else (not authentication). `clear <executor>` refuses an
-executor that holds an inflight task, is not a running executor, or lacks the ownership
-marker, and sends keys only to the pane the roster names. Prints a JSON result and records
-an `ExecutorContextCleared` event. After a clear the plugin's `SessionStart` hook
-re-injects the role, so the executor's loop resumes with no re-briefing. Exit `0`, `1` on a
-refusal, `2` on a malformed number or missing name.
+Refusals, each sending nothing and naming the cause (exit `1`; `2` on a malformed number or missing name):
+
+- the name is not a running roster session, or its entry is unsafe;
+- an executor that holds an inflight task (its context is work in progress);
+- the roster has no running dispatch session, so no hooks module is loaded to deliver the request;
+- the request was not consumed within the ceiling, which means no module is loaded or ticking: check the session's
+  pane for the module's one-line refusal (version floor or missing primitive, below). The request stays pending.
+
+`clear <name>` is a dispatch-session command, checked by the same mistake guard as `tick` (not authentication);
+`clear --self` is open to any roster session. An `ExecutorContextCleared` event records the request. A module accepts
+the `rotate` message only from the dispatch roster name; that roster-name check is the guard against a look-alike sender.
 
 ### `rotate-pending`
 
-Prints `{"pending": true|false}` and deletes any `<board-dir>/handoff/rotate-request-*.json`, so one request
-rotates once. The dispatch host's timer calls it before each tick; `clear --self` from the dispatch session
-writes the request.
+Prints `{"pending": true|false, "forward": ["<name>", ...]}` and deletes every `<board-dir>/handoff/rotate-request-*.json`,
+so one request rotates once. `pending` is a request for the dispatch host itself; `forward` names the other sessions the
+host tells with `$.session.send`. The dispatch host's timer calls it before each tick.
 
 ```bash
 cli-hierarchy rotate-pending
@@ -558,7 +558,7 @@ executor or the working directory is not the project's repository.
 
 **Removed flags (AISDLC-1034, RFC-0058 phase 1).** `--wait`, `--sender-pid` and `--sender-ref` are gone, and so is
 the start token (`start-token.ts`, `<board-dir>/starts/`): an executor no longer blocks in a background call, and
-the start no longer checks who typed it. `check-sender` stays for later instruction messages until phase 4.
+the start no longer checks who typed it. `check-sender` was deleted in phase 4 (AISDLC-1037): the module's roster-name check is the guard.
 
 **Idle path.** When `taskId` is `null` the executor ends its reply with `[executor] idle` and keeps its context.
 
@@ -934,20 +934,6 @@ the names it does list, so a look-alike or another project's session never recei
 message is typed into the session's pane with the same ownership checks `brief --notify` applies.
 Exit `2` on a missing `--to` or `--text`. A mistake guard, not authentication.
 
-### `check-sender`
-
-Exit 0 only when the sender of a message is this roster's running dispatch session. The
-executor skill runs it before acting on an instruction.
-
-```bash
-cli-hierarchy check-sender [--sender-pid <n>] [--sender-ref <ref>]
-```
-
-The sender is compared by pid or harness session ref, never by a name written in the message
-text. A mismatch prints `not my dispatch session` and exits 1. When the harness reports
-neither a pid nor a ref the check fails open: a warning on stderr, `{"ok":true,"verified":false}`
-on stdout, exit 0. Read-only.
-
 ### `check-repo`
 
 Exit 0 only when the working directory is in the repository that owns this roster's board.
@@ -970,17 +956,17 @@ The cycle is **brief, tick, clear**:
    briefs into `queue/`, handles new verdicts, and returns the reports and escalations to
    send. Executors claim from `queue/` on their own.
 3. **clear.** When an executor's task reaches a verdict, the executor module clears its own context
-   (RFC-0058 phase 1); `clear <executor>` stays for a tmux-driven fleet.
+   (RFC-0058 phase 1); `clear <executor>` is the manual rotate request.
 
 Self-clear rule: **one task per executor context**, and **the dispatch session does not clear
 itself between ticks** (the model-less host runs the tick on a timer, see [the dispatch role](#the-hierarchy-hooks-module-dispatch-role-model-less-host)).
-It rotates through its hooks module at 120k tokens or on the rotate request `clear --self` writes. Every role, the
+It rotates through its hooks module at 120k tokens or on the rotate request `clear` writes. Every role, the
 planner included, also clears itself automatically when its context passes its [threshold](#context-thresholds-aisdlc-815-aisdlc-1036);
 handoff files are regenerated by the CLI, so a session can be cleared at any moment.
 
 How `clear` interacts with an executor's loop: the executor's loop ends after it reports a
-verdict (step "Stop" in [The executor loop](#the-executor-loop)); `clear`
-then empties the context and types `/ai-sdlc executor`, starting a fresh pass. An executor
+verdict (step "Stop" in [The executor loop](#the-executor-loop)); the rotation
+then empties the context and runs the resume command, starting a fresh pass. An executor
 that still holds an inflight task is never cleared, so work in progress is never destroyed.
 
 ## PR reconciler
@@ -1061,8 +1047,8 @@ moves to `backlog/completed/` in that push and the verdict's PR is the fixed PR.
 **Scheduler** (`pipeline-cli/src/hierarchy/scheduler.ts`, `reconcile --watch`): a reconcile
 runs at start (session start or machine wake), within a 2 s debounce after the webhook
 receiver touches `<board>/.reconcile-wake`, and on a timer of 60 s (`BUSY_INTERVAL_MS`, `scheduler.ts:10`) while any task or docs PR
-is open, else 15 min (`IDLE_INTERVAL_MS`, `scheduler.ts:11`). It is code, not a model turn; `cli-hierarchy clear --self
---resume-after` no longer paces PR handling. The tick's progress line lists open PRs as
+is open, else 15 min (`IDLE_INTERVAL_MS`, `scheduler.ts:11`). It is code, not a model turn; `cli-hierarchy clear --self`
+no longer paces PR handling. The tick's progress line lists open PRs as
 `#<n> <kind> <state>`.
 
 **Task action set** (acted on from `ready` on; before delivery the executor owns the PR, so
@@ -1169,20 +1155,27 @@ sessions.
 names. Run `status` to see the roster; an agent absent from it needs `up`. A roster entry
 with a `gone` state needs `up` to restart it.
 
-**`attach` or `clear` says the tmux session is not running.** The session ended outside
+**`attach` says the tmux session is not running.** The session ended outside
 `down`. Run `up`: it drops the dead entry and starts a replacement.
 
-**`down` or `clear` refuses a session.** It lacks the `@ai-sdlc-hierarchy` ownership option
+**`down` refuses a session.** It lacks the `@ai-sdlc-hierarchy` ownership option
 (a personal tmux session sharing the name) or its pane id no longer matches the roster. The
 session is left alone; stop it by hand if it is yours.
 
-**`clear`, `tick`, `restart`, `register` or `route-decision` exits 1 with a caller message.** Only the running
+**`clear <name>`, `tick`, `restart`, `register` or `route-decision` exits 1 with a caller message.** Only the running
 dispatch session may run them. Run them from that session.
 
 **`status` shows `ENV missing`, or `doctor` reports `hierarchy-launch-env`.** The session was
 started without the launch env, so its lease push is refused. Run `cli-hierarchy down --role
 <role>` then `up` from the main checkout's build (`pnpm --filter @ai-sdlc/pipeline-cli build`
 there first when `resolve-pipeline-cli.sh` refuses as stale). `clear` does not fix it.
+
+**`clear <name>` exits 1 with `not acknowledged within N ms ... no module loaded`.** Nothing consumed the rotate request:
+the dispatch session's hooks module is not loaded or has refused to register. Open its pane; the module logs one line naming
+the missing primitive and the version floor (`hierarchy/log` in `$.store`). Fix the host (Claude Code at or above the floor,
+the plugin installed with its `modules` entry), then run `clear` again; the stale request is consumed by the first tick that
+runs. The old entries about an unsubmitted resume command and an `unknown` state after a degraded clear no longer exist:
+no command is typed, so none can be left unsubmitted in an input line.
 
 **An executor's heartbeat.** `executor-start` writes `inflight/<task>.state.json` naming the
 worker right after the claim, before any model call, because the hook's second condition is
@@ -2126,51 +2119,31 @@ saved manifest, is already queued, inflight or blocked, or has used its retries
 ### Clearing an executor
 
 ```bash
-cli-hierarchy clear <executor-name> [--settle-ms <n>]
+cli-hierarchy clear <name> [--settle-ms <n>]
 ```
 
-`cli-hierarchy clear` is meant for the dispatch session only. Its mistake guard resolves
-the calling session from the roster and refuses, sending nothing, for any other caller,
-including a human at a plain shell (it is not authentication; see "The caller binding"). A person outside the hierarchy who needs to empty a pane uses tmux
-directly (`tmux send-keys -t <pane> -l -- /clear`, then `Enter`), after checking with
-`cli-hierarchy status` that the executor holds no inflight task.
+See [`clear`](#clear) for the flow and the refusals. In short: one rotate request file, one acknowledgement (the file
+consumed by the dispatch host within the ceiling), or a named refusal. The `ExecutorContextCleared` event records the
+request; a dispatch tick that cannot get the acknowledgement reports the clear as `failed`, a blocker.
 
-Looks up the executor in the roster and sends `/clear` and Enter to its pane, polls
-until the pane is idle (up to the ceiling, 30000 ms by default, key `clear.handshakeCeilingMs` in
-`.ai-sdlc/pr-lifecycle.yaml`), then sends `/ai-sdlc executor` and Enter and polls for the identity line.
-It refuses, sending nothing, when the name is not a running executor, the name or
-pane id is malformed, the window is not open, or the executor holds an inflight
-task, or the executor's tmux session does not carry the `@ai-sdlc-hierarchy` marker
-that `up` sets (a session `cli-hierarchy` did not start is never typed into; sessions
-of the old single-session layout predate the marker and are not checked). Keys are
-sent only to the pane the roster names, and only after tmux confirms the pane still
-belongs to that window; a recorded pane id that no longer belongs to it is refused,
-never replaced by the window name. An `ExecutorContextCleared` event records the
-clear.
+### Mods-driven hierarchy: tiers, floor and gaps
 
-**Submission check (AISDLC-1029).** After typing the resume command and `Enter`, `clear` reads the
-pane. While the input line still holds the command (a swallowed `Enter`, for example under a
-slash-command completion popup), it sends `Enter` again, at most twice, 2 s apart; if the
-command is still there it sends `Escape`, empties the line and retypes the command once. Only
-then does it wait for the identity line. `clear --self` runs the same check in their delivery script and log
-`resume command not submitted; last pane line: ...` to `handoff/auto-clear.log` when it fails.
-
-**Failure result.** A clear either restarted the session (identity line seen within the
-ceiling, `ok: true`) or failed: the JSON result carries `ok: false`, `reason: "resume command
-not submitted"` and `lastLine` (the last non-empty pane line), the command exits `1`, and a
-dispatch tick reports the clear as `failed`, a blocker, rather than moving on.
-
-The `hierarchy.clear` capability is reported `live` when the executor printed its identity line
-again within the ceiling; otherwise the failure reason (the ceiling and the last pane line seen,
-so a slow start can be told from a dead session) is recorded against it, and it shows up in
-`doctor`. Check the executor's window with `cli-hierarchy status`.
-
-### Per-tick self-clear
-
-The dispatch session does not clear between ticks; it sleeps with context intact (`ScheduleWakeup` at `nextWakeSec`,
-`dispatch-loop.ts:64-68`). `cli-hierarchy clear --self [--resume-after <seconds>]` resolves the session's own pane from its roster
-entry, refuses any caller that is not the dispatch session, and has a detached process type `/clear` and then
-`/ai-sdlc operator-dispatch` after the resume delay. With `TMUX_PANE` unset it is refused.
+- **Install tier (OQ-4).** The hierarchy runs on every install tier (user, project, managed). The module records the
+  detected tier and, when `$.session.identity()` answers, the identity as an informational field in its start line; it is
+  never authority, and enterprise-only gating (organisation allow-lists, managed settings) is accepted rather than worked around.
+- **Version floor and probe (OQ-5).** At `session.start` the module compares `$.session.version()` with the floor and probes each
+  primitive it registers (`prompt.submit`, `command.run`, `session.compact`, `session.measure`, `session.send`; the dispatch
+  host needs `clock.every`, `process.run`, `session.send`, `ui.open` and `session.measure`). On a miss it registers nothing and
+  logs one refusal naming the primitive or the floor, so a session on an older host runs as a plain session and
+  `cli-hierarchy clear` reports `no module loaded` instead of silently doing nothing. The floor moves up only with a
+  dated entry in the RFC.
+- **What tmux still does.** tmux is a window manager only (OQ-3): `up`, `attach` and `terminals` create and attach windows.
+  `clear`, the executor wake, the dispatch tick and the rotations send no keys. The remaining key deliveries (`send`,
+  `brief --notify`, the escalation-chain messages and the `/exit` of `down`) are the last tmux typing and move to the
+  module transport when it can be called from a CLI.
+- **A gap in Mods.** Report it upstream first (the Claude Code Mods surface), then add the smallest interim workaround here,
+  named in the code with the upstream report it waits on, and delete it when the upstream fix lands. Do not widen the
+  workaround into a second keystroke layer.
 
 ### Planner context ceiling
 

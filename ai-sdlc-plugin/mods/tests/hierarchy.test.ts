@@ -209,6 +209,25 @@ describe('hierarchy module: executor wake', () => {
     expect(submits(s)).toEqual([]);
   });
 
+  it('rotates on a rotate message from dispatch: now when idle, at the end of the turn when a task runs', async () => {
+    const s = setup();
+    await s.start();
+    const recv = s.handlers.get('session.receive');
+    expect(await recv(s.$, { text: env('proj-operator-dispatch', 'rotate') }, s.next)).toEqual({
+      consumed: 'hierarchy:rotate',
+    });
+    expect(ran(s)).toContain('clear');
+    const busy = setup();
+    await busy.start();
+    const r2 = busy.handlers.get('session.receive');
+    await r2(busy.$, { text: env('proj-operator-dispatch', 'enqueue AISDLC-1') }, busy.next);
+    busy.$.command.run.mockClear();
+    await r2(busy.$, { text: env('proj-operator-dispatch', 'rotate') }, busy.next);
+    expect(ran(busy)).not.toContain('clear');
+    await busy.handlers.get('turn.complete')(busy.$, { text: '[executor] idle' }, busy.next);
+    expect(ran(busy)).toContain('clear');
+  });
+
   it('a task with no activity for a while no longer mutes wakes', async () => {
     vi.useFakeTimers();
     const s = setup();
