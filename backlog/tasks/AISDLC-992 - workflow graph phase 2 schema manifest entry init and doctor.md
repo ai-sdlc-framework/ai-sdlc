@@ -1,7 +1,7 @@
 ---
 id: AISDLC-992
 title: 'Workflow graph phase 2: `Workflow` schema, config-manifest entry, rendered default, `init` scaffold and `doctor` check'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-20'
 labels:

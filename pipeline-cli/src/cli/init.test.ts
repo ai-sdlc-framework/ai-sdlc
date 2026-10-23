@@ -27,7 +27,7 @@ describe('cli-init', () => {
     expect(code).toBe(1);
     const report = JSON.parse(out);
     expect(report.missing.map((m: { path: string }) => m.path)).toEqual(
-      REQUIRED_CONFIG_MANIFEST.map((e) => e.path),
+      REQUIRED_CONFIG_MANIFEST.filter((e) => e.optional !== true).map((e) => e.path),
     );
     expect(report.remediation).toContain('/ai-sdlc init');
   });

@@ -61,6 +61,7 @@ import {
   fixUntrackedReviewLedgers,
   checkParentCheckoutState,
   checkConfigManifest,
+  checkWorkflowDocument,
   fixConfigManifest,
   fixWorktreeHooks,
   checkForcePushPolicy,
@@ -1496,6 +1497,40 @@ describe('checkCiQueue (AISDLC-799)', () => {
     const c = DOCTOR_CHECKS.find((x) => x.id === 'ci-queue');
     expect(c).toBeDefined();
     expect(c?.fix).toBeUndefined();
+  });
+});
+
+describe('checkWorkflowDocument (RFC-0056 phase 2)', () => {
+  function withWorkflowCli(): void {
+    mkdirSync(join(tmpDir, 'pipeline-cli', 'bin'), { recursive: true });
+    writeFileSync(join(tmpDir, 'pipeline-cli', 'bin', 'cli-workflow.mjs'), '');
+  }
+  function withDoc(): void {
+    mkdirSync(join(tmpDir, '.ai-sdlc'), { recursive: true });
+    writeFileSync(join(tmpDir, '.ai-sdlc', 'workflow.yaml'), 'x: 1\n');
+  }
+  const run = (stdout: string) =>
+    checkWorkflowDocument(makeCtx(makeAdapters({ runCommand: () => ({ stdout, exitCode: 0 }) })));
+
+  it('warns when the document is missing', () => {
+    expect(checkWorkflowDocument(makeCtx(makeAdapters())).severity).toBe('warn');
+  });
+
+  it('warns when cli-workflow cannot be located', () => {
+    withDoc();
+    expect(checkWorkflowDocument(makeCtx(makeAdapters())).severity).toBe('warn');
+  });
+
+  it('passes on a valid report, fails naming the rule, warns on unreadable output', () => {
+    withDoc();
+    withWorkflowCli();
+    expect(run(JSON.stringify({ state: 'valid', errors: [] })).severity).toBe('pass');
+    const bad = run(
+      JSON.stringify({ state: 'invalid', errors: ["when-identifier: edge a -> b: 'zz' x"] }),
+    );
+    expect(bad.severity).toBe('fail');
+    expect(bad.title).toContain('when-identifier');
+    expect(run('nope').severity).toBe('warn');
   });
 });
 

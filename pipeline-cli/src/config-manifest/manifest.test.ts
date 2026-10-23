@@ -41,6 +41,15 @@ describe('manifest contents (AC1)', () => {
     for (const e of REQUIRED_CONFIG_MANIFEST) expect(e.since).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
+  it('lists the optional workflow document, rendered from the validated default', async () => {
+    const e = REQUIRED_CONFIG_MANIFEST.find((x) => x.path === '.ai-sdlc/workflow.yaml');
+    expect(e?.optional).toBe(true);
+    expect(e?.since).toBe('0.36.0');
+    const { validateWorkflowYaml } = await import('../workflow/validate.js');
+    expect(validateWorkflowYaml(e!.render({})).ok).toBe(true);
+    expect(missingConfigEntries(dir).map((m) => m.id)).not.toContain('workflow');
+  });
+
   it('the paths the verifier hardcodes are in the manifest', () => {
     const src = readFileSync(
       join(__dirname, '..', '..', 'attestation-core', 'verify-core.mjs'),
@@ -112,7 +121,11 @@ describe('scaffold (AC2)', () => {
 
   it('skipOperatorInput scaffolds only default-able entries (doctor --fix)', async () => {
     const res = await scaffoldConfig({ projectDir: dir, skipOperatorInput: true });
-    expect(res.created).toEqual(['.ai-sdlc/review-policy.md', '.ai-sdlc/agent-role.yaml']);
+    expect(res.created).toEqual([
+      '.ai-sdlc/review-policy.md',
+      '.ai-sdlc/agent-role.yaml',
+      '.ai-sdlc/workflow.yaml',
+    ]);
   });
 
   it('doctor --fix does not stamp configVersion while operator-input entries are missing', async () => {
@@ -163,7 +176,9 @@ describe('versions and notice (AC6)', () => {
     expect(configVersionNotice(dir)).toContain('0.1.0');
     writeFileSync(join(dir, CONFIG_VERSION_PATH), `configVersion: '${newestConfigVersion()}'\n`);
     expect(configVersionNotice(dir)).toBeNull();
-    expect(missingConfigEntries(dir)).toHaveLength(REQUIRED_CONFIG_MANIFEST.length);
+    expect(missingConfigEntries(dir)).toHaveLength(
+      REQUIRED_CONFIG_MANIFEST.filter((e) => e.optional !== true).length,
+    );
   });
 });
 

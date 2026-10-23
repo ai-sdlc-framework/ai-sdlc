@@ -15,6 +15,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { now } from '../clock.js';
+import { buildExecuteGraph, renderYaml } from '../workflow/graph.js';
 
 /** The command an operator runs to scaffold missing configuration. */
 export const INIT_COMMAND = '/ai-sdlc init';
@@ -41,6 +42,11 @@ export interface ConfigEntry {
    * defaults under `--non-interactive`) and `doctor --fix` never scaffolds them.
    */
   operatorInput: boolean;
+  /**
+   * Scaffolded by init but never required: a missing optional entry does not
+   * refuse a run or fail `cli-init --check`.
+   */
+  optional?: boolean;
   /** Questions asked for this entry; empty for pure-default entries. */
   prompts: readonly ConfigPrompt[];
   /** Render the file from answers. Throws an Error naming what is missing. */
@@ -195,6 +201,16 @@ export const REQUIRED_CONFIG_MANIFEST: readonly ConfigEntry[] = [
     ],
     render: renderPipeline,
   },
+  {
+    id: 'workflow',
+    path: '.ai-sdlc/workflow.yaml',
+    since: '0.36.0',
+    description: 'workflow graph document (RFC-0056); nothing reads it at run time yet',
+    operatorInput: false,
+    optional: true,
+    prompts: [],
+    render: () => renderYaml(buildExecuteGraph()),
+  },
 ];
 
 // ── Versions ──────────────────────────────────────────────────────────────
@@ -244,7 +260,7 @@ export function missingConfigEntries(
   projectDir: string,
   manifest: readonly ConfigEntry[] = REQUIRED_CONFIG_MANIFEST,
 ): ConfigEntry[] {
-  return manifest.filter((e) => !existsSync(join(projectDir, e.path)));
+  return manifest.filter((e) => e.optional !== true && !existsSync(join(projectDir, e.path)));
 }
 
 /** One line per missing entry. The single wording for preflight and doctor. */

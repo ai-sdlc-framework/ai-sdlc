@@ -115,7 +115,7 @@
               },
               "condition": {
                 "type": "string",
-                "description": "Expression that must evaluate to true for the stage to execute."
+                "description": "Expression that must evaluate to true for the stage to execute. Deprecated (RFC-0056): replaced by Workflow edge `when` and removed in phase 3 with spec.stages."
               },
               "context": {
                 "type": "object",

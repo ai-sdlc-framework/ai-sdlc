@@ -2145,14 +2145,12 @@ export function checkBacklogDriftWarnings(ctx: DoctorRunContext): DoctorCheckRes
 // ── Check: required consumer config manifest (AISDLC-910) ───────────────
 
 /** Locate `cli-init.mjs` (the manifest owner) in the project, its node_modules, or the plugin install. */
-function resolveCliInit(ctx: DoctorRunContext): string | undefined {
+function resolveCliInit(ctx: DoctorRunContext, bin = 'cli-init.mjs'): string | undefined {
   const pluginDir = resolvePluginDir(ctx);
   const candidates = [
-    join(ctx.projectDir, 'pipeline-cli', 'bin', 'cli-init.mjs'),
-    join(ctx.projectDir, 'node_modules', '@ai-sdlc', 'pipeline-cli', 'bin', 'cli-init.mjs'),
-    ...(pluginDir
-      ? [join(pluginDir, 'node_modules', '@ai-sdlc', 'pipeline-cli', 'bin', 'cli-init.mjs')]
-      : []),
+    join(ctx.projectDir, 'pipeline-cli', 'bin', bin),
+    join(ctx.projectDir, 'node_modules', '@ai-sdlc', 'pipeline-cli', 'bin', bin),
+    ...(pluginDir ? [join(pluginDir, 'node_modules', '@ai-sdlc', 'pipeline-cli', 'bin', bin)] : []),
   ];
   return candidates.find((c) => ctx.adapters.exists(c));
 }
@@ -2224,6 +2222,56 @@ export function fixConfigManifest(ctx: DoctorRunContext): DoctorFixResult {
     id: 'config-manifest',
     applied: res.exitCode === 0 && created.length > 0,
     detail: created.length > 0 ? created.join('; ') : 'nothing to scaffold without operator input',
+  };
+}
+
+// ── Check: workflow document (RFC-0056 phase 2) ─────────────────────────
+
+/**
+ * Validates `.ai-sdlc/workflow.yaml` with the pipeline-cli validator
+ * (`cli-workflow validate`), so doctor and the later engine share one function.
+ */
+export function checkWorkflowDocument(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'workflow-document';
+  if (!ctx.adapters.exists(join(ctx.projectDir, '.ai-sdlc', 'workflow.yaml'))) {
+    return {
+      id,
+      severity: 'warn',
+      title: '.ai-sdlc/workflow.yaml is missing (not read at run time yet)',
+      remediation: 'Run `ai-sdlc init` to scaffold .ai-sdlc/workflow.yaml',
+    };
+  }
+  const cli = resolveCliInit(ctx, 'cli-workflow.mjs');
+  if (!cli) {
+    return {
+      id,
+      severity: 'warn',
+      title: 'could not locate pipeline-cli cli-workflow; workflow.yaml was not validated',
+      remediation: 'Run `ai-sdlc-plugin/scripts/install-runtime-deps.sh` and re-run doctor',
+    };
+  }
+  const res = ctx.adapters.runCommand('node', [cli, 'validate', '--project-dir', ctx.projectDir]);
+  let report: { state: string; errors: string[] };
+  try {
+    report = JSON.parse(res.stdout) as { state: string; errors: string[] };
+  } catch {
+    return {
+      id,
+      severity: 'warn',
+      title: 'cli-workflow validate produced no readable report',
+      remediation: res.stderr?.trim() || undefined,
+    };
+  }
+  if (report.state === 'valid') {
+    return { id, severity: 'pass', title: '.ai-sdlc/workflow.yaml is present and valid' };
+  }
+  return {
+    id,
+    severity: 'fail',
+    title: `.ai-sdlc/workflow.yaml fails validation: ${report.errors.join('; ')}`,
+    remediation:
+      'Fix the named rules against spec/schemas/workflow.schema.json, or regenerate the default with `cli-workflow graph --format yaml`',
+    anonymizableEvidence: { errorCount: report.errors.length },
   };
 }
 
@@ -2634,6 +2682,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
       'Required .ai-sdlc config entries from the pipeline-cli manifest; same wording as the execute preflight (AISDLC-910).',
     run: checkConfigManifest,
     fix: fixConfigManifest,
+  },
+  {
+    id: 'workflow-document',
+    description:
+      '.ai-sdlc/workflow.yaml validates against the Workflow schema and identifier rules (RFC-0056).',
+    run: checkWorkflowDocument,
   },
   {
     id: 'plugin-version',

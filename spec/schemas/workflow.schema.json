@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/workflow.schema.json",
+  "title": "AI-SDLC Workflow",
+  "description": "A composable workflow graph (RFC-0056): typed nodes joined by edges. Phase 2 defines the document and its validator only; nothing reads it at run time yet. Every `when` is written in the @ai-sdlc/reference policy expression grammar (createSimpleExpressionEvaluator): comparisons (==, !=, >, >=, <, <=), &&, ||, !, dotted paths, `contains` and literals. A `when` may only name identifiers that an upstream node declares as an output.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": { "const": "ai-sdlc.io/v1alpha1" },
+    "kind": { "const": "Workflow" },
+    "metadata": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "extends": {
+          "type": "string",
+          "description": "Name of the Workflow document this one extends."
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": ["nodes", "edges"],
+      "additionalProperties": false,
+      "properties": {
+        "nodes": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/node" }
+        },
+        "edges": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/edge" }
+        },
+        "anchors": {
+          "type": "array",
+          "description": "Node ids whose deterministic result an agent cannot override.",
+          "items": { "type": "string" }
+        },
+        "budget": { "$ref": "#/$defs/budget" }
+      }
+    }
+  },
+  "$defs": {
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxTokens": { "type": "integer", "minimum": 1 },
+        "maxUsd": { "type": "number", "exclusiveMinimum": 0 },
+        "maxTurns": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "frozen": {
+      "description": "A node boolean, or a list of named freeze rules.",
+      "oneOf": [
+        { "type": "boolean" },
+        { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 }
+      ]
+    },
+    "node": {
+      "oneOf": [
+        { "$ref": "#/$defs/stepNode" },
+        { "$ref": "#/$defs/agentNode" },
+        { "$ref": "#/$defs/anchorNode" },
+        { "$ref": "#/$defs/fanoutNode" },
+        { "$ref": "#/$defs/humanNode" }
+      ]
+    },
+    "stepNode": {
+      "type": "object",
+      "required": ["kind", "impl"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "step" },
+        "impl": { "type": "string", "minLength": 1 },
+        "inputs": { "type": "string" },
+        "outputs": { "type": "string" },
+        "frozen": { "$ref": "#/$defs/frozen" }
+      }
+    },
+    "agentNode": {
+      "type": "object",
+      "required": ["kind", "role"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "agent" },
+        "role": { "type": "string", "minLength": 1 },
+        "fresh": { "type": "boolean", "default": false },
+        "budget": { "$ref": "#/$defs/budget" },
+        "gating": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this agent's verdict gates the run."
+        },
+        "sample": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1,
+          "description": "Number of independent samples taken (RFC-0056 OQ-1)."
+        },
+        "frozen": { "$ref": "#/$defs/frozen" }
+      }
+    },
+    "anchorNode": {
+      "type": "object",
+      "required": ["kind", "impl"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "anchor" },
+        "impl": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A deterministic implementation id. An agent role is not a valid anchor.",
+          "not": {
+            "enum": [
+              "developer",
+              "code-reviewer",
+              "test-reviewer",
+              "security-reviewer",
+              "code-reviewer-codex",
+              "test-reviewer-codex",
+              "review-executor"
+            ]
+          }
+        },
+        "frozen": { "$ref": "#/$defs/frozen" }
+      }
+    },
+    "humanNode": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "human" },
+        "prompt": { "type": "string" },
+        "frozen": { "$ref": "#/$defs/frozen" }
+      }
+    },
+    "fanoutNode": {
+      "type": "object",
+      "required": ["kind", "over", "cap", "node"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "fanout" },
+        "over": { "type": "string", "minLength": 1 },
+        "cap": { "type": "integer", "minimum": 1 },
+        "expect": {
+          "type": "string",
+          "pattern": "^(all|[0-9]+|quorum\\([0-9]+\\))$",
+          "default": "all",
+          "description": "all | n | quorum(k)."
+        },
+        "node": { "$ref": "#/$defs/agentNode" },
+        "frozen": { "$ref": "#/$defs/frozen" }
+      }
+    },
+    "edge": {
+      "oneOf": [
+        { "type": "string", "pattern": "^\\s*[A-Za-z0-9_-]+\\s*->\\s*[A-Za-z0-9_-]+\\s*$" },
+        {
+          "type": "object",
+          "required": ["from", "to"],
+          "additionalProperties": false,
+          "properties": {
+            "from": { "type": "string", "minLength": 1 },
+            "to": { "type": "string", "minLength": 1 },
+            "when": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Policy expression (@ai-sdlc/reference createSimpleExpressionEvaluator grammar)."
+            },
+            "loop": {
+              "type": "object",
+              "required": ["max"],
+              "additionalProperties": false,
+              "properties": { "max": { "type": "integer", "minimum": 1 } }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
