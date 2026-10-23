@@ -1,7 +1,7 @@
 ---
 id: AISDLC-994
 title: 'Workflow graph phase 4: open knobs, `extends` overrides and frozen-set enforcement with cited enforcers'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-20'
 labels:
