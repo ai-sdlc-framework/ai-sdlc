@@ -57,7 +57,7 @@ Test command: `pnpm test`. One run, after my changes, failed on the usage-ingest
 
 ## Verification
 - `pnpm build` — passed
-- `pnpm test` — waived
+- `pnpm test` — passed. Command: `pnpm test` (full, in the task worktree, exit 0). Summary: pipeline-cli 524 test files passed (524), 11982 tests passed, 13 skipped; orchestrator 224 files passed, 5192 tests passed, 2 skipped; reference 130 files passed, 1 skipped, 1968 tests passed, 4 skipped; `node --test` gates 3550 pass, 0 fail. An earlier full run under load hit one 5000 ms timeout in `review-plan.test.ts` (untouched by this PR); the rerun passed with no change.
 - `pnpm lint` — passed
 - `pnpm format:check` — passed
 - 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
