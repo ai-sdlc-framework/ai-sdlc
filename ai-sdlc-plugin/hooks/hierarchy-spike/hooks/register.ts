@@ -39,6 +39,13 @@ function outcome(r: Any): Record<string, unknown> {
   return { ran: true };
 }
 
+// session.receive hands the hook the whole cross-session envelope
+// (`<cross-session-message ...><agent-message ...>hier:consume</agent-message></cross-session-message>`),
+// not the sender's text, so every `hier:` command matches on the inner text.
+export function innerText(raw: string): string {
+  return raw.replace(/<\/?(?:cross-session-message|agent-message)\b[^>]*>/g, '').trim();
+}
+
 export const register = (on: Any): void => {
   on('session.start', async ($: Any, e: Any, next: Any) => {
     // A second module_loaded after a clear means the module reloaded.
@@ -61,7 +68,7 @@ export const register = (on: Any): void => {
     if (pending.ok && pending.value) {
       const step = String(pending.value);
       await safe(() => $.store.set(PENDING_KEY, null));
-      const r = await safe(() => $.prompt.submit({ text: '/hier-ping' }));
+      const r = await safe(() => $.prompt.submit({ text: '/hierarchy-spike:hier-ping' }));
       await $.store.set(STORE_LOG_KEY, [
         ...((await $.store.get(STORE_LOG_KEY)) ?? []),
         line('prompt.submit', { after: step, ...outcome(r) }),
@@ -107,10 +114,11 @@ export const register = (on: Any): void => {
   });
 
   on('session.receive', async ($: Any, e: Any, next: Any) => {
-    const text = String(e?.text ?? '');
+    const raw = String(e?.text ?? '');
+    const text = innerText(raw);
     await $.store.set(STORE_LOG_KEY, [
       ...((await $.store.get(STORE_LOG_KEY)) ?? []),
-      line('session.receive', { origin: e?.origin ?? null, text }),
+      line('session.receive', { origin: e?.origin ?? null, text: raw }),
     ]);
 
     if (text.startsWith('hier:consume')) {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { register, STORE_LOG_KEY } from '../../hooks/hierarchy-spike/hooks/register.ts';
+import { innerText, register, STORE_LOG_KEY } from '../../hooks/hierarchy-spike/hooks/register.ts';
 
 function setup() {
   const handlers = new Map<string, any>();
@@ -38,7 +38,7 @@ describe('hierarchy-spike', () => {
     await recv($, { text: 'hier:run compact' }, next);
     expect(kv.get('hierarchy-spike/marker')).toBe('written-before-compact');
     await handlers.get('session.start')($, { reason: 'clear' }, next);
-    expect($.prompt.submit).toHaveBeenCalledWith({ text: '/hier-ping' });
+    expect($.prompt.submit).toHaveBeenCalledWith({ text: '/hierarchy-spike:hier-ping' });
     for (const n of ['turn.start', 'turn.complete', 'session.measure', 'session.end']) {
       await handlers.get(n)($, {}, next);
     }
@@ -48,6 +48,21 @@ describe('hierarchy-spike', () => {
       ran: false,
       drop: 'unsupported',
     });
+  });
+
+  it('matches commands on the inner text of the real cross-session envelope', async () => {
+    const env = (t: string) =>
+      `<cross-session-message from="alpha" id="1"><agent-message kind="text">${t}</agent-message></cross-session-message>`;
+    expect(innerText(env('hier:consume 1'))).toBe('hier:consume 1');
+    for (const cmd of ['hier:consume 1', 'hier:dump', 'hier:run clear', 'hier:run compact']) {
+      const { handlers, $, next } = setup();
+      const recv = handlers.get('session.receive');
+      expect(await recv($, { text: env(cmd) }, next)).toEqual({ consumed: true });
+    }
+    const { handlers, $, next, kv } = setup();
+    const raw = env('hello');
+    await handlers.get('session.receive')($, { text: raw }, next);
+    expect((kv.get(STORE_LOG_KEY) as string[])[0]).toContain('cross-session-message');
   });
 
   it('hier:dump submits the log, and records a refused submit', async () => {
