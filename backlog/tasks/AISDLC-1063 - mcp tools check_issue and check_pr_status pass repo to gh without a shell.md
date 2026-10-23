@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1063
 title: 'MCP tools check_issue and check_pr_status pass the repo argument to gh without a shell (command injection, GitHub issue 1970)'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-23'
 labels:
