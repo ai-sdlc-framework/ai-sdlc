@@ -3,7 +3,7 @@
  * roster and board, an injected git runner. No session, tmux or network.
  */
 
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -338,17 +338,17 @@ describe('cli-hierarchy executor-start and clear --self (executor)', () => {
     expect(r.err).toMatch(/not a running executor/);
   });
 
-  it('takes no --wait, --sender-pid or --sender-ref: the board claim is the authority', async () => {
+  it('refuses --wait without a module heartbeat and ignores --sender-pid and --sender-ref', async () => {
     writeManifest(board, mkManifest('AISDLC-4'));
     const extras = {
       identity: identityFor('executor', 'proj-executor-alpha'),
       repoGit: gitAt(tmp),
     };
+    const refused = await run(['executor-start', '--wait', '600'], extras);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toMatch(/--wait 600 refused/);
     // removed flags are ignored, not waited on: the claim returns at once
-    const ok = await run(
-      ['executor-start', '--wait', '600', '--sender-pid', '1', '--sender-ref', 'x'],
-      extras,
-    );
+    const ok = await run(['executor-start', '--sender-pid', '1', '--sender-ref', 'x'], extras);
     expect(ok.code).toBe(0);
     expect(JSON.parse(ok.out[ok.out.length - 1]!)).toMatchObject({ taskId: 'AISDLC-4' });
   });
@@ -368,5 +368,54 @@ describe('cli-hierarchy executor-start and clear --self (executor)', () => {
     });
     expect(nobody.code).toBe(1);
     expect(nobody.err).toMatch(/not a running session in the roster/);
+  });
+});
+
+describe('executorStart idle polling guards (AISDLC-1065)', () => {
+  const run = (waitSec?: number, lines: string[] = []) =>
+    executorStart(
+      { boardDir: board, cwd: tmp, ...(waitSec === undefined ? {} : { waitSec }) },
+      {
+        identity: identityFor('executor', 'proj-executor-alpha'),
+        repoGit: gitAt(tmp),
+        log: (l) => lines.push(l),
+      },
+    );
+
+  it('refuses --wait without a module heartbeat, naming the rule', async () => {
+    await expect(run(1500)).rejects.toThrow(/--wait 1500 refused: .*no hooks-module heartbeat/);
+  });
+
+  it('accepts --wait with a loaded heartbeat', async () => {
+    mkdirSync(path.join(board, 'handoff'), { recursive: true });
+    writeFileSync(
+      path.join(board, 'handoff', 'module-proj-executor-alpha.json'),
+      JSON.stringify({ state: 'loaded', at: new Date().toISOString() }),
+    );
+    await expect(run(1500)).resolves.toMatchObject({ taskId: null });
+  });
+
+  it('returns repeat on a second idle call within 60 s and resets after an enqueue', async () => {
+    const first = await run();
+    expect(first.repeat).toBeUndefined();
+    const lines: string[] = [];
+    const second = await run(undefined, lines);
+    expect(second).toMatchObject({ taskId: null, repeat: true });
+    expect(lines.join('\n')).toContain('already idle; stop the turn');
+    writeManifest(board, mkManifest('AISDLC-9'));
+    const third = await run();
+    expect(third.repeat).toBeUndefined();
+    expect(third.taskId).toBe('AISDLC-9');
+  });
+
+  it('does not treat a call after the window as a repeat', async () => {
+    vi.useFakeTimers({ now: new Date('2026-10-23T10:00:00Z') });
+    try {
+      await run();
+      vi.setSystemTime(new Date('2026-10-23T10:01:01Z'));
+      expect((await run()).repeat).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

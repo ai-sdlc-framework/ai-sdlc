@@ -1331,6 +1331,12 @@ Work an executor finished locally but could not push is never hand-pushed. The n
 
 ## Quota and cost events
 
+### Idle executor polling (AISDLC-1065)
+
+Weekly token audit, 2026-10-16 to 2026-10-23: three idle executor sessions on 2026-10-23 re-ran `executor-start --wait 1500` in a background loop and read its output 2,100 to 3,000 times each, at an average context of 450k to 483k tokens (peak 966k). They consumed 3,702M cache-read tokens, 47 percent of the week, and wrote under 0.4M output tokens. Their hooks module was not loaded, so nothing woke or rotated them and the model polled. Even with a module, polling climbs about 1k context per minute per executor.
+
+Guards: `executor-start --wait N` (N > 0) exits 1 with a one-line refusal when the session has no `loaded` module heartbeat (`handoff/module-<name>.json`); a second `executor-start` within 60 s from the same roster name with no new enqueue (recorded under `<board-dir>/starts/<name>.json`) prints "already idle; stop the turn" and returns `{"taskId":null,"repeat":true}`. An idle executor ends its turn with `[executor] idle` and costs no model calls until the module wakes it.
+
 Admission order for the events below follows the Product Priority Algorithm ([RFC-0005](../../spec/rfcs/RFC-0005-product-priority-algorithm.md)).
 
 | Event | Severity | Meaning | Response |

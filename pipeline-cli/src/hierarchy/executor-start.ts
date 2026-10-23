@@ -19,6 +19,9 @@
  *
  */
 
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+
 import { now } from '../clock.js';
 import { writeHeartbeat } from '../dispatch/board.js';
 import { claimWithWait } from '../dispatch/claim-wait.js';
@@ -27,6 +30,7 @@ import type { DispatchManifest } from '../dispatch/types.js';
 import { resolveCaller, type IdentityDeps } from './caller-identity.js';
 import { claimPreflight, type LeasePreflight } from './lease-preflight.js';
 import { readHold } from './hold.js';
+import { readModuleHealth } from './module-health.js';
 import { checkRepoMatch, rosterProject } from './peer-guard.js';
 import { readRosterChecked } from './roster.js';
 import type { GitRunner } from './trusted-root.js';
@@ -38,6 +42,49 @@ export const DEFAULT_EMPTY_QUEUE_HIBERNATE_SEC = 1800;
 export interface ExecutorStartOptions {
   boardDir: string;
   cwd: string;
+  /** `--wait <sec>`: refused (AISDLC-1065) unless this session has a loaded hooks-module heartbeat. */
+  waitSec?: number;
+}
+
+/** A second idle `executor-start` inside this window, with no new enqueue, is a repeat. */
+export const REPEAT_WINDOW_MS = 60_000;
+
+function queueSignature(boardDir: string): string {
+  try {
+    return readdirSync(path.join(boardDir, 'queue')).sort().join('|');
+  } catch {
+    return '';
+  }
+}
+
+function startsFile(boardDir: string, name: string): string {
+  return path.join(boardDir, 'starts', `${name}.json`);
+}
+
+function lastIdleStart(boardDir: string, name: string): { at: number; queue: string } | undefined {
+  try {
+    const r = JSON.parse(readFileSync(startsFile(boardDir, name), 'utf8')) as {
+      at?: unknown;
+      queue?: unknown;
+    };
+    const at = typeof r.at === 'string' ? Date.parse(r.at) : NaN;
+    if (Number.isNaN(at) || typeof r.queue !== 'string') return undefined;
+    return { at, queue: r.queue };
+  } catch {
+    return undefined;
+  }
+}
+
+function recordStart(boardDir: string, name: string, idle: boolean, queue: string): void {
+  try {
+    mkdirSync(path.join(boardDir, 'starts'), { recursive: true });
+    writeFileSync(
+      startsFile(boardDir, name),
+      JSON.stringify(idle ? { at: now().toISOString(), queue } : {}),
+    );
+  } catch {
+    // The guard is advisory: a write failure must never block a claim.
+  }
 }
 
 /** Collaborators; every one is replaceable in tests. */
@@ -65,6 +112,8 @@ export interface ExecutorStartResult {
   taskId: string | null;
   /** The hold reason when the board is held (AISDLC-899); nothing was claimed. */
   held?: string;
+  /** True when this idle session called again within a minute with no new enqueue (AISDLC-1065). */
+  repeat?: boolean;
   manifest?: DispatchManifest;
   /** The lease-push preflight of the claim; absent when nothing was claimed. */
   leasePreflight?: LeasePreflight;
@@ -81,6 +130,14 @@ export async function executorStart(
   const self = resolveCaller(deps.identity);
   if (!self || self.role !== 'executor') {
     throw new Error('this session is not a running executor in the roster');
+  }
+  if (opts.waitSec !== undefined && opts.waitSec > 0) {
+    const health = readModuleHealth(opts.boardDir, { name: self.name, role: self.role }, now());
+    if (health.state !== 'loaded') {
+      throw new Error(
+        `--wait ${opts.waitSec} refused: this session has no hooks-module heartbeat, and waiting in a model turn is pure cost; end the turn with '[executor] idle' (AISDLC-1065)`,
+      );
+    }
   }
   const { roster } = readRosterChecked(opts.boardDir);
   const dispatch =
@@ -99,8 +156,15 @@ export async function executorStart(
   deps.log?.(
     `[executor] I am '${self.name}' (project '${project.project}'); dispatch session is '${dispatch || 'none'}'`,
   );
+  const queue = queueSignature(opts.boardDir);
+  const last = lastIdleStart(opts.boardDir, self.name);
+  if (last && now().getTime() - last.at < REPEAT_WINDOW_MS && last.queue === queue) {
+    deps.log?.('[executor] already idle; stop the turn');
+    return { name: self.name, project: project.project, dispatch, taskId: null, repeat: true };
+  }
   const hold = readHold(opts.boardDir);
   if (hold) {
+    recordStart(opts.boardDir, self.name, true, queue);
     deps.log?.(`[executor] BOARD HELD: ${hold.reason} (since ${hold.since}); not claiming.`);
     return { name: self.name, project: project.project, dispatch, taskId: null, held: hold.reason };
   }
@@ -133,6 +197,7 @@ export async function executorStart(
       );
     }
   }
+  recordStart(opts.boardDir, self.name, !(result.claimed && result.manifest), queue);
   let leasePreflight: LeasePreflight | undefined;
   if (result.claimed && result.manifest) {
     leasePreflight = (deps.preflight ?? claimPreflight)(
