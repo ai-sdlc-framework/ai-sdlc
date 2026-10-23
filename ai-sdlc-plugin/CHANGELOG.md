@@ -5,6 +5,13 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.31.2](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.31.1...ai-sdlc-plugin-v0.31.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* **ci:** read the host version object in the hooks module guard (AISDLC-1062) ([#1976](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1976)) ([bbd85f4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bbd85f4a7362caf9ca41772114eb9387be19b002))
+
 ## [0.31.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.31.0...ai-sdlc-plugin-v0.31.1) (2026-10-23)
 
 
