@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1052
 title: 'Add the CLI-level test for the cli-workflow graph subcommand so PR #1907 passes the patch coverage gate'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22'
 labels:
