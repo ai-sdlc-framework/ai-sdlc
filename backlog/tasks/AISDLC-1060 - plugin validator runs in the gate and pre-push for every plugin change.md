@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1060
 title: 'the Claude plugin validator runs in the PR gate and in pre-push for every change under ai-sdlc-plugin, so a refused hooks module can never merge again'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-23'
 labels:

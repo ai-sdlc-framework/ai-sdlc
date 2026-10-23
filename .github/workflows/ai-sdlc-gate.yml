@@ -107,6 +107,7 @@ jobs:
       first_run: ${{ steps.sdk-filter.outputs.first_run }}
       rfcs: ${{ steps.rfcs-filter.outputs.rfcs }}
       pipeline_cli: ${{ steps.pipeline-cli-filter.outputs.pipeline_cli }}
+      plugin: ${{ steps.plugin-filter.outputs.plugin }}
     steps:
       # AISDLC-963: Actions bucket remaining at the start of the run (end: pr-ready).
       - name: Report API quota remaining (start of run)
@@ -199,6 +200,14 @@ jobs:
           filters: |
             pipeline_cli:
               - 'pipeline-cli/**'
+      # AISDLC-1060: drives the plugin-validate job.
+      - id: plugin-filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          token: ''
+          filters: |
+            plugin:
+              - 'ai-sdlc-plugin/**'
       # Fourth filter (AISDLC-727): SDK + first-run-smoke path filters moved
       # here from ci.yml so this workflow is the only one that runs the suite
       # on pull_request events.
@@ -397,6 +406,29 @@ jobs:
             exit 1
           fi
           echo "[backlog-drift] gate passed (info/warning issues are informational, not blocking)"
+
+  # AISDLC-1060: the host's loader is the validator; unit tests cannot see
+  # duplicate hook registrations. Runs only when ai-sdlc-plugin/** changes.
+  # `claude plugin validate` needs no login. Errors fail; warnings stay warnings.
+  plugin-validate:
+    name: Claude plugin validate
+    needs: detect
+    if: needs.detect.outputs.plugin == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLAUDE_CODE_VERSION: 2.1.309
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Install Claude Code CLI (pinned)
+        run: |
+          npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+          claude --version
+      - name: Validate plugin
+        run: claude plugin validate ai-sdlc-plugin
 
   first-run-smoke:
     name: First-run smoke (fresh repo)
@@ -1497,6 +1529,7 @@ jobs:
         integration,
         backlog-drift,
         first-run-smoke,
+        plugin-validate,
         test-python,
         test-go,
         attestation-gate,
@@ -1553,6 +1586,7 @@ jobs:
             pipeline-cli-macos,
             integration,
             first-run-smoke,
+            plugin-validate,
             test-python,
             test-go,
             attestation-gate,
