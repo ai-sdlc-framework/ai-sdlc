@@ -711,6 +711,20 @@ it differs from `<board>/.blockers-sent.json`. Holds and resumes are appended to
 A hold limits actions, never reporting; the rule is rendered once from `prompt-rules.js` into the
 planner, dispatch and executor commands.
 
+### `block` and `unblock`
+
+Park one queued task without pausing the drain (AISDLC-1043). `cli-dispatch block` moves
+`queue/<id>.dispatch.json` to `blocked/` and records `block: {blockedAt, blockedBy, reason}`; the
+claim logic never reads `blocked/`, and `cli-hierarchy status` lists each blocked task with its
+reason. It refuses an inflight, done or failed task and is a no-op on an already blocked one.
+`unblock` returns the manifest to `queue/` with `after`, `priority` and its queue position
+unchanged. Use `hold` to pause every claim; use `block` to park one task while the others drain.
+
+```bash
+cli-dispatch block --task-id <id> --reason <text> [--by <name>]
+cli-dispatch unblock --task-id <id>
+```
+
 ### `resume`
 
 Remove the hold set by `cli-hierarchy hold`; see [`hold`](#hold). Prints `{"ok": true, "resumed": <bool>}`.

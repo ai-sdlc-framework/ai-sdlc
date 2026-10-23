@@ -49,6 +49,7 @@ export {
   sweepStaleHeartbeats,
   retireQueued,
   unblockManifest,
+  blockQueued,
   writeDiagnostic,
   writeHeartbeat,
   writeIterationExhaustedDiagnostic,

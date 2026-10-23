@@ -753,6 +753,7 @@ export function unblockManifest(
   if (!manifest) return false;
   if (onlyIfBlockedBy !== undefined && manifest.blockedBy !== onlyIfBlockedBy) return false;
   delete manifest.blockedBy;
+  delete manifest.block;
   const dst = manifestPathIn(boardDir, 'queue', taskId);
   if (existsSync(dst)) {
     throw new Error(`dispatch.unblock: queue/${taskId}${MANIFEST_SUFFIX} already exists`);
@@ -760,6 +761,48 @@ export function unblockManifest(
   writeIntoQueue(dst, manifest, statSync(src));
   rmSync(src);
   return true;
+}
+
+/** Outcome of {@link blockQueued}. */
+export type BlockResult = { ok: true; alreadyBlocked: boolean } | { ok: false; reason: string };
+
+/**
+ * Park a queued manifest in `blocked/` with `{ blockedAt, blockedBy, reason }`
+ * (AISDLC-1043). Refuses an inflight, done or failed task or one not on the
+ * board; a task already in `blocked/` is a no-op success. The manifest keeps
+ * its mtime and every other field (`after`, `priority`), so `unblockManifest`
+ * returns it to its FIFO position unchanged.
+ */
+export function blockQueued(
+  boardDir: string,
+  taskId: string,
+  reason: string,
+  blockedBy: string,
+  now: () => Date = clockNow,
+): BlockResult {
+  ensureBoardDirs(boardDir);
+  const state = boardStateOf(boardDir, taskId);
+  if (state === 'blocked') return { ok: true, alreadyBlocked: true };
+  if (state !== 'queue') {
+    return {
+      ok: false,
+      reason: state
+        ? `${taskId} is ${state}; only a queued task can be blocked`
+        : `${taskId} is not on the board`,
+    };
+  }
+  const src = manifestPathIn(boardDir, 'queue', taskId);
+  const manifest = readManifest(src);
+  if (!manifest) return { ok: false, reason: `${taskId} has an unreadable manifest in queue/` };
+  manifest.block = { blockedAt: now().toISOString(), blockedBy, reason };
+  const dst = manifestPathIn(boardDir, 'blocked', taskId);
+  const tmp = `${dst}.tmp-${process.pid}-${process.hrtime.bigint()}`;
+  const times = statSync(src);
+  writeFileSync(tmp, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+  utimesSync(tmp, times.atime, times.mtime);
+  renameSync(tmp, dst);
+  rmSync(src);
+  return { ok: true, alreadyBlocked: false };
 }
 
 /** Atomic write into `queue/` that keeps the source file's mtime (its FIFO position). */
@@ -936,7 +979,8 @@ export function listBoard(boardDir: string, now: () => Date = () => new Date()):
       const entry: BoardEntry = { taskId: file.slice(0, -MANIFEST_SUFFIX.length), state: sub };
       if (sub === 'blocked') {
         const manifest = readManifest(path.join(boardDir, sub, file));
-        if (manifest?.blockedBy) entry.reason = `blocked by decision ${manifest.blockedBy}`;
+        if (manifest?.block) entry.reason = manifest.block.reason;
+        else if (manifest?.blockedBy) entry.reason = `blocked by decision ${manifest.blockedBy}`;
       }
       entries.push(entry);
     }
