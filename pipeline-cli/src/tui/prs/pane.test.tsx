@@ -181,6 +181,8 @@ describe('PrsPaneContent — keyboard navigation', () => {
     await flush();
 
     stdin.write('\x1b'); // ESC
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 50)); // ink 8 flushes a lone ESC after 20ms
     await flush();
 
     const frame = lastFrame() ?? '';
