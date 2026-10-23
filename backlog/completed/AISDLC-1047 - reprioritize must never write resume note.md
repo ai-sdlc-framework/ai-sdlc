@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1047
 title: 'cli-dispatch reprioritize --note must never overwrite resume.note on a queued manifest'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22'
 labels:

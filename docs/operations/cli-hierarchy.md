@@ -1147,8 +1147,9 @@ node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" reprioritize <task-id> --priority 0 [-
 ```
 
 `reprioritize` rewrites only `priority` on `queue/<id>.dispatch.json` (the enqueue time is kept).
-`--note` updates `resume.note` only when the manifest already carries a resume block; on any other
-manifest it is stored in `reorderNote` (audit only). `--note` never creates a resume block, so a
+`--note` is audit metadata stored in `reorderNote` and never touches `resume` (AISDLC-1047): an
+existing resume block, including its `resume.note` instructions, is copied through unchanged, and the
+command output names its first line as `resumeNote`. `--note` never creates a resume block, so a
 never-started task is still claimed as a fresh task. The note is bounded by the same 4000-character
 limit as a resume note. The command exits 1, leaving the file untouched, when the task is inflight, has a verdict in `done/` or a
 diagnostic in `failed/`, or is not queued.

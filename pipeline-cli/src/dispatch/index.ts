@@ -39,6 +39,7 @@ export {
   probeIterationBudget,
   readHeartbeat,
   readInflightManifest,
+  readQueuedManifest,
   readResumeSignal,
   parkInflight,
   releaseInflight,

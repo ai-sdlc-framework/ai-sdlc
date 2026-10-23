@@ -170,3 +170,27 @@ describe('a dependency counts only once landed', () => {
     expect(listBoard(board).find((e) => e.taskId === 'AISDLC-11')?.eligible).toBe(true);
   });
 });
+
+describe('reprioritize --note never writes resume (AISDLC-1047)', () => {
+  it('keeps resume byte-identical and puts the note in reorderNote', () => {
+    const resume = {
+      note: 'cleanup\nthen fix',
+      resumedAt: '2026-10-11T00:00:00.000Z',
+      resumedBy: 'dispatch',
+    };
+    writeManifest(board, { ...mk('AISDLC-2', 'backlog/tasks/missing.md'), resume });
+    reprioritizeQueued(board, 'AISDLC-2', { priority: 0, note: 'reorder text' });
+    const m = readQueuedManifest(board, 'AISDLC-2');
+    expect(m?.resume).toEqual(resume);
+    expect(m?.resume?.note).toBe('cleanup\nthen fix');
+    expect(m?.reorderNote).toBe('reorder text');
+  });
+
+  it('never-started manifest gets reorderNote and no resume', () => {
+    writeManifest(board, mk('AISDLC-3', 'backlog/tasks/missing.md'));
+    reprioritizeQueued(board, 'AISDLC-3', { priority: 0, note: 'why' });
+    const m = readQueuedManifest(board, 'AISDLC-3');
+    expect(m?.resume).toBeUndefined();
+    expect(m?.reorderNote).toBe('why');
+  });
+});
