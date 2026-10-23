@@ -54,6 +54,10 @@ export interface DispatchState {
   blockers: string[];
   plannerName: string;
   boardDir?: string;
+  /** Roster name of this session; keys the module heartbeat file. */
+  sessionName?: string;
+  /** Host version recorded in the heartbeat. */
+  hostVersion?: string;
   uiOpened?: boolean;
   /** Last blockers text sent to the planner; a changed list is announced once. */
   lastBlockers: string;
@@ -74,6 +78,26 @@ export function newDispatchState(options?: DispatchOptions): DispatchState {
     lastTickFailure: '',
     ticking: false,
   };
+}
+
+/** Writes the file named by argv[1] (creating its directory) with argv[2]. */
+const WRITE_SCRIPT =
+  "const fs=require('fs');fs.mkdirSync(require('path').dirname(process.argv[1]),{recursive:true});fs.writeFileSync(process.argv[1],process.argv[2])";
+
+/**
+ * AISDLC-1061: record whether the module loaded in `<board-dir>/handoff/module-<name>.json`, which
+ * `cli-hierarchy status`, `up` and `doctor` read. Never throws: a host without `process.run` just leaves
+ * the file absent, which those commands report as `absent`.
+ */
+export async function writeModuleHealth(
+  run: (a: { command: string; args: string[] }) => Promise<Any>,
+  boardDir: string | undefined,
+  name: string,
+  health: { state: 'loaded' | 'refused'; reason?: string; version?: string },
+): Promise<void> {
+  const file = `${boardDir ?? '.ai-sdlc/dispatch'}/handoff/module-${name}.json`;
+  const body = JSON.stringify({ ...health, at: new Date().toISOString() });
+  await safe(() => run({ command: NODE, args: ['-e', WRITE_SCRIPT, file, body] }));
 }
 
 const EVENT_LIMIT = 10;
@@ -204,6 +228,12 @@ export async function tick(p: DispatchPorts, state: DispatchState): Promise<void
   if (state.ticking) return;
   state.ticking = true;
   try {
+    if (state.sessionName) {
+      await writeModuleHealth(p.runProcess, state.boardDir, state.sessionName, {
+        state: 'loaded',
+        ...(state.hostVersion ? { version: state.hostVersion } : {}),
+      });
+    }
     const rotation = await rotateRequested(p, state);
     for (const name of rotation.forward) {
       const sent = await safe(() => p.send({ to: name, text: 'rotate' }));

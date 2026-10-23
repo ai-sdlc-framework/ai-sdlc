@@ -1294,6 +1294,53 @@ export function checkCiQueue(ctx: DoctorRunContext): DoctorCheckResult[] {
 }
 
 /**
+ * AISDLC-1061: the dispatch host's hierarchy hooks module must report `loaded` in
+ * `<board>/handoff/module-<name>.json`, refreshed every tick (30 s). A refused, absent or stale
+ * module means no ticks, wakes or rotations while `status` shows every session healthy.
+ */
+export function checkHierarchyModule(ctx: DoctorRunContext): DoctorCheckResult[] {
+  const board = join(ctx.projectDir, '.ai-sdlc', 'dispatch');
+  const raw = ctx.adapters.readFile(join(board, 'hierarchy.json'));
+  if (raw === null) return [];
+  let sessions: unknown;
+  try {
+    sessions = (JSON.parse(raw) as { sessions?: unknown }).sessions;
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(sessions)) return [];
+  const bad: string[] = [];
+  for (const e of sessions as Array<Record<string, unknown>>) {
+    if (e.role !== 'operator-dispatch' || e.status !== 'running') continue;
+    if (typeof e.name !== 'string') continue;
+    let h: { state?: unknown; reason?: unknown; at?: unknown } = {};
+    try {
+      const text = ctx.adapters.readFile(join(board, 'handoff', `module-${e.name}.json`));
+      if (text !== null) h = JSON.parse(text) as typeof h;
+    } catch {
+      /* unreadable counts as absent */
+    }
+    const at = typeof h.at === 'string' ? Date.parse(h.at) : NaN;
+    const reason = typeof h.reason === 'string' && h.reason ? `: ${h.reason}` : '';
+    if (h.state === 'refused') bad.push(`${e.name} refused${reason}`);
+    else if (h.state !== 'loaded') bad.push(`${e.name} absent`);
+    else if (Number.isNaN(at) || clockNow().getTime() - at > 120_000)
+      bad.push(`${e.name} stale (no heartbeat)`);
+  }
+  if (bad.length === 0) return [];
+  return [
+    {
+      id: 'hierarchy-module',
+      severity: 'fail',
+      title: `the dispatch host's hierarchy hooks module is not loaded, so there are no ticks, wakes or rotations: ${bad.join('; ')}`,
+      remediation:
+        "Fix the module error (see docs/operations/cli-hierarchy.md, 'Module absent'), rebuild, then run `cli-hierarchy down --role operator-dispatch` and `cli-hierarchy up`.",
+      anonymizableEvidence: { affectedCount: bad.length },
+    },
+  ];
+}
+
+/**
  * AISDLC-791: a running hierarchy session must have been launched with
  * `AI_SDLC_HIERARCHY_SESSION=<name>` and `AI_SDLC_HIERARCHY_ROLE=<role>`: the
  * lease-push hook binds an executor by them, and a bare launch (an older build's
@@ -2767,6 +2814,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     description:
       'Running hierarchy sessions whose tmux start command lacks the AI_SDLC_HIERARCHY_SESSION/ROLE launch env the lease-push hook binds executors by (AISDLC-791).',
     run: checkHierarchyLaunchEnv,
+  },
+  {
+    id: 'hierarchy-module',
+    description:
+      "The dispatch host's hierarchy hooks module reports loaded with a fresh heartbeat; a refused, absent or stale module means no ticks (AISDLC-1061).",
+    run: checkHierarchyModule,
   },
   {
     id: 'stale-repo-build',

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1061
 title: 'cli-hierarchy status shows each session hooks-module state and up fails loudly when the dispatch host has no module, so an inert hierarchy is visible in one line'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-23'
 labels:

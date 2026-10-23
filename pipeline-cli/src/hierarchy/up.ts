@@ -17,6 +17,7 @@ import { findStartedSession, readSessionRegistry } from './registry.js';
 import { checkCrossSessionInbound, evaluateResourceGate, readSettingsView } from './preflight.js';
 import { isLegacyLayoutEntry, readRosterChecked, writeRoster } from './roster.js';
 import { inspectVscodeTasks, syncVscodeTasks } from './terminals.js';
+import { assertDispatchModuleLoaded } from './module-health.js';
 import {
   hasSession,
   markSessionOwned,
@@ -84,6 +85,8 @@ export interface UpOptions {
   node?: string;
   /** Rebuild a stale or missing repo build (`--rebuild`) instead of refusing to launch. */
   rebuild?: boolean;
+  /** End with the dispatch-host module check (the CLI sets this unless `--no-module-check`). */
+  verifyModule?: boolean;
 }
 
 /** The one command that rebuilds the repo's own pipeline-cli. */
@@ -586,6 +589,11 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
     } catch (err) {
       deps.log(`warning: webhook receiver not started: ${(err as Error).message}`);
     }
+  }
+
+  if (opts.verifyModule) {
+    const hosts = roster.sessions.filter((e) => e.role === 'operator-dispatch');
+    if (hosts.length > 0) await assertDispatchModuleLoaded(deps, hosts);
   }
 
   let attachExitCode: number | undefined;

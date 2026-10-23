@@ -133,6 +133,27 @@ describe('runHierarchyCli', () => {
     expect(logs.some((l) => l.includes("not stopping 'executor-alpha'"))).toBe(true);
   });
 
+  it('up exits 1 naming the module state when the dispatch host never reports loaded (AISDLC-1061)', async () => {
+    writeFileSync(
+      path.join(tmp, 'settings.json'),
+      JSON.stringify({ crossSessionInbound: 'accept' }),
+    );
+    let started = false;
+    const run: CommandRunner = (_f, args) => {
+      if (args[0] === 'new-session') started = true;
+      if (args[0] === 'has-session') return { status: started ? 0 : 1, stdout: '', stderr: '' };
+      if (args[0] === 'display-message') return { status: 0, stdout: '%1 4242\n', stderr: '' };
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const code = await runHierarchyCli(
+      ['up', '--executors', '0', '--no-planner', '--no-vscode-tasks'],
+      overrides({ run, env: {}, cwd: path.join(tmp, 'repo') }),
+    );
+    expect(code).toBe(1);
+    expect(String(err.mock.calls[0]?.[0])).toContain('MODULE absent');
+  });
+
   it('up --attach returns the exit code of the attach', async () => {
     writeFileSync(
       path.join(tmp, 'settings.json'),
@@ -148,7 +169,7 @@ describe('runHierarchyCli', () => {
     };
     const attached: string[][] = [];
     const code = await runHierarchyCli(
-      ['up', '--executors', '0', '--no-planner', '--attach'],
+      ['up', '--executors', '0', '--no-planner', '--attach', '--no-module-check'],
       overrides({
         run,
         env: {},
@@ -187,6 +208,7 @@ describe('runHierarchyCli', () => {
         'default',
         '--allow-planner-bypass',
         '--no-vscode-tasks',
+        '--no-module-check',
       ],
       overrides({ run, env: {}, cwd: path.join(tmp, 'repo') }),
     );
