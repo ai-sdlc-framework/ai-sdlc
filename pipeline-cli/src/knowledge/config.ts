@@ -46,3 +46,31 @@ export function loadKnowledgeConfig(projectRoot: string): KnowledgeConfig {
   config.clientIdentifiers = stringList(classification?.clientIdentifiers);
   return config;
 }
+
+export const DEFAULT_RETRIEVAL_ADAPTER = 'sqlite';
+export const DEFAULT_RETRIEVAL_INDEX_PATH = '.ai-sdlc/context-index.db';
+
+export interface RetrievalConfig {
+  adapter: string;
+  indexPath: string;
+}
+
+/** Reads `retrieval.adapter` and `retrieval.indexPath` (RFC-0053 Configuration). */
+export function loadRetrievalConfig(projectRoot: string): RetrievalConfig {
+  const config: RetrievalConfig = {
+    adapter: DEFAULT_RETRIEVAL_ADAPTER,
+    indexPath: DEFAULT_RETRIEVAL_INDEX_PATH,
+  };
+  const file = join(projectRoot, CONTEXT_CONFIG_PATH);
+  if (!existsSync(file)) return config;
+  const doc = yaml.load(readFileSync(file, 'utf-8'), { schema: yaml.JSON_SCHEMA });
+  const retrieval = (doc as { retrieval?: Record<string, unknown> } | null)?.retrieval;
+  if (!retrieval || typeof retrieval !== 'object') return config;
+  if (typeof retrieval.adapter === 'string' && retrieval.adapter !== '') {
+    config.adapter = retrieval.adapter;
+  }
+  if (typeof retrieval.indexPath === 'string' && retrieval.indexPath !== '') {
+    config.indexPath = retrieval.indexPath;
+  }
+  return config;
+}

@@ -285,6 +285,9 @@ importers:
       '@ai-sdlc/reference':
         specifier: workspace:*
         version: link:../reference
+      better-sqlite3:
+        specifier: ^13.0.3
+        version: 13.0.3
       ink:
         specifier: ^8.0.0
         version: 8.0.0(@types/react@19.3.0)(react@19.3.0)
@@ -307,6 +310,9 @@ importers:
         specifier: ^4.0.0
         version: 4.6.7
     devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^7.6.0
+        version: 7.6.13
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5

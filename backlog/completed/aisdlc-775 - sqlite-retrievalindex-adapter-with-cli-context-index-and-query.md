@@ -2,7 +2,7 @@
 id: AISDLC-775
 title: >-
   sqlite RetrievalIndex adapter with cli-context index and query
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-09'
 labels:
@@ -31,11 +31,11 @@ Sequencing: depends on the knowledge store task (AISDLC-773) in `dependencies:`.
 
 ## Acceptance Criteria
 
-- [ ] `RetrievalIndex` interface and SQLite implementation exist with FTS5, vector and edges tables (test).
-- [ ] `cli-context index` rebuilds the index from entries on disk; deleting the index file and rebuilding returns identical query results (test).
-- [ ] Keyword and vector results are fused with reciprocal rank fusion; a fixture shows a document found by only one signal still ranks (test).
-- [ ] `cli-context query` returns entry ids, contentHash and citations, honors `--budget` and `--min-score`, and prefers the head of a `supersedes` chain (test).
-- [ ] `cli-context query --session <id>` omits entries already recorded as loaded for that session unless the contentHash changed (test).
-- [ ] A benchmark test shows p95 query latency under 200 ms at 10K entries.
-- [ ] The index path is gitignored and `retrieval.adapter` and `retrieval.indexPath` are read from `.ai-sdlc/context.yaml` (test).
-- [ ] Selecting `retrieval.adapter: enterprise` exits non-zero with a message that the adapter is declared but not implemented (test).
+- [x] `RetrievalIndex` interface and SQLite implementation exist with FTS5, vector and edges tables (test).
+- [x] `cli-context index` rebuilds the index from entries on disk; deleting the index file and rebuilding returns identical query results (test).
+- [x] Keyword and vector results are fused with reciprocal rank fusion; a fixture shows a document found by only one signal still ranks (test).
+- [x] `cli-context query` returns entry ids, contentHash and citations, honors `--budget` and `--min-score`, and prefers the head of a `supersedes` chain (test).
+- [x] `cli-context query --session <id>` omits entries already recorded as loaded for that session unless the contentHash changed (test).
+- [x] A benchmark test shows p95 query latency under 200 ms at 10K entries.
+- [x] The index path is gitignored and `retrieval.adapter` and `retrieval.indexPath` are read from `.ai-sdlc/context.yaml` (test).
+- [x] Selecting `retrieval.adapter: enterprise` exits non-zero with a message that the adapter is declared but not implemented (test).
