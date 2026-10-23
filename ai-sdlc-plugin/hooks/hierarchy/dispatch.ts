@@ -171,6 +171,37 @@ export async function refreshPane(p: DispatchPorts, state: DispatchState): Promi
   return status;
 }
 
+export const REFRESH_TIMEOUT_MS = 20_000;
+
+/** Run `fn`; resolve `ok` or the failure reason. Never throws. */
+export async function attempt(fn: () => Promise<Any> | Any): Promise<string> {
+  try {
+    await fn();
+    return 'ok';
+  } catch (err) {
+    return String((err as Any)?.message ?? err ?? 'rejected');
+  }
+}
+
+/** `refreshPane` bounded by a timeout so a hung `cli-hierarchy status` cannot wedge the pane. */
+export async function refreshPaneBounded(
+  p: DispatchPorts,
+  state: DispatchState,
+  ms: number = REFRESH_TIMEOUT_MS,
+): Promise<string> {
+  let timer: Any;
+  const limit = new Promise<string>((resolve) => {
+    timer = setTimeout(() => resolve(`timed out after ${ms} ms`), ms);
+  });
+  const work = attempt(async () => {
+    const status = await refreshPane(p, state);
+    if (status == null) throw new Error('status unavailable');
+  });
+  const r = await Promise.race([work, limit]);
+  clearTimeout(timer);
+  return r;
+}
+
 /** Wake one executor by roster name. The executor module consumes `enqueue ...` from the dispatch session. */
 export async function wake(p: DispatchPorts, name: string, taskId: string): Promise<boolean> {
   const r = await safe(() => p.send({ to: name, text: `enqueue ${taskId}` }));

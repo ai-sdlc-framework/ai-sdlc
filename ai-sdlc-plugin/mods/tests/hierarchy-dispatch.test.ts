@@ -93,6 +93,51 @@ const sends = (s: ReturnType<typeof setup>) =>
 const submits = (s: ReturnType<typeof setup>) =>
   s.$.prompt.submit.mock.calls.filter((c: any[]) => c[0]?.text);
 
+const flush = async () => {
+  for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+};
+
+describe('dispatch registration order (AISDLC-1064)', () => {
+  it('keeps the tick registered and running when ui.open never resolves, logging each step in order', async () => {
+    const s = setup();
+    s.$.ui.open = vi.fn(() => new Promise(() => {}));
+    await s.start();
+    await flush();
+    expect(s.$.clock.every).toHaveBeenCalledWith(expect.objectContaining({ ms: 30000 }));
+    expect(s.runs.some((a) => a[1] === 'tick')).toBe(true);
+    const log = (s.kv.get('hierarchy/log') as string[]).join('\n');
+    const at = (t: string) => log.indexOf(t);
+    expect(at('tick registered every 30000')).toBeGreaterThan(at('identity'));
+    expect(at('first tick ran at')).toBeGreaterThan(at('tick registered'));
+    expect(at('refreshPane ok')).toBeGreaterThan(-1);
+    expect(log).not.toContain('ui.open ok');
+    expect(s.kv.get('hierarchy/dispatch-board')).toBeTruthy();
+  }, 15000);
+
+  it('logs a rejecting store.set and still completes registration', async () => {
+    const s = setup();
+    s.$.store.set = async () => {
+      throw new Error('disk full');
+    };
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await s.start();
+    await flush();
+    expect(s.$.clock.every).toHaveBeenCalled();
+    expect(err.mock.calls.flat().join('\n')).toContain('tick registered every');
+    err.mockRestore();
+  });
+
+  it('logs a failed ui.open and a hung status call without blocking', async () => {
+    const s = setup();
+    s.$.ui.open = vi.fn(async () => {
+      throw new Error('no pane');
+    });
+    await s.start();
+    await flush();
+    expect((s.kv.get('hierarchy/log') as string[]).join('\n')).toContain('ui.open failed no pane');
+  });
+});
+
 describe('dispatch host (AISDLC-1035)', () => {
   it('arms one timer, opens the pane, and never submits a prompt over a simulated hour', async () => {
     const s = setup();

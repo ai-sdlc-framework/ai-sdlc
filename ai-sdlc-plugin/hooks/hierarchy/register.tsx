@@ -21,7 +21,8 @@ import {
   DISPATCH_PRIMITIVES,
   BOARD_KEY,
   newDispatchState,
-  refreshPane,
+  attempt,
+  refreshPaneBounded,
   dispatchSessionMeasure,
   dispatchSessionReceive,
   dispatchUiRender,
@@ -184,23 +185,6 @@ export const register = (on: Any, options?: Any): void => {
       if (versionText) dispatch.hostVersion = versionText;
       await health({ state: 'loaded' });
       const tickMs = Number(options?.tickMs) > 0 ? Number(options.tickMs) : DEFAULT_TICK_MS;
-      await safe(() => $.ui.open({ id: 'board', title: 'Dispatch board' }));
-      await safe(() =>
-        $.clock.every({
-          ms: tickMs,
-          run: async () => {
-            const dp: DispatchPorts = {
-              storeGet: (k) => $.store.get(k),
-              storeSet: (k, v) => $.store.set(k, v),
-              runCommand: (a) => $.command.run(a),
-              runProcess: (a) => $.process.run(a),
-              send: (a) => $.session.send(a),
-              uiOpen: (a) => $.ui.open(a),
-            };
-            await tick(dp, dispatch);
-          },
-        }),
-      );
       const dp: DispatchPorts = {
         storeGet: (k) => $.store.get(k),
         storeSet: (k, v) => $.store.set(k, v),
@@ -209,10 +193,33 @@ export const register = (on: Any, options?: Any): void => {
         send: (a) => $.session.send(a),
         uiOpen: (a) => $.ui.open(a),
       };
+      // AISDLC-1064: the tick is the function, the pane is a view. Register the timer before any UI or
+      // status call, log every step, and never await a primitive that can hang on the registration path.
+      let firstTick = true;
+      const run = async (): Promise<void> => {
+        if (firstTick) {
+          firstTick = false;
+          await log(p, `first tick ran at ${new Date().toISOString()}`);
+        }
+        await tick(dp, dispatch);
+      };
+      const timer = await attempt(() => $.clock.every({ ms: tickMs, run }));
+      await log(
+        p,
+        timer === 'ok' ? `tick registered every ${tickMs}` : `tick registration failed ${timer}`,
+      );
       // A rotation keeps the last pane in $.store; show it until the first tick replaces it.
       const kept = (await safe(() => dp.storeGet(BOARD_KEY))).value as string[] | undefined;
       if (Array.isArray(kept)) dispatch.pane = kept;
-      await refreshPane(dp, dispatch);
+      // Fire and log: a UI open or a status call that never settles must not block the registration path.
+      void attempt(() => $.ui.open({ id: 'board', title: 'Dispatch board' })).then((r) =>
+        log(p, r === 'ok' ? 'ui.open ok' : `ui.open failed ${r}`),
+      );
+      void refreshPaneBounded(dp, dispatch).then((r) =>
+        log(p, r === 'ok' ? 'refreshPane ok' : `refreshPane failed ${r}`),
+      );
+      // The first tick runs at once so a pending rotate request is consumed within seconds of `up`.
+      if (timer === 'ok') void attempt(run);
       return next(e);
     }
     if (role === 'planner') {
@@ -223,6 +230,7 @@ export const register = (on: Any, options?: Any): void => {
       router.current = 'planner';
       planner.enabled = true;
       if (planner.resumePending) await resumeAfterClear(p, planner);
+      await log(p, 'registered role=planner');
       return next(e);
     }
     if (role !== 'executor') return next(e);
@@ -232,6 +240,7 @@ export const register = (on: Any, options?: Any): void => {
     state.enabled = true;
     // INTERIM: if a host fires session.start after a mod-run clear, resume from here as well.
     if (state.resumePending) await resumeAfterClear(p, state);
+    await log(p, 'registered role=executor');
     return next(e);
   });
 };

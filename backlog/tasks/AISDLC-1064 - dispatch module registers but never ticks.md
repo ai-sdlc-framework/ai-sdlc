@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1064
 title: 'hierarchy dispatch module registers but never ticks: register the tick timer before any awaited UI or status call and log every registration step'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-23'
 labels:
