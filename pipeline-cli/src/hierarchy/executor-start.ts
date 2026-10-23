@@ -6,20 +6,17 @@
  *     claude-process roster entry, and it must be an executor. The name is used
  *     exactly as the roster has it.
  *  2. Check the working directory is the repository of the roster's project.
- *  3. Check the instructing sender is the roster's dispatch session (`check-sender`,
- *     AISDLC-764): it always runs, so it cannot be skipped. The sender pid or ref the
- *     harness reports is passed in; without either the check accepts and logs a loud UNCHECKED START warning.
- *  4. When the board is held (`cli-hierarchy hold`), print the reason and claim nothing.
- *     Otherwise claim the next eligible task under that name, blocking up to `waitSec`
- *     seconds (`cli-dispatch claim --wait`).
- *  5. Write `inflight/<task>.state.json` naming the worker, before returning and so
+ *  3. When the board is held (`cli-hierarchy hold`), print the reason and claim nothing.
+ *     Otherwise claim the next eligible task under that name, once and without waiting: the
+ *     hierarchy hooks module wakes an idle executor on an enqueue message (RFC-0058, AISDLC-1034).
+ *     The board claim is the authority (RFC-0051): no sender flag and no start token.
+ *  4. Write `inflight/<task>.state.json` naming the worker, before returning and so
  *     before any model call: the lease-push hook binds an executor to its task by
  *     that heartbeat, so it must hold from the first push. A write failure throws.
- *  6. Run the lease-push preflight (AISDLC-798) on the new claim and print what the
+ *  5. Run the lease-push preflight (AISDLC-798) on the new claim and print what the
  *     PreToolUse hook would refuse later (missing launch env, a second claim, a missing
  *     heartbeat), so a misconfigured executor is caught at claim time.
  *
- * Later instruction messages are still checked with `cli-hierarchy check-sender`.
  */
 
 import { now } from '../clock.js';
@@ -30,18 +27,10 @@ import type { DispatchManifest } from '../dispatch/types.js';
 import { resolveCaller, type IdentityDeps } from './caller-identity.js';
 import { claimPreflight, type LeasePreflight } from './lease-preflight.js';
 import { readHold } from './hold.js';
-import {
-  checkDispatchSender,
-  type SenderCheck,
-  checkRepoMatch,
-  rosterProject,
-} from './peer-guard.js';
+import { checkRepoMatch, rosterProject } from './peer-guard.js';
 import { readRosterChecked } from './roster.js';
-import { clearStartToken, verifyStartToken } from './start-token.js';
 import type { GitRunner } from './trusted-root.js';
 
-/** Default seconds an idle executor blocks on the board before it hibernates. */
-export const DEFAULT_EXECUTOR_WAIT_SEC = 1500;
 /** Seconds an idle executor hibernates when it cannot clear itself (`emptyQueueHibernateSec`). */
 export const DEFAULT_EMPTY_QUEUE_HIBERNATE_SEC = 1800;
 
@@ -49,19 +38,13 @@ export const DEFAULT_EMPTY_QUEUE_HIBERNATE_SEC = 1800;
 export interface ExecutorStartOptions {
   boardDir: string;
   cwd: string;
-  /** Seconds to wait for an eligible task (default {@link DEFAULT_EXECUTOR_WAIT_SEC}). */
-  waitSec?: number;
-  /** Pid the harness reports for the sender of the instruction (check-sender). */
-  senderPid?: number;
-  /** Session ref the harness reports for the sender of the instruction (check-sender). */
-  senderRef?: string;
 }
 
 /** Collaborators; every one is replaceable in tests. */
 export interface ExecutorStartDeps {
   identity: IdentityDeps;
   repoGit?: GitRunner;
-  /** Replaces the blocking claim (tests). */
+  /** Replaces the claim (tests). */
   claim?: typeof claimWithWait;
   /** Replaces the heartbeat write (tests). */
   heartbeat?: typeof writeHeartbeat;
@@ -78,7 +61,7 @@ export interface ExecutorStartResult {
   project: string;
   /** The dispatch session's roster name, or '' when there is none. */
   dispatch: string;
-  /** The claimed task, or null when the wait lapsed with nothing eligible or the board is held. */
+  /** The claimed task, or null when nothing is eligible or the board is held. */
   taskId: string | null;
   /** The hold reason when the board is held (AISDLC-899); nothing was claimed. */
   held?: string;
@@ -112,27 +95,6 @@ export async function executorStart(
     ...(deps.repoGit ? { git: deps.repoGit } : {}),
   });
   if (!repo.ok) throw new Error(repo.reason);
-  const dispatchPid = roster.sessions.find(
-    (s) => s.role === 'operator-dispatch' && s.status === 'running',
-  )?.pid;
-  const flagged = opts.senderPid !== undefined || opts.senderRef !== undefined;
-  // A start typed by `cli-hierarchy clear` carries a token instead of a sender flag (AISDLC-1028).
-  const tokenOk =
-    !flagged && verifyStartToken(opts.boardDir, self.name, dispatchPid, now().getTime());
-  const sender: SenderCheck = tokenOk
-    ? { ok: true, name: dispatch }
-    : checkDispatchSender(roster.sessions, {
-        ...(opts.senderPid === undefined ? {} : { pid: opts.senderPid }),
-        ...(opts.senderRef === undefined ? {} : { ref: opts.senderRef }),
-      });
-  if (!sender.ok) throw new Error(sender.reason);
-  if (sender.warning !== undefined) {
-    // No claim: the start cannot say who issued it (AISDLC-1025).
-    throw new Error(
-      `unchecked-start: no --sender-pid or --sender-ref was given and there is no valid start token, so the sender is unverified; nothing claimed. A start is verified either by a clear (cli-hierarchy clear writes the token) or by the sender flag the harness reports. Report 'unchecked-start' to ${dispatch || 'dispatch'} and pass the pid or ref the harness reports.`,
-    );
-  }
-
   // The identity line is how `cli-hierarchy clear` sees an executor report back.
   deps.log?.(
     `[executor] I am '${self.name}' (project '${project.project}'); dispatch session is '${dispatch || 'none'}'`,
@@ -143,7 +105,7 @@ export async function executorStart(
     return { name: self.name, project: project.project, dispatch, taskId: null, held: hold.reason };
   }
   const result = await (deps.claim ?? claimWithWait)(opts.boardDir, 'in-session-agent', {
-    waitSec: opts.waitSec ?? DEFAULT_EXECUTOR_WAIT_SEC,
+    waitSec: 0,
     workerId: self.name,
   });
   // A resumed task (AISDLC-738) carries a feedback note: surface it before the
@@ -154,7 +116,6 @@ export async function executorStart(
     );
   }
   if (result.claimed && result.manifest) {
-    clearStartToken(opts.boardDir, self.name);
     const stamp = now().toISOString();
     try {
       (deps.heartbeat ?? writeHeartbeat)(opts.boardDir, {

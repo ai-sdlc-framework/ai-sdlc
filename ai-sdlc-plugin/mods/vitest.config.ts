@@ -25,7 +25,8 @@ export default defineConfig({
       include: [
         'context-meter/hooks/**/*.ts',
         'context-meter/hooks/**/*.tsx',
-        '../hooks/hierarchy-spike/hooks/**/*.ts',
+        '../hooks/hierarchy/**/*.ts',
+        '../hooks/hierarchy/**/*.tsx',
       ],
       thresholds: { lines: 90 },
     },

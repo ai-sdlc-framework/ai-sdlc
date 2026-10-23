@@ -1,6 +1,8 @@
 ---
 id: AISDLC-1050
-title: 'RFC-0058 phase 0: the hierarchy spike matches the inner message text, not the envelope, and the live protocol is rerun with measured numbers'
+title: >-
+  RFC-0058 phase 0: the hierarchy spike matches the inner message text, not the
+  envelope, and the live protocol is rerun with measured numbers
 status: Done
 assignee: []
 created_date: '2026-10-22'
@@ -11,10 +13,22 @@ labels:
 dependencies: []
 references:
   - spec/rfcs/RFC-0058-session-hierarchy-on-mods.md
-  - ai-sdlc-plugin/hooks/hierarchy-spike/hooks/register.ts
-  - ai-sdlc-plugin/hooks/hierarchy-spike/README.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/hooks/hierarchy-spike/hooks/register.ts
+    resolution: flagged
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/hooks/hierarchy-spike/README.md
+    resolution: flagged
+drift_checked: '2026-10-23'
 ---
 
 ## Description

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1034
 title: 'Hierarchy mod phase 1: executor role (consumed enqueue, prompt.submit wake, clear > compact > relaunch rotation); executor-start loses --wait, the token and sender flags'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22'
 labels:
@@ -16,7 +16,6 @@ references:
   - ai-sdlc-plugin/.claude-plugin/plugin.json
   - ai-sdlc-plugin/commands/executor.md
   - pipeline-cli/src/hierarchy/executor-start.ts
-  - pipeline-cli/src/hierarchy/start-token.ts
 priority: high
 dispatchable: true
 ---
@@ -42,10 +41,40 @@ RFC-0058 phase 1 (Signed Off 2026-10-22). The `hierarchy` hooks module ships in 
 
 ## Acceptance Criteria
 
-- [ ] `claude plugin validate` and `claude plugin test` pass; with no role set the module registers no hook (test).
-- [ ] A version or primitive miss registers nothing and logs the missing primitive and the floor (test per probed primitive).
-- [ ] An enqueue message from the dispatch roster name is consumed (no model turn) and starts `/ai-sdlc:executor` once idle (test with a fake `$.prompt.submit`).
-- [ ] Rotation runs handoff write, then clear with `$.store` carrying role, resume command and last reply; on `{ drop }` it compacts; on a second failure it ends the session (three tests).
-- [ ] Rotation never fires mid-task: a `session.measure` over threshold during a task waits for the task's last `turn.complete` (test).
-- [ ] `executor-start` has no `--wait`, token or sender flag; `start-token.ts` is deleted; `pnpm dark-code:check` passes without baseline growth.
-- [ ] `docs/operations/cli-hierarchy.md` describes the executor role of the module and the removed flags.
+- [x] `claude plugin validate` and `claude plugin test` pass; with no role set the module registers no hook (test).
+- [x] A version or primitive miss registers nothing and logs the missing primitive and the floor (test per probed primitive).
+- [x] An enqueue message from the dispatch roster name is consumed (no model turn) and starts `/ai-sdlc:executor` once idle (test with a fake `$.prompt.submit`).
+- [x] Rotation runs handoff write, then clear with `$.store` carrying role, resume command and last reply; on `{ drop }` it compacts; on a second failure it ends the session (three tests).
+- [x] Rotation never fires mid-task: a `session.measure` over threshold during a task waits for the task's last `turn.complete` (test).
+- [x] `executor-start` has no `--wait`, token or sender flag; `start-token.ts` is deleted; `pnpm dark-code:check` passes without baseline growth.
+- [x] `docs/operations/cli-hierarchy.md` describes the executor role of the module and the removed flags.
+
+## Final Summary
+
+## Summary
+The `hierarchy` hooks module ships in the plugin with the executor role: a role-gated `session.start` that applies the version floor and primitive probes, consumes dispatch enqueue messages and wakes the executor with `$.prompt.submit`, and rotates (handoff, clear with `$.store`, compact fallback, session end) after the verdict or at 120k tokens, never mid-task. `executor-start` claims once and lost `--wait`, the sender flags and the start token; `start-token.ts` and the spike module are deleted.
+
+## Changes
+- ai-sdlc-plugin/hooks/hooks.json
+- ai-sdlc-plugin/hooks/hierarchy/register.tsx
+- ai-sdlc-plugin/hooks/hierarchy/executor.ts
+- ai-sdlc-plugin/mods/tests/hierarchy.test.ts
+- ai-sdlc-plugin/mods/vitest.config.ts
+- ai-sdlc-plugin/commands/executor.md
+- ai-sdlc-plugin/commands/executor.test.mjs
+- pipeline-cli/src/hierarchy/executor-start.ts
+- pipeline-cli/src/hierarchy/clear.ts
+- pipeline-cli/src/cli/hierarchy.ts
+- docs/operations/cli-hierarchy.md
+
+## Design decisions
+`claude plugin validate` passes for the plugin; the tests run under Vitest because the `claude plugin test` kit is undocumented (as in the phase 0 spike). The validator refuses `$` passed around or read as a value, so primitives are probed by a call with an empty payload and the handlers build closures over `$.noun.verb(...)`. The role is read through `$.env.get` (interim: a module has no process or fs). The end-of-task signal is a reply ending in `[executor] verdict reported` (or `[executor] idle`), which `executor.md` now prints. Floor is 2.1.307, the build the phase 0 spike passed on.
+
+## Verification
+- `pnpm build` — passed
+- `pnpm test` — passed
+- `pnpm lint` — passed
+- `pnpm format:check` — passed
+
+## Follow-up
+(none)

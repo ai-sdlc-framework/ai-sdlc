@@ -320,7 +320,9 @@ RFC deletes.
   text: '/hier-ping' })`; record whether the clear runs, the mod reloads, `$.store`
   survives and the prompt starts a turn once idle. Measure tokens and seconds for a
   mod-handled message against a model-relayed SendMessage. Answers OQ-1 and feeds the
-  measured saving into this RFC before Ready for Review.
+  measured saving into this RFC before Ready for Review. Measured (live run, PR #1946):
+  about 2.0 s and 66 output tokens saved per hook-consumed message versus the model
+  relay (hook path median 7.5 ms and 0 model tokens; model path median 2.05 s).
 - **Phase 1, executor wake and rotation.** Hierarchy module with the executor role:
   enqueue message consumed, `$.prompt.submit` wake, in-session clear or compact,
   `session.measure` rotation. `executor-start` loses `--wait`, the token and the

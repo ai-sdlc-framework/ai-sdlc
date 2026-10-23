@@ -37,22 +37,22 @@ describe('executor command', () => {
     assert.ok(raw.split('\n').length < 165, `executor.md has ${raw.split('\n').length} lines`);
   });
 
-  it('starts with one executor-start call that blocks on the board', () => {
-    assert.match(body, /cli-hierarchy\.mjs" executor-start[^\n]*--wait 1500/);
-    assert.match(body, /run_in_background: true/);
-    assert.match(body, /600 s foreground\s+cap/);
+  it('starts with one executor-start call that claims once, with no wait, token or sender flag', () => {
+    assert.match(body, /cli-hierarchy\.mjs" executor-start --board-dir "\$BOARD_DIR"\n/);
+    assert.doesNotMatch(body, /executor-start[^\n]*--wait/);
+    assert.doesNotMatch(body, /executor-start[^\n]*--sender/);
+    assert.doesNotMatch(body, /start token|unchecked-start/);
     assert.match(body, /collision suffix/);
-    assert.match(body, /with no model calls/);
     assert.doesNotMatch(body, /hierarchy\.json/);
     assert.doesNotMatch(body, /cli-dispatch\.mjs" claim/);
   });
 
-  it('keeps its context and re-issues the blocking wait when nothing is eligible (AISDLC-815)', () => {
+  it('keeps its context and waits for the module wake when nothing is eligible (AISDLC-815, AISDLC-1034)', () => {
     assert.match(body, /"taskId": null/);
     assert.doesNotMatch(body, /clear --self --resume-after/);
-    assert.match(body, /Do not clear and do not poll/);
-    assert.match(body, /re-issue the same `executor-start` call with `run_in_background: true`/);
-    assert.match(body, /--wait 1500/);
+    assert.match(body, /Do not clear, poll or wait/);
+    assert.match(body, /\[executor\] idle/);
+    assert.match(body, /\[executor\] verdict reported/);
     assert.match(body, /idle-backoff/);
     assert.match(body, /RESUMED TASK/);
     assert.match(body, /emptyQueueHibernateSec/);
@@ -111,8 +111,7 @@ describe('executor peer binding (project-scoped names)', () => {
 
   it('refuses a sender that is not its own dispatch session with one line', () => {
     assert.match(body, /cli-hierarchy\.mjs" check-sender/);
-    assert.match(body, /--sender-pid/);
-    assert.match(body, /--sender-ref/);
+    assert.match(body, /check-sender[^\n]*\n?[^\n]*--sender-pid/);
     assert.match(body, /whole reply is the single line `not my dispatch session`/);
     assert.match(body, /no claim, no worktree, no pull request/);
   });

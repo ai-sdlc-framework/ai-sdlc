@@ -122,38 +122,6 @@ afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 const capability = () => readCapabilityState(artifacts).find((r) => r.id === 'hierarchy.clear');
 
 describe('clearExecutor', () => {
-  describe('start token (AISDLC-1028)', () => {
-    const tokenFile = () => path.join(board, 'starts', 'executor-alpha.json');
-    const dispatch = entry({
-      role: 'operator-dispatch',
-      name: 'disp',
-      pid: 4000,
-      tmuxWindow: 'disp',
-      paneId: '%1',
-    });
-    const planner = entry({
-      role: 'planner',
-      name: 'plan',
-      pid: 4001,
-      tmuxWindow: 'plan',
-      paneId: '%2',
-    });
-
-    it('is written by the dispatch caller before the resume command is typed', async () => {
-      seedRoster(entry(), dispatch);
-      await clearExecutor({ executor: 'executor-alpha', settleMs: 500, workerId: 'disp' }, deps());
-      const token = JSON.parse(readFileSync(tokenFile(), 'utf-8'));
-      expect(token).toMatchObject({ issuerPid: 4000, issuerName: 'disp' });
-      expect(Number.isFinite(Date.parse(token.issuedAt))).toBe(true);
-    });
-
-    it('is not written by a planner caller', async () => {
-      seedRoster(entry(), planner);
-      await clearExecutor({ executor: 'executor-alpha', settleMs: 500, workerId: 'plan' }, deps());
-      expect(existsSync(tokenFile())).toBe(false);
-    });
-  });
-
   it('sends /clear, Enter, waits, then /ai-sdlc executor, Enter, to the executor pane', async () => {
     const result = await clearExecutor(
       { executor: 'executor-alpha', settleMs: 1000, pollIntervalMs: 250, taskId: 'AISDLC-1' },
@@ -176,7 +144,7 @@ describe('clearExecutor', () => {
     const blockedRun: CommandRunner = (file, args) => {
       const literal = args[args.indexOf('--') + 1];
       if (args[0] === 'send-keys' && args.includes('-l') && literal === '/ai-sdlc executor') {
-        screen += 'Bash(node cli-hierarchy.mjs executor-start --wait 1500)\n';
+        screen += 'Bash(node cli-hierarchy.mjs executor-start --board-dir /b)\n';
       }
       return base(file, args);
     };
@@ -187,7 +155,7 @@ describe('clearExecutor', () => {
     expect(result.resumed).toBe(true);
   });
 
-  it('does not count a bare mention of executor-start (no --wait) as reported back', async () => {
+  it('does not count a bare mention of executor-start (no --board-dir) as reported back', async () => {
     resumes = false;
     const base = run;
     const mentionRun: CommandRunner = (file, args) => {

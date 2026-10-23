@@ -1,6 +1,9 @@
 ---
 id: AISDLC-1051
-title: 'RFC-0058 phase 0: the hierarchy spike returns the host consumed shape, strips the escaped agent-message wrapper, and the live protocol finally measures a silent consume'
+title: >-
+  RFC-0058 phase 0: the hierarchy spike returns the host consumed shape, strips
+  the escaped agent-message wrapper, and the live protocol finally measures a
+  silent consume
 status: Done
 assignee: []
 created_date: '2026-10-22'
@@ -11,11 +14,28 @@ labels:
 dependencies: []
 references:
   - spec/rfcs/RFC-0058-session-hierarchy-on-mods.md
-  - ai-sdlc-plugin/hooks/hierarchy-spike/hooks/register.ts
-  - ai-sdlc-plugin/hooks/hierarchy-spike/README.md
-  - ai-sdlc-plugin/mods/tests/hierarchy-spike.test.ts
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/hooks/hierarchy-spike/hooks/register.ts
+    resolution: flagged
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/hooks/hierarchy-spike/README.md
+    resolution: flagged
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/mods/tests/hierarchy-spike.test.ts
+    resolution: flagged
+drift_checked: '2026-10-23'
 ---
 
 ## Description
