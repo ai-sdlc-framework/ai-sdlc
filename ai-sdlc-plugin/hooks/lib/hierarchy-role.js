@@ -266,7 +266,22 @@ function readHandoffText(self, { bin, boardDir, run = spawnSync }) {
   }
 }
 
+const BIN_NAME = 'cli-hierarchy.mjs';
+const PIPELINE_CLI_REL = join('node_modules', '@ai-sdlc', 'pipeline-cli', 'bin');
+
+/** Path of the `cli-hierarchy` binary: the env override, the plugin's own install, else the monorepo copy. */
+function resolveBin(env, pluginDir) {
+  const candidates = [];
+  if (env.PIPELINE_CLI_BIN) candidates.push(join(env.PIPELINE_CLI_BIN, BIN_NAME));
+  if (env.CLAUDE_PLUGIN_ROOT)
+    candidates.push(join(env.CLAUDE_PLUGIN_ROOT, PIPELINE_CLI_REL, BIN_NAME));
+  candidates.push(join(pluginDir, PIPELINE_CLI_REL, BIN_NAME));
+  candidates.push(join(pluginDir, '..', 'pipeline-cli', 'bin', BIN_NAME));
+  return candidates.find((c) => existsSync(c));
+}
+
 module.exports = {
+  resolveBin,
   readHandoffText,
   HANDOFF_MAX_CHARS,
   RESET_SOURCES,

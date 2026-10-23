@@ -42,8 +42,8 @@
  *     owns this roster's board; otherwise print why and exit 1.
  *   - `handoff write|read --role <planner|operator-dispatch|executor> [--name <n>]` — write
  *     (from board and catalog state) or read (regenerating when stale) a session's handoff file.
- *   - `auto-clear --transcript <path>` — Stop-hook entry: when the session's context is over
- *     its role threshold, refresh its handoff and schedule `clear --self`.
+ *   - `send --to <name> --text <message>` — message a roster session; refused with the reason when
+ *     `to` is not listed in this project's roster (AISDLC-1036).
  *   - `playbook --task <id> --action <step>` — run one named playbook step (AISDLC-918).
  *   - `route-decision --decision-id <id> --route operational|design --to <name>`
  *     — record that a decision was routed to a tier.
@@ -85,8 +85,6 @@ import {
   checkOwnWorktreeForOperator,
   clearExecutor,
   clearSelf,
-  clearWarned,
-  decideAutoClear,
   boundedHandoffView,
   readHandoff as readGeneratedHandoff,
   writeHandoff,
@@ -119,6 +117,7 @@ import {
   checkDispatchSender,
   checkRepoMatch,
   readRosterChecked,
+  sendToRoster,
   rosterProject,
   readParentHead,
   runDispatchTick,
@@ -181,7 +180,7 @@ Commands:
   route-decision  Record that a decision was routed to a tier
   playbook   Run one named playbook step for one task (playbook --task <id> --action <step>)
   handoff         Write or read a session's handoff file (handoff write|read --role <r>)
-  auto-clear      Clear this session when its context is over the role threshold (Stop hook)
+  send            Message a session listed in this project's roster; refuses any other name
   executor-start  Executor identity, repository check and a blocking claim, as one call
   check-sender    Exit 0 only when a message sender is this roster's dispatch session
   check-repo      Exit 0 only when the working directory is this roster's repository
@@ -299,10 +298,9 @@ Options for handoff:
                            --kind filed|commented|opened|closed|sent --url <url> [--summary <text>]
   --full                   read: print the whole file (default: block plus last 8000 chars of prose)
 
-Options for auto-clear:
-  --transcript <path>      Session transcript whose usage fields give the context size
-                           Thresholds: planner 150000, dispatch 120000, executor 120000 tokens;
-                           override with contextThresholds in <board-dir>/config.json
+Options for send:
+  --to <name>              Roster session name, as printed by status (refused when not listed)
+  --text <message>         One line to type into that session; plain text, no newline
 
 Options for playbook:
   --task <id>              Task whose failure record the step is run for
@@ -1092,59 +1090,26 @@ export async function runHierarchyCli(
         }
         return 0;
       }
-      case 'auto-clear': {
-        const transcript = flags.transcript;
-        if (!transcript || transcript === 'true') {
-          process.stderr.write('cli-hierarchy auto-clear: --transcript is required\n');
+      case 'send': {
+        const to = flags.to === 'true' ? '' : (flags.to ?? '');
+        const text = flags.text === 'true' ? '' : (flags.text ?? '');
+        if (!to || !text) {
+          process.stderr.write('cli-hierarchy send: --to and --text are required\n');
           return 2;
         }
-        const self = resolveCaller(
-          extras.identity ?? createSystemIdentity(deps.boardDir, extras.processLookup),
-        );
-        if (!self) {
-          deps.log(JSON.stringify({ action: 'none', reason: 'not a hierarchy session' }));
-          return 0;
+        const { roster } = readRosterChecked(deps.boardDir);
+        try {
+          sendToRoster(
+            roster.sessions,
+            to,
+            text,
+            extras.sendBrief ?? createTmuxBriefSender(deps.run),
+          );
+        } catch (err) {
+          process.stderr.write(`cli-hierarchy send: ${(err as Error).message}\n`);
+          return 1;
         }
-        const role = self.role as HierarchyRole;
-        const decision = decideAutoClear({
-          boardDir: deps.boardDir,
-          role,
-          name: self.name,
-          transcriptPath: transcript,
-          now: deps.now,
-        });
-        if (decision.action !== 'clear') {
-          deps.log(JSON.stringify(decision));
-          return 0;
-        }
-        const handoff = writeHandoff({
-          role,
-          name: self.name,
-          boardDir: deps.boardDir,
-          now: deps.now,
-        });
-        if (role === 'operator-dispatch') {
-          // The model-less host rotates through its hooks module, not by typed keystrokes (AISDLC-1035).
-          const file = requestDispatchRotate(deps.boardDir, self.name, deps.now());
-          clearWarned(deps.boardDir, self.name);
-          deps.log(JSON.stringify({ ...decision, handoff: handoff.file, rotateRequest: file }));
-          return 0;
-        }
-        const result = clearSelf(
-          {
-            self: self.name,
-            role,
-            ...(deps.env.TMUX_PANE ? { callerPane: deps.env.TMUX_PANE } : {}),
-          },
-          {
-            run: deps.run,
-            boardDir: deps.boardDir,
-            log: deps.log,
-            ...(extras.spawnDetached ? { spawnDetached: extras.spawnDetached } : {}),
-          },
-        );
-        clearWarned(deps.boardDir, self.name);
-        deps.log(JSON.stringify({ ...decision, handoff: handoff.file, scheduled: result }));
+        deps.log(JSON.stringify({ ok: true, sent: to }));
         return 0;
       }
       case 'route-decision': {

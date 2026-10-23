@@ -22,6 +22,8 @@ export const ROTATE_AT_TOKENS = 120_000;
 export const RESUME_COMMAND = 'ai-sdlc:executor';
 /** A carried rotation record older than this is stale (a clear that never reached a new session). */
 export const ROTATION_TTL_MS = 10 * 60 * 1000;
+/** Longest last reply carried into the planner's resume command arguments. */
+export const LAST_REPLY_MAX_CHARS = 4000;
 /** A task with no turn activity for this long is treated as ended, so a lost verdict cannot mute wakes. */
 export const ACTIVE_STALE_MS = 30 * 60 * 1000;
 /** Printed as the last line of a reply by the executor command (Step 5 / idle path). */
@@ -31,10 +33,28 @@ export const IDLE_MARKER = '[executor] idle';
 export const LOG_KEY = 'hierarchy/log';
 export const ROTATION_KEY = 'hierarchy/rotation';
 
-const HANDOFF_COMMAND = { command: 'ai-sdlc:hierarchy', args: 'handoff write --role executor' };
-export const SUMMARY_PROMPT =
-  'Summarise for the hierarchy executor: its role (executor), that it holds no task, the board ' +
-  'directory, and that its next step is /ai-sdlc:executor. Drop everything about the finished task.';
+/** What differs between the roles' rotations; the function that rotates is shared (RFC-0058 OQ-1). */
+export interface RotationPlan {
+  role: string;
+  /** Slash command run in the new session after the clear. */
+  resume: string;
+  /** `handoff write --role <role>`, run first. */
+  handoff: { command: string; args: string };
+  /** Summary prompt for the compact fallback. */
+  summary: string;
+  /** Carry the last reply into the resume command's arguments (the planner prints it after a clear). */
+  replyAsArgs?: boolean;
+}
+
+export const EXECUTOR_PLAN: RotationPlan = {
+  role: 'executor',
+  resume: RESUME_COMMAND,
+  handoff: { command: 'ai-sdlc:hierarchy', args: 'handoff write --role executor' },
+  summary:
+    'Summarise for the hierarchy executor: its role (executor), that it holds no task, the board ' +
+    'directory, and that its next step is /ai-sdlc:executor. Drop everything about the finished task.',
+};
+export const SUMMARY_PROMPT = EXECUTOR_PLAN.summary;
 
 /** The primitives the executor role uses; `session.measure` is an event, so its pull-side twin `usage` stands in. */
 export const PRIMITIVES = [
@@ -86,7 +106,7 @@ export async function exists(
 }
 
 /** A `{ drop }` result means the host refused the call. */
-function ran(r: { ok: boolean; value?: unknown }): boolean {
+export function ran(r: { ok: boolean; value?: unknown }): boolean {
   const v = r.value as Any;
   return r.ok && !(v && typeof v === 'object' && 'drop' in v);
 }
@@ -146,8 +166,8 @@ export function endsWithMarker(reply: string, marker: string): boolean {
   return reply.trimEnd().endsWith(marker);
 }
 
-const DISPATCH_NAME = /(?:^|-)operator-dispatch(?:-\d+)?$/;
-const STATUS_NOISE = /^(status|ack|ping)\b/i;
+export const DISPATCH_NAME = /(?:^|-)operator-dispatch(?:-\d+)?$/;
+export const STATUS_NOISE = /^(status|ack|ping)\b/i;
 
 /** Tokens in the context from a `session.measure` payload. */
 export function measuredTokens(e: Any): number {
@@ -182,14 +202,16 @@ export interface ExecutorState {
 export async function rotate(
   p: Ports,
   state: ExecutorState,
+  plan: RotationPlan = EXECUTOR_PLAN,
 ): Promise<'clear' | 'compact' | 'exit'> {
-  const handoff = await safe(() => p.runCommand(HANDOFF_COMMAND));
+  const handoff = await safe(() => p.runCommand(plan.handoff));
   if (!ran(handoff))
-    await log(p, 'handoff write was refused; the executor wrote its own at the verdict');
+    await log(p, `handoff write was refused; the ${plan.role} writes its own on resume`);
   await p.storeSet(ROTATION_KEY, {
-    role: 'executor',
-    resume: RESUME_COMMAND,
+    role: plan.role,
+    resume: plan.resume,
     lastReply: state.lastReply,
+    replyAsArgs: plan.replyAsArgs === true,
     at: Date.now(),
   });
   state.resumePending = true;
@@ -198,7 +220,7 @@ export async function rotate(
     await log(p, 'rotated with clear');
     return 'clear';
   }
-  if (ran(await safe(() => p.compact({ instructions: SUMMARY_PROMPT })))) {
+  if (ran(await safe(() => p.compact({ instructions: plan.summary })))) {
     await p.storeSet(ROTATION_KEY, null);
     state.resumePending = false;
     await log(p, 'clear refused; rotated with compact');
@@ -223,7 +245,11 @@ export async function resumeAfterClear(p: Ports, state: ExecutorState): Promise<
   await safe(() => p.storeSet(ROTATION_KEY, null));
   if (!carried?.resume || Date.now() - Number(carried.at ?? 0) > ROTATION_TTL_MS) return;
   state.lastReply = String(carried.lastReply ?? '');
-  const r = await safe(() => p.runCommand({ command: carried.resume }));
+  const resume: { command: string; args?: string } = { command: carried.resume };
+  if (carried.replyAsArgs && state.lastReply) {
+    resume.args = `last-reply: ${state.lastReply.slice(0, LAST_REPLY_MAX_CHARS)}`;
+  }
+  const r = await safe(() => p.runCommand(resume));
   if (ran(r)) state.active = true;
   else await log(p, `resume after clear refused: ${JSON.stringify(r.value ?? null)}`);
 }

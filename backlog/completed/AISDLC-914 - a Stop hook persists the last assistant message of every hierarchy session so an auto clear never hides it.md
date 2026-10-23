@@ -1,14 +1,42 @@
 ---
 id: AISDLC-914
-title: 'feat: a Stop hook persists the last assistant message of every hierarchy session to .claude/memory/LAST_MESSAGE.md so an auto clear never hides it'
+title: >-
+  feat: a Stop hook persists the last assistant message of every hierarchy
+  session to .claude/memory/LAST_MESSAGE.md so an auto clear never hides it
 status: Done
 assignee: []
 created_date: '2026-10-14'
-labels: [feature, plugin, hierarchy]
+labels:
+  - feature
+  - plugin
+  - hierarchy
 dependencies: []
-references: [ai-sdlc-plugin/hooks/context-auto-clear.js, ai-sdlc-plugin/hooks/context-auto-clear.sh, ai-sdlc-plugin/hooks/context-auto-clear.test.mjs, ai-sdlc-plugin/plugin.json, ai-sdlc-plugin/commands/planner.md, docs/operations/cli-hierarchy.md]
+references:
+  - ai-sdlc-plugin/plugin.json
+  - ai-sdlc-plugin/commands/planner.md
+  - docs/operations/cli-hierarchy.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/hooks/context-auto-clear.js
+    resolution: flagged
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/hooks/context-auto-clear.sh
+    resolution: flagged
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/hooks/context-auto-clear.test.mjs
+    resolution: flagged
+drift_checked: '2026-10-23'
 ---
 
 ## Description

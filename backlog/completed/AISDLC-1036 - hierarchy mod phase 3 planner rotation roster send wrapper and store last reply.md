@@ -1,7 +1,10 @@
 ---
 id: AISDLC-1036
-title: 'Hierarchy mod phase 3: planner role (rotation with handoff write first, roster-name send wrapper, $.store last reply); delete LAST_MESSAGE.md persistence and the Stop-hook auto-clear'
-status: To Do
+title: >-
+  Hierarchy mod phase 3: planner role (rotation with handoff write first,
+  roster-name send wrapper, $.store last reply); delete LAST_MESSAGE.md
+  persistence and the Stop-hook auto-clear
+status: Done
 assignee: []
 created_date: '2026-10-22'
 labels:
@@ -13,12 +16,27 @@ dependencies:
   - AISDLC-1034
 references:
   - spec/rfcs/RFC-0058-session-hierarchy-on-mods.md
-  - ai-sdlc-plugin/hooks/context-auto-clear.js
   - ai-sdlc-plugin/commands/planner.md
-  - pipeline-cli/src/hierarchy/auto-clear.ts
   - docs/operations/cli-hierarchy.md
 priority: medium
 dispatchable: true
+drift_status: flagged
+drift_checked: '2026-10-23'
+drift_log:
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/hooks/context-auto-clear.js
+    resolution: flagged
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/hierarchy/auto-clear.ts'
+    resolution: flagged
+  - date: '2026-10-23'
+    type: dep-resolved
+    detail: Dependency AISDLC-1034 has been completed
+    resolution: flagged
 ---
 
 ## Description
@@ -41,8 +59,8 @@ RFC-0058 phase 3 (Signed Off 2026-10-22). The planner role joins the module; the
 
 ## Acceptance Criteria
 
-- [ ] At 150k tokens the planner role writes the handoff, then rotates clear > compact > relaunch, and the stored last reply is readable after the clear (tests).
-- [ ] A send to a name outside this project's roster is refused with a reason naming the roster source (test).
-- [ ] Planner-addressed rulings and escalations reach the model unchanged; status noise is consumed (tests).
-- [ ] `auto-clear.ts`, the Stop-hook entry and the `LAST_MESSAGE.md` paths are deleted; no command text still references the file; `pnpm dark-code:check` passes.
-- [ ] `docs/operations/cli-hierarchy.md` and the planner command describe the module's planner role and the roster wrapper.
+- [x] At 150k tokens the planner role writes the handoff, then rotates clear > compact > relaunch, and the stored last reply is readable after the clear (tests).
+- [x] A send to a name outside this project's roster is refused with a reason naming the roster source (test).
+- [x] Planner-addressed rulings and escalations reach the model unchanged; status noise is consumed (tests).
+- [x] `auto-clear.ts`, the Stop-hook entry and the `LAST_MESSAGE.md` paths are deleted; no command text still references the file; `pnpm dark-code:check` passes.
+- [x] `docs/operations/cli-hierarchy.md` and the planner command describe the module's planner role and the roster wrapper.

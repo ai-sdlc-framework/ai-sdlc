@@ -1,7 +1,8 @@
 ---
 id: AISDLC-1007
 title: >-
-  Planner over-budget Stop did not auto-clear and resume; context-auto-clear leaves no trace of the branch it took
+  Planner over-budget Stop did not auto-clear and resume; context-auto-clear
+  leaves no trace of the branch it took
 status: Done
 assignee: []
 created_date: '2026-10-21'
@@ -11,16 +12,41 @@ labels:
   - root-cause
 dependencies: []
 references:
-  - ai-sdlc-plugin/hooks/context-auto-clear.js
-  - ai-sdlc-plugin/hooks/context-auto-clear.sh
-  - ai-sdlc-plugin/hooks/context-auto-clear.test.mjs
   - ai-sdlc-plugin/hooks/session-start.js
   - ai-sdlc-plugin/hooks/session-start.test.mjs
-  - pipeline-cli/src/hierarchy/auto-clear.ts
-  - pipeline-cli/src/hierarchy/auto-clear.test.ts
   - docs/operations/cli-hierarchy.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/hooks/context-auto-clear.js
+    resolution: flagged
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/hooks/context-auto-clear.sh
+    resolution: flagged
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/hooks/context-auto-clear.test.mjs
+    resolution: flagged
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/hierarchy/auto-clear.ts'
+    resolution: flagged
+  - date: '2026-10-23'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/src/hierarchy/auto-clear.test.ts
+    resolution: flagged
+drift_checked: '2026-10-23'
 ---
 
 ## Description

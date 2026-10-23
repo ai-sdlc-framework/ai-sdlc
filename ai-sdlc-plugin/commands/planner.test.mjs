@@ -98,10 +98,15 @@ describe('planner peer binding', () => {
 });
 
 describe('planner context ceiling', () => {
-  it('keeps the handoff through the CLI and clears itself automatically at 150k tokens', () => {
+  it('keeps the handoff through the CLI and rotates through the hooks module at 150k tokens', () => {
     assert.match(match[2], /## Context and handoff/);
     assert.match(match[2], /150k tokens/);
     assert.match(match[2], /handoff write --role planner/);
-    assert.match(match[2], /cli-hierarchy auto-clear/);
+    assert.match(match[2], /hierarchy hooks module/);
+    assert.doesNotMatch(match[2], /auto-clear|LAST_MESSAGE/);
+  });
+
+  it('points at the roster send wrapper instead of restating the rule', () => {
+    assert.match(match[2], /cli-hierarchy\.mjs" send --to/);
   });
 });
