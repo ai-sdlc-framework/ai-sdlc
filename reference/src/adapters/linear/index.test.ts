@@ -174,3 +174,37 @@ describe('createLinearIssueTracker', () => {
     expect(issue.assignee).toBeUndefined();
   });
 });
+
+describe('createLinearIssueTracker with the real @linear/sdk 98 client', () => {
+  it('issues GraphQL requests through global fetch (not the 37-era node-fetch)', async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        data: {
+          issues: {
+            nodes: [
+              {
+                id: 'issue-98',
+                title: 'From 98',
+                description: 'd',
+                url: 'https://linear.app/team/issue-98',
+              },
+            ],
+            pageInfo: { hasNextPage: false, hasPreviousPage: false },
+          },
+        },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const tracker = createLinearIssueTracker(config);
+      // Real client: state/labels/assignee are lazy fetches; only assert the 98 request path.
+      await tracker.listIssues({}).catch(() => undefined);
+      expect(fetchMock).toHaveBeenCalled();
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      expect(String(url)).toContain('api.linear.app');
+      expect(JSON.stringify(init.headers)).toContain('lin_mock_api_key');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

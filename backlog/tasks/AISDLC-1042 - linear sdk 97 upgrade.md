@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1042
 title: 'Dependency: upgrade @linear/sdk from 37 to the current 98 line and fix the node types resolution it breaks'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-22'
 labels:
