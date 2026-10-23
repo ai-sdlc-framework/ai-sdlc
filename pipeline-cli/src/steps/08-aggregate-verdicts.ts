@@ -101,4 +101,5 @@ export const AGGREGATE_VERDICTS_STEP: import('./step-meta.js').StepMeta = {
   id: 'aggregate-verdicts',
   inputs: 'review-evidence.v1',
   outputs: 'local:verdict',
+  outputFields: ['decision'],
 };

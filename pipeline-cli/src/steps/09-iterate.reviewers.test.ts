@@ -9,6 +9,7 @@ const calls: { iteration?: number; sourceKind?: string }[] = [];
 let reviewers: ReviewerType[] = [];
 let unavailable = false;
 vi.mock('./07-build-review-prompts.js', () => ({
+  BUILD_REVIEW_PROMPTS_STEP: { id: 'build-review-prompts', inputs: 'x', outputs: 'y' },
   buildReviewPrompts: async (opts: { iteration?: number; sourceKind?: string }) => {
     calls.push({ iteration: opts.iteration, sourceKind: opts.sourceKind });
     return {

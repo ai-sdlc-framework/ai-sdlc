@@ -10,4 +10,6 @@ export interface StepMeta {
   readonly id: string;
   readonly inputs: string;
   readonly outputs: string;
+  /** Top-level fields a Workflow `when` may name after this step (RFC-0056 phase 2). */
+  readonly outputFields?: readonly string[];
 }
