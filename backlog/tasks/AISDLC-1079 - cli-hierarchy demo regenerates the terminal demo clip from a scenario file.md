@@ -1,0 +1,42 @@
+---
+id: AISDLC-1079
+title: 'cli-hierarchy demo regenerates the terminal demo clip from a scenario file: one real hierarchy run under asciinema, a beat-cut cast, and agg plus ffmpeg render to MP4 and WebM'
+status: To Do
+assignee: []
+created_date: '2026-10-24'
+labels: [pipeline-cli, hierarchy, docs, demo]
+priority: medium
+dispatchable: true
+dependencies: []
+references: [pipeline-cli/src/cli/hierarchy.ts, pipeline-cli/src/hierarchy/auto-brief.ts, pipeline-cli/src/cli/decisions.ts, pipeline-cli/src/dispatch/board.ts, pipeline-cli/src/hierarchy/docs-parity.test.ts, docs/operations/cli-hierarchy.md, docs/operations/README.md]
+---
+
+## Description
+
+Adopters and the ai-sdlc.io home page need a 30 to 60 second terminal clip that shows what one unit of work looks like under the session hierarchy: an operator states a feature, the planner surfaces two or three open questions, the operator answers them, a brief goes to dispatch, an executor opens a PR, and the PR lands on main with its attestation. Today that clip can only be produced by a person typing in a planner pane while someone records the screen, so it goes stale on every CLI release and nobody re-records it. This task adds `cli-hierarchy demo`, a subcommand that produces the clip from a scenario file with nobody at the keyboard, so the clip is regenerated whenever the flow or a release changes and doubles as an end-to-end smoke test of the hierarchy.
+
+The command runs in three stages, each also callable on its own.
+
+**Stage 1, run** (`cli-hierarchy demo run --scenario <file> --out <dir>`). The scenario is a JSON file with: `request` (the one-sentence feature the operator states), `task` (an existing backlog task id that implements it), `decisions` (a list of `{ summary, options: [{ id, description }], answer, rationale }`), `brief` (`{ tasks: [ids] }`), `timeoutMinutes` and `pollSeconds`. Preflight refuses, with one line each, when `asciinema`, `agg` or `ffmpeg` is missing from PATH, when the roster has no idle executor, when the task is not `To Do` and dispatchable, or when the checkout is not clean. It then records itself: it re-executes `cli-hierarchy demo run --inner` under `asciinema rec --overwrite --idle-time-limit 2 --cols 120 --rows 30`, writing `<out>/hierarchy.cast`. The inner run prints the request as a prompt line, then executes the real commands and lets their real output through unchanged: `cli-decisions add` for each scenario decision (scope `issue:<task>`, source `ad-hoc`, `--by` the scenario author), `cli-decisions list` so the open questions are visible, `cli-decisions answer <id> <answer> --rationale`, `cli-hierarchy brief --tasks <ids> --notify`, then a poll loop that prints one line per board transition it observes (`cli-dispatch board --json` for queued, claimed, inflight; `gh pr list --search <task>` for the PR number; `gh pr view <n> --json state,mergeCommit,statusCheckRollup` for the checks and the merge) until the PR is merged or `timeoutMinutes` elapses. Every beat boundary (request, questions, answers, brief, PR opened, PR landed) is written with its elapsed seconds to `<out>/beats.json`, so the cut never parses terminal output. On timeout or any failed command the run exits non-zero, keeps the cast for inspection and does not render; nothing in the cast is typed from a canned transcript.
+
+**Stage 2, cut** (`cli-hierarchy demo cut --cast <file> --beats <file> --out <file>`). Reads the asciicast (v2 or v3) and the beats file, keeps a window of at most 8 seconds of events around each beat, drops everything else, rescales any remaining gap over 1.5 seconds down to 1.5 seconds, and writes `hierarchy.cut.cast` whose total duration is between 30 and 60 seconds. It prints the kept duration and refuses, non-zero, when a beat is missing from the beats file.
+
+**Stage 3, render** (`cli-hierarchy demo render --cast <file> --out <dir>`). Runs `agg` on the cut cast with a dark theme, font size 22 and 120 by 30 cells into a lossless GIF, then `ffmpeg` to `hierarchy.mp4` (libx264, crf 18, yuv420p, faststart, no audio) and `hierarchy.webm` (libvpx-vp9, crf 32, no audio), and extracts `hierarchy-poster.png` from the first frame. It refuses, non-zero, when either video exceeds 4 MB, and writes `manifest.json` with the task id, PR number, merge sha, cast duration, cut duration, and the asciinema, agg and ffmpeg versions.
+
+`cli-hierarchy demo --scenario <file> --out <dir>` runs all three stages in order. The first scenario ships at `pipeline-cli/demo/scenarios/context-pressure.json` and targets AISDLC-1066 (the context-threshold column in `cli-hierarchy status`), with these decisions: the threshold source (the roster's per-role clear threshold, or a flat 120k), the marker when a transcript cannot be found (`?`), and whether `--json` carries the new field (yes, as `contextTokens` and `overThreshold`). Running it is not part of this task's acceptance; the scenario file is validated by the loader test only.
+
+Out of scope: a dry-run mode for dispatch, re-rendering from a VHS tape, uploading the rendered files anywhere, and any change to how briefs or decisions work. The command only calls the existing CLIs.
+
+**Five-step review (requirements first).** Requirement questioned: whether the demo must come from a real run at all, since a scripted tape renders in seconds; it must, because the clip's claim is that the flow actually happened, and a canned tape makes that claim false the first time the CLI output changes. Deletion: the human-driven recording procedure and the VHS tape that would have transcribed it are deleted from the plan; no tape format is introduced. Simplified: one scenario file is the only input, and the only text the command types is the operator's request and the scenario's answers; everything else on screen is real command output. Accelerated: the three stages are separate subcommands, so a bad cut or render is redone in seconds without a new one-hour run, and beats are recorded as timestamps so the cut never parses terminal text. Automated last: the whole clip regenerates with one command and fails closed, so it can run after each release as a hierarchy smoke test.
+
+## Acceptance Criteria
+
+- [ ] `cli-hierarchy demo run --scenario pipeline-cli/demo/scenarios/context-pressure.json --out <dir>` with `asciinema` absent from PATH exits non-zero and prints a single line naming the missing tool; the same for `agg` and for `ffmpeg`.
+- [ ] With all tools present, a loader test proves the shipped scenario file validates (request, task, at least two decisions each with at least two options and an `answer` that is one of them, brief tasks, timeoutMinutes, pollSeconds) and that a scenario missing any field is rejected with the field name.
+- [ ] A run test with the command runner stubbed shows the inner run executes, in order, `cli-decisions add` per decision, `cli-decisions list`, `cli-decisions answer` per decision, `cli-hierarchy brief --tasks <ids> --notify`, then polls until the stubbed `gh pr view` reports `MERGED`, and writes `beats.json` with the six beats (request, questions, answers, brief, pr-opened, pr-landed) each carrying an elapsed-seconds number.
+- [ ] A run test shows that when the stubbed poll never reports `MERGED` within `timeoutMinutes`, the command exits non-zero, `hierarchy.cast` is kept, and no `hierarchy.mp4` exists.
+- [ ] `cli-hierarchy demo cut` on a fixture cast of 600 seconds with six beats produces a cast whose duration is between 30 and 60 seconds, keeps every event within 8 seconds of each beat, contains no gap longer than 1.5 seconds, and exits non-zero naming the beat when one of the six is missing.
+- [ ] `cli-hierarchy demo render` on the fixture cut cast produces `hierarchy.mp4`, `hierarchy.webm` and `hierarchy-poster.png`, each under 4 MB, and `manifest.json` with task id, PR number, merge sha, durations and the three tool versions; the render test is skipped with a printed reason when `agg` or `ffmpeg` is not installed on the runner.
+- [ ] `cli-hierarchy demo` with no stage runs the three stages in order and stops at the first non-zero stage.
+- [ ] `docs/operations/cli-hierarchy.md` gains a `### demo` section under `## Commands` describing the scenario file fields, the three stages, the honesty rule (only the request and the answers are typed; no canned output) and the exit codes; `docs/operations/README.md` lists the command; `docs-parity.test.ts` passes.
+- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` green; `ai-sdlc/pr-ready` green.
