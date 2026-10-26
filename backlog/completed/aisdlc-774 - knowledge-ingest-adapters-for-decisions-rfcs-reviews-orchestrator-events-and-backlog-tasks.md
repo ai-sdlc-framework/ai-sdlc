@@ -2,7 +2,7 @@
 id: AISDLC-774
 title: >-
   knowledge ingest adapters for decisions, RFCs, reviews, orchestrator events and backlog tasks
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-09'
 labels:

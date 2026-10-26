@@ -39,6 +39,8 @@ export interface KnowledgeEntry {
   contentHash: string;
   writtenBy?: string;
   reverify?: string;
+  /** Source id backing the entry (decision id, RFC id, ...); set by ingest adapters. */
+  proof?: string;
   /** Markdown body after the frontmatter. */
   body: string;
 }
@@ -173,6 +175,7 @@ export function toEntry(fields: Record<string, unknown>, body: string): Knowledg
     contentHash: String(fields.contentHash),
     writtenBy: typeof fields.writtenBy === 'string' ? fields.writtenBy : undefined,
     reverify: typeof fields.reverify === 'string' ? fields.reverify : undefined,
+    proof: typeof fields.proof === 'string' ? fields.proof : undefined,
     body,
   };
 }

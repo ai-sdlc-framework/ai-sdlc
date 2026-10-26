@@ -21,6 +21,7 @@ import { hideBin } from 'yargs/helpers';
 import { now } from '../clock.js';
 import { loadKnowledgeConfig } from '../knowledge/config.js';
 import { checkKnowledgeScope, checkKnowledgeScopeRange } from '../knowledge/scope-check.js';
+import { INGEST_SOURCES, ingestSource, type IngestSource } from '../knowledge/ingest-sources.js';
 import { sectionsToEntries } from '../knowledge/ingest-sections.js';
 import { loadOntology } from '../knowledge/ontology.js';
 import { findProtectedCitations, validateKnowledge } from '../knowledge/store.js';
@@ -107,6 +108,32 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           writeFileSync(out, e.text);
         }
         process.stdout.write(`${entries.length} entries written\n`);
+      },
+    )
+    .command(
+      'ingest',
+      'Ingest decisions, RFCs, reviews, orchestrator events or backlog tasks as knowledge entries',
+      (y) =>
+        y
+          .option('source', { type: 'string', choices: INGEST_SOURCES, demandOption: true })
+          .option('events-file', { type: 'string', describe: 'Orchestrator _events.jsonl path' })
+          .option('observed', { type: 'string', default: now().toISOString().slice(0, 10) }),
+      (args) => {
+        const projectDir = String(args['project-dir']);
+        const config = loadKnowledgeConfig(projectDir);
+        const trackedRootAbs = isAbsolute(config.trackedRoot)
+          ? config.trackedRoot
+          : join(projectDir, config.trackedRoot);
+        const r = ingestSource(args.source as IngestSource, {
+          projectDir,
+          trackedRootAbs,
+          ontology: loadOntology(trackedRootAbs).ontology,
+          observed: String(args.observed),
+          eventsFile: args['events-file'] as string | undefined,
+        });
+        process.stdout.write(
+          `${r.created} created, ${r.updated} updated, ${r.unchanged} unchanged\n`,
+        );
       },
     )
     .demandCommand(1, 'A subcommand is required. Run with --help for the list.')
