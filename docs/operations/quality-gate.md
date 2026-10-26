@@ -51,7 +51,7 @@ This is the same pattern shipped in production by **aiohttp**, **attrs**, **cond
 |---|---|---|
 | `Detect Changes` (docs-only archetype via `scripts/is-docs-only-changeset.mjs`; deps/tasks via `dorny/paths-filter`) | yes | — |
 | `Lint & Format` (`pnpm lint && pnpm format:check`) | yes | — |
-| `Build & Test (Node 22)` (build, `pnpm test:coverage` once with per-package floors, root gate checks, schema validation, then the 90% patch gate; AISDLC-844 folded the former `Coverage` job into it) | — | yes |
+| `Build & Test (Node 22)` (build, `pnpm test:coverage` once with per-package floors, root gate checks (the plugin pin check runs as `--pr` manifest self-consistency only; the workspace comparison runs in `main-health-monitor.yml`, AISDLC-1068), schema validation, then the 90% patch gate; AISDLC-844 folded the former `Coverage` job into it) | — | yes |
 | `pipeline-cli tests (macOS)` (AISDLC-1021: `pnpm build` then the pipeline-cli suite on `macos-latest`, the executors' filesystem semantics; runs only when the `detect` path filter `pipeline-cli/**` matches and the PR is not docs-only or records-only; a skip is allowed in the rollup) | — | yes (via `ai-sdlc/pr-ready`) |
 | `Integration Tests` (`pnpm --filter @ai-sdlc/reference test`) | — | yes |
 | `DoR readiness (task-file PRs)` (see below) | — | only when the PR changes `backlog/tasks/*.md` |

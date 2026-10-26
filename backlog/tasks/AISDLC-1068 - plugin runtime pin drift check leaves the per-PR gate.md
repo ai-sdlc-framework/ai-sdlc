@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1068
 title: 'plugin runtime pin drift check moves off the per-PR gate so a release pin lag never blocks every open PR'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-23'
 labels:

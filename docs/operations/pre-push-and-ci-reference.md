@@ -44,6 +44,8 @@ Workflows MUST invoke pipeline-cli CLIs via `node pipeline-cli/bin/cli-XXX.mjs` 
 
 ### Dark-code gate (AISDLC-552)
 
+`pnpm sync:plugin-runtime-deps:check:pr` (wired into `pnpm test` and the PR gate, AISDLC-1068) checks only that the two plugin manifests agree; `pnpm sync:plugin-runtime-deps:check` (workspace comparison) runs in `main-health-monitor.yml`.
+
 `pnpm dark-code:check` (wired into `pnpm test`) fails when a module has **no
 non-test importer and no barrel re-export** — code that ships with passing unit
 tests, three reviewer approvals, and zero runtime effect. Reachability counts

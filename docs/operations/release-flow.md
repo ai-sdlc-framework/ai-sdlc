@@ -36,8 +36,12 @@ a collision rate that became visible once the merge queue was dropped (AISDLC-40
    per push to `main` (release-please's own). There is no second fixup push.
    release-please cannot source a sibling component's version into the plugin's
    `runtimeDependencies` pins, so they lag on that branch;
-   `scripts/sync-plugin-runtime-deps.mjs --check` (in `pnpm test`) tolerates
-   that lag when the branch is `release-please--branches--main`. After the
+   `scripts/sync-plugin-runtime-deps.mjs --check` tolerates that lag when the
+   branch is `release-please--branches--main`. **Check split (AISDLC-1068):** the
+   per-PR gate and `pnpm test` run only `--pr` (the two plugin manifests must
+   agree with each other); the workspace-version comparison (`--check`) is main
+   state and runs in `main-health-monitor.yml` on every push to `main` and on its
+   schedule, so a failed pin sync never turns every open PR red. After the
    release lands, the `sync-plugin-runtime-deps` job commits the pins to a
    `chore/sync-runtime-pins-<version>` branch and opens a PR (AISDLC-1059;
    `main` is protected, so a direct push is refused). The auto-enable workflow

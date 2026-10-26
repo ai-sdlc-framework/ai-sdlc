@@ -239,11 +239,11 @@ gates:
     owner: engineering
     property: protected knowledge stays out of the tracked root
     baseline: true
-  - id: test-chain:pnpm sync:plugin-runtime-deps:check
+  - id: test-chain:pnpm sync:plugin-runtime-deps:check:pr
     surface: test-chain
     origin: unknown (plugin runtime deps sync)
     owner: engineering
-    property: plugin runtime dependency list matches the workspace
+    property: the two plugin manifests pin the same runtime dependency ranges (AISDLC-1068; the registry-vs-workspace comparison runs on main)
     baseline: true
   - id: role-action:gh pr merge*
     surface: role-action

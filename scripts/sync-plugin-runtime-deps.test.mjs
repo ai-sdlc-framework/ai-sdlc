@@ -297,3 +297,10 @@ describe('CLI end-to-end (--check and write modes)', () => {
     }
   });
 });
+
+import { findManifestMismatches as _fmm, REPO_ROOT } from './sync-plugin-runtime-deps.mjs';
+import { test as _t } from 'node:test';
+import _assert from 'node:assert/strict';
+_t('findManifestMismatches: real repo manifests agree (AISDLC-1068)', () => {
+  _assert.deepEqual(_fmm(REPO_ROOT), []);
+});

@@ -105,7 +105,7 @@ Local cost and failure rate are **not measured** (hooks write no run history). "
 | `pnpm test:gates` | glob runner (new) | AISDLC-805 | engineering | KEEP | `scripts/run-gate-tests.mjs` |
 | `pnpm rfc:check` | RFC docs-drift | AISDLC-165 | engineering | KEEP | |
 | `pnpm dark-code:check` | no dark modules | AISDLC-552 | engineering | KEEP | |
-| `pnpm sync:plugin-runtime-deps:check` | plugin dep list in sync | unknown | engineering | KEEP | |
+| `pnpm sync:plugin-runtime-deps:check:pr` | plugin manifests agree (AISDLC-1068) | unknown | engineering | KEEP | |
 
 Before and after: all 75 test files named by the old chain are discovered by the runner (verified by diffing the old set, extracted from the chain, against `node scripts/run-gate-tests.mjs --list`; zero missing). The runner discovers 36 test files the old chain did not name explicitly (some were covered by the old `ai-sdlc-plugin/commands/*.test.mjs` glob; the rest were never chained, for example `check-backlog-ascii`, `check-skip-ci-marker`, `dor-ingress`, and the plugin hook and command tests), because they live in a discovered directory. Two discovered files fail on `main` today and are listed in the runner's shrink-only `KNOWN_RED` map with reasons; both are findings:
 

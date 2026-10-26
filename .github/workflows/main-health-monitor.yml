@@ -102,6 +102,13 @@ jobs:
         continue-on-error: true
         run: pnpm rfc:check
 
+      # AISDLC-1068: main-state check moved off the per-PR gate, so a release
+      # pin lag never blocks every open PR (red here routes through the run conclusion).
+      - name: Plugin runtime pin drift check
+        id: plugin-pins
+        continue-on-error: true
+        run: pnpm sync:plugin-runtime-deps:check
+
       - name: Coverage (full)
         id: coverage
         continue-on-error: true
