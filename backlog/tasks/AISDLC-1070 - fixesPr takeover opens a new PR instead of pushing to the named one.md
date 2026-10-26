@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1070
 title: 'fixesPr takeover: an executor given fixesPr pushes to that PR branch instead of opening a new PR'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-23'
 labels:
