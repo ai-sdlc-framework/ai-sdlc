@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1071
 title: 'one governance skill copy, and the three reviewer agents render their rule blocks from prompt-rules.js instead of hand-written duplicates'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-23'
 labels:

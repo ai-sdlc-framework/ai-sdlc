@@ -35,6 +35,9 @@ const GUARDED = [
   'agents/developer.md',
   'agents/rebase-resolver.md',
   'agents/ci-conflict-resolver.md',
+  'agents/code-reviewer.md',
+  'agents/test-reviewer.md',
+  'agents/security-reviewer.md',
 ];
 
 function allPrompts() {
@@ -266,4 +269,19 @@ describe('standing decision rules (AISDLC-873)', () => {
       assert.ok(content.includes('<!-- standing-rules:begin -->'));
     });
   }
+});
+
+describe('skills are listed once (AISDLC-1071)', () => {
+  it('no skill name exists in both the project .claude/skills and the plugin', () => {
+    const list = (d) => {
+      try {
+        return readdirSync(d);
+      } catch {
+        return [];
+      }
+    };
+    const project = new Set(list(join(pluginDir, '..', '.claude', 'skills')));
+    const dupes = list(join(pluginDir, 'skills')).filter((n) => project.has(n));
+    assert.deepEqual(dupes, [], `skill(s) listed twice: ${dupes.join(', ')}`);
+  });
 });

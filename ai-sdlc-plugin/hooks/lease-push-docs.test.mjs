@@ -143,10 +143,10 @@ describe('push spellings prescribed in command / agent / skill bodies', () => {
     }
   });
 
-  it('also scans the tracked .claude/skills copy of the governance skill', () => {
+  it('scans the plugin copy of the governance skill', () => {
     assert.ok(
-      found.some((x) => x.f.includes(`${'.claude'}/skills/ai-sdlc-governance/SKILL.md`)),
-      '.claude/skills/ai-sdlc-governance/SKILL.md must show the explicit spelling and be scanned',
+      found.some((x) => x.f.includes('skills/ai-sdlc-governance/SKILL.md')),
+      'skills/ai-sdlc-governance/SKILL.md must show the explicit spelling and be scanned',
     );
   });
 
