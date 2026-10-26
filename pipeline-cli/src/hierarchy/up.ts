@@ -180,6 +180,18 @@ export function hasLaunchEnv(command: string, name: string, role: string): boole
   return has('AI_SDLC_HIERARCHY_SESSION', name) && has('AI_SDLC_HIERARCHY_ROLE', role);
 }
 
+/**
+ * AISDLC-1067: an executor loads only the MCP servers named by `--mcp-config`, not the operator's
+ * personal connectors (their tool schemas would ride in every call). Set
+ * `AI_SDLC_EXECUTOR_MCP_CONFIG=<path to an MCP config json>` to name the servers it keeps (the
+ * plugin's own server); `AI_SDLC_EXECUTOR_MCP=all` restores every configured server.
+ */
+export function executorMcpArgs(role: string, env: NodeJS.ProcessEnv = process.env): string[] {
+  if (role !== 'executor' || env.AI_SDLC_EXECUTOR_MCP === 'all') return [];
+  const cfg = env.AI_SDLC_EXECUTOR_MCP_CONFIG;
+  return ['--strict-mcp-config', ...(cfg ? ['--mcp-config', shellQuote(cfg)] : [])];
+}
+
 /** Build the `claude` command line for one session. */
 export function buildClaudeCommand(
   bin: string,
@@ -207,6 +219,7 @@ export function buildClaudeCommand(
     shellQuote(s.model),
     '--permission-mode',
     shellQuote(s.permissionMode),
+    ...executorMcpArgs(s.role),
     shellQuote(s.prompt),
   ].join(' ');
 }

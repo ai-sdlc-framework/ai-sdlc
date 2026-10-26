@@ -48,66 +48,8 @@ Do NOT commit if any of these fail. Fix the errors first, then commit.
 - Keep commit history linear — no merge commits on feature branches.
 - Use conventional commits: `feat:`, `fix:`, `test:`, `docs:`, `chore:`, `style:`
 
-## Workflow Expectations
+## Workflow
 
-When given a multi-step task, complete ALL steps before stopping:
+Complete ALL steps of a multi-step task before stopping: research, plan, implement, run the checklist above, commit with a conventional commit, push, open a PR (never merge it outside `cli-merge-if-eligible`), report. If blocked, say which step and why. When review agents post findings: APPROVE with suggestions is ready for merge per `governance.allowMerge`; CHANGES_REQUESTED with critical or major means fix and push again; a false positive means update `.ai-sdlc/review-policy.md`, never dismiss.
 
-1. Research the task by reading relevant files
-2. Plan the approach (use EnterPlanMode for non-trivial tasks)
-3. Implement the changes
-4. Run typecheck, tests, lint, format — fix any failures
-5. Commit with a conventional commit message
-6. Push to the branch
-7. Create a PR if needed (but do NOT merge)
-8. Report what was done and what remains
-
-If blocked at any step, say which step you're stuck on and why.
-
-## PR Workflow
-
-- Create PRs with descriptive titles and bodies
-- After pushing, tell the user the PR is ready for their review
-- If CI fails or reviews request changes, fix the issues and push again
-- Use `/fix-pr <number>` to automatically gather and fix PR issues
-- Merge only through the sanctioned path, per `governance.allowMerge` (`cli-merge-if-eligible`)
-
-## Review Policy
-
-When review agents post findings:
-- **APPROVE with suggestions/minors** → PR is ready for merge per `governance.allowMerge`
-- **CHANGES_REQUESTED with critical/major** → fix the real issues, push again
-- **False positives** → update `.ai-sdlc/review-policy.md` with better calibration, don't dismiss reviews
-
-## Project Structure
-
-- `orchestrator/` — core pipeline logic (TypeScript)
-- `reference/` — framework reference implementation
-- `dogfood/` — CLI scripts that invoke the orchestrator
-- `.ai-sdlc/` — pipeline configuration (YAML) — agents cannot modify these files
-- `.claude/` — Claude Code hooks, commands, and skills
-- `.github/workflows/` — GitHub Actions — refused only when the project's `.ai-sdlc/agent-role.yaml` lists it under `blockedPaths` (not blocked by default; check this project's own config)
-- `spec/schemas/` — JSON schemas for YAML validation
-
-## Cross-harness review (AISDLC-247)
-
-Two Codex reviewer variants ship alongside the Claude variants:
-
-| Agent | Harness | When to use |
-|-------|---------|-------------|
-| `code-reviewer` | claude-code | Default code review |
-| `test-reviewer` | claude-code | Default test review |
-| `code-reviewer-codex` | codex | Claude-developed PRs reviewed by Codex; or when o4-mini latency/cost is preferred |
-| `test-reviewer-codex` | codex | Same as above for test coverage |
-
-All four return the same `{ approved, findings, summary }` envelope — Step 8 aggregation is harness-agnostic.
-
-**`security-reviewer` stays on Claude** (per `feedback_subagent_model_selection.md`) for reasoning-heavy OWASP analysis.
-
-See `docs/operations/cross-harness-review.md` for the full operator runbook.
-
-## Testing
-
-- Use Vitest for all orchestrator and reference tests
-- Coverage target: 90% patch coverage on PRs (CI gate)
-- Run `pnpm test` from repo root for all packages
-- Run `pnpm --filter @ai-sdlc/orchestrator test` for orchestrator only
+Reference material (project structure, cross-harness review variants, PR workflow, testing) lives in [`docs/operations/agent-governance-reference.md`](../../../docs/operations/agent-governance-reference.md).

@@ -150,3 +150,9 @@ Every fix, prevention task, governance rule and process change is worked in this
 5. **Automate.** Last, never first.
 
 A task that fixes a failure or adds a rule opens its Fix with a "Five-step review (requirements first)" paragraph: the requirement questioned and who set it, what is deleted, then what is simplified, accelerated or automated. A deletion that loosens a governance control is a class (b) decision for the operator. Velocity impact: positive by construction; the rule removes work before it adds any. Origin: the 2026-10-10 PR-drain review (AISDLC-797..803), where 5 of 7 failure families traced to requirements that should not have existed.
+
+## Project structure, cross-harness review and testing (moved from the governance skill, AISDLC-1067)
+
+- `orchestrator/` core pipeline logic; `reference/` framework reference implementation; `dogfood/` CLI scripts that invoke the orchestrator; `.ai-sdlc/` pipeline configuration (agents cannot modify it); `.claude/` Claude Code hooks, commands and skills; `.github/workflows/` refused only when `.ai-sdlc/agent-role.yaml` lists it under `blockedPaths`; `spec/schemas/` JSON schemas.
+- Cross-harness review: `code-reviewer` and `test-reviewer` (claude-code, default), `code-reviewer-codex` and `test-reviewer-codex` (codex). All return the same `{ approved, findings, summary }` envelope. `security-reviewer` stays on Claude. Runbook: `docs/operations/cross-harness-review.md`.
+- Testing: Vitest for orchestrator and reference; 90 percent patch coverage in CI; `pnpm test` from the root, `pnpm --filter @ai-sdlc/orchestrator test` for one package. Use `/fix-pr <number>` to gather and fix PR issues.

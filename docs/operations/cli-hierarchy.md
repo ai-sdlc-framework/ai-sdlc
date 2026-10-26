@@ -2034,6 +2034,24 @@ rules above refuse the task tools' other forms; see the qualification there). `c
 - the file lists of open pull requests (`gh pr list`; when it cannot be reached the
   command warns, reports `"openPrScan":"unavailable"` and checks the first two only).
 
+### Push-only resume
+
+**Push-only resume.** When the `RESUMED TASK` block says `RESUME MODE: push-only` (the
+manifest's `resume.resumeMode`), run no developer and no reviewer subagent. In the existing worktree:
+`git fetch origin && git rebase origin/main` (mechanical only; on a conflict abort the rebase, report
+`failed` naming the conflicting files in the verdict note, and stop), build `reference`, `orchestrator`
+and `pipeline-cli`, run `pnpm lint` and `pnpm format:check` (fix format drift with `pnpm format` and commit
+it as `style:`), then sign from the existing `.ai-sdlc/verdicts/<task-id-lower>.json` and transcript
+leaves, lease-push from your own session (never a subagent), run `gh pr ready`, and report the verdict.
+After the rebase run `node pipeline-cli/bin/cli-dispatch.mjs push-only-check --task-id <task-id> --worktree <worktree>` (it wraps
+`evaluatePushOnly` in `pipeline-cli/src/dispatch/resume.ts`). Exit 1 means refuse the mode, say why in your status line, and continue in this same run with the normal
+pipeline below (a refusal is never a failure on its own) (the verdict is not an approval, or the branch content no longer matches an approval after the rebase). A missing verdict file
+alone is not a refusal: the JSON carries `verdictMissing`, so run the verdict step (sign from the approval envelope) rather than a developer. Never write a new verdict file and never set an `AI_SDLC_SKIP_*` variable.
+
+### Continuation after `iterate-needed`
+
+**`iterate-needed` is the continuation path.** The verdict leaves the claim in place, so release it right after reporting (`cli-dispatch.mjs release --board-dir "$BOARD_DIR" --task-id "$TASK_ID"`); it refuses while the worktree holds unpushed commits or uncommitted tracked changes (commit and push first; `--force --reason <text>` drops work). Dispatch then continues the task with `cli-dispatch.mjs reenter <pr> --note "<the verdict notes>"`, which requeues it with no wave for the next claim. A worker holds one claim at a time.
+
 ### Rules an executor keeps
 
 - It never messages another executor.
@@ -2213,3 +2231,11 @@ attributed, refuse the close with that reason. The comment and the
 `audit/superseded-close.jsonl` line carry the PR number and its merge commit sha. The
 id-based search remains only as a pre-check for `ai-sdlc/<task-id>-*` branches, restricted to
 that branch's own task id.
+
+### Executor MCP servers (AISDLC-1067)
+
+`cli-hierarchy up` starts executors with `--strict-mcp-config`, so they load only the servers
+in `--mcp-config` and not the operator's personal connectors; the tool schemas of unrelated
+servers otherwise ride in every model call. Set `AI_SDLC_EXECUTOR_MCP_CONFIG=<path>` to an MCP
+config json naming the servers an executor keeps, or `AI_SDLC_EXECUTOR_MCP=all` to restore
+every configured server. Planner and dispatch sessions are unaffected.
