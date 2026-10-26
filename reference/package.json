@@ -41,7 +41,7 @@
   "dependencies": {
     "@linear/sdk": "^99.0.0",
     "@octokit/rest": "^22.0.1",
-    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/api": "^1.10.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "yaml": "^2.9.1"
