@@ -288,6 +288,16 @@ gate writes the file through `$.process.run`; the dispatch role refreshes it on 
 waiting up to 60 seconds (two tick intervals) for the dispatch host to report `loaded`, else exits 1 naming
 the reason and the fix (`--no-module-check` skips it); `ai-sdlc doctor` has the same check
 (`hierarchy-module`). See Troubleshooting, "Module absent".
+The `CONTEXT` column (AISDLC-1066) is the session's live context size in k tokens: the last assistant record's
+`usage` (input plus cache read plus cache creation) in its transcript
+`~/.claude/projects/<encoded cwd>/<sessionId>.jsonl`, found through the session id in the harness session
+registry and read by seeking from the end of the file (at most 1 MiB, never the whole file). `OVER` follows the
+value when it exceeds the role's clear threshold, `?` means the transcript could not be found, and `-` a
+session whose window is gone. `status --json` carries `contextTokens` and `overThreshold` per session; `status`
+and `up` print one `warning:` line per session that is over. This catches the dead-module case: when the hooks
+module is not loaded nothing rotates the session, so an executor sits at 450k to 966k context showing `busy`
+and `ENV ok`; the column makes that visible within an hour. The CLI only reports; rotation stays with the
+module and the dispatch session.
 A final `unbriefed` line lists dispatchable open tasks under `backlog/tasks/` that are on no
 brief and not on the board (nothing would ever queue them); write a brief for them.
 

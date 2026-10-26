@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1066
 title: 'cli-hierarchy status reads each session context size and flags any session above its clear threshold'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-23'
 labels:
