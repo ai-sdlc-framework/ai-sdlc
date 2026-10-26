@@ -34,6 +34,7 @@ import {
   resolveEventsDir,
 } from '../decisions/event-log.js';
 import { paceFiling, recordFiling } from './file-pacing.js';
+import { isProtectedBranch } from '../hierarchy/lease-policy.js';
 import { writeAutoBrief } from '../hierarchy/auto-brief.js';
 import type { DecisionEvent } from '../decisions/decision-record.js';
 
@@ -458,11 +459,20 @@ function fixesOf(
   fixesPr: number | undefined,
 ): { fixesPr: number; prHeadRef: string } | undefined {
   if (fixesPr === undefined) return undefined;
-  const r = deps.exec('gh', ['pr', 'view', String(fixesPr), '--json', 'headRefName'], repo);
+  const r = deps.exec(
+    'gh',
+    ['pr', 'view', String(fixesPr), '--json', 'headRefName,isCrossRepository'],
+    repo,
+  );
   let ref: string;
+  let cross = false;
   try {
-    ref =
-      r.status === 0 ? String((JSON.parse(r.stdout) as { headRefName?: string }).headRefName) : '';
+    const j =
+      r.status === 0
+        ? (JSON.parse(r.stdout) as { headRefName?: string; isCrossRepository?: boolean })
+        : {};
+    ref = String(j.headRefName ?? '');
+    cross = j.isCrossRepository === true;
   } catch {
     ref = '';
   }
@@ -470,6 +480,14 @@ function fixesOf(
     throw new FileRefusal(
       `--fixes-pr ${fixesPr}: could not read the head branch of PR #${fixesPr}`,
     );
+  }
+  if (cross) {
+    throw new FileRefusal(
+      `--fixes-pr ${fixesPr}: PR #${fixesPr} head is in another repository (a fork); refused`,
+    );
+  }
+  if (isProtectedBranch(ref, [])) {
+    throw new FileRefusal(`--fixes-pr ${fixesPr}: head branch '${ref}' is protected; refused`);
   }
   return { fixesPr, prHeadRef: ref };
 }

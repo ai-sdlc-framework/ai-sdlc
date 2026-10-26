@@ -200,3 +200,15 @@ A push typed in the Pattern C parent (on `main`, same remote) overwrites the tas
 - Exploration/spikes (retroactively if it becomes real work).
 
 
+
+## `fixesPr` takeover end to end (AISDLC-1054, AISDLC-1070)
+
+`fixesPr` makes a task land on an existing PR instead of opening a new one. The PR resolves to a head branch once, at claim time; every later step only sees a branch.
+
+1. **Entry.** `cli-file --fixes-pr <n>` runs `gh pr view <n> --json headRefName,isCrossRepository` and writes `fixesPr` and `prHeadRef` into the brief entry (`brief-format.ts`). A brief written by hand may carry both fields.
+2. **Dispatch.** `briefToEnqueueEntries` (`dispatch-loop.ts`) copies both into the entry, and `enqueueTasks` writes them into the board manifest, which the claim moves to `inflight/`. A resume manifest keeps them.
+3. **Step 2.** `execute-pipeline` reads `fixesPr` and `prHeadRef` from the inflight manifest; `computeBranchName` returns `prHeadRef` (or reads it with `gh pr view`) instead of computing a fresh branch name.
+4. **Step 3.** The run is a resume: the worktree is created from `origin/<head branch>` (or reuses the existing one), so it tracks the PR branch.
+5. **Step 11.** Pushes to the PR branch with the lease push (DEC-0264, `--force-with-lease=refs/heads/<branch>:<observed remote head>`), appends `Fixed by <task id>` to the PR body and runs no `gh pr create`; the returned `prUrl` is the existing PR.
+
+**Refusals (named reason, never a silent fallback to a new branch).** A PR whose head is in another repository (a fork) and a head branch that is protected (built-in list, e.g. `main`) are refused at filing (`cli-file`) and again in Step 2. Test: `pipeline-cli/src/steps/fixes-pr-pipeline.test.ts`.

@@ -264,6 +264,28 @@ describe('cli-file', () => {
       );
     });
 
+    const viewDeps = (out: string): FileDeps => ({
+      ...deps,
+      exec(cmd, args, cwd) {
+        if (cmd === 'gh' && args[1] === 'view') return { status: 0, stdout: out, stderr: '' };
+        return deps.exec(cmd, args, cwd);
+      },
+    });
+
+    it('--fixes-pr refuses a fork PR (AISDLC-1070)', () => {
+      const d = viewDeps('{"headRefName":"f","isCrossRepository":true}');
+      expect(() => fileTask(repo, writeFm(''), { pr: true, fixesPr: 5 }, d)).toThrow(
+        /another repository/,
+      );
+    });
+
+    it('--fixes-pr refuses a protected head branch (AISDLC-1070)', () => {
+      const d = viewDeps('{"headRefName":"main"}');
+      expect(() => fileTask(repo, writeFm(''), { pr: true, fixesPr: 5 }, d)).toThrow(
+        /is protected/,
+      );
+    });
+
     it('--no-brief and a plain (no --pr) filing write none', () => {
       fileTask(repo, writeFm(''), { pr: true, brief: false }, deps);
       expect(existsSync(briefPath())).toBe(false);

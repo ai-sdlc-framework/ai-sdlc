@@ -18,6 +18,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { load as yamlLoad } from '../util/yaml.js';
+import { isProtectedBranch } from '../hierarchy/lease-policy.js';
 import type { Runner } from '../runtime/exec.js';
 import {
   DEFAULT_LOGGER,
@@ -300,26 +301,44 @@ export function buildBranchName(
   return { branch, slug };
 }
 
-function parseHeadRef(stdout: string): string {
+function parseHeadInfo(stdout: string): { ref: string; cross: boolean } {
   try {
-    return String((JSON.parse(stdout) as { headRefName?: unknown }).headRefName);
+    const j = JSON.parse(stdout) as { headRefName?: unknown; isCrossRepository?: unknown };
+    return { ref: String(j.headRefName), cross: j.isCrossRepository === true };
   } catch {
-    return '';
+    return { ref: '', cross: false };
+  }
+}
+
+/** AISDLC-1070: a takeover pushes to the PR branch, so refuse a protected branch by name. */
+function refuseProtected(pr: number, ref: string, opts: ComputeBranchOptions): void {
+  if (isProtectedBranch(ref, [])) {
+    throw new Error(
+      `Step 2 for ${opts.taskId}: fixesPr #${pr} refused: head branch '${ref}' is protected; ` +
+        `a takeover pushes to the PR branch, so it must be a feature branch`,
+    );
   }
 }
 
 /** AISDLC-1054: the head branch of a PR, which must be a plain git ref name. */
 async function readPrHeadRef(pr: number, opts: ComputeBranchOptions): Promise<string> {
   const runner = opts.runner ?? (await import('../runtime/exec.js')).defaultRunner;
-  const r = await runner('gh', ['pr', 'view', String(pr), '--json', 'headRefName'], {
-    cwd: opts.workDir,
-    allowFailure: true,
-  });
-  const ref = parseHeadRef(r.code === 0 ? r.stdout : '');
+  const r = await runner(
+    'gh',
+    ['pr', 'view', String(pr), '--json', 'headRefName,isCrossRepository'],
+    { cwd: opts.workDir, allowFailure: true },
+  );
+  const { ref, cross } = parseHeadInfo(r.code === 0 ? r.stdout : '');
   if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(ref) || ref.includes('..')) {
     throw new Error(
       `Step 2 for ${opts.taskId}: could not resolve the head branch of PR #${pr} (fixesPr); ` +
         `check \`gh pr view ${pr}\` or set prHeadRef on the manifest`,
+    );
+  }
+  if (cross) {
+    throw new Error(
+      `Step 2 for ${opts.taskId}: fixesPr #${pr} refused: the PR head lives in another repository ` +
+        `(a fork), so this repo's branch cannot be pushed to`,
     );
   }
   return ref;
@@ -329,6 +348,7 @@ export async function computeBranchName(opts: ComputeBranchOptions): Promise<Com
   const taskIdLower = opts.taskId.toLowerCase();
   if (opts.fixesPr !== undefined) {
     const branch = opts.prHeadRef ?? (await readPrHeadRef(opts.fixesPr, opts));
+    refuseProtected(opts.fixesPr, branch, opts);
     return {
       branch,
       worktreePath: join(opts.workDir, '.worktrees', taskIdLower),
