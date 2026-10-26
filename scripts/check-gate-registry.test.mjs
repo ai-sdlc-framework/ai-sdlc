@@ -128,7 +128,7 @@ const BASELINE_IDS = [
   'test-chain:pnpm test:gates',
   'test-chain:pnpm rfc:check',
   'test-chain:pnpm dark-code:check',
-  'test-chain:pnpm sync:plugin-runtime-deps:check',
+  'test-chain:pnpm sync:plugin-runtime-deps:check:pr',
   'role-action:gh pr merge*',
   'role-action:git merge*',
   'role-action:git push --force*',

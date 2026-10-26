@@ -38,6 +38,11 @@
  * Usage:
  *   node scripts/sync-plugin-runtime-deps.mjs           # write mode (default)
  *   node scripts/sync-plugin-runtime-deps.mjs --check    # exit 1 on drift, no write
+ *   node scripts/sync-plugin-runtime-deps.mjs --pr       # exit 1 if the two manifests disagree (AISDLC-1068)
+ *
+ * `--pr` is the per-PR gate form: it compares the manifests only with each
+ * other, never with the workspace versions, so a release pin lag on main
+ * cannot turn every open PR red. `--check` runs on main (main-health-monitor).
  *
  * Exit codes:
  *   0 — no drift (--check) or write succeeded / was a no-op (default)
@@ -142,7 +147,32 @@ export function applyPinsToManifest(manifestPath, pins) {
   return changed;
 }
 
+/** Self-consistency: both manifests must carry identical pins for every synced package. */
+export function findManifestMismatches(repoRoot) {
+  const manifests = MANIFEST_PATHS.map((p) => JSON.parse(readFileSync(join(repoRoot, p), 'utf-8')));
+  const out = [];
+  for (const { pkgName } of SYNCED_PACKAGES) {
+    const pins = manifests.map((m) => m.runtimeDependencies?.[pkgName]);
+    if (new Set(pins).size > 1) out.push(`${pkgName}: ${pins.join(' vs ')}`);
+  }
+  return out;
+}
+
 async function main() {
+  if (process.argv.includes('--pr')) {
+    for (const p of MANIFEST_PATHS) {
+      if (!existsSync(join(REPO_ROOT, p))) {
+        console.error(`sync-plugin-runtime-deps: manifest not found: ${p}`);
+        process.exitCode = 2;
+        return;
+      }
+    }
+    const mismatches = findManifestMismatches(REPO_ROOT);
+    for (const m of mismatches) console.error(`sync-plugin-runtime-deps: manifests disagree: ${m}`);
+    if (mismatches.length > 0) process.exitCode = 1;
+    else console.error('sync-plugin-runtime-deps: manifests agree (--pr).');
+    return;
+  }
   const checkOnly = process.argv.includes('--check');
   const repoRoot = REPO_ROOT;
 

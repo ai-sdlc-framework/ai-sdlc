@@ -102,6 +102,13 @@ jobs:
         continue-on-error: true
         run: pnpm rfc:check
 
+      # AISDLC-1068: main-state check moved off the per-PR gate, so a release
+      # pin lag never blocks every open PR (red here routes through the run conclusion).
+      - name: Plugin runtime pin drift check
+        id: plugin-pins
+        continue-on-error: true
+        run: pnpm sync:plugin-runtime-deps:check
+
       - name: Coverage (full)
         id: coverage
         continue-on-error: true
@@ -144,7 +151,7 @@ jobs:
         run: |
           full="${{ steps.full-test.outcome }}"
           workflow="${{ steps.workflow-test.outcome }}"
-          extra="plugin=${{ steps.plugin-test.outcome }} lint=${{ steps.lint.outcome }} format=${{ steps.format.outcome }} schemas=${{ steps.schemas.outcome }} rfc=${{ steps.rfc-check.outcome }} coverage=${{ steps.coverage.outcome }} smoke=${{ steps.smoke.outcome }}"
+          extra="plugin=${{ steps.plugin-test.outcome }} lint=${{ steps.lint.outcome }} format=${{ steps.format.outcome }} schemas=${{ steps.schemas.outcome }} rfc=${{ steps.rfc-check.outcome }} plugin-pins=${{ steps.plugin-pins.outcome }} coverage=${{ steps.coverage.outcome }} smoke=${{ steps.smoke.outcome }}"
           echo "full-test outcome: $full"
           echo "workflow-test outcome: $workflow"
           echo "other outcomes: $extra"
@@ -164,10 +171,10 @@ jobs:
           {
             echo "## main is RED at ${GITHUB_SHA:0:8}"
             echo ""
-            echo "full-test=${{ steps.full-test.outcome }} workflow-test=${{ steps.workflow-test.outcome }} plugin-test=${{ steps.plugin-test.outcome }}"
+            echo "full-test=${{ steps.full-test.outcome }} workflow-test=${{ steps.workflow-test.outcome }} plugin-test=${{ steps.plugin-test.outcome }} plugin-pins=${{ steps.plugin-pins.outcome }}"
             echo "Runbook: docs/operations/main-health-monitor.md"
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "::error::main health check FAILED — full-test=${{ steps.full-test.outcome }} workflow-test=${{ steps.workflow-test.outcome }} plugin-test=${{ steps.plugin-test.outcome }}"
+          echo "::error::main health check FAILED — full-test=${{ steps.full-test.outcome }} workflow-test=${{ steps.workflow-test.outcome }} plugin-test=${{ steps.plugin-test.outcome }} plugin-pins=${{ steps.plugin-pins.outcome }}"
           echo "::error::See the steps above for failing test output."
           echo "::error::Runbook: docs/operations/main-health-monitor.md"
           exit 1

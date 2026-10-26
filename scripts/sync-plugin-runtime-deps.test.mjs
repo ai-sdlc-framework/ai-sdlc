@@ -17,6 +17,8 @@ import {
   computeDesiredPins,
   nextMajorUpperBound,
   applyPinsToManifest,
+  findManifestMismatches,
+  REPO_ROOT,
   SYNCED_PACKAGES,
   MANIFEST_PATHS,
 } from './sync-plugin-runtime-deps.mjs';
@@ -292,6 +294,86 @@ describe('CLI end-to-end (--check and write modes)', () => {
       const rewritten = JSON.parse(readFileSync(manifestPath, 'utf-8'));
       assert.equal(rewritten.runtimeDependencies['@ai-sdlc/orchestrator'], '>=0.20.5 <1.0.0');
       assert.equal(rewritten.runtimeDependencies['@ai-sdlc/pipeline-cli'], '>=0.20.5 <1.0.0');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('findManifestMismatches / --pr (AISDLC-1068)', () => {
+  const pins = { orchestrator: '>=0.20.5 <1.0.0', pipelineCli: '>=0.20.5 <1.0.0' };
+
+  it('real repo manifests agree', () => {
+    assert.deepEqual(findManifestMismatches(REPO_ROOT), []);
+  });
+
+  it('returns an entry when the two manifests differ', () => {
+    const root = buildFixtureRepo({
+      orchestratorVersion: '0.20.5',
+      pipelineCliVersion: '0.20.5',
+      pins,
+    });
+    try {
+      const alt = join(root, 'ai-sdlc-plugin', '.claude-plugin', 'plugin.json');
+      const m = JSON.parse(readFileSync(alt, 'utf-8'));
+      m.runtimeDependencies['@ai-sdlc/orchestrator'] = '>=0.20.4 <1.0.0';
+      writeFileSync(alt, JSON.stringify(m));
+      const out = findManifestMismatches(root);
+      assert.equal(out.length, 1);
+      assert.match(out[0], /@ai-sdlc\/orchestrator/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  function runPr(root) {
+    mkdirSync(join(root, 'scripts'), { recursive: true });
+    const script = join(realpathSync(root), 'scripts', 'sync-plugin-runtime-deps.mjs');
+    writeFileSync(script, readFileSync(SCRIPT, 'utf-8'));
+    return spawnSync(process.execPath, [script, '--pr'], { encoding: 'utf-8' });
+  }
+
+  it('CLI --pr exits 0 on agreement even when pins lag the workspace', () => {
+    const root = buildFixtureRepo({
+      orchestratorVersion: '0.20.5',
+      pipelineCliVersion: '0.20.5',
+      pins: { orchestrator: '>=0.19.0 <1.0.0', pipelineCli: '>=0.19.0 <1.0.0' },
+    });
+    try {
+      assert.equal(runPr(root).status, 0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('CLI --pr exits 1 when the manifests disagree', () => {
+    const root = buildFixtureRepo({
+      orchestratorVersion: '0.20.5',
+      pipelineCliVersion: '0.20.5',
+      pins,
+    });
+    try {
+      const alt = join(root, 'ai-sdlc-plugin', '.claude-plugin', 'plugin.json');
+      const m = JSON.parse(readFileSync(alt, 'utf-8'));
+      m.runtimeDependencies['@ai-sdlc/pipeline-cli'] = '>=0.1.0 <1.0.0';
+      writeFileSync(alt, JSON.stringify(m));
+      const res = runPr(root);
+      assert.equal(res.status, 1);
+      assert.match(res.stderr, /manifests disagree/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('CLI --pr exits 2 when a manifest is missing', () => {
+    const root = buildFixtureRepo({
+      orchestratorVersion: '0.20.5',
+      pipelineCliVersion: '0.20.5',
+      pins,
+    });
+    try {
+      rmSync(join(root, 'ai-sdlc-plugin', '.claude-plugin', 'plugin.json'));
+      assert.equal(runPr(root).status, 2);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

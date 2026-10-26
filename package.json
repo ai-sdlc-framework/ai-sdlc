@@ -12,7 +12,7 @@
   "scripts": {
     "typecheck": "pnpm -r --parallel exec tsc --noEmit",
     "build": "pnpm -r build",
-    "test": "pnpm -r test && pnpm test:gates && pnpm rfc:check && pnpm dark-code:check && pnpm lint:publishable && pnpm knowledge:check && pnpm sync:plugin-runtime-deps:check",
+    "test": "pnpm -r test && pnpm test:gates && pnpm rfc:check && pnpm dark-code:check && pnpm lint:publishable && pnpm knowledge:check && pnpm sync:plugin-runtime-deps:check:pr",
     "test:gates": "node scripts/run-gate-tests.mjs",
     "test:coverage": "pnpm -r test:coverage",
     "lint": "eslint . && node scripts/check-clock-discipline.mjs",
@@ -87,6 +87,7 @@
     "test:substrate-contract-gate": "node --test scripts/check-substrate-contract.test.mjs",
     "test:substrate-contract-conformance": "node --test scripts/check-substrate-contract.conformance.test.mjs",
     "sync:plugin-runtime-deps:check": "node scripts/sync-plugin-runtime-deps.mjs --check",
+    "sync:plugin-runtime-deps:check:pr": "node scripts/sync-plugin-runtime-deps.mjs --pr",
     "test:sync-plugin-runtime-deps-gate": "node --test scripts/sync-plugin-runtime-deps.test.mjs",
     "test:pr-governance-gate": "node --test scripts/check-pr-governance.test.mjs",
     "test:parent-on-main-hook": "node --test ai-sdlc-plugin/hooks/parent-on-main.test.mjs",
