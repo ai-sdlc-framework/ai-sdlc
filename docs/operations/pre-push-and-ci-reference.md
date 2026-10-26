@@ -38,13 +38,15 @@ PR merge gate is the single rollup check `ai-sdlc/pr-ready` produced by `.github
 
 Workflows MUST invoke pipeline-cli CLIs via `node pipeline-cli/bin/cli-XXX.mjs` directly — never via `pnpm --filter @ai-sdlc/pipeline-cli exec cli-XXX`. `pnpm exec` does not resolve workspace own-bins, so the latter form silently fails with `Command not found` and any `|| echo <fallback>` safety net fires unconditionally. `pipeline-cli/src/cli/bin-invocation.test.ts` enforces both directions of this rule. See AISDLC-156 + the "Invoking from CI" section of `pipeline-cli/README.md`.
 
+### Plugin runtime pin check (AISDLC-1068)
+
+`pnpm sync:plugin-runtime-deps:check:pr` (wired into `pnpm test` and the PR gate, AISDLC-1068) checks only that the two plugin manifests agree; `pnpm sync:plugin-runtime-deps:check` (workspace comparison) runs in `main-health-monitor.yml`.
+
 ### Claude plugin validator (AISDLC-1060)
 
 `claude plugin validate ai-sdlc-plugin` runs at both tiers because the host's loader is the validator and unit tests cannot see duplicate hook registrations (RCA 2026-10-23). CI: the `plugin-validate` job of `ai-sdlc-gate.yml` runs only when the changeset touches `ai-sdlc-plugin/**`, installs `@anthropic-ai/claude-code` at the version pinned in the job (`CLAUDE_CODE_VERSION`, no login needed) and is part of the `ai-sdlc/pr-ready` rollup (skipped is allowed). Errors fail; warnings stay warnings. Pre-push: same command when a pushed commit touches `ai-sdlc-plugin/` and `claude` is on PATH; otherwise one warning line and the push continues. Skip: `AI_SDLC_SKIP_PLUGIN_VALIDATE=1`.
 
 ### Dark-code gate (AISDLC-552)
-
-`pnpm sync:plugin-runtime-deps:check:pr` (wired into `pnpm test` and the PR gate, AISDLC-1068) checks only that the two plugin manifests agree; `pnpm sync:plugin-runtime-deps:check` (workspace comparison) runs in `main-health-monitor.yml`.
 
 `pnpm dark-code:check` (wired into `pnpm test`) fails when a module has **no
 non-test importer and no barrel re-export** — code that ships with passing unit
