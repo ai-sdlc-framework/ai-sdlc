@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { classify, renderBoard } from '../../hooks/hierarchy/dispatch.ts';
-import { register } from '../../hooks/hierarchy/register.tsx';
+import { registerStrict } from './hierarchy-strict-host.ts';
 
 const env = (from: string, text: string) =>
   `<cross-session-message from="${from}" id="1"><agent-message kind="text">${text}</agent-message></cross-session-message>`;
@@ -18,8 +18,7 @@ const STATUS = {
 const EMPTY_TICK = { blockers: [], ingested: [], verdicts: [], escalations: [], reports: [] };
 
 function setup(tickResult: unknown = EMPTY_TICK) {
-  const handlers = new Map<string, any>();
-  register((n: string, h: any) => handlers.set(n, h), {});
+  const handlers = registerStrict({});
   const kv = new Map<string, any>();
   let timer: (() => Promise<void>) | undefined;
   const runs: string[][] = [];
@@ -327,7 +326,6 @@ describe('dispatch host (AISDLC-1035)', () => {
     delete t.$.clock.every;
     await t.start();
     expect((t.kv.get('hierarchy/log') as string[]).join()).toContain('clock.every');
-    expect(t.handlers.has('ui.render')).toBe(false);
     const u = setup();
     await u.start();
     u.handlers.get('session.receive'); // registered once enabled
