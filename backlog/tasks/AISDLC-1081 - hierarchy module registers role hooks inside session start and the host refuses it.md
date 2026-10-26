@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1081
 title: 'hierarchy hooks module registers its role hooks from inside session.start, which the host refuses, so no session ever ticks, rotates or writes its health file'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-26'
 labels:
