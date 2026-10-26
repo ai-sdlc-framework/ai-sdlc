@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1067
 title: 'executor session start context is cut from about 72k tokens to under 30k by moving reference prose out of the command, CLAUDE.md and the governance preamble'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-23'
 labels:
