@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1078
 title: 'step 6 runs the verify commands itself and gates on exit status, not on the developer subagent self-reported verifications'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-23'
 labels:

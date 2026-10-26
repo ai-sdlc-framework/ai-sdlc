@@ -23,7 +23,12 @@ import {
   computeBranchName,
   coerceReviewerVerdict,
   finalizeTask,
+  claimedGreenButRed,
+  formatVerifyFeedback,
   iterateReviewLoop,
+  recordDeveloperHonestyEvent,
+  runVerifyCommands,
+  writeVerifyRunState,
   parseDeveloperReturnWithRetry,
   pushAndPr,
   setupWorktree,
@@ -57,6 +62,18 @@ import {
 } from './types.js';
 
 /** The dispatch board of the checkout the pipeline runs from. */
+function mergeVerified(
+  claimed: DeveloperReturn['verifications'],
+  verified: Record<'build' | 'test' | 'lint' | 'format', DeveloperReturn['verifications']['build']>,
+): DeveloperReturn['verifications'] {
+  return {
+    build: verified.build === 'skipped' ? claimed.build : verified.build,
+    test: verified.test === 'skipped' ? claimed.test : verified.test,
+    lint: verified.lint === 'skipped' ? claimed.lint : verified.lint,
+    format: verified.format === 'skipped' ? claimed.format : verified.format,
+  };
+}
+
 function dispatchBoardDir(workDir: string): string {
   return process.env.AI_SDLC_DISPATCH_BOARD_DIR ?? join(workDir, '.ai-sdlc', 'dispatch');
 }
@@ -413,7 +430,74 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       outcome = failOutcome;
       return abort(opts, branch.branch, branch.worktreePath, null, aborted, failOutcome);
     }
-    const initialDev: DeveloperReturn = parsedDev.developer;
+    let initialDev: DeveloperReturn = parsedDev.developer;
+
+    // Step 6 code gate (AISDLC-1078): run the manifest's verifyCommands ourselves and gate on
+    // exit status. A red run goes back to step 5 (counted against the iteration cap) and never
+    // reaches a reviewer. Runs only for a claimed dispatch manifest; inline specs have none.
+    const reviewCap = opts.maxReviewIterations ?? 2;
+    let verifyRounds = 0;
+    const verifyCommands = claimed?.spec?.verifyCommands;
+    if (verifyCommands) {
+      for (;;) {
+        const run = await runVerifyCommands({
+          commands: verifyCommands,
+          cwd: branch.worktreePath,
+          developerClaimed: initialDev.verifications,
+          ...(opts.runner ? { runner: opts.runner } : {}),
+          ...(opts.verifyTimeoutMs !== undefined ? { timeoutMs: opts.verifyTimeoutMs } : {}),
+        });
+        writeVerifyRunState(routingArtifactsDir(opts.workDir), opts.taskId, run);
+        if (run.ok) {
+          initialDev = {
+            ...initialDev,
+            verifications: run.skipped
+              ? initialDev.verifications
+              : mergeVerified(initialDev.verifications, run.verifications),
+          };
+          break;
+        }
+        if (claimedGreenButRed(run)) recordDeveloperHonestyEvent(opts.workDir, opts.taskId, run);
+        if (verifyRounds >= reviewCap) {
+          aborted = `verify command failed after ${verifyRounds} developer round(s): ${run.failing?.command}`;
+          outcome = 'developer-failed';
+          return abort(opts, branch.branch, branch.worktreePath, null, aborted, 'developer-failed');
+        }
+        verifyRounds += 1;
+        logger.progress(
+          '06-verify',
+          `red (${run.failing?.command}); back to step 5, round ${verifyRounds}`,
+        );
+        const { prompt: fixPrompt, model: fixModel } = await buildDeveloperPrompt({
+          taskId: opts.taskId,
+          task,
+          branch: branch.branch,
+          worktreePath: branch.worktreePath,
+          iteration: verifyRounds + 1,
+          sourceKind: opts.sourceKind,
+          resumeFeedback: formatVerifyFeedback(run),
+        });
+        const fixSpawn = await spawner.spawn({
+          type: 'developer',
+          prompt: fixPrompt,
+          cwd: branch.worktreePath,
+          ...(fixModel ? { model: fixModel } : {}),
+        });
+        const reparsed = await parseDeveloperReturnWithRetry({
+          initialResult: fixSpawn,
+          cwd: branch.worktreePath,
+          spawner,
+        });
+        if (!reparsed.ok || !reparsed.developer) {
+          aborted = reparsed.reason ?? 'developer subagent failed';
+          outcome = reparsed.contractViolation
+            ? 'developer-json-contract-violated'
+            : 'developer-failed';
+          return abort(opts, branch.branch, branch.worktreePath, null, aborted, outcome);
+        }
+        initialDev = reparsed.developer;
+      }
+    }
 
     // Step 7 — build 3 review prompts
     const reviewBuild = await buildReviewPrompts({
@@ -484,7 +568,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       branch: branch.branch,
       initialDeveloperReturn: initialDev,
       initialVerdict,
-      maxIterations: opts.maxReviewIterations ?? 2,
+      maxIterations: Math.max(0, reviewCap - verifyRounds),
       sourceKind,
       reviewSourceKind,
       spawner: spawner,
