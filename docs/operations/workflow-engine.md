@@ -68,3 +68,14 @@ base branch (never the working tree); the last-anchor rule has no such override.
 without `extends` are checked against the default the same way. Promoting the staged lens or a
 `gating: false` node to gating is a tightening, accepted with the authorizing reference
 (RFC-0052 OQ-2) logged. `pr-lifecycle.yaml` is read from the base branch like the other configs.
+
+## Step 6 verify gate (AISDLC-1078)
+
+Step 6 does not trust the developer's self-reported `verifications`. After the return parses, `executePipeline` runs the claimed manifest's `spec.verifyCommands` (`pnpm build`, `pnpm test`, `pnpm lint`, `pnpm format:check` by default) in the task worktree through the injected runner (`sh -c`), in order, stopping at the first non-zero exit. Implementation: `pipeline-cli/src/steps/verify-commands.ts`; the workflow engine step node reuses the same functions.
+
+- **Per-command timeout:** `PipelineOptions.verifyTimeoutMs`, default 20 minutes. A timed-out command counts as red.
+- **Authoritative record:** `<artifacts>/verify-runs/<task-id>.json` holds `verifications` (from exit codes), the per-command exit code and last 60 output lines, and `developerClaimed` (the developer's report, for the record only).
+- **Red:** the run returns to step 5 with the failing command and tail as developer feedback, no reviewer is built, and the round counts against `maxReviewIterations` (the review loop gets the remainder). Still red at the cap yields `developer-failed`.
+- **Honesty event:** a developer that claimed green while code found red appends a `developer-honesty` line to `.ai-sdlc/usage/developer-honesty.jsonl`.
+- **Docs-only:** `verifyCommands: []` records `skipped: docs-only` and proceeds.
+- **No manifest:** runs without a claimed dispatch manifest (inline specs, resume re-entry) have no `verifyCommands` and keep the previous behaviour.

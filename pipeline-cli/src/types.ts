@@ -30,6 +30,8 @@ export interface PipelineOptions {
    * verdict before flagging `needs-human-attention`.
    */
   maxReviewIterations?: number;
+  /** Per-command timeout for the step 6 verify gate (AISDLC-1078); default 20 minutes. */
+  verifyTimeoutMs?: number;
   /** Optional progress callback fired per iteration of the review loop. */
   onProgress?: (iteration: number, verdict: AggregatedVerdict) => Promise<void> | void;
   /** Optional logger; defaults to console. */

@@ -22,3 +22,4 @@ export * from './11-late-rebase.js';
 export * from './11-push-and-pr.js';
 export * from './12-sibling-prs.js';
 export * from './13-cleanup.js';
+export * from './verify-commands.js';
