@@ -59,7 +59,7 @@ All hierarchy hooks are now registered from register() itself, so the host no lo
 
 ## Changes
 - ai-sdlc-plugin/hooks/hierarchy/register.tsx
-- ai-sdlc-plugin/mods/tests/hierarchy-strict-host.ts
+- ai-sdlc-plugin/mods/tests/stubs/hierarchy-strict-host.ts
 - ai-sdlc-plugin/mods/tests/hierarchy.test.ts
 - ai-sdlc-plugin/mods/tests/hierarchy-dispatch.test.ts
 - ai-sdlc-plugin/mods/tests/hierarchy-register-once.test.ts

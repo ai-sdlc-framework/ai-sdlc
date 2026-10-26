@@ -1,4 +1,4 @@
-import { register } from '../../hooks/hierarchy/register.tsx';
+import { register } from '../../../hooks/hierarchy/register.tsx';
 
 // AISDLC-1081: the real host throws on any on() made after register() returned. Every hierarchy test
 // registers through this stub so a late on() fails the test instead of the live session.

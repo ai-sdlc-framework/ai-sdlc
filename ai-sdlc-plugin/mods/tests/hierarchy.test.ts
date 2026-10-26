@@ -18,7 +18,7 @@ import {
   PLANNER_ROTATE_AT_TOKENS,
   lastReplyKey,
 } from '../../hooks/hierarchy/planner.ts';
-import { registerStrict } from './hierarchy-strict-host.ts';
+import { registerStrict } from './stubs/hierarchy-strict-host.ts';
 
 const env = (from: string, text: string) =>
   `<cross-session-message from="${from}" id="1"><agent-message kind="text">${text}</agent-message></cross-session-message>`;

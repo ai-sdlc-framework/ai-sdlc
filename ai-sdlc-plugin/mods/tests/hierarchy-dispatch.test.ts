@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { classify, renderBoard } from '../../hooks/hierarchy/dispatch.ts';
-import { registerStrict } from './hierarchy-strict-host.ts';
+import { registerStrict } from './stubs/hierarchy-strict-host.ts';
 
 const env = (from: string, text: string) =>
   `<cross-session-message from="${from}" id="1"><agent-message kind="text">${text}</agent-message></cross-session-message>`;
