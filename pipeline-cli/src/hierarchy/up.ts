@@ -18,6 +18,7 @@ import { checkCrossSessionInbound, evaluateResourceGate, readSettingsView } from
 import { isLegacyLayoutEntry, readRosterChecked, writeRoster } from './roster.js';
 import { inspectVscodeTasks, syncVscodeTasks } from './terminals.js';
 import { assertDispatchModuleLoaded } from './module-health.js';
+import { overContextWarnings } from './context-size.js';
 import {
   hasSession,
   markSessionOwned,
@@ -594,6 +595,12 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
   if (opts.verifyModule) {
     const hosts = roster.sessions.filter((e) => e.role === 'operator-dispatch');
     if (hosts.length > 0) await assertDispatchModuleLoaded(deps, hosts);
+  }
+
+  try {
+    for (const line of overContextWarnings(deps, roster.sessions)) deps.log(line);
+  } catch {
+    /* a context read must never fail up */
   }
 
   let attachExitCode: number | undefined;

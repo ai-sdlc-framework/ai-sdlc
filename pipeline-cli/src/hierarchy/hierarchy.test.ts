@@ -852,7 +852,9 @@ describe('hierarchy status', () => {
     const json = JSON.parse(JSON.stringify(result)) as { rows: { launchEnv: string }[] };
     expect(json.rows.map((r) => r.launchEnv)).toEqual(['ok', 'missing']);
     const lines = formatStatus(result);
-    expect(lines[0]).toMatch(/INFLIGHT\s+LANDING\s+ENV\s+NODE\s+MODULE\s+HIERARCHY_SESSION/);
+    expect(lines[0]).toMatch(
+      /INFLIGHT\s+LANDING\s+ENV\s+NODE\s+MODULE\s+CONTEXT\s+HIERARCHY_SESSION/,
+    );
     expect(lines.find((l) => l.includes('env missing on'))).toContain(
       'cli-hierarchy down --role executor',
     );
@@ -1753,7 +1755,7 @@ describe('pinned Node (AISDLC-812)', () => {
       ['22.19.0', true],
     ]);
     const lines = formatStatus(result);
-    expect(lines[0]).toMatch(/ENV\s+NODE\s+MODULE\s+HIERARCHY_SESSION/);
+    expect(lines[0]).toMatch(/ENV\s+NODE\s+MODULE\s+CONTEXT\s+HIERARCHY_SESSION/);
     expect(lines.join('\n')).toContain('22.19.0 MISMATCH');
     expect(lines.join('\n')).toContain('node mismatch on');
     // ps unreadable: no version, no flag.

@@ -76,6 +76,8 @@ export interface RegistrySession {
   /** Harness-reported state, typically `busy` or `idle`. */
   status: string;
   cwd?: string;
+  /** Harness session id; names the transcript file (AISDLC-1066). */
+  sessionId?: string;
 }
 
 /** A point-in-time view of machine headroom used by the resource gate. */

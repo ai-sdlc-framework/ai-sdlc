@@ -33,6 +33,7 @@ import {
 } from './reconcile-scheduler.js';
 import { formatWebhookStatus, webhookStatus, type WebhookStatus } from './webhook.js';
 import { listWindows, paneInfo, paneStartCommand, sessionAttached } from './tmux.js';
+import { contextWarning, formatContext, sessionContextTokens } from './context-size.js';
 import { resolveThresholds } from './thresholds.js';
 import type { HierarchyDeps, HierarchyRole, RosterEntry } from './types.js';
 
@@ -60,6 +61,10 @@ export interface StatusRow {
   nodeMismatch?: boolean;
   /** Hooks-module heartbeat (AISDLC-1061); `absent` when the session never wrote one. */
   module: ModuleHealth;
+  /** Context tokens from the transcript tail (AISDLC-1066); absent when the transcript cannot be found. */
+  contextTokens?: number;
+  /** True when `contextTokens` exceeds the role's clear threshold. */
+  overThreshold?: boolean;
   /** Present with `launchEnv: 'missing'`: how to repair it. */
   nextStep?: string;
 }
@@ -113,6 +118,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
   };
 
   const wantedNode = readNvmrc(deps.cwd);
+  const thresholdsByRole = resolveThresholds(deps.boardDir);
   const rows = roster.sessions.map((entry): StatusRow => {
     const live =
       registry.find((r) => r.name === entry.name) ??
@@ -141,9 +147,13 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
       nodeVersion !== undefined &&
       wantedNode !== undefined &&
       !versionMatches(wantedNode, nodeVersion);
+    const contextTokens = alive ? sessionContextTokens(deps, live) : undefined;
     return {
       entry,
       state,
+      ...(contextTokens !== undefined
+        ? { contextTokens, overThreshold: contextTokens > thresholdsByRole[entry.role] }
+        : {}),
       ...(nodeVersion ? { nodeVersion } : {}),
       ...(nodeMismatch ? { nodeMismatch } : {}),
       module: readModuleHealth(deps.boardDir, entry, deps.now()),
@@ -205,7 +215,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     board: peekQueue(deps.boardDir),
     webhook: webhookStatus(deps),
     scheduler: schedulerStatus(deps),
-    contextThresholds: resolveThresholds(deps.boardDir),
+    contextThresholds: thresholdsByRole,
     ...(unbriefed.length > 0 ? { unbriefed } : {}),
     ...(blocked.length > 0 ? { blocked } : {}),
   };
@@ -248,6 +258,7 @@ export function formatStatus(result: StatusResult): string[] {
     'ENV',
     'NODE',
     'MODULE',
+    'CONTEXT',
     'HIERARCHY_SESSION',
     'HIERARCHY_ROLE',
   ];
@@ -263,6 +274,7 @@ export function formatStatus(result: StatusResult): string[] {
     r.launchEnv ?? '-',
     r.nodeVersion ? `${r.nodeVersion}${r.nodeMismatch ? ' MISMATCH' : ''}` : '-',
     formatModuleHealth(r.module),
+    r.state === 'gone' ? '-' : formatContext(r.contextTokens, r.overThreshold),
     r.entry.tmuxSession,
     r.entry.role,
   ]);
@@ -283,10 +295,13 @@ export function formatStatus(result: StatusResult): string[] {
         ]
       : [],
   );
+  const overLines = contextWarnings(result);
   return [
     fmt(header),
     ...body.map(fmt),
-    ...(repairs.length + nodeRepairs.length > 0 ? ['', ...repairs, ...nodeRepairs] : []),
+    ...(repairs.length + nodeRepairs.length + overLines.length > 0
+      ? ['', ...repairs, ...nodeRepairs, ...overLines]
+      : []),
     '',
     `board: ${queued} queued, ${inflight} inflight, ${done} done, ${failed} failed`,
     formatWebhookStatus(result.webhook),
@@ -315,4 +330,14 @@ function formatGhCalls(result: StatusResult): string[] {
     ? `remaining core ${q.core ?? '?'}, graphql ${q.graphql ?? '?'}`
     : 'remaining unknown';
   return [`gh calls last hour: ${per}; ${quota}`, ...growth];
+}
+
+/** One warning line per session whose context is above its clear threshold (AISDLC-1066). */
+export function contextWarnings(result: StatusResult): string[] {
+  const t = result.contextThresholds;
+  return result.rows.flatMap((r) =>
+    r.overThreshold && r.contextTokens !== undefined && t
+      ? [contextWarning(r.entry.name, r.contextTokens, t[r.entry.role])]
+      : [],
+  );
 }
