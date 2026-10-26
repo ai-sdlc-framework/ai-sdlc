@@ -12,11 +12,14 @@ describe('hierarchy module registers each event once', () => {
     const seen: string[] = [];
     let role = 'executor';
     const handlers = new Map<string, any>();
+    let open = true;
     register((event: string, a: any, b?: any) => {
+      if (!open) throw new Error('on() after register() returned');
       const matcher = typeof a === 'function' ? undefined : a;
       seen.push(`${event}|${JSON.stringify(matcher ?? null)}`);
       handlers.set(event, typeof a === 'function' ? a : b);
     }, {});
+    open = false;
     const stub = () => vi.fn(async () => undefined);
     const $: any = {
       env: { get: (k: string) => (k === 'HIERARCHY_ROLE' ? role : undefined) },

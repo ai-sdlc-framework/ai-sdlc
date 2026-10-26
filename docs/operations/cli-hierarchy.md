@@ -1161,8 +1161,13 @@ restart loses no queued work, but finish or accept the loss of any task in fligh
 **Module absent (AISDLC-1061).** `status` shows `MODULE absent`, `refused: <reason>` or `stale` for the
 dispatch host, or `up` exits 1 with `the hierarchy hooks module is not loaded on the dispatch host`. With
 no module the hierarchy is inert: no ticks, no executor wakes, no rotations, while `STATE` still reads
-`busy`/`idle`. Look at the one-line refusal in the dispatch pane (the host validator names the offending
-file and construct, or the primitive or version floor that failed), fix
+`busy`/`idle`. A refusal from the host validator or a hook that threw (for example `on() ... a hook may not
+register hooks`) is visible only in two places, not the pane: the Claude Code debug log and the plugin store log
+(`hierarchy/log`, which ending at the `role=... identity=...` line means the gate threw after it). Probe with
+`AI_SDLC_HIERARCHY_ROLE=executor AI_SDLC_HIERARCHY_SESSION=probe claude -p "ok" --max-turns 1 --debug`: it must
+write `.ai-sdlc/dispatch/handoff/module-probe.json` with `state: loaded` and print no
+`session.start hook skipped` line for `ai-sdlc`. All `on()` calls live in `register()`; the host refuses one
+made later. Fix
 `ai-sdlc-plugin/hooks/hierarchy/`, rebuild, then `cli-hierarchy down --role operator-dispatch` and
 `cli-hierarchy up`. `absent` on a planner or executor launched without a hierarchy role is expected.
 

@@ -18,7 +18,7 @@ import {
   PLANNER_ROTATE_AT_TOKENS,
   lastReplyKey,
 } from '../../hooks/hierarchy/planner.ts';
-import { register } from '../../hooks/hierarchy/register.tsx';
+import { registerStrict } from './stubs/hierarchy-strict-host.ts';
 
 const env = (from: string, text: string) =>
   `<cross-session-message from="${from}" id="1"><agent-message kind="text">${text}</agent-message></cross-session-message>`;
@@ -33,8 +33,7 @@ function setup(
     name?: string;
   } = {},
 ) {
-  const handlers = new Map<string, any>();
-  register((n: string, h: any) => handlers.set(n, h), {});
+  const handlers = registerStrict({});
   const kv = new Map<string, any>();
   const drop = new Set(over.drop ?? []);
   const result = (name: string) => (drop.has(name) ? { drop: 'busy' } : undefined);
@@ -98,12 +97,11 @@ const compacts = (s: ReturnType<typeof setup>) =>
 afterEach(() => vi.useRealTimers());
 
 describe('hierarchy module: gate', () => {
-  it('registers only the session.start gate and nothing else without a role', async () => {
+  it('registers every hook up front and a session without a role passes events through', async () => {
     const s = setup({ role: null });
     await s.start();
-    expect([...s.handlers.keys()]).toEqual(['session.start']);
     for (const h of ['turn.start', 'session.receive', 'turn.complete', 'session.measure'])
-      expect(s.handlers.has(h)).toBe(false);
+      expect(s.handlers.has(h)).toBe(true);
     expect(logOf(s.kv)).toEqual([]);
     expect(s.next).toHaveBeenCalled();
   });
@@ -118,6 +116,7 @@ describe('hierarchy module: gate', () => {
       'session.start',
       'turn.complete',
       'turn.start',
+      'ui.render',
     ]);
     expect(logOf(s.kv)[0]).toContain('role=executor tier=managed');
   });
@@ -131,7 +130,7 @@ describe('hierarchy module: gate', () => {
   it('refuses below the version floor and names it', async () => {
     const s = setup({ version: '2.1.300' });
     await s.start();
-    expect([...s.handlers.keys()]).toEqual(['session.start']);
+    expect(await s.handlers.get('turn.start')(s.$, 'e', (x: any) => x)).toBe('e'); // not armed
     expect(logOf(s.kv)).toHaveLength(1);
     expect(logOf(s.kv)[0]).toContain(`floor ${VERSION_FLOOR}`);
   });
@@ -141,7 +140,7 @@ describe('hierarchy module: gate', () => {
     async (omit) => {
       const s = setup({ omit });
       await s.start();
-      expect([...s.handlers.keys()]).toEqual(['session.start']);
+      expect(await s.handlers.get('turn.start')(s.$, 'e', (x: any) => x)).toBe('e'); // not armed
       const want = omit === 'session.usage' ? 'session.measure' : omit;
       expect(logOf(s.kv)[0]).toContain(`primitive ${want} is missing`);
       expect(logOf(s.kv)[0]).toContain(VERSION_FLOOR);
@@ -166,8 +165,7 @@ describe('hierarchy module: gate', () => {
 
   it('takes the role from the module option, never from a record carried in the store', async () => {
     const a = setup({ role: null });
-    const handlers = new Map<string, any>();
-    register((n: string, h: any) => handlers.set(n, h), { role: 'executor' });
+    const handlers = registerStrict({ role: 'executor' });
     await handlers.get('session.start')(a.$, {}, a.next);
     expect(handlers.has('turn.complete')).toBe(true);
     const b = setup({ role: null });
@@ -178,7 +176,7 @@ describe('hierarchy module: gate', () => {
       at: Date.now(),
     });
     await b.start();
-    expect([...b.handlers.keys()]).toEqual(['session.start']);
+    expect(await b.handlers.get('turn.start')(b.$, 'e', (x: any) => x)).toBe('e'); // not armed
     expect(b.kv.get(ROTATION_KEY)).toBeNull();
     expect(ran(b)).toEqual([]);
   });

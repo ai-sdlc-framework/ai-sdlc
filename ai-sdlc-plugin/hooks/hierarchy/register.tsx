@@ -1,6 +1,6 @@
 // RFC-0058 phase 1 (AISDLC-1034): the hierarchy hooks module, executor role only.
-// Registered through hooks/hooks.json `modules`. It registers one `session.start` gate; the role hooks are
-// registered from inside it, so a session with no hierarchy role (or a host below the floor) gets none.
+// Registered through hooks/hooks.json `modules`. All hooks register from register() (the host refuses on() later);
+// the session.start gate arms a role, and without one the forwarders pass events through.
 // `$` is only ever spelled `$.noun.verb(...)` here (the validator refuses anything else).
 import {
   ROTATION_KEY,
@@ -77,10 +77,7 @@ function onMeasure(r: Router, $: Any, e: Any, next: Any): Any {
 }
 
 export const register = (on: Any, options?: Any): void => {
-  // Each event is registered once per module (the validator is static and refuses a duplicate), and only
-  // when a role arms, so a session without a role registers nothing but the gate.
-  let wiredBase = false;
-  let wiredRender = false;
+  // Each event is registered once per module (the validator is static and refuses a duplicate).
   const router: Router = {
     current: '',
     executor: { active: false, pendingRotate: false, lastReply: '' },
@@ -96,20 +93,13 @@ export const register = (on: Any, options?: Any): void => {
   const state = router.executor;
   const dispatch = router.dispatch;
   const planner = router.planner;
-  const wire = (withRender: boolean): void => {
-    if (wiredBase) return wireRender(withRender);
-    wiredBase = true;
-    on('session.receive', ($: Any, e: Any, next: Any) => onReceive(router, $, e, next));
-    on('turn.start', ($: Any, e: Any, next: Any) => onTurnStart(router, $, e, next));
-    on('turn.complete', ($: Any, e: Any, next: Any) => onTurnComplete(router, $, e, next));
-    on('session.measure', ($: Any, e: Any, next: Any) => onMeasure(router, $, e, next));
-    wireRender(withRender);
-  };
-  const wireRender = (withRender: boolean): void => {
-    if (!withRender || wiredRender) return;
-    wiredRender = true;
-    on('ui.render', ($: Any, e: Any, next: Any) => onRender(router, $, e, next));
-  };
+  // The host refuses any on() after register() returned (AISDLC-1081), so every hook is registered here,
+  // once. The forwarders pass the event through while router.current is empty (no role armed).
+  on('session.receive', ($: Any, e: Any, next: Any) => onReceive(router, $, e, next));
+  on('turn.start', ($: Any, e: Any, next: Any) => onTurnStart(router, $, e, next));
+  on('turn.complete', ($: Any, e: Any, next: Any) => onTurnComplete(router, $, e, next));
+  on('session.measure', ($: Any, e: Any, next: Any) => onMeasure(router, $, e, next));
+  on('ui.render', ($: Any, e: Any, next: Any) => onRender(router, $, e, next));
   on('session.start', async ($: Any, e: Any, next: Any) => {
     const p: Ports = {
       storeGet: (k) => $.store.get(k),
@@ -178,7 +168,6 @@ export const register = (on: Any, options?: Any): void => {
     );
     if (role === 'operator-dispatch') {
       // AISDLC-1035: a model-less host. No prompt.submit port exists in the dispatch module.
-      wire(true);
       router.current = 'operator-dispatch';
       dispatch.enabled = true;
       dispatch.sessionName = sessionName;
@@ -226,7 +215,6 @@ export const register = (on: Any, options?: Any): void => {
       await health({ state: 'loaded' });
       // The roster name keys the stored last reply; the launcher sets it, the role is the fallback.
       planner.name = typeof named === 'string' && named ? named : 'planner';
-      wire(false);
       router.current = 'planner';
       planner.enabled = true;
       if (planner.resumePending) await resumeAfterClear(p, planner);
@@ -235,7 +223,6 @@ export const register = (on: Any, options?: Any): void => {
     }
     if (role !== 'executor') return next(e);
     await health({ state: 'loaded' });
-    wire(false);
     router.current = 'executor';
     state.enabled = true;
     // INTERIM: if a host fires session.start after a mod-run clear, resume from here as well.
