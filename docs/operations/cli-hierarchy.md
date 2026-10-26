@@ -2234,8 +2234,12 @@ that branch's own task id.
 
 ### Executor MCP servers (AISDLC-1067)
 
-`cli-hierarchy up` starts executors with `--strict-mcp-config`, so they load only the servers
-in `--mcp-config` and not the operator's personal connectors; the tool schemas of unrelated
-servers otherwise ride in every model call. Set `AI_SDLC_EXECUTOR_MCP_CONFIG=<path>` to an MCP
-config json naming the servers an executor keeps, or `AI_SDLC_EXECUTOR_MCP=all` to restore
-every configured server. Planner and dispatch sessions are unaffected.
+When `AI_SDLC_EXECUTOR_MCP_CONFIG=<path>` names an MCP config json, `cli-hierarchy up` starts
+executors with `--strict-mcp-config --mcp-config <path>`, so they load only those servers and
+not the operator's personal connectors; the tool schemas of unrelated servers otherwise ride in
+every model call. The config must include the plugin's own server (`task_edit`,
+`task_complete`). Unset, or `AI_SDLC_EXECUTOR_MCP=all`, leaves MCP loading unchanged (the
+strict flag alone would load no server at all). Planner and dispatch sessions are unaffected.
+
+The plugin is now the only source of the SessionStart governance block; the duplicate
+registration in `.claude/settings.json` was removed.

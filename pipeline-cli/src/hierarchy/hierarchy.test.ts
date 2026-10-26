@@ -245,6 +245,8 @@ const baseOpts: UpOptions = {
 let schedulerSpawns: string[][];
 
 beforeEach(() => {
+  vi.stubEnv('AI_SDLC_EXECUTOR_MCP', '');
+  vi.stubEnv('AI_SDLC_EXECUTOR_MCP_CONFIG', '');
   tmp = mkdtempSync(path.join(tmpdir(), 'hierarchy-'));
   boardDir = path.join(tmp, 'dispatch');
   registryDir = path.join(tmp, 'sessions');
@@ -283,6 +285,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -440,8 +443,8 @@ describe('hierarchy up', () => {
     ).toEqual([
       `AI_SDLC_HIERARCHY_SESSION='${Q('planner')}' AI_SDLC_HIERARCHY_ROLE='planner' 'claude' --name '${Q('planner')}' --model 'fable' --permission-mode 'bypassPermissions' '/ai-sdlc planner'`,
       `AI_SDLC_HIERARCHY_SESSION='${Q('operator-dispatch')}' AI_SDLC_HIERARCHY_ROLE='operator-dispatch' 'claude' --name '${Q('operator-dispatch')}' --model 'opus' --permission-mode 'bypassPermissions' '/ai-sdlc operator-dispatch'`,
-      `AI_SDLC_HIERARCHY_SESSION='${Q('executor-alpha')}' AI_SDLC_HIERARCHY_ROLE='executor' 'claude' --name '${Q('executor-alpha')}' --model 'sonnet' --permission-mode 'bypassPermissions' --strict-mcp-config '/ai-sdlc executor'`,
-      `AI_SDLC_HIERARCHY_SESSION='${Q('executor-beta')}' AI_SDLC_HIERARCHY_ROLE='executor' 'claude' --name '${Q('executor-beta')}' --model 'sonnet' --permission-mode 'bypassPermissions' --strict-mcp-config '/ai-sdlc executor'`,
+      `AI_SDLC_HIERARCHY_SESSION='${Q('executor-alpha')}' AI_SDLC_HIERARCHY_ROLE='executor' 'claude' --name '${Q('executor-alpha')}' --model 'sonnet' --permission-mode 'bypassPermissions' '/ai-sdlc executor'`,
+      `AI_SDLC_HIERARCHY_SESSION='${Q('executor-beta')}' AI_SDLC_HIERARCHY_ROLE='executor' 'claude' --name '${Q('executor-beta')}' --model 'sonnet' --permission-mode 'bypassPermissions' '/ai-sdlc executor'`,
     ]);
     // One detached session per agent, named after it; never a shared session or a new window.
     const creates = fake.calls.filter((c) =>
@@ -1627,7 +1630,7 @@ describe('validation helpers', () => {
         prompt: "a'b",
       }),
     ).toBe(
-      `AI_SDLC_HIERARCHY_SESSION='x' AI_SDLC_HIERARCHY_ROLE='executor' 'claude' --name 'x' --model 'm' --permission-mode 'p' --strict-mcp-config 'a'\\''b'`,
+      `AI_SDLC_HIERARCHY_SESSION='x' AI_SDLC_HIERARCHY_ROLE='executor' 'claude' --name 'x' --model 'm' --permission-mode 'p' 'a'\\''b'`,
     );
     for (const role of ['planner', 'operator-dispatch', 'executor'] as const) {
       const prefixed = buildClaudeCommand('claude', {
@@ -1668,7 +1671,7 @@ describe('pinned Node (AISDLC-812)', () => {
 
   it('executorMcpArgs limits only executors to the configured MCP servers (AISDLC-1067)', () => {
     expect(executorMcpArgs('planner', {})).toEqual([]);
-    expect(executorMcpArgs('executor', {})).toEqual(['--strict-mcp-config']);
+    expect(executorMcpArgs('executor', {})).toEqual([]);
     expect(executorMcpArgs('executor', { AI_SDLC_EXECUTOR_MCP_CONFIG: '/a/m.json' })).toEqual([
       '--strict-mcp-config',
       '--mcp-config',

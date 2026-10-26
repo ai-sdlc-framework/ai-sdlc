@@ -1,16 +1,48 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { measureStatic, countSessionStartRegistrations } from './measure-start-context.mjs';
+import {
+  measureStatic,
+  measureTranscript,
+  countSessionStartRegistrations,
+} from './measure-start-context.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 // Ceiling for the statically measurable executor start context (AISDLC-1067). Raise only
-// with a reason; the target for the full second call is 30k tokens.
+// with a reason. This is only a proxy for the 30k-token target on the full second model call,
+// which also includes skill/agent listings and MCP schemas that depend on the operator machine.
 const STATIC_CEILING_TOKENS = 7500;
+
+describe('measureTranscript (AISDLC-1067)', () => {
+  const write = (lines) => {
+    const f = join(mkdtempSync(join(tmpdir(), 'mt-')), 't.jsonl');
+    writeFileSync(f, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+    return f;
+  };
+
+  it('sums input and cache tokens of the second usage block', () => {
+    const f = write([
+      { message: { usage: { input_tokens: 1, cache_creation_input_tokens: 2 } } },
+      { type: 'user' },
+      {
+        message: {
+          usage: { input_tokens: 10, cache_creation_input_tokens: 20, cache_read_input_tokens: 30 },
+        },
+      },
+    ]);
+    assert.equal(measureTranscript(f), 60);
+  });
+
+  it('falls back to the only usage block and throws when none', () => {
+    assert.equal(measureTranscript(write([{ usage: { input_tokens: 5 } }])), 5);
+    assert.throws(() => measureTranscript(write([{ type: 'user' }])), /no assistant usage/);
+  });
+});
 
 describe('executor start context budget (AISDLC-1067)', () => {
   it('stays under the committed ceiling', () => {

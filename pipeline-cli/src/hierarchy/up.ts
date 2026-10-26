@@ -184,12 +184,14 @@ export function hasLaunchEnv(command: string, name: string, role: string): boole
  * AISDLC-1067: an executor loads only the MCP servers named by `--mcp-config`, not the operator's
  * personal connectors (their tool schemas would ride in every call). Set
  * `AI_SDLC_EXECUTOR_MCP_CONFIG=<path to an MCP config json>` to name the servers it keeps (the
- * plugin's own server); `AI_SDLC_EXECUTOR_MCP=all` restores every configured server.
+ * plugin's own server); unset leaves MCP loading unchanged; `AI_SDLC_EXECUTOR_MCP=all` forces that.
  */
 export function executorMcpArgs(role: string, env: NodeJS.ProcessEnv = process.env): string[] {
   if (role !== 'executor' || env.AI_SDLC_EXECUTOR_MCP === 'all') return [];
   const cfg = env.AI_SDLC_EXECUTOR_MCP_CONFIG;
-  return ['--strict-mcp-config', ...(cfg ? ['--mcp-config', shellQuote(cfg)] : [])];
+  // Without a config, --strict-mcp-config would load no server at all (not even the plugin's
+  // task_edit/task_complete), so the flag is only passed together with --mcp-config.
+  return cfg ? ['--strict-mcp-config', '--mcp-config', shellQuote(cfg)] : [];
 }
 
 /** Build the `claude` command line for one session. */
