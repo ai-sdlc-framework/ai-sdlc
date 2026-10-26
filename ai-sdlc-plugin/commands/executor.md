@@ -85,17 +85,7 @@ the executor stays idle until the dispatch session types `/ai-sdlc executor` (`c
 
 ## Step 2 - Run the pipeline, unmodified
 
-**Push-only resume.** When the `RESUMED TASK` block says `RESUME MODE: push-only` (the
-manifest's `resume.resumeMode`), run no developer and no reviewer subagent. In the existing worktree:
-`git fetch origin && git rebase origin/main` (mechanical only; on a conflict abort the rebase, report
-`failed` naming the conflicting files in the verdict note, and stop), build `reference`, `orchestrator`
-and `pipeline-cli`, run `pnpm lint` and `pnpm format:check` (fix format drift with `pnpm format` and commit
-it as `style:`), then sign from the existing `.ai-sdlc/verdicts/<task-id-lower>.json` and transcript
-leaves, lease-push from your own session (never a subagent), run `gh pr ready`, and report the verdict.
-After the rebase run `node pipeline-cli/bin/cli-dispatch.mjs push-only-check --task-id <task-id> --worktree <worktree>` (it wraps
-`evaluatePushOnly` in `pipeline-cli/src/dispatch/resume.ts`). Exit 1 means refuse the mode, say why in your status line, and continue in this same run with the normal
-pipeline below (a refusal is never a failure on its own) (the verdict is not an approval, or the branch content no longer matches an approval after the rebase). A missing verdict file
-alone is not a refusal: the JSON carries `verdictMissing`, so run the verdict step (sign from the approval envelope) rather than a developer. Never write a new verdict file and never set an `AI_SDLC_SKIP_*` variable.
+**Push-only resume.** When the `RESUMED TASK` block says `RESUME MODE: push-only`, run no developer and no reviewer: follow "Push-only resume" in `docs/operations/cli-hierarchy.md` (rebase, `cli-dispatch.mjs push-only-check`, sign, lease-push, `gh pr ready`). Never write a new verdict file and never set an `AI_SDLC_SKIP_*` variable.
 
 Run `/ai-sdlc execute <task-id>` with the task id and **nothing else**: invoke the plugin's `execute`
 command with the `Skill` tool, passing `$TASK_ID` as the only argument. If it reports a worktree with
@@ -129,7 +119,7 @@ node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" complete --board-dir "$BOARD_DIR" \
 `success` and `iterate-needed` land in `done/`, the rest in `failed/`. `--worker` must equal the claim-time name
 (a guard, not authentication). Pass a `next-step` stop's `cause` as `--cause "<cause>"`. If `complete` refuses, say so; do not retry.
 
-**`iterate-needed` is the continuation path.** The verdict leaves the claim in place, so release it right after reporting (`cli-dispatch.mjs release --board-dir "$BOARD_DIR" --task-id "$TASK_ID"`); it refuses while the worktree holds unpushed commits or uncommitted tracked changes (commit and push first; `--force --reason <text>` drops work). Dispatch then continues the task with `cli-dispatch.mjs reenter <pr> --note "<the verdict notes>"`, which requeues it with no wave for the next claim. A worker holds one claim at a time.
+**`iterate-needed`** leaves the claim in place: release it right after reporting (`cli-dispatch.mjs release --board-dir "$BOARD_DIR" --task-id "$TASK_ID"`; it refuses while unpushed or uncommitted work exists, and `--force` drops work). Dispatch continues the task with `reenter`. Details: "Continuation" in `docs/operations/cli-hierarchy.md`.
 
 ## Step 4 - Tell the dispatch session
 

@@ -229,6 +229,7 @@ export {
 } from './types.js';
 export {
   buildClaudeCommand,
+  executorMcpArgs,
   DEFAULT_PLANNER_MODE,
   findForeignSessions,
   hasLaunchEnv,

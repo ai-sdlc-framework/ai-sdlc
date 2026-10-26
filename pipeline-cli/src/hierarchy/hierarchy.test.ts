@@ -25,6 +25,7 @@ import type { DispatchManifest } from '../dispatch/types.js';
 import {
   attachTmuxSession,
   buildClaudeCommand,
+  executorMcpArgs,
   hasLaunchEnv,
   createSystemRunner,
   evaluateResourceGate,
@@ -244,6 +245,8 @@ const baseOpts: UpOptions = {
 let schedulerSpawns: string[][];
 
 beforeEach(() => {
+  vi.stubEnv('AI_SDLC_EXECUTOR_MCP', '');
+  vi.stubEnv('AI_SDLC_EXECUTOR_MCP_CONFIG', '');
   tmp = mkdtempSync(path.join(tmpdir(), 'hierarchy-'));
   boardDir = path.join(tmp, 'dispatch');
   registryDir = path.join(tmp, 'sessions');
@@ -282,6 +285,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -1664,6 +1668,17 @@ describe('pinned Node (AISDLC-812)', () => {
     permissionMode: 'p',
     prompt: 'x',
   } as const;
+
+  it('executorMcpArgs limits only executors to the configured MCP servers (AISDLC-1067)', () => {
+    expect(executorMcpArgs('planner', {})).toEqual([]);
+    expect(executorMcpArgs('executor', {})).toEqual([]);
+    expect(executorMcpArgs('executor', { AI_SDLC_EXECUTOR_MCP_CONFIG: '/a/m.json' })).toEqual([
+      '--strict-mcp-config',
+      '--mcp-config',
+      "'/a/m.json'",
+    ]);
+    expect(executorMcpArgs('executor', { AI_SDLC_EXECUTOR_MCP: 'all' })).toEqual([]);
+  });
 
   it('buildClaudeCommand prefixes the nvm activation for the version and keeps the launch env', () => {
     const cmd = buildClaudeCommand('claude', sess, '22.23.2');
