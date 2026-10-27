@@ -127,10 +127,13 @@ export const register = (on: Any, options?: Any): void => {
     const sessionName = typeof named === 'string' && named ? named : role;
     const versionText = typeof version === 'string' ? version : '';
     const health = (h: { state: 'loaded' | 'refused'; reason?: string }): Promise<void> =>
-      writeModuleHealth((a) => $.process.run(a), options?.boardDir, sessionName, {
-        ...h,
-        ...(versionText ? { version: versionText } : {}),
-      });
+      writeModuleHealth(
+        (a) => $.process.run(a),
+        options?.boardDir,
+        sessionName,
+        { ...h, ...(versionText ? { version: versionText } : {}) },
+        (k, v) => $.store.set(k, v),
+      );
     // OQ-5: the validator refuses `typeof $.noun.verb`, so each primitive is probed by one call whose
     // argument is a bare string, never an object with fields: a typed boundary rejects it before any
     // action (no compaction, no blank turn), and only an absent primitive counts as missing. A host that

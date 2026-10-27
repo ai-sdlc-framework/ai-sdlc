@@ -94,10 +94,21 @@ export async function writeModuleHealth(
   boardDir: string | undefined,
   name: string,
   health: { state: 'loaded' | 'refused'; reason?: string; version?: string },
+  storeSet?: (k: string, v: unknown) => Promise<Any>,
 ): Promise<void> {
   const file = `${boardDir ?? '.ai-sdlc/dispatch'}/handoff/module-${name}.json`;
-  const body = JSON.stringify({ ...health, at: new Date().toISOString() });
-  await safe(() => run({ command: NODE, args: ['-e', WRITE_SCRIPT, file, body] }));
+  const record = { ...health, at: new Date().toISOString() };
+  const body = JSON.stringify(record);
+  // AISDLC-1082: the plugin store copy survives a host whose `process.run` cannot write the board file.
+  // The CLI reader fallback to the store is deferred (the store file location is host-defined).
+  if (storeSet) await safe(() => storeSet(`hierarchy/health/${name}`, record));
+  const r = await safe(() => run({ command: NODE, args: ['-e', WRITE_SCRIPT, file, body] }));
+  const v = (r.value ?? {}) as Any;
+  const code = v.exitCode ?? v.status ?? v.code;
+  if (r.ok && typeof code === 'number' && code !== 0) {
+    const msg = `process.run node -e health write exited ${code}: ${String(v.stderr ?? '').slice(0, 200)}`;
+    await safe(() => Promise.reject(new Error(msg)), 'process.run');
+  }
 }
 
 const EVENT_LIMIT = 10;
@@ -260,10 +271,13 @@ export async function tick(p: DispatchPorts, state: DispatchState): Promise<void
   state.ticking = true;
   try {
     if (state.sessionName) {
-      await writeModuleHealth(p.runProcess, state.boardDir, state.sessionName, {
-        state: 'loaded',
-        ...(state.hostVersion ? { version: state.hostVersion } : {}),
-      });
+      await writeModuleHealth(
+        p.runProcess,
+        state.boardDir,
+        state.sessionName,
+        { state: 'loaded', ...(state.hostVersion ? { version: state.hostVersion } : {}) },
+        p.storeSet,
+      );
     }
     const rotation = await rotateRequested(p, state);
     for (const name of rotation.forward) {
