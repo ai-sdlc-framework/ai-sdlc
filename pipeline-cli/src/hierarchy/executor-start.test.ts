@@ -419,3 +419,39 @@ describe('executorStart idle polling guards (AISDLC-1065)', () => {
     }
   });
 });
+
+describe('executorStart under AI_SDLC_EXECUTOR_TASK (AISDLC-1073)', () => {
+  const run = (task: string, waitSec?: number) =>
+    executorStart(
+      { boardDir: board, cwd: tmp, ...(waitSec === undefined ? {} : { waitSec }) },
+      {
+        identity: identityFor('executor', 'proj-executor-alpha'),
+        repoGit: gitAt(tmp),
+        env: { AI_SDLC_EXECUTOR_TASK: task },
+      },
+    );
+
+  it('claims exactly that task and leaves the others queued', async () => {
+    writeManifest(board, mkManifest('AISDLC-8'));
+    writeManifest(board, mkManifest('AISDLC-9'));
+    const r = await run('AISDLC-9');
+    expect(r.taskId).toBe('AISDLC-9');
+    expect(readHeartbeat(board, 'AISDLC-8')).toBeUndefined();
+  });
+
+  it('exits with a named reason when the task is not claimable', async () => {
+    writeManifest(board, mkManifest('AISDLC-8'));
+    await expect(run('AISDLC-9')).rejects.toThrow(/cannot claim AISDLC-9/);
+  });
+
+  it('refuses --wait and a malformed task id', async () => {
+    await expect(run('AISDLC-9', 30)).rejects.toThrow(/--wait 30 refused.*AI_SDLC_EXECUTOR_TASK/);
+    await expect(run('nope')).rejects.toThrow(/not a valid task id/);
+  });
+
+  it('refuses on a held board', async () => {
+    writeManifest(board, mkManifest('AISDLC-9'));
+    writeHold(board, { reason: 'spend paused', since: 'now', by: 'planner' });
+    await expect(run('AISDLC-9')).rejects.toThrow(/board is held/);
+  });
+});

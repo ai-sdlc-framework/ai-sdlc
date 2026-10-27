@@ -137,6 +137,8 @@ export interface PlannedSession {
   model: string;
   permissionMode: string;
   prompt: string;
+  /** Task an ephemeral executor serves; exported as `AI_SDLC_EXECUTOR_TASK` (RFC-0059). */
+  taskId?: string;
 }
 
 /**
@@ -197,7 +199,7 @@ export function executorMcpArgs(role: string, env: NodeJS.ProcessEnv = process.e
 /** Build the `claude` command line for one session. */
 export function buildClaudeCommand(
   bin: string,
-  s: Pick<PlannedSession, 'role' | 'name' | 'model' | 'permissionMode' | 'prompt'>,
+  s: Pick<PlannedSession, 'role' | 'name' | 'model' | 'permissionMode' | 'prompt' | 'taskId'>,
   nodeVersion?: string,
   ghLog?: { shimDir: string; logPath: string },
 ): string {
@@ -214,6 +216,7 @@ export function buildClaudeCommand(
       : []),
     `AI_SDLC_HIERARCHY_SESSION=${shellQuote(s.name)}`,
     `AI_SDLC_HIERARCHY_ROLE=${shellQuote(s.role)}`,
+    ...(s.taskId ? [`AI_SDLC_EXECUTOR_TASK=${shellQuote(s.taskId)}`] : []),
     shellQuote(bin),
     '--name',
     shellQuote(s.name),

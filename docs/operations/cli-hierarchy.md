@@ -560,6 +560,21 @@ cli-hierarchy escalation-file --task-id <id> --message <text>
 
 Prints `{"file": "<path>"}`. Exit `2` on a missing flag, `1` on an invalid task id.
 
+### `spawn`
+
+Starts one ephemeral executor for one task (RFC-0059, AISDLC-1073).
+
+```bash
+cli-hierarchy spawn <task-id> [--model <m>]
+```
+
+The session name is `ai-sdlc-executor-<task-id-lowercase>` (`.` becomes `-`), matched against
+`^ai-sdlc-executor-[a-z0-9-]+$` before any shell or tmux call. It creates the tmux session, writes a dynamic
+roster entry (role `executor`, `taskId`, `startedAt` as the spawn time) and launches the interactive `claude`
+with `AI_SDLC_EXECUTOR_TASK=<id>`. A live session of that name is reported and nothing is created; a task already
+inflight is refused. With the variable set, `executor-start` claims only that task, exits `1` naming the reason
+when it is not claimable (or the board is held), and refuses `--wait`.
+
 ### `executor-start`
 
 An executor's whole start-up in one call: roster identity (the calling session must be a running

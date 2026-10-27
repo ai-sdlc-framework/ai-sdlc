@@ -24,6 +24,34 @@ export function isValidTaskId(id: string): boolean {
   return TASK_ID_PATTERN.test(id);
 }
 
+const SPAWN_NAME_PATTERN = /^ai-sdlc-executor-[a-z0-9-]+$/;
+
+/**
+ * Name of the ephemeral executor for a task (RFC-0059): `ai-sdlc-executor-<task-id-lowercase>`,
+ * with `.` mapped to `-`. A pure function of the task id; the id is validated first and the
+ * result is matched against `^ai-sdlc-executor-[a-z0-9-]+$`, before any shell or tmux call.
+ * @throws when `taskId` is not a well-formed task id or the name fails the pattern.
+ */
+export function spawnedExecutorName(taskId: string): string {
+  if (!isValidTaskId(taskId.toUpperCase())) {
+    throw new Error(`invalid task id '${taskId}': expected for example AISDLC-1067`);
+  }
+  const name = `ai-sdlc-executor-${taskId.toLowerCase().replace(/\./g, '-')}`;
+  if (!SPAWN_NAME_PATTERN.test(name) || name.length > 48) {
+    throw new Error(`refusing executor name '${name}': it must match ${SPAWN_NAME_PATTERN.source}`);
+  }
+  return name;
+}
+
+/** True when `name` is the ephemeral executor name of `taskId`. */
+export function isSpawnedExecutorNameOf(name: string, taskId: string): boolean {
+  try {
+    return spawnedExecutorName(taskId) === name;
+  } catch {
+    return false;
+  }
+}
+
 /** True when `name` is safe to use as a session name and tmux window name. */
 export function isValidSessionName(name: string): boolean {
   return SESSION_NAME_PATTERN.test(name);
