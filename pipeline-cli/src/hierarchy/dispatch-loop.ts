@@ -41,6 +41,14 @@ import type { DispatchVerdict } from '../dispatch/types.js';
 import { sanitizeVerdict } from '../dispatch/verdict-fields.js';
 import { parseBrief, type ParsedBrief } from './brief-format.js';
 import { processCanaryEvents, type CanaryReport } from './canary.js';
+import {
+  downRecordedExecutors,
+  isEphemeralWorker,
+  spawnForEligibleClaims,
+  sweepFinishedExecutors,
+  type EphemeralDeps,
+  type EphemeralReport,
+} from './ephemeral-tick.js';
 import { readHold, type Hold } from './hold.js';
 import {
   classifyHumanAttention,
@@ -219,6 +227,8 @@ export interface TickResult {
   parentUpkeep?: ParentUpkeepResult;
   /** Present when a pipeline canary event set or lifted the hold this tick (AISDLC-1023). */
   canary?: CanaryReport;
+  /** Present when the ephemeral steps downed or spawned an executor, or a spawn failed (RFC-0059). */
+  ephemeral?: EphemeralReport;
   /** Deterministic list of what stops the drain; the dispatch command sends it to the planner when it changes. */
   blockers: string[];
 }
@@ -337,6 +347,8 @@ export interface LoopDeps {
    * untracked-file sync, once per tick. The executors only assert the parent.
    */
   parentUpkeep?: () => Promise<ParentUpkeepResult>;
+  /** Ephemeral executors (RFC-0059): down on verdict, sweep, spawn per claim; absent means standing executors only. */
+  ephemeral?: EphemeralDeps;
   /** Files the hotfix task for a red pipeline canary (AISDLC-1023); absent means events are not processed. */
   fileHotfix?: (opts: { sha: string; detail: string }) => string;
 }
@@ -441,7 +453,14 @@ async function watchVerdicts(
         });
       }
     } else {
-      if (executors.has(verdict.workerId)) {
+      if (deps.ephemeral && isEphemeralWorker(deps.boardDir, verdict.workerId)) {
+        // The executor ends with its task: dispatch downs it in this tick instead of clearing it.
+        report.clear = {
+          status: 'skipped',
+          executor: verdict.workerId,
+          reason: 'ephemeral executor: downed',
+        };
+      } else if (executors.has(verdict.workerId)) {
         report.clear = await clearOnce(deps, verdict);
       }
       if (verdictState === 'failed') {
@@ -547,21 +566,33 @@ async function checkStalls(
 ): Promise<StalledReport[]> {
   const stall = deps.stall;
   if (!stall || held) return [];
+  const standardClear: StallDeps['clear'] = deps.operational.has('clear-executor-context')
+    ? async (o) => {
+        const r = await clearOnce(deps, {
+          taskId: o.taskId,
+          workerId: o.executor,
+        } as DispatchVerdict);
+        return { status: r.status, ...(r.reason ? { reason: r.reason } : {}) };
+      }
+    : undefined;
+  // A crashed ephemeral executor is downed, not cleared (RFC-0059); the others keep the clear.
+  const stallClear: StallDeps['clear'] = deps.ephemeral
+    ? async (o) => {
+        if (isEphemeralWorker(deps.boardDir, o.executor)) {
+          const r = await deps.ephemeral!.down(o.executor);
+          return { status: r.ok ? 'downed' : 'failed', ...(r.reason ? { reason: r.reason } : {}) };
+        }
+        return standardClear ? standardClear(o) : { status: 'not-permitted' };
+      }
+    : standardClear;
   try {
     return await reapStalledClaims(
       {
         ...stall,
         boardDir: deps.boardDir,
         now: deps.now,
-        clear: deps.operational.has('clear-executor-context')
-          ? async (o) => {
-              const r = await clearOnce(deps, {
-                taskId: o.taskId,
-                workerId: o.executor,
-              } as DispatchVerdict);
-              return { status: r.status, ...(r.reason ? { reason: r.reason } : {}) };
-            }
-          : undefined,
+        isEphemeral: deps.ephemeral ? (w) => isEphemeralWorker(deps.boardDir, w) : undefined,
+        clear: stallClear,
         requeue: deps.operational.has('requeue') ? stall.requeue : undefined,
       },
       (v) => {
@@ -572,6 +603,39 @@ async function checkStalls(
   } catch {
     return [];
   }
+}
+
+/**
+ * RFC-0059 order: verdicts are recorded (by the caller), then finished executors are
+ * downed, the sweep catches any still alive 5 minutes after its verdict, crashed ones are
+ * reaped by the stall path (which downs rather than clears them), then a spawn per
+ * eligible claim up to the cap. Held, nothing is downed or spawned.
+ */
+async function runEphemeralSteps(
+  deps: LoopDeps,
+  verdicts: readonly VerdictReport[],
+  held: Hold | null,
+  quotaSkip: TickResult['quotaSkip'],
+  reap: () => Promise<StalledReport[]>,
+): Promise<{ stalled: StalledReport[]; report?: EphemeralReport }> {
+  const eph = deps.ephemeral;
+  if (!eph || held) return { stalled: await reap() };
+  const report: EphemeralReport = { downed: [], spawned: [], spawnErrors: [] };
+  await downRecordedExecutors(deps.boardDir, eph, verdicts, report);
+  try {
+    await sweepFinishedExecutors(deps.boardDir, eph, deps.now().getTime(), report);
+  } catch {
+    /* an unreadable verdict must not stop the dispatch loop */
+  }
+  const stalled = await reap();
+  if (!quotaSkip) {
+    try {
+      await spawnForEligibleClaims(deps.boardDir, eph, deps.now, report);
+    } catch {
+      /* an unreadable queue must not stop the dispatch loop */
+    }
+  }
+  return { stalled, report };
 }
 
 /** GitHub reads happen at most this often unless a webhook wake is newer (AISDLC-960). */
@@ -632,7 +696,11 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   const githubFresh = githubReadFresh(deps, state);
   const readGithub = !quotaSkip && !githubFresh;
   const watch = await watchVerdicts(deps, state, held);
-  const stalled = await checkStalls(deps, state, held);
+  const ephemeral = await runEphemeralSteps(deps, watch.verdicts, held, quotaSkip, async () => {
+    const stalled = await checkStalls(deps, state, held);
+    return stalled;
+  });
+  const stalled = ephemeral.stalled;
   const reports = buildReports(deps, state, watch.verdicts.length);
   if (canary?.held) {
     reports.push({
@@ -690,7 +758,15 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   } catch {
     /* an unreadable decision log must not stop the dispatch loop */
   }
+  const eph = ephemeral.report;
+  const ephemeralActive =
+    eph !== undefined &&
+    (eph.downed.length > 0 || eph.spawned.length > 0 || eph.spawnErrors.length > 0);
   const wake = computeNextWake(deps.boardDir, { ...ingest, ...watch, reports, stalled }, markReady);
+  if (ephemeralActive) {
+    wake.nextWakeSec = Math.min(wake.nextWakeSec, WAKE_PENDING_SEC);
+    wake.wakeReason = 'pending';
+  }
   const blockers = computeBlockers(deps.boardDir, held, watch.escalations);
   return {
     blockers,
@@ -702,6 +778,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     ...(parentUpkeep ? { parentUpkeep } : {}),
     ...(canary ? { canary } : {}),
     ...(stalled.length > 0 ? { stalled } : {}),
+    ...(ephemeralActive ? { ephemeral: eph } : {}),
     ...(humanAttention.length > 0 ? { humanAttention } : {}),
     ...wake,
     ...(markReady ? { markReady } : {}),

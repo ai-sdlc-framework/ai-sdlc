@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1074
 title: 'dispatch tick spawns per eligible claim up to the cap and downs on verdict'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-23'
 labels:

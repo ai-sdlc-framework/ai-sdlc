@@ -71,6 +71,11 @@ export interface StallDeps {
    * a pull request it is a `reenter` carrying the step note; without one, a plain requeue.
    */
   requeue?: (taskId: string, note: string, pr?: number) => void;
+  /**
+   * True for a spawned (ephemeral) executor (RFC-0059). Its crash threshold is the grace
+   * period (10 minutes without a heartbeat), whatever its session state.
+   */
+  isEphemeral?: (worker: string) => boolean;
   /** Open pull request number of the task, when one exists. */
   findPr?: (taskId: string) => number | undefined;
 }
@@ -161,8 +166,9 @@ export async function reapStalledClaims(
     const ageMs = Math.max(0, nowMs - last);
     const worker = heartbeat?.workerId ?? 'unknown';
     let reason: StalledReport['reason'] | undefined;
-    if (ageMs > staleMs) reason = 'stale-heartbeat';
-    else if (heartbeat?.workerId && deps.liveness) {
+    if (ageMs > staleMs || (ageMs > graceMs && deps.isEphemeral?.(worker) === true)) {
+      reason = 'stale-heartbeat';
+    } else if (heartbeat?.workerId && deps.liveness) {
       live ??= deps.liveness();
       const state = live.get(heartbeat.workerId);
       if (
