@@ -54,7 +54,8 @@
  */
 
 import { parseQuota, parseQuotaFloor } from '../hierarchy/gh-calls.js';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -69,6 +70,8 @@ import { sanitizeVerdict } from '../dispatch/verdict-fields.js';
 import { enqueueTasks, type EnqueueEntry } from '../dispatch/enqueue.js';
 import { requeueFailed } from '../dispatch/requeue.js';
 import { reenter } from '../hierarchy/reenter.js';
+import { now as clockNow } from '../clock.js';
+import { runDemo, type DemoDeps } from '../hierarchy/demo.js';
 import { writeEscalationFile } from '../hierarchy/escalation-file.js';
 import { consumeRotateRequests } from '../hierarchy/rotate-request.js';
 import { correctManifestBranch } from '../dispatch/resume.js';
@@ -173,6 +176,7 @@ Commands:
   rotate-pending  Print {pending} and consume the dispatch host's rotate requests
   escalation-file  Write a board file for the planner: failure record, log tail, PR check summary
   route-decision  Record that a decision was routed to a tier
+  demo       Regenerate the terminal demo clip from a scenario: demo [run|cut|render]
   playbook   Run one named playbook step for one task (playbook --task <id> --action <step>)
   handoff         Write or read a session's handoff file (handoff write|read --role <r>)
   send            Message a session listed in this project's roster; refuses any other name
@@ -257,6 +261,13 @@ Usage for restart and register (dispatch session only, executors only):
   register re-records an executor that is already running under a new pid, after checking
   its tmux pane, the ownership marker, the pane's launch environment and a live harness session.
   A mistake guard refuses any caller but the dispatch session; it is not authentication.
+
+Options for demo:
+  run | cut | render       One stage; with none, all three in order, stopping at the first failure
+  --scenario <file>        run: the scenario JSON (request, task, decisions, brief, timeoutMinutes, pollSeconds)
+  --out <dir>              run and render: output directory; cut: the cut cast file
+  --cast <file>            cut and render: the cast to read
+  --beats <file>           cut: the beats file written by run
 
 Options for hold:
   --reason <text>          Why the board is held (required); shown by tick and executor-start
@@ -418,6 +429,56 @@ export function firstPositional(argv: readonly string[]): string | undefined {
   return undefined;
 }
 
+/** The system-backed dependencies of `cli-hierarchy demo` (AISDLC-1079). */
+function createDemoDeps(deps: HierarchyDeps, overrides: Partial<DemoDeps> = {}): DemoDeps {
+  const run = createSystemRunner();
+  const binDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin');
+  const out = (line: string): void => void process.stdout.write(`${line}\n`);
+  const err = (line: string): void => void process.stderr.write(`${line}\n`);
+  return {
+    run,
+    out,
+    err,
+    now: () => clockNow().getTime(),
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    which: (tool) =>
+      (process.env['PATH'] ?? '').split(path.delimiter).some((dir) => {
+        try {
+          accessSync(path.join(dir, tool), constants.X_OK);
+          return true;
+        } catch {
+          return false;
+        }
+      }),
+    idleExecutors: () =>
+      hierarchyStatus(deps).rows.filter((r) => r.entry.role === 'executor' && r.state === 'idle')
+        .length,
+    taskState: (taskId) => {
+      const file = findTaskFile(deps.cwd, taskId);
+      if (!file) return null;
+      const head = readFileSync(path.join(deps.cwd, file), 'utf-8').split('\n---')[0] ?? '';
+      return {
+        status: /^status:\s*(.+?)\s*$/m.exec(head)?.[1]?.replace(/^['"]|['"]$/g, '') ?? '',
+        dispatchable: !/^dispatchable:\s*false\s*$/m.test(head),
+      };
+    },
+    cleanCheckout: () =>
+      run('git', ['status', '--porcelain'], { cwd: deps.cwd }).stdout.trim() === '',
+    record: (args) => spawnSync('asciinema', args, { stdio: 'inherit', cwd: deps.cwd }).status ?? 1,
+    binDir,
+    cwd: deps.cwd,
+    media: {
+      run: (cmd, args) => {
+        const r = run(cmd, args, { cwd: deps.cwd });
+        return { status: r.status ?? 1, stdout: r.stdout, stderr: r.stderr };
+      },
+      out,
+      err,
+    },
+    ...overrides,
+  };
+}
+
 /**
  * CLI entry point. Returns the intended exit code. Tests call this with
  * synthetic argv and injected dependencies.
@@ -458,6 +519,8 @@ export async function runHierarchyCli(
     landEligible?: () => Promise<LandReport>;
     /** Replaces the parent upkeep pass of the tick (tests). */
     parentUpkeep?: () => Promise<ParentUpkeepResult>;
+    /** Replaces the demo's system dependencies (tests). */
+    demo?: Partial<DemoDeps>;
   } = {},
 ): Promise<number> {
   const { subcommand, flags } = parseArgv(argv);
@@ -1194,6 +1257,9 @@ export async function runHierarchyCli(
         );
         deps.log(JSON.stringify({ ok: outcome.result === 'done', outcome }));
         return outcome.result === 'done' ? 0 : 1;
+      }
+      case 'demo': {
+        return await runDemo(firstPositional(argv), flags, createDemoDeps(deps, extras.demo));
       }
       default:
         process.stderr.write(`cli-hierarchy: unknown command '${subcommand}'\n\n${USAGE}`);

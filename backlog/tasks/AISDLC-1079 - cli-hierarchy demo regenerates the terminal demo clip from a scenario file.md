@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1079
 title: 'cli-hierarchy demo regenerates the terminal demo clip from a scenario file: one real hierarchy run under asciinema, a beat-cut cast, and agg plus ffmpeg render to MP4 and WebM'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-24'
 labels: [pipeline-cli, hierarchy, docs, demo]
