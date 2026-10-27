@@ -5,6 +5,22 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.32.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.31.2...ai-sdlc-plugin-v0.32.0) (2026-10-27)
+
+
+### Features
+
+* **orchestrator:** fixed-prefix tiering, path-bound rules and control linter (AISDLC-782) ([#1988](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1988)) ([45aba26](https://github.com/ai-sdlc-framework/ai-sdlc/commit/45aba2643c32e4e9adec40cd3174c0ec78eba00a))
+* show hooks-module health in status and fail up when dispatch has none (AISDLC-1061) ([#1980](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1980)) ([5965c97](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5965c972fa780201fb419ba8c1a4bf0efd12f62e))
+
+
+### Bug Fixes
+
+* **ci:** register the dispatch tick first and log every registration step (AISDLC-1064) ([#1985](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1985)) ([f46c2e2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f46c2e2df059e62f61c61da1aabff8381d90e085))
+* **orchestrator:** register every hierarchy hook from register() (AISDLC-1081) ([#2014](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2014)) ([62f2757](https://github.com/ai-sdlc-framework/ai-sdlc/commit/62f2757a94f0c29f4929bd130d4f08a5bbe7184c))
+* refuse executor-start --wait without a module and guard idle repeats (AISDLC-1065) ([#1991](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1991)) ([89d5c53](https://github.com/ai-sdlc-framework/ai-sdlc/commit/89d5c53933e3f9556cc9df6329989f201efec50b))
+* spawn gh without a shell in check_issue and check_pr_status (AISDLC-1063) ([#1982](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1982)) ([717d7ec](https://github.com/ai-sdlc-framework/ai-sdlc/commit/717d7ecf068b714f65955e50fcf5cb4f9a0b5070))
+
 ## [0.31.2](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.31.1...ai-sdlc-plugin-v0.31.2) (2026-10-23)
 
 
