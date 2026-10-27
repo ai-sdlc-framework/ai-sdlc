@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1073
 title: 'cli-hierarchy spawn creates a per-task executor session and dynamic roster entry'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-23'
 labels:

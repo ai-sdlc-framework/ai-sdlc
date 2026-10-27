@@ -4824,6 +4824,12 @@ export const hierarchyRosterV1Schema = {
           description:
             'Project the session belongs to: the repository basename unless cli-hierarchy up was given --project. Session names are qualified with it (<project>-<role>) so hierarchies of different projects on one machine do not collide. Optional for rosters written before project scoping; readers treat a missing value as the repository basename and the next up rewrites it. A mistake guard, not authentication.',
         },
+        taskId: {
+          type: 'string',
+          pattern: '^[A-Z][A-Z0-9]+-[0-9]+(\\.[0-9]+)*$',
+          description:
+            "Task a spawned (ephemeral) executor was created for (RFC-0059). Present only on dynamic executor entries written by cli-hierarchy spawn; the entry's name is derived from it. startedAt is the spawn time.",
+        },
         name: {
           type: 'string',
           minLength: 1,

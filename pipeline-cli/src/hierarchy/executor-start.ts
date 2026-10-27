@@ -13,6 +13,9 @@
  *  4. Write `inflight/<task>.state.json` naming the worker, before returning and so
  *     before any model call: the lease-push hook binds an executor to its task by
  *     that heartbeat, so it must hold from the first push. A write failure throws.
+ *  Under `AI_SDLC_EXECUTOR_TASK=<id>` (a spawned executor, RFC-0059) step 3 claims exactly that
+ *  task and never polls: `--wait` is refused, and a held board or a task that is not claimable
+ *  exits non-zero with the reason.
  *  5. Run the lease-push preflight (AISDLC-798) on the new claim and print what the
  *     PreToolUse hook would refuse later (missing launch env, a second claim, a missing
  *     heartbeat), so a misconfigured executor is caught at claim time.
@@ -23,16 +26,17 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { now } from '../clock.js';
-import { writeHeartbeat } from '../dispatch/board.js';
+import { claimNext, writeHeartbeat } from '../dispatch/board.js';
 import { claimWithWait } from '../dispatch/claim-wait.js';
 import { formatResumeFeedback } from '../dispatch/resume.js';
-import type { DispatchManifest } from '../dispatch/types.js';
+import type { DispatchManifest, WorkerKind } from '../dispatch/types.js';
 import { resolveCaller, type IdentityDeps } from './caller-identity.js';
 import { claimPreflight, type LeasePreflight } from './lease-preflight.js';
 import { readHold } from './hold.js';
 import { readModuleHealth } from './module-health.js';
 import { checkRepoMatch, rosterProject } from './peer-guard.js';
 import { readRosterChecked } from './roster.js';
+import { isValidTaskId } from './validate.js';
 import type { GitRunner } from './trusted-root.js';
 
 /** Seconds an idle executor hibernates when it cannot clear itself (`emptyQueueHibernateSec`). */
@@ -131,6 +135,17 @@ export async function executorStart(
   if (!self || self.role !== 'executor') {
     throw new Error('this session is not a running executor in the roster');
   }
+  const pinned = (deps.env ?? process.env).AI_SDLC_EXECUTOR_TASK;
+  if (pinned !== undefined && pinned !== '') {
+    if (!isValidTaskId(pinned)) {
+      throw new Error(`AI_SDLC_EXECUTOR_TASK '${pinned}' is not a valid task id`);
+    }
+    if (opts.waitSec !== undefined && opts.waitSec > 0) {
+      throw new Error(
+        `--wait ${opts.waitSec} refused: this executor was spawned for ${pinned} (AI_SDLC_EXECUTOR_TASK) and claims once without polling`,
+      );
+    }
+  }
   if (opts.waitSec !== undefined && opts.waitSec > 0) {
     const health = readModuleHealth(opts.boardDir, { name: self.name, role: self.role }, now());
     if (health.state !== 'loaded') {
@@ -156,13 +171,17 @@ export async function executorStart(
   deps.log?.(
     `[executor] I am '${self.name}' (project '${project.project}'); dispatch session is '${dispatch || 'none'}'`,
   );
+  const pinnedTask = pinned !== undefined && pinned !== '' ? pinned : undefined;
   const queue = queueSignature(opts.boardDir);
-  const last = lastIdleStart(opts.boardDir, self.name);
+  const last = pinnedTask ? undefined : lastIdleStart(opts.boardDir, self.name);
   if (last && now().getTime() - last.at < REPEAT_WINDOW_MS && last.queue === queue) {
     deps.log?.('[executor] already idle; stop the turn');
     return { name: self.name, project: project.project, dispatch, taskId: null, repeat: true };
   }
   const hold = readHold(opts.boardDir);
+  if (hold && pinnedTask) {
+    throw new Error(`cannot claim ${pinnedTask}: the board is held: ${hold.reason}`);
+  }
   if (hold) {
     recordStart(opts.boardDir, self.name, true, queue);
     deps.log?.(`[executor] BOARD HELD: ${hold.reason} (since ${hold.since}); not claiming.`);
@@ -171,7 +190,21 @@ export async function executorStart(
   const result = await (deps.claim ?? claimWithWait)(opts.boardDir, 'in-session-agent', {
     waitSec: 0,
     workerId: self.name,
+    ...(pinnedTask
+      ? {
+          claim: (dir: string, kind: WorkerKind, workerId?: string) =>
+            claimNext(dir, kind, undefined, {
+              onlyTaskId: pinnedTask,
+              ...(workerId === undefined ? {} : { workerId }),
+            }),
+        }
+      : {}),
   });
+  if (pinnedTask && !(result.claimed && result.manifest)) {
+    throw new Error(
+      `cannot claim ${pinnedTask}: it is not in the queue or not eligible (held by another session, cooling down, blocked by a dependency or its sequence group)`,
+    );
+  }
   // A resumed task (AISDLC-738) carries a feedback note: surface it before the
   // executor runs the task, ahead of the final JSON line.
   if (result.claimed && result.manifest?.resume) {

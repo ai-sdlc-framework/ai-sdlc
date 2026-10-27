@@ -403,6 +403,8 @@ export interface ClaimHooks {
    * `workerId` (no normalisation).
    */
   workerId?: string;
+  /** Claim only the manifest of this task (AISDLC-1073); any other eligible manifest is left alone. */
+  onlyTaskId?: string;
   /** How long a lower-id group claimant waits for a rival to hand its claim back. Default 200. */
   groupSettleMs?: number;
   /** Sleep used while settling; tests inject a stand-in. */
@@ -533,7 +535,9 @@ export function claimNext(
     reportBoard(boardDir, 'degraded', degradedReason('board directory unreadable', err));
     throw err;
   }
-  const eligible = orderEligible(boardDir, candidates, workerKind, now);
+  const eligible = orderEligible(boardDir, candidates, workerKind, now).filter(
+    (e) => hooks.onlyTaskId === undefined || e.manifest.taskId === hooks.onlyTaskId,
+  );
 
   if (hooks.workerId !== undefined && eligible.length > 0) {
     const undelivered = findUndeliveredPr(boardDir, hooks.workerId);

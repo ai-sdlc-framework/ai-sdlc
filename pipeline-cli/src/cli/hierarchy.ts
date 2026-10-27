@@ -88,6 +88,7 @@ import {
   createStreamEmitter,
   createSystemIdentity,
   executorStart,
+  hierarchySpawn,
   resolveCaller,
   createSystemRunner,
   createTmuxBriefSender,
@@ -175,6 +176,7 @@ Commands:
   playbook   Run one named playbook step for one task (playbook --task <id> --action <step>)
   handoff         Write or read a session's handoff file (handoff write|read --role <r>)
   send            Message a session listed in this project's roster; refuses any other name
+  spawn           Start one ephemeral executor session for one task (spawn <task-id> [--model <m>])
   executor-start  Executor identity, repository check and a blocking claim, as one call
   check-repo      Exit 0 only when the working directory is this roster's repository
 
@@ -266,8 +268,15 @@ Options for tick:
   --retry-limit <n>        Re-queues allowed per failed task (default 2; a larger value is refused)
   --work-dir <path>        Repository root (default the current directory)
 
+Options for spawn:
+  <task-id>                Task the executor serves; its session is ai-sdlc-executor-<task-id-lowercase>.
+                           A live session of that name is reported and nothing is created.
+  --model <m>              Executor model (default sonnet)
+
 Options for executor-start:
-  --wait <sec>             Refused (exit 1) when this session has no hooks-module heartbeat; a repeat
+  --wait <sec>             Refused (exit 1) under AI_SDLC_EXECUTOR_TASK, which claims only that task
+                           and exits 1 with the reason when it is not claimable. Also refused when
+                           this session has no hooks-module heartbeat; a repeat
                            call within 60 s with no new enqueue returns {"taskId":null,"repeat":true}.
   (none)                   Prints the identity line, then one JSON line: {name, project, dispatch,
                            taskId|null, manifest?}. Claims once and does not wait: the hierarchy
@@ -537,6 +546,22 @@ export async function runHierarchyCli(
           deps,
         );
         return result.attachExitCode ?? 0;
+      }
+      case 'spawn': {
+        const taskArg = firstPositional(argv);
+        if (!taskArg) {
+          process.stderr.write(`cli-hierarchy: spawn needs a task id\n\n${USAGE}`);
+          return 2;
+        }
+        const spawned = await hierarchySpawn(
+          { taskId: taskArg, ...(flags.model === undefined ? {} : { model: flags.model }) },
+          deps,
+        );
+        for (const w of spawned.warnings) deps.log(`warning: ${w}`);
+        deps.log(
+          JSON.stringify({ name: spawned.name, taskId: spawned.taskId, created: spawned.created }),
+        );
+        return 0;
       }
       case 'status': {
         const result = hierarchyStatus(deps);

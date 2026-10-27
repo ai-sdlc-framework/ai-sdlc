@@ -21,6 +21,8 @@ export interface RosterEntry {
    * it in with the repository basename.
    */
   project?: string;
+  /** Task a spawned (ephemeral) executor serves (RFC-0059); absent on static entries. */
+  taskId?: string;
   name: string;
   tmuxSession: string;
   tmuxWindow: string;

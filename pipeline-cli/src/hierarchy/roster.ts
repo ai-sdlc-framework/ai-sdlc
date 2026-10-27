@@ -13,6 +13,7 @@ import { validateHierarchyRoster } from '@ai-sdlc/reference';
 
 import { HIERARCHY_TMUX_SESSION, type Roster, type RosterEntry } from './types.js';
 import {
+  isSpawnedExecutorNameOf,
   isValidSessionName,
   roleOfDefaultName,
   sanitizeProject,
@@ -118,12 +119,17 @@ export function unsafeEntryReason(entry: RosterEntry): string | undefined {
     if (entry.tmuxSession !== entry.tmuxWindow) {
       return `names tmux session '${String(entry.tmuxSession)}', which is neither '${HIERARCHY_TMUX_SESSION}' nor the session named after window '${entry.tmuxWindow}'`;
     }
-    if (roleOfDefaultName(entry.tmuxSession) === undefined) {
+    if (entry.taskId !== undefined) {
+      // A dynamic executor (RFC-0059): its name must be the one derived from its task id.
+      if (entry.role !== 'executor' || !isSpawnedExecutorNameOf(entry.tmuxSession, entry.taskId)) {
+        return `names tmux session '${entry.tmuxSession}', which is not the executor name derived from task '${entry.taskId}'`;
+      }
+    } else if (roleOfDefaultName(entry.tmuxSession) === undefined) {
       return `names tmux session '${entry.tmuxSession}', which is not one of the default hierarchy session names`;
     }
     // A project-qualified name must record the same project, so a session that merely
     // ends in a role name (`my-planner`) is not taken for one of ours.
-    const split = splitSessionName(entry.tmuxSession);
+    const split = entry.taskId === undefined ? splitSessionName(entry.tmuxSession) : undefined;
     if (split?.project !== undefined && entry.project !== split.project) {
       return entry.project === undefined
         ? `names tmux session '${entry.tmuxSession}', which is not one of the default hierarchy session names`
