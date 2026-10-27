@@ -967,6 +967,58 @@ the names it does list, so a look-alike or another project's session never recei
 message is typed into the session's pane with the same ownership checks `brief --notify` applies.
 Exit `2` on a missing `--to` or `--text`. A mistake guard, not authentication.
 
+### `demo`
+
+Regenerate the terminal demo clip from a scenario file, with nobody at the keyboard (AISDLC-1079).
+The clip shows one unit of work: the operator states a feature, the planner surfaces open
+questions, the operator answers them, a brief goes to dispatch, an executor opens a PR, and the PR
+lands.
+
+```bash
+cli-hierarchy demo --scenario pipeline-cli/demo/scenarios/context-pressure.json --out demo-out
+cli-hierarchy demo run --scenario <file> --out <dir>
+cli-hierarchy demo cut --cast <dir>/hierarchy.cast --beats <dir>/beats.json --out <dir>/hierarchy.cut.cast
+cli-hierarchy demo render --cast <dir>/hierarchy.cut.cast --out <dir>
+```
+
+With no stage, `demo` runs the three stages in order and stops at the first non-zero one.
+
+**Scenario file** (JSON): `request` (the one-sentence feature the operator states), `task` (an
+existing `To Do`, dispatchable backlog task that implements it), `author` (optional, passed as
+`--by`; default `operator`), `decisions` (at least two of `{ summary, options: [{ id, description }],
+answer, rationale }`, `answer` being one of the option ids), `brief` (`{ tasks: [ids] }`),
+`timeoutMinutes` and `pollSeconds`. A scenario missing a field is rejected with the field name.
+
+**Stages.**
+
+- `run` checks that `asciinema`, `agg` and `ffmpeg` are on PATH (one line per missing tool), that
+  the roster has an idle executor, that the task is `To Do` and dispatchable, and that the checkout
+  is clean. It then re-executes itself (`demo run --inner`) under `asciinema rec --overwrite
+  --idle-time-limit 2 --cols 120 --rows 30`, writing `<out>/hierarchy.cast`. The inner run adds each
+  decision (`cli-decisions add`, scope `issue:<task>`, source `ad-hoc`), lists them, answers them,
+  runs `cli-hierarchy brief --tasks <ids> --notify`, then polls `cli-dispatch board --json`,
+  `gh pr list --search <task>` and `gh pr view` once per `pollSeconds`, printing one line per
+  transition, until the PR is `MERGED` or `timeoutMinutes` elapse. Each beat (`request`,
+  `questions`, `answers`, `brief`, `pr-opened`, `pr-landed`) is written to `<out>/beats.json` with
+  its elapsed seconds on the recorded clock (idle gaps capped at 2 seconds, like the recording), so
+  the cut never parses terminal text.
+- `cut` keeps at most 8 seconds of events around each beat (2 before, 6 after), drops the rest,
+  rescales any gap over 1.5 seconds down to 1.5 seconds, and writes a cast of 30 to 60 seconds.
+  It reads asciicast v2 or v3.
+- `render` runs `agg` (dark theme, font size 22, 120 by 30 cells) to a GIF, then `ffmpeg` to
+  `hierarchy.mp4` (libx264, crf 18, yuv420p, faststart) and `hierarchy.webm` (libvpx-vp9, crf 32),
+  both without audio, extracts `hierarchy-poster.png`, and writes `manifest.json` (task id, PR
+  number, merge sha, cast and cut durations, asciinema, agg and ffmpeg versions).
+
+**Honesty rule.** Only the operator's request and the scenario's answers are typed by the command;
+every other line in the clip is the real output of a real command. Nothing is replayed from a
+canned transcript, so the clip doubles as an end-to-end smoke test of the hierarchy.
+
+**Exit codes.** 0 on success; 2 for missing flags, an invalid scenario or an unknown stage; 1 for a
+failed preflight, a failed command, a run that times out (the cast is kept for inspection and
+nothing is rendered), a beat missing from the beats file, a cut outside 30 to 60 seconds, a failed
+render step, or a video over 4 MB.
+
 ### `check-repo`
 
 Exit 0 only when the working directory is in the repository that owns this roster's board.

@@ -1,0 +1,37 @@
+{
+  "request": "Show each session's context size in cli-hierarchy status and flag the ones over their clear threshold.",
+  "task": "AISDLC-1066",
+  "author": "dominique",
+  "decisions": [
+    {
+      "summary": "Where does the context threshold come from?",
+      "options": [
+        { "id": "per-role", "description": "The roster's per-role clear threshold" },
+        { "id": "flat-120k", "description": "A flat 120k tokens for every session" }
+      ],
+      "answer": "per-role",
+      "rationale": "Planner, dispatch and executors clear at different sizes; one number would mislead."
+    },
+    {
+      "summary": "What does status print when a transcript cannot be found?",
+      "options": [
+        { "id": "question-mark", "description": "Print ? in the column" },
+        { "id": "zero", "description": "Print 0 tokens" }
+      ],
+      "answer": "question-mark",
+      "rationale": "Zero would read as an empty context; a question mark says the size is unknown."
+    },
+    {
+      "summary": "Does status --json carry the new field?",
+      "options": [
+        { "id": "yes", "description": "Yes, as contextTokens and overThreshold" },
+        { "id": "no", "description": "No, the table only" }
+      ],
+      "answer": "yes",
+      "rationale": "Scripts that watch the hierarchy need the same signal the table shows."
+    }
+  ],
+  "brief": { "tasks": ["AISDLC-1066"] },
+  "timeoutMinutes": 90,
+  "pollSeconds": 10
+}
