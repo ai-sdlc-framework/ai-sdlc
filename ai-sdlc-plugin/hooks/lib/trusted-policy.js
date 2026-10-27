@@ -24,7 +24,7 @@ const { readFileSync, readdirSync, realpathSync, lstatSync } = require('fs');
 const { join, resolve, dirname, basename, sep } = require('path');
 const { execFileSync, spawnSync } = require('child_process');
 const { resolveGovernanceExtrasFromYaml } = require('./governance-resolver');
-const { taskBindingProblem } = require('./lease-push-guard');
+const { taskBindingProblem, isPlannerFilingShape } = require('./lease-push-guard');
 
 const GIT_TIMEOUT_MS = 2000;
 
@@ -369,7 +369,12 @@ function evaluateLeasePush({ projectDir, cwd, env = process.env, branch, boardDi
     const dirTask = basename(top).toLowerCase();
     const taskId = readTaskId(top);
     let claimTaskId = null;
-    if (realProj !== realMain) {
+    // AISDLC-830 (DEC-0088): a planner session in a file-* worktree needs no board claim;
+    // the branch half (below, or in the guard) requires ai-sdlc/<worktree dir> exactly.
+    const plannerFiling = env.AI_SDLC_HIERARCHY_ROLE === 'planner' && /^file-/.test(basename(top));
+    if (plannerFiling) {
+      // bound by role + worktree name instead of a claim
+    } else if (realProj !== realMain) {
       if (realProj !== top) {
         fail(
           'own-session',
@@ -432,12 +437,18 @@ function evaluateLeasePush({ projectDir, cwd, env = process.env, branch, boardDi
     const effectiveTask = taskId || claimTaskId;
     if (branch !== undefined && failing.length === 0) {
       const own = String(branch).replace(/^refs\/heads\//, '');
-      const problem = taskBindingProblem(own, effectiveTask, basename(top));
+      const problem = taskBindingProblem(
+        own,
+        effectiveTask,
+        basename(top),
+        env.AI_SDLC_HIERARCHY_ROLE,
+      );
       if (problem) {
         fail(problem.condition, problem.found, problem.expected, branchFix(problem.condition, top));
       }
     }
-    return done({ mainRoot, top, claimTaskId, taskId: effectiveTask });
+    const shape = plannerFiling && failing.length === 0 ? 'planner-filing' : 'executor-task';
+    return done({ mainRoot, top, claimTaskId, taskId: effectiveTask, shape });
   } catch (err) {
     fail(
       'evaluation-error',

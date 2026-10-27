@@ -28,7 +28,7 @@ export interface PolicyModule {
     env?: NodeJS.ProcessEnv;
     branch?: string;
     boardDir?: string;
-  }) => { allowed: boolean; failing: LeaseCondition[] };
+  }) => { allowed: boolean; failing: LeaseCondition[]; shape?: string };
   inspectInflightClaim: (
     boardDir: string,
     taskId: string,
@@ -130,7 +130,10 @@ export function leasePushPreflight(opts: LeasePreflightOptions): LeasePreflight 
       status: 'allowed',
       blocking: false,
       failing: [],
-      message: 'lease-push preflight: allowed',
+      message:
+        r.shape === 'planner-filing'
+          ? 'lease-push preflight: allowed (accepted shape: planner-filing, DEC-0088: planner session, .worktrees/file-<x>, branch ai-sdlc/file-<x>)'
+          : 'lease-push preflight: allowed (accepted shape: executor-task)',
     };
   }
   const managed =

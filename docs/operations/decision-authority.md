@@ -78,6 +78,8 @@ This refusal applies under `leaseOnOwnBranch` only.
 
 The default lease policy allows a lease push of a dispatched task's own branch from its task worktree. From a session rooted at the main checkout the cwd worktree must be bound to ONE task: either `AI_SDLC_ACTIVE_TASK_ID` equals its `.active-task`, or the session is a hierarchy executor (`AI_SDLC_HIERARCHY_ROLE=executor`, set by `cli-hierarchy up`) holding exactly one inflight claim on the dispatch board, for that task (AISDLC-756, DEC-0067). The refusal names both bindings and the next step: claim the task through the executor loop, or run the push from a session rooted in the worktree. This applies the "own branch" definition of DEC-0047; it does not widen what may be pushed.
 
+A second accepted shape, the planner filing branch (AISDLC-830, DEC-0088): a session with `AI_SDLC_HIERARCHY_ROLE=planner` whose cwd is `<repo>/.worktrees/file-<x>` may lease-push the worktree's checked-out branch, which must be exactly `ai-sdlc/file-<x>`, to the explicit destination `HEAD:refs/heads/ai-sdlc/file-<x>`. It needs no claim or `.active-task`. Never main/master, never a task branch, never another role; the planner updates a filing PR in place and never re-files. `cli-hierarchy` lease-push preflight reports the matched shape (`planner-filing` or `executor-task`).
+
 ## Rubric in autonomous mode
 
 When no operator is present, the `decision-rubric` skill runs in its autonomous mode: the same problem statement, research, options, recommendation and counter-argument, then it selects the recommendation itself and records it with `cli-decisions add` plus `answer` (class (a)), or with `--timebox` and `--autonomous-fallback` (class (b)). It does not call AskUserQuestion.

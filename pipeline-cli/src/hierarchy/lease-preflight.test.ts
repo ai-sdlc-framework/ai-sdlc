@@ -160,3 +160,21 @@ describe('leasePushPreflight under allowForcePush: lease (AISDLC-1005)', () => {
     expect(r.status).toBe('refused');
   });
 });
+
+describe('leasePushPreflight planner-filing shape (AISDLC-830)', () => {
+  it('names the planner-filing accepted shape in the allowed message', () => {
+    const r = leasePushPreflight({
+      projectDir: '/p',
+      cwd: '/p/.worktrees/file-x',
+      taskId: 'file-x',
+      env: { AI_SDLC_HIERARCHY_ROLE: 'planner' },
+      load: () =>
+        ({
+          evaluateLeasePush: () => ({ allowed: true, failing: [], shape: 'planner-filing' }),
+        }) as unknown as PolicyModule,
+    });
+    expect(r.status).toBe('allowed');
+    expect(r.message).toContain('planner-filing');
+    expect(r.message).toContain('DEC-0088');
+  });
+});

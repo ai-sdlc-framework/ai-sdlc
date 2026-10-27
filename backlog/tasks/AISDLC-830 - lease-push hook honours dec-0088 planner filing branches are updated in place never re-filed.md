@@ -2,7 +2,7 @@
 id: AISDLC-830
 title: >-
   Lease-push hook honours DEC-0088: planner filing branches are updated in place, never re-filed
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-13'
 labels:

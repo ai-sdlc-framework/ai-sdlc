@@ -650,3 +650,28 @@ describe('evaluateLeasePush mode lease (AISDLC-1005)', () => {
     assert.equal(any('git push origin docs/x').decision, 'none');
   });
 });
+
+describe('evaluateLeasePush - planner filing shape (AISDLC-830, DEC-0088)', () => {
+  const F = 'ai-sdlc/file-x';
+  const over = (o = {}) => ({
+    ownRef: `refs/heads/${F}`,
+    taskId: null,
+    worktreeName: 'file-x',
+    role: 'planner',
+    ...o,
+  });
+  const cmd = `git push --force-with-lease origin HEAD:refs/heads/${F}`;
+
+  it('allows the planner on its own file-* branch without a task sentinel', () =>
+    assert.equal(verdict(cmd, over()), 'allow'));
+  it('denies executors, unset role, mismatched branch and main', () => {
+    assert.equal(verdict(cmd, over({ role: 'executor' })), 'deny');
+    assert.equal(verdict(cmd, over({ role: undefined })), 'deny');
+    assert.equal(verdict(cmd, over({ worktreeName: 'file-y' })), 'deny');
+    assert.equal(verdict(cmd, over({ ownRef: 'refs/heads/main' })), 'deny');
+    assert.equal(
+      verdict('git push --force-with-lease origin HEAD:refs/heads/main', over()),
+      'deny',
+    );
+  });
+});
