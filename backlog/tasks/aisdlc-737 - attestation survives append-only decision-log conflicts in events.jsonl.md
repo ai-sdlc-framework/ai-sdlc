@@ -2,7 +2,7 @@
 id: AISDLC-737
 title: >-
   attestation survives append-only decision-log conflicts in events.jsonl
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-06'
 labels:

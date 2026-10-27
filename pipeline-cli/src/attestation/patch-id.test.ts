@@ -320,6 +320,7 @@ describe('patch-id helpers (AISDLC-398 AC-4)', () => {
         ':!backlog/tasks/',
         ':!backlog/completed/',
         ':!.ai-sdlc/reviews/',
+        ':!.ai-sdlc/_decisions/events.jsonl',
       ]);
     });
 

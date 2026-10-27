@@ -53,6 +53,7 @@ const CANONICAL_PATCH_ID_EXCLUSIONS = [
   ':!backlog/tasks/',
   ':!backlog/completed/',
   ':!.ai-sdlc/reviews/',
+  ':!.ai-sdlc/_decisions/events.jsonl',
 ];
 
 /**

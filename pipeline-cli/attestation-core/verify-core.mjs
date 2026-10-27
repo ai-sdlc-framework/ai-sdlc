@@ -138,6 +138,9 @@ import {
  * ledger is lifecycle-observability data written in the same pipeline pass
  * as `emit-leaf`/`sign-v6`, so it must be excluded here in lockstep with
  * `PATCH_ID_EXCLUSIONS` for the same reason `transcript-leaves/` is.
+ *
+ * AISDLC-737: `.ai-sdlc/_decisions/events.jsonl` added (append-only decision
+ * log; a keep-both-sides conflict must not invalidate attestation).
  */
 export const ATTESTATION_PATH_EXCLUSIONS = [
   ':!.ai-sdlc/attestations/',
@@ -146,6 +149,7 @@ export const ATTESTATION_PATH_EXCLUSIONS = [
   ':!backlog/tasks/',
   ':!backlog/completed/',
   ':!.ai-sdlc/reviews/',
+  ':!.ai-sdlc/_decisions/events.jsonl',
 ];
 
 /**

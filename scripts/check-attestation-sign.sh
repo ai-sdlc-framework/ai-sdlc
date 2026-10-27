@@ -233,6 +233,7 @@ PATCH_ID_EXCLUSIONS_FALLBACK=(
   ':!backlog/tasks/'
   ':!backlog/completed/'
   ':!.ai-sdlc/reviews/'
+  ':!.ai-sdlc/_decisions/events.jsonl'
 )
 
 PATCH_ID_EXCLUSIONS=()

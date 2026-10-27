@@ -123,7 +123,7 @@ describe('AISDLC-610 AC-4: signer/verifier exclusion-list lockstep', () => {
     expect(ATTESTATION_PATH_EXCLUSIONS).toContain(':!backlog/completed/');
   });
 
-  it('neither list has grown beyond the six canonical entries (regression guard)', () => {
+  it('neither list has grown beyond the seven canonical entries (regression guard)', () => {
     // Pins the exact canonical set so a future one-sided addition (the
     // AISDLC-421 bug class) fails loudly here rather than silently breaking
     // attestation lookups in production.
@@ -134,6 +134,7 @@ describe('AISDLC-610 AC-4: signer/verifier exclusion-list lockstep', () => {
       ':!backlog/tasks/',
       ':!backlog/completed/',
       ':!.ai-sdlc/reviews/',
+      ':!.ai-sdlc/_decisions/events.jsonl',
     ].sort();
     expect([...PATCH_ID_EXCLUSIONS].sort()).toEqual(canonical);
     expect([...ATTESTATION_PATH_EXCLUSIONS].sort()).toEqual(canonical);
@@ -252,6 +253,53 @@ describe('AISDLC-616 AC-4: reviews-ledger append does not shift patch-id', () =>
     expect(headAfter).not.toBe(headBefore);
     expect(pidAfter).not.toBeNull();
     expect(pidAfter).toBe(pidBefore);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AISDLC-737: decision-log append conflict does not shift patch-id
+// ---------------------------------------------------------------------------
+
+describe('AISDLC-737: decision log events.jsonl is excluded from the patch-id', () => {
+  it('both lists include the decision log', () => {
+    expect(PATCH_ID_EXCLUSIONS).toContain(':!.ai-sdlc/_decisions/events.jsonl');
+    expect(ATTESTATION_PATH_EXCLUSIONS).toContain(':!.ai-sdlc/_decisions/events.jsonl');
+  });
+
+  it('a keep-both-sides resolution of an events.jsonl conflict leaves the patch-id UNCHANGED', () => {
+    sh('git checkout -b feat-737', repoDir);
+    writeFileSync(join(repoDir, 'src-737.ts'), 'export const v = 737;\n');
+    sh('git add src-737.ts', repoDir);
+    sh('git commit -m "feat: source (AISDLC-737)"', repoDir);
+    const base = sh('git merge-base main HEAD', repoDir);
+    const pidBefore = computePatchId(base, sh('git rev-parse HEAD', repoDir), repoDir);
+    expect(pidBefore).not.toBeNull();
+
+    // Branch appends its own line AND the merged result also holds the other
+    // PR's line (what keeping both sides yields).
+    mkdirSync(join(repoDir, '.ai-sdlc', '_decisions'), { recursive: true });
+    writeFileSync(
+      join(repoDir, '.ai-sdlc', '_decisions', 'events.jsonl'),
+      '{"id":"DEC-A"}\n{"id":"DEC-B"}\n',
+    );
+    sh('git add .ai-sdlc/_decisions/events.jsonl', repoDir);
+    sh('git commit -m "chore: decision log both sides (AISDLC-737)"', repoDir);
+    const pidAfter = computePatchId(base, sh('git rev-parse HEAD', repoDir), repoDir);
+    expect(pidAfter).toBe(pidBefore);
+  });
+
+  it('a real change to another file still shifts the patch-id', () => {
+    sh('git checkout -b feat-737b', repoDir);
+    writeFileSync(join(repoDir, 'src-737b.ts'), 'export const v = 1;\n');
+    sh('git add src-737b.ts', repoDir);
+    sh('git commit -m "feat: one"', repoDir);
+    const base = sh('git merge-base main HEAD', repoDir);
+    const pid1 = computePatchId(base, sh('git rev-parse HEAD', repoDir), repoDir);
+    writeFileSync(join(repoDir, 'src-737b.ts'), 'export const v = 2;\n');
+    sh('git add src-737b.ts', repoDir);
+    sh('git commit -m "feat: two"', repoDir);
+    const pid2 = computePatchId(base, sh('git rev-parse HEAD', repoDir), repoDir);
+    expect(pid2).not.toBe(pid1);
   });
 });
 
