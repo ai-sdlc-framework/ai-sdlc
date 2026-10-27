@@ -314,6 +314,23 @@ export async function resumeAfterClear(p: Ports, state: ExecutorState): Promise<
   else await log(p, `resume after clear refused: ${JSON.stringify(r.value ?? null)}`);
 }
 
+/**
+ * RFC-0059: a spawned executor has `AI_SDLC_EXECUTOR_TASK` set at launch and serves that one task. Run the
+ * executor command at session start instead of waiting for an `enqueue` wake; `executor-start` reads the
+ * variable and claims exactly that task.
+ */
+export async function startPinnedTask(
+  p: Ports,
+  state: ExecutorState,
+  taskId: string,
+): Promise<void> {
+  const r = await safe(() => p.runCommand({ command: RESUME_COMMAND }));
+  if (ran(r)) {
+    state.active = true;
+    state.lastActivity = Date.now();
+  } else await log(p, `start for ${taskId} refused: ${JSON.stringify(r.value ?? null)}`);
+}
+
 /** True while a task is believed to run: set at a wake, cleared at the verdict, stale after ACTIVE_STALE_MS. */
 function taskRunning(state: ExecutorState): boolean {
   if (!state.active) return false;

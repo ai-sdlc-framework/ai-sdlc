@@ -222,7 +222,21 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
 }
 
 /** Render the status result as a plain-text table. */
-export function formatStatus(result: StatusResult): string[] {
+/** Human age such as `5m` or `2h10m` for a dynamic executor's `startedAt`. */
+export function formatAge(startedAt: string, nowMs: number): string {
+  const ms = nowMs - Date.parse(startedAt);
+  if (!Number.isFinite(ms) || ms < 0) return '?';
+  const min = Math.floor(ms / 60_000);
+  return min < 60 ? `${min}m` : `${Math.floor(min / 60)}h${min % 60}m`;
+}
+
+export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): string[] {
+  const dynamicLines = result.rows
+    .filter((r) => r.entry.taskId !== undefined)
+    .map(
+      (r) =>
+        `dynamic executor: ${r.entry.name} task ${r.entry.taskId} age ${formatAge(r.entry.startedAt, nowMs)} (${r.state})`,
+    );
   const t = result.contextThresholds;
   const thresholds = t
     ? [
@@ -302,6 +316,7 @@ export function formatStatus(result: StatusResult): string[] {
     ...(repairs.length + nodeRepairs.length + overLines.length > 0
       ? ['', ...repairs, ...nodeRepairs, ...overLines]
       : []),
+    ...(dynamicLines.length > 0 ? ['', ...dynamicLines] : []),
     '',
     `board: ${queued} queued, ${inflight} inflight, ${done} done, ${failed} failed`,
     formatWebhookStatus(result.webhook),

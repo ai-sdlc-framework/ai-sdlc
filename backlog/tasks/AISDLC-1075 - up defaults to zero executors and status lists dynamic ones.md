@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1075
 title: 'up defaults to zero executors, status lists dynamic executors, runbook rewritten'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-23'
 labels:

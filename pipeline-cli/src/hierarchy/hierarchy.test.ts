@@ -31,6 +31,7 @@ import {
   evaluateResourceGate,
   executorNames,
   findStartedSession,
+  formatAge,
   formatStatus,
   hierarchyDown,
   hierarchyRegister,
@@ -339,6 +340,43 @@ function legacyEntry(name: string, role: 'planner' | 'operator-dispatch' | 'exec
   });
 }
 
+describe('formatStatus dynamic executors (AISDLC-1075)', () => {
+  it('lists each dynamic executor with its task id and age', () => {
+    const row = (taskId: string | undefined, startedAt: string) =>
+      ({
+        entry: {
+          role: 'executor',
+          name: taskId ? `ai-sdlc-executor-${taskId.toLowerCase()}` : 'p-executor-alpha',
+          tmuxSession: 'x',
+          tmuxWindow: 'x',
+          model: 'sonnet',
+          permissionMode: 'bypassPermissions',
+          startedAt,
+          ...(taskId ? { taskId } : {}),
+        },
+        state: 'busy',
+        attached: false,
+        module: { state: 'absent' },
+      }) as never;
+    const now = Date.parse('2026-10-27T12:00:00Z');
+    const lines = formatStatus(
+      {
+        rows: [row('AISDLC-9', '2026-10-27T11:55:00Z'), row(undefined, '2026-10-27T01:00:00Z')],
+        board: { queued: 0, inflight: 0, done: 0, failed: 0 },
+        webhook: { running: false },
+        scheduler: { running: false },
+      } as never,
+      now,
+    );
+    const dyn = lines.filter((l) => l.startsWith('dynamic executor:'));
+    expect(dyn).toEqual([
+      'dynamic executor: ai-sdlc-executor-aisdlc-9 task AISDLC-9 age 5m (busy)',
+    ]);
+    expect(formatAge('2026-10-27T09:50:00Z', now)).toBe('2h10m');
+    expect(formatAge('garbage', now)).toBe('?');
+  });
+});
+
 describe('hierarchy up VS Code tasks (AISDLC-754)', () => {
   const HINT =
     'VS Code: run task "hierarchy: open all agents" (Terminal > Run Task) to open one terminal per agent';
@@ -510,6 +548,15 @@ describe('hierarchy up', () => {
     });
     expect(alpha.pid).toBeGreaterThan(0);
     expect(alpha.paneId).toMatch(/^%/);
+  });
+
+  it('prints a deprecation line for --executors above 0 and none for the default 0 (AISDLC-1075)', async () => {
+    const logs: string[] = [];
+    const logDeps = { ...deps, log: (l: string) => void logs.push(l) };
+    await hierarchyUp({ ...baseOpts, executors: 0, noPlanner: true }, logDeps);
+    expect(logs.some((l) => l.includes('deprecated: --executors'))).toBe(false);
+    await hierarchyUp({ ...baseOpts, executors: 2, noPlanner: true }, logDeps);
+    expect(logs.some((l) => l.includes('deprecated: --executors 2'))).toBe(true);
   });
 
   it('--executors 2 --no-planner issues one new-session per started agent and no new-window', async () => {
@@ -804,6 +851,7 @@ describe('hierarchy status', () => {
     expect(result.board.inflight).toBe(1);
 
     const text = formatStatus(result).join('\n');
+    expect(text).not.toContain('dynamic executor:');
     expect(text).toContain(Q('executor-alpha'));
     expect(text).toContain('AISDLC-100');
     expect(text).toContain('busy');

@@ -31,6 +31,7 @@ function setup(
     omit?: string;
     identity?: unknown;
     name?: string;
+    task?: string;
   } = {},
 ) {
   const handlers = registerStrict({});
@@ -46,7 +47,9 @@ function setup(
             : over.role
           : k === 'AI_SDLC_HIERARCHY_SESSION'
             ? over.name
-            : undefined,
+            : k === 'AI_SDLC_EXECUTOR_TASK'
+              ? over.task
+              : undefined,
     },
     session: {
       version: async () => over.version ?? '2.1.309',
@@ -202,6 +205,26 @@ describe('hierarchy module: gate', () => {
     expect(measuredTokens({ tokens: 5 })).toBe(5);
     expect(measuredTokens({ usage: { input: 1, cacheRead: 2, output: 3 } })).toBe(6);
     expect(measuredTokens(undefined)).toBe(0);
+  });
+});
+
+describe('hierarchy module: spawned executor (AISDLC-1075)', () => {
+  it('with AI_SDLC_EXECUTOR_TASK set, starts the executor command at session start without a wake', async () => {
+    const s = setup({ task: 'AISDLC-7' });
+    await s.start();
+    expect(ran(s)).toEqual([RESUME_COMMAND]);
+  });
+
+  it('without the variable, waits for a wake', async () => {
+    const s = setup();
+    await s.start();
+    expect(ran(s)).toEqual([]);
+  });
+
+  it('logs a refused start', async () => {
+    const s = setup({ task: 'AISDLC-7', drop: [RESUME_COMMAND] });
+    await s.start();
+    expect(logOf(s.kv).join('\n')).toContain('start for AISDLC-7 refused');
   });
 });
 

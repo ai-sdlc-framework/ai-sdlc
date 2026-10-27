@@ -15,6 +15,7 @@ import {
   resumeAfterClear,
   safe,
   setSwallowSink,
+  startPinnedTask,
 } from './executor.ts';
 import type { ExecutorState, Ports } from './executor.ts';
 import {
@@ -252,6 +253,11 @@ export const register = (on: Any, options?: Any): void => {
     // INTERIM: if a host fires session.start after a mod-run clear, resume from here as well.
     if (state.resumePending) await resumeAfterClear(p, state);
     await log(p, 'registered role=executor');
+    // RFC-0059: a spawned executor serves exactly one task; start at once, no wake to wait for.
+    const pinned = (await safe(() => $.env.get('AI_SDLC_EXECUTOR_TASK'))).value;
+    if (typeof pinned === 'string' && pinned && !state.resumePending) {
+      await startPinnedTask(p, state, pinned);
+    }
     return next(e);
   });
 };

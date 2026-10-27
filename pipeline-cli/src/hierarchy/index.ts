@@ -205,6 +205,7 @@ export {
   writeRoster,
 } from './roster.js';
 export {
+  formatAge,
   formatStatus,
   hierarchyStatus,
   type LiveState,
