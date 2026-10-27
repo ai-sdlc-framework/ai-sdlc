@@ -115,7 +115,8 @@ export interface DemoDeps {
   idleExecutors(): number;
   /** The task's backlog status and whether it is dispatchable; null when there is no task file. */
   taskState(taskId: string): { status: string; dispatchable: boolean } | null;
-  cleanCheckout(): boolean;
+  /** True when the checkout is clean, ignoring the demo output directory `ignore`. */
+  cleanCheckout(ignore?: string): boolean;
   /** Run the recorder (asciinema) in the foreground and return its exit status. */
   record(args: string[]): number;
   /** Absolute directory holding the `cli-*.mjs` bin shims. */
@@ -139,7 +140,7 @@ export interface BeatsDoc {
 const quote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;
 
 /** One line per missing tool; returns whether preflight passed. */
-export function preflight(scenario: Scenario, deps: DemoDeps): boolean {
+export function preflight(scenario: Scenario, deps: DemoDeps, out?: string): boolean {
   let ok = true;
   const fail = (line: string): void => {
     deps.err(line);
@@ -154,7 +155,7 @@ export function preflight(scenario: Scenario, deps: DemoDeps): boolean {
   if (!state || state.status !== 'To Do' || !state.dispatchable) {
     fail(`cli-hierarchy demo: ${scenario.task} is not a dispatchable To Do task`);
   }
-  if (!deps.cleanCheckout()) fail('cli-hierarchy demo: the checkout is not clean');
+  if (!deps.cleanCheckout(out)) fail('cli-hierarchy demo: the checkout is not clean');
   return ok;
 }
 
@@ -376,7 +377,7 @@ export async function runDemoRun(flags: Record<string, string>, deps: DemoDeps):
     return 2;
   }
   if (flags['inner'] === 'true') return runInner(scenario, out, deps);
-  if (!preflight(scenario, deps)) return 1;
+  if (!preflight(scenario, deps, out)) return 1;
   mkdirSync(out, { recursive: true });
   const cast = path.join(out, 'hierarchy.cast');
   const inner = [

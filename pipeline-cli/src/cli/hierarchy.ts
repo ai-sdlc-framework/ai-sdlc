@@ -462,8 +462,17 @@ function createDemoDeps(deps: HierarchyDeps, overrides: Partial<DemoDeps> = {}):
         dispatchable: !/^dispatchable:\s*false\s*$/m.test(head),
       };
     },
-    cleanCheckout: () =>
-      run('git', ['status', '--porcelain'], { cwd: deps.cwd }).stdout.trim() === '',
+    cleanCheckout: (ignore) => {
+      const args = ['status', '--porcelain', '--untracked-files=all'];
+      if (ignore) {
+        const rel = path.relative(deps.cwd, path.resolve(deps.cwd, ignore));
+        // A demo output directory inside the checkout must not dirty it on rerun.
+        if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
+          args.push('--', '.', `:(exclude)${rel}`);
+        }
+      }
+      return run('git', args, { cwd: deps.cwd }).stdout.trim() === '';
+    },
     record: (args) => spawnSync('asciinema', args, { stdio: 'inherit', cwd: deps.cwd }).status ?? 1,
     binDir,
     cwd: deps.cwd,

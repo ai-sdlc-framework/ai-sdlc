@@ -165,6 +165,38 @@ describe('demo run (AISDLC-1079)', () => {
     expect(beats.mergeSha).toBe('abcdef1234567');
   });
 
+  it('picks the new PR, not an older one created before the brief', async () => {
+    const out = tmp();
+    const h = harness();
+    const base = h.deps.run;
+    h.deps.run = (file, args, o) =>
+      file === 'gh' && args[1] === 'list'
+        ? {
+            status: 0,
+            stderr: '',
+            stdout: JSON.stringify([
+              { number: 5, createdAt: '1969-12-30T00:00:00Z' },
+              { number: 88, createdAt: '1970-01-01T00:00:10Z' },
+            ]),
+          }
+        : base(file, args, o);
+    expect(await runDemo('run', { scenario: SCENARIO, out, inner: 'true' }, h.deps)).toBe(0);
+    const beats = JSON.parse(readFileSync(path.join(out, 'beats.json'), 'utf-8')) as {
+      prNumber: number;
+    };
+    expect(beats.prNumber).toBe(88);
+  });
+
+  it('passes the output directory to the cleanliness check', async () => {
+    const out = tmp();
+    const seen: (string | undefined)[] = [];
+    const h = harness({
+      cleanCheckout: (ignore) => (seen.push(ignore), true),
+    });
+    await runDemo('run', { scenario: SCENARIO, out }, h.deps);
+    expect(seen).toEqual([out]);
+  });
+
   it('fails the run when a command fails or prints no decision id', async () => {
     const h = harness({ run: () => ({ status: 3, stdout: '', stderr: 'boom' }) });
     expect(await runDemo('run', { scenario: SCENARIO, out: tmp(), inner: 'true' }, h.deps)).toBe(1);
