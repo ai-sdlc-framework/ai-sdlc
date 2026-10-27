@@ -69,6 +69,13 @@ function setup(
         return result(a.command);
       }),
     },
+    process: {
+      run: vi.fn(async (a: any) => {
+        if (!Array.isArray(a) || a.length === 0)
+          throw new Error('process.run: takes argv, a non-empty list of strings');
+        return { exitCode: 0, stdout: '' };
+      }),
+    },
     prompt: {
       submit: vi.fn(async (a: any) => {
         if (typeof a?.text !== 'string') throw new Error('prompt.submit: text required');
@@ -131,24 +138,25 @@ describe('hierarchy module: gate', () => {
     const s = setup({ version: '2.1.300' });
     await s.start();
     expect(await s.handlers.get('turn.start')(s.$, 'e', (x: any) => x)).toBe('e'); // not armed
-    // AISDLC-1082: a swallowed failure (this stub has no process.run) is logged too.
-    const lines = logOf(s.kv).filter((l: string) => !l.includes('swallowed'));
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain(`floor ${VERSION_FLOOR}`);
-    expect(logOf(s.kv).join()).toContain('swallowed');
+    expect(logOf(s.kv)).toHaveLength(1);
+    expect(logOf(s.kv)[0]).toContain(`floor ${VERSION_FLOOR}`);
   });
 
-  it.each(['prompt.submit', 'command.run', 'session.compact', 'session.usage', 'session.send'])(
-    'refuses and names the missing primitive %s',
-    async (omit) => {
-      const s = setup({ omit });
-      await s.start();
-      expect(await s.handlers.get('turn.start')(s.$, 'e', (x: any) => x)).toBe('e'); // not armed
-      const want = omit === 'session.usage' ? 'session.measure' : omit;
-      expect(logOf(s.kv)[0]).toContain(`primitive ${want} is missing`);
-      expect(logOf(s.kv)[0]).toContain(VERSION_FLOOR);
-    },
-  );
+  it.each([
+    'prompt.submit',
+    'command.run',
+    'session.compact',
+    'session.usage',
+    'session.send',
+    'process.run',
+  ])('refuses and names the missing primitive %s', async (omit) => {
+    const s = setup({ omit });
+    await s.start();
+    expect(await s.handlers.get('turn.start')(s.$, 'e', (x: any) => x)).toBe('e'); // not armed
+    const want = omit === 'session.usage' ? 'session.measure' : omit;
+    expect(logOf(s.kv)[0]).toContain(`primitive ${want} is missing`);
+    expect(logOf(s.kv)[0]).toContain(VERSION_FLOOR);
+  });
 
   it('probes without acting: a host that rejects the probe still registers, nothing compacts or submits', async () => {
     const s = setup();
@@ -486,6 +494,7 @@ describe('version guard (AISDLC-1062)', () => {
     'session.compact': true,
     'session.measure': true,
     'session.send': true,
+    'process.run': true,
   };
   const obj = (VERSION: string) => ({
     version: { VERSION, BUILD_TIME: '2026-10-01T00:00:00Z', GIT_SHA: 'abc' },

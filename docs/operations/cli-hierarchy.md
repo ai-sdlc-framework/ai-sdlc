@@ -623,7 +623,7 @@ loop and **never submits a prompt to the dispatch model**; its dispatch code has
   operator-dispatch command, which is now a role description.
 
 Interim assumptions (a hooks module has no process or file API and the host contract is read from the RFC): the payload shapes of
-`$.clock.every(ms, fn)` (AISDLC-1082: the host throws `$.clock.every takes a function` for the old `{ ms, run }` object; the first argument is the interval in milliseconds, the second the callback), `$.process.run({ command, args })` (result `stdout` plus `exitCode`) and the
+`$.clock.every(ms, fn)` (AISDLC-1082: the host throws `$.clock.every takes a function` for the old `{ ms, run }` object; the first argument is the interval in milliseconds, the second the callback), `$.process.run([command, ...args])` (AISDLC-1082: the host takes an argv list of strings and rejects `{ command, args }` with "takes argv, a non-empty list of strings naming the command first"; result `stdout` plus `exitCode`) and the
 `ui.render` return value are verified by `claude plugin test` fixtures against engine-written types when available.
 
 ## The hierarchy hooks module (executor and planner roles)

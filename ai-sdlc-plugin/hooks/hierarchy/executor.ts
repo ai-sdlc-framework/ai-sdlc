@@ -63,6 +63,7 @@ export const PRIMITIVES = [
   'session.compact',
   'session.measure',
   'session.send',
+  'process.run', // AISDLC-1082: the module-health heartbeat is written through it
 ] as const;
 
 /**

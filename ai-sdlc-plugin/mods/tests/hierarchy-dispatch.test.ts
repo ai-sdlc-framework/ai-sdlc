@@ -55,9 +55,13 @@ function setup(tickResult: unknown = EMPTY_TICK) {
     },
     process: {
       run: vi.fn(async (a: any) => {
-        if (typeof a?.command !== 'string') throw new Error('run: command required');
-        runs.push(a.args);
-        const sub = a.args[1];
+        // like the host: an argv list of strings, command first; { command, args } is rejected (AISDLC-1082)
+        if (!Array.isArray(a) || a.length === 0 || a.some((x: unknown) => typeof x !== 'string'))
+          throw new Error(
+            'process.run: takes argv, a non-empty list of strings naming the command first',
+          );
+        runs.push(a.slice(1));
+        const sub = a[2];
         if (sub === 'tick') {
           return tickOut === undefined
             ? { exitCode: 0, stdout: '' }
@@ -287,8 +291,7 @@ describe('dispatch host (AISDLC-1035)', () => {
     await s.start();
     s.$.process.run.mockImplementation(async (a: any) => ({
       exitCode: 0,
-      stdout:
-        a.args[1] === 'rotate-pending' ? '{"pending":false,"forward":["executor-alpha"]}' : '{}',
+      stdout: a[2] === 'rotate-pending' ? '{"pending":false,"forward":["executor-alpha"]}' : '{}',
     }));
     await s.timer();
     expect(sends(s)).toEqual([{ to: 'executor-alpha', text: 'rotate' }]);
@@ -311,7 +314,7 @@ describe('dispatch host (AISDLC-1035)', () => {
     await s.start();
     s.$.process.run.mockImplementation(async (a: any) => ({
       exitCode: 0,
-      stdout: a.args[1] === 'rotate-pending' ? '{"pending":true}' : '{}',
+      stdout: a[2] === 'rotate-pending' ? '{"pending":true}' : '{}',
     }));
     await s.timer();
     expect(s.$.command.run).toHaveBeenCalledWith({ command: 'clear' });

@@ -128,7 +128,7 @@ export const register = (on: Any, options?: Any): void => {
     const versionText = typeof version === 'string' ? version : '';
     const health = (h: { state: 'loaded' | 'refused'; reason?: string }): Promise<void> =>
       writeModuleHealth(
-        (a) => $.process.run(a),
+        (a) => $.process.run([a.command, ...a.args]),
         options?.boardDir,
         sessionName,
         { ...h, ...(versionText ? { version: versionText } : {}) },
@@ -154,6 +154,8 @@ export const register = (on: Any, options?: Any): void => {
             'session.compact': await exists(() => $.session.compact('probe'), 'compact'),
             'session.measure': await exists(() => $.session.usage(), 'usage'),
             'session.send': await exists(() => $.session.send('probe'), 'send'),
+            // AISDLC-1082: the heartbeat write depends on it; the host takes an argv list, not { command, args }.
+            'process.run': await exists(() => $.process.run('probe'), 'run'),
           };
     const miss = guard(
       version,
@@ -184,7 +186,7 @@ export const register = (on: Any, options?: Any): void => {
         storeGet: (k) => $.store.get(k),
         storeSet: (k, v) => $.store.set(k, v),
         runCommand: (a) => $.command.run(a),
-        runProcess: (a) => $.process.run(a),
+        runProcess: (a) => $.process.run([a.command, ...a.args]),
         send: (a) => $.session.send(a),
         uiOpen: (a) => $.ui.open(a),
       };

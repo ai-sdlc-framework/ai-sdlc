@@ -102,3 +102,25 @@ describe('assertDispatchModuleLoaded', () => {
     ).resolves.toBeUndefined();
   });
 });
+
+describe('plugin store fallback (AISDLC-1082)', () => {
+  it('reads the mirrored store key when the board file is absent, and prefers the board file', () => {
+    const b = board();
+    const store = board();
+    const rec = { state: 'loaded', at: NOW.toISOString() };
+    writeFileSync(path.join(store, 'a.json'), 'not json');
+    writeFileSync(path.join(store, 'b.json'), JSON.stringify({ 'hierarchy/health/p-exec': rec }));
+    writeFileSync(
+      path.join(store, 'c.json'),
+      JSON.stringify({ store: { 'hierarchy/health/p-dispatch': rec } }),
+    );
+    expect(readModuleHealth(b, executor, NOW, [store]).state).toBe('loaded');
+    expect(readModuleHealth(b, dispatch, NOW, [store]).state).toBe('loaded');
+    expect(readModuleHealth(b, { name: 'other', role: 'executor' }, NOW, [store]).state).toBe(
+      'absent',
+    );
+    expect(readModuleHealth(b, executor, NOW, ['/nonexistent-dir']).state).toBe('absent');
+    write(b, 'p-exec', { state: 'refused', reason: 'x' });
+    expect(readModuleHealth(b, executor, NOW, [store]).state).toBe('refused');
+  });
+});

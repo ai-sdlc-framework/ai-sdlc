@@ -100,7 +100,7 @@ export async function writeModuleHealth(
   const record = { ...health, at: new Date().toISOString() };
   const body = JSON.stringify(record);
   // AISDLC-1082: the plugin store copy survives a host whose `process.run` cannot write the board file.
-  // The CLI reader fallback to the store is deferred (the store file location is host-defined).
+  // `readModuleHealth` falls back to this store key when the board file is absent.
   if (storeSet) await safe(() => storeSet(`hierarchy/health/${name}`, record));
   const r = await safe(() => run({ command: NODE, args: ['-e', WRITE_SCRIPT, file, body] }));
   const v = (r.value ?? {}) as Any;
@@ -447,7 +447,7 @@ export async function dispatchSessionReceive(
     storeGet: (k) => $.store.get(k),
     storeSet: (k, v) => $.store.set(k, v),
     runCommand: (a) => $.command.run(a),
-    runProcess: (a) => $.process.run(a),
+    runProcess: (a) => $.process.run([a.command, ...a.args]),
     send: (a) => $.session.send(a),
     uiOpen: (a) => $.ui.open(a),
   };
@@ -480,7 +480,7 @@ export async function dispatchSessionMeasure(
     storeGet: (k) => $.store.get(k),
     storeSet: (k, v) => $.store.set(k, v),
     runCommand: (a) => $.command.run(a),
-    runProcess: (a) => $.process.run(a),
+    runProcess: (a) => $.process.run([a.command, ...a.args]),
     send: (a) => $.session.send(a),
     uiOpen: (a) => $.ui.open(a),
   };
