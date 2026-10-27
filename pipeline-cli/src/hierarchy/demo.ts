@@ -261,6 +261,7 @@ export async function runInner(
     return (flush(), 1);
   }
   beat('brief');
+  const briefAt = deps.now();
 
   const deadline = deps.now() + scenario.timeoutMinutes * 60_000;
   let lastBoard = '';
@@ -293,13 +294,18 @@ export async function runInner(
           '--state',
           'all',
           '--json',
-          'number',
+          'number,createdAt',
           '--limit',
-          '1',
+          '20',
         ],
         { cwd: deps.cwd },
       );
-      const n = tryJson<{ number: number }[]>(list.stdout)?.[0]?.number;
+      // Ignore PRs created before the brief (for example the task's filing PR).
+      const n = tryJson<{ number: number; createdAt?: string }[]>(list.stdout)?.find((p) => {
+        if (!p.createdAt) return true;
+        const t = Date.parse(p.createdAt);
+        return Number.isNaN(t) || t >= briefAt - 60_000;
+      })?.number;
       if (typeof n === 'number') {
         doc.prNumber = n;
         say(`pr: #${n} opened`);
