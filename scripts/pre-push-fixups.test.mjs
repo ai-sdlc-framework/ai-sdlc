@@ -58,6 +58,7 @@ const PRE_PUSH_FIXUPS_FAKE_SIGNER_EXCLUSIONS = [
   ':!backlog/tasks/',
   ':!backlog/completed/',
   ':!.ai-sdlc/reviews/',
+  ':!.ai-sdlc/_decisions/events.jsonl',
 ];
 
 // ── helpers ──────────────────────────────────────────────────────────────────

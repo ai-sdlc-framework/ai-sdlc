@@ -80,10 +80,10 @@ import { execFileSync, spawnSync } from 'node:child_process';
  * - `.ai-sdlc/_decisions/events.jsonl` — excluded per AISDLC-737. The
  *   append-only decision log: two concurrent PRs both appending produce a
  *   same-file conflict whose only resolution is keeping both sides; that must
- *   not shift the patch-id and force a full re-review. Integrity of existing
- *   lines is covered by the per-event content hash (`eventContentHash` in
- *   `decisions/event-log.ts`) and the sharded `_decisions/events/` files, and
- *   the log is observability data, not reviewed source.
+ *   not shift the patch-id and force a full re-review. Decision records sit outside reviewer
+ *   attestation by design (docs-only classification, decisions-sync lane);
+ *   decision authority comes from records on main, and the log is
+ *   observability data, not reviewed source.
  *
  * Kept as a tuple so callers spread it into git invocations and adding
  * another exclusion is a one-element append rather than a re-architecture.
