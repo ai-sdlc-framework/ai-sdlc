@@ -1,5 +1,12 @@
 # @ai-sdlc/reference
 
+## [0.37.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.36.0...reference-v0.37.0) (2026-10-27)
+
+
+### Features
+
+* **orchestrator:** cli-hierarchy spawn creates a per-task executor session (AISDLC-1073) ([#2017](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2017)) ([caf223f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/caf223f578112307191571d353dc92b6e91abcdd))
+
 ## [0.36.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.35.0...reference-v0.36.0) (2026-10-23)
 
 

@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.37.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.36.0...pipeline-cli-v0.37.0) (2026-10-27)
+
+
+### Features
+
+* knowledge ingest adapters for decisions, RFCs, reviews, events, tasks (AISDLC-774) ([#2007](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2007)) ([699af7c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/699af7c8742936aa78f84c1bfccb19fe205aa3a6))
+* **orchestrator:** cli-hierarchy demo regenerates the terminal demo clip (AISDLC-1079) ([#2016](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2016)) ([be6822c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/be6822c195232e7b49e645ba4cb6b825fece9523))
+* **orchestrator:** cli-hierarchy spawn creates a per-task executor session (AISDLC-1073) ([#2017](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2017)) ([caf223f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/caf223f578112307191571d353dc92b6e91abcdd))
+* **orchestrator:** fixed-prefix tiering, path-bound rules and control linter (AISDLC-782) ([#1988](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1988)) ([45aba26](https://github.com/ai-sdlc-framework/ai-sdlc/commit/45aba2643c32e4e9adec40cd3174c0ec78eba00a))
+* **orchestrator:** status CONTEXT column flags sessions over their clear threshold (AISDLC-1066) ([#2005](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2005)) ([7343754](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7343754b45d056d673b069de30c8d6fb0a99728e))
+* **orchestrator:** step 6 runs verify commands and gates on exit status (AISDLC-1078) ([#2013](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2013)) ([a2210e4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a2210e43cd3654ba14031c367302bb4ebdfb2979))
+* show hooks-module health in status and fail up when dispatch has none (AISDLC-1061) ([#1980](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1980)) ([5965c97](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5965c972fa780201fb419ba8c1a4bf0efd12f62e))
+
+
+### Bug Fixes
+
+* **orchestrator:** refuse fork and protected fixesPr heads, add takeover pipeline test (AISDLC-1070) ([#2012](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2012)) ([494112c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/494112ce8b49aaea94dd7a7e4de6a5bea7062c85))
+* refuse executor-start --wait without a module and guard idle repeats (AISDLC-1065) ([#1991](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1991)) ([89d5c53](https://github.com/ai-sdlc-framework/ai-sdlc/commit/89d5c53933e3f9556cc9df6329989f201efec50b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.37.0
+
 ## [0.36.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.35.0...pipeline-cli-v0.36.0) (2026-10-23)
 
 
