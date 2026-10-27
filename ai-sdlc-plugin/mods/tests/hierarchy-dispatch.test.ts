@@ -41,9 +41,11 @@ function setup(tickResult: unknown = EMPTY_TICK) {
     command: { run: vi.fn(async () => undefined) },
     prompt: { submit: vi.fn(async () => undefined) },
     clock: {
-      every: vi.fn(async (a: any) => {
-        if (typeof a?.ms !== 'number') throw new Error('every: ms required');
-        timer = a.run;
+      // The real host shape: every(ms, fn); an object first argument is refused (AISDLC-1082).
+      every: vi.fn(async (ms: any, fn: any) => {
+        if (typeof fn !== 'function') throw new TypeError('$.clock.every takes a function');
+        if (typeof ms !== 'number') throw new Error('every: ms required');
+        timer = fn;
       }),
     },
     ui: {
@@ -102,7 +104,7 @@ describe('dispatch registration order (AISDLC-1064)', () => {
     s.$.ui.open = vi.fn(() => new Promise(() => {}));
     await s.start();
     await flush();
-    expect(s.$.clock.every).toHaveBeenCalledWith(expect.objectContaining({ ms: 30000 }));
+    expect(s.$.clock.every).toHaveBeenCalledWith(30000, expect.any(Function));
     expect(s.runs.some((a) => a[1] === 'tick')).toBe(true);
     const log = (s.kv.get('hierarchy/log') as string[]).join('\n');
     const at = (t: string) => log.indexOf(t);
@@ -141,7 +143,7 @@ describe('dispatch host (AISDLC-1035)', () => {
   it('arms one timer, opens the pane, and never submits a prompt over a simulated hour', async () => {
     const s = setup();
     await s.start();
-    expect(s.$.clock.every).toHaveBeenCalledWith(expect.objectContaining({ ms: 30000 }));
+    expect(s.$.clock.every).toHaveBeenCalledWith(30000, expect.any(Function));
     expect(s.$.ui.open).toHaveBeenCalledWith(expect.objectContaining({ id: 'board' }));
     // an hour of ticks at the default interval plus mixed events
     for (let i = 0; i < 120; i++) {

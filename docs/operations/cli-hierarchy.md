@@ -602,7 +602,7 @@ loop and **never submits a prompt to the dispatch model**; its dispatch code has
 
 - **Guard.** The version floor plus a probe of `clock.every`, `process.run`, `session.send`, `ui.open` and
   `session.measure`; a miss registers nothing and logs one line naming it.
-- **Timer.** `$.clock.every` (default 30 s, module option `tickMs`) runs `node pipeline-cli/bin/cli-hierarchy.mjs tick`
+- **Timer.** `$.clock.every(ms, fn)` (default 30 s, module option `tickMs`) runs `node pipeline-cli/bin/cli-hierarchy.mjs tick`
   through `$.process.run`. The result goes to the board and the pane, never to the model. Ticks do not overlap.
 - **Consumed events.** `session.receive` consumes `verdict <task-id> ...` (applied with `cli-dispatch collect-verdicts`,
   then an immediate tick), `landed #<pr>` (`cli-dispatch reconcile --pr <n>`) and `status ...` messages, then refreshes
@@ -623,7 +623,7 @@ loop and **never submits a prompt to the dispatch model**; its dispatch code has
   operator-dispatch command, which is now a role description.
 
 Interim assumptions (a hooks module has no process or file API and the host contract is read from the RFC): the payload shapes of
-`$.clock.every({ ms, run })`, `$.process.run({ command, args })` (result `stdout` plus `exitCode`) and the
+`$.clock.every(ms, fn)` (AISDLC-1082: the host throws `$.clock.every takes a function` for the old `{ ms, run }` object; the first argument is the interval in milliseconds, the second the callback), `$.process.run({ command, args })` (result `stdout` plus `exitCode`) and the
 `ui.render` return value are verified by `claude plugin test` fixtures against engine-written types when available.
 
 ## The hierarchy hooks module (executor and planner roles)
@@ -1225,7 +1225,7 @@ restart loses no queued work, but finish or accept the loss of any task in fligh
 
 ## Troubleshooting
 
-**Module absent (AISDLC-1061).** `status` shows `MODULE absent`, `refused: <reason>` or `stale` for the
+**Module absent (AISDLC-1061).** Look in `hierarchy/log` for `tick registration failed <reason>` and `refreshPane failed <reason>`; since AISDLC-1082 every failure `safe()` swallows is also logged there as `swallowed <primitive>: <error text>`. `status` shows `MODULE absent`, `refused: <reason>` or `stale` for the
 dispatch host, or `up` exits 1 with `the hierarchy hooks module is not loaded on the dispatch host`. With
 no module the hierarchy is inert: no ticks, no executor wakes, no rotations, while `STATE` still reads
 `busy`/`idle`. A refusal from the host validator or a hook that threw (for example `on() ... a hook may not

@@ -14,6 +14,7 @@ import {
   executorTurnStart,
   resumeAfterClear,
   safe,
+  setSwallowSink,
 } from './executor.ts';
 import type { ExecutorState, Ports } from './executor.ts';
 import {
@@ -108,6 +109,8 @@ export const register = (on: Any, options?: Any): void => {
       compact: (a) => $.session.compact(a),
       submit: (a) => $.prompt.submit(a),
     };
+    // AISDLC-1082: every failure `safe()` swallows lands in `hierarchy/log` with the primitive and the text.
+    setSwallowSink((line) => log(p, line));
     // A record carried by a rotation whose new session never reached a hook is stale: clear it here so it
     // cannot start an executor in an unrelated session. A live post-clear resume runs from the turn hooks.
     if (!state.resumePending) await safe(() => p.storeSet(ROTATION_KEY, null));
@@ -192,7 +195,9 @@ export const register = (on: Any, options?: Any): void => {
         }
         await tick(dp, dispatch);
       };
-      const timer = await attempt(() => $.clock.every({ ms: tickMs, run }));
+      // Host signature (the engine's `every: (ms, fn)`, which throws "takes a function" for a non-function
+      // second argument): `$.clock.every(ms, fn)`. The old `{ ms, run }` object was rejected.
+      const timer = await attempt(() => $.clock.every(tickMs, run));
       await log(
         p,
         timer === 'ok' ? `tick registered every ${tickMs}` : `tick registration failed ${timer}`,

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1082
 title: 'hierarchy hooks module: the dispatch tick timer uses a clock.every shape the host rejects and the health heartbeat write through process.run fails silently, so MODULE stays absent and rotate requests are never consumed'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-26'
 labels:

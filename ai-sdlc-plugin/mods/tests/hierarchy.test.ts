@@ -131,8 +131,11 @@ describe('hierarchy module: gate', () => {
     const s = setup({ version: '2.1.300' });
     await s.start();
     expect(await s.handlers.get('turn.start')(s.$, 'e', (x: any) => x)).toBe('e'); // not armed
-    expect(logOf(s.kv)).toHaveLength(1);
-    expect(logOf(s.kv)[0]).toContain(`floor ${VERSION_FLOOR}`);
+    // AISDLC-1082: a swallowed failure (this stub has no process.run) is logged too.
+    const lines = logOf(s.kv).filter((l: string) => !l.includes('swallowed'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(`floor ${VERSION_FLOOR}`);
+    expect(logOf(s.kv).join()).toContain('swallowed');
   });
 
   it.each(['prompt.submit', 'command.run', 'session.compact', 'session.usage', 'session.send'])(
