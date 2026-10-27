@@ -16,6 +16,7 @@ const {
   renderOperationalRules,
   renderSessionStartHardRules,
 } = require('./lib/governance-resolver');
+const { checkRuntimeDepsHealth } = require('../scripts/lib/runtime-deps-health');
 const { bannerGovernance } = require('./lib/trusted-policy');
 const { detectEnforcementCached, renderReviewPolicyBanner } = require('./lib/review-policy-banner');
 const {
@@ -87,24 +88,10 @@ try {
   const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
   if (pluginRoot && existsSync(join(pluginRoot, 'plugin.json'))) {
     const sentinel = join(pluginRoot, 'node_modules', '.ai-sdlc-installed');
-    const pipelineCliBin = join(
-      pluginRoot,
-      'node_modules',
-      '@ai-sdlc',
-      'pipeline-cli',
-      'bin',
-      'cli-deps.mjs',
-    );
-    const mcpServerBin = join(
-      pluginRoot,
-      'node_modules',
-      '@ai-sdlc',
-      'plugin-mcp-server',
-      'dist',
-      'bin.js',
-    );
+    // AISDLC-1084: one shared health check (entry points plus the full
+    // @ai-sdlc dependency closure), also used by install-runtime-deps.sh.
     const needsInstallFileCheck =
-      !existsSync(sentinel) || !existsSync(pipelineCliBin) || !existsSync(mcpServerBin);
+      !existsSync(sentinel) || !checkRuntimeDepsHealth(pluginRoot).healthy;
 
     // AISDLC-580 review follow-up: file-existence-only is not enough to
     // decide "is this install correct" — a stale-but-present install (all

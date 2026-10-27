@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1084
 title: 'install-runtime-deps.sh: one install at a time per plugin cache (lock), verify the full @ai-sdlc dependency closure, and self-heal a partial tree by one clean reinstall instead of exiting 1 forever'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-27'
 labels:

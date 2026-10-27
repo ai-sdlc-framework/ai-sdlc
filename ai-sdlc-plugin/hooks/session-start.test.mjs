@@ -456,6 +456,23 @@ describe('ai-sdlc-plugin session-start hook — version-aware self-heal gate (AI
       '#!/usr/bin/env node\n',
       'utf-8',
     );
+    // AISDLC-1084: the shared health check also requires the orchestrator entry point.
+    mkdirSync(join(pluginDir, 'node_modules', '@ai-sdlc', 'orchestrator', 'dist', 'runtime'), {
+      recursive: true,
+    });
+    writeFileSync(
+      join(
+        pluginDir,
+        'node_modules',
+        '@ai-sdlc',
+        'orchestrator',
+        'dist',
+        'runtime',
+        'attestations.js',
+      ),
+      '\n',
+      'utf-8',
+    );
 
     // Fake shared version-check script — deterministic, no npm/network dependency.
     writeFileSync(
@@ -488,6 +505,35 @@ describe('ai-sdlc-plugin session-start hook — version-aware self-heal gate (AI
           'even though the file-existence check alone (sentinel + both bins present) would report ' +
           'the install as complete',
       );
+    } finally {
+      rmSync(pluginDir, { recursive: true, force: true });
+    }
+  });
+
+  it('AISDLC-1084: a tree missing a transitive @ai-sdlc dependency triggers the installer', () => {
+    const pluginDir = buildStaleButPresentPlugin({ staleCheckOutput: '' });
+    writeFileSync(
+      join(pluginDir, 'node_modules', '@ai-sdlc', 'pipeline-cli', 'package.json'),
+      JSON.stringify({
+        name: '@ai-sdlc/pipeline-cli',
+        dependencies: { '@ai-sdlc/reference': '1.0.0' },
+      }),
+      'utf-8',
+    );
+    try {
+      runHook(tempDirEmpty, { CLAUDE_PLUGIN_ROOT: pluginDir });
+      assert.ok(existsSync(join(pluginDir, '.install-invoked')), 'unhealthy tree must install');
+    } finally {
+      rmSync(pluginDir, { recursive: true, force: true });
+    }
+  });
+
+  it('AISDLC-1084: a tree with a deleted entry point triggers the installer', () => {
+    const pluginDir = buildStaleButPresentPlugin({ staleCheckOutput: '' });
+    rmSync(join(pluginDir, 'node_modules', '@ai-sdlc', 'plugin-mcp-server', 'dist', 'bin.js'));
+    try {
+      runHook(tempDirEmpty, { CLAUDE_PLUGIN_ROOT: pluginDir });
+      assert.ok(existsSync(join(pluginDir, '.install-invoked')));
     } finally {
       rmSync(pluginDir, { recursive: true, force: true });
     }
