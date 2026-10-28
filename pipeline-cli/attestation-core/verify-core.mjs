@@ -1580,6 +1580,20 @@ export function verifyV6Envelope({
       }
     }
 
+    // AISDLC-977: a credited reviewer leaf (anything but a plan/execute stage
+    // leaf, which is checked above) must carry an approved verdict and no
+    // critical or major finding. The verifier is the only check CI trusts.
+    if (onDiskLeaf.stage !== 'plan' && onDiskLeaf.stage !== 'execute') {
+      const f = onDiskLeaf.findings ?? {};
+      const blocking = (Number(f.critical) || 0) + (Number(f.major) || 0);
+      if (onDiskLeaf.verdictApproved !== true || blocking > 0) {
+        return {
+          status: 'invalid',
+          reason: `v6: leaf[${logicalLeafIndex}] (${onDiskLeaf.reviewerName}) is not an approved verdict (verdictApproved=${JSON.stringify(onDiskLeaf.verdictApproved ?? null)}, critical+major findings=${blocking})`,
+        };
+      }
+    }
+
     // Compute the leaf hash from the on-disk leaf (the authoritative source).
     const leafHash = v6HashLeaf(onDiskLeaf);
 
