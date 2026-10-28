@@ -37,3 +37,7 @@ First live run with the module loaded on all sessions, 2026-10-28 09:00Z to 09:2
 - [ ] The same for `rotate`, and the planner handler still passes a non-dispatch sender through unchanged.
 - [ ] Live check in the PR body: after relaunch, `cli-hierarchy clear <executor>` is acknowledged by the module (no "no hooks module consumed it").
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+
+## Test run note (resume round)
+
+`env -i HOME=$HOME PATH=$PATH pnpm test` on this branch rebased onto origin/main: the earlier 16 executor-start/webhook-receiver failures did not reproduce; one failure remained, `pipeline-cli/src/dispatch/webhook-receiver.test.ts` "coalesces five check-run deliveries for one head into one wake" (expected 1 call, got 2). It fails identically with `env -i npx vitest run src/dispatch/webhook-receiver.test.ts` on the main checkout (7c11084c2, no diff from origin/main), so it is red on main and untouched by this diff (hierarchy.ts executor and its test only). Not caused by this task.
