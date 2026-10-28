@@ -19,6 +19,7 @@ dependencies:
 references:
   - spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md
 priority: high
+dispatchable: false
 drift_status: flagged
 drift_checked: '2026-10-16'
 drift_log:
