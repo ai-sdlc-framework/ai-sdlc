@@ -295,3 +295,40 @@ describe('the set tier is its weakest leaf', () => {
     expect(verify(sign(patchId), patchId).overallIndependenceTier).toBe('none');
   });
 });
+
+describe('AISDLC-977: a credited reviewer leaf must be an approved verdict', () => {
+  const cases: [string, Partial<TranscriptLeaf>][] = [
+    ['verdictApproved=false', { verdictApproved: false }],
+    [
+      'a critical finding',
+      { verdictApproved: true, findings: { critical: 1, major: 0, minor: 0, suggestion: 0 } },
+    ],
+    [
+      'a major finding',
+      { verdictApproved: true, findings: { critical: 0, major: 2, minor: 0, suggestion: 0 } },
+    ],
+  ];
+
+  it.each(cases)('refuses a leaf with %s, naming the leaf and reviewer', (_name, overrides) => {
+    const patchId = '8'.repeat(40);
+    write(patchId, [
+      leaf({ reviewerName: 'code-reviewer', verdictApproved: true }),
+      leaf({ reviewerName: 'test-reviewer', transcriptHash: 'c'.repeat(64), ...overrides }),
+    ]);
+    const result = verify(sign(patchId), patchId);
+    expect(result.status).toBe('invalid');
+    expect(result.reason).toMatch(/leaf\[1\] \(test-reviewer\) is not an approved verdict/);
+  });
+
+  it('accepts approved leaves carrying only minor findings', () => {
+    const patchId = '9'.repeat(40);
+    write(patchId, [
+      leaf({
+        reviewerName: 'code-reviewer',
+        verdictApproved: true,
+        findings: { critical: 0, major: 0, minor: 3, suggestion: 1 },
+      }),
+    ]);
+    expect(verify(sign(patchId), patchId).status).toBe('valid');
+  });
+});

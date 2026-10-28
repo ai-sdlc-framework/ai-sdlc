@@ -1,7 +1,7 @@
 ---
 id: AISDLC-977
 title: 'CI attestation verifier checks that review leaves carry an approved verdict'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-20'
 labels:
