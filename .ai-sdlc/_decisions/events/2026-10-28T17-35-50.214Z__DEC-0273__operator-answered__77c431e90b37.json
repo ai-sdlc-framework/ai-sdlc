@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-28T17:35:50.214Z","decisionId":"DEC-0273","chosenOptionId":"strict-off","rationale":"Operator chose strict off 2026-10-28 17:50Z: gate reran on every head, main-health-monitor is the backstop (DEC-0048 velocity)","by":"planner"}
