@@ -2,7 +2,7 @@
 id: AISDLC-656.2
 title: >-
   RFC-0050 OQ-3 part 2: cli-usage route apply turns an approved proposal Decision into a routing-table pull request
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-02'
 labels:
