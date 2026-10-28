@@ -1,7 +1,7 @@
 ---
 id: AISDLC-605.1
 title: 'merge matcher: reduce over-blocking with a real tokenizer'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-10'
 labels:
@@ -37,3 +37,7 @@ Found in the final review of the positive grammar and deliberately not fixed in 
 - The branch-merge API surface (`/merges`, the `mergeBranch` mutation) is not covered by the PR merge path matcher.
 - The permission-check hook fails open on its own errors.
 - Accepted over-block (note only): `gh pr create --body $'...'` is refused when the body mentions the merge phrase, because ANSI-C quoting makes the segment opaque. Use a plain quoted `--body` or `--body-file` until the tokenizer lands.
+
+## Final Summary
+
+Retired 2026-10-28: DEC-0267 deleted merge-matcher.js, nothing left to tokenize
