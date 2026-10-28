@@ -147,6 +147,19 @@ describe('promotion verifier', () => {
     expect(authority()).toBe('canonical');
   });
 
+  it('does not demote a canonical entry via specialist promotion', () => {
+    repo();
+    expect(promoteEntry(tracked(), 'k-1', { to: 'canonical', by: 'human' }, ctx()).ok).toBe(true);
+    const r = promoteEntry(
+      tracked(),
+      'k-1',
+      { to: 'specialist', proof: 'decision-id:DEC-0091', by: 'agent' },
+      ctx(),
+    );
+    expect(r.ok).toBe(false);
+    expect(authority()).toBe('canonical');
+  });
+
   it('requires a proof for specialist and reports a missing entry', () => {
     repo();
     expect(promoteEntry(tracked(), 'k-1', { to: 'specialist', by: 'agent' }, ctx()).ok).toBe(false);

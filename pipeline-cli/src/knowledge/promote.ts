@@ -185,6 +185,8 @@ function rewrite(
   return before;
 }
 
+const AUTHORITY_RANK: Record<string, number> = { inferred: 0, specialist: 1, canonical: 2 };
+
 export type Role = 'agent' | 'human';
 
 export interface PromoteResult extends Verdict {
@@ -212,6 +214,16 @@ export function promoteEntry(
       };
     }
   } else {
+    if (
+      AUTHORITY_RANK[current] !== undefined &&
+      AUTHORITY_RANK[current] >= AUTHORITY_RANK.specialist
+    ) {
+      return {
+        ok: false,
+        reason: `entry is already ${current}; specialist promotion never demotes`,
+        authority: current,
+      };
+    }
     if (!opts.proof)
       return { ok: false, reason: 'promotion to specialist requires --proof', authority: current };
     const v = verifyProof(opts.proof, c);

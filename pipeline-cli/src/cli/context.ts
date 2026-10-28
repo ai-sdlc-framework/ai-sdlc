@@ -41,6 +41,18 @@ function knowledgeCtx(projectDir: string) {
   };
 }
 
+/**
+ * Role is derived from a signal an agent cannot set: a human is an interactive
+ * terminal on both stdin and stdout with no active-task env. Agent sessions run
+ * with piped stdio and AI_SDLC_ACTIVE_TASK_ID, so they always resolve to 'agent'.
+ */
+export function resolveRole(
+  env: NodeJS.ProcessEnv = process.env,
+  tty: boolean = process.stdin.isTTY === true && process.stdout.isTTY === true,
+): Role {
+  return tty && !env.AI_SDLC_ACTIVE_TASK_ID ? 'human' : 'agent';
+}
+
 export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
   return yargs(argv)
     .scriptName('cli-context')
@@ -165,8 +177,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
             type: 'string',
             choices: ['specialist', 'canonical'],
             default: 'specialist',
-          })
-          .option('by', { type: 'string', choices: ['agent', 'human'], default: 'agent' }),
+          }),
       (args) => {
         const ctx = knowledgeCtx(String(args['project-dir']));
         const r = promoteEntry(
@@ -175,7 +186,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           {
             to: args.to as 'specialist' | 'canonical',
             proof: args.proof as string | undefined,
-            by: args.by as Role,
+            by: resolveRole(),
           },
           ctx.verify,
         );
@@ -199,16 +210,10 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
       (y) =>
         y
           .positional('id', { type: 'string', demandOption: true })
-          .option('reason', { type: 'string', demandOption: true })
-          .option('by', { type: 'string', choices: ['agent', 'human'], default: 'agent' }),
+          .option('reason', { type: 'string', demandOption: true }),
       (args) => {
         const ctx = knowledgeCtx(String(args['project-dir']));
-        const ok = refuteEntry(
-          ctx.trackedAbs,
-          String(args.id),
-          String(args.reason),
-          args.by as Role,
-        );
+        const ok = refuteEntry(ctx.trackedAbs, String(args.id), String(args.reason), resolveRole());
         if (!ok) {
           process.stderr.write(`error: entry '${String(args.id)}' not found\n`);
           process.exitCode = 1;
