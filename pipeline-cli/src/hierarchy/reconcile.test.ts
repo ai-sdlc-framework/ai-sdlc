@@ -180,7 +180,11 @@ describe('action table (AC2)', () => {
     'ready-to-flip': taskPr({ draft: true, approvedVerdict: true, executorDead: true }),
     'armed-clean': taskPr({ autoMergeArmed: true }),
     pending: taskPr({ checks: [{ name: 'ci', conclusion: 'pending' }] }),
-    'no-match': taskPr({ checks: [{ name: 'ci', conclusion: 'success' }], autoMergeArmed: false }),
+    'no-match': taskPr({
+      checks: [{ name: 'ci', conclusion: 'success' }],
+      autoMergeArmed: false,
+      mergeStateStatus: 'BLOCKED',
+    }),
   };
 
   for (const state of PR_STATES) {
@@ -596,14 +600,106 @@ describe('gatherFacts trust filter', () => {
       '/',
       board,
     )!;
-    expect(facts).toEqual([]);
+    // AISDLC-1091: not dropped, an unowned row with the reason.
+    expect(facts.map((f) => f.unownedReason)).toEqual([
+      expect.stringContaining('mallory'),
+      expect.stringContaining('mallory'),
+    ]);
   });
 
-  it('acts on a task PR only when its number matches the task record', () => {
-    expect(gatherFacts(run([pr({})]), '/', board)).toEqual([]);
+  it('owns a task PR through its branch even when the verdict lacks the PR (AISDLC-1091)', () => {
+    const facts = gatherFacts(run([pr({})]), '/', board)!;
+    expect(facts.map((f) => [f.prNumber, f.taskId, f.unownedReason])).toEqual([
+      [5, 'AISDLC-9', undefined],
+    ]);
     done(5);
     expect(gatherFacts(run([pr({})]), '/', board)!.map((f) => f.prNumber)).toEqual([5]);
-    expect(gatherFacts(run([pr({ number: 8 })]), '/', board)).toEqual([]);
+  });
+
+  it('keeps dependabot PRs as the deps kind and flags chore branches with no lane', () => {
+    const facts = gatherFacts(
+      run([
+        pr({
+          number: 20,
+          title: 'Bump x',
+          headRefName: 'dependabot/npm/x-1',
+          author: { login: 'app/dependabot' },
+        }),
+        pr({ number: 21, title: 'chore: pin sync', headRefName: 'chore/pin-sync' }),
+      ]),
+      '/',
+      board,
+    )!;
+    expect(facts[0]).toMatchObject({ prNumber: 20, taskId: '' });
+    expect(facts[0]!.unownedReason).toBeUndefined();
+    expect(facts[1]!.unownedReason).toContain('chore/pin-sync');
+  });
+
+  it('unowned PRs get the planner with a reason, never none (AISDLC-1091)', () => {
+    const d = decide({ prNumber: 1, taskId: '', unownedReason: 'no lane', draft: true });
+    expect(d).toMatchObject({ action: 'route-to-planner', note: 'unowned: no lane' });
+  });
+
+  it('arms a green dependabot PR with the deps source kind and updates a BEHIND one', () => {
+    const green = {
+      prNumber: 20,
+      taskId: '',
+      headBranch: 'dependabot/npm/x',
+      draft: false,
+      mergeStateStatus: 'CLEAN',
+      autoMergeArmed: false,
+      checks: [{ name: 'ci', conclusion: 'success' as const }],
+    };
+    expect(decide(green)).toMatchObject({ kind: 'deps', action: 'arm' });
+    const ctx = {
+      pr: 20,
+      taskId: '',
+      kind: 'deps' as const,
+      action: 'arm',
+      state: 'no-match' as const,
+      boardDir: '/b',
+    };
+    expect(actionCommands(ctx, '/bin')![0]!.args).toContain('deps');
+    expect(decide({ ...green, mergeStateStatus: 'BEHIND' }).action).toBe('update-branch');
+    expect(actionCommands({ ...ctx, action: 'update-branch' }, '/bin')![0]!.args).toEqual([
+      'pr',
+      'update-branch',
+      '20',
+    ]);
+  });
+
+  it('a draft of a done task that is green is flipped by the reconciler alone', () => {
+    const f = {
+      prNumber: 24,
+      taskId: 'AISDLC-9',
+      headBranch: 'ai-sdlc/aisdlc-9-x',
+      draft: true,
+      executorDead: true,
+      approvedVerdict: true,
+      mergeStateStatus: 'CLEAN',
+      checks: [{ name: 'ci', conclusion: 'success' as const }],
+    };
+    expect(decide(f).action).toBe('flip-ready-takeover');
+    expect(decide({ ...f, draft: false })).toMatchObject({ action: 'arm' });
+  });
+
+  it('owns a draft of a done task and flags a draft with no claim and no verdict', () => {
+    done(5);
+    const doneFacts = gatherFacts(run([pr({ isDraft: true })]), '/', board)!;
+    expect(doneFacts[0]).toMatchObject({ executorDead: true, approvedVerdict: true });
+    const orphan = gatherFacts(
+      run([
+        pr({
+          number: 9,
+          title: 'feat: y (AISDLC-77)',
+          headRefName: 'ai-sdlc/aisdlc-77-y',
+          isDraft: true,
+        }),
+      ]),
+      '/',
+      board,
+    )!;
+    expect(orphan[0]!.unownedReason).toContain('draft task PR');
   });
 
   it('keeps allowed docs PRs and same-repo release PRs', () => {

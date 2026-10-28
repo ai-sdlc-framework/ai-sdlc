@@ -66,7 +66,7 @@ export const DOCS_ACTIONS: Record<PrState, string> = {
 /** Docs action used instead of `route-to-planner` when the failing check is the DoR gate. */
 export const DOCS_DOR_ACTION = 'rerun-dor';
 
-export type PrKind = 'task' | 'docs' | 'decisions-sync' | 'release';
+export type PrKind = 'task' | 'docs' | 'decisions-sync' | 'deps' | 'release';
 
 /** Facts for one PR as the reconciler gathers them. */
 export interface ReconcilePr extends PrFacts {
@@ -80,6 +80,8 @@ export interface ReconcilePr extends PrFacts {
   executorDead?: boolean;
   /** Where the task's manifest sits on the board, when it has one. */
   manifestState?: 'queue' | 'inflight';
+  /** AISDLC-1091: why no lane can act on this PR; the row is `unowned` and goes to the planner. */
+  unownedReason?: string;
 }
 
 export interface LandingEntry {
@@ -115,6 +117,8 @@ export interface LandingRecord {
   history: LandingEntry[];
 }
 
+/** Dependabot head branches (AISDLC-1091). */
+export const DEPS_BRANCH_PREFIX = 'dependabot/';
 export const DOCS_BRANCH_PREFIXES = ['ai-sdlc/file-', 'docs/'] as const;
 const TASK_ID_IN_TEXT = /\b[A-Z][A-Z0-9]*-\d+(?:\.\d+)*\b/;
 const RELEASE_RE = /^chore: release\b|^release-please--/i;
@@ -124,6 +128,7 @@ export function detectKind(f: { title?: string; headBranch?: string; taskId?: st
   if (RELEASE_RE.test(f.title ?? '') || RELEASE_RE.test(f.headBranch ?? '')) return 'release';
   const branch = f.headBranch ?? '';
   if (branch === DECISIONS_SYNC_BRANCH) return 'decisions-sync';
+  if (branch.startsWith(DEPS_BRANCH_PREFIX)) return 'deps';
   if (DOCS_BRANCH_PREFIXES.some((p) => branch.startsWith(p))) return 'docs';
   return f.taskId ? 'task' : 'docs';
 }
@@ -174,9 +179,14 @@ export function decide(
     state: c.state,
     ...(c.failingLine === undefined ? {} : { failingLine: c.failingLine }),
   };
-  if (kind === 'docs' || kind === 'decisions-sync') {
+  // No lane owns it: a written reason and the planner, never a silent `none`.
+  if (f.unownedReason !== undefined && !f.merged) {
+    return { ...base, action: 'route-to-planner', note: `unowned: ${f.unownedReason}` };
+  }
+  if (kind === 'docs' || kind === 'decisions-sync' || kind === 'deps') {
     const checks = f.checks ?? [];
     let action = DOCS_ACTIONS[c.state];
+    if (kind === 'deps' && c.state === 'behind-or-dirty') action = 'update-branch';
     if (checks.some((k) => /dor/i.test(k.name) && k.conclusion === 'failure')) {
       if (c.state !== 'merged') action = DOCS_DOR_ACTION;
     } else if (c.state === 'no-match') {
@@ -194,9 +204,11 @@ export function decide(
   // Task set: the executor owns the PR until it is delivered (flipped ready); a stale
   // claim, or a dead executor after signing, hands it to the machine.
   const delivered = f.merged === true || f.draft === false || record?.delivered !== undefined;
-  const takeover = f.executorDead === true && c.state === 'ready-to-flip';
+  const takeover = f.executorDead === true;
   if (!delivered && !takeover) return { ...base, action: 'none' };
-  const action = TASK_ACTIONS[c.state];
+  let action = TASK_ACTIONS[c.state];
+  // A green, CLEAN, unarmed ready task PR is armed by the reconciler (AISDLC-1091).
+  if (c.state === 'no-match' && f.draft !== true && isGreenCleanUnarmed(f)) action = 'arm';
   if (ruled && c.state !== 'merged') {
     if (ruled.untilMerged) return { ...base, action: 'ready-to-requeue' };
     if (HELD_ACTIONS.has(action)) return { ...base, action: 'held', ruling: ruled.ruling.text };
@@ -214,6 +226,16 @@ const GUARD_EXEMPT_ACTIONS = new Set([
   'ready-to-requeue',
   'wait-and-rerun',
 ]);
+
+function isGreenCleanUnarmed(f: ReconcilePr): boolean {
+  const checks = f.checks ?? [];
+  return (
+    checks.length > 0 &&
+    checks.every((k) => k.conclusion === 'success') &&
+    f.mergeStateStatus === 'CLEAN' &&
+    !f.autoMergeArmed
+  );
+}
 
 /** Names of actions in the guard note: the PR-facing verb, not the table's internal one. */
 const GUARD_LABELS: Record<string, string> = { 'land-prep': 'rebase' };
@@ -287,7 +309,10 @@ export function actionCommands(ctx: ActionContext, cliBin: string): ActionComman
     case 'rewrite-manifest':
       return [dispatch('write-manifest', '--task-id', ctx.taskId, '--from-pr', String(ctx.pr))];
     case 'flip-ready-takeover':
+      // The flip is followed by the arm on the next pass (the PR is then ready, green and CLEAN).
       return [{ file: 'gh', args: ['pr', 'ready', String(ctx.pr)] }];
+    case 'update-branch':
+      return [{ file: 'gh', args: ['pr', 'update-branch', String(ctx.pr)] }];
     case 'rebase-in-place':
       return [
         {
@@ -297,7 +322,7 @@ export function actionCommands(ctx: ActionContext, cliBin: string): ActionComman
       ];
     case 'arm': {
       // A docs PR with no task id has no sanctioned source kind: route it to the planner.
-      if (ctx.kind !== 'decisions-sync' && !ctx.taskId) return null;
+      if (ctx.kind !== 'decisions-sync' && ctx.kind !== 'deps' && !ctx.taskId) return null;
       return [
         {
           file: 'node',
@@ -305,7 +330,11 @@ export function actionCommands(ctx: ActionContext, cliBin: string): ActionComman
             path.join(cliBin, 'cli-merge-if-eligible.mjs'),
             String(ctx.pr),
             '--source-kind',
-            ctx.kind === 'decisions-sync' ? 'decisions-sync' : 'backlog',
+            ctx.kind === 'decisions-sync'
+              ? 'decisions-sync'
+              : ctx.kind === 'deps'
+                ? 'deps'
+                : 'backlog',
             '--arm',
           ],
         },
@@ -637,10 +666,16 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
     const machineOwned =
       d.kind === 'docs' ||
       d.kind === 'decisions-sync' ||
+      d.kind === 'deps' ||
       delivered ||
       existing?.owner === 'machine' ||
       (f.executorDead === true && d.action !== 'none');
-    const owner = machineOwned ? 'machine' : `executor:${f.executor ?? 'unknown'}`;
+    const owner =
+      f.unownedReason !== undefined && !f.merged
+        ? 'unowned'
+        : machineOwned
+          ? 'machine'
+          : `executor:${f.executor ?? 'unknown'}`;
     const unchanged =
       existing !== undefined &&
       existing.state === d.state &&
@@ -723,7 +758,9 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
     };
     const deliveredAt =
       existing?.delivered ??
-      (delivered || d.kind === 'docs' || d.kind === 'decisions-sync' ? ts : undefined);
+      (delivered || d.kind === 'docs' || d.kind === 'decisions-sync' || d.kind === 'deps'
+        ? ts
+        : undefined);
     const landedAt = existing?.landed ?? (d.state === 'merged' ? ts : undefined);
     const record: LandingRecord = {
       pr: f.prNumber,
@@ -901,6 +938,7 @@ function parse<T>(text: string): T | undefined {
   }
 }
 
+const DEPS_LOGINS = ['dependabot[bot]', 'app/dependabot', 'dependabot'];
 const DOCS_FILE_RE = /^(backlog|docs|spec)\/|^\.ai-sdlc\/_decisions\/|\.md$/;
 
 /** Normalise one check from the rollup. */
@@ -980,10 +1018,20 @@ export function gatherFacts(
       ...(p.headRefName === undefined ? {} : { headBranch: p.headRefName }),
       taskId,
     });
-    if (kind !== 'release') {
-      if (!allowed.has((p.author?.login ?? '').toLowerCase())) continue;
-      if (kind === 'task' && !prBelongsToTask(boardDir, taskId, p.number, p.headRefName, verdicts))
-        continue;
+    const login = (p.author?.login ?? '').toLowerCase();
+    let unownedReason: string | undefined;
+    if (kind === 'deps') {
+      if (!DEPS_LOGINS.includes(login)) unownedReason = `dependabot/ branch opened by "${login}"`;
+    } else if (kind !== 'release') {
+      if (!allowed.has(login)) {
+        unownedReason = `author "${login}" is not on the reconcile allow-list`;
+      } else if (
+        kind === 'docs' &&
+        !taskId &&
+        !DOCS_BRANCH_PREFIXES.some((x) => (p.headRefName ?? '').startsWith(x))
+      ) {
+        unownedReason = `branch "${p.headRefName ?? ''}" names no task id and is not a docs-lane branch, so no source kind can land it`;
+      }
     }
     const view = run('gh', ['pr', 'view', String(p.number), '--json', 'statusCheckRollup'], {
       cwd,
@@ -996,7 +1044,25 @@ export function gatherFacts(
     const queuedManifest = kind === 'task' ? readQueuedManifest(boardDir, taskId) : undefined;
     const inflightManifest = kind === 'task' ? readInflightManifest(boardDir, taskId) : undefined;
     const onBoard = inflightManifest ?? queuedManifest;
+    const isDraft = p.isDraft === true;
+    let executorDead = false;
+    let approvedVerdict = false;
+    if (kind === 'task' && isDraft && unownedReason === undefined) {
+      // A draft whose task is done and has no live claim: the executor is gone, the machine owns it.
+      const done = verdicts.some(
+        (v) => v.taskId.toLowerCase() === taskId.toLowerCase() && v.outcome === 'success',
+      );
+      if (done && !inflightManifest) {
+        executorDead = true;
+        approvedVerdict = true;
+      } else if (!onBoard) {
+        unownedReason = 'draft task PR with no live manifest on the board and no done verdict';
+      }
+    }
     facts.push({
+      ...(unownedReason === undefined ? {} : { unownedReason }),
+      ...(executorDead ? { executorDead, approvedVerdict } : {}),
+      ...(inflightManifest?.workerId ? { executor: inflightManifest.workerId } : {}),
       ...(onBoard?.branch === undefined
         ? {}
         : {
@@ -1004,11 +1070,11 @@ export function gatherFacts(
             manifestState: inflightManifest ? ('inflight' as const) : ('queue' as const),
           }),
       prNumber: p.number,
-      taskId,
+      taskId: kind === 'deps' ? '' : taskId,
       ...(p.title === undefined ? {} : { title: p.title }),
       ...(p.headRefName === undefined ? {} : { headBranch: p.headRefName }),
       ...(p.headRefOid === undefined ? {} : { headSha: p.headRefOid }),
-      draft: p.isDraft === true,
+      draft: isDraft,
       ...(p.mergeStateStatus === undefined ? {} : { mergeStateStatus: p.mergeStateStatus }),
       autoMergeArmed: p.autoMergeRequest != null,
       docsOnly: files.length > 0 && files.every((x) => DOCS_FILE_RE.test(x)),

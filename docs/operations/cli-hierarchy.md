@@ -2325,3 +2325,14 @@ strict flag alone would load no server at all). Planner and dispatch sessions ar
 
 The plugin is now the only source of the SessionStart governance block; the duplicate
 registration in `.claude/settings.json` was removed.
+
+## Every open PR has an owner (AISDLC-1091)
+
+The reconciler keeps no skip lane. Each open same-repo PR gets a lane and an action:
+`dependabot/*` PRs are the `deps` lane (armed with `--source-kind deps` when green and CLEAN,
+`gh pr update-branch` once per head when BEHIND); a task PR is owned through its branch or title even
+when the verdict lacks `prUrl`; a draft of a done task with no live claim is taken over, flipped ready
+and armed; a green CLEAN unarmed task PR is armed. A PR no lane can act on (foreign author, a branch
+with no task id and no docs-lane prefix, a draft with no claim and no verdict) is recorded as owner
+`unowned` with the reason in `note`, routed to the planner once per head, and counted in
+`cli-hierarchy status` as `unowned PRs: N`.

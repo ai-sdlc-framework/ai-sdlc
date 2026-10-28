@@ -83,6 +83,8 @@ export interface StatusResult {
   unbriefed?: string[];
   /** Tasks parked in `blocked/` with the reason (AISDLC-1043); absent when none. */
   blocked?: { taskId: string; reason: string }[];
+  /** Open PRs no lane owns (AISDLC-1091); `unowned PRs: N` in the text view. */
+  unowned?: number;
   /** `gh` calls in the last hour by HIERARCHY_SESSION (AISDLC-963). */
   ghCallsPerHour?: Record<string, number>;
   /** Live remaining quota for the core and graphql buckets; absent when `gh` cannot say. */
@@ -210,6 +212,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
   }
   return {
     rows,
+    unowned: landings.filter((l) => l.owner === 'unowned').length,
     ...(growth ? { attestationGrowth: growth } : {}),
     ...(Object.keys(ghCallsPerHour).length > 0 ? { ghCallsPerHour } : {}),
     ...(quota ? { quota } : {}),
@@ -250,6 +253,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       ]
     : [];
   const ghLines = formatGhCalls(result);
+  const unownedLine = `unowned PRs: ${result.unowned ?? 0}`;
   const blockedLines = (result.blocked ?? []).map((b) => `blocked: ${b.taskId}: ${b.reason}`);
   if (result.rows.length === 0)
     return [
@@ -259,6 +263,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       ...thresholds,
       ...unbriefed,
       ...blockedLines,
+      unownedLine,
       ...ghLines,
     ];
   const header = [
@@ -325,6 +330,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
     ...thresholds,
     ...unbriefed,
     ...blockedLines,
+    unownedLine,
     ...ghLines,
   ];
 }

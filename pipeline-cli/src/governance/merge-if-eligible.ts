@@ -326,7 +326,12 @@ export function resolveGovernanceFromYaml(yamlText: string): {
  * (external GitHub issue / contributor-authored work) and any unrecognised
  * value are untrusted — fail closed.
  */
-export type SourceKind = 'backlog' | 'gh-issue' | 'release' | 'decisions-sync' | 'docs';
+export type SourceKind = 'backlog' | 'gh-issue' | 'release' | 'decisions-sync' | 'docs' | 'deps';
+
+/** AISDLC-1091: the dependabot lane: a `dependabot/*` head opened and committed by the bot. */
+export const DEPS_HEAD_PREFIX = 'dependabot/';
+const DEPS_LOGINS = ['dependabot[bot]', 'app/dependabot', 'dependabot'];
+const isDepsLogin = (login: string): boolean => DEPS_LOGINS.includes(login.toLowerCase());
 
 /** AISDLC-895: the dedicated Decision Catalog sync branch (mirrors remote-persist.ts). */
 export const DECISIONS_SYNC_HEAD = 'ai-sdlc/decisions-sync';
@@ -375,7 +380,12 @@ export function docsLanePathRefusal(files: ChangedFile[]): string | null {
 }
 
 export function isTrustedSourceKind(sourceKind: SourceKind | undefined): boolean {
-  return sourceKind === 'backlog' || sourceKind === 'decisions-sync' || sourceKind === 'docs';
+  return (
+    sourceKind === 'backlog' ||
+    sourceKind === 'decisions-sync' ||
+    sourceKind === 'docs' ||
+    sourceKind === 'deps'
+  );
 }
 
 // ── PR-derived trust facts (read from GitHub, not from caller flags) ────
@@ -771,10 +781,17 @@ export async function evaluatePrTrust(args: {
   }
   const allowed = (login: string) =>
     mergeAuthors.some((a) => a.toLowerCase() === login.toLowerCase());
-  if (!allowed(pr.authorLogin)) {
+  const isDeps = args.sourceKind === 'deps';
+  if (isDeps) {
+    if (!isDepsLogin(pr.authorLogin) || !pr.headRefName.startsWith(DEPS_HEAD_PREFIX)) {
+      return `PR "${pr.headRefName}" by "${pr.authorLogin}" is not a dependabot PR - deps landing is limited to "${DEPS_HEAD_PREFIX}*" opened by dependabot`;
+    }
+  } else if (!allowed(pr.authorLogin)) {
     return `PR author "${pr.authorLogin}" is not on the spec.governance.mergeAuthors allow-list`;
   }
-  if (args.sourceKind === 'decisions-sync') {
+  if (isDeps) {
+    // The dependabot identity was checked above; the task and docs-lane checks do not apply.
+  } else if (args.sourceKind === 'decisions-sync') {
     if (pr.headRefName !== DECISIONS_SYNC_HEAD) {
       return `PR head branch is "${pr.headRefName}" - decisions-sync landing is limited to "${DECISIONS_SYNC_HEAD}"`;
     }
@@ -814,7 +831,7 @@ export async function evaluatePrTrust(args: {
   if (!logins.author) {
     return 'the head commit author is not linked to a GitHub account — refusing (cannot be determined)';
   }
-  if (!allowed(logins.author)) {
+  if (isDeps ? !isDepsLogin(logins.author) : !allowed(logins.author)) {
     return `the head commit author "${logins.author}" is not on the spec.governance.mergeAuthors allow-list`;
   }
   return null;

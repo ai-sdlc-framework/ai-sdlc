@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1091
 title: 'reconciler owns every open PR: no skip lane for unowned, dependabot, chore or draft-of-done PRs; each gets a deterministic next action'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-28'
 labels:
