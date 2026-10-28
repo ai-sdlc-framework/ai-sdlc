@@ -5,7 +5,8 @@
  * could write), which is exactly the state that went unnoticed for ten hours on 2026-10-23.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import type { HierarchyDeps, RosterEntry } from './types.js';
@@ -33,17 +34,63 @@ export function moduleHealthPath(boardDir: string, name: string): string {
   return path.join(boardDir, 'handoff', `module-${name}.json`);
 }
 
-/** Read one session's heartbeat; a missing or unreadable file is `absent`, a dispatch file past the stale window `stale`. */
+/** Plugin data directories the host keeps `$.store` files in (`~/.claude/plugins/data/ai-sdlc-*`). */
+export function defaultStoreDirs(): string[] {
+  const root = path.join(os.homedir(), '.claude', 'plugins', 'data');
+  try {
+    return readdirSync(root)
+      .filter((d) => d.startsWith('ai-sdlc'))
+      .map((d) => path.join(root, d));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * AISDLC-1082 fallback: the module mirrors its heartbeat to the plugin store key `hierarchy/health/<name>`.
+ * Scan `*.json` files in the store directories for that key (top level or under `store`/`data`).
+ */
+export function readStoreHealth(storeDirs: readonly string[], name: string): unknown {
+  const key = `hierarchy/health/${name}`;
+  for (const dir of storeDirs) {
+    let files: string[];
+    try {
+      files = readdirSync(dir).filter((f) => f.endsWith('.json'));
+    } catch {
+      continue;
+    }
+    for (const f of files) {
+      try {
+        const j = JSON.parse(readFileSync(path.join(dir, f), 'utf8')) as Record<
+          string,
+          Record<string, unknown> | undefined
+        >;
+        const hit = (j[key] as unknown) ?? j.store?.[key] ?? j.data?.[key];
+        if (hit && typeof hit === 'object') return hit;
+      } catch {
+        // unreadable store file: try the next
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Read one session's heartbeat; the board file wins, then the plugin store copy. A missing or unreadable
+ * record is `absent`, a dispatch record past the stale window `stale`.
+ */
 export function readModuleHealth(
   boardDir: string,
   entry: Pick<RosterEntry, 'name' | 'role'>,
   now: Date,
+  storeDirs: readonly string[] = defaultStoreDirs(),
 ): ModuleHealth {
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(moduleHealthPath(boardDir, entry.name), 'utf8'));
   } catch {
-    return { state: 'absent' };
+    raw = readStoreHealth(storeDirs, entry.name);
+    if (raw === undefined) return { state: 'absent' };
   }
   const r = (raw ?? {}) as Record<string, unknown>;
   const state = r.state === 'loaded' || r.state === 'refused' ? r.state : 'absent';

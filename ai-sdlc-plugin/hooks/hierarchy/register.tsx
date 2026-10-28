@@ -14,6 +14,7 @@ import {
   executorTurnStart,
   resumeAfterClear,
   safe,
+  setSwallowSink,
 } from './executor.ts';
 import type { ExecutorState, Ports } from './executor.ts';
 import {
@@ -108,6 +109,8 @@ export const register = (on: Any, options?: Any): void => {
       compact: (a) => $.session.compact(a),
       submit: (a) => $.prompt.submit(a),
     };
+    // AISDLC-1082: every failure `safe()` swallows lands in `hierarchy/log` with the primitive and the text.
+    setSwallowSink((line) => log(p, line));
     // A record carried by a rotation whose new session never reached a hook is stale: clear it here so it
     // cannot start an executor in an unrelated session. A live post-clear resume runs from the turn hooks.
     if (!state.resumePending) await safe(() => p.storeSet(ROTATION_KEY, null));
@@ -124,10 +127,13 @@ export const register = (on: Any, options?: Any): void => {
     const sessionName = typeof named === 'string' && named ? named : role;
     const versionText = typeof version === 'string' ? version : '';
     const health = (h: { state: 'loaded' | 'refused'; reason?: string }): Promise<void> =>
-      writeModuleHealth((a) => $.process.run(a), options?.boardDir, sessionName, {
-        ...h,
-        ...(versionText ? { version: versionText } : {}),
-      });
+      writeModuleHealth(
+        (a) => $.process.run([a.command, ...a.args]),
+        options?.boardDir,
+        sessionName,
+        { ...h, ...(versionText ? { version: versionText } : {}) },
+        (k, v) => $.store.set(k, v),
+      );
     // OQ-5: the validator refuses `typeof $.noun.verb`, so each primitive is probed by one call whose
     // argument is a bare string, never an object with fields: a typed boundary rejects it before any
     // action (no compaction, no blank turn), and only an absent primitive counts as missing. A host that
@@ -148,6 +154,8 @@ export const register = (on: Any, options?: Any): void => {
             'session.compact': await exists(() => $.session.compact('probe'), 'compact'),
             'session.measure': await exists(() => $.session.usage(), 'usage'),
             'session.send': await exists(() => $.session.send('probe'), 'send'),
+            // AISDLC-1082: the heartbeat write depends on it; the host takes an argv list, not { command, args }.
+            'process.run': await exists(() => $.process.run('probe'), 'run'),
           };
     const miss = guard(
       version,
@@ -178,7 +186,7 @@ export const register = (on: Any, options?: Any): void => {
         storeGet: (k) => $.store.get(k),
         storeSet: (k, v) => $.store.set(k, v),
         runCommand: (a) => $.command.run(a),
-        runProcess: (a) => $.process.run(a),
+        runProcess: (a) => $.process.run([a.command, ...a.args]),
         send: (a) => $.session.send(a),
         uiOpen: (a) => $.ui.open(a),
       };
@@ -192,7 +200,9 @@ export const register = (on: Any, options?: Any): void => {
         }
         await tick(dp, dispatch);
       };
-      const timer = await attempt(() => $.clock.every({ ms: tickMs, run }));
+      // Host signature (the engine's `every: (ms, fn)`, which throws "takes a function" for a non-function
+      // second argument): `$.clock.every(ms, fn)`. The old `{ ms, run }` object was rejected.
+      const timer = await attempt(() => $.clock.every(tickMs, run));
       await log(
         p,
         timer === 'ok' ? `tick registered every ${tickMs}` : `tick registration failed ${timer}`,

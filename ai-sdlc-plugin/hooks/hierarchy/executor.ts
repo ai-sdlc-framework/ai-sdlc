@@ -63,6 +63,7 @@ export const PRIMITIVES = [
   'session.compact',
   'session.measure',
   'session.send',
+  'process.run', // AISDLC-1082: the module-health heartbeat is written through it
 ] as const;
 
 /**
@@ -102,10 +103,37 @@ export function atLeast(version: unknown, floor: string): boolean {
   return true;
 }
 
-export async function safe<T>(fn: () => Promise<T> | T): Promise<{ ok: boolean; value?: T }> {
+/** AISDLC-1082: where a swallowed failure is reported; set by the module once a store port exists. */
+let swallowSink: ((line: string) => Promise<void> | void) | undefined;
+let reporting = false;
+
+export function setSwallowSink(sink: ((line: string) => Promise<void> | void) | undefined): void {
+  swallowSink = sink;
+}
+
+/** The primitive a thunk calls, read from its source (`$.process.run`, `p.send`), for the failure line. */
+function primitiveOf(fn: () => unknown): string {
+  return /(?:\$|\bp|\bdp)\.[A-Za-z]+(?:\.[A-Za-z]+)?/.exec(String(fn))?.[0] ?? 'unknown';
+}
+
+export async function safe<T>(
+  fn: () => Promise<T> | T,
+  what?: string,
+): Promise<{ ok: boolean; value?: T }> {
   try {
     return { ok: true, value: await fn() };
-  } catch {
+  } catch (err) {
+    if (swallowSink && !reporting) {
+      reporting = true;
+      try {
+        const text = err instanceof Error ? err.message : String(err);
+        await swallowSink(`swallowed ${what ?? primitiveOf(fn)}: ${text}`);
+      } catch {
+        // reporting must never fail the caller
+      } finally {
+        reporting = false;
+      }
+    }
     return { ok: false };
   }
 }
