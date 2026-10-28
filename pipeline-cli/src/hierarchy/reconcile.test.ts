@@ -300,6 +300,18 @@ describe('ownership (AC4)', () => {
     expect(summariseLanding(board)).toContain('#20 docs');
   });
 
+  it('an unownedReason fact yields owner unowned with the reason in the note (AISDLC-1091)', () => {
+    const execute = () => ({ ran: false });
+    reconcile([docsPr({ unownedReason: 'no lane can land this' })], {
+      boardDir: board,
+      execute,
+      now: fixedNow,
+    });
+    const landing = readLanding(board, 20);
+    expect(landing?.owner).toBe('unowned');
+    expect(landing?.note).toContain('no lane can land this');
+  });
+
   it('marks a merged PR landed', () => {
     const execute = vi.fn(() => ({ ran: true }));
     reconcile([taskPr({ merged: true })], { boardDir: board, execute, now: fixedNow });

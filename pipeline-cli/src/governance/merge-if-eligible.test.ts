@@ -891,6 +891,51 @@ describe('decisions-sync author check (AISDLC-928)', () => {
   });
 });
 
+describe('deps source kind trust (AISDLC-1091)', () => {
+  async function depsTrust(
+    over: Partial<PrSnapshot>,
+    commitStdout = '{"author":"dependabot[bot]","committer":"web-flow"}',
+  ) {
+    const { runner } = makeFakeRunner({ 'commits/': { stdout: commitStdout } });
+    return evaluatePrTrust({
+      snapshot: {
+        ...SNAPSHOT,
+        authorLogin: 'dependabot[bot]',
+        headRefName: 'dependabot/npm_and_yarn/foo-1.2.3',
+        ...over,
+      },
+      mergeAuthors: ['operator'],
+      repoSlug: 'org/repo',
+      taskPrefix: 'AISDLC',
+      sourceKind: 'deps',
+      mainSha: async () => MAIN_SHA,
+      runner,
+    });
+  }
+
+  it('is a trusted source kind', () => {
+    expect(isTrustedSourceKind('deps')).toBe(true);
+  });
+
+  it('accepts a dependabot PR on a dependabot/ branch', async () => {
+    expect(await depsTrust({})).toBeNull();
+  });
+
+  it('refuses a non-dependabot author on a dependabot/ branch', async () => {
+    expect(await depsTrust({ authorLogin: 'mallory' })).toMatch(/not a dependabot PR/);
+  });
+
+  it('refuses a dependabot author on a non-dependabot/ branch', async () => {
+    expect(await depsTrust({ headRefName: 'feat/x' })).toMatch(/not a dependabot PR/);
+  });
+
+  it('refuses a non-dependabot head-commit author', async () => {
+    expect(await depsTrust({}, '{"author":"mallory","committer":"mallory"}')).toMatch(
+      /head commit author "mallory"/,
+    );
+  });
+});
+
 describe('resolveGovernanceFromYaml (native)', () => {
   it('fails closed to strict with no authors when the block is absent', () => {
     // Strict everywhere except allowForcePush, which defaults to lease-on-own-branch (AISDLC-710).
