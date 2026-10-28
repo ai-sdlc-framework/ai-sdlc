@@ -58,7 +58,10 @@ export function readExistingText(root) {
 }
 
 export function dedupeAlerts(alerts, existingText) {
-  return alerts.filter((a) => !existingText.includes(alertMarker(a.source, a.number)));
+  return alerts.filter((a) => {
+    const marker = alertMarker(a.source, a.number).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return !new RegExp(`${marker}(?!\\d)`).test(existingText);
+  });
 }
 
 export function maxTaskNumber(root) {

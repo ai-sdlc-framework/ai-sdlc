@@ -104,3 +104,13 @@ test('listOpenAlerts merges both endpoints', () => {
   assert.equal(out.length, 2);
   assert.equal(calls.length, 2);
 });
+
+test('dedupe is boundary-aware: filed #94 does not suppress #9', () => {
+  const mk = (n) => ({ source: 'dependabot', number: n, severity: 'low', summary: 's', url: 'u' });
+  const existing = `Marker: ${alertMarker('dependabot', 94)}\n`;
+  const out = dedupeAlerts([mk(9), mk(94)], existing);
+  assert.deepEqual(
+    out.map((a) => a.number),
+    [9],
+  );
+});
