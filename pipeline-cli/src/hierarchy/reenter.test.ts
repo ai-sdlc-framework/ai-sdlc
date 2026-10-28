@@ -287,6 +287,66 @@ describe('reenter loop guard (AISDLC-883)', () => {
   });
 });
 
+describe('reenter loop guard release (AISDLC-1105)', () => {
+  const round = (note: string, extra: Partial<Parameters<typeof reenter>[0]> = {}) =>
+    ({ target: '7', developerRound: true, note, ...extra }) as Parameters<typeof reenter>[0];
+  const answered = (taskId: string, lifecycle = 'answered') =>
+    ({
+      metadata: { id: 'DEC-0001', scope: 'workspace' },
+      spec: { escalation: { taskId } },
+      status: { lifecycle },
+    }) as never;
+  const guardEntries = (): { noteHash?: string; decision?: string }[] =>
+    JSON.parse(readFileSync(path.join(board, 'landing', '7', 'reentered.json'), 'utf-8'));
+
+  function again(): void {
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-b' });
+    completeTask(board, { taskId: TASK, outcome: 'failed', workerId: 'exec-b', prNumber: 7 });
+  }
+
+  it('accepts a different developer-round note on the same head and records its hash', () => {
+    failTask();
+    reenter(round('first order'), deps(gh()));
+    again();
+    reenter(round('second order'), deps(gh()));
+    const e = guardEntries();
+    expect(e).toHaveLength(2);
+    expect(e[0]?.noteHash).toMatch(/^[0-9a-f]{12}$/);
+    expect(e[1]?.noteHash).not.toBe(e[0]?.noteHash);
+  });
+
+  it('still refuses the identical developer-round note on the same head', () => {
+    failTask();
+    reenter(round('same order'), deps(gh()));
+    again();
+    expect(() => reenter(round('same order'), deps(gh()))).toThrow(/loop guard/);
+  });
+
+  it('releases the guard on an answered decision scoped to the task', () => {
+    failTask();
+    reenter({ target: '7' }, deps(gh()));
+    again();
+    const d = { ...deps(gh()), resolveDecision: () => answered(TASK) };
+    reenter({ target: '7', decisionId: 'DEC-0001' }, d);
+    expect(guardEntries()[1]?.decision).toBe('DEC-0001');
+  });
+
+  it('refuses a release by an open, unrelated or missing decision', () => {
+    failTask();
+    reenter({ target: '7' }, deps(gh()));
+    again();
+    const run = (r: () => unknown) =>
+      reenter(
+        { target: '7', decisionId: 'DEC-0001' },
+        { ...deps(gh()), resolveDecision: r as never },
+      );
+    expect(() => run(() => answered(TASK, 'open'))).toThrow(/not answered/);
+    expect(() => run(() => answered('AISDLC-1'))).toThrow(/not scoped/);
+    expect(() => run(() => null)).toThrow(/not found/);
+    expect(queued()).toEqual([]);
+  });
+});
+
 describe('reenter origin head (AISDLC-937)', () => {
   const ORIGIN = 'ccccccc3333333';
   const full = ORIGIN;

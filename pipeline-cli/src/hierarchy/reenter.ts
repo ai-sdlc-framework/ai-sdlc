@@ -12,16 +12,23 @@
  *    normal executor claim; Step 3 reuses the branch the manifest names.
  *
  * Loop guard (AISDLC-883): the same `(action, headSha)` is never taken twice; a new head
- * resets it.
+ * resets it. Two releases for a planner-ordered round (AISDLC-1105): a `--developer-round`
+ * reenter with a note keys on `(route, headSha, noteHash)`, so new instructions are a new
+ * action; and `--decision <id>` releases the guard when the catalog holds an answered
+ * record scoped to the task.
  */
 
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
+import { resolveCatalogRoot } from '../decisions/catalog-root.js';
 import { now as clockNow } from '../clock.js';
 import { collectVerdicts, TASK_ID_RE } from '../dispatch/board.js';
 import { resumeDone } from '../dispatch/resume.js';
 import type { ResumeFeedback } from '../dispatch/types.js';
+import type { Decision } from '../decisions/decision-record.js';
+import { projectDecision } from '../decisions/projection.js';
 import { resolveGateRunId } from './gate-run.js';
 import { classifyPr, type PrFacts, type PrState } from './pr-state.js';
 import { landingDir, normaliseCheck, readLanding, taskIdFrom } from './reconcile.js';
@@ -49,6 +56,8 @@ export interface ReenterInput {
   note?: string;
   /** Order a developer round even when the patch id is unchanged (AISDLC-1053). */
   developerRound?: boolean;
+  /** An answered catalog record scoped to the task; releases the same-head loop guard. */
+  decisionId?: string;
 }
 
 export interface ReenterDeps {
@@ -67,12 +76,33 @@ export interface ReenterDeps {
   resolveLocalAheadHead?: (taskId: string, prHead: string) => string | undefined;
   /** Where the origin-lookup fallback notice goes; defaults to stderr. */
   warn?: (line: string) => void;
+  /** Reads one catalog record; defaults to the decision projection under `cwd`. */
+  resolveDecision?: (id: string) => Decision | null;
 }
 
 interface GuardEntry {
   action: string;
   headSha: string;
   at: string;
+  /** Hash of the order's note, for a developer-round entry. */
+  noteHash?: string;
+  /** The answered catalog record that released the guard. */
+  decision?: string;
+}
+
+const hashNote = (note: string): string =>
+  createHash('sha256').update(note.trim()).digest('hex').slice(0, 12);
+
+/** Why a record cannot release the guard for this task, or undefined when it can. */
+function decisionRefusal(d: Decision | null, id: string, taskId: string): string | undefined {
+  if (!d) return `decision ${id} was not found in the catalog`;
+  if (d.status.lifecycle !== 'answered') {
+    return `decision ${id} is ${d.status.lifecycle}, not answered`;
+  }
+  const scoped =
+    d.spec.escalation?.taskId.toLowerCase() === taskId.toLowerCase() ||
+    d.metadata.scope.toLowerCase().includes(taskId.toLowerCase());
+  return scoped ? undefined : `decision ${id} is not scoped to ${taskId}`;
 }
 
 interface PrView {
@@ -258,16 +288,34 @@ export function reenter(input: ReenterInput, deps: ReenterDeps): ReenterResult {
     );
   }
 
+  const noteHash = input.developerRound && input.note?.trim() ? hashNote(input.note) : undefined;
+  const action = noteHash ? `${route}:dev-round:${noteHash}` : route;
+  let released: string | undefined;
+  if (input.decisionId) {
+    const resolve =
+      deps.resolveDecision ??
+      ((id: string) => projectDecision(id, { workDir: resolveCatalogRoot(deps.cwd) }));
+    const refusal = decisionRefusal(resolve(input.decisionId), input.decisionId, taskId);
+    if (refusal) throw new Error(`loop guard release refused: ${refusal}`);
+    released = input.decisionId;
+  }
   const prior = readGuard(deps.boardDir, pr).filter(
-    (e) => e.action === route && e.headSha === headSha,
+    (e) => e.action === action && e.headSha === headSha,
   );
-  if (prior.length > 0) {
+  if (prior.length > 0 && !released) {
     throw new Error(
       `loop guard: ${route}@${short(headSha)} x${prior.length + 1} on pull request #${pr}; ` +
-        'the head has not changed since the last re-entry. Push a new head, or route it to the planner with `cli-decisions escalate` (AISDLC-883)',
+        'the head has not changed since the last re-entry. Push a new head, order a developer round with new instructions ' +
+        '(`--developer-round --note <different text>`), or pass `--decision <DEC-NNNN>` for an answered catalog record scoped to the task (AISDLC-883, AISDLC-1105)',
     );
   }
-  const entry: GuardEntry = { action: route, headSha, at: now().toISOString() };
+  const entry: GuardEntry = {
+    action,
+    headSha,
+    at: now().toISOString(),
+    ...(noteHash ? { noteHash } : {}),
+    ...(released ? { decision: released } : {}),
+  };
 
   if (route !== 'executor') {
     const cmd =

@@ -2,7 +2,7 @@
 id: AISDLC-1105
 title: >-
   cli-dispatch reenter: the same-head loop guard releases on a planner-ordered developer round (escalate records but never unblocks)
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-28'
 labels:
@@ -40,3 +40,7 @@ Fix: key the guard on `(route, headSha, noteHash)` for developer-round reenters;
 ## Notes
 
 Evidence: dispatch report 2026-10-28 22:40Z (loop guard refusal on #1910 after the planner's developer-round ruling); earlier refusals on #2051 and #2055 at 20:45Z. Interim workaround ruled by the planner: run the conflict resolver on the PR to push a new head, then reenter.
+
+## Verification
+
+`pnpm build && pnpm test && pnpm lint && pnpm format:check`: pipeline-cli `Tests 14 failed | 12211 passed | 13 skipped (12238)`; all 14 failures are in `executor-start.test.ts`, caused by the executor session env (`AI_SDLC_EXECUTOR_TASK`) leaking into the test; with that env unset the file shows `Tests 24 passed (24)`. reenter.test.ts and dispatch.test.ts pass. Lint and format:check clean.

@@ -1572,6 +1572,9 @@ export async function runDispatchCli(
             target,
             ...(note === undefined ? {} : { note }),
             ...(developerRound ? { developerRound: true } : {}),
+            ...(flags['decision'] && flags['decision'] !== 'true'
+              ? { decisionId: flags['decision'] }
+              : {}),
           },
           {
             boardDir,
@@ -1756,7 +1759,7 @@ Subcommands:
   close-superseded <pr>   (DEC-0266: close a CLI-opened PR whose every file is already on main via a landed PR; exit 3 otherwise)
   reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]
   requeue --task-id <id> [--retry-limit <n>]   (PR-less failures; meant for the dispatch session; limit at most 2)
-  reenter <pr|task-id> [--note <text>] [--developer-round]   (re-enter a PR keyed on its state; replaces resume)
+  reenter <pr|task-id> [--note <text>] [--developer-round] [--decision <id>]   (re-enter a PR keyed on its state; replaces resume)
   complete --task-id <id> --outcome <enum> --worker <name> [--pr <number>] [--pr-url <url>]
            [--follow-ups <ids>] [--decisions <ids>] [--notes <s>] [--cause <s>]
   next-subid <task-id> [--work-dir <path>]
