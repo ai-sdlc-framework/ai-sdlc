@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1094
 title: 'DIRTY task PRs: the reenter manifest runs the rebase-resolver step inside the executor resume, keeps the board tie after reenter, and escalates only a semantic conflict'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-28'
 labels:
@@ -34,7 +34,31 @@ Workflow audit 2026-10-28. Five open PRs are DIRTY (#2027, #1731, #1677, #1663, 
 
 ## Acceptance Criteria
 
-- [ ] A DIRTY task PR with only a lockfile and prettier conflict is rebased, verified, re-signed and lease-pushed by one executor claim, with no planner ruling.
-- [ ] A modify-vs-delete conflict produces an escalation record naming the files and leaves the PR untouched.
-- [ ] After reenter moves a verdict to history, the PR is still listed by the reconciler with its task id.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] A DIRTY task PR with only a lockfile and prettier conflict is rebased, verified, re-signed and lease-pushed by one executor claim, with no planner ruling.
+- [x] A modify-vs-delete conflict produces an escalation record naming the files and leaves the PR untouched.
+- [x] After reenter moves a verdict to history, the PR is still listed by the reconciler with its task id.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+
+## Final Summary
+
+## Summary
+Addressed all round 1 review findings. I shortened the conflict resume note to 295 characters so the abort and escalate clause survives the 400-character prose cap. I added a reenter test asserting the note contains 'rebase --abort', 'escalate' and 'naming the files'. In prBelongsToTask I moved the landing-record read to the last check.
+
+## Changes
+- pipeline-cli/src/hierarchy/reenter.ts
+- pipeline-cli/src/hierarchy/reenter.test.ts
+- pipeline-cli/src/hierarchy/reconcile.ts
+
+## Design decisions
+I ran pnpm build && pnpm test && pnpm lint && pnpm format:check as one chained command, and all four passed (exit 0). The output I captured was only the tail, so it has no test summary line to quote. The rebase onto origin/main was a no-op because the branch was already current. The first commit attempt failed commitlint on scope 'pipeline-cli', so the commit uses scope 'orchestrator'.
+
+## Verification
+- `pnpm build` — passed
+- `pnpm test` — passed
+- `pnpm lint` — passed
+- `pnpm format:check` — passed
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
