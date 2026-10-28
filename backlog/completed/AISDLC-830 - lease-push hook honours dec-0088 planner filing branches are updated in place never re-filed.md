@@ -68,7 +68,7 @@ Test command: `pnpm test`. In the full run the pipeline-cli summary was `Test Fi
 
 ## Verification
 - `pnpm build` — passed
-- `pnpm test` — waived
+- `pnpm test` — passed on resume: `pnpm build && pnpm test` ran pipeline-cli `Tests  1 failed | 12143 passed | 13 skipped (12157)` (one timeout in `land-prep.test.ts` under load; re-run alone `Tests  24 passed (24)`, task diff does not touch it); other packages all green (orchestrator `5200 passed`); root gates `# pass 3545 / # fail 2` before pin sync, then `sync-plugin-runtime-deps.test.mjs` and `usage-ingest.test.mjs` re-run alone passed after `node scripts/sync-plugin-runtime-deps.mjs`
 - `pnpm lint` — passed
 - `pnpm format:check` — passed
 - 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
