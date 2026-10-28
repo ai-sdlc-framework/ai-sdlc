@@ -136,6 +136,16 @@ function prFromVerdicts(boardDir: string, taskId: string): number | undefined {
   return undefined;
 }
 
+/**
+ * The rebase-resolver step runs inside the executor resume (AISDLC-1094): one claim
+ * rebases, resolves mechanical conflicts, verifies, re-signs and lease-pushes.
+ */
+const CONFLICT_ROUND =
+  'resolve the merge conflict with origin/main by running the ci-conflict-resolver step in this resume: ' +
+  'rebase; resolve mechanical conflicts yourself (pnpm-lock.yaml accept incoming then pnpm install, CHANGELOG.md drop the branch diff, prettier drift then pnpm format, additive test files); ' +
+  'verify, re-sign and lease-push. On a semantic conflict (same function edited on both sides, modify-vs-delete) ' +
+  'run git rebase --abort, leave the PR untouched and file cli-decisions escalate naming the files';
+
 /** Collapse to one prose line; resume notes never start like a command. */
 function proseLine(text: string): string {
   return `Fix: ${text.replace(/\s+/g, ' ').trim().slice(0, 400)}`;
@@ -279,7 +289,7 @@ export function reenter(input: ReenterInput, deps: ReenterDeps): ReenterResult {
   const failingLine = c.failingLine ?? failedChecks[0]?.summary;
   const reason =
     c.state === 'behind-or-dirty'
-      ? 'resolve the merge conflict with origin/main'
+      ? CONFLICT_ROUND
       : c.state === 'attestation-content-hash-mismatch'
         ? 're-sign the attestation and push only'
         : (failingLine ?? 'a required check failed');
