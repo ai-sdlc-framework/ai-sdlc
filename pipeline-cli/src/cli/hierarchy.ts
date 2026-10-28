@@ -959,6 +959,12 @@ export async function runHierarchyCli(
             findPr: (id) => findOpenPrNumber(extras.ghRun ?? deps.run, repoRoot, id),
           },
           parentHead: () => readParentHead(repoRoot),
+          idleExecutors: () =>
+            hierarchyStatus(deps)
+              .rows.filter(
+                (r) => r.entry.role === 'executor' && r.state === 'idle' && !r.inflightTask,
+              )
+              .map((r) => r.entry.name),
           // RFC-0059: one executor per eligible claim, downed on its verdict.
           // AI_SDLC_EPHEMERAL_EXECUTORS=0 keeps standing executors only.
           ...(deps.env.AI_SDLC_EPHEMERAL_EXECUTORS === '0'
