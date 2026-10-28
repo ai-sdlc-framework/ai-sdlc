@@ -47,7 +47,7 @@ Once the plugin is installed, these hooks run without any configuration:
 | `enforce-blocked-actions.sh` | PreToolUse | Blocks Bash commands and file writes matching `blockedActions` / `blockedPaths` |
 | `enforce-role-tools.sh` | PreToolUse | Enforces the role's tool allow-list |
 | `collect-tool-sequence.sh` | PostToolUse | Captures tool calls for workflow pattern detection (async) |
-| `context-auto-clear.sh`, `context-warn.sh`, `context-budget.sh` | Stop | Context-window warnings, budget and automatic clear |
+| `context-warn.sh`, `context-budget.sh` | Stop | Context-window warnings and budget |
 | `permission-check.sh` | PermissionRequest | Hard deny at permission layer for blocked actions |
 
 The **SessionStart** hook injects context like:
