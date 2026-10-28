@@ -141,10 +141,9 @@ function prFromVerdicts(boardDir: string, taskId: string): number | undefined {
  * rebases, resolves mechanical conflicts, verifies, re-signs and lease-pushes.
  */
 const CONFLICT_ROUND =
-  'resolve the merge conflict with origin/main by running the ci-conflict-resolver step in this resume: ' +
-  'rebase; resolve mechanical conflicts yourself (pnpm-lock.yaml accept incoming then pnpm install, CHANGELOG.md drop the branch diff, prettier drift then pnpm format, additive test files); ' +
-  'verify, re-sign and lease-push. On a semantic conflict (same function edited on both sides, modify-vs-delete) ' +
-  'run git rebase --abort, leave the PR untouched and file cli-decisions escalate naming the files';
+  'run the ci-conflict-resolver step in this resume: rebase onto origin/main, resolve mechanical ' +
+  'conflicts (lockfile, prettier, CHANGELOG), verify, re-sign, lease-push. On a semantic conflict ' +
+  '(modify-vs-delete) run git rebase --abort, leave the PR untouched, cli-decisions escalate naming the files';
 
 /** Collapse to one prose line; resume notes never start like a command. */
 function proseLine(text: string): string {

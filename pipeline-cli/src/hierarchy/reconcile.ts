@@ -866,8 +866,6 @@ export function prBelongsToTask(
     if (v.taskId.toLowerCase() !== id) continue;
     if (v.prNumber === prNumber || prNumberFromUrl(v.prUrl) === prNumber) return true;
   }
-  // Reenter moves the verdict to history; the landing record keeps the tie (AISDLC-1094).
-  if (readLanding(boardDir, prNumber)?.taskId?.toLowerCase() === id) return true;
   const manifest = readInflightManifest(boardDir, taskId);
   if (manifest?.resume?.prNumber === prNumber) return true;
   const branch = manifest?.branch;
@@ -875,11 +873,15 @@ export function prBelongsToTask(
   // A queued manifest holding the short form of the head (`<branch>-<slug>`) still owns the PR.
   const queued = readQueuedManifest(boardDir, taskId);
   if (queued?.resume?.prNumber === prNumber) return true;
-  return (
+  if (
     queued?.branch !== undefined &&
     headBranch !== undefined &&
     headBranch.startsWith(`${queued.branch}-`)
-  );
+  ) {
+    return true;
+  }
+  // Reenter moves the verdict to history; the landing record keeps the tie (AISDLC-1094).
+  return readLanding(boardDir, prNumber)?.taskId?.toLowerCase() === id;
 }
 
 interface RollupItem {
