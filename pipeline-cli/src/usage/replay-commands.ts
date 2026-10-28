@@ -55,6 +55,7 @@ import {
   runReplay,
   type SpawnerFactory,
 } from './replay-run.js';
+import { REPLAY_SETS, renderSetResults, setReplayItems, toSetResults } from './replay-set.js';
 import { deriveUnitWeights } from './units.js';
 import { loadUsageConfig } from './usage-config.js';
 import type { UsageIo, UsageViewDeps } from './commands.js';
@@ -274,9 +275,14 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
         c
           .option('role', {
             type: 'string',
-            demandOption: true,
             choices: [...REPLAY_ROLES],
-            description: 'Reviewer role to replay',
+            description: 'Reviewer role to replay (give this or --set)',
+          })
+          .option('set', {
+            type: 'string',
+            choices: [...REPLAY_SETS],
+            description:
+              'Replay a reviewer set against the gating set instead of one role (RFC-0052)',
           })
           .option('model', {
             type: 'string',
@@ -325,9 +331,16 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
           .epilog(REPLAY_HELP),
       async (argv) => {
         const repoRoot = repoRootOf();
-        const role = argv.role;
+        const set = argv.set;
+        if (set !== undefined && (argv.role !== undefined || argv['reference-model'])) {
+          fail(io, '--set cannot be combined with --role or --reference-model.');
+          return;
+        }
+        // A set replay sends the diff through the code remit; the staged set is compared with
+        // the gating set's outcome per commit.
+        const role = set !== undefined ? 'code' : argv.role;
         if (!isValidRole(role)) {
-          fail(io, `Invalid --role "${role}".`);
+          fail(io, set === undefined ? 'Give --role or --set.' : `Invalid --role "${role}".`);
           return;
         }
         const models = [argv.model, ...(argv['reference-model'] ? [argv['reference-model']] : [])];
@@ -358,7 +371,12 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
           return;
         }
         const runId = runIdFor(now);
-        const resultsPath = join(artifactsDir, 'replay', `results-${role}-${runId}.json`);
+        // Set results are not role results: the name keeps them out of `route propose`.
+        const resultsPath = join(
+          artifactsDir,
+          'replay',
+          set !== undefined ? `set-${set}-${runId}.json` : `results-${role}-${runId}.json`,
+        );
         if (isUnderAiSdlc(resultsPath, repoRoot)) {
           fail(
             io,
@@ -374,7 +392,10 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
           fail(io, corpus);
           return;
         }
-        const items = corpus.items.filter((i) => i.role === role);
+        const items =
+          set !== undefined
+            ? setReplayItems(corpus.items)
+            : corpus.items.filter((i) => i.role === role);
         if (items.length === 0) {
           fail(io, `The corpus has no items for role ${role}.`);
           return;
@@ -518,6 +539,13 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
               io,
               'Refusing to write replay results under .ai-sdlc (only .ai-sdlc/artifacts is allowed).',
             );
+            return;
+          }
+          if (set !== undefined) {
+            const setResults = toSetResults(set, results);
+            writeJsonAtomic(resultsPath, setResults);
+            io.out(renderSetResults(setResults));
+            io.out(`Wrote ${resultsPath}\n`);
             return;
           }
           writeJsonAtomic(resultsPath, results);

@@ -535,6 +535,8 @@ export interface ReviewerVerdict {
   approved: boolean;
   findings: ReviewerFinding[];
   summary?: string;
+  /** False for a shadow verdict recorded beside the gating set; Step 8 ignores it (RFC-0052). */
+  gating?: boolean;
 }
 
 export interface AggregatedVerdict {

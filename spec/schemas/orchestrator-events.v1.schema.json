@@ -515,6 +515,7 @@
         "UsageLimitObserved",
         "AllotmentChangeSuspected",
         "ModelRoutingOverrideApplied",
+        "ReviewComparisonFlagged",
         "JudgmentEscalated",
         "JudgmentProviderUnavailable",
         "HierarchySessionStarted",

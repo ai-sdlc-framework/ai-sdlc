@@ -2,7 +2,7 @@
 id: AISDLC-677
 title: >-
   RFC-0052: staged pipeline as shadow beside the gating set, per-case comparison record, flagged cases, cli-usage replay --set
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-01'
 labels:

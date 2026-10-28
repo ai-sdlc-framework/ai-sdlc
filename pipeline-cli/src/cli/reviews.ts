@@ -8,6 +8,7 @@
  *
  * Subcommands:
  *   analyze [--repo-root ...] [--json]  — compute + print the analysis
+ *   compare [--bar] [--json]            — staged (shadow) vs gating reviewers, per case
  *
  * `--repo-root` may be repeated to aggregate a ledger corpus across multiple
  * checkouts (e.g. this repo + a sibling dogfood repo) — see
@@ -34,6 +35,8 @@ import {
   summarizeRounds,
 } from '../incremental-review/review-rounds.js';
 import { analyzeReviewLedger, formatReviewAnalysis } from '../attestation/reviews-analysis.js';
+import { compareStagedToGating, formatComparison } from '../attestation/reviews-compare.js';
+import { writeEvent, type OrchestratorEvent } from '../orchestrator/events.js';
 
 function emitText(text: string): void {
   process.stdout.write(text.endsWith('\n') ? text : text + '\n');
@@ -56,7 +59,20 @@ export function loadCorpus(repoRoots: string[]): ReviewLedgerRecord[] {
   return records;
 }
 
-export function buildReviewsCli(argv: string[]): ReturnType<typeof yargs> {
+/** Records one orchestrator event; a no-op unless the orchestrator events stream is enabled. */
+export type ReviewsEventEmitter = (event: {
+  type: OrchestratorEvent['type'];
+  taskId?: string;
+  [k: string]: unknown;
+}) => void;
+
+const defaultEmitter: ReviewsEventEmitter = (event) => writeEvent({ ...event, ts: '' });
+
+export function buildReviewsCli(
+  argv: string[],
+  deps: { emit?: ReviewsEventEmitter } = {},
+): ReturnType<typeof yargs> {
+  const emit = deps.emit ?? defaultEmitter;
   return yargs(argv)
     .scriptName('cli-reviews')
     .usage('Usage: $0 <command> [options]')
@@ -91,6 +107,51 @@ export function buildReviewsCli(argv: string[]): ReturnType<typeof yargs> {
         } else {
           emitText(formatReviewAnalysis(result));
         }
+      },
+    )
+    .command(
+      'compare',
+      'RFC-0052: compare the staged review set (shadow, gating: false) with the gating reviewers ' +
+        'per case: staged-only, standalone-only and agreed findings, a separate security ' +
+        'section, and flagged cases (a blocking finding only one side raised) listed first. ' +
+        'Each flagged case emits ReviewComparisonFlagged. --bar reports the relax-bar status.',
+      (y: Argv) =>
+        y
+          .option('repo-root', {
+            type: 'array',
+            string: true,
+            default: [] as string[],
+            describe: 'Repo root holding .ai-sdlc/reviews/. Repeatable. Defaults to cwd.',
+          })
+          .option('bar', {
+            type: 'boolean',
+            default: false,
+            describe: 'Report compared PRs and act-band precision against 50 PRs and 0.95.',
+          })
+          .option('events', {
+            type: 'boolean',
+            default: true,
+            describe: 'Emit ReviewComparisonFlagged per flagged case (--no-events to skip).',
+          })
+          .option('json', { type: 'boolean', default: false }),
+      (args) => {
+        const report = compareStagedToGating(
+          loadCorpus((args['repo-root'] as string[] | undefined) ?? []),
+        );
+        if (args['events']) {
+          for (const c of report.cases.filter((x) => x.flagged)) {
+            emit({
+              type: 'ReviewComparisonFlagged',
+              taskId: c.taskId,
+              commitSha: c.commitSha,
+              iteration: c.iteration,
+              stagedOnlyBlocking: c.stagedOnlyBlocking,
+              standaloneOnlyBlocking: c.standaloneOnlyBlocking,
+            });
+          }
+        }
+        if (args['json']) emitJson(report);
+        else emitText(formatComparison(report, { bar: args['bar'] as boolean }));
       },
     )
     .command(

@@ -6526,6 +6526,7 @@ export const orchestratorEventsV1Schema = {
         'UsageLimitObserved',
         'AllotmentChangeSuspected',
         'ModelRoutingOverrideApplied',
+        'ReviewComparisonFlagged',
         'JudgmentEscalated',
         'JudgmentProviderUnavailable',
         'HierarchySessionStarted',

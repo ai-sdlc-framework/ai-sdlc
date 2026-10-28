@@ -11,6 +11,17 @@ function v(
 }
 
 describe('Step 8 — aggregateVerdicts', () => {
+  it('ignores shadow verdicts (gating: false) entirely', async () => {
+    const shadow: ReviewerVerdict = {
+      ...v('staged-review', false, [{ severity: 'major', message: 'shadow only' }]),
+      gating: false,
+    };
+    const r = await aggregateVerdicts({ verdicts: [v('code-reviewer', true), shadow] });
+    expect(r.decision).toBe('APPROVED');
+    expect(r.counts.major).toBe(0);
+    expect(r.verdicts.map((x) => x.agentId)).toEqual(['code-reviewer']);
+  });
+
   it('APPROVED when all approve and no critical/major findings', async () => {
     const r = await aggregateVerdicts({
       verdicts: [
