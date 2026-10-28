@@ -13,6 +13,7 @@ import path from 'node:path';
 import { validateHierarchyRoster } from '@ai-sdlc/reference';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { landingPath } from './reconcile.js';
 import { schedulerDown, schedulerStatus } from './reconcile-scheduler.js';
 
 import {
@@ -1008,8 +1009,26 @@ describe('hierarchy status', () => {
       'webhook: off (no secret)',
       'scheduler: off',
       'context clear thresholds (tokens): planner 150000, operator-dispatch 120000, executor 120000',
+      'unowned PRs: 0',
       expect.stringContaining('attestation and leaf files:'),
     ]);
+  });
+
+  it('counts unowned open PRs from the landing records (AISDLC-1091)', () => {
+    const record = (pr: number, owner: string) => ({
+      pr,
+      kind: 'docs',
+      owner,
+      state: 'green',
+      action: 'route-to-planner',
+      history: [],
+    });
+    mkdirSync(path.join(boardDir, 'landing'), { recursive: true });
+    writeFileSync(landingPath(boardDir, 7), JSON.stringify(record(7, 'unowned')));
+    writeFileSync(landingPath(boardDir, 8), JSON.stringify(record(8, 'machine')));
+    const result = hierarchyStatus(deps);
+    expect(result.unowned).toBe(1);
+    expect(formatStatus(result)).toContain('unowned PRs: 1');
   });
 
   it('shows an ATTACHED column per session, yes only when a client is attached', async () => {

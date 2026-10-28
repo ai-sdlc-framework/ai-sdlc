@@ -45,7 +45,10 @@ describe('planner rulings in the reconciler (AISDLC-903)', () => {
   });
 
   it('holds a no-match PR instead of routing it to the planner', () => {
-    const noMatch = pr({ checks: [{ name: 'ci', conclusion: 'success' }] });
+    const noMatch = pr({
+      mergeStateStatus: 'BLOCKED',
+      checks: [{ name: 'ci', conclusion: 'success' }],
+    });
     expect(decide(noMatch).action).toBe('route-to-planner');
     expect(decide(noMatch, undefined, { ruling, untilMerged: false }).action).toBe('held');
   });
