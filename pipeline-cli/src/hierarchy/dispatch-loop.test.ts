@@ -175,6 +175,14 @@ describe('auto-brief (AISDLC-930)', () => {
     await runDispatchTick(deps({ parentUpkeep: async () => ({ ok: true, swept: 2 }) }));
   });
 
+  it('reports holdLifted once on the first tick after a resume (AISDLC-1089)', async () => {
+    writeHold(board, { reason: 'x', since: 's', by: 'b' });
+    expect((await runDispatchTick(deps())).holdLifted).toBeUndefined();
+    clearHold(board, 'b', 'now');
+    expect((await runDispatchTick(deps())).holdLifted).toBe(true);
+    expect((await runDispatchTick(deps())).holdLifted).toBeUndefined();
+  });
+
   it('a red canary event holds the tick and files the hotfix; green lifts it (AISDLC-1023)', async () => {
     const dir = path.join(board, 'events');
     mkdirSync(dir, { recursive: true });

@@ -65,7 +65,12 @@ import process from 'node:process';
 import { promoteExpiredDecisions } from '../decisions/escalation-chain.js';
 import { isDecisionCatalogEnabled } from '../decisions/feature-flag.js';
 import { persistDecisionLog } from '../decisions/remote-persist.js';
-import { collectVerdicts, DEFAULT_BOARD_DIR, TASK_ID_RE } from '../dispatch/board.js';
+import {
+  collectVerdicts,
+  DEFAULT_BOARD_DIR,
+  peekQueueOrder,
+  TASK_ID_RE,
+} from '../dispatch/board.js';
 import { sanitizeVerdict } from '../dispatch/verdict-fields.js';
 import { enqueueTasks, type EnqueueEntry } from '../dispatch/enqueue.js';
 import { requeueFailed } from '../dispatch/requeue.js';
@@ -1075,6 +1080,13 @@ export async function runHierarchyCli(
         deps.log(
           JSON.stringify({
             ...result,
+            holdLifted: result.holdLifted === true,
+            eligibleQueued: result.held ? [] : peekQueueOrder(deps.boardDir).map((e) => e.taskId),
+            idleExecutors: hierarchyStatus(deps)
+              .rows.filter(
+                (r) => r.entry.role === 'executor' && r.state === 'idle' && !r.inflightTask,
+              )
+              .map((r) => r.entry.name),
             identity: { name: worker, planner: planner?.name ?? '' },
             handoff: dispatchHandoff(deps, worker),
             selfClear: selfClearAvailability(deps.env),

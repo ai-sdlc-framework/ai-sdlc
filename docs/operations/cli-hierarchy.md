@@ -814,6 +814,12 @@ prerequisite, and queued work with no running executor; dispatch sends it to the
 it differs from `<board>/.blockers-sent.json`. Holds and resumes are appended to
 `<board>/hold-events.jsonl`.
 
+The tick JSON also carries `eligibleQueued` (queued task ids that can be claimed, in claim order; empty
+while held), `idleExecutors` (names of idle executor sessions) and `holdLifted` (true on the first tick
+after a hold was lifted). The hooks module wakes idle executors on every tick that has both, not only
+when a brief was ingested; an executor woken on one tick is skipped on the next (one-tick back-off), and
+`holdLifted` clears the back-off.
+
 | State   | Claims | Relaunches / re-queues | Reports and escalations |
 | ------- | ------ | ---------------------- | ----------------------- |
 | running | yes    | yes                    | yes                     |

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1089
 title: 'hierarchy hooks module wakes idle executors on every tick that finds eligible queued work and idle executors, and after a hold is lifted, not only on a tick that ingests'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-28'
 labels:

@@ -286,6 +286,55 @@ describe('dispatch host (AISDLC-1035)', () => {
     expect(sends(s)).toEqual([{ to: 'executor-alpha', text: 'enqueue AISDLC-20' }]);
   });
 
+  it('wakes idle executors on a tick with eligible queued work and no ingest, backing off one tick (AISDLC-1089)', async () => {
+    const s = setup({
+      ...EMPTY_TICK,
+      eligibleQueued: ['AISDLC-31', 'AISDLC-32'],
+      idleExecutors: ['executor-alpha', 'executor-gamma'],
+    });
+    await s.start();
+    await s.timer();
+    expect(sends(s)).toEqual([
+      { to: 'executor-alpha', text: 'enqueue AISDLC-31' },
+      { to: 'executor-gamma', text: 'enqueue AISDLC-32' },
+    ]);
+    s.$.session.send.mockClear();
+    await s.timer();
+    expect(sends(s)).toEqual([]);
+    await s.timer();
+    expect(sends(s).map((a: any) => a.to)).toEqual(['executor-alpha', 'executor-gamma']);
+  });
+
+  it('a lifted hold clears the back-off so idle executors are woken at once (AISDLC-1089)', async () => {
+    const base = {
+      ...EMPTY_TICK,
+      eligibleQueued: ['AISDLC-31'],
+      idleExecutors: ['executor-alpha'],
+    };
+    const s = setup(base);
+    await s.start();
+    await s.timer();
+    s.$.session.send.mockClear();
+    s.setTick({ ...base, holdLifted: true });
+    await s.timer();
+    expect(sends(s)).toEqual([{ to: 'executor-alpha', text: 'enqueue AISDLC-31' }]);
+  });
+
+  it('does not wake without idle executors or while held (AISDLC-1089)', async () => {
+    const s = setup({ ...EMPTY_TICK, eligibleQueued: ['AISDLC-31'], idleExecutors: [] });
+    await s.start();
+    await s.timer();
+    expect(sends(s)).toEqual([]);
+    s.setTick({
+      ...EMPTY_TICK,
+      held: { reason: 'x' },
+      ingested: [{ file: 'b', tasks: ['AISDLC-5'] }],
+      idleExecutors: ['executor-alpha'],
+    });
+    await s.timer();
+    expect(sends(s)).toEqual([]);
+  });
+
   it('delivers a rotate request for another session with $.session.send and rotates only itself for its own', async () => {
     const s = setup(EMPTY_TICK);
     await s.start();

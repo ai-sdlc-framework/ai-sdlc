@@ -63,6 +63,10 @@ export interface DispatchState {
   lastBlockers: string;
   /** Text of the last tick failure escalated; the same failure is escalated once, not on every timer fire. */
   lastTickFailure: string;
+  /** Tick counter; with `lastWoke` it gives a woken executor a one-tick back-off (AISDLC-1089). */
+  tickNo?: number;
+  /** Executor name -> tick number it was last sent `enqueue`. */
+  lastWoke?: Record<string, number>;
   /** Number of in-flight ticks: a slow tick must not overlap the next. */
   ticking: boolean;
 }
@@ -247,15 +251,19 @@ export async function wake(p: DispatchPorts, name: string, taskId: string): Prom
 async function wakeIdleExecutors(
   p: DispatchPorts,
   state: DispatchState,
-  status: Any,
+  idle: string[],
   taskIds: string[],
+  holdLifted: boolean,
 ): Promise<void> {
-  const idle: string[] = ((status?.rows ?? []) as Any[])
-    .filter((r) => r.entry?.role === 'executor' && r.state === 'idle' && !r.inflightTask)
-    .map((r) => String(r.entry.name));
-  for (let i = 0; i < Math.min(idle.length, taskIds.length); i++) {
-    const ok = await wake(p, idle[i], taskIds[i]);
-    note(state, ok ? `woke ${idle[i]} for ${taskIds[i]}` : `wake of ${idle[i]} refused`);
+  const tickNo = state.tickNo ?? 0;
+  const lastWoke = (state.lastWoke ??= {});
+  if (holdLifted) for (const k of Object.keys(lastWoke)) delete lastWoke[k];
+  // One-tick back-off: an executor woken last tick and still idle had its claim refused; leave it this tick.
+  const ready = idle.filter((n) => lastWoke[n] === undefined || tickNo - lastWoke[n] > 1);
+  for (let i = 0; i < Math.min(ready.length, taskIds.length); i++) {
+    lastWoke[ready[i]] = tickNo;
+    const ok = await wake(p, ready[i], taskIds[i]);
+    note(state, ok ? `woke ${ready[i]} for ${taskIds[i]}` : `wake of ${ready[i]} refused`);
   }
 }
 
@@ -358,8 +366,19 @@ export async function tick(p: DispatchPorts, state: DispatchState): Promise<void
     const sweep = await runCli(p, CI_BIN, ['sweep', ...boardArgs(state)]);
     if (!sweep.ok) note(state, 'cli-ci sweep failed');
     const status = await refreshPane(p, state);
-    if (ingested.length) {
-      await wakeIdleExecutors(p, state, status, ingested);
+    state.tickNo = (state.tickNo ?? 0) + 1;
+    const strings = (v: Any): string[] =>
+      Array.isArray(v) ? v.filter((x: unknown): x is string => typeof x === 'string') : [];
+    const idle = Array.isArray(result.idleExecutors)
+      ? strings(result.idleExecutors)
+      : ((status?.rows ?? []) as Any[])
+          .filter((r) => r.entry?.role === 'executor' && r.state === 'idle' && !r.inflightTask)
+          .map((r) => String(r.entry.name));
+    const tasks = [
+      ...new Set([...strings(result.eligibleQueued), ...(result.held ? [] : ingested)]),
+    ];
+    if (idle.length && tasks.length) {
+      await wakeIdleExecutors(p, state, idle, tasks, result.holdLifted === true);
       await refreshPane(p, state);
     }
   } finally {
