@@ -17,6 +17,8 @@ export interface KnowledgeConfig {
   dataRoomRoots: string[];
   /** Client identifiers whose presence in an entry marks it as likely protected. */
   clientIdentifiers: string[];
+  /** Promotion proof allowlist (RFC-0053 OQ-3): command id -> argv. Empty = no command proofs. */
+  allowlistedCommands: Record<string, string[]>;
 }
 
 function stringList(v: unknown): string[] {
@@ -29,6 +31,7 @@ export function loadKnowledgeConfig(projectRoot: string): KnowledgeConfig {
     protectedRoot: DEFAULT_PROTECTED_ROOT,
     dataRoomRoots: [],
     clientIdentifiers: [],
+    allowlistedCommands: {},
   };
   const file = join(projectRoot, CONTEXT_CONFIG_PATH);
   if (!existsSync(file)) return config;
@@ -44,5 +47,12 @@ export function loadKnowledgeConfig(projectRoot: string): KnowledgeConfig {
   const classification = knowledge.classification as Record<string, unknown> | undefined;
   config.dataRoomRoots = stringList(classification?.dataRoomRoots);
   config.clientIdentifiers = stringList(classification?.clientIdentifiers);
+  const cmds = (knowledge.promotion as Record<string, unknown> | undefined)?.commands;
+  if (cmds && typeof cmds === 'object' && !Array.isArray(cmds)) {
+    for (const [id, argv] of Object.entries(cmds)) {
+      const list = stringList(argv);
+      if (list.length > 0) config.allowlistedCommands[id] = list;
+    }
+  }
   return config;
 }

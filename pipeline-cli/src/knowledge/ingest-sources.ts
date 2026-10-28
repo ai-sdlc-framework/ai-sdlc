@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path';
 import { reviewsLedgerPath, reviewsLedgerRelativePath } from '../attestation/reviews-ledger.js';
 import { projectAll } from '../decisions/projection.js';
 import { dump } from '../util/yaml.js';
+import { appendKnowledgeEvent } from './log.js';
 import { hashValue, parseEntryFile, validateEntryFields } from './entry.js';
 import type { Ontology } from './ontology.js';
 import { slugify } from './ingest-sections.js';
@@ -249,7 +250,14 @@ export function ingestSource(kind: IngestSource, o: IngestOptions): IngestResult
         result.unchanged++;
         continue;
       }
-      if ('fields' in prior) fields.supersedes = `${c.id}@${String(prior.fields.contentHash)}`;
+      if ('fields' in prior) {
+        fields.supersedes = `${c.id}@${String(prior.fields.contentHash)}`;
+        appendKnowledgeEvent(o.trackedRootAbs, {
+          event: 'superseded',
+          id: c.id,
+          detail: String(fields.supersedes),
+        });
+      }
       result.updated++;
     } else {
       result.created++;

@@ -2,7 +2,7 @@
 id: AISDLC-776
 title: >-
   promotion verifier, knowledge log and cli-context audit
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-09'
 labels:

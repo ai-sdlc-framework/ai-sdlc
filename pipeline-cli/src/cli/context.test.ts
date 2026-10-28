@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildContextCli } from './context.js';
+import { buildContextCli, resolveRole } from './context.js';
 
 let dir: string;
 afterEach(() => {
@@ -33,5 +33,13 @@ describe('cli-context ingest-sections', () => {
     expect(existsSync(join(dir, '.ai-sdlc/knowledge/process/why-it-exists.md'))).toBe(true);
     await buildContextCli(['validate', '--project-dir', dir]).parseAsync();
     expect(process.exitCode ?? 0).toBe(0);
+  });
+});
+
+describe('resolveRole', () => {
+  it('is human only on an interactive tty with no active task', () => {
+    expect(resolveRole({}, true)).toBe('human');
+    expect(resolveRole({}, false)).toBe('agent');
+    expect(resolveRole({ AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-1' }, true)).toBe('agent');
   });
 });
