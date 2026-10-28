@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1099
 title: 'hierarchy: an executor is cleared after its verdict whatever its last line says, a rotate request is honoured by an idle executor, dispatch waits across ticks for the acknowledgement, and planner messages to dispatch are submitted rather than left as pasted text'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-28'
 labels:
@@ -44,9 +44,31 @@ Four causes, all in the hierarchy module and CLI:
 
 ## Acceptance Criteria
 
-- [ ] An executor whose verdict file exists is cleared at its next turn completion whatever its last reply line is.
-- [ ] A `rotate` message to an idle executor results in a clear within one tick.
-- [ ] A clear started from a dispatch tick is reported acknowledged on the next tick when the executor restarted; no "not acknowledged" from the issuing tick.
-- [ ] A planner `cli-hierarchy send` or `brief --notify` to the dispatch session is submitted and answered without a human pressing Enter.
-- [ ] `cli-hierarchy status` warns on an executor idle with a reported verdict for more than one tick.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] An executor whose verdict file exists is cleared at its next turn completion whatever its last reply line is.
+- [x] A `rotate` message to an idle executor results in a clear within one tick.
+- [x] A clear started from a dispatch tick is reported acknowledged on the next tick when the executor restarted; no "not acknowledged" from the issuing tick.
+- [x] A planner `cli-hierarchy send` or `brief --notify` to the dispatch session is submitted and answered without a human pressing Enter.
+- [x] `cli-hierarchy status` warns on an executor idle with a reported verdict for more than one tick.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+
+## Final Summary
+
+## Summary
+Rebased the AISDLC-1099 branch onto origin/main. I resolved the three conflicts in pipeline-cli/src/hierarchy/dispatch-loop.ts by keeping main's ephemeral-executor handling and re-applying the AISDLC-1099 clear-state threading. The clear is requested in one tick and acknowledged on the next, and `clearAcks` is still included in the reports. The branch is not pushed, because the pipeline pushes.
+
+## Changes
+- pipeline-cli/src/hierarchy/dispatch-loop.ts
+
+## Design decisions
+Ran `pnpm build && pnpm test && pnpm lint && pnpm format:check` after the rebase; the chain exited 0, so every step passed. I did not open a new PR; this updates existing PR #2052. The resolution commit is the rebased HEAD d38773991 with no extra commit on top. The log has some `FAIL`-named test titles and an `[rfc-check] FAIL` line, but the chain exited 0.
+
+## Verification
+- `pnpm build` — passed
+- `pnpm test` — passed
+- `pnpm lint` — passed
+- `pnpm format:check` — passed
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers; review-full)
+
+## Follow-up
+(none)
+

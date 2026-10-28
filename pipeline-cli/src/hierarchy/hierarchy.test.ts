@@ -1002,6 +1002,28 @@ describe('hierarchy status', () => {
     expect(hierarchyStatus(deps).rows[0]?.state).toBe('unknown');
   });
 
+  it('warns on an idle executor whose verdict is older than a tick and uncleared (AISDLC-1099)', async () => {
+    fake.startedAtMs = NOW.getTime() - 10 * 60_000;
+    await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
+    const done = path.join(deps.boardDir, 'done');
+    mkdirSync(done, { recursive: true });
+    writeFileSync(
+      path.join(done, 'AISDLC-9.verdict.json'),
+      JSON.stringify({
+        taskId: 'AISDLC-9',
+        workerId: Q('executor-alpha'),
+        completedAt: new Date(NOW.getTime() - 5 * 60_000).toISOString(),
+      }),
+    );
+    const result = hierarchyStatus(deps);
+    expect(result.rows.find((r) => r.entry.name === Q('executor-alpha'))?.idleAfterVerdict).toBe(
+      'AISDLC-9',
+    );
+    expect(formatStatus(result).join('\n')).toContain(
+      `idle after verdict on ${Q('executor-alpha')}`,
+    );
+  });
+
   it('handles an empty roster', () => {
     const result = hierarchyStatus(deps);
     expect(formatStatus(result)).toEqual([

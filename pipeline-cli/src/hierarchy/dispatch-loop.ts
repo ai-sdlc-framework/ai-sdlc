@@ -62,6 +62,7 @@ import type { LandReport } from './land-eligible.js';
 import type { MarkReadyReport } from './mark-ready.js';
 import type { PlaybookOutcome } from './playbook.js';
 import { summariseLanding, takeSuppressedNote } from './reconcile.js';
+import { rotateRequestPath } from './rotate-request.js';
 import { readRosterChecked } from './roster.js';
 import type { ParentUpkeepResult } from '../steps/00-parent-upkeep.js';
 import { formatStall, reapStalledClaims, type StallDeps, type StalledReport } from './stall.js';
@@ -96,6 +97,8 @@ export interface LoopState {
   lastReportAt?: string;
   /** When the tick last read GitHub (AISDLC-960). */
   lastGithubReadAt?: string;
+  /** Executors whose rotate request this loop wrote; the next tick reports whether each was consumed (AISDLC-1099). */
+  pendingClears?: string[];
 }
 
 /** Why and when the board refused a brief. */
@@ -142,6 +145,7 @@ export function readLoopState(boardDir: string): LoopState {
       handled: Array.isArray(parsed.handled) ? parsed.handled : [],
       ...(parsed.lastReportAt ? { lastReportAt: parsed.lastReportAt } : {}),
       ...(parsed.lastGithubReadAt ? { lastGithubReadAt: parsed.lastGithubReadAt } : {}),
+      ...(Array.isArray(parsed.pendingClears) ? { pendingClears: parsed.pendingClears } : {}),
     };
   } catch {
     return emptyState();
@@ -171,7 +175,7 @@ export function briefToEnqueueEntries(brief: ParsedBrief): EnqueueEntry[] {
 
 /** What a clear attempt did for one verdict. */
 export interface ClearReport {
-  status: 'cleared' | 'failed' | 'refused' | 'not-permitted' | 'skipped';
+  status: 'cleared' | 'requested' | 'failed' | 'refused' | 'not-permitted' | 'skipped';
   executor?: string;
   reason?: string;
 }
@@ -461,7 +465,7 @@ async function watchVerdicts(
           reason: 'ephemeral executor: downed',
         };
       } else if (executors.has(verdict.workerId)) {
-        report.clear = await clearOnce(deps, verdict);
+        report.clear = await clearOnce(deps, state, verdict);
       }
       if (verdictState === 'failed') {
         const outcome = await deps.playbook(verdict);
@@ -474,7 +478,11 @@ async function watchVerdicts(
   return out;
 }
 
-async function clearOnce(deps: LoopDeps, verdict: DispatchVerdict): Promise<ClearReport> {
+async function clearOnce(
+  deps: LoopDeps,
+  state: LoopState,
+  verdict: DispatchVerdict,
+): Promise<ClearReport> {
   const executor = verdict.workerId;
   if (!deps.operational.has('clear-executor-context')) {
     return { status: 'not-permitted', executor, reason: 'clear-executor-context is not granted' };
@@ -482,7 +490,12 @@ async function clearOnce(deps: LoopDeps, verdict: DispatchVerdict): Promise<Clea
   try {
     // The task id goes on the clear event only when it is well formed.
     const taskId = TASK_ID_RE.test(verdict.taskId) ? verdict.taskId : undefined;
+    // The request is consumed by the NEXT dispatch tick, so this tick cannot wait for it (AISDLC-1099).
     const r = await deps.clear({ executor, ...(taskId ? { taskId } : {}) });
+    if (r.ok && !r.acknowledged) {
+      state.pendingClears = [...new Set([...(state.pendingClears ?? []), executor])];
+      return { status: 'requested', executor };
+    }
     return r.ok
       ? { status: 'cleared', executor }
       : {
@@ -568,7 +581,7 @@ async function checkStalls(
   if (!stall || held) return [];
   const standardClear: StallDeps['clear'] = deps.operational.has('clear-executor-context')
     ? async (o) => {
-        const r = await clearOnce(deps, {
+        const r = await clearOnce(deps, state, {
           taskId: o.taskId,
           workerId: o.executor,
         } as DispatchVerdict);
@@ -672,6 +685,16 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
       /* an unreadable event must not stop the dispatch loop */
     }
   }
+  const clearAcks: PlannerReport[] = [];
+  for (const name of state.pendingClears ?? []) {
+    clearAcks.push({
+      kind: 'progress',
+      text: existsSync(rotateRequestPath(deps.boardDir, name))
+        ? `clear of ${name} not acknowledged: its rotate request is still pending`
+        : `clear of ${name} acknowledged: the rotate request was consumed`,
+    });
+  }
+  if (clearAcks.length > 0) delete state.pendingClears;
   const held = readHold(deps.boardDir);
   let quotaSkip: TickResult['quotaSkip'];
   try {
@@ -701,7 +724,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     return stalled;
   });
   const stalled = ephemeral.stalled;
-  const reports = buildReports(deps, state, watch.verdicts.length);
+  const reports = [...clearAcks, ...buildReports(deps, state, watch.verdicts.length)];
   if (canary?.held) {
     reports.push({
       kind: 'progress',

@@ -3,6 +3,9 @@
  * and the board's inflight view.
  */
 
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+
 import { listBoard, peekQueue } from '../dispatch/board.js';
 import { listUnbriefed } from './auto-brief.js';
 import type { QueueCounts } from '../dispatch/types.js';
@@ -65,6 +68,8 @@ export interface StatusRow {
   contextTokens?: number;
   /** True when `contextTokens` exceeds the role's clear threshold. */
   overThreshold?: boolean;
+  /** AISDLC-1099: the task whose verdict this idle executor reported more than a tick ago and was not cleared after. */
+  idleAfterVerdict?: string;
   /** Present with `launchEnv: 'missing'`: how to repair it. */
   nextStep?: string;
 }
@@ -91,6 +96,34 @@ export interface StatusResult {
   quota?: Quota;
   /** Committed attestation envelope and leaf growth (AISDLC-968). */
   attestationGrowth?: AttestationGrowth;
+}
+
+/** A verdict older than this on an idle executor means the clear did not happen (a tick is 30 s). */
+export const IDLE_AFTER_VERDICT_MS = 60_000;
+
+/** The newest verdict (done/ or failed/) written by `name`, as `{taskId, at}` in epoch ms. */
+function latestVerdictBy(
+  boardDir: string,
+  name: string,
+): { taskId: string; at: number } | undefined {
+  let best: { taskId: string; at: number } | undefined;
+  for (const sub of ['done', 'failed']) {
+    const dir = path.join(boardDir, sub);
+    if (!existsSync(dir)) continue;
+    for (const f of readdirSync(dir)) {
+      if (!f.endsWith('.verdict.json')) continue;
+      try {
+        const v = JSON.parse(readFileSync(path.join(dir, f), 'utf-8')) as Record<string, unknown>;
+        const at = Date.parse(String(v.completedAt ?? ''));
+        if (v.workerId === name && Number.isFinite(at) && (!best || at > best.at)) {
+          best = { taskId: String(v.taskId ?? f.replace('.verdict.json', '')), at };
+        }
+      } catch {
+        /* an unreadable verdict contributes nothing */
+      }
+    }
+  }
+  return best;
 }
 
 /** Join the roster with the registry, tmux and the board. */
@@ -151,9 +184,22 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
       wantedNode !== undefined &&
       !versionMatches(wantedNode, nodeVersion);
     const contextTokens = alive ? sessionContextTokens(deps, live) : undefined;
+    let idleAfterVerdict: string | undefined;
+    if (entry.role === 'executor' && state === 'idle' && !held) {
+      try {
+        const v = latestVerdictBy(deps.boardDir, entry.name);
+        const nowMs = deps.now().getTime();
+        if (v && nowMs - v.at > IDLE_AFTER_VERDICT_MS && v.at > (live?.startedAt ?? 0)) {
+          idleAfterVerdict = v.taskId;
+        }
+      } catch {
+        /* an unreadable board must not break status */
+      }
+    }
     return {
       entry,
       state,
+      ...(idleAfterVerdict ? { idleAfterVerdict } : {}),
       ...(contextTokens !== undefined
         ? { contextTokens, overThreshold: contextTokens > thresholdsByRole[entry.role] }
         : {}),
@@ -315,7 +361,16 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
         ]
       : [],
   );
-  const overLines = contextWarnings(result);
+  const overLines = [
+    ...contextWarnings(result),
+    ...result.rows.flatMap((r) =>
+      r.idleAfterVerdict
+        ? [
+            `idle after verdict on ${r.entry.name}: it reported ${r.idleAfterVerdict} and was not cleared; run \`cli-hierarchy clear ${r.entry.name}\``,
+          ]
+        : [],
+    ),
+  ];
   return [
     fmt(header),
     ...body.map(fmt),

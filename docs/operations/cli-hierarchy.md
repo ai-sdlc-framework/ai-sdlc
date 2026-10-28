@@ -526,6 +526,12 @@ next tick through [`rotate-pending`](#rotate-pending) and either rotates itself 
 session a `rotate` message; that session's hooks module runs the one rotation (handoff, clear, resume; an executor that is
 mid-task rotates at its last turn). The request file being consumed is the acknowledgement.
 
+A clear issued from a dispatch tick never waits (the file is consumed by the next tick): the verdict report says
+`requested`, and the next tick reports `clear of <name> acknowledged` or `not acknowledged`. An executor clears at the
+turn that prints `[executor] verdict reported` on a line of its own, whatever follows it. `cli-hierarchy status` warns
+on an idle executor that reported a verdict more than a minute ago and was not cleared. Text sent to a roster pane by
+`send` or `brief --notify` is submitted with Enter after a 400 ms pause, so Claude Code does not read it as a paste.
+
 Refusals, each sending nothing and naming the cause (exit `1`; `2` on a malformed number or missing name):
 
 - the name is not a running roster session, or its entry is unsafe;

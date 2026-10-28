@@ -261,6 +261,20 @@ describe('hierarchy module: executor wake', () => {
     expect(ran(busy)).toContain('clear');
   });
 
+  it('rotates on a rotate message when the last turn ended with no marker (AISDLC-1099)', async () => {
+    const s = setup();
+    await s.start();
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    await s.handlers.get('turn.complete')(s.$, { text: 'working on it' }, s.next);
+    s.$.command.run.mockClear();
+    await s.handlers.get('session.receive')(
+      s.$,
+      { text: env('proj-operator-dispatch', 'rotate') },
+      s.next,
+    );
+    expect(ran(s)).toContain('clear');
+  });
+
   it('a task with no activity for a while no longer mutes wakes', async () => {
     vi.useFakeTimers();
     const s = setup();
@@ -335,12 +349,28 @@ describe('hierarchy module: rotation', () => {
     expect(ran(t)).toEqual([]);
   });
 
-  it('does not rotate on a verdict marker quoted mid-reply', async () => {
+  it('does not rotate on a verdict marker quoted inside a sentence', async () => {
     const s = setup();
     await s.start();
     await s.handlers.get('turn.start')(s.$, {}, s.next);
-    await s.handlers.get('turn.complete')(s.$, { text: `${VERDICT_MARKER}\nmore work` }, s.next);
+    await s.handlers.get('turn.complete')(
+      s.$,
+      { text: `I will print "${VERDICT_MARKER}" once the PR is open.` },
+      s.next,
+    );
     expect(ran(s)).toEqual([]);
+  });
+
+  it('rotates when the marker line is followed by another sentence (AISDLC-1099)', async () => {
+    const s = setup();
+    await s.start();
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    await s.handlers.get('turn.complete')(
+      s.$,
+      { text: `${VERDICT_MARKER}\nThe dispatch session will clear this context next.` },
+      s.next,
+    );
+    expect(ran(s)).toEqual(['ai-sdlc:hierarchy', 'clear']);
   });
 
   it('compacts with the hierarchy summary prompt when clear is dropped', async () => {

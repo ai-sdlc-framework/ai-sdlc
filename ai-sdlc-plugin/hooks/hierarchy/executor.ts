@@ -226,6 +226,11 @@ export function endsWithMarker(reply: string, marker: string): boolean {
   return reply.trimEnd().endsWith(marker);
 }
 
+/** AISDLC-1099: true when the marker is a line of its own anywhere in the reply (the model adds a sentence after it). */
+export function hasMarkerLine(reply: string, marker: string): boolean {
+  return reply.split('\n').some((line) => line.trim() === marker);
+}
+
 export const DISPATCH_NAME = /(?:^|-)operator-dispatch(?:-\d+)?$/;
 export const STATUS_NOISE = /^(status|ack|ping)\b/i;
 
@@ -251,6 +256,8 @@ export interface ExecutorState {
   resumePending?: boolean;
   /** A measure crossed the threshold while a task ran; rotate at the task's last turn. */
   pendingRotate: boolean;
+  /** A main-loop turn is running now (turn.start seen, turn.complete not yet); an idle executor has none. */
+  turnInFlight?: boolean;
   lastReply: string;
 }
 
@@ -364,6 +371,7 @@ export async function executorSessionReceive(
       if (!taskRunning(state)) {
         const r = await safe(() => p.runCommand({ command: RESUME_COMMAND }));
         if (ran(r)) {
+          state.turnInFlight = true;
           state.active = true;
           state.lastActivity = Date.now();
         } else await log(p, `wake refused: ${JSON.stringify(r.value ?? null)}`);
@@ -372,7 +380,7 @@ export async function executorSessionReceive(
     }
     // `cli-hierarchy clear <name>` (RFC-0058 phase 4): the dispatch host delivers a rotate request.
     if (/^rotate\b/i.test(text)) {
-      if (taskRunning(state)) state.pendingRotate = true;
+      if (state.turnInFlight) state.pendingRotate = true;
       else await rotate(p, state);
       return { consumed: 'hierarchy:rotate' };
     }
@@ -398,6 +406,7 @@ export async function executorTurnStart(
   };
   await resumeAfterClear(p, state);
   if (!e?.agentId) {
+    state.turnInFlight = true;
     state.active = true;
     state.lastActivity = Date.now();
   }
@@ -419,11 +428,12 @@ export async function executorTurnComplete(
     submit: (a) => $.prompt.submit(a),
   };
   if (e?.agentId) return next(e);
+  state.turnInFlight = false;
   const reply = String(e?.text ?? e?.reply ?? '');
   if (reply) state.lastReply = reply;
   state.lastActivity = Date.now();
-  const verdict = endsWithMarker(reply, VERDICT_MARKER);
-  if (verdict || endsWithMarker(reply, IDLE_MARKER)) state.active = false;
+  const verdict = hasMarkerLine(reply, VERDICT_MARKER);
+  if (verdict || hasMarkerLine(reply, IDLE_MARKER)) state.active = false;
   if (verdict || (state.pendingRotate && !taskRunning(state))) await rotate(p, state);
   return next(e);
 }

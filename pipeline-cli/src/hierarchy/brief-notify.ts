@@ -32,6 +32,14 @@ export function briefMessage(briefFile: string, cwd: string): string {
   return `A dispatch brief is ready: ${shown}. Read it and ingest it.`;
 }
 
+/** Pause between the typed text and Enter so Claude Code does not treat the burst as one paste (AISDLC-1099). */
+export const SUBMIT_DELAY_MS = 400;
+
+/** Block the thread for `ms` (the sender is synchronous). */
+function pause(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 /**
  * Sender that types the message into the entry's tmux pane with `send-keys`.
  * @throws when the entry is not safe to target or its window is not open.
@@ -55,6 +63,7 @@ export function createTmuxBriefSender(run: CommandRunner): BriefSender {
     }
     const typed = run('tmux', ['send-keys', '-t', target, '-l', '--', message]);
     if (typed.status !== 0) throw new Error(`could not type into '${entry.name}': ${typed.stderr}`);
+    pause(SUBMIT_DELAY_MS);
     const sent = run('tmux', ['send-keys', '-t', target, 'Enter']);
     if (sent.status !== 0) throw new Error(`could not submit to '${entry.name}': ${sent.stderr}`);
   };

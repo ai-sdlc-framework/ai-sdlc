@@ -893,7 +893,6 @@ export async function runHierarchyCli(
           return 2;
         }
         const repoRoot = path.resolve(flags['work-dir'] ?? deps.cwd);
-        const settleMs = flagSettleMs ?? loadPrLifecycleConfig(deps.cwd).clear.handshakeCeilingMs;
         const { operational, emit, playbookDeps } = playbookSetup(repoRoot, worker);
         // One PR snapshot per wake, shared by every consumer below (AISDLC-959).
         const wakeGh = createSnapshotRunner(extras.ghRun ?? deps.run, { boardDir: deps.boardDir });
@@ -916,7 +915,8 @@ export async function runHierarchyCli(
                 executor: o.executor,
                 taskId: o.taskId,
                 workerId: worker,
-                ...(settleMs === undefined ? {} : { settleMs }),
+                // The request is consumed by the next tick, so this tick cannot wait for it (AISDLC-1099).
+                settleMs: 0,
               },
               { boardDir: deps.boardDir, sleep: deps.sleep, now: deps.now, emit },
             ),
