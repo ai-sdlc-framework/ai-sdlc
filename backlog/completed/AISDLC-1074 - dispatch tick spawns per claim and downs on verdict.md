@@ -46,11 +46,11 @@ The dispatch tick now downs a task's executor in the tick that records its verdi
 - backlog/tasks/AISDLC-1074 - dispatch tick spawns per claim and downs on verdict.md
 
 ## Design decisions
-The test waiver covers only the sdk-typescript timeout; this diff touches only pipeline-cli. Test command: `pnpm --filter @ai-sdlc/pipeline-cli test` gave Test Files 547 passed (547), Tests 12152 passed | 13 skipped (12165). `pnpm lint`, `pnpm format:check` and `pnpm dark-code:check` are green. Only the PR's own CI (`ai-sdlc/pr-ready`, AC4) is still outstanding. Two decisions to check. (1) The spawn cap is a placeholder: `AI_SDLC_EXECUTORS_MAX`, default 3, until AISDLC-1076 adds `executors.max` and the budget pacer. (2) Ephemeral behaviour is on by default in `cli-hierarchy tick`; `AI_SDLC_EPHEMERAL_EXECUTORS=0` turns it off. The backlog task file is included in the commit because `git rebase` refused to run with its frontmatter edit left unstaged.
+Test command: `pnpm --filter @ai-sdlc/pipeline-cli test` gave Test Files 547 passed (547), Tests 12152 passed | 13 skipped (12165). `pnpm lint`, `pnpm format:check` and `pnpm dark-code:check` are green. Only the PR's own CI (`ai-sdlc/pr-ready`, AC4) is still outstanding. Two decisions to check. (1) The spawn cap is a placeholder: `AI_SDLC_EXECUTORS_MAX`, default 3, until AISDLC-1076 adds `executors.max` and the budget pacer. (2) Ephemeral behaviour is on by default in `cli-hierarchy tick`; `AI_SDLC_EPHEMERAL_EXECUTORS=0` turns it off. The backlog task file is included in the commit because `git rebase` refused to run with its frontmatter edit left unstaged.
 
 ## Verification
 - `pnpm build` — passed
-- `pnpm test` — waived
+- `pnpm test` — passed for the touched package: `pnpm --filter @ai-sdlc/pipeline-cli test` gave Test Files 547 passed (547). Full `pnpm test` hit one unrelated flake (ai-sdlc-plugin/hooks/usage-ingest.test.mjs, ENOTEMPTY in tmpdir cleanup) that passes alone: `node --test ai-sdlc-plugin/hooks/usage-ingest.test.mjs` # pass 18, # fail 0
 - `pnpm lint` — passed
 - `pnpm format:check` — passed
 - 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
