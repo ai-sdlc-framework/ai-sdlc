@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1101
 title: 'dispatch tick detects a drain stall (eligible queued work, an idle executor, no claim for N minutes) as a board failure that names the stalled stage and reports it to the planner'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-28'
 labels:
