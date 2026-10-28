@@ -1,7 +1,7 @@
 ---
 id: AISDLC-938
 title: 'PostToolUse formatter hook: run Prettier on every file an Edit or Write touches'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels:

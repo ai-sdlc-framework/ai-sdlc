@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "e939c3838fd94130bf6f44423ae31049860362d3"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "4b59c469290f2cb58e07841ee9f48d8063a3ae74804fce0899925a7cfed3f8e4",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "4b59c469290f2cb58e07841ee9f48d8063a3ae74804fce0899925a7cfed3f8e4",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "277f1bdf2a4c313ef3e43effcfc4cda7d1cf4725df02c2d89b598c2f9abcb345",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "277f1bdf2a4c313ef3e43effcfc4cda7d1cf4725df02c2d89b598c2f9abcb345",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "8326214f99013b7f9f7f336dfee1fb67fc8a348e9cd26b7d57e2e5d8e1cd770c",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "8326214f99013b7f9f7f336dfee1fb67fc8a348e9cd26b7d57e2e5d8e1cd770c",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "bb9f98db0f2bf13d4898214f2f09b67d514a8fdd5b97bc5fb37cb34bdaefbfad",
+        "c4c593aca7b99e1b7f87d4088bd994bdd434d8814c2019d7e1b40de79086875e"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "fd6bc5edbf2178adbc345f1975a217accc358c3453da648044a66acca2e2b0b6",
+        "c4c593aca7b99e1b7f87d4088bd994bdd434d8814c2019d7e1b40de79086875e"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "079cf1406695e019e9c2a8508119f45fbef974a4896da401824d5f08b4e4ce06",
+        "40213f0ce77ace13d975c97b986bac7896a827c1302a48edef0501e14b4f35eb"
+      ]
+    }
+  ],
+  "rootHash": "980cc767968cd4eb95a72bde3c36d4581bdfe9ff6d0ee3a69d2fee6d2c67f101",
+  "rootSignature": "5/XpzzcBoUQiyN8zpSjoM9StEg29lBC3VHs5NrKR0wKqA+ZIIGsOxDH3wWhYeU2bOYNT8CO8O71sg1HeTPM3Dw==",
+  "nonce": "5ee230c0b90de64546f96df501415c02c1d953367d35a5d9dde129136f086365",
+  "leafCount": 3,
+  "signedAt": "2026-10-28T19:54:33.217Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      "ai-sdlc-plugin/.claude-plugin/plugin.json",
+      "ai-sdlc-plugin/hooks/format-on-write.js",
+      "ai-sdlc-plugin/hooks/format-on-write.sh",
+      "ai-sdlc-plugin/hooks/format-on-write.test.mjs",
+      "ai-sdlc-plugin/plugin.json"
+    ],
+    "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
+  }
+}
