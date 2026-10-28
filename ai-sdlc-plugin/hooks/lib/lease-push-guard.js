@@ -35,6 +35,8 @@
  *   taskId:            string | null  — lower-case task id from the worktree's
  *                                       `.active-task` (null = absent/malformed)
  *   worktreeName:      string | null  — basename of the worktree root directory
+ *   role:              string | undefined — AI_SDLC_HIERARCHY_ROLE (AISDLC-830: `planner`
+ *                                       may push its own file-* filing branch)
  *   refAliasState:     (name) => 'clear' | 'collides' | 'error'
  *                                     — whether a local ref OTHER than
  *                                       refs/heads/<name> answers to the short
@@ -216,7 +218,23 @@ function classifySegment(toks, aliasLookup) {
  * it, and the branch must be `ai-sdlc/<id>` or `ai-sdlc/<id>-*`. Returns null
  * when all three agree, else `{ condition, found, expected, reason }`.
  */
-function taskBindingProblem(own, taskId, worktreeName) {
+/**
+ * AISDLC-830 (DEC-0088): the planner-filing shape. Session role `planner`, worktree
+ * directory `file-<x>`, checked-out branch exactly `ai-sdlc/file-<x>`. Never a task
+ * branch, never main/master (the branch must equal ai-sdlc/<worktree dir>).
+ */
+function isPlannerFilingShape(role, worktreeName, own) {
+  return (
+    role === 'planner' &&
+    typeof worktreeName === 'string' &&
+    /^file-[A-Za-z0-9._-]+$/.test(worktreeName) &&
+    own === `ai-sdlc/${worktreeName}`
+  );
+}
+
+function taskBindingProblem(own, taskId, worktreeName, role) {
+  // AISDLC-830 (DEC-0088): the planner updates its own filing branch in place.
+  if (isPlannerFilingShape(role, worktreeName, own)) return null;
   if (!taskId) {
     return {
       condition: 'active-task-sentinel',
@@ -264,7 +282,7 @@ function parseAllowedShape(command, ctx) {
   // `ai-sdlc/{issueIdLower}-{slug}` (DEC-0083).
   // All three must agree; any missing piece denies (operator sessions without a
   // sentinel get no lease push).
-  const binding = taskBindingProblem(own, ctx.taskId, ctx.worktreeName);
+  const binding = taskBindingProblem(own, ctx.taskId, ctx.worktreeName, ctx.role);
   if (binding) return binding.reason;
   // Short-name aliasing: git resolves a bare name against local refs with every
   // rule (refs/tags/<x>, refs/<x>, refs/remotes/<x>, ...). Refuse unless no
@@ -474,4 +492,10 @@ function hasForcePushOption(command) {
   return false;
 }
 
-module.exports = { evaluateLeasePush, isProtectedBranch, hasForcePushOption, taskBindingProblem };
+module.exports = {
+  evaluateLeasePush,
+  isProtectedBranch,
+  hasForcePushOption,
+  taskBindingProblem,
+  isPlannerFilingShape,
+};

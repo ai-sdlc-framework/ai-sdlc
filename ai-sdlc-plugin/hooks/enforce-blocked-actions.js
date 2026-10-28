@@ -518,6 +518,7 @@ function enforceBash(command) {
         aliasLookup: (name) => gitOut(['config', '--get', `alias.${name}`], lease.cwd),
         taskId: top ? readTaskId(top) || lease.claimTaskId || null : null,
         worktreeName: top ? basename(top) : null,
+        role: process.env.AI_SDLC_HIERARCHY_ROLE,
         refAliasState: (name) => refAliasState(name, lease.cwd),
       });
       if (verdict.decision === 'deny') deny(verdict.reason);

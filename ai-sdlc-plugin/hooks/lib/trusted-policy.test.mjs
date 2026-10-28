@@ -510,3 +510,81 @@ describe('evaluateLeasePush golden paths and negative twins (AISDLC-798)', () =>
       assert.deepEqual(conditions(r), ['main-checkout']);
     }));
 });
+
+describe('evaluateLeasePush planner filing shape (AISDLC-830, DEC-0088)', () => {
+  function fixture(d, name, branch) {
+    const gitEnv = {
+      PATH: process.env.PATH,
+      HOME: d,
+      GIT_CONFIG_GLOBAL: join(d, 'c'),
+      GIT_CONFIG_NOSYSTEM: '1',
+    };
+    writeFileSync(join(d, 'c'), '');
+    const root = join(d, 'main');
+    mkdirSync(root);
+    const g = (cwd, ...a) => execFileSync('git', a, { cwd, env: gitEnv });
+    g(root, 'init', '-q', '-b', 'main');
+    g(
+      root,
+      '-c',
+      'user.name=t',
+      '-c',
+      'user.email=t@e.invalid',
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-m',
+      'i',
+    );
+    const wt = join(root, '.worktrees', name);
+    g(root, 'worktree', 'add', '-q', '-b', branch, wt);
+    return { root: realpathSync(root), wt: realpathSync(wt) };
+  }
+  const planner = { AI_SDLC_HIERARCHY_ROLE: 'planner', AI_SDLC_HIERARCHY_SESSION: 'planner' };
+
+  it('ALLOWS a planner on ai-sdlc/file-x from .worktrees/file-x and reports the shape', () =>
+    tmp((d) => {
+      const f = fixture(d, 'file-x', 'ai-sdlc/file-x');
+      const r = evaluateLeasePush({
+        projectDir: f.root,
+        cwd: f.wt,
+        env: planner,
+        branch: 'refs/heads/ai-sdlc/file-x',
+      });
+      assert.deepEqual(r.failing, []);
+      assert.equal(r.shape, 'planner-filing');
+    }));
+
+  it('REFUSES the same shape for an executor role', () =>
+    tmp((d) => {
+      const f = fixture(d, 'file-x', 'ai-sdlc/file-x');
+      const r = evaluateLeasePush({
+        projectDir: f.root,
+        cwd: f.wt,
+        env: { ...planner, AI_SDLC_HIERARCHY_ROLE: 'executor' },
+        branch: 'ai-sdlc/file-x',
+      });
+      assert.equal(r.allowed, false);
+    }));
+
+  it('REFUSES a planner whose branch is not ai-sdlc/<worktree dir>', () =>
+    tmp((d) => {
+      const f = fixture(d, 'file-x', 'ai-sdlc/file-x');
+      for (const branch of ['main', 'ai-sdlc/file-y', 'ai-sdlc/aisdlc-1-t']) {
+        const r = evaluateLeasePush({ projectDir: f.root, cwd: f.wt, env: planner, branch });
+        assert.equal(r.allowed, false, branch);
+      }
+    }));
+
+  it('REFUSES a planner in a non-file-* worktree', () =>
+    tmp((d) => {
+      const f = fixture(d, 'aisdlc-9', 'ai-sdlc/aisdlc-9');
+      const r = evaluateLeasePush({
+        projectDir: f.root,
+        cwd: f.wt,
+        env: planner,
+        branch: 'ai-sdlc/aisdlc-9',
+      });
+      assert.equal(r.allowed, false);
+    }));
+});
