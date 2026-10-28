@@ -385,6 +385,42 @@ describe('hierarchy module: board busy predicate (AISDLC-1124)', () => {
         execFileSync('node', ['-e', BUSY_SCRIPT, '/nonexistent', 'w1', '1'], { encoding: 'utf8' }),
       ).held,
     ).toBeNull();
+
+describe('hierarchy module: socket-path envelope (AISDLC-1090)', () => {
+  const sock = (name: string, text: string) =>
+    `<cross-session-message from="uds:/tmp/cc-socks/1.sock" from-name="${name}" from-mode="bypass">${text}</cross-session-message>`;
+
+  it('consumes enqueue and rotate whose sender is only in from-name', async () => {
+    const s = setup();
+    await s.start();
+    const recv = s.handlers.get('session.receive');
+    const next = vi.fn();
+    const r = await recv(
+      s.$,
+      { text: sock('ai-sdlc-operator-dispatch', 'enqueue AISDLC-1') },
+      next,
+    );
+    expect(r).toEqual({ consumed: 'hierarchy:enqueue' });
+    expect(ran(s)).toEqual([RESUME_COMMAND]);
+    expect(next).not.toHaveBeenCalled();
+    const r2 = await recv(s.$, { text: sock('ai-sdlc-operator-dispatch', 'rotate') }, next);
+    expect(r2).toEqual({ consumed: 'hierarchy:rotate' });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('passes a non-dispatch sender through unchanged, for executor and planner', async () => {
+    const s = setup();
+    await s.start();
+    const e = { text: sock('someone-else', 'enqueue x') };
+    expect(await s.handlers.get('session.receive')(s.$, e, s.next)).toBe(e);
+    expect(ran(s)).toEqual([]);
+    const p = setup({ role: 'planner', name: 'proj-planner' });
+    await p.start();
+    const recv = p.handlers.get('session.receive');
+    if (recv) {
+      const m = { text: sock('someone-else', 'hello') };
+      expect(await recv(p.$, m, p.next)).toBe(m);
+    }
   });
 });
 

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1090
 title: 'hierarchy hooks module reads the sender from the cross-session envelope from-name attribute, so enqueue and rotate from dispatch are consumed instead of reaching the executor model'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-28'
 labels:
