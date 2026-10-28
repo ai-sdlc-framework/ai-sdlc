@@ -1151,6 +1151,8 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
                 timestamp: signedAt,
                 verdict: verdictApproved ? 'approved' : 'rejected',
                 findings: normalizedFindings,
+                // The staged set runs as shadow beside the gating reviewers (DEC-0149).
+                ...(role === 'staged' ? { gating: false } : {}),
                 ...(reviewMode
                   ? {
                       reviewMode,

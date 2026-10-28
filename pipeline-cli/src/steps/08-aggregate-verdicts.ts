@@ -30,8 +30,10 @@ export interface AggregateVerdictsOptions {
 const SEVERITIES: Severity[] = ['critical', 'major', 'minor', 'suggestion'];
 
 export async function aggregateVerdicts(
-  opts: AggregateVerdictsOptions,
+  input: AggregateVerdictsOptions,
 ): Promise<AggregatedVerdict> {
+  // Shadow verdicts (`gating: false`, the staged set during the head-to-head) never gate.
+  const opts = { ...input, verdicts: input.verdicts.filter((v) => v.gating !== false) };
   const groundingAnnotations = opts.grounding
     ? await runFindingGrounding(opts.verdicts, opts.grounding)
     : undefined;

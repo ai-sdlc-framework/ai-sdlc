@@ -102,6 +102,13 @@ export type OrchestratorEventType =
    * `decisionId`.
    */
   | 'ModelRoutingOverrideApplied'
+  /**
+   * RFC-0052 / AISDLC-677 - emitted by `cli-reviews compare` for a case where the staged
+   * set or a gating reviewer raised a critical or major finding the other side did not.
+   * Per-event fields: `taskId`, `commitSha`, `iteration`, `stagedOnlyBlocking`,
+   * `standaloneOnlyBlocking`.
+   */
+  | 'ReviewComparisonFlagged'
   | 'OrchestratorTaskAlreadyInFlight'
   | 'WorkerStateTransition'
   /**

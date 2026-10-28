@@ -163,3 +163,134 @@ describe('runReviewsCli — bin-shim entry point', () => {
     expect(parsed.totalCycles).toBe(1);
   });
 });
+
+describe('compare', () => {
+  const finding = (severity: 'major' | 'minor', title: string) => ({
+    severity,
+    summary: title,
+    title,
+  });
+
+  function seed(): void {
+    const sha = (c: string) => c.repeat(40);
+    // PR-1: only the staged set found a major finding; security agrees on a minor.
+    appendReviewLedgerRecord(
+      rec({ taskId: 'AISDLC-1', commitSha: sha('a'), role: 'code' }),
+      tmpRoot,
+    );
+    appendReviewLedgerRecord(
+      rec({
+        taskId: 'AISDLC-1',
+        commitSha: sha('a'),
+        role: 'security',
+        findings: [finding('minor', 'shared nit')],
+      }),
+      tmpRoot,
+    );
+    appendReviewLedgerRecord(
+      rec({
+        taskId: 'AISDLC-1',
+        commitSha: sha('a'),
+        role: 'staged',
+        gating: false,
+        verdict: 'rejected',
+        findings: [finding('major', 'null deref'), finding('minor', 'shared nit')],
+      }),
+      tmpRoot,
+    );
+    // PR-2: both sides agree and approve.
+    appendReviewLedgerRecord(
+      rec({ taskId: 'AISDLC-2', commitSha: sha('b'), role: 'code' }),
+      tmpRoot,
+    );
+    appendReviewLedgerRecord(
+      rec({ taskId: 'AISDLC-2', commitSha: sha('b'), role: 'staged', gating: false }),
+      tmpRoot,
+    );
+    // PR-3: no staged row, not compared.
+    appendReviewLedgerRecord(rec({ taskId: 'AISDLC-3', commitSha: sha('c') }), tmpRoot);
+  }
+
+  it('lists staged-only, standalone-only and agreed findings, flagged first, and emits the event', async () => {
+    seed();
+    appendReviewLedgerRecord(
+      rec({
+        taskId: 'AISDLC-0',
+        commitSha: 'd'.repeat(40),
+        role: 'test',
+        verdict: 'rejected',
+        findings: [finding('major', 'missing test')],
+      }),
+      tmpRoot,
+    );
+    appendReviewLedgerRecord(
+      rec({ taskId: 'AISDLC-0', commitSha: 'd'.repeat(40), role: 'staged', gating: false }),
+      tmpRoot,
+    );
+    const events: Array<Record<string, unknown>> = [];
+    await buildReviewsCli(['compare', '--repo-root', tmpRoot], {
+      emit: (e) => void events.push(e),
+    }).parseAsync();
+    const out = stdoutChunks.join('');
+    expect(out).toContain('Compared cases: 3 (2 flagged for re-evaluation)');
+    // Flagged first (AISDLC-0 then AISDLC-1), the agreeing PR last.
+    expect(out.indexOf('FLAGGED AISDLC-0')).toBeLessThan(out.indexOf('FLAGGED AISDLC-1'));
+    expect(out.indexOf('FLAGGED AISDLC-1')).toBeLessThan(out.indexOf('AISDLC-2 @'));
+    expect(out).toContain('staged-only    [major] null deref');
+    expect(out).toContain('standalone-only [major] missing test (test)');
+    expect(out).toContain('agreed         [staged minor / standalone minor] shared nit');
+    expect(out).toContain('security (staged vs security-reviewer):');
+    expect(events.map((e) => [e.type, e.taskId])).toEqual([
+      ['ReviewComparisonFlagged', 'AISDLC-0'],
+      ['ReviewComparisonFlagged', 'AISDLC-1'],
+    ]);
+  });
+
+  it('skips events with --no-events and prints json', async () => {
+    seed();
+    const events: unknown[] = [];
+    await buildReviewsCli(['compare', '--repo-root', tmpRoot, '--no-events', '--json'], {
+      emit: (e) => void events.push(e),
+    }).parseAsync();
+    expect(events).toEqual([]);
+    expect(JSON.parse(stdoutChunks.join('')).flaggedCases).toBe(1);
+  });
+
+  it('--bar reports compared PRs and act-band precision against 50 and 0.95', async () => {
+    seed();
+    await buildReviewsCli(['compare', '--repo-root', tmpRoot, '--bar', '--no-events']).parseAsync();
+    const out = stdoutChunks.join('');
+    expect(out).toContain(
+      'overall   compared PRs 2, act-band precision 0.000 (0/1 staged blocks confirmed): not met',
+    );
+    expect(out).toContain(
+      'security  compared PRs 1, act-band precision 0.000 (0/1 staged blocks confirmed): not met',
+    );
+    expect(out).toContain('need 50 PRs and 0.95');
+  });
+
+  it('meets the bar at 50 PRs with confirmed blocks and reports n/a with no blocks', async () => {
+    const { compareStagedToGating } = await import('../attestation/reviews-compare.js');
+    const rows: ReviewLedgerRecord[] = [];
+    for (let i = 0; i < 50; i++) {
+      const base = {
+        taskId: `T-${i}`,
+        commitSha: String(i % 10).repeat(40),
+        verdict: 'rejected' as const,
+      };
+      rows.push(
+        rec({ ...base, role: 'security' }),
+        rec({ ...base, role: 'staged', gating: false }),
+      );
+    }
+    const report = compareStagedToGating(rows);
+    expect(report.bar.overall).toMatchObject({ comparedPrs: 50, actBandPrecision: 1, met: true });
+    expect(report.bar.security.met).toBe(true);
+    const none = compareStagedToGating([
+      rec({ taskId: 'X', role: 'code' }),
+      rec({ taskId: 'X', role: 'staged', gating: false }),
+    ]);
+    expect(none.bar.overall.actBandPrecision).toBeNull();
+    expect(none.bar.overall.met).toBe(false);
+  });
+});

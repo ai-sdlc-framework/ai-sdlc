@@ -124,6 +124,7 @@ describe('emit-leaf --stage', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       role: 'staged',
+      gating: false,
       iteration: 2,
       commitSha: HEAD,
       verdict: 'approved',

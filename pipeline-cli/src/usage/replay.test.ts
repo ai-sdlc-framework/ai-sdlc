@@ -427,6 +427,67 @@ describe('replay-corpus build', () => {
   });
 });
 
+describe('replay --set staged', () => {
+  it('compares the staged set per case and leaves ledger, leaves and attestations untouched', async () => {
+    await buildCorpusViaCli();
+    const before = snapshot(join(repo, '.ai-sdlc'));
+    const spawned: Spawned[] = [];
+    const r = await run(
+      [
+        'replay',
+        '--set',
+        'staged',
+        '--model',
+        'cand-model',
+        '--max-items',
+        '10',
+        '--max-units',
+        '1000000',
+      ],
+      { createSpawner: makeSpawner(spawned) },
+    );
+    expect(r.exit).toBe(0);
+    // 6 distinct commits: D1 D2 D3 C1 C2 and the security-only clean S1.
+    expect(spawned).toHaveLength(6);
+    expect(r.out).toContain('staged: recall 67% (2/3), false-block 33% (1/3)');
+    expect(r.out).toContain('Blocked only by staged: 1; blocked only by the gating set: 1.');
+    expect(r.out).toContain('(known-defect) gating block, staged approve');
+    expect(r.out).toContain('(clean) gating approve, staged block');
+    expect(snapshot(join(repo, '.ai-sdlc'))).toBe(before);
+    const file = readdirSync(join(artifacts, 'replay')).find((n) => n.startsWith('set-staged-'));
+    expect(file).toBeDefined();
+    expect(readdirSync(join(artifacts, 'replay')).some((n) => n.startsWith('results-'))).toBe(
+      false,
+    );
+  });
+
+  it('rejects --set together with --role, and neither', async () => {
+    const both = await run(
+      [
+        'replay',
+        '--set',
+        'staged',
+        '--role',
+        'code',
+        '--model',
+        'm',
+        '--max-items',
+        '1',
+        '--max-units',
+        '1',
+      ],
+      { createSpawner: makeSpawner([]) },
+    );
+    expect(both.exit).toBe(1);
+    expect(both.err).toContain('--set cannot be combined');
+    const none = await run(['replay', '--model', 'm', '--max-items', '1', '--max-units', '1'], {
+      createSpawner: makeSpawner([]),
+    });
+    expect(none.exit).toBe(1);
+    expect(none.err).toContain('Give --role or --set');
+  });
+});
+
 describe('replay', () => {
   it('scores recall and false-block rate against a hand calculation, with counts', async () => {
     await buildCorpusViaCli();

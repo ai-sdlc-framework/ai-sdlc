@@ -109,6 +109,11 @@ export interface ReviewLedgerRecord {
    * `reviewBaseSha`, and why. Optional: records written before this field omit it.
    */
   reviewMode?: 'full' | 'delta';
+  /**
+   * False for a row that is recorded beside the gating set but does not gate (the staged
+   * set while it runs as shadow, RFC-0052 section 6). Absent means the row gates.
+   */
+  gating?: boolean;
   reviewBaseSha?: string | null;
   reviewReason?: string;
 }
