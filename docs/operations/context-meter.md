@@ -11,8 +11,7 @@ runs the [session hierarchy](cli-hierarchy.md).
 Run the planner with the mod folder loaded (terminal or the desktop Code tab's local session):
 
 ```bash
-claude --plugin-dir ai-sdlc-plugin/mods/context-meter
-# or: CLAUDE_CODE_PLUGIN_DIRS=ai-sdlc-plugin/mods/context-meter claude
+CLAUDE_CODE_PLUGIN_DIRS=ai-sdlc-plugin/mods/context-meter claude
 ```
 
 A folder given this way hot-reloads while you edit it; run `/reload-plugins` after changes
