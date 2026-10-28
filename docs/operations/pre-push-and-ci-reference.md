@@ -75,3 +75,7 @@ recreates exactly the condition being detected. A second rule flags non-test sou
 - Coverage: CI is the single gate (AISDLC-726): vitest line floors of 90 for reference, orchestrator, pipeline-cli, mcp-server, mcp-advisor and sdk-typescript, 85 for dogfood, dashboard and the conformance runner, plus a 90% patch gate (`scripts/check-pr-patch-coverage.mjs`). Nothing runs coverage automatically on a developer machine.
 - `@ai-sdlc/dogfood` tests import from `dist/runner/index.js`; the `pretest` hook in `dogfood/package.json` runs `pnpm build`. Do NOT remove it, or PRs where dogfood is selected by the `...[origin/main]` filter fail (AISDLC-404).
 - Branch protection: `ai-sdlc/pr-ready` is the merge gate; `auto-enable-auto-merge.yml` sets `--auto --squash` on same-repo PRs (AISDLC-400); PRs merge directly once `ai-sdlc/pr-ready` passes.
+
+## Format-on-write hook (AISDLC-938)
+
+`ai-sdlc-plugin/hooks/format-on-write.js` is a synchronous PostToolUse hook (matcher `Edit|Write`, registered in both plugin manifests) that runs the project's installed `prettier --write` on the single file the tool just touched, so format drift never reaches the commit. It is a no-op when the file is gone, `.prettierignore` excludes it, no Prettier config resolves, or Prettier is not installed in the project; a Prettier error is logged to stderr and the hook still exits 0. The pre-push `format:check` stays as the backstop. Opt out: `AI_SDLC_SKIP_FORMAT_ON_WRITE=1`.
