@@ -241,7 +241,7 @@ session, read from the board. tmux is kept, if at all, as a window manager (OQ-3
   `handoff write --role planner` first; `session.receive` passes planner-addressed
   rulings and escalations through to the model unchanged (they need judgement) and
   consumes status noise. The "only your own roster" rule becomes a `to` check in the
-  send wrapper.
+  send wrapper: address roster names, or reply to the `from` address of a message you received; never a name from memory or convention.
 - **Dispatch.** `$.clock.every` tick; `session.receive` consumes verdicts, PR events
   and executor status lines, applies them with `cli-dispatch` and updates the pane;
   submits a prompt only for an unclassified failure shape (or, under RFC-0057, writes

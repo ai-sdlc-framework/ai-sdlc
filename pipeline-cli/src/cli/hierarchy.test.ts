@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
+import fs from 'node:fs';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1601,6 +1602,50 @@ describe('handoff and send subcommands (AISDLC-766, AISDLC-1036)', () => {
     expect(msg).toContain('hierarchy.json');
     expect(msg).toContain('alpha-planner');
     expect(sent).toHaveLength(1);
+  });
+
+  it('send accepts the from address of a received message and still refuses freehand names (AISDLC-1080)', async () => {
+    writeRoster(path.join(tmp, 'dispatch'), {
+      schemaVersion: 'v1',
+      sessions: [projectEntry('alpha', 'planner', 'planner', 1)],
+    });
+    const handoff = path.join(tmp, 'dispatch', 'handoff');
+    fs.mkdirSync(handoff, { recursive: true });
+    fs.writeFileSync(
+      path.join(handoff, 'received-planner.json'),
+      JSON.stringify(['uds:/tmp/cc-socks/123.sock']),
+    );
+    const sent: Array<[string, string]> = [];
+    const sendSocket = (a: string, m: string) => void sent.push([a, m]);
+    const sendBrief = vi.fn();
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(
+      await runHierarchyCli(
+        ['send', '--to', 'uds:/tmp/cc-socks/123.sock', '--text', 'done'],
+        overrides(),
+        { sendBrief, sendSocket },
+      ),
+    ).toBe(0);
+    expect(sent).toEqual([['uds:/tmp/cc-socks/123.sock', 'done']]);
+    for (const to of ['uds:/tmp/cc-socks/999.sock', 'other-project-planner']) {
+      expect(
+        await runHierarchyCli(['send', '--to', to, '--text', 'hi'], overrides(), {
+          sendBrief,
+          sendSocket,
+        }),
+      ).toBe(1);
+      expect(String(err.mock.calls.at(-1)?.[0])).toContain('not listed');
+    }
+    expect(sent).toHaveLength(1);
+    expect(sendBrief).not.toHaveBeenCalled();
+    // a roster name still goes through the pane sender
+    expect(
+      await runHierarchyCli(['send', '--to', 'alpha-planner', '--text', 'x'], overrides(), {
+        sendBrief,
+        sendSocket,
+      }),
+    ).toBe(0);
+    expect(sendBrief).toHaveBeenCalledTimes(1);
   });
 
   it('send refuses a mixed-project roster and a text with a newline', async () => {

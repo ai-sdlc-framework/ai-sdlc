@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1080
 title: 'roster send wrapper accepts a reply to the sender of an inbound cross-session message: the from address of a received message is a valid to, freehand names stay refused'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-24'
 labels: [pipeline-cli, hierarchy, governance]

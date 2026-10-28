@@ -87,7 +87,10 @@ describe('planner authority is a record on main', () => {
 
 describe('planner peer binding', () => {
   it('addresses only sessions in its own roster', () => {
-    assert.match(match[2], /Address only sessions listed in this roster/);
+    assert.match(
+      match[2],
+      /Address roster names, or reply to the `from` address of a message you received; never a name\s+from memory or convention/,
+    );
     assert.match(match[2], /mistake guard, not authentication/);
   });
 

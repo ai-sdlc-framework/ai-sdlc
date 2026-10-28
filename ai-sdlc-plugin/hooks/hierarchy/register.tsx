@@ -28,6 +28,7 @@ import {
   dispatchSessionReceive,
   dispatchUiRender,
   tick,
+  recordReceivedSender,
   writeModuleHealth,
 } from './dispatch.ts';
 import type { DispatchPorts, DispatchState } from './dispatch.ts';
@@ -46,12 +47,22 @@ interface Router {
   executor: ExecutorState;
   dispatch: DispatchState;
   planner: PlannerState;
+  sessionName: string;
+  boardDir: string | undefined;
 }
 
 // The validator follows `$` only into functions declared at the top of the file or imported from the
 // module's own files, so the forwarders are plain top-level functions that call each role's handler
 // by name. They are the one place that decides which role receives an event.
-function onReceive(r: Router, $: Any, e: Any, next: Any): Any {
+async function onReceive(r: Router, $: Any, e: Any, next: Any): Promise<Any> {
+  // AISDLC-1080: keep the return address of every inbound message so a reply to it can be sent.
+  if (r.current && r.sessionName)
+    await recordReceivedSender(
+      (a) => $.process.run([a.command, ...a.args]),
+      r.boardDir,
+      r.sessionName,
+      String(e?.text ?? ''),
+    );
   if (r.current === 'operator-dispatch') return dispatchSessionReceive(r.dispatch, $, e, next);
   if (r.current === 'planner') return plannerSessionReceive(r.planner, $, e, next);
   if (r.current === 'executor') return executorSessionReceive(r.executor, $, e, next);
@@ -90,6 +101,8 @@ export const register = (on: Any, options?: Any): void => {
       name: 'planner',
       inTurn: false,
     },
+    sessionName: '',
+    boardDir: options?.boardDir,
   };
   const state = router.executor;
   const dispatch = router.dispatch;
@@ -125,6 +138,7 @@ export const register = (on: Any, options?: Any): void => {
     // AISDLC-1061: the name keys the heartbeat file `cli-hierarchy status`, `up` and `doctor` read.
     const named = (await safe(() => $.env.get('AI_SDLC_HIERARCHY_SESSION'))).value;
     const sessionName = typeof named === 'string' && named ? named : role;
+    router.sessionName = sessionName;
     const versionText = typeof version === 'string' ? version : '';
     const health = (h: { state: 'loaded' | 'refused'; reason?: string }): Promise<void> =>
       writeModuleHealth(
