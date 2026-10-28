@@ -226,6 +226,11 @@ export function endsWithMarker(reply: string, marker: string): boolean {
   return reply.trimEnd().endsWith(marker);
 }
 
+/** AISDLC-1099: true when the marker is a line of its own anywhere in the reply (the model adds a sentence after it). */
+export function hasMarkerLine(reply: string, marker: string): boolean {
+  return reply.split('\n').some((line) => line.trim() === marker);
+}
+
 export const DISPATCH_NAME = /(?:^|-)operator-dispatch(?:-\d+)?$/;
 export const STATUS_NOISE = /^(status|ack|ping)\b/i;
 
@@ -422,8 +427,8 @@ export async function executorTurnComplete(
   const reply = String(e?.text ?? e?.reply ?? '');
   if (reply) state.lastReply = reply;
   state.lastActivity = Date.now();
-  const verdict = endsWithMarker(reply, VERDICT_MARKER);
-  if (verdict || endsWithMarker(reply, IDLE_MARKER)) state.active = false;
+  const verdict = hasMarkerLine(reply, VERDICT_MARKER);
+  if (verdict || hasMarkerLine(reply, IDLE_MARKER)) state.active = false;
   if (verdict || (state.pendingRotate && !taskRunning(state))) await rotate(p, state);
   return next(e);
 }

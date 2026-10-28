@@ -335,12 +335,28 @@ describe('hierarchy module: rotation', () => {
     expect(ran(t)).toEqual([]);
   });
 
-  it('does not rotate on a verdict marker quoted mid-reply', async () => {
+  it('does not rotate on a verdict marker quoted inside a sentence', async () => {
     const s = setup();
     await s.start();
     await s.handlers.get('turn.start')(s.$, {}, s.next);
-    await s.handlers.get('turn.complete')(s.$, { text: `${VERDICT_MARKER}\nmore work` }, s.next);
+    await s.handlers.get('turn.complete')(
+      s.$,
+      { text: `I will print "${VERDICT_MARKER}" once the PR is open.` },
+      s.next,
+    );
     expect(ran(s)).toEqual([]);
+  });
+
+  it('rotates when the marker line is followed by another sentence (AISDLC-1099)', async () => {
+    const s = setup();
+    await s.start();
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    await s.handlers.get('turn.complete')(
+      s.$,
+      { text: `${VERDICT_MARKER}\nThe dispatch session will clear this context next.` },
+      s.next,
+    );
+    expect(ran(s)).toEqual(['ai-sdlc:hierarchy', 'clear']);
   });
 
   it('compacts with the hierarchy summary prompt when clear is dropped', async () => {

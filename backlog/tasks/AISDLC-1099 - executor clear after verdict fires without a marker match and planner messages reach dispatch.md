@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1099
 title: 'hierarchy: an executor is cleared after its verdict whatever its last line says, a rotate request is honoured by an idle executor, dispatch waits across ticks for the acknowledgement, and planner messages to dispatch are submitted rather than left as pasted text'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-28'
 labels:
