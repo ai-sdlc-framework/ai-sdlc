@@ -79,7 +79,13 @@ export {
   type LandReport,
 } from './land-eligible.js';
 export { markReadyAfterCodeql, repoHasCodeql, type MarkReadyReport } from './mark-ready.js';
-export { checkSendTarget, sendToRoster, type SendCheck } from './send.js';
+export {
+  checkSendTarget,
+  readReceivedAddresses,
+  sendToRoster,
+  type SendCheck,
+  type SocketSender,
+} from './send.js';
 export { resolveThresholds, DEFAULT_CONTEXT_THRESHOLDS } from './thresholds.js';
 export {
   boundedHandoffView,

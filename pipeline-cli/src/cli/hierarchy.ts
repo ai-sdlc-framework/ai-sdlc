@@ -115,7 +115,9 @@ import {
   type LandReport,
   checkRepoMatch,
   readRosterChecked,
+  readReceivedAddresses,
   sendToRoster,
+  type SocketSender,
   rosterProject,
   readParentHead,
   runDispatchTick,
@@ -497,6 +499,7 @@ export async function runHierarchyCli(
   overrides: Partial<HierarchyDeps> = {},
   extras: {
     sendBrief?: BriefSender;
+    sendSocket?: SocketSender;
     /** Replaces the policy file as the source of the operational grants (tests). */
     operational?: ReadonlySet<string>;
     /** Replaces the policy file as the source of the lease-push rules (tests). */
@@ -1175,6 +1178,8 @@ export async function runHierarchyCli(
             to,
             text,
             extras.sendBrief ?? createTmuxBriefSender(deps.run),
+            readReceivedAddresses(deps.boardDir),
+            extras.sendSocket,
           );
         } catch (err) {
           process.stderr.write(`cli-hierarchy send: ${(err as Error).message}\n`);

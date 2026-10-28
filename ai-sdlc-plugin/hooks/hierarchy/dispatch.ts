@@ -84,6 +84,30 @@ export function newDispatchState(options?: DispatchOptions): DispatchState {
 const WRITE_SCRIPT =
   "const fs=require('fs');fs.mkdirSync(require('path').dirname(process.argv[1]),{recursive:true});fs.writeFileSync(process.argv[1],process.argv[2])";
 
+/** Appends argv[2] to the JSON array in argv[1] (deduplicated, newest 50), creating the directory. */
+const RECEIVED_SCRIPT =
+  "const fs=require('fs');const f=process.argv[1];fs.mkdirSync(require('path').dirname(f),{recursive:true});let a=[];try{a=JSON.parse(fs.readFileSync(f,'utf8'))}catch(e){}if(!Array.isArray(a))a=[];a=a.filter(x=>x!==process.argv[2]);a.push(process.argv[2]);fs.writeFileSync(f,JSON.stringify(a.slice(-50)))";
+
+/**
+ * AISDLC-1080: remember the verified `from` address of a received cross-session message in
+ * `<board-dir>/handoff/received-<name>.json`, the list `cli-hierarchy send` accepts as a reply target
+ * besides roster names. Never throws; a host without `process.run` just records nothing.
+ */
+export async function recordReceivedSender(
+  run: (a: { command: string; args: string[] }) => Promise<Any>,
+  boardDir: string | undefined,
+  name: string,
+  raw: string,
+): Promise<void> {
+  const from = senderOf(raw);
+  if (!/^uds:\/[A-Za-z0-9._/-]+\.sock$/.test(from)) return;
+  const file = `${boardDir ?? '.ai-sdlc/dispatch'}/handoff/received-${name}.json`;
+  await safe(
+    () => run({ command: NODE, args: ['-e', RECEIVED_SCRIPT, file, from] }),
+    'process.run',
+  );
+}
+
 /**
  * AISDLC-1061: record whether the module loaded in `<board-dir>/handoff/module-<name>.json`, which
  * `cli-hierarchy status`, `up` and `doctor` read. Never throws: a host without `process.run` just leaves

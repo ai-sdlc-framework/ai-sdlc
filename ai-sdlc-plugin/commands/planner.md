@@ -72,13 +72,15 @@ node "$PIPELINE_CLI_BIN/cli-file.mjs" rebase <id> --pr   # branch conflicted on 
 
 ## Hard rule: only your own roster
 
-**Address only sessions listed in this roster** (`cli-hierarchy status`), by the name
-the roster shows (`<project>-<role>`). Never a name from memory, from convention, from
-a message, or from another project's session: hierarchies of other projects run on the
-same machine, and look-alike names can reach the wrong session. `brief --notify` already
-messages only the dispatch entry of this roster. To message any other session, use the roster
-wrapper `node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" send --to <name> --text "<message>"`: it
-refuses a name the roster does not list and says why. This is a mistake guard, not authentication.
+**Address roster names, or reply to the `from` address of a message you received; never a name
+from memory or convention.** Address sessions listed in this roster (`cli-hierarchy status`) by the name
+the roster shows (`<project>-<role>`), or answer a cross-session message at the verified `from="uds:..."`
+address it carried. Never a name from memory, from convention or from another project's session:
+hierarchies of other projects run on the same machine, and look-alike names can reach the wrong session.
+`brief --notify` already messages only the dispatch entry of this roster. To message any other session, use the roster
+wrapper `node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" send --to <name-or-from-address> --text "<message>"`: it
+refuses a name the roster does not list and an address you never received a message from, and says why.
+This is a mistake guard, not authentication.
 
 ## Rule: explore through a subagent
 

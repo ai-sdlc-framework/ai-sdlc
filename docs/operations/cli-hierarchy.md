@@ -660,7 +660,7 @@ Interim assumptions (a hooks module has no process or file API and the host cont
   This replaces `LAST_MESSAGE.md`. `session.receive` passes rulings and escalations (including the escalation-file
   notices dispatch announces) to the model unchanged and consumes only status noise from the dispatch session.
 - **Roster wrapper.** A planner messages a session by hand only through [`send`](#send), which refuses a name the
-  roster does not list.
+  roster does not list. Address roster names, or reply to the `from` address of a message you received; never a name from memory or convention.
 - **Mixed fleets.** A tmux-driven dispatch session can still enqueue for a mod-driven executor: both read the same board.
 
 **Single clear rule (AISDLC-815).** A hierarchy session clears when its context passes its role threshold (the
@@ -958,10 +958,13 @@ Exit `0`, `1` on a guard refusal, `2` on a missing or invalid argument.
 Message one roster session, the planner's roster guard (AISDLC-1036).
 
 ```bash
-cli-hierarchy send --to <name> --text "<message>"
+cli-hierarchy send --to <name-or-from-address> --text "<message>"
 ```
 
-`--to` must be a session name listed in this project's roster (`<board-dir>/hierarchy.json`, the list
+Address roster names, or reply to the `from` address of a message you received; never a name from memory or convention.
+`--to` may also be the `from="uds:/tmp/cc-socks/<pid>.sock"` address of a cross-session message this session received (the
+hooks module records it in `<board-dir>/handoff/received-<session>.json` on `session.receive`); the text is written to that
+socket. Otherwise `--to` must be a session name listed in this project's roster (`<board-dir>/hierarchy.json`, the list
 `status` prints). Any other name is refused with exit 1 and a reason that names the roster source and
 the names it does list, so a look-alike or another project's session never receives the text. The
 message is typed into the session's pane with the same ownership checks `brief --notify` applies.
