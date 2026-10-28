@@ -399,6 +399,11 @@ export async function launchSession(
 export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise<UpResult> {
   ensureFreshRepoBuild(deps, opts.rebuild === true);
   const count = parseExecutorCount(opts.executors);
+  if (count > 0) {
+    deps.log(
+      `deprecated: --executors ${count} starts standing executors; dispatch now spawns one executor per task (RFC-0059), so the default is 0 and this option is removed in the next release`,
+    );
+  }
   assertModel(opts.plannerModel, '--planner-model');
   assertModel(opts.dispatchModel, '--dispatch-model');
   assertModel(opts.executorModel, '--executor-model');

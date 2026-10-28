@@ -161,7 +161,7 @@ import { findTaskFile, parseArgv, resolveBaseSha } from './dispatch.js';
 const USAGE = `Usage: cli-hierarchy <command> [options]
 
 Commands:
-  up         Start the planner, dispatch session and executors, one tmux session each
+  up         Start the planner and dispatch session (no executors by default), one tmux session each
   status     Show the roster with live state, attached clients and inflight tasks
   attach     Show one agent in this terminal: attach <name>
   terminals  Generate editor terminal tasks, one per agent (terminals --vscode)
@@ -187,7 +187,7 @@ Commands:
   check-repo      Exit 0 only when the working directory is this roster's repository
 
 Options for up:
-  --executors <n>          Number of executors, 0 to 5 (default 5)
+  --executors <n>          Deprecated: standing executors, 0 to 5 (default 0); dispatch spawns one per task
   --planner-model <m>      Planner model (default: the planner cell of model-routing.yaml)
   --dispatch-model <m>     Dispatch model (default sonnet)
   --executor-model <m>     Executor model (default sonnet)
@@ -600,7 +600,7 @@ export async function runHierarchyCli(
       case 'up': {
         const result = await hierarchyUp(
           {
-            executors: flags.executors ?? '5',
+            executors: flags.executors ?? '0',
             plannerModel: flags['planner-model'] ?? routedModel('planner'),
             dispatchModel: flags['dispatch-model'] ?? 'sonnet',
             executorModel: flags['executor-model'] ?? 'sonnet',
@@ -641,7 +641,7 @@ export async function runHierarchyCli(
       case 'status': {
         const result = hierarchyStatus(deps);
         if (flags.json === 'true') deps.log(JSON.stringify(result));
-        else for (const line of formatStatus(result)) deps.log(line);
+        else for (const line of formatStatus(result, deps.now().getTime())) deps.log(line);
         return 0;
       }
       case 'stall-notice': {

@@ -113,8 +113,9 @@ malformed argument). `--help`, `-h` or `help` prints the usage and exits 0.
 
 ### `up`
 
-Start the planner, the dispatch session and up to five executors, each in its own detached
-tmux session, and write the roster. Idempotent: sessions already running are left alone and
+Start the planner and the dispatch session, each in its own detached tmux session, and write
+the roster. No executor is started: dispatch spawns one executor per task with [`spawn`](#spawn)
+(RFC-0059, AISDLC-1075). Idempotent: sessions already running are left alone and
 only the missing ones are started. It also starts the reconcile scheduler (`cli-dispatch reconcile --watch`, which polls `<board>/.reconcile-wake`) as a detached process and records its pid in `<board>/reconcile-scheduler.json`; a second `up` with a live scheduler starts no other.
 
 ```bash
@@ -126,7 +127,7 @@ cli-hierarchy up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
 
 | Option                   | Meaning                                                                      |
 | ------------------------ | ---------------------------------------------------------------------------- |
-| `--executors <n>`        | Number of executors, 0 to 5 (default 5).                                     |
+| `--executors <n>`        | Deprecated: standing executors, 0 to 5 (default 0); a value above 0 prints a deprecation line and is removed in the next release. |
 | `--planner-model <m>`    | Planner model (default `fable`).                                             |
 | `--dispatch-model <m>`   | Dispatch model (default `sonnet`, per DEC-0068).                             |
 | `--executor-model <m>`   | Executor model (default `sonnet`).                                           |
@@ -572,7 +573,10 @@ The session name is `ai-sdlc-executor-<task-id-lowercase>` (`.` becomes `-`), ma
 `^ai-sdlc-executor-[a-z0-9-]+$` before any shell or tmux call. It creates the tmux session, writes a dynamic
 roster entry (role `executor`, `taskId`, `startedAt` as the spawn time) and launches the interactive `claude`
 with `AI_SDLC_EXECUTOR_TASK=<id>`. A live session of that name is reported and nothing is created; a task already
-inflight is refused. With the variable set, `executor-start` claims only that task, exits `1` naming the reason
+inflight is refused. The hooks module executor branch reads the variable at `session.start` and runs the executor
+command at once, with no `enqueue` wake to wait for. `status` lists each dynamic executor as
+`dynamic executor: <name> task <id> age <age> (<state>)`, one line per roster entry that carries a `taskId`.
+The session ends with its task (one task per executor). With the variable set, `executor-start` claims only that task, exits `1` naming the reason
 when it is not claimable (or the board is held), and refuses `--wait`.
 
 ### `executor-start`
@@ -641,7 +645,10 @@ Interim assumptions (a hooks module has no process or file API and the host cont
   registers nothing and logs one line naming the missing primitive and the floor (the `hierarchy/log` list in `$.store`).
 - **Start line (OQ-4).** The line names the role and the detected tier; when `$.session.identity()` answers, the identity
   is recorded as an informational field, never as authority.
-- **Wake.** `session.receive` consumes an `enqueue` message from the dispatch roster name (no model turn) and calls
+- **Spawned executor (AISDLC-1075).** With `AI_SDLC_EXECUTOR_TASK` set at launch (`spawn`), the executor branch runs
+  `$.command.run({ command: 'ai-sdlc:executor' })` at `session.start` and does not wait for a wake; `executor-start`
+  claims exactly that task.
+- **Wake (legacy standing executors).** `session.receive` consumes an `enqueue` message from the dispatch roster name (no model turn) and calls
   `$.command.run({ command: 'ai-sdlc:executor' })` (the host refuses `$.prompt.submit` of a text starting with `/`). A task
   with no turn activity for 30 minutes no longer mutes later wakes. Status noise from dispatch is
   consumed; anything else passes through.
