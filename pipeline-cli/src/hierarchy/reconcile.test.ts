@@ -731,6 +731,16 @@ describe('gatherFacts trust filter', () => {
     expect(facts.map((f) => f.prNumber)).toEqual([7, 9]);
   });
 
+  it('prBelongsToTask keeps the tie through a landing record after the verdict moved', () => {
+    mkdirSync(path.join(board, 'landing'), { recursive: true });
+    writeFileSync(
+      path.join(board, 'landing', '5.json'),
+      JSON.stringify({ pr: 5, kind: 'task', taskId: 'AISDLC-9' }),
+    );
+    expect(prBelongsToTask(board, 'AISDLC-9', 5, 'b', [])).toBe(true);
+    expect(prBelongsToTask(board, 'AISDLC-8', 5, 'b', [])).toBe(false);
+  });
+
   it('prBelongsToTask accepts a verdict url or an inflight branch', () => {
     expect(
       prBelongsToTask(board, 'AISDLC-9', 5, 'b', [

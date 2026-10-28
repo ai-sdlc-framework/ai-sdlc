@@ -211,6 +211,13 @@ describe('reenter, a real failure on the head', () => {
     const r = reenter({ target: '7' }, deps(gh({ merge: 'DIRTY', checks: [] })));
     expect(r).toMatchObject({ kind: 'manifest', state: 'behind-or-dirty' });
     expect(calls).toEqual([]);
+    const m = JSON.parse(
+      readFileSync(path.join(board, 'queue', `${TASK}.dispatch.json`), 'utf-8'),
+    ) as DispatchManifest;
+    const note = JSON.stringify(m.resume);
+    expect(note).toContain('rebase --abort');
+    expect(note).toContain('escalate');
+    expect(note).toContain('naming the files');
   });
 });
 
