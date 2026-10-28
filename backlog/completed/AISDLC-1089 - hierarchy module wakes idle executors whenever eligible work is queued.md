@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1089
 title: 'hierarchy hooks module wakes idle executors on every tick that finds eligible queued work and idle executors, and after a hold is lifted, not only on a tick that ingests'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-28'
 labels:
@@ -34,8 +34,36 @@ Observed 2026-10-28 09:00Z, the first run with the hooks module loaded on dispat
 
 ## Acceptance Criteria
 
-- [ ] With 5 idle executors, 0 inflight and eligible queued work, the module sends `enqueue` to every idle executor within one tick, with no new brief ingested.
-- [ ] After `cli-hierarchy resume`, the next tick wakes idle executors.
-- [ ] An executor whose claim was refused is not re-woken on the very next tick (one-tick back-off), and is re-woken after.
-- [ ] `cli-hierarchy tick` JSON carries `eligibleQueued`, `idleExecutors` and `holdLifted`.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] With 5 idle executors, 0 inflight and eligible queued work, the module sends `enqueue` to every idle executor within one tick, with no new brief ingested.
+- [x] After `cli-hierarchy resume`, the next tick wakes idle executors.
+- [x] An executor whose claim was refused is not re-woken on the very next tick (one-tick back-off), and is re-woken after.
+- [x] `cli-hierarchy tick` JSON carries `eligibleQueued`, `idleExecutors` and `holdLifted`.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+
+## Final Summary
+
+## Summary
+The dispatch hooks module now wakes idle executors on every tick that has idle executors and eligible queued work, not only on ingest. A one-tick back-off keeps a just-woken executor from being re-woken on the next tick, and a lifted hold clears the back-off. `cli-hierarchy tick` JSON now carries `eligibleQueued`, `idleExecutors` and `holdLifted`. Draft PR #2051 is open.
+
+## Changes
+- ai-sdlc-plugin/hooks/hierarchy/dispatch.ts
+- ai-sdlc-plugin/mods/tests/hierarchy-dispatch.test.ts
+- pipeline-cli/src/cli/hierarchy.ts
+- pipeline-cli/src/hierarchy/dispatch-loop.ts
+- pipeline-cli/src/hierarchy/dispatch-loop.test.ts
+- docs/operations/cli-hierarchy.md
+- backlog/tasks/AISDLC-1089 - hierarchy module wakes idle executors whenever eligible work is queued.md
+
+## Design decisions
+The first full `pnpm test` run failed on one sdk-typescript test that hit its 5-second timeout under load. That package passed when re-run alone, and the second full `pnpm test` run exited 0. A scope-less commit message was needed because the commitlint scope-enum rejected `hierarchy`. I included the task-file status change (To Do to In Progress) in the commit. The test command was `pnpm test`. Plugin module tests were run separately with vitest in `ai-sdlc-plugin/mods`: 93 passed. The loop and CLI tests were run in `pipeline-cli`: 164 passed.
+
+## Verification
+- `pnpm build` — passed
+- `pnpm test` — passed
+- `pnpm lint` — passed
+- `pnpm format:check` — passed
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
