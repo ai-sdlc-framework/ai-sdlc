@@ -2377,3 +2377,7 @@ open PR past the window as `aged PR #N: <age>, lane <owner>, last action <action
 ## Drain liveness (AISDLC-1096)
 
 Every tick records `lastTickAt` and `lastTickBy` (`host` or `scheduler`) in `operator-dispatch.state.json`; `status` prints `last tick: <n>s ago by <who>`. The detached watch scheduler (`cli-dispatch reconcile --watch`) checks every 30 s and, when the host has missed three intervals and work is queued, runs `cli-hierarchy tick --by scheduler`: the same deterministic tick, no model turn. The tick re-checks staleness itself, so a live host is never doubled. After each tick, webhook event records for closed PRs are deleted and the directory is capped at 2,000 files (oldest first; canary records are kept).
+
+## Module measure (AISDLC-1100)
+
+The hooks module reads the host `session.measure` payload at `context.tokens` and mirrors the last count to the plugin store key `hierarchy/measure/<name>`. `cli-hierarchy status` shows it in the MODULE column (`measured N`) and warns `measure mismatch` when it and CONTEXT fall on opposite sides of the clear threshold. An unrecognised payload shape is logged once (`session.measure payload not recognised`). The host `turn.complete` carries no reply text, so a pending threshold rotation fires at the turn boundary; a verdict-marker rotation still needs reply text.

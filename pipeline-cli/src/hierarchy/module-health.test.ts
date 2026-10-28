@@ -9,6 +9,7 @@ import {
   formatModuleHealth,
   moduleHealthPath,
   readModuleHealth,
+  readModuleMeasure,
 } from './module-health.js';
 import type { HierarchyDeps, RosterEntry } from './types.js';
 
@@ -122,5 +123,22 @@ describe('plugin store fallback (AISDLC-1082)', () => {
     expect(readModuleHealth(b, executor, NOW, ['/nonexistent-dir']).state).toBe('absent');
     write(b, 'p-exec', { state: 'refused', reason: 'x' });
     expect(readModuleHealth(b, executor, NOW, [store]).state).toBe('refused');
+  });
+});
+
+describe('readModuleMeasure (AISDLC-1100)', () => {
+  it('reads the module last measure from the store and ignores a missing or malformed one', () => {
+    const dir = board();
+    expect(readModuleMeasure([dir], 'p-exec')).toBeUndefined();
+    writeFileSync(
+      path.join(dir, 'a.json'),
+      JSON.stringify({ 'hierarchy/measure/p-exec': { tokens: 154000, at: 'x' } }),
+    );
+    writeFileSync(
+      path.join(dir, 'b.json'),
+      JSON.stringify({ 'hierarchy/measure/p-bad': { tokens: 'n' } }),
+    );
+    expect(readModuleMeasure([dir], 'p-exec')).toEqual({ tokens: 154000, at: 'x' });
+    expect(readModuleMeasure([dir], 'p-bad')).toBeUndefined();
   });
 });

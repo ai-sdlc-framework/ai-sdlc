@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1100
 title: 'hierarchy module: measuredTokens reads the host session.measure payload (context.tokens) and the verdict check no longer depends on a reply text the turn.complete payload does not carry, so planner and executor auto-clear fire'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-28'
 labels:

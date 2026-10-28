@@ -183,3 +183,21 @@ describe('overContextWarnings', () => {
     expect(lines[0]).toContain('hot context 500k is over its 120k');
   });
 });
+
+describe('contextWarnings measure mismatch (AISDLC-1100)', () => {
+  it('warns when the module and CONTEXT disagree across the threshold', async () => {
+    const { contextWarnings } = await import('./status.js');
+    const row = (moduleTokens: number | undefined) =>
+      ({
+        entry: { name: 'p-planner', role: 'planner' },
+        contextTokens: 154000,
+        overThreshold: true,
+        ...(moduleTokens !== undefined ? { moduleTokens } : {}),
+      }) as never;
+    const base = { contextThresholds: { planner: 150000 } };
+    const w = contextWarnings({ ...base, rows: [row(0)] } as never);
+    expect(w.some((l) => l.includes('measure mismatch on p-planner'))).toBe(true);
+    expect(contextWarnings({ ...base, rows: [row(154000)] } as never)).toHaveLength(1);
+    expect(contextWarnings({ ...base, rows: [row(undefined)] } as never)).toHaveLength(1);
+  });
+});

@@ -7,7 +7,7 @@ import {
   STATUS_NOISE,
   innerText,
   log,
-  measuredTokens,
+  readMeasure,
   rotate,
   resumeAfterClear,
   safe,
@@ -159,7 +159,7 @@ export async function plannerSessionMeasure(
     submit: (a) => $.prompt.submit(a),
   };
   await resumeAfterClear(p, state);
-  if (measuredTokens(e) >= PLANNER_ROTATE_AT_TOKENS) {
+  if ((await readMeasure(p, state.name, e)) >= PLANNER_ROTATE_AT_TOKENS) {
     // Never mid-turn: a measure that lands while the main thread runs waits for its turn.complete.
     if (turnRunning(state)) state.pendingRotate = true;
     else await rotatePlanner(p, state, PLANNER_PLAN);
