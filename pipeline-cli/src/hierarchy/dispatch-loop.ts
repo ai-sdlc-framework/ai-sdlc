@@ -51,6 +51,7 @@ import {
   type EphemeralReport,
 } from './ephemeral-tick.js';
 import { checkDrainStall, formatDrainStall, resolveStallAfterMinutes } from './drain-stall.js';
+import { runBudgetPacer, type UsageDeps } from './budget.js';
 import { readHold, type Hold } from './hold.js';
 import {
   classifyHumanAttention,
@@ -363,6 +364,8 @@ export interface LoopDeps {
   listPrs?: () => HumanAttentionPr[] | undefined;
   /** Parent `HEAD`; a rejected brief is retried when it moves (AISDLC-952). */
   parentHead?: () => string | undefined;
+  /** Token budget pacer inputs (AISDLC-1072); absent means no sampling. */
+  usage?: UsageDeps;
   /** Live remaining quota (AISDLC-963); below `quotaFloor` the tick skips its GitHub reads. */
   quota?: () => Quota | undefined;
   /** Floor of remaining quota; default 300. */
@@ -712,6 +715,15 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
       /* an unreadable event must not stop the dispatch loop */
     }
   }
+  // AISDLC-1072: the budget pacer sets or lifts a `budget` hold before this tick reads it.
+  let pacer: Awaited<ReturnType<typeof runBudgetPacer>> | undefined;
+  if (deps.usage) {
+    try {
+      pacer = await runBudgetPacer(deps.boardDir, deps.usage);
+    } catch {
+      /* an unreadable usage sample must not stop the dispatch loop */
+    }
+  }
   const held = readHold(deps.boardDir);
   const holdLifted = state.wasHeld === true && !held;
   if (held) state.wasHeld = true;
@@ -763,6 +775,10 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     reports.push({ kind: 'progress', text: `pipeline canary green: lifted "${canary.lifted}"` });
   }
   for (const e of canary?.errors ?? []) reports.push({ kind: 'progress', text: e });
+  if (pacer?.set)
+    reports.push({ kind: 'progress', text: `budget pacer: board held (${pacer.set})` });
+  if (pacer?.lifted)
+    reports.push({ kind: 'progress', text: `budget pacer: lifted "${pacer.lifted}"` });
   if (quotaSkip) {
     reports.push({
       kind: 'progress',

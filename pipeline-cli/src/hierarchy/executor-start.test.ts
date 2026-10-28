@@ -311,6 +311,31 @@ describe('cli-hierarchy executor-start (executor)', () => {
     expect(JSON.parse(r.out[r.out.length - 1]!)).toMatchObject({ taskId: 'AISDLC-4' });
   });
 
+  it('usage writes usage.json without the token; resume --budget overrides (AISDLC-1072)', async () => {
+    const usage = {
+      readToken: () => 'sk-secret-token',
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          five_hour: { utilization: 5, resets_at: '2026-10-23T23:30:00Z' },
+          seven_day: { utilization: 91, resets_at: '2026-10-27T18:30:00Z' },
+        }),
+      }),
+    };
+    const planner = { identity: identityFor('planner', 'proj-planner'), usage };
+    const r = await run(['usage'], planner);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out[0]!)).toMatchObject({ available: true });
+    expect(r.out.join('')).not.toContain('sk-secret-token');
+    const none = await run(['usage'], { usage: { readToken: () => undefined } });
+    expect(JSON.parse(none.out[0]!)).toMatchObject({ available: false });
+    writeHold(board, { reason: 'budget: x', since: 's', by: 'pacer' });
+    const o = await run(['resume', '--budget'], planner);
+    expect(JSON.parse(o.out[0]!)).toEqual({ ok: true, budgetOverride: true });
+    expect(readHold(board)).toBeNull();
+  });
+
   it('hold then resume round-trips; dispatch and executors are refused (AISDLC-899)', async () => {
     const planner = { identity: identityFor('planner', 'proj-planner') };
     const held = await run(['hold', '--reason', 'spend paused'], planner);

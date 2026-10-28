@@ -79,6 +79,13 @@ import { reenter } from '../hierarchy/reenter.js';
 import { now as clockNow } from '../clock.js';
 import { runDemo, type DemoDeps } from '../hierarchy/demo.js';
 import { writeEscalationFile } from '../hierarchy/escalation-file.js';
+import {
+  fetchUsage,
+  overrideBudget,
+  readKeychainToken,
+  recordUsage,
+  type UsageDeps,
+} from '../hierarchy/budget.js';
 import { correctManifestBranch } from '../dispatch/resume.js';
 import { DEFAULT_REQUEUE_RETRY_LIMIT } from '../dispatch/session-reaper.js';
 import { DECISION_ID_RE } from '../dispatch/verdict-fields.js';
@@ -179,7 +186,8 @@ Commands:
   stall-notice  Alert once when queued work has not moved for N minutes (no relaunch, no model)
   webhook    Local GitHub webhook receiver: webhook up|down|status (needs AI_SDLC_WEBHOOK_SECRET)
   hold       Pause claims and relaunches, never reporting (--reason <text>); planner or operator only
-  resume     Lift the hold set by hold
+  resume     Lift the hold set by hold (resume --budget: override the budget pacer for the window)
+  usage      Sample the account usage windows into usage.json (never prints the token)
   tick       One wake-up of the dispatch loop (ingest, verdict watch, playbook, reports)
   escalation-file  Write a board file for the planner: failure record, log tail, PR check summary
   route-decision  Record that a decision was routed to a tier
@@ -278,6 +286,9 @@ Options for demo:
 Options for hold:
   --reason <text>          Why the board is held (required); shown by tick and executor-start
 
+Options for resume:
+  --budget                 Override the budget pacer for the rest of the current windows (logged)
+
 Options for tick:
   --worker <name>          Optional; when given it must equal the calling session's own roster name
   --report-every-ms <n>    Spacing of progress reports (default 900000)
@@ -331,6 +342,16 @@ Options for route-decision:
 Common options:
   --board-dir <path>       Dispatch board directory (default ${DEFAULT_BOARD_DIR})
 `;
+
+/** Credential, endpoint and clock of the budget pacer; the real ones unless a test replaces them. */
+function usageDepsOf(over: Partial<UsageDeps> | undefined, now: () => Date): UsageDeps {
+  return {
+    readToken: readKeychainToken,
+    fetchImpl: (url, init) => fetch(url, init),
+    now,
+    ...over,
+  };
+}
 
 /** Largest handoff text `tick` hands back, in characters. */
 const HANDOFF_MAX_CHARS = 8000;
@@ -536,6 +557,8 @@ export async function runHierarchyCli(
     landEligible?: () => Promise<LandReport>;
     /** Replaces the parent upkeep pass of the tick (tests). */
     parentUpkeep?: () => Promise<ParentUpkeepResult>;
+    /** Replaces the usage endpoint and credential reads (tests). */
+    usage?: Partial<UsageDeps>;
     /** Replaces the demo's system dependencies (tests). */
     demo?: Partial<DemoDeps>;
   } = {},
@@ -826,10 +849,26 @@ export async function runHierarchyCli(
           }
           writeHold(deps.boardDir, { reason, since: deps.now().toISOString(), by });
           deps.log(JSON.stringify({ ok: true, held: { reason, by } }));
+        } else if (flags.budget === 'true') {
+          overrideBudget(deps.boardDir, by, deps.now().toISOString());
+          deps.log(JSON.stringify({ ok: true, budgetOverride: true }));
         } else {
           const lifted = clearHold(deps.boardDir, by, deps.now().toISOString());
           deps.log(JSON.stringify({ ok: true, resumed: lifted !== null }));
         }
+        return 0;
+      }
+      case 'usage': {
+        const usageDeps = usageDepsOf(extras.usage, deps.now);
+        const result = await fetchUsage(usageDeps);
+        const file = recordUsage(deps.boardDir, result, deps.now());
+        deps.log(
+          JSON.stringify(
+            file.available
+              ? { available: true, sample: file.sample }
+              : { available: false, reason: file.reason },
+          ),
+        );
         return 0;
       }
       case 'escalation-file': {
@@ -996,6 +1035,7 @@ export async function runHierarchyCli(
                 (r) => r.entry.role === 'executor' && r.state === 'idle' && !r.inflightTask,
               )
               .map((r) => r.entry.name),
+          usage: usageDepsOf(extras.usage, deps.now),
           // RFC-0059: one executor per eligible claim, downed on its verdict.
           // AI_SDLC_EPHEMERAL_EXECUTORS=0 keeps standing executors only.
           ...(deps.env.AI_SDLC_EPHEMERAL_EXECUTORS === '0'

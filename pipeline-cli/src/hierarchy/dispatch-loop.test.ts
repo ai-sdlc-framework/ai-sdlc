@@ -181,6 +181,38 @@ describe('auto-brief (AISDLC-930)', () => {
     expect((await runDispatchTick(deps())).holdLifted).toBeUndefined();
   });
 
+  it('the budget pacer holds claims while ahead of the line and lifts, status shows BUDGET (AISDLC-1072)', async () => {
+    let seven = 91;
+    let t = Date.parse('2026-10-23T18:30:00Z');
+    const usage = {
+      readToken: () => 'tok',
+      now: () => new Date(t),
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          seven_day: { utilization: seven, resets_at: '2026-10-27T18:30:00Z' },
+        }),
+      }),
+    };
+    writeFileSync(
+      path.join(board, 'config.json'),
+      JSON.stringify({ budget: { marginPoints: 0.5 } }),
+    );
+    const first = await runDispatchTick(deps({ usage, now: () => new Date(t) }));
+    expect(first.held).toBeUndefined();
+    t += 3600_000;
+    seven = 92;
+    const held = await runDispatchTick(deps({ usage, now: () => new Date(t) }));
+    expect(held.held?.reason).toMatch(/^budget/);
+    expect(held.reports.map((x) => x.text).join('\n')).toContain('budget pacer: board held');
+    t += 3600_000;
+    seven = 90;
+    const lifted = await runDispatchTick(deps({ usage, now: () => new Date(t) }));
+    expect(lifted.held).toBeUndefined();
+    expect(lifted.reports.map((x) => x.text).join('\n')).toContain('budget pacer: lifted');
+  });
+
   it('a red canary event holds the tick and files the hotfix; green lifts it (AISDLC-1023)', async () => {
     const dir = path.join(board, 'events');
     mkdirSync(dir, { recursive: true });
