@@ -290,6 +290,40 @@ jobs:
       - name: First-run smoke
         run: node scripts/first-run-smoke.mjs
 
+  security-findings:
+    # AISDLC-940: nightly only. Lists open CodeQL, Dependabot and Scorecard alerts
+    # (dry run into the job summary) and files one backlog task per unfiled alert
+    # when the repo variable AI_SDLC_FILE_SECURITY_FINDINGS is 1.
+    name: Security findings to tasks
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      security-events: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Dry run into the job summary
+        run: |
+          {
+            echo '### Unfiled security alerts'
+            echo '```'
+            node scripts/security-findings-to-tasks.mjs --dry-run
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: File tasks
+        if: vars.AI_SDLC_FILE_SECURITY_FINDINGS == '1'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          node scripts/security-findings-to-tasks.mjs
+
   test-python:
     name: Test Python SDK (${{ matrix.python-version }})
     needs: changes

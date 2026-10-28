@@ -75,6 +75,12 @@ Blast-radius analysis and DoR gating based on codebase dependency snapshots.
 | [`deps-composition.md`](deps-composition.md) | `cli-deps snapshot/gc/inspect`, Phase 1-5 feature flag surfaces |
 | [`deps-composition-promotion.md`](deps-composition-promotion.md) | Hybrid promotion runbook to flip `AI_SDLC_DEPS_COMPOSITION` default-on |
 
+### Security Findings
+
+| Runbook | Description |
+|---------|-------------|
+| [`security-findings.md`](security-findings.md) | CodeQL, Dependabot and Scorecard alerts filed as backlog tasks; the `dismissal:` rule |
+
 **Feature flag:** `AI_SDLC_DEPS_COMPOSITION`
 
 **RFC:** [`spec/rfcs/RFC-0014-dependency-graph-composition.md`](../../spec/rfcs/RFC-0014-dependency-graph-composition.md)
