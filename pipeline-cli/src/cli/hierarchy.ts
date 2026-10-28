@@ -959,6 +959,27 @@ export async function runHierarchyCli(
             findPr: (id) => findOpenPrNumber(extras.ghRun ?? deps.run, repoRoot, id),
           },
           parentHead: () => readParentHead(repoRoot),
+          // RFC-0059: one executor per eligible claim, downed on its verdict.
+          // AI_SDLC_EPHEMERAL_EXECUTORS=0 keeps standing executors only.
+          ...(deps.env.AI_SDLC_EPHEMERAL_EXECUTORS === '0'
+            ? {}
+            : {
+                ephemeral: {
+                  down: async (name: string) => {
+                    const r = await hierarchyDown({ role: name }, deps);
+                    const refusal = r.refused.find((x) => x.name === name);
+                    return refusal ? { ok: false, reason: refusal.reason } : { ok: true };
+                  },
+                  spawn: async (taskId: string) => {
+                    await hierarchySpawn({ taskId }, deps);
+                  },
+                  // Config ceiling and budget pacer arrive with AISDLC-1076.
+                  cap: () => {
+                    const n = Number(deps.env.AI_SDLC_EXECUTORS_MAX);
+                    return Number.isInteger(n) && n > 0 ? n : 3;
+                  },
+                },
+              }),
           // AISDLC-981: the tick owns the parent; the open-PR list is the wake's snapshot.
           parentUpkeep:
             extras.parentUpkeep ??
