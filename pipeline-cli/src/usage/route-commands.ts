@@ -14,7 +14,8 @@
  * @module usage/route-commands
  */
 
-import { existsSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { readPriceHistory, resolveUsageDir } from '@ai-sdlc/reference';
 import type { Argv } from 'yargs';
@@ -43,6 +44,7 @@ import { resolveArtifactsDir } from '../routing/artifacts-dir.js';
 import { loadRoutingTable, type LoadTableOptions } from '../routing/load-table.js';
 import type { RoutingTable } from '../routing/default-table.js';
 import { repoNameFor } from './attribution.js';
+import { foldScorecard, foldWeights, isAliasTable, sameModel } from './route-alias.js';
 import { repoIdFor } from './repo-id.js';
 import { selectScorecardRecords } from './scorecard-commands.js';
 import { readReplayResults, replayRows, type ReplayRow } from './replay-report.js';
@@ -90,6 +92,10 @@ export interface ProposedChange {
   comparison: CandidateEvaluation['comparison'];
   /** Evidence files, relative to the artifacts directory. */
   evidence: string[];
+  /** SHA-256 of each evidence file, keyed by the same relative reference. */
+  evidenceDigests: Record<string, string>;
+  /** Other model ids whose evidence rows were counted as `to` (alias tables only). */
+  mergedModels: string[];
 }
 
 export interface ProposeResult {
@@ -154,6 +160,15 @@ function listReplayFiles(artifactsDir: string): { files: string[]; unsafe: numbe
     return { files: safe.map((f) => join(dir, f)), unsafe: names.length - safe.length };
   } catch {
     return { files: [], unsafe: 0 };
+  }
+}
+
+/** SHA-256 (hex) of a file, or undefined when it cannot be read. */
+export function digestFile(path: string): string | undefined {
+  try {
+    return createHash('sha256').update(readFileSync(path)).digest('hex');
+  } catch {
+    return undefined;
   }
 }
 
@@ -305,12 +320,17 @@ export async function collect(
 }
 
 /** Every scorecard row that feeds the cell's counts for `model`. */
-function rowsFor(card: Scorecard, cell: CellRef, model: string): ScorecardRow[] {
+function rowsFor(
+  card: Scorecard,
+  cell: CellRef,
+  model: string,
+  aliasTable: boolean,
+): ScorecardRow[] {
   const excluded = new Set(cell.excludeClasses ?? []);
   return card.rows.filter(
     (r) =>
       r.role === cell.role &&
-      r.model === model &&
+      sameModel(r.model, model, aliasTable) &&
       (cell.taskClass === '*' ? !excluded.has(r.taskClass) : r.taskClass === cell.taskClass),
   );
 }
@@ -385,6 +405,8 @@ function decisionBody(
       to: c.to,
       repoId: repoId ?? null,
       evidence: c.evidence,
+      evidenceDigests: c.evidenceDigests,
+      mergedModels: c.mergedModels,
       comparison: c.comparison,
     })),
   };
@@ -392,10 +414,19 @@ function decisionBody(
   return lines.join('\n');
 }
 
-const PROPOSAL_OPTIONS: DecisionOption[] = [
-  { id: 'approve-all', description: 'Approve every listed change' },
-  { id: 'decline', description: 'Keep the routing table as it is' },
-];
+/** `approve-all` and `decline`, plus `approve-<n>` per change when there is a choice to make. */
+function proposalOptions(changeCount: number): DecisionOption[] {
+  const options: DecisionOption[] = [
+    { id: 'approve-all', description: 'Approve every listed change' },
+    { id: 'decline', description: 'Keep the routing table as it is' },
+  ];
+  if (changeCount > 1) {
+    for (let i = 1; i <= changeCount; i++) {
+      options.push({ id: `approve-${i}`, description: `Approve only change ${i}` });
+    }
+  }
+  return options;
+}
 
 /** Evaluate every cell and, when warranted, file one proposal Decision. */
 export async function runRoutePropose(
@@ -430,15 +461,19 @@ export async function runRoutePropose(
   const cells = enumerateCells(table);
   // Without a resolved repoId nothing is attributable: leave the counts off so
   // evaluateCell fails closed.
-  const evidence: EvidenceScorecard = c.repoId
-    ? { ...c.card, legacyRecords: c.legacyRecords, unavailableRecords: c.unavailableRecords }
-    : { ...c.card };
+  const aliasTable = isAliasTable(table);
+  const evidence: EvidenceScorecard = foldScorecard(
+    c.repoId
+      ? { ...c.card, legacyRecords: c.legacyRecords, unavailableRecords: c.unavailableRecords }
+      : { ...c.card },
+    aliasTable,
+  );
 
   const evaluations: CellEvaluation[] = cells.map((cell) =>
     evaluateCell(cell, evidence, {
       minTasks: c.minTasks,
       marginPoints: margin,
-      weights: c.weights,
+      weights: foldWeights(c.weights, aliasTable),
       replay: c.replay,
     }),
   );
@@ -483,6 +518,8 @@ export async function runRoutePropose(
       to: proposed.model,
       comparison: proposed.comparison,
       evidence: [],
+      evidenceDigests: {},
+      mergedModels: [],
     };
   });
   result.changes = changes;
@@ -519,12 +556,21 @@ export async function runRoutePropose(
   changes.forEach((ch, i) => {
     const cell = changeCells[i];
     const refs: string[] = [];
+    ch.mergedModels = aliasTable
+      ? [
+          ...new Set(
+            rowsFor(c.card, cell, ch.to, true)
+              .map((r) => r.model)
+              .filter((m) => m !== ch.to),
+          ),
+        ].sort()
+      : [];
     if (ch.comparison?.kind === 'reviewer') {
       const f = c.replayFiles.get(ch.comparison.runId);
       if (f) refs.push(f);
     } else {
       for (const model of [ch.to, ch.from]) {
-        for (const row of rowsFor(c.card, cell, model)) {
+        for (const row of rowsFor(c.card, cell, model, aliasTable)) {
           const p = pathFor(row);
           if (p) refs.push(p);
         }
@@ -538,6 +584,11 @@ export async function runRoutePropose(
       ];
     }
     ch.evidence = safe;
+    ch.evidenceDigests = {};
+    for (const ref of safe) {
+      const digest = digestFile(join(artifactsDir, ref));
+      if (digest) ch.evidenceDigests[ref] = digest;
+    }
   });
 
   const decisionId = withEventLogLock({ workDir: decisionsDir }, () => {
@@ -553,7 +604,7 @@ export async function runRoutePropose(
         summary: `Weekly model routing proposal: ${changes.length} cheaper-model change(s) qualify`,
         body: decisionBody(changes, noLongerCheaper, margin, c.minTasks, c.repoId),
         reversible: true,
-        options: PROPOSAL_OPTIONS,
+        options: proposalOptions(changes.length),
         by: 'framework:route-propose',
         now,
       }),
@@ -607,9 +658,14 @@ export function renderProposeText(r: ProposeResult): string {
   return `${lines.join('\n')}\n`;
 }
 
-export function registerRouteCommands(y: Argv, deps: RouteDeps, io: UsageIo): Argv {
+export function registerRouteCommands(
+  y: Argv,
+  deps: RouteDeps,
+  io: UsageIo,
+  extend: (r: Argv) => Argv = (r) => r,
+): Argv {
   return y.command('route', 'Routing table change proposals', (r) =>
-    r
+    extend(r)
       .command(
         'propose',
         'Evaluate every routing cell and file one Decision for the cheaper-model changes that qualify',
@@ -649,6 +705,6 @@ export function registerRouteCommands(y: Argv, deps: RouteDeps, io: UsageIo): Ar
           }
         },
       )
-      .demandCommand(1, 'Specify a route subcommand: propose'),
+      .demandCommand(1, 'Specify a route subcommand: propose or apply'),
   );
 }

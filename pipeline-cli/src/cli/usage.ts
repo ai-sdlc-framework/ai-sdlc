@@ -48,6 +48,7 @@ import { hideBin } from 'yargs/helpers';
 import { writeEvent, type OrchestratorEvent } from '../orchestrator/events.js';
 import { emitPriceChanges } from '../orchestrator/price-refresh.js';
 import { registerReplayCommands, type ReplayDeps } from '../usage/replay-commands.js';
+import { registerRouteApplyCommand, type CommandRunner } from '../usage/route-apply.js';
 import { registerRouteCommands, type RouteDeps } from '../usage/route-commands.js';
 import { registerScorecardCommands, type ScorecardDeps } from '../usage/scorecard-commands.js';
 import { registerUsageViewCommands, type UsageViewDeps } from '../usage/commands.js';
@@ -73,6 +74,8 @@ export interface UsageCliDeps
     Pick<RouteDeps, 'loadTable' | 'decisionsWorkDir' | 'env' | 'readBaseTable' | 'afterPrecheck'>,
     Pick<ReplayDeps, 'git' | 'runner' | 'createSpawner' | 'tmpRoot' | 'handleSignals'> {
   fetch?: FetchFn;
+  /** Replaces the git/gh runner used by `route apply` (tests). */
+  routeExec?: CommandRunner;
   stdout?: (text: string) => void;
   stderr?: (text: string) => void;
   onCapability?: (outcome: 'live' | 'degraded', reason?: string) => void;
@@ -477,6 +480,22 @@ export function buildUsageCli(
       afterPrecheck: deps.afterPrecheck,
     },
     io,
+    (r) =>
+      registerRouteApplyCommand(
+        r,
+        {
+          ...viewDeps,
+          repoRoot: deps.repoRoot,
+          artifactsDir: deps.artifactsDir,
+          assignmentLogPath: deps.assignmentLogPath,
+          loadTable: deps.loadTable,
+          decisionsWorkDir: deps.decisionsWorkDir,
+          env: deps.env,
+          readBaseTable: deps.readBaseTable,
+          exec: deps.routeExec,
+        },
+        io,
+      ),
   );
   registerReplayCommands(
     cli,
