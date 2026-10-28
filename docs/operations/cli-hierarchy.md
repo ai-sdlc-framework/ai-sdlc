@@ -311,6 +311,17 @@ cli-hierarchy status [--json]
 "nodeVersion": "22.23.2", "nodeMismatch": true, "module": { "state": "loaded|refused|absent|stale", "reason": "..." }, "nextStep": "..." } ], "board": { "queued": n,
 "inflight": n, "done": n, "failed": n }, "webhook": { "state": "up", "port": n, "pid": n }, "scheduler": { "state": "up", "pid": n } }`. Read-only. Exit code `0`.
 
+### Drain stall (AISDLC-1101)
+
+Each dispatch tick checks for a drain that stopped moving: eligible queued work, an idle executor holding no
+inflight task, and an unchanged board (queue, inflight, done and failed counts) for longer than
+`stallAfterMinutes` (default 30, set in `<board-dir>/config.json`). It writes one record to
+`<board-dir>/drain-stall.json` (opens and closes are appended to `drain-stalls.jsonl`), names the stage that
+did not run (`clear-and-wake-after-verdict`, `wake-after-ingest`, `claim` or `wake`) and sends one `drain-stall`
+report to the planner. `cli-hierarchy status` prints the open stall as a `drain-stall:` line (and `drainStall` in
+`--json`). The record closes by itself when the board moves or the condition lapses. Nothing is recorded while
+the board is held.
+
 ### `stall-notice`
 
 An alert-only check for a drain that stopped moving (AISDLC-871). With eligible queued work and

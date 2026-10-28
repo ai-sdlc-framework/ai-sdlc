@@ -37,6 +37,7 @@ import {
 import { formatWebhookStatus, webhookStatus, type WebhookStatus } from './webhook.js';
 import { listWindows, paneInfo, paneStartCommand, sessionAttached } from './tmux.js';
 import { contextWarning, formatContext, sessionContextTokens } from './context-size.js';
+import { readOpenDrainStall, type DrainStallRecord } from './drain-stall.js';
 import { resolveThresholds } from './thresholds.js';
 import type { HierarchyDeps, HierarchyRole, RosterEntry } from './types.js';
 
@@ -94,6 +95,8 @@ export interface StatusResult {
   ghCallsPerHour?: Record<string, number>;
   /** Live remaining quota for the core and graphql buckets; absent when `gh` cannot say. */
   quota?: Quota;
+  /** The open drain stall (AISDLC-1101); absent when the drain is moving. */
+  drainStall?: DrainStallRecord;
   /** Committed attestation envelope and leaf growth (AISDLC-968). */
   attestationGrowth?: AttestationGrowth;
 }
@@ -250,6 +253,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
   } catch {
     /* gh missing or offline */
   }
+  const drainStall = readOpenDrainStall(deps.boardDir);
   let growth: AttestationGrowth | undefined;
   try {
     growth = attestationGrowth(deps.cwd, deps.run);
@@ -260,6 +264,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     rows,
     unowned: landings.filter((l) => l.owner === 'unowned').length,
     ...(growth ? { attestationGrowth: growth } : {}),
+    ...(drainStall ? { drainStall } : {}),
     ...(Object.keys(ghCallsPerHour).length > 0 ? { ghCallsPerHour } : {}),
     ...(quota ? { quota } : {}),
     board: peekQueue(deps.boardDir),
@@ -299,6 +304,11 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       ]
     : [];
   const ghLines = formatGhCalls(result);
+  const stallLines = result.drainStall
+    ? [
+        `drain-stall: open since ${result.drainStall.since}, stalled stage ${result.drainStall.stage}, ${result.drainStall.eligible} eligible queued, idle ${result.drainStall.idleExecutors.join(', ')}`,
+      ]
+    : [];
   const unownedLine = `unowned PRs: ${result.unowned ?? 0}`;
   const blockedLines = (result.blocked ?? []).map((b) => `blocked: ${b.taskId}: ${b.reason}`);
   if (result.rows.length === 0)
@@ -309,6 +319,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       ...thresholds,
       ...unbriefed,
       ...blockedLines,
+      ...stallLines,
       unownedLine,
       ...ghLines,
     ];
@@ -385,6 +396,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
     ...thresholds,
     ...unbriefed,
     ...blockedLines,
+    ...stallLines,
     unownedLine,
     ...ghLines,
   ];

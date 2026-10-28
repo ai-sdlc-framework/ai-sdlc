@@ -49,6 +49,7 @@ import {
   type EphemeralDeps,
   type EphemeralReport,
 } from './ephemeral-tick.js';
+import { checkDrainStall, formatDrainStall, resolveStallAfterMinutes } from './drain-stall.js';
 import { readHold, type Hold } from './hold.js';
 import {
   classifyHumanAttention,
@@ -196,7 +197,7 @@ export interface VerdictReport {
 
 /** One line for the planner. */
 export interface PlannerReport {
-  kind: 'progress' | 'brief-complete';
+  kind: 'progress' | 'brief-complete' | 'drain-stall';
   text: string;
 }
 
@@ -355,6 +356,8 @@ export interface LoopDeps {
   ephemeral?: EphemeralDeps;
   /** Files the hotfix task for a red pipeline canary (AISDLC-1023); absent means events are not processed. */
   fileHotfix?: (opts: { sha: string; detail: string }) => string;
+  /** Idle executors holding no inflight task (AISDLC-1101); absent means no drain-stall check runs. */
+  idleExecutors?: () => string[];
 }
 
 function ingestBriefs(
@@ -745,6 +748,30 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     reports.push({ kind: 'progress', text: `parent upkeep refused: ${parentUpkeep.reason}` });
   }
   for (const s of stalled) reports.push({ kind: 'progress', text: formatStall(s) });
+  if (deps.idleExecutors) {
+    try {
+      const ds = checkDrainStall({
+        boardDir: deps.boardDir,
+        now: deps.now,
+        held,
+        idleExecutors: deps.idleExecutors,
+      });
+      if (ds.opened) {
+        reports.push({
+          kind: 'drain-stall',
+          text: formatDrainStall(ds.opened, resolveStallAfterMinutes(deps.boardDir)),
+        });
+      }
+      if (ds.closed) {
+        reports.push({
+          kind: 'progress',
+          text: `drain-stall closed: the drain moved again (was stalled at ${ds.closed.stage})`,
+        });
+      }
+    } catch {
+      /* a detector failure must not stop the dispatch loop */
+    }
+  }
   let humanAttention: HumanAttentionRow[] = [];
   try {
     humanAttention = !readGithub ? [] : classifyHumanAttention(deps.listPrs?.() ?? [], deps.now());
