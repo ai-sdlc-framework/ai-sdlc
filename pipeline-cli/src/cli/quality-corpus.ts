@@ -124,7 +124,7 @@ function emitText(text: string): void {
   if (!text.endsWith('\n')) process.stdout.write('\n');
 }
 
-function renderTable(report: QualityCorpusReport): string {
+export function renderTable(report: QualityCorpusReport): string {
   const { reliabilityTrend, metrics } = report;
 
   const lines: string[] = [
