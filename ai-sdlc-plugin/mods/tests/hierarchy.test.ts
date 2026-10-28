@@ -261,6 +261,20 @@ describe('hierarchy module: executor wake', () => {
     expect(ran(busy)).toContain('clear');
   });
 
+  it('rotates on a rotate message when the last turn ended with no marker (AISDLC-1099)', async () => {
+    const s = setup();
+    await s.start();
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    await s.handlers.get('turn.complete')(s.$, { text: 'working on it' }, s.next);
+    s.$.command.run.mockClear();
+    await s.handlers.get('session.receive')(
+      s.$,
+      { text: env('proj-operator-dispatch', 'rotate') },
+      s.next,
+    );
+    expect(ran(s)).toContain('clear');
+  });
+
   it('a task with no activity for a while no longer mutes wakes', async () => {
     vi.useFakeTimers();
     const s = setup();
