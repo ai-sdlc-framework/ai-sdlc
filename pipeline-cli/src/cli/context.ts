@@ -7,6 +7,8 @@
  *   validate        — validate entries in both knowledge roots and the ontology.
  *                     Exit 1 on any error; `--strict` also fails on classification
  *                     warnings (likely mis-scoped entries).
+ *   promote <id> --proof <kind:value> [--to canonical --by human] — verifier promotion (AISDLC-776).
+ *   audit / refute / reobserve — knowledge log listing, refutation, 30 percent re-observation.
  *   check-pr-body   — fail when a PR body (`--body-file <path>` or stdin) cites a
  *                     protected entry id or the protected root path.
  *   check-scope     — fail when a protected entry is in the configured tracked root, or the
@@ -23,8 +25,21 @@ import { loadKnowledgeConfig } from '../knowledge/config.js';
 import { checkKnowledgeScope, checkKnowledgeScopeRange } from '../knowledge/scope-check.js';
 import { INGEST_SOURCES, ingestSource, type IngestSource } from '../knowledge/ingest-sources.js';
 import { sectionsToEntries } from '../knowledge/ingest-sections.js';
+import { auditLines, readKnowledgeLog } from '../knowledge/log.js';
 import { loadOntology } from '../knowledge/ontology.js';
+import { promoteEntry, reobserveEntry, refuteEntry, type Role } from '../knowledge/promote.js';
 import { findProtectedCitations, validateKnowledge } from '../knowledge/store.js';
+
+function knowledgeCtx(projectDir: string) {
+  const config = loadKnowledgeConfig(projectDir);
+  const trackedAbs = isAbsolute(config.trackedRoot)
+    ? config.trackedRoot
+    : join(projectDir, config.trackedRoot);
+  return {
+    trackedAbs,
+    verify: { projectDir, config, ontology: loadOntology(trackedAbs).ontology },
+  };
+}
 
 export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
   return yargs(argv)
@@ -134,6 +149,92 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
         process.stdout.write(
           `${r.created} created, ${r.updated} updated, ${r.unchanged} unchanged\n`,
         );
+      },
+    )
+    .command(
+      'promote <id>',
+      'Promote an entry: specialist via a verified proof, canonical only by a human',
+      (y) =>
+        y
+          .positional('id', { type: 'string', demandOption: true })
+          .option('proof', {
+            type: 'string',
+            describe: '<kind>:<value> from the ontology vocabulary',
+          })
+          .option('to', {
+            type: 'string',
+            choices: ['specialist', 'canonical'],
+            default: 'specialist',
+          })
+          .option('by', { type: 'string', choices: ['agent', 'human'], default: 'agent' }),
+      (args) => {
+        const ctx = knowledgeCtx(String(args['project-dir']));
+        const r = promoteEntry(
+          ctx.trackedAbs,
+          String(args.id),
+          {
+            to: args.to as 'specialist' | 'canonical',
+            proof: args.proof as string | undefined,
+            by: args.by as Role,
+          },
+          ctx.verify,
+        );
+        process.stdout.write(`${r.ok ? 'promoted' : 'refused'}: ${r.reason}\n`);
+        if (!r.ok) process.exitCode = 1;
+      },
+    )
+    .command(
+      'audit',
+      'List every promotion with its proof',
+      (y) => y,
+      (args) => {
+        const ctx = knowledgeCtx(String(args['project-dir']));
+        const lines = auditLines(readKnowledgeLog(ctx.trackedAbs));
+        process.stdout.write(lines.length > 0 ? `${lines.join('\n')}\n` : 'no promotions\n');
+      },
+    )
+    .command(
+      'refute <id>',
+      'Refute an entry: drops it to inferred and logs the reason',
+      (y) =>
+        y
+          .positional('id', { type: 'string', demandOption: true })
+          .option('reason', { type: 'string', demandOption: true })
+          .option('by', { type: 'string', choices: ['agent', 'human'], default: 'agent' }),
+      (args) => {
+        const ctx = knowledgeCtx(String(args['project-dir']));
+        const ok = refuteEntry(
+          ctx.trackedAbs,
+          String(args.id),
+          String(args.reason),
+          args.by as Role,
+        );
+        if (!ok) {
+          process.stderr.write(`error: entry '${String(args.id)}' not found\n`);
+          process.exitCode = 1;
+        }
+      },
+    )
+    .command(
+      'reobserve <id>',
+      'Re-observe an entry: confidence moves 30 percent toward the new value',
+      (y) =>
+        y
+          .positional('id', { type: 'string', demandOption: true })
+          .option('confidence', { type: 'number', demandOption: true })
+          .option('observed', { type: 'string', default: now().toISOString().slice(0, 10) }),
+      (args) => {
+        const ctx = knowledgeCtx(String(args['project-dir']));
+        const next = reobserveEntry(
+          ctx.trackedAbs,
+          String(args.id),
+          Number(args.confidence),
+          String(args.observed),
+        );
+        if (next === null) {
+          process.stderr.write(`error: entry '${String(args.id)}' not found\n`);
+          process.exitCode = 1;
+        } else process.stdout.write(`confidence ${next}\n`);
       },
     )
     .demandCommand(1, 'A subcommand is required. Run with --help for the list.')
