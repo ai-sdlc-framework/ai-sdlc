@@ -1354,7 +1354,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           // repo-relative monorepo path, then to a guarded downgrade, so
           // `agentDir: undefined` here (adopter with no plugin installed
           // at all) is a supported, non-throwing case.
-          const agentDir = resolveInstalledPluginAgentDir() ?? undefined;
+          const agentDir = resolveInstalledPluginAgentDir(undefined, repoRoot) ?? undefined;
 
           const out = core.runVerifier({ headSha, baseSha, repoRoot, agentDir });
           let output = `status=${out.status}\nreason=${out.reason}\n`;
@@ -1442,7 +1442,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
 
           const core = await loadVerifyCore();
           core.bindRuntime(runtimeMod);
-          const agentDir = resolveInstalledPluginAgentDir() ?? undefined;
+          const agentDir = resolveInstalledPluginAgentDir(undefined, repoRoot) ?? undefined;
           const out = core.runVerifier({ headSha, baseSha, repoRoot, agentDir });
 
           // Absent field (legacy pre-AISDLC-588 envelope, or an invalid

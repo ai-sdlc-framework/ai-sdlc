@@ -203,30 +203,36 @@ function verifyCoreCandidates() {
 }
 
 /**
- * AISDLC-583 — resolve the INSTALLED plugin's `agents/` dir, for injection
- * into `runVerifier({ agentDir })`. Env-var-only (unlike
- * `trustedRuntimeModuleCandidates`'s extra node_modules-walk-up candidate):
- * deliberately does NOT add a "this script's own on-disk location" fallback
- * here, because in this driver's own hermetic tests the script runs
- * in-place from the monorepo checkout (not copied into a separate install
- * tree the way the trusted node_modules candidates are), so a self-location
- * candidate would resolve to THIS MONOREPO's real `ai-sdlc-plugin/agents/`
- * instead of the fixture's intended source — a test-environment false
- * positive that would mask real adopter-repo resolution bugs. When neither
- * env var resolves, `runVerifier` (`verify-core.mjs`) falls back to the
- * repo-relative monorepo path, then a guarded, warned downgrade — this
- * driver never needs to fail closed when nothing here resolves.
+ * AISDLC-583 / AISDLC-584 — resolve the INSTALLED plugin's `agents/` dir, for
+ * injection into `runVerifier({ agentDir })`.
+ *
+ * Candidates, in order: `$CLAUDE_PLUGIN_DIR/agents`, `$CLAUDE_PLUGIN_ROOT/agents`,
+ * then a SELF-LOCATION probe (`<this script's plugin root>/agents`) so the
+ * documented plain-CI recipe (no plugin env vars) still enforces the legacy
+ * `agentFileHash` binding.
+ *
+ * Fixture guard: the self-location candidate is used ONLY when the script
+ * physically lives under a `node_modules` directory (a real install). Run
+ * in-place from the monorepo (this driver's own hermetic tests) the script is
+ * not under node_modules, so the probe is skipped and cannot resolve the
+ * monorepo's real `ai-sdlc-plugin/agents/` in place of a test fixture.
+ *
+ * @param scriptPath absolute path of this script (injectable for tests)
  */
-function agentDirCandidates() {
+export function agentDirCandidates(scriptPath = fileURLToPath(import.meta.url)) {
   const candidates = [];
   for (const pluginDir of [process.env.CLAUDE_PLUGIN_DIR, process.env.CLAUDE_PLUGIN_ROOT]) {
     if (pluginDir) candidates.push(join(pluginDir, 'agents'));
   }
+  const scriptDir = dirname(scriptPath);
+  if (scriptDir.split(/[\\/]/).includes('node_modules')) {
+    candidates.push(join(dirname(scriptDir), 'agents'));
+  }
   return [...new Set(candidates)];
 }
 
-function resolvePluginAgentDir(repoRoot) {
-  for (const candidate of agentDirCandidates()) {
+export function resolvePluginAgentDir(repoRoot, scriptPath) {
+  for (const candidate of agentDirCandidates(scriptPath)) {
     if (!existsSync(candidate)) continue;
     if (isInsideRepoRoot(candidate, repoRoot)) continue;
     return candidate;

@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import {
   resolveInstalledPluginAgentDir,
   highestVersionCacheAgentsDir,
+  isInsideRepoRoot,
 } from './agent-dir-resolver.js';
 
 const ORIGINAL_ENV = { ...process.env };
@@ -155,5 +156,49 @@ describe('highestVersionCacheAgentsDir (AISDLC-583)', () => {
   it('is reached via resolveInstalledPluginAgentDir when no env vars are set', () => {
     const agents = seed('acme-marketplace', '0.20.1');
     expect(resolveInstalledPluginAgentDir(cacheRoot)).toBe(agents);
+  });
+});
+
+describe('containment guard (AISDLC-584)', () => {
+  let base: string;
+  beforeEach(() => {
+    resetEnv();
+    base = mkdtempSync(join(tmpdir(), 'agent-dir-guard-'));
+  });
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true });
+    process.env = { ...ORIGINAL_ENV };
+  });
+
+  it('rejects a CLAUDE_PLUGIN_ROOT agents dir that lives inside repoRoot', () => {
+    const repo = join(base, 'repo');
+    const inside = join(repo, 'plugin', 'agents');
+    mkdirSync(inside, { recursive: true });
+    process.env['CLAUDE_PLUGIN_ROOT'] = join(repo, 'plugin');
+    expect(resolveInstalledPluginAgentDir(join(base, 'no-cache'), repo)).toBeNull();
+  });
+
+  it('accepts an agents dir outside repoRoot', () => {
+    const repo = join(base, 'repo');
+    mkdirSync(repo, { recursive: true });
+    const outside = join(base, 'plugin', 'agents');
+    mkdirSync(outside, { recursive: true });
+    process.env['CLAUDE_PLUGIN_ROOT'] = join(base, 'plugin');
+    expect(resolveInstalledPluginAgentDir(join(base, 'no-cache'), repo)).toBe(outside);
+  });
+
+  it('rejects a cache hit inside repoRoot', () => {
+    const repo = join(base, 'repo');
+    const cacheRoot = join(repo, 'cache');
+    mkdirSync(join(cacheRoot, 'mkt', 'ai-sdlc', '1.0.0', 'agents'), { recursive: true });
+    expect(resolveInstalledPluginAgentDir(cacheRoot, repo)).toBeNull();
+  });
+
+  it('isInsideRepoRoot treats the root itself and nested paths as inside, siblings as outside', () => {
+    const repo = join(base, 'repo');
+    mkdirSync(repo, { recursive: true });
+    expect(isInsideRepoRoot(repo, repo)).toBe(true);
+    expect(isInsideRepoRoot(join(repo, 'a', 'b'), repo)).toBe(true);
+    expect(isInsideRepoRoot(join(base, 'other'), repo)).toBe(false);
   });
 });

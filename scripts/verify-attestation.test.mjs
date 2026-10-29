@@ -721,6 +721,40 @@ describe('runVerifier (AISDLC-583 — consumer-repo agent-dir resolution)', () =
     );
   });
 
+  it('resolution order: the injected agentDir WINS over a present repo-relative ai-sdlc-plugin/agents (AISDLC-584)', () => {
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    writeTrustedReviewersYaml(fixture.root, publicKeyPem);
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      privateKeyPem,
+    );
+    // Installed dir holds the signed content; repo-relative dir exists but is
+    // tampered. If the repo-relative dir won, this would be invalid.
+    const installed = join(fixture.root, '..', `installed-agents-${process.pid}`);
+    mkdirSync(installed, { recursive: true });
+    for (const [id, body] of Object.entries(AGENT_FILES)) {
+      writeFileSync(join(installed, `${id}.md`), body);
+    }
+    writeFileSync(
+      join(fixture.root, 'ai-sdlc-plugin', 'agents', 'test-reviewer.md'),
+      AGENT_FILES['test-reviewer'] + '\n## TAMPERED REPO-RELATIVE COPY\n',
+    );
+    try {
+      const out = runVerifier({
+        headSha: fixture.headSha,
+        baseSha: fixture.baseSha,
+        repoRoot: fixture.root,
+        agentDir: installed,
+      });
+      assert.equal(out.status, 'valid', `expected valid, got ${out.status}: ${out.reason}`);
+    } finally {
+      rmSync(installed, { recursive: true, force: true });
+    }
+  });
+
   it('regression: monorepo layout (repo-relative ai-sdlc-plugin/agents present) still resolves + enforces exactly as before', () => {
     const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
     writeTrustedReviewersYaml(fixture.root, publicKeyPem);

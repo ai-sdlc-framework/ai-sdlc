@@ -101,6 +101,11 @@ live outside the checkout:
 
 1. `$CLAUDE_PLUGIN_DIR` / `$CLAUDE_PLUGIN_ROOT` node_modules — present when
    running inside a Claude Code plugin session; irrelevant for a plain CI job.
+
+   The legacy `agentFileHash` binding resolves the plugin `agents/` dir from the same
+   env vars, then (AISDLC-584) from `<plugin root>/agents` next to the script when
+   it is installed under `node_modules`, so a plain CI job enforces it without
+   setting `CLAUDE_PLUGIN_ROOT`. Candidates inside the checkout are rejected.
 2. `node_modules` walking up from the resolver's OWN on-disk location — for
    `cli-attestation verify` this means `@ai-sdlc/orchestrator` installed as a
    normal sibling npm dependency alongside `@ai-sdlc/pipeline-cli`, never
