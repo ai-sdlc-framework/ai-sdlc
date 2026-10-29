@@ -3,7 +3,7 @@
 // `session.receive`, renders the board pane and wakes executors with `$.session.send`. It NEVER submits a
 // prompt to its model: there is no `prompt.submit` port here, so no code path can. Same call-site rule as
 // executor.ts: `$` is only spelled `$.noun.verb(...)` in the handler that builds the ports.
-import { innerText, log, measuredTokens, safe, senderOf } from './executor.ts';
+import { innerText, log, readMeasure, safe, senderOf } from './executor.ts';
 import type { Ports } from './executor.ts';
 
 type Any = any;
@@ -527,6 +527,6 @@ export async function dispatchSessionMeasure(
     send: (a) => $.session.send(a),
     uiOpen: (a) => $.ui.open(a),
   };
-  if (measuredTokens(e) >= DISPATCH_ROTATE_AT_TOKENS) await rotateHost(p, state);
+  if ((await readMeasure(p, undefined, e)) >= DISPATCH_ROTATE_AT_TOKENS) await rotateHost(p, state);
   return next(e);
 }

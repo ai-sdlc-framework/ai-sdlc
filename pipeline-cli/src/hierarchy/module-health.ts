@@ -51,7 +51,21 @@ export function defaultStoreDirs(): string[] {
  * Scan `*.json` files in the store directories for that key (top level or under `store`/`data`).
  */
 export function readStoreHealth(storeDirs: readonly string[], name: string): unknown {
-  const key = `hierarchy/health/${name}`;
+  return readStoreKey(storeDirs, `hierarchy/health/${name}`);
+}
+
+/** AISDLC-1100: the module's last `session.measure` token count, from the plugin store (undefined when none). */
+export function readModuleMeasure(
+  storeDirs: readonly string[],
+  name: string,
+): { tokens: number; at?: string } | undefined {
+  const hit = readStoreKey(storeDirs, `hierarchy/measure/${name}`) as
+    Record<string, unknown> | undefined;
+  if (!hit || typeof hit.tokens !== 'number') return undefined;
+  return { tokens: hit.tokens, ...(typeof hit.at === 'string' ? { at: hit.at } : {}) };
+}
+
+function readStoreKey(storeDirs: readonly string[], key: string): unknown {
   for (const dir of storeDirs) {
     let files: string[];
     try {

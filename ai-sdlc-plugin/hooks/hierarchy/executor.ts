@@ -234,20 +234,58 @@ export function hasMarkerLine(reply: string, marker: string): boolean {
 export const DISPATCH_NAME = /(?:^|-)operator-dispatch(?:-\d+)?$/;
 export const STATUS_NOISE = /^(status|ack|ping)\b/i;
 
-/** Tokens in the context from a `session.measure` payload. */
-export function measuredTokens(e: Any): number {
-  const direct = e?.contextTokens ?? e?.tokens ?? e?.totalTokens;
-  if (typeof direct === 'number') return direct;
+/** Tokens in a `session.measure` payload, or null when no known field carries a number (AISDLC-1100). */
+export function recognisedTokens(e: Any): number | null {
+  // The host sends `{ context: { tokens, window, percent } }`; the flat fields are older guesses.
+  const direct = e?.context?.tokens ?? e?.contextTokens ?? e?.tokens ?? e?.totalTokens;
+  if (typeof direct === 'number' && Number.isFinite(direct)) return direct;
   const u = e?.usage ?? e ?? {};
-  return ['input', 'cacheWrite', 'cacheRead', 'output'].reduce(
-    (n, k) => n + (typeof u[k] === 'number' ? u[k] : 0),
-    0,
-  );
+  const keys = ['input', 'cacheWrite', 'cacheRead', 'output'];
+  if (!keys.some((k) => typeof u[k] === 'number')) return null;
+  return keys.reduce((n, k) => n + (typeof u[k] === 'number' ? u[k] : 0), 0);
+}
+
+/** Tokens in the context from a `session.measure` payload; 0 only for an unrecognised shape. */
+export function measuredTokens(e: Any): number {
+  return recognisedTokens(e) ?? 0;
+}
+
+let shapeLogged = false;
+
+/**
+ * Read a measure and record it: the last count goes to `hierarchy/measure/<name>` for `cli-hierarchy status`,
+ * and an unrecognised payload is logged once with its keys instead of being read silently as 0.
+ */
+export async function readMeasure(
+  p: Pick<Ports, 'storeGet' | 'storeSet'>,
+  name: string | undefined,
+  e: Any,
+): Promise<number> {
+  const t = recognisedTokens(e);
+  if (t === null) {
+    if (!shapeLogged) {
+      shapeLogged = true;
+      const keys = e && typeof e === 'object' ? Object.keys(e).join(',') : typeof e;
+      await log(
+        p,
+        `session.measure payload not recognised (keys: ${keys}); reading it as 0 tokens`,
+      );
+    }
+    return 0;
+  }
+  if (name) {
+    await safe(() =>
+      p.storeSet(`hierarchy/measure/${name}`, { tokens: t, at: new Date().toISOString() }),
+    );
+  }
+  return t;
 }
 
 export interface ExecutorState {
   /** Set by the session.start gate once the role, version and probes passed; every handler checks it. */
   enabled?: boolean;
+  /** Roster name, keys the stored last measure. */
+  name?: string;
   /** A task is in progress: from the first main-loop turn after a wake to its verdict or idle marker. */
   active: boolean;
   /** Epoch ms of the last main-loop turn event while a task runs; a stale task no longer mutes wakes. */
@@ -432,6 +470,9 @@ export async function executorTurnComplete(
   const reply = String(e?.text ?? e?.reply ?? '');
   if (reply) state.lastReply = reply;
   state.lastActivity = Date.now();
+  // AISDLC-1100: the host's turn.complete carries no reply text; the turn boundary itself then ends the
+  // task, so a pending threshold rotation can fire. A verdict rotation still needs the text.
+  if (!reply && state.pendingRotate) state.active = false;
   const verdict = hasMarkerLine(reply, VERDICT_MARKER);
   if (verdict || hasMarkerLine(reply, IDLE_MARKER)) state.active = false;
   if (verdict || (state.pendingRotate && !taskRunning(state))) await rotate(p, state);
@@ -453,7 +494,7 @@ export async function executorSessionMeasure(
     submit: (a) => $.prompt.submit(a),
   };
   await resumeAfterClear(p, state);
-  if (measuredTokens(e) >= ROTATE_AT_TOKENS) {
+  if ((await readMeasure(p, state.name, e)) >= ROTATE_AT_TOKENS) {
     if (taskRunning(state)) state.pendingRotate = true;
     else await rotate(p, state);
   }

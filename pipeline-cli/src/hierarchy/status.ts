@@ -26,7 +26,13 @@ import {
   readGhCalls,
   type Quota,
 } from './gh-calls.js';
-import { formatModuleHealth, readModuleHealth, type ModuleHealth } from './module-health.js';
+import {
+  formatModuleHealth,
+  readModuleHealth,
+  defaultStoreDirs,
+  readModuleMeasure,
+  type ModuleHealth,
+} from './module-health.js';
 import { readSessionRegistry } from './registry.js';
 import { readRosterChecked } from './roster.js';
 import {
@@ -72,6 +78,8 @@ export interface StatusRow {
   overThreshold?: boolean;
   /** AISDLC-1099: the task whose verdict this idle executor reported more than a tick ago and was not cleared after. */
   idleAfterVerdict?: string;
+  /** The module's own last `session.measure` count (AISDLC-1100); absent when it never measured. */
+  moduleTokens?: number;
   /** Present with `launchEnv: 'missing'`: how to repair it. */
   nextStep?: string;
 }
@@ -204,6 +212,9 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
         /* an unreadable board must not break status */
       }
     }
+    const moduleTokens = alive
+      ? readModuleMeasure(defaultStoreDirs(), entry.name)?.tokens
+      : undefined;
     return {
       entry,
       state,
@@ -214,6 +225,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
       ...(nodeVersion ? { nodeVersion } : {}),
       ...(nodeMismatch ? { nodeMismatch } : {}),
       module: readModuleHealth(deps.boardDir, entry, deps.now()),
+      ...(moduleTokens !== undefined ? { moduleTokens } : {}),
       attached: alive && isAttached(entry.tmuxSession),
       inflightTask: held?.taskId,
       ...(owned
@@ -374,7 +386,9 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
     r.landing ?? '-',
     r.launchEnv ?? '-',
     r.nodeVersion ? `${r.nodeVersion}${r.nodeMismatch ? ' MISMATCH' : ''}` : '-',
-    formatModuleHealth(r.module),
+    r.moduleTokens !== undefined
+      ? `${formatModuleHealth(r.module)} (measured ${r.moduleTokens})`
+      : formatModuleHealth(r.module),
     r.state === 'gone' ? '-' : formatContext(r.contextTokens, r.overThreshold),
     r.entry.tmuxSession,
     r.entry.role,
@@ -450,9 +464,19 @@ function formatGhCalls(result: StatusResult): string[] {
 /** One warning line per session whose context is above its clear threshold (AISDLC-1066). */
 export function contextWarnings(result: StatusResult): string[] {
   const t = result.contextThresholds;
-  return result.rows.flatMap((r) =>
+  const over = result.rows.flatMap((r) =>
     r.overThreshold && r.contextTokens !== undefined && t
       ? [contextWarning(r.entry.name, r.contextTokens, t[r.entry.role])]
       : [],
   );
+  // AISDLC-1100: the module and the transcript measure differently; across the threshold means no rotation.
+  const disagree = result.rows.flatMap((r) => {
+    if (!t || r.moduleTokens === undefined || r.contextTokens === undefined) return [];
+    const limit = t[r.entry.role];
+    if (r.moduleTokens > limit === r.contextTokens > limit) return [];
+    return [
+      `measure mismatch on ${r.entry.name}: module last measured ${r.moduleTokens}, CONTEXT ${r.contextTokens}, threshold ${limit}; the module may not be rotating this session`,
+    ];
+  });
+  return [...over, ...disagree];
 }

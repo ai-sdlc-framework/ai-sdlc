@@ -249,6 +249,7 @@ export const register = (on: Any, options?: Any): void => {
     if (role !== 'executor') return next(e);
     await health({ state: 'loaded' });
     router.current = 'executor';
+    state.name = typeof named === 'string' && named ? named : 'executor';
     state.enabled = true;
     // INTERIM: if a host fires session.start after a mod-run clear, resume from here as well.
     if (state.resumePending) await resumeAfterClear(p, state);

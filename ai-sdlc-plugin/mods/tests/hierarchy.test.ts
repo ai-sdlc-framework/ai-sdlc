@@ -11,6 +11,7 @@ import {
   guard,
   innerText,
   measuredTokens,
+  recognisedTokens,
   senderOf,
 } from '../../hooks/hierarchy/executor.ts';
 import {
@@ -205,6 +206,10 @@ describe('hierarchy module: gate', () => {
     expect(measuredTokens({ tokens: 5 })).toBe(5);
     expect(measuredTokens({ usage: { input: 1, cacheRead: 2, output: 3 } })).toBe(6);
     expect(measuredTokens(undefined)).toBe(0);
+    expect(measuredTokens({ context: { tokens: 154000, window: 200000, percent: 77 } })).toBe(
+      154000,
+    );
+    expect(recognisedTokens({ event: 'x' })).toBeNull();
   });
 });
 
@@ -411,6 +416,33 @@ describe('hierarchy module: rotation', () => {
     expect(ran(s)).toEqual([]);
     await s.handlers.get('session.measure')(s.$, { tokens: 120_000 }, s.next);
     expect(ran(s)).toContain('clear');
+  });
+
+  it('rotates on the real session.measure shape and a reply-less turn.complete (AISDLC-1100)', async () => {
+    const s = setup();
+    await s.start();
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    await s.handlers.get('session.measure')(
+      s.$,
+      { context: { tokens: 125_000, window: 200_000, percent: 62 } },
+      s.next,
+    );
+    expect(ran(s)).toEqual([]);
+    await s.handlers.get('turn.complete')(
+      s.$,
+      { event: 'turn.complete', reason: 'end_turn', turnId: 't1', usage: {} },
+      s.next,
+    );
+    expect(ran(s)).toContain('clear');
+    expect(s.kv.get('hierarchy/measure/executor')).toMatchObject({ tokens: 125_000 });
+  });
+
+  it('logs an unrecognised measure payload once instead of reading it silently as 0', async () => {
+    const s = setup();
+    await s.start();
+    await s.handlers.get('session.measure')(s.$, { weird: 1 }, s.next);
+    await s.handlers.get('session.measure')(s.$, { weird: 2 }, s.next);
+    expect(logOf(s.kv).filter((l) => l.includes('not recognised'))).toHaveLength(1);
   });
 
   it('rotates after an idle marker when a measure was pending, and logs a refused handoff', async () => {
