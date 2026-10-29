@@ -1,15 +1,16 @@
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildContextCli } from '../../cli/context.js';
 import { loadRetrievalConfig } from '../config.js';
 import { hashValue, type KnowledgeEntry } from '../entry.js';
 import { HashedEmbedder } from './embedder.js';
-import { loadedKeys } from './ledger.js';
+import { loadedKeys, readLedger } from './ledger.js';
 import { createRetrievalIndex, RetrievalAdapterError } from './registry.js';
-import { queryIndex, rebuildIndex } from './service.js';
+import { compactSession, queryIndex, rebuildIndex, resetSession } from './service.js';
 import { fuseRanks, SqliteRetrievalIndex } from './sqlite-index.js';
 import type { Embedder } from './types.js';
 
@@ -188,6 +189,93 @@ describe('session ledger', () => {
     const changed = await queryIndex(dir, { text: 'gateway retries', sessionId: 's1' });
     expect(changed.map((h) => h.id)).toContain('gateway');
     expect(loadedKeys(dir, 's1').size).toBeGreaterThan(1);
+  });
+
+  it('records the supersession, tokens and moment per injection', async () => {
+    const dir = project(CORPUS);
+    await rebuildIndex(dir);
+    await queryIndex(dir, { text: 'gateway retries', sessionId: 's1', moment: 'prompt' });
+    writeFileSync(
+      join(dir, '.ai-sdlc/knowledge/systems/gateway.md'),
+      entryFile(mk('gateway', 'The gateway retries failed requests five times')),
+    );
+    await rebuildIndex(dir);
+    await queryIndex(dir, { text: 'gateway retries', sessionId: 's1', moment: 'session-start' });
+    const rows = readLedger(dir, 's1').filter((r) => r.id === 'gateway');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ moment: 'prompt' });
+    expect(rows[0].tokens).toBeGreaterThan(0);
+    expect(rows[0].supersedes).toBeUndefined();
+    expect(rows[1]).toMatchObject({ moment: 'session-start', supersedes: rows[0].contentHash });
+    expect(rows[1].tokens).toBeGreaterThan(0);
+  });
+
+  it('pre-marks CLAUDE.md and the memory index and never re-injects their entries', async () => {
+    const dir = project([
+      mk('claude-rule', 'Always rebase feature branches onto main', { source: 'CLAUDE.md' }),
+      mk('mem-note', 'Rebase feature branches never merge main', {
+        source: '.claude/memory/MEMORY.md',
+      }),
+      mk('other', 'Rebase conflicts need manual review'),
+    ]);
+    writeFileSync(join(dir, 'CLAUDE.md'), '# rules');
+    mkdirSync(join(dir, '.claude/memory'), { recursive: true });
+    writeFileSync(join(dir, '.claude/memory/MEMORY.md'), '- index');
+    await rebuildIndex(dir);
+    const hits = await queryIndex(dir, { text: 'rebase feature branches', sessionId: 'p1' });
+    expect(hits.map((h) => h.id)).toEqual(['other']);
+    expect(readLedger(dir, 'p1').filter((r) => r.kind === 'premark')).toHaveLength(2);
+  });
+
+  it('resets on clear leaving only the pre-marked entries', async () => {
+    const dir = project(CORPUS);
+    writeFileSync(join(dir, 'CLAUDE.md'), '# rules');
+    await rebuildIndex(dir);
+    await queryIndex(dir, { text: 'gateway retries', sessionId: 'r1' });
+    expect(readLedger(dir, 'r1').some((r) => r.kind === 'load')).toBe(true);
+    resetSession(dir, 'r1');
+    expect(readLedger(dir, 'r1').map((r) => r.kind)).toEqual(['premark']);
+    const again = await queryIndex(dir, { text: 'gateway retries', sessionId: 'r1' });
+    expect(again.map((h) => h.id)).toContain('gateway');
+  });
+
+  it('keeps entries that survive the compaction summary and frees the rest', async () => {
+    const dir = project(CORPUS);
+    await rebuildIndex(dir);
+    const first = await queryIndex(dir, { text: 'gateway retries', sessionId: 'k1' });
+    expect(first.length).toBeGreaterThan(1);
+    const survivor = first[0];
+    const summary = `Summary: we noted that ${CORPUS.find((c) => c.id === survivor.id)!.value}.`;
+    const r = compactSession(dir, 'k1', summary);
+    expect(r.kept).toBe(1);
+    expect(r.dropped).toBe(first.length - 1);
+    const next = await queryIndex(dir, { text: 'gateway retries', sessionId: 'k1' });
+    expect(next.map((h) => h.id)).not.toContain(survivor.id);
+    expect(next.length).toBe(first.length - 1);
+  });
+
+  it('keeps a valid ledger under concurrent appends from two processes', async () => {
+    const dist = fileURLToPath(
+      new URL('../../../dist/knowledge/retrieval/ledger.js', import.meta.url),
+    );
+    if (!existsSync(dist)) return; // exercised after `pnpm build`
+    root = mkdtempSync(join(tmpdir(), 'ledger-lock-'));
+    const script = `import(${JSON.stringify(dist)}).then((m) => {
+      for (let i = 0; i < 40; i++) {
+        m.recordLoaded(process.argv[1], 'lk', [{ id: process.argv[2] + i, contentHash: 'h', score: 1, citations: [], tokens: 3 }]);
+      }
+    });`;
+    const run = (tag: string) =>
+      new Promise<number | null>((res) => {
+        const c = spawn(process.execPath, ['-e', script, root, tag], { stdio: 'ignore' });
+        c.on('exit', res);
+      });
+    const codes = await Promise.all([run('a'), run('b')]);
+    expect(codes).toEqual([0, 0]);
+    const raw = readFileSync(join(root, '.ai-sdlc/context/sessions/lk.jsonl'), 'utf-8').trim();
+    const lines = raw.split('\n');
+    expect(lines).toHaveLength(80);
+    for (const l of lines) expect(() => JSON.parse(l)).not.toThrow();
   });
 
   it('rejects path-like session ids', async () => {

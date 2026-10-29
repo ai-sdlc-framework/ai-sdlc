@@ -23,6 +23,8 @@ export interface QueryOptions {
   limit?: number;
   /** Entries to skip: `${id}@${contentHash}` keys already loaded in the session. */
   exclude?: ReadonlySet<string>;
+  /** Entries whose `source` is in this set are skipped (pre-marked files such as CLAUDE.md). */
+  excludeSources?: ReadonlySet<string>;
 }
 
 export interface QueryHit {

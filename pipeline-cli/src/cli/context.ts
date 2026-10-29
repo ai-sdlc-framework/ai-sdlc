@@ -15,6 +15,7 @@
  *   index           — rebuild the retrieval index from the entries on disk.
  *   query <text>    — ranked entry ids, contentHash and citations within `--budget`/`--min-score`;
  *                     `--session <id>` omits entries already loaded in that session.
+ *   session-reset / session-compact — clear / PreCompact handling of the session load ledger (AISDLC-780).
  *   check-scope     — fail when a protected entry is in the configured tracked root, or the
  *                     configured protected root is tracked / not git-ignored. With `--rev`, also
  *                     scans every commit in the pushed range, not only HEAD/the index.
@@ -39,7 +40,12 @@ import {
   supersedeEntry,
 } from '../knowledge/human.js';
 import { promoteEntry, reobserveEntry, refuteEntry, type Role } from '../knowledge/promote.js';
-import { queryIndex, rebuildIndex } from '../knowledge/retrieval/service.js';
+import {
+  compactSession,
+  queryIndex,
+  rebuildIndex,
+  resetSession,
+} from '../knowledge/retrieval/service.js';
 import { findProtectedCitations, readEntries, validateKnowledge } from '../knowledge/store.js';
 
 function knowledgeCtx(projectDir: string) {
@@ -110,6 +116,10 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           .option('session', {
             type: 'string',
             describe: 'Skip entries already loaded in this session',
+          })
+          .option('moment', {
+            type: 'string',
+            describe: 'Injection moment recorded in the ledger',
           }),
       async (args) => {
         try {
@@ -118,8 +128,40 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
             budget: args.budget,
             minScore: args['min-score'] as number,
             sessionId: args.session,
+            moment: args.moment,
           });
           process.stdout.write(`${JSON.stringify({ results: hits }, null, 2)}\n`);
+        } catch (err) {
+          process.stderr.write(`error: ${(err as Error).message}\n`);
+          process.exitCode = 1;
+        }
+      },
+    )
+    .command(
+      'session-reset <session>',
+      'Reset the session load ledger (/clear); pre-marked entries stay loaded',
+      (y) => y.positional('session', { type: 'string', demandOption: true }),
+      (args) => {
+        try {
+          resetSession(String(args['project-dir']), String(args.session));
+        } catch (err) {
+          process.stderr.write(`error: ${(err as Error).message}\n`);
+          process.exitCode = 1;
+        }
+      },
+    )
+    .command(
+      'session-compact <session>',
+      'Rebuild the session load ledger from a compaction summary (PreCompact)',
+      (y) =>
+        y
+          .positional('session', { type: 'string', demandOption: true })
+          .option('summary-file', { type: 'string', describe: 'Defaults to stdin' }),
+      (args) => {
+        try {
+          const summary = readFileSync((args['summary-file'] as string | undefined) ?? 0, 'utf-8');
+          const r = compactSession(String(args['project-dir']), String(args.session), summary);
+          process.stdout.write(`${r.kept} kept, ${r.dropped} eligible again\n`);
         } catch (err) {
           process.stderr.write(`error: ${(err as Error).message}\n`);
           process.exitCode = 1;
