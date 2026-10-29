@@ -240,7 +240,7 @@ export function decisionMessage(
   return `Decision ${decisionId} (${tier}) needs an answer. Read it with: cli-decisions show ${decisionId}${store}`;
 }
 
-/** Tell the session that owns `tier` about a decision (id and tier only). Never throws. */
+/** Tell the session that owns `tier` about a decision (id, tier and the decision store path). Never throws. */
 export function notifyTier(
   deps: ChainDeps,
   tier: EscalationTier,

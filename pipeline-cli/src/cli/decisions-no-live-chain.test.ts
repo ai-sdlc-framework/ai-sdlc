@@ -48,7 +48,7 @@ describe('decisions CLI tests never reach the system chain (AISDLC-1113)', () =>
       const escalates = /escalate/.test(block) && /['"]--(route|park)['"]/.test(block);
       if (!escalates) continue;
       for (const args of cliCallArgs(block)) {
-        expect(args, `${file}: buildDecisionsCli() without a chain`).toMatch(/chain/);
+        expect(args, `${file}: buildDecisionsCli() without a chain`).toMatch(/\bchain\b\s*[:,}]/);
       }
     }
   });
