@@ -60,6 +60,9 @@ import {
   runAudit,
   type AuditDeps,
 } from '../usage/audit.js';
+import { homedir } from 'node:os';
+import path from 'node:path';
+import { loadRosterSessionRoles } from '../usage/roster-roles.js';
 import {
   DEFAULT_MAX_SECONDS,
   ingestClaudeTranscripts,
@@ -375,6 +378,13 @@ export function buildUsageCli(
               ? { projectsDir: args['projects-dir'] }
               : {}),
             maxSeconds: args['max-seconds'],
+            sessionRoles: loadRosterSessionRoles(
+              path.resolve('.ai-sdlc', 'dispatch'),
+              path.join(
+                process.env.CLAUDE_CONFIG_DIR || path.join(homedir(), '.claude'),
+                'sessions',
+              ),
+            ),
           });
         } catch (err) {
           report('degraded', 'ingest failed');

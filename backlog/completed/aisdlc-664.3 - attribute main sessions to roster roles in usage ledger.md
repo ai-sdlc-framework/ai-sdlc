@@ -2,7 +2,7 @@
 id: AISDLC-664.3
 title: >-
   RFC-0051: attribute main-session usage to hierarchy roster roles
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:

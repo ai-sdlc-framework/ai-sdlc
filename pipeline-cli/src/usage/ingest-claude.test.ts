@@ -723,3 +723,15 @@ describe('large projects directory', () => {
     expect(second).toMatchObject({ filesScanned: 500, callsWritten: 0 });
   }, 60_000);
 });
+
+describe('ingestClaudeTranscripts roster roles (AISDLC-664.3)', () => {
+  it('records a roster session under its role and keeps others as main-session', async () => {
+    const repo = mkRepo(join(root, 'work', 'myrepo'));
+    writeSession('p1', 'planner-sess', [assistant({ id: 'r1', cwd: repo })]);
+    writeSession('p1', 'other-sess', [assistant({ id: 'r2', cwd: repo })]);
+    await ingest({ sessionRoles: new Map([['planner-sess', 'planner']]) });
+    const byId = new Map((await ledger()).map((r) => [r.callId, r]));
+    expect(byId.get('r1')?.agentRole).toBe('planner');
+    expect(byId.get('r2')?.agentRole).toBe('main-session');
+  });
+});
