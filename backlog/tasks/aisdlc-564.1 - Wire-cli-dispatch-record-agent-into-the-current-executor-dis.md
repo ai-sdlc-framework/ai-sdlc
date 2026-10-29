@@ -1,7 +1,7 @@
 ---
 id: AISDLC-564.1
 title: Wire cli-dispatch record-agent into the current executor dispatch path
-status: To Do
+status: In Progress
 priority: medium
 created_date: '2026-10-11 03:06'
 updated_date: '2026-10-11 03:06'
