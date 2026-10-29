@@ -20,6 +20,7 @@ import { aggregateVerdicts } from '../steps/08-aggregate-verdicts.js';
 import type { AggregatedVerdict, ReviewerFinding, ReviewerVerdict, Severity } from '../types.js';
 import { writeRunFile } from './init.js';
 import type { NextStepContext, NextStepState } from './types.js';
+import { DEFAULT_HARNESS } from '../harness-defaults.js';
 
 /** What the model reports for one reviewer. */
 export interface ReviewerReport {
@@ -252,7 +253,7 @@ function resolveActual(
   if (!fellBack) return { agent: sp.agent, harness: sp.harness, leafModel: sp.leafModel };
   return {
     agent: report.agent,
-    harness: 'claude-code',
+    harness: DEFAULT_HARNESS,
     leafModel: report.model ?? 'sonnet',
     plannedHarness: sp.harness,
   };

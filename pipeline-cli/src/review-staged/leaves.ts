@@ -14,6 +14,7 @@
 import { join } from 'node:path';
 import { STAGED_REVIEWER_NAME, type StagedLeafStage } from '../attestation/merkle.js';
 import { safeSegment } from './run-store.js';
+import { DEFAULT_HARNESS } from '../harness-defaults.js';
 
 export interface LeafManifestEntry {
   stage: StagedLeafStage;
@@ -94,7 +95,7 @@ export function buildLeafManifest(opts: BuildLeafManifestOpts): {
       reviewer: STAGED_REVIEWER_NAME,
       transcriptPath: join(d.transcriptDir, 'review-planner.jsonl'),
       verdictPath: join(d.verdictDir, `review-planner-${d.id}.json`),
-      harness: 'claude-code',
+      harness: DEFAULT_HARNESS,
       model: opts.plannerModel ?? 'unrouted',
     },
     ...[...opts.executeLeaves]
@@ -113,7 +114,7 @@ export function buildLeafManifest(opts: BuildLeafManifestOpts): {
       reviewer: STAGED_REVIEWER_NAME,
       transcriptPath: join(d.transcriptDir, 'review-synthesizer.jsonl'),
       verdictPath: synthesizeVerdictPath,
-      harness: 'claude-code',
+      harness: DEFAULT_HARNESS,
       model: opts.synthesizerModel ?? 'unrouted',
     },
   ];

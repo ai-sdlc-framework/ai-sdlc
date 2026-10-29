@@ -88,8 +88,8 @@
  * @see spec/rfcs/RFC-0028-engineering-axis-substrate-enforcement.md §4
  */
 
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
-import { join, basename, dirname, resolve } from 'node:path';
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { join, basename, dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
@@ -663,6 +663,67 @@ export function emitDecision(failure, repoRoot) {
   }
 }
 
+// ── Vendor-default regression check (AISDLC-540) ─────────────────────────────
+
+/** Core source roots scanned for hardwired vendor defaults. */
+export const VENDOR_SCAN_ROOTS = ['orchestrator/src', 'pipeline-cli/src'];
+
+/**
+ * Files allowed to spell the vendor default literally: the single seam, and
+ * the Claude Code adapter layer (see docs/audits/2026-10-28-claude-coupling-audit.md).
+ */
+export const VENDOR_DEFAULT_ALLOWLIST = [
+  'pipeline-cli/src/harness-defaults.ts',
+  'orchestrator/src/defaults.ts',
+  'pipeline-cli/src/usage/ingest-claude.ts',
+  'pipeline-cli/src/runtime/shell-claude-p-spawner.ts',
+  'orchestrator/src/cli/commands/mcp-setup.ts',
+  'orchestrator/src/harness/adapters/claude-code.ts',
+  'pipeline-cli/src/runtime/default-spawner.ts',
+];
+
+// A value default (`harness: 'claude-code'`, `harness = 'claude-code'`,
+// `?? 'claude-code'`) that is not a type-union member (`'claude-code' | 'codex'`).
+const VENDOR_DEFAULT_RE =
+  /(?:\bharness\s*[:=]\s*|\?\?\s*)'claude-code'(?!\s*\|)|(?:\bclaudeBin(?:ary)?\s*[:=]\s*|\bbinary\s*(?:\?\?|:)\s*)'claude'/;
+
+function listSourceFiles(dir, out = []) {
+  if (!existsSync(dir)) return out;
+  for (const name of readdirSync(dir)) {
+    const full = join(dir, name);
+    if (statSync(full).isDirectory()) {
+      if (name === 'node_modules' || name === 'dist' || name === '__tests__') continue;
+      listSourceFiles(full, out);
+    } else if (/\.(ts|mjs|js)$/.test(name) && !/\.test\.|\.d\.ts$/.test(name)) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+/**
+ * Fail on a hardwired `'claude-code'` default in core source outside the seam.
+ * @param {string} repoRoot
+ * @returns {Array<{file: string; line: number; text: string}>}
+ */
+export function findVendorDefaultViolations(repoRoot) {
+  const violations = [];
+  for (const root of VENDOR_SCAN_ROOTS) {
+    for (const full of listSourceFiles(join(repoRoot, root))) {
+      const rel = relative(resolve(repoRoot), full).split('\\').join('/');
+      if (VENDOR_DEFAULT_ALLOWLIST.includes(rel)) continue;
+      readFileSync(full, 'utf8')
+        .split('\n')
+        .forEach((text, i) => {
+          if (VENDOR_DEFAULT_RE.test(text) && !/^\s*(\/\/|\*)/.test(text)) {
+            violations.push({ file: rel, line: i + 1, text: text.trim() });
+          }
+        });
+    }
+  }
+  return violations;
+}
+
 // ── CLI entry point ───────────────────────────────────────────────────────────
 
 /**
@@ -712,6 +773,13 @@ export async function main(argv) {
   }
 
   const args = parseArgs(argv);
+  const vendorViolations = findVendorDefaultViolations(args.repoRoot);
+  for (const v of vendorViolations) {
+    process.stderr.write(
+      `::error file=${v.file},line=${v.line}::hardwired 'claude-code' default; import DEFAULT_HARNESS from pipeline-cli/src/harness-defaults.ts (AISDLC-540)\n`,
+    );
+  }
+  if (vendorViolations.length > 0) process.exitCode = 1;
   const result = runGate(args);
 
   if (result.coldStart) {

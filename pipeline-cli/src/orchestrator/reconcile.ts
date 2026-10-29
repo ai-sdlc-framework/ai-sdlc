@@ -82,6 +82,7 @@ import { resolveTargetBranch } from '../steps/02-compute-branch.js';
 import { deriveReviewerSetFromGit } from '../steps/reviewer-set.js';
 import type { ReviewerSetClassification } from '../steps/reviewer-set.js';
 import { writeEvent, type WriteEventOpts } from './events.js';
+import { DEFAULT_HARNESS } from '../harness-defaults.js';
 
 /**
  * A reviewer the reconcile sub-tick emits + signs for.
@@ -640,7 +641,7 @@ function runReconcileInner(
   const cliAttestationBin =
     options.cliAttestationBin ?? path.join(workDir, 'pipeline-cli', 'bin', 'cli-attestation.mjs');
   const reviewerModel = options.reviewerModel ?? DEFAULT_ROLE_MODELS['code-reviewer'];
-  const harness = options.harness ?? 'claude-code';
+  const harness = options.harness ?? DEFAULT_HARNESS;
 
   // AISDLC-493 — capture reviewer fan-out start/end timestamps for verdict patching.
   const reviewerStartedAt = now().toISOString();

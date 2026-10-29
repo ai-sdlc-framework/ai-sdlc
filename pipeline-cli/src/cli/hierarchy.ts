@@ -176,6 +176,7 @@ import {
 import { resolveArtifactsDir } from '../routing/artifacts-dir.js';
 import { loadUsageConfig } from '../usage/usage-config.js';
 import { findTaskFile, parseArgv, resolveBaseSha } from './dispatch.js';
+import { DEFAULT_HARNESS_BINARY } from '../harness-defaults.js';
 
 const USAGE = `Usage: cli-hierarchy <command> [options]
 
@@ -426,7 +427,7 @@ export function defaultHierarchyDeps(flags: Record<string, string>): HierarchyDe
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     log: (line) => process.stdout.write(line + '\n'),
     attach: attachTmuxSession,
-    claudeBin: 'claude',
+    claudeBin: DEFAULT_HARNESS_BINARY,
     pollAttempts: 20,
     pollIntervalMs: 500,
     emit: createStreamEmitter(),

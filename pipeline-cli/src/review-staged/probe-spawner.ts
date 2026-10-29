@@ -49,6 +49,7 @@ import {
   ProbeScopeError,
   type ProbeSandbox,
 } from './probe-sandbox.js';
+import { DEFAULT_HARNESS_BINARY } from '../harness-defaults.js';
 
 /** Tools that read files. A probe holding any of them is a scope-bearing probe. */
 const FILE_TOOLS: readonly string[] = ['Read', 'Grep', 'Glob'];
@@ -251,7 +252,7 @@ export class ClaudeProbeSpawner implements ProbeSpawner {
   private readonly envFor: () => Record<string, string>;
 
   constructor(options: ClaudeProbeSpawnerOptions = {}) {
-    this.binary = options.binary ?? 'claude';
+    this.binary = options.binary ?? DEFAULT_HARNESS_BINARY;
     this.extraArgs = options.extraArgs ?? [];
     this.run = options.run ?? runProbeProcess;
     this.git = options.git;

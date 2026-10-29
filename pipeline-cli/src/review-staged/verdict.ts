@@ -12,6 +12,7 @@
 import { STAGED_REVIEWER_NAME } from '../attestation/merkle.js';
 import type { ReviewerFinding, ReviewerVerdict } from '../types.js';
 import type { StagedVerdict } from '../review-synth/types.js';
+import { DEFAULT_HARNESS } from '../harness-defaults.js';
 
 /** Hunk ids named in the summary at most; the rest are counted. */
 const MAX_LISTED = 20;
@@ -40,7 +41,7 @@ export function toReviewerVerdict(
   }
   return {
     agentId: STAGED_REVIEWER_NAME,
-    harness: 'claude-code',
+    harness: DEFAULT_HARNESS,
     approved: verdict.approved,
     findings,
     summary: notes.join(' '),

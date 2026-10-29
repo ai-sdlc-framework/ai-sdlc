@@ -14,7 +14,7 @@ import {
   type CostReceipt,
 } from '@ai-sdlc/reference';
 import { createHash } from 'node:crypto';
-import { DEFAULT_MODEL } from './defaults.js';
+import { DEFAULT_MODEL, DEFAULT_TOOL } from './defaults.js';
 
 /**
  * Create a provenance record for a pipeline execution.
@@ -32,7 +32,7 @@ export function createPipelineProvenance(opts: {
 
   return createProvenance({
     model: opts.model ?? DEFAULT_MODEL,
-    tool: opts.tool ?? 'claude-code',
+    tool: opts.tool ?? DEFAULT_TOOL,
     promptHash,
     humanReviewer: opts.humanReviewer,
     cost: opts.cost,

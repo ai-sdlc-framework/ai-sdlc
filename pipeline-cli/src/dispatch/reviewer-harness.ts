@@ -19,6 +19,7 @@
  */
 
 import { resolveReviewerHarnessSetting, routedModel } from '../routing/role-model.js';
+import { DEFAULT_HARNESS } from '../harness-defaults.js';
 
 /** The four dispatchable roles. */
 export type ReviewerRole = 'code' | 'test' | 'security' | 'developer';
@@ -59,7 +60,7 @@ export interface ResolvedReviewer {
 export function resolveReviewer(role: ReviewerRole, overrideHarness?: string): ResolvedReviewer {
   // Developer dispatch is never affected by the reviewer-harness override.
   if (role === 'developer') {
-    return { agentName: 'developer', harness: 'claude-code', model: routedModel('developer') };
+    return { agentName: 'developer', harness: DEFAULT_HARNESS, model: routedModel('developer') };
   }
 
   // Security review always stays on Claude-native opus — reasoning-heavy work
@@ -67,7 +68,7 @@ export function resolveReviewer(role: ReviewerRole, overrideHarness?: string): R
   if (role === 'security') {
     return {
       agentName: 'security-reviewer',
-      harness: 'claude-code',
+      harness: DEFAULT_HARNESS,
       model: routedModel('security-reviewer'),
     };
   }
@@ -81,7 +82,7 @@ export function resolveReviewer(role: ReviewerRole, overrideHarness?: string): R
     if (forceClaudeNative) {
       return {
         agentName: 'code-reviewer',
-        harness: 'claude-code',
+        harness: DEFAULT_HARNESS,
         model: routedModel('code-reviewer'),
       };
     }
@@ -96,7 +97,7 @@ export function resolveReviewer(role: ReviewerRole, overrideHarness?: string): R
   if (forceClaudeNative) {
     return {
       agentName: 'test-reviewer',
-      harness: 'claude-code',
+      harness: DEFAULT_HARNESS,
       model: routedModel('test-reviewer'),
     };
   }
@@ -133,7 +134,7 @@ export function resolveReviewerByClassifierName(
       // the pipeline doesn't silently drop an unknown reviewer.
       return {
         agentName: classifierName,
-        harness: 'claude-code',
+        harness: DEFAULT_HARNESS,
         model: routedModel('code-reviewer'),
       };
   }
