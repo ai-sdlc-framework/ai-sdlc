@@ -20,5 +20,9 @@ export function resolveMaxWorkers(env = process.env, ncpu = availableParallelism
 export const sharedTestConfig = {
   pool: 'forks',
   maxWorkers: resolveMaxWorkers(),
+  // AISDLC-1088: generous ceiling so contention never fails an untouched file;
+  // tests themselves should stay under 2 s (use fake timers, not real waits).
+  testTimeout: 30000,
+  hookTimeout: 30000,
   setupFiles: [fileURLToPath(new URL('./vitest.parent-watch.setup.mjs', import.meta.url))],
 };

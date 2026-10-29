@@ -191,7 +191,7 @@ gates:
     owner: engineering
     property: whole-workspace TypeScript typecheck before push
     baseline: true
-  - id: test-chain:pnpm -r test
+  - id: test-chain:pnpm -r --no-bail test
     surface: test-chain
     origin: project baseline
     owner: engineering

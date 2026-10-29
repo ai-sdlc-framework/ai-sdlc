@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1088
 title: 'vitest shared config sets a 30 s per-test timeout, the root test script does not stop at the first failing package, and the real-timer tests over 2.5 s use fake timers'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-27'
 labels:

@@ -12,7 +12,7 @@
   "scripts": {
     "typecheck": "pnpm -r --parallel exec tsc --noEmit",
     "build": "pnpm -r build",
-    "test": "pnpm -r test && pnpm test:gates && pnpm rfc:check && pnpm dark-code:check && pnpm lint:publishable && pnpm knowledge:check && pnpm sync:plugin-runtime-deps:check:pr",
+    "test": "pnpm -r --no-bail test && pnpm test:gates && pnpm rfc:check && pnpm dark-code:check && pnpm lint:publishable && pnpm knowledge:check && pnpm sync:plugin-runtime-deps:check:pr",
     "test:gates": "node scripts/run-gate-tests.mjs",
     "test:coverage": "pnpm -r test:coverage",
     "lint": "eslint . && node scripts/check-clock-discipline.mjs",

@@ -124,7 +124,7 @@ const BASELINE_IDS = [
   'pre-push:scripts/pre-push-fixups.sh',
   'pre-commit:scripts/check-backlog-ascii.sh',
   'pre-commit:lint-staged',
-  'test-chain:pnpm -r test',
+  'test-chain:pnpm -r --no-bail test',
   'test-chain:pnpm test:gates',
   'test-chain:pnpm rfc:check',
   'test-chain:pnpm dark-code:check',

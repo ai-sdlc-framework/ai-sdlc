@@ -124,6 +124,9 @@ describe('runOrchestratorTick — Dispatchability filter (AISDLC-243)', () => {
       escalate: async () => {},
       // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
       parentBranchGuard: async () => {},
+      // AISDLC-1088 — hermetic filters: no live `ps -ax` or `gh pr list` per tick.
+      alreadyInFlightOpts: { detectSubprocess: false, listOpenPRs: () => [] },
+      openPRExistsOpts: { listOpenPRsByBranch: () => [] },
     };
 
     const tick = await runOrchestratorTick(config, adapters, 1);
@@ -188,6 +191,9 @@ describe('runOrchestratorTick — Dispatchability filter (AISDLC-243)', () => {
       escalate: async () => {},
       // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
       parentBranchGuard: async () => {},
+      // AISDLC-1088 — hermetic filters: no live `ps -ax` or `gh pr list` per tick.
+      alreadyInFlightOpts: { detectSubprocess: false, listOpenPRs: () => [] },
+      openPRExistsOpts: { listOpenPRsByBranch: () => [] },
     };
 
     const tick = await runOrchestratorTick(config, adapters, 1);
@@ -227,6 +233,9 @@ describe('runOrchestratorTick — Dispatchability filter (AISDLC-243)', () => {
       escalate: async () => {},
       // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
       parentBranchGuard: async () => {},
+      // AISDLC-1088 — hermetic filters: no live `ps -ax` or `gh pr list` per tick.
+      alreadyInFlightOpts: { detectSubprocess: false, listOpenPRs: () => [] },
+      openPRExistsOpts: { listOpenPRsByBranch: () => [] },
     };
 
     const tick = await runOrchestratorTick(config, adapters, 1);
