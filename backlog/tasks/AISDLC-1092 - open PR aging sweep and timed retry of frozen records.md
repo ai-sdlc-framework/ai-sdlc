@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1092
 title: 'open PR aging sweep: a PR with no state change for 6 hours is re-evaluated with fresh facts, gets one more action per head per window, and raises an age alarm in status'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-28'
 labels:
