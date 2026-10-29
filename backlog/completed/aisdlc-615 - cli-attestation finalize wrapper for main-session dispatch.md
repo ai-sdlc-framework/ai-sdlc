@@ -1,7 +1,7 @@
 ---
 id: AISDLC-615
 title: Single cli-attestation `finalize` wrapper for a main-session dispatch (LOW-7)
-status: In Progress
+status: Done
 priority: low
 labels:
   - attestation
