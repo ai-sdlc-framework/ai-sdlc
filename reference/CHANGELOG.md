@@ -1,5 +1,22 @@
 # @ai-sdlc/reference
 
+## [0.38.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.37.0...reference-v0.38.0) (2026-10-29)
+
+
+### Features
+
+* add model and permission mode to HierarchySessionStarted (AISDLC-664.4) ([#2116](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2116)) ([a6b3f90](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a6b3f90973ae73a00a65f67bbbecd701254ac380))
+* dispatch tick markers, turns-per-tick scorecard and budget Decision (AISDLC-667.1) ([#2095](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2095)) ([c6a3802](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c6a380240266637d97c94389544e448a42bbd70d))
+* hold fetched price drifting from seed, manual or median (AISDLC-659.1) ([#2112](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2112)) ([afe1b93](https://github.com/ai-sdlc-framework/ai-sdlc/commit/afe1b93f9515b7849ca57e904310bfd565bfba48))
+* **orchestrator:** wire the six RFC-0006 Addendum A design modules (AISDLC-551) ([#2089](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2089)) ([c87bee2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c87bee25c1b464476dac340b70a853a7dc71049b))
+* staged review shadow comparison, compare --bar, replay --set (AISDLC-677) ([#2071](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2071)) ([b3e6ec0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b3e6ec0bd0c2576c3688ee1fa42d9e4da30f9b28))
+
+
+### Bug Fixes
+
+* harden hierarchy preflight and roster name handling (AISDLC-664.5) ([#2120](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2120)) ([3aa12bf](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3aa12bf9da902d621c4575cf53a4dc73a7660ffb))
+* status reads the session's own Node, not an MCP child's (AISDLC-906) ([#1663](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1663)) ([283bcd8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/283bcd8181d6b594513f31dbf2118a3030aac805))
+
 ## [0.37.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.36.0...reference-v0.37.0) (2026-10-27)
 
 
