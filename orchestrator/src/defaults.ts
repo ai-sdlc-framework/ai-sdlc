@@ -20,6 +20,9 @@ import { parseDuration, CLAUDE_SONNET_MODEL_ID, SEED_PRICES } from '@ai-sdlc/ref
  */
 export const DEFAULT_MODEL = CLAUDE_SONNET_MODEL_ID;
 
+/** Default provenance tool label (AISDLC-540: the one vendor-default seam for orchestrator). */
+export const DEFAULT_TOOL = 'claude-code';
+
 // ── GitHub ───────────────────────────────────────────────────────────
 
 /**

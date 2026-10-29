@@ -57,6 +57,7 @@ import {
 import { routedModel } from '../routing/role-model.js';
 import type { PlanLimits, Probe, ProbeFileRef, ProbeType, ReviewPlan } from './types.js';
 import { DEFAULT_MAX_RUN_PROBES, escapesRoot, isSafeRelativePath } from './validate.js';
+import { DEFAULT_HARNESS } from '../harness-defaults.js';
 
 export type { CommandResult, CommandRunner, GitResult, GitRunner } from './executor-git.js';
 
@@ -939,7 +940,7 @@ function selectHarness(probe: Probe, limits: ExecutorLimits): ExecutorHarness {
   if (c?.available !== true || c.trusted !== true) return 'claude-code';
   // The Codex variant is read-only, so a probe that executes a command never runs on it.
   if (probe.type === 'run') return 'claude-code';
-  return (c.probeTypes ?? CODEX_ELIGIBLE).includes(probe.type) ? 'codex' : 'claude-code';
+  return (c.probeTypes ?? CODEX_ELIGIBLE).includes(probe.type) ? 'codex' : DEFAULT_HARNESS;
 }
 
 // ── runTrusted (separable) ───────────────────────────────────────────────
@@ -1076,11 +1077,11 @@ export async function executePlan(
     const scoped = probeUsesFileTools(probe);
     let harness = selectHarness(probe, limits);
     if (scoped && harness === 'codex' && !declaresFileScope(spawner, 'codex'))
-      harness = 'claude-code';
+      harness = DEFAULT_HARNESS;
     // A probe with no file tools is handed an empty tool list. Codex receives it only when the
     // bridge declares it honours one; otherwise the probe stays on the Claude harness.
     if (!scoped && harness === 'codex' && !honoursEmptyToolList(spawner, 'codex'))
-      harness = 'claude-code';
+      harness = DEFAULT_HARNESS;
     if (scoped && !declaresFileScope(spawner, harness))
       return {
         ...emptyEntry(probe.id),

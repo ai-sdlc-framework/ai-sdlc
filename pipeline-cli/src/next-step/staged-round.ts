@@ -36,6 +36,7 @@ import type {
   SpawnedReviewer,
   StagedModelAgent,
 } from './types.js';
+import { DEFAULT_HARNESS } from '../harness-defaults.js';
 
 /** Shape of the report the model sends for a staged stage. */
 export const STAGED_REPORT_SHAPE =
@@ -176,7 +177,7 @@ export async function startStagedRound(
   const entry: SpawnedReviewer = {
     reviewer: 'review-planner',
     agent: 'review-planner',
-    harness: 'claude-code',
+    harness: DEFAULT_HARNESS,
     leafModel: planner.leafModel,
     ...(planner.model ? { model: planner.model } : {}),
     promptFile: prep.plannerPromptPath,
@@ -331,7 +332,7 @@ export async function advanceStagedRound(
     const entry: SpawnedReviewer = {
       reviewer: 'review-synthesizer',
       agent: 'review-synthesizer',
-      harness: 'claude-code',
+      harness: DEFAULT_HARNESS,
       leafModel: staged.synthModel,
       ...(synth.model ? { model: synth.model } : {}),
       promptFile: sp.promptPath,

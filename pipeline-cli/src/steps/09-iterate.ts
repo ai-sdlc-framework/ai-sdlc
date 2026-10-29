@@ -33,6 +33,7 @@ import type {
   SubagentResult,
   SubagentSpawner,
 } from '../types.js';
+import { DEFAULT_HARNESS } from '../harness-defaults.js';
 
 /** The review-iteration cap; the single definition (AISDLC-982). */
 export const DEFAULT_MAX_ITERATIONS = 2;
@@ -211,7 +212,7 @@ export function coerceReviewerVerdict(agentId: ReviewerType, r: SubagentResult):
   if (!parsed || typeof parsed !== 'object') {
     return {
       agentId,
-      harness: 'claude-code',
+      harness: DEFAULT_HARNESS,
       approved: false,
       findings: [
         {
@@ -231,7 +232,7 @@ export function coerceReviewerVerdict(agentId: ReviewerType, r: SubagentResult):
   };
   return {
     agentId,
-    harness: typeof obj.harness === 'string' ? obj.harness : 'claude-code',
+    harness: typeof obj.harness === 'string' ? obj.harness : DEFAULT_HARNESS,
     approved: !!obj.approved,
     findings: Array.isArray(obj.findings) ? (obj.findings as ReviewerVerdict['findings']) : [],
     summary: typeof obj.summary === 'string' ? obj.summary : undefined,
@@ -289,7 +290,7 @@ export async function spawnReviewerWithRetry(
   if (firstResult.status === 'timeout') {
     return {
       agentId,
-      harness: 'claude-code',
+      harness: DEFAULT_HARNESS,
       approved: false,
       findings: [
         {
@@ -325,7 +326,7 @@ export async function spawnReviewerWithRetry(
   if (retryResult.status === 'timeout') {
     return {
       agentId,
-      harness: 'claude-code',
+      harness: DEFAULT_HARNESS,
       approved: false,
       findings: [
         {

@@ -43,6 +43,7 @@ import {
   writeVerdict,
 } from './board.js';
 import type { DispatchManifest, DispatchVerdict } from './types.js';
+import { DEFAULT_HARNESS_BINARY } from '../harness-defaults.js';
 
 // Re-export PID lock helpers so callers depending on supervisor.ts get
 // the singleton-enforcement surface in one import.
@@ -125,7 +126,7 @@ export function runSupervisorTick(opts: SupervisorTickOptions): SupervisorTickRe
     staleMs,
     state,
     spawn,
-    claudeBinary = 'claude',
+    claudeBinary = DEFAULT_HARNESS_BINARY,
     now = () => new Date(),
     log = () => {},
   } = opts;
