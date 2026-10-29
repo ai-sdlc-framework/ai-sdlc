@@ -19,9 +19,11 @@ import { releaseInflight } from '../dispatch/board.js';
 import { listInflight } from './inflight.js';
 import { schedulerDown } from './reconcile-scheduler.js';
 import { readRosterChecked, writeRoster } from './roster.js';
-import { splitSessionName } from './validate.js';
+import { isSpawnedExecutorNameOf, splitSessionName } from './validate.js';
 import {
   killPane,
+  hasSession,
+  killSession,
   killWindow,
   listWindows,
   ownershipRefusal,
@@ -122,6 +124,14 @@ export async function hierarchyDown(
       continue;
     }
     const { forced } = stop;
+    // AISDLC-1117: an ephemeral executor's session must not outlive its roster entry.
+    if (
+      entry.taskId !== undefined &&
+      isSpawnedExecutorNameOf(entry.tmuxSession, entry.taskId) &&
+      hasSession(deps.run, entry.tmuxSession)
+    ) {
+      killSession(deps.run, entry.tmuxSession);
+    }
     const held = listInflight(deps.boardDir).find((i) => i.workerId === entry.name);
     let requeued: string | undefined;
     if (held && releaseInflight(deps.boardDir, held.taskId)) requeued = held.taskId;

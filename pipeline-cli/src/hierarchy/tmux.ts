@@ -11,6 +11,21 @@ export function hasSession(run: CommandRunner, session: string): boolean {
   return run('tmux', ['has-session', '-t', `=${session}`]).status === 0;
 }
 
+/** Close a whole session (AISDLC-1117: orphan reclaim, and the tail of an ephemeral executor's down). */
+export function killSession(run: CommandRunner, session: string): CommandResult {
+  return run('tmux', ['kill-session', '-t', `=${session}`]);
+}
+
+/** Names of every tmux session; empty when tmux has none or cannot be read. */
+export function listSessionNames(run: CommandRunner): string[] {
+  const r = run('tmux', ['list-sessions', '-F', '#{session_name}']);
+  if (r.status !== 0) return [];
+  return r.stdout
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+}
+
 /** Window names in the session; empty when the session does not exist. */
 export function listWindows(run: CommandRunner, session: string): string[] {
   const r = run('tmux', ['list-windows', '-t', `=${session}`, '-F', '#{window_name}']);

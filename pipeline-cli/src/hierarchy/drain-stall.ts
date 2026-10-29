@@ -67,6 +67,10 @@ export interface DrainStallDeps {
   /** Roster names of executors that are idle and hold no inflight task. */
   idleExecutors: () => string[];
   minutes?: number;
+  /** Spawn errors of this tick (AISDLC-1117); with no live executor they count as a stall. */
+  spawnErrors?: number;
+  /** Live dynamic executors in the roster. */
+  liveExecutors?: number;
 }
 
 export interface DrainStallResult {
@@ -128,7 +132,7 @@ function kindOf(prev: Counts | undefined, next: Counts): ProgressKind {
 export function formatDrainStall(r: DrainStallRecord, minutes: number): string {
   return (
     `drain-stall: ${r.eligible} eligible task(s) queued, ${r.idleExecutors.length} idle executor(s) ` +
-    `(${r.idleExecutors.join(', ')}), no progress since ${r.since} (over ${minutes} min). ` +
+    `(${r.idleExecutors.join(', ') || 'none; spawn errors with no live executor'}), no progress since ${r.since} (over ${minutes} min). ` +
     `Stalled stage: ${r.stage}.`
   );
 }
@@ -150,7 +154,8 @@ export function checkDrainStall(deps: DrainStallDeps): DrainStallResult {
     (e) => e.state === 'queue' && e.eligible,
   ).length;
   const idle = eligible > 0 && !deps.held ? deps.idleExecutors() : [];
-  const condition = eligible > 0 && idle.length > 0 && !deps.held;
+  const spawnStalled = (deps.spawnErrors ?? 0) > 0 && (deps.liveExecutors ?? 0) === 0;
+  const condition = eligible > 0 && (idle.length > 0 || spawnStalled) && !deps.held;
 
   if (moved || !condition) next.since = nowIso;
 

@@ -21,6 +21,8 @@ export interface EphemeralDeps {
   down: (name: string) => Promise<{ ok: boolean; reason?: string }>;
   /** Spawns the executor of one task; throws when it cannot. */
   spawn: (taskId: string) => Promise<void>;
+  /** Kills unrostered spawned-executor tmux sessions; returns the names reaped (AISDLC-1117). */
+  reapOrphans?: () => string[];
   /** Maximum number of live dynamic executors. */
   cap: () => number;
   /** Sweep delay; default {@link EPHEMERAL_SWEEP_MS}. */
@@ -38,6 +40,8 @@ export interface EphemeralReport {
   }[];
   spawned: string[];
   spawnErrors: { taskId: string; error: string }[];
+  /** Orphaned tmux sessions the sweep killed (AISDLC-1117). */
+  orphansReaped?: string[];
 }
 
 /** Dynamic (spawned) executors in the roster: a task id and a name derived from it. */
@@ -123,6 +127,13 @@ export async function sweepFinishedExecutors(
     });
     if (finished) await downOne(deps, entry, 'sweep', out);
   }
+}
+
+/** Reap tmux sessions named like a spawned executor that the roster does not know. */
+export function reapOrphanSessions(deps: EphemeralDeps, out: EphemeralReport): void {
+  if (!deps.reapOrphans) return;
+  const reaped = deps.reapOrphans();
+  if (reaped.length > 0) out.orphansReaped = reaped;
 }
 
 /** Spawn one executor per eligible queued claim, up to the cap on live dynamic executors. */

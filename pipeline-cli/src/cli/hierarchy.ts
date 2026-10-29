@@ -98,6 +98,7 @@ import {
   createSystemIdentity,
   executorStart,
   hierarchySpawn,
+  reapOrphanExecutorSessions,
   resolveCaller,
   createSystemRunner,
   createTmuxBriefSender,
@@ -1034,6 +1035,7 @@ export async function runHierarchyCli(
                   spawn: async (taskId: string) => {
                     await hierarchySpawn({ taskId }, deps);
                   },
+                  reapOrphans: () => reapOrphanExecutorSessions(deps),
                   // Config ceiling and budget pacer arrive with AISDLC-1076.
                   cap: () => {
                     const n = Number(deps.env.AI_SDLC_EXECUTORS_MAX);

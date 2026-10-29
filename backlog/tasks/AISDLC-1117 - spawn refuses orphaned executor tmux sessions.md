@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1117
 title: ephemeral spawn refuses every eligible claim while an orphaned tmux session carries the executor name; the tick must reap orphans and surface spawn errors
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-29'
 labels:

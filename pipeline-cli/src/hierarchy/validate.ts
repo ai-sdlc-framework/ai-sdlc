@@ -43,6 +43,11 @@ export function spawnedExecutorName(taskId: string): string {
   return name;
 }
 
+/** True when `name` has the shape of a spawned executor's name (any task). */
+export function isSpawnedExecutorName(name: string): boolean {
+  return SPAWN_NAME_PATTERN.test(name) && name.length <= 48;
+}
+
 /** True when `name` is the ephemeral executor name of `taskId`. */
 export function isSpawnedExecutorNameOf(name: string, taskId: string): boolean {
   try {

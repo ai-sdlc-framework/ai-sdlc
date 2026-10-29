@@ -58,6 +58,26 @@ describe('checkDrainStall (AISDLC-1101)', () => {
     expect(events).toHaveLength(1);
   });
 
+  it('counts spawn errors with zero live executors as a stall (AISDLC-1117)', () => {
+    idle = [];
+    queue('AISDLC-1');
+    const spawn = (liveExecutors: number) =>
+      checkDrainStall({
+        boardDir: dir,
+        now: () => new Date(nowMs),
+        held: null,
+        idleExecutors: () => idle,
+        spawnErrors: 1,
+        liveExecutors,
+      });
+    expect(spawn(1)).toEqual({});
+    spawn(0);
+    nowMs += 31 * 60_000;
+    const r = spawn(0);
+    expect(r.opened).toMatchObject({ eligible: 1, idleExecutors: [] });
+    expect(formatDrainStall(r.opened!, 30)).toContain('spawn errors with no live executor');
+  });
+
   it('closes the record when the board moves', () => {
     queue('AISDLC-1');
     check();

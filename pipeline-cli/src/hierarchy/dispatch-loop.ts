@@ -47,7 +47,9 @@ import { pruneEvents } from './pr-snapshot.js';
 import { processCanaryEvents, type CanaryReport } from './canary.js';
 import {
   downRecordedExecutors,
+  dynamicExecutors,
   isEphemeralWorker,
+  reapOrphanSessions,
   spawnForEligibleClaims,
   sweepFinishedExecutors,
   type EphemeralDeps,
@@ -112,6 +114,8 @@ export interface LoopState {
   /** When a tick last ran, and who ran it (AISDLC-1096). */
   lastTickAt?: string;
   lastTickBy?: 'host' | 'scheduler';
+  /** Spawn errors of the last tick, one per task; `status` prints them (AISDLC-1117). */
+  lastSpawnErrors?: { taskId: string; error: string }[];
   /** When this drain window began (AISDLC-831); set on the first tick. */
   drainStartedAt?: string;
 }
@@ -163,6 +167,9 @@ export function readLoopState(boardDir: string): LoopState {
       ...(parsed.wasHeld ? { wasHeld: true } : {}),
       ...(parsed.lastTickAt ? { lastTickAt: parsed.lastTickAt } : {}),
       ...(parsed.lastTickBy ? { lastTickBy: parsed.lastTickBy } : {}),
+      ...(Array.isArray(parsed.lastSpawnErrors) && parsed.lastSpawnErrors.length > 0
+        ? { lastSpawnErrors: parsed.lastSpawnErrors }
+        : {}),
     };
   } catch {
     return emptyState();
@@ -711,6 +718,11 @@ async function runEphemeralSteps(
   } catch {
     /* an unreadable verdict must not stop the dispatch loop */
   }
+  try {
+    reapOrphanSessions(eph, report);
+  } catch {
+    /* an unreadable tmux server must not stop the dispatch loop */
+  }
   const stalled = await reap();
   if (!quotaSkip) {
     try {
@@ -838,6 +850,8 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
         now: deps.now,
         held,
         idleExecutors: deps.idleExecutors,
+        spawnErrors: ephemeral.report?.spawnErrors.length ?? 0,
+        liveExecutors: dynamicExecutors(deps.boardDir).length,
       });
       if (ds.opened) {
         reports.push({
@@ -868,6 +882,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   if (readGithub && (deps.listPrs || deps.markReady || deps.landEligible)) {
     state.lastGithubReadAt = deps.now().toISOString();
   }
+  state.lastSpawnErrors = ephemeral.report?.spawnErrors ?? [];
   state.lastTickAt = deps.now().toISOString();
   state.lastTickBy = deps.tickedBy ?? 'host';
   saveState(deps.boardDir, state);
@@ -905,7 +920,10 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   const eph = ephemeral.report;
   const ephemeralActive =
     eph !== undefined &&
-    (eph.downed.length > 0 || eph.spawned.length > 0 || eph.spawnErrors.length > 0);
+    (eph.downed.length > 0 ||
+      eph.spawned.length > 0 ||
+      eph.spawnErrors.length > 0 ||
+      (eph.orphansReaped?.length ?? 0) > 0);
   const wake = computeNextWake(deps.boardDir, { ...ingest, ...watch, reports, stalled }, markReady);
   if (ephemeralActive) {
     wake.nextWakeSec = Math.min(wake.nextWakeSec, WAKE_PENDING_SEC);
