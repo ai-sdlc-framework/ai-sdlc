@@ -1,0 +1,28 @@
+# Design Review Exemplar Bank (RFC-0006 Addendum A, Layer 4)
+#
+# Labeled design-review scenarios loaded via parseExemplarsFromYaml().
+# To calibrate the design reviewer: add an exemplar, don't add a rule.
+# `principle` must be one of the ids in DESIGN_REVIEW_PRINCIPLES.
+
+exemplars:
+  - id: hardcoded-hex-colour
+    type: true-positive
+    category: color
+    scenario: 'A component sets `color: #3b82f6` directly instead of referencing a colour token.'
+    verdict: 'major - hardcoded colour bypasses the token system and breaks theming'
+    principle: deterministic-first
+
+  - id: off-grid-spacing-in-prototype
+    type: false-positive
+    category: spacing
+    scenario: 'A one-off spike component under `examples/` uses `margin: 5px`.'
+    verdict: 'do not flag - example code is outside the production design-system scope'
+    principle: scope-discipline
+
+  - id: missing-focus-state
+    type: borderline
+    category: states
+    scenario: 'A custom button defines hover and disabled states but no visible focus state.'
+    verdict: 'major - keyboard users lose their position; flag with the affected component type'
+    principle: severity-honesty
+    confidence: 0.7

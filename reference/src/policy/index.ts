@@ -93,3 +93,9 @@ export {
   type ModelSelectionContext,
   type ModelSelectionResult,
 } from './model-selection.js';
+
+// RFC-0006 Addendum A: Design CI (Layer 1), structural preprocessor (Layer 2),
+// principles + exemplar bank (Layer 4)
+export * from './design-ci.js';
+export * from './structural-preprocessor.js';
+export * from './design-exemplar-bank.js';
