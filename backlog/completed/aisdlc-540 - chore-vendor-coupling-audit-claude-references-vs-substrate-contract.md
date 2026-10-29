@@ -4,7 +4,7 @@ title: >-
   chore(neutrality): vendor-coupling audit — inventory claude-specific
   references in core paths against the substrate contract and close the
   mechanical cases
-status: In Progress
+status: Done
 assignee: []
 labels:
   - adoption
