@@ -55,7 +55,12 @@ function fakeFrontier(ids: string[]): () => Array<{ id: string; title: string }>
  */
 function hermeticFilterAdapters(): Pick<
   OrchestratorAdapters,
-  'graphLoader' | 'taskLabelsLoader' | 'calibrationLogPath' | 'parentBranchGuard'
+  | 'graphLoader'
+  | 'taskLabelsLoader'
+  | 'calibrationLogPath'
+  | 'parentBranchGuard'
+  | 'alreadyInFlightOpts'
+  | 'openPRExistsOpts'
 > {
   return {
     graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
@@ -63,6 +68,9 @@ function hermeticFilterAdapters(): Pick<
     calibrationLogPath: '/nonexistent-aisdlc-229-bypass.jsonl',
     // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
     parentBranchGuard: async () => {},
+    // AISDLC-1088 — hermetic filters: no live `ps -ax` or `gh pr list` per tick.
+    alreadyInFlightOpts: { detectSubprocess: false, listOpenPRs: () => [] },
+    openPRExistsOpts: { listOpenPRsByBranch: () => [] },
   };
 }
 

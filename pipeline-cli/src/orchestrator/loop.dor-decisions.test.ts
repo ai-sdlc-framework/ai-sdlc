@@ -153,6 +153,9 @@ describe('AISDLC-395 — DorReadiness block auto-files Decisions (AC-1, AC-3)', 
       escalate: async () => {},
       calibrationLogPath,
       parentBranchGuard: async () => {},
+      // AISDLC-1088 — hermetic filters: no live `ps -ax` or `gh pr list` per tick.
+      alreadyInFlightOpts: { detectSubprocess: false, listOpenPRs: () => [] },
+      openPRExistsOpts: { listOpenPRsByBranch: () => [] },
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -189,6 +192,9 @@ describe('AISDLC-395 — Idempotency: second tick does NOT re-file (AC-4)', () =
       escalate: async () => {},
       calibrationLogPath,
       parentBranchGuard: async () => {},
+      // AISDLC-1088 — hermetic filters: no live `ps -ax` or `gh pr list` per tick.
+      alreadyInFlightOpts: { detectSubprocess: false, listOpenPRs: () => [] },
+      openPRExistsOpts: { listOpenPRsByBranch: () => [] },
     };
 
     // Tick 1 — files the decisions.
@@ -222,6 +228,9 @@ describe('AISDLC-395 — OrchestratorEmittedDecision event emitted (AC-5)', () =
       calibrationLogPath,
       emitEvent: (ev) => captured.push(ev),
       parentBranchGuard: async () => {},
+      // AISDLC-1088 — hermetic filters: no live `ps -ax` or `gh pr list` per tick.
+      alreadyInFlightOpts: { detectSubprocess: false, listOpenPRs: () => [] },
+      openPRExistsOpts: { listOpenPRsByBranch: () => [] },
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -253,6 +262,9 @@ describe('AISDLC-395 — OrchestratorEmittedDecision event emitted (AC-5)', () =
       escalate: async () => {},
       calibrationLogPath,
       parentBranchGuard: async () => {},
+      // AISDLC-1088 — hermetic filters: no live `ps -ax` or `gh pr list` per tick.
+      alreadyInFlightOpts: { detectSubprocess: false, listOpenPRs: () => [] },
+      openPRExistsOpts: { listOpenPRsByBranch: () => [] },
     };
 
     // Tick 1 — files decisions.
@@ -293,6 +305,9 @@ describe('AISDLC-395 — Feature flag off: no Decision filed, DoR still blocks (
       escalate: async () => {},
       calibrationLogPath,
       parentBranchGuard: async () => {},
+      // AISDLC-1088 — hermetic filters: no live `ps -ax` or `gh pr list` per tick.
+      alreadyInFlightOpts: { detectSubprocess: false, listOpenPRs: () => [] },
+      openPRExistsOpts: { listOpenPRsByBranch: () => [] },
     };
 
     const tick = await runOrchestratorTick(config, adapters, 1);
@@ -328,6 +343,9 @@ describe('AISDLC-395 — Feature flag off: no Decision filed, DoR still blocks (
       calibrationLogPath,
       emitEvent: (ev) => captured.push(ev),
       parentBranchGuard: async () => {},
+      // AISDLC-1088 — hermetic filters: no live `ps -ax` or `gh pr list` per tick.
+      alreadyInFlightOpts: { detectSubprocess: false, listOpenPRs: () => [] },
+      openPRExistsOpts: { listOpenPRsByBranch: () => [] },
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -355,6 +373,9 @@ describe('AISDLC-395 — Flag on (default): Decision emitted on first block tick
       escalate: async () => {},
       calibrationLogPath,
       parentBranchGuard: async () => {},
+      // AISDLC-1088 — hermetic filters: no live `ps -ax` or `gh pr list` per tick.
+      alreadyInFlightOpts: { detectSubprocess: false, listOpenPRs: () => [] },
+      openPRExistsOpts: { listOpenPRsByBranch: () => [] },
     };
 
     await runOrchestratorTick(config, adapters, 1);

@@ -120,6 +120,9 @@ describe('chaos — mid-dispatch SIGTERM (Q2 resume)', () => {
       },
       escalate: async () => {},
       parentBranchGuard: async () => {},
+      // AISDLC-1088 — hermetic filters: no live `ps -ax` or `gh pr list` per tick.
+      alreadyInFlightOpts: { detectSubprocess: false, listOpenPRs: () => [] },
+      openPRExistsOpts: { listOpenPRsByBranch: () => [] },
       artifactsDir: workdir,
       runId: 'run-chaos-mid-dispatch',
     };
@@ -175,6 +178,9 @@ describe('chaos — mid-dispatch SIGTERM (Q2 resume)', () => {
       dispatch: dispatchFn,
       escalate: async () => {},
       parentBranchGuard: async () => {},
+      // AISDLC-1088 — hermetic filters: no live `ps -ax` or `gh pr list` per tick.
+      alreadyInFlightOpts: { detectSubprocess: false, listOpenPRs: () => [] },
+      openPRExistsOpts: { listOpenPRsByBranch: () => [] },
       artifactsDir: workdir,
       runId: 'run-chaos-resume',
     };
@@ -215,6 +221,9 @@ describe('chaos — mid-finalize SIGTERM (events sink throws)', () => {
       dispatch: async (taskId) => approvedResult(taskId, `https://github.com/x/y/pull/9`),
       escalate: async () => {},
       parentBranchGuard: async () => {},
+      // AISDLC-1088 — hermetic filters: no live `ps -ax` or `gh pr list` per tick.
+      alreadyInFlightOpts: { detectSubprocess: false, listOpenPRs: () => [] },
+      openPRExistsOpts: { listOpenPRsByBranch: () => [] },
       artifactsDir: workdir,
       runId: 'run-chaos-mid-finalize',
       emitEvent: (ev) => {
@@ -356,6 +365,9 @@ describe('chaos — events.jsonl append-only integrity', () => {
       },
       escalate: async () => {},
       parentBranchGuard: async () => {},
+      // AISDLC-1088 — hermetic filters: no live `ps -ax` or `gh pr list` per tick.
+      alreadyInFlightOpts: { detectSubprocess: false, listOpenPRs: () => [] },
+      openPRExistsOpts: { listOpenPRsByBranch: () => [] },
       artifactsDir: workdir,
       runId: 'run-chaos-integ',
     };
@@ -417,6 +429,9 @@ describe('chaos — SIGTERM drain (Q2 resume contract)', () => {
       dispatch: async (taskId) => approvedResult(taskId, 'https://github.com/x/y/pull/A'),
       escalate: async () => {},
       parentBranchGuard: async () => {},
+      // AISDLC-1088 — hermetic filters: no live `ps -ax` or `gh pr list` per tick.
+      alreadyInFlightOpts: { detectSubprocess: false, listOpenPRs: () => [] },
+      openPRExistsOpts: { listOpenPRsByBranch: () => [] },
       artifactsDir: workdir,
       runId: 'run-A',
     };
@@ -431,6 +446,9 @@ describe('chaos — SIGTERM drain (Q2 resume contract)', () => {
       dispatch: async (taskId) => approvedResult(taskId, 'https://github.com/x/y/pull/B'),
       escalate: async () => {},
       parentBranchGuard: async () => {},
+      // AISDLC-1088 — hermetic filters: no live `ps -ax` or `gh pr list` per tick.
+      alreadyInFlightOpts: { detectSubprocess: false, listOpenPRs: () => [] },
+      openPRExistsOpts: { listOpenPRsByBranch: () => [] },
       artifactsDir: workdir,
       runId: 'run-B',
     };
