@@ -5,6 +5,28 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.38.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.37.0...orchestrator-v0.38.0) (2026-10-29)
+
+
+### Features
+
+* add InternalAdopter journey reference impl (AISDLC-470) ([#2079](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2079)) ([665bcee](https://github.com/ai-sdlc-framework/ai-sdlc/commit/665bcee4ea7701f7bbd820531228c9607b4e9f9f))
+* attach judgment cost sink in orchestrator execute path (AISDLC-631.1) ([#2087](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2087)) ([9aa2b65](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9aa2b65657216d7df99900ffbecc127fad9925ea))
+* **orchestrator:** report openai-compatible judgment provider and shadow cap (AISDLC-631.4) ([#2109](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2109)) ([ee73531](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ee73531baa84c464abe37da863d4d5b1cfe65989))
+* **orchestrator:** wire the six RFC-0006 Addendum A design modules (AISDLC-551) ([#2089](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2089)) ([c87bee2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c87bee25c1b464476dac340b70a853a7dc71049b))
+
+
+### Bug Fixes
+
+* doctor ignores committed state, CSV formula escaping (AISDLC-651.1) ([#2092](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2092)) ([91780aa](https://github.com/ai-sdlc-framework/ai-sdlc/commit/91780aaec5cfd07d9bebe00c370c0713cfb6d68a))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.38.0
+
 ## [0.37.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.36.0...orchestrator-v0.37.0) (2026-10-27)
 
 
