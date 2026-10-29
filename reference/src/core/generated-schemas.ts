@@ -4832,9 +4832,9 @@ export const hierarchyRosterV1Schema = {
         },
         name: {
           type: 'string',
-          minLength: 1,
+          pattern: '^[a-z][a-z0-9-]{0,47}(-[0-9]{1,6})?$',
           description:
-            'Name the harness actually gave the session. Equals the requested name unless the harness added a collision suffix.',
+            'Session-name pattern with an optional numeric collision suffix; the name drives the inflight join and is echoed to the terminal, so anything else is rejected. Name the harness actually gave the session. Equals the requested name unless the harness added a collision suffix.',
         },
         tmuxSession: {
           type: 'string',
