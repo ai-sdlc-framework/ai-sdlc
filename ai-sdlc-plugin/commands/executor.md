@@ -92,7 +92,7 @@ command with the `Skill` tool, passing `$TASK_ID` as the only argument. If it re
 no git hooks directory, run `pnpm install --frozen-lockfile && pnpm run prepare` there (scripts stay
 enabled); if still missing, report `failed` and stop: never commit from such a worktree. Reviews run only inside that command, through its shared incremental decision (`cli-incremental-decide plan`): never run reviewers any other way. The pipeline refreshes your claim's heartbeat on every step itself; do not heartbeat by hand. A rebased commit on a resume is pushed through the pipeline's push step from the task worktree, never by a hand-typed push from another directory (a reset shell cwd makes the lease-push guard refuse with `worktree-location`).
 
-**Record the recovery key (AISDLC-564.1).** The moment the `execute` command dispatches the developer subagent (its agent id is in the dispatch result), persist it, so a subagent killed by a usage limit can be resumed with `SendMessage <agentId>`. Run it again if the developer is re-dispatched:
+**Record the recovery key.** The moment the `execute` command dispatches the developer subagent (its agent id is in the dispatch result), persist it, so a subagent killed by a usage limit can be resumed with `SendMessage <agentId>`. Run it again if the developer is re-dispatched:
 
 ```bash
 node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" record-agent --board-dir "$BOARD_DIR" \
