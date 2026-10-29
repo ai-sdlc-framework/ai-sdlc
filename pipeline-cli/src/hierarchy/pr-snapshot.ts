@@ -75,10 +75,12 @@ function readJson<T>(file: string): T | undefined {
 }
 
 /** Event record names: `<repo>#<pr>@<sha>:<kind>:<delivery>.json`, URI encoded. */
-function eventEntries(boardDir: string): { pr: number | null; id: string; mtimeMs: number }[] {
+function eventEntries(
+  boardDir: string,
+): { pr: number | null; id: string; mtimeMs: number; file: string }[] {
   const dir = eventsDir(boardDir);
   if (!existsSync(dir)) return [];
-  const out: { pr: number | null; id: string; mtimeMs: number }[] = [];
+  const out: { pr: number | null; id: string; mtimeMs: number; file: string }[] = [];
   for (const f of readdirSync(dir)) {
     if (!f.endsWith('.json')) continue;
     let key: string;
@@ -94,9 +96,50 @@ function eventEntries(boardDir: string): { pr: number | null; id: string; mtimeM
     } catch {
       continue;
     }
-    out.push({ pr: m && m[1] !== 'none' ? Number(m[1]) : null, id: key, mtimeMs });
+    out.push({ pr: m && m[1] !== 'none' ? Number(m[1]) : null, id: key, mtimeMs, file: f });
   }
   return out;
+}
+
+/** Most event records kept after a tick (AISDLC-1096). */
+export const MAX_EVENT_FILES = 2000;
+
+/**
+ * Delete event records that nothing reads again: those for a PR not in `openPrs` (when
+ * known), then the oldest beyond {@link MAX_EVENT_FILES}. Canary records are kept; the
+ * canary pass owns them. Returns the number deleted.
+ */
+export function pruneEvents(
+  boardDir: string,
+  openPrs?: ReadonlySet<number>,
+  max: number = MAX_EVENT_FILES,
+): number {
+  const dir = eventsDir(boardDir);
+  const isCanary = (id: string): boolean => /:pipeline-canary-(red|green):/.test(id);
+  const live = eventEntries(boardDir).filter((e) => !isCanary(e.id));
+  let deleted = 0;
+  const drop = (file: string): void => {
+    try {
+      unlinkSync(path.join(dir, file));
+      deleted += 1;
+    } catch {
+      /* already gone */
+    }
+  };
+  let kept = live;
+  // An empty open set means a wrong repo or token scope, not "no PRs"; never prune on it.
+  if (openPrs && openPrs.size > 0) {
+    kept = [];
+    for (const e of live) {
+      if (e.pr !== null && !openPrs.has(e.pr)) drop(e.file);
+      else kept.push(e);
+    }
+  }
+  if (kept.length > max) {
+    kept.sort((a, b) => a.mtimeMs - b.mtimeMs || (a.id < b.id ? -1 : 1));
+    for (const e of kept.slice(0, kept.length - max)) drop(e.file);
+  }
+  return deleted;
 }
 
 /** The newest event id recorded for a PR; empty when none. */

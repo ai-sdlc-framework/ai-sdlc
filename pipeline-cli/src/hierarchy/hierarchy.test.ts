@@ -1030,6 +1030,7 @@ describe('hierarchy status', () => {
       'no sessions in the roster',
       'webhook: off (no secret)',
       'scheduler: off',
+      'last tick: never',
       'context clear thresholds (tokens): planner 150000, operator-dispatch 120000, executor 120000',
       'unowned PRs: 0',
       expect.stringContaining('attestation and leaf files:'),

@@ -91,6 +91,11 @@ export interface DispatchCallerInputs {
   installDir?: string | null;
   /** Replaces the git probe used to find the work tree that contains the install (tests). */
   installGit?: InstallGit;
+  /**
+   * AISDLC-1096: the watch scheduler ticks for a silent host. The location checks still run;
+   * only the "caller is the dispatch session" requirement is skipped.
+   */
+  skipCallerIdentity?: boolean;
 }
 
 /** Directory of this module, or null when it cannot be determined. */
@@ -157,6 +162,7 @@ export function checkDispatchCaller(i: DispatchCallerInputs): CallerCheck {
     }
     identityBoard = trusted.boardDir;
   }
+  if (i.skipCallerIdentity) return { ok: true, name: i.worker ?? 'scheduler' };
   return requireDispatchCaller(
     i.identity ?? createSystemIdentity(identityBoard, i.processLookup),
     i.worker,
