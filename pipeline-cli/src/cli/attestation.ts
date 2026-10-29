@@ -22,7 +22,7 @@
  * @module cli/attestation
  */
 
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { hostname, userInfo } from 'node:os';
@@ -44,6 +44,11 @@ import {
   verifyInclusion,
 } from '../attestation/merkle.js';
 import { dropAttestationChores, type GitFn } from '../attestation/drop-chores.js';
+import {
+  DEFAULT_FINALIZE_REVIEWERS,
+  defaultTranscriptsDir,
+  finalizeAttestation,
+} from '../attestation/finalize.js';
 import { computeMergeBase, computePatchId, PATCH_ID_EXCLUSIONS } from '../attestation/patch-id.js';
 import {
   formatV6Envelope,
@@ -532,6 +537,89 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           }
 
           emitText(outPath);
+        },
+      )
+      // ── finalize (AISDLC-615) ───────────────────────────────────────────────────
+      .command(
+        'finalize',
+        'One-shot attestation for a main-session dispatch: persist transcripts -> emit-leaf per ' +
+          'reviewer -> sign-v6 -> verify, with one shared patch-id. Idempotent; fails with a clear ' +
+          'error when a reviewer transcript or verdict file is missing. Expects ' +
+          '<transcripts-dir>/<reviewer>.jsonl and <reviewer>.verdict.json.',
+        (y: Argv) =>
+          y
+            .option('task-id', { type: 'string', demandOption: true, describe: 'Task ID.' })
+            .option('head-sha', { type: 'string', demandOption: true, describe: '40-hex PR head.' })
+            .option('transcripts-dir', {
+              type: 'string',
+              describe:
+                'Directory with <reviewer>.jsonl + <reviewer>.verdict.json (default ' +
+                '.ai-sdlc/transcripts/<task-id>). Override for multi-worktree transcript scatter.',
+            })
+            .option('reviewers', {
+              type: 'string',
+              default: DEFAULT_FINALIZE_REVIEWERS.join(','),
+              describe: 'Comma-separated reviewer names.',
+            })
+            .option('harness', { type: 'string', default: 'claude-code' })
+            .option('model', { type: 'string', default: 'sonnet' })
+            .option('base-ref', { type: 'string', default: 'origin/main' })
+            .option('nonce', { type: 'string' })
+            .option('project-dir', { type: 'string' })
+            .option('claude-session-id', { type: 'string' })
+            .option('key-path', { type: 'string' }),
+        (args) => {
+          const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
+          const taskId = args['task-id'] as string;
+          const headSha = args['head-sha'] as string;
+          if (!isValidHeadSha(headSha)) {
+            process.stderr.write(
+              '[cli-attestation] finalize: --head-sha must be 40 lowercase hex\n',
+            );
+            process.exit(1);
+          }
+          const baseRef = args['base-ref'] as string;
+          const mergeBase = computeMergeBase(baseRef, headSha, repoRoot);
+          const patchId = mergeBase ? computePatchId(mergeBase, headSha, repoRoot) : null;
+          if (!mergeBase || !patchId) {
+            process.stderr.write(
+              `[cli-attestation] finalize: cannot compute patch-id against ${baseRef}\n`,
+            );
+            process.exit(1);
+          }
+          const script = process.argv[1] ?? '';
+          const result = finalizeAttestation({
+            repoRoot,
+            taskId,
+            headSha,
+            patchId,
+            baseSha: mergeBase,
+            reviewers: (args['reviewers'] as string)
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean),
+            transcriptsDir: resolve(
+              (args['transcripts-dir'] as string | undefined) ??
+                defaultTranscriptsDir(repoRoot, taskId),
+            ),
+            harness: args['harness'] as string,
+            model: args['model'] as string,
+            nonce: args['nonce'] as string | undefined,
+            projectDir: args['project-dir'] as string | undefined,
+            claudeSessionId: args['claude-session-id'] as string | undefined,
+            keyPath: args['key-path'] as string | undefined,
+            run: (a) => {
+              const r = spawnSync(process.execPath, [script, ...a], { encoding: 'utf8' });
+              return { status: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
+            },
+          });
+          if (!result.ok) {
+            for (const e of result.errors)
+              process.stderr.write(`[cli-attestation] finalize: ${e}\n`);
+            process.exitCode = 1;
+            return;
+          }
+          emitText(`patch-id=${result.patchId}\nstatus=${result.status}`);
         },
       )
       // ── inspect-v6 ──────────────────────────────────────────────────────────────
@@ -1485,7 +1573,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
       )
       .demandCommand(
         1,
-        'Specify a subcommand (e.g. transcripts list, merkle-root, merkle-proof, sign-v6, inspect-v6, emit-leaf, generate-nonce, nonce-marker, verify, independence-policy, print-patch-id-exclusions, reset-stack, reviewer-set, reviewer-set-window)',
+        'Specify a subcommand (e.g. transcripts list, merkle-root, merkle-proof, sign-v6, finalize, inspect-v6, emit-leaf, generate-nonce, nonce-marker, verify, independence-policy, print-patch-id-exclusions, reset-stack, reviewer-set, reviewer-set-window)',
       )
       .help()
       .alias('h', 'help')
