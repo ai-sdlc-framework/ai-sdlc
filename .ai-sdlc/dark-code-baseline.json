@@ -24,10 +24,6 @@
       "rfc": "RFC-0006"
     },
     {
-      "path": "orchestrator/src/journey-sa2-router.ts",
-      "rfc": "RFC-0018"
-    },
-    {
       "path": "orchestrator/src/journey/inheritance-validator.ts",
       "rfc": "RFC-0018"
     },
