@@ -2,7 +2,7 @@
 id: AISDLC-655.1
 title: >-
   RFC-0050: live smoke test of the reviewer replay sandbox with the real claude CLI
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
