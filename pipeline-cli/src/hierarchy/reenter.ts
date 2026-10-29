@@ -99,9 +99,14 @@ function decisionRefusal(d: Decision | null, id: string, taskId: string): string
   if (d.status.lifecycle !== 'answered') {
     return `decision ${id} is ${d.status.lifecycle}, not answered`;
   }
+  const tid = taskId.toLowerCase();
+  // Token boundary: AISDLC-11050 and AISDLC-1105.2 must not match AISDLC-1105.
+  const scopeRe = new RegExp(
+    `(?<![a-z0-9-])${tid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])(?!\\.\\d)`,
+  );
   const scoped =
-    d.spec.escalation?.taskId.toLowerCase() === taskId.toLowerCase() ||
-    d.metadata.scope.toLowerCase().includes(taskId.toLowerCase());
+    d.spec.escalation?.taskId?.toLowerCase() === tid ||
+    scopeRe.test(d.metadata.scope.toLowerCase());
   return scoped ? undefined : `decision ${id} is not scoped to ${taskId}`;
 }
 
@@ -297,6 +302,15 @@ export function reenter(input: ReenterInput, deps: ReenterDeps): ReenterResult {
       ((id: string) => projectDecision(id, { workDir: resolveCatalogRoot(deps.cwd) }));
     const refusal = decisionRefusal(resolve(input.decisionId), input.decisionId, taskId);
     if (refusal) throw new Error(`loop guard release refused: ${refusal}`);
+    if (
+      readGuard(deps.boardDir, pr).some(
+        (e) => e.headSha === headSha && e.decision === input.decisionId,
+      )
+    ) {
+      throw new Error(
+        `loop guard release refused: decision ${input.decisionId} already released this head; push a new head or cite another decision`,
+      );
+    }
     released = input.decisionId;
   }
   const prior = readGuard(deps.boardDir, pr).filter(

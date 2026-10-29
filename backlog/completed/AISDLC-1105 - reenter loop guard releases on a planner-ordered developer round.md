@@ -43,12 +43,12 @@ Evidence: dispatch report 2026-10-28 22:40Z (loop guard refusal on #1910 after t
 
 ## Verification
 
-`pnpm build && pnpm test && pnpm lint && pnpm format:check`: pipeline-cli `Tests 14 failed | 12211 passed | 13 skipped (12238)`; all 14 failures are in `executor-start.test.ts`, caused by the executor session env (`AI_SDLC_EXECUTOR_TASK`) leaking into the test; with that env unset the file shows `Tests 24 passed (24)`. reenter.test.ts and dispatch.test.ts pass. Lint and format:check clean.
+`pnpm build && env -u AI_SDLC_EXECUTOR_TASK -u AI_SDLC_HIERARCHY_SESSION -u AI_SDLC_HIERARCHY_ROLE -u AI_SDLC_GH_CALL_LOG -u AI_SDLC_WEBHOOK_SECRET pnpm test && pnpm lint && pnpm format:check` (executor session env cleared so it does not leak into `executor-start.test.ts`): pipeline-cli `Tests  12230 passed | 13 skipped (12243)`, exit 0. Two earlier runs each had one load-induced timing flake (`land-prep.test.ts`, `webhook-receiver.test.ts`), both passing alone and in the clean run. Lint and format:check clean.
 
 ## Final Summary
 
 ## Summary
-The same-head loop guard in `reenter` now has two releases. A `--developer-round --note <text>` reenter keys the guard on (route, head, noteHash), so a new note on the same head is accepted. `--decision <id>` releases it when the catalog holds an answered record scoped to the task. The refusal message and `docs/operations/cli-hierarchy.md` name both releases. Local `pnpm test` has 14 failures, all in `executor-start.test.ts` (waived below).
+The same-head loop guard in `reenter` now has two releases. A `--developer-round --note <text>` reenter keys the guard on (route, head, noteHash), so a new note on the same head is accepted. `--decision <id>` releases it when the catalog holds an answered record scoped to the task. The refusal message and `docs/operations/cli-hierarchy.md` name both releases.
 
 ## Changes
 - pipeline-cli/src/hierarchy/reenter.ts
@@ -58,11 +58,11 @@ The same-head loop guard in `reenter` now has two releases. A `--developer-round
 - backlog/tasks/AISDLC-1105 - reenter loop guard releases on a planner-ordered developer round.md
 
 ## Design decisions
-Test command: `pnpm build && pnpm test && pnpm lint && pnpm format:check`. Summary line: `Tests 14 failed | 12211 passed | 13 skipped (12238)`. All 14 failures are in `executor-start.test.ts`, which this diff does not touch. The command and summary line are recorded in the task file. `reenter.test.ts` and `dispatch.test.ts` pass, including four new tests for the note-hash and decision releases. `reconcile.ts` is unchanged. Rebase onto origin/main was a no-op; the branch was already current.
+Test command: `pnpm build && env -u AI_SDLC_EXECUTOR_TASK -u AI_SDLC_HIERARCHY_SESSION -u AI_SDLC_HIERARCHY_ROLE -u AI_SDLC_GH_CALL_LOG -u AI_SDLC_WEBHOOK_SECRET pnpm test && pnpm lint && pnpm format:check`. Summary line: `Tests  12230 passed | 13 skipped (12243)`. `reenter.test.ts` and `dispatch.test.ts` cover the note-hash and decision releases, token-boundary scope match, a decision already recorded for the head, and the `--decision` CLI wiring. `reconcile.ts` is unchanged.
 
 ## Verification
 - `pnpm build` — passed
-- `pnpm test` — waived
+- `pnpm test` — passed (`Tests  12230 passed | 13 skipped (12243)`, executor env cleared)
 - `pnpm lint` — passed
 - `pnpm format:check` — passed
 - 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)

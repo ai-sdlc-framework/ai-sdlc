@@ -345,6 +345,55 @@ describe('reenter loop guard release (AISDLC-1105)', () => {
     expect(() => run(() => null)).toThrow(/not found/);
     expect(queued()).toEqual([]);
   });
+
+  it('matches the task id on a token boundary in the decision scope', () => {
+    failTask();
+    reenter({ target: '7' }, deps(gh()));
+    again();
+    const scoped = (scope: string) =>
+      ({
+        metadata: { id: 'DEC-0001', scope },
+        spec: {},
+        status: { lifecycle: 'answered' },
+      }) as never;
+    const run = (scope: string) =>
+      reenter(
+        { target: '7', decisionId: 'DEC-0001' },
+        { ...deps(gh()), resolveDecision: () => scoped(scope) },
+      );
+    expect(() => run(`task:${TASK}0`)).toThrow(/not scoped/);
+    expect(() => run(`task:${TASK}.2`)).toThrow(/not scoped/);
+    expect(() => run(`task:${TASK}`)).not.toThrow();
+  });
+
+  it('refuses a decision already recorded for this head', () => {
+    failTask();
+    reenter({ target: '7' }, deps(gh()));
+    again();
+    const d = { ...deps(gh()), resolveDecision: () => answered(TASK) };
+    reenter({ target: '7', decisionId: 'DEC-0001' }, d);
+    again();
+    expect(() => reenter({ target: '7', decisionId: 'DEC-0001' }, d)).toThrow(/already released/);
+  });
+
+  it('releases a decision with no prior guard entry and records it', () => {
+    failTask();
+    const d = { ...deps(gh()), resolveDecision: () => answered(TASK) };
+    reenter({ target: '7', decisionId: 'DEC-0001' }, d);
+    expect(guardEntries()).toHaveLength(1);
+    expect(guardEntries()[0]?.decision).toBe('DEC-0001');
+  });
+
+  it('combines --decision with a developer-round note', () => {
+    failTask();
+    reenter(round('same order'), deps(gh()));
+    again();
+    const d = { ...deps(gh()), resolveDecision: () => answered(TASK) };
+    reenter(round('same order', { decisionId: 'DEC-0001' }), d);
+    const e = guardEntries();
+    expect(e[1]?.decision).toBe('DEC-0001');
+    expect(e[1]?.noteHash).toBe(e[0]?.noteHash);
+  });
 });
 
 describe('reenter origin head (AISDLC-937)', () => {
