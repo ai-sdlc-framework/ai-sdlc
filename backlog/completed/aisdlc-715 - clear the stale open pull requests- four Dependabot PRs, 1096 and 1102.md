@@ -2,7 +2,7 @@
 id: AISDLC-715
 title: >-
   Clear the stale open pull requests: four Dependabot PRs, #1096 and #1102
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-04'
 labels:
