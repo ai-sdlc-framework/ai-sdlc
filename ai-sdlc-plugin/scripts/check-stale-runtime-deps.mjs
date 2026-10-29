@@ -67,9 +67,41 @@
  * converged" apart from "could not confirm — registry check timed out".
  */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+
+/**
+ * AISDLC-581: registry lookups (`npm view`) are cached per `name@pin` for a
+ * TTL so every session start does not pay 1-3 network round-trips. Only the
+ * resolved registry TARGET is cached (never the stale verdict), so the
+ * installed-vs-target comparison stays fresh after an upgrade. Timeouts and
+ * failures are never cached. TTL override: AI_SDLC_STALE_CHECK_TTL_MS
+ * (0 disables the cache). Cache file override: AI_SDLC_STALE_CHECK_CACHE
+ * (default `<pluginDir>/.stale-runtime-cache.json`). A missing, unwritable or
+ * corrupt cache is treated as a miss (fail open).
+ */
+const DEFAULT_TTL_MS = 60 * 60 * 1000;
+
+function cacheTtlMs() {
+  const raw = process.env.AI_SDLC_STALE_CHECK_TTL_MS;
+  if (raw === undefined || raw === '') return DEFAULT_TTL_MS;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_TTL_MS;
+}
+
+function cachePath(pluginDir) {
+  return process.env.AI_SDLC_STALE_CHECK_CACHE || join(pluginDir, '.stale-runtime-cache.json');
+}
+
+function readCache(file) {
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf-8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
 
 const KNOWN_PACKAGES = [
   '@ai-sdlc/pipeline-cli',
@@ -99,6 +131,11 @@ function main() {
   const deps = pluginJson && pluginJson.runtimeDependencies;
   if (!deps || typeof deps !== 'object' || Array.isArray(deps)) return;
 
+  const ttl = cacheTtlMs();
+  const cacheFile = cachePath(pluginDir);
+  const cache = ttl > 0 ? readCache(cacheFile) : {};
+  let cacheDirty = false;
+
   for (const name of KNOWN_PACKAGES) {
     const pin = deps[name];
     if (!pin || typeof pin !== 'string') continue;
@@ -115,7 +152,27 @@ function main() {
     }
     if (!installed) continue;
 
-    const { target, timedOut } = resolveRegistryVersion(name, pin, timeoutMs);
+    const key = `${name}@${pin}`;
+    const entry = cache[key];
+    const fresh =
+      ttl > 0 &&
+      entry &&
+      typeof entry.target === 'string' &&
+      entry.target.length > 0 &&
+      typeof entry.at === 'number' &&
+      Date.now() - entry.at >= 0 &&
+      Date.now() - entry.at < ttl;
+    let target;
+    let timedOut = false;
+    if (fresh) {
+      target = entry.target;
+    } else {
+      ({ target, timedOut } = resolveRegistryVersion(name, pin, timeoutMs));
+      if (ttl > 0 && target) {
+        cache[key] = { target, at: Date.now() };
+        cacheDirty = true;
+      }
+    }
     if (timedOut) {
       // AISDLC-608: distinct from an ordinary failure — surface it on
       // stderr so a caller that cares can tell "unknown due to timeout"
@@ -128,6 +185,14 @@ function main() {
 
     if (target !== installed) {
       process.stdout.write(`${name}\t${installed}\t${target}\t${pin}\n`);
+    }
+  }
+
+  if (cacheDirty) {
+    try {
+      writeFileSync(cacheFile, JSON.stringify(cache));
+    } catch {
+      // fail open — an unwritable cache just means the next run re-queries
     }
   }
 }

@@ -3,7 +3,7 @@ id: AISDLC-581
 title: >-
   Cache session-start runtime version-check with a TTL (avoid per-session npm
   view calls)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-05 22:05'
 labels:

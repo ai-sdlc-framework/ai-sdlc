@@ -438,3 +438,59 @@ describe('check-stale-runtime-deps.mjs — fails open', () => {
     assert.equal(result.stdout.trim(), '');
   });
 });
+
+describe('AISDLC-581: registry lookup TTL cache', () => {
+  function setup(name) {
+    const pluginDir = join(workDir, name);
+    writePluginJson(pluginDir, { '@ai-sdlc/pipeline-cli': '^0.20.0' });
+    writeInstalledPackage(pluginDir, '@ai-sdlc/pipeline-cli', '0.20.0');
+    return pluginDir;
+  }
+  function runCached(pluginDir, npmBinDir, extraEnv = {}) {
+    const r = spawnSync('node', [SCRIPT, pluginDir], {
+      env: { PATH: `${npmBinDir}:${process.env.PATH}`, HOME: process.env.HOME, ...extraEnv },
+      encoding: 'utf-8',
+      timeout: 15_000,
+    });
+    return r.stdout.trim();
+  }
+
+  it('cache miss detects stale; a fresh hit skips npm view but still reports stale', () => {
+    const pluginDir = setup('cache-hit');
+    const out1 = runCached(pluginDir, buildFakeNpm({ '@ai-sdlc/pipeline-cli@^0.20.0': '0.20.1' }));
+    assert.match(out1, /0\.20\.0\t0\.20\.1/);
+    // npm now unreachable: a hit must still answer from cache
+    const out2 = runCached(pluginDir, buildFakeNpm({}));
+    assert.match(out2, /0\.20\.0\t0\.20\.1/);
+  });
+
+  it('expired entry (TTL 0 disables cache) re-queries npm', () => {
+    const pluginDir = setup('cache-expired');
+    runCached(pluginDir, buildFakeNpm({ '@ai-sdlc/pipeline-cli@^0.20.0': '0.20.1' }));
+    const out = runCached(pluginDir, buildFakeNpm({}), { AI_SDLC_STALE_CHECK_TTL_MS: '0' });
+    assert.equal(out, '');
+  });
+
+  it('stale entry older than TTL is ignored', () => {
+    const pluginDir = setup('cache-old');
+    writeFileSync(
+      join(pluginDir, '.stale-runtime-cache.json'),
+      JSON.stringify({ '@ai-sdlc/pipeline-cli@^0.20.0': { target: '0.20.1', at: 1 } }),
+    );
+    assert.equal(runCached(pluginDir, buildFakeNpm({})), '');
+  });
+
+  it('corrupt cache is tolerated and treated as a miss', () => {
+    const pluginDir = setup('cache-corrupt');
+    writeFileSync(join(pluginDir, '.stale-runtime-cache.json'), '{not json');
+    const out = runCached(pluginDir, buildFakeNpm({ '@ai-sdlc/pipeline-cli@^0.20.0': '0.20.1' }));
+    assert.match(out, /0\.20\.1/);
+  });
+
+  it('after upgrade the cached target equals installed, so nothing is reported', () => {
+    const pluginDir = setup('cache-upgraded');
+    runCached(pluginDir, buildFakeNpm({ '@ai-sdlc/pipeline-cli@^0.20.0': '0.20.1' }));
+    writeInstalledPackage(pluginDir, '@ai-sdlc/pipeline-cli', '0.20.1');
+    assert.equal(runCached(pluginDir, buildFakeNpm({})), '');
+  });
+});
