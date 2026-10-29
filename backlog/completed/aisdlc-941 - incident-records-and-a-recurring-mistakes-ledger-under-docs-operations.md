@@ -1,7 +1,7 @@
 ---
 id: AISDLC-941
 title: 'Incident records and a recurring-mistakes ledger under docs/operations/incidents/'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels:
