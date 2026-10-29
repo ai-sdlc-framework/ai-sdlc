@@ -244,12 +244,17 @@ describe('makeGitEnv() — AISDLC-253 fixture-leak prevention', () => {
     });
   });
 
-  it('disables git auto gc / maintenance (AISDLC-655.5)', () => {
+  it('disables git auto gc / maintenance in real git (AISDLC-655.5)', () => {
     const env = makeGitEnv();
-    expect(env['GIT_CONFIG_COUNT']).toBe('2');
-    expect(env['GIT_CONFIG_KEY_0']).toBe('gc.auto');
-    expect(env['GIT_CONFIG_VALUE_0']).toBe('0');
-    expect(env['GIT_CONFIG_KEY_1']).toBe('maintenance.auto');
-    expect(env['GIT_CONFIG_VALUE_1']).toBe('false');
+    const dir = mkdtempSync(join(tmpdir(), 'git-env-gc-'));
+    try {
+      execSync('git init -q -b main', { cwd: dir, env, stdio: 'pipe' });
+      const read = (key: string): string =>
+        execSync(`git config --get ${key}`, { cwd: dir, env, encoding: 'utf8' }).trim();
+      expect(read('gc.auto')).toBe('0');
+      expect(read('maintenance.auto')).toBe('false');
+    } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
   });
 });

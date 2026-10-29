@@ -1,4 +1,4 @@
-import { execFileSync, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawnSync, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { createHash } from 'node:crypto';
 import {
@@ -177,8 +177,37 @@ beforeEach(() => {
   writeFileSync(join(repo, '.ai-sdlc', 'attestations', 'a.dsse.json'), '{"sig":"x"}\n');
 });
 
+/** Print processes holding files under `dir` so a recurring flake names its writer. */
+function reportHolders(dir: string): void {
+  const lsof = spawnSync('lsof', ['+D', dir], { encoding: 'utf8' });
+  const out = lsof.error
+    ? (spawnSync('ps', ['-axo', 'pid,ppid,command'], { encoding: 'utf8' }).stdout ?? '')
+    : lsof.stdout;
+  console.error(`[replay.test] rmSync failed for ${dir}; processes holding files:\n${out}`);
+}
+
 afterEach(() => {
-  for (const d of [repo, artifacts, usageDir, tmpRoot]) rmSync(d, RM_OPTS);
+  for (const d of [repo, artifacts, usageDir, tmpRoot]) {
+    try {
+      rmSync(d, RM_OPTS);
+    } catch (err) {
+      reportHolders(d);
+      throw err;
+    }
+  }
+});
+
+it('fixture repo disables git auto gc / maintenance via env and repo config', () => {
+  for (const key of ['gc.auto', 'maintenance.auto']) {
+    const want = key === 'gc.auto' ? '0' : 'false';
+    expect(git(repo, 'config', '--get', key)).toBe(want);
+    const local = execFileSync('git', ['config', '--local', '--get', key], {
+      cwd: repo,
+      env: { PATH: process.env['PATH'], GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
+      encoding: 'utf8',
+    }).trim();
+    expect(local).toBe(want);
+  }
 });
 
 /** Hash every file under a directory, by relative path and bytes. */
