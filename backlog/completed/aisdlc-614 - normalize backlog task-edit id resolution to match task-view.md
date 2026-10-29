@@ -1,7 +1,7 @@
 ---
 id: AISDLC-614
 title: Normalize backlog `task edit` id resolution to match `task view` (LOW-6)
-status: To Do
+status: Done
 priority: low
 labels:
   - backlog-cli
