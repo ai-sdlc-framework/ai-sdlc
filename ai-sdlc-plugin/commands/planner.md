@@ -155,7 +155,7 @@ node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" peek --board-dir "$BOARD_DIR"
 ## Step 4 — Pending design decisions
 
 ```bash
-node "$PIPELINE_CLI_BIN/cli-decisions.mjs" list --format table
+node "$PIPELINE_CLI_BIN/cli-decisions.mjs" list --route design --format table
 ```
 
 Questions about RFC interpretation, scope or conflicting instructions belong to

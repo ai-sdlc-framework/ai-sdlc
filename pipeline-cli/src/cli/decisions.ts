@@ -647,6 +647,12 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             default: false,
             describe:
               'AISDLC-447 — filter to decisions whose timebox has expired AND are still unresolved (lifecycle ≠ answered / archived / superseded).',
+          })
+          .option('route', {
+            type: 'string',
+            choices: ESCALATION_ROUTES,
+            describe:
+              'AISDLC-668.2 — keep only decisions currently at this tier (operational or design). A decision with no recorded routing counts as design, the escalate default.',
           }),
       async (argv) => {
         const workDir = String(argv['work-dir']);
@@ -663,7 +669,12 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
         const { decisions: rawDecisions, skipped } = listDecisions({ workDir });
         // Apply --expired filter BEFORE sort so the urgency ordering only
         // reflects the visible subset.
-        const filtered = argv.expired ? filterExpiredDecisions(rawDecisions) : rawDecisions;
+        const expiredFiltered = argv.expired ? filterExpiredDecisions(rawDecisions) : rawDecisions;
+        const route = argv.route as string | undefined;
+        const filtered =
+          route === undefined
+            ? expiredFiltered
+            : expiredFiltered.filter((d) => (d.status.escalationTier ?? 'design') === route);
         // AISDLC-463 — `--ranked` is a third ordering mode alongside the
         // AISDLC-447 `--sort timebox|created`. When set it takes precedence
         // (the priority × impact × urgency formula subsumes the plain
