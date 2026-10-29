@@ -2,7 +2,7 @@
 id: AISDLC-655.4
 title: >-
   RFC-0050: pairwise replay comparison and incremental corpus building
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
