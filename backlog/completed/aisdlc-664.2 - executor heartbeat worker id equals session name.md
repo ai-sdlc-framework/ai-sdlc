@@ -2,7 +2,7 @@
 id: AISDLC-664.2
 title: >-
   RFC-0051: executor and dispatch loops set the heartbeat worker id to their session name
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
