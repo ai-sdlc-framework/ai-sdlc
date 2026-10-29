@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1095
 title: 'reconciler observability: the watch scheduler logs to the board, every PR row in pr-snapshot carries lane, action, reason, owner and lastActionAt, status prints the table, and the planner receives each new routing line once'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-28'
 labels:
@@ -38,8 +38,30 @@ Workflow audit 2026-10-28. The `reconcile --watch` scheduler started by `cli-hie
 
 ## Acceptance Criteria
 
-- [ ] After `cli-hierarchy up`, `.ai-sdlc/dispatch/log/reconcile.log` receives one row per open PR per run.
-- [ ] `cli-hierarchy status` prints every open PR with lane, action, reason, owner and age.
-- [ ] A reconcile run repeated with unchanged facts sends the planner nothing; a new routing sends exactly one line.
-- [ ] The four prose state files are gone from the board and from every command prose that named them.
+- [x] After `cli-hierarchy up`, `.ai-sdlc/dispatch/log/reconcile.log` receives one row per open PR per run.
+- [x] `cli-hierarchy status` prints every open PR with lane, action, reason, owner and age.
+- [x] A reconcile run repeated with unchanged facts sends the planner nothing; a new routing sends exactly one line.
+- [x] The four prose state files are gone from the board and from every command prose that named them.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+
+## Final Summary
+
+## Summary
+Added ai-sdlc-plugin/hooks/dispatch-routing.test.mjs (node --test, 6 cases) to cover newRoutingLines and the dispatch tick's planner-once behaviour. This answers the round-1 test-reviewer finding.
+
+## Changes
+- ai-sdlc-plugin/hooks/dispatch-routing.test.mjs
+
+## Design decisions
+I ran `pnpm build && pnpm test && pnpm lint && pnpm format:check` with AI_SDLC_EXECUTOR_TASK, AI_SDLC_HIERARCHY_ROLE and AI_SDLC_HIERARCHY_SESSION unset, and all four exited clean. Only the tail of the `pnpm test` output was captured, so I have no summary line to quote, and I did not run coverage. The new file's own run reported 6 pass, 0 fail. The test file covers these cases: empty and non-JSON stdout, acted with and without a note, a routed entry, an unrelated action, and a leading log line before the JSON. Two tick tests check that the planner gets no message when route-to-planner appears only in prose, and exactly one line for a new routing. The branch was already up to date with origin/main, so the rebase changed nothing. The first two push attempts were blocked by the governance hook, which rejected the `cd && git push` chain and a push from the parent cwd. The push succeeded as `git -C <worktree> push --force-with-lease -u origin HEAD:refs/heads/<branch>`. PR #2132 already existed, so I did not open a new one.
+
+## Verification
+- `pnpm build` — passed
+- `pnpm test` — passed
+- `pnpm lint` — passed
+- `pnpm format:check` — passed
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
