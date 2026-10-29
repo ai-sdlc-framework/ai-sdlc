@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1093
 title: 'reconciler passes --developer-round on failure shapes that need new code (coverage red, test failure, waived tests), so an unchanged patch id no longer strands a fix round'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-28'
 labels:
