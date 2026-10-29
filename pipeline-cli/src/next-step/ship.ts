@@ -24,6 +24,7 @@ import { computeMergeBase, computePatchId } from '../attestation/patch-id.js';
 import { PUSH_NON_FAST_FORWARD_CAUSE } from '../hierarchy/playbook.js';
 import { dropAttestationChores } from '../attestation/drop-chores.js';
 import { loadOperationalPolicy } from '../hierarchy/operational.js';
+import { isProtectedBranch } from '../hierarchy/lease-policy.js';
 import { leasePushPreflight, type LeasePreflight } from '../hierarchy/lease-preflight.js';
 import { writeVerdictFile } from '../cli/execute.js';
 import { resolveTargetBranch } from '../steps/02-compute-branch.js';
@@ -171,6 +172,29 @@ export async function preSignRebase(
   // (AISDLC-951).
   // Empty root keeps the ledger path worktree-relative; the writer owns the
   // (lowercase) spelling, so it is never rebuilt by hand (AISDLC-1017).
+  // AISDLC-1098: a re-sign removes the stale envelope for the previous content
+  // hash, leaving a tracked file deleted-unstaged that makes git refuse the
+  // rebase. Stage exactly those deletions; any other unstaged change still refuses.
+  const deleted = await ctx.runner(
+    'git',
+    ['ls-files', '--deleted', '--', '.ai-sdlc/attestations/'],
+    { cwd: wt, allowFailure: true },
+  );
+  const staleEnvelopes = deleted.stdout
+    .split('\n')
+    .map((f) => f.trim())
+    .filter((f) => f !== '');
+  if (deleted.code === 0 && staleEnvelopes.length > 0) {
+    await ctx.runner('git', ['rm', '--cached', '-q', '--', ...staleEnvelopes], {
+      cwd: wt,
+      allowFailure: true,
+    });
+    await ctx.runner(
+      'git',
+      ['commit', '-m', `chore: drop stale attestation envelope (${state.taskId})`],
+      { cwd: wt, allowFailure: true, timeout: 300_000 },
+    );
+  }
   const owned = ['.ai-sdlc/transcript-leaves/', reviewsLedgerPath(state.taskId, '')];
   const pending = await ctx.runner('git', ['status', '--porcelain', '--', ...owned], {
     cwd: wt,
@@ -381,6 +405,53 @@ export async function shipTask(
   }
 }
 
+/**
+ * AISDLC-1098: lease-push the pre-sign-rebased head. Honours the trusted push policy
+ * (`allowForcePush: never`, protected or malformed branch refuse), pins the lease to the
+ * remote-tracking sha held before the fetch, and refuses when the fetch shows the remote
+ * moved. Returns null when the fallback does not apply.
+ */
+async function leasePushOwnRebaseShip(
+  ctx: NextStepContext,
+  runner: NextStepContext['runner'],
+  wt: string,
+  branch: string,
+  env: NodeJS.ProcessEnv | undefined,
+): Promise<Awaited<ReturnType<NextStepContext['runner']>> | null> {
+  const policy = loadOperationalPolicy(ctx.workDir, ctx.workDir);
+  if (policy.forcePushMode === 'never') return null;
+  if (
+    !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch) ||
+    branch.includes('..') ||
+    isProtectedBranch(branch, policy.protectedBranches)
+  ) {
+    return null;
+  }
+  const ref = `refs/remotes/origin/${branch}`;
+  const sha = async (): Promise<string> => {
+    const r = await runner('git', ['rev-parse', ref], { cwd: wt, allowFailure: true });
+    return r.code === 0 ? r.stdout.trim() : '';
+  };
+  const recorded = await sha();
+  if (!/^[0-9a-f]{40,64}$/i.test(recorded)) return null;
+  const fetched = await runner('git', ['fetch', 'origin', branch], {
+    cwd: wt,
+    allowFailure: true,
+    timeout: 30_000,
+  });
+  if (fetched.code !== 0 || (await sha()) !== recorded) return null;
+  return runner(
+    'git',
+    [
+      'push',
+      '-u',
+      `--force-with-lease=refs/heads/${branch}:${recorded}`,
+      'origin',
+      `HEAD:refs/heads/${branch}`,
+    ],
+    { cwd: wt, allowFailure: true, timeout: PUSH_TIMEOUT_MS, env },
+  );
+}
 async function shipInner(
   ctx: NextStepContext,
   state: NextStepState,
@@ -486,6 +557,18 @@ async function shipInner(
     pushRc = push.code;
     pushErr = (push.stderr || push.stdout).trim();
     if (pushRc === 0) break;
+    if (/non-fast-forward/i.test(pushErr)) {
+      // AISDLC-1098: step 10.5 rebased a branch whose developer pass had already
+      // force-pushed, so local and remote diverge. Push what we rebased with one
+      // policy-checked lease push pinned to the remote tip this run last saw; a
+      // remote that moved since (a foreign push) keeps the abort.
+      const lease = await leasePushOwnRebaseShip(ctx, runner, wt, state.branch, pushEnv);
+      if (lease) {
+        pushRc = lease.code;
+        pushErr = (lease.stderr || lease.stdout).trim();
+        if (pushRc === 0) break;
+      }
+    }
   }
   if (pushRc !== 0) {
     const nonFf = /non-fast-forward|rejected/i.test(pushErr);

@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { appendReviewLedgerRecord } from '../attestation/reviews-ledger.js';
 import { fail, ok } from '../__test-helpers/fake-runner.js';
 import type { Runner } from '../runtime/exec.js';
@@ -23,10 +23,23 @@ import {
 } from './ship.js';
 import type { NextStepState } from './types.js';
 
+const policyOverride = vi.hoisted(() => ({ mode: null as null | 'lease' | 'never' }));
+vi.mock('../hierarchy/operational.js', async (orig) => {
+  const real = await orig<typeof import('../hierarchy/operational.js')>();
+  return {
+    ...real,
+    loadOperationalPolicy: (...a: Parameters<typeof real.loadOperationalPolicy>) => {
+      const base = real.loadOperationalPolicy(...a);
+      return policyOverride.mode ? { ...base, forcePushMode: policyOverride.mode } : base;
+    },
+  };
+});
+
 let h: Harness;
 let state: NextStepState;
 
 beforeEach(() => {
+  policyOverride.mode = 'lease';
   h = makeHarness();
   state = makeState(h.root, {
     developer: DEV_RETURN,
@@ -140,6 +153,23 @@ describe('preSignRebase (AISDLC-102)', () => {
     const r = await preSignRebase(h.ctx, state);
     expect(r.kind).toBe('skipped');
     expect(indexOfCall(/git rebase/)).toBe(-1);
+  });
+
+  it('stages a deleted-unstaged attestation envelope before the rebase (AISDLC-1098)', async () => {
+    hashes('A', 'A');
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    h.runner.on(/ls-files --deleted/, ok('.ai-sdlc/attestations/old.v6.dsse.json\n'));
+    await preSignRebase(h.ctx, state);
+    const rmAt = indexOfCall(/git rm --cached -q -- \.ai-sdlc\/attestations\/old\.v6\.dsse\.json/);
+    expect(rmAt).toBeGreaterThanOrEqual(0);
+    expect(rmAt).toBeLessThan(indexOfCall(/git rebase origin\/main/));
+  });
+
+  it('does not touch the index when no envelope is deleted (AISDLC-1098)', async () => {
+    hashes('A', 'A');
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    await preSignRebase(h.ctx, state);
+    expect(indexOfCall(/git rm --cached/)).toBe(-1);
   });
 
   it('bounds the fetch with a 30s timeout', async () => {
@@ -804,7 +834,49 @@ describe('shipTask: failures stop before anything irreversible', () => {
     const res = await shipTask(h.ctx, state);
     expect(res.action === 'stop' && res.reason).toMatch(/non-fast-forward[\s\S]*destructive/);
     expect(res.action === 'stop' && res.cause).toBe('push-non-fast-forward');
-    expect(cmds().some((c) => /push --force|push -f|branch -[dD]/.test(c))).toBe(false);
+    expect(cmds().some((c) => /push -f|push --force(?!-with-lease)|branch -[dD]/.test(c))).toBe(
+      false,
+    );
+  });
+
+  it('lands a rebased head with one pinned lease push after a non-fast-forward (AISDLC-1098)', async () => {
+    giveKey();
+    const sha = 'a'.repeat(40);
+    h.runner.on(/rev-parse refs\/remotes\/origin\//, ok(`${sha}\n`));
+    h.runner.on(/^git push -u --force-with-lease=/, ok(''));
+    h.runner.on(/^git push -u origin/, fail('! [rejected] non-fast-forward', 1));
+    scriptShip();
+    const res = await shipTask(h.ctx, state);
+    expect(res.action === 'stop' && res.cause).not.toBe('push-non-fast-forward');
+    const leases = cmds().filter((c) => c.includes('--force-with-lease='));
+    expect(leases).toHaveLength(1);
+    expect(leases[0]).toContain(`:${sha}`);
+  });
+
+  it('keeps the abort when the trusted policy forbids a lease push (AISDLC-1098)', async () => {
+    giveKey();
+    policyOverride.mode = 'never';
+    h.runner.on(/rev-parse refs\/remotes\/origin\//, ok(`${'a'.repeat(40)}\n`));
+    h.runner.on(/^git push -u origin/, fail('! [rejected] non-fast-forward', 1));
+    scriptShip();
+    const res = await shipTask(h.ctx, state);
+    expect(res.action === 'stop' && res.cause).toBe('push-non-fast-forward');
+    expect(cmds().some((c) => c.includes('--force-with-lease'))).toBe(false);
+  });
+
+  it('keeps the abort when the remote moved since it was last seen (AISDLC-1098)', async () => {
+    giveKey();
+    let gen = 0;
+    h.runner.on(/^git fetch origin ai-sdlc\//, () => {
+      gen += 1;
+      return ok('');
+    });
+    h.runner.on(/rev-parse refs\/remotes\/origin\//, () => ok(`${String(gen).repeat(40)}\n`));
+    h.runner.on(/^git push -u origin/, fail('! [rejected] non-fast-forward', 1));
+    scriptShip();
+    const res = await shipTask(h.ctx, state);
+    expect(res.action === 'stop' && res.cause).toBe('push-non-fast-forward');
+    expect(cmds().some((c) => c.includes('--force-with-lease'))).toBe(false);
   });
 
   it('stops when the PR cannot be created', async () => {

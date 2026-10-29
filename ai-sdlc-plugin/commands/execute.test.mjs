@@ -445,7 +445,11 @@ describe('/ai-sdlc execute — next-step implements what the body used to narrat
     assert.match(ship, /print-content-hash/);
     assert.match(ship, /sign-attestation-if-consumer\.sh/);
     assert.match(ship, /sanitizeCiSkipTokens/);
-    assert.doesNotMatch(ship, /'--force|'push',\s*'-f'/, 'ship.ts must never force-push');
+    assert.doesNotMatch(
+      ship,
+      /'--force(?!-with-lease)|'push',\s*'-f'/,
+      'ship.ts must never force-push (a lease push is the only sanctioned form, AISDLC-1098)',
+    );
     assert.doesNotMatch(ship, /'pr',\s*'merge'/, 'ship.ts must never merge');
   });
 
