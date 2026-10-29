@@ -1,0 +1,5 @@
+{
+  "name": "gh-issue-no-claude",
+  "note": "gh:<n> form routes to the issue path and stops when claude is not on PATH",
+  "task": "gh:7"
+}

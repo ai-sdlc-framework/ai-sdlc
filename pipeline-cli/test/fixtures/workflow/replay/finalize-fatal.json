@@ -1,0 +1,5 @@
+{
+  "name": "finalize-fatal",
+  "note": "finalizeReview fails non-recoverably: stop, no corrected-report retry",
+  "finalizeFatal": true
+}

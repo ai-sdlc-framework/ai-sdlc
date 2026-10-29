@@ -1,0 +1,5 @@
+{
+  "name": "cancel-at-start",
+  "note": "operator cancel signal present right after init",
+  "cancelAt": "start"
+}

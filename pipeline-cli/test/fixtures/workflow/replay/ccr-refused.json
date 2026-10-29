@@ -1,0 +1,5 @@
+{
+  "name": "ccr-refused",
+  "note": "the remote-sandbox guard refuses the run before init",
+  "ccr": true
+}

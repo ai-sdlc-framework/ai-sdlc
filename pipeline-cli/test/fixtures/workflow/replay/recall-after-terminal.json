@@ -1,0 +1,5 @@
+{
+  "name": "recall-after-terminal",
+  "note": "a call after a terminal instruction re-emits the persisted result",
+  "recallAfterTerminal": true
+}

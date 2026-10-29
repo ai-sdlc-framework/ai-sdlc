@@ -8,7 +8,8 @@ execute round gets the iteration cap, the review fan-out cap, the hygiene nodes 
 
 - Default: engine. Run state holds `workflow.records`; the sign step adds `workflowDigest`.
 - Escape hatch: `AI_SDLC_WORKFLOW_ENGINE=0` runs the legacy Machine in `next-step/next-step.ts`
-  and prints one deprecation warning per process on stderr.
+  and prints one deprecation warning per process on stderr. Only the exact value `0` selects the
+  Machine; any other value (`false`, `off`, empty) keeps the engine.
 - Deprecation: the escape hatch and the Machine are removed after one release. A state file begun
   by one path cannot be resumed by the other; start a fresh run (`--fresh`).
 

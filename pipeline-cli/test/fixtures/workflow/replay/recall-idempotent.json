@@ -1,0 +1,5 @@
+{
+  "name": "recall-idempotent",
+  "note": "a call with no result re-emits the pending instruction",
+  "recall": true
+}

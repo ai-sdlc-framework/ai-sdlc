@@ -1,0 +1,5 @@
+{
+  "name": "ship-throws",
+  "note": "a collaborator throws after the task began: status rolled back, aborted stop",
+  "shipThrows": true
+}

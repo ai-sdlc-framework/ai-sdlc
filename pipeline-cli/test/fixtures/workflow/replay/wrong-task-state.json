@@ -1,0 +1,5 @@
+{
+  "name": "wrong-task-state",
+  "note": "a state file for another task is refused without being rewritten",
+  "wrongTask": true
+}

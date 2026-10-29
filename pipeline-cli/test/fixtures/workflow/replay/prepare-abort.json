@@ -1,0 +1,5 @@
+{
+  "name": "prepare-abort",
+  "note": "prepareReview aborts: the run stops without a reviewer fan-out",
+  "prepareAbort": true
+}

@@ -16,6 +16,7 @@ import { WORKFLOW_PATH, workflowDigestFromStateFile } from './digest.js';
 import {
   EXECUTE_IMPLS,
   readLedger,
+  resetMachineDeprecationWarning,
   warnMachineDeprecated,
   workflowEngineEnabled,
   workflowNextStep,
@@ -446,6 +447,7 @@ describe('workflowNextStep host paths', () => {
   });
 
   it('warns once per process when the escape hatch selects the Machine', () => {
+    resetMachineDeprecationWarning();
     const lines: string[] = [];
     warnMachineDeprecated({}, (l) => lines.push(l));
     expect(lines).toHaveLength(0);

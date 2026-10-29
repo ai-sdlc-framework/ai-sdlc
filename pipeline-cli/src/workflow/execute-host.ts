@@ -10,6 +10,7 @@
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { defaultArtifactsDir, resolveProjectRoot } from '../routing/artifacts-dir.js';
+import { consumeDeveloperRound } from '../dispatch/board.js';
 import { parseDeveloperReturn } from '../steps/06-parse-dev-return.js';
 import { formatFeedback } from '../steps/08-aggregate-verdicts.js';
 import { DEFAULT_MAX_ITERATIONS } from '../steps/09-iterate.js';
@@ -74,6 +75,11 @@ export function workflowEngineEnabled(env: NodeJS.ProcessEnv): boolean {
 }
 
 let deprecationWarned = false;
+
+/** Test seam: forget that the warning was already written in this process. */
+export function resetMachineDeprecationWarning(): void {
+  deprecationWarned = false;
+}
 
 /** One warning per process when the escape hatch selects the legacy Machine. */
 export function warnMachineDeprecated(
@@ -270,9 +276,16 @@ class ExecuteHost implements EngineHost {
     if (this.cancelled(state)) return this.cancelHalt(state);
     if (init.resumed) {
       // AISDLC-947: an unchanged patch id needs no developer and no reviewer.
-      const decision = await decideResumeReview(ctx, init.worktreePath);
-      state.resumeReview = decision;
+      const decision = await decideResumeReview(ctx, init.worktreePath, {
+        ...(init.developerRound ? { developerRound: true } : {}),
+      });
       ctx.logger.info(`[resume] ${decision.note}`);
+      if (decision.branch === 'developer-round') {
+        // AISDLC-1053: the review is decided after the ordered developer round (parse).
+        state.developerRoundPending = true;
+      } else {
+        state.resumeReview = decision;
+      }
       if (decision.branch === 'unchanged') {
         const head = await ctx.runner('git', ['rev-parse', 'HEAD'], {
           cwd: init.worktreePath,
@@ -324,6 +337,13 @@ class ExecuteHost implements EngineHost {
     }
     state.developer = parsed.developer;
     recordDeveloperResponseOf(state);
+    if (state.developerRoundPending) {
+      // AISDLC-1053: the ordered round ran; pick the review from the new patch id.
+      delete state.developerRoundPending;
+      consumeDeveloperRound(join(state.workDir, '.ai-sdlc', 'dispatch'), state.taskId);
+      state.resumeReview = await decideResumeReview(this.ctx, state.worktreePath);
+      this.ctx.logger.info(`[resume] ${state.resumeReview.note}`);
+    }
     return { kind: 'ok' };
   }
 

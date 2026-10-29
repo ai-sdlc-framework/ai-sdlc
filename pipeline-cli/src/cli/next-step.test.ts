@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildCli } from './index.js';
+import { resetMachineDeprecationWarning } from '../workflow/execute-host.js';
 import {
   buildContext,
   defaultCliBinDir,
@@ -97,6 +98,26 @@ describe('handler', () => {
     expect(parsed).toMatchObject({ action: 'stop', outcome: 'aborted', prUrl: null });
     expect(parsed.reason).toContain('Accepted forms');
     expect(exitCode).toBe(1);
+  });
+
+  it('runs the workflow engine by default (it records the run state path for the signing hook)', async () => {
+    delete process.env.AI_SDLC_WORKFLOW_ENGINE;
+    delete process.env.AI_SDLC_WORKFLOW_STATE;
+    const state = join(dir, 's.json');
+    await run({ task: 'not-an-arg!', state });
+    expect(process.env.AI_SDLC_WORKFLOW_STATE).toBe(state);
+    expect(JSON.parse(stdout).action).toBe('stop');
+  });
+
+  it('AI_SDLC_WORKFLOW_ENGINE=0 runs the legacy Machine and warns that it is deprecated', async () => {
+    resetMachineDeprecationWarning();
+    process.env.AI_SDLC_WORKFLOW_ENGINE = '0';
+    delete process.env.AI_SDLC_WORKFLOW_STATE;
+    const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await run({ task: 'not-an-arg!', state: join(dir, 's.json') });
+    expect(process.env.AI_SDLC_WORKFLOW_STATE).toBeUndefined();
+    expect(err.mock.calls.flat().join('\n')).toContain('deprecated');
+    expect(JSON.parse(stdout).action).toBe('stop');
   });
 
   it('refuses in a CCR sandbox', async () => {

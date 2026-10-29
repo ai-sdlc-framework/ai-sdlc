@@ -1,0 +1,5 @@
+{
+  "name": "cancel-after-developer",
+  "note": "operator cancel signal seen at the developer step boundary",
+  "cancelAt": "developer"
+}
