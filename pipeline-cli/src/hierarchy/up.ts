@@ -563,6 +563,8 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
       type: 'HierarchySessionStarted',
       sessionName: entry.name,
       sessionRole: entry.role,
+      sessionModel: entry.model,
+      sessionPermissionMode: entry.permissionMode,
     });
   }
   // Also rewrites a roster written before project scoping, now carrying `project`.

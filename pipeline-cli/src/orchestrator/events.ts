@@ -340,7 +340,8 @@ export type OrchestratorEventType =
   /**
    * RFC-0051 - emitted when a hierarchy session (planner, dispatch or
    * executor) is started by `cli-hierarchy up`. Per-event fields:
-   * `sessionName` (the roster name), `sessionRole`.
+   * `sessionName` (the roster name), `sessionRole`, `sessionModel`,
+   * `sessionPermissionMode`.
    */
   | 'HierarchySessionStarted'
   /**

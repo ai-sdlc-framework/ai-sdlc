@@ -2006,9 +2006,15 @@ describe('system runner', () => {
 
 describe('hierarchy up events', () => {
   it('records one HierarchySessionStarted event per started session', async () => {
-    const events: { type: string; sessionName?: unknown; sessionRole?: unknown }[] = [];
+    const events: Record<string, unknown>[] = [];
     await hierarchyUp({ ...baseOpts, executors: 1 }, { ...deps, emit: (e) => events.push(e) });
-    expect(events).toEqual([
+    expect(
+      events.map(({ sessionModel, sessionPermissionMode, ...rest }) => {
+        expect(typeof sessionModel).toBe('string');
+        expect(typeof sessionPermissionMode).toBe('string');
+        return rest;
+      }),
+    ).toEqual([
       { type: 'HierarchySessionStarted', sessionName: Q('planner'), sessionRole: 'planner' },
       {
         type: 'HierarchySessionStarted',

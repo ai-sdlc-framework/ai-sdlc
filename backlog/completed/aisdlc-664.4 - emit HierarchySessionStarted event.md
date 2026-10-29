@@ -2,7 +2,7 @@
 id: AISDLC-664.4
 title: >-
   RFC-0051: emit a HierarchySessionStarted event when cli-hierarchy starts a session
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:

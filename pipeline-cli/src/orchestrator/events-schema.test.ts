@@ -406,6 +406,8 @@ describe('orchestrator-events.v1.schema.json — accepts every emitted type', ()
       type: 'HierarchySessionStarted',
       sessionName: 'executor-alpha',
       sessionRole: 'executor',
+      sessionModel: 'sonnet',
+      sessionPermissionMode: 'bypassPermissions',
     });
     expectInvalid({
       ts: baseTs,
