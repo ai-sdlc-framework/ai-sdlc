@@ -168,26 +168,55 @@ fi
 # which doesn't exist in a plain monorepo checkout, causing Claude Code to fall
 # back to the sibling path or requiring explicit CLAUDE_PLUGIN_ROOT override.
 # For dogfood use, build the local dist first: `pnpm --filter @ai-sdlc/plugin-mcp-server build`.
-PIPELINE_CLI_OK=0
-MCP_SERVER_OK=0
-ORCHESTRATOR_OK=0
+# AISDLC-1084: health is decided by the shared module (entry-point files plus
+# the full @ai-sdlc dependency closure), the same one session-start.js uses.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HEALTH_SCRIPT="$SCRIPT_DIR/lib/runtime-deps-health.js"
 
-if [ -f "$PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin/cli-deps.mjs" ]; then
-  PIPELINE_CLI_OK=1
-fi
-if [ -f "$PLUGIN_DIR/node_modules/@ai-sdlc/plugin-mcp-server/dist/bin.js" ]; then
-  MCP_SERVER_OK=1
-fi
-# AISDLC-554: @ai-sdlc/orchestrator carries the attestation signing runtime.
-# It MUST participate in the idempotence check — without this line an adopter
-# whose plugin predates AISDLC-554 already has the other two packages, so the
-# early-exit below fires and orchestrator is never installed, leaving the
-# signer unresolvable and attestation silently unavailable. The probed file is
-# the exact module sign-attestation.mjs imports, so a partial install fails the
-# check rather than passing on the package directory alone.
-if [ -f "$PLUGIN_DIR/node_modules/@ai-sdlc/orchestrator/dist/runtime/attestations.js" ]; then
-  ORCHESTRATOR_OK=1
-fi
+# health_missing: prints "<pkg>\t<file>" lines for problems; returns 1 if unhealthy.
+health_missing() {
+  node "$HEALTH_SCRIPT" "$PLUGIN_DIR" 2>/dev/null
+}
+
+# ── Mutual exclusion (AISDLC-1084) ───────────────────────────────────────────
+#
+# Every session runs this from SessionStart; a hierarchy starts several at once.
+# Overlapping `npm install --prefix <same dir>` runs (and the stale-upgrade
+# rm -rf below) race each other's extraction and leave a partial tree. A
+# mkdir lock (atomic, portable to macOS) serialises them; a waiter re-checks
+# health once it holds the lock and usually finds nothing left to do.
+LOCK_DIR="$PLUGIN_DIR/.ai-sdlc-install.lock"
+LOCK_TIMEOUT="${AI_SDLC_INSTALL_LOCK_TIMEOUT:-300}"
+LOCK_HELD=0
+release_lock() {
+  if [ "$LOCK_HELD" = "1" ]; then
+    rm -rf "$LOCK_DIR"
+    LOCK_HELD=0
+  fi
+}
+trap release_lock EXIT
+waited=0
+waited_s=0
+while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+  holder="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
+  if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
+    echo "install-runtime-deps.sh: removing stale install lock left by dead pid $holder" >&2
+    rm -rf "$LOCK_DIR"
+    continue
+  fi
+  if [ "$waited" = "0" ]; then
+    echo "install-runtime-deps.sh: waited for lock held by another installer ($LOCK_DIR) ..." >&2
+    waited=1
+  fi
+  if [ "$waited_s" -ge "$LOCK_TIMEOUT" ]; then
+    echo "install-runtime-deps.sh: gave up waiting ${LOCK_TIMEOUT}s for install lock $LOCK_DIR (holder pid ${holder:-unknown})" >&2
+    exit 1
+  fi
+  sleep 1
+  waited_s=$((waited_s + 1))
+done
+LOCK_HELD=1
+echo "$$" > "$LOCK_DIR/pid"
 
 # ── Version-convergence check (AISDLC-580) ───────────────────────────────────
 #
@@ -230,7 +259,6 @@ fi
 # leave that one package briefly absent) — accepted because the failure mode
 # is self-healing (the post-install verification step below will fail loud
 # and the very next invocation retries the same rm+install), not silent.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STALE_CHECK_SCRIPT="$SCRIPT_DIR/check-stale-runtime-deps.mjs"
 
 if [ "$FORCE" = "1" ]; then
@@ -245,9 +273,6 @@ if [ "$FORCE" = "1" ]; then
     echo "install-runtime-deps.sh: removing $PLUGIN_DIR/node_modules/$force_name for forced reinstall" >&2
     rm -rf "$PLUGIN_DIR/node_modules/$force_name"
   done
-  PIPELINE_CLI_OK=0
-  MCP_SERVER_OK=0
-  ORCHESTRATOR_OK=0
 elif [ -f "$STALE_CHECK_SCRIPT" ]; then
   STALE_OUTPUT=$(node "$STALE_CHECK_SCRIPT" "$PLUGIN_DIR" 2>/dev/null) || STALE_OUTPUT=""
   # Tab-delimited (not space) — a semver range pin can legally contain a
@@ -258,17 +283,23 @@ elif [ -f "$STALE_CHECK_SCRIPT" ]; then
     [ -z "$stale_name" ] && continue
     echo "install-runtime-deps.sh: upgrading $stale_name $stale_installed -> $stale_target to satisfy pin $stale_pin" >&2
     rm -rf "$PLUGIN_DIR/node_modules/$stale_name"
-    case "$stale_name" in
-      "@ai-sdlc/pipeline-cli") PIPELINE_CLI_OK=0 ;;
-      "@ai-sdlc/plugin-mcp-server") MCP_SERVER_OK=0 ;;
-      "@ai-sdlc/orchestrator") ORCHESTRATOR_OK=0 ;;
-    esac
   done <<< "$STALE_OUTPUT"
 fi
 
-if [ "$FORCE" != "1" ] && [ "$PIPELINE_CLI_OK" = "1" ] && [ "$MCP_SERVER_OK" = "1" ] && [ "$ORCHESTRATOR_OK" = "1" ]; then
+if [ "$FORCE" != "1" ] && health_missing >/dev/null; then
   echo "install-runtime-deps.sh: all runtimeDependencies already installed in $PLUGIN_DIR" >&2
+  # Re-stamp: a waiter that skipped the install must still leave the sentinel.
+  mkdir -p "$PLUGIN_DIR/node_modules"
+  [ -f "$PLUGIN_DIR/node_modules/.ai-sdlc-installed" ] || printf '%s\n' "installed by ai-sdlc-plugin install-runtime-deps.sh at $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$PLUGIN_DIR/node_modules/.ai-sdlc-installed"
   exit 0
+fi
+
+# AISDLC-1084: unhealthy and not already clean -> start from a clean
+# @ai-sdlc tree so npm cannot keep a half-extracted package it believes done.
+if [ -d "$PLUGIN_DIR/node_modules/@ai-sdlc" ]; then
+  echo "install-runtime-deps.sh: unhealthy tree detected, clearing $PLUGIN_DIR/node_modules/@ai-sdlc for a clean reinstall:" >&2
+  health_missing | sed 's/^/install-runtime-deps.sh:   - /' >&2 || true
+  rm -rf "$PLUGIN_DIR/node_modules/@ai-sdlc"
 fi
 
 echo "install-runtime-deps.sh: installing ${#RUNTIME_SPECS[@]} runtimeDependencies in $PLUGIN_DIR ..." >&2
@@ -295,51 +326,44 @@ done
 # the AISDLC-441 case, the cache dir has no usable package.json, so we always
 # pass explicit specs. This is the load-bearing fix.
 
-npm install \
-  --prefix "$PLUGIN_DIR" \
-  --no-save \
-  --omit=dev \
-  --no-audit \
-  --no-fund \
-  --ignore-scripts \
-  --loglevel warn \
-  "${RUNTIME_SPECS[@]}" \
-  2>&1
+NPM_LOG="$(mktemp "${TMPDIR:-/tmp}/ai-sdlc-npm-install.XXXXXX")"
+trap 'release_lock; rm -f "$NPM_LOG"' EXIT
 
-# ── Verify install succeeded ─────────────────────────────────────────────────
-INSTALL_OK=1
-MISSING=()
-if [ ! -f "$PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin/cli-deps.mjs" ]; then
-  MISSING+=("@ai-sdlc/pipeline-cli (expected $PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin/cli-deps.mjs)")
-  INSTALL_OK=0
-fi
-if [ ! -f "$PLUGIN_DIR/node_modules/@ai-sdlc/plugin-mcp-server/dist/bin.js" ]; then
-  MISSING+=("@ai-sdlc/plugin-mcp-server (expected $PLUGIN_DIR/node_modules/@ai-sdlc/plugin-mcp-server/dist/bin.js)")
-  INSTALL_OK=0
-fi
-# AISDLC-554: the sentinel written below lets session-start skip future
-# installs, so orchestrator must be verified here too — otherwise a run that
-# silently failed to install it still stamps "complete" and the signer stays
-# unresolvable.
-if [ ! -f "$PLUGIN_DIR/node_modules/@ai-sdlc/orchestrator/dist/runtime/attestations.js" ]; then
-  MISSING+=("@ai-sdlc/orchestrator (expected $PLUGIN_DIR/node_modules/@ai-sdlc/orchestrator/dist/runtime/attestations.js)")
-  INSTALL_OK=0
+run_npm_install() {
+  : > "$NPM_LOG"
+  npm install \
+    --prefix "$PLUGIN_DIR" \
+    --no-save \
+    --omit=dev \
+    --no-audit \
+    --no-fund \
+    --ignore-scripts \
+    --loglevel warn \
+    "${RUNTIME_SPECS[@]}" \
+    2>&1 | tee "$NPM_LOG" || true
+}
+
+# ── Install, verify, and self-heal once (AISDLC-1084) ────────────────────────
+run_npm_install
+if ! health_missing >/dev/null; then
+  echo "install-runtime-deps.sh: tree unhealthy after install, retrying once from a clean @ai-sdlc tree" >&2
+  rm -rf "$PLUGIN_DIR/node_modules/@ai-sdlc"
+  run_npm_install
 fi
 
-if [ "$INSTALL_OK" = "1" ]; then
-  # Write a sentinel so session-start can skip the install on subsequent loads
-  # without re-running npm. The sentinel is removed if anyone manually deletes
-  # node_modules, naturally re-triggering install.
+if health_missing >/dev/null; then
   mkdir -p "$PLUGIN_DIR/node_modules"
   printf '%s\n' "installed by ai-sdlc-plugin install-runtime-deps.sh at $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     > "$PLUGIN_DIR/node_modules/.ai-sdlc-installed"
   echo "install-runtime-deps.sh: runtimeDependencies installed successfully (${#RUNTIME_SPECS[@]} packages)" >&2
   exit 0
 else
-  echo "install-runtime-deps.sh: npm install completed but the following expected files are missing:" >&2
-  for m in "${MISSING[@]}"; do
-    echo "install-runtime-deps.sh:   - $m" >&2
-  done
-  echo "install-runtime-deps.sh: check network access (npm registry reachable?) + npm registry config" >&2
+  echo "install-runtime-deps.sh: install failed; the following packages/files are still missing after a clean reinstall:" >&2
+  health_missing | while IFS=$'\t' read -r m_pkg m_file; do
+    echo "install-runtime-deps.sh:   - $m_pkg (expected $m_file)" >&2
+  done || true
+  echo "install-runtime-deps.sh: npm output tail:" >&2
+  tail -n 15 "$NPM_LOG" | sed 's/^/install-runtime-deps.sh:   | /' >&2
+  echo "install-runtime-deps.sh: if npm reported network/registry errors above, check network access and npm registry config" >&2
   exit 1
 fi
