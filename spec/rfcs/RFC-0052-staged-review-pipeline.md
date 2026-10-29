@@ -11,8 +11,6 @@ requires: []
 assumes: [RFC-0012, RFC-0042, RFC-0043, RFC-0046, RFC-0049, RFC-0050]
 requiresDocs:
   - operator-runbook
-deferredDocs: true
-deferredDocsDeadline: '2026-12-15'
 ---
 
 # RFC-0052: Staged Review Pipeline

@@ -1,0 +1,69 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "878edcf80b04d0de5140b0f5400b17481238b0e0"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "correctness-reviewer",
+      "transcriptHash": "adf30c45de9849eb056b8b5d76cd48ca6e3648b6b1096a9904e15b704cf2b3bb",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "correctness-reviewer",
+      "transcriptHash": "96832c2ca0141b489210dbb3837499e1099e3a120d9d04870f1e4695abc68419",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "ca9dc2ad0c841cfc1f3912d97c5dd14f2c3ccda4a4d44d737b9fda38c1f605a2",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "ca9dc2ad0c841cfc1f3912d97c5dd14f2c3ccda4a4d44d737b9fda38c1f605a2",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "f089817e5e61fc7c9761250ac777a5070154b238f39c420d3b8526a8ae3a2ece",
+        "4787dafae485f046eb0915ccbfb4898fe57bc30e053ec1473c69d82f110d90b6"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "5abc3c50e08ea3f4d58dfa5f296feef42250cd2160d1c83983b99d52e2d4f546",
+        "4787dafae485f046eb0915ccbfb4898fe57bc30e053ec1473c69d82f110d90b6"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "cf4bb8a935d20af230dfd6af26fb5534391e7327f5113f1e7c685f1881e6307b",
+        "62daf5f49c3168485126676efe0691b0cdf7c856ac3e63fe7a2a7d88f4bcdf60"
+      ]
+    }
+  ],
+  "rootHash": "90b34fd5a77fa916e08f7f10847639167cc3a26b3bab53e9fa5d12815b06d2c1",
+  "rootSignature": "rqCa3sppa5NPA7Z+WeYitcvaZOo/qwICCbYZ4GlUvbtaucF+OxfnBc2kP4gpaEtzlZso86uW+kJU7dnAeq6MCA==",
+  "nonce": "f0ab34e8083326d71887a46469ea74ff87886b2d9cfe115ada38a5f0e27b918e",
+  "leafCount": 3,
+  "signedAt": "2026-10-29T08:44:22.443Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "docs-adjacent",
+    "securityAlways": false,
+    "requiredSet": "correctness-only",
+    "reason": "every path is Markdown or docs-only",
+    "triggeringPaths": [],
+    "appliedReviewers": ["correctness-reviewer", "security-reviewer"]
+  }
+}

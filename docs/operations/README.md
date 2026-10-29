@@ -54,6 +54,18 @@ Claude and Codex review each other's work. Bidirectional coverage with harness-t
 
 ---
 
+### Staged Review
+
+A review pipeline that plans, probes and synthesizes, run in shadow beside the gating reviewers until the comparison bar is met.
+
+| Runbook | Description |
+|---------|-------------|
+| [`staged-review.md`](staged-review.md) | Stages, baseline checklist, schemas, `staged.*` config, routing cells, shadow comparison, replay, the two switches, attestation leaves, troubleshooting |
+
+**RFC:** [`spec/rfcs/RFC-0052-staged-review-pipeline.md`](../../spec/rfcs/RFC-0052-staged-review-pipeline.md)
+
+---
+
 ### Dependency Graph Composition
 
 Blast-radius analysis and DoR gating based on codebase dependency snapshots.
