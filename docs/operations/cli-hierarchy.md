@@ -411,6 +411,18 @@ cli-hierarchy terminals --vscode [--out <dir>] [--force] [--print]
 Writes `<out>/tasks.json` atomically; refuses an existing file without `--force`. Exit `0`,
 or `1` on a refusal.
 
+### `brief-status`
+
+Print each brief under `<board-dir>/briefs/` with how many of its tasks hold a verdict in
+`done/`. The planner command uses it for the open-briefs step.
+
+```bash
+cli-hierarchy brief-status
+```
+
+Prints `<brief>.md: <done> of <total> task(s) done` per brief, `<brief>.md: unreadable (...)`
+for a brief that does not parse, or `No briefs yet.`. Exit `0`.
+
 ### `brief`
 
 Write a dispatch brief (waves and sequence groups) from task metadata, and optionally tell

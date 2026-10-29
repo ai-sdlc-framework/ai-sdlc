@@ -18,6 +18,7 @@
  *   - `brief --tasks <id,...> | --rfc <RFC-NNNN> [--out <path>] [--force] [--notify]` —
  *     write a dispatch brief from task metadata and optionally tell the dispatch
  *     session about it.
+ *   - `brief-status` — print each brief on the board with its done and total task counts.
  *   - `down [--role <name-or-role>]` — end sessions, return their inflight
  *     manifests to `queue/`, close their windows, update the roster.
  *   - `restart <executor> [--after-task] [--wait <sec>]` — stop and start one executor and
@@ -101,6 +102,8 @@ import {
   createSystemRunner,
   createTmuxBriefSender,
   generateBrief,
+  briefStatus,
+  formatBriefStatus,
   notifyDispatch,
   type BriefSender,
   formatStatus,
@@ -181,6 +184,7 @@ Commands:
   attach     Show one agent in this terminal: attach <name>
   terminals  Generate editor terminal tasks, one per agent (terminals --vscode)
   brief      Generate a dispatch brief (waves, sequence groups) from task metadata
+  brief-status  Show each brief's done and total task counts
   down       Stop sessions and return their inflight manifests to the queue
   clear      Empty an executor's context between tasks and restart its loop
   restart    Stop and start one executor, updating its roster entry (restart <executor>)
@@ -739,6 +743,10 @@ export async function runHierarchyCli(
           notifyDispatch(result.dispatch, result.file, deps.cwd, send);
           deps.log(`notified '${result.dispatch?.name}'`);
         }
+        return 0;
+      }
+      case 'brief-status': {
+        for (const line of formatBriefStatus(briefStatus(deps.boardDir))) deps.log(line);
         return 0;
       }
       case 'down': {
