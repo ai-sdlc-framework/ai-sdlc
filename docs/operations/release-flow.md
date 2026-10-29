@@ -2,6 +2,8 @@
 
 > Triggered by: AISDLC-401 (parallel-merge CHANGELOG collision rate after AISDLC-400 queue drop)
 
+> Backing out a bad release or plugin pin: see [`rollback.md`](rollback.md).
+
 ## Model: rolling release PR
 
 AI-SDLC uses [release-please](https://github.com/googleapis/release-please) in its

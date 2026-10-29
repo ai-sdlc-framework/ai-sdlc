@@ -1,7 +1,7 @@
 ---
 id: AISDLC-942
 title: 'Rollback runbook: how to back out a release and a plugin version pin'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-16'
 labels:
