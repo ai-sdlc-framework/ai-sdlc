@@ -15,7 +15,7 @@ export interface FollowupViolation {
   /** The offending item, trimmed and with list markers removed. */
   item: string;
   /** Why it was rejected. */
-  reason: 'no-tracked-id' | 'declined-without-reason' | 'item-too-large';
+  reason: 'no-tracked-id' | 'declined-without-reason' | 'item-too-large' | 'unclosed-fence';
 }
 
 export interface FollowupCheckOptions {
@@ -61,13 +61,28 @@ interface Fence {
 
 /** Opening code fence (three or more backticks or tildes), else null. */
 function fenceOpen(line: string): Fence | null {
+  // CommonMark: zero to three spaces of indent; four or more is an indented code block.
   let i = 0;
-  while (i < line.length && /\s/.test(line[i])) i++;
+  while (i < line.length && line[i] === ' ') i++;
+  if (i > 3) return null;
   const ch = line[i];
   if (ch !== '`' && ch !== '~') return null;
   let n = 0;
   while (line[i + n] === ch) n++;
-  return n >= 3 ? { ch, len: n } : null;
+  if (n < 3) return null;
+  // A backtick fence's info string may not contain a backtick (it is inline code then).
+  if (ch === '`' && line.indexOf('`', i + n) !== -1) return null;
+  return { ch, len: n };
+}
+
+/** Linear test: does the line start like a Follow-up heading, however long it is? */
+function looksLikeFollowupHeading(line: string): boolean {
+  let i = 0;
+  while (line[i] === '#') i++;
+  if (i < 2 || i > 4) return false;
+  const ws = i;
+  while (i < line.length && /\s/.test(line[i])) i++;
+  return i > ws && /^follow-?ups?\b/i.test(line.slice(i, i + 12));
 }
 
 /** A closing fence uses the same character, is at least as long, and carries nothing else. */
@@ -89,23 +104,37 @@ function taskIdRegExp(prefix: string): RegExp {
 /** A line too long to inspect; carries a display prefix only. */
 interface OversizedLine {
   oversized: string;
+  reason?: 'unclosed-fence';
 }
 type BodyLine = string | OversizedLine;
 
 /** Bodies of every Follow-up section (a document may hold several). */
 function extractSections(markdown: string): BodyLine[][] {
-  const lines = markdown.split(/\r?\n/);
+  const lines = markdown.split(/\r\n|\r|\n/);
   const sections: BodyLine[][] = [];
   let outer: Fence | null = null;
+  let fencedHeading: string | null = null;
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].length > MAX_LINE_LENGTH) continue;
+    const long = lines[i].length > MAX_LINE_LENGTH;
     if (outer) {
-      if (closesFence(lines[i], outer)) outer = null;
+      if (closesFence(lines[i], outer)) {
+        outer = null;
+        fencedHeading = null;
+      } else if (fencedHeading === null && looksLikeFollowupHeading(lines[i])) {
+        fencedHeading = lines[i].slice(0, DISPLAY_LENGTH);
+      }
       continue;
     }
     const o = fenceOpen(lines[i]);
     if (o) {
       outer = o;
+      continue;
+    }
+    if (long) {
+      // Too long to run a regex on: a heading padded past the cap must not hide its section.
+      if (looksLikeFollowupHeading(lines[i])) {
+        sections.push([{ oversized: lines[i].slice(0, DISPLAY_LENGTH) }]);
+      }
       continue;
     }
     const m = HEADING_RE.exec(lines[i]);
@@ -137,12 +166,17 @@ function extractSections(markdown: string): BodyLine[][] {
     sections.push(body);
     i = j - 1;
   }
+  // Fail closed: a document that ends inside a fence holding a Follow-up heading.
+  if (outer && fencedHeading !== null) {
+    sections.push([{ oversized: fencedHeading, reason: 'unclosed-fence' }]);
+  }
   return sections;
 }
 
 interface Item {
   text: string;
   tooLarge: boolean;
+  reason?: 'unclosed-fence';
 }
 
 /** Group section lines into items: one per list entry, one per paragraph. */
@@ -160,7 +194,7 @@ function toItems(body: BodyLine[]): Item[] {
   for (const line of body) {
     if (typeof line !== 'string') {
       flush();
-      items.push({ text: line.oversized, tooLarge: true });
+      items.push({ text: line.oversized, tooLarge: true, reason: line.reason });
       continue;
     }
     if (line.trim() === '') {
@@ -209,9 +243,12 @@ export function checkFollowups(
   const idRe = taskIdRegExp(options.taskPrefix ?? DEFAULT_TASK_PREFIX);
   const violations: FollowupViolation[] = [];
   const raws = sections.flatMap((body) => toItems(body));
-  for (const { text: raw, tooLarge } of raws) {
+  for (const { text: raw, tooLarge, reason } of raws) {
     if (tooLarge || raw.length > MAX_ITEM_LENGTH) {
-      violations.push({ item: `${raw.slice(0, DISPLAY_LENGTH)}...`, reason: 'item-too-large' });
+      violations.push({
+        item: `${raw.slice(0, DISPLAY_LENGTH)}...`,
+        reason: reason ?? 'item-too-large',
+      });
       continue;
     }
     const item = stripEmphasis(raw);
@@ -250,7 +287,9 @@ export function formatFollowupViolations(
           ? ' (declined: needs a reason of at least 10 characters)'
           : v.reason === 'item-too-large'
             ? ' (item is too long; split it into short items)'
-            : ''
+            : v.reason === 'unclosed-fence'
+              ? ' (Follow-up heading inside a code fence that is never closed; close the fence)'
+              : ''
       }`,
     );
   }

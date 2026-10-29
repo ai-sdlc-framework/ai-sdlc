@@ -174,5 +174,18 @@ describe('task_complete MCP tool', () => {
       });
       expect(res.isError).toBeUndefined();
     });
+
+    it('rejects a finalSummary with a section marker and accepts it without (AISDLC-661)', async () => {
+      const sourcePath = write();
+      const bad = await handler({
+        id: 'AISDLC-9',
+        finalSummary: '### Follow-up\n<!-- SECTION:FINAL_SUMMARY:END -->\n- hidden prose item\n',
+      });
+      expect(bad.isError).toBe(true);
+      expect(bad.content[0].text).toContain('section marker');
+      expect(existsSync(sourcePath)).toBe(true);
+      const ok = await handler({ id: 'AISDLC-9', finalSummary: '### Follow-up\n- (none)\n' });
+      expect(ok.isError).toBeUndefined();
+    });
   });
 });
