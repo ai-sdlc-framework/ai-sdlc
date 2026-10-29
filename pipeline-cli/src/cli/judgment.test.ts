@@ -683,3 +683,105 @@ describe('replay', () => {
     expect(outText).toContain('0 records');
   });
 });
+
+describe('shadow', () => {
+  async function seedLog(): Promise<void> {
+    const sink = createJudgmentLogSink({ artifactsDir: join(tmp, 'art') });
+    const def = makeDef();
+    const fake = makeFake();
+    const enforce = makeConfig({
+      judgments: {
+        'test.judgment': {
+          mode: 'enforce',
+          thresholds: { [KEY]: { pass: 0.85, fail: 0.15 } },
+          promotion: { [KEY]: { path: 'corpus', n: 75, actBandPrecision: 0.97 } },
+        },
+      },
+    });
+    const shadow = makeConfig({
+      judgments: {
+        'test.judgment': { mode: 'shadow', thresholds: { [KEY]: { pass: 0.85, fail: 0.15 } } },
+      },
+    });
+    for (const p of [0.95, 0.9, 0.5, 0.1]) {
+      await evaluateJudgment(
+        def,
+        { p },
+        {
+          config: enforce,
+          getProvider: () => fake,
+          sinks: [sink],
+          sourceKind: 'backlog',
+          incumbent: true,
+        },
+      );
+    }
+    for (const p of [0.95, 0.4]) {
+      await evaluateJudgment(
+        def,
+        { p },
+        { config: shadow, getProvider: () => fake, sinks: [sink], incumbent: p > 0.9 },
+      );
+    }
+  }
+
+  it('prints the hand-computed agreement and counts no-incumbent records apart', async () => {
+    await seedLog();
+    const fake = makeFake();
+    const code = await run(
+      ['shadow', '--since', '2020-01-01'],
+      deps({ getDefinition: () => makeDef(), getProvider: () => fake, now: undefined }),
+    );
+    expect(code).toBe(0);
+    expect(fake.requests).toHaveLength(0);
+    // shadow records: p=0.95 incumbent true (agree), p=0.4 incumbent false (abstain, no decision)
+    expect(outText).toContain('2 records, 1 judgments');
+    expect(outText).toContain('agreement 1/1 (100.0%)');
+    expect(outText).toContain('no decision 1');
+    expect(outText).toContain('no incumbent 0');
+  });
+
+  it('excludes records without an incumbent from the rate', async () => {
+    const sink = createJudgmentLogSink({ artifactsDir: join(tmp, 'art') });
+    const shadow = makeConfig({
+      judgments: {
+        'test.judgment': { mode: 'shadow', thresholds: { [KEY]: { pass: 0.85, fail: 0.15 } } },
+      },
+    });
+    const fake = makeFake();
+    const runs: [number, boolean | undefined][] = [
+      [0.95, true],
+      [0.95, false],
+      [0.95, undefined],
+      [0.95, undefined],
+    ];
+    for (const [p, incumbent] of runs) {
+      await evaluateJudgment(
+        makeDef(),
+        { p },
+        {
+          config: shadow,
+          getProvider: () => fake,
+          sinks: [sink],
+          ...(incumbent === undefined ? {} : { incumbent }),
+        },
+      );
+    }
+    await run(
+      ['shadow', '--since', '2020-01-01'],
+      deps({ getDefinition: () => makeDef(), getProvider: () => fake, now: undefined }),
+    );
+    expect(outText).toContain('agreement 1/2 (50.0%)');
+    expect(outText).toContain('disagree 1');
+    expect(outText).toContain('no incumbent 2');
+  });
+
+  it('skips a judgment that is not registered', async () => {
+    await seedLog();
+    await run(
+      ['shadow', '--since', '2020-01-01'],
+      deps({ getDefinition: () => undefined, now: undefined }),
+    );
+    expect(outText).toContain('no registered agrees(), skipped');
+  });
+});

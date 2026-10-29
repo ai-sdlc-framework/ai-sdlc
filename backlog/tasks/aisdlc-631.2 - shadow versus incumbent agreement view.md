@@ -2,7 +2,7 @@
 id: AISDLC-631.2
 title: >-
   RFC-0049 follow-up: cli-judgment view of shadow outcomes against the incumbent decision
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-01'
 labels:
