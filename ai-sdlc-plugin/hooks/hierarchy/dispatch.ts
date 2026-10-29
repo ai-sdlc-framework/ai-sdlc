@@ -351,8 +351,11 @@ export async function tick(p: DispatchPorts, state: DispatchState): Promise<void
     // The old loop ran the PR reconciler and the CI sweep after every tick; `cli-ci sweep` throttles itself to 15 minutes.
     const rec = await runCli(p, DISPATCH_BIN, ['reconcile', ...boardArgs(state)]);
     if (!rec.ok) note(state, 'reconcile failed');
-    else if (rec.stdout.includes('route-to-planner')) {
-      await tellPlanner(p, state, `reconciler routed a PR to you:\n${rec.stdout.slice(0, 1500)}`);
+    else {
+      // AISDLC-1095: the reconciler dedupes (routeOnce); forward only the routings new this run.
+      for (const line of newRoutingLines(rec.stdout)) {
+        await tellPlanner(p, state, `reconciler routed a PR to you: ${line}`);
+      }
     }
     const sweep = await runCli(p, CI_BIN, ['sweep', ...boardArgs(state)]);
     if (!sweep.ok) note(state, 'cli-ci sweep failed');
@@ -375,6 +378,26 @@ export async function tick(p: DispatchPorts, state: DispatchState): Promise<void
   } finally {
     state.ticking = false;
   }
+}
+
+/** One line per routing the reconciler reports as new in its JSON output; none for other output. */
+export function newRoutingLines(stdout: string): string[] {
+  let report: Any;
+  try {
+    report = JSON.parse(stdout.trim().split('\n').pop() ?? '');
+  } catch {
+    return [];
+  }
+  const lines: string[] = [];
+  for (const a of (report?.acted ?? []) as Any[]) {
+    if (a?.action === 'route-to-planner') {
+      lines.push(`#${a.pr}${a.note ? ` ${String(a.note)}` : ''}`.slice(0, 500));
+    }
+  }
+  if (report?.routed?.action === 'route-to-planner') {
+    lines.push(String(report.routed.text ?? '').slice(0, 500));
+  }
+  return lines;
 }
 
 export type Classified =

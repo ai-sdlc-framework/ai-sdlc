@@ -1014,7 +1014,11 @@ describe('hierarchy status', () => {
     expect(result.agedPrs?.map((a) => a.pr)).toEqual([23, 21]);
     const text = formatStatus(result).join('\n');
     expect(text).toContain('aged PR #23: 30h0m, lane machine, last action reenter');
-    expect(text).not.toContain('#22');
+    expect(text).not.toContain('aged PR #22');
+    // AISDLC-1095: the table lists every open PR with lane, action, reason, owner and age.
+    expect(text).toContain(
+      '#22 lane task, action reenter, reason real-failure, owner machine, age 1h0m',
+    );
   });
 
   it('reports gone when the window is dead even if a registry file exists', async () => {

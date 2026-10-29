@@ -13,6 +13,7 @@ import {
 } from './attestation-growth.js';
 import { listInflight } from './inflight.js';
 import { AGING_WINDOW_MS, listLanding, recordLastActionAt } from './reconcile.js';
+import { formatPrTable } from './pr-rows.js';
 import { paneNodeVersion, readNvmrc, versionMatches } from './node-pin.js';
 import { hasLaunchEnv } from './up.js';
 import {
@@ -99,6 +100,8 @@ export interface StatusResult {
   unowned?: number;
   /** AISDLC-1092: open PRs with no state change for the aging window, oldest first. */
   agedPrs?: { pr: number; ageMs: number; lane: string; lastAction: string }[];
+  /** AISDLC-1095: every open PR with lane, action, reason, owner and age, as text lines. */
+  prTable?: string[];
   /** `gh` calls in the last hour by HIERARCHY_SESSION (AISDLC-963). */
   ghCallsPerHour?: Record<string, number>;
   /** Live remaining quota for the core and graphql buckets; absent when `gh` cannot say. */
@@ -260,6 +263,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
   return {
     rows,
     ...(agedPrs.length > 0 ? { agedPrs } : {}),
+    prTable: formatPrTable(deps.boardDir, nowMs),
     unowned: landings.filter((l) => l.owner === 'unowned').length,
     ...(growth ? { attestationGrowth: growth } : {}),
     ...(drainStall ? { drainStall } : {}),
@@ -326,6 +330,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       ...stallLines,
       unownedLine,
       ...agedLines,
+      ...(result.prTable ?? []),
       ...ghLines,
     ];
   const header = [
@@ -398,6 +403,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
     ...stallLines,
     unownedLine,
     ...agedLines,
+    ...(result.prTable ?? []),
     ...ghLines,
   ];
 }
