@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path';
 import { buildDecisionsCli } from './decisions.js';
 import { readEventLogText, resolveEventLogPath } from '../decisions/event-log.js';
 import type { Decision } from '../decisions/decision-record.js';
+import type { ChainDeps } from '../decisions/escalation-chain.js';
 
 // ── Test infrastructure ───────────────────────────────────────────────────────
 
@@ -1466,6 +1467,21 @@ describe('AISDLC-447 — list timebox-aware sort + --expired filter', () => {
 
   it('AISDLC-668.2: --route keeps only decisions at that tier, unrouted counts as design', async () => {
     await seedDecision('unrouted');
+    const sent: string[] = [];
+    const chain = (): ChainDeps => ({
+      boardDir: join(tmpdir(), 'no-board-aisdlc-1113'),
+      identity: {
+        readSessions: () => [],
+        parentPid: () => null,
+        comm: () => 'node',
+        startPid: 1,
+      },
+      sessions: () => [],
+      send: (_e, message) => {
+        sent.push(message);
+      },
+      emit: () => {},
+    });
     for (const [route, task] of [
       ['operational', 'T-OP'],
       ['design', 'T-DE'],
@@ -1485,16 +1501,17 @@ describe('AISDLC-447 — list timebox-aware sort + --expired filter', () => {
         '--format',
         'json',
       );
-      await buildDecisionsCli().parseAsync();
+      await buildDecisionsCli({ chain }).parseAsync();
     }
     const tiers = async (route: string) => {
       stdoutChunks = [];
       setArgv('list', '--format', 'json', '--route', route);
-      await buildDecisionsCli().parseAsync();
+      await buildDecisionsCli({ chain }).parseAsync();
       return stdoutJson<{ decisions: Decision[] }>().decisions.map((d) => d.metadata.id);
     };
     expect(await tiers('operational')).toEqual(['DEC-0002']);
     expect(await tiers('design')).toEqual(['DEC-0001', 'DEC-0003']);
+    expect(sent).toEqual([]); // empty roster: nothing reaches a session, and none was live
   });
 
   it('table format adds a timebox column when at least one decision is timeboxed', async () => {
