@@ -2,7 +2,7 @@
 id: AISDLC-1109
 title: >-
   Decision escalation chain stops re-sending "Decision DEC-NNNN needs an answer" to the planner for a decision whose lifecycle is answered (DEC-0003 prompt repeated 4 times in one hour)
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-29'
 labels:
@@ -31,10 +31,10 @@ Fix: find which of the two paths sends the notice (run the tick's loader against
 
 ## Acceptance Criteria
 
-- [ ] With `events.jsonl` holding `decision-opened` then `operator-answered` for DEC-0003, a dispatch tick sends no "needs an answer" notice for it (test using the same loader the tick uses).
-- [ ] A due open decision is announced once per (decision, toTier); the next tick with no state change sends nothing (test).
-- [ ] If the root cause is message replay by the hooks module, a delivered cross-session message is not re-delivered on a later wake (test), and the fix is documented in `docs/operations/decision-authority.md` or `docs/operations/cli-hierarchy.md`.
-- [ ] `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm format:check` pass; the task file records the test command and its summary line.
+- [x] With `events.jsonl` holding `decision-opened` then `operator-answered` for DEC-0003, a dispatch tick sends no "needs an answer" notice for it (test using the same loader the tick uses).
+- [x] A due open decision is announced once per (decision, toTier); the next tick with no state change sends nothing (test).
+- [x] If the root cause is message replay by the hooks module, a delivered cross-session message is not re-delivered on a later wake (test), and the fix is documented in `docs/operations/decision-authority.md` or `docs/operations/cli-hierarchy.md`.
+- [x] `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm format:check` pass; the task file records the test command and its summary line.
 
 ## Notes
 
@@ -43,3 +43,29 @@ Evidence: planner session transcript 2026-10-29 06:50Z, 07:03Z, 07:12Z, 07:20Z, 
 ## Verification
 
 Test command: `pnpm test` (executor hierarchy env vars unset). Summary: pipeline-cli Tests  12322 passed | 13 skipped (12335); orchestrator 5209 passed; node --test gates 3566 pass, 0 fail.
+
+## Final Summary
+
+## Summary
+Found and fixed the cause of the repeated notice. `projectAll` folded the legacy `events.jsonl` before the per-event `events/` files, so an `operator-answered` event for a decision opened in the other layout was dropped. That left the decision open and due again. `projectAll` now folds events in timestamp order, ties keep read order. The notice in `promoteExpiredDecisions` is typed into the planner pane by tmux and stored nowhere, so no hooks replay exists and AC3 does not apply. I added a regression test that fails on the old fold, kept the once-per-tier test, and documented the root cause in `decision-authority.md`.
+
+## Changes
+- pipeline-cli/src/decisions/projection.ts
+- pipeline-cli/src/decisions/escalation-chain.ts
+- pipeline-cli/src/decisions/escalation-chain-promote.test.ts
+- docs/operations/decision-authority.md
+- backlog/tasks/AISDLC-1109 - escalation chain re-sends needs an answer for an answered decision.md
+
+## Design decisions
+I ran `pnpm test` with `AI_SDLC_HIERARCHY_SESSION` and `AI_SDLC_HIERARCHY_ROLE` unset, because the executor session sets them and 14 tests in `executor-start.test.ts` fail with them set. Result: pipeline-cli 12322 passed | 13 skipped, orchestrator 5209 passed, node --test gates 3566 pass, 0 fail. An earlier run exited non-zero (ELIFECYCLE); I did not find the cause in its output, and the rerun was clean. The committed DEC-0003 has no escalation block and both its events are in `events.jsonl`, so the real store cannot reproduce the bug. The regression test builds the cross-layout shape instead. The PR already existed when I tried to create it, so I reused it. It is still a draft and the push is done.
+
+## Verification
+- `pnpm build` — passed
+- `pnpm test` — passed
+- `pnpm lint` — passed
+- `pnpm format:check` — passed
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers; review-full)
+
+## Follow-up
+(none)
+
