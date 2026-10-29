@@ -1464,6 +1464,39 @@ describe('AISDLC-447 — list timebox-aware sort + --expired filter', () => {
     expect(stdoutJson<{ decisions: Decision[] }>().decisions).toEqual([]);
   });
 
+  it('AISDLC-668.2: --route keeps only decisions at that tier, unrouted counts as design', async () => {
+    await seedDecision('unrouted');
+    for (const [route, task] of [
+      ['operational', 'T-OP'],
+      ['design', 'T-DE'],
+    ]) {
+      setArgv(
+        'escalate',
+        '--task-id',
+        task,
+        '--source-worktree',
+        '/tmp/wt',
+        '--summary',
+        `${route} question`,
+        '--option',
+        'a:A',
+        '--route',
+        route,
+        '--format',
+        'json',
+      );
+      await buildDecisionsCli().parseAsync();
+    }
+    const tiers = async (route: string) => {
+      stdoutChunks = [];
+      setArgv('list', '--format', 'json', '--route', route);
+      await buildDecisionsCli().parseAsync();
+      return stdoutJson<{ decisions: Decision[] }>().decisions.map((d) => d.metadata.id);
+    };
+    expect(await tiers('operational')).toEqual(['DEC-0002']);
+    expect(await tiers('design')).toEqual(['DEC-0001', 'DEC-0003']);
+  });
+
   it('table format adds a timebox column when at least one decision is timeboxed', async () => {
     await seedDecision('urgent', 'PT4H');
     setArgv('list', '--format', 'table');

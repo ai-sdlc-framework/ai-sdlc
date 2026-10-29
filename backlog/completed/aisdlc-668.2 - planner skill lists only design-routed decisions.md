@@ -2,7 +2,7 @@
 id: AISDLC-668.2
 title: >-
   RFC-0051: planner command lists only decisions routed to the planner
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
