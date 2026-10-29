@@ -2366,6 +2366,14 @@ with no task id and no docs-lane prefix, a draft with no claim and no verdict) i
 `unowned` with the reason in `note`, routed to the planner once per head, and counted in
 `cli-hierarchy status` as `unowned PRs: N`.
 
+### Aging sweep (AISDLC-1092)
+
+An open PR whose record has had no action or state change for 6 hours (`lastActionAt`, else the last
+history entry) is re-evaluated on the next reconcile pass with fresh facts and its action re-run.
+Each head gets at most 3 attempts (the first run plus two aged re-runs, counted in `agedAttempts`);
+then one line goes to the planner and the head is not retried. `cli-hierarchy status` lists every
+open PR past the window as `aged PR #N: <age>, lane <owner>, last action <action>`, oldest first.
+
 ## Drain liveness (AISDLC-1096)
 
 Every tick records `lastTickAt` and `lastTickBy` (`host` or `scheduler`) in `operator-dispatch.state.json`; `status` prints `last tick: <n>s ago by <who>`. The detached watch scheduler (`cli-dispatch reconcile --watch`) checks every 30 s and, when the host has missed three intervals and work is queued, runs `cli-hierarchy tick --by scheduler`: the same deterministic tick, no model turn. The tick re-checks staleness itself, so a live host is never doubled. After each tick, webhook event records for closed PRs are deleted and the directory is capped at 2,000 files (oldest first; canary records are kept).

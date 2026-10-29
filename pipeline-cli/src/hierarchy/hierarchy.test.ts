@@ -987,6 +987,34 @@ describe('hierarchy status', () => {
     expect(text).toContain('#11 undelivered:green');
   });
 
+  it('lists open PRs older than the aging window, oldest first (AISDLC-1092)', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
+    const nowMs = deps.now().getTime();
+    const put = (pr: number, hoursAgo: number): void => {
+      mkdirSync(path.join(boardDir, 'landing'), { recursive: true });
+      writeFileSync(
+        path.join(boardDir, 'landing', `${pr}.json`),
+        JSON.stringify({
+          pr,
+          kind: 'task',
+          owner: 'machine',
+          state: 'real-failure',
+          action: 'reenter',
+          lastActionAt: new Date(nowMs - hoursAgo * 3_600_000).toISOString(),
+          history: [],
+        }),
+      );
+    };
+    put(21, 7);
+    put(22, 1);
+    put(23, 30);
+    const result = hierarchyStatus(deps);
+    expect(result.agedPrs?.map((a) => a.pr)).toEqual([23, 21]);
+    const text = formatStatus(result).join('\n');
+    expect(text).toContain('aged PR #23: 30h0m, lane machine, last action reenter');
+    expect(text).not.toContain('#22');
+  });
+
   it('reports gone when the window is dead even if a registry file exists', async () => {
     await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
     fake.windows = fake.windows.filter((w) => w !== Q('executor-alpha'));

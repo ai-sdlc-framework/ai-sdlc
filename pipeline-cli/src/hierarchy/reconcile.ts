@@ -110,6 +110,10 @@ export interface LandingRecord {
   rateLimitResetAt?: string;
   /** `rate-limited` only: the head sha already rerun once; never rerun it again. */
   rerunHeadSha?: string;
+  /** AISDLC-1092: when the action last ran or the state last changed; absent on older records. */
+  lastActionAt?: string;
+  /** AISDLC-1092: aged re-runs of `action` on this head; the head's attempts are capped. */
+  agedAttempts?: number;
   delivered?: string;
   landed?: string;
   /** Set once the PR is confirmed closed without landing; the record is not re-checked. */
@@ -586,6 +590,25 @@ export function nextFullHour(now: Date): Date {
   return new Date((Math.floor(now.getTime() / RATE_LIMIT_WAIT_MS) + 1) * RATE_LIMIT_WAIT_MS);
 }
 
+/** AISDLC-1092: an open PR with no state change this long is re-evaluated. */
+export const AGING_WINDOW_MS = 6 * 60 * 60 * 1000;
+/** AISDLC-1092: attempts per head (first run plus aged re-runs) before the planner is told. */
+export const MAX_AGED_ATTEMPTS = 3;
+const AGING_EXEMPT_ACTIONS = new Set([
+  'none',
+  'mark-landed',
+  'held',
+  'ready-to-requeue',
+  'wait-and-rerun',
+  'route-to-planner',
+  'superseded-close',
+]);
+
+/** When the record last acted or changed state: `lastActionAt`, else the last history entry. */
+export function recordLastActionAt(r: LandingRecord): string | undefined {
+  return r.lastActionAt ?? r.history[r.history.length - 1]?.ts;
+}
+
 export interface ReconcileOpts {
   boardDir: string;
   execute: ActionExecutor;
@@ -740,6 +763,55 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
       report.records.push(existing);
       continue;
     }
+    if (
+      unchanged &&
+      !AGING_EXEMPT_ACTIONS.has(d.action) &&
+      !existing.landed &&
+      !existing.closedUnlanded &&
+      existing.actionFailed !== true
+    ) {
+      const last = Date.parse(recordLastActionAt(existing) ?? '');
+      if (Number.isFinite(last) && now().getTime() - last >= AGING_WINDOW_MS) {
+        const attempts = existing.agedAttempts ?? 1;
+        if (attempts >= MAX_AGED_ATTEMPTS) {
+          if (routeOnce(f.prNumber, f.headSha, `aged ${d.action} x${attempts}`)) {
+            report.acted.push({
+              pr: f.prNumber,
+              action: 'route-to-planner',
+              ran: false,
+              note: `${d.action}@${f.headSha ?? ''} x${attempts} aged, no more retries`,
+            });
+          }
+          report.records.push(existing);
+          continue;
+        }
+        const aged = opts.execute({
+          pr: f.prNumber,
+          taskId: f.taskId,
+          kind: d.kind,
+          action: d.action,
+          state: d.state,
+          ...(f.headSha === undefined ? {} : { headSha: f.headSha }),
+          ...(d.failingLine === undefined ? {} : { failingLine: d.failingLine }),
+          boardDir: opts.boardDir,
+        });
+        const updated: LandingRecord = {
+          ...existing,
+          lastActionAt: ts,
+          agedAttempts: attempts + 1,
+          ...(aged.failed ? { actionFailed: true } : {}),
+        };
+        writeLanding(opts.boardDir, updated);
+        report.records.push(updated);
+        report.acted.push({
+          pr: f.prNumber,
+          action: d.action,
+          ran: aged.ran,
+          ...(aged.note ? { note: aged.note } : {}),
+        });
+        continue;
+      }
+    }
     if (unchanged) {
       if (
         d.action === 'route-to-planner' &&
@@ -778,6 +850,7 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
         : {}),
       ...(d.ruling === undefined ? {} : { ruling: d.ruling }),
       ...(d.note === undefined ? {} : { note: d.note }),
+      lastActionAt: ts,
       ...(deliveredAt === undefined ? {} : { delivered: deliveredAt }),
       ...(landedAt === undefined ? {} : { landed: landedAt }),
       history: [...(existing?.history ?? []), entry],
