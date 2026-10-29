@@ -298,6 +298,28 @@ export interface ActionCommand {
   captureRunId?: boolean;
 }
 
+const COVERAGE_RE = /coverage/i;
+const WAIVED_RE = /\bwaived\b|\bskipped\b/i;
+const TEST_FAIL_RE = /\btests?\b.*\bfail|\bfail.*\btests?\b|\bnot ok\b/i;
+
+/**
+ * Note for a developer round when the failing line names a red that only new code fixes:
+ * low patch coverage, a failing suite, or a waived test line. Undefined for any other red.
+ */
+export function developerRoundNote(failingLine?: string): string | undefined {
+  if (!failingLine) return undefined;
+  if (WAIVED_RE.test(failingLine) && /pnpm test|test/i.test(failingLine)) {
+    return `Run the full test suite and record its command and summary line; the waiver is refused. Failing line: ${failingLine}`;
+  }
+  if (COVERAGE_RE.test(failingLine)) {
+    return `Add tests for the low-coverage file named in the failing line, then rerun coverage. Failing line: ${failingLine}`;
+  }
+  if (TEST_FAIL_RE.test(failingLine)) {
+    return `Fix the failing test named in the failing line. Failing line: ${failingLine}`;
+  }
+  return undefined;
+}
+
 export function actionCommands(ctx: ActionContext, cliBin: string): ActionCommand[] | null {
   const dispatch = (...a: string[]) => ({
     file: 'node',
@@ -306,7 +328,13 @@ export function actionCommands(ctx: ActionContext, cliBin: string): ActionComman
   // `reenter` classifies the PR itself and runs the machine action or writes the manifest.
   const reenter = () => dispatch('reenter', String(ctx.pr));
   switch (ctx.action) {
-    case 'reenter':
+    case 'reenter': {
+      // A red that only new code can fix needs the developer in the round (AISDLC-1093): an
+      // unchanged patch id would otherwise resume as re-sign only.
+      const note = developerRoundNote(ctx.failingLine);
+      if (note === undefined) return [reenter()];
+      return [dispatch('reenter', String(ctx.pr), '--developer-round', '--note', note)];
+    }
     case 'land-prep':
     case 'push-only-resign':
       return [reenter()];
