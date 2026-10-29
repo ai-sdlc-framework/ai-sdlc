@@ -3,7 +3,7 @@ id: AISDLC-943
 title: >-
   Docs: declare the system of record per artifact and where this project
   diverges from human-approval stages
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-16'
 updated_date: '2026-10-16 18:30'
