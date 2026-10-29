@@ -2,7 +2,7 @@
 id: AISDLC-655.6
 title: >-
   Assert real git behaviour in the git-env helper tests and capture a diagnostic if the replay flake recurs
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-01'
 labels:
