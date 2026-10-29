@@ -1,6 +1,6 @@
 {
-  "$comment": "Dark-code baseline (AISDLC-552). Modules with no non-test importer and no barrel re-export. The gate fails only on modules NOT listed here, so this file is a ratchet: shrink it as modules get wired, never grow it by hand — growth relative to the base ref fails the gate. Use `allowlist` entries of the form { path, reason } for entry points that are legitimately never imported. stubSites (stub-in-production rule): non-test source importing or calling a test double; same ratchet. stubAllowlist entries are { path, capability, reason }. Capability \"unassigned\" means no capability id has been mapped yet.",
-  "generatedAt": "2026-08-11",
+  "$comment": "Dark-code baseline (AISDLC-552). Modules with no non-test importer and no barrel re-export. The gate fails only on modules NOT listed here, so this file is a ratchet: shrink it as modules get wired, never grow it by hand — growth relative to the base ref fails the gate. Use `allowlist` entries of the form { path, reason } for entry points that are legitimately never imported. `stubSites` records non-test source that imports or calls a test double; same ratchet. `stubAllowlist` entries are { path, capability, reason }.",
+  "generatedAt": "2026-10-29",
   "allowlist": [],
   "darkModules": [
     {
@@ -12,19 +12,7 @@
       "rfc": "RFC-0008"
     },
     {
-      "path": "orchestrator/src/design-quality-trend.ts",
-      "rfc": "RFC-0008"
-    },
-    {
       "path": "orchestrator/src/design-system-context.ts",
-      "rfc": "RFC-0006"
-    },
-    {
-      "path": "orchestrator/src/design-system-correction-loop.ts",
-      "rfc": "RFC-0006"
-    },
-    {
-      "path": "orchestrator/src/design-system-metrics.ts",
       "rfc": "RFC-0006"
     },
     {
@@ -90,18 +78,6 @@
     {
       "path": "reference/src/core/validate-schemas.ts",
       "rfc": null
-    },
-    {
-      "path": "reference/src/policy/design-ci.ts",
-      "rfc": "RFC-0006"
-    },
-    {
-      "path": "reference/src/policy/design-exemplar-bank.ts",
-      "rfc": "RFC-0006"
-    },
-    {
-      "path": "reference/src/policy/structural-preprocessor.ts",
-      "rfc": "RFC-0006"
     }
   ],
   "stubAllowlist": [],

@@ -61,7 +61,7 @@ re-litigating contrast ratios instead of evaluating design.
 (`checkAccessibility`, `checkTouchTargets`, `checkTypographyScale`,
 `checkSpacingGrid`, `checkColorPalette`, `checkStateCompleteness`) plus
 `runDesignCI()` and `generateDesignCIBoundary()` — the function that renders the
-boundary text reviewers receive. That module is currently unwired (see
+boundary text reviewers receive. That module is now exported from `@ai-sdlc/reference`; it is not yet invoked by a declarative gate (see
 [Implementation status](#implementation-status)).
 
 The checks that run declaratively today do so as `QualityGate` rules:
@@ -176,14 +176,20 @@ Three states are distinguished:
 | Token compliance / visual regression / story completeness gates | **Wired** | `QualityGate` rule types (`designTokenCompliance`, `visualRegression`, `storyCompleteness`) |
 | `designReview` human gate | **Wired** | `QualityGate` rule type (RFC-0006 §8.5) |
 | `UsabilitySimulationRunner` contract (Layer 3) | **Wired** (interface + stub; no production runner in v1alpha1) | `reference/src/adapters/interfaces.ts`, exported via `reference/src/adapters/index.ts` alongside `createStubUsabilitySimulationRunner` |
-| Structural design preprocessor (Layer 2) | **Implemented, unwired** — `analyzeStructure`, `computeComplexityScore`, `triggersDesignReview`, full `StructuralDesignAnalysis` type tree | `reference/src/policy/structural-preprocessor.ts` |
-| 7 design review principles + exemplar bank (Layer 4) | **Implemented, unwired** | `reference/src/policy/design-exemplar-bank.ts` |
-| Six design metrics | **Implemented, unwired** | `orchestrator/src/design-system-metrics.ts` |
-| Correction loop + review feedback pipeline | **Implemented, unwired** | `orchestrator/src/design-system-correction-loop.ts` |
-| Design quality trend detector | **Implemented, unwired** | `orchestrator/src/design-quality-trend.ts` |
+| Structural design preprocessor (Layer 2) | **Wired** (exported from the package barrel) — `analyzeStructure`, `computeComplexityScore`, `triggersDesignReview`, full `StructuralDesignAnalysis` type tree | `reference/src/policy/structural-preprocessor.ts` |
+| 7 design review principles + exemplar bank (Layer 4) | **Wired** | `reference/src/policy/design-exemplar-bank.ts`; exemplars in `.ai-sdlc/design-review-exemplars.yaml` |
+| Six design metrics | **Wired** | `orchestrator/src/design-system-metrics.ts`; entry points in `orchestrator/src/design-review-pipeline.ts` |
+| Correction loop + review feedback pipeline | **Wired** | `orchestrator/src/design-system-correction-loop.ts`; entry points in `orchestrator/src/design-review-pipeline.ts` |
+| Design quality trend detector | **Wired** | `orchestrator/src/design-quality-trend.ts`; entry points in `orchestrator/src/design-review-pipeline.ts` |
 | Review / simulation persistence records | **Implemented** | `orchestrator/src/state/types.ts` |
-| Design CI checks (Layer 1) — accessibility, touch targets, typography scale, spacing grid, colour palette, state completeness, `runDesignCI`, `generateDesignCIBoundary` | **Implemented, unwired** | `reference/src/policy/design-ci.ts` |
+| Design CI checks (Layer 1) — accessibility, touch targets, typography scale, spacing grid, colour palette, state completeness, `runDesignCI`, `generateDesignCIBoundary` | **Wired** | `reference/src/policy/design-ci.ts` |
 | An `accessibilityAudit` **QualityGate rule type** to invoke those checks from a pipeline gate | **Spec-only** — zero occurrences in the schema; the `checkAccessibility()` function above exists but nothing can call it declaratively. Run axe-core / Pa11y in your own CI meanwhile | RFC-0006 §A.3.1 |
+
+Note: "Wired" for the orchestrator rows means exported from `@ai-sdlc/orchestrator`
+with callable pipeline entry points (`buildDesignReviewContext`,
+`computeBindingDesignMetrics` feeding `AutonomyTracker.recordDesignMetrics`,
+`handleDesignGateFailure`, `runDesignQualityTrendMonitor`). No scheduler invokes
+the periodic trend monitor yet; adopters call it from their own tick.
 
 ### What "unwired" means for you
 

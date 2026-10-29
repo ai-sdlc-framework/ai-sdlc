@@ -9,6 +9,11 @@
 import { validateResource } from '@ai-sdlc/reference';
 import type { StateStore } from './state/store.js';
 import type { AutonomyLedgerEntry } from './state/types.js';
+import type { DesignMetrics } from './design-system-metrics.js';
+
+/** Design-quality floors (RFC-0006 §13.2, §A.10). */
+export const DESIGN_PROMOTION_MIN_APPROVAL_RATE = 0.8;
+export const DESIGN_DEMOTION_MAX_APPROVAL_RATE = 0.5;
 
 export interface AgentPerformanceMetrics {
   totalTasks: number;
@@ -78,6 +83,7 @@ export const MAX_INITIAL_LEVEL = 1;
 
 export class AutonomyTracker {
   private initialLevels = new Map<string, number>();
+  private designMetrics = new Map<string, DesignMetrics>();
 
   constructor(private store: StateStore) {}
 
@@ -105,6 +111,14 @@ export class AutonomyTracker {
       }
     }
     for (const agent of agents) this.initialLevels.set(agent.name, agent.currentLevel);
+  }
+
+  /**
+   * Feed design metrics (computeDesignMetrics output) into promotion and
+   * demotion evaluation for an agent (RFC-0006 §A.10).
+   */
+  recordDesignMetrics(agentName: string, metrics: DesignMetrics): void {
+    this.designMetrics.set(agentName, metrics);
   }
 
   /**
@@ -260,6 +274,13 @@ export class AutonomyTracker {
       unmetConditions.push(`Need ${daysNeeded}d at level, have ${daysAt}d`);
     }
 
+    const design = this.designMetrics.get(agentName);
+    if (design && design.designReviewApprovalRate < DESIGN_PROMOTION_MIN_APPROVAL_RATE) {
+      unmetConditions.push(
+        `Need ${Math.round(DESIGN_PROMOTION_MIN_APPROVAL_RATE * 100)}% design review approval, have ${Math.round(design.designReviewApprovalRate * 100)}%`,
+      );
+    }
+
     const eligible = unmetConditions.length === 0;
 
     if (eligible && ledger) {
@@ -330,6 +351,13 @@ export class AutonomyTracker {
     // Demotion trigger: success rate dropped below threshold
     if (metrics.totalTasks >= 5 && metrics.successRate < 0.6) {
       reasons.push(`Success rate dropped to ${Math.round(metrics.successRate * 100)}%`);
+    }
+
+    const design = this.designMetrics.get(agentName);
+    if (design && design.designReviewApprovalRate < DESIGN_DEMOTION_MAX_APPROVAL_RATE) {
+      reasons.push(
+        `Design review approval rate dropped to ${Math.round(design.designReviewApprovalRate * 100)}%`,
+      );
     }
 
     const shouldDemote = reasons.length > 0;

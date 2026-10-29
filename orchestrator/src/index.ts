@@ -770,6 +770,12 @@ export type {
   PromotionProximity,
 } from './autonomy-tracker.js';
 
+// Design review pipeline (RFC-0006 Addendum A)
+export * from './design-review-pipeline.js';
+export * from './design-system-metrics.js';
+export * from './design-system-correction-loop.js';
+export * from './design-quality-trend.js';
+
 // Cost tracker
 export { CostTracker } from './cost-tracker.js';
 export type {
