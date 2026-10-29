@@ -51,6 +51,7 @@ export {
 } from './clear.js';
 export {
   briefToEnqueueEntries,
+  findUnresolvedAfter,
   DEFAULT_REPORT_EVERY_MS,
   LOOP_STATE_FILENAME,
   readLoopState,
