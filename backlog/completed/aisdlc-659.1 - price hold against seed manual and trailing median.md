@@ -2,7 +2,7 @@
 id: AISDLC-659.1
 title: >-
   RFC-0050 follow-up: hold a fetched price that drifts from the seed/manual row or the 30-day median, not only the last row
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-01'
 labels:
