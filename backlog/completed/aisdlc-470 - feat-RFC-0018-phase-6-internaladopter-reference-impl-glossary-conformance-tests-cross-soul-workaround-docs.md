@@ -1,7 +1,7 @@
 ---
 id: AISDLC-470
 title: 'feat: RFC-0018 Phase 6 — InternalAdopter accessibility-audit-pipeline reference impl + glossary + conformance tests + cross-soul workaround docs'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-28'
 labels:

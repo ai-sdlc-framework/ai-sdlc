@@ -48,6 +48,10 @@ A stage-level configuration that specifies approval requirements before a [Pipel
 
 A key-value pair in a resource's [metadata](#metadata) used for non-identifying information such as build provenance, tooling hints, or operational notes. Annotations are not used for selection or filtering. See [spec.md](spec.md#3-metadata-object).
 
+### auditOverdueGracePolicy {#audit-overdue-grace-policy}
+
+A per-[Soul](#soul) accessibility cadence enforcement mode controlling how an overdue WCAG audit degrades Compliance Clearance (Eρ₅). Values: `graduated` (default: warn, then -25%, -50%, effective block at 30/60/90 days), `binary-30d` (effective block at 30 days), `hard-block` (effective block at cadence+0d). See [journey-metrics.md](../docs/operations/journey-metrics.md) and RFC-0018 OQ-6.
+
 ### Autonomy Level {#autonomy-level}
 
 A numbered tier (0-3) defining the permissions, guardrails, and monitoring intensity for an AI agent. Level 0 (Observer) is read-only; Level 3 (Principal) is autonomous within domain. See [autonomy.md](autonomy.md).
@@ -71,6 +75,10 @@ A [Pipeline](#pipeline)-level configuration that declares branch naming patterns
 ### Circuit Breaker {#circuit-breaker}
 
 A real-time cost monitoring loop that interrupts agent execution when a cost limit is reached. See RFC-0004.
+
+### completionCriteria {#completion-criteria}
+
+A [Journey](#journey) field defining what "done" means. Closed enum for v1: `terminal-success-state` (reaching a terminal state with `successState: true`, named by `target`) or `all-states-reached`. `custom-predicate` is rejected; CEL is pre-recommended for v2. See RFC-0018 OQ-4.
 
 ### Complexity Score {#complexity-score}
 
@@ -132,6 +140,14 @@ An [adapter](#adapter) that abstracts a runtime infrastructure concern (audit st
 
 A typed API definition for an integration category. SDLC interfaces: IssueTracker, SourceControl, CIPipeline, CodeAnalysis, Messenger, DeploymentTarget. Infrastructure interfaces: AuditSink, Sandbox, SecretStore, MemoryStore, EventBus. Priority signal interfaces: [SupportChannel](#support-channel), [CrmProvider](#crm-provider), [AnalyticsProvider](#analytics-provider). Each [adapter](#adapter) implements one or more interface contracts. See [adapters.md](adapters.md#2-interface-contracts).
 
+### Journey {#journey}
+
+A temporally-ordered user flow within a [Soul](#soul) DID or Variant, with distinct design intent, [completion criteria](#completion-criteria), accessibility requirements and success metrics. Journeys are scoring scopes, not a runtime workflow engine, and are schema-enforced flat (no nested journeys). See RFC-0018.
+
+### JourneyStateIdDriftRule {#journey-state-id-drift-rule}
+
+The fourth rule in the RFC-0009 section 13 tessellation drift detection engine. It AST-scans substrate code for references to journey state IDs that are undeclared or belong to a removed [Journey](#journey), emitting `Decision: journey-state-id-drift`. See RFC-0018 OQ-8 and OQ-10.
+
 ### Label {#label}
 
 A key-value pair in a resource's [metadata](#metadata) used for identification, selection, and filtering. Labels enable resource queries and policy targeting. See [spec.md](spec.md#3-metadata-object).
@@ -151,6 +167,10 @@ An [infrastructure adapter](#infrastructure-adapter) interface providing a key-v
 ### Metadata {#metadata}
 
 The `metadata` object present on every [resource](#resource), containing `name`, `namespace`, [labels](#label), and [annotations](#annotation). See [spec.md](spec.md#3-metadata-object).
+
+### MetricSnapshot {#metric-snapshot}
+
+An operator-supplied numeric metric resource (kind `MetricSnapshot`) recording a [Journey](#journey) success-metric value at a point in time. The framework does not poll analytics backends; a snapshot older than the staleness threshold (default 30 days) is treated as an unknown input. See [journey-metrics.md](../docs/operations/journey-metrics.md) and RFC-0018 OQ-5.
 
 ### Notification Template {#notification-template}
 
@@ -298,3 +318,7 @@ A typed, per-Soul-DID configuration object stored in `substrate-contracts/<soulI
 ### Type-Registry Layer Detection {#type-registry-layer-detection}
 
 The fourth drift-detection mechanism for Tessellated DID platforms, complementing RFC-0009 §7.2's three orchestrator-side rules (AST scan, inter-soul embedding distance convergence, cross-soul provenance audits). Type-registry layer detection runs at CI authoring time as a deterministic 5-assertion test suite against every Substrate Contract file. It catches *declared* drift before it ships — cross-file invariants the AST scan cannot see, such as a Soul DID registered with a key that does not match its `soulId`, or a director declared in one Soul's contract but absent from that Soul's council membership. Specified in [RFC-0028 §4](rfcs/RFC-0028-engineering-axis-substrate-enforcement.md#4-ci-integrity-gate--proposed-72-type-registry-layer-detection-candidate) and cross-referenced from [RFC-0009 §7.2](rfcs/RFC-0009-tessellated-design-intent-documents.md). Implemented in `scripts/check-substrate-contract.mjs`. See [docs/operations/substrate-contract.md §3](../docs/operations/substrate-contract.md#section-3--reading-the-ci-integrity-gate-output).
+
+### targetedJourneys {#targeted-journeys}
+
+A Work Item field declaring which [journeys](#journey) the work applies to, as a list of path-style URIs: `<soul-id>/<journey-id>` or `<soul-id>/<variant-id>/<journey-id>`. Drives journey-scoped Sα₂, Cκ and Eρ₅ routing in admission scoring. See RFC-0018 section 6.1.
