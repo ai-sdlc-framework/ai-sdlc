@@ -100,6 +100,8 @@ export interface LoopState {
   lastGithubReadAt?: string;
   /** Executors whose rotate request this loop wrote; the next tick reports whether each was consumed (AISDLC-1099). */
   pendingClears?: string[];
+  /** Whether the board was held at the last tick; a held-to-free change is `holdLifted` (AISDLC-1089). */
+  wasHeld?: boolean;
 }
 
 /** Why and when the board refused a brief. */
@@ -147,6 +149,7 @@ export function readLoopState(boardDir: string): LoopState {
       ...(parsed.lastReportAt ? { lastReportAt: parsed.lastReportAt } : {}),
       ...(parsed.lastGithubReadAt ? { lastGithubReadAt: parsed.lastGithubReadAt } : {}),
       ...(Array.isArray(parsed.pendingClears) ? { pendingClears: parsed.pendingClears } : {}),
+      ...(parsed.wasHeld ? { wasHeld: true } : {}),
     };
   } catch {
     return emptyState();
@@ -234,6 +237,12 @@ export interface TickResult {
   canary?: CanaryReport;
   /** Present when the ephemeral steps downed or spawned an executor, or a spawn failed (RFC-0059). */
   ephemeral?: EphemeralReport;
+  /** True on the first tick after a hold was lifted (AISDLC-1089). */
+  holdLifted?: boolean;
+  /** Task ids queued and eligible to claim, in claim order; filled by `cli-hierarchy tick` (AISDLC-1089). */
+  eligibleQueued?: string[];
+  /** Names of idle executor sessions; filled by `cli-hierarchy tick` (AISDLC-1089). */
+  idleExecutors?: string[];
   /** Deterministic list of what stops the drain; the dispatch command sends it to the planner when it changes. */
   blockers: string[];
 }
@@ -699,6 +708,9 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   }
   if (clearAcks.length > 0) delete state.pendingClears;
   const held = readHold(deps.boardDir);
+  const holdLifted = state.wasHeld === true && !held;
+  if (held) state.wasHeld = true;
+  else delete state.wasHeld;
   let quotaSkip: TickResult['quotaSkip'];
   try {
     const remaining = lowestRemaining(deps.quota?.());
@@ -821,6 +833,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   return {
     blockers,
     ...(held ? { held } : {}),
+    ...(holdLifted ? { holdLifted } : {}),
     ...ingest,
     ...watch,
     reports,
