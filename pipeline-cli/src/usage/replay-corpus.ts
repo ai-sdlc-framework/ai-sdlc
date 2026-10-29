@@ -197,6 +197,23 @@ export async function buildCorpus(input: BuildCorpusInput): Promise<CorpusFile> 
   };
 }
 
+/**
+ * Merge a freshly built corpus into an existing one: existing items are kept,
+ * new items (by task, role and commit) are appended, and skip counts are those
+ * of the latest build.
+ */
+export function mergeCorpus(existing: CorpusFile, built: CorpusFile): CorpusFile {
+  const key = (i: CorpusItem): string => `${i.taskId}\u0000${i.role}\u0000${i.commitSha}`;
+  const seen = new Set(existing.items.map(key));
+  const items = [...existing.items];
+  for (const i of built.items) {
+    if (seen.has(key(i))) continue;
+    seen.add(key(i));
+    items.push(i);
+  }
+  return { ...built, items };
+}
+
 /** Write a JSON file atomically, creating the parent directory. */
 export function writeJsonAtomic(path: string, value: unknown): void {
   mkdirSync(dirname(path), { recursive: true });

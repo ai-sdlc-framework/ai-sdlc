@@ -18,6 +18,7 @@ import { resolveArtifactsDir } from '../routing/artifacts-dir.js';
 import { repoNameFor } from './attribution.js';
 import {
   buildCorpus,
+  mergeCorpus,
   readCorpus,
   renderCorpusSummary,
   writeCorpus,
@@ -239,6 +240,11 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
                 .option('out', {
                   type: 'string',
                   description: 'Corpus file (default: <artifacts>/replay/corpus.json)',
+                })
+                .option('merge', {
+                  type: 'boolean',
+                  default: false,
+                  description: 'Keep items already in the corpus file and add only new ones',
                 }),
             async (argv) => {
               const repoRoot = repoRootOf();
@@ -260,9 +266,14 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
                 baseRef: argv['base-ref'],
                 now: deps.now?.() ?? new Date(),
               });
-              writeCorpus(out, corpus);
+              let final = corpus;
+              if (argv.merge) {
+                const prior = readCorpus(out);
+                if (typeof prior !== 'string') final = mergeCorpus(prior, corpus);
+              }
+              writeCorpus(out, final);
               io.out(`Artifacts directory: ${artifactsDirFor(deps, repoRoot)}\n`);
-              io.out(renderCorpusSummary(corpus, out));
+              io.out(renderCorpusSummary(final, out));
             },
           )
           .demandCommand(1, 'Specify a replay-corpus subcommand: build'),
@@ -323,6 +334,11 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
             default: [] as string[],
             description: 'Off-peak window, TZ@HH-HH or TZ@HH-HH@Day,Day (repeatable)',
           })
+          .option('timeout-minutes', {
+            type: 'number',
+            default: 20,
+            description: 'Per-review timeout; a review that exceeds it is recorded as an error',
+          })
           .option('confirm-spend', {
             type: 'boolean',
             default: false,
@@ -358,6 +374,12 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
         }
         if (!Number.isFinite(maxUnits) || maxUnits <= 0) {
           fail(io, '--max-units must be greater than 0.');
+          return;
+        }
+
+        const timeoutMinutes = argv['timeout-minutes'];
+        if (!Number.isFinite(timeoutMinutes) || timeoutMinutes <= 0) {
+          fail(io, '--timeout-minutes must be greater than 0.');
           return;
         }
 
@@ -520,6 +542,7 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
             ...(argv['reference-model'] ? { reference: argv['reference-model'] } : {}),
             maxItems,
             maxUnits,
+            reviewTimeoutMs: Math.round(timeoutMinutes * 60_000),
             repoRoot,
             repoName,
             git: deps.git ?? createGit(deps.runner),
