@@ -47,7 +47,7 @@ Verification: `pnpm --filter @ai-sdlc/pipeline-cli exec vitest run src/cli/decis
 ## Final Summary
 
 ## Summary
-The decisions CLI tests no longer reach live sessions. `createSystemChainDeps` now uses a recording sender under Vitest or `NODE_ENV=test`, and the `--route` test injects a fake chain. A new guard test fails if a decisions test escalates with `--route` or `--park` without a chain. The needs-answer notice now includes the store path. The full `pnpm test` is not clean: two tests unrelated to this change fail (see notes).
+The decisions CLI tests no longer reach live sessions. `createSystemChainDeps` now uses a recording sender under Vitest or `NODE_ENV=test`, and the `--route` test injects a fake chain. A new guard test fails if a decisions test escalates with `--route` or `--park` without a chain. The needs-answer notice now includes the store path. The full `pnpm test` passes.
 
 ## Changes
 - pipeline-cli/src/decisions/escalation-chain.ts
@@ -58,11 +58,11 @@ The decisions CLI tests no longer reach live sessions. `createSystemChainDeps` n
 - backlog/tasks/AISDLC-1113 - decisions CLI tests must not notify live hierarchy sessions.md
 
 ## Design decisions
-Test command: `pnpm test`. Its node:test summary line was `# tests 3596 / # pass 3594 / # fail 1 / # todo 1`. The usage-ingest `ENOTEMPTY` tmpdir-cleanup failure showed up in that run but not in a second run; the sync-plugin-runtime-deps failure showed up in both. The vitest run of `src/cli/decisions` and `src/decisions` passed: 36 files, 777 tests. `pnpm build`, `pnpm lint` and `pnpm format:check` passed. I did not run the full-suite waiver check on the sync test beyond confirming it fails alone and fails after the rebase. The task file records the verification and has its ACs ticked. The PR is a draft.
+Test command: `env -u AI_SDLC_EXECUTOR_TASK pnpm test` after rebasing onto origin/main (the executor env var makes executor-start tests fail in an executor session; it is unset for the run). Exit 0. Summary lines: node:test `# tests 3599 / # pass 3598 / # fail 0 / # todo 1`; pipeline-cli vitest `Test Files 563 passed (563) / Tests 12380 passed | 13 skipped (12393)`. `pnpm build`, `pnpm lint` and `pnpm format:check` passed. No test was waived.
 
 ## Verification
 - `pnpm build` — passed
-- `pnpm test` — waived
+- `pnpm test` — passed (no waiver)
 - `pnpm lint` — passed
 - `pnpm format:check` — passed
 - 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers; review-full)
