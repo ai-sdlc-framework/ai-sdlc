@@ -441,9 +441,8 @@ export async function runReplay(input: RunReplayInput): Promise<ReplayResults> {
           built.changedFiles,
         );
         for (const model of models) {
-          let result: SubagentResult;
-          try {
-            result = await withTimeout(
+          const spawn = (): Promise<SubagentResult> =>
+            withTimeout(
               (spawners.get(model) as SubagentSpawner).spawn({
                 type,
                 prompt,
@@ -452,12 +451,20 @@ export async function runReplay(input: RunReplayInput): Promise<ReplayResults> {
               }),
               timeoutMs,
             );
+          let result: SubagentResult;
+          try {
+            result = await spawn();
           } catch {
-            // A thrown or timed-out spawn may still have spent tokens we cannot see: treat it
-            // like a missing usage report so --max-units cannot be bypassed.
-            outcomes[model] = 'error';
-            usageGap = true;
-            continue;
+            // One transient error (an API blip) is retried once before the spawn counts as a gap.
+            try {
+              result = await spawn();
+            } catch {
+              // A thrown or timed-out spawn may still have spent tokens we cannot see: treat it
+              // like a missing usage report so --max-units cannot be bypassed.
+              outcomes[model] = 'error';
+              usageGap = true;
+              continue;
+            }
           }
           outcomes[model] = verdictOf(result).outcome;
           const tokens = tokensFromOutput(result.output ?? '');

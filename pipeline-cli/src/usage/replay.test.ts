@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn as nodeSpawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { createHash } from 'node:crypto';
 import {
@@ -38,6 +38,7 @@ import {
   cleanupActiveWorktreesSync,
   commitExists,
   createGit,
+  defaultReplayRoot,
   isCommitId,
   isSafeRef,
   mergeBaseOf,
@@ -239,12 +240,20 @@ function envelope(tokens = { input_tokens: 1000, output_tokens: 100 }): string {
  * Candidate blocks D1, D2 and C1; approves D3 and C2.
  * Reference blocks every item.
  */
-function makeSpawner(spawned: Spawned[], opts: { throws?: boolean; noUsage?: boolean } = {}) {
+function makeSpawner(
+  spawned: Spawned[],
+  opts: { throws?: boolean; throwsOnce?: boolean; noUsage?: boolean } = {},
+) {
+  let failedOnce = false;
   const create: SpawnerFactory = ({ model, type }) => {
     const spawner: SubagentSpawner = {
       async spawn(o: SpawnOpts): Promise<SubagentResult> {
         spawned.push({ model, prompt: o.prompt, cwd: o.cwd });
         if (opts.throws) throw new Error('spawner exploded');
+        if (opts.throwsOnce && !failedOnce) {
+          failedOnce = true;
+          throw new Error('transient API error');
+        }
         expect(o.type).toBe(type);
         const blocks =
           model === 'ref-model'
@@ -878,14 +887,38 @@ describe('replay', () => {
       { createSpawner: makeSpawner(spawned, { throws: true }) },
     );
     expect(r.exit).toBe(0);
-    // A thrown spawn is treated like a missing usage report: the run stops after the first item.
-    expect(spawned).toHaveLength(1);
+    // A thrown spawn is retried once, then treated like a missing usage report: the run stops.
+    expect(spawned).toHaveLength(2);
     expect(r.out).toContain('1 error(s) not scored');
     expect(r.out).toContain('could not be enforced');
     expect(r.err).toContain('--max-units cannot be enforced');
     expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain('ai-sdlc-replay-');
     expect(readdirSync(tmpRoot)).toEqual([]);
     expect(snapshot(join(repo, '.ai-sdlc'))).toBe(aiSdlcBefore);
+  });
+
+  it('retries one transient spawn error once and carries on', async () => {
+    await buildCorpusViaCli();
+    const spawned: Spawned[] = [];
+    const r = await run(
+      [
+        'replay',
+        '--role',
+        'code',
+        '--model',
+        'cand-model',
+        '--max-items',
+        '1',
+        '--max-units',
+        '1000000',
+      ],
+      { createSpawner: makeSpawner(spawned, { throwsOnce: true }) },
+    );
+    expect(r.exit).toBe(0);
+    expect(spawned).toHaveLength(2);
+    expect(spawned[0]?.prompt).toBe(spawned[1]?.prompt);
+    expect(r.out).not.toContain('error(s) not scored');
+    expect(r.out).toContain('Stopped: reached --max-items');
   });
 
   it('reports reviews that carry no token counts instead of inventing units', async () => {
@@ -2053,6 +2086,107 @@ describe('sandbox environment', () => {
   });
 });
 
+describe('HFS+-ignorable code points and the per-user clone root', () => {
+  it('removes a CLAUDE.md spelled with code points HFS+ ignores', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'replay-hfs-'));
+    try {
+      const names = [
+        'CLAUDE\u200C.md',
+        'CLA\u200DUDE.md',
+        '\uFEFFCLAUDE.md',
+        'claude.local\u202E.md',
+        '.cl\u206Aaude',
+      ];
+      for (const n of names) writeFileSync(join(dir, n), 'x\n');
+      writeFileSync(join(dir, 'keep.ts'), 'x\n');
+      expect(removeCommitClaudeConfig(dir)).toBe(names.length);
+      expect(readdirSync(dir)).toEqual(['keep.ts']);
+    } finally {
+      rmSync(dir, RM_OPTS);
+    }
+  });
+
+  it('defaults the clone root to a per-user directory on Linux and the OS temp elsewhere', () => {
+    expect(defaultReplayRoot('linux', {}, '/home/me')).toBe('/home/me/.cache/ai-sdlc');
+    expect(defaultReplayRoot('linux', { XDG_CACHE_HOME: '/x/cache' }, '/home/me')).toBe(
+      '/x/cache/ai-sdlc',
+    );
+    expect(defaultReplayRoot('linux', { XDG_CACHE_HOME: 'rel' }, '/home/me')).toBe(
+      '/home/me/.cache/ai-sdlc',
+    );
+    expect(defaultReplayRoot('darwin', {}, '/Users/me')).toBe(tmpdir());
+    expect(defaultReplayRoot('win32', {}, 'C:\\me')).toBe(tmpdir());
+  });
+});
+
+describe('a real SIGTERM during a replay', () => {
+  const dist = join(__dirname, '..', '..', 'dist', 'usage');
+  const built = existsSync(join(dist, 'replay-commands.js'));
+
+  it.skipIf(!built || process.platform === 'win32')(
+    'kills the running child and removes the clone',
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), 'replay-sigterm-'));
+      const script = join(root, 'child.mjs');
+      writeFileSync(
+        script,
+        `
+import { withReplayClone, createGit } from ${JSON.stringify(join(dist, 'replay-git.js'))};
+import { trackedSpawner } from ${JSON.stringify(join(dist, 'replay-sandbox.js'))};
+import { installReplaySignalHandlers } from ${JSON.stringify(join(dist, 'replay-commands.js'))};
+installReplaySignalHandlers(new AbortController());
+await withReplayClone(createGit(), ${JSON.stringify(repo)}, async (checkout) => {
+  const wt = await checkout(${JSON.stringify(sha.D1)});
+  const child = trackedSpawner()('sleep', ['60'], { cwd: wt, stdio: 'ignore' });
+  console.log('READY ' + wt + ' ' + child.pid);
+  await new Promise(() => {});
+}, { tmpRoot: ${JSON.stringify(tmpRoot)} });
+`,
+      );
+      const proc = nodeSpawn(process.execPath, [script], { stdio: ['ignore', 'pipe', 'inherit'] });
+      try {
+        let out = '';
+        const ready = await new Promise<string>((resolveReady, reject) => {
+          const timer = setTimeout(() => reject(new Error('child never became ready')), 30_000);
+          proc.stdout?.on('data', (d: Buffer) => {
+            out += d.toString();
+            if (out.includes('\n')) {
+              clearTimeout(timer);
+              resolveReady(out);
+            }
+          });
+          proc.on('exit', () => reject(new Error(`child exited early: ${out}`)));
+        });
+        const [, wt, pidText] = /^READY (\S+) (\d+)/.exec(ready) as RegExpExecArray;
+        const sleepPid = Number(pidText);
+        expect(existsSync(wt as string)).toBe(true);
+        const exited = new Promise<string | null>((r) => {
+          proc.removeAllListeners('exit');
+          proc.on('exit', (_c, signal) => r(signal));
+        });
+        proc.kill('SIGTERM');
+        expect(await exited).toBe('SIGTERM');
+        expect(existsSync(wt as string)).toBe(false);
+        expect(readdirSync(tmpRoot)).toEqual([]);
+        let alive = true;
+        for (let i = 0; i < 50 && alive; i++) {
+          try {
+            process.kill(sleepPid, 0);
+            await new Promise((r) => setTimeout(r, 100));
+          } catch {
+            alive = false;
+          }
+        }
+        expect(alive).toBe(false);
+      } finally {
+        proc.kill('SIGKILL');
+        rmSync(root, RM_OPTS);
+      }
+    },
+    60_000,
+  );
+});
+
 describe('private per-user temp parent and ownership-checked sweep', () => {
   it('puts holders under a private 0700 parent that is matched as a replay cwd', async () => {
     let wt = '';
@@ -2277,7 +2411,7 @@ describe('replay hardening details', () => {
       ],
       { createSpawner: makeSpawner(spawned, { throws: true }) },
     );
-    expect(spawned).toHaveLength(1);
+    expect(spawned).toHaveLength(2);
     expect(r.err).toContain('WARNING');
     expect(r.out).toContain('Stopped: a review reported no token counts');
   });
