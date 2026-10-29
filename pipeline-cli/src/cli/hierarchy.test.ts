@@ -388,7 +388,7 @@ describe('defaultHierarchyDeps', () => {
       expect(d.registryDir).toBe(path.join(tmp, 'cfg', 'sessions'));
       expect(d.userSettingsFile).toBe(path.join(tmp, 'cfg', 'settings.json'));
       expect(d.boardDir).toBe(path.join(tmp, 'board'));
-      expect(d.settingsFiles).toHaveLength(3);
+      expect(d.settingsFiles).toHaveLength(4);
       expect(d.now()).toBeInstanceOf(Date);
       d.log('');
     } finally {

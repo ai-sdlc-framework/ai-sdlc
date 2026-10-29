@@ -7,7 +7,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import type { RegistrySession } from './types.js';
+import type { RegistrySession, RosterEntry } from './types.js';
 
 /** Read every well-formed session file in `dir`. A missing directory yields []. */
 export function readSessionRegistry(dir: string): RegistrySession[] {
@@ -56,4 +56,32 @@ export function findStartedSession(
     (s) => s.startedAt >= spawnedAtMs && !claimedNames.has(s.name) && collision.test(s.name),
   );
   return candidates.find((s) => s.name === requestedName) ?? candidates[0];
+}
+
+/**
+ * Reconcile roster entries stuck in `starting` with the registry (AISDLC-664.5): an entry
+ * whose session the registry now lists takes the registered name and pid and becomes
+ * `running`. Returns the new entries and how many changed; other entries pass through.
+ */
+export function reconcileStartingEntries(
+  entries: readonly RosterEntry[],
+  registry: readonly RegistrySession[],
+): { entries: RosterEntry[]; changed: number } {
+  const claimed = new Set(entries.filter((e) => e.status !== 'starting').map((e) => e.name));
+  let changed = 0;
+  const out = entries.map((e) => {
+    if (e.status !== 'starting') return e;
+    const startedAt = Date.parse(e.startedAt);
+    const found = findStartedSession(
+      registry,
+      e.tmuxWindow,
+      Number.isNaN(startedAt) ? 0 : startedAt,
+      claimed,
+    );
+    if (!found) return e;
+    claimed.add(found.name);
+    changed++;
+    return { ...e, name: found.name, pid: found.pid, status: 'running' as const };
+  });
+  return { entries: out, changed };
 }

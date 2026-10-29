@@ -123,6 +123,7 @@ export {
   MIN_AVAILABLE_BYTES,
   parseMemInfo,
   parseVmStat,
+  managedSettingsFile,
   readSettingsView,
   REQUIRED_INBOUND_VALUE,
   SKIP_RESOURCE_GATE_ENV,
@@ -183,7 +184,7 @@ export {
   type PlaybookOutcome,
 } from './playbook.js';
 export { checkRepoMatch, rosterProject, type RepoCheck } from './peer-guard.js';
-export { findStartedSession, readSessionRegistry } from './registry.js';
+export { findStartedSession, readSessionRegistry, reconcileStartingEntries } from './registry.js';
 export { resolveCallerRole, type SessionRoleDeps } from './session-role.js';
 export {
   mainCheckoutRoot,

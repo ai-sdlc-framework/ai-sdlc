@@ -237,7 +237,11 @@ Preflight, all before anything starts:
 
 - **Settings.** Because every session starts in bypass mode, the effective `crossSessionInbound`
   setting must be `accept` (user settings, `.claude/settings.json`, `.claude/settings.local.json`),
-  or lower-tier messages are not delivered. `up` refuses with the exact fix otherwise.
+  or lower-tier messages are not delivered. `up` refuses with the exact fix otherwise. The
+  managed (enterprise) settings file is read last because it has the highest precedence
+  (AISDLC-664.5). A per-session `--settings` override is declined: it would outrank the
+  operator's own files and change approval behaviour for the planner, so the planner keeps its
+  held-message gate by the value in the files alone.
 - **Resource gate.** At least 4 GiB of memory available and a 1-minute load average below the
   core count; `AI_SDLC_EXECUTE_PARALLEL_SKIP_RESOURCE_GATE=1` overrides it (testing only).
 - **Foreign sessions.** Live sessions on the machine with the same role names for another

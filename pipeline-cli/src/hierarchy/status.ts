@@ -30,8 +30,8 @@ import {
   readModuleMeasure,
   type ModuleHealth,
 } from './module-health.js';
-import { readSessionRegistry } from './registry.js';
-import { readRosterChecked } from './roster.js';
+import { readSessionRegistry, reconcileStartingEntries } from './registry.js';
+import { readRosterChecked, writeRoster } from './roster.js';
 import {
   formatSchedulerStatus,
   schedulerStatus,
@@ -111,9 +111,24 @@ export interface StatusResult {
 
 /** Join the roster with the registry, tmux and the board. */
 export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
-  const { roster, rejected } = readRosterChecked(deps.boardDir);
+  const checked = readRosterChecked(deps.boardDir);
+  const { rejected } = checked;
+  let roster = checked.roster;
   for (const r of rejected) deps.log(`warning: ${r}; not touched`);
   const registry = readSessionRegistry(deps.registryDir);
+  // Entries stuck in `starting` take their registry name; persisted unless that would drop
+  // a rejected entry from the file.
+  const reconciled = reconcileStartingEntries(roster.sessions, registry);
+  if (reconciled.changed > 0) {
+    roster = { ...roster, sessions: reconciled.entries };
+    if (rejected.length === 0) {
+      try {
+        writeRoster(deps.boardDir, roster);
+      } catch {
+        /* status stays read-only on a write failure */
+      }
+    }
+  }
   const windows = new Set<string>();
   for (const tmuxSession of new Set(roster.sessions.map((e) => e.tmuxSession))) {
     for (const w of listWindows(deps.run, tmuxSession)) windows.add(`${tmuxSession}:${w}`);

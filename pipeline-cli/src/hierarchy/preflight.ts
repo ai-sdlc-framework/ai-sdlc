@@ -25,6 +25,22 @@ export interface SettingsView {
   defaultMode?: string;
 }
 
+/**
+ * Managed (enterprise) settings file for this platform. It has the highest precedence of
+ * all layers, so the preflight reads it last: a managed `crossSessionInbound` wins.
+ * AISDLC-664.5 decision: read it, but do NOT pass a per-session `--settings` override.
+ * A launch override would outrank the user's and project's files and change tool-approval
+ * and held-message behaviour for the planner as well; the planner keeps its held-message
+ * gate because the preflight only requires the file-level value and edits nothing.
+ */
+export function managedSettingsFile(platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'darwin') {
+    return '/Library/Application Support/ClaudeCode/managed-settings.json';
+  }
+  if (platform === 'win32') return 'C:\\Program Files\\ClaudeCode\\managed-settings.json';
+  return '/etc/claude-code/managed-settings.json';
+}
+
 function readJsonObject(file: string): Record<string, unknown> | undefined {
   if (!existsSync(file)) return undefined;
   try {

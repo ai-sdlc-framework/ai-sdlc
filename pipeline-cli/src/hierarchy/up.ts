@@ -13,7 +13,7 @@ import path from 'node:path';
 import { schedulerUp } from './reconcile-scheduler.js';
 import { webhookUp } from './webhook.js';
 import { attachEntry } from './attach.js';
-import { findStartedSession, readSessionRegistry } from './registry.js';
+import { findStartedSession, readSessionRegistry, reconcileStartingEntries } from './registry.js';
 import { checkCrossSessionInbound, evaluateResourceGate, readSettingsView } from './preflight.js';
 import { isLegacyLayoutEntry, readRosterChecked, writeRoster } from './roster.js';
 import { inspectVscodeTasks, syncVscodeTasks } from './terminals.js';
@@ -455,9 +455,15 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
   for (const r of rejected) warnings.push(`${r}; not touched`);
 
   // Drop roster entries whose session is gone; they are restarted below if planned.
-  const kept = loaded.sessions.filter((e) => windowLive(deps.run, e.tmuxSession, e.tmuxWindow));
+  const liveEntries = loaded.sessions.filter((e) =>
+    windowLive(deps.run, e.tmuxSession, e.tmuxWindow),
+  );
+  // An entry left in `starting` takes its registry name once the registry lists it.
+  const reconciled = reconcileStartingEntries(liveEntries, readSessionRegistry(deps.registryDir));
+  const kept = reconciled.entries;
+  const reconcileChanged = reconciled.changed > 0;
   for (const e of loaded.sessions) {
-    if (!kept.includes(e)) {
+    if (!liveEntries.includes(e)) {
       warnings.push(`roster entry '${e.name}' had no live tmux session and was dropped`);
     }
   }
@@ -568,7 +574,7 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
     });
   }
   // Also rewrites a roster written before project scoping, now carrying `project`.
-  if (toStart.length === 0 && (warnings.length > 0 || kept.length > 0)) {
+  if (toStart.length === 0 && (warnings.length > 0 || kept.length > 0 || reconcileChanged)) {
     writeRoster(deps.boardDir, roster);
   }
 

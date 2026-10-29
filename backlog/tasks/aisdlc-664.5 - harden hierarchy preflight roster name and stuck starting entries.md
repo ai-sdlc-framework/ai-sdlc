@@ -2,7 +2,7 @@
 id: AISDLC-664.5
 title: >-
   RFC-0051: harden the hierarchy preflight and roster name handling
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-30'
 labels:
