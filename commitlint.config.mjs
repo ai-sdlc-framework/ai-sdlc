@@ -19,6 +19,9 @@ export default {
         'ci',
         'spec',
         'docs',
+        'pipeline-cli',
+        'hooks',
+        'plugin',
       ],
     ],
     'scope-empty': [0], // allow unscoped commits
