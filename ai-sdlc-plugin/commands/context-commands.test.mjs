@@ -44,7 +44,7 @@ describe('context-capture', () => {
 
 describe('context-hygiene', () => {
   it('raises contradictions via cli-decisions add, at most 3 per run', () => {
-    assert.match(hygiene, /node pipeline-cli\/bin\/cli-decisions\.mjs add/);
+    assert.match(hygiene, /node "\$PIPELINE_CLI_BIN\/cli-decisions\.mjs" add/);
     assert.match(hygiene, /At most 3 contradictions are raised per run/);
   });
   it('reports entries below freshness 0.3 as questions, not facts', () => {

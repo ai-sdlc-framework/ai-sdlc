@@ -16,7 +16,7 @@ Hygiene pass for the context engine (RFC-0053). Adapted from the knowledge-hygie
 3. **Stale means a question, not a fact.** Freshness = 0.5^(age / half-life). An entry with freshness below 0.3 is reported under "Questions to re-verify", phrased as a question using its `reverify:` note, never as a statement of fact.
 4. **Contradictions become Decision Catalog items.** Detect pairs of entries joined by a `contradicts` relation or stating incompatible values for the same subject. Raise each with:
    ```bash
-   node pipeline-cli/bin/cli-decisions.mjs add \
+   node "$PIPELINE_CLI_BIN/cli-decisions.mjs" add \
      --summary "Knowledge contradiction: <subject>" \
      --body "<entry A id and value> conflicts with <entry B id and value>. Sources: <citations>." \
      --scope workspace \
