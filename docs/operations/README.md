@@ -6,6 +6,15 @@ Operator-facing runbooks for running, tuning, and triaging an AI-SDLC pipeline i
 
 ## Navigation Map
 
+### Governance
+
+| Runbook | Description |
+|---------|-------------|
+| [`system-of-record.md`](system-of-record.md) | Which store wins per artifact (task, issue, PR, decision, RFC, board, attestation, memory) and where this project diverges from playbook human-approval stages |
+| [`decision-authority.md`](decision-authority.md) | The autonomous decision protocol: classes (a), (b) and (c) |
+
+---
+
 ### Autonomous Orchestrator
 
 The orchestrator runs a continuous reconciliation loop over your backlog, dispatching tasks into isolated worktrees and running the full Step 0-13 pipeline autonomously.

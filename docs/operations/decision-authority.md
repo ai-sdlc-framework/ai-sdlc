@@ -2,7 +2,7 @@
 
 The operator wants agents to run development and administration and to decide by rubric rather than wait for them (DEC-0039). Sessions correctly refuse an operator approval relayed by another session, so work used to stop until the operator typed into each session. This protocol fixes that by moving the authority into the repository: every session reads the same policy, so none of them has to trust a relayed message.
 
-The normative summary is the "Decision authority" section of `CLAUDE.md`. This page is the long form.
+The normative summary is the "Decision authority" section of `CLAUDE.md`. This page is the long form. For which store wins when artifacts disagree, and where this project replaces playbook approvals, see [`system-of-record.md`](system-of-record.md).
 
 ## What counts as authority
 
