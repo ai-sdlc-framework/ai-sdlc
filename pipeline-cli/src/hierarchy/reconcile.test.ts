@@ -80,7 +80,7 @@ describe('reconcile idempotency (AC1)', () => {
     const second = reconcile(facts, {
       boardDir: board,
       execute,
-      now: () => new Date('2027-01-01T00:00:00Z'),
+      now: () => new Date('2026-10-14T01:00:00Z'),
     });
     expect(execute).toHaveBeenCalledTimes(2);
     expect(second.acted).toEqual([]);
@@ -1051,5 +1051,33 @@ describe('superseded close (AISDLC-1011)', () => {
       closeSuperseded,
     });
     expect(closeSuperseded).not.toHaveBeenCalled();
+  });
+});
+
+describe('open PR aging sweep (AISDLC-1092)', () => {
+  const red = () =>
+    taskPr({ checks: [{ name: 'ai-sdlc/pr-ready', conclusion: 'failure', summary: 'x' }] });
+  const at = (h: number) => () => new Date(Date.parse('2026-10-14T00:00:00.000Z') + h * 3_600_000);
+
+  it('re-runs the action after 7h unchanged, not after 1h', () => {
+    const execute = vi.fn(() => ({ ran: true }));
+    reconcile([red()], { boardDir: board, execute, now: at(0) });
+    reconcile([red()], { boardDir: board, execute, now: at(1) });
+    expect(execute).toHaveBeenCalledTimes(1);
+    reconcile([red()], { boardDir: board, execute, now: at(7) });
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(readLanding(board, 10)?.agedAttempts).toBe(2);
+    expect(readLanding(board, 10)?.lastActionAt).toBe(at(7)().toISOString());
+  });
+
+  it('routes one line to the planner after three attempts and stops retrying', () => {
+    const execute = vi.fn(() => ({ ran: true }));
+    for (const h of [0, 7, 14, 21, 28, 35]) {
+      reconcile([red()], { boardDir: board, execute, now: at(h) });
+    }
+    expect(execute).toHaveBeenCalledTimes(3);
+    const report = reconcile([red()], { boardDir: board, execute, now: at(42) });
+    expect(report.acted).toHaveLength(0);
+    expect(execute).toHaveBeenCalledTimes(3);
   });
 });

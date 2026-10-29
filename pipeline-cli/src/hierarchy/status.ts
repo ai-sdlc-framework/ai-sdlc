@@ -15,7 +15,7 @@ import {
   type AttestationGrowth,
 } from './attestation-growth.js';
 import { listInflight } from './inflight.js';
-import { listLanding } from './reconcile.js';
+import { AGING_WINDOW_MS, listLanding, recordLastActionAt } from './reconcile.js';
 import { paneNodeVersion, readNvmrc, versionMatches } from './node-pin.js';
 import { hasLaunchEnv } from './up.js';
 import {
@@ -94,6 +94,8 @@ export interface StatusResult {
   blocked?: { taskId: string; reason: string }[];
   /** Open PRs no lane owns (AISDLC-1091); `unowned PRs: N` in the text view. */
   unowned?: number;
+  /** AISDLC-1092: open PRs with no state change for the aging window, oldest first. */
+  agedPrs?: { pr: number; ageMs: number; lane: string; lastAction: string }[];
   /** `gh` calls in the last hour by HIERARCHY_SESSION (AISDLC-963). */
   ghCallsPerHour?: Record<string, number>;
   /** Live remaining quota for the core and graphql buckets; absent when `gh` cannot say. */
@@ -264,8 +266,19 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     /* unreadable directories must not break status */
   }
   const lastTick = lastTickInfo(deps.boardDir, deps.now());
+  const nowMs = deps.now().getTime();
+  const agedPrs = landings
+    .flatMap((l) => {
+      const at = Date.parse(recordLastActionAt(l) ?? '');
+      const ageMs = nowMs - at;
+      return Number.isFinite(at) && !l.closedUnlanded && ageMs >= AGING_WINDOW_MS
+        ? [{ pr: l.pr, ageMs, lane: l.owner, lastAction: l.action }]
+        : [];
+    })
+    .sort((a, b) => b.ageMs - a.ageMs);
   return {
     rows,
+    ...(agedPrs.length > 0 ? { agedPrs } : {}),
     unowned: landings.filter((l) => l.owner === 'unowned').length,
     ...(growth ? { attestationGrowth: growth } : {}),
     ...(drainStall ? { drainStall } : {}),
@@ -315,6 +328,10 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       ]
     : [];
   const unownedLine = `unowned PRs: ${result.unowned ?? 0}`;
+  const agedLines = (result.agedPrs ?? []).map(
+    (a) =>
+      `aged PR #${a.pr}: ${formatAge(new Date(0).toISOString(), a.ageMs)}, lane ${a.lane}, last action ${a.lastAction}`,
+  );
   const blockedLines = (result.blocked ?? []).map((b) => `blocked: ${b.taskId}: ${b.reason}`);
   if (result.rows.length === 0)
     return [
@@ -327,6 +344,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       ...blockedLines,
       ...stallLines,
       unownedLine,
+      ...agedLines,
       ...ghLines,
     ];
   const header = [
@@ -405,6 +423,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
     ...blockedLines,
     ...stallLines,
     unownedLine,
+    ...agedLines,
     ...ghLines,
   ];
 }
