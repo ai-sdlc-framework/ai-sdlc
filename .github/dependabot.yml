@@ -69,6 +69,18 @@ updates:
       - dependency-name: 'web-tree-sitter'
         update-types:
           - 'version-update:semver-minor'
+      # AISDLC-715: major bumps are deferred, not auto-proposed. Each needs a
+      # coordinated upgrade (build + tests + API migration) tracked as its own
+      # follow-up task; remove the ignore when that task starts. Minor/patch flow.
+      - dependency-name: 'typescript'
+        update-types:
+          - 'version-update:semver-major'
+      - dependency-name: '@linear/sdk'
+        update-types:
+          - 'version-update:semver-major'
+      - dependency-name: 'ink'
+        update-types:
+          - 'version-update:semver-major'
     commit-message:
       prefix: 'chore(deps)'
       prefix-development: 'chore(deps-dev)'
