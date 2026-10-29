@@ -1228,6 +1228,7 @@ async function executePipelineBody(
           workDir,
           sourceKind: 'execute',
           taskId: String(issueId),
+          ...(options.costTracker ? { costTracker: options.costTracker } : {}),
         }),
     );
     auditLog.record({

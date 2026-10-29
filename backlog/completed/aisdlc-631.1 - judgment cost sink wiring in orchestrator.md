@@ -2,7 +2,7 @@
 id: AISDLC-631.1
 title: >-
   RFC-0049 follow-up: wire the judgment cost sink into the orchestrator context builder
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-01'
 labels:
