@@ -215,6 +215,34 @@ describe('action table (AC2)', () => {
     expect(args).not.toContain('resume');
   });
 
+  it('a coverage, waived or failing-test red reenters with a developer round (AISDLC-1093)', () => {
+    const base = {
+      pr: 7,
+      taskId: 'T-1',
+      kind: 'task',
+      action: 'reenter',
+      state: 'real-failure',
+      boardDir: 'b',
+    } as unknown as ActionContext;
+    for (const line of [
+      '[patch-coverage] FAIL: patch coverage 87.27% < 89% threshold. low: a.ts',
+      'x.md records `pnpm test` as waived or skipped',
+      '3 tests failed',
+    ]) {
+      const args = actionCommands({ ...base, failingLine: line }, '/bin')![0]!.args;
+      expect(args).toContain('--developer-round');
+      expect(args[args.indexOf('--note') + 1]).toContain(line);
+    }
+    expect(actionCommands({ ...base, failingLine: 'lint broke' }, '/bin')![0]!.args).not.toContain(
+      '--developer-round',
+    );
+    expect(actionCommands({ ...base }, '/bin')![0]!.args).not.toContain('--developer-round');
+    expect(
+      actionCommands({ ...base, action: 'push-only-resign', failingLine: 'coverage' }, '/bin')![0]!
+        .args,
+    ).not.toContain('--developer-round');
+  });
+
   it('docs: DoR failure reruns DoR, other failure goes to the planner, green CLEAN arms', () => {
     expect(
       decide(docsPr({ checks: [{ name: 'DoR gate', conclusion: 'failure' }, ...green] })).action,
