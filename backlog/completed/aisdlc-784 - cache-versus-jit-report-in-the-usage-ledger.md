@@ -2,7 +2,7 @@
 id: AISDLC-784
 title: >-
   cache-versus-JIT report in the usage ledger
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-09'
 labels:
