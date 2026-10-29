@@ -242,6 +242,34 @@ Largest single-turn context growths, sess-a (main-session):
 
 (The path is shortened here. It is shown only for framework scope.) For a subagent row the `agent` column shows the subagent id rather than the role, so a main session and its subagents appear as separate rows.
 
+### `cli-usage jit`
+
+The RFC-0053 cache-versus-JIT report. It instruments the trade between context loaded up front (and re-read from the cache every turn) and context injected just in time; it does not assume just-in-time loading is cheaper. It is the evidence for a profile default change under the asymmetric rule.
+
+It reads the per-session load ledgers under `.ai-sdlc/context/sessions/` and the model-call ledger for the same sessions, and prints three sections:
+
+- **Injected tokens by role and moment**: injections and injected tokens per role and injection moment, with the cited share. Pre-marked rows (`CLAUDE.md`, the memory index) are not injections.
+- **Per session**: injected tokens, cited share and the session's `cache_read` tokens side by side. The role comes from the session's model calls (`(unknown)` when it has none).
+- **Weekly net-token check**: only with `--profiles`. Net tokens are injected plus cache-read tokens per session. For each profile change, the mean per session over the week before is compared with the week after (up to now). A profile whose change raised the mean prints `RAISED NET TOKENS`; it stays `ok` when net tokens fell or held, or when either week has no sessions.
+
+An injection counts as cited when a later reference in the same session names its entry id (the reference time is at or after the load time). Pass references with `--refs <file>`, a JSONL file of `{"sessionId","id","at"}` lines taken from tool calls or decisions; without it the cited share is 0. `--profiles <file>` is JSON: `{"changes":[{"profile","at"}],"sessions":{"<sessionId>":"<profile>"}}`. Other options: `--since`, `--until`, `--scope` and `--format text|json`.
+
+```console
+$ cli-usage jit --profiles profiles.json
+Injected tokens by role and moment
+role      moment         injections  injected_tokens  cited  cited_share
+executor  prompt                  1  300              0      0.0%
+executor  session-start           1  100              1      100.0%
+
+Per session, injected tokens beside cache-read tokens
+session  role      injected_tokens  cited_share  cache_read
+s1       executor  400              50.0%        1,500
+
+Weekly net-token check (injected plus cache-read per session, week before versus week after)
+profile  changed_at            before     after       flag
+jit      2026-09-10T00:00:00Z  1,100 (1)  1,900 (1)   RAISED NET TOKENS
+```
+
 ---
 
 ## Weighted units
