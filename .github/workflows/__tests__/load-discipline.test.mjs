@@ -35,21 +35,22 @@ const triggers = (wf) => wf.on ?? wf.true ?? {};
 describe('auto-enable workflow triggers (AISDLC-799)', () => {
   const wf = loadYaml('auto-enable-auto-merge.yml');
 
-  it('fires only on pull_request_target opened, reopened, ready_for_review', () => {
+  it('fires only on pull_request_target opened, reopened, ready_for_review, synchronize', () => {
     const t = triggers(wf);
     assert.deepEqual(Object.keys(t), ['pull_request_target']);
     assert.deepEqual([...t.pull_request_target.types].sort(), [
       'opened',
       'ready_for_review',
       'reopened',
+      'synchronize',
     ]);
   });
 
-  it('no longer re-fires on synchronize, check_suite or status', () => {
+  it('does not re-fire on check_suite or status; synchronize re-arms (AISDLC-1097)', () => {
     const t = triggers(wf);
     assert.equal('check_suite' in t, false);
     assert.equal('status' in t, false);
-    assert.equal(t.pull_request_target.types.includes('synchronize'), false);
+    assert.equal(t.pull_request_target.types.includes('synchronize'), true);
   });
 
   it('has a per-PR concurrency group that cancels superseded runs', () => {

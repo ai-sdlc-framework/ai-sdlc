@@ -723,6 +723,11 @@ describe('gatherFacts trust filter', () => {
     expect(decide({ ...f, draft: false })).toMatchObject({ action: 'arm' });
   });
 
+  it('re-arms a green CLEAN ready task PR whose auto-merge GitHub dropped (AISDLC-1097)', () => {
+    expect(decide(taskPr({ autoMergeArmed: false }))).toMatchObject({ action: 'arm' });
+    expect(decide(taskPr({ autoMergeArmed: true })).action).toBe('none');
+  });
+
   it('owns a draft of a done task and flags a draft with no claim and no verdict', () => {
     done(5);
     const doneFacts = gatherFacts(run([pr({ isDraft: true })]), '/', board)!;
