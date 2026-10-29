@@ -1,0 +1,71 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "8427dd2a6107c1c2cf2447dfb6969d72113c5d52"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "2c0809b4a99e096c3d85b204f40917a42b5d7ea8620d080aca4408443c3ad938",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "2c0809b4a99e096c3d85b204f40917a42b5d7ea8620d080aca4408443c3ad938",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "4d0b4db652979f8eaa6dd80d1f4d257e0b81f8ff425683849adee413217ae53d",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "4d0b4db652979f8eaa6dd80d1f4d257e0b81f8ff425683849adee413217ae53d",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "f6c3839bfa7ff559322ed3feb7ff039cca2abe64b72f069e892874683392ef81",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "f6c3839bfa7ff559322ed3feb7ff039cca2abe64b72f069e892874683392ef81",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "ac700aa361ccc0d0dfb0162ec93576e35f4da5da25ae603a9e71e840988a722a",
+        "ffe7d2f1c4d212fcb7e5ec16461d824cb0ab86787e521030f6d5c84a1a9cd9f5"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "52ca0449e6fff26443605e55415f8caba8df9f7a09e7077322723e3cbc92041b",
+        "ffe7d2f1c4d212fcb7e5ec16461d824cb0ab86787e521030f6d5c84a1a9cd9f5"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "66a0e351e0c877da39bce0ebb300c51d162f493a176bbcb8973797ee8e339718",
+        "6525dbf013ab8279cd0f2055b06fba9c5f7added160e2ba45511213858051443"
+      ]
+    }
+  ],
+  "rootHash": "632c638b49f24b66d655b0206329fba76b316731d25c0bca88f3a02a6e4b0c2a",
+  "rootSignature": "o2xcUuPluvpFA0Hlb/Wmih8RWpjuHAjf2DZ5dwaGENjBdY8yErDs5NBEDIhb8bQN6czU7qnsGsUiPy+DryS2Cw==",
+  "nonce": "da665668140f52973e6ca4cd9d116dca8500d86fb0be33b8ec5dbd9753ad4596",
+  "leafCount": 3,
+  "signedAt": "2026-10-29T21:21:21.665Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [".github/dependabot.yml"],
+    "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
+  }
+}
