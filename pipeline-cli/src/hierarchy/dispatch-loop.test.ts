@@ -1309,3 +1309,41 @@ describe('hold (AISDLC-899)', () => {
     expect(clearHold(board, 'planner', 'x')).toBeNull();
   });
 });
+
+describe('tick marker and turn budget review (AISDLC-667.1)', () => {
+  it('records one marker per tick with its steps in order', async () => {
+    const markers: unknown[] = [];
+    const r = await runDispatchTick(deps({ recordTick: (m) => markers.push(m) }));
+    expect(markers).toEqual([r.tickMarker]);
+    expect(r.tickMarker).toMatchObject({
+      tickId: 'operator-dispatch@2026-09-30T12:00:00.000Z',
+      startedAt: '2026-09-30T12:00:00.000Z',
+      nextWakeSec: WAKE_IDLE_SEC,
+    });
+    expect(r.tickMarker.steps.map((s) => s.name).slice(0, 3)).toEqual([
+      'ingest',
+      'verdicts',
+      'reports',
+    ]);
+  });
+
+  it('a failing marker write or budget review never fails the tick', async () => {
+    const r = await runDispatchTick(
+      deps({
+        recordTick: () => {
+          throw new Error('disk full');
+        },
+        reviewTurnBudget: () => {
+          throw new Error('ledger unreadable');
+        },
+      }),
+    );
+    expect(r.turnBudget).toBeUndefined();
+  });
+
+  it('returns the budget review', async () => {
+    const review = { median: 3, budget: 5, overBudget: false };
+    const r = await runDispatchTick(deps({ reviewTurnBudget: async () => review }));
+    expect(r.turnBudget).toEqual(review);
+  });
+});

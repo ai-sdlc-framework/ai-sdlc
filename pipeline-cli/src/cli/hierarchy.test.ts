@@ -1189,6 +1189,50 @@ describe('clear, tick and route-decision', () => {
     expect(enqueued).toEqual(['AISDLC-1']);
   });
 
+  it('tick records a DispatchTick marker and files one Decision on a turns-per-tick overrun (AISDLC-667.1)', async () => {
+    seedBoardWithBrief();
+    const emitted: { type: string; [k: string]: unknown }[] = [];
+    const filed: { summary: string }[] = [];
+    const ticks = Array.from({ length: 22 }, (_, i) => ({
+      tickId: `t${i}`,
+      startedAt: new Date(Date.parse('2026-10-02T10:00:00Z') + i * 1000).toISOString(),
+      turns: 9,
+      byStep: { reports: 9 },
+    }));
+    const extras = {
+      ...dispatchCaller,
+      lease,
+      operational: new Set<string>(),
+      enqueue: () => [],
+      turnBudget: {
+        budget: 5,
+        ticks: () => ticks,
+        hasOpenDecision: () => filed.length > 0,
+        fileDecision: (d: { summary: string }) => {
+          filed.push(d);
+          return 'DEC-0777';
+        },
+      },
+    };
+    const run = () =>
+      runHierarchyCli(
+        ['tick', '--worker', 'operator-dispatch', '--work-dir', tmp],
+        overrides({ env: {}, emit: (e) => void emitted.push(e as (typeof emitted)[number]) }),
+        extras,
+      );
+    expect(await run()).toBe(0);
+    const first = JSON.parse(logs.at(-1) as string);
+    expect(first.turnBudget).toMatchObject({ overBudget: true, decisionId: 'DEC-0777' });
+    expect(filed[0].summary).toContain('costliest step: reports');
+    const marker = emitted.find((e) => e.type === 'DispatchTick');
+    expect(marker).toMatchObject({ tickId: first.tickMarker.tickId });
+    expect(marker?.steps).toEqual(first.tickMarker.steps);
+
+    expect(await run()).toBe(0);
+    expect(JSON.parse(logs.at(-1) as string).turnBudget.skipped).toContain('already open');
+    expect(filed).toHaveLength(1);
+  });
+
   it('tick refuses a --retry-limit above 2, writes nothing, and accepts 2', async () => {
     seedBoardWithBrief();
     const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);

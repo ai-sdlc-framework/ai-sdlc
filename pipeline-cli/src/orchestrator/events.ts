@@ -368,7 +368,14 @@ export type OrchestratorEventType =
    * `retrigger-ci`, `requeue`, `escalate`), `result` (`done`, `refused`,
    * `failed`, `escalated`), `reason`; optional `branch`.
    */
-  | 'OperatorPlaybookAction';
+  | 'OperatorPlaybookAction'
+  /**
+   * RFC-0051 (AISDLC-667.1) - one dispatch-loop wake-up, so the usage ledger can
+   * bucket the dispatch session's model calls per tick. Per-event fields:
+   * `tickId`, `startedAt`, `endedAt`, `steps` (`{name, startedAt}` in order),
+   * `nextWakeSec`.
+   */
+  | 'DispatchTick';
 
 /**
  * One JSONL line on the events stream. Common envelope (`ts`, optional

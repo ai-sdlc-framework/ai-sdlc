@@ -380,6 +380,8 @@ spec:
   roles: # optional; defaults shown in Role budgets below
     executor:
       turnBudget: 150
+  dispatch:
+    turnsPerTickBudget: 5 # model turns one dispatch wake-up should need
 ```
 
 ### Role budgets
@@ -431,6 +433,7 @@ Keep the thresholds in step with `spec.roles` if you override the defaults. If y
 Window modes: `first-use` opens at the first call after the previous window ended, `fixed` repeats from an `anchor`, and `trailing` is the last `lengthHours` before now. `weights.tokenClasses` can override the per-class weights (`input`, `cacheWrite5m`, `cacheWrite1h`, `cacheRead`, `output`). The schema is [`usage-config.v1.schema.json`](../../spec/schemas/usage-config.v1.schema.json).
 
 `output.noticeTokens` (default 8000) is read by the PostToolUse hook `collect-tool-sequence.js`: in a planner or operator-dispatch session a tool result larger than that many estimated tokens (four characters per token) returns a one-line notice pointing at an Explore subagent, `tail`/`grep` and the artifacts directory. Developer and executor sessions are exempt, and the hook never blocks. The hook reads the machine-level file, then the base-branch file, with a plain text scan of this one key. Ledger records also carry `toolNames`, the tools a call asked to run, where the transcript provides them, so growth per turn can be attributed to a tool.
+`dispatch.turnsPerTickBudget` is the budget for the dispatch session (RFC-0051). `cli-usage scorecard` reports the median and p90 of model turns per dispatch tick against it, and the dispatch loop files one Decision, naming the step that used the most turns, when the median over the last 20 ticks exceeds it.
 
 A config that fails validation is skipped with a warning and the next source is tried. A bad config never stops a report.
 

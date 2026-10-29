@@ -15,7 +15,14 @@ import {
 } from '@ai-sdlc/reference';
 import type { Argv } from 'yargs';
 import { loadAllReviewLedgers } from '../attestation/reviews-ledger.js';
+import { readRecentEvents } from '../orchestrator/events.js';
 import { repoNameFor } from './attribution.js';
+import {
+  isDispatchCall,
+  parseTickMarkers,
+  summariseDispatchTurns,
+  turnsPerTick,
+} from './dispatch-turns.js';
 import {
   legacyNote,
   repoIdFor,
@@ -41,6 +48,7 @@ import {
 import { REPLAY_TASK_ID } from './replay-run.js';
 import { readReplayResults, renderReplayRows, replayRows } from './replay-report.js';
 import { resolveArtifactsDir } from '../routing/artifacts-dir.js';
+import type { DispatchTurnsSummary } from './dispatch-turns.js';
 import { deriveUnitWeights, describeWeights } from './units.js';
 import { loadUsageConfig } from './usage-config.js';
 import type { UsageIo, UsageViewDeps } from './commands.js';
@@ -74,6 +82,33 @@ export async function selectScorecardRecords(
     if (r.taskId && r.taskId !== REPLAY_TASK_ID) candidates.push(r);
   }
   return selectByRepo(candidates, identity);
+}
+
+/**
+ * Turns per dispatch tick for one repository: the dispatch session's framework-scope
+ * calls (they carry no task id, so the task-keyed selection above never sees them)
+ * bucketed by the `DispatchTick` markers on or after `from`.
+ */
+export async function dispatchTurnsFor(
+  usageDir: string | undefined,
+  from: Date | undefined,
+  identity: RepoIdentity,
+  artifactsDir: string,
+  budget: number,
+): Promise<DispatchTurnsSummary | undefined> {
+  const markers = parseTickMarkers(readRecentEvents({ artifactsDir, limit: 1_000_000 })).filter(
+    (m) => !from || Date.parse(m.startedAt) >= from.getTime(),
+  );
+  if (markers.length === 0) return undefined;
+  const candidates: ModelCallRecord[] = [];
+  for await (const r of readModelCalls(
+    { scope: 'framework', ...(from ? { from } : {}) },
+    { dir: usageDir },
+  )) {
+    if (isDispatchCall(r)) candidates.push(r);
+  }
+  const calls = selectByRepo(candidates, identity).records;
+  return summariseDispatchTurns(turnsPerTick(calls, markers), budget);
 }
 
 export function registerScorecardCommands(y: Argv, deps: ScorecardDeps, io: UsageIo): Argv {
@@ -160,7 +195,15 @@ export function registerScorecardCommands(y: Argv, deps: ScorecardDeps, io: Usag
       const assignments = readAssignmentLog(
         deps.assignmentLogPath ?? resolve(artifactsDir, ASSIGNMENT_LOG_RELATIVE),
       );
+      const dispatchTurns = await dispatchTurnsFor(
+        deps.usageDir,
+        from,
+        { repoId, repoName: repo },
+        artifactsDir,
+        config.dispatchTurnsPerTickBudget,
+      );
       const card = {
+        ...(dispatchTurns ? { dispatchTurns } : {}),
         ...buildScorecard({
           records,
           outcomes,

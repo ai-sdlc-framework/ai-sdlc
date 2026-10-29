@@ -13,6 +13,9 @@
  *  3. Reports: a progress line at the configured cadence, and one summary when
  *     every task of an ingested brief has reached a final state.
  *
+ * 4. Marker and budget: every tick writes a `DispatchTick` marker so the usage ledger can
+ *    count the session's model turns per tick, and the turns-per-tick budget is reviewed.
+ *
  * Messages are not sent from here. The tick returns escalations and reports and
  * the skill sends them, so this module never types into another session.
  *
@@ -61,6 +64,7 @@ import {
 } from './human-attention.js';
 import type { ClearResult } from './clear.js';
 import type { LandReport } from './land-eligible.js';
+import type { DispatchTickMarker } from '../usage/dispatch-turns.js';
 import type { MarkReadyReport } from './mark-ready.js';
 import type { PlaybookOutcome } from './playbook.js';
 import {
@@ -213,6 +217,20 @@ export interface PlannerReport {
   text: string;
 }
 
+/** The turns-per-tick budget check, as the loop reports it. */
+export interface TurnBudgetReview {
+  /** Rolling median of turns per tick over the window, null when no tick has completed. */
+  median: number | null;
+  budget: number;
+  overBudget: boolean;
+  /** Present when this tick filed a Decision. */
+  decisionId?: string;
+  /** Step that used the most turns, when over budget. */
+  costliestStep?: string;
+  /** Why no Decision was filed although over budget (one is already open). */
+  skipped?: string;
+}
+
 /** Everything a tick did. */
 export interface TickResult {
   ingested: { file: string; tasks: string[] }[];
@@ -256,6 +274,10 @@ export interface TickResult {
   closedUnmerged?: number;
   /** Deterministic list of what stops the drain; the dispatch command sends it to the planner when it changes. */
   blockers: string[];
+  /** The marker written for this tick. */
+  tickMarker: DispatchTickMarker;
+  /** Present when a budget review was supplied and did not fail. */
+  turnBudget?: TurnBudgetReview;
 }
 
 /**
@@ -384,6 +406,10 @@ export interface LoopDeps {
   tickedBy?: 'host' | 'scheduler';
   /** Numbers of the open PRs, for pruning consumed webhook events; undefined when GitHub cannot be read. */
   openPrNumbers?: () => ReadonlySet<number> | undefined;
+  /** Records the tick marker; its failure never fails the tick. */
+  recordTick?: (marker: DispatchTickMarker) => void;
+  /** Checks the turns-per-tick budget and files a Decision on an overrun; its failure never fails the tick. */
+  reviewTurnBudget?: () => TurnBudgetReview | Promise<TurnBudgetReview>;
 }
 
 function ingestBriefs(
@@ -693,9 +719,21 @@ function githubReadFresh(deps: LoopDeps, state: LoopState): boolean {
   }
 }
 
+/** Collect the steps of a tick in the order they ran, each with its start time. */
+class StepLog {
+  readonly steps: { name: string; startedAt: string }[] = [];
+  constructor(private readonly now: () => Date) {}
+  start(name: string): void {
+    this.steps.push({ name, startedAt: this.now().toISOString() });
+  }
+}
+
 /** Run one wake-up of the dispatch loop. */
 export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
+  const startedAt = deps.now().toISOString();
+  const log = new StepLog(deps.now);
   const state = readLoopState(deps.boardDir);
+  log.start('ingest');
   const { skipped, ...ingestRest } = ingestBriefs(deps, state);
   const ingest = { ...ingestRest, ...(skipped.length > 0 ? { skipped } : {}) };
   // AISDLC-1023: a canary event sets or lifts the hold before this tick reads it.
@@ -738,6 +776,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   }
   const githubFresh = githubReadFresh(deps, state);
   const readGithub = !quotaSkip && !githubFresh;
+  log.start('verdicts');
   const watch = await watchVerdicts(deps, state, held);
   const ephemeral = await runEphemeralSteps(deps, watch.verdicts, held, quotaSkip, async () => {
     const stalled = await checkStalls(deps, state, held);
@@ -752,6 +791,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   } catch {
     /* an unreadable PR list must not stop the dispatch loop */
   }
+  log.start('reports');
   const reports = [...buildReports(deps, state, watch.verdicts.length, closedUnmerged)];
   if (canary?.held) {
     reports.push({
@@ -818,6 +858,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   } catch {
     /* pruning must not stop the dispatch loop */
   }
+  if (readGithub) log.start('github');
   const markReady =
     readGithub && deps.markReady && deps.operational.has('mark-ready-after-codeql')
       ? deps.markReady()
@@ -835,10 +876,13 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     }
   }
   let promotions: PromotedDecision[] = [];
-  try {
-    promotions = deps.promoteExpired?.() ?? [];
-  } catch {
-    /* an unreadable decision log must not stop the dispatch loop */
+  if (deps.promoteExpired) {
+    log.start('promotions');
+    try {
+      promotions = deps.promoteExpired();
+    } catch {
+      /* an unreadable decision log must not stop the dispatch loop */
+    }
   }
   const eph = ephemeral.report;
   const ephemeralActive =
@@ -850,6 +894,25 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     wake.wakeReason = 'pending';
   }
   const blockers = computeBlockers(deps.boardDir, held, watch.escalations);
+
+  const tickMarker: DispatchTickMarker = {
+    tickId: `${deps.workerId}@${startedAt}`,
+    startedAt,
+    endedAt: deps.now().toISOString(),
+    steps: log.steps,
+    nextWakeSec: wake.nextWakeSec,
+  };
+  try {
+    deps.recordTick?.(tickMarker);
+  } catch {
+    /* a marker is observability; losing one must not stop the loop */
+  }
+  let turnBudget: TurnBudgetReview | undefined;
+  try {
+    turnBudget = await deps.reviewTurnBudget?.();
+  } catch {
+    /* an unreadable ledger must not stop the dispatch loop */
+  }
   return {
     blockers,
     ...(closedUnmerged ? { closedUnmerged: closedUnmerged.total } : {}),
@@ -865,8 +928,10 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     ...(ephemeralActive ? { ephemeral: eph } : {}),
     ...(humanAttention.length > 0 ? { humanAttention } : {}),
     ...wake,
+    tickMarker,
     ...(markReady ? { markReady } : {}),
     ...(landed ? { landed } : {}),
     ...(promotions.length > 0 ? { promotions } : {}),
+    ...(turnBudget ? { turnBudget } : {}),
   };
 }
