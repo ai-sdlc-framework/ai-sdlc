@@ -260,7 +260,13 @@ describe('runStatus', () => {
     const status = runStatus(boardDir, pidFile);
     expect(status.alive).toBe(false);
     expect(status.pid).toBeUndefined();
-    expect(status.board).toEqual({ queued: 0, inflight: 0, done: 0, failed: 0 });
+    expect(status.board).toEqual({
+      queued: 0,
+      inflight: 0,
+      done: 0,
+      failed: 0,
+      oldestQueued: null,
+    });
   });
 
   it('returns alive=true when PID file points to a live process (we use our own)', () => {

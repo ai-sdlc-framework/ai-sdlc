@@ -562,7 +562,25 @@ describe('peekQueue', () => {
       inflight: 0,
       done: 0,
       failed: 0,
+      oldestQueued: null,
     });
+  });
+
+  it('reports the oldest queued manifest and its age from the injected clock (AISDLC-1085)', () => {
+    const boardDir = mkBoard();
+    const mk = (taskId: string, dispatchedAt: string) =>
+      mkManifest(taskId, 'in-session-agent', { dispatchedAt });
+    writeManifest(boardDir, mk('AISDLC-2', '2026-01-01T00:10:00.000Z'));
+    writeManifest(boardDir, mk('AISDLC-1', '2026-01-01T00:00:00.000Z'));
+    const peek = peekQueue(boardDir, () => new Date('2026-01-01T00:05:00.000Z'));
+    expect(peek.queued).toBe(2);
+    expect(peek.oldestQueued).toEqual({
+      taskId: 'AISDLC-1',
+      dispatchedAt: '2026-01-01T00:00:00.000Z',
+      ageSeconds: 300,
+    });
+    const early = peekQueue(boardDir, () => new Date('2025-01-01T00:00:00.000Z'));
+    expect(early.oldestQueued?.ageSeconds).toBe(0);
   });
 
   it('reflects the full lifecycle correctly', () => {
@@ -570,7 +588,7 @@ describe('peekQueue', () => {
     writeManifest(boardDir, mkManifest('AISDLC-9993'));
     writeManifest(boardDir, mkManifest('AISDLC-9994'));
     writeManifest(boardDir, mkManifest('AISDLC-9995'));
-    expect(peekQueue(boardDir)).toEqual({
+    expect(peekQueue(boardDir)).toMatchObject({
       queued: 3,
       inflight: 0,
       done: 0,

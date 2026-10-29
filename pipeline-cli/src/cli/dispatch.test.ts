@@ -137,6 +137,7 @@ describe('runDispatchCli', () => {
       inflight: 0,
       done: 0,
       failed: 0,
+      oldestQueued: null,
     });
   });
 

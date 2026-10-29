@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1085
 title: 'cli-dispatch peek reports the oldest queued task and how long it has waited'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-27'
 labels:

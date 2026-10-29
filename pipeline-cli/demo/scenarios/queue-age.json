@@ -1,0 +1,28 @@
+{
+  "request": "Make cli-dispatch peek report the oldest queued task and how long it has waited.",
+  "task": "AISDLC-1085",
+  "author": "dominique",
+  "decisions": [
+    {
+      "summary": "What does peek print when the queue is empty?",
+      "options": [
+        { "id": "null", "description": "oldestQueued is null" },
+        { "id": "omit", "description": "Leave the field out" }
+      ],
+      "answer": "null",
+      "rationale": "A present-but-null field keeps the JSON shape stable for scripts."
+    },
+    {
+      "summary": "Which clock measures the wait?",
+      "options": [
+        { "id": "injected", "description": "The injected clock, as the rest of the board does" },
+        { "id": "wall", "description": "Date.now() directly" }
+      ],
+      "answer": "injected",
+      "rationale": "An injected clock keeps the age deterministic in tests."
+    }
+  ],
+  "brief": { "tasks": ["AISDLC-1085"] },
+  "timeoutMinutes": 90,
+  "pollSeconds": 10
+}
