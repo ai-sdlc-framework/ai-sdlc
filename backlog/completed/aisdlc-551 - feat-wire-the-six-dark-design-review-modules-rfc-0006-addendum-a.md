@@ -3,7 +3,7 @@ id: AISDLC-551
 title: >-
   feat(design): wire the six implemented-but-unreachable RFC-0006 Addendum A
   modules into the pipeline and package surfaces
-status: In Progress
+status: Done
 assignee: []
 labels:
   - design-system
