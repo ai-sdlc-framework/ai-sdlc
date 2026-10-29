@@ -1,6 +1,6 @@
 /**
  * The execute-task host of the workflow engine (RFC-0056 phase 3), behind
- * `AI_SDLC_WORKFLOW_ENGINE=1`. It supplies what the engine does not own: the step
+ * the default engine path. It supplies what the engine does not own: the step
  * implementations (the same collaborators the Machine in `next-step/next-step.ts` calls),
  * the agent prompts, and the `next-step` reply protocol. With the flag off nothing here
  * runs; the Machine is untouched.
@@ -66,11 +66,26 @@ import {
   type WorkflowRunState,
 } from './engine.js';
 
-/** `1` routes `next-step` through the engine; unset or anything else runs the Machine. */
+/** The engine is the default (AISDLC-1077); `0` is the one-release escape hatch to the Machine. */
 export const WORKFLOW_ENGINE_FLAG = 'AI_SDLC_WORKFLOW_ENGINE';
 
 export function workflowEngineEnabled(env: NodeJS.ProcessEnv): boolean {
-  return env[WORKFLOW_ENGINE_FLAG] === '1';
+  return env[WORKFLOW_ENGINE_FLAG] !== '0';
+}
+
+let deprecationWarned = false;
+
+/** One warning per process when the escape hatch selects the legacy Machine. */
+export function warnMachineDeprecated(
+  env: NodeJS.ProcessEnv,
+  write: (line: string) => void = (l) => console.error(l),
+): void {
+  if (workflowEngineEnabled(env) || deprecationWarned) return;
+  deprecationWarned = true;
+  write(
+    `warning: ${WORKFLOW_ENGINE_FLAG}=0 runs the legacy Machine, which is deprecated and ` +
+      'will be removed after one release; unset it to use the workflow engine (RFC-0056).',
+  );
 }
 
 /** Impl ids the execute host implements: the 14 steps of the default document. */
@@ -704,7 +719,7 @@ async function resumeRun(
       s,
       'aborted',
       `state file ${ctx.statePath} was written by the Machine, not the workflow engine; ` +
-        `unset ${WORKFLOW_ENGINE_FLAG} to finish this run, or start a fresh one (--fresh)`,
+        `set ${WORKFLOW_ENGINE_FLAG}=0 to finish this run, or start a fresh one (--fresh)`,
     );
   }
   host.run = wf;

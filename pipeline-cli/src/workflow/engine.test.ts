@@ -16,6 +16,7 @@ import { WORKFLOW_PATH, workflowDigestFromStateFile } from './digest.js';
 import {
   EXECUTE_IMPLS,
   readLedger,
+  warnMachineDeprecated,
   workflowEngineEnabled,
   workflowNextStep,
 } from './execute-host.js';
@@ -437,10 +438,21 @@ describe('non-gating (shadow) nodes (AC-3)', () => {
 // ── host paths ───────────────────────────────────────────────────────
 
 describe('workflowNextStep host paths', () => {
-  it('is off unless the flag is exactly 1', () => {
+  it('is on by default and off only when the flag is exactly 0', () => {
     expect(workflowEngineEnabled({ AI_SDLC_WORKFLOW_ENGINE: '1' })).toBe(true);
-    expect(workflowEngineEnabled({ AI_SDLC_WORKFLOW_ENGINE: 'true' })).toBe(false);
-    expect(workflowEngineEnabled({})).toBe(false);
+    expect(workflowEngineEnabled({ AI_SDLC_WORKFLOW_ENGINE: 'true' })).toBe(true);
+    expect(workflowEngineEnabled({})).toBe(true);
+    expect(workflowEngineEnabled({ AI_SDLC_WORKFLOW_ENGINE: '0' })).toBe(false);
+  });
+
+  it('warns once per process when the escape hatch selects the Machine', () => {
+    const lines: string[] = [];
+    warnMachineDeprecated({}, (l) => lines.push(l));
+    expect(lines).toHaveLength(0);
+    warnMachineDeprecated({ AI_SDLC_WORKFLOW_ENGINE: '0' }, (l) => lines.push(l));
+    warnMachineDeprecated({ AI_SDLC_WORKFLOW_ENGINE: '0' }, (l) => lines.push(l));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('deprecated');
   });
 
   it('persists one record per node run and exposes the run digest for signing', async () => {

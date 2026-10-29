@@ -1,7 +1,7 @@
 /**
  * Golden replay (RFC-0056 phase 3): the workflow engine and the Machine are driven over the
  * same recorded fixtures with the same collaborators, and must emit the same instruction
- * sequence. This is the gate for flipping `AI_SDLC_WORKFLOW_ENGINE` on by default.
+ * sequence. This gates the Machine escape hatch (`AI_SDLC_WORKFLOW_ENGINE=0`); it runs in `pnpm test`.
  */
 import { mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
