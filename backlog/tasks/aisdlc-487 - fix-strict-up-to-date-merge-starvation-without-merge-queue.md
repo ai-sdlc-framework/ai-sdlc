@@ -15,12 +15,13 @@ labels:
 dependencies: []
 references: []
 priority: low
+dispatchable: false
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Parked (planner, 2026-10-06): do not start without a planner go.
+Retired (DEC-0275, 2026-10-29): folded into AISDLC-1097, which implements the DEC-0273 answer (strict off) with the runbook entry. Not dispatchable. Re-open only if AISDLC-1097 lands without the merge-model runbook.
 
 
 ## Context
