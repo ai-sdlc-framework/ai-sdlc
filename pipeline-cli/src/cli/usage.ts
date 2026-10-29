@@ -136,7 +136,9 @@ export function formatRefreshSummary(r: RefreshResult): string {
     `appended=${r.appended} held=${r.held.length} unchanged=${r.unchanged} ` +
       `incomplete=${r.incomplete.length} rejected=${r.rejected.length}`,
   );
-  for (const h of r.held) lines.push(`held ${h.model}: ${h.reason}`);
+  for (const h of r.held) {
+    lines.push(`held ${h.model}: ${h.reason}${h.comparison ? ` (vs ${h.comparison})` : ''}`);
+  }
   if (!r.anySourceSucceeded)
     lines.push('Every source failed; the last known prices stay in force.');
   return `${lines.join('\n')}\n`;
