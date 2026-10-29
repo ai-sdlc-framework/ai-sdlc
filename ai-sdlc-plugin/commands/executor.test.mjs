@@ -72,7 +72,7 @@ describe('executor command', () => {
 
   it('stops and waits for the clear', () => {
     assert.match(body, /## Step 5 - Stop and wait/);
-    assert.match(body, /clears this context/);
+    assert.match(body, /clears this pane from your verdict file/);
   });
 
   it('states the hand-written hard rules', () => {

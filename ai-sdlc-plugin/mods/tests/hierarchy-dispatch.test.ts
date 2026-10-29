@@ -68,7 +68,6 @@ function setup(tickResult: unknown = EMPTY_TICK) {
             : { exitCode: 0, stdout: JSON.stringify(tickOut) };
         }
         if (sub === 'status') return { exitCode: 0, stdout: JSON.stringify(STATUS) };
-        if (sub === 'rotate-pending') return { exitCode: 0, stdout: '{"pending":false}' };
         if (sub === 'escalation-file')
           return { exitCode: 0, stdout: '{"file":"/b/escalations/x.json"}' };
         return { exitCode: 0, stdout: '[]' };
@@ -335,18 +334,6 @@ describe('dispatch host (AISDLC-1035)', () => {
     expect(sends(s)).toEqual([]);
   });
 
-  it('delivers a rotate request for another session with $.session.send and rotates only itself for its own', async () => {
-    const s = setup(EMPTY_TICK);
-    await s.start();
-    s.$.process.run.mockImplementation(async (a: any) => ({
-      exitCode: 0,
-      stdout: a[2] === 'rotate-pending' ? '{"pending":false,"forward":["executor-alpha"]}' : '{}',
-    }));
-    await s.timer();
-    expect(sends(s)).toEqual([{ to: 'executor-alpha', text: 'rotate' }]);
-    expect(s.$.command.run).not.toHaveBeenCalledWith({ command: 'clear' });
-  });
-
   it('forwards reports and a changed blocker list to the planner once', async () => {
     const s = setup({ ...EMPTY_TICK, blockers: ['b1'], reports: [{ text: 'weekly' }, 'plain'] });
     await s.start();
@@ -358,16 +345,9 @@ describe('dispatch host (AISDLC-1035)', () => {
     expect(texts).toContain('plain');
   });
 
-  it('rotates on a rotate request and at 120k tokens', async () => {
+  it('rotates at 120k tokens', async () => {
     const s = setup();
     await s.start();
-    s.$.process.run.mockImplementation(async (a: any) => ({
-      exitCode: 0,
-      stdout: a[2] === 'rotate-pending' ? '{"pending":true}' : '{}',
-    }));
-    await s.timer();
-    expect(s.$.command.run).toHaveBeenCalledWith({ command: 'clear' });
-    s.$.command.run.mockClear();
     const m = s.handlers.get('session.measure');
     await m(s.$, { contextTokens: 10 }, s.next);
     expect(s.$.command.run).not.toHaveBeenCalled();

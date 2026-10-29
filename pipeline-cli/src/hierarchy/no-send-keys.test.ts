@@ -1,9 +1,10 @@
 /**
  * Ratchet (RFC-0058 phase 4, AISDLC-1037): `tmux send-keys` is confined to the two
  * remaining call sites. The list only shrinks; a new site fails this test.
- *   - tmux.ts `sendExit` (down/restart ask a session to exit)
+ *   - tmux.ts `sendExit` (down/restart ask a session to exit) and `sendLine` (the dispatch-owned
+ *     executor clear, AISDLC-1107)
  *   - brief-notify.ts (`brief --notify` types a line into the dispatch pane)
- * clear.ts, the pane-text idle detection and the detached keystroke script are gone.
+ * clear.ts reaches the pane only through the tmux.ts primitives.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

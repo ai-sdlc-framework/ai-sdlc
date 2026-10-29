@@ -202,8 +202,8 @@ an inflight task, so work in progress is never destroyed.
 
 Other clearing paths:
 
-- `cli-hierarchy clear --self` clears the calling session's own pane and then types its
-  resume command (dispatch, planner, or an idle executor). It needs tmux (`TMUX_PANE`).
+- The dispatch tick clears an executor's pane after its verdict file appears (`cli-hierarchy clear <name>`,
+  AISDLC-1107); the executor does not take part.
 - An idle executor with an empty queue clears itself instead of polling, so an idle
   executor costs one short turn about every 25 minutes.
 - Every session also clears itself automatically when its context passes a threshold

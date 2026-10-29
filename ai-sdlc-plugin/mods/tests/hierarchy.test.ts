@@ -1,11 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ACTIVE_STALE_MS,
-  IDLE_MARKER,
   RESUME_COMMAND,
   ROTATION_TTL_MS,
   ROTATION_KEY,
-  VERDICT_MARKER,
   VERSION_FLOOR,
   atLeast,
   guard,
@@ -247,37 +245,23 @@ describe('hierarchy module: executor wake', () => {
     expect(submits(s)).toEqual([]);
   });
 
-  it('rotates on a rotate message from dispatch: now when idle, at the end of the turn when a task runs', async () => {
+  it('no longer handles a rotate message: it passes through and nothing is cleared (AISDLC-1107)', async () => {
+    const s = setup();
+    await s.start();
+    const msg = { text: env('proj-operator-dispatch', 'rotate') };
+    expect(await s.handlers.get('session.receive')(s.$, msg, s.next)).toBe(msg);
+    expect(ran(s)).toEqual([]);
+  });
+
+  it('an enqueue wake runs the executor command after a turn that ended without a marker (AISDLC-1107)', async () => {
     const s = setup();
     await s.start();
     const recv = s.handlers.get('session.receive');
-    expect(await recv(s.$, { text: env('proj-operator-dispatch', 'rotate') }, s.next)).toEqual({
-      consumed: 'hierarchy:rotate',
-    });
-    expect(ran(s)).toContain('clear');
-    const busy = setup();
-    await busy.start();
-    const r2 = busy.handlers.get('session.receive');
-    await r2(busy.$, { text: env('proj-operator-dispatch', 'enqueue AISDLC-1') }, busy.next);
-    busy.$.command.run.mockClear();
-    await r2(busy.$, { text: env('proj-operator-dispatch', 'rotate') }, busy.next);
-    expect(ran(busy)).not.toContain('clear');
-    await busy.handlers.get('turn.complete')(busy.$, { text: '[executor] idle' }, busy.next);
-    expect(ran(busy)).toContain('clear');
-  });
-
-  it('rotates on a rotate message when the last turn ended with no marker (AISDLC-1099)', async () => {
-    const s = setup();
-    await s.start();
+    await recv(s.$, { text: env('proj-operator-dispatch', 'enqueue 1') }, s.next);
     await s.handlers.get('turn.start')(s.$, {}, s.next);
-    await s.handlers.get('turn.complete')(s.$, { text: 'working on it' }, s.next);
-    s.$.command.run.mockClear();
-    await s.handlers.get('session.receive')(
-      s.$,
-      { text: env('proj-operator-dispatch', 'rotate') },
-      s.next,
-    );
-    expect(ran(s)).toContain('clear');
+    await s.handlers.get('turn.complete')(s.$, { text: 'ready for the next task' }, s.next);
+    await recv(s.$, { text: env('proj-operator-dispatch', 'enqueue 2') }, s.next);
+    expect(ran(s)).toEqual([RESUME_COMMAND, RESUME_COMMAND]);
   });
 
   it('a task with no activity for a while no longer mutes wakes', async () => {
@@ -312,8 +296,8 @@ describe('hierarchy module: executor wake', () => {
 describe('hierarchy module: rotation', () => {
   async function verdict(s: ReturnType<typeof setup>) {
     await s.start();
-    await s.handlers.get('turn.start')(s.$, {}, s.next);
-    await s.handlers.get('turn.complete')(s.$, { text: `done\n${VERDICT_MARKER}` }, s.next);
+    await s.handlers.get('turn.complete')(s.$, { text: 'done' }, s.next);
+    await s.handlers.get('session.measure')(s.$, { tokens: 130_000 }, s.next);
   }
 
   it('writes the handoff, then clears with role, resume command and last reply in the store', async () => {
@@ -323,7 +307,7 @@ describe('hierarchy module: rotation', () => {
     expect(s.kv.get(ROTATION_KEY)).toMatchObject({
       role: 'executor',
       resume: RESUME_COMMAND,
-      lastReply: `done\n${VERDICT_MARKER}`,
+      lastReply: 'done',
     });
     expect(s.kv.get(ROTATION_KEY)).toMatchObject({ resume: RESUME_COMMAND });
   });
@@ -354,28 +338,12 @@ describe('hierarchy module: rotation', () => {
     expect(ran(t)).toEqual([]);
   });
 
-  it('does not rotate on a verdict marker quoted inside a sentence', async () => {
+  it('does not rotate on a reply line that looks like the old verdict marker (AISDLC-1107)', async () => {
     const s = setup();
     await s.start();
     await s.handlers.get('turn.start')(s.$, {}, s.next);
-    await s.handlers.get('turn.complete')(
-      s.$,
-      { text: `I will print "${VERDICT_MARKER}" once the PR is open.` },
-      s.next,
-    );
+    await s.handlers.get('turn.complete')(s.$, { text: '[executor] verdict reported' }, s.next);
     expect(ran(s)).toEqual([]);
-  });
-
-  it('rotates when the marker line is followed by another sentence (AISDLC-1099)', async () => {
-    const s = setup();
-    await s.start();
-    await s.handlers.get('turn.start')(s.$, {}, s.next);
-    await s.handlers.get('turn.complete')(
-      s.$,
-      { text: `${VERDICT_MARKER}\nThe dispatch session will clear this context next.` },
-      s.next,
-    );
-    expect(ran(s)).toEqual(['ai-sdlc:hierarchy', 'clear']);
   });
 
   it('compacts with the hierarchy summary prompt when clear is dropped', async () => {
@@ -402,10 +370,13 @@ describe('hierarchy module: rotation', () => {
     await s.handlers.get('turn.start')(s.$, { agentId: 'sub' }, s.next);
     await s.handlers.get('session.measure')(s.$, { tokens: 130_000 }, s.next);
     expect(ran(s)).toEqual([]);
-    await s.handlers.get('turn.complete')(s.$, { agentId: 'sub', text: VERDICT_MARKER }, s.next);
+    await s.handlers.get('turn.complete')(s.$, { agentId: 'sub', text: 'sub done' }, s.next);
     await s.handlers.get('turn.complete')(s.$, { text: 'still working' }, s.next);
     expect(ran(s)).toEqual([]);
-    await s.handlers.get('turn.complete')(s.$, { text: `x\n${VERDICT_MARKER}` }, s.next);
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + ACTIVE_STALE_MS + 1000);
+    await s.handlers.get('session.measure')(s.$, { tokens: 130_000 }, s.next);
+    vi.useRealTimers();
     expect(ran(s)).toContain('clear');
   });
 
@@ -445,12 +416,10 @@ describe('hierarchy module: rotation', () => {
     expect(logOf(s.kv).filter((l) => l.includes('not recognised'))).toHaveLength(1);
   });
 
-  it('rotates after an idle marker when a measure was pending, and logs a refused handoff', async () => {
+  it('logs a refused handoff and still rotates', async () => {
     const s = setup({ drop: ['ai-sdlc:hierarchy'] });
     await s.start();
-    await s.handlers.get('turn.start')(s.$, {}, s.next);
     await s.handlers.get('session.measure')(s.$, { tokens: 200_000 }, s.next);
-    await s.handlers.get('turn.complete')(s.$, { reply: IDLE_MARKER }, s.next);
     expect(ran(s)).toContain('clear');
     expect(logOf(s.kv).some((l) => l.includes('handoff write was refused'))).toBe(true);
   });

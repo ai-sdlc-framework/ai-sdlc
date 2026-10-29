@@ -170,6 +170,35 @@ export function ownershipRefusal(run: CommandRunner, entry: RosterEntry): string
 
 /** Last lines of a window's visible output; empty when it cannot be read (AISDLC-948). */
 export function paneTail(run: CommandRunner, session: string, window: string): string {
-  const r = run('tmux', ['capture-pane', '-p', '-t', `${session}:${window}`, '-S', '-30']);
+  return paneScreenAt(run, `${session}:${window}`);
+}
+
+/** The last lines of the pane named by a tmux target (a pane id from `resolveSendTarget`, or a window). */
+export function paneScreenAt(run: CommandRunner, target: string): string {
+  const r = run('tmux', ['capture-pane', '-p', '-t', target, '-S', '-30']);
   return r.status === 0 ? r.stdout : '';
+}
+
+/**
+ * True when a captured pane tail shows an idle input prompt: a prompt line is visible and no
+ * "esc to interrupt" status says a turn is running.
+ */
+export function paneShowsPrompt(tail: string): boolean {
+  const lines = tail
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l !== '');
+  if (lines.some((l) => /esc to interrupt/i.test(l))) return false;
+  return lines.slice(-8).some((l) => /^[│|]?\s*[❯>](\s|$)/u.test(l));
+}
+
+/** Type a line into a pane and press Enter; false when either key send fails. */
+export function sendLine(run: CommandRunner, target: string, text: string): boolean {
+  const typed = run('tmux', ['send-keys', '-t', target, '-l', '--', text]);
+  return typed.status === 0 && run('tmux', ['send-keys', '-t', target, 'Enter']).status === 0;
+}
+
+/** True when the window's pane shows an idle input prompt right now. */
+export function paneIsIdle(run: CommandRunner, session: string, window: string): boolean {
+  return paneShowsPrompt(paneTail(run, session, window));
 }

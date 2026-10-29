@@ -285,7 +285,7 @@ describe('executorStart', () => {
   });
 });
 
-describe('cli-hierarchy executor-start and clear --self (executor)', () => {
+describe('cli-hierarchy executor-start (executor)', () => {
   async function run(argv: string[], extras: Parameters<typeof runHierarchyCli>[2]) {
     const out: string[] = [];
     const err: string[] = [];
@@ -351,23 +351,6 @@ describe('cli-hierarchy executor-start and clear --self (executor)', () => {
     const ok = await run(['executor-start', '--sender-pid', '1', '--sender-ref', 'x'], extras);
     expect(ok.code).toBe(0);
     expect(JSON.parse(ok.out[ok.out.length - 1]!)).toMatchObject({ taskId: 'AISDLC-4' });
-  });
-
-  it("clear --self asks for the calling session's own rotation without waiting, and a caller outside the roster is refused", async () => {
-    const e = await run(['clear', '--self'], {
-      identity: identityFor('executor', 'proj-executor-alpha'),
-    });
-    expect(e.code).toBe(0);
-    expect(JSON.parse(e.out.at(-1)!)).toMatchObject({
-      executor: 'proj-executor-alpha',
-      ok: true,
-      acknowledged: false,
-    });
-    const nobody = await run(['clear', '--self'], {
-      identity: { ...identityFor('executor', 'proj-executor-alpha'), startPid: 1 },
-    });
-    expect(nobody.code).toBe(1);
-    expect(nobody.err).toMatch(/not a running session in the roster/);
   });
 });
 

@@ -448,7 +448,7 @@ describe('clear, tick and route-decision', () => {
     expect(calls).toEqual([]);
   });
 
-  it('clear sends a rotate request, types nothing, and reports the acknowledgement (RFC-0058 phase 4)', async () => {
+  it('clear drives the pane directly and reports success with no handshake (AISDLC-1107)', async () => {
     const board = path.join(tmp, 'dispatch');
     writeRoster(board, {
       schemaVersion: 'v1',
@@ -458,26 +458,31 @@ describe('clear, tick and route-decision', () => {
       ],
     });
     const events: { type: string }[] = [];
-    const request = path.join(board, 'handoff', 'rotate-request-executor-alpha.json');
-    // The dispatch host consumes the request while the command waits.
-    const sleep = async () => rmSync(request, { force: true });
+    const keys: string[] = [];
+    const run: CommandRunner = (_f, args) => {
+      if (args[0] === 'display-message') return { status: 0, stdout: '%3\n', stderr: '' };
+      if (args[0] === 'capture-pane')
+        return { status: 0, stdout: keys.length ? '│ > │\nfresh\n' : '│ > │\n', stderr: '' };
+      if (args[0] === 'send-keys') keys.push(args.at(-1)!);
+      return { status: 0, stdout: '', stderr: '' };
+    };
     expect(
       await runHierarchyCli(
         ['clear', 'executor-alpha', '--settle-ms', '500'],
-        overrides({ sleep, emit: (e) => events.push(e) }),
+        overrides({ run, emit: (e) => events.push(e) }),
         dispatchCaller,
       ),
     ).toBe(0);
-    expect(calls).toEqual([]);
+    expect(keys).toEqual(['/clear', 'Enter', '/ai-sdlc:executor', 'Enter']);
     expect(events.map((e) => e.type)).toEqual(['ExecutorContextCleared']);
     expect(JSON.parse(logs.at(-1) as string)).toMatchObject({
       executor: 'executor-alpha',
       ok: true,
-      acknowledged: true,
+      via: 'clear',
     });
   });
 
-  it('clear exits 1 with the named refusal when nothing consumes the request', async () => {
+  it('clear exits 1 with the named refusal when the recorded pane cannot be confirmed', async () => {
     writeRoster(path.join(tmp, 'dispatch'), {
       schemaVersion: 'v1',
       sessions: [
@@ -485,6 +490,7 @@ describe('clear, tick and route-decision', () => {
         entry('executor', 'executor-alpha'),
       ],
     });
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
     expect(
       await runHierarchyCli(
         ['clear', 'executor-alpha', '--settle-ms', '500'],
@@ -492,8 +498,8 @@ describe('clear, tick and route-decision', () => {
         dispatchCaller,
       ),
     ).toBe(1);
-    expect(JSON.parse(logs.at(-1) as string).reason).toMatch(/no module loaded/);
-    expect(calls).toEqual([]);
+    expect(String(err.mock.calls.at(-1)?.[0])).toMatch(/does not belong to window/);
+    expect(calls.some((c) => c[0] === 'send-keys')).toBe(false);
   });
 
   /** Every file under the board, so a refused command can be shown to have written nothing. */
@@ -722,29 +728,8 @@ describe('clear, tick and route-decision', () => {
       expect(out.handoff).toContain('Queue, eligible: (none)');
     });
 
-    it('clear --self from the dispatch session types nothing and writes a rotate request (AISDLC-1035)', async () => {
+    it('escalation-file validates its flags', async () => {
       seedBoardWithBrief();
-      const code = await runHierarchyCli(
-        ['clear', '--self', '--worker', 'operator-dispatch'],
-        overrides({ env: {} }),
-        { identity: asCaller('operator-dispatch') },
-      );
-      expect(code).toBe(0);
-      expect(calls).toEqual([]);
-      const out = JSON.parse(logs.at(-1) as string);
-      expect(out).toMatchObject({ executor: 'operator-dispatch', ok: true });
-      expect(existsSync(out.file)).toBe(true);
-    });
-
-    it('rotate-pending consumes the request once, and escalation-file validates its flags', async () => {
-      seedBoardWithBrief();
-      await runHierarchyCli(['clear', '--self'], overrides({ env: {} }), {
-        identity: asCaller('operator-dispatch'),
-      });
-      expect(await runHierarchyCli(['rotate-pending'], overrides())).toBe(0);
-      expect(JSON.parse(logs.at(-1) as string)).toEqual({ pending: true, forward: [] });
-      await runHierarchyCli(['rotate-pending'], overrides());
-      expect(JSON.parse(logs.at(-1) as string)).toEqual({ pending: false, forward: [] });
       const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
       expect(await runHierarchyCli(['escalation-file'], overrides())).toBe(2);
       expect(

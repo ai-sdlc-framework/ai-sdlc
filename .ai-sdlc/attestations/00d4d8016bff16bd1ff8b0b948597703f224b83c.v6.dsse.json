@@ -1,0 +1,80 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "e6e1dae7bb3a5e739611ee01d0490f4e80e3d08a"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "ff0673c8037ccffc1b8d1b732e7ddc2a28fc0aa021aa1c8ca1a9e6290b3b7c01",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "ff0673c8037ccffc1b8d1b732e7ddc2a28fc0aa021aa1c8ca1a9e6290b3b7c01",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "798715c5b1a56d5900f5d9d4841718901c3fdb1e42c23551da7f92050b6db7f4",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "263a2b917d74295daa32f8b7168d4d81be7591501354e658879f63a5d22deaba",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "263a2b917d74295daa32f8b7168d4d81be7591501354e658879f63a5d22deaba",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "614c4984f0ea620248edaa972aa8e85da3bd78027aba8b861c638c674b35512f",
+        "4665191fed2c9c5b9a2162fb8b4a20c11eec76f2642dbc293ebdf79b4e639ead"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "acc2802d7829e820458b7f7bef7a5fba86803b6534f0ac1db60e267b966a5306",
+        "4665191fed2c9c5b9a2162fb8b4a20c11eec76f2642dbc293ebdf79b4e639ead"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "d34c528288f0797877cdd74c4ce7e72283a2c84564fc9c2e49acc15931e32a54",
+        "a57df87b2d1e775ccd58ac8a519e7a721411f03b27b6b41469201bc1dc9d990f"
+      ]
+    }
+  ],
+  "rootHash": "6a6c00fd790ae88816908189d36ee6911ca2e253273b3750388adaaf7ae9f50a",
+  "rootSignature": "sQqV5hndj4nx91bpnE0bEPxDEh735kkjJtqbQoCDlR+DrrkqbaPJ+st345uv0KTbaprRQ0riNpQXW9VaIUWuBA==",
+  "nonce": "49c857f328ad982d2500ffadcda2022a2f77986a0aedbeb77dd66e98bfb1faed",
+  "leafCount": 3,
+  "signedAt": "2026-10-29T05:36:23.585Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      "ai-sdlc-plugin/commands/executor.md",
+      "ai-sdlc-plugin/commands/executor.test.mjs",
+      "ai-sdlc-plugin/commands/operator-dispatch.md",
+      "ai-sdlc-plugin/commands/operator-dispatch.test.mjs",
+      "ai-sdlc-plugin/hooks/hierarchy/dispatch.ts",
+      "ai-sdlc-plugin/hooks/hierarchy/executor.ts",
+      "ai-sdlc-plugin/hooks/hierarchy/register.tsx",
+      "ai-sdlc-plugin/mods/tests/hierarchy-dispatch.test.ts",
+      "ai-sdlc-plugin/mods/tests/hierarchy.test.ts"
+    ],
+    "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
+  }
+}

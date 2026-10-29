@@ -38,7 +38,7 @@ describe('operator-dispatch command (model-less host)', () => {
     assert.match(body, /forwarded to the planner's roster name with `\$\.session\.send`/);
     assert.match(body, /escalation file under `<board>\/escalations\/`/);
     assert.match(body, /failure record, log tail, PR check summary/);
-    assert.match(body, /rotate request/);
+    assert.match(body, /clears an executor.s pane from its verdict file/);
     assert.match(body, /never submits a prompt to your model/);
   });
 

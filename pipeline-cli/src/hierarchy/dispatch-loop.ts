@@ -69,7 +69,6 @@ import {
   type ListedClosedPr,
 } from '../kpi/closed-unmerged.js';
 import { summariseLanding, takeSuppressedNote } from './reconcile.js';
-import { rotateRequestPath } from './rotate-request.js';
 import { readRosterChecked } from './roster.js';
 import type { ParentUpkeepResult } from '../steps/00-parent-upkeep.js';
 import { formatStall, reapStalledClaims, type StallDeps, type StalledReport } from './stall.js';
@@ -104,8 +103,6 @@ export interface LoopState {
   lastReportAt?: string;
   /** When the tick last read GitHub (AISDLC-960). */
   lastGithubReadAt?: string;
-  /** Executors whose rotate request this loop wrote; the next tick reports whether each was consumed (AISDLC-1099). */
-  pendingClears?: string[];
   /** Whether the board was held at the last tick; a held-to-free change is `holdLifted` (AISDLC-1089). */
   wasHeld?: boolean;
   /** When a tick last ran, and who ran it (AISDLC-1096). */
@@ -159,7 +156,6 @@ export function readLoopState(boardDir: string): LoopState {
       handled: Array.isArray(parsed.handled) ? parsed.handled : [],
       ...(parsed.lastReportAt ? { lastReportAt: parsed.lastReportAt } : {}),
       ...(parsed.lastGithubReadAt ? { lastGithubReadAt: parsed.lastGithubReadAt } : {}),
-      ...(Array.isArray(parsed.pendingClears) ? { pendingClears: parsed.pendingClears } : {}),
       ...(parsed.wasHeld ? { wasHeld: true } : {}),
       ...(parsed.lastTickAt ? { lastTickAt: parsed.lastTickAt } : {}),
       ...(parsed.lastTickBy ? { lastTickBy: parsed.lastTickBy } : {}),
@@ -192,7 +188,7 @@ export function briefToEnqueueEntries(brief: ParsedBrief): EnqueueEntry[] {
 
 /** What a clear attempt did for one verdict. */
 export interface ClearReport {
-  status: 'cleared' | 'requested' | 'failed' | 'refused' | 'not-permitted' | 'skipped';
+  status: 'cleared' | 'failed' | 'refused' | 'not-permitted' | 'skipped';
   executor?: string;
   reason?: string;
 }
@@ -523,19 +519,11 @@ async function clearOnce(
   try {
     // The task id goes on the clear event only when it is well formed.
     const taskId = TASK_ID_RE.test(verdict.taskId) ? verdict.taskId : undefined;
-    // The request is consumed by the NEXT dispatch tick, so this tick cannot wait for it (AISDLC-1099).
+    // The pane is driven here, on the tick that consumes the verdict (AISDLC-1107).
     const r = await deps.clear({ executor, ...(taskId ? { taskId } : {}) });
-    if (r.ok && !r.acknowledged) {
-      state.pendingClears = [...new Set([...(state.pendingClears ?? []), executor])];
-      return { status: 'requested', executor };
-    }
     return r.ok
       ? { status: 'cleared', executor }
-      : {
-          status: 'failed',
-          executor,
-          reason: r.reason ?? 'rotate request not acknowledged',
-        };
+      : { status: 'failed', executor, reason: r.reason ?? 'the pane did not reach a fresh prompt' };
   } catch (err) {
     return {
       status: 'refused',
@@ -724,16 +712,6 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
       /* an unreadable event must not stop the dispatch loop */
     }
   }
-  const clearAcks: PlannerReport[] = [];
-  for (const name of state.pendingClears ?? []) {
-    clearAcks.push({
-      kind: 'progress',
-      text: existsSync(rotateRequestPath(deps.boardDir, name))
-        ? `clear of ${name} not acknowledged: its rotate request is still pending`
-        : `clear of ${name} acknowledged: the rotate request was consumed`,
-    });
-  }
-  if (clearAcks.length > 0) delete state.pendingClears;
   const held = readHold(deps.boardDir);
   const holdLifted = state.wasHeld === true && !held;
   if (held) state.wasHeld = true;
@@ -774,10 +752,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   } catch {
     /* an unreadable PR list must not stop the dispatch loop */
   }
-  const reports = [
-    ...clearAcks,
-    ...buildReports(deps, state, watch.verdicts.length, closedUnmerged),
-  ];
+  const reports = [...buildReports(deps, state, watch.verdicts.length, closedUnmerged)];
   if (canary?.held) {
     reports.push({
       kind: 'progress',

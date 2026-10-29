@@ -139,4 +139,4 @@ Send `$DISPATCH_NAME` **one** status line with `SendMessage`, and nothing else:
 ## Step 5 - Stop and wait
 
 After the verdict run `handoff write --role executor --name "$MY_NAME" --board-dir "$BOARD_DIR"` via `cli-hierarchy.mjs`, then
-end your reply with the line `[executor] verdict reported` and stop: one task per context, no second claim, no wake-up. The hierarchy hooks module clears this context after that reply and re-issues `/ai-sdlc:executor` (rotation at 120k tokens, never mid-task); without the module dispatch clears it.
+end your reply with the line `[executor] verdict reported` and stop: one task per context, no second claim, no wake-up. The dispatch tick clears this pane from your verdict file (`/clear`, then `/ai-sdlc:executor`), falling back to a restart; you take no part and the line is for humans only (rotation at 120k tokens mid-task stays with the hooks module).
