@@ -18,6 +18,7 @@ import { schedulerDown, schedulerStatus } from './reconcile-scheduler.js';
 
 import {
   ensureBoardDirs,
+  readHeartbeat,
   releaseInflight,
   writeHeartbeat,
   writeManifest,
@@ -64,6 +65,7 @@ import {
   type UpOptions,
   unsafeEntryReason,
 } from './index.js';
+import { executorStart } from './executor-start.js';
 import { isNodeInstalled, paneNodeVersion, readNvmrc } from './node-pin.js';
 
 const NOW = new Date('2026-09-30T12:00:00.000Z');
@@ -1242,6 +1244,44 @@ describe('hierarchy down', () => {
     const r2 = await hierarchyDown({}, deps);
     expect(r2.stopped.map((s) => s.name)).toEqual([Q('planner'), Q('operator-dispatch')]);
     expect(readRoster(boardDir).sessions).toEqual([]);
+  });
+
+  it('executor-start heartbeat worker id equals the session name, so status shows and down requeues its task (AISDLC-664.2)', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
+    ensureBoardDirs(boardDir);
+    writeManifest(boardDir, manifest('AISDLC-700'));
+    const alpha = readRoster(boardDir).sessions.find((s) => s.name === Q('executor-alpha'));
+    if (!alpha) throw new Error('executor-alpha missing from the roster');
+
+    // The board lives at <repo>/<x>/dispatch, so the repository root is two levels up.
+    const repoRoot = path.dirname(path.dirname(boardDir));
+    const started = await executorStart(
+      { boardDir, cwd: repoRoot },
+      {
+        identity: {
+          readSessions: () => [
+            { name: alpha.name, role: 'executor', pid: alpha.pid, status: 'running' },
+          ],
+          parentPid: () => null,
+          comm: () => 'claude',
+          startPid: alpha.pid,
+        },
+        repoGit: () => path.join(repoRoot, '.git'),
+      },
+    );
+    expect(started.taskId).toBe('AISDLC-700');
+    // AC1: the heartbeat worker id is the session name.
+    expect(readHeartbeat(boardDir, 'AISDLC-700')?.workerId).toBe(alpha.name);
+
+    // AC2: status joins the inflight task to the executor ...
+    const row = hierarchyStatus(deps).rows.find((r) => r.entry.name === alpha.name);
+    expect(row?.inflightTask).toBe('AISDLC-700');
+
+    // ... and down returns its manifest to the queue.
+    const r = await hierarchyDown({ role: 'executor-alpha' }, deps);
+    expect(r.stopped[0]?.requeued).toBe('AISDLC-700');
+    expect(existsSync(path.join(boardDir, 'queue', 'AISDLC-700.dispatch.json'))).toBe(true);
+    expect(existsSync(path.join(boardDir, 'inflight', 'AISDLC-700.dispatch.json'))).toBe(false);
   });
 
   it('rejects an unknown role', async () => {
