@@ -171,6 +171,29 @@ export async function preSignRebase(
   // (AISDLC-951).
   // Empty root keeps the ledger path worktree-relative; the writer owns the
   // (lowercase) spelling, so it is never rebuilt by hand (AISDLC-1017).
+  // AISDLC-1098: a re-sign removes the stale envelope for the previous content
+  // hash, leaving a tracked file deleted-unstaged that makes git refuse the
+  // rebase. Stage exactly those deletions; any other unstaged change still refuses.
+  const deleted = await ctx.runner(
+    'git',
+    ['ls-files', '--deleted', '--', '.ai-sdlc/attestations/'],
+    { cwd: wt, allowFailure: true },
+  );
+  const staleEnvelopes = deleted.stdout
+    .split('\n')
+    .map((f) => f.trim())
+    .filter((f) => f !== '');
+  if (deleted.code === 0 && staleEnvelopes.length > 0) {
+    await ctx.runner('git', ['rm', '--cached', '-q', '--', ...staleEnvelopes], {
+      cwd: wt,
+      allowFailure: true,
+    });
+    await ctx.runner(
+      'git',
+      ['commit', '-m', `chore: drop stale attestation envelope (${state.taskId})`],
+      { cwd: wt, allowFailure: true, timeout: 300_000 },
+    );
+  }
   const owned = ['.ai-sdlc/transcript-leaves/', reviewsLedgerPath(state.taskId, '')];
   const pending = await ctx.runner('git', ['status', '--porcelain', '--', ...owned], {
     cwd: wt,
@@ -486,6 +509,24 @@ async function shipInner(
     pushRc = push.code;
     pushErr = (push.stderr || push.stdout).trim();
     if (pushRc === 0) break;
+    if (/non-fast-forward|rejected/i.test(pushErr)) {
+      // AISDLC-1098: step 10.5 rebased a branch whose developer pass had already
+      // force-pushed, so local and remote diverge. Push what we rebased with one
+      // lease push, after refreshing the lease from the remote tip.
+      await runner('git', ['fetch', 'origin', state.branch], {
+        cwd: wt,
+        allowFailure: true,
+        timeout: 30_000,
+      });
+      const lease = await runner(
+        'git',
+        ['push', '--force-with-lease', '-u', 'origin', `HEAD:refs/heads/${state.branch}`],
+        { cwd: wt, allowFailure: true, timeout: PUSH_TIMEOUT_MS, env: pushEnv },
+      );
+      pushRc = lease.code;
+      pushErr = (lease.stderr || lease.stdout).trim();
+      if (pushRc === 0) break;
+    }
   }
   if (pushRc !== 0) {
     const nonFf = /non-fast-forward|rejected/i.test(pushErr);

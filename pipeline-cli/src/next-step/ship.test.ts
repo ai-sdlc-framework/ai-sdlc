@@ -142,6 +142,23 @@ describe('preSignRebase (AISDLC-102)', () => {
     expect(indexOfCall(/git rebase/)).toBe(-1);
   });
 
+  it('stages a deleted-unstaged attestation envelope before the rebase (AISDLC-1098)', async () => {
+    hashes('A', 'A');
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    h.runner.on(/ls-files --deleted/, ok('.ai-sdlc/attestations/old.v6.dsse.json\n'));
+    await preSignRebase(h.ctx, state);
+    const rmAt = indexOfCall(/git rm --cached -q -- \.ai-sdlc\/attestations\/old\.v6\.dsse\.json/);
+    expect(rmAt).toBeGreaterThanOrEqual(0);
+    expect(rmAt).toBeLessThan(indexOfCall(/git rebase origin\/main/));
+  });
+
+  it('does not touch the index when no envelope is deleted (AISDLC-1098)', async () => {
+    hashes('A', 'A');
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    await preSignRebase(h.ctx, state);
+    expect(indexOfCall(/git rm --cached/)).toBe(-1);
+  });
+
   it('bounds the fetch with a 30s timeout', async () => {
     hashes('A');
     await preSignRebase(h.ctx, state);
@@ -804,7 +821,19 @@ describe('shipTask: failures stop before anything irreversible', () => {
     const res = await shipTask(h.ctx, state);
     expect(res.action === 'stop' && res.reason).toMatch(/non-fast-forward[\s\S]*destructive/);
     expect(res.action === 'stop' && res.cause).toBe('push-non-fast-forward');
-    expect(cmds().some((c) => /push --force|push -f|branch -[dD]/.test(c))).toBe(false);
+    expect(cmds().some((c) => /push -f|push --force(?!-with-lease)|branch -[dD]/.test(c))).toBe(
+      false,
+    );
+  });
+
+  it('lands a rebased head with one lease push after a non-fast-forward (AISDLC-1098)', async () => {
+    giveKey();
+    h.runner.on(/^git push --force-with-lease/, ok(''));
+    h.runner.on(/^git push -u/, fail('! [rejected] non-fast-forward', 1));
+    scriptShip();
+    const res = await shipTask(h.ctx, state);
+    expect(res.action === 'stop' && res.cause).not.toBe('push-non-fast-forward');
+    expect(cmds().filter((c) => c.startsWith('git push --force-with-lease'))).toHaveLength(1);
   });
 
   it('stops when the PR cannot be created', async () => {

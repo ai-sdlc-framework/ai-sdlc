@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1098
 title: 'resume: the pre-sign rebase step stages the attestation file it removes, and the dirty-worktree check ignores unstaged deletions under .ai-sdlc/attestations, so a fix round no longer dies on its own re-sign'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-28'
 labels:
