@@ -2,7 +2,7 @@
 id: AISDLC-655.2
 title: >-
   RFC-0050: document the reviewer replay sandbox and the spend confirmation flag
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
