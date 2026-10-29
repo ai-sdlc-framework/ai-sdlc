@@ -13,7 +13,8 @@ export function knowledgeLogPath(trackedRootAbs: string): string {
   return join(dirname(trackedRootAbs), KNOWLEDGE_LOG_FILE);
 }
 
-export type KnowledgeEventKind = 'promoted' | 'superseded' | 'refuted' | 'reobserved';
+export type KnowledgeEventKind =
+  'promoted' | 'superseded' | 'refuted' | 'reobserved' | 'confirmed' | 'corrected';
 
 export interface KnowledgeEvent {
   ts: string;

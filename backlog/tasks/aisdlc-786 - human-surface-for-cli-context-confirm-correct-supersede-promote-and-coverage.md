@@ -2,7 +2,7 @@
 id: AISDLC-786
 title: >-
   human surface for cli-context: confirm, correct, supersede, promote and coverage
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-09'
 labels:

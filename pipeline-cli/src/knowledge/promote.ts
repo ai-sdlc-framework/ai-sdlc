@@ -158,7 +158,7 @@ export function verifyProof(proof: string, c: VerifyContext): Verdict {
   return VERIFIERS[kind](value, c);
 }
 
-function findEntryFile(dir: string, id: string): string | null {
+export function findEntryFile(dir: string, id: string): string | null {
   if (!existsSync(dir)) return null;
   for (const d of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, d.name);
@@ -173,7 +173,7 @@ function findEntryFile(dir: string, id: string): string | null {
   return null;
 }
 
-function rewrite(
+export function rewrite(
   file: string,
   edit: (f: Record<string, unknown>) => void,
 ): Record<string, unknown> {
