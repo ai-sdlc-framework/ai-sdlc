@@ -5,10 +5,11 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
+import { reconcileLogPath } from './pr-rows.js';
 import type { HierarchyDeps } from './types.js';
 
 const STATE_FILE = 'reconcile-scheduler.json';
@@ -17,11 +18,25 @@ const STATE_FILE = 'reconcile-scheduler.json';
 export type SchedulerStatus = { state: 'up'; pid: number } | { state: 'off' };
 
 /** Starts a detached process and returns its pid (undefined when it has none). */
-export type PidSpawner = (file: string, args: readonly string[]) => number | undefined;
+export type PidSpawner = (
+  file: string,
+  args: readonly string[],
+  logFile?: string,
+) => number | undefined;
 
-const spawnDetached: PidSpawner = (file, args) => {
-  const child = spawn(file, [...args], { detached: true, stdio: 'ignore' });
+/** AISDLC-1095: stdout and stderr go to `logFile` so the scheduler leaves a record. */
+const spawnDetached: PidSpawner = (file, args, logFile) => {
+  let fd: number | undefined;
+  if (logFile !== undefined) {
+    mkdirSync(path.dirname(logFile), { recursive: true });
+    fd = openSync(logFile, 'a');
+  }
+  const child = spawn(file, [...args], {
+    detached: true,
+    stdio: fd === undefined ? 'ignore' : ['ignore', fd, fd],
+  });
   child.unref();
+  if (fd !== undefined) closeSync(fd);
   return child.pid;
 };
 
@@ -69,13 +84,17 @@ export function schedulerUp(
     return before;
   }
   const hierarchyBin = deps.binPath ?? process.argv[1] ?? '';
-  const pid = spawner(process.execPath, [
-    path.join(path.dirname(hierarchyBin), 'cli-dispatch.mjs'),
-    'reconcile',
-    '--watch',
-    '--board-dir',
-    deps.boardDir,
-  ]);
+  const pid = spawner(
+    process.execPath,
+    [
+      path.join(path.dirname(hierarchyBin), 'cli-dispatch.mjs'),
+      'reconcile',
+      '--watch',
+      '--board-dir',
+      deps.boardDir,
+    ],
+    reconcileLogPath(deps.boardDir),
+  );
   if (pid === undefined) throw new Error('could not start the reconcile scheduler');
   mkdirSync(deps.boardDir, { recursive: true });
   writeFileSync(stateFile(deps.boardDir), JSON.stringify({ pid }) + '\n');

@@ -211,6 +211,7 @@ import {
   type ReconcilePr,
 } from '../hierarchy/reconcile.js';
 import { gatherPrFacts } from '../hierarchy/pr-facts.js';
+import { annotateSnapshot, appendReconcileLog, rowsForOpen } from '../hierarchy/pr-rows.js';
 import { createSnapshotRunner } from '../hierarchy/pr-snapshot.js';
 import { reenter } from '../hierarchy/reenter.js';
 import { decideResumeReview } from '../next-step/resume-decision.js';
@@ -511,6 +512,19 @@ export async function runDispatchCli(
         return 2;
       }
       const { maxSameHeadActions, reconcile: timers } = loadPrLifecycleConfig(cwd);
+      // AISDLC-1095: one log row per open PR, and the same fields on the snapshot.
+      const logRows = (facts: readonly ReconcilePr[]): void => {
+        try {
+          const rows = rowsForOpen(
+            boardDir,
+            facts.filter((f) => f.merged !== true).map((f) => f.prNumber),
+          );
+          appendReconcileLog(boardDir, rows, clockNow());
+          annotateSnapshot(boardDir, rows);
+        } catch {
+          /* observability must never stop the scheduler */
+        }
+      };
       const pass = (): ReconcilePr[] | undefined => {
         let facts: ReconcilePr[] | undefined;
         if (flags['facts']) {
@@ -565,6 +579,7 @@ export async function runDispatchCli(
                 closeSuperseded,
               }),
             );
+            logRows(facts);
             return listLanding(boardDir).filter((r) => !r.landed).length;
           },
         });
@@ -584,6 +599,7 @@ export async function runDispatchCli(
           closeSuperseded,
         }),
       );
+      logRows(facts);
       return 0;
     }
 
