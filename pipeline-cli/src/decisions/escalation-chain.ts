@@ -37,7 +37,7 @@ import {
 } from './decision-record.js';
 import { loadDecisionsConfig, type DecisionsConfig } from './decisions-config.js';
 import { appendDecisionEvent, makeRoutingChangedEvent } from './event-log.js';
-import { listDecisions, projectDecision } from './projection.js';
+import { listDecisions } from './projection.js';
 
 /** Default minutes an escalated decision may wait at a tier. */
 export const DEFAULT_ESCALATION_TIMEBOX_MINUTES = { operational: 30, design: 240 } as const;
@@ -400,14 +400,7 @@ export function promoteExpiredDecisions(
         }),
         { workDir: opts.workDir },
       );
-      // Announce only what the event log now says: the decision must still be open
-      // at the tier it just moved to. An answered decision is never announced.
-      const current = projectDecision(row.decisionId, { workDir: opts.workDir });
-      if (current?.status.lifecycle === 'open' && current.status.escalationTier === d.toTier) {
-        row.notified = announcePromotion(chain, d);
-      } else {
-        row.notified = { sent: false, reason: 'the decision is no longer open at that tier' };
-      }
+      row.notified = announcePromotion(chain, d);
     }
     promoted.push(row);
   }

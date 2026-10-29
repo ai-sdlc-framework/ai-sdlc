@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -60,6 +60,26 @@ describe('promoteExpiredDecisions notices', () => {
     const sent: string[] = [];
     const out = promoteExpiredDecisions(chain(sent), { workDir: dir, now: LATER });
     expect(out).toEqual([]);
+    expect(sent).toEqual([]);
+  });
+
+  it('sends no notice when the answer sits in the legacy log and the opening in events/', () => {
+    // Regression for AISDLC-1109: the reader returns events.jsonl first, so this answer folded
+    // before its decision existed, was dropped, and the decision stayed open and was re-announced.
+    open('operational');
+    mkdirSync(join(dir, '.ai-sdlc', '_decisions'), { recursive: true });
+    appendFileSync(
+      join(dir, '.ai-sdlc', '_decisions', 'events.jsonl'),
+      JSON.stringify(
+        makeOperatorAnsweredEvent({
+          decisionId: 'DEC-0003',
+          chosenOptionId: 'exempt',
+          now: new Date('2026-10-07T01:00:00.000Z'),
+        }),
+      ) + '\n',
+    );
+    const sent: string[] = [];
+    expect(promoteExpiredDecisions(chain(sent), { workDir: dir, now: LATER })).toEqual([]);
     expect(sent).toEqual([]);
   });
 

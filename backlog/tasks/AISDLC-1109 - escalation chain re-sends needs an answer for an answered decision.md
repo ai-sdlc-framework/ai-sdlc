@@ -42,4 +42,4 @@ Evidence: planner session transcript 2026-10-29 06:50Z, 07:03Z, 07:12Z, 07:20Z, 
 
 ## Verification
 
-Test command: `pnpm test`. Summary: pipeline-cli 14 failed | 12306 passed (all 14 in executor-start.test.ts, caused by AI_SDLC_HIERARCHY_* env of the executor session; pass with those vars unset: 25 passed, incl. 2 new promote tests).
+Test command: `pnpm test` (executor hierarchy env vars unset). Summary: pipeline-cli Tests  12322 passed | 13 skipped (12335); orchestrator 5209 passed; node --test gates 3566 pass, 0 fail.

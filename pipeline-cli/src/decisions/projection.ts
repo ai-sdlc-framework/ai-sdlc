@@ -257,7 +257,16 @@ export function projectAll(opts: ReadEventsOpts = {}): {
   decisions: Map<string, Decision>;
   skipped: number;
 } {
-  const { events, skipped } = readDecisionEvents(opts);
+  const { events: read, skipped } = readDecisionEvents(opts);
+  // The reader returns the legacy log first, then per-event files. An answer held in one
+  // layout for a decision opened in the other would fold before its opening and be dropped,
+  // leaving an answered decision open (AISDLC-1109). Fold in time order; ties keep read order.
+  const events = read
+    .map((event, i) => ({ event, i, t: Date.parse(event.ts) }))
+    .sort((a, b) =>
+      Number.isFinite(a.t) && Number.isFinite(b.t) && a.t !== b.t ? a.t - b.t : a.i - b.i,
+    )
+    .map((x) => x.event);
   const decisions = new Map<string, Decision>();
   for (const event of events) {
     const current = decisions.get(event.decisionId) ?? null;
