@@ -1001,20 +1001,35 @@ describe('checkNpmDistTagReachability', () => {
 
 describe('checkUsageIngest', () => {
   function writeState(capabilities: Record<string, unknown>, base?: string): void {
-    const dir = join(base ?? join(tmpDir, '.ai-sdlc', 'artifacts'), '_capabilities');
+    const dir = join(base ?? join(tmpDir, 'usage'), '_capabilities');
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'state.json'), JSON.stringify({ version: 1, capabilities }));
   }
 
+  const usageAdapters = (): DoctorCheckAdapters =>
+    makeAdapters({ env: { AI_SDLC_USAGE_DIR: join(tmpDir, 'usage') } });
+
+  it('ignores a state.json committed under the repository', () => {
+    writeState(
+      { 'usage.ingest': { lastOutcome: 'degraded', lastDegradedReason: 'committed copy' } },
+      join(tmpDir, '.ai-sdlc', 'artifacts'),
+    );
+    writeState({ 'usage.ingest': { lastOutcome: 'live', lastLiveAt: '2026-09-30T12:00:00.000Z' } });
+    const r = checkUsageIngest(makeCtx(usageAdapters()));
+    expect(r.severity).toBe('pass');
+    expect(r.title).toContain('2026-09-30T12:00:00.000Z');
+    expect(r.title).not.toContain('committed copy');
+  });
+
   it('passes with a hint when ingest has never run', () => {
-    const r = checkUsageIngest(makeCtx(makeAdapters()));
+    const r = checkUsageIngest(makeCtx(usageAdapters()));
     expect(r.severity).toBe('pass');
     expect(r.title).toMatch(/has not run yet/);
   });
 
   it('shows the time of the last successful ingest', () => {
     writeState({ 'usage.ingest': { lastOutcome: 'live', lastLiveAt: '2026-09-30T10:00:00.000Z' } });
-    const r = checkUsageIngest(makeCtx(makeAdapters()));
+    const r = checkUsageIngest(makeCtx(usageAdapters()));
     expect(r.severity).toBe('pass');
     expect(r.title).toContain('last successful ingest 2026-09-30T10:00:00.000Z');
   });
@@ -1027,7 +1042,7 @@ describe('checkUsageIngest', () => {
         lastDegradedReason: 'ledger locked',
       },
     });
-    const r = checkUsageIngest(makeCtx(makeAdapters()));
+    const r = checkUsageIngest(makeCtx(usageAdapters()));
     expect(r.severity).toBe('warn');
     expect(r.title).toContain('ledger locked');
     expect(r.title).toContain('2026-09-29T10:00:00.000Z');
@@ -1035,7 +1050,7 @@ describe('checkUsageIngest', () => {
 
   it('warns without a time when degraded and never live', () => {
     writeState({ 'usage.ingest': { lastOutcome: 'degraded' } });
-    const r = checkUsageIngest(makeCtx(makeAdapters()));
+    const r = checkUsageIngest(makeCtx(usageAdapters()));
     expect(r.severity).toBe('warn');
     expect(r.title).toContain('no successful ingest recorded');
   });

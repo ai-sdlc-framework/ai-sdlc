@@ -15,6 +15,7 @@ import type { ReviewLedgerRecord } from '../attestation/reviews-ledger.js';
 import type { TaskClass } from '../estimation/types.js';
 import { unitsForCall, type UnitWeights } from './units.js';
 import { DEFAULT_SCORECARD_MIN_TASKS } from './usage-config.js';
+import { csvEscape } from './csv.js';
 
 export const CONDUCTOR_ROLE = 'main-session';
 export const DEVELOPER_ROLE = 'developer';
@@ -355,10 +356,6 @@ export function renderScorecardText(card: Scorecard): string {
   );
   if (card.unitsNote) lines.push(card.unitsNote);
   return `${lines.join('\n')}\n`;
-}
-
-function csvEscape(v: string): string {
-  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 }
 
 export function renderScorecardCsv(card: Scorecard): string {

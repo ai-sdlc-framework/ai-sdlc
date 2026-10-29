@@ -24,6 +24,7 @@ import {
   type WindowSpec,
 } from './usage-config.js';
 import { bucketStarter, recordTimes } from './windows.js';
+import { csvEscape } from './csv.js';
 
 export const GROUP_KEYS = ['model', 'role', 'task', 'repo', 'pool', 'day', 'window'] as const;
 export type GroupKey = (typeof GROUP_KEYS)[number];
@@ -304,10 +305,6 @@ export function renderReportJson(report: UsageReport): string {
     null,
     2,
   )}\n`;
-}
-
-function csvEscape(v: string): string {
-  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 }
 
 export function renderReportCsv(report: UsageReport): string {
