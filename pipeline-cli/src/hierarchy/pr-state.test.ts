@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   classifyAndRecord,
   classifyPr,
+  dropSupersededCancelled,
   PR_ACTIONS,
   type PrCheck,
   type PrFacts,
@@ -216,5 +217,25 @@ describe('Detect Changes structural shape (AISDLC-953)', () => {
   it('is not the shape when Detect Changes did not fail', () => {
     const checks = [red('ai-sdlc/issue-link'), ...downstream, rollup];
     expect(classifyPr({ ...base, checks }).state).toBe('real-failure');
+  });
+});
+
+describe('cancelled duplicate with passing sibling (AISDLC-724)', () => {
+  const cancelled = (name: string): PrCheck => ({ name, conclusion: 'cancelled' });
+
+  it('treats a cancelled run with a passing same-name sibling as passing', () => {
+    const c = classifyPr({
+      ...base,
+      checks: [...green, cancelled('ai-sdlc/attestation')],
+      mergeStateStatus: 'CLEAN',
+      autoMergeArmed: true,
+    });
+    expect(c.state).toBe('armed-clean');
+  });
+
+  it('keeps a cancelled run that has no passing sibling', () => {
+    const c = classifyPr({ ...base, checks: [ok('a'), cancelled('b')] });
+    expect(c.state).toBe('cancelled-or-infra');
+    expect(dropSupersededCancelled([cancelled('b')])).toHaveLength(1);
   });
 });

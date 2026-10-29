@@ -2,7 +2,7 @@
 id: AISDLC-724
 title: >-
   Cancelled duplicate workflow runs show as failed checks
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-04'
 labels:
