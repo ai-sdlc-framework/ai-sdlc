@@ -2,7 +2,7 @@
 id: AISDLC-657.1
 title: >-
   RFC-0050 docs: replace the planned proposal section in the routing runbook with real commands
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-01'
 labels:
