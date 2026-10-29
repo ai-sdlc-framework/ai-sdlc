@@ -90,6 +90,36 @@ describe('buildOrchestratorJudgmentContext', () => {
     expect(rows()).toHaveLength(1);
   });
 
+  it('a failing ledger write does not change the evaluation result', async () => {
+    const store = StateStore.open(new Database(':memory:'));
+    const tracker = new CostTracker(store);
+    tracker.recordJudgmentCost = () => {
+      throw new Error('ledger down');
+    };
+    const mk = (withTracker: boolean) => {
+      const fake = new FakeJudgmentProvider({ name: 'fake', modelId: 'fake-1' });
+      fake.script('q1', { type: 'noul', probability: 0.9 });
+      const origEvaluate = fake.evaluate.bind(fake);
+      fake.evaluate = async (req) => ({
+        ...(await origEvaluate(req)),
+        usage: { inputTokens: 500, outputTokens: 0 },
+      });
+      return {
+        ...buildOrchestratorJudgmentContext({
+          config: resolveJudgmentConfig({
+            spec: { provider: 'fake', model: 'fake-1', defaults: { mode: 'shadow' } },
+          }),
+          artifactsDir: dir,
+          ...(withTracker ? { costTracker: tracker } : {}),
+        }),
+        getProvider: () => fake,
+      };
+    };
+    const failing = await evaluateJudgment(def, {}, mk(true));
+    const baseline = await evaluateJudgment(def, {}, mk(false));
+    expect(failing).toEqual(baseline);
+  });
+
   it('carries per-call fields and extra sinks', () => {
     const extra = { record: () => undefined };
     const ctx = buildOrchestratorJudgmentContext({
