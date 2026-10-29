@@ -28,6 +28,7 @@ export default tseslint.config(
       'ai-sdlc-plugin/mods/',
       'ai-sdlc-plugin/agents/',
       'ai-sdlc-plugin/commands/',
+      'ai-sdlc-plugin/skills/',
       '**/coverage/',
       'pipeline-cli/bin/',
       // AISDLC-575: single-sourced attestation verifier core — plain,

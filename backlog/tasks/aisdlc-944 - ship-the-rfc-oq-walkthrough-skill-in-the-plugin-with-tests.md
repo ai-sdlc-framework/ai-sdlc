@@ -1,7 +1,7 @@
 ---
 id: AISDLC-944
 title: 'Ship the rfc-oq-walkthrough skill in the plugin, with tests, so adopters get the RFC lifecycle flow'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-16'
 labels:
