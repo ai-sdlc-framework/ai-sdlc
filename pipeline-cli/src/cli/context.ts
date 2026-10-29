@@ -8,6 +8,7 @@
  *                     Exit 1 on any error; `--strict` also fails on classification
  *                     warnings (likely mis-scoped entries).
  *   promote <id> --proof <kind:value> [--to canonical --by human] — verifier promotion (AISDLC-776).
+ *   confirm / correct / supersede / coverage — human surface (AISDLC-786).
  *   audit / refute / reobserve — knowledge log listing, refutation, 30 percent re-observation.
  *   check-pr-body   — fail when a PR body (`--body-file <path>` or stdin) cites a
  *                     protected entry id or the protected root path.
@@ -27,8 +28,15 @@ import { INGEST_SOURCES, ingestSource, type IngestSource } from '../knowledge/in
 import { sectionsToEntries } from '../knowledge/ingest-sections.js';
 import { auditLines, readKnowledgeLog } from '../knowledge/log.js';
 import { loadOntology } from '../knowledge/ontology.js';
+import {
+  buildDashboard,
+  confirmEntry,
+  correctEntry,
+  renderDashboard,
+  supersedeEntry,
+} from '../knowledge/human.js';
 import { promoteEntry, reobserveEntry, refuteEntry, type Role } from '../knowledge/promote.js';
-import { findProtectedCitations, validateKnowledge } from '../knowledge/store.js';
+import { findProtectedCitations, readEntries, validateKnowledge } from '../knowledge/store.js';
 
 function knowledgeCtx(projectDir: string) {
   const config = loadKnowledgeConfig(projectDir);
@@ -192,6 +200,76 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
         );
         process.stdout.write(`${r.ok ? 'promoted' : 'refused'}: ${r.reason}\n`);
         if (!r.ok) process.exitCode = 1;
+      },
+    )
+    .command(
+      'confirm <id>',
+      'Confirm an entry: confidence moves 30 percent toward the value; authority is unchanged',
+      (y) =>
+        y
+          .positional('id', { type: 'string', demandOption: true })
+          .option('confidence', { type: 'number', default: 1 })
+          .option('observed', { type: 'string', default: now().toISOString().slice(0, 10) }),
+      (args) => {
+        const ctx = knowledgeCtx(String(args['project-dir']));
+        const next = confirmEntry(
+          ctx.trackedAbs,
+          String(args.id),
+          Number(args.confidence),
+          resolveRole(),
+          String(args.observed),
+        );
+        if (next === null) {
+          process.stderr.write(`error: entry '${String(args.id)}' not found\n`);
+          process.exitCode = 1;
+        } else process.stdout.write(`confidence ${next}\n`);
+      },
+    )
+    .command(
+      'correct <id>',
+      'Correct an entry value in place',
+      (y) =>
+        y
+          .positional('id', { type: 'string', demandOption: true })
+          .option('value', { type: 'string', demandOption: true })
+          .option('observed', { type: 'string', default: now().toISOString().slice(0, 10) }),
+      (args) => {
+        const ctx = knowledgeCtx(String(args['project-dir']));
+        const ok = correctEntry(
+          ctx.trackedAbs,
+          String(args.id),
+          String(args.value),
+          resolveRole(),
+          String(args.observed),
+        );
+        if (!ok) {
+          process.stderr.write(`error: entry '${String(args.id)}' not found\n`);
+          process.exitCode = 1;
+        }
+      },
+    )
+    .command(
+      'supersede <old> <new>',
+      'Link <new> as superseding <old>; the old entry is kept',
+      (y) =>
+        y
+          .positional('old', { type: 'string', demandOption: true })
+          .positional('new', { type: 'string', demandOption: true }),
+      (args) => {
+        const ctx = knowledgeCtx(String(args['project-dir']));
+        const r = supersedeEntry(ctx.trackedAbs, String(args.old), String(args.new), resolveRole());
+        process.stdout.write(`${r.ok ? 'superseded' : 'refused'}: ${r.reason}\n`);
+        if (!r.ok) process.exitCode = 1;
+      },
+    )
+    .command(
+      'coverage',
+      'Print the coverage score, the tagged gap list and the staleness queue',
+      (y) => y,
+      (args) => {
+        const ctx = knowledgeCtx(String(args['project-dir']));
+        const d = buildDashboard(readEntries(ctx.trackedAbs), ctx.verify.ontology.trunks);
+        process.stdout.write(`${renderDashboard(d).join('\n')}\n`);
       },
     )
     .command(
