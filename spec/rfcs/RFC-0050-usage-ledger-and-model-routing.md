@@ -407,10 +407,31 @@ runs a reviewer role with a candidate model over the corpus through the existing
 spawner and scores the binary result (block or approve) against the label: recall on
 known-defect diffs, false-block rate on clean diffs, and units per review.
 
-Replay spends allotment, so it takes an explicit task count and unit budget, stops when
-either is reached, and can be scheduled through the existing off-peak scheduling
-module. Replay reviews are never written to the reviews ledger, the transcript leaves
-or any attestation.
+Replay spends allotment, so it takes an explicit item count and unit budget and stops when
+either is reached. A real run refuses to start without `--confirm-spend`; before that check
+it prints the capped cost (items x models x mean units per review on record, bounded by
+`--max-units`), so the operator sees what the flag authorizes. `--dry-run` calls no model.
+Replay can be restricted to an off-peak window with `--off-peak` and one or more
+`--off-peak-window <TZ@HH-HH[@Day,Day]>` flags, through the existing off-peak scheduling
+module; a run started outside the window is deferred and calls no model.
+
+```text
+cli-usage replay --role code --model <id> [--reference-model <id>] \
+  --max-items <n> --max-units <n> [--off-peak --off-peak-window UTC@22-06] \
+  [--dry-run] --confirm-spend
+```
+
+Labelling rule: `known-defect` and `clean` are inferred from the reviews ledger, not
+proven defects. A commit already on the base ref (empty diff) is skipped.
+
+Sandbox. A replayed diff is untrusted code, so each review runs `claude -p` with read-only
+tools only (Read, Grep, Glob), no MCP, user-level settings only, no slash commands, no
+session transcript and prompts denied, never `bypassPermissions`. The commit is checked out
+in a throwaway local clone (no remote, hooks off, user git config off) from which every
+`.claude/`, `.mcp.json` and `CLAUDE.md` it carries is removed, and the environment drops
+`CLAUDE_PROJECT_DIR`, `CLAUDECODE` and `AI_SDLC_*`. This is the CLI's permission layer, not
+an operating-system sandbox. Replay reviews are never written to the reviews ledger, the
+transcript leaves or any attestation.
 
 #### B5. How the table changes
 

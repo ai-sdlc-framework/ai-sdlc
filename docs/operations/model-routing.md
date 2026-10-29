@@ -285,7 +285,7 @@ Artifacts directory: <project>/.ai-sdlc/artifacts
 Refusing to spend model usage without --confirm-spend. No model was called.
 ```
 
-With `--off-peak` and `--off-peak-window`, a run started outside the window is deferred and calls no model.
+With `--off-peak` and at least one `--off-peak-window` (for example `UTC@22-06`), a run started outside the window is deferred and calls no model. The cost line is printed before the deferral, so a missing `--confirm-spend` is never hidden by a wait.
 
 ### What a replay reports
 
