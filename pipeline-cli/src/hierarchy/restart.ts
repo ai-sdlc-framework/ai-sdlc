@@ -209,7 +209,13 @@ export async function hierarchyRestart(
   }
   const next = launched.entry;
   replaceEntry(deps, entry.name, next);
-  deps.emit?.({ type: 'HierarchySessionStarted', sessionName: next.name, sessionRole: next.role });
+  deps.emit?.({
+    type: 'HierarchySessionStarted',
+    sessionName: next.name,
+    sessionRole: next.role,
+    sessionModel: next.model,
+    sessionPermissionMode: next.permissionMode,
+  });
   for (const w of warnings) deps.log(`warning: ${w}`);
   deps.log(
     `restarted executor '${next.tmuxWindow}'${stop.forced ? ' (window closed after no exit)' : ''}; pid ${entry.pid} -> ${next.pid}`,
