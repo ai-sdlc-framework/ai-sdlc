@@ -60,6 +60,29 @@ import { deriveUnitWeights } from './units.js';
 import { loadUsageConfig } from './usage-config.js';
 import type { UsageIo, UsageViewDeps } from './commands.js';
 
+/**
+ * On SIGINT or SIGTERM: abort the run, kill every tracked child, remove the
+ * clone, then re-raise the signal with the default action. Returns a function
+ * that removes the listeners.
+ */
+export function installReplaySignalHandlers(controller: AbortController): () => void {
+  const remove = (): void => {
+    process.removeListener('SIGINT', onSignal);
+    process.removeListener('SIGTERM', onSignal);
+  };
+  function onSignal(signal: NodeJS.Signals): void {
+    controller.abort();
+    killTrackedChildren();
+    cleanupActiveWorktreesSync();
+    // Listeners were registered with `once`; removing them makes the re-raise use the default action.
+    remove();
+    process.kill(process.pid, signal);
+  }
+  process.once('SIGINT', onSignal);
+  process.once('SIGTERM', onSignal);
+  return remove;
+}
+
 export interface ReplayDeps extends UsageViewDeps {
   /** Repository root holding `.ai-sdlc/reviews`. Defaults to `workDir` then cwd. */
   repoRoot?: string;
@@ -498,20 +521,10 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
         sweepStaleReplayHolders();
 
         const controller = new AbortController();
-        const onSignal = (signal: NodeJS.Signals): void => {
-          controller.abort();
-          killTrackedChildren();
-          cleanupActiveWorktreesSync();
-          // The listener was registered with `once`, so re-raising uses the default action.
-          process.removeListener('SIGINT', onSignal);
-          process.removeListener('SIGTERM', onSignal);
-          process.kill(process.pid, signal);
-        };
         const useSignals = deps.handleSignals !== false;
-        if (useSignals) {
-          process.once('SIGINT', onSignal);
-          process.once('SIGTERM', onSignal);
-        }
+        const removeSignalHandlers = useSignals
+          ? installReplaySignalHandlers(controller)
+          : (): void => undefined;
         try {
           const results = await runReplay({
             items,
@@ -555,10 +568,7 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
         } catch (err) {
           fail(io, `The replay could not complete: ${(err as Error).message}`);
         } finally {
-          if (useSignals) {
-            process.removeListener('SIGINT', onSignal);
-            process.removeListener('SIGTERM', onSignal);
-          }
+          removeSignalHandlers();
           killTrackedChildren();
           cleanupActiveWorktreesSync();
         }

@@ -23,7 +23,7 @@ import {
   utimesSync,
   type Stats,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 
@@ -43,6 +43,31 @@ export function isSafeRef(value: unknown): value is string {
     !value.endsWith('/') &&
     !value.endsWith('.lock')
   );
+}
+
+/**
+ * Directory the clones live under. Claude Code also reads CLAUDE.md from
+ * ancestor directories, and on a shared Linux temp directory another user could
+ * plant one in `/tmp`, so on Linux the default is a per-user cache directory
+ * (mode 0700). Elsewhere it is the OS temp directory, which is already per user.
+ */
+export function defaultReplayRoot(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+): string {
+  if (platform !== 'linux') return tmpdir();
+  const cache =
+    env.XDG_CACHE_HOME && env.XDG_CACHE_HOME.startsWith('/')
+      ? env.XDG_CACHE_HOME
+      : join(home, '.cache');
+  return join(cache, 'ai-sdlc');
+}
+
+/** Create the default root with mode 0700 when it is not the OS temp directory. */
+function ensureDefaultRoot(root: string): void {
+  if (root === tmpdir()) return;
+  mkdirSync(root, { recursive: true, mode: 0o700 });
 }
 
 /** Prefix of every temporary holder directory a replay creates. */
@@ -126,8 +151,15 @@ const CONFIG_NAMES_ANY_DEPTH = new Set(['claude.md', 'claude.local.md', '.claude
 /** Names removed at the top of the tree only, lowercase. */
 const CONFIG_NAMES_TOP_LEVEL = new Set(['.mcp.json', '.claude.json']);
 
-function foldName(name: string): string {
-  return name.normalize('NFKC').toLowerCase();
+/**
+ * Code points HFS+ ignores when it compares names: U+200C to U+200F, U+202A to
+ * U+202E, U+206A to U+206F and U+FEFF. `CLAUDE\u200C.md` therefore opens the
+ * same file as `CLAUDE.md` there, so they are stripped before folding.
+ */
+const HFS_IGNORABLE = /[\u200C-\u200F\u202A-\u202E\u206A-\u206F\uFEFF]/g;
+
+export function foldName(name: string): string {
+  return name.replace(HFS_IGNORABLE, '').normalize('NFKC').toLowerCase();
 }
 
 /**
@@ -251,7 +283,7 @@ export interface SweepOptions {
 export function sweepStaleReplayHolders(opts: SweepOptions = {}): number {
   // Fail closed: without a uid, ownership cannot be checked, so nothing is swept.
   if (currentUid() === undefined) return 0;
-  const os = opts.osTmpdir ?? tmpdir();
+  const os = opts.osTmpdir ?? defaultReplayRoot();
   const root = opts.root ?? os;
   try {
     if (realpathSync(root) !== realpathSync(os)) return 0;
@@ -323,7 +355,8 @@ export async function withReplayClone<T>(
   fn: (checkout: CheckoutFn) => Promise<T>,
   opts: TempCloneOptions = {},
 ): Promise<T> {
-  const root = opts.tmpRoot ?? tmpdir();
+  const root = opts.tmpRoot ?? defaultReplayRoot();
+  if (opts.tmpRoot === undefined) ensureDefaultRoot(root);
   const usePrivate =
     opts.privateParent ??
     (() => {
