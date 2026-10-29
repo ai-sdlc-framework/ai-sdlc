@@ -2,7 +2,7 @@
 id: AISDLC-651.1
 title: >-
   RFC-0050 follow-up: doctor reads capability state from artifacts only, CSV formula escaping, README event list
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-01'
 labels:
