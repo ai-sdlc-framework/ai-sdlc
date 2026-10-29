@@ -10,6 +10,7 @@
  *   cli-judgment ask <judgment-id> --input <json-file>
  *   cli-judgment eval <judgment-id> --corpus <jsonl> [--sweep <name>=<from>:<to>:<step>]
  *   cli-judgment replay --since <date> [--judgment <id>]
+ *   cli-judgment shadow --since <date> [--judgment <id>]
  */
 
 import { lstatSync, readFileSync, writeFileSync } from 'node:fs';
@@ -575,6 +576,83 @@ async function runReplay(
   return 0;
 }
 
+/**
+ * Summarise shadow records against the incumbent decision. A shadow record logs
+ * an abstain, so the would-be decision is recomputed from the logged answers.
+ * Records without an incumbent, and records whose recomputed outcome is not an
+ * act, are counted apart and excluded from the agreement rate.
+ */
+async function runShadow(
+  args: CommonArgs & { since: string; judgment?: string },
+  deps: JudgmentCliDeps,
+) {
+  const out = deps.out ?? ((t) => process.stdout.write(t));
+  const s = openSession(args, deps);
+  const since = parseSince(args.since);
+  const sourceKind = args['source-kind'] ?? 'backlog';
+  const log = readJudgmentLog(s.artifactsDir, {
+    since,
+    ...(args.judgment ? { judgmentId: args.judgment } : {}),
+  });
+  const shadow = log.entries.filter((e) => e.effectiveMode === 'shadow');
+  const ids = [...new Set(shadow.map((e) => e.judgmentId))].sort();
+  out(`shadow since ${since.toISOString()}: ${shadow.length} records, ${ids.length} judgments\n`);
+  for (const id of ids) {
+    const def = (deps.getDefinition ?? getJudgmentDefinition)(id);
+    const entries = shadow.filter((e) => e.judgmentId === id);
+    if (!def || typeof def.agrees !== 'function') {
+      out(`${id}: ${entries.length} records, no registered agrees(), skipped\n`);
+      continue;
+    }
+    let noIncumbent = 0;
+    let noDecision = 0;
+    let agree = 0;
+    let disagree = 0;
+    for (const e of entries) {
+      if (e.incumbent === null || e.incumbent === undefined) {
+        noIncumbent += 1;
+        continue;
+      }
+      let decision: unknown;
+      try {
+        const key =
+          e.provider && e.modelVersion ? providerModelKey(e.provider, e.modelVersion) : '';
+        const thresholds = e.thresholds ?? s.config.judgments[id]?.thresholds[key] ?? {};
+        const outcome = e.answers
+          ? def.compose(e.answers, undefined, thresholds, {
+              permissiveAllowed: def.direction === 'bidirectional' && sourceKind === 'backlog',
+              agrees: def.agrees.bind(def),
+              ...(def.capabilityId ? { capabilityId: def.capabilityId } : {}),
+            })
+          : undefined;
+        if (outcome?.kind !== 'act') {
+          noDecision += 1;
+          continue;
+        }
+        decision = outcome.decision;
+      } catch {
+        noDecision += 1;
+        continue;
+      }
+      let ok = false;
+      try {
+        ok = def.agrees(decision, e.incumbent) === true;
+      } catch {
+        // a throwing comparison counts as disagreement
+      }
+      if (ok) agree += 1;
+      else disagree += 1;
+    }
+    const compared = agree + disagree;
+    out(
+      `${id}: ${entries.length} shadow records; ` +
+        `agreement ${compared === 0 ? 'n/a' : `${agree}/${compared} (${pct(agree / compared)})`}; ` +
+        `disagree ${disagree}; no incumbent ${noIncumbent}; no decision ${noDecision}\n`,
+    );
+  }
+  return 0;
+}
+
 // --- yargs wiring -------------------------------------------------------
 
 function commonOptions<T>(y: Argv<T>) {
@@ -683,9 +761,18 @@ export function buildJudgmentCli(
           .option('judgment', { type: 'string', describe: 'Only this judgment id.' }),
       (a) => run(() => runReplay(a as never, deps)),
     )
+    .command(
+      'shadow',
+      'Summarise shadow records against the incumbent decision; no provider calls.',
+      (y) =>
+        thresholdOptions(y)
+          .option('since', { type: 'string', demandOption: true, describe: 'Start date.' })
+          .option('judgment', { type: 'string', describe: 'Only this judgment id.' }),
+      (a) => run(() => runShadow(a as never, deps)),
+    )
     .demandCommand(
       1,
-      'Choose a command: doctor, list, dor-corpus, ask, eval, export-corpus or replay.',
+      'Choose a command: doctor, list, dor-corpus, ask, eval, export-corpus, replay or shadow.',
     )
     .strict()
     .exitProcess(false)
