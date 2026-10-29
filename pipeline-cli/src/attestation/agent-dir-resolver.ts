@@ -29,9 +29,9 @@
  * `attestation-core/verify-core.mjs`.
  */
 
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 /** Numeric, dot-separated version compare. Missing/non-numeric segments sort as 0. */
 function compareVersionStrings(a: string, b: string): number {
@@ -96,16 +96,49 @@ export function highestVersionCacheAgentsDir(
 }
 
 /**
- * Resolve the installed Claude Code plugin's `agents/` directory. See the
- * module header for the full resolution order and rationale.
+ * AISDLC-584: is `candidate` inside `repoRoot` (the untrusted checkout)?
+ * Mirrors `isInsideRepoRoot` in `ai-sdlc-plugin/scripts/verify-attestation.mjs`:
+ * compares REAL (symlink-free) paths so a symlink planted in the checkout
+ * cannot smuggle a repo-controlled dir in as the "installed" plugin.
  */
-export function resolveInstalledPluginAgentDir(cacheRoot?: string): string | null {
+export function isInsideRepoRoot(candidate: string, repoRoot: string): boolean {
+  // Resolve symlinks on the nearest existing ancestor so a not-yet-existing
+  // path still compares in real-path space (e.g. macOS /var -> /private/var).
+  const real = (p: string): string => {
+    const abs = resolve(p);
+    try {
+      return realpathSync(abs);
+    } catch {
+      const parent = dirname(abs);
+      return parent === abs ? abs : join(real(parent), basename(abs));
+    }
+  };
+  const realCandidate = real(candidate);
+  const realRoot = real(repoRoot);
+  if (realCandidate === realRoot) return true;
+  const rel = relative(realRoot, realCandidate);
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+}
+
+/**
+ * Resolve the installed Claude Code plugin's `agents/` directory. See the
+ * module header for the full resolution order and rationale. When `repoRoot`
+ * is given, any candidate inside it is rejected (containment guard,
+ * AISDLC-584); callers pass the checkout under verification.
+ */
+export function resolveInstalledPluginAgentDir(
+  cacheRoot?: string,
+  repoRoot?: string,
+): string | null {
+  const contained = (dir: string): boolean =>
+    repoRoot !== undefined && isInsideRepoRoot(dir, repoRoot);
   for (const pluginDir of [process.env['CLAUDE_PLUGIN_ROOT'], process.env['CLAUDE_PLUGIN_DIR']]) {
     if (!pluginDir) continue;
     const candidate = join(pluginDir, 'agents');
-    if (existsSync(candidate)) return candidate;
+    if (existsSync(candidate) && !contained(candidate)) return candidate;
   }
   // `cacheRoot` is optional (injectable for hermetic tests); when omitted the
   // walk falls back to the real `~/.claude/plugins/cache` default.
-  return highestVersionCacheAgentsDir(cacheRoot);
+  const cached = highestVersionCacheAgentsDir(cacheRoot);
+  return cached && !contained(cached) ? cached : null;
 }

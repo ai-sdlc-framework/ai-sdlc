@@ -1024,3 +1024,59 @@ describe('verify-attestation.mjs — module surface', () => {
     );
   });
 });
+
+// ─── AISDLC-584 — self-location agent-dir probe with fixture guard ──────────
+describe('agentDirCandidates (AISDLC-584)', () => {
+  it('adds <plugin root>/agents when the script lives under node_modules (plain-CI install)', async () => {
+    const { agentDirCandidates } = await import(pathToFileURL(verifyHelperPath).href);
+    const saved = { d: process.env.CLAUDE_PLUGIN_DIR, r: process.env.CLAUDE_PLUGIN_ROOT };
+    delete process.env.CLAUDE_PLUGIN_DIR;
+    delete process.env.CLAUDE_PLUGIN_ROOT;
+    try {
+      const script = join(
+        '/ci',
+        'node_modules',
+        'ai-sdlc-plugin',
+        'scripts',
+        'verify-attestation.mjs',
+      );
+      assert.deepEqual(agentDirCandidates(script), [
+        join('/ci', 'node_modules', 'ai-sdlc-plugin', 'agents'),
+      ]);
+    } finally {
+      if (saved.d !== undefined) process.env.CLAUDE_PLUGIN_DIR = saved.d;
+      if (saved.r !== undefined) process.env.CLAUDE_PLUGIN_ROOT = saved.r;
+    }
+  });
+
+  it('fixture guard: skips self-location when the script runs in place outside node_modules (monorepo)', async () => {
+    const { agentDirCandidates } = await import(pathToFileURL(verifyHelperPath).href);
+    const saved = { d: process.env.CLAUDE_PLUGIN_DIR, r: process.env.CLAUDE_PLUGIN_ROOT };
+    delete process.env.CLAUDE_PLUGIN_DIR;
+    delete process.env.CLAUDE_PLUGIN_ROOT;
+    try {
+      assert.deepEqual(agentDirCandidates(verifyHelperPath), []);
+    } finally {
+      if (saved.d !== undefined) process.env.CLAUDE_PLUGIN_DIR = saved.d;
+      if (saved.r !== undefined) process.env.CLAUDE_PLUGIN_ROOT = saved.r;
+    }
+  });
+
+  it('resolvePluginAgentDir returns the installed dir and rejects one inside repoRoot', async () => {
+    const { resolvePluginAgentDir } = await import(pathToFileURL(verifyHelperPath).href);
+    const base = mkdtempSync(join(tmpdir(), 'agentdir-selfloc-'));
+    try {
+      const pluginRoot = join(base, 'node_modules', 'ai-sdlc-plugin');
+      mkdirSync(join(pluginRoot, 'agents'), { recursive: true });
+      mkdirSync(join(pluginRoot, 'scripts'), { recursive: true });
+      const script = join(pluginRoot, 'scripts', 'verify-attestation.mjs');
+      const outsideRepo = join(base, 'elsewhere');
+      mkdirSync(outsideRepo, { recursive: true });
+      assert.equal(resolvePluginAgentDir(outsideRepo, script), join(pluginRoot, 'agents'));
+      // repoRoot containing the install (e.g. checkout with committed node_modules) is rejected.
+      assert.equal(resolvePluginAgentDir(base, script), null);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+});
