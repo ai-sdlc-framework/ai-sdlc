@@ -34,6 +34,7 @@ import {
   schedulerStatus,
   type SchedulerStatus,
 } from './reconcile-scheduler.js';
+import { formatLastTick, lastTickInfo } from './host-liveness.js';
 import { formatWebhookStatus, webhookStatus, type WebhookStatus } from './webhook.js';
 import { listWindows, paneInfo, paneStartCommand, sessionAttached } from './tmux.js';
 import { contextWarning, formatContext, sessionContextTokens } from './context-size.js';
@@ -83,6 +84,8 @@ export interface StatusResult {
   webhook: WebhookStatus;
   /** The detached reconcile scheduler (AISDLC-932). */
   scheduler: SchedulerStatus;
+  /** Age and author of the last dispatch tick (AISDLC-1096); absent when none was recorded. */
+  lastTick?: { ageSec: number; by: 'host' | 'scheduler' };
   /** Per-role context-clear thresholds in tokens (AISDLC-815), from `<board-dir>/config.json`. */
   contextThresholds?: Record<HierarchyRole, number>;
   /** Dispatchable tasks on no brief and not on the board (AISDLC-930); absent when none. */
@@ -260,6 +263,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
   } catch {
     /* unreadable directories must not break status */
   }
+  const lastTick = lastTickInfo(deps.boardDir, deps.now());
   return {
     rows,
     unowned: landings.filter((l) => l.owner === 'unowned').length,
@@ -270,6 +274,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     board: peekQueue(deps.boardDir),
     webhook: webhookStatus(deps),
     scheduler: schedulerStatus(deps),
+    ...(lastTick ? { lastTick } : {}),
     contextThresholds: thresholdsByRole,
     ...(unbriefed.length > 0 ? { unbriefed } : {}),
     ...(blocked.length > 0 ? { blocked } : {}),
@@ -316,6 +321,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       'no sessions in the roster',
       formatWebhookStatus(result.webhook),
       formatSchedulerStatus(result.scheduler),
+      formatLastTick(result.lastTick),
       ...thresholds,
       ...unbriefed,
       ...blockedLines,
@@ -393,6 +399,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
     `board: ${queued} queued, ${inflight} inflight, ${done} done, ${failed} failed`,
     formatWebhookStatus(result.webhook),
     formatSchedulerStatus(result.scheduler),
+    formatLastTick(result.lastTick),
     ...thresholds,
     ...unbriefed,
     ...blockedLines,

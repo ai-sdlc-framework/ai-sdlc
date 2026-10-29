@@ -215,6 +215,7 @@ import { reenter } from '../hierarchy/reenter.js';
 import { decideResumeReview } from '../next-step/resume-decision.js';
 import { defaultRunner } from '../runtime/exec.js';
 import { loadPrLifecycleConfig } from '../hierarchy/pr-lifecycle-config.js';
+import { startHostWatch } from '../hierarchy/host-liveness.js';
 import { startScheduler } from '../hierarchy/scheduler.js';
 import { now as clockNow } from '../clock.js';
 import { closeSupersededPr } from '../hierarchy/superseded.js';
@@ -527,6 +528,25 @@ export async function runDispatchCli(
         return facts && only !== undefined ? facts.filter((f) => f.prNumber === only) : facts;
       };
       if (flags['watch'] === 'true') {
+        // AISDLC-1096: tick as the scheduler when the dispatch host has gone silent.
+        startHostWatch({
+          boardDir,
+          now: clockNow,
+          runTick: () => {
+            createSystemRunner()(
+              process.execPath,
+              [
+                path.join(cliBin, 'cli-hierarchy.mjs'),
+                'tick',
+                '--by',
+                'scheduler',
+                '--board-dir',
+                boardDir,
+              ],
+              { cwd },
+            );
+          },
+        });
         startScheduler({
           wakeFile: path.join(boardDir, '.reconcile-wake'),
           timerOpenMs: timers.timerOpenMs,

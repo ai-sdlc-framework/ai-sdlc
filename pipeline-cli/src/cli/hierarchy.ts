@@ -126,6 +126,7 @@ import {
   rosterProject,
   readParentHead,
   runDispatchTick,
+  hostTickStale,
   endsWithQuestion,
   clearHold,
   writeHold,
@@ -285,6 +286,7 @@ Options for tick:
   --settle-ms <n>          Ceiling for the rotate acknowledgement (default 30000, config clear.handshakeCeilingMs)
   --retry-limit <n>        Re-queues allowed per failed task (default 2; a larger value is refused)
   --work-dir <path>        Repository root (default the current directory)
+  --by scheduler           Used by the watch scheduler: ticks only when the host missed three intervals
 
 Options for spawn:
   <task-id>                Task the executor serves; its session is ai-sdlc-executor-<task-id-lowercase>.
@@ -558,8 +560,12 @@ export async function runHierarchyCli(
    * `--worker` is only compared with that result. Runs before anything is read,
    * written or sent. It is not authentication.
    */
-  const dispatchCaller = (command: string): ReturnType<typeof checkDispatchCaller> =>
+  const dispatchCaller = (
+    command: string,
+    skipCallerIdentity = false,
+  ): ReturnType<typeof checkDispatchCaller> =>
     checkDispatchCaller({
+      skipCallerIdentity,
       label: `cli-hierarchy ${command}`,
       cwd: deps.cwd,
       boardDir: deps.boardDir,
@@ -879,12 +885,35 @@ export async function runHierarchyCli(
         }
       }
       case 'tick': {
-        const caller = dispatchCaller('tick');
-        if (!caller.ok) {
-          process.stderr.write(`${caller.reason}\n`);
-          return 1;
+        // AISDLC-1096: the watch scheduler stands in for a silent host; it ticks only when the
+        // host has missed three intervals, checked here, and runs as the roster's dispatch name.
+        const byScheduler = flags.by === 'scheduler';
+        let worker: string;
+        if (byScheduler) {
+          // Location checks (main checkout, board-dir, work-dir, install) still run; only the
+          // dispatch-session identity requirement is skipped. work-dir must equal the trusted
+          // root, so repoRoot below is pinned to it.
+          const caller = dispatchCaller('tick', true);
+          if (!caller.ok) {
+            process.stderr.write(`${caller.reason}\n`);
+            return 1;
+          }
+          if (!hostTickStale(deps.boardDir, deps.now())) {
+            deps.log(JSON.stringify({ skipped: 'dispatch host is alive' }));
+            return 0;
+          }
+          worker =
+            readRosterChecked(deps.boardDir).roster.sessions.find(
+              (e) => e.role === 'operator-dispatch' && e.status === 'running',
+            )?.name ?? 'scheduler';
+        } else {
+          const caller = dispatchCaller('tick');
+          if (!caller.ok) {
+            process.stderr.write(`${caller.reason}\n`);
+            return 1;
+          }
+          worker = caller.name;
         }
-        const worker = caller.name;
         const flagSettleMs = intFlag(flags, 'settle-ms');
         const reportEveryMs = intFlag(flags, 'report-every-ms');
         const retryLimit = intFlag(flags, 'retry-limit');
@@ -904,6 +933,23 @@ export async function runHierarchyCli(
         const result = await runDispatchTick({
           boardDir: deps.boardDir,
           workerId: worker,
+          ...(byScheduler ? { tickedBy: 'scheduler' as const } : {}),
+          openPrNumbers: () => {
+            const r = wakeGh(
+              'gh',
+              ['pr', 'list', '--state', 'open', '--limit', '200', '--json', 'number'],
+              { cwd: repoRoot },
+            );
+            if (r?.status !== 0) return undefined;
+            try {
+              const list = JSON.parse(r.stdout) as { number: number }[];
+              // A full page may hide open PRs past the limit; skip the closed-PR prune.
+              if (list.length >= 200) return undefined;
+              return new Set(list.map((x) => x.number));
+            } catch {
+              return undefined;
+            }
+          },
           now: deps.now,
           enqueue:
             extras.enqueue ??

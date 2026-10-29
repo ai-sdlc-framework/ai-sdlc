@@ -2365,3 +2365,7 @@ and armed; a green CLEAN unarmed task PR is armed. A PR no lane can act on (fore
 with no task id and no docs-lane prefix, a draft with no claim and no verdict) is recorded as owner
 `unowned` with the reason in `note`, routed to the planner once per head, and counted in
 `cli-hierarchy status` as `unowned PRs: N`.
+
+## Drain liveness (AISDLC-1096)
+
+Every tick records `lastTickAt` and `lastTickBy` (`host` or `scheduler`) in `operator-dispatch.state.json`; `status` prints `last tick: <n>s ago by <who>`. The detached watch scheduler (`cli-dispatch reconcile --watch`) checks every 30 s and, when the host has missed three intervals and work is queued, runs `cli-hierarchy tick --by scheduler`: the same deterministic tick, no model turn. The tick re-checks staleness itself, so a live host is never doubled. After each tick, webhook event records for closed PRs are deleted and the directory is capped at 2,000 files (oldest first; canary records are kept).

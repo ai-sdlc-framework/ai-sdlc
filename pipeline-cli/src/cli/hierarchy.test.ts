@@ -255,6 +255,7 @@ describe('runHierarchyCli', () => {
       'no sessions in the roster',
       'webhook: off (no secret)',
       'scheduler: off',
+      'last tick: never',
       'context clear thresholds (tokens): planner 150000, operator-dispatch 120000, executor 120000',
       'unowned PRs: 0',
       expect.stringContaining('attestation and leaf files:'),
@@ -1098,6 +1099,59 @@ describe('clear, tick and route-decision', () => {
     ).toBe(1);
     expect(String(err.mock.calls.at(-1)?.[0])).toContain('--worker does not match');
     expect(boardListing()).toEqual(before);
+  });
+
+  it('tick --by scheduler still runs the location checks', async () => {
+    seedBoardWithBrief();
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(
+      await runHierarchyCli(['tick', '--by', 'scheduler'], overrides(), {
+        ...dispatchCaller,
+        trustedBoard: { root: '/elsewhere', boardDir: '/elsewhere/board' },
+        lease,
+        operational: new Set<string>(),
+      }),
+    ).toBe(1);
+    expect(String(err.mock.calls.at(-1)?.[0])).toContain('refused');
+  });
+
+  it('tick --by scheduler is skipped while the host is alive', async () => {
+    seedBoardWithBrief();
+    fs.writeFileSync(
+      path.join(tmp, 'dispatch', 'operator-dispatch.state.json'),
+      JSON.stringify({
+        schemaVersion: 'v1',
+        ingested: {},
+        rejected: {},
+        handled: [],
+        lastTickAt: new Date().toISOString(),
+        lastTickBy: 'host',
+      }),
+    );
+    expect(
+      await runHierarchyCli(['tick', '--by', 'scheduler'], overrides(), {
+        ...dispatchCaller,
+        lease,
+        operational: new Set<string>(),
+      }),
+    ).toBe(0);
+    expect(JSON.parse(logs.at(-1) as string)).toEqual({ skipped: 'dispatch host is alive' });
+  });
+
+  it('tick --by scheduler runs without the dispatch identity and records the scheduler', async () => {
+    seedBoardWithBrief();
+    expect(
+      await runHierarchyCli(['tick', '--by', 'scheduler'], overrides(), {
+        identity: asCaller('executor', 'executor-alpha'),
+        lease,
+        operational: new Set<string>(),
+        enqueue: () => [],
+      }),
+    ).toBe(0);
+    const state = JSON.parse(
+      fs.readFileSync(path.join(tmp, 'dispatch', 'operator-dispatch.state.json'), 'utf-8'),
+    );
+    expect(state.lastTickBy).toBe('scheduler');
   });
 
   it('tick runs for the dispatch session with no --worker', async () => {

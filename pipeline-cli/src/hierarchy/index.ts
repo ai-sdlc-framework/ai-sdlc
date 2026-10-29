@@ -290,3 +290,10 @@ export {
 } from './webhook.js';
 
 export { HOLD_FILENAME, clearHold, readHold, writeHold, type Hold } from './hold.js';
+export {
+  formatLastTick,
+  hostTickStale,
+  hostWatchCheck,
+  lastTickInfo,
+  startHostWatch,
+} from './host-liveness.js';

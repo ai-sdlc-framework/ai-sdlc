@@ -40,6 +40,7 @@ import type { EnqueueEntry } from '../dispatch/enqueue.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
 import { sanitizeVerdict } from '../dispatch/verdict-fields.js';
 import { parseBrief, type ParsedBrief } from './brief-format.js';
+import { pruneEvents } from './pr-snapshot.js';
 import { processCanaryEvents, type CanaryReport } from './canary.js';
 import {
   downRecordedExecutors,
@@ -102,6 +103,9 @@ export interface LoopState {
   pendingClears?: string[];
   /** Whether the board was held at the last tick; a held-to-free change is `holdLifted` (AISDLC-1089). */
   wasHeld?: boolean;
+  /** When a tick last ran, and who ran it (AISDLC-1096). */
+  lastTickAt?: string;
+  lastTickBy?: 'host' | 'scheduler';
 }
 
 /** Why and when the board refused a brief. */
@@ -150,6 +154,8 @@ export function readLoopState(boardDir: string): LoopState {
       ...(parsed.lastGithubReadAt ? { lastGithubReadAt: parsed.lastGithubReadAt } : {}),
       ...(Array.isArray(parsed.pendingClears) ? { pendingClears: parsed.pendingClears } : {}),
       ...(parsed.wasHeld ? { wasHeld: true } : {}),
+      ...(parsed.lastTickAt ? { lastTickAt: parsed.lastTickAt } : {}),
+      ...(parsed.lastTickBy ? { lastTickBy: parsed.lastTickBy } : {}),
     };
   } catch {
     return emptyState();
@@ -367,6 +373,10 @@ export interface LoopDeps {
   fileHotfix?: (opts: { sha: string; detail: string }) => string;
   /** Idle executors holding no inflight task (AISDLC-1101); absent means no drain-stall check runs. */
   idleExecutors?: () => string[];
+  /** Who runs this tick; the scheduler stands in for a silent host (AISDLC-1096). Default host. */
+  tickedBy?: 'host' | 'scheduler';
+  /** Numbers of the open PRs, for pruning consumed webhook events; undefined when GitHub cannot be read. */
+  openPrNumbers?: () => ReadonlySet<number> | undefined;
 }
 
 function ingestBriefs(
@@ -797,7 +807,14 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   if (readGithub && (deps.listPrs || deps.markReady || deps.landEligible)) {
     state.lastGithubReadAt = deps.now().toISOString();
   }
+  state.lastTickAt = deps.now().toISOString();
+  state.lastTickBy = deps.tickedBy ?? 'host';
   saveState(deps.boardDir, state);
+  try {
+    pruneEvents(deps.boardDir, readGithub ? deps.openPrNumbers?.() : undefined);
+  } catch {
+    /* pruning must not stop the dispatch loop */
+  }
   const markReady =
     readGithub && deps.markReady && deps.operational.has('mark-ready-after-codeql')
       ? deps.markReady()
