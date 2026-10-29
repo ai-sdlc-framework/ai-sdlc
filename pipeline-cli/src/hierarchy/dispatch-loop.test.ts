@@ -19,7 +19,6 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { rotateRequestPath } from './rotate-request.js';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -130,7 +129,6 @@ beforeEach(() => {
   clearImpl = async (o) => ({
     executor: o.executor,
     ok: true,
-    acknowledged: true,
     settleMs: 0,
   });
   playbookImpl = (v) => ({
@@ -489,29 +487,6 @@ describe('verdict watch and clears', () => {
     expect(cleared).toHaveLength(1);
   });
 
-  it('reports an unacknowledged request as requested, then acknowledged on the next tick (AISDLC-1099)', async () => {
-    const prev = clearImpl;
-    clearImpl = async (o) => ({
-      executor: o.executor,
-      ok: true,
-      acknowledged: false,
-      settleMs: 0,
-      file: rotateRequestPath(board, o.executor),
-    });
-    try {
-      verdict('AISDLC-1');
-      const first = await runDispatchTick(deps());
-      expect(first.verdicts[0]?.clear).toMatchObject({ status: 'requested' });
-      expect(first.reports.map((r) => r.text).join('\n')).not.toMatch(/not acknowledged/);
-      const second = await runDispatchTick(deps());
-      expect(second.reports.map((r) => r.text)).toContain(
-        'clear of executor-alpha acknowledged: the rotate request was consumed',
-      );
-    } finally {
-      clearImpl = prev;
-    }
-  });
-
   it('clears once per verdict, each for the executor that produced it', async () => {
     verdict('AISDLC-1', { workerId: 'executor-alpha' });
     verdict('AISDLC-2', {
@@ -594,9 +569,8 @@ describe('verdict watch and clears', () => {
     clearImpl = async (o) => ({
       executor: o.executor,
       ok: false,
-      acknowledged: false,
       settleMs: 0,
-      reason: 'rotate request not acknowledged',
+      reason: 'no fresh prompt',
     });
     verdict('AISDLC-7');
     const result = await runDispatchTick(deps());

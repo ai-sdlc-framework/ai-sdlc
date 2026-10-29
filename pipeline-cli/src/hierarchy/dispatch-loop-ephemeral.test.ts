@@ -42,7 +42,7 @@ function deps(over: Partial<LoopDeps> = {}): LoopDeps {
     workerId: 'operator-dispatch',
     now: () => new Date(clock),
     enqueue: () => [],
-    clear: async (o) => ({ executor: o.executor, ok: true, acknowledged: true, settleMs: 0 }),
+    clear: async (o) => ({ executor: o.executor, ok: true, settleMs: 0 }),
     playbook: (v) => ({ taskId: v.taskId, action: 'requeue', result: 'done', reason: 'ok' }),
     operational: new Set(['clear-executor-context', 'requeue']),
     ephemeral: {

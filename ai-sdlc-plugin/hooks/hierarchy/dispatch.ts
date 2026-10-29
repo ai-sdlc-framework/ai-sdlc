@@ -311,15 +311,6 @@ export async function tick(p: DispatchPorts, state: DispatchState): Promise<void
         p.storeSet,
       );
     }
-    const rotation = await rotateRequested(p, state);
-    for (const name of rotation.forward) {
-      const sent = await safe(() => p.send({ to: name, text: 'rotate' }));
-      note(state, sent.ok ? `asked ${name} to rotate` : `rotate request to ${name} failed`);
-    }
-    if (rotation.self) {
-      await rotateHost(p, state);
-      return;
-    }
     const r = await runCli(p, HIERARCHY_BIN, ['tick', ...boardArgs(state)]);
     const result = parseJson(r.stdout) as Any;
     if (!r.ok || !result || typeof result !== 'object') {
@@ -384,22 +375,6 @@ export async function tick(p: DispatchPorts, state: DispatchState): Promise<void
   } finally {
     state.ticking = false;
   }
-}
-
-/**
- * Rotate requests that `cli-hierarchy clear` wrote; the CLI deletes them as it answers (the deletion is the
- * acknowledgement). `self` is a request for this host; `forward` names the sessions to tell with `$.session.send`.
- */
-export async function rotateRequested(
-  p: DispatchPorts,
-  state: DispatchState,
-): Promise<{ self: boolean; forward: string[] }> {
-  const r = await runCli(p, HIERARCHY_BIN, ['rotate-pending', ...boardArgs(state)]);
-  const out = r.ok ? (parseJson(r.stdout) as Any) : null;
-  const forward = Array.isArray(out?.forward)
-    ? (out.forward as unknown[]).filter((n): n is string => typeof n === 'string')
-    : [];
-  return { self: out?.pending === true, forward };
 }
 
 export type Classified =

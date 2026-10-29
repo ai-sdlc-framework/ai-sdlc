@@ -26,9 +26,6 @@ export const ROTATION_TTL_MS = 10 * 60 * 1000;
 export const LAST_REPLY_MAX_CHARS = 4000;
 /** A task with no turn activity for this long is treated as ended, so a lost verdict cannot mute wakes. */
 export const ACTIVE_STALE_MS = 30 * 60 * 1000;
-/** Printed as the last line of a reply by the executor command (Step 5 / idle path). */
-export const VERDICT_MARKER = '[executor] verdict reported';
-export const IDLE_MARKER = '[executor] idle';
 
 export const LOG_KEY = 'hierarchy/log';
 export const ROTATION_KEY = 'hierarchy/rotation';
@@ -221,16 +218,6 @@ export function senderOf(raw: string): string {
   return /<cross-session-message\b[^>]*\bfrom="([^"]*)"/.exec(raw)?.[1] ?? '';
 }
 
-/** True when the reply's last line is the marker (a marker quoted mid-reply must not trigger rotation). */
-export function endsWithMarker(reply: string, marker: string): boolean {
-  return reply.trimEnd().endsWith(marker);
-}
-
-/** AISDLC-1099: true when the marker is a line of its own anywhere in the reply (the model adds a sentence after it). */
-export function hasMarkerLine(reply: string, marker: string): boolean {
-  return reply.split('\n').some((line) => line.trim() === marker);
-}
-
 export const DISPATCH_NAME = /(?:^|-)operator-dispatch(?:-\d+)?$/;
 export const STATUS_NOISE = /^(status|ack|ping)\b/i;
 
@@ -416,12 +403,6 @@ export async function executorSessionReceive(
       }
       return { consumed: 'hierarchy:enqueue' };
     }
-    // `cli-hierarchy clear <name>` (RFC-0058 phase 4): the dispatch host delivers a rotate request.
-    if (/^rotate\b/i.test(text)) {
-      if (state.turnInFlight) state.pendingRotate = true;
-      else await rotate(p, state);
-      return { consumed: 'hierarchy:rotate' };
-    }
     if (STATUS_NOISE.test(text)) return { consumed: 'hierarchy:status' };
     return next(e);
   };
@@ -471,11 +452,9 @@ export async function executorTurnComplete(
   if (reply) state.lastReply = reply;
   state.lastActivity = Date.now();
   // AISDLC-1100: the host's turn.complete carries no reply text; the turn boundary itself then ends the
-  // task, so a pending threshold rotation can fire. A verdict rotation still needs the text.
+  // task, so a pending threshold rotation can fire.
   if (!reply && state.pendingRotate) state.active = false;
-  const verdict = hasMarkerLine(reply, VERDICT_MARKER);
-  if (verdict || hasMarkerLine(reply, IDLE_MARKER)) state.active = false;
-  if (verdict || (state.pendingRotate && !taskRunning(state))) await rotate(p, state);
+  if (state.pendingRotate && !taskRunning(state)) await rotate(p, state);
   return next(e);
 }
 

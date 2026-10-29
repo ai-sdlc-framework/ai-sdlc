@@ -1,8 +1,10 @@
 ---
 id: AISDLC-1107
 title: >-
-  Executor clear after verdict is owned by dispatch and driven by the verdict file: tmux /clear + resume from the dispatch tick, no marker line, no rotate handshake, no executor-side module
-status: To Do
+  Executor clear after verdict is owned by dispatch and driven by the verdict
+  file: tmux /clear + resume from the dispatch tick, no marker line, no rotate
+  handshake, no executor-side module
+status: In Progress
 assignee: []
 created_date: '2026-10-28'
 labels:
@@ -12,7 +14,6 @@ labels:
 dependencies: []
 references:
   - pipeline-cli/src/hierarchy/clear.ts
-  - pipeline-cli/src/hierarchy/rotate-request.ts
   - pipeline-cli/src/hierarchy/dispatch-loop.ts
   - pipeline-cli/src/hierarchy/restart.ts
   - ai-sdlc-plugin/hooks/hierarchy/executor.ts
@@ -20,6 +21,14 @@ references:
   - docs/operations/cli-hierarchy.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-29'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/src/hierarchy/rotate-request.ts
+    resolution: flagged
+drift_checked: '2026-10-29'
 ---
 
 ## Description
@@ -47,3 +56,7 @@ Fix: implement the tick step in `dispatch-loop.ts` (or the dispatch hooks module
 ## Notes
 
 Evidence: `cli-hierarchy status` 2026-10-28 23:35Z listed all seven executors "idle after verdict ... not cleared" with the two dynamic ones idle for 1h8m; dispatch's clear at 23:50Z reported "rotate request not acknowledged: no hooks module consumed it" for alpha, gamma and epsilon; alpha's pane shows the rotate message reaching the model as chat, which replied that it cannot clear its own context. The operator typed restarts by hand at 20:45Z, 23:34Z and 23:55Z.
+
+## Verification record
+
+`pnpm build && pnpm test && pnpm lint && pnpm format:check` run on the branch. `pnpm test` summary line (pipeline-cli): `Tests 1 failed | 12216 passed | 13 skipped (12230)`; the single failure, `src/cli/orchestrator.test.ts > runs N ticks when --max-ticks is set` (30 s timeout under full-suite load), passes alone (`pnpm exec vitest run src/cli/orchestrator.test.ts`: 30 passed), and neither it nor its source is touched by this change. Hooks mod suite: 92 passed; plugin command suite: `node --test ai-sdlc-plugin/commands/*.test.mjs` 394 passed.

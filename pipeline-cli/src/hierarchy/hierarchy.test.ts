@@ -1030,7 +1030,7 @@ describe('hierarchy status', () => {
     expect(hierarchyStatus(deps).rows[0]?.state).toBe('unknown');
   });
 
-  it('warns on an idle executor whose verdict is older than a tick and uncleared (AISDLC-1099)', async () => {
+  it('never reports idle after verdict: the dispatch tick clears, so the state cannot persist (AISDLC-1107)', async () => {
     fake.startedAtMs = NOW.getTime() - 10 * 60_000;
     await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
     const done = path.join(deps.boardDir, 'done');
@@ -1044,12 +1044,10 @@ describe('hierarchy status', () => {
       }),
     );
     const result = hierarchyStatus(deps);
-    expect(result.rows.find((r) => r.entry.name === Q('executor-alpha'))?.idleAfterVerdict).toBe(
-      'AISDLC-9',
+    expect(result.rows.find((r) => r.entry.name === Q('executor-alpha'))).not.toHaveProperty(
+      'idleAfterVerdict',
     );
-    expect(formatStatus(result).join('\n')).toContain(
-      `idle after verdict on ${Q('executor-alpha')}`,
-    );
+    expect(formatStatus(result).join('\n')).not.toContain('idle after verdict');
   });
 
   it('handles an empty roster', () => {

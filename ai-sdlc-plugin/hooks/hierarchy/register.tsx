@@ -232,7 +232,7 @@ export const register = (on: Any, options?: Any): void => {
       void refreshPaneBounded(dp, dispatch).then((r) =>
         log(p, r === 'ok' ? 'refreshPane ok' : `refreshPane failed ${r}`),
       );
-      // The first tick runs at once so a pending rotate request is consumed within seconds of `up`.
+      // The first tick runs at once so the board is read within seconds of `up`.
       if (timer === 'ok') void attempt(run);
       return next(e);
     }

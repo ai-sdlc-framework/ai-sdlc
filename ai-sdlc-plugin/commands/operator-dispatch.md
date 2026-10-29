@@ -29,7 +29,7 @@ The loop does not run in this conversation. The `hierarchy` hooks module (`hooks
 - `session.receive` consumes verdict, PR-landed and executor status messages, applies them with `cli-dispatch`, and refreshes the pane. A message addressed to the planner is forwarded to the planner's roster name with `$.session.send`.
 - A tick result the policy tables cannot classify is written as an escalation file under `<board>/escalations/` (failure record, log tail, PR check summary) and announced to the planner; you are not asked.
 - An enqueue writes the board entry, then wakes the named executor with `$.session.send`.
-- `cli-hierarchy clear --self` writes a rotate request that the module consumes; rotation at 120k tokens is registered the same way.
+- The tick clears an executor's pane from its verdict file (`cli-hierarchy clear <name>` drives `/clear` and the executor command, falling back to restart); rotation at 120k tokens is registered by the module.
 
 If you are reading this, a prompt reached you outside the module (a human typed into the pane, or the
 module is not loaded). Do only this: run `cli-hierarchy status` and report it; do not start a loop, do not

@@ -173,3 +173,27 @@ export function paneTail(run: CommandRunner, session: string, window: string): s
   const r = run('tmux', ['capture-pane', '-p', '-t', `${session}:${window}`, '-S', '-30']);
   return r.status === 0 ? r.stdout : '';
 }
+
+/**
+ * True when a captured pane tail shows an idle input prompt: a prompt line is visible and no
+ * "esc to interrupt" status says a turn is running.
+ */
+export function paneShowsPrompt(tail: string): boolean {
+  const lines = tail
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l !== '');
+  if (lines.some((l) => /esc to interrupt/i.test(l))) return false;
+  return lines.slice(-8).some((l) => /^[│|]?\s*[❯>](\s|$)/u.test(l));
+}
+
+/** Type a line into a pane and press Enter; false when either key send fails. */
+export function sendLine(run: CommandRunner, target: string, text: string): boolean {
+  const typed = run('tmux', ['send-keys', '-t', target, '-l', '--', text]);
+  return typed.status === 0 && run('tmux', ['send-keys', '-t', target, 'Enter']).status === 0;
+}
+
+/** True when the window's pane shows an idle input prompt right now. */
+export function paneIsIdle(run: CommandRunner, session: string, window: string): boolean {
+  return paneShowsPrompt(paneTail(run, session, window));
+}

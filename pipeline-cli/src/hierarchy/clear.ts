@@ -1,32 +1,29 @@
 /**
- * `cli-hierarchy clear <name>`: ask a roster session to rotate its context (RFC-0058 phase 4).
+ * Clear an executor between tasks (AISDLC-1107). Dispatch owns the clear and drives the pane
+ * itself; the executor's model and hooks module are not involved, and no request file or
+ * acknowledgement exists. The verdict file proves the task ended.
  *
- * The keystroke layer is gone: nothing here types into a pane or reads pane text. A clear is
- * one rotate request plus one acknowledgement. The request is a file under the board
- * (`handoff/rotate-request-<name>.json`, see `rotate-request.ts`). The dispatch session's hooks
- * module consumes it on its next tick (`cli-hierarchy rotate-pending`): it rotates itself when
- * the request names it, and otherwise sends the named session a `rotate` message with
- * `$.session.send`, whose own module runs the one rotation (handoff, clear, resume). The
- * request file disappearing is the acknowledgement.
+ * Sequence (the same pane driving `restart` relies on): wait for the idle prompt, type `/clear`
+ * and Enter, wait for the fresh prompt, type the executor command and Enter. When the pane does
+ * not reach an idle or fresh prompt within the ceiling, the fallback is `restart <name>` (kill
+ * and relaunch), which needs no cooperation either.
  *
  * Refusals, all named and all sending nothing:
  *  - the name is not a running roster session, or its roster entry is unsafe;
  *  - an executor that holds an inflight manifest (its context is work in progress);
- *  - no running dispatch session: nothing would consume the request, so no hooks module is loaded;
- *  - the request was not consumed within the ceiling: the hooks module is not loaded or not ticking.
+ *  - the tmux session was not started by `cli-hierarchy up`, or the recorded pane is stale.
  */
-
-import { existsSync } from 'node:fs';
 
 import { readInflightManifest } from '../dispatch/board.js';
 import type { EventEmitter } from './emit.js';
 import { listInflight } from './inflight.js';
-import { requestRotate, rotateRequestPath } from './rotate-request.js';
 import { readRosterChecked, unsafeEntryReason } from './roster.js';
+import { ownershipRefusal, paneIsIdle, resolveSendTarget, sendLine } from './tmux.js';
+import type { CommandRunner } from './types.js';
 
-/** Default ceiling, in milliseconds, for the acknowledgement. Overridable in `.ai-sdlc/pr-lifecycle.yaml` (`clear.handshakeCeilingMs`) or `--settle-ms`. */
+/** Default ceiling, in milliseconds, for the pane to reach an idle or fresh prompt. Overridable in `.ai-sdlc/pr-lifecycle.yaml` (`clear.handshakeCeilingMs`) or `--settle-ms`. */
 export const DEFAULT_SETTLE_MS = 30_000;
-/** Default spacing of the "was the request consumed" checks. */
+/** Default spacing of the prompt checks. */
 export const DEFAULT_POLL_INTERVAL_MS = 500;
 
 const SESSION_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -34,18 +31,22 @@ const SESSION_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 /** Collaborators of {@link clearExecutor}; every one is injected in tests. */
 export interface ClearDeps {
   boardDir: string;
+  /** Runs `tmux`. */
+  run: CommandRunner;
   sleep: (ms: number) => Promise<void>;
   now: () => Date;
   /** Records the `ExecutorContextCleared` event. */
   emit?: EventEmitter;
   log?: (line: string) => void;
+  /** Kill and relaunch the executor; the fallback when the pane never shows a prompt. Absent means no fallback. */
+  restart?: (name: string) => Promise<unknown>;
 }
 
 /** Inputs of {@link clearExecutor}. */
 export interface ClearOptions {
-  /** Roster name of the session to rotate. */
+  /** Roster name of the executor to clear. */
   executor: string;
-  /** Ceiling for the acknowledgement; default {@link DEFAULT_SETTLE_MS}. 0 writes the request and does not wait. */
+  /** Ceiling for each wait for the pane's prompt; default {@link DEFAULT_SETTLE_MS}. */
   settleMs?: number;
   pollIntervalMs?: number;
   /** Task whose verdict triggered the clear; recorded on the event. */
@@ -57,16 +58,16 @@ export interface ClearOptions {
 /** What a clear did. */
 export interface ClearResult {
   executor: string;
-  /** The request was written and, unless `settleMs` is 0, acknowledged. */
   ok: boolean;
-  /** The hooks module consumed the request. */
-  acknowledged: boolean;
+  /** How the context was emptied; absent when `ok` is false. */
+  via?: 'clear' | 'restart';
   settleMs: number;
-  /** The request file. */
-  file?: string;
   /** Set when `ok` is false: the named refusal. */
   reason?: string;
 }
+
+/** The command typed into a cleared executor pane. */
+export const EXECUTOR_RESUME = '/ai-sdlc:executor';
 
 /** The task the named session holds inflight, or undefined. */
 export function holdsInflight(boardDir: string, name: string): string | undefined {
@@ -79,9 +80,9 @@ export function holdsInflight(boardDir: string, name: string): string | undefine
 }
 
 /**
- * Ask the named session to rotate and report the acknowledgement.
- * @throws, writing nothing, when the name is invalid, is not a running roster session, its entry is
- *   unsafe, it holds an inflight task, or the roster has no running dispatch session to deliver the request.
+ * Empty the named session's context from the dispatch side.
+ * @throws, sending nothing, when the name is invalid, is not a running roster session, its entry is
+ *   unsafe, it holds an inflight task, or its tmux session or pane cannot be trusted.
  */
 export async function clearExecutor(opts: ClearOptions, deps: ClearDeps): Promise<ClearResult> {
   const name = opts.executor;
@@ -105,45 +106,63 @@ export async function clearExecutor(opts: ClearOptions, deps: ClearDeps): Promis
   }
   const unsafe = unsafeEntryReason(entry);
   if (unsafe) throw new Error(`refusing to clear '${name}': it ${unsafe}`);
-  if (entry.role === 'executor') {
-    const held = holdsInflight(deps.boardDir, name);
-    if (held) {
-      throw new Error(`refusing to clear '${name}': it holds ${held}, which is still inflight`);
+  if (entry.role !== 'executor') {
+    throw new Error(`refusing to clear '${name}': clear applies to executors only (${entry.role})`);
+  }
+  const held = holdsInflight(deps.boardDir, name);
+  if (held) {
+    throw new Error(`refusing to clear '${name}': it holds ${held}, which is still inflight`);
+  }
+  const unowned = ownershipRefusal(deps.run, entry);
+  if (unowned) throw new Error(`refusing to clear '${name}': ${unowned}`);
+  const target = resolveSendTarget(deps.run, entry.tmuxSession, entry.tmuxWindow, entry.paneId);
+
+  const polls = Math.max(1, Math.ceil(settleMs / pollIntervalMs));
+  const waitForPrompt = async (): Promise<boolean> => {
+    for (let i = 0; i < polls; i++) {
+      if (paneIsIdle(deps.run, entry.tmuxSession, entry.tmuxWindow)) return true;
+      await deps.sleep(pollIntervalMs);
+    }
+    return false;
+  };
+
+  let via: 'clear' | 'restart' | undefined;
+  let reason: string | undefined;
+  // The pane must be idle before `/clear` is typed, and fresh again before the resume command.
+  if ((await waitForPrompt()) && sendLine(deps.run, target, '/clear')) {
+    // Let the pane leave the old prompt before looking for the fresh one.
+    await deps.sleep(pollIntervalMs);
+    if ((await waitForPrompt()) && sendLine(deps.run, target, EXECUTOR_RESUME)) via = 'clear';
+  }
+  if (!via) {
+    if (deps.restart) {
+      deps.log?.(`'${name}' did not reach a fresh prompt within ${settleMs} ms; restarting it`);
+      try {
+        await deps.restart(name);
+        via = 'restart';
+      } catch (err) {
+        reason = `no fresh prompt within ${settleMs} ms and the restart fallback failed: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    } else {
+      reason = `no fresh prompt within ${settleMs} ms and no restart fallback is available`;
     }
   }
-  if (!roster.sessions.some((e) => e.role === 'operator-dispatch' && e.status === 'running')) {
-    throw new Error(
-      `refusing to clear '${name}': no running dispatch session in the roster, so no hooks module is loaded to deliver the rotate request; start one with cli-hierarchy up`,
-    );
-  }
-
-  const file = requestRotate(deps.boardDir, name, deps.now());
-  let acknowledged = false;
-  const polls = settleMs === 0 ? 0 : Math.max(1, Math.ceil(settleMs / pollIntervalMs));
-  for (let i = 0; i < polls && !acknowledged; i++) {
-    await deps.sleep(pollIntervalMs);
-    acknowledged = !existsSync(rotateRequestPath(deps.boardDir, name));
-  }
-  const ok = settleMs === 0 || acknowledged;
-  const reason = ok
-    ? undefined
-    : `rotate request not acknowledged within ${settleMs} ms: no hooks module consumed it, so the dispatch session has no module loaded (check its pane and the module version floor); the request stays pending at ${file}`;
+  const ok = via !== undefined;
   deps.emit?.({
     type: 'ExecutorContextCleared',
     executor: name,
     paneId: entry.paneId,
-    resumed: acknowledged,
+    resumed: ok,
     settleMs,
     ...(opts.taskId ? { taskId: opts.taskId } : {}),
     ...(opts.workerId ? { workerId: opts.workerId } : {}),
   });
-  deps.log?.(ok ? `rotate requested for '${name}'` : `clear of '${name}' failed: ${reason}`);
+  deps.log?.(ok ? `cleared '${name}' (${via})` : `clear of '${name}' failed: ${reason}`);
   return {
     executor: name,
     ok,
-    acknowledged,
     settleMs,
-    file,
+    ...(via ? { via } : {}),
     ...(reason === undefined ? {} : { reason }),
   };
 }
