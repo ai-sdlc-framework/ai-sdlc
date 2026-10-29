@@ -164,8 +164,8 @@ describe('checkFollowups', () => {
       expect(r.ok).toBe(false);
     });
 
-    it('documents: an unclosed fence before the heading hides the section', () => {
-      expect(checkFollowups('```\nnever closed\n### Follow-up\n- prose\n').ok).toBe(true);
+    it('fails closed: an unclosed fence before the heading is reported (AISDLC-661)', () => {
+      expect(checkFollowups('```\nnever closed\n### Follow-up\n- prose\n').ok).toBe(false);
     });
   });
 
@@ -214,6 +214,37 @@ describe('checkFollowups', () => {
       );
       expect(Date.now() - t).toBeLessThan(BOUND_MS);
       expect(r.ok).toBe(false);
+    });
+  });
+
+  describe('bypass hardening (AISDLC-661)', () => {
+    const H = '### Follow-up\n- prose only\n';
+    const F = '```';
+    it('checks a heading after an indented (code block) fence-like line', () => {
+      expect(checkFollowups(`    ${F}\n${H}`).ok).toBe(false);
+    });
+    it('checks a heading after a backtick opener with a backtick in the info string', () => {
+      expect(checkFollowups(`${F} a${'`'}b\n${H}`).ok).toBe(false);
+    });
+    it('still treats a 3-space-indented fence as a fence', () => {
+      expect(checkFollowups(`   ${F}\n${H}${F}\n`).ok).toBe(true);
+    });
+    it('reports an over-long heading line', () => {
+      const r = checkFollowups(`## ${' '.repeat(5000)}Follow-up\n- (none)\n`);
+      expect(r.ok).toBe(false);
+      expect(r.violations[0].reason).toBe('item-too-large');
+    });
+    it('splits on a bare carriage return', () => {
+      expect(checkFollowups('intro\r### Follow-up\r- prose only\r').ok).toBe(false);
+    });
+    it('reports a document that ends inside a fence holding a heading', () => {
+      const r = checkFollowups('```\n### Follow-up\n- prose only\n');
+      expect(r.ok).toBe(false);
+      expect(r.violations[0].reason).toBe('unclosed-fence');
+      expect(formatFollowupViolations(r.violations)).toContain('never closed');
+    });
+    it('passes a closed fence containing a heading', () => {
+      expect(checkFollowups('```\n### Follow-up\n- prose only\n```\n').ok).toBe(true);
     });
   });
 });

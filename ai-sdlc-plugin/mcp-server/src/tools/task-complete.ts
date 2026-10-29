@@ -67,6 +67,20 @@ export function registerTaskComplete(server: McpServer, deps: ToolDeps): void {
         // call leaves the task file untouched. Same rule + message as the
         // pre-push gate (shared implementation in pipeline-cli).
         if (finalSummary !== undefined) {
+          // Backlog.md adds the section markers itself; one inside the input
+          // could end the Follow-up check early while the rest still renders
+          // under the heading.
+          if (/<!--\s*SECTION:/i.test(finalSummary)) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: 'finalSummary must not contain a section marker (<!-- SECTION:... -->); Backlog.md adds them itself. Remove the marker and retry.',
+                },
+              ],
+              isError: true,
+            };
+          }
           const taskPrefix = readTaskPrefix(projectDir);
           const check = checkFollowups(finalSummary, { taskPrefix });
           if (!check.ok) {
