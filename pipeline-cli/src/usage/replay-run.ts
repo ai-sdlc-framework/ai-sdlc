@@ -129,6 +129,8 @@ export interface RunReplayInput {
   runId: string;
   tmpRoot?: string;
   runner?: Runner;
+  /** Per-review timeout in ms; a review that exceeds it is an error. Default 20 minutes. */
+  reviewTimeoutMs?: number;
   /** Aborted by a signal handler; the run stops before the next item. */
   signal?: AbortSignal;
   onProgress?: (line: string) => void;
@@ -318,11 +320,64 @@ export function wrapUntrusted(
   );
 }
 
+/** Reject when the promise does not settle within `ms`; the timer never keeps the process alive. */
+async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('review timed out')), ms);
+    timer.unref();
+  });
+  try {
+    return await Promise.race([p, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export interface PairwiseComparison {
+  candidate: string;
+  reference: string;
+  /** Candidate rate minus reference rate; null when either rate is null. */
+  recallDelta: number | null;
+  falseBlockDelta: number | null;
+  candidateRecall: { blocked: number; items: number };
+  referenceRecall: { blocked: number; items: number };
+  candidateFalseBlock: { blocked: number; items: number };
+  referenceFalseBlock: { blocked: number; items: number };
+}
+
+/** Candidate-versus-reference deltas, or undefined when the run had no reference. */
+export function compareScores(r: ReplayResults): PairwiseComparison | undefined {
+  if (!r.reference) return undefined;
+  const c = r.scores.find((s) => s.model === r.candidate);
+  const f = r.scores.find((s) => s.model === r.reference);
+  if (!c || !f) return undefined;
+  const delta = (a: number | null, b: number | null): number | null =>
+    a === null || b === null ? null : a - b;
+  return {
+    candidate: c.model,
+    reference: f.model,
+    recallDelta: delta(c.recall, f.recall),
+    falseBlockDelta: delta(c.falseBlockRate, f.falseBlockRate),
+    candidateRecall: c.knownDefect,
+    referenceRecall: f.knownDefect,
+    candidateFalseBlock: c.clean,
+    referenceFalseBlock: f.clean,
+  };
+}
+
+function signedPoints(d: number | null): string {
+  if (d === null) return '-';
+  const v = Math.round(d * 100);
+  return `${v > 0 ? '+' : ''}${v} pts`;
+}
+
 export async function runReplay(input: RunReplayInput): Promise<ReplayResults> {
   const models = [input.candidate, ...(input.reference ? [input.reference] : [])];
   // Computed once: the same value stamps every record and the results file.
   const repoId = (input.repoIdFor ?? repoIdFor)(input.repoRoot);
   const type = reviewerTypeFor(input.role);
+  const timeoutMs = input.reviewTimeoutMs ?? REVIEW_TIMEOUT_MS;
   const spawners = new Map(models.map((m) => [m, input.createSpawner({ model: m, type })]));
   const ordered = interleaveByLabel(input.items.filter((i) => i.role === input.role));
 
@@ -388,12 +443,15 @@ export async function runReplay(input: RunReplayInput): Promise<ReplayResults> {
         for (const model of models) {
           let result: SubagentResult;
           try {
-            result = await (spawners.get(model) as SubagentSpawner).spawn({
-              type,
-              prompt,
-              cwd: worktree,
-              timeout: REVIEW_TIMEOUT_MS,
-            });
+            result = await withTimeout(
+              (spawners.get(model) as SubagentSpawner).spawn({
+                type,
+                prompt,
+                cwd: worktree,
+                timeout: timeoutMs,
+              }),
+              timeoutMs,
+            );
           } catch {
             // A thrown or timed-out spawn may still have spent tokens we cannot see: treat it
             // like a missing usage report so --max-units cannot be bypassed.
@@ -500,6 +558,15 @@ export function renderReplayResults(r: ReplayResults): string {
         `over ${s.reviews} review(s)` +
         (s.errors ? `, ${s.errors} error(s) not scored` : '') +
         (s.usageMissing ? `, ${s.usageMissing} review(s) reported no token counts` : ''),
+    );
+  }
+  const cmp = compareScores(r);
+  if (cmp) {
+    const frac = (x: { blocked: number; items: number }): string => `${x.blocked}/${x.items}`;
+    lines.push(
+      `Candidate ${cmp.candidate} vs reference ${cmp.reference}: ` +
+        `recall ${signedPoints(cmp.recallDelta)} (${frac(cmp.candidateRecall)} vs ${frac(cmp.referenceRecall)}), ` +
+        `false-block ${signedPoints(cmp.falseBlockDelta)} (${frac(cmp.candidateFalseBlock)} vs ${frac(cmp.referenceFalseBlock)})`,
     );
   }
   return `${lines.join('\n')}\n`;

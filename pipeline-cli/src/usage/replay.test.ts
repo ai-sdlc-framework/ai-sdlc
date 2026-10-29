@@ -28,7 +28,8 @@ import type { ProcessSpawner } from '../runtime/shell-claude-p-spawner.js';
 import type { SpawnOpts, SubagentResult, SubagentSpawner } from '../types.js';
 import { buildCorpus, labelRecords, readCorpus, type CorpusFile } from './replay-corpus.js';
 import { repoIdFor, selectByRepo } from './repo-id.js';
-import { runReplay } from './replay-run.js';
+import { compareScores, renderReplayResults, runReplay } from './replay-run.js';
+import { mergeCorpus } from './replay-corpus.js';
 import {
   activeWorktreeCount,
   isOwnedByUser,
@@ -714,6 +715,81 @@ describe('replay', () => {
     }
     const sel = selectByRepo(records, { repoId: 'x#y', repoName: 'replay-repo' });
     expect(sel).toMatchObject({ records: [], legacy: 0, unavailable: 2 });
+  });
+
+  it('records a review that exceeds the per-model timeout as an error and stops on the usage gap', async () => {
+    const corpus = await buildCorpusViaCli();
+    const hang: SpawnerFactory = () => ({
+      spawn: () => new Promise<SubagentResult>(() => undefined),
+      spawnParallel: async () => [],
+    });
+    const results = await runReplay({
+      items: corpus.items,
+      role: 'code',
+      candidate: 'cand-model',
+      maxItems: 2,
+      maxUnits: 1_000_000,
+      reviewTimeoutMs: 20,
+      repoRoot: repo,
+      repoName: 'replay-repo',
+      git: createGit(),
+      createSpawner: hang,
+      weights: deriveUnitWeights([], T0.toISOString(), defaultUsageConfig().weights),
+      usage: { dir: usageDir },
+      now: () => T0,
+      runId: 'timeout',
+      tmpRoot,
+    });
+    expect(results.items[0]?.outcomes['cand-model']).toBe('error');
+    expect(results.stoppedBy).toBe('usage-unreported');
+  });
+
+  it('shows pairwise deltas with counts and merges corpora without duplicates', async () => {
+    const corpus = await buildCorpusViaCli();
+    const merged = mergeCorpus(corpus, { ...corpus, items: [...corpus.items].reverse() });
+    expect(merged.items).toHaveLength(corpus.items.length);
+    const extra = { ...corpus.items[0], commitSha: 'e'.repeat(40) } as (typeof corpus.items)[0];
+    expect(mergeCorpus(corpus, { ...corpus, items: [extra] }).items).toHaveLength(
+      corpus.items.length + 1,
+    );
+    const score = (model: string, recall: number | null, fb: number | null) => ({
+      model,
+      role: 'code' as const,
+      reviews: 4,
+      errors: 0,
+      knownDefect: { items: 2, blocked: recall === null ? 0 : recall * 2 },
+      clean: { items: 2, blocked: fb === null ? 0 : fb * 2 },
+      recall,
+      falseBlockRate: fb,
+      unitsTotal: 0,
+      meanUnitsPerReview: null,
+      usageMissing: 0,
+    });
+    const results = {
+      schemaVersion: 'v1' as const,
+      runId: 'r',
+      generatedAt: '',
+      role: 'code' as const,
+      candidate: 'c',
+      reference: 'r',
+      stoppedBy: 'completed' as const,
+      limits: { maxItems: 1, maxUnits: 1 },
+      itemsReplayed: 4,
+      skippedUnreachable: 0,
+      scores: [score('c', 0.5, 0), score('r', 1, 0.5)],
+      items: [],
+    };
+    expect(compareScores(results)?.recallDelta).toBe(-0.5);
+    expect(renderReplayResults(results)).toContain(
+      'recall -50 pts (1/2 vs 2/2), false-block -50 pts (0/2 vs 1/2)',
+    );
+    expect(compareScores({ ...results, reference: undefined })).toBeUndefined();
+    expect(compareScores({ ...results, scores: [score('c', null, null)] })).toBeUndefined();
+    const nul = compareScores({ ...results, scores: [score('c', null, 0), score('r', 1, 0)] });
+    expect(nul?.recallDelta).toBeNull();
+    expect(
+      renderReplayResults({ ...results, scores: [score('c', null, 0), score('r', 1, 0)] }),
+    ).toContain('recall -');
   });
 
   it('keeps replay usage out of the scorecard and adds reviewer rows from a results file', async () => {
