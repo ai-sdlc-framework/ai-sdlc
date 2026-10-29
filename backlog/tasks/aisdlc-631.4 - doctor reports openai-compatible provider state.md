@@ -2,7 +2,7 @@
 id: AISDLC-631.4
 title: >-
   RFC-0049 follow-up: doctor judgment check reports the openai-compatible provider and its shadow cap
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-01'
 labels:

@@ -1142,7 +1142,26 @@ describe('checkJudgmentLayer', () => {
         ),
       ),
     );
-    expect(ids(good)).toEqual(['judgment-layer']);
+    expect(ids(good)).toEqual(['judgment-layer', 'judgment-provider-openai-compatible']);
+    const info = good.find((r) => r.id === 'judgment-provider-openai-compatible')!;
+    expect(info.title).toContain('localhost:1');
+    expect(info.title).toContain('loopback: yes');
+    expect(info.title).toContain('capped at shadow');
+  });
+
+  it('never prints the API key value for openai-compatible', () => {
+    const rs = checkJudgmentLayer(
+      ctxWith(
+        config(
+          '  provider: openai-compatible\n  model: m\n  providerOptions:\n    openai-compatible:\n      baseUrl: https://gw.example.com/v1\n      apiKeyEnv: MY_GW_KEY\n',
+        ),
+        { MY_GW_KEY: 'sk-SECRET-VALUE' },
+      ),
+    );
+    const info = rs.find((r) => r.id === 'judgment-provider-openai-compatible')!;
+    expect(info.title).toContain('gw.example.com');
+    expect(info.title).toContain('loopback: no');
+    expect(JSON.stringify(rs)).not.toContain('sk-SECRET-VALUE');
   });
 
   it('warns when the provider is not built in', () => {
