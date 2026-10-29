@@ -3,7 +3,14 @@ import { rmSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { loadKnowledgeConfig, loadRetrievalConfig } from '../config.js';
 import { readEntries } from '../store.js';
-import { loadedKeys, recordLoaded } from './ledger.js';
+import {
+  compactLedger,
+  ensureLedger,
+  loadedKeys,
+  loadedSources,
+  recordLoaded,
+  resetLedger,
+} from './ledger.js';
 import { createRetrievalIndex } from './registry.js';
 import type { Embedder, QueryHit, QueryOptions } from './types.js';
 
@@ -41,6 +48,8 @@ export async function rebuildIndex(projectRoot: string, embedder?: Embedder): Pr
 export interface QueryRequest extends QueryOptions {
   text: string;
   sessionId?: string;
+  /** Injection moment recorded in the ledger (for example session-start, prompt). */
+  moment?: string;
 }
 
 export async function queryIndex(
@@ -50,11 +59,44 @@ export async function queryIndex(
 ): Promise<QueryHit[]> {
   const { index } = open(projectRoot, embedder);
   try {
+    if (req.sessionId) ensureLedger(projectRoot, req.sessionId);
     const exclude = req.sessionId ? loadedKeys(projectRoot, req.sessionId) : undefined;
-    const hits = await index.query(req.text, { ...req, exclude });
-    if (req.sessionId) recordLoaded(projectRoot, req.sessionId, hits);
+    const excludeSources = req.sessionId ? loadedSources(projectRoot, req.sessionId) : undefined;
+    const hits = await index.query(req.text, { ...req, exclude, excludeSources });
+    if (req.sessionId) recordLoaded(projectRoot, req.sessionId, hits, { moment: req.moment });
     return hits;
   } finally {
     index.close();
   }
+}
+
+/** `/clear`: the session starts again with only the pre-marked entries loaded. */
+export function resetSession(projectRoot: string, sessionId: string): void {
+  resetLedger(projectRoot, sessionId);
+}
+
+const squash = (t: string): string => t.replace(/\s+/g, ' ').trim().toLowerCase();
+
+/**
+ * `PreCompact`: an entry stays loaded when its id or its value text appears in the compaction
+ * summary; the rest become eligible for injection again.
+ */
+export function compactSession(
+  projectRoot: string,
+  sessionId: string,
+  summary: string,
+): { kept: number; dropped: number } {
+  const k = loadKnowledgeConfig(projectRoot);
+  const text = squash(summary);
+  const values = new Map<string, string>();
+  for (const e of [
+    ...readEntries(abs(projectRoot, k.trackedRoot)),
+    ...readEntries(abs(projectRoot, k.protectedRoot)),
+  ]) {
+    values.set(e.id, squash(e.value));
+  }
+  return compactLedger(projectRoot, sessionId, (row) => {
+    const value = values.get(row.id);
+    return text.includes(row.id.toLowerCase()) || (!!value && text.includes(value));
+  });
 }

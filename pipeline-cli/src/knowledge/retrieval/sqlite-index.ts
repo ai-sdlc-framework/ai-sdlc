@@ -177,6 +177,7 @@ export class SqliteRetrievalIndex implements RetrievalIndex {
         { id: string; content_hash: string; source: string; tokens: number } | undefined;
       if (!row) continue;
       if (opts.exclude?.has(loadKey(row.id, row.content_hash))) continue;
+      if (opts.excludeSources?.has(row.source)) continue;
       if (opts.budget !== undefined && used + row.tokens > opts.budget) break;
       used += row.tokens;
       hits.push({
