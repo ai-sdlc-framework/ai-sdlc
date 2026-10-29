@@ -2,7 +2,7 @@
 id: AISDLC-696
 title: >-
   commitlint: accept the pipeline-cli, hooks and plugin scopes
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-03'
 labels:
