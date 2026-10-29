@@ -2,7 +2,7 @@
 id: AISDLC-668.4
 title: >-
   RFC-0051: cli-hierarchy brief-status subcommand
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
