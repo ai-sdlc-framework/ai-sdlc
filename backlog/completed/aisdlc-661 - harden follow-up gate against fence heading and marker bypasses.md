@@ -2,7 +2,7 @@
 id: AISDLC-661
 title: >-
   Harden the follow-up gate against fence, long-heading and embedded-marker bypasses
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
