@@ -190,6 +190,13 @@ export {
   type PriorityInput,
   type PriorityConfig,
 } from './priority.js';
+export {
+  csvSignalAdapter,
+  decayFactor,
+  externalSignalUplift,
+  type ExternalSignalAdapter,
+  type ExternalSignalEntry,
+} from './external-signals.js';
 
 // Action enforcement
 export {

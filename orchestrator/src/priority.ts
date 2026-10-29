@@ -13,6 +13,9 @@
 
 import type { PriorityScore, PriorityInput, PriorityConfig } from '@ai-sdlc/reference';
 
+import { now as clockNow } from './clock.js';
+import { externalSignalUplift, type ExternalSignalEntry } from './external-signals.js';
+
 // ── Re-export types ─────────────────────────────────────────────────
 
 export type { PriorityScore, PriorityInput, PriorityConfig };
@@ -214,7 +217,22 @@ export function computeConfidence(input: PriorityInput): number {
  *
  * P(w) = Sα × Dπ × Mφ × Eρ × (1 − Eτ) × (1 + HC) × Cκ
  */
-export function computePriority(input: PriorityInput, config?: PriorityConfig): PriorityScore {
+export function computePriority(
+  rawInput: PriorityInput,
+  config?: PriorityConfig,
+  externalSignals?: readonly ExternalSignalEntry[],
+  now: Date = clockNow(),
+): PriorityScore {
+  let input = rawInput;
+  if (externalSignals && externalSignals.length > 0) {
+    const uplift = externalSignalUplift(rawInput.itemId, externalSignals, now);
+    if (uplift > 0) {
+      input = {
+        ...rawInput,
+        demandSignal: clamp((rawInput.demandSignal ?? DEFAULT_SIGNAL) + uplift, 0, 1),
+      };
+    }
+  }
   const timestamp = new Date().toISOString();
 
   // ── Override path ──────────────────────────────────────────────
