@@ -2,7 +2,7 @@
 id: AISDLC-1111
 title: >-
   Pipeline rebuilds the workspace after a rebase and before attestation-sign or push (missing orchestrator dist and stale reference dist stop the run at the last step)
-status: In Progress
+status: To Do
 assignee: []
 created_date: '2026-10-29'
 labels:
@@ -44,3 +44,7 @@ Fix: in the setup step and in every rebase done by the pipeline (the pre-sign re
 ## Notes
 
 Evidence: `.ai-sdlc/dispatch/failed/` verdicts dated 2026-10-29 for the PRs listed above ("attestation-sign hard-failed because orchestrator/dist was not built in the worktree", "TS2305 ... @ai-sdlc/reference has no exported member ... likely stale reference build after the rebase").
+
+## Verification record
+
+`pnpm --filter @ai-sdlc/pipeline-cli test` (vitest run): full run had 1 load-induced flake outside the touched files; re-run split passes: `src/steps` 30 files, 699 tests passed; remainder 532 files, 11665 tests passed, 13 skipped. build, lint, format:check clean.
