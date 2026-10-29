@@ -121,14 +121,25 @@ export interface ChainDeps {
 
 /** Production collaborators: the main checkout's board, `ps`, tmux and the events stream. */
 export function createSystemChainDeps(workDir: string): ChainDeps {
+  // AISDLC-1113: a process under test must never type into a live roster session.
+  const underTest = process.env.VITEST !== undefined || process.env.NODE_ENV === 'test';
   const boardDir =
     resolveTrustedBoard(process.cwd())?.boardDir ?? path.join(workDir, '.ai-sdlc', 'dispatch');
   return {
     boardDir,
     identity: createSystemIdentity(boardDir),
     sessions: () => readRosterChecked(boardDir).roster.sessions,
-    send: createTmuxBriefSender(createSystemRunner()),
+    send: underTest ? recordingSend(testSentMessages) : createTmuxBriefSender(createSystemRunner()),
     emit: createStreamEmitter(),
+  };
+}
+
+/** Messages the test-mode sender swallowed instead of typing into a session (AISDLC-1113). */
+export const testSentMessages: Array<{ to: string; message: string }> = [];
+
+function recordingSend(sink: Array<{ to: string; message: string }>): BriefSender {
+  return (entry, message) => {
+    sink.push({ to: entry.name, message });
   };
 }
 
@@ -214,6 +225,7 @@ export function decisionMessage(
   kind: 'needs-answer' | 'answered',
   decisionId: string,
   tier?: EscalationTier,
+  storePath?: string,
 ): string {
   if (!/^DEC-\d{4,}$/.test(decisionId)) {
     throw new Error(`refusing to announce decision id '${oneLine(decisionId, 40)}'`);
@@ -224,7 +236,8 @@ export function decisionMessage(
   if (tier === undefined || !ESCALATION_TIERS.includes(tier)) {
     throw new Error('refusing to announce a decision without a known tier');
   }
-  return `Decision ${decisionId} (${tier}) needs an answer. Read it with: cli-decisions show ${decisionId}`;
+  const store = storePath ? ` (store: ${oneLine(storePath, 120)})` : '';
+  return `Decision ${decisionId} (${tier}) needs an answer. Read it with: cli-decisions show ${decisionId}${store}`;
 }
 
 /** Tell the session that owns `tier` about a decision (id and tier only). Never throws. */
@@ -232,10 +245,15 @@ export function notifyTier(
   deps: ChainDeps,
   tier: EscalationTier,
   decisionId: string,
+  storePath?: string,
 ): NotifyResult {
   if (tier === 'operator') return { sent: false, reason: 'the operator has no session' };
   try {
-    return sendTo(deps, tierSession(deps, tier), decisionMessage('needs-answer', decisionId, tier));
+    return sendTo(
+      deps,
+      tierSession(deps, tier),
+      decisionMessage('needs-answer', decisionId, tier, storePath),
+    );
   } catch (err) {
     return { sent: false, reason: err instanceof Error ? err.message : String(err) };
   }

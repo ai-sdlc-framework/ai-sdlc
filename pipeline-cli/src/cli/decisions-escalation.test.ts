@@ -231,7 +231,7 @@ describe('escalate --route / --park', () => {
     expect(h.sent).toHaveLength(1);
     expect(h.sent[0]!.to).toBe('operator-dispatch');
     expect(h.sent[0]!.message).toMatch(
-      /^Decision DEC-\d+ \(operational\) needs an answer\. Read it with: cli-decisions show DEC-\d+$/,
+      /^Decision DEC-\d+ \(operational\) needs an answer\. Read it with: cli-decisions show DEC-\d+ \(store: .+\)$/,
     );
     expect(h.sent[0]!.message).not.toMatch(/retry policy/);
     expect(h.events).toEqual([

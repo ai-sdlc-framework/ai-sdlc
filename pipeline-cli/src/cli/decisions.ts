@@ -1173,7 +1173,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
           }
           const receiver = tierSession(chain, route);
           emitRouted(chain, { decisionId, route, taskId, routedTo: receiver?.name ?? route });
-          notified = notifyTier(chain, route, decisionId);
+          notified = notifyTier(chain, route, decisionId, workDir);
         }
 
         if (String(argv.format) === 'json') {

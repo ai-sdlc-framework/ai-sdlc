@@ -2,7 +2,7 @@
 id: AISDLC-1113
 title: >-
   decisions CLI tests must not notify live hierarchy sessions (escalate tests send "DEC-0003 needs an answer" to the real planner over tmux on every suite run)
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-29'
 labels:
@@ -32,12 +32,14 @@ Fix: guard `createSystemChainDeps` under test, inject a fake chain in every `dec
 
 ## Acceptance Criteria
 
-- [ ] Running `pnpm --filter @ai-sdlc/pipeline-cli test` inside a task worktree while the hierarchy is up sends no tmux message to any roster session (verify with a tmux `pipe-pane` capture or by asserting `send` is never the system sender under `VITEST`).
-- [ ] Every `escalate --route` / `--park` test in `pipeline-cli/src/cli/decisions*.test.ts` injects a chain and asserts the captured message instead of relying on the system chain.
-- [ ] A module test fails if a decisions CLI test file calls `escalate --route` or `--park` without an injected chain.
-- [ ] The needs-answer notice includes the decision store path so a fixture decision cannot be mistaken for the catalog one.
-- [ ] `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm format:check` pass; the task file records the test command and its summary line.
+- [x] Running `pnpm --filter @ai-sdlc/pipeline-cli test` inside a task worktree while the hierarchy is up sends no tmux message to any roster session (verify with a tmux `pipe-pane` capture or by asserting `send` is never the system sender under `VITEST`).
+- [x] Every `escalate --route` / `--park` test in `pipeline-cli/src/cli/decisions*.test.ts` injects a chain and asserts the captured message instead of relying on the system chain.
+- [x] A module test fails if a decisions CLI test file calls `escalate --route` or `--park` without an injected chain.
+- [x] The needs-answer notice includes the decision store path so a fixture decision cannot be mistaken for the catalog one.
+- [x] `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm format:check` pass; the task file records the test command and its summary line.
 
 ## Notes
 
 Evidence: planner notices 2026-10-29 07:04Z, 16:3xZ and 17:0xZ; `cli-decisions show DEC-0003` in the main checkout shows lifecycle answered (2026-10-07) with no escalation field; the route test was merged 07:25Z, the first burst was seen 07:04Z while it was being developed.
+
+Verification: `pnpm --filter @ai-sdlc/pipeline-cli exec vitest run src/cli/decisions src/decisions` -> Test Files 36 passed (36), Tests 777 passed (777). Full `pnpm test`: only unrelated failures remain: `scripts/sync-plugin-runtime-deps.test.mjs` (plugin pin drift, fails alone, file untouched by this diff) and a flaky tmpdir cleanup in `ai-sdlc-plugin/hooks/usage-ingest.test.mjs` (passes alone, 18/18, untouched). build, lint, format:check pass.
