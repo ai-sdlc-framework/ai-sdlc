@@ -1552,3 +1552,72 @@ blockedActions: []
     it(`does not block ${rel} (a folded '**x' glob would)`, () => assert.ok(!denied(rel)));
   }
 });
+
+describe('enforce-blocked-actions: bug test-file lock (AISDLC-939)', () => {
+  let proj;
+  const testPath = 'src/foo.test.ts';
+
+  function task(id, labels, body = '') {
+    const l = labels.length ? `labels:\n${labels.map((x) => `  - ${x}`).join('\n')}\n` : '';
+    writeFileSync(
+      join(proj, 'backlog', 'tasks', `${id.toLowerCase()} - t.md`),
+      `---\nid: ${id}\n${l}---\n\n${body}\n`,
+    );
+  }
+
+  function run(file, env = {}) {
+    return spawnSync('node', [hookScript], {
+      input: JSON.stringify({ tool_name: 'Edit', tool_input: { file_path: join(proj, file) } }),
+      encoding: 'utf-8',
+      env: { ...process.env, GITHUB_ACTIONS: '', CLAUDE_PROJECT_DIR: proj, ...env },
+      timeout: 5000,
+    });
+  }
+
+  before(() => {
+    proj = join(tmpdir(), `enforce-test-lock-${Date.now()}`);
+    mkdirSync(join(proj, 'backlog', 'tasks'), { recursive: true });
+    mkdirSync(join(proj, 'src'), { recursive: true });
+    task('AISDLC-901', ['bug']);
+    task('AISDLC-902', ['bug'], `Add ${testPath} as the regression test.`);
+    task('AISDLC-903', ['feature']);
+  });
+
+  after(() => rmSync(proj, { recursive: true, force: true }));
+
+  it('denies an unnamed test file for a bug task, naming the task file and both fixes', () => {
+    const r = run(testPath, { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-901' });
+    assert.match(r.stdout, /"deny"/);
+    assert.match(r.stdout, /aisdlc-901 - t\.md/);
+    assert.match(r.stdout, /add 'src\/foo\.test\.ts'/);
+    assert.match(r.stdout, /without the 'bug' label/);
+  });
+
+  it('denies __tests__ and spec paths for a bug task', () => {
+    assert.match(
+      run('src/__tests__/a.ts', { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-901' }).stdout,
+      /"deny"/,
+    );
+    assert.match(run('src/a.spec.js', { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-901' }).stdout, /"deny"/);
+  });
+
+  it('allows a named test file for a bug task', () => {
+    assert.equal(run(testPath, { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-902' }).stdout.trim(), '');
+  });
+
+  it('allows non-test files and tasks without the bug label', () => {
+    assert.equal(run('src/foo.ts', { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-901' }).stdout.trim(), '');
+    assert.equal(run(testPath, { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-903' }).stdout.trim(), '');
+  });
+
+  it('allows when there is no active task', () => {
+    const env = { AI_SDLC_ACTIVE_TASK_ID: '' };
+    assert.equal(run(testPath, env).stdout.trim(), '');
+  });
+
+  it('AI_SDLC_SKIP_TEST_LOCK=1 allows and logs', () => {
+    const r = run(testPath, { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-901', AI_SDLC_SKIP_TEST_LOCK: '1' });
+    assert.equal(r.stdout.trim(), '');
+    assert.match(r.stderr, /AI_SDLC_SKIP_TEST_LOCK=1/);
+  });
+});

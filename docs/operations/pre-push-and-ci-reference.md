@@ -79,3 +79,7 @@ recreates exactly the condition being detected. A second rule flags non-test sou
 ## Format-on-write hook (AISDLC-938)
 
 `ai-sdlc-plugin/hooks/format-on-write.js` is a synchronous PostToolUse hook (matcher `Edit|Write`, registered in both plugin manifests) that runs the project's installed `prettier --write` on the single file the tool just touched, so format drift never reaches the commit. It is a no-op when the file is gone, `.prettierignore` excludes it, no Prettier config resolves, or Prettier is not installed in the project; a Prettier error is logged to stderr and the hook still exits 0. The pre-push `format:check` stays as the backstop. Opt out: `AI_SDLC_SKIP_FORMAT_ON_WRITE=1`.
+
+## Test-file lock (AISDLC-939)
+
+`ai-sdlc-plugin/hooks/enforce-blocked-actions.js` denies `Edit`/`Write` on `*.test.*`, `*.spec.*` and `__tests__/**` paths while the active task (`AI_SDLC_ACTIVE_TASK_ID` or the worktree sentinel) carries the `bug` label, unless the repo-relative path appears in the task file (`references:` or body). The denial names the task file and the two ways forward: add the test path to the task (a reviewed change), or move the edit to a task without the `bug` label. Tasks without the label and sessions without an active task are unaffected. Skip: `AI_SDLC_SKIP_TEST_LOCK=1` (logged to stderr).

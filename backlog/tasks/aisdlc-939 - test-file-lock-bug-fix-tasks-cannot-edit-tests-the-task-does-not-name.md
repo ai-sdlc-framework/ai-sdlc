@@ -1,7 +1,7 @@
 ---
 id: AISDLC-939
 title: 'Test-file lock: a task labelled bug cannot edit test files the task does not name'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-16'
 labels:
