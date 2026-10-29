@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-29T19:14:55.615Z","decisionId":"DEC-0278","chosenOptionId":"link-versions","rationale":"Operator chose it in session 2026-10-29 18:55Z: one release PR, no drift window; plugin version line merges into the runtime group (0.33.x -> group version). Tightening, class (b) recorded with the operator present.","by":"planner"}
