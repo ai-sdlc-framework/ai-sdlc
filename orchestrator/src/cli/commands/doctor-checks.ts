@@ -52,6 +52,7 @@ import { parse as parseYaml } from 'yaml';
 import {
   createBuiltInJudgmentProvider,
   getJudgmentDefinition,
+  isLoopbackUrl,
   isModelAlias,
   judgmentEnforceDowngradeReason,
   loadJudgmentConfig,
@@ -1928,6 +1929,21 @@ export function checkJudgmentLayer(ctx: DoctorRunContext): DoctorCheckResult[] {
       id: 'judgment-layer',
       severity: 'pass',
       title: `judgment layer enabled (provider ${cleanText(provider.name)}, model ${cleanText(config.model ?? provider.modelId)})`,
+    });
+  }
+  if (provider.name === 'openai-compatible') {
+    let host = 'unknown';
+    try {
+      if (provider.baseUrl) host = new URL(provider.baseUrl).host;
+    } catch {
+      // unparseable baseUrl: keep 'unknown'
+    }
+    const loopback = isLoopbackUrl(provider.baseUrl);
+    results.push({
+      id: 'judgment-provider-openai-compatible',
+      severity: 'pass',
+      title: `judgment provider 'openai-compatible' (host ${cleanText(host)}, loopback: ${loopback ? 'yes' : 'no'}); judgments on it are capped at shadow (uncalibrated probabilities)`,
+      anonymizableEvidence: { provider: provider.name, loopback, shadowCap: true },
     });
   }
   return results;
