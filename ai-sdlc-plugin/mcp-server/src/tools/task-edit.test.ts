@@ -142,4 +142,22 @@ describe('locateTaskFile', () => {
   it('returns undefined for unknown ids', () => {
     expect(locateTaskFile(projectDir, 'AISDLC-9999')).toBeUndefined();
   });
+
+  it('accepts bare, prefixed and lowercase forms identically (AISDLC-614)', () => {
+    const path = join(projectDir, 'backlog', 'tasks', 'lt-595 - example.md');
+    writeFileSync(path, 'x');
+    const expected = { path, bucket: 'tasks' };
+    for (const form of ['595', '0595', 'LT-595', 'lt-595', ' lt-595 ']) {
+      expect(locateTaskFile(projectDir, form)).toEqual(expected);
+    }
+  });
+
+  it('does not false-resolve unknown, partial or ambiguous bare ids', () => {
+    writeFileSync(join(projectDir, 'backlog', 'tasks', 'lt-595 - a.md'), 'x');
+    writeFileSync(join(projectDir, 'backlog', 'tasks', 'ab-7 - a.md'), 'x');
+    writeFileSync(join(projectDir, 'backlog', 'tasks', 'cd-7 - a.md'), 'x');
+    expect(locateTaskFile(projectDir, '59')).toBeUndefined();
+    expect(locateTaskFile(projectDir, '7')).toBeUndefined();
+    expect(locateTaskFile(projectDir, '')).toBeUndefined();
+  });
 });

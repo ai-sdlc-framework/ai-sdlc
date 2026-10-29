@@ -163,19 +163,32 @@ export interface LocatedTask {
  * `aisdlc-68 - <slug>.md`).
  */
 export function locateTaskFile(projectDir: string, id: string): LocatedTask | undefined {
-  const idLower = id.toLowerCase();
+  const idLower = id.trim().toLowerCase();
+  if (idLower === '') return undefined;
+  // Bare number (`595`): match `<prefix>-595` for a single unambiguous prefix,
+  // same as `backlog task <n>` (AISDLC-614). Ambiguous prefixes do not resolve.
+  const bare = /^\d+$/.test(idLower) ? String(Number(idLower)) : undefined;
   const buckets: Array<{ dir: string; bucket: 'tasks' | 'completed' }> = [
     { dir: join(projectDir, 'backlog', 'tasks'), bucket: 'tasks' },
     { dir: join(projectDir, 'backlog', 'completed'), bucket: 'completed' },
   ];
+  const bareHits: Array<{ path: string; bucket: 'tasks' | 'completed'; prefix: string }> = [];
   for (const { dir, bucket } of buckets) {
     if (!existsSync(dir)) continue;
     for (const entry of readdirSync(dir)) {
       const lower = entry.toLowerCase();
-      if (lower.startsWith(`${idLower} `) || lower.startsWith(`${idLower}.`)) {
-        return { path: join(dir, entry), bucket };
+      if (bare === undefined) {
+        if (lower.startsWith(`${idLower} `) || lower.startsWith(`${idLower}.`)) {
+          return { path: join(dir, entry), bucket };
+        }
+        continue;
       }
+      const m = /^([a-z][a-z0-9_]*)-0*(\d+)[ .]/.exec(lower);
+      if (m && m[2] === bare) bareHits.push({ path: join(dir, entry), bucket, prefix: m[1] });
     }
+  }
+  if (bareHits.length > 0 && new Set(bareHits.map((h) => h.prefix)).size === 1) {
+    return { path: bareHits[0].path, bucket: bareHits[0].bucket };
   }
   return undefined;
 }
