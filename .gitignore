@@ -158,3 +158,9 @@ AGENTS.md
 
 # AISDLC-581: session-start registry-version TTL cache
 ai-sdlc-plugin/.stale-runtime-cache.json
+
+# AISDLC-775 / RFC-0053: derived retrieval index and per-session load ledgers
+.ai-sdlc/context-index.db
+.ai-sdlc/context-index.db-wal
+.ai-sdlc/context-index.db-shm
+.ai-sdlc/context/sessions/
