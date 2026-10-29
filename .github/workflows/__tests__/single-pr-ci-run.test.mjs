@@ -127,3 +127,30 @@ describe('CI runs once per pull request (AISDLC-727)', () => {
     }
   });
 });
+
+/**
+ * AISDLC-724: a push must produce one result per check name. A workflow that
+ * triggers on both pull_request and pull_request_target, under one cancelling
+ * concurrency group, leaves a cancelled (red) duplicate next to a passing run.
+ * Decision: one event per workflow (no dual triggers) so there is no duplicate
+ * to cancel; the cancel-in-progress groups then only supersede older pushes.
+ */
+describe('AISDLC-724: no dual pull_request / pull_request_target triggers', () => {
+  const files = readdirSync(WORKFLOWS_DIR).filter((f) => f.endsWith('.yml'));
+  for (const f of files) {
+    it(`${f} does not trigger on both pull_request and pull_request_target`, () => {
+      const t = triggers(loadYaml(f));
+      assert.ok(
+        !(t.includes('pull_request') && t.includes('pull_request_target')),
+        `${f} must use a single PR event`,
+      );
+    });
+  }
+
+  it('PR-bound cancelling workflows key concurrency on the PR number', () => {
+    for (const f of ['ai-sdlc-gate.yml', 'ai-sdlc-review.yml']) {
+      const c = loadYaml(f).concurrency;
+      assert.match(c.group, /github\.event\.pull_request\.number/, f);
+    }
+  });
+});

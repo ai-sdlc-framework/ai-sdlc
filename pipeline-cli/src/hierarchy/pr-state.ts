@@ -127,9 +127,18 @@ function failed(c: PrCheck): boolean {
   return c.conclusion === 'failure';
 }
 
+/**
+ * AISDLC-724: a cancelled run is a superseded duplicate when a sibling check of
+ * the same name succeeded; drop it so it is not read as a failing check.
+ */
+export function dropSupersededCancelled(checks: readonly PrCheck[]): PrCheck[] {
+  const passing = new Set(checks.filter((c) => c.conclusion === 'success').map((c) => c.name));
+  return checks.filter((c) => !(c.conclusion === 'cancelled' && passing.has(c.name)));
+}
+
 /** Classify one PR into exactly one state. Pure and deterministic. */
 export function classifyPr(f: PrFacts): PrClassification {
-  const checks = f.checks ?? [];
+  const checks = dropSupersededCancelled(f.checks ?? []);
   const mk = (state: PrState, failingLine?: string): PrClassification => ({
     prNumber: f.prNumber,
     taskId: f.taskId,
