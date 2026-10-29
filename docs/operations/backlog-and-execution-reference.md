@@ -212,3 +212,7 @@ A push typed in the Pattern C parent (on `main`, same remote) overwrites the tas
 5. **Step 11.** Pushes to the PR branch with the lease push (DEC-0264, `--force-with-lease=refs/heads/<branch>:<observed remote head>`), appends `Fixed by <task id>` to the PR body and runs no `gh pr create`; the returned `prUrl` is the existing PR.
 
 **Refusals (named reason, never a silent fallback to a new branch).** A PR whose head is in another repository (a fork) and a head branch that is protected (built-in list, e.g. `main`) are refused at filing (`cli-file`) and again in Step 2. Test: `pipeline-cli/src/steps/fixes-pr-pipeline.test.ts`.
+
+## Workspace build after a rebase (AISDLC-1111)
+
+The tree that is signed and pushed is built from the sources being pushed. Step 3 (setup and resume) and Step 11 (after its late rebase, which also covers a fix-round resume) call `ensureWorkspaceBuilt`, which runs `pnpm build` when HEAD moved since the last build or when `orchestrator/dist/runtime/attestations.js` or `reference/dist/index.js` is absent, and records the build sha in `.ai-sdlc/.last-build-sha` (gitignored). An unmoved HEAD with the dist present pays nothing. A failed build stops Step 11 before sign and push with the build output as the reason. No tooling ceiling is involved.

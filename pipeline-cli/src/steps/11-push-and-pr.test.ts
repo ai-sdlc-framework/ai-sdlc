@@ -797,3 +797,80 @@ describe('Step 11 clobber-signature guard (AISDLC-1019)', () => {
     expect(fake.calls.some((c) => c.args[0] === 'push')).toBe(false);
   });
 });
+
+describe('workspace rebuild after the late rebase (AISDLC-1111)', () => {
+  const seed = (withDist: boolean) => {
+    mkdirSync(join(tmp, 'node_modules'), { recursive: true });
+    if (withDist) {
+      for (const p of ['orchestrator/dist/runtime/attestations.js', 'reference/dist/index.js']) {
+        mkdirSync(join(tmp, p, '..'), { recursive: true });
+        writeFileSync(join(tmp, p), '');
+      }
+    }
+  };
+  const run = async (rebaseMoves: boolean) => {
+    let head = 'aaa';
+    const fake = new FakeRunner()
+      .on(/^git rev-parse HEAD$/, () => ok(head + '\n'))
+      .on(/^git merge-base --is-ancestor/, rebaseMoves ? fail('', 1) : ok())
+      .on(/^git rebase /, () => {
+        head = 'bbb';
+        return ok();
+      })
+      .on(/^gh pr create/, ok('https://example/1'));
+    const r = await pushAndPr({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: dev,
+      verdict: approved,
+      runner: fake.toRunner(),
+      leasePreflight: () => ({ status: 'ok' }) as never,
+    });
+    return { r, fake };
+  };
+  const order = (f: FakeRunner) =>
+    f.calls
+      .map((c) => `${c.command} ${c.args[0]}`)
+      .filter((c) => /pnpm build|git rebase|git push/.test(c));
+
+  it('rebuilds after the rebase moved HEAD, before the push', async () => {
+    seed(true);
+    const { r, fake } = await run(true);
+    expect(r.pushed).toBe(true);
+    expect(order(fake)).toEqual(['git rebase', 'pnpm build', 'git push']);
+  });
+
+  it('does not rebuild when the rebase left HEAD alone', async () => {
+    seed(true);
+    const { fake } = await run(false);
+    expect(order(fake)).not.toContain('pnpm build');
+  });
+
+  it('rebuilds a missing dist entry point even though HEAD did not move', async () => {
+    seed(false);
+    const { fake } = await run(false);
+    expect(order(fake)).toEqual(['pnpm build', 'git push']);
+  });
+
+  it('refuses to push when the rebuild fails', async () => {
+    seed(false);
+    const fake = new FakeRunner().on(/^pnpm build/, fail('TS2305 no exported member'));
+    const r = await pushAndPr({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: dev,
+      verdict: approved,
+      runner: fake.toRunner(),
+      leasePreflight: () => ({ status: 'ok' }) as never,
+    });
+    expect(r.pushed).toBe(false);
+    expect(r.reason).toContain('TS2305');
+    expect(fake.calls.some((c) => c.args[0] === 'push')).toBe(false);
+  });
+});

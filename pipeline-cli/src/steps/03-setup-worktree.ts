@@ -25,6 +25,7 @@ import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { withWorktreeMutex, type WithWorktreeMutexOptions } from '../runtime/worktree-mutex.js';
 import type { SetupWorktreeResult } from '../types.js';
 import type { OrchestratorEvent } from '../orchestrator/events.js';
+import { ensureWorkspaceBuilt } from './ensure-workspace-built.js';
 import { ensureWorktreeHooks, type HooksCheckFs } from './hooks-check.js';
 
 /** Canonical truthy values for feature flags (per CLAUDE.md feature-flag conventions). */
@@ -611,6 +612,13 @@ export async function setupWorktree(opts: SetupWorktreeOptions): Promise<SetupWo
     if (resumedHooks.status === 'missing') {
       throw new Error(`Step 3 refused to continue for ${opts.taskId}: ${resumedHooks.message}`);
     }
+    // AISDLC-1111: a resumed worktree may predate a rebase; build only when stale or incomplete.
+    if (existsSync(join(opts.worktreePath, 'node_modules'))) {
+      await ensureWorkspaceBuilt(opts.worktreePath, {
+        runner,
+        ...(resumed.baseSha ? { head: resumed.baseSha } : {}),
+      });
+    }
     return resumed;
   }
 
@@ -708,6 +716,14 @@ export async function setupWorktree(opts: SetupWorktreeOptions): Promise<SetupWo
     await runner('bash', [ensureBuilt, opts.worktreePath], {
       timeout: 600_000,
       allowFailure: true,
+    });
+  }
+  // AISDLC-1111: the workspace packages (orchestrator and reference dist) must be built before
+  // the developer pass; a failed build is not fatal here, Step 11 builds again before signing.
+  if (existsSync(join(opts.worktreePath, 'node_modules'))) {
+    await ensureWorkspaceBuilt(opts.worktreePath, {
+      runner,
+      ...(created.baseSha ? { head: created.baseSha } : {}),
     });
   }
   if (opts.taskFilePathOverride && existsSync(opts.taskFilePathOverride)) {

@@ -46,6 +46,7 @@ import {
   resolveTargetBranch,
 } from './02-compute-branch.js';
 import { landPrep } from './land-prep.js';
+import { ensureWorkspaceBuilt } from './ensure-workspace-built.js';
 import { detectDraftPrForBranch } from './03-setup-worktree.js';
 import { composeJudgmentNotes } from '../judgment/agent-output-checks.js';
 import { writeEvent, type WriteEventOpts } from '../orchestrator/events.js';
@@ -473,6 +474,16 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
         reason: rebase.reason ?? 'late-rebase failed',
       },
     };
+  }
+
+  // 0a. AISDLC-1111 - build the workspace from the rebased sources before anything signs or
+  //     pushes; skipped when the rebase left HEAD alone and the dist entry points exist.
+  if (existsSync(join(opts.worktreePath, 'node_modules'))) {
+    const built = await ensureWorkspaceBuilt(opts.worktreePath, {
+      runner,
+      ...(preRebaseSha ? { changedSince: preRebaseSha } : {}),
+    });
+    if (!built.ok) return { pushed: false, prUrl: null, reason: built.reason };
   }
 
   // 0b. AISDLC-232 — Re-sign attestation after auto-resolve.

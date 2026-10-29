@@ -2,7 +2,7 @@
 id: AISDLC-1111
 title: >-
   Pipeline rebuilds the workspace after a rebase and before attestation-sign or push (missing orchestrator dist and stale reference dist stop the run at the last step)
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-29'
 labels:

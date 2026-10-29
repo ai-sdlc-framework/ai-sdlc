@@ -4,7 +4,7 @@ import { setupWorktree } from './03-setup-worktree.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
 import { FakeRunner, fail, ok } from '../__test-helpers/fake-runner.js';
 import { join } from 'node:path';
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { OrchestratorEvent } from '../orchestrator/events.js';
 import type { ExecResult } from '../runtime/exec.js';
 
@@ -88,6 +88,36 @@ describe('Step 3 — setupWorktree', () => {
         runner: fake.toRunner(),
       }),
     ).rejects.toThrow(/branch already exists|cleanup AISDLC-3/);
+  });
+});
+
+describe('Step 3 — workspace build (AISDLC-1111)', () => {
+  it('leaves orchestrator and reference dist present before the developer pass', async () => {
+    const wt = join(tmp, '.worktrees', 'aisdlc-1111');
+    const fake = new FakeRunner()
+      .on(/^git fetch origin main/, ok())
+      .on(/^git worktree add/, () => {
+        mkdirSync(join(wt, 'node_modules'), { recursive: true });
+        return ok();
+      })
+      .on(/^git -C .+ rev-parse HEAD/, ok('abc123\n'))
+      .on(/^pnpm build/, () => {
+        for (const p of ['orchestrator/dist/runtime/attestations.js', 'reference/dist/index.js']) {
+          mkdirSync(join(wt, p, '..'), { recursive: true });
+          writeFileSync(join(wt, p), '');
+        }
+        return ok();
+      });
+    await setupWorktree({
+      taskId: 'AISDLC-1111',
+      branch: 'b1111',
+      worktreePath: wt,
+      workDir: tmp,
+      runner: fake.toRunner(),
+    });
+    expect(existsSync(join(wt, 'orchestrator', 'dist', 'runtime', 'attestations.js'))).toBe(true);
+    expect(existsSync(join(wt, 'reference', 'dist', 'index.js'))).toBe(true);
+    expect(readFileSync(join(wt, '.ai-sdlc', '.last-build-sha'), 'utf8').trim()).toBe('abc123');
   });
 });
 
