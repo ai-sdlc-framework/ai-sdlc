@@ -133,13 +133,20 @@ export function parseBrief(markdown: string): ParsedBrief {
   if (Buffer.byteLength(markdown, 'utf8') > MAX_BRIEF_BYTES) {
     throw new Error(`brief is larger than ${MAX_BRIEF_BYTES / 1024} KB`);
   }
-  const fence = /^```yaml[ \t]*\r?\n([\s\S]*?)^```[ \t]*$/gm;
+  const open = /^```yaml[ \t]*\r?$/;
+  const close = /^```[ \t]*\r?$/;
+  const lines = markdown.split('\n');
   const blocks: unknown[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = fence.exec(markdown)) !== null) {
+  for (let i = 0; i < lines.length; i++) {
+    if (!open.test(lines[i]!)) continue;
+    let j = i + 1;
+    while (j < lines.length && !close.test(lines[j]!)) j++;
+    if (j >= lines.length) break; // unclosed: nothing after it can close either
+    const body = lines.slice(i + 1, j).join('\n') + '\n';
+    i = j;
     let doc: unknown;
     try {
-      doc = load(m[1]);
+      doc = load(body);
     } catch (err) {
       throw new Error(`brief YAML block is not valid YAML: ${(err as Error).message}`, {
         cause: err,

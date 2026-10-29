@@ -855,3 +855,38 @@ describe('parseBrief input caps', () => {
     expect(() => parseBrief(mk(MAX_BRIEF_ENTRIES + 1))).toThrow(/more than 500 entries/);
   });
 });
+
+describe('hardening (AISDLC-668.5)', () => {
+  it('generates a brief for a task whose priority is constructor', () => {
+    const tasks = [{ ...base('NS-1'), priority: 'constructor' }];
+    const plan = planBrief(tasks, () => true);
+    expect(plan.entries[0]?.priority).toBeUndefined();
+  });
+
+  it('does not let a backslash plus invisible marks open a code span', () => {
+    const tasks = [{ ...base('NS-1'), title: 'a\\\u200b`x`\ufeff\u061c' }];
+    const md = renderBriefOf(planBrief(tasks, () => true));
+    expect(md).not.toMatch(/[\u200b-\u200f\u061c\ufeff]/);
+    expect(md).toContain('a\\\\ \\`x\\`');
+  });
+
+  it('parses many unclosed fence openers in linear time', () => {
+    const md = '```yaml\n'.repeat(Math.floor(MAX_BRIEF_BYTES / 8) - 10);
+    const start = Date.now();
+    expect(() => parseBrief(md)).toThrow(/no 'dispatch/);
+    expect(Date.now() - start).toBeLessThan(2000);
+  });
+
+  it('refuses an explicit output path outside the repo', () => {
+    expect(() => generateBrief({ tasks: 'DEMO-1', out: '../escape.md' }, deps)).toThrow(
+      /outside the repository/,
+    );
+  });
+
+  it('skips a malformed task id found by RFC selection with a warning', () => {
+    task('tasks', 'bad id!', { refs: [RFC] });
+    const r = brief({ rfc: 'RFC-0099' });
+    expect(r.plan.tasks.has('bad id!')).toBe(false);
+    expect(logs.join('\n')).toMatch(/malformed id/);
+  });
+});

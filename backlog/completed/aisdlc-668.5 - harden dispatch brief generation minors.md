@@ -2,7 +2,7 @@
 id: AISDLC-668.5
 title: >-
   RFC-0051: harden dispatch brief generation against minor review findings
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:

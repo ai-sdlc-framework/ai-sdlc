@@ -81,8 +81,9 @@ const FIXED_GROUPS: { match: (file: string) => boolean; name: string }[] = [
 export const PRIORITY_RANK: Readonly<Record<string, number>> = { high: 1, medium: 2, low: 3 };
 
 /** Control, bidi-override and line-separator characters that must not reach the Markdown. */
-// eslint-disable-next-line no-control-regex -- matching control characters is the point
-const UNSAFE_TEXT = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]+/g;
+const UNSAFE_TEXT =
+  // eslint-disable-next-line no-control-regex -- matching control characters is the point
+  /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]+/g;
 
 /** Collapse control characters to a space and neutralise backticks (inline text). */
 function mdText(value: string): string {
@@ -298,7 +299,7 @@ export function planBrief(
       };
       const group = groupOfTask.get(t.id);
       if (group) entry.sequenceGroup = group;
-      const rank = PRIORITY_RANK[t.priority];
+      const rank = Object.hasOwn(PRIORITY_RANK, t.priority) ? PRIORITY_RANK[t.priority] : undefined;
       if (rank !== undefined) entry.priority = rank;
       return entry;
     })
@@ -376,7 +377,12 @@ export function selectTasks(workDir: string, selection: BriefSelection): Selecte
       throw new Error(`invalid --rfc '${selection.rfc}': expected RFC-NNNN`);
     }
     const prefix = `${rfc}-`;
-    const tasks = openNodes.map(readFrontmatterMeta).filter((t) =>
+    const validNodes = openNodes.filter((n) => {
+      if (isValidTaskId(String(n.id).toUpperCase())) return true;
+      warnings.push(`skipping task with malformed id '${mdCode(String(n.id))}'`);
+      return false;
+    });
+    const tasks = validNodes.map(readFrontmatterMeta).filter((t) =>
       t.references.some((r) => {
         const base = path.posix.basename(normalizeRef(r));
         return base.toUpperCase() === `${rfc}.MD` || base.toUpperCase().startsWith(prefix);
@@ -599,6 +605,11 @@ export function generateBrief(options: BriefOptions, deps: HierarchyDeps): Brief
   if (!options.out && !isInside(briefsDir, file)) {
     throw new Error(`${file} is outside ${briefsDir}`);
   }
+  if (options.out && !isInside(deps.cwd, file)) {
+    throw new Error(
+      `${file} is outside the repository ${deps.cwd}; refusing to write a brief there`,
+    );
+  }
   if (!options.out && lstatOrNull(briefsDir)?.isSymbolicLink()) {
     throw new Error(`${briefsDir} is a symbolic link; refusing to write a brief through it`);
   }
@@ -615,6 +626,11 @@ export function generateBrief(options: BriefOptions, deps: HierarchyDeps): Brief
     return { file, plan, dispatch, reused: true };
   }
   mkdirSync(path.dirname(file), { recursive: true });
+  const realDir = realpathSync(path.dirname(file));
+  const realRoot = realpathSync(options.out ? deps.cwd : briefsDir);
+  if (realDir !== realRoot && !isInside(realRoot, realDir)) {
+    throw new Error(`${file} resolves outside ${realRoot}; refusing to write a brief there`);
+  }
   // Exclusive create without --force (no check-then-write race); with --force, never
   // follow a link that appeared after the check.
   const flags =
@@ -641,7 +657,13 @@ export function generateBrief(options: BriefOptions, deps: HierarchyDeps): Brief
     throw err;
   }
   try {
-    writeSync(fd, content);
+    const bytes = Buffer.from(content, 'utf8');
+    let written = 0;
+    while (written < bytes.length) {
+      const n = writeSync(fd, bytes, written, bytes.length - written);
+      if (n <= 0) throw new Error(`short write to ${file}`);
+      written += n;
+    }
   } finally {
     closeSync(fd);
   }
