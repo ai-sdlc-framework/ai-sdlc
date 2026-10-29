@@ -106,16 +106,13 @@ export interface LoopState {
   lastGithubReadAt?: string;
   /** Executors whose rotate request this loop wrote; the next tick reports whether each was consumed (AISDLC-1099). */
   pendingClears?: string[];
-<<<<<<< HEAD
   /** Whether the board was held at the last tick; a held-to-free change is `holdLifted` (AISDLC-1089). */
   wasHeld?: boolean;
   /** When a tick last ran, and who ran it (AISDLC-1096). */
   lastTickAt?: string;
   lastTickBy?: 'host' | 'scheduler';
-=======
   /** When this drain window began (AISDLC-831); set on the first tick. */
   drainStartedAt?: string;
->>>>>>> ef55368bc (feat: track PRs closed unmerged as a waste KPI (AISDLC-831))
 }
 
 /** Why and when the board refused a brief. */
@@ -182,17 +179,15 @@ function saveState(boardDir: string, state: LoopState): void {
 
 /** Map a parsed brief to the entries the board enqueues (the same mapping `cli-dispatch enqueue --from-brief` uses). */
 export function briefToEnqueueEntries(brief: ParsedBrief): EnqueueEntry[] {
-  return brief.entries.map(
-    (e): EnqueueEntry => ({
-      taskId: e.task,
-      ...(e.after.length > 0 ? { after: e.after } : {}),
-      ...(e.sequenceGroup ? { sequenceGroup: e.sequenceGroup } : {}),
-      ...(e.priority !== undefined ? { priority: e.priority } : {}),
-      wave: e.wave,
-      ...(e.fixesPr !== undefined ? { fixesPr: e.fixesPr } : {}),
-      ...(e.prHeadRef ? { prHeadRef: e.prHeadRef } : {}),
-    }),
-  );
+  return brief.entries.map((e): EnqueueEntry => ({
+    taskId: e.task,
+    ...(e.after.length > 0 ? { after: e.after } : {}),
+    ...(e.sequenceGroup ? { sequenceGroup: e.sequenceGroup } : {}),
+    ...(e.priority !== undefined ? { priority: e.priority } : {}),
+    wave: e.wave,
+    ...(e.fixesPr !== undefined ? { fixesPr: e.fixesPr } : {}),
+    ...(e.prHeadRef ? { prHeadRef: e.prHeadRef } : {}),
+  }));
 }
 
 /** What a clear attempt did for one verdict. */
@@ -255,17 +250,14 @@ export interface TickResult {
   canary?: CanaryReport;
   /** Present when the ephemeral steps downed or spawned an executor, or a spawn failed (RFC-0059). */
   ephemeral?: EphemeralReport;
-<<<<<<< HEAD
   /** True on the first tick after a hold was lifted (AISDLC-1089). */
   holdLifted?: boolean;
   /** Task ids queued and eligible to claim, in claim order; filled by `cli-hierarchy tick` (AISDLC-1089). */
   eligibleQueued?: string[];
   /** Names of idle executor sessions; filled by `cli-hierarchy tick` (AISDLC-1089). */
   idleExecutors?: string[];
-=======
   /** PRs closed unmerged in the drain window (AISDLC-831); absent when GitHub was not read. */
   closedUnmerged?: number;
->>>>>>> ef55368bc (feat: track PRs closed unmerged as a waste KPI (AISDLC-831))
   /** Deterministic list of what stops the drain; the dispatch command sends it to the planner when it changes. */
   blockers: string[];
 }
