@@ -154,6 +154,8 @@ export type {
   InflightHeartbeat,
   ManifestWorkerKind,
   QueueCounts,
+  QueuePeek,
+  OldestQueued,
   ResumeFeedback,
   ResumeSignal,
   SweepResult,

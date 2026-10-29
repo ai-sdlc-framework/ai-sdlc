@@ -47,7 +47,7 @@ import {
   type DispatchManifest,
   type DispatchVerdict,
   type InflightHeartbeat,
-  type QueueCounts,
+  type QueuePeek,
   type ResumeSignal,
   type SweepResult,
   type WorkerKind,
@@ -1132,9 +1132,30 @@ export function updateQueuedManifest(
  * Read board occupancy without mutating state. Useful for the Conductor's
  * backpressure decision (don't emit new manifests if queue+inflight ≥ cap).
  */
-export function peekQueue(boardDir: string): QueueCounts {
+export function peekQueue(boardDir: string, now: () => Date = () => clockNow()): QueuePeek {
   ensureBoardDirs(boardDir);
+  let oldest: { taskId: string; dispatchedAt: string; ms: number } | null = null;
+  for (const { fullPath } of listManifestCandidates(path.join(boardDir, 'queue'))) {
+    let manifest: DispatchManifest | undefined;
+    try {
+      manifest = readManifest(fullPath);
+    } catch {
+      continue;
+    }
+    const ms = manifest ? Date.parse(manifest.dispatchedAt) : NaN;
+    if (!manifest || Number.isNaN(ms)) continue;
+    if (oldest === null || ms < oldest.ms) {
+      oldest = { taskId: manifest.taskId, dispatchedAt: manifest.dispatchedAt, ms };
+    }
+  }
   return {
+    oldestQueued: oldest
+      ? {
+          taskId: oldest.taskId,
+          dispatchedAt: oldest.dispatchedAt,
+          ageSeconds: Math.max(0, Math.floor((now().getTime() - oldest.ms) / 1000)),
+        }
+      : null,
     queued: countManifests(path.join(boardDir, 'queue')),
     inflight: countManifests(path.join(boardDir, 'inflight')),
     done: countVerdicts(path.join(boardDir, 'done')),

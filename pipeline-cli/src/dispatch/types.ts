@@ -304,6 +304,18 @@ export interface QueueCounts {
   failed: number;
 }
 
+/** The longest-waiting queued task (AISDLC-1085). */
+export interface OldestQueued {
+  taskId: string;
+  dispatchedAt: string;
+  ageSeconds: number;
+}
+
+/** Result of `peekQueue`: counts plus the oldest queued task (`null` when the queue is empty). */
+export interface QueuePeek extends QueueCounts {
+  oldestQueued: OldestQueued | null;
+}
+
 /** Result of a stale-heartbeat sweep. */
 export interface SweepResult {
   /** Manifests moved from inflight/ to failed/ during this sweep. */
