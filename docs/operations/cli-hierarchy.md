@@ -1404,8 +1404,14 @@ GitHub, classifies it (`pr-state.ts`) and then:
   for a manifest it writes: the path the next resume takes, so you see before the executor
   runs whether the note will be acted on.
 - Loop guard (AISDLC-883): the same `(action, head SHA)` is never taken twice. The second call
-  exits 1 with `loop guard: <action>@<sha> x2 ...`; a push (new head) resets it. Route a
-  refused loop to the planner with `cli-decisions escalate`.
+  exits 1 with `loop guard: <action>@<sha> x2 ...`; a push (new head) resets it. Two more
+  releases serve a planner-ordered round (AISDLC-1105). (1) `--developer-round --note <text>`
+  keys the guard on `(route, head SHA, note hash)`, so a second order with a different note on
+  the same head is accepted and records the note hash; the identical note is still refused.
+  (2) `--decision <DEC-NNNN>` releases the guard when the catalog holds an answered record
+  scoped to the task (its escalation task id or scope names it); an open, unknown or unrelated
+  record is refused, and the guard entry records the decision id. Automated reconcile routing
+  to the planner is unchanged.
 
 The command exits 1, changing nothing, when the PR is merged or closed, the task has no
 verdict, or no PR can be found (a PR-less failure uses `cli-dispatch requeue --task-id <id>`,

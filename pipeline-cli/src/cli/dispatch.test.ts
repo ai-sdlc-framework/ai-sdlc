@@ -2122,4 +2122,37 @@ describe('reenter --developer-round resumePath (AISDLC-1053)', () => {
     const r = await run([]);
     expect(r.resumePath).toBe('full');
   });
+
+  it('wires --decision into the guard release (unknown record is refused)', async () => {
+    await run([]);
+    const { exit } = await captureStdout(() =>
+      runDispatchCli(
+        [
+          'reenter',
+          '7',
+          '--board-dir',
+          board,
+          '--work-dir',
+          root,
+          '--base-sha',
+          'abc1234',
+          '--decision',
+          'DEC-9999',
+        ],
+        {
+          ghRun: gh,
+          operational: new Set(['requeue']),
+          identity: {
+            readSessions: () => [
+              { name: 'operator-dispatch', role: 'operator-dispatch', pid: 400, status: 'running' },
+            ],
+            parentPid: (pid: number) => (pid === 500 ? 400 : null),
+            comm: (pid: number) => (pid === 400 ? 'claude' : 'zsh'),
+            startPid: 500,
+          },
+        },
+      ),
+    );
+    expect(exit).not.toBe(0);
+  });
 });
