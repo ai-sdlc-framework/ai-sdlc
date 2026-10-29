@@ -2,7 +2,7 @@
 id: AISDLC-1114
 title: >-
   sync-plugin-runtime-deps end-to-end test must not depend on live pin drift (every PR red after release 0.38.0 until the pin-sync PR lands)
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-29'
 labels:
@@ -38,3 +38,7 @@ Fix: add a `--root <dir>` option to the script if it lacks one, rewrite the end-
 ## Notes
 
 Evidence: dispatch report 2026-10-29 17:35Z; `Build & Test` red on #1989 and #1852 with the sync-plugin-runtime-deps `CLI end-to-end` assertion while `--pr` passes on main.
+
+## Verification
+
+`node --test scripts/sync-plugin-runtime-deps.test.mjs` -> `# tests 26 / # pass 26 / # fail 0`. Full `pnpm test`: only `pipeline-cli/src/hierarchy/executor-start.test.ts` failed locally because the executor session exports `AI_SDLC_EXECUTOR_TASK`; it passes (23/23) with that env cleared and this diff does not touch it.

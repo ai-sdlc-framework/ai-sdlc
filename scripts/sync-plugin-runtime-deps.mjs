@@ -39,6 +39,7 @@
  *   node scripts/sync-plugin-runtime-deps.mjs           # write mode (default)
  *   node scripts/sync-plugin-runtime-deps.mjs --check    # exit 1 on drift, no write
  *   node scripts/sync-plugin-runtime-deps.mjs --pr       # exit 1 if the two manifests disagree (AISDLC-1068)
+ *   ... --root <dir>                                     # operate on <dir> instead of the repo (tests, AISDLC-1114)
  *
  * `--pr` is the per-PR gate form: it compares the manifests only with each
  * other, never with the workspace versions, so a release pin lag on main
@@ -51,7 +52,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -158,23 +159,39 @@ export function findManifestMismatches(repoRoot) {
   return out;
 }
 
+/** Resolve the root: `--root <dir>` when given, else the repository containing this script. */
+export function resolveRoot(argv) {
+  const i = argv.indexOf('--root');
+  if (i === -1) return REPO_ROOT;
+  const dir = argv[i + 1];
+  if (!dir || dir.startsWith('--')) throw new Error('--root requires a directory argument');
+  return resolve(dir);
+}
+
 async function main() {
+  let repoRoot;
+  try {
+    repoRoot = resolveRoot(process.argv);
+  } catch (err) {
+    console.error(`sync-plugin-runtime-deps: ${err.message}`);
+    process.exitCode = 2;
+    return;
+  }
   if (process.argv.includes('--pr')) {
     for (const p of MANIFEST_PATHS) {
-      if (!existsSync(join(REPO_ROOT, p))) {
+      if (!existsSync(join(repoRoot, p))) {
         console.error(`sync-plugin-runtime-deps: manifest not found: ${p}`);
         process.exitCode = 2;
         return;
       }
     }
-    const mismatches = findManifestMismatches(REPO_ROOT);
+    const mismatches = findManifestMismatches(repoRoot);
     for (const m of mismatches) console.error(`sync-plugin-runtime-deps: manifests disagree: ${m}`);
     if (mismatches.length > 0) process.exitCode = 1;
     else console.error('sync-plugin-runtime-deps: manifests agree (--pr).');
     return;
   }
   const checkOnly = process.argv.includes('--check');
-  const repoRoot = REPO_ROOT;
 
   let anyDrift = false;
   let anyChanged = false;
