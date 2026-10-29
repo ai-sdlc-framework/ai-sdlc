@@ -59,6 +59,8 @@ export interface IngestOptions {
   homeDir?: string;
   /** Clock, for tests. */
   now?: () => number;
+  /** Session id to hierarchy role (RFC-0051); a main session found here is recorded under that role. */
+  sessionRoles?: ReadonlyMap<string, string>;
 }
 
 export interface IngestResult {
@@ -280,7 +282,9 @@ export async function ingestClaudeTranscripts(opts: IngestOptions = {}): Promise
       if (st.size < start) start = 0; // file shrank or was rotated
       if (start >= st.size) continue;
 
-      const agentRole = file.sidecarPath ? readAgentRole(file.sidecarPath) : 'main-session';
+      const agentRole = file.sidecarPath
+        ? readAgentRole(file.sidecarPath)
+        : (opts.sessionRoles?.get(file.sessionStem) ?? 'main-session');
       const batch = new Map<string, ModelCallRecord>();
       const limits: LimitEvent[] = [];
       let scopeDecided = !frameworkOnly;
