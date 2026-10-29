@@ -461,7 +461,8 @@ describe('clear, tick and route-decision', () => {
     const keys: string[] = [];
     const run: CommandRunner = (_f, args) => {
       if (args[0] === 'display-message') return { status: 0, stdout: '%3\n', stderr: '' };
-      if (args[0] === 'capture-pane') return { status: 0, stdout: '│ > │\n', stderr: '' };
+      if (args[0] === 'capture-pane')
+        return { status: 0, stdout: keys.length ? '│ > │\nfresh\n' : '│ > │\n', stderr: '' };
       if (args[0] === 'send-keys') keys.push(args.at(-1)!);
       return { status: 0, stdout: '', stderr: '' };
     };

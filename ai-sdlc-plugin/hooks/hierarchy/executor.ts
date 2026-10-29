@@ -455,6 +455,9 @@ export async function executorTurnComplete(
   // task, so a pending threshold rotation can fire.
   if (!reply && state.pendingRotate) state.active = false;
   if (state.pendingRotate && !taskRunning(state)) await rotate(p, state);
+  // A main-thread turn that ends with no rotation pending leaves the executor idle (dispatch owns the clear
+  // after a verdict), so the next enqueue wake must run the executor command rather than be consumed.
+  else if (!state.pendingRotate) state.active = false;
   return next(e);
 }
 

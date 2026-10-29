@@ -253,6 +253,17 @@ describe('hierarchy module: executor wake', () => {
     expect(ran(s)).toEqual([]);
   });
 
+  it('an enqueue wake runs the executor command after a turn that ended without a marker (AISDLC-1107)', async () => {
+    const s = setup();
+    await s.start();
+    const recv = s.handlers.get('session.receive');
+    await recv(s.$, { text: env('proj-operator-dispatch', 'enqueue 1') }, s.next);
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    await s.handlers.get('turn.complete')(s.$, { text: 'ready for the next task' }, s.next);
+    await recv(s.$, { text: env('proj-operator-dispatch', 'enqueue 2') }, s.next);
+    expect(ran(s)).toEqual([RESUME_COMMAND, RESUME_COMMAND]);
+  });
+
   it('a task with no activity for a while no longer mutes wakes', async () => {
     vi.useFakeTimers();
     const s = setup();

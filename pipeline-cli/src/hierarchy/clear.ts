@@ -18,7 +18,13 @@ import { readInflightManifest } from '../dispatch/board.js';
 import type { EventEmitter } from './emit.js';
 import { listInflight } from './inflight.js';
 import { readRosterChecked, unsafeEntryReason } from './roster.js';
-import { ownershipRefusal, paneIsIdle, resolveSendTarget, sendLine } from './tmux.js';
+import {
+  ownershipRefusal,
+  paneShowsPrompt,
+  paneScreenAt,
+  resolveSendTarget,
+  sendLine,
+} from './tmux.js';
 import type { CommandRunner } from './types.js';
 
 /** Default ceiling, in milliseconds, for the pane to reach an idle or fresh prompt. Overridable in `.ai-sdlc/pr-lifecycle.yaml` (`clear.handshakeCeilingMs`) or `--settle-ms`. */
@@ -118,9 +124,13 @@ export async function clearExecutor(opts: ClearOptions, deps: ClearDeps): Promis
   const target = resolveSendTarget(deps.run, entry.tmuxSession, entry.tmuxWindow, entry.paneId);
 
   const polls = Math.max(1, Math.ceil(settleMs / pollIntervalMs));
-  const waitForPrompt = async (): Promise<boolean> => {
+  // Read the pane from the same target the keys are sent to.
+  const tailOf = (): string => paneScreenAt(deps.run, target);
+  // With `staleTail`, an idle-looking pane whose tail is unchanged is still the pre-clear context.
+  const waitForPrompt = async (staleTail?: string): Promise<boolean> => {
     for (let i = 0; i < polls; i++) {
-      if (paneIsIdle(deps.run, entry.tmuxSession, entry.tmuxWindow)) return true;
+      const tail = tailOf();
+      if (paneShowsPrompt(tail) && (staleTail === undefined || tail !== staleTail)) return true;
       await deps.sleep(pollIntervalMs);
     }
     return false;
@@ -129,10 +139,12 @@ export async function clearExecutor(opts: ClearOptions, deps: ClearDeps): Promis
   let via: 'clear' | 'restart' | undefined;
   let reason: string | undefined;
   // The pane must be idle before `/clear` is typed, and fresh again before the resume command.
-  if ((await waitForPrompt()) && sendLine(deps.run, target, '/clear')) {
+  const idle = await waitForPrompt();
+  const before = tailOf();
+  if (idle && sendLine(deps.run, target, '/clear')) {
     // Let the pane leave the old prompt before looking for the fresh one.
     await deps.sleep(pollIntervalMs);
-    if ((await waitForPrompt()) && sendLine(deps.run, target, EXECUTOR_RESUME)) via = 'clear';
+    if ((await waitForPrompt(before)) && sendLine(deps.run, target, EXECUTOR_RESUME)) via = 'clear';
   }
   if (!via) {
     if (deps.restart) {

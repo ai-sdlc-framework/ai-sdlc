@@ -28,6 +28,10 @@ let keys: string[];
 /** What `capture-pane` returns, in order; the last one repeats. */
 let tails: string[];
 const IDLE = '╭───╮\n│ > │\n╰───╯\n';
+const FRESH = '╭───╮\n│ > │\n╰───╯\nfresh session\n';
+/** When false, /clear leaves the pane tail unchanged (the old context is still on screen). */
+let clearChangesTail = true;
+let clearSent = false;
 const BUSY = 'working…\nesc to interrupt\n';
 
 const entry = (over: Partial<RosterEntry> = {}): RosterEntry => ({
@@ -61,10 +65,14 @@ function seedRoster(...sessions: RosterEntry[]): void {
 const run: CommandRunner = (_cmd, args) => {
   if (args[0] === 'display-message') return { status: 0, stdout: '%7\n', stderr: '' };
   if (args[0] === 'capture-pane') {
-    const out = tails.length > 1 ? tails.shift()! : (tails[0] ?? '');
+    let out = tails.length > 1 ? tails.shift()! : (tails[0] ?? '');
+    if (clearSent && clearChangesTail && out === IDLE) out = FRESH;
     return { status: 0, stdout: out, stderr: '' };
   }
-  if (args[0] === 'send-keys') keys.push(args[args.length - 1]!);
+  if (args[0] === 'send-keys') {
+    keys.push(args[args.length - 1]!);
+    if (args[args.length - 1] === '/clear') clearSent = true;
+  }
   return { status: 0, stdout: '', stderr: '' };
 };
 
@@ -102,6 +110,8 @@ beforeEach(() => {
   sleeps = [];
   onSleep = () => {};
   keys = [];
+  clearSent = false;
+  clearChangesTail = true;
   tails = [IDLE];
   seedRoster(
     dispatch(),
@@ -150,6 +160,17 @@ describe('clearExecutor', () => {
     expect(r.via).toBe('restart');
     expect(keys).toEqual(['/clear', 'Enter']);
     expect(restarted).toEqual(['executor-alpha']);
+  });
+
+  it('does not type the executor command while the pane tail is unchanged since before /clear', async () => {
+    clearChangesTail = false;
+    const restarted: string[] = [];
+    const r = await clearExecutor(
+      { executor: 'executor-alpha', settleMs: 1000 },
+      deps({ restart: async (n) => void restarted.push(n) }),
+    );
+    expect(r.via).toBe('restart');
+    expect(keys).toEqual(['/clear', 'Enter']);
   });
 
   it('reports a named failure when the restart fallback fails or is absent', async () => {

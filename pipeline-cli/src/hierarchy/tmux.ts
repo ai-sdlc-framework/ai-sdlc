@@ -170,7 +170,12 @@ export function ownershipRefusal(run: CommandRunner, entry: RosterEntry): string
 
 /** Last lines of a window's visible output; empty when it cannot be read (AISDLC-948). */
 export function paneTail(run: CommandRunner, session: string, window: string): string {
-  const r = run('tmux', ['capture-pane', '-p', '-t', `${session}:${window}`, '-S', '-30']);
+  return paneScreenAt(run, `${session}:${window}`);
+}
+
+/** The last lines of the pane named by a tmux target (a pane id from `resolveSendTarget`, or a window). */
+export function paneScreenAt(run: CommandRunner, target: string): string {
+  const r = run('tmux', ['capture-pane', '-p', '-t', target, '-S', '-30']);
   return r.status === 0 ? r.stdout : '';
 }
 

@@ -1149,7 +1149,7 @@ moves to `backlog/completed/` in that push and the verdict's PR is the fixed PR.
 **Scheduler** (`pipeline-cli/src/hierarchy/scheduler.ts`, `reconcile --watch`): a reconcile
 runs at start (session start or machine wake), within a 2 s debounce after the webhook
 receiver touches `<board>/.reconcile-wake`, and on a timer of 60 s (`BUSY_INTERVAL_MS`, `scheduler.ts:10`) while any task or docs PR
-is open, else 15 min (`IDLE_INTERVAL_MS`, `scheduler.ts:11`). It is code, not a model turn; It no longer paces PR handling. The tick's progress line lists open PRs as
+is open, else 15 min (`IDLE_INTERVAL_MS`, `scheduler.ts:11`). It runs as code, not a model turn, and does not pace PR handling. The tick's progress line lists open PRs as
 `#<n> <kind> <state>`.
 
 **Task action set** (acted on from `ready` on; before delivery the executor owns the PR, so
