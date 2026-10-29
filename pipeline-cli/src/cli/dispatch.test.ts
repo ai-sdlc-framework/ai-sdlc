@@ -23,6 +23,7 @@ import { computePatchId } from '../attestation/patch-id.js';
 import { dispatchEnsureBoardDirs, dispatchWriteManifest } from '../index.js';
 import type { DispatchManifest } from '../index.js';
 
+import { renderBriefBlock } from '../hierarchy/index.js';
 import { approvalEnvelopeMatches, findTaskFile, parseArgv, runDispatchCli } from './dispatch.js';
 
 describe('parseArgv', () => {
@@ -1699,6 +1700,46 @@ describe('runDispatchCli ordering commands', () => {
     expect(read('TT-1').after).toBeUndefined();
     expect(read('TT-2')).toMatchObject({ after: ['TT-1'], sequenceGroup: 'g', wave: 2 });
     expect(read('TT-2').priority).toBeUndefined();
+  });
+
+  it('round-trips a generated brief block into manifests with the same ordering fields', async () => {
+    const entries = [
+      { task: 'TT-1', after: [], wave: 1, priority: 1 },
+      { task: 'TT-2', after: ['TT-1'], sequenceGroup: 'grp', wave: 2, priority: 3 },
+      { task: 'TT-3', after: ['TT-1', 'TT-2'], wave: 3 },
+    ];
+    for (const e of entries) {
+      writeFileSync(path.join(root, 'backlog', 'tasks', `${e.task} - x.md`), '');
+    }
+    const brief = path.join(root, 'generated.md');
+    writeFileSync(brief, `# Brief\n\n${renderBriefBlock(entries)}\n`);
+    expect(await runDispatchCli(['enqueue', '--from-brief', brief, ...base()])).toBe(0);
+    for (const e of entries) {
+      const m = JSON.parse(
+        readFileSync(path.join(boardDir, 'queue', `${e.task}.dispatch.json`), 'utf-8'),
+      );
+      expect(m.after).toEqual(e.after.length > 0 ? e.after : undefined);
+      expect(m.sequenceGroup).toBe(e.sequenceGroup);
+      expect(m.wave).toBe(e.wave);
+      expect(m.priority).toBe(e.priority);
+    }
+  });
+
+  it('reports an after id that is neither in the brief nor done, and accepts a done one', async () => {
+    writeFileSync(path.join(root, 'backlog', 'tasks', 'TT-7 - x.md'), '');
+    const brief = path.join(root, 'dangling.md');
+    writeFileSync(
+      brief,
+      '```yaml\ndispatchBrief:\n  - task: TT-7\n    after: [TT-99]\n    wave: 2\n```\n',
+    );
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    expect(await runDispatchCli(['enqueue', '--from-brief', brief, ...base()])).toBe(1);
+    expect(err.mock.calls.join('')).toContain('TT-7 -> TT-99');
+    err.mockRestore();
+    expect(existsSync(path.join(boardDir, 'queue', 'TT-7.dispatch.json'))).toBe(false);
+    mkdirSync(path.join(boardDir, 'done'), { recursive: true });
+    writeFileSync(path.join(boardDir, 'done', 'TT-99.completed.json'), '{}');
+    expect(await runDispatchCli(['enqueue', '--from-brief', brief, ...base()])).toBe(0);
   });
 
   it('rejects a one-letter task prefix in a brief while --task still accepts it', async () => {

@@ -190,6 +190,24 @@ export function briefToEnqueueEntries(brief: ParsedBrief): EnqueueEntry[] {
   }));
 }
 
+/**
+ * `after` ids in a brief block that are neither a task in the block nor already done.
+ * Returns `"<task> -> <after>"` strings; empty when the block is self-consistent.
+ */
+export function findUnresolvedAfter(
+  entries: readonly EnqueueEntry[],
+  isDone: (taskId: string) => boolean,
+): string[] {
+  const inBlock = new Set(entries.map((e) => e.taskId.toUpperCase()));
+  const out: string[] = [];
+  for (const e of entries) {
+    for (const dep of e.after ?? []) {
+      if (!inBlock.has(dep.toUpperCase()) && !isDone(dep)) out.push(`${e.taskId} -> ${dep}`);
+    }
+  }
+  return out;
+}
+
 /** What a clear attempt did for one verdict. */
 export interface ClearReport {
   status: 'cleared' | 'failed' | 'refused' | 'not-permitted' | 'skipped';

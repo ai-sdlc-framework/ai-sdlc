@@ -169,6 +169,7 @@ import {
   formatResumeFeedback,
   MAX_NOTE_CHARS,
   listBoard,
+  loadEligibilityContext,
   listResumeSignals,
   OneClaimPerWorkerError,
   UndeliveredPrError,
@@ -238,6 +239,7 @@ import type {
 import { loadDispatchConfig } from '../dispatch/recommend-worker.js';
 import {
   briefToEnqueueEntries,
+  findUnresolvedAfter,
   parseBrief,
   resolveCallerRole,
   type HierarchyRole,
@@ -1370,6 +1372,14 @@ export async function runDispatchCli(
           entries = briefToEnqueueEntries(
             parseBrief(readFileSync(path.resolve(flags['from-brief']), 'utf-8')),
           );
+          const ctx = loadEligibilityContext(boardDir, workDir);
+          const unresolved = findUnresolvedAfter(
+            entries,
+            (id) => ctx.doneTaskIds.has(id) || (ctx.isDoneOnMain?.(id) ?? false),
+          );
+          if (unresolved.length > 0) {
+            throw new Error(`after id neither in the brief nor done: ${unresolved.join(', ')}`);
+          }
         } else {
           const ids = argv.flatMap((tok, i) =>
             tok === '--task' && argv[i + 1] ? [argv[i + 1]!] : [],

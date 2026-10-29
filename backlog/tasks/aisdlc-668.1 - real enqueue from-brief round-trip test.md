@@ -2,7 +2,7 @@
 id: AISDLC-668.1
 title: >-
   RFC-0051: real cli-dispatch enqueue --from-brief round-trip for dispatch briefs
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-30'
 labels:
