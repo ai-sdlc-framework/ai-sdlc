@@ -37,6 +37,13 @@ import {
   formatRecurrenceEntry,
 } from '../tui/analytics/quality-metrics.js';
 import { formatReliabilityTrend } from '../tui/analytics/metrics.js';
+import {
+  classifyClosedUnmerged,
+  fetchClosedUnmergedPrs,
+  type ClosedUnmergedReport,
+  type ListedClosedPr,
+} from '../kpi/closed-unmerged.js';
+import { spawnSync } from 'node:child_process';
 
 // ── Report shape ──────────────────────────────────────────────────────
 
@@ -45,6 +52,8 @@ export interface QualityCorpusReport {
   reliabilityTrend: ReliabilityTrend;
   /** §8 self-improvement metrics derived from the full corpus. */
   metrics: QualityMetrics;
+  /** AISDLC-831: PRs closed unmerged in the window (waste; target zero). Absent when GitHub is unreadable. */
+  'prs-closed-unmerged'?: ClosedUnmergedReport;
   /** ISO-8601 timestamp of the report generation. */
   generatedAt: string;
 }
@@ -65,6 +74,10 @@ export interface AggregateQualityCorpusOpts {
   recurrenceWindows?: string[];
   /** Config file path override for quality-monitoring.yaml. */
   qualityMonitoringConfigPath?: string;
+  /** PRs from `gh pr list --state all`; omit when GitHub could not be read. */
+  prs?: readonly ListedClosedPr[];
+  /** Window for `prs-closed-unmerged` in days (default 7). */
+  closedUnmergedDays?: number;
 }
 
 /**
@@ -87,9 +100,15 @@ export function aggregateQualityCorpus(opts: AggregateQualityCorpusOpts = {}): Q
     qualityMonitoringConfigPath: opts.qualityMonitoringConfigPath,
   });
 
+  const days = opts.closedUnmergedDays ?? 7;
+  const closedUnmerged = opts.prs
+    ? classifyClosedUnmerged(opts.prs, new Date(now().getTime() - days * 86_400_000))
+    : undefined;
+
   return {
     reliabilityTrend,
     metrics,
+    ...(closedUnmerged ? { 'prs-closed-unmerged': closedUnmerged } : {}),
     generatedAt: now().toISOString(),
   };
 }
@@ -105,7 +124,7 @@ function emitText(text: string): void {
   if (!text.endsWith('\n')) process.stdout.write('\n');
 }
 
-function renderTable(report: QualityCorpusReport): string {
+export function renderTable(report: QualityCorpusReport): string {
   const { reliabilityTrend, metrics } = report;
 
   const lines: string[] = [
@@ -124,6 +143,16 @@ function renderTable(report: QualityCorpusReport): string {
     `  Coverage rate:  ${formatCoverageRate(metrics.coverageRate)}`,
     ``,
   ];
+
+  const cu = report['prs-closed-unmerged'];
+  if (cu) {
+    lines.push(
+      `PRs closed unmerged since ${cu.since} (target: 0)`,
+      `  Total: ${cu.total}  (re-filed ${cu.byCause['re-filed']}, superseded ${cu.byCause.superseded}, withdrawn ${cu.byCause.withdrawn}, unknown ${cu.byCause.unknown})`,
+      ...cu.prs.map((p) => `  #${p.number} ${p.taskId || '-'} ${p.cause}`),
+      ``,
+    );
+  }
 
   // MTTR table — labeled "MTTR (from first capture)" per OQ-8
   if (metrics.mttr.length > 0) {
@@ -228,7 +257,12 @@ export function buildQualityCorpusCli(): Argv {
         const windowsArg = argv['recurrence-windows'] as string;
         const recurrenceWindows = windowsArg ? parseRecurrenceWindowsArg(windowsArg) : undefined;
 
+        const prs = fetchClosedUnmergedPrs((file, args, o) => {
+          const r = spawnSync(file, [...args], { cwd: o?.cwd, encoding: 'utf8' });
+          return { status: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
+        }, process.cwd());
         const report = aggregateQualityCorpus({
+          prs,
           artifactsDir: argv['artifacts-dir'] as string | undefined,
           workDir: argv['work-dir'] as string | undefined,
           recurrenceWindows,

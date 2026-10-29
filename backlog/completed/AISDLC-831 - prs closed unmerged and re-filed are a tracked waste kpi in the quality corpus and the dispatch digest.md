@@ -2,7 +2,7 @@
 id: AISDLC-831
 title: >-
   PRs closed unmerged and re-filed are a tracked waste KPI in the quality corpus and the dispatch digest
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:
@@ -34,11 +34,11 @@ dispatchable: true
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `cli-quality-corpus aggregate` emits `prs-closed-unmerged` with total and per-cause counts for the window, with the PR numbers and task ids listed; hermetic test on a fixture of closed PRs
-- [ ] #2 A closed PR followed by an open or merged PR for the same task id within the window is classified `re-filed`
-- [ ] #3 The dispatch tick result and its progress line carry `closedUnmerged: <n>` for the current drain window, read from the same classifier
-- [ ] #4 `docs/operations/` KPI page (or the quality corpus doc) defines the metric and states that the target is zero
-- [ ] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
+- [x] #1 `cli-quality-corpus aggregate` emits `prs-closed-unmerged` with total and per-cause counts for the window, with the PR numbers and task ids listed; hermetic test on a fixture of closed PRs
+- [x] #2 A closed PR followed by an open or merged PR for the same task id within the window is classified `re-filed`
+- [x] #3 The dispatch tick result and its progress line carry `closedUnmerged: <n>` for the current drain window, read from the same classifier
+- [x] #4 `docs/operations/` KPI page (or the quality corpus doc) defines the metric and states that the target is zero
+- [x] #5 The task body names the five steps (requirement questioned, delete, simplify, accelerate, automate)
 <!-- AC:END -->
 
 ## Verification
