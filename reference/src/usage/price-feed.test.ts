@@ -338,7 +338,9 @@ describe('refreshPrices', () => {
       now: () => T1,
       sources: [source('a', [srow('claude-haiku-4-5', { outputPer1M: 40 })])],
     });
-    expect(res.held).toEqual([{ model: 'claude-haiku-4-5', reason: 'change-factor' }]);
+    expect(res.held).toEqual([
+      { model: 'claude-haiku-4-5', reason: 'change-factor', comparison: 'previous' },
+    ]);
     const tokens = { input: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 1_000_000 };
     const call = { model: 'claude-haiku-4-5', ts: '2026-10-13T00:00:00Z', tokens };
     expect(priceCall(call, { dir })).toBe(5);
@@ -357,10 +359,86 @@ describe('refreshPrices', () => {
     expect(confirmHeldPrice('claude-haiku-4-5', { dir })).toBeUndefined();
   });
 
+  it('holds a slow daily cut at the fetch that crosses the factor against the seed row', async () => {
+    const day = (n: number): Date => new Date(T1.getTime() + n * 86_400_000);
+    const results = [];
+    for (const [i, out] of [2, 0.8].entries()) {
+      results.push(
+        await refreshPrices({
+          dir,
+          now: () => day(i),
+          sources: [source('a', [srow('claude-haiku-4-5', { outputPer1M: out })])],
+        }),
+      );
+    }
+    expect(results[0]?.held).toEqual([]);
+    expect(results[1]?.held).toEqual([
+      { model: 'claude-haiku-4-5', reason: 'change-factor', comparison: 'seed' },
+    ]);
+  });
+
+  it('holds a cut that is within the factor of the last row and seed but not of the median', async () => {
+    const day = (n: number): Date => new Date(T1.getTime() + n * 86_400_000);
+    let last;
+    for (const [i, out] of [14, 14.1, 14.2, 5.1, 1.8].entries()) {
+      last = await refreshPrices({
+        dir,
+        now: () => day(i),
+        sources: [source('a', [srow('claude-haiku-4-5', { outputPer1M: out })])],
+      });
+      if (i < 4) expect(last.held).toEqual([]);
+    }
+    expect(last?.held).toEqual([
+      { model: 'claude-haiku-4-5', reason: 'change-factor', comparison: 'median' },
+    ]);
+  });
+
+  it('holds a cut against the seed row when no recent rows are in the median window', async () => {
+    const first = await refreshPrices({
+      dir,
+      now: () => T1,
+      sources: [source('a', [srow('claude-haiku-4-5', { outputPer1M: 2 })])],
+    });
+    expect(first.held).toEqual([]);
+    const later = new Date(T1.getTime() + 45 * 86_400_000);
+    const res = await refreshPrices({
+      dir,
+      now: () => later,
+      sources: [source('a', [srow('claude-haiku-4-5', { outputPer1M: 0.8 })])],
+    });
+    expect(res.held).toEqual([
+      { model: 'claude-haiku-4-5', reason: 'change-factor', comparison: 'seed' },
+    ]);
+  });
+
+  it('holds a drift from the last manual row and names it', async () => {
+    setManualPrice(
+      'claude-haiku-4-5',
+      { input: 1, output: 25, cacheRead: 0.1, cacheWrite5m: 1.25, cacheWrite1h: 2 },
+      { dir, now: () => T1 },
+    );
+    const res = await refreshPrices({
+      dir,
+      now: () => T2,
+      sources: [source('a', [srow('claude-haiku-4-5', { outputPer1M: 7 })])],
+    });
+    expect(res.held[0]?.comparison).toBe('manual');
+  });
+
+  it('accepts a change within the factor against every reference', async () => {
+    const res = await refreshPrices({
+      dir,
+      now: () => T1,
+      sources: [source('a', [srow('claude-haiku-4-5', { outputPer1M: 8 })])],
+    });
+    expect(res.held).toEqual([]);
+    expect(res.appended).toBe(1);
+  });
+
   it('keeps a manual row ahead of a fetched active row and emits no change for it', async () => {
     setManualPrice(
       'claude-haiku-4-5',
-      { input: 9, output: 9, cacheRead: 9, cacheWrite5m: 9, cacheWrite1h: 9 },
+      { input: 2, output: 5, cacheRead: 0.2, cacheWrite5m: 2.5, cacheWrite1h: 4 },
       { dir, now: () => T1 },
     );
     const res = await refreshPrices({
@@ -373,7 +451,7 @@ describe('refreshPrices', () => {
     const tokens = { input: 1_000_000, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 0 };
     expect(
       priceCall({ model: 'claude-haiku-4-5', ts: '2026-10-13T00:00:00Z', tokens }, { dir }),
-    ).toBe(9);
+    ).toBe(2);
   });
 
   it('survives every source failing, keeps last prices, and reports degraded', async () => {

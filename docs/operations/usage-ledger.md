@@ -333,7 +333,7 @@ claude-sonnet-4-6  in=3 out=15 read=0.3 w5m=3.75 w1h=6  source=anthropic-publish
 
 Prices are per million tokens. `refresh` is a plain GET of those two public URLs and sends nothing about your repository. The orchestrator also runs it at most once a day, at the start of a tick; there is no setting that turns that daily refresh off, so to avoid this network egress do not run the orchestrator loop, and do not run `prices refresh`. Without a refresh, the last known prices (or manual rows from `prices set`) stay in force, and `prices list` marks them `STALE` after 14 days. `refresh` takes `--source <name>`, `--json`, `--tolerance` (default 0.05) and `--change-factor` (default 3).
 
-A fetched row is rejected if a price is zero, negative or not a number. A row is held, and not used, when two sources disagree by more than the tolerance or a price moves by more than the change factor against the last row. A held row shows in `prices list` with the command to confirm it. If every source is unreachable, the last known prices stay in force, and `prices list` marks them `STALE` after 14 days (change with `--stale-days`).
+A fetched row is rejected if a price is zero, negative or not a number. A row is held, and not used, when two sources disagree by more than the tolerance or a price moves by more than the change factor against the previous row, the last manual or seed row, or the trailing 30-day median of active rows (the hold names which one). A held row shows in `prices list` with the command to confirm it. If every source is unreachable, the last known prices stay in force, and `prices list` marks them `STALE` after 14 days (change with `--stale-days`).
 
 A manual row needs all five prices:
 

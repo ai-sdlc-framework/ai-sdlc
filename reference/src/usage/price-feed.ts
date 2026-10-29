@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path';
 import { DIR_MODE, FILE_MODE } from './fs-lock.js';
 import { resolveUsageDir } from './paths.js';
+import { SEED_SOURCE } from './prices-seed.js';
 import { createLiteLlmSource } from './price-source-litellm.js';
 import { createOpenRouterSource } from './price-source-openrouter.js';
 import {
@@ -43,6 +44,7 @@ export const DEFAULT_STALE_AFTER_DAYS = 14;
 
 const STATE_FILE = 'price-feed-state.json';
 const DAY_MS = 86_400_000;
+const MEDIAN_WINDOW_DAYS = 30;
 
 /** Sources in precedence order: provider-native first (none yet), then aggregators. */
 export function defaultPriceSources(opts: PriceSourceOptions = {}): PriceSource[] {
@@ -52,7 +54,10 @@ export function defaultPriceSources(opts: PriceSourceOptions = {}): PriceSource[
 export interface PriceFeedConfig {
   /** Relative disagreement between sources that holds a row. Default 0.05. */
   tolerance?: number;
-  /** Multiplicative move against the last row that holds a row. Default 3. */
+  /**
+   * Multiplicative move that holds a row, against the previous row, the last
+   * manual or seed row, or the trailing 30-day median. Default 3.
+   */
   changeFactor?: number;
   /** Days without a successful refresh before prices are stale. Default 14. */
   staleAfterDays?: number;
@@ -81,6 +86,9 @@ export interface SourceOutcome {
 
 export type HoldReason = 'sources-disagree' | 'change-factor';
 
+/** The reference a fetched price was compared with when it crossed the change factor. */
+export type HoldComparison = 'previous' | 'manual' | 'seed' | 'median';
+
 export interface RefreshResult {
   fetchedAt: string;
   sources: SourceOutcome[];
@@ -88,7 +96,7 @@ export interface RefreshResult {
   anySourceSucceeded: boolean;
   /** Active rows appended. */
   appended: number;
-  held: Array<{ model: string; reason: HoldReason }>;
+  held: Array<{ model: string; reason: HoldReason; comparison?: HoldComparison }>;
   unchanged: number;
   /** Models whose five classes could not all be resolved. */
   incomplete: string[];
@@ -157,6 +165,59 @@ function writePriceFeedState(state: PriceFeedState, opts: UsageStoreOptions): vo
 interface Contribution {
   source: string;
   row: SourcePriceRow;
+}
+
+function median(values: number[]): number {
+  const v = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(v.length / 2);
+  return v.length % 2 ? (v[mid] as number) : ((v[mid - 1] as number) + (v[mid] as number)) / 2;
+}
+
+function crossesFactor(candidate: PriceRow, ref: PriceRow, factor: number): boolean {
+  return PRICE_CLASSES.some((c) => {
+    const ratio = num(candidate, c) / num(ref, c);
+    return ratio > factor || ratio < 1 / factor;
+  });
+}
+
+/** The first reference the candidate drifts from by more than the factor, if any. */
+function driftComparison(
+  candidate: PriceRow,
+  baseline: PriceRow | undefined,
+  history: readonly PriceRow[],
+  now: Date,
+  factor: number,
+): HoldComparison | undefined {
+  if (baseline && crossesFactor(candidate, baseline, factor)) return 'previous';
+  // Last manual row, else the seed row (the oldest shipped row) for the model.
+  let manual: PriceRow | undefined;
+  let seed: PriceRow | undefined;
+  for (const r of history) {
+    if (r.model !== candidate.model) continue;
+    if (r.status === 'manual') {
+      if (!manual || Date.parse(r.fetchedAt) >= Date.parse(manual.fetchedAt)) manual = r;
+    } else if (r.status === 'active' && r.source.startsWith(SEED_SOURCE)) {
+      if (!seed || Date.parse(r.effectiveFrom) >= Date.parse(seed.effectiveFrom)) seed = r;
+    }
+  }
+  if (manual && crossesFactor(candidate, manual, factor)) return 'manual';
+  if (seed && crossesFactor(candidate, seed, factor)) return 'seed';
+  const cutoff = now.getTime() - MEDIAN_WINDOW_DAYS * DAY_MS;
+  const recent = history.filter(
+    (r) =>
+      r.model === candidate.model &&
+      r.status === 'active' &&
+      Date.parse(r.fetchedAt) >= cutoff &&
+      Date.parse(r.fetchedAt) <= now.getTime(),
+  );
+  if (recent.length > 0) {
+    const drifted = PRICE_CLASSES.some((c) => {
+      const ratio = num(candidate, c) / median(recent.map((r) => num(r, c)));
+      return ratio > factor || ratio < 1 / factor;
+    });
+    if (drifted) return 'median';
+  }
+  return undefined;
 }
 
 /** Latest pending held row: held, and newer than the last non-held fetched row. */
@@ -309,19 +370,15 @@ function applyRows(
     }
 
     let reason: HoldReason | undefined;
+    let comparison: HoldComparison | undefined;
     if (disagree) reason = 'sources-disagree';
-    else if (
-      baseline &&
-      PRICE_CLASSES.some((c) => {
-        const ratio = num(candidate, c) / num(baseline, c);
-        return ratio > factor || ratio < 1 / factor;
-      })
-    ) {
-      reason = 'change-factor';
+    else {
+      comparison = driftComparison(candidate, baseline, history, now, factor);
+      if (comparison) reason = 'change-factor';
     }
     if (reason) {
       toAppend.push({ ...candidate, status: 'held' });
-      result.held.push({ model, reason });
+      result.held.push(comparison ? { model, reason, comparison } : { model, reason });
       continue;
     }
     toAppend.push(candidate);
