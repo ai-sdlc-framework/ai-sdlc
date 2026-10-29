@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1077
 title: 'flip the workflow engine default: every execute runs the RFC-0056 graph (iteration cap, fan-out cap, hygiene nodes, frozen set) without the opt-in flag'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-23'
 labels:
