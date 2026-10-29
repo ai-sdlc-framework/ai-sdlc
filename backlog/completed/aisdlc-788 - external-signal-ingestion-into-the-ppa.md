@@ -2,7 +2,7 @@
 id: AISDLC-788
 title: >-
   external signal ingestion into the PPA
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-09'
 labels:
