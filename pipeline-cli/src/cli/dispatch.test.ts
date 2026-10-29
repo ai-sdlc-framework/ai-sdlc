@@ -351,6 +351,49 @@ describe('runDispatchCli', () => {
     expect(JSON.parse(after.captured.raw)[0].status).toBe('done');
   });
 
+  it('executor.md wires record-agent; the recovery key survives a kill (AISDLC-564.1)', async () => {
+    const commands = path.resolve(__dirname, '../../../ai-sdlc-plugin/commands');
+    const executor = readFileSync(path.join(commands, 'executor.md'), 'utf-8');
+    expect(executor).toContain('cli-dispatch.mjs" record-agent');
+    expect(readFileSync(path.join(commands, 'orchestrator-tick.md'), 'utf-8')).not.toContain(
+      'record-agent',
+    );
+    expect(readFileSync(path.join(commands, 'dispatch-worker.md'), 'utf-8')).not.toContain(
+      'record-agent',
+    );
+    // Flags documented in executor.md are the ones the CLI accepts.
+    for (const flag of ['--task-id', '--agent-id', '--worktree', '--transcript']) {
+      expect(executor).toContain(flag);
+    }
+    // Dispatch time: record. Then the subagent is "killed" (no complete call).
+    const rec = await captureStdout(() =>
+      runDispatchCli([
+        'record-agent',
+        '--board-dir',
+        boardDir,
+        '--task-id',
+        'AISDLC-2041',
+        '--agent-id',
+        'killed-agent-1',
+        '--worktree',
+        '/wt/aisdlc-2041',
+        '--transcript',
+        '/t/agent-killed-agent-1.jsonl',
+      ]),
+    );
+    expect(rec.exit).toBe(0);
+    const listed = await captureStdout(() =>
+      runDispatchCli(['sessions', '--board-dir', boardDir, '--json']),
+    );
+    expect(JSON.parse(listed.captured.raw)[0]).toMatchObject({
+      taskId: 'AISDLC-2041',
+      agentId: 'killed-agent-1',
+      worktreePath: '/wt/aisdlc-2041',
+      transcriptPath: '/t/agent-killed-agent-1.jsonl',
+      status: 'in-progress',
+    });
+  });
+
   it('record-agent rejects a bad task id; sessions reports empty', async () => {
     const bad = await captureStdout(() =>
       runDispatchCli([
