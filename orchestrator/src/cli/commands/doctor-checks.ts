@@ -934,7 +934,9 @@ interface UsageIngestRecord {
 
 /**
  * Reports the time of the last successful usage ingest, read from the
- * capability state file the ingester writes (`_capabilities/state.json`). A
+ * capability state file the ingester writes (`_capabilities/state.json`) under
+ * `$ARTIFACTS_DIR` or the machine usage directory only; a copy committed under
+ * the repository is never read. A
  * degraded last outcome warns; a repo that has never ingested passes with a
  * hint, since ingestion is additive and optional.
  */
@@ -943,11 +945,7 @@ export function checkUsageIngest(ctx: DoctorRunContext): DoctorCheckResult {
   // The ingester reports into $ARTIFACTS_DIR when set, else into the
   // machine-level usage directory (it often runs detached with no repo cwd).
   const usageDir = env.AI_SDLC_USAGE_DIR ?? join(ctx.adapters.homeDir(), '.ai-sdlc', 'usage');
-  const candidates = [
-    ...(env.ARTIFACTS_DIR ? [env.ARTIFACTS_DIR] : []),
-    join(ctx.projectDir, '.ai-sdlc', 'artifacts'),
-    usageDir,
-  ];
+  const candidates = [...(env.ARTIFACTS_DIR ? [env.ARTIFACTS_DIR] : []), usageDir];
   let rec: UsageIngestRecord | undefined;
   for (const dir of candidates) {
     const raw = ctx.adapters.readFile(join(dir, '_capabilities', 'state.json'));
