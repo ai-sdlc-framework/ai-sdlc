@@ -133,22 +133,7 @@ node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" status --board-dir "$BOARD_DIR"
 A brief's task is done when the board holds a verdict for it in `done/`.
 
 ```bash
-BRIEFS_DIR="$BOARD_DIR/briefs"
-if ls "$BRIEFS_DIR"/*.md >/dev/null 2>&1; then
-  for brief in "$BRIEFS_DIR"/*.md; do
-    total=0; done_count=0
-    set -f
-    while IFS= read -r id; do
-      printf '%s\n' "$id" | grep -Eq '^[A-Z][A-Z0-9]+-[0-9]+(\.[0-9]+)*$' || continue
-      total=$((total + 1))
-      [ -f "$BOARD_DIR/done/$id.verdict.json" ] && done_count=$((done_count + 1))
-    done < <(grep -E '^[[:space:]]*- task: ' "$brief" | sed -E 's/^[[:space:]]*- task:[[:space:]]*//')
-    set +f
-    echo "$(basename "$brief"): $done_count of $total task(s) done"
-  done
-else
-  echo "No briefs yet."
-fi
+node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" brief-status --board-dir "$BOARD_DIR"
 node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" peek --board-dir "$BOARD_DIR"
 ```
 

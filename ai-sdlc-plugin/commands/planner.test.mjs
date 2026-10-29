@@ -52,11 +52,10 @@ describe('planner command', () => {
     );
   });
 
-  it('reads brief task ids safely, skipping anything that is not a task id', () => {
-    assert.match(match[2], /set -f/);
-    assert.match(match[2], /while IFS= read -r id/);
-    assert.match(match[2], /\^\[A-Z\]\[A-Z0-9\]\+-\[0-9\]\+/);
-    assert.doesNotMatch(match[2], /for id in \$\(/);
+  it('prints brief progress with brief-status instead of a shell loop', () => {
+    assert.match(match[2], /cli-hierarchy\.mjs" brief-status/);
+    assert.doesNotMatch(match[2], /while IFS= read -r id/);
+    assert.doesNotMatch(match[2], /verdict\.json/);
   });
 
   it('carries no internal task ids', () => {

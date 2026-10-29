@@ -33,6 +33,7 @@ export {
   type BriefEntry,
   type ParsedBrief,
 } from './brief-format.js';
+export { briefStatus, formatBriefStatus, type BriefProgress } from './brief-status.js';
 export {
   briefMessage,
   createTmuxBriefSender,
