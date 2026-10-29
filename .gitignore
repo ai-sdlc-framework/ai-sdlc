@@ -155,3 +155,6 @@ AGENTS.md
 # AISDLC-869: Claude Code memory dream output (.claude/memory.dream-<ts>.*) is machine-local;
 # untracked, it made Step 0.5 abort every execute on a non-backlog untracked file.
 .claude/memory.dream-*
+
+# AISDLC-581: session-start registry-version TTL cache
+ai-sdlc-plugin/.stale-runtime-cache.json
