@@ -518,3 +518,4 @@ Pre-populated with the smoke-test data captured 2026-05-09.
 - `pipeline-cli/src/runtime/spawners/codex-harness.ts` — `CodexHarnessAdapter` for programmatic dispatch
 - `pipeline-cli/README.md` — `--spawner codex` flag documentation
 - `docs/operations/adapter-authoring.md` — how to add a new harness adapter
+- `docs/operations/staged-review.md` — staged review probes may run on Codex (`review-executor-codex`) when the bridge declares file-scope enforcement

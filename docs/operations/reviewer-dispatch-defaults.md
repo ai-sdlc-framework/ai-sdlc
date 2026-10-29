@@ -95,3 +95,7 @@ codex --version   # should print v0.128.0 or later
 If `codex` is absent, the pipeline will attempt to dispatch `code-reviewer-codex` / `test-reviewer-codex` — these agents detect the absence and return an error verdict. To avoid that, either install Codex or set `AI_SDLC_REVIEWER_HARNESS=claude` globally.
 
 See also: `docs/operations/codex-execution-path.md` for Codex CLI installation + configuration.
+
+## The staged set
+
+A repository can select `reviewerSet: staged` for trusted work (RFC-0052). The staged set replaces the code, test and security fan-out with a pipeline: `review-planner` and `review-synthesizer` (default `opus`) bracket parallel read-only `review-executor` probes (default `haiku`, or `review-executor-codex` on the Codex harness). While the head-to-head comparison runs, the staged pass is advisory (`gating: false`) and the standard reviewers keep gating. See [`staged-review.md`](staged-review.md).

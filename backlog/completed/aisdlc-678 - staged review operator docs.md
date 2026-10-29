@@ -2,7 +2,7 @@
 id: AISDLC-678
 title: >-
   RFC-0052 docs: operator runbook for the staged reviewer set, its config, the comparison and the switches
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-01'
 labels:
@@ -44,10 +44,10 @@ requirement and removes the deferral.
    `spec/rfcs/RFC-0052-staged-review-pipeline.md`. Change nothing else.
 
 ## Acceptance Criteria
-- [ ] `docs/operations/staged-review.md` exists, cites `RFC-0052`, and covers every item in scope 1.
-- [ ] Every command shown runs as written against the shipped CLIs.
-- [ ] The two existing documents carry their additions and `README.md` links the new document.
-- [ ] `deferredDocs` and `deferredDocsDeadline` are removed from the RFC frontmatter and `node scripts/check-rfc-docs.mjs` passes.
-- [ ] The document contains no internal task ids.
-- [ ] `pnpm lint && pnpm format:check` pass.
+- [x] `docs/operations/staged-review.md` exists, cites `RFC-0052`, and covers every item in scope 1.
+- [x] Every command shown runs as written against the shipped CLIs.
+- [x] The two existing documents carry their additions and `README.md` links the new document.
+- [x] `deferredDocs` and `deferredDocsDeadline` are removed from the RFC frontmatter and `node scripts/check-rfc-docs.mjs` passes.
+- [x] The document contains no internal task ids.
+- [x] `pnpm lint && pnpm format:check` pass.
 <!-- SECTION:DESCRIPTION:END -->
