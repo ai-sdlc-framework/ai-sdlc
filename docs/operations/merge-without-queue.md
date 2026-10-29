@@ -90,13 +90,13 @@ Total wall-clock time: ~5-10 min (CI time) vs ~15-25 min with the queue (CI + qu
 
 ## Open PR handling (AISDLC-727 / DEC-0056)
 
-`auto-rebase-open-prs.yml` was deleted. It rebased every other open PR after every merge to `main`; each rebase restarted CI, cancelled runs in flight, disarmed auto-merge and invalidated the attestation envelope's head binding (a 50-PR sample showed ~37 workflow runs per PR, 343 cancelled runs and auto-merge toggled about 350 times). The up-to-date requirement on `main` is off (`strict=false`, DEC-0010), so those rebases were not needed to merge.
+`auto-rebase-open-prs.yml` was deleted. It rebased every other open PR after every merge to `main`; each rebase restarted CI, cancelled runs in flight, disarmed auto-merge and invalidated the attestation envelope's head binding (a 50-PR sample showed ~37 workflow runs per PR, 343 cancelled runs and auto-merge toggled about 350 times). The up-to-date requirement on `main` is on (`strict=true`, as `scripts/sync-branch-protection.sh` applies), so GitHub disarms a BEHIND PR; the rebases are not restored because the arm is: `auto-enable-auto-merge.yml` re-arms on `synchronize` and the reconciler re-arms any green CLEAN ready task PR that is unarmed (AISDLC-1097).
 
-Current rule: a PR is rebased only when it conflicts with `main`, by its executor or the `ci-conflict-resolver` / `/ai-sdlc rebase` path. A PR that is merely BEHIND merges as-is once required checks pass. AISDLC-491 / AISDLC-448 keep the v6 attestation valid for disjoint PRs across any later rebase.
+Current rule: a PR is rebased only when it conflicts with or is BEHIND `main`, by its executor, the reconciler (`land-prep`) or the `ci-conflict-resolver` / `/ai-sdlc rebase` path; it then merges once required checks pass. AISDLC-491 / AISDLC-448 keep the v6 attestation valid for disjoint PRs across any later rebase.
 
 `auto-rebase-on-queue-kick.yml` was also deleted: it triggered only on `ai-sdlc/attestation` failures on `gh-readonly-queue/main/pr-*` probe SHAs, which no longer exist. `auto-rearm-on-dequeue.yml` was deleted too (AISDLC-832, DEC-0099): its dequeue trigger cannot fire without a merge queue.
 
-If you flip branch protection back to `strict=true`, restore the proactive rebase from git history (`git log --diff-filter=D -- .github/workflows/auto-rebase-open-prs.yml`) or rebase PRs by hand.
+If you turn the up-to-date rule off in branch protection (and the script), a BEHIND PR merges as-is and the re-arm above becomes a safety net only. The strict value here and in the script is pinned by `scripts/sync-branch-protection.test.mjs`.
 
 ---
 
@@ -233,7 +233,7 @@ The `ai-sdlc/decisions-sync` commit written by `remote-persist.ts` uses the oper
 - AISDLC-398 — content-addressed envelopes (prerequisite that made this safe)
 - AISDLC-399 — conditional update-branch (superseded by AISDLC-400)
 - AISDLC-491 — patch-scoped verifier / rebase-invariant v6 attestation for disjoint PRs
-- AISDLC-495 / DEC-0010 — strict-false guard in auto-rebase-open-prs.yml (workflow since deleted)
+- AISDLC-495 / DEC-0010 — strict guard in auto-rebase-open-prs.yml (workflow since deleted)
 - AISDLC-727 / DEC-0056 — one CI run per PR; auto-rebase workflows retired
 - `.github/workflows/auto-enable-auto-merge.yml` — arms auto-merge (squash) on PR open
 - `scripts/sync-branch-protection.sh` — idempotent branch protection sync script

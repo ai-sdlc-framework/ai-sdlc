@@ -72,9 +72,10 @@ name: Auto-enable auto-merge on PR open
 # runs were this workflow, re-arming PRs that were already armed. The re-fires
 # existed for a queue / direct-merge admission race that no longer applies
 # since AISDLC-400 dropped the merge queue, and GitHub keeps an armed PR armed
-# across pushes. A PR GitHub does disarm is re-armed by
-# `auto-rearm-on-dequeue.yml` (the safety net) or by the operator. A per-PR
-# concurrency group cancels a superseded run for the same PR.
+# across pushes. AISDLC-1097: with the up-to-date rule on (`strict=true`) GitHub
+# does disarm a PR after a push, so `synchronize` is back, as a cheap re-arm only
+# (no disable-then-arm); the reconciler re-arms any PR that stays unarmed. A
+# per-PR concurrency group cancels a superseded run for the same PR.
 
 on:
   # AISDLC-381: migrated from `pull_request` to `pull_request_target` so
@@ -88,9 +89,9 @@ on:
     # draft-PR flow flips a draft to ready (which is the FIRST time the PR
     # should arm auto-merge). The existing job-level `draft == false` guard
     # below correctly skips draft `opened` events.
-    # AISDLC-799: `synchronize`, `check_suite.completed` and `status` are
-    # intentionally NOT triggers (see the load-discipline note above).
-    types: [opened, reopened, ready_for_review]
+    # AISDLC-799: `check_suite.completed` and `status` are intentionally NOT
+    # triggers; AISDLC-1097 restores `synchronize` only (see the note above).
+    types: [opened, reopened, ready_for_review, synchronize]
 
 concurrency:
   group: auto-enable-${{ github.event.pull_request.number }}
@@ -190,7 +191,13 @@ jobs:
           GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
           GH_REPO: ${{ github.repository }}
           PR: ${{ steps.discover.outputs.pr }}
+          EVENT_ACTION: ${{ github.event.action }}
         run: |
+          # AISDLC-1097: a push only needs the arm restored; skip the disarm flap.
+          if [ "$EVENT_ACTION" = "synchronize" ]; then
+            gh pr merge --auto --squash "$PR"
+            exit 0
+          fi
           # AISDLC-230: bare `gh pr merge --auto` is idempotent on
           # already-armed PRs and won't clear stale GitHub state, so
           # disable-then-arm is required to refresh direct-merge admission.

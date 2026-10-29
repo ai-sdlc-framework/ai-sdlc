@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1097
 title: 'merge-without-queue: docs, sync-branch-protection and the reconciler agree on the up-to-date rule, and a PR GitHub disarms is re-armed by the reconciler'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-28'
 labels:
