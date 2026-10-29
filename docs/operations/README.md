@@ -143,6 +143,7 @@ Pluggable adapters fetch raw customer signals (support tickets, community thread
 |---------|-------------|
 | [`stacked-prs.md`](stacked-prs.md) | Managing stacked PRs in the merge queue |
 | [`adapter-authoring.md`](adapter-authoring.md) | Authoring a new harness adapter (`AgentRunner` / `HarnessAdapter` extension point) |
+| [`rollback.md`](rollback.md) | Backing out a defective npm release, a bad plugin version pin, or a bad `main` commit |
 
 ---
 

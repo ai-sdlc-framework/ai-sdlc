@@ -1,5 +1,7 @@
 # Emergency Gate Bypass — `AI_SDLC_BYPASS_ALL_GATES`
 
+> For a bad release or plugin version pin (not a gate problem), use [`rollback.md`](rollback.md).
+
 ## When to use
 
 `AI_SDLC_BYPASS_ALL_GATES=1` is a **single env var that stops the entire pre-push chain**.
