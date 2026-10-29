@@ -6,7 +6,7 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, readFileSync, rmSync, mkdtempSync, realpathSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, rmSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -235,16 +235,47 @@ describe('applyPinsToManifest', () => {
   });
 });
 
-describe('CLI end-to-end (--check and write modes)', () => {
-  it('--check exits 1 when a fixture repo has drifted pins (uses the real repo, not a fixture)', () => {
-    // This exercises the script against the ACTUAL repo state — the
-    // authoritative regression check that the real manifests + workspace
-    // versions agree. It must currently pass (exit 0) because the AISDLC-574
-    // fix keeps them in sync; if a future release re-freezes the pins this
-    // test starts failing exactly like scripts/install-runtime-deps.test.mjs's
-    // parallel drift-guard test.
-    const res = spawnSync(process.execPath, [SCRIPT, '--check'], { encoding: 'utf-8' });
-    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+/**
+ * The ONLY place this file shells out to the script. It always passes an
+ * explicit fixture `--root`, so no case can depend on the repository's live
+ * pins (AISDLC-1114).
+ */
+function runScript(root, args, env = {}) {
+  assert.ok(root && root !== REPO_ROOT, 'runScript requires an explicit fixture root');
+  return spawnSync(process.execPath, [SCRIPT, ...args, '--root', root], {
+    encoding: 'utf-8',
+    env: { ...process.env, GITHUB_HEAD_REF: '', GITHUB_REF_NAME: '', ...env },
+  });
+}
+
+describe('CLI end-to-end (--check and write modes, fixture roots only)', () => {
+  it('--check exits 0 on an in-sync fixture', () => {
+    const root = buildFixtureRepo({
+      orchestratorVersion: '0.20.5',
+      pipelineCliVersion: '0.20.5',
+      pins: { orchestrator: '>=0.20.5 <1.0.0', pipelineCli: '>=0.20.5 <1.0.0' },
+    });
+    try {
+      assert.equal(runScript(root, ['--check']).status, 0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('--check exits 1 on a drifted fixture and names the drifted pin', () => {
+    const root = buildFixtureRepo({
+      orchestratorVersion: '0.20.5',
+      pipelineCliVersion: '0.20.5',
+      pins: { orchestrator: '>=0.20.5 <1.0.0', pipelineCli: '>=0.19.0 <1.0.0' },
+    });
+    try {
+      const res = runScript(root, ['--check']);
+      assert.equal(res.status, 1);
+      assert.match(res.stderr, /@ai-sdlc\/pipeline-cli pin drifted/);
+      assert.doesNotMatch(res.stderr, /@ai-sdlc\/orchestrator pin drifted/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('--check tolerates pin drift only on the release-please branch (AISDLC-956)', () => {
@@ -254,49 +285,48 @@ describe('CLI end-to-end (--check and write modes)', () => {
       pins: { orchestrator: '>=0.19.0 <1.0.0', pipelineCli: '>=0.19.0 <1.0.0' },
     });
     try {
-      mkdirSync(join(root, 'scripts'), { recursive: true });
-      const script = join(realpathSync(root), 'scripts', 'sync-plugin-runtime-deps.mjs');
-      writeFileSync(script, readFileSync(SCRIPT, 'utf-8'));
-      const run = (env) =>
-        spawnSync(process.execPath, [script, '--check'], {
-          encoding: 'utf-8',
-          env: { ...process.env, GITHUB_HEAD_REF: '', GITHUB_REF_NAME: '', ...env },
-        });
-      assert.equal(run({}).status, 1);
-      assert.equal(run({ GITHUB_HEAD_REF: 'feat/other' }).status, 1);
-      assert.equal(run({ GITHUB_HEAD_REF: 'release-please--branches--main' }).status, 0);
+      assert.equal(runScript(root, ['--check']).status, 1);
+      assert.equal(runScript(root, ['--check'], { GITHUB_HEAD_REF: 'feat/other' }).status, 1);
+      assert.equal(
+        runScript(root, ['--check'], { GITHUB_HEAD_REF: 'release-please--branches--main' }).status,
+        0,
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
 
-  it('write mode updates a fixture manifest end-to-end', () => {
-    // We can't point the script at an arbitrary root (it always resolves
-    // REPO_ROOT relative to its own file location), so this test exercises
-    // the exported building blocks directly against a fixture, matching the
-    // pattern used by the unit-level describes above. The CLI wiring itself
-    // (main()) is covered by the "runs against the real repo" test above.
+  it('write mode rewrites a drifted fixture, after which --check passes', () => {
     const root = buildFixtureRepo({
       orchestratorVersion: '0.20.5',
       pipelineCliVersion: '0.20.5',
       pins: { orchestrator: '^0.19.0', pipelineCli: '^0.19.0' },
     });
     try {
-      const manifestPath = join(root, 'ai-sdlc-plugin', 'plugin.json');
-      const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-      const desired = computeDesiredPins(root, manifest.runtimeDependencies);
-      assert.deepEqual(desired, {
-        '@ai-sdlc/orchestrator': '>=0.20.5 <1.0.0',
-        '@ai-sdlc/pipeline-cli': '>=0.20.5 <1.0.0',
-      });
-      const changed = applyPinsToManifest(manifestPath, desired);
-      assert.equal(changed, true);
-      const rewritten = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-      assert.equal(rewritten.runtimeDependencies['@ai-sdlc/orchestrator'], '>=0.20.5 <1.0.0');
-      assert.equal(rewritten.runtimeDependencies['@ai-sdlc/pipeline-cli'], '>=0.20.5 <1.0.0');
+      assert.equal(runScript(root, []).status, 0);
+      for (const p of MANIFEST_PATHS) {
+        const m = JSON.parse(readFileSync(join(root, p), 'utf-8'));
+        assert.equal(m.runtimeDependencies['@ai-sdlc/orchestrator'], '>=0.20.5 <1.0.0');
+        assert.equal(m.runtimeDependencies['@ai-sdlc/pipeline-cli'], '>=0.20.5 <1.0.0');
+      }
+      assert.equal(runScript(root, ['--check']).status, 0);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it('--root without a directory exits 2', () => {
+    const res = spawnSync(process.execPath, [SCRIPT, '--check', '--root'], { encoding: 'utf-8' });
+    assert.equal(res.status, 2);
+  });
+
+  it('no case runs the script without an explicit fixture root (AISDLC-1114 guard)', () => {
+    const src = readFileSync(fileURLToPath(import.meta.url), 'utf-8');
+    const spawns = src.match(/spawnSync\(/g) ?? [];
+    // runScript + the deliberate --root-missing case above.
+    assert.equal(spawns.length, 2, 'shell out only through runScript(root, ...)');
+    const helper = src.slice(src.indexOf('function runScript'), src.indexOf("describe('CLI end"));
+    assert.match(helper, /'--root', root/);
   });
 });
 
@@ -326,12 +356,7 @@ describe('findManifestMismatches / --pr (AISDLC-1068)', () => {
     }
   });
 
-  function runPr(root) {
-    mkdirSync(join(root, 'scripts'), { recursive: true });
-    const script = join(realpathSync(root), 'scripts', 'sync-plugin-runtime-deps.mjs');
-    writeFileSync(script, readFileSync(SCRIPT, 'utf-8'));
-    return spawnSync(process.execPath, [script, '--pr'], { encoding: 'utf-8' });
-  }
+  const runPr = (root) => runScript(root, ['--pr']);
 
   it('CLI --pr exits 0 on agreement even when pins lag the workspace', () => {
     const root = buildFixtureRepo({
