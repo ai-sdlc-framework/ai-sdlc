@@ -176,3 +176,7 @@ DEC-0187 (hand-editing the verdict and writing a manifest to re-enqueue a failed
 ## Superseded-PR close (AISDLC-1011, DEC-0266)
 
 The never-close rule has one mechanical exception: the reconciler closes a PR the CLI opened (`ai-sdlc/file-*`, `ai-sdlc/decisions-sync`, or an `ai-sdlc/<task-id>-*` branch whose task is Done) only when a landed PR carries the same task or decision id and every file in its diff has the same blob sha on GitHub's main (or is absent on both), through `cli-dispatch close-superseded` alone, which posts a comment naming the landed PR and appends a `superseded-close` audit record (pr, superseding pr, content hashes) under the board's `audit/` directory; sessions still cannot run the raw close subcommand.
+
+## Tier promotion notices (AISDLC-1109)
+
+`promoteExpiredDecisions` appends a `routing-changed` event for each lapsed tier, then re-projects the decision from the same event log `cli-decisions show` reads. It sends the "needs an answer" notice only when the decision is still `open` at the tier it moved to; an answered decision is never announced. Because the move is an event, the next tick finds the decision at its new tier with a fresh timebox and sends nothing until that timebox lapses. Tests: `pipeline-cli/src/decisions/escalation-chain-promote.test.ts`. The loader in the dispatch tick showed no path that announces an answered DEC-0003 (it has no escalation block), and no hooks-module replay was found in this repository, so no replay change was made.

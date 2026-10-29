@@ -2,7 +2,7 @@
 id: AISDLC-1109
 title: >-
   Decision escalation chain stops re-sending "Decision DEC-NNNN needs an answer" to the planner for a decision whose lifecycle is answered (DEC-0003 prompt repeated 4 times in one hour)
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-29'
 labels:
@@ -39,3 +39,7 @@ Fix: find which of the two paths sends the notice (run the tick's loader against
 ## Notes
 
 Evidence: planner session transcript 2026-10-29 06:50Z, 07:03Z, 07:12Z, 07:20Z, identical text each time; `cli-decisions show DEC-0003` lifecycle `answered`, events: opened 2026-05-28, operator-answered 2026-10-07T01:38Z; `cli-decisions list --format table | grep -v answered` empty; no file under `.ai-sdlc/dispatch` or `~/.ai-sdlc` contains the prompt text.
+
+## Verification
+
+Test command: `pnpm test`. Summary: pipeline-cli 14 failed | 12306 passed (all 14 in executor-start.test.ts, caused by AI_SDLC_HIERARCHY_* env of the executor session; pass with those vars unset: 25 passed, incl. 2 new promote tests).
