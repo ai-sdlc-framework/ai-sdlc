@@ -124,6 +124,7 @@ Pluggable adapters fetch raw customer signals (support tickets, community thread
 | [`quality-gate.md`](quality-gate.md) | `ai-sdlc/pr-ready` single rollup check — archetype gating, cutover, and rollback |
 | [`merge-queue-rebase-recovery.md`](merge-queue-rebase-recovery.md) | Recovering from merge-queue rebases that invalidate DSSE attestation envelopes (`contentHashV4`) |
 | [`pr-unstick.md`](pr-unstick.md) | Unsticking PRs blocked by stale checks, failed merge queue, or attestation issues |
+| [`incidents/README.md`](incidents/README.md) | Incident record template, back-filled incident records, and the recurring-mistakes ledger |
 
 ---
 
