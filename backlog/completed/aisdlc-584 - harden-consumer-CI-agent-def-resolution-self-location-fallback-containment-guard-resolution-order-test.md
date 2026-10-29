@@ -3,7 +3,7 @@ id: AISDLC-584
 title: >-
   doctor/attestation: harden consumer-CI agent-def resolution — self-location
   fallback + containment-guard symmetry + resolution-order test
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-06 03:44'
 labels:
