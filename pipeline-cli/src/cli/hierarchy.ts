@@ -64,6 +64,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hotfixTaskId, hotfixTaskMarkdown } from '../hierarchy/canary.js';
+import { runLoopCanaryCommand } from '../hierarchy/loop-canary-run.js';
+import { markCanaryDue } from '../hierarchy/loop-canary.js';
 import process from 'node:process';
 
 import { promoteExpiredDecisions } from '../decisions/escalation-chain.js';
@@ -199,6 +201,7 @@ Commands:
   webhook    Local GitHub webhook receiver: webhook up|down|status (needs AI_SDLC_WEBHOOK_SECRET)
   hold       Pause claims and relaunches, never reporting (--reason <text>); planner or operator only
   resume     Lift the hold set by hold
+  canary     Drive a synthetic task through claim, verdict, clear and re-claim: canary run --no-pr
   tick       One wake-up of the dispatch loop (ingest, verdict watch, playbook, reports)
   escalation-file  Write a board file for the planner: failure record, log tail, PR check summary
   route-decision  Record that a decision was routed to a tier
@@ -397,6 +400,15 @@ export function selfClearAvailability(env: NodeJS.ProcessEnv): {
 }
 
 /** `--role` as a hierarchy role; `dispatch` is an alias of `operator-dispatch`. */
+/** `resolveBaseSha` without git's stderr: the canary step reports a missing base itself. */
+function quietBaseSha(workDir: string): string {
+  for (const ref of ['origin/main', 'HEAD']) {
+    const r = spawnSync('git', ['rev-parse', ref], { cwd: workDir, encoding: 'utf-8' });
+    if (r.status === 0 && r.stdout.trim()) return r.stdout.trim();
+  }
+  throw new Error('cannot resolve a base commit');
+}
+
 function parseRoleFlag(raw: string | undefined): HierarchyRole | null {
   if (raw === 'dispatch') return 'operator-dispatch';
   return raw === 'planner' || raw === 'operator-dispatch' || raw === 'executor' ? raw : null;
@@ -660,6 +672,8 @@ export async function runHierarchyCli(
           },
           deps,
         );
+        // AISDLC-1102: the loop canary runs on the first tick after `up`.
+        markCanaryDue(deps.boardDir);
         return result.attachExitCode ?? 0;
       }
       case 'spawn': {
@@ -909,6 +923,44 @@ export async function runHierarchyCli(
           return 1;
         }
       }
+      case 'canary': {
+        const sub = firstPositional(argv);
+        if (sub !== 'run') {
+          process.stderr.write('cli-hierarchy canary: usage: canary run --no-pr\n');
+          return 2;
+        }
+        if (flags['no-pr'] !== 'true') {
+          process.stderr.write(
+            'cli-hierarchy canary run: --no-pr is required; the canary never opens a pull request\n',
+          );
+          return 2;
+        }
+        const repoRoot = path.resolve(flags['work-dir'] ?? deps.cwd);
+        return await runLoopCanaryCommand({
+          boardDir: deps.boardDir,
+          workDir: repoRoot,
+          baseSha: resolveBaseSha(repoRoot),
+          dispatchedBy: 'canary',
+          now: deps.now,
+          sleep: deps.sleep,
+          log: deps.log,
+          notifyPlanner: (text) => {
+            const { roster } = readRosterChecked(deps.boardDir);
+            const planner = roster.sessions.find(
+              (e) => e.role === 'planner' && e.status === 'running',
+            );
+            if (!planner) return;
+            sendToRoster(
+              roster.sessions,
+              planner.name,
+              text,
+              extras.sendBrief ?? createTmuxBriefSender(deps.run),
+              readReceivedAddresses(deps.boardDir),
+              extras.sendSocket,
+            );
+          },
+        });
+      }
       case 'tick': {
         // AISDLC-1096: the watch scheduler stands in for a silent host; it ticks only when the
         // host has missed three intervals, checked here, and runs as the roster's dispatch name.
@@ -976,6 +1028,7 @@ export async function runHierarchyCli(
             }
           },
           now: deps.now,
+          loopCanary: { workDir: repoRoot, baseSha: () => quietBaseSha(repoRoot) },
           enqueue:
             extras.enqueue ??
             ((entries) =>

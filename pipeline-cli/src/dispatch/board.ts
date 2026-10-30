@@ -1143,7 +1143,7 @@ export function peekQueue(boardDir: string, now: () => Date = () => clockNow()):
       continue;
     }
     const ms = manifest ? Date.parse(manifest.dispatchedAt) : NaN;
-    if (!manifest || Number.isNaN(ms)) continue;
+    if (!manifest || Number.isNaN(ms) || manifest.taskId.startsWith('CANARY-')) continue;
     if (oldest === null || ms < oldest.ms) {
       oldest = { taskId: manifest.taskId, dispatchedAt: manifest.dispatchedAt, ms };
     }
@@ -1816,10 +1816,15 @@ function safeReaddir(dir: string): string[] {
   }
 }
 
+/** Loop-canary files (AISDLC-1102) are synthetic and never count as real board work. */
+function isCanaryFile(name: string): boolean {
+  return name.startsWith('CANARY-');
+}
+
 function countManifests(dir: string): number {
   let n = 0;
   for (const f of safeReaddir(dir)) {
-    if (f.endsWith(MANIFEST_SUFFIX)) n++;
+    if (f.endsWith(MANIFEST_SUFFIX) && !isCanaryFile(f)) n++;
   }
   return n;
 }
@@ -1827,7 +1832,7 @@ function countManifests(dir: string): number {
 function countVerdicts(dir: string): number {
   let n = 0;
   for (const f of safeReaddir(dir)) {
-    if (f.endsWith(VERDICT_SUFFIX)) n++;
+    if (f.endsWith(VERDICT_SUFFIX) && !isCanaryFile(f)) n++;
   }
   return n;
 }
@@ -1835,7 +1840,7 @@ function countVerdicts(dir: string): number {
 function countDiagnostics(dir: string): number {
   let n = 0;
   for (const f of safeReaddir(dir)) {
-    if (f.endsWith(DIAGNOSTIC_SUFFIX) || f.endsWith(VERDICT_SUFFIX)) n++;
+    if ((f.endsWith(DIAGNOSTIC_SUFFIX) || f.endsWith(VERDICT_SUFFIX)) && !isCanaryFile(f)) n++;
   }
   return n;
 }

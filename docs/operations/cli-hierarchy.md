@@ -834,6 +834,28 @@ can only print a line to paste. A mod could call `$.session.compact({ instructio
 button (the `context-meter` mod calls it without instructions today), and whether a mod can run
 `/clear` is unverified, so clearing stays a human action (or the module's 150k rotation above).
 
+### `canary`
+
+Loop canary (AISDLC-1102). `cli-hierarchy canary run --no-pr` enqueues two synthetic docs-only tasks
+(`CANARY-<n>` and `CANARY-<n+1>`) and polls the board for five stages in order, each with its own
+deadline counted from the previous stage: `claimed` (15 min), `developed` (30 min, the verdict lands
+in `done/`), `verdictRecorded` (10 min, the dispatch tick handled it), `executorCleared` (10 min, the
+clear stamp `canary-runs/cleared/<executor>.json` is newer than the verdict) and `reclaimed` (15 min,
+the second task was claimed). `--no-pr` is required: the canary never opens a pull request. It
+refuses under a hold.
+
+```bash
+cli-hierarchy canary run --no-pr
+```
+
+Records are `<board>/canary-runs/run-<n>.json` (`status` pass or fail, the stages seen, and on
+failure `failedStage` and `reason`). A failure also sends the planner a message naming the stage.
+The dispatch tick runs the canary without operator action: on the first tick after `up` and then
+daily, never while the board is held. The synthetic `CANARY-` ids are excluded from the board's
+queued, done and failed counts, and a failed canary verdict never runs the playbook. An executor
+that claims a `CANARY-` task does no development: it reports a `success` verdict with the note
+`canary` and stops.
+
 ### `hold`
 
 Pause the drain without silencing it (AISDLC-899). `hold` writes `<board>/.hold`
