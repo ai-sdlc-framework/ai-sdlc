@@ -3,7 +3,7 @@ id: AISDLC-461
 title: >-
   RFC: distributed LLM-worker scheduler for multi-machine multi-tenant
   concurrent dispatch
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-28 18:22'
 updated_date: '2026-05-28 20:42'

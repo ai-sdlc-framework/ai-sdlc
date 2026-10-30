@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "eab54b0ebce200f0dffa763f4496dcf7efdd8e4f"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "correctness-reviewer",
+      "transcriptHash": "a14fa7c6d72f3a43106e52346548fa9125f8f7cc5aa05bb856aeb8053f2193b1",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": []
+    }
+  ],
+  "rootHash": "721ac69f87d47fee087812352d504b7e7cd782b4c88c2d02c92befde08f30b9f",
+  "rootSignature": "aHTQi/dcUeLFI+2zpAZAaxgREAxweQZ8U4QSqU0Rp467uGH8xXdttSK7zGkxnLo0lQNrvWnwwmq9Zov8mzoHBw==",
+  "nonce": "897f003607696f279cf6589057c78e581b962c44af59f0691627425121c4f40b",
+  "leafCount": 1,
+  "signedAt": "2026-10-30T20:24:30.796Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "docs-adjacent",
+    "securityAlways": false,
+    "requiredSet": "correctness-only",
+    "reason": "every path is Markdown or docs-only",
+    "triggeringPaths": [],
+    "appliedReviewers": ["correctness-reviewer"]
+  }
+}
