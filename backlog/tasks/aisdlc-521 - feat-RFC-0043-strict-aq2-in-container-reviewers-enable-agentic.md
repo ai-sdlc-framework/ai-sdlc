@@ -14,6 +14,7 @@ dependencies:
 references:
   - spec/rfcs/RFC-0043-untrusted-contributor-pr-verification.md
 priority: low
+dispatchable: false
 ---
 
 ## Description
@@ -63,3 +64,7 @@ proxy-only-pinhole distinction (surfaced by the operator on 2026-06-05) is the c
 work: the reviewer stage needs a single egress to the proxy, unlike the Stage-2
 untrusted-code stage which gets zero network.
 <!-- SECTION:NOTES -->
+
+## Dispatch note (2026-10-30)
+
+`dispatchable: false` (DEC-0276, operator ruling 2026-10-30): the task stays parked pending a planner go; no executor claims it until the operator flips this back to `true`.
