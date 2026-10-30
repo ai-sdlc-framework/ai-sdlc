@@ -137,6 +137,8 @@ function cleanEnv(extra = {}) {
   // AISDLC-383.6: schema version env vars must not leak from operator shell.
   delete env.AI_SDLC_SCHEMA_VERSION;
   delete env.AI_SDLC_V6_CUTOVER_ACTIVE;
+  // AISDLC-972: v5 signing is refused unless this fixture seam is set.
+  if (!('AI_SDLC_V5_FIXTURE_SIGN' in extra)) env.AI_SDLC_V5_FIXTURE_SIGN = '1';
   // AISDLC-383.6 default: most tests assume cutover-active (so v6 is the
   // effective default + AISDLC-380 gate is audit-only). Tests that
   // specifically need the gated/non-cutover state pass an explicit
@@ -579,6 +581,27 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
       false,
       'signer must NOT be invoked when v5 attestation already exists',
     );
+  });
+
+  it('AISDLC-972: refuses v5 via every removed producer path and says why', () => {
+    writeFileSync(join(root, '.active-task'), 'AISDLC-133\n');
+    writeVerdictFile(root, 'AISDLC-133');
+    for (const env of [
+      { AI_SDLC_V5_LEGACY: '1' },
+      { AI_SDLC_V6_CUTOVER_ACTIVE: '0' },
+      { AI_SDLC_SCHEMA_VERSION: 'v5' },
+    ]) {
+      const { cmd, logPath } = installFakeSigner(root, {});
+      const r = runHook(root, {
+        AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+        AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+        AI_SDLC_V5_FIXTURE_SIGN: '',
+        ...env,
+      });
+      assert.equal(r.status, 1, JSON.stringify(env));
+      assert.match(r.stderr, /v5 attestation signing was removed \(AISDLC-972\)/);
+      assert.equal(existsSync(logPath), false, 'signer must not be invoked');
+    }
   });
 
   it('AC #1+5: signs + commits + exits 1 when sentinel + verdict + no attestation (v6 default)', () => {

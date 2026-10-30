@@ -177,12 +177,14 @@ fi
 # silently regress the AISDLC-380 forgery defense (security finding on the
 # AISDLC-409 PR review).
 #
-# Operator opt-outs (in precedence order):
-#   - AI_SDLC_SCHEMA_VERSION=v5 explicit pin
-#   - AI_SDLC_V5_LEGACY=1
-#   - Legacy: AI_SDLC_V6_CUTOVER_ACTIVE=0 (operators who pinned the old env
-#     to 0 keep that behavior; any other value of that env now defaults to v6)
-if [ "${AI_SDLC_V5_LEGACY:-0}" = "1" ] || [ "${AI_SDLC_V6_CUTOVER_ACTIVE:-1}" = "0" ]; then
+# v5 is NOT an opt-out any more (AISDLC-972): AI_SDLC_SCHEMA_VERSION=v5,
+# AI_SDLC_V5_LEGACY=1 and AI_SDLC_V6_CUTOVER_ACTIVE=0 are refused below. Only the
+# test-only AI_SDLC_V5_FIXTURE_SIGN=1 mints v5 fixtures; the verifier rejects them.
+if ([ "${AI_SDLC_V5_LEGACY:-0}" = "1" ] || [ "${AI_SDLC_V6_CUTOVER_ACTIVE:-1}" = "0" ] || [ "${AI_SDLC_SCHEMA_VERSION:-v6}" = "v5" ]) && [ "${AI_SDLC_V5_FIXTURE_SIGN:-0}" != "1" ]; then
+  echo "[attestation-sign] ERROR: v5 attestation signing was removed (AISDLC-972). v5 is read-only for envelopes signed before 2026-05-23; the verifier rejects new v5 envelopes (v5-after-cutover). Unset AI_SDLC_V5_LEGACY / AI_SDLC_SCHEMA_VERSION=v5 / AI_SDLC_V6_CUTOVER_ACTIVE=0 and sign v6." >&2
+  exit 1
+fi
+if [ "${AI_SDLC_V5_FIXTURE_SIGN:-0}" = "1" ] && { [ "${AI_SDLC_V5_LEGACY:-0}" = "1" ] || [ "${AI_SDLC_V6_CUTOVER_ACTIVE:-1}" = "0" ]; }; then
   SCHEMA_VERSION="${AI_SDLC_SCHEMA_VERSION:-v5}"
 else
   SCHEMA_VERSION="${AI_SDLC_SCHEMA_VERSION:-v6}"

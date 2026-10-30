@@ -479,22 +479,27 @@ async function main() {
   //      emit transcript leaves to .ai-sdlc/transcript-leaves.jsonl via
   //      cli-attestation.mjs emit-leaf as part of their reviewer fan-out.
   //
-  // Operator opt-outs (in precedence order):
-  //   - Pass --schema-version v5 explicitly
-  //   - Export AI_SDLC_V5_LEGACY=1 (forces v5 for ad-hoc / legacy flows)
-  //   - Legacy: AI_SDLC_V6_CUTOVER_ACTIVE=0 is honored for backward-compat
-  //     (operators who pinned the old env to 0 to lock down to v5 keep that
-  //     behavior; any other value of the legacy env, set or unset, defaults
-  //     to v6 now).
-  //
-  // Ad-hoc reviewer spawning (outside the two canonical skill bodies) does
-  // NOT yet emit transcript leaves — operators on that path should pass
-  // --schema-version v5 explicitly or set AI_SDLC_V5_LEGACY=1. Tracked as a
-  // follow-up to AISDLC-409.
+  // AISDLC-972: v5 is READ-ONLY (verify-only, for envelopes signed before the
+  // 2026-05-23 cutover). The producer paths (--schema-version v5,
+  // AI_SDLC_V5_LEGACY=1, AI_SDLC_V6_CUTOVER_ACTIVE=0) are removed; the verifier
+  // rejects any v5 envelope signed after the cutover (`v5-after-cutover`).
+  const v5Requested =
+    args['schema-version'] === 'v5' ||
+    process.env['AI_SDLC_V5_LEGACY'] === '1' ||
+    process.env['AI_SDLC_V6_CUTOVER_ACTIVE'] === '0' ||
+    process.env['AI_SDLC_SCHEMA_VERSION'] === 'v5';
+  // AI_SDLC_V5_FIXTURE_SIGN=1 is a test-fixture seam only: the verifier still
+  // rejects the result (v5-after-cutover), so it cannot land code.
+  if (v5Requested && process.env['AI_SDLC_V5_FIXTURE_SIGN'] !== '1') {
+    fail(
+      'v5 attestation signing was removed (AISDLC-972): v5 is read-only for envelopes signed before ' +
+        '2026-05-23, and the verifier rejects new v5 envelopes (v5-after-cutover). Sign v6 instead ' +
+        '(the default); unset AI_SDLC_V5_LEGACY / AI_SDLC_V6_CUTOVER_ACTIVE=0 / --schema-version v5.',
+    );
+  }
   const v5LegacyOptOut =
     process.env['AI_SDLC_V5_LEGACY'] === '1' || process.env['AI_SDLC_V6_CUTOVER_ACTIVE'] === '0';
-  const defaultSchema = v5LegacyOptOut ? 'v5' : 'v6';
-  const schemaVersion = args['schema-version'] ?? defaultSchema;
+  const schemaVersion = args['schema-version'] ?? (v5LegacyOptOut ? 'v5' : 'v6');
 
   // ──────────────────────────────────────────────────────────────────
   // RFC-0042 Phase 2: --schema-version v6 mode
