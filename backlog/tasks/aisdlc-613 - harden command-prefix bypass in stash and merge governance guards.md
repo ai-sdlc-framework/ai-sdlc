@@ -1,15 +1,16 @@
 ---
 id: AISDLC-613
 title: Harden command-prefix bypass (sudo/env/nice) in stash + merge governance guards
-status: To Do
+status: Superseded
 priority: low
+dispatchable: false
 labels:
   - security
   - hooks
 created: 2026-09-14
 ---
 
-Parked (planner, 2026-10-06): do not start without a planner go.
+Superseded (operator, 2026-10-30): AISDLC-1014 (#1845) deleted the stash and merge command-text guards this task hardens; nothing left to do.
 
 ## Context
 

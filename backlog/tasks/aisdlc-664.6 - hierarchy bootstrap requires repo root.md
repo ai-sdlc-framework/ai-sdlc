@@ -32,7 +32,7 @@ drift_log:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Parked (planner, 2026-10-06): do not start without a planner go.
+Go (operator, 2026-10-30): the 2026-10-06 park is lifted; dispatchable.
 
 Follow-up filed from executor and reviewer reports on the parent task, approved by the
 operator on 2026-10-01. The parent's conventions apply (strict TypeScript, ESM,

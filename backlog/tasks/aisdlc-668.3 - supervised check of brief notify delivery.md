@@ -14,6 +14,7 @@ references:
   - spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md
   - pipeline-cli/src/hierarchy/brief.ts
 priority: low
+dispatchable: false
 ---
 
 ## Description
@@ -28,3 +29,7 @@ Design source: `spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md`. Do n
 - [ ] Behaviour when the session is mid-turn is recorded, with a change to the delivery if it interleaves.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Dispatch note (2026-10-30)
+
+`dispatchable: false` (operator ruling 2026-10-30): ACs 1-2 need a supervised run of `cli-hierarchy brief --notify` against a live idle and a mid-turn dispatch session, which only the operator can observe. The 2026-10-29 developer pass parked for this reason.
