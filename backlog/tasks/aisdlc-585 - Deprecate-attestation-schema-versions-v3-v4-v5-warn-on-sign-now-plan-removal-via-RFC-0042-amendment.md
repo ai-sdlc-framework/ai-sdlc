@@ -3,7 +3,7 @@ id: AISDLC-585
 title: >-
   Deprecate attestation schema versions v3/v4/v5 — warn on sign now, plan
   removal via RFC-0042 amendment
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-06 04:07'
 labels:

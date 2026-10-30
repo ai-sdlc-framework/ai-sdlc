@@ -1677,6 +1677,9 @@ export function generateSigningKeyPair(): { privateKeyPem: string; publicKeyPem:
   };
 }
 
+/** Schema versions deprecated for signing (AISDLC-585); verification is unchanged. */
+const DEPRECATED_SIGN_SCHEMA_VERSIONS: readonly string[] = ['v3', 'v4', 'v5'];
+
 /** Sign options. `keyid` is required — verifiers use it to look up the pubkey. */
 export interface SignOptions {
   predicate: AttestationPredicate;
@@ -1694,6 +1697,11 @@ export function signAttestation(opts: SignOptions): DsseEnvelope {
   if (!ACCEPTED_SCHEMA_VERSIONS.includes(opts.predicate.schemaVersion)) {
     throw new Error(
       `signAttestation: schemaVersion '${opts.predicate.schemaVersion}' is not in the accepted allowlist [${ACCEPTED_SCHEMA_VERSIONS.join(', ')}]`,
+    );
+  }
+  if (DEPRECATED_SIGN_SCHEMA_VERSIONS.includes(opts.predicate.schemaVersion)) {
+    process.stderr.write(
+      `[attestation] DEPRECATED: signing a '${opts.predicate.schemaVersion}' attestation envelope. Schema versions v3/v4/v5 are deprecated for signing; migrate to v6 (cli-attestation sign-v6). The verifier still reads them for historical PRs; removal is deferred to an RFC-0042 amendment.\n`,
     );
   }
   const payloadJson = Buffer.from(JSON.stringify(opts.predicate), 'utf-8');

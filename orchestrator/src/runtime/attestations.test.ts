@@ -3121,3 +3121,21 @@ describe('ACCEPTED_SCHEMA_VERSIONS includes v5', () => {
     expect(ACCEPTED_SCHEMA_VERSIONS).toContain('v5');
   });
 });
+
+describe('signAttestation deprecation warning (AISDLC-585)', () => {
+  it('warns on legacy schema sign', () => {
+    const { privateKeyPem } = generateSigningKeyPair();
+    const writes: string[] = [];
+    const orig = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((c: string | Uint8Array) => {
+      writes.push(String(c));
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      signAttestation({ predicate: buildPredicate(DEFAULT_INPUTS), privateKeyPem, keyid: 'k' });
+    } finally {
+      process.stderr.write = orig;
+    }
+    expect(writes.join('')).toMatch(/DEPRECATED.*'v3'.*v6/);
+  });
+});
