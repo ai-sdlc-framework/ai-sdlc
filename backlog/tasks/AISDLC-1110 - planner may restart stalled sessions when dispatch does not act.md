@@ -2,7 +2,7 @@
 id: AISDLC-1110
 title: >-
   cli-hierarchy restart accepts the planner session as caller when dispatch has not acted on a restart request within two ticks, and dispatch acts on planner restart requests deterministically from the tick
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-29'
 labels:

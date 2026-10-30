@@ -42,8 +42,10 @@ import {
   WAKE_IDLE_SEC,
   WAKE_PENDING_SEC,
   type LoopDeps,
+  type SessionHealth,
 } from './dispatch-loop.js';
 import type { PlaybookOutcome } from './playbook.js';
+import { writeRestartRequest } from './restart-lock.js';
 import { writeRoster } from './roster.js';
 import type { RosterEntry } from './types.js';
 
@@ -1389,4 +1391,99 @@ describe('hierarchy loop canary in the tick (AISDLC-1102)', () => {
       true,
     );
   });
+=======
+describe('deterministic restarts (AISDLC-1110)', () => {
+  let restarted: string[];
+  let health: SessionHealth[];
+  const restartDeps = () =>
+    deps({
+      sessions: () => health,
+      restartSession: async (name) => {
+        restarted.push(name);
+        return { ok: true };
+      },
+    });
+  beforeEach(() => {
+    restarted = [];
+    health = [];
+  });
+
+  it('restarts an unknown executor with no task on the second consecutive tick, and logs it', async () => {
+    health = [{ name: 'executor-alpha', role: 'executor', state: 'unknown' }];
+    const first = await runDispatchTick(restartDeps());
+    expect(restarted).toEqual([]);
+    expect(first.restarts).toBeUndefined();
+    const second = await runDispatchTick(restartDeps());
+    expect(restarted).toEqual(['executor-alpha']);
+    expect(second.restarts).toEqual([
+      { session: 'executor-alpha', cause: 'unknown-no-task', status: 'restarted' },
+    ]);
+    expect(second.reports.map((r) => r.text)).toContain(
+      'restart executor-alpha (unknown-no-task): restarted',
+    );
+  });
+
+  it('a recovered session resets its streak; a busy executor is left alone', async () => {
+    health = [{ name: 'executor-alpha', role: 'executor', state: 'unknown' }];
+    await runDispatchTick(restartDeps());
+    health = [
+      { name: 'executor-alpha', role: 'executor', state: 'busy', inflightTask: 'AISDLC-1' },
+    ];
+    await runDispatchTick(restartDeps());
+    health = [{ name: 'executor-alpha', role: 'executor', state: 'unknown' }];
+    await runDispatchTick(restartDeps());
+    expect(restarted).toEqual([]);
+  });
+
+  it('restarts an idle executor while work is queued', async () => {
+    mkdirSync(path.join(board, 'queue'), { recursive: true });
+    writeFileSync(
+      path.join(board, 'queue', 'AISDLC-900.dispatch.json'),
+      JSON.stringify({ schemaVersion: 'v1', taskId: 'AISDLC-900' }),
+    );
+    health = [{ name: 'executor-beta', role: 'executor', state: 'idle' }];
+    await runDispatchTick(restartDeps());
+    await runDispatchTick(restartDeps());
+    expect(restarted).toEqual(['executor-beta']);
+  });
+
+  it('restarts an over-context planner on the second tick but never the dispatch session', async () => {
+    health = [
+      { name: 'planner', role: 'planner', state: 'busy', overThreshold: true },
+      { name: 'operator-dispatch', role: 'operator-dispatch', state: 'busy', overThreshold: true },
+    ];
+    await runDispatchTick(restartDeps());
+    expect(restarted).toEqual([]);
+    const r = await runDispatchTick(restartDeps());
+    expect(restarted).toEqual(['planner']);
+    expect(r.restarts?.[0]).toMatchObject({ session: 'planner', cause: 'over-context' });
+  });
+
+  it('consumes a restart-request file as a restart on the next tick and removes it', async () => {
+    writeRestartRequest(board, 'executor-alpha', 'planner', new Date(clock));
+    const file = path.join(board, 'restart-requests', 'executor-alpha.json');
+    expect(existsSync(file)).toBe(true);
+    const r = await runDispatchTick(restartDeps());
+    expect(restarted).toEqual(['executor-alpha']);
+    expect(r.restarts).toEqual([
+      { session: 'executor-alpha', cause: 'request', status: 'restarted' },
+    ]);
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it('reports a failed restart without failing the tick', async () => {
+    writeRestartRequest(board, 'executor-alpha', 'planner', new Date(clock));
+    const r = await runDispatchTick(
+      deps({
+        sessions: () => [],
+        restartSession: async () => {
+          throw new Error('lock held');
+        },
+      }),
+    );
+    expect(r.restarts).toEqual([
+      { session: 'executor-alpha', cause: 'request', status: 'failed', reason: 'lock held' },
+    ]);
+  });
+>>>>>>> aa9c2da5 (feat: restart lock, auto-restart rules and restart-request file (AISDLC-1110))
 });

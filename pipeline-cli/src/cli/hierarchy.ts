@@ -117,6 +117,7 @@ import {
   hierarchyRegister,
   hierarchyRestart,
   hierarchyRestartAll,
+  writeRestartRequest,
   hierarchyStatus,
   hierarchyTerminals,
   hierarchyUp,
@@ -824,14 +825,19 @@ export async function runHierarchyCli(
       }
       case 'restart':
       case 'register': {
-        const caller = dispatchCaller(
-          subcommand,
-          false,
-          subcommand === 'restart' ? ['operator-dispatch', 'planner'] : undefined,
-        );
-        if (!caller.ok) {
-          process.stderr.write(`${caller.reason}\n`);
-          return 1;
+        // `restart` is open to any roster session or the operator, guarded by a lock
+        // (AISDLC-1110); `register` stays a dispatch-session command.
+        let callerName: string | undefined;
+        if (subcommand === 'register') {
+          const caller = dispatchCaller(subcommand);
+          if (!caller.ok) {
+            process.stderr.write(`${caller.reason}\n`);
+            return 1;
+          }
+        } else {
+          callerName = resolveCaller(
+            extras.identity ?? createSystemIdentity(deps.boardDir, extras.processLookup),
+          )?.name;
         }
         // `--after-task executor-beta` reads the name as the flag's value.
         const afterTask = flags['after-task'];
@@ -853,7 +859,10 @@ export async function runHierarchyCli(
         if (waitSec === null) return 2;
         if (all) {
           const res = await hierarchyRestartAll(
-            { ...(waitSec === undefined ? {} : { waitSec }), callerName: caller.name },
+            {
+              ...(waitSec === undefined ? {} : { waitSec }),
+              ...(callerName ? { callerName } : {}),
+            },
             deps,
           );
           deps.log(JSON.stringify(res));
@@ -863,7 +872,7 @@ export async function runHierarchyCli(
           {
             session: session as string,
             afterTask: afterTask !== undefined,
-            callerName: caller.name,
+            ...(callerName ? { callerName } : {}),
             ...(waitSec === undefined ? {} : { waitSec }),
           },
           deps,
@@ -1096,6 +1105,22 @@ export async function runHierarchyCli(
             findPr: (id) => findOpenPrNumber(extras.ghRun ?? deps.run, repoRoot, id),
           },
           parentHead: () => readParentHead(repoRoot),
+          sessions: () =>
+            hierarchyStatus(deps).rows.map((r) => ({
+              name: r.entry.name,
+              role: r.entry.role,
+              state: r.state,
+              ...(r.inflightTask ? { inflightTask: r.inflightTask } : {}),
+              ...(r.overThreshold ? { overThreshold: true } : {}),
+            })),
+          restartSession: async (name) => {
+            try {
+              await hierarchyRestart({ session: name, lockHolder: worker }, deps);
+              return { ok: true };
+            } catch (err) {
+              return { ok: false, reason: (err as Error).message };
+            }
+          },
           idleExecutors: () =>
             hierarchyStatus(deps)
               .rows.filter(
@@ -1377,6 +1402,25 @@ export async function runHierarchyCli(
         return 0;
       }
       case 'send': {
+        const restartTarget = flags.restart;
+        if (restartTarget !== undefined) {
+          if (restartTarget === 'true' || !restartTarget) {
+            process.stderr.write('cli-hierarchy send: --restart <session> needs a session name\n');
+            return 2;
+          }
+          const by =
+            resolveCaller(
+              extras.identity ?? createSystemIdentity(deps.boardDir, extras.processLookup),
+            )?.name ?? 'operator';
+          try {
+            writeRestartRequest(deps.boardDir, restartTarget, by, deps.now());
+          } catch (err) {
+            process.stderr.write(`cli-hierarchy send: ${(err as Error).message}\n`);
+            return 1;
+          }
+          deps.log(JSON.stringify({ ok: true, restartRequested: restartTarget, by }));
+          return 0;
+        }
         const to = flags.to === 'true' ? '' : (flags.to ?? '');
         const text = flags.text === 'true' ? '' : (flags.text ?? '');
         if (!to || !text) {

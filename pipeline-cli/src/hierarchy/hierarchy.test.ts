@@ -2360,6 +2360,27 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
     expect(validateHierarchyRoster(after).valid).toBe(true);
   });
 
+  it('a planner-role caller restarts an executor; a second caller inside the lock window is refused naming the holder (AISDLC-1110)', async () => {
+    const planner = Q('planner');
+    const first = await hierarchyRestart({ session: alpha, callerName: planner }, deps);
+    expect(first.name).toBe(alpha);
+    await expect(
+      hierarchyRestart({ session: alpha, callerName: Q('executor-beta') }, deps),
+    ).rejects.toThrow(new RegExp(`'${planner}' holds its restart lock`));
+    // after the window the lock is free again
+    deps.now = () => new Date(NOW.getTime() + 121_000);
+    await expect(
+      hierarchyRestart({ session: alpha, callerName: Q('executor-beta') }, deps),
+    ).resolves.toMatchObject({ name: alpha });
+  });
+
+  it('refuses a caller that restarts its own session (AISDLC-1110)', async () => {
+    await expect(hierarchyRestart({ session: alpha, callerName: alpha }, deps)).rejects.toThrow(
+      /calling session/,
+    );
+    expect(fake.calls.some((c) => c.args[0] === 'send-keys')).toBe(false);
+  });
+
   it('starts a session whose window is already gone (after a crash)', async () => {
     fake.windows = fake.windows.filter((w) => w !== alpha);
     const result = await hierarchyRestart({ session: alpha }, deps);

@@ -1801,20 +1801,37 @@ describe('restart and register (AISDLC-713)', () => {
     });
   });
 
-  it.each(['restart', 'register'])(
-    '%s refuses an executor caller and changes nothing',
-    async (cmd) => {
-      const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
-      const code = await runHierarchyCli([cmd, 'executor-alpha'], overrides(), {
-        identity: asCaller('executor', 'executor-alpha'),
-      });
-      expect(code).toBe(1);
-      expect(String(err.mock.calls[0]?.[0])).toContain(
-        cmd === 'restart' ? 'only the dispatch or planner session' : 'only the dispatch session',
-      );
-      expect(calls).toEqual([]);
-    },
-  );
+  it('register refuses an executor caller and changes nothing', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const code = await runHierarchyCli(['register', 'executor-alpha'], overrides(), {
+      identity: asCaller('executor', 'executor-alpha'),
+    });
+    expect(code).toBe(1);
+    expect(String(err.mock.calls[0]?.[0])).toContain('only the dispatch session');
+    expect(calls).toEqual([]);
+  });
+
+  it('restart refuses a session restarting itself and changes nothing (AISDLC-1110)', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const code = await runHierarchyCli(['restart', 'executor-alpha'], overrides(), {
+      identity: asCaller('executor', 'executor-alpha'),
+    });
+    expect(code).toBe(1);
+    expect(String(err.mock.calls[0]?.[0])).toContain('calling session');
+    expect(calls).toEqual([]);
+  });
+
+  it('send --restart writes a request file for the next tick (AISDLC-1110)', async () => {
+    const logs: string[] = [];
+    const base = overrides();
+    const code = await runHierarchyCli(
+      ['send', '--restart', 'executor-alpha'],
+      { ...base, log: (l: string) => logs.push(l) },
+      { identity: asCaller('planner', 'planner') },
+    );
+    expect(code).toBe(0);
+    expect(logs.join('')).toContain('"restartRequested":"executor-alpha"');
+  });
 
   it('restart accepts the planner as caller (AISDLC-1104)', async () => {
     const run: CommandRunner = (_f, args) => {
