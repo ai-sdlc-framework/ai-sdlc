@@ -618,6 +618,7 @@ function enforceWriteEdit(filePath) {
         );
       }
     }
+    enforceTestFileLock(relPath, projectAbs, searchFrom);
     return;
   }
 
@@ -1010,34 +1011,66 @@ function matchGlob(glob, path) {
  * Returns [] when no active task, no matching task file, or no frontmatter field.
  */
 function loadPermittedExternalPaths(projectAbs, searchFrom) {
+  const task = loadActiveTaskFile(projectAbs, searchFrom);
+  if (!task) return [];
+  const fmMatch = task.content.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) return [];
+  return parseListField(fmMatch[1], 'permittedExternalPaths');
+}
+
+/** Read the active task file: `{ file, content }` or null when absent. */
+function loadActiveTaskFile(projectAbs, searchFrom) {
   const taskId = readActiveTaskId(projectAbs, searchFrom);
-  if (!taskId) return [];
+  if (!taskId) return null;
 
   const tasksDir = join(projectAbs, 'backlog', 'tasks');
-  if (!existsSync(tasksDir)) return [];
+  if (!existsSync(tasksDir)) return null;
 
   let entries;
   try {
     entries = readdirSync(tasksDir);
   } catch {
-    return [];
+    return null;
   }
 
   // Task files are named `<id-lower> - <slug>.md` (e.g. `aisdlc-68 - foo.md`).
   // Match case-insensitively on the id prefix to be tolerant.
   const idLower = taskId.toLowerCase();
   const taskFile = entries.find((f) => f.toLowerCase().startsWith(idLower + ' '));
-  if (!taskFile) return [];
+  if (!taskFile) return null;
 
-  let content;
   try {
-    content = readFileSync(join(tasksDir, taskFile), 'utf-8');
+    return {
+      file: `backlog/tasks/${taskFile}`,
+      content: readFileSync(join(tasksDir, taskFile), 'utf-8'),
+    };
   } catch {
-    return [];
+    return null;
   }
+}
 
-  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
-  if (!fmMatch) return [];
-
-  return parseListField(fmMatch[1], 'permittedExternalPaths');
+/**
+ * AISDLC-939: while the active task carries the `bug` label, refuse edits to
+ * test files (`*.test.*`, `*.spec.*`, `__tests__/**`) unless the task file
+ * names the repo-relative path. Skip: AI_SDLC_SKIP_TEST_LOCK=1 (logged).
+ */
+function enforceTestFileLock(relPath, projectAbs, searchFrom) {
+  const isTestFile = /\.(test|spec)\.[^/]+$/i.test(relPath) || /(^|\/)__tests__\//.test(relPath);
+  if (!isTestFile) return;
+  const task = loadActiveTaskFile(projectAbs, searchFrom);
+  if (!task) return;
+  const fmMatch = task.content.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch || !parseListField(fmMatch[1], 'labels').includes('bug')) return;
+  if (task.content.includes(relPath)) return;
+  if (process.env.AI_SDLC_SKIP_TEST_LOCK === '1') {
+    process.stderr.write(
+      `[enforce-blocked-actions] AI_SDLC_SKIP_TEST_LOCK=1 - test-file lock skipped for '${relPath}'\n`,
+    );
+    return;
+  }
+  deny(
+    `test file '${relPath}' is locked: the active task (${task.file}) is labelled 'bug' and does not name this path. ` +
+      `Next step: add '${relPath}' to 'references:' or the body of ${task.file} (a reviewed change), ` +
+      `or move this edit to a task without the 'bug' label.`,
+  );
 }
