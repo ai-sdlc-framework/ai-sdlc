@@ -13,11 +13,20 @@ import {
   type ModelCallRecord,
   type PriceRow,
 } from '@ai-sdlc/reference';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Argv } from 'yargs';
 import { repoNameFor } from './attribution.js';
 import { repoIdFor, resolveRepoFilter } from './repo-id.js';
 import type { OrchestratorEvent } from '../orchestrator/events.js';
+import {
+  buildJitReport,
+  readSessionLedgers,
+  renderJitJson,
+  renderJitText,
+  type EntryReference,
+  type ProfileInput,
+} from './jit-report.js';
 import {
   GROUP_KEYS,
   buildContextView,
@@ -277,6 +286,56 @@ export function registerUsageViewCommands(y: Argv, deps: UsageViewDeps, io: Usag
           io.out(renderReportCsv(report));
           io.err(`${report.unitsNote}\n`);
         } else io.out(renderReportText(report));
+      },
+    )
+    .command(
+      'jit',
+      'Cache-versus-JIT report: injected tokens by role and moment, cited share, cache-read tokens and the weekly net-token flag',
+      (c) =>
+        withRange(c)
+          .option('refs', {
+            type: 'string',
+            description: 'JSONL file of later references: {"sessionId","id","at"} per line',
+          })
+          .option('profiles', {
+            type: 'string',
+            description: 'JSON file {"changes":[{"profile","at"}],"sessions":{"<id>":"<profile>"}}',
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['text', 'json'] as const,
+            default: 'text',
+          }),
+      async (argv) => {
+        const filter = rangeFilter(argv, io);
+        if (!filter) return;
+        const ctx = context(deps, io);
+        const records = await loadRecords(deps, filter);
+        let references: EntryReference[] | undefined;
+        let profiles: ProfileInput | undefined;
+        try {
+          if (argv.refs !== undefined) {
+            references = readFileSync(argv.refs, 'utf-8')
+              .split('\n')
+              .filter((l) => l.trim())
+              .map((l) => JSON.parse(l) as EntryReference);
+          }
+          if (argv.profiles !== undefined) {
+            profiles = JSON.parse(readFileSync(argv.profiles, 'utf-8')) as ProfileInput;
+          }
+        } catch (e) {
+          io.err(`Cannot read --refs or --profiles input: ${(e as Error).message}\n`);
+          io.exit(1);
+          return;
+        }
+        const report = buildJitReport({
+          ledgers: readSessionLedgers(resolve(deps.workDir ?? process.cwd())),
+          records,
+          references,
+          profiles,
+          now: ctx.now,
+        });
+        io.out(argv.format === 'json' ? renderJitJson(report) : renderJitText(report));
       },
     )
     .command(
