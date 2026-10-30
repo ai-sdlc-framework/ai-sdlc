@@ -129,7 +129,13 @@ describe('loop canary', () => {
     const run = start();
     play(run.taskId, { stamp: true });
     const c = peekQueue(board);
-    expect(c).toEqual({ queued: 1 - 1, inflight: 0, done: 0, failed: 0 });
+    expect(c).toEqual({
+      queued: 0,
+      inflight: 0,
+      done: 0,
+      failed: 0,
+      oldestQueued: null,
+    });
   });
 
   it('canary run: pass record exit 0, failure exit 1 with planner message, refuses under a hold', async () => {
