@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1116
 title: docs-only classifier counts review logs and transcript leaves as code, so docs PRs run the code gate and fail the reviewers check
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-29'
 labels:

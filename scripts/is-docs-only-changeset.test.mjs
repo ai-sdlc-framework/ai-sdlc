@@ -597,3 +597,19 @@ describe('AISDLC-867 records-only classifier', () => {
     assert.equal(r.stdout.trim(), 'records-only');
   });
 });
+
+describe('review metadata paths (AISDLC-1116)', () => {
+  const meta = ['.ai-sdlc/reviews/abc.jsonl', '.ai-sdlc/transcript-leaves/abc.jsonl'];
+  it('classifies docs plus review logs and transcript leaves as docs-only', () => {
+    const files = [
+      'docs/a.md',
+      'backlog/tasks/aisdlc-1 - x.md',
+      '.ai-sdlc/attestations/abc.dsse.json',
+      ...meta,
+    ];
+    assert.equal(classifyChangeset(files), 'docs-only');
+  });
+  it('still classifies review logs plus source as code', () => {
+    assert.equal(classifyChangeset([meta[0], 'pipeline-cli/src/y.ts']), 'code');
+  });
+});

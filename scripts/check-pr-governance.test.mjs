@@ -416,3 +416,28 @@ describe('waived-tests check (AISDLC-1022)', () => {
     assert.match(checkWaivedTests({ base: 'a', head: 'b', git })[0], /cannot diff/);
   });
 });
+
+describe('reviewers check on docs plus review metadata (AISDLC-1116)', () => {
+  it('passes a docs-only attestation carrying one reviewer', async () => {
+    const { classifyChangeset } = await import('./is-docs-only-changeset.mjs');
+    const r = mkRepo();
+    const files = {
+      'docs/a.md': 'x\n',
+      '.ai-sdlc/reviews/abc.jsonl': '{}\n',
+      '.ai-sdlc/transcript-leaves/abc.jsonl': '{}\n',
+    };
+    const head = r.commit(files, 'docs: change');
+    const cls = classifyChangeset(Object.keys(files));
+    assert.equal(cls, 'docs-only');
+    assert.deepEqual(
+      checkReviewers({
+        base: r.base,
+        head,
+        repoRoot: r.d,
+        git: r.git,
+        docsOnly: cls === 'docs-only',
+      }),
+      [],
+    );
+  });
+});
