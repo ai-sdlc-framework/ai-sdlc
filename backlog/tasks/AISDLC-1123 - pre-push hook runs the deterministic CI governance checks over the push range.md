@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1123
 title: pre-push hook runs the deterministic CI governance checks (waived-tests, reviewers, attestation verify, backlog drift, conflict markers) over the push range, so a red that CI would raise is fixed before the push
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-30'
 labels:

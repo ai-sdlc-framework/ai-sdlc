@@ -394,3 +394,7 @@ Two standalone PR workflows became jobs of `ai-sdlc-gate.yml`, so one checkout a
 - `rfc-lifecycle` (check name `RFC Lifecycle Gate`): runs only when `Detect Changes` reports a changed `spec/rfcs/*.md` (`rfcs` output; an allowed skip otherwise). It keeps the transition check and the AISDLC-417 guards, and a forbidden transition fails `ai-sdlc/pr-ready`.
 
 A trusted PR push starts two workflows: the gate and the auto-arm workflow. `untrusted-pr-gate.yml` and `ai-sdlc-review.yml` also start but every job is skipped by a job-level trust condition (fork, non-collaborator or bot only), so no runner starts and no API call is made. `no-new-pr-gate.test.mjs` fails if any other workflow gains a `pull_request` or `pull_request_target` trigger.
+
+## Pre-push governance gate (AISDLC-1123)
+
+`.husky/pre-push` runs `scripts/check-governance-on-push.sh` over the push range after the fixups: conflict markers, `check-pr-governance.mjs waived-tests`, `reviewers` (only when the range adds an attestation envelope, never on a docs-only push), `backlog-drift` (only when a removed or renamed file is referenced from `backlog/`) and `run-gate-tests.mjs` (only when a gate test directory changed, never on a docs-only push). Attestation verification stays in `check-attestation-sign.sh` (AISDLC-694). Same scripts and arguments as CI; CI remains the merge gate. Skip: `AI_SDLC_SKIP_GOVERNANCE_GATE=1`.

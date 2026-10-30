@@ -20,12 +20,19 @@
 #      the re-push finds nothing to do and exits 0. The sub-hooks are no
 #      longer invoked directly from this file.
 #
+#   3. Governance gate (AISDLC-1123) - `scripts/check-governance-on-push.sh`, runs AFTER
+#      the fixups so the signed HEAD is checked: conflict markers, waived-tests,
+#      reviewers (when an envelope is in the range), backlog drift (only when a
+#      backlog-referenced file is removed), gate tests (only when a gate dir changed;
+#      docs-only pushes run neither). Attestation verify stays in step 2 (AISDLC-694).
+#      Skip: AI_SDLC_SKIP_GOVERNANCE_GATE=1.
+#
 # Skip individual gates with their respective env vars
 # (AI_SDLC_SKIP_SUBSTRATE_GATE=1,
 # AI_SDLC_SKIP_TASK_MOVE=1, AI_SDLC_SKIP_SQUASH_CHORES=1,
 # AI_SDLC_SKIP_FOLLOWUP_GATE=1,
 # AI_SDLC_SKIP_ATTESTATION_SIGN=1, AI_SDLC_SKIP_DARK_CODE_GATE=1,
-# AI_SDLC_SKIP_MARKER_GATE=1)
+# AI_SDLC_SKIP_MARKER_GATE=1, AI_SDLC_SKIP_GOVERNANCE_GATE=1)
 # or skip all pre-push hooks via `git push --no-verify` (use sparingly —
 # these gates exist because the things they guard have failed silently in
 # the past).
@@ -104,7 +111,13 @@ printf '%s\n' "$PUSH_STDIN" | ./scripts/check-followups-on-push.sh
 # in a single pass and exits 1 ONCE if a fixup commit was made. Skips:
 # AI_SDLC_SKIP_SQUASH_CHORES, AI_SDLC_SKIP_TASK_MOVE, AI_SDLC_SKIP_ATTESTATION_SIGN.
 printf '%s\n' "$PUSH_STDIN" | ./scripts/pre-push-fixups.sh
+<<<<<<< HEAD
 # AISDLC-1119: early copy of the CI patch-coverage gate. Runs test:coverage only in the
 # packages the diff touches, then scripts/check-pr-patch-coverage.mjs with the same threshold
 # file as CI (.ai-sdlc/patch-coverage.yaml). Skip: AI_SDLC_SKIP_PATCH_COVERAGE_GATE=1.
 node scripts/pre-push-patch-coverage.mjs
+=======
+# AISDLC-1123: deterministic CI governance checks over the push range. Skip:
+# AI_SDLC_SKIP_GOVERNANCE_GATE=1.
+printf '%s\n' "$PUSH_STDIN" | ./scripts/check-governance-on-push.sh
+>>>>>>> e5454d0f (feat(hooks): pre-push runs deterministic CI governance checks (AISDLC-1123))
