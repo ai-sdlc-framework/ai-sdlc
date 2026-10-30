@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1117
 title: ephemeral spawn refuses every eligible claim while an orphaned tmux session carries the executor name; the tick must reap orphans and surface spawn errors
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-29'
 labels:
@@ -35,13 +35,49 @@ Two defects. (1) A tmux session whose name matches a spawned-executor name but w
 
 ## Acceptance Criteria
 
-- [ ] AC1: with a tmux session `ai-sdlc-executor-aisdlc-999` present and no roster entry, `cli-hierarchy spawn AISDLC-999` kills it and spawns (unit test with a fake tmux).
-- [ ] AC2: with the same session present and a roster entry for it, `spawn` still refuses.
-- [ ] AC3: the tick sweep reaps an unrostered spawned-executor session and lists it in the tick result.
-- [ ] AC4: after a verdict down, the executor's tmux session no longer exists (test).
-- [ ] AC5: `status` prints each spawn error of the last tick; the drain-stall check fires on spawn errors with zero live executors.
-- [ ] AC6: `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] AC1: with a tmux session `ai-sdlc-executor-aisdlc-999` present and no roster entry, `cli-hierarchy spawn AISDLC-999` kills it and spawns (unit test with a fake tmux).
+- [x] AC2: with the same session present and a roster entry for it, `spawn` still refuses.
+- [x] AC3: the tick sweep reaps an unrostered spawned-executor session and lists it in the tick result.
+- [x] AC4: after a verdict down, the executor's tmux session no longer exists (test).
+- [x] AC5: `status` prints each spawn error of the last tick; the drain-stall check fires on spawn errors with zero live executors.
+- [x] AC6: `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 
 ## Out of scope
 
 The executor cap and budget pacer (AISDLC-1076); VS Code terminal visibility of dynamic executors (the vscode-hierarchy extension covers it).
+
+## Final Summary
+
+## Summary
+An unrostered tmux session that carries an executor name is now treated as an orphan. `spawn` kills it and recreates it, and the tick sweep reaps it and lists it as `orphansReaped`. `down` always kills an ephemeral executor's tmux session. `status` prints each of the last tick's spawn errors, and the drain-stall check counts spawn errors with zero live executors as a stall.
+
+## Changes
+- pipeline-cli/src/hierarchy/spawn.ts
+- pipeline-cli/src/hierarchy/tmux.ts
+- pipeline-cli/src/hierarchy/validate.ts
+- pipeline-cli/src/hierarchy/down.ts
+- pipeline-cli/src/hierarchy/ephemeral-tick.ts
+- pipeline-cli/src/hierarchy/dispatch-loop.ts
+- pipeline-cli/src/hierarchy/drain-stall.ts
+- pipeline-cli/src/hierarchy/status.ts
+- pipeline-cli/src/hierarchy/index.ts
+- pipeline-cli/src/cli/hierarchy.ts
+- pipeline-cli/src/hierarchy/spawn.test.ts
+- pipeline-cli/src/hierarchy/dispatch-loop-ephemeral.test.ts
+- pipeline-cli/src/hierarchy/drain-stall.test.ts
+- pipeline-cli/src/hierarchy/hierarchy.test.ts
+- docs/operations/cli-hierarchy.md
+
+## Design decisions
+Test command: `env -u AI_SDLC_EXECUTOR_TASK npx vitest run` in pipeline-cli, summary line `Tests 12387 passed | 13 skipped (12400)`. The variable has to be unset because the dev environment exports AI_SDLC_EXECUTOR_TASK, which makes the executor-start tests fail; that is unrelated to this change. `hierarchyDown` now kills the tmux session after a successful stop when the session still exists. The orphan rule is shared: `spawn` checks for an inflight task first, and the sweep skips any session whose name is the worker id of an inflight task. The last tick's spawn errors are persisted as `lastSpawnErrors` in the dispatch loop state file. The commit scope is `pipeline-cli` because commitlint rejects `hierarchy` as a scope.
+
+## Verification
+- `pnpm build` — passed
+- `pnpm test` — passed
+- `pnpm lint` — passed
+- `pnpm format:check` — passed
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+

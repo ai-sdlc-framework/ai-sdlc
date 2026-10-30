@@ -12,10 +12,17 @@ import { manifestPathIn } from '../dispatch/board.js';
 import { readNvmrc } from './node-pin.js';
 import { rosterProject } from './peer-guard.js';
 import { readRosterChecked, writeRoster } from './roster.js';
-import { hasSession } from './tmux.js';
+import { listInflight } from './inflight.js';
+import { hasSession, killSession, listSessionNames } from './tmux.js';
 import type { HierarchyDeps, RosterEntry } from './types.js';
 import { launchSession, ROLE_PROMPT } from './up.js';
-import { assertModel, assertProject, sanitizeProject, spawnedExecutorName } from './validate.js';
+import {
+  assertModel,
+  assertProject,
+  isSpawnedExecutorName,
+  sanitizeProject,
+  spawnedExecutorName,
+} from './validate.js';
 import path from 'node:path';
 
 /** Inputs of {@link hierarchySpawn}. */
@@ -55,15 +62,17 @@ export async function hierarchySpawn(
     deps.log(`executor '${name}' for ${taskId} is already live; nothing created`);
     return { name, taskId, created: false, entry: existing, warnings };
   }
-  if (hasSession(deps.run, name)) {
-    throw new Error(
-      `tmux session '${name}' exists but is not in the roster; refusing to start a duplicate`,
-    );
-  }
   if (existsSync(manifestPathIn(deps.boardDir, 'inflight', taskId))) {
     throw new Error(
       `${taskId} is already claimed (inflight); refusing to spawn an executor for it`,
     );
+  }
+  // AISDLC-1117: the roster is the authority. A session that carries the executor name but is
+  // not in the roster (checked above) and holds no inflight task is an orphan: reclaim it.
+  if (hasSession(deps.run, name)) {
+    killSession(deps.run, name);
+    deps.log(`reclaimed orphaned tmux session '${name}' (not in the roster)`);
+    warnings.push(`reclaimed orphaned tmux session '${name}'`);
   }
 
   const known = rosterProject(roster.sessions);
@@ -103,4 +112,24 @@ export async function hierarchySpawn(
   deps.log(`spawned executor '${name}' for ${taskId} model=${model}`);
   deps.log(`  show it with: cli-hierarchy attach ${name}`);
   return { name, taskId, created: true, entry, warnings };
+}
+
+/**
+ * The tick's sweep (AISDLC-1117): kill every tmux session that is named like a spawned executor
+ * but is absent from the roster and holds no inflight task. The same rule {@link hierarchySpawn}
+ * applies to the one session it needs. Returns the names reaped.
+ */
+export function reapOrphanExecutorSessions(deps: HierarchyDeps): string[] {
+  const { roster } = readRosterChecked(deps.boardDir);
+  const rostered = new Set(roster.sessions.flatMap((s) => [s.name, s.tmuxSession]));
+  const holding = new Set(listInflight(deps.boardDir).map((i) => i.workerId));
+  const reaped: string[] = [];
+  for (const name of listSessionNames(deps.run)) {
+    if (!isSpawnedExecutorName(name) || rostered.has(name) || holding.has(name)) continue;
+    if (killSession(deps.run, name).status === 0) {
+      reaped.push(name);
+      deps.log(`reaped orphaned tmux session '${name}' (not in the roster)`);
+    }
+  }
+  return reaped;
 }

@@ -150,7 +150,12 @@ export {
   type OperationalAction,
   type OperationalPolicy,
 } from './operational.js';
-export { hierarchySpawn, type SpawnOptions, type SpawnResult } from './spawn.js';
+export {
+  hierarchySpawn,
+  reapOrphanExecutorSessions,
+  type SpawnOptions,
+  type SpawnResult,
+} from './spawn.js';
 export {
   DEFAULT_EMPTY_QUEUE_HIBERNATE_SEC,
   executorStart,

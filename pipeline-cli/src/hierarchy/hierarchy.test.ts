@@ -375,6 +375,17 @@ describe('formatStatus dynamic executors (AISDLC-1075)', () => {
     expect(dyn).toEqual([
       'dynamic executor: ai-sdlc-executor-aisdlc-9 task AISDLC-9 age 5m (busy)',
     ]);
+    const withErrors = formatStatus(
+      {
+        rows: [],
+        board: { queued: 0, inflight: 0, done: 0, failed: 0 },
+        webhook: { running: false },
+        scheduler: { running: false },
+        spawnErrors: [{ taskId: 'AISDLC-785', error: 'boom' }],
+      } as never,
+      now,
+    );
+    expect(withErrors).toContain('spawn error: task AISDLC-785: boom');
     expect(formatAge('2026-10-27T09:50:00Z', now)).toBe('2h10m');
     expect(formatAge('garbage', now)).toBe('?');
   });

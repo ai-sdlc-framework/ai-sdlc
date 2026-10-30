@@ -38,6 +38,7 @@ import {
   schedulerStatus,
   type SchedulerStatus,
 } from './reconcile-scheduler.js';
+import { readLoopState } from './dispatch-loop.js';
 import { formatLastTick, lastTickInfo } from './host-liveness.js';
 import { formatWebhookStatus, webhookStatus, type WebhookStatus } from './webhook.js';
 import { listWindows, paneInfo, paneStartCommand, sessionAttached } from './tmux.js';
@@ -108,6 +109,8 @@ export interface StatusResult {
   quota?: Quota;
   /** The open drain stall (AISDLC-1101); absent when the drain is moving. */
   drainStall?: DrainStallRecord;
+  /** Spawn errors of the last tick (AISDLC-1117). */
+  spawnErrors?: { taskId: string; error: string }[];
   /** Committed attestation envelope and leaf growth (AISDLC-968). */
   attestationGrowth?: AttestationGrowth;
 }
@@ -250,6 +253,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     /* unreadable directories must not break status */
   }
   const lastTick = lastTickInfo(deps.boardDir, deps.now());
+  const spawnErrors = readLoopState(deps.boardDir).lastSpawnErrors ?? [];
   const nowMs = deps.now().getTime();
   const agedPrs = landings
     .flatMap((l) => {
@@ -267,6 +271,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     unowned: landings.filter((l) => l.owner === 'unowned').length,
     ...(growth ? { attestationGrowth: growth } : {}),
     ...(drainStall ? { drainStall } : {}),
+    ...(spawnErrors.length > 0 ? { spawnErrors } : {}),
     ...(Object.keys(ghCallsPerHour).length > 0 ? { ghCallsPerHour } : {}),
     ...(quota ? { quota } : {}),
     board: peekQueue(deps.boardDir),
@@ -295,6 +300,9 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       (r) =>
         `dynamic executor: ${r.entry.name} task ${r.entry.taskId} age ${formatAge(r.entry.startedAt, nowMs)} (${r.state})`,
     );
+  dynamicLines.push(
+    ...(result.spawnErrors ?? []).map((e) => `spawn error: task ${e.taskId}: ${e.error}`),
+  );
   const t = result.contextThresholds;
   const thresholds = t
     ? [
@@ -321,6 +329,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
   if (result.rows.length === 0)
     return [
       'no sessions in the roster',
+      ...dynamicLines,
       formatWebhookStatus(result.webhook),
       formatSchedulerStatus(result.scheduler),
       formatLastTick(result.lastTick),

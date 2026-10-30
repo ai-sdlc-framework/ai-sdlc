@@ -594,6 +594,10 @@ with `AI_SDLC_EXECUTOR_TASK=<id>`. A live session of that name is reported and n
 inflight is refused. The hooks module executor branch reads the variable at `session.start` and runs the executor
 command at once, with no `enqueue` wake to wait for. `status` lists each dynamic executor as
 `dynamic executor: <name> task <id> age <age> (<state>)`, one line per roster entry that carries a `taskId`.
+A tmux session of that name that the roster does not know, with no inflight task, is an orphan (AISDLC-1117): `spawn` kills it and
+creates the session, and the dispatch tick reaps every such session on its own (listed in the tick result as `orphansReaped`).
+A rostered live session is never touched. The last tick's spawn failures print in `status` as `spawn error: task <id>: <error>`,
+and the drain-stall check counts spawn errors with no live executor as a stall. `down` also kills the session of an ephemeral executor.
 The session ends with its task (one task per executor). With the variable set, `executor-start` claims only that task, exits `1` naming the reason
 when it is not claimable (or the board is held), and refuses `--wait`.
 

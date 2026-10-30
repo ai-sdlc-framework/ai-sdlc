@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { writeHeartbeat, writeVerdict } from '../dispatch/board.js';
 import { enqueueTasks } from '../dispatch/enqueue.js';
 import { requeueFailed } from '../dispatch/requeue.js';
-import { runDispatchTick, type LoopDeps } from './dispatch-loop.js';
+import { readLoopState, runDispatchTick, type LoopDeps } from './dispatch-loop.js';
 import { readRosterChecked, writeRoster } from './roster.js';
 import type { RosterEntry } from './types.js';
 import { spawnedExecutorName } from './validate.js';
@@ -211,6 +211,14 @@ describe('ephemeral executors in the tick', () => {
     const r = await runDispatchTick(failing);
     expect(r.ephemeral?.spawnErrors).toHaveLength(2);
     expect(r.ephemeral?.spawned).toEqual([]);
+    expect(readLoopState(board).lastSpawnErrors).toHaveLength(2);
+  });
+
+  it('reaps orphaned executor sessions and lists them in the result (AISDLC-1117)', async () => {
+    const d = deps();
+    d.ephemeral!.reapOrphans = () => ['ai-sdlc-executor-aisdlc-9'];
+    const r = await runDispatchTick(d);
+    expect(r.ephemeral?.orphansReaped).toEqual(['ai-sdlc-executor-aisdlc-9']);
   });
 
   it('does nothing while held', async () => {

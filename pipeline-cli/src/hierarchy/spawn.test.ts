@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { manifestPathIn } from '../dispatch/board.js';
 import { readRoster, readRosterChecked, writeRoster } from './roster.js';
-import { hierarchySpawn } from './spawn.js';
+import { hierarchyDown } from './down.js';
+import { hierarchySpawn, reapOrphanExecutorSessions } from './spawn.js';
 import type { HierarchyDeps } from './types.js';
 import { isSpawnedExecutorNameOf, spawnedExecutorName } from './validate.js';
 
@@ -105,11 +106,39 @@ describe('hierarchySpawn', () => {
     expect(calls.filter((c) => c[1] === 'new-session')).toHaveLength(0);
   });
 
-  it('refuses a live tmux session that the roster does not know', async () => {
-    live.add('ai-sdlc-executor-aisdlc-1067');
-    await expect(hierarchySpawn({ taskId: 'AISDLC-1067' }, deps)).rejects.toThrow(
-      /not in the roster/,
-    );
+  it('reclaims an orphaned session the roster does not know (AISDLC-1117 AC1)', async () => {
+    live.add('ai-sdlc-executor-aisdlc-999');
+    const r = await hierarchySpawn({ taskId: 'AISDLC-999' }, deps);
+    expect(r.created).toBe(true);
+    const kill = calls.findIndex((c) => c[1] === 'kill-session');
+    const create = calls.findIndex((c) => c[1] === 'new-session');
+    expect(kill).toBeGreaterThanOrEqual(0);
+    expect(kill).toBeLessThan(create);
+  });
+
+  it('still refuses to touch a rostered live session (AC2)', async () => {
+    await hierarchySpawn({ taskId: 'AISDLC-999' }, deps);
+    const r = await hierarchySpawn({ taskId: 'AISDLC-999' }, deps);
+    expect(r.created).toBe(false);
+    expect(calls.filter((c) => c[1] === 'kill-session')).toHaveLength(0);
+  });
+
+  it('sweep reaps unrostered executor sessions only (AC3)', async () => {
+    await hierarchySpawn({ taskId: 'AISDLC-1' }, deps);
+    live.add('ai-sdlc-executor-aisdlc-2');
+    live.add('my-personal');
+    const run = deps.run;
+    const swept: HierarchyDeps = {
+      ...deps,
+      run: (f, a, o) =>
+        a[0] === 'list-sessions'
+          ? { status: 0, stdout: [...live].join('\n'), stderr: '' }
+          : run(f, a, o),
+    };
+    expect(reapOrphanExecutorSessions(swept)).toEqual(['ai-sdlc-executor-aisdlc-2']);
+    expect(calls.filter((c) => c[1] === 'kill-session').map((c) => c[3])).toEqual([
+      '=ai-sdlc-executor-aisdlc-2',
+    ]);
   });
 
   it('keeps existing roster entries and reports a tmux failure', async () => {
@@ -152,5 +181,31 @@ describe('hierarchySpawn', () => {
     const r = readRosterChecked(deps.boardDir);
     expect(r.roster.sessions).toEqual([]);
     expect(r.rejected[0]).toMatch(/derived from task/);
+  });
+});
+
+describe('ephemeral down (AISDLC-1117 AC4)', () => {
+  it('leaves no tmux session behind after the executor is downed', async () => {
+    await hierarchySpawn({ taskId: 'AISDLC-7' }, deps);
+    const name = 'ai-sdlc-executor-aisdlc-7';
+    let windowOpen = true;
+    const base = deps.run;
+    const down: HierarchyDeps = {
+      ...deps,
+      run: (f, a, o) => {
+        if (a[0] === 'show-options') return { status: 0, stdout: '1\n', stderr: '' };
+        if (a[0] === 'list-windows') {
+          return { status: windowOpen ? 0 : 1, stdout: windowOpen ? name : '', stderr: '' };
+        }
+        // the claude process exits but the session survives (a shell holds it open)
+        if (a[0] === 'send-keys') windowOpen = false;
+        if (a[0] === 'kill-session') live.delete(name);
+        if (a[0] === 'display-message') return { status: 0, stdout: '', stderr: '' };
+        return base(f, a, o);
+      },
+    };
+    await hierarchyDown({ role: name }, down);
+    expect(live.has(name)).toBe(false);
+    expect(readRoster(deps.boardDir).sessions).toHaveLength(0);
   });
 });
