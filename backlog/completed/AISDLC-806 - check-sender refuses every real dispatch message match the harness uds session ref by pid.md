@@ -2,7 +2,7 @@
 id: AISDLC-806
 title: >-
   check-sender refuses every real dispatch message: match the harness uds session ref by pid
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-10'
 labels:
