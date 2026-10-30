@@ -1143,7 +1143,7 @@ export function peekQueue(boardDir: string, now: () => Date = () => clockNow()):
       continue;
     }
     const ms = manifest ? Date.parse(manifest.dispatchedAt) : NaN;
-    if (!manifest || Number.isNaN(ms)) continue;
+    if (!manifest || Number.isNaN(ms) || manifest.taskId.startsWith('CANARY-')) continue;
     if (oldest === null || ms < oldest.ms) {
       oldest = { taskId: manifest.taskId, dispatchedAt: manifest.dispatchedAt, ms };
     }
