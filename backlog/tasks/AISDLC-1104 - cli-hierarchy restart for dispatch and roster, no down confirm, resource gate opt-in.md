@@ -53,3 +53,5 @@ Fix:
 ## Notes
 
 Operator request 2026-10-28 22:40Z in the planner session. Velocity impact: removes two operator interrupts per relaunch and one full board drain per dispatch restart.
+
+Verification: `pnpm build && pnpm test && pnpm lint && pnpm format:check`. With the executor session env vars unset (`env -u AI_SDLC_EXECUTOR_TASK -u AI_SDLC_HIERARCHY_SESSION -u AI_SDLC_HIERARCHY_ROLE pnpm --filter @ai-sdlc/pipeline-cli exec vitest run src/hierarchy`): `Test Files  58 passed (58)`, `Tests  967 passed (967)`. Lint and format:check clean.
