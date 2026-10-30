@@ -38,6 +38,11 @@
     "configuration": {
       "title": "AI-SDLC Hierarchy",
       "properties": {
+        "aiSdlc.hierarchy.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Master switch. Set to false in a window (for example a parent folder that also contains the repository) to stop it opening terminals and recording activation."
+        },
         "aiSdlc.hierarchy.autoOpen": {
           "type": "boolean",
           "default": true,

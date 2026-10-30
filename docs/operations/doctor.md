@@ -73,6 +73,7 @@ Checks currently implemented (see `DOCTOR_CHECKS` in `doctor-checks.ts`):
 | `orphaned-vitest-workers` | Warns on `vitest` workers with parent pid 1 older than 2 minutes (left by a killed test run) and prints the `kill` command; prints nothing when there are none (AISDLC-681) | `ps` |
 | `worktree-hooks` | Warns on every worktree under `.worktrees/` whose git hooks directory (asked of git with `rev-parse --git-path hooks`, never assumed to be `.husky`) has no executable `pre-push` while the main checkout has one, and names the main checkout's hooks directory. Quiet when all are fine or when the main checkout has no `pre-push` (none expected). `--fix` runs `pnpm run prepare` in each affected worktree that has `node_modules` and reports the ones it skipped for lacking it (AISDLC-693) | `git`, `pnpm` |
 | `hierarchy-launch-env` | Warns for each running `cli-hierarchy` session whose tmux `#{pane_start_command}` lacks `AI_SDLC_HIERARCHY_SESSION=<name>` and `AI_SDLC_HIERARCHY_ROLE=<role>` (the env the lease-push hook binds an executor by), and names the fix: `cli-hierarchy down --role <role>` then `up` from the main checkout's build. Quiet with no roster or when tmux cannot report the command (AISDLC-791) | `tmux` |
+| `vscode-hierarchy-terminals` | Only when `TERM_PROGRAM=vscode`: warns when the hierarchy terminals extension is missing (remediation has `code --install-extension`), when it is installed but not active in this window with its current build (reload the window), and when it is active in two windows covering this repo (names both folders; set `aiSdlc.hierarchy.enabled: false` in the unwanted one). `--fix` reinstalls a stale vsix and never reloads the window (AISDLC-1118). See [VS Code users](cli-hierarchy.md#vs-code-users) | `code` |
 | `stale-repo-build` | Warns when the repo's own `pipeline-cli` build is missing or older than its sources (`resolve-pipeline-cli.sh --strict` exits 1), so dispatch would run old code; names `pnpm --filter @ai-sdlc/pipeline-cli build`. Quiet in repos without the script (AISDLC-988) | `bash` |
 | `force-push-policy` | The effective `spec.governance.allowForcePush` value and where it came from: the `leaseOnOwnBranch` default (key unset or no `agent-role.yaml`), an explicit value (`never`, `leaseOnOwnBranch` or `lease`) in `.ai-sdlc/agent-role.yaml`, or a malformed value that fails closed to `never` (warn). See [governance](../api-reference/governance.md) (AISDLC-710) | — |
 | `judgment-layer` | The judgment layer config (`.ai-sdlc/judgment-config.yaml`); see below | `loadJudgmentConfig` (RFC-0049) |
@@ -121,9 +122,10 @@ rule that a `fix()` must be safe, mechanical, and idempotent.
 
 ## `--fix`
 
-Only two checks currently have a mechanical auto-fix:
+These checks have a mechanical auto-fix:
 
 - `runtime-deps-pins` → re-runs `ai-sdlc-plugin/scripts/install-runtime-deps.sh`.
+- `vscode-hierarchy-terminals` → reinstalls a stale or missing vsix (detail tells you to run `Developer: Reload Window`).
 - `manifests-agree` → copies `plugin.json` (the manifest release-please's
   `extra-files` config bumps directly) over `.claude-plugin/plugin.json`.
 

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1118
 title: doctor diagnoses the VS Code hierarchy-terminals setup (extension missing, stale after reinstall, nested workspace double-activation) and the docs give VS Code users one setup path
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-29'
 labels:

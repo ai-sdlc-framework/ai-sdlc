@@ -1394,6 +1394,154 @@ export function checkHierarchyLaunchEnv(ctx: DoctorRunContext): DoctorCheckResul
   ];
 }
 
+// ── Check: VS Code hierarchy terminals (AISDLC-1118) ────────────────────
+
+const VSCODE_EXT_PREFIX = 'ai-sdlc.vscode-hierarchy-';
+const VSCODE_VSIX_RELATIVE = join('vscode-hierarchy', 'dist', 'ai-sdlc-vscode-hierarchy.vsix');
+const VSCODE_INSTALL_HINT =
+  'Run `pnpm --filter vscode-hierarchy package` then `code --install-extension vscode-hierarchy/dist/ai-sdlc-vscode-hierarchy.vsix`, then run `Developer: Reload Window`. See "VS Code users" in docs/operations/cli-hierarchy.md.';
+
+function installedVscodeExtension(
+  ctx: DoctorRunContext,
+): { dir: string; mtimeMs: number | null } | undefined {
+  const root = join(ctx.adapters.homeDir(), '.vscode', 'extensions');
+  const name = ctx.adapters
+    .listDir(root)
+    .filter((d) => d.startsWith(VSCODE_EXT_PREFIX))
+    .sort()
+    .pop();
+  if (!name) return undefined;
+  const dir = join(root, name);
+  return { dir, mtimeMs: ctx.adapters.fileMtimeMs?.(dir) ?? null };
+}
+
+interface VscodeWindowRecord {
+  activatedAt: number;
+  covering: string;
+}
+
+/** Window records whose open folders include the project, an ancestor of it, or a folder below it. */
+function vscodeWindowRecords(ctx: DoctorRunContext): VscodeWindowRecord[] {
+  const dir = join(ctx.projectDir, '.ai-sdlc', 'dispatch', 'vscode-hierarchy-windows');
+  const project = ctx.projectDir.replace(/\/+$/, '');
+  const out: VscodeWindowRecord[] = [];
+  for (const file of ctx.adapters.listFiles?.(dir) ?? []) {
+    if (!file.endsWith('.json')) continue;
+    try {
+      const rec = JSON.parse(ctx.adapters.readFile(join(dir, file)) ?? '') as {
+        activatedAt?: unknown;
+        folders?: unknown;
+      };
+      const at = typeof rec.activatedAt === 'string' ? Date.parse(rec.activatedAt) : NaN;
+      if (Number.isNaN(at) || !Array.isArray(rec.folders)) continue;
+      const covering = (rec.folders as unknown[])
+        .filter((f): f is string => typeof f === 'string')
+        .map((f) => f.replace(/\/+$/, ''))
+        .find((f) => project === f || project.startsWith(`${f}/`) || f.startsWith(`${project}/`));
+      if (covering !== undefined) out.push({ activatedAt: at, covering });
+    } catch {
+      /* unreadable record counts as absent */
+    }
+  }
+  return out;
+}
+
+/**
+ * AISDLC-1118: answers the three questions a VS Code user has about the hierarchy
+ * terminals extension: installed, current, and reaching this window. Quiet outside VS Code.
+ */
+export function checkVscodeHierarchyTerminals(ctx: DoctorRunContext): DoctorCheckResult[] {
+  const id = 'vscode-hierarchy-terminals';
+  if (ctx.adapters.env['TERM_PROGRAM'] !== 'vscode') return [];
+  const installed = installedVscodeExtension(ctx);
+  if (!installed) {
+    return [
+      {
+        id,
+        severity: 'warn',
+        title:
+          'the AI-SDLC hierarchy terminals extension is not installed, so VS Code opens no executor terminals (extension: missing)',
+        remediation: VSCODE_INSTALL_HINT,
+      },
+    ];
+  }
+  const records = vscodeWindowRecords(ctx);
+  const results: DoctorCheckResult[] = [];
+  const latest = Math.max(...records.map((r) => r.activatedAt));
+  if (records.length === 0 || (installed.mtimeMs !== null && installed.mtimeMs > latest)) {
+    results.push({
+      id,
+      severity: 'warn',
+      title:
+        'the hierarchy terminals extension is installed but not active in this window with its current build (a reinstall does not take effect until the window reloads)',
+      remediation:
+        'Run `Developer: Reload Window` from the VS Code command palette. If it still does not activate, check the roster exists (`cli-hierarchy up`) and that `aiSdlc.hierarchy.enabled` is not false here.',
+    });
+  } else {
+    results.push({
+      id,
+      severity: 'pass',
+      title: 'hierarchy terminals extension is active in this window',
+    });
+  }
+  const folders = [...new Set(records.map((r) => r.covering))];
+  if (folders.length > 1) {
+    results.push({
+      id: `${id}:nested-workspace`,
+      severity: 'warn',
+      title: `the extension is active in ${folders.length} VS Code windows covering this repo (${folders.join(' and ')}), so terminals can open in the window you are not looking at`,
+      remediation:
+        'Set `aiSdlc.hierarchy.enabled` to false in the settings of the window you do not want (usually the parent folder), then run `Developer: Reload Window` there.',
+      anonymizableEvidence: { windows: folders.length },
+    });
+  }
+  return results;
+}
+
+/** `doctor --fix`: reinstall the vsix when it is missing or newer than the installed build. Never reloads the window. */
+export function fixVscodeHierarchyTerminals(ctx: DoctorRunContext): DoctorFixResult {
+  const id = 'vscode-hierarchy-terminals';
+  if (ctx.adapters.env['TERM_PROGRAM'] !== 'vscode') {
+    return { id, applied: false, detail: 'not running in a VS Code terminal' };
+  }
+  const vsix = join(ctx.projectDir, VSCODE_VSIX_RELATIVE);
+  if (!ctx.adapters.exists(vsix)) {
+    return {
+      id,
+      applied: false,
+      detail: `no ${VSCODE_VSIX_RELATIVE}; run \`pnpm --filter vscode-hierarchy package\` first`,
+    };
+  }
+  const installed = installedVscodeExtension(ctx);
+  const vsixMtime = ctx.adapters.fileMtimeMs?.(vsix) ?? null;
+  if (
+    installed &&
+    installed.mtimeMs !== null &&
+    vsixMtime !== null &&
+    installed.mtimeMs >= vsixMtime
+  ) {
+    return {
+      id,
+      applied: false,
+      detail: 'installed build is current; run Developer: Reload Window if it is not active',
+    };
+  }
+  const r = ctx.adapters.runCommand('code', ['--install-extension', vsix, '--force']);
+  if (r.exitCode !== 0) {
+    return {
+      id,
+      applied: false,
+      detail: `code --install-extension failed: ${r.stderr?.trim() || 'exit ' + r.exitCode}`,
+    };
+  }
+  return {
+    id,
+    applied: true,
+    detail:
+      'reinstalled the vsix; run Developer: Reload Window to activate it (doctor never reloads the window)',
+  };
+}
+
 /**
  * AISDLC-988: inside the monorepo, a pipeline-cli build that is missing or older than
  * its sources makes dispatch run old code. Asks the resolve script's single freshness
@@ -2834,6 +2982,13 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     description:
       "The dispatch host's hierarchy hooks module reports loaded with a fresh heartbeat; a refused, absent or stale module means no ticks (AISDLC-1061).",
     run: checkHierarchyModule,
+  },
+  {
+    id: 'vscode-hierarchy-terminals',
+    description:
+      'In a VS Code terminal: the hierarchy terminals extension is installed, current (activated after the last reinstall) and not double-active across nested windows (AISDLC-1118).',
+    run: checkVscodeHierarchyTerminals,
+    fix: fixVscodeHierarchyTerminals,
   },
   {
     id: 'stale-repo-build',

@@ -96,6 +96,8 @@ reviewer set, agent role). The keyring and pipeline need `/ai-sdlc init`.
 
 ## Output
 
+In a VS Code terminal the `vscode-hierarchy-terminals` check diagnoses the hierarchy terminals extension (missing, stale after reinstall, nested windows); steps are under "VS Code users" in `docs/operations/cli-hierarchy.md`.
+
 See `docs/operations/doctor.md` for the full check catalog, the `--fix`
 contract, and the exit-code rules. In short: pass/warn/fail per check with
 a one-line remediation; exits non-zero on any `fail` (0 on warn-only,
