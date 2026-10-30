@@ -37,7 +37,7 @@ describe('hierarchy command body', () => {
   it('has frontmatter and calls the dispatch script with $ARGUMENTS', () => {
     assert.match(body, /^---\nname: hierarchy$/m);
     assert.match(body, /hierarchy-dispatch\.mjs" \$ARGUMENTS/);
-    assert.match(body, /--confirmed/);
+    assert.doesNotMatch(body, /--confirmed/);
   });
 });
 
@@ -133,13 +133,13 @@ describe('hierarchy dispatch script', () => {
     }
   });
 
-  it('down without --role needs confirmation; --confirmed and --role proceed', () => {
+  it('down runs at once, with or without --role, and no confirmation exists', () => {
     const bin = fakeBin();
     try {
-      assert.equal(capture(['down'], { PIPELINE_CLI_BIN: bin }).code, 3);
-      const c = capture(['down', '--confirmed'], { PIPELINE_CLI_BIN: bin });
-      assert.equal(c.code, 0);
-      assert.equal(c.out, 'ARGS:["down"]');
+      const d = capture(['down'], { PIPELINE_CLI_BIN: bin });
+      assert.equal(d.code, 0);
+      assert.equal(d.out, 'ARGS:["down"]');
+      assert.doesNotMatch(d.err, /--confirmed/);
       assert.equal(capture(['down', '--role', 'executor'], { PIPELINE_CLI_BIN: bin }).code, 0);
     } finally {
       rmSync(bin, { recursive: true });

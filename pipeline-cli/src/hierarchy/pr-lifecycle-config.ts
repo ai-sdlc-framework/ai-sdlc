@@ -26,6 +26,8 @@ export interface PrLifecycleConfig {
   reconcile: { timerOpenMs: number; timerIdleMs: number };
   /** Ceiling for each wait of the executor clear handshake (AISDLC-1000). */
   clear: { handshakeCeilingMs: number };
+  /** `up` refuses on low memory or high load only when `resourceGate` is true (default false). */
+  hierarchy: { resourceGate: boolean };
 }
 
 /** Default webhook receiver port (webhook.ts re-exports it). */
@@ -40,6 +42,7 @@ export const PR_LIFECYCLE_DEFAULTS: PrLifecycleConfig = {
   stall: { staleMs: DEFAULT_STALL_STALE_MS, graceMs: DEFAULT_STALL_GRACE_MS },
   reconcile: { timerOpenMs: BUSY_INTERVAL_MS, timerIdleMs: IDLE_INTERVAL_MS },
   clear: { handshakeCeilingMs: DEFAULT_SETTLE_MS },
+  hierarchy: { resourceGate: false },
 };
 
 /** Each `spec` key in the yaml, mapped to the function that reads it from the loaded config. */
@@ -51,6 +54,7 @@ export const PR_LIFECYCLE_KEY_READERS: Readonly<Record<string, (c: PrLifecycleCo
     stall: (c) => c.stall,
     reconcile: (c) => c.reconcile,
     clear: (c) => c.clear,
+    hierarchy: (c) => c.hierarchy,
   };
 
 const pick = (v: unknown, d: number, int = false): number =>
@@ -88,6 +92,7 @@ export function loadPrLifecycleConfig(
     stall: { ...d.stall },
     reconcile: { ...d.reconcile },
     clear: { ...d.clear },
+    hierarchy: { ...d.hierarchy },
   });
   const text = readPrLifecycleFromBaseRef(projectDir, baseRef);
   if (text === null) return defaults();
@@ -118,6 +123,7 @@ export function loadPrLifecycleConfig(
       clear: {
         handshakeCeilingMs: pick(clear?.handshakeCeilingMs, d.clear.handshakeCeilingMs, true),
       },
+      hierarchy: { resourceGate: obj(spec?.hierarchy)?.resourceGate === true },
     };
   } catch {
     return defaults();

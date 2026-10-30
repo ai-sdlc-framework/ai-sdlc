@@ -12,8 +12,12 @@
  *   restarted by hand). It first checks the tmux pane, the ownership marker, the launch
  *   environment of the pane's command and a live harness session of that name.
  *
- * Both are dispatch-session commands and apply to executors only; the CLI runs the caller
- * guard before calling in here.
+ * `restart` also takes `operator-dispatch` and `planner` (AISDLC-1104): the session is stopped
+ * and started with its recorded model, mode and env, inflight manifests stay on the board, and
+ * for dispatch the reconcile scheduler and webhook receiver are re-registered. `restartAll`
+ * restarts dispatch and every idle executor, deferring busy executors to their task boundary.
+ * `register` applies to executors only. The dispatch or planner session may run `restart`
+ * (only dispatch may run `register`); the CLI runs the caller guard before calling in here.
  */
 
 import { releaseInflight } from '../dispatch/board.js';
@@ -21,6 +25,7 @@ import { createSystemIdentity } from './caller-identity.js';
 import { holdsInflight } from './clear.js';
 import { stopSessionWindow } from './down.js';
 import { listInflight } from './inflight.js';
+import { schedulerUp } from './reconcile-scheduler.js';
 import { readSessionRegistry } from './registry.js';
 import {
   defaultProjectForBoard,
@@ -32,6 +37,7 @@ import { readNvmrc } from './node-pin.js';
 import { ownershipRefusal, paneInfo, paneStartCommand, windowLive } from './tmux.js';
 import type { HierarchyDeps, Roster, RosterEntry } from './types.js';
 import { defaultIsAlive, hasLaunchEnv, launchSession, ROLE_PROMPT } from './up.js';
+import { webhookUp } from './webhook.js';
 import { assertModel, assertPermissionMode, splitSessionName } from './validate.js';
 
 /** Options for `restart`. */
@@ -72,8 +78,13 @@ function snapshot(entry: RosterEntry): Snapshot {
   return { pid: entry.pid, startedAt: entry.startedAt, paneId: entry.paneId };
 }
 
-/** The roster entry a name selects, which must be a modern-layout executor. */
-function selectExecutor(roster: Roster, session: string, verb: string): RosterEntry {
+/** The roster entry a name selects, which must be a modern-layout executor (any role for `restart`). */
+function selectExecutor(
+  roster: Roster,
+  session: string,
+  verb: string,
+  anyRole = false,
+): RosterEntry {
   const entry = roster.sessions.find(
     (e) =>
       e.name === session ||
@@ -85,7 +96,7 @@ function selectExecutor(roster: Roster, session: string, verb: string): RosterEn
       `no session named '${session}' in the roster; run cli-hierarchy status for the names, or cli-hierarchy up to start it`,
     );
   }
-  if (entry.role !== 'executor') {
+  if (!anyRole && entry.role !== 'executor') {
     throw new Error(
       `refusing to ${verb} '${entry.name}': ${verb} applies to executors only (this is the ${entry.role} session). To refresh it run cli-hierarchy down --role ${entry.name}, then cli-hierarchy up`,
     );
@@ -157,17 +168,20 @@ export async function hierarchyRestart(
   deps: HierarchyDeps,
 ): Promise<RestartResult> {
   const { roster } = readRosterChecked(deps.boardDir);
-  const entry = selectExecutor(roster, opts.session, 'restart');
+  const entry = selectExecutor(roster, opts.session, 'restart', true);
   assertModel(entry.model, 'the roster model');
   assertPermissionMode(entry.permissionMode);
 
-  const held = holdsInflight(deps.boardDir, entry.name);
+  const held = entry.role === 'executor' ? holdsInflight(deps.boardDir, entry.name) : undefined;
   if (held && !opts.afterTask) {
     throw new Error(
       `refusing to restart '${entry.name}': it holds ${held}, which is still inflight. Run again with --after-task to restart at the task boundary`,
     );
   }
-  const waitedFor = opts.afterTask ? await waitForTaskBoundary(entry, opts, deps) : undefined;
+  const waitedFor =
+    opts.afterTask && entry.role === 'executor'
+      ? await waitForTaskBoundary(entry, opts, deps)
+      : undefined;
 
   const stop = await stopSessionWindow(entry, deps);
   if ('refused' in stop) {
@@ -217,8 +231,9 @@ export async function hierarchyRestart(
     sessionPermissionMode: next.permissionMode,
   });
   for (const w of warnings) deps.log(`warning: ${w}`);
+  if (next.role === 'operator-dispatch') reRegisterDispatchServices(deps);
   deps.log(
-    `restarted executor '${next.tmuxWindow}'${stop.forced ? ' (window closed after no exit)' : ''}; pid ${entry.pid} -> ${next.pid}`,
+    `restarted ${next.role} '${next.tmuxWindow}'${stop.forced ? ' (window closed after no exit)' : ''}; pid ${entry.pid} -> ${next.pid}`,
   );
   return {
     name: next.name,
@@ -227,6 +242,68 @@ export async function hierarchyRestart(
     ...(waitedFor ? { waitedFor } : {}),
     ...(requeued ? { requeued } : {}),
   };
+}
+
+/** After a dispatch restart: make sure the reconcile scheduler and, when a secret is set, the webhook receiver run. */
+function reRegisterDispatchServices(deps: HierarchyDeps): void {
+  try {
+    schedulerUp(deps, deps.spawnScheduler);
+  } catch (err) {
+    deps.log(`warning: reconcile scheduler not started: ${(err as Error).message}`);
+  }
+  if (deps.env.AI_SDLC_WEBHOOK_SECRET) {
+    try {
+      webhookUp(deps);
+    } catch (err) {
+      deps.log(`warning: webhook receiver not started: ${(err as Error).message}`);
+    }
+  }
+}
+
+/** Result of `restart --all`. */
+export interface RestartAllResult {
+  restarted: RestartResult[];
+  /** Busy executors restarted at their task boundary (waited for, as `--after-task` does). */
+  deferred: string[];
+  failed: { name: string; error: string }[];
+}
+
+/**
+ * Restart dispatch and every executor: dispatch first, idle executors next, then each busy
+ * executor at its task boundary. The planner is left alone. One failure does not stop the rest.
+ */
+export async function hierarchyRestartAll(
+  opts: { waitSec?: number },
+  deps: HierarchyDeps,
+): Promise<RestartAllResult> {
+  const { roster } = readRosterChecked(deps.boardDir);
+  const dispatch = roster.sessions.filter((e) => e.role === 'operator-dispatch');
+  const executors = roster.sessions.filter((e) => e.role === 'executor');
+  const busy = executors.filter((e) => holdsInflight(deps.boardDir, e.name));
+  const idle = executors.filter((e) => !busy.includes(e));
+  const out: RestartAllResult = { restarted: [], deferred: [], failed: [] };
+  const plan: [RosterEntry, boolean][] = [
+    ...dispatch.map((e): [RosterEntry, boolean] => [e, false]),
+    ...idle.map((e): [RosterEntry, boolean] => [e, false]),
+    ...busy.map((e): [RosterEntry, boolean] => [e, true]),
+  ];
+  for (const [entry, defer] of plan) {
+    try {
+      const r = await hierarchyRestart(
+        {
+          session: entry.name,
+          afterTask: defer,
+          ...(opts.waitSec === undefined ? {} : { waitSec: opts.waitSec }),
+        },
+        deps,
+      );
+      out.restarted.push(r);
+      if (defer) out.deferred.push(entry.name);
+    } catch (err) {
+      out.failed.push({ name: entry.name, error: (err as Error).message });
+    }
+  }
+  return out;
 }
 
 /**

@@ -14,9 +14,6 @@ export const MIN_AVAILABLE_BYTES = 4 * 1024 * 1024 * 1024;
 /** The value the bypass tiers need so lower-tier messages are delivered. */
 export const REQUIRED_INBOUND_VALUE = 'accept';
 
-/** Environment variable that skips the resource gate (testing escape hatch). */
-export const SKIP_RESOURCE_GATE_ENV = 'AI_SDLC_EXECUTE_PARALLEL_SKIP_RESOURCE_GATE';
-
 /** Effective values read from the layered Claude Code settings files. */
 export interface SettingsView {
   /** Effective `crossSessionInbound`, or undefined when no layer sets it. */
@@ -142,21 +139,17 @@ export function systemResourceSnapshot(run: CommandRunner): ResourceSnapshot {
 }
 
 /**
- * Resource gate: refuse when available memory is under 4 GiB or the one-minute
+ * Resource gate (opt-in via `hierarchy.resourceGate`): refuse when available memory is under 4 GiB or the one-minute
  * load average is at or above the core count. An unmeasurable memory value is
  * not a refusal. Returns an error message, or null when there is headroom.
  */
-export function evaluateResourceGate(
-  snapshot: ResourceSnapshot,
-  env: NodeJS.ProcessEnv = {},
-): string | null {
-  if (env[SKIP_RESOURCE_GATE_ENV] === '1') return null;
+export function evaluateResourceGate(snapshot: ResourceSnapshot): string | null {
   if (snapshot.availableBytes !== null && snapshot.availableBytes < MIN_AVAILABLE_BYTES) {
     const gb = (snapshot.availableBytes / 1024 ** 3).toFixed(1);
-    return `resource gate refused: ${gb} GiB of memory available, at least 4 GiB needed. Set ${SKIP_RESOURCE_GATE_ENV}=1 to override.`;
+    return `resource gate refused: ${gb} GiB of memory available, at least 4 GiB needed. The gate runs only when hierarchy.resourceGate is true in .ai-sdlc/pr-lifecycle.yaml.`;
   }
   if (snapshot.loadAvg1 >= snapshot.cpus) {
-    return `resource gate refused: one-minute load average ${snapshot.loadAvg1.toFixed(2)} is at or above the ${snapshot.cpus} available cores. Set ${SKIP_RESOURCE_GATE_ENV}=1 to override.`;
+    return `resource gate refused: one-minute load average ${snapshot.loadAvg1.toFixed(2)} is at or above the ${snapshot.cpus} available cores. The gate runs only when hierarchy.resourceGate is true in .ai-sdlc/pr-lifecycle.yaml.`;
   }
   return null;
 }

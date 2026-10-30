@@ -105,6 +105,7 @@ export {
   DEFAULT_AFTER_TASK_WAIT_SEC,
   hierarchyRegister,
   hierarchyRestart,
+  hierarchyRestartAll,
   type RestartOptions,
   type RestartResult,
 } from './restart.js';
@@ -128,7 +129,6 @@ export {
   managedSettingsFile,
   readSettingsView,
   REQUIRED_INBOUND_VALUE,
-  SKIP_RESOURCE_GATE_ENV,
   systemResourceSnapshot,
   type InboundCheck,
   type SettingsView,

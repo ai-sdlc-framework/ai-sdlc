@@ -128,6 +128,7 @@ export function requireDispatchCaller(
   deps: IdentityDeps,
   worker: string | undefined,
   command: string,
+  allowed: readonly string[] = ['operator-dispatch'],
 ): CallerCheck {
   const caller = resolveCaller(deps);
   if (!caller) {
@@ -136,10 +137,11 @@ export function requireDispatchCaller(
       reason: `${command}: the calling session is not a running session in the roster; ${CALLER_NEXT_STEP}`,
     };
   }
-  if (caller.role !== 'operator-dispatch') {
+  if (!allowed.includes(caller.role)) {
+    const who = allowed.length === 1 ? 'the dispatch session' : 'the dispatch or planner session';
     return {
       ok: false,
-      reason: `${command}: only the dispatch session may run this command (the caller's role is ${caller.role}); ${CALLER_NEXT_STEP}`,
+      reason: `${command}: only ${who} may run this command (the caller's role is ${caller.role}); ${CALLER_NEXT_STEP}`,
     };
   }
   if (worker !== undefined && worker !== caller.name) {

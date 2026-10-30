@@ -2,7 +2,7 @@
 id: AISDLC-1104
 title: >-
   cli-hierarchy: restart any session or the whole roster in one command, drop the down confirmation, make the resource gate opt-in
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-28'
 labels:

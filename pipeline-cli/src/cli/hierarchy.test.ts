@@ -1809,15 +1809,61 @@ describe('restart and register (AISDLC-713)', () => {
         identity: asCaller('executor', 'executor-alpha'),
       });
       expect(code).toBe(1);
-      expect(String(err.mock.calls[0]?.[0])).toContain('only the dispatch session');
+      expect(String(err.mock.calls[0]?.[0])).toContain(
+        cmd === 'restart' ? 'only the dispatch or planner session' : 'only the dispatch session',
+      );
       expect(calls).toEqual([]);
     },
   );
 
-  it.each(['restart', 'register'])('%s needs an executor name', async (cmd) => {
+  it('restart accepts the planner as caller (AISDLC-1104)', async () => {
+    const run: CommandRunner = (_f, args) => {
+      calls.push([...args]);
+      if (args[0] === 'display-message') return { status: 0, stdout: '%9 4242\n', stderr: '' };
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const code = await runHierarchyCli(['restart', 'executor-alpha'], overrides({ run }), {
+      identity: asCaller('planner', 'planner'),
+    });
+    expect(code).toBe(0);
+    expect(JSON.parse(logs.at(-1) as string)).toMatchObject({ name: 'executor-alpha' });
+  });
+
+  it('register still refuses a planner caller', async () => {
     const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
-    expect(await runHierarchyCli([cmd], overrides(), dispatch)).toBe(2);
-    expect(String(err.mock.calls[0]?.[0])).toContain('an executor name is required');
+    const code = await runHierarchyCli(['register', 'executor-alpha'], overrides(), {
+      identity: asCaller('planner', 'planner'),
+    });
+    expect(code).toBe(1);
+    expect(String(err.mock.calls[0]?.[0])).toContain('only the dispatch session');
+  });
+
+  it('restart --all reports the restarted sessions as JSON', async () => {
+    const run: CommandRunner = (_f, args) => {
+      calls.push([...args]);
+      if (args[0] === 'display-message') return { status: 0, stdout: '%9 4242\n', stderr: '' };
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const code = await runHierarchyCli(['restart', '--all'], overrides({ run }), dispatch);
+    expect(code).toBe(0);
+    const res = JSON.parse(logs.at(-1) as string) as { restarted: { name: string }[] };
+    expect(res.restarted.map((r) => r.name)).toEqual(['operator-dispatch', 'executor-alpha']);
+  });
+
+  it('restart --all exits 1 when a session fails', async () => {
+    const run: CommandRunner = (_f, args) => {
+      calls.push([...args]);
+      return { status: 1, stdout: '', stderr: '' };
+    };
+    expect(await runHierarchyCli(['restart', '--all'], overrides({ run }), dispatch)).toBe(1);
+  });
+
+  it('restart needs a name or --all; register needs an executor name', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(await runHierarchyCli(['restart'], overrides(), dispatch)).toBe(2);
+    expect(String(err.mock.calls[0]?.[0])).toContain('a session name or --all is required');
+    expect(await runHierarchyCli(['register'], overrides(), dispatch)).toBe(2);
+    expect(String(err.mock.calls[1]?.[0])).toContain('an executor name is required');
   });
 
   it('restart rejects a malformed --wait', async () => {

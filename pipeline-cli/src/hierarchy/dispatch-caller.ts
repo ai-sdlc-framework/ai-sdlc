@@ -89,6 +89,8 @@ export interface DispatchCallerInputs {
    * determined (tests). Never derived from argv, cwd or the environment.
    */
   installDir?: string | null;
+  /** Roles accepted as the caller; default the dispatch session only (`restart` adds the planner). */
+  allowedRoles?: readonly string[];
   /** Replaces the git probe used to find the work tree that contains the install (tests). */
   installGit?: InstallGit;
   /**
@@ -167,5 +169,6 @@ export function checkDispatchCaller(i: DispatchCallerInputs): CallerCheck {
     i.identity ?? createSystemIdentity(identityBoard, i.processLookup),
     i.worker,
     i.label,
+    i.allowedRoles,
   );
 }

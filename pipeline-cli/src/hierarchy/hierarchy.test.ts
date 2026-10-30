@@ -38,6 +38,7 @@ import {
   hierarchyDown,
   hierarchyRegister,
   hierarchyRestart,
+  hierarchyRestartAll,
   hierarchyStatus,
   hierarchyUp,
   isLegacyLayoutEntry,
@@ -715,9 +716,21 @@ describe('hierarchy up', () => {
     expect(r.started.map((e) => e.name)).toEqual([Q('operator-dispatch')]);
   });
 
-  it('refuses when the resource gate refuses', async () => {
+  it('refuses when the resource gate is enabled and refuses', async () => {
     deps.resources = () => ({ availableBytes: 1024 ** 3, loadAvg1: 0, cpus: 4 });
+    deps.resourceGate = true;
     await expect(hierarchyUp(baseOpts, deps)).rejects.toThrow(/resource gate refused/);
+  });
+
+  it('does not call the resource gate unless hierarchy.resourceGate is true (AISDLC-1104)', async () => {
+    let probed = 0;
+    deps.resources = () => {
+      probed++;
+      return { availableBytes: 1024 ** 3, loadAvg1: 99, cpus: 4 };
+    };
+    // no override: the config default (false) applies
+    await expect(hierarchyUp(baseOpts, deps)).resolves.toBeDefined();
+    expect(probed).toBe(0);
   });
 
   it('drops roster entries whose window is gone and restarts them', async () => {
@@ -2035,12 +2048,6 @@ describe('preflight helpers', () => {
     expect(evaluateResourceGate({ ...ok, availableBytes: null })).toBeNull();
     expect(evaluateResourceGate({ ...ok, availableBytes: 1024 ** 3 })).toMatch(/memory/);
     expect(evaluateResourceGate({ ...ok, loadAvg1: 4 })).toMatch(/load average/);
-    expect(
-      evaluateResourceGate(
-        { ...ok, loadAvg1: 9 },
-        { AI_SDLC_EXECUTE_PARALLEL_SKIP_RESOURCE_GATE: '1' },
-      ),
-    ).toBeNull();
   });
 });
 
@@ -2427,11 +2434,66 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
     expect(result.waitedFor).toBeUndefined();
   });
 
-  it.each([
-    ['restart', () => hierarchyRestart({ session: 'planner' }, deps)],
-    ['register', async () => hierarchyRegister({ session: 'operator-dispatch' }, deps)],
-  ])('%s applies to executors only and names the down/up path', async (_verb, run) => {
-    await expect(run()).rejects.toThrow(/executors only.*cli-hierarchy down --role/);
+  it('register applies to executors only and names the down/up path', async () => {
+    expect(() => hierarchyRegister({ session: 'operator-dispatch' }, deps)).toThrow(
+      /executors only.*cli-hierarchy down --role/,
+    );
+  });
+
+  it('restarts operator-dispatch with its recorded model and mode and keeps inflight on the board (AISDLC-1104)', async () => {
+    fake.startedAtMs = later;
+    deps.now = () => new Date(later);
+    putInflight('AISDLC-300', alpha);
+    const disp = Q('operator-dispatch');
+    const old = entryOf(disp) as RosterEntry;
+    const result = await hierarchyRestart({ session: 'operator-dispatch' }, deps);
+    const fresh = entryOf(disp) as RosterEntry;
+    expect(fresh.pid).not.toBe(old.pid);
+    expect(fresh).toMatchObject({ model: old.model, permissionMode: old.permissionMode });
+    expect(result.requeued).toBeUndefined();
+    expect(existsSync(path.join(boardDir, 'inflight', 'AISDLC-300.dispatch.json'))).toBe(true);
+    const started = newWindowCommands();
+    expect(started).toHaveLength(1);
+    expect(hasLaunchEnv(started[0] as string, disp, 'operator-dispatch')).toBe(true);
+    expect(started[0]).toContain("'/ai-sdlc operator-dispatch'");
+  });
+
+  it('restarts the planner with its recorded mode', async () => {
+    fake.startedAtMs = later;
+    deps.now = () => new Date(later);
+    const planner = Q('planner');
+    const old = entryOf(planner) as RosterEntry;
+    await hierarchyRestart({ session: 'planner' }, deps);
+    expect(entryOf(planner)).toMatchObject({ permissionMode: old.permissionMode });
+    expect(entryOf(planner)?.pid).not.toBe(old.pid);
+  });
+
+  it('restart --all restarts dispatch and idle executors now and defers busy ones', async () => {
+    fake.startedAtMs = later;
+    deps.now = () => new Date(later);
+    await hierarchyUp({ ...baseOpts, executors: 2 }, deps);
+    const beta = Q('executor-beta');
+    putInflight('AISDLC-300', beta);
+    let sleeps = 0;
+    deps.sleep = async () => {
+      if (++sleeps === 1) releaseInflight(boardDir, 'AISDLC-300');
+    };
+    const res = await hierarchyRestartAll({}, deps);
+    expect(res.failed).toEqual([]);
+    expect(res.restarted.map((r) => r.name)).toEqual([Q('operator-dispatch'), alpha, beta]);
+    expect(res.deferred).toEqual([beta]);
+    expect(entryOf(Q('planner'))?.pid).toBe(
+      readRoster(boardDir).sessions.find((e) => e.role === 'planner')?.pid,
+    );
+  });
+
+  it('restart --all collects a failure and keeps going', async () => {
+    fake.startedAtMs = later;
+    deps.now = () => new Date(later);
+    fake.failStartFor = Q('operator-dispatch');
+    const res = await hierarchyRestartAll({}, deps);
+    expect(res.failed.map((f) => f.name)).toEqual([Q('operator-dispatch')]);
+    expect(res.restarted.map((r) => r.name)).toEqual([alpha, Q('executor-beta')]);
   });
 
   it('refuses an unknown session', async () => {

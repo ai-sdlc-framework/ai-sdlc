@@ -59,19 +59,6 @@ cd "$(git rev-parse --show-toplevel)"
 node "$PLUGIN_SCRIPTS_DIR/hierarchy-dispatch.mjs" $ARGUMENTS
 ```
 
-## Confirming `down`
-
-`down` with no `--role` stops every session and returns inflight manifests to the
-queue. The script exits 3 and prints a notice when it is run unconfirmed. When that
-happens, ask the operator once whether to stop every session; only on a yes, run the
-same command again with `--confirmed` appended:
-
-```bash
-node "$PLUGIN_SCRIPTS_DIR/hierarchy-dispatch.mjs" down --confirmed
-```
-
-`down --role <role>` needs no confirmation.
-
 ## VS Code extension
 
 The `vscode-hierarchy` extension opens one terminal per roster agent automatically. Install with
