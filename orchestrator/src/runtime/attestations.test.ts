@@ -247,6 +247,13 @@ describe('v5 is read-only after the v6 cutover (AISDLC-972)', () => {
     const later = verifyV5('2026-10-01T00:00:00.000Z');
     expect(later.valid).toBe(false);
   });
+
+  it('fails closed on a v5 envelope with a non-finite signedAt', () => {
+    // The shape validator rejects a non-ISO signedAt before the cutover branch runs.
+    const result = verifyV5('not-a-date');
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.reason).toMatch(/signedAt/);
+  });
 });
 
 describe('signAttestation + verifyAttestation (happy path)', () => {

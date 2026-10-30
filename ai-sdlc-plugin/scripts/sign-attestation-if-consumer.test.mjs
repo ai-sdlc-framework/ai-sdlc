@@ -607,6 +607,25 @@ describe('sign-attestation-if-consumer.sh (AISDLC-598)', () => {
     });
   });
 
+  describe('v5 signing refused (AISDLC-972)', () => {
+    it('REFUSES AI_SDLC_SCHEMA_VERSION=v5 without running the signer', () => {
+      installConsumerPushPath(root);
+      writeFileSync(join(root, '.active-task'), 'AISDLC-598\n');
+      writeVerdictFile(root, 'AISDLC-598');
+      const { cmd, logPath } = installFakeSigner(root);
+
+      const r = runScript(root, {
+        AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+        AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+        AI_SDLC_SCHEMA_VERSION: 'v5',
+      });
+
+      assert.notEqual(r.status, 0, `expected refusal, got 0: ${r.stderr}`);
+      assert.match(r.stderr, /v5 attestation signing was removed/);
+      assert.equal(existsSync(logPath), false, 'the signer must NOT have run');
+    });
+  });
+
   describe('security: signer override gate (mirrors AISDLC-555)', () => {
     it('REFUSES a substitute signer unless AI_SDLC_ALLOW_SIGNER_OVERRIDE=1', () => {
       installConsumerPushPath(root);
