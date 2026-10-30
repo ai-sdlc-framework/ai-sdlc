@@ -4,7 +4,7 @@ title: >-
   One poster for the `ai-sdlc/attestation` commit status: every post carries the
   run URL and schema version, stale posts are overwritten by the verifier, and
   the gate reads the verifier's run, not the bare status
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-10'
 updated_date: '2026-10-13 20:39'

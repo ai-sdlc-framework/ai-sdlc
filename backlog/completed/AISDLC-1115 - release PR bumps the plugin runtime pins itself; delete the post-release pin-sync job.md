@@ -2,7 +2,7 @@
 id: AISDLC-1115
 title: >-
   release PR bumps the plugin runtime pins itself (plugin joins the linked-versions group); delete the post-release pin-sync job
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-29'
 labels:
