@@ -230,6 +230,21 @@ describe('auto-brief (AISDLC-930)', () => {
     expect(r.parentUpkeep).toMatchObject({ ok: false, reason: 'parent upkeep threw: boom' });
   });
 
+  it('starts a usage ingest each tick and survives a throwing one (AISDLC-1122)', async () => {
+    let calls = 0;
+    await runDispatchTick(deps({ usageIngest: () => void calls++ }));
+    expect(calls).toBe(1);
+    await expect(
+      runDispatchTick(
+        deps({
+          usageIngest: () => {
+            throw new Error('boom');
+          },
+        }),
+      ),
+    ).resolves.toBeDefined();
+  });
+
   it('skips the parent upkeep for low quota and omits it when not wired (AISDLC-981)', async () => {
     let calls = 0;
     const low = await runDispatchTick(

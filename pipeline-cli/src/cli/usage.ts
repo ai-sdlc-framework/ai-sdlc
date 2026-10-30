@@ -4,7 +4,8 @@
  * Subcommands:
  *   ingest [--backfill] [--json]                read Claude Code transcripts and Codex sessions into the ledger
  *   report [--group-by ...] [--format ...]      usage by model, role, task, repo, pool, day, window
- *   window | task <id> | context                fixed views: allotment windows, one task, context overhead
+ *   window | task <id>                          fixed views: allotment windows, one task
+ *   by-task | by-role | by-day [--since 7d]     spend with work and polling in separate columns
  *   scorecard [--role ...] [--write-evidence d] quality and cost per role, model, task class
  *   route propose [--dry-run] [--json]          file one Decision for qualifying cheaper-model changes
  *   replay-corpus build [--base-ref r]          label reviewed commits for reviewer replay

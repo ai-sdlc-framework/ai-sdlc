@@ -172,6 +172,16 @@ function* walkTranscripts(projectsDir: string): Generator<TranscriptFile> {
   }
 }
 
+/**
+ * Transcripts ordered most recently written first. Under the time limit a long
+ * backlog of old files must never starve the live sessions, which is how the
+ * cursor used to lag by a day.
+ */
+function newestFirst(files: Iterable<TranscriptFile>): TranscriptFile[] {
+  const withTime = [...files].map((f) => ({ f, t: realStat(f.path)?.mtimeMs ?? 0 }));
+  return withTime.sort((a, b) => b.t - a.t).map((x) => x.f);
+}
+
 /** Agent role from the sidecar's `agentType`; the description is never read out. */
 function readAgentRole(sidecarPath: string | undefined): string {
   const unknown = 'subagent-unknown';
@@ -267,7 +277,7 @@ export async function ingestClaudeTranscripts(opts: IngestOptions = {}): Promise
   );
   const bytesPerFile = opts.backfill ? BACKFILL_BYTES_PER_FILE : NORMAL_RUN_BYTES_PER_FILE;
 
-  for (const file of walkTranscripts(projectsDir)) {
+  for (const file of newestFirst(walkTranscripts(projectsDir))) {
     if (expired()) {
       result.timedOut = true;
       break;

@@ -7,7 +7,6 @@
 
 import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
-import { CLEAR_HOOK_NAME } from './transcript-inspect.js';
 import { DEFAULT_ROLE_BUDGETS, parseUsageConfig, roleFromSessionName } from './usage-config.js';
 
 const require = createRequire(import.meta.url);
@@ -46,9 +45,5 @@ describe('context budget lockstep with the Stop hook', () => {
     for (const name of ['planner', 'Executor-aisdlc-1', 'operator-dispatch.2', 'planners', 'x']) {
       expect(hook.roleFromName(name) ?? undefined).toBe(roleFromSessionName(name));
     }
-  });
-
-  it('reads the same clear marker', () => {
-    expect(hook.CLEAR_HOOK_NAME).toBe(CLEAR_HOOK_NAME);
   });
 });

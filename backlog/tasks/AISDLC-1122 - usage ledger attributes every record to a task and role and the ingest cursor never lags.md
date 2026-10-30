@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1122
 title: usage ledger attributes every record to a task id, role and session, ingests every transcript directory including worktrees and subagents, and a per-task cost view replaces the gross session view
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-30'
 labels:
