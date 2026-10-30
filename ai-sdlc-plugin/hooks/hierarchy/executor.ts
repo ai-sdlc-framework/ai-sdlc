@@ -12,6 +12,8 @@ export interface Ports {
   runCommand: (a: { command: string; args?: string }) => Promise<Any>;
   compact: (a: { instructions: string }) => Promise<Any>;
   submit: (a: { text: string }) => Promise<Any>;
+  /** `$.process.run([command, ...args])`; absent on a host without it, which reads as "the board names nobody". */
+  runProcess?: (a: { command: string; args: string[] }) => Promise<Any>;
 }
 
 /** Build the phase 0 spike passed on (AISDLC-1033); the module registers nothing below it. */
@@ -284,6 +286,52 @@ export interface ExecutorState {
   /** A main-loop turn is running now (turn.start seen, turn.complete not yet); an idle executor has none. */
   turnInFlight?: boolean;
   lastReply: string;
+  /** Board directory the busy predicate reads (module option `boardDir`). */
+  boardDir?: string;
+}
+
+/** A heartbeat younger than this, naming the worker, means the board says it holds the task (AISDLC-1124). */
+export const BUSY_HEARTBEAT_MS = 30 * 60 * 1000;
+
+/** Prints `{"held":"<task>"|null}`: the inflight task whose manifest or heartbeat names argv[2] and is fresh. */
+export const BUSY_SCRIPT =
+  "const fs=require('fs'),p=require('path');const[d,n,m]=process.argv.slice(1);let h=null;try{const dir=p.join(d,'inflight');for(const f of fs.readdirSync(dir)){if(!f.endsWith('.dispatch.json'))continue;const id=f.slice(0,-14);let mf={},hb={};try{mf=JSON.parse(fs.readFileSync(p.join(dir,f),'utf8'))}catch(e){}try{hb=JSON.parse(fs.readFileSync(p.join(dir,id+'.state.json'),'utf8'))}catch(e){}if(hb.workerId!==n&&mf.workerId!==n)continue;const t=Date.parse(hb.lastHeartbeat||mf.dispatchedAt);if(Number.isFinite(t)&&Date.now()-t<Number(m)){h=id;break}}}catch(e){}console.log(JSON.stringify({held:h}))";
+
+/**
+ * The one busy predicate (AISDLC-1124): the board names this worker as the holder of a task. Turn state is
+ * not consulted, because a backgrounded developer ends the main turn at once. Null when nothing is held or
+ * the board cannot be read.
+ */
+export async function heldTask(p: Ports, state: ExecutorState): Promise<string | null> {
+  if (!p.runProcess || !state.name) return null;
+  const dir = state.boardDir ?? '.ai-sdlc/dispatch';
+  const r = await safe(() =>
+    p.runProcess!({
+      command: 'node',
+      args: ['-e', BUSY_SCRIPT, dir, state.name!, String(BUSY_HEARTBEAT_MS)],
+    }),
+  );
+  const out = String(((r.value ?? {}) as Any).stdout ?? '');
+  try {
+    const held = JSON.parse(out.trim().split('\n').pop() ?? '').held;
+    return typeof held === 'string' && held ? held : null;
+  } catch {
+    return null;
+  }
+}
+
+/** One module-store line per wake decision: the worker, the event and the reason. */
+export async function logWake(
+  p: Pick<Ports, 'storeGet' | 'storeSet'>,
+  state: ExecutorState,
+  event: string,
+  decision: 'run' | 'skip',
+  reason: string,
+): Promise<void> {
+  await log(
+    p,
+    `wake ${decision}: worker=${state.name ?? 'executor'} event=${event} reason=${reason}`,
+  );
 }
 
 /**
@@ -325,6 +373,17 @@ export async function rotate(
   return 'exit';
 }
 
+/** A rotation is a wake of the clear path: it never runs while the board names this worker as holder. */
+async function rotateUnlessHeld(p: Ports, state: ExecutorState, event: string): Promise<void> {
+  const held = await heldTask(p, state);
+  if (held) {
+    state.pendingRotate = true;
+    await logWake(p, state, `rotate(${event})`, 'skip', `board holds ${held}`);
+    return;
+  }
+  await rotate(p, state);
+}
+
 /**
  * Run the resume command in the fresh session after a mod-run clear. `session.start` does not fire after
  * that clear (three live runs), so this runs from the first hook of the new session that does fire
@@ -356,8 +415,14 @@ export async function startPinnedTask(
   state: ExecutorState,
   taskId: string,
 ): Promise<void> {
+  const held = await heldTask(p, state);
+  if (held) {
+    await logWake(p, state, 'session.start', 'skip', `board holds ${held}`);
+    return;
+  }
   const r = await safe(() => p.runCommand({ command: RESUME_COMMAND }));
   if (ran(r)) {
+    await logWake(p, state, 'session.start', 'run', `pinned ${taskId}`);
     state.active = true;
     state.lastActivity = Date.now();
   } else await log(p, `start for ${taskId} refused: ${JSON.stringify(r.value ?? null)}`);
@@ -383,6 +448,7 @@ export async function executorSessionReceive(
     runCommand: (a) => $.command.run(a),
     compact: (a) => $.session.compact(a),
     submit: (a) => $.prompt.submit(a),
+    runProcess: (a) => $.process.run([a.command, ...a.args]),
   };
   // A failure in this gating hook must never swallow a message: fall through to the model.
   const handle = async () => {
@@ -393,13 +459,19 @@ export async function executorSessionReceive(
     const text = innerText(raw);
     if (!DISPATCH_NAME.test(sender)) return next(e);
     if (/^enqueue\b/i.test(text)) {
-      if (!taskRunning(state)) {
+      const held = await heldTask(p, state);
+      if (held) {
+        await logWake(p, state, 'enqueue', 'skip', `board holds ${held}`);
+      } else if (!taskRunning(state)) {
         const r = await safe(() => p.runCommand({ command: RESUME_COMMAND }));
         if (ran(r)) {
+          await logWake(p, state, 'enqueue', 'run', 'board holds nothing');
           state.turnInFlight = true;
           state.active = true;
           state.lastActivity = Date.now();
         } else await log(p, `wake refused: ${JSON.stringify(r.value ?? null)}`);
+      } else {
+        await logWake(p, state, 'enqueue', 'skip', 'turn state says a task runs');
       }
       return { consumed: 'hierarchy:enqueue' };
     }
@@ -422,6 +494,7 @@ export async function executorTurnStart(
     runCommand: (a) => $.command.run(a),
     compact: (a) => $.session.compact(a),
     submit: (a) => $.prompt.submit(a),
+    runProcess: (a) => $.process.run([a.command, ...a.args]),
   };
   await resumeAfterClear(p, state);
   if (!e?.agentId) {
@@ -445,6 +518,7 @@ export async function executorTurnComplete(
     runCommand: (a) => $.command.run(a),
     compact: (a) => $.session.compact(a),
     submit: (a) => $.prompt.submit(a),
+    runProcess: (a) => $.process.run([a.command, ...a.args]),
   };
   if (e?.agentId) return next(e);
   state.turnInFlight = false;
@@ -454,7 +528,7 @@ export async function executorTurnComplete(
   // AISDLC-1100: the host's turn.complete carries no reply text; the turn boundary itself then ends the
   // task, so a pending threshold rotation can fire.
   if (!reply && state.pendingRotate) state.active = false;
-  if (state.pendingRotate && !taskRunning(state)) await rotate(p, state);
+  if (state.pendingRotate && !taskRunning(state)) await rotateUnlessHeld(p, state, 'turn.complete');
   // A main-thread turn that ends with no rotation pending leaves the executor idle (dispatch owns the clear
   // after a verdict), so the next enqueue wake must run the executor command rather than be consumed.
   else if (!state.pendingRotate) state.active = false;
@@ -474,11 +548,12 @@ export async function executorSessionMeasure(
     runCommand: (a) => $.command.run(a),
     compact: (a) => $.session.compact(a),
     submit: (a) => $.prompt.submit(a),
+    runProcess: (a) => $.process.run([a.command, ...a.args]),
   };
   await resumeAfterClear(p, state);
   if ((await readMeasure(p, state.name, e)) >= ROTATE_AT_TOKENS) {
     if (taskRunning(state)) state.pendingRotate = true;
-    else await rotate(p, state);
+    else await rotateUnlessHeld(p, state, 'session.measure');
   }
   return next(e);
 }

@@ -219,7 +219,7 @@ describe('clearExecutor', () => {
     expect(keys).toEqual([]);
   });
 
-  it('refuses an executor that holds an inflight manifest and writes nothing', async () => {
+  it('refuses an executor that holds an inflight manifest with a fresh heartbeat, even at a prompt, and writes nothing (AISDLC-1124)', async () => {
     writeManifest(board, mkManifest('AISDLC-5'));
     claimNext(board, 'in-session-agent', undefined, { workerId: 'executor-alpha' });
     await expect(clearExecutor({ executor: 'executor-alpha' }, deps())).rejects.toThrow(

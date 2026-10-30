@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1124
 title: executor busy predicate reads the board so a backgrounded developer pass is never re-issued the executor command
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-30'
 labels:
@@ -37,13 +37,42 @@ Removes one wasted model turn per wake on a running executor and prevents a futu
 
 ## Acceptance Criteria
 
-- [ ] Unit test: with an inflight manifest naming the worker and a backgrounded developer (main turn ended), a `session.start`, an `enqueue` wake and a `rotate` wake each produce no command run and one logged skip.
-- [ ] Unit test: a `session.start` carrying an `agentId` never runs the pinned start.
-- [ ] Unit test: `clearExecutor` and the stall reaper refuse a worker named by the inflight manifest with a heartbeat younger than 30 minutes even when the pane shows a prompt and the registry says idle.
-- [ ] The module store holds one line per wake decision naming the worker, the event and the reason.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` green.
+- [x] Unit test: with an inflight manifest naming the worker and a backgrounded developer (main turn ended), a `session.start`, an `enqueue` wake and a `rotate` wake each produce no command run and one logged skip.
+- [x] Unit test: a `session.start` carrying an `agentId` never runs the pinned start.
+- [x] Unit test: `clearExecutor` and the stall reaper refuse a worker named by the inflight manifest with a heartbeat younger than 30 minutes even when the pane shows a prompt and the registry says idle.
+- [x] The module store holds one line per wake decision naming the worker, the event and the reason.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` green.
 
 ## Out of scope
 
 - Dispatch-side wake fan-out and the pre-spawn eligibility check (AISDLC-1121).
 - Heartbeat-age reaping thresholds (AISDLC-1103).
+
+## Final Summary
+
+## Summary
+The executor hooks module now decides busy from the board. The pinned start, the enqueue wake and the rotate paths skip while an inflight manifest or a heartbeat under 30 minutes names the worker. A `session.start` with an `agentId` returns before any check, and every wake decision is logged to the module store. The stall reaper no longer reaps an idle holder early, and `clearExecutor` already refused any inflight holder.
+
+## Changes
+- ai-sdlc-plugin/hooks/hierarchy/executor.ts
+- ai-sdlc-plugin/hooks/hierarchy/register.tsx
+- ai-sdlc-plugin/mods/tests/hierarchy.test.ts
+- pipeline-cli/src/hierarchy/stall.ts
+- pipeline-cli/src/hierarchy/stall.test.ts
+- pipeline-cli/src/hierarchy/clear.test.ts
+- pipeline-cli/src/hierarchy/dispatch-loop.test.ts
+- docs/operations/cli-hierarchy.md
+
+## Design decisions
+Test command: `env -u AI_SDLC_EXECUTOR_TASK pnpm test`, exit 0 (pipeline-cli 12426 passed, orchestrator 5242 passed, plugin mods 102 passed). I unset `AI_SDLC_EXECUTOR_TASK` because my shell had it set, and it made the pipeline-cli `executor-start` tests fail. Choices to check: (1) 'rotate wake' in AC1 is read as the clear path, meaning the rotations in `turn.complete` and `session.measure`. The dispatch-sent `rotate` message is already unhandled (AISDLC-1107) and still passes through. (2) The stall reaper now reaps `holder-not-busy` only for `gone` or `unknown` holders. An `idle` holder waits for the 30 minute stale threshold. I left the `holder-asked-question` path as is. (3) The module reads the board through `$.process.run node -e` because it has no fs access. If that call fails, the predicate reads as not held, which is the old behaviour. (4) For the clear half of AC3, I changed only the test title, because the existing test already covered a fresh-heartbeat inflight holder.
+
+## Verification
+- `pnpm build` — passed
+- `pnpm test` — passed
+- `pnpm lint` — passed
+- `pnpm format:check` — passed
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+

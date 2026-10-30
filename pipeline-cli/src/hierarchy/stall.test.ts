@@ -126,7 +126,13 @@ describe('reapStalledClaims thresholds (AISDLC-1103)', () => {
     expect(await reap(11, 'busy')).toEqual([]);
   });
 
-  it.each(['gone', 'idle', 'unknown'] as const)(
+  it('refuses an idle holder named by the inflight manifest with a heartbeat under 30 minutes (AISDLC-1124)', async () => {
+    expect(await reap(11, 'idle')).toEqual([]);
+    expect(await reap(29, 'idle')).toEqual([]);
+    expect((await reap(31, 'idle'))[0]?.reason).toBe('stale-heartbeat');
+  });
+
+  it.each(['gone', 'unknown'] as const)(
     'reaps a %s holder after the grace period as holder-not-busy',
     async (state) => {
       const r = await reap(11, state);

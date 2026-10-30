@@ -1,6 +1,11 @@
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ACTIVE_STALE_MS,
+  BUSY_SCRIPT,
   RESUME_COMMAND,
   ROTATION_TTL_MS,
   ROTATION_KEY,
@@ -290,6 +295,96 @@ describe('hierarchy module: executor wake', () => {
     const stranger = { text: env('someone-else', 'enqueue x') };
     expect(await recv(s.$, stranger, s.next)).toBe(stranger);
     expect(ran(s)).toHaveLength(1);
+  });
+});
+
+describe('hierarchy module: board busy predicate (AISDLC-1124)', () => {
+  const held = (s: ReturnType<typeof setup>, task: string | null) =>
+    s.$.process.run.mockImplementation(async (a: any) => {
+      if (!Array.isArray(a) || a.length === 0) throw new Error('process.run: argv required');
+      return { exitCode: 0, stdout: JSON.stringify({ held: task }) + '\n' };
+    });
+  const wakeLines = (s: ReturnType<typeof setup>) => logOf(s.kv).filter((l) => l.includes('wake '));
+
+  it('a backgrounded developer: session.start, enqueue and rotate each run nothing and log one skip', async () => {
+    const s = setup({ task: 'AISDLC-7', name: 'exec-1' });
+    held(s, 'AISDLC-7');
+    await s.start();
+    expect(ran(s)).toEqual([]);
+    expect(wakeLines(s)).toHaveLength(1);
+    expect(wakeLines(s)[0]).toContain(
+      'worker=exec-1 event=session.start reason=board holds AISDLC-7',
+    );
+    // the main turn ended at once, as with a backgrounded developer
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    await s.handlers.get('turn.complete')(s.$, {}, s.next);
+    const recv = s.handlers.get('session.receive');
+    expect(
+      await recv(s.$, { text: env('proj-operator-dispatch', 'enqueue AISDLC-8') }, s.next),
+    ).toEqual({ consumed: 'hierarchy:enqueue' });
+    expect(ran(s)).toEqual([]);
+    expect(wakeLines(s)).toHaveLength(2);
+    expect(wakeLines(s)[1]).toContain('event=enqueue');
+    await s.handlers.get('session.measure')(s.$, { tokens: 130_000 }, s.next);
+    expect(ran(s)).toEqual([]);
+    expect(wakeLines(s)).toHaveLength(3);
+    expect(wakeLines(s)[2]).toContain('event=rotate(session.measure)');
+  });
+
+  it('logs a run decision when the board holds nothing', async () => {
+    const s = setup({ name: 'exec-1' });
+    held(s, null);
+    await s.start();
+    await s.handlers.get('session.receive')(
+      s.$,
+      { text: env('proj-operator-dispatch', 'enqueue 1') },
+      s.next,
+    );
+    expect(ran(s)).toEqual([RESUME_COMMAND]);
+    expect(wakeLines(s)).toEqual([
+      '[hierarchy] wake run: worker=exec-1 event=enqueue reason=board holds nothing',
+    ]);
+  });
+
+  it('a session.start carrying an agentId never runs the pinned start', async () => {
+    const s = setup({ task: 'AISDLC-7' });
+    await s.handlers.get('session.start')(s.$, { reason: 'startup', agentId: 'sub' }, s.next);
+    expect(ran(s)).toEqual([]);
+    expect(s.next).toHaveBeenCalledTimes(1);
+  });
+
+  it('BUSY_SCRIPT names a fresh heartbeat holder and ignores a stale or other one', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'busy-'));
+    mkdirSync(path.join(dir, 'inflight'));
+    const put = (id: string, worker: string, ago: number) => {
+      writeFileSync(
+        path.join(dir, 'inflight', `${id}.dispatch.json`),
+        JSON.stringify({ dispatchedAt: new Date().toISOString() }),
+      );
+      writeFileSync(
+        path.join(dir, 'inflight', `${id}.state.json`),
+        JSON.stringify({
+          workerId: worker,
+          lastHeartbeat: new Date(Date.now() - ago).toISOString(),
+        }),
+      );
+    };
+    const run = (name: string) =>
+      JSON.parse(
+        execFileSync('node', ['-e', BUSY_SCRIPT, dir, name, String(30 * 60_000)], {
+          encoding: 'utf8',
+        }),
+      ).held;
+    put('AISDLC-1', 'w1', 60_000);
+    put('AISDLC-2', 'w2', 31 * 60_000);
+    expect(run('w1')).toBe('AISDLC-1');
+    expect(run('w2')).toBeNull();
+    expect(run('w3')).toBeNull();
+    expect(
+      JSON.parse(
+        execFileSync('node', ['-e', BUSY_SCRIPT, '/nonexistent', 'w1', '1'], { encoding: 'utf8' }),
+      ).held,
+    ).toBeNull();
   });
 });
 

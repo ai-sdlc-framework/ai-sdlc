@@ -172,7 +172,10 @@ export async function reapStalledClaims(
         safeIsQuestion(deps.lastOutputIsQuestion, heartbeat.workerId)
       ) {
         reason = 'holder-asked-question';
-      } else if (ageMs > graceMs && (state === 'idle' || state === 'gone' || state === 'unknown')) {
+      } else if (ageMs > graceMs && (state === 'gone' || state === 'unknown')) {
+        // AISDLC-1124: `idle` is not evidence here. A backgrounded developer leaves the pane and the
+        // registry idle for the whole pass while the manifest names the worker and the heartbeat is fresh,
+        // so an idle holder waits for the stale threshold like a busy one.
         reason = 'holder-not-busy';
       }
     }
