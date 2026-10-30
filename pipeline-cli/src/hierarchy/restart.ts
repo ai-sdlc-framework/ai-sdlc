@@ -48,6 +48,8 @@ export interface RestartOptions {
   afterTask?: boolean;
   /** Longest wait for `afterTask`, in seconds (default 1500). */
   waitSec?: number;
+  /** Roster name of the calling session; restarting it would kill this very command. */
+  callerName?: string;
 }
 
 /** The roster fields a restart or register changes. */
@@ -171,6 +173,11 @@ export async function hierarchyRestart(
   const entry = selectExecutor(roster, opts.session, 'restart', true);
   assertModel(entry.model, 'the roster model');
   assertPermissionMode(entry.permissionMode);
+  if (opts.callerName && opts.callerName === entry.name) {
+    throw new Error(
+      `refusing to restart '${entry.name}': it is the calling session, and stopping it would kill this command before the new window starts. Ask another session (the planner for dispatch, dispatch for the planner) to run cli-hierarchy restart ${entry.name}`,
+    );
+  }
 
   const held = entry.role === 'executor' ? holdsInflight(deps.boardDir, entry.name) : undefined;
   if (held && !opts.afterTask) {
@@ -266,6 +273,8 @@ export interface RestartAllResult {
   /** Busy executors restarted at their task boundary (waited for, as `--after-task` does). */
   deferred: string[];
   failed: { name: string; error: string }[];
+  /** Sessions left alone because the caller is that session. */
+  skipped: string[];
 }
 
 /**
@@ -273,15 +282,24 @@ export interface RestartAllResult {
  * executor at its task boundary. The planner is left alone. One failure does not stop the rest.
  */
 export async function hierarchyRestartAll(
-  opts: { waitSec?: number },
+  opts: { waitSec?: number; callerName?: string },
   deps: HierarchyDeps,
 ): Promise<RestartAllResult> {
   const { roster } = readRosterChecked(deps.boardDir);
-  const dispatch = roster.sessions.filter((e) => e.role === 'operator-dispatch');
+  const out: RestartAllResult = { restarted: [], deferred: [], failed: [], skipped: [] };
+  // The calling session cannot restart itself without killing this command; leave it for another session.
+  const dispatch = roster.sessions.filter((e) => {
+    if (e.role !== 'operator-dispatch') return false;
+    if (opts.callerName !== e.name) return true;
+    out.skipped.push(e.name);
+    deps.log(
+      `skipped '${e.name}': it is the calling session; ask the planner to run cli-hierarchy restart ${e.name}`,
+    );
+    return false;
+  });
   const executors = roster.sessions.filter((e) => e.role === 'executor');
   const busy = executors.filter((e) => holdsInflight(deps.boardDir, e.name));
   const idle = executors.filter((e) => !busy.includes(e));
-  const out: RestartAllResult = { restarted: [], deferred: [], failed: [] };
   const plan: [RosterEntry, boolean][] = [
     ...dispatch.map((e): [RosterEntry, boolean] => [e, false]),
     ...idle.map((e): [RosterEntry, boolean] => [e, false]),

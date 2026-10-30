@@ -836,7 +836,10 @@ export async function runHierarchyCli(
         const waitSec = intFlag(flags, 'wait');
         if (waitSec === null) return 2;
         if (all) {
-          const res = await hierarchyRestartAll(waitSec === undefined ? {} : { waitSec }, deps);
+          const res = await hierarchyRestartAll(
+            { ...(waitSec === undefined ? {} : { waitSec }), callerName: caller.name },
+            deps,
+          );
           deps.log(JSON.stringify(res));
           return res.failed.length === 0 ? 0 : 1;
         }
@@ -844,6 +847,7 @@ export async function runHierarchyCli(
           {
             session: session as string,
             afterTask: afterTask !== undefined,
+            callerName: caller.name,
             ...(waitSec === undefined ? {} : { waitSec }),
           },
           deps,

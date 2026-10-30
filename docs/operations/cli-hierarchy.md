@@ -508,8 +508,12 @@ receiver. A window that is already gone (a crash) is simply started.
 
 `--all` restarts dispatch, then every idle executor, now; each busy executor is restarted at
 its task boundary, as `--after-task` does. The planner is left alone. One failure does not
-stop the rest; the JSON lists `restarted`, `deferred` and `failed`, and the exit is `1` when
+stop the rest; the JSON lists `restarted`, `deferred`, `failed` and `skipped`, and the exit is `1` when
 any failed.
+
+A session cannot restart itself: stopping its own window would kill the command before the new
+window starts. `restart <own-name>` is refused, and `restart --all` run from dispatch skips
+dispatch (listed in `skipped`) and restarts the executors; ask the planner to restart dispatch.
 
 An executor that holds a claimed task is refused: the message names `--after-task`. With
 `--after-task` the command waits for the task boundary (up to `--wait` seconds, default

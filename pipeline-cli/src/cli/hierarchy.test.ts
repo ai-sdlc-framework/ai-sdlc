@@ -1844,10 +1844,36 @@ describe('restart and register (AISDLC-713)', () => {
       if (args[0] === 'display-message') return { status: 0, stdout: '%9 4242\n', stderr: '' };
       return { status: 0, stdout: '', stderr: '' };
     };
-    const code = await runHierarchyCli(['restart', '--all'], overrides({ run }), dispatch);
+    const code = await runHierarchyCli(['restart', '--all'], overrides({ run }), {
+      identity: asCaller('planner', 'planner'),
+    });
     expect(code).toBe(0);
     const res = JSON.parse(logs.at(-1) as string) as { restarted: { name: string }[] };
     expect(res.restarted.map((r) => r.name)).toEqual(['operator-dispatch', 'executor-alpha']);
+  });
+
+  it('restart --all from dispatch skips dispatch itself and restarts the executors', async () => {
+    const run: CommandRunner = (_f, args) => {
+      calls.push([...args]);
+      if (args[0] === 'display-message') return { status: 0, stdout: '%9 4242\n', stderr: '' };
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const code = await runHierarchyCli(['restart', '--all'], overrides({ run }), dispatch);
+    expect(code).toBe(0);
+    const res = JSON.parse(logs.at(-1) as string) as {
+      restarted: { name: string }[];
+      skipped: string[];
+    };
+    expect(res.restarted.map((r) => r.name)).toEqual(['executor-alpha']);
+    expect(res.skipped).toEqual(['operator-dispatch']);
+  });
+
+  it('restart refuses a caller restarting its own session', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const code = await runHierarchyCli(['restart', 'operator-dispatch'], overrides(), dispatch);
+    expect(code).toBe(1);
+    expect(calls).toEqual([]);
+    expect(String(err.mock.calls[0]?.[0])).toContain('it is the calling session');
   });
 
   it('restart --all exits 1 when a session fails', async () => {
