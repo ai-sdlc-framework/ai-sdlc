@@ -77,6 +77,14 @@ import { execFileSync, spawnSync } from 'node:child_process';
  *   and `sign-v6`, reproducing the exact AISDLC-421/610 bug class this
  *   module exists to prevent.
  *
+ * - `.ai-sdlc/_decisions/events.jsonl` — excluded per AISDLC-737. The
+ *   append-only decision log: two concurrent PRs both appending produce a
+ *   same-file conflict whose only resolution is keeping both sides; that must
+ *   not shift the patch-id and force a full re-review. Decision records sit outside reviewer
+ *   attestation by design (docs-only classification, decisions-sync lane);
+ *   decision authority comes from records on main, and the log is
+ *   observability data, not reviewed source.
+ *
  * Kept as a tuple so callers spread it into git invocations and adding
  * another exclusion is a one-element append rather than a re-architecture.
  *
@@ -91,6 +99,7 @@ export const PATCH_ID_EXCLUSIONS = [
   ':!backlog/tasks/',
   ':!backlog/completed/',
   ':!.ai-sdlc/reviews/',
+  ':!.ai-sdlc/_decisions/events.jsonl',
 ] as const;
 
 /**

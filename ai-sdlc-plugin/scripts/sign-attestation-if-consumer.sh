@@ -305,7 +305,7 @@ fi
 MERGE_BASE=$(git merge-base "$BASE_REF" HEAD 2>/dev/null || echo '')
 PATCH_ID=""
 if [ -n "$MERGE_BASE" ] && [ ${#MERGE_BASE} -eq 40 ]; then
-  DIFF_OUTPUT=$(git diff-tree --no-color -p "${MERGE_BASE}..HEAD" -- ':!.ai-sdlc/attestations/' ':!.ai-sdlc/transcript-leaves/' ':!.ai-sdlc/transcript-leaves.jsonl' ':!backlog/tasks/' ':!backlog/completed/' ':!.ai-sdlc/reviews/' 2>/dev/null || echo '')
+  DIFF_OUTPUT=$(git diff-tree --no-color -p "${MERGE_BASE}..HEAD" -- ':!.ai-sdlc/attestations/' ':!.ai-sdlc/transcript-leaves/' ':!.ai-sdlc/transcript-leaves.jsonl' ':!backlog/tasks/' ':!backlog/completed/' ':!.ai-sdlc/reviews/' ':!.ai-sdlc/_decisions/events.jsonl' 2>/dev/null || echo '')
   if [ -n "$DIFF_OUTPUT" ]; then
     PATCH_ID_LINE=$(printf '%s' "$DIFF_OUTPUT" | git patch-id --stable 2>/dev/null | head -1 || echo '')
     PATCH_ID=$(printf '%s' "$PATCH_ID_LINE" | cut -c1-40 2>/dev/null || echo '')

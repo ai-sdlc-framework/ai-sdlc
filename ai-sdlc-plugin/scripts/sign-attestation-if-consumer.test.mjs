@@ -63,6 +63,7 @@ const FAKE_SIGNER_EXCLUSIONS = [
   ':!backlog/tasks/',
   ':!backlog/completed/',
   ':!.ai-sdlc/reviews/',
+  ':!.ai-sdlc/_decisions/events.jsonl',
 ];
 
 function cleanEnv(extra = {}) {
