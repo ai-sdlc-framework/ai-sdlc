@@ -57,7 +57,8 @@ export function readHold(boardDir: string): Hold | null {
   }
 }
 
-function logEvent(boardDir: string, event: Record<string, unknown>): void {
+/** Append an event to the hold log. */
+export function appendHoldEvent(boardDir: string, event: Record<string, unknown>): void {
   appendFileSync(path.join(boardDir, HOLD_LOG_FILENAME), JSON.stringify(event) + '\n', 'utf-8');
 }
 
@@ -68,13 +69,13 @@ export function writeHold(boardDir: string, hold: Hold): void {
   const tmp = `${target}.tmp-${process.pid}-${now().getTime()}`;
   writeFileSync(tmp, JSON.stringify(hold, null, 2) + '\n', 'utf-8');
   renameSync(tmp, target);
-  logEvent(boardDir, { event: 'hold', ...hold });
+  appendHoldEvent(boardDir, { event: 'hold', ...hold });
 }
 
 /** Remove the hold; returns the hold that was lifted, or null when there was none. */
 export function clearHold(boardDir: string, by: string, at: string): Hold | null {
   const held = readHold(boardDir);
   rmSync(holdPath(boardDir), { force: true });
-  if (held) logEvent(boardDir, { event: 'resume', by, at, reason: held.reason });
+  if (held) appendHoldEvent(boardDir, { event: 'resume', by, at, reason: held.reason });
   return held;
 }

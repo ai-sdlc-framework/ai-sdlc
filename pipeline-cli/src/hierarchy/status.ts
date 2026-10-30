@@ -44,6 +44,7 @@ import { formatWebhookStatus, webhookStatus, type WebhookStatus } from './webhoo
 import { listWindows, paneInfo, paneStartCommand, sessionAttached } from './tmux.js';
 import { contextWarning, formatContext, sessionContextTokens } from './context-size.js';
 import { readOpenDrainStall, type DrainStallRecord } from './drain-stall.js';
+import { budgetStatus, formatBudget, type BudgetStatus } from './budget.js';
 import { resolveThresholds } from './thresholds.js';
 import type { HierarchyDeps, HierarchyRole, RosterEntry } from './types.js';
 
@@ -93,6 +94,8 @@ export interface StatusResult {
   lastTick?: { ageSec: number; by: 'host' | 'scheduler' };
   /** Per-role context-clear thresholds in tokens (AISDLC-815), from `<board-dir>/config.json`. */
   contextThresholds?: Record<HierarchyRole, number>;
+  /** Token budget pace from `usage.json` (AISDLC-1072); absent when never sampled. */
+  budget?: BudgetStatus;
   /** Dispatchable tasks on no brief and not on the board (AISDLC-930); absent when none. */
   unbriefed?: string[];
   /** Tasks parked in `blocked/` with the reason (AISDLC-1043); absent when none. */
@@ -158,6 +161,12 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
 
   const wantedNode = readNvmrc(deps.cwd);
   const thresholdsByRole = resolveThresholds(deps.boardDir);
+  let budgetNow: BudgetStatus | undefined;
+  try {
+    budgetNow = budgetStatus(deps.boardDir, deps.now().getTime());
+  } catch {
+    /* an unreadable usage file must not break status */
+  }
   const rows = roster.sessions.map((entry): StatusRow => {
     const live =
       registry.find((r) => r.name === entry.name) ??
@@ -279,6 +288,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     scheduler: schedulerStatus(deps),
     ...(lastTick ? { lastTick } : {}),
     contextThresholds: thresholdsByRole,
+    ...(budgetNow ? { budget: budgetNow } : {}),
     ...(unbriefed.length > 0 ? { unbriefed } : {}),
     ...(blocked.length > 0 ? { blocked } : {}),
   };
@@ -309,6 +319,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
         `context clear thresholds (tokens): planner ${t.planner}, operator-dispatch ${t['operator-dispatch']}, executor ${t.executor}`,
       ]
     : [];
+  const budgetLine = result.budget ? [formatBudget(result.budget)] : [];
   const unbriefed = result.unbriefed?.length
     ? [
         `unbriefed (dispatchable, on no brief, not on the board): ${result.unbriefed.join(', ')}; write a brief with \`cli-hierarchy brief --tasks <id,...>\``,
@@ -334,6 +345,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       formatSchedulerStatus(result.scheduler),
       formatLastTick(result.lastTick),
       ...thresholds,
+      ...budgetLine,
       ...unbriefed,
       ...blockedLines,
       ...stallLines,
@@ -407,6 +419,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
     formatSchedulerStatus(result.scheduler),
     formatLastTick(result.lastTick),
     ...thresholds,
+    ...budgetLine,
     ...unbriefed,
     ...blockedLines,
     ...stallLines,

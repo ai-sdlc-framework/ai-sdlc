@@ -814,6 +814,20 @@ can only print a line to paste. A mod could call `$.session.compact({ instructio
 button (the `context-meter` mod calls it without instructions today), and whether a mod can run
 `/clear` is unverified, so clearing stays a human action (or the module's 150k rotation above).
 
+### `usage`
+
+Weekly token budget pacer (AISDLC-1072). `usage` reads the Claude Code OAuth credential from the macOS login keychain, makes one GET of the account usage endpoint and writes `<board>/usage.json`: both windows (`fiveHour`, `sevenDay`) with `utilization` (percent) and `resetsAt`, a sample timestamp, and a 24-hour ring of samples. It never prints or stores the token. With no credential or an unreachable endpoint it prints `{"available":false,"reason":...}` and the tick carries on (see `docs/operations/tooling-limitations.md`).
+
+```bash
+cli-hierarchy usage
+```
+
+The dispatch `tick` samples at most once per 5 minutes and applies one rule per window. The line is `allowed(t) = u0 + (100 - u0) * elapsed / total`: a straight line from the window start (utilization `u0` at the first sample of that reset time, or the true window start when later) to 100 percent at `resetsAt`. When utilization is above the line by more than the margin, the tick sets a hold with reason `budget: ...`; when it falls back under the line minus the margin, the tick lifts it (between the two the hold stays as it is). Margins come from `<board>/config.json`: `{ "budget": { "marginPoints": 2, "fiveHourMarginPoints": 10 } }` (seven-day default 2, five-hour default 10). A hold set by anything else is never touched. A budget hold blocks new claims only, like any hold; reports, verdicts and landings continue and inflight manifests are untouched. The pacer does not start work: the drain fills every hour the line allows.
+
+`status` prints a `BUDGET` line: both utilizations, the line value, ahead or behind in points, and the projected time the current burn rate (oldest ring sample of the window to now) reaches 100 percent.
+
+The planner or operator overrides with `cli-hierarchy resume --budget`: it lifts a budget hold and exempts the current seven-day and five-hour windows until their reset; the override is written to `<board>/budget-override.json` and logged as `budget-override` in `hold-events.jsonl`.
+
 ### `hold`
 
 Pause the drain without silencing it (AISDLC-899). `hold` writes `<board>/.hold`
@@ -822,7 +836,7 @@ either; dispatch and executors are refused.
 
 ```bash
 cli-hierarchy hold --reason <text>
-cli-hierarchy resume
+cli-hierarchy resume [--budget]
 ```
 
 While held, `tick` still ingests briefs, watches verdicts, classifies PRs and returns `reports`

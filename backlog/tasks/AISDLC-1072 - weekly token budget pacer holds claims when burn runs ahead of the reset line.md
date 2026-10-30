@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1072
 title: 'weekly token budget pacer: dispatch reads the account utilization each tick and holds claims when burn runs ahead of the line to the weekly reset'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-23'
 labels:
