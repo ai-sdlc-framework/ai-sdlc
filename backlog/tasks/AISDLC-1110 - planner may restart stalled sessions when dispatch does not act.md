@@ -42,3 +42,7 @@ Fix: lift the role check in `pipeline-cli/src/hierarchy/restart.ts` / `cli/hiera
 ## Notes
 
 Evidence: `cli-hierarchy status` 08:15Z (0 inflight, three executors `unknown`, planner `197k OVER`, dispatch `last tick: 11s ago by host`); planner `send` log 06:18Z, 07:05Z, 07:17Z, 07:47Z, 08:17Z; refusal text above. Related: AISDLC-1104 (restart verb), AISDLC-1107 (verdict-driven clear), AISDLC-1101 (stall detection).
+
+## Verification
+
+Test command: `pnpm --filter @ai-sdlc/pipeline-cli test` (run with AI_SDLC_EXECUTOR_TASK unset). Summary line: `Tests  1 failed | 12419 passed | 13 skipped (12433)`; the one failure, `webhook-receiver.test.ts > coalesces five check-run deliveries`, passes alone (7 of 7) and is untouched by this change (load-sensitive timing). Other packages pass; build, lint and format:check clean.
