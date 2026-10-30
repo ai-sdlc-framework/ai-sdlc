@@ -328,6 +328,13 @@ report to the planner. `cli-hierarchy status` prints the open stall as a `drain-
 `--json`). The record closes by itself when the board moves or the condition lapses. Nothing is recorded while
 the board is held.
 
+### Stall thresholds (AISDLC-1103)
+
+The stall reaper uses two thresholds for every worker, roster or ephemeral. `graceMs` (default 10 minutes) applies
+only when the holder session is `idle`, `gone` or `unknown`: the claim is then reaped as `holder-not-busy`. `staleMs`
+(default 30 minutes) applies whatever the session state: a heartbeat older than it is reaped as `stale-heartbeat`, so a
+busy developer pass is never reaped before 30 minutes.
+
 ### `stall-notice`
 
 An alert-only check for a drain that stopped moving (AISDLC-871). With eligible queued work and

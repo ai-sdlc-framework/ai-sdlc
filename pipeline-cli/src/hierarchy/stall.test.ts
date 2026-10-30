@@ -1,10 +1,17 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, renameSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { ensureBoardDirs, writeHeartbeat, writeManifest } from '../dispatch/board.js';
 
 import {
   DEFAULT_STALL_GRACE_MS,
   DEFAULT_STALL_STALE_MS,
   findOpenPrNumber,
   endsWithQuestion,
+  reapStalledClaims,
   stallResumeNote,
   stallThresholdsFromEnv,
 } from './stall.js';
@@ -72,5 +79,64 @@ describe('endsWithQuestion', () => {
   it('is false for a statement or empty output', () => {
     expect(endsWithQuestion('Pushed the branch.\n❯ \n')).toBe(false);
     expect(endsWithQuestion('')).toBe(false);
+  });
+});
+
+describe('reapStalledClaims thresholds (AISDLC-1103)', () => {
+  const T0 = Date.parse('2026-10-28T10:00:00Z');
+  const MIN = 60000;
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(os.tmpdir(), 'stall-reap-'));
+    ensureBoardDirs(dir);
+    writeManifest(dir, {
+      schemaVersion: 'v1',
+      taskId: 'AISDLC-9',
+      taskFile: 'x',
+      branch: 'b',
+      baseSha: 'a'.repeat(40),
+      dispatchedAt: new Date(T0).toISOString(),
+      dispatchedBy: 't',
+    } as never);
+    renameSync(
+      path.join(dir, 'queue', 'AISDLC-9.dispatch.json'),
+      path.join(dir, 'inflight', 'AISDLC-9.dispatch.json'),
+    );
+    writeHeartbeat(dir, {
+      taskId: 'AISDLC-9',
+      workerId: 'eph-1',
+      workerKind: 'any',
+      startedAt: new Date(T0).toISOString(),
+      lastHeartbeat: new Date(T0).toISOString(),
+      currentStep: '05-dev-running',
+    } as never);
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  const reap = (ageMin: number, state?: 'busy' | 'idle' | 'gone' | 'unknown') =>
+    reapStalledClaims({
+      boardDir: dir,
+      now: () => new Date(T0 + ageMin * MIN),
+      staleMs: 30 * MIN,
+      graceMs: 10 * MIN,
+      liveness: state ? () => new Map([['eph-1', state]]) : undefined,
+    });
+
+  it('keeps a busy worker past the grace period but inside the stale period', async () => {
+    expect(await reap(11, 'busy')).toEqual([]);
+  });
+
+  it.each(['gone', 'idle', 'unknown'] as const)(
+    'reaps a %s holder after the grace period as holder-not-busy',
+    async (state) => {
+      const r = await reap(11, state);
+      expect(r).toHaveLength(1);
+      expect(r[0]?.reason).toBe('holder-not-busy');
+    },
+  );
+
+  it('reaps any worker as stale-heartbeat after the stale period', async () => {
+    const r = await reap(31, 'busy');
+    expect(r[0]?.reason).toBe('stale-heartbeat');
   });
 });

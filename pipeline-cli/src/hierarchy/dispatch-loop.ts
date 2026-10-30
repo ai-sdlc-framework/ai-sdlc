@@ -682,7 +682,6 @@ async function checkStalls(
         ...stall,
         boardDir: deps.boardDir,
         now: deps.now,
-        isEphemeral: deps.ephemeral ? (w) => isEphemeralWorker(deps.boardDir, w) : undefined,
         clear: stallClear,
         requeue: deps.operational.has('requeue') ? stall.requeue : undefined,
       },

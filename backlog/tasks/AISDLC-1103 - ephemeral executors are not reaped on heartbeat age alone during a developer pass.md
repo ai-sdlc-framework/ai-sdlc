@@ -2,7 +2,7 @@
 id: AISDLC-1103
 title: >-
   Ephemeral executors are not reaped on heartbeat age alone during a developer pass (stall reaper uses holder state, not the 10-minute grace)
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-28'
 labels:
