@@ -106,6 +106,8 @@ export interface LandingRecord {
   note?: string;
   /** Set when the last run of `action` failed; the next pass retries without a new history entry. */
   actionFailed?: boolean;
+  /** AISDLC-1125: failed runs of `action` on this head; the second routes to the planner and stops retries. */
+  failedAttempts?: number;
   /** `rate-limited` only: when the installation limit resets and the rerun may fire. */
   rateLimitResetAt?: string;
   /** `rate-limited` only: the head sha already rerun once; never rerun it again. */
@@ -735,7 +737,30 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
       existing.headSha === f.headSha &&
       existing.owner === owner;
     if (unchanged && existing.actionFailed === true && d.action !== 'none') {
-      // A failed action is retried on the next pass; history is not appended again.
+      // AISDLC-1125: a failed action is retried once on an unchanged head; a second failure routes
+      // to the planner once and the head is terminal (a changed head writes a fresh record).
+      const failures = existing.failedAttempts ?? 1;
+      const routeFailed = (n: number): void => {
+        if (routeOnce(f.prNumber, f.headSha, `${d.action} failed x${n}`)) {
+          report.acted.push({
+            pr: f.prNumber,
+            action: 'route-to-planner',
+            ran: false,
+            note: `${d.action}@${f.headSha ?? ''} failed x${n}, no more retries`,
+          });
+        }
+      };
+      const lastAt = Date.parse(recordLastActionAt(existing) ?? '');
+      const agedOut =
+        (existing.agedAttempts ?? 1) >= MAX_AGED_ATTEMPTS &&
+        !AGING_EXEMPT_ACTIONS.has(d.action) &&
+        Number.isFinite(lastAt) &&
+        now().getTime() - lastAt >= AGING_WINDOW_MS;
+      if (failures >= 2 || agedOut) {
+        routeFailed(Math.max(failures, 2));
+        report.records.push(existing);
+        continue;
+      }
       const retry = opts.execute({
         pr: f.prNumber,
         taskId: f.taskId,
@@ -746,8 +771,10 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
         ...(d.failingLine === undefined ? {} : { failingLine: d.failingLine }),
         boardDir: opts.boardDir,
       });
-      const { actionFailed: _drop, ...rest } = existing;
-      const updated: LandingRecord = retry.failed ? { ...rest, actionFailed: true } : rest;
+      const { actionFailed: _drop, failedAttempts: _n, ...rest } = existing;
+      const updated: LandingRecord = retry.failed
+        ? { ...rest, actionFailed: true, failedAttempts: failures + 1, lastActionAt: ts }
+        : rest;
       writeLanding(opts.boardDir, updated);
       report.records.push(updated);
       report.acted.push({
@@ -756,6 +783,7 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
         ran: retry.ran,
         ...(retry.note ? { note: retry.note } : {}),
       });
+      if (retry.failed) routeFailed(failures + 1);
       continue;
     }
     if (unchanged && d.action === 'wait-and-rerun') {
@@ -776,7 +804,7 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
         const updated: LandingRecord = {
           ...existing,
           rerunHeadSha: f.headSha,
-          ...(r.failed ? { actionFailed: true } : {}),
+          ...(r.failed ? { actionFailed: true, failedAttempts: 1 } : {}),
         };
         writeLanding(opts.boardDir, updated);
         report.records.push(updated);
@@ -827,7 +855,7 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
           ...existing,
           lastActionAt: ts,
           agedAttempts: attempts + 1,
-          ...(aged.failed ? { actionFailed: true } : {}),
+          ...(aged.failed ? { actionFailed: true, failedAttempts: 1 } : {}),
         };
         writeLanding(opts.boardDir, updated);
         report.records.push(updated);
@@ -896,7 +924,10 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
         boardDir: opts.boardDir,
       });
     }
-    if (result.failed) record.actionFailed = true;
+    if (result.failed) {
+      record.actionFailed = true;
+      record.failedAttempts = 1;
+    }
     writeLanding(opts.boardDir, record);
     report.records.push(record);
     // A merged PR completes an iterate-needed task and frees its slot (AISDLC-1030).

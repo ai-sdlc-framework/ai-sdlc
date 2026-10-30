@@ -106,6 +106,90 @@ describe('reconcile idempotency (AC1)', () => {
     expect(execute).toHaveBeenCalledTimes(2);
   });
 
+  describe('failed-action retry loop (AISDLC-1125)', () => {
+    const red = [{ name: 'ai-sdlc/pr-ready', conclusion: 'failure' as const, summary: 'boom' }];
+    const failing = () =>
+      vi.fn<(c: ActionContext) => { ran: boolean; failed?: boolean }>(() => ({
+        ran: true,
+        failed: true,
+      }));
+    const routes = (r: { acted: { action: string }[] }) =>
+      r.acted.filter((a) => a.action === 'route-to-planner');
+
+    it('routes once after a second failure on the same head and stops retrying', () => {
+      const execute = failing();
+      const facts = [taskPr({ checks: red })];
+      const t = (h: number) => () => new Date(`2026-10-14T0${h}:00:00.000Z`);
+      const p1 = reconcile(facts, { boardDir: board, execute, now: t(0) });
+      expect(routes(p1)).toHaveLength(0);
+      const p2 = reconcile(facts, { boardDir: board, execute, now: t(1) });
+      expect(routes(p2)).toHaveLength(1);
+      expect(routes(p2)[0]).toMatchObject({ pr: 10 });
+      expect(JSON.stringify(routes(p2)[0])).toContain('abc123');
+      expect(JSON.stringify(routes(p2)[0])).toContain('failed x2');
+      expect(readLanding(board, 10)?.lastActionAt).toBe('2026-10-14T01:00:00.000Z');
+      const p3 = reconcile(facts, { boardDir: board, execute, now: t(2) });
+      expect(routes(p3)).toHaveLength(0);
+      expect(execute).toHaveBeenCalledTimes(2);
+    });
+
+    it('re-runs once on a new head after a failure', () => {
+      const execute = failing();
+      reconcile([taskPr({ checks: red })], { boardDir: board, execute, now: fixedNow });
+      reconcile([taskPr({ checks: red, headSha: 'new999' })], {
+        boardDir: board,
+        execute,
+        now: fixedNow,
+      });
+      expect(execute).toHaveBeenCalledTimes(2);
+      expect(execute.mock.calls[1]![0].headSha).toBe('new999');
+    });
+
+    it('a failed record still reaches the aging cap', () => {
+      const execute = failing();
+      const facts = [taskPr({ checks: red })];
+      reconcile(facts, { boardDir: board, execute, now: fixedNow });
+      const rec = readLanding(board, 10)!;
+      writeFileSync(
+        path.join(board, 'landing', '10.json'),
+        JSON.stringify({ ...rec, agedAttempts: 3 }),
+      );
+      const later = () => new Date('2026-10-14T12:00:00.000Z');
+      const r = reconcile(facts, { boardDir: board, execute, now: later });
+      expect(routes(r)).toHaveLength(1);
+      expect(JSON.stringify(routes(r)[0])).toContain('failed');
+      expect(execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('replays frozen failed records (agedAttempts 2) to the planner on the first pass', () => {
+      const execute = failing();
+      for (const pr of [2093, 2127, 2129]) {
+        const f = taskPr({ prNumber: pr, taskId: `AISDLC-${pr}`, checks: red });
+        reconcile([f], { boardDir: board, execute, now: fixedNow });
+        const rec = readLanding(board, pr)!;
+        const { failedAttempts: _drop, ...old } = rec;
+        writeFileSync(
+          path.join(board, 'landing', `${pr}.json`),
+          JSON.stringify({
+            ...old,
+            actionFailed: true,
+            agedAttempts: 2,
+            lastActionAt: '2026-10-29T00:00:00.000Z',
+          }),
+        );
+      }
+      const facts = [2093, 2127, 2129].map((pr) =>
+        taskPr({ prNumber: pr, taskId: `AISDLC-${pr}`, checks: red }),
+      );
+      const r = reconcile(facts, { boardDir: board, execute, now: fixedNow });
+      expect(
+        routes(r)
+          .map((a) => (a as { pr: number }).pr)
+          .sort(),
+      ).toEqual([2093, 2127, 2129]);
+    });
+  });
+
   it('appends history and runs the new action when the head SHA changes', () => {
     const execute = vi.fn(() => ({ ran: true }));
     const red = [{ name: 'ai-sdlc/pr-ready', conclusion: 'failure' as const, summary: 'boom' }];

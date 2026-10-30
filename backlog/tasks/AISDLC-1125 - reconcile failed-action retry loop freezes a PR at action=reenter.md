@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1125
 title: reconcile failed-action retry loop freezes a PR at action=reenter instead of routing it
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-30'
 labels:
