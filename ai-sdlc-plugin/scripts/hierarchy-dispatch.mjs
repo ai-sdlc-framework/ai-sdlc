@@ -11,11 +11,8 @@
  *   PIPELINE_CLI_BIN  Optional. The pipeline-cli bin directory; when unset it is
  *                     resolved through `resolve-pipeline-cli.sh`.
  *
- * Script-only flag (stripped before the CLI sees the arguments):
- *   --confirmed       The operator confirmed a `down` with no `--role`.
- *
  * Exit codes: 0 ok (or the CLI's own code), 1 bin not found, 2 refused
- * subcommand, 3 confirmation needed.
+ * subcommand.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -93,8 +90,7 @@ export function run(args, io = {}) {
   }
 
   const rest = args.slice(1);
-  const confirmed = rest.includes('--confirmed');
-  const passArgs = [sub, ...rest.filter((a) => a !== '--confirmed')];
+  const passArgs = [sub, ...rest];
   const quoted = `node "${cli}"`;
 
   if (sub === 'attach') {
@@ -109,13 +105,6 @@ export function run(args, io = {}) {
     );
     return 0;
   }
-  if (sub === 'down' && !passArgs.includes('--role') && !confirmed) {
-    err(
-      'ai-sdlc hierarchy: `down` with no --role stops every session and returns inflight manifests to the queue. Confirm with the operator, then re-run with --confirmed.',
-    );
-    return 3;
-  }
-
   const r = exec(passArgs);
   return r.status ?? 1;
 }

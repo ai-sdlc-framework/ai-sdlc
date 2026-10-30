@@ -21,8 +21,9 @@
  *   - `brief-status` — print each brief on the board with its done and total task counts.
  *   - `down [--role <name-or-role>]` — end sessions, return their inflight
  *     manifests to `queue/`, close their windows, update the roster.
- *   - `restart <executor> [--after-task] [--wait <sec>]` — stop and start one executor and
- *     replace its roster entry; refuses while it holds a task unless `--after-task`.
+ *   - `restart <name>|--all [--after-task] [--wait <sec>]` — stop and start one session (an
+ *     executor, dispatch or the planner) or dispatch plus every executor, replacing its roster
+ *     entry; an executor holding a task is refused unless `--after-task`.
  *   - `register <executor>` — re-record an executor restarted by hand under a new pid, after
  *     checking its tmux pane and process.
  *   - `executor-start` — an executor's identity, repository check and one claim
@@ -47,7 +48,8 @@
  *
  * All subcommands accept `--board-dir <path>` (default `.ai-sdlc/dispatch`).
  *
- * `clear`, `tick`, `restart`, `register`, `playbook` and `route-decision` are dispatch-session commands. A mistake
+ * `clear`, `tick`, `restart`, `register`, `playbook` and `route-decision` are dispatch-session commands
+ * (`restart` also accepts the planner). A mistake
  * guard keeps other sessions from running them by accident: it finds the calling
  * session from the process tree and the roster and refuses unless that is the running
  * dispatch session. A `--worker` value is only compared with that result. The guard is
@@ -112,6 +114,7 @@ import {
   hierarchyDown,
   hierarchyRegister,
   hierarchyRestart,
+  hierarchyRestartAll,
   hierarchyStatus,
   hierarchyTerminals,
   hierarchyUp,
@@ -190,7 +193,7 @@ Commands:
   brief-status  Show each brief's done and total task counts
   down       Stop sessions and return their inflight manifests to the queue
   clear      Empty an executor's context between tasks and restart its loop
-  restart    Stop and start one executor, updating its roster entry (restart <executor>)
+  restart    Stop and start one session or all of them, updating the roster (restart <name>|--all)
   register   Re-record an executor whose process was restarted by hand (register <executor>)
   stall-notice  Alert once when queued work has not moved for N minutes (no relaunch, no model)
   webhook    Local GitHub webhook receiver: webhook up|down|status (needs AI_SDLC_WEBHOOK_SECRET)
@@ -273,16 +276,21 @@ Usage for clear:
   session that is not an executor, an executor that holds an inflight task, a tmux session
   cli-hierarchy did not start.
 
-Usage for restart and register (dispatch session only, executors only):
-  cli-hierarchy restart <executor> [--after-task] [--wait <seconds>]
+Usage for restart and register (dispatch or planner session for restart; dispatch only for register):
+  cli-hierarchy restart <name> [--after-task] [--wait <seconds>]
+  cli-hierarchy restart --all [--wait <seconds>]
   cli-hierarchy register <executor>
-  restart stops the named executor and starts it again with its recorded model and mode,
-  then replaces only its roster entry (pid, pane, started time); other sessions are not touched.
-  It refuses while the executor holds a claimed task unless --after-task is given, which waits
+  restart stops the named session (an executor, operator-dispatch or planner) and starts it
+  again with its recorded model, mode and env, then replaces only its roster entry (pid, pane,
+  started time); other sessions are not touched and inflight manifests stay on the board.
+  Restarting dispatch re-registers the reconcile scheduler and the webhook receiver.
+  An executor that holds a claimed task is refused unless --after-task is given, which waits
   (up to --wait seconds, default 1500) for the task boundary first.
+  --all restarts dispatch and every idle executor now, and each busy executor at its task
+  boundary, as --after-task does; the planner is left alone.
   register re-records an executor that is already running under a new pid, after checking
   its tmux pane, the ownership marker, the pane's launch environment and a live harness session.
-  A mistake guard refuses any caller but the dispatch session; it is not authentication.
+  A mistake guard refuses any other caller (executors never); it is not authentication.
 
 Options for demo:
   run | cut | render       One stage; with none, all three in order, stopping at the first failure
@@ -582,9 +590,11 @@ export async function runHierarchyCli(
   const dispatchCaller = (
     command: string,
     skipCallerIdentity = false,
+    allowedRoles?: readonly string[],
   ): ReturnType<typeof checkDispatchCaller> =>
     checkDispatchCaller({
       skipCallerIdentity,
+      ...(allowedRoles ? { allowedRoles } : {}),
       label: `cli-hierarchy ${command}`,
       cwd: deps.cwd,
       boardDir: deps.boardDir,
@@ -798,7 +808,11 @@ export async function runHierarchyCli(
       }
       case 'restart':
       case 'register': {
-        const caller = dispatchCaller(subcommand);
+        const caller = dispatchCaller(
+          subcommand,
+          false,
+          subcommand === 'restart' ? ['operator-dispatch', 'planner'] : undefined,
+        );
         if (!caller.ok) {
           process.stderr.write(`${caller.reason}\n`);
           return 1;
@@ -808,20 +822,32 @@ export async function runHierarchyCli(
         const session =
           firstPositional(argv) ??
           (afterTask !== undefined && afterTask !== 'true' ? afterTask : undefined);
-        if (!session) {
-          process.stderr.write(`cli-hierarchy ${subcommand}: an executor name is required\n`);
+        const all = subcommand === 'restart' && flags.all === 'true';
+        if (!session && !all) {
+          process.stderr.write(
+            `cli-hierarchy ${subcommand}: ${subcommand === 'restart' ? 'a session name or --all' : 'an executor name'} is required\n`,
+          );
           return 2;
         }
         if (subcommand === 'register') {
-          deps.log(JSON.stringify(hierarchyRegister({ session }, deps)));
+          deps.log(JSON.stringify(hierarchyRegister({ session: session as string }, deps)));
           return 0;
         }
         const waitSec = intFlag(flags, 'wait');
         if (waitSec === null) return 2;
+        if (all) {
+          const res = await hierarchyRestartAll(
+            { ...(waitSec === undefined ? {} : { waitSec }), callerName: caller.name },
+            deps,
+          );
+          deps.log(JSON.stringify(res));
+          return res.failed.length === 0 ? 0 : 1;
+        }
         const result = await hierarchyRestart(
           {
-            session,
+            session: session as string,
             afterTask: afterTask !== undefined,
+            callerName: caller.name,
             ...(waitSec === undefined ? {} : { waitSec }),
           },
           deps,

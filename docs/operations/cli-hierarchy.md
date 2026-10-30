@@ -14,8 +14,8 @@ resolved pipeline-cli bin (works from an installed plugin, not only the dogfood 
 
 It passes `up`, `status`, `attach`, `terminals`, `brief` and `down` through unchanged,
 with these differences: `attach` and `up --attach` print the shell command to run (a
-Claude Code session cannot switch your terminal); `down` with no `--role` asks you to
-confirm first; `clear`, `tick`, `restart`, `register`, `playbook`, `route-decision`, `check-repo` and
+Claude Code session cannot switch your terminal); `down` runs at once, with no
+confirmation (AISDLC-1104); `clear`, `tick`, `restart`, `register`, `playbook`, `route-decision`, `check-repo` and
 `executor-start` are refused (they belong to the dispatch and executor loop bodies); with no arguments it
 prints `--help` plus a common-recipes block.
 
@@ -242,8 +242,10 @@ Preflight, all before anything starts:
   (AISDLC-664.5). A per-session `--settings` override is declined: it would outrank the
   operator's own files and change approval behaviour for the planner, so the planner keeps its
   held-message gate by the value in the files alone.
-- **Resource gate.** At least 4 GiB of memory available and a 1-minute load average below the
-  core count; `AI_SDLC_EXECUTE_PARALLEL_SKIP_RESOURCE_GATE=1` overrides it (testing only).
+- **Resource gate (opt-in).** Off by default. With `hierarchy.resourceGate: true` under `spec` in
+  `.ai-sdlc/pr-lifecycle.yaml` (read from the base branch), `up` refuses unless at least 4 GiB of
+  memory is available and the 1-minute load average is below the core count. The
+  `AI_SDLC_EXECUTE_PARALLEL_SKIP_RESOURCE_GATE` variable no longer exists.
 - **Foreign sessions.** Live sessions on the machine with the same role names for another
   project make `up` refuse unless `--project` is given.
 - **Roster.** An old single-session-layout roster is refused (run `down` first); a second
@@ -479,7 +481,7 @@ cli-hierarchy down [--role <name-or-role>]
 ```
 
 `--role` stops one session by name (`executor-beta`) or a role (`executor` selects all
-executors); with no option every session stops and the reconcile scheduler (the poller of `<board>/.reconcile-wake`) is stopped too. Each session is asked to exit and gets a
+executors); with no option every session stops, with no confirmation question, and the reconcile scheduler (the poller of `<board>/.reconcile-wake`) is stopped too. Each session is asked to exit and gets a
 grace period; a window that stays open is closed by pane id. A session that does not carry
 the ownership marker, or whose recorded pane no longer belongs to it, is refused and left
 in the roster. Effects: manifests held by a stopped session move from `inflight/` to
@@ -488,18 +490,30 @@ session was refused or `--role` matches nothing.
 
 ### `restart`
 
-Stop and start one executor without touching the rest of the hierarchy.
+Stop and start one session, or dispatch plus every executor, without `down` and `up`.
 
 ```bash
-cli-hierarchy restart <executor> [--after-task] [--wait <seconds>]
+cli-hierarchy restart <name> [--after-task] [--wait <seconds>]
+cli-hierarchy restart --all [--wait <seconds>]
 ```
 
-`<executor>` is a roster name, a tmux window or the unqualified name (`executor-beta`).
-The session is asked to exit (closed by pane id when it stays open), then started again
-with the model, permission mode and launch environment its roster entry records. Its roster
-entry (pid, pane, started time) is replaced in one atomic write; no other entry, window or
-inflight manifest is touched, and the dispatch session keeps running. A window that is
-already gone (a crash) is simply started.
+`<name>` is a roster name, a tmux window or the unqualified name (`executor-beta`,
+`operator-dispatch`, `planner`). The session is asked to exit (closed by pane id when it
+stays open), then started again with the model, permission mode and launch environment its
+roster entry records. Its roster entry (pid, pane, started time) is replaced in one atomic
+write; no other entry, window or inflight manifest is touched. Restarting
+`operator-dispatch` leaves every inflight manifest on the board (nothing is requeued) and
+re-registers the reconcile scheduler and, when `AI_SDLC_WEBHOOK_SECRET` is set, the webhook
+receiver. A window that is already gone (a crash) is simply started.
+
+`--all` restarts dispatch, then every idle executor, now; each busy executor is restarted at
+its task boundary, as `--after-task` does. The planner is left alone. One failure does not
+stop the rest; the JSON lists `restarted`, `deferred`, `failed` and `skipped`, and the exit is `1` when
+any failed.
+
+A session cannot restart itself: stopping its own window would kill the command before the new
+window starts. `restart <own-name>` is refused, and `restart --all` run from dispatch skips
+dispatch (listed in `skipped`) and restarts the executors; ask the planner to restart dispatch.
 
 An executor that holds a claimed task is refused: the message names `--after-task`. With
 `--after-task` the command waits for the task boundary (up to `--wait` seconds, default
@@ -509,11 +523,10 @@ next task in the instant between the last check and the stop, that manifest is r
 before the write, so a change to another entry made during the wait is kept. If the new session cannot be started, its dead entry
 is dropped from the roster and the message says to run `cli-hierarchy up`.
 
-Dispatch session only (the same mistake guard as `clear`, not authentication); executors
-only. The planner and dispatch sessions are refused with the `down --role` then `up` path.
-A session without the ownership marker, or whose recorded pane no longer belongs to it, is
-refused and left running. Prints the before and after pid, start time and pane as JSON.
-Exit `0`; `1` on a refusal.
+The dispatch or planner session may run it (the same mistake guard as `clear`, not
+authentication); executors may not. A session without the ownership marker, or whose recorded
+pane no longer belongs to it, is refused and left running. Prints the before and after pid,
+start time and pane as JSON. Exit `0`; `1` on a refusal.
 
 ### `register`
 
@@ -530,7 +543,7 @@ readable pane whose start command carries this session's `AI_SDLC_HIERARCHY_SESS
 checkout whose pid is the pane's process or one of its descendants. It then replaces that entry's pid, pane and started time (status `running`) and
 nothing else; a pid that belongs to another roster entry is refused, and an entry that
 already matches is left unchanged. It does not wait for tasks, because the roster's task
-binding is the session name, not the pid. Same caller and role rules as `restart`.
+binding is the session name, not the pid. Dispatch session only, executors only.
 
 ### `clear`
 
@@ -1271,8 +1284,8 @@ executor spends a run on it; the hold lifts by itself once that task is done.
 
 Sessions load the plugin once, when they start. A new plugin version (commands, hooks,
 role text) is picked up only after `cli-hierarchy down` followed by `cli-hierarchy up`, or,
-for one executor at a time, `cli-hierarchy restart <executor> --after-task` from the dispatch
-session (the dispatch and planner sessions still need `down` then `up`);
+for any session, `cli-hierarchy restart <name>` (or `restart --all`) from the dispatch or
+planner session, which keeps inflight manifests on the board;
 `clear` does not reload the plugin. `down` returns inflight manifests to `queue/`, so the
 restart loses no queued work, but finish or accept the loss of any task in flight first.
 
@@ -1314,7 +1327,7 @@ with a `gone` state needs `up` to restart it.
 session is left alone; stop it by hand if it is yours.
 
 **`clear <name>`, `tick`, `restart`, `register` or `route-decision` exits 1 with a caller message.** Only the running
-dispatch session may run them. Run them from that session.
+dispatch session may run them (`restart` also accepts the planner). Run them from that session.
 
 **`status` shows `ENV missing`, or `doctor` reports `hierarchy-launch-env`.** The session was
 started without the launch env, so its lease push is refused. Run `cli-hierarchy down --role

@@ -108,7 +108,9 @@ export interface HierarchyDeps {
   userSettingsFile: string;
   /** Machine headroom probe for the resource gate. */
   resources: () => ResourceSnapshot;
-  /** Environment (for the resource gate override). */
+  /** Overrides `hierarchy.resourceGate` from the config (tests); absent reads the config. */
+  resourceGate?: boolean;
+  /** Environment. */
   env: NodeJS.ProcessEnv;
   /** Clock. */
   now: () => Date;

@@ -109,4 +109,16 @@ describe('pr-lifecycle.yaml operational keys', () => {
     expect(c.reconcile.timerOpenMs).toBe(7);
     for (const r of Object.values(PR_LIFECYCLE_KEY_READERS)) r(c);
   });
+
+  it('reads hierarchy.resourceGate, defaulting to false and accepting only true (AISDLC-1104)', () => {
+    const read = (yaml: string): boolean => {
+      const d = repoWithBase(yaml);
+      const c = loadPrLifecycleConfig(d);
+      rmSync(d, { recursive: true, force: true });
+      return c.hierarchy.resourceGate;
+    };
+    expect(read('spec: {}\n')).toBe(false);
+    expect(read('spec:\n  hierarchy: {resourceGate: true}\n')).toBe(true);
+    expect(read('spec:\n  hierarchy: {resourceGate: "yes"}\n')).toBe(false);
+  });
 });

@@ -10,6 +10,7 @@ import { ghCallsPath, GH_CALL_LOG_ENV, installGhShim } from './gh-calls.js';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 
+import { loadPrLifecycleConfig } from './pr-lifecycle-config.js';
 import { schedulerUp } from './reconcile-scheduler.js';
 import { webhookUp } from './webhook.js';
 import { attachEntry } from './attach.js';
@@ -538,7 +539,9 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
       const installed = deps.nodeInstalled ?? ((v: string) => isNodeInstalled(v, deps.env));
       if (!installed(nodeVersion)) throw new Error(missingNodeMessage(nodeVersion));
     }
-    const refusal = evaluateResourceGate(deps.resources(), deps.env);
+    // Opt-in: hierarchy.resourceGate in .ai-sdlc/pr-lifecycle.yaml (default false).
+    const gateOn = deps.resourceGate ?? loadPrLifecycleConfig(deps.cwd).hierarchy.resourceGate;
+    const refusal = gateOn ? evaluateResourceGate(deps.resources()) : null;
     if (refusal) throw new Error(refusal);
   }
 
