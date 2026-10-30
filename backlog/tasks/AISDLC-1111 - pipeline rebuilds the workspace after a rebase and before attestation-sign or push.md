@@ -48,3 +48,5 @@ Evidence: `.ai-sdlc/dispatch/failed/` verdicts dated 2026-10-29 for the PRs list
 ## Verification record
 
 `pnpm --filter @ai-sdlc/pipeline-cli test` (vitest run): full run had 1 load-induced flake outside the touched files; re-run split passes: `src/steps` 30 files, 699 tests passed; remainder 532 files, 11665 tests passed, 13 skipped. build, lint, format:check clean.
+
+Re-verified after rebase onto 08909b3a0: `pnpm test` with the ambient hierarchy env vars unset (AI_SDLC_HIERARCHY_SESSION, AI_SDLC_HIERARCHY_ROLE, AI_SDLC_EXECUTOR_TASK, which make executor-start.test.ts and hierarchy.test.ts claim against the live board): pipeline-cli `Test Files 567 passed`, hierarchy `Test Files 59 passed (59), Tests 984 passed (984)`. build, lint, format:check clean.
