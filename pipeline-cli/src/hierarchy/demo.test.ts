@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +9,26 @@ import { runHierarchyCli } from '../cli/hierarchy.js';
 import { loadScenario, parseScenario, runDemo, type DemoDeps } from './demo.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const SCENARIO = path.resolve(here, '../../demo/scenarios/context-pressure.json');
+const SCENARIO = path.resolve(here, '../../demo/scenarios/home-page.json');
+
+const REPO_ROOT = path.resolve(here, '../../..');
+const SCENARIO_DIR = path.resolve(here, '../../demo/scenarios');
+
+/** Returns a problem naming the scenario and task, or null when the task is a dispatchable To Do. */
+function scenarioTaskProblem(name: string, task: string, backlogDir: string): string | null {
+  const dirs = [backlogDir];
+  const file = dirs
+    .flatMap((d) => (existsSync(d) ? readdirSync(d) : []))
+    .find((f) => f.startsWith(`${task} - `) && f.endsWith('.md'));
+  if (!file) return `scenario ${name}: task ${task} is not a file under backlog/tasks/`;
+  const front = readFileSync(path.join(backlogDir, file), 'utf-8').split('---')[1] ?? '';
+  const todo = /^status:\s*To Do\s*$/m.test(front);
+  const dispatchable = !/^dispatchable:\s*false\s*$/m.test(front);
+  if (!todo || !dispatchable) {
+    return `scenario ${name}: task ${task} is not a To Do, dispatchable task; retire the scenario`;
+  }
+  return null;
+}
 
 function tmp(): string {
   return mkdtempSync(path.join(os.tmpdir(), 'demo-'));
@@ -40,7 +59,7 @@ function harness(over: Partial<DemoDeps> & { prStates?: string[] } = {}): Harnes
     if (a[0] === 'cli-decisions.mjs' && a[1] === 'add') {
       return ok(`decision added: DEC-${String(++decision).padStart(4, '0')}\n`);
     }
-    if (a[0] === 'cli-dispatch.mjs') return ok('[{"taskId":"AISDLC-1066","state":"inflight"}]');
+    if (a[0] === 'cli-dispatch.mjs') return ok('[{"taskId":"AISDLC-1106","state":"inflight"}]');
     if (a[0] === 'gh' && a[2] === 'list') return ok('[{"number":77}]');
     if (a[0] === 'gh' && a[2] === 'view') {
       const state = prStates[Math.min(views++, prStates.length - 1)];
@@ -78,8 +97,34 @@ function harness(over: Partial<DemoDeps> & { prStates?: string[] } = {}): Harnes
 describe('scenario loader (AISDLC-1079)', () => {
   it('validates the shipped scenario', () => {
     const s = loadScenario(SCENARIO);
-    expect(s.task).toBe('AISDLC-1066');
+    expect(s.task).toBe('AISDLC-1106');
     expect(s.decisions.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('every shipped scenario validates and names a To Do, dispatchable task', () => {
+    const files = readdirSync(SCENARIO_DIR).filter((f) => f.endsWith('.json'));
+    expect(files).toContain('home-page.json');
+    for (const f of files) {
+      const s = loadScenario(path.join(SCENARIO_DIR, f));
+      expect(scenarioTaskProblem(f, s.task, path.join(REPO_ROOT, 'backlog/tasks'))).toBeNull();
+    }
+  });
+
+  it('fails naming the scenario and task when the task is Done', () => {
+    const dir = tmp();
+    writeFileSync(
+      path.join(dir, 'AISDLC-9999 - done thing.md'),
+      '---\nid: AISDLC-9999\nstatus: Done\ndispatchable: true\n---\nbody\n',
+    );
+    writeFileSync(
+      path.join(dir, 'AISDLC-9998 - held.md'),
+      '---\nid: AISDLC-9998\nstatus: To Do\ndispatchable: false\n---\nbody\n',
+    );
+    const done = scenarioTaskProblem('stale.json', 'AISDLC-9999', dir);
+    expect(done).toContain('stale.json');
+    expect(done).toContain('AISDLC-9999');
+    expect(scenarioTaskProblem('held.json', 'AISDLC-9998', dir)).toContain('AISDLC-9998');
+    expect(scenarioTaskProblem('x.json', 'AISDLC-1', dir)).toContain('not a file');
   });
 
   it.each(['request', 'task', 'decisions', 'brief', 'timeoutMinutes', 'pollSeconds'])(
@@ -143,7 +188,7 @@ describe('demo run (AISDLC-1079)', () => {
       'cli-hierarchy.mjs',
       'brief',
       '--tasks',
-      'AISDLC-1066',
+      'AISDLC-1106',
       '--notify',
     ]);
     expect(verbs.some((v) => v === 'gh pr')).toBe(true);

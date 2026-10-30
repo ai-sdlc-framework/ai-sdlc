@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1120
 title: 'cli-hierarchy demo: ship the home-page scenario against AISDLC-1106, retire the two scenarios whose tasks are Done, and document that a scenario task is reserved until its demo runs'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-30'
 labels: [hierarchy, demo, docs]
@@ -36,3 +36,7 @@ Subject task: AISDLC-1106 (`cli-hierarchy down` with a bare session name is drop
 - [ ] `docs/operations/cli-hierarchy.md` `### demo` states the reservation rule and the retire-in-the-same-PR rule; `docs-parity.test.ts` passes.
 - [ ] The PR body states that AISDLC-1106 is reserved for the ai-sdlc.io demo run (IO-48) and is not to be briefed before it.
 - [ ] `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm format:check` pass; the task file records the test command and its summary line.
+
+## Verification
+
+`pnpm --filter @ai-sdlc/pipeline-cli test` (executor env vars unset): `Test Files  564 passed (564)`, `Tests  12398 passed | 13 skipped (12411)`. Other packages passed in the full `pnpm test`.
