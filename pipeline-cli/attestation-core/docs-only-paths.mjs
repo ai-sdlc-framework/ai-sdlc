@@ -8,11 +8,12 @@
  *
  * Covered prefixes: spec/rfcs/, docs/, backlog/tasks/, backlog/completed/,
  * .ai-sdlc/attestations/<sha>.dsse.json, .ai-sdlc/_decisions/,
+ * .ai-sdlc/reviews/<x>.jsonl, .ai-sdlc/transcript-leaves/<x>.jsonl (AISDLC-1116),
  * .ai-sdlc/dispatch/briefs/, .claude/memory/, .github/dependabot.yml,
  * .github/*.md (not subdirectories) and root-level *.md.
  */
 export const DOCS_ONLY_PATTERN =
-  /^(spec\/rfcs\/|docs\/|backlog\/tasks\/|backlog\/completed\/|\.ai-sdlc\/attestations\/[^/]+\.dsse\.json$|\.ai-sdlc\/_decisions\/|\.ai-sdlc\/dispatch\/briefs\/|\.claude\/memory\/|\.github\/dependabot\.yml$|\.github\/[^/]+\.md$|[^/]+\.md$)/;
+  /^(spec\/rfcs\/|docs\/|backlog\/tasks\/|backlog\/completed\/|\.ai-sdlc\/attestations\/[^/]+\.dsse\.json$|\.ai-sdlc\/_decisions\/|\.ai-sdlc\/reviews\/[^/]+\.jsonl$|\.ai-sdlc\/transcript-leaves\/[^/]+\.jsonl$|\.ai-sdlc\/dispatch\/briefs\/|\.claude\/memory\/|\.github\/dependabot\.yml$|\.github\/[^/]+\.md$|[^/]+\.md$)/;
 
 /**
  * The records-only allowlist (AISDLC-867): paths that carry records (task

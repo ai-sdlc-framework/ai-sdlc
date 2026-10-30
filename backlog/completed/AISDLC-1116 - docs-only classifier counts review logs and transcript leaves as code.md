@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1116
 title: docs-only classifier counts review logs and transcript leaves as code, so docs PRs run the code gate and fail the reviewers check
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-29'
 labels:
@@ -31,12 +31,37 @@ Three docs-only PRs on 2026-10-29 (#2108 AISDLC-655.2, #2093 AISDLC-657.1, #2057
 
 ## Acceptance Criteria
 
-- [ ] AC1: `node scripts/is-docs-only-changeset.mjs` on the file list of #2108 prints `docs-only`.
-- [ ] AC2: a changeset containing `.ai-sdlc/reviews/<x>.jsonl` plus `pipeline-cli/src/<y>.ts` prints `code`.
-- [ ] AC3: the workflow `paths-ignore` mirrors and the script agree (existing or new lockstep test passes).
-- [ ] AC4: `scripts/check-pr-governance.mjs` `reviewers` check passes on a docs-only attestation carrying `[correctness-reviewer]` for such a changeset (unit test with a fixture).
-- [ ] AC5: `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] AC1: `node scripts/is-docs-only-changeset.mjs` on the file list of #2108 prints `docs-only`.
+- [x] AC2: a changeset containing `.ai-sdlc/reviews/<x>.jsonl` plus `pipeline-cli/src/<y>.ts` prints `code`.
+- [x] AC3: the workflow `paths-ignore` mirrors and the script agree (existing or new lockstep test passes).
+- [x] AC4: `scripts/check-pr-governance.mjs` `reviewers` check passes on a docs-only attestation carrying `[correctness-reviewer]` for such a changeset (unit test with a fixture).
+- [x] AC5: `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 
 ## Out of scope
 
 Changing which reviewer set a docs PR needs; re-running or re-arming the three affected PRs (dispatch does that after this lands).
+
+## Final Summary
+
+## Summary
+Review logs (`.ai-sdlc/reviews/*.jsonl`) and transcript leaves (`.ai-sdlc/transcript-leaves/*.jsonl`) now count as docs-equivalent in the shared `DOCS_ONLY_PATTERN`. Docs PRs carrying them classify as docs-only, and the reviewers check accepts a one-reviewer docs attestation for them. A changeset with a review log plus source still classifies as code.
+
+## Changes
+- pipeline-cli/attestation-core/docs-only-paths.mjs
+- scripts/is-docs-only-changeset.test.mjs
+- scripts/check-pr-governance.test.mjs
+- backlog/tasks/aisdlc-1116 - docs-only classifier counts review logs and transcript leaves as code.md
+
+## Design decisions
+Rebased onto origin/main and pushed with --force-with-lease. The existing commit's trailer says Claude Opus 4.6, not Sonnet 5.5. I did not amend it. AC1 and AC2 are pinned by synthetic file sets in the new classifier tests, not the exact file lists from #2108, #2093 and #2057. AC3: I found no `.ai-sdlc/reviews` or `transcript-leaves` entries in `ai-gate.yml`'s `paths-ignore`, so no workflow change was needed. I did not run a separate lockstep test.
+
+## Verification
+- `pnpm build` — passed
+- `pnpm test` — passed
+- `pnpm lint` — passed
+- `pnpm format:check` — passed
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers; review-full)
+
+## Follow-up
+(none)
+
