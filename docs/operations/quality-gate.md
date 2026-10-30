@@ -158,7 +158,7 @@ Per Q3 in the AISDLC-140 redesign decision and the industry consensus documented
 | CI patch gate | `scripts/check-pr-patch-coverage.mjs` (PR-diff patch coverage, threshold `target - tolerance`) | No (no skip env var) | **Authoritative merge gate** |
 | Informational | codecov.io (PR comment + dashboard, patch target = `target`) | Not a check | Visibility only |
 
-Developers are asked (developer agent instructions) to hold the packages they touch to 95% lines and to run coverage for those packages once before their first push; that is a working target, not a CI gate.
+**Pre-push early copy (AISDLC-1119).** `.husky/pre-push` runs `scripts/pre-push-patch-coverage.mjs`: `test:coverage` only in the packages whose instrumentable files the diff against `origin/main` touches, then `check-pr-patch-coverage.mjs` with the same threshold file, printing uncovered line ranges. Docs-only or test-only pushes print one skip line. Skip: `AI_SDLC_SKIP_PATCH_COVERAGE_GATE=1`. CI remains the only merge gate.
 
 The CI patch gate runs in two places that both must pass:
 

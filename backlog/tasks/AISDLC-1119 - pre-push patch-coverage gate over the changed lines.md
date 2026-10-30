@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1119
 title: pre-push hook runs the CI patch-coverage script over the changed lines of the touched packages, so coverage gaps are fixed in the developer round instead of a CI round-trip
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-30'
 labels:
