@@ -34,6 +34,7 @@ export * from './escalation.js';
 export * from './trusted-reviewers-check.js';
 export * from './gates/index.js';
 export * from './upstream-oq-gate.js';
+export * from './decision-point.js';
 export * from './dor-answer-capture.js';
 export {
   DEFAULT_RESOLVERS,

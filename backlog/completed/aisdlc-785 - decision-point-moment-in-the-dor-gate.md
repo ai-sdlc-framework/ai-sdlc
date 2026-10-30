@@ -2,7 +2,7 @@
 id: AISDLC-785
 title: >-
   decision-point moment in the DoR gate
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-09'
 labels:
