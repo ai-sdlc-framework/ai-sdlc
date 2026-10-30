@@ -61,6 +61,14 @@ import { cleanGitEnv } from './git-env.js';
  * Exported so the `verify-attestation` workflow can `import`/inline it.
  */
 export const ACCEPTED_SCHEMA_VERSIONS = ['v3', 'v5'] as const;
+
+/**
+ * AISDLC-972: v5 is read-only. v6 became the default at this instant
+ * (AISDLC-409, 2026-05-23); a v5 envelope whose `signedAt` is at or after it
+ * is invalid with reason `v5-after-cutover`. Pre-cutover v5 envelopes already
+ * on main keep verifying.
+ */
+export const V5_CUTOVER_ISO = '2026-05-23T00:00:00.000Z';
 export type SchemaVersion = (typeof ACCEPTED_SCHEMA_VERSIONS)[number];
 
 /**
@@ -1826,6 +1834,15 @@ export function verifyAttestation(opts: VerifyOptions): VerifyResult {
       valid: false,
       reason: `schemaVersion '${predicate.schemaVersion}' not in allowlist [${allowlist.join(', ')}]`,
     };
+  }
+
+  // ── v5 is read-only after the v6 cutover (AISDLC-972) ─────────
+  // A missing or unparseable signedAt is treated as after-cutover (fail closed).
+  if (predicate.schemaVersion === 'v5') {
+    const signedMs = Date.parse(String(predicate.signedAt));
+    if (!Number.isFinite(signedMs) || signedMs >= Date.parse(V5_CUTOVER_ISO)) {
+      return { valid: false, reason: 'v5-after-cutover' };
+    }
   }
 
   // ── Signature (any-of-N pubkeys) ──────────────────────────────

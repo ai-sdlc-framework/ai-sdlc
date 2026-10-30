@@ -217,6 +217,38 @@ describe('buildPredicate', () => {
   });
 });
 
+describe('v5 is read-only after the v6 cutover (AISDLC-972)', () => {
+  function verifyV5(signedAt: string) {
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const base = buildPredicate({ ...DEFAULT_INPUTS, signedAt });
+    const predicate = {
+      ...base,
+      schemaVersion: 'v5',
+      contentHashV5: 'a'.repeat(64),
+      signedMergeBase: 'b'.repeat(40),
+    } as unknown as AttestationPredicate;
+    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
+    return verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: { ...buildExpected(predicate), contentHashV5: 'a'.repeat(64) },
+    });
+  }
+
+  it('verifies a v5 envelope signed before the cutover', () => {
+    const result = verifyV5('2026-05-22T23:59:59.000Z');
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects a v5 envelope signed at or after the cutover', () => {
+    const after = verifyV5('2026-05-23T00:00:00.000Z');
+    expect(after.valid).toBe(false);
+    if (!after.valid) expect(after.reason).toBe('v5-after-cutover');
+    const later = verifyV5('2026-10-01T00:00:00.000Z');
+    expect(later.valid).toBe(false);
+  });
+});
+
 describe('signAttestation + verifyAttestation (happy path)', () => {
   it('round-trips: sign then verify against the same trusted reviewer', () => {
     const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();

@@ -53,6 +53,8 @@ function cleanEnv(extra = {}) {
   delete env.AI_SDLC_HARNESS_NOTE;
   delete env.AI_SDLC_SCHEMA_VERSION;
   delete env.AI_SDLC_V6_CUTOVER_ACTIVE;
+  // AISDLC-972: v5 signing is refused unless this fixture seam is set.
+  if (!('AI_SDLC_V5_FIXTURE_SIGN' in extra)) env.AI_SDLC_V5_FIXTURE_SIGN = '1';
   if (!('AI_SDLC_V6_CUTOVER_ACTIVE' in extra)) {
     env.AI_SDLC_V6_CUTOVER_ACTIVE = '1';
   }

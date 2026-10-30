@@ -1,7 +1,7 @@
 ---
 id: AISDLC-972
 title: 'CI rejects v5 attestation envelopes signed after the v6 cutover; v5 stays read-only for history'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-17'
 labels:

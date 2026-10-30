@@ -76,6 +76,10 @@ function cleanEnv(extra = {}) {
   if (env.AI_SDLC_V5_LEGACY === undefined) {
     env.AI_SDLC_V5_LEGACY = '1';
   }
+  // AISDLC-972: v5 signing is refused unless this fixture seam is set.
+  if (env.AI_SDLC_V5_FIXTURE_SIGN === undefined) {
+    env.AI_SDLC_V5_FIXTURE_SIGN = '1';
+  }
   return env;
 }
 
@@ -217,6 +221,28 @@ describe('sign-attestation.mjs', () => {
     const res = runHelper(fixture.root, [], { HOME: tmpHome });
     assert.notEqual(res.status, 0);
     assert.match(res.stderr, /--review-verdicts <path> required/);
+  });
+
+  it('AISDLC-972: refuses to sign v5 via every removed producer path and says why', () => {
+    const verdictsPath = join(fixture.root, 'verdicts.json');
+    writeFileSync(verdictsPath, '[]');
+    const base = ['--review-verdicts', verdictsPath, '--iteration-count', '1'];
+    const cases = [
+      [[...base, '--schema-version', 'v5'], {}],
+      [base, { AI_SDLC_V5_LEGACY: '1' }],
+      [base, { AI_SDLC_V6_CUTOVER_ACTIVE: '0' }],
+      [base, { AI_SDLC_SCHEMA_VERSION: 'v5' }],
+    ];
+    for (const [args, env] of cases) {
+      const res = runHelper(fixture.root, args, {
+        HOME: tmpHome,
+        AI_SDLC_V5_FIXTURE_SIGN: '',
+        ...env,
+      });
+      assert.notEqual(res.status, 0, JSON.stringify(env));
+      assert.match(res.stderr, /v5 attestation signing was removed \(AISDLC-972\)/);
+      assert.match(res.stderr, /v5-after-cutover/);
+    }
   });
 
   it('errors clearly when --iteration-count is invalid', () => {

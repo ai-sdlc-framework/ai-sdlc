@@ -216,7 +216,9 @@ function writeSigningKey(tmpHome, privateKeyPem) {
 function runSign(cwd, args, extraEnv = {}) {
   return spawnSync(process.execPath, [signHelperPath, ...args], {
     cwd,
-    env: cleanEnv(extraEnv),
+    // AISDLC-972: v5 signing needs the fixture seam; the verifier then rejects
+    // the envelope as v5-after-cutover.
+    env: cleanEnv({ AI_SDLC_V5_FIXTURE_SIGN: '1', ...extraEnv }),
     encoding: 'utf-8',
   });
 }
@@ -320,13 +322,11 @@ describe('verify-attestation.mjs — consumer-runnable verifier (AISDLC-566)', (
       ['--head', fixture.headSha, '--base', fixture.baseSha],
       { HOME: tmpHome, CLAUDE_PLUGIN_ROOT: pluginDir },
     );
-    assert.equal(
-      verifyRes.status,
-      0,
-      `expected status=valid (exit 0); stderr: ${verifyRes.stderr}\nstdout: ${verifyRes.stdout}`,
-    );
-    assert.match(verifyRes.stdout, /status=valid/);
-    assert.match(verifyRes.stdout, /reason=ok/);
+    // AISDLC-972: a freshly signed v5 envelope is post-cutover, so the runtime
+    // resolving and verifying end-to-end shows up as v5-after-cutover.
+    assert.equal(verifyRes.status, 1, `stderr: ${verifyRes.stderr}\nstdout: ${verifyRes.stdout}`);
+    assert.match(verifyRes.stdout, /status=invalid/);
+    assert.match(verifyRes.stdout, /reason=v5-after-cutover/);
     // Assert WHICH candidate resolved — the trusted plugin copy, never the
     // repoRoot-installed one used for signing.
     assert.ok(
@@ -492,8 +492,11 @@ describe('verify-attestation.mjs — consumer-runnable verifier (AISDLC-566)', (
       ['--head', fixture.headSha, '--base', fixture.baseSha],
       { HOME: tmpHome, CLAUDE_PLUGIN_ROOT: pluginDir },
     );
-    assert.equal(verifyRes.status, 0, `stderr: ${verifyRes.stderr}\nstdout: ${verifyRes.stdout}`);
-    assert.match(verifyRes.stdout, /status=valid/);
+    // AISDLC-972: a freshly signed v5 envelope is post-cutover, so the runtime
+    // resolving and verifying end-to-end shows up as v5-after-cutover.
+    assert.equal(verifyRes.status, 1, `stderr: ${verifyRes.stderr}\nstdout: ${verifyRes.stdout}`);
+    assert.match(verifyRes.stdout, /status=invalid/);
+    assert.match(verifyRes.stdout, /reason=v5-after-cutover/);
     assert.ok(
       verifyRes.stderr.includes(installedRuntimePath(pluginDir)),
       `expected the plugin copy to resolve; stderr: ${verifyRes.stderr}`,
@@ -535,8 +538,11 @@ describe('verify-attestation.mjs — consumer-runnable verifier (AISDLC-566)', (
     // No --head/--base, no PR_HEAD_SHA/PR_BASE_SHA — the script must default
     // to `git rev-parse HEAD` and `git merge-base origin/main HEAD`.
     const verifyRes = runVerify(fixture.root, [], { HOME: tmpHome, CLAUDE_PLUGIN_ROOT: pluginDir });
-    assert.equal(verifyRes.status, 0, `stderr: ${verifyRes.stderr}\nstdout: ${verifyRes.stdout}`);
-    assert.match(verifyRes.stdout, /status=valid/);
+    // AISDLC-972: a freshly signed v5 envelope is post-cutover, so the runtime
+    // resolving and verifying end-to-end shows up as v5-after-cutover.
+    assert.equal(verifyRes.status, 1, `stderr: ${verifyRes.stderr}\nstdout: ${verifyRes.stdout}`);
+    assert.match(verifyRes.stdout, /status=invalid/);
+    assert.match(verifyRes.stdout, /reason=v5-after-cutover/);
   });
 
   it('fails loud with adopter-actionable guidance when the runtime is absent everywhere', () => {
@@ -714,13 +720,11 @@ describe('verify-attestation.mjs — bare node_modules walk-up, no plugin sessio
       ['--head', fixture.headSha, '--base', fixture.baseSha],
       { HOME: tmpHome },
     );
-    assert.equal(
-      verifyRes.status,
-      0,
-      `expected status=valid (exit 0); stderr: ${verifyRes.stderr}\nstdout: ${verifyRes.stdout}`,
-    );
-    assert.match(verifyRes.stdout, /status=valid/);
-    assert.match(verifyRes.stdout, /reason=ok/);
+    // AISDLC-972: a freshly signed v5 envelope is post-cutover, so the runtime
+    // resolving and verifying end-to-end shows up as v5-after-cutover.
+    assert.equal(verifyRes.status, 1, `stderr: ${verifyRes.stderr}\nstdout: ${verifyRes.stdout}`);
+    assert.match(verifyRes.stdout, /status=invalid/);
+    assert.match(verifyRes.stdout, /reason=v5-after-cutover/);
     assert.ok(
       verifyRes.stderr.includes(installedRuntimePath(join(installRoot, 'some'))),
       `expected the walk-up-resolved copy to win; stderr: ${verifyRes.stderr}`,
