@@ -113,7 +113,7 @@ describe('reconcile idempotency (AC1)', () => {
         ran: true,
         failed: true,
       }));
-    const routes = (r: { acted: { action: string }[] }) =>
+    const routes = (r: { acted: { action: string; pr: number }[] }) =>
       r.acted.filter((a) => a.action === 'route-to-planner');
 
     it('routes once after a second failure on the same head and stops retrying', () => {
@@ -184,7 +184,7 @@ describe('reconcile idempotency (AC1)', () => {
       const r = reconcile(facts, { boardDir: board, execute, now: fixedNow });
       expect(
         routes(r)
-          .map((a) => (a as { pr: number }).pr)
+          .map((a) => a.pr)
           .sort(),
       ).toEqual([2093, 2127, 2129]);
     });
