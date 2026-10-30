@@ -300,6 +300,25 @@ describe('Step 11 resume', () => {
     expect(push?.opts?.cwd).toBe(tmp);
   });
 
+  it('rebuilds before pushing when the resume rebase moves HEAD (AISDLC-1111)', async () => {
+    mkdirSync(join(tmp, 'node_modules'), { recursive: true });
+    let head = 'aaa';
+    const fake = new FakeRunner()
+      .on(/^git rev-parse HEAD$/, () => ok(head + '\n'))
+      .on(/^git merge-base --is-ancestor/, fail('', 1))
+      .on(/^git rebase /, () => {
+        head = 'bbb';
+        return ok();
+      })
+      .on(/^gh pr list/, ok('[]'))
+      .on(/^gh pr create/, ok('https://github.com/x/y/pull/15\n'));
+    await pushAndPr({ ...common(), resume: true, runner: fake.toRunner() });
+    const seq = fake.calls
+      .map((c) => `${c.command} ${c.args[0]}`)
+      .filter((c) => /pnpm build|git rebase|git push/.test(c));
+    expect(seq).toEqual(['git rebase', 'pnpm build', 'git push']);
+  });
+
   it('reports a refused push with the hook message (AISDLC-905)', async () => {
     const hookMsg =
       'worktree-location: found the main checkout; fix: run it as a lone command from that worktree';
