@@ -20,7 +20,7 @@ priority: low
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Parked (planner, 2026-10-06): do not start without a planner go.
+Go (operator, 2026-10-30): the 2026-10-06 park is lifted; dispatchable.
 
 ## Directive
 Operator (2026-09-06): "mark the previous signing signature versions less than v6 as deprecated and no longer support them soon."
