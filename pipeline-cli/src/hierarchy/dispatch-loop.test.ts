@@ -1347,3 +1347,31 @@ describe('tick marker and turn budget review (AISDLC-667.1)', () => {
     expect(r.turnBudget).toEqual(review);
   });
 });
+
+describe('hierarchy loop canary in the tick (AISDLC-1102)', () => {
+  const canaryCfg = () => ({ workDir: tmp, baseSha: () => 'a'.repeat(40) });
+
+  it('starts a run on the first tick, never under a hold, and escalates a missed stage', async () => {
+    writeHold(board, { reason: 'x', since: 's', by: 'b' });
+    await runDispatchTick(deps({ loopCanary: canaryCfg() }));
+    expect(existsSync(path.join(board, 'canary-runs'))).toBe(false);
+    clearHold(board, 'b', 'now');
+    const started = await runDispatchTick(deps({ loopCanary: canaryCfg() }));
+    expect(started.reports.some((r) => r.text.startsWith('hierarchy loop canary started'))).toBe(
+      true,
+    );
+    clock += 16 * 60_000;
+    const failed = await runDispatchTick(deps({ loopCanary: canaryCfg() }));
+    expect(failed.escalations.some((e) => e.message.includes('FAILED at claimed'))).toBe(true);
+  });
+
+  it('stamps the clear and skips the playbook for a failed canary verdict', async () => {
+    verdict('CANARY-100', { outcome: 'failed' });
+    const r = await runDispatchTick(deps());
+    expect(playbooked).toEqual([]);
+    expect(r.verdicts[0]?.clear.status).toBe('cleared');
+    expect(existsSync(path.join(board, 'canary-runs', 'cleared', 'executor-alpha.json'))).toBe(
+      true,
+    );
+  });
+});

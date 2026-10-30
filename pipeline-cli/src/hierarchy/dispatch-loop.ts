@@ -58,6 +58,15 @@ import {
 import { checkDrainStall, formatDrainStall, resolveStallAfterMinutes } from './drain-stall.js';
 import { readHold, type Hold } from './hold.js';
 import {
+  advanceCanaryRun,
+  canaryDue,
+  isCanaryTask,
+  runningCanary,
+  startCanaryRun,
+  writeClearStamp,
+  type CanaryStage,
+} from './loop-canary.js';
+import {
   classifyHumanAttention,
   formatHumanAttentionRow,
   formatHumanAttentionStall,
@@ -425,6 +434,13 @@ export interface LoopDeps {
   listAllPrs?: () => ListedClosedPr[] | undefined;
   /** Files the hotfix task for a red pipeline canary (AISDLC-1023); absent means events are not processed. */
   fileHotfix?: (opts: { sha: string; detail: string }) => string;
+  /** Hierarchy loop canary (AISDLC-1102); absent means no synthetic task is ever enqueued. */
+  loopCanary?: {
+    workDir: string;
+    baseSha: () => string;
+    deadlinesMs?: Record<CanaryStage, number>;
+    intervalMs?: number;
+  };
   /** Idle executors holding no inflight task (AISDLC-1101); absent means no drain-stall check runs. */
   idleExecutors?: () => string[];
   /** Who runs this tick; the scheduler stands in for a silent host (AISDLC-1096). Default host. */
@@ -547,7 +563,9 @@ async function watchVerdicts(
       } else if (executors.has(verdict.workerId)) {
         report.clear = await clearOnce(deps, state, verdict);
       }
-      if (verdictState === 'failed') {
+      if (verdictState === 'failed' && isCanaryTask(verdict.taskId)) {
+        // A synthetic canary failure is the canary's own to report, never a playbook requeue.
+      } else if (verdictState === 'failed') {
         const outcome = await deps.playbook(verdict);
         report.playbook = outcome;
         if (outcome.escalation) out.escalations.push(outcome.escalation);
@@ -572,6 +590,7 @@ async function clearOnce(
     const taskId = TASK_ID_RE.test(verdict.taskId) ? verdict.taskId : undefined;
     // The pane is driven here, on the tick that consumes the verdict (AISDLC-1107).
     const r = await deps.clear({ executor, ...(taskId ? { taskId } : {}) });
+    if (r.ok) writeClearStamp(deps.boardDir, executor, deps.now());
     return r.ok
       ? { status: 'cleared', executor }
       : { status: 'failed', executor, reason: r.reason ?? 'the pane did not reach a fresh prompt' };
@@ -734,6 +753,48 @@ async function runEphemeralSteps(
   return { stalled, report };
 }
 
+/** One loop-canary step: advance the run in flight, or start one when due. Never under a hold. */
+function stepLoopCanary(
+  deps: LoopDeps,
+  held: Hold | null,
+): { reports: PlannerReport[]; escalations: { taskId: string; message: string }[] } {
+  const out = {
+    reports: [] as PlannerReport[],
+    escalations: [] as { taskId: string; message: string }[],
+  };
+  const cfg = deps.loopCanary;
+  if (!cfg || held) return out;
+  try {
+    const running = runningCanary(deps.boardDir);
+    if (running) {
+      const r = advanceCanaryRun(deps.boardDir, running, deps.now(), cfg.deadlinesMs);
+      if (r.finished === 'fail' && r.message) {
+        out.escalations.push({ taskId: running.taskId, message: r.message });
+      } else if (r.finished === 'pass') {
+        out.reports.push({
+          kind: 'progress',
+          text: `hierarchy loop canary passed (${running.runId})`,
+        });
+      }
+    } else if (canaryDue(deps.boardDir, deps.now(), cfg.intervalMs)) {
+      const run = startCanaryRun({
+        boardDir: deps.boardDir,
+        workDir: cfg.workDir,
+        baseSha: cfg.baseSha(),
+        dispatchedBy: deps.workerId,
+        now: deps.now,
+      });
+      out.reports.push({ kind: 'progress', text: `hierarchy loop canary started (${run.runId})` });
+    }
+  } catch (err) {
+    out.reports.push({
+      kind: 'progress',
+      text: `hierarchy loop canary error: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
+  return out;
+}
+
 /** GitHub reads happen at most this often unless a webhook wake is newer (AISDLC-960). */
 export const GITHUB_READ_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -822,7 +883,15 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     /* an unreadable PR list must not stop the dispatch loop */
   }
   log.start('reports');
-  const reports = [...buildReports(deps, state, watch.verdicts.length, closedUnmerged)];
+  for (const d of ephemeral.report?.downed ?? []) {
+    if (d.ok) writeClearStamp(deps.boardDir, d.name, deps.now());
+  }
+  const canaryRun = stepLoopCanary(deps, held);
+  watch.escalations.push(...canaryRun.escalations);
+  const reports = [
+    ...buildReports(deps, state, watch.verdicts.length, closedUnmerged),
+    ...canaryRun.reports,
+  ];
   if (canary?.held) {
     reports.push({
       kind: 'progress',

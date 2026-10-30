@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1102
 title: 'hierarchy loop canary: a scheduled synthetic docs-only task flows claim, develop, verdict, clear and re-claim through the live hierarchy with a per-stage deadline, and a missed stage is a board failure'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-28'
 labels:

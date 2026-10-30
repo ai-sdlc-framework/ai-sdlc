@@ -116,6 +116,8 @@ node "$PIPELINE_CLI_BIN/cli-decisions.mjs" escalate --task-id "$TASK_ID" \
   --option "<id>:<description>" --option "<id>:<description>" --body "<context>"
 ```
 
+**Loop canary (AISDLC-1102).** A claimed task id starting `CANARY-` is the hierarchy loop canary: run no `/ai-sdlc execute`, create no worktree or pull request; go straight to Step 3 with `--outcome success --notes "canary"`.
+
 ## Step 3 - Report the verdict
 
 ```bash
