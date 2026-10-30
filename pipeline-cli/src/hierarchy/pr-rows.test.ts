@@ -43,6 +43,11 @@ describe('pr rows', () => {
     expect(formatRow(rows[1]!)).not.toContain('lastActionAt');
   });
 
+  it('marks a failed action with its failure count', () => {
+    land({ pr: 3, action: 'reenter', actionFailed: true, failedAttempts: 2 });
+    expect(rowsForOpen(board, [3])[0]!.action).toBe('reenter (failed x2)');
+  });
+
   it('appends rows to the log and skips an empty set', () => {
     appendReconcileLog(board, [], new Date());
     appendReconcileLog(board, rowsForOpen(board, [2]), new Date('2026-10-29T01:00:00Z'));

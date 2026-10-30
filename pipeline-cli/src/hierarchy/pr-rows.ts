@@ -34,7 +34,7 @@ export function rowFromRecord(r: LandingRecord): PrRow {
   return {
     pr: r.pr,
     lane: r.kind,
-    action: r.action,
+    action: r.actionFailed ? `${r.action} (failed x${r.failedAttempts ?? 1})` : r.action,
     reason: rowReason(r),
     owner: r.owner,
     ...(at === undefined ? {} : { lastActionAt: at }),

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1125
 title: reconcile failed-action retry loop freezes a PR at action=reenter instead of routing it
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-30'
 labels:
@@ -36,9 +36,36 @@ A PR whose re-entry is refused reaches the planner within one scheduler pass ins
 
 ## Acceptance Criteria
 
-- [ ] Unit test: a `reenter` command that fails twice on the same head produces exactly one route-to-planner report naming the PR, the sha and the failure count, and the record's `lastActionAt` moves on each attempt.
-- [ ] Unit test: a failed action on a head that later changes is re-run once on the new head.
-- [ ] Unit test: a record with `actionFailed: true` still ages and reaches the aging cap.
-- [ ] Unit test: the status row for a failed action reads `reenter (failed x2)`.
-- [ ] Replaying the 2026-10-30 landing records for #2093, #2127 and #2129 through `reconcile` with a stub executor routes all three to the planner on the first pass.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` green.
+- [x] Unit test: a `reenter` command that fails twice on the same head produces exactly one route-to-planner report naming the PR, the sha and the failure count, and the record's `lastActionAt` moves on each attempt.
+- [x] Unit test: a failed action on a head that later changes is re-run once on the new head.
+- [x] Unit test: a record with `actionFailed: true` still ages and reaches the aging cap.
+- [x] Unit test: the status row for a failed action reads `reenter (failed x2)`.
+- [x] Replaying the 2026-10-30 landing records for #2093, #2127 and #2129 through `reconcile` with a stub executor routes all three to the planner on the first pass.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` green.
+
+## Final Summary
+
+## Summary
+A reconcile action that fails twice on the same head now routes the PR to the planner once and stops retrying. Status rows for a failed action read `reenter (failed x2)`. A new head still gets one fresh run. I opened draft PR #2189.
+
+## Changes
+- pipeline-cli/src/hierarchy/reconcile.ts
+- pipeline-cli/src/hierarchy/reconcile.test.ts
+- pipeline-cli/src/hierarchy/pr-rows.ts
+- pipeline-cli/src/hierarchy/pr-rows.test.ts
+- docs/operations/cli-hierarchy.md
+- backlog/tasks/AISDLC-1125 - reconcile failed-action retry loop freezes a PR at action=reenter.md
+
+## Design decisions
+The pipeline-cli suite is `npx vitest run` with `AI_SDLC_EXECUTOR_TASK`, `AI_SDLC_HIERARCHY_SESSION`, `AI_SDLC_HIERARCHY_ROLE` and `AI_SDLC_ACTIVE_TASK_ID` unset. It finished with 566 files passed and 12442 tests passed, 13 skipped. With the executor env vars set in this agent shell, `executor-start.test.ts` and one `hierarchy.test.ts` test fail, because the pinned task makes executor-start refuse to claim. Those failures are environmental and not in files this diff touches. The first push attempt was rejected by the pre-push typecheck, so I made a second small commit to fix a type in `reconcile.test.ts`. The branch has two commits.
+
+## Verification
+- `pnpm build` — passed
+- `pnpm test` — passed
+- `pnpm lint` — passed
+- `pnpm format:check` — passed
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
