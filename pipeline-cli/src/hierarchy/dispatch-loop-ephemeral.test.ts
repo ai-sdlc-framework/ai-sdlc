@@ -165,9 +165,9 @@ describe('ephemeral executors in the tick', () => {
     expect(downs).toEqual([]);
   });
 
-  it('downs a crashed executor (no heartbeat for 10 minutes) and requeues its manifest', async () => {
+  it('downs a crashed executor (no heartbeat for 30 minutes) and requeues its manifest', async () => {
     writeRoster(board, { schemaVersion: 'v1', sessions: [entry('AISDLC-71')] });
-    claim('AISDLC-71', 'ai-sdlc-executor-aisdlc-71', 11 * MIN);
+    claim('AISDLC-71', 'ai-sdlc-executor-aisdlc-71', 31 * MIN);
     const requeued: string[] = [];
     const r = await runDispatchTick(
       deps({

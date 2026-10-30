@@ -2,7 +2,7 @@
 id: AISDLC-1103
 title: >-
   Ephemeral executors are not reaped on heartbeat age alone during a developer pass (stall reaper uses holder state, not the 10-minute grace)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-28'
 labels:
@@ -39,3 +39,28 @@ Fix: in `reapStalledClaims`, drop the `|| (ageMs > graceMs && deps.isEphemeral?.
 ## Notes
 
 Evidence: `.ai-sdlc/dispatch/failed/AISDLC-656.2.diagnostic.json`, `AISDLC-940.diagnostic.json`, `AISDLC-1096.diagnostic.json` (2026-10-28). The reaped tasks were re-entered by the planner ruling of 20:25Z.
+
+## Verification
+
+- `pnpm build` — passed
+- `pnpm test` — passed: pipeline-cli `Test Files 564 passed (564)`, `Tests 12416 passed | 13 skipped (12429)`; plugin hooks `# pass 3613`. One teardown race in `ai-sdlc-plugin/hooks/usage-ingest.test.mjs` (ENOTEMPTY on its temp dir, file not touched by this change) passed on an isolated rerun (`# pass 18`, `# fail 0`).
+- `pnpm lint` — passed
+- `pnpm format:check` — passed
+
+## Final Summary
+
+## Summary
+The stall reaper no longer reaps an ephemeral executor on heartbeat age alone after `graceMs`. A busy ephemeral session is kept until `staleMs` (30 minutes) like a roster executor; an `idle`, `gone` or `unknown` holder is still reaped after `graceMs` as `holder-not-busy`. The `isEphemeral` short-circuit and its wiring in the dispatch loop are deleted; the two thresholds are documented.
+
+## Changes
+- pipeline-cli/src/hierarchy/stall.ts
+- pipeline-cli/src/hierarchy/dispatch-loop.ts
+- pipeline-cli/src/hierarchy/stall.test.ts
+- pipeline-cli/src/hierarchy/dispatch-loop-ephemeral.test.ts
+- docs/operations/cli-hierarchy.md
+
+## Design decisions
+Landed by the planner by hand (operator order 2026-10-30 20:30Z): the executor path reaped this task's own developer pass three times, because the pass ran longer than the ten-minute grace the fix removes.
+
+## Follow-up
+(none)
