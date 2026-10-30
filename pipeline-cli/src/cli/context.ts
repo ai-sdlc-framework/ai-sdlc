@@ -7,6 +7,7 @@
  *   validate        — validate entries in both knowledge roots and the ontology.
  *                     Exit 1 on any error; `--strict` also fails on classification
  *                     warnings (likely mis-scoped entries).
+ *   ingest-memory / mark-recalled — auto-memory trunk ingest and harness-recall ledger marks (AISDLC-783).
  *   promote <id> --proof <kind:value> [--to canonical --by human] — verifier promotion (AISDLC-776).
  *   confirm / correct / supersede / coverage — human surface (AISDLC-786).
  *   audit / refute / reobserve — knowledge log listing, refutation, 30 percent re-observation.
@@ -29,6 +30,8 @@ import { now } from '../clock.js';
 import { loadKnowledgeConfig } from '../knowledge/config.js';
 import { checkKnowledgeScope, checkKnowledgeScopeRange } from '../knowledge/scope-check.js';
 import { INGEST_SOURCES, ingestSource, type IngestSource } from '../knowledge/ingest-sources.js';
+import { ingestMemoryForProject } from '../knowledge/ingest-memory.js';
+import { resolveMemoryDir } from '../memory-dream/resolve-dir.js';
 import { sectionsToEntries } from '../knowledge/ingest-sections.js';
 import { auditLines, readKnowledgeLog } from '../knowledge/log.js';
 import { loadOntology } from '../knowledge/ontology.js';
@@ -44,6 +47,7 @@ import {
   compactSession,
   queryIndex,
   rebuildIndex,
+  recordHarnessRecall,
   resetSession,
 } from '../knowledge/retrieval/service.js';
 import { findProtectedCitations, readEntries, validateKnowledge } from '../knowledge/store.js';
@@ -256,6 +260,52 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
         process.stdout.write(
           `${r.created} created, ${r.updated} updated, ${r.unchanged} unchanged\n`,
         );
+      },
+    )
+    .command(
+      'ingest-memory',
+      'Ingest the auto-memory folder as protected `memory` trunk entries (AISDLC-783)',
+      (y) =>
+        y
+          .option('dir', { type: 'string', describe: 'Memory folder (default: resolved setting)' })
+          .option('observed', { type: 'string', default: now().toISOString().slice(0, 10) }),
+      (args) => {
+        try {
+          const projectDir = String(args['project-dir']);
+          const memoryDir = (args.dir as string | undefined) ?? resolveMemoryDir({ projectDir });
+          const r = ingestMemoryForProject(projectDir, memoryDir, String(args.observed));
+          process.stdout.write(
+            `${r.created} created, ${r.updated} updated, ${r.unchanged} unchanged, ${r.superseded} superseded, ${r.skipped} skipped\n`,
+          );
+        } catch (err) {
+          process.stderr.write(`error: ${(err as Error).message}\n`);
+          process.exitCode = 1;
+        }
+      },
+    )
+    .command(
+      'mark-recalled <session> [notes..]',
+      'Mark memory notes the harness recall surfaced as loaded in the session ledger',
+      (y) =>
+        y
+          .positional('session', { type: 'string', demandOption: true })
+          .positional('notes', { type: 'string', array: true, default: [] })
+          .option('dir', { type: 'string', describe: 'Memory folder (default: resolved setting)' }),
+      (args) => {
+        try {
+          const projectDir = String(args['project-dir']);
+          const memoryDir = (args.dir as string | undefined) ?? resolveMemoryDir({ projectDir });
+          const n = recordHarnessRecall(
+            projectDir,
+            String(args.session),
+            memoryDir,
+            (args.notes as string[]).map(String),
+          );
+          process.stdout.write(`${n} marked loaded\n`);
+        } catch (err) {
+          process.stderr.write(`error: ${(err as Error).message}\n`);
+          process.exitCode = 1;
+        }
       },
     )
     .command(

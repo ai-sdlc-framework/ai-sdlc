@@ -2,7 +2,7 @@
 id: AISDLC-783
 title: >-
   auto-memory trunk ingest adapter
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-09'
 labels:

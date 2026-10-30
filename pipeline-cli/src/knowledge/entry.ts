@@ -41,6 +41,8 @@ export interface KnowledgeEntry {
   reverify?: string;
   /** Source id backing the entry (decision id, RFC id, ...); set by ingest adapters. */
   proof?: string;
+  /** True when the source note was removed; the entry is kept but never indexed. */
+  superseded?: boolean;
   /** Markdown body after the frontmatter. */
   body: string;
 }
@@ -176,6 +178,7 @@ export function toEntry(fields: Record<string, unknown>, body: string): Knowledg
     writtenBy: typeof fields.writtenBy === 'string' ? fields.writtenBy : undefined,
     reverify: typeof fields.reverify === 'string' ? fields.reverify : undefined,
     proof: typeof fields.proof === 'string' ? fields.proof : undefined,
+    superseded: fields.status === 'superseded' ? true : undefined,
     body,
   };
 }

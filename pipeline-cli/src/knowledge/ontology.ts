@@ -18,7 +18,7 @@ export interface Ontology {
 export const ONTOLOGY_FILE = 'ontology.yaml';
 
 export const DEFAULT_ONTOLOGY: Ontology = {
-  trunks: ['systems', 'products', 'customers', 'decisions', 'people', 'process'],
+  trunks: ['systems', 'products', 'customers', 'decisions', 'people', 'process', 'memory'],
   entryTypes: ['fact', 'decision', 'constraint', 'procedure', 'person', 'system'],
   relations: ['supports', 'contradicts', 'supersedes', 'depends_on'],
   proofKinds: ['test-id', 'decision-id', 'path-exists', 'allowlisted-command'],
