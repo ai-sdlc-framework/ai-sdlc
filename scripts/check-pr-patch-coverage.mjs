@@ -652,11 +652,13 @@ export async function computePatchCoverage({ base, head, threshold, cwd, coverag
     }
     let covered = 0;
     let uncovered = 0;
-    for (const ln of changedLines) {
+    const uncoveredLines = [];
+    for (const ln of [...changedLines].sort((a, b) => a - b)) {
       if (entry.covered.has(ln)) {
         covered++;
       } else if (entry.uncovered.has(ln)) {
         uncovered++;
+        uncoveredLines.push(ln);
       } else {
         // Line is in the diff but not in the instrumentation map (blank line,
         // pure comment, type-only declaration). Skip — not part of the
@@ -674,6 +676,7 @@ export async function computePatchCoverage({ base, head, threshold, cwd, coverag
       changed: effective,
       covered,
       uncovered,
+      uncoveredLines,
       missing: false,
       pct: (covered / effective) * 100,
     });
@@ -715,6 +718,25 @@ export async function computePatchCoverage({ base, head, threshold, cwd, coverag
 
 // ── Formatting ───────────────────────────────────────────────────────────────
 
+/** Collapse sorted line numbers into `3-5, 9` style ranges. */
+export function formatLineRanges(lines) {
+  const out = [];
+  let start = null;
+  let prev = null;
+  for (const ln of lines) {
+    if (start === null) {
+      start = prev = ln;
+    } else if (ln === prev + 1) {
+      prev = ln;
+    } else {
+      out.push(start === prev ? `${start}` : `${start}-${prev}`);
+      start = prev = ln;
+    }
+  }
+  if (start !== null) out.push(start === prev ? `${start}` : `${start}-${prev}`);
+  return out.join(', ');
+}
+
 export function formatResultHuman(result) {
   const lines = [];
   if (result.reason === 'no-instrumentable-changes') {
@@ -739,6 +761,9 @@ export function formatResultHuman(result) {
       lines.push(`[patch-coverage]   MISSING: ${f.file} (${f.changed} changed line(s))`);
     } else {
       lines.push(`[patch-coverage]   ${f.file}: ${f.covered}/${f.changed} (${f.pct.toFixed(1)}%)`);
+      if (f.uncoveredLines?.length > 0) {
+        lines.push(`[patch-coverage]     uncovered lines: ${formatLineRanges(f.uncoveredLines)}`);
+      }
     }
   }
   lines.push(

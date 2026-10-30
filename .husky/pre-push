@@ -8,7 +8,8 @@
 #   0b. Dark-code gate (AISDLC-687) — `node scripts/check-dark-code.mjs`: a newly
 #      unwired module, a grown baseline or a new test double in production code
 #      blocks the push. Static scan. Skip: AI_SDLC_SKIP_DARK_CODE_GATE=1.
-#      (There is no local coverage gate: coverage is gated once, in CI — AISDLC-726.)
+#      (Whole-package coverage floors are CI-only, AISDLC-726; the patch-coverage gate
+#      runs last, AISDLC-1119.)
 #   2. Mechanical fixups orchestrator (AISDLC-386, AISDLC-837) — ONE call of
 #      scripts/pre-push-fixups.sh runs, in order:
 #        squash-attestation-chores (AISDLC-369) → task-move (AISDLC-220)
@@ -92,3 +93,7 @@ printf '%s\n' "$PUSH_STDIN" | ./scripts/check-followups-on-push.sh
 # in a single pass and exits 1 ONCE if a fixup commit was made. Skips:
 # AI_SDLC_SKIP_SQUASH_CHORES, AI_SDLC_SKIP_TASK_MOVE, AI_SDLC_SKIP_ATTESTATION_SIGN.
 printf '%s\n' "$PUSH_STDIN" | ./scripts/pre-push-fixups.sh
+# AISDLC-1119: early copy of the CI patch-coverage gate. Runs test:coverage only in the
+# packages the diff touches, then scripts/check-pr-patch-coverage.mjs with the same threshold
+# file as CI (.ai-sdlc/patch-coverage.yaml). Skip: AI_SDLC_SKIP_PATCH_COVERAGE_GATE=1.
+node scripts/pre-push-patch-coverage.mjs

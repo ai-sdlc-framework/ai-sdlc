@@ -173,6 +173,12 @@ gates:
     owner: engineering
     property: one pass of squash, task-move and attestation-sign (re-push is clean)
     baseline: true
+  - id: pre-push:scripts/pre-push-patch-coverage.mjs
+    surface: pre-push
+    origin: AISDLC-1119
+    owner: engineering
+    property: patch coverage of the touched packages meets the CI threshold before the push (early copy of the CI gate, same script and yaml)
+    decision: DEC-0282
   - id: pre-commit:scripts/check-backlog-ascii.sh
     surface: pre-commit
     origin: AISDLC-92, AISDLC-727
