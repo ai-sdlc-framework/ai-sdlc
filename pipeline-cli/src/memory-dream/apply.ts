@@ -100,7 +100,15 @@ function swap(liveDir: string, incoming: string, now: Date): string {
   return saved;
 }
 
-export function applyDream(opts: { outputDir: string; keep?: number; now?: Date }): ApplyResult {
+/** Runs inside the dream lock right after a swap (apply or undo), for example a re-ingest. */
+export type AfterSwap = (liveDir: string) => void;
+
+export function applyDream(opts: {
+  outputDir: string;
+  keep?: number;
+  now?: Date;
+  afterSwap?: AfterSwap;
+}): ApplyResult {
   const at = opts.now ?? now();
   const metaPath = metaPathFor(opts.outputDir);
   if (!existsSync(opts.outputDir) || !existsSync(metaPath)) {
@@ -132,12 +140,17 @@ export function applyDream(opts: { outputDir: string; keep?: number; now?: Date 
       writeFileSync(outIndexPath, `${base}${extra.join('\n')}\n`);
     }
     const saved = swap(liveDir, opts.outputDir, at);
+    opts.afterSwap?.(liveDir);
     const pruned = prune(liveDir, opts.keep ?? MIN_KEEP);
     return { liveDir, previousVersion: saved, carriedOver: changed.map((n) => n.file), pruned };
   });
 }
 
-export function undoDream(opts: { liveDir: string; now?: Date }): UndoResult {
+export function undoDream(opts: {
+  liveDir: string;
+  now?: Date;
+  afterSwap?: AfterSwap;
+}): UndoResult {
   const at = opts.now ?? now();
   return withLock(opts.liveDir, () => {
     const versions = listVersions(opts.liveDir);
@@ -145,6 +158,7 @@ export function undoDream(opts: { liveDir: string; now?: Date }): UndoResult {
     if (!latest) throw new Error(`no previous version to restore for ${opts.liveDir}`);
     const from = join(versionsDirFor(opts.liveDir), latest);
     const savedAs = swap(opts.liveDir, from, at);
+    opts.afterSwap?.(opts.liveDir);
     return { liveDir: opts.liveDir, restoredFrom: from, currentSavedAs: savedAs };
   });
 }

@@ -13,6 +13,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
+import { reingestAfterSwap } from '../knowledge/ingest-memory.js';
 import { applyDream, undoDream } from '../memory-dream/apply.js';
 import { DEFAULT_BUDGETS, type Budgets } from '../memory-dream/build-output.js';
 import { ClaudeSynthesizer } from '../memory-dream/claude-synthesizer.js';
@@ -108,8 +109,15 @@ export async function cmdRun(a: RunArgs, io: DreamCliIo): Promise<RunResult> {
   return result;
 }
 
-export function cmdApply(a: { output: string; keep?: number }, io: Pick<DreamCliIo, 'out'>): void {
-  const r = applyDream({ outputDir: resolve(a.output), keep: a.keep });
+export function cmdApply(
+  a: { output: string; keep?: number; projectDir?: string },
+  io: Pick<DreamCliIo, 'out'>,
+): void {
+  const r = applyDream({
+    outputDir: resolve(a.output),
+    keep: a.keep,
+    afterSwap: reingestAfterSwap(a.projectDir ?? process.cwd()),
+  });
   io.out(`applied: ${r.liveDir} now holds the dream output`);
   io.out(`previous version kept at ${r.previousVersion} (undo with: memory-dream undo)`);
   io.out(
@@ -124,7 +132,10 @@ export function cmdUndo(
   a: { dir?: string; projectDir?: string },
   io: Pick<DreamCliIo, 'out'>,
 ): void {
-  const r = undoDream({ liveDir: memoryDirFor(a) });
+  const r = undoDream({
+    liveDir: memoryDirFor(a),
+    afterSwap: reingestAfterSwap(a.projectDir ?? process.cwd()),
+  });
   io.out(`restored ${r.liveDir} from ${r.restoredFrom}`);
   io.out(`the folder you undid is kept at ${r.currentSavedAs}`);
 }
@@ -183,12 +194,19 @@ export async function runMemoryDreamCli(): Promise<void> {
       'apply <output>',
       'Swap a reviewed dream output in for the live folder, keeping previous versions',
       (y) =>
-        y.positional('output', { type: 'string', demandOption: true }).option('keep', {
-          type: 'number',
-          default: 3,
-          description: 'Previous versions to keep (minimum 3)',
-        }),
-      (argv) => cmdApply({ output: argv.output as string, keep: argv.keep }, { out }),
+        y
+          .positional('output', { type: 'string', demandOption: true })
+          .option('keep', {
+            type: 'number',
+            default: 3,
+            description: 'Previous versions to keep (minimum 3)',
+          })
+          .option('project-dir', { type: 'string', description: 'Project root (default: cwd)' }),
+      (argv) =>
+        cmdApply(
+          { output: argv.output as string, keep: argv.keep, projectDir: argv['project-dir'] },
+          { out },
+        ),
     )
     .command(
       'undo',

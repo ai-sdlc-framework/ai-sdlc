@@ -2,6 +2,7 @@
 import { rmSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { loadKnowledgeConfig, loadRetrievalConfig } from '../config.js';
+import { harnessRecallHits } from '../ingest-memory.js';
 import { readEntries } from '../store.js';
 import {
   compactLedger,
@@ -12,7 +13,7 @@ import {
   resetLedger,
 } from './ledger.js';
 import { createRetrievalIndex } from './registry.js';
-import type { Embedder, QueryHit, QueryOptions } from './types.js';
+import { loadKey, type Embedder, type QueryHit, type QueryOptions } from './types.js';
 
 function abs(root: string, p: string): string {
   return isAbsolute(p) ? p : join(root, p);
@@ -31,7 +32,7 @@ export async function rebuildIndex(projectRoot: string, embedder?: Embedder): Pr
   const entries = [
     ...readEntries(abs(projectRoot, k.trackedRoot)),
     ...readEntries(abs(projectRoot, k.protectedRoot)),
-  ];
+  ].filter((e) => !e.superseded);
   const cfg = loadRetrievalConfig(projectRoot);
   const indexPath = abs(projectRoot, cfg.indexPath);
   // Non-sqlite kinds throw here (enterprise: declared, not implemented) before any file is touched.
@@ -68,6 +69,25 @@ export async function queryIndex(
   } finally {
     index.close();
   }
+}
+
+/**
+ * The harness recall path surfaced these memory notes: mark them loaded so the engine does not
+ * inject them again. Notes already in the ledger are not recorded twice.
+ */
+export function recordHarnessRecall(
+  projectRoot: string,
+  sessionId: string,
+  memoryDir: string,
+  files: string[],
+): number {
+  ensureLedger(projectRoot, sessionId);
+  const seen = loadedKeys(projectRoot, sessionId);
+  const hits = harnessRecallHits(memoryDir, files).filter(
+    (h) => !seen.has(loadKey(h.id, h.contentHash)),
+  );
+  recordLoaded(projectRoot, sessionId, hits, { moment: 'harness-recall' });
+  return hits.length;
 }
 
 /** `/clear`: the session starts again with only the pre-marked entries loaded. */
