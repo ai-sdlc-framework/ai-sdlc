@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-30T16:56:58.025Z","decisionId":"DEC-0280","chosenOptionId":"corepack-enable","rationale":"Class (a): reversible local environment fix, already applied 16:55Z and verified (pnpm -v 9.15.4 under v22.23.2). Developer rounds would redo approved work; a PATH hack would not survive the next node install.","by":"planner"}
