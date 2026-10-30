@@ -6,7 +6,7 @@ assignee: []
 created_date: '2026-10-30'
 labels: [hierarchy, demo, docs]
 dependencies: []
-references: [pipeline-cli/demo/scenarios/queue-age.json, pipeline-cli/demo/scenarios/context-pressure.json, pipeline-cli/src/hierarchy/demo.test.ts, docs/operations/cli-hierarchy.md, backlog/tasks]
+references: [pipeline-cli/src/hierarchy/demo.test.ts, docs/operations/cli-hierarchy.md, backlog/tasks]
 priority: high
 dispatchable: true
 ---
