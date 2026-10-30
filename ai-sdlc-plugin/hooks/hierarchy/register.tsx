@@ -116,12 +116,15 @@ export const register = (on: Any, options?: Any): void => {
   on('session.measure', ($: Any, e: Any, next: Any) => onMeasure(router, $, e, next));
   on('ui.render', ($: Any, e: Any, next: Any) => onRender(router, $, e, next));
   on('session.start', async ($: Any, e: Any, next: Any) => {
+    // AISDLC-1124: a subagent's session.start is never an executor start.
+    if (e?.agentId) return next(e);
     const p: Ports = {
       storeGet: (k) => $.store.get(k),
       storeSet: (k, v) => $.store.set(k, v),
       runCommand: (a) => $.command.run(a),
       compact: (a) => $.session.compact(a),
       submit: (a) => $.prompt.submit(a),
+      runProcess: (a) => $.process.run([a.command, ...a.args]),
     };
     // AISDLC-1082: every failure `safe()` swallows lands in `hierarchy/log` with the primitive and the text.
     setSwallowSink((line) => log(p, line));
@@ -251,6 +254,7 @@ export const register = (on: Any, options?: Any): void => {
     router.current = 'executor';
     state.name = typeof named === 'string' && named ? named : 'executor';
     state.enabled = true;
+    if (options?.boardDir) state.boardDir = options.boardDir;
     // INTERIM: if a host fires session.start after a mod-run clear, resume from here as well.
     if (state.resumePending) await resumeAfterClear(p, state);
     await log(p, 'registered role=executor');

@@ -331,7 +331,7 @@ the board is held.
 ### Stall thresholds (AISDLC-1103)
 
 The stall reaper uses two thresholds for every worker, roster or ephemeral. `graceMs` (default 10 minutes) applies
-only when the holder session is `idle`, `gone` or `unknown`: the claim is then reaped as `holder-not-busy`. `staleMs`
+only when the holder session is `gone` or `unknown`: the claim is then reaped as `holder-not-busy`. An `idle` holder is not reaped early (AISDLC-1124): a backgrounded developer leaves the pane idle for its whole pass, so the board (manifest plus a heartbeat under `staleMs`) decides busy. `staleMs`
 (default 30 minutes) applies whatever the session state: a heartbeat older than it is reaped as `stale-heartbeat`, so a
 busy developer pass is never reaped before 30 minutes.
 
