@@ -1,0 +1,43 @@
+{
+  "request": "Fix cli-hierarchy down so a bare session name stops only that session instead of the whole hierarchy.",
+  "task": "AISDLC-1106",
+  "author": "dominique",
+  "decisions": [
+    {
+      "summary": "What should down do with a bare session name?",
+      "options": [
+        {
+          "id": "resolve",
+          "description": "Resolve it to the matching roster session and stop only that one"
+        },
+        {
+          "id": "refuse",
+          "description": "Refuse the call with a one-line error naming the valid forms"
+        }
+      ],
+      "answer": "resolve",
+      "rationale": "The operator meant that session; stopping everything on a typo is the failure to remove."
+    },
+    {
+      "summary": "What if the name matches no roster session?",
+      "options": [
+        { "id": "error", "description": "Exit non-zero and stop nothing" },
+        { "id": "all", "description": "Fall back to stopping the whole hierarchy" }
+      ],
+      "answer": "error",
+      "rationale": "An unknown name must never widen the blast radius of the call."
+    },
+    {
+      "summary": "In what order does a full down stop the sessions?",
+      "options": [
+        { "id": "executors-first", "description": "Executors first, planner last" },
+        { "id": "roster", "description": "Roster order" }
+      ],
+      "answer": "executors-first",
+      "rationale": "The planner must outlive the sessions it coordinates so their tasks are requeued."
+    }
+  ],
+  "brief": { "tasks": ["AISDLC-1106"] },
+  "timeoutMinutes": 90,
+  "pollSeconds": 10
+}

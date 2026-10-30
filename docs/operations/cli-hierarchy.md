@@ -1042,7 +1042,7 @@ questions, the operator answers them, a brief goes to dispatch, an executor open
 lands.
 
 ```bash
-cli-hierarchy demo --scenario pipeline-cli/demo/scenarios/context-pressure.json --out demo-out
+cli-hierarchy demo --scenario pipeline-cli/demo/scenarios/home-page.json --out demo-out
 cli-hierarchy demo run --scenario <file> --out <dir>
 cli-hierarchy demo cut --cast <dir>/hierarchy.cast --beats <dir>/beats.json --out <dir>/hierarchy.cut.cast
 cli-hierarchy demo render --cast <dir>/hierarchy.cut.cast --out <dir>
@@ -1055,6 +1055,11 @@ existing `To Do`, dispatchable backlog task that implements it), `author` (optio
 `--by`; default `operator`), `decisions` (at least two of `{ summary, options: [{ id, description }],
 answer, rationale }`, `answer` being one of the option ids), `brief` (`{ tasks: [ids] }`),
 `timeoutMinutes` and `pollSeconds`. A scenario missing a field is rejected with the field name.
+
+**Scenario tasks are reserved.** The task a scenario names is held out of every brief until the
+demo run consumes it (the run is what lands it). When a scenario's task has landed by another path,
+retire the scenario in the same PR; the loader test fails until you do. The current scenario is
+`home-page.json` (AISDLC-1106), consumed by ai-sdlc.io (`shorts/scripts/render-demo.mjs`).
 
 **Stages.**
 

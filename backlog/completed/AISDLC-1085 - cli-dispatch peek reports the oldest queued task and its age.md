@@ -15,7 +15,6 @@ dependencies: []
 references:
   - pipeline-cli/src/dispatch/board.ts
   - pipeline-cli/src/cli/dispatch.ts
-  - pipeline-cli/demo/scenarios/context-pressure.json
   - docs/operations/cli-hierarchy.md
 ---
 
