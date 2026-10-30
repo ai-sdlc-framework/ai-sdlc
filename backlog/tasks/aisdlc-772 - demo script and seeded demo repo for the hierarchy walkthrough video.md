@@ -22,7 +22,7 @@ references:
   - ai-sdlc-plugin/commands/operator-dispatch.md
   - ai-sdlc-plugin/commands/executor.md
 priority: high
-dispatchable: true
+dispatchable: false
 ---
 
 ## Description
@@ -42,3 +42,7 @@ Sequencing: the hierarchy idle and self-clear work (AISDLC-759, AISDLC-760, AISD
 - [ ] Every command in the shot list exists on main (a test greps them).
 - [ ] The reset script restores the start state (test).
 - [ ] `docs/demo/walkthrough.md` names the three north-star features shown: hierarchy, operator TUI and context-meter mod.
+
+## Dispatch note (2026-10-30)
+
+`dispatchable: false` (operator ruling 2026-10-30): the task depends on AISDLC-671, an operator-run supervised hierarchy run (DEC-0274) that no executor can perform. The demo waits for that run; the operator flips this back to `true` once AISDLC-671 is done.
