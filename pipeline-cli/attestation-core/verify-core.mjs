@@ -1406,6 +1406,18 @@ export function verifyV6Envelope({
   const verifiedReviewerNames = [];
   const deltaBaseShas = new Set();
   const seenLeafIndexes = new Set();
+  // AISDLC-1144 (DEC-0287): newest leaf per reviewer is the credited one. The
+  // newest is derived from the ON-DISK leaves (never from the envelope's
+  // `superseded` flag), so a flag can only retire a leaf that is genuinely older.
+  const newestLeafIndexByReviewer = new Map();
+  for (const summary of envelope.transcriptLeaves) {
+    const disk = onDiskLeaves.find((l) => l.leafIndex === summary?.leafIndex);
+    if (!disk || disk.stage === 'plan' || disk.stage === 'execute') continue;
+    const prev = newestLeafIndexByReviewer.get(disk.reviewerName);
+    if (prev === undefined || disk.leafIndex > prev) {
+      newestLeafIndexByReviewer.set(disk.reviewerName, disk.leafIndex);
+    }
+  }
   for (let i = 0; i < envelope.transcriptLeaves.length; i++) {
     const leafSummary = envelope.transcriptLeaves[i];
     const merkleProof = envelope.merkleProofs[i];
@@ -1587,7 +1599,26 @@ export function verifyV6Envelope({
     // AISDLC-977: a credited reviewer leaf (anything but a plan/execute stage
     // leaf, which is checked above) must carry an approved verdict and no
     // critical or major finding. The verifier is the only check CI trusts.
-    if (onDiskLeaf.stage !== 'plan' && onDiskLeaf.stage !== 'execute') {
+    // AISDLC-1144 (DEC-0287): a leaf marked superseded is history: it still
+    // hashes into the root below, but only the newest leaf per reviewer is
+    // credited. A superseded mark on the newest leaf is refused.
+    if (leafSummary.superseded !== undefined && typeof leafSummary.superseded !== 'boolean') {
+      return {
+        status: 'invalid',
+        reason: `v6: transcriptLeaves[${i}].superseded must be a boolean when present`,
+      };
+    }
+    const isSuperseded =
+      leafSummary.superseded === true &&
+      newestLeafIndexByReviewer.has(onDiskLeaf.reviewerName) &&
+      newestLeafIndexByReviewer.get(onDiskLeaf.reviewerName) > onDiskLeaf.leafIndex;
+    if (leafSummary.superseded === true && !isSuperseded) {
+      return {
+        status: 'invalid',
+        reason: `v6: leaf[${logicalLeafIndex}] (${onDiskLeaf.reviewerName}) is not an approved verdict (marked superseded but no newer credited leaf by this reviewer exists)`,
+      };
+    }
+    if (onDiskLeaf.stage !== 'plan' && onDiskLeaf.stage !== 'execute' && !isSuperseded) {
       const f = onDiskLeaf.findings ?? {};
       const blocking = (Number(f.critical) || 0) + (Number(f.major) || 0);
       if (onDiskLeaf.verdictApproved !== true || blocking > 0) {

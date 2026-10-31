@@ -278,4 +278,56 @@ describe('AISDLC-579: sign/verify Merkle root parity', () => {
     expect(tamperedResult.status).toBe('invalid');
     expect(tamperedResult.reason).toContain('rootSignature');
   });
+
+  describe('AISDLC-1144: newest leaf per reviewer is credited (DEC-0287)', () => {
+    const rejected = {
+      verdictApproved: false,
+      findings: { critical: 1, major: 0, minor: 0, suggestion: 0 },
+    };
+    const run = (patchId: string, leaves: Partial<TranscriptLeaf>[]) => {
+      leaves.forEach((l, i) =>
+        appendLeafForPatchId(makeLeaf({ leafIndex: i, ...l }), patchId, tmpRoot),
+      );
+      return signAndVerify(patchId);
+    };
+
+    it('reject-then-approve by one reviewer signs and verifies, older leaf marked superseded', () => {
+      const patchId = '7'.repeat(40);
+      const result = run(patchId, [rejected, {}]);
+      expect(result.status).toBe('valid');
+      const env = JSON.parse(
+        readFileSync(join(tmpRoot, '.ai-sdlc', 'attestations', `${patchId}.v6.dsse.json`), 'utf8'),
+      );
+      expect(env.transcriptLeaves[0].superseded).toBe(true);
+      expect(env.transcriptLeaves[1].superseded).toBeUndefined();
+    });
+
+    it('approve-then-reject fails', () => {
+      const result = run('8'.repeat(40), [{}, rejected]);
+      expect(result.status).toBe('invalid');
+      expect(result.reason).toContain('is not an approved verdict');
+    });
+
+    it('a rejected newest leaf fails even after earlier approvals', () => {
+      const result = run('9'.repeat(40), [{}, {}, rejected]);
+      expect(result.status).toBe('invalid');
+    });
+
+    it('a superseded flag on the newest leaf is refused', () => {
+      const patchId = 'd'.repeat(40);
+      run(patchId, [{}, {}]);
+      const path = join(tmpRoot, '.ai-sdlc', 'attestations', `${patchId}.v6.dsse.json`);
+      const env = JSON.parse(readFileSync(path, 'utf8'));
+      env.transcriptLeaves[1].superseded = true;
+      const result = verifyV6Envelope({
+        envelope: env,
+        envelopeFileName: `${FAKE_HEAD_SHA}.v6.dsse.json`,
+        headSha: FAKE_HEAD_SHA,
+        trustedReviewers: [{ pubkey: publicKeyPem }],
+        repoRoot: tmpRoot,
+        patchIdHint: patchId,
+      }) as { status: string; reason: string };
+      expect(result.status).toBe('invalid');
+    });
+  });
 });
