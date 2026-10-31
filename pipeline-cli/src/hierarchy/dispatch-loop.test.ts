@@ -1391,7 +1391,8 @@ describe('hierarchy loop canary in the tick (AISDLC-1102)', () => {
       true,
     );
   });
-=======
+});
+
 describe('deterministic restarts (AISDLC-1110)', () => {
   let restarted: string[];
   let health: SessionHealth[];
@@ -1485,5 +1486,4 @@ describe('deterministic restarts (AISDLC-1110)', () => {
       { session: 'executor-alpha', cause: 'request', status: 'failed', reason: 'lock held' },
     ]);
   });
->>>>>>> aa9c2da5 (feat: restart lock, auto-restart rules and restart-request file (AISDLC-1110))
 });

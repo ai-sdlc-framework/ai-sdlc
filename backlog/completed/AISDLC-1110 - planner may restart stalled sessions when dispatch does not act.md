@@ -45,7 +45,7 @@ Evidence: `cli-hierarchy status` 08:15Z (0 inflight, three executors `unknown`, 
 
 ## Verification
 
-Test command: `pnpm --filter @ai-sdlc/pipeline-cli test` (run with AI_SDLC_EXECUTOR_TASK unset). Summary line: `Tests  1 failed | 12419 passed | 13 skipped (12433)`; the one failure, `webhook-receiver.test.ts > coalesces five check-run deliveries`, passes alone (7 of 7) and is untouched by this change (load-sensitive timing). Other packages pass; build, lint and format:check clean.
+Test command: `pnpm --filter @ai-sdlc/pipeline-cli test` (run with AI_SDLC_EXECUTOR_TASK, AI_SDLC_HIERARCHY_SESSION and AI_SDLC_HIERARCHY_ROLE unset). Summary line: `Tests  12463 passed | 13 skipped (12476)`, 567 files passed. Other packages pass; build, lint and format:check clean.
 
 ## Final Summary
 
@@ -65,11 +65,11 @@ Rebased the earlier AISDLC-1110 work onto origin/main. The conflicts came from A
 - backlog/tasks/AISDLC-1110 - planner may restart stalled sessions when dispatch does not act.md
 
 ## Design decisions
-Test command: `pnpm --filter @ai-sdlc/pipeline-cli test`, run with AI_SDLC_EXECUTOR_TASK, AI_SDLC_HIERARCHY_SESSION and AI_SDLC_HIERARCHY_ROLE unset. Summary line: `Tests  1 failed | 12419 passed | 13 skipped (12433)`. The one failure is the webhook-receiver test above, which this diff does not touch.
+Test command: `pnpm --filter @ai-sdlc/pipeline-cli test`, run with AI_SDLC_EXECUTOR_TASK, AI_SDLC_HIERARCHY_SESSION and AI_SDLC_HIERARCHY_ROLE unset. Summary line: `Tests  12463 passed | 13 skipped (12476)`.
 
 ## Verification
 - `pnpm build` — passed
-- `pnpm test` — waived
+- `pnpm test` — passed
 - `pnpm lint` — passed
 - `pnpm format:check` — passed
 - 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers; review-full)
