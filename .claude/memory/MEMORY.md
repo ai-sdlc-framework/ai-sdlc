@@ -1,0 +1,103 @@
+- [Incident 2026-10-30 handoff — READ FIRST](project_incident_2026_10_30_handoff.md) — fix #2191 merged 10-31 02:49Z, hierarchy restarted 02:58Z, board empty by loss, follow-ups #2192-#2196 pending, reenter 785/1123; read LAST_MESSAGE.md
+- [Repo deleted 2026-10-30, recovery state](project_repo_deletion_2026_10_30.md) — parent tree + 45 worktrees wiped 23:57Z-00:05Z; clone restored from origin; board, untracked files and ~45 memory notes lost; cause reproduced: GIT_DIR leaked by git into the pre-push coverage gate; fix PR #2191 merged 10-31 02:49Z, hierarchy restarted
+- [tmux notices answer dialogs](feedback_tmux_notices_answer_dialogs.md) — operator 2026-10-29: injected pane notices auto-pick the first AskUserQuestion option; use text answers for OQs while any notice sender is live (#2141 pending)
+- [Overnight autonomy 2026-10-29](project_overnight_autonomy_2026_10_29.md) — operator 05:00Z: rubric-recommended option self-recorded, releases + pin updates allowed, restart over-context sessions, review in the morning; planner cron 235efcce
+- [Restart executors the old way](feedback_restart_executors_the_old_way.md) — operator 2026-10-28: idle or over-threshold executor = cli-hierarchy restart <name> on the same tick; the no-relaunch rule bars watchdogs, not restarts
+- [Reply to sender address allowed](feedback_reply_to_sender_address_allowed.md) — operator 2026-10-24: answer an inbound cross-session message at its from address directly; roster-only guards typed names, not replies (rule fix filed as #1998)
+- [Overbuild patch coverage locally](feedback_overbuild_patch_coverage_locally.md) — operator 2026-10-22: new files must show in the local coverage table and pass check-pr-patch-coverage before push; a CI coverage red = full gate rerun
+- [725 waits for 951](project_725_waits_for_951.md) — planner 2026-10-16: no reenter/re-enqueue 725 until 951 lands; land 951 first, DEC-0187 re-enqueue 725; report 951 PR# and "1346 landed"
+- [Rubric decides filing and bookkeeping](feedback_rubric_decides_filing_and_bookkeeping.md) — operator 2026-10-22: task candidates and already-restored weakening records are rubric calls; file/answer and report, never ask
+- [Class (c) needs no API path](feedback_class_c_requires_no_api_path.md) — operator 2026-10-17: check gh/API path before escalating a repo setting; rubric decides (a/b), agent applies
+- [Brief contents are the planner's call](feedback_brief_contents_are_planner_call.md) — operator 2026-10-17: after he names the theme, draft + notify in one turn; never ask whether to send a brief
+- [1519 land check + 867 requeue](project_1519_land_check.md) — planner 2026-10-16: no retrigger; after 2 ticks open -> merge-if-eligible once; requeue 867 after 534.1 Done; ignore retrigger-once bug
+- [Cron survives clear](feedback_cron_survives_clear.md) — operator 2026-10-16: CronCreate jobs outlive /clear; CronList before creating, never recreate the 30-min planner drive (e84665df)
+- [936 reenter after 17:45Z](project_936_reenter_after_1745z.md) — planner 2026-10-16: no reconcile/reenter before 17:45Z, then reenter #1667 push-only, pace 20 s; ignore no-match on file-aisdlc-938..944
+- [Last message survives auto clear](feedback_last_message_survives_auto_clear.md) — operator 2026-10-14: write the final reply to LAST_MESSAGE.md before any clear; read LAST_MESSAGE.md first on start
+- [Roster node-mismatch warning is a red herring](project_roster_node_mismatch_red_herring.md) — operator 2026-10-14: sessions run .nvmrc 22.23.2; the status probe reports stale 22.19.0; ignore, never relaunch for it
+- [Planner is the exception handler, not dispatch](feedback_planner_is_exception_handler.md) — operator 2026-10-13: dispatch owns the drain (ticks, parent ff, resumes, operational rulings); planner answers only what dispatch cannot
+- [Automation ladder](feedback_automation_ladder.md) — operator 2026-10-13: deterministic → structural → JEV → scoped haiku → strong model plans/synthesizes only; minimise prose automations
+- [Operator TUI retired, web UI preferred](project_operator_tui_retired_web_ui_preferred.md) — operator 2026-10-13: TUI mostly broken, no further investment; post-drain RFC for a web dashboard
+- [HANDOFF planner — READ FIRST](project_planner_handoff_2026_10_31.md) — CLI block + ONE current RESUME HERE block (replace, never append); older history in project_planner_handoff_2026_10_15_archive.md
+- [Filing PR hygiene](feedback_filing_pr_hygiene.md) — no task ids in references:, no unsigned RFC ids or sibling task ids in prose (empty DoR message), planner may lease-push its own filing branches since DEC-0264 (2026-10-21), never re-file, rebuild dist after ff, hook blocks command text
+- [Five-step production algorithm](feedback_five_step_production_algorithm.md) — operator 2026-10-10: question requirements, delete, simplify, accelerate, automate, in that order; every fix names the steps
+- [HANDOFF 2026-10-06/07 — READ FIRST](project_planner_handoff_2026_10_06.md) — planner state appended 2026-10-07 11:40 PDT: red PRs for dispatch, DEC-0061 open, unpushed file-756, AISDLC-757 filing for local-trades, VS Code tasks fix
+- [Release waits for the named unblocker PR](feedback_release_waits_for_named_unblocker.md) — operator 2026-10-10: 0.25.0 missed the 756 hook fix, forced 0.26.0 next day
+- [Continuous handoff + auto clear](feedback_continuous_handoff_auto_clear.md) — operator 2026-10-08: handoff state is always current; clear at any moment; automatic clear at threshold (AISDLC-766)
+- [Pattern C MCP routing races](pattern-c-mcp-routing-races-concurrent-sessions.md) — task_edit misroutes to wrong worktree under concurrent execute sessions
+- [Lease push two-call form](lease-push-two-call-form.md) — hook accepts lease push only as a lone command with cwd in the task worktree
+- [Worktree hooks missing](worktree-hooks-missing-ignore-scripts.md) — --ignore-scripts leaves no .husky/_ so no hooks run
+- [Operator-dispatch handoff](operator-dispatch-handoff.md) — 2026-10-06 17:05: how to run the tick, one-slot rule, queue, open PRs; dispatch resumes from it after each self-clear
+- [Route questions via planner](route-questions-via-planner.md) — never ask the operator directly
+- [Dispatch clears finished executors](dispatch-clears-finished-executors.md) — /clear an executor once it reports done, then hand it the next task
+- [Velocity-first governance (DEC-0048)](velocity-first-governance-rule.md) — new rules need a Velocity impact section
+- [Autonomous mode: stop asking](feedback_autonomous_mode_stop_asking.md) — 2026-05-25 operator pushback
+- [Internal issues via backlog, not gh](feedback_internal_issues_via_backlog.md) — gh issues are for EXTERNAL contributors only
+- [Release waits for its brief to drain](feedback_release_pr_arm_is_standing.md) — operator 2026-10-17: release-please PR gated on the "to release" brief fully done; planner reports readiness, operator says release; CORRECTED from the 01:20Z "arm on green"
+- [PRs auto-armed, never ask to merge](feedback_prs_auto_armed_never_ask_to_merge.md) — operator 2026-10-09: only red checks block landing; never ask him to arm or hand-merge
+- [Never Skip Reviews](feedback_never_skip_reviews.md) — NEVER merge with unaddressed CHANGES_REQUESTED or failing checks
+- [Review Severity Policy](feedback_review_severity_policy.md) — merge on APPROVE with suggestions
+- [NEVER Merge PRs](feedback_never_merge_prs.md) — only humans merge PRs, Claude must never run gh pr merge
+- [Never Paste Secrets](feedback_never_paste_secrets.md) — flag immediately if user pastes tokens/keys, advise rotation
+- [Rebase Not Merge](feedback_rebase_not_merge.md) — always rebase feature branches onto main, never merge main in
+- [Team Roles for RFC Sign-off](project_team_roles.md) — dominique = Engineering + Operator
+- [CLAUDE.md is not a changelog](feedback_claude_md_no_changelog.md) — don't append per-PR explanatory bullets
+- [Pull main + rebase open PRs proactively](feedback_pull_main_proactively.md) — fetch+rebase before every push (not just ancestor check)
+- [Design for adopters from day one](feedback_design_for_adopters_first.md) — prescriptive framework
+- [Decision fatigue signal](feedback_decision_fatigue_signal.md) — when operator says "exhausted/can't answer more questions": stop OQ walkthroughs, switch to autonomous…
+- [ALWAYS act on reviewer findings](feedback_act_on_reviewer_findings.md) — critical/major BLOCK ship
+- [Subagent model selection — Sonnet for dev + code/test reviewers, Opus for security only](feedback_subagent_model_selection.md) — per-role model split (PR #327) keeps subagent costs ~5x lower
+- [ALWAYS spawn the 3 reviewer subagents on every PR you author](feedback_always_spawn_reviewers.md) — never skip even when CI's `Post Review Results: skipped (budget exhausted)` makes things look green
+- [ALWAYS sign attestation on PRs that touch code paths](feedback_always_sign_attestation.md) — don't bypass attestation-sign hook just because no `.active-task` sentinel exists
+- [Bash session cwd persists across tool calls](feedback_bash_cwd_persists.md) — after any `cd`, subsequent calls inherit it
+- [Dev subagents open a DRAFT PR by design](feedback_dev_subagents_violate_no_push.md) — CORRECTED 2026-06-08: developer DoD REQUIRES rebase+push+gh pr create --draft + writing the PR body (AISDLC-218)
+- [No agent scope creep](feedback_no_agent_scope_creep.md) — agents must stop at original-ask boundary
+- [Parent worktree is read-only — even for docs](feedback_parent_worktree_read_only.md) — never `git checkout -b` or edit in the parent ai-sdlc/
+- [80% coverage is non-negotiable](feedback_coverage_gate_authority.md) — never re-arm auto-merge or use AI_SDLC_SKIP_COVERAGE_GATE=1 when patch coverage drops below 80%
+- [Pre-push gate discipline](feedback_pre_push_gate_discipline.md) — NEVER push with AI_SDLC_SKIP_* env vars as routine shortcut
+- [One PR per task — no separate "file the issue" PR](feedback_one_pr_per_task.md) — dispatch dev with task body inline
+- [Default to pair, not dispatch](feedback_default_to_pair_not_dispatch.md) — "let's work on X" = collaborate in-session, NOT dispatch a subagent
+- [Use /ai-sdlc execute, don't hand-roll](feedback_use_execute_not_hand_roll.md) — when operator says "ship/execute X", invoke `/ai-sdlc execute AISDLC-N` from slash command body
+- [Operator's name is Dominique Legault](user_operator_name.md) — local git config says "Dominique Demers" but that's wrong
+- [Don't escalate operational decisions](feedback_dont_escalate_operational_decisions.md) — MAJOR-mechanical → fix inline
+- [Run rubric, pick recommendation, execute — don't ask](feedback_timebox_operator_decisions.md) — operator: "cost of waiting > wrong decision"
+- [Flip draft → ready after reconcile](feedback_flip_draft_ready_after_reconcile.md) — `gh pr ready <pr#>` after sign+push. Auto-merge can't fire on draft. Easy-to-forget step the skill bodies handle…
+- [RFC walkthrough always generates tasks](feedback_rfc_walkthrough_generates_tasks.md) — after OQ resolution + sign-off, generate phase tasks in same PR
+- [Workflow-edit rule is external-only](feedback_workflow_edit_rule_scope.md) — "never edit .github/workflows" guards EXTERNAL agents
+- [Diagnose CI from the real FAIL line](feedback_diagnose_ci_from_real_fail_line.md) — extract actual not-ok/# fail summary FIRST
+- [Codex quota → fall back to Claude-native reviewers](feedback_codex_quota_fallback.md) — codex usage-limit yields a fake CRITICAL verdict
+- [RFC born Signed Off in one PR](feedback_rfc_born_signed_off_one_pr.md) — a NEW RFC can be born at any lifecycle (incl. Signed Off) in ONE PR (gate only blocks skips for EXISTING RFCs)
+- [Governance hook over-blocks doc/shell commands](feedback_governance_hook_overblocks_doc_commands.md) — AISDLC-602 hook (live on main 2026-09-07) blocks ANY Bash command TEXT containing the pr-merge phrase…
+- [Lease pushes always authorized](feedback_lease_push_always_authorized.md) — operator 2026-10-03: never ask again
+- [Unpinned model aliases](feedback_unpinned_model_aliases.md) — operator 2026-10-03: use sonnet/opus aliases, never old versioned ids
+- [Worktree Node version + hooks](feedback_worktree_node_version_and_hooks.md) — use nvm v22.23.2 for pnpm install in a fresh worktree
+- [Parent-folder session limits](feedback_parent_folder_session_limits.md) — session rooted in the non-git parent cannot lease-push (push fast-forward only) and needs emit-leaf --project-dir
+- [Decisions, not work](feedback_decisions_not_work.md) — operator 2026-10-03: he controls decisions, agents do the work
+- [Planner delegates, does not execute](feedback_planner_delegates_not_executes.md) — operator 2026-10-03 + 10-06: planner plans and files only; pushes/rebases/signing go to dispatch or executors, never "quick unblocks" in the planner
+- [Operator handover: agents run dev + admin](feedback_operator_handover_autonomy.md) — operator 2026-10-03: he reviews direction only
+- [Governance rules need velocity scrutiny](feedback_governance_rules_velocity_scrutiny.md) — operator 2026-10-04: velocity is top priority
+- [.ai-sdlc config block is external-only](feedback_config_block_is_external_only.md) — operator 2026-10-04: only untrusted external PRs are barred from changing .ai-sdlc config
+- [Priority: velocity + token cost, less governance](feedback_priority_velocity_and_token_cost.md) — operator 2026-10-04: catch up on the backlog
+- [Archived index](MEMORY-archive.md) — older entries (withdrawn, resolved, superseded, finished drains); the note files are still in this folder
+- [Uniform bypass permission mode](feedback_uniform_bypass_permission_mode.md) — operator 2026-10-09: every roster session incl. planner launches bypass; AISDLC-752 (#1259) lands first
+- [Hold only blocked or irreversible items for Dominique](feedback_overnight_hold_only_blocked_or_irreversible.md) — 2026-10-05: test each "decision for you" (irreversible? hook-blocked? loosens beyond his decision?)
+- [One task per context](feedback_one_task_per_context.md) — operator 2026-10-06: executors one task then clear
+- [Closed PR is wasted work](feedback_closed_pr_is_wasted_work.md) — operator 2026-10-13: never re-file to dodge a push refusal; explain the avoidable cause before asking to close; closed-unmerged PRs are a KPI
+- [DEC-0187 re-enqueue procedure](reference_dec_0187_reenqueue.md) — remove-verdict --from failed + write-manifest with resume note and prUrl, when requeue hits the cap
+- [Fix-round resume needs an explicit developer pass](reference_fix_round_resume_needs_developer_pass.md) — 2026-10-26: unchanged patch id makes a resume skip the developer and fail non-ff; note must open with "Developer pass required"
+- [Stability before unsupervised spend](feedback_stability_before_unsupervised_spend.md) — operator 2026-10-14: no watchdog/relaunch automation until burn is controlled; deterministic first, Qwen 27B or JEV for low-stakes decisions
+- [Dispatch reports blockers to planner](feedback_dispatch_report_blockers_to_planner.md) — operator 2026-10-14: message the planner on every brief/blocker even when told "stay idle"; idle limits actions, not reporting
+- [Hold limits actions, not reporting](feedback_hold_limits_actions_not_reporting.md) — operator 2026-10-14: never send "stay idle"; a hold keeps SendMessage reporting up the tiers; use cli-hierarchy hold once AISDLC-899 lands
+- [Ask decisions immediately when present](feedback_ask_decisions_immediately_when_present.md) — operator 2026-10-14: open AskUserQuestion the moment a class (c)/rubric question surfaces; never park it in a status line
+- [Three-executor limit lifted 2026-10-21](project_three_executors_until_rate_limit_fix.md) — webhook up, delta/epsilon may claim; re-hold if gh core remaining < 2000
+- [Dispatch waits for 902](project_dispatch_wait_for_902.md) — shared Build&Test red = RFC-0054 status; after 902 merges requeue 833/469/829, rerun 1571
+- [Check planner holds before routing](feedback_check_planner_holds_before_routing.md) — planner 2026-10-15: read RESUME HERE notes first; #1596/#1568 wait for pr-ready, #1543 held, #1594 after #1601
+- [Inflight PR head change: no route](feedback_inflight_pr_head_change_no_route.md) — planner 2026-10-15: never route a PR to the planner on a head change while its task is inflight; report only on done/failed/escalation
+- [582 rate-limit rerun hold](project_582_rate_limit_rerun_hold.md) — planner 2026-10-15: minimise gh calls ~15 min, rerun failed jobs on #1521 once, no reenter, report when green
+- [884 verdict rewrite pending](project_884_verdict_rewrite_pending.md) — planner 2026-10-15: once #1647 ready+armed, flip 884 failed→success so 885 is released
+- [Quota freeze until 02:55Z](project_quota_freeze_0255z.md) — planner 2026-10-16: no reruns/arms until 02:55Z, then #1641 alone, then one PR per 10 min
+- [1608 waits for 883 verdict](project_1608_wait_for_883_verdict.md) — planner 2026-10-16: after 883 verdict, conditional reenter #1608 with guard-exemption note; ignore land-prep not-in-done refusals
+- [855 hold for 946](project_855_hold_for_946.md) — planner 2026-10-16: #1652 held for 946; no reenter/push/cleanup; report only on remote head change or 946 landing
+- [Track tooling limitations](feedback_track_tooling_limitations.md) — operator 2026-10-16: every gh/GitHub/git/Actions ceiling we work around goes in docs/operations/tooling-limitations.md (AISDLC-964) with its headroom metric; name the ceiling when ruling on a quota red
+- [Workflow graph audit 2026-10-18](project_workflow_graph_audit_2026_10_18.md) — operator asked for graph + audit + composable config; artifact WDYWRxGSnYUUn7cy8GphWZ, 16 findings; RFC-0056 filed as PR #1762 (docs lane); next: OQ walkthrough, then phase 1
+- [Codex quota standing reenter](project_codex_quota_standing_reenter.md) — planner 2026-10-21 until 11-19: reenter fake-CRITICAL iterate-needed verdicts with AI_SDLC_REVIEWER_HARNESS=claude note, no ping
+- [Dispatch standing operator items](project_dispatch_standing_operator_items.md) — planner 2026-10-21: #1780/#1779/#1813/#1736, 28 ingest errors, ~45 worktrees = operator items; never re-route
