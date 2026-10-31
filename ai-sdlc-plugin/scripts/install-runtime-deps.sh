@@ -89,7 +89,7 @@ fi
 #   @ai-sdlc/plugin-mcp-server@0.9.2
 #
 # AISDLC-607: the pipeline-cli floor shown above must reflect the real pinned
-# range in plugin.json (kept in sync by sync-plugin-runtime-deps.mjs). pipeline-cli
+# range in plugin.json (written by release-please extra-files, DEC-0278). pipeline-cli
 # >=0.24.1 carries the cli-merge-if-eligible fix that lets governed merges work in
 # consumer / no-branch-protection repos; this plugin release republishes so adopters
 # are prompted to update and pull it.
@@ -97,7 +97,7 @@ fi
 # AISDLC-600: the pipeline-cli/orchestrator pins are forward-floating ranges
 # (">=X <1.0.0"), not carets — a caret on a 0.x version cannot resolve past
 # its own minor (the "caret-0.x trap"), so it could never self-heal forward
-# across a 0.x minor bump. See sync-plugin-runtime-deps.mjs's header comment
+# across a 0.x minor bump. See DEC-0278
 # for the full rationale.
 #
 # Exits 1 with an actionable message when `runtimeDependencies` is missing or

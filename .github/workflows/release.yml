@@ -72,60 +72,6 @@ jobs:
           # for the canonical rationale.
           token: ${{ secrets.AI_SDLC_PAT }}
 
-  sync-plugin-runtime-deps:
-    # AISDLC-574 / AISDLC-956: post-merge pin sync. release-please bumps
-    # orchestrator/pipeline-cli's OWN version on the release branch but
-    # cannot source a sibling component's version into the plugin's
-    # `runtimeDependencies` pins. The pre-merge fixup push that used to cover
-    # this (AISDLC-577) was a SECOND push to `release-please--branches--main`
-    # on every push to main (two `synchronize` events, a cancelled gate run
-    # each time). It is gone: the release branch now takes exactly ONE push
-    # (release-please's), `scripts/sync-plugin-runtime-deps.mjs --check`
-    # tolerates the expected pin lag on that branch, and this job lands the
-    # pins on main right after the release lands, through a PR (AISDLC-1059):
-    # main is protected, so a direct push is refused.
-    name: Sync plugin runtimeDependencies pins
-    needs: release-please
-    if: |
-      needs.release-please.outputs['orchestrator--release_created'] == 'true' ||
-      needs.release-please.outputs['pipeline-cli--release_created'] == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # AI_SDLC_PAT so this commit triggers downstream CI (GITHUB_TOKEN
-          # commits are silently excluded from workflow triggers) — same
-          # rationale as the release-please step above.
-          token: ${{ secrets.AI_SDLC_PAT }}
-          ref: main
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-      - name: Sync runtimeDependencies pins to released versions
-        run: node scripts/sync-plugin-runtime-deps.mjs
-      - name: Open a PR with the pin updates if any
-        env:
-          GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
-        run: |
-          if git diff --quiet -- ai-sdlc-plugin/plugin.json ai-sdlc-plugin/.claude-plugin/plugin.json; then
-            echo "[sync-plugin-runtime-deps] no drift, nothing to commit"
-            exit 0
-          fi
-          VERSION="$(node -p "require('./ai-sdlc-plugin/plugin.json').version")"
-          BRANCH="chore/sync-runtime-pins-${VERSION}"
-          git config user.email "release-bot@ai-sdlc.io"
-          git config user.name "AI-SDLC Release Bot"
-          git checkout -b "$BRANCH"
-          git add ai-sdlc-plugin/plugin.json ai-sdlc-plugin/.claude-plugin/plugin.json
-          git commit -m "chore(plugin): sync runtimeDependencies pins to released runtime (AISDLC-574)"
-          git push -u origin "HEAD:refs/heads/${BRANCH}"
-          gh pr create --base main --head "$BRANCH" \
-            --title "chore(plugin): sync runtimeDependencies pins to ${VERSION} (AISDLC-574)" \
-            --body "Post-release pin sync. Main is protected, so the pins land through this PR (AISDLC-1059)."
-
   publish-npm:
     name: Publish npm packages
     needs: release-please
@@ -153,12 +99,6 @@ jobs:
           cache: pnpm
           registry-url: 'https://registry.npmjs.org'
       - run: pnpm install --frozen-lockfile
-      # AISDLC-956: the release landed with stale plugin pins (no second
-      # push to the release branch); sync them in the working tree so the
-      # `sync:plugin-runtime-deps:check` leg of `pnpm test` passes. The
-      # sync-plugin-runtime-deps job commits the same change to main.
-      - name: Sync plugin runtimeDependencies pins (working tree only)
-        run: node scripts/sync-plugin-runtime-deps.mjs
       - run: pnpm build
       - run: pnpm test
       # Regenerate npm-shrinkwrap.json for the MCP server so each published

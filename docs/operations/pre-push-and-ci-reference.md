@@ -40,7 +40,7 @@ Workflows MUST invoke pipeline-cli CLIs via `node pipeline-cli/bin/cli-XXX.mjs` 
 
 ### Plugin runtime pin check (AISDLC-1068)
 
-`pnpm sync:plugin-runtime-deps:check:pr` (wired into `pnpm test` and the PR gate, AISDLC-1068) checks only that the two plugin manifests agree; `pnpm sync:plugin-runtime-deps:check` (workspace comparison) runs in `main-health-monitor.yml`.
+Plugin runtime pins are verified by `.github/workflows/__tests__/release-please-config.test.mjs` (DEC-0278, AISDLC-1142).
 
 ### Claude plugin validator (AISDLC-1060)
 

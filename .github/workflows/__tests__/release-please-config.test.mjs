@@ -240,3 +240,43 @@ describe('release-please-config.json — AISDLC-401', () => {
     }
   });
 });
+
+describe('plugin runtime pins ride the release PR (DEC-0278, AISDLC-1142)', () => {
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  const read = (p) => JSON.parse(readFileSync(join(root, p), 'utf-8'));
+  const config = read('release-please-config.json');
+  const released = read('.release-please-manifest.json')['pipeline-cli'];
+  const manifests = ['ai-sdlc-plugin/plugin.json', 'ai-sdlc-plugin/.claude-plugin/plugin.json'];
+  const pkgs = ['@ai-sdlc/orchestrator', '@ai-sdlc/pipeline-cli'];
+
+  it('the plugin is in the node-packages linked-versions group', () => {
+    const group = config.plugins.find((p) => p.type === 'linked-versions');
+    assert.equal(group.groupName, 'node-packages');
+    assert.ok(group.components.includes('ai-sdlc-plugin'));
+  });
+
+  it('extra-files write both pins into both plugin manifests', () => {
+    const extra = config.packages['ai-sdlc-plugin']['extra-files'];
+    for (const file of ['plugin.json', '.claude-plugin/plugin.json']) {
+      for (const pkg of pkgs) {
+        assert.ok(
+          extra.some(
+            (e) =>
+              e.type === 'json' &&
+              e.path === file &&
+              e.jsonpath === `$.runtimeDependencies['${pkg}']`,
+          ),
+          `${file} must have an extra-files entry for ${pkg}`,
+        );
+      }
+    }
+  });
+
+  for (const file of manifests) {
+    for (const pkg of pkgs) {
+      it(`${file} pins ${pkg} to the released pipeline-cli version`, () => {
+        assert.equal(read(file).runtimeDependencies[pkg], released);
+      });
+    }
+  }
+});

@@ -359,8 +359,8 @@ export function commitAuthorRefusal(commits: PrCommit[], authors: string[]): str
 // ── File content validation ─────────────────────────────────────────────
 
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
-/** Pin-sync value shape (scripts/sync-plugin-runtime-deps.mjs): `>=X.Y.Z <1.0.0`. */
-const PIN = /^>=\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)? <1\.0\.0$/;
+/** Pin value shape: the exact release version written by release-please (DEC-0278), or a legacy `>=X.Y.Z <1.0.0` range. */
+const PIN = /^(?:>=)?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?: <1\.0\.0)?$/;
 
 /**
  * The only JSON paths a release may change, per file, with the shape the new

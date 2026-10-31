@@ -1,7 +1,10 @@
 ---
 id: AISDLC-1142
-title: 'Implement DEC-0278: the release PR bumps the plugin runtime pins itself; delete the post-release pin-sync job and the main-health pin check (AISDLC-1115 was closed without the work)'
-status: To Do
+title: >-
+  Implement DEC-0278: the release PR bumps the plugin runtime pins itself;
+  delete the post-release pin-sync job and the main-health pin check
+  (AISDLC-1115 was closed without the work)
+status: In Progress
 assignee: []
 created_date: '2026-10-31'
 labels:
@@ -13,12 +16,17 @@ references:
   - release-please-config.json
   - .github/workflows/release.yml
   - .github/workflows/main-health-monitor.yml
-  - scripts/sync-plugin-runtime-deps.mjs
   - ai-sdlc-plugin/plugin.json
   - ai-sdlc-plugin/.claude-plugin/plugin.json
   - docs/operations/release-flow.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-31'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/sync-plugin-runtime-deps.mjs'
+    resolution: flagged
+drift_checked: '2026-10-31'
 ---
 
 ## Description
@@ -47,3 +55,7 @@ Velocity impact: main stops going red after every release; no post-release PR to
 ## Notes
 
 Pre-condition: #2209 (pins to 0.39.0, stopgap that clears main today) lands first or is superseded by this PR; whichever lands second must not reintroduce the range form. The first release after this lands moves the plugin from 0.34.0 onto the shared 0.39.x line; `docs/operations/release-flow.md` names that version-line merge. Decision record: DEC-0278. Origin: dispatch recommendation 2026-10-31 and planner research showing AISDLC-1115 closed without the work (process defect: bulk completion by #2166 on filing PRs, worth a separate check in `check-task-moved.sh` later, not in scope here).
+
+## Verification
+
+`pnpm build && pnpm test && pnpm lint && pnpm format:check` (executor env vars unset): pipeline-cli vitest all passed; `pnpm test:gates` summary `# pass 3780 / # fail 0`; `pnpm test:release-please-config` `# pass 32 / # fail 0`; lint and format clean.

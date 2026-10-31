@@ -105,7 +105,6 @@ Local cost and failure rate are **not measured** (hooks write no run history). "
 | `pnpm test:gates` | glob runner (new) | AISDLC-805 | engineering | KEEP | `scripts/run-gate-tests.mjs` |
 | `pnpm rfc:check` | RFC docs-drift | AISDLC-165 | engineering | KEEP | |
 | `pnpm dark-code:check` | no dark modules | AISDLC-552 | engineering | KEEP | |
-| `pnpm sync:plugin-runtime-deps:check:pr` | plugin manifests agree (AISDLC-1068) | unknown | engineering | KEEP | |
 
 Before and after: all 75 test files named by the old chain are discovered by the runner (verified by diffing the old set, extracted from the chain, against `node scripts/run-gate-tests.mjs --list`; zero missing). The runner discovers 36 test files the old chain did not name explicitly (some were covered by the old `ai-sdlc-plugin/commands/*.test.mjs` glob; the rest were never chained, for example `check-backlog-ascii`, `check-skip-ci-marker`, `dor-ingress`, and the plugin hook and command tests), because they live in a discovered directory. Two discovered files fail on `main` today and are listed in the runner's shrink-only `KNOWN_RED` map with reasons; both are findings:
 
@@ -209,4 +208,4 @@ Nothing governance or trust-chain is deleted in this PR. Each item below is a cl
 
 - `scripts/check-rm-guard.test.mjs` and `ai-sdlc-plugin/agents/rebase-resolver.test.mjs` were never chained and fail on `main`; each needs a fix task (recorded in the runner's `KNOWN_RED` map, shrink-only).
 - The old chain did not name 36 existing test files explicitly; they now run.
-- `check-followups-on-push.sh`, `lint-staged`, `typecheck-workspace.mjs`, `sync:plugin-runtime-deps:check`, `test-python` and three reviewer agents have no recorded origin.
+- `check-followups-on-push.sh`, `lint-staged`, `typecheck-workspace.mjs`, `test-python` and three reviewer agents have no recorded origin.
