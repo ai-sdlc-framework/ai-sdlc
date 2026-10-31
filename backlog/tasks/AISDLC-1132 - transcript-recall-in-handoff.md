@@ -14,7 +14,6 @@ references:
   - pipeline-cli/src/hierarchy/context-size.ts
   - pipeline-cli/src/usage/transcript-inspect.ts
   - pipeline-cli/src/usage/line-reader.ts
-  - .claude/hooks/archive-transcript.sh
   - ai-sdlc-plugin/commands/planner.md
   - ai-sdlc-plugin/commands/executor.md
   - docs/operations/cli-hierarchy.md
@@ -24,7 +23,7 @@ dispatchable: true
 
 ## Description
 
-After a `/clear` (operator-requested or the 150k rotation) the session resumes from `handoff write`, which is generated from board and catalog state only. It cannot say what the agent was in the middle of, what the operator last asked, or what a tool call returned a minute earlier, so handoffs are routinely incomplete and the resumed agent guesses. The information is not lost: `/clear` keeps the same session id and transcript file, and every turn before the clear sits in `~/.claude/projects/<encoded cwd>/<sessionId>.jsonl` above a `SessionStart:clear` marker. On a true session end, the SessionEnd hook `.claude/hooks/archive-transcript.sh` copies that file into `.claude/transcripts/`. Nothing reads it back today. `transcript-inspect.ts` already locates clear markers and tool names but drops message text by design, and `context-size.ts` already resolves a role's live transcript path.
+After a `/clear` (operator-requested or the 150k rotation) the session resumes from `handoff write`, which is generated from board and catalog state only. It cannot say what the agent was in the middle of, what the operator last asked, or what a tool call returned a minute earlier, so handoffs are routinely incomplete and the resumed agent guesses. The information is not lost: `/clear` keeps the same session id and transcript file, and every turn before the clear sits in `~/.claude/projects/<encoded cwd>/<sessionId>.jsonl` above a `SessionStart:clear` marker. On a true session end, the SessionEnd hook (`archive-transcript.sh` under `.claude/hooks/`, PR #2201) copies that file into `.claude/transcripts/`. Nothing reads it back today. `transcript-inspect.ts` already locates clear markers and tool names but drops message text by design, and `context-size.ts` already resolves a role's live transcript path.
 
 **Five-step review (requirements first).**
 1. Requirement questioned: should the agent write a better handoff instead? It cannot: the rotation fires mid-work and the agent does not know what it will forget. Reading back what happened is the only source that is always complete.
