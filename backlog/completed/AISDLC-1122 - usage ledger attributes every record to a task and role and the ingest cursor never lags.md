@@ -61,11 +61,11 @@ Added `cli-usage by-task`, `by-role` and `by-day` with work and polling spend in
 - docs/operations/usage-ledger.md
 
 ## Design decisions
-Full `pnpm test` was run in an environment with AI_SDLC_EXECUTOR_TASK=AISDLC-1122 set, which caused the 15 failures above. I waived them under DEC-0202. I did not re-run the full suite with the variable unset. The `testWaiver.untouched: true` claim is only partly true: my diff does not change executor-start or hierarchy.test.ts, but it does add a test to dispatch-loop.test.ts, which was in the passing re-run. AC3 (at least 98 percent coverage against a transcript recount) needs a live-machine recount and was not measured. AC1 is covered only by the existing attribution code and tests plus the new newest-first ordering and per-tick ingest. I did not check a live ledger. The per-tick ingest in `pipeline-cli/src/cli/hierarchy.ts` spawns `pipeline-cli/bin/cli-usage.mjs ingest --max-seconds 25` detached, and only when that bin exists under the repo root.
+The earlier waiver is withdrawn: the full suite was re-run with the variable unset (`env -u AI_SDLC_EXECUTOR_TASK pnpm test`) and exited 0 with `# pass 3790`, `# fail 0` on the node:test summary and every vitest package green. The detached ingest spawn in `pipeline-cli/src/cli/hierarchy.ts` now has an error listener so a failed spawn cannot crash the tick. AC3 (at least 98 percent coverage against a transcript recount) needs a live-machine recount and was not measured. AC1 is covered only by the existing attribution code and tests plus the new newest-first ordering and per-tick ingest. I did not check a live ledger. The per-tick ingest in `pipeline-cli/src/cli/hierarchy.ts` spawns `pipeline-cli/bin/cli-usage.mjs ingest --max-seconds 25` detached, and only when that bin exists under the repo root.
 
 ## Verification
 - `pnpm build` — passed
-- `pnpm test` — waived
+- `env -u AI_SDLC_EXECUTOR_TASK pnpm test` — passed (exit 0; `# pass 3790`, `# fail 0`)
 - `pnpm lint` — passed
 - `pnpm format:check` — passed
 - 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers; review-full)

@@ -1130,11 +1130,14 @@ export async function runHierarchyCli(
             (() => {
               const bin = path.join(repoRoot, 'pipeline-cli', 'bin', 'cli-usage.mjs');
               if (!existsSync(bin)) return;
-              spawn(process.execPath, [bin, 'ingest', '--max-seconds', '25'], {
+              const child = spawn(process.execPath, [bin, 'ingest', '--max-seconds', '25'], {
                 cwd: repoRoot,
                 detached: true,
                 stdio: 'ignore',
-              }).unref();
+              });
+              // A failed spawn must never crash the tick.
+              child.on('error', () => undefined);
+              child.unref();
             }),
           // AISDLC-981: the tick owns the parent; the open-PR list is the wake's snapshot.
           parentUpkeep:
