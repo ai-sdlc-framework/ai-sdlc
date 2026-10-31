@@ -1264,7 +1264,11 @@ rewritten by hand. For a manifest with `fixesPr`, Step 2 uses `prHeadRef` (else 
 --json headRefName`) as the branch, Step 3 checks that branch out, and Step 11 lease-pushes to it
 (DEC-0264), appends `Fixed by <task id>` to the existing PR body and creates no PR; the task file
 moves to `backlog/completed/` in that push and the verdict's PR is the fixed PR. A manifest without
-`fixesPr` behaves as before. A fork PR head is not supported.
+`fixesPr` behaves as before. A fork PR head is not supported. One resolver
+(`findTaskFile` in `dor/dispatch-readiness.ts`) finds the task file for enqueue: it scans `backlog/tasks/`
+then `backlog/completed/` and accepts `<id> - <title>.md` and `<id>-<slug>.md`, any case. A task that
+resolves to `backlog/completed/` enqueues only with `fixesPr` (so a bot PR on a finished task is
+repairable); without it the enqueue fails with `task <id> is completed; fix-on-PR entries need fixesPr`.
 
 **Scheduler** (`pipeline-cli/src/hierarchy/scheduler.ts`, `reconcile --watch`): a reconcile
 runs at start (session start or machine wake), within a 2 s debounce after the webhook

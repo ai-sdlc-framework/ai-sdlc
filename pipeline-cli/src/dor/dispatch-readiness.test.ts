@@ -22,6 +22,8 @@ import {
   checkDispatchReadinessBatch,
   findClosedPriorPRs,
   findShippedCommits,
+  findTaskFile,
+  findTaskFileRelative,
 } from './dispatch-readiness.js';
 
 let tmp: string;
@@ -335,5 +337,33 @@ describe('canonicaliseTaskId', () => {
 
   it('falls back to upper-casing the whole string for non-matching input', () => {
     expect(canonicaliseTaskId('garbage')).toBe('GARBAGE');
+  });
+});
+
+describe('findTaskFile / findTaskFileRelative (AISDLC-1141)', () => {
+  it('resolves both shapes in both directories, any case, without prefix collisions', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'find-task-'));
+    try {
+      mkdirSync(join(dir, 'backlog', 'tasks'), { recursive: true });
+      mkdirSync(join(dir, 'backlog', 'completed'), { recursive: true });
+      writeFileSync(join(dir, 'backlog', 'tasks', 'aisdlc-954-some-slug.md'), '');
+      writeFileSync(join(dir, 'backlog', 'tasks', 'AISDLC-962 - Titled task.md'), '');
+      writeFileSync(join(dir, 'backlog', 'tasks', 'aisdlc-631.1 - Subtask.md'), '');
+      writeFileSync(join(dir, 'backlog', 'completed', 'AISDLC-574 - Done.md'), '');
+      writeFileSync(join(dir, 'backlog', 'completed', 'aisdlc-575-slug.md'), '');
+      expect(findTaskFileRelative('AISDLC-954', dir)).toBe('backlog/tasks/aisdlc-954-some-slug.md');
+      expect(findTaskFileRelative('aisdlc-962', dir)).toBe(
+        'backlog/tasks/AISDLC-962 - Titled task.md',
+      );
+      expect(findTaskFileRelative('AISDLC-574', dir)).toBe(
+        'backlog/completed/AISDLC-574 - Done.md',
+      );
+      expect(findTaskFileRelative('AISDLC-575', dir)).toBe('backlog/completed/aisdlc-575-slug.md');
+      expect(findTaskFileRelative('AISDLC-95', dir)).toBeUndefined();
+      expect(findTaskFileRelative('AISDLC-631', dir)).toBeUndefined();
+      expect(findTaskFile('AISDLC-1', dir)).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

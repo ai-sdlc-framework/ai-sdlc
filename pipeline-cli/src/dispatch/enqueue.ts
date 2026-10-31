@@ -101,6 +101,9 @@ export function enqueueTasks(
     if (isOnBoard(boardDir, id)) throw new Error(`task ${id} is already on the board`);
     const taskFile = defaults.resolveTaskFile(id);
     if (!taskFile) throw new Error(`no backlog task file found for ${id}`);
+    if (taskFile.startsWith('backlog/completed/') && entry.fixesPr === undefined) {
+      throw new Error(`task ${id} is completed; fix-on-PR entries need fixesPr`);
+    }
     for (const dep of entry.after ?? []) {
       if (!TASK_ID_RE.test(dep))
         throw new Error(`'${dep}' (after, for ${id}) is not a valid task id`);

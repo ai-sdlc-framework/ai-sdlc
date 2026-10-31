@@ -184,7 +184,8 @@ import {
 } from '../hierarchy/turn-budget.js';
 import { resolveArtifactsDir } from '../routing/artifacts-dir.js';
 import { loadUsageConfig } from '../usage/usage-config.js';
-import { findTaskFile, parseArgv, resolveBaseSha } from './dispatch.js';
+import { findTaskFileRelative } from '../dor/dispatch-readiness.js';
+import { parseArgv, resolveBaseSha } from './dispatch.js';
 import { DEFAULT_HARNESS_BINARY } from '../harness-defaults.js';
 
 const USAGE = `Usage: cli-hierarchy <command> [options]
@@ -510,7 +511,7 @@ function createDemoDeps(deps: HierarchyDeps, overrides: Partial<DemoDeps> = {}):
       hierarchyStatus(deps).rows.filter((r) => r.entry.role === 'executor' && r.state === 'idle')
         .length,
     taskState: (taskId) => {
-      const file = findTaskFile(deps.cwd, taskId);
+      const file = findTaskFileRelative(taskId, deps.cwd);
       if (!file) return null;
       const head = readFileSync(path.join(deps.cwd, file), 'utf-8').split('\n---')[0] ?? '';
       return {
@@ -1057,7 +1058,7 @@ export async function runHierarchyCli(
               enqueueTasks(deps.boardDir, entries, {
                 baseSha: resolveBaseSha(repoRoot),
                 dispatchedBy: worker,
-                resolveTaskFile: (id) => findTaskFile(repoRoot, id),
+                resolveTaskFile: (id) => findTaskFileRelative(id, repoRoot),
                 workDir: repoRoot,
               })),
           clear: (o) =>
@@ -1109,7 +1110,7 @@ export async function runHierarchyCli(
                   cwd: repoRoot,
                   reenteredBy: worker,
                   resolveBaseSha: () => resolveBaseSha(repoRoot),
-                  resolveTaskFile: (tid) => findTaskFile(repoRoot, tid),
+                  resolveTaskFile: (tid) => findTaskFileRelative(tid, repoRoot),
                 },
               );
             },

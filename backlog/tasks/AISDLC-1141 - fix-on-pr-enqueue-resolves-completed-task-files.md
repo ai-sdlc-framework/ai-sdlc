@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1141
 title: 'Fix-on-PR enqueue resolves a task file in backlog/completed; a completed task without fixesPr is refused with a reason'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-31'
 labels:

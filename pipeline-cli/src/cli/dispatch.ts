@@ -196,6 +196,7 @@ import {
   writeResumeSignal,
   writeVerdict,
 } from '../dispatch/index.js';
+import { findTaskFileRelative } from '../dor/dispatch-readiness.js';
 import { computePatchId } from '../attestation/patch-id.js';
 import { formatSessionLine, listSessions, recordAgentSession } from '../dispatch/sessions.js';
 import { assertClaimHolder, completeTask, splitIdList } from '../dispatch/complete.js';
@@ -1423,7 +1424,7 @@ export async function runDispatchCli(
         const paths = enqueueTasks(boardDir, entries, {
           baseSha: flags['base-sha'] ?? resolveBaseSha(workDir),
           dispatchedBy: flags['dispatched-by'] ?? `operator-${process.pid}`,
-          resolveTaskFile: (id) => findTaskFile(workDir, id),
+          resolveTaskFile: (id) => findTaskFileRelative(id, workDir),
           workDir,
         });
         out({ ok: true, enqueued: entries.map((e) => e.taskId), paths });
@@ -1628,7 +1629,7 @@ export async function runDispatchCli(
             cwd: workDir,
             reenteredBy: caller.name,
             resolveBaseSha: () => flags['base-sha'] ?? resolveBaseSha(workDir),
-            resolveTaskFile: (id) => findTaskFile(workDir, id),
+            resolveTaskFile: (id) => findTaskFileRelative(id, workDir),
           },
         );
         // AISDLC-1053: say which path the next resume takes, so dispatch sees whether the note
@@ -1680,20 +1681,6 @@ export function resolveBaseSha(workDir: string): string {
     }
   }
   throw new Error('cannot resolve a base commit; pass --base-sha <sha>');
-}
-
-/** Repo-relative backlog task file for an id, or undefined. */
-export function findTaskFile(workDir: string, taskId: string): string | undefined {
-  const dir = path.join(workDir, 'backlog', 'tasks');
-  if (!existsSync(dir)) return undefined;
-  // Accept both `<id> - <title>.md` and the cli-file shape `<id>-<slug>.md`.
-  // A bare `<id>.md` or `<id>.1 - ...` (subtask) must not match.
-  const prefixes = [`${taskId.toLowerCase()} - `, `${taskId.toLowerCase()}-`];
-  const hit = readdirSync(dir).find((f) => {
-    const lower = f.toLowerCase();
-    return f.endsWith('.md') && prefixes.some((p) => lower.startsWith(p));
-  });
-  return hit ? path.posix.join('backlog', 'tasks', hit) : undefined;
 }
 
 /** Render the board listing: one line per manifest, grouped by state. */
