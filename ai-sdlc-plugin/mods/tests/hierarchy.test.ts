@@ -15,8 +15,10 @@ import {
   innerText,
   measuredTokens,
   recognisedTokens,
+  senderAddressOf,
   senderOf,
 } from '../../hooks/hierarchy/executor.ts';
+import { recordReceivedSender } from '../../hooks/hierarchy/dispatch.ts';
 import {
   PLANNER_RESUME_COMMAND,
   PLANNER_ROTATE_AT_TOKENS,
@@ -385,6 +387,58 @@ describe('hierarchy module: board busy predicate (AISDLC-1124)', () => {
         execFileSync('node', ['-e', BUSY_SCRIPT, '/nonexistent', 'w1', '1'], { encoding: 'utf8' }),
       ).held,
     ).toBeNull();
+  });
+});
+
+describe('hierarchy module: socket-path envelope (AISDLC-1090)', () => {
+  const sock = (name: string, text: string) =>
+    `<cross-session-message from="uds:/tmp/cc-socks/1.sock" from-name="${name}" from-mode="bypass">${text}</cross-session-message>`;
+
+  it('consumes enqueue and rotate whose sender is only in from-name', async () => {
+    const s = setup();
+    await s.start();
+    const recv = s.handlers.get('session.receive');
+    const next = vi.fn();
+    const r = await recv(
+      s.$,
+      { text: sock('ai-sdlc-operator-dispatch', 'enqueue AISDLC-1') },
+      next,
+    );
+    expect(r).toEqual({ consumed: 'hierarchy:enqueue' });
+    expect(ran(s)).toEqual([RESUME_COMMAND]);
+    expect(next).not.toHaveBeenCalled();
+    // rotate is no longer a message (AISDLC-1107): it passes through like the plain-from form does.
+    const m = { text: sock('ai-sdlc-operator-dispatch', 'rotate') };
+    expect(await recv(s.$, m, next)).toBeUndefined();
+    expect(next).toHaveBeenCalledWith(m);
+  });
+
+  it('splits the sender name from the socket address and records the address', async () => {
+    const raw = sock('ai-sdlc-operator-dispatch', 'hi');
+    expect(senderOf(raw)).toBe('ai-sdlc-operator-dispatch');
+    expect(senderAddressOf(raw)).toBe('uds:/tmp/cc-socks/1.sock');
+    expect(senderAddressOf(env('plain', 'x'))).toBe('plain');
+    expect(senderAddressOf('no envelope')).toBe('');
+    const calls: Array<{ command: string; args: string[] }> = [];
+    await recordReceivedSender(async (a) => void calls.push(a), '/b', 'me', raw);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args).toContain('/b/handoff/received-me.json');
+    expect(calls[0].args).toContain('uds:/tmp/cc-socks/1.sock');
+  });
+
+  it('passes a non-dispatch sender through unchanged, for executor and planner', async () => {
+    const s = setup();
+    await s.start();
+    const e = { text: sock('someone-else', 'enqueue x') };
+    expect(await s.handlers.get('session.receive')(s.$, e, s.next)).toBe(e);
+    expect(ran(s)).toEqual([]);
+    const p = setup({ role: 'planner', name: 'proj-planner' });
+    await p.start();
+    const recv = p.handlers.get('session.receive');
+    if (recv) {
+      const m = { text: sock('someone-else', 'hello') };
+      expect(await recv(p.$, m, p.next)).toBe(m);
+    }
   });
 });
 

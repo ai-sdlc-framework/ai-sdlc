@@ -217,7 +217,15 @@ export function innerText(raw: string): string {
 }
 
 export function senderOf(raw: string): string {
-  return /<cross-session-message\b[^>]*\bfrom="([^"]*)"/.exec(raw)?.[1] ?? '';
+  // The host now sends from="uds:/tmp/cc-socks/<pid>.sock" plus from-name="<session name>": prefer the name.
+  const tag = /<cross-session-message\b[^>]*>/.exec(raw)?.[0] ?? '';
+  return /\bfrom-name="([^"]*)"/.exec(tag)?.[1] ?? /\bfrom="([^"]*)"/.exec(tag)?.[1] ?? '';
+}
+
+/** The raw `from=` address (a `uds:/...sock` path on current hosts), used for reply allowlisting. */
+export function senderAddressOf(raw: string): string {
+  const tag = /<cross-session-message\b[^>]*>/.exec(raw)?.[0] ?? '';
+  return /\bfrom="([^"]*)"/.exec(tag)?.[1] ?? '';
 }
 
 export const DISPATCH_NAME = /(?:^|-)operator-dispatch(?:-\d+)?$/;
