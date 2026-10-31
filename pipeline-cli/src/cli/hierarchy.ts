@@ -165,6 +165,8 @@ import {
   webhookUp,
   webhookStatus,
   formatWebhookStatus,
+  recallTranscript,
+  resolveTranscriptSource,
 } from '../hierarchy/index.js';
 import { loadPrLifecycleConfig } from '../hierarchy/pr-lifecycle-config.js';
 import { createSnapshotRunner } from '../hierarchy/pr-snapshot.js';
@@ -208,6 +210,7 @@ Commands:
   demo       Regenerate the terminal demo clip from a scenario: demo [run|cut|render]
   playbook   Run one named playbook step for one task (playbook --task <id> --action <step>)
   handoff         Write or read a session's handoff file (handoff write|read --role <r>)
+  transcript      Digest of the turns before a /clear (transcript recall --role <r>)
   send            Message a session listed in this project's roster; refuses any other name
   spawn           Start one ephemeral executor session for one task (spawn <task-id> [--model <m>])
   executor-start  Executor identity, repository check and a blocking claim, as one call
@@ -338,6 +341,14 @@ Options for handoff:
   note                     append one outward action to the role's ledger (AISDLC-1049):
                            --kind filed|commented|opened|closed|sent --url <url> [--summary <text>]
   --full                   read: print the whole file (default: block plus last 8000 chars of prose)
+
+Options for transcript:
+  recall                   Print a text digest (U/A/T/E lines) of the turns before the last /clear
+  --role <r>               planner, operator-dispatch (or dispatch), or executor
+  --since-clear            Window between the previous two clear markers (default)
+  --last-turns <n>         The last n turns instead
+  --file <path>            An archived copy under .claude/transcripts/ (whole file)
+  --max-chars <n>          Output cap (default 12000); the oldest lines are dropped first
 
 Options for send:
   --to <name>              Roster session name, as printed by status (refused when not listed)
@@ -1336,6 +1347,7 @@ export async function runHierarchyCli(
           ...(name ? { name } : {}),
           ...(flags.out && flags.out !== 'true' ? { file: flags.out } : {}),
           ...(flags['no-archive'] === 'true' ? { archive: false } : {}),
+          transcript: resolveTranscriptSource(deps, role, name),
         };
         if (action === 'note') {
           try {
@@ -1374,6 +1386,46 @@ export async function runHierarchyCli(
             );
           }
         }
+        return 0;
+      }
+      case 'transcript': {
+        const role = parseRoleFlag(flags.role);
+        if (firstPositional(argv) !== 'recall' || !role) {
+          process.stderr.write(
+            `cli-hierarchy transcript: use 'transcript recall --role <r> [--since-clear | --last-turns N] [--file <path>] [--max-chars N]'\n`,
+          );
+          return 2;
+        }
+        const lastTurns = intFlag(flags, 'last-turns');
+        const maxChars = intFlag(flags, 'max-chars');
+        if (lastTurns === null || maxChars === null) return 2;
+        const src = resolveTranscriptSource(deps, role, flags.name);
+        let file = src.file;
+        if (flags.file && flags.file !== 'true') {
+          file = path.resolve(deps.cwd, flags.file);
+          const rel = path.relative(src.archiveDir, file);
+          if (rel.startsWith('..') || path.isAbsolute(rel)) {
+            process.stderr.write(
+              `cli-hierarchy transcript recall: --file must be under ${src.archiveDir}\n`,
+            );
+            return 2;
+          }
+        }
+        if (!file) {
+          deps.log(`notice: no live transcript is registered for ${role}`);
+          return 0;
+        }
+        const r = recallTranscript({
+          file,
+          window: flags.file
+            ? { mode: 'whole' }
+            : lastTurns !== undefined
+              ? { mode: 'last-turns', turns: lastTurns }
+              : { mode: 'pre-clear' },
+          ...(maxChars === undefined ? {} : { maxChars }),
+        });
+        for (const n of r.notices) deps.log(`notice: ${n}`);
+        if (r.digest) deps.log(r.digest);
         return 0;
       }
       case 'send': {

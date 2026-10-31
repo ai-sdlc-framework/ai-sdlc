@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1132
 title: 'Transcript recall: a digest of the pre-clear turns in the handoff so a cleared session can research what happened'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-31'
 labels:

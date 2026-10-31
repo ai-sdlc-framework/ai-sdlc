@@ -100,6 +100,7 @@ export {
   type HandoffOptions,
   type HandoffResult,
 } from './handoff.js';
+export { recallTranscript, resolveTranscriptSource } from './transcript-recall.js';
 export { hierarchyDown, stopSessionWindow, type DownOutcome, type DownResult } from './down.js';
 export {
   DEFAULT_AFTER_TASK_WAIT_SEC,

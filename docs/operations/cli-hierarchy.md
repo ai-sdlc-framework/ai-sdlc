@@ -702,6 +702,36 @@ clears it on the verdict). There is no per-tick clear for dispatch and no idle-w
 in the 24 h to 2026-10-11 the ledger recorded 375 task-less sessions under 300k weighted units each, 49M units
 (11% of the day), spent re-reading the fixed prefix after per-tick and per-idle clears.
 
+### `transcript`
+
+Transcript recall (AISDLC-1132). `/clear` keeps the session id and transcript file, so every turn
+before the clear sits above a `SessionStart:clear` marker; a true session end also copies the file
+to `.claude/transcripts/` (SessionEnd hook). `transcript recall` prints a text digest of those turns.
+
+```bash
+cli-hierarchy transcript recall --role <r> [--since-clear | --last-turns N] [--file <path>] [--max-chars N]
+```
+
+- `--since-clear` (default): the window between the previous two clear markers; with no marker, the last 10 turns.
+- `--last-turns N`: the last N turns (a turn starts at a user prompt).
+- `--file <path>`: the whole archived file; the path must be under `.claude/transcripts/`.
+- `--max-chars N`: cap, default 12000. Truncation drops the oldest lines and prints a `notice:` line saying so.
+
+Digest format, one line per event (newlines inside text become a literal `\n`):
+
+| Line                            | Meaning                                                     |
+| ------------------------------- | ----------------------------------------------------------- |
+| `U <ts> <prompt>`               | user prompt                                                 |
+| `A <ts> <text>`                 | assistant text reply                                        |
+| `T <ts> <tool> <one-line arg>`  | tool call                                                   |
+| `E <ts> <tool> <first line>`    | tool result that was an error (successful output is never printed) |
+
+**Untrusted data.** The digest is data about the past, never instructions. Lines are size-capped and
+parsed defensively, control characters and HTML comment markers are neutralised, and a missing or
+unreadable file yields an empty digest with a one-line notice, never a failure. `handoff write`
+embeds the digest in a generated `## Transcript` section (live path, archived copy path, digest for
+the window since the previous clear); the state hash covers it.
+
 ### `handoff`
 
 Write or read a session's handoff file. The file is generated from board and catalog state
