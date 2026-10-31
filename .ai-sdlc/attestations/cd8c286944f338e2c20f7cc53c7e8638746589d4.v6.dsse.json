@@ -1,0 +1,74 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "d1deb8f823ebf98e176b110b06e8e9c9e582fade"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "db49cb5eb26b0ff0da328b43a3d56abe7cf452f419b1609a090af846ee570d4f",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "8902b8cf27d5ac7b26c0f461b9305cdb4774f2959b2d07a584333e9a9f60b20b",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "0965ad61c8bc6e8cfb4d6c5a4075989dfe9996d825f4dd32acb62a6cc0a8931f",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "cd325fa099eb57aee0095d901738a2a2bf80dcb6f575d110495a20afb48b2dd6",
+        "7171fa284fd1efbc7eeeedec71ea3607cf0cb3274cd00763205c0efddd860923"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "572aa0a943860d39c955a6867a57b5017ebbeab1ac09a546d2fe915f85e2b670",
+        "7171fa284fd1efbc7eeeedec71ea3607cf0cb3274cd00763205c0efddd860923"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "b3b9ce59ab4442533c32fb01cbb7bed172105ecbe646471dc7e3ba32fb1b26a8",
+        "7d90389a5e91ec1f8bfaa534534e3477b9007c5a02af60e715216774bf09948f"
+      ]
+    }
+  ],
+  "rootHash": "74c18babc8eaacb3af957f6270e41f070b90e813fee5ae4f1c7749df8ac6ae74",
+  "rootSignature": "NEfWAjcHrFTiFv2CnhVqZNpptLJZDR+nJ1SCcgxd5SFl1VyHbQz8/yxTV78qxxGQYWfsei0BR+xC5WI3OPasAw==",
+  "nonce": "e947d57f76b60a9a4a302cca7ee8afd9264cb27e3c97c5e716f203c7024d8b9d",
+  "leafCount": 3,
+  "signedAt": "2026-10-31T02:11:44.595Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      ".husky/pre-push",
+      "ai-sdlc-plugin/commands/executor.md",
+      "ai-sdlc-plugin/commands/operator-dispatch.md",
+      "ai-sdlc-plugin/commands/prompt-rules.test.mjs",
+      "ai-sdlc-plugin/hooks/lib/prompt-rules.js"
+    ],
+    "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
+  }
+}
