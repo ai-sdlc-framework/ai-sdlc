@@ -61,11 +61,11 @@ Round 2: I inventoried the Machine against the replay fixtures and added 15 fixt
 - pipeline-cli/test/fixtures/workflow/replay/wrong-task-state
 
 ## Design decisions
-Rebased onto origin/main and force-pushed with lease. PR body edited through the REST API because gh pr edit fails on the deprecated Projects (classic) GraphQL call. All vitest packages passed (pipeline-cli: 559 files, 12357 passed, 13 skipped). The pnpm test chain stopped at the node:test gates because of the usage-ingest flake in a file this diff does not touch, so rfc:check, lint:publishable and knowledge:check did not run locally; CI runs them. dark-code:check, lint and format:check passed separately. Replay parity gap fixed: the engine's init called decideResumeReview without developerRound and skipped consumeDeveloperRound; replay test now also compares operator-visible log lines. Not replay-covered: resume unchanged and delta branches (resume-decision.test.ts covers them) and the staged review (staged-round.test.ts covers it); parity there was read, not run. workflowDigest note and first-default-engine-round open item are in the PR body; the open item is not yet available.
+Rebased onto origin/main and force-pushed with lease. PR body edited through the REST API because gh pr edit fails on the deprecated Projects (classic) GraphQL call. All vitest packages passed (pipeline-cli: 559 files, 12357 passed, 13 skipped). The earlier partial chain was caused by hierarchy env vars in the session; the rerun with them unset completed the full pnpm test chain with exit 0. Replay parity gap fixed: the engine's init called decideResumeReview without developerRound and skipped consumeDeveloperRound; replay test now also compares operator-visible log lines. Not replay-covered: resume unchanged and delta branches (resume-decision.test.ts covers them) and the staged review (staged-round.test.ts covers it); parity there was read, not run. workflowDigest note and first-default-engine-round open item are in the PR body; the open item is not yet available.
 
 ## Verification
 - `pnpm build` — passed
-- `pnpm test` — waived
+- `pnpm test` — passed (`env -u AI_SDLC_HIERARCHY_SESSION -u AI_SDLC_HIERARCHY_ROLE -u AI_SDLC_EXECUTOR_TASK pnpm test`, exit 0, full chain incl. node:test gates, dark-code, lint:publishable, knowledge:check; every vitest package passed, e.g. dogfood `Tests 376 passed (376)`)
 - `pnpm lint` — passed
 - `pnpm format:check` — passed
 - 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)

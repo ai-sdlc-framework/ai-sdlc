@@ -356,7 +356,7 @@ function reset(): void {
 
 describe('golden replay: engine vs Machine', () => {
   it('has the recorded fixtures', () => {
-    expect(fixtures.length).toBeGreaterThanOrEqual(27);
+    expect(fixtures.length).toBeGreaterThanOrEqual(29);
     expect(fixtures.map((f) => f.name)).toContain('changes-requested-at-cap');
     expect(fixtures.map((f) => f.name)).toContain('reviewer-return-missing');
   });
