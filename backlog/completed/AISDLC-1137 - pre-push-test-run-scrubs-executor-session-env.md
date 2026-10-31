@@ -58,11 +58,11 @@ The pre-push patch-coverage test child now gets an env without AI_SDLC_EXECUTOR_
 - backlog/tasks/AISDLC-1137 - pre-push-test-run-scrubs-executor-session-env.md
 
 ## Design decisions
-Test command: `pnpm test`. Final re-run after rebasing onto origin/main ended with pass 3799, fail 0 (an earlier run hit one usage-ingest tmpdir flake that passes alone and is untouched by this diff; it did not recur). With AI_SDLC_EXECUTOR_TASK=AISDLC-1 exported, `pnpm --filter @ai-sdlc/pipeline-cli test -- executor-start hierarchy` passed (61 files, 1103 tests). Rather than passing `deps.env` to every unpinned call, I added `vi.stubEnv('AI_SDLC_EXECUTOR_TASK', '')` in the top-level beforeEach of both test files. I also added a test asserting the pinned path reads `deps.env` over `process.env`. The branch also carries a small commit with a task-file state change, committed because the rebase needed a clean tree.
+Test command: `pnpm test`. Final re-run after rebasing onto origin/main ended with pass 3800, fail 0 (an earlier run hit one usage-ingest tmpdir flake that passes alone and is untouched by this diff; it did not recur). With AI_SDLC_EXECUTOR_TASK=AISDLC-1 exported, `pnpm --filter @ai-sdlc/pipeline-cli test -- executor-start hierarchy` passed (61 files, 1103 tests). Rather than passing `deps.env` to every unpinned call, I added `vi.stubEnv('AI_SDLC_EXECUTOR_TASK', '')` in the top-level beforeEach of both test files. I also added a test asserting the pinned path reads `deps.env` over `process.env`. The branch also carries a small commit with a task-file state change, committed because the rebase needed a clean tree.
 
 ## Verification
 - `pnpm build` — passed (exit 0)
-- `pnpm test` — passed (exit 0; final node --test summary: pass 3799, fail 0)
+- `pnpm test` — passed (exit 0; final node --test summary: pass 3800, fail 0)
 - `pnpm lint` — passed
 - `pnpm format:check` — passed
 - 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
