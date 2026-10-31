@@ -102,6 +102,12 @@ export {
 } from './handoff.js';
 export { hierarchyDown, stopSessionWindow, type DownOutcome, type DownResult } from './down.js';
 export {
+  acquireRestartLock,
+  takeRestartRequests,
+  writeRestartRequest,
+  type RestartRequest,
+} from './restart-lock.js';
+export {
   DEFAULT_AFTER_TASK_WAIT_SEC,
   hierarchyRegister,
   hierarchyRestart,

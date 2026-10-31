@@ -84,6 +84,7 @@ import {
   type ListedClosedPr,
 } from '../kpi/closed-unmerged.js';
 import { summariseLanding, takeSuppressedNote } from './reconcile.js';
+import { takeRestartRequests } from './restart-lock.js';
 import { readRosterChecked } from './roster.js';
 import type { ParentUpkeepResult } from '../steps/00-parent-upkeep.js';
 import { formatStall, reapStalledClaims, type StallDeps, type StalledReport } from './stall.js';
@@ -127,6 +128,27 @@ export interface LoopState {
   lastSpawnErrors?: { taskId: string; error: string }[];
   /** When this drain window began (AISDLC-831); set on the first tick. */
   drainStartedAt?: string;
+  /** Consecutive ticks a session met an auto-restart rule (AISDLC-1110); dropped when it stops. */
+  restartStreak?: Record<string, number>;
+}
+
+/** A roster session as the restart rules see it (AISDLC-1110). */
+export interface SessionHealth {
+  name: string;
+  role: string;
+  /** Live state: `busy`, `idle`, `unknown`, `starting` or `gone`. */
+  state: string;
+  inflightTask?: string;
+  /** Measured context is above the role's clear threshold. */
+  overThreshold?: boolean;
+}
+
+/** What the tick did about one restart rule or request. */
+export interface RestartReport {
+  session: string;
+  cause: 'unknown-no-task' | 'idle-with-queue' | 'over-context' | 'request';
+  status: 'restarted' | 'failed';
+  reason?: string;
 }
 
 /** Why and when the board refused a brief. */
@@ -179,6 +201,7 @@ export function readLoopState(boardDir: string): LoopState {
       ...(Array.isArray(parsed.lastSpawnErrors) && parsed.lastSpawnErrors.length > 0
         ? { lastSpawnErrors: parsed.lastSpawnErrors }
         : {}),
+      ...(parsed.restartStreak ? { restartStreak: parsed.restartStreak } : {}),
     };
   } catch {
     return emptyState();
@@ -310,6 +333,8 @@ export interface TickResult {
   blockers: string[];
   /** The marker written for this tick. */
   tickMarker: DispatchTickMarker;
+  /** Restarts the tick performed (AISDLC-1110): two-tick rules and consumed request files. */
+  restarts?: RestartReport[];
   /** Present when a budget review was supplied and did not fail. */
   turnBudget?: TurnBudgetReview;
 }
@@ -449,6 +474,10 @@ export interface LoopDeps {
   tickedBy?: 'host' | 'scheduler';
   /** Numbers of the open PRs, for pruning consumed webhook events; undefined when GitHub cannot be read. */
   openPrNumbers?: () => ReadonlySet<number> | undefined;
+  /** Live sessions for the two-tick restart rules (AISDLC-1110); absent means no auto-restart. */
+  sessions?: () => SessionHealth[];
+  /** Restarts one roster session of any role; called by the tick only. */
+  restartSession?: (name: string) => Promise<{ ok: boolean; reason?: string }>;
   /** Records the tick marker; its failure never fails the tick. */
   recordTick?: (marker: DispatchTickMarker) => void;
   /** Checks the turns-per-tick budget and files a Decision on an overrun; its failure never fails the tick. */
@@ -811,6 +840,85 @@ function githubReadFresh(deps: LoopDeps, state: LoopState): boolean {
   }
 }
 
+/** Consecutive ticks a rule must hold before the tick restarts the session. */
+export const RESTART_AFTER_TICKS = 2;
+
+/**
+ * Deterministic restarts (AISDLC-1110): consume restart-request files, then restart a
+ * session that has met a rule for {@link RESTART_AFTER_TICKS} consecutive ticks. The
+ * dispatch session itself is never restarted here. Held, nothing runs.
+ */
+async function runRestarts(
+  deps: LoopDeps,
+  state: LoopState,
+  held: Hold | null,
+): Promise<RestartReport[]> {
+  const restart = deps.restartSession;
+  if (!restart || held) return [];
+  const out: RestartReport[] = [];
+  const attempt = async (session: string, cause: RestartReport['cause']): Promise<void> => {
+    try {
+      const r = await restart(session);
+      out.push({
+        session,
+        cause,
+        status: r.ok ? 'restarted' : 'failed',
+        ...(r.reason ? { reason: r.reason } : {}),
+      });
+    } catch (err) {
+      out.push({
+        session,
+        cause,
+        status: 'failed',
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+  const done = new Set<string>();
+  try {
+    for (const req of takeRestartRequests(deps.boardDir)) {
+      if (req.session === deps.workerId) {
+        out.push({
+          session: req.session,
+          cause: 'request',
+          status: 'failed',
+          reason: 'the dispatch session cannot restart itself',
+        });
+        continue;
+      }
+      done.add(req.session);
+      await attempt(req.session, 'request');
+    }
+  } catch {
+    /* an unreadable request directory must not stop the dispatch loop */
+  }
+  if (!deps.sessions) return out;
+  let sessions: SessionHealth[];
+  try {
+    sessions = deps.sessions();
+  } catch {
+    return out;
+  }
+  const queued = peekQueue(deps.boardDir).queued;
+  const prev = state.restartStreak ?? {};
+  const next: Record<string, number> = {};
+  for (const s of sessions) {
+    if (s.name === deps.workerId || s.role === 'operator-dispatch' || done.has(s.name)) continue;
+    let cause: RestartReport['cause'] | undefined;
+    if (s.overThreshold) cause = 'over-context';
+    else if (s.role === 'executor' && !s.inflightTask) {
+      if (s.state === 'unknown') cause = 'unknown-no-task';
+      else if (s.state === 'idle' && queued > 0) cause = 'idle-with-queue';
+    }
+    if (!cause) continue;
+    const streak = (prev[s.name] ?? 0) + 1;
+    if (streak >= RESTART_AFTER_TICKS) await attempt(s.name, cause);
+    else next[s.name] = streak;
+  }
+  state.restartStreak = next;
+  return out;
+}
+
 /** Collect the steps of a tick in the order they ran, each with its start time. */
 class StepLog {
   readonly steps: { name: string; startedAt: string }[] = [];
@@ -880,6 +988,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     return stalled;
   });
   const stalled = ephemeral.stalled;
+  const restarts = await runRestarts(deps, state, held);
   state.drainStartedAt ??= deps.now().toISOString();
   let closedUnmerged: ClosedUnmergedReport | undefined;
   try {
@@ -918,6 +1027,12 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     reports.push({ kind: 'progress', text: `parent upkeep refused: ${parentUpkeep.reason}` });
   }
   for (const s of stalled) reports.push({ kind: 'progress', text: formatStall(s) });
+  for (const r of restarts) {
+    reports.push({
+      kind: 'progress',
+      text: `restart ${r.session} (${r.cause}): ${r.status}${r.reason ? `: ${r.reason}` : ''}`,
+    });
+  }
   if (deps.idleExecutors) {
     try {
       const ds = checkDrainStall({
@@ -1036,6 +1151,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     ...(parentUpkeep ? { parentUpkeep } : {}),
     ...(canary ? { canary } : {}),
     ...(stalled.length > 0 ? { stalled } : {}),
+    ...(restarts.length > 0 ? { restarts } : {}),
     ...(ephemeralActive ? { ephemeral: eph } : {}),
     ...(humanAttention.length > 0 ? { humanAttention } : {}),
     ...wake,

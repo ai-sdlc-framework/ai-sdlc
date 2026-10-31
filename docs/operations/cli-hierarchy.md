@@ -514,10 +514,32 @@ next task in the instant between the last check and the stop, that manifest is r
 before the write, so a change to another entry made during the wait is kept. If the new session cannot be started, its dead entry
 is dropped from the roster and the message says to run `cli-hierarchy up`.
 
-The dispatch or planner session may run it (the same mistake guard as `clear`, not
-authentication); executors may not. A session without the ownership marker, or whose recorded
-pane no longer belongs to it, is refused and left running. Prints the before and after pid,
-start time and pane as JSON. Exit `0`; `1` on a refusal.
+Any roster session (dispatch, planner, another executor) or the operator at a shell may run
+`restart` (AISDLC-1110), on any roster session including dispatch and the planner. A session without the ownership marker, or whose recorded pane no
+longer belongs to it, is refused and left running. Prints the before and after pid, start time
+and pane as JSON. Exit `0`; `1` on a refusal.
+
+**Restart lock.** Each restart first takes a lock file `restart-locks/<session>.json` under the
+board dir, holding the caller's name and time. A second caller inside the 120 s window is refused
+with `'<holder>' holds its restart lock`; the same holder may repeat. This, not a role check,
+prevents two callers racing on one pane. A caller restarting its own session is always refused
+(its process would die mid-command); ask another session or use the request file.
+
+**Auto-restart rules (dispatch tick).** The tick restarts a session once a rule has held for two
+consecutive ticks (the streak is kept in `operator-dispatch.state.json`):
+
+- an executor in state `unknown` with no inflight task;
+- an executor `idle` with no inflight task while tasks are queued;
+- any roster session, the planner included, whose measured context is over its clear threshold.
+
+The dispatch session is never restarted by its own tick, and nothing restarts while the board is
+held. Each restart (or failure) is a progress line `restart <name> (<cause>): restarted|failed`
+and a `restarts` entry in the tick result.
+
+**Restart-request file.** `cli-hierarchy send --restart <session>` (no `--to` or `--text`)
+writes `restart-requests/<session>.json`. The next dispatch tick consumes it as a restart, removes
+the file and logs the outcome with cause `request`. The planner's direct `restart` call remains
+the fallback when the tick is dead.
 
 ### `register`
 
@@ -1385,8 +1407,8 @@ with a `gone` state needs `up` to restart it.
 (a personal tmux session sharing the name) or its pane id no longer matches the roster. The
 session is left alone; stop it by hand if it is yours.
 
-**`clear <name>`, `tick`, `restart`, `register` or `route-decision` exits 1 with a caller message.** Only the running
-dispatch session may run them (`restart` also accepts the planner). Run them from that session.
+**`clear <name>`, `tick`, `register` or `route-decision` exits 1 with a caller message.** Only the running
+dispatch session may run them (`restart` is open to any roster session, see the restart lock). Run them from that session.
 
 **`status` shows `ENV missing`, or `doctor` reports `hierarchy-launch-env`.** The session was
 started without the launch env, so its lease push is refused. Run `cli-hierarchy down --role

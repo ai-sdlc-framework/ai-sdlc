@@ -16,8 +16,9 @@
  * and started with its recorded model, mode and env, inflight manifests stay on the board, and
  * for dispatch the reconcile scheduler and webhook receiver are re-registered. `restartAll`
  * restarts dispatch and every idle executor, deferring busy executors to their task boundary.
- * `register` applies to executors only. The dispatch or planner session may run `restart`
+ * `register` applies to executors only. Any roster session may run `restart`
  * (only dispatch may run `register`); the CLI runs the caller guard before calling in here.
+ * A per-session lock (AISDLC-1110) lets any roster session or the operator restart, refusing a second caller.
  */
 
 import { releaseInflight } from '../dispatch/board.js';
@@ -34,6 +35,7 @@ import {
   writeRoster,
 } from './roster.js';
 import { readNvmrc } from './node-pin.js';
+import { acquireRestartLock } from './restart-lock.js';
 import { ownershipRefusal, paneInfo, paneStartCommand, windowLive } from './tmux.js';
 import type { HierarchyDeps, Roster, RosterEntry } from './types.js';
 import { defaultIsAlive, hasLaunchEnv, launchSession, ROLE_PROMPT } from './up.js';
@@ -50,6 +52,8 @@ export interface RestartOptions {
   waitSec?: number;
   /** Roster name of the calling session; restarting it would kill this very command. */
   callerName?: string;
+  /** Who takes the restart lock (default `callerName`, else `operator`). */
+  lockHolder?: string;
 }
 
 /** The roster fields a restart or register changes. */
@@ -178,6 +182,12 @@ export async function hierarchyRestart(
       `refusing to restart '${entry.name}': it is the calling session, and stopping it would kill this command before the new window starts. Ask another session (the planner for dispatch, dispatch for the planner) to run cli-hierarchy restart ${entry.name}`,
     );
   }
+  acquireRestartLock(
+    deps.boardDir,
+    entry.name,
+    opts.lockHolder ?? opts.callerName ?? 'operator',
+    deps.now(),
+  );
 
   const held = entry.role === 'executor' ? holdsInflight(deps.boardDir, entry.name) : undefined;
   if (held && !opts.afterTask) {
