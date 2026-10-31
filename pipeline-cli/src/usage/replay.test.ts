@@ -39,6 +39,7 @@ import {
   commitExists,
   createGit,
   defaultReplayRoot,
+  ensureDefaultRoot,
   isCommitId,
   isSafeRef,
   mergeBaseOf,
@@ -47,7 +48,7 @@ import {
   sweepStaleReplayHolders,
   withReplayClone,
 } from './replay-git.js';
-import { isUnderAiSdlc } from './replay-commands.js';
+import { installReplaySignalHandlers, isUnderAiSdlc } from './replay-commands.js';
 import { estimateUnitsPerReview } from './replay-report.js';
 import {
   checkSandboxSupport,
@@ -2414,5 +2415,34 @@ describe('replay hardening details', () => {
     expect(spawned).toHaveLength(2);
     expect(r.err).toContain('WARNING');
     expect(r.out).toContain('Stopped: a review reported no token counts');
+  });
+});
+
+describe('in-process signal handling and default root', () => {
+  it('aborts, cleans up and re-raises on SIGTERM, and the remover detaches the listeners', () => {
+    const controller = new AbortController();
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    const remove = installReplaySignalHandlers(controller);
+    try {
+      const listeners = process.listeners('SIGTERM');
+      (listeners[listeners.length - 1] as (s: NodeJS.Signals) => void)('SIGTERM');
+      expect(controller.signal.aborted).toBe(true);
+      expect(kill).toHaveBeenCalledWith(process.pid, 'SIGTERM');
+    } finally {
+      remove();
+      kill.mockRestore();
+    }
+  });
+
+  it('creates a missing non-temp root with mode 0700 and leaves the temp dir alone', () => {
+    const base = mkdtempSync(join(tmpdir(), 'replay-root-'));
+    try {
+      const root = join(base, 'cache', 'ai-sdlc');
+      ensureDefaultRoot(root);
+      expect(statSync(root).mode & 0o777).toBe(0o700);
+      expect(() => ensureDefaultRoot(tmpdir())).not.toThrow();
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 });

@@ -65,7 +65,7 @@ export function defaultReplayRoot(
 }
 
 /** Create the default root with mode 0700 when it is not the OS temp directory. */
-function ensureDefaultRoot(root: string): void {
+export function ensureDefaultRoot(root: string): void {
   if (root === tmpdir()) return;
   mkdirSync(root, { recursive: true, mode: 0o700 });
 }
