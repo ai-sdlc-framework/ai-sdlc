@@ -478,6 +478,8 @@ Selected over explicit genesis ceremony (setup friction, no security benefit) an
 
 **Resolution (2026-05-20):** **Keep v3/v4/v5 verifier code indefinitely (read-only).**
 
+**Amended 2026-10-31 (DEC-0284, operator ruling):** the retention above is reversed. v6 is the only attestation schema the signer produces and the verifier accepts; v3, v4 and v5 support is removed outright, with no deprecation window and no backward compatibility. No workflow ever re-verified a historical envelope (every gate calls the verifier for the current PR head only), so the audit-continuity benefit below was never exercised and the carried code was judged not worth it. Historical `*.dsse.json` envelopes stay in the repository as records the verifier no longer reads. Implementation: AISDLC-585.2 (signer), AISDLC-585.1 (verifier), AISDLC-585.3 (docs). The original resolution and rationale are kept below for the record.
+
 Signer code for v3/v4/v5 is deleted in Phase 4 (no new envelopes use legacy formats). Verifier code stays in a clearly-marked `legacy/` subdirectory or behind `// Pre-v6: read-only` headers. ~200 lines of read-only code; cheap to carry; never modified.
 
 Benefit: every PR ever merged with v3/v4/v5 attestation remains independently verifiable forever — critical for compliance, security forensics, and audit-trail-continuity properties. The expensive parts of the legacy chain (chore-commit hooks, rebase-fragility workarounds, exclusion lists, AISDLC-274 stale-envelope detection, AISDLC-381 fork-PR migration code) all get deleted in Phase 4. Only the READ side stays.
