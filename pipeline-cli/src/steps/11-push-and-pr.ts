@@ -377,6 +377,49 @@ async function leasePushOwnRebase(
   );
 }
 
+/**
+ * AISDLC-1138: the developer subagent may already have pushed the branch, so the first push of
+ * this run can meet a remote head that the late rebase made non-fast-forward. When
+ * `origin/<branch>` exists and the trusted policy permits a lease push to the task's own branch,
+ * return that head as the lease. `forcePushMode: never` is reported as `policyNever` so a
+ * refusal can name the policy. Protected or malformed branches never get a lease.
+ */
+async function firstPushLease(
+  opts: PushAndPrStepOptions,
+  runner: Runner,
+): Promise<{ sha: string | null; policyNever: boolean }> {
+  const none = { sha: null, policyNever: false };
+  const ls = await runner('git', ['ls-remote', '--heads', 'origin', opts.branch], {
+    cwd: opts.worktreePath,
+    allowFailure: true,
+  });
+  if (ls.code !== 0) return none;
+  const line = ls.stdout
+    .split('\n')
+    .map((l) => l.trim().split(/\s+/))
+    .find((f) => f[1] === `refs/heads/${opts.branch}`);
+  const sha = line?.[0] ?? '';
+  if (!/^[0-9a-f]{40,64}$/i.test(sha)) return none;
+  const trusted = opts.resumeLeasePolicy ? null : loadOperationalPolicy(opts.workDir, opts.workDir);
+  const policy = opts.resumeLeasePolicy ?? {
+    forcePushMode: trusted!.forcePushMode,
+    protectedBranches: trusted!.protectedBranches,
+    ownWorktree: (worktree: string) => checkOwnWorktreeForOperator(opts.workDir, worktree),
+  };
+  if (policy.forcePushMode === 'never') return { sha: null, policyNever: true };
+  if (
+    !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(opts.branch) ||
+    opts.branch.includes('..') ||
+    isProtectedBranch(opts.branch, policy.protectedBranches)
+  ) {
+    return none;
+  }
+  if (policy.forcePushMode === 'leaseOnOwnBranch' && policy.ownWorktree(opts.worktreePath)) {
+    return none;
+  }
+  return { sha, policyNever: false };
+}
+
 /** AISDLC-1054: append "Fixed by <task id>" to the body of the PR this task fixes; creates no PR. */
 async function noteFixedBy(opts: PushAndPrStepOptions, runner: Runner): Promise<PushAndPrResult> {
   const pr = String(opts.fixesPr);
@@ -541,11 +584,15 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
   //    commits on origin and the late rebase changed their SHAs, so it pushes
   //    with a lease on its own branch only, expecting the origin/<branch> SHA that
   //    Step 3 recorded, so a mid-run fetch cannot widen the lease (AISDLC-738).
-  const pushArgs = opts.resume
+  const first = opts.resume
+    ? { sha: null, policyNever: false }
+    : await firstPushLease(opts, runner);
+  const leaseSha = opts.resume ? opts.resumeRemoteSha : first.sha;
+  const pushArgs = leaseSha
     ? [
         'push',
         '-u',
-        `--force-with-lease=refs/heads/${opts.branch}:${opts.resumeRemoteSha}`,
+        `--force-with-lease=refs/heads/${opts.branch}:${leaseSha}`,
         'origin',
         `HEAD:refs/heads/${opts.branch}`,
       ]
@@ -562,8 +609,12 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
   if (pushResult.code !== 0) {
     const stderr = pushResult.stderr.trim();
     const reason = /non-fast-forward|rejected/i.test(stderr)
-      ? `non-fast-forward push to '${opts.branch}'; cleanup is to delete the remote branch and rerun, ` +
-        `but that's destructive — confirm with the operator first`
+      ? first.policyNever
+        ? `non-fast-forward push to '${opts.branch}' refused: origin already holds this branch and the role ` +
+          `(spec.governance.allowForcePush: never in .ai-sdlc/agent-role.yaml) forbids a lease push; ` +
+          `set it to 'leaseOnOwnBranch' or 'lease', or ask the operator to reconcile the remote branch`
+        : `non-fast-forward push to '${opts.branch}'; cleanup is to delete the remote branch and rerun, ` +
+          `but that's destructive — confirm with the operator first`
       : `git push failed: ${stderr || pushResult.stdout.trim() || 'unknown error'}`;
     return { pushed: false, prUrl: null, reason };
   }
