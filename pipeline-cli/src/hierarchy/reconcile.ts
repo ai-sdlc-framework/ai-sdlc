@@ -1213,6 +1213,7 @@ export function gatherFacts(
       draft: isDraft,
       ...(p.mergeStateStatus === undefined ? {} : { mergeStateStatus: p.mergeStateStatus }),
       autoMergeArmed: p.autoMergeRequest != null,
+      changedFiles: files,
       docsOnly: files.length > 0 && files.every((x) => DOCS_FILE_RE.test(x)),
       checks,
     });
