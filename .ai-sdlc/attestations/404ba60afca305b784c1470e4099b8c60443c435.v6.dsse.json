@@ -1,0 +1,71 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "ba56f3d734093d766b0f089a3983c24766b9cc4d"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "b5cc739f5221c25a1b93f22355fa4b549ea49377d84c8badcfb0e1155b4136fc",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "b5cc739f5221c25a1b93f22355fa4b549ea49377d84c8badcfb0e1155b4136fc",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "27d80938ccd6ebb0d9eeb32e388d418ca8b3b92d17f5a2e41b17ad2c3c139e42",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "27d80938ccd6ebb0d9eeb32e388d418ca8b3b92d17f5a2e41b17ad2c3c139e42",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "6b244417230c8cc2f149f352f8ac9f9167e0a4b5a87d3c1ee020537358d70de1",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "6b244417230c8cc2f149f352f8ac9f9167e0a4b5a87d3c1ee020537358d70de1",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "9f6551510b62c1d45658bf6330cfcc06588351052077c99832a9b39be10dcd42",
+        "5f5e5950cc23bf55681a853d1fe9582328c5cfe7c781e78044ab65cc327b36d6"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "65b58da1b2e153fc33f68894c261987ce055f3ab6d6a917f3ba34e4df5d68987",
+        "5f5e5950cc23bf55681a853d1fe9582328c5cfe7c781e78044ab65cc327b36d6"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "c6f041054b30c1a85793807d282f42a5603661cf885dde86c658d286de8dc37e",
+        "8580302a6371feb3349990ef358fa340799af5ae03a37e0b14e94726406b6404"
+      ]
+    }
+  ],
+  "rootHash": "3191c2cbb3ab34c94f7ce82cc9dc65d4d3caed37f6acf46b7fb32db2268fc9ad",
+  "rootSignature": "857IzYz9ms+7i9sjura6wx3bcqgKq7vjqC2oGdHsMHG56a/o0egBt1JvrWzeJVOZ2eNBhxkCUF65TJhO1v2bDg==",
+  "nonce": "0f85dca95a28ead6747f468d24b3c02b935882d8fec6f7d47454aecc7fdc725f",
+  "leafCount": 3,
+  "signedAt": "2026-10-31T04:35:30.509Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [".husky/pre-push"],
+    "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
+  }
+}
