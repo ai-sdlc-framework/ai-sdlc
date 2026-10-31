@@ -25,7 +25,7 @@ import {
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import {
   appendLeaf,
   appendLeafForPatchId,
@@ -3218,6 +3218,17 @@ describe('emit-leaf — binds the leaf to its own reviewer run', () => {
   });
 });
 
+/** True when `p` exists and its real path sits inside the real tmpdir (incident 2026-10-30). */
+function isUnderTmpdir(p: string): boolean {
+  try {
+    const tmpReal = realpathSync(tmpdir());
+    const real = realpathSync(p);
+    return real === tmpReal || real.startsWith(tmpReal + sep);
+  } catch {
+    return false;
+  }
+}
+
 describe('emit-leaf — worktree layout end to end (markers under the main checkout)', () => {
   let mainRoot = '';
   let worktreeRoot = '';
@@ -3237,18 +3248,20 @@ describe('emit-leaf — worktree layout end to end (markers under the main check
     git(['worktree', 'add', '-q', '-b', 'task-1', worktreeRoot], mainRoot);
     // git may report the realpath (macOS /var -> /private/var); use what git reports.
     const common = git(['rev-parse', '--git-common-dir'], worktreeRoot).trim();
-    mainRoot = join(common, '..');
     // Incident 2026-10-30: with an inherited GIT_DIR this resolved to the REAL
-    // repository and afterEach deleted it. Refuse anything outside the tmpdir.
-    const tmpReal = realpathSync(tmpdir());
-    if (!realpathSync(mainRoot).startsWith(tmpReal + '/')) {
-      throw new Error(`fixture root ${mainRoot} is not under ${tmpReal}; refusing to continue`);
+    // repository and afterEach deleted it. Only adopt the git answer once it is
+    // proven to sit under the tmpdir; until then mainRoot stays the mkdtemp path.
+    const resolved = join(common, '..');
+    if (!isUnderTmpdir(resolved)) {
+      throw new Error(`fixture root ${resolved} is not under ${tmpdir()}; refusing to continue`);
     }
+    mainRoot = resolved;
     process.env['REPO_ROOT'] = worktreeRoot;
   });
 
   afterEach(() => {
-    rmSync(mainRoot, { recursive: true, force: true });
+    // Same guard on the way out: never delete a path that is not a tmp fixture.
+    if (mainRoot && isUnderTmpdir(mainRoot)) rmSync(mainRoot, { recursive: true, force: true });
     rmSync(fakeHomeDirForHarnessTests, { recursive: true, force: true });
     fakeHomeDirForHarnessTests = '';
   });

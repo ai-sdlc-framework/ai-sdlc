@@ -1,8 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   packagesToCover,
   main,
@@ -141,16 +142,85 @@ describe('gitSafeEnv', () => {
 });
 
 describe('.husky/pre-push', () => {
-  it('unsets the git repository variables before any gate runs', () => {
-    const hook = readFileSync(join(REPO_ROOT, '.husky/pre-push'), 'utf-8');
-    const lines = hook.split('\n');
-    const unsetAt = lines.findIndex((l) => /^unset .*\bGIT_DIR\b/.test(l));
+  const hook = readFileSync(join(REPO_ROOT, '.husky/pre-push'), 'utf-8');
+  const lines = hook.split('\n');
+  const unsetAt = lines.findIndex((l) => /^unset .*\bGIT_DIR\b/.test(l));
+
+  it('unsets every git repository variable in GIT_REPO_ENV_VARS, before PUSH_STDIN is read', () => {
     assert.ok(unsetAt >= 0, 'an `unset ... GIT_DIR ...` line exists');
-    for (const k of ['GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_PREFIX']) {
+    for (const k of GIT_REPO_ENV_VARS) {
       assert.match(lines[unsetAt], new RegExp(`\\b${k}\\b`), `unset covers ${k}`);
     }
-    const firstGate = lines.findIndex((l) => /^\s*(node|\.\/scripts|printf|pnpm)\b/.test(l));
-    assert.ok(firstGate > unsetAt, 'the unset runs before the first gate command');
+    // PUSH_STDIN= is the first statement of the gate chain and a stable anchor.
+    const pushStdinAt = lines.findIndex((l) => /^PUSH_STDIN=/.test(l));
+    assert.ok(pushStdinAt > unsetAt, 'the unset runs before the gate chain starts');
+  });
+
+  it('behaviourally: the hook preamble under sh drops the variables and keeps the rest', () => {
+    const pushStdinAt = lines.findIndex((l) => /^PUSH_STDIN=/.test(l));
+    const preamble = lines.slice(0, pushStdinAt).join('\n');
+    const r = spawnSync('sh', ['-c', `${preamble}\nenv`], {
+      encoding: 'utf-8',
+      env: {
+        PATH: process.env.PATH,
+        GIT_DIR: '/elsewhere/.git/worktrees/x',
+        GIT_PREFIX: '',
+        GIT_WORK_TREE: '/elsewhere',
+        GIT_INDEX_FILE: '/elsewhere/.git/index',
+        GIT_AUTHOR_NAME: 'kept',
+      },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    const keys = r.stdout.split('\n').map((l) => l.split('=')[0]);
+    for (const k of GIT_REPO_ENV_VARS) assert.ok(!keys.includes(k), `${k} dropped`);
+    assert.ok(keys.includes('GIT_AUTHOR_NAME'), 'unrelated GIT_* variables survive');
+  });
+});
+
+describe('vitest.git-env.setup.mjs', () => {
+  const setupPath = join(REPO_ROOT, 'vitest.git-env.setup.mjs');
+
+  it('is the first setup file of the shared vitest config', async () => {
+    const { sharedTestConfig } = await import(
+      pathToFileURL(join(REPO_ROOT, 'vitest.shared.mjs')).href
+    );
+    assert.ok(existsSync(setupPath), 'setup file exists');
+    assert.match(sharedTestConfig.setupFiles[0], /vitest\.git-env\.setup\.mjs$/);
+  });
+
+  it('deletes exactly the GIT_REPO_ENV_VARS list from a worker and keeps the rest', () => {
+    const r = spawnSync(
+      process.execPath,
+      [
+        '--import',
+        pathToFileURL(setupPath).href,
+        '-e',
+        'console.log(Object.keys(process.env).join("\\n"))',
+      ],
+      {
+        encoding: 'utf-8',
+        env: {
+          PATH: process.env.PATH,
+          GIT_DIR: '/elsewhere/.git/worktrees/x',
+          GIT_PREFIX: '',
+          GIT_WORK_TREE: '/elsewhere',
+          GIT_INDEX_FILE: '/elsewhere/.git/index',
+          GIT_COMMON_DIR: '/elsewhere/.git',
+          GIT_AUTHOR_NAME: 'kept',
+        },
+      },
+    );
+    assert.equal(r.status, 0, r.stderr);
+    const keys = r.stdout.trim().split('\n');
+    for (const k of GIT_REPO_ENV_VARS) assert.ok(!keys.includes(k), `${k} deleted`);
+    assert.ok(keys.includes('GIT_AUTHOR_NAME'), 'GIT_AUTHOR_NAME kept');
+    assert.ok(keys.includes('PATH'), 'PATH kept');
+  });
+
+  it('spells the same list as GIT_REPO_ENV_VARS (no drift between the three layers)', () => {
+    const src = readFileSync(setupPath, 'utf-8');
+    const listed = [...src.matchAll(/'(GIT_[A-Z_]+)'/g)].map((m) => m[1]);
+    assert.deepEqual(listed.sort(), [...GIT_REPO_ENV_VARS].sort());
   });
 });
 
