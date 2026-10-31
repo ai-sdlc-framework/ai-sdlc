@@ -23,6 +23,7 @@ import { hideBin } from 'yargs/helpers';
 import { refineBacklogTask } from '../dor/ingress-claude.js';
 import { renderClarificationComment } from '../dor/comment-loop.js';
 import { loadDorConfig } from '../dor/dor-config.js';
+import { checkSecurityFindingCompletion } from '../dor/security-finding-dismissal.js';
 
 function extractTaskIdFromFile(taskFile: string): string | null {
   // Backlog convention: `aisdlc-<n> - <slug>.md`. Pull the ID from the basename.
@@ -71,6 +72,15 @@ async function checkOneTaskFile(taskFile: string): Promise<CheckOneResult> {
     };
   }
   const workDir = findWorkDir(resolved);
+
+  // AISDLC-940: completed security-finding tasks need a PR reference or a dismissal.
+  const sec = checkSecurityFindingCompletion(
+    readFileSync(resolved, 'utf8'),
+    resolved.split(/[\\/]/).includes('completed'),
+  );
+  if (!sec.ok) {
+    return { taskFile: resolved, taskId, blocked: true, comment: sec.message };
+  }
 
   // Force enforce mode regardless of repo's dor-config.yaml — the pre-push
   // gate's entire purpose is to BLOCK, not warn. A repo that's still in
