@@ -5,6 +5,28 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.34.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.33.0...ai-sdlc-plugin-v0.34.0) (2026-10-31)
+
+
+### Features
+
+* hierarchy loop canary drives claim, develop, verdict, clear and re-claim (AISDLC-1102) ([#2174](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2174)) ([5410dbf](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5410dbf5dc8bb2a0f9d65f95230d53e9c19f295b))
+* lock test files for bug-labelled tasks unless named (AISDLC-939) ([#2077](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2077)) ([7292d2e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7292d2e93dd4577e95ab35503f2c7d5c3439d0ca))
+* **orchestrator:** diagnose VS Code hierarchy terminals setup (AISDLC-1118) ([#2158](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2158)) ([7853fbb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7853fbb506d49c73471b20ee8c5d894b5a8ffd66))
+* **plugin:** add context-capture and context-hygiene commands (AISDLC-777) ([#2129](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2129)) ([12f2f80](https://github.com/ai-sdlc-framework/ai-sdlc/commit/12f2f80750a862d486c917bf628ded60dbdc4a72))
+* pre-push runs the CI patch-coverage gate over touched packages (AISDLC-1119) ([#2168](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2168)) ([6a2b18c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/6a2b18c18154429225ab9951e3cd0654ebf85216))
+* restart any roster session or --all, drop down confirm, opt-in resource gate (AISDLC-1104) ([#2169](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2169)) ([5e44868](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5e4486855254dcbf340197a3e3bb802a0d669d41))
+
+
+### Bug Fixes
+
+* **ci:** lock installer, verify [@ai-sdlc](https://github.com/ai-sdlc) closure, self-heal partial tree (AISDLC-1084) ([#2025](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2025)) ([31bd856](https://github.com/ai-sdlc-framework/ai-sdlc/commit/31bd856e5dc8e10684592eea6bf8dec3a92b1881))
+* executor busy predicate reads the board, not turn state (AISDLC-1124) ([#2184](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2184)) ([a64b974](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a64b974517e45a039270c4a87dab879ae89a0907))
+* **hooks:** strip GIT_DIR from the pre-push chain and vitest workers (AISDLC-1126) ([#2191](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2191)) ([8b80942](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8b80942001f3060aa3a10e1f77a78827874c8198))
+* **orchestrator:** exclude decision log from patch-id (AISDLC-737) ([#2024](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2024)) ([52ba889](https://github.com/ai-sdlc-framework/ai-sdlc/commit/52ba889677518e6a91ce19cfad8d1fb4fe4c8ed4))
+* **orchestrator:** read hierarchy sender from cross-session from-name (AISDLC-1090) ([#2063](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2063)) ([5f4c723](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5f4c723224eb8e5f33801ea9af3bc5ad51c8810f))
+* reject v5 attestations signed after the v6 cutover (AISDLC-972) ([#2181](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2181)) ([582edbb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/582edbb615e9984a32909a37d21522621b83b981))
+
 ## [0.33.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.32.0...ai-sdlc-plugin-v0.33.0) (2026-10-29)
 
 

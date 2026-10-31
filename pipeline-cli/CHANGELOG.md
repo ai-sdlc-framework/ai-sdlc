@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.39.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.38.0...pipeline-cli-v0.39.0) (2026-10-31)
+
+
+### Features
+
+* auto-memory trunk ingest adapter (AISDLC-783) ([#2182](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2182)) ([966709d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/966709d613bc8526e9f7a6b2540db659b068b9f8))
+* hierarchy loop canary drives claim, develop, verdict, clear and re-claim (AISDLC-1102) ([#2174](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2174)) ([5410dbf](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5410dbf5dc8bb2a0f9d65f95230d53e9c19f295b))
+* make the RFC-0056 workflow engine the default next-step path (AISDLC-1077) ([#2127](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2127)) ([685304d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/685304d6304adb71421a1cfcbc96a8ff6c6be9fe))
+* pairwise replay comparison, corpus merge, per-review timeout (AISDLC-655.4) ([#2114](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2114)) ([b726dd0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b726dd057d8739a24d099fc8b29fdcc596dedd0c))
+* **pipeline-cli:** cache-versus-JIT report in the usage ledger (AISDLC-784) ([#2151](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2151)) ([d2da863](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d2da8637326171d7cc596df798dce6d1e280371e))
+* **pipeline-cli:** per-task, per-role, per-day cost views and per-tick ingest (AISDLC-1122) ([#2179](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2179)) ([32e15cf](https://github.com/ai-sdlc-framework/ai-sdlc/commit/32e15cfb4d6e58e8bf8ca897984eacdd3ee54b32))
+* restart any roster session or --all, drop down confirm, opt-in resource gate (AISDLC-1104) ([#2169](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2169)) ([5e44868](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5e4486855254dcbf340197a3e3bb802a0d669d41))
+* restart lock, auto-restart rules and restart-request file (AISDLC-1110) ([#2178](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2178)) ([f6314e2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f6314e23ff861855c4a616a325bb1e87a2b70e41))
+* ship home-page demo scenario, retire dead scenarios (AISDLC-1120) ([#2170](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2170)) ([9ae4bef](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9ae4bef9590a4ab67c2a2c848a377efeb9ce3166))
+* **spec:** session load-once ledger with reset, compaction and locking (AISDLC-780) ([#2148](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2148)) ([5e2ab96](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5e2ab96f097aa2f3bbd65dfa10e015d95ca0df97))
+* **spec:** sqlite RetrievalIndex with cli-context index and query (AISDLC-775) ([#1989](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1989)) ([e0a12b6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e0a12b65913c0f036b4de5cce60cb08ffd22563f))
+
+
+### Bug Fixes
+
+* decisions CLI tests must not notify live sessions (AISDLC-1113) ([#2141](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2141)) ([09fb981](https://github.com/ai-sdlc-framework/ai-sdlc/commit/09fb98129cc736aa9d49b2188e53a7f2201b9504))
+* executor busy predicate reads the board, not turn state (AISDLC-1124) ([#2184](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2184)) ([a64b974](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a64b974517e45a039270c4a87dab879ae89a0907))
+* **hooks:** strip GIT_DIR from the pre-push chain and vitest workers (AISDLC-1126) ([#2191](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2191)) ([8b80942](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8b80942001f3060aa3a10e1f77a78827874c8198))
+* **orchestrator:** exclude decision log from patch-id (AISDLC-737) ([#2024](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2024)) ([52ba889](https://github.com/ai-sdlc-framework/ai-sdlc/commit/52ba889677518e6a91ce19cfad8d1fb4fe4c8ed4))
+* **pipeline-cli:** rebuild the workspace after a rebase and before sign or push (AISDLC-1111) ([#2139](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2139)) ([c588976](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c588976d67e30c6009c545428e2a67b91b09fa76))
+* **pipeline-cli:** reclaim orphaned executor tmux sessions and surface spawn errors (AISDLC-1117) ([#2156](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2156)) ([0ffc0f7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0ffc0f7a71b71b88ef516cc1d9349ccdb403949b))
+* **pipeline-cli:** route a twice-failed reconcile action to the planner (AISDLC-1125) ([#2189](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2189)) ([694a537](https://github.com/ai-sdlc-framework/ai-sdlc/commit/694a5371272914200fc73ce38d0734383ce6184b))
+* reap ephemeral executors on holder state, not heartbeat grace (AISDLC-1103) ([#2177](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2177)) ([0ab2481](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0ab2481a435933a099c0d56128769b411cc9a077))
+* treat review logs and transcript leaves as docs-equivalent (AISDLC-1116) ([#2173](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2173)) ([eccd244](https://github.com/ai-sdlc-framework/ai-sdlc/commit/eccd24476454117a88c959ac711c525ce9fbe800))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.39.0
+
 ## [0.38.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.37.0...pipeline-cli-v0.38.0) (2026-10-29)
 
 
