@@ -56,7 +56,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 
 import { extractBlockedReason } from './upstream-oq-gate.js';
 
@@ -265,7 +265,7 @@ export function checkDispatchReadinessBatch(
  * `backlog/completed/`. Returns the absolute path or `null` when absent.
  *
  * Matches files whose filename STARTS WITH the lowercased task ID (e.g.
- * `aisdlc-451 - Frontier-triage-rubric.md`) — same convention the rest
+ * `aisdlc-451 - Frontier-triage-rubric.md` or `aisdlc-451-slug.md`) — same convention the rest
  * of the pipeline uses (see `pipeline-cli/src/steps/01-validate.ts`).
  */
 export function findTaskFile(taskId: string, workDir: string): string | null {
@@ -279,10 +279,22 @@ export function findTaskFile(taskId: string, workDir: string): string | null {
     } catch {
       continue;
     }
-    const hit = entries.find((f) => f.toLowerCase().startsWith(`${idLower} `) && f.endsWith('.md'));
+    // Both `<id> - <title>.md` and the cli-file shape `<id>-<slug>.md`; a bare
+    // `<id>.md` or a subtask `<id>.1 - ...` must not match.
+    const hit = entries.find(
+      (f) =>
+        f.endsWith('.md') &&
+        (f.toLowerCase().startsWith(`${idLower} `) || f.toLowerCase().startsWith(`${idLower}-`)),
+    );
     if (hit) return join(candidate, hit);
   }
   return null;
+}
+
+/** Repo-relative (posix) form of {@link findTaskFile}, or `undefined`. */
+export function findTaskFileRelative(taskId: string, workDir: string): string | undefined {
+  const abs = findTaskFile(taskId, workDir);
+  return abs ? relative(workDir, abs).split(sep).join('/') : undefined;
 }
 
 /**

@@ -64,3 +64,36 @@ describe('enqueue and Step 2 share one branch name (AISDLC-851)', () => {
     );
   });
 });
+
+describe('completed task files (AISDLC-1141)', () => {
+  const defaults = (rel: string) => ({
+    baseSha: 'abc',
+    dispatchedBy: 'test',
+    resolveTaskFile: () => rel,
+  });
+
+  it('enqueues a fix-on-PR entry for a completed task', () => {
+    const rel = 'backlog/completed/aisdlc-574-sync-pins.md';
+    const [written] = enqueueTasks(
+      path.join(root, 'board'),
+      [{ taskId: 'AISDLC-574', fixesPr: 2209, prHeadRef: 'chore/sync-runtime-pins-0.34.0' }],
+      defaults(rel),
+    );
+    const m = JSON.parse(readFileSync(written!, 'utf8')) as {
+      spec: { taskFile: string };
+      branch: string;
+    };
+    expect(m.spec.taskFile).toBe(rel);
+    expect(m.branch).toBe('chore/sync-runtime-pins-0.34.0');
+  });
+
+  it('refuses a completed task without fixesPr', () => {
+    expect(() =>
+      enqueueTasks(
+        path.join(root, 'board'),
+        [{ taskId: 'AISDLC-574' }],
+        defaults('backlog/completed/AISDLC-574 - Sync.md'),
+      ),
+    ).toThrow('task AISDLC-574 is completed; fix-on-PR entries need fixesPr');
+  });
+});
