@@ -5,6 +5,13 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.35.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.34.0...ai-sdlc-plugin-v0.35.0) (2026-10-31)
+
+
+### Features
+
+* **pipeline-cli:** transcript recall digest embedded in handoff (AISDLC-1132) ([#2204](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2204)) ([86f27d6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/86f27d6494a044a1eb861d6e2dc80027f6935bd1))
+
 ## [0.34.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.33.0...ai-sdlc-plugin-v0.34.0) (2026-10-31)
 
 

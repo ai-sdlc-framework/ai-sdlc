@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.40.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.39.0...pipeline-cli-v0.40.0) (2026-10-31)
+
+
+### Features
+
+* **pipeline-cli:** transcript recall digest embedded in handoff (AISDLC-1132) ([#2204](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2204)) ([86f27d6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/86f27d6494a044a1eb861d6e2dc80027f6935bd1))
+
+
+### Bug Fixes
+
+* **pipeline-cli:** enqueue fix-on-PR for completed task files (AISDLC-1141) ([#2223](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2223)) ([0e50595](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0e5059524940cd670c817ff728b31fde87dca075))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.40.0
+
 ## [0.39.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.38.0...pipeline-cli-v0.39.0) (2026-10-31)
 
 
