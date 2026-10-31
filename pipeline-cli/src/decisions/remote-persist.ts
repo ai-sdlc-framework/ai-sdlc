@@ -223,6 +223,19 @@ function idsOf(ls: string[]): Set<string> {
   return out;
 }
 
+/** Decision id when the line is a valid decision-opened event, else null. */
+function openedIdOf(line: string): string | null {
+  try {
+    const evt = JSON.parse(line) as { type?: unknown; decisionId?: unknown };
+    if (validateDecisionEvent(evt) === null && evt.type === 'decision-opened') {
+      return evt.decisionId as string;
+    }
+  } catch {
+    /* not an event */
+  }
+  return null;
+}
+
 function isValidEventLine(l: string): boolean {
   try {
     return validateDecisionEvent(JSON.parse(l) as unknown) === null;
@@ -370,6 +383,12 @@ export function persistDecisionLog(opts: DurableOpts): PersistResult {
     const onMain = new Set(mainEntries.map((e) => eventContentHash(e.line)));
     const namesOnMain = new Set(mainEntries.map((e) => e.name));
     const additions = new Map<string, EventEntry>();
+    // AISDLC-1135: first decision-opened file per id, on main then earlier in the batch.
+    const openedBy = new Map<string, string>();
+    for (const e of mainEntries) {
+      const id = openedIdOf(e.line);
+      if (id && !openedBy.has(id)) openedBy.set(id, e.name);
+    }
     for (const e of [...entriesAtRef(ctx, syncRef), ...localEntries(opts.workDir)]) {
       const h = eventContentHash(e.line);
       if (onMain.has(h) || additions.has(h)) continue;
@@ -387,6 +406,16 @@ export function persistDecisionLog(opts: DurableOpts): PersistResult {
           `[decisions] WARN: dropping event file whose name does not match its content: ${e.name}`,
         );
         continue;
+      }
+      const openedId = openedIdOf(e.line);
+      if (openedId) {
+        const existing = openedBy.get(openedId);
+        if (existing !== undefined) {
+          const msg = `${openedId} already has a decision-opened event (${existing}); refusing to push a second one (${e.name}), nothing was pushed`;
+          warn(`[decisions] WARN: ${msg}; decision kept locally only`);
+          return { persisted: false, reason: msg };
+        }
+        openedBy.set(openedId, e.name);
       }
       additions.set(h, e);
     }

@@ -70,13 +70,13 @@ function syncLedger(): string {
   return names.map((n) => git(parent, 'show', `${ref}:${n}`)).join('\n');
 }
 
-function addDec(workDir: string, id: string): void {
+function addDec(workDir: string, id: string, summary = `s ${id}`): void {
   appendDecisionEvent(
     makeDecisionOpenedEvent({
       decisionId: id,
       source: 'ad-hoc',
       scope: 't',
-      summary: `s ${id}`,
+      summary,
       reversible: true,
       options: [{ id: 'a', description: 'a' }],
     }),
@@ -185,6 +185,47 @@ describe('persistDecisionLog (AISDLC-546)', () => {
     addDec(parent, 'DEC-0002');
     persistDecisionLog({ workDir: parent, runner });
     expect(ghCalls.find((a) => a[0] === 'pr' && a[1] === 'create')).toContain('--draft');
+  });
+
+  it('refuses a second decision-opened for an id already on origin/main (AISDLC-1135)', () => {
+    addDec(parent, 'DEC-0001');
+    expect(persistDecisionLog({ workDir: parent, runner }).persisted).toBe(true);
+    git(parent, 'push', 'origin', `origin/${DECISIONS_SYNC_BRANCH}:refs/heads/main`);
+    git(origin, 'branch', '-D', DECISIONS_SYNC_BRANCH);
+    addDec(parent, 'DEC-0001', 'fixture');
+    addDec(parent, 'DEC-0002');
+    const warnings: string[] = [];
+    const r = persistDecisionLog({ workDir: parent, runner, warn: (m) => warnings.push(m) });
+    expect(r.persisted).toBe(false);
+    expect(r.reason).toMatch(/DEC-0001.*decision-opened__/);
+    expect(warnings.join('\n')).toMatch(/DEC-0001/);
+    expect(git(origin, 'branch', '--list', DECISIONS_SYNC_BRANCH)).toBe('');
+    expect(readdirSync(join(parent, '.ai-sdlc', '_decisions', 'events')).length).toBe(3);
+  });
+
+  it('refuses two decision-opened events for one id in the local log (AISDLC-1135)', () => {
+    addDec(parent, 'DEC-0001');
+    addDec(parent, 'DEC-0001', 'other');
+    const r = persistDecisionLog({ workDir: parent, runner, warn: () => {} });
+    expect(r.persisted).toBe(false);
+    expect(r.reason).toMatch(/DEC-0001/);
+    expect(git(origin, 'branch', '--list', DECISIONS_SYNC_BRANCH)).toBe('');
+  });
+
+  it('still syncs a fresh id and an answer for an already-opened id (AISDLC-1135)', () => {
+    addDec(parent, 'DEC-0001');
+    expect(persistDecisionLog({ workDir: parent, runner }).persisted).toBe(true);
+    git(parent, 'push', 'origin', `origin/${DECISIONS_SYNC_BRANCH}:refs/heads/main`);
+    git(origin, 'branch', '-D', DECISIONS_SYNC_BRANCH);
+    addDec(parent, 'DEC-0002');
+    appendDecisionEvent(
+      makeOperatorAnsweredEvent({ decisionId: 'DEC-0001', chosenOptionId: 'a', by: 'op@test' }),
+      { workDir: parent },
+    );
+    expect(persistDecisionLog({ workDir: parent, runner }).persisted).toBe(true);
+    const remote = syncLedger();
+    expect(remote).toContain('DEC-0002');
+    expect(remote).toContain('operator-answered');
   });
 
   it('answer-style append lands on the sync branch', () => {
