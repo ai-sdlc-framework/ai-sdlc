@@ -63,6 +63,8 @@ const mkManifest = (taskId: string): DispatchManifest => ({
 const gitAt = (root: string) => (_args: readonly string[]) => path.join(root, '.git');
 
 beforeEach(() => {
+  // Never read the ambient executor session (AISDLC-1137).
+  vi.stubEnv('AI_SDLC_EXECUTOR_TASK', '');
   tmp = mkdtempSync(path.join(tmpdir(), 'executor-start-'));
   board = path.join(tmp, '.ai-sdlc', 'dispatch');
   mkdirSync(board, { recursive: true });
@@ -81,6 +83,7 @@ beforeEach(() => {
   });
 });
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
   rmSync(tmp, { recursive: true, force: true });
 });
@@ -436,5 +439,12 @@ describe('executorStart under AI_SDLC_EXECUTOR_TASK (AISDLC-1073)', () => {
     writeManifest(board, mkManifest('AISDLC-9'));
     writeHold(board, { reason: 'spend paused', since: 'now', by: 'planner' });
     await expect(run('AISDLC-9')).rejects.toThrow(/board is held/);
+  });
+
+  it('reads deps.env, not process.env, for the pinned task (AISDLC-1137)', async () => {
+    vi.stubEnv('AI_SDLC_EXECUTOR_TASK', 'AISDLC-1');
+    writeManifest(board, mkManifest('AISDLC-9'));
+    const r = await run('AISDLC-9');
+    expect(r.taskId).toBe('AISDLC-9');
   });
 });
