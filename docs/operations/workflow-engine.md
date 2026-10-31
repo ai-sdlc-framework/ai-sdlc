@@ -1,9 +1,24 @@
 # Workflow engine (RFC-0056 phase 3)
 
-`AI_SDLC_WORKFLOW_ENGINE=1` routes `ai-sdlc-pipeline next-step` through the workflow engine
-(`pipeline-cli/src/workflow/engine.ts`, host in `execute-host.ts`). Unset, or any other value,
-the Machine in `next-step/next-step.ts` runs exactly as before. The default flips in a follow-up
-after one green release.
+The workflow engine is the default (AISDLC-1077): `ai-sdlc-pipeline next-step` runs it with no
+environment flag (`pipeline-cli/src/workflow/engine.ts`, host in `execute-host.ts`), so every
+execute round gets the iteration cap, the review fan-out cap, the hygiene nodes and the frozen set.
+
+## Default, escape hatch, deprecation
+
+- Default: engine. Run state holds `workflow.records`; the sign step adds `workflowDigest`.
+- Escape hatch: `AI_SDLC_WORKFLOW_ENGINE=0` runs the legacy Machine in `next-step/next-step.ts`
+  and prints one deprecation warning per process on stderr. Only the exact value `0` selects the
+  Machine; any other value (`false`, `off`, empty) keeps the engine.
+- Deprecation: the escape hatch and the Machine are removed after one release. A state file begun
+  by one path cannot be resumed by the other; start a fresh run (`--fresh`).
+
+## Reading a run's engine records
+
+Open the state JSON (`--state`, default under `.ai-sdlc/`): `workflow.path/sha256/baseSha` name the
+document, `workflow.records[]` has one entry per node run (node id, outcome, iteration), and
+`workflow.pending` is the instruction awaiting a reply. The signed envelope carries the same
+`workflowDigest`. An absent `workflow` key means the Machine produced the state.
 
 ## What the engine does
 
@@ -40,11 +55,11 @@ Envelopes without the field verify unchanged. The three path-exclusion lists
 (`PATCH_ID_EXCLUSIONS`, `ATTESTATION_PATH_EXCLUSIONS`, `PATCH_ID_EXCLUSIONS_FALLBACK`) are unchanged:
 `.ai-sdlc/workflow.yaml` stays inside the reviewed patch.
 
-## Gate for the default flip
+## Replay gate
 
-`pipeline-cli/src/workflow/replay.test.ts` drives both paths over the fixtures in
-`pipeline-cli/test/fixtures/workflow/replay/` and asserts identical instruction sequences, exit
-codes and collaborator calls. Add a fixture for every Machine behaviour before flipping the flag.
+`pipeline-cli/src/workflow/replay.test.ts` runs in `pnpm test` and drives both paths over the
+fixtures in `pipeline-cli/test/fixtures/workflow/replay/`, asserting identical instruction
+sequences, exit codes and collaborator calls. Add a fixture for every Machine behaviour.
 
 ## Removed with this phase
 

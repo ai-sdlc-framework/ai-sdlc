@@ -1,0 +1,5 @@
+{
+  "name": "cancel-after-reviewers",
+  "note": "operator cancel signal seen at the reviewer step boundary",
+  "cancelAt": "reviewers"
+}

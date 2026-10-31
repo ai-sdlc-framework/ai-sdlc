@@ -1,0 +1,5 @@
+{
+  "name": "bad-argument",
+  "note": "an unparseable argument is refused before any state exists",
+  "task": "not a task!"
+}

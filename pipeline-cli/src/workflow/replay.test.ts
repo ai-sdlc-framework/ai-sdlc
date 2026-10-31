@@ -1,9 +1,9 @@
 /**
  * Golden replay (RFC-0056 phase 3): the workflow engine and the Machine are driven over the
  * same recorded fixtures with the same collaborators, and must emit the same instruction
- * sequence. This is the gate for flipping `AI_SDLC_WORKFLOW_ENGINE` on by default.
+ * sequence. This gates the Machine escape hatch (`AI_SDLC_WORKFLOW_ENGINE=0`); it runs in `pnpm test`.
  */
-import { mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -23,6 +23,7 @@ import type {
   NextStepState,
   ReviewRoundState,
 } from '../next-step/types.js';
+import { defaultGhIssueDeps } from '../next-step/gh-issue.js';
 import { workflowNextStep } from './execute-host.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -36,8 +37,28 @@ interface Fixture {
   devResult?: 'failed' | 'parked' | 'prose';
   reviewResult?: 'both' | 'missing-security';
   reviewResults?: string[];
-  lease?: 'blocking';
+  lease?: 'blocking' | 'warning';
   initRefused?: boolean;
+  /** `prepareReview` aborts the run. */
+  prepareAbort?: boolean;
+  /** `finalizeReview` fails with a non-recoverable reason. */
+  finalizeFatal?: boolean;
+  /** `ship` throws after the task began (rollback path). */
+  shipThrows?: boolean;
+  /** Operator cancel signal present before this call is answered. */
+  cancelAt?: 'start' | 'developer' | 'reviewers';
+  /** The argument handed to every call (default `AISDLC-900`). */
+  task?: string;
+  /** The Claude Code remote-sandbox guard fires. */
+  ccr?: boolean;
+  /** Before each answer, call once with no result (idempotent re-emit of the pending instruction). */
+  recall?: boolean;
+  /** After the first instruction, call with a different task id against the same state file. */
+  wrongTask?: boolean;
+  /** After a terminal instruction, call again (the persisted result is re-emitted). */
+  recallAfterTerminal?: boolean;
+  /** The task is resumed: `developer-round` (ordered round) or `full` (no usable attestation). */
+  resume?: 'developer-round' | 'full';
 }
 
 const fixtures: Fixture[] = readdirSync(FIXTURES)
@@ -137,6 +158,8 @@ function depsFor(fx: Fixture): Partial<NextStepDeps> {
         ? { ok: false, reason: 'dependency preflight failed for AISDLC-900' }
         : {
             ok: true,
+            ...(fx.resume ? { resumed: true } : {}),
+            ...(fx.resume === 'developer-round' ? { developerRound: true } : {}),
             branch: 'ai-sdlc/aisdlc-900-demo-task',
             worktreePath: worktree,
             task: makeTask(),
@@ -146,6 +169,7 @@ function depsFor(fx: Fixture): Partial<NextStepDeps> {
           },
     prepareReview: async (_c, _s, round) => {
       counters.prepared += 1;
+      if (fx.prepareAbort) return { kind: 'abort', reason: 'no diff against the target branch' };
       if (fx.nothingToSpawn) {
         return {
           kind: 'nothing-to-spawn',
@@ -173,6 +197,9 @@ function depsFor(fx: Fixture): Partial<NextStepDeps> {
           reason: `no report for ${missing.map((m) => m.agent).join(', ')}`,
         };
       }
+      if (fx.finalizeFatal) {
+        return { ok: false, recoverable: false, reason: 'attestation envelope refused' };
+      }
       const approved = approvals[counters.finalized] ?? true;
       counters.finalized += 1;
       return { ok: true, verdict: verdict(approved), warnings: [] };
@@ -180,7 +207,9 @@ function depsFor(fx: Fixture): Partial<NextStepDeps> {
     leasePreflight: () =>
       fx.lease === 'blocking'
         ? { status: 'refused', blocking: true, failing: [], message: 'lease refused' }
-        : { status: 'skipped', blocking: false, failing: [], message: '' },
+        : fx.lease === 'warning'
+          ? { status: 'refused', blocking: false, failing: [], message: 'lease warning' }
+          : { status: 'skipped', blocking: false, failing: [], message: '' },
     preSignRebase: async () => {
       const kind = rebases[counters.rebased] ?? 'skipped';
       counters.rebased += 1;
@@ -191,6 +220,7 @@ function depsFor(fx: Fixture): Partial<NextStepDeps> {
     },
     ship: async (_c, s) => {
       counters.shipped.push(structuredClone(s));
+      if (fx.shipThrows) throw new Error('gh pr create exploded');
       const done: DoneInstruction = {
         action: 'done',
         taskId: s.taskId,
@@ -208,6 +238,10 @@ function depsFor(fx: Fixture): Partial<NextStepDeps> {
     buildDeveloperPrompt: async (o) => {
       counters.devPrompts.push({ iteration: o.iteration, feedback: o.reviewerFeedback });
       return { prompt: `iteration ${o.iteration ?? 1} prompt`, task: o.task };
+    },
+    ghIssue: {
+      ...defaultGhIssueDeps,
+      claudeOnPath: async () => false,
     },
   };
 }
@@ -228,25 +262,46 @@ function devResultFor(fx: Fixture): string {
 
 type Step = typeof nextStep;
 
+function writeCancel(): void {
+  const dir = join(ctx.workDir, '.ai-sdlc', 'dispatch', 'sessions');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'aisdlc-900.cancel.json'),
+    JSON.stringify({ reason: 'operator-cancel' }),
+    'utf8',
+  );
+}
+
 /** Act as the model: answer each instruction like the recorded session did. */
 async function drive(
   run: Step,
   fx: Fixture,
 ): Promise<{ instructions: Instruction[]; exitCodes: number[] }> {
   const d = depsFor(fx);
+  const task = fx.task ?? 'AISDLC-900';
   const instructions: Instruction[] = [];
   const exitCodes: number[] = [];
+  const record = (out: { instruction: Instruction; exitCode: number }): void => {
+    instructions.push(out.instruction);
+    exitCodes.push(out.exitCode);
+  };
   let reviewCalls = 0;
-  let out = await run(ctx, { task: 'AISDLC-900' }, d);
-  instructions.push(out.instruction);
-  exitCodes.push(out.exitCode);
+  if (fx.ccr) ctx.env.CLAUDE_REMOTE_EXECUTION = '1';
+  else delete ctx.env.CLAUDE_REMOTE_EXECUTION;
+  if (fx.cancelAt === 'start') writeCancel();
+  let out = await run(ctx, { task }, d);
+  record(out);
+  if (fx.wrongTask) record(await run(ctx, { task: 'AISDLC-901', result: DEV_JSON }, d));
   for (let guard = 0; guard < 30; guard++) {
     const i = out.instruction;
     if (i.action === 'done' || i.action === 'stop') break;
+    if (fx.recall) record(await run(ctx, { task }, d));
     let result: string;
     if (i.action === 'spawn-developer') {
+      if (fx.cancelAt === 'developer') writeCancel();
       result = devResultFor(fx);
     } else {
+      if (fx.cancelAt === 'reviewers') writeCancel();
       const scripted = fx.reviewResults?.[reviewCalls];
       reviewCalls += 1;
       result =
@@ -256,10 +311,10 @@ async function drive(
             ? reviewersJson(['code-reviewer-codex'])
             : reviewersJson(['code-reviewer-codex', 'security-reviewer']);
     }
-    out = await run(ctx, { task: 'AISDLC-900', result }, d);
-    instructions.push(out.instruction);
-    exitCodes.push(out.exitCode);
+    out = await run(ctx, { task, result }, d);
+    record(out);
   }
+  if (fx.recallAfterTerminal) record(await run(ctx, { task, result: DEV_JSON }, d));
   return { instructions, exitCodes };
 }
 
@@ -281,7 +336,12 @@ beforeEach(() => {
 });
 afterEach(() => h.cleanup());
 
+/** Operator-visible log lines: resume decisions and warnings/errors must match too. */
+const operatorLogs = (): string[] =>
+  h.logs.filter((l) => l.includes('[resume]') || l.startsWith('warn:') || l.startsWith('error:'));
+
 function reset(): void {
+  h.logs.length = 0;
   rmSync(ctx.statePath, { force: true });
   rmSync(ctx.filesDir, { recursive: true, force: true });
   counters = {
@@ -296,7 +356,7 @@ function reset(): void {
 
 describe('golden replay: engine vs Machine', () => {
   it('has the recorded fixtures', () => {
-    expect(fixtures.length).toBeGreaterThanOrEqual(14);
+    expect(fixtures.length).toBeGreaterThanOrEqual(29);
     expect(fixtures.map((f) => f.name)).toContain('changes-requested-at-cap');
     expect(fixtures.map((f) => f.name)).toContain('reviewer-return-missing');
   });
@@ -311,8 +371,10 @@ describe('golden replay: engine vs Machine', () => {
         reviewRound: s.reviewRound,
         postRebaseReviewed: s.postRebaseReviewed,
       }));
+      const machineLogs = operatorLogs();
       reset();
       const engine = await drive(workflowNextStep, fx);
+      expect(operatorLogs()).toEqual(machineLogs);
       expect(engine.instructions).toEqual(machine.instructions);
       expect(engine.exitCodes).toEqual(machine.exitCodes);
       expect(structuredClone({ ...counters, shipped: counters.shipped.length })).toEqual(
@@ -351,5 +413,43 @@ describe('golden replay: engine vs Machine', () => {
       'stop',
     ]);
     expect(counters.shipped).toHaveLength(0);
+  });
+
+  it('the behaviour fixtures really exercise their path (not a vacuous pair of identical runs)', async () => {
+    const expectations: Record<string, { last: Record<string, unknown>; logs?: string }> = {
+      'lease-refused-warning': {
+        last: { action: 'done', outcome: 'approved' },
+        logs: 'lease warning',
+      },
+      'prepare-abort': { last: { action: 'stop', outcome: 'aborted' } },
+      'finalize-fatal': { last: { action: 'stop', outcome: 'aborted' } },
+      'ship-throws': { last: { action: 'stop', outcome: 'aborted' } },
+      'cancel-at-start': { last: { action: 'stop', outcome: 'aborted' } },
+      'cancel-after-developer': { last: { action: 'stop', outcome: 'aborted' } },
+      'cancel-after-reviewers': { last: { action: 'stop', outcome: 'aborted' } },
+      'bad-argument': { last: { action: 'stop', outcome: 'aborted' } },
+      'ccr-refused': { last: { action: 'stop', outcome: 'aborted' } },
+      'gh-issue-no-claude': { last: { action: 'stop', outcome: 'aborted' } },
+      'recall-after-terminal': { last: { action: 'done', outcome: 'approved' } },
+      'resume-developer-round': {
+        last: { action: 'done', outcome: 'approved' },
+        logs: 'developer-round: ordered by reenter',
+      },
+      'resume-full': { last: { action: 'done', outcome: 'approved' }, logs: 'review-full' },
+    };
+    for (const [name, want] of Object.entries(expectations)) {
+      const fx = fixtures.find((f) => f.name === name) as Fixture;
+      reset();
+      const run = await drive(workflowNextStep, fx);
+      expect(run.instructions.at(-1), name).toMatchObject(want.last);
+      if (want.logs) expect(operatorLogs().join('\n'), name).toContain(want.logs);
+    }
+    reset();
+    const wrong = await drive(
+      workflowNextStep,
+      fixtures.find((f) => f.name === 'wrong-task-state') as Fixture,
+    );
+    expect(wrong.instructions[1]).toMatchObject({ action: 'stop' });
+    expect((wrong.instructions[1] as { reason: string }).reason).toContain('belongs to');
   });
 });

@@ -1,0 +1,5 @@
+{
+  "name": "lease-refused-warning",
+  "note": "a non-blocking lease refusal only warns; the run goes on to rebase and ship",
+  "lease": "warning"
+}

@@ -14,7 +14,11 @@ import { fileURLToPath } from 'node:url';
 import type { ArgumentsCamelCase, CommandModule } from 'yargs';
 import { now } from '../clock.js';
 import { nextStep } from '../next-step/next-step.js';
-import { workflowEngineEnabled, workflowNextStep } from '../workflow/execute-host.js';
+import {
+  warnMachineDeprecated,
+  workflowEngineEnabled,
+  workflowNextStep,
+} from '../workflow/execute-host.js';
 import type { NextStepContext } from '../next-step/types.js';
 import { defaultRunner } from '../runtime/exec.js';
 import type { PipelineLogger } from '../types.js';
@@ -109,6 +113,7 @@ export function nextStepCommand(): CommandModule {
             : resultArg === '-'
               ? await readStdin()
               : readFileSync(resolve(resultArg), 'utf8');
+        warnMachineDeprecated(process.env);
         const run = workflowEngineEnabled(process.env) ? workflowNextStep : nextStep;
         out = await run(buildContext(workDir, statePath), {
           task: argv.task as string,
