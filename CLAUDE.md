@@ -21,7 +21,7 @@ Only rules that change behaviour in every session live here (budget 15k characte
 ## Testing
 
 - Run `pnpm build && pnpm test && pnpm lint && pnpm format:check` before pushing.
-- Coverage is NOT a local gate; CI is the single gate (AISDLC-726): per-package line floors of 85-90 plus a 90% patch gate.
+- Coverage blocks a merge only in CI (AISDLC-726): per-package line floors of 85-90 plus a 90% patch gate; the pre-push step is an early copy of the same patch gate over the touched packages (AISDLC-1119, DEC-0282).
 - Hook scripts (`ai-sdlc-plugin/hooks/*.js`) use `node --test`; orchestrator and MCP server use Vitest.
 - Do NOT remove the `pretest` build hook in `dogfood/package.json` (AISDLC-404).
 
