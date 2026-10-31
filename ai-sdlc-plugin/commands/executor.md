@@ -46,7 +46,7 @@ to your dispatch session; never retry in another spelling.
 - **A hold limits actions, never reporting:** the planner pauses the drain with `cli-hierarchy hold --reason <text>` (never a prose "stay idle"), which blocks claims and relaunches only; every blocker, verdict and merge sha still goes to the parent tier by `SendMessage` as it happens, and pane text is not a report.
 <!-- prompt-rules:end -->
 <!-- standing-rules:begin -->
-- **Standing (DEC-0167):** Never relaunch a session for a stale node probe.
+- **Standing rule:** Never relaunch a session for a stale node probe.
 <!-- standing-rules:end -->
 
 ## Step 1 - Resolve the CLIs, then start

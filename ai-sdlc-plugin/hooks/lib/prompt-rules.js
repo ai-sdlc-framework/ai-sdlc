@@ -244,9 +244,10 @@ function loadCatalogEvents(root, opts = {}) {
  * @param {Array<Record<string, any>>} events
  */
 function renderStandingRulesBlock(events) {
-  const lines = projectStandingRules(events).map(
-    (r) => `- **Standing (${r.decisionId}):** ${r.rule}`,
-  );
+  // Adopter-visible text carries no internal ids (the command tests enforce
+  // /\b[A-Z]{3,}-\d+\b/ is absent), so the decision id orders the lines but is
+  // not printed; the catalog is the place to look a rule's record up.
+  const lines = projectStandingRules(events).map((r) => `- **Standing rule:** ${r.rule}`);
   // No rules: one line, so an empty block costs a prompt a single line.
   if (lines.length === 0) return STANDING_BEGIN + STANDING_END;
   return [STANDING_BEGIN, ...lines, STANDING_END].join('\n');
