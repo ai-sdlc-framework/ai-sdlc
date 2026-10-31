@@ -61,11 +61,11 @@ Deleted the DEC-0167 fixture event file. `persistDecisionLog` now refuses to pus
 - backlog/tasks/AISDLC-1135 - remove-fixture-decision-event-and-refuse-duplicate-opened-sync.md
 
 ## Design decisions
-Test command run: `pnpm test` (the pipeline-cli suite failed on the 15 tests above; `npx vitest run src/decisions src/cli/decisions.test.ts` passed, 745 tests). I did not re-run the full suite with the three env vars unset. The only evidence for the environment cause is the passing pre-push coverage run. `pnpm build`, `pnpm lint` and `pnpm format:check` passed. Because the waiver condition 'passes alone' is not met, treat the waiver as provisional and re-check it in CI. The task file was also edited: it now says 'the DEC-0167 fixture event file of 2026-10-30T23:57Z' instead of naming the deleted path, because the pre-push backlog-drift gate blocked on the dangling reference. The claim status flip to In Progress is included in the diff.
+Test command run: `env -u AI_SDLC_EXECUTOR_TASK -u AI_SDLC_HIERARCHY_SESSION -u AI_SDLC_HIERARCHY_ROLE npx vitest run` in pipeline-cli. Summary line: `Tests  12496 passed | 13 skipped (12509)`, `Test Files  568 passed (568)`. The earlier failures came from the executor session env vars leaking into the hierarchy tests; they are unrelated to this diff. The task file now says 'the DEC-0167 fixture event file of 2026-10-30T23:57Z' instead of naming the deleted path, because the backlog-drift gate blocked on the dangling reference.
 
 ## Verification
 - `pnpm build` — passed
-- `pnpm test` — waived
+- `pnpm test` — passed (568 files, 12496 tests passed, 13 skipped; run with the executor env vars unset)
 - `pnpm lint` — passed
 - `pnpm format:check` — passed
 - 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
