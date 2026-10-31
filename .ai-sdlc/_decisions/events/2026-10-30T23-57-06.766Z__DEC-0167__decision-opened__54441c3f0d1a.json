@@ -1,1 +1,0 @@
-{"eventVersion":"v1","type":"decision-opened","ts":"2026-10-30T23:57:06.766Z","decisionId":"DEC-0167","source":"ad-hoc","scope":"workspace","summary":"x","options":[{"id":"opt-a","description":"Yes"}],"reversible":true,"standingRule":"Never relaunch a session for a stale node probe."}
