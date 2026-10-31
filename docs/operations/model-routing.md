@@ -4,7 +4,7 @@
 **RFC:** [`RFC-0050`](../../spec/rfcs/RFC-0050-usage-ledger-and-model-routing.md) (Usage Ledger and Evidence-Based Model Routing)
 **Companion:** [`usage-ledger.md`](usage-ledger.md) covers the usage data this evidence is built from.
 
-Model routing lets a repository say which model each agent role uses, and gather evidence on whether a cheaper model does the job as well. This document separates what ships today from what does not. The weekly proposal (`cli-usage route propose`) ships and is described in [Weekly proposal](#weekly-proposal). Approving a proposal into a pull request and the automatic revert are described in [Planned behaviour](#planned-behaviour-not-yet-available); no command for them exists yet.
+Model routing lets a repository say which model each agent role uses, and gather evidence on whether a cheaper model does the job as well. The weekly proposal (`cli-usage route propose`) is described in [Weekly proposal](#weekly-proposal). Turning an approved proposal into a pull request (`cli-usage route apply`) and the automatic revert are described in [Approving a proposal and the automatic revert](#approving-a-proposal-and-the-automatic-revert).
 
 Commands are written as `cli-usage` and `ai-sdlc-pipeline`. From a repository checkout, run `node pipeline-cli/bin/cli-usage.mjs` and `node pipeline-cli/bin/ai-sdlc-pipeline.mjs` in their place. The examples use synthetic data.
 
@@ -192,7 +192,7 @@ $ ai-sdlc-pipeline resolve-model code-reviewer --task-id DEMO-3 --task-class cho
 }
 ```
 
-A missing or unreadable overrides file is treated as empty. Nothing in the framework writes this file yet (see [Planned behaviour](#planned-behaviour-not-yet-available)).
+A missing or unreadable overrides file is treated as empty. The orchestrator tick writes it when it reverts a cell (see [Approving a proposal and the automatic revert](#approving-a-proposal-and-the-automatic-revert)).
 
 ---
 
@@ -324,7 +324,7 @@ The security reviewer never gets candidates. Both numbers can be changed per run
 
 The Decision lists each change with its counts and rates and the evidence files. It holds counts, ids and attribution only: no prompt, response, file content or task id. The evidence files are the scorecard's per-cell files, written under `$ARTIFACTS_DIR/_routing/evidence/<date>/` when a Decision is filed; for a reviewer change it cites the replay results file. The Decision states the `repoId` the evidence was resolved for, in its text and in its machine-readable block (top level and on each change), so the approval step can check it. The block also records `source: framework-calibration` and `by: framework:route-propose`, and is always the LAST fenced `json` block of the body.
 
-**Consumers must verify.** The later apply step must not trust the Decision body: re-derive the evidence (scorecard and replay for the stated `repoId`) and check the Decision's recorded source and actor instead of parsing claims out of the text. Evidence references are emitted only when they are plain relative paths (letters, digits, `.`, `_`, `-`, `/`; no `..`); others are skipped with a warning. The Decision Catalog must be on (`AI_SDLC_DECISION_CATALOG`, on by default); with it off nothing is filed.
+**Consumers must verify.** `cli-usage route apply` does not trust the Decision body: re-derive the evidence (scorecard and replay for the stated `repoId`) and check the Decision's recorded source and actor instead of parsing claims out of the text. Evidence references are emitted only when they are plain relative paths (letters, digits, `.`, `_`, `-`, `/`; no `..`); others are skipped with a warning. The Decision Catalog must be on (`AI_SDLC_DECISION_CATALOG`, on by default); with it off nothing is filed.
 
 | Flag                  | Meaning                                                                                                   |
 | --------------------- | --------------------------------------------------------------------------------------------------------- |
@@ -336,31 +336,49 @@ The Decision lists each change with its counts and rates and the evidence files.
 
 The orchestrator tick runs it at most once per ISO calendar week (UTC), recording the week in `$ARTIFACTS_DIR/_routing/proposal-state.json`. A failure is logged as a warning and never stops the tick; the week is recorded when the attempt starts, so a failing run is not retried until next week.
 
-Cells that carry `cell.previousModel` are also checked: when that earlier model is now cheaper than (or as cheap as) the cell's model at current prices, the output lists the cell as information only. Nothing writes `cell.evidence` or `cell.previousModel` yet; edit them by hand if you apply a change yourself.
+Cells that carry `cell.previousModel` are also checked: when that earlier model is now cheaper than (or as cheap as) the cell's model at current prices, the output lists the cell as information only. `cli-usage route apply` writes `cell.evidence` and `cell.previousModel`; set them by hand only if you apply a change yourself.
 
 ---
 
-## Planned behaviour (not yet available)
+## Approving a proposal and the automatic revert
 
-**This section describes rules from RFC-0050 whose automation has not shipped: turning an approved proposal into a pull request, and the automatic revert. No command is shown for them.** Do not expect the table to change by itself. What ships today is the evidence (scorecards, replay), the table, exploration, the override reader and the [weekly proposal](#weekly-proposal). Table edits are made by hand, by pull request to the base branch, even after a proposal is approved.
+The table changes only by pull request. Approving a proposal opens that pull request; the orchestrator tick moves a cell back to a stronger model if the change turns out worse.
 
-The rules the RFC sets for changing the table, once that automation exists:
+### 1. Approve the Decision
 
-**Moving to a cheaper model: proposed, then approved.**
+Silence leaves the table unchanged: a proposal nobody answers has no effect, and nothing edits the table by itself. The operator answers the proposal Decision with one of its options: `approve-all`, `decline`, or `approve-<n>` for a single change (offered when the proposal lists more than one). Answering is a Decision Catalog action done by the operator or the planner, not by a developer agent.
 
-- A weekly job (shipped: see [Weekly proposal](#weekly-proposal)) evaluates each cell's candidates. A candidate qualifies when it has at least **30 compared tasks** and its first-pass approval rate is no more than **5 points** below the cell's current model over the same period. For a reviewer role, replay recall must be no more than 5 points lower and the false-block rate no more than 5 points higher.
-- Every qualifying change goes into one Decision (RFC-0035) with the evidence attached (shipped). Approving it will produce a pull request that edits the table and records the evidence reference (not yet available).
-- **Silence leaves the table unchanged.** A proposal that nobody approves has no effect.
-- The proposal is computed at current prices, and it reports any cell whose applied change is no longer cheaper (shipped, for cells that carry `previousModel`).
+### 2. Turn it into a pull request
 
-**Moving back to a stronger model: automatic.**
+`cli-usage route apply` trusts nothing in the Decision. It checks that the framework filed it and the operator answered it, re-reads the evidence files against their recorded digests, re-derives the evidence for this repository and refuses when the change no longer qualifies. Every check runs before the first write. The edit happens in a fresh worktree on a new branch cut from `origin/main`, and the command opens the pull request.
 
-- When a cell's model, after a change, shows a first-pass approval rate more than 5 points below the rate recorded in the evidence that justified the change, over at least 30 tasks, that cell is reverted to its previous model through the overrides file. The revert is recorded, announced through a Decision, and stays until a table change supersedes it.
-- **Overrides can only select a stronger model.** An override may never move a cell to a cheaper or equal one. The resolver already enforces this when it reads the overrides file (see [Overrides](#overrides)).
+```console
+$ cli-usage route apply --decision DEC-0099
+Refused: decision not found: DEC-0099
+$ cli-usage route apply --decision DEC-0099 --json
+{
+  "outcome": "refused",
+  "reason": "decision not found: DEC-0099"
+}
+```
 
-The 30-task and 5-point values are the defaults, and the RFC makes both configurable.
+A refusal exits 1 and changes nothing. On success the output is `Opened <pr-url> on branch <branch>.` followed by one `<role> / <class>: <from> -> <to>` line per applied change, and a `not approved:` line for each change the answer left out. The pull request records, per cell, `cell.previousModel` (the model before the change) and `cell.evidence` (a copy of the evidence under `.ai-sdlc/routing-evidence/<decision>/`). In a table that uses family aliases the alias is written; `--pin` writes the versioned id and adds it to `strength` instead. Merge the pull request through the normal path.
 
-Until the rest of this automation ships, apply an approved proposal by hand: edit the table (and, if you want the later checks, set `cell.evidence` and `cell.previousModel`) and land it by pull request. You can also read `cli-usage scorecard`, apply the same bar (30 tasks, 5 points), and commit a table change yourself. To step a cell back, edit the table to the stronger model.
+| Flag                | Meaning                                         |
+| ------------------- | ----------------------------------------------- |
+| `--decision DEC-NN` | The answered proposal Decision (required)       |
+| `--pin`             | Write the versioned id and add it to `strength` |
+| `--json`            | Print the result as JSON                        |
+
+### 3. Automatic revert to a stronger model
+
+Every orchestrator tick checks each cell that carries `cell.evidence` and `cell.previousModel`. When the cell's model, over at least **30 tasks** since the change, shows a first-pass approval rate more than **5 points** below the rate recorded in the evidence that justified the change, the cell goes back to its previous model through `$ARTIFACTS_DIR/_routing/overrides.json` (see [Overrides](#overrides)). The revert emits a `ModelRoutingOverrideApplied` event and files one informational Decision with scope `routing:model-revert`; nothing needs answering. The override stays until the table cell changes, at which point the next tick drops it. A failure in this step is logged and never stops the tick.
+
+**Overrides can only select a stronger model.** The revert never moves a cell to a cheaper or equal one, and the resolver ignores any such override entry.
+
+The 30-task and 5-point values are the defaults. For the proposal, `--min-tasks` and `--margin-points` change them per run (see [Weekly proposal](#weekly-proposal)); the proposal is computed at current prices and reports any cell whose applied change is no longer cheaper.
+
+---
 
 ## Troubleshooting
 
