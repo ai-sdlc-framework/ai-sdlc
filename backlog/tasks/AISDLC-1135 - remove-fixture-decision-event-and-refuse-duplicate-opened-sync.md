@@ -21,7 +21,7 @@ dispatchable: true
 
 ## Description
 
-Operator ruling 2026-10-31 via the decision rubric (planner session): the event `2026-10-30T23-57-06.766Z__DEC-0167__decision-opened__54441c3f0d1a.json` is deleted, and the sync path is tightened so the same shape cannot land again.
+Operator ruling 2026-10-31 via the decision rubric (planner session): the event the DEC-0167 fixture event file of 2026-10-30T23:57Z is deleted, and the sync path is tightened so the same shape cannot land again.
 
 What happened: DEC-0167 is a real decision ("Regroup 14 queued CI/CD tasks"), opened and answered on 2026-10-13. On 2026-10-30 at 23:57Z, during the incident recorded in `docs/operations/incidents/2026-10-30-parent-checkout-deleted-by-pre-push-coverage-gate.md`, a vitest run with the leaked `GIT_DIR` wrote a test fixture (summary `x`, option `opt-a: Yes`, standing rule "Never relaunch a session for a stale node probe"; the values of the `--standing-rule` case in `pipeline-cli/src/cli/decisions.test.ts`) into the real events directory under the id DEC-0167. The decisions-sync path (`remote-persist.ts`) then pushed it and it merged in PR #2190. Since then `cli-decisions list` shows DEC-0167 as open with summary `x`, and every `cli-file` run warns `duplicate (decisionId, type) pair DEC-0167 decision-opened already on origin/main`.
 
@@ -38,7 +38,7 @@ Velocity impact: none on normal filings; a genuine re-open of an existing id (no
 
 ## Acceptance Criteria
 
-- [ ] AC-1: The file `.ai-sdlc/_decisions/events/2026-10-30T23-57-06.766Z__DEC-0167__decision-opened__54441c3f0d1a.json` is removed. After the PR lands, `node pipeline-cli/bin/cli-decisions.mjs show DEC-0167` reports the 2026-10-13 record as `answered` (option `edit-manifests`) with no 2026-10-30 event, and `cli-file` no longer warns about a duplicate DEC-0167 pair.
+- [ ] AC-1: The file the DEC-0167 fixture event file of 2026-10-30T23:57Z is removed. After the PR lands, `node pipeline-cli/bin/cli-decisions.mjs show DEC-0167` reports the 2026-10-13 record as `answered` (option `edit-manifests`) with no 2026-10-30 event, and `cli-file` no longer warns about a duplicate DEC-0167 pair.
 - [ ] AC-2: `persistDecisionLog` in `pipeline-cli/src/decisions/remote-persist.ts` refuses to push an addition whose `(decisionId, 'decision-opened')` pair already exists on `origin/main` or earlier in the local log; it returns `persisted: false` with a reason naming the id and the existing event file, keeps the local file untouched, and pushes nothing from that batch. Other event types are unaffected.
 - [ ] AC-3: Tests: a fixture log with an existing `DEC-0001 decision-opened` on the simulated remote and a second local `DEC-0001 decision-opened` yields the refusal and no push; a fresh id still syncs; an `operator-answered` for an already-opened id still syncs.
 - [ ] AC-4: `docs/operations/decision-authority.md` (decision catalog section) gains two sentences: the log is append-only, and the one sanctioned exception is removing an event with no decision behind it under an operator ruling that names the file, as done for DEC-0167 on 2026-10-31.
