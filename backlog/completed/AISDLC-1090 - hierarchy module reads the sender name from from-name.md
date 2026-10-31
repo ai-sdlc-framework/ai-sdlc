@@ -38,30 +38,25 @@ First live run with the module loaded on all sessions, 2026-10-28 09:00Z to 09:2
 - [ ] Live check in the PR body: after relaunch, `cli-hierarchy clear <executor>` is acknowledged by the module (no "no hooks module consumed it").
 - [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 
-## Test run note (resume round)
+## Test run note (round 2)
 
-`env -i HOME=$HOME PATH=$PATH pnpm test` on this branch rebased onto origin/main: the earlier 16 executor-start/webhook-receiver failures did not reproduce; one failure remained, `pipeline-cli/src/dispatch/webhook-receiver.test.ts` "coalesces five check-run deliveries for one head into one wake" (expected 1 call, got 2). It fails identically with `env -i npx vitest run src/dispatch/webhook-receiver.test.ts` on the main checkout (7c11084c2, no diff from origin/main), so it is red on main and untouched by this diff (hierarchy.ts executor and its test only). Not caused by this task.
+Round 1 reviewers flagged the unclosed describe in hierarchy.test.ts (fixed: braces closed), the from-name/from split (added `senderAddressOf`, used by `recordReceivedSender` so the AISDLC-1080 received log keeps the uds address, with a test), and the waiver. `env -i HOME=$HOME PATH=$PATH pnpm test` now exits 0 on this branch rebased onto origin/main: no waiver. (Without `env -i` the agent shell leaks variables and 15+ pipeline-cli executor-start tests fail; that is environmental.)
 
 ## Final Summary
 
 ## Summary
-Resume round for AISDLC-1090. I rebased onto origin/main and reran the suite with `env -i`. The 16 earlier executor-start/webhook-receiver failures did not reproduce. One failure remains, in the webhook receiver test, and it also fails on main. I recorded that in the task file and pushed to the existing PR #2063.
+Hierarchy hooks module now reads the sender name from the `from-name` attribute (falling back to `from`), so enqueue from dispatch is consumed again. `senderAddressOf` keeps the raw `from` socket address for the AISDLC-1080 reply allowlist.
 
 ## Changes
 - ai-sdlc-plugin/hooks/hierarchy/executor.ts
+- ai-sdlc-plugin/hooks/hierarchy/dispatch.ts
 - ai-sdlc-plugin/mods/tests/hierarchy.test.ts
-- backlog/tasks/AISDLC-1090 - hierarchy module reads the sender name from from-name.md
 
 ## Design decisions
-Test command: `env -i HOME=$HOME PATH=$PATH pnpm test`. pipeline-cli summary line: 1 failed | 12178 passed | 13 skipped (12192). The one failure is the webhook-receiver test named in the waiver. This diff touches only hierarchy executor.ts, hierarchy.test.ts and the task file, nothing under pipeline-cli. The task file records the main-red evidence. Build, lint and format passed. The push went through git -C with the lease flag. AC3, the live `cli-hierarchy clear` check, needs a relaunch and is not covered here, so it still has to be added to the PR body.
+Test command: `env -i HOME=$HOME PATH=$PATH pnpm test`; exits 0, all suites pass. rotate is no longer a message (AISDLC-1107), so the test asserts it passes through. AC3 (live `cli-hierarchy clear` check) needs a relaunch and is added to the PR body as a post-merge check.
 
 ## Verification
-- `pnpm build` — passed
-- `pnpm test` — waived
-- `pnpm lint` — passed
-- `pnpm format:check` — passed
-- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
-
-## Follow-up
-- declined: pre-existing main-red webhook-receiver coalesce test is outside this task's scope; dispatch already tracks it
-
+- `pnpm build` - passed
+- `pnpm test` - passed
+- `pnpm lint` - passed
+- `pnpm format:check` - passed

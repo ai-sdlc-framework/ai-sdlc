@@ -3,7 +3,7 @@
 // `session.receive`, renders the board pane and wakes executors with `$.session.send`. It NEVER submits a
 // prompt to its model: there is no `prompt.submit` port here, so no code path can. Same call-site rule as
 // executor.ts: `$` is only spelled `$.noun.verb(...)` in the handler that builds the ports.
-import { innerText, log, readMeasure, safe, senderOf } from './executor.ts';
+import { innerText, log, readMeasure, safe, senderAddressOf, senderOf } from './executor.ts';
 import type { Ports } from './executor.ts';
 
 type Any = any;
@@ -103,7 +103,7 @@ export async function recordReceivedSender(
   name: string,
   raw: string,
 ): Promise<void> {
-  const from = senderOf(raw);
+  const from = senderAddressOf(raw);
   if (!/^uds:\/[A-Za-z0-9._/-]+\.sock$/.test(from)) return;
   const file = `${boardDir ?? '.ai-sdlc/dispatch'}/handoff/received-${name}.json`;
   await safe(
