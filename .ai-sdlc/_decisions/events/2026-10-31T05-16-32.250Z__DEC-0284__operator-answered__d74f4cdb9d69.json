@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-31T05:16:32.250Z","decisionId":"DEC-0284","chosenOptionId":"drop-legacy","rationale":"Operator ruling in the planner session: every envelope on main is v6, nothing consumes the old formats, backward compatibility carries only maintenance cost. Tightening, class (a).","by":"planner"}
