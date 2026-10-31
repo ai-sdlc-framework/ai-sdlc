@@ -179,6 +179,12 @@ gates:
     owner: engineering
     property: patch coverage of the touched packages meets the CI threshold before the push (early copy of the CI gate, same script and yaml)
     decision: DEC-0282
+  - id: pre-push:scripts/check-governance-on-push.sh
+    surface: pre-push
+    origin: AISDLC-1123
+    owner: engineering
+    property: deterministic CI governance checks (waived-tests, reviewers, attestation verify, backlog drift, conflict markers) run over the push range before the push
+    decision: DEC-0283
   - id: pre-commit:scripts/check-backlog-ascii.sh
     surface: pre-commit
     origin: AISDLC-92, AISDLC-727
