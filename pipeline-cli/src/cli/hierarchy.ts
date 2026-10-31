@@ -59,7 +59,7 @@
 import { fetchClosedUnmergedPrs } from '../kpi/closed-unmerged.js';
 import { parseQuota, parseQuotaFloor } from '../hierarchy/gh-calls.js';
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -573,6 +573,8 @@ export async function runHierarchyCli(
     landEligible?: () => Promise<LandReport>;
     /** Replaces the parent upkeep pass of the tick (tests). */
     parentUpkeep?: () => Promise<ParentUpkeepResult>;
+    /** Replaces the per-tick usage ingest launch (tests). */
+    usageIngest?: () => void;
     /** Replaces the demo's system dependencies (tests). */
     demo?: Partial<DemoDeps>;
     /** Replaces the ledger, the usage config and the decision log the turn-budget review uses (tests). */
@@ -1122,6 +1124,21 @@ export async function runHierarchyCli(
                   },
                 },
               }),
+          // AISDLC-1122: every tick ingests what is new; detached, so the tick never waits.
+          usageIngest:
+            extras.usageIngest ??
+            (() => {
+              const bin = path.join(repoRoot, 'pipeline-cli', 'bin', 'cli-usage.mjs');
+              if (!existsSync(bin)) return;
+              const child = spawn(process.execPath, [bin, 'ingest', '--max-seconds', '25'], {
+                cwd: repoRoot,
+                detached: true,
+                stdio: 'ignore',
+              });
+              // A failed spawn must never crash the tick.
+              child.on('error', () => undefined);
+              child.unref();
+            }),
           // AISDLC-981: the tick owns the parent; the open-PR list is the wake's snapshot.
           parentUpkeep:
             extras.parentUpkeep ??

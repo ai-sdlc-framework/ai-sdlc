@@ -9,6 +9,7 @@ import {
   rmSync,
   symlinkSync,
   truncateSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -733,5 +734,31 @@ describe('ingestClaudeTranscripts roster roles (AISDLC-664.3)', () => {
     const byId = new Map((await ledger()).map((r) => [r.callId, r]));
     expect(byId.get('r1')?.agentRole).toBe('planner');
     expect(byId.get('r2')?.agentRole).toBe('main-session');
+  });
+});
+
+describe('ingestClaudeTranscripts ordering and worktree attribution (AISDLC-1122)', () => {
+  it('reads the most recently written transcript first under the time limit', async () => {
+    const repo = mkRepo(join(root, 'repo'));
+    const old = writeSession('aaa-old', 'old1', [assistant({ id: 'old', cwd: repo })]);
+    writeSession('zzz-new', 'new1', [assistant({ id: 'new', cwd: repo, sessionId: 'new1' })]);
+    const past = new Date('2026-01-01T00:00:00Z');
+    utimesSync(old, past, past);
+    let t = 0;
+    // The clock jumps past the deadline after the first file is chosen.
+    const res = await ingest({ maxSeconds: 1, now: () => (t++ < 2 ? 0 : 10_000) });
+    const ids = (await ledger()).map((r) => r.callId);
+    expect(ids).toContain('new');
+    expect(ids).not.toContain('old');
+    expect(res.timedOut).toBe(true);
+  });
+
+  it('attributes a worktree session to its task, role and session', async () => {
+    const repo = mkRepo(join(root, 'repo'));
+    const wt = mkRepo(join(repo, '.worktrees', 'aisdlc-7'));
+    writeSession('wt', 'sw', [assistant({ id: 'w1', cwd: wt, sessionId: 'sw' })]);
+    await ingest({ sessionRoles: new Map([['sw', 'executor']]) });
+    const rec = (await ledger()).find((r) => r.callId === 'w1');
+    expect(rec).toMatchObject({ taskId: 'AISDLC-7', agentRole: 'executor', sessionId: 'sw' });
   });
 });

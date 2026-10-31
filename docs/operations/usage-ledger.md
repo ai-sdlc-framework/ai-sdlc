@@ -221,26 +221,13 @@ TOTAL                 16  5,860          76,000               0     878,000  15,
 
 It takes `--format text|json|csv`.
 
-### `cli-usage context`
+### `cli-usage by-task`, `by-role`, `by-day`
 
-Context overhead per session: the size of the context at the first call (the fixed prefix each later turn re-reads), the size of the last call, the number of turns, the turns since the last `/clear`, whether the session is over its role budget and the total cache read. Cache reads dominate consumption, so this is where reductions are found. Options: `--since`, `--until`, `--scope`, `--limit <rows>` (default 20), `--role planner|operator-dispatch|executor` and `--format text|json`.
+Spend per task, per role (planner, operator-dispatch, executor, or the subagent type such as `ai-sdlc:developer`) or per UTC day, with **work** and **polling** spend in separate columns (`work_calls`, `work_usd`, `polling_calls`, `polling_usd`). A call is polling when every tool it invoked is a wait or poll tool (`ScheduleWakeup`, `Monitor`, `TaskOutput`, `TaskList`, `CronList`); any other call is work. Cost is API-equivalent USD over priced calls. Options: `--since` (an ISO date or a relative age such as `7d` or `12h`), `--until`, `--scope` and `--format text|json`. Example: `cli-usage by-task --since 7d`.
 
-- `turnsSinceClear` counts the calls after the last `SessionStart:clear` entry in the session transcript. A session with no recorded clear, or whose transcript cannot be read (other scope, deleted file), counts all its calls.
-- `overBudget` is `true` when the last call's context (input plus cache read plus cache write tokens) exceeds the role's `contextBudgetTokens`, or `turnsSinceClear` exceeds its `turnBudget` (see [Role budgets](#role-budgets)). The role comes from the session name recorded in the transcript (the name is the role, or starts with it and a dash, for example `executor-aisdlc-12`); `--role` supplies a role for main sessions whose name does not resolve. When no role is known, `overBudget` is `n/a` (`null` in JSON). Subagent rows have no role.
-- Under each table the command lists the ten largest single-turn context growths per session: the `cache_creation_input_tokens` of the call, the tool that produced it and the time. The tool is the one the call before it invoked (its result entered the context in the growing call). `(session start)` marks the first call, `(no tool)` a call after one that invoked no tool, and `-` a transcript that could not be read. Only tool names are read from the transcript, never message text or tool output.
+The per-session `context` view was removed (AISDLC-1122): its gross session totals were dominated by polling and hid which task or role the spend belonged to. The Stop hook still enforces the role budgets.
 
-```console
-$ cli-usage context --limit 5
-session  agent         scope      role     first_call_tokens  context_tokens  turns  turnsSinceClear  overBudget  total_cache_read  path
-sess-a   main-session  framework  planner  45,300             162,900         312    41               true        678,000           .../projects/p1/sess-a.jsonl
-sess-b   main-session  other      -        22,200             30,100          5      5                n/a         100,000           -
-
-Largest single-turn context growths, sess-a (main-session):
-   1. +38,200 tokens  Read  2026-09-10T09:14:03.000Z
-   2. +21,900 tokens  Bash  2026-09-10T09:31:47.000Z
-```
-
-(The path is shortened here. It is shown only for framework scope.) For a subagent row the `agent` column shows the subagent id rather than the role, so a main session and its subagents appear as separate rows.
+Attribution: each record carries `taskId` (worktree path, branch, then the `.active-task` sentinel), `agentRole` (roster tier for a roster session, otherwise `main-session` or the subagent type) and `sessionId`. Every tick starts an ingest over every project directory, parent, worktrees and subagents, reading the most recently written transcripts first so a backlog never starves live sessions under the time limit.
 
 ### `cli-usage jit`
 

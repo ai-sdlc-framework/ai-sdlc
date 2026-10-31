@@ -29,9 +29,7 @@ import {
 } from './jit-report.js';
 import {
   GROUP_KEYS,
-  buildContextView,
   buildUsageReport,
-  renderContextText,
   renderReportCsv,
   renderReportJson,
   renderReportText,
@@ -48,9 +46,8 @@ import {
   type Snapshot,
 } from './snapshots.js';
 import { UNITS_PROXY_NOTE, deriveUnitWeights, describeWeights, type UnitWeights } from './units.js';
-import { inspectTranscript, type TranscriptInspector } from './transcript-inspect.js';
+import { buildSplitReport, renderSplitText, type SplitKey } from './split-views.js';
 import {
-  BUDGET_ROLES,
   loadUsageConfig,
   type LoadUsageConfigOptions,
   type ResolvedUsageConfig,
@@ -76,8 +73,6 @@ export interface UsageViewDeps {
   loadConfig?: (opts: LoadUsageConfigOptions) => ResolvedUsageConfig;
   /** Price rows (tests); otherwise the price history in the usage directory. */
   priceRows?: ReadonlyArray<PriceRow>;
-  /** Replaces the transcript reader used by `context` (tests). */
-  inspectTranscript?: TranscriptInspector;
   emit?: (event: Omit<OrchestratorEvent, 'ts'>) => void;
 }
 
@@ -94,8 +89,12 @@ interface Context {
   priceRows: ReadonlyArray<PriceRow>;
 }
 
+function nowOf(deps: UsageViewDeps): Date {
+  return deps.now?.() ?? new Date();
+}
+
 function context(deps: UsageViewDeps, io: UsageIo): Context {
-  const now = deps.now?.() ?? new Date();
+  const now = nowOf(deps);
   const config = (deps.loadConfig ?? loadUsageConfig)({
     dir: deps.usageDir,
     workDir: deps.workDir,
@@ -116,8 +115,16 @@ async function loadRecords(
   return out;
 }
 
-function parseInstant(label: string, v: string | undefined, io: UsageIo): Date | undefined | 'bad' {
+function parseInstant(
+  label: string,
+  v: string | undefined,
+  io: UsageIo,
+  now: Date,
+): Date | undefined | 'bad' {
   if (v === undefined) return undefined;
+  const rel = /^(\d{1,4})([dh])$/.exec(v);
+  if (rel)
+    return new Date(now.getTime() - Number(rel[1]) * (rel[2] === 'd' ? 86_400_000 : 3_600_000));
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) {
     io.err(`Invalid ${label} value "${v}"; use an ISO date or timestamp.\n`);
@@ -133,9 +140,9 @@ interface RangeArgs {
   scope?: string;
 }
 
-function rangeFilter(args: RangeArgs, io: UsageIo): ModelCallFilter | undefined {
-  const from = parseInstant('--since', args.since, io);
-  const to = parseInstant('--until', args.until, io);
+function rangeFilter(args: RangeArgs, io: UsageIo, now: Date): ModelCallFilter | undefined {
+  const from = parseInstant('--since', args.since, io, now);
+  const to = parseInstant('--until', args.until, io, now);
   if (from === 'bad' || to === 'bad') return undefined;
   return {
     ...(from ? { from } : {}),
@@ -146,7 +153,10 @@ function rangeFilter(args: RangeArgs, io: UsageIo): ModelCallFilter | undefined 
 
 function withRange<T>(y: Argv<T>) {
   return y
-    .option('since', { type: 'string', description: 'Include calls at or after this ISO date' })
+    .option('since', {
+      type: 'string',
+      description: 'Include calls at or after this ISO date, or a relative age such as 7d or 12h',
+    })
     .option('until', { type: 'string', description: 'Include calls before this ISO date' })
     .option('scope', {
       type: 'string',
@@ -235,6 +245,23 @@ export function allSnapshots(
 export function registerUsageViewCommands(y: Argv, deps: UsageViewDeps, io: UsageIo): Argv {
   const emit = (event: Omit<OrchestratorEvent, 'ts'>): void => deps.emit?.(event);
 
+  const splitOptions = (c: Argv) =>
+    withRange(c).option('format', {
+      type: 'string',
+      choices: ['text', 'json'] as const,
+      default: 'text',
+    });
+
+  const runSplit = async (key: SplitKey, argv: RangeArgs & { format?: string }): Promise<void> => {
+    const filter = rangeFilter(argv, io, nowOf(deps));
+    if (!filter) return;
+    const ctx = context(deps, io);
+    const rows = buildSplitReport(await loadRecords(deps, filter), key, ctx.priceRows);
+    io.out(
+      argv.format === 'json' ? `${JSON.stringify(rows, null, 2)}\n` : renderSplitText(key, rows),
+    );
+  };
+
   return y
     .command(
       'report',
@@ -258,7 +285,7 @@ export function registerUsageViewCommands(y: Argv, deps: UsageViewDeps, io: Usag
             default: 'text',
           }),
       async (argv) => {
-        const filter = rangeFilter(argv, io);
+        const filter = rangeFilter(argv, io, nowOf(deps));
         if (!filter) return;
         const ctx = context(deps, io);
         let records = await loadRecords(deps, filter);
@@ -307,7 +334,7 @@ export function registerUsageViewCommands(y: Argv, deps: UsageViewDeps, io: Usag
             default: 'text',
           }),
       async (argv) => {
-        const filter = rangeFilter(argv, io);
+        const filter = rangeFilter(argv, io, nowOf(deps));
         if (!filter) return;
         const ctx = context(deps, io);
         const records = await loadRecords(deps, filter);
@@ -390,34 +417,22 @@ export function registerUsageViewCommands(y: Argv, deps: UsageViewDeps, io: Usag
       },
     )
     .command(
-      'context',
-      'Context overhead per session: first-call tokens, turns, turns since clear, budget status and the largest context growths',
-      (c) =>
-        withRange(c)
-          .option('limit', { type: 'number', default: 20, description: 'Rows to show' })
-          .option('role', {
-            type: 'string',
-            choices: BUDGET_ROLES,
-            description: 'Role budget to apply to main sessions whose name does not resolve',
-          })
-          .option('format', {
-            type: 'string',
-            choices: ['text', 'json'] as const,
-            default: 'text',
-          }),
-      async (argv) => {
-        const filter = rangeFilter(argv, io);
-        if (!filter) return;
-        const ctx = context(deps, io);
-        const rows = buildContextView(await loadRecords(deps, filter), {
-          roles: ctx.config.roles,
-          ...(argv.role ? { defaultRole: argv.role } : {}),
-          inspect: deps.inspectTranscript ?? inspectTranscript,
-        }).slice(0, Math.max(1, argv.limit));
-        io.out(
-          argv.format === 'json' ? `${JSON.stringify(rows, null, 2)}\n` : renderContextText(rows),
-        );
-      },
+      'by-task',
+      'Spend per task, work and polling spend in separate columns',
+      (c) => splitOptions(c),
+      async (argv) => runSplit('task', argv),
+    )
+    .command(
+      'by-role',
+      'Spend per role (planner, dispatch, executor, subagent types), work and polling separate',
+      (c) => splitOptions(c),
+      async (argv) => runSplit('role', argv),
+    )
+    .command(
+      'by-day',
+      'Spend per day, work and polling spend in separate columns',
+      (c) => splitOptions(c),
+      async (argv) => runSplit('day', argv),
     )
     .command(
       'snapshot',
@@ -441,7 +456,7 @@ export function registerUsageViewCommands(y: Argv, deps: UsageViewDeps, io: Usag
           io.exit(1);
           return;
         }
-        const at = parseInstant('--at', argv.at, io);
+        const at = parseInstant('--at', argv.at, io, ctx.now);
         if (at === 'bad') return;
         const atMs = (at ?? ctx.now).getTime();
         const records = await loadRecords(deps, {});

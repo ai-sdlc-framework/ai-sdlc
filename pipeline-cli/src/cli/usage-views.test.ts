@@ -202,7 +202,7 @@ describe('cli-usage report', () => {
   });
 });
 
-describe('cli-usage task and context', () => {
+describe('cli-usage task and split views', () => {
   beforeEach(() => {
     appendModelCalls(
       [
@@ -238,23 +238,16 @@ describe('cli-usage task and context', () => {
     expect(await run(['task', 'TASK-1', '--format', 'csv'])).toContain('role,calls');
   });
 
-  it('lists sessions with first-call tokens and shows no path for other scope', async () => {
-    const text = await run(['context']);
-    expect(text).toContain('sess-1');
-    expect(text).toContain('sess-other');
-    const otherLine = text.split('\n').find((l) => l.startsWith('sess-other')) ?? '';
-    expect(otherLine).toContain('other');
-    expect(otherLine.trimEnd().endsWith('-')).toBe(true);
-    out.length = 0;
-    const json = JSON.parse(await run(['context', '--format', 'json', '--limit', '1']));
-    expect(json).toHaveLength(1);
-    expect(json[0].session).toBe('sess-1');
-    expect(json[0].firstCallTokens).toBe(9500);
-    expect(json[0].turns).toBe(3);
+  it('lists by-task, by-role and by-day with work and polling columns', async () => {
+    const text = await run(['by-task', '--since', '3650d']);
+    expect(text).toContain('polling_usd');
+    expect(text).toContain('TASK-1');
+    expect(await run(['by-role', '--format', 'json'])).toContain('"workUsd"');
+    expect(await run(['by-day'])).toContain('day');
   });
 
   it('rejects an unparsable --until', async () => {
-    await run(['context', '--until', 'x']);
+    await run(['by-task', '--until', 'x']);
     expect(exitCode).toBe(1);
   });
 });

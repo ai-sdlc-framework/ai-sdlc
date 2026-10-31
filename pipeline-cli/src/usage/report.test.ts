@@ -2,9 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ModelCallRecord, PriceRow } from '@ai-sdlc/reference';
 import {
   GROUP_KEYS,
-  buildContextView,
   buildUsageReport,
-  renderContextText,
   renderReportCsv,
   renderReportJson,
   renderReportText,
@@ -213,46 +211,5 @@ describe('buildUsageReport', () => {
     const bad = rec(0, { ts: 'not-a-time' });
     const r = report(['day', 'window'], [bad]);
     expect(r.rows[0].keys).toEqual({ day: 'unknown', window: 'unknown' });
-  });
-});
-
-describe('buildContextView', () => {
-  it('lists sessions with first-call tokens, turns and cache read, largest first', () => {
-    const rows = buildContextView(RECORDS);
-    expect(rows[0].totalCacheRead).toBeGreaterThanOrEqual(rows[rows.length - 1].totalCacheRead);
-    const s0 = rows.find((r) => r.session === 's0');
-    // Earliest s0 call is rec(0): input 100 + write 0 + write 0 + cache read 1000.
-    expect(s0?.firstCallTokens).toBe(1100);
-    expect(s0?.turns).toBe(4);
-    expect(s0?.agent).toBe('main-session');
-  });
-
-  it('shows no path for other-scope sessions, even if a record carried one', () => {
-    const other = rec(0, {
-      scope: 'other',
-      source: { file: '/home/someone/private/transcript.jsonl', offset: 0 },
-      sessionId: 'sx',
-    });
-    const fw = rec(1, {
-      source: { file: '/repo/transcripts/t.jsonl', offset: 0 },
-      sessionId: 'sy',
-    });
-    const rows = buildContextView([other, fw]);
-    const o = rows.find((r) => r.session === 'sx');
-    expect(o?.scope).toBe('other');
-    expect(o?.path).toBeUndefined();
-    expect(rows.find((r) => r.session === 'sy')?.path).toBe('/repo/transcripts/t.jsonl');
-    const text = renderContextText(rows);
-    expect(text).not.toContain('/home/someone');
-    expect(text).toContain('/repo/transcripts/t.jsonl');
-  });
-
-  it('separates subagents of one session and handles an empty ledger', () => {
-    const rows = buildContextView([
-      rec(0, { agentId: 'a1' }),
-      rec(1, { agentId: 'a2', sessionId: 's0' }),
-    ]);
-    expect(rows).toHaveLength(2);
-    expect(renderContextText([])).toBe('No sessions recorded for this range.\n');
   });
 });
