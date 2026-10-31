@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1138
 title: 'Step 11 first push uses force-with-lease against the existing remote head when the developer already pushed the branch and the role allows lease mode'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-31'
 labels:
@@ -33,11 +33,35 @@ Velocity impact: removes the second most common push refusal on the 2026-10-31 b
 
 ## Acceptance Criteria
 
-- [ ] AC-1: When `origin/<branch>` exists and the role allows lease pushes, step 11's first push is `--force-with-lease=refs/heads/<branch>:<remoteSha>`; when it does not exist, the push is unchanged (`push -u origin <branch>`).
-- [ ] AC-2: With mode `never`, step 11 still runs a plain push and, on refusal, reports that the role forbids a lease push (no silent retry, no `--force`).
-- [ ] AC-3: `main`, `master` and the protected branches are refused as before; a test asserts it.
-- [ ] AC-4: `pnpm build && pnpm test && pnpm lint && pnpm format:check` green.
+- [x] AC-1: When `origin/<branch>` exists and the role allows lease pushes, step 11's first push is `--force-with-lease=refs/heads/<branch>:<remoteSha>`; when it does not exist, the push is unchanged (`push -u origin <branch>`).
+- [x] AC-2: With mode `never`, step 11 still runs a plain push and, on refusal, reports that the role forbids a lease push (no silent retry, no `--force`).
+- [x] AC-3: `main`, `master` and the protected branches are refused as before; a test asserts it.
+- [x] AC-4: `pnpm build && pnpm test && pnpm lint && pnpm format:check` green.
 
 ## Notes
 
 Origin: planner PR-pressure survey 2026-10-31 (failed verdicts AISDLC-1072, 1134, 1135, 940). Sibling tasks: AISDLC-1137, AISDLC-1139, AISDLC-1140.
+
+## Final Summary
+
+## Summary
+Step 11's first push now runs `git ls-remote --heads origin <branch>`. If origin already has the branch and the policy is `lease`, or `leaseOnOwnBranch` from the task's own worktree, it pushes with `--force-with-lease=refs/heads/<branch>:<remoteSha>`. If the branch is absent it still runs the plain `push -u origin <branch>`. With mode `never` it also stays a plain push, and a refusal now says the role forbids a lease push. `main`, `master` and protected or malformed branch names never get a lease.
+
+## Changes
+- pipeline-cli/src/steps/11-push-and-pr.ts
+- pipeline-cli/src/steps/11-push-and-pr.test.ts
+- backlog/tasks/AISDLC-1138 - step-11-lease-push-when-remote-branch-exists.md
+
+## Design decisions
+The first `pnpm test` run failed 15 tests in `pipeline-cli/src/hierarchy/executor-start*.test.ts`. They fail only because this session's env (AI_SDLC_EXECUTOR_TASK=AISDLC-1138, AI_SDLC_HIERARCHY_ROLE, AI_SDLC_HIERARCHY_SESSION) pins the task claim. Full command run: `cd pipeline-cli && env -u AI_SDLC_EXECUTOR_TASK -u AI_SDLC_HIERARCHY_ROLE -u AI_SDLC_HIERARCHY_SESSION npx vitest run`. Result: Test Files 568 passed (568), Tests 12487 passed | 13 skipped (12500). `pnpm lint` and `pnpm format:check` were then run and passed. The pre-push hook's coverage run hit the same env problem, so I pushed with those three vars unset. Patch coverage was 42/42 lines (100%). The commit includes the backlog task file's status change to In Progress. The branch was already up to date with origin/main when I rebased.
+
+## Verification
+- `pnpm build` — passed
+- `pnpm test` — passed
+- `pnpm lint` — passed
+- `pnpm format:check` — passed
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+

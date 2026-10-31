@@ -597,6 +597,76 @@ describe('Step 11 — pushAndPr', () => {
     });
   });
 
+  describe('first push leases against an existing remote head (AISDLC-1138)', () => {
+    const REMOTE = 'c'.repeat(40);
+    const policyOf = (
+      forcePushMode: 'never' | 'leaseOnOwnBranch' | 'lease',
+      protectedBranches: string[] = [],
+      notOwn: string | null = null,
+    ) => ({ forcePushMode, protectedBranches, ownWorktree: () => notOwn });
+    const run = async (
+      branch: string,
+      remoteHead: boolean,
+      policy: ReturnType<typeof policyOf>,
+      pushResult = ok(),
+    ) => {
+      const fake = new FakeRunner()
+        .on(/^git ls-remote/, ok(remoteHead ? `${REMOTE}\trefs/heads/${branch}\n` : ''))
+        .on(/^git push/, pushResult)
+        .on(/^gh pr create/, ok('https://example/1'));
+      const r = await pushAndPr({
+        taskId: 'AISDLC-1',
+        workDir: tmp,
+        worktreePath: tmp,
+        branch,
+        task,
+        developerReturn: dev,
+        verdict: approved,
+        runner: fake.toRunner(),
+        resumeLeasePolicy: policy,
+      });
+      const push = fake.calls.find((c) => c.command === 'git' && c.args[0] === 'push')!;
+      return { r, push };
+    };
+
+    it.each(['lease', 'leaseOnOwnBranch'] as const)(
+      'leases when the head exists (%s)',
+      async (m) => {
+        const { r, push } = await run('b', true, policyOf(m));
+        expect(r.pushed).toBe(true);
+        expect(push.args).toContain(`--force-with-lease=refs/heads/b:${REMOTE}`);
+      },
+    );
+
+    it('pushes plainly when the branch is absent on origin', async () => {
+      const { push } = await run('b', false, policyOf('lease'));
+      expect(push.args).toEqual(['push', '-u', 'origin', 'b']);
+    });
+
+    it('mode never keeps the plain push and names the policy on refusal', async () => {
+      const { r, push } = await run(
+        'b',
+        true,
+        policyOf('never'),
+        fail('! [rejected] b -> b (non-fast-forward)', 1),
+      );
+      expect(push.args).toEqual(['push', '-u', 'origin', 'b']);
+      expect(r.pushed).toBe(false);
+      expect(r.reason).toMatch(/allowForcePush: never/);
+      expect(r.reason).toMatch(/forbids a lease push/);
+    });
+
+    it('leaseOnOwnBranch outside the own worktree stays plain', async () => {
+      const { push } = await run('b', true, policyOf('leaseOnOwnBranch', [], 'not registered'));
+      expect(push.args).toEqual(['push', '-u', 'origin', 'b']);
+    });
+
+    it.each(['main', 'master', 'release'])('never leases protected branch %s', async (b) => {
+      const { push } = await run(b, true, policyOf('lease', ['release']));
+      expect(push.args.some((a) => a.startsWith('--force-with-lease'))).toBe(false);
+    });
+  });
+
   it('returns prUrl=null when gh pr create fails', async () => {
     const fake = new FakeRunner()
       .on(/^git push -u origin/, ok())
