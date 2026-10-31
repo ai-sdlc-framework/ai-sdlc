@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1137
 title: 'Pre-push patch-coverage test run scrubs the executor session variables (AI_SDLC_EXECUTOR_TASK, AI_SDLC_HIERARCHY_*) and the executor-start tests stop reading ambient env'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-31'
 labels:
