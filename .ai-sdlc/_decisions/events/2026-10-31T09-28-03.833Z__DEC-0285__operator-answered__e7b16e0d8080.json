@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-10-31T09:28:03.833Z","decisionId":"DEC-0285","chosenOptionId":"opt-a","rationale":"Rubric autonomous mode, class (a) decide-and-proceed: reversible lease pushes to task branches only, hooks and attestation path unchanged. Operator reviews via operator-digest in the morning.","by":"planner"}
