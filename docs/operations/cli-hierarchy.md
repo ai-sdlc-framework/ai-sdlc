@@ -789,6 +789,8 @@ archive touches neither file. Pass `--no-archive` for the old block-only behavio
 file: `read` prints the generated block, then the last 8000 characters (cut at a line boundary)
 of the prose outside the markers, then the file path; `--full` prints the whole file.
 
+Raw session history behind a handoff is archived by the `SessionEnd` hook: [`transcript-archive.md`](transcript-archive.md).
+
 Call `write` after each state change (a ruling recorded, a task claimed, a verdict written, a
 brief sent). `read` recomputes the hash first and regenerates a missing or stale file, so a
 stale file is never read as current.

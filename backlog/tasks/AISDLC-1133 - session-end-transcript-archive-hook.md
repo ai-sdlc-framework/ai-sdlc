@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1133
 title: 'SessionEnd hook archives each session transcript into .claude/transcripts (lands PR #2201)'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-31'
 labels:
