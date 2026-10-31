@@ -172,7 +172,7 @@ describe('standing decision rules (AISDLC-873)', () => {
     const block = renderStandingRulesBlock([opened('DEC-0002'), answered('DEC-0002')]);
     assert.equal(
       block,
-      '<!-- standing-rules:begin -->\n- **Standing (DEC-0002):** rule for DEC-0002\n<!-- standing-rules:end -->',
+      '<!-- standing-rules:begin -->\n- **Standing rule:** rule for DEC-0002\n<!-- standing-rules:end -->',
     );
   });
 
@@ -198,11 +198,17 @@ describe('standing decision rules (AISDLC-873)', () => {
   });
 
   it('is deterministic and sorted by decision id, independent of input order', () => {
-    const a = [opened('DEC-0009'), answered('DEC-0009'), opened('DEC-0002'), answered('DEC-0002')];
+    // Rule texts sort opposite to the ids, so the order can only come from the id.
+    const a = [
+      opened('DEC-0009', { standingRule: 'alpha rule' }),
+      answered('DEC-0009'),
+      opened('DEC-0002', { standingRule: 'zulu rule' }),
+      answered('DEC-0002'),
+    ];
     const first = renderStandingRulesBlock(a);
     assert.equal(renderStandingRulesBlock([...a].reverse()), first);
     assert.equal(renderStandingRulesBlock(a), first);
-    assert.ok(first.indexOf('DEC-0002') < first.indexOf('DEC-0009'));
+    assert.ok(first.indexOf('zulu rule') < first.indexOf('alpha rule'));
   });
 
   it('syncStandingRules leaves block-less text alone and rewrites a drifted block', () => {
@@ -215,8 +221,17 @@ describe('standing decision rules (AISDLC-873)', () => {
       'a\n<!-- standing-rules:begin -->\nold\n<!-- standing-rules:end -->\nb',
       [opened('DEC-0001'), answered('DEC-0001')],
     );
-    assert.match(out, /Standing \(DEC-0001\)/);
+    assert.match(out, /\*\*Standing rule:\*\* rule for DEC-0001/);
     assert.ok(out.startsWith('a\n') && out.endsWith('\nb'));
+  });
+
+  it('prints no decision id of its own (adopter-visible text carries no internal ids)', () => {
+    const block = renderStandingRulesBlock([
+      opened('DEC-0042', { standingRule: 'Never relaunch a session for a stale node probe.' }),
+      answered('DEC-0042'),
+    ]);
+    assert.doesNotMatch(block, /\b[A-Z]{3,}-\d+\b/);
+    assert.match(block, /Never relaunch a session for a stale node probe\./);
   });
 
   it('loadCatalogEvents returns [] for a root that is not a git repo', () => {

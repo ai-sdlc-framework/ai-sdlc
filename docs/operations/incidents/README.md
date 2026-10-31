@@ -34,6 +34,7 @@ Copy this shape. Keep it to one screen. The six headings are fixed.
 | 2026-10-15 | [Webhook forwarder death](2026-10-15-webhook-forwarder-death.md) | DEC-0235 |
 | 2026-10-15 | [Decision id allocation collisions](2026-10-15-decision-id-allocation-collisions.md) | DEC-0242 to DEC-0246 |
 | 2026-10-16 | [PR head frozen on GitHub](2026-10-16-pr-head-frozen-on-github.md) | none on main |
+| 2026-10-30 | [Parent checkout and all worktrees deleted by the pre-push coverage gate](2026-10-30-parent-checkout-deleted-by-pre-push-coverage-gate.md) | operator ruling in chat; fix PR |
 
 ## Recurring-mistakes ledger
 
@@ -47,3 +48,4 @@ Append a row, or bump the count and last-seen date, when a mistake recurs. File 
 | Decision ids allocated twice for different records (concurrent sessions) | 2 | 2026-10-15 | none yet |
 | The same decision record opened twice by one session | 1 | 2026-10-15 | none yet (DEC-0249 mirrors DEC-0250) |
 | A PR head on GitHub does not move after a push, so checks and reviews target a stale SHA | 1 | 2026-10-16 | [`pr-unstick.md`](../pr-unstick.md); none yet for detection |
+| A git hook's children inherit `GIT_DIR` from a linked worktree and act on the real repository (`core.bare` flips, HEAD moves, fixture teardown deletes the checkout) | 2 (AISDLC-137 nuisance flips; 2026-10-30 full deletion) | 2026-10-30 | [`2026-10-30 incident`](2026-10-30-parent-checkout-deleted-by-pre-push-coverage-gate.md): hook `unset`, `gitSafeEnv()`, `vitest.git-env.setup.mjs`; mandatory `makeGitEnv()` check still to file |

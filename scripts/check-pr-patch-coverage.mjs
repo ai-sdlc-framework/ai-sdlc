@@ -209,9 +209,11 @@ const NON_INSTRUMENTED_PATTERNS = [
   // AISDLC-681: the shared vitest preset and its per-worker parent-death setup
   // file live at the repo root (outside any package's src/), so no package's
   // coverage report can contain them. They are test configuration, exercised by
-  // scripts/vitest-parent-death.test.mjs under node --test. Exactly these two
-  // root-level filenames, anchored; any other vitest.*.mjs is not excluded.
-  /^vitest\.(?:shared|parent-watch\.setup)\.mjs$/,
+  // scripts/vitest-parent-death.test.mjs under node --test. Same for the
+  // per-worker git-env setup (incident 2026-10-30), exercised by
+  // scripts/pre-push-patch-coverage.test.mjs. Exactly these three root-level
+  // filenames, anchored; any other vitest.*.mjs is not excluded.
+  /^vitest\.(?:shared|parent-watch\.setup|git-env\.setup)\.mjs$/,
   // vscode-hierarchy/src/extension.ts: thin adapter over the `vscode` runtime API,
   // which cannot be loaded under Vitest; the logic lives in reconciler.ts and
   // roster.ts (covered). Mirrors that package's vitest `coverage.exclude`.

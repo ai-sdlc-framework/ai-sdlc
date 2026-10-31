@@ -21,6 +21,7 @@ export default tseslint.config(
       // AISDLC-681: plain-ESM shared vitest preset + worker setup (not in any tsconfig).
       'vitest.shared.mjs',
       'vitest.parent-watch.setup.mjs',
+      'vitest.git-env.setup.mjs',
       '.github/workflows/__tests__/',
       '.claude/hooks/',
       'ai-sdlc-plugin/hooks/',

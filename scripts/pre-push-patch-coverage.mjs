@@ -41,6 +41,30 @@ function defaultReadPkg(dir) {
   return existsSync(p) ? JSON.parse(readFileSync(p, 'utf-8')) : null;
 }
 
+/**
+ * Git repository variables a hook inherits from the `git push` process. In a
+ * linked worktree GIT_DIR is an absolute path into the SHARED `.git`; a test
+ * suite spawned with it inherits it and every `git` call inside a temp fixture
+ * then acts on the real repository (incident 2026-10-30: core.bare flipped,
+ * branch moved, parent checkout and 45 worktrees deleted).
+ */
+export const GIT_REPO_ENV_VARS = [
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_INDEX_FILE',
+  'GIT_COMMON_DIR',
+  'GIT_PREFIX',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+];
+
+/** A copy of `env` with every git repository variable removed (never mutates `env`). */
+export function gitSafeEnv(env = process.env) {
+  const out = { ...env };
+  for (const k of GIT_REPO_ENV_VARS) delete out[k];
+  return out;
+}
+
 export function main({ run = spawnSync, changed = listChangedFiles, log = console.log } = {}) {
   if (
     process.env.AI_SDLC_SKIP_PATCH_COVERAGE_GATE === '1' ||
@@ -49,7 +73,13 @@ export function main({ run = spawnSync, changed = listChangedFiles, log = consol
     log('[patch-coverage] skipped by env');
     return 0;
   }
-  const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf-8' }).trim();
+  // Children get cwd-based repository discovery only; see GIT_REPO_ENV_VARS.
+  const env = gitSafeEnv();
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: ROOT,
+    encoding: 'utf-8',
+    env,
+  }).trim();
   const base = 'origin/main';
   const packages = packagesToCover(changed({ base, head, cwd: ROOT }));
   if (packages.length === 0) {
@@ -61,6 +91,7 @@ export function main({ run = spawnSync, changed = listChangedFiles, log = consol
     const r = run('pnpm', ['--filter', `./${pkg}`, 'test:coverage'], {
       cwd: ROOT,
       stdio: 'inherit',
+      env,
     });
     if (r.status !== 0) {
       log(`[patch-coverage] FAIL: test:coverage failed in ${pkg}`);
@@ -70,7 +101,7 @@ export function main({ run = spawnSync, changed = listChangedFiles, log = consol
   const r = run(
     process.execPath,
     [join(ROOT, 'scripts/check-pr-patch-coverage.mjs'), '--base', base, '--head', head],
-    { cwd: ROOT, stdio: 'inherit' },
+    { cwd: ROOT, stdio: 'inherit', env },
   );
   return r.status === 0 ? 0 : 1;
 }

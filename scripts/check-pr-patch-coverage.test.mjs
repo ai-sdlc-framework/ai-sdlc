@@ -537,11 +537,18 @@ describe('check-pr-patch-coverage — skip on 0 changed code files', () => {
     // outside every package's src/, so no coverage report can contain them.
     const base = commitFile(repo, 'README.md', '# x\n', 'init');
     commitFile(repo, 'vitest.shared.mjs', 'export const preset = {};\n', 'test: add shared preset');
-    const head = commitFile(
+    commitFile(
       repo,
       'vitest.parent-watch.setup.mjs',
       'export const watch = () => {};\n',
       'test: add parent watch setup',
+    );
+    // Incident 2026-10-30: the per-worker git-env setup file is the third one.
+    const head = commitFile(
+      repo,
+      'vitest.git-env.setup.mjs',
+      'delete process.env.GIT_DIR;\n',
+      'test: add git-env setup',
     );
     const r = runGate(repo, { base, head, json: true });
     assert.equal(
