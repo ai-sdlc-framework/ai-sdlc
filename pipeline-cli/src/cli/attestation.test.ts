@@ -3223,7 +3223,8 @@ function isUnderTmpdir(p: string): boolean {
   try {
     const tmpReal = realpathSync(tmpdir());
     const real = realpathSync(p);
-    return real === tmpReal || real.startsWith(tmpReal + sep);
+    // Strictly inside: a fixture root is always a child of the tmpdir, never the tmpdir itself.
+    return real.startsWith(tmpReal + sep);
   } catch {
     return false;
   }
