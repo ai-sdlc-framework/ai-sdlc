@@ -69,7 +69,7 @@ The test command is `node --test scripts/sync-plugin-runtime-deps.test.mjs`, whi
 
 ## Verification
 - `pnpm build` — passed
-- `pnpm test` — waived
+- `pnpm test` — partial run: the 15 pipeline-cli failures are described above
 - `pnpm lint` — passed
 - `pnpm format:check` — passed
 - 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers; review-full)
