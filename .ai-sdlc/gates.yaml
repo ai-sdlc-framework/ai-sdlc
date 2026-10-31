@@ -183,7 +183,7 @@ gates:
     surface: pre-push
     origin: AISDLC-1123
     owner: engineering
-    property: deterministic CI governance checks (waived-tests, reviewers, attestation verify, backlog drift, conflict markers) run over the push range before the push
+    property: deterministic CI governance checks (conflict markers, waived-tests, reviewers, backlog drift on removed referenced files, gate tests) run over the push range before the push; attestation verify stays in the fixups step
     decision: DEC-0283
   - id: pre-commit:scripts/check-backlog-ascii.sh
     surface: pre-commit

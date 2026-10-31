@@ -151,7 +151,7 @@ Per Q3 in the AISDLC-140 redesign decision and the industry consensus documented
 
 **Single source of truth:** `.ai-sdlc/patch-coverage.yaml` holds `target` (90) and `tolerance` (1). The gate passes at `target - tolerance`. The tolerance exists because the two measuring methods disagree by a point or two: codecov's patch computation and the script's unified-diff walk count executable lines differently, so a single hard number turns measurement noise into red checks. `check-pr-patch-coverage.mjs` reads the file as its default (no `--threshold` in CI), and `codecov.yml` patch and project targets are asserted equal to `target` by `scripts/check-pr-patch-coverage.test.mjs`.
 
-**Coverage is gated once, in CI (AISDLC-726).** There is no local pre-push or Stop-hook coverage run and no skip variable; nothing runs coverage automatically on a developer machine. CI enforces two things:
+**CI is the only gate that blocks a merge on coverage (AISDLC-726).** The pre-push step (below) runs the same script and threshold over the touched packages as an early copy. CI enforces two things:
 
 | Layer | Where | Bypassable | Authority |
 |---|---|---|---|
@@ -159,7 +159,7 @@ Per Q3 in the AISDLC-140 redesign decision and the industry consensus documented
 | CI patch gate | `scripts/check-pr-patch-coverage.mjs` (PR-diff patch coverage, threshold `target - tolerance`) | No (no skip env var) | **Authoritative merge gate** |
 | Informational | codecov.io (PR comment + dashboard, patch target = `target`) | Not a check | Visibility only |
 
-**Pre-push early copy (AISDLC-1119).** `.husky/pre-push` runs `scripts/pre-push-patch-coverage.mjs`: `test:coverage` only in the packages whose instrumentable files the diff against `origin/main` touches, then `check-pr-patch-coverage.mjs` with the same threshold file, printing uncovered line ranges. Docs-only or test-only pushes print one skip line. Skip: `AI_SDLC_SKIP_PATCH_COVERAGE_GATE=1`. CI remains the only merge gate.
+**Pre-push early copy (AISDLC-1119).** `.husky/pre-push` runs `scripts/pre-push-patch-coverage.mjs`: `test:coverage` only in the packages whose instrumentable files the diff against `origin/main` touches, then `check-pr-patch-coverage.mjs` with the same threshold file, printing uncovered line ranges. Docs-only or test-only pushes print one skip line. Skip: `AI_SDLC_SKIP_PATCH_COVERAGE_GATE=1` (never routine). CI remains the only merge gate.
 
 The CI patch gate runs in two places that both must pass:
 
