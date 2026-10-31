@@ -8,6 +8,7 @@ import {
   packagesToCover,
   main,
   gitSafeEnv,
+  sessionScrubbedEnv,
   GIT_REPO_ENV_VARS,
 } from './pre-push-patch-coverage.mjs';
 import { formatLineRanges } from './check-pr-patch-coverage.mjs';
@@ -138,6 +139,22 @@ describe('gitSafeEnv', () => {
     ]) {
       assert.ok(GIT_REPO_ENV_VARS.includes(k), k);
     }
+  });
+});
+
+describe('sessionScrubbedEnv', () => {
+  it('drops executor session keys and keeps unrelated variables', () => {
+    const input = {
+      PATH: '/bin',
+      HOME: '/h',
+      AI_SDLC_SKIP_X: '1',
+      AI_SDLC_EXECUTOR_TASK: 'AISDLC-1',
+      AI_SDLC_HIERARCHY_BOARD: '/b',
+      GIT_DIR: '/x/.git',
+    };
+    const out = sessionScrubbedEnv(input);
+    assert.deepEqual(out, { PATH: '/bin', HOME: '/h', AI_SDLC_SKIP_X: '1' });
+    assert.equal(input.AI_SDLC_EXECUTOR_TASK, 'AISDLC-1');
   });
 });
 

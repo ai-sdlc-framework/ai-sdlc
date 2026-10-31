@@ -65,6 +65,18 @@ export function gitSafeEnv(env = process.env) {
   return out;
 }
 
+/**
+ * A copy of `env` without the executor session variables (AI_SDLC_EXECUTOR_TASK and
+ * AI_SDLC_HIERARCHY_*), so the test child never depends on the ambient session (AISDLC-1137).
+ */
+export function sessionScrubbedEnv(env = process.env) {
+  const out = gitSafeEnv(env);
+  for (const k of Object.keys(out)) {
+    if (k === 'AI_SDLC_EXECUTOR_TASK' || k.startsWith('AI_SDLC_HIERARCHY_')) delete out[k];
+  }
+  return out;
+}
+
 export function main({ run = spawnSync, changed = listChangedFiles, log = console.log } = {}) {
   if (
     process.env.AI_SDLC_SKIP_PATCH_COVERAGE_GATE === '1' ||
@@ -74,7 +86,7 @@ export function main({ run = spawnSync, changed = listChangedFiles, log = consol
     return 0;
   }
   // Children get cwd-based repository discovery only; see GIT_REPO_ENV_VARS.
-  const env = gitSafeEnv();
+  const env = sessionScrubbedEnv();
   const head = execFileSync('git', ['rev-parse', 'HEAD'], {
     cwd: ROOT,
     encoding: 'utf-8',
