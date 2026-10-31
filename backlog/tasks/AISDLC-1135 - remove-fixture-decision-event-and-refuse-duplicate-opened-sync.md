@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1135
 title: 'Decision log: remove the vitest fixture event that re-opened DEC-0167 on 2026-10-30, and make decisions-sync refuse to push a second decision-opened event for an existing id'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-31'
 labels:
