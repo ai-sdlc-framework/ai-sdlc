@@ -18,6 +18,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readdirSync,
+  realpathSync,
   rmSync,
   writeFileSync,
   readFileSync,
@@ -3237,6 +3238,12 @@ describe('emit-leaf — worktree layout end to end (markers under the main check
     // git may report the realpath (macOS /var -> /private/var); use what git reports.
     const common = git(['rev-parse', '--git-common-dir'], worktreeRoot).trim();
     mainRoot = join(common, '..');
+    // Incident 2026-10-30: with an inherited GIT_DIR this resolved to the REAL
+    // repository and afterEach deleted it. Refuse anything outside the tmpdir.
+    const tmpReal = realpathSync(tmpdir());
+    if (!realpathSync(mainRoot).startsWith(tmpReal + '/')) {
+      throw new Error(`fixture root ${mainRoot} is not under ${tmpReal}; refusing to continue`);
+    }
     process.env['REPO_ROOT'] = worktreeRoot;
   });
 

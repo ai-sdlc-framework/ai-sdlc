@@ -42,6 +42,17 @@ if (set -o pipefail) 2>/dev/null; then
   set -o pipefail
 fi
 
+# INCIDENT 2026-10-30: git exports GIT_DIR (an absolute path INTO the shared
+# .git, e.g. <parent>/.git/worktrees/<task>) to hooks run from a linked
+# worktree, plus GIT_PREFIX, and sometimes GIT_WORK_TREE / GIT_INDEX_FILE /
+# GIT_COMMON_DIR. Every child process below inherits them, so a test or script
+# that runs git inside a temp fixture silently operates on the REAL repository
+# instead (core.bare flips, branch checkouts, `worktree remove --force`,
+# fixture rmSync). That leak deleted the whole parent checkout and 45
+# worktrees. The gates only need cwd-based discovery: drop the variables here,
+# once, before anything else runs. (See docs/operations/incidents/.)
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_PREFIX GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+
 # Read git's pre-push stdin once so multiple gates can consume the range info.
 # (AISDLC-370: DoR gate uses the push range to walk touched task files.)
 PUSH_STDIN="$(cat || true)"

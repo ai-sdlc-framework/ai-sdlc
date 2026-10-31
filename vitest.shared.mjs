@@ -24,5 +24,9 @@ export const sharedTestConfig = {
   // tests themselves should stay under 2 s (use fake timers, not real waits).
   testTimeout: 30000,
   hookTimeout: 30000,
-  setupFiles: [fileURLToPath(new URL('./vitest.parent-watch.setup.mjs', import.meta.url))],
+  setupFiles: [
+    // Incident 2026-10-30: strip inherited GIT_DIR & co. before any test shells out to git.
+    fileURLToPath(new URL('./vitest.git-env.setup.mjs', import.meta.url)),
+    fileURLToPath(new URL('./vitest.parent-watch.setup.mjs', import.meta.url)),
+  ],
 };
