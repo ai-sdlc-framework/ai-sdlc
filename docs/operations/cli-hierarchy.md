@@ -1296,6 +1296,8 @@ Design note (AISDLC-953): `cli-hierarchy` has no dequeue for a wrong `reenter` m
 
 **PR follow-up loop guard (AISDLC-883).** The reconciler (`pipeline-cli/src/hierarchy/reconcile.ts`) is the only PR poller, and a stalled claim has one owner, the stall check (`stall.ts`). Unlike failures must not add up, so a PR follow-up is bounded by what the action did, not by a retry count. Before any machine action on a PR, the reconciler reads `landing/<pr>.json` history; if the same `(action, headSha)` was already taken and the PR returned to it on the same head, the action is not run again and the record becomes `route-to-planner` with a note such as `rebase@<sha> x2`. A push that moves the head resets the guard. The limit is `loopGuard.maxSameHeadActions` in `.ai-sdlc/pr-lifecycle.yaml`. A task with no PR keeps the retry cap in `requeue.ts`.
 
+**Stale-base Backlog Drift (AISDLC-1140).** When the only failed job (the `pr-ready` rollup aside) is `Backlog Drift` and every `<TASK-ID> ✗` error line names a task whose file is not among the PR's changed files, the classifier returns `behind-or-dirty` instead of `real-failure`: the gate checks out the PR head, so a base that predates a drift-affecting landing on main is fixed by a rebase (`rebase-in-place` for docs, `land-prep` for tasks). An error naming a task the PR adds or edits stays `real-failure`.
+
 **Docs action set** (machine-owned from birth):
 
 | Situation | Action | What runs |
