@@ -103,6 +103,12 @@ export interface V6TranscriptLeafSummary {
     baseSha: string;
     headSha: string;
   };
+  /**
+   * AISDLC-1144 (DEC-0287): true when a newer leaf by the same reviewer exists
+   * in this envelope. The leaf stays in the Merkle input as history but is not
+   * credited. Omitted on the credited (newest) leaf.
+   */
+  superseded?: true;
 }
 
 /** A single entry in the `merkleProofs` array of the v6 envelope. */
@@ -247,6 +253,14 @@ export function buildV6Envelope(opts: BuildV6EnvelopeOptions): AttestationEnvelo
   // Build transcriptLeaves summaries (only this PR's reviewer leaves).
   // AISDLC-568: verdictClass defaults to the lower-trust 'self-authored'
   // when the source leaf predates this field — fail-safe, never over-claim.
+  // AISDLC-1144 (DEC-0287): newest leaf per reviewer is credited; older ones are history.
+  const newestByReviewer = new Map<string, number>();
+  for (const leaf of prLeaves) {
+    if (leaf.stage === 'plan' || leaf.stage === 'execute') continue;
+    const prev = newestByReviewer.get(leaf.reviewerName);
+    if (prev === undefined || leaf.leafIndex > prev)
+      newestByReviewer.set(leaf.reviewerName, leaf.leafIndex);
+  }
   const transcriptLeaves: V6TranscriptLeafSummary[] = prLeaves.map((leaf) => ({
     leafIndex: leaf.leafIndex,
     reviewerName: leaf.reviewerName,
@@ -267,6 +281,11 @@ export function buildV6Envelope(opts: BuildV6EnvelopeOptions): AttestationEnvelo
     ...(leaf.stage ? { stage: leaf.stage } : {}),
     // AISDLC-725: carried through as-is; undefined on full rounds.
     reviewRange: leaf.reviewRange,
+    ...((newestByReviewer.get(leaf.reviewerName) ?? leaf.leafIndex) > leaf.leafIndex &&
+    leaf.stage !== 'plan' &&
+    leaf.stage !== 'execute'
+      ? { superseded: true as const }
+      : {}),
   }));
 
   // Build merkleProofs for each prLeaf.
