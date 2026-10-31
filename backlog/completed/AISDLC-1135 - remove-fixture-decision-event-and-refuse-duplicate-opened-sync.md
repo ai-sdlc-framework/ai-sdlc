@@ -57,7 +57,7 @@ Deleted the DEC-0167 fixture event file. `persistDecisionLog` now refuses to pus
 - pipeline-cli/src/decisions/remote-persist.ts
 - pipeline-cli/src/decisions/remote-persist.test.ts
 - docs/operations/decision-authority.md
-- .ai-sdlc/_decisions/events/2026-10-30T23-57-06.766Z__DEC-0167__decision-opened__54441c3f0d1a.json
+- the DEC-0167 fixture event file of 2026-10-30T23:57Z under `.ai-sdlc/_decisions/events/` (deleted)
 - backlog/tasks/AISDLC-1135 - remove-fixture-decision-event-and-refuse-duplicate-opened-sync.md
 
 ## Design decisions
