@@ -250,6 +250,8 @@ const baseOpts: UpOptions = {
 let schedulerSpawns: string[][];
 
 beforeEach(() => {
+  // Never read the ambient executor session (AISDLC-1137).
+  vi.stubEnv('AI_SDLC_EXECUTOR_TASK', '');
   vi.stubEnv('AI_SDLC_EXECUTOR_MCP', '');
   vi.stubEnv('AI_SDLC_EXECUTOR_MCP_CONFIG', '');
   tmp = mkdtempSync(path.join(tmpdir(), 'hierarchy-'));
