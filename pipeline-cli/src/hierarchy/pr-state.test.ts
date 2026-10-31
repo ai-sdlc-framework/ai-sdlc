@@ -239,3 +239,37 @@ describe('cancelled duplicate with passing sibling (AISDLC-724)', () => {
     expect(dropSupersededCancelled([cancelled('b')])).toHaveLength(1);
   });
 });
+
+describe('stale-base Backlog Drift (AISDLC-1140)', () => {
+  const drift = (changedFiles: string[]) =>
+    classifyPr({
+      prNumber: 1,
+      taskId: 'AISDLC-1133',
+      changedFiles,
+      checks: [
+        {
+          name: 'Backlog Drift',
+          conclusion: 'failure',
+          summary:
+            'AISDLC-1132 ✗ Referenced file no longer exists: pipeline-cli/src/usage/transcript-inspect.ts',
+        },
+        { name: 'ai-sdlc/pr-ready', conclusion: 'failure', summary: 'Backlog Drift failed' },
+      ],
+    });
+
+  it('reads a drift error on a task outside the diff as behind-or-dirty', () => {
+    expect(drift(['backlog/tasks/aisdlc-1133 - x.md']).state).toBe('behind-or-dirty');
+  });
+
+  it('keeps real-failure when the PR touches the named task', () => {
+    expect(drift(['backlog/tasks/aisdlc-1132 - y.md']).state).toBe('real-failure');
+  });
+
+  it('keeps real-failure when changed files are unknown', () => {
+    expect(drift(undefined as never).state).toBe('real-failure');
+  });
+
+  it('does not treat AISDLC-11320 as AISDLC-1132', () => {
+    expect(drift(['backlog/tasks/aisdlc-11320 - z.md']).state).toBe('behind-or-dirty');
+  });
+});
