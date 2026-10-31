@@ -11,7 +11,6 @@ labels:
 dependencies: []
 references:
   - .gitignore
-  - .mcp.json
   - .claude/memory/MEMORY.md
   - pipeline-cli/src/hierarchy/handoff.ts
   - pipeline-cli/attestation-core/docs-only-paths.mjs
