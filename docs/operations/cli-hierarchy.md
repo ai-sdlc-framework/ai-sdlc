@@ -42,6 +42,7 @@ reads the real `--help` output and fails when this page omits a command or optio
 - [Commands](#commands)
 - [Operating cycle](#operating-cycle)
 - [Dispatch tick: PR and board state machine](#dispatch-tick-pr-and-board-state-machine)
+- [VS Code users](#vs-code-users)
 - [Restarting after a plugin upgrade](#restarting-after-a-plugin-upgrade)
 - [Troubleshooting](#troubleshooting)
 - [Quota and cost events](#quota-and-cost-events)
@@ -182,24 +183,7 @@ operators who manage the file themselves. When `up` runs in a VS Code terminal
 (`TERM_PROGRAM=vscode` or `VSCODE_GIT_IPC_HANDLE` set) it ends with one line:
 `VS Code: run task "hierarchy: open all agents" (Terminal > Run Task) to open one terminal per agent`.
 
-**VS Code extension (AISDLC-755).** The private workspace package `vscode-hierarchy/`
-(`vscode-hierarchy`) is a VS Code extension that opens one integrated terminal per
-roster agent as `.ai-sdlc/dispatch/hierarchy.json` changes (in the opened folder or one level
-below), each running `node <cli-hierarchy.mjs> attach <name>`. Terminals are transient, are
-disposed when the agent leaves the roster or the roster is deleted, and a terminal you close is
-not reopened until the next roster write. Install:
-
-```
-pnpm --filter vscode-hierarchy package
-code --install-extension vscode-hierarchy/dist/ai-sdlc-vscode-hierarchy.vsix
-```
-
-Settings: `aiSdlc.hierarchy.autoOpen` (default `true`), `aiSdlc.hierarchy.focusNew` (default
-`false`), `aiSdlc.hierarchy.pipelineCliBin` (absolute `cli-hierarchy.mjs`, used only when it is
-not under the repository's `pipeline-cli/bin` or the Claude plugin cache). Commands:
-`AI-SDLC: Open all hierarchy agents` and `AI-SDLC: Close all hierarchy agents`. The extension
-sets `AI_SDLC_VSCODE_HIERARCHY=1` in integrated terminals, and `up` then omits the run-task hint
-above. `.vscode/extensions.json` recommends it.
+**VS Code extension (AISDLC-755).** `vscode-hierarchy/` opens one integrated terminal per roster agent. Install, verify and troubleshooting: [VS Code users](#vs-code-users). The extension sets `AI_SDLC_VSCODE_HIERARCHY=1` in integrated terminals, and `up` then omits the run-task hint above.
 
 Every session, the planner included, starts in `bypassPermissions` (the mode
 `claude --dangerously-skip-permissions` selects): the hierarchy is unattended for most of the
@@ -1313,6 +1297,47 @@ success verdict in `done/` is skipped by `claim` (and listed as ineligible, with
 executor spends a run on it; the hold lifts by itself once that task is done. 
 
 **Start token (AISDLC-1028), removed (AISDLC-1034).** `clear` no longer writes `<boardDir>/starts/<executor>.json` and `executor-start` no longer verifies one.
+
+## VS Code users
+
+The private workspace package `vscode-hierarchy/` is an extension that opens one integrated
+terminal per roster agent as `.ai-sdlc/dispatch/hierarchy.json` changes (in the opened folder or
+one level below), each running `node <cli-hierarchy.mjs> attach <name>`. Terminals are transient,
+are disposed when the agent leaves the roster, and a terminal you close is not reopened until
+the next roster write. `.vscode/extensions.json` recommends it.
+
+**Install.**
+
+```
+pnpm --filter vscode-hierarchy package
+code --install-extension vscode-hierarchy/dist/ai-sdlc-vscode-hierarchy.vsix
+```
+
+Then run `Developer: Reload Window`. Without the extension, use Terminal > Run Task >
+`hierarchy: open all agents` (the tasks file `up` writes).
+
+**Verify.** Run `/ai-sdlc doctor` in a VS Code terminal: the `vscode-hierarchy-terminals` check
+must read `pass`. Each activated window records itself in
+`.ai-sdlc/dispatch/vscode-hierarchy-windows/<pid>.json`, which is what the check reads.
+
+**After an update.** A reinstalled extension does not take effect until the window reloads.
+Run `doctor --fix` (reinstalls a stale vsix; it never reloads the window), then
+`Developer: Reload Window` in every window that has the repo open.
+
+**Settings.** `aiSdlc.hierarchy.enabled` (default `true`; `false` stops a window opening
+terminals), `aiSdlc.hierarchy.autoOpen` (`true`), `aiSdlc.hierarchy.focusNew` (`false`),
+`aiSdlc.hierarchy.pipelineCliBin` (absolute `cli-hierarchy.mjs`, used only when it is not under
+the repository's `pipeline-cli/bin` or the Claude plugin cache). Commands: `AI-SDLC: Open all
+hierarchy agents` and `AI-SDLC: Close all hierarchy agents`.
+
+**Troubleshooting.**
+
+| Symptom (`doctor` finding) | Cause | Fix |
+|---|---|---|
+| extension: missing | Not installed | Install command above, then reload the window |
+| installed but not active in this window | Reinstalled (or installed) after the window last activated | `Developer: Reload Window` |
+| active in 2 windows covering this repo | The repo folder and a parent folder are both open; terminals may open in the other window | Set `aiSdlc.hierarchy.enabled: false` in the parent window's settings and reload it |
+| `status` lists agents but no terminals, doctor passes | Roster not yet written, or you closed the terminals | Run `AI-SDLC: Open all hierarchy agents` |
 
 ## Restarting after a plugin upgrade
 

@@ -51,6 +51,8 @@ import {
   checkJudgmentLayer,
   checkRuntimeGitignore,
   checkHierarchyLaunchEnv,
+  checkVscodeHierarchyTerminals,
+  fixVscodeHierarchyTerminals,
   checkHierarchyModule,
   checkStaleRepoBuild,
   checkLeasePushPreflight,
@@ -2554,5 +2556,128 @@ describe('hierarchy-module check', () => {
 
   it('is registered', () => {
     expect(DOCTOR_CHECKS.find((x) => x.id === 'hierarchy-module')).toBeDefined();
+  });
+});
+
+// ── vscode-hierarchy-terminals (AISDLC-1118) ──────────────────────────
+
+describe('vscode-hierarchy-terminals check', () => {
+  const T = (iso: string) => Date.parse(iso);
+  const EXT = '/home/.vscode/extensions/ai-sdlc.vscode-hierarchy-0.1.0';
+  const WIN = '/proj/.ai-sdlc/dispatch/vscode-hierarchy-windows';
+
+  function setup(opts: {
+    term?: string;
+    installedAt?: number | null;
+    windows?: Record<string, { activatedAt: string; folders: string[] }>;
+    vsixAt?: number | null;
+    installExit?: number;
+  }) {
+    const calls: string[][] = [];
+    const windows = opts.windows ?? {};
+    const adapters = makeAdapters({
+      env: opts.term === undefined ? {} : { TERM_PROGRAM: opts.term },
+      homeDir: () => '/home',
+      exists: (p) => p.endsWith('.vsix') && opts.vsixAt !== null && opts.vsixAt !== undefined,
+      listDir: (p) =>
+        p === '/home/.vscode/extensions' && opts.installedAt !== undefined
+          ? ['other.ext-1.0.0', 'ai-sdlc.vscode-hierarchy-0.1.0']
+          : [],
+      listFiles: (p) => (p === WIN ? [...Object.keys(windows), 'note.txt'] : []),
+      readFile: (p) => {
+        const name = p.slice(WIN.length + 1);
+        return name in windows ? JSON.stringify(windows[name]) : name === 'bad.json' ? '{' : null;
+      },
+      fileMtimeMs: (p) => (p === EXT ? (opts.installedAt ?? null) : (opts.vsixAt ?? null)),
+      runCommand: (cmd, args) => {
+        calls.push([cmd, ...args]);
+        return { stdout: '', stderr: 'boom', exitCode: opts.installExit ?? 0 };
+      },
+    });
+    return { ctx: makeCtx(adapters, '/proj'), calls };
+  }
+
+  const win = (iso: string, folder = '/proj') => ({ activatedAt: iso, folders: [folder] });
+
+  it('is quiet outside VS Code', () => {
+    expect(checkVscodeHierarchyTerminals(setup({}).ctx)).toEqual([]);
+    expect(checkVscodeHierarchyTerminals(setup({ term: 'iTerm.app' }).ctx)).toEqual([]);
+  });
+
+  it('warns with the install command when the extension is missing', () => {
+    const r = checkVscodeHierarchyTerminals(setup({ term: 'vscode' }).ctx);
+    expect(r[0].severity).toBe('warn');
+    expect(r[0].remediation).toContain('code --install-extension');
+  });
+
+  it('warns to reload when installed after the last activation, passes after reload', () => {
+    const stale = setup({
+      term: 'vscode',
+      installedAt: T('2026-10-29T16:39:00Z'),
+      windows: { '1.json': win('2026-10-29T16:37:00Z'), 'bad.json': win('x') },
+    });
+    const r = checkVscodeHierarchyTerminals(stale.ctx);
+    expect(r).toHaveLength(1);
+    expect(r[0].severity).toBe('warn');
+    expect(r[0].title).toContain('not active in this window');
+    expect(r[0].remediation).toContain('Reload Window');
+    const fresh = setup({
+      term: 'vscode',
+      installedAt: T('2026-10-29T16:39:00Z'),
+      windows: { '1.json': win('2026-10-29T16:41:00Z') },
+    });
+    expect(checkVscodeHierarchyTerminals(fresh.ctx)[0].severity).toBe('pass');
+  });
+
+  it('warns when no window has activated at all', () => {
+    const r = checkVscodeHierarchyTerminals(setup({ term: 'vscode', installedAt: 1 }).ctx);
+    expect(r[0].severity).toBe('warn');
+  });
+
+  it('flags the nested workspace naming both folders', () => {
+    const r = checkVscodeHierarchyTerminals(
+      setup({
+        term: 'vscode',
+        installedAt: 1,
+        windows: {
+          '1.json': win('2026-10-29T16:41:00Z', '/proj'),
+          '2.json': win('2026-10-29T16:41:00Z', '/'),
+          '3.json': win('2026-10-29T16:41:00Z', '/elsewhere'),
+        },
+      }).ctx,
+    );
+    const nested = r.find((x) => x.id.endsWith('nested-workspace'));
+    expect(nested?.severity).toBe('warn');
+    expect(nested?.title).toContain('/proj');
+    expect(nested?.remediation).toContain('aiSdlc.hierarchy.enabled');
+  });
+
+  it('fix reinstalls a stale vsix and tells the user to reload', () => {
+    const s = setup({ term: 'vscode', installedAt: 10, vsixAt: 20 });
+    const f = fixVscodeHierarchyTerminals(s.ctx);
+    expect(f.applied).toBe(true);
+    expect(f.detail).toContain('Reload Window');
+    expect(s.calls[0][0]).toBe('code');
+    expect(s.calls[0]).toContain('--install-extension');
+    expect(fixVscodeHierarchyTerminals(setup({ term: 'vscode', vsixAt: 20 }).ctx).applied).toBe(
+      true,
+    );
+  });
+
+  it('fix is a no-op outside VS Code, without a vsix, when current, and reports failure', () => {
+    expect(fixVscodeHierarchyTerminals(setup({}).ctx).applied).toBe(false);
+    expect(fixVscodeHierarchyTerminals(setup({ term: 'vscode' }).ctx).detail).toContain('package');
+    const cur = setup({ term: 'vscode', installedAt: 30, vsixAt: 20 });
+    expect(fixVscodeHierarchyTerminals(cur.ctx).applied).toBe(false);
+    expect(cur.calls).toEqual([]);
+    const bad = fixVscodeHierarchyTerminals(
+      setup({ term: 'vscode', vsixAt: 20, installExit: 1 }).ctx,
+    );
+    expect(bad.applied).toBe(false);
+    expect(bad.detail).toContain('boom');
+  });
+
+  it('is registered with a fix', () => {
+    expect(DOCTOR_CHECKS.find((x) => x.id === 'vscode-hierarchy-terminals')?.fix).toBeDefined();
   });
 });

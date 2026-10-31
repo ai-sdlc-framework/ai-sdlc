@@ -5,8 +5,11 @@
 
 import * as fs from 'node:fs';
 import * as os from 'node:os';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 
+import { buildRecord, removeRecords, writeRecords, type RecordFs } from './activation.js';
+import { now } from './clock.js';
 import { Reconciler, type TerminalHandle } from './reconciler.js';
 import { findRosterFiles, parseRosterNames, repoRootOf, resolveHierarchyBin } from './roster.js';
 import type { RosterFs } from './roster.js';
@@ -29,7 +32,16 @@ function config(): vscode.WorkspaceConfiguration {
   return vscode.workspace.getConfiguration('aiSdlc.hierarchy');
 }
 
+const recordFs: RecordFs = {
+  write: (file, text) => {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text, 'utf-8');
+  },
+  remove: (file) => fs.rmSync(file, { force: true }),
+};
+
 export function activate(context: vscode.ExtensionContext): void {
+  if (!config().get<boolean>('enabled', true)) return;
   context.environmentVariableCollection.replace('AI_SDLC_VSCODE_HIERARCHY', '1');
 
   const handles = new Map<TerminalHandle, vscode.Terminal>();
@@ -139,6 +151,15 @@ export function activate(context: vscode.ExtensionContext): void {
       if (e.affectsConfiguration('aiSdlc.hierarchy')) for (const f of rosters()) sync(f, false);
     }),
   );
+
+  const record = buildRecord(
+    process.pid,
+    String((context.extension.packageJSON as { version?: unknown }).version ?? ''),
+    folders(),
+    now(),
+  );
+  const written = writeRecords([...new Set(rosters().map(repoRootOf))], record, recordFs);
+  context.subscriptions.push({ dispose: () => removeRecords(written, recordFs) });
 
   for (const file of rosters()) sync(file, true);
 }
