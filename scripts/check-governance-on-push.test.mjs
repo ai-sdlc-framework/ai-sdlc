@@ -69,11 +69,11 @@ function commit(files, remove = []) {
   git(['commit', '-q', '-m', 'work']);
 }
 
-function push() {
+function push(remoteSha = '0'.repeat(40)) {
   const head = git(['rev-parse', 'HEAD']);
   return spawnSync('bash', [join(root, 'scripts', 'check-governance-on-push.sh')], {
     cwd: root,
-    input: `refs/heads/b ${head} refs/heads/b ${'0'.repeat(40)}\n`,
+    input: `refs/heads/b ${head} refs/heads/b ${remoteSha}\n`,
     encoding: 'utf-8',
     env: { ...process.env, PATH: process.env.PATH },
     timeout: 60000,
@@ -94,6 +94,31 @@ describe('check-governance-on-push.sh', () => {
     assert.match(r.stderr + r.stdout, /waived-tests/);
     commit({ 'backlog/completed/AISDLC-9 - t.md': '- `pnpm test` - 12 passed\n' });
     assert.equal(push().status, 0);
+  });
+
+  it('ranges a rebased lease push from the origin/main merge-base (AISDLC-1143)', () => {
+    fixture();
+    const fork = git(['rev-parse', 'HEAD']);
+    commit({ 'src/own.txt': 'own\n' });
+    const staleRemote = git(['rev-parse', 'HEAD']);
+    // main moves on: a landed commit adds a waived-tests task file next to pipeline code.
+    git(['checkout', '-q', '-b', 'newmain', fork]);
+    commit({
+      'pipeline-cli/src/m.ts': 'export const m = 1;\n',
+      'backlog/completed/AISDLC-8 - m.md': WAIVED,
+    });
+    git(['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+    // the branch is rebased onto the new main; the remote still has the old head.
+    git(['checkout', '-q', '-b', 'rebased']);
+    commit({ 'src/own.txt': 'own2\n' });
+    assert.equal(push(staleRemote).status, 0);
+    commit({
+      'pipeline-cli/src/b.ts': 'export const b = 1;\n',
+      'backlog/completed/AISDLC-7 - b.md': WAIVED,
+    });
+    const r = push(staleRemote);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr + r.stdout, /waived-tests/);
   });
 
   it('refuses a conflict marker in any file', () => {

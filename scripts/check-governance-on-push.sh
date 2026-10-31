@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # AISDLC-1123: pre-push copy of the deterministic CI governance checks, run over the push
-# range (merge-base..HEAD) so a red CI would raise is fixed before the push. Same scripts,
+# range (origin/main merge-base..HEAD) so a red CI would raise is fixed before the push. Same scripts,
 # same arguments as CI; CI stays the only merge gate. Reads git's pre-push stdin.
 #
 #   conflict markers  added lines starting with a conflict marker refuse the push.
@@ -33,12 +33,10 @@ BLOCKED=0
 while read -r _LOCAL_REF LOCAL_SHA _REMOTE_REF REMOTE_SHA; do
   [ -z "${LOCAL_SHA:-}" ] && continue
   [ "$LOCAL_SHA" = "$ALL_ZEROS" ] && continue
-  if [ "${REMOTE_SHA:-$ALL_ZEROS}" = "$ALL_ZEROS" ]; then
-    git show-ref --verify --quiet refs/remotes/origin/main || continue
-    BASE="$(git merge-base "$LOCAL_SHA" origin/main 2>/dev/null || true)"
-  else
-    BASE="$(git merge-base "$REMOTE_SHA" "$LOCAL_SHA" 2>/dev/null || true)"
-  fi
+  # AISDLC-1143: always the origin/main merge-base (the CI range), never the remote head: after
+  # a rebase the remote-head merge-base is the old fork point and sweeps in landed main commits.
+  git show-ref --verify --quiet refs/remotes/origin/main || continue
+  BASE="$(git merge-base "$LOCAL_SHA" origin/main 2>/dev/null || true)"
   [ -z "$BASE" ] && continue
 
   FILES="$(git diff --name-only --no-renames "$BASE..$LOCAL_SHA")"
