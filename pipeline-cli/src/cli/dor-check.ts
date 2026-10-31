@@ -23,11 +23,8 @@ import { hideBin } from 'yargs/helpers';
 import { refineBacklogTask } from '../dor/ingress-claude.js';
 import { renderClarificationComment } from '../dor/comment-loop.js';
 import { loadDorConfig } from '../dor/dor-config.js';
-<<<<<<< HEAD
 import { checkSecurityFindingCompletion } from '../dor/security-finding-dismissal.js';
-=======
-import { routeDecisionPoint } from '../dor/decision-point.js';
->>>>>>> 0dde1428 (feat(pipeline-cli): wire decision-point routing into dor-check (AISDLC-785))
+import { routeDecisionPointForTaskFile } from '../dor/decision-point.js';
 
 function extractTaskIdFromFile(taskFile: string): string | null {
   // Backlog convention: `aisdlc-<n> - <slug>.md`. Pull the ID from the basename.
@@ -62,31 +59,6 @@ interface CheckOneResult {
   taskId: string;
   blocked: boolean;
   comment: string;
-}
-
-/**
- * AISDLC-785: decision-point moment. Non-blocking: routes retrieval findings
- * through the Decision Catalog; any failure is swallowed so the DoR result
- * is unchanged.
- */
-async function routeDecisionPointBestEffort(
-  taskId: string,
-  taskFile: string,
-  workDir: string,
-): Promise<void> {
-  try {
-    const raw = readFileSync(taskFile, 'utf8');
-    const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(raw);
-    const result = await routeDecisionPoint({
-      taskId,
-      frontmatter: m ? m[1] : '',
-      body: m ? m[2] : raw,
-      workDir,
-    });
-    for (const ev of result.routed) process.stderr.write(`${JSON.stringify(ev)}\n`);
-  } catch {
-    // best effort
-  }
 }
 
 async function checkOneTaskFile(taskFile: string): Promise<CheckOneResult> {
@@ -124,7 +96,7 @@ async function checkOneTaskFile(taskFile: string): Promise<CheckOneResult> {
     config: enforceConfig,
   });
 
-  await routeDecisionPointBestEffort(taskId, resolved, workDir);
+  await routeDecisionPointForTaskFile(taskId, resolved, workDir);
 
   if (!result.shouldRefuseExecution) {
     return { taskFile: resolved, taskId, blocked: false, comment: '' };

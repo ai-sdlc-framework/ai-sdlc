@@ -11,6 +11,7 @@
  * `blocked.reason` (the upstream-OQ gate override) is not routed.
  */
 
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadKnowledgeConfig } from '../knowledge/config.js';
 import { readEntries } from '../knowledge/store.js';
@@ -200,4 +201,31 @@ export async function routeDecisionPoint(input: DecisionPointInput): Promise<Dec
     };
   }
   return { findings, routed, skippedDuplicates };
+}
+
+/**
+ * Non-blocking wrapper used by `dor-check`: reads the task file, routes the
+ * findings and logs each routed event to stderr. Any failure is swallowed so
+ * the DoR result is unchanged.
+ */
+export async function routeDecisionPointForTaskFile(
+  taskId: string,
+  taskFile: string,
+  workDir: string,
+  extra: Partial<DecisionPointInput> = {},
+): Promise<void> {
+  try {
+    const raw = readFileSync(taskFile, 'utf8');
+    const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(raw);
+    const result = await routeDecisionPoint({
+      taskId,
+      frontmatter: m ? (m[1] ?? '') : '',
+      body: m ? (m[2] ?? '') : raw,
+      workDir,
+      ...extra,
+    });
+    for (const ev of result.routed) process.stderr.write(`${JSON.stringify(ev)}\n`);
+  } catch {
+    // best effort
+  }
 }

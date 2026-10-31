@@ -1,8 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { routeDecisionPoint, type DecisionPointFinding } from './decision-point.js';
+import {
+  routeDecisionPoint,
+  routeDecisionPointForTaskFile,
+  type DecisionPointFinding,
+} from './decision-point.js';
 import { listDecisions } from '../decisions/projection.js';
 import { DECISION_CATALOG_FLAG } from '../decisions/feature-flag.js';
 
@@ -92,5 +96,43 @@ describe('routeDecisionPoint', () => {
   it('falls back to the default retrieval, which degrades to empty without an index', async () => {
     const r = await routeDecisionPoint(base());
     expect(r.routed).toEqual([]);
+  });
+});
+
+describe('routeDecisionPointForTaskFile', () => {
+  it('routes findings from a task file and logs each event to stderr', async () => {
+    const f = join(workDir, 't.md');
+    writeFileSync(f, '---\nid: AISDLC-9\n---\nBody RFC-0035\n');
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      await routeDecisionPointForTaskFile('AISDLC-9', f, workDir, {
+        env: ENV,
+        retrieval: async () => FINDINGS,
+      });
+      expect(write).toHaveBeenCalledTimes(2);
+      expect(String(write.mock.calls[0]?.[0])).toContain('DorDecisionPointRouted');
+    } finally {
+      write.mockRestore();
+    }
+  });
+
+  it('treats a file without frontmatter as all body', async () => {
+    const f = join(workDir, 't.md');
+    writeFileSync(f, 'plain body');
+    let seen = '';
+    await routeDecisionPointForTaskFile('AISDLC-9', f, workDir, {
+      env: ENV,
+      retrieval: async (q) => {
+        seen = q;
+        return [];
+      },
+    });
+    expect(seen).toBe('plain body');
+  });
+
+  it('swallows a missing file', async () => {
+    await expect(
+      routeDecisionPointForTaskFile('AISDLC-9', join(workDir, 'nope.md'), workDir),
+    ).resolves.toBeUndefined();
   });
 });
