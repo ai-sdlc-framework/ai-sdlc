@@ -37,6 +37,8 @@ export interface PrFacts {
   checks?: PrCheck[];
   headBranch?: string;
   manifestBranch?: string;
+  /** Paths the PR changes (AISDLC-1140); lets a Backlog Drift red be read as a stale base. */
+  changedFiles?: string[];
 }
 
 export const PR_STATES = [
@@ -123,6 +125,31 @@ function detectChangesOnlyShape(checks: readonly PrCheck[]): boolean {
   return others.every((c) => c.skipped === true || c.name === PR_READY);
 }
 
+const DRIFT_CHECK_RE = /backlog drift/i;
+const DRIFT_ERROR_RE = /\b([A-Z][A-Z0-9]*-\d+(?:\.\d+)*)\s+✗/g;
+
+/**
+ * AISDLC-1140: the only failed job is Backlog Drift and every error line names a
+ * task whose file the PR does not change. The gate checks out the PR head, so the
+ * red comes from a base that predates a landing on main; a rebase fixes it.
+ */
+function staleBaseDrift(
+  failedChecks: readonly PrCheck[],
+  changedFiles?: readonly string[],
+): boolean {
+  if (!changedFiles) return false;
+  const jobs = failedChecks.filter((c) => c.name !== PR_READY);
+  if (jobs.length === 0 || !jobs.every((c) => DRIFT_CHECK_RE.test(c.name))) return false;
+  const ids = new Set<string>();
+  for (const c of jobs) {
+    for (const m of (c.summary ?? '').matchAll(DRIFT_ERROR_RE)) ids.add(m[1]!.toLowerCase());
+  }
+  if (ids.size === 0) return false;
+  const touched = (id: string): boolean =>
+    changedFiles.some((f) => new RegExp(`(^|/)${id}(?!\\d|\\.\\d)`, 'i').test(f));
+  return ![...ids].some(touched);
+}
+
 function failed(c: PrCheck): boolean {
   return c.conclusion === 'failure';
 }
@@ -168,6 +195,7 @@ export function classifyPr(f: PrFacts): PrClassification {
   ) {
     return mk('rate-limited');
   }
+  if (staleBaseDrift(failedChecks, f.changedFiles)) return mk('behind-or-dirty');
   const ready = checks.find((c) => c.name === PR_READY && failed(c));
   if (ready) return mk('real-failure', ready.summary);
   if (checks.some((c) => c.conclusion === 'cancelled' || c.conclusion === 'infra')) {
