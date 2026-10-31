@@ -2,7 +2,7 @@
 id: AISDLC-777
 title: >-
   ported capture and hygiene commands for the context engine
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-09'
 labels:

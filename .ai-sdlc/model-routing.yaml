@@ -49,6 +49,10 @@ spec:
       '*': { model: sonnet }
     cleanup:
       '*': { model: haiku }
+    context-capture:
+      '*': { model: sonnet }
+    context-hygiene:
+      '*': { model: sonnet }
     detect-patterns:
       '*': { model: sonnet }
     dispatch-worker:
