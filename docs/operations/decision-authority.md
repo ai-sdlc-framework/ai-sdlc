@@ -52,6 +52,8 @@ Class (c) is never derived from the other questions; it is recognised by its sub
 
 `cli-decisions` resolves the catalog root to the main checkout when run from a linked worktree (`git rev-parse --git-common-dir`), so `add`, `answer`, `show` and `list` read and write `<main checkout>/.ai-sdlc/_decisions/events/` wherever they run. A decision an executor files from `.worktrees/<id>/` is therefore visible to dispatch with `cli-decisions show <id>` from the parent, with no manual copy. The events reach `main` as before (a filing PR, or committed in a task branch); the parent copy is what a later fast-forward brings. Step 0.5 treats untracked files under `.ai-sdlc/_decisions/events/` as parent-tolerated, so they never refuse a fresh execute.
 
+The event log is append-only, and `persistDecisionLog` refuses to push a second `decision-opened` event for an id that already has one (AISDLC-1135). The one sanctioned exception is removing an event with no decision behind it, under an operator ruling that names the file, as done for the DEC-0167 fixture event on 2026-10-31.
+
 ## Velocity: no refusal ends in a person
 
 Only class (c) waits on a human, and only for legal, money, credentials or the operator's own identity. Everything else a rule refuses must name a next step the agent can take itself: a sanctioned command, a config key and value, or escalation to the dispatch or planner session. New rules, gates and defaults carry a "Velocity impact" section in their PR body (harm prevented, workflows touched, happy-path firing in a fresh adopter repo, what the agent does when refused), and with nothing configured the documented workflow must run.
