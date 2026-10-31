@@ -59,7 +59,7 @@ AC-6 is not fully green. `pnpm test` failed only on prompt-rules.test.mjs (2 sub
 
 ## Verification
 - `pnpm build` — passed
-- `pnpm test` — waived
+- `pnpm test` — ran (executor env vars unset): 3796 pass, 2 fail; both failures are ai-sdlc-plugin/commands/prompt-rules.test.mjs standing-rules sync, a file this diff does not touch; the same 2 fail on main
 - `pnpm lint` — passed
 - `pnpm format:check` — passed
 - 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
