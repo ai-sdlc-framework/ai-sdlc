@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1143
 title: 'Pre-push governance gate ranges from the origin/main merge-base, not from the stale remote head, so a rebased lease push is checked over the PR diff only'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-31'
 labels:
