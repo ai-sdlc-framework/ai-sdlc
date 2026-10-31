@@ -5,6 +5,26 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.39.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.38.0...orchestrator-v0.39.0) (2026-10-31)
+
+
+### Features
+
+* **orchestrator:** diagnose VS Code hierarchy terminals setup (AISDLC-1118) ([#2158](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2158)) ([7853fbb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7853fbb506d49c73471b20ee8c5d894b5a8ffd66))
+* **orchestrator:** external signal ingestion into the PPA (AISDLC-788) ([#2100](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2100)) ([d2f6ae1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d2f6ae1e24870b01816bac1e307dd131b24e8b56))
+
+
+### Bug Fixes
+
+* reject v5 attestations signed after the v6 cutover (AISDLC-972) ([#2181](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2181)) ([582edbb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/582edbb615e9984a32909a37d21522621b83b981))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.39.0
+
 ## [0.38.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.37.0...orchestrator-v0.38.0) (2026-10-29)
 
 

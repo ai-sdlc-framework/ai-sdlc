@@ -1,6 +1,6 @@
 {
   "name": "@ai-sdlc/orchestrator",
-  "version": "0.38.0",
+  "version": "0.39.0",
   "description": "AI-SDLC Orchestrator — long-running runtime that drives issues through the complete SDLC with AI agents",
   "license": "Apache-2.0",
   "repository": {
