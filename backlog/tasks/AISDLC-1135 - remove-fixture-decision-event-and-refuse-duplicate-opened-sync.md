@@ -10,7 +10,6 @@ labels:
   - incident-follow-up
 dependencies: []
 references:
-  - .ai-sdlc/_decisions/events/2026-10-30T23-57-06.766Z__DEC-0167__decision-opened__54441c3f0d1a.json
   - pipeline-cli/src/decisions/remote-persist.ts
   - pipeline-cli/src/cli/decisions.test.ts
   - pipeline-cli/src/cli/file.ts
