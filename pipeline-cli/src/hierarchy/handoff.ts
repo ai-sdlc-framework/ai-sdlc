@@ -31,6 +31,7 @@ import { listRulings, type BoardRuling } from '../dispatch/ruling.js';
 import { listDecisions } from '../decisions/projection.js';
 import { listInflight } from './inflight.js';
 import { readRoster } from './roster.js';
+import { renderTranscriptSection, type TranscriptSource } from './transcript-recall.js';
 import type { HierarchyRole } from './types.js';
 
 export const HANDOFF_BEGIN = '<!-- ai-sdlc-handoff:begin -->';
@@ -54,6 +55,8 @@ export interface HandoffState {
   rulings: BoardRuling[];
   /** The newest {@link LEDGER_RENDER_LIMIT} outward actions, newest first (AISDLC-1049). */
   ledger?: LedgerEntry[];
+  /** Body of the `## Transcript` section: paths plus the pre-clear digest (AISDLC-1132). */
+  transcript?: string;
 }
 
 /** Kinds of outward action a session can record. */
@@ -83,6 +86,8 @@ export interface HandoffOptions {
   file?: string;
   /** Planner only: roll older notes into `<basename>_archive.md` (default true; AISDLC-933). */
   archive?: boolean;
+  /** Where the session's transcripts live; absent omits the `## Transcript` section (AISDLC-1132). */
+  transcript?: TranscriptSource;
 }
 
 /** Result of a write or read. */
@@ -109,6 +114,7 @@ export function collectHandoffState(
   boardDir: string,
   now: () => Date = clock,
   ledgerFile?: string,
+  transcript?: string,
 ): HandoffState {
   let roster: HandoffState['roster'];
   try {
@@ -150,6 +156,7 @@ export function collectHandoffState(
     openDecisions,
     rulings: listRulings(boardDir),
     ledger: ledgerFile ? readLedger(ledgerFile, LEDGER_RENDER_LIMIT) : [],
+    ...(transcript === undefined ? {} : { transcript }),
   };
 }
 
@@ -283,6 +290,7 @@ export function renderHandoff(
     ...(state.ledger?.length
       ? state.ledger.map((e) => `- ${e.at} ${e.kind} ${e.url}${e.summary ? ` (${e.summary})` : ''}`)
       : ['- (none)']),
+    ...(state.transcript === undefined ? [] : ['', '## Transcript', state.transcript]),
     HANDOFF_END,
   ];
   return lines.join('\n') + '\n';
@@ -413,7 +421,12 @@ export function writeHandoff(opts: HandoffOptions): HandoffResult {
   const now = (opts.now ?? clock)();
   const name = opts.name ?? opts.role;
   const file = handoffPath(opts, now);
-  const state = collectHandoffState(opts.boardDir, () => now, ledgerPath(opts, now));
+  const state = collectHandoffState(
+    opts.boardDir,
+    () => now,
+    ledgerPath(opts, now),
+    opts.transcript ? renderTranscriptSection(opts.transcript) : undefined,
+  );
   const block = renderHandoff(opts.role, name, state, now.toISOString());
   const carried = existsSync(file) ? file : newestPlannerHandoff(file, opts);
   const existing = carried ? readFileSync(carried, 'utf-8') : undefined;
@@ -454,7 +467,12 @@ export function readHandoff(opts: HandoffOptions): HandoffResult {
   const now = (opts.now ?? clock)();
   const file = handoffPath(opts, now);
   const live = hashHandoffState(
-    collectHandoffState(opts.boardDir, () => now, ledgerPath(opts, now)),
+    collectHandoffState(
+      opts.boardDir,
+      () => now,
+      ledgerPath(opts, now),
+      opts.transcript ? renderTranscriptSection(opts.transcript) : undefined,
+    ),
   );
   if (existsSync(file)) {
     const content = readFileSync(file, 'utf-8');
