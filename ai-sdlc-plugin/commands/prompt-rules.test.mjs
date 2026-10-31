@@ -198,11 +198,17 @@ describe('standing decision rules (AISDLC-873)', () => {
   });
 
   it('is deterministic and sorted by decision id, independent of input order', () => {
-    const a = [opened('DEC-0009'), answered('DEC-0009'), opened('DEC-0002'), answered('DEC-0002')];
+    // Rule texts sort opposite to the ids, so the order can only come from the id.
+    const a = [
+      opened('DEC-0009', { standingRule: 'alpha rule' }),
+      answered('DEC-0009'),
+      opened('DEC-0002', { standingRule: 'zulu rule' }),
+      answered('DEC-0002'),
+    ];
     const first = renderStandingRulesBlock(a);
     assert.equal(renderStandingRulesBlock([...a].reverse()), first);
     assert.equal(renderStandingRulesBlock(a), first);
-    assert.ok(first.indexOf('DEC-0002') < first.indexOf('DEC-0009'));
+    assert.ok(first.indexOf('zulu rule') < first.indexOf('alpha rule'));
   });
 
   it('syncStandingRules leaves block-less text alone and rewrites a drifted block', () => {
