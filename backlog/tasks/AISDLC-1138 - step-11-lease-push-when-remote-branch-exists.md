@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1138
 title: 'Step 11 first push uses force-with-lease against the existing remote head when the developer already pushed the branch and the role allows lease mode'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-31'
 labels:
