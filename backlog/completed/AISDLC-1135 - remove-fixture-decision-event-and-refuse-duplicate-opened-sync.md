@@ -61,7 +61,7 @@ Deleted the DEC-0167 fixture event file. `persistDecisionLog` now refuses to pus
 - backlog/tasks/AISDLC-1135 - remove-fixture-decision-event-and-refuse-duplicate-opened-sync.md
 
 ## Design decisions
-Test command run: `env -u AI_SDLC_EXECUTOR_TASK -u AI_SDLC_HIERARCHY_SESSION -u AI_SDLC_HIERARCHY_ROLE npx vitest run` in pipeline-cli. Summary line: `Tests  12496 passed | 13 skipped (12509)`, `Test Files  568 passed (568)`. The earlier failures came from the executor session env vars leaking into the hierarchy tests; they are unrelated to this diff. The task file now says 'the DEC-0167 fixture event file of 2026-10-30T23:57Z' instead of naming the deleted path, because the backlog-drift gate blocked on the dangling reference.
+Test command run (planner, 2026-10-31, DEC-0285 relief, shell without AI_SDLC_EXECUTOR_TASK / AI_SDLC_HIERARCHY_*): `pnpm test` on the rebased branch at origin/main 4b7dfefd: pipeline-cli `Tests  12496 passed | 13 skipped (12509)`, orchestrator `Tests  5253 passed | 2 skipped (5255)`, reference 1987 passed, dogfood 376 passed, every other package green, exit 0. The earlier executor-side failures of 15 executor-start tests were the leaked executor env (AISDLC-1137). `pnpm build`, `pnpm lint` and `pnpm format:check` passed. The task file was also edited: it names the deleted event file by description instead of path because the backlog-drift gate blocks a dangling reference.
 
 ## Verification
 - `pnpm build` — passed
