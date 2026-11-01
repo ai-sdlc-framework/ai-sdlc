@@ -2,7 +2,7 @@
 id: AISDLC-655.3
 title: >-
   RFC-0050: harden reviewer replay against minor review findings
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
