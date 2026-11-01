@@ -149,10 +149,46 @@ export function unpreloadedNodeTestScripts(pkg) {
   return bad;
 }
 
+/**
+ * Runners other than package scripts that execute `node --test`: the gate-test
+ * runner (scripts/run-gate-tests.mjs) and the CI workflows. Returns labels of
+ * those that do not load the preload.
+ */
+export function unpreloadedRunners(root = process.cwd()) {
+  const bad = [];
+  const runner = join(root, 'scripts', 'run-gate-tests.mjs');
+  if (existsSync(runner) && !/--import/.test(readFileSync(runner, 'utf-8'))) {
+    bad.push('scripts/run-gate-tests.mjs');
+  } else if (existsSync(runner) && !readFileSync(runner, 'utf-8').includes(SETUP_FILE)) {
+    bad.push('scripts/run-gate-tests.mjs');
+  }
+  const wfDir = join(root, '.github', 'workflows');
+  if (existsSync(wfDir)) {
+    for (const f of readdirSync(wfDir).filter((n) => /\.ya?ml$/.test(n))) {
+      const lines = readFileSync(join(wfDir, f), 'utf-8').split('\n');
+      lines.forEach((line, i) => {
+        const t = line.trim();
+        if (t.startsWith('#') || /^-?\s*name:/.test(t)) return;
+        for (const seg of t.split(/&&|;|\|/)) {
+          if (
+            /\bnode\b[^&;|]*--test\b/.test(seg) &&
+            !/--import[= ]\S*vitest\.git-env\.setup\.mjs/.test(seg)
+          ) {
+            bad.push(`.github/workflows/${f}:${i + 1}`);
+            break;
+          }
+        }
+      });
+    }
+  }
+  return bad;
+}
+
 export function findOffenders({ root = process.cwd() } = {}) {
   const pkgPath = join(root, 'package.json');
   const pkg = existsSync(pkgPath) ? JSON.parse(readFileSync(pkgPath, 'utf-8')) : {};
-  const nodePreloaded = unpreloadedNodeTestScripts(pkg).length === 0;
+  const nodePreloaded =
+    unpreloadedNodeTestScripts(pkg).length === 0 && unpreloadedRunners(root).length === 0;
   const offenders = [];
   for (const file of listTestFiles(root)) {
     if (vitestCoversFile(file, root)) continue;
@@ -178,6 +214,7 @@ export function loadBaseline(root = process.cwd(), path = BASELINE_PATH) {
 
 export function loadBaselineAtRef(ref, root = process.cwd(), path = BASELINE_PATH) {
   try {
+    if (String(ref).startsWith('-')) throw new Error(`invalid --base-ref "${ref}"`);
     const raw = execFileSync('git', ['show', `${ref}:${path}`], {
       cwd: root,
       encoding: 'utf-8',
@@ -185,7 +222,10 @@ export function loadBaselineAtRef(ref, root = process.cwd(), path = BASELINE_PAT
     });
     const parsed = JSON.parse(raw);
     return { offenders: Array.isArray(parsed.offenders) ? parsed.offenders : [] };
-  } catch {
+  } catch (err) {
+    process.stderr.write(
+      `[git-env-hygiene] warning: cannot read baseline at ${ref}:${path} (${err.code ?? err.message}); shrink-only check skipped\n`,
+    );
     return null;
   }
 }
@@ -227,9 +267,7 @@ export function formatReport({ newOffenders, nowClean, grown, unpreloaded = [] }
     );
   }
   for (const s of unpreloaded) {
-    lines.push(
-      `[git-env-hygiene] package.json script "${s}" runs node --test without --import ./${SETUP_FILE}`,
-    );
+    lines.push(`[git-env-hygiene] ${s} runs node --test without --import ./${SETUP_FILE}`);
   }
   for (const g of grown)
     lines.push(`[git-env-hygiene] baseline grew: ${g} (baseline is shrink-only)`);
@@ -252,6 +290,10 @@ function main(argv) {
   const root = process.cwd();
   const refIdx = argv.indexOf('--base-ref');
   const baseRef = refIdx !== -1 ? argv[refIdx + 1] : 'origin/main';
+  if (!baseRef || baseRef.startsWith('-')) {
+    process.stderr.write(`[git-env-hygiene] invalid --base-ref "${baseRef}"\n`);
+    return 2;
+  }
   const offenders = findOffenders({ root });
   const baseline = loadBaseline(root);
   if (argv.includes('--update-baseline')) {
@@ -270,7 +312,10 @@ function main(argv) {
   const diff = diffAgainstBaseline(offenders, baseline);
   const grown = baselineGrowth(loadBaselineAtRef(baseRef, root), baseline);
   const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
-  const unpreloaded = unpreloadedNodeTestScripts(pkg);
+  const unpreloaded = [
+    ...unpreloadedNodeTestScripts(pkg).map((n) => `package.json script "${n}"`),
+    ...unpreloadedRunners(root),
+  ];
   process.stdout.write(`${formatReport({ ...diff, grown, unpreloaded })}\n`);
   return diff.newOffenders.length > 0 || grown.length > 0 || unpreloaded.length > 0 ? 1 : 0;
 }

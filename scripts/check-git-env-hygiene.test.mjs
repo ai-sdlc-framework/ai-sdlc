@@ -7,6 +7,8 @@ import {
   findUnsafeGitSpawns,
   findOffenders,
   unpreloadedNodeTestScripts,
+  unpreloadedRunners,
+  loadBaselineAtRef,
   diffAgainstBaseline,
   baselineGrowth,
   formatReport,
@@ -118,7 +120,7 @@ test('baseline: new offenders fail, cleaned ones ratchet, growth is detected', (
     [],
   );
   assert.deepEqual(baselineGrowth(null, { offenders: [{ path: 'a' }] }), []);
-  const report = formatReport({ ...diff, grown: ['z'], unpreloaded: ['t'] });
+  const report = formatReport({ ...diff, grown: ['z'], unpreloaded: ['package.json script "t"'] });
   assert.match(report, /b\.test\.mjs/);
   assert.match(report, /baseline grew: z/);
   assert.match(report, /script "t"/);
@@ -134,4 +136,36 @@ test('baseline file round-trips', () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('unpreloadedRunners flags a gate runner and workflow step without the preload', () => {
+  const bad = fixture({
+    'scripts/run-gate-tests.mjs': "spawnSync(process.execPath, ['--test'])",
+    '.github/workflows/a.yml':
+      'steps:\n  - name: x node --test y\n    # node --test z\n    run: node --test a.mjs\n',
+  });
+  const found = unpreloadedRunners(bad);
+  assert.deepEqual(found, ['scripts/run-gate-tests.mjs', '.github/workflows/a.yml:4']);
+  const good = fixture({
+    'scripts/run-gate-tests.mjs': "['--import', 'vitest.git-env.setup.mjs', '--test']",
+    '.github/workflows/a.yml': 'run: node --import ./vitest.git-env.setup.mjs --test a.mjs\n',
+  });
+  assert.deepEqual(unpreloadedRunners(good), []);
+  const noImport = fixture({ 'scripts/run-gate-tests.mjs': "['--import', 'other.mjs']" });
+  assert.deepEqual(unpreloadedRunners(noImport), ['scripts/run-gate-tests.mjs']);
+  assert.deepEqual(unpreloadedRunners(fixture({})), []);
+});
+
+test('an unpreloaded runner makes node --test files offenders', () => {
+  const root = fixture({
+    'package.json': PRELOADED,
+    'scripts/run-gate-tests.mjs': "['--test']",
+    'scripts/a.test.mjs': "execFileSync('git', ['status'])",
+  });
+  assert.equal(findOffenders({ root }).length, 1);
+});
+
+test('loadBaselineAtRef returns null for an unreadable or option-like ref', () => {
+  assert.equal(loadBaselineAtRef('--output=/x', process.cwd()), null);
+  assert.equal(loadBaselineAtRef('no-such-ref-xyz', process.cwd()), null);
 });

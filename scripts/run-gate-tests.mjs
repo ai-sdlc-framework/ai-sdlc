@@ -88,6 +88,13 @@ export function discoverGateTests(root, dirs = GATE_TEST_DIRS, knownRed = KNOWN_
 
 export { GATE_TEST_DIRS, KNOWN_RED };
 
+/** Strip inherited GIT_DIR & co. (2026-10-30 incident); resolved from this script, not the scanned root. */
+const GIT_ENV_PRELOAD = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'vitest.git-env.setup.mjs',
+);
+
 /** A nested `node --test` inherits NODE_TEST_CONTEXT and reports through the parent; strip it. */
 function childEnv() {
   const env = { ...process.env };
@@ -103,7 +110,7 @@ export function runGateTests(root, args = [], dirs = GATE_TEST_DIRS, knownRed = 
     return 0;
   }
   for (const f of skipped) console.log(`[run-gate-tests] SKIPPED known-red ${f}: ${knownRed[f]}`);
-  const r = spawnSync(process.execPath, ['--test', ...files], {
+  const r = spawnSync(process.execPath, ['--import', GIT_ENV_PRELOAD, '--test', ...files], {
     cwd: root,
     stdio: 'inherit',
     env: childEnv(),
