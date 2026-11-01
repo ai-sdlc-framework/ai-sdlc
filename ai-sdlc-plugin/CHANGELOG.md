@@ -5,6 +5,20 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.40.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.34.0...ai-sdlc-plugin-v0.40.0) (2026-11-01)
+
+
+### Features
+
+* drop attestation schemas v3/v4/v5, v6 only (AISDLC-1147) ([#2245](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2245)) ([c411aba](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c411abae92fc4d4bd18b4db2c208faa0649ba701))
+* **pipeline-cli:** transcript recall digest embedded in handoff (AISDLC-1132) ([#2204](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2204)) ([86f27d6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/86f27d6494a044a1eb861d6e2dc80027f6935bd1))
+* release PR bumps plugin runtime pins; delete pin-sync job (AISDLC-1142) ([#2244](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2244)) ([75401e5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/75401e5fec606c631356b353c607a82608ae70d0))
+
+
+### Bug Fixes
+
+* **plugin:** resync standing-rules block after DEC-0167 fixture removal (AISDLC-1145) ([#2237](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2237)) ([e874ba3](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e874ba380f9a5e0ca4552bc6e9daf18ed9abbadc))
+
 ## [0.34.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.33.0...ai-sdlc-plugin-v0.34.0) (2026-10-31)
 
 
