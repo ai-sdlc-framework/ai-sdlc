@@ -12,6 +12,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { removeFixtureDir } from './remove-fixture-dir.js';
 import { rmSync } from 'node:fs';
 
+// Never derive an "outside" path from process.cwd(): the checkout may live under tmpdir().
+const OUTSIDE = dirname(realpathSync(tmpdir()));
+
 const cleanup: string[] = [];
 afterEach(() => {
   for (const d of cleanup.splice(0)) rmSync(d, { recursive: true, force: true });
@@ -26,7 +29,7 @@ describe('removeFixtureDir', () => {
   });
 
   it('refuses a path outside tmpdir and deletes nothing', () => {
-    const outside = process.cwd();
+    const outside = OUTSIDE;
     expect(() => removeFixtureDir(outside)).toThrow(/refusing/);
     expect(existsSync(outside)).toBe(true);
   });
@@ -46,9 +49,9 @@ describe('removeFixtureDir', () => {
     const d = mkdtempSync(join(tmpdir(), 'rfd-'));
     cleanup.push(d);
     const link = join(d, 'link');
-    symlinkSync(process.cwd(), link);
+    symlinkSync(OUTSIDE, link);
     expect(() => removeFixtureDir(link)).toThrow(/refusing/);
-    expect(existsSync(process.cwd())).toBe(true);
+    expect(existsSync(OUTSIDE)).toBe(true);
   });
 
   it('removes through a symlink that resolves inside tmpdir', () => {
@@ -67,7 +70,7 @@ describe('removeFixtureDir', () => {
   });
 
   it('refuses a nonexistent path outside tmpdir', () => {
-    expect(() => removeFixtureDir(join(process.cwd(), 'rfd-does-not-exist'))).toThrow(/refusing/);
+    expect(() => removeFixtureDir(join(OUTSIDE, 'rfd-does-not-exist'))).toThrow(/refusing/);
   });
 
   it('refuses an empty path', () => {
