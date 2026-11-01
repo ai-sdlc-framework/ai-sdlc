@@ -141,6 +141,13 @@ cli-hierarchy up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
 | `--node <version>`       | Node version every session runs under (default: the version in `.nvmrc`).    |
 | `--rebuild`              | Rebuild a stale or missing `pipeline-cli` build, then launch (see below).    |
 
+**Launch directory (AISDLC-664.6).** Run `up` from the repository root or one of its
+worktrees; from anywhere else it refuses and names the directory. Every window starts with its
+working directory at the root and `CLAUDE_PROJECT_DIR` set to it, because the governance hook
+resolves policy from that variable and a session launched elsewhere fails closed to
+`allowForcePush: never`. `up` prints the resolved `allowForcePush` and `operational` values
+first, and warns when `allowForcePush` is `never`.
+
 **Stale build refusal (AISDLC-988).** In the ai-sdlc monorepo `up` first runs
 `resolve-pipeline-cli.sh --strict` (also `AI_SDLC_RESOLVE_STRICT=1`). When the repo's own
 `pipeline-cli/dist` is missing or older than its sources, `up` exits non-zero and prints
