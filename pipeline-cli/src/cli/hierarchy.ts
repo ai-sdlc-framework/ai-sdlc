@@ -57,6 +57,7 @@
  */
 
 import { fetchClosedUnmergedPrs } from '../kpi/closed-unmerged.js';
+import { executorCap } from '../hierarchy/executor-cap.js';
 import { parseQuota, parseQuotaFloor } from '../hierarchy/gh-calls.js';
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
@@ -1194,11 +1195,8 @@ export async function runHierarchyCli(
                     await hierarchySpawn({ taskId }, deps);
                   },
                   reapOrphans: () => reapOrphanExecutorSessions(deps),
-                  // Config ceiling and budget pacer arrive with AISDLC-1076.
-                  cap: () => {
-                    const n = Number(deps.env.AI_SDLC_EXECUTORS_MAX);
-                    return Number.isInteger(n) && n > 0 ? n : 3;
-                  },
+                  // AISDLC-1076: min(executors.max, budget pacer allowance), read every tick.
+                  cap: () => executorCap(deps.boardDir, deps.now().getTime(), deps.env).cap,
                 },
               }),
           // AISDLC-1122: every tick ingests what is new; detached, so the tick never waits.

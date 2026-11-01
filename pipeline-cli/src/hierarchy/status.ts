@@ -45,6 +45,7 @@ import { listWindows, paneInfo, paneStartCommand, sessionAttached } from './tmux
 import { contextWarning, formatContext, sessionContextTokens } from './context-size.js';
 import { readOpenDrainStall, type DrainStallRecord } from './drain-stall.js';
 import { budgetStatus, formatBudget, type BudgetStatus } from './budget.js';
+import { executorCap, formatExecutorCap, type ExecutorCap } from './executor-cap.js';
 import { resolveThresholds } from './thresholds.js';
 import type { HierarchyDeps, HierarchyRole, RosterEntry } from './types.js';
 
@@ -96,6 +97,8 @@ export interface StatusResult {
   contextThresholds?: Record<HierarchyRole, number>;
   /** Token budget pace from `usage.json` (AISDLC-1072); absent when never sampled. */
   budget?: BudgetStatus;
+  /** Spawn cap: min of executors.max and the pacer allowance (AISDLC-1076). */
+  executorCap?: ExecutorCap;
   /** Dispatchable tasks on no brief and not on the board (AISDLC-930); absent when none. */
   unbriefed?: string[];
   /** Tasks parked in `blocked/` with the reason (AISDLC-1043); absent when none. */
@@ -167,6 +170,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
   } catch {
     /* an unreadable usage file must not break status */
   }
+  const capNow = executorCap(deps.boardDir, deps.now().getTime(), deps.env, budgetNow);
   const rows = roster.sessions.map((entry): StatusRow => {
     const live =
       registry.find((r) => r.name === entry.name) ??
@@ -289,6 +293,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     ...(lastTick ? { lastTick } : {}),
     contextThresholds: thresholdsByRole,
     ...(budgetNow ? { budget: budgetNow } : {}),
+    executorCap: capNow,
     ...(unbriefed.length > 0 ? { unbriefed } : {}),
     ...(blocked.length > 0 ? { blocked } : {}),
   };
@@ -319,7 +324,10 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
         `context clear thresholds (tokens): planner ${t.planner}, operator-dispatch ${t['operator-dispatch']}, executor ${t.executor}`,
       ]
     : [];
-  const budgetLine = result.budget ? [formatBudget(result.budget)] : [];
+  const budgetLine = [
+    ...(result.budget ? [formatBudget(result.budget)] : []),
+    ...(result.executorCap ? [formatExecutorCap(result.executorCap)] : []),
+  ];
   const unbriefed = result.unbriefed?.length
     ? [
         `unbriefed (dispatchable, on no brief, not on the board): ${result.unbriefed.join(', ')}; write a brief with \`cli-hierarchy brief --tasks <id,...>\``,
