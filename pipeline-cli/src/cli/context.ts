@@ -28,6 +28,7 @@ import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { now } from '../clock.js';
 import { loadKnowledgeConfig } from '../knowledge/config.js';
+import { captureFact, exportableEntries } from '../knowledge/data-room.js';
 import { checkKnowledgeScope, checkKnowledgeScopeRange } from '../knowledge/scope-check.js';
 import { INGEST_SOURCES, ingestSource, type IngestSource } from '../knowledge/ingest-sources.js';
 import { ingestMemoryForProject } from '../knowledge/ingest-memory.js';
@@ -455,6 +456,44 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           process.stderr.write(`error: entry '${String(args.id)}' not found\n`);
           process.exitCode = 1;
         } else process.stdout.write(`confidence ${next}\n`);
+      },
+    )
+    .command(
+      'capture <id>',
+      'Capture a fact from a data-room document as a protected entry with a citation',
+      (y) =>
+        y
+          .positional('id', { type: 'string', demandOption: true })
+          .option('value', { type: 'string', demandOption: true })
+          .option('source-doc', { type: 'string', demandOption: true })
+          .option('observed', { type: 'string', default: now().toISOString().slice(0, 10) }),
+      (args) => {
+        const projectDir = String(args['project-dir']);
+        const config = loadKnowledgeConfig(projectDir);
+        const protectedAbs = isAbsolute(config.protectedRoot)
+          ? config.protectedRoot
+          : join(projectDir, config.protectedRoot);
+        const file = captureFact(protectedAbs, {
+          id: String(args.id),
+          value: String(args.value),
+          sourceDoc: String(args['source-doc']),
+          observed: String(args.observed),
+        });
+        process.stdout.write(`captured ${file}\n`);
+      },
+    )
+    .command(
+      'export',
+      'Print entries safe to share: the protected partition is excluded by scope',
+      (y) => y,
+      (args) => {
+        const projectDir = String(args['project-dir']);
+        const config = loadKnowledgeConfig(projectDir);
+        const trackedAbs = isAbsolute(config.trackedRoot)
+          ? config.trackedRoot
+          : join(projectDir, config.trackedRoot);
+        const shared = exportableEntries(readEntries(trackedAbs));
+        process.stdout.write(`${JSON.stringify(shared, null, 2)}\n`);
       },
     )
     .demandCommand(1, 'A subcommand is required. Run with --help for the list.')

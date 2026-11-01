@@ -598,6 +598,11 @@ function enforceWriteEdit(filePath) {
     if (lexAbsPath !== realAbsPath) enforceUntrustedPath(lexAbsPath, lexHomeAbs);
   }
 
+  // AISDLC-787 (RFC-0053 OQ-7): the data-room root is read-only unless the active
+  // task's permittedExternalPaths names it, wherever it sits (inside home, in scratch
+  // space or in a sibling repository).
+  enforceDataRoomReadOnly(realAbsPath, lexAbsPath, projectAbs, lexHomeAbs, searchFrom);
+
   if (insideHome) {
     // Path is inside the agent's home — check against the hardcoded
     // never-editable floor plus the project's configured blockedPaths globs.
@@ -659,6 +664,52 @@ function enforceWriteEdit(filePath) {
         `active task's permittedExternalPaths (${allowed.join(', ')}). Next step: add the path to ` +
         `'permittedExternalPaths' in the task frontmatter, or record the need with ` +
         `'node pipeline-cli/bin/cli-decisions.mjs escalate'.`,
+    );
+  }
+}
+
+/**
+ * Read `knowledge.dataRoomRoot` from `.ai-sdlc/context.yaml` in the project root or the
+ * active worktree. Unset (or no file) returns []. Relative values resolve against the
+ * directory holding the config file.
+ */
+function loadDataRoomRoots(projectAbs, homeAbs) {
+  const roots = [];
+  for (const base of new Set([projectAbs, homeAbs])) {
+    let text;
+    try {
+      text = readFileSync(join(base, '.ai-sdlc', 'context.yaml'), 'utf-8');
+    } catch {
+      continue;
+    }
+    const block = text.match(/^knowledge:[ \t]*\r?\n((?:[ \t]+.*\r?\n?|[ \t]*\r?\n)*)/m);
+    if (!block) continue;
+    const m = block[1].match(
+      /^[ \t]+dataRoomRoot:[ \t]*(?:"([^"]+)"|'([^']+)'|([^\s#'"][^#\r\n]*?))[ \t]*(?:#.*)?\r?$/m,
+    );
+    const value = m && (m[1] || m[2] || m[3]);
+    if (value) roots.push(resolve(base, value.trim()));
+  }
+  return roots;
+}
+
+function enforceDataRoomReadOnly(realAbsPath, lexAbsPath, projectAbs, homeAbs, searchFrom) {
+  const roots = loadDataRoomRoots(projectAbs, homeAbs);
+  if (roots.length === 0) return;
+  const under = (p, r) => p === r || p.startsWith(r + sep);
+  for (const root of roots) {
+    const rootReal = realpathOrDeny(root);
+    if (!(under(realAbsPath, rootReal) || under(lexAbsPath, root))) continue;
+    const allowed = loadPermittedExternalPaths(projectAbs, searchFrom);
+    for (const ext of allowed) {
+      const extAbs = realpathOrDeny(resolve(projectAbs, ext));
+      // Only an entry covering the whole data-room root or the target counts.
+      if (under(realAbsPath, extAbs)) return;
+    }
+    deny(
+      `path '${realAbsPath}' is under the read-only data-room root (knowledge.dataRoomRoot). ` +
+        `Next step: capture facts as protected entries in the protected knowledge root with a citation, ` +
+        `or add the path to 'permittedExternalPaths' in the task frontmatter if the task must edit the documents.`,
     );
   }
 }

@@ -1621,3 +1621,39 @@ describe('enforce-blocked-actions: bug test-file lock (AISDLC-939)', () => {
     assert.match(r.stderr, /AI_SDLC_SKIP_TEST_LOCK=1/);
   });
 });
+
+describe('data-room read-only root (AISDLC-787)', () => {
+  const roomName = 'data-room-787';
+  before(() => {
+    mkdirSync(join(tempDir, roomName), { recursive: true });
+    writeFileSync(
+      join(tempDir, '.ai-sdlc', 'context.yaml'),
+      `knowledge:\n  dataRoomRoot: ${roomName}\n`,
+    );
+    writeFileSync(
+      join(tempDir, 'backlog', 'tasks', 'aisdlc-787 - room-task.md'),
+      `---\nid: AISDLC-787\ntitle: Room task\npermittedExternalPaths:\n  - '${roomName}'\n---\n\nBody.\n`,
+    );
+  });
+  after(() => {
+    rmSync(join(tempDir, '.ai-sdlc', 'context.yaml'), { force: true });
+  });
+
+  it('denies a write under the data room without a permittedExternalPaths entry', () => {
+    const result = runHookFile('Write', join(tempDir, roomName, 'a.md'));
+    assert.ok(isDenied(result));
+    assert.match(result.output, /data-room/);
+  });
+
+  it('allows the write when the active task names the root', () => {
+    const result = runHookFile('Write', join(tempDir, roomName, 'a.md'), {
+      AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-787',
+    });
+    assert.ok(!isDenied(result));
+  });
+
+  it('does not affect paths outside the data room', () => {
+    const result = runHookFile('Write', join(tempDir, 'src', 'x.ts'));
+    assert.ok(!isDenied(result));
+  });
+});

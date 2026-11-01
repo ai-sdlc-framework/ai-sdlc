@@ -2,7 +2,7 @@
 id: AISDLC-787
 title: >-
   data-room read-only root, write denial and protected partition
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-09'
 labels:
