@@ -10,14 +10,18 @@ bounds: "tightly scoped template prompt over structured inputs; fixed output; no
 
 Companion to `/ai-sdlc execute`. Two modes:
 
-## Mode 1 — Sweep all merged worktrees (no arguments)
+## Mode 1 — Sweep leftover worktrees (no arguments)
 
-When `$ARGUMENTS` is empty, do exactly what `/ai-sdlc execute` does at start: walk `.worktrees/`, check each branch's PR status via `gh pr list`, remove any whose PR has merged. Also remove the legacy project-level `.worktrees/.active-task` sentinel if present — it's no longer written by `/ai-sdlc execute` (per-worktree sentinels replaced it in AISDLC-81) and would only ever be a leftover from a much older run. Per-worktree `.active-task` files inside each worktree directory are removed automatically when `git worktree remove` deletes the worktree.
+When `$ARGUMENTS` is empty, run the same sweep as the dispatch tick (AISDLC-1108), so the manual and the automatic path agree. A worktree is removed when its disposition is one of:
+
+- `remove-merged`: its PR is MERGED.
+- `remove-closed`: its PR is CLOSED and not merged.
+- `remove-no-pr`: the branch has no PR and the directory is older than the grace window (default 6 h).
+- `remove-stale`: the PR is OPEN but the branch head has not moved for 14 days.
+
+It keeps `keep-inflight` (task inflight on the board, or a `.active-task` sentinel younger than 24 h) and `keep-open-pr`. PR state is looked up per branch. A dirty tree does not block removal; the untracked paths are logged, `git worktree remove --force` runs with its exit code checked, and a refusal falls back to `rm -rf` plus `git worktree prune`. **Branches are never deleted**, locally or on origin: only the worktree directory goes, and a resume recreates it from the branch. Also remove the legacy project-level `.worktrees/.active-task` sentinel if present (superseded by per-worktree sentinels in AISDLC-81).
 
 ```bash
-# Clear the legacy project-level sentinel if it still exists. Safe to delete:
-# /ai-sdlc execute now writes per-worktree sentinels at .worktrees/<id>/.active-task
-# instead of the project-level path.
 rm -f .worktrees/.active-task
 
 if [ ! -d .worktrees ]; then
@@ -25,23 +29,16 @@ if [ ! -d .worktrees ]; then
   exit 0
 fi
 
-REMOVED=0
-for wt in .worktrees/*/; do
-  [ -d "$wt" ] || continue
-  WT_BRANCH=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)
-  [ -z "$WT_BRANCH" ] && continue
-  [ "$WT_BRANCH" = "HEAD" ] && continue
-  MERGED_AT=$(gh pr list --head "$WT_BRANCH" --state merged --json mergedAt --jq '.[0].mergedAt' 2>/dev/null)
-  if [ -n "$MERGED_AT" ] && [ "$MERGED_AT" != "null" ]; then
-    echo "Removing $wt (branch $WT_BRANCH merged at $MERGED_AT)"
-    # The per-worktree .active-task sentinel (if any) is removed atomically
-    # with the worktree itself.
-    git worktree remove --force "$wt" 2>/dev/null || true
-    REMOVED=$((REMOVED + 1))
+PLUGIN_SCRIPTS_DIR="${CLAUDE_PLUGIN_DIR:-${CLAUDE_PLUGIN_ROOT:-$(pwd)/ai-sdlc-plugin}}/scripts"
+if [ -z "${PIPELINE_CLI_BIN:-}" ]; then
+  if [ -f "$PLUGIN_SCRIPTS_DIR/resolve-pipeline-cli.sh" ]; then
+    PIPELINE_CLI_BIN=$(bash "$PLUGIN_SCRIPTS_DIR/resolve-pipeline-cli.sh") || { echo "ERROR: @ai-sdlc/pipeline-cli not found; export PIPELINE_CLI_BIN=/path/to/pipeline-cli/bin" >&2; exit 1; }
+  else
+    PIPELINE_CLI_BIN="$(pwd)/pipeline-cli/bin"
   fi
-done
-echo "Swept $REMOVED merged worktree(s)."
-
+fi
+# Optional preview: node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" sweep-worktrees --dry-run
+node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" sweep-worktrees
 ```
 
 ## Mode 2 — Force-remove a specific task's worktree
