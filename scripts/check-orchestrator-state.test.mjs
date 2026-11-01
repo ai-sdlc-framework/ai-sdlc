@@ -6,7 +6,15 @@
 
 import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  readFileSync,
+  readdirSync,
+} from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -39,6 +47,13 @@ function setupRepoPair() {
   sh(`git -C "${local}" push -q -u origin main`);
 
   return { root, remote, local };
+}
+
+function readEscalations(local) {
+  const dir = join(local, '.ai-sdlc/_decisions/events');
+  return readdirSync(dir)
+    .map((f) => readFileSync(join(dir, f), 'utf8'))
+    .join('\n');
 }
 
 function runScript(cwd, env = {}) {
@@ -83,6 +98,33 @@ describe('check-orchestrator-state.sh', () => {
     assert.equal(r.status, 0, `stderr: ${r.stderr}`);
     assert.match(r.stdout, /core\.bare=true detected; auto-correcting/);
     assert.equal(sh(`git -C "${env.local}" config --get core.bare`), 'false');
+  });
+
+  it('[AISDLC-1129] records a parent-checkout escalation on a core.bare correction', () => {
+    sh(`git -C "${env.local}" config core.bare true`);
+    const r = runScript(env.local);
+    assert.equal(r.status, 0, `stderr: ${r.stderr}`);
+    assert.match(r.stdout, /recorded parent-checkout escalation \(core\.bare=true corrected\)/);
+    const log = readEscalations(env.local);
+    assert.match(log, /parent-checkout/);
+    assert.match(log, /Parent HEAD before: [0-9a-f]+\. After: [0-9a-f]+/);
+    assert.match(log, /likely cause/);
+  });
+
+  it('[AISDLC-1129] records a parent-checkout escalation on an off-main recovery', () => {
+    sh(`git -C "${env.local}" checkout -q -b feature/leak`);
+    const r = runScript(env.local);
+    assert.equal(r.status, 0, `stderr: ${r.stderr}`);
+    assert.match(r.stdout, /recorded parent-checkout escalation \(off-main recovery/);
+    const log = readEscalations(env.local);
+    assert.match(log, /parent-checkout/);
+    assert.match(log, /feature\/leak/);
+  });
+
+  it('[AISDLC-1129] writes no escalation when the parent is healthy', () => {
+    const r = runScript(env.local);
+    assert.equal(r.status, 0, `stderr: ${r.stderr}`);
+    assert.ok(!existsSync(join(env.local, '.ai-sdlc/_decisions')));
   });
 
   it('updates refs/heads/main when origin/main has moved', () => {

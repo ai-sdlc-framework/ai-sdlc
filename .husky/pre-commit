@@ -8,6 +8,10 @@ if [ -n "$STAGED" ] && ! echo "$STAGED" | grep -qvE '^\.ai-sdlc/attestations/[a-
   exit 0
 fi
 
+# INCIDENT 2026-10-30 (AISDLC-1129): drop the repo-pointing git env before any child runs.
+# GIT_INDEX_FILE is kept here: lint-staged needs it for partial commits.
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_PREFIX
+
 # AISDLC-727: backlog filenames must be ASCII (AISDLC-92). Was documented as enforced but
 # never called from any hook; it only inspects staged backlog filenames, so it is instant.
 ./scripts/check-backlog-ascii.sh

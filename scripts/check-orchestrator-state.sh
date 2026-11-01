@@ -31,6 +31,10 @@
 #      by that commit and `git read-tree -u -m <match> HEAD` loses nothing. Otherwise
 #      the existing refuse/warn behaviour stays.
 #
+# AISDLC-1129: every core.bare correction and off-main recovery is also recorded as a
+# Decision Catalog escalation (scope `parent-checkout`) naming the parent HEAD before and
+# after and the last reflog entry, so the flip is an incident signal, not a silent self-heal.
+#
 # Skip with: AI_SDLC_SKIP_ORCHESTRATOR_STATE_CHECK=1
 
 set -euo pipefail
@@ -58,6 +62,40 @@ fi
 
 PARENT_ROOT=$(dirname "$GIT_COMMON_DIR_ABS")
 cd "$PARENT_ROOT"
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+# AISDLC-1129: record a parent-checkout self-heal as a catalog escalation. Never fails the
+# check: the repair already happened, this only makes it visible to the tick.
+# Args: kind, head-before, head-after.
+record_parent_escalation() {
+  local kind="$1" before="$2" after="$3" cause cli
+  cause=$(git reflog -n 1 --format='%gs' HEAD 2>/dev/null | head -1 || true)
+  [ -z "$cause" ] && cause="unknown (empty reflog)"
+  cli=""
+  for cand in "${SCRIPT_DIR}/../pipeline-cli/bin/cli-decisions.mjs" "${PARENT_ROOT}/pipeline-cli/bin/cli-decisions.mjs"; do
+    if [ -f "$cand" ]; then cli="$cand"; break; fi
+  done
+  if [ -z "$cli" ]; then
+    echo "[orchestrator-state] WARN: cannot record escalation (decisions CLI missing)"
+    return 0
+  fi
+  if node "$cli" escalate \
+    --work-dir "$PARENT_ROOT" \
+    --task-id "${AI_SDLC_ACTIVE_TASK_ID:-parent-checkout}" \
+    --source-worktree "$PARENT_ROOT" \
+    --scope parent-checkout \
+    --summary "Parent checkout self-healed: ${kind} (HEAD ${before} -> ${after})" \
+    --body "check-orchestrator-state.sh corrected the parent checkout (${kind}). Parent HEAD before: ${before}. After: ${after}. Last reflog entry (likely cause): ${cause}. This is the GIT_DIR leak class of the 2026-10-30 incident: find the command that ran git against the parent." \
+    --option "investigate:find the command that caused the flip" \
+    --option "ack:known cause, no action" \
+    --exit-code 0 >/dev/null 2>&1; then
+    echo "[orchestrator-state] recorded parent-checkout escalation (${kind})"
+  else
+    echo "[orchestrator-state] WARN: failed to record parent-checkout escalation (${kind})"
+  fi
+  return 0
+}
 
 # AISDLC-363: skip the orchestrator state check when running inside a GH
 # merge-queue read-only probe branch or a shallow CI clone. These run BEFORE
@@ -97,6 +135,7 @@ elif [ "$CURRENT_BRANCH" != "main" ]; then
   else
     # Clean tree — auto-recover: checkout main + reset to origin/main.
     echo "[orchestrator-state] auto-recovering parent from '${CURRENT_BRANCH}' to main"
+    HEAD_BEFORE=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
     if ! git checkout main; then
       echo "[orchestrator-state] ERROR: git checkout main failed in ${PARENT_ROOT}" >&2
       exit 1
@@ -106,6 +145,7 @@ elif [ "$CURRENT_BRANCH" != "main" ]; then
       exit 1
     fi
     echo "[orchestrator-state] auto-recovered parent from '${CURRENT_BRANCH}' to main at $(git rev-parse --short HEAD)"
+    record_parent_escalation "off-main recovery from '${CURRENT_BRANCH}'" "$HEAD_BEFORE" "$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
     exit 0
   fi
 fi
@@ -115,10 +155,12 @@ fi
 BARE=$(git config --get core.bare 2>/dev/null || echo "false")
 if [ "$BARE" = "true" ]; then
   echo "[orchestrator-state] WARN: core.bare=true detected; auto-correcting to false"
+  HEAD_BEFORE=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
   git config core.bare false
   # When transitioning from bare→non-bare, we also need HEAD pointing at main
   # so the working tree can be materialized.
   git symbolic-ref HEAD refs/heads/main 2>/dev/null || true
+  record_parent_escalation "core.bare=true corrected" "$HEAD_BEFORE" "$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 fi
 
 # 2. Fetch latest main + update the local main ref. update-ref is atomic;

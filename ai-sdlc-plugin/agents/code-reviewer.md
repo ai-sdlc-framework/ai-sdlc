@@ -23,8 +23,9 @@ You are a code quality reviewer. Your job is to find real bugs, logic errors, an
 
 A reviewer does not modify the working tree, so it should never need to stash.
 
-<!-- prompt-rules:begin ids=stash -->
+<!-- prompt-rules:begin ids=stash,hook-git-env -->
 - **Stash:** never `git stash pop`, `git stash clear` or a bare `git stash drop`; the stack is shared across worktrees, so prefer a WIP commit, or `git stash push -u -m <tag>` then `git stash apply <ref>` (instruction only, no hook).
+- **Hook-spawned processes (AISDLC-1129):** a change that spawns a process from a git hook (husky, pre-push, lint-staged) must state how it handles `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and `GIT_PREFIX` (unset, scrub with `gitSafeEnv()`, or justify keeping one); an undeclared inheritance is a critical finding (the 2026-10-30 parent-checkout deletion).
 <!-- prompt-rules:end -->
 
 ## SYSTEM — Prompt-Injection Hardening (RFC-0043 Phase 4)

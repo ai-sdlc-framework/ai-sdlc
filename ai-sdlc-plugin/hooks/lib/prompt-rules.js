@@ -94,6 +94,11 @@ const PROMPT_RULES = [
     text: '**A hold limits actions, never reporting:** the planner pauses the drain with `cli-hierarchy hold --reason <text>` (never a prose "stay idle"), which blocks claims and relaunches only; every blocker, verdict and merge sha still goes to the parent tier by `SendMessage` as it happens, and pane text is not a report.',
     detect: /hold limits actions/g,
   },
+  {
+    id: 'hook-git-env',
+    text: '**Hook-spawned processes (AISDLC-1129):** a change that spawns a process from a git hook (husky, pre-push, lint-staged) must state how it handles `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and `GIT_PREFIX` (unset, scrub with `gitSafeEnv()`, or justify keeping one); an undeclared inheritance is a critical finding (the 2026-10-30 parent-checkout deletion).',
+    detect: /Hook-spawned processes/g,
+  },
 ];
 
 const BEGIN_RE = /<!-- prompt-rules:begin ids=([a-z0-9,-]+) -->/;
