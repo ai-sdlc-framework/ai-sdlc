@@ -3,7 +3,7 @@ id: AISDLC-664.6
 title: >-
   RFC-0051 follow-up: cli-hierarchy up requires the repo root, sets
   CLAUDE_PROJECT_DIR per window, preflights policy
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-01'
 updated_date: '2026-10-16 18:29'
