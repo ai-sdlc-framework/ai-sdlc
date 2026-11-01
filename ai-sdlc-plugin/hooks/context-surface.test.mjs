@@ -59,7 +59,7 @@ const INPUTS = {
   taskClaim: { prompt: 'implement AISDLC-779' },
   userPrompt: { prompt: 'what governs trusted-policy.js?' },
   toolTouch: { tool_input: { file_path: '.ai-sdlc/trusted-policy.js' } },
-  compaction: { summary: 'we were editing the hooks' },
+  compaction: { source: 'compact', summary: 'we were editing the hooks' },
 };
 
 describe('manifests', () => {
@@ -80,6 +80,7 @@ describe('manifests', () => {
       const cmds = (ev) => JSON.stringify(hooks[ev]);
       assert.match(cmds('UserPromptSubmit'), /context-surface\.sh\\" userPrompt/);
       assert.match(cmds('PreCompact'), /context-surface\.sh\\" compaction/);
+      assert.match(cmds('SessionStart'), /context-surface\.sh\\" compaction/);
       assert.match(cmds('SubagentStart'), /subagent-start\.sh/);
       assert.match(cmds('SessionStart'), /session-start\.sh/);
     });
@@ -161,11 +162,32 @@ describe('fail-open', () => {
 });
 
 describe('compaction', () => {
-  it('re-runs retrieval against the compaction summary', () => {
+  it('re-runs retrieval against the summary read from the transcript on SessionStart(compact)', () => {
     rmSync(argsLog, { force: true });
-    const res = run('compaction', { summary: 'SUMMARY-MARKER about hooks' });
+    const tp = join(dir, 'transcript.jsonl');
+    writeFileSync(
+      tp,
+      [
+        JSON.stringify({ message: { content: 'old' } }),
+        JSON.stringify({
+          isCompactSummary: true,
+          message: { content: [{ type: 'text', text: 'SUMMARY-MARKER about hooks' }] },
+        }),
+      ].join('\n'),
+    );
+    const res = run('compaction', { source: 'compact', transcript_path: tp });
     assert.match(readFileSync(argsLog, 'utf-8'), /SUMMARY-MARKER/);
-    assert.equal(JSON.parse(res.stdout).hookSpecificOutput.hookEventName, 'PreCompact');
+    assert.equal(JSON.parse(res.stdout).hookSpecificOutput.hookEventName, 'SessionStart');
+  });
+
+  it('injects nothing on PreCompact or a non-compact SessionStart', () => {
+    assert.equal(run('compaction', { custom_instructions: 'x' }).stdout.trim(), '');
+    assert.equal(run('compaction', { source: 'startup', summary: 'x' }).stdout.trim(), '');
+  });
+
+  it('session-start retrieval yields to compaction after a compact', () => {
+    assert.equal(run('sessionStart', { source: 'compact' }).stdout.trim(), '');
+    assert.notEqual(run('sessionStart', { source: 'startup' }).stdout.trim(), '');
   });
 });
 

@@ -19,7 +19,9 @@ const HOOK_EVENT = {
   taskClaim: 'SubagentStart',
   userPrompt: 'UserPromptSubmit',
   toolTouch: 'PreToolUse',
-  compaction: 'PreCompact',
+  // PreCompact cannot inject context and fires before the summary exists; the retrieval runs on the
+  // post-compaction SessionStart (source=compact), where the summary is in the transcript.
+  compaction: 'SessionStart',
 };
 const DEFAULT_BUDGET = {
   sessionStart: 1000,
@@ -123,6 +125,25 @@ function loadProfile(projectDir, role) {
   return profiles[role] || null;
 }
 
+/** Text of the newest compaction summary entry in the session transcript, or ''. */
+function readCompactSummary(transcriptPath) {
+  try {
+    if (!transcriptPath || !existsSync(transcriptPath)) return '';
+    const lines = readFileSync(transcriptPath, 'utf-8').split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!lines[i].includes('isCompactSummary')) continue;
+      const entry = JSON.parse(lines[i]);
+      if (!entry.isCompactSummary) continue;
+      const c = entry.message && entry.message.content;
+      if (typeof c === 'string') return c;
+      if (Array.isArray(c)) return c.map((b) => (b && b.text) || '').join('\n');
+    }
+  } catch {
+    // fall through
+  }
+  return '';
+}
+
 function extractKey(moment, input, env, projectDir) {
   const ti = input.tool_input || {};
   switch (moment) {
@@ -133,7 +154,7 @@ function extractKey(moment, input, env, projectDir) {
     case 'taskClaim':
       return String(input.prompt || input.description || env.AI_SDLC_ACTIVE_TASK_ID || '');
     case 'compaction':
-      return String(input.summary || input.custom_instructions || '');
+      return String(input.summary || readCompactSummary(input.transcript_path) || '');
     default:
       return [env.AI_SDLC_ACTIVE_TASK_ID, basename(projectDir)].filter(Boolean).join(' ');
   }
@@ -163,6 +184,15 @@ function surface(moment, input, env, projectDir, spawn = spawnSync) {
   try {
     const profile = loadProfile(projectDir, resolveRole(env));
     if (!profile || !Array.isArray(profile.moments) || !profile.moments.includes(moment))
+      return null;
+    // Compaction runs on the post-compaction SessionStart only; PreCompact cannot inject context.
+    if (moment === 'compaction' && input.source !== 'compact') return null;
+    // After a compaction the compaction retrieval replaces the plain session-start one.
+    if (
+      moment === 'sessionStart' &&
+      input.source === 'compact' &&
+      profile.moments.includes('compaction')
+    )
       return null;
     const key = extractKey(moment, input, env, projectDir).trim();
     if (!key) return null;
