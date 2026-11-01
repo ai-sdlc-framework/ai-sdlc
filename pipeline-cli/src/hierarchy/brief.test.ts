@@ -53,6 +53,7 @@ function task(
   opts: {
     deps?: string[];
     refs?: string[];
+    creates?: string[];
     dispatchable?: boolean;
     status?: string;
     priority?: string;
@@ -69,6 +70,7 @@ function task(
     ...(opts.deps ?? []).map((d) => `  - ${d}`),
     'references:',
     ...(opts.refs ?? []).map((r) => `  - ${r}`),
+    ...(opts.creates ? ['creates:', ...opts.creates.map((r) => `  - ${r}`)] : []),
     ...(opts.dispatchable === false ? ['dispatchable: false'] : []),
     '---',
     '',
@@ -191,6 +193,15 @@ describe('sequence groups', () => {
     expect(group['DEMO-6']).toBe('events');
     expect(group['DEMO-3']).toBe('shared.ts');
     expect(group['DEMO-4']).toBe('shared.ts');
+  });
+
+  it('treats a creates: deliverable as a reference for sequencing', () => {
+    task('tasks', 'CR-1', { refs: ['x/new-file.ts'] });
+    task('tasks', 'CR-2', { creates: ['x/new-file.ts'] });
+    const { plan } = brief({ tasks: 'CR-1,CR-2' });
+    const g = Object.fromEntries(plan.entries.map((e) => [e.task, e.sequenceGroup]));
+    expect(g['CR-1']).toBe('new-file.ts');
+    expect(g['CR-2']).toBe('new-file.ts');
   });
 
   it('prefers a fixed name over a more widely shared file and notes the overlap', () => {

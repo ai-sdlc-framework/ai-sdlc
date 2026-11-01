@@ -379,6 +379,7 @@ export function buildTaskContent(opts: TaskCreateOptions): string {
  * Matches the quoting logic in `backlog-frontmatter.ts` for consistency.
  */
 function formatYamlString(value: string): string {
+  if (/[\r\n]/.test(value)) return JSON.stringify(value);
   if (needsQuoting(value)) {
     const escaped = value.replace(/'/g, "''");
     return `'${escaped}'`;

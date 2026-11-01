@@ -130,7 +130,7 @@ export function runStageA(opts: StageAOptions): StageAResult {
     });
   }
 
-  const references = task.references ?? [];
+  const references = [...(task.references ?? []), ...(task.creates ?? [])];
 
   // Coverage requirement — read .codecov.yml once.
   const codecovPath = join(opts.workDir, 'codecov.yml');

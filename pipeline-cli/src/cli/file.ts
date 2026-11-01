@@ -63,7 +63,8 @@ function realExec(cmd: string, args: string[], cwd: string): ExecResult {
 
 /**
  * AISDLC-1148: refuse only on `severity == "error"` issues, like the CI gate.
- * The tool exits 1 on warnings and info too; an unreadable report refuses.
+ * The tool exits 1 on warnings and info too. An unparseable report refuses only
+ * on a non-zero exit; an unparseable report with exit 0 does not refuse.
  */
 export function driftRefusal(r: ExecResult): string | null {
   let report: unknown;
