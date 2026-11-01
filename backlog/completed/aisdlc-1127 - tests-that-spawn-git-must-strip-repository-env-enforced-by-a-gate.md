@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1127
 title: 'Tests that spawn git must strip the repository environment, enforced by a gate (incident 2026-10-30 follow-up)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-31'
 labels:

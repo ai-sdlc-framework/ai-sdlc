@@ -128,7 +128,7 @@ jobs:
           # which aborted on the first failing file and silenced the rest — so a
           # red main caused by a later file was misreported as the first file's
           # failure. The glob also auto-includes any future workflow test files.
-          node --test .github/workflows/__tests__/*.test.mjs
+          node --import ./vitest.git-env.setup.mjs --test .github/workflows/__tests__/*.test.mjs
 
       # AISDLC-549: `pnpm -r test` runs only workspace-member `test` scripts; the
       # plugin's `node --test` doc-contract suites (agents/commands/hooks/scripts)
@@ -247,7 +247,7 @@ jobs:
       - name: Gate - patch-id exclusions parity
         id: gate-patch-id
         continue-on-error: true
-        run: node --test scripts/check-attestation-sign.test.mjs
+        run: node --import ./vitest.git-env.setup.mjs --test scripts/check-attestation-sign.test.mjs
 
       - name: Determine gate outcome
         run: |

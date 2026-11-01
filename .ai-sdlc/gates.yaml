@@ -227,6 +227,12 @@ gates:
     owner: engineering
     property: no module without a non-test importer
     baseline: true
+  - id: test-chain:pnpm git-env-hygiene:check
+    surface: test-chain
+    origin: AISDLC-1127
+    owner: engineering
+    property: tests that spawn git strip the repository environment
+    baseline: true
   - id: test-chain:pnpm lint:publishable
     surface: test-chain
     origin: AISDLC-846, AISDLC-97

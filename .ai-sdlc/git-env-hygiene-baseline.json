@@ -1,0 +1,4 @@
+{
+  "$comment": "Git-env hygiene baseline (AISDLC-1127). Test files that spawn git without a makeGitEnv() env and are not covered by the vitest setup or the node --test preload. Shrink-only: growth relative to the base ref fails the gate.",
+  "offenders": []
+}
