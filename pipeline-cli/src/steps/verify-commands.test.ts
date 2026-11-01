@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { acquireVerifySlot, listVerifySlots } from '../runtime/verify-slots.js';
 import { FakeRunner, fail, ok } from '../__test-helpers/fake-runner.js';
 import {
   claimedGreenButRed,
@@ -87,5 +88,60 @@ describe('runVerifyCommands', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('verify slots (AISDLC-1087)', () => {
+  it('limits to two concurrent runs and caps workers for the second', async () => {
+    const board = mkdtempSync(join(tmpdir(), 'verify-slots-'));
+    let active = 0;
+    let peak = 0;
+    const workers: (string | undefined)[] = [];
+    const runner = async (_c: string, _a: string[], o?: { env?: NodeJS.ProcessEnv }) => {
+      active++;
+      peak = Math.max(peak, active);
+      workers.push(o?.env?.AI_SDLC_VITEST_MAX_WORKERS);
+      await new Promise((r) => setTimeout(r, 40));
+      active--;
+      return { stdout: 'ok', stderr: '', code: 0 };
+    };
+    const call = () =>
+      runVerifyCommands({
+        commands: ['pnpm test'],
+        cwd: '/x',
+        runner,
+        boardDir: board,
+        slotDeps: { pollMs: 5 },
+      });
+    const runs = await Promise.all([call(), call(), call()]);
+    expect(runs.every((r) => r.ok)).toBe(true);
+    expect(peak).toBe(2);
+    expect(workers.slice(0, 2)).toEqual(['4', '2']);
+    expect(listVerifySlots(board)).toEqual([]);
+    rmSync(board, { recursive: true, force: true });
+  });
+
+  it('reclaims a dead holder and leaves a live one', async () => {
+    const board = mkdtempSync(join(tmpdir(), 'verify-slots-'));
+    const dir = join(board, 'verify-slots');
+    for (const [i, pid] of [
+      [0, 111],
+      [1, 222],
+    ] as const) {
+      mkdirSync(join(dir, `slot-${i}`), { recursive: true });
+      writeFileSync(join(dir, `slot-${i}`, 'pid'), String(pid));
+    }
+    const slot = await acquireVerifySlot(board, {
+      pid: 333,
+      isAlive: (p) => p === 222 || p === 333,
+      pollMs: 1,
+    });
+    expect(slot.index).toBe(0);
+    expect(readFileSync(join(dir, 'slot-0', 'pid'), 'utf8')).toBe('333');
+    expect(readFileSync(join(dir, 'slot-1', 'pid'), 'utf8')).toBe('222');
+    expect(slot.workers).toBe(2);
+    slot.release();
+    expect(listVerifySlots(board, () => true).map((s) => s.index)).toEqual([1]);
+    rmSync(board, { recursive: true, force: true });
   });
 });

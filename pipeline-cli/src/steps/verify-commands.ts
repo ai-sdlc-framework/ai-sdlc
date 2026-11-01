@@ -12,6 +12,11 @@ import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { now } from '../clock.js';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
+import {
+  acquireVerifySlot,
+  type VerifySlot,
+  type VerifySlotDeps,
+} from '../runtime/verify-slots.js';
 import { DEFAULT_VERIFY_COMMANDS } from './verify-defaults.js';
 import type { DeveloperReturn, VerificationStatus } from '../types.js';
 
@@ -82,6 +87,9 @@ export interface RunVerifyOptions {
   runner?: Runner;
   timeoutMs?: number;
   developerClaimed?: DeveloperReturn['verifications'];
+  /** Board directory holding the shared verify slots; omitted = no cross-run limiting. */
+  boardDir?: string;
+  slotDeps?: VerifySlotDeps;
 }
 
 /** Run every command in order, stopping at the first failure. */
@@ -98,10 +106,39 @@ export async function runVerifyCommands(opts: RunVerifyOptions): Promise<VerifyR
   if (opts.commands.length === 0) {
     return { ok: true, skipped: 'docs-only', results: [], verifications, ...base };
   }
+  let slot: VerifySlot | undefined;
+  if (opts.boardDir) {
+    try {
+      slot = await acquireVerifySlot(opts.boardDir, opts.slotDeps);
+    } catch {
+      // best effort: an unwritable board runs unlimited rather than blocking the gate
+    }
+  }
+  try {
+    return await runAll(opts, runner, timeout, verifications, base, slot);
+  } finally {
+    slot?.release();
+  }
+}
+
+async function runAll(
+  opts: RunVerifyOptions,
+  runner: Runner,
+  timeout: number,
+  verifications: Record<VerifyKey, VerificationStatus>,
+  base: object,
+  slot: VerifySlot | undefined,
+): Promise<VerifyRunResult> {
+  const env = slot ? { AI_SDLC_VITEST_MAX_WORKERS: String(slot.workers) } : undefined;
   const results: VerifyCommandResult[] = [];
   for (const command of opts.commands) {
     const started = now().getTime();
-    const r = await runner('sh', ['-c', command], { cwd: opts.cwd, timeout, allowFailure: true });
+    const r = await runner('sh', ['-c', command], {
+      cwd: opts.cwd,
+      timeout,
+      allowFailure: true,
+      ...(env ? { env } : {}),
+    });
     const timedOut = r.code !== 0 && now().getTime() - started >= timeout;
     const tail = tailOf(`${r.stdout}${r.stderr ? '\n' + r.stderr : ''}`, VERIFY_TAIL_LINES);
     const res: VerifyCommandResult = {
