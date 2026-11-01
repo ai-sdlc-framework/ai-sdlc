@@ -1,6 +1,7 @@
 /** Glue between config, the entries on disk, the adapter registry and the session ledger. */
 import { rmSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { readDataRoomEntries } from '../data-room.js';
 import { loadKnowledgeConfig, loadRetrievalConfig } from '../config.js';
 import { harnessRecallHits } from '../ingest-memory.js';
 import { readEntries } from '../store.js';
@@ -32,6 +33,7 @@ export async function rebuildIndex(projectRoot: string, embedder?: Embedder): Pr
   const entries = [
     ...readEntries(abs(projectRoot, k.trackedRoot)),
     ...readEntries(abs(projectRoot, k.protectedRoot)),
+    ...(k.dataRoomRoot ? readDataRoomEntries(abs(projectRoot, k.dataRoomRoot)) : []),
   ].filter((e) => !e.superseded);
   const cfg = loadRetrievalConfig(projectRoot);
   const indexPath = abs(projectRoot, cfg.indexPath);

@@ -13,6 +13,8 @@ export const CONTEXT_CONFIG_PATH = '.ai-sdlc/context.yaml';
 export interface KnowledgeConfig {
   trackedRoot: string;
   protectedRoot: string;
+  /** Optional raw data-room root (RFC-0053 OQ-7), indexed read-only at scope protected. Unset by default. */
+  dataRoomRoot: string | null;
   /** Source-path prefixes that mark client / data-room material. */
   dataRoomRoots: string[];
   /** Client identifiers whose presence in an entry marks it as likely protected. */
@@ -29,6 +31,7 @@ export function loadKnowledgeConfig(projectRoot: string): KnowledgeConfig {
   const config: KnowledgeConfig = {
     trackedRoot: DEFAULT_TRACKED_ROOT,
     protectedRoot: DEFAULT_PROTECTED_ROOT,
+    dataRoomRoot: null,
     dataRoomRoots: [],
     clientIdentifiers: [],
     allowlistedCommands: {},
@@ -43,6 +46,9 @@ export function loadKnowledgeConfig(projectRoot: string): KnowledgeConfig {
   }
   if (typeof knowledge.protectedRoot === 'string' && knowledge.protectedRoot !== '') {
     config.protectedRoot = knowledge.protectedRoot;
+  }
+  if (typeof knowledge.dataRoomRoot === 'string' && knowledge.dataRoomRoot !== '') {
+    config.dataRoomRoot = knowledge.dataRoomRoot;
   }
   const classification = knowledge.classification as Record<string, unknown> | undefined;
   config.dataRoomRoots = stringList(classification?.dataRoomRoots);
