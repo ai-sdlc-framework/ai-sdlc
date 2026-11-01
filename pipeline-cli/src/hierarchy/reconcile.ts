@@ -82,6 +82,11 @@ export interface ReconcilePr extends PrFacts {
   manifestState?: 'queue' | 'inflight';
   /** AISDLC-1091: why no lane can act on this PR; the row is `unowned` and goes to the planner. */
   unownedReason?: string;
+  /**
+   * AISDLC-1139: a draft task PR with no live claim whose failed verdict records a signed
+   * attestation (every reviewer approved); only the push is missing, so the machine owns it.
+   */
+  reclaimable?: boolean;
 }
 
 export interface LandingEntry {
@@ -188,6 +193,20 @@ export function decide(
   // No lane owns it: a written reason and the planner, never a silent `none`.
   if (f.unownedReason !== undefined && !f.merged) {
     return { ...base, action: 'route-to-planner', note: `unowned: ${f.unownedReason}` };
+  }
+  if (kind === 'task' && f.reclaimable === true && f.draft === true && !f.merged) {
+    // Rewrite the manifest from the PR, then re-enter in push-only mode (AISDLC-821).
+    const action = f.manifestState === undefined ? 'rewrite-manifest' : 'push-only-reenter';
+    // The reenter already queued its manifest on this head: wait for the executor to claim
+    // it instead of re-running reenter every tick (the guard never counts repeats in a row).
+    if (
+      action === 'push-only-reenter' &&
+      record?.action === 'push-only-reenter' &&
+      record.history.at(-1)?.headSha === f.headSha
+    ) {
+      return { ...base, action: 'none' };
+    }
+    return guardSameHead({ ...base, action }, f, record, maxSameHeadActions);
   }
   if (kind === 'docs' || kind === 'decisions-sync' || kind === 'deps') {
     const checks = f.checks ?? [];
@@ -337,6 +356,8 @@ export function actionCommands(ctx: ActionContext, cliBin: string): ActionComman
       if (note === undefined) return [reenter()];
       return [dispatch('reenter', String(ctx.pr), '--developer-round', '--note', note)];
     }
+    case 'push-only-reenter':
+      return [dispatch('reenter', String(ctx.pr), '--push-only')];
     case 'land-prep':
     case 'push-only-resign':
       return [reenter()];
@@ -1183,6 +1204,7 @@ export function gatherFacts(
     const isDraft = p.isDraft === true;
     let executorDead = false;
     let approvedVerdict = false;
+    let reclaimable = false;
     if (kind === 'task' && isDraft && unownedReason === undefined) {
       // A draft whose task is done and has no live claim: the executor is gone, the machine owns it.
       const done = verdicts.some(
@@ -1191,11 +1213,24 @@ export function gatherFacts(
       if (done && !inflightManifest) {
         executorDead = true;
         approvedVerdict = true;
+      } else if (
+        !inflightManifest &&
+        verdicts.some(
+          (v) =>
+            v.taskId.toLowerCase() === taskId.toLowerCase() &&
+            v.outcome === 'failed' &&
+            typeof v.signedAt === 'string' &&
+            v.signedAt !== '',
+        )
+      ) {
+        // AISDLC-1139: the failed verdict records a signed attestation, so reviewers approved.
+        reclaimable = true;
       } else if (!onBoard) {
         unownedReason = 'draft task PR with no live manifest on the board and no done verdict';
       }
     }
     facts.push({
+      ...(reclaimable ? { reclaimable } : {}),
       ...(unownedReason === undefined ? {} : { unownedReason }),
       ...(executorDead ? { executorDead, approvedVerdict } : {}),
       ...(inflightManifest?.workerId ? { executor: inflightManifest.workerId } : {}),

@@ -1619,6 +1619,7 @@ export async function runDispatchCli(
             target,
             ...(note === undefined ? {} : { note }),
             ...(developerRound ? { developerRound: true } : {}),
+            ...(flags['push-only'] !== undefined ? { pushOnly: true } : {}),
             ...(flags['decision'] && flags['decision'] !== 'true'
               ? { decisionId: flags['decision'] }
               : {}),
