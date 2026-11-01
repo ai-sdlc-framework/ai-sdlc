@@ -2,7 +2,7 @@
 id: AISDLC-779
 title: >-
   hook wiring for the six surfacing moments
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-09'
 labels:
