@@ -38,6 +38,8 @@ function overrides(over: Partial<HierarchyDeps> = {}): Partial<HierarchyDeps> {
   };
   return {
     run,
+    resolveRoot: (c) => c,
+    loadPolicy: () => ({ forcePushMode: 'lease', operational: [] }),
     env: {},
     boardDir: path.join(tmp, 'dispatch'),
     registryDir: path.join(tmp, 'sessions'),

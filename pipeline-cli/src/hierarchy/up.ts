@@ -10,6 +10,8 @@ import { ghCallsPath, GH_CALL_LOG_ENV, installGhShim } from './gh-calls.js';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 
+import { loadOperationalPolicy } from './operational.js';
+import { verifiedMainRoot } from './trusted-root.js';
 import { loadPrLifecycleConfig } from './pr-lifecycle-config.js';
 import { schedulerUp } from './reconcile-scheduler.js';
 import { webhookUp } from './webhook.js';
@@ -203,6 +205,7 @@ export function buildClaudeCommand(
   s: Pick<PlannedSession, 'role' | 'name' | 'model' | 'permissionMode' | 'prompt' | 'taskId'>,
   nodeVersion?: string,
   ghLog?: { shimDir: string; logPath: string },
+  projectDir?: string,
 ): string {
   // Exported ahead of the command so the plugin hook sees them at launch (the agent's
   // own Bash commands cannot change them); the lease-push guard binds an executor by them.
@@ -215,6 +218,8 @@ export function buildClaudeCommand(
           `${GH_CALL_LOG_ENV}=${shellQuote(ghLog.logPath)}`,
         ]
       : []),
+    // AISDLC-664.6: the governance hook resolves policy from CLAUDE_PROJECT_DIR.
+    ...(projectDir ? [`CLAUDE_PROJECT_DIR=${shellQuote(projectDir)}`] : []),
     `AI_SDLC_HIERARCHY_SESSION=${shellQuote(s.name)}`,
     `AI_SDLC_HIERARCHY_ROLE=${shellQuote(s.role)}`,
     ...(s.taskId ? [`AI_SDLC_EXECUTOR_TASK=${shellQuote(s.taskId)}`] : []),
@@ -341,7 +346,7 @@ export async function launchSession(
   } catch (err) {
     warnings.push(`could not install the gh call-log shim: ${(err as Error).message}`);
   }
-  const command = buildClaudeCommand(deps.claudeBin, s, nodeVersion, ghLog);
+  const command = buildClaudeCommand(deps.claudeBin, s, nodeVersion, ghLog, deps.cwd);
   // Impossible by construction; asserted because a bare launch only fails at push time.
   if (!hasLaunchEnv(command, s.name, s.role)) {
     return {
@@ -397,7 +402,24 @@ export async function launchSession(
  * @throws before starting anything when validation, the settings check or the
  *   resource gate refuses; after a partial start when a window cannot be created.
  */
-export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise<UpResult> {
+export async function hierarchyUp(opts: UpOptions, launchDeps: HierarchyDeps): Promise<UpResult> {
+  // AISDLC-664.6: sessions launch at the repository root so the hook resolves the real policy.
+  const root = (launchDeps.resolveRoot ?? ((c: string) => verifiedMainRoot(c)))(launchDeps.cwd);
+  if (!root) {
+    throw new Error(
+      `'${launchDeps.cwd}' is not inside a repository; run cli-hierarchy up from the repository root (or one of its worktrees). Launched elsewhere, the governance hook fails closed to allowForcePush: never and every executor's lease push is blocked`,
+    );
+  }
+  const deps: HierarchyDeps = { ...launchDeps, cwd: root };
+  const policy = (deps.loadPolicy ?? ((r: string) => loadOperationalPolicy(r, r)))(root);
+  deps.log(
+    `policy (${root}): allowForcePush=${policy.forcePushMode} operational=[${[...policy.operational].join(', ')}]`,
+  );
+  if (policy.forcePushMode === 'never') {
+    deps.log(
+      'warning: allowForcePush resolves to never; executors cannot lease-push. Check .ai-sdlc/agent-role.yaml in the repository root',
+    );
+  }
   ensureFreshRepoBuild(deps, opts.rebuild === true);
   const count = parseExecutorCount(opts.executors);
   if (count > 0) {

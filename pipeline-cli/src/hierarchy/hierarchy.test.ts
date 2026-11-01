@@ -78,7 +78,7 @@ const Q = (bare: string): string => `${PROJECT}-${bare}`;
 
 interface FakeTmux {
   run: CommandRunner;
-  calls: { file: string; args: string[] }[];
+  calls: { file: string; args: string[]; options?: { cwd?: string } }[];
   /** Live agents in the current layout: each is a session with one window of the same name. */
   windows: string[];
   /** Windows of the shared legacy 'ai-sdlc-hierarchy' session (old layout). */
@@ -126,8 +126,8 @@ function makeFakeTmux(registryDir: string): FakeTmux {
     }
     return fake.windows.includes(session) ? [session] : undefined;
   };
-  fake.run = (file, args) => {
-    fake.calls.push({ file, args: [...args] });
+  fake.run = (file, args, options) => {
+    fake.calls.push({ file, args: [...args], options });
     if (file !== 'tmux') return { status: 1, stdout: '', stderr: 'unexpected binary' };
     const [cmd] = args;
     const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
@@ -266,6 +266,8 @@ beforeEach(() => {
     run: (f, a, o) => fake.run(f, a, o),
     boardDir,
     cwd: '/repo',
+    resolveRoot: (c) => c,
+    loadPolicy: () => ({ forcePushMode: 'lease', operational: [] }),
     registryDir,
     settingsFiles: [settingsFile],
     userSettingsFile: settingsFile,
@@ -496,10 +498,10 @@ describe('hierarchy up', () => {
     expect(
       newWindowCommands().map((c) => c.replace(/^PATH=\S+ AI_SDLC_GH_CALL_LOG=\S+ /, '')),
     ).toEqual([
-      `AI_SDLC_HIERARCHY_SESSION='${Q('planner')}' AI_SDLC_HIERARCHY_ROLE='planner' 'claude' --name '${Q('planner')}' --model 'fable' --permission-mode 'bypassPermissions' '/ai-sdlc planner'`,
-      `AI_SDLC_HIERARCHY_SESSION='${Q('operator-dispatch')}' AI_SDLC_HIERARCHY_ROLE='operator-dispatch' 'claude' --name '${Q('operator-dispatch')}' --model 'opus' --permission-mode 'bypassPermissions' '/ai-sdlc operator-dispatch'`,
-      `AI_SDLC_HIERARCHY_SESSION='${Q('executor-alpha')}' AI_SDLC_HIERARCHY_ROLE='executor' 'claude' --name '${Q('executor-alpha')}' --model 'sonnet' --permission-mode 'bypassPermissions' '/ai-sdlc executor'`,
-      `AI_SDLC_HIERARCHY_SESSION='${Q('executor-beta')}' AI_SDLC_HIERARCHY_ROLE='executor' 'claude' --name '${Q('executor-beta')}' --model 'sonnet' --permission-mode 'bypassPermissions' '/ai-sdlc executor'`,
+      `CLAUDE_PROJECT_DIR='/repo' AI_SDLC_HIERARCHY_SESSION='${Q('planner')}' AI_SDLC_HIERARCHY_ROLE='planner' 'claude' --name '${Q('planner')}' --model 'fable' --permission-mode 'bypassPermissions' '/ai-sdlc planner'`,
+      `CLAUDE_PROJECT_DIR='/repo' AI_SDLC_HIERARCHY_SESSION='${Q('operator-dispatch')}' AI_SDLC_HIERARCHY_ROLE='operator-dispatch' 'claude' --name '${Q('operator-dispatch')}' --model 'opus' --permission-mode 'bypassPermissions' '/ai-sdlc operator-dispatch'`,
+      `CLAUDE_PROJECT_DIR='/repo' AI_SDLC_HIERARCHY_SESSION='${Q('executor-alpha')}' AI_SDLC_HIERARCHY_ROLE='executor' 'claude' --name '${Q('executor-alpha')}' --model 'sonnet' --permission-mode 'bypassPermissions' '/ai-sdlc executor'`,
+      `CLAUDE_PROJECT_DIR='/repo' AI_SDLC_HIERARCHY_SESSION='${Q('executor-beta')}' AI_SDLC_HIERARCHY_ROLE='executor' 'claude' --name '${Q('executor-beta')}' --model 'sonnet' --permission-mode 'bypassPermissions' '/ai-sdlc executor'`,
     ]);
     // One detached session per agent, named after it; never a shared session or a new window.
     const creates = fake.calls.filter((c) =>
@@ -1903,6 +1905,37 @@ describe('pinned Node (AISDLC-812)', () => {
     for (const c of starts) {
       expect(c.args[c.args.length - 1]).toContain(`nvm use '22.23.2'`);
     }
+  });
+
+  it('up refuses outside a repository and names the expected root (AISDLC-664.6)', async () => {
+    const d = { ...deps, cwd: '/not/a/repo', resolveRoot: () => null };
+    await expect(hierarchyUp({ ...baseOpts, executors: 0, noPlanner: true }, d)).rejects.toThrow(
+      /\/not\/a\/repo.*repository root/s,
+    );
+    expect(fake.calls.some((c) => c.args[0] === 'new-session')).toBe(false);
+  });
+
+  it('up from a worktree launches every window at the root with CLAUDE_PROJECT_DIR (AISDLC-664.6)', async () => {
+    const d = {
+      ...deps,
+      cwd: '/repo/.worktrees/x',
+      resolveRoot: () => '/repo',
+      loadPolicy: () => ({ forcePushMode: 'lease', operational: ['a', 'b'] }),
+    };
+    await hierarchyUp({ ...baseOpts, executors: 0, noPlanner: true }, d);
+    const start = fake.calls.find((c) => c.args[0] === 'new-session');
+    expect(start?.args[start.args.indexOf('-c') + 1]).toBe('/repo');
+    expect(start?.options?.cwd).toBe('/repo');
+    expect(start?.args[start.args.length - 1]).toContain(`CLAUDE_PROJECT_DIR='/repo'`);
+    expect(logs).toContain('policy (/repo): allowForcePush=lease operational=[a, b]');
+    expect(logs.some((l) => l.includes('resolves to never'))).toBe(false);
+  });
+
+  it('up warns when the policy resolves allowForcePush to never (AISDLC-664.6)', async () => {
+    const d = { ...deps, loadPolicy: () => ({ forcePushMode: 'never', operational: [] }) };
+    await hierarchyUp({ ...baseOpts, executors: 0, noPlanner: true }, d);
+    expect(logs.some((l) => l.includes('allowForcePush=never'))).toBe(true);
+    expect(logs.some((l) => l.includes('resolves to never'))).toBe(true);
   });
 
   it('--node overrides .nvmrc, and a bad value is refused', async () => {

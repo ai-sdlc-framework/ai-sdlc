@@ -141,6 +141,10 @@ export interface HierarchyDeps {
   spawnScheduler?: (file: string, args: readonly string[]) => number | undefined;
   /** Records orchestrator events (session started, context cleared). Absent: nothing is recorded. */
   emit?: EventEmitter;
+  /** Resolves the repository root `cwd` belongs to, or null (AISDLC-664.6). Absent: the verified git main checkout. */
+  resolveRoot?: (cwd: string) => string | null;
+  /** Loads the dispatch policy the executors will see (AISDLC-664.6). Absent: read from the verified main checkout. */
+  loadPolicy?: (root: string) => { forcePushMode: string; operational: Iterable<string> };
 }
 
 /**
