@@ -38,6 +38,10 @@ export interface Gate3Opts {
   pendingRefs?: Record<string, string>;
 }
 
+function normalizeCreate(raw: string): string {
+  return raw.trim().replace(/^\.\//, '');
+}
+
 const TASK_ID_RE = /^AISDLC-\d+(?:\.\d+)?$/i;
 
 export async function evaluateGate3(
@@ -54,7 +58,12 @@ export async function evaluateGate3(
   const explicitRefs = explicit.map((raw) => ({ raw, kind: 'file-existence' as const }));
   const allRefs = [...explicitRefs, ...extracted];
 
-  if (allRefs.length === 0) {
+  if (
+    allRefs.length === 0 ||
+    allRefs.every((r) =>
+      (input.creates ?? []).map(normalizeCreate).includes(normalizeCreate(r.raw)),
+    )
+  ) {
     return {
       gateId: 3,
       verdict: 'pass',
@@ -76,7 +85,10 @@ export async function evaluateGate3(
   const pending: Array<{ ref: string; where: string }> = [];
   const pendingMap: Record<string, string> = {};
   for (const [k, v] of Object.entries(opts.pendingRefs ?? {})) pendingMap[k.toUpperCase()] = v;
+  const creates = new Set((input.creates ?? []).map(normalizeCreate));
   for (const ref of allRefs) {
+    // AISDLC-1148: a declared deliverable need not exist yet.
+    if (creates.has(normalizeCreate(ref.raw))) continue;
     const result = await resolveReference(ref, resolverOpts, opts.resolvers);
     const raw = ref.raw.trim();
     const where = TASK_ID_RE.test(raw) ? pendingMap[raw.toUpperCase()] : undefined;

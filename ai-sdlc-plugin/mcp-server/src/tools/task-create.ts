@@ -52,8 +52,22 @@ export function registerTaskCreate(server: McpServer, deps: ToolDeps): void {
         .array(z.string())
         .optional()
         .describe('List of file paths or URLs relevant to this task.'),
+      creates: z
+        .array(z.string())
+        .optional()
+        .describe('Paths this task will create; not required to exist yet (AISDLC-1148).'),
     },
-    async ({ id, title, description, status, priority, labels, dependencies, references }) => {
+    async ({
+      id,
+      title,
+      description,
+      status,
+      priority,
+      labels,
+      dependencies,
+      references,
+      creates,
+    }) => {
       try {
         // Major 1 (security): validate `id` shape before interpolating into filesystem paths.
         // Reject any ID that doesn't match the project convention (AISDLC-N, AISDLC-N.M, etc.)
@@ -136,6 +150,7 @@ export function registerTaskCreate(server: McpServer, deps: ToolDeps): void {
           labels,
           dependencies,
           references,
+          creates,
         });
 
         // AISDLC-559: cross-source collision check (git refs across every
@@ -290,6 +305,7 @@ interface TaskCreateOptions {
   labels?: string[];
   dependencies?: string[];
   references?: string[];
+  creates?: string[];
 }
 
 /**
@@ -339,6 +355,13 @@ export function buildTaskContent(opts: TaskCreateOptions): string {
     }
   } else {
     lines.push('references: []');
+  }
+
+  if (opts.creates && opts.creates.length > 0) {
+    lines.push('creates:');
+    for (const c of opts.creates) {
+      lines.push(`  - ${formatYamlString(c)}`);
+    }
   }
 
   lines.push('---', '');

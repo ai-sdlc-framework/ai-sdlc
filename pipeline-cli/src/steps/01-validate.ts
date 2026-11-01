@@ -136,6 +136,10 @@ export function parseTaskFile(filePath: string): TaskSpec {
   if (Array.isArray(fm.references)) {
     references = (fm.references as unknown[]).map(String);
   }
+  let creates: string[] | undefined;
+  if (Array.isArray(fm.creates)) {
+    creates = (fm.creates as unknown[]).map(String);
+  }
 
   return {
     id,
@@ -145,6 +149,7 @@ export function parseTaskFile(filePath: string): TaskSpec {
     acceptanceCriteriaChecked: acsChecked,
     permittedExternalPaths,
     references,
+    creates,
     description,
     rawBody: body,
     filePath,

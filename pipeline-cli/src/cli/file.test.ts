@@ -12,6 +12,7 @@ import {
   EVENT_LOG_REL,
   FileRefusal,
   assertAscii,
+  driftRefusal,
   defaultDeps,
   fileDecision,
   fileRebase,
@@ -680,5 +681,26 @@ describe('cli-file', () => {
     } finally {
       process.chdir(prev);
     }
+  });
+});
+
+describe('driftRefusal (AISDLC-1148)', () => {
+  const r = (status: number, stdout: string) => ({ status, stdout, stderr: '' });
+  it('ignores warnings and info even when the tool exits 1', () => {
+    expect(
+      driftRefusal(r(1, JSON.stringify([{ severity: 'warning' }, { severity: 'info' }]))),
+    ).toBe(null);
+  });
+  it('refuses on an error-severity issue', () => {
+    expect(
+      driftRefusal(r(1, JSON.stringify([{ severity: 'error', message: 'dead ref' }]))),
+    ).toMatch(/1 error-severity.*dead ref/);
+  });
+  it('falls back to the exit code when the report is unreadable', () => {
+    expect(driftRefusal(r(0, 'not json'))).toBe(null);
+    expect(driftRefusal(r(1, 'boom'))).toMatch(/^backlog-drift: boom/);
+    expect(driftRefusal(r(1, '{}'))).toMatch(/^backlog-drift:/);
+    expect(driftRefusal(r(0, '{}'))).toBe(null);
+    expect(driftRefusal(r(0, '[null]'))).toBe(null);
   });
 });

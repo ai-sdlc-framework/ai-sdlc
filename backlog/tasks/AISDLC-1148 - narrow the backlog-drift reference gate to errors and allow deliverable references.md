@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1148
 title: 'Narrow the backlog-drift reference gate: errors only on every path, deliverable references allowed, dead duplicates removed'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-01'
 labels:

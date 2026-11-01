@@ -326,7 +326,11 @@ export function planBrief(
 function readFrontmatterMeta(node: DependencyNode): BriefTask {
   const raw = readFileSync(node.filePath, 'utf8');
   const fm = parseSimpleYaml(raw.match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? '');
-  const refs = Array.isArray(fm.references) ? (fm.references as unknown[]).map(String) : [];
+  const refs = [
+    ...(Array.isArray(fm.references) ? (fm.references as unknown[]).map(String) : []),
+    // AISDLC-1148: a declared deliverable is still a reference for sequencing.
+    ...(Array.isArray(fm.creates) ? (fm.creates as unknown[]).map(String) : []),
+  ];
   const flag = fm.dispatchable;
   return {
     id: node.id,

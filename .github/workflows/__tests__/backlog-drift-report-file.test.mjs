@@ -14,7 +14,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-const WORKFLOWS = ['ci.yml', 'ai-sdlc-gate.yml'];
+const WORKFLOWS = ['ai-sdlc-gate.yml'];
 
 /** Executable lines of every `backlog-drift ... --json` invocation, comments stripped. */
 function jsonInvocations(file) {
@@ -25,8 +25,8 @@ function jsonInvocations(file) {
 }
 
 describe('Backlog Drift JSON report capture (AISDLC-796)', () => {
-  it('ci.yml runs the JSON check', () => {
-    assert.ok(jsonInvocations('ci.yml').length > 0);
+  it('ai-sdlc-gate.yml runs the JSON check', () => {
+    assert.ok(jsonInvocations('ai-sdlc-gate.yml').length > 0);
   });
 
   for (const file of WORKFLOWS) {
@@ -43,7 +43,7 @@ describe('Backlog Drift JSON report capture (AISDLC-796)', () => {
   }
 
   it('reads the report from the file and fails with a named ::error:: on invalid JSON', () => {
-    const src = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
+    const src = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'ai-sdlc-gate.yml'), 'utf8');
     assert.match(src, /report="\$\{RUNNER_TEMP[^"]*backlog-drift\.json"/);
     assert.match(src, /jq [^\n]*"\$report"/);
     assert.match(

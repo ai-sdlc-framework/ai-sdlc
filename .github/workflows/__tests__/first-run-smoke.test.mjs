@@ -118,7 +118,7 @@ describe('ci.yml first-run-smoke job (AISDLC-771)', () => {
   });
 
   it('every other build/test job is skipped on the nightly schedule', () => {
-    for (const name of ['lint', 'backlog-drift', 'build-and-test', 'coverage', 'integration']) {
+    for (const name of ['lint', 'build-and-test', 'coverage', 'integration']) {
       assert.match(wf.jobs[name].if, /event_name != 'schedule'/, `${name} must skip on schedule`);
     }
   });

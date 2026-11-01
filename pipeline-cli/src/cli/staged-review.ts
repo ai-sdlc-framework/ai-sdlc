@@ -165,7 +165,7 @@ export function buildStagedReviewCli(
           try {
             const task = parseTaskFile(taskFile);
             criteria = task.acceptanceCriteria;
-            references = task.references ?? [];
+            references = [...(task.references ?? []), ...(task.creates ?? [])];
           } catch {
             criteria = [];
           }

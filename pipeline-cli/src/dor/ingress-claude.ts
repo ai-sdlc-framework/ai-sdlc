@@ -145,10 +145,25 @@ export function extractLabels(frontmatter: string): string[] {
     .filter(Boolean);
 }
 
+/** `creates:` entries from raw frontmatter (block list or inline `[a, b]`). */
+export function extractCreates(frontmatter: string): string[] {
+  const unq = (s: string): string => s.trim().replace(/^['"]|['"]$/g, '');
+  const inline = frontmatter.match(/^creates:\s*\[(.*)\]\s*$/m);
+  if (inline) return (inline[1] ?? '').split(',').map(unq).filter(Boolean);
+  const block = frontmatter.match(/^creates:\s*\n((?:[ \t]+-[ \t]+.+\n?)*)/m);
+  if (!block) return [];
+  return (block[1] ?? '')
+    .split('\n')
+    .map((l) => unq(l.replace(/^\s+-\s+/, '')))
+    .filter(Boolean);
+}
+
 /** Attach the frontmatter fields the Stage A gates key on (labels, blocked.reason). */
 export function applyFrontmatterFields(input: IssueInput, frontmatter: string): void {
   const labels = extractLabels(frontmatter);
   if (labels.length > 0) input.labels = labels;
+  const creates = extractCreates(frontmatter);
+  if (creates.length > 0) input.creates = creates;
   const blocked = extractBlockedReason(frontmatter);
   if (blocked) input.blockedReason = blocked;
 }
