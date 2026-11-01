@@ -17,6 +17,10 @@
  *   query <text>    — ranked entry ids, contentHash and citations within `--budget`/`--min-score`;
  *                     `--session <id>` omits entries already loaded in that session.
  *   session-reset / session-compact — clear / PreCompact handling of the session load ledger (AISDLC-780).
+ *   eval            — score the golden set (recall at 5, MRR, nDCG); `--gate` applies the ranking
+ *                     gate; `--set synthetic` reports without gating (AISDLC-778).
+ *   mine / synthesize / citation-rate — evaluator-only quarantine feeds and the report-only
+ *                     citation rate (AISDLC-778).
  *   check-scope     — fail when a protected entry is in the configured tracked root, or the
  *                     configured protected root is tracked / not git-ignored. With `--rev`, also
  *                     scans every commit in the pushed range, not only HEAD/the index.
@@ -34,6 +38,21 @@ import { ingestMemoryForProject } from '../knowledge/ingest-memory.js';
 import { resolveMemoryDir } from '../memory-dream/resolve-dir.js';
 import { sectionsToEntries } from '../knowledge/ingest-sections.js';
 import { auditLines, readKnowledgeLog } from '../knowledge/log.js';
+import { citationRate, renderCitationRate, sessionIds } from '../knowledge/eval/citation.js';
+import {
+  BASELINE_PATH,
+  evaluateGate,
+  loadEvaluationConfig,
+  readBaseline,
+  writeBaseline,
+} from '../knowledge/eval/gate.js';
+import { type EvalQuestion, loadGolden, liveEntryIds, runEval } from '../knowledge/eval/golden.js';
+import {
+  generateSynthetic,
+  mineQuestions,
+  readSynthetic,
+  writeSynthetic,
+} from '../knowledge/eval/quarantine.js';
 import { loadOntology } from '../knowledge/ontology.js';
 import {
   buildDashboard,
@@ -139,6 +158,119 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           process.stderr.write(`error: ${(err as Error).message}\n`);
           process.exitCode = 1;
         }
+      },
+    )
+    .command(
+      'eval',
+      'Score the golden set: recall at 5, MRR, nDCG; --gate enforces the ranking gate',
+      (y) =>
+        y
+          .option('set', { type: 'string', choices: ['golden', 'synthetic'], default: 'golden' })
+          .option('gate', { type: 'boolean', default: false })
+          .option('update-baseline', {
+            type: 'string',
+            describe: 'Store the golden recall at 5 as the baseline for this release label',
+          }),
+      async (args) => {
+        try {
+          const projectDir = String(args['project-dir']);
+          const synthetic = args.set === 'synthetic';
+          const questions: EvalQuestion[] = synthetic
+            ? readSynthetic(projectDir).map((q) => ({
+                id: q.key,
+                question: q.question,
+                relevant: new Map([[q.entryId, 1]]),
+              }))
+            : loadGolden(projectDir);
+          const rank = async (text: string): Promise<string[]> =>
+            (await queryIndex(projectDir, { text, limit: 10 })).map((h) => h.id);
+          const report = await runEval(questions, liveEntryIds(projectDir), rank);
+          process.stdout.write(
+            `${JSON.stringify(
+              {
+                set: args.set,
+                scored: report.scored,
+                retired: report.retired,
+                recallAt5: report.recallAt5,
+                mrr: report.mrr,
+                ndcgAt5: report.ndcgAt5,
+              },
+              null,
+              2,
+            )}\n`,
+          );
+          if (synthetic) return; // report only, never gates
+          if (args['update-baseline']) {
+            writeBaseline(projectDir, {
+              release: String(args['update-baseline']),
+              recallAt5: report.recallAt5,
+            });
+            process.stdout.write(`baseline written to ${BASELINE_PATH}\n`);
+          }
+          if (args.gate) {
+            if (report.scored === 0) {
+              process.stdout.write('warning: no scoreable golden questions; gate skipped\n');
+              return;
+            }
+            const gate = evaluateGate(
+              report.recallAt5,
+              loadEvaluationConfig(projectDir),
+              readBaseline(projectDir),
+            );
+            for (const f of gate.failures) process.stderr.write(`error: ${f}\n`);
+            if (!gate.ok) process.exitCode = 1;
+          }
+        } catch (err) {
+          process.stderr.write(`error: ${(err as Error).message}\n`);
+          process.exitCode = 1;
+        }
+      },
+    )
+    .command(
+      'mine [transcripts..]',
+      'Mine scrubbed, de-duplicated questions from transcripts into the evaluator-only quarantine',
+      (y) => y.positional('transcripts', { type: 'string', array: true, default: [] }),
+      (args) => {
+        const files = (args.transcripts as string[]).map(String);
+        const r = mineQuestions(
+          String(args['project-dir']),
+          files.map((f) => readFileSync(f, 'utf-8')),
+        );
+        process.stdout.write(`${r.written} written, ${r.duplicates} duplicates\n`);
+      },
+    )
+    .command(
+      'synthesize',
+      'Generate one synthetic question per entry into the evaluator-only quarantine',
+      (y) => y,
+      (args) => {
+        const projectDir = String(args['project-dir']);
+        const { trackedAbs, verify } = knowledgeCtx(projectDir);
+        const protectedAbs = isAbsolute(verify.config.protectedRoot)
+          ? verify.config.protectedRoot
+          : join(projectDir, verify.config.protectedRoot);
+        const n = writeSynthetic(
+          projectDir,
+          generateSynthetic([...readEntries(trackedAbs), ...readEntries(protectedAbs)]),
+        );
+        process.stdout.write(`${n} synthetic questions written\n`);
+      },
+    )
+    .command(
+      'citation-rate',
+      'Report the share of injected entries later cited (report only, never gates)',
+      (y) =>
+        y
+          .option('text-file', {
+            type: 'string',
+            describe: 'Session output text; defaults to stdin',
+          })
+          .option('session', { type: 'string', array: true, describe: 'Defaults to all ledgers' }),
+      (args) => {
+        const projectDir = String(args['project-dir']);
+        const text = readFileSync((args['text-file'] as string | undefined) ?? 0, 'utf-8');
+        const sessions = (args.session as string[] | undefined) ?? sessionIds(projectDir);
+        process.stdout.write(`${renderCitationRate(citationRate(projectDir, sessions, text))}\n`);
       },
     )
     .command(
