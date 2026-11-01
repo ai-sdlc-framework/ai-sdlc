@@ -5,6 +5,21 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.40.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.39.0...orchestrator-v0.40.0) (2026-11-01)
+
+
+### Features
+
+* drop attestation schemas v3/v4/v5, v6 only (AISDLC-1147) ([#2245](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2245)) ([c411aba](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c411abae92fc4d4bd18b4db2c208faa0649ba701))
+* warn on signing deprecated attestation schemas v3/v4/v5 (AISDLC-585) ([#2171](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2171)) ([4d07dae](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4d07dae9365176b663b68cfa37dc4dafeb64b722))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.40.0
+
 ## [0.39.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.38.0...orchestrator-v0.39.0) (2026-10-31)
 
 

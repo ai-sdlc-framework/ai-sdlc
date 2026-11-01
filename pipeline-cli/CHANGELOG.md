@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.40.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.39.0...pipeline-cli-v0.40.0) (2026-11-01)
+
+
+### Features
+
+* drop attestation schemas v3/v4/v5, v6 only (AISDLC-1147) ([#2245](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2245)) ([c411aba](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c411abae92fc4d4bd18b4db2c208faa0649ba701))
+* **pipeline-cli:** credit newest v6 leaf per reviewer, older leaves superseded (AISDLC-1144) ([#2234](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2234)) ([f4bad30](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f4bad30fb5b4af8695b4e970fd5ca0d035181de8))
+* **pipeline-cli:** decision-point moment in the DoR gate (AISDLC-785) ([#2150](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2150)) ([ec64a4a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ec64a4ad1e2f64e0ee7e935a64aad8644d27763d))
+* **pipeline-cli:** transcript recall digest embedded in handoff (AISDLC-1132) ([#2204](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2204)) ([86f27d6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/86f27d6494a044a1eb861d6e2dc80027f6935bd1))
+* reconciler reclaims draft task PRs with a signed failed verdict (AISDLC-1139) ([#2239](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2239)) ([603ccb7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/603ccb72f3a091164d4fcf6da39cf811cca43188))
+* release PR bumps plugin runtime pins; delete pin-sync job (AISDLC-1142) ([#2244](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2244)) ([75401e5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/75401e5fec606c631356b353c607a82608ae70d0))
+* security findings become backlog tasks with a dismissal rule (AISDLC-940) ([#2060](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2060)) ([d92e5f1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d92e5f1fc4e45b2c9ae2084374524dac73392a79))
+* warn on signing deprecated attestation schemas v3/v4/v5 (AISDLC-585) ([#2171](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2171)) ([4d07dae](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4d07dae9365176b663b68cfa37dc4dafeb64b722))
+* weekly token budget pacer holds claims ahead of the reset line (AISDLC-1072) ([#2064](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2064)) ([ea65e34](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ea65e34bcf533efe69511d0ae7c9823f8f982f75))
+
+
+### Bug Fixes
+
+* harden reviewer replay against minor review findings (AISDLC-655.3) ([#2111](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2111)) ([0f1d7c8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0f1d7c81f8fe04ddee22f7978c399e5cb9e0495a))
+* **pipeline-cli:** enqueue fix-on-PR for completed task files (AISDLC-1141) ([#2223](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2223)) ([0e50595](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0e5059524940cd670c817ff728b31fde87dca075))
+* **pipeline-cli:** lease-push step 11 when origin already has the branch (AISDLC-1138) ([#2220](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2220)) ([5b75a45](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5b75a4565f1f96340070ea741a580f7ad6f902c9))
+* **pipeline-cli:** refuse duplicate decision-opened sync, drop DEC-0167 fixture (AISDLC-1135) ([#2214](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2214)) ([af11205](https://github.com/ai-sdlc-framework/ai-sdlc/commit/af112057829bf494c5af4db6f30e18ed59256d31))
+* read stale-base Backlog Drift red as behind-or-dirty (AISDLC-1140) ([#2221](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2221)) ([4b7dfef](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4b7dfefd6e71c4b34430ddd42a111c768b1fc4aa))
+* scrub executor session env from pre-push test child (AISDLC-1137) ([#2219](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2219)) ([bbcb8e7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bbcb8e703c75d735bfe18c3d4812f0ce1cda9067))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.40.0
+
 ## [0.39.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.38.0...pipeline-cli-v0.39.0) (2026-10-31)
 
 
