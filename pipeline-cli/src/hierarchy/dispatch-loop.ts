@@ -779,6 +779,9 @@ async function runEphemeralSteps(
   if (!quotaSkip) {
     try {
       await spawnForEligibleClaims(deps.boardDir, eph, deps.now, report);
+      for (const u of report.unclaimable ?? []) {
+        console.error(`[hierarchy] not spawning an executor for ${u.taskId}: ${u.reason}`);
+      }
     } catch {
       /* an unreadable queue must not stop the dispatch loop */
     }
@@ -1129,6 +1132,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     (eph.downed.length > 0 ||
       eph.spawned.length > 0 ||
       eph.spawnErrors.length > 0 ||
+      (eph.unclaimable?.length ?? 0) > 0 ||
       (eph.orphansReaped?.length ?? 0) > 0);
   const wake = computeNextWake(deps.boardDir, { ...ingest, ...watch, reports, stalled }, markReady);
   if (ephemeralActive) {

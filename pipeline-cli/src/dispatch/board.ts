@@ -1073,10 +1073,11 @@ export interface QueueOrderEntry {
 export function peekQueueOrder(
   boardDir: string,
   now: () => Date = () => clockNow(),
+  workerKind?: WorkerKind,
 ): QueueOrderEntry[] {
   ensureBoardDirs(boardDir);
   const candidates = listManifestCandidates(path.join(boardDir, 'queue'));
-  return orderEligible(boardDir, candidates, undefined, now).map(({ manifest }) => ({
+  return orderEligible(boardDir, candidates, workerKind, now).map(({ manifest }) => ({
     taskId: manifest.taskId,
     wave: manifest.wave ?? 0,
     priority: typeof manifest.priority === 'number' ? manifest.priority : null,

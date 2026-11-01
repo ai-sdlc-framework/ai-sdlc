@@ -200,6 +200,21 @@ describe('ephemeral executors in the tick', () => {
     expect(r.ephemeral?.spawned).toEqual(spawns);
   });
 
+  it('spawns nothing for a task no executor may claim and reports the reason once (AISDLC-1121)', async () => {
+    enqueueTasks(board, [{ taskId: 'AISDLC-90', wave: 1 }], {
+      baseSha: 'abc1234',
+      dispatchedBy: 'operator-dispatch',
+      resolveTaskFile: (id) => `backlog/tasks/${id.toLowerCase()}.md`,
+      workerKind: 'claude-p-shell',
+    });
+    const r = await runDispatchTick(deps());
+    expect(spawns).toEqual([]);
+    expect(r.ephemeral?.unclaimable?.map((u) => u.taskId)).toEqual(['AISDLC-90']);
+    const again = await runDispatchTick(deps());
+    expect(spawns).toEqual([]);
+    expect(again.ephemeral?.unclaimable ?? []).toEqual([]);
+  });
+
   it('counts live executors against the cap and records spawn failures', async () => {
     writeRoster(board, { schemaVersion: 'v1', sessions: [entry('AISDLC-71')] });
     queue('AISDLC-80');
