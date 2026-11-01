@@ -7,11 +7,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
 import { resolveTaskFromFile, TaskFromFileResolutionError } from './task-from-file.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 describe('resolveTaskFromFile', () => {
   let tmp: string;
@@ -21,7 +22,7 @@ describe('resolveTaskFromFile', () => {
   });
 
   afterEach(() => {
-    rmSync(tmp, { recursive: true, force: true });
+    removeFixtureDir(tmp);
   });
 
   function writeTask(relativePath: string, body: string): { absolute: string; relative: string } {

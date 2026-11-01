@@ -9,9 +9,10 @@ import { hashValue } from './entry.js';
 import { DEFAULT_ONTOLOGY, parseOntology } from './ontology.js';
 import { checkKnowledgeScope, checkKnowledgeScopeRange } from './scope-check.js';
 import { findProtectedCitations, validateKnowledge } from './store.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let root: string;
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(root));
 
 function project(files: Record<string, string>): string {
   root = mkdtempSync(join(tmpdir(), 'knowledge-'));

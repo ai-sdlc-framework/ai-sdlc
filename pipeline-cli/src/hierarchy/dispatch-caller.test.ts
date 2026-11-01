@@ -8,7 +8,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,12 +19,13 @@ import type { IdentityDeps } from './caller-identity.js';
 import { checkDispatchCaller, defaultInstallDir } from './dispatch-caller.js';
 import { stripGitRedirects } from './git-env.js';
 import { resolveTrustedBoard } from './trusted-root.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 beforeEach(() => {
   tmp = realpathSync(mkdtempSync(path.join(tmpdir(), 'dispatch-caller-')));
 });
-afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(tmp));
 
 const gitEnv = {
   ...stripGitRedirects(process.env),

@@ -18,6 +18,7 @@ import {
   checkOwnWorktreeForOperator,
   isProtectedBranch,
 } from './lease-policy.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const require = createRequire(import.meta.url);
 const hooksLib = path.resolve(
@@ -42,7 +43,7 @@ beforeEach(() => {
 afterEach(() => {
   if (savedBinding === undefined) delete process.env['AI_SDLC_ACTIVE_TASK_ID'];
   else process.env['AI_SDLC_ACTIVE_TASK_ID'] = savedBinding;
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
 });
 
 describe('isProtectedBranch', () => {
@@ -142,7 +143,7 @@ describe('checkOwnWorktree', () => {
     rmSync(path.join(wt, '.git'));
     mkdirSync(path.join(wt, '.git'));
     expect(checkOwnWorktree(main, wt, plainCheckout)).toMatch(/plain file/);
-    rmSync(path.join(wt, '.git'), { recursive: true });
+    removeFixtureDir(path.join(wt, '.git'));
     writeFileSync(path.join(tmp, 'target'), 'gitdir: x\n');
     symlinkSync(path.join(tmp, 'target'), path.join(wt, '.git'));
     expect(checkOwnWorktree(main, wt, plainCheckout)).toMatch(/plain file/);

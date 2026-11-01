@@ -25,6 +25,7 @@ import type {
 } from '../next-step/types.js';
 import { defaultGhIssueDeps } from '../next-step/gh-issue.js';
 import { workflowNextStep } from './execute-host.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(here, '..', '..', 'test', 'fixtures', 'workflow', 'replay');
@@ -349,7 +350,7 @@ const operatorLogs = (): string[] =>
 function reset(): void {
   h.logs.length = 0;
   rmSync(ctx.statePath, { force: true });
-  rmSync(ctx.filesDir, { recursive: true, force: true });
+  removeFixtureDir(ctx.filesDir);
   counters = {
     prepared: 0,
     finalized: 0,

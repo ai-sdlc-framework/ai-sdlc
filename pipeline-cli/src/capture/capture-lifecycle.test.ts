@@ -14,7 +14,7 @@
  *   - AC-11 Integration test: capture progresses through full lifecycle ladder
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -47,6 +47,7 @@ import {
   type CaptureLifecycleConfig,
 } from './capture-lifecycle.js';
 import { FakeLlmInvoker } from '../classifier/substrate/fake-invoker.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Test fixture setup ────────────────────────────────────────────────────────
 
@@ -67,7 +68,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
   if (savedRepoRoot === undefined) {
     delete process.env.CAPTURE_REPO_ROOT;
   } else {

@@ -1,7 +1,8 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const refine = vi.fn();
 const route = vi.fn();
@@ -37,7 +38,7 @@ describe('cli-dor-check decision-point wiring (AISDLC-785)', () => {
   afterEach(() => {
     process.argv = origArgv;
     vi.restoreAllMocks();
-    rmSync(dir, { recursive: true, force: true });
+    removeFixtureDir(dir);
   });
 
   it('routes decision points after the DoR verdict and leaves a passing result unchanged', async () => {

@@ -3,7 +3,7 @@
  * The roster and board are temp directories.
  */
 
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +16,7 @@ import { clearExecutor, EXECUTOR_RESUME, type ClearDeps } from './clear.js';
 import type { HierarchyEvent } from './emit.js';
 import { writeRoster } from './roster.js';
 import type { CommandRunner, Roster, RosterEntry } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 let board: string;
@@ -119,7 +120,7 @@ beforeEach(() => {
     entry({ name: 'executor-beta', tmuxWindow: 'executor-beta', paneId: '%8' }),
   );
 });
-afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(tmp));
 
 describe('clearExecutor', () => {
   it('types /clear then the executor command into an idle pane, with no request file (AC1, AC3)', async () => {

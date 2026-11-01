@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const execFileSync = vi.hoisted(() => vi.fn());
 vi.mock('node:child_process', () => ({ execFileSync }));
@@ -38,7 +39,7 @@ beforeEach(() => {
 afterEach(() => {
   restore();
   out.mockRestore();
-  rmSync(dir, { recursive: true, force: true });
+  removeFixtureDir(dir);
 });
 
 const cache = () => join(dir, '.ai-sdlc', 'kpi', 'pr-list-2026-10-14.json');

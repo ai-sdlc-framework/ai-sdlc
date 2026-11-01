@@ -18,7 +18,7 @@
  */
 
 import { snapshotFailedManifest } from './requeue.js';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Worker } from 'node:worker_threads';
@@ -55,6 +55,7 @@ import type {
   ManifestWorkerKind,
   ResumeSignal,
 } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ---------------------------------------------------------------------------
 // fixture helpers
@@ -1454,7 +1455,7 @@ beforeEach(() => {
 afterEach(() => {
   for (const root of createdRoots.splice(0)) {
     try {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDir(root);
     } catch {
       /* ignore */
     }

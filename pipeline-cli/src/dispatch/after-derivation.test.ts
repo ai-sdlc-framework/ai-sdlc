@@ -1,6 +1,6 @@
 /** AISDLC-1027: `after` is derived from the task file's `dependencies:`; a dependency counts once landed. */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -20,6 +20,7 @@ import { enqueueTasks } from './enqueue.js';
 import { reprioritizeQueued } from './reprioritize.js';
 import { FAILED_MANIFEST_SUFFIX, requeueFailed } from './requeue.js';
 import type { DispatchManifest } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let root: string;
 let board: string;
@@ -67,7 +68,7 @@ beforeEach(() => {
   board = path.join(root, '.ai-sdlc', 'dispatch');
   ensureBoardDirs(board);
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(root));
 
 describe('after derived from dependencies', () => {
   it('enqueue fills after from the task file when none is passed', () => {

@@ -33,6 +33,7 @@ import {
   removeBgAgentRequest,
   writeBgAgentRequest,
 } from './dispatch-bg-agent.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function mkBoard(): string {
   return path.join(mkdtempSync(path.join(tmpdir(), 'bg-agent-')), 'dispatch');
@@ -77,7 +78,7 @@ describe('bg-agent-request — library API', () => {
   });
   afterEach(() => {
     try {
-      rmSync(path.dirname(boardDir), { recursive: true, force: true });
+      removeFixtureDir(path.dirname(boardDir));
     } catch {
       /* ignore */
     }
@@ -144,7 +145,7 @@ describe('bg-agent-request — library API', () => {
     dispatchEnsureBoardDirs(freshDir);
     // Do NOT call ensureBgAgentRequestDir — listing must tolerate absence.
     expect(listBgAgentRequests(freshDir)).toEqual([]);
-    rmSync(path.dirname(freshDir), { recursive: true, force: true });
+    removeFixtureDir(path.dirname(freshDir));
   });
 
   it('removeBgAgentRequest is idempotent', () => {
@@ -277,7 +278,7 @@ describe('Pattern X — hermetic 3-task drain (AC-7, reconcile flow)', () => {
   });
   afterEach(() => {
     try {
-      rmSync(path.dirname(boardDir), { recursive: true, force: true });
+      removeFixtureDir(path.dirname(boardDir));
     } catch {
       /* ignore */
     }

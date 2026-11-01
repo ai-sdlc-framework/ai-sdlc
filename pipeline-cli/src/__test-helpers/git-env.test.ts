@@ -19,12 +19,13 @@
  */
 
 import { execSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, expect, it, afterEach } from 'vitest';
 import { makeGitEnv } from './git-env.js';
+import { removeFixtureDir } from './remove-fixture-dir.js';
 
 describe('makeGitEnv() — AISDLC-253 fixture-leak prevention', () => {
   const originalEnv = { ...process.env };
@@ -100,7 +101,7 @@ describe('makeGitEnv() — AISDLC-253 fixture-leak prevention', () => {
     afterEach(() => {
       for (const d of fixtureDirs) {
         try {
-          rmSync(d, { recursive: true, force: true });
+          removeFixtureDir(d);
         } catch {
           /* ignore */
         }
@@ -254,7 +255,7 @@ describe('makeGitEnv() — AISDLC-253 fixture-leak prevention', () => {
       expect(read('gc.auto')).toBe('0');
       expect(read('maintenance.auto')).toBe('false');
     } finally {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+      removeFixtureDir(dir);
     }
   });
 });

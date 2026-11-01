@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -8,12 +8,13 @@ import {
   LAST_BUILD_SHA_FILE,
   REQUIRED_DIST_ENTRY_POINTS,
 } from './ensure-workspace-built.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let wt: string;
 beforeEach(() => {
   wt = mkdtempSync(join(tmpdir(), 'ewb-'));
 });
-afterEach(() => rmSync(wt, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(wt));
 
 const seedDist = () => {
   for (const p of REQUIRED_DIST_ENTRY_POINTS) {

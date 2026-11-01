@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -17,10 +17,11 @@ import {
 import { readKnowledgeLog } from './log.js';
 import { DEFAULT_ONTOLOGY } from './ontology.js';
 import { readEntries } from './store.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let root: string;
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDir(root);
   process.exitCode = 0;
 });
 

@@ -13,7 +13,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,6 +27,7 @@ import {
   withWorktreeMutex,
   type _MutexState,
 } from './worktree-mutex.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────
 
@@ -275,7 +276,7 @@ describe('file lock helpers', () => {
     mkdirSync(join(tmpDir, '.git'), { recursive: true });
   });
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('tryAcquireFileLock returns true on first acquire', () => {
@@ -309,7 +310,7 @@ describe('withWorktreeMutex — file lock integration', () => {
   });
   afterEach(() => {
     releaseFileLock(tmpDir); // ensure cleanup even if test fails
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('acquires and releases the file lock around fn', async () => {
@@ -354,7 +355,7 @@ describe('setupWorktreeSignalHandler', () => {
   });
   afterEach(() => {
     releaseFileLock(tmpDir);
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
     _resetSignalHandlerFlag();
   });
 
@@ -489,13 +490,13 @@ describe('withWorktreeMutex — real git worktree add (AC #7)', () => {
     }
     for (const wt of worktreeDirs) {
       try {
-        rmSync(wt, { recursive: true, force: true });
+        removeFixtureDir(wt);
       } catch {
         // best-effort
       }
     }
     try {
-      rmSync(repoDir, { recursive: true, force: true });
+      removeFixtureDir(repoDir);
     } catch {
       // best-effort
     }

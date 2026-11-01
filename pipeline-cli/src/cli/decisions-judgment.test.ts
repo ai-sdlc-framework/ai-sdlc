@@ -4,11 +4,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakeJudgmentProvider, registerJudgmentProvider } from '@ai-sdlc/reference';
 import { buildDecisionsCli } from './decisions.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 let savedArgv: string[];
@@ -34,7 +35,7 @@ afterEach(() => {
   process.argv = savedArgv;
   process.env = savedEnv;
   process.stdout.write = savedWrite;
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
   vi.restoreAllMocks();
 });
 

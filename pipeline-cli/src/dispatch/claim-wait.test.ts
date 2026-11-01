@@ -2,7 +2,7 @@
  * Hermetic tests for the blocking claim: real temp-dir boards, no LLM, no network.
  */
 
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -12,6 +12,7 @@ import { runDispatchCli } from '../cli/dispatch.js';
 import { claimNext, ensureBoardDirs, writeManifest } from './board.js';
 import { claimWithWait } from './claim-wait.js';
 import type { DispatchManifest } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const mkManifest = (taskId: string): DispatchManifest => ({
   schemaVersion: 'v1',
@@ -33,7 +34,7 @@ beforeEach(() => {
   board = path.join(root, 'dispatch');
   ensureBoardDirs(board);
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(root));
 
 describe('claimWithWait', () => {
   it('returns at once with --wait 0 and an empty queue', async () => {

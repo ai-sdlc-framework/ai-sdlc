@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -7,6 +7,7 @@ import { buildDeveloperPrompt } from './05-build-dev-prompt.js';
 import type { TaskSpec } from '../types.js';
 import { routingArtifactsDir } from '../routing/artifacts-dir.js';
 import { assignmentLogPath } from '../routing/assignment-log.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const task: TaskSpec = {
   id: 'AISDLC-1',
@@ -32,7 +33,7 @@ beforeEach(() => {
   process.env.AI_SDLC_USAGE_DIR = join(pinned, 'usage');
 });
 afterEach(() => {
-  rmSync(pinned, { recursive: true, force: true });
+  removeFixtureDir(pinned);
   if (savedArts === undefined) delete process.env.ARTIFACTS_DIR;
   else process.env.ARTIFACTS_DIR = savedArts;
   if (savedUsage === undefined) delete process.env.AI_SDLC_USAGE_DIR;
@@ -151,7 +152,7 @@ describe('Step 5 — artifacts dir anchoring (AISDLC-654.2)', () => {
       expect(existsSync(assignmentLogPath(expected))).toBe(true);
       expect(existsSync(join(wt, '.ai-sdlc', 'artifacts'))).toBe(false);
     } finally {
-      rmSync(parent, { recursive: true, force: true });
+      removeFixtureDir(parent);
     }
   });
 

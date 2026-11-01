@@ -13,7 +13,7 @@
  *   - `isSupervisorMissing` truth table.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -30,6 +30,7 @@ import {
   maybeEmitCostWarning,
 } from './cost-estimate.js';
 import type { DispatchManifest, DispatchVerdict } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function mkBoard(): string {
   return path.join(mkdtempSync(path.join(tmpdir(), 'sup-cost-')), 'dispatch');
@@ -39,7 +40,7 @@ const tmpRoots: string[] = [];
 afterEach(() => {
   for (const dir of tmpRoots.splice(0)) {
     try {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     } catch {
       /* ignore */
     }

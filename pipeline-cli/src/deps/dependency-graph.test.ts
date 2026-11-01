@@ -14,7 +14,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   blockers,
@@ -27,6 +27,7 @@ import {
   validate,
 } from './dependency-graph.js';
 import { cleanupTmpProject, makeTmpProject, writeTaskFile } from '../__test-helpers/make-task.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 
@@ -48,7 +49,7 @@ describe('buildDependencyGraph', () => {
 
   it('returns empty graph when workDir has no backlog/ at all', () => {
     const empty = makeTmpProject();
-    rmSync(join(empty, 'backlog'), { recursive: true, force: true });
+    removeFixtureDir(join(empty, 'backlog'));
     const g = buildDependencyGraph({ workDir: empty });
     expect(g.nodes.size).toBe(0);
     cleanupTmpProject(empty);
@@ -182,7 +183,7 @@ describe('frontier', () => {
     expect(f.map((e) => e.id).sort()).toEqual(['AISDLC-B', 'AISDLC-C']);
 
     // Now mark B+C done. D should be on the frontier.
-    rmSync(join(tmp, 'backlog'), { recursive: true });
+    removeFixtureDir(join(tmp, 'backlog'));
     mkdirSync(join(tmp, 'backlog', 'tasks'), { recursive: true });
     mkdirSync(join(tmp, 'backlog', 'completed'), { recursive: true });
     writeTaskFile(tmp, { id: 'AISDLC-A', title: 'a', completed: true });

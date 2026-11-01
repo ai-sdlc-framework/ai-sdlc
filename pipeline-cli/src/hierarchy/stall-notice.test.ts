@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ensureBoardDirs, writeHeartbeat, writeManifest } from '../dispatch/board.js';
 import { runStallNotice } from './stall-notice.js';
 import type { CommandRunner } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const T0 = Date.parse('2026-10-16T10:00:00Z');
 let dir: string;
@@ -40,7 +41,7 @@ beforeEach(() => {
     return { status: 0, stdout: '', stderr: '' };
   };
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(dir));
 
 describe('runStallNotice (AISDLC-871)', () => {
   it('sends nothing for an empty queue', () => {

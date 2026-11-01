@@ -25,7 +25,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -45,6 +44,7 @@ import {
 } from './00-5-sync-parent.js';
 import type { FileDeps } from '../cli/file.js';
 import { FakeRunner, ok, fail as fakeRunnerFail } from '../__test-helpers/fake-runner.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let workDir: string;
 
@@ -56,7 +56,7 @@ beforeEach(() => {
 
 afterEach(() => {
   try {
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   } catch {
     // ignore
   }

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -11,13 +11,14 @@ import {
   DEFAULT_ROLE_BUDGETS,
   DEFAULT_SCORECARD_MIN_TASKS,
 } from './usage-config.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const NOW = new Date('2026-09-10T12:00:00.000Z');
 let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'usage-pane-'));
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(dir));
 
 function call(n: number, over: Partial<ModelCallRecord> = {}): ModelCallRecord {
   return {

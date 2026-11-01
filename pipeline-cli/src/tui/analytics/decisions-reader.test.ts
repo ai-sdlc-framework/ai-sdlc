@@ -2,7 +2,7 @@
  * Tests for the decisions.jsonl reader (AISDLC-178.6).
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readDecisions } from './decisions-reader.js';
 import { decisionsPath, operatorDirPath } from './paths.js';
 import type { DecisionRecord } from './decisions-writer.js';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 let workdir: string;
 
@@ -18,7 +19,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDir(workdir);
 });
 
 const VALID_RECORD: DecisionRecord = {

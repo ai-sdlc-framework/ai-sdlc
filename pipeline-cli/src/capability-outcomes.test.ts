@@ -6,7 +6,7 @@
  * never depends on the report.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -31,6 +31,7 @@ import type { Decision } from './decisions/decision-record.js';
 import type { StageAResult } from './estimation/types.js';
 import type { IssueInput } from './dor/types.js';
 import type { StageAOutput } from './decisions/decision-record.js';
+import { removeFixtureDir } from './__test-helpers/remove-fixture-dir.js';
 
 const PIPELINE_CLI_CAPABILITIES = [
   'classifier.capture-triage',
@@ -61,7 +62,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDir(root);
   if (savedInvokerModule === undefined) delete process.env.AI_SDLC_CLASSIFIER_INVOKER_MODULE;
   else process.env.AI_SDLC_CLASSIFIER_INVOKER_MODULE = savedInvokerModule;
   resetInvokerCache();

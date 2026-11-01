@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -9,6 +9,7 @@ import {
 } from './decision-point.js';
 import { listDecisions } from '../decisions/projection.js';
 import { DECISION_CATALOG_FLAG } from '../decisions/feature-flag.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const ENV = { [DECISION_CATALOG_FLAG]: 'experimental' } as NodeJS.ProcessEnv;
 const FM = 'id: AISDLC-9\nreferences:\n  - spec/rfcs/RFC-0053-x.md\n';
@@ -21,7 +22,7 @@ let workDir: string;
 beforeEach(() => {
   workDir = mkdtempSync(join(tmpdir(), 'dp-'));
 });
-afterEach(() => rmSync(workDir, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(workDir));
 
 const base = () => ({
   taskId: 'AISDLC-9',

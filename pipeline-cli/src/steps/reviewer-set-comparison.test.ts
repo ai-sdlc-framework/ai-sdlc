@@ -2,7 +2,7 @@
  * AISDLC-722 comparison window: the log is bounded, records disagreements, and never blocks.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -14,12 +14,13 @@ import {
   recordReviewerSetOutcome,
   summarizeComparisonWindow,
 } from './reviewer-set-comparison.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'reviewer-set-comparison-'));
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(dir));
 
 const T0 = new Date('2026-10-10T00:00:00.000Z');
 const two = { set: 'two' as const, reason: 'no-trust-chain-path', triggeringPaths: [] };

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -11,6 +11,7 @@ import {
   resolveHooksDir,
 } from './hooks-check.js';
 import { FakeRunner, fail, ok } from '../__test-helpers/fake-runner.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let root: string;
 let main: string;
@@ -24,7 +25,7 @@ beforeEach(() => {
   mkdirSync(wt, { recursive: true });
 });
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDir(root);
 });
 
 const HOOKS_REL = '.husky/_';

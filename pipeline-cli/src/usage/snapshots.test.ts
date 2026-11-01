@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -16,12 +16,13 @@ import {
 } from './snapshots.js';
 import { deriveUnitWeights } from './units.js';
 import type { WindowSpec } from './usage-config.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'usage-snap-'));
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(dir));
 
 const rules = { allotmentTolerance: 0.25, modelMixSimilarity: 0.8 };
 const weights = deriveUnitWeights([], '2026-09-01T00:00:00Z');

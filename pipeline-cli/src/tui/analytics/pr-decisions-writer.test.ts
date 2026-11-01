@@ -2,7 +2,7 @@
  * Tests for the PR-decisions writer + transition tracker (AISDLC-178.6 AC#2).
  */
 
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,6 +15,7 @@ import {
 } from './pr-decisions-writer.js';
 import { prDecisionsPath } from './paths.js';
 import type { GhPrSummary } from '../sources/gh-pr-cache.js';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 let workdir: string;
 
@@ -23,7 +24,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDir(workdir);
 });
 
 const SAMPLE_RECORD: PrDecisionRecord = {

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -15,10 +15,11 @@ import {
   verifyProof,
   type VerifyContext,
 } from './promote.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let root: string;
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDir(root);
   process.exitCode = 0;
 });
 

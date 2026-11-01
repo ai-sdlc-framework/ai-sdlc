@@ -11,7 +11,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -23,6 +23,7 @@ import { appendDecisionEvent } from './event-log.js';
 import { makeDecisionOpenedEvent } from './event-log.js';
 import { makeStageCCompletedEvent } from './stage-c.js';
 import type { StageCOutput } from './decision-record.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 
@@ -31,7 +32,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
 });
 
 function seedCorpus(entry: CalibrationCorpusEntry): void {

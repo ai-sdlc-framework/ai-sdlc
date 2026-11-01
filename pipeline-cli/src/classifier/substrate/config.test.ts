@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -14,6 +14,7 @@ import {
   DEFAULT_HAIKU_MODEL,
   loadSubstrateConfig,
 } from './config.js';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 function makeRepoRoot(): string {
   const dir = mkdtempSync(join(tmpdir(), 'aisdlc-321-config-'));
@@ -38,7 +39,7 @@ describe('loadSubstrateConfig — defaults', () => {
       expect(cfg.model).toBe(DEFAULT_HAIKU_MODEL);
       expect(cfg.dailyTokenCap).toBe(DEFAULT_DAILY_TOKEN_CAP);
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 
@@ -49,7 +50,7 @@ describe('loadSubstrateConfig — defaults', () => {
       const cfg = loadSubstrateConfig('capture-triage', repoRoot);
       expect(cfg.threshold).toBe(DEFAULT_CONFIDENCE_THRESHOLD);
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 
@@ -64,7 +65,7 @@ describe('loadSubstrateConfig — defaults', () => {
       const cfg = loadSubstrateConfig('capture-triage', repoRoot);
       expect(cfg.threshold).toBe(DEFAULT_CONFIDENCE_THRESHOLD);
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 });
@@ -82,7 +83,7 @@ describe('loadSubstrateConfig — global overrides', () => {
       expect(cfg.threshold).toBe(0.85);
       expect(cfg.model).toBe('claude-sonnet-4-5');
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 
@@ -101,7 +102,7 @@ describe('loadSubstrateConfig — global overrides', () => {
       expect(decisionCfg.threshold).toBe(0.9);
       expect(decisionCfg.model).toBe('claude-opus-4-7');
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 });
@@ -131,7 +132,7 @@ describe('loadSubstrateConfig — per-task overrides', () => {
       expect(severity.threshold).toBe(0.85);
       expect(severity.model).toBe('claude-sonnet-4-5');
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 });
@@ -145,7 +146,7 @@ describe('loadSubstrateConfig — clamping', () => {
       writeYaml(repoRoot, 'capture-config.yaml', 'classifier:\n  threshold: -0.5\n');
       expect(loadSubstrateConfig('capture-triage', repoRoot).threshold).toBe(0);
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 
@@ -157,7 +158,7 @@ describe('loadSubstrateConfig — clamping', () => {
         DEFAULT_CONFIDENCE_THRESHOLD,
       );
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 
@@ -169,7 +170,7 @@ describe('loadSubstrateConfig — clamping', () => {
         DEFAULT_DAILY_TOKEN_CAP,
       );
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 });
@@ -208,7 +209,7 @@ describe('loadSubstrateConfig — per-agent overrides (AISDLC-275 AC-4)', () => 
       // Unknown agentRole → falls back to per-task.
       expect(loadSubstrateConfig('capture-triage', repoRoot, 'never-heard-of').threshold).toBe(0.6);
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 
@@ -232,7 +233,7 @@ describe('loadSubstrateConfig — per-agent overrides (AISDLC-275 AC-4)', () => 
         0.85,
       );
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 
@@ -246,7 +247,7 @@ describe('loadSubstrateConfig — per-agent overrides (AISDLC-275 AC-4)', () => 
       );
       expect(loadSubstrateConfig('capture-triage', repoRoot, 'rogue').threshold).toBe(1);
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 
@@ -258,7 +259,7 @@ describe('loadSubstrateConfig — per-agent overrides (AISDLC-275 AC-4)', () => 
         0.7,
       );
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 });

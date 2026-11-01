@@ -24,7 +24,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runOrchestratorTick, type OrchestratorAdapters } from './index.js';
@@ -32,6 +32,7 @@ import { defaultOrchestratorConfig, ORCHESTRATOR_SPAWNER_ENV } from './loop.js';
 import type { PipelineLogger, PipelineResult } from '../types.js';
 import type { ExecuteCommandResult } from '../cli/execute.js';
 import type { RichDispatchResult } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -769,7 +770,7 @@ describe('runOrchestratorTick — umbrella dispatch (AISDLC-229)', () => {
         } else {
           process.env.CODEX_SPAWN_AGENT_BIN = previousBridge;
         }
-        rmSync(workDir, { recursive: true, force: true });
+        removeFixtureDir(workDir);
       }
     });
   });

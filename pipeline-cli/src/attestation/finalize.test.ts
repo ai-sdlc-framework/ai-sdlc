@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { finalizeAttestation, missingInputs, type RunFn } from './finalize.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const SHA = 'a'.repeat(40);
 const PID = 'b'.repeat(40);
@@ -19,7 +20,7 @@ beforeEach(() => {
     writeFileSync(join(dir, `${r}.verdict.json`), '{}');
   }
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(root));
 
 function opts(run: RunFn) {
   return {

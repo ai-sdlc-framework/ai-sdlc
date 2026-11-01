@@ -4,7 +4,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -14,6 +14,7 @@ import {
   readCorpus,
   type CalibrationCorpusEntry,
 } from '../classifier/substrate/index.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function makeRepo(): string {
   return mkdtempSync(join(tmpdir(), 'aisdlc-321-cli-classifier-'));
@@ -66,7 +67,7 @@ describe('cli-classifier corpus aggregate', () => {
     repo = makeRepo();
   });
   afterEach(() => {
-    rmSync(repo, { recursive: true, force: true });
+    removeFixtureDir(repo);
   });
 
   it('emits an empty per-task-type breakdown when no corpus exists', async () => {
@@ -164,7 +165,7 @@ describe('cli-classifier corpus stats', () => {
     repo = makeRepo();
   });
   afterEach(() => {
-    rmSync(repo, { recursive: true, force: true });
+    removeFixtureDir(repo);
   });
 
   it('reports accuracy + above/below-threshold override rates', async () => {
@@ -217,7 +218,7 @@ describe('cli-classifier corpus resolve-silence', () => {
     repo = makeRepo();
   });
   afterEach(() => {
-    rmSync(repo, { recursive: true, force: true });
+    removeFixtureDir(repo);
   });
 
   it('flips old pending entries to positive', async () => {

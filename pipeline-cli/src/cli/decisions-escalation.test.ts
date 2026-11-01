@@ -25,6 +25,7 @@ import { ensureBoardDirs, writeManifest } from '../dispatch/board.js';
 import type { DispatchManifest } from '../dispatch/types.js';
 import type { HierarchyEvent } from '../hierarchy/emit.js';
 import type { RosterEntry } from '../hierarchy/types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 let boardDir: string;
@@ -158,7 +159,7 @@ afterEach(() => {
     if (savedEnv[k] === undefined) delete process.env[k];
     else process.env[k] = savedEnv[k];
   }
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
   vi.restoreAllMocks();
 });
 

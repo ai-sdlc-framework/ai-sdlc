@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -17,6 +17,7 @@ import {
 } from './manifest.js';
 import { CODE_TEST_MERGED_REVIEWER_SET, classifyReviewerSet } from '../steps/reviewer-set.js';
 import { checkReviewerKindCoverage } from '../../attestation-core/review-scope-core.mjs';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const PEM = '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAabc=\n-----END PUBLIC KEY-----';
 const answers = { identity: 'a@b.c', pubkey: PEM, org: 'acme', repo: 'widgets' };
@@ -25,7 +26,7 @@ let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'cfg-manifest-'));
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(dir));
 
 describe('manifest contents (AC1)', () => {
   it('lists every .ai-sdlc path read for attestation and review, each with a since version', () => {

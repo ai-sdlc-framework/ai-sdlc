@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -22,6 +22,7 @@ import {
   shipTask,
 } from './ship.js';
 import type { NextStepState } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const policyOverride = vi.hoisted(() => ({ mode: null as null | 'lease' | 'never' }));
 vi.mock('../hierarchy/operational.js', async (orig) => {
@@ -530,7 +531,7 @@ describe('preSignRebase against real git and the real ledger writer (AISDLC-1021
     );
 
   afterEach(() => {
-    rmSync(base, { recursive: true, force: true });
+    removeFixtureDir(base);
   });
 
   it('stages and tracks the ledger the real writer wrote for a mixed-case task id', async () => {

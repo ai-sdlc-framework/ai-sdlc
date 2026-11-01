@@ -5,7 +5,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -20,6 +20,7 @@ import {
   trustedPolicyRoot,
   verifiedMainRoot,
 } from './trusted-root.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const require = createRequire(import.meta.url);
 const hookLib = require(
@@ -36,7 +37,7 @@ let tmp: string;
 beforeEach(() => {
   tmp = realpathSync(mkdtempSync(path.join(tmpdir(), 'trusted-root-')));
 });
-afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(tmp));
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', args, {

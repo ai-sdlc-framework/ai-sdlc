@@ -6,7 +6,7 @@
  * Phase 5 (AISDLC-306 / OQ-7) adds risk-based blast-radius composition.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -22,6 +22,7 @@ import {
   DETERMINISM_SAMPLE_FRACTION,
   type DeterminismBaseline,
 } from './determinism-detector.js';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 let workdir: string;
 
@@ -30,7 +31,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDir(workdir);
 });
 
 const BASELINE: DeterminismBaseline = {

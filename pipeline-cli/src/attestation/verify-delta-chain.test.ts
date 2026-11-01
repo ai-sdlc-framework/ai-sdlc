@@ -5,13 +5,14 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { generateKeyPairSync } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appendLeafForPatchId, type TranscriptLeaf } from './merkle.js';
 import { signAndWriteV6Envelope } from './sign-v6.js';
 // @ts-expect-error -- plain ESM, no type declarations shipped
 import { verifyDeltaChain, verifyV6Envelope } from '../../attestation-core/verify-core.mjs';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const sha = (c: string) => c.repeat(40);
 const HEAD = sha('c');
@@ -120,7 +121,7 @@ describe('verifyV6Envelope surfaces delta base shas', () => {
     privateKeyPem = kp.privateKey.export({ format: 'pem', type: 'pkcs8' }) as string;
     publicKeyPem = kp.publicKey.export({ format: 'pem', type: 'spki' }) as string;
   });
-  afterEach(() => rmSync(tmpRoot, { recursive: true, force: true }));
+  afterEach(() => removeFixtureDir(tmpRoot));
 
   function verifyWith(extra: Partial<TranscriptLeaf>) {
     const patchId = '7'.repeat(40);

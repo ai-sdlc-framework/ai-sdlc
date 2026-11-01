@@ -1,6 +1,6 @@
 /** Hermetic tests for `cli-hierarchy spawn` (AISDLC-1073): fake tmux runner, temp board. */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -12,6 +12,7 @@ import { hierarchyDown } from './down.js';
 import { hierarchySpawn, reapOrphanExecutorSessions } from './spawn.js';
 import type { HierarchyDeps } from './types.js';
 import { isSpawnedExecutorNameOf, spawnedExecutorName } from './validate.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 let deps: HierarchyDeps;
@@ -48,7 +49,7 @@ beforeEach(() => {
     pollIntervalMs: 1,
   };
 });
-afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(tmp));
 
 describe('spawnedExecutorName', () => {
   it('is a pure function of the task id', () => {

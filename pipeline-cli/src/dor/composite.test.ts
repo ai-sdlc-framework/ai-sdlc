@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MockSpawner } from '../runtime/subagent-spawner.js';
@@ -21,6 +21,7 @@ import {
 } from './composite.js';
 import type { StageBResult } from './stage-b.js';
 import type { GateEvaluation, GateId, IssueInput, StageAVerdict } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function gate(
   id: GateId,
@@ -301,7 +302,7 @@ describe('evaluateIssueE2E', () => {
       // Even without Stage B, the gate 4 + 6 verdicts remain skipped from Stage A
       expect(v.gates.find((g) => g.gateId === 4)?.verdict).toBe('skip');
     } finally {
-      rmSync(stub, { recursive: true, force: true });
+      removeFixtureDir(stub);
     }
   });
 

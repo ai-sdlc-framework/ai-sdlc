@@ -18,7 +18,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -30,6 +30,7 @@ import { emitDorDecisions, resolveDorDecision } from './dor-bridge.js';
 import { listDecisions } from './projection.js';
 import { buildDecisionsCli } from '../cli/decisions.js';
 import { DECISION_CATALOG_FLAG } from './feature-flag.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Test infrastructure ───────────────────────────────────────────────────────
 
@@ -95,7 +96,7 @@ afterEach(() => {
   if (savedEnvFlag === undefined) delete process.env[DECISION_CATALOG_FLAG];
   else process.env[DECISION_CATALOG_FLAG] = savedEnvFlag;
 
-  rmSync(workDir, { recursive: true, force: true });
+  removeFixtureDir(workDir);
 });
 
 function setArgv(...args: string[]): void {

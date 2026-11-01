@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +14,7 @@ import {
 import { editTableText, modelToWrite, type CommandRunner } from './route-apply.js';
 import { repoIdFor } from './repo-id.js';
 import { defaultUsageConfig } from './usage-config.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const T0 = Date.parse('2026-09-10T00:00:00Z');
 const SONNET = 'claude-sonnet-4-5';
@@ -62,7 +63,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllEnvs();
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDir(root);
 });
 
 function price(model: string, input: number): PriceRow {

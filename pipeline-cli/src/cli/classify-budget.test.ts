@@ -14,10 +14,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runClassifyBudgetCli } from './classify-budget.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const validVerdict = JSON.stringify({ approved: true, findings: [], summary: 'LGTM' });
 const budgetStderr =
@@ -45,7 +46,7 @@ afterEach(async () => {
   process.argv = originalArgv;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (process.stdout as any).write = originalWrite;
-  await rm(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
 });
 
 async function runWith(files: {

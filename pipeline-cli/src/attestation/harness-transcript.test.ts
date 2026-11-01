@@ -22,7 +22,6 @@ import {
   mkdtempSync,
   readdirSync,
   realpathSync,
-  rmSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
@@ -31,6 +30,7 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let fakeHomeDir = '';
 
@@ -66,8 +66,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(repoRoot, { recursive: true, force: true });
-  rmSync(fakeHomeDir, { recursive: true, force: true });
+  removeFixtureDir(repoRoot);
+  removeFixtureDir(fakeHomeDir);
 });
 
 // ── Path derivation ─────────────────────────────────────────────────────────
@@ -95,7 +95,7 @@ describe('resolveMostRecentSessionDir', () => {
     const dir = mkdtempSync(join(tmpdir(), 'no-subdirs-'));
     writeFileSync(join(dir, 'not-a-dir.txt'), 'x');
     expect(resolveMostRecentSessionDir(dir)).toBeNull();
-    rmSync(dir, { recursive: true, force: true });
+    removeFixtureDir(dir);
   });
 
   it('returns the most-recently-modified subdirectory', () => {
@@ -110,7 +110,7 @@ describe('resolveMostRecentSessionDir', () => {
     utimesSync(newer, now, now);
 
     expect(resolveMostRecentSessionDir(dir)).toBe(newer);
-    rmSync(dir, { recursive: true, force: true });
+    removeFixtureDir(dir);
   });
 });
 
@@ -618,7 +618,7 @@ describe('resolveMainCheckoutRoot', () => {
     mainRoot = mkdtempSync(join(tmpdir(), 'main-checkout-'));
     initGitRepo(mainRoot);
     worktreeRoot = mkdtempSync(join(tmpdir(), 'linked-worktree-'));
-    rmSync(worktreeRoot, { recursive: true, force: true }); // git worktree add requires a non-existent target
+    removeFixtureDir(worktreeRoot); // git worktree add requires a non-existent target
     execFileSync('git', ['worktree', 'add', '-q', '-b', 'aisdlc-589-branch', worktreeRoot], {
       cwd: mainRoot,
     });
@@ -628,9 +628,9 @@ describe('resolveMainCheckoutRoot', () => {
     try {
       execFileSync('git', ['worktree', 'remove', '--force', worktreeRoot], { cwd: mainRoot });
     } catch {
-      rmSync(worktreeRoot, { recursive: true, force: true });
+      removeFixtureDir(worktreeRoot);
     }
-    rmSync(mainRoot, { recursive: true, force: true });
+    removeFixtureDir(mainRoot);
   });
 
   it('resolves a linked worktree back to the main checkout root', () => {
@@ -648,7 +648,7 @@ describe('resolveMainCheckoutRoot', () => {
   it('returns null for a directory that is not a git repo at all', () => {
     const nonRepo = mkdtempSync(join(tmpdir(), 'not-a-repo-'));
     expect(resolveMainCheckoutRoot(nonRepo)).toBeNull();
-    rmSync(nonRepo, { recursive: true, force: true });
+    removeFixtureDir(nonRepo);
   });
 });
 
@@ -657,7 +657,7 @@ describe('resolveClaudeProjectRoot', () => {
     const override = mkdtempSync(join(tmpdir(), 'override-'));
     const resolved = resolveClaudeProjectRoot({ repoRoot, projectDirOverride: override });
     expect(realpathSync(resolved)).toBe(realpathSync(override));
-    rmSync(override, { recursive: true, force: true });
+    removeFixtureDir(override);
   });
 
   it('falls back to repoRoot itself when git resolution fails (not a git repo)', () => {
@@ -674,7 +674,7 @@ describe('computeHarnessTranscriptHash — AISDLC-589 Gap A worktree resolution'
     mainRoot = mkdtempSync(join(tmpdir(), 'main-checkout-'));
     initGitRepo(mainRoot);
     worktreeRoot = mkdtempSync(join(tmpdir(), 'linked-worktree-'));
-    rmSync(worktreeRoot, { recursive: true, force: true });
+    removeFixtureDir(worktreeRoot);
     execFileSync('git', ['worktree', 'add', '-q', '-b', 'aisdlc-589-branch-2', worktreeRoot], {
       cwd: mainRoot,
     });
@@ -684,9 +684,9 @@ describe('computeHarnessTranscriptHash — AISDLC-589 Gap A worktree resolution'
     try {
       execFileSync('git', ['worktree', 'remove', '--force', worktreeRoot], { cwd: mainRoot });
     } catch {
-      rmSync(worktreeRoot, { recursive: true, force: true });
+      removeFixtureDir(worktreeRoot);
     }
-    rmSync(mainRoot, { recursive: true, force: true });
+    removeFixtureDir(mainRoot);
   });
 
   it('yields a non-null harnessTranscriptHash for a reviewer dispatched from a worktree, using the MAIN checkout slug', () => {
@@ -781,7 +781,7 @@ describe('computeHarnessTranscriptHash — AISDLC-589 Gap A worktree resolution'
     });
 
     expect(result.harnessTranscriptHash).not.toBeNull();
-    rmSync(overrideRoot, { recursive: true, force: true });
+    removeFixtureDir(overrideRoot);
   });
 });
 
@@ -907,7 +907,7 @@ describe('resolveHarnessTranscriptPath — path-traversal hardening', () => {
     });
 
     expect(result.transcriptPath).toBeNull();
-    rmSync(evilRoot, { recursive: true, force: true });
+    removeFixtureDir(evilRoot);
   });
 
   it('rejects a symlinked session directory that resolves outside the trusted project directory', () => {
@@ -934,7 +934,7 @@ describe('resolveHarnessTranscriptPath — path-traversal hardening', () => {
 
     expect(result.transcriptPath).toBeNull();
     expect(result.reason).toMatch(/resolves outside the trusted project directory/);
-    rmSync(evilRoot, { recursive: true, force: true });
+    removeFixtureDir(evilRoot);
   });
 
   it('computeHarnessTranscriptHash end-to-end: a traversal --claude-session-id never yields a hash even with a valid nonce + marker', () => {
@@ -966,7 +966,7 @@ describe('resolveHarnessTranscriptPath — path-traversal hardening', () => {
     });
 
     expect(result.harnessTranscriptHash).toBeNull();
-    rmSync(evilRoot, { recursive: true, force: true });
+    removeFixtureDir(evilRoot);
   });
 });
 
@@ -989,7 +989,7 @@ describe('computeHarnessTranscriptHash — marker location and reviewer binding'
     mainRoot = mkdtempSync(join(tmpdir(), 'main-checkout-bind-'));
     initGitRepo(mainRoot);
     worktreeRoot = mkdtempSync(join(tmpdir(), 'linked-worktree-bind-'));
-    rmSync(worktreeRoot, { recursive: true, force: true });
+    removeFixtureDir(worktreeRoot);
     execFileSync('git', ['worktree', 'add', '-q', '-b', 'bind-branch', worktreeRoot], {
       cwd: mainRoot,
     });
@@ -999,9 +999,9 @@ describe('computeHarnessTranscriptHash — marker location and reviewer binding'
     try {
       execFileSync('git', ['worktree', 'remove', '--force', worktreeRoot], { cwd: mainRoot });
     } catch {
-      rmSync(worktreeRoot, { recursive: true, force: true });
+      removeFixtureDir(worktreeRoot);
     }
-    rmSync(mainRoot, { recursive: true, force: true });
+    removeFixtureDir(mainRoot);
   });
 
   /** Three reviewers spawned ~2 s apart from a session rooted at the MAIN checkout. */
@@ -1161,7 +1161,7 @@ describe('computeHarnessTranscriptHash — marker location and reviewer binding'
       });
       expect(result.harnessTranscriptHash).toBe(sha256Hex(content));
     } finally {
-      rmSync(sessionDir, { recursive: true, force: true });
+      removeFixtureDir(sessionDir);
     }
   });
 

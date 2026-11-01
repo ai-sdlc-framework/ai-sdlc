@@ -4,7 +4,6 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -22,6 +21,7 @@ import {
   syncVscodeTasks,
 } from './terminals.js';
 import type { HierarchyDeps, RosterEntry } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const BIN = '/opt/My Tools/pipeline-cli/bin/cli-hierarchy.mjs';
 let tmp: string;
@@ -83,7 +83,7 @@ beforeEach(() => {
   mkdirSync(deps.cwd, { recursive: true });
 });
 
-afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(tmp));
 
 const OPTS = { force: false, print: false };
 

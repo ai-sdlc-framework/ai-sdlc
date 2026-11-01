@@ -3,7 +3,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -13,6 +13,7 @@ import {
   resolveDorConfigPath,
   validateDorConfig,
 } from './dor-config.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 
@@ -21,7 +22,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (tmp) rmSync(tmp, { recursive: true, force: true });
+  if (tmp) removeFixtureDir(tmp);
 });
 
 describe('resolveDorConfigPath', () => {

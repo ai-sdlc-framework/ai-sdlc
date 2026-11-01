@@ -20,7 +20,7 @@
  */
 
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -46,6 +46,7 @@ import {
   type SupervisorSpawn,
 } from './supervisor.js';
 import type { DispatchManifest, InflightHeartbeat } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ---------------------------------------------------------------------------
 // fixture helpers
@@ -263,7 +264,7 @@ describe('runSupervisorTick', () => {
 
   afterEach(() => {
     try {
-      rmSync(path.dirname(boardDir), { recursive: true, force: true });
+      removeFixtureDir(path.dirname(boardDir));
     } catch {
       /* ignore */
     }

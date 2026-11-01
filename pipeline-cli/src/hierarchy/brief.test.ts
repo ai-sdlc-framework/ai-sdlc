@@ -9,7 +9,6 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -39,6 +38,7 @@ import {
   type HierarchyDeps,
   type RosterEntry,
 } from './index.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const NOW = new Date('2026-09-30T12:00:00.000Z');
 const RFC = 'spec/rfcs/RFC-0099-demo.md';
@@ -137,7 +137,7 @@ beforeEach(() => {
   seedSixTasks();
 });
 
-afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(tmp));
 
 function brief(sel: { tasks?: string; rfc?: string }, extra: { force?: boolean } = {}) {
   return generateBrief({ ...sel, ...extra }, deps);

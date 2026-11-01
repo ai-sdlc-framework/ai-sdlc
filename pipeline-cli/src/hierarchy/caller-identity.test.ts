@@ -3,7 +3,7 @@
  * ever read.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -17,6 +17,7 @@ import {
   type CallerSession,
   type IdentityDeps,
 } from './caller-identity.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const session = (name: string, role: string, pid: number, status = 'running'): CallerSession => ({
   name,
@@ -184,7 +185,7 @@ describe('createSystemIdentity', () => {
   beforeEach(() => {
     tmp = mkdtempSync(path.join(tmpdir(), 'identity-'));
   });
-  afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+  afterEach(() => removeFixtureDir(tmp));
 
   it('reads the roster file and nothing else about the sessions', () => {
     const deps = createSystemIdentity(tmp);

@@ -4,7 +4,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +16,7 @@ import {
   type ResolvedJudgmentConfig,
 } from '@ai-sdlc/reference';
 import { runJudgmentCli } from './judgment.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const CORPUS = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -56,7 +57,7 @@ let tmp: string;
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), 'cli-judgment-class-'));
 });
-afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(tmp));
 
 describe('cli-judgment eval estimate.class', () => {
   it('is registered, and runs against a JSONL corpus with a fake provider', async () => {

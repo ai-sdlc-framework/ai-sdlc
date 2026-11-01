@@ -8,13 +8,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
   buildBacklogVerifyCli,
   extractTaskIdFromFilename,
   verifyBacklogIntegrity,
 } from './backlog-verify.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Fixtures ───────────────────────────────────────────────────────────
 
@@ -28,7 +29,7 @@ function setupWorkDir(): void {
 
 function teardownWorkDir(): void {
   try {
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   } catch {
     // ignore
   }
@@ -153,7 +154,7 @@ describe('verifyBacklogIntegrity — resilience', () => {
 
   it('handles missing backlog directories gracefully', () => {
     // Remove both dirs.
-    rmSync(join(workDir, 'backlog'), { recursive: true, force: true });
+    removeFixtureDir(join(workDir, 'backlog'));
     const result = verifyBacklogIntegrity(workDir);
     expect(result.ok).toBe(true);
     expect(result.locations).toHaveLength(0);

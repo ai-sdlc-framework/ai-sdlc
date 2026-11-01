@@ -39,7 +39,7 @@
  * runs it; a failure should block flag promotion.
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -55,6 +55,7 @@ import {
 import { eventsFilePath, writeEvent } from './events.js';
 import { readPersistedWorkerState, WorkerStateTracker } from './playbook/index.js';
 import type { PipelineLogger, PipelineResult } from '../types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let workdir: string;
 let savedEnv: NodeJS.ProcessEnv;
@@ -66,7 +67,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDir(workdir);
   process.env = savedEnv;
 });
 

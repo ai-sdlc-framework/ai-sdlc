@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadAdopterAuthoringConfig, resolveAdopterAuthoringPath } from './config.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function withTmp(fn: (dir: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), 'adopter-auth-cfg-'));
   try {
     fn(dir);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    removeFixtureDir(dir);
   }
 }
 

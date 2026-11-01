@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -12,6 +12,7 @@ import {
   readModuleMeasure,
 } from './module-health.js';
 import type { HierarchyDeps, RosterEntry } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const dirs: string[] = [];
 function board(): string {
@@ -21,7 +22,7 @@ function board(): string {
   return d;
 }
 afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  for (const d of dirs.splice(0)) removeFixtureDir(d);
 });
 
 const NOW = new Date('2026-10-23T12:00:00Z');

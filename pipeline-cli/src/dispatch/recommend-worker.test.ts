@@ -4,7 +4,7 @@
  * AISDLC-377.5.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -18,6 +18,7 @@ import {
   recommendWorkerKind,
   TIGHT_QUOTA_THRESHOLD,
 } from './recommend-worker.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 
@@ -27,7 +28,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
 });
 
 function writeDispatchConfig(content: string): void {

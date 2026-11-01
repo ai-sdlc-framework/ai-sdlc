@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchUsageIngestDetached } from './launch.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'usage-launch-'));
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(dir));
 
 async function waitFor(path: string): Promise<boolean> {
   for (let i = 0; i < 100; i++) {

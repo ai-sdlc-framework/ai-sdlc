@@ -25,7 +25,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CLAUDE_SONNET_MODEL_ID } from '@ai-sdlc/reference';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -42,6 +42,7 @@ import {
 import type { ReviewerRole, ModelRequest } from './reviewer-runner.js';
 import type { ReviewerVerdict } from './report-validator.js';
 import type { DifferentialTestResult } from './sandbox-runner.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Shared fixtures ───────────────────────────────────────────────────────────
 
@@ -899,7 +900,7 @@ describe('reviewer-runner.test.ts — no shared /tmp/.ai-sdlc pollution', () => 
       expect(dir).toContain('reviewer-runner-test-');
       expect(dir).not.toBe('/tmp/.ai-sdlc');
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 });

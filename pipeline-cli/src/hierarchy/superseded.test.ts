@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { closeSupersededPr, isCliBranchShape, taskIsDone } from './superseded.js';
 import type { CommandRunner } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let dir: string;
 beforeEach(() => {
@@ -13,7 +14,7 @@ beforeEach(() => {
   mkdirSync(path.join(dir, 'backlog', 'completed'), { recursive: true });
   writeFileSync(path.join(dir, 'backlog', 'completed', 'aisdlc-7 - Thing.md'), '');
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(dir));
 
 const SHA_A = 'a'.repeat(40);
 const SHA_B = 'b'.repeat(40);

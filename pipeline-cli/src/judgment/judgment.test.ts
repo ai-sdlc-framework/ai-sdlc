@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -11,6 +11,7 @@ import {
 import { buildJudgmentContext, resolveJudgmentArtifactsDir } from './context.js';
 import { createJudgmentEventsSink } from './events-sink.js';
 import type { OrchestratorEvent } from '../orchestrator/events.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 interface Input {
   text: string;
@@ -32,7 +33,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'judgment-ctx-'));
 });
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+  removeFixtureDir(dir);
 });
 
 function baseRec(over: Partial<JudgmentEvaluationRecord> = {}): JudgmentEvaluationRecord {

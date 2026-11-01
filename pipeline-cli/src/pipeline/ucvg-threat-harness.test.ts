@@ -50,7 +50,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -86,6 +86,7 @@ import {
   renderConformanceTable,
   type ConformanceRecord,
 } from './ucvg-threat-fixtures.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Gate ──────────────────────────────────────────────────────────────────────
 
@@ -136,7 +137,7 @@ afterAll(() => {
   // (leave it on failure so the operator can inspect artifacts)
   const allPassed = conformanceRecords.every((r) => r.passed);
   if (allPassed && existsSync(harnessTmpDir)) {
-    rmSync(harnessTmpDir, { recursive: true, force: true });
+    removeFixtureDir(harnessTmpDir);
   } else if (!allPassed) {
     console.log(`[ucvg-harness] Leaving temp dir for inspection: ${harnessTmpDir}`);
   }
@@ -242,7 +243,7 @@ describe('Vector 1 [integration]: benign PR passes all stages against real runti
           expect(result.differentialTest.upstreamSuitePassed).toBe(true);
         }
       } finally {
-        rmSync(tmpDir, { recursive: true, force: true });
+        removeFixtureDir(tmpDir);
       }
     },
     180_000, // 3 min test timeout
@@ -504,7 +505,7 @@ describe('Vector 6 [integration]: credential exfiltration — TypeScript-layer c
           }),
         ).rejects.toThrow(/GITHUB_TOKEN/);
       } finally {
-        rmSync(tmpDir, { recursive: true, force: true });
+        removeFixtureDir(tmpDir);
       }
     },
     60_000,
@@ -608,7 +609,7 @@ describe('Vector 7 [integration]: resource exhaustion — breach result shape an
         });
         expect(result.outcome).toBe('resource-breach');
       } finally {
-        rmSync(tmpDir, { recursive: true, force: true });
+        removeFixtureDir(tmpDir);
       }
     },
     30_000,

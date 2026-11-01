@@ -1,8 +1,9 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const execFileSync = vi.hoisted(() => vi.fn());
 vi.mock('node:child_process', () => ({ execFileSync }));
@@ -44,7 +45,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   execFileSync.mockReset();
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDir(root);
 });
 
 describe('requeueFailed default PR state reader', () => {

@@ -4,7 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -28,6 +28,7 @@ import {
 import { pathClassifierReviewers, routeReviewers } from './review-routing.js';
 import { reviewPaths } from './review-judgment-support.js';
 import { isTrustChainPath } from '../../attestation-core/review-scope-core.mjs';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const KEY = 'fake@fake-1';
 const SET_ID = 'review.reviewer-set';
@@ -518,7 +519,7 @@ describe('judgment log record', () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'reviewer-set-log-'));
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => removeFixtureDir(dir));
 
   const lines = (): Record<string, unknown>[] => {
     const d = join(dir, '_judgment');
@@ -738,7 +739,7 @@ describe('deriveReviewerSetFromGit (AISDLC-722)', () => {
         reason: 'diff-unavailable',
       });
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 });

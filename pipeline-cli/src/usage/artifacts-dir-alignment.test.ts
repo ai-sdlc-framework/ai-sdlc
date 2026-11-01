@@ -3,7 +3,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -21,8 +20,8 @@ import { assignmentKey } from './scorecard.js';
 import { repoNameFor } from './attribution.js';
 import { defaultUsageConfig } from './usage-config.js';
 import { isUnderAiSdlc } from './replay-commands.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
-const RM = { recursive: true, force: true, maxRetries: 5, retryDelay: 50 } as const;
 let root: string;
 let usageDir: string;
 let savedEnv: string | undefined;
@@ -37,8 +36,8 @@ beforeEach(() => {
 afterEach(() => {
   if (savedEnv === undefined) delete process.env.ARTIFACTS_DIR;
   else process.env.ARTIFACTS_DIR = savedEnv;
-  rmSync(root, RM);
-  rmSync(usageDir, RM);
+  removeFixtureDir(root);
+  removeFixtureDir(usageDir);
 });
 
 async function cli(args: string[]): Promise<{ out: string; err: string; exit: number }> {
@@ -202,7 +201,7 @@ describe('replay guard narrowing', () => {
       expect(isUnderAiSdlc(join(root, '.ai-sdlc', 'artifacts', 'x.json'), root)).toBe(true);
       expect(isUnderAiSdlc(join(root, '.ai-sdlc', 'other', 'x.json'), root)).toBe(true);
     } finally {
-      rmSync(elsewhere, RM);
+      removeFixtureDir(elsewhere);
     }
   });
 
@@ -213,7 +212,7 @@ describe('replay guard narrowing', () => {
       symlinkSync(elsewhere, join(root, '.ai-sdlc', 'artifacts'));
       expect(isUnderAiSdlc(join(root, '.ai-sdlc', 'artifacts', 'x.json'), root)).toBe(true);
     } finally {
-      rmSync(elsewhere, RM);
+      removeFixtureDir(elsewhere);
     }
   });
 
@@ -227,7 +226,7 @@ describe('replay guard narrowing', () => {
       expect(isUnderAiSdlc(join(root, '.ai-sdlc', 'artifacts', 'a', 'x.json'), root)).toBe(true);
       expect(isUnderAiSdlc(join(root, '.ai-sdlc', 'artifacts', 'o', 'x.json'), root)).toBe(true);
     } finally {
-      rmSync(outside, RM);
+      removeFixtureDir(outside);
     }
   });
 
@@ -388,6 +387,6 @@ describe('project-root anchoring from a worktree (AISDLC-654.2)', () => {
     const log = readScorecardAssignmentLog(assignmentLogPath(anchored));
     expect(log.has(assignmentKey('D-1', 'developer'))).toBe(true);
     expect(existsSync(join(wt, '.ai-sdlc', 'artifacts'))).toBe(false);
-    rmSync(parent, RM);
+    removeFixtureDir(parent);
   });
 });

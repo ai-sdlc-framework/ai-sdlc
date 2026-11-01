@@ -3,7 +3,7 @@
  * most one open at a time, naming the costliest step. Injected collaborators.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -20,6 +20,7 @@ import {
   TURN_BUDGET_DECISION_SCOPE,
   type TurnBudgetDecisionInput,
 } from './turn-budget.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const ticks = (n: number, turns: number, byStep: Record<string, number>): TickTurns[] =>
   Array.from({ length: n }, (_, i) => ({
@@ -91,7 +92,7 @@ describe('the decision catalog', () => {
   beforeEach(() => {
     work = mkdtempSync(path.join(tmpdir(), 'turn-budget-'));
   });
-  afterEach(() => rmSync(work, { recursive: true, force: true }));
+  afterEach(() => removeFixtureDir(work));
 
   const input: TurnBudgetDecisionInput = {
     scope: TURN_BUDGET_DECISION_SCOPE,
@@ -128,7 +129,7 @@ describe('loadDispatchTicks', () => {
         [],
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 
@@ -159,7 +160,7 @@ describe('loadDispatchTicks', () => {
         { tickId: 'operator-dispatch@x', startedAt: start, turns: 0, byStep: {} },
       ]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 });

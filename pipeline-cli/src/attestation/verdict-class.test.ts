@@ -9,7 +9,7 @@
  *   (d) malformed marker JSON -> 'self-authored' (fail-safe).
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -25,6 +25,7 @@ import {
   stripAgentTypeNamespace,
   subagentSessionsDir,
 } from './verdict-class.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let repoRoot: string;
 
@@ -33,7 +34,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(repoRoot, { recursive: true, force: true });
+  removeFixtureDir(repoRoot);
 });
 
 function writeMarker(
@@ -361,7 +362,7 @@ describe('determineVerdictClass — bound to the reviewer the leaf is for', () =
         })?.filePath,
       ).toBe(marker);
     } finally {
-      rmSync(sessionRoot, { recursive: true, force: true });
+      removeFixtureDir(sessionRoot);
     }
   });
 

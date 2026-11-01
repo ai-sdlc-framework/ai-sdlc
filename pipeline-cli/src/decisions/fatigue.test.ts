@@ -11,7 +11,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -26,6 +26,7 @@ import {
   type FatigueStatus,
 } from './fatigue.js';
 import { resolveFatigueConfig } from './decisions-config.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 
@@ -34,7 +35,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
 });
 
 // ── operator-state.yaml round-trip ────────────────────────────────────

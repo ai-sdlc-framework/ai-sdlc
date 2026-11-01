@@ -11,7 +11,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -31,6 +31,7 @@ import {
   saveReviewerCache,
   type CacheFileEntry,
 } from './reviewer-cache.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const HEAD_SHA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const OTHER_SHA = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
@@ -55,7 +56,7 @@ describe('reviewer-cache (iter-2)', () => {
 
   afterEach(() => {
     try {
-      rmSync(workDir, { recursive: true, force: true });
+      removeFixtureDir(workDir);
     } catch {
       /* ignore */
     }
@@ -622,7 +623,7 @@ describe('reviewer-cache (iter-2)', () => {
     });
 
     afterEach(() => {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     });
 
     it('resolveBlobShaForPath returns the 40-char SHA for a tracked file', () => {

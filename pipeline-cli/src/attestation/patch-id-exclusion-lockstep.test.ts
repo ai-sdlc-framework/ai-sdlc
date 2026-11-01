@@ -43,7 +43,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execSync } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
-import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { computePatchId, PATCH_ID_EXCLUSIONS } from './patch-id.js';
@@ -56,6 +56,7 @@ import { signAndWriteV6Envelope } from './sign-v6.js';
 import { verifyV6Envelope } from '../../attestation-core/verify-core.mjs';
 // @ts-expect-error -- plain ESM, no type declarations shipped
 import { ATTESTATION_PATH_EXCLUSIONS } from '../../attestation-core/verify-core.mjs';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -99,7 +100,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(repoDir, { recursive: true, force: true });
+  removeFixtureDir(repoDir);
 });
 
 // ---------------------------------------------------------------------------

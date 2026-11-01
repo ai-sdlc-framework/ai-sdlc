@@ -8,7 +8,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Decision } from './decision-record.js';
@@ -21,12 +21,13 @@ import {
   STAGE_B_LOW_CONFIDENCE_THRESHOLD,
 } from './stage-b.js';
 import { isStageCAutoApplyEligible, shouldFireStageC } from './stage-c.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), 'baseline-gating-'));
 });
-afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(tmp));
 
 const ID = 'DEC-0001';
 const DAY = 24 * 60 * 60 * 1000;

@@ -1,6 +1,6 @@
 /** `blockQueued` / `unblockManifest` round trip (AISDLC-1043). */
 
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -14,6 +14,7 @@ import {
   writeManifest,
 } from './board.js';
 import type { DispatchManifest } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let board: string;
 
@@ -23,7 +24,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(board, { recursive: true, force: true });
+  removeFixtureDir(board);
 });
 
 const at = (sub: string, id: string): string => path.join(board, sub, `${id}.dispatch.json`);
