@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1128
 title: 'Fixture teardowns never delete a path outside tmpdir: shared guard and sweep of the ten git-derived roots'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-31'
 labels:
