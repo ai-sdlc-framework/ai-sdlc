@@ -18,6 +18,7 @@ import {
   ATTESTATION_ENVELOPE_PATH_PATTERN,
   CONTENTHASH_SHARED_CHURN_FILES,
   CONTENTHASHV4_IGNORE_FILES,
+  DSSE_PAYLOAD_TYPE,
   INDEPENDENCE_REQUIRED_ROLES,
   REQUIRED_REVIEWER_AGENT_IDS,
   REVIEWER_ROLE_EQUIVALENCES,
@@ -47,7 +48,6 @@ import {
 } from './attestations.js';
 
 const FIXED_COMMIT = 'a'.repeat(40); // 40 hex chars
-const SECOND_COMMIT = 'b'.repeat(40);
 
 // AISDLC-103 (Verifier Phase 3): default inputs always carry a v3
 // `changedFileDeltas` set since `buildPredicate` requires it. The legacy
@@ -217,241 +217,7 @@ describe('buildPredicate', () => {
   });
 });
 
-describe('v5 is read-only after the v6 cutover (AISDLC-972)', () => {
-  function verifyV5(signedAt: string) {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const base = buildPredicate({ ...DEFAULT_INPUTS, signedAt });
-    const predicate = {
-      ...base,
-      schemaVersion: 'v5',
-      contentHashV5: 'a'.repeat(64),
-      signedMergeBase: 'b'.repeat(40),
-    } as unknown as AttestationPredicate;
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    return verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: { ...buildExpected(predicate), contentHashV5: 'a'.repeat(64) },
-    });
-  }
-
-  it('verifies a v5 envelope signed before the cutover', () => {
-    const result = verifyV5('2026-05-22T23:59:59.000Z');
-    expect(result.valid).toBe(true);
-  });
-
-  it('rejects a v5 envelope signed at or after the cutover', () => {
-    const after = verifyV5('2026-05-23T00:00:00.000Z');
-    expect(after.valid).toBe(false);
-    if (!after.valid) expect(after.reason).toBe('v5-after-cutover');
-    const later = verifyV5('2026-10-01T00:00:00.000Z');
-    expect(later.valid).toBe(false);
-  });
-
-  it('fails closed on a v5 envelope with a non-finite signedAt', () => {
-    // The shape validator rejects a non-ISO signedAt before the cutover branch runs.
-    const result = verifyV5('not-a-date');
-    expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toMatch(/signedAt/);
-  });
-});
-
-describe('signAttestation + verifyAttestation (happy path)', () => {
-  it('round-trips: sign then verify against the same trusted reviewer', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate(DEFAULT_INPUTS);
-    const envelope = signAttestation({
-      predicate,
-      privateKeyPem,
-      keyid: 'dev@example.com:laptop',
-    });
-
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: buildExpected(predicate),
-    });
-    expect(result.valid).toBe(true);
-    if (result.valid) {
-      expect(result.predicate.schemaVersion).toBe('v3');
-      expect(result.trustedReviewer.identity).toBe('dev@example.com');
-    }
-  });
-
-  it('verifies via any-of-N pubkeys (later trusted-reviewer matches)', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const { publicKeyPem: otherPubkey } = generateSigningKeyPair();
-    const predicate = buildPredicate(DEFAULT_INPUTS);
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [
-        makeTrustedReviewer(otherPubkey, { identity: 'other@example.com' }),
-        makeTrustedReviewer(publicKeyPem, { identity: 'dev@example.com' }),
-      ],
-      expected: buildExpected(predicate),
-    });
-    expect(result.valid).toBe(true);
-    if (result.valid) expect(result.trustedReviewer.identity).toBe('dev@example.com');
-  });
-});
-
 describe('verifyAttestation (failure modes)', () => {
-  it('rejects when no trusted reviewer pubkey matches (signature mismatch)', () => {
-    const { privateKeyPem } = generateSigningKeyPair();
-    const { publicKeyPem: otherPubkey } = generateSigningKeyPair();
-    const predicate = buildPredicate(DEFAULT_INPUTS);
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(otherPubkey)],
-      expected: buildExpected(predicate),
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toMatch(/signature did not match/);
-  });
-
-  it('rejects empty trusted reviewers list (missing-key path)', () => {
-    const { privateKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate(DEFAULT_INPUTS);
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [],
-      expected: buildExpected(predicate),
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toMatch(/signature did not match/);
-  });
-
-  it('rejects contentHashV3 mismatch (replay after force-push, AC #9)', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate(DEFAULT_INPUTS);
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: {
-        ...buildExpected(predicate),
-        contentHashV3: sha256Hex('something completely different'),
-      },
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toMatch(/contentHashV3 mismatch/);
-  });
-
-  it('rejects policyHash mismatch (policy edited after attestation, AC #10)', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate(DEFAULT_INPUTS);
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: { ...buildExpected(predicate), policyHash: sha256Hex('# new policy text') },
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toMatch(/policyHash mismatch/);
-  });
-
-  it('rejects agentFileHash mismatch (reviewer agent edited after attestation, AC #11)', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate(DEFAULT_INPUTS);
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-
-    const tamperedExpected = buildExpected(predicate);
-    tamperedExpected.expectedAgentFileHashes['code-reviewer'] = sha256Hex('CHANGED AGENT FILE');
-
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: tamperedExpected,
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.reason).toMatch(/agentFileHash mismatch/);
-      expect(result.reason).toMatch(/code-reviewer/);
-    }
-  });
-
-  it('rejects subject digest mismatch (copy-pasted attestation from another PR)', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate(DEFAULT_INPUTS);
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: { ...buildExpected(predicate), commitSha: SECOND_COMMIT },
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toMatch(/subject digest mismatch/);
-  });
-
-  it('rejects schemaVersion not in allowlist (AC #12)', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate(DEFAULT_INPUTS);
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-
-    // Use a custom (empty) allowlist to simulate a future deprecation.
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: buildExpected(predicate),
-      acceptedSchemaVersions: ['v9'],
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.reason).toMatch(/schemaVersion 'v3' not in allowlist/);
-    }
-  });
-
-  it('rejects forged envelope where the payload was swapped after signing', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate(DEFAULT_INPUTS);
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-
-    // Build a tampered predicate with a different contentHashV3, but reuse
-    // the original signature. Verify must reject — the PAE-encoded payload
-    // no longer matches what was signed.
-    const tampered: AttestationPredicate = {
-      ...predicate,
-      contentHashV3: sha256Hex('attacker-supplied content delta'),
-    };
-    const forged: DsseEnvelope = {
-      ...envelope,
-      payload: Buffer.from(JSON.stringify(tampered), 'utf-8').toString('base64'),
-    };
-
-    const result = verifyAttestation({
-      envelope: forged,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: buildExpected(tampered),
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toMatch(/signature did not match/);
-  });
-
-  it('rejects envelope with wrong payloadType', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate(DEFAULT_INPUTS);
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const result = verifyAttestation({
-      envelope: {
-        ...envelope,
-        payloadType: 'application/x-bogus' as unknown as typeof envelope.payloadType,
-      },
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: buildExpected(predicate),
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toMatch(/payloadType mismatch/);
-  });
-
   it('rejects envelope with no signatures', () => {
     const { publicKeyPem } = generateSigningKeyPair();
     const predicate = buildPredicate(DEFAULT_INPUTS);
@@ -488,18 +254,6 @@ describe('verifyAttestation (failure modes)', () => {
     });
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.reason).toMatch(/payload is not valid JSON/);
-  });
-});
-
-describe('signAttestation guards', () => {
-  it('refuses to sign a predicate with a schemaVersion not in the allowlist', () => {
-    const { privateKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate(DEFAULT_INPUTS);
-    // Cast to bypass the type guard so we can assert the runtime check.
-    const tampered = { ...predicate, schemaVersion: 'v99' as unknown as 'v3' };
-    expect(() => signAttestation({ predicate: tampered, privateKeyPem, keyid: 'k' })).toThrow(
-      /not in the accepted allowlist/,
-    );
   });
 });
 
@@ -862,113 +616,6 @@ describe('validatePredicateShape (regex bound)', () => {
   });
 });
 
-describe('verifyAttestation (post-review hardening)', () => {
-  it('rejects schema-shape violations BEFORE interpolating values into reason', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate(DEFAULT_INPUTS);
-    // Hand-craft a malicious envelope: forge a sha1 with `\nstatus=valid`.
-    // We can't sign a malformed predicate normally (signAttestation would
-    // sign it fine — the schema check is at VERIFY time), so we sign and
-    // then verify. The signature won't match the tampered payload, but
-    // the verify must fail BEFORE the signature check on schema grounds
-    // when we replace the payload with a malicious one. Simplest: build
-    // a payload directly + signature from random.
-    const malicious: AttestationPredicate = {
-      ...predicate,
-      subject: { digest: { sha1: 'a'.repeat(40) + '\nstatus=valid' } },
-    };
-    // Sign the malicious predicate (signAttestation doesn't shape-check).
-    const envelope = signAttestation({
-      predicate: malicious,
-      privateKeyPem,
-      keyid: 'attacker:laptop',
-    });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: {
-        commitSha: FIXED_COMMIT,
-        contentHashV3: predicate.contentHashV3,
-        policyHash: predicate.policyHash,
-        expectedAgentFileHashes: {},
-      },
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.reason).toMatch(/schema validation failed: subject\.digest\.sha1/);
-      // Critical: the malicious value must NOT appear in the reason.
-      expect(result.reason).not.toContain('status=valid');
-      expect(result.reason).not.toContain('\n');
-      expect(result.reason).not.toContain('\r');
-    }
-  });
-
-  it('rejects an attestation that is missing a required reviewer (incomplete reviewer set)', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const inputs = {
-      ...DEFAULT_INPUTS,
-      // Drop test-reviewer + security-reviewer — only code-reviewer remains.
-      reviewers: [DEFAULT_INPUTS.reviewers[0]],
-    };
-    const predicate = buildPredicate(inputs);
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: buildExpected(predicate),
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.reason).toMatch(/reviewer set incomplete/);
-      expect(result.reason).toMatch(/test-reviewer|security-reviewer/);
-    }
-  });
-
-  it('accepts when all 3 required reviewers are present (regression for the set check)', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate(DEFAULT_INPUTS);
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: buildExpected(predicate),
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  it('rejects schemaVersion v0 (boundary case below v3)', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate(DEFAULT_INPUTS);
-    // Mutate the payload to claim v0 then re-sign so the signature is
-    // valid — then verify must reject on schema grounds.
-    const mutated = { ...predicate, schemaVersion: 'v0' as unknown as 'v3' };
-    // signAttestation refuses, so build the envelope manually.
-    const payloadJson = Buffer.from(JSON.stringify(mutated), 'utf-8');
-    const pae = paeEncode('application/vnd.ai-sdlc.attestation+json', payloadJson);
-    // Use Node's sign directly via signAttestation's path: we have to
-    // bypass its own enum check. Easiest: sign with the raw private key.
-    // Instead just hand-craft an envelope with the bad version and assert
-    // the verify rejects. Signature will not verify, but the SHAPE check
-    // runs first.
-    const envelope: DsseEnvelope = {
-      payloadType: 'application/vnd.ai-sdlc.attestation+json',
-      payload: payloadJson.toString('base64'),
-      signatures: [{ keyid: 'k', sig: Buffer.alloc(64).toString('base64') }],
-    };
-    void pae;
-    void privateKeyPem;
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: buildExpected(predicate),
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.reason).toMatch(/schemaVersion not in accepted enum/);
-    }
-  });
-});
-
 // ─── AISDLC-94 — rebase-tolerant contentHash ─────────────────────────
 //
 // `contentHash` binds the attestation to the post-apply tree state of the
@@ -1287,40 +934,6 @@ describe('validatePredicateShape with pipelineVersion (AISDLC-100.6)', () => {
     // unenforceable empty values.
     const p = withPipelineVersion('');
     expect(validatePredicateShape(p)).toMatch(/pipelineVersion does not match pattern/);
-  });
-});
-
-describe('verifyAttestation with pipelineVersion (AISDLC-100.6)', () => {
-  it('round-trips a signed envelope carrying pipelineVersion', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate({ ...DEFAULT_INPUTS, pipelineVersion: '0.1.0' });
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: buildExpected(predicate),
-    });
-    expect(result.valid).toBe(true);
-    if (result.valid) {
-      // Field round-trips through DSSE encoding intact.
-      expect(result.predicate.pipelineVersion).toBe('0.1.0');
-    }
-  });
-
-  it('still verifies legacy envelopes that omit pipelineVersion', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate(DEFAULT_INPUTS);
-    expect(predicate.pipelineVersion).toBeUndefined();
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: buildExpected(predicate),
-    });
-    expect(result.valid).toBe(true);
-    if (result.valid) {
-      expect(result.predicate.pipelineVersion).toBeUndefined();
-    }
   });
 });
 
@@ -1660,91 +1273,6 @@ describe('validatePredicateShape with contentHashV3 (AISDLC-101 → AISDLC-103)'
 
   it('accepts a v3 predicate with contentHashV3 present', () => {
     expect(validatePredicateShape(v3Predicate())).toBeNull();
-  });
-});
-
-describe('verifyAttestation with contentHashV3 (AISDLC-101 → AISDLC-103)', () => {
-  const CHANGED_FILE_DELTAS = [
-    { path: 'src/a.ts', baseBlobSha: 'x'.repeat(40), headBlobSha: 'a'.repeat(40) },
-    { path: 'src/b.ts', baseBlobSha: 'y'.repeat(40), headBlobSha: 'b'.repeat(40) },
-  ];
-
-  it('accepts a v3 envelope when contentHashV3 matches the expected value', () => {
-    // Happy path: producer + verifier compute the same per-file (base,
-    // head) blob-pair transition.
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate({
-      ...DEFAULT_INPUTS,
-      changedFileDeltas: CHANGED_FILE_DELTAS,
-    });
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: {
-        ...buildExpected(predicate),
-        contentHashV3: predicate.contentHashV3,
-      },
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  it('rejects when contentHashV3 diverges (genuine content tampering → reject)', () => {
-    // Threat-model boundary: a malicious rebase that changed the
-    // post-apply file content flips the head blob SHA → fileDeltaHash
-    // flips → contentHashV3 flips. The verifier MUST reject.
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate({
-      ...DEFAULT_INPUTS,
-      changedFileDeltas: CHANGED_FILE_DELTAS,
-    });
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: {
-        ...buildExpected(predicate),
-        contentHashV3: sha256Hex('different delta'),
-      },
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toMatch(/contentHashV3 mismatch/);
-  });
-
-  // AISDLC-103 inversion of the legacy AISDLC-101 "Phase-1 envelope still
-  // verifies via dual-hash leg" test: the dual-hash leg is gone. A v3
-  // envelope is required; an attacker can't smuggle a legacy v1 / v2
-  // envelope into the v3 window. We can't construct a v1/v2 envelope
-  // through `buildPredicate` anymore (the type system rejects it), so
-  // the test below directly hand-crafts a tampered payload that claims
-  // schemaVersion 'v1' and asserts the verifier rejects with the
-  // schemaVersion-allowlist reason.
-  it('AISDLC-103: rejects a hand-crafted v1 envelope (legacy → no longer accepted)', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate({
-      ...DEFAULT_INPUTS,
-      changedFileDeltas: CHANGED_FILE_DELTAS,
-    });
-    // Tamper the schemaVersion to claim v1, then build a hand-crafted
-    // envelope (signAttestation refuses the bad version, so we PAE-encode
-    // and sign manually here). The verifier's schema check must reject.
-    const tampered = { ...predicate, schemaVersion: 'v1' as unknown as 'v3' };
-    const payloadJson = Buffer.from(JSON.stringify(tampered), 'utf-8');
-    const envelope: DsseEnvelope = {
-      payloadType: 'application/vnd.ai-sdlc.attestation+json',
-      payload: payloadJson.toString('base64'),
-      signatures: [{ keyid: 'k', sig: Buffer.alloc(64).toString('base64') }],
-    };
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: buildExpected(predicate),
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.reason).toMatch(/schemaVersion not in accepted enum/);
-    }
-    void privateKeyPem;
   });
 });
 
@@ -2161,180 +1689,6 @@ describe('validatePredicateShape with contentHashV4 (AISDLC-193.1)', () => {
   });
 });
 
-describe('verifyAttestation v4-prefer / v3-fallback (AISDLC-193.1)', () => {
-  // Shared test setup: two delta sets with the SAME head blob but
-  // DIFFERENT base blob. Simulates the queue-rebase scenario.
-  const ORIGINAL_DELTAS = [
-    { path: 'src/foo.ts', baseBlobSha: '1'.repeat(40), headBlobSha: 'h'.repeat(40) },
-  ];
-  const REBASED_DELTAS = [
-    { path: 'src/foo.ts', baseBlobSha: '2'.repeat(40), headBlobSha: 'h'.repeat(40) },
-  ];
-
-  it('AC #5: v4-enabled envelope accepts a PR-head whose head blobs match, REGARDLESS of base movement', () => {
-    // The whole point: producer signs against ORIGINAL_DELTAS (base=1).
-    // Verifier expects REBASED_DELTAS (base=2). v4 hashes match
-    // because head blob is the same → verifier accepts.
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate({
-      ...DEFAULT_INPUTS,
-      changedFileDeltas: ORIGINAL_DELTAS,
-    });
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    // Verifier computes its OWN expected hashes from REBASED_DELTAS.
-    const expectedV4 = computeContentHashV4(projectDeltaEntriesToHeadEntries(REBASED_DELTAS));
-    const expectedV3 = computeContentHashV3(REBASED_DELTAS);
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: {
-        ...buildExpected(predicate),
-        contentHashV3: expectedV3, // v3 differs (base moved) — DOES NOT MATCH
-        contentHashV4: expectedV4, // v4 stable (head unchanged) — matches
-      },
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  it('AC #6: v4-enabled envelope REJECTS a PR-head whose head blobs differ (genuine modification)', () => {
-    // Threat model: an attacker amended the PR to inject unreviewed
-    // code. Head blob changes → v4 hash flips → verifier rejects.
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate({
-      ...DEFAULT_INPUTS,
-      changedFileDeltas: ORIGINAL_DELTAS,
-    });
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const tampered = [
-      { path: 'src/foo.ts', baseBlobSha: '1'.repeat(40), headBlobSha: 'TAMPERED'.padEnd(40, '0') },
-    ];
-    const expectedV4 = computeContentHashV4(projectDeltaEntriesToHeadEntries(tampered));
-    const expectedV3 = computeContentHashV3(tampered);
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: {
-        ...buildExpected(predicate),
-        contentHashV3: expectedV3,
-        contentHashV4: expectedV4,
-      },
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.reason).toMatch(/contentHashV4 mismatch/);
-    }
-  });
-
-  it('AC #8: legacy v3-only envelope still verifies via the v3 path (back-compat)', () => {
-    // Hand-craft a legacy envelope: build a fresh predicate then
-    // surgically remove contentHashV4 before signing. The verifier
-    // must accept via the v3 fallback.
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate({
-      ...DEFAULT_INPUTS,
-      changedFileDeltas: ORIGINAL_DELTAS,
-    });
-    const legacyPredicate: AttestationPredicate = { ...predicate };
-    delete legacyPredicate.contentHashV4;
-    const envelope = signAttestation({
-      predicate: legacyPredicate,
-      privateKeyPem,
-      keyid: 'k',
-    });
-    // Verifier supplies expected v3 (matching) AND optionally an expected
-    // v4 (which is irrelevant because the envelope has no v4).
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: {
-        ...buildExpected(legacyPredicate),
-        contentHashV3: legacyPredicate.contentHashV3,
-        contentHashV4: 'a'.repeat(64), // verifier supplied — but envelope has none
-      },
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  it('AC #6+#8 hybrid: legacy v3-only envelope rejects when v3 hash differs', () => {
-    // Sanity: removing v4 doesn't bypass v3 enforcement.
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate({
-      ...DEFAULT_INPUTS,
-      changedFileDeltas: ORIGINAL_DELTAS,
-    });
-    const legacyPredicate: AttestationPredicate = { ...predicate };
-    delete legacyPredicate.contentHashV4;
-    const envelope = signAttestation({
-      predicate: legacyPredicate,
-      privateKeyPem,
-      keyid: 'k',
-    });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: {
-        ...buildExpected(legacyPredicate),
-        contentHashV3: sha256Hex('different content'),
-      },
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.reason).toMatch(/contentHashV3 mismatch/);
-    }
-  });
-
-  it('dual v3+v4 envelope: when v4 matches, v3 is NOT consulted (the queue-rebase fix)', () => {
-    // The CRITICAL property: producer's v3 may be STALE (because the
-    // queue rebased the merge-base forward), but v4 is fresh. The
-    // verifier must accept on v4 alone — consulting v3 here would
-    // cause exactly the AISDLC-193 stage-1 failure pattern.
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate({
-      ...DEFAULT_INPUTS,
-      changedFileDeltas: ORIGINAL_DELTAS,
-    });
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: {
-        ...buildExpected(predicate),
-        // Verifier's expected v3 is BOGUS (= simulating the stale
-        // v3 the queue rebase produces).
-        contentHashV3: sha256Hex('stale post-rebase v3 from the queue'),
-        // But v4 matches (= the producer's reviewed content is
-        // unchanged at HEAD).
-        contentHashV4: predicate.contentHashV4,
-      },
-    });
-    // ✓ This must pass — otherwise the queue-rebase fix isn't actually
-    // fixing anything.
-    expect(result.valid).toBe(true);
-  });
-
-  it('opts.expected omits contentHashV4 → falls back to v3 even on v4-carrying envelope', () => {
-    // Scenario: caller hasn't been updated to compute v4 yet (e.g. a
-    // test fixture). The verifier should still work via v3 fallback —
-    // this is the "soft" rollout property.
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate({
-      ...DEFAULT_INPUTS,
-      changedFileDeltas: ORIGINAL_DELTAS,
-    });
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: {
-        ...buildExpected(predicate),
-        contentHashV3: predicate.contentHashV3,
-        // Note: contentHashV4 deliberately omitted.
-      },
-    });
-    expect(result.valid).toBe(true);
-  });
-});
-
 // ── AISDLC-202.3: harness envelope field ──────────────────────────────
 
 describe('buildPredicate — harness field (AISDLC-202.3 AC #1)', () => {
@@ -2412,51 +1766,6 @@ describe('validatePredicateShape — harness field back-compat (AISDLC-202.3 AC 
   });
 });
 
-describe('verifyAttestation — harness field round-trip (AISDLC-202.3 AC #2)', () => {
-  it('verifies a Codex-run envelope with harness field and exposes it in the predicate', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    // AISDLC-252: when implementer harness is 'codex', reviewers must use a
-    // different harness (independence enforcement). Use claude-code reviewers
-    // so this test focuses on harness field round-trip, not independence.
-    const predicate = buildPredicate({
-      ...DEFAULT_INPUTS,
-      harness: { name: 'codex', version: '0.128.0' },
-      reviewers: DEFAULT_INPUTS.reviewers.map((r) => ({ ...r, harness: 'claude-code' })),
-    });
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: {
-        ...buildExpected(predicate),
-        contentHashV3: predicate.contentHashV3,
-      },
-    });
-    expect(result.valid).toBe(true);
-    if (result.valid) {
-      expect(result.predicate.harness).toEqual({ name: 'codex', version: '0.128.0' });
-    }
-  });
-
-  it('verifies a legacy envelope without harness field (back-compat)', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate(DEFAULT_INPUTS); // no harness field
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: {
-        ...buildExpected(predicate),
-        contentHashV3: predicate.contentHashV3,
-      },
-    });
-    expect(result.valid).toBe(true);
-    if (result.valid) {
-      expect(result.predicate.harness).toBeUndefined();
-    }
-  });
-});
-
 // ─── AISDLC-252 — cross-harness reviewer equivalence + independence ──
 //
 // AC #1: code-reviewer-codex and test-reviewer-codex satisfy their roles.
@@ -2487,187 +1796,6 @@ describe('REVIEWER_ROLE_EQUIVALENCES (AISDLC-252)', () => {
     expect(REQUIRED_REVIEWER_AGENT_IDS).toContain('code-reviewer');
     expect(REQUIRED_REVIEWER_AGENT_IDS).toContain('test-reviewer');
     expect(REQUIRED_REVIEWER_AGENT_IDS).toContain('security-reviewer');
-  });
-});
-
-describe('verifyAttestation — cross-harness reviewer variants (AISDLC-252)', () => {
-  // Shared inputs for codex-reviewer envelope: uses code-reviewer-codex +
-  // test-reviewer-codex + security-reviewer (Claude). Implementer harness
-  // is claude-code (absent field = default) so no independence check applies.
-  const CODEX_REVIEWER_INPUTS = {
-    ...DEFAULT_INPUTS,
-    reviewers: [
-      {
-        agentId: 'code-reviewer-codex',
-        agentFileContent: '---\nname: code-reviewer-codex\n---\nbody',
-        harness: 'codex',
-        approved: true,
-        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-      },
-      {
-        agentId: 'test-reviewer-codex',
-        agentFileContent: '---\nname: test-reviewer-codex\n---\nbody',
-        harness: 'codex',
-        approved: true,
-        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-      },
-      {
-        agentId: 'security-reviewer',
-        agentFileContent: '---\nname: security-reviewer\n---\nbody',
-        harness: 'claude-code',
-        approved: true,
-        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-      },
-    ],
-    // No implementer harness (= claude-code default, no independence check)
-    harness: undefined,
-  };
-
-  // AC #2: envelope with code-reviewer-codex + test-reviewer-codex + security-reviewer PASSES.
-  it('AC #2: accepts code-reviewer-codex + test-reviewer-codex + security-reviewer (claude-code implementer)', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate(CODEX_REVIEWER_INPUTS);
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: buildExpected(predicate),
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  // AC #3: codex code-reviewer but NO test-reviewer (either variant) FAILS.
-  it('AC #3: rejects when code-reviewer-codex present but no test-reviewer variant at all', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const inputs = {
-      ...DEFAULT_INPUTS,
-      reviewers: [
-        {
-          agentId: 'code-reviewer-codex',
-          agentFileContent: '---\nname: code-reviewer-codex\n---\nbody',
-          harness: 'codex',
-          approved: true,
-          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-        },
-        // No test-reviewer or test-reviewer-codex
-        {
-          agentId: 'security-reviewer',
-          agentFileContent: '---\nname: security-reviewer\n---\nbody',
-          harness: 'claude-code',
-          approved: true,
-          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-        },
-      ],
-    };
-    const predicate = buildPredicate(inputs);
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: buildExpected(predicate),
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.reason).toMatch(/reviewer set incomplete/);
-      expect(result.reason).toMatch(/test-reviewer/);
-    }
-  });
-
-  // AC #4: Codex implementer + codex reviewer → independence violation (rejection).
-  it('AC #4: rejects when implementer harness is codex AND code-reviewer harness is codex (same harness = no independence)', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const inputs = {
-      ...DEFAULT_INPUTS,
-      harness: { name: 'codex', version: '0.128.0' },
-      reviewers: [
-        {
-          agentId: 'code-reviewer-codex',
-          agentFileContent: '---\nname: code-reviewer-codex\n---\nbody',
-          harness: 'codex', // same as implementer → violation
-          approved: true,
-          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-        },
-        {
-          agentId: 'test-reviewer',
-          agentFileContent: '---\nname: test-reviewer\n---\nbody',
-          harness: 'claude-code',
-          approved: true,
-          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-        },
-        {
-          agentId: 'security-reviewer',
-          agentFileContent: '---\nname: security-reviewer\n---\nbody',
-          harness: 'claude-code',
-          approved: true,
-          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-        },
-      ],
-    };
-    const predicate = buildPredicate(inputs);
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: buildExpected(predicate),
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.reason).toMatch(/independence violation/);
-      expect(result.reason).toMatch(/codex/);
-    }
-  });
-
-  // AC #4 counterpart: Codex implementer + claude-code reviewer → PASSES independence.
-  it('AC #4 counterpart: accepts codex implementer with claude-code code-reviewer (cross-harness independence satisfied)', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const inputs = {
-      ...DEFAULT_INPUTS,
-      harness: { name: 'codex', version: '0.128.0' },
-      reviewers: [
-        {
-          agentId: 'code-reviewer',
-          agentFileContent: '---\nname: code-reviewer\n---\nbody',
-          harness: 'claude-code', // different from implementer → independence OK
-          approved: true,
-          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-        },
-        {
-          agentId: 'test-reviewer',
-          agentFileContent: '---\nname: test-reviewer\n---\nbody',
-          harness: 'claude-code',
-          approved: true,
-          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-        },
-        {
-          agentId: 'security-reviewer',
-          agentFileContent: '---\nname: security-reviewer\n---\nbody',
-          harness: 'claude-code',
-          approved: true,
-          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-        },
-      ],
-    };
-    const predicate = buildPredicate(inputs);
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: buildExpected(predicate),
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  // AC #1: old canonical names still work (back-compat for pre-252 envelopes).
-  it('AC #1 back-compat: accepts legacy code-reviewer + test-reviewer + security-reviewer (no codex variants)', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate(DEFAULT_INPUTS); // has code-reviewer, test-reviewer, security-reviewer
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: buildExpected(predicate),
-    });
-    expect(result.valid).toBe(true);
   });
 });
 
@@ -3060,54 +2188,6 @@ describe('buildPredicate with v5', () => {
     expect((predicate as unknown as Record<string, unknown>).signedMergeBase).toBeUndefined();
   });
 
-  it('round-trips through sign + verify with v5 (happy path)', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate({
-      ...DEFAULT_INPUTS,
-      v5Entries: V5_ENTRIES,
-      v5MergeBase: MERGE_BASE,
-    });
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'dev@example.com:laptop' });
-
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: {
-        ...buildExpected(predicate),
-        contentHashV4: predicate.contentHashV4,
-        contentHashV5: predicate.contentHashV5,
-      },
-    });
-    expect(result.valid).toBe(true);
-    if (result.valid) expect(result.predicate.schemaVersion).toBe('v5');
-  });
-
-  it('v5 mismatch rejects (sibling overlap — overlapping blob SHA changed)', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate({
-      ...DEFAULT_INPUTS,
-      v5Entries: V5_ENTRIES,
-      v5MergeBase: MERGE_BASE,
-    });
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-
-    // Simulate a sibling PR that touched the same file — the blob SHA is now different.
-    const differentV5 = computeContentHashV5(
-      [{ path: 'src/foo.ts', blobSha: '9'.repeat(40) }],
-      MERGE_BASE,
-    );
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: {
-        ...buildExpected(predicate),
-        contentHashV5: differentV5,
-      },
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toMatch(/contentHashV5/);
-  });
-
   it('validatePredicateShape accepts valid v5 predicate fields', () => {
     const predicate = buildPredicate({
       ...DEFAULT_INPUTS,
@@ -3161,20 +2241,35 @@ describe('ACCEPTED_SCHEMA_VERSIONS includes v5', () => {
   });
 });
 
-describe('signAttestation deprecation warning (AISDLC-585)', () => {
-  it('warns on legacy schema sign', () => {
+describe('legacy schemas are refused (DEC-0284)', () => {
+  it('signAttestation refuses a v5 predicate and names DEC-0284', () => {
     const { privateKeyPem } = generateSigningKeyPair();
-    const writes: string[] = [];
-    const orig = process.stderr.write.bind(process.stderr);
-    process.stderr.write = ((c: string | Uint8Array) => {
-      writes.push(String(c));
-      return true;
-    }) as typeof process.stderr.write;
-    try {
-      signAttestation({ predicate: buildPredicate(DEFAULT_INPUTS), privateKeyPem, keyid: 'k' });
-    } finally {
-      process.stderr.write = orig;
-    }
-    expect(writes.join('')).toMatch(/DEPRECATED.*'v3'.*v6/);
+    const predicate = { ...buildPredicate(DEFAULT_INPUTS), schemaVersion: 'v5' as const };
+    expect(() => signAttestation({ predicate, privateKeyPem, keyid: 'k' })).toThrow(/DEC-0284/);
+  });
+
+  function verifyWithVersion(schemaVersion: string) {
+    const payload = Buffer.from(JSON.stringify({ schemaVersion }), 'utf-8').toString('base64');
+    return verifyAttestation({
+      envelope: {
+        payloadType: DSSE_PAYLOAD_TYPE,
+        payload,
+        signatures: [{ keyid: 'k', sig: 'AA==' }],
+      },
+      trustedReviewers: [],
+      expected: {},
+    } as unknown as Parameters<typeof verifyAttestation>[0]);
+  }
+
+  it('verifyAttestation refuses a v5 envelope and names DEC-0284', () => {
+    const result = verifyWithVersion('v5');
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.reason).toMatch(/'v5' refused.*DEC-0284/);
+  });
+
+  it('verifyAttestation never echoes an unbounded schemaVersion into the reason', () => {
+    const result = verifyWithVersion('v5\nevil=1');
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.reason).toMatch(/'unknown' refused.*DEC-0284/);
   });
 });

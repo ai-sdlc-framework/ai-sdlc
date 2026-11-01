@@ -338,27 +338,6 @@ describe('signAndWriteV6Envelope — happy path', () => {
     expect(parsed.subject.digest.sha1).toBe(FAKE_HEAD_SHA);
   });
 
-  it('does not emit a legacy-schema deprecation warning when signing v6 (AISDLC-585)', () => {
-    appendLeaf(makeLeaf({ leafIndex: 0, taskId: 'AISDLC-383.3' }), tmpRoot);
-    const writes: string[] = [];
-    const orig = process.stderr.write.bind(process.stderr);
-    process.stderr.write = ((c: string | Uint8Array) => {
-      writes.push(String(c));
-      return true;
-    }) as typeof process.stderr.write;
-    try {
-      signAndWriteV6Envelope({
-        repoRoot: tmpRoot,
-        headSha: FAKE_HEAD_SHA,
-        taskId: 'AISDLC-383.3',
-        privateKeyPem,
-      });
-    } finally {
-      process.stderr.write = orig;
-    }
-    expect(writes.join('')).not.toMatch(/DEPRECATED/);
-  });
-
   it('writes an envelope that passes prettier --check (AISDLC-875)', () => {
     appendLeaf(makeLeaf({ leafIndex: 0, taskId: 'AISDLC-383.3' }), tmpRoot);
     const outPath = signAndWriteV6Envelope({

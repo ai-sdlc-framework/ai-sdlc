@@ -137,8 +137,6 @@ function cleanEnv(extra = {}) {
   // AISDLC-383.6: schema version env vars must not leak from operator shell.
   delete env.AI_SDLC_SCHEMA_VERSION;
   delete env.AI_SDLC_V6_CUTOVER_ACTIVE;
-  // AISDLC-972: v5 signing is refused unless this fixture seam is set.
-  if (!('AI_SDLC_V5_FIXTURE_SIGN' in extra)) env.AI_SDLC_V5_FIXTURE_SIGN = '1';
   // AISDLC-383.6 default: most tests assume cutover-active (so v6 is the
   // effective default + AISDLC-380 gate is audit-only). Tests that
   // specifically need the gated/non-cutover state pass an explicit
@@ -557,33 +555,7 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     );
   });
 
-  it('AC #4: idempotent — exits 0 when v5 attestation already exists at HEAD (v5 explicit)', () => {
-    writeFileSync(join(root, '.active-task'), 'AISDLC-133\n');
-    writeVerdictFile(root, 'AISDLC-133');
-    // Simulate a pre-existing attestation at current HEAD.
-    // When schema is explicitly v5 → file is <sha>.dsse.json.
-    const head = git(['rev-parse', 'HEAD'], root).trim();
-    const attDir = join(root, '.ai-sdlc', 'attestations');
-    mkdirSync(attDir, { recursive: true });
-    writeFileSync(join(attDir, `${head}.dsse.json`), '{"existing":true,"schemaVersion":"v5"}\n');
-    // Even with a "fail-everything" signer, idempotent skip should NOT invoke it.
-    const { cmd, logPath } = installFakeSigner(root, { fail: true });
-    const r = runHook(root, {
-      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
-      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
-      AI_SDLC_SCHEMA_VERSION: 'v5',
-      // AISDLC-694: an existing envelope is now verified; the stub accepts it.
-      ...verifierEnv(root, { mode: 'valid' }).env,
-    });
-    assert.equal(r.status, 0, `expected 0 for v5 idempotent skip, got ${r.status}: ${r.stderr}`);
-    assert.equal(
-      existsSync(logPath),
-      false,
-      'signer must NOT be invoked when v5 attestation already exists',
-    );
-  });
-
-  it('AISDLC-972: refuses v5 via every removed producer path and says why', () => {
+  it('DEC-0284: refuses v5 via every removed producer path and says why', () => {
     writeFileSync(join(root, '.active-task'), 'AISDLC-133\n');
     writeVerdictFile(root, 'AISDLC-133');
     for (const env of [
@@ -595,11 +567,10 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
       const r = runHook(root, {
         AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
         AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
-        AI_SDLC_V5_FIXTURE_SIGN: '',
         ...env,
       });
       assert.equal(r.status, 1, JSON.stringify(env));
-      assert.match(r.stderr, /v5 attestation signing was removed \(AISDLC-972\)/);
+      assert.match(r.stderr, /v6 is the only attestation schema signed or verified \(DEC-0284\)/);
       assert.equal(existsSync(logPath), false, 'signer must not be invoked');
     }
   });

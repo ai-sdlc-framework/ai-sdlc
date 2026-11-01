@@ -32,7 +32,7 @@
  * supports it natively.
  */
 
-import { createHash, generateKeyPairSync, sign, verify } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
 import { cleanGitEnv } from './git-env.js';
@@ -1685,8 +1685,13 @@ export function generateSigningKeyPair(): { privateKeyPem: string; publicKeyPem:
   };
 }
 
-/** Schema versions deprecated for signing (AISDLC-585); verification is unchanged. */
-const DEPRECATED_SIGN_SCHEMA_VERSIONS: readonly string[] = ['v3', 'v4', 'v5'];
+/**
+ * DEC-0284: attestation schema v6 is the only schema signed or verified. The
+ * legacy v3/v4/v5 predicate shapes handled by this module are refused on both
+ * paths; v6 envelopes are signed and verified by pipeline-cli.
+ */
+export const LEGACY_SCHEMA_REFUSAL =
+  'v6 is the only attestation schema signed or verified (DEC-0284)';
 
 /** Sign options. `keyid` is required — verifiers use it to look up the pubkey. */
 export interface SignOptions {
@@ -1696,35 +1701,13 @@ export interface SignOptions {
 }
 
 /**
- * Sign a predicate, producing a DSSE envelope.
- *
- * Throws if `predicate.schemaVersion` is not in `ACCEPTED_SCHEMA_VERSIONS` —
- * we don't want to issue an envelope that we'd reject ourselves.
+ * Refuses every legacy predicate (DEC-0284): v6 is the only schema signed, and
+ * it is signed by pipeline-cli (`cli-attestation sign-v6`), never here.
  */
-export function signAttestation(opts: SignOptions): DsseEnvelope {
-  if (!ACCEPTED_SCHEMA_VERSIONS.includes(opts.predicate.schemaVersion)) {
-    throw new Error(
-      `signAttestation: schemaVersion '${opts.predicate.schemaVersion}' is not in the accepted allowlist [${ACCEPTED_SCHEMA_VERSIONS.join(', ')}]`,
-    );
-  }
-  if (DEPRECATED_SIGN_SCHEMA_VERSIONS.includes(opts.predicate.schemaVersion)) {
-    process.stderr.write(
-      `[attestation] DEPRECATED: signing a '${opts.predicate.schemaVersion}' attestation envelope. Schema versions v3/v4/v5 are deprecated for signing; migrate to v6 (cli-attestation sign-v6). The verifier still reads them for historical PRs; removal is deferred to an RFC-0042 amendment.\n`,
-    );
-  }
-  const payloadJson = Buffer.from(JSON.stringify(opts.predicate), 'utf-8');
-  const pae = paeEncode(DSSE_PAYLOAD_TYPE, payloadJson);
-  const signature = sign(null, pae, opts.privateKeyPem);
-  return {
-    payloadType: DSSE_PAYLOAD_TYPE,
-    payload: payloadJson.toString('base64'),
-    signatures: [
-      {
-        keyid: opts.keyid,
-        sig: signature.toString('base64'),
-      },
-    ],
-  };
+export function signAttestation(opts: SignOptions): never {
+  throw new Error(
+    `signAttestation: schemaVersion '${String(opts.predicate.schemaVersion)}' refused: ${LEGACY_SCHEMA_REFUSAL}; use cli-attestation sign-v6`,
+  );
 }
 
 /** Verify options. `expected` lets the caller bind verification to a specific PR state. */
@@ -1793,8 +1776,6 @@ export interface VerifyOptions {
  * (`ai-sdlc/attestation: invalid (<reason>)`), so keep it short and specific.
  */
 export function verifyAttestation(opts: VerifyOptions): VerifyResult {
-  const allowlist = opts.acceptedSchemaVersions ?? ACCEPTED_SCHEMA_VERSIONS;
-
   // ── Parse the envelope ────────────────────────────────────────
   if (opts.envelope.payloadType !== DSSE_PAYLOAD_TYPE) {
     return {
@@ -1822,180 +1803,19 @@ export function verifyAttestation(opts: VerifyOptions): VerifyResult {
     return { valid: false, reason: 'payload is not valid JSON' };
   }
 
-  // ── Schema validation (REGEX-BOUND) ───────────────────────────
-  // This MUST run before any predicate field is interpolated into a
-  // reason string. The shape validator returns a fixed (non-interpolated)
-  // reason on failure so a malicious value cannot smuggle CR/LF or
-  // `=` into our output. See validatePredicateShape for rationale.
-  const shapeError = validatePredicateShape(parsed);
-  if (shapeError !== null) {
-    return { valid: false, reason: shapeError };
-  }
-  const predicate = parsed as AttestationPredicate;
-
-  // ── Schema version allowlist (post-shape) ─────────────────────
-  // Belt-and-braces: the shape validator already enforced membership in
-  // ACCEPTED_SCHEMA_VERSIONS, but callers can override the allowlist via
-  // opts.acceptedSchemaVersions for forward-compat tests, so re-check here.
-  if (!allowlist.includes(predicate.schemaVersion)) {
+  // ── DEC-0284: v6 is the only schema verified ──────────────────
+  // This predicate path only ever carried legacy v3/v4/v5 shapes; refuse any
+  // envelope here with one fixed reason (the version is echoed only when it
+  // matches a bounded pattern, so no attacker-controlled bytes reach the reason).
+  {
+    const rawVersion = (parsed as { schemaVersion?: unknown } | null)?.schemaVersion;
+    const shown =
+      typeof rawVersion === 'string' && /^v[0-9]{1,2}$/.test(rawVersion) ? rawVersion : 'unknown';
     return {
       valid: false,
-      reason: `schemaVersion '${predicate.schemaVersion}' not in allowlist [${allowlist.join(', ')}]`,
+      reason: `schemaVersion '${shown}' refused: ${LEGACY_SCHEMA_REFUSAL}`,
     };
   }
-
-  // ── v5 is read-only after the v6 cutover (AISDLC-972) ─────────
-  // A missing or unparseable signedAt is treated as after-cutover (fail closed).
-  if (predicate.schemaVersion === 'v5') {
-    const signedMs = Date.parse(String(predicate.signedAt));
-    if (!Number.isFinite(signedMs) || signedMs >= Date.parse(V5_CUTOVER_ISO)) {
-      return { valid: false, reason: 'v5-after-cutover' };
-    }
-  }
-
-  // ── Signature (any-of-N pubkeys) ──────────────────────────────
-  const pae = paeEncode(DSSE_PAYLOAD_TYPE, payloadJson);
-  let matchedReviewer: TrustedReviewer | null = null;
-  for (const sig of opts.envelope.signatures) {
-    let sigBytes: Buffer;
-    try {
-      sigBytes = Buffer.from(sig.sig, 'base64');
-    } catch {
-      continue;
-    }
-    for (const reviewer of opts.trustedReviewers) {
-      try {
-        if (verify(null, pae, reviewer.pubkey, sigBytes)) {
-          matchedReviewer = reviewer;
-          break;
-        }
-      } catch {
-        // Bad pubkey PEM — skip, try next.
-      }
-    }
-    if (matchedReviewer) break;
-  }
-  if (!matchedReviewer) {
-    return {
-      valid: false,
-      reason: 'signature did not match any trusted reviewer pubkey',
-    };
-  }
-
-  // ── Bind to PR state ──────────────────────────────────────────
-  // Note: every field interpolated into a reason below has already been
-  // regex-bounded by validatePredicateShape (sha1/sha256 hex, SHORT_ID
-  // for agentId), so embedding them in reason strings cannot inject
-  // CR/LF or `=` into downstream key=value writers.
-  const expectedSha = opts.expected.commitSha.toLowerCase();
-  if (predicate.subject.digest.sha1.toLowerCase() !== expectedSha) {
-    return {
-      valid: false,
-      reason: `subject digest mismatch (envelope was signed for a different commit)`,
-    };
-  }
-  // AISDLC-362: v5-prefer, v4-fallback, v3-last-resort.
-  //
-  // Priority order (highest rebase-stability first):
-  //   1. v5 (frozen merge-base delta hash) — prefers when BOTH envelope AND
-  //      expected carry contentHashV5. Survives non-overlapping sibling merges.
-  //   2. v4 (base-independent head-blob hash) — prefers when BOTH carry v4
-  //      but not v5. Survives queue rebases when files don't overlap.
-  //   3. v3 (base+head blob-pair delta hash) — legacy fallback only.
-  //
-  // When a higher-priority hash matches, lower-priority hashes are NOT
-  // consulted (the merge-base shift that would invalidate them is exactly
-  // what the higher-priority hash was designed to survive).
-  const envelopeHasV5 = typeof predicate.contentHashV5 === 'string';
-  const expectedHasV5 = typeof opts.expected.contentHashV5 === 'string';
-  const envelopeHasV4 = typeof predicate.contentHashV4 === 'string';
-  const expectedHasV4 = typeof opts.expected.contentHashV4 === 'string';
-
-  if (envelopeHasV5 && expectedHasV5) {
-    if (predicate.contentHashV5 !== opts.expected.contentHashV5) {
-      return {
-        valid: false,
-        reason: 'contentHashV5 mismatch (PR content changed since attestation)',
-      };
-    }
-    // v5 matched → skip v4 and v3 entirely.
-  } else if (envelopeHasV4 && expectedHasV4) {
-    if (predicate.contentHashV4 !== opts.expected.contentHashV4) {
-      return {
-        valid: false,
-        reason: 'contentHashV4 mismatch (PR content changed since attestation)',
-      };
-    }
-    // v4 matched → skip the v3 check entirely. The producer's v3 was
-    // computed against a base ref that may have moved on by now (queue
-    // rebase, sibling overlap); the v4 match is the source of truth.
-  } else {
-    // Legacy v3-only envelope OR caller did not supply expected.contentHashV4/V5
-    // → fall back to v3. Same as pre-AISDLC-193.1 behavior.
-    if (predicate.contentHashV3 !== opts.expected.contentHashV3) {
-      return {
-        valid: false,
-        reason: 'contentHashV3 mismatch (PR content changed since attestation)',
-      };
-    }
-  }
-  if (predicate.policyHash !== opts.expected.policyHash) {
-    return {
-      valid: false,
-      reason: 'policyHash mismatch (.ai-sdlc/review-policy.md changed since attestation)',
-    };
-  }
-  for (const r of predicate.reviewers) {
-    const expectedHash = opts.expected.expectedAgentFileHashes[r.agentId];
-    if (expectedHash && expectedHash !== r.agentFileHash) {
-      return {
-        valid: false,
-        reason: `agentFileHash mismatch for reviewer '${r.agentId}' (agent file changed since attestation)`,
-      };
-    }
-  }
-
-  // ── Reviewer-set completeness (AISDLC-252) ──────────────────────
-  // Every attestation MUST cover all three required reviewer ROLES (code,
-  // test, security). Each role is satisfied by ANY agentId in its
-  // equivalence group — so `code-reviewer-codex` satisfies the `code-reviewer`
-  // role, enabling cross-harness reviews without a redundant Claude review.
-  // Security stays Claude-only (no codex variant, per policy).
-  const presentIds = new Set(predicate.reviewers.map((r) => r.agentId));
-  for (const [role, variants] of Object.entries(REVIEWER_ROLE_EQUIVALENCES)) {
-    const satisfied = variants.some((v) => presentIds.has(v));
-    if (!satisfied) {
-      return {
-        valid: false,
-        reason: `reviewer set incomplete: missing required reviewer '${role}' (or any variant: ${variants.join(', ')})`,
-      };
-    }
-  }
-
-  // ── Independence enforcement (AISDLC-252, RFC-0010 §13.10) ──────
-  // When the implementer ran in codex (`predicate.harness.name === 'codex'`),
-  // the code-reviewer and test-reviewer MUST NOT also be codex — that would
-  // defeat the cross-harness independence goal. Security is exempt because it
-  // is always Claude-only.
-  const implementerHarness = predicate.harness?.name?.toLowerCase();
-  if (implementerHarness === 'codex') {
-    for (const role of INDEPENDENCE_REQUIRED_ROLES) {
-      // Find the reviewer entry that satisfied this role.
-      const satisfyingVariants = REVIEWER_ROLE_EQUIVALENCES[role] ?? [];
-      const reviewerEntry = predicate.reviewers.find((r) => satisfyingVariants.includes(r.agentId));
-      if (reviewerEntry) {
-        const reviewerHarness = reviewerEntry.harness?.toLowerCase();
-        if (reviewerHarness === 'codex') {
-          return {
-            valid: false,
-            reason: `independence violation: implementer harness is 'codex' but reviewer '${reviewerEntry.agentId}' also uses codex (requiresIndependentHarnessFrom per RFC-0010 §13.10)`,
-          };
-        }
-      }
-    }
-  }
-
-  return { valid: true, predicate, trustedReviewer: matchedReviewer };
 }
 
 /**
