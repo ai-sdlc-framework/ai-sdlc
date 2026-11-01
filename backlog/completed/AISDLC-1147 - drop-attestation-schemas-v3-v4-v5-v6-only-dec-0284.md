@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1147
 title: 'Implement DEC-0284: drop attestation schemas v3/v4/v5 outright, v6 is the only schema signed and verified (supersedes the warn-only #2171)'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-01'
 labels:
@@ -49,3 +49,42 @@ Decision record: DEC-0284 (on main). Origin: planner 2026-11-01, once PR #2171 h
 ## Implementation notes
 Verification: `pnpm build && pnpm test && pnpm lint && pnpm format:check` all green. `pnpm test` ran the full suite (pnpm -r test, gate tests, rfc:check, dark-code:check); gate runner summary `# pass 3738`, `# fail 0`; dark-code reports OK, no newly unwired modules (18 baselined).
 Scope: the signer script and the check-attestation-sign and sign-attestation-if-consumer hooks refuse every non-v6 schema; orchestrator signAttestation throws and verifyAttestation refuses with a DEC-0284 reason; legacy sign/verify fixtures and tests deleted. The dormant legacy hash helpers in orchestrator/src/runtime/attestations.ts and the verify-core legacy walk are unreachable for acceptance but not yet deleted (large surface; scripts/verify-attestation.mjs is a blocked path for dev agents); follow-up recommended.
+
+## Final Summary
+
+## Summary
+Signer, hooks and the orchestrator sign and verify paths now accept only attestation schema v6 and refuse anything else with a DEC-0284 error. The #2171 warn-on-sign code, its tests, the legacy sign/verify fixtures and tests, and the CLAUDE.md deprecation lines are gone. The legacy hash helpers in `orchestrator/src/runtime/attestations.ts` and the legacy walk in `pipeline-cli/attestation-core/verify-core.mjs` are unreachable for acceptance but not deleted.
+
+## Changes
+- CLAUDE.md
+- ai-sdlc-plugin/scripts/sign-attestation.mjs
+- ai-sdlc-plugin/scripts/sign-attestation.test.mjs
+- ai-sdlc-plugin/scripts/check-attestation-sign.sh
+- ai-sdlc-plugin/scripts/check-attestation-sign.test.mjs
+- ai-sdlc-plugin/scripts/sign-attestation-if-consumer.sh
+- ai-sdlc-plugin/scripts/sign-attestation-if-consumer.test.mjs
+- ai-sdlc-plugin/scripts/verify-attestation.test.mjs
+- scripts/check-attestation-sign.sh
+- scripts/check-attestation-sign.test.mjs
+- scripts/pre-push-fixups.test.mjs
+- scripts/verify-attestation.test.mjs
+- orchestrator/src/runtime/attestations.ts
+- orchestrator/src/runtime/attestations.test.ts
+- pipeline-cli/src/attestation/sign-v6.test.ts
+- docs/operations/attestation-reference.md
+- spec/rfcs/RFC-0042-proof-of-execution-attestation.md
+- backlog/tasks/AISDLC-1147 - drop-attestation-schemas-v3-v4-v5-v6-only-dec-0284.md
+
+## Design decisions
+Test command: `pnpm test` (pnpm -r test, then gate tests, rfc:check and dark-code:check). It exited 0 after the final edits, with the gate runner reporting `# pass 3738`, `# fail 0` and dark-code OK (18 baselined, no new entries). Build, lint and format:check also passed. The rebase onto origin/main was clean and the push went through with --force-with-lease. The task file records the test command and ACs 1-5 are checked there. AC-2 is only partly met: the verifier now refuses a v3/v4/v5 envelope with a DEC-0284 reason, but the legacy hash and predicate-shape helpers in orchestrator `attestations.ts` and the legacy walk in `verify-core.mjs` are still in the tree. They are unreachable for acceptance. Deleting them is a large change, and `scripts/verify-attestation.mjs` is a blocked path for dev agents, so it needs a follow-up task. `pnpm dark-code:check` is green with no new baseline entry. About 100 legacy sign/verify tests were deleted across `orchestrator/src/runtime/attestations.test.ts`, `ai-sdlc-plugin/scripts/` and `scripts/` because they depended on minting legacy envelopes. Refusal of a v5 envelope on sign is tested in `ai-sdlc-plugin/scripts/sign-attestation.test.mjs`, the two `check-attestation-sign` suites, `ai-sdlc-plugin/scripts/sign-attestation-if-consumer.test.mjs` and `orchestrator/src/runtime/attestations.test.ts`. On verify it is tested only in the orchestrator suite. The RFC-0042 OQ-7 amendment from #2228 is kept with no new Resolution marker. The older AISDLC-585 deprecation note in the RFC header now points to the amendment.
+
+## Verification
+- `pnpm build` — passed
+- `pnpm test` — passed
+- `pnpm lint` — passed
+- `pnpm format:check` — passed
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+- declined: delete the dormant legacy hash helpers in orchestrator attestations.ts and the verify-core.mjs legacy walk; blocked path for dev agents and needs operator-authorised task filing
+
