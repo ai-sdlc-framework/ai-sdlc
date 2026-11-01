@@ -1,6 +1,6 @@
 {
   "request": "Fix cli-hierarchy down so a bare session name stops only that session instead of the whole hierarchy.",
-  "task": "AISDLC-1106",
+  "task": "AISDLC-1108",
   "author": "dominique",
   "decisions": [
     {
@@ -37,7 +37,7 @@
       "rationale": "The planner must outlive the sessions it coordinates so their tasks are requeued."
     }
   ],
-  "brief": { "tasks": ["AISDLC-1106"] },
+  "brief": { "tasks": ["AISDLC-1108"] },
   "timeoutMinutes": 90,
   "pollSeconds": 10
 }

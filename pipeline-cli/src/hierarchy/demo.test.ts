@@ -59,7 +59,7 @@ function harness(over: Partial<DemoDeps> & { prStates?: string[] } = {}): Harnes
     if (a[0] === 'cli-decisions.mjs' && a[1] === 'add') {
       return ok(`decision added: DEC-${String(++decision).padStart(4, '0')}\n`);
     }
-    if (a[0] === 'cli-dispatch.mjs') return ok('[{"taskId":"AISDLC-1106","state":"inflight"}]');
+    if (a[0] === 'cli-dispatch.mjs') return ok('[{"taskId":"AISDLC-1108","state":"inflight"}]');
     if (a[0] === 'gh' && a[2] === 'list') return ok('[{"number":77}]');
     if (a[0] === 'gh' && a[2] === 'view') {
       const state = prStates[Math.min(views++, prStates.length - 1)];
@@ -97,7 +97,7 @@ function harness(over: Partial<DemoDeps> & { prStates?: string[] } = {}): Harnes
 describe('scenario loader (AISDLC-1079)', () => {
   it('validates the shipped scenario', () => {
     const s = loadScenario(SCENARIO);
-    expect(s.task).toBe('AISDLC-1106');
+    expect(s.task).toBe('AISDLC-1108');
     expect(s.decisions.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -188,7 +188,7 @@ describe('demo run (AISDLC-1079)', () => {
       'cli-hierarchy.mjs',
       'brief',
       '--tasks',
-      'AISDLC-1106',
+      'AISDLC-1108',
       '--notify',
     ]);
     expect(verbs.some((v) => v === 'gh pr')).toBe(true);
