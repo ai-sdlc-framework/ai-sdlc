@@ -276,15 +276,12 @@ run_self_verify() {
 # Mirrors check-attestation-sign.sh's polarity exactly so both the hook and
 # this script would compute the same envelope filename for the same commit
 # (defense against ever double-signing if both happen to run).
-if ([ "${AI_SDLC_V5_LEGACY:-0}" = "1" ] || [ "${AI_SDLC_V6_CUTOVER_ACTIVE:-1}" = "0" ] || [ "${AI_SDLC_SCHEMA_VERSION:-v6}" = "v5" ]) && [ "${AI_SDLC_V5_FIXTURE_SIGN:-0}" != "1" ]; then
-  echo "[sign-attestation-if-consumer] ERROR: v5 attestation signing was removed (AISDLC-972). v5 is read-only for envelopes signed before 2026-05-23; the verifier rejects new v5 envelopes (v5-after-cutover). Unset AI_SDLC_V5_LEGACY / AI_SDLC_SCHEMA_VERSION=v5 / AI_SDLC_V6_CUTOVER_ACTIVE=0 and sign v6." >&2
+# DEC-0284: v6 is the only attestation schema; any legacy knob is refused.
+if [ "${AI_SDLC_V5_LEGACY:-0}" = "1" ] || [ "${AI_SDLC_V6_CUTOVER_ACTIVE:-1}" = "0" ] || [ "${AI_SDLC_SCHEMA_VERSION:-v6}" != "v6" ]; then
+  echo "[sign-attestation-if-consumer] ERROR: v6 is the only attestation schema signed or verified (DEC-0284). Unset AI_SDLC_V5_LEGACY / AI_SDLC_SCHEMA_VERSION / AI_SDLC_V6_CUTOVER_ACTIVE=0 and sign v6." >&2
   exit 1
 fi
-if [ "${AI_SDLC_V5_FIXTURE_SIGN:-0}" = "1" ] && { [ "${AI_SDLC_V5_LEGACY:-0}" = "1" ] || [ "${AI_SDLC_V6_CUTOVER_ACTIVE:-1}" = "0" ]; }; then
-  SCHEMA_VERSION="${AI_SDLC_SCHEMA_VERSION:-v5}"
-else
-  SCHEMA_VERSION="${AI_SDLC_SCHEMA_VERSION:-v6}"
-fi
+SCHEMA_VERSION="v6"
 
 # AISDLC-999: a retry must not sign on top of a previous attempt's attestation
 # chore commits (their envelope subject is no longer in history). Drop them

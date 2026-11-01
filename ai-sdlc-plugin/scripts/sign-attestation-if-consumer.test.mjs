@@ -607,7 +607,7 @@ describe('sign-attestation-if-consumer.sh (AISDLC-598)', () => {
     });
   });
 
-  describe('v5 signing refused (AISDLC-972)', () => {
+  describe('v5 signing refused (DEC-0284)', () => {
     it('REFUSES AI_SDLC_SCHEMA_VERSION=v5 without running the signer', () => {
       installConsumerPushPath(root);
       writeFileSync(join(root, '.active-task'), 'AISDLC-598\n');
@@ -621,7 +621,7 @@ describe('sign-attestation-if-consumer.sh (AISDLC-598)', () => {
       });
 
       assert.notEqual(r.status, 0, `expected refusal, got 0: ${r.stderr}`);
-      assert.match(r.stderr, /v5 attestation signing was removed/);
+      assert.match(r.stderr, /v6 is the only attestation schema signed or verified \(DEC-0284\)/);
       assert.equal(existsSync(logPath), false, 'the signer must NOT have run');
     });
   });

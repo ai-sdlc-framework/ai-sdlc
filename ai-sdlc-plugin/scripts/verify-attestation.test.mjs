@@ -218,7 +218,7 @@ function runSign(cwd, args, extraEnv = {}) {
     cwd,
     // AISDLC-972: v5 signing needs the fixture seam; the verifier then rejects
     // the envelope as v5-after-cutover.
-    env: cleanEnv({ AI_SDLC_V5_FIXTURE_SIGN: '1', ...extraEnv }),
+    env: cleanEnv({ ...extraEnv }),
     encoding: 'utf-8',
   });
 }
@@ -278,65 +278,6 @@ describe('verify-attestation.mjs — consumer-runnable verifier (AISDLC-566)', (
   afterEach(() => {
     rmSync(base, { recursive: true, force: true });
     rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it('signs (v5) with a repoRoot copy, verifies via a TRUSTED $CLAUDE_PLUGIN_ROOT copy', () => {
-    const root = join(base, 'app');
-    const fixture = setupAdopterRepo(root);
-    // Sign-side runtime resolution is unaffected by AISDLC-566 (signer runs
-    // on trusted operator content) — a repoRoot-installed copy is fine here.
-    writeRuntimeShim(installedRuntimePath(fixture.root));
-
-    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-    const privateKeyPem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
-    const publicKeyPem = publicKey.export({ format: 'pem', type: 'spki' }).toString();
-    writeSigningKey(tmpHome, privateKeyPem);
-    writeTrustedReviewersYaml(fixture.root, publicKeyPem);
-
-    const verdictsPath = join(fixture.root, 'verdicts.json');
-    writeFileSync(verdictsPath, STANDARD_VERDICTS);
-    const signRes = runSign(
-      fixture.root,
-      [
-        '--review-verdicts',
-        verdictsPath,
-        '--iteration-count',
-        '1',
-        '--harness-note',
-        '',
-        '--schema-version',
-        'v5',
-      ],
-      { HOME: tmpHome, GIT_AUTHOR_EMAIL: 'dev@example.com' },
-    );
-    assert.equal(signRes.status, 0, `sign stderr: ${signRes.stderr}\nstdout: ${signRes.stdout}`);
-
-    // Verify-side runtime MUST come from OUTSIDE repoRoot (AISDLC-566) — the
-    // real adopter CI recipe installs it into $CLAUDE_PLUGIN_ROOT, never
-    // into the PR checkout itself.
-    const pluginDir = join(base, 'plugin');
-    installTrustedVerifyDeps(pluginDir);
-
-    const verifyRes = runVerify(
-      fixture.root,
-      ['--head', fixture.headSha, '--base', fixture.baseSha],
-      { HOME: tmpHome, CLAUDE_PLUGIN_ROOT: pluginDir },
-    );
-    // AISDLC-972: a freshly signed v5 envelope is post-cutover, so the runtime
-    // resolving and verifying end-to-end shows up as v5-after-cutover.
-    assert.equal(verifyRes.status, 1, `stderr: ${verifyRes.stderr}\nstdout: ${verifyRes.stdout}`);
-    assert.match(verifyRes.stdout, /status=invalid/);
-    assert.match(verifyRes.stdout, /reason=v5-after-cutover/);
-    // Assert WHICH candidate resolved — the trusted plugin copy, never the
-    // repoRoot-installed one used for signing.
-    assert.ok(
-      verifyRes.stderr.includes(installedRuntimePath(pluginDir)),
-      `expected the trusted plugin copy to resolve; stderr: ${verifyRes.stderr}`,
-    );
-    assert.ok(
-      !verifyRes.stderr.includes(installedRuntimePath(fixture.root)),
-      `must NOT resolve the repoRoot-installed copy; stderr: ${verifyRes.stderr}`,
-    );
   });
 
   it('signs a v6 (Merkle-transcript) envelope and verifies it via a TRUSTED $CLAUDE_PLUGIN_ROOT copy', () => {
@@ -408,141 +349,6 @@ describe('verify-attestation.mjs — consumer-runnable verifier (AISDLC-566)', (
       verifyRes.stderr.includes(installedRuntimePath(pluginDir)),
       `expected the trusted plugin copy to resolve; stderr: ${verifyRes.stderr}`,
     );
-  });
-
-  it('rejects (status=invalid, exit 1) when the source diff was tampered with after signing', () => {
-    const root = join(base, 'app');
-    const fixture = setupAdopterRepo(root);
-    writeRuntimeShim(installedRuntimePath(fixture.root));
-
-    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-    const privateKeyPem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
-    const publicKeyPem = publicKey.export({ format: 'pem', type: 'spki' }).toString();
-    writeSigningKey(tmpHome, privateKeyPem);
-    writeTrustedReviewersYaml(fixture.root, publicKeyPem);
-
-    const verdictsPath = join(fixture.root, 'verdicts.json');
-    writeFileSync(verdictsPath, STANDARD_VERDICTS);
-    const signRes = runSign(
-      fixture.root,
-      [
-        '--review-verdicts',
-        verdictsPath,
-        '--iteration-count',
-        '1',
-        '--harness-note',
-        '',
-        '--schema-version',
-        'v5',
-      ],
-      { HOME: tmpHome, GIT_AUTHOR_EMAIL: 'dev@example.com' },
-    );
-    assert.equal(signRes.status, 0, `sign stderr: ${signRes.stderr}`);
-
-    // Tamper: force-push-shaped edit — amend HEAD's file content after signing.
-    writeFileSync(join(fixture.root, 'feature.txt'), 'tampered content\n');
-    git(['add', 'feature.txt'], fixture.root);
-    git(['commit', '-q', '--amend', '-m', 'feature (tampered)'], fixture.root);
-    const tamperedHeadSha = git(['rev-parse', 'HEAD'], fixture.root).trim();
-
-    const pluginDir = join(base, 'plugin');
-    installTrustedVerifyDeps(pluginDir);
-
-    const verifyRes = runVerify(
-      fixture.root,
-      ['--head', tamperedHeadSha, '--base', fixture.baseSha],
-      { HOME: tmpHome, CLAUDE_PLUGIN_ROOT: pluginDir },
-    );
-    assert.equal(verifyRes.status, 1, `expected exit 1; stdout: ${verifyRes.stdout}`);
-    assert.match(verifyRes.stdout, /status=invalid/);
-  });
-
-  it('resolves via CLAUDE_PLUGIN_ROOT with nothing installed in the repo itself', () => {
-    const root = join(base, 'app');
-    const fixture = setupAdopterRepo(root);
-    const pluginDir = join(base, 'plugin');
-    installTrustedVerifyDeps(pluginDir);
-
-    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-    const privateKeyPem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
-    const publicKeyPem = publicKey.export({ format: 'pem', type: 'spki' }).toString();
-    writeSigningKey(tmpHome, privateKeyPem);
-    writeTrustedReviewersYaml(fixture.root, publicKeyPem);
-
-    const verdictsPath = join(fixture.root, 'verdicts.json');
-    writeFileSync(verdictsPath, STANDARD_VERDICTS);
-    const signRes = runSign(
-      fixture.root,
-      [
-        '--review-verdicts',
-        verdictsPath,
-        '--iteration-count',
-        '1',
-        '--harness-note',
-        '',
-        '--schema-version',
-        'v5',
-      ],
-      { HOME: tmpHome, GIT_AUTHOR_EMAIL: 'dev@example.com', CLAUDE_PLUGIN_ROOT: pluginDir },
-    );
-    assert.equal(signRes.status, 0, `sign stderr: ${signRes.stderr}`);
-
-    const verifyRes = runVerify(
-      fixture.root,
-      ['--head', fixture.headSha, '--base', fixture.baseSha],
-      { HOME: tmpHome, CLAUDE_PLUGIN_ROOT: pluginDir },
-    );
-    // AISDLC-972: a freshly signed v5 envelope is post-cutover, so the runtime
-    // resolving and verifying end-to-end shows up as v5-after-cutover.
-    assert.equal(verifyRes.status, 1, `stderr: ${verifyRes.stderr}\nstdout: ${verifyRes.stdout}`);
-    assert.match(verifyRes.stdout, /status=invalid/);
-    assert.match(verifyRes.stdout, /reason=v5-after-cutover/);
-    assert.ok(
-      verifyRes.stderr.includes(installedRuntimePath(pluginDir)),
-      `expected the plugin copy to resolve; stderr: ${verifyRes.stderr}`,
-    );
-  });
-
-  it('defaults --head/--base from git when neither flags nor env vars are given', () => {
-    const root = join(base, 'app');
-    const fixture = setupAdopterRepo(root);
-    writeRuntimeShim(installedRuntimePath(fixture.root));
-
-    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-    const privateKeyPem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
-    const publicKeyPem = publicKey.export({ format: 'pem', type: 'spki' }).toString();
-    writeSigningKey(tmpHome, privateKeyPem);
-    writeTrustedReviewersYaml(fixture.root, publicKeyPem);
-
-    const verdictsPath = join(fixture.root, 'verdicts.json');
-    writeFileSync(verdictsPath, STANDARD_VERDICTS);
-    const signRes = runSign(
-      fixture.root,
-      [
-        '--review-verdicts',
-        verdictsPath,
-        '--iteration-count',
-        '1',
-        '--harness-note',
-        '',
-        '--schema-version',
-        'v5',
-      ],
-      { HOME: tmpHome, GIT_AUTHOR_EMAIL: 'dev@example.com' },
-    );
-    assert.equal(signRes.status, 0, `sign stderr: ${signRes.stderr}`);
-
-    const pluginDir = join(base, 'plugin');
-    installTrustedVerifyDeps(pluginDir);
-
-    // No --head/--base, no PR_HEAD_SHA/PR_BASE_SHA — the script must default
-    // to `git rev-parse HEAD` and `git merge-base origin/main HEAD`.
-    const verifyRes = runVerify(fixture.root, [], { HOME: tmpHome, CLAUDE_PLUGIN_ROOT: pluginDir });
-    // AISDLC-972: a freshly signed v5 envelope is post-cutover, so the runtime
-    // resolving and verifying end-to-end shows up as v5-after-cutover.
-    assert.equal(verifyRes.status, 1, `stderr: ${verifyRes.stderr}\nstdout: ${verifyRes.stdout}`);
-    assert.match(verifyRes.stdout, /status=invalid/);
-    assert.match(verifyRes.stdout, /reason=v5-after-cutover/);
   });
 
   it('fails loud with adopter-actionable guidance when the runtime is absent everywhere', () => {
@@ -673,63 +479,6 @@ describe('verify-attestation.mjs — bare node_modules walk-up, no plugin sessio
       encoding: 'utf-8',
     });
   }
-
-  it('resolves the trusted runtime + verify-core purely via node_modules walk-up, no CLAUDE_PLUGIN_* set', () => {
-    const root = join(base, 'app');
-    const fixture = setupAdopterRepo(root);
-    // Sign-side resolution is unaffected by the walk-up fix (signer runs on
-    // trusted operator content) — a repoRoot-installed copy is fine here.
-    writeRuntimeShim(installedRuntimePath(fixture.root));
-
-    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-    const privateKeyPem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
-    const publicKeyPem = publicKey.export({ format: 'pem', type: 'spki' }).toString();
-    writeSigningKey(tmpHome, privateKeyPem);
-    writeTrustedReviewersYaml(fixture.root, publicKeyPem);
-
-    const verdictsPath = join(fixture.root, 'verdicts.json');
-    writeFileSync(verdictsPath, STANDARD_VERDICTS);
-    const signRes = runSign(
-      fixture.root,
-      [
-        '--review-verdicts',
-        verdictsPath,
-        '--iteration-count',
-        '1',
-        '--harness-note',
-        '',
-        '--schema-version',
-        'v5',
-      ],
-      { HOME: tmpHome, GIT_AUTHOR_EMAIL: 'dev@example.com' },
-    );
-    assert.equal(signRes.status, 0, `sign stderr: ${signRes.stderr}`);
-
-    // Install BOTH trusted deps under a synthetic node_modules ancestor of
-    // the copied script — NOT under fixture.root (the untrusted checkout),
-    // and NOT via $CLAUDE_PLUGIN_ROOT/$CLAUDE_PLUGIN_DIR (deliberately unset
-    // by `cleanEnv`) — the "npm install as a sibling dependency, no plugin
-    // at all" consumer layout.
-    const installRoot = mkdtempSync(join(base, 'install-'));
-    installTrustedVerifyDeps(join(installRoot, 'some'));
-    const scriptCopyPath = installScriptCopy(installRoot);
-
-    const verifyRes = runVerifyCopy(
-      scriptCopyPath,
-      fixture.root,
-      ['--head', fixture.headSha, '--base', fixture.baseSha],
-      { HOME: tmpHome },
-    );
-    // AISDLC-972: a freshly signed v5 envelope is post-cutover, so the runtime
-    // resolving and verifying end-to-end shows up as v5-after-cutover.
-    assert.equal(verifyRes.status, 1, `stderr: ${verifyRes.stderr}\nstdout: ${verifyRes.stdout}`);
-    assert.match(verifyRes.stdout, /status=invalid/);
-    assert.match(verifyRes.stdout, /reason=v5-after-cutover/);
-    assert.ok(
-      verifyRes.stderr.includes(installedRuntimePath(join(installRoot, 'some'))),
-      `expected the walk-up-resolved copy to win; stderr: ${verifyRes.stderr}`,
-    );
-  });
 
   it('fails closed (exit 2) when the walk-up layout has no trusted runtime installed anywhere', () => {
     const root = join(base, 'app');

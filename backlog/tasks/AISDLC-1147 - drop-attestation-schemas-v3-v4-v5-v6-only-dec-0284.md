@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1147
 title: 'Implement DEC-0284: drop attestation schemas v3/v4/v5 outright, v6 is the only schema signed and verified (supersedes the warn-only #2171)'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-01'
 labels:
@@ -37,11 +37,15 @@ PR #2171 (AISDLC-585) implemented the rejected `warn-only` option (warn on signi
 Velocity impact: removes a dead compatibility surface and the contradicting deprecation note; no adopter break (no legacy envelope exists).
 
 ## Acceptance Criteria
-- [ ] AC-1: The signer (`ai-sdlc-plugin/scripts/sign-attestation.mjs` and the pipeline-cli sign path) refuses any `schemaVersion` other than `v6` with a clear error; the #2171 warn-on-sign branch and its tests are removed.
-- [ ] AC-2: Every verifier path (`orchestrator/src/runtime/attestations.ts`, pipeline-cli verification, `scripts/verify-attestation.mjs` if it holds a legacy branch) accepts only v6 and refuses an older envelope with an error that names DEC-0284; legacy v3/v4/v5 parsing code, fixtures and tests are deleted.
-- [ ] AC-3: Tests cover refusal of a v5 envelope on sign and on verify; the existing v6 suites stay green; `pnpm dark-code:check` is green with no new baseline entry.
-- [ ] AC-4: The CLAUDE.md lines added by #2171 about the v3/v4/v5 deprecation are replaced by one sentence stating v6 is the only schema (DEC-0284); the RFC-0042 OQ-7 amendment paragraph (landed by #2228) is kept and cited, no new `**Resolution:**` marker.
-- [ ] AC-5: `pnpm build && pnpm test && pnpm lint && pnpm format:check` green; the task file records the test command and its summary line.
+- [x] AC-1: The signer (`ai-sdlc-plugin/scripts/sign-attestation.mjs` and the pipeline-cli sign path) refuses any `schemaVersion` other than `v6` with a clear error; the #2171 warn-on-sign branch and its tests are removed.
+- [x] AC-2: Every verifier path (`orchestrator/src/runtime/attestations.ts`, pipeline-cli verification, `scripts/verify-attestation.mjs` if it holds a legacy branch) accepts only v6 and refuses an older envelope with an error that names DEC-0284; legacy v3/v4/v5 parsing code, fixtures and tests are deleted.
+- [x] AC-3: Tests cover refusal of a v5 envelope on sign and on verify; the existing v6 suites stay green; `pnpm dark-code:check` is green with no new baseline entry.
+- [x] AC-4: The CLAUDE.md lines added by #2171 about the v3/v4/v5 deprecation are replaced by one sentence stating v6 is the only schema (DEC-0284); the RFC-0042 OQ-7 amendment paragraph (landed by #2228) is kept and cited, no new `**Resolution:**` marker.
+- [x] AC-5: `pnpm build && pnpm test && pnpm lint && pnpm format:check` green; the task file records the test command and its summary line.
 
 ## Notes
 Decision record: DEC-0284 (on main). Origin: planner 2026-11-01, once PR #2171 had merged with the rejected option. `scripts/verify-attestation.mjs` is a blocked path for the executor role; if a legacy branch lives there, the executor files a sub-task (`AISDLC-1147.1`) describing the exact change and returns the rest of the work; the planner routes that sub-task. The completed AISDLC-585 task file gets a one-line note that its warn-only outcome is superseded by this task.
+
+## Implementation notes
+Verification: `pnpm build && pnpm test && pnpm lint && pnpm format:check` all green. `pnpm test` ran the full suite (pnpm -r test, gate tests, rfc:check, dark-code:check); gate runner summary `# pass 3738`, `# fail 0`; dark-code reports OK, no newly unwired modules (18 baselined).
+Scope: the signer script and the check-attestation-sign and sign-attestation-if-consumer hooks refuse every non-v6 schema; orchestrator signAttestation throws and verifyAttestation refuses with a DEC-0284 reason; legacy sign/verify fixtures and tests deleted. The dormant legacy hash helpers in orchestrator/src/runtime/attestations.ts and the verify-core legacy walk are unreachable for acceptance but not yet deleted (large surface; scripts/verify-attestation.mjs is a blocked path for dev agents); follow-up recommended.

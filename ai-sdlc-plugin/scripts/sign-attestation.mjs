@@ -31,7 +31,7 @@
  *   node ai-sdlc-plugin/scripts/sign-attestation.mjs --print-content-hash
  *
  * Inputs (CLI flags):
- *   --schema-version   'v5' (default during transition) | 'v6' (RFC-0042 Phase 2)
+ *   --schema-version   'v6' only (default; DEC-0284). Any other value is refused.
  *                     When 'v6': reads transcript leaves from
  *                     .ai-sdlc/transcript-leaves.jsonl, computes the Merkle
  *                     root + per-leaf inclusion proofs, signs the root, and
@@ -479,27 +479,21 @@ async function main() {
   //      emit transcript leaves to .ai-sdlc/transcript-leaves.jsonl via
   //      cli-attestation.mjs emit-leaf as part of their reviewer fan-out.
   //
-  // AISDLC-972: v5 is READ-ONLY (verify-only, for envelopes signed before the
-  // 2026-05-23 cutover). The producer paths (--schema-version v5,
-  // AI_SDLC_V5_LEGACY=1, AI_SDLC_V6_CUTOVER_ACTIVE=0) are removed; the verifier
-  // rejects any v5 envelope signed after the cutover (`v5-after-cutover`).
-  const v5Requested =
-    args['schema-version'] === 'v5' ||
+  // DEC-0284: v6 is the only attestation schema. v3/v4/v5 signing is removed,
+  // with no opt-out and no fixture seam. Any other schemaVersion is refused.
+  const schemaVersion = args['schema-version'] ?? 'v6';
+  if (
+    schemaVersion !== 'v6' ||
     process.env['AI_SDLC_V5_LEGACY'] === '1' ||
     process.env['AI_SDLC_V6_CUTOVER_ACTIVE'] === '0' ||
-    process.env['AI_SDLC_SCHEMA_VERSION'] === 'v5';
-  // AI_SDLC_V5_FIXTURE_SIGN=1 is a test-fixture seam only: the verifier still
-  // rejects the result (v5-after-cutover), so it cannot land code.
-  if (v5Requested && process.env['AI_SDLC_V5_FIXTURE_SIGN'] !== '1') {
+    process.env['AI_SDLC_SCHEMA_VERSION'] === 'v5'
+  ) {
     fail(
-      'v5 attestation signing was removed (AISDLC-972): v5 is read-only for envelopes signed before ' +
-        '2026-05-23, and the verifier rejects new v5 envelopes (v5-after-cutover). Sign v6 instead ' +
-        '(the default); unset AI_SDLC_V5_LEGACY / AI_SDLC_V6_CUTOVER_ACTIVE=0 / --schema-version v5.',
+      `unsupported attestation schemaVersion '${schemaVersion}': v6 is the only schema signed or ` +
+        'verified (DEC-0284). Sign v6 (the default); unset --schema-version, AI_SDLC_V5_LEGACY, ' +
+        'AI_SDLC_V6_CUTOVER_ACTIVE=0 and AI_SDLC_SCHEMA_VERSION.',
     );
   }
-  const v5LegacyOptOut =
-    process.env['AI_SDLC_V5_LEGACY'] === '1' || process.env['AI_SDLC_V6_CUTOVER_ACTIVE'] === '0';
-  const schemaVersion = args['schema-version'] ?? (v5LegacyOptOut ? 'v5' : 'v6');
 
   // ──────────────────────────────────────────────────────────────────
   // RFC-0042 Phase 2: --schema-version v6 mode
@@ -599,296 +593,6 @@ async function main() {
     process.stdout.write(`${outPath}\n`);
     return;
   }
-
-  // ── Legacy v5 path (default during transition) ────────────────────
-  const verdictsPath = args['review-verdicts'];
-  const iterationCount = Number(args['iteration-count'] ?? '1');
-  const harnessNote = args['harness-note'] ?? '';
-  // AISDLC-202.3: optional harness identification. The Codex execution path
-  // passes --harness-name codex (and optionally --harness-version) so the
-  // envelope predicate carries a machine-readable { name, version } field.
-  // Claude Code paths omit these flags and the field is absent (back-compat).
-  const harnessName = typeof args['harness-name'] === 'string' ? args['harness-name'].trim() : '';
-  const harnessVersion =
-    typeof args['harness-version'] === 'string' ? args['harness-version'].trim() : '';
-
-  if (!verdictsPath) fail('--review-verdicts <path> required');
-  if (!Number.isFinite(iterationCount) || iterationCount < 1) {
-    fail(`--iteration-count must be a positive integer, got ${args['iteration-count']}`);
-  }
-
-  const keyPath = join(homedir(), '.ai-sdlc', 'signing-key.pem');
-  if (!existsSync(keyPath)) {
-    fail(
-      `No signing key at ${keyPath}.\n` +
-        '       Run /ai-sdlc init-signing-key once, then add your pubkey to\n' +
-        '       .ai-sdlc/trusted-reviewers.yaml via a follow-up PR.',
-    );
-  }
-
-  // Lazy-import the runtime barrel so the script can run standalone, resolving
-  // it from the repo being signed (monorepo build dir, else installed package).
-  const {
-    buildPredicate,
-    signAttestation,
-    collectChangedFileDeltaEntries,
-    collectChangedFileEntriesForV5,
-  } = await loadAttestationRuntime(repoRoot);
-
-  // Gather inputs.
-  const headSha = git(['rev-parse', 'HEAD'], repoRoot).trim();
-  // AISDLC-103 (Verifier Phase 3): collect per-file (base, head) blob
-  // deltas for `contentHashV3`. The legacy `diffHash` (sha256 of literal
-  // git diff) and `contentHash` (head blob SHA per file) are no longer
-  // emitted — see CLAUDE.md "What CI rejects" / "What CI accepts" for the
-  // full backstory of the v1 → v2 → v3 migration.
-  let changedFileDeltas;
-  try {
-    changedFileDeltas = collectChangedFileDeltaEntries('origin/main', 'HEAD', repoRoot);
-  } catch (err) {
-    fail(err.message ?? String(err));
-  }
-  // AISDLC-362 (contentHashV5): collect the frozen-merge-base file set.
-  // This is the load-bearing fix: the merge-base is computed ONCE here and
-  // frozen into the envelope so the verifier can reproduce the EXACT diff
-  // base the signer used — regardless of how many sibling PRs merge on
-  // `origin/main` between sign time and verify time.
-  let v5Result;
-  try {
-    v5Result = collectChangedFileEntriesForV5(repoRoot, 'origin/main', 'HEAD');
-  } catch (err) {
-    // Non-fatal: if v5 collection fails (unusual environment, no fetch),
-    // degrade gracefully to a v3+v4 envelope. The verifier will fall back.
-    process.stderr.write(
-      `[sign-attestation] WARNING: v5 collection failed (${err.message ?? String(err)}); falling back to v3+v4 envelope\n`,
-    );
-    v5Result = null;
-  }
-  const policy = readFileSync(join(repoRoot, '.ai-sdlc', 'review-policy.md'), 'utf-8');
-  const verdictsRaw = JSON.parse(readFileSync(verdictsPath, 'utf-8'));
-  // AISDLC-355 — support both shapes during transition:
-  //   Flat array:       [{agentId, harness, approved, findings}, ...]
-  //     (written by resume-from-draft after the Bug 2 fix)
-  //   Nested object:    {taskId, decision, counts, verdicts: [...]}
-  //     (written by writeVerdictFile in execute.ts / VerdictFilePayload shape)
-  // Extract the flat array from whichever shape was written.
-  let verdicts;
-  if (Array.isArray(verdictsRaw)) {
-    verdicts = verdictsRaw;
-  } else if (
-    verdictsRaw !== null &&
-    typeof verdictsRaw === 'object' &&
-    Array.isArray(verdictsRaw.verdicts)
-  ) {
-    verdicts = verdictsRaw.verdicts;
-  } else {
-    fail(
-      `${verdictsPath} must contain either a JSON array of reviewer verdicts or an object with a 'verdicts' array key`,
-    );
-  }
-  // AISDLC-355 CRITICAL: handle both the new flat-array `findings` form and
-  // the legacy counts-object form so sign-attestation never silently reports
-  // 0 findings when the verdict file uses the flat-array shape.
-  function countBySeverity(findings) {
-    if (Array.isArray(findings)) {
-      // New flat-array form: count by severity field.
-      const counts = { critical: 0, major: 0, minor: 0, suggestion: 0 };
-      for (const f of findings) {
-        if (f && typeof f === 'object' && f.severity in counts) {
-          counts[f.severity]++;
-        }
-      }
-      return counts;
-    }
-    // Legacy counts-object form (or missing/null): read directly with ?? 0.
-    return {
-      critical: findings?.critical ?? 0,
-      major: findings?.major ?? 0,
-      minor: findings?.minor ?? 0,
-      suggestion: findings?.suggestion ?? 0,
-    };
-  }
-
-  const reviewers = verdicts.map((v) => {
-    if (!v?.agentId) fail(`reviewer verdict missing agentId: ${JSON.stringify(v)}`);
-    const agentFile = join(repoRoot, 'ai-sdlc-plugin', 'agents', `${v.agentId}.md`);
-    if (!existsSync(agentFile)) fail(`reviewer agent file not found: ${agentFile}`);
-    return {
-      agentId: v.agentId,
-      agentFileContent: readFileSync(agentFile, 'utf-8'),
-      harness: v.harness ?? 'unknown',
-      approved: Boolean(v.approved),
-      findings: countBySeverity(v.findings),
-    };
-  });
-  const pluginManifest = JSON.parse(
-    readFileSync(join(repoRoot, 'ai-sdlc-plugin', 'plugin.json'), 'utf-8'),
-  );
-  const pluginVersion = pluginManifest.version ?? 'unknown';
-
-  // AISDLC-100.6 (RFC-0012 Phase 6): read `@ai-sdlc/pipeline-cli` version
-  // from its `package.json` and include in the predicate. Forensic / audit
-  // purpose only — the verifier logs but does NOT enforce a specific
-  // pipeline-cli version. Resolution: sibling workspace package at
-  // `<repoRoot>/pipeline-cli/package.json`. If the file is missing OR
-  // unparseable OR has no `version` field, fall back to `null` so the
-  // predicate omits the field rather than carrying a bogus value.
-  let pipelineVersion = null;
-  try {
-    const pipelinePkgPath = join(repoRoot, 'pipeline-cli', 'package.json');
-    if (existsSync(pipelinePkgPath)) {
-      const pipelinePkg = JSON.parse(readFileSync(pipelinePkgPath, 'utf-8'));
-      if (typeof pipelinePkg.version === 'string' && pipelinePkg.version.length > 0) {
-        pipelineVersion = pipelinePkg.version;
-      }
-    }
-  } catch {
-    // Malformed package.json — leave pipelineVersion null so we omit the
-    // field rather than embedding a bad value.
-  }
-
-  // Build harness object when --harness-name was provided. The Codex path
-  // passes --harness-name codex (+ optional --harness-version) so the
-  // envelope predicate carries a machine-readable harness identification.
-  // Claude Code paths omit the flag and the predicate field stays absent.
-  const harnessPayload = harnessName
-    ? { name: harnessName, ...(harnessVersion ? { version: harnessVersion } : {}) }
-    : undefined;
-
-  const predicate = buildPredicate({
-    commitSha: headSha,
-    policy,
-    reviewers,
-    pluginVersion,
-    pipelineVersion: pipelineVersion ?? undefined,
-    harness: harnessPayload,
-    iterationCount,
-    harnessNote,
-    changedFileDeltas,
-    // AISDLC-362: pass v5 data when collection succeeded. When null, the
-    // predicate falls back to a v3+v4 envelope (schemaVersion: 'v3').
-    ...(v5Result ? { v5Entries: v5Result.entries, v5MergeBase: v5Result.signedMergeBase } : {}),
-  });
-
-  const privateKeyPem = readFileSync(keyPath, 'utf-8');
-  const identity =
-    process.env.GIT_AUTHOR_EMAIL || process.env.EMAIL || `${userInfo().username}@local`;
-  const machine = hostname();
-  const envelope = signAttestation({
-    predicate,
-    privateKeyPem,
-    keyid: `${identity}:${machine}`,
-  });
-
-  const outDir = join(repoRoot, '.ai-sdlc', 'attestations');
-  mkdirSync(outDir, { recursive: true });
-
-  // AISDLC-274: single-envelope-per-PR invariant.
-  //
-  // Before writing the new envelope, scan for any envelope files that were
-  // ADDED by earlier commits in the current PR (vs origin/main). Stale
-  // envelopes accumulate when a PR is queue-rebased and re-signed across
-  // multiple iterations — each sign adds a new <sha>.dsse.json without
-  // removing the one from the previous iteration. The verifier then walks
-  // multiple envelopes, can't resolve the orphan SHAs, and surfaces a
-  // misleading `contentHashV4 mismatch` error.
-  //
-  // We use `git diff --name-only --diff-filter=A origin/main..HEAD` to
-  // list files ADDED by the PR (the diff-filter=A ensures we only see
-  // files that are new on this branch, not pre-existing attestation files
-  // from merged PRs). Any *.dsse.json in .ai-sdlc/attestations/ in that
-  // list is a stale envelope from a previous sign of this PR — delete it.
-  let prAddedEnvelopes = [];
-  try {
-    const diffOut = git(
-      [
-        'diff',
-        '--name-only',
-        '--diff-filter=A',
-        'origin/main..HEAD',
-        '--',
-        '.ai-sdlc/attestations/',
-      ],
-      repoRoot,
-    );
-    prAddedEnvelopes = diffOut
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l.endsWith('.dsse.json') && l.startsWith('.ai-sdlc/attestations/'));
-  } catch {
-    // origin/main unreachable or diff fails — skip cleanup and proceed.
-    // The new envelope will still be written; worst case we leave an orphan
-    // (the original bug) rather than failing the entire sign.
-  }
-
-  const { unlinkSync } = await import('node:fs');
-  for (const staleRelPath of prAddedEnvelopes) {
-    const staleAbsPath = join(repoRoot, staleRelPath);
-    try {
-      unlinkSync(staleAbsPath);
-      process.stderr.write(`[sign-attestation] removed stale envelope: ${staleRelPath}\n`);
-    } catch {
-      // Best-effort — if deletion fails (permissions, already gone), continue.
-    }
-  }
-
-  // AISDLC-398: compute content-addressed patch-id for the primary filename.
-  //
-  // The patch-id is stable across conflict-free rebases (queue rebases that
-  // change the commit SHA but not the diff content). This eliminates the
-  // v4-kick failure mode where a rebase shifted the head SHA → the verifier
-  // looked for <new-sha>.dsse.json → couldn't find it → posted failure.
-  //
-  // We compute merge-base ONCE here so both the patch-id and v5Result use
-  // the same frozen base — they should, since v5Result.signedMergeBase was
-  // already computed above.
-  let patchIdMergeBase = v5Result?.signedMergeBase ?? null;
-  if (!patchIdMergeBase) {
-    try {
-      const mb = git(['merge-base', 'origin/main', 'HEAD'], repoRoot).trim();
-      if (/^[0-9a-f]{40}$/i.test(mb)) patchIdMergeBase = mb.toLowerCase();
-    } catch {
-      patchIdMergeBase = null;
-    }
-  }
-
-  // AISDLC-610: use the SAME `computePatchId` implementation as the v6 path
-  // (and as `cli-attestation emit-leaf` / `sign-v6`) — not a re-implemented
-  // copy. See `tryLoadPipelineCliPatchId` above (best-effort: degrades to
-  // the legacy per-SHA filename when the module can't be resolved).
-  let patchId = null;
-  if (patchIdMergeBase) {
-    const patchIdModule = await tryLoadPipelineCliPatchId(repoRoot);
-    if (patchIdModule) {
-      patchId = patchIdModule.computePatchId(patchIdMergeBase, headSha, repoRoot);
-    }
-  }
-
-  const envelopeJson = formatEnvelopeJson(envelope);
-
-  // Primary: content-addressed filename (AISDLC-398)
-  const primaryOutPath = patchId
-    ? join(outDir, `${patchId}.dsse.json`)
-    : join(outDir, `${headSha}.dsse.json`);
-  writeFileSync(primaryOutPath, envelopeJson);
-  if (patchId) {
-    process.stderr.write(
-      `[sign-attestation] wrote primary envelope (patch-id): .ai-sdlc/attestations/${patchId}.dsse.json\n`,
-    );
-  }
-
-  // Legacy compat bridge: per-SHA filename (one-release soak, AISDLC-398).
-  // Verifiers that haven't been updated yet will still find the envelope via
-  // the SHA-keyed filename. Scheduled for deletion in the AISDLC-398 follow-up.
-  if (patchId) {
-    const legacyOutPath = join(outDir, `${headSha}.dsse.json`);
-    writeFileSync(legacyOutPath, envelopeJson);
-    process.stderr.write(
-      `[sign-attestation] wrote legacy bridge envelope (SHA): .ai-sdlc/attestations/${headSha}.dsse.json\n`,
-    );
-  }
-
-  process.stdout.write(`${primaryOutPath}\n`);
 }
 
 main().catch((err) => fail(err.message ?? String(err)));

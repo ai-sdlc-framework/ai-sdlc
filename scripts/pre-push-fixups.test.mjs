@@ -86,8 +86,6 @@ function cleanEnv(extra = {}) {
   // attestation-sign needs schema version env clean.
   delete env.AI_SDLC_SCHEMA_VERSION;
   delete env.AI_SDLC_V6_CUTOVER_ACTIVE;
-  // AISDLC-972: v5 signing is refused unless this fixture seam is set.
-  if (!('AI_SDLC_V5_FIXTURE_SIGN' in extra)) env.AI_SDLC_V5_FIXTURE_SIGN = '1';
   // Post-AISDLC-383.7: the AISDLC-380 sub-attestation gate was removed.
   // These env vars are no longer consulted by check-attestation-sign.sh
   // but we still scrub them defensively in case host env carries stale values.
@@ -397,7 +395,7 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
         AI_SDLC_TEST_MODE: '1',
         AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
         AI_SDLC_V6_CUTOVER_ACTIVE: '1',
-        AI_SDLC_SCHEMA_VERSION: 'v5',
+        AI_SDLC_SCHEMA_VERSION: 'v6',
       },
     });
 
@@ -426,7 +424,7 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
         AI_SDLC_TEST_MODE: '1',
         AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
         AI_SDLC_V6_CUTOVER_ACTIVE: '1',
-        AI_SDLC_SCHEMA_VERSION: 'v5',
+        AI_SDLC_SCHEMA_VERSION: 'v6',
       },
     });
 
@@ -457,7 +455,7 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
         AI_SDLC_TEST_MODE: '1',
         AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
         AI_SDLC_V6_CUTOVER_ACTIVE: '1',
-        AI_SDLC_SCHEMA_VERSION: 'v5',
+        AI_SDLC_SCHEMA_VERSION: 'v6',
       },
     });
 
@@ -496,7 +494,7 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
       AI_SDLC_TEST_MODE: '1',
       AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
       AI_SDLC_V6_CUTOVER_ACTIVE: '1',
-      AI_SDLC_SCHEMA_VERSION: 'v5',
+      AI_SDLC_SCHEMA_VERSION: 'v6',
       // AISDLC-694: the second push finds an envelope and runs the verifier.
       AI_SDLC_VERIFY_ATTESTATION_CMD: installFakeVerifier(root),
     };
@@ -602,7 +600,7 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
         AI_SDLC_TEST_MODE: '1',
         AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
         AI_SDLC_V6_CUTOVER_ACTIVE: '1',
-        AI_SDLC_SCHEMA_VERSION: 'v5',
+        AI_SDLC_SCHEMA_VERSION: 'v6',
       }),
       input: stdinData,
       encoding: 'utf-8',

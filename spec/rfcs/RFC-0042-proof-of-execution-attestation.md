@@ -39,7 +39,7 @@ implementedBy:
 **Updated:** 2026-05-28
 **Implemented:** 2026-05-23 (AISDLC-409 v6 default-on cutover)
 **Target Spec Version:** v1alpha1
-**Deprecation note (AISDLC-585, 2026-10-30):** signing v3/v4/v5 envelopes is deprecated and warns on sign; v6 is the only supported signing format. Target removal window: signer code removal in Phase B, no earlier than 2026-12-31. Phase B (removal) is deferred to an RFC-0042 amendment; the verifier keeps reading v3/v4/v5 (OQ-7).
+**Schema note (DEC-0284, 2026-10-31):** v6 is the only attestation schema signed or verified; v3/v4/v5 are refused outright. See the OQ-7 amendment below (supersedes the AISDLC-585 deprecation note).
 
 ## Problem
 
