@@ -31,6 +31,8 @@ The loop does not run in this conversation. The `hierarchy` hooks module (`hooks
 - An enqueue writes the board entry, then wakes the named executor with `$.session.send`.
 - The tick clears an executor's pane from its verdict file (`cli-hierarchy clear <name>` drives `/clear` and the executor command, falling back to restart); rotation at 120k tokens is registered by the module.
 
+Inside the hierarchy, recycle an idle or stuck executor with `cli-hierarchy restart <name>` and remove a dynamic executor with `cli-hierarchy down <name>`; never run a bare `down` (it is refused from a roster session, and a full teardown is an operator action).
+
 If you are reading this, a prompt reached you outside the module (a human typed into the pane, or the
 module is not loaded). Do only this: run `cli-hierarchy status` and report it; do not start a loop, do not
 sleep, do not clear.

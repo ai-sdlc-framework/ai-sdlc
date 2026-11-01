@@ -475,10 +475,16 @@ End sessions, return their inflight manifests to `queue/`, close their windows a
 the roster.
 
 ```bash
-cli-hierarchy down [--role <name-or-role>]
+cli-hierarchy down [<name-or-role> | --role <name-or-role>]
 ```
 
-`--role` stops one session by name (`executor-beta`) or a role (`executor` selects all
+Inside the hierarchy, recycle an idle or stuck executor with `restart <name>` (the session comes
+back) and remove a dynamic executor with `down <name>`; never with a bare `down`. A bare `down`
+from a roster session is refused (exit `2`), and `down <name>` / `restart <name>` refuse the calling
+session itself (AISDLC-1106). A full teardown is an operator action from outside the roster; it
+stops executors first, then dispatch, then the planner last.
+
+The positional name and `--role` are equivalent. `--role` stops one session by name (`executor-beta`) or a role (`executor` selects all
 executors); with no option every session stops, with no confirmation question, and the reconcile scheduler (the poller of `<board>/.reconcile-wake`) is stopped too. Each session is asked to exit and gets a
 grace period; a window that stays open is closed by pane id. A session that does not carry
 the ownership marker, or whose recorded pane no longer belongs to it, is refused and left

@@ -817,7 +817,20 @@ export async function runHierarchyCli(
         return 0;
       }
       case 'down': {
-        const result = await hierarchyDown({ role: flags.role }, deps);
+        const target = firstPositional(argv) ?? flags.role;
+        const who = resolveCaller(
+          extras.identity ?? createSystemIdentity(deps.boardDir, extras.processLookup),
+        );
+        if (who && !target) {
+          process.stderr.write(
+            `cli-hierarchy down: refusing a bare down from inside the hierarchy ('${who.name}' is a roster session); it would stop every session, including this one. Stop one session with 'down <name>' or recycle it with 'restart <name>'; a full teardown is an operator action from outside the roster\n`,
+          );
+          return 2;
+        }
+        const result = await hierarchyDown(
+          { ...(target ? { role: target } : {}), ...(who ? { callerName: who.name } : {}) },
+          deps,
+        );
         // A session left alone (not started by `up`, stale pane) is not a success.
         return result.refused.length > 0 ? 1 : 0;
       }
