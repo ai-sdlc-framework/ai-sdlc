@@ -69,13 +69,13 @@ function commit(files, remove = []) {
   git(['commit', '-q', '-m', 'work']);
 }
 
-function push(remoteSha = '0'.repeat(40)) {
+function push(remoteSha = '0'.repeat(40), pathPrefix = '') {
   const head = git(['rev-parse', 'HEAD']);
   return spawnSync('bash', [join(root, 'scripts', 'check-governance-on-push.sh')], {
     cwd: root,
     input: `refs/heads/b ${head} refs/heads/b ${remoteSha}\n`,
     encoding: 'utf-8',
-    env: { ...process.env, PATH: process.env.PATH },
+    env: { ...process.env, PATH: pathPrefix + process.env.PATH },
     timeout: 60000,
   });
 }
@@ -149,6 +149,44 @@ describe('check-governance-on-push.sh', () => {
     git(['update-ref', 'refs/remotes/origin/main', 'HEAD']);
     commit({}, ['docs/gone.md']);
     assert.match(push().stderr, /referenced from backlog\//);
+  });
+
+  describe('drift severity gate (AISDLC-1146)', () => {
+    // Stub `npx`: `check --json` prints the report and both calls exit 1.
+    function driftPush(report) {
+      fixture();
+      commit({ 'docs/gone.md': 'x\n', 'backlog/tasks/t.md': 'see docs/gone.md\n' });
+      git(['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+      commit({}, ['docs/gone.md']);
+      const bin = join(root, 'stub-bin');
+      mkdirSync(bin);
+      writeFileSync(join(bin, 'report.txt'), report);
+      writeFileSync(
+        join(bin, 'npx'),
+        `#!/bin/sh\ncase "$*" in *--json*) cat "${join(bin, 'report.txt')}";; esac\nexit 1\n`,
+        { mode: 0o755 },
+      );
+      return push(undefined, `${bin}:`);
+    }
+
+    it('passes with only info/warning findings', () => {
+      const r = driftPush('[{"severity":"warning"},{"severity":"info"}]');
+      assert.doesNotMatch(r.stderr, /push blocked/);
+      assert.match(r.stderr, /gate passed \(info\/warning issues are informational/);
+      assert.equal(r.status, 0);
+    });
+
+    it('blocks on an error finding and names the fix command', () => {
+      const r = driftPush('[{"severity":"error"},{"severity":"info"}]');
+      assert.equal(r.status, 1);
+      assert.match(r.stderr, /1 error-severity issue\(s\); fix with npx backlog-drift fix --task/);
+    });
+
+    it('blocks on an unreadable report and prints the exit code', () => {
+      const r = driftPush('not json');
+      assert.equal(r.status, 1);
+      assert.match(r.stderr, /not valid JSON \(backlog-drift exit code 1\)/);
+    });
   });
 
   it('is skippable and the hook wires it in', () => {

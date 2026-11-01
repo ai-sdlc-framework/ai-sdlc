@@ -75,9 +75,26 @@ $(git diff --name-only --diff-filter=DR "$BASE..$LOCAL_SHA")
 EOF_GONE
   if [ "$DRIFT" = "1" ]; then
     echo "[governance-gate] a removed file is referenced from backlog/; running backlog-drift" >&2
-    if ! npx backlog-drift@0.1.3 check </dev/null; then
-      echo "[governance-gate] backlog drift: fix with npx backlog-drift fix --task <id>" >&2
+    # Mirror ai-sdlc-gate.yml `backlog-drift`: the tool exits 1 on ANY finding,
+    # so only error-severity entries in the `check --json` array block (AISDLC-1146).
+    DRIFT_REPORT="$(mktemp)"
+    DRIFT_RC=0
+    npx backlog-drift@0.1.3 check --json </dev/null >"$DRIFT_REPORT" 2>/dev/null || DRIFT_RC=$?
+    npx backlog-drift@0.1.3 check </dev/null >&2 || true
+    DRIFT_ERRORS="$(node -e '
+      const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      if (!Array.isArray(r)) process.exit(2);
+      console.log(r.filter((i) => i && i.severity === "error").length);
+    ' "$DRIFT_REPORT" 2>/dev/null)" || DRIFT_ERRORS="invalid"
+    rm -f "$DRIFT_REPORT"
+    if [ "$DRIFT_ERRORS" = "invalid" ]; then
+      echo "[governance-gate] backlog drift report is not valid JSON (backlog-drift exit code ${DRIFT_RC}); the gate cannot read the report." >&2
       BLOCKED=$((BLOCKED + 1))
+    elif [ "$DRIFT_ERRORS" != "0" ]; then
+      echo "[governance-gate] backlog drift: ${DRIFT_ERRORS} error-severity issue(s); fix with npx backlog-drift fix --task <id>" >&2
+      BLOCKED=$((BLOCKED + 1))
+    else
+      echo "[governance-gate] backlog drift gate passed (info/warning issues are informational, not blocking)" >&2
     fi
   fi
 
