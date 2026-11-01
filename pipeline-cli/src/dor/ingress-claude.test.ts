@@ -476,3 +476,20 @@ describe('stripFrontmatter — created_by extraction (Phase 4)', () => {
     expect(out.createdBy).toBeUndefined();
   });
 });
+
+describe('extractCreates (AISDLC-1148)', () => {
+  it('reads block and inline lists, and none', async () => {
+    const { extractCreates, applyFrontmatterFields } = await import('./ingress-claude.js');
+    expect(extractCreates("id: X\ncreates:\n  - 'a/b.ts'\n  - c.ts\nlabels: []\n")).toEqual([
+      'a/b.ts',
+      'c.ts',
+    ]);
+    expect(extractCreates('creates: [a.ts, "b.ts"]')).toEqual(['a.ts', 'b.ts']);
+    expect(extractCreates('id: X')).toEqual([]);
+    const input = { source: 'backlog', id: 'X', title: 't', body: '' } as never as {
+      creates?: string[];
+    };
+    applyFrontmatterFields(input as never, 'creates:\n  - z.ts\n');
+    expect(input.creates).toEqual(['z.ts']);
+  });
+});

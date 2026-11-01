@@ -92,3 +92,21 @@ describe('evaluateGate3', () => {
     expect(v.finding).toMatch(/forced/);
   });
 });
+
+describe('evaluateGate3 deliverables (AISDLC-1148)', () => {
+  it('passes a declared deliverable that does not exist, still fails other missing paths', async () => {
+    const opts = { resolvers: [fileExistenceResolver] };
+    const ok = await evaluateGate3(
+      { ...input('plain', ['src/new-file.ts']), creates: ['./src/new-file.ts'] },
+      opts,
+    );
+    expect(ok.verdict).toBe('pass');
+    const bad = await evaluateGate3(
+      { ...input('plain', ['src/new-file.ts', 'src/gone.ts']), creates: ['src/new-file.ts'] },
+      opts,
+    );
+    expect(bad.verdict).toBe('fail');
+    expect(bad.finding).toMatch(/gone\.ts/);
+    expect(bad.finding).not.toMatch(/new-file/);
+  });
+});

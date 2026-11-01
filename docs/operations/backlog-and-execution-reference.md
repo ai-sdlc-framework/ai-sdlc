@@ -45,7 +45,9 @@ dispatchableReason: "Operator soak phase — no code work; operator monitors sta
 
 ### Drift gate
 
-`backlog-drift` checks every reference in task frontmatter resolves. **Required** on commit (per-task pre-commit, fails on any drift in staged tasks) + CI (full repo, fails on `error`-severity issues only — `info`/`warning` are surfaced but non-blocking, AISDLC-125). Local-only escape: `AI_SDLC_SKIP_DRIFT_GATE=1` (pre-commit hook only — NOT honored in CI). Auto-fix: `npx backlog-drift fix --task AISDLC-N`.
+`backlog-drift` checks every `references:` path in task frontmatter resolves. It is not run on commit (the pre-commit step was removed in AISDLC-712); it runs in CI (full repo) and on the filing paths. Every blocking path blocks on `error` severity only (AISDLC-1148, DEC-0289): CI, `scripts/check-governance-on-push.sh` and `cli-file` (which parses `backlog-drift check --json`); `info`/`warning` are surfaced but non-blocking. Auto-fix: `npx backlog-drift fix --task AISDLC-N`.
+
+**Deliverables (`creates:`).** A path the task will create goes in a `creates:` frontmatter list, not in `references:`. Drift, DoR gate 3 and `task_create` skip the existence check for `creates:` entries; every consumer that reads `references:` (brief sequence groups, review-plan baseline scope, dev prompt) treats them as references. A path that must already exist stays in `references:` and is still checked.
 
 ### Upstream-OQ gate (AISDLC-296 / RFC-0011 extension)
 

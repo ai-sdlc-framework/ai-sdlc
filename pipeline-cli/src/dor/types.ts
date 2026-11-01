@@ -57,6 +57,11 @@ export interface IssueInput {
    * of `references`.
    */
   declaredDependencyRefs?: string[];
+  /**
+   * Paths the task will create (frontmatter `creates:`, AISDLC-1148). Gate 3
+   * does not require these to exist.
+   */
+  creates?: string[];
   /** Backlog frontmatter labels. */
   labels?: string[];
   /** Frontmatter `blocked.reason` override. */

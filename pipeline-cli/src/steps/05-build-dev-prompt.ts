@@ -75,10 +75,8 @@ export async function buildDeveloperPrompt(
 ): Promise<DeveloperPromptResult> {
   const acList = opts.task.acceptanceCriteria.map((ac, i) => `${i + 1}. ${ac}`).join('\n');
 
-  const refs =
-    opts.task.references && opts.task.references.length > 0
-      ? opts.task.references.join('\n')
-      : '(none)';
+  const allRefs = [...(opts.task.references ?? []), ...(opts.task.creates ?? [])];
+  const refs = allRefs.length > 0 ? allRefs.join('\n') : '(none)';
 
   const externalPaths =
     opts.task.permittedExternalPaths && opts.task.permittedExternalPaths.length > 0

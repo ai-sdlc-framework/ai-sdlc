@@ -297,6 +297,8 @@ export interface TaskSpec {
   permittedExternalPaths?: string[];
   description: string;
   references?: string[];
+  /** Paths the task will create (AISDLC-1148): skipped for existence, otherwise a reference. */
+  creates?: string[];
   /** Raw markdown body of the task (for the developer prompt). */
   rawBody: string;
   /** Path to the on-disk task file. */

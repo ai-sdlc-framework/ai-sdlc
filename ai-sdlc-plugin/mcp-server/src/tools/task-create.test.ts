@@ -112,6 +112,21 @@ describe('task_create MCP tool (AISDLC-234)', () => {
     expect(content).toContain('Full schema.');
   });
 
+  it('writes creates: without existence check and quotes newline values', async () => {
+    const result = await handler({
+      id: 'AISDLC-301',
+      title: 'Creates test',
+      creates: ['new/file.ts', 'odd\nname.ts'],
+    });
+    expect(result.isError).toBeUndefined();
+    const tasksDir = join(projectDir, 'backlog', 'tasks');
+    const created = require_readdirSync(tasksDir).find((f: string) => f.startsWith('aisdlc-301'));
+    const content = readFileSync(join(tasksDir, created!), 'utf-8');
+    expect(content).toContain('creates:');
+    expect(content).toContain('  - new/file.ts');
+    expect(content).toContain('  - "odd\\nname.ts"');
+  });
+
   // AC #4: response content explicitly includes the path
   it('response includes resolved file path (AC #4)', async () => {
     const result = await handler({ id: 'AISDLC-400', title: 'Path in response' });

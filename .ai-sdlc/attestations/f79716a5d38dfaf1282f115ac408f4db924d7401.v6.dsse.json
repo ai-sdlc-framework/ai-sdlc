@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "e336556a754e2a44963163dc54db7fd4992246d1"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "9fb4c90038fa976424cf70aaf4526bef160431e8aff27130a911c1b3b78d4c9a",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "9fb4c90038fa976424cf70aaf4526bef160431e8aff27130a911c1b3b78d4c9a",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "e3eecb34618fde789e493ac73029cea04266ef3a9faa1024edbb43eef18e2226",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "e3eecb34618fde789e493ac73029cea04266ef3a9faa1024edbb43eef18e2226",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "528300b6c0115e6f619d93685be8ea623f33478c386d9a43e1ed0e49d42a2286",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "528300b6c0115e6f619d93685be8ea623f33478c386d9a43e1ed0e49d42a2286",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "e777f3d7cbed6aa158d0f40dd1ae781f46d39315563c033a4ee73cd72e80c5f7",
+        "0c400598472c8a6f08e66b21c2a34b4bb5417abd3e34b5bcc7ef433f5d38cb35"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "cb076e49cf06b2bec1d8fb3b40a11704c48da40616612036ab7ad38451b58f06",
+        "0c400598472c8a6f08e66b21c2a34b4bb5417abd3e34b5bcc7ef433f5d38cb35"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "7cdafdff9ddb39d6fd5e81b4618c026059dc8bba5d954e1100f811a4acde1077",
+        "ed307a7189ac88d34b5e49c44d2410d1317a4e3581a8292760611504ee36c058"
+      ]
+    }
+  ],
+  "rootHash": "a4b946f8de479c0233c59a97c9bb493dfd3ce2815883049b451a5d5439e4fa90",
+  "rootSignature": "K8h0c1vc95gBdUCi7qXwBp/7IEvVF4OwqztOtL8JZlYqptsmIHXH8o15p2B4QxSR5ZDNzLJ48558tti4GqExCA==",
+  "nonce": "dfca749f4fa9ad03430dd1a4d5509dd8277575b9ca515115c1c45c5e716b286c",
+  "leafCount": 3,
+  "signedAt": "2026-11-01T04:49:02.566Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      ".github/workflows/__tests__/backlog-drift-report-file.test.mjs",
+      ".github/workflows/__tests__/first-run-smoke.test.mjs",
+      ".github/workflows/ci.yml",
+      "ai-sdlc-plugin/mcp-server/src/tools/task-create.test.ts",
+      "ai-sdlc-plugin/mcp-server/src/tools/task-create.ts"
+    ],
+    "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
+  }
+}

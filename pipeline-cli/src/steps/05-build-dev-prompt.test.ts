@@ -97,6 +97,17 @@ describe('Step 5 — buildDeveloperPrompt', () => {
     expect(r.prompt).toContain('## Permitted external paths (cross-repo writes)\nnone');
   });
 
+  it('lists creates: deliverables alongside references', async () => {
+    const t: TaskSpec = { ...task, references: ['ref/a.md'], creates: ['new/deliverable.ts'] };
+    const r = await buildDeveloperPrompt({
+      taskId: 'AISDLC-1',
+      task: t,
+      branch: 'b',
+      worktreePath: '/tmp/wt',
+    });
+    expect(r.prompt).toContain('ref/a.md\nnew/deliverable.ts');
+  });
+
   it('returns the resolved developer model (default arm without a repo table)', async () => {
     const r = await buildDeveloperPrompt({
       taskId: 'AISDLC-1',

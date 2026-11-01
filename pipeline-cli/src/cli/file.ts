@@ -61,13 +61,36 @@ function realExec(cmd: string, args: string[], cwd: string): ExecResult {
   return { status: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
 
+/**
+ * AISDLC-1148: refuse only on `severity == "error"` issues, like the CI gate.
+ * The tool exits 1 on warnings and info too. An unparseable report refuses only
+ * on a non-zero exit; an unparseable report with exit 0 does not refuse.
+ */
+export function driftRefusal(r: ExecResult): string | null {
+  let report: unknown;
+  try {
+    report = JSON.parse(r.stdout);
+  } catch {
+    return r.status === 0 ? null : `backlog-drift: ${(r.stdout + r.stderr).trim()}`;
+  }
+  if (!Array.isArray(report)) {
+    return r.status === 0 ? null : `backlog-drift: ${(r.stdout + r.stderr).trim()}`;
+  }
+  const errors = report.filter(
+    (i): i is Record<string, unknown> =>
+      typeof i === 'object' && i !== null && (i as { severity?: unknown }).severity === 'error',
+  );
+  if (errors.length === 0) return null;
+  return `backlog-drift: ${errors.length} error-severity issue(s): ${JSON.stringify(errors)}`;
+}
+
 const PKG_BIN = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'bin');
 
 export const defaultDeps: FileDeps = {
   exec: realExec,
   drift(taskId, cwd) {
-    const r = realExec('npx', ['backlog-drift', 'check', '--task', taskId], cwd);
-    return r.status === 0 ? null : `backlog-drift: ${(r.stdout + r.stderr).trim()}`;
+    const r = realExec('npx', ['backlog-drift', 'check', '--json', '--task', taskId], cwd);
+    return driftRefusal(r);
   },
   dor(taskFile, cwd) {
     const r = realExec(
