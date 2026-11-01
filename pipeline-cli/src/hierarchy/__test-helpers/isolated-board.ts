@@ -5,9 +5,11 @@
  * outcome. Tests pass `board` explicitly and never fall back to discovery.
  */
 
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 export const AMBIENT_ENV_PATTERN = /^(AI_SDLC_|HIERARCHY_|CLAUDE_)/;
 
@@ -38,7 +40,7 @@ export function withIsolatedBoard(prefix = 'hierarchy-test-'): IsolatedBoard {
       for (const [key, value] of Object.entries(saved)) {
         if (value !== undefined) process.env[key] = value;
       }
-      rmSync(tmp, { recursive: true, force: true });
+      removeFixtureDir(tmp);
     },
   };
 }
