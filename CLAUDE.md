@@ -37,6 +37,8 @@ Only rules that change behaviour in every session live here (budget 15k characte
 
 Sections that bind to named files live in `.claude/rules/*.md` with `paths:` frontmatter and load when a matching file is opened (AISDLC-782): `pre-push-hooks.md`, `review-attestations.md`, `rfcs.md`, `releases.md`. Releases: CHANGELOG.md is owned by release-please; never edit it.
 
+**Attestation schemas (AISDLC-585):** signing v3/v4/v5 is deprecated (warns on sign; use v6); verifier unchanged; removal window from 2026-12-31 via an RFC-0042 amendment.
+
 ## Five-step algorithm (DEC-0090)
 
 For every fix or rule: question the requirement, delete, simplify, accelerate, automate last; name the steps. Details: [`docs/operations/agent-governance-reference.md`](docs/operations/agent-governance-reference.md).
