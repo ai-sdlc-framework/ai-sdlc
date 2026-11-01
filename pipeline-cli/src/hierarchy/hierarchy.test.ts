@@ -1185,6 +1185,28 @@ describe('hierarchy status', () => {
 });
 
 describe('hierarchy down', () => {
+  it('a full down stops executors, then dispatch, then the planner (AISDLC-1106)', async () => {
+    await hierarchyUp(baseOpts, deps);
+    const result = await hierarchyDown({}, deps);
+    expect(result.stopped.map((o) => o.role)).toEqual([
+      'executor',
+      'executor',
+      'operator-dispatch',
+      'planner',
+    ]);
+  });
+
+  it('refuses to stop the calling session, naming the alternatives (AISDLC-1106)', async () => {
+    await hierarchyUp(baseOpts, deps);
+    await expect(hierarchyDown({ callerName: Q('operator-dispatch') }, deps)).rejects.toThrow(
+      /calling session/,
+    );
+    await expect(
+      hierarchyDown({ role: Q('executor-alpha'), callerName: Q('executor-alpha') }, deps),
+    ).rejects.toThrow(/calling session/);
+    expect(readRoster(boardDir).sessions).toHaveLength(4);
+  });
+
   it('returns only the named executor manifest to the queue and removes only its window and entry', async () => {
     await hierarchyUp(baseOpts, deps);
     putInflight('AISDLC-200', Q('executor-alpha'));
@@ -1286,7 +1308,7 @@ describe('hierarchy down', () => {
     const r1 = await hierarchyDown({ role: 'executor' }, deps);
     expect(r1.stopped.map((s) => s.name)).toEqual([Q('executor-alpha'), Q('executor-beta')]);
     const r2 = await hierarchyDown({}, deps);
-    expect(r2.stopped.map((s) => s.name)).toEqual([Q('planner'), Q('operator-dispatch')]);
+    expect(r2.stopped.map((s) => s.name)).toEqual([Q('operator-dispatch'), Q('planner')]);
     expect(readRoster(boardDir).sessions).toEqual([]);
   });
 

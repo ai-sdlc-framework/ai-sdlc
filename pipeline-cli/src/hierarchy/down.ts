@@ -95,7 +95,7 @@ export async function stopSessionWindow(
  * @throws when `role` matches nothing.
  */
 export async function hierarchyDown(
-  options: { role?: string },
+  options: { role?: string; callerName?: string },
   deps: HierarchyDeps,
 ): Promise<DownResult> {
   const { roster, rejected } = readRosterChecked(deps.boardDir);
@@ -113,6 +113,18 @@ export async function hierarchyDown(
   if (options.role && selected.length === 0) {
     throw new Error(`no session named or with role '${options.role}' in the roster`);
   }
+
+  const self = options.callerName ? selected.find((e) => e.name === options.callerName) : undefined;
+  if (self) {
+    throw new Error(
+      `refusing to stop '${self.name}': it is the calling session, and stopping it would kill this command before it finishes. Ask another session (the planner for dispatch, dispatch for the planner) to run cli-hierarchy down ${self.name}, or use restart for a session that should come back`,
+    );
+  }
+  // Executors first, then dispatch, the planner last, so an interrupted run never
+  // orphans the executors (AISDLC-1106). The sort is stable within a rank.
+  const rank = (e: RosterEntry): number =>
+    e.role === 'planner' ? 2 : e.role === 'operator-dispatch' ? 1 : 0;
+  selected.sort((a, b) => rank(a) - rank(b));
 
   const stopped: DownOutcome[] = [];
   const refused: { name: string; reason: string }[] = [];

@@ -288,6 +288,33 @@ describe('runHierarchyCli', () => {
     expect(await runHierarchyCli(['down', '--role', 'executor-beta'], overrides())).toBe(1);
   });
 
+  it('down <name> and down --role <name> select the same single session (AISDLC-1106)', async () => {
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const a = await runHierarchyCli(['down', 'executor-beta'], overrides());
+    const b = await runHierarchyCli(['down', '--role', 'executor-beta'], overrides());
+    expect([a, b]).toEqual([1, 1]);
+    expect(logs).toEqual([]);
+  });
+
+  it('a bare down from a roster session refuses with exit 2 naming down <name> and restart <name>', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const identity: IdentityDeps = {
+      readSessions: () => [
+        { name: 'operator-dispatch', role: 'operator-dispatch', pid: 400, status: 'running' },
+      ],
+      parentPid: (pid) => (pid === 500 ? 400 : null),
+      comm: (pid) => (pid === 400 ? 'claude' : 'zsh'),
+      startPid: 500,
+    };
+    const code = await runHierarchyCli(['down'], overrides(), { identity });
+    expect(code).toBe(2);
+    const msg = String(err.mock.calls[0]?.[0]);
+    expect(msg).toContain('down <name>');
+    expect(msg).toContain('restart <name>');
+    // naming oneself is refused too
+    expect(await runHierarchyCli(['down', 'operator-dispatch'], overrides(), { identity })).toBe(1);
+  });
+
   it('down with an empty roster succeeds', async () => {
     expect(await runHierarchyCli(['down'], overrides())).toBe(0);
   });
