@@ -15,6 +15,10 @@ import { execFileSync } from 'node:child_process';
 import { load as yamlLoad } from 'js-yaml';
 
 import { DEFAULT_SETTLE_MS } from './clear.js';
+import {
+  WORKTREE_SWEEP_DEFAULTS,
+  type WorktreeSweepConfig,
+} from '../steps/00-worktree-disposition.js';
 import { DEFAULT_STALL_GRACE_MS, DEFAULT_STALL_STALE_MS } from './stall.js';
 import { BUSY_INTERVAL_MS, IDLE_INTERVAL_MS } from './scheduler.js';
 
@@ -27,7 +31,7 @@ export interface PrLifecycleConfig {
   /** Ceiling for each wait of the executor clear handshake (AISDLC-1000). */
   clear: { handshakeCeilingMs: number };
   /** `up` refuses on low memory or high load only when `resourceGate` is true (default false). */
-  hierarchy: { resourceGate: boolean };
+  hierarchy: { resourceGate: boolean; worktrees: WorktreeSweepConfig };
 }
 
 /** Default webhook receiver port (webhook.ts re-exports it). */
@@ -42,7 +46,7 @@ export const PR_LIFECYCLE_DEFAULTS: PrLifecycleConfig = {
   stall: { staleMs: DEFAULT_STALL_STALE_MS, graceMs: DEFAULT_STALL_GRACE_MS },
   reconcile: { timerOpenMs: BUSY_INTERVAL_MS, timerIdleMs: IDLE_INTERVAL_MS },
   clear: { handshakeCeilingMs: DEFAULT_SETTLE_MS },
-  hierarchy: { resourceGate: false },
+  hierarchy: { resourceGate: false, worktrees: { ...WORKTREE_SWEEP_DEFAULTS } },
 };
 
 /** Each `spec` key in the yaml, mapped to the function that reads it from the loaded config. */
@@ -92,7 +96,7 @@ export function loadPrLifecycleConfig(
     stall: { ...d.stall },
     reconcile: { ...d.reconcile },
     clear: { ...d.clear },
-    hierarchy: { ...d.hierarchy },
+    hierarchy: { ...d.hierarchy, worktrees: { ...d.hierarchy.worktrees } },
   });
   const text = readPrLifecycleFromBaseRef(projectDir, baseRef);
   if (text === null) return defaults();
@@ -102,6 +106,8 @@ export function loadPrLifecycleConfig(
     const stall = obj(spec?.stall);
     const reconcile = obj(spec?.reconcile);
     const clear = obj(spec?.clear);
+    const wt = obj(obj(spec?.hierarchy)?.worktrees);
+    const w = d.hierarchy.worktrees;
     return {
       maxSameHeadActions: pick(
         obj(spec?.loopGuard)?.maxSameHeadActions,
@@ -123,7 +129,16 @@ export function loadPrLifecycleConfig(
       clear: {
         handshakeCeilingMs: pick(clear?.handshakeCeilingMs, d.clear.handshakeCeilingMs, true),
       },
-      hierarchy: { resourceGate: obj(spec?.hierarchy)?.resourceGate === true },
+      hierarchy: {
+        resourceGate: obj(spec?.hierarchy)?.resourceGate === true,
+        worktrees: {
+          sweepEveryTicks: pick(wt?.sweepEveryTicks, w.sweepEveryTicks, true),
+          ceiling: pick(wt?.ceiling, w.ceiling, true),
+          noPrGraceMs: pick(wt?.noPrGraceMs, w.noPrGraceMs),
+          staleMs: pick(wt?.staleMs, w.staleMs),
+          sentinelMs: pick(wt?.sentinelMs, w.sentinelMs),
+        },
+      },
     };
   } catch {
     return defaults();

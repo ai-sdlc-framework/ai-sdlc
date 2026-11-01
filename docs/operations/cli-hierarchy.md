@@ -272,6 +272,9 @@ table. It is `-` when no nvm-managed node process runs under the pane or `ps` ca
 The last line is the webhook receiver: `webhook: up (port N)` when running, `webhook: off (no secret)`
 when `AI_SDLC_WEBHOOK_SECRET` is unset, `webhook: off (not running)` otherwise.
 The line after it is the reconcile scheduler (the poller of `<board>/.reconcile-wake`): `scheduler: up (pid N)` or `scheduler: off`. Below it, `open PRs:` lists every open PR with lane, action, reason, owner and age. The scheduler writes stdout and stderr to `<board>/log/reconcile.log`, which also receives one row per open PR per run; the same lane, action, reason, owner and `lastActionAt` fields are copied onto each row of `pr-snapshot.json`. The tick forwards to the planner only the routings new in that run. A failed action is retried once on an unchanged head; the second failure routes the PR to the planner once and the row reads `reenter (failed x2)` (AISDLC-1125).
+A `worktrees: <count> (<n> removable)` line (AISDLC-1108) gives the number of `.worktrees/*` directories and how many
+the last sweep classed removable but could not remove (written to `.git/ai-sdlc-sweep-status.json`); above the ceiling
+(`hierarchy.worktrees.ceiling`, default 40) an `ALARM:` line follows. `--json` carries the same under `worktrees`.
 A `gh calls last hour` line (AISDLC-963) gives each `HIERARCHY_SESSION`'s `gh` calls in the last hour and the live remaining
 quota for the core and graphql buckets (`gh api rate_limit`, not metered). The source is `<board-dir>/gh-calls.jsonl`, one
 JSON line per call (`at`, `session`, `argv`, `exit`, `remaining` when `gh api -i` printed it), written by the runner in
@@ -416,6 +419,19 @@ cli-hierarchy terminals --vscode [--out <dir>] [--force] [--print]
 
 Writes `<out>/tasks.json` atomically; refuses an existing file without `--force`. Exit `0`,
 or `1` on a refusal.
+
+### `sweep-worktrees`
+
+Remove the leftover directories under `.worktrees/` using the same disposition rules as the
+dispatch tick (AISDLC-1108; see [Worktree sweep](#worktree-sweep-aisdlc-1108)). `/ai-sdlc:cleanup`
+calls it, so the manual and the automatic path agree.
+
+```bash
+cli-hierarchy sweep-worktrees [--dry-run]
+```
+
+`--dry-run` lists what would go and removes nothing. Prints one line per worktree with its
+disposition and a total. Branches are never deleted. Exit `0`, or `1` when a removal failed.
 
 ### `brief-status`
 
@@ -1398,6 +1414,40 @@ executor spends a run on it; the hold lifts by itself once that task is done.
 
 **Start token (AISDLC-1028), removed (AISDLC-1034).** `clear` no longer writes `<boardDir>/starts/<executor>.json` and `executor-start` no longer verifies one.
 
+## Worktree sweep (AISDLC-1108)
+
+The dispatch tick removes every `.worktrees/<task>` directory that one function,
+`worktreeDisposition` (`pipeline-cli/src/steps/00-worktree-disposition.ts`), classes as
+removable. The board supplies the inflight tasks, `gh pr list --head <branch> --state all`
+supplies the PR state per branch (never a recent-200 list, which lost every older PR), and
+directory ages supply the grace and stale rules.
+
+| Disposition     | When                                                                       | Action |
+| --------------- | -------------------------------------------------------------------------- | ------ |
+| `keep-inflight` | Task id inflight on the board, or a `.active-task` sentinel under 24 h old; also a branch with no PR whose directory is inside the grace window | kept   |
+| `keep-open-pr`  | The branch has an OPEN PR whose head moved within the stale window         | kept   |
+| `remove-merged` | PR MERGED                                                                  | removed |
+| `remove-closed` | PR CLOSED, not merged                                                      | removed |
+| `remove-no-pr`  | No PR and the directory mtime is older than the grace window               | removed |
+| `remove-stale`  | OPEN PR whose branch head commit is older than the stale window            | removed |
+
+A dirty tree no longer blocks removal: the untracked paths are logged at info level, then
+`git worktree remove --force` runs and its exit code is checked. When git refuses, the sweep
+falls back to `rm -rf` plus `git worktree prune` and reports it; a removal that fails both ways
+is reported and never counted as swept. A failed PR lookup keeps the worktree. Branches (local
+and on origin) are never deleted, so a resume recreates the directory from the branch. Review
+ledgers stranded in a worktree are made recoverable before any sweep (AISDLC-966).
+
+Windows, under `spec.hierarchy.worktrees` in `.ai-sdlc/pr-lifecycle.yaml` (base branch):
+
+| Key               | Default           | Meaning                                              |
+| ----------------- | ----------------- | ---------------------------------------------------- |
+| `sweepEveryTicks` | `1`               | Run the sweep every N ticks                          |
+| `ceiling`         | `40`              | `status` alarms above this many worktree directories |
+| `noPrGraceMs`     | `21600000` (6 h)  | Grace for a branch with no PR                        |
+| `staleMs`         | `1209600000` (14 d) | Open-PR worktree with no head change this long is removed |
+| `sentinelMs`      | `86400000` (24 h) | A `.active-task` sentinel younger than this keeps the worktree |
+
 ## VS Code users
 
 The private workspace package `vscode-hierarchy/` is an extension that opens one integrated
@@ -1405,6 +1455,11 @@ terminal per roster agent as `.ai-sdlc/dispatch/hierarchy.json` changes (in the 
 one level below), each running `node <cli-hierarchy.mjs> attach <name>`. Terminals are transient,
 are disposed when the agent leaves the roster, and a terminal you close is not reopened until
 the next roster write. `.vscode/extensions.json` recommends it.
+
+`.vscode/settings.json` (AISDLC-1108) excludes `.worktrees/**`, `**/node_modules/**`,
+`**/dist/**` and `**/coverage/**` from `files.watcherExclude`, `search.exclude` and
+`files.exclude`, so VS Code does not watch or index every worktree. To get the same in every
+project, mirror those three keys in your VS Code user settings.
 
 **Install.**
 

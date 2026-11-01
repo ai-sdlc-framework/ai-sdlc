@@ -53,17 +53,23 @@ Branch deletion stays out of scope (operator-controlled, CLAUDE.md). Review ledg
 
 ## Acceptance Criteria
 
-- [ ] `worktreeDisposition` returns the six dispositions above from fixture inputs (board inflight set, PR state, sentinel age, directory mtime, PR head age); table-driven test.
-- [ ] A worktree whose PR is CLOSED-unmerged, or whose branch has no PR and whose mtime is older than the grace window, is removed by the tick sweep (test with a fake git and gh runner).
-- [ ] A worktree for an inflight task, or with a sentinel younger than 24 h, is never removed even when its PR is merged or closed (test).
-- [ ] PR state is resolved per branch (or per batch covering every worktree branch), not from a 200-row recent list; a worktree whose PR is older than the 200 most recent PRs is still classified correctly (test).
-- [ ] A dirty merged or closed worktree is removed with `--force`; the untracked paths are logged; the remove exit code is checked and a refusal falls back to `rm -rf` + `git worktree prune` and is reported, never counted as swept when it fails (test).
-- [ ] `cli-hierarchy status` prints the worktree count and the removable count, and prints an alarm line above the ceiling (test).
-- [ ] `/ai-sdlc:cleanup` (`ai-sdlc-plugin/commands/cleanup.md`) uses the same disposition rules so a manual sweep removes closed and stale worktrees too; its prose says branches are never deleted.
-- [ ] `.vscode/settings.json` exists with `files.watcherExclude`, `search.exclude` and `files.exclude` covering `.worktrees/**`, `**/node_modules/**`, `**/dist/**`, `**/coverage/**`.
-- [ ] `docs/operations/cli-hierarchy.md` documents the dispositions, the windows and their config keys, and the status line.
-- [ ] `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm format:check` pass; the task file records the test command and its summary line.
+- [x] `worktreeDisposition` returns the six dispositions above from fixture inputs (board inflight set, PR state, sentinel age, directory mtime, PR head age); table-driven test.
+- [x] A worktree whose PR is CLOSED-unmerged, or whose branch has no PR and whose mtime is older than the grace window, is removed by the tick sweep (test with a fake git and gh runner).
+- [x] A worktree for an inflight task, or with a sentinel younger than 24 h, is never removed even when its PR is merged or closed (test).
+- [x] PR state is resolved per branch (or per batch covering every worktree branch), not from a 200-row recent list; a worktree whose PR is older than the 200 most recent PRs is still classified correctly (test).
+- [x] A dirty merged or closed worktree is removed with `--force`; the untracked paths are logged; the remove exit code is checked and a refusal falls back to `rm -rf` + `git worktree prune` and is reported, never counted as swept when it fails (test).
+- [x] `cli-hierarchy status` prints the worktree count and the removable count, and prints an alarm line above the ceiling (test).
+- [x] `/ai-sdlc:cleanup` (`ai-sdlc-plugin/commands/cleanup.md`) uses the same disposition rules so a manual sweep removes closed and stale worktrees too; its prose says branches are never deleted.
+- [x] `.vscode/settings.json` exists with `files.watcherExclude`, `search.exclude` and `files.exclude` covering `.worktrees/**`, `**/node_modules/**`, `**/dist/**`, `**/coverage/**`.
+- [x] `docs/operations/cli-hierarchy.md` documents the dispositions, the windows and their config keys, and the status line.
+- [x] `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm format:check` pass; the task file records the test command and its summary line.
 
 ## Notes
 
 Evidence (2026-10-29 ~05:00Z): `df -h /` 926Gi size, 554Mi free, 97% used; `.worktrees` 264 entries, board 3 inflight; manual merged-PR sweep removed 125+ worktrees and freed 46 GiB in 10 minutes; macOS "out of application memory" dialog and Claude Code "Transcript writes are failing (disk full, ENOSPC)" seen by the operator. Operator ruling: dispatch owns worktree hygiene; the operator must never have to run the sweep by hand.
+
+## Implementation Notes
+
+Test command: `pnpm test` (root). Summary lines: `pipeline-cli test:  Test Files  575 passed (575)`, `Tests  12581 passed | 13 skipped (12594)`; plugin node tests `node --test ai-sdlc-plugin/commands/cleanup.test.mjs ai-sdlc-plugin/commands/no-bare-paths.test.mjs`: `# pass 11`, `# fail 0` (after updating cleanup.test.mjs for the new body). `pnpm build`, `pnpm lint`, `pnpm format:check` clean.
+
+Design notes: the last-sweep summary and the every-N-ticks counter live under `.git/` (never an untracked parent file, which Step 0.5 would stop on). A branch with no PR inside the grace window returns `keep-inflight`. A failed PR lookup keeps the worktree. `cli-hierarchy sweep-worktrees [--dry-run]` is the entry `/ai-sdlc:cleanup` calls.

@@ -273,6 +273,8 @@ export interface SweepResult {
     mergedAt: string;
     /** AISDLC-493 — task ID derived from the worktree directory name (best-effort). */
     taskId?: string;
+    /** AISDLC-1108 — why the worktree was removed (or would be, in a dry run). */
+    disposition?: string;
     /** AISDLC-493 — dispatch anchor from the verdict file (best-effort). */
     dispatchedAt?: string;
     /** AISDLC-493 — total dispatch→merge wall-clock in ms (best-effort). */
@@ -280,6 +282,8 @@ export interface SweepResult {
     /** AISDLC-493 — best-effort CI-wait duration in ms from gh run list (null = not available). */
     ciWaitMs?: number | null;
   }>;
+  /** AISDLC-1108 — worktrees classed removable whose removal failed (never counted in `swept`). */
+  failed?: Array<{ worktreePath: string; branch: string; reason: string }>;
 }
 
 // ── Step 1 — Validate task ───────────────────────────────────────────

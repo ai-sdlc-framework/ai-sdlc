@@ -12,6 +12,10 @@ import {
   type AttestationGrowth,
 } from './attestation-growth.js';
 import { listInflight } from './inflight.js';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { SWEEP_STATUS_FILE, type SweepStatusRecord } from '../steps/00-sweep.js';
+import { loadPrLifecycleConfig } from './pr-lifecycle-config.js';
 import { AGING_WINDOW_MS, listLanding, recordLastActionAt } from './reconcile.js';
 import { formatPrTable } from './pr-rows.js';
 import { paneNodeVersion, readNvmrc, versionMatches } from './node-pin.js';
@@ -119,6 +123,42 @@ export interface StatusResult {
   spawnErrors?: { taskId: string; error: string }[];
   /** Committed attestation envelope and leaf growth (AISDLC-968). */
   attestationGrowth?: AttestationGrowth;
+  /** Worktree directories, how many the last sweep could not remove, and the alarm ceiling (AISDLC-1108). */
+  worktrees?: { count: number; removable: number; ceiling: number };
+}
+
+/** Count `.worktrees/*` directories and read the last sweep's unremoved-removable count. */
+export function worktreeStatus(deps: HierarchyDeps): NonNullable<StatusResult['worktrees']> {
+  const ceiling = loadPrLifecycleConfig(deps.cwd).hierarchy.worktrees.ceiling;
+  const dir = join(deps.cwd, '.worktrees');
+  let count = 0;
+  try {
+    count = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).length;
+  } catch {
+    // no .worktrees directory
+  }
+  let removable = 0;
+  try {
+    const p = join(deps.cwd, SWEEP_STATUS_FILE);
+    if (existsSync(p)) {
+      removable = (JSON.parse(readFileSync(p, 'utf8')) as SweepStatusRecord).removable || 0;
+    }
+  } catch {
+    // unreadable record: report none
+  }
+  return { count, removable, ceiling };
+}
+
+/** `worktrees: <count> (<n> removable)` plus an alarm line above the ceiling. */
+export function formatWorktrees(w: StatusResult['worktrees']): string[] {
+  if (!w) return [];
+  const lines = [`worktrees: ${w.count} (${w.removable} removable)`];
+  if (w.count > w.ceiling) {
+    lines.push(
+      `ALARM: ${w.count} worktrees exceed the ceiling of ${w.ceiling}; run \`/ai-sdlc:cleanup\` or check that the dispatch tick sweep is running`,
+    );
+  }
+  return lines;
 }
 
 /** Join the roster with the registry, tmux and the board. */
@@ -288,6 +328,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     ...(Object.keys(ghCallsPerHour).length > 0 ? { ghCallsPerHour } : {}),
     ...(quota ? { quota } : {}),
     board: peekQueue(deps.boardDir),
+    worktrees: worktreeStatus(deps),
     webhook: webhookStatus(deps),
     scheduler: schedulerStatus(deps),
     ...(lastTick ? { lastTick } : {}),
@@ -351,6 +392,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       ...dynamicLines,
       formatWebhookStatus(result.webhook),
       formatSchedulerStatus(result.scheduler),
+      ...formatWorktrees(result.worktrees),
       formatLastTick(result.lastTick),
       ...thresholds,
       ...budgetLine,
@@ -425,6 +467,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
     `board: ${queued} queued, ${inflight} inflight, ${done} done, ${failed} failed`,
     formatWebhookStatus(result.webhook),
     formatSchedulerStatus(result.scheduler),
+    ...formatWorktrees(result.worktrees),
     formatLastTick(result.lastTick),
     ...thresholds,
     ...budgetLine,

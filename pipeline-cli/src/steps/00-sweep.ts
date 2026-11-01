@@ -1,40 +1,53 @@
 /**
- * Step 0 — Sweep merged worktrees.
+ * Step 0 — Sweep leftover worktrees (AISDLC-1108).
  *
  * Mirrors `ai-sdlc-plugin/commands/execute.md` Step 0. Walks
- * `<workDir>/.worktrees/`, looks up each worktree's branch, and removes
- * the worktree if the corresponding GitHub PR has merged.
+ * `<workDir>/.worktrees/` and removes every worktree that
+ * {@link worktreeDisposition} classes as `remove-*`: merged, closed-unmerged,
+ * no PR past the grace window, or an open PR whose branch head has not moved
+ * for the stale window. Inflight tasks (board claim or a fresh `.active-task`
+ * sentinel) are never removed. Branches are never deleted: only the directory
+ * goes, and a resume recreates it from the branch.
  *
  * Pure with respect to its inputs — accepts a `Runner` so tests can stub
  * `git` / `gh` invocations without any side effects.
  *
- * Idempotent and parallel-safe: `git worktree remove --force` on an
- * already-swept entry is a no-op.
+ * ## PR state is looked up per branch
  *
- * ## Why `--state all` instead of `--state merged` (AISDLC-204)
+ * `gh pr list --head <branch> --state all` (AISDLC-204: `--state all` keeps
+ * squash-merged PRs whose source branch was deleted visible). A single
+ * `--limit 200` list silently lost every PR older than the 200 most recent,
+ * which left those worktrees "no PR" forever. A failed lookup leaves the
+ * worktree alone; it is never treated as "no PR".
  *
- * `gh pr list --head <branch> --state merged` returns an empty array once the
- * source branch has been deleted from the remote. This is the normal case for
- * this repo: `delete_branch_on_merge: true` means every squash-merged PR has
- * its source branch removed immediately. The `--head` filter matches on the
- * CURRENT remote ref, not on historical head associations, so deleted branches
- * produce zero results even when the PR itself is `MERGED`.
- *
- * The fix is `--state all`, which includes open, closed, and merged PRs
- * regardless of source-branch existence. We then filter client-side by
- * `.state === "MERGED"` to keep the same intent (only sweep merged PRs, not
- * abandoned-and-closed ones).
- *
- * Closed (abandoned) PRs are intentionally NOT swept — those need explicit
- * operator cleanup because the work may be salvageable.
+ * Removal uses `git worktree remove --force` (a dirty tree no longer blocks it;
+ * the untracked paths are logged), checks the exit code and falls back to
+ * `rm -rf` plus `git worktree prune`. A failed removal is reported, never counted
+ * as swept.
  *
  * @module steps/00-sweep
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import type { SweepResult } from '../types.js';
+import { listInflight } from '../hierarchy/inflight.js';
+import {
+  WORKTREE_SWEEP_DEFAULTS,
+  isRemoval,
+  worktreeDisposition,
+  type WorktreeDisposition,
+  type WorktreeSweepConfig,
+} from './00-worktree-disposition.js';
 
 export interface SweepOptions {
   workDir: string;
@@ -50,6 +63,24 @@ export interface SweepOptions {
    * whose worktrees are all in flight makes none.
    */
   knownOpenBranches?: ReadonlySet<string>;
+  /** Windows and ceiling; defaults to {@link WORKTREE_SWEEP_DEFAULTS}. */
+  config?: WorktreeSweepConfig;
+  /** Clock for the age rules (tests). */
+  now?: () => number;
+  /** Classify only: report what would go, remove nothing and write no status file. */
+  dryRun?: boolean;
+  logger?: { info: (msg: string) => void; warn: (msg: string) => void };
+}
+
+/** Last-sweep summary read by `cli-hierarchy status`. */
+export const SWEEP_STATUS_FILE = join('.git', 'ai-sdlc-sweep-status.json');
+
+export interface SweepStatusRecord {
+  at: string;
+  /** Worktree directories left after the sweep. */
+  count: number;
+  /** Of those, how many are classed `remove-*` but could not be removed. */
+  removable: number;
 }
 
 // ── AISDLC-493 profiling helpers ──────────────────────────────────────────
@@ -139,9 +170,6 @@ export interface PrInfo {
 
 const NO_PR: PrInfo = { state: null, mergedAt: null };
 
-/** Max PRs fetched by the single batched query (AISDLC-958). */
-export const SWEEP_PR_LIST_LIMIT = 200;
-
 /** On-disk cache of branches whose PR is permanently landed or closed. */
 export const SWEEP_CACHE_FILE = join('.ai-sdlc', 'sweep-landed-cache.json');
 
@@ -175,64 +203,122 @@ function writeCache(path: string, cache: SweepCache): void {
 }
 
 /**
- * AISDLC-958 — ONE `gh pr list --state all` for the whole sweep, matched to
- * branches locally. `--state all` keeps squash-merged PRs whose source branch
- * was deleted visible (AISDLC-204). When a branch has several PRs, an OPEN one
- * wins (the branch is back in flight), otherwise the most recently listed.
- *
- * Returns `null` on any gh/parse failure so the caller skips silently.
+ * Resolve one branch's PR with `gh pr list --head <branch> --state all`. When
+ * the branch has several PRs, an OPEN one wins (the branch is back in flight),
+ * otherwise the newest. Returns `null` on any gh/parse failure so the caller
+ * keeps the worktree instead of guessing "no PR".
  */
-export async function listPrStatesByBranch(
+export async function lookupPrForBranch(
   workDir: string,
+  branch: string,
   runner: Runner,
-): Promise<Map<string, PrInfo> | null> {
+): Promise<PrInfo | null> {
   try {
     const r = await runner(
       'gh',
       [
         'pr',
         'list',
+        '--head',
+        branch,
         '--state',
         'all',
         '--limit',
-        String(SWEEP_PR_LIST_LIMIT),
+        '10',
         '--json',
-        'number,state,headRefName,mergedAt',
+        'number,state,mergedAt,closedAt',
       ],
       { allowFailure: true, cwd: workDir },
     );
     if (r.code !== 0) return null;
     const raw = r.stdout.trim();
-    if (!raw || raw === 'null') return new Map();
+    if (!raw || raw === 'null') return NO_PR;
     const prs = JSON.parse(raw) as Array<{
       number?: number;
       state?: string;
-      headRefName?: string;
       mergedAt?: string | null;
     }>;
-    const byBranch = new Map<string, { info: PrInfo; number: number }>();
+    let best: { number?: number; state?: string; mergedAt?: string | null } | undefined;
     for (const pr of prs) {
-      if (!pr.headRefName || !pr.state) continue;
-      const num = pr.number ?? 0;
-      const prev = byBranch.get(pr.headRefName);
-      if (prev) {
-        const prevOpen = prev.info.state === 'OPEN';
-        const open = pr.state === 'OPEN';
-        if (prevOpen !== open ? prevOpen : num < prev.number) continue;
+      if (!pr.state) continue;
+      if (!best) {
+        best = pr;
+        continue;
       }
-      byBranch.set(pr.headRefName, {
-        info: { state: pr.state, mergedAt: pr.mergedAt ?? null },
-        number: num,
-      });
+      const bestOpen = best.state === 'OPEN';
+      const open = pr.state === 'OPEN';
+      if (bestOpen !== open ? open : (pr.number ?? 0) > (best.number ?? 0)) best = pr;
     }
-    return new Map([...byBranch].map(([k, v]) => [k, v.info]));
+    return best ? { state: best.state ?? null, mergedAt: best.mergedAt ?? null } : NO_PR;
   } catch {
     return null;
   }
 }
 
+/** Untracked and modified paths of a worktree, for the info log; empty on any failure. */
+async function dirtyPaths(wt: string, runner: Runner): Promise<string[]> {
+  try {
+    const r = await runner('git', ['-C', wt, 'status', '--porcelain', '--untracked-files=all'], {
+      allowFailure: true,
+    });
+    if (r.code !== 0) return [];
+    return r.stdout
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+/** Age in ms of the branch head commit; null when git cannot say. */
+async function headAgeMs(wt: string, runner: Runner, nowMs: number): Promise<number | null> {
+  try {
+    const r = await runner('git', ['-C', wt, 'log', '-1', '--format=%ct'], { allowFailure: true });
+    if (r.code !== 0) return null;
+    const sec = Number(r.stdout.trim());
+    return Number.isFinite(sec) && sec > 0 ? nowMs - sec * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+type Removal = { ok: true; fallback: boolean } | { ok: false; reason: string };
+
+/** `git worktree remove --force`, checked; on refusal `rm -rf` plus `git worktree prune`. */
+async function removeWorktree(wt: string, workDir: string, runner: Runner): Promise<Removal> {
+  let refusal: string;
+  try {
+    const r = await runner('git', ['worktree', 'remove', '--force', wt], {
+      cwd: workDir,
+      allowFailure: true,
+    });
+    if (r.code === 0) return { ok: true, fallback: false };
+    refusal = (r.stderr || r.stdout).trim() || `exit ${r.code}`;
+  } catch (err) {
+    refusal = (err as Error).message;
+  }
+  try {
+    rmSync(wt, { recursive: true, force: true });
+    await runner('git', ['worktree', 'prune'], { cwd: workDir, allowFailure: true });
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `git refused (${refusal}); rm -rf failed: ${(err as Error).message}`,
+    };
+  }
+  if (existsSync(wt)) return { ok: false, reason: `git refused (${refusal}); directory remains` };
+  return { ok: true, fallback: true };
+}
+
 export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepResult> {
   const runner = opts.runner ?? defaultRunner;
+  const config = opts.config ?? WORKTREE_SWEEP_DEFAULTS;
+  const nowMs = (opts.now ?? Date.now)();
+  const log = opts.logger ?? {
+    info: (m: string) => console.info(m),
+    warn: (m: string) => console.warn(m),
+  };
   const worktreesDir = join(opts.workDir, '.worktrees');
   const boardDir = opts.boardDir ?? join(opts.workDir, '.ai-sdlc', 'dispatch');
 
@@ -241,6 +327,7 @@ export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepRes
   }
 
   const swept: SweepResult['swept'] = [];
+  const failed: NonNullable<SweepResult['failed']> = [];
 
   let entries: string[];
   try {
@@ -249,17 +336,34 @@ export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepRes
     return { swept: [] };
   }
 
-  // Pass 1 (local git only): resolve each worktree's branch and HEAD sha.
-  const found: Array<{ entry: string; wt: string; branch: string; headSha: string }> = [];
+  let inflight: Set<string>;
+  try {
+    inflight = new Set(listInflight(boardDir).map((i) => i.taskId.toLowerCase()));
+  } catch {
+    inflight = new Set();
+  }
+
+  // Pass 1 (local only): branch, HEAD sha, sentinel and directory ages per worktree.
+  const found: Array<{
+    entry: string;
+    wt: string;
+    branch: string;
+    headSha: string;
+    inflight: boolean;
+    sentinelAgeMs: number | null;
+    dirAgeMs: number;
+  }> = [];
+  let count = 0;
   for (const entry of entries) {
     const wt = join(worktreesDir, entry);
-    let isDir: boolean;
+    let st;
     try {
-      isDir = statSync(wt).isDirectory();
+      st = statSync(wt);
     } catch {
       continue;
     }
-    if (!isDir) continue;
+    if (!st.isDirectory()) continue;
+    count++;
 
     let branch: string;
     try {
@@ -281,17 +385,34 @@ export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepRes
     } catch {
       // no sha: entry is never served from cache
     }
-    found.push({ entry, wt, branch, headSha });
+    let sentinelAgeMs: number | null = null;
+    try {
+      sentinelAgeMs = nowMs - statSync(join(wt, '.active-task')).mtimeMs;
+    } catch {
+      // no sentinel
+    }
+    found.push({
+      entry,
+      wt,
+      branch,
+      headSha,
+      inflight: inflight.has(entry.toLowerCase()),
+      sentinelAgeMs,
+      dirAgeMs: nowMs - st.mtimeMs,
+    });
   }
 
-  // Cache: drop entries for branches with no worktree any more (AC2), serve
-  // landed/closed branches without a GitHub call (AISDLC-958).
+  // Cache: drop entries for branches with no worktree any more, serve
+  // landed/closed branches without a GitHub call (AISDLC-958). Inflight
+  // worktrees need no PR state at all.
   const cachePath = join(opts.workDir, SWEEP_CACHE_FILE);
   const oldCache = readCache(cachePath);
   const cache: SweepCache = {};
-  const resolved = new Map<string, PrInfo>();
-  const uncached: typeof found = [];
+  const resolved = new Map<string, PrInfo | null>();
+  const isProtected = (f: { inflight: boolean; sentinelAgeMs: number | null }): boolean =>
+    f.inflight || (f.sentinelAgeMs !== null && f.sentinelAgeMs < config.sentinelMs);
   for (const f of found) {
+    if (resolved.has(f.branch) || isProtected(f)) continue;
     const hit = oldCache[f.branch];
     if (opts.knownOpenBranches?.has(f.branch)) {
       resolved.set(f.branch, { state: 'OPEN', mergedAt: null });
@@ -299,72 +420,73 @@ export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepRes
       cache[f.branch] = hit;
       resolved.set(f.branch, { state: hit.state, mergedAt: hit.mergedAt });
     } else {
-      uncached.push(f);
-    }
-  }
-  if (uncached.length > 0) {
-    const listed = await listPrStatesByBranch(opts.workDir, runner);
-    for (const f of uncached) {
-      const info = listed?.get(f.branch) ?? NO_PR;
+      const info = await lookupPrForBranch(opts.workDir, f.branch, runner);
       resolved.set(f.branch, info);
-      if ((info.state === 'MERGED' || info.state === 'CLOSED') && f.headSha !== '') {
+      if (info && (info.state === 'MERGED' || info.state === 'CLOSED') && f.headSha !== '') {
         cache[f.branch] = { state: info.state, mergedAt: info.mergedAt, headSha: f.headSha };
       }
     }
   }
-  for (const { entry, wt, branch } of found) {
-    // Only remove MERGED, not CLOSED (abandoned work may be salvageable).
-    const { state, mergedAt } = resolved.get(branch) ?? NO_PR;
-    if (state !== 'MERGED') continue;
 
-    // AISDLC-256 security minor: don't `--force` remove a worktree that has
-    // uncommitted changes. Mirrors the WorktreeAutoCleaned guard from
-    // AISDLC-224 — if `gh` returns a spurious MERGED state (API race, cached
-    // stale response, or accidental early merge of an in-progress branch),
-    // refusing to wipe a dirty worktree gives the operator a recovery window.
-    try {
-      const status = await runner('git', ['-C', wt, 'status', '--porcelain'], {
-        allowFailure: true,
+  for (const f of found) {
+    const { entry, wt, branch } = f;
+    if (isProtected(f)) continue;
+    const info = resolved.get(branch);
+    // A failed lookup is unknown, not "no PR": keep the worktree.
+    if (info === null || info === undefined) continue;
+    const prState =
+      info.state === 'OPEN' || info.state === 'MERGED' || info.state === 'CLOSED'
+        ? info.state
+        : null;
+    const mergedAt = info.mergedAt;
+    const disposition: WorktreeDisposition = worktreeDisposition(
+      {
+        onBoardInflight: f.inflight,
+        sentinelAgeMs: f.sentinelAgeMs,
+        dirAgeMs: f.dirAgeMs,
+        prState,
+        headAgeMs: prState === 'OPEN' ? await headAgeMs(wt, runner, nowMs) : null,
+      },
+      config,
+    );
+    if (!isRemoval(disposition)) continue;
+    if (opts.dryRun) {
+      swept.push({
+        worktreePath: wt,
+        branch,
+        mergedAt: mergedAt ?? 'unknown',
+        taskId: entry,
+        disposition,
       });
-      // Conservative: skip removal in BOTH cases — dirty worktree OR
-      // status check itself failed (the runner uses allowFailure so a
-      // non-zero exit returns code != 0 instead of throwing). Either way,
-      // we don't have a reliable signal that the tree is clean.
-      if (status.code !== 0) {
-        console.warn(
-          `[step-0-sweep] ${branch}: SKIPPED removal — git status check failed ` +
-            `(exit ${status.code}) at ${wt}. Conservative skip; inspect manually.`,
-        );
-        continue;
-      }
-      if (status.stdout.trim().length > 0) {
-        // Dirty worktree — skip removal, log + leave for operator to inspect.
-        // Not pushing this to `swept` so the consumer (orchestrator loop)
-        // doesn't emit a misleading OrchestratorWorktreeSwept event.
-
-        console.warn(
-          `[step-0-sweep] ${branch}: SKIPPED removal — worktree has uncommitted changes ` +
-            `at ${wt} despite PR being MERGED. Inspect manually before re-running.`,
-        );
-        continue;
-      }
-    } catch {
-      // Defense-in-depth: even with allowFailure: true, a thrown error
-      // (e.g. runner mock that throws) falls here. Same conservative skip.
       continue;
     }
 
-    const mergedAtStr = mergedAt ?? 'unknown';
-    try {
-      await runner('git', ['worktree', 'remove', '--force', wt], {
-        cwd: opts.workDir,
-        allowFailure: true,
-      });
+    const dirty = await dirtyPaths(wt, runner);
+    if (dirty.length > 0) {
+      log.info(
+        `[step-0-sweep] ${branch}: removing ${disposition} worktree with ${dirty.length} untracked or modified path(s) at ${wt}: ${dirty.slice(0, 20).join(', ')}${dirty.length > 20 ? ', ...' : ''}`,
+      );
+    }
+    const removal = await removeWorktree(wt, opts.workDir, runner);
+    if (!removal.ok) {
+      log.warn(`[step-0-sweep] ${branch}: removal FAILED at ${wt}: ${removal.reason}`);
+      failed.push({ worktreePath: wt, branch, reason: removal.reason });
+      continue;
+    }
+    count--;
+    if (removal.fallback) {
+      log.warn(
+        `[step-0-sweep] ${branch}: git refused the removal; fell back to rm -rf + git worktree prune at ${wt}`,
+      );
+    }
 
-      // AISDLC-493 — populate dispatch→merge profiling fields (best-effort).
-      const taskIdLower = entry.toLowerCase();
-      const dispatchedAt = readDispatchedAtFromVerdict(boardDir, taskIdLower);
-      let totalLifecycleMs: number | undefined;
+    // AISDLC-493 — populate dispatch→merge profiling fields (merged only, best-effort).
+    const taskIdLower = entry.toLowerCase();
+    let dispatchedAt: string | undefined;
+    let totalLifecycleMs: number | undefined;
+    let ciWaitMs: number | null | undefined;
+    if (disposition === 'remove-merged') {
+      dispatchedAt = readDispatchedAtFromVerdict(boardDir, taskIdLower);
       if (dispatchedAt && mergedAt) {
         const dispMs = Date.parse(dispatchedAt);
         const mergedMs = Date.parse(mergedAt);
@@ -372,25 +494,59 @@ export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepRes
           totalLifecycleMs = mergedMs - dispMs;
         }
       }
-      const ciWaitMs = await deriveCiWaitMs(branch, opts.workDir, runner);
+      ciWaitMs = await deriveCiWaitMs(branch, opts.workDir, runner);
+    }
 
-      swept.push({
-        worktreePath: wt,
-        branch,
-        mergedAt: mergedAtStr,
-        taskId: entry, // entry is the directory name = task-id-lower
-        ...(dispatchedAt !== undefined ? { dispatchedAt } : {}),
-        ...(totalLifecycleMs !== undefined ? { totalLifecycleMs } : {}),
-        ciWaitMs: ciWaitMs,
-      });
+    swept.push({
+      worktreePath: wt,
+      branch,
+      mergedAt: mergedAt ?? 'unknown',
+      taskId: entry, // entry is the directory name = task-id-lower
+      disposition,
+      ...(dispatchedAt !== undefined ? { dispatchedAt } : {}),
+      ...(totalLifecycleMs !== undefined ? { totalLifecycleMs } : {}),
+      ...(ciWaitMs !== undefined ? { ciWaitMs } : {}),
+    });
+  }
+
+  if (!opts.dryRun) {
+    // Removed worktrees drop out of the cache immediately.
+    for (const s of swept) delete cache[s.branch];
+    if (JSON.stringify(cache) !== JSON.stringify(oldCache)) writeCache(cachePath, cache);
+    try {
+      const record: SweepStatusRecord = {
+        at: new Date(nowMs).toISOString(),
+        count,
+        removable: failed.length,
+      };
+      // Under .git so it is never an untracked file in the parent (Step 0.5 would stop on it).
+      const p = join(opts.workDir, SWEEP_STATUS_FILE);
+      writeFileSync(p, JSON.stringify(record) + '\n');
     } catch {
-      // remove may fail if path no longer registered — already swept by sibling run
+      // best-effort
     }
   }
 
-  // Removed worktrees drop out of the cache immediately.
-  for (const s of swept) delete cache[s.branch];
-  if (JSON.stringify(cache) !== JSON.stringify(oldCache)) writeCache(cachePath, cache);
+  return failed.length > 0 ? { swept, failed } : { swept };
+}
 
-  return { swept };
+/** Tick counter for `hierarchy.worktrees.sweepEveryTicks`; each tick is its own process. */
+export const SWEEP_TICK_FILE = join('.git', 'ai-sdlc-sweep-tick-counter');
+
+/** Count this tick and say whether the sweep runs on it (the first tick, then every N-th). */
+export function sweepDue(workDir: string, everyTicks: number): boolean {
+  if (everyTicks <= 1) return true;
+  const p = join(workDir, SWEEP_TICK_FILE);
+  let n = 0;
+  try {
+    n = Number.parseInt(readFileSync(p, 'utf8'), 10) || 0;
+  } catch {
+    // first tick
+  }
+  try {
+    writeFileSync(p, String((n + 1) % everyTicks) + '\n');
+  } catch {
+    return true; // no .git directory to hold the counter: sweep every tick
+  }
+  return n % everyTicks === 0;
 }

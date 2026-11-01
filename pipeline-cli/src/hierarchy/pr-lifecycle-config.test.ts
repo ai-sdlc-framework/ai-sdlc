@@ -110,6 +110,23 @@ describe('pr-lifecycle.yaml operational keys', () => {
     for (const r of Object.values(PR_LIFECYCLE_KEY_READERS)) r(c);
   });
 
+  it('reads hierarchy.worktrees windows with defaults (AISDLC-1108)', () => {
+    const read = (yaml: string) => {
+      const d = repoWithBase(yaml);
+      try {
+        return loadPrLifecycleConfig(d).hierarchy.worktrees;
+      } finally {
+        rmSync(d, { recursive: true, force: true });
+      }
+    };
+    expect(read('spec: {}\n')).toMatchObject({ sweepEveryTicks: 1, ceiling: 40 });
+    expect(
+      read(
+        'spec:\n  hierarchy:\n    worktrees: {sweepEveryTicks: 3, ceiling: 10, noPrGraceMs: 5}\n',
+      ),
+    ).toMatchObject({ sweepEveryTicks: 3, ceiling: 10, noPrGraceMs: 5 });
+  });
+
   it('reads hierarchy.resourceGate, defaulting to false and accepting only true (AISDLC-1104)', () => {
     const read = (yaml: string): boolean => {
       const d = repoWithBase(yaml);
