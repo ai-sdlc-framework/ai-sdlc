@@ -866,7 +866,21 @@ describe('hierarchy status', () => {
     fake.windows = fake.windows.filter((w) => w !== Q('operator-dispatch'));
     rmSync(path.join(registryDir, '4001.json'));
 
+    writeFileSync(
+      path.join(boardDir, 'usage.json'),
+      JSON.stringify({
+        available: true,
+        samples: [],
+        windows: {},
+        sample: {
+          at: '2026-10-23T18:30:00Z',
+          sevenDay: { utilization: 91, resetsAt: '2026-10-27T18:30:00Z' },
+        },
+      }),
+    );
     const result = hierarchyStatus(deps);
+    expect(formatStatus(result)[0]).toBeDefined();
+    expect(formatStatus(result).join('\n')).toContain('BUDGET 7d 91%');
     const byName = Object.fromEntries(result.rows.map((r) => [r.entry.name, r]));
     expect(byName[Q('executor-alpha')]).toMatchObject({
       state: 'idle',
