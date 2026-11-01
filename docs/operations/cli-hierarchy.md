@@ -258,6 +258,8 @@ cli-hierarchy up --executors 3 --project billing-api
 
 ### `status`
 
+Verify slots (AISDLC-1087): the machine verify run takes one of two slots under `<board>/verify-slots/` (a dead holder's slot is reclaimed), so at most two executors run a suite at once; the second concurrent run gets `AI_SDLC_VITEST_MAX_WORKERS=2`, a lone run 4. `status` prints a `verify slot <n>: held by pid <p>` line per held slot and nothing when none are held.
+
 Show the roster with each session's live state (`busy`, `idle`, `starting`, `gone`,
 `unknown`), whether a tmux client is attached, and the board's inflight task, plus the queue
 counts. The table also lists each session's `HIERARCHY_SESSION` and `HIERARCHY_ROLE` values.

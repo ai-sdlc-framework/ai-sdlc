@@ -268,6 +268,18 @@ describe('runHierarchyCli', () => {
     expect(JSON.parse(logs[0] as string).rows).toEqual([]);
   });
 
+  it('status lists held verify slots and prints nothing extra when empty', async () => {
+    const board = fs.mkdtempSync(path.join(tmpdir(), 'hier-slots-'));
+    const slot = path.join(board, 'verify-slots', 'slot-0');
+    fs.mkdirSync(slot, { recursive: true });
+    fs.writeFileSync(path.join(slot, 'pid'), String(process.pid));
+    expect(await runHierarchyCli(['status'], overrides({ boardDir: board }))).toBe(0);
+    expect(logs).toContain(`verify slot 0: held by pid ${process.pid}`);
+    logs.length = 0;
+    expect(await runHierarchyCli(['status', '--json'], overrides({ boardDir: board }))).toBe(0);
+    expect(JSON.parse(logs[0] as string).verifySlots).toHaveLength(1);
+  });
+
   it('webhook status and usage errors', async () => {
     expect(await runHierarchyCli(['webhook', 'status'], overrides())).toBe(0);
     expect(logs).toEqual(['webhook: off (no secret)']);
