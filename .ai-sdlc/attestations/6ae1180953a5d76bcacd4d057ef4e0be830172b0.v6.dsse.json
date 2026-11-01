@@ -2,7 +2,7 @@
   "schemaVersion": "v6",
   "subject": {
     "digest": {
-      "sha1": "1c84b7643da053977e652bf7ee7233e67e1dd053"
+      "sha1": "896a8feb870237fe313f16410c92b0314f8cb609"
     }
   },
   "transcriptLeaves": [
@@ -11,7 +11,8 @@
       "reviewerName": "correctness-reviewer",
       "transcriptHash": "33c49502e1d324ec90f1934742cb597253c73a25b6cc6dda0a23f20ecd3f94d6",
       "verdictClass": "self-authored",
-      "harnessTranscriptHash": null
+      "harnessTranscriptHash": null,
+      "superseded": true
     },
     {
       "leafIndex": 1,
@@ -19,14 +20,16 @@
       "transcriptHash": "196e572d459ecc42d4e057670347f840479e3b22727b2a69b2c018b73a383826",
       "verdictClass": "independent",
       "harnessTranscriptHash": "196e572d459ecc42d4e057670347f840479e3b22727b2a69b2c018b73a383826",
-      "independenceTier": "attested"
+      "independenceTier": "attested",
+      "superseded": true
     },
     {
       "leafIndex": 2,
       "reviewerName": "correctness-reviewer",
       "transcriptHash": "c2f1c0ef9e7256b8b98f206f23ef447322dd39ec2e413d7c9a86fbed16f1f1f5",
       "verdictClass": "self-authored",
-      "harnessTranscriptHash": null
+      "harnessTranscriptHash": null,
+      "superseded": true
     },
     {
       "leafIndex": 3,
@@ -34,14 +37,16 @@
       "transcriptHash": "cb2d8e53b55d39e4cf71f7de7a4df882b672fe14ed9606ebf0ceb332475d246d",
       "verdictClass": "independent",
       "harnessTranscriptHash": "cb2d8e53b55d39e4cf71f7de7a4df882b672fe14ed9606ebf0ceb332475d246d",
-      "independenceTier": "attested"
+      "independenceTier": "attested",
+      "superseded": true
     },
     {
       "leafIndex": 4,
       "reviewerName": "correctness-reviewer",
       "transcriptHash": "5037e4bd72147f79f99c2394be043b639c901fcfbd52ef55e64a572f24f383cb",
       "verdictClass": "self-authored",
-      "harnessTranscriptHash": null
+      "harnessTranscriptHash": null,
+      "superseded": true
     },
     {
       "leafIndex": 5,
@@ -49,14 +54,16 @@
       "transcriptHash": "d7506ac61aabd8fbb080ea54e06e49177d27af3202e7da3ecb8b40512424a63d",
       "verdictClass": "independent",
       "harnessTranscriptHash": "d7506ac61aabd8fbb080ea54e06e49177d27af3202e7da3ecb8b40512424a63d",
-      "independenceTier": "attested"
+      "independenceTier": "attested",
+      "superseded": true
     },
     {
       "leafIndex": 6,
       "reviewerName": "correctness-reviewer",
       "transcriptHash": "fdc817173e46c1231011d67ddf6344a45e5c06f8d7f8f79cb9886c73fbd803b3",
       "verdictClass": "self-authored",
-      "harnessTranscriptHash": null
+      "harnessTranscriptHash": null,
+      "superseded": true
     },
     {
       "leafIndex": 7,
@@ -64,14 +71,16 @@
       "transcriptHash": "087deece562c46ac15f0ff9b916824068c4613a0dafa90c8fdc2b829917924a0",
       "verdictClass": "independent",
       "harnessTranscriptHash": "087deece562c46ac15f0ff9b916824068c4613a0dafa90c8fdc2b829917924a0",
-      "independenceTier": "attested"
+      "independenceTier": "attested",
+      "superseded": true
     },
     {
       "leafIndex": 8,
       "reviewerName": "correctness-reviewer",
       "transcriptHash": "3f3c7958fdc2d4bec74c57aaff8c4310194699bf94d077652f16b81dd8a374d9",
       "verdictClass": "self-authored",
-      "harnessTranscriptHash": null
+      "harnessTranscriptHash": null,
+      "superseded": true
     },
     {
       "leafIndex": 9,
@@ -79,7 +88,8 @@
       "transcriptHash": "4e567ebdee5df28cc786822535aa96d88e97dc850a0162c2e89750e2a61d8f73",
       "verdictClass": "independent",
       "harnessTranscriptHash": "4e567ebdee5df28cc786822535aa96d88e97dc850a0162c2e89750e2a61d8f73",
-      "independenceTier": "attested"
+      "independenceTier": "attested",
+      "superseded": true
     },
     {
       "leafIndex": 10,
@@ -209,9 +219,9 @@
   ],
   "rootHash": "a5099fff0b28362ecfdd7a2e8d3ddd264c2ec34ec849eb4b3d30040b8af3b604",
   "rootSignature": "IBgyVzmUV63qZRBWuDkeOfRFvGbK1S8AZYxGDTXGft/1X81nZk0dCej1m2WJvpGoKTVL3RxBj2EKxUk9ZkK2BQ==",
-  "nonce": "bb59f29333273b6f619cc8c37f230c99f1a9ac92e83a220c89dfa5db904c39b1",
+  "nonce": "9306bf1b2ff385015bc6540fbe233180293bdf2f353609abb0de0406bda22b23",
   "leafCount": 12,
-  "signedAt": "2026-10-31T23:37:51.705Z",
+  "signedAt": "2026-11-01T00:08:06.295Z",
   "signerIdentity": "dominique@local:doms-macbook",
   "reviewScope": {
     "classification": "full",
