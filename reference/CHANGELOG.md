@@ -1,5 +1,12 @@
 # @ai-sdlc/reference
 
+## [0.41.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.40.0...reference-v0.41.0) (2026-11-01)
+
+
+### Features
+
+* dispatch board rebuild, daily backup and restore (AISDLC-1130) ([#2263](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2263)) ([4f47398](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4f4739807f16ac284270e033e659ef1f053c6d9e))
+
 ## [0.40.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.39.0...reference-v0.40.0) (2026-11-01)
 
 

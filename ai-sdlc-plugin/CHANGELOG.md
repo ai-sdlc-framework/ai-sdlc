@@ -5,6 +5,23 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.41.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.40.0...ai-sdlc-plugin-v0.41.0) (2026-11-01)
+
+
+### Features
+
+* data-room read-only root, write denial and protected partition (AISDLC-787) ([#2261](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2261)) ([251e591](https://github.com/ai-sdlc-framework/ai-sdlc/commit/251e5912ce677e52b542a8c2ba883d5224869add))
+* hook-env-hygiene doctor check and parent-checkout escalations (AISDLC-1129) ([#2268](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2268)) ([5a94c66](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5a94c66ab16772dd3c9b0ff13a2139ae1e492689))
+* **pipeline-cli:** next-step runs verification itself, delete test waiver (AISDLC-1086) ([#2256](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2256)) ([c70e9fb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c70e9fba7fec32bffd88ce46640d1144b5b54823))
+* **plugin:** wire RFC-0053 surfacing hooks (AISDLC-779) ([#2255](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2255)) ([b373bd1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b373bd16698c8b6cea8f8ac172db8cb4f3b15a63))
+
+
+### Bug Fixes
+
+* consume rotate wakes in executor module, skip unclaimable spawns (AISDLC-1121) ([#2266](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2266)) ([c6a9d8e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c6a9d8e53f65dfecafebe9e168636c7eababe9de))
+* make cli-hierarchy down safe inside the hierarchy (AISDLC-1106) ([#2252](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2252)) ([259b5b1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/259b5b1b8ae85489908f2ddc97d88e236a7dc624))
+* narrow backlog-drift gate to errors, add creates: deliverables (AISDLC-1148) ([#2249](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2249)) ([abfb485](https://github.com/ai-sdlc-framework/ai-sdlc/commit/abfb48524588982753abdee2879a9a744a2571ea))
+
 ## [0.40.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.34.0...ai-sdlc-plugin-v0.40.0) (2026-11-01)
 
 

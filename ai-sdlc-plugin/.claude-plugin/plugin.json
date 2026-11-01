@@ -1,6 +1,6 @@
 {
   "name": "ai-sdlc",
-  "version": "0.40.0",
+  "version": "0.41.0",
   "description": "AI-SDLC governance framework for Claude Code — action enforcement, telemetry, quality gates, and review agents",
   "author": {
     "name": "AI-SDLC Framework",
@@ -201,8 +201,8 @@
     ]
   },
   "runtimeDependencies": {
-    "@ai-sdlc/orchestrator": "0.40.0",
-    "@ai-sdlc/pipeline-cli": "0.40.0",
+    "@ai-sdlc/orchestrator": "0.41.0",
+    "@ai-sdlc/pipeline-cli": "0.41.0",
     "@ai-sdlc/plugin-mcp-server": "0.9.2"
   },
   "mcpServers": {
