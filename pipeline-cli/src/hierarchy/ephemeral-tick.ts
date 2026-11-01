@@ -42,6 +42,8 @@ export interface EphemeralReport {
   spawnErrors: { taskId: string; error: string }[];
   /** Orphaned tmux sessions the sweep killed (AISDLC-1117). */
   orphansReaped?: string[];
+  /** Queued tasks no roster executor may claim; each is reported once, never spawned (AISDLC-1121). */
+  unclaimable?: { taskId: string; reason: string }[];
 }
 
 /** Dynamic (spawned) executors in the roster: a task id and a name derived from it. */
@@ -136,6 +138,9 @@ export function reapOrphanSessions(deps: EphemeralDeps, out: EphemeralReport): v
   if (reaped.length > 0) out.orphansReaped = reaped;
 }
 
+/** Unclaimable tasks already reported, so the reason is logged once per task. */
+const reportedUnclaimable = new Set<string>();
+
 /** Spawn one executor per eligible queued claim, up to the cap on live dynamic executors. */
 export async function spawnForEligibleClaims(
   boardDir: string,
@@ -147,7 +152,21 @@ export async function spawnForEligibleClaims(
   let slots = deps.cap() - live.length;
   if (slots <= 0) return;
   const liveTasks = new Set(live.map((e) => e.taskId));
+  // AISDLC-1121: a spawned executor claims as an in-session agent; a task it cannot claim would
+  // cost a session start for a refused claim, so it is skipped here and reported once.
+  const claimable = peekQueueOrder(boardDir, now, 'in-session-agent');
+  const claimableIds = new Set(claimable.map((q) => q.taskId));
   for (const { taskId } of peekQueueOrder(boardDir, now)) {
+    if (claimableIds.has(taskId)) continue;
+    const key = `${boardDir}|${taskId}`;
+    if (reportedUnclaimable.has(key)) continue;
+    reportedUnclaimable.add(key);
+    (out.unclaimable ??= []).push({
+      taskId,
+      reason: 'its workerKind is not claimable by an in-session executor; not spawning',
+    });
+  }
+  for (const { taskId } of claimable) {
     if (slots <= 0) break;
     if (liveTasks.has(taskId.toUpperCase())) continue;
     try {

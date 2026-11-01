@@ -238,6 +238,8 @@ describe('hierarchy module: spawned executor (AISDLC-1075)', () => {
   });
 });
 
+const wakeLines2 = (s: ReturnType<typeof setup>) => logOf(s.kv).filter((l) => l.includes('wake '));
+
 describe('hierarchy module: executor wake', () => {
   it('consumes an enqueue from dispatch and starts the executor command', async () => {
     const s = setup();
@@ -252,12 +254,31 @@ describe('hierarchy module: executor wake', () => {
     expect(submits(s)).toEqual([]);
   });
 
-  it('no longer handles a rotate message: it passes through and nothing is cleared (AISDLC-1107)', async () => {
+  it('consumes enqueue and rotate wakes in idle, running and post-verdict phases without a prompt (AISDLC-1121)', async () => {
     const s = setup();
     await s.start();
-    const msg = { text: env('proj-operator-dispatch', 'rotate') };
-    expect(await s.handlers.get('session.receive')(s.$, msg, s.next)).toBe(msg);
-    expect(ran(s)).toEqual([]);
+    const recv = s.handlers.get('session.receive');
+    const wake = (t: string) => ({ text: env('proj-operator-dispatch', t) });
+    // idle
+    expect(await recv(s.$, wake('rotate'), s.next)).toEqual({ consumed: 'hierarchy:rotate' });
+    expect(await recv(s.$, wake('enqueue AISDLC-1'), s.next)).toEqual({
+      consumed: 'hierarchy:enqueue',
+    });
+    // running
+    expect(await recv(s.$, wake('rotate'), s.next)).toEqual({ consumed: 'hierarchy:rotate' });
+    expect(await recv(s.$, wake('enqueue AISDLC-2'), s.next)).toEqual({
+      consumed: 'hierarchy:enqueue',
+    });
+    // post-verdict: the turn ended
+    await s.handlers.get('turn.complete')(s.$, {}, s.next);
+    expect(await recv(s.$, wake('rotate'), s.next)).toEqual({ consumed: 'hierarchy:rotate' });
+    expect(await recv(s.$, wake('enqueue AISDLC-3'), s.next)).toEqual({
+      consumed: 'hierarchy:enqueue',
+    });
+    expect(submits(s)).toEqual([]);
+    const lines = wakeLines2(s);
+    expect(lines.filter((l) => l.includes('event=rotate'))).toHaveLength(3);
+    expect(lines.filter((l) => l.includes('event=enqueue'))).toHaveLength(3);
   });
 
   it('an enqueue wake runs the executor command after a turn that ended without a marker (AISDLC-1107)', async () => {
@@ -407,10 +428,9 @@ describe('hierarchy module: socket-path envelope (AISDLC-1090)', () => {
     expect(r).toEqual({ consumed: 'hierarchy:enqueue' });
     expect(ran(s)).toEqual([RESUME_COMMAND]);
     expect(next).not.toHaveBeenCalled();
-    // rotate is no longer a message (AISDLC-1107): it passes through like the plain-from form does.
     const m = { text: sock('ai-sdlc-operator-dispatch', 'rotate') };
-    expect(await recv(s.$, m, next)).toBeUndefined();
-    expect(next).toHaveBeenCalledWith(m);
+    expect(await recv(s.$, m, next)).toEqual({ consumed: 'hierarchy:rotate' });
+    expect(next).not.toHaveBeenCalled();
   });
 
   it('splits the sender name from the socket address and records the address', async () => {

@@ -2554,3 +2554,7 @@ Every tick records `lastTickAt` and `lastTickBy` (`host` or `scheduler`) in `ope
 ## Module measure (AISDLC-1100)
 
 The hooks module reads the host `session.measure` payload at `context.tokens` and mirrors the last count to the plugin store key `hierarchy/measure/<name>`. `cli-hierarchy status` shows it in the MODULE column (`measured N`) and warns `measure mismatch` when it and CONTEXT fall on opposite sides of the clear threshold. An unrecognised payload shape is logged once (`session.measure payload not recognised`). The host `turn.complete` carries no reply text, so a pending threshold rotation fires at the turn boundary; a verdict-marker rotation still needs reply text.
+
+## Wakes never reach the executor model (AISDLC-1121)
+
+The executor hooks module consumes every `enqueue` and `rotate` wake from operator-dispatch in its receive handler (`hierarchy:enqueue`, `hierarchy:rotate`) and logs a `wake run|skip` line with the action. A wake is never a prompt. The tick also skips spawning an executor for a queued task that an in-session executor cannot claim (for example a `claude-p-shell` task), and reports the reason once per task.

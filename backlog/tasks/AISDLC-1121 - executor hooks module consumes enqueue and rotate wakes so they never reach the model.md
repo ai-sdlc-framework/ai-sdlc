@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1121
 title: executor hooks module consumes every enqueue and rotate wake, and a refused executor start never costs a model turn
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-30'
 labels:

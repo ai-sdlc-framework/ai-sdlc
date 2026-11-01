@@ -483,6 +483,17 @@ export async function executorSessionReceive(
       }
       return { consumed: 'hierarchy:enqueue' };
     }
+    if (/^rotate\b/i.test(text)) {
+      // AISDLC-1121: a rotate wake is a signal, never a prompt; consume it and act deterministically.
+      if (taskRunning(state)) {
+        state.pendingRotate = true;
+        await logWake(p, state, 'rotate', 'skip', 'turn state says a task runs; rotate at its end');
+      } else {
+        await rotateUnlessHeld(p, state, 'wake');
+        await logWake(p, state, 'rotate', 'run', 'no task running');
+      }
+      return { consumed: 'hierarchy:rotate' };
+    }
     if (STATUS_NOISE.test(text)) return { consumed: 'hierarchy:status' };
     return next(e);
   };
