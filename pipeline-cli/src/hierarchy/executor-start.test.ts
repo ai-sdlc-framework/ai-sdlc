@@ -3,8 +3,7 @@
  * roster and board, an injected git runner. No session, tmux or network.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,11 +12,13 @@ import { runHierarchyCli } from '../cli/hierarchy.js';
 import { readHeartbeat, writeManifest } from '../dispatch/board.js';
 import type { DispatchManifest } from '../dispatch/types.js';
 import type { IdentityDeps } from './caller-identity.js';
+import { withIsolatedBoard, type IsolatedBoard } from './__test-helpers/isolated-board.js';
 import { executorStart } from './executor-start.js';
 import { readHold, writeHold } from './hold.js';
 import { writeRoster } from './roster.js';
 import type { RosterEntry } from './types.js';
 
+let iso: IsolatedBoard;
 let tmp: string;
 let board: string;
 
@@ -63,11 +64,9 @@ const mkManifest = (taskId: string): DispatchManifest => ({
 const gitAt = (root: string) => (_args: readonly string[]) => path.join(root, '.git');
 
 beforeEach(() => {
-  // Never read the ambient executor session (AISDLC-1137).
-  vi.stubEnv('AI_SDLC_EXECUTOR_TASK', '');
-  tmp = mkdtempSync(path.join(tmpdir(), 'executor-start-'));
-  board = path.join(tmp, '.ai-sdlc', 'dispatch');
-  mkdirSync(board, { recursive: true });
+  // Scrubs the ambient executor session and live board pointers (AISDLC-1112).
+  iso = withIsolatedBoard('executor-start-');
+  ({ tmp, board } = iso);
   writeRoster(board, {
     schemaVersion: 'v1',
     sessions: [
@@ -85,7 +84,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
-  rmSync(tmp, { recursive: true, force: true });
+  iso.cleanup();
 });
 
 describe('executorStart on a held board (AISDLC-899)', () => {

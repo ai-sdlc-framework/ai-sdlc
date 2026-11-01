@@ -2,7 +2,7 @@
 id: AISDLC-1112
 title: >-
   executor-start tests isolate from the live dispatch board and the executor environment (14 failures in every task worktree while a hold or a claim is live)
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-29'
 labels:
