@@ -57,7 +57,7 @@ Test command: `pnpm build && pnpm test && pnpm lint && pnpm format:check`. Summa
 
 ## Verification
 - `pnpm build` — passed
-- `pnpm test` — waived
+- `pnpm test` — passed (command: `pnpm build && pnpm test`; full chain exited 0, including dark-code:check, lint:publishable and knowledge:check)
 - `pnpm lint` — passed
 - `pnpm format:check` — passed
 - 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
