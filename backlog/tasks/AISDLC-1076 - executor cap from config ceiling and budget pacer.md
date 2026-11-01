@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1076
 title: 'executor cap is min of executors.max and the budget pacer allowance'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-23'
 labels:

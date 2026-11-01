@@ -913,6 +913,8 @@ The dispatch `tick` samples at most once per 5 minutes and applies one rule per 
 
 `status` prints a `BUDGET` line: both utilizations, the line value, ahead or behind in points, and the projected time the current burn rate (oldest ring sample of the window to now) reaches 100 percent.
 
+Executor cap (AISDLC-1076). The ephemeral-executor spawn cap is `min(executors.max, pacer allowance)`, recomputed every tick. `executors.max` is the ceiling: `AI_SDLC_EXECUTORS_MAX` in the environment, else `<board>/config.json` `{ "executors": { "max": 3 } }`, else the default 3. The pacer allowance is 0 when a window is above its line by more than the margin (the budget hold applies), 1 while utilization sits inside the margin band around the line, and unlimited when clearly behind the line or when no sample exists. The cap never drops below one while the allowance is above zero. `status` prints a `BUDGET` line and an `EXECUTOR CAP` line showing the cap, `executors.max` and the allowance.
+
 The planner or operator overrides with `cli-hierarchy resume --budget`: it lifts a budget hold and exempts the current seven-day and five-hour windows until their reset; the override is written to `<board>/budget-override.json` and logged as `budget-override` in `hold-events.jsonl`.
 
 ### `hold`
