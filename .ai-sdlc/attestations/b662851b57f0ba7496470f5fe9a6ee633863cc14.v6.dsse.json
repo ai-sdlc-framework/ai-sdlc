@@ -1,0 +1,74 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "aba456d3b707211e47f207836cf14437aa4608e7"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "2cdd547adad8d28a9f25718d67d4d6fcc70a9b387258ba33b11f12a3829b367a",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "2cdd547adad8d28a9f25718d67d4d6fcc70a9b387258ba33b11f12a3829b367a",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "fd27ff14c3910fb5383dec32debe46dc9990bb7982955851be9206c88959cd91",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "fd27ff14c3910fb5383dec32debe46dc9990bb7982955851be9206c88959cd91",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "732b4a4ef60037b176ce91055e626b0958cfd6880084eb9fe4a45e02e8782f53",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "732b4a4ef60037b176ce91055e626b0958cfd6880084eb9fe4a45e02e8782f53",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "06f6ecb79f5a662d24e2152d6aee051274507ff4646b1cc59e0fa15bfd8c92dd",
+        "3cdfd26caeb69869a208b107e489ab7e181bcf581116e2e24c4dfc3ec98073dd"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "60dd92e1288344de888f35a8138c569ef07061632f7040b839a984eab63b215a",
+        "3cdfd26caeb69869a208b107e489ab7e181bcf581116e2e24c4dfc3ec98073dd"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "a0de61b5d296640b6e9a6a778f84bd9e36940553dbeae5b61a847e86e41f092b",
+        "de3e4c71146c26f5bf444e48ae0fdff6ff21e9fdd2c75061cb84fac4c48f8c45"
+      ]
+    }
+  ],
+  "rootHash": "f606ec05def43f3cf9689454d61fcf9674407268e7b6d7e1f33d029ce1a9dc54",
+  "rootSignature": "kf6o2bBXuLiwXqOan6HZj4Pzl2Jx29PFwVW3OYbhYAKBPHXsKs8c8dHR08TOjCF8JcEA1aolx0MRBGZkCvUWCw==",
+  "nonce": "4192e057fadef2391e5dfb23d9c5491aeddf88db0405a943f25a2f48f7234335",
+  "leafCount": 3,
+  "signedAt": "2026-11-01T20:31:38.471Z",
+  "signerIdentity": "dominique@local:doms-macbook",
+  "reviewScope": {
+    "classification": "full",
+    "securityAlways": false,
+    "requiredSet": "three",
+    "reason": "trust-chain-path",
+    "triggeringPaths": [
+      "ai-sdlc-plugin/hooks/enforce-blocked-actions.js",
+      "ai-sdlc-plugin/hooks/enforce-blocked-actions.test.mjs"
+    ],
+    "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
+  }
+}
