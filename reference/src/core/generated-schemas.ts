@@ -4431,6 +4431,11 @@ export const dispatchVerdictV1Schema = {
       description:
         'AISDLC-894 - ISO-8601 time the dispatch tick landed (merged, or armed auto-merge on) the task PR through merge-if-eligible.',
     },
+    rebuilt: {
+      type: 'boolean',
+      description:
+        'AISDLC-1130 - true when cli-dispatch rebuild derived this verdict from GitHub PR state rather than an executor writing it.',
+    },
   },
   additionalProperties: false,
 } as const;

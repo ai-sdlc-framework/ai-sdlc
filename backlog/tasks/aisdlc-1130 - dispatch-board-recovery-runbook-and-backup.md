@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1130
 title: 'Dispatch board recovery: rebuild .ai-sdlc/dispatch from GitHub PR state, and a periodic board backup'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-31'
 labels:

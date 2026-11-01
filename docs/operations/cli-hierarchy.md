@@ -249,6 +249,8 @@ code with `--attach`), `1` on any refusal or a failed tmux start.
 cli-hierarchy up --executors 3 --project billing-api
 ```
 
+When the board directory holds no manifest or verdict but `backlog/completed/` does, `up` prints the rebuild command and carries on; it never runs the rebuild unasked. See [board-recovery.md](board-recovery.md) (AISDLC-1130).
+
 ### `status`
 
 Show the roster with each session's live state (`busy`, `idle`, `starting`, `gone`,

@@ -2222,3 +2222,76 @@ describe('reenter --developer-round resumePath (AISDLC-1053)', () => {
     expect(exit).not.toBe(0);
   });
 });
+
+describe('runDispatchCli board recovery (AISDLC-1130)', () => {
+  const prs = [
+    { number: 1, title: 'feat: a (AISDLC-1)', state: 'MERGED' },
+    { number: 2, title: 'feat: b (AISDLC-2)', state: 'OPEN' },
+  ];
+  let root: string;
+  let boardDir: string;
+  beforeEach(() => {
+    root = mkdtempSync(path.join(tmpdir(), 'dispatch-rebuild-'));
+    boardDir = path.join(root, 'board');
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  it('requires --from-github and reports a failed PR list', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation((() => true) as never);
+    expect(await runDispatchCli(['rebuild', '--board-dir', boardDir])).toBe(2);
+    expect(
+      await runDispatchCli(['rebuild', '--from-github', '--board-dir', boardDir], {
+        cwd: root,
+        listAllPrs: () => {
+          throw new Error('rate limited');
+        },
+      }),
+    ).toBe(1);
+    err.mockRestore();
+  });
+
+  it('dry-run prints counts and writes nothing; a real run writes verdicts', async () => {
+    const dry = await captureStdout(() =>
+      runDispatchCli(['rebuild', '--from-github', '--dry-run', '--board-dir', boardDir], {
+        cwd: root,
+        listAllPrs: () => prs,
+      }),
+    );
+    expect(readLastJson(dry.captured)).toMatchObject({
+      dryRun: true,
+      counts: { done: 1, failed: 1 },
+    });
+    expect(existsSync(path.join(boardDir, 'done'))).toBe(false);
+    const real = await captureStdout(() =>
+      runDispatchCli(['rebuild', '--from-github', '--board-dir', boardDir], {
+        cwd: root,
+        listAllPrs: () => prs,
+      }),
+    );
+    expect(readLastJson(real.captured)).toMatchObject({
+      written: { done: 1, failed: 1, queued: 0 },
+    });
+    expect(existsSync(path.join(boardDir, 'done', 'AISDLC-1.verdict.json'))).toBe(true);
+  });
+
+  it('backs up and restores the board', async () => {
+    await runDispatchCli(['rebuild', '--from-github', '--board-dir', boardDir], {
+      cwd: root,
+      listAllPrs: () => prs,
+    });
+    const backupDir = path.join(root, 'backups');
+    const b = await captureStdout(() =>
+      runDispatchCli(['backup', '--board-dir', boardDir, '--backup-dir', backupDir], { cwd: root }),
+    );
+    const file = (readLastJson(b.captured) as { file: string }).file;
+    const target = path.join(root, 'restored');
+    const r = await captureStdout(() =>
+      runDispatchCli(['restore', '--backup', file, '--board-dir', target]),
+    );
+    expect(r.exit).toBe(0);
+    expect(existsSync(path.join(target, 'done', 'AISDLC-1.verdict.json'))).toBe(true);
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation((() => true) as never);
+    expect(await runDispatchCli(['restore', '--backup', file, '--board-dir', target])).toBe(1);
+    err.mockRestore();
+  });
+});
