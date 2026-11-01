@@ -8,7 +8,12 @@ import { buildExecuteGraph, MACHINE_STEPS, renderMermaid, renderYaml } from './g
 
 const here = dirname(fileURLToPath(import.meta.url));
 // Numbered step files the Machine never visits (no metadata by design).
-const NOT_VISITED = new Set(['00-sweep.ts', '00-5-sync-parent.ts', '11-late-rebase.ts']);
+const NOT_VISITED = new Set([
+  '00-sweep.ts',
+  '00-worktree-disposition.ts',
+  '00-5-sync-parent.ts',
+  '11-late-rebase.ts',
+]);
 
 describe('workflow graph', () => {
   it('step ids equal the node impls the Machine visits', () => {

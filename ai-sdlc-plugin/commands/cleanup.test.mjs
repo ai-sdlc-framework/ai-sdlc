@@ -51,15 +51,19 @@ describe('/ai-sdlc cleanup frontmatter', () => {
 });
 
 describe('/ai-sdlc cleanup body contract', () => {
-  it('mode 1 (no args): scans .worktrees/ and uses gh pr list', () => {
+  it('mode 1 (no args): runs the shared disposition sweep (AISDLC-1108)', () => {
     assert.match(body, /\.worktrees\//);
-    assert.match(body, /gh pr list --head/);
-    assert.match(body, /merged/);
+    assert.match(body, /cli-hierarchy\.mjs" sweep-worktrees/);
+    for (const d of ['remove-merged', 'remove-closed', 'remove-no-pr', 'remove-stale']) {
+      assert.match(body, new RegExp(d));
+    }
+    assert.match(body, /keep-inflight/);
   });
 
-  it('mode 1: only removes worktrees whose PR has merged', () => {
+  it('mode 1: removes with --force, falls back to rm -rf, never deletes branches', () => {
     assert.match(body, /git worktree remove --force/);
-    assert.match(body, /MERGED_AT/);
+    assert.match(body, /rm -rf/);
+    assert.match(body, /\*\*Branches are never deleted\*\*/);
   });
 
   it('mode 2 (with arg): force-removes a specific task worktree', () => {

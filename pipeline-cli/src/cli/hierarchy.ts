@@ -193,6 +193,7 @@ import { createSnapshotRunner } from '../hierarchy/pr-snapshot.js';
 import { routedModel } from '../routing/role-model.js';
 import { defaultRunner } from '../runtime/exec.js';
 import { runParentUpkeep, type ParentUpkeepResult } from '../steps/00-parent-upkeep.js';
+import { sweepDue, sweepMergedWorktrees } from '../steps/00-sweep.js';
 import { resolvePluginScriptsDir } from './next-step.js';
 import {
   fileTurnBudgetDecision,
@@ -216,6 +217,7 @@ Commands:
   terminals  Generate editor terminal tasks, one per agent (terminals --vscode)
   brief      Generate a dispatch brief (waves, sequence groups) from task metadata
   brief-status  Show each brief's done and total task counts
+  sweep-worktrees  Remove merged, closed, no-PR and stale worktrees (branches are never deleted); --dry-run lists only
   down       Stop sessions and return their inflight manifests to the queue
   clear      Empty an executor's context between tasks and restart its loop
   restart    Stop and start one session or all of them, updating the roster (restart <name>|--all)
@@ -886,6 +888,22 @@ export async function runHierarchyCli(
         }
         return 0;
       }
+      case 'sweep-worktrees': {
+        // AISDLC-1108: the same disposition rules as the dispatch tick sweep.
+        const swept = await sweepMergedWorktrees({
+          workDir: deps.cwd,
+          runner: defaultRunner,
+          boardDir: deps.boardDir,
+          config: loadPrLifecycleConfig(deps.cwd).hierarchy.worktrees,
+          dryRun: flags['dry-run'] === 'true',
+          logger: { info: deps.log, warn: deps.log },
+        });
+        const verb = flags['dry-run'] === 'true' ? 'would remove' : 'removed';
+        for (const s of swept.swept) deps.log(`${verb} ${s.worktreePath} (${s.disposition})`);
+        for (const f of swept.failed ?? []) deps.log(`FAILED ${f.worktreePath}: ${f.reason}`);
+        deps.log(`${verb} ${swept.swept.length} worktree(s); branches are never deleted.`);
+        return (swept.failed?.length ?? 0) > 0 ? 1 : 0;
+      }
       case 'brief-status': {
         for (const line of formatBriefStatus(briefStatus(deps.boardDir))) deps.log(line);
         return 0;
@@ -1374,6 +1392,9 @@ export async function runHierarchyCli(
           parentUpkeep:
             extras.parentUpkeep ??
             (async () => {
+              // AISDLC-1108: sweep every N ticks (hierarchy.worktrees.sweepEveryTicks, default 1).
+              const wtConfig = loadPrLifecycleConfig(repoRoot).hierarchy.worktrees;
+              const skipSweep = !sweepDue(repoRoot, wtConfig.sweepEveryTicks);
               const open = new Set<string>();
               const listed = wakeGh(
                 'gh',
@@ -1394,6 +1415,8 @@ export async function runHierarchyCli(
                 pluginScriptsDir: resolvePluginScriptsDir(deps.env, repoRoot),
                 exists: existsSync,
                 knownOpenBranches: open,
+                worktreeConfig: wtConfig,
+                skipSweep,
               });
             }),
           quota: () => {
