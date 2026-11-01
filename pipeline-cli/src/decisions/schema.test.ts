@@ -9,7 +9,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +19,7 @@ import { Ajv2020, type ErrorObject } from 'ajv/dist/2020.js';
 import { appendDecisionEvent, makeDecisionOpenedEvent } from './event-log.js';
 import { projectDecision } from './projection.js';
 import type { Decision } from './decision-record.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -52,7 +53,7 @@ beforeEach(() => {
   workDir = mkdtempSync(join(tmpdir(), 'decisions-schema-'));
 });
 afterEach(() => {
-  rmSync(workDir, { recursive: true, force: true });
+  removeFixtureDir(workDir);
 });
 
 describe('decision.v1.schema.json (AC#1)', () => {

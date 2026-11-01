@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -8,13 +8,14 @@ import {
   slugify,
   writeBacklogTaskFromSpecKitEntry,
 } from './task-writer.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function withTmp(fn: (dir: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), 'import-spec-writer-'));
   try {
     fn(dir);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    removeFixtureDir(dir);
   }
 }
 

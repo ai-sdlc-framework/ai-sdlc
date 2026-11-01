@@ -7,7 +7,7 @@
  *  - Degrade-open when estimation flag is disabled.
  */
 
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,6 +16,7 @@ import { buildEstimateClassesCli } from './estimate-classes.js';
 import { ESTIMATION_FLAG } from '../estimation/feature-flag.js';
 import { appendProposal } from '../estimation/class-proposals.js';
 import type { ClassProposal } from '../estimation/class-proposals.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -66,7 +67,7 @@ beforeEach(() => {
 
 afterEach(() => {
   try {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   } catch {
     // ignore
   }

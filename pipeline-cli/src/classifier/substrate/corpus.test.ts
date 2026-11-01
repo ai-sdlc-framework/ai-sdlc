@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,6 +15,7 @@ import {
   setCorpusEntryPolarity,
 } from './corpus.js';
 import type { CalibrationCorpusEntry } from './types.js';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 function makeRepo(): string {
   return mkdtempSync(join(tmpdir(), 'aisdlc-321-corpus-'));
@@ -61,7 +62,7 @@ describe('readCorpus', () => {
     try {
       expect(readCorpus(repo, 'capture-triage')).toEqual([]);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -72,7 +73,7 @@ describe('readCorpus', () => {
       writeFileSync(resolveCorpusFilePath(repo, 'capture-triage'), 'not: valid: yaml:::');
       expect(readCorpus(repo, 'capture-triage')).toEqual([]);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 });
@@ -88,7 +89,7 @@ describe('appendCorpusEntry', () => {
       expect(read).toHaveLength(1);
       expect(read[0]).toMatchObject({ id: 'entry-1', classification: 'quick-fix-task' });
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -100,7 +101,7 @@ describe('appendCorpusEntry', () => {
       appendCorpusEntry(repo, fakeEntry({ id: 'e3' }));
       expect(readCorpus(repo, 'capture-triage').map((e) => e.id)).toEqual(['e1', 'e2', 'e3']);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -117,7 +118,7 @@ describe('appendCorpusEntry', () => {
       expect(triage.map((e) => e.id)).toEqual(['t1']);
       expect(severity.map((e) => e.id)).toEqual(['s1']);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -144,7 +145,7 @@ describe('appendCorpusEntry', () => {
       const quarantinedBody = readFileSync(join(dir, quarantined[0]), 'utf8');
       expect(quarantinedBody).toContain('unclosed');
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 });
@@ -167,7 +168,7 @@ describe('setCorpusEntryPolarity', () => {
       expect(reRead[0].polarity).toBe('negative');
       expect(reRead[0].operatorOverrideReason).toBe('turns out this needs a full Issue');
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -179,7 +180,7 @@ describe('setCorpusEntryPolarity', () => {
         setCorpusEntryPolarity(repo, 'capture-triage', 'nope', { polarity: 'positive' }),
       ).toBeNull();
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -197,7 +198,7 @@ describe('setCorpusEntryPolarity', () => {
         'c:pending',
       ]);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 });
@@ -220,7 +221,7 @@ describe('atomic write — no half-written files on failure', () => {
       expect(existsSync(`${filePath}.tmp`)).toBe(false);
       expect(readFileSync(filePath, 'utf8')).toContain('id: a');
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 });

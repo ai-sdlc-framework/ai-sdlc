@@ -17,7 +17,7 @@
  */
 
 import { generateKeyPairSync } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -31,6 +31,7 @@ import {
   type TranscriptLeaf,
 } from './merkle.js';
 import { signAndWriteV6Envelope, type AttestationEnvelopeV6 } from './sign-v6.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const FAKE_HEAD_SHA = 'c'.repeat(40);
 const FAKE_PATCH_ID = 'd'.repeat(40);
@@ -68,7 +69,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmpRoot, { recursive: true, force: true });
+  removeFixtureDir(tmpRoot);
 });
 
 describe('AISDLC-421 — legacy shared-file fallback (AC#7)', () => {

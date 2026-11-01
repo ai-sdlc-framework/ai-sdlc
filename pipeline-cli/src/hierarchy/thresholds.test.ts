@@ -1,9 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { DEFAULT_CONTEXT_THRESHOLDS, configPath, resolveThresholds } from './thresholds.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const dirs: string[] = [];
 const board = (config?: string): string => {
@@ -13,7 +14,7 @@ const board = (config?: string): string => {
   return dir;
 };
 afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  for (const d of dirs.splice(0)) removeFixtureDir(d);
 });
 
 describe('resolveThresholds', () => {

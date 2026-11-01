@@ -24,6 +24,7 @@ import { defaultRunner } from '../runtime/exec.js';
 import { createJudgmentEventsSink } from './events-sink.js';
 import type { OrchestratorEvent } from '../orchestrator/events.js';
 import type { ReviewerVerdict } from '../types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let dir: string;
 const saved: Record<string, string | undefined> = {};
@@ -64,7 +65,7 @@ afterEach(() => {
     if (saved[k] === undefined) delete process.env[k];
     else process.env[k] = saved[k];
   }
-  rmSync(dir, { recursive: true, force: true });
+  removeFixtureDir(dir);
 });
 
 describe('readCommittedFile (git objects at the reviewed commit)', () => {

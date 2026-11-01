@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakeRunner, fail, ok } from '../__test-helpers/fake-runner.js';
@@ -11,6 +11,7 @@ import {
   verifyKeyFor,
   writeVerifyRunState,
 } from './verify-commands.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const green = { build: 'passed', test: 'passed', lint: 'passed', format: 'passed' } as const;
 
@@ -85,7 +86,7 @@ describe('runVerifyCommands', () => {
       writeVerifyRunState('/dev/null/x', 'T-1', run);
       recordDeveloperHonestyEvent('/dev/null/x', 'T-1', run);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 });

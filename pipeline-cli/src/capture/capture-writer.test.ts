@@ -4,7 +4,7 @@
  * Uses a temporary directory so no real ARTIFACTS_DIR is needed.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -15,6 +15,7 @@ import {
   resolveCapturesDir,
 } from './capture-writer.js';
 import { loadCaptures, loadCaptureById, hasPendingCapturesForIssue } from './capture-reader.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmpDir: string;
 let artifactsDir: string;
@@ -25,7 +26,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmpDir, { recursive: true, force: true });
+  removeFixtureDir(tmpDir);
 });
 
 describe('resolveCapturesDir', () => {

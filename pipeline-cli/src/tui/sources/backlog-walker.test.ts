@@ -8,7 +8,7 @@
  *   - useBacklogTasks hook: mount + interval polling, unmount cleanup.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import React from 'react';
@@ -23,6 +23,7 @@ import {
   useBacklogTasks,
   type ReadBacklogTasksResult,
 } from './backlog-walker.js';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 let workdir: string;
 
@@ -31,7 +32,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDir(workdir);
   cleanup();
   vi.useRealTimers();
 });

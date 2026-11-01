@@ -14,7 +14,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -25,6 +25,7 @@ import {
   resolveTranscriptsDir,
   type TranscriptEvent,
 } from './transcript-capture.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
@@ -76,7 +77,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmpRoot, { recursive: true, force: true });
+  removeFixtureDir(tmpRoot);
 });
 
 // ── isValidTranscriptEvent ────────────────────────────────────────────────────

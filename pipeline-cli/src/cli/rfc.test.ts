@@ -7,7 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -35,6 +35,7 @@ import {
   projectDecision,
   type Decision,
 } from '../decisions/index.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Test infrastructure ───────────────────────────────────────────────────────
 
@@ -81,7 +82,7 @@ afterEach(() => {
   if (savedFlag === undefined) delete process.env.AI_SDLC_DECISION_CATALOG;
   else process.env.AI_SDLC_DECISION_CATALOG = savedFlag;
 
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
 });
 
 function setArgv(...args: string[]): void {

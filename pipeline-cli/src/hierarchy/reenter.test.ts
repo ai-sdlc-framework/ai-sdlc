@@ -22,6 +22,7 @@ import { completeTask } from '../dispatch/complete.js';
 import type { DispatchManifest } from '../dispatch/types.js';
 import { reenter, type ReenterDeps } from './reenter.js';
 import type { CommandRunner } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const TASK = 'AISDLC-950';
 const BRANCH = 'ai-sdlc/aisdlc-950-the-real-branch';
@@ -38,7 +39,7 @@ beforeEach(() => {
   calls = [];
   warnings = [];
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(root));
 
 function manifest(): DispatchManifest {
   return {

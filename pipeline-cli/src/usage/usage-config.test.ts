@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -12,12 +12,13 @@ import {
   parseUsageConfig,
   readUsageConfigFromBaseRef,
 } from './usage-config.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'usage-config-'));
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(dir));
 
 function doc(spec: string): string {
   return `apiVersion: ai-sdlc.io/v1alpha1\nkind: UsageConfig\nmetadata:\n  name: usage\nspec:\n${spec}`;

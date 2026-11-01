@@ -10,7 +10,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +30,7 @@ import {
 import { deriveEnvelopeReviewScope } from './review-scope.js';
 import { appendLeafForPatchId } from './merkle.js';
 import { signAndWriteV6Envelope } from './sign-v6.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 type Scoped = {
   status: string;
@@ -50,7 +51,7 @@ const PIPELINE_CLI = join(HERE, '..', '..');
 
 const dirs: string[] = [];
 afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  for (const d of dirs.splice(0)) removeFixtureDir(d);
 });
 
 describe('trust-chain path list', () => {

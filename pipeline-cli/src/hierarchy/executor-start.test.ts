@@ -3,7 +3,7 @@
  * roster and board, an injected git runner. No session, tmux or network.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -17,6 +17,7 @@ import { executorStart } from './executor-start.js';
 import { readHold, writeHold } from './hold.js';
 import { writeRoster } from './roster.js';
 import type { RosterEntry } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 let board: string;
@@ -85,7 +86,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
 });
 
 describe('executorStart on a held board (AISDLC-899)', () => {

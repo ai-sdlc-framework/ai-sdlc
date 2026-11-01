@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { auditGovernanceDir, resolveMainCheckout } from './audit-dir.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const saved = process.env.ARTIFACTS_DIR;
 afterEach(() => {
@@ -37,7 +38,7 @@ describe('audit directory (AISDLC-1010)', () => {
       expect(resolveMainCheckout(wt)).toBe(main);
       expect(auditGovernanceDir(undefined, wt)).toBe(join(main, 'artifacts', '_governance'));
     } finally {
-      rmSync(base, { recursive: true, force: true });
+      removeFixtureDir(base);
     }
   });
 
@@ -46,7 +47,7 @@ describe('audit directory (AISDLC-1010)', () => {
     try {
       expect(resolveMainCheckout(d)).toBe(d);
     } finally {
-      rmSync(d, { recursive: true, force: true });
+      removeFixtureDir(d);
     }
   });
 

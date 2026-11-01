@@ -14,7 +14,6 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -36,10 +35,11 @@ import {
 import { computeSeal, StagedIntegrityError } from './seal.js';
 import { RUN_FILES, readDispatchRecord, readRunJson, stagedRunDir } from './run-store.js';
 import type { LeafManifestEntry } from './leaves.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const roots: string[] = [];
 afterAll(() => {
-  for (const r of roots) rmSync(r, { recursive: true, force: true });
+  for (const r of roots) removeFixtureDir(r);
 });
 
 const TASK = 'AISDLC-676';

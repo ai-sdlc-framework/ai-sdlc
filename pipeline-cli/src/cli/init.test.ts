@@ -1,9 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { gatherDefaults, runInitCli } from './init.js';
 import { REQUIRED_CONFIG_MANIFEST } from '../config-manifest/manifest.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let dir: string;
 let out: string;
@@ -18,7 +19,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
-  rmSync(dir, { recursive: true, force: true });
+  removeFixtureDir(dir);
 });
 
 describe('cli-init', () => {

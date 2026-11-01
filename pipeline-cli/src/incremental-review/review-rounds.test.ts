@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -22,6 +22,7 @@ import {
 } from './review-rounds.js';
 import { formatMarker, type RunGit } from './incremental.js';
 import { appendReviewLedgerRecord, type ReviewLedgerRole } from '../attestation/reviews-ledger.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const TASK = 'AISDLC-9';
 
@@ -71,7 +72,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(repo, { recursive: true, force: true });
+  removeFixtureDir(repo);
 });
 
 function plan(extra: Partial<Parameters<typeof planReviewRound>[0]> = {}): ReviewRoundPlan {

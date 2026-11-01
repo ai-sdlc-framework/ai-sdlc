@@ -1,9 +1,10 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PriceSource, SourcePriceRow } from '@ai-sdlc/reference';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emitPriceChanges, runDailyPriceRefresh } from './price-refresh.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const DAY1 = new Date('2026-10-01T03:00:00.000Z');
 const DAY1_LATER = new Date('2026-10-01T23:30:00.000Z');
@@ -14,7 +15,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'price-refresh-tick-'));
 });
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+  removeFixtureDir(dir);
 });
 
 function row(inputPer1M: number): SourcePriceRow {

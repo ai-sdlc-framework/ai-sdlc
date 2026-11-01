@@ -30,7 +30,7 @@
  */
 
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -71,6 +71,7 @@ import {
 // Stage 4 — Report Validator (Zod boundary)
 import { validateReport, SIGSTORE_ANCHOR_REQUEST_DECISION_SUMMARY } from './report-validator.js';
 import type { UntrustedPrReport } from './report-validator.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Shared fixtures ────────────────────────────────────────────────────────────
 
@@ -226,7 +227,7 @@ describe('RFC-0043 AC-2 — sandbox cannot read host high-privilege tokens (cred
       // detectSandboxArtifacts returns the sentinel name found, or null if clean
       expect(found).toBe('untrusted-pr-eval-active');
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 
@@ -236,7 +237,7 @@ describe('RFC-0043 AC-2 — sandbox cannot read host high-privilege tokens (cred
       const found = detectSandboxArtifacts(tmpDir);
       expect(found).toBeNull();
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 
@@ -247,7 +248,7 @@ describe('RFC-0043 AC-2 — sandbox cannot read host high-privilege tokens (cred
       const found = detectSandboxArtifacts(tmpDir);
       expect(found).toBe('.sandbox-pid');
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 
@@ -258,7 +259,7 @@ describe('RFC-0043 AC-2 — sandbox cannot read host high-privilege tokens (cred
       const found = detectSandboxArtifacts(tmpDir);
       expect(found).toBe('stages-1-3-output');
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 
@@ -411,7 +412,7 @@ describe('RFC-0043 AC-3 — prompt injection → finding; clean-room signer vali
         expect(result.error).toContain('consensus.approved');
       }
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 });
@@ -427,7 +428,7 @@ describe('RFC-0043 OQ-1 — trust source is static file (no live GitHub API)', (
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('classifyTrust reads from static file only (alice trusted)', () => {
@@ -538,7 +539,7 @@ describe('RFC-0043 OQ-2 — CI default deployment; local opt-in', () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('default sandbox config uses CI deployment mode', () => {
@@ -594,7 +595,7 @@ describe('RFC-0043 OQ-3 — resource limits: configurable defaults + hard-abort'
       expect(config.differentialTest.resourceLimits.memoryMb).toBe(8192);
       expect(config.differentialTest.resourceLimits.perTestTimeoutSeconds).toBe(120);
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 
@@ -610,7 +611,7 @@ describe('RFC-0043 OQ-3 — resource limits: configurable defaults + hard-abort'
       // -1 should fall back to the default (parser rejects non-positive)
       expect(config.differentialTest.resourceLimits.wallClockSeconds).toBe(600);
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 });
@@ -683,7 +684,7 @@ describe('RFC-0043 OQ-5 — driver defaults: Docker default; regime → MicroVM 
       const config = loadSandboxConfig(tmpDir);
       expect(config.sandboxDriver).toBe('kata');
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 });

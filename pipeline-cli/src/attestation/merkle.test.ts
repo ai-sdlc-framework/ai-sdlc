@@ -10,7 +10,7 @@
  *   - Nonce generation (32-byte hex, PR-bound)
  */
 
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -26,6 +26,7 @@ import {
   verifyInclusion,
   type TranscriptLeaf,
 } from './merkle.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -464,7 +465,7 @@ describe('loadLeaves', () => {
     tmp = mkdtempSync(join(tmpdir(), 'merkle-test-'));
   });
   afterEach(() => {
-    rmSync(tmp, { recursive: true, force: true });
+    removeFixtureDir(tmp);
   });
 
   it('returns empty array when file does not exist', () => {
@@ -561,7 +562,7 @@ describe('appendLeaf', () => {
     tmp = mkdtempSync(join(tmpdir(), 'merkle-append-'));
   });
   afterEach(() => {
-    rmSync(tmp, { recursive: true, force: true });
+    removeFixtureDir(tmp);
   });
 
   it('creates the file and directory if they do not exist', () => {
@@ -605,7 +606,7 @@ describe('end-to-end: append → compute → verify', () => {
     tmp = mkdtempSync(join(tmpdir(), 'merkle-e2e-'));
   });
   afterEach(() => {
-    rmSync(tmp, { recursive: true, force: true });
+    removeFixtureDir(tmp);
   });
 
   it('3 leaves appended, all inclusion proofs verify against computed root', () => {

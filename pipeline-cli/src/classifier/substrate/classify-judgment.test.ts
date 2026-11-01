@@ -2,7 +2,7 @@
  * Judgment bridge in classify(): hermetic (fake provider, temp dirs, no network).
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -19,6 +19,7 @@ import { readCorpus } from './corpus.js';
 import { DEFAULT_HAIKU_MODEL } from './config.js';
 import { resetInvokerCache } from '../../capture/invoker-loader.js';
 import type { ClassifierInput, ClassifierTaskType } from './types.js';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 const KEY = 'fake@fake-1';
 const choice = (c: string, confidence: number): JudgmentAnswer => ({
@@ -58,7 +59,7 @@ beforeEach(() => {
   resetInvokerCache();
 });
 afterEach(() => {
-  rmSync(repo, { recursive: true, force: true });
+  removeFixtureDir(repo);
   if (savedEnv === undefined) delete process.env.AI_SDLC_CLASSIFIER_INVOKER_MODULE;
   else process.env.AI_SDLC_CLASSIFIER_INVOKER_MODULE = savedEnv;
   resetInvokerCache();

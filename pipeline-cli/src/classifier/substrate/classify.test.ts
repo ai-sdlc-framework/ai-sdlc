@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,6 +12,7 @@ import { FakeLlmInvoker } from './fake-invoker.js';
 import { readCorpus, resolveCorpusFilePath } from './corpus.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_HAIKU_MODEL } from './config.js';
 import type { SubscriptionLedgerEntry } from './types.js';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 function makeRepo(): string {
   return mkdtempSync(join(tmpdir(), 'aisdlc-321-classify-'));
@@ -41,7 +42,7 @@ describe('classify — happy path', () => {
       expect(result.model).toBe(DEFAULT_HAIKU_MODEL);
       expect(result.corpusEntryId).not.toBeNull();
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -64,7 +65,7 @@ describe('classify — happy path', () => {
       expect(result.metBehindThreshold).toBe(false);
       expect(result.classification).toBe('medium');
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 });
@@ -97,7 +98,7 @@ describe('classify — per-call + per-org threshold overrides (AC-3)', () => {
       expect(strict.metBehindThreshold).toBe(false);
       expect(strict.effectiveThreshold).toBe(0.9);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -123,7 +124,7 @@ describe('classify — per-call + per-org threshold overrides (AC-3)', () => {
       expect(result.effectiveThreshold).toBe(0.85);
       expect(result.metBehindThreshold).toBe(false);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 });
@@ -145,7 +146,7 @@ describe('classify — model resolution (AC-2)', () => {
       expect(result.model).toBe(DEFAULT_HAIKU_MODEL);
       expect(result.reasoning).toContain(DEFAULT_HAIKU_MODEL);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -168,7 +169,7 @@ describe('classify — model resolution (AC-2)', () => {
       });
       expect(result.model).toBe('claude-sonnet-4-5');
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 });
@@ -193,7 +194,7 @@ describe('classify — corpus capture (AC-4)', () => {
       expect(corpus.map((e) => e.input.text)).toEqual(['a', 'b']);
       expect(corpus.every((e) => e.polarity === 'pending')).toBe(true);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -217,7 +218,7 @@ describe('classify — corpus capture (AC-4)', () => {
       expect(result.corpusEntryId).toBeNull();
       expect(readCorpus(repo, 'capture-triage')).toEqual([]);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -239,7 +240,7 @@ describe('classify — corpus capture (AC-4)', () => {
         join(repo, '.ai-sdlc', 'classifier-corpus', 'pr-comment-is-capture.yaml'),
       );
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 });
@@ -255,7 +256,7 @@ describe('classify — failure modes', () => {
       expect(result.metBehindThreshold).toBe(false);
       expect(result.reasoning).toContain('network down');
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -267,7 +268,7 @@ describe('classify — failure modes', () => {
       expect(result.confidence).toBe(0);
       expect(result.reasoning).toContain('no invoker');
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -291,7 +292,7 @@ describe('classify — failure modes', () => {
       const corpus = readCorpus(repo, 'capture-severity');
       expect(corpus[0].classification).toBe('maybe-high');
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -311,7 +312,7 @@ describe('classify — failure modes', () => {
       expect(result.confidence).toBe(0);
       expect(result.metBehindThreshold).toBe(false);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -331,7 +332,7 @@ describe('classify — failure modes', () => {
       const result = await classify({ text: 'x' }, 'capture-triage', { invoker, repoRoot: repo });
       expect(result.metBehindThreshold).toBe(false);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 });
@@ -363,7 +364,7 @@ describe('classify — subscription ledger (AC-9)', () => {
       expect(ledgerEntries[0].taskType).toBe('capture-triage');
       expect(ledgerEntries[0].model).toBe(DEFAULT_HAIKU_MODEL);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -381,7 +382,7 @@ describe('classify — subscription ledger (AC-9)', () => {
       });
       expect(ledgerEntries).toHaveLength(0);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -407,7 +408,7 @@ describe('classify — subscription ledger (AC-9)', () => {
       expect(result.classification).toBe('quick-fix-task');
       expect(result.metBehindThreshold).toBe(true);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -434,7 +435,7 @@ describe('classify — subscription ledger (AC-9)', () => {
       expect(ledgerEntries[0].inputTokens).toBe(0);
       expect(ledgerEntries[0].outputTokens).toBe(12);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 });
@@ -504,7 +505,7 @@ describe('classify — multi-task-type support (AC-8)', () => {
       expect(dorAnswer.classification).toBe('new-concern');
       expect(decision.classification).toBe('option-a');
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 });

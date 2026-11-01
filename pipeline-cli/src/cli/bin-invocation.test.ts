@@ -49,10 +49,11 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // Resolve the package root from the test file location:
 //   <pkg-root>/src/cli/bin-invocation.test.ts → <pkg-root>/
@@ -128,7 +129,7 @@ beforeAll(() => {
 afterAll(() => {
   if (priorCodexHome === undefined) delete process.env.CODEX_HOME;
   else process.env.CODEX_HOME = priorCodexHome;
-  rmSync(fileCodexHome, { recursive: true, force: true });
+  removeFixtureDir(fileCodexHome);
 });
 
 describe('AISDLC-156 + AISDLC-181: bin invocation pattern (CI cost-saver + umbrella bin guard)', () => {
@@ -411,7 +412,7 @@ describe('cli-usage: bin shim guard and end-to-end ingest', () => {
   });
 
   afterEach(() => {
-    rmSync(tmp, { recursive: true, force: true });
+    removeFixtureDir(tmp);
   });
 
   it('bin shim file exists at the expected path', () => {
@@ -548,7 +549,7 @@ describe('AISDLC-209: cli-task-complete end-to-end integration (AC#6)', () => {
 
   afterEach(() => {
     try {
-      rmSync(tmpWorkDir, { recursive: true, force: true });
+      removeFixtureDir(tmpWorkDir);
     } catch {
       // ignore
     }
@@ -649,7 +650,7 @@ describe('AISDLC-209: cli-backlog-verify end-to-end integration (AC#6)', () => {
 
   afterEach(() => {
     try {
-      rmSync(tmpWorkDir, { recursive: true, force: true });
+      removeFixtureDir(tmpWorkDir);
     } catch {
       // ignore
     }

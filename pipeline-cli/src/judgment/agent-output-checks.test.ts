@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -28,6 +28,7 @@ import {
 import type { OrchestratorEvent } from '../orchestrator/events.js';
 import type { ReviewerVerdict } from '../types.js';
 import type { Runner } from '../runtime/exec.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const noul = (probability: number): JudgmentAnswer => ({ type: 'noul', probability });
 const choice = (c: string): JudgmentAnswer => ({
@@ -89,7 +90,7 @@ afterEach(() => {
     if (SAVED_GIT_ENV[k] === undefined) delete process.env[k];
     else process.env[k] = SAVED_GIT_ENV[k];
   }
-  rmSync(dir, { recursive: true, force: true });
+  removeFixtureDir(dir);
 });
 
 function harness(

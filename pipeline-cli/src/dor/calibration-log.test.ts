@@ -10,7 +10,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -21,6 +21,7 @@ import {
   type CalibrationEntry,
 } from './calibration-log.js';
 import type { RefinementVerdict } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function verdict(over: Partial<RefinementVerdict> = {}): RefinementVerdict {
   return {
@@ -47,7 +48,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (tmp) rmSync(tmp, { recursive: true, force: true });
+  if (tmp) removeFixtureDir(tmp);
 });
 
 describe('resolveCalibrationLogPath', () => {

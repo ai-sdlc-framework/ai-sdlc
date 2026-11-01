@@ -1,10 +1,11 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildContextCli } from '../cli/context.js';
 import { parseEntryFile } from './entry.js';
 import { INGEST_SOURCES, type IngestSource } from './ingest-sources.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let dir: string;
 const root = (): string => join(dir, '.ai-sdlc/knowledge');
@@ -96,7 +97,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'ingest-src-'));
 });
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+  removeFixtureDir(dir);
   process.exitCode = 0;
 });
 

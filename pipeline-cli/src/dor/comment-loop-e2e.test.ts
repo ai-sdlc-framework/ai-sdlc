@@ -11,7 +11,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -24,6 +24,7 @@ import {
 } from './comment-loop.js';
 import { refineBacklogTask } from './ingress-claude.js';
 import type { DorConfig } from './dor-config.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const enforceConfig: DorConfig = {
   rubricVersion: 'v1',
@@ -60,7 +61,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (tmp) rmSync(tmp, { recursive: true, force: true });
+  if (tmp) removeFixtureDir(tmp);
 });
 
 function writeTask(taskId: string, body: string): string {

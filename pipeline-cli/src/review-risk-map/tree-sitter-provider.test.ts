@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -20,12 +20,13 @@ import {
   type FileAnalysis,
   type TreeSitterProviderOptions,
 } from './index.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const SECRET = 'LOCAL_ONLY_DO_NOT_READ';
 
 const roots: string[] = [];
 afterAll(() => {
-  for (const r of roots) rmSync(r, { recursive: true, force: true });
+  for (const r of roots) removeFixtureDir(r);
 });
 
 interface Repo {

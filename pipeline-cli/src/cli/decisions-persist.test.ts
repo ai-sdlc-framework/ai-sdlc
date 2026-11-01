@@ -4,13 +4,14 @@
  * `gh` is absent/unauthenticated in this path, so only the branch push is exercised.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { buildDecisionsCli } from './decisions.js';
 import { DECISIONS_SYNC_BRANCH } from '../decisions/remote-persist.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // Every case runs real git (bare origin, clone, pushes, fetches); under machine load that
 // exceeds vitest's 5 s default (AISDLC-1057). Explicit budget, assertions unchanged.
@@ -90,7 +91,7 @@ afterEach(() => {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
   }
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDir(root);
 });
 
 async function run(...args: string[]): Promise<void> {
@@ -147,7 +148,7 @@ describe('cli-decisions remote persistence (AISDLC-546)', () => {
     async () => {
       await run(...ADD);
       // simulate a parent reset wiping the local append; origin still holds DEC-0001
-      rmSync(join(parent, '.ai-sdlc', '_decisions', 'events'), { recursive: true, force: true });
+      removeFixtureDir(join(parent, '.ai-sdlc', '_decisions', 'events'));
       const errs: string[] = [];
       process.stderr.write = ((c: string | Uint8Array) => {
         errs.push(String(c));

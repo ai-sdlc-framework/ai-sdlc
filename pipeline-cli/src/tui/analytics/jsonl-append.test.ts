@@ -2,12 +2,13 @@
  * Tests for the shared best-effort JSONL appender (AISDLC-178.6).
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { appendJsonlRecord } from './jsonl-append.js';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 let workdir: string;
 
@@ -16,7 +17,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDir(workdir);
 });
 
 describe('appendJsonlRecord', () => {

@@ -17,7 +17,7 @@
  *   - emit, fail helpers (stdout/stderr/exit)
  */
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -40,6 +40,7 @@ import * as sandboxRunnerMod from '../pipeline/sandbox-runner.js';
 import * as cleanRoomSignerMod from '../pipeline/clean-room-signer.js';
 import { runUcvgCli, _ucvgSeams } from './ucvg.js';
 import { FakeModelClient } from '../pipeline/reviewer-runner.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── isUntrustedPrGateEnabled — MINOR fix #9 ──────────────────────────────────
 
@@ -183,7 +184,7 @@ describe('runSandboxAndReview — upstreamMainRef is baseSha (MAJOR fix #7)', ()
     } catch {
       // Ignore errors from file writes — we only care about the mock call
     } finally {
-      rmSync(sandboxTmp, { recursive: true, force: true });
+      removeFixtureDir(sandboxTmp);
     }
 
     // Guard against a vacuous pass: the mock MUST have been invoked.
@@ -400,7 +401,7 @@ describe('runClassify — classify subcommand', () => {
   });
   afterEach(() => {
     io.restore();
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('outputs "trusted\\n" to stdout when author is in allowlist', async () => {
@@ -493,7 +494,7 @@ describe('runAstGateCli — ast-gate subcommand', () => {
     stdinOnSpy = null;
     setEncodingSpy = null;
     io.restore();
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
     // Restore isTTY
     Object.defineProperty(process.stdin, 'isTTY', {
       value: origIsTTY,
@@ -690,7 +691,7 @@ describe('runSandboxAndReview — sandbox-run subcommand additional paths', () =
   });
   afterEach(() => {
     io.restore();
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
     _ucvgSeams.modelClientFactory = null;
   });
 
@@ -799,7 +800,7 @@ describe('runReviewDegraded — review-degraded subcommand', () => {
   });
   afterEach(() => {
     io.restore();
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('emits ok:true with degraded:true and writes the degraded report', async () => {
@@ -875,7 +876,7 @@ describe('runCleanRoomSignCli — clean-room-sign subcommand', () => {
   });
   afterEach(() => {
     io.restore();
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('fails with exit 1 when --report-path is missing', async () => {
@@ -1155,7 +1156,7 @@ describe('runLocalReview — local-review subcommand', () => {
   });
   afterEach(() => {
     io.restore();
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('emits ok:true, mode:local, and lists instructions', async () => {
@@ -1205,7 +1206,7 @@ describe('computePrDiff helper (via sandbox-run path)', () => {
   });
   afterEach(() => {
     io.restore();
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
     _ucvgSeams.modelClientFactory = null;
     // Restore the default stub after each computePrDiff test
     _ucvgSeams.computePrDiffFn = null;
@@ -1241,7 +1242,7 @@ describe('computePrDiff helper (via sandbox-run path)', () => {
         tmpDir,
       ]);
     } finally {
-      rmSync(repoDir, { recursive: true, force: true });
+      removeFixtureDir(repoDir);
     }
 
     expect(capturedDiff).toBeDefined();
@@ -1288,7 +1289,7 @@ describe('computePrDiff helper (via sandbox-run path)', () => {
       } else {
         process.env['AI_SDLC_UCVG_FIXTURE_SUBDIR'] = origSubdir;
       }
-      rmSync(repoDir, { recursive: true, force: true });
+      removeFixtureDir(repoDir);
     }
 
     expect(capturedDiff).toBeDefined();
@@ -1340,7 +1341,7 @@ describe('computePrDiff helper (via sandbox-run path)', () => {
       } else {
         process.env['AI_SDLC_UCVG_FIXTURE_SUBDIR'] = origSubdir;
       }
-      rmSync(repoDir, { recursive: true, force: true });
+      removeFixtureDir(repoDir);
     }
 
     // The traversal subdir was rejected — the diff is taken from the full repo
@@ -1373,7 +1374,7 @@ describe('extractDifferentialTestResult helper (via sandbox-run success path)', 
   });
   afterEach(() => {
     io.restore();
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
     _ucvgSeams.modelClientFactory = null;
   });
 
@@ -1482,7 +1483,7 @@ describe('buildUnsignedReport helper (via sandbox-run written report)', () => {
   });
   afterEach(() => {
     io.restore();
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
     _ucvgSeams.modelClientFactory = null;
   });
 
@@ -1533,7 +1534,7 @@ describe('buildDegradedReport helper (via review-degraded written report)', () =
   });
   afterEach(() => {
     io.restore();
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('written degraded report has correct fields and trust reason', async () => {
@@ -1651,7 +1652,7 @@ describe('AQ2 proxy lifecycle — runSandboxAndReview via sandbox-run subcommand
 
   afterEach(() => {
     io.restore();
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
     _ucvgSeams.modelClientFactory = null;
     // Restore the real inferenceProxyFactory
     // (import from the module — we just restore to the module-level default)
@@ -1950,7 +1951,7 @@ describe('buildUnsignedReport reviewers=undefined fallback path (lines 536-539)'
 
   afterEach(() => {
     io.restore();
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
     _ucvgSeams.modelClientFactory = null;
     vi.unstubAllEnvs();
   });
@@ -2016,7 +2017,7 @@ describe('no /tmp/.ai-sdlc pollution', () => {
   });
   afterEach(() => {
     io.restore();
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
     _ucvgSeams.modelClientFactory = null;
   });
 

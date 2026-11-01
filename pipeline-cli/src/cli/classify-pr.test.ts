@@ -11,11 +11,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildClassifyPrCli } from './classify-pr.js';
 import type { ClassifierDecision } from '../classifier/classifier.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 let savedArgv: string[];
@@ -51,7 +52,7 @@ afterEach(() => {
   process.stdout.write = savedWrite;
   process.stderr.write = savedErrWrite;
   process.exit = savedExit;
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
 });
 
 function setArgv(...args: string[]): void {

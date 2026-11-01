@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { emitIncompleteSpecDecision, emitUnknownSchemaDecision } from './decisions.js';
 import { readEventLogText } from '../decisions/event-log.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 describe('emitIncompleteSpecDecision', () => {
   let workDir: string;
@@ -16,7 +17,7 @@ describe('emitIncompleteSpecDecision', () => {
   });
 
   afterEach(() => {
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
     if (prevFlag === undefined) delete process.env.AI_SDLC_DECISION_CATALOG;
     else process.env.AI_SDLC_DECISION_CATALOG = prevFlag;
   });
@@ -82,7 +83,7 @@ describe('emitUnknownSchemaDecision', () => {
   });
 
   afterEach(() => {
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
     if (prevFlag === undefined) delete process.env.AI_SDLC_DECISION_CATALOG;
     else process.env.AI_SDLC_DECISION_CATALOG = prevFlag;
   });

@@ -14,7 +14,7 @@
  * `loop.playbook.test.ts` (the 10-task fixture queue per AC #8).
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -37,6 +37,7 @@ import {
   verificationFailureHandler,
 } from './index.js';
 import type { FailureSignal, HandlerDeps, WorkerContext } from './types.js';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -610,7 +611,7 @@ describe('handlers/StackedPRBaseSquashed', () => {
     let worktreePath: string;
 
     afterEach(() => {
-      if (workDir) rmSync(workDir, { recursive: true, force: true });
+      if (workDir) removeFixtureDir(workDir);
     });
 
     it('rebases onto origin/<targetBranch> when spec.branching.targetBranch is configured', async () => {

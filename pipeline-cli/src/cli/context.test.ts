@@ -1,12 +1,13 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildContextCli, resolveRole } from './context.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let dir: string;
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+  removeFixtureDir(dir);
   process.exitCode = 0;
 });
 

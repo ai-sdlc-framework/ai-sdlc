@@ -5,7 +5,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -16,6 +16,7 @@ import {
   resolveReviewerSetMode,
   selectReviewerSet,
 } from './reviewer-set.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const configWith = (mode: string) => () => `reviewerSet: ${mode}\n`;
 
@@ -148,7 +149,7 @@ describe('resolveReviewerSetMode: the config is read from the base ref, never th
     git('commit', '-q', '-m', 'base');
     git('update-ref', 'refs/remotes/origin/main', 'HEAD');
   });
-  afterEach(() => rmSync(repo, { recursive: true, force: true }));
+  afterEach(() => removeFixtureDir(repo));
 
   const writeWorkingCopy = (mode: string) => {
     mkdirSync(join(repo, '.ai-sdlc'), { recursive: true });
@@ -166,7 +167,7 @@ describe('resolveReviewerSetMode: the config is read from the base ref, never th
     git('commit', '-q', '-m', 'adopt staged');
     git('update-ref', 'refs/remotes/origin/main', 'HEAD');
     // Remove the working copy: only the committed base-ref copy remains.
-    rmSync(join(repo, '.ai-sdlc'), { recursive: true });
+    removeFixtureDir(join(repo, '.ai-sdlc'));
     expect(resolveReviewerSetMode({ env: {}, sourceKind: 'backlog', workDir: repo })).toBe(
       'staged',
     );

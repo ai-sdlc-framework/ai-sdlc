@@ -6,7 +6,6 @@ import {
   readFileSync,
   readdirSync,
   statSync,
-  rmSync,
   symlinkSync,
   truncateSync,
   utimesSync,
@@ -23,6 +22,7 @@ import {
 } from './ingest-claude.js';
 import { selectByRepo } from './repo-id.js';
 import { REPLAY_CHECKOUT_DIR, REPLAY_HOLDER_PREFIX } from './replay-git.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const BODY = 'SENTINEL-BODY-TEXT-MUST-NEVER-BE-STORED';
 const DESCRIPTION = 'SENTINEL-DESCRIPTION-MUST-NEVER-BE-STORED';
@@ -130,7 +130,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDir(root);
 });
 
 describe('ingestClaudeTranscripts repoId wiring', () => {

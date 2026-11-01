@@ -19,7 +19,7 @@
  */
 
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { SubagentResult, SubagentSpawner, SpawnOpts } from '../types.js';
@@ -28,6 +28,7 @@ import { effectiveE2E, runE2ECorpus, type FixtureExpectationWithE2E } from './co
 import { pickStageBGates, STAGE_B_OWNED_GATES } from './stage-b.js';
 import { evaluateIssue } from './evaluate.js';
 import type { GateId, IssueInput, StageAVerdict } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const REPO_ROOT = resolve(__dirname, '../../..');
 const CORPUS_ROOT = join(REPO_ROOT, 'spec', 'dor-corpus');
@@ -101,7 +102,7 @@ beforeAll(() => {
 afterAll(() => {
   if (stubRoot) {
     try {
-      rmSync(stubRoot, { recursive: true, force: true });
+      removeFixtureDir(stubRoot);
     } catch {
       // ignore
     }

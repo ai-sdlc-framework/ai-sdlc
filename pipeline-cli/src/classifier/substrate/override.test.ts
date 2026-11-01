@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,6 +15,7 @@ import {
   resolveSilenceAsPositive,
 } from './override.js';
 import type { CalibrationCorpusEntry } from './types.js';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 function makeRepo(): string {
   return mkdtempSync(join(tmpdir(), 'aisdlc-321-override-'));
@@ -43,7 +44,7 @@ describe('resolveOverrideWindowHours', () => {
     try {
       expect(resolveOverrideWindowHours(repo)).toBe(DEFAULT_OVERRIDE_WINDOW_HOURS);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -58,7 +59,7 @@ describe('resolveOverrideWindowHours', () => {
       );
       expect(resolveOverrideWindowHours(repo)).toBe(48);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -73,7 +74,7 @@ describe('resolveOverrideWindowHours', () => {
       );
       expect(resolveOverrideWindowHours(repo)).toBe(DEFAULT_OVERRIDE_WINDOW_HOURS);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 });
@@ -96,7 +97,7 @@ describe('recordOperatorOverride (AC-6)', () => {
       expect(result.entry?.operatorOverrideClassification).toBe('new-feature-issue');
       expect(readCorpus(repo, 'capture-triage')[0].polarity).toBe('negative');
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -112,7 +113,7 @@ describe('recordOperatorOverride (AC-6)', () => {
       expect(result.flipped).toBe(false);
       expect(result.reason).toBe('no-corpus-entry-id');
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -128,7 +129,7 @@ describe('recordOperatorOverride (AC-6)', () => {
       expect(result.flipped).toBe(false);
       expect(result.reason).toBe('entry-not-found');
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -147,7 +148,7 @@ describe('recordOperatorOverride (AC-6)', () => {
       expect(result.reason).toBe('window-expired');
       expect(readCorpus(repo, 'capture-triage')[0].polarity).toBe('pending');
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -165,7 +166,7 @@ describe('recordOperatorOverride (AC-6)', () => {
       expect(result.flipped).toBe(false);
       expect(result.reason).toBe('already-resolved');
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 });
@@ -218,7 +219,7 @@ describe('resolveSilenceAsPositive (AC-7)', () => {
       expect(triage.find((e) => e.id === 't2')?.polarity).toBe('pending');
       expect(triage.find((e) => e.id === 't3')?.polarity).toBe('negative');
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -247,7 +248,7 @@ describe('resolveSilenceAsPositive (AC-7)', () => {
       expect(result.promotedCount).toBe(1);
       expect(readCorpus(repo, 'capture-severity')[0].polarity).toBe('pending');
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -263,7 +264,7 @@ describe('resolveSilenceAsPositive (AC-7)', () => {
       expect(first.promotedCount).toBe(1);
       expect(second.promotedCount).toBe(0);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 });

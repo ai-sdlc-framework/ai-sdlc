@@ -14,7 +14,7 @@
  *   - Schema validation (taskId pattern, status enum) via Ajv2020
  */
 
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -40,6 +40,7 @@ import {
   writeSession,
   type DispatchSession,
 } from './sessions.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ─── Schema loader ─────────────────────────────────────────────────────────
 
@@ -81,7 +82,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(path.dirname(boardDir), { recursive: true, force: true });
+  removeFixtureDir(path.dirname(boardDir));
 });
 
 // ─── Round-trip: write + read ──────────────────────────────────────────────

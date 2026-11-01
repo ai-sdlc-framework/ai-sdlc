@@ -10,11 +10,12 @@
  * rejected, stale versions are rejected, and total absence fails closed.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadAttestationRuntime, TrustedRuntimeResolutionError } from './verify-runtime.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -44,7 +45,7 @@ describe('verify-runtime — trusted @ai-sdlc/orchestrator resolution (AISDLC-57
   });
 
   afterEach(() => {
-    rmSync(base, { recursive: true, force: true });
+    removeFixtureDir(base);
     process.env = { ...ORIGINAL_ENV };
   });
 
@@ -141,7 +142,7 @@ describe('verify-runtime — bare node_modules walk-up, no CLAUDE_PLUGIN_* env s
   });
 
   afterEach(() => {
-    rmSync(base, { recursive: true, force: true });
+    removeFixtureDir(base);
     process.env = { ...ORIGINAL_ENV };
   });
 

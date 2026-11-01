@@ -4,7 +4,7 @@
  * without `planReviewRound` / `cli-incremental-decide plan`).
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +18,7 @@ import {
   planReviewRound,
   defaultGitRunner,
 } from './review-rounds.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(HERE, '..');
@@ -154,8 +155,8 @@ describe('cli-incremental-decide plan / record-round / record-response + cli-rev
   afterEach(() => {
     process.stdout.write = savedOut;
     process.stderr.write = savedErr;
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(scratch, { recursive: true, force: true });
+    removeFixtureDir(repo);
+    removeFixtureDir(scratch);
   });
 
   const run = async (...argv: string[]): Promise<string> => {

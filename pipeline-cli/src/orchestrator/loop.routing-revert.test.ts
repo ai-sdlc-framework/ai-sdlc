@@ -4,7 +4,7 @@
  * disturb the tick.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,13 +14,14 @@ import {
   runOrchestratorTick,
   type OrchestratorAdapters,
 } from './index.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let artifactsDir: string;
 beforeEach(() => {
   artifactsDir = mkdtempSync(join(tmpdir(), 'aisdlc-loop-revert-'));
 });
 afterEach(() => {
-  rmSync(artifactsDir, { recursive: true, force: true });
+  removeFixtureDir(artifactsDir);
 });
 
 function adapters(extra: Partial<OrchestratorAdapters>): {

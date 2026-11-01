@@ -9,7 +9,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildIncrementalDecideCli, decide, type DecideArgs } from './incremental-decide.js';
@@ -18,6 +18,7 @@ import {
   type IncrementalDecision,
   type RunGit,
 } from '../incremental-review/incremental.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 let stdoutChunks: string[];
@@ -56,7 +57,7 @@ afterEach(() => {
   process.stdout.write = savedWrite;
   process.stderr.write = savedErrWrite;
   process.exit = savedExit;
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
 });
 
 function stdoutJson<T>(): T {

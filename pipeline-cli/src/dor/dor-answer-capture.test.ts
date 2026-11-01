@@ -23,7 +23,7 @@
  */
 
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -41,6 +41,7 @@ import {
   type LlmInvocationResponse,
 } from '../classifier/substrate/index.js';
 import type { CaptureRecord } from '../capture/index.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -191,7 +192,7 @@ describe('classifyDorAnswerSegments — AC #2 multi-class output per segment', (
   });
 
   afterEach(() => {
-    rmSync(repoRoot, { recursive: true, force: true });
+    removeFixtureDir(repoRoot);
   });
 
   it('returns one classifier decision per segment in input order (AC #2)', async () => {
@@ -262,7 +263,7 @@ describe('proposeCapturesFromDorAnswer', () => {
   });
 
   afterEach(() => {
-    rmSync(repoRoot, { recursive: true, force: true });
+    removeFixtureDir(repoRoot);
   });
 
   it('AC #1: invokes the classifier for each segment (call count matches)', async () => {
@@ -400,7 +401,7 @@ describe('commitDorAnswerCaptures', () => {
   });
 
   afterEach(() => {
-    rmSync(artifactsDir, { recursive: true, force: true });
+    removeFixtureDir(artifactsDir);
   });
 
   function makeProposal(finding: string): CaptureProposal {
@@ -501,8 +502,8 @@ describe('processDorAnswer — AC #5 operator-confirmation hook', () => {
   });
 
   afterEach(() => {
-    rmSync(repoRoot, { recursive: true, force: true });
-    rmSync(artifactsDir, { recursive: true, force: true });
+    removeFixtureDir(repoRoot);
+    removeFixtureDir(artifactsDir);
   });
 
   it('AC #5: confirm callback can reject proposals → no captures written', async () => {
@@ -614,8 +615,8 @@ describe('AC #7 — integration test: mixed clarification + new-concern segments
   });
 
   afterEach(() => {
-    rmSync(repoRoot, { recursive: true, force: true });
-    rmSync(artifactsDir, { recursive: true, force: true });
+    removeFixtureDir(repoRoot);
+    removeFixtureDir(artifactsDir);
   });
 
   it('extracts 2 captures + leaves 2 clarification segments from a 4-segment answer (AC #7)', async () => {

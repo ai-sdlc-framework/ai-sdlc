@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -13,6 +13,7 @@ import {
   type JudgmentDefinition,
 } from '@ai-sdlc/reference';
 import { collectAnswers, evaluateOnce } from './eval.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const QUESTIONS = { q1: { type: 'noul' as const, instructions: 'Is it fine?' } };
 const PLANTED: JudgmentAnswer = { type: 'noul', probability: 0.05 };
@@ -49,7 +50,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'judgment-eval-'));
 });
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+  removeFixtureDir(dir);
 });
 
 function plant() {

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -6,12 +6,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { gatherFacts, landingPath, readLanding } from './reconcile.js';
 import type { CommandRunner } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let board: string;
 beforeEach(() => {
   board = mkdtempSync(path.join(tmpdir(), 'closed-'));
 });
-afterEach(() => rmSync(board, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(board));
 
 describe('closed-unlanded landing records', () => {
   it('confirms a closed PR once, then stops re-checking it', () => {

@@ -11,7 +11,7 @@
  * @module capture/pr-comment-classifier.test
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -30,6 +30,7 @@ import {
   isAiAgentAuthor,
   stripCaptureIdMarker,
 } from './pr-comment-classifier.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Setup ────────────────────────────────────────────────────────────────────
 
@@ -40,7 +41,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
 });
 
 // Helper — builds a substrate invoker that returns is-capture with a

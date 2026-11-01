@@ -33,6 +33,7 @@ import {
 } from './rollback.js';
 import type { ExecOptions, ExecResult, Runner } from '../runtime/exec.js';
 import type { PipelineLogger } from '../types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 interface RecordedCall {
   command: string;
@@ -145,7 +146,7 @@ describe('rollbackDispatch — status revert', () => {
     taskFile = fixture.taskFile;
   });
   afterEach(() => {
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 
   it('patches the task file `status:` back to the pre-dispatch value', async () => {
@@ -188,7 +189,7 @@ describe('rollbackDispatch — AISDLC-1026 completed / unknown status', () => {
     const result = await rollbackDispatch(makeOptions({ workDir, runner, fromStatus: 'Done' }));
     expect(result.statusReverted).toBe(false);
     expect(readFileSync(f, 'utf8')).toBe(bytes);
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 
   it('writes no synthesized status when the pre-dispatch read failed', async () => {
@@ -199,7 +200,7 @@ describe('rollbackDispatch — AISDLC-1026 completed / unknown status', () => {
     expect(result.statusReverted).toBe(false);
     expect(readFileSync(taskFile, 'utf8')).toBe(before);
     expect(result.warnings.join(' ')).toMatch(/pre-dispatch status unknown/);
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 });
 
@@ -208,7 +209,7 @@ describe('rollbackDispatch — worktree removal', () => {
     const wt = mkdtempSync(join(tmpdir(), 'rollback-wt-'));
     const { runner, calls } = makeRunner({});
     const result = await rollbackDispatch(makeOptions({ worktreePath: wt, runner }));
-    rmSync(wt, { recursive: true, force: true });
+    removeFixtureDir(wt);
 
     expect(result.worktreeRemoved).toBe(true);
     const removeCall = calls.find(
@@ -237,7 +238,7 @@ describe('rollbackDispatch — worktree removal', () => {
       },
     });
     const result = await rollbackDispatch(makeOptions({ worktreePath: wt, runner }));
-    rmSync(wt, { recursive: true, force: true });
+    removeFixtureDir(wt);
 
     expect(result.worktreeRemoved).toBe(false);
     expect(result.warnings.join(' ')).toMatch(/worktree remove failed/);
@@ -420,8 +421,8 @@ describe('rollbackDispatch — composition (full happy path)', () => {
         now: () => fixedNow,
       }),
     );
-    rmSync(fixture.workDir, { recursive: true, force: true });
-    rmSync(wt, { recursive: true, force: true });
+    removeFixtureDir(fixture.workDir);
+    removeFixtureDir(wt);
 
     expect(result).toMatchObject({
       taskId: 'AISDLC-70',
@@ -498,10 +499,10 @@ describe('rollbackDispatch — AISDLC-186 collision avoidance', () => {
       }),
     );
 
-    rmSync(fixture1.workDir, { recursive: true, force: true });
-    rmSync(fixture2.workDir, { recursive: true, force: true });
-    rmSync(wt1, { recursive: true, force: true });
-    rmSync(wt2, { recursive: true, force: true });
+    removeFixtureDir(fixture1.workDir);
+    removeFixtureDir(fixture2.workDir);
+    removeFixtureDir(wt1);
+    removeFixtureDir(wt2);
 
     // Both quarantine refs should exist + be DIFFERENT — pre-186 they
     // were both `quarantine/aisdlc-70-2026-05-04T14-23-44`.
@@ -953,8 +954,8 @@ describe('rollbackDispatch — AISDLC-228: quarantine skipped for in-flight bran
       }),
     );
 
-    rmSync(fixture.workDir, { recursive: true, force: true });
-    rmSync(wt, { recursive: true, force: true });
+    removeFixtureDir(fixture.workDir);
+    removeFixtureDir(wt);
 
     // Branch must NOT have been quarantined
     expect(result.branchQuarantined).toBe(false);
@@ -1028,7 +1029,7 @@ describe('rollbackDispatch — AISDLC-228: quarantine skipped for in-flight bran
       }),
     );
 
-    rmSync(fixture.workDir, { recursive: true, force: true });
+    removeFixtureDir(fixture.workDir);
 
     expect(result.branchQuarantined).toBe(false);
     expect(result.quarantineSkippedReason).toMatch(/PR #386/);
@@ -1098,7 +1099,7 @@ describe('rollbackDispatch — AISDLC-228: quarantine skipped for in-flight bran
       }),
     );
 
-    rmSync(fixture.workDir, { recursive: true, force: true });
+    removeFixtureDir(fixture.workDir);
 
     // Quarantine MUST have fired
     expect(result.branchQuarantined).toBe(true);

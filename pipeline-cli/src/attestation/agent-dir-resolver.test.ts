@@ -5,7 +5,7 @@
  * the INSTALLED plugin instead of a monorepo-only, unguarded path.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -13,6 +13,7 @@ import {
   highestVersionCacheAgentsDir,
   isInsideRepoRoot,
 } from './agent-dir-resolver.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -30,7 +31,7 @@ describe('resolveInstalledPluginAgentDir (AISDLC-583)', () => {
   });
 
   afterEach(() => {
-    rmSync(base, { recursive: true, force: true });
+    removeFixtureDir(base);
     process.env = { ...ORIGINAL_ENV };
   });
 
@@ -103,7 +104,7 @@ describe('highestVersionCacheAgentsDir (AISDLC-583)', () => {
     cacheRoot = mkdtempSync(join(tmpdir(), 'agent-dir-cache-'));
   });
   afterEach(() => {
-    rmSync(cacheRoot, { recursive: true, force: true });
+    removeFixtureDir(cacheRoot);
   });
 
   /** Create `<cacheRoot>/<marketplace>/ai-sdlc/<version>/agents`. */
@@ -166,7 +167,7 @@ describe('containment guard (AISDLC-584)', () => {
     base = mkdtempSync(join(tmpdir(), 'agent-dir-guard-'));
   });
   afterEach(() => {
-    rmSync(base, { recursive: true, force: true });
+    removeFixtureDir(base);
     process.env = { ...ORIGINAL_ENV };
   });
 

@@ -19,10 +19,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, utimesSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { checkAndRebuildIfStale, type DistStalenessOptions } from './dist-staleness.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 let stderrMessages: string[];
@@ -33,7 +34,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (tmp) rmSync(tmp, { recursive: true, force: true });
+  if (tmp) removeFixtureDir(tmp);
   // Restore any env mutations done in tests.
   delete process.env['AI_SDLC_ORCHESTRATOR_SKIP_REBUILD'];
 });

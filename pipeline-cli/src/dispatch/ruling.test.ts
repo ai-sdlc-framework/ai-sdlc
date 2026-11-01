@@ -1,10 +1,11 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { clearRuling, listRulings, readRuling, setRuling } from './ruling.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let board: string;
 const NOW = () => new Date('2026-10-15T00:00:00.000Z');
@@ -16,7 +17,7 @@ const put = (sub: string, name: string, body: object) => {
 beforeEach(() => {
   board = mkdtempSync(path.join(tmpdir(), 'ruling-'));
 });
-afterEach(() => rmSync(board, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(board));
 
 describe('rulings on the board (AISDLC-903)', () => {
   it('writes and clears a ruling on a queue manifest', () => {

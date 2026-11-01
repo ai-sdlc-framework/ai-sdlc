@@ -13,9 +13,10 @@ import { createRetrievalIndex, RetrievalAdapterError } from './registry.js';
 import { compactSession, queryIndex, rebuildIndex, resetSession } from './service.js';
 import { fuseRanks, SqliteRetrievalIndex } from './sqlite-index.js';
 import type { Embedder } from './types.js';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 let root: string;
-afterEach(() => root && rmSync(root, { recursive: true, force: true }));
+afterEach(() => root && removeFixtureDir(root));
 
 function mk(id: string, value: string, over: Partial<KnowledgeEntry> = {}): KnowledgeEntry {
   return {

@@ -10,10 +10,11 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runGc, collectStats, runEmbeddingGcCli } from './embedding-gc.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -60,7 +61,7 @@ describe('cli-embedding-gc (unit tests via module import)', () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('AC#4: removes entries older than retention threshold', () => {
@@ -306,7 +307,7 @@ describe('runEmbeddingGcCli (yargs router coverage)', () => {
   afterEach(() => {
     process.argv = savedArgv;
     process.stdout.write = savedStdout;
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
     vi.restoreAllMocks();
   });
 

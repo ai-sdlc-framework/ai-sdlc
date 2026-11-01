@@ -1,6 +1,6 @@
 /** Parking an inflight manifest in blocked/ and returning it to queue/ (RFC-0051 escalation chain). */
 
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { ensureBoardDirs, parkInflight, unblockManifest, writeManifest } from './board.js';
 import type { DispatchManifest } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let board: string;
 
@@ -17,7 +18,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(board, { recursive: true, force: true });
+  removeFixtureDir(board);
 });
 
 function inflight(taskId: string): void {

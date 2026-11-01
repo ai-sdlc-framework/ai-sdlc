@@ -19,7 +19,6 @@ import {
   mkdirSync,
   readdirSync,
   realpathSync,
-  rmSync,
   writeFileSync,
   readFileSync,
 } from 'node:fs';
@@ -39,6 +38,7 @@ import {
   nonceMarkerLiteral,
 } from '../attestation/harness-transcript.js';
 import { buildAttestationCli, readAgentIdSidecar } from './attestation.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 /** AISDLC-734: markers are bound to their leaf, not deleted; list the ones still free. */
 function unconsumedMarkers(dir: string): string[] {
@@ -155,7 +155,7 @@ afterEach(() => {
     process.env['REPO_ROOT'] = savedEnvRepoRoot;
   }
 
-  rmSync(tmpRoot, { recursive: true, force: true });
+  removeFixtureDir(tmpRoot);
 });
 
 // ── Fixture helpers ───────────────────────────────────────────────────────────
@@ -295,7 +295,7 @@ describe('cli-attestation transcripts list', () => {
       const out = flushStdout();
       expect(out).toContain('aisdlc-override');
     } finally {
-      rmSync(tmpRoot2, { recursive: true, force: true });
+      removeFixtureDir(tmpRoot2);
     }
   });
 
@@ -403,7 +403,7 @@ describe('reviewer-set', () => {
       const parsed = JSON.parse(flushStdout()) as { set: string; reason: string };
       expect(parsed).toMatchObject({ set: 'three', reason: 'diff-unavailable' });
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 });
@@ -455,7 +455,7 @@ describe('reviewer-set (git-backed)', () => {
         triggeringPaths: ['ai-sdlc-plugin/hooks/h.js'],
       });
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 });
@@ -467,7 +467,7 @@ describe('reviewer-set-window', () => {
       await buildAttestationCli(['reviewer-set-window', '--artifacts-dir', dir]).parseAsync();
       expect(JSON.parse(flushStdout())).toMatchObject({ windowOpen: true, prs: 0 });
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 });
@@ -3262,8 +3262,8 @@ describe('emit-leaf — worktree layout end to end (markers under the main check
 
   afterEach(() => {
     // Same guard on the way out: never delete a path that is not a tmp fixture.
-    if (mainRoot && isUnderTmpdir(mainRoot)) rmSync(mainRoot, { recursive: true, force: true });
-    rmSync(fakeHomeDirForHarnessTests, { recursive: true, force: true });
+    if (mainRoot && isUnderTmpdir(mainRoot)) removeFixtureDir(mainRoot);
+    removeFixtureDir(fakeHomeDirForHarnessTests);
     fakeHomeDirForHarnessTests = '';
   });
 

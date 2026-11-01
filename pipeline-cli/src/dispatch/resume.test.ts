@@ -27,6 +27,7 @@ import {
   stripControl,
 } from './resume.js';
 import type { DispatchManifest } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function mkManifest(taskId: string, extra: Partial<DispatchManifest> = {}): DispatchManifest {
   return {
@@ -53,7 +54,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDir(root);
 });
 
 /** Run a task through claim and a success verdict, as an executor would. */
@@ -1014,7 +1015,7 @@ describe('correctManifestBranch (AISDLC-851)', () => {
       expect(q.branch).toBe('ai-sdlc/aisdlc-7-long');
       expect(correctManifestBranch(board, '../evil', 'x')).toBe(0);
     } finally {
-      rmSync(board, { recursive: true, force: true });
+      removeFixtureDir(board);
     }
   });
 });

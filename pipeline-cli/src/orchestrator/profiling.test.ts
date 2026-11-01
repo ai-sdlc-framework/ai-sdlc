@@ -11,7 +11,7 @@
  *     matching completion/failure event (AC-1 + AC-2).
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -28,6 +28,7 @@ import {
   populateVerdictTiming,
   writeTimedVerdict,
 } from './profiling.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let workdir: string;
 
@@ -36,7 +37,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDir(workdir);
 });
 
 function manifest(overrides: Partial<DispatchManifest> = {}): DispatchManifest {

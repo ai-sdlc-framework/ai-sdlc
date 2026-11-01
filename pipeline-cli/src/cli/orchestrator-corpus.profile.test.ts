@@ -7,7 +7,7 @@
  * EstimateActualsRecorded append (AC-3 / AC-4).
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { appendActualsToCalibration, buildOrchestratorCorpusCli } from './orchestrator-corpus.js';
 import type { EstimateActualsRecord } from './profile-aggregator.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 let savedArgv: string[];
@@ -41,7 +42,7 @@ afterEach(() => {
   process.argv = savedArgv;
   process.stdout.write = savedWrite;
   process.exit = savedExit;
-  if (tmp) rmSync(tmp, { recursive: true, force: true });
+  if (tmp) removeFixtureDir(tmp);
 });
 
 function setArgv(...args: string[]): void {

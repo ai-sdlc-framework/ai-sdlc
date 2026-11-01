@@ -15,13 +15,13 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deriveFeatureId, importSpec, resolveTasksMdPath } from './import.js';
 import type { RefineBacklogTaskResult } from '../dor/ingress-claude.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let workDir: string;
 let specRoot: string;
@@ -36,8 +36,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workDir, { recursive: true, force: true });
-  rmSync(specRoot, { recursive: true, force: true });
+  removeFixtureDir(workDir);
+  removeFixtureDir(specRoot);
   if (prevFlag === undefined) delete process.env.AI_SDLC_DECISION_CATALOG;
   else process.env.AI_SDLC_DECISION_CATALOG = prevFlag;
 });

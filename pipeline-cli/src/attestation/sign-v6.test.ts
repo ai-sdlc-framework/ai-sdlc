@@ -24,7 +24,6 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -39,6 +38,7 @@ import {
   writeEnvelopeAtomic,
   type AttestationEnvelopeV6,
 } from './sign-v6.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Key generation helpers ────────────────────────────────────────────────────
 
@@ -85,7 +85,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmpRoot, { recursive: true, force: true });
+  removeFixtureDir(tmpRoot);
   delete process.env['AISDLC_SIGNING_KEY_PATH'];
 });
 
@@ -945,7 +945,7 @@ describe('assertSubjectIsHead (AISDLC-545 AC#1)', () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'sign-v6-head-'));
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => removeFixtureDir(dir));
 
   const git = (...a: string[]): string =>
     execFileSync('git', a, { cwd: dir, encoding: 'utf8' }).trim();
@@ -977,7 +977,7 @@ describe('writeEnvelopeAtomic (AISDLC-543 AC#4, PR #912 corrupted-envelope seque
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'sign-v6-atomic-'));
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => removeFixtureDir(dir));
 
   it('replaces a truncated/unparsable envelope with a complete one and leaves no temp files', () => {
     const target = join(dir, 'abc.v6.dsse.json');

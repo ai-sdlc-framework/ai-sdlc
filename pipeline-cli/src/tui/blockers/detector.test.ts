@@ -11,7 +11,7 @@
  *   - Individual rule detectors (unit)
  */
 
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -35,6 +35,7 @@ import {
 
 import type { BacklogTask } from '../sources/backlog-walker.js';
 import type { GhPrSummary } from '../sources/gh-pr-cache.js';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -521,7 +522,7 @@ describe('readTaskBody', () => {
   });
 
   afterEach(() => {
-    rmSync(workdir, { recursive: true, force: true });
+    removeFixtureDir(workdir);
   });
 
   it('reads file content successfully', () => {

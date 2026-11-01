@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -30,12 +30,13 @@ import {
   type ReconcilePr,
 } from './reconcile.js';
 import type { CommandRunner } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let board: string;
 beforeEach(() => {
   board = mkdtempSync(path.join(os.tmpdir(), 'reconcile-'));
 });
-afterEach(() => rmSync(board, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(board));
 
 const fixedNow = () => new Date('2026-10-14T00:00:00.000Z');
 const green = [{ name: 'ai-sdlc/pr-ready', conclusion: 'success' as const }];

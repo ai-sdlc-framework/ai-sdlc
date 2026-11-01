@@ -19,7 +19,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -33,6 +33,7 @@ import {
 } from './deps-corpus.js';
 import type { SnapshotRecord } from '../deps/snapshot.js';
 import type { OverrideEntry } from '../deps/override-log.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 let savedArgv: string[];
@@ -68,7 +69,7 @@ afterEach(() => {
   process.stdout.write = savedWrite;
   process.stderr.write = savedErrWrite;
   process.exit = savedExit;
-  if (tmp) rmSync(tmp, { recursive: true, force: true });
+  if (tmp) removeFixtureDir(tmp);
 });
 
 function setArgv(...args: string[]): void {

@@ -22,13 +22,14 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { determineVerdictClass, subagentSessionsDir } from './verdict-class.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -49,7 +50,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(fakeProjectDir, { recursive: true, force: true });
+  removeFixtureDir(fakeProjectDir);
 });
 
 describe('SubagentStart hook -> determineVerdictClass integration (AISDLC-571)', () => {

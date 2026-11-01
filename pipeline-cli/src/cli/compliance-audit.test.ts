@@ -12,7 +12,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -28,6 +28,7 @@ import {
   type EvidenceFile,
   type BundleManifest,
 } from './compliance-audit.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Fixture helpers ───────────────────────────────────────────────────────
 
@@ -137,7 +138,7 @@ beforeEach(() => {
 
 afterEach(() => {
   try {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   } catch {
     // ignore
   }

@@ -1,4 +1,4 @@
-import { mkdtempSync, renameSync, rmSync } from 'node:fs';
+import { mkdtempSync, renameSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -16,6 +16,7 @@ import {
   stallThresholdsFromEnv,
 } from './stall.js';
 import type { CommandRunner } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 describe('stallThresholdsFromEnv', () => {
   it('defaults to 30 and 10 minutes', () => {
@@ -111,7 +112,7 @@ describe('reapStalledClaims thresholds (AISDLC-1103)', () => {
       currentStep: '05-dev-running',
     } as never);
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => removeFixtureDir(dir));
 
   const reap = (ageMin: number, state?: 'busy' | 'idle' | 'gone' | 'unknown') =>
     reapStalledClaims({

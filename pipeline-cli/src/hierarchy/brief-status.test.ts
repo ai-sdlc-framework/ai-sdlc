@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -6,10 +6,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { renderBriefBlock } from './brief-format.js';
 import { briefStatus, formatBriefStatus } from './brief-status.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const dirs: string[] = [];
 afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  for (const d of dirs.splice(0)) removeFixtureDir(d);
 });
 
 function board(): string {

@@ -19,7 +19,7 @@
  * @module capture/pr-comment-classifier.integration.test
  */
 
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -30,6 +30,7 @@ import { generateCaptureId } from './capture-record.js';
 import type { CaptureRecord } from './capture-record.js';
 import { FakeLlmInvoker } from '../classifier/substrate/fake-invoker.js';
 import { appendCaptureMarkerToComment, classifyPrCommentsBatch } from './pr-comment-classifier.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 
@@ -38,7 +39,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
 });
 
 /**

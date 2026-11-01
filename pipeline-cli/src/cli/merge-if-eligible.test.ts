@@ -5,13 +5,14 @@
  * CLI-facing render/format layer that the yargs router calls.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildMergeIfEligibleCli, renderJsonResult, renderResult } from './merge-if-eligible.js';
 import { STRICT_DEFAULTS, type RunMergeIfEligibleResult } from '../governance/merge-if-eligible.js';
 import type { ExecResult, Runner } from '../runtime/exec.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function baseResult(overrides: Partial<RunMergeIfEligibleResult> = {}): RunMergeIfEligibleResult {
   return {
@@ -384,7 +385,7 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
       expect(parsed.ok).toBe(false);
       expect(parsed.reason).toMatch(/target repository/);
     } finally {
-      rmSync(plain, { recursive: true, force: true });
+      removeFixtureDir(plain);
     }
   });
 
@@ -419,7 +420,7 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
         true,
       );
     } finally {
-      rmSync(plain, { recursive: true, force: true });
+      removeFixtureDir(plain);
     }
   });
 
@@ -501,7 +502,7 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
         callerRole: 'operator',
       });
     } finally {
-      rmSync(artifacts, { recursive: true, force: true });
+      removeFixtureDir(artifacts);
     }
   });
 
@@ -530,7 +531,7 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
       expect(JSON.parse(out.join('')).reason).toMatch(/target repository.*Next step:/);
       expect(fake.calls.some((c) => c.args.includes('merge'))).toBe(false);
     } finally {
-      rmSync(plain, { recursive: true, force: true });
+      removeFixtureDir(plain);
     }
   });
 
@@ -548,7 +549,7 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
       expect(out.join('')).toMatch(/caller role "executor"/);
       expect(fake.calls.some((c) => c.args.includes('merge'))).toBe(false);
     } finally {
-      rmSync(artifacts, { recursive: true, force: true });
+      removeFixtureDir(artifacts);
     }
   });
 

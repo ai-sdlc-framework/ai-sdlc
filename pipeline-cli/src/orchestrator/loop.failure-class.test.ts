@@ -3,7 +3,7 @@
  * unchanged outcome, only for failures the playbook left unmatched.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -18,13 +18,14 @@ import {
   type OrchestratorAdapters,
 } from './index.js';
 import { FAILURE_CLASS_ID } from '../judgment/failure-class.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let artifactsDir: string;
 beforeEach(() => {
   artifactsDir = mkdtempSync(join(tmpdir(), 'aisdlc-loop-fc-'));
 });
 afterEach(() => {
-  rmSync(artifactsDir, { recursive: true, force: true });
+  removeFixtureDir(artifactsDir);
 });
 
 function adapters(judgment: EvaluateJudgmentContext): OrchestratorAdapters {

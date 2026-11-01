@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -15,6 +15,7 @@ import {
 } from './corpus-eval.js';
 import type { CalibrationCorpusEntry } from './types.js';
 import { runJudgmentCli } from '../../cli/judgment.js';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 function entry(id: string, text: string, override?: string): CalibrationCorpusEntry {
   return {
@@ -37,7 +38,7 @@ let tmp: string;
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), 'corpus-eval-'));
 });
-afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(tmp));
 
 describe('corpus converter', () => {
   it('keeps only entries with an operator override', () => {

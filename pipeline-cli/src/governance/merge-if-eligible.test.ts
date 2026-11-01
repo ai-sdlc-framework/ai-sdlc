@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -43,6 +43,7 @@ import {
   type BacklogMergeAuditRecord,
 } from './merge-if-eligible.js';
 import { type ExecResult, type Runner } from '../runtime/exec.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -1061,7 +1062,7 @@ describe('verified main root + policy read from git', () => {
   });
   afterEach(() => {
     process.env = { ...ORIGINAL_ENV };
-    rmSync(base, { recursive: true, force: true });
+    removeFixtureDir(base);
   });
 
   it('resolveTargetRepo: origin slug, explicit --repo, mismatch refusal, non-git fallback', async () => {
@@ -2127,7 +2128,7 @@ describe('defaultBacklogAuditWriter (DEC-0072)', () => {
       writeFileSync(join(dir, 'blocker'), 'x');
       expect(() => defaultBacklogAuditWriter(join(dir, 'blocker'))(rec)).not.toThrow();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 });

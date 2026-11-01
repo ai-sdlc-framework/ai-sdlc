@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -7,12 +7,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { computeBranchName } from '../steps/02-compute-branch.js';
 import { parseTaskFile } from '../steps/01-validate.js';
 import { enqueueTasks } from './enqueue.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let root: string;
 beforeEach(() => {
   root = mkdtempSync(path.join(tmpdir(), 'enqueue-'));
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(root));
 
 describe('enqueue and Step 2 share one branch name (AISDLC-851)', () => {
   it('writes the branch Step 2 computes for the same task', async () => {

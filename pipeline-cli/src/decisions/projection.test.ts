@@ -3,7 +3,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -25,6 +25,7 @@ import {
 } from './projection.js';
 import { computeTimeboxExpiresAt, parseTimebox } from './timebox.js';
 import type { DecisionPriority } from './decision-record.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let workDir: string;
 
@@ -33,7 +34,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workDir, { recursive: true, force: true });
+  removeFixtureDir(workDir);
 });
 
 function openDecision(id: string, summary: string, ts: string): void {

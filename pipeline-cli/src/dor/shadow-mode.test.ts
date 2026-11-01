@@ -13,7 +13,7 @@
  */
 
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
@@ -28,6 +28,7 @@ import { loadCorpus } from './corpus.js';
 import type { SubagentResult, SubagentSpawner, SpawnOpts } from '../types.js';
 import type { GateId, IssueInput, RefinementVerdict } from './types.js';
 import type { FixtureExpectationWithE2E } from './corpus-e2e.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const REPO_ROOT = resolve(__dirname, '../../..');
 const CORPUS_ROOT = join(REPO_ROOT, 'spec', 'dor-corpus');
@@ -97,7 +98,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  if (stubRoot) rmSync(stubRoot, { recursive: true, force: true });
+  if (stubRoot) removeFixtureDir(stubRoot);
 });
 
 /**

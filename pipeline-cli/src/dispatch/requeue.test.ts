@@ -23,6 +23,7 @@ import { claimNext, ensureBoardDirs, writeManifest, writeVerdict } from './board
 import { completeTask } from './complete.js';
 import { FAILED_MANIFEST_SUFFIX, requeueFailed, snapshotFailedManifest } from './requeue.js';
 import type { DispatchManifest } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function mkManifest(taskId: string, extra: Partial<DispatchManifest> = {}): DispatchManifest {
   return {
@@ -48,7 +49,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDir(root);
 });
 
 /** Every file on the board with its content, for before/after comparison. */
@@ -311,7 +312,7 @@ describe('requeueFailed with an open PR (follow-up)', () => {
     ] as const) {
       failWithPr(id, 2);
       expect(() => requeueFailed(board, id, { prState: () => state })).toThrow(/limit is 2/);
-      rmSync(path.join(board, 'failed'), { recursive: true, force: true });
+      removeFixtureDir(path.join(board, 'failed'));
       ensureBoardDirs(board);
     }
   });

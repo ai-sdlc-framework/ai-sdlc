@@ -4,7 +4,6 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,6 +21,7 @@ import {
   type LandOutcome,
 } from './land-eligible.js';
 import type { CommandRunner } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const SHA = 'a'.repeat(40);
 let board: string;
@@ -29,7 +29,7 @@ let board: string;
 beforeEach(() => {
   board = mkdtempSync(path.join(tmpdir(), 'land-'));
 });
-afterEach(() => rmSync(board, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(board));
 
 function fakeGh(prs: unknown[], autoMerge: 'true' | 'false' | 'fail' = 'true') {
   const calls: string[][] = [];

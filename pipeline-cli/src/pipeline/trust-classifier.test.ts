@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -16,6 +16,7 @@ import {
   loadAllowlistedAuthors,
   shouldEngageUcvg,
 } from './trust-classifier.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Test fixtures ────────────────────────────────────────────────────────────
 
@@ -122,7 +123,7 @@ describe('loadAllowlistedAuthors', () => {
   });
 
   afterEach(() => {
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 
   it('returns empty array when trusted-reviewers.yaml does not exist', () => {
@@ -173,7 +174,7 @@ describe('classifyTrust', () => {
   });
 
   afterEach(() => {
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 
   // AC#9 positive cases
