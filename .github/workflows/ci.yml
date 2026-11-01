@@ -345,16 +345,34 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: pnpm --filter @ai-sdlc/reference test
 
+  # AISDLC-778 / RFC-0053 OQ-5: ranking gate. Fails when golden recall at 5 is below
+  # evaluation.goldenRecallAt5 or regresses beyond evaluation.maxRegressionPoints.
+  context-eval:
+    name: Context ranking gate
+    runs-on: ubuntu-latest
+    if: (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @ai-sdlc/pipeline-cli build
+      - run: node pipeline-cli/bin/cli-context.mjs index
+      - run: node pipeline-cli/bin/cli-context.mjs eval --gate
+
   ci-ok:
     name: CI OK
     if: always()
-    needs: [lint, build-and-test, test-python, test-go, first-run-smoke]
+    needs: [lint, build-and-test, test-python, test-go, first-run-smoke, context-eval]
     runs-on: ubuntu-latest
     steps:
       - run: |
           # AISDLC-1148: the merge_group Backlog Drift job was removed with the merge queue;
           # drift is gated by ai-sdlc-gate.yml.
-          results=("${{ needs.lint.result }}" "${{ needs.build-and-test.result }}" "${{ needs.test-python.result }}" "${{ needs.test-go.result }}" "${{ needs.first-run-smoke.result }}")
+          results=("${{ needs.lint.result }}" "${{ needs.build-and-test.result }}" "${{ needs.test-python.result }}" "${{ needs.test-go.result }}" "${{ needs.first-run-smoke.result }}" "${{ needs.context-eval.result }}")
           for result in "${results[@]}"; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
               echo "CI failed: found job with result '$result'"
