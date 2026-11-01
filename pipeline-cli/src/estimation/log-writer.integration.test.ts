@@ -20,7 +20,7 @@
  * and cleans up afterwards.
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -30,6 +30,7 @@ import { ORCHESTRATOR_FLAG } from '../orchestrator/feature-flag.js';
 import { assignClassCached } from './cache.js';
 import { captureEstimate, estimateLogPath, readEstimateLog } from './log-writer.js';
 import { runStageA } from './stage-a.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let workDir: string;
 let artifactsDir: string;
@@ -49,7 +50,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanupTmpProject(workDir);
-  rmSync(artifactsDir, { recursive: true, force: true });
+  removeFixtureDir(artifactsDir);
   process.env = savedEnv;
 });
 

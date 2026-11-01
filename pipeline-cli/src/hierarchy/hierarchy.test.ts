@@ -68,6 +68,7 @@ import {
 } from './index.js';
 import { executorStart } from './executor-start.js';
 import { isNodeInstalled, paneNodeVersion, readNvmrc } from './node-pin.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const NOW = new Date('2026-09-30T12:00:00.000Z');
 
@@ -293,7 +294,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
 });
 
 function manifest(taskId: string): DispatchManifest {
@@ -2232,7 +2233,7 @@ describe('project-scoped session names', () => {
 
     rmSync(rosterPath(boardDir));
     fake = makeFakeTmux(registryDir);
-    rmSync(registryDir, { recursive: true, force: true });
+    removeFixtureDir(registryDir);
     foreignRegistryEntry('9001.json', { name: 'planner', cwd: '/repo' });
     deps.isAlive = () => true;
     const r = await hierarchyUp({ ...baseOpts, executors: 0 }, deps);

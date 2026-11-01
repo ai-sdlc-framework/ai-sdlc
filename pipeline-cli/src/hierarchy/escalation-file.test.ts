@@ -1,17 +1,18 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { writeEscalationFile } from './escalation-file.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let board: string;
 beforeEach(() => {
   board = mkdtempSync(path.join(tmpdir(), 'escalation-'));
   mkdirSync(path.join(board, 'failed'), { recursive: true });
 });
-afterEach(() => rmSync(board, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(board));
 
 const now = new Date('2026-10-23T01:02:03Z');
 const ok = (stdout: string) => ({ status: 0, stdout, stderr: '' });

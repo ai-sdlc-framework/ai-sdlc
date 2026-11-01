@@ -1,16 +1,17 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { REBUILD_COMMAND, ensureFreshRepoBuild } from './up.js';
 import type { HierarchyDeps } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 beforeEach(() => {
   tmp = mkdtempSync(path.join(tmpdir(), 'repo-build-'));
 });
-afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(tmp));
 
 function setup(checkResults: number[], buildStatus = 0) {
   mkdirSync(path.join(tmp, 'ai-sdlc-plugin', 'scripts'), { recursive: true });
@@ -58,7 +59,7 @@ describe('ensureFreshRepoBuild (AISDLC-988)', () => {
 
   it('skips repos without the resolve script', () => {
     const { deps, calls } = setup([1]);
-    rmSync(path.join(tmp, 'ai-sdlc-plugin'), { recursive: true });
+    removeFixtureDir(path.join(tmp, 'ai-sdlc-plugin'));
     ensureFreshRepoBuild(deps, false);
     expect(calls).toEqual([]);
   });

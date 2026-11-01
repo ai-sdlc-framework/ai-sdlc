@@ -24,9 +24,10 @@ import {
   type ChangedFile,
 } from './ast-gate.js';
 import { afterEach, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── normalizePath ────────────────────────────────────────────────────────────
 
@@ -732,7 +733,7 @@ describe('loadAstGateConfig', () => {
   });
 
   afterEach(() => {
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 
   it('falls back to DEFAULT_AST_GATE_CONFIG when config file is absent', () => {

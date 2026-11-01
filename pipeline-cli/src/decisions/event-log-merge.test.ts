@@ -10,7 +10,6 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -31,6 +30,7 @@ import {
   resolveEventsDir,
 } from './event-log.js';
 import { defaultRunner, nextDecisionIdDurable, type GitRunner } from './remote-persist.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const git = (cwd: string, ...args: string[]): string =>
   execFileSync('git', args, {
@@ -80,7 +80,7 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'dec-merge-'));
 });
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDir(root);
 });
 
 /** Build a repo with a base commit and branches a/b each adding one decision via the writer. */

@@ -14,7 +14,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -26,6 +26,7 @@ import {
 } from './reconcile.js';
 import { readEventLogText } from '../decisions/event-log.js';
 import type { SpecKitTaskEntry } from './parser.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let workDir: string;
 let prevFlag: string | undefined;
@@ -39,7 +40,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workDir, { recursive: true, force: true });
+  removeFixtureDir(workDir);
   if (prevFlag === undefined) delete process.env.AI_SDLC_DECISION_CATALOG;
   else process.env.AI_SDLC_DECISION_CATALOG = prevFlag;
 });

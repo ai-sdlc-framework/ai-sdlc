@@ -5,12 +5,13 @@
  * and the reviews ledger taking one `staged` row per review.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadLeavesForPatchId, STAGED_REVIEWER_NAME } from '../attestation/merkle.js';
 import { loadReviewLedger } from '../attestation/reviews-ledger.js';
 import { buildAttestationCli } from './attestation.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const PATCH_ID = '9'.repeat(40);
 const HEAD = 'f'.repeat(40);
@@ -42,7 +43,7 @@ afterEach(() => {
   process.exit = savedExit;
   process.stdout.write = savedOut;
   process.stderr.write = savedErr;
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDir(root);
 });
 
 function fixture(name: string, transcript: string, verdict: unknown): [string, string] {

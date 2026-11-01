@@ -1,8 +1,9 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runDorCheckCli } from './dor-check.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // AISDLC-940: cli-dor-check blocks a completed security-finding task with no PR and no dismissal.
 describe('cli-dor-check security-finding completion rule (AISDLC-940)', () => {
@@ -11,7 +12,7 @@ describe('cli-dor-check security-finding completion rule (AISDLC-940)', () => {
   afterEach(() => {
     process.argv = origArgv;
     vi.restoreAllMocks();
-    if (dir) rmSync(dir, { recursive: true, force: true });
+    if (dir) removeFixtureDir(dir);
   });
 
   it('exits 1 for a completed finding with neither PR nor dismissal', async () => {

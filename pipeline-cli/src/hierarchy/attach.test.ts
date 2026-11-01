@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { attachEntry, hierarchyAttach, insideTmux } from './attach.js';
 import { writeRoster } from './roster.js';
 import type { HierarchyDeps, RosterEntry } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 let calls: string[][];
@@ -66,7 +67,7 @@ beforeEach(() => {
   };
 });
 
-afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(tmp));
 
 describe('insideTmux', () => {
   it('is true only for a non-empty TMUX value', () => {

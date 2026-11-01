@@ -11,6 +11,7 @@ import {
   processCanaryEvents,
 } from './canary.js';
 import { readHold, writeHold } from './hold.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const SHA = 'abcdef0123456789abcdef0123456789abcdef01';
 let board: string;
@@ -20,7 +21,7 @@ beforeEach(() => {
   board = mkdtempSync(path.join(os.tmpdir(), 'canary-'));
   filed = [];
 });
-afterEach(() => rmSync(board, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(board));
 
 function event(
   kind: 'pipeline-canary-red' | 'pipeline-canary-green',

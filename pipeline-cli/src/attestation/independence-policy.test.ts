@@ -17,7 +17,7 @@
  *     two callers, per RFC-0046 §Rollout (OQ-5).
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -30,6 +30,7 @@ import {
   resolveIndependencePolicyPath,
   type IndependenceTier,
 } from './independence-policy.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 describe('INDEPENDENCE_TIER_ORDER — tier ordering', () => {
   it('orders none < attested < isolated', () => {
@@ -52,7 +53,7 @@ describe('loadIndependencePolicy — missing file defaults to none', () => {
   });
 
   afterEach(() => {
-    rmSync(tmpRoot, { recursive: true, force: true });
+    removeFixtureDir(tmpRoot);
   });
 
   it('resolves to requiredTier: none when .ai-sdlc/independence-policy.yaml is absent', () => {
@@ -114,7 +115,7 @@ describe('loadIndependencePolicy — reads the on-disk file', () => {
   });
 
   afterEach(() => {
-    rmSync(tmpRoot, { recursive: true, force: true });
+    removeFixtureDir(tmpRoot);
   });
 
   it('reads requiredTier: attested from .ai-sdlc/independence-policy.yaml', () => {

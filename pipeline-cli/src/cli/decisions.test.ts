@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -14,6 +14,7 @@ import { buildDecisionsCli } from './decisions.js';
 import { readEventLogText, resolveEventLogPath } from '../decisions/event-log.js';
 import type { Decision } from '../decisions/decision-record.js';
 import type { ChainDeps } from '../decisions/escalation-chain.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Test infrastructure ───────────────────────────────────────────────────────
 
@@ -60,7 +61,7 @@ afterEach(() => {
   if (savedFlag === undefined) delete process.env.AI_SDLC_DECISION_CATALOG;
   else process.env.AI_SDLC_DECISION_CATALOG = savedFlag;
 
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
   vi.restoreAllMocks();
 });
 

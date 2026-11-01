@@ -14,7 +14,7 @@
  *  - Best-effort: malformed lines + missing files don't crash.
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -22,6 +22,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ORCHESTRATOR_FLAG } from '../orchestrator/feature-flag.js';
 import { captureEstimate, estimateLogPath, readEstimateLog } from './log-writer.js';
 import type { SignalOutput, StageAResult } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const SIGNALS_XS: SignalOutput[] = [
   {
@@ -62,7 +63,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDir(workdir);
   process.env = savedEnv;
 });
 

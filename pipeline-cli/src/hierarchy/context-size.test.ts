@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -12,6 +12,7 @@ import {
   TAIL_MAX_BYTES,
   transcriptPath,
 } from './context-size.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const bytesRead = vi.hoisted(() => ({ total: 0 }));
 vi.mock('node:fs', async (orig) => {
@@ -34,7 +35,7 @@ function tmp(): string {
   return d;
 }
 afterEach(() => {
-  while (dirs.length) rmSync(dirs.pop() as string, { recursive: true, force: true });
+  while (dirs.length) removeFixtureDir(dirs.pop() as string);
   vi.restoreAllMocks();
 });
 

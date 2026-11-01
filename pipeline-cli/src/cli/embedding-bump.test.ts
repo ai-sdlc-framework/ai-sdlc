@@ -16,7 +16,6 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  rmSync,
   writeFileSync,
   existsSync,
 } from 'node:fs';
@@ -37,6 +36,7 @@ import {
   type ReEmbedFn,
   type VectorStoreEntry,
 } from './embedding-bump.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Fixture helpers ───────────────────────────────────────────────────────────
 
@@ -92,7 +92,7 @@ describe('readJsonlEntries', () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'aisdlc-339-read-'));
   });
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('returns [] when the file does not exist', () => {
@@ -136,7 +136,7 @@ describe('findFromFile', () => {
     embDir = makeEmbeddingsDir(tmpDir);
   });
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('returns null when no file holds the provider', () => {
@@ -199,7 +199,7 @@ describe('estimateMigrationCost', () => {
     embDir = makeEmbeddingsDir(tmpDir);
   });
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('AC#1: returns null when no source file exists', () => {
@@ -266,7 +266,7 @@ describe('executeMigration', () => {
     embDir = makeEmbeddingsDir(tmpDir);
   });
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('AC#11: round-trip — entries from source land on target with same text + textHash', async () => {
@@ -453,7 +453,7 @@ describe('AC#11 mid-migration concurrent reads (true atomicity proof)', () => {
     embDir = makeEmbeddingsDir(tmpDir);
   });
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('concurrent reads of the source path during executeMigration see either complete source contents or post-rename absence', async () => {
@@ -569,7 +569,7 @@ describe('runEmbeddingBumpCli (yargs router coverage)', () => {
   afterEach(() => {
     process.argv = savedArgv;
     process.stdout.write = savedStdout;
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   function setArgv(...args: string[]): void {

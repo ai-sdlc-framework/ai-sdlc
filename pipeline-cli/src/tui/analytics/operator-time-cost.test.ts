@@ -12,7 +12,7 @@
  *   - §7 severity rubric format helper
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -25,6 +25,7 @@ import {
   formatOperatorTimeCostForRubric,
   resolveAfkInactivityMinutes,
 } from './operator-time-cost.js';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 let workdir: string;
 let artifactsDir: string;
@@ -38,7 +39,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDir(workdir);
 });
 
 interface RawEvent {
@@ -100,7 +101,7 @@ describe('classifyActiveCostBucket', () => {
 
 describe('computeOperatorTimeCost', () => {
   it('returns empty metrics when no events.jsonl files exist', () => {
-    rmSync(eventsDir, { recursive: true, force: true });
+    removeFixtureDir(eventsDir);
     const metrics = computeOperatorTimeCost({ artifactsDir });
     expect(metrics.entries).toEqual([]);
     expect(metrics.meanActiveCostMs).toBeNull();

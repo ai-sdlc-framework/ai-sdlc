@@ -1,10 +1,11 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { checkRepoMatch, rosterProject } from './peer-guard.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 describe('checkRepoMatch', () => {
   let tmp: string;
@@ -12,7 +13,7 @@ describe('checkRepoMatch', () => {
     tmp = mkdtempSync(path.join(tmpdir(), 'peer-guard-'));
   });
   afterEach(() => {
-    rmSync(tmp, { recursive: true, force: true });
+    removeFixtureDir(tmp);
   });
 
   const board = (root: string) => path.join(root, '.ai-sdlc', 'dispatch');

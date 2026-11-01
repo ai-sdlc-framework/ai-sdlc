@@ -10,17 +10,17 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProbeSpawner } from '../review-plan/executor.js';
 import { buildStagedReviewCli } from './staged-review.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const roots: string[] = [];
 afterAll(() => {
-  for (const r of roots) rmSync(r, { recursive: true, force: true });
+  for (const r of roots) removeFixtureDir(r);
 });
 
 const TASK = 'AISDLC-676';

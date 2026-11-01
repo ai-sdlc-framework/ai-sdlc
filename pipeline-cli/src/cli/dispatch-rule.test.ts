@@ -1,10 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runDispatchCli } from './dispatch.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let boardDir: string;
 let stdout: string;
@@ -24,7 +25,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
-  rmSync(path.dirname(boardDir), { recursive: true, force: true });
+  removeFixtureDir(path.dirname(boardDir));
 });
 
 describe('cli-dispatch rule (AISDLC-903)', () => {

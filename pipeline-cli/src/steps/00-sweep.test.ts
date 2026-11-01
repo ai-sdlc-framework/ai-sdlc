@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { sweepMergedWorktrees, listPrStatesByBranch, SWEEP_CACHE_FILE } from './00-sweep.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
 import { FakeRunner, ok, fail as fakeRunnerFail } from '../__test-helpers/fake-runner.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 
@@ -246,8 +247,7 @@ describe('Step 0 — batched query and landed cache (AISDLC-958)', () => {
       'ai-sdlc/keep',
     ]);
     // Operator removes the 'gone' worktree directory.
-    const { rmSync } = await import('node:fs');
-    rmSync(join(tmp, '.worktrees', 'gone'), { recursive: true });
+    removeFixtureDir(join(tmp, '.worktrees', 'gone'));
     await sweepMergedWorktrees({ workDir: tmp, runner: wtRunner(prs).toRunner() });
     expect(Object.keys(JSON.parse(readFileSync(cachePath(), 'utf8')))).toEqual(['ai-sdlc/keep']);
   });

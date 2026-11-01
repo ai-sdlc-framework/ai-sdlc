@@ -25,6 +25,7 @@ import type { DispatchManifest } from '../index.js';
 
 import { renderBriefBlock } from '../hierarchy/index.js';
 import { approvalEnvelopeMatches, parseArgv, runDispatchCli } from './dispatch.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 describe('parseArgv', () => {
   it('parses subcommand + key/value flag pairs', () => {
@@ -115,7 +116,7 @@ describe('runDispatchCli', () => {
   });
   afterEach(() => {
     try {
-      rmSync(path.dirname(boardDir), { recursive: true, force: true });
+      removeFixtureDir(path.dirname(boardDir));
     } catch {
       /* ignore */
     }
@@ -1111,7 +1112,7 @@ spec:
       expect(exit).toBe(1);
       const result = readLastJson(captured) as { maxSessions: number };
       expect(result.maxSessions).toBe(2);
-      rmSync(workDir, { recursive: true, force: true });
+      removeFixtureDir(workDir);
     });
 
     it('falls back to default cap=4 when yaml is missing AND --max-sessions not passed', async () => {
@@ -1177,7 +1178,7 @@ spec:
       expect(exit).toBe(1);
       const result = readLastJson(captured) as { maxSessions: number };
       expect(result.maxSessions).toBe(1);
-      rmSync(workDir, { recursive: true, force: true });
+      removeFixtureDir(workDir);
     });
 
     it('help mentions Pattern X subcommands', async () => {
@@ -1205,7 +1206,7 @@ spec:
     });
 
     afterEach(() => {
-      rmSync(path.dirname(board), { recursive: true, force: true });
+      removeFixtureDir(path.dirname(board));
     });
 
     const blocked = JSON.stringify([
@@ -1384,7 +1385,7 @@ describe('runDispatchCli ordering commands', () => {
       writeFileSync(path.join(root, 'backlog', 'tasks', `${id} - x.md`), '');
     }
   });
-  afterEach(() => rmSync(root, { recursive: true, force: true }));
+  afterEach(() => removeFixtureDir(root));
 
   const base = () => ['--board-dir', boardDir, '--work-dir', root, '--base-sha', 'abc1234'];
 
@@ -2144,7 +2145,7 @@ describe('reenter --developer-round resumePath (AISDLC-1053)', () => {
     claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-a' });
     completeTask(board, { taskId: TASK, outcome: 'failed', workerId: 'exec-a', prNumber: 7 });
   });
-  afterEach(() => rmSync(root, { recursive: true, force: true }));
+  afterEach(() => removeFixtureDir(root));
 
   const run = async (extra: string[]): Promise<Record<string, unknown>> => {
     const { exit, captured } = await captureStdout(() =>

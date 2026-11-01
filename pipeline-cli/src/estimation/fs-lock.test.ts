@@ -7,12 +7,13 @@
  * Phase-5 hardening AC.
  */
 
-import { closeSync, existsSync, mkdtempSync, openSync, rmSync, utimesSync } from 'node:fs';
+import { closeSync, existsSync, mkdtempSync, openSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { acquireFileLock, withFileLock } from './fs-lock.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let workdir: string;
 
@@ -21,7 +22,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDir(workdir);
 });
 
 describe('acquireFileLock', () => {

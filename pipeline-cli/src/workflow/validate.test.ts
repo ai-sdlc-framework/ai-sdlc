@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { renderGraph } from '../cli/workflow.js';
 import { buildExecuteGraph, renderYaml } from './graph.js';
 import { validateWorkflowDocument, validateWorkflowYaml, whenIdentifiers } from './validate.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const golden = readFileSync(
@@ -99,7 +100,7 @@ describe('cli-workflow validate', () => {
       }
       expect(JSON.parse(out).state).toBe('missing');
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 });

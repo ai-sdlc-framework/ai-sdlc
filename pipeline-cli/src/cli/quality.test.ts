@@ -6,7 +6,7 @@
  * config-fallback resolution + the error paths the operator will see.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -19,6 +19,7 @@ import {
 } from '../tui/analytics/quality-reader.js';
 import type { FrameworkBugCaptureRecord } from '../tui/analytics/quality-classifier.js';
 import { buildCaptureId } from '../tui/analytics/upstream-reporter.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let workdir: string;
 let artifactsDir: string;
@@ -77,7 +78,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDir(workdir);
 });
 
 describe('runReportUpstream', () => {

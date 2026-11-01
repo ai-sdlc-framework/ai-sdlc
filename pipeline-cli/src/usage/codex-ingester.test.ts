@@ -1,12 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  appendFileSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,6 +13,7 @@ import {
 import { selectByRepo } from './repo-id.js';
 import { attributeCodexSession } from './codex-attribution.js';
 import { formatCodexIngestSummary } from '../cli/usage.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let root: string;
 let sessions: string;
@@ -67,7 +61,7 @@ beforeEach(() => {
   usage = join(root, 'usage');
   mkdirSync(sessions, { recursive: true });
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(root));
 
 function frameworkRepo(): string {
   const repo = join(root, 'myrepo');

@@ -3,13 +3,14 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DOR_BYPASS_LABEL, handleBypassLabel } from './bypass.js';
 import { resolveCalibrationLogPath } from './calibration-log.js';
 import { DOR_CONFIG_DEFAULTS } from './dor-config.js';
 import type { RefinementVerdict } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 
@@ -18,7 +19,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (tmp) rmSync(tmp, { recursive: true, force: true });
+  if (tmp) removeFixtureDir(tmp);
 });
 
 function failingVerdict(): RefinementVerdict {

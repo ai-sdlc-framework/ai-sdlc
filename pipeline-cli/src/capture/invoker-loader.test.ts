@@ -4,11 +4,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { loadConfiguredInvoker, resetInvokerCache } from './invoker-loader.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const ORIGINAL_ENV = process.env.AI_SDLC_CLASSIFIER_INVOKER_MODULE;
 let tmpRoot = '';
@@ -19,7 +20,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmpRoot, { recursive: true, force: true });
+  removeFixtureDir(tmpRoot);
   if (ORIGINAL_ENV === undefined) {
     delete process.env.AI_SDLC_CLASSIFIER_INVOKER_MODULE;
   } else {

@@ -8,12 +8,13 @@
  *      stubbed (pattern from cli/capture.test.ts).
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { LifecycleTickResult } from '../capture/capture-lifecycle.js';
 import { renderTickResult, buildCaptureLifecycleCli } from './capture-lifecycle.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function emptyResult(): LifecycleTickResult {
   return {
@@ -187,7 +188,7 @@ describe('buildCaptureLifecycleCli — yargs integration', () => {
     else process.env.AI_SDLC_EMERGENT_CAPTURE = savedEnvCapture;
     if (savedEnvRepoRoot === undefined) delete process.env.CAPTURE_REPO_ROOT;
     else process.env.CAPTURE_REPO_ROOT = savedEnvRepoRoot;
-    rmSync(tmp, { recursive: true, force: true });
+    removeFixtureDir(tmp);
   });
 
   it('refuses every subcommand that requires the feature flag when it is unset', async () => {

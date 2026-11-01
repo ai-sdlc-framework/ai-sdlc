@@ -9,7 +9,6 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
-  rmSync,
   statSync,
   symlinkSync,
   utimesSync,
@@ -70,6 +69,7 @@ import {
 import { isValidTaskId } from './replay-corpus.js';
 import { deriveUnitWeights } from './units.js';
 import { defaultUsageConfig } from './usage-config.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 vi.setConfig({ testTimeout: 60_000 });
 
@@ -86,7 +86,6 @@ const GIT_ENV = {
   GIT_CONFIG_KEY_1: 'maintenance.auto',
   GIT_CONFIG_VALUE_1: 'false',
 };
-const RM_OPTS = { recursive: true, force: true, maxRetries: 5, retryDelay: 50 } as const;
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, env: GIT_ENV, encoding: 'utf8' }).trim();
 }
@@ -192,7 +191,7 @@ function reportHolders(dir: string): void {
 afterEach(() => {
   for (const d of [repo, artifacts, usageDir, tmpRoot]) {
     try {
-      rmSync(d, RM_OPTS);
+      removeFixtureDir(d);
     } catch (err) {
       reportHolders(d);
       throw err;
@@ -1455,7 +1454,7 @@ describe('isUnderAiSdlc', () => {
       expect(isUnderAiSdlc(join(root, '.AI-SDLC', 'y.json'), root, 'darwin')).toBe(true);
       expect(isUnderAiSdlc(join(root, '.AI-SDLC', 'y.json'), root, 'linux')).toBe(false);
     } finally {
-      rmSync(root, RM_OPTS);
+      removeFixtureDir(root);
     }
   });
 });
@@ -1839,9 +1838,9 @@ describe('commit-supplied Claude Code config never reaches the session', () => {
       // The links were removed, never their targets.
       expect(readFileSync(join(outside, 'secret.md'), 'utf8')).toBe('do not delete');
       expect(lstatSync(join(dir, 'linked-claude')).isSymbolicLink()).toBe(true);
-      rmSync(outside, RM_OPTS);
+      removeFixtureDir(outside);
     } finally {
-      rmSync(dir, RM_OPTS);
+      removeFixtureDir(dir);
     }
   });
 
@@ -1903,7 +1902,7 @@ describe('commit-supplied Claude Code config never reaches the session', () => {
         { tmpRoot },
       );
     } finally {
-      rmSync(outside, RM_OPTS);
+      removeFixtureDir(outside);
     }
   });
 });
@@ -1916,7 +1915,7 @@ describe('commit-supplied config under case and compatibility variants', () => {
       writeFileSync(join(d, a), '');
       return !existsSync(join(d, b));
     } finally {
-      rmSync(d, RM_OPTS);
+      removeFixtureDir(d);
     }
   }
 
@@ -1956,7 +1955,7 @@ describe('commit-supplied config under case and compatibility variants', () => {
       removeCommitClaudeConfig(dir);
       expect(listing(dir)).toEqual(['src', 'src/keep.ts', 'sub'].sort());
     } finally {
-      rmSync(dir, RM_OPTS);
+      removeFixtureDir(dir);
     }
   });
 
@@ -2066,7 +2065,7 @@ describe('sandbox environment', () => {
       expect(env).not.toHaveProperty('B');
       expect(env.KEEP).toBe('ok');
     } finally {
-      rmSync(base, RM_OPTS);
+      removeFixtureDir(base);
     }
   });
 
@@ -2103,7 +2102,7 @@ describe('HFS+-ignorable code points and the per-user clone root', () => {
       expect(removeCommitClaudeConfig(dir)).toBe(names.length);
       expect(readdirSync(dir)).toEqual(['keep.ts']);
     } finally {
-      rmSync(dir, RM_OPTS);
+      removeFixtureDir(dir);
     }
   });
 
@@ -2181,7 +2180,7 @@ await withReplayClone(createGit(), ${JSON.stringify(repo)}, async (checkout) => 
         expect(alive).toBe(false);
       } finally {
         proc.kill('SIGKILL');
-        rmSync(root, RM_OPTS);
+        removeFixtureDir(root);
       }
     },
     60_000,
@@ -2442,7 +2441,7 @@ describe('in-process signal handling and default root', () => {
       expect(statSync(root).mode & 0o777).toBe(0o700);
       expect(() => ensureDefaultRoot(tmpdir())).not.toThrow();
     } finally {
-      rmSync(base, { recursive: true, force: true });
+      removeFixtureDir(base);
     }
   });
 });

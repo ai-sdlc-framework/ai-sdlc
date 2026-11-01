@@ -12,6 +12,7 @@ import { readLedger } from './retrieval/ledger.js';
 import { queryIndex, rebuildIndex, recordHarnessRecall } from './retrieval/service.js';
 import { checkKnowledgeScope } from './scope-check.js';
 import { findProtectedCitations, validateKnowledge } from './store.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let dir: string;
 let mem: string;
@@ -44,7 +45,7 @@ beforeEach(() => {
   note('reference_y.md', 'reference');
   writeFileSync(join(mem, 'MEMORY.md'), '- [a](user_role.md) — a\n');
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(dir));
 
 describe('ingestMemoryForProject', () => {
   it('turns every note into a protected memory entry cited to the note file', () => {

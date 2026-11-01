@@ -15,7 +15,7 @@
  *  - AC#10: hermetic tests for every new event type + aggregator phase math.
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -33,6 +33,7 @@ import {
   runOrchestratorTick,
   type OrchestratorAdapters,
 } from './index.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let workdir: string;
 
@@ -41,7 +42,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDir(workdir);
 });
 
 // ── AC#1: durationMs wired ────────────────────────────────────────────

@@ -21,7 +21,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -42,6 +42,7 @@ import {
 
 import { _ucvgSeams } from '../cli/ucvg.js';
 import { InferenceProxyClient } from './reviewer-runner.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -200,7 +201,7 @@ describe('AQ2-6: runSandbox — sandboxEnv and proxyHostArgs passthrough', () =>
         sandboxEnv: proxyEnv,
       });
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
 
     // The sandbox env MUST have reached the driver
@@ -235,7 +236,7 @@ describe('AQ2-6: runSandbox — sandboxEnv and proxyHostArgs passthrough', () =>
         proxyHostArgs,
       });
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
 
     expect(capturedExtraArgs).toBeDefined();
@@ -266,7 +267,7 @@ describe('AQ2-6: runSandbox — sandboxEnv and proxyHostArgs passthrough', () =>
         // sandboxEnv NOT provided
       });
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
 
     expect(capturedEnv).toBeUndefined();

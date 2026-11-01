@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -14,6 +14,7 @@ import {
   priceFor,
 } from './audit.js';
 import { buildUsageCli } from '../cli/usage.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const TS = '2026-10-09T10:00:00Z';
 const user = (text: string): string =>
@@ -217,7 +218,7 @@ describe('listTranscripts', () => {
       expect(byName['s1.jsonl'].project).toBe('foo');
       expect(listTranscripts(join(root, 'missing'), 0)).toEqual([]);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeFixtureDir(root);
     }
   });
 

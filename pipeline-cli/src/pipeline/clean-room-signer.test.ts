@@ -33,6 +33,7 @@ import {
   SANDBOX_ARTIFACT_SENTINELS,
 } from './clean-room-signer.js';
 import type { UntrustedPrReport } from './report-validator.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -77,7 +78,7 @@ describe('detectSandboxArtifacts (AC#8)', () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('returns null when no sentinel files are present', () => {
@@ -118,7 +119,7 @@ describe('runCleanRoomSigner — isolation invariant enforcement (AC#8)', () => 
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('fails with phase:isolation-check when sandbox sentinel is present', () => {
@@ -173,7 +174,7 @@ describe('runCleanRoomSigner — artifact read failures', () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('fails with phase:artifact-read when report file does not exist', () => {
@@ -219,7 +220,7 @@ describe('runCleanRoomSigner — Zod validation BEFORE key resolution (AC#5)', (
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('fails with phase:zod-validation for a tampered report', () => {
@@ -310,7 +311,7 @@ describe('runCleanRoomSigner — key resolution (AC#5 order)', () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
     if (origSigningKeyPath !== undefined) {
       process.env['AISDLC_SIGNING_KEY_PATH'] = origSigningKeyPath;
     } else {
@@ -351,7 +352,7 @@ describe('runCleanRoomSigner — v6 envelope generation (AC#7)', () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
     if (origSigningKeyPath !== undefined) {
       process.env['AISDLC_SIGNING_KEY_PATH'] = origSigningKeyPath;
     } else {
@@ -437,7 +438,7 @@ describe('runCleanRoomSigner — readFileSync TOCTOU guard (finding #4)', () => 
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
     if (origSigningKeyPath !== undefined) {
       process.env['AISDLC_SIGNING_KEY_PATH'] = origSigningKeyPath;
     } else {
@@ -540,7 +541,7 @@ describe('runCleanRoomSigner — headSha cross-check (finding #6)', () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
     if (origSigningKeyPath !== undefined) {
       process.env['AISDLC_SIGNING_KEY_PATH'] = origSigningKeyPath;
     } else {
@@ -599,7 +600,7 @@ describe('runCleanRoomSigner — signing phase failure with wrong-algorithm key 
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
     if (origSigningKeyPath !== undefined) {
       process.env['AISDLC_SIGNING_KEY_PATH'] = origSigningKeyPath;
     } else {
@@ -676,7 +677,7 @@ describe('runCleanRoomSigner — v6 verifier integration (finding #2)', () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
     if (origSigningKeyPath !== undefined) {
       process.env['AISDLC_SIGNING_KEY_PATH'] = origSigningKeyPath;
     } else {
@@ -815,7 +816,7 @@ describe('runCleanRoomSigner — approval gate (CRITICAL fix #4)', () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
     if (origSigningKeyPath !== undefined) {
       process.env['AISDLC_SIGNING_KEY_PATH'] = origSigningKeyPath;
     } else {
@@ -960,7 +961,7 @@ describe('runCleanRoomSigner — transcript leaf emission (AISDLC-522 AC-3)', ()
     } else {
       process.env['AISDLC_SIGNING_KEY_PATH'] = origSigningKeyPath;
     }
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('writes transcript-leaves.jsonl with 3 leaves (one per reviewer) before signing attempt', () => {
@@ -1013,7 +1014,7 @@ describe('runCleanRoomSigner — transcript leaf emission (AISDLC-522 AC-3)', ()
         .filter((l) => l.trim().length > 0)
         .map((l) => (JSON.parse(l) as Record<string, unknown>)['model']);
     const run = (): void => {
-      rmSync(join(tmpDir, '.ai-sdlc'), { recursive: true, force: true });
+      removeFixtureDir(join(tmpDir, '.ai-sdlc'));
       runCleanRoomSigner({
         reportArtifactPath: reportPath,
         repoRoot: tmpDir,
@@ -1160,7 +1161,7 @@ describe('runCleanRoomSigner — RFC-0047 Phase 4 (AISDLC-596): ci-only key + in
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
     if (origSigningKeyPath !== undefined) {
       process.env['AISDLC_SIGNING_KEY_PATH'] = origSigningKeyPath;
     } else {

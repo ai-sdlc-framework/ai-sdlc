@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -9,6 +9,7 @@ import {
   isAttestationChorePath,
   isAttestationChoreSubject,
 } from './drop-chores.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let dir: string;
 const g = (...args: string[]): string =>
@@ -31,7 +32,7 @@ beforeEach(() => {
   g('update-ref', 'refs/remotes/origin/main', 'HEAD');
   g('checkout', '-q', '-b', 'ai-sdlc/aisdlc-1-x');
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(dir));
 
 describe('identification rule', () => {
   it('matches the two chore subjects only', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,6 +19,7 @@ import {
   renderOperatorDigestMarkdown,
   runOperatorDigest,
 } from './operator-digest.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const opened = (id: string, extra: Record<string, unknown> = {}): DecisionEvent =>
   ({
@@ -156,7 +157,7 @@ describe('runOperatorDigest', () => {
       ).toHaveLength(1);
       expect(() => runOperatorDigest({ workDir: dir, since: 'nope' })).toThrow(/ISO timestamp/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 
@@ -173,7 +174,7 @@ describe('runOperatorDigest', () => {
       );
       expect(runOperatorDigest({ workDir: dir }).defaultTimeboxHours).toBe(12);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 
@@ -192,7 +193,7 @@ describe('runOperatorDigest', () => {
       writeFileSync(marker, 'not json');
       expect(runOperatorDigest({ workDir: dir, now: t1 }).answered).toHaveLength(1);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 
@@ -202,7 +203,7 @@ describe('runOperatorDigest', () => {
       runOperatorDigest({ workDir: dir, mark: true });
       expect(existsSync(join(resolveDecisionsDir(dir), 'last-digest.json'))).toBe(true);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 });
@@ -273,7 +274,7 @@ describe('digest flags and marker safety', () => {
       const now = new Date('2026-10-05T00:00:00Z');
       expect(runOperatorDigest({ workDir: dir, now }).since).toBe('2026-10-04T00:00:00.000Z');
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 });
@@ -356,7 +357,7 @@ describe('gitProvenanceResolver', () => {
     try {
       expect(gitProvenanceResolver(dir)('DEC-0001')).toBeNull();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 });
@@ -387,7 +388,7 @@ describe('gitProvenanceResolver in a real repo', () => {
       expect(gitProvenanceResolver(dir, 'HEAD')('DEC-0002')?.pr).toBeNull();
       expect(gitProvenanceResolver(dir, 'HEAD')('DEC-0009')).toBeNull();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 });
@@ -431,7 +432,7 @@ describe('governance config changes in the digest (AISDLC-720.1)', () => {
       expect(md).not.toContain('PR #42');
       expect(md).not.toContain('PR #44');
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 });
@@ -468,7 +469,7 @@ describe('PRs needing a human section (AISDLC-888)', () => {
       expect(runOperatorDigest({ ...common, humanPrs: () => [row] }).humanPrs).toEqual([row]);
       expect(runOperatorDigest({ ...common, humanPrs: () => [] }).humanPrs).toBeUndefined();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 });
@@ -495,7 +496,7 @@ describe('spend block (AISDLC-885)', () => {
       const next = runOperatorDigest({ ...opts, now: new Date(t1.getTime() + 1000) });
       expect(next.spend).toEqual([]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 });

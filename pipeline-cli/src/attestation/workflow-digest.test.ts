@@ -7,7 +7,7 @@
  */
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,6 +22,7 @@ import {
 } from '../workflow/digest.js';
 import { appendLeafForPatchId, type TranscriptLeaf } from './merkle.js';
 import { signAndWriteV6Envelope } from './sign-v6.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..', '..');
@@ -51,7 +52,7 @@ beforeEach(() => {
   git(tmp, 'commit', '-q', '-m', 'work');
   headSha = git(tmp, 'rev-parse', 'HEAD');
 });
-afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(tmp));
 
 const good = (): { path: string; sha256: string; baseSha: string } => ({
   path: WORKFLOW_PATH,

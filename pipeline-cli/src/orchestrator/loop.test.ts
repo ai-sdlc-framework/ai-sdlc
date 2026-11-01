@@ -14,7 +14,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -30,6 +30,7 @@ import {
 } from './index.js';
 import type { EscalationRecord } from './types.js';
 import type { PipelineResult, PipelineLogger } from '../types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -82,7 +83,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(_hermeticArtifactsDir, { recursive: true, force: true });
+  removeFixtureDir(_hermeticArtifactsDir);
 });
 
 function hermeticFilterAdapters(): Pick<

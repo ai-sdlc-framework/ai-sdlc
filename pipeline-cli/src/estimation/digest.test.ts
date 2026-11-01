@@ -8,7 +8,7 @@
  *  - Q6 calibration state token formatter (DigestCalibrationState).
  */
 
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -22,6 +22,7 @@ import {
 } from './digest.js';
 import type { CalibrationRecord } from './calibration-writer.js';
 import type { EstimateLogRecord } from './log-writer.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -91,7 +92,7 @@ beforeEach(() => {
 
 afterEach(() => {
   try {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   } catch {
     // ignore
   }

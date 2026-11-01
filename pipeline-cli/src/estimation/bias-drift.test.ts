@@ -10,13 +10,14 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { detectBiasDrift } from './bias-drift.js';
 import type { CalibrationRecord } from './calibration-writer.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -58,7 +59,7 @@ beforeEach(() => {
 
 afterEach(() => {
   try {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   } catch {
     // ignore
   }

@@ -1,6 +1,6 @@
 /** Ephemeral executors in the dispatch tick (RFC-0059, AISDLC-1074). */
 
-import { mkdirSync, mkdtempSync, renameSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -13,6 +13,7 @@ import { readLoopState, runDispatchTick, type LoopDeps } from './dispatch-loop.j
 import { readRosterChecked, writeRoster } from './roster.js';
 import type { RosterEntry } from './types.js';
 import { spawnedExecutorName } from './validate.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const MIN = 60_000;
 let tmp: string;
@@ -105,7 +106,7 @@ beforeEach(() => {
   downs = [];
   spawns = [];
 });
-afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(tmp));
 
 describe('ephemeral executors in the tick', () => {
   it('downs the executor of a verdict recorded this tick and removes its roster entry', async () => {

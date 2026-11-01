@@ -12,10 +12,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { runStageACorpus, loadCorpus } from './corpus.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // Project root — pipeline-cli sits two levels under it (`<root>/pipeline-cli/`).
 const REPO_ROOT = resolve(__dirname, '../../..');
@@ -99,7 +100,7 @@ beforeAll(() => {
 afterAll(() => {
   if (stubRoot) {
     try {
-      rmSync(stubRoot, { recursive: true, force: true });
+      removeFixtureDir(stubRoot);
     } catch {
       // ignore
     }

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -10,11 +10,12 @@ import {
   THREE_REVIEWER_SET,
   CODE_TEST_MERGED_REVIEWER_SET,
 } from './reviewer-set.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 describe('resolveReviewerSetMode (AISDLC-617)', () => {
   const dirs: string[] = [];
   afterEach(() => {
-    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+    for (const d of dirs.splice(0)) removeFixtureDir(d);
   });
 
   function makeWorkDir(): string {
@@ -162,7 +163,7 @@ describe('readReviewConfigFromBaseRef (real git show)', () => {
     try {
       expect(readReviewConfigFromBaseRef(workDir, 'origin/main')).toBeNull();
     } finally {
-      rmSync(workDir, { recursive: true, force: true });
+      removeFixtureDir(workDir);
     }
   });
 
@@ -198,7 +199,7 @@ describe('resolveReviewerSet (AISDLC-617 AC-1)', () => {
       expect(set).toEqual([...THREE_REVIEWER_SET]);
       expect(set).toHaveLength(3);
     } finally {
-      rmSync(workDir, { recursive: true, force: true });
+      removeFixtureDir(workDir);
     }
   });
 
@@ -217,7 +218,7 @@ describe('resolveReviewerSet (AISDLC-617 AC-1)', () => {
       // AC-3: security reviewer path unchanged — same name in both sets.
       expect(THREE_REVIEWER_SET).toContain('security-reviewer');
     } finally {
-      rmSync(workDir, { recursive: true, force: true });
+      removeFixtureDir(workDir);
     }
   });
 });

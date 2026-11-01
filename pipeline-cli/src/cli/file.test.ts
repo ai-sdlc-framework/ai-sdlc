@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -24,6 +24,7 @@ import {
   taskIdOf,
   type FileDeps,
 } from './file.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const sh = (cwd: string, ...args: string[]) =>
   execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -88,7 +89,7 @@ describe('cli-file', () => {
     };
   });
 
-  afterEach(() => rmSync(root, { recursive: true, force: true }));
+  afterEach(() => removeFixtureDir(root));
 
   const writeTask = (name = 'aisdlc-900 - thing.md') => {
     mkdirSync(join(repo, 'backlog/tasks'), { recursive: true });
@@ -335,7 +336,7 @@ describe('cli-file', () => {
     expect(r.prUrl).toBe('https://github.com/o/r/pull/1');
     expect(sh(remote, 'show', `${r.branch}:backlog/tasks/aisdlc-931 - ext.md`)).toContain('body');
     expect(sh(repo, 'status', '--porcelain', '--', 'backlog')).toBe('');
-    rmSync(dir, { recursive: true, force: true });
+    removeFixtureDir(dir);
   });
 
   it('AISDLC-931: refuses an external source whose basename exists on main, naming the path', () => {
@@ -346,7 +347,7 @@ describe('cli-file', () => {
     expect(() => fileTask(repo, src, { pr: true }, deps)).toThrow(
       /backlog\/completed\/aisdlc-931 - ext\.md/,
     );
-    rmSync(dir, { recursive: true, force: true });
+    removeFixtureDir(dir);
   });
 
   it('AISDLC-931: refuses a non-.md source', () => {
@@ -354,7 +355,7 @@ describe('cli-file', () => {
     const src = join(dir, 'aisdlc-931 - ext.txt');
     writeFileSync(src, 'x');
     expect(() => fileTask(repo, src, { pr: true }, deps)).toThrow(/\.md/);
-    rmSync(dir, { recursive: true, force: true });
+    removeFixtureDir(dir);
   });
 
   it('AISDLC-931: still refuses a missing external source', () => {

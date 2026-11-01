@@ -4,7 +4,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -29,6 +29,7 @@ import {
   selectRelevantExemplars,
   shortlistDuplicates,
 } from './judged.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function mk(id: string, summary: string, over: Partial<Decision['spec']> = {}): Decision {
   return {
@@ -348,7 +349,7 @@ describe('Stage B signals', () => {
       tmp = mkdtempSync(join(tmpdir(), 'stage-b-signals-'));
       mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
     });
-    afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+    afterEach(() => removeFixtureDir(tmp));
 
     const seeded = `exemplars:
   - id: ex-1

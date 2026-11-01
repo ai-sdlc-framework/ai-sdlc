@@ -3,7 +3,7 @@
  * and the clear-and-resume contract. A temp repository holds the board; no session runs.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -21,6 +21,7 @@ import {
 } from './handoff.js';
 import { writeRoster } from './roster.js';
 import type { RosterEntry } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let repo: string;
 let board: string;
@@ -66,7 +67,7 @@ beforeEach(() => {
   writeManifest(board, manifest('AISDLC-1'));
 });
 
-afterEach(() => rmSync(repo, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(repo));
 
 describe('handoff write', () => {
   it('writes the dispatch handoff under the board from board state', () => {
@@ -207,7 +208,7 @@ describe('handoff bounded view and marker placement (AISDLC-889)', () => {
     const fmEnd = r.content.indexOf('---\n', 4) + 4;
     expect(r.content.indexOf(HANDOFF_BEGIN)).toBe(fmEnd);
     expect(r.content.endsWith('some notes\n')).toBe(true);
-    rmSync(dir, { recursive: true, force: true });
+    removeFixtureDir(dir);
   });
 });
 
@@ -268,7 +269,7 @@ describe('handoff archive of older notes (AISDLC-933)', () => {
     expect(again.archivedBlocks).toBe(0);
     expect(readFileSync(file, 'utf-8')).toBe(live);
     expect(readFileSync(archive, 'utf-8')).toBe(arch);
-    rmSync(dir, { recursive: true, force: true });
+    removeFixtureDir(dir);
   });
 
   it('--no-archive writes the block only', () => {
@@ -279,6 +280,6 @@ describe('handoff archive of older notes (AISDLC-933)', () => {
     expect(readFileSync(file, 'utf-8').match(/## RESUME HERE/g)).toHaveLength(3);
     expect(existsSync(archive)).toBe(false);
     expect(before).toContain('loose prose');
-    rmSync(dir, { recursive: true, force: true });
+    removeFixtureDir(dir);
   });
 });

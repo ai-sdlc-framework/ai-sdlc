@@ -15,6 +15,7 @@ import {
   writeClearStamp,
 } from './loop-canary.js';
 import { runLoopCanaryCommand } from './loop-canary-run.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let root: string;
 let board: string;
@@ -28,7 +29,7 @@ beforeEach(() => {
   mkdirSync(board, { recursive: true });
   clock = Date.parse('2026-10-28T10:00:00Z');
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(root));
 
 function start() {
   return startCanaryRun({

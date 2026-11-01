@@ -6,7 +6,6 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -26,6 +25,7 @@ import {
 } from '../hierarchy/index.js';
 import { writeVerdict } from '../dispatch/board.js';
 import { defaultHierarchyDeps, firstPositional, runHierarchyCli } from './hierarchy.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 let logs: string[];
@@ -58,7 +58,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
   vi.restoreAllMocks();
 });
 
@@ -709,7 +709,7 @@ describe('clear, tick and route-decision', () => {
 
     it('an empty board answers nextWakeSec 1800', async () => {
       seedBoardWithBrief();
-      rmSync(path.join(tmp, 'dispatch', 'briefs'), { recursive: true, force: true });
+      removeFixtureDir(path.join(tmp, 'dispatch', 'briefs'));
       vi.spyOn(process.stderr, 'write').mockReturnValue(true);
       const code = await runHierarchyCli(
         ['tick', '--worker', 'operator-dispatch', '--work-dir', tmp],

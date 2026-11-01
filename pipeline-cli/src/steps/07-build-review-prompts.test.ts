@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, writeFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, writeFileSync, mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,6 +18,7 @@ import {
   resolveJudgmentConfig,
   type EvaluateJudgmentContext,
 } from '@ai-sdlc/reference';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 let savedArts: string | undefined;
@@ -462,7 +463,7 @@ describe('Step 7 — buildReviewPrompts', () => {
       expect(r.diff).toContain('+two changed');
       expect(r.changedFiles).toEqual(['a.txt']);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -804,7 +805,7 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
       expect(r.diff).not.toMatch(/Binary files/);
       expect(r.changedFiles).toEqual(['a.txt']);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
   it('parses numstat binary rows and stubs NUL sections', () => {
@@ -915,7 +916,7 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
       expect(r.diff).toContain('Binary files a/blob.dat and b/blob.dat differ');
       for (const p of r.prompts) expect(p.prompt).not.toContain('\u0000');
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 
@@ -950,7 +951,7 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
         'security-reviewer',
       ]);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeFixtureDir(repo);
     }
   });
 });
@@ -1004,7 +1005,7 @@ describe('Step 7 — artifacts dir anchoring (AISDLC-654.2)', () => {
       ).toBe(true);
       expect(existsSync(join(wt, '.ai-sdlc', 'artifacts'))).toBe(false);
     } finally {
-      rmSync(parent, { recursive: true, force: true });
+      removeFixtureDir(parent);
     }
   });
 
@@ -1025,7 +1026,7 @@ describe('Step 7 — artifacts dir anchoring (AISDLC-654.2)', () => {
       expect(existsSync(join(elsewhere, '_routing', 'assignments.jsonl'))).toBe(true);
       expect(existsSync(join(parent, '.ai-sdlc', 'artifacts'))).toBe(false);
     } finally {
-      rmSync(parent, { recursive: true, force: true });
+      removeFixtureDir(parent);
     }
   });
 });

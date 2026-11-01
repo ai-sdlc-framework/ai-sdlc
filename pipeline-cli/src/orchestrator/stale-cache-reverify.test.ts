@@ -11,7 +11,7 @@
  *   - persistence round-trip + corrupt-file resilience
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -33,6 +33,7 @@ import {
   type BlockedPrSignature,
   type PassiveTickState,
 } from './stale-cache-reverify.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const PR_A: BlockedPrSignature = {
   prNumber: '4321',
@@ -299,7 +300,7 @@ describe('persistence round-trip', () => {
   });
 
   afterEach(() => {
-    rmSync(boardDir, { recursive: true, force: true });
+    removeFixtureDir(boardDir);
   });
 
   it('reads back what it writes', () => {

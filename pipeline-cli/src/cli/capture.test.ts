@@ -11,7 +11,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -29,6 +29,7 @@ import { renderRubricTable, getRubricEntry } from '../capture/triage-rubric.js';
 import { loadCaptures } from '../capture/capture-reader.js';
 import type { CaptureRecord } from '../capture/capture-record.js';
 import { generateCaptureId } from '../capture/capture-record.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Test infrastructure ───────────────────────────────────────────────────────
 
@@ -119,7 +120,7 @@ afterEach(() => {
     process.env.CAPTURE_REPO_ROOT = savedEnvRepoRoot;
   }
 
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
   setStdinReaderForTesting(null);
   setPrDetectorForTesting(null);
   setOperatorResolverForTesting(null);

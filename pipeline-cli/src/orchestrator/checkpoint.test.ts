@@ -14,7 +14,7 @@
  */
 
 import { execSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -28,6 +28,7 @@ import {
   worktreePath,
 } from './checkpoint.js';
 import { makeGitEnv } from '../__test-helpers/git-env.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 //
@@ -106,7 +107,7 @@ function makeGitRepoWithOrigin(): { repoDir: string; originDir: string } {
 afterEach(() => {
   for (const d of tmpDirs) {
     try {
-      rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+      removeFixtureDir(d);
     } catch {
       /* ignore cleanup errors */
     }

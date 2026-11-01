@@ -3,7 +3,7 @@
  * nothing written. The well-formed path is covered in executor-loop.test.ts.
  */
 
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -12,12 +12,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { claimNext, collectVerdicts, readInflightManifest, writeManifest } from './board.js';
 import { completeLandedIterateNeeded, completeTask } from './complete.js';
 import type { DispatchManifest } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let board: string;
 beforeEach(() => {
   board = mkdtempSync(path.join(tmpdir(), 'complete-'));
 });
-afterEach(() => rmSync(board, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(board));
 
 const base = { taskId: 'AISDLC-701', outcome: 'blocked', workerId: 'executor-a' };
 

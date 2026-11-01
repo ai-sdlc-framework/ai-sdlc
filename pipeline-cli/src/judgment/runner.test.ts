@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -11,12 +11,13 @@ import {
   disabledJudgmentConfig,
 } from '@ai-sdlc/reference';
 import { createJudgmentRunner } from './runner.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), 'judgment-runner-'));
 });
-afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(tmp));
 
 describe('createJudgmentRunner', () => {
   it('returns undefined when the layer is disabled, and touches nothing on disk', () => {

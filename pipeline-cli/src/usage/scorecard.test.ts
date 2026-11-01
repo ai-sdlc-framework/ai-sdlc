@@ -4,7 +4,6 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -33,6 +32,7 @@ import {
   writeEvidenceFiles,
 } from './scorecard-sources.js';
 import { deriveUnitWeights } from './units.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const weights = deriveUnitWeights([], '2026-09-10T00:00:00Z');
 
@@ -336,7 +336,7 @@ describe('sources', () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'scorecard-src-'));
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => removeFixtureDir(dir));
 
   it('reads the assignment log defensively, first entry wins', () => {
     const p = join(dir, 'a.jsonl');

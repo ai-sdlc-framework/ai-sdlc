@@ -45,6 +45,7 @@ import {
 import { enqueueTasks } from './enqueue.js';
 import { requeueStaleInflight } from './session-reaper.js';
 import type { DispatchManifest } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function mk(taskId: string, extra: Partial<DispatchManifest> = {}): DispatchManifest {
   return {
@@ -76,7 +77,7 @@ beforeEach(() => {
   board = path.join(mkdtempSync(path.join(tmpdir(), 'board-order-')), 'dispatch');
   ensureBoardDirs(board);
 });
-afterEach(() => rmSync(path.dirname(board), { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(path.dirname(board)));
 
 describe('claim rules', () => {
   it('holds a manifest until every after id has a success verdict in done/', () => {
@@ -635,7 +636,7 @@ describe('worker identity and hierarchy.board capability', () => {
   afterEach(() => {
     if (prev === undefined) delete process.env.ARTIFACTS_DIR;
     else process.env.ARTIFACTS_DIR = prev;
-    rmSync(artifacts, { recursive: true, force: true });
+    removeFixtureDir(artifacts);
   });
   const state = () => readCapabilityState(artifacts).find((r) => r.id === 'hierarchy.board');
 

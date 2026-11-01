@@ -15,7 +15,7 @@
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -31,6 +31,7 @@ import type { OrchestratorEvent } from './events.js';
 import type { PipelineLogger, PipelineResult } from '../types.js';
 import { listDecisions } from '../decisions/projection.js';
 import { DECISION_CATALOG_FLAG } from '../decisions/feature-flag.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -133,7 +134,7 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env[ORCHESTRATOR_FLAG];
   delete process.env[DECISION_CATALOG_FLAG];
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
 });
 
 // ── AC-1 + AC-3: DorReadiness block → emitDorDecisions called, decisions filed ─

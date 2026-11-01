@@ -3,7 +3,7 @@
  * appends to the PR body and opens no new PR; without fixesPr nothing changes.
  */
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -16,13 +16,14 @@ import { parseBrief, renderBriefBlock } from '../hierarchy/brief-format.js';
 import type { AggregatedVerdict, DeveloperReturn, TaskSpec } from '../types.js';
 import { computeBranchName } from './02-compute-branch.js';
 import { pushAndPr } from './11-push-and-pr.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), 'fixes-pr-'));
 });
 afterEach(() => {
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
 });
 
 const task = { id: 'AISDLC-9', title: 'Add the test', acceptanceCriteria: ['a'] } as TaskSpec;

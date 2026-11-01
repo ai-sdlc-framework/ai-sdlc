@@ -1,6 +1,6 @@
 /** Outward-action ledger of the handoff (AISDLC-1049): note, render, append-only. */
 
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -15,6 +15,7 @@ import {
   readLedger,
   writeHandoff,
 } from './handoff.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let repo: string;
 let board: string;
@@ -29,7 +30,7 @@ beforeEach(() => {
   tick = 0;
   opts = { role: 'planner', boardDir: board, now };
 });
-afterEach(() => rmSync(repo, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(repo));
 
 describe('handoff note', () => {
   it('appends a timestamped JSON line next to the handoff', () => {

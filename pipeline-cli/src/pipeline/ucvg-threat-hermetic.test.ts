@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -74,6 +74,7 @@ import {
   type ConformanceRecord,
 } from './ucvg-threat-fixtures.js';
 import type { ThreatFixture } from './ucvg-threat-fixtures.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -394,7 +395,7 @@ describe('Vector 6: credential-exfiltration — sandbox cannot reach signing key
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('fixture has blockingStage=stage-2-sandbox (env-withholding + network-deny fire at Stage 2)', () => {

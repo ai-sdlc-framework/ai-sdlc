@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -12,12 +12,13 @@ import {
 } from './pr-rows.js';
 import { landingPath, type LandingRecord } from './reconcile.js';
 import { schedulerUp } from './reconcile-scheduler.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let board: string;
 beforeEach(() => {
   board = mkdtempSync(path.join(os.tmpdir(), 'pr-rows-'));
 });
-afterEach(() => rmSync(board, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(board));
 
 function land(r: Partial<LandingRecord> & { pr: number }): void {
   const rec: LandingRecord = {

@@ -9,7 +9,6 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -33,6 +32,7 @@ import {
   persistDecisionLog,
   type GitRunner,
 } from './remote-persist.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const git = (cwd: string, ...args: string[]): string =>
   execFileSync('git', args, {
@@ -113,7 +113,7 @@ afterEach(() => {
   restore('AI_SDLC_UNTRUSTED_RUN', savedTrust.u);
   restore('GITHUB_ACTIONS', savedTrust.g);
   restore('AI_SDLC_INTERNAL_RUN', savedTrust.i);
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDir(root);
 });
 
 describe('persistDecisionLog (AISDLC-546)', () => {
@@ -146,7 +146,7 @@ describe('persistDecisionLog (AISDLC-546)', () => {
     expect(git(parent, 'status', '--porcelain')).toContain('.ai-sdlc/');
 
     // Simulate check-orchestrator-state.sh: wipe the un-synced local append.
-    rmSync(resolveEventsDir(parent), { recursive: true, force: true });
+    removeFixtureDir(resolveEventsDir(parent));
     expect(syncLedger()).toContain('DEC-0001');
 
     expect(nextDecisionIdDurable({ workDir: parent, runner })).toBe('DEC-0002');
@@ -263,7 +263,7 @@ describe('persistDecisionLog (AISDLC-546)', () => {
     git(parent, 'add', '-f', '.ai-sdlc/_decisions/events');
     git(parent, 'commit', '-m', 'ledger');
     git(parent, 'push', 'origin', 'HEAD:main');
-    rmSync(resolveEventsDir(parent), { recursive: true, force: true });
+    removeFixtureDir(resolveEventsDir(parent));
     expect(nextDecisionIdDurable({ workDir: parent, runner })).toBe('DEC-0006');
   });
 
@@ -273,7 +273,7 @@ describe('persistDecisionLog (AISDLC-546)', () => {
     addDec(plain, 'DEC-0001');
     expect(persistDecisionLog({ workDir: plain, runner }).persisted).toBe(false);
     expect(nextDecisionIdDurable({ workDir: plain, runner })).toBe('DEC-0002');
-    rmSync(plain, { recursive: true, force: true });
+    removeFixtureDir(plain);
 
     addDec(parent, 'DEC-0001');
     git(parent, 'remote', 'set-url', 'origin', join(root, 'missing.git'));

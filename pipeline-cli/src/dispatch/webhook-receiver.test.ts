@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -12,6 +12,7 @@ import {
   WEBHOOK_PATH,
   type Receiver,
 } from './webhook-receiver.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const SECRET = 's3cret';
 const SHA = 'a'.repeat(40);
@@ -69,7 +70,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await receiver.stop();
-  rmSync(dir, { recursive: true, force: true });
+  removeFixtureDir(dir);
 });
 
 describe('webhook receiver (AISDLC-880)', () => {

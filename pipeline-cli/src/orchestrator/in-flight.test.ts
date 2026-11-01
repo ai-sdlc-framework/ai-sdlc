@@ -16,7 +16,7 @@
  * filesystem footprint.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -30,6 +30,7 @@ import {
   releaseInFlight,
   type DispatchState,
 } from './in-flight.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function makeState(overrides: Partial<DispatchState> = {}): DispatchState {
   return {
@@ -104,7 +105,7 @@ describe('reconstructInFlightFromWorktrees', () => {
   });
 
   afterEach(() => {
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 
   it('returns an empty map when the worktrees dir is missing', () => {

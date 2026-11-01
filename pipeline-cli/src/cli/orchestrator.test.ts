@@ -10,7 +10,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -22,6 +22,7 @@ import {
 import { ORCHESTRATOR_FLAG, type OrchestratorAdapters } from '../orchestrator/index.js';
 import type { PipelineResult, PipelineLogger } from '../types.js';
 import { readDispatchResult, writeDispatchResult } from '../runtime/spawners/dispatch-result.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let savedArgv: string[];
 let savedEnv: NodeJS.ProcessEnv;
@@ -295,7 +296,7 @@ describe('cli-orchestrator write-dispatch-result (AISDLC-225)', () => {
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), 'aisdlc-225-cli-'));
-    cleanup = () => rmSync(tmpDir, { recursive: true, force: true });
+    cleanup = () => removeFixtureDir(tmpDir);
   });
 
   afterEach(() => {
@@ -439,7 +440,7 @@ describe('cli-orchestrator tick --continue-from-result (AISDLC-225)', () => {
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), 'aisdlc-225-tick-'));
-    cleanup = () => rmSync(tmpDir, { recursive: true, force: true });
+    cleanup = () => removeFixtureDir(tmpDir);
     process.env[ORCHESTRATOR_FLAG] = 'experimental';
   });
 
@@ -662,7 +663,7 @@ describe('cli-orchestrator tick --task-from-file (AISDLC-373)', () => {
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), 'aisdlc-373-tff-'));
-    cleanup = () => rmSync(tmpDir, { recursive: true, force: true });
+    cleanup = () => removeFixtureDir(tmpDir);
     process.env[ORCHESTRATOR_FLAG] = 'experimental';
   });
 

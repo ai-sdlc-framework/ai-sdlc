@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -12,6 +12,7 @@ import {
   PR_LIFECYCLE_DEFAULTS,
   PR_LIFECYCLE_KEY_READERS,
 } from './pr-lifecycle-config.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const git = (cwd: string, ...args: string[]): void => {
   execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
@@ -41,7 +42,7 @@ describe('loadPrLifecycleConfig', () => {
     return d;
   };
   afterEach(() => {
-    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+    for (const d of dirs.splice(0)) removeFixtureDir(d);
   });
 
   it('defaults when the file or key is missing or invalid', () => {
@@ -103,7 +104,7 @@ describe('pr-lifecycle.yaml operational keys', () => {
       'spec:\n  webhook: {port: 9000, debounceMs: -1}\n  stall: {staleMs: 5}\n  reconcile: {timerOpenMs: 7}\n',
     );
     const c = loadPrLifecycleConfig(d);
-    rmSync(d, { recursive: true, force: true });
+    removeFixtureDir(d);
     expect(c.webhook).toEqual({ port: 9000, debounceMs: PR_LIFECYCLE_DEFAULTS.webhook.debounceMs });
     expect(c.stall).toEqual({ staleMs: 5, graceMs: PR_LIFECYCLE_DEFAULTS.stall.graceMs });
     expect(c.reconcile.timerOpenMs).toBe(7);
@@ -114,7 +115,7 @@ describe('pr-lifecycle.yaml operational keys', () => {
     const read = (yaml: string): boolean => {
       const d = repoWithBase(yaml);
       const c = loadPrLifecycleConfig(d);
-      rmSync(d, { recursive: true, force: true });
+      removeFixtureDir(d);
       return c.hierarchy.resourceGate;
     };
     expect(read('spec: {}\n')).toBe(false);

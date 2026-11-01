@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -12,6 +12,7 @@ import {
   readOpenDrainStall,
   resolveStallAfterMinutes,
 } from './drain-stall.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const T0 = Date.parse('2026-10-28T09:00:00Z');
 let dir: string;
@@ -39,7 +40,7 @@ beforeEach(() => {
   nowMs = T0;
   idle = ['executor-1'];
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(dir));
 
 describe('checkDrainStall (AISDLC-1101)', () => {
   it('opens one record after the threshold and names the stage', () => {

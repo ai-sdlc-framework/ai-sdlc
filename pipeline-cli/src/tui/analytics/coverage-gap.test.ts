@@ -9,7 +9,6 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -17,6 +16,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { FRAMEWORK_COVERAGE_GAP_SOURCE, recordFrameworkCoverageGap } from './coverage-gap.js';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 let workdir: string;
 let artifactsDir: string;
@@ -27,7 +27,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDir(workdir);
 });
 
 describe('recordFrameworkCoverageGap', () => {
@@ -151,7 +151,7 @@ describe('recordFrameworkCoverageGap', () => {
     // regular file, not a directory.
     const blockedDir = join(workdir, 'not-a-dir');
     const fakeArt = join(blockedDir, 'artifacts');
-    rmSync(workdir, { recursive: true, force: true });
+    removeFixtureDir(workdir);
     mkdirSync(workdir, { recursive: true });
     writeFileSync(blockedDir, 'sentinel', 'utf8');
 

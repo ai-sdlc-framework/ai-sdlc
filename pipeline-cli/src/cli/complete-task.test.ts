@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
   buildCompleteTaskCli,
@@ -19,6 +19,7 @@ import {
   SymbolicLinkError,
   TASK_ID_RE,
 } from './complete-task.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Fixtures ───────────────────────────────────────────────────────────
 
@@ -36,7 +37,7 @@ function setupWorkDir(): void {
 
 function teardownWorkDir(): void {
   try {
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   } catch {
     // ignore
   }

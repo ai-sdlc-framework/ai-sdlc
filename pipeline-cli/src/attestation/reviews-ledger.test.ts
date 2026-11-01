@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   mkdtempSync,
-  rmSync,
   existsSync,
   readFileSync,
   writeFileSync,
@@ -21,6 +20,7 @@ import {
   resolveLedgerWriteRoot,
   type ReviewLedgerRecord,
 } from './reviews-ledger.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let repoRoot: string;
 
@@ -29,7 +29,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(repoRoot, { recursive: true, force: true });
+  removeFixtureDir(repoRoot);
 });
 
 function makeRecord(overrides: Partial<ReviewLedgerRecord> = {}): ReviewLedgerRecord {

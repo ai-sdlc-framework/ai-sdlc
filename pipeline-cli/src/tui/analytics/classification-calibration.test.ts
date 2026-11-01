@@ -15,7 +15,7 @@
  *     entries older than the override window.
  */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -35,6 +35,7 @@ import {
   resolveClassificationSilence,
   resolveQualityCalibrationCorpusDir,
 } from './classification-calibration.js';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 const HERMETIC_CTX = {
   resolvedThresholds: { ...DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLDS },
@@ -57,7 +58,7 @@ describe('classification-calibration', () => {
   });
 
   afterEach(() => {
-    rmSync(repoRoot, { recursive: true, force: true });
+    removeFixtureDir(repoRoot);
   });
 
   describe('resolveQualityCalibrationCorpusDir', () => {

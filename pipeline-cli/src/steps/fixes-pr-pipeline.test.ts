@@ -4,7 +4,7 @@
  * protected head branch is refused with a named reason instead of falling back to a new branch.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,13 +15,14 @@ import type { AggregatedVerdict, DeveloperReturn, TaskSpec } from '../types.js';
 import { computeBranchName } from './02-compute-branch.js';
 import { setupWorktree } from './03-setup-worktree.js';
 import { pushAndPr } from './11-push-and-pr.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), 'fixes-pr-pipe-'));
 });
 afterEach(() => {
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
 });
 
 const task = { id: 'AISDLC-9', title: 'Add the test', acceptanceCriteria: ['a'] } as TaskSpec;

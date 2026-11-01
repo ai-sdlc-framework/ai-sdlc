@@ -4,7 +4,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -27,6 +27,7 @@ import { enqueueTasks } from './enqueue.js';
 import { findStrandedWork, guardedRelease } from './release-guard.js';
 import { resumeDone } from './resume.js';
 import type { DispatchManifest } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function mk(taskId: string, extra: Partial<DispatchManifest> = {}): DispatchManifest {
   return {
@@ -52,7 +53,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDir(root);
 });
 
 describe('consumeDeveloperRound (AISDLC-1053)', () => {

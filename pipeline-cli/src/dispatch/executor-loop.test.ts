@@ -10,7 +10,6 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -23,6 +22,7 @@ import { readInflightManifest, writeManifest } from './board.js';
 import { completeTask, splitIdList } from './complete.js';
 import { nextSubId } from './subid.js';
 import type { DispatchManifest } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function mkManifest(taskId: string): DispatchManifest {
   return {
@@ -47,7 +47,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDir(root);
 });
 
 async function cli(argv: string[], deps = {}): Promise<{ exit: number; stdout: string }> {

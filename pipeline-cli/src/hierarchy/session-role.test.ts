@@ -4,17 +4,18 @@
  */
 
 import { createRequire } from 'node:module';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { resolveCallerRole } from './session-role.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const dirs: string[] = [];
 afterEach(() => {
-  while (dirs.length) rmSync(dirs.pop() as string, { recursive: true, force: true });
+  while (dirs.length) removeFixtureDir(dirs.pop() as string);
 });
 
 function board(sessions: unknown, raw?: string): string {

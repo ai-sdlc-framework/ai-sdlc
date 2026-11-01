@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,6 +10,7 @@ import {
   nextStepCommand,
   resolvePluginScriptsDir,
 } from './next-step.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 describe('path resolution', () => {
   it('prefers CLAUDE_PLUGIN_DIR, then CLAUDE_PLUGIN_ROOT, then the dogfood plugin dir', () => {
@@ -81,7 +82,7 @@ describe('handler', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     process.env = { ...savedEnv };
-    rmSync(dir, { recursive: true, force: true });
+    removeFixtureDir(dir);
   });
 
   const run = async (args: Record<string, unknown>): Promise<void> => {
