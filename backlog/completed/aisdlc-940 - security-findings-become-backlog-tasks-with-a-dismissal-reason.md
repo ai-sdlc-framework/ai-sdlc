@@ -1,7 +1,7 @@
 ---
 id: AISDLC-940
 title: 'Security findings become backlog tasks: CodeQL, Dependabot and Scorecard alerts file a task with a dismissal-reason field'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-16'
 labels:
