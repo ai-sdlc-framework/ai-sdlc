@@ -229,6 +229,7 @@ export async function runVerifyGate(
     cwd: state.worktreePath,
     runner: ctx.runner,
     developerClaimed: developer.verifications,
+    boardDir: join(state.workDir, '.ai-sdlc', 'dispatch'),
   });
   writeVerifyRunState(artifactsDir, state.taskId, run);
   if (run.ok) return { kind: 'green', developer: applyVerifyRun(developer, run) };

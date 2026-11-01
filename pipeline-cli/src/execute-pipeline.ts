@@ -433,6 +433,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
           commands: verifyCommands,
           cwd: branch.worktreePath,
           developerClaimed: initialDev.verifications,
+          boardDir: dispatchBoardDir(opts.workDir),
           ...(opts.runner ? { runner: opts.runner } : {}),
           ...(opts.verifyTimeoutMs !== undefined ? { timeoutMs: opts.verifyTimeoutMs } : {}),
         });

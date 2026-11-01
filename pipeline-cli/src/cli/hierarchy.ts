@@ -56,6 +56,7 @@
  * not authentication; a session running as the same user can defeat it.
  */
 
+import { listVerifySlots } from '../runtime/verify-slots.js';
 import { fetchClosedUnmergedPrs } from '../kpi/closed-unmerged.js';
 import { executorCap, resolveExecutorsMax } from '../hierarchy/executor-cap.js';
 import { clearScaleCeiling, writeScaleCeiling } from '../hierarchy/scale.js';
@@ -787,8 +788,13 @@ export async function runHierarchyCli(
       }
       case 'status': {
         const result = hierarchyStatus(deps);
-        if (flags.json === 'true') deps.log(JSON.stringify(result));
-        else for (const line of formatStatus(result, deps.now().getTime())) deps.log(line);
+        const slots = listVerifySlots(deps.boardDir).filter((s) => s.alive);
+        if (flags.json === 'true') {
+          deps.log(JSON.stringify(slots.length > 0 ? { ...result, verifySlots: slots } : result));
+        } else {
+          for (const line of formatStatus(result, deps.now().getTime())) deps.log(line);
+          for (const s of slots) deps.log(`verify slot ${s.index}: held by pid ${s.pid ?? '?'}`);
+        }
         return 0;
       }
       case 'stall-notice': {

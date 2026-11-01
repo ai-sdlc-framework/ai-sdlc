@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1087
 title: 'verify-commands takes a shared board lock so at most two executors run a test suite at once, and caps vitest workers while others wait, so host load stops manufacturing timeout failures'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-27'
 labels:
