@@ -24,6 +24,7 @@ import { refineBacklogTask } from '../dor/ingress-claude.js';
 import { renderClarificationComment } from '../dor/comment-loop.js';
 import { loadDorConfig } from '../dor/dor-config.js';
 import { checkSecurityFindingCompletion } from '../dor/security-finding-dismissal.js';
+import { routeDecisionPointForTaskFile } from '../dor/decision-point.js';
 
 function extractTaskIdFromFile(taskFile: string): string | null {
   // Backlog convention: `aisdlc-<n> - <slug>.md`. Pull the ID from the basename.
@@ -94,6 +95,8 @@ async function checkOneTaskFile(taskFile: string): Promise<CheckOneResult> {
     taskFilePathOverride: resolved,
     config: enforceConfig,
   });
+
+  await routeDecisionPointForTaskFile(taskId, resolved, workDir);
 
   if (!result.shouldRefuseExecution) {
     return { taskFile: resolved, taskId, blocked: false, comment: '' };
