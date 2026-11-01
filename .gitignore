@@ -167,3 +167,7 @@ ai-sdlc-plugin/.stale-runtime-cache.json
 
 # AISDLC-1111: sha of the last workspace build in this worktree
 .ai-sdlc/.last-build-sha
+
+# SessionEnd hook (.claude/hooks/archive-transcript.sh) copies Claude Code session
+# transcripts here. Plaintext, may hold secrets: machine-local, never committed.
+.claude/transcripts/
