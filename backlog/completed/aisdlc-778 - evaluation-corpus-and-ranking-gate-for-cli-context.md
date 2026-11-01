@@ -2,7 +2,7 @@
 id: AISDLC-778
 title: >-
   evaluation corpus and ranking gate for cli-context
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-09'
 labels:
