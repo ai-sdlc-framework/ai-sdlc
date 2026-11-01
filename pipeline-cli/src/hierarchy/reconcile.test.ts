@@ -895,6 +895,28 @@ describe('gatherFacts trust filter', () => {
       });
     });
 
+    it('waits when the last pass already ran push-only reenter on this head', () => {
+      const f: ReconcilePr = {
+        prNumber: 9,
+        taskId: 'AISDLC-77',
+        headBranch: 'ai-sdlc/aisdlc-77-y',
+        headSha: 'H',
+        draft: true,
+        reclaimable: true,
+        manifestState: 'queue',
+        checks: [],
+      };
+      const record = {
+        pr: 9,
+        kind: 'task',
+        owner: 'x',
+        state: 'pending',
+        action: 'push-only-reenter',
+        history: [{ ts: 't', state: 'pending', action: 'push-only-reenter', headSha: 'H' }],
+      } as unknown as LandingRecord;
+      expect(decide(f, record).action).toBe('none');
+    });
+
     it('runs reenter with --push-only', () => {
       const cmds = actionCommands(
         {

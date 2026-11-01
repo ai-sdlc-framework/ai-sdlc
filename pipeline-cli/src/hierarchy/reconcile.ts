@@ -197,6 +197,15 @@ export function decide(
   if (kind === 'task' && f.reclaimable === true && f.draft === true && !f.merged) {
     // Rewrite the manifest from the PR, then re-enter in push-only mode (AISDLC-821).
     const action = f.manifestState === undefined ? 'rewrite-manifest' : 'push-only-reenter';
+    // The reenter already queued its manifest on this head: wait for the executor to claim
+    // it instead of re-running reenter every tick (the guard never counts repeats in a row).
+    if (
+      action === 'push-only-reenter' &&
+      record?.action === 'push-only-reenter' &&
+      record.history.at(-1)?.headSha === f.headSha
+    ) {
+      return { ...base, action: 'none' };
+    }
     return guardSameHead({ ...base, action }, f, record, maxSameHeadActions);
   }
   if (kind === 'docs' || kind === 'decisions-sync' || kind === 'deps') {
