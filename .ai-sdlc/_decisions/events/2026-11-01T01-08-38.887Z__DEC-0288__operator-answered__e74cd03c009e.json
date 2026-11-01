@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-11-01T01:08:38.887Z","decisionId":"DEC-0288","chosenOptionId":"supersede-via-1142","rationale":"Operator ruling 2026-11-01 via planner rubric: no third re-sign round on a bot branch DEC-0278 deletes; 1142 requeues after 1146 lands and carries the exact pins.","by":"dominique@reliablegenius.io"}
