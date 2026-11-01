@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1136
 title: 'Repo ignore rules for the regenerated .claude/memory state, settings.local.json, .claude/transcripts and the project .mcp.json; commit a .mcp.json.example template'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-31'
 labels:

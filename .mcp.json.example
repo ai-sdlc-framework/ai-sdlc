@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "ai-sdlc": {
+      "command": "node",
+      "args": ["mcp-advisor/dist/bin.js"],
+      "env": {
+        "AI_SDLC_WORKSPACE": "."
+      }
+    },
+    "backlog": {
+      "command": "backlog",
+      "args": ["mcp", "start", "--cwd", "."]
+    },
+    "backlog-ent": {
+      "command": "backlog",
+      "args": ["mcp", "start", "--cwd", "../ai-sdlc-enterprise"]
+    },
+    "backlog-io": {
+      "command": "backlog",
+      "args": ["mcp", "start", "--cwd", "../ai-sdlc-io"]
+    }
+  }
+}
