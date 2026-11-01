@@ -32,6 +32,7 @@ import {
   isDocsOnly,
   isRecordsOnly,
 } from './is-docs-only-changeset.mjs';
+import { TRUST_CHAIN_PATH_PREFIXES } from '../pipeline-cli/attestation-core/review-scope-core.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -120,10 +121,24 @@ describe('isDocsOnly() — path category coverage (AC-3)', () => {
     );
   });
 
-  it('root *.md → docs-only', () => {
-    assert.equal(isDocsOnly(['README.md']), true);
-    assert.equal(isDocsOnly(['CHANGELOG.md']), true);
-    assert.equal(isDocsOnly(['CONTRIBUTING.md']), true);
+  it('root *.md → NOT docs-only (AISDLC-971)', () => {
+    assert.equal(isDocsOnly(['README.md']), false);
+    assert.equal(isDocsOnly(['CLAUDE.md']), false);
+    assert.equal(isDocsOnly(['AGENTS.md']), false);
+  });
+
+  it('agent memory, dispatch briefs and dependabot config run the full gate (AISDLC-971)', () => {
+    assert.equal(isDocsOnly(['.claude/memory/x.md']), false);
+    assert.equal(isDocsOnly(['.ai-sdlc/dispatch/briefs/b.md']), false);
+    assert.equal(isDocsOnly(['.github/dependabot.yml']), false);
+    assert.equal(isDocsOnly(['docs/a.md', 'spec/rfcs/RFC-0001.md', 'backlog/tasks/t.md']), true);
+  });
+
+  it('no trust-chain prefix or pattern is docs-only (AISDLC-971)', () => {
+    for (const prefix of TRUST_CHAIN_PATH_PREFIXES) {
+      const sample = prefix.endsWith('/') ? `${prefix}x.md` : prefix;
+      assert.equal(isDocsOnly([sample]), false, sample);
+    }
   });
 
   // .ai-sdlc/_decisions/ — decision-log entries are docs-only (DEC-0010 follow-up)
@@ -134,9 +149,9 @@ describe('isDocsOnly() — path category coverage (AC-3)', () => {
   });
 
   // AISDLC-534: non-executable .github config is docs-only; workflows are not
-  it('.github/dependabot.yml only → docs-only (AISDLC-534)', () => {
-    assert.equal(isDocsOnly(['.github/dependabot.yml']), true);
-    assert.equal(isDocsOnly(['.github/SECURITY.md']), true);
+  it('.github/dependabot.yml and .github/*.md → NOT docs-only (AISDLC-971)', () => {
+    assert.equal(isDocsOnly(['.github/dependabot.yml']), false);
+    assert.equal(isDocsOnly(['.github/SECURITY.md']), false);
   });
 
   it('.github/workflows, actions, CODEOWNERS and look-alikes → NOT docs-only (AISDLC-534)', () => {
@@ -211,7 +226,6 @@ describe('isDocsOnly() — path category coverage (AC-3)', () => {
         'spec/rfcs/RFC-0001.md',
         'docs/operations/README.md',
         'backlog/tasks/aisdlc-100.md',
-        'README.md',
       ]),
       true,
     );
@@ -270,9 +284,6 @@ describe('paths-ignore equivalence (AC-4) — DOCS_ONLY_PATTERN mirrors workflow
     'backlog/tasks/**',
     'backlog/completed/**',
     '.ai-sdlc/_decisions/**',
-    '.github/dependabot.yml',
-    '.github/*.md',
-    '*.md',
   ]);
 
   for (const wfFile of WORKFLOW_FILES) {

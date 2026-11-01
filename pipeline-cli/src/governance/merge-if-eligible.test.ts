@@ -2241,11 +2241,20 @@ describe('runMergeIfEligible - docs lane (AISDLC-878)', () => {
   it('arms a docs-only ai-sdlc/file-* PR', async () => {
     expect(isTrustedSourceKind('docs')).toBe(true);
     const { promise, calls } = run(
-      base(changedFiles([[DOC], ['.ai-sdlc/dispatch/briefs/a.md'], ['.claude/memory/m.md']])),
+      base(changedFiles([[DOC], ['docs/operations/a.md'], ['spec/rfcs/RFC-0001.md']])),
     );
     const r = await promise;
     expect(r.armed).toBe(true);
     expect(armed(calls)).toBe(true);
+  });
+
+  it('refuses briefs, agent memory and root instruction files (AISDLC-971)', async () => {
+    for (const p of ['.ai-sdlc/dispatch/briefs/a.md', '.claude/memory/m.md', 'CLAUDE.md']) {
+      const { promise, calls } = run(base(changedFiles([[DOC], [p]])));
+      const r = await promise;
+      expect(r.armed).toBeFalsy();
+      expect(armed(calls)).toBe(false);
+    }
   });
 
   it('refuses a PR touching a non-docs path, naming it', async () => {

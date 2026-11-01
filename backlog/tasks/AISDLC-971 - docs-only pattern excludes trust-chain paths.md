@@ -1,7 +1,7 @@
 ---
 id: AISDLC-971
 title: 'The docs-only lane is docs AND not trust-chain: root markdown, agent memory, dispatch briefs and dependabot config leave the pattern'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-17'
 labels:

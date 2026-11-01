@@ -30,10 +30,8 @@
  *   - backlog/completed/**
  *   - .ai-sdlc/attestations/<sha>.dsse.json (chore-commit envelope files)
  *   - .ai-sdlc/_decisions/** (append-only operator governance data; DEC-0010 follow-up)
- *   - .ai-sdlc/dispatch/briefs/**, .claude/memory/** (AISDLC-878)
- *   - .github/dependabot.yml (exact file; non-executable config; AISDLC-534)
- *   - .github/*.md (directly under .github only; NOT subdirectories, NOT workflows/**, NOT CODEOWNERS)
- *   - *.md  (root-level only — single * does NOT match /)
+ *   Root *.md (CLAUDE.md, AGENTS.md), .claude/memory/**, .ai-sdlc/dispatch/briefs/**
+ *   and .github/** are NOT docs (AISDLC-971): they steer agents or the pipeline.
  *
  * CLI usage (for workflow shell-out):
  *   echo "$FILES" | node scripts/is-docs-only-changeset.mjs
@@ -56,8 +54,18 @@ import { isTrustChainPath } from '../pipeline-cli/attestation-core/review-scope-
 export { DOCS_ONLY_PATTERN, RECORDS_ONLY_PATTERN };
 
 /**
- * Returns true iff the file list is non-empty and every file matches the
- * DOCS_ONLY_PATTERN. An empty list is treated as NOT docs-only (nothing to
+ * A docs path is on the docs allowlist and not a trust-chain path (AISDLC-971).
+ *
+ * @param {string} f
+ * @returns {boolean}
+ */
+function isDocsPath(f) {
+  return DOCS_ONLY_PATTERN.test(f) && !isTrustChainPath(f);
+}
+
+/**
+ * Returns true iff the file list is non-empty and every file is a docs path
+ * (DOCS_ONLY_PATTERN and not trust-chain). An empty list is treated as NOT docs-only (nothing to
  * attest is a different concept — the fallback workflow handles empty sets
  * separately by posting success unconditionally; this function is scoped
  * purely to the predicate logic).
@@ -66,7 +74,7 @@ export { DOCS_ONLY_PATTERN, RECORDS_ONLY_PATTERN };
  * @returns {boolean}
  */
 export function isDocsOnly(files) {
-  return files.length > 0 && files.every((f) => DOCS_ONLY_PATTERN.test(f));
+  return files.length > 0 && files.every(isDocsPath);
 }
 
 /**
@@ -96,9 +104,7 @@ export function classifyChangeset(files) {
   // AISDLC-1018: docs plus records contains no code, so it is docs-only.
   if (
     files.length > 0 &&
-    files.every(
-      (f) => DOCS_ONLY_PATTERN.test(f) || (RECORDS_ONLY_PATTERN.test(f) && !isTrustChainPath(f)),
-    )
+    files.every((f) => isDocsPath(f) || (RECORDS_ONLY_PATTERN.test(f) && !isTrustChainPath(f)))
   ) {
     return 'docs-only';
   }
