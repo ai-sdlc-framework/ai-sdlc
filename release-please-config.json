@@ -59,7 +59,8 @@
         "sdk-typescript",
         "orchestrator",
         "mcp-advisor",
-        "pipeline-cli"
+        "pipeline-cli",
+        "ai-sdlc-plugin"
       ]
     }
   ],
@@ -109,8 +110,28 @@
         },
         {
           "type": "json",
+          "path": "plugin.json",
+          "jsonpath": "$.runtimeDependencies['@ai-sdlc/orchestrator']"
+        },
+        {
+          "type": "json",
+          "path": "plugin.json",
+          "jsonpath": "$.runtimeDependencies['@ai-sdlc/pipeline-cli']"
+        },
+        {
+          "type": "json",
           "path": ".claude-plugin/plugin.json",
           "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": ".claude-plugin/plugin.json",
+          "jsonpath": "$.runtimeDependencies['@ai-sdlc/orchestrator']"
+        },
+        {
+          "type": "json",
+          "path": ".claude-plugin/plugin.json",
+          "jsonpath": "$.runtimeDependencies['@ai-sdlc/pipeline-cli']"
         },
         {
           "type": "json",

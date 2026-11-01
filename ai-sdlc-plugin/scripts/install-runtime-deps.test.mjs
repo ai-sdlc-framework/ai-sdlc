@@ -339,6 +339,12 @@ describe('plugin manifests — runtimeDependencies pins must not lag the workspa
         );
       }
     });
+
+    it(`${pkgName} runtimeDependencies pin is the exact version in an exact form (DEC-0278)`, () => {
+      for (const manifest of [topLevel, marketplace]) {
+        assert.match(manifest.runtimeDependencies[pkgName], /^\d+\.\d+\.\d+$/);
+      }
+    });
   }
 });
 

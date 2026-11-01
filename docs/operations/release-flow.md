@@ -34,24 +34,16 @@ a collision rate that became visible once the merge queue was dropped (AISDLC-40
    - The rolling PR accumulates: version bumps in `package.json` files +
      CHANGELOG.md entries for each package.
 
-   **Single push (AISDLC-956):** the release branch receives exactly one push
-   per push to `main` (release-please's own). There is no second fixup push.
-   release-please cannot source a sibling component's version into the plugin's
-   `runtimeDependencies` pins, so they lag on that branch;
-   `scripts/sync-plugin-runtime-deps.mjs --check` tolerates that lag when the
-   branch is `release-please--branches--main`. **Check split (AISDLC-1068):** the
-   per-PR gate and `pnpm test` run only `--pr` (the two plugin manifests must
-   agree with each other); the workspace-version comparison (`--check`) is main
-   state and runs in `main-health-monitor.yml` on every push to `main` and on its
-   schedule, so a failed pin sync never turns every open PR red. After the
-   release lands, the `sync-plugin-runtime-deps` job commits the pins to a
-   `chore/sync-runtime-pins-<version>` branch and opens a PR (AISDLC-1059;
-   `main` is protected, so a direct push is refused). The auto-enable workflow
-   arms it and it lands through `ai-sdlc/pr-ready`. `publish-npm` syncs the pins
-   in its working tree before testing. The cache-rebuild step retries a failed
+   **Single PR (DEC-0278, AISDLC-1142):** the plugin joins the `node-packages`
+   linked-versions group, so one release PR bumps the runtime packages, the
+   plugin `version` fields and the two `runtimeDependencies` pins
+   (`@ai-sdlc/orchestrator`, `@ai-sdlc/pipeline-cli`) to the same exact version
+   through `json` `extra-files`. There is no post-release pin-sync job and no
+   bot PR to attest; `release-please-config.test.mjs` fails when either plugin
+   manifest pin differs from the `pipeline-cli` version in
+   `.release-please-manifest.json`. The release branch receives exactly one
+   push (release-please's own). The cache-rebuild step retries a failed
    install, since the registry can lag `publish` by minutes.
-   Plugin `version` fields still ride on the one release-please commit via
-   `extra-files`.
 
 4. **Operator merges the rolling release PR** when ready to cut a release.
    After merge, `release.yml`'s `publish-npm` job runs and pushes to npm.

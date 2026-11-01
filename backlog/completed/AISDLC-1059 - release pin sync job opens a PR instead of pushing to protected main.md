@@ -1,6 +1,8 @@
 ---
 id: AISDLC-1059
-title: 'release pin-sync job opens a PR instead of pushing to protected main, so a release never leaves the drift check red'
+title: >-
+  release pin-sync job opens a PR instead of pushing to protected main, so a
+  release never leaves the drift check red
 status: Done
 assignee: []
 created_date: '2026-10-23'
@@ -12,11 +14,21 @@ labels:
 dependencies: []
 references:
   - .github/workflows/release.yml
-  - scripts/sync-plugin-runtime-deps.mjs
-  - scripts/sync-plugin-runtime-deps.test.mjs
   - docs/operations/release-flow.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-31'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/sync-plugin-runtime-deps.mjs'
+    resolution: flagged
+  - date: '2026-10-31'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      scripts/sync-plugin-runtime-deps.test.mjs
+    resolution: flagged
+drift_checked: '2026-10-31'
 ---
 
 ## Description

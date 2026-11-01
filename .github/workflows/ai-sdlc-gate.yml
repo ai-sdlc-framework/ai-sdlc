@@ -308,7 +308,7 @@ jobs:
       - run: pnpm --filter ./ucvg-demo test
       # AISDLC-1068: only the manifest self-consistency check (`--pr`) runs here;
       # the workspace-version comparison is main state and runs in main-health-monitor.yml.
-      - run: pnpm test:gates && pnpm rfc:check && pnpm dark-code:check && pnpm knowledge:check && pnpm sync:plugin-runtime-deps:check:pr
+      - run: pnpm test:gates && pnpm rfc:check && pnpm dark-code:check && pnpm knowledge:check
       # AISDLC-727: ci.yml no longer runs on pull requests, so schema validation
       # (cheap, cross-cutting) runs here instead of only post-merge on main.
       - run: pnpm validate-schemas

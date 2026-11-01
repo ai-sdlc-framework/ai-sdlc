@@ -1,7 +1,8 @@
 ---
 id: AISDLC-1115
 title: >-
-  release PR bumps the plugin runtime pins itself (plugin joins the linked-versions group); delete the post-release pin-sync job
+  release PR bumps the plugin runtime pins itself (plugin joins the
+  linked-versions group); delete the post-release pin-sync job
 status: Done
 assignee: []
 created_date: '2026-10-29'
@@ -15,13 +16,23 @@ references:
   - .release-please-manifest.json
   - .github/workflows/release.yml
   - .github/workflows/main-health-monitor.yml
-  - scripts/sync-plugin-runtime-deps.mjs
-  - scripts/sync-plugin-runtime-deps.test.mjs
   - ai-sdlc-plugin/plugin.json
   - ai-sdlc-plugin/.claude-plugin/plugin.json
   - docs/operations/release-flow.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-31'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/sync-plugin-runtime-deps.mjs'
+    resolution: flagged
+  - date: '2026-10-31'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      scripts/sync-plugin-runtime-deps.test.mjs
+    resolution: flagged
+drift_checked: '2026-10-31'
 ---
 
 ## Description
@@ -47,3 +58,5 @@ Fix: edit `release-please-config.json` (add `ai-sdlc-plugin` to the linked group
 ## Notes
 
 Pre-condition: the pending pin-sync PR for 0.38.0 (#2135) either lands first or is superseded by this change; whichever lands second must not reintroduce the old range form. Decision record: DEC-0278 (link the plugin version line to the runtime group).
+
+Note: this work did not land under AISDLC-1115; it landed through AISDLC-1142.

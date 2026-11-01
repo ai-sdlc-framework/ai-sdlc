@@ -1,7 +1,8 @@
 ---
 id: AISDLC-600
 title: >-
-  Bump install-runtime-deps.sh pipeline-cli pin to the current runtime (off the caret-0.x trap) so execute's produce stamps independent
+  Bump install-runtime-deps.sh pipeline-cli pin to the current runtime (off the
+  caret-0.x trap) so execute's produce stamps independent
 status: Done
 assignee: []
 created_date: '2026-09-07'
@@ -14,9 +15,14 @@ labels:
 dependencies: []
 references:
   - ai-sdlc-plugin/scripts/install-runtime-deps.sh
-  - scripts/sync-plugin-runtime-deps.mjs
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-31'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/sync-plugin-runtime-deps.mjs'
+    resolution: flagged
+drift_checked: '2026-10-31'
 ---
 
 ## Description

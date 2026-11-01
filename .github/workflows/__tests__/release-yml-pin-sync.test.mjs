@@ -11,7 +11,8 @@
  * that job: the release branch now receives exactly ONE push per merge to
  * main (release-please's). The pins are tolerated as lagging on that branch by
  * `sync-plugin-runtime-deps.mjs --check` and landed on main by the
- * post-merge `sync-plugin-runtime-deps` job.
+ * post-merge `sync-plugin-runtime-deps` job. AISDLC-1142 (DEC-0278) deleted that
+ * job: the release PR now writes the pins itself.
  *
  * Run with: node --test .github/workflows/__tests__/release-yml-pin-sync.test.mjs
  */
@@ -66,17 +67,9 @@ describe('release.yml — single push to the release-please branch (AISDLC-956)'
     assert.equal(rp.length, 1);
   });
 
-  it('the post-merge sync job opens a PR and never pushes to main (AISDLC-1059)', () => {
-    const job = workflow.jobs['sync-plugin-runtime-deps'];
-    assert.ok(job, 'post-merge sync job must remain');
-    const runs = job.steps.map((s) => s.run ?? '').join('\n');
-    assert.doesNotMatch(runs, /git push[^\n]*\bmain\b/);
-    assert.doesNotMatch(runs, /HEAD:main/);
-    assert.match(runs, /git push -u origin "HEAD:refs\/heads\/\$\{BRANCH\}"/);
-    assert.match(runs, /BRANCH="chore\/sync-runtime-pins-/);
-    assert.match(runs, /gh pr create/);
-    assert.doesNotMatch(runs, /gh pr create[^\n]*--draft/);
-    assert.equal(job.permissions['pull-requests'], 'write');
+  it('has no post-release pin-sync job (DEC-0278, AISDLC-1142)', () => {
+    assert.equal(workflow.jobs['sync-plugin-runtime-deps'], undefined);
+    assert.doesNotMatch(raw, /sync-plugin-runtime-deps/);
   });
 
   it('the cache-rebuild step retries instead of aborting on an install failure', () => {
@@ -86,12 +79,9 @@ describe('release.yml — single push to the release-please branch (AISDLC-956)'
     assert.match(step.run, /install-runtime-deps\.sh"[^\n]*\|\|/);
   });
 
-  it('publish-npm syncs pins in its working tree before running pnpm test', () => {
-    const steps = workflow.jobs['publish-npm'].steps;
-    const sync = steps.findIndex((s) => /sync-plugin-runtime-deps\.mjs/.test(s.run ?? ''));
-    const test = steps.findIndex((s) => s.run === 'pnpm test');
-    assert.ok(sync >= 0, 'publish-npm must sync pins before testing');
-    assert.ok(sync < test, 'pin sync must precede pnpm test');
+  it('publish-npm does not rewrite pins in its working tree', () => {
+    const runs = workflow.jobs['publish-npm'].steps.map((s) => s.run ?? '').join('\n');
+    assert.doesNotMatch(runs, /sync-plugin-runtime-deps/);
   });
 
   it('cannot loop: release.yml push trigger is scoped to main only', () => {

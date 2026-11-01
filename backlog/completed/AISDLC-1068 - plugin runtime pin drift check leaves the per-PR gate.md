@@ -1,6 +1,8 @@
 ---
 id: AISDLC-1068
-title: 'plugin runtime pin drift check moves off the per-PR gate so a release pin lag never blocks every open PR'
+title: >-
+  plugin runtime pin drift check moves off the per-PR gate so a release pin lag
+  never blocks every open PR
 status: Done
 assignee: []
 created_date: '2026-10-23'
@@ -14,8 +16,13 @@ dependencies: []
 references:
   - .github/workflows/ai-sdlc-gate.yml
   - .github/workflows/main-health-monitor.yml
-  - scripts/sync-plugin-runtime-deps.mjs
   - docs/operations/release-flow.md
+drift_log:
+  - date: '2026-10-31'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/sync-plugin-runtime-deps.mjs'
+    resolution: flagged
+drift_checked: '2026-10-31'
 ---
 
 ## Description
