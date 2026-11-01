@@ -831,6 +831,85 @@ describe('gatherFacts trust filter', () => {
     expect(orphan[0]!.unownedReason).toContain('draft task PR');
   });
 
+  describe('draft task PR with a failed verdict (AISDLC-1139)', () => {
+    const orphanRun = () =>
+      run([
+        pr({
+          number: 9,
+          title: 'feat: y (AISDLC-77)',
+          headRefName: 'ai-sdlc/aisdlc-77-y',
+          isDraft: true,
+        }),
+      ]);
+    const failed = (extra: Record<string, unknown>) =>
+      writeVerdict(board, {
+        schemaVersion: 'v1',
+        taskId: 'AISDLC-77',
+        outcome: 'failed',
+        completedAt: '2026-10-31T00:00:00.000Z',
+        ...extra,
+      } as never);
+
+    it('reclaims a draft whose failed verdict records a signed attestation', () => {
+      failed({ signedAt: '2026-10-31T00:00:00.000Z' });
+      const facts = gatherFacts(orphanRun(), '/', board)!;
+      expect(facts[0]!.unownedReason).toBeUndefined();
+      expect(facts[0]!.reclaimable).toBe(true);
+      expect(decide(facts[0]!).action).toBe('rewrite-manifest');
+      expect(decide({ ...facts[0]!, manifestState: 'queue' }).action).toBe('push-only-reenter');
+    });
+
+    it('keeps an unapproved failed verdict and no verdict routed to the planner', () => {
+      failed({});
+      const noApproval = gatherFacts(orphanRun(), '/', board)!;
+      expect(noApproval[0]!.unownedReason).toContain('draft task PR');
+      expect(decide(noApproval[0]!)).toMatchObject({
+        action: 'route-to-planner',
+        note: expect.stringContaining('no done verdict'),
+      });
+    });
+
+    it('routes a twice-failed push-only reenter on the same head to the planner', () => {
+      const f: ReconcilePr = {
+        prNumber: 9,
+        taskId: 'AISDLC-77',
+        headBranch: 'ai-sdlc/aisdlc-77-y',
+        headSha: 'H',
+        draft: true,
+        reclaimable: true,
+        manifestState: 'queue',
+        checks: [],
+      };
+      const record = {
+        pr: 9,
+        kind: 'task',
+        owner: 'x',
+        state: 'pending',
+        action: 'none',
+        history: [{ ts: 't', state: 'pending', action: 'push-only-reenter', headSha: 'H' }],
+      } as unknown as LandingRecord;
+      expect(decide(f, record)).toMatchObject({
+        action: 'route-to-planner',
+        note: 'push-only-reenter@H x2',
+      });
+    });
+
+    it('runs reenter with --push-only', () => {
+      const cmds = actionCommands(
+        {
+          pr: 9,
+          taskId: 'AISDLC-77',
+          kind: 'task',
+          action: 'push-only-reenter',
+          state: 'pending',
+          boardDir: board,
+        },
+        '/bin',
+      );
+      expect(cmds![0]!.args).toEqual(expect.arrayContaining(['reenter', '9', '--push-only']));
+    });
+  });
+
   it('keeps allowed docs PRs and same-repo release PRs', () => {
     const facts = gatherFacts(
       run([

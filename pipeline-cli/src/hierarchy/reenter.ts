@@ -56,6 +56,8 @@ export interface ReenterInput {
   note?: string;
   /** Order a developer round even when the patch id is unchanged (AISDLC-1053). */
   developerRound?: boolean;
+  /** AISDLC-1139: resume without a developer or reviewer round (the verdict is approved). */
+  pushOnly?: boolean;
   /** An answered catalog record scoped to the task; releases the same-head loop guard. */
   decisionId?: string;
 }
@@ -285,7 +287,7 @@ export function reenter(input: ReenterInput, deps: ReenterDeps): ReenterResult {
     route = rerunId ? 'rerun' : 'executor';
   } else if (c.state === 'real-failure' || c.state === 'attestation-content-hash-mismatch') {
     route = 'executor';
-  } else if (note) {
+  } else if (note || input.pushOnly) {
     route = 'executor';
   } else {
     throw new Error(
@@ -351,7 +353,7 @@ export function reenter(input: ReenterInput, deps: ReenterDeps): ReenterResult {
   const reason =
     c.state === 'behind-or-dirty'
       ? CONFLICT_ROUND
-      : c.state === 'attestation-content-hash-mismatch'
+      : c.state === 'attestation-content-hash-mismatch' || input.pushOnly
         ? 're-sign the attestation and push only'
         : (failingLine ?? 'a required check failed');
   const text = note ?? proseLine(`${reason} (head ${short(headSha)})`);
@@ -365,7 +367,7 @@ export function reenter(input: ReenterInput, deps: ReenterDeps): ReenterResult {
       headSha,
       ...(failingLine ? { failingLine: proseLine(failingLine).slice(5) } : {}),
       failingChecks: failedChecks.map((k) => `${k.name}${k.summary ? `: ${k.summary}` : ''}`),
-      pushOnly: c.state === 'attestation-content-hash-mismatch',
+      pushOnly: c.state === 'attestation-content-hash-mismatch' || input.pushOnly === true,
       ...(input.developerRound ? { developerRound: true } : {}),
     },
     {

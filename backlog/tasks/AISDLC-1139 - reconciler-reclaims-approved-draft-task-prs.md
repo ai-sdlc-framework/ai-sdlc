@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1139
 title: 'Reconciler reclaims a draft task PR whose failed verdict records an approved review round: rewrite the manifest from the PR and reenter in push-only mode instead of routing to the planner'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-31'
 labels:

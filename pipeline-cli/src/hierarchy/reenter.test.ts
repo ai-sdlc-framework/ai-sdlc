@@ -194,6 +194,13 @@ describe('reenter, a real failure on the head', () => {
     expect(r.kind === 'manifest' && r.resume.resumeMode).toBe('push-only');
   });
 
+  it('--push-only orders a push-only round on a green PR with no note (AISDLC-1139)', () => {
+    failTask();
+    const green = gh({ checks: [{ name: 'a', status: 'COMPLETED', conclusion: 'SUCCESS' }] });
+    const r = reenter({ target: '7', pushOnly: true }, deps(green));
+    expect(r.kind === 'manifest' && r.resume.resumeMode).toBe('push-only');
+  });
+
   it('--developer-round sets resume.developerRound on the manifest (AISDLC-1053)', () => {
     failTask();
     const r = reenter({ target: '7', developerRound: true }, deps(gh()));
