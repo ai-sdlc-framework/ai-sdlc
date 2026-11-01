@@ -40,6 +40,11 @@
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/usage-ingest.sh\"",
             "async": true,
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/context-surface.sh\" sessionStart",
+            "timeout": 5
           }
         ]
       }
@@ -51,6 +56,11 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-start.sh\"",
             "statusMessage": "Injecting AI-SDLC governance into subagent..."
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/context-surface.sh\" taskClaim",
+            "timeout": 5
           }
         ]
       }
@@ -93,6 +103,16 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/enforce-role-tools.sh\"",
             "statusMessage": "Checking role tool policy..."
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Write|Edit|MultiEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/context-surface.sh\" toolTouch",
+            "timeout": 5
           }
         ]
       }
@@ -148,6 +168,28 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/permission-check.sh\"",
             "if": "Bash(gh pr merge*)"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/context-surface.sh\" userPrompt",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/context-surface.sh\" compaction",
+            "timeout": 5
           }
         ]
       }
