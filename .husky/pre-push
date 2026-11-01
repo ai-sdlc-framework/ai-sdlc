@@ -21,7 +21,7 @@
 #      longer invoked directly from this file.
 #
 #   3. Governance gate (AISDLC-1123) - `scripts/check-governance-on-push.sh`, runs AFTER
-#      the fixups so the signed HEAD is checked: conflict markers, waived-tests,
+#      the fixups so the signed HEAD is checked: conflict markers,
 #      reviewers (when an envelope is in the range), backlog drift (only when a
 #      backlog-referenced file is removed), gate tests (only when a gate dir changed;
 #      docs-only pushes run neither). Attestation verify stays in step 2 (AISDLC-694).

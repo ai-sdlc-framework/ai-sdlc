@@ -57,7 +57,7 @@ Before renaming, moving or deleting a file run `grep -rl "<old path>" backlog/` 
 
 ## Hard rules (NEVER violate)
 
-<!-- prompt-rules:begin ids=merge,force-push,close,branch-delete,destructive-git,stash,ci-skip,governance-config,oq-resolution,pre-work,worktree-cwd,waived-tests -->
+<!-- prompt-rules:begin ids=merge,force-push,close,branch-delete,destructive-git,stash,ci-skip,governance-config,oq-resolution,pre-work,worktree-cwd -->
 - **Merge:** only via `cli-merge-if-eligible` when `governance.allowMerge` permits it; the raw `gh pr merge` (any form, `--auto` included) is not a sanctioned path; branch protection on `main` and the `ai-sdlc/pr-ready` rollup are the controls.
 - **Force-push:** only `git push --force-with-lease origin HEAD:refs/heads/<your-branch>` to your own task branch after a rebase (from the parent cwd, prefix `git -C <main>/.worktrees/<task-id>`); plain `git push --force`/`-f` and any push to `main`/`master` are refused (lease guard hook, branch protection).
 - **Close:** never close PRs or issues (`gh pr close`, `gh issue close`); report in `notes` instead (instruction only, no hook).
@@ -69,7 +69,6 @@ Before renaming, moving or deleting a file run `grep -rl "<old path>" backlog/` 
 - **RFC Open Questions:** never add a `**Resolution:**` marker (AISDLC-298); on a blocking OQ run `cli-decisions escalate` (scope `rfc:RFC-XXXX`), return `prUrl: null` with the RFC, OQ and options in `notes`; a non-blocking OQ gets a PR-body assumption only.
 - **Pre-work flags:** when the task says "Pre-work required", "Pre-conditions:" or "operator walkthrough needed", STOP and return `prUrl: null` naming the unmet precondition; never self-authorize scope expansion (AISDLC-308).
 - **Worktree cwd (AISDLC-1019):** every git write (commit, rebase, push) runs with the task worktree as cwd, never the Pattern C parent (a parent push of main overwrites the task branch and auto-closes the PR; the PreToolUse hook denies it); never run `gh pr reopen`, report a closed PR in `notes` for dispatch.
-- **Waived tests on pipeline code (AISDLC-1022):** a waived or skipped `pnpm test` on a change under `pipeline-cli/src`, `orchestrator/src` or `ai-sdlc-plugin/hooks` is a critical finding, never a waiver; the developer states the exact test command run and its summary line in `notes`, and the governance-gate job blocks a completed task file that records the suite as waived or skipped.
 <!-- prompt-rules:end -->
 
 The full `cli-decisions escalate` invocation for OQs, the stash safe pattern and the incidents behind these rules are in the developer reference above.
@@ -115,12 +114,11 @@ Return a JSON object as your final message (no other text):
   "prUrl": "https://github.com/<org>/<repo>/pull/<n>",
   "verifications": {
     "build": "passed | failed | skipped",
-    "test": "passed | failed | skipped | waived",
+    "test": "passed | failed | skipped",
     "lint": "passed | failed | skipped",
     "format": "passed | failed | skipped"
   },
   "acceptanceCriteriaMet": [1, 2, 3],
-  "testWaiver": {"tests": ["<test name>"], "passesAlone": "<evidence>", "untouched": true},
   "notes": "anything the reviewers or operator should know (optional)",
   "followups": ["AISDLC-123", "#456", "declined: <reason of at least 10 characters>"]
 }
@@ -128,9 +126,9 @@ Return a JSON object as your final message (no other text):
 
 `followups` (optional) lists follow-up work that surfaced. Each entry is a task id, an issue reference, or `declined: <reason>`; prose is rejected at finalize. Omit it when there is none. Free-form commentary belongs in `notes`, never in `followups`.
 
-### Local test waiver (DEC-0202)
+### Verification is machine-run (AISDLC-1086)
 
-A locally failing test is waived only when (1) it passes when re-run alone and (2) the task diff does not touch the test or the source it exercises. Then return `verifications.test: "waived"` with a complete `testWaiver` (`tests` non-empty, `passesAlone` evidence, `untouched: true`); the PR body carries it. Without it the return is rejected. `build`, `lint` and `format` are never waived; everything else blocks.
+The pipeline re-runs `pnpm build`, `pnpm test`, `pnpm lint` and `pnpm format:check` in your worktree after you return and records that result; `verifications` is only your claim and may be omitted. A red run is sent back to you with the failing command's output. Run the full suite yourself before you return and fix every failure.
 
 ### Required fields
 

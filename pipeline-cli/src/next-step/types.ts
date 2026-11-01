@@ -122,6 +122,8 @@ export interface NextStepState {
   /** Developer pass counter (1-based, capped by `maxIterations`). */
   iteration: number;
   maxIterations: number;
+  /** AISDLC-1086: developer rounds spent fixing a red machine verify run (capped by `maxIterations`). */
+  verifyRounds?: number;
   developer: DeveloperReturn | null;
   /** AISDLC-947: the resume review decision, set only when the task resumed. */
   resumeReview?: ResumeReviewDecision;

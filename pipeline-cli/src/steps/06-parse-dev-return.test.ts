@@ -118,12 +118,12 @@ describe('Step 6 — parseDeveloperReturn', () => {
     expect(r.reason).toMatch(/filesChanged/);
   });
 
-  it('flags invalid verification status', async () => {
+  it('normalises an unknown verification status to skipped (claim only)', async () => {
     const r = await parseDeveloperReturn({
       developerReturn: { ...happy, verifications: { ...happy.verifications, build: 'bogus' } },
     });
-    expect(r.ok).toBe(false);
-    expect(r.reason).toMatch(/verifications.build/);
+    expect(r.ok).toBe(true);
+    expect(r.developer?.verifications.build).toBe('skipped');
   });
 
   it('treats null commitSha as developer-failed', async () => {
@@ -135,28 +135,25 @@ describe('Step 6 — parseDeveloperReturn', () => {
     expect(r.reason).toMatch(/could not finish/);
   });
 
-  it('treats verifications.build=failed as developer-failed', async () => {
+  it('accepts verifications.build=failed: the verify run decides (AISDLC-1086)', async () => {
     const r = await parseDeveloperReturn({
       developerReturn: { ...happy, verifications: { ...happy.verifications, build: 'failed' } },
     });
-    expect(r.ok).toBe(false);
-    expect(r.reason).toMatch(/build = failed/);
+    expect(r.ok).toBe(true);
+    expect(r.developer?.verifications.build).toBe('failed');
   });
 
-  it('treats verifications.format=failed as developer-failed', async () => {
-    const r = await parseDeveloperReturn({
-      developerReturn: { ...happy, verifications: { ...happy.verifications, format: 'failed' } },
-    });
-    expect(r.ok).toBe(false);
-    expect(r.reason).toMatch(/format = failed/);
-  });
-
-  it('flags missing verifications object', async () => {
+  it('accepts a return that omits verifications and fills every key as skipped', async () => {
     const { verifications, ...rest } = happy;
     void verifications;
     const r = await parseDeveloperReturn({ developerReturn: rest });
-    expect(r.ok).toBe(false);
-    expect(r.reason).toMatch(/verifications/);
+    expect(r.ok).toBe(true);
+    expect(r.developer?.verifications).toEqual({
+      build: 'skipped',
+      test: 'skipped',
+      lint: 'skipped',
+      format: 'skipped',
+    });
   });
 
   it('flags missing acceptanceCriteriaMet array', async () => {
@@ -335,42 +332,5 @@ describe('Step 6 — parseDeveloperReturnWithRetry (AISDLC-176)', () => {
     });
     expect(r.ok).toBe(true);
     expect(captured).toBe(60_000);
-  });
-});
-
-describe('AISDLC-864 — DEC-0202 test waiver', () => {
-  const base = (over: Record<string, unknown> = {}, test = 'waived') => ({
-    summary: 's',
-    filesChanged: [],
-    commitSha: 'abc1234',
-    verifications: { build: 'passed', test, lint: 'passed', format: 'passed' },
-    acceptanceCriteriaMet: [1],
-    ...over,
-  });
-  const waiver = { tests: ['a > b'], passesAlone: 'passed alone', untouched: true };
-
-  it('accepts a complete waiver', async () => {
-    const r = await parseDeveloperReturn({ developerReturn: base({ testWaiver: waiver }) });
-    expect(r.ok).toBe(true);
-  });
-  it.each([
-    ['missing', undefined, 'testWaiver'],
-    ['empty tests', { ...waiver, tests: [] }, 'testWaiver.tests'],
-    ['untouched false', { ...waiver, untouched: false }, 'testWaiver.untouched'],
-    ['no evidence', { ...waiver, passesAlone: '' }, 'testWaiver.passesAlone'],
-    ['not an object', 'x', 'testWaiver'],
-  ])('rejects %s', async (_n, w, field) => {
-    const r = await parseDeveloperReturn({
-      developerReturn: base(w === undefined ? {} : { testWaiver: w }),
-    });
-    expect(r.ok).toBe(false);
-    expect(r.reason).toContain(field);
-  });
-  it.each(['build', 'lint', 'format'])('rejects waived %s', async (key) => {
-    const b = base({ testWaiver: waiver });
-    (b.verifications as Record<string, string>)[key] = 'waived';
-    const r = await parseDeveloperReturn({ developerReturn: b });
-    expect(r.ok).toBe(false);
-    expect(r.reason).toContain(`verifications.${key}`);
   });
 });

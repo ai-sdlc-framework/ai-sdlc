@@ -10,6 +10,7 @@
 import path from 'node:path';
 import { parseTaskFrontmatter } from '../deps/dependency-graph.js';
 import { parseTaskFile } from '../steps/01-validate.js';
+import { DEFAULT_VERIFY_COMMANDS } from '../steps/verify-defaults.js';
 import { buildBranchName, DEFAULT_PATTERN, readBranchPattern } from '../steps/02-compute-branch.js';
 import { isOnBoard, TASK_ID_RE, writeManifest } from './board.js';
 import type { DispatchManifest, ManifestWorkerKind } from './types.js';
@@ -71,13 +72,8 @@ export function dependenciesOfTaskFile(workDir: string | undefined, taskFile: st
   }
 }
 
-/** Default verification commands copied onto each manifest. */
-export const DEFAULT_VERIFY_COMMANDS = [
-  'pnpm build',
-  'pnpm test',
-  'pnpm lint',
-  'pnpm format:check',
-];
+/** Default verification commands copied onto each manifest: the one list shared with next-step. */
+export { DEFAULT_VERIFY_COMMANDS };
 
 /**
  * Write one manifest per entry into `queue/`. Returns the written paths.
@@ -121,7 +117,7 @@ export function enqueueTasks(
       workerKind: defaults.workerKind ?? 'any',
       dispatchedAt,
       dispatchedBy: defaults.dispatchedBy,
-      spec: { taskFile, verifyCommands: defaults.verifyCommands ?? DEFAULT_VERIFY_COMMANDS },
+      spec: { taskFile, verifyCommands: defaults.verifyCommands ?? [...DEFAULT_VERIFY_COMMANDS] },
     };
     const after =
       entry.after && entry.after.length > 0

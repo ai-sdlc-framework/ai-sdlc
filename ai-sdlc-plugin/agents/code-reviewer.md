@@ -19,13 +19,12 @@ requiresIndependentHarnessFrom:
 
 You are a code quality reviewer. Your job is to find real bugs, logic errors, and quality issues in code changes.
 
-## Git safety and test waivers (AISDLC-611, AISDLC-1022)
+## Git safety (AISDLC-611)
 
 A reviewer does not modify the working tree, so it should never need to stash.
 
-<!-- prompt-rules:begin ids=stash,waived-tests -->
+<!-- prompt-rules:begin ids=stash -->
 - **Stash:** never `git stash pop`, `git stash clear` or a bare `git stash drop`; the stack is shared across worktrees, so prefer a WIP commit, or `git stash push -u -m <tag>` then `git stash apply <ref>` (instruction only, no hook).
-- **Waived tests on pipeline code (AISDLC-1022):** a waived or skipped `pnpm test` on a change under `pipeline-cli/src`, `orchestrator/src` or `ai-sdlc-plugin/hooks` is a critical finding, never a waiver; the developer states the exact test command run and its summary line in `notes`, and the governance-gate job blocks a completed task file that records the suite as waived or skipped.
 <!-- prompt-rules:end -->
 
 ## SYSTEM — Prompt-Injection Hardening (RFC-0043 Phase 4)

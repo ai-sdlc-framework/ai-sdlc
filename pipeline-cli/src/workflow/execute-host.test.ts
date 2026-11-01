@@ -85,8 +85,16 @@ const approved: AggregatedVerdict = {
 };
 
 let prepares: number;
+const greenRun: NextStepDeps['runVerify'] = async (o) => ({
+  ok: true,
+  results: [],
+  verifications: { build: 'passed', test: 'passed', lint: 'passed', format: 'passed' },
+  ...(o.developerClaimed ? { developerClaimed: o.developerClaimed } : {}),
+});
+
 function deps(staged: boolean, over: Partial<NextStepDeps> = {}): Partial<NextStepDeps> {
   return {
+    runVerify: greenRun,
     initTask: async () => ({
       ok: true,
       branch: 'b',
@@ -167,6 +175,42 @@ describe('cancel back-channel (AISDLC-481)', () => {
     const out = await workflowNextStep(ctx, { task: 'AISDLC-900', result }, deps(false));
     expect(out.instruction.action === 'stop' && out.instruction.reason).toContain('cancelled');
     expect(readState(ctx.statePath)?.phase).toBe('aborted');
+  });
+});
+
+describe('machine verification through the engine (AISDLC-1086)', () => {
+  it('sends a red run back to the developer and reviews only after a green one', async () => {
+    let runs = 0;
+    const runVerify: NextStepDeps['runVerify'] = async (o) => {
+      const red = runs++ === 0;
+      const failing = {
+        command: 'pnpm test',
+        exitCode: 1,
+        timedOut: false,
+        tail: '1 test failed',
+        summary: '1 test failed',
+      };
+      return {
+        ok: !red,
+        results: red ? [failing] : [],
+        verifications: {
+          build: 'passed',
+          test: red ? 'failed' : 'passed',
+          lint: 'passed',
+          format: 'passed',
+        },
+        ...(o.developerClaimed ? { developerClaimed: o.developerClaimed } : {}),
+        ...(red ? { failing } : {}),
+      };
+    };
+    const d = deps(false, { runVerify });
+    await workflowNextStep(ctx, { task: 'AISDLC-900' }, d);
+    const fix = await workflowNextStep(ctx, { task: 'AISDLC-900', result: DEV_JSON }, d);
+    expect(fix.instruction.action).toBe('spawn-developer');
+    expect(prepares).toBe(0);
+    const next = await workflowNextStep(ctx, { task: 'AISDLC-900', result: DEV_JSON }, d);
+    expect(next.instruction.action).toBe('spawn-reviewers');
+    expect(prepares).toBe(1);
   });
 });
 

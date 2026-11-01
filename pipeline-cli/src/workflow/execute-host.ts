@@ -31,6 +31,7 @@ import {
   recordRound,
   REPORT_SHAPE,
   rollbackStatus,
+  runVerifyGate,
   writeState,
   type NextStepDeps,
   type NextStepInput,
@@ -218,7 +219,7 @@ class ExecuteHost implements EngineHost {
       case 'parent-upkeep':
         return this.init(run);
       case 'parse-dev-return':
-        return this.parse();
+        return this.parse(run);
       case 'build-review-prompts':
         return this.plan(run);
       case 'aggregate-verdicts':
@@ -305,7 +306,7 @@ class ExecuteHost implements EngineHost {
     return { kind: 'ok', covers: INIT_COVERS };
   }
 
-  private async parse(): Promise<StepOutcome> {
+  private async parse(run: WorkflowRunState): Promise<StepOutcome> {
     const state = this.s;
     const parsed = await parseDeveloperReturn({ developerReturn: extractJson(this.devText) });
     if (parsed.parked) {
@@ -335,7 +336,18 @@ class ExecuteHost implements EngineHost {
         ),
       };
     }
-    state.developer = parsed.developer;
+    const gate = await runVerifyGate(this.ctx, this.deps, state, parsed.developer);
+    if (gate.kind === 'halt') return { kind: 'halt', instruction: gate.instruction };
+    if (gate.kind === 'fix') {
+      // AISDLC-1086: a red verify run goes back to the developer and never reaches a reviewer.
+      run.scratch.devPrompt = { file: gate.file, ...(gate.model ? { model: gate.model } : {}) };
+      return {
+        kind: 'invalidate',
+        nodes: ['develop', 'parse'],
+        detail: 'machine verify run red; developer fix round',
+      };
+    }
+    state.developer = gate.developer;
     recordDeveloperResponseOf(state);
     if (state.developerRoundPending) {
       // AISDLC-1053: the ordered round ran; pick the review from the new patch id.

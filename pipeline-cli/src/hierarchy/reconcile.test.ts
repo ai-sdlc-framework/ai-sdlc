@@ -300,7 +300,7 @@ describe('action table (AC2)', () => {
     expect(args).not.toContain('resume');
   });
 
-  it('a coverage, waived or failing-test red reenters with a developer round (AISDLC-1093)', () => {
+  it('a coverage or failing-test red reenters with a developer round (AISDLC-1093)', () => {
     const base = {
       pr: 7,
       taskId: 'T-1',
@@ -311,7 +311,6 @@ describe('action table (AC2)', () => {
     } as unknown as ActionContext;
     for (const line of [
       '[patch-coverage] FAIL: patch coverage 87.27% < 89% threshold. low: a.ts',
-      'x.md records `pnpm test` as waived or skipped',
       '3 tests failed',
     ]) {
       const args = actionCommands({ ...base, failingLine: line }, '/bin')![0]!.args;

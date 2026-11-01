@@ -51,6 +51,13 @@ import { detectDraftPrForBranch } from './03-setup-worktree.js';
 import { composeJudgmentNotes } from '../judgment/agent-output-checks.js';
 import { writeEvent, type WriteEventOpts } from '../orchestrator/events.js';
 
+const VERIFY_KEYS = [
+  ['build', 'pnpm build'],
+  ['test', 'pnpm test'],
+  ['lint', 'pnpm lint'],
+  ['format', 'pnpm format:check'],
+] as const;
+
 export interface PushAndPrStepOptions extends PushAndPrOptions {
   runner?: Runner;
   /**
@@ -186,13 +193,15 @@ export function composeBody(opts: PushAndPrOptions): string {
   });
   const notesBlock = judgmentNotes ? `\n${judgmentNotes}` : '';
 
-  const waiver = opts.developerReturn.testWaiver;
-  const waiverBlock =
-    opts.developerReturn.verifications?.test === 'waived' && waiver
-      ? `\n## Local test waiver (DEC-0202)\n\nFailing locally, waived because each passes when re-run alone and the task diff does not touch it or the source it exercises:\n\n${waiver.tests
-          .map((t) => `- ${t}`)
-          .join('\n')}\n\nPasses-alone evidence: ${waiver.passesAlone}\n`
-      : '';
+  const summaries = opts.developerReturn.verificationSummaries;
+  const verificationBlock = summaries
+    ? `\n## Verification\n\n${VERIFY_KEYS.map(
+        ([key, command]) =>
+          `- \`${command}\` - ${opts.developerReturn.verifications[key]}${
+            summaries[key] ? ` (${summaries[key]})` : ''
+          }`,
+      ).join('\n')}\n`
+    : '';
 
   // AISDLC-1024: the hotfix lane runs on a pinned pipeline build; the PR says which.
   const pipelineRef = opts.pipelineRef ?? process.env.AI_SDLC_PIPELINE_REF;
@@ -209,7 +218,7 @@ export function composeBody(opts: PushAndPrOptions): string {
     `## Changed files\n${filesBlock}\n` +
     reviewBlock +
     notesBlock +
-    waiverBlock +
+    verificationBlock +
     pipelineBlock +
     footer
   );

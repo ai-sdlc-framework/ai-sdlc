@@ -1,7 +1,7 @@
 import { checkFollowups } from '../backlog/followup-rule.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import {
   buildFinalSummary,
   finalizeTask,
@@ -539,42 +539,23 @@ describe('Step 10 — finalizeTask', () => {
   });
 });
 
-describe('Step 10 - waived-tests governance check (AISDLC-1056)', () => {
-  const governanceScript = resolve(__dirname, '../../../scripts/check-pr-governance.mjs');
-  const waivedDev: DeveloperReturn = {
-    ...dev,
-    verifications: { ...dev.verifications, test: 'waived' },
-  };
-  const run = (changed: string, developerReturn: DeveloperReturn) => {
-    writeTaskFile(tmp, { id: 'AISDLC-9', title: 'nine', status: 'In Progress' });
-    const fake = new FakeRunner().on(/^git diff/, ok(changed));
-    return finalizeTask({
+describe('Step 10 - machine verification summaries (AISDLC-1086)', () => {
+  it('writes the four bullets with the machine summary lines', () => {
+    const { finalSummary } = buildFinalSummary({
       taskId: 'AISDLC-9',
       workDir: tmp,
       worktreePath: tmp,
       task,
-      developerReturn,
+      developerReturn: {
+        ...dev,
+        verificationSummaries: { test: 'Tests 12 passed (12)', build: 'done' },
+      },
       verdict: approved(),
       iterations: 1,
-      runner: fake.toRunner(),
-      skipCommit: true,
-      governanceScript,
     });
-  };
-
-  it('fails with the gate message when pipeline code is touched and pnpm test is waived', async () => {
-    await expect(run('pipeline-cli/src/foo.ts\n', waivedDev)).rejects.toThrow(
-      /waived-tests governance check failed[\s\S]*a waiver is not allowed for pipeline-cli\/src/,
-    );
-  });
-
-  it('passes the same wording on a docs-only diff', async () => {
-    const r = await run('docs/operations/x.md\n', waivedDev);
-    expect(r.skipped).toBe(false);
-  });
-
-  it('passes pipeline code with a passed suite', async () => {
-    const r = await run('pipeline-cli/src/foo.ts\n', dev);
-    expect(r.skipped).toBe(false);
+    expect(finalSummary).toContain('- `pnpm test` — passed (Tests 12 passed (12))');
+    expect(finalSummary).toContain('- `pnpm build` — passed (done)');
+    expect(finalSummary).toContain('- `pnpm lint` — passed\n');
+    expect(finalSummary).toContain('- `pnpm format:check` — passed\n');
   });
 });

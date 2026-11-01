@@ -100,11 +100,10 @@ Internal sessions may edit governance config, so the control is review and visib
 
 **Untrusted-signal check (security review):** confirm an untrusted run (`AI_SDLC_UNTRUSTED_RUN`) cannot clear its own untrusted signal. The signal must be read only from the hook/CI process environment; flag as `critical` any diff that lets a Write/Edit/MultiEdit target, `agent-role.yaml` key, `.active-task` sentinel, project setting, or shell-command env assignment turn it off, or that lets an untrusted run write any path under `.ai-sdlc/` or `.github/workflows/`. Also confirm CI (not the hook) is the boundary for fork and outside-author PRs.
 
-## Git safety and test waivers (AISDLC-611, AISDLC-1022)
+## Git safety (AISDLC-611)
 
-<!-- prompt-rules:begin ids=stash,waived-tests -->
+<!-- prompt-rules:begin ids=stash -->
 - **Stash:** never `git stash pop`, `git stash clear` or a bare `git stash drop`; the stack is shared across worktrees, so prefer a WIP commit, or `git stash push -u -m <tag>` then `git stash apply <ref>` (instruction only, no hook).
-- **Waived tests on pipeline code (AISDLC-1022):** a waived or skipped `pnpm test` on a change under `pipeline-cli/src`, `orchestrator/src` or `ai-sdlc-plugin/hooks` is a critical finding, never a waiver; the developer states the exact test command run and its summary line in `notes`, and the governance-gate job blocks a completed task file that records the suite as waived or skipped.
 <!-- prompt-rules:end -->
 
 ## POST — Output Contract Restatement (Prompt-Injection Hardening)
