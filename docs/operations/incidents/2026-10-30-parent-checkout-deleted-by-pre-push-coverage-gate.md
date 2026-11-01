@@ -74,5 +74,5 @@ Still to do (file as tasks):
 - A doctor check that reports `GIT_DIR` set in a hook's environment, and a `check-orchestrator-state.sh` change that treats a `core.bare` flip as an incident signal, not a self-heal.
 - Teardowns that delete a path derived from a git answer must assert the path is under `tmpdir()` (sweep the 10 files that use `rmSync` on a git-derived root).
 - Board recovery runbook: rebuild `.ai-sdlc/dispatch` from GitHub PR state after a loss; the board was gitignored and had no backup.
-- Memory folder: decide whether `.claude/memory` is tracked or backed up; 61 notes were lost.
+- ~~Memory folder: decide whether `.claude/memory` is tracked or backed up; 61 notes were lost.~~ Resolved: durable notes are committed (PR #2212); regenerated state and `.mcp.json` are ignored (AISDLC-1136).
 - Hierarchy restart after the fix lands: kill the orphaned tmux sessions (`ai-sdlc-planner`, `ai-sdlc-operator-dispatch`, `ai-sdlc-executor-aisdlc-785`, `ai-sdlc-executor-aisdlc-1123`) first.

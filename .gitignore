@@ -171,3 +171,14 @@ ai-sdlc-plugin/.stale-runtime-cache.json
 # SessionEnd hook (.claude/hooks/archive-transcript.sh) copies Claude Code session
 # transcripts here. Plaintext, may hold secrets: machine-local, never committed.
 .claude/transcripts/
+
+# AISDLC-1136: machine-regenerated handoff state (cli-hierarchy handoff write); durable notes stay tracked
+.claude/memory/project_*_handoff_*.md
+# AISDLC-1136: handoff archive files rolled over by handoff write
+.claude/memory/*_archive.md
+# AISDLC-1136: outward-action ledgers appended by handoff note
+.claude/memory/handoff_ledger_*.jsonl
+# AISDLC-1136: per-machine Claude Code settings
+.claude/settings.local.json
+# AISDLC-1136: project MCP config points at per-machine sibling checkouts; copy .mcp.json.example
+.mcp.json
