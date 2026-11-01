@@ -20,6 +20,7 @@ import {
   chmodSync,
   utimesSync,
   readdirSync,
+  statSync,
   accessSync,
   constants as fsConstants,
 } from 'node:fs';
@@ -63,6 +64,8 @@ import {
   checkBacklogDriftWarnings,
   fixUntrackedReviewLedgers,
   checkParentCheckoutState,
+  checkHookEnvHygiene,
+  hookPreamble,
   checkConfigManifest,
   checkWorkflowDocument,
   fixConfigManifest,
@@ -2679,5 +2682,74 @@ describe('vscode-hierarchy-terminals check', () => {
 
   it('is registered with a fix', () => {
     expect(DOCTOR_CHECKS.find((x) => x.id === 'vscode-hierarchy-terminals')?.fix).toBeDefined();
+  });
+});
+
+// ── hook-env-hygiene (AISDLC-1129) ────────────────────────────────────
+
+describe('hook-env-hygiene check', () => {
+  function hookAdapters(hooks: Record<string, string>) {
+    return makeAdapters({
+      listFiles: () => ['_', ...Object.keys(hooks)],
+      readFile: (p) => hooks[p.split('/').pop() ?? ''] ?? null,
+      runCommand: (cmd, args) => {
+        const r = spawnSync(cmd, args, { encoding: 'utf8' });
+        return { stdout: r.stdout ?? '', exitCode: r.status ?? 1 };
+      },
+    });
+  }
+
+  it('splits the preamble at the first gate command', () => {
+    expect(hookPreamble('set -eu\nunset GIT_DIR\n./scripts/gate.sh\nunset X\n')).toBe(
+      'set -eu\nunset GIT_DIR',
+    );
+  });
+
+  it('passes when every hook unsets the variables before its first gate', () => {
+    const r = checkHookEnvHygiene(
+      makeCtx(
+        hookAdapters({
+          'pre-push': 'set -eu\nunset GIT_DIR GIT_WORK_TREE\nnode scripts/x.mjs\n',
+          'commit-msg': 'unset GIT_DIR GIT_WORK_TREE\npnpm exec commitlint\n',
+        }),
+      ),
+    );
+    expect(r.severity).toBe('pass');
+  });
+
+  it('fails and names a hook that leaves GIT_DIR set', () => {
+    const r = checkHookEnvHygiene(
+      makeCtx(
+        hookAdapters({
+          good: 'unset GIT_DIR GIT_WORK_TREE\nnode a.mjs\n',
+          bad: 'echo hi\n./scripts/gate.sh\n',
+        }),
+      ),
+    );
+    expect(r.severity).toBe('fail');
+    expect(r.title).toContain('bad');
+    expect(r.title).not.toContain('good,');
+  });
+
+  it('fails when only GIT_WORK_TREE survives', () => {
+    const r = checkHookEnvHygiene(makeCtx(hookAdapters({ h: 'unset GIT_DIR\nnode a.mjs\n' })));
+    expect(r.severity).toBe('fail');
+  });
+
+  it('warns when the preamble cannot be evaluated', () => {
+    const r = checkHookEnvHygiene(makeCtx(hookAdapters({ h: 'exit 0\nnode a.mjs\n' })));
+    expect(r.severity).toBe('warn');
+  });
+
+  it('passes on the real .husky hooks of this repository', () => {
+    const repoRoot = join(__dirname, '..', '..', '..', '..');
+    const adapters = makeAdapters({
+      listFiles: (p) => readdirSync(p).filter((n) => statSync(join(p, n)).isFile()),
+      runCommand: (cmd, args) => {
+        const r = spawnSync(cmd, args, { encoding: 'utf8' });
+        return { stdout: r.stdout ?? '', exitCode: r.status ?? 1 };
+      },
+    });
+    expect(checkHookEnvHygiene(makeCtx(adapters, repoRoot)).severity).toBe('pass');
   });
 });

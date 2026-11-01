@@ -1857,6 +1857,75 @@ export function checkParentCheckoutState(ctx: DoctorRunContext): DoctorCheckResu
   ];
 }
 
+// ── Hook environment hygiene (AISDLC-1129) ─────────────────────────────
+
+/** A hook line at column 0 that starts a gate: a script, package runner, or piped script. */
+const HOOK_GATE_LINE = /^(\.\/|node\s|pnpm\s|npx\s|bash\s|sh\s|printf\s.*\|\s*\.\/)/;
+
+/** Lines of a hook up to (excluding) its first gate command. */
+export function hookPreamble(text: string): string {
+  const out: string[] = [];
+  for (const line of text.split('\n')) {
+    if (HOOK_GATE_LINE.test(line)) break;
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+/**
+ * Git exports `GIT_DIR` (an absolute path into the shared .git) to hooks run from a
+ * linked worktree, and every child inherits it (2026-10-30 incident). Runs each
+ * `.husky/*` hook's preamble under `sh` with `GIT_DIR` and `GIT_WORK_TREE` set and
+ * `git` stubbed, and fails when either survives to the first gate.
+ */
+export function checkHookEnvHygiene(ctx: DoctorRunContext): DoctorCheckResult {
+  const dir = join(ctx.projectDir, '.husky');
+  const leaking: string[] = [];
+  const unevaluated: string[] = [];
+  let checked = 0;
+  for (const name of (ctx.adapters.listFiles?.(dir) ?? []).sort()) {
+    if (name.startsWith('_') || name.startsWith('.')) continue;
+    const text = ctx.adapters.readFile(join(dir, name));
+    if (text === null) continue;
+    checked += 1;
+    const script = [
+      'exec </dev/null',
+      'export GIT_DIR=/nonexistent/doctor-git-dir GIT_WORK_TREE=/nonexistent/doctor-work-tree',
+      'git() { return 0; }',
+      hookPreamble(text),
+      'printf "DOCTOR_GIT_DIR=%s\\nDOCTOR_GIT_WORK_TREE=%s\\n" "${GIT_DIR-}" "${GIT_WORK_TREE-}"',
+    ].join('\n');
+    const r = ctx.adapters.runCommand('sh', ['-c', script]);
+    const gitDir = /^DOCTOR_GIT_DIR=(.*)$/m.exec(r.stdout);
+    const workTree = /^DOCTOR_GIT_WORK_TREE=(.*)$/m.exec(r.stdout);
+    if (!gitDir || !workTree) unevaluated.push(name);
+    else if (gitDir[1] !== '' || workTree[1] !== '') leaking.push(name);
+  }
+  if (leaking.length > 0) {
+    return {
+      id: 'hook-env-hygiene',
+      severity: 'fail',
+      title: `husky hook(s) leave GIT_DIR/GIT_WORK_TREE set for their gates: ${leaking.join(', ')}`,
+      remediation:
+        'Add `unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_PREFIX` before the first gate command of each listed .husky hook (see docs/operations/incidents/2026-10-30-parent-checkout-deleted-by-pre-push-coverage-gate.md).',
+      anonymizableEvidence: { leakingHooks: leaking.length },
+    };
+  }
+  if (unevaluated.length > 0) {
+    return {
+      id: 'hook-env-hygiene',
+      severity: 'warn',
+      title: `could not evaluate the preamble of husky hook(s): ${unevaluated.join(', ')}`,
+      remediation: 'Run each listed hook preamble under `sh` by hand and check `env | grep GIT_`.',
+    };
+  }
+  return {
+    id: 'hook-env-hygiene',
+    severity: 'pass',
+    title: `${checked} husky hook(s) drop GIT_DIR and GIT_WORK_TREE before their first gate`,
+  };
+}
+
 // ── Force-push policy (AISDLC-710) ──────────────────────────────────────
 
 export type ForcePushPolicySource = 'default' | 'explicit' | 'malformed';
@@ -3068,6 +3137,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     id: 'feature-workflows',
     description: 'Workflow files exist for every enabled feature (AISDLC-582).',
     run: checkFeatureWorkflows,
+  },
+  {
+    id: 'hook-env-hygiene',
+    description:
+      'Every .husky hook drops GIT_DIR and GIT_WORK_TREE before its first gate command (2026-10-30 incident, AISDLC-1129).',
+    run: checkHookEnvHygiene,
   },
   {
     id: 'force-push-policy',

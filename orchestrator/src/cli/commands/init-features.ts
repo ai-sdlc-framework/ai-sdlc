@@ -1726,7 +1726,10 @@ export async function applyFeatureSelection(
         // is pure POSIX and never pipes, so `set -eu` under `sh` is correct in
         // both dash and bash. For the `.git/hooks/pre-push` path git honours
         // the shebang directly, and `sh` works there too.
-        adapters.writeFile(hookPath, `#!/usr/bin/env sh\nset -eu\n\n${HUSKY_PREPUSH_SIGN_SNIPPET}`);
+        adapters.writeFile(
+          hookPath,
+          `#!/usr/bin/env sh\nset -eu\n\n# AISDLC-1129: git exports GIT_DIR into hooks run from a linked worktree; drop it\n# so child processes discover the repository from cwd.\nunset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_PREFIX\n\n${HUSKY_PREPUSH_SIGN_SNIPPET}`,
+        );
         adapters.chmodExecutable(hookPath);
         result.created.push(hookRelPath);
         adapters.log(`  created ${hookRelPath}`);

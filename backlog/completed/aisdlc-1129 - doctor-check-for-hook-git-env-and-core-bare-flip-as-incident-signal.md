@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1129
 title: 'Doctor check for GIT_DIR in hook environments, and a core.bare flip on the parent becomes an incident signal instead of a silent self-heal'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-31'
 labels:

@@ -1,1 +1,3 @@
+# INCIDENT 2026-10-30 (AISDLC-1129): drop the repo-pointing git env before any child runs.
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_PREFIX
 pnpm exec commitlint --edit $1
