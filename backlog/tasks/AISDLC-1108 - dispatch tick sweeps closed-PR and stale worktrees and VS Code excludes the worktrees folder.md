@@ -2,7 +2,7 @@
 id: AISDLC-1108
 title: >-
   Dispatch tick sweeps closed-PR, no-PR and stale worktrees (not only merged + clean), looks PRs up per branch instead of a 200-row list, checks the remove exit code; VS Code settings exclude .worktrees
-status: In Progress
+status: To Do
 assignee: []
 created_date: '2026-10-29'
 labels:
