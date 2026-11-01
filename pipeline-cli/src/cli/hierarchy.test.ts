@@ -157,6 +157,20 @@ describe('runHierarchyCli', () => {
     expect(String(err.mock.calls[0]?.[0])).toContain('MODULE absent');
   });
 
+  it('up prints the board rebuild hint for an empty board beside completed tasks (AISDLC-1130)', async () => {
+    const repo = path.join(tmp, 'repo2');
+    mkdirSync(path.join(repo, 'backlog', 'completed'), { recursive: true });
+    writeFileSync(path.join(repo, 'backlog', 'completed', 'aisdlc-1 - done.md'), '');
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    await runHierarchyCli(
+      ['up', '--executors', '0', '--no-planner', '--no-vscode-tasks', '--no-module-check'],
+      overrides({ cwd: repo }),
+    );
+    err.mockRestore();
+    expect(logs.some((l) => l.includes('rebuild --from-github'))).toBe(true);
+    expect(calls.some((c) => c[0] === 'new-session' && c.includes('rebuild'))).toBe(false);
+  });
+
   it('up --attach returns the exit code of the attach', async () => {
     writeFileSync(
       path.join(tmp, 'settings.json'),

@@ -458,6 +458,8 @@ export interface LoopDeps {
   parentUpkeep?: () => Promise<ParentUpkeepResult>;
   /** Starts a detached usage-ledger ingest once per tick (AISDLC-1122); must not block. */
   usageIngest?: () => void;
+  /** Daily board backup (AISDLC-1130); best effort, must not block the tick. */
+  boardBackup?: () => void;
   /** Ephemeral executors (RFC-0059): down on verdict, sweep, spawn per claim; absent means standing executors only. */
   ephemeral?: EphemeralDeps;
   /** PRs for the closed-unmerged KPI (AISDLC-831); undefined when GitHub cannot be read. */
@@ -993,6 +995,11 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     deps.usageIngest?.();
   } catch {
     /* ledger ingest is best effort and must never stop the dispatch loop */
+  }
+  try {
+    deps.boardBackup?.();
+  } catch {
+    /* a failed backup must never stop the dispatch loop */
   }
   const githubFresh = githubReadFresh(deps, state);
   const readGithub = !quotaSkip && !githubFresh;

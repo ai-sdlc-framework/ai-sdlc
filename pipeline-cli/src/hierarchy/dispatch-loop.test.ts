@@ -279,6 +279,21 @@ describe('auto-brief (AISDLC-930)', () => {
     ).resolves.toBeDefined();
   });
 
+  it('runs the board backup each tick and survives a throwing one (AISDLC-1130)', async () => {
+    let calls = 0;
+    await runDispatchTick(deps({ boardBackup: () => void calls++ }));
+    expect(calls).toBe(1);
+    await expect(
+      runDispatchTick(
+        deps({
+          boardBackup: () => {
+            throw new Error('disk full');
+          },
+        }),
+      ),
+    ).resolves.toBeDefined();
+  });
+
   it('skips the parent upkeep for low quota and omits it when not wired (AISDLC-981)', async () => {
     let calls = 0;
     const low = await runDispatchTick(

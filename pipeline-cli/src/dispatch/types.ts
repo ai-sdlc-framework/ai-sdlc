@@ -244,6 +244,8 @@ export interface DispatchVerdict {
   prOpenedAt?: string;
   /** AISDLC-894 - ISO-8601 time the dispatch tick landed (merged or armed) the task's PR. */
   landed?: string;
+  /** AISDLC-1130 - true when `cli-dispatch rebuild` derived this verdict from GitHub, not an executor. */
+  rebuilt?: boolean;
 }
 
 /**

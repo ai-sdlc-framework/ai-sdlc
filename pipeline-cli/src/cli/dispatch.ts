@@ -227,6 +227,15 @@ import type { CommandRunner } from '../hierarchy/types.js';
 import { DEFAULT_REQUEUE_RETRY_LIMIT } from '../dispatch/session-reaper.js';
 import { checkDispatchCaller, loadOperational, type IdentityDeps } from '../hierarchy/index.js';
 import { nextSubId } from '../dispatch/subid.js';
+import {
+  applyRebuild,
+  backlogTaskIds,
+  backupBoard,
+  backupDirFor,
+  classifyRebuild,
+  listAllPrs,
+  restoreBoard,
+} from '../dispatch/board-recovery.js';
 import type {
   BoardEntry,
   ClaimResult,
@@ -395,6 +404,8 @@ export interface DispatchCliDeps {
   callerRole?: () => HierarchyRole | null;
   /** Runs `gh` for `reenter`; default the process's `gh`. */
   ghRun?: CommandRunner;
+  /** Replaces the all-state PR list `rebuild` reads (tests). */
+  listAllPrs?: () => import('../dispatch/board-recovery.js').RebuildPr[];
 }
 
 /** File paths touched by open pull requests, from the `gh` CLI. */
@@ -693,6 +704,59 @@ export async function runDispatchCli(
         );
         return 1;
       }
+    }
+
+    case 'rebuild': {
+      // AISDLC-1130: derive done/failed/queued entries from GitHub PR state and backlog/.
+      if (flags['from-github'] !== 'true') {
+        process.stderr.write('cli-dispatch rebuild: --from-github is required\n');
+        return 2;
+      }
+      const cwd = deps.cwd ?? process.cwd();
+      let plan;
+      try {
+        const prs = deps.listAllPrs ? deps.listAllPrs() : listAllPrs(createSystemRunner(), cwd);
+        plan = classifyRebuild(prs, backlogTaskIds(path.join(cwd, 'backlog', 'completed')));
+      } catch (err) {
+        process.stderr.write(
+          `cli-dispatch rebuild: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+        return 1;
+      }
+      if (flags['dry-run'] === 'true') {
+        out({ dryRun: true, counts: plan.counts, items: plan.items });
+        return 0;
+      }
+      let baseSha: string;
+      try {
+        baseSha = resolveBaseSha(cwd);
+      } catch {
+        baseSha = '0000000';
+      }
+      const written = applyRebuild(plan, { boardDir, repoRoot: cwd, baseSha, now: clockNow() });
+      out({ dryRun: false, planned: plan.counts, written });
+      return 0;
+    }
+
+    case 'restore': {
+      const backup = requireFlag(flags, 'backup');
+      try {
+        restoreBoard(path.resolve(backup), boardDir, flags['force'] === 'true');
+        out({ ok: true, restored: path.resolve(backup), boardDir });
+        return 0;
+      } catch (err) {
+        process.stderr.write(
+          `cli-dispatch restore: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+        return 1;
+      }
+    }
+
+    case 'backup': {
+      const cwd = deps.cwd ?? process.cwd();
+      const result = backupBoard(boardDir, flags['backup-dir'] ?? backupDirFor(cwd), clockNow());
+      out(result);
+      return 0;
     }
 
     case 'peek': {
@@ -1762,6 +1826,9 @@ Usage:
   cli-dispatch <subcommand> [--board-dir <path>] [...]
 
 Subcommands:
+  rebuild --from-github [--dry-run]   (derive done/failed/queued from PR state and backlog/completed; verdicts marked rebuilt)
+  backup [--backup-dir <path>]   (tar the board to ~/.ai-sdlc/board-backups/<repo-id>/<date>.tar.gz; keeps seven)
+  restore --backup <file> [--force]   (extract a backup into the board; refuses a non-empty board)
   peek [--order]   (--order lists eligible queue entries in claim order: wave, priority, dispatchedAt)
   reprioritize <task-id> --priority <n> [--note "<text>"]   (queued tasks only; lower claims first)
   claim --worker-kind {in-session-agent|claude-p-shell} [--worker <name>] [--wait <sec>]

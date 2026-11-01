@@ -81,6 +81,7 @@ import {
 import { sanitizeVerdict } from '../dispatch/verdict-fields.js';
 import { enqueueTasks, type EnqueueEntry } from '../dispatch/enqueue.js';
 import { requeueFailed } from '../dispatch/requeue.js';
+import { backupBoard, backupDirFor, boardRecoveryHint } from '../dispatch/board-recovery.js';
 import { reenter } from '../hierarchy/reenter.js';
 import { now as clockNow } from '../clock.js';
 import { runDemo, type DemoDeps } from '../hierarchy/demo.js';
@@ -610,6 +611,8 @@ export async function runHierarchyCli(
     parentUpkeep?: () => Promise<ParentUpkeepResult>;
     /** Replaces the per-tick usage ingest launch (tests). */
     usageIngest?: () => void;
+    /** Replaces the daily board backup the tick runs (tests). */
+    boardBackup?: () => void;
     /** Replaces the usage endpoint and credential reads (tests). */
     usage?: Partial<UsageDeps>;
     /** Replaces the demo's system dependencies (tests). */
@@ -689,6 +692,9 @@ export async function runHierarchyCli(
   try {
     switch (subcommand) {
       case 'up': {
+        // AISDLC-1130: an empty board beside completed tasks gets a hint; the rebuild is never run unasked.
+        const hint = boardRecoveryHint(deps.boardDir, deps.cwd);
+        if (hint) deps.log(hint);
         const result = await hierarchyUp(
           {
             executors: flags.executors ?? '0',
@@ -1212,6 +1218,12 @@ export async function runHierarchyCli(
                   cap: () => executorCap(deps.boardDir, deps.now().getTime(), deps.env).cap,
                 },
               }),
+          // AISDLC-1130: once a day the board is tarred under ~/.ai-sdlc/board-backups/.
+          boardBackup:
+            extras.boardBackup ??
+            (() => {
+              backupBoard(deps.boardDir, backupDirFor(repoRoot), deps.now());
+            }),
           // AISDLC-1122: every tick ingests what is new; detached, so the tick never waits.
           usageIngest:
             extras.usageIngest ??
