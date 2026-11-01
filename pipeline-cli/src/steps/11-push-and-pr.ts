@@ -47,6 +47,7 @@ import {
 } from './02-compute-branch.js';
 import { landPrep } from './land-prep.js';
 import { ensureWorkspaceBuilt } from './ensure-workspace-built.js';
+import { decidePrDraft } from '../hierarchy/mark-ready.js';
 import { detectDraftPrForBranch } from './03-setup-worktree.js';
 import { composeJudgmentNotes } from '../judgment/agent-output-checks.js';
 import { writeEvent, type WriteEventOpts } from '../orchestrator/events.js';
@@ -657,12 +658,17 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
   // `gh pr ready` (Step 13) to flip the draft to ready and trigger CI exactly
   // once. See `docs/operations/aisdlc-218-draft-pr-flow.md` and
   // `ai-sdlc-plugin/commands/execute.md` Step 11 / Step 13.
+  const prDecision = decidePrDraft(
+    opts.workDir,
+    loadOperationalPolicy(opts.workDir, opts.workDir).openTaskPrsReady,
+  );
+  (opts.logger ?? DEFAULT_LOGGER).info(prDecision.reason);
   const prResult = await runner(
     'gh',
     [
       'pr',
       'create',
-      ...(loadOperationalPolicy(opts.workDir, opts.workDir).openTaskPrsReady ? [] : ['--draft']),
+      ...(prDecision.draft ? ['--draft'] : []),
       '--title',
       title,
       '--body',

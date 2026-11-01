@@ -28,6 +28,7 @@ import { isProtectedBranch } from '../hierarchy/lease-policy.js';
 import { leasePushPreflight, type LeasePreflight } from '../hierarchy/lease-preflight.js';
 import { writeVerdictFile } from '../cli/execute.js';
 import { resolveTargetBranch } from '../steps/02-compute-branch.js';
+import { decidePrDraft } from '../hierarchy/mark-ready.js';
 import { detectDraftPrForBranch } from '../steps/03-setup-worktree.js';
 import { findTaskFile } from '../steps/01-validate.js';
 import { buildFinalSummary } from '../steps/10-finalize.js';
@@ -612,12 +613,17 @@ async function shipInner(
     const footer = `\nReferences ${state.taskId}\n`;
     const line = state.classifierLine ? `\n${state.classifierLine}\n` : '';
     body = body.endsWith(footer) ? body.slice(0, -footer.length) + line + footer : body + line;
+    const prDecision = decidePrDraft(
+      ctx.workDir,
+      loadOperationalPolicy(ctx.workDir, ctx.workDir).openTaskPrsReady,
+    );
+    ctx.logger.info(prDecision.reason);
     const create = await runner(
       'gh',
       [
         'pr',
         'create',
-        ...(loadOperationalPolicy(ctx.workDir, ctx.workDir).openTaskPrsReady ? [] : ['--draft']),
+        ...(prDecision.draft ? ['--draft'] : []),
         '--title',
         title,
         '--body',

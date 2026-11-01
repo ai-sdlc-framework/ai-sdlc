@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1149
 title: 'Task PRs open ready when CodeQL does not run on pull requests: shared detection for step 11, ship and mark-ready, openTaskPrsReady in the schema'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-01'
 labels:

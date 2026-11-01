@@ -132,7 +132,7 @@ import {
   hierarchyUp,
   loadOperationalPolicy,
   markReadyAfterCodeql,
-  repoHasCodeql,
+  codeqlRunsOnPullRequests,
   createLander,
   landEligiblePrs,
   readMergeAuthors,
@@ -1274,7 +1274,7 @@ export async function runHierarchyCli(
           listAllPrs: () => fetchClosedUnmergedPrs(wakeGh, repoRoot),
           markReady: () =>
             markReadyAfterCodeql(wakeGh, repoRoot, {
-              hasCodeql: repoHasCodeql(repoRoot),
+              hasCodeql: codeqlRunsOnPullRequests(repoRoot),
             }),
           landEligible:
             extras.landEligible ??

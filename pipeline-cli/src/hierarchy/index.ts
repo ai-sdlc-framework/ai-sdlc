@@ -81,7 +81,11 @@ export {
   readMergeAuthors,
   type LandReport,
 } from './land-eligible.js';
-export { markReadyAfterCodeql, repoHasCodeql, type MarkReadyReport } from './mark-ready.js';
+export {
+  markReadyAfterCodeql,
+  codeqlRunsOnPullRequests,
+  type MarkReadyReport,
+} from './mark-ready.js';
 export {
   checkSendTarget,
   readReceivedAddresses,
