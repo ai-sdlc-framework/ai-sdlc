@@ -27,6 +27,7 @@ import {
   formatVerifyFeedback,
   iterateReviewLoop,
   recordDeveloperHonestyEvent,
+  applyVerifyRun,
   runVerifyCommands,
   writeVerifyRunState,
   parseDeveloperReturnWithRetry,
@@ -62,18 +63,6 @@ import {
 } from './types.js';
 
 /** The dispatch board of the checkout the pipeline runs from. */
-function mergeVerified(
-  claimed: DeveloperReturn['verifications'],
-  verified: Record<'build' | 'test' | 'lint' | 'format', DeveloperReturn['verifications']['build']>,
-): DeveloperReturn['verifications'] {
-  return {
-    build: verified.build === 'skipped' ? claimed.build : verified.build,
-    test: verified.test === 'skipped' ? claimed.test : verified.test,
-    lint: verified.lint === 'skipped' ? claimed.lint : verified.lint,
-    format: verified.format === 'skipped' ? claimed.format : verified.format,
-  };
-}
-
 function dispatchBoardDir(workDir: string): string {
   return process.env.AI_SDLC_DISPATCH_BOARD_DIR ?? join(workDir, '.ai-sdlc', 'dispatch');
 }
@@ -449,12 +438,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
         });
         writeVerifyRunState(routingArtifactsDir(opts.workDir), opts.taskId, run);
         if (run.ok) {
-          initialDev = {
-            ...initialDev,
-            verifications: run.skipped
-              ? initialDev.verifications
-              : mergeVerified(initialDev.verifications, run.verifications),
-          };
+          initialDev = applyVerifyRun(initialDev, run);
           break;
         }
         if (claimedGreenButRed(run)) recordDeveloperHonestyEvent(opts.workDir, opts.taskId, run);

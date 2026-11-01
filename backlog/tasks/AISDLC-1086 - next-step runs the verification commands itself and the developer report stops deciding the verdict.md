@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1086
 title: 'next-step runs the verification commands itself after the developer returns: the machine-written result replaces the developer self-report, a red run routes into the fix round, and the test waiver shape is deleted'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-27'
 labels:

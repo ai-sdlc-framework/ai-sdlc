@@ -4,7 +4,8 @@
  * Mirrors `execute-orchestrator.md` Step 6:
  *
  *  - If `commitSha` is null → developer-failed.
- *  - If any of `verifications.{build,test,lint,format}` is `failed` → developer-failed.
+ *  - `verifications` is only the developer's claim (AISDLC-1086): it may be omitted or `failed`;
+ *    the machine verify run decides.
  *  - Otherwise the structured return is validated and returned.
  *
  * Inputs accepted as either a JSON string or an already-parsed object so
@@ -32,35 +33,6 @@ import type {
   VerificationStatus,
 } from '../types.js';
 import { runAcCoverage, type AcCoverageHook } from '../judgment/agent-output-checks.js';
-
-const VALID_VERIFICATION_STATUSES: VerificationStatus[] = ['passed', 'failed', 'skipped'];
-
-/** Only `test` may be waived (DEC-0202); build, lint and format never are. */
-function validStatusesFor(key: string): VerificationStatus[] {
-  return key === 'test' ? [...VALID_VERIFICATION_STATUSES, 'waived'] : VALID_VERIFICATION_STATUSES;
-}
-
-/** Returns the reason a `testWaiver` is incomplete, or null when it satisfies DEC-0202. */
-function testWaiverProblem(waiver: unknown): string | null {
-  if (!waiver || typeof waiver !== 'object' || Array.isArray(waiver)) {
-    return "verifications.test is 'waived' but the return has no 'testWaiver' object";
-  }
-  const w = waiver as Record<string, unknown>;
-  if (
-    !Array.isArray(w.tests) ||
-    w.tests.length === 0 ||
-    !w.tests.every((t) => typeof t === 'string' && t.trim() !== '')
-  ) {
-    return 'testWaiver.tests must be a non-empty list of test names';
-  }
-  if (w.untouched !== true) {
-    return 'testWaiver.untouched must be true (the task diff touches neither the test nor the source it exercises)';
-  }
-  if (typeof w.passesAlone !== 'string' || w.passesAlone.trim() === '') {
-    return 'testWaiver.passesAlone must be non-empty evidence that the tests pass when re-run alone';
-  }
-  return null;
-}
 
 export interface ParseDeveloperReturnOptions {
   /** Either a JSON string or a parsed object. */
@@ -125,13 +97,7 @@ export async function parseDeveloperReturn(
   const obj = parsed as Record<string, unknown>;
 
   // Required keys
-  for (const key of [
-    'summary',
-    'filesChanged',
-    'commitSha',
-    'verifications',
-    'acceptanceCriteriaMet',
-  ]) {
+  for (const key of ['summary', 'filesChanged', 'commitSha', 'acceptanceCriteriaMet']) {
     if (!(key in obj)) {
       return { ok: false, reason: `developer return missing required key '${key}'` };
     }
@@ -143,20 +109,16 @@ export async function parseDeveloperReturn(
   if (!Array.isArray(obj.acceptanceCriteriaMet)) {
     return { ok: false, reason: "developer return field 'acceptanceCriteriaMet' must be an array" };
   }
-  const v = obj.verifications;
-  if (!v || typeof v !== 'object') {
-    return { ok: false, reason: "developer return field 'verifications' must be an object" };
-  }
-  const vObj = v as Record<string, unknown>;
+  // AISDLC-1086: `verifications` is a claim, not a gate. Normalise it so every key is present.
+  const claimed = (
+    obj.verifications && typeof obj.verifications === 'object' ? obj.verifications : {}
+  ) as Record<string, unknown>;
+  const normalised: Record<string, VerificationStatus> = {};
   for (const key of ['build', 'test', 'lint', 'format']) {
-    const val = vObj[key];
-    if (typeof val !== 'string' || !validStatusesFor(key).includes(val as VerificationStatus)) {
-      return {
-        ok: false,
-        reason: `developer return verifications.${key} must be one of ${validStatusesFor(key).join('/')}`,
-      };
-    }
+    const val = claimed[key];
+    normalised[key] = val === 'passed' || val === 'failed' ? val : 'skipped';
   }
+  obj.verifications = normalised;
 
   // AISDLC-651.3 — a parked return (`notes.parked: true`, turn budget hit) is a parked outcome,
   // not a failure. Checked before the commitSha/verification gates: WIP may not pass them.
@@ -178,27 +140,6 @@ export async function parseDeveloperReturn(
       }`,
       developer: obj as unknown as DeveloperReturn,
     };
-  }
-
-  for (const key of ['build', 'test', 'lint', 'format'] as const) {
-    if (vObj[key] === 'failed') {
-      return {
-        ok: false,
-        reason: `developer reported verifications.${key} = failed`,
-        developer: obj as unknown as DeveloperReturn,
-      };
-    }
-  }
-
-  if (vObj.test === 'waived') {
-    const problem = testWaiverProblem(obj.testWaiver);
-    if (problem) {
-      return {
-        ok: false,
-        reason: `developer return rejected: ${problem}`,
-        developer: obj as unknown as DeveloperReturn,
-      };
-    }
   }
 
   const developer = obj as unknown as DeveloperReturn;

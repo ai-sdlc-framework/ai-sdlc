@@ -153,6 +153,12 @@ function depsFor(fx: Fixture): Partial<NextStepDeps> {
   const approvals = fx.approvals ?? [];
   const rebases = fx.rebases ?? [];
   return {
+    runVerify: async (o) => ({
+      ok: true,
+      results: [],
+      verifications: { build: 'passed', test: 'passed', lint: 'passed', format: 'passed' },
+      ...(o.developerClaimed ? { developerClaimed: o.developerClaimed } : {}),
+    }),
     initTask: async () =>
       fx.initRefused
         ? { ok: false, reason: 'dependency preflight failed for AISDLC-900' }

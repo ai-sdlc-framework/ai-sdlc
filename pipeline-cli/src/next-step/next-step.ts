@@ -20,6 +20,15 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { consumeDeveloperRound } from '../dispatch/board.js';
+import {
+  applyVerifyRun,
+  claimedGreenButRed,
+  DEFAULT_VERIFY_COMMANDS,
+  formatVerifyFeedback,
+  recordDeveloperHonestyEvent,
+  runVerifyCommands,
+  writeVerifyRunState,
+} from '../steps/verify-commands.js';
 import { buildDeveloperPrompt } from '../steps/05-build-dev-prompt.js';
 import { DEFAULT_MAX_ITERATIONS } from '../steps/09-iterate.js';
 import { findTaskFile } from '../steps/01-validate.js';
@@ -47,6 +56,7 @@ import {
 import { advanceStagedRound, STAGED_REPORT_SHAPE } from './staged-round.js';
 import { checkCancelSignal, updateSessionState } from './session.js';
 import { leasePreflightStep, preSignRebase, shipTask, type PreSignRebaseResult } from './ship.js';
+import type { DeveloperReturn } from '../types.js';
 import type { LeasePreflight } from '../hierarchy/lease-preflight.js';
 import type {
   DoneInstruction,
@@ -79,6 +89,8 @@ export interface NextStepDeps {
   preSignRebase: (ctx: NextStepContext, state: NextStepState) => Promise<PreSignRebaseResult>;
   ship: (ctx: NextStepContext, state: NextStepState) => Promise<DoneInstruction | StopInstruction>;
   buildDeveloperPrompt: typeof buildDeveloperPrompt;
+  /** AISDLC-1086: the machine verify run that replaces the developer's self-report. */
+  runVerify: typeof runVerifyCommands;
   ghIssue: GhIssueDeps;
 }
 
@@ -90,6 +102,7 @@ export const defaultNextStepDeps: NextStepDeps = {
   preSignRebase,
   ship: shipTask,
   buildDeveloperPrompt,
+  runVerify: runVerifyCommands,
   ghIssue: defaultGhIssueDeps,
 };
 
@@ -190,6 +203,70 @@ export async function rollbackStatus(ctx: NextStepContext, state: NextStepState)
       `could not revert ${state.taskId} to ${state.fromStatus}: ${(err as Error).message}`,
     );
   }
+}
+
+export type VerifyGateOutcome =
+  | { kind: 'green'; developer: DeveloperReturn }
+  | { kind: 'fix'; file: string; model?: string }
+  | { kind: 'halt'; instruction: StopInstruction };
+
+/**
+ * AISDLC-1086: run the verification commands in the worktree after the developer returns. The
+ * machine result replaces the developer's claim; a red run builds the next developer prompt from
+ * the failing command's output tail (a fix round, capped by `maxIterations`) and never reaches a
+ * reviewer. Shared by the Machine and the workflow engine host.
+ */
+export async function runVerifyGate(
+  ctx: NextStepContext,
+  deps: NextStepDeps,
+  state: NextStepState,
+  developer: DeveloperReturn,
+): Promise<VerifyGateOutcome> {
+  const artifactsDir =
+    ctx.env.ARTIFACTS_DIR || defaultArtifactsDir(resolveProjectRoot(state.worktreePath));
+  const run = await deps.runVerify({
+    commands: DEFAULT_VERIFY_COMMANDS,
+    cwd: state.worktreePath,
+    runner: ctx.runner,
+    developerClaimed: developer.verifications,
+  });
+  writeVerifyRunState(artifactsDir, state.taskId, run);
+  if (run.ok) return { kind: 'green', developer: applyVerifyRun(developer, run) };
+  if (claimedGreenButRed(run)) recordDeveloperHonestyEvent(state.workDir, state.taskId, run);
+  const spent = state.verifyRounds ?? 0;
+  if (spent >= state.maxIterations) {
+    await rollbackStatus(ctx, state);
+    return {
+      kind: 'halt',
+      instruction: await failRun(
+        ctx,
+        state,
+        'developer-failed',
+        `verify command failed after ${spent} developer fix round(s): ${run.failing?.command}. Worktree preserved at ${state.worktreePath}. To clean up: /ai-sdlc cleanup ${state.taskId}`,
+        { developer },
+      ),
+    };
+  }
+  state.verifyRounds = spent + 1;
+  ctx.logger.progress(
+    '06-verify',
+    `red (${run.failing?.command}); back to the developer, fix round ${state.verifyRounds}`,
+  );
+  const built = await deps.buildDeveloperPrompt({
+    taskId: state.taskId,
+    task: state.task,
+    branch: state.branch,
+    worktreePath: state.worktreePath,
+    iteration: state.iteration + state.verifyRounds,
+    resumeFeedback: formatVerifyFeedback(run),
+    sourceKind: 'backlog',
+  });
+  const file = writeRunFile(ctx, `developer-prompt-verify-${state.verifyRounds}.md`, built.prompt);
+  return {
+    kind: 'fix',
+    file,
+    ...(built.model && built.modelArm !== 'default' ? { model: built.model } : {}),
+  };
 }
 
 /**
@@ -487,7 +564,10 @@ class Machine {
         { developer: parsed.developer ?? null },
       );
     }
-    state.developer = parsed.developer;
+    const gate = await runVerifyGate(ctx, this.deps, state, parsed.developer);
+    if (gate.kind === 'halt') return gate.instruction;
+    if (gate.kind === 'fix') return this.spawnDeveloper(state, gate.file, gate.model);
+    state.developer = gate.developer;
     this.recordDeveloperResponse(state);
     if (state.developerRoundPending) {
       // AISDLC-1053: the ordered round ran. Clear the flag so a later resume of this manifest

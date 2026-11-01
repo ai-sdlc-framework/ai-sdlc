@@ -80,32 +80,18 @@ function push(remoteSha = '0'.repeat(40), pathPrefix = '') {
   });
 }
 
-const WAIVED = '- `pnpm test` - waived\n';
+const MARKER = 'a\n<<<<<<< HEAD\nb\n';
 
 describe('check-governance-on-push.sh', () => {
-  it('refuses a waived-tests marker with pipeline code, passes once removed', () => {
-    fixture();
-    commit({
-      'pipeline-cli/src/a.ts': 'export const a = 1;\n',
-      'backlog/completed/AISDLC-9 - t.md': WAIVED,
-    });
-    const r = push();
-    assert.equal(r.status, 1);
-    assert.match(r.stderr + r.stdout, /waived-tests/);
-    commit({ 'backlog/completed/AISDLC-9 - t.md': '- `pnpm test` - 12 passed\n' });
-    assert.equal(push().status, 0);
-  });
-
   it('ranges a rebased lease push from the origin/main merge-base (AISDLC-1143)', () => {
     fixture();
     const fork = git(['rev-parse', 'HEAD']);
     commit({ 'src/own.txt': 'own\n' });
     const staleRemote = git(['rev-parse', 'HEAD']);
-    // main moves on: a landed commit adds a waived-tests task file next to pipeline code.
+    // main moves on: a landed commit adds a conflict-marker file.
     git(['checkout', '-q', '-b', 'newmain', fork]);
     commit({
-      'pipeline-cli/src/m.ts': 'export const m = 1;\n',
-      'backlog/completed/AISDLC-8 - m.md': WAIVED,
+      'src/m.txt': MARKER,
     });
     git(['update-ref', 'refs/remotes/origin/main', 'HEAD']);
     // the branch is rebased onto the new main; the remote still has the old head.
@@ -113,12 +99,11 @@ describe('check-governance-on-push.sh', () => {
     commit({ 'src/own.txt': 'own2\n' });
     assert.equal(push(staleRemote).status, 0);
     commit({
-      'pipeline-cli/src/b.ts': 'export const b = 1;\n',
-      'backlog/completed/AISDLC-7 - b.md': WAIVED,
+      'src/b.txt': MARKER,
     });
     const r = push(staleRemote);
     assert.equal(r.status, 1);
-    assert.match(r.stderr + r.stdout, /waived-tests/);
+    assert.match(r.stderr + r.stdout, /conflict marker/);
   });
 
   it('refuses a conflict marker in any file', () => {

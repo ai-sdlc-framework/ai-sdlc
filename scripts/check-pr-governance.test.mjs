@@ -14,8 +14,6 @@ import {
   checkChangelog,
   checkReviewers,
   checkScopeCreep,
-  checkWaivedTests,
-  recordsWaivedTests,
   envelopeReviewerNames,
   extractTaskIds,
   isChangelogPath,
@@ -364,56 +362,6 @@ describe('run() and CLI', () => {
       { cwd: d, encoding: 'utf-8' },
     );
     assert.equal(cli.status, 1, cli.stdout + cli.stderr);
-  });
-});
-
-describe('waived-tests check (AISDLC-1022)', () => {
-  const task = (verdict) =>
-    `## Verification\n- \`pnpm build\` \u2014 passed\n- \`pnpm test\` \u2014 ${verdict}\n- \`pnpm lint\` \u2014 passed\n`;
-
-  it('recognises waived and skipped records, not passed ones', () => {
-    assert.equal(recordsWaivedTests(task('waived')), true);
-    assert.equal(recordsWaivedTests(task('skipped')), true);
-    assert.equal(recordsWaivedTests(task('passed')), false);
-  });
-
-  it('fails a pipeline-cli/src change whose completed task waived the suite', () => {
-    const { git, base, commit } = mkRepo();
-    const head = commit(
-      {
-        'pipeline-cli/src/x.ts': 'export {};\n',
-        'backlog/completed/AISDLC-9 - t.md': task('waived'),
-      },
-      'fix: x (AISDLC-9)',
-    );
-    const out = checkWaivedTests({ base, head, git });
-    assert.equal(out.length, 1);
-    assert.match(out[0], /AISDLC-9 - t\.md/);
-  });
-
-  it('passes when the suite passed, or the diff touches no pipeline code', () => {
-    const a = mkRepo();
-    const headA = a.commit(
-      {
-        'pipeline-cli/src/x.ts': 'export {};\n',
-        'backlog/completed/AISDLC-9 - t.md': task('passed'),
-      },
-      'fix: x',
-    );
-    assert.deepEqual(checkWaivedTests({ base: a.base, head: headA, git: a.git }), []);
-    const b = mkRepo();
-    const headB = b.commit(
-      { 'docs/x.md': 'x\n', 'backlog/completed/AISDLC-9 - t.md': task('waived') },
-      'docs: x',
-    );
-    assert.deepEqual(checkWaivedTests({ base: b.base, head: headB, git: b.git }), []);
-  });
-
-  it('fails closed on a git error', () => {
-    const git = () => {
-      throw new Error('boom');
-    };
-    assert.match(checkWaivedTests({ base: 'a', head: 'b', git })[0], /cannot diff/);
   });
 });
 

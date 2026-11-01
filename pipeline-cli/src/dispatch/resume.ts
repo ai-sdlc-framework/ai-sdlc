@@ -309,7 +309,7 @@ export function resumeDone(
       workerKind: 'any',
       dispatchedAt: (opts.now ?? now)().toISOString(),
       dispatchedBy: opts.resumedBy,
-      spec: { taskFile, verifyCommands: DEFAULT_VERIFY_COMMANDS },
+      spec: { taskFile, verifyCommands: [...DEFAULT_VERIFY_COMMANDS] },
     };
   }
 

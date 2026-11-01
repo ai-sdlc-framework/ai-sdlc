@@ -12,14 +12,10 @@ import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { now } from '../clock.js';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
+import { DEFAULT_VERIFY_COMMANDS } from './verify-defaults.js';
 import type { DeveloperReturn, VerificationStatus } from '../types.js';
 
-export const DEFAULT_VERIFY_COMMANDS = [
-  'pnpm build',
-  'pnpm test',
-  'pnpm lint',
-  'pnpm format:check',
-] as const;
+export { DEFAULT_VERIFY_COMMANDS };
 /** Per-command timeout default: 20 minutes. */
 export const DEFAULT_VERIFY_TIMEOUT_MS = 20 * 60 * 1000;
 export const VERIFY_TAIL_LINES = 60;
@@ -33,6 +29,8 @@ export interface VerifyCommandResult {
   timedOut: boolean;
   /** Last 60 lines of combined output. */
   tail: string;
+  /** Last non-empty output line: the command's own summary (for example the test totals). */
+  summary: string;
 }
 
 export interface VerifyRunResult {
@@ -58,6 +56,24 @@ function tailOf(text: string, n: number): string {
     .filter((l, i, a) => l !== '' || i < a.length - 1)
     .slice(-n)
     .join('\n');
+}
+
+function summaryLineOf(tail: string): string {
+  const lines = tail.split('\n').filter((l) => l.trim() !== '');
+  const line = (lines[lines.length - 1] ?? '').trim();
+  return line.length > 160 ? `${line.slice(0, 157)}...` : line;
+}
+
+/** Per-key one-line summaries of the commands that ran (machine-written). */
+export function verifySummaries(
+  run: VerifyRunResult,
+): Partial<Record<'build' | 'test' | 'lint' | 'format', string>> {
+  const out: Partial<Record<VerifyKey, string>> = {};
+  for (const r of run.results) {
+    const key = verifyKeyFor(r.command);
+    if (key && r.summary) out[key] = r.summary;
+  }
+  return out;
 }
 
 export interface RunVerifyOptions {
@@ -87,11 +103,13 @@ export async function runVerifyCommands(opts: RunVerifyOptions): Promise<VerifyR
     const started = now().getTime();
     const r = await runner('sh', ['-c', command], { cwd: opts.cwd, timeout, allowFailure: true });
     const timedOut = r.code !== 0 && now().getTime() - started >= timeout;
+    const tail = tailOf(`${r.stdout}${r.stderr ? '\n' + r.stderr : ''}`, VERIFY_TAIL_LINES);
     const res: VerifyCommandResult = {
       command,
       exitCode: r.code,
       timedOut,
-      tail: tailOf(`${r.stdout}${r.stderr ? '\n' + r.stderr : ''}`, VERIFY_TAIL_LINES),
+      tail,
+      summary: summaryLineOf(tail),
     };
     results.push(res);
     const key = verifyKeyFor(command);
@@ -101,6 +119,15 @@ export async function runVerifyCommands(opts: RunVerifyOptions): Promise<VerifyR
     }
   }
   return { ok: true, results, verifications, ...base };
+}
+
+/** Replace the developer's claimed verifications with the machine-written run result. */
+export function applyVerifyRun(dev: DeveloperReturn, run: VerifyRunResult): DeveloperReturn {
+  return {
+    ...dev,
+    verifications: { ...run.verifications },
+    verificationSummaries: verifySummaries(run),
+  };
 }
 
 /** True when the developer claimed every non-skipped key green but code found red. */

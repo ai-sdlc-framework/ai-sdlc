@@ -276,7 +276,7 @@ describe('Step 11 — composeBody', () => {
     expect(body).toContain('References AISDLC-1');
   });
 
-  it('includes the DEC-0202 waiver section with tests and evidence', () => {
+  it('includes the machine-written verification bullets with summary lines', () => {
     const body = composeBody({
       taskId: 'AISDLC-1',
       workDir: tmp,
@@ -285,14 +285,13 @@ describe('Step 11 — composeBody', () => {
       task,
       developerReturn: {
         ...dev,
-        verifications: { ...dev.verifications, test: 'waived' },
-        testWaiver: { tests: ['flaky > case'], passesAlone: 'passed alone x3', untouched: true },
+        verificationSummaries: { test: 'Tests 3 passed (3)' },
       },
       verdict: approved,
     });
-    expect(body).toContain('Local test waiver (DEC-0202)');
-    expect(body).toContain('- flaky > case');
-    expect(body).toContain('passed alone x3');
+    expect(body).toContain('## Verification');
+    expect(body).toContain('- `pnpm test` - passed (Tests 3 passed (3))');
+    expect(body).toContain('- `pnpm build` - passed');
   });
 
   it('omits the judgment section when there is nothing to report', () => {

@@ -26,7 +26,7 @@ AISDLC-651.2. "Never do X" rules used to be pasted (and sometimes escalated in l
 
 ## Rule ids
 
-`merge`, `force-push`, `close`, `branch-delete`, `destructive-git`, `stash`, `ci-skip`, `governance-config`, `oq-resolution`, `pre-work`, `worktree-cwd`, `executor-no-question`, `hold-reporting`, and `waived-tests` (AISDLC-1022: a waived or skipped `pnpm test` on a change under `pipeline-cli/src`, `orchestrator/src` or `ai-sdlc-plugin/hooks` is a critical finding; `check-pr-governance.mjs` `waived-tests` fails the governance-gate when the completed task file records the suite as waived or skipped).
+`merge`, `force-push`, `close`, `branch-delete`, `destructive-git`, `stash`, `ci-skip`, `governance-config`, `oq-resolution`, `pre-work`, `worktree-cwd`, `executor-no-question`, and `hold-reporting`.
 
 ## Session hooks
 

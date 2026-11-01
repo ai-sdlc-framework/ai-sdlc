@@ -108,18 +108,22 @@ interface Script {
   /** Rebase outcome per approved review, in order (default: skipped). */
   rebases?: Array<'skipped' | 'unchanged' | 'changed' | 'failed'>;
   prepare?: NextStepDeps['prepareReview'];
+  /** Exit code of each machine verify run, in order (default: always green). */
+  verifyExits?: number[];
 }
 
 let counters: {
   prepared: number;
   finalized: number;
   rebased: number;
-  devPrompts: Array<{ iteration?: number; feedback?: string }>;
+  devPrompts: Array<{ iteration?: number; feedback?: string; resume?: string }>;
+  verified: number;
 };
 
 function deps(script: Script = {}): Partial<NextStepDeps> {
   const approvals = script.approvals ?? [];
   const rebases = script.rebases ?? [];
+  const verifyExits = script.verifyExits ?? [];
   return {
     initTask: async () => ({
       ok: true,
@@ -169,8 +173,31 @@ function deps(script: Script = {}): Partial<NextStepDeps> {
       };
       return done;
     },
+    runVerify: async (o) => {
+      const exit = verifyExits[counters.verified++] ?? 0;
+      const results = o.commands.map((command) => ({
+        command,
+        exitCode: exit,
+        timedOut: false,
+        tail: exit === 0 ? 'Tests 4 passed (4)' : 'FAIL x.test.ts\n1 test failed',
+        summary: exit === 0 ? 'Tests 4 passed (4)' : '1 test failed',
+      }));
+      const status = exit === 0 ? ('passed' as const) : ('failed' as const);
+      const failing = exit === 0 ? undefined : results[1];
+      return {
+        ok: exit === 0,
+        results,
+        verifications: { build: 'passed', test: status, lint: 'passed', format: 'passed' },
+        ...(o.developerClaimed ? { developerClaimed: o.developerClaimed } : {}),
+        ...(failing ? { failing } : {}),
+      };
+    },
     buildDeveloperPrompt: async (o) => {
-      counters.devPrompts.push({ iteration: o.iteration, feedback: o.reviewerFeedback });
+      counters.devPrompts.push({
+        iteration: o.iteration,
+        feedback: o.reviewerFeedback,
+        resume: o.resumeFeedback,
+      });
       return { prompt: `iteration ${o.iteration ?? 1} prompt`, task: o.task };
     },
   };
@@ -211,7 +238,7 @@ beforeEach(() => {
   worktree = join(h.root, '.worktrees', 'aisdlc-900');
   mkdirSync(worktree, { recursive: true });
   shipped = [];
-  counters = { prepared: 0, finalized: 0, rebased: 0, devPrompts: [] };
+  counters = { prepared: 0, finalized: 0, rebased: 0, devPrompts: [], verified: 0 };
 });
 afterEach(() => h.cleanup());
 
@@ -266,7 +293,7 @@ describe('happy path', () => {
     });
     expect(shipped).toHaveLength(1);
     expect(shipped[0].needsHumanAttention).toBe(false);
-    expect(shipped[0].developer).toEqual(DEV_RETURN);
+    expect(shipped[0].developer).toMatchObject(DEV_RETURN);
     expect(persisted()).toMatchObject({ phase: 'done', calls: 3 });
   });
 
@@ -443,6 +470,52 @@ describe('resuming and idempotence', () => {
   });
 });
 
+describe('machine verification (AISDLC-1086)', () => {
+  beforeEach(() => writeDemoTaskFile(worktree));
+
+  it('routes a red run into a fix round and logs a developer-honesty event', async () => {
+    const { instructions, last } = await drive(deps({ verifyExits: [1, 0] }));
+    const actions = instructions.map((i) => i.action);
+    expect(actions).toEqual(['spawn-developer', 'spawn-developer', 'spawn-reviewers', 'done']);
+    expect(counters.prepared).toBe(1);
+    expect(counters.devPrompts).toHaveLength(1);
+    expect(counters.devPrompts[0]!.resume).toContain('1 test failed');
+    expect(counters.devPrompts[0]!.resume).toContain('exited 1');
+    const log = readFileSync(join(h.root, '.ai-sdlc', 'usage', 'developer-honesty.jsonl'), 'utf8');
+    expect(log).toContain('"event":"developer-honesty"');
+    expect(last.action).toBe('done');
+  });
+
+  it('writes the machine result over the claim and its summary lines into the state', async () => {
+    await drive(deps({ verifyExits: [0] }));
+    expect(shipped[0]!.developer?.verificationSummaries?.test).toBe('Tests 4 passed (4)');
+    expect(shipped[0]!.developer?.verifications.test).toBe('passed');
+  });
+
+  it('lets a developer claim of failed through: the verify run decides', async () => {
+    const claim = JSON.stringify({
+      ...DEV_RETURN,
+      verifications: { ...DEV_RETURN.verifications, test: 'failed' },
+    });
+    const { last } = await drive(deps(), { devResult: () => claim });
+    expect(last.action).toBe('done');
+    expect(shipped[0]!.developer?.verifications.test).toBe('passed');
+  });
+
+  it('accepts a return with no verifications at all', async () => {
+    const { verifications, ...rest } = DEV_RETURN;
+    void verifications;
+    const { last } = await drive(deps(), { devResult: () => JSON.stringify(rest) });
+    expect(last.action).toBe('done');
+  });
+
+  it('stops as developer-failed when the run stays red past the round cap', async () => {
+    const { last } = await drive(deps({ verifyExits: [1, 1, 1, 1] }));
+    expect(last).toMatchObject({ action: 'stop', outcome: 'developer-failed' });
+    expect(counters.prepared).toBe(0);
+  });
+});
+
 describe('developer failures roll back and stop', () => {
   beforeEach(() => {
     writeDemoTaskFile(worktree);
@@ -481,15 +554,6 @@ describe('developer failures roll back and stop', () => {
     ).not.toContain('status: To Do');
     expect(existsSync(worktree)).toBe(true);
     expect(counters.prepared).toBe(0);
-  });
-
-  it('treats a failed verification as a developer failure', async () => {
-    const bad = JSON.stringify({
-      ...DEV_RETURN,
-      verifications: { ...DEV_RETURN.verifications, test: 'failed' },
-    });
-    const { last } = await drive(deps(), { devResult: () => bad });
-    expect(last).toMatchObject({ action: 'stop', outcome: 'developer-failed' });
   });
 
   it('flags non-JSON prose as a contract violation', async () => {

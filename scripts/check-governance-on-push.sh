@@ -4,7 +4,6 @@
 # same arguments as CI; CI stays the only merge gate. Reads git's pre-push stdin.
 #
 #   conflict markers  added lines starting with a conflict marker refuse the push.
-#   waived-tests      check-pr-governance.mjs waived-tests (AISDLC-1022).
 #   reviewers         check-pr-governance.mjs reviewers, only when the range already adds an
 #                     attestation envelope (a draft pushed before the reviewers ran has none)
 #                     and the push is not docs-only.
@@ -50,10 +49,6 @@ while read -r _LOCAL_REF LOCAL_SHA _REMOTE_REF REMOTE_SHA; do
   if git diff -U0 --no-renames "$BASE..$LOCAL_SHA" | grep -E '^\+(<<<<<<< |=======$|>>>>>>> )' >/dev/null; then
     echo "[governance-gate] conflict marker left in the push range $BASE..$LOCAL_SHA" >&2
     git diff -U0 --no-renames "$BASE..$LOCAL_SHA" | grep -nE '^\+(<<<<<<< |=======$|>>>>>>> )' >&2 || true
-    BLOCKED=$((BLOCKED + 1))
-  fi
-
-  if ! node scripts/check-pr-governance.mjs waived-tests --base "$BASE" --head "$LOCAL_SHA" </dev/null; then
     BLOCKED=$((BLOCKED + 1))
   fi
 
