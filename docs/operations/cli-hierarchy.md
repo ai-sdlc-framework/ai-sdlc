@@ -310,6 +310,8 @@ cli-hierarchy status [--json]
 "nodeVersion": "22.23.2", "nodeMismatch": true, "module": { "state": "loaded|refused|absent|stale", "reason": "..." }, "nextStep": "..." } ], "board": { "queued": n,
 "inflight": n, "done": n, "failed": n }, "webhook": { "state": "up", "port": n, "pid": n }, "scheduler": { "state": "up", "pid": n } }`. Read-only. Exit code `0`.
 
+**Landing retires a failed verdict (AISDLC-1158).** The verdict an executor wrote is a step record; only landing makes a task done. When the reconcile pass marks a PR landed, it moves that task's `failed/<id>.verdict.json` and `failed/<id>.manifest.json` to `done/`, adding `landedSha`, `landedAt` and `supersededCause` and keeping the original failed verdict under `supersededVerdict`. So `status`, `brief-status` and the handoff count a repaired, landed task as done, not failed. `cli-dispatch retire-landed` applies the same move to existing stale entries; it is idempotent and prints `{ "moved": [ { "taskId", "pr" } ] }`.
+
 ### Drain stall (AISDLC-1101)
 
 Each dispatch tick checks for a drain that stopped moving: eligible queued work, an idle executor holding no

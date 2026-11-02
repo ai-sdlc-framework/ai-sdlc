@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1158
 title: 'Landing a PR retires the failed verdict of its task: mark-landed moves failed/<task>.verdict.json and manifest to done/ with the landing sha, so the board never shows a landed task as failed'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-02'
 labels:

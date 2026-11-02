@@ -33,6 +33,8 @@
  *     [--current-step <s>]` — write or refresh a heartbeat.
  *   - `sweep [--stale-ms <n>]` — sweep stale inflight heartbeats; print the
  *     reaped taskIds.
+ *   - `retire-landed` — move the failed verdict and manifest of every task whose PR landed to
+ *     `done/` (AISDLC-1158); idempotent, prints what moved.
  *   - `release --task-id <id> [--force --reason <text>]` — move inflight back
  *     to queue/ (surrender the claim without writing a verdict). Refused when
  *     `done/` already holds a verdict for the task (use `reenter` or
@@ -201,6 +203,7 @@ import { computePatchId } from '../attestation/patch-id.js';
 import { formatSessionLine, listSessions, recordAgentSession } from '../dispatch/sessions.js';
 import { assertClaimHolder, completeTask, splitIdList } from '../dispatch/complete.js';
 import { guardedRelease } from '../dispatch/release-guard.js';
+import { retireLandedSweep } from '../dispatch/retire-landed.js';
 import { clearRuling, setRuling } from '../dispatch/ruling.js';
 import { classifyAndRecord, type PrFacts } from '../hierarchy/pr-state.js';
 import {
@@ -1163,6 +1166,11 @@ export async function runDispatchCli(
       if (staleMs === null) return 2;
       const result = sweepStaleHeartbeats(boardDir, { staleMs });
       out(result);
+      return 0;
+    }
+
+    case 'retire-landed': {
+      out(retireLandedSweep(boardDir, listLanding(boardDir)));
       return 0;
     }
 
