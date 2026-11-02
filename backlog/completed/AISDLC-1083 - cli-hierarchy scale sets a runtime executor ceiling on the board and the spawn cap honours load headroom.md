@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1083
 title: 'cli-hierarchy scale: planner or dispatch sets a runtime executor ceiling on the board, and the spawn cap honours machine load headroom so the pool grows and shrinks with dispatch load'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-27'
 labels:
@@ -42,9 +42,31 @@ RFC-0059 makes the executor pool elastic: the dispatch tick spawns one executor 
 
 ## Acceptance Criteria
 
-- [ ] `cli-hierarchy scale --max 2 --reason x` writes the board ceiling and a `scale-events.jsonl` entry with the caller's roster name; `--clear` removes it; `--max` above the config maximum is refused with a message naming the config key.
-- [ ] The tick never spawns above `min(executors.max, board ceiling, budget allowance, load headroom)`, proven by unit tests over the dispatch loop with a stubbed snapshot and pacer, one test per input being the minimum.
-- [ ] With a stubbed load snapshot at saturation the tick spawns nothing, and after two ticks with the cap below the running count it downs only executors with no inflight task.
-- [ ] `status` prints the CAP line with all four inputs and the winner.
-- [ ] The runbook documents the formula, the command, the config keys and the tighten-only rule.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] `cli-hierarchy scale --max 2 --reason x` writes the board ceiling and a `scale-events.jsonl` entry with the caller's roster name; `--clear` removes it; `--max` above the config maximum is refused with a message naming the config key.
+- [x] The tick never spawns above `min(executors.max, board ceiling, budget allowance, load headroom)`, proven by unit tests over the dispatch loop with a stubbed snapshot and pacer, one test per input being the minimum.
+- [x] With a stubbed load snapshot at saturation the tick spawns nothing, and after two ticks with the cap below the running count it downs only executors with no inflight task.
+- [x] `status` prints the CAP line with all four inputs and the winner.
+- [x] The runbook documents the formula, the command, the config keys and the tighten-only rule.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+
+## Final Summary
+
+## Summary
+Added four tests for the `cli-hierarchy scale` command in `hierarchy.test.ts`, covering the review finding. They cover set and clear, the caller's roster name in `scale-events.jsonl`, missing or invalid flags (exit 2), refusal of an executor caller, and refusal of `--max` above `executors.max` with the config key named in the message. I rebased onto `origin/main` and pushed to the existing draft PR #2277.
+
+## Changes
+- pipeline-cli/src/cli/hierarchy.test.ts
+
+## Design decisions
+I ran all four verifications before the commit, and they passed. I did not re-run them after the rebase. The pre-push hook (including the patch-coverage gate) ran during the push and the push succeeded.
+
+## Verification
+- `pnpm build` — passed (ai-sdlc-plugin/mcp-server build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (246 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
