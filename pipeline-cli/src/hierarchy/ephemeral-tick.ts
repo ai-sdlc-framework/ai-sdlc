@@ -23,8 +23,8 @@ export interface EphemeralDeps {
   spawn: (taskId: string) => Promise<void>;
   /** Kills unrostered spawned-executor tmux sessions; returns the names reaped (AISDLC-1117). */
   reapOrphans?: () => string[];
-  /** Maximum number of live dynamic executors. */
-  cap: () => number;
+  /** Maximum number of live dynamic executors, given how many are live now (the load headroom counts them). */
+  cap: (live?: number) => number;
   /** Sweep delay; default {@link EPHEMERAL_SWEEP_MS}. */
   sweepMs?: number;
 }
@@ -34,7 +34,7 @@ export interface EphemeralReport {
   downed: {
     name: string;
     taskId: string;
-    why: 'verdict' | 'sweep';
+    why: 'verdict' | 'sweep' | 'surplus';
     ok: boolean;
     reason?: string;
   }[];
@@ -68,7 +68,7 @@ export function isEphemeralWorker(boardDir: string, worker: string): boolean {
 async function downOne(
   deps: EphemeralDeps,
   entry: RosterEntry,
-  why: 'verdict' | 'sweep',
+  why: 'verdict' | 'sweep' | 'surplus',
   out: EphemeralReport,
 ): Promise<void> {
   let r: { ok: boolean; reason?: string };
@@ -149,7 +149,7 @@ export async function spawnForEligibleClaims(
   out: EphemeralReport,
 ): Promise<void> {
   const live = dynamicExecutors(boardDir);
-  let slots = deps.cap() - live.length;
+  let slots = deps.cap(live.length) - live.length;
   if (slots <= 0) return;
   const liveTasks = new Set(live.map((e) => e.taskId));
   // AISDLC-1121: a spawned executor claims as an in-session agent; a task it cannot claim would
@@ -177,4 +177,29 @@ export async function spawnForEligibleClaims(
       out.spawnErrors.push({ taskId, error: err instanceof Error ? err.message : String(err) });
     }
   }
+}
+
+/**
+ * AISDLC-1083: down the surplus above the cap, only executors named in `idle` (no inflight
+ * task). Returns how many were downed.
+ */
+export async function downIdleSurplus(
+  boardDir: string,
+  deps: EphemeralDeps,
+  idle: ReadonlySet<string>,
+  out: EphemeralReport,
+): Promise<number> {
+  const live = dynamicExecutors(boardDir).filter(
+    (e) => !out.downed.some((d) => d.name === e.name && d.ok),
+  );
+  let surplus = live.length - deps.cap(live.length);
+  let n = 0;
+  for (const entry of live) {
+    if (surplus <= 0) break;
+    if (!idle.has(entry.name)) continue;
+    await downOne(deps, entry, 'surplus', out);
+    surplus -= 1;
+    n += 1;
+  }
+  return n;
 }
