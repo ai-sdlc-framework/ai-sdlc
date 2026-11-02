@@ -13,7 +13,7 @@ references:
   - ai-sdlc-plugin/hooks/hierarchy/planner.ts
   - ai-sdlc-plugin/hooks/hierarchy/executor.ts
   - ai-sdlc-plugin/hooks/hierarchy/register.tsx
-  - ai-sdlc-plugin/hooks/hierarchy/context-size.ts
+  - pipeline-cli/src/hierarchy/context-size.ts
   - pipeline-cli/src/hierarchy/handoff.ts
   - ai-sdlc-plugin/commands/planner.md
   - docs/operations/cli-hierarchy.md
@@ -33,7 +33,7 @@ At 2026-11-02 17:24:55Z the planner crossed 150k tokens mid-turn and the hierarc
 1. Requirement questioned: must a rotation lose anything the operator would have to re-tell? No. The planner's own command text already says a clear "loses nothing" and the operator confirmed on 2026-11-02 that continuity without a reminder is the requirement. The question is whether the state block can carry it; it cannot, because pending asks and drafts live only in the conversation.
 2. Delete: the `e.text ?? e.reply` read in `plannerTurnComplete`, which has never produced a value; the dead `last-reply:` branch in `resumeAfterClear` is kept but fed from a real source.
 3. Simplify: one mechanism, not two. When `pendingRotate` is set at turn end, the module submits ONE prompt turn ("Handoff routine: run `handoff write --role planner`, then rewrite the `## RESUME HERE` block with open rulings, owed items, pending operator asks with the exact draft paths, next free task and decision ids, what each peer waits on; reply with the file path only") and rotates when THAT turn completes. The RESUME block is then written by the model that holds the context, with the same routine the operator triggers by hand.
-4. Accelerate: the last reply comes from the transcript's last assistant text record (as `context-size.ts` already reads the transcript for usage), stored at `turn.complete`, so `/ai-sdlc:planner last-reply: ...` works on the next resume without waiting for a host payload change.
+4. Accelerate: the last reply comes from the transcript's last assistant text record (as `pipeline-cli/src/hierarchy/context-size.ts` already reads the transcript for usage), stored at `turn.complete`, so `/ai-sdlc:planner last-reply: ...` works on the next resume without waiting for a host payload change.
 5. Automate: module tests cover the two-step rotation (prompt turn, then clear), the transcript-sourced last reply, the role-correct `resumePending` check, and the operator line printed when a threshold rotation is scheduled.
 
 Velocity impact: every planner rotation (at least one per long operator session) stops costing an operator reminder and a transcript archaeology round; outward work (unfiled drafts, pending gos) can no longer be silently dropped by a clear.
