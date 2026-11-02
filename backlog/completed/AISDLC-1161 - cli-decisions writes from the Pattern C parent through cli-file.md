@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1161
 title: 'cli-decisions add|answer|escalate --file writes a decision event from the Pattern-C parent through cli-file own worktree and PR, so planners stop hand-moving events out of throwaway worktrees'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-02'
 labels:
@@ -43,12 +43,38 @@ Velocity impact: every planner-authored decision (several per day) drops from ab
 
 ## Acceptance Criteria
 
-- [ ] AC-1: `cli-decisions add ... --file --pr` run from the Pattern-C parent with no active task opens a `ai-sdlc/file-dec-nnnn` PR containing the `decision-opened` event and writes nothing into the parent's `.ai-sdlc/_decisions/events/`; a test asserts the parent store is unchanged.
-- [ ] AC-2: `cli-decisions answer <id> <option> --file --pr` from the parent files the `operator-answered` event for a decision whose `decision-opened` is only on `origin/main`; the same duplicate-pair and option-validity checks as `fileDecision` apply.
-- [ ] AC-3: Without `--file`, the parent refusal in `resolveWriteRoot` is unchanged and its message names `--file` as the sanctioned path.
-- [ ] AC-4: `resolve`, `override`, `extend`, `auto-expire` and `score-c` resolve their write root with `resolveWriteRoot` (and accept `--file`); a test lists every subcommand that calls `appendDecisionEvent` and asserts each uses the write root.
-- [ ] AC-5: `planner.md` and `docs/operations/decision-authority.md` show the one-command form (`cli-decisions add ... --file --pr`) and drop any worktree workaround text.
+- [x] AC-1: `cli-decisions add ... --file --pr` run from the Pattern-C parent with no active task opens a `ai-sdlc/file-dec-nnnn` PR containing the `decision-opened` event and writes nothing into the parent's `.ai-sdlc/_decisions/events/`; a test asserts the parent store is unchanged.
+- [x] AC-2: `cli-decisions answer <id> <option> --file --pr` from the parent files the `operator-answered` event for a decision whose `decision-opened` is only on `origin/main`; the same duplicate-pair and option-validity checks as `fileDecision` apply.
+- [x] AC-3: Without `--file`, the parent refusal in `resolveWriteRoot` is unchanged and its message names `--file` as the sanctioned path.
+- [x] AC-4: `resolve`, `override`, `extend`, `auto-expire` and `score-c` resolve their write root with `resolveWriteRoot` (and accept `--file`); a test lists every subcommand that calls `appendDecisionEvent` and asserts each uses the write root.
+- [x] AC-5: `planner.md` and `docs/operations/decision-authority.md` show the one-command form (`cli-decisions add ... --file --pr`) and drop any worktree workaround text.
 
 ## Notes
 
 Origin: planner sessions authoring DEC-0287..DEC-0291 in throwaway worktrees (`.worktrees/dec-0291`, nested filing worktree still listed as prunable on 2026-11-02). Related: AISDLC-874 (write-root refusal), AISDLC-825 (catalog root), AISDLC-801 (cli-file), AISDLC-1160 (queued `--answer` replay), AISDLC-1162 (supersede event, which should use the same `--file` path).
+
+## Final Summary
+
+## Summary
+Fixed the round-1 review findings. `operator-digest` is read-only again. `answer --file` now accepts a decision whose `decision-opened` is only on origin/main and leaves option and duplicate validation to `fileDecision`. Added behavioral tests for AC-1, AC-2 and AC-3, and for the new `fileDecision` `events` input. Pushed to the existing draft PR.
+
+## Changes
+- pipeline-cli/src/cli/decisions.ts
+- pipeline-cli/src/cli/decisions-file-flag.test.ts
+- pipeline-cli/src/cli/decisions-write-root.test.ts
+- pipeline-cli/src/cli/file.test.ts
+- pipeline-cli/src/decisions/catalog-root.test.ts
+
+## Design decisions
+The new `decisions-file-flag.test.ts` runs `add --file` and `answer --file` against a local bare origin, with no --pr so `gh` is never called. Branch is already on origin/main, so the rebase was a no-op. The task file `backlog/tasks/AISDLC-1161 - ...md` shows as modified but I left it out of the commit, since it was changed outside my edits.
+
+## Verification
+- `pnpm build` — passed (ai-sdlc-plugin/mcp-server build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (246 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
