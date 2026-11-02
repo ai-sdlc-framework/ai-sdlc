@@ -253,6 +253,23 @@ A question goes to the lowest tier that can answer it, and every hop is recorded
 Answers are written to the Decision Catalog, so the executor that parked the task,
 or any executor, can resume it with the answer in hand.
 
+**Amended 2026-11-02 (DEC-0291, operator ruling):** the chain above covers questions; it
+did not cover failures. Twice (AISDLC-1136 #2246, AISDLC-1153 #2282) a re-entry passed
+verify, review and signing, failed only its final push on a stale resume lease, and sat
+as an unowned draft for hours because the reconciler's `route-to-planner` action runs no
+command, never ages, and sends at most one message to a session that is not a loop. The
+invariant is therefore: **every failed executor verdict ends in exactly one of three
+terminal states**: (i) repaired and re-queued or delivered by the dispatch playbook,
+which after a repair push verifies the attestation, marks the PR ready and writes a
+`delivered` verdict; (ii) a timeboxed Decision Catalog entry with an autonomous
+fallback; or (iii) an operator notification with a deadline through the stall-notice
+channel. A mechanical repair is a command and never routes to a model session;
+`route-to-planner` is not a terminal state and ages like every other action. The tick
+checks the invariant and opens a `stuck-pr` stall when a verdict is in any other state
+past `stuckAfterMinutes` (default 60). Implementation: AISDLC-1156 (dispatch) and
+AISDLC-1154 (Step 11 fast-forward fallback). No Open Question is reopened; section 8
+steps 1 to 4 stand.
+
 ### 9. Context lifecycle
 
 An executor's context is emptied after every task. The mechanism is `/clear` sent to
@@ -457,3 +474,4 @@ where a human should be asked.
 | Date | Change |
 | --- | --- |
 | 2026-09-30 | Initial version, born `Signed Off` (Engineering + Operator). Codifies the planner / operator-dispatch / executor arrangement from the first RFC-0049/0050 parallel run and the gaps it surfaced. 3 Open Questions resolved via operator rubric walkthrough. Phase tasks AISDLC-663 to AISDLC-671. Trigger: operator request. |
+| 2026-11-02 | Section 8 amended under DEC-0291: three terminal states for a failed verdict; mechanical repairs never route to the planner; `route-to-planner` ages. Implementation AISDLC-1156, AISDLC-1154. Trigger: operator ruling after #2246 and #2282 stranded as drafts. |
