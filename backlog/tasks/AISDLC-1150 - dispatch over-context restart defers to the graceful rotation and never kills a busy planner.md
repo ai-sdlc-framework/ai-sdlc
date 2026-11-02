@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1150
 title: 'Dispatch over-context restart defers to the graceful rotation: rotate request first, handoff written before any kill, no hard restart of a busy planner'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-01'
 labels:

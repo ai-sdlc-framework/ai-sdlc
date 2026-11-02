@@ -54,6 +54,7 @@ import { readOpenDrainStall, type DrainStallRecord } from './drain-stall.js';
 import { budgetStatus, formatBudget, type BudgetStatus } from './budget.js';
 import { dynamicExecutors } from './ephemeral-tick.js';
 import { executorCap, formatExecutorCap, type ExecutorCap } from './executor-cap.js';
+import { readRotateRequests } from './rotate-request.js';
 import { resolveThresholds } from './thresholds.js';
 import type { HierarchyDeps, HierarchyRole, RosterEntry } from './types.js';
 
@@ -89,6 +90,8 @@ export interface StatusRow {
   moduleTokens?: number;
   /** The module deferred a rotation to the turn end (AISDLC-1159). */
   rotatePending?: boolean;
+  /** Pending rotate request dispatch made of this session and its age (AISDLC-1150). */
+  rotateRequest?: { at: string; ageSec: number };
   /** Present with `launchEnv: 'missing'`: how to repair it. */
   nextStep?: string;
 }
@@ -192,6 +195,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     ...(resourcesNow ? { resources: resourcesNow } : {}),
     live: dynamicExecutors(deps.boardDir).length,
   });
+  const rotateRequests = readRotateRequests(deps.boardDir);
   const rows = roster.sessions.map((entry): StatusRow => {
     const live =
       registry.find((r) => r.name === entry.name) ??
@@ -232,6 +236,17 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
       ...(rotatePending ? { rotatePending } : {}),
       ...(contextTokens !== undefined
         ? { contextTokens, overThreshold: contextTokens > thresholdsByRole[entry.role] }
+        : {}),
+      ...(rotateRequests[entry.name] && Number.isFinite(Date.parse(rotateRequests[entry.name]!))
+        ? {
+            rotateRequest: {
+              at: rotateRequests[entry.name]!,
+              ageSec: Math.max(
+                0,
+                Math.round((deps.now().getTime() - Date.parse(rotateRequests[entry.name]!)) / 1000),
+              ),
+            },
+          }
         : {}),
       ...(nodeVersion ? { nodeVersion } : {}),
       ...(nodeMismatch ? { nodeMismatch } : {}),
@@ -443,7 +458,16 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
         ]
       : [],
   );
-  const overLines = contextWarnings(result);
+  const overLines = [
+    ...contextWarnings(result),
+    ...result.rows.flatMap((r) =>
+      r.rotateRequest
+        ? [
+            `rotate requested of ${r.entry.name} ${r.rotateRequest.ageSec} s ago; waiting for its turn boundary`,
+          ]
+        : [],
+    ),
+  ];
   return [
     fmt(header),
     ...body.map(fmt),
