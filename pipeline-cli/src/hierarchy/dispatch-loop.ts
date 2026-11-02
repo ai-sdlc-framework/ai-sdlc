@@ -56,6 +56,7 @@ import {
   type EphemeralDeps,
   type EphemeralReport,
 } from './ephemeral-tick.js';
+import { runWebhookHealthTick, type WebhookHealthTickDeps } from './webhook-health.js';
 import { checkDrainStall, formatDrainStall, resolveStallAfterMinutes } from './drain-stall.js';
 import { runBudgetPacer, type UsageDeps } from './budget.js';
 import { readHold, type Hold } from './hold.js';
@@ -275,7 +276,7 @@ export interface VerdictReport {
 
 /** One line for the planner. */
 export interface PlannerReport {
-  kind: 'progress' | 'brief-complete' | 'drain-stall';
+  kind: 'progress' | 'brief-complete' | 'drain-stall' | 'webhook-health';
   text: string;
 }
 
@@ -477,6 +478,8 @@ export interface LoopDeps {
     deadlinesMs?: Record<CanaryStage, number>;
     intervalMs?: number;
   };
+  /** Webhook health (AISDLC-1157); absent means no check runs. `boardDir` and `now` default to this tick's own. */
+  webhookHealth?: Omit<WebhookHealthTickDeps, 'boardDir' | 'now'>;
   /** Idle executors holding no inflight task (AISDLC-1101); absent means no drain-stall check runs. */
   idleExecutors?: () => string[];
   /** Who runs this tick; the scheduler stands in for a silent host (AISDLC-1096). Default host. */
@@ -1107,6 +1110,18 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
       }
     } catch {
       /* a detector failure must not stop the dispatch loop */
+    }
+  }
+  if (deps.webhookHealth) {
+    try {
+      const wh = runWebhookHealthTick({
+        boardDir: deps.boardDir,
+        now: deps.now,
+        ...deps.webhookHealth,
+      });
+      if (wh.report) reports.push({ kind: 'webhook-health', text: wh.report.text });
+    } catch {
+      /* a health check failure must not stop the dispatch loop */
     }
   }
   let humanAttention: HumanAttentionRow[] = [];

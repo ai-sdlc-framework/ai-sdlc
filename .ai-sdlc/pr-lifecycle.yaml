@@ -18,6 +18,8 @@ spec:
   webhook:
     port: 8765
     debounceMs: 5000
+    staleAfterMinutes: 30
+    downAfterMinutes: 120
   reconcile:
     timerOpenMs: 60000
     timerIdleMs: 900000

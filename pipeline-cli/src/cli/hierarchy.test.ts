@@ -297,7 +297,7 @@ describe('runHierarchyCli', () => {
   it('webhook status reports off (not running) with a secret and no receiver', async () => {
     const env = { AI_SDLC_WEBHOOK_SECRET: 'x' };
     expect(await runHierarchyCli(['webhook', 'status'], overrides({ env }))).toBe(0);
-    expect(logs).toEqual(['webhook: off (not running)']);
+    expect(logs).toEqual(['webhook: down (receiver process is not running)']);
   });
 
   it('down reports an unknown role with exit 1', async () => {

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1157
 title: 'Webhook health report on the operator tick: healthy, degraded and down classes from receiver, port, event age, PR-activity-without-event and forwarder signals; degraded or down files a catalog escalation naming the fix, and cli-hierarchy status shows event age instead of "up"'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-02'
 labels:

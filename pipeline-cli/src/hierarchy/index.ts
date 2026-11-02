@@ -298,12 +298,17 @@ export {
   WEBHOOK_PORT_ENV,
   WEBHOOK_SECRET_ENV,
   formatWebhookStatus,
+  parseFeed,
+  trackPrActivity,
   webhookDown,
+  webhookHealth,
   webhookServe,
   webhookStatus,
   webhookUp,
+  type WebhookHealth,
   type WebhookStatus,
 } from './webhook.js';
+export { catalogWebhookEscalation, stallChannelNotifier } from './webhook-health.js';
 
 export { HOLD_FILENAME, clearHold, readHold, writeHold, type Hold } from './hold.js';
 export {

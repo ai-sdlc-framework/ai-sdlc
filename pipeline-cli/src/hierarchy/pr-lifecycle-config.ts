@@ -21,7 +21,14 @@ import { BUSY_INTERVAL_MS, IDLE_INTERVAL_MS } from './scheduler.js';
 export interface PrLifecycleConfig {
   /** How many times one `(action, headSha)` may run; the next one parks to the planner. */
   maxSameHeadActions: number;
-  webhook: { port: number; debounceMs: number };
+  webhook: {
+    port: number;
+    debounceMs: number;
+    /** Minutes without an event, with PR activity, before health is degraded (AISDLC-1157). */
+    staleAfterMinutes: number;
+    /** Minutes without an event, with PR activity, before health is down (AISDLC-1157). */
+    downAfterMinutes: number;
+  };
   stall: { staleMs: number; graceMs: number };
   reconcile: { timerOpenMs: number; timerIdleMs: number };
   /** Ceiling for each wait of the executor clear handshake (AISDLC-1000). */
@@ -35,10 +42,17 @@ export const DEFAULT_WEBHOOK_PORT = 8765;
 
 /** Receiver debounce default (mirrors `DEFAULT_DEBOUNCE_MS` in the webhook receiver). */
 const DEFAULT_WEBHOOK_DEBOUNCE_MS = 5000;
+const DEFAULT_WEBHOOK_STALE_AFTER_MINUTES = 30;
+const DEFAULT_WEBHOOK_DOWN_AFTER_MINUTES = 120;
 
 export const PR_LIFECYCLE_DEFAULTS: PrLifecycleConfig = {
   maxSameHeadActions: 1,
-  webhook: { port: DEFAULT_WEBHOOK_PORT, debounceMs: DEFAULT_WEBHOOK_DEBOUNCE_MS },
+  webhook: {
+    port: DEFAULT_WEBHOOK_PORT,
+    debounceMs: DEFAULT_WEBHOOK_DEBOUNCE_MS,
+    staleAfterMinutes: DEFAULT_WEBHOOK_STALE_AFTER_MINUTES,
+    downAfterMinutes: DEFAULT_WEBHOOK_DOWN_AFTER_MINUTES,
+  },
   stall: { staleMs: DEFAULT_STALL_STALE_MS, graceMs: DEFAULT_STALL_GRACE_MS },
   reconcile: { timerOpenMs: BUSY_INTERVAL_MS, timerIdleMs: IDLE_INTERVAL_MS },
   clear: { handshakeCeilingMs: DEFAULT_SETTLE_MS },
@@ -111,6 +125,8 @@ export function loadPrLifecycleConfig(
       webhook: {
         port: pick(webhook?.port, d.webhook.port, true),
         debounceMs: pick(webhook?.debounceMs, d.webhook.debounceMs),
+        staleAfterMinutes: pick(webhook?.staleAfterMinutes, d.webhook.staleAfterMinutes),
+        downAfterMinutes: pick(webhook?.downAfterMinutes, d.webhook.downAfterMinutes),
       },
       stall: {
         staleMs: pick(stall?.staleMs, d.stall.staleMs),

@@ -105,7 +105,10 @@ describe('pr-lifecycle.yaml operational keys', () => {
     );
     const c = loadPrLifecycleConfig(d);
     removeFixtureDir(d);
-    expect(c.webhook).toEqual({ port: 9000, debounceMs: PR_LIFECYCLE_DEFAULTS.webhook.debounceMs });
+    expect(c.webhook).toEqual({
+      ...PR_LIFECYCLE_DEFAULTS.webhook,
+      port: 9000,
+    });
     expect(c.stall).toEqual({ staleMs: 5, graceMs: PR_LIFECYCLE_DEFAULTS.stall.graceMs });
     expect(c.reconcile.timerOpenMs).toBe(7);
     for (const r of Object.values(PR_LIFECYCLE_KEY_READERS)) r(c);

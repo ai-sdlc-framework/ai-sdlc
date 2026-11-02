@@ -269,8 +269,9 @@ not (a bare launch; the repair line follows the table), and `-` for a gone windo
 The `NODE` column is the Node version the pane's processes run, read from the process table
 (`ps`), with `MISMATCH` appended when it does not satisfy `.nvmrc`; a repair line follows the
 table. It is `-` when no nvm-managed node process runs under the pane or `ps` cannot be read.
-The last line is the webhook receiver: `webhook: up (port N)` when running, `webhook: off (no secret)`
-when `AI_SDLC_WEBHOOK_SECRET` is unset, `webhook: off (not running)` otherwise.
+The last line is the webhook receiver: `webhook: <class> (port N, last event <age>, feed <kind|none>)` with
+class `healthy`, `degraded` or `down` (see `webhook`; a live pid alone is no longer shown as `up`),
+`webhook: off (no secret)` when `AI_SDLC_WEBHOOK_SECRET` is unset. `--json` carries the full signal object as `webhookHealth`.
 The line after it is the reconcile scheduler (the poller of `<board>/.reconcile-wake`): `scheduler: up (pid N)` or `scheduler: off`. Below it, `open PRs:` lists every open PR with lane, action, reason, owner and age. The scheduler writes stdout and stderr to `<board>/log/reconcile.log`, which also receives one row per open PR per run; the same lane, action, reason, owner and `lastActionAt` fields are copied onto each row of `pr-snapshot.json`. The tick forwards to the planner only the routings new in that run. A failed action is retried once on an unchanged head; the second failure routes the PR to the planner once and the row reads `reenter (failed x2)` (AISDLC-1125).
 A `gh calls last hour` line (AISDLC-963) gives each `HIERARCHY_SESSION`'s `gh` calls in the last hour and the live remaining
 quota for the core and graphql buckets (`gh api rate_limit`, not metered). The source is `<board-dir>/gh-calls.jsonl`, one
@@ -365,7 +366,7 @@ writes nothing. After a record is written, deliveries for the same `(pr, headSha
 and then the file `.ai-sdlc/dispatch/.reconcile-wake` (the file `reconcile --watch` polls) is touched, once. A replayed delivery id or a failed signature touches nothing. The receiver never classifies or acts.
 
 ```bash
-AI_SDLC_WEBHOOK_SECRET=... cli-hierarchy webhook up [--port 8765]
+AI_SDLC_WEBHOOK_SECRET=... cli-hierarchy webhook up [--port 8765] [--feed gh-forward|tunnel|none [--feed-pid <pid>]]
 cli-hierarchy webhook status [--json]
 cli-hierarchy webhook down
 ```
@@ -380,6 +381,30 @@ Reaching it from GitHub, with the repository webhook's secret equal to `AI_SDLC_
 `gh webhook forward --repo <owner>/<repo> --events pull_request,check_suite,check_run,workflow_run,status,pull_request_review --url http://127.0.0.1:8765/webhooks/github`
 for development, or a named tunnel (for example Cloudflare Tunnel) pointing at `127.0.0.1:8765` for daily
 use.
+
+**Health (AISDLC-1157).** A live receiver pid does not prove events arrive: the forwarder is a separate
+process on the operator's account. `webhook up --feed <kind>` records the feed (and optional `--feed-pid`)
+in `.ai-sdlc/dispatch/webhook.json`; without a record the forwarder is found by a process match
+(`pgrep -f 'gh webhook forward'`). `webhook status` and `cli-hierarchy status` compute one class from five
+signals: receiver pid, port answering on `127.0.0.1`, age of the newest file in `events/`, PR activity
+without an event (a PR in `pr-snapshot.json` changed head or left the open list, tracked in
+`webhook-pr-activity.json`, within the window and no event names it) and forwarder alive.
+
+| Class      | When                                                                                                                                 |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `healthy`  | Events arrive, or no PR changed in the window (signal `quiet`: silence is expected).                                                  |
+| `degraded` | No event for `staleAfterMinutes` (30) while a PR changed in that window, or the forwarder pid is gone while the receiver is up.     |
+| `down`     | Receiver pid or port dead, or no event for `downAfterMinutes` (120) with PR activity in that window.                                  |
+
+The thresholds are `spec.webhook.staleAfterMinutes` and `spec.webhook.downAfterMinutes` in
+`.ai-sdlc/pr-lifecycle.yaml`. The dispatch tick reads the class once per tick and reports to the planner
+(a report of kind `webhook-health`) only when the class changes. Entering `degraded` or `down` files one
+operational escalation per episode (`cli-decisions escalate --route operational` shape, scope
+`webhook-health:<since>`) and fires the stall-notice channel once; returning to `healthy` closes the
+episode with a note. The fix is operator-only (it touches the operator's account and network): restart the
+forwarder with the `gh webhook forward` command above and record it with `cli-hierarchy webhook up --feed gh-forward`,
+re-register the repository hook, or `cli-hierarchy webhook up` when the receiver itself is down. Meanwhile dispatch
+polls `gh` (about 2,700 calls an hour), which is the cost a degraded feed hides.
 
 ### `attach`
 

@@ -75,7 +75,7 @@ function readJson<T>(file: string): T | undefined {
 }
 
 /** Event record names: `<repo>#<pr>@<sha>:<kind>:<delivery>.json`, URI encoded. */
-function eventEntries(
+export function eventEntries(
   boardDir: string,
 ): { pr: number | null; id: string; mtimeMs: number; file: string }[] {
   const dir = eventsDir(boardDir);

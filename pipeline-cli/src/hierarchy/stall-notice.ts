@@ -61,6 +61,22 @@ function lastProgressMs(boardDir: string): number | undefined {
   return valid.length > 0 ? Math.max(...valid) : undefined;
 }
 
+/** One desktop notification through the platform's notifier, and nothing else. */
+export function desktopNotice(
+  run: CommandRunner,
+  message: string,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  if (platform === 'darwin') {
+    run('osascript', [
+      '-e',
+      `display notification ${JSON.stringify(message)} with title "ai-sdlc dispatch stall"`,
+    ]);
+  } else {
+    run('notify-send', ['ai-sdlc dispatch stall', message]);
+  }
+}
+
 /** Check the board once; notify at most once per stall. */
 export function runStallNotice(deps: StallNoticeDeps): StallNoticeResult {
   const minutes = deps.minutes ?? DEFAULT_STALL_NOTICE_MINUTES;
@@ -88,15 +104,7 @@ export function runStallNotice(deps: StallNoticeDeps): StallNoticeResult {
   if (state.notifiedFor === key) return { action: 'none', reason: 'already-notified', idleMinutes };
 
   const message = `Drain stalled: ${eligible} eligible task(s) queued, no verdict or heartbeat for ${idleMinutes} min`;
-  const platform = deps.platform ?? process.platform;
-  if (platform === 'darwin') {
-    deps.run('osascript', [
-      '-e',
-      `display notification ${JSON.stringify(message)} with title "ai-sdlc dispatch stall"`,
-    ]);
-  } else {
-    deps.run('notify-send', ['ai-sdlc dispatch stall', message]);
-  }
+  desktopNotice(deps.run, message, deps.platform);
   mkdirSync(deps.boardDir, { recursive: true });
   appendFileSync(
     path.join(deps.boardDir, DIGEST_FILE),
