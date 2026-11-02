@@ -606,6 +606,7 @@ describe('shipTask: approved path', () => {
     expect(push.opts?.env).toMatchObject({
       AI_SDLC_ITERATION_COUNT: '2',
       AI_SDLC_HARNESS_NOTE: '',
+      AI_SDLC_WORKFLOW_STATE: h.ctx.statePath,
     });
     expect(cmds().some((c) => /--force|\s-f(\s|$)/.test(c))).toBe(false);
     expect(cmds().some((c) => RAW_MERGE.test(c))).toBe(false);

@@ -489,7 +489,7 @@ describe('workflowNextStep host paths', () => {
       sha256: wf?.sha256,
       baseSha: BASE_SHA,
     });
-    expect(ctx.env.AI_SDLC_WORKFLOW_STATE).toBe(ctx.statePath);
+    expect(ctx.env.AI_SDLC_WORKFLOW_STATE).toBeUndefined();
   });
 
   it('re-emits the pending instruction when called without a result', async () => {

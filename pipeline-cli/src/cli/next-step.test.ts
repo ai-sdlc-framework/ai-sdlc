@@ -100,12 +100,12 @@ describe('handler', () => {
     expect(exitCode).toBe(1);
   });
 
-  it('runs the workflow engine by default (it records the run state path for the signing hook)', async () => {
+  it('runs the workflow engine by default (it does not leak the run state path into process.env, AISDLC-1155)', async () => {
     delete process.env.AI_SDLC_WORKFLOW_ENGINE;
     delete process.env.AI_SDLC_WORKFLOW_STATE;
     const state = join(dir, 's.json');
     await run({ task: 'not-an-arg!', state });
-    expect(process.env.AI_SDLC_WORKFLOW_STATE).toBe(state);
+    expect(process.env.AI_SDLC_WORKFLOW_STATE).toBeUndefined();
     expect(JSON.parse(stdout).action).toBe('stop');
   });
 

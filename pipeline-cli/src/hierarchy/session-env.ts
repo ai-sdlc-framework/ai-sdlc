@@ -15,8 +15,9 @@ export const HIERARCHY_SESSION_ENV_VARS = [
   'AI_SDLC_EXECUTOR_TASK',
   'CLAUDE_PROJECT_DIR',
   'AI_SDLC_GH_CALL_LOG',
-  // Set on process.env by the workflow engine (execute-host); verifyV6Envelope reads it, so a
-  // verify-gate test would otherwise see the run's own state file.
+  // Regression guard, not the fix (AISDLC-1155): the engine no longer sets this on process.env;
+  // the ship step passes it only to the sign/push spawns. verifyV6Envelope reads it, so keep it
+  // stripped in case an operator or a future caller leaks it into a verify child.
   'AI_SDLC_WORKFLOW_STATE',
 ] as const;
 
