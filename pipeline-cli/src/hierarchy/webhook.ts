@@ -122,8 +122,6 @@ const PR_ACTIVITY_FILE = 'webhook-pr-activity.json';
 
 interface PrActivityState {
   heads: Record<string, { head: string; changedAt: string }>;
-  /** Last time a PR vanished from the open snapshot (merged or closed). */
-  lastClosedAt?: string;
 }
 
 function readActivity(boardDir: string): PrActivityState {
@@ -136,8 +134,7 @@ function readActivity(boardDir: string): PrActivityState {
 }
 
 /**
- * Fold the PR snapshot into the activity state: a new head, a new PR or a PR that left
- * the open list is a change stamped `now`. Called once per tick; never throws.
+ * Fold the PR snapshot into the activity state: a new head or a new PR is a change stamped `now`. Called once per tick; never throws.
  */
 export function trackPrActivity(boardDir: string, now: Date): void {
   try {
@@ -145,10 +142,7 @@ export function trackPrActivity(boardDir: string, now: Date): void {
       prs?: { number?: number; headRefOid?: string }[];
     };
     const prev = readActivity(boardDir);
-    const next: PrActivityState = {
-      heads: {},
-      ...(prev.lastClosedAt ? { lastClosedAt: prev.lastClosedAt } : {}),
-    };
+    const next: PrActivityState = { heads: {} };
     const iso = now.toISOString();
     for (const pr of snap.prs ?? []) {
       if (typeof pr.number !== 'number') continue;
@@ -157,7 +151,6 @@ export function trackPrActivity(boardDir: string, now: Date): void {
       const old = prev.heads[key];
       next.heads[key] = old && old.head === head ? old : { head, changedAt: iso };
     }
-    if (Object.keys(prev.heads).some((k) => !(k in next.heads))) next.lastClosedAt = iso;
     writeFileSync(path.join(boardDir, PR_ACTIVITY_FILE), JSON.stringify(next) + '\n');
   } catch {
     /* no snapshot yet, or unreadable: no activity is recorded */
@@ -228,11 +221,10 @@ export function webhookHealth(deps: HierarchyDeps, opts: WebhookHealthOptions = 
     pr: Number(n),
     at: Date.parse(h.changedAt),
   }));
-  if (activity.lastClosedAt) changes.push({ pr: -1, at: Date.parse(activity.lastClosedAt) });
   const within = (min: number) => changes.filter((c) => nowMs - c.at <= min * 60_000);
   const recent = within(staleMin);
   const withoutEvent = recent.some(
-    (c) => c.pr >= 0 && !events.some((e) => e.pr === c.pr && e.mtimeMs >= c.at - 60_000),
+    (c) => !events.some((e) => e.pr === c.pr && e.mtimeMs >= c.at - 60_000),
   );
   const silent = (min: number) => ageMin === null || ageMin >= min;
 

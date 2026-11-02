@@ -217,7 +217,7 @@ describe('webhook health (AISDLC-1157)', () => {
     trackPrActivity(dir, new Date(NOW + 60_000));
     const st = JSON.parse(readFileSync(path.join(dir, 'webhook-pr-activity.json'), 'utf-8'));
     expect(st.heads['1'].head).toBe('a2');
-    expect(st.lastClosedAt).toBeDefined();
+    expect(st.lastClosedAt).toBeUndefined();
     trackPrActivity(path.join(dir, 'nope'), new Date(NOW));
   });
 

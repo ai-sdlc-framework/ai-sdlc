@@ -387,7 +387,7 @@ process on the operator's account. `webhook up --feed <kind>` records the feed (
 in `.ai-sdlc/dispatch/webhook.json`; without a record the forwarder is found by a process match
 (`pgrep -f 'gh webhook forward'`). `webhook status` and `cli-hierarchy status` compute one class from five
 signals: receiver pid, port answering on `127.0.0.1`, age of the newest file in `events/`, PR activity
-without an event (a PR in `pr-snapshot.json` changed head or left the open list, tracked in
+without an event (a PR in `pr-snapshot.json` changed head or appeared (a merge or close is not counted: pruning removes its events), tracked in
 `webhook-pr-activity.json`, within the window and no event names it) and forwarder alive.
 
 | Class      | When                                                                                                                                 |
