@@ -182,3 +182,6 @@ ai-sdlc-plugin/.stale-runtime-cache.json
 .claude/settings.local.json
 # AISDLC-1136: project MCP config points at per-machine sibling checkouts; copy .mcp.json.example
 .mcp.json
+
+# AISDLC-778 / RFC-0053: evaluator-only quarantine (mined and synthetic questions)
+.ai-sdlc/context/eval-quarantine/

@@ -1,0 +1,5 @@
+# RFC-0053 OQ-5 golden set: hand-authored questions with relevance judgments. This set gates
+# ranking (`cli-context eval --gate`). A question whose judged entries no longer exist retires.
+# Format: relevant is a map of entry id -> grade (higher is more relevant) or a list of ids.
+# Thresholds live in .ai-sdlc/context.yaml `evaluation.*` and change only through a decision record.
+questions: []

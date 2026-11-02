@@ -41,6 +41,7 @@ export const GOVERNANCE_PATTERNS = [
   'scripts/check-dark-code.mjs',
   '.ai-sdlc/dark-code-baseline.json',
   '.ai-sdlc/knowledge/ontology.yaml', // AISDLC-773: closed vocabulary incl. promotable proof kinds
+  '.ai-sdlc/context-eval/golden.yaml', // AISDLC-778: ranking-gate golden set
   '.ai-sdlc/*.yaml', // adapter-binding*, agent-role*, pipeline*, quality-gate, ...
   '.ai-sdlc/*-policy.md',
   '.ai-sdlc/*-principles.md',
