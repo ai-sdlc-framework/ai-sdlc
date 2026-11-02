@@ -181,6 +181,7 @@ function deps(script: Script = {}): Partial<NextStepDeps> {
         timedOut: false,
         tail: exit === 0 ? 'Tests 4 passed (4)' : 'FAIL x.test.ts\n1 test failed',
         summary: exit === 0 ? 'Tests 4 passed (4)' : '1 test failed',
+        failures: exit === 0 ? [] : ['x.test.ts'],
       }));
       const status = exit === 0 ? ('passed' as const) : ('failed' as const);
       const failing = exit === 0 ? undefined : results[1];

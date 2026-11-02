@@ -47,7 +47,7 @@ otherwise the skip is recorded on the node and in the ledger.
 ## Attestation
 
 `sign-v6` adds `workflowDigest: { path, sha256, baseSha }` to the envelope when the run state
-(`--workflow-state`, or `AI_SDLC_WORKFLOW_STATE`, which the engine sets) holds engine records.
+(`--workflow-state`, or `AI_SDLC_WORKFLOW_STATE`, which the ship step passes to the sign and push spawns only) holds engine records.
 `verify-core.mjs` recomputes the digest from `baseSha` when the field is present, and refuses an
 envelope whose run state shows engine records but no digest. A run on the built-in default records
 `path: builtin:execute-task`, and the verifier then requires that `baseSha` holds no document.

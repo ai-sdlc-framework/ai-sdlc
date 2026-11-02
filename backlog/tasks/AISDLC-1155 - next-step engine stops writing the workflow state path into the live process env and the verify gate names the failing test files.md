@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1155
 title: 'next-step engine stops writing the workflow state path into the live process env, and the verify gate names the failing test files: the env leak behind AISDLC-1153 is closed at its source and a red verify is diagnosable from the verdict'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-02'
 labels:

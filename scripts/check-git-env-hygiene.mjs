@@ -190,7 +190,7 @@ const SESSION_VARS = [
   'AI_SDLC_EXECUTOR_TASK',
   'CLAUDE_PROJECT_DIR',
   'AI_SDLC_GH_CALL_LOG',
-  // AI_SDLC_WORKFLOW_STATE is deliberately absent: the engine sets it and its own tests assert that.
+  // AI_SDLC_WORKFLOW_STATE is deliberately absent: the ship step passes it to the sign/push spawns (AISDLC-1155).
 ];
 
 /**

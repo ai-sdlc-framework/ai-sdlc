@@ -189,6 +189,7 @@ describe('machine verification through the engine (AISDLC-1086)', () => {
         timedOut: false,
         tail: '1 test failed',
         summary: '1 test failed',
+        failures: [],
       };
       return {
         ok: !red,

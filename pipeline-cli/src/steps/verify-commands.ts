@@ -32,6 +32,8 @@ export interface VerifyCommandResult {
   tail: string;
   /** Last non-empty output line: the command's own summary (for example the test totals). */
   summary: string;
+  /** Failing test file paths or names parsed from a failing `pnpm test` / `node --test` run. */
+  failures: string[];
 }
 
 export interface VerifyRunResult {
@@ -57,6 +59,36 @@ function tailOf(text: string, n: number): string {
     .filter((l, i, a) => l !== '' || i < a.length - 1)
     .slice(-n)
     .join('\n');
+}
+
+const MAX_FAILURES = 50;
+// eslint-disable-next-line no-control-regex -- strips terminal colour codes
+const ANSI = /\x1b\[[0-9;]*m/g;
+
+/**
+ * Failing test files (vitest `FAIL <path>` and `❯ <path> (n tests | m failed)` lines) or test
+ * names (node --test `not ok N - name` lines) from a test command's output. Unique, in order of
+ * appearance; empty when nothing recognisable is found.
+ */
+export function parseTestFailures(output: string): string[] {
+  const found = new Set<string>();
+  for (const raw of output.split('\n')) {
+    const line = raw.replace(ANSI, '').trim();
+    let m = /^FAIL\s+(?:\[[^\]]*\]\s+)?(\S+?)(?:\s+>.*)?$/.exec(line);
+    if (!m) m = /^❯\s+(\S+\.[cm]?[jt]sx?)\s+\(\d+ tests?\s*\|\s*\d+ failed/.exec(line);
+    if (m?.[1]) {
+      found.add(m[1]);
+    } else {
+      const n = /^not ok \d+ - (.+?)(?:\s+#.*)?$/.exec(line);
+      if (n?.[1]) found.add(n[1]);
+    }
+    if (found.size >= MAX_FAILURES) break;
+  }
+  return [...found];
+}
+
+function isTestCommand(command: string): boolean {
+  return /\btest\b|--test\b/.test(command);
 }
 
 function summaryLineOf(tail: string): string {
@@ -116,6 +148,10 @@ export async function runVerifyCommands(opts: RunVerifyOptions): Promise<VerifyR
       timedOut,
       tail,
       summary: summaryLineOf(tail),
+      failures:
+        r.code !== 0 && isTestCommand(command)
+          ? parseTestFailures(`${r.stdout}${r.stderr ? '\n' + r.stderr : ''}`)
+          : [],
     };
     results.push(res);
     const key = verifyKeyFor(command);
@@ -151,6 +187,7 @@ export function formatVerifyFeedback(run: VerifyRunResult): string {
       f.timedOut ? 'timed out' : `exited ${f.exitCode}`
     }. Your reported verifications were not accepted; fix the failure and re-run it yourself.`,
     '',
+    ...(f.failures.length > 0 ? ['Failing tests:', ...f.failures.map((x) => `  - ${x}`), ''] : []),
     `Last ${VERIFY_TAIL_LINES} lines of output:`,
     f.tail,
   ].join('\n');

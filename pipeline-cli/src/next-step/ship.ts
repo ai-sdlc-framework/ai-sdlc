@@ -468,6 +468,9 @@ async function shipInner(
   const pushEnv = {
     AI_SDLC_ITERATION_COUNT: String(state.iteration),
     AI_SDLC_HARNESS_NOTE: verdict.harnessNote,
+    // AISDLC-1155: the signing hook reads the run's digest from this state file; passed to the
+    // sign and push spawns only, never written into the live process env.
+    AI_SDLC_WORKFLOW_STATE: ctx.statePath,
   };
   if (!needsHuman) {
     // Step 10 — refuse early when the contributor has no signing key (the hook would fail loudly).

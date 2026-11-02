@@ -9,6 +9,7 @@ import {
   formatVerifyFeedback,
   recordDeveloperHonestyEvent,
   runVerifyCommands,
+  parseTestFailures,
   verifyKeyFor,
   writeVerifyRunState,
 } from './verify-commands.js';
@@ -109,5 +110,62 @@ describe('runVerifyCommands', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+const VITEST_OUT = [
+  ' \u001b[31m FAIL \u001b[39m src/cli/attestation.test.ts > sign-v6 > reads digest',
+  ' FAIL  src/cli/attestation.test.ts > sign-v6 > other',
+  ' FAIL  [pipeline-cli] src/steps/11-push.test.ts',
+  ' \u276f src/hierarchy/lease.test.ts (12 tests | 2 failed) 40ms',
+  ' \u00d7 does a thing 3ms',
+  ' \u2713 src/ok.test.ts (3 tests) 5ms',
+].join('\n');
+
+const NODE_OUT = [
+  'TAP version 13',
+  'ok 1 - fine',
+  'not ok 2 - hook blocks push',
+  'not ok 3 - other thing # SKIP',
+].join('\n');
+
+describe('parseTestFailures (AISDLC-1155)', () => {
+  it('lists unique failing files from vitest output', () => {
+    expect(parseTestFailures(VITEST_OUT)).toEqual([
+      'src/cli/attestation.test.ts',
+      'src/steps/11-push.test.ts',
+      'src/hierarchy/lease.test.ts',
+    ]);
+  });
+
+  it('lists failing test names from node --test output', () => {
+    expect(parseTestFailures(NODE_OUT)).toEqual(['hook blocks push', 'other thing']);
+  });
+
+  it('is empty when nothing is recognisable', () => {
+    expect(parseTestFailures('all good\n')).toEqual([]);
+  });
+
+  it('populates failures on a failing run and renders them before the tail', async () => {
+    const fr = new FakeRunner().on(/pnpm test/, fail(VITEST_OUT, 1));
+    const run = await runVerifyCommands({
+      commands: ['pnpm test'],
+      cwd: '/x',
+      runner: fr.toRunner(),
+    });
+    expect(run.failing?.failures).toContain('src/cli/attestation.test.ts');
+    const fb = formatVerifyFeedback(run);
+    expect(fb.indexOf('src/cli/attestation.test.ts')).toBeLessThan(fb.indexOf('Last 60 lines'));
+  });
+
+  it('leaves failures empty for a passing run and a non-test command', async () => {
+    const fr = new FakeRunner().on(/pnpm build/, fail('FAIL src/a.test.ts\n', 1));
+    const run = await runVerifyCommands({
+      commands: ['pnpm build'],
+      cwd: '/x',
+      runner: fr.toRunner(),
+    });
+    expect(run.failing?.failures).toEqual([]);
+    expect(formatVerifyFeedback(run)).not.toContain('Failing tests:');
   });
 });

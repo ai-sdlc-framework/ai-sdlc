@@ -658,8 +658,8 @@ export async function workflowNextStep(
   overrides: Partial<NextStepDeps> = {},
 ): Promise<NextStepOutput> {
   const deps: NextStepDeps = { ...defaultNextStepDeps, ...overrides };
-  // Child processes (the pre-push hook that signs) read the run's digest from this state file.
-  ctx.env.AI_SDLC_WORKFLOW_STATE = ctx.statePath;
+  // AISDLC-1155: the state path is NOT written to ctx.env (the live process.env). The ship step
+  // passes it in the env of the sign and push spawns, the only children that read it.
   const instruction = await runEngine(ctx, deps, input);
   return { instruction, exitCode: exitCodeFor(instruction) };
 }
