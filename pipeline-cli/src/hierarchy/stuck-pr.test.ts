@@ -226,6 +226,7 @@ describe('status stuck section and --check', () => {
     expect(hasStuckViolation({ ...result, stuck: undefined })).toBe(false);
     const text = formatStatus(result, nowMs).join('\n');
     expect(text).toContain('stuck:');
+    expect(text.split('PR #2282 (AISDLC-1153)').length - 1).toBe(1);
     expect(text).toContain('PR #2282 (AISDLC-1153): push-non-fast-forward, age 90m');
     expect(text).toContain('missing repair-or-delivery, decision, notification');
   });

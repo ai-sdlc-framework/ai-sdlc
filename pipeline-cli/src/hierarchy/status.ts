@@ -463,7 +463,6 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       ...blockedLines,
       ...stallLines,
       ...stuckLines,
-      ...stuckLines,
       unownedLine,
       ...agedLines,
       ...(result.prTable ?? []),
