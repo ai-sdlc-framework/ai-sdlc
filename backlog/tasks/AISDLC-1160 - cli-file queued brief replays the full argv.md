@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1160
 title: 'cli-file --pr --queue writes the queued brief from the real argv, so a queued `decision --answer` (and every other flag) replays intact'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-02'
 labels:

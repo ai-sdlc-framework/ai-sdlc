@@ -20,10 +20,13 @@ import {
   removeSourceCopy,
   buildPrCreateArgs,
   parseLogStrict,
+  replayCommand,
   runFileCli,
   taskIdOf,
   type FileDeps,
 } from './file.js';
+import { setClock } from '../clock.js';
+import { recordFiling, type PacingDeps } from './file-pacing.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const sh = (cwd: string, ...args: string[]) =>
@@ -645,6 +648,129 @@ describe('cli-file', () => {
     expect(() => fileTask(repo, writeTask(), { pr: false }, failing)).toThrow(/boom/);
     expect(sh(repo, 'branch', '--list', 'ai-sdlc/file-aisdlc-900')).toBe('');
     expect(() => fileTask(repo, writeTask(), { pr: false }, deps)).not.toThrow();
+  });
+
+  describe('AISDLC-1160 queued brief replays the real argv', () => {
+    const T0 = new Date('2026-10-20T12:00:00Z');
+    let restore: () => void;
+    let pacing: PacingDeps;
+    let cwd0: string;
+    beforeEach(() => {
+      commitMain(
+        EVENT_LOG_REL,
+        [
+          ev('DEC-0001', 'decision-opened'),
+          ev('DEC-0005', 'decision-opened', { options: [{ id: 'opt-a' }, { id: 'opt-b' }] }),
+        ].join('\n') + '\n',
+      );
+      cwd0 = process.cwd();
+      process.chdir(repo);
+      restore = setClock(() => new Date(T0.getTime() + 60_000));
+      pacing = { readRateLimit: () => null, sleep: async () => {}, log: () => {} };
+      const prev = setClock(() => T0);
+      recordFiling(repo);
+      prev();
+      restore();
+      restore = setClock(() => new Date(T0.getTime() + 60_000));
+    });
+    afterEach(() => {
+      restore();
+      process.chdir(cwd0);
+    });
+    const briefRun = (id: string): string => {
+      const f = join(repo, `.ai-sdlc/dispatch/queued-filings/filing-${id}.md`);
+      const m = readFileSync(f, 'utf8').match(/^Run: `(.*)`$/m);
+      return m![1];
+    };
+    const words = (line: string): string[] =>
+      spawnSync('sh', ['-c', `printf '%s\\n' ${line}`], { encoding: 'utf8' })
+        .stdout.split('\n')
+        .slice(0, -1);
+
+    it('decision: carries --answer and quoted --rationale, drops --queue; replay appends the answer', async () => {
+      const argv = [
+        'decision',
+        'DEC-0005',
+        '--task-id',
+        'X-1',
+        '--answer',
+        'opt-a',
+        '--rationale',
+        'two words',
+        '--pr',
+        '--queue',
+      ];
+      expect(await runFileCli(argv, deps, pacing)).toBe(0);
+      const line = briefRun('dec-0005');
+      expect(line).toContain('--answer opt-a');
+      expect(line).toContain("--rationale 'two words'");
+      expect(line).not.toContain('--queue');
+      restore();
+      restore = setClock(() => new Date(T0.getTime() + 20 * 60_000));
+      const replay = words(line);
+      expect(replay[0]).toBe('cli-file');
+      expect(await runFileCli(replay.slice(1), deps, pacing)).toBe(0);
+      const branch = 'ai-sdlc/file-dec-0005';
+      const log = sh(remote, 'show', `${branch}:${EVENT_LOG_REL}`);
+      const answered = log.split('\n').filter((l) => l.includes('"operator-answered"'));
+      expect(answered).toHaveLength(1);
+      expect(answered[0]).toContain('"chosenOptionId":"opt-a"');
+    });
+
+    it('task: carries --no-brief, --fixes-pr and --update', async () => {
+      const argv = [
+        'task',
+        'backlog/tasks/a.md',
+        '--no-brief',
+        '--fixes-pr',
+        '12',
+        '--update',
+        '--pr',
+        '--queue',
+        '--spacing-minutes',
+        '30',
+      ];
+      expect(await runFileCli(argv, deps, pacing)).toBe(0);
+      expect(briefRun('a.md')).toBe(
+        'cli-file task backlog/tasks/a.md --no-brief --fixes-pr 12 --update --pr',
+      );
+    });
+
+    it('rebase: carries --source', async () => {
+      const argv = ['rebase', 'aisdlc-9', '--source', '/tmp/my dir/x.md', '--pr', '--queue'];
+      expect(await runFileCli(argv, deps, pacing)).toBe(0);
+      expect(briefRun('aisdlc-9')).toBe(
+        "cli-file rebase aisdlc-9 --source '/tmp/my dir/x.md' --pr",
+      );
+    });
+
+    it('replayCommand strips pacing flags in every spelling and quotes quotes', () => {
+      expect(
+        replayCommand(['task', "it's", '--queue=true', '--spacing-minutes=3', '--no-queue']),
+      ).toBe("cli-file task 'it'\\''s'");
+    });
+  });
+
+  it('AISDLC-1160: drift runs against the scratchpad source, which refuses on a missing reference', () => {
+    const scratch = join(root, 'scratch');
+    mkdirSync(scratch);
+    const src = join(scratch, 'aisdlc-901 - bad.md');
+    writeFileSync(src, '---\nid: AISDLC-901\n---\nSee docs/missing-file.md\n');
+    const seen: string[] = [];
+    const driftDeps: FileDeps = {
+      ...deps,
+      drift(id, cwd) {
+        const f = join(cwd, 'backlog/tasks/aisdlc-901 - bad.md');
+        seen.push(cwd);
+        if (!existsSync(f)) return null; // the parent does not contain the source: nothing to check
+        const ref = /See (\S+)/.exec(readFileSync(f, 'utf8'))![1];
+        return existsSync(join(cwd, ref)) ? null : `backlog-drift: ref-deleted ${ref}`;
+      },
+    };
+    expect(() => fileTask(repo, src, { pr: true }, driftDeps)).toThrow(/ref-deleted/);
+    expect(seen[0]).toContain('.worktrees/drift-aisdlc-901');
+    expect(existsSync(join(repo, '.worktrees/drift-aisdlc-901'))).toBe(false);
+    expect(ghCalls).toHaveLength(0);
   });
 
   it('helpers', () => {
