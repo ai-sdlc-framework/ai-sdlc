@@ -9,11 +9,14 @@
  * @module cli/memory-dream
  */
 
+import { now } from '../clock.js';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { reingestAfterSwap } from '../knowledge/ingest-memory.js';
+import { backupMemory } from '../memory-dream/backup.js';
+import { recoverFromTranscripts } from '../memory-dream/recover.js';
 import { applyDream, undoDream } from '../memory-dream/apply.js';
 import { DEFAULT_BUDGETS, type Budgets } from '../memory-dream/build-output.js';
 import { ClaudeSynthesizer } from '../memory-dream/claude-synthesizer.js';
@@ -140,6 +143,34 @@ export function cmdUndo(
   io.out(`the folder you undid is kept at ${r.currentSavedAs}`);
 }
 
+export function cmdRecover(
+  a: { fromTranscripts: string; dir?: string; projectDir?: string },
+  io: Pick<DreamCliIo, 'out'>,
+): void {
+  const r = recoverFromTranscripts({
+    projectsDir: resolve(a.fromTranscripts),
+    memoryDir: memoryDirFor(a),
+  });
+  io.out(`recovered ${r.recovered.length} note(s) into ${r.outputDir} (unapplied)`);
+  io.out(
+    `${r.missingBodies.length} index entr${r.missingBodies.length === 1 ? 'y has' : 'ies have'} no recoverable body`,
+  );
+  for (const f of r.missingBodies) io.out(`  missing: ${f}`);
+  io.out(`review, then: memory-dream apply ${r.outputDir} (undo with: memory-dream undo)`);
+}
+
+export function cmdBackup(
+  a: { dir?: string; projectDir?: string },
+  io: Pick<DreamCliIo, 'out'>,
+): void {
+  const r = backupMemory({
+    memoryDir: memoryDirFor(a),
+    projectDir: resolve(a.projectDir ?? process.cwd()),
+    now: now(),
+  });
+  io.out(r.dir ? `memory backup ${r.status}: ${r.dir}` : 'memory backup skipped: no memory folder');
+}
+
 export async function runMemoryDreamCli(): Promise<void> {
   const out = (l: string): void => void process.stdout.write(`${l}\n`);
   await yargs(hideBin(process.argv))
@@ -213,6 +244,30 @@ export async function runMemoryDreamCli(): Promise<void> {
       'Restore the most recent previous version',
       (y) => y.option('dir', { type: 'string' }).option('project-dir', { type: 'string' }),
       (argv) => cmdUndo(argv as { dir?: string; projectDir?: string }, { out }),
+    )
+    .command(
+      'recover',
+      'Rebuild notes from Write/Edit/Read records in session transcripts into a reviewable folder',
+      (y) =>
+        y
+          .option('from-transcripts', { type: 'string', demandOption: true })
+          .option('dir', { type: 'string' })
+          .option('project-dir', { type: 'string' }),
+      (argv) =>
+        cmdRecover(
+          {
+            fromTranscripts: argv['from-transcripts'] as string,
+            dir: argv.dir,
+            projectDir: argv['project-dir'],
+          },
+          { out },
+        ),
+    )
+    .command(
+      'backup',
+      'Copy the memory folder to ~/.ai-sdlc/memory-backups/<repo-id>/<date>/ (daily, keeps 14)',
+      (y) => y.option('dir', { type: 'string' }).option('project-dir', { type: 'string' }),
+      (argv) => cmdBackup(argv as { dir?: string; projectDir?: string }, { out }),
     )
     .demandCommand(1)
     .strict()

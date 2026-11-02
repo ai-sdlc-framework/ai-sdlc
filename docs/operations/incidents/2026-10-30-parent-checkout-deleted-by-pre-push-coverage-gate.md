@@ -76,3 +76,5 @@ Still to do (file as tasks):
 - ~~Board recovery runbook: rebuild `.ai-sdlc/dispatch` from GitHub PR state after a loss; the board was gitignored and had no backup.~~ Done: [board-recovery.md](../board-recovery.md) (AISDLC-1130).
 - ~~Memory folder: decide whether `.claude/memory` is tracked or backed up; 61 notes were lost.~~ Resolved: durable notes are committed (PR #2212); regenerated state and `.mcp.json` are ignored (AISDLC-1136).
 - Hierarchy restart after the fix lands: kill the orphaned tmux sessions (`ai-sdlc-planner`, `ai-sdlc-operator-dispatch`, `ai-sdlc-executor-aisdlc-785`, `ai-sdlc-executor-aisdlc-1123`) first.
+
+Memory backup and transcript-based rebuild (AISDLC-1131): see [memory-dream.md](../memory-dream.md#backup-and-recovery-aisdlc-1131).
