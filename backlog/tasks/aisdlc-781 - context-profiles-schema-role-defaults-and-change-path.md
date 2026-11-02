@@ -2,7 +2,7 @@
 id: AISDLC-781
 title: >-
   context profiles schema, role defaults and change path
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-09'
 labels:

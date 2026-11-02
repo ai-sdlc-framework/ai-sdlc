@@ -13,7 +13,14 @@ const { existsSync, readFileSync } = require('fs');
 const { spawnSync } = require('child_process');
 const { join, basename } = require('path');
 
-const MOMENTS = ['sessionStart', 'taskClaim', 'userPrompt', 'toolTouch', 'compaction'];
+const {
+  MOMENTS,
+  DEFAULT_BUDGET,
+  DEFAULT_PROFILES,
+  parseConfig,
+  validateConfig,
+  resolveProfile,
+} = require('./context-profiles.js');
 const HOOK_EVENT = {
   sessionStart: 'SessionStart',
   taskClaim: 'SubagentStart',
@@ -23,87 +30,12 @@ const HOOK_EVENT = {
   // post-compaction SessionStart (source=compact), where the summary is in the transcript.
   compaction: 'SessionStart',
 };
-const DEFAULT_BUDGET = {
-  sessionStart: 1000,
-  taskClaim: 1500,
-  userPrompt: 1500,
-  toolTouch: 500,
-  compaction: 3000,
-};
-
-/** RFC-0053 profile defaults by role, used when `.ai-sdlc/context-profiles.yaml` is absent. */
-const DEFAULT_PROFILES = {
-  planner: {
-    moments: MOMENTS.slice(),
-    budget: {
-      sessionStart: 3000,
-      taskClaim: 3000,
-      userPrompt: 1500,
-      toolTouch: 800,
-      compaction: 3000,
-    },
-    minScore: 0.4,
-  },
-  'operator-dispatch': { moments: ['sessionStart', 'taskClaim', 'compaction'] },
-  executor: {
-    moments: ['sessionStart', 'taskClaim', 'toolTouch'],
-    budget: { sessionStart: 1000, taskClaim: 1500, toolTouch: 500 },
-    toolTouchPaths: 'governance-bearing',
-  },
-  reviewer: { moments: ['taskClaim'] },
-  relay: { moments: ['sessionStart'] },
-};
-
 const GOVERNANCE_PATH =
   /(^|\/)(\.ai-sdlc|\.claude|\.github\/workflows|spec|ai-sdlc-plugin\/hooks)(\/|$)|(^|\/)(CLAUDE\.md|AGENTS\.md)$/;
 
-function parseScalar(s) {
-  const t = s.trim().replace(/\s+#.*$/, '');
-  if (/^-?\d+(\.\d+)?$/.test(t)) return Number(t);
-  return t.replace(/^['"]|['"]$/g, '');
-}
-
-function parseFlow(v) {
-  const t = v.trim().replace(/\s+#.*$/, '');
-  if (t.startsWith('[') && t.endsWith(']')) {
-    return t
-      .slice(1, -1)
-      .split(',')
-      .map((x) => x.trim())
-      .filter(Boolean);
-  }
-  if (t.startsWith('{') && t.endsWith('}')) {
-    const out = {};
-    for (const part of t.slice(1, -1).split(',')) {
-      const i = part.indexOf(':');
-      if (i > 0) out[part.slice(0, i).trim()] = parseScalar(part.slice(i + 1));
-    }
-    return out;
-  }
-  return parseScalar(t);
-}
-
-/** Minimal parser for the documented `profiles:` shape (two-level, flow collections). */
+/** Profiles section of the config file. */
 function parseProfiles(text) {
-  const profiles = {};
-  let inProfiles = false;
-  let current = null;
-  for (const raw of String(text).split('\n')) {
-    if (!raw.trim() || raw.trim().startsWith('#')) continue;
-    const indent = raw.length - raw.trimStart().length;
-    const m = raw.trim().match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-    if (!m) continue;
-    if (indent === 0) {
-      inProfiles = m[1] === 'profiles';
-      current = null;
-    } else if (inProfiles && indent === 2) {
-      current = {};
-      profiles[m[1]] = current;
-    } else if (inProfiles && current && indent > 2 && m[2] !== '') {
-      current[m[1]] = parseFlow(m[2]);
-    }
-  }
-  return profiles;
+  return parseConfig(text).profiles;
 }
 
 function resolveRole(env) {
@@ -114,15 +46,19 @@ function resolveRole(env) {
   );
 }
 
-function loadProfile(projectDir, role) {
-  let profiles = DEFAULT_PROFILES;
+function loadProfile(projectDir, role, model) {
+  let cfg = { profiles: DEFAULT_PROFILES, modelOverrides: {} };
   try {
     const file = join(projectDir, '.ai-sdlc', 'context-profiles.yaml');
-    if (existsSync(file)) profiles = parseProfiles(readFileSync(file, 'utf-8'));
+    if (existsSync(file)) {
+      const parsed = parseConfig(readFileSync(file, 'utf-8'));
+      // An invalid file never widens or breaks surfacing: fall back to the shipped defaults.
+      if (validateConfig(parsed).length === 0) cfg = parsed;
+    }
   } catch {
-    profiles = DEFAULT_PROFILES;
+    // keep defaults
   }
-  return profiles[role] || null;
+  return resolveProfile(cfg, role, model);
 }
 
 /** Text of the newest compaction summary entry in the session transcript, or ''. */
@@ -182,7 +118,7 @@ function render(moment, hits) {
  */
 function surface(moment, input, env, projectDir, spawn = spawnSync) {
   try {
-    const profile = loadProfile(projectDir, resolveRole(env));
+    const profile = loadProfile(projectDir, resolveRole(env), env.AI_SDLC_CONTEXT_MODEL);
     if (!profile || !Array.isArray(profile.moments) || !profile.moments.includes(moment))
       return null;
     // Compaction runs on the post-compaction SessionStart only; PreCompact cannot inject context.

@@ -1,0 +1,32 @@
+# RFC-0053 OQ-8: surfacing profiles. Role is the primary key; modelOverrides is the secondary
+# key by alias and overrides only the fields it names. Defaults change only through a decision
+# record: adding a moment or raising a budget needs evidence, removing or lowering is automatic.
+profiles:
+  planner:
+    moments: [sessionStart, taskClaim, userPrompt, toolTouch, decisionPoint, compaction]
+    # prettier-ignore
+    budget: { sessionStart: 3000, taskClaim: 3000, userPrompt: 1500, toolTouch: 800, compaction: 3000 }
+    minScore: 0.4
+    maxInjectionsPerNTurns: { n: 5, max: 3 }
+  operator-dispatch:
+    moments: [sessionStart, taskClaim, compaction]
+    budget: { sessionStart: 1000, taskClaim: 1500, compaction: 2000 }
+    minScore: 0.5
+    maxInjectionsPerNTurns: { n: 10, max: 2 }
+  executor:
+    moments: [sessionStart, taskClaim, toolTouch]
+    budget: { sessionStart: 1000, taskClaim: 1500, toolTouch: 500 }
+    minScore: 0.5
+    maxInjectionsPerNTurns: { n: 10, max: 2 }
+    toolTouchPaths: governance-bearing
+  reviewer:
+    moments: [taskClaim]
+    budget: { taskClaim: 1000 }
+    minScore: 0.5
+    maxInjectionsPerNTurns: { n: 10, max: 1 }
+  relay:
+    moments: [sessionStart]
+    budget: { sessionStart: 500 }
+    minScore: 0.5
+    maxInjectionsPerNTurns: { n: 10, max: 1 }
+modelOverrides: {}
