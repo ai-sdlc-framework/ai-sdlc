@@ -1340,7 +1340,14 @@ describe('route-to-planner is not a terminal state (AISDLC-1156, DEC-0291)', () 
     const late = run('2026-11-02T11:01:00.000Z');
     expect(late.stalls).toHaveLength(1);
     expect(late.stalls[0]).toMatchObject({ ageMinutes: 61 });
-    expect(late.acted.filter((a) => a.action === 'route-to-planner')).toEqual([]);
+    expect(late.acted).toEqual([
+      {
+        pr: 20,
+        action: 'route-to-planner',
+        ran: false,
+        note: expect.stringContaining('stalled 61 min'),
+      },
+    ]);
     // The window restarts: the next pass inside it stalls nothing, the one after it stalls again.
     expect(run('2026-11-02T11:30:00.000Z').stalls).toEqual([]);
     expect(run('2026-11-02T12:02:00.000Z').stalls).toHaveLength(1);

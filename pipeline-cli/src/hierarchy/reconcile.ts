@@ -885,11 +885,20 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
         };
         writeLanding(opts.boardDir, updated);
         report.records.push(updated);
+        const ageMinutes = Math.floor((now().getTime() - last) / 60_000);
+        const note = d.note ?? d.failingLine ?? d.state;
         report.stalls.push({
           pr: f.prNumber,
           ...(f.headSha === undefined ? {} : { headSha: f.headSha }),
-          note: d.note ?? d.failingLine ?? d.state,
-          ageMinutes: Math.floor((now().getTime() - last) / 60_000),
+          note,
+          ageMinutes,
+        });
+        // The dispatch module forwards `route-to-planner` entries of `acted`: one line per window.
+        report.acted.push({
+          pr: f.prNumber,
+          action: 'route-to-planner',
+          ran: false,
+          note: `stalled ${ageMinutes} min: ${note}`,
         });
         continue;
       }
