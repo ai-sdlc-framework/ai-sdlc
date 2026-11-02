@@ -119,7 +119,11 @@ describe('playbook finishes a repaired push (AISDLC-1156)', () => {
 
   it('escalates when the pushed head cannot be read', async () => {
     const s = setup();
-    const run = s.deps.run;
+    const run = s.deps.run as (
+      f: string,
+      a: readonly string[],
+      o?: { cwd?: string },
+    ) => CommandResult;
     s.deps.run = (file, args, o) =>
       args[0] === 'rev-parse' ? { status: 1, stdout: '', stderr: 'x' } : run(file, args, o);
     const outcome = await runPlaybook(failed(), s.deps);
