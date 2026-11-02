@@ -9,7 +9,7 @@
  * @module routing/role-model
  */
 
-import { DEFAULT_ROLE_MODELS } from './default-table.js';
+import { DEFAULT_ROLE_MODELS, type LaunchProfile } from './default-table.js';
 import { loadRoutingTable, type LoadTableOptions } from './load-table.js';
 
 /** Fallbacks for roles outside the spawner map, used when the table has no cell. */
@@ -71,4 +71,20 @@ export function resolveReviewerHarnessSetting(
     return { harness: loaded.table.harness, source: 'yaml' };
   }
   return { harness: 'codex', source: 'default' };
+}
+
+/**
+ * The launch profile named `name` (the hierarchy role) in the `launch:` block of the
+ * routing table on the base ref (AISDLC-1151), or undefined when the table has none.
+ */
+export function routedLaunchProfile(
+  name: string,
+  opts: RoutedModelOptions = {},
+): LaunchProfile | undefined {
+  const loaded = loadRoutingTable({
+    workDir: opts.workDir ?? process.cwd(),
+    ...(opts.baseRef ? { baseRef: opts.baseRef } : {}),
+    ...(opts.readBaseTable ? { readBaseTable: opts.readBaseTable } : {}),
+  });
+  return loaded.source === 'repo' ? loaded.table.launch?.[name] : undefined;
 }

@@ -2548,6 +2548,20 @@ The planner hands off and clears at 15% of the window (150k tokens), without exc
 It keeps its handoff file current as rulings happen and delegates review rounds and
 orchestration loops instead of running them in its own context.
 
+### Launch profiles
+
+A planner session carries about 60k tokens of fixed context on its first turn; the built-in tool
+schemas are the largest block (about 19k tokens for 16 tools). The `launch:` block of
+`.ai-sdlc/model-routing.yaml` (read from the base ref, like the model cells) holds one profile per
+hierarchy role with optional `allowedTools`, `disallowedTools` and `disallowedAgents` lists.
+`up`, `restart` and `spawn` resolve the profile through the same function and render
+`--allowedTools` / `--disallowedTools` after `--permission-mode` (an agent is denied as
+`Agent(<name>)`); the roster entry records the profile name so `restart` reproduces it. A role with
+no profile launches exactly as before. The repository ships a `planner` profile that drops tools the
+planner command never uses (notebooks, worktree switching, cron scheduling, plan mode); executors
+and dispatch keep the full set. Measured saving: not yet measured on a live launch; compare the
+`CONTEXT` column of `cli-hierarchy status` before and after.
+
 ### Events
 
 `HierarchySessionStarted` (from `cli-hierarchy up`), `ExecutorContextCleared`,

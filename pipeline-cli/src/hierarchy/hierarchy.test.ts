@@ -2389,6 +2389,62 @@ describe('project-scoped session names', () => {
   });
 });
 
+describe('launch profiles (AISDLC-1151)', () => {
+  const sess = {
+    role: 'planner' as const,
+    name: 'x',
+    model: 'm',
+    permissionMode: 'bypassPermissions',
+    prompt: 'p',
+  };
+
+  it('no profile leaves the command line unchanged', () => {
+    const cmd = buildClaudeCommand('claude', sess);
+    expect(cmd).not.toContain('--allowedTools');
+    expect(cmd).not.toContain('--disallowedTools');
+    expect(cmd).toBe(buildClaudeCommand('claude', { ...sess }));
+  });
+
+  it('renders allowed then disallowed flags after the permission mode', () => {
+    const cmd = buildClaudeCommand('claude', {
+      ...sess,
+      launchProfile: {
+        name: 'planner',
+        allowedTools: ['Bash', 'Read'],
+        disallowedTools: ['NotebookEdit'],
+        disallowedAgents: ['code-reviewer'],
+      },
+    });
+    expect(cmd).toContain(
+      "--permission-mode 'bypassPermissions' --allowedTools 'Bash,Read' --disallowedTools 'NotebookEdit,Agent(code-reviewer)' 'p'",
+    );
+  });
+
+  it('up records the profile name and restart reproduces the flags', async () => {
+    {
+      const d: HierarchyDeps = {
+        ...deps,
+        resolveLaunchProfile: (n) =>
+          n === 'executor' ? { disallowedTools: ['NotebookEdit'] } : undefined,
+      };
+      await hierarchyUp(baseOpts, d);
+      const alpha = Q('executor-alpha');
+      const rec = readRoster(boardDir).sessions.find((e) => e.name === alpha) as RosterEntry;
+      expect(rec.launchProfile).toBe('executor');
+      expect(
+        readRoster(boardDir).sessions.find((e) => e.role === 'planner')?.launchProfile,
+      ).toBeUndefined();
+      expect(validateHierarchyRoster(readRoster(boardDir)).valid).toBe(true);
+      fake.calls.length = 0;
+      await hierarchyRestart({ session: 'executor-alpha' }, d);
+      expect(newWindowCommands()[0]).toContain("--disallowedTools 'NotebookEdit'");
+      expect(readRoster(boardDir).sessions.find((e) => e.name === alpha)?.launchProfile).toBe(
+        'executor',
+      );
+    }
+  });
+});
+
 describe('hierarchy restart and register (AISDLC-713)', () => {
   const alpha = Q('executor-alpha');
   const entryOf = (name: string) => readRoster(boardDir).sessions.find((e) => e.name === name);

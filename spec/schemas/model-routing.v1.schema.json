@@ -38,6 +38,19 @@
           "type": "string",
           "description": "Salt mixed into the assignment hash so a new salt reshuffles assignments."
         },
+        "launch": {
+          "type": "object",
+          "description": "Launch profiles (AISDLC-1151), keyed by profile name (the hierarchy role): the tool and agent set a session of that role starts with. Absent role means the harness default.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "allowedTools": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+              "disallowedTools": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+              "disallowedAgents": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+            }
+          }
+        },
         "cells": {
           "type": "object",
           "description": "Role -> task class (or '*') -> cell.",

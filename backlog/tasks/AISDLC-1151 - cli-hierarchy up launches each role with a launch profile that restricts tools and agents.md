@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1151
 title: 'cli-hierarchy up launches each role with a launch profile: restricted tool and agent set per role, starting with the planner'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-01'
 labels:

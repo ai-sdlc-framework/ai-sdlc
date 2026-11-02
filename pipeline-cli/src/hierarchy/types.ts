@@ -5,6 +5,7 @@
  */
 
 import type { EventEmitter } from './emit.js';
+import type { LaunchProfile } from '../routing/default-table.js';
 
 /** Tier a session belongs to. */
 export type HierarchyRole = 'planner' | 'operator-dispatch' | 'executor';
@@ -30,6 +31,8 @@ export interface RosterEntry {
   pid: number;
   model: string;
   permissionMode: string;
+  /** Name of the launch profile the session started with (AISDLC-1151); absent when none. */
+  launchProfile?: string;
   startedAt: string;
   /** Full Node version `up` activated for the session (AISDLC-906); absent when not pinned. */
   nodeVersion?: string;
@@ -141,6 +144,8 @@ export interface HierarchyDeps {
   spawnScheduler?: (file: string, args: readonly string[]) => number | undefined;
   /** Records orchestrator events (session started, context cleared). Absent: nothing is recorded. */
   emit?: EventEmitter;
+  /** Resolves a launch profile by name (AISDLC-1151). Absent: read from `.ai-sdlc/model-routing.yaml` on the base ref. */
+  resolveLaunchProfile?: (name: string) => LaunchProfile | undefined;
   /** Resolves the repository root `cwd` belongs to, or null (AISDLC-664.6). Absent: the verified git main checkout. */
   resolveRoot?: (cwd: string) => string | null;
   /** Loads the dispatch policy the executors will see (AISDLC-664.6). Absent: read from the verified main checkout. */

@@ -38,7 +38,14 @@ import { readNvmrc } from './node-pin.js';
 import { acquireRestartLock } from './restart-lock.js';
 import { ownershipRefusal, paneInfo, paneStartCommand, windowLive } from './tmux.js';
 import type { HierarchyDeps, Roster, RosterEntry } from './types.js';
-import { defaultIsAlive, hasLaunchEnv, launchSession, ROLE_PROMPT } from './up.js';
+import {
+  defaultIsAlive,
+  hasLaunchEnv,
+  launchSession,
+  resolveProfile,
+  ROLE_PROMPT,
+  withProfile,
+} from './up.js';
 import { webhookUp } from './webhook.js';
 import { assertModel, assertPermissionMode, splitSessionName } from './validate.js';
 
@@ -224,6 +231,7 @@ export async function hierarchyRestart(
       model: entry.model,
       permissionMode: entry.permissionMode,
       prompt: ROLE_PROMPT[entry.role],
+      ...(entry.launchProfile ? withProfile(resolveProfile(deps, entry.launchProfile)) : {}),
     },
     project,
     deps,

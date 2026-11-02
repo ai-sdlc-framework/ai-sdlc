@@ -34,6 +34,13 @@ export interface RoutingCell {
   previousModel?: string;
 }
 
+/** Tool and agent restrictions a hierarchy session of one role starts with (AISDLC-1151). */
+export interface LaunchProfile {
+  allowedTools?: string[];
+  disallowedTools?: string[];
+  disallowedAgents?: string[];
+}
+
 export interface RoutingTable {
   /** Models, weakest first. */
   strength: string[];
@@ -41,6 +48,8 @@ export interface RoutingTable {
   salt: string;
   /** Default reviewer harness; absent means `codex`. */
   harness?: 'codex' | 'claude';
+  /** Launch profiles by name (the hierarchy role). */
+  launch?: Record<string, LaunchProfile>;
   /** role -> task class (or '*') -> cell. */
   cells: Record<string, Record<string, RoutingCell>>;
 }
