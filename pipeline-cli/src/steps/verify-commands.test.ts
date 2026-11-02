@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { HIERARCHY_SESSION_ENV_VARS } from '../hierarchy/session-env.js';
 import { FakeRunner, fail, ok } from '../__test-helpers/fake-runner.js';
 import {
   claimedGreenButRed,
@@ -15,6 +16,27 @@ import {
 const green = { build: 'passed', test: 'passed', lint: 'passed', format: 'passed' } as const;
 
 describe('runVerifyCommands', () => {
+  it('spawns verify commands without the hierarchy session env (AISDLC-1153)', async () => {
+    const saved: Record<string, string | undefined> = {};
+    for (const k of HIERARCHY_SESSION_ENV_VARS) {
+      saved[k] = process.env[k];
+      process.env[k] = 'leak';
+    }
+    try {
+      const names = HIERARCHY_SESSION_ENV_VARS.map((k) => `\${${k}:-unset}`).join(' ');
+      const run = await runVerifyCommands({ commands: [`echo ${names}`], cwd: tmpdir() });
+      expect(run.ok).toBe(true);
+      expect(run.results[0]!.tail.trim()).toBe(
+        HIERARCHY_SESSION_ENV_VARS.map(() => 'unset').join(' '),
+      );
+    } finally {
+      for (const k of HIERARCHY_SESSION_ENV_VARS) {
+        if (saved[k] === undefined) delete process.env[k];
+        else process.env[k] = saved[k];
+      }
+    }
+  });
+
   it('records a red test with tail and keeps the developer claim', async () => {
     const fr = new FakeRunner().on(/pnpm test/, fail('boom\n'.repeat(100), 1));
     const run = await runVerifyCommands({

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   findUnsafeGitSpawns,
+  findSessionEnvReads,
   findOffenders,
   unpreloadedNodeTestScripts,
   unpreloadedRunners,
@@ -168,4 +169,13 @@ test('an unpreloaded runner makes node --test files offenders', () => {
 test('loadBaselineAtRef returns null for an unreadable or option-like ref', () => {
   assert.equal(loadBaselineAtRef('--output=/x', process.cwd()), null);
   assert.equal(loadBaselineAtRef('no-such-ref-xyz', process.cwd()), null);
+});
+
+test('flags reads of hierarchy session vars, not assignments or deletes (AISDLC-1153)', () => {
+  const P = 'process.' + 'env';
+  assert.deepEqual(findSessionEnvReads(`const a = ${P}.CLAUDE_PROJECT_DIR;`), [1]);
+  assert.deepEqual(findSessionEnvReads(`x\nconst r = ${P}['AI_SDLC_HIERARCHY_ROLE'];`), [2]);
+  assert.deepEqual(findSessionEnvReads(`${P}.AI_SDLC_HIERARCHY_SESSION = "s";`), []);
+  assert.deepEqual(findSessionEnvReads(`delete ${P}.AI_SDLC_EXECUTOR_TASK;`), []);
+  assert.deepEqual(findSessionEnvReads(`// ${P}.AI_SDLC_GH_CALL_LOG`), []);
 });

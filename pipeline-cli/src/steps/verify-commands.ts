@@ -12,6 +12,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { now } from '../clock.js';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
+import { strippedSessionEnv } from '../hierarchy/session-env.js';
 import { DEFAULT_VERIFY_COMMANDS } from './verify-defaults.js';
 import type { DeveloperReturn, VerificationStatus } from '../types.js';
 
@@ -101,7 +102,12 @@ export async function runVerifyCommands(opts: RunVerifyOptions): Promise<VerifyR
   const results: VerifyCommandResult[] = [];
   for (const command of opts.commands) {
     const started = now().getTime();
-    const r = await runner('sh', ['-c', command], { cwd: opts.cwd, timeout, allowFailure: true });
+    const r = await runner('sh', ['-c', command], {
+      cwd: opts.cwd,
+      timeout,
+      allowFailure: true,
+      env: strippedSessionEnv(),
+    });
     const timedOut = r.code !== 0 && now().getTime() - started >= timeout;
     const tail = tailOf(`${r.stdout}${r.stderr ? '\n' + r.stderr : ''}`, VERIFY_TAIL_LINES);
     const res: VerifyCommandResult = {

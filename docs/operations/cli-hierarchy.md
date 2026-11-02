@@ -662,6 +662,14 @@ the start no longer checks who typed it. `check-sender` was deleted in phase 4 (
 
 **Idle path.** When `taskId` is `null` the executor ends its reply with `[executor] idle` and keeps its context.
 
+**Stripped session env (AISDLC-1153).** The executor shell exports `AI_SDLC_HIERARCHY_SESSION`, `AI_SDLC_HIERARCHY_ROLE`,
+`AI_SDLC_EXECUTOR_TASK`, `CLAUDE_PROJECT_DIR` and `AI_SDLC_GH_CALL_LOG`; the workflow engine also sets
+`AI_SDLC_WORKFLOW_STATE` on `process.env` (`execute-host.ts`), which `verifyV6Envelope` reads. The verify gate (`runVerifyCommands`, step 6) removes
+them from every command's env, and `vitest.git-env.setup.mjs` deletes them in each test worker (list:
+`HIERARCHY_SESSION_ENV_VARS` in `pipeline-cli/src/hierarchy/session-env.ts`). Left set, `pnpm test` inherits the session and the
+lease-push preflight refuses `not-task-worktree` for about 36 pipeline-cli tests. Tests that need them inject `env`;
+`scripts/check-git-env-hygiene.mjs` flags a test that reads them from `process.env`.
+
 ## The hierarchy hooks module (dispatch role, model-less host)
 
 RFC-0058 phase 2 (AISDLC-1035, OQ-6). With `HIERARCHY_ROLE=operator-dispatch` the same module hosts the dispatch
