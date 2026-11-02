@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1163
 title: 'Hierarchy module rotates at the configured contextThresholds instead of hardcoded 150k/120k, and the generated handoff block gains a Pending asks section fed by handoff note --kind asked|settled'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-02'
 labels:
@@ -44,12 +44,45 @@ Velocity impact: operators can tune rotation per role without a code change, and
 
 ## Acceptance Criteria
 
-- [ ] AC-1: The hierarchy module resolves each role's rotation threshold from `<boardDir>/config.json` `contextThresholds` (same validation as `resolveThresholds`: positive integers only, per-role fallback); `planner.ts:162`, `executor.ts:573` and `dispatch.ts:528` compare against the resolved value. Module tests cover configured, absent and malformed config for each role.
-- [ ] AC-2: The module logs the thresholds it resolved once at registration; a test asserts `cli-hierarchy status` and the module agree for the same config file.
-- [ ] AC-3: `cli-hierarchy handoff note --kind asked --ref <key> --summary <text>` and `--kind settled --ref <key>` are accepted (`--url` stays required for the existing kinds only); unknown kinds still refuse.
-- [ ] AC-4: `renderHandoff` emits `## Pending asks` with each unsettled `asked` entry (`at`, ref, summary), computed over the whole ledger file; `(none)` when empty. Tests cover ask-then-settle, two asks on different refs, and an ask older than the 20-entry render window.
-- [ ] AC-5: `planner.md` (Handoff routine and the asking step) and `docs/operations/cli-hierarchy.md` (thresholds and outward-action ledger sections) describe both changes.
+- [x] AC-1: The hierarchy module resolves each role's rotation threshold from `<boardDir>/config.json` `contextThresholds` (same validation as `resolveThresholds`: positive integers only, per-role fallback); `planner.ts:162`, `executor.ts:573` and `dispatch.ts:528` compare against the resolved value. Module tests cover configured, absent and malformed config for each role.
+- [x] AC-2: The module logs the thresholds it resolved once at registration; a test asserts `cli-hierarchy status` and the module agree for the same config file.
+- [x] AC-3: `cli-hierarchy handoff note --kind asked --ref <key> --summary <text>` and `--kind settled --ref <key>` are accepted (`--url` stays required for the existing kinds only); unknown kinds still refuse.
+- [x] AC-4: `renderHandoff` emits `## Pending asks` with each unsettled `asked` entry (`at`, ref, summary), computed over the whole ledger file; `(none)` when empty. Tests cover ask-then-settle, two asks on different refs, and an ask older than the 20-entry render window.
+- [x] AC-5: `planner.md` (Handoff routine and the asking step) and `docs/operations/cli-hierarchy.md` (thresholds and outward-action ledger sections) describe both changes.
 
 ## Notes
 
 Origin: AISDLC-1159 Notes ("Out of scope, follow-ups to file separately if wanted"), both halves. Neither half is covered by AISDLC-1159: its AC-2 puts pending asks in the model-written RESUME prose; this task adds the structured, CLI-generated section. Premise widened: the hardcoded threshold affects executor (`executor.ts:22`) and dispatch (`dispatch.ts:23`) as well as the planner. Related: AISDLC-815 (thresholds config), AISDLC-1049 (ledger), AISDLC-1150 (dispatch over-context restart).
+
+## Final Summary
+
+## Summary
+The hierarchy module now rotates at the `contextThresholds` from `<boardDir>/config.json` for the planner, executor and dispatch roles. `handoff note` accepts `--kind asked|settled --ref`, and the generated handoff gains a `## Pending asks` section built from the whole ledger. The four verification commands passed before the commit. A draft PR is open.
+
+## Changes
+- ai-sdlc-plugin/hooks/hierarchy/executor.ts
+- ai-sdlc-plugin/hooks/hierarchy/planner.ts
+- ai-sdlc-plugin/hooks/hierarchy/dispatch.ts
+- ai-sdlc-plugin/hooks/hierarchy/register.tsx
+- ai-sdlc-plugin/mods/tests/hierarchy.test.ts
+- ai-sdlc-plugin/commands/planner.md
+- docs/operations/cli-hierarchy.md
+- pipeline-cli/src/hierarchy/handoff.ts
+- pipeline-cli/src/hierarchy/handoff-ledger.test.ts
+- pipeline-cli/src/cli/hierarchy.ts
+- pipeline-cli/src/cli/hierarchy.test.ts
+- backlog/tasks/AISDLC-1163 - Hierarchy rotation reads configured thresholds and handoff carries pending asks.md
+
+## Design decisions
+The commit scope is `pipeline-cli` because commitlint rejected `hierarchy`. The local pre-push patch-coverage gate (`scripts/pre-push-patch-coverage.mjs`) does not run coverage for `ai-sdlc-plugin/mods`, so the first two pushes failed with 'no coverage data' for the plugin files. I ran `pnpm --filter ./ai-sdlc-plugin/mods test:coverage` and then the patch-coverage checker, which reported 69/69 changed lines covered (100%); the third push then succeeded. The thresholds are resolved once at `session.start`, so a changed value applies from the next session start. The task file in `backlog/tasks` shows a status change to In Progress, which was already in the worktree before I started.
+
+## Verification
+- `pnpm build` — passed (ai-sdlc-plugin/mcp-server build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (246 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+- declined: the pre-push patch-coverage gap for ai-sdlc-plugin/mods is a separate tooling issue and outside this task's scope
+
