@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1083
 title: 'cli-hierarchy scale: planner or dispatch sets a runtime executor ceiling on the board, and the spawn cap honours machine load headroom so the pool grows and shrinks with dispatch load'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-27'
 labels:
