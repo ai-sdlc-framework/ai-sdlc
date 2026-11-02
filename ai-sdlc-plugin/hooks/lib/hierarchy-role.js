@@ -234,10 +234,45 @@ function buildHierarchyRoleBlock({ source, boardDir, pids, commOf = commOfPid, r
 }
 
 /** Longest handoff text injected into a fresh context, in characters. */
-const HANDOFF_MAX_CHARS = 12000;
+const HANDOFF_MAX_CHARS = 4500;
+const HANDOFF_BEGIN = '<!-- ai-sdlc-handoff:begin -->';
+const HANDOFF_END = '<!-- ai-sdlc-handoff:end -->';
 
 /**
- * Handoff text for a roster session via `cli-hierarchy handoff read`, truncated,
+ * Condense a `handoff read` output to the generated block, the last
+ * `## RESUME HERE` block and a pointer to the full file (AISDLC-1152), so a
+ * long-lived planner never floods the SessionStart prefix.
+ * @param {string} text
+ * @param {number} [max]
+ * @returns {string}
+ */
+function condenseHandoff(text, max = HANDOFF_MAX_CHARS) {
+  const start = text.indexOf(HANDOFF_BEGIN);
+  const end = text.indexOf(HANDOFF_END);
+  const hasBlock = start !== -1 && end >= start;
+  const block = hasBlock ? text.slice(start, end + HANDOFF_END.length) : '';
+  const rest = hasBlock ? text.slice(end + HANDOFF_END.length) : text;
+  const lines = rest.trim().split('\n');
+  const last = lines[lines.length - 1] || '';
+  const file = /^\S+\.md$/.test(last.trim()) ? last.trim() : '';
+  const body = file ? lines.slice(0, -1) : lines;
+  let idx = -1;
+  body.forEach((l, i) => {
+    if (/^## RESUME HERE\b/.test(l)) idx = i;
+  });
+  const resume = idx === -1 ? '' : body.slice(idx).join('\n').trim();
+  const pointer = `[handoff condensed; full file: ${file || 'run \`cli-hierarchy handoff read --full\`'}]`;
+  const budget = Math.max(0, max - pointer.length - 4);
+  const blockMax = Math.floor(budget / 2);
+  const clip = (t, n, keepTail) =>
+    t.length <= n ? t : keepTail ? `[...]\n${t.slice(t.length - n)}` : `${t.slice(0, n)}\n[...]`;
+  const blockOut = clip(block, blockMax, false);
+  const resumeOut = clip(resume, Math.max(0, budget - blockOut.length), false);
+  return [blockOut, resumeOut, pointer].filter((p) => p).join('\n\n');
+}
+
+/**
+ * Handoff text for a roster session via `cli-hierarchy handoff read`, condensed,
  * or null when the CLI is missing or fails. `run` is injectable for tests.
  * @param {{ role: string, name: string }} self
  * @param {object} args
@@ -256,11 +291,7 @@ function readHandoffText(self, { bin, boardDir, run = spawnSync }) {
     );
     const text = res && res.status === 0 ? String(res.stdout || '').trim() : '';
     if (!text) return null;
-    if (text.length <= HANDOFF_MAX_CHARS) return text;
-    // Keep the head (state block) and the tail (newest notes); drop the middle.
-    const head = Math.floor(HANDOFF_MAX_CHARS / 3);
-    const tail = HANDOFF_MAX_CHARS - head;
-    return `${text.slice(0, head)}\n[handoff middle omitted]\n${text.slice(text.length - tail)}`;
+    return condenseHandoff(text);
   } catch {
     return null;
   }
@@ -283,6 +314,7 @@ function resolveBin(env, pluginDir) {
 module.exports = {
   resolveBin,
   readHandoffText,
+  condenseHandoff,
   HANDOFF_MAX_CHARS,
   RESET_SOURCES,
   buildHierarchyRoleBlock,

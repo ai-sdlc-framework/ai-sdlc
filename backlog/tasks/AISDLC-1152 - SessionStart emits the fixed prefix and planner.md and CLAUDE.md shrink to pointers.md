@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1152
 title: 'SessionStart emits the AISDLC-782 fixed prefix; planner.md and CLAUDE.md shrink to pointers under the 10 KB prefix budget'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-01'
 labels:

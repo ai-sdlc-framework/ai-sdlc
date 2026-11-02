@@ -168,6 +168,8 @@ describe('path-bound rules', () => {
 
 describe('no control lost from the prior CLAUDE.md', () => {
   const before = readFileSync(join(here, 'fixtures/claude-md-before-782.md'), 'utf-8');
+  // The old size-budget sentence is obsolete by design (AISDLC-1152 lowered the budget).
+  const controlsBefore = findControlSentences(before).filter((s) => !/budget 15k/.test(s));
   const homes = {
     prefix: normalizeSentence(prefixOf()),
     'CLAUDE.md': normalizeSentence(readFileSync(join(root, 'CLAUDE.md'), 'utf-8')),
@@ -180,14 +182,14 @@ describe('no control lost from the prior CLAUDE.md', () => {
   };
 
   it('maps every control sentence to the prefix, CLAUDE.md or a rule file', () => {
-    const sentences = [...new Set(findControlSentences(before))];
+    const sentences = [...new Set(controlsBefore)];
     assert.ok(sentences.length > 30);
     const lost = sentences.filter((s) => !Object.values(homes).some((h) => h.includes(s)));
     assert.deepEqual(lost, []);
   });
 
   it('moved the path-bound sections out of CLAUDE.md into rule files', () => {
-    const moved = findControlSentences(before).filter(
+    const moved = controlsBefore.filter(
       (s) => !homes['CLAUDE.md'].includes(s) && !homes.prefix.includes(s),
     );
     assert.ok(moved.length > 0);

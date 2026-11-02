@@ -13,6 +13,11 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { PREFIX_MAX_BYTES } = require('./lib/fixed-prefix.js');
+const { condenseHandoff, HANDOFF_MAX_CHARS } = require('./lib/hierarchy-role.js');
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const hookScript = join(__dirname, 'session-start.js');
@@ -663,13 +668,44 @@ describe('ai-sdlc-plugin session-start hook — compact form (AISDLC-651.2)', ()
     const lines = ctx.split('\n');
     assert.equal(lines.filter((l) => l.startsWith('Limits:')).length, 1);
     assert.equal(lines.filter((l) => l.startsWith('Blocked actions')).length, 0);
-    assert.equal(lines.filter((l) => l.startsWith('Before EVERY commit')).length, 1);
+    assert.equal(lines.filter((l) => l.startsWith('- Before EVERY commit')).length, 1);
     assert.ok(!ctx.includes('### Pre-Commit Checklist'), 'no multi-line checklist section');
     assert.ok(!ctx.includes('### Blocked Actions'), 'no per-action bullet section');
   });
 
-  it('keeps the injected block small', () => {
+  it('keeps the injected block within the fixed-prefix budget (AISDLC-1152)', () => {
     const ctx = JSON.parse(runHook(tempDirWithConfig).output).hookSpecificOutput.additionalContext;
-    assert.ok(ctx.length < 2000, `session governance block grew to ${ctx.length} chars`);
+    const bytes = Buffer.byteLength(ctx);
+    assert.ok(bytes <= PREFIX_MAX_BYTES, `session start text is ${bytes} bytes`);
+    assert.ok(ctx.includes('## Governance controls') && ctx.includes('## Pointers'));
+  });
+
+  it('stays within the budget with warnings and a long-lived planner handoff', () => {
+    const ctx = JSON.parse(
+      runHook(tempDirWithConfig, {
+        __AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR: 'x '.repeat(5000),
+      }).output,
+    ).hookSpecificOutput.additionalContext;
+    assert.ok(ctx.includes('Setup Warnings'));
+    assert.ok(Buffer.byteLength(ctx) <= PREFIX_MAX_BYTES);
+  });
+
+  it('condenseHandoff keeps the generated block and last RESUME HERE only', () => {
+    const text = [
+      '<!-- ai-sdlc-handoff:begin -->',
+      'state',
+      '<!-- ai-sdlc-handoff:end -->',
+      '## RESUME HERE',
+      'old '.repeat(3000),
+      '## RESUME HERE',
+      'newest',
+      '/x/handoff.md',
+    ].join('\n');
+    const out = condenseHandoff(text);
+    assert.ok(out.includes('state') && out.includes('newest') && out.includes('/x/handoff.md'));
+    assert.ok(!out.includes('old old'));
+    assert.ok(out.length <= HANDOFF_MAX_CHARS);
+    assert.ok(condenseHandoff('x'.repeat(20000)).length <= HANDOFF_MAX_CHARS);
+    assert.ok(condenseHandoff('plain').includes('handoff read --full'));
   });
 });
