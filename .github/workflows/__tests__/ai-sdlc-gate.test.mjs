@@ -712,9 +712,10 @@ describe('ai-sdlc-gate.yml — archetype detection (AC #2, AISDLC-484)', () => {
   it('spec/rfcs only -> true', () => {
     assert.equal(classifyList(['spec/rfcs/RFC-0042-foo.md']), 'true');
   });
-  it('docs, backlog, root *.md -> true', () => {
+  it('docs and backlog -> true; root *.md -> false (AISDLC-971)', () => {
     assert.equal(classifyList(['docs/operations/quality-gate.md', 'backlog/tasks/x.md']), 'true');
-    assert.equal(classifyList(['README.md', 'CHANGELOG.md']), 'true');
+    assert.equal(classifyList(['README.md', 'CHANGELOG.md']), 'false');
+    assert.equal(classifyList(['CLAUDE.md']), 'false');
   });
   it('mixed docs + source -> false', () => {
     assert.equal(classifyList(['docs/a.md', 'pipeline-cli/src/exec.ts']), 'false');
