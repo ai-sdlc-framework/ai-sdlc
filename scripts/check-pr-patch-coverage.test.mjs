@@ -544,11 +544,18 @@ describe('check-pr-patch-coverage — skip on 0 changed code files', () => {
       'test: add parent watch setup',
     );
     // Incident 2026-10-30: the per-worker git-env setup file is the third one.
-    const head = commitFile(
+    commitFile(
       repo,
       'vitest.git-env.setup.mjs',
       'delete process.env.GIT_DIR;\n',
       'test: add git-env setup',
+    );
+    // AISDLC-1151: the hierarchy-env setup file is the fourth one.
+    const head = commitFile(
+      repo,
+      'vitest.hierarchy-env.setup.mjs',
+      'delete process.env.AI_SDLC_HIERARCHY_ROLE;\n',
+      'test: add hierarchy-env setup',
     );
     const r = runGate(repo, { base, head, json: true });
     assert.equal(
