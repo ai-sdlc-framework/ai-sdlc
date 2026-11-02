@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1150
 title: 'Dispatch over-context restart defers to the graceful rotation: rotate request first, handoff written before any kill, no hard restart of a busy planner'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-01'
 labels:
@@ -37,12 +37,35 @@ Velocity impact: positive. A planner rotation at a turn boundary costs one `/cle
 
 ## Acceptance Criteria
 
-- [ ] AC-1: In `dispatch-loop.ts`, the `over-context` cause for a session with a hooks module (planner, executor) first issues a rotate request through the existing clear/rotate request path instead of calling `restartSession`. The `RestartReport` gains a status `requested-rotate`. A hard restart for `over-context` happens only when the session is still over threshold and has not rotated after a grace of `N` ticks (default 6, configurable next to `RESTART_AFTER_TICKS`), and never while `status` reports the session `busy`.
-- [ ] AC-2: `restart()` in `restart.ts` refuses a `planner` or `operator-dispatch` target whose live state is `busy` unless `force: true` is passed, with a refusal that names `cli-hierarchy clear <name>` as the next step. The CLI exposes `--force`.
-- [ ] AC-3: Before `stopSessionWindow`, `restart()` for a `planner` target runs the equivalent of `cli-hierarchy handoff write --role planner --board-dir <board>` and records the path in the restart result; a failure to write is reported but does not block the restart. The same for `operator-dispatch` where a handoff role exists.
-- [ ] AC-4: `cli-hierarchy status` shows, per session, the pending rotate request and its age so the operator can see a rotation that is waiting on a long turn.
-- [ ] AC-5: Tests for AC-1 to AC-3 in the existing `dispatch-loop.test.ts` and `restart` test files; `docs/operations/cli-hierarchy.md` describes the order: module rotation at the turn boundary, dispatch rotate request, hard restart as last resort, and the handoff written in every path.
+- [x] AC-1: In `dispatch-loop.ts`, the `over-context` cause for a session with a hooks module (planner, executor) first issues a rotate request through the existing clear/rotate request path instead of calling `restartSession`. The `RestartReport` gains a status `requested-rotate`. A hard restart for `over-context` happens only when the session is still over threshold and has not rotated after a grace of `N` ticks (default 6, configurable next to `RESTART_AFTER_TICKS`), and never while `status` reports the session `busy`.
+- [x] AC-2: `restart()` in `restart.ts` refuses a `planner` or `operator-dispatch` target whose live state is `busy` unless `force: true` is passed, with a refusal that names `cli-hierarchy clear <name>` as the next step. The CLI exposes `--force`.
+- [x] AC-3: Before `stopSessionWindow`, `restart()` for a `planner` target runs the equivalent of `cli-hierarchy handoff write --role planner --board-dir <board>` and records the path in the restart result; a failure to write is reported but does not block the restart. The same for `operator-dispatch` where a handoff role exists.
+- [x] AC-4: `cli-hierarchy status` shows, per session, the pending rotate request and its age so the operator can see a rotation that is waiting on a long turn.
+- [x] AC-5: Tests for AC-1 to AC-3 in the existing `dispatch-loop.test.ts` and `restart` test files; `docs/operations/cli-hierarchy.md` describes the order: module rotation at the turn boundary, dispatch rotate request, hard restart as last resort, and the handoff written in every path.
 
 ## Notes
 
 Origin: operator question 2026-11-01 ~22:30Z after the planner restart ("shouldn't the planner be able to finish its active work and write a handoff before terminating"). Evidence: `.ai-sdlc/dispatch/restart-locks/ai-sdlc-planner.json` holder `ai-sdlc-operator-dispatch` at 22:23:25.965Z; new planner `startedAt` 22:23:26.503Z; the killed command's transcript shows exit 137 inside the pre-push patch-coverage gate. Related: the planner starts at roughly 90k tokens of fixed context, which leaves 60k of working room before the 150k threshold; reducing the starting load is RFC-0053's scope and is tracked separately.
+
+## Final Summary
+
+## Summary
+Rebased the AISDLC-1150 branch onto origin/main and resolved the conflicts. The over-context rotate-request-first flow is intact, and nothing needed fixing after the rebase. I did not push, per instructions.
+
+## Changes
+- pipeline-cli/src/hierarchy/dispatch-loop.ts
+- pipeline-cli/src/hierarchy/status.ts
+
+## Design decisions
+Rebase hit mechanical conflicts only. In dispatch-loop.ts I kept both new LoopState fields (overCapTicks and rotateAsked) and both read-state spreads. In status.ts I kept main's resourcesNow/capNow block plus the readRotateRequests call. For vitest.git-env.setup.mjs I took main's AISDLC-1153 HIERARCHY_SESSION_ENV_VARS scrub, which supersedes my earlier test commit; that commit collapsed into the first one, so the branch is now one commit (cd631bcd). The other packages passed in the full run; hierarchy suites re-run: 65 files and 1071 tests passed. The branch tip differs from the pushed one, so the later push needs a force-with-lease. I did not push; PR #2274 already exists.
+
+## Verification
+- `pnpm build` — passed (ai-sdlc-plugin/mcp-server build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (246 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
