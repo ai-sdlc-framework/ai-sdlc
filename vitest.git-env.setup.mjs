@@ -25,3 +25,17 @@ for (const k of [
 ]) {
   delete process.env[k];
 }
+
+/**
+ * Executor session vars (AISDLC-1153): an executor shell exports these and the lease-push
+ * preflight then refuses `not-task-worktree`. Mirrors HIERARCHY_SESSION_ENV_VARS in
+ * pipeline-cli/src/hierarchy/session-env.ts (a test fails on drift).
+ */
+const HIERARCHY_SESSION_ENV_VARS = [
+  'AI_SDLC_HIERARCHY_SESSION',
+  'AI_SDLC_HIERARCHY_ROLE',
+  'AI_SDLC_EXECUTOR_TASK',
+  'CLAUDE_PROJECT_DIR',
+  'AI_SDLC_GH_CALL_LOG',
+];
+for (const k of HIERARCHY_SESSION_ENV_VARS) delete process.env[k];

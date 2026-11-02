@@ -184,6 +184,32 @@ export function unpreloadedRunners(root = process.cwd()) {
   return bad;
 }
 
+const SESSION_VARS = [
+  'AI_SDLC_HIERARCHY_SESSION',
+  'AI_SDLC_HIERARCHY_ROLE',
+  'AI_SDLC_EXECUTOR_TASK',
+  'CLAUDE_PROJECT_DIR',
+  'AI_SDLC_GH_CALL_LOG',
+];
+
+/**
+ * Lines in `source` that READ a hierarchy session var from process.env (AISDLC-1153).
+ * Assignments and deletes are setup, not reads; a test should inject `env` instead.
+ */
+export function findSessionEnvReads(source) {
+  const code = stripComments(source);
+  const re = new RegExp(
+    `(delete\\s+)?process\\.env(?:\\.|\\[\\s*['"\`])(${SESSION_VARS.join('|')})(?:['"\`]\\s*\\])?(\\s*=(?!=))?`,
+    'g',
+  );
+  const lines = [];
+  for (const m of code.matchAll(re)) {
+    if (m[1] || m[3]) continue;
+    lines.push(code.slice(0, m.index).split('\n').length);
+  }
+  return lines;
+}
+
 export function findOffenders({ root = process.cwd() } = {}) {
   const pkgPath = join(root, 'package.json');
   const pkg = existsSync(pkgPath) ? JSON.parse(readFileSync(pkgPath, 'utf-8')) : {};
@@ -191,9 +217,15 @@ export function findOffenders({ root = process.cwd() } = {}) {
     unpreloadedNodeTestScripts(pkg).length === 0 && unpreloadedRunners(root).length === 0;
   const offenders = [];
   for (const file of listTestFiles(root)) {
+    const source = readFileSync(join(root, file), 'utf-8');
+    const reads = findSessionEnvReads(source);
+    if (reads.length > 0) {
+      offenders.push({ path: file, lines: reads });
+      continue;
+    }
     if (vitestCoversFile(file, root)) continue;
     if (!/\.(ts|tsx)$/.test(file) && nodePreloaded) continue;
-    const spawns = findUnsafeGitSpawns(readFileSync(join(root, file), 'utf-8'));
+    const spawns = findUnsafeGitSpawns(source);
     if (spawns.length > 0) offenders.push({ path: file, lines: spawns.map((s) => s.line) });
   }
   return offenders;
