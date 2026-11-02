@@ -45,6 +45,7 @@ import { listWindows, paneInfo, paneStartCommand, sessionAttached } from './tmux
 import { contextWarning, formatContext, sessionContextTokens } from './context-size.js';
 import { readOpenDrainStall, type DrainStallRecord } from './drain-stall.js';
 import { budgetStatus, formatBudget, type BudgetStatus } from './budget.js';
+import { dynamicExecutors } from './ephemeral-tick.js';
 import { executorCap, formatExecutorCap, type ExecutorCap } from './executor-cap.js';
 import { resolveThresholds } from './thresholds.js';
 import type { HierarchyDeps, HierarchyRole, RosterEntry } from './types.js';
@@ -170,7 +171,16 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
   } catch {
     /* an unreadable usage file must not break status */
   }
-  const capNow = executorCap(deps.boardDir, deps.now().getTime(), deps.env, budgetNow);
+  let resourcesNow: ReturnType<HierarchyDeps['resources']> | undefined;
+  try {
+    resourcesNow = deps.resources();
+  } catch {
+    /* an unmeasurable machine adds no load limit */
+  }
+  const capNow = executorCap(deps.boardDir, deps.now().getTime(), deps.env, budgetNow, {
+    ...(resourcesNow ? { resources: resourcesNow } : {}),
+    live: dynamicExecutors(deps.boardDir).length,
+  });
   const rows = roster.sessions.map((entry): StatusRow => {
     const live =
       registry.find((r) => r.name === entry.name) ??

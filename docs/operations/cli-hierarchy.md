@@ -985,6 +985,25 @@ cli-dispatch unblock --task-id <id>
 
 Remove the hold set by `cli-hierarchy hold`; see [`hold`](#hold). Prints `{"ok": true, "resumed": <bool>}`.
 
+### `scale`
+
+Set or clear the runtime executor ceiling (AISDLC-1083), so the planner or dispatch can shrink the pool without editing config.
+
+```bash
+cli-hierarchy scale --max <n> --reason <text>
+cli-hierarchy scale --clear
+```
+
+| Option            | Meaning                                                        |
+| ----------------- | -------------------------------------------------------------- |
+| `--max <n>`       | Ceiling on spawned executors, written to `<board>/scale.json`. |
+| `--reason <text>` | Why (required with `--max`).                                   |
+| `--clear`         | Remove the ceiling.                                            |
+
+Every set and clear is appended to `<board>/scale-events.jsonl` with the caller's roster name. **Tighten-only:** a `--max` above `executors.max` is refused with a message naming the config key (`AI_SDLC_EXECUTORS_MAX`, or `"executors": { "max" }` in `<board>/config.json`); the ceiling can lower the cap, never raise it. Executors may not scale.
+
+**Cap formula.** The spawn cap is `min(executors.max, board ceiling, pacer allowance, load headroom)`, recomputed every tick. Load headroom is 0 when available memory is under 4 GiB or the one-minute load average is at or above the core count, else the running executors plus the cores not yet loaded. At saturation the tick spawns nothing. When the cap has stayed below the running count for two ticks in a row, the tick downs the surplus, choosing only executors with no inflight task; an executor holding a task is never downed for scale. `status` prints the `EXECUTOR CAP` line with all four inputs and the one that limits.
+
 ### `tick`
 
 One wake-up of the dispatch loop: ingest briefs, handle new verdicts (clear the finished

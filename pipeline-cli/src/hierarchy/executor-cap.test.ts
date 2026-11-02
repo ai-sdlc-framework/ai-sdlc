@@ -67,15 +67,37 @@ describe('pacer allowance and cap', () => {
     expect(computeCap(3, 1)).toBe(1);
     expect(computeCap(3, 0)).toBe(0);
     expect(computeCap(2, 0.4)).toBe(1);
-    expect(executorCap(dir, 0, {}, budget(0))).toEqual({ max: 3, allowance: 1, cap: 1 });
+    expect(executorCap(dir, 0, {}, budget(0))).toEqual({
+      max: 3,
+      allowance: 1,
+      headroom: Infinity,
+      cap: 1,
+      winner: 'pacer allowance',
+    });
     expect(executorCap(dir, 0, {}).cap).toBe(3);
   });
 
   it('formats the status line', () => {
-    expect(formatExecutorCap({ max: 3, allowance: Infinity, cap: 3 })).toBe(
-      'EXECUTOR CAP 3 (executors.max 3, pacer allowance unlimited)',
+    expect(
+      formatExecutorCap({
+        max: 3,
+        allowance: Infinity,
+        headroom: Infinity,
+        cap: 3,
+        winner: 'executors.max',
+      }),
+    ).toBe(
+      'EXECUTOR CAP 3 (executors.max 3, board ceiling none, pacer allowance unlimited, load headroom unlimited; limited by executors.max)',
     );
-    expect(formatExecutorCap({ max: 3, allowance: 1, cap: 1 })).toContain('pacer allowance 1)');
+    expect(
+      formatExecutorCap({
+        max: 3,
+        allowance: 1,
+        headroom: Infinity,
+        cap: 1,
+        winner: 'pacer allowance',
+      }),
+    ).toContain('pacer allowance 1,');
   });
 
   it('the tick never spawns above min(max, allowance) with a stubbed pacer', async () => {
