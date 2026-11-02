@@ -384,6 +384,44 @@ describe('cli-file', () => {
     expect(ghCalls[0][ghCalls[0].indexOf('--title') + 1]).toMatch(/\(AISDLC-801\)$/);
   });
 
+  describe('in-memory events (AISDLC-1161)', () => {
+    const answered = (decisionId: string, opt: string) => ({
+      eventVersion: 'v1',
+      type: 'operator-answered',
+      ts: 't',
+      decisionId,
+      chosenOptionId: opt,
+      by: 'planner',
+    });
+    const opened = (extra: object = {}) => ev('DEC-0001', 'decision-opened', extra) + '\n';
+    const file = (events: Array<Record<string, unknown>>, id = 'DEC-0001') =>
+      fileDecision(repo, id, { taskId: 'X-1', pr: false, events }, deps);
+
+    it('files an answer for a decision-opened only on origin/main; parent store untouched', () => {
+      commitMain(EVENT_LOG_REL, opened({ options: [{ id: 'a' }] }));
+      const r = file([answered('DEC-0001', 'a')]);
+      expect(sh(remote, 'show', `${r.branch}:${EVENT_LOG_REL}`)).toContain('"operator-answered"');
+      expect(sh(repo, 'status', '--porcelain', '--', '.ai-sdlc')).toBe('');
+    });
+
+    it('refuses an event for a different decision', () => {
+      expect(() => file([answered('DEC-0002', 'a')])).toThrow(/in-memory event is for DEC-0002/);
+    });
+
+    it('refuses a pair already on origin/main', () => {
+      commitMain(
+        EVENT_LOG_REL,
+        opened({ options: [{ id: 'a' }] }) + ev('DEC-0001', 'operator-answered') + '\n',
+      );
+      expect(() => file([answered('DEC-0001', 'a')])).toThrow(/duplicate/);
+    });
+
+    it('refuses an invalid option on an in-memory answer', () => {
+      commitMain(EVENT_LOG_REL, opened({ options: [{ id: 'a' }] }));
+      expect(() => file([answered('DEC-0001', 'zz')])).toThrow(/not an option/);
+    });
+  });
+
   describe('per-event store (AISDLC-852)', () => {
     const open = () =>
       makeDecisionOpenedEvent({

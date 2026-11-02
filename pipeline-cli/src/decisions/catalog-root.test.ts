@@ -59,6 +59,14 @@ describe('resolveWriteRoot (AISDLC-874)', () => {
     mkdirSync(join(main, '.worktrees'));
     expect(() => resolveWriteRoot(main, {})).toThrow(/refusing to write/);
   });
+  it('AC-3: refusal names --file as the sanctioned path', () => {
+    mkdirSync(join(main, '.worktrees'));
+    expect(() => resolveWriteRoot(main, {})).toThrow(/--file/);
+  });
+  it('accepts the parent when --file is set', () => {
+    mkdirSync(join(main, '.worktrees'));
+    expect(resolveWriteRoot(main, {}, { file: true })).toBe(main);
+  });
   it('routes to the active task worktree from the parent', () => {
     mkdirSync(join(main, '.worktrees', 'aisdlc-9'), { recursive: true });
     expect(resolveWriteRoot(main, { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-9' })).toBe(

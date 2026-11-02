@@ -39,6 +39,13 @@ describe('decision writers use the write root (AISDLC-1161)', () => {
     expect(text).not.toMatch(/appendDecisionEvent\(/);
   });
 
+  it('read-only operator-digest does not route through the write root', () => {
+    const digest = commands.findIndex((c) => c.name.startsWith('operator-digest'));
+    expect(digest).toBeGreaterThanOrEqual(0);
+    expect(body(digest)).not.toMatch(/writeRoot\(/);
+    expect(body(digest)).toMatch(/String\(argv\['work-dir'\]\)/);
+  });
+
   it('recordEvents is the only direct appendDecisionEvent caller', () => {
     expect(src.match(/appendDecisionEvent\(/g)).toHaveLength(1);
   });

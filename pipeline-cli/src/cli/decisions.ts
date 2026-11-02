@@ -1452,7 +1452,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             default: 'markdown' as const,
           }),
       async (argv) => {
-        const workDir = writeRoot(Boolean(argv.file));
+        const workDir = String(argv['work-dir']);
         const digest = runOperatorDigest({
           workDir,
           ...(typeof argv.since === 'string' ? { since: argv.since } : {}),
@@ -1916,14 +1916,16 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
           );
         }
         const decision = projectDecision(id, { workDir });
-        if (decision === null) fail(`decision not found: ${id}`);
-        if (!decision!.spec.options.some((o) => o.id === optionId)) {
+        // AISDLC-1161 (AC-2): under --file the decision may exist only on origin/main;
+        // fileDecision then validates option and duplicate pair against origin/main.
+        if (decision === null && !argv.file) fail(`decision not found: ${id}`);
+        if (decision && !decision.spec.options.some((o) => o.id === optionId)) {
           fail(
-            `optionId "${optionId}" is not declared on ${id} — valid options: ${decision!.spec.options.map((o) => o.id).join(', ')}`,
+            `optionId "${optionId}" is not declared on ${id} — valid options: ${decision.spec.options.map((o) => o.id).join(', ')}`,
           );
         }
         // RFC-0051: an escalated decision is answered only by the tier that owns it.
-        const tier = decision!.status.escalationTier;
+        const tier = decision?.status.escalationTier;
         const chain = tier !== undefined ? chainFor(workDir) : undefined;
         if (tier !== undefined && chain !== undefined) {
           const who = lookupCaller(chain);
@@ -1937,7 +1939,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
           ...(typeof argv.by === 'string' ? { by: String(argv.by) } : {}),
         });
         recordEvents(argv, workDir, id, [evt], true);
-        const after = chain ? afterAnswer(chain, decision!) : undefined;
+        const after = chain && decision ? afterAnswer(chain, decision) : undefined;
 
         if (String(argv.format) === 'json') {
           emit({
