@@ -420,6 +420,7 @@ export type DecisionEvent =
   | TimeboxExtendedEvent
   | AutoExpiredEvent
   | RoutingChangedEvent
+  | SupersededEvent
   | (DecisionEventEnvelope & {
       type: Exclude<
         DecisionEventType,
@@ -431,6 +432,7 @@ export type DecisionEvent =
         | 'timebox-extended'
         | 'auto-expired'
         | 'routing-changed'
+        | 'superseded'
       >;
     } & Record<string, unknown>);
 
@@ -787,6 +789,17 @@ export interface OverriddenEvent extends DecisionEventEnvelope {
   rationale?: string;
 }
 
+/**
+ * AISDLC-1162 — `superseded` event. Closes a decision overruled by a later one
+ * without recording any of its own options as chosen (RFC-0035 §4.2).
+ */
+export interface SupersededEvent extends DecisionEventEnvelope {
+  type: 'superseded';
+  /** The decision that overruled this one (`DEC-NNNN`). */
+  supersededBy: string;
+  reason: string;
+}
+
 // ── recommendation-issued event (Phase 2+3) ──────────────────────────────────
 
 /**
@@ -854,6 +867,15 @@ export function validateDecisionEvent(raw: unknown): string | null {
     }
     if (typeof r.autoApplied !== 'boolean') {
       return 'stage-c-completed: autoApplied (boolean) is required';
+    }
+  }
+
+  if (r.type === 'superseded') {
+    if (typeof r.supersededBy !== 'string' || !/^DEC-\d{4,}$/.test(r.supersededBy)) {
+      return 'superseded: supersededBy must match DEC-NNNN';
+    }
+    if (typeof r.reason !== 'string' || r.reason.trim().length === 0) {
+      return 'superseded: reason is required';
     }
   }
 

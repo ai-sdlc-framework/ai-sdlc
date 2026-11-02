@@ -500,3 +500,26 @@ describe('spend block (AISDLC-885)', () => {
     }
   });
 });
+
+describe('superseded group (AISDLC-1162)', () => {
+  it('lists supersessions since the cutoff in their own group', () => {
+    const sup = (ts: string): DecisionEvent =>
+      ({
+        eventVersion: 'v1',
+        type: 'superseded',
+        ts,
+        decisionId: 'DEC-0001',
+        supersededBy: 'DEC-0002',
+        reason: 'overruled',
+      }) as unknown as DecisionEvent;
+    const events = [opened('DEC-0001'), sup('2026-10-05T00:00:00.000Z')];
+    const d = buildOperatorDigest(events, '2026-10-04T12:00:00.000Z');
+    expect(d.superseded).toHaveLength(1);
+    expect(d.answered).toHaveLength(0);
+    const md = renderOperatorDigestMarkdown(d);
+    expect(md).toContain('## Superseded (1)');
+    expect(md).toContain('superseded by DEC-0002: overruled');
+    const old = buildOperatorDigest(events, '2026-10-06T00:00:00.000Z');
+    expect(old.superseded).toHaveLength(0);
+  });
+});

@@ -19,6 +19,11 @@ import {
   readHandoff,
   writeHandoff,
 } from './handoff.js';
+import {
+  appendDecisionEvent,
+  makeDecisionOpenedEvent,
+  makeSupersededEvent,
+} from '../decisions/event-log.js';
 import { writeRoster } from './roster.js';
 import type { RosterEntry } from './types.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
@@ -120,6 +125,31 @@ describe('handoff write', () => {
       now: () => new Date('2026-10-12T05:00:00.000Z'),
     });
     expect(readFileSync(path.join(repo, '.claude', 'memory', 'MEMORY.md'), 'utf-8')).toBe(index);
+  });
+
+  it('omits superseded decisions from Open decisions (AISDLC-1162)', () => {
+    for (const id of ['DEC-0001', 'DEC-0002']) {
+      appendDecisionEvent(
+        makeDecisionOpenedEvent({
+          decisionId: id,
+          source: 'ad-hoc',
+          scope: 'workspace',
+          summary: `sum ${id}`,
+          options: [
+            { id: 'a', description: 'A' },
+            { id: 'b', description: 'B' },
+          ],
+        }),
+        { workDir: repo },
+      );
+    }
+    appendDecisionEvent(
+      makeSupersededEvent({ decisionId: 'DEC-0001', supersededBy: 'DEC-0002', reason: 'later' }),
+      { workDir: repo },
+    );
+    const r = writeHandoff({ role: 'planner', name: 'p-planner', boardDir: board, now: NOW });
+    expect(r.content).toContain('DEC-0002');
+    expect(r.content).not.toContain('DEC-0001');
   });
 
   it('refuses an unsafe session name', () => {

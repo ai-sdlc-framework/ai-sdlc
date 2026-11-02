@@ -2652,3 +2652,64 @@ describe('AISDLC-703 — derived governance-change tag', () => {
     expect(stderrText()).toMatch(/tagged automatically/);
   });
 });
+
+describe('supersede subcommand (AISDLC-1162)', () => {
+  beforeEach(async () => {
+    for (const sum of ['old one', 'new one']) {
+      setArgv(
+        'add',
+        '--summary',
+        sum,
+        '--scope',
+        'workspace',
+        '--option',
+        'opt-a:Option A',
+        '--option',
+        'opt-b:Option B',
+        '--format',
+        'json',
+      );
+      await buildDecisionsCli().parseAsync();
+    }
+    stdoutChunks = [];
+  });
+
+  it('closes the target and list shows the successor', async () => {
+    setArgv(
+      'supersede',
+      'DEC-0001',
+      '--by',
+      'DEC-0002',
+      '--reason',
+      'overruled',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    expect(stdoutJson<{ ok: boolean }>().ok).toBe(true);
+    stdoutChunks = [];
+    setArgv('list', '--format', 'table');
+    await buildDecisionsCli().parseAsync();
+    expect(stdoutText()).toContain('superseded -> DEC-0002');
+  });
+
+  it('refuses an already closed target', async () => {
+    setArgv('answer', 'DEC-0001', 'opt-a', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    setArgv('supersede', 'DEC-0001', '--by', 'DEC-0002', '--reason', 'x', '--format', 'json');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/already answered/);
+  });
+
+  it('refuses an unknown --by', async () => {
+    setArgv('supersede', 'DEC-0001', '--by', 'DEC-9999', '--reason', 'x', '--format', 'json');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/not found/);
+  });
+
+  it('refuses --by equal to the target', async () => {
+    setArgv('supersede', 'DEC-0001', '--by', 'DEC-0001', '--reason', 'x', '--format', 'json');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/cannot supersede itself/);
+  });
+});

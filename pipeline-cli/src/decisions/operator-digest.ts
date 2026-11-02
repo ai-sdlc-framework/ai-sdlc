@@ -169,10 +169,20 @@ export interface DigestPending {
   provenance?: Provenance | null;
 }
 
+export interface DigestSuperseded {
+  decisionId: string;
+  summary: string;
+  supersededBy: string;
+  reason: string;
+  supersededAt: string;
+}
+
 export interface OperatorDigest {
   since: string;
   generatedAt: string;
   answered: DigestAnswered[];
+  /** AISDLC-1162 — decisions closed by a later one since the cutoff. */
+  superseded?: DigestSuperseded[];
   pending: DigestPending[];
   /** Every merged change to governance config in the window, with its PR (visibility only). */
   governanceChanges?: GovernanceChange[];
@@ -240,6 +250,7 @@ export function buildOperatorDigest(
   const opened = new Map<string, DecisionOpenedEvent>();
   const answers = new Map<string, Answer>();
   const expiry = new Map<string, string>();
+  const supers = new Map<string, { supersededBy: string; reason: string; ts: string }>();
 
   for (const ev of events) {
     if (ev.type === 'decision-opened') {
@@ -248,6 +259,9 @@ export function buildOperatorDigest(
       if (o.timeboxExpiresAt) expiry.set(o.decisionId, o.timeboxExpiresAt);
     } else if (ev.type === 'timebox-extended') {
       expiry.set(ev.decisionId, (ev as { newTimeboxExpiresAt: string }).newTimeboxExpiresAt);
+    } else if (ev.type === 'superseded') {
+      const sv = ev as { supersededBy: string; reason: string };
+      supers.set(ev.decisionId, { supersededBy: sv.supersededBy, reason: sv.reason, ts: ev.ts });
     } else if (ev.type === 'operator-answered' || ev.type === 'auto-expired') {
       answers.set(ev.decisionId, ev as Answer);
     }
@@ -285,7 +299,7 @@ export function buildOperatorDigest(
   const pending: DigestPending[] = [];
   for (const [id, o] of opened) {
     const exp = expiry.get(id);
-    if (answers.has(id) || !exp) continue;
+    if (answers.has(id) || supers.has(id) || !exp) continue;
     const ms = Date.parse(exp) - now.getTime();
     if (!(ms > 0)) continue;
     const pendingProvenance = resolveProvenance ? resolveProvenance(id) : undefined;
@@ -303,7 +317,21 @@ export function buildOperatorDigest(
   }
   pending.sort((a, b) => a.msRemaining - b.msRemaining);
 
-  return { since: sinceIso, generatedAt: now.toISOString(), answered, pending };
+  const superseded: DigestSuperseded[] = [];
+  for (const [id, sv] of supers) {
+    const o = opened.get(id);
+    if (!o || !(Date.parse(sv.ts) > since)) continue;
+    superseded.push({
+      decisionId: id,
+      summary: oneLine(o.summary),
+      supersededBy: sv.supersededBy,
+      reason: oneLine(sv.reason),
+      supersededAt: sv.ts,
+    });
+  }
+  superseded.sort((a, b) => a.supersededAt.localeCompare(b.supersededAt));
+
+  return { since: sinceIso, generatedAt: now.toISOString(), answered, superseded, pending };
 }
 
 function describeProvenance(p: Provenance | null, author: string | undefined): string {
@@ -334,6 +362,15 @@ export function renderOperatorDigestMarkdown(d: OperatorDigest): string {
       `  - reverse: ${a.reverse}`,
       ...a.flags.map((f) => `  - FLAG: ${f}`),
     );
+  }
+  if (d.superseded !== undefined && d.superseded.length > 0) {
+    lines.push('', `## Superseded (${d.superseded.length})`, '');
+    for (const sv of d.superseded) {
+      lines.push(
+        `- **${sv.decisionId}** ${sv.summary}`,
+        `  - superseded by ${sv.supersededBy}: ${sv.reason}`,
+      );
+    }
   }
   if (d.governanceChanges !== undefined) {
     lines.push('', `## Governance config changes merged (${d.governanceChanges.length})`, '');

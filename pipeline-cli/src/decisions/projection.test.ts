@@ -11,6 +11,8 @@ import {
   appendDecisionEvent,
   makeAutoExpiredEvent,
   makeDecisionOpenedEvent,
+  makeOperatorAnsweredEvent,
+  makeSupersededEvent,
   makeTimeboxExtendedEvent,
 } from './event-log.js';
 import {
@@ -424,5 +426,55 @@ describe('AISDLC-463 — auto-expired projection fold', () => {
     expect(last.type).toBe('auto-expired');
     expect(last.rationale).toBe('fallback after PT4H timebox');
     expect(last.contextRef).toBe('pr:1234');
+  });
+});
+
+describe('superseded event (AISDLC-1162)', () => {
+  it('folds into lifecycle superseded and ignores a later answer', () => {
+    openDecision('DEC-0001', 'old', '2026-10-01T00:00:00.000Z');
+    openDecision('DEC-0002', 'new', '2026-10-02T00:00:00.000Z');
+    appendDecisionEvent(
+      makeSupersededEvent({
+        decisionId: 'DEC-0001',
+        supersededBy: 'DEC-0002',
+        reason: 'r',
+        now: new Date('2026-10-03T00:00:00.000Z'),
+      }),
+      { workDir },
+    );
+    appendDecisionEvent(
+      makeOperatorAnsweredEvent({
+        decisionId: 'DEC-0001',
+        chosenOptionId: 'opt-a',
+        now: new Date('2026-10-04T00:00:00.000Z'),
+      }),
+      { workDir },
+    );
+    const d = projectDecision('DEC-0001', { workDir });
+    expect(d?.status.lifecycle).toBe('superseded');
+    expect(d?.status.supersededBy).toBe('DEC-0002');
+    expect(d?.status.answeredOptionId ?? null).toBeNull();
+  });
+
+  it('does not supersede an already answered decision', () => {
+    openDecision('DEC-0001', 'old', '2026-10-01T00:00:00.000Z');
+    appendDecisionEvent(
+      makeOperatorAnsweredEvent({
+        decisionId: 'DEC-0001',
+        chosenOptionId: 'opt-a',
+        now: new Date('2026-10-03T00:00:00.000Z'),
+      }),
+      { workDir },
+    );
+    appendDecisionEvent(
+      makeSupersededEvent({
+        decisionId: 'DEC-0001',
+        supersededBy: 'DEC-0002',
+        reason: 'r',
+        now: new Date('2026-10-04T00:00:00.000Z'),
+      }),
+      { workDir },
+    );
+    expect(projectDecision('DEC-0001', { workDir })?.status.lifecycle).toBe('answered');
   });
 });
