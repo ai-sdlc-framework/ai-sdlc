@@ -22,7 +22,7 @@ const rules = readdirSync(rulesDir)
   .join('\n');
 
 /** Budget in characters (not bytes). */
-export const CLAUDE_MD_BUDGET = 15_000;
+export const CLAUDE_MD_BUDGET = 9_000;
 
 describe('CLAUDE.md size budget', () => {
   it(`stays at or under ${CLAUDE_MD_BUDGET} characters`, () => {

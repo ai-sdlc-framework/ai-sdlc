@@ -201,11 +201,15 @@ describe('handoff reload after clear or compact (AISDLC-728)', () => {
     assert.doesNotMatch(out, /Handoff \(/);
   });
 
-  it('readHandoffText keeps the state-hash line and the last line of a 200 KB handoff', () => {
+  it('readHandoffText condenses a 200 KB handoff to the block, the last RESUME block and a pointer', () => {
     const big = [
+      '<!-- ai-sdlc-handoff:begin -->',
       '<!-- state-hash: ' + 'a'.repeat(64) + ' -->',
+      '<!-- ai-sdlc-handoff:end -->',
       ...Array.from({ length: 6000 }, (_, i) => `note line ${i} ${'y'.repeat(30)}`),
+      '## RESUME HERE',
       'LAST LINE WRITTEN',
+      '/repo/.claude/memory/planner.md',
     ].join('\n');
     assert.ok(big.length > 200000);
     const text = lib.readHandoffText(
@@ -214,11 +218,12 @@ describe('handoff reload after clear or compact (AISDLC-728)', () => {
     );
     assert.match(text, /state-hash: a{64}/);
     assert.ok(text.includes('LAST LINE WRITTEN'));
-    assert.ok(!text.includes('[handoff truncated]'));
+    assert.ok(text.includes('/repo/.claude/memory/planner.md'));
+    assert.ok(!text.includes('note line 5'));
     assert.ok(text.length <= lib.HANDOFF_MAX_CHARS + 100);
   });
 
-  it('readHandoffText runs handoff read, truncates, and fails soft', () => {
+  it('readHandoffText runs handoff read, condenses, and fails soft', () => {
     const self = { role: 'planner', name: 'planner' };
     let argv;
     const run = (_node, args) => {
@@ -226,8 +231,8 @@ describe('handoff reload after clear or compact (AISDLC-728)', () => {
       return { status: 0, stdout: 'x'.repeat(lib.HANDOFF_MAX_CHARS + 50) };
     };
     const text = lib.readHandoffText(self, { bin: '/bin/cli.mjs', boardDir: '/b', run });
-    assert.ok(text.includes('[handoff middle omitted]'));
-    assert.doesNotMatch(text, /\[handoff truncated\]/);
+    assert.ok(text.includes('[handoff condensed'));
+    assert.ok(text.length <= lib.HANDOFF_MAX_CHARS + 100);
     assert.deepEqual(argv.slice(1, 6), ['handoff', 'read', '--role', 'planner', '--name']);
     assert.equal(lib.readHandoffText(self, { bin: '', boardDir: '/b', run }), null);
     assert.equal(

@@ -11,11 +11,8 @@
 const { readFileSync, readSync, existsSync } = require('fs');
 const { join } = require('path');
 const { execSync, spawnSync } = require('child_process');
-const {
-  resolveGovernanceFromYaml,
-  renderOperationalRules,
-  renderSessionStartHardRules,
-} = require('./lib/governance-resolver');
+const { resolveGovernanceFromYaml, renderOperationalRules } = require('./lib/governance-resolver');
+const { buildFixedPrefix, renderFixedPrefix } = require('./lib/fixed-prefix');
 const { checkRuntimeDepsHealth } = require('../scripts/lib/runtime-deps-health');
 const { bannerGovernance } = require('./lib/trusted-policy');
 const { detectEnforcementCached, renderReviewPolicyBanner } = require('./lib/review-policy-banner');
@@ -396,25 +393,41 @@ if (existsSync(reviewPolicyPath)) {
 
 // ── Build governance context ─────────────────────────────────────────
 
-// AISDLC-651.2: compact form. One line per section; the prose behind each rule
-// lives in the linked runbooks (docs/operations/agent-governance-reference.md),
-// because this block is re-read on every turn of every session.
-let context = `## AI-SDLC Governance Active
+// AISDLC-1152: one producer of session-start text, the AISDLC-782 fixed prefix
+// (RFC-0053). Controls, the role/task frame and pointers only; prose lives in docs.
+const prefixText = (extraSections) =>
+  '## AI-SDLC Governance Active\n\n' +
+  renderFixedPrefix(
+    buildFixedPrefix({
+      resolved: resolvedGovernance,
+      role,
+      taskId: process.env.AI_SDLC_ACTIVE_TASK_ID || undefined,
+      frameExtra: [
+        `Goal: ${goal}`,
+        `Limits: max ${maxFiles} files per change; tests required: ${requireTests}${
+          blockedPaths.length > 0 ? `; blocked paths: ${blockedPaths.join(', ')}` : ''
+        }.`,
+      ],
+      controlsExtra: [
+        'Before EVERY commit run and fix: `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm format:check` (`pnpm format` fixes). CI is the only coverage gate; nothing runs coverage locally.',
+        ...(operationalRules ? [operationalRules] : []),
+        ...(reviewPolicySummary ? [reviewPolicySummary.trim().replace(/\n+/g, ' ')] : []),
+      ],
+      pointers: [
+        '`CLAUDE.md` and `.claude/rules/*.md` (path-bound rules load when a matching file is opened)',
+        '`docs/operations/agent-governance-reference.md` (governance reference)',
+        '`docs/operations/cli-hierarchy.md` (session hierarchy and handoff)',
+      ],
+    }),
+  ) +
+  extraSections;
 
-**Role:** ${role} | **Goal:** ${goal}
-Limits: max ${maxFiles} files per change; tests required: ${requireTests}${
-  blockedPaths.length > 0 ? `; blocked paths: ${blockedPaths.join(', ')}` : ''
-}.
-Before EVERY commit run and fix: \`pnpm build\`, \`pnpm test\`, \`pnpm lint\`, \`pnpm format:check\` (\`pnpm format\` fixes). CI is the only coverage gate (per-package floors plus a 90% patch gate); nothing runs coverage locally.
-
-${renderSessionStartHardRules(resolvedGovernance)}${operationalRules ? `\n${operationalRules}` : ''}${reviewPolicySummary}`;
-
-if (warnings.length > 0) {
-  context += `\n\n### Setup Warnings\n${warnings.join('\n')}`;
-}
-
-if (hierarchyRoleBlock) {
-  context += `\n\n${hierarchyRoleBlock}`;
+let context = '';
+{
+  let extra = '';
+  if (warnings.length > 0) extra += `\n### Setup Warnings\n${warnings.join('\n')}\n`;
+  if (hierarchyRoleBlock) extra += `\n${hierarchyRoleBlock}\n`;
+  context = prefixText(extra).trimEnd();
 }
 
 // ── Output ───────────────────────────────────────────────────────────

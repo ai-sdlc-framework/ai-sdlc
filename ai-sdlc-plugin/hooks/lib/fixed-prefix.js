@@ -17,18 +17,28 @@ const {
 const PREFIX_MAX_BYTES = 10240;
 
 /**
- * @param {{ governanceYaml?: string, role?: string, taskId?: string, pointers?: string[] }} input
+ * @param {{ governanceYaml?: string, resolved?: object, role?: string, taskId?: string, pointers?: string[], frameExtra?: string[], controlsExtra?: string[] }} input
  * @returns {{ controls: string[], frame: string[], pointers: string[] }}
  */
-function buildFixedPrefix({ governanceYaml = '', role, taskId, pointers = [] } = {}) {
-  const resolved = resolveGovernanceFromYaml(governanceYaml);
+function buildFixedPrefix({
+  governanceYaml = '',
+  resolved: resolvedIn,
+  role,
+  taskId,
+  pointers = [],
+  frameExtra = [],
+  controlsExtra = [],
+} = {}) {
+  const resolved = resolvedIn || resolveGovernanceFromYaml(governanceYaml);
   const controls = [
     ...renderSessionStartHardRules(resolved).split('\n'),
     ...PROMPT_RULES.map((r) => r.text),
-  ];
+    ...controlsExtra,
+  ].filter((c) => c.trim());
   const frame = [];
   if (role) frame.push(`Role: ${role}`);
   if (taskId) frame.push(`Task: ${taskId}`);
+  frame.push(...frameExtra);
   return { controls, frame, pointers: [...pointers] };
 }
 
