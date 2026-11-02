@@ -82,6 +82,8 @@ import { sanitizeVerdict } from '../dispatch/verdict-fields.js';
 import { enqueueTasks, type EnqueueEntry } from '../dispatch/enqueue.js';
 import { requeueFailed } from '../dispatch/requeue.js';
 import { backupBoard, backupDirFor, boardRecoveryHint } from '../dispatch/board-recovery.js';
+import { backupMemory, memoryBackupHint } from '../memory-dream/backup.js';
+import { resolveMemoryDir } from '../memory-dream/resolve-dir.js';
 import { reenter } from '../hierarchy/reenter.js';
 import { now as clockNow } from '../clock.js';
 import { runDemo, type DemoDeps } from '../hierarchy/demo.js';
@@ -695,6 +697,15 @@ export async function runHierarchyCli(
         // AISDLC-1130: an empty board beside completed tasks gets a hint; the rebuild is never run unasked.
         const hint = boardRecoveryHint(deps.boardDir, deps.cwd);
         if (hint) deps.log(hint);
+        // AISDLC-1131: warn when memory is gone but a backup exists, else take the daily backup.
+        try {
+          const memoryDir = resolveMemoryDir({ projectDir: deps.cwd });
+          const lost = memoryBackupHint({ memoryDir, projectDir: deps.cwd });
+          if (lost) deps.log(lost);
+          else backupMemory({ memoryDir, projectDir: deps.cwd, now: deps.now() });
+        } catch {
+          /* memory backup is best effort and never blocks up */
+        }
         const result = await hierarchyUp(
           {
             executors: flags.executors ?? '0',

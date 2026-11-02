@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1131
 title: 'Agent memory folder is backed up: periodic copy outside the repo and a transcript-based rebuild command'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-31'
 labels:
