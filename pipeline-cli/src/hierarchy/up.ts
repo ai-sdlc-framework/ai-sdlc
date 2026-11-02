@@ -167,7 +167,11 @@ export function resolveProfile(
   return profile ? { ...profile, name } : undefined;
 }
 
-/** The restriction flags a profile renders, in a fixed order. */
+/**
+ * The restriction flags a profile renders, in a fixed order. The tool flags are variadic in the
+ * claude CLI, so the `--flag=<list>` form is used: a space-separated value would swallow the
+ * positional prompt that follows as another tool name.
+ */
 export function launchProfileArgs(p: ResolvedLaunchProfile | undefined): string[] {
   if (!p) return [];
   const denied = [
@@ -175,8 +179,8 @@ export function launchProfileArgs(p: ResolvedLaunchProfile | undefined): string[
     ...(p.disallowedAgents ?? []).map((a) => `Agent(${a})`),
   ];
   return [
-    ...(p.allowedTools?.length ? ['--allowedTools', shellQuote(p.allowedTools.join(','))] : []),
-    ...(denied.length ? ['--disallowedTools', shellQuote(denied.join(','))] : []),
+    ...(p.allowedTools?.length ? [`--allowedTools=${shellQuote(p.allowedTools.join(','))}`] : []),
+    ...(denied.length ? [`--disallowedTools=${shellQuote(denied.join(','))}`] : []),
   ];
 }
 

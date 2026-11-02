@@ -20,7 +20,7 @@ spec:
   salt: ai-sdlc-2026-10
   # Launch profiles (AISDLC-1151), keyed by hierarchy role: tools the session starts without,
   # so their schemas stay out of every turn. The planner never uses notebooks, worktree
-  # switching, cron scheduling or plan mode; it keeps Bash, Read, Edit, Write, Agent,
+  # switching, cron scheduling, plan mode, browser automation, artifacts or workflows; it keeps Bash, Read, Edit, Write, Agent,
   # AskUserQuestion, Skill, SendMessage, ToolSearch and the MCP backlog and ai-sdlc tools.
   # Executors and dispatch have no entry and keep the full set.
   launch:
@@ -34,6 +34,10 @@ spec:
         - CronCreate
         - CronDelete
         - CronList
+        - Artifact
+        - Workflow
+        - mcp__claude-in-chrome__*
+        - mcp__playwright__*
   cells:
     ci-conflict-resolver:
       '*': { model: sonnet }

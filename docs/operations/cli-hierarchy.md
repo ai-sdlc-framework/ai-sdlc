@@ -2555,10 +2555,11 @@ schemas are the largest block (about 19k tokens for 16 tools). The `launch:` blo
 `.ai-sdlc/model-routing.yaml` (read from the base ref, like the model cells) holds one profile per
 hierarchy role with optional `allowedTools`, `disallowedTools` and `disallowedAgents` lists.
 `up`, `restart` and `spawn` resolve the profile through the same function and render
-`--allowedTools` / `--disallowedTools` after `--permission-mode` (an agent is denied as
+`--allowedTools=<list>` / `--disallowedTools=<list>` after `--permission-mode` (the `=` form,
+because the flags are variadic and would swallow the prompt; an agent is denied as
 `Agent(<name>)`); the roster entry records the profile name so `restart` reproduces it. A role with
 no profile launches exactly as before. The repository ships a `planner` profile that drops tools the
-planner command never uses (notebooks, worktree switching, cron scheduling, plan mode); executors
+planner command never uses (notebooks, worktree switching, cron scheduling, plan mode, browser automation, artifacts, workflows); executors
 and dispatch keep the full set. Measured saving: not yet measured on a live launch; compare the
 `CONTEXT` column of `cli-hierarchy status` before and after.
 

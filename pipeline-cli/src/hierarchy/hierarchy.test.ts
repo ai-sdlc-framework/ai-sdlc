@@ -2416,7 +2416,7 @@ describe('launch profiles (AISDLC-1151)', () => {
       },
     });
     expect(cmd).toContain(
-      "--permission-mode 'bypassPermissions' --allowedTools 'Bash,Read' --disallowedTools 'NotebookEdit,Agent(code-reviewer)' 'p'",
+      "--permission-mode 'bypassPermissions' --allowedTools='Bash,Read' --disallowedTools='NotebookEdit,Agent(code-reviewer)' 'p'",
     );
   });
 
@@ -2437,7 +2437,7 @@ describe('launch profiles (AISDLC-1151)', () => {
       expect(validateHierarchyRoster(readRoster(boardDir)).valid).toBe(true);
       fake.calls.length = 0;
       await hierarchyRestart({ session: 'executor-alpha' }, d);
-      expect(newWindowCommands()[0]).toContain("--disallowedTools 'NotebookEdit'");
+      expect(newWindowCommands()[0]).toContain("--disallowedTools='NotebookEdit'");
       expect(readRoster(boardDir).sessions.find((e) => e.name === alpha)?.launchProfile).toBe(
         'executor',
       );
