@@ -832,8 +832,10 @@ Interim assumptions (a hooks module has no process or file API and the host cont
 - **Mixed fleets.** A tmux-driven dispatch session can still enqueue for a mod-driven executor: both read the same board.
 
 **Single clear rule (AISDLC-815).** A hierarchy session clears when its context passes its role threshold (the
-module rotation: planner 150k, dispatch 120k, executor 120k tokens; the module uses these built-in values, and
-`contextThresholds` in `<board-dir>/config.json` only changes what `cli-hierarchy status` prints), or when an executor's task finishes (dispatch
+module rotation: planner 150k, dispatch 120k, executor 120k tokens; these are the per-role fallbacks; the module reads
+`contextThresholds` in `<board-dir>/config.json` once at session start (positive integers only, per-role fallback),
+logs `rotation threshold role=<r> tokens=<n>`, and rotates at that value, the same one `cli-hierarchy status` prints;
+a change applies from the next session start, AISDLC-1163), or when an executor's task finishes (dispatch
 clears it on the verdict). There is no per-tick clear for dispatch and no idle-wait clear for executors. Motivation:
 in the 24 h to 2026-10-11 the ledger recorded 375 task-less sessions under 300k weighted units each, 49M units
 (11% of the day), spent re-reading the fixed prefix after per-tick and per-idle clears.
@@ -878,6 +880,8 @@ so it cannot go stale by omission.
 cli-hierarchy handoff write --role <planner|operator-dispatch|executor> [--name <n>] [--out <path>]
 cli-hierarchy handoff read  --role <planner|operator-dispatch|executor> [--name <n>] [--out <path>]
 cli-hierarchy handoff note  --role <r> --kind filed|commented|opened|closed|sent --url <url> [--summary <text>] --board-dir <dir>
+cli-hierarchy handoff note  --role <r> --kind asked --ref <key> --summary <text>   # pending ask
+cli-hierarchy handoff note  --role <r> --kind settled --ref <key>                   # answered
 ```
 
 | Option         | Meaning                                                                                    |
@@ -923,6 +927,11 @@ turn as any post outside the repository (an issue filed, a comment, a hand-opene
 to another project's session). An unknown `--kind` is refused with the allowed list. `write`
 renders the newest 20 lines, newest first, under `## Outward actions` inside the generated block,
 and `read` prints them with the block. The ledger is append-only: `write` never rewrites it.
+
+**Pending asks (AISDLC-1163).** Kinds `asked` and `settled` take `--ref <key>` (a draft path, `DEC-NNNN`)
+instead of `--url`; `asked` also needs `--summary`. `write` adds `## Pending asks` to the generated block, listing
+every `asked` entry with no later `settled` entry for the same ref (`at`, ref, summary), folded over the whole
+ledger file, not the 20-entry window; `(none)` when empty. A rotated session sees open asks in its first `handoff read`.
 
 **Resume contract.** After any `/clear`, the first thing a loop body does is
 `handoff read --role <r>`; the file and the board are all a fresh context needs. The resume

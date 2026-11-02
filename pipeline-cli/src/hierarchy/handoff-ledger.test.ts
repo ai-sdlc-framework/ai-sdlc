@@ -73,6 +73,47 @@ describe('ledger rendering', () => {
   });
 });
 
+describe('pending asks (AISDLC-1163)', () => {
+  const section = (content: string) =>
+    content.split('## Pending asks')[1]!.split('## Outward actions')[0]!.trim();
+
+  it('shows (none) when empty and refuses an ask without ref or summary', () => {
+    expect(section(writeHandoff(opts).content)).toBe('- (none)');
+    expect(() => noteLedger(opts, { kind: 'asked', summary: 's' })).toThrow(/--ref/);
+    expect(() => noteLedger(opts, { kind: 'settled' })).toThrow(/--ref/);
+    expect(() => noteLedger(opts, { kind: 'asked', ref: 'r' })).toThrow(/--summary/);
+    expect(noteLedger(opts, { kind: 'asked', ref: 'r', summary: 's' }).entry).toMatchObject({
+      kind: 'asked',
+      ref: 'r',
+      url: '',
+    });
+  });
+
+  it('drops an ask once settled', () => {
+    noteLedger(opts, { kind: 'asked', ref: 'DEC-1', summary: 'ok?' });
+    expect(section(writeHandoff(opts).content)).toContain('DEC-1 (ok?)');
+    noteLedger(opts, { kind: 'settled', ref: 'DEC-1' });
+    expect(section(writeHandoff(opts).content)).toBe('- (none)');
+  });
+
+  it('keeps two asks on different refs and settles only the named one', () => {
+    noteLedger(opts, { kind: 'asked', ref: 'a', summary: 'first' });
+    noteLedger(opts, { kind: 'asked', ref: 'b', summary: 'second' });
+    noteLedger(opts, { kind: 'settled', ref: 'a' });
+    const s = section(writeHandoff(opts).content);
+    expect(s).toContain('b (second)');
+    expect(s).not.toContain('first');
+  });
+
+  it('lists an ask older than the 20-entry render window', () => {
+    noteLedger(opts, { kind: 'asked', ref: 'old', summary: 'still open' });
+    for (let i = 0; i < 25; i++) noteLedger(opts, { kind: 'commented', url: `https://x/${i}` });
+    const { content } = writeHandoff(opts);
+    expect(section(content)).toContain('old (still open)');
+    expect(content.split('## Outward actions')[1]).not.toContain('asked');
+  });
+});
+
 describe('append-only guarantee', () => {
   it('a rewrite never drops, reorders or rewrites ledger lines', () => {
     noteLedger(opts, { kind: 'filed', url: 'https://x/a' });

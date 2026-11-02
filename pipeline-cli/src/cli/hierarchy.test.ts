@@ -1762,6 +1762,23 @@ describe('handoff and send subcommands (AISDLC-766, AISDLC-1036)', () => {
     expect(String(err.mock.calls.at(-1)?.[0])).toContain('allowed: filed, commented');
   });
 
+  it('handoff note accepts asked and settled with --ref instead of --url', async () => {
+    const base = ['handoff', 'note', '--role', 'planner'];
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(
+      await runHierarchyCli(
+        [...base, '--kind', 'asked', '--ref', 'DEC-9', '--summary', 'q'],
+        overrides(),
+      ),
+    ).toBe(0);
+    expect(
+      await runHierarchyCli([...base, '--kind', 'settled', '--ref', 'DEC-9'], overrides()),
+    ).toBe(0);
+    expect(await runHierarchyCli([...base, '--kind', 'asked', '--summary', 'q'], overrides())).toBe(
+      2,
+    );
+  });
+
   it('handoff rejects a missing action or an unknown role', async () => {
     const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
     expect(await runHierarchyCli(['handoff', '--role', 'executor'], overrides())).toBe(2);

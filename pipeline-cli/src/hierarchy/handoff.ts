@@ -55,12 +55,22 @@ export interface HandoffState {
   rulings: BoardRuling[];
   /** The newest {@link LEDGER_RENDER_LIMIT} outward actions, newest first (AISDLC-1049). */
   ledger?: LedgerEntry[];
+  /** Asks with no later `settled` entry for the same ref, oldest first, from the whole ledger (AISDLC-1163). */
+  pendingAsks?: LedgerEntry[];
   /** Body of the `## Transcript` section: paths plus the pre-clear digest (AISDLC-1132). */
   transcript?: string;
 }
 
 /** Kinds of outward action a session can record. */
-export const LEDGER_KINDS = ['filed', 'commented', 'opened', 'closed', 'sent'] as const;
+export const LEDGER_KINDS = [
+  'filed',
+  'commented',
+  'opened',
+  'closed',
+  'sent',
+  'asked',
+  'settled',
+] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 
 /** One line of the append-only outward-action ledger. */
@@ -68,7 +78,10 @@ export interface LedgerEntry {
   at: string;
   role: string;
   kind: LedgerKind;
+  /** Link of an outward action; empty for `asked` / `settled`, which carry `ref`. */
   url: string;
+  /** Free key of an ask (a draft path, `DEC-NNNN`); `settled` closes the `asked` entries with the same ref. */
+  ref?: string;
   summary?: string;
 }
 
@@ -156,6 +169,7 @@ export function collectHandoffState(
     openDecisions,
     rulings: listRulings(boardDir),
     ledger: ledgerFile ? readLedger(ledgerFile, LEDGER_RENDER_LIMIT) : [],
+    pendingAsks: ledgerFile ? pendingAsks(readLedger(ledgerFile, Infinity)) : [],
     ...(transcript === undefined ? {} : { transcript }),
   };
 }
@@ -182,22 +196,41 @@ export function readLedger(file: string, limit: number): LedgerEntry[] {
   return out.slice(-limit).reverse();
 }
 
+/** `asked` entries with no later `settled` for the same ref. Takes newest-first entries; returns oldest first. */
+export function pendingAsks(newestFirst: LedgerEntry[]): LedgerEntry[] {
+  const settled = new Set<string>();
+  const open: LedgerEntry[] = [];
+  for (const e of newestFirst) {
+    if (e.kind === 'settled' && e.ref) settled.add(e.ref);
+    else if (e.kind === 'asked' && e.ref && !settled.has(e.ref)) open.push(e);
+  }
+  return open.reverse();
+}
+
 /** Append one outward action to the role's ledger. Refuses an unknown kind. */
 export function noteLedger(
   opts: HandoffOptions,
-  entry: { kind: string; url: string; summary?: string },
+  entry: { kind: string; url?: string; ref?: string; summary?: string },
 ): { file: string; entry: LedgerEntry } {
   if (!(LEDGER_KINDS as readonly string[]).includes(entry.kind)) {
     throw new Error(`invalid --kind '${entry.kind}'; allowed: ${LEDGER_KINDS.join(', ')}`);
   }
-  if (!entry.url.trim()) throw new Error('--url is required');
+  const askKind = entry.kind === 'asked' || entry.kind === 'settled';
+  const url = entry.url ?? '';
+  const ref = entry.ref ?? '';
+  if (askKind) {
+    if (!ref.trim()) throw new Error(`--ref is required for --kind ${entry.kind}`);
+    if (entry.kind === 'asked' && !entry.summary?.trim())
+      throw new Error('--summary is required for --kind asked');
+  } else if (!url.trim()) throw new Error('--url is required');
   const at = (opts.now ?? clock)();
   const file = ledgerPath(opts, at);
   const line: LedgerEntry = {
     at: at.toISOString(),
     role: opts.role,
     kind: entry.kind as LedgerKind,
-    url: entry.url,
+    url: askKind ? '' : url,
+    ...(askKind ? { ref } : {}),
     ...(entry.summary ? { summary: entry.summary } : {}),
   };
   mkdirSync(path.dirname(file), { recursive: true });
@@ -286,9 +319,16 @@ export function renderHandoff(
         ]
       : []),
     '',
+    '## Pending asks',
+    ...(state.pendingAsks?.length
+      ? state.pendingAsks.map((e) => `- ${e.at} ${e.ref}${e.summary ? ` (${e.summary})` : ''}`)
+      : ['- (none)']),
+    '',
     '## Outward actions',
     ...(state.ledger?.length
-      ? state.ledger.map((e) => `- ${e.at} ${e.kind} ${e.url}${e.summary ? ` (${e.summary})` : ''}`)
+      ? state.ledger.map(
+          (e) => `- ${e.at} ${e.kind} ${e.url || e.ref || ''}${e.summary ? ` (${e.summary})` : ''}`,
+        )
       : ['- (none)']),
     ...(state.transcript === undefined ? [] : ['', '## Transcript', state.transcript]),
     HANDOFF_END,

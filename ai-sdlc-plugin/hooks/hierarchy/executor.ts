@@ -20,6 +20,39 @@ export interface Ports {
 export const VERSION_FLOOR = '2.1.307';
 /** Context size, in tokens, at which an executor rotates (the 120k executor threshold). */
 export const ROTATE_AT_TOKENS = 120_000;
+/**
+ * Prints `{"v":<n>|null}`: `contextThresholds[argv[2]]` of `<argv[1]>/config.json` when it is a positive integer
+ * (same rule as `resolveThresholds` in pipeline-cli; AISDLC-1163).
+ */
+export const THRESHOLD_SCRIPT =
+  "const fs=require('fs'),p=require('path');let v=null;try{const t=JSON.parse(fs.readFileSync(p.join(process.argv[1],'config.json'),'utf8')).contextThresholds;const n=t&&typeof t==='object'?t[process.argv[2]]:null;if(typeof n==='number'&&Number.isInteger(n)&&n>0)v=n}catch(e){}console.log(JSON.stringify({v}))";
+
+/**
+ * The rotation threshold for a role: the configured `contextThresholds` value, else `fallback` (the role's
+ * constant) on a missing file, an invalid value, or a host without `process.run`.
+ */
+export async function resolveRotateAt(
+  run: ((a: { command: string; args: string[] }) => Promise<Any>) | undefined,
+  boardDir: string | undefined,
+  role: string,
+  fallback: number,
+): Promise<number> {
+  if (!run) return fallback;
+  const r = await safe(() =>
+    run({
+      command: 'node',
+      args: ['-e', THRESHOLD_SCRIPT, boardDir ?? '.ai-sdlc/dispatch', role],
+    }),
+  );
+  const out = String(((r.value ?? {}) as Any).stdout ?? '');
+  try {
+    const v = JSON.parse(out.trim().split('\n').pop() ?? '').v;
+    return typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 /** A slash command is run with `$.command.run` (the host refuses `$.prompt.submit` of a text starting with `/`). */
 export const RESUME_COMMAND = 'ai-sdlc:executor';
 /** A carried rotation record older than this is stale (a clear that never reached a new session). */
@@ -289,6 +322,8 @@ export interface ExecutorState {
   lastActivity?: number;
   /** A mod-run clear ended the session and the resume command has not run in the new one yet. */
   resumePending?: boolean;
+  /** Resolved rotation threshold in tokens (config.json `contextThresholds`); the role constant when unset. */
+  rotateAt?: number;
   /** A measure crossed the threshold while a task ran; rotate at the task's last turn. */
   pendingRotate: boolean;
   /** A main-loop turn is running now (turn.start seen, turn.complete not yet); an idle executor has none. */
@@ -570,7 +605,7 @@ export async function executorSessionMeasure(
     runProcess: (a) => $.process.run([a.command, ...a.args]),
   };
   await resumeAfterClear(p, state);
-  if ((await readMeasure(p, state.name, e)) >= ROTATE_AT_TOKENS) {
+  if ((await readMeasure(p, state.name, e)) >= (state.rotateAt ?? ROTATE_AT_TOKENS)) {
     if (taskRunning(state)) state.pendingRotate = true;
     else await rotateUnlessHeld(p, state, 'session.measure');
   }

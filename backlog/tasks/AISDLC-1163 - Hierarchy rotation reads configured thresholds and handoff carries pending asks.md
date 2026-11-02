@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1163
 title: 'Hierarchy module rotates at the configured contextThresholds instead of hardcoded 150k/120k, and the generated handoff block gains a Pending asks section fed by handoff note --kind asked|settled'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-02'
 labels:

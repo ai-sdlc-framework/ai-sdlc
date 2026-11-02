@@ -13,6 +13,8 @@ import {
   executorTurnComplete,
   executorTurnStart,
   resumeAfterClear,
+  resolveRotateAt,
+  ROTATE_AT_TOKENS,
   safe,
   setSwallowSink,
   startPinnedTask,
@@ -21,6 +23,7 @@ import type { ExecutorState, Ports } from './executor.ts';
 import {
   DEFAULT_TICK_MS,
   DISPATCH_PRIMITIVES,
+  DISPATCH_ROTATE_AT_TOKENS,
   BOARD_KEY,
   newDispatchState,
   attempt,
@@ -38,6 +41,7 @@ import {
   plannerSessionReceive,
   plannerTurnComplete,
   plannerTurnStart,
+  PLANNER_ROTATE_AT_TOKENS,
 } from './planner.ts';
 import type { PlannerState } from './planner.ts';
 
@@ -196,6 +200,18 @@ export const register = (on: Any, options?: Any): void => {
       p,
       `role=${role} tier=${identity ? 'managed' : 'user'} identity=${identity ? JSON.stringify(identity) : 'none'}`,
     );
+    // AISDLC-1163: the configured threshold, resolved once; the role constant is the per-role fallback.
+    const fallbackAt =
+      role === 'operator-dispatch'
+        ? DISPATCH_ROTATE_AT_TOKENS
+        : role === 'planner'
+          ? PLANNER_ROTATE_AT_TOKENS
+          : ROTATE_AT_TOKENS;
+    const rotateAt = await resolveRotateAt(p.runProcess, options?.boardDir, role, fallbackAt);
+    await log(p, `rotation threshold role=${role} tokens=${rotateAt}`);
+    if (role === 'operator-dispatch') dispatch.rotateAt = rotateAt;
+    else if (role === 'planner') planner.rotateAt = rotateAt;
+    else state.rotateAt = rotateAt;
     if (role === 'operator-dispatch') {
       // AISDLC-1035: a model-less host. No prompt.submit port exists in the dispatch module.
       router.current = 'operator-dispatch';

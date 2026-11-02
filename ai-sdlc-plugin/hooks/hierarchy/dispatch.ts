@@ -54,6 +54,8 @@ export interface DispatchState {
   blockers: string[];
   plannerName: string;
   boardDir?: string;
+  /** Resolved rotation threshold in tokens (config.json `contextThresholds`); the constant when unset. */
+  rotateAt?: number;
   /** Roster name of this session; keys the module heartbeat file. */
   sessionName?: string;
   /** Host version recorded in the heartbeat. */
@@ -553,6 +555,7 @@ export async function dispatchSessionMeasure(
     send: (a) => $.session.send(a),
     uiOpen: (a) => $.ui.open(a),
   };
-  if ((await readMeasure(p, undefined, e)) >= DISPATCH_ROTATE_AT_TOKENS) await rotateHost(p, state);
+  if ((await readMeasure(p, undefined, e)) >= (state.rotateAt ?? DISPATCH_ROTATE_AT_TOKENS))
+    await rotateHost(p, state);
   return next(e);
 }
