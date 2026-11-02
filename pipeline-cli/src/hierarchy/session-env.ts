@@ -15,6 +15,9 @@ export const HIERARCHY_SESSION_ENV_VARS = [
   'AI_SDLC_EXECUTOR_TASK',
   'CLAUDE_PROJECT_DIR',
   'AI_SDLC_GH_CALL_LOG',
+  // Set on process.env by the workflow engine (execute-host); verifyV6Envelope reads it, so a
+  // verify-gate test would otherwise see the run's own state file.
+  'AI_SDLC_WORKFLOW_STATE',
 ] as const;
 
 /**

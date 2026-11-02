@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1153
 title: 'Verify gate strips the hierarchy session env before pnpm test, and the vitest setup clears the same vars: executor sessions stop failing 36 pipeline-cli tests with not-task-worktree'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-01'
 labels:
@@ -40,7 +40,7 @@ Velocity impact: unblocks seven stranded tasks and every future executor run; re
 
 ## Acceptance Criteria
 
-- [ ] AC-1: One exported constant (for example `HIERARCHY_SESSION_ENV_VARS` in `pipeline-cli/src/hierarchy/`) lists `AI_SDLC_HIERARCHY_SESSION`, `AI_SDLC_HIERARCHY_ROLE`, `AI_SDLC_EXECUTOR_TASK`, `CLAUDE_PROJECT_DIR` and `AI_SDLC_GH_CALL_LOG`; `runVerifyCommands` passes an `env` built from `process.env` minus those names to every verify command. A test proves the spawned env lacks each name when the parent has them set.
+- [ ] AC-1: One exported constant (for example `HIERARCHY_SESSION_ENV_VARS` in `pipeline-cli/src/hierarchy/`) lists `AI_SDLC_HIERARCHY_SESSION`, `AI_SDLC_HIERARCHY_ROLE`, `AI_SDLC_EXECUTOR_TASK`, `CLAUDE_PROJECT_DIR`, `AI_SDLC_GH_CALL_LOG` and `AI_SDLC_WORKFLOW_STATE` (set by `execute-host.ts`, read by `verifyV6Envelope`); `runVerifyCommands` passes an `env` built from `process.env` minus those names to every verify command. A test proves the spawned env lacks each name when the parent has them set.
 - [ ] AC-2: `vitest.git-env.setup.mjs` deletes the same five names (the list imported or mirrored with a test that fails when the two drift), superseding the three-name hunk on the AISDLC-1149 branch; that branch drops its hunk on rebase.
 - [ ] AC-3: `pnpm test` passes on main from a shell that exports all five vars (the executor shape); the PR body shows the command and result.
 - [ ] AC-4: `scripts/check-git-env-hygiene.mjs` flags a test that reads any of the five names from `process.env` without injecting `env`, with the baseline file unchanged (zero offenders after this change) or updated with the reason per entry.
