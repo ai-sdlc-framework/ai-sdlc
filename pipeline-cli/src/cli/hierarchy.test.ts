@@ -2004,3 +2004,69 @@ describe('restart and register (AISDLC-713)', () => {
     expect(calls.filter((c) => c[0] === 'new-session')).toHaveLength(1);
   });
 });
+
+describe('scale', () => {
+  const caller = (role: RosterEntry['role'], name: string = role): { identity: IdentityDeps } => ({
+    identity: {
+      readSessions: () => [{ name, role, pid: 400, status: 'running' }],
+      parentPid: (pid) => (pid === 500 ? 400 : null),
+      comm: (pid) => (pid === 400 ? 'claude' : 'zsh'),
+      startPid: 500,
+    },
+  });
+  const board = () => path.join(tmp, 'dispatch');
+  const scaleOver = () => overrides({ env: { AI_SDLC_EXECUTORS_MAX: '4' } });
+
+  it('sets the ceiling and logs the caller roster name, then clears it', async () => {
+    const who = caller('planner', 'planner-1');
+    expect(await runHierarchyCli(['scale', '--max', '2', '--reason', 'x'], scaleOver(), who)).toBe(
+      0,
+    );
+    const ceiling = JSON.parse(readFileSync(path.join(board(), 'scale.json'), 'utf-8'));
+    expect(ceiling).toMatchObject({ max: 2, reason: 'x', by: 'planner-1' });
+    const log = readFileSync(path.join(board(), 'scale-events.jsonl'), 'utf-8');
+    expect(log).toContain('"by":"planner-1"');
+
+    expect(await runHierarchyCli(['scale', '--clear'], scaleOver(), who)).toBe(0);
+    expect(existsSync(path.join(board(), 'scale.json'))).toBe(false);
+    expect(readFileSync(path.join(board(), 'scale-events.jsonl'), 'utf-8')).toContain(
+      'scale-clear',
+    );
+    expect(JSON.parse(logs[logs.length - 1]!)).toMatchObject({ ok: true, cleared: true });
+  });
+
+  it('rejects a missing --max or --reason with exit 2', async () => {
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const who = caller('planner');
+    expect(await runHierarchyCli(['scale', '--reason', 'x'], scaleOver(), who)).toBe(2);
+    expect(await runHierarchyCli(['scale', '--max', '2'], scaleOver(), who)).toBe(2);
+    expect(await runHierarchyCli(['scale', '--max', '0', '--reason', 'x'], scaleOver(), who)).toBe(
+      2,
+    );
+    expect(existsSync(path.join(board(), 'scale.json'))).toBe(false);
+  });
+
+  it('refuses an executor caller', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const code = await runHierarchyCli(
+      ['scale', '--max', '2', '--reason', 'x'],
+      scaleOver(),
+      caller('executor', 'executor-alpha'),
+    );
+    expect(code).toBe(1);
+    expect(String(err.mock.calls[0]?.[0])).toContain('executor-alpha');
+    expect(existsSync(path.join(board(), 'scale.json'))).toBe(false);
+  });
+
+  it('refuses --max above executors.max and names the config key', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const code = await runHierarchyCli(
+      ['scale', '--max', '9', '--reason', 'x'],
+      scaleOver(),
+      caller('operator-dispatch'),
+    );
+    expect(code).toBe(1);
+    expect(String(err.mock.calls[0]?.[0])).toContain('executors.max');
+    expect(existsSync(path.join(board(), 'scale.json'))).toBe(false);
+  });
+});
