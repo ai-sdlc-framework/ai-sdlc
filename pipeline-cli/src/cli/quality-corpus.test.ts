@@ -5,12 +5,13 @@
  * Salvaged from PR #481 (AISDLC-270).
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { aggregateQualityCorpus, buildQualityCorpusCli, renderTable } from './quality-corpus.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 vi.mock('node:child_process', () => ({
   spawnSync: vi.fn(() => ({ status: 0, stdout: '[]', stderr: '' })),
@@ -24,7 +25,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDir(workdir);
 });
 
 function writeCaptures(lines: string[]): void {

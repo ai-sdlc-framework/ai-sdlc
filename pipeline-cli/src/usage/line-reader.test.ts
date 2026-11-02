@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CHUNK_BYTES, readLines } from './line-reader.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let dir: string;
 let file: string;
@@ -10,7 +11,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'line-reader-'));
   file = join(dir, 't.jsonl');
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(dir));
 
 function collect(start = 0, extra: Record<string, unknown> = {}) {
   const lines: Array<[string, number, number]> = [];

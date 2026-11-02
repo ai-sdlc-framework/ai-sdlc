@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveCatalogRoot, resolveWriteRoot } from './catalog-root.js';
 import { appendDecisionEvent, makeDecisionOpenedEvent } from './event-log.js';
 import { projectDecision } from './projection.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let base: string;
 let main: string;
@@ -21,7 +22,7 @@ beforeEach(() => {
   git(main, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--allow-empty', '-qm', 'i');
   git(main, 'worktree', 'add', '-q', '-b', 'task', wt);
 });
-afterEach(() => rmSync(base, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(base));
 
 describe('resolveCatalogRoot (AISDLC-825)', () => {
   it('maps a linked worktree to the main checkout', () => {

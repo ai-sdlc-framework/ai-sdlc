@@ -6,13 +6,14 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildDorStatsCli } from './dor-stats.js';
 import { buildDorDigestCli } from './dor-digest.js';
 import { appendCalibrationEntry } from '../dor/calibration-log.js';
 import type { RefinementVerdict } from '../dor/types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 let logPath: string;
@@ -50,7 +51,7 @@ afterEach(() => {
   process.stdout.write = savedWrite;
   process.stderr.write = savedErrWrite;
   process.exit = savedExit;
-  if (tmp) rmSync(tmp, { recursive: true, force: true });
+  if (tmp) removeFixtureDir(tmp);
 });
 
 function setArgv(...args: string[]): void {

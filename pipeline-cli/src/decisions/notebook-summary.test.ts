@@ -2,7 +2,7 @@
  * RFC-0035 Phase 10 (AISDLC-294) — notebook-summary unit tests.
  */
 
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -21,6 +21,7 @@ import {
   runNotebookSummary,
   writeNotebookSummary,
 } from './notebook-summary.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function baseDecision(): Decision {
   return {
@@ -78,7 +79,7 @@ describe('writeNotebookSummary / readNotebookSummary', () => {
     workDir = mkdtempSync(join(tmpdir(), 'aisdlc-294-summary-'));
   });
   afterEach(() => {
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 
   it('writes single-file per decision and reads it back', () => {
@@ -125,7 +126,7 @@ describe('runNotebookSummary', () => {
     workDir = mkdtempSync(join(tmpdir(), 'aisdlc-294-runner-'));
   });
   afterEach(() => {
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 
   it('skips when feature flag is off (default)', async () => {

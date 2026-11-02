@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,6 +46,7 @@ import {
   type BudgetItem,
   type StagedVerdict,
 } from './index.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Fixtures ────────────────────────────────────────────────────────────
 
@@ -137,7 +138,7 @@ beforeAll(() => {
   repoRoot = mkdtempSync(join(tmpdir(), 'review-synth-'));
 });
 afterAll(() => {
-  rmSync(repoRoot, { recursive: true, force: true });
+  removeFixtureDir(repoRoot);
 });
 
 function limitsFor(): PlanLimits {

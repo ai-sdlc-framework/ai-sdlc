@@ -19,7 +19,7 @@
  * the injected sink throws — observability MUST NOT crash the loop.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -32,6 +32,7 @@ import {
 } from './index.js';
 import type { OrchestratorEvent } from './events.js';
 import type { PipelineLogger, PipelineResult } from '../types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // Shared isolated tmp dir — created fresh before each test, cleaned up
 // after. Injected into adapter literals whose dispatch throws so that
@@ -44,7 +45,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(_hermeticArtifactsDir, { recursive: true, force: true });
+  removeFixtureDir(_hermeticArtifactsDir);
 });
 
 function silentLogger(): PipelineLogger {

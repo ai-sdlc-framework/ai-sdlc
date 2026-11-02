@@ -15,7 +15,7 @@
  * clock). No real time, no tmux, no external processes.
  */
 
-import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -34,6 +34,7 @@ import {
 } from './sessions.js';
 import { honorCancelIfRequested, reapStaleSessions } from './session-reaper.js';
 import type { DispatchManifest, InflightHeartbeat } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ---------------------------------------------------------------------------
 // fixture helpers
@@ -113,7 +114,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(path.dirname(boardDir), { recursive: true, force: true });
+  removeFixtureDir(path.dirname(boardDir));
 });
 
 // ---------------------------------------------------------------------------
@@ -450,6 +451,6 @@ describe('agent recovery records (AISDLC-564)', () => {
     const r = reapStaleSessions({ boardDir: dir, staleMs: 1000, now: () => new Date() });
     expect(r.reaped).toEqual([]);
     expect(readSession(dir, 'AISDLC-564')?.status).toBe('in-progress');
-    rmSync(path.dirname(dir), { recursive: true, force: true });
+    removeFixtureDir(path.dirname(dir));
   });
 });

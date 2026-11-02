@@ -12,7 +12,7 @@
  * @module orchestrator/hc-cost.test
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -28,6 +28,7 @@ import {
   loadHcCostConfig,
   readCalibrationTier,
 } from './hc-cost.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Test utilities ────────────────────────────────────────────────────
 
@@ -63,7 +64,7 @@ describe('loadHcCostConfig — opt-in gate (AC #5)', () => {
   });
 
   afterEach(() => {
-    rmSync(tempDir, { recursive: true, force: true });
+    removeFixtureDir(tempDir);
   });
 
   it('is disabled by default (no env set)', () => {
@@ -122,7 +123,7 @@ describe('loadHcCostConfig — weight resolution (AC #2)', () => {
   });
 
   afterEach(() => {
-    rmSync(tempDir, { recursive: true, force: true });
+    removeFixtureDir(tempDir);
   });
 
   it('defaults to 1.0 when no env or file config', () => {
@@ -193,7 +194,7 @@ describe('readCalibrationTier — RFC-0016 tier (AC #3)', () => {
   });
 
   afterEach(() => {
-    rmSync(tempDir, { recursive: true, force: true });
+    removeFixtureDir(tempDir);
   });
 
   it('returns crude when no _estimates/ directory', () => {

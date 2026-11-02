@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -28,6 +28,7 @@ import {
   type HunkStructuralFacts,
   type StructuralProvider,
 } from './index.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const SECRET = `sk-ant-api03-${'A'.repeat(30)}`;
 
@@ -155,7 +156,7 @@ function tmp(): string {
   return d;
 }
 afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  for (const d of dirs.splice(0)) removeFixtureDir(d);
 });
 
 describe('stage 0', () => {

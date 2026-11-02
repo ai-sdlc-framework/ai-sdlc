@@ -3,7 +3,7 @@
  * injected runner; nothing here touches a real repository, remote or session.
  */
 
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -23,6 +23,7 @@ import {
   type PlaybookDeps,
 } from './playbook.js';
 import type { CommandResult, CommandRunner } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const REPO = '/repo';
 const BRANCH = 'ai-sdlc/aisdlc-9-some-slug';
@@ -532,7 +533,7 @@ describe('requeue with the real board: a failure with no manifest copy escalates
         ['escalate', 'escalated'],
       ]);
     } finally {
-      rmSync(board, { recursive: true, force: true });
+      removeFixtureDir(board);
     }
   });
 });

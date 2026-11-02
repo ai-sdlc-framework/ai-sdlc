@@ -20,7 +20,7 @@
  * Tests use a per-test tmpdir so they're hermetic + parallel-safe.
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -28,6 +28,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { assignClassCached, readCacheEntry, type CacheFile } from './cache.js';
 import { captureEstimate, estimateLogPath, readEstimateLog } from './log-writer.js';
 import type { SignalOutput, StageAResult } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const SIGNALS: SignalOutput[] = [
   {
@@ -59,7 +60,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDir(workdir);
 });
 
 describe('captureEstimate — N parallel same-hash captures', () => {

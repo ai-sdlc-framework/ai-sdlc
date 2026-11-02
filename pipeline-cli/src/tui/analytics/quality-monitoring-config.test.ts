@@ -6,7 +6,7 @@
  * Phase 6 (AISDLC-307 / OQ-5/10).
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -30,6 +30,7 @@ import {
   type QualityMonitoringConfig,
   type VendorNamespaceEnforce,
 } from './quality-monitoring-config.js';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 // Helper: build a complete QualityMonitoringConfig from a partial; tests
 // only override the bits they care about. Phase 5 added required fields
@@ -67,7 +68,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDir(workdir);
 });
 
 describe('parseDurationDays', () => {

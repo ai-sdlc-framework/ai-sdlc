@@ -3,7 +3,7 @@
  * analysis reports it under that role without changing any other role's counts.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { analyzeReviewLedger, formatReviewAnalysis } from './reviews-analysis.js';
@@ -14,6 +14,7 @@ import {
 } from './reviews-ledger.js';
 import type { ReviewLedgerRecord } from './reviews-ledger.js';
 import { buildReviewsCli } from '../cli/reviews.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function rec(overrides: Partial<ReviewLedgerRecord>): ReviewLedgerRecord {
   return {
@@ -139,7 +140,7 @@ describe('cli-reviews analyze over a ledger with staged rows', () => {
   });
   afterEach(() => {
     process.stdout.write = saved;
-    rmSync(root, { recursive: true, force: true });
+    removeFixtureDir(root);
   });
 
   it('reports the staged rows under the staged role in JSON', async () => {

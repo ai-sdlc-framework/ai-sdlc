@@ -1,7 +1,7 @@
 /** AISDLC-720 — producer of the untrusted-run signal. */
 import { describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChildProcess } from 'node:child_process';
@@ -15,6 +15,7 @@ import {
 } from './untrusted-env.js';
 import { ShellClaudePSpawner } from './shell-claude-p-spawner.js';
 import type { SpawnOpts, SubagentResult, SubagentSpawner } from '../types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function recorder() {
   const seen: SpawnOpts[] = [];
@@ -103,7 +104,7 @@ describe('writeUntrustedMarker (AISDLC-730)', () => {
       expect(writeUntrustedMarker(join(d, 'badwt'), 'x')).toBeNull();
       expect(writeUntrustedMarker(join(d, 'missing'), 'x')).toBeNull();
     } finally {
-      rmSync(d, { recursive: true, force: true });
+      removeFixtureDir(d);
     }
   });
 
@@ -129,7 +130,7 @@ describe('clearUntrustedMarker + hook lockstep (AISDLC-730)', () => {
       expect(existsSync(f)).toBe(false);
       expect(clearUntrustedMarker(join(d, 'nope'))).toBe(false);
     } finally {
-      rmSync(d, { recursive: true, force: true });
+      removeFixtureDir(d);
     }
   });
 
@@ -140,7 +141,7 @@ describe('clearUntrustedMarker + hook lockstep (AISDLC-730)', () => {
       writeFileSync(join(d, 'wt', '.git'), `gitdir: ${join(d, 'missing-gitdir')}\n`);
       expect(() => writeUntrustedMarker(join(d, 'wt'), 'x')).toThrow();
     } finally {
-      rmSync(d, { recursive: true, force: true });
+      removeFixtureDir(d);
     }
   });
 
@@ -167,7 +168,7 @@ describe('clearUntrustedMarker + hook lockstep (AISDLC-730)', () => {
         expect(hook.findUntrustedMarker(join(d, w))).toBeNull();
       }
     } finally {
-      rmSync(d, { recursive: true, force: true });
+      removeFixtureDir(d);
     }
   });
 });

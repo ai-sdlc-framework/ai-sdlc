@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -8,6 +8,7 @@ import { writeManifest } from '../dispatch/board.js';
 import { setRuling } from '../dispatch/ruling.js';
 import type { DispatchManifest } from '../dispatch/types.js';
 import { readHandoff, writeHandoff } from './handoff.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let repo: string;
 let board: string;
@@ -30,7 +31,7 @@ beforeEach(() => {
   };
   writeManifest(board, m);
 });
-afterEach(() => rmSync(repo, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(repo));
 
 describe('Rulings in force (AISDLC-903)', () => {
   it('renders an empty section, then every ruling; read regenerates on a new ruling', () => {

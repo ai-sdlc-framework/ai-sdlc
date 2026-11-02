@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -7,6 +7,7 @@ import {
   type ReviewLedgerRecord,
 } from '../attestation/reviews-ledger.js';
 import { buildReviewsCli, loadCorpus, runReviewsCli } from './reviews.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmpRoot: string;
 let stdoutChunks: string[];
@@ -24,7 +25,7 @@ beforeEach(() => {
 
 afterEach(() => {
   process.stdout.write = savedWrite;
-  rmSync(tmpRoot, { recursive: true, force: true });
+  removeFixtureDir(tmpRoot);
 });
 
 function rec(overrides: Partial<ReviewLedgerRecord>): ReviewLedgerRecord {
@@ -58,8 +59,8 @@ describe('loadCorpus', () => {
       expect(records).toHaveLength(2);
       expect(records.map((r) => r.taskId).sort()).toEqual(['AISDLC-1', 'AISDLC-2']);
     } finally {
-      rmSync(repoA, { recursive: true, force: true });
-      rmSync(repoB, { recursive: true, force: true });
+      removeFixtureDir(repoA);
+      removeFixtureDir(repoB);
     }
   });
 });
@@ -114,8 +115,8 @@ describe('cli-reviews analyze', () => {
       const parsed = JSON.parse(out) as { totalCycles: number };
       expect(parsed.totalCycles).toBe(2);
     } finally {
-      rmSync(repoA, { recursive: true, force: true });
-      rmSync(repoB, { recursive: true, force: true });
+      removeFixtureDir(repoA);
+      removeFixtureDir(repoB);
     }
   });
 

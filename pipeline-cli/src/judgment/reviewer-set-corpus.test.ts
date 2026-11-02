@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -20,6 +20,7 @@ import {
   ledgerToReviewerSetCorpus,
   reviewerSetInputFromDiff,
 } from './reviewer-set-corpus.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const DIFF = 'diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n+const x = 1;\n';
 const INPUT = reviewerSetInputFromDiff(DIFF);
@@ -117,7 +118,7 @@ describe('cli-judgment eval review.reviewer-set on the converter output', () => 
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), 'reviewer-set-eval-'));
   });
-  afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+  afterEach(() => removeFixtureDir(tmp));
 
   it('runs with a fake provider and counts the blocking PR as a disagreement', async () => {
     const records = [
@@ -195,7 +196,7 @@ describe('gitDiffInputResolver and the reviewer-set-corpus command', () => {
     writeFileSync(join(repo, 'a.txt'), '2\n');
     git('commit', '-qam', 'change');
   });
-  afterEach(() => rmSync(repo, { recursive: true, force: true }));
+  afterEach(() => removeFixtureDir(repo));
 
   it('resolves the diff for a recorded commit and fails closed otherwise', () => {
     const sha = git('rev-parse', 'HEAD').trim();

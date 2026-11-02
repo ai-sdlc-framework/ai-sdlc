@@ -9,7 +9,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { generateKeyPairSync } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appendLeafForPatchId, type TranscriptLeaf } from './merkle.js';
@@ -19,6 +19,7 @@ import { signAndWriteV6Envelope } from './sign-v6.js';
 // documented pattern for consuming this file).
 // @ts-expect-error -- plain ESM, no type declarations shipped
 import { verifyV6Envelope } from '../../attestation-core/verify-core.mjs';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 interface V6VerifyResult {
   status: string;
@@ -57,7 +58,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmpRoot, { recursive: true, force: true });
+  removeFixtureDir(tmpRoot);
 });
 
 // RFC-0047 Phase 3 (AISDLC-595): `isolated` is credited by the verifier ONLY

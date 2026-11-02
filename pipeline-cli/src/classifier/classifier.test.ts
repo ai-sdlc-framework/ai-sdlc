@@ -8,7 +8,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -22,6 +22,7 @@ import {
   parseUnifiedDiff,
   type ClassifierOutput,
 } from './classifier.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 describe('defaultRulesetDecision', () => {
   it('emits empty reviewers when nothing changed (AC-6 docs-only edge case)', () => {
@@ -434,7 +435,7 @@ describe('appendCalibrationEntry', () => {
     tmpRoot = await mkdtemp(join(tmpdir(), 'classifier-pcli-'));
   });
   afterEach(async () => {
-    await rm(tmpRoot, { recursive: true, force: true });
+    removeFixtureDir(tmpRoot);
   });
 
   it('writes JSONL to <artifactsDir>/_classifier/calibration.jsonl (AC-5 plumb)', async () => {

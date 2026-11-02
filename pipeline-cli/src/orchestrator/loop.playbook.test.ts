@@ -15,7 +15,7 @@
  *      operator config wins over defaults.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -28,6 +28,7 @@ import {
 } from './index.js';
 import { DEFAULT_CATALOGUE, type FailurePatternCatalogue } from './playbook/index.js';
 import type { PipelineLogger, PipelineResult } from '../types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function silentLogger(): PipelineLogger {
   return { info: () => {}, warn: () => {}, error: () => {}, progress: () => {} };
@@ -57,7 +58,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(_hermeticArtifactsDir, { recursive: true, force: true });
+  removeFixtureDir(_hermeticArtifactsDir);
 });
 
 describe('runOrchestratorTick — playbook integration', () => {

@@ -3,7 +3,7 @@
  * carries its feedback into the developer prompt, and updates its existing PR.
  */
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -16,13 +16,14 @@ import { setupWorktree } from './03-setup-worktree.js';
 import { beginTask } from './04-flip-status.js';
 import { buildDeveloperPrompt } from './05-build-dev-prompt.js';
 import { pushAndPr } from './11-push-and-pr.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), 'resume-steps-'));
 });
 afterEach(() => {
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
 });
 
 const BRANCH = 'ai-sdlc/aisdlc-9-slug';

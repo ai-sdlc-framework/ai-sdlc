@@ -42,6 +42,7 @@ import {
 import type { OrchestratorEvent } from './events.js';
 import type { ExecOptions, ExecResult, Runner } from '../runtime/exec.js';
 import type { PipelineLogger, PipelineOutcome, PipelineResult } from '../types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function silentLogger(): PipelineLogger {
   return { info: () => {}, warn: () => {}, error: () => {}, progress: () => {} };
@@ -195,7 +196,7 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
       'OrchestratorRollback',
     ]);
 
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 
   it('developer-json-contract-violated (AISDLC-176): also triggers rollback', async () => {
@@ -228,7 +229,7 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
       taskId: 'AISDLC-71',
       fromStatus: 'To Do',
     });
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 
   // AISDLC-242 — `aborted` is now classified as RECOVERABLE. The worktree
@@ -260,7 +261,7 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
     expect(events.some((e) => e.type === 'OrchestratorTaskAbortedRecoverable')).toBe(true);
     const recoverable = events.find((e) => e.type === 'OrchestratorTaskAbortedRecoverable');
     expect(recoverable?.taskId).toBe('AISDLC-72');
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 
   it('thrown dispatcher (uncatalogued): rollback fires AFTER OrchestratorFailed', async () => {
@@ -295,7 +296,7 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
     const rollbackIdx = types.indexOf('OrchestratorRollback');
     expect(failedIdx).toBeGreaterThanOrEqual(0);
     expect(rollbackIdx).toBeGreaterThan(failedIdx);
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 
   it('approved: does NOT trigger rollback', async () => {
@@ -321,7 +322,7 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
 
     expect(events.some((e) => e.type === 'OrchestratorRollback')).toBe(false);
     expect(events.some((e) => e.type === 'OrchestratorWorkQuarantined')).toBe(false);
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 
   it('needs-human-attention: does NOT trigger rollback (operator iterates on the worktree)', async () => {
@@ -352,7 +353,7 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
     await runOrchestratorTick(config, adapters, 1);
 
     expect(events.some((e) => e.type === 'OrchestratorRollback')).toBe(false);
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 
   it('quarantine path: dev had commits → emits OrchestratorWorkQuarantined alongside Rollback', async () => {
@@ -407,7 +408,7 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
     });
     // The throwaway-branch delete must NOT fire when we quarantined.
     expect(calls.some((c) => c.args[0] === 'branch' && c.args[1] === '-D')).toBe(false);
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 
   it('AISDLC-186 — partial rollback (task file disappears) → event payload reflects statusReverted=false', async () => {
@@ -480,6 +481,6 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
       branchQuarantined: false,
     });
 
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 });

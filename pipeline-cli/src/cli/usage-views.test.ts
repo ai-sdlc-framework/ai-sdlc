@@ -5,7 +5,6 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,6 +21,7 @@ import type { IngestResult } from '../usage/ingest-claude.js';
 import { repoIdFor } from '../usage/repo-id.js';
 import { defaultUsageConfig } from '../usage/usage-config.js';
 import { buildUsageCli, type UsageCliDeps } from './usage.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const H = 3_600_000;
 const T0 = Date.parse('2026-09-10T00:00:00Z');
@@ -47,7 +47,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllEnvs();
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDir(root);
 });
 
 function price(model: string, input: number): PriceRow {
@@ -189,7 +189,7 @@ describe('cli-usage report', () => {
 
   it('prints the ungrouped total and an empty-ledger message', async () => {
     expect(await run(['report'])).toContain('calls');
-    rmSync(usageDir, { recursive: true, force: true });
+    removeFixtureDir(usageDir);
     out.length = 0;
     expect(await run(['report'])).toContain('No usage recorded');
   });

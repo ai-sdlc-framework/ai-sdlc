@@ -12,7 +12,6 @@ import {
   readFileSync,
   statSync,
   renameSync,
-  rmSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
@@ -48,6 +47,7 @@ import type { PlaybookOutcome } from './playbook.js';
 import { writeRestartRequest } from './restart-lock.js';
 import { writeRoster } from './roster.js';
 import type { RosterEntry } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 let board: string;
@@ -148,7 +148,7 @@ beforeEach(() => {
     ],
   });
 });
-afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(tmp));
 
 describe('auto-brief (AISDLC-930)', () => {
   const taskFile = (id: string, extra = '') => {

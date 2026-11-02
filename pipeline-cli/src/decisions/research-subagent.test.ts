@@ -5,7 +5,7 @@
  * + persistence layer + SubscriptionLedger debit (AC#5).
  */
 
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -24,6 +24,7 @@ import {
   shouldInvokeResearchSubagent,
   writeResearchArtifact,
 } from './research-subagent.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -168,7 +169,7 @@ describe('writeResearchArtifact / readResearchArtifacts', () => {
     workDir = mkdtempSync(join(tmpdir(), 'aisdlc-294-research-'));
   });
   afterEach(() => {
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 
   it('writes findings under .ai-sdlc/_decisions/research/', () => {
@@ -253,7 +254,7 @@ describe('runResearchSubagent', () => {
     workDir = mkdtempSync(join(tmpdir(), 'aisdlc-294-runner-'));
   });
   afterEach(() => {
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 
   it('returns invoked:false when gate skips', async () => {

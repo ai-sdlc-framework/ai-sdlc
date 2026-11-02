@@ -8,7 +8,7 @@
  * fails on the old code).
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -23,6 +23,7 @@ import {
   MARKER_MAX_AGE_MS,
   subagentSessionsDir,
 } from './verdict-class.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let repoRoot: string;
 const HEAD_A = 'a'.repeat(40);
@@ -32,7 +33,7 @@ beforeEach(() => {
   repoRoot = mkdtempSync(join(tmpdir(), 'verdict-class-reemit-'));
 });
 afterEach(() => {
-  rmSync(repoRoot, { recursive: true, force: true });
+  removeFixtureDir(repoRoot);
 });
 
 function writeMarker(name: string, agentType = 'code-reviewer', firedAt = new Date()): string {

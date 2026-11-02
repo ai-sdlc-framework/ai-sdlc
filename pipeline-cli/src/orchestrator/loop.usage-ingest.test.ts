@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -7,6 +7,7 @@ import {
   runOrchestratorTick,
   type OrchestratorAdapters,
 } from './index.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let workDir: string;
 beforeEach(() => {
@@ -16,7 +17,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllEnvs();
-  rmSync(workDir, { recursive: true, force: true });
+  removeFixtureDir(workDir);
 });
 
 function adapters(extra: Partial<OrchestratorAdapters>): OrchestratorAdapters {

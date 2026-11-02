@@ -5,7 +5,6 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
-  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -18,6 +17,7 @@ import {
   formatRefreshSummary,
   renderIngestResult,
 } from './usage.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let root: string;
 let writes: string[];
@@ -38,7 +38,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDir(root);
 });
 
 function fixture(): string {
@@ -226,7 +226,7 @@ describe('cli-usage price commands', () => {
     dir = mkdtempSync(join(tmpdir(), 'cli-usage-'));
   });
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    removeFixtureDir(dir);
   });
 
   function row(model: string, vals: Partial<SourcePriceRow> = {}): SourcePriceRow {

@@ -38,7 +38,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { generateKeyPairSync } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appendLeafForPatchId, leavesFilePathForPatchId, type TranscriptLeaf } from './merkle.js';
@@ -48,6 +48,7 @@ import { signAndWriteV6Envelope } from './sign-v6.js';
 // documented pattern for consuming this file).
 // @ts-expect-error -- plain ESM, no type declarations shipped
 import { verifyV6Envelope } from '../../attestation-core/verify-core.mjs';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function makeLeaf(overrides: Partial<TranscriptLeaf> = {}): TranscriptLeaf {
   return {
@@ -79,7 +80,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmpRoot, { recursive: true, force: true });
+  removeFixtureDir(tmpRoot);
 });
 
 function signAndVerify(patchId: string) {

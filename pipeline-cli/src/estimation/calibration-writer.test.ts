@@ -24,7 +24,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -42,6 +41,7 @@ import {
   type CalibrationRecord,
 } from './calibration-writer.js';
 import { historicalActualsSignal, reviewerIterationSignal } from './signals.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -55,7 +55,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDir(workdir);
   process.env = savedEnv;
 });
 

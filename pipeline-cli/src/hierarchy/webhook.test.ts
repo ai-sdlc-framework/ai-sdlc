@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -12,6 +12,7 @@ import {
   webhookStatus,
   webhookUp,
 } from './webhook.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let dir: string;
 let lines: string[];
@@ -30,7 +31,7 @@ beforeEach(() => {
   dir = mkdtempSync(path.join(os.tmpdir(), 'wh-'));
   lines = [];
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(dir));
 
 describe('cli-hierarchy webhook (AISDLC-880)', () => {
   it('reports off (no secret) without the secret and starts nothing', () => {

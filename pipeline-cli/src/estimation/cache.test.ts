@@ -11,12 +11,13 @@
  *  - Per-repo isolation via `artifactsDir`.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { assignClassCached, readCacheEntry, type CacheFile } from './cache.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let workdir: string;
 
@@ -25,7 +26,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDir(workdir);
 });
 
 describe('assignClassCached — first call', () => {
@@ -324,8 +325,8 @@ describe('artifacts-dir isolation', () => {
       expect(inB.cached).toBe(false);
       expect(assigner).toHaveBeenCalledTimes(2);
     } finally {
-      rmSync(a, { recursive: true, force: true });
-      rmSync(b, { recursive: true, force: true });
+      removeFixtureDir(a);
+      removeFixtureDir(b);
     }
   });
 });

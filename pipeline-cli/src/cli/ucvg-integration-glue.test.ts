@@ -22,7 +22,7 @@
  * testable (signer gate tests below call the real function, not the mock).
  */
 
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -46,6 +46,7 @@ import { FakeModelClient, InferenceProxyClient } from '../pipeline/reviewer-runn
 import { runCleanRoomSigner, unsignedReportPath } from '../pipeline/clean-room-signer.js';
 import { validateReport } from '../pipeline/report-validator.js';
 import type { UntrustedPrReport } from '../pipeline/report-validator.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Shared fixtures ────────────────────────────────────────────────────────────
 
@@ -436,7 +437,7 @@ describe('Stage 2/3 → Stage 4 artifact handoff contract: path agreement', () =
     } finally {
       io.restore();
       _ucvgSeams.modelClientFactory = null;
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 });
@@ -487,7 +488,7 @@ describe('Stage 4 signer — approved report passes all pre-key gates', () => {
       }
       // success: true is also a valid outcome (operator machine with signing key)
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 });
@@ -515,7 +516,7 @@ describe('Stage 4 signer — unapproved report refused (phase: consensus-rejecte
         expect(result.error).toContain('consensus.approved is not true');
       }
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 
@@ -538,7 +539,7 @@ describe('Stage 4 signer — unapproved report refused (phase: consensus-rejecte
         expect(result.phase).toBe('consensus-rejected');
       }
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 
@@ -568,7 +569,7 @@ describe('Stage 4 signer — unapproved report refused (phase: consensus-rejecte
         expect(result.error).toContain('Signing refused');
       }
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 
@@ -610,7 +611,7 @@ describe('Stage 4 signer — unapproved report refused (phase: consensus-rejecte
         expect(result.error).toContain('promptInjectionDetected');
       }
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 });
@@ -635,7 +636,7 @@ describe('Stage 4 signer — fail-closed on missing artifact', () => {
         expect(result.error).toContain('not found');
       }
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 
@@ -658,7 +659,7 @@ describe('Stage 4 signer — fail-closed on missing artifact', () => {
         expect(result.phase).toBe('artifact-read');
       }
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 
@@ -686,7 +687,7 @@ describe('Stage 4 signer — fail-closed on missing artifact', () => {
       expect(parsed['ok']).toBe(false);
     } finally {
       io.restore();
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 });
@@ -717,7 +718,7 @@ describe('Stage 4 signer — isolation invariant (refuses when sandbox sentinels
         expect(result.error).toContain('untrusted-pr-eval-active');
       }
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 
@@ -741,7 +742,7 @@ describe('Stage 4 signer — isolation invariant (refuses when sandbox sentinels
         expect(result.phase).toBe('isolation-check');
       }
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 
@@ -765,7 +766,7 @@ describe('Stage 4 signer — isolation invariant (refuses when sandbox sentinels
         expect(result.phase).toBe('isolation-check');
       }
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 });
@@ -794,7 +795,7 @@ describe('Stage 4 signer — tampered report rejected at Zod boundary (before ke
         expect(result.error).toContain('schemaVersion');
       }
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 
@@ -819,7 +820,7 @@ describe('Stage 4 signer — tampered report rejected at Zod boundary (before ke
         expect(result.error).toContain('headSha mismatch');
       }
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 
@@ -843,7 +844,7 @@ describe('Stage 4 signer — tampered report rejected at Zod boundary (before ke
         expect(result.phase).toBe('zod-validation');
       }
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      removeFixtureDir(tmpDir);
     }
   });
 });

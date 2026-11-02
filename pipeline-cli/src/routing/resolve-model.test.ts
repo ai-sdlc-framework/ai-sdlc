@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DEFAULT_MODELS } from '../runtime/shell-claude-p-spawner.js';
@@ -10,6 +10,7 @@ import { loadRoutingTable, parseRoutingTable } from './load-table.js';
 import { cellModel, findOverride, overridesPath } from './overrides.js';
 import { exploreCandidate, resolveModel } from './resolve-model.js';
 import { taskClassOf } from './task-class.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const TABLE = `
 apiVersion: ai-sdlc.io/v1alpha1
@@ -39,7 +40,7 @@ beforeEach(() => {
   process.env.AI_SDLC_USAGE_DIR = join(dir, 'usage');
 });
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+  removeFixtureDir(dir);
   if (savedEnv.a === undefined) delete process.env.ARTIFACTS_DIR;
   else process.env.ARTIFACTS_DIR = savedEnv.a;
   if (savedEnv.u === undefined) delete process.env.AI_SDLC_USAGE_DIR;

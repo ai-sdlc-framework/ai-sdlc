@@ -13,7 +13,7 @@
  *   - Task file content structure
  */
 
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -30,6 +30,7 @@ import {
   type FrameworkBugAttributionConfig,
   type QualityMonitoringConfig,
 } from './quality-monitoring-config.js';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 // Helper: a fresh, complete config the test can mutate without aliasing
 // the frozen defaults map. Phase 4 router tests rely on opts.qualityMonitoringConfig
@@ -99,7 +100,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDir(workdir);
   // Clean up env vars
   delete process.env.AI_SDLC_FRAMEWORK_QUALITY_MONITORING;
   vi.restoreAllMocks();
@@ -150,7 +151,7 @@ describe('appendFrameworkCapture', () => {
       } catch {
         // best-effort; ignore if already removed
       }
-      rmSync(readonlyDir, { recursive: true, force: true });
+      removeFixtureDir(readonlyDir);
     }
   });
 });

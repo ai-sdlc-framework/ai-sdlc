@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setClock } from '../clock.js';
@@ -13,6 +13,7 @@ import {
   resolveSpacingMinutes,
   type PacingDeps,
 } from './file-pacing.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const T0 = new Date('2026-10-20T12:00:00Z');
 const RL = JSON.stringify({
@@ -40,7 +41,7 @@ describe('file pacing (AISDLC-986)', () => {
   });
   afterEach(() => {
     restore();
-    rmSync(repo, { recursive: true, force: true });
+    removeFixtureDir(repo);
   });
 
   it('prints remaining calls and reset time', async () => {

@@ -16,7 +16,7 @@
  */
 
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -34,6 +34,7 @@ import {
   runStatus,
   runStop,
 } from './dispatch-supervisor.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ---------------------------------------------------------------------------
 // fixture helpers
@@ -129,8 +130,8 @@ describe('runStart (--once mode)', () => {
   it('acquires the PID lock, runs one tick, releases the lock', async () => {
     const boardDir = mkBoard();
     const pidFile = mkPidFile();
-    cleanup.push(() => rmSync(path.dirname(pidFile), { recursive: true, force: true }));
-    cleanup.push(() => rmSync(path.dirname(boardDir), { recursive: true, force: true }));
+    cleanup.push(() => removeFixtureDir(path.dirname(pidFile)));
+    cleanup.push(() => removeFixtureDir(path.dirname(boardDir)));
 
     writeManifest(boardDir, mkManifest('AISDLC-CLI-100'));
     const spawnedPids: number[] = [];
@@ -161,8 +162,8 @@ describe('runStart (--once mode)', () => {
   it('refuses to start when another live supervisor owns the PID file (AC #3)', async () => {
     const boardDir = mkBoard();
     const pidFile = mkPidFile();
-    cleanup.push(() => rmSync(path.dirname(pidFile), { recursive: true, force: true }));
-    cleanup.push(() => rmSync(path.dirname(boardDir), { recursive: true, force: true }));
+    cleanup.push(() => removeFixtureDir(path.dirname(pidFile)));
+    cleanup.push(() => removeFixtureDir(path.dirname(boardDir)));
 
     // Plant our own PID — guaranteed alive.
     writeFileSync(pidFile, `${process.pid}\n`, 'utf-8');
@@ -194,8 +195,8 @@ describe('runStart (loop mode)', () => {
   it('runs the loop until stopSignal resolves', async () => {
     const boardDir = mkBoard();
     const pidFile = mkPidFile();
-    cleanup.push(() => rmSync(path.dirname(pidFile), { recursive: true, force: true }));
-    cleanup.push(() => rmSync(path.dirname(boardDir), { recursive: true, force: true }));
+    cleanup.push(() => removeFixtureDir(path.dirname(pidFile)));
+    cleanup.push(() => removeFixtureDir(path.dirname(boardDir)));
 
     writeManifest(boardDir, mkManifest('AISDLC-CLI-200'));
     const spawn: SupervisorSpawn = () => {
@@ -254,8 +255,8 @@ describe('runStatus', () => {
   it('returns alive=false on missing PID file', () => {
     const boardDir = mkBoard();
     const pidFile = mkPidFile();
-    cleanup.push(() => rmSync(path.dirname(pidFile), { recursive: true, force: true }));
-    cleanup.push(() => rmSync(path.dirname(boardDir), { recursive: true, force: true }));
+    cleanup.push(() => removeFixtureDir(path.dirname(pidFile)));
+    cleanup.push(() => removeFixtureDir(path.dirname(boardDir)));
 
     const status = runStatus(boardDir, pidFile);
     expect(status.alive).toBe(false);
@@ -272,8 +273,8 @@ describe('runStatus', () => {
   it('returns alive=true when PID file points to a live process (we use our own)', () => {
     const boardDir = mkBoard();
     const pidFile = mkPidFile();
-    cleanup.push(() => rmSync(path.dirname(pidFile), { recursive: true, force: true }));
-    cleanup.push(() => rmSync(path.dirname(boardDir), { recursive: true, force: true }));
+    cleanup.push(() => removeFixtureDir(path.dirname(pidFile)));
+    cleanup.push(() => removeFixtureDir(path.dirname(boardDir)));
 
     writeFileSync(pidFile, `${process.pid}\n`, 'utf-8');
     const status = runStatus(boardDir, pidFile);
@@ -284,8 +285,8 @@ describe('runStatus', () => {
   it('returns alive=false on a dead PID', () => {
     const boardDir = mkBoard();
     const pidFile = mkPidFile();
-    cleanup.push(() => rmSync(path.dirname(pidFile), { recursive: true, force: true }));
-    cleanup.push(() => rmSync(path.dirname(boardDir), { recursive: true, force: true }));
+    cleanup.push(() => removeFixtureDir(path.dirname(pidFile)));
+    cleanup.push(() => removeFixtureDir(path.dirname(boardDir)));
 
     writeFileSync(pidFile, '99999999\n', 'utf-8');
     const status = runStatus(boardDir, pidFile);
@@ -296,8 +297,8 @@ describe('runStatus', () => {
   it('reports board occupancy alongside PID status', () => {
     const boardDir = mkBoard();
     const pidFile = mkPidFile();
-    cleanup.push(() => rmSync(path.dirname(pidFile), { recursive: true, force: true }));
-    cleanup.push(() => rmSync(path.dirname(boardDir), { recursive: true, force: true }));
+    cleanup.push(() => removeFixtureDir(path.dirname(pidFile)));
+    cleanup.push(() => removeFixtureDir(path.dirname(boardDir)));
 
     writeManifest(boardDir, mkManifest('AISDLC-CLI-300'));
     writeManifest(boardDir, mkManifest('AISDLC-CLI-301'));
@@ -313,7 +314,7 @@ describe('runStatus', () => {
 describe('runStop', () => {
   it('no-ops when PID file is absent', async () => {
     const pidFile = mkPidFile();
-    cleanup.push(() => rmSync(path.dirname(pidFile), { recursive: true, force: true }));
+    cleanup.push(() => removeFixtureDir(path.dirname(pidFile)));
     const result = await runStop({ pidFile });
     expect(result.exit).toBe(0);
     expect(result.killed).toBe(false);
@@ -321,7 +322,7 @@ describe('runStop', () => {
 
   it('no-ops when the recorded PID is dead, and cleans the file', async () => {
     const pidFile = mkPidFile();
-    cleanup.push(() => rmSync(path.dirname(pidFile), { recursive: true, force: true }));
+    cleanup.push(() => removeFixtureDir(path.dirname(pidFile)));
     writeFileSync(pidFile, `${process.pid}\n`, 'utf-8');
     const result = await runStop({
       pidFile,
@@ -334,7 +335,7 @@ describe('runStop', () => {
 
   it('SIGTERMs an alive PID, waits graceMs, removes the file (AC #3)', async () => {
     const pidFile = mkPidFile();
-    cleanup.push(() => rmSync(path.dirname(pidFile), { recursive: true, force: true }));
+    cleanup.push(() => removeFixtureDir(path.dirname(pidFile)));
     writeFileSync(pidFile, `${process.pid}\n`, 'utf-8');
 
     const killCalls: Array<[number, NodeJS.Signals | 0]> = [];
@@ -360,7 +361,7 @@ describe('runStop', () => {
 
   it('force-kills with SIGKILL when SIGTERM did not stop the process', async () => {
     const pidFile = mkPidFile();
-    cleanup.push(() => rmSync(path.dirname(pidFile), { recursive: true, force: true }));
+    cleanup.push(() => removeFixtureDir(path.dirname(pidFile)));
     writeFileSync(pidFile, `${process.pid}\n`, 'utf-8');
 
     const killCalls: Array<NodeJS.Signals | 0> = [];
@@ -381,7 +382,7 @@ describe('runStop', () => {
 
   it('tolerates kill errors (PID already gone between read + signal)', async () => {
     const pidFile = mkPidFile();
-    cleanup.push(() => rmSync(path.dirname(pidFile), { recursive: true, force: true }));
+    cleanup.push(() => removeFixtureDir(path.dirname(pidFile)));
     writeFileSync(pidFile, `${process.pid}\n`, 'utf-8');
     const result = await runStop({
       pidFile,
@@ -439,8 +440,8 @@ describe('runDispatchSupervisorCli', () => {
   it('returns status JSON on stdout for `status`', async () => {
     const boardDir = mkBoard();
     const pidFile = mkPidFile();
-    cleanup.push(() => rmSync(path.dirname(pidFile), { recursive: true, force: true }));
-    cleanup.push(() => rmSync(path.dirname(boardDir), { recursive: true, force: true }));
+    cleanup.push(() => removeFixtureDir(path.dirname(pidFile)));
+    cleanup.push(() => removeFixtureDir(path.dirname(boardDir)));
 
     const { exit, raw } = await captureStdout(() =>
       runDispatchSupervisorCli(['status', '--board-dir', boardDir, '--pid-file', pidFile]),
@@ -454,8 +455,8 @@ describe('runDispatchSupervisorCli', () => {
   it('returns 0 + alive:true when PID file is current process', async () => {
     const boardDir = mkBoard();
     const pidFile = mkPidFile();
-    cleanup.push(() => rmSync(path.dirname(pidFile), { recursive: true, force: true }));
-    cleanup.push(() => rmSync(path.dirname(boardDir), { recursive: true, force: true }));
+    cleanup.push(() => removeFixtureDir(path.dirname(pidFile)));
+    cleanup.push(() => removeFixtureDir(path.dirname(boardDir)));
     writeFileSync(pidFile, `${process.pid}\n`, 'utf-8');
 
     const { exit, raw } = await captureStdout(() =>
@@ -469,7 +470,7 @@ describe('runDispatchSupervisorCli', () => {
 
   it('returns 0 on `stop` with no PID file', async () => {
     const pidFile = mkPidFile();
-    cleanup.push(() => rmSync(path.dirname(pidFile), { recursive: true, force: true }));
+    cleanup.push(() => removeFixtureDir(path.dirname(pidFile)));
     const { exit, raw } = await captureStdout(() =>
       runDispatchSupervisorCli(['stop', '--pid-file', pidFile]),
     );
@@ -485,8 +486,8 @@ describe('runDispatchSupervisorCli', () => {
     // parsing + maxConcurrent/pollIntervalSec/staleMs defaults branch.
     const boardDir = mkBoard();
     const pidFile = mkPidFile();
-    cleanup.push(() => rmSync(path.dirname(pidFile), { recursive: true, force: true }));
-    cleanup.push(() => rmSync(path.dirname(boardDir), { recursive: true, force: true }));
+    cleanup.push(() => removeFixtureDir(path.dirname(pidFile)));
+    cleanup.push(() => removeFixtureDir(path.dirname(boardDir)));
 
     const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     try {
@@ -522,8 +523,8 @@ describe('runDispatchSupervisorCli', () => {
     // no real `claude` spawn is attempted.
     const boardDir = mkBoard();
     const pidFile = mkPidFile();
-    cleanup.push(() => rmSync(path.dirname(pidFile), { recursive: true, force: true }));
-    cleanup.push(() => rmSync(path.dirname(boardDir), { recursive: true, force: true }));
+    cleanup.push(() => removeFixtureDir(path.dirname(pidFile)));
+    cleanup.push(() => removeFixtureDir(path.dirname(boardDir)));
 
     const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     try {

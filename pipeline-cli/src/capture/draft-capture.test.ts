@@ -13,7 +13,7 @@
  *   - getAutoSubmitThreshold (config + default)
  */
 
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -36,6 +36,7 @@ import {
   resolveDraftsDir,
   resolveSubmittedDir,
 } from './draft-capture.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Shared test fixture helpers ───────────────────────────────────────────────
 
@@ -52,7 +53,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
   if (savedRepoRoot === undefined) {
     delete process.env.CAPTURE_REPO_ROOT;
   } else {

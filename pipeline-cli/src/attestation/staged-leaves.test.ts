@@ -6,7 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { generateKeyPairSync } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -19,6 +19,7 @@ import {
 import { signAndWriteV6Envelope } from './sign-v6.js';
 // @ts-expect-error -- plain ESM, no type declarations shipped
 import { enforceReviewScope, verifyV6Envelope } from '../../attestation-core/verify-core.mjs';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 interface V6VerifyResult {
   status: string;
@@ -57,7 +58,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  removeFixtureDir(root);
 });
 
 function write(patchId: string, leaves: TranscriptLeaf[]): void {

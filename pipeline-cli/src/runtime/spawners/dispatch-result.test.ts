@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -22,13 +22,14 @@ import {
   writeDispatchResult,
   type DispatchResult,
 } from './dispatch-result.js';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 const FIXED_NOW = '2026-05-06T00:00:00.000Z';
 const fixedNow = () => FIXED_NOW;
 
 function makeTmpDir(): { dir: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), 'aisdlc-225-dispatch-result-'));
-  return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  return { dir, cleanup: () => removeFixtureDir(dir) };
 }
 
 // ── resolveResultPath ─────────────────────────────────────────────────

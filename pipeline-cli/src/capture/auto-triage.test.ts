@@ -23,7 +23,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -40,6 +40,7 @@ import {
 } from './auto-triage.js';
 import type { AuditEntry, CaptureRecord } from './capture-record.js';
 import { FakeLlmInvoker, readCorpus } from '../classifier/substrate/index.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 function makeRepoRoot(): string {
   const dir = mkdtempSync(join(tmpdir(), 'aisdlc-275-auto-triage-'));
@@ -135,7 +136,7 @@ describe('autoTriageCapture — confidence > threshold (AC-1, AC-2, AC-7)', () =
       expect(result.corpusEntryId).not.toBeNull();
       expect(result.rawClassification).toBe('quick-fix-task');
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 
@@ -162,7 +163,7 @@ describe('autoTriageCapture — confidence > threshold (AC-1, AC-2, AC-7)', () =
       expect(corpus[0].polarity).toBe('pending');
       expect(corpus[0].classification).toBe('scope-extension');
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 });
@@ -191,7 +192,7 @@ describe('autoTriageCapture — confidence < threshold (AC-3, AC-7)', () => {
       expect(result.recommendedTriage).toBe('tbd');
       expect(result.confidence).toBe(0.55);
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 
@@ -220,7 +221,7 @@ describe('autoTriageCapture — confidence < threshold (AC-3, AC-7)', () => {
       expect(result.recommendedTriage).toBeNull();
       expect(result.confidence).toBe(0);
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 });
@@ -272,7 +273,7 @@ describe('autoTriageCapture — per-agent threshold (AC-4)', () => {
       expect(codeResult.effectiveThreshold).toBe(0.5);
       expect(codeResult.metBehindThreshold).toBe(true);
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 
@@ -306,7 +307,7 @@ describe('autoTriageCapture — per-agent threshold (AC-4)', () => {
         }),
       ).toBe(0.33);
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 });
@@ -335,7 +336,7 @@ describe('autoInferSeverity (AC-5)', () => {
       expect(result.recommendedSeverity).toBe('major');
       expect(result.metBehindThreshold).toBe(true);
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 
@@ -361,7 +362,7 @@ describe('autoInferSeverity (AC-5)', () => {
       // metBehindThreshold=false as "leave severity as unknown".
       expect(result.recommendedSeverity).toBe('minor');
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 
@@ -387,7 +388,7 @@ describe('autoInferSeverity (AC-5)', () => {
       expect(result.metBehindThreshold).toBe(false);
       expect(result.recommendedSeverity).toBeNull();
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 });
@@ -467,7 +468,7 @@ describe('recordTriageOverride (AC-6)', () => {
       expect(corpus[0].operatorOverrideClassification).toBe('new-feature-issue');
       expect(corpus[0].operatorOverrideReason).toBe('needs upstream design');
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 
@@ -483,7 +484,7 @@ describe('recordTriageOverride (AC-6)', () => {
       expect(override.flipped).toBe(false);
       expect(override.reason).toBe('no-corpus-entry-id');
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 
@@ -518,7 +519,7 @@ describe('recordTriageOverride (AC-6)', () => {
       // reverseMapTriageClassification contract.
       expect(corpus[0].operatorOverrideClassification).toBe('new-issue');
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 });
@@ -558,7 +559,7 @@ describe('recordSeverityOverride (AC-6 severity arc)', () => {
       expect(corpus[0].polarity).toBe('negative');
       expect(corpus[0].operatorOverrideClassification).toBe('medium');
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeFixtureDir(repoRoot);
     }
   });
 });

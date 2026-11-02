@@ -12,6 +12,7 @@ import {
   safeOverridesPath,
   writeOverride,
 } from './overrides.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const TABLE = `
 apiVersion: ai-sdlc.io/v1alpha1
@@ -41,7 +42,7 @@ beforeEach(() => {
   if (!parsed.ok) throw new Error('fixture');
   table = parsed.table;
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(dir));
 
 describe('writeOverride (strength-only)', () => {
   it('writes an override to a stronger model and records the table model it covers', () => {

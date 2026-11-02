@@ -34,6 +34,7 @@ import {
 } from './synthesis.js';
 import { buildMiningPrompt, collectTranscriptText, parseProposals } from './transcripts.js';
 import { cmdApply, cmdRun, cmdUndo, summaryLines } from '../cli/memory-dream.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // Test double: lives in this test file only (dark-code gate forbids it in source).
 class FakeSynthesizer implements Synthesizer {
@@ -66,7 +67,7 @@ beforeEach(() => {
   mem = join(root, 'memory');
   mkdirSync(mem);
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(root));
 
 function seed(files: Record<string, string>, index?: string): void {
   for (const [f, c] of Object.entries(files)) writeFileSync(join(mem, f), c);

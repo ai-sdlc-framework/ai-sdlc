@@ -37,6 +37,7 @@ import {
   safeExistsFile,
   salvageReviewerTranscript,
 } from './reconcile.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 interface SpawnCall {
   file: string;
@@ -198,8 +199,8 @@ describe('salvageReviewerTranscript', () => {
   });
 
   afterEach(() => {
-    rmSync(tmpRoot, { recursive: true, force: true });
-    rmSync(worktreePath, { recursive: true, force: true });
+    removeFixtureDir(tmpRoot);
+    removeFixtureDir(worktreePath);
   });
 
   it('returns already-present when the transcript exists in the worktree', () => {
@@ -302,7 +303,7 @@ describe('runReconcile — orchestration', () => {
   });
 
   afterEach(() => {
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 
   it('returns outcome=failed when no verdict is present', () => {
@@ -338,7 +339,7 @@ describe('runReconcile — orchestration', () => {
 
   it('returns outcome=failed when the worktree path is missing', () => {
     writeDevVerdict(boardDir);
-    rmSync(worktreePath, { recursive: true, force: true });
+    removeFixtureDir(worktreePath);
     const { spawn } = makeSpawnRecorder();
     const result = runReconcile({
       workDir,
@@ -410,11 +411,8 @@ describe('runReconcile — orchestration', () => {
   it('reconciles exactly 2 reviewers when reviewers: RECONCILE_REVIEWERS_MERGED is passed', () => {
     // Overwrite the artifact fixtures for the merged set (correctness + security)
     // instead of the default three.
-    rmSync(path.join(worktreePath, '.ai-sdlc', 'transcripts', taskIdLower), {
-      recursive: true,
-      force: true,
-    });
-    rmSync(path.join(worktreePath, '.ai-sdlc', 'verdicts'), { recursive: true, force: true });
+    removeFixtureDir(path.join(worktreePath, '.ai-sdlc', 'transcripts', taskIdLower));
+    removeFixtureDir(path.join(worktreePath, '.ai-sdlc', 'verdicts'));
     const transcriptsDir = path.join(worktreePath, '.ai-sdlc', 'transcripts', taskIdLower);
     const verdictsDir = path.join(worktreePath, '.ai-sdlc', 'verdicts');
     mkdirSync(transcriptsDir, { recursive: true });
@@ -1082,7 +1080,7 @@ describe('reconcile — small exported utilities', () => {
     expect(safeExistsFile(f)).toBe(true);
     expect(safeExistsFile(path.join(tmpDir, 'nope'))).toBe(false);
     expect(safeExistsFile(tmpDir)).toBe(false); // directory, not file
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 
   it('readVerdictJson parses good JSON + returns null on bad input', () => {
@@ -1094,7 +1092,7 @@ describe('reconcile — small exported utilities', () => {
     expect(readVerdictJson(good)).toEqual({ approved: true });
     expect(readVerdictJson(bad)).toBeNull();
     expect(readVerdictJson(path.join(tmpDir, 'nope.json'))).toBeNull();
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeFixtureDir(tmpDir);
   });
 });
 
@@ -1107,7 +1105,7 @@ describe('salvageReviewerTranscript — edge paths', () => {
       });
       expect(result.status).toBe('not-found');
     } finally {
-      rmSync(wt, { recursive: true, force: true });
+      removeFixtureDir(wt);
     }
   });
 
@@ -1137,8 +1135,8 @@ describe('salvageReviewerTranscript — edge paths', () => {
       });
       expect(result.status).toBe('not-found');
     } finally {
-      rmSync(tmpRoot, { recursive: true, force: true });
-      rmSync(wt, { recursive: true, force: true });
+      removeFixtureDir(tmpRoot);
+      removeFixtureDir(wt);
     }
   });
 });
@@ -1163,7 +1161,7 @@ describe('runReconcile — AISDLC-543 ordering + concurrent-writer protection', 
   });
 
   afterEach(() => {
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 
   it('AC#1: orders fetch -> rebase -> emit-leaves -> sign -> push and binds leaves to the rebased HEAD', () => {
@@ -1291,7 +1289,7 @@ describe('runReconcile — shared incremental round plan (AISDLC-725)', () => {
   });
 
   afterEach(() => {
-    rmSync(workDir, { recursive: true, force: true });
+    removeFixtureDir(workDir);
   });
 
   const deltaPlan = {

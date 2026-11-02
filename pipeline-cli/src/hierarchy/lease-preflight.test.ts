@@ -7,7 +7,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,6 +21,7 @@ import {
   type LeaseCondition,
   type PolicyModule,
 } from './lease-preflight.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const cond: LeaseCondition = { condition: 'heartbeat', found: 'f', expected: 'e', fix: 'x' };
@@ -37,7 +38,7 @@ let tmp: string;
 beforeEach(() => {
   tmp = mkdtempSync(path.join(tmpdir(), 'lease-preflight-'));
 });
-afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(tmp));
 
 describe('loadPolicyModule', () => {
   it('finds the plugin policy module from a directory inside the repository', () => {

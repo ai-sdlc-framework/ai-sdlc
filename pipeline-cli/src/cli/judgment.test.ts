@@ -10,7 +10,6 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -34,6 +33,7 @@ import {
   writeReportFile,
   percentile,
 } from '../judgment/eval.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 interface In {
   p: number;
@@ -93,7 +93,7 @@ beforeEach(() => {
   errText = '';
 });
 afterEach(() => {
-  rmSync(tmp, { recursive: true, force: true });
+  removeFixtureDir(tmp);
 });
 
 function deps(over: Partial<JudgmentCliDeps> = {}): JudgmentCliDeps {

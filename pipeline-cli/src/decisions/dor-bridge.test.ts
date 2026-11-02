@@ -7,7 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,6 +15,7 @@ import { dorClarificationOptions, emitDorDecisions, resolveDorDecision } from '.
 import { listDecisions, projectDecision } from './projection.js';
 import { DECISION_CATALOG_FLAG } from './feature-flag.js';
 import type { RefinementVerdict } from '../dor/types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -45,7 +46,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workDir, { recursive: true, force: true });
+  removeFixtureDir(workDir);
 });
 
 // ── dorClarificationOptions ───────────────────────────────────────────────────
@@ -262,7 +263,7 @@ describe('AC#3 — operator answers resolve Decisions', () => {
         const d = projectDecision(decisionIds[0]!, { workDir: tmpVerdictWorkDir });
         expect(d!.status.answeredOptionId).toBe(optId);
       } finally {
-        rmSync(tmpVerdictWorkDir, { recursive: true, force: true });
+        removeFixtureDir(tmpVerdictWorkDir);
       }
     }
   });

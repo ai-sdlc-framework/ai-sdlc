@@ -24,9 +24,10 @@ import {
   findUnresolvedOqs,
   resolveRfcFilePath,
 } from './upstream-oq-gate.js';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -366,7 +367,7 @@ describe('checkUpstreamOqs', () => {
     return tmp;
   };
   const teardown = (): void => {
-    if (tmp) rmSync(tmp, { recursive: true, force: true });
+    if (tmp) removeFixtureDir(tmp);
   };
 
   it('AC #4 — manual override via blocked.reason skips the gate', () => {
@@ -542,7 +543,7 @@ describe('resolveRfcFilePath', () => {
     mkdirSync(join(tmp, 'spec', 'rfcs'), { recursive: true });
     writeFileSync(join(tmp, 'spec', 'rfcs', 'RFC-0011-definition-of-ready-gate.md'), '');
     expect(resolveRfcFilePath('RFC-0011', tmp)).toContain('RFC-0011');
-    rmSync(tmp, { recursive: true, force: true });
+    removeFixtureDir(tmp);
   });
 
   it('resolves spec/rfcs/ path directly', () => {
@@ -550,14 +551,14 @@ describe('resolveRfcFilePath', () => {
     mkdirSync(join(tmp, 'spec', 'rfcs'), { recursive: true });
     writeFileSync(join(tmp, 'spec', 'rfcs', 'RFC-0011-definition-of-ready-gate.md'), '');
     expect(resolveRfcFilePath('spec/rfcs/RFC-0011-definition-of-ready-gate.md', tmp)).toBeTruthy();
-    rmSync(tmp, { recursive: true, force: true });
+    removeFixtureDir(tmp);
   });
 
   it('returns null when RFC not found', () => {
     tmp = mkdtempSync(join(tmpdir(), 'dor-oq-resolve-'));
     mkdirSync(join(tmp, 'spec', 'rfcs'), { recursive: true });
     expect(resolveRfcFilePath('RFC-9999', tmp)).toBeNull();
-    rmSync(tmp, { recursive: true, force: true });
+    removeFixtureDir(tmp);
   });
 });
 

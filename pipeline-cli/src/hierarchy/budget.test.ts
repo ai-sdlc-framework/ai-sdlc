@@ -16,6 +16,7 @@ import {
   type UsageDeps,
 } from './budget.js';
 import { readHold, writeHold } from './hold.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const T0 = Date.parse('2026-10-23T18:30:00Z');
 const RESET7 = '2026-10-27T18:30:00Z'; // 96 hours after T0
@@ -51,7 +52,7 @@ beforeEach(() => {
   token = 'sk-secret-token';
   status = 200;
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(dir));
 
 describe('fetchUsage and usage.json', () => {
   it('writes both windows and never stores the token', async () => {

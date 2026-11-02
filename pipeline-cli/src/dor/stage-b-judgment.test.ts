@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -27,6 +27,7 @@ import {
 import { dorCorpusToEvalJsonl, dorCorpusToJudgmentItems } from './stage-b-judgment-corpus.js';
 import { STAGE_B_GATE_QUESTIONS } from './stage-b.js';
 import type { GateEvaluation, GateId, IssueInput } from './types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const THRESHOLDS = { pass: 0.8, fail: 0.2 };
 const noul = (probability: number): JudgmentAnswer => ({ type: 'noul', probability });
@@ -451,7 +452,7 @@ describe('dor corpus converter and cli-judgment eval', () => {
     try {
       expect(await dorCorpusToEvalJsonl(dir)).toBe('');
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 
@@ -516,7 +517,7 @@ describe('dor corpus converter and cli-judgment eval', () => {
       expect(out.join('')).toContain('"gateIds"');
       writeFileSync(join(dir, 'x'), '');
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 });

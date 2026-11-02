@@ -12,7 +12,7 @@
  * and the batch helper.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -25,6 +25,7 @@ import {
   findTaskFile,
   findTaskFileRelative,
 } from './dispatch-readiness.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 
@@ -36,7 +37,7 @@ beforeEach(() => {
 
 afterEach(() => {
   try {
-    rmSync(tmp, { recursive: true, force: true });
+    removeFixtureDir(tmp);
   } catch {
     /* ignore */
   }
@@ -363,7 +364,7 @@ describe('findTaskFile / findTaskFileRelative (AISDLC-1141)', () => {
       expect(findTaskFileRelative('AISDLC-631', dir)).toBeUndefined();
       expect(findTaskFile('AISDLC-1', dir)).toBeNull();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeFixtureDir(dir);
     }
   });
 });

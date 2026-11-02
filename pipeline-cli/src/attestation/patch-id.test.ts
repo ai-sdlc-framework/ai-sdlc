@@ -35,6 +35,7 @@ import {
   patchIdFilenameV6,
   PATCH_ID_EXCLUSION,
 } from './patch-id.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -258,7 +259,7 @@ describe('patch-id helpers (AISDLC-398 AC-4)', () => {
     sh('git checkout main', repoDir);
     sh('git branch -D feat-e', repoDir);
     rmSync(join(repoDir, 'source-e.ts'), { force: true });
-    rmSync(join(repoDir, '.ai-sdlc', 'attestations'), { recursive: true, force: true });
+    removeFixtureDir(join(repoDir, '.ai-sdlc', 'attestations'));
   });
 
   // ── Filename suffix helpers ─────────────────────────────────────────────

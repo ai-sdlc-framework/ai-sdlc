@@ -19,7 +19,7 @@
  */
 
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -34,6 +34,7 @@ import type { OrchestratorEvent } from './events.js';
 import type { ExecOptions, ExecResult, Runner } from '../runtime/exec.js';
 import type { PipelineLogger } from '../types.js';
 import { makeGitEnv } from '../__test-helpers/git-env.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // ── Test helpers ──────────────────────────────────────────────────────────
 //
@@ -113,7 +114,7 @@ function makeRunner(branchStates: Record<string, 'MERGED' | 'OPEN' | null>): {
         const targetPath = args[args.length - 1];
         if (targetPath) {
           try {
-            rmSync(targetPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+            removeFixtureDir(targetPath);
           } catch {
             // no-op — mirror the allow-failure behaviour of the real function
           }
@@ -162,7 +163,7 @@ const workDirs: string[] = [];
 afterEach(() => {
   for (const d of workDirs) {
     try {
-      rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+      removeFixtureDir(d);
     } catch {
       /* ignore cleanup errors */
     }

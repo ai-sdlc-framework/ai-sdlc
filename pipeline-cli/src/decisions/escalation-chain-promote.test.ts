@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -10,6 +10,7 @@ import {
   makeOperatorAnsweredEvent,
 } from './event-log.js';
 import type { RosterEntry } from '../hierarchy/types.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const OPENED = new Date('2026-10-07T00:00:00.000Z');
 const LATER = new Date('2026-10-29T07:00:00.000Z');
@@ -17,7 +18,7 @@ let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'promote-'));
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(dir));
 
 function chain(sent: string[]): () => ChainDeps {
   return () => ({

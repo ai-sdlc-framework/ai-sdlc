@@ -53,6 +53,7 @@ import {
   type ReviewPlan,
   type RiskMapInput,
 } from './index.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 // A fixture secret in the shape of a GitHub classic token, which redactSecrets knows.
 const SECRET = 'ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';
@@ -65,7 +66,7 @@ const tmp = (prefix: string): string => {
   return dir;
 };
 afterAll(() => {
-  for (const d of tempRoots) rmSync(d, { recursive: true, force: true });
+  for (const d of tempRoots) removeFixtureDir(d);
   disposeScratchHome();
 });
 

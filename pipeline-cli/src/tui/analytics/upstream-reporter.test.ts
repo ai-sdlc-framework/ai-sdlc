@@ -11,7 +11,7 @@
  *   - suggested-fix + related-paths heuristics
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -31,6 +31,7 @@ import {
 } from './upstream-reporter.js';
 import type { FrameworkBugCaptureRecord } from './quality-classifier.js';
 import { FRAMEWORK_QUALITY_CAPTURES_FILE, FRAMEWORK_QUALITY_DIRNAME } from './quality-reader.js';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 let workdir: string;
 let artifactsDir: string;
@@ -86,7 +87,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workdir, { recursive: true, force: true });
+  removeFixtureDir(workdir);
 });
 
 // ── buildCaptureId ────────────────────────────────────────────────────

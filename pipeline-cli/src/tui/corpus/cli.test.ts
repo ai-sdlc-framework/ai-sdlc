@@ -16,11 +16,12 @@
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { removeFixtureDir } from '../../__test-helpers/remove-fixture-dir.js';
 
 const __filename = fileURLToPath(import.meta.url);
 // src/tui/corpus/cli.test.ts → pipeline-cli root
@@ -51,7 +52,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (tmp) rmSync(tmp, { recursive: true, force: true });
+  if (tmp) removeFixtureDir(tmp);
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { projectAll } from '../decisions/index.js';
@@ -15,6 +15,7 @@ import {
   type RoutingRevertOptions,
   type RoutingRevertResult,
 } from './routing-revert.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const REPO_ID = 'repo-id-1';
 const SINCE = '2026-09-10T00:00:00.000Z';
@@ -35,7 +36,7 @@ beforeEach(() => {
   events = [];
   warnings = [];
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(root));
 
 function table(over: Partial<RoutingTable['cells']['developer']['*']> = {}): RoutingTable {
   return {

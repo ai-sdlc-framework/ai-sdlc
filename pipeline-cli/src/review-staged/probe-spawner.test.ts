@@ -14,7 +14,6 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
-  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -37,12 +36,13 @@ import {
   type ProbeProcessResult,
   type ProbeProcessRunner,
 } from './probe-spawner.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const ENV_SECRET = 'fixture-env-secret-do-not-read';
 
 const roots: string[] = [];
 afterAll(() => {
-  for (const r of roots) rmSync(r, { recursive: true, force: true });
+  for (const r of roots) removeFixtureDir(r);
 });
 
 /** A repository with committed files, a committed symlink, and a gitignored `.env`. */

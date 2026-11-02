@@ -12,12 +12,13 @@ import {
   parseOperational,
   parseOperationalPolicy,
 } from './operational.js';
+import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 beforeEach(() => {
   tmp = mkdtempSync(path.join(tmpdir(), 'operational-'));
 });
-afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+afterEach(() => removeFixtureDir(tmp));
 
 const yaml = (items: string[]) =>
   `spec:\n  governance:\n    allowForcePush: leaseOnOwnBranch\n    operational:\n${items
