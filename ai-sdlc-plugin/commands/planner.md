@@ -46,7 +46,8 @@ File every backlog task and decision record with `cli-file`, never by hand:
 
 ```bash
 node "$PIPELINE_CLI_BIN/cli-file.mjs" task "<scratchpad>/<id> - title.md" --pr
-node "$PIPELINE_CLI_BIN/cli-file.mjs" decision DEC-NNNN --task-id <id> [--answer <option>] --pr
+node "$PIPELINE_CLI_BIN/cli-decisions.mjs" add --summary "..." --scope "..." --option a:"..." --option b:"..." --file --pr
+node "$PIPELINE_CLI_BIN/cli-decisions.mjs" answer DEC-NNNN <option> --file --pr
 node "$PIPELINE_CLI_BIN/cli-file.mjs" rebase <id> --pr
 ```
 

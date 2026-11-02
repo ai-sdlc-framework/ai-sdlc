@@ -46,13 +46,16 @@ export function resolveCatalogRoot(dir: string): string {
  *  - from a linked worktree: that worktree's own store;
  *  - from the parent with an active task (`AI_SDLC_ACTIVE_TASK_ID`): that
  *    task's worktree `.worktrees/<id>/`;
- *  - from the parent with no active task: refuse (throws).
+ *  - from the parent with no active task: refuse (throws), unless `file` (AISDLC-1161).
  * Anything that is not a Pattern-C parent (no `.worktrees/` dir) is unchanged.
  */
 export function resolveWriteRoot(
   dir: string,
   env: Record<string, string | undefined> = process.env,
+  opts: { file?: boolean } = {},
 ): string {
+  // AISDLC-1161: with --file nothing is written here; cli-file publishes from the main checkout.
+  if (opts.file) return resolveCatalogRoot(dir);
   if (resolveCatalogRoot(dir) !== dir) return dir; // linked worktree: its own store
   if (!existsSync(join(dir, '.worktrees'))) return dir; // not a Pattern-C parent
   const taskId = env.AI_SDLC_ACTIVE_TASK_ID?.trim();
@@ -66,6 +69,7 @@ export function resolveWriteRoot(
   throw new Error(
     `[cli-decisions] refusing to write from the Pattern-C parent (${dir}) with no active task: ` +
       'the event would land untracked in the parent. Run from the task worktree ' +
-      '(.worktrees/<task-id>/) or set AI_SDLC_ACTIVE_TASK_ID.',
+      '(.worktrees/<task-id>/), set AI_SDLC_ACTIVE_TASK_ID, or pass --file [--pr] to file the event ' +
+      'through cli-file (its own worktree and PR).',
   );
 }
