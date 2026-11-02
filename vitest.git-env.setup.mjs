@@ -25,3 +25,15 @@ for (const k of [
 ]) {
   delete process.env[k];
 }
+
+// Hierarchy session identity (executor/planner panes) must not leak into tests:
+// running the suite from an executor session made the lease-push preflight
+// refuse every step-11 test (AISDLC-1150 verification).
+for (const k of [
+  'AI_SDLC_HIERARCHY_ROLE',
+  'AI_SDLC_HIERARCHY_SESSION',
+  'AI_SDLC_EXECUTOR_TASK',
+  'CLAUDE_PROJECT_DIR',
+]) {
+  delete process.env[k];
+}

@@ -141,6 +141,7 @@ import {
   readRosterChecked,
   readReceivedAddresses,
   sendToRoster,
+  writeRotateRequest,
   type SocketSender,
   rosterProject,
   readParentHead,
@@ -295,13 +296,15 @@ Usage for clear:
   cli-hierarchy did not start.
 
 Usage for restart and register (dispatch or planner session for restart; dispatch only for register):
-  cli-hierarchy restart <name> [--after-task] [--wait <seconds>]
+  cli-hierarchy restart <name> [--after-task] [--wait <seconds>] [--force]
   cli-hierarchy restart --all [--wait <seconds>]
   cli-hierarchy register <executor>
   restart stops the named session (an executor, operator-dispatch or planner) and starts it
   again with its recorded model, mode and env, then replaces only its roster entry (pid, pane,
   started time); other sessions are not touched and inflight manifests stay on the board.
   Restarting dispatch re-registers the reconcile scheduler and the webhook receiver.
+  A busy planner or dispatch session is refused unless --force is given; ask it to rotate with
+  cli-hierarchy clear <name> instead. The handoff is written before the stop (AISDLC-1150).
   An executor that holds a claimed task is refused unless --after-task is given, which waits
   (up to --wait seconds, default 1500) for the task boundary first.
   --all restarts dispatch and every idle executor now, and each busy executor at its task
@@ -397,6 +400,28 @@ function usageDepsOf(over: Partial<UsageDeps> | undefined, now: () => Date): Usa
 
 /** Largest handoff text `tick` hands back, in characters. */
 const HANDOFF_MAX_CHARS = 8000;
+
+/**
+ * Ask a session's hooks module to rotate (AISDLC-1150): deliver `rotate` and record the request
+ * so `status` can show its age. @throws the roster refusal when the name is not addressable.
+ */
+function sendRotate(
+  deps: HierarchyDeps,
+  name: string,
+  sendBrief: BriefSender | undefined,
+  sendSocket: SocketSender | undefined,
+): void {
+  const { roster } = readRosterChecked(deps.boardDir);
+  sendToRoster(
+    roster.sessions,
+    name,
+    'rotate',
+    sendBrief ?? createTmuxBriefSender(deps.run),
+    readReceivedAddresses(deps.boardDir),
+    sendSocket,
+  );
+  writeRotateRequest(deps.boardDir, name, deps.now());
+}
 
 /**
  * The dispatch handoff, regenerated from board and catalog state after this tick's changes
@@ -851,6 +876,20 @@ export async function runHierarchyCli(
           process.stderr.write('cli-hierarchy clear: a session name is required\n');
           return 2;
         }
+        // A planner is rotated by its own module at the turn boundary (RFC-0058 phase 4, AISDLC-1150).
+        const targetRole = readRosterChecked(deps.boardDir).roster.sessions.find(
+          (e) => e.name === target,
+        )?.role;
+        if (targetRole === 'planner') {
+          try {
+            sendRotate(deps, target, extras.sendBrief, extras.sendSocket);
+          } catch (err) {
+            process.stderr.write(`cli-hierarchy clear: ${(err as Error).message}\n`);
+            return 1;
+          }
+          deps.log(JSON.stringify({ ok: true, rotateRequested: target }));
+          return 0;
+        }
         const flagSettleMs = intFlag(flags, 'settle-ms');
         if (flagSettleMs === null) return 2;
         const settleMs = flagSettleMs ?? loadPrLifecycleConfig(deps.cwd).clear.handshakeCeilingMs;
@@ -927,6 +966,7 @@ export async function runHierarchyCli(
           {
             session: session as string,
             afterTask: afterTask !== undefined,
+            ...(flags.force === 'true' ? { force: true } : {}),
             ...(callerName ? { callerName } : {}),
             ...(waitSec === undefined ? {} : { waitSec }),
           },
@@ -1187,6 +1227,15 @@ export async function runHierarchyCli(
           restartSession: async (name) => {
             try {
               await hierarchyRestart({ session: name, lockHolder: worker }, deps);
+              return { ok: true };
+            } catch (err) {
+              return { ok: false, reason: (err as Error).message };
+            }
+          },
+          // AISDLC-1150: ask the session's module to rotate before any hard restart.
+          requestRotate: async (name) => {
+            try {
+              sendRotate(deps, name, extras.sendBrief, extras.sendSocket);
               return { ok: true };
             } catch (err) {
               return { ok: false, reason: (err as Error).message };
