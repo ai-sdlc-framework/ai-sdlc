@@ -25,3 +25,9 @@ for (const k of [
 ]) {
   delete process.env[k];
 }
+
+// AISDLC-1149: tests must not depend on the executor session that runs them.
+// An executor shell exports these; step 11 and the hierarchy helpers branch on them.
+for (const k of ['AI_SDLC_HIERARCHY_SESSION', 'AI_SDLC_HIERARCHY_ROLE', 'CLAUDE_PROJECT_DIR']) {
+  delete process.env[k];
+}

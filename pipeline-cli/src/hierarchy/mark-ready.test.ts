@@ -4,7 +4,13 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { analyzeState, markReadyAfterCodeql, repoHasCodeql, rollupState } from './mark-ready.js';
+import {
+  analyzeState,
+  codeqlRunsOnPullRequests,
+  decidePrDraft,
+  markReadyAfterCodeql,
+  rollupState,
+} from './mark-ready.js';
 import type { CommandRunner } from './types.js';
 
 const BODY = 'Draft until CodeQL is clean.';
@@ -48,8 +54,8 @@ describe('markReadyAfterCodeql', () => {
   it('flips a draft whose Analyze jobs all passed, and nothing else', () => {
     const gh = fakeGh(
       [
-        { number: 1, body: BODY, mergeStateStatus: 'CLEAN' },
-        { number: 2, body: 'an ordinary draft', mergeStateStatus: 'CLEAN' },
+        { number: 1, body: BODY, headRefName: 'ai-sdlc/t', mergeStateStatus: 'CLEAN' },
+        { number: 2, body: 'an ordinary draft', headRefName: 'feat/x', mergeStateStatus: 'CLEAN' },
       ],
       { 1: { statusCheckRollup: [analyze('SUCCESS')], comments: [] } },
     );
@@ -60,9 +66,12 @@ describe('markReadyAfterCodeql', () => {
   });
 
   it('reports a failed Analyze job and does not flip it', () => {
-    const gh = fakeGh([{ number: 3, body: BODY, mergeStateStatus: 'CLEAN' }], {
-      3: { statusCheckRollup: [analyze('FAILURE')], comments: [] },
-    });
+    const gh = fakeGh(
+      [{ number: 3, body: BODY, headRefName: 'ai-sdlc/t', mergeStateStatus: 'CLEAN' }],
+      {
+        3: { statusCheckRollup: [analyze('FAILURE')], comments: [] },
+      },
+    );
     const r = markReadyAfterCodeql(gh.run, '/repo');
     expect(r.failedAnalyze).toEqual([3]);
     expect(r.readied).toEqual([]);
@@ -72,9 +81,14 @@ describe('markReadyAfterCodeql', () => {
   it('never flips a superseded or conflicting PR', () => {
     const gh = fakeGh(
       [
-        { number: 4, body: `${BODY} Superseded by #9`, mergeStateStatus: 'CLEAN' },
-        { number: 5, body: BODY, mergeStateStatus: 'DIRTY' },
-        { number: 6, body: BODY, mergeStateStatus: 'CLEAN' },
+        {
+          number: 4,
+          body: `${BODY} Superseded by #9`,
+          headRefName: 'ai-sdlc/t',
+          mergeStateStatus: 'CLEAN',
+        },
+        { number: 5, body: BODY, headRefName: 'ai-sdlc/t', mergeStateStatus: 'DIRTY' },
+        { number: 6, body: BODY, headRefName: 'ai-sdlc/t', mergeStateStatus: 'CLEAN' },
       ],
       {
         6: { statusCheckRollup: [analyze('SUCCESS')], comments: [{ body: 'superseded by #10' }] },
@@ -140,16 +154,64 @@ describe('repos without CodeQL (AISDLC-896)', () => {
     expect(rollupState([{ conclusion: 'ERROR' }])).toBe('failed');
   });
 
-  it('repoHasCodeql detects the codeql-action in a workflow', () => {
+  it('codeqlRunsOnPullRequests is true only for CodeQL on a pull_request trigger', () => {
     const root = mkdtempSync(path.join(os.tmpdir(), 'cq-'));
-    expect(repoHasCodeql(root)).toBe(false);
-    mkdirSync(path.join(root, '.github', 'workflows'), { recursive: true });
-    writeFileSync(path.join(root, '.github', 'workflows', 'ci.yml'), 'jobs: {}\n');
-    expect(repoHasCodeql(root)).toBe(false);
+    const wf = path.join(root, '.github', 'workflows');
+    expect(codeqlRunsOnPullRequests(root)).toBe(false);
+    mkdirSync(wf, { recursive: true });
+    writeFileSync(path.join(wf, 'ci.yml'), 'on: [pull_request]\njobs: {}\n');
+    expect(codeqlRunsOnPullRequests(root)).toBe(false);
+    // Scorecard shape: upload-sarif only.
     writeFileSync(
-      path.join(root, '.github', 'workflows', 'codeql.yml'),
-      'uses: github/codeql-action/analyze@v3\n',
+      path.join(wf, 'scorecard.yml'),
+      'on:\n  pull_request: {}\njobs:\n  s:\n    steps:\n      - uses: github/codeql-action/upload-sarif@v3\n',
     );
-    expect(repoHasCodeql(root)).toBe(true);
+    expect(codeqlRunsOnPullRequests(root)).toBe(false);
+    // This repository's shape: schedule only.
+    writeFileSync(
+      path.join(wf, 'codeql.yml'),
+      'on:\n  schedule:\n    - cron: "0 0 * * 1"\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/analyze@v3\n',
+    );
+    expect(codeqlRunsOnPullRequests(root)).toBe(false);
+    writeFileSync(
+      path.join(wf, 'codeql.yml'),
+      'on:\n  pull_request:\n    branches: [main]\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/analyze@v3\n',
+    );
+    expect(codeqlRunsOnPullRequests(root)).toBe(true);
+    writeFileSync(
+      path.join(wf, 'codeql.yml'),
+      'on: pull_request_target\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/init@v3\n',
+    );
+    expect(codeqlRunsOnPullRequests(root)).toBe(true);
+    writeFileSync(
+      path.join(wf, 'codeql.yml'),
+      'on: [push, pull_request]\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/init@v3\n',
+    );
+    expect(codeqlRunsOnPullRequests(root)).toBe(true);
+    writeFileSync(path.join(wf, 'codeql.yml'), ': : bad\n  - [\n uses: github/codeql-action/init');
+    expect(codeqlRunsOnPullRequests(root)).toBe(false);
+  });
+
+  it('decidePrDraft names the reason', () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'cq-'));
+    expect(decidePrDraft(root, false)).toEqual({
+      draft: false,
+      reason: 'ready: no pull-request codeql',
+    });
+    expect(decidePrDraft(root, true)).toEqual({
+      draft: false,
+      reason: 'ready: governance.openTaskPrsReady',
+    });
+    const wf = path.join(root, '.github', 'workflows');
+    mkdirSync(wf, { recursive: true });
+    writeFileSync(
+      path.join(wf, 'codeql.yml'),
+      'on: [pull_request]\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/init@v3\n',
+    );
+    expect(decidePrDraft(root, false)).toEqual({
+      draft: true,
+      reason: 'draft: codeql runs on pull requests',
+    });
+    expect(decidePrDraft(root, true).draft).toBe(false);
   });
 });

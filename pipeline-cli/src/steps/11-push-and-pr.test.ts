@@ -8,6 +8,7 @@ import {
   pushAndPr,
   readTitleTemplate,
 } from './11-push-and-pr.js';
+import * as operational from '../hierarchy/operational.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
 import { FakeRunner, fail, ok } from '../__test-helpers/fake-runner.js';
 import type { AggregatedVerdict, DeveloperReturn, TaskSpec } from '../types.js';
@@ -21,6 +22,7 @@ beforeEach(() => {
   tmp = makeTmpProject();
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   cleanupTmpProject(tmp);
 });
@@ -433,6 +435,12 @@ describe('Step 11 — pushAndPr', () => {
   // Without this assertion, removing the flag wouldn't be caught by any
   // other test in the suite (the `/^gh pr create/` matcher is permissive).
   it('opens the PR as DRAFT (AISDLC-218 regression guard)', async () => {
+    const wf = join(tmp, '.github', 'workflows');
+    mkdirSync(wf, { recursive: true });
+    writeFileSync(
+      join(wf, 'codeql.yml'),
+      'on: [pull_request]\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/init@v3\n',
+    );
     const fake = new FakeRunner()
       .on(/^git push -u origin/, ok())
       .on(/^gh pr create/, ok('https://github.com/x/y/pull/1\n'));
@@ -454,6 +462,52 @@ describe('Step 11 — pushAndPr', () => {
       ghPrCreateCall!.args.includes('--draft'),
       `gh pr create args must include --draft (AISDLC-218); got: ${ghPrCreateCall!.args.join(' ')}`,
     ).toBe(true);
+  });
+
+  it('opens the PR ready when no pull-request CodeQL exists (AISDLC-1149)', async () => {
+    const fake = new FakeRunner()
+      .on(/^git push -u origin/, ok())
+      .on(/^gh pr create/, ok('https://github.com/x/y/pull/1\n'));
+    await pushAndPr({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: dev,
+      verdict: approved,
+      runner: fake.toRunner(),
+    });
+    const call = fake.calls.find((c) => c.command === 'gh' && c.args[1] === 'create');
+    expect(call!.args).not.toContain('--draft');
+  });
+
+  it('opens the PR ready when governance.openTaskPrsReady is set (AISDLC-1149)', async () => {
+    const wf = join(tmp, '.github', 'workflows');
+    mkdirSync(wf, { recursive: true });
+    writeFileSync(
+      join(wf, 'codeql.yml'),
+      'on: [pull_request]\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/init@v3\n',
+    );
+    vi.spyOn(operational, 'loadOperationalPolicy').mockReturnValue({
+      ...operational.loadOperationalPolicy(tmp),
+      openTaskPrsReady: true,
+    });
+    const fake = new FakeRunner()
+      .on(/^git push -u origin/, ok())
+      .on(/^gh pr create/, ok('https://github.com/x/y/pull/1\n'));
+    await pushAndPr({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: dev,
+      verdict: approved,
+      runner: fake.toRunner(),
+    });
+    const call = fake.calls.find((c) => c.command === 'gh' && c.args[1] === 'create');
+    expect(call!.args).not.toContain('--draft');
   });
 
   // AISDLC-606 — `gh pr create --base` must default to 'main' (no

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -143,6 +143,19 @@ describe('parseOperationalPolicy', () => {
     expect(p.forcePushMode).toBe('leaseOnOwnBranch');
     expect(p.protectedBranches).toEqual(['ai-sdlc/*', 'staging']);
     expect([...p.operational]).toEqual(['requeue']);
+  });
+
+  it('declares openTaskPrsReady in both agent-role schemas (AISDLC-1149)', () => {
+    for (const rel of [
+      '../spec/schemas/agent-role.schema.json',
+      '../sdk-go/core/schemas/agent-role.schema.json',
+    ]) {
+      const schema = JSON.parse(readFileSync(path.resolve(process.cwd(), rel), 'utf-8')) as {
+        $defs: { Governance: { properties: Record<string, { type?: string; default?: unknown }> } };
+      };
+      const prop = schema.$defs.Governance.properties.openTaskPrsReady;
+      expect(prop).toMatchObject({ type: 'boolean', default: false });
+    }
   });
 
   it('reads openTaskPrsReady, defaulting to false', () => {

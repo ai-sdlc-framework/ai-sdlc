@@ -45,3 +45,5 @@ Request from the ai-sdlc-io planner session on 2026-10-14 (ai-sdlc-io DEC-0008).
 **Velocity impact.** Positive: every task PR in a CodeQL-less adopter repo is stuck in draft today; after this, none is. This repo's behaviour is unchanged.
 
 Authority: class (a) (configurable, reversible; this repo keeps CodeQL gating). Operator instruction 2026-10-14 ("do them all").
+
+Notes: the acceptance criteria were delivered in code but never ticked; the schema and docs gap (`governance.openTaskPrsReady`) is closed by AISDLC-1149.
