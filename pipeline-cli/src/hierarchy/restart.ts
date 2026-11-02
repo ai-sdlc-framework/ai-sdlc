@@ -24,6 +24,7 @@
 import { releaseInflight } from '../dispatch/board.js';
 import { createSystemIdentity } from './caller-identity.js';
 import { holdsInflight } from './clear.js';
+import { writeHandoff } from './handoff.js';
 import { stopSessionWindow } from './down.js';
 import { listInflight } from './inflight.js';
 import { schedulerUp } from './reconcile-scheduler.js';
@@ -52,6 +53,8 @@ export interface RestartOptions {
   waitSec?: number;
   /** Roster name of the calling session; restarting it would kill this very command. */
   callerName?: string;
+  /** Restart a busy planner or dispatch session anyway (AISDLC-1150). */
+  force?: boolean;
   /** Who takes the restart lock (default `callerName`, else `operator`). */
   lockHolder?: string;
 }
@@ -72,6 +75,10 @@ export interface RestartResult {
   unchanged?: boolean;
   /** Task the executor held that `--after-task` waited for. */
   waitedFor?: string;
+  /** Handoff file written just before the stop (planner, dispatch; AISDLC-1150). */
+  handoff?: string;
+  /** The handoff could not be written; the restart went ahead. */
+  handoffError?: string;
   /** Task the executor claimed in the instant before the stop; returned to `queue/`. */
   requeued?: string;
 }
@@ -195,10 +202,34 @@ export async function hierarchyRestart(
       `refusing to restart '${entry.name}': it holds ${held}, which is still inflight. Run again with --after-task to restart at the task boundary`,
     );
   }
+  if (!opts.force && (entry.role === 'planner' || entry.role === 'operator-dispatch')) {
+    if (isBusy(deps, entry)) {
+      throw new Error(
+        `refusing to restart '${entry.name}': it is busy, and stopping it would kill its running command. Ask it to rotate at the turn boundary with cli-hierarchy clear ${entry.name}, or pass --force to restart anyway`,
+      );
+    }
+  }
   const waitedFor =
     opts.afterTask && entry.role === 'executor'
       ? await waitForTaskBoundary(entry, opts, deps)
       : undefined;
+
+  // Preserve state before the kill so the new session's `handoff read` reflects this moment.
+  let handoff: string | undefined;
+  let handoffError: string | undefined;
+  if (entry.role === 'planner' || entry.role === 'operator-dispatch') {
+    try {
+      handoff = writeHandoff({
+        role: entry.role,
+        name: entry.name,
+        boardDir: deps.boardDir,
+        now: deps.now,
+      }).file;
+    } catch (err) {
+      handoffError = err instanceof Error ? err.message : String(err);
+      deps.log(`warning: handoff not written before restart: ${handoffError}`);
+    }
+  }
 
   const stop = await stopSessionWindow(entry, deps);
   if ('refused' in stop) {
@@ -258,7 +289,18 @@ export async function hierarchyRestart(
     after: snapshot(next),
     ...(waitedFor ? { waitedFor } : {}),
     ...(requeued ? { requeued } : {}),
+    ...(handoff ? { handoff } : {}),
+    ...(handoffError ? { handoffError } : {}),
   };
+}
+
+/** True when the harness registry reports the roster entry's session busy (a turn is running). */
+function isBusy(deps: HierarchyDeps, entry: RosterEntry): boolean {
+  const registry = readSessionRegistry(deps.registryDir);
+  const live =
+    registry.find((r) => r.name === entry.name) ??
+    registry.find((r) => r.pid === entry.pid && entry.pid > 0);
+  return live?.status === 'busy';
 }
 
 /** After a dispatch restart: make sure the reconcile scheduler and, when a secret is set, the webhook receiver run. */

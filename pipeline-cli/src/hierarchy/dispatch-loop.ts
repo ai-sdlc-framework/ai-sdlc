@@ -86,6 +86,7 @@ import {
 } from '../kpi/closed-unmerged.js';
 import { summariseLanding, takeSuppressedNote } from './reconcile.js';
 import { takeRestartRequests } from './restart-lock.js';
+import { clearRotateRequest } from './rotate-request.js';
 import { readRosterChecked } from './roster.js';
 import type { ParentUpkeepResult } from '../steps/00-parent-upkeep.js';
 import { formatStall, reapStalledClaims, type StallDeps, type StalledReport } from './stall.js';
@@ -131,6 +132,8 @@ export interface LoopState {
   drainStartedAt?: string;
   /** Consecutive ticks a session met an auto-restart rule (AISDLC-1110); dropped when it stops. */
   restartStreak?: Record<string, number>;
+  /** Ticks since dispatch asked an over-context session to rotate (AISDLC-1150); dropped once it is under threshold. */
+  rotateAsked?: Record<string, number>;
 }
 
 /** A roster session as the restart rules see it (AISDLC-1110). */
@@ -148,7 +151,7 @@ export interface SessionHealth {
 export interface RestartReport {
   session: string;
   cause: 'unknown-no-task' | 'idle-with-queue' | 'over-context' | 'request';
-  status: 'restarted' | 'failed';
+  status: 'restarted' | 'failed' | 'requested-rotate';
   reason?: string;
 }
 
@@ -203,6 +206,7 @@ export function readLoopState(boardDir: string): LoopState {
         ? { lastSpawnErrors: parsed.lastSpawnErrors }
         : {}),
       ...(parsed.restartStreak ? { restartStreak: parsed.restartStreak } : {}),
+      ...(parsed.rotateAsked ? { rotateAsked: parsed.rotateAsked } : {}),
     };
   } catch {
     return emptyState();
@@ -483,6 +487,8 @@ export interface LoopDeps {
   sessions?: () => SessionHealth[];
   /** Restarts one roster session of any role; called by the tick only. */
   restartSession?: (name: string) => Promise<{ ok: boolean; reason?: string }>;
+  /** Asks a session's hooks module to rotate (AISDLC-1150); absent means over-context restarts directly. */
+  requestRotate?: (name: string) => Promise<{ ok: boolean; reason?: string }>;
   /** Records the tick marker; its failure never fails the tick. */
   recordTick?: (marker: DispatchTickMarker) => void;
   /** Checks the turns-per-tick budget and files a Decision on an overrun; its failure never fails the tick. */
@@ -851,6 +857,9 @@ function githubReadFresh(deps: LoopDeps, state: LoopState): boolean {
 /** Consecutive ticks a rule must hold before the tick restarts the session. */
 export const RESTART_AFTER_TICKS = 2;
 
+/** Ticks a rotate request may stay unanswered before an over-context session is hard-restarted (AISDLC-1150). */
+export const ROTATE_GRACE_TICKS = 6;
+
 /**
  * Deterministic restarts (AISDLC-1110): consume restart-request files, then restart a
  * session that has met a rule for {@link RESTART_AFTER_TICKS} consecutive ticks. The
@@ -909,7 +918,10 @@ async function runRestarts(
   }
   const queued = peekQueue(deps.boardDir).queued;
   const prev = state.restartStreak ?? {};
+  const asked = state.rotateAsked ?? {};
+  const nextAsked: Record<string, number> = {};
   const next: Record<string, number> = {};
+  const askRotate = deps.requestRotate;
   for (const s of sessions) {
     if (s.name === deps.workerId || s.role === 'operator-dispatch' || done.has(s.name)) continue;
     let cause: RestartReport['cause'] | undefined;
@@ -920,9 +932,54 @@ async function runRestarts(
     }
     if (!cause) continue;
     const streak = (prev[s.name] ?? 0) + 1;
-    if (streak >= RESTART_AFTER_TICKS) await attempt(s.name, cause);
-    else next[s.name] = streak;
+    if (streak < RESTART_AFTER_TICKS) {
+      next[s.name] = streak;
+      continue;
+    }
+    // Over-context: the module's graceful rotation comes first (AISDLC-1150); the hard
+    // restart is the last resort once the grace lapses, and never while the session is busy.
+    if (cause === 'over-context' && askRotate && (s.role === 'planner' || s.role === 'executor')) {
+      next[s.name] = streak;
+      const age = asked[s.name];
+      if (age === undefined) {
+        try {
+          const r = await askRotate(s.name);
+          out.push({
+            session: s.name,
+            cause,
+            status: r.ok ? 'requested-rotate' : 'failed',
+            ...(r.reason ? { reason: r.reason } : {}),
+          });
+        } catch (err) {
+          out.push({
+            session: s.name,
+            cause,
+            status: 'failed',
+            reason: err instanceof Error ? err.message : String(err),
+          });
+        }
+        nextAsked[s.name] = 0;
+        continue;
+      }
+      if (age + 1 >= ROTATE_GRACE_TICKS && s.state !== 'busy') {
+        await attempt(s.name, cause);
+        delete next[s.name];
+      } else {
+        nextAsked[s.name] = age + 1;
+      }
+      continue;
+    }
+    await attempt(s.name, cause);
   }
+  for (const name of Object.keys(asked)) {
+    if (nextAsked[name] !== undefined) continue;
+    try {
+      clearRotateRequest(deps.boardDir, name);
+    } catch {
+      /* a stale marker only mis-reports status */
+    }
+  }
+  state.rotateAsked = nextAsked;
   state.restartStreak = next;
   return out;
 }

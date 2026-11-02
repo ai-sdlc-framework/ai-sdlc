@@ -499,7 +499,7 @@ session was refused or `--role` matches nothing.
 Stop and start one session, or dispatch plus every executor, without `down` and `up`.
 
 ```bash
-cli-hierarchy restart <name> [--after-task] [--wait <seconds>]
+cli-hierarchy restart <name> [--after-task] [--wait <seconds>] [--force]
 cli-hierarchy restart --all [--wait <seconds>]
 ```
 
@@ -545,7 +545,25 @@ consecutive ticks (the streak is kept in `operator-dispatch.state.json`):
 
 - an executor in state `unknown` with no inflight task;
 - an executor `idle` with no inflight task while tasks are queued;
-- any roster session, the planner included, whose measured context is over its clear threshold.
+- any roster session, the planner included, whose measured context is over its clear threshold
+  (graceful order below, AISDLC-1150).
+
+**Over-context order (AISDLC-1150).** A session past its threshold is rotated gracefully first and
+killed only as a last resort:
+
+1. The session's own hooks module rotates at the turn boundary (the planner waits for
+   `turn.complete`, so it never rotates mid-turn): it writes the handoff, stores the last reply and
+   clears.
+2. If the session is still over threshold when the streak holds, the tick sends it a `rotate`
+   request (the same request `cli-hierarchy clear <planner>` sends) and records
+   `rotate-requests/<session>.json`; the tick reports `requested-rotate`. `status` shows
+   `rotate requested of <name> <N> s ago` while it waits on a long turn.
+3. Only when the session is still over threshold after `ROTATE_GRACE_TICKS` (6) ticks and is not
+   `busy` does the tick hard-restart it. A busy session is never hard-restarted by the tick.
+4. In every path the handoff is written: `restart` for a planner or dispatch target runs the
+   equivalent of `handoff write --role <role>` before stopping the window and returns its path as
+   `handoff` (a write failure is reported as `handoffError` and does not block the restart).
+   `restart` refuses a busy planner or dispatch unless `--force`, naming `cli-hierarchy clear <name>`.
 
 The dispatch session is never restarted by its own tick, and nothing restarts while the board is
 held. Each restart (or failure) is a progress line `restart <name> (<cause>): restarted|failed`

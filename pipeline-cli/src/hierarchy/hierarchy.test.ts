@@ -65,6 +65,8 @@ import {
   type RosterEntry,
   type UpOptions,
   unsafeEntryReason,
+  writeRotateRequest,
+  readRotateRequests,
 } from './index.js';
 import { executorStart } from './executor-start.js';
 import { isNodeInstalled, paneNodeVersion, readNvmrc } from './node-pin.js';
@@ -2444,6 +2446,48 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
     await expect(
       hierarchyRestart({ session: alpha, callerName: Q('executor-beta') }, deps),
     ).resolves.toMatchObject({ name: alpha });
+  });
+
+  describe('busy planner and handoff (AISDLC-1150)', () => {
+    const planner = Q('planner');
+    const markBusy = () => {
+      for (const f of readdirSync(registryDir)) {
+        const file = path.join(registryDir, f);
+        const rec = JSON.parse(readFileSync(file, 'utf8')) as { name: string };
+        if (rec.name === planner) writeFileSync(file, JSON.stringify({ ...rec, status: 'busy' }));
+      }
+    };
+
+    it('refuses a busy planner naming cli-hierarchy clear, and stops nothing', async () => {
+      markBusy();
+      await expect(hierarchyRestart({ session: planner }, deps)).rejects.toThrow(
+        new RegExp(`cli-hierarchy clear ${planner}`),
+      );
+      expect(fake.calls.some((c) => c.args[0] === 'send-keys')).toBe(false);
+    });
+
+    it('restarts a busy planner with force, writing the handoff before the stop', async () => {
+      markBusy();
+      const result = await hierarchyRestart({ session: planner, force: true }, deps);
+      expect(result.handoff).toBeTruthy();
+      expect(existsSync(result.handoff as string)).toBe(true);
+      expect(result.handoffError).toBeUndefined();
+    });
+
+    it('status shows the pending rotate request and its age', async () => {
+      writeRotateRequest(boardDir, planner, new Date(NOW.getTime() - 90_000));
+      const row = hierarchyStatus(deps).rows.find((r) => r.entry.name === planner);
+      expect(row?.rotateRequest).toMatchObject({ ageSec: 90 });
+      expect(formatStatus(hierarchyStatus(deps)).join('\n')).toContain(
+        `rotate requested of ${planner} 90 s ago`,
+      );
+      expect(readRotateRequests(boardDir)[planner]).toBeTruthy();
+    });
+
+    it('restarts an idle planner and records the handoff path', async () => {
+      const result = await hierarchyRestart({ session: planner }, deps);
+      expect(result.handoff).toBeTruthy();
+    });
   });
 
   it('refuses a caller that restarts its own session (AISDLC-1110)', async () => {

@@ -43,6 +43,7 @@ import {
   WAKE_PENDING_SEC,
   type LoopDeps,
   type SessionHealth,
+  ROTATE_GRACE_TICKS,
 } from './dispatch-loop.js';
 import type { PlaybookOutcome } from './playbook.js';
 import { writeRestartRequest } from './restart-lock.js';
@@ -1495,16 +1496,85 @@ describe('deterministic restarts (AISDLC-1110)', () => {
     expect(restarted).toEqual(['executor-beta']);
   });
 
-  it('restarts an over-context planner on the second tick but never the dispatch session', async () => {
+  it('asks an over-context planner to rotate on the second tick, never the dispatch session (AISDLC-1150)', async () => {
+    const rotated: string[] = [];
+    const d = () =>
+      deps({
+        sessions: () => health,
+        restartSession: async (name) => {
+          restarted.push(name);
+          return { ok: true };
+        },
+        requestRotate: async (name) => {
+          rotated.push(name);
+          return { ok: true };
+        },
+      });
     health = [
       { name: 'planner', role: 'planner', state: 'busy', overThreshold: true },
       { name: 'operator-dispatch', role: 'operator-dispatch', state: 'busy', overThreshold: true },
     ];
-    await runDispatchTick(restartDeps());
+    await runDispatchTick(d());
+    expect(rotated).toEqual([]);
+    const r = await runDispatchTick(d());
+    expect(rotated).toEqual(['planner']);
     expect(restarted).toEqual([]);
-    const r = await runDispatchTick(restartDeps());
+    expect(r.restarts).toEqual([
+      { session: 'planner', cause: 'over-context', status: 'requested-rotate' },
+    ]);
+    // a busy session is never hard-restarted, however long the grace has lapsed
+    for (let i = 0; i < ROTATE_GRACE_TICKS + 2; i++) await runDispatchTick(d());
+    expect(restarted).toEqual([]);
+    expect(rotated).toEqual(['planner']);
+    // idle and still over after the grace: the last resort
+    health = [{ name: 'planner', role: 'planner', state: 'idle', overThreshold: true }];
+    await runDispatchTick(d());
     expect(restarted).toEqual(['planner']);
-    expect(r.restarts?.[0]).toMatchObject({ session: 'planner', cause: 'over-context' });
+  });
+
+  it('hard-restarts an idle over-context session only after the grace lapses; recovery resets (AISDLC-1150)', async () => {
+    const d = () =>
+      deps({
+        sessions: () => health,
+        restartSession: async (name) => {
+          restarted.push(name);
+          return { ok: true };
+        },
+        requestRotate: async () => ({ ok: true }),
+      });
+    health = [{ name: 'planner', role: 'planner', state: 'idle', overThreshold: true }];
+    await runDispatchTick(d());
+    await runDispatchTick(d());
+    for (let i = 0; i < ROTATE_GRACE_TICKS - 2; i++) await runDispatchTick(d());
+    expect(restarted).toEqual([]);
+    health = [{ name: 'planner', role: 'planner', state: 'idle' }];
+    await runDispatchTick(d());
+    health = [{ name: 'planner', role: 'planner', state: 'idle', overThreshold: true }];
+    await runDispatchTick(d());
+    await runDispatchTick(d());
+    expect(restarted).toEqual([]);
+    for (let i = 0; i < ROTATE_GRACE_TICKS; i++) await runDispatchTick(d());
+    expect(restarted).toEqual(['planner']);
+  });
+
+  it('reports a failed rotate request and leaves a marker for status (AISDLC-1150)', async () => {
+    const d = (ok: boolean) =>
+      deps({
+        sessions: () => health,
+        restartSession: async () => ({ ok: true }),
+        requestRotate: async () => (ok ? { ok } : { ok, reason: 'not in roster' }),
+      });
+    health = [{ name: 'planner', role: 'planner', state: 'busy', overThreshold: true }];
+    await runDispatchTick(d(false));
+    const r = await runDispatchTick(d(false));
+    expect(r.restarts?.[0]).toMatchObject({ status: 'failed', reason: 'not in roster' });
+  });
+
+  it('restarts an over-context session directly when no rotate path is wired', async () => {
+    health = [{ name: 'planner', role: 'planner', state: 'idle', overThreshold: true }];
+    await runDispatchTick(restartDeps());
+    await runDispatchTick(restartDeps());
+    expect(restarted).toEqual(['planner']);
   });
 
   it('consumes a restart-request file as a restart on the next tick and removes it', async () => {
