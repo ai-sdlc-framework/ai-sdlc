@@ -422,6 +422,15 @@ export function newRoutingLines(stdout: string): string[] {
       lines.push(`#${a.pr}${a.note ? ` ${String(a.note)}` : ''}`.slice(0, 500));
     }
   }
+  // AISDLC-1156: a routing unchanged past the threshold is a stall, reported once per window.
+  for (const st of (report?.stalls ?? []) as Any[]) {
+    lines.push(
+      `#${st.pr} stalled ${st.ageMinutes} min${st.note ? `: ${String(st.note)}` : ''}`.slice(
+        0,
+        500,
+      ),
+    );
+  }
   if (report?.routed?.action === 'route-to-planner') {
     lines.push(String(report.routed.text ?? '').slice(0, 500));
   }

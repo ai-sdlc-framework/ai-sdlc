@@ -57,7 +57,15 @@ import {
   type EphemeralReport,
 } from './ephemeral-tick.js';
 import { runWebhookHealthTick, type WebhookHealthTickDeps } from './webhook-health.js';
-import { checkDrainStall, formatDrainStall, resolveStallAfterMinutes } from './drain-stall.js';
+import {
+  checkDrainStall,
+  checkStuckPrs,
+  formatDrainStall,
+  formatStuckPr,
+  resolveStallAfterMinutes,
+  resolveStuckAfterMinutes,
+  type StuckPrRecord,
+} from './drain-stall.js';
 import { runBudgetPacer, type UsageDeps } from './budget.js';
 import { readHold, type Hold } from './hold.js';
 import {
@@ -484,6 +492,14 @@ export interface LoopDeps {
   };
   /** Webhook health (AISDLC-1157); absent means no check runs. `boardDir` and `now` default to this tick's own. */
   webhookHealth?: Omit<WebhookHealthTickDeps, 'boardDir' | 'now'>;
+  /**
+   * Stuck-PR stall (AISDLC-1156, DEC-0291). On opening a `stuck-pr` stall the tick files one timeboxed
+   * operational Decision and raises one operator notification; both are optional and each failure is contained.
+   */
+  stuckPr?: {
+    fileDecision?: (r: StuckPrRecord) => string;
+    notify?: (r: StuckPrRecord) => void;
+  };
   /** Idle executors holding no inflight task (AISDLC-1101); absent means no drain-stall check runs. */
   idleExecutors?: () => string[];
   /** Who runs this tick; the scheduler stands in for a silent host (AISDLC-1096). Default host. */
@@ -1180,6 +1196,27 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     } catch {
       /* a health check failure must not stop the dispatch loop */
     }
+  }
+  try {
+    const minutes = resolveStuckAfterMinutes(deps.boardDir);
+    const stuck = checkStuckPrs({
+      boardDir: deps.boardDir,
+      now: deps.now,
+      minutes,
+      ...(deps.stuckPr?.fileDecision ? { fileDecision: deps.stuckPr.fileDecision } : {}),
+      ...(deps.stuckPr?.notify ? { notify: deps.stuckPr.notify } : {}),
+    });
+    for (const r of stuck.opened) {
+      reports.push({ kind: 'drain-stall', text: formatStuckPr(r, minutes) });
+    }
+    for (const r of stuck.closed) {
+      reports.push({
+        kind: 'progress',
+        text: `stuck-pr closed: #${r.pr} (${r.taskId}) is delivered, landed or re-queued`,
+      });
+    }
+  } catch {
+    /* a detector failure must not stop the dispatch loop */
   }
   let humanAttention: HumanAttentionRow[] = [];
   try {

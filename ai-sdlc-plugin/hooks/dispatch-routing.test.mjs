@@ -28,6 +28,20 @@ test('newRoutingLines reports a routed entry and ignores unrelated actions', () 
   assert.deepEqual(newRoutingLines(json({ acted: [{ pr: 1, action: 'rebase' }] })), []);
 });
 
+test('newRoutingLines reports a stalled routing once per window (AISDLC-1156)', () => {
+  const out = json({
+    acted: [],
+    stalls: [
+      { pr: 2282, ageMinutes: 61, note: 'unowned: draft' },
+      { pr: 9, ageMinutes: 70 },
+    ],
+  });
+  assert.deepEqual(newRoutingLines(out), [
+    '#2282 stalled 61 min: unowned: draft',
+    '#9 stalled 70 min',
+  ]);
+});
+
 test('newRoutingLines reads the JSON after a leading log line', () => {
   const out = `reconciling...\n${json({ acted: [{ pr: 3, action: 'route-to-planner' }] })}\n`;
   assert.deepEqual(newRoutingLines(out), ['#3']);

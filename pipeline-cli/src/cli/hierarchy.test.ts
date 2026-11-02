@@ -23,7 +23,7 @@ import {
   type IdentityDeps,
   type RosterEntry,
 } from '../hierarchy/index.js';
-import { writeVerdict } from '../dispatch/board.js';
+import { collectVerdicts, writeVerdict } from '../dispatch/board.js';
 import { defaultHierarchyDeps, firstPositional, runHierarchyCli } from './hierarchy.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
@@ -735,6 +735,105 @@ describe('clear, tick and route-decision', () => {
         outcome: { action: 'rebase-push', result: 'done' },
       });
       expect(git.some((a) => a[0] === 'push' && a.includes('--force-with-lease'))).toBe(true);
+    });
+  });
+
+  describe('playbook finishes a repaired push (AISDLC-1156)', () => {
+    const HEAD = 'a'.repeat(40);
+    const go = async (
+      verify: { ok: boolean; reason?: string },
+      ghDraft = true,
+    ): Promise<number> => {
+      seedBoardWithBrief();
+      const boardDir = path.join(tmp, 'dispatch');
+      writeVerdict(boardDir, {
+        schemaVersion: 'v1',
+        taskId: 'AISDLC-9',
+        outcome: 'failed',
+        cause: 'push-non-fast-forward',
+        completedAt: '2026-11-02T12:00:00.000Z',
+        workerId: 'executor-alpha',
+        signedAt: '2026-11-02T11:00:00.000Z',
+        prNumber: 2282,
+      });
+      mkdirSync(path.join(tmp, '.worktrees', 'aisdlc-9'), { recursive: true });
+      vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      return runHierarchyCli(
+        [
+          'playbook',
+          '--worker',
+          'operator-dispatch',
+          '--task',
+          'AISDLC-9',
+          '--action',
+          'rebase-push',
+          '--work-dir',
+          tmp,
+        ],
+        overrides(),
+        {
+          identity: asCaller('operator-dispatch'),
+          operational: new Set(['rebase-own-branch', 'lease-push-own-branch']),
+          lease: { ...lease, forcePushMode: 'leaseOnOwnBranch' as const, ownWorktree: () => null },
+          gitRun: (_f, a) => ({
+            status: 0,
+            stdout:
+              a[0] === 'branch'
+                ? 'ai-sdlc/aisdlc-9-slug\n'
+                : a[0] === 'rev-parse'
+                  ? `${HEAD}\n`
+                  : '',
+            stderr: '',
+          }),
+          verifyAttestation: () => verify,
+          ghRun: (_f, a) => ({
+            status: 0,
+            stdout: a[1] === 'view' ? JSON.stringify({ isDraft: ghDraft }) : '',
+            stderr: '',
+          }),
+        },
+      );
+    };
+
+    it('delivers: writes a success verdict and moves the failed one to history', async () => {
+      expect(await go({ ok: true })).toBe(0);
+      const boardDir = path.join(tmp, 'dispatch');
+      expect(JSON.parse(logs.at(-1) as string).outcome).toMatchObject({ delivered: true });
+      const done = collectVerdicts(boardDir).filter((v) => v.taskId === 'AISDLC-9');
+      expect(done).toHaveLength(1);
+      expect(done[0]).toMatchObject({ outcome: 'success', prNumber: 2282, commitSha: HEAD });
+      expect(existsSync(path.join(boardDir, 'failed', 'history'))).toBe(true);
+    });
+
+    it('escalates and keeps the failed verdict when verification fails', async () => {
+      expect(await go({ ok: false, reason: 'bad' })).toBe(1);
+      const left = collectVerdicts(path.join(tmp, 'dispatch')).filter(
+        (v) => v.taskId === 'AISDLC-9',
+      );
+      expect(left.map((v) => v.outcome)).toEqual(['failed']);
+    });
+  });
+
+  describe('status --check (AISDLC-1156)', () => {
+    it('exits 1 only when a stuck entry is older than the threshold', async () => {
+      const boardDir = path.join(tmp, 'dispatch');
+      writeVerdict(boardDir, {
+        schemaVersion: 'v1',
+        taskId: 'AISDLC-1153',
+        outcome: 'failed',
+        cause: 'push-non-fast-forward',
+        completedAt: '2026-01-01T00:00:00.000Z',
+        workerId: 'executor-alpha',
+        signedAt: '2026-01-01T00:00:00.000Z',
+        prNumber: 2282,
+      });
+      expect(await runHierarchyCli(['status'], overrides())).toBe(0);
+      expect(logs.some((l) => l.startsWith('stuck:'))).toBe(true);
+      expect(await runHierarchyCli(['status', '--check'], overrides())).toBe(1);
+    });
+
+    it('exits 0 with --check when nothing is stuck', async () => {
+      expect(await runHierarchyCli(['status', '--check'], overrides())).toBe(0);
     });
   });
 

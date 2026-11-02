@@ -82,10 +82,20 @@ export {
   type LandReport,
 } from './land-eligible.js';
 export {
+  markPrReady,
   markReadyAfterCodeql,
   codeqlRunsOnPullRequests,
   type MarkReadyReport,
 } from './mark-ready.js';
+export {
+  checkStuckPrs,
+  listStuckPrs,
+  resolveStuckAfterMinutes,
+  resolveStuckTimeboxHours,
+  type StuckPrRecord,
+  type StuckPrRow,
+} from './drain-stall.js';
+export { buildStuckPrDecision, fileStuckPrDecision } from './stuck-pr-decision.js';
 export {
   checkSendTarget,
   readReceivedAddresses,
@@ -199,6 +209,7 @@ export {
   type Classification,
   type PlaybookAction,
   type PlaybookDeps,
+  type RepairFinishDeps,
   NAMED_STEPS,
   type PlaybookOutcome,
 } from './playbook.js';
@@ -228,6 +239,7 @@ export {
 export {
   formatAge,
   formatStatus,
+  hasStuckViolation,
   hierarchyStatus,
   type LiveState,
   type StatusResult,
@@ -295,6 +307,7 @@ export {
 export {
   DEFAULT_STALL_NOTICE_MINUTES,
   runStallNotice,
+  desktopNotice,
   type StallNoticeResult,
 } from './stall-notice.js';
 export { paneTail } from './tmux.js';

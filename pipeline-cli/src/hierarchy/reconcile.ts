@@ -126,6 +126,8 @@ export interface LandingRecord {
   lastActionAt?: string;
   /** AISDLC-1092: aged re-runs of `action` on this head; the head's attempts are capped. */
   agedAttempts?: number;
+  /** AISDLC-1156: times a routing with no state change re-escalated as a stall, once per threshold window. */
+  stalledRoutes?: number;
   delivered?: string;
   landed?: string;
   /** AISDLC-1158: the commit that landed, when known. */
@@ -501,6 +503,11 @@ export interface ReconcileReport {
   reported: { pr: number; title?: string }[];
   /** `route-to-planner` reports withheld this pass because the same key was already sent. */
   suppressed: number;
+  /**
+   * AISDLC-1156: routings that sat unchanged past `stuckAfterMinutes` and re-escalated as a stall (once
+   * per threshold window), not as a repeated message.
+   */
+  stalls: { pr: number; headSha?: string; note: string; ageMinutes: number }[];
   /** AISDLC-929: `main: RED at <sha>`, `main: green` or `main: unknown`; undefined when not checked. */
   main?: string;
   /** Set once per red sha: the item the tick routes to the planner. */
@@ -654,9 +661,11 @@ const AGING_EXEMPT_ACTIONS = new Set([
   'held',
   'ready-to-requeue',
   'wait-and-rerun',
-  'route-to-planner',
   'superseded-close',
 ]);
+
+/** AISDLC-1156 (DEC-0291): a routing with no state change this long re-escalates as a stall. */
+export const DEFAULT_ROUTE_STUCK_MINUTES = 60;
 
 /** When the record last acted or changed state: `lastActionAt`, else the last history entry. */
 export function recordLastActionAt(r: LandingRecord): string | undefined {
@@ -676,12 +685,21 @@ export interface ReconcileOpts {
    * Returns the superseding PR number when it closed the PR, else undefined.
    */
   closeSuperseded?: (pr: number) => number | undefined;
+  /** AISDLC-1156: minutes a `route-to-planner` may sit unchanged before it re-escalates as a stall; default 60. */
+  stuckAfterMinutes?: number;
 }
 
 /** Reconcile a set of PR facts: update the records and run the actions. Idempotent. */
 export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): ReconcileReport {
   const now = opts.now ?? clockNow;
-  const report: ReconcileReport = { records: [], acted: [], reported: [], suppressed: 0 };
+  const report: ReconcileReport = {
+    records: [],
+    acted: [],
+    reported: [],
+    suppressed: 0,
+    stalls: [],
+  };
+  const stuckMs = (opts.stuckAfterMinutes ?? DEFAULT_ROUTE_STUCK_MINUTES) * 60_000;
   if (opts.mainHealth) Object.assign(report, reportMainHealth(opts.boardDir, opts.mainHealth));
   const routeOnce = (pr: number, headSha: string | undefined, reason: string): boolean => {
     const first = firstRoute(opts.boardDir, pr, headSha, reason);
@@ -837,6 +855,41 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
           action: 'rerun-rate-limited',
           ran: r.ran,
           ...(r.note ? { note: r.note } : {}),
+        });
+        continue;
+      }
+      report.records.push(existing);
+      continue;
+    }
+    if (
+      unchanged &&
+      d.action === 'route-to-planner' &&
+      !existing.landed &&
+      !existing.closedUnlanded
+    ) {
+      // AISDLC-1156 (DEC-0291, RFC-0051 section 8 amendment): route-to-planner is not a terminal state.
+      // The first sighting is the one message (a routing record is written on every first route, the
+      // #2282 case); a routing unchanged for stuckAfterMinutes re-escalates once per window as a stall.
+      // Incidents: #2246 (AISDLC-1136), #2282 (AISDLC-1153).
+      if (routeOnce(f.prNumber, f.headSha, d.failingLine ?? d.state)) {
+        report.acted.push({ pr: f.prNumber, action: d.action, ran: false });
+        report.records.push(existing);
+        continue;
+      }
+      const last = Date.parse(recordLastActionAt(existing) ?? '');
+      if (Number.isFinite(last) && now().getTime() - last >= stuckMs) {
+        const updated: LandingRecord = {
+          ...existing,
+          lastActionAt: ts,
+          stalledRoutes: (existing.stalledRoutes ?? 0) + 1,
+        };
+        writeLanding(opts.boardDir, updated);
+        report.records.push(updated);
+        report.stalls.push({
+          pr: f.prNumber,
+          ...(f.headSha === undefined ? {} : { headSha: f.headSha }),
+          note: d.note ?? d.failingLine ?? d.state,
+          ageMinutes: Math.floor((now().getTime() - last) / 60_000),
         });
         continue;
       }

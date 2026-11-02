@@ -308,13 +308,13 @@ A final `unbriefed` line lists dispatchable open tasks under `backlog/tasks/` th
 brief and not on the board (nothing would ever queue them); write a brief for them.
 
 ```bash
-cli-hierarchy status [--json]
+cli-hierarchy status [--json] [--check]
 ```
 
 `--json` prints one JSON object: `{ "rows": [ { "entry": <roster entry>, "state": "...",
 "attached": true|false, "inflightTask": "AISDLC-N", "launchEnv": "ok|missing",
 "nodeVersion": "22.23.2", "nodeMismatch": true, "module": { "state": "loaded|refused|absent|stale", "reason": "..." }, "nextStep": "..." } ], "board": { "queued": n,
-"inflight": n, "done": n, "failed": n }, "webhook": { "state": "up", "port": n, "pid": n }, "scheduler": { "state": "up", "pid": n } }`. Read-only. Exit code `0`.
+"inflight": n, "done": n, "failed": n }, "webhook": { "state": "up", "port": n, "pid": n }, "scheduler": { "state": "up", "pid": n } }`. Read-only. Exit code `0`; with `--check` it exits `1` when a stuck entry is older than `stuckAfterMinutes` (see below).
 
 **Landing retires a failed verdict (AISDLC-1158).** The verdict an executor wrote is a step record; only landing makes a task done. When the reconcile pass marks a PR landed, it moves that task's `failed/<id>.verdict.json` and `failed/<id>.manifest.json` to `done/`, adding `landedSha`, `landedAt` and `supersededCause` and keeping the original failed verdict under `supersededVerdict`. So `status`, `brief-status` and the handoff count a repaired, landed task as done, not failed. `cli-dispatch retire-landed` applies the same move to existing stale entries; it is idempotent and prints `{ "moved": [ { "taskId", "pr" } ] }`.
 
@@ -328,6 +328,29 @@ did not run (`clear-and-wake-after-verdict`, `wake-after-ingest`, `claim` or `wa
 report to the planner. `cli-hierarchy status` prints the open stall as a `drain-stall:` line (and `drainStall` in
 `--json`). The record closes by itself when the board moves or the condition lapses. Nothing is recorded while
 the board is held.
+
+### Every failed verdict reaches a terminal state (AISDLC-1156, DEC-0291)
+
+A pipeline that depends on a human noticing a failure is a workflow failure. The tick checks one invariant
+(RFC-0051 section 8 amendment): every failed verdict ends in exactly one of (i) repaired and re-queued or
+delivered, (ii) a Decision Catalog entry with a timebox and an autonomous fallback, (iii) an operator
+notification with a deadline. A failed verdict that carries `signedAt` or a review record and a PR number, and
+is in none of those states past `stuckAfterMinutes` (default 60, set in `<board-dir>/config.json`), opens a
+`stuck-pr` stall (PR number, head sha, cause) in `<board-dir>/stuck-prs.json`. Opening it files one
+`operational` Decision with a timebox (`stuckDecisionTimeboxHours`, default 4) whose autonomous fallback is the
+repair command, raises one desktop notification and sends one `drain-stall` report to the planner. A second
+open on the same PR and head is a no-op; the stall closes when the PR is delivered, landed or re-queued.
+
+A repair that pushes a signed task PR finishes itself: after a successful `rebase-push` (or `drop-chores`) the
+playbook verifies the attestation at the pushed head, flips the PR ready through the shared mark-ready path,
+and writes a `delivered` verdict with `signedAt` and `prNumber`. The failed verdict moves to `failed/history/`.
+Any refusal (verify fails, mark-ready refused) escalates.
+
+`route-to-planner` is not a terminal state: a routing with no state change for `stuckAfterMinutes` re-escalates
+once per window as a stall in the reconcile report (`stalls`) and fires a desktop notification.
+`cli-hierarchy status` prints the stuck entries under a `stuck:` heading (PR, cause, age, which terminal
+states are missing: `repair-or-delivery`, `decision`, `notification`), and `cli-hierarchy status --check`
+exits `1` when any entry is older than `stuckAfterMinutes`.
 
 ### Stall thresholds (AISDLC-1103)
 

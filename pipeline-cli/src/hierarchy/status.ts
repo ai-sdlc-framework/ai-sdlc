@@ -49,7 +49,13 @@ import {
 } from './webhook.js';
 import { listWindows, paneInfo, paneStartCommand, sessionAttached } from './tmux.js';
 import { contextWarning, formatContext, sessionContextTokens } from './context-size.js';
-import { readOpenDrainStall, type DrainStallRecord } from './drain-stall.js';
+import {
+  listStuckPrs,
+  readOpenDrainStall,
+  resolveStuckAfterMinutes,
+  type DrainStallRecord,
+  type StuckPrRow,
+} from './drain-stall.js';
 import { budgetStatus, formatBudget, type BudgetStatus } from './budget.js';
 import { dynamicExecutors } from './ephemeral-tick.js';
 import { executorCap, formatExecutorCap, type ExecutorCap } from './executor-cap.js';
@@ -129,6 +135,13 @@ export interface StatusResult {
   quota?: Quota;
   /** The open drain stall (AISDLC-1101); absent when the drain is moving. */
   drainStall?: DrainStallRecord;
+  /**
+   * AISDLC-1156 (DEC-0291): failed verdicts with a signature or review that reached no terminal state
+   * (repaired and delivered, a timeboxed Decision, an operator notification).
+   */
+  stuck?: StuckPrRow[];
+  /** `stuckAfterMinutes` in force; `status --check` exits 1 when a stuck entry is older. */
+  stuckAfterMinutes?: number;
   /** Spawn errors of the last tick (AISDLC-1117). */
   spawnErrors?: { taskId: string; error: string }[];
   /** Worktree directories, how many the last sweep could not remove, and the alarm ceiling (AISDLC-1108). */
@@ -336,6 +349,12 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
   } catch {
     /* an unreadable health reading must not break status */
   }
+  let stuck: StuckPrRow[] = [];
+  try {
+    stuck = listStuckPrs(deps.boardDir, deps.now);
+  } catch {
+    /* an unreadable board must not break status */
+  }
   const lastTick = lastTickInfo(deps.boardDir, deps.now());
   const spawnErrors = readLoopState(deps.boardDir).lastSpawnErrors ?? [];
   const nowMs = deps.now().getTime();
@@ -354,6 +373,9 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     prTable: formatPrTable(deps.boardDir, nowMs),
     unowned: landings.filter((l) => l.owner === 'unowned').length,
     ...(drainStall ? { drainStall } : {}),
+    ...(stuck.length > 0
+      ? { stuck, stuckAfterMinutes: resolveStuckAfterMinutes(deps.boardDir) }
+      : {}),
     ...(spawnErrors.length > 0 ? { spawnErrors } : {}),
     ...(Object.keys(ghCallsPerHour).length > 0 ? { ghCallsPerHour } : {}),
     ...(quota ? { quota } : {}),
@@ -411,6 +433,16 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
         `drain-stall: open since ${result.drainStall.since}, stalled stage ${result.drainStall.stage}, ${result.drainStall.eligible} eligible queued, idle ${result.drainStall.idleExecutors.join(', ')}`,
       ]
     : [];
+  const stuckLines =
+    result.stuck && result.stuck.length > 0
+      ? [
+          'stuck:',
+          ...result.stuck.map(
+            (r) =>
+              `  PR #${r.pr} (${r.taskId}): ${r.cause}, age ${r.ageMinutes}m, missing ${r.missing.join(', ')}`,
+          ),
+        ]
+      : [];
   const unownedLine = `unowned PRs: ${result.unowned ?? 0}`;
   const agedLines = (result.agedPrs ?? []).map(
     (a) =>
@@ -430,6 +462,8 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       ...unbriefed,
       ...blockedLines,
       ...stallLines,
+      ...stuckLines,
+      ...stuckLines,
       unownedLine,
       ...agedLines,
       ...(result.prTable ?? []),
@@ -555,4 +589,10 @@ export function contextWarnings(result: StatusResult): string[] {
     ];
   });
   return [...over, ...disagree];
+}
+
+/** True when any stuck entry is older than the threshold; `cli-hierarchy status --check` exits 1 on it. */
+export function hasStuckViolation(result: StatusResult): boolean {
+  const limit = result.stuckAfterMinutes ?? Number.POSITIVE_INFINITY;
+  return (result.stuck ?? []).some((r) => r.ageMinutes > limit);
 }

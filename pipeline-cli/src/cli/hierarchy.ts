@@ -75,10 +75,12 @@ import { promoteExpiredDecisions } from '../decisions/escalation-chain.js';
 import { isDecisionCatalogEnabled } from '../decisions/feature-flag.js';
 import { persistDecisionLog } from '../decisions/remote-persist.js';
 import {
+  archiveFailedVerdict,
   collectVerdicts,
   DEFAULT_BOARD_DIR,
   peekQueueOrder,
   TASK_ID_RE,
+  writeVerdict,
 } from '../dispatch/board.js';
 import { sanitizeVerdict } from '../dispatch/verdict-fields.js';
 import { enqueueTasks, type EnqueueEntry } from '../dispatch/enqueue.js';
@@ -125,6 +127,7 @@ import {
   notifyDispatch,
   type BriefSender,
   formatStatus,
+  hasStuckViolation,
   hierarchyAttach,
   hierarchyDown,
   hierarchyRegister,
@@ -135,8 +138,13 @@ import {
   hierarchyTerminals,
   hierarchyUp,
   loadOperationalPolicy,
+  markPrReady,
   markReadyAfterCodeql,
   codeqlRunsOnPullRequests,
+  buildStuckPrDecision,
+  fileStuckPrDecision,
+  resolveStuckTimeboxHours,
+  desktopNotice,
   createLander,
   landEligiblePrs,
   readMergeAuthors,
@@ -161,6 +169,7 @@ import {
   runPlaybook,
   NAMED_STEPS,
   type PlaybookDeps,
+  type RepairFinishDeps,
   runStallNotice,
   DEFAULT_STALL_NOTICE_MINUTES,
   SAFE_SESSION_NAME,
@@ -270,6 +279,7 @@ Options for up:
 
 Options for status:
   --json                   Print machine-readable output
+  --check                  Exit 1 when a failed verdict has been in no terminal state longer than stuckAfterMinutes
 
 Options for stall-notice:
   --minutes <n>            Minutes without a verdict or heartbeat before alerting (default 45)
@@ -645,6 +655,8 @@ export async function runHierarchyCli(
     repoGit?: GitRunner;
     /** Replaces the board enqueue (tests). */
     enqueue?: (entries: EnqueueEntry[]) => string[];
+    /** Replaces the attestation verification of a repaired push (tests). */
+    verifyAttestation?: RepairFinishDeps['verify'];
     /** Replaces the `gh` runner the mark-ready pass uses (tests). */
     ghRun?: CommandRunner;
     /** Replaces the landing pass of the `land-eligible-prs` action (tests). */
@@ -727,6 +739,34 @@ export async function runHierarchyCli(
       emit,
       workerId: worker,
       correctBranch: (id, b) => void correctManifestBranch(deps.boardDir, id, b),
+      finish: {
+        verify:
+          extras.verifyAttestation ??
+          (({ worktree, headSha, baseSha }) => {
+            const r = deps.run(
+              'node',
+              [
+                path.join(repoRoot, 'pipeline-cli', 'bin', 'cli-attestation.mjs'),
+                'verify',
+                '--head',
+                headSha,
+                '--base',
+                baseSha,
+              ],
+              { cwd: worktree },
+            );
+            const out = r?.stdout ?? '';
+            const ok = r?.status === 0 && /^status=valid$/m.test(out);
+            const reason = /^reason=(.*)$/m.exec(out)?.[1] ?? (r?.stderr ?? '').split('\n')[0];
+            return { ok, ...(ok ? {} : { reason: reason || 'verifier failed' }) };
+          }),
+        markReady: (pr) => markPrReady(extras.ghRun ?? deps.run, repoRoot, pr),
+        deliver: (delivered) => {
+          archiveFailedVerdict(deps.boardDir, delivered.taskId, deps.now());
+          writeVerdict(deps.boardDir, delivered);
+        },
+        now: deps.now,
+      },
     });
     return { operational, emit, playbookDeps };
   };
@@ -799,7 +839,8 @@ export async function runHierarchyCli(
           for (const line of formatStatus(result, deps.now().getTime())) deps.log(line);
           for (const s of slots) deps.log(`verify slot ${s.index}: held by pid ${s.pid ?? '?'}`);
         }
-        return 0;
+        // AISDLC-1156: a failed verdict in no terminal state past stuckAfterMinutes fails the check.
+        return flags.check === 'true' && hasStuckViolation(result) ? 1 : 0;
       }
       case 'stall-notice': {
         const minutes = intFlag(flags, 'minutes');
@@ -1495,6 +1536,21 @@ export async function runHierarchyCli(
                   }),
               }
             : {}),
+          stuckPr: {
+            fileDecision: (r) =>
+              isDecisionCatalogEnabled()
+                ? fileStuckPrDecision(
+                    repoRoot,
+                    buildStuckPrDecision(r, resolveStuckTimeboxHours(deps.boardDir)),
+                    deps.now(),
+                  )
+                : '',
+            notify: (r) =>
+              desktopNotice(
+                deps.run,
+                `PR #${r.pr} (${r.taskId}) is stuck after a failed verdict (${r.cause}) with no repair, decision or delivery`,
+              ),
+          },
           promoteExpired: () =>
             isDecisionCatalogEnabled()
               ? promoteExpiredDecisions(
