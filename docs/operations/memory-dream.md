@@ -56,3 +56,13 @@ Apply takes a lock, so two applies cannot run at once. It detects notes added or
 - Update the existing note instead of adding a new one that restates or corrects it.
 - Put finished work and one-off state in a note you can archive, not in a standing rule.
 - Make the index line say when the note applies.
+
+## Backup and recovery (AISDLC-1131)
+
+The memory folder is the agents' institutional memory and lives outside git, so it is copied, not committed.
+
+- **Backup location:** `~/.ai-sdlc/memory-backups/<repo-id>/<YYYY-MM-DD>/`, where `<repo-id>` is the checkout folder name plus a short hash of its absolute path. `cli-hierarchy up` takes at most one copy per day and keeps the newest fourteen. Run it by hand with `cli-memory-dream backup`.
+- **Warning:** `cli-hierarchy up` prints a one-line warning when `MEMORY.md` is missing from the memory folder and a backup exists. Restore with `cp -R <backup-dir>/. <memory-dir>/`.
+- **Rebuild from transcripts:** `cli-memory-dream recover --from-transcripts <projects-dir>` (for example `~/.claude/projects`) replays `Write`, `Edit` and full `Read` records for `memory/*.md` files, oldest transcript first, into `<memory>.dream-<stamp>/` with a report. It lists the index entries that have no recoverable body. Review the folder, then `cli-memory-dream apply <folder>`; `cli-memory-dream undo` reverts. Live notes the transcripts lack are carried into the output; a transcript record replaces a live note of the same name, so review before applying.
+
+Incident that motivated this: [2026-10-30 parent checkout deleted](incidents/2026-10-30-parent-checkout-deleted-by-pre-push-coverage-gate.md).
