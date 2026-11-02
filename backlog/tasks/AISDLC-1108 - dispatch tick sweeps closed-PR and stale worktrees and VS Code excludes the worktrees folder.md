@@ -70,6 +70,6 @@ Evidence (2026-10-29 ~05:00Z): `df -h /` 926Gi size, 554Mi free, 97% used; `.wor
 
 ## Implementation Notes
 
-Test command: `pnpm test` (root). Summary lines: `pipeline-cli test:  Test Files  575 passed (575)`, `Tests  12581 passed | 13 skipped (12594)`; plugin node tests `node --test ai-sdlc-plugin/commands/cleanup.test.mjs ai-sdlc-plugin/commands/no-bare-paths.test.mjs`: `# pass 11`, `# fail 0` (after updating cleanup.test.mjs for the new body). `pnpm build`, `pnpm lint`, `pnpm format:check` clean.
+Test command: `pnpm test` (root; re-verified with `pnpm --filter @ai-sdlc/pipeline-cli test`, an earlier red run was not reproducible and is attributed to a vitest-cache ENOTEMPTY flake). Summary lines: `pipeline-cli test:  Test Files  581 passed (581)`, `Tests  12633 passed | 13 skipped (12646)`; plugin node tests `node --test ai-sdlc-plugin/commands/cleanup.test.mjs ai-sdlc-plugin/commands/no-bare-paths.test.mjs`: `# pass 11`, `# fail 0` (after updating cleanup.test.mjs for the new body). `pnpm build`, `pnpm lint`, `pnpm format:check` clean.
 
 Design notes: the last-sweep summary and the every-N-ticks counter live under `.git/` (never an untracked parent file, which Step 0.5 would stop on). A branch with no PR inside the grace window returns `keep-inflight`. A failed PR lookup keeps the worktree. `cli-hierarchy sweep-worktrees [--dry-run]` is the entry `/ai-sdlc:cleanup` calls.
