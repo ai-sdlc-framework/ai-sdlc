@@ -391,6 +391,50 @@ describe('Step 11 resume', () => {
     });
   });
 
+  describe('stale recorded lease (AISDLC-1154)', () => {
+    const HEAD_SHA = 'c'.repeat(40);
+    const NEW_REMOTE = 'd'.repeat(40);
+    const stale = fail('! [rejected] b -> b (stale info)', 1);
+    const run = async (remoteIsAncestor: boolean) => {
+      const fake = new FakeRunner()
+        .on(/^git rev-parse HEAD$/, ok(HEAD_SHA + '\n'))
+        .on(/^git rev-parse refs\/remotes/, ok(NEW_REMOTE + '\n'))
+        .on(
+          (c, a) => c === 'git' && a[0] === 'merge-base' && a[a.length - 1] === 'HEAD',
+          remoteIsAncestor ? ok() : fail('', 1),
+        )
+        .on((c, a) => c === 'git' && a[0] === 'merge-base', fail('', 1))
+        .on(/^git push -u --force-with-lease/, stale)
+        .on(/^gh pr list/, ok('[]'))
+        .on(/^gh pr create/, ok('https://github.com/x/y/pull/15\n'));
+      const r = await pushAndPr({ ...common(), resume: true, runner: fake.toRunner() });
+      return { r, fake };
+    };
+
+    it('falls back to a plain push when the remote head is an ancestor of HEAD', async () => {
+      const { r, fake } = await run(true);
+      expect(r).toEqual({ pushed: true, prUrl: 'https://github.com/x/y/pull/15' });
+      const pushes = fake.calls.filter((c) => c.args[0] === 'push').map((c) => c.args);
+      expect(pushes[pushes.length - 1]).toEqual([
+        'push',
+        '-u',
+        'origin',
+        `HEAD:refs/heads/${BRANCH}`,
+      ]);
+      expect(fake.calls.some((c) => c.command === 'gh' && c.args[1] === 'create')).toBe(true);
+    });
+
+    it('still aborts, naming both shas, when the remote head is not an ancestor', async () => {
+      const { r, fake } = await run(false);
+      expect(r.pushed).toBe(false);
+      expect(r.reason).toContain(NEW_REMOTE);
+      expect(r.reason).toContain(HEAD_SHA);
+      expect(r.reason).toContain('human must reconcile');
+      expect(r.reason).not.toContain('delete the remote branch');
+      expect(fake.calls.filter((c) => c.args[0] === 'push')).toHaveLength(1);
+    });
+  });
+
   it('a first run pushes without a lease, as before', async () => {
     const fake = new FakeRunner().on(/^gh pr create/, ok('https://github.com/x/y/pull/1\n'));
     await pushAndPr({ ...common(), runner: fake.toRunner() });

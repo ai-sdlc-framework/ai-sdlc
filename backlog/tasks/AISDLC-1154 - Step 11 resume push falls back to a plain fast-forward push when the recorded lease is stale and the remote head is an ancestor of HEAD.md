@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1154
 title: 'Step 11 resume push falls back to a plain fast-forward push when the recorded lease is stale and the remote head is an ancestor of HEAD: signed task PRs stop stranding as drafts after a developer push mid-run'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-02'
 labels:

@@ -387,6 +387,46 @@ async function leasePushOwnRebase(
 }
 
 /**
+ * AISDLC-1154: a fast-forward push cannot clobber anything, so it needs no lease. On a resumed
+ * run the lease recorded at Step 3 goes stale when the developer subagent pushes mid-run; fetch
+ * `origin/<branch>` and, when it is an ancestor of HEAD, push plainly. Returns the push result
+ * plus the observed shas, or `remote: null` when the remote head could not be read.
+ */
+async function fastForwardPush(
+  opts: PushAndPrStepOptions,
+  runner: Runner,
+): Promise<{
+  result: Awaited<ReturnType<Runner>> | null;
+  remote: string | null;
+  head: string | null;
+}> {
+  const cwd = opts.worktreePath;
+  const fetched = await runner('git', ['fetch', 'origin', opts.branch], {
+    cwd,
+    allowFailure: true,
+  });
+  if (fetched.code !== 0) return { result: null, remote: null, head: null };
+  const rev = async (ref: string): Promise<string | null> => {
+    const r = await runner('git', ['rev-parse', ref], { cwd, allowFailure: true });
+    const sha = r.code === 0 ? r.stdout.trim() : '';
+    return /^[0-9a-f]{40,64}$/i.test(sha) ? sha : null;
+  };
+  const remote = await rev(`refs/remotes/origin/${opts.branch}`);
+  const head = await rev('HEAD');
+  if (!remote) return { result: null, remote: null, head };
+  const ancestor = await runner('git', ['merge-base', '--is-ancestor', remote, 'HEAD'], {
+    cwd,
+    allowFailure: true,
+  });
+  if (ancestor.code !== 0) return { result: null, remote, head };
+  const result = await runner('git', ['push', '-u', 'origin', `HEAD:refs/heads/${opts.branch}`], {
+    cwd,
+    allowFailure: true,
+  });
+  return { result, remote, head };
+}
+
+/**
  * AISDLC-1138: the developer subagent may already have pushed the branch, so the first push of
  * this run can meet a remote head that the late rebase made non-fast-forward. When
  * `origin/<branch>` exists and the trusted policy permits a lease push to the task's own branch,
@@ -610,21 +650,31 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
     cwd: opts.worktreePath,
     allowFailure: true,
   });
-  if (pushResult.code !== 0 && /non-fast-forward|rejected/i.test(pushResult.stderr)) {
+  let diverged: { remote: string; head: string | null } | null = null;
+  if (pushResult.code !== 0 && /non-fast-forward|rejected|stale info/i.test(pushResult.stderr)) {
     // AISDLC-1016: the remote may hold only the pre-rebase copy of this very branch.
     const retry = await leasePushOwnRebase(opts, runner, preRebaseSha);
     if (retry) pushResult = retry;
+    else if (opts.resume) {
+      // AISDLC-1154: stale recorded lease, remote head an ancestor of HEAD: plain fast-forward.
+      const ff = await fastForwardPush(opts, runner);
+      if (ff.result) pushResult = ff.result;
+      else if (ff.remote) diverged = { remote: ff.remote, head: ff.head };
+    }
   }
   if (pushResult.code !== 0) {
     const stderr = pushResult.stderr.trim();
-    const reason = /non-fast-forward|rejected/i.test(stderr)
-      ? first.policyNever
-        ? `non-fast-forward push to '${opts.branch}' refused: origin already holds this branch and the role ` +
-          `(spec.governance.allowForcePush: never in .ai-sdlc/agent-role.yaml) forbids a lease push; ` +
-          `set it to 'leaseOnOwnBranch' or 'lease', or ask the operator to reconcile the remote branch`
-        : `non-fast-forward push to '${opts.branch}'; cleanup is to delete the remote branch and rerun, ` +
-          `but that's destructive — confirm with the operator first`
-      : `git push failed: ${stderr || pushResult.stdout.trim() || 'unknown error'}`;
+    const reason = diverged
+      ? `non-fast-forward push to '${opts.branch}': remote head ${diverged.remote} is not an ancestor of ` +
+        `local head ${diverged.head ?? 'unknown'}; a human must reconcile the two histories`
+      : /non-fast-forward|rejected|stale info/i.test(stderr)
+        ? first.policyNever
+          ? `non-fast-forward push to '${opts.branch}' refused: origin already holds this branch and the role ` +
+            `(spec.governance.allowForcePush: never in .ai-sdlc/agent-role.yaml) forbids a lease push; ` +
+            `set it to 'leaseOnOwnBranch' or 'lease', or ask the operator to reconcile the remote branch`
+          : `non-fast-forward push to '${opts.branch}'; cleanup is to delete the remote branch and rerun, ` +
+            `but that's destructive — confirm with the operator first`
+        : `git push failed: ${stderr || pushResult.stdout.trim() || 'unknown error'}`;
     return { pushed: false, prUrl: null, reason };
   }
 
