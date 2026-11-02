@@ -57,7 +57,8 @@
  */
 
 import { fetchClosedUnmergedPrs } from '../kpi/closed-unmerged.js';
-import { executorCap } from '../hierarchy/executor-cap.js';
+import { executorCap, resolveExecutorsMax } from '../hierarchy/executor-cap.js';
+import { clearScaleCeiling, writeScaleCeiling } from '../hierarchy/scale.js';
 import { parseQuota, parseQuotaFloor } from '../hierarchy/gh-calls.js';
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
@@ -213,6 +214,7 @@ Commands:
   stall-notice  Alert once when queued work has not moved for N minutes (no relaunch, no model)
   webhook    Local GitHub webhook receiver: webhook up|down|status (needs AI_SDLC_WEBHOOK_SECRET)
   hold       Pause claims and relaunches, never reporting (--reason <text>); planner or operator only
+  scale      Set or clear the runtime executor ceiling (scale --max <n> --reason <text> | --clear); tightens only
   resume     Lift the hold set by hold (resume --budget: override the budget pacer for the window)
   canary     Drive a synthetic task through claim, verdict, clear and re-claim: canary run --no-pr
   usage      Sample the account usage windows into usage.json (never prints the token)
@@ -319,6 +321,11 @@ Options for demo:
 
 Options for hold:
   --reason <text>          Why the board is held (required); shown by tick and executor-start
+
+Options for scale:
+  --max <n>                Ceiling on spawned executors; refused above executors.max (env AI_SDLC_EXECUTORS_MAX or <board>/config.json)
+  --reason <text>          Why the ceiling is set (required with --max)
+  --clear                  Remove the ceiling
 
 Options for resume:
   --budget                 Override the budget pacer for the rest of the current windows (logged)
@@ -966,6 +973,41 @@ export async function runHierarchyCli(
         }
         return 0;
       }
+      case 'scale': {
+        const who = resolveCaller(
+          extras.identity ?? createSystemIdentity(deps.boardDir, extras.processLookup),
+        );
+        if (who && who.role === 'executor') {
+          process.stderr.write(
+            `cli-hierarchy scale: only the planner, dispatch or the operator may scale the board; this session is '${who.name}' (${who.role}).\n`,
+          );
+          return 1;
+        }
+        const by = who?.name ?? 'unresolved';
+        if (flags.clear === 'true') {
+          const lifted = clearScaleCeiling(deps.boardDir, by, deps.now().toISOString());
+          deps.log(JSON.stringify({ ok: true, cleared: lifted !== null }));
+          return 0;
+        }
+        const max = Number(flags.max);
+        const reason = flags.reason;
+        if (!Number.isInteger(max) || max < 1 || !reason || reason === 'true') {
+          process.stderr.write(
+            'cli-hierarchy scale: --max <positive integer> and --reason <text> are required (or --clear)\n',
+          );
+          return 2;
+        }
+        const configMax = resolveExecutorsMax(deps.boardDir, deps.env);
+        if (max > configMax) {
+          process.stderr.write(
+            `cli-hierarchy scale: --max ${max} is above executors.max ${configMax}; the runtime ceiling can only tighten. Raise executors.max (AI_SDLC_EXECUTORS_MAX or "executors": { "max" } in <board>/config.json) instead.\n`,
+          );
+          return 1;
+        }
+        writeScaleCeiling(deps.boardDir, { max, reason, since: deps.now().toISOString(), by });
+        deps.log(JSON.stringify({ ok: true, ceiling: { max, reason, by } }));
+        return 0;
+      }
       case 'usage': {
         const usageDeps = usageDepsOf(extras.usage, deps.now);
         const result = await fetchUsage(usageDeps);
@@ -1215,7 +1257,11 @@ export async function runHierarchyCli(
                   },
                   reapOrphans: () => reapOrphanExecutorSessions(deps),
                   // AISDLC-1076: min(executors.max, budget pacer allowance), read every tick.
-                  cap: () => executorCap(deps.boardDir, deps.now().getTime(), deps.env).cap,
+                  cap: (live) =>
+                    executorCap(deps.boardDir, deps.now().getTime(), deps.env, undefined, {
+                      resources: deps.resources(),
+                      live: live ?? 0,
+                    }).cap,
                 },
               }),
           // AISDLC-1130: once a day the board is tarred under ~/.ai-sdlc/board-backups/.

@@ -49,6 +49,7 @@ import {
   downRecordedExecutors,
   dynamicExecutors,
   isEphemeralWorker,
+  downIdleSurplus,
   reapOrphanSessions,
   spawnForEligibleClaims,
   sweepFinishedExecutors,
@@ -131,6 +132,8 @@ export interface LoopState {
   drainStartedAt?: string;
   /** Consecutive ticks a session met an auto-restart rule (AISDLC-1110); dropped when it stops. */
   restartStreak?: Record<string, number>;
+  /** Consecutive ticks the cap sat below the running executors (AISDLC-1083); the second downs the idle surplus. */
+  overCapTicks?: number;
 }
 
 /** A roster session as the restart rules see it (AISDLC-1110). */
@@ -203,6 +206,7 @@ export function readLoopState(boardDir: string): LoopState {
         ? { lastSpawnErrors: parsed.lastSpawnErrors }
         : {}),
       ...(parsed.restartStreak ? { restartStreak: parsed.restartStreak } : {}),
+      ...(typeof parsed.overCapTicks === 'number' ? { overCapTicks: parsed.overCapTicks } : {}),
     };
   } catch {
     return emptyState();
@@ -762,6 +766,7 @@ async function runEphemeralSteps(
   held: Hold | null,
   quotaSkip: TickResult['quotaSkip'],
   reap: () => Promise<StalledReport[]>,
+  state: LoopState,
 ): Promise<{ stalled: StalledReport[]; report?: EphemeralReport }> {
   const eph = deps.ephemeral;
   if (!eph || held) return { stalled: await reap() };
@@ -787,6 +792,18 @@ async function runEphemeralSteps(
     } catch {
       /* an unreadable queue must not stop the dispatch loop */
     }
+  }
+  // AISDLC-1083: the cap sat below the running executors for two ticks: down idle surplus only.
+  try {
+    const over =
+      dynamicExecutors(deps.boardDir).length > eph.cap(dynamicExecutors(deps.boardDir).length);
+    if (!over) delete state.overCapTicks;
+    else if ((state.overCapTicks = (state.overCapTicks ?? 0) + 1) >= 2) {
+      await downIdleSurplus(deps.boardDir, eph, new Set(deps.idleExecutors?.() ?? []), report);
+      delete state.overCapTicks;
+    }
+  } catch {
+    /* an unreadable roster must not stop the dispatch loop */
   }
   return { stalled, report };
 }
@@ -1005,10 +1022,17 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   const readGithub = !quotaSkip && !githubFresh;
   log.start('verdicts');
   const watch = await watchVerdicts(deps, state, held);
-  const ephemeral = await runEphemeralSteps(deps, watch.verdicts, held, quotaSkip, async () => {
-    const stalled = await checkStalls(deps, state, held);
-    return stalled;
-  });
+  const ephemeral = await runEphemeralSteps(
+    deps,
+    watch.verdicts,
+    held,
+    quotaSkip,
+    async () => {
+      const stalled = await checkStalls(deps, state, held);
+      return stalled;
+    },
+    state,
+  );
   const stalled = ephemeral.stalled;
   const restarts = await runRestarts(deps, state, held);
   state.drainStartedAt ??= deps.now().toISOString();
