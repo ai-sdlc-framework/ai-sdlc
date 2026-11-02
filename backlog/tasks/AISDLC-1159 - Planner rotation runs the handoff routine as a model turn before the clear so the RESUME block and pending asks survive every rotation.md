@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1159
 title: 'Planner rotation runs the handoff routine as a model turn before the clear, captures the last reply from the transcript, and resumes with it, so the RESUME block and pending operator asks survive every rotation'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-02'
 labels:

@@ -115,7 +115,7 @@ After every state change run
 The hierarchy hooks module rotates this session past 150k tokens (restart: `/ai-sdlc:planner`); after any clear run
 `handoff read --role planner` first and resume from it.
 
-**Handoff routine** (trigger: "handoff" or the "Context is at N%" warning, at the next turn boundary):
+**Handoff routine** (the hooks module runs it as a model turn at the end of the turn that crosses the rotation threshold, before the clear; the operator word "handoff" or the "Context is at N%" warning only triggers it earlier, at the next turn boundary):
 run `handoff write`, edit the file outside the markers with ONE `## RESUME HERE` block at the end
-(rulings, owed items, scheduled jobs, next ids, peer waits), then confirm `Handoff written: <path>. Safe to /clear.` Details and recall commands:
+(open rulings, owed items, pending operator asks with the absolute path of every scratchpad draft, next free task and decision ids, scheduled jobs, what each peer waits on), then confirm `Handoff written: <path>. Safe to /clear.` Details and recall commands:
 `docs/operations/cli-hierarchy.md`.

@@ -130,7 +130,11 @@ export const register = (on: Any, options?: Any): void => {
     setSwallowSink((line) => log(p, line));
     // A record carried by a rotation whose new session never reached a hook is stale: clear it here so it
     // cannot start an executor in an unrelated session. A live post-clear resume runs from the turn hooks.
-    if (!state.resumePending) await safe(() => p.storeSet(ROTATION_KEY, null));
+    // AISDLC-1159: keep it when the role NAMED IN THE RECORD still awaits its resume (a planner record is
+    // not wiped because the executor state holds no pending resume).
+    const record = (await safe(() => p.storeGet(ROTATION_KEY))).value as Any;
+    const awaiting = record?.role === 'planner' ? planner.resumePending : state.resumePending;
+    if (!awaiting) await safe(() => p.storeSet(ROTATION_KEY, null));
     const role = pickRole([
       (await safe(() => $.env.get('HIERARCHY_ROLE'))).value,
       (await safe(() => $.env.get('AI_SDLC_HIERARCHY_ROLE'))).value,

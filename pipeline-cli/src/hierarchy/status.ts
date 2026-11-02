@@ -29,6 +29,7 @@ import {
   readModuleHealth,
   defaultStoreDirs,
   readModuleMeasure,
+  readModuleRotatePending,
   type ModuleHealth,
 } from './module-health.js';
 import { readSessionRegistry, reconcileStartingEntries } from './registry.js';
@@ -80,6 +81,8 @@ export interface StatusRow {
   overThreshold?: boolean;
   /** The module's own last `session.measure` count (AISDLC-1100); absent when it never measured. */
   moduleTokens?: number;
+  /** The module deferred a rotation to the turn end (AISDLC-1159). */
+  rotatePending?: boolean;
   /** Present with `launchEnv: 'missing'`: how to repair it. */
   nextStep?: string;
 }
@@ -214,9 +217,11 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     const moduleTokens = alive
       ? readModuleMeasure(defaultStoreDirs(), entry.name)?.tokens
       : undefined;
+    const rotatePending = alive && readModuleRotatePending(defaultStoreDirs(), entry.name);
     return {
       entry,
       state,
+      ...(rotatePending ? { rotatePending } : {}),
       ...(contextTokens !== undefined
         ? { contextTokens, overThreshold: contextTokens > thresholdsByRole[entry.role] }
         : {}),
@@ -399,9 +404,9 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
     r.landing ?? '-',
     r.launchEnv ?? '-',
     r.nodeVersion ? `${r.nodeVersion}${r.nodeMismatch ? ' MISMATCH' : ''}` : '-',
-    r.moduleTokens !== undefined
+    (r.moduleTokens !== undefined
       ? `${formatModuleHealth(r.module)} (measured ${r.moduleTokens})`
-      : formatModuleHealth(r.module),
+      : formatModuleHealth(r.module)) + (r.rotatePending ? ' rotate pending' : ''),
     r.state === 'gone' ? '-' : formatContext(r.contextTokens, r.overThreshold),
     r.entry.tmuxSession,
     r.entry.role,
