@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1154
 title: 'Step 11 resume push falls back to a plain fast-forward push when the recorded lease is stale and the remote head is an ancestor of HEAD: signed task PRs stop stranding as drafts after a developer push mid-run'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-02'
 labels:
@@ -35,11 +35,35 @@ Velocity impact: removes the last manual step from a successful re-entry; the tw
 
 ## Acceptance Criteria
 
-- [ ] AC-1: In `11-push-and-pr.ts`, when a resumed run's lease push is rejected (`non-fast-forward|rejected|stale info` in stderr), the step fetches `origin/<branch>` and, if `git merge-base --is-ancestor <remote> HEAD` succeeds, retries with a plain `git push -u origin HEAD:refs/heads/<branch>` (no force flag). The existing `leasePushOwnRebase` retry stays for its own shape.
-- [ ] AC-2: When the remote head is not an ancestor of HEAD, the step still aborts with `pushed: false`; its reason no longer suggests deleting the remote branch but states the remote head sha, the local head sha and that a human must reconcile.
-- [ ] AC-3: Tests cover both branches of AC-1/AC-2 with a scripted runner; the mark-ready and PR-create steps run after the fast-forward retry exactly as after a first-try push.
-- [ ] AC-4: `docs/operations/cli-hierarchy.md` (push section) states that a fast-forward push needs no lease and names the stale-lease shape; `playbook.ts` keeps `PUSH_NON_FAST_FORWARD_CAUSE` for the real conflict shape only.
+- [x] AC-1: In `11-push-and-pr.ts`, when a resumed run's lease push is rejected (`non-fast-forward|rejected|stale info` in stderr), the step fetches `origin/<branch>` and, if `git merge-base --is-ancestor <remote> HEAD` succeeds, retries with a plain `git push -u origin HEAD:refs/heads/<branch>` (no force flag). The existing `leasePushOwnRebase` retry stays for its own shape.
+- [x] AC-2: When the remote head is not an ancestor of HEAD, the step still aborts with `pushed: false`; its reason no longer suggests deleting the remote branch but states the remote head sha, the local head sha and that a human must reconcile.
+- [x] AC-3: Tests cover both branches of AC-1/AC-2 with a scripted runner; the mark-ready and PR-create steps run after the fast-forward retry exactly as after a first-try push.
+- [x] AC-4: `docs/operations/cli-hierarchy.md` (push section) states that a fast-forward push needs no lease and names the stale-lease shape; `playbook.ts` keeps `PUSH_NON_FAST_FORWARD_CAUSE` for the real conflict shape only.
 
 ## Notes
 
 Origin: planner triage 2026-11-02 ~15:40Z of `.ai-sdlc/dispatch/failed/AISDLC-1153.verdict.json` (notes: "origin/branch (1d54ea55) is an ancestor of local HEAD 72293f30"), operator report "the executor finished but the PR is still in draft mode". Precedent #2246 (AISDLC-1136) 2026-11-01 ~04:11Z, same shape, same manual repair. Related: AISDLC-1016 (own-rebase lease retry), AISDLC-1138 (first-push lease), AISDLC-738 (lease fixed at Step 3).
+
+## Final Summary
+
+## Summary
+The test failure came from a stale branch base, not from the Step 11 change. I rebased onto origin/main, which already contains the executor-session env-hygiene fix, and the full verification suite now passes. The Step 11 stale-lease fast-forward fallback, its tests and the docs update are unchanged.
+
+## Changes
+- pipeline-cli/src/steps/11-push-and-pr.ts
+- pipeline-cli/src/steps/resume-fix-round.test.ts
+- docs/operations/cli-hierarchy.md
+
+## Design decisions
+Root cause of the red pnpm test: the executePipeline cleanup-warning tests and the other 'lease-push preflight' tests aborted with not-task-worktree. They ran inside an executor session whose AI_SDLC_HIERARCHY_* and AI_SDLC_EXECUTOR_TASK env vars were set, and the branch predated the main fix that scrubs those vars in tests. Rebasing onto origin/main fixed it with no test edits. The PR (#2286) is draft, and the force-with-lease push passed the pre-push patch-coverage gate.
+
+## Verification
+- `pnpm build` — passed (ai-sdlc-plugin/mcp-server build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (246 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
