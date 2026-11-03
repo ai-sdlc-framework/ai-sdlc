@@ -2141,7 +2141,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             default: 'text' as const,
           }),
       async (argv) => {
-        const workDir = String(argv['work-dir']);
+        const workDir = writeRoot(Boolean(argv.file));
         const id = String(argv.id);
         const by = String(argv.by);
         const reason = String(argv.reason ?? '');
@@ -2168,7 +2168,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
           reason,
           ...(typeof argv.actor === 'string' ? { by: String(argv.actor) } : {}),
         });
-        appendDecisionEvent(evt, { workDir });
+        recordEvents(argv, workDir, id, [evt]);
         if (String(argv.format) === 'json') {
           emit({ ok: true, decisionId: id, supersededBy: by, reason });
         } else {
