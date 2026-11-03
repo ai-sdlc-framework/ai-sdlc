@@ -120,7 +120,7 @@ describe('pr-lifecycle.yaml operational keys', () => {
       try {
         return loadPrLifecycleConfig(d).hierarchy.worktrees;
       } finally {
-        rmSync(d, { recursive: true, force: true });
+        removeFixtureDir(d);
       }
     };
     expect(read('spec: {}\n')).toMatchObject({ sweepEveryTicks: 1, ceiling: 40 });
