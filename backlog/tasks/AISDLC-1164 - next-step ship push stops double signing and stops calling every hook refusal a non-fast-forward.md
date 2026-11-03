@@ -14,7 +14,7 @@ references:
   - pipeline-cli/src/next-step/ship.ts
   - pipeline-cli/src/steps/11-push-and-pr.ts
   - .husky/pre-push
-  - scripts/auto-sign-attestation.sh
+  - scripts/check-attestation-sign.sh
 priority: high
 dispatchable: true
 ---
