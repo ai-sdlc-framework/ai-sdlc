@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1164
 title: 'next-step ship: the push after Step 10.6 signing must not be re-signed by the pre-push hook, and a hook refusal must not be reported as push-non-fast-forward'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-03'
 labels:
@@ -49,14 +49,37 @@ Velocity impact: this is the single largest source of stranded drafts on 2026-11
 
 ## Acceptance Criteria
 
-- [ ] AC-1: Reproduce the failure in a test. After Step 10.6 signs, ship's push through the real pre-push hook produces a second auto-sign commit and a non-zero exit. Record the hook's message in the PR body.
-- [ ] AC-2: After the fix, a ship run that signs at Step 10.6 pushes on the first attempt with exactly one auto-sign commit at HEAD. The test from AC-1 asserts this.
-- [ ] AC-3: Ship reports `cause: push-non-fast-forward` only when git's output names a non-fast-forward and a fetch shows `origin/<branch>` is not an ancestor of HEAD. When it is an ancestor, ship pushes plainly without a lease, matching AISDLC-1154 in step 11.
-- [ ] AC-4: Any other push failure is reported with its own cause and the last stderr lines in the stop reason, so the verdict names the real failure. Tests cover a hook refusal and a real divergence.
-- [ ] AC-5: A ship run whose developer pass already pushed the branch and opened the draft ends with the draft marked ready, as on a fresh branch.
+- [x] AC-1: Reproduce the failure in a test. After Step 10.6 signs, ship's push through the real pre-push hook produces a second auto-sign commit and a non-zero exit. Record the hook's message in the PR body.
+- [x] AC-2: After the fix, a ship run that signs at Step 10.6 pushes on the first attempt with exactly one auto-sign commit at HEAD. The test from AC-1 asserts this.
+- [x] AC-3: Ship reports `cause: push-non-fast-forward` only when git's output names a non-fast-forward and a fetch shows `origin/<branch>` is not an ancestor of HEAD. When it is an ancestor, ship pushes plainly without a lease, matching AISDLC-1154 in step 11.
+- [x] AC-4: Any other push failure is reported with its own cause and the last stderr lines in the stop reason, so the verdict names the real failure. Tests cover a hook refusal and a real divergence.
+- [x] AC-5: A ship run whose developer pass already pushed the branch and opened the draft ends with the draft marked ready, as on a fresh branch.
 
 ## Notes
 
 Evidence: failed verdicts in `.ai-sdlc/dispatch/failed/AISDLC-{1156..1163}.verdict.json`, all `cause: push-non-fast-forward` after approvals; worktree reflogs under `.worktrees/aisdlc-{1156,1157,1162,1163}`. Repairs done by the planner 2026-11-03: fast-forward pushes to #2301, #2303, #2304, #2305, #2307, #2308 and `gh pr ready` on #2301 to #2308.
 
 Related: AISDLC-1154 (fixed the same symptom in step 11 only), AISDLC-1098 (lease push after a step 10.5 rebase), AISDLC-1155 (workflow state env passed to sign and push spawns), AISDLC-1156 (dispatch finishes a repaired push), AISDLC-1149 and DEC-0290 (task PRs open ready).
+
+## Final Summary
+
+## Summary
+The security reviewer's major finding is fixed in `ship.ts`. A remote ref that did not exist before the push now aborts the lease push instead of pinning it to the tip this run's own fetch just created. A failed fetch after a rejection is now reported as `push-failed`, not `push-non-fast-forward`.
+
+## Changes
+- pipeline-cli/src/next-step/ship.ts
+- pipeline-cli/src/next-step/ship.test.ts
+
+## Design decisions
+The first version of the fix (setting the pre-fetch ref to '' only inside the rejection branch) still failed the new test. Attempt 1's own fetch created the ref, so attempt 2 read it as 'seen' and ran the lease push. I moved the `rev-parse` of `refs/remotes/origin/<branch>` out of the loop, so it runs once before the first push. The `rev-parse` fallback is '', and `leasePushOwnRebaseShip` then returns null. Two tests were added. One asserts no `--force-with-lease` push is issued when the ref was never seen. The other asserts a failed fetch gives `push-failed` with no lease push. I rebased onto origin/main and pushed with `--force-with-lease`. PR #2314 already existed and is currently not a draft, so I did not open a new one. If `/ai-sdlc execute` expects the PR to stay a draft until reviewers sign, that status needs checking.
+
+## Verification
+- `pnpm build` — passed (ai-sdlc-plugin/mcp-server build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (246 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
