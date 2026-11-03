@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1167
 title: 'Webhook health opens one decision per outage, and decision ids are allocated without collisions'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-03'
 labels:

@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 import { runDispatchTick, type LoopDeps } from './dispatch-loop.js';
+import { appendDecisionEvent, makeDecisionOpenedEvent } from '../decisions/event-log.js';
+import { listDecisions } from '../decisions/projection.js';
 import {
+  catalogWebhookEscalation,
   formatWebhookEscalationBody,
   runWebhookHealthTick,
   stallChannelNotifier,
@@ -128,5 +131,56 @@ describe('webhook health tick (AISDLC-1157)', () => {
     cls = 'degraded';
     expect(await kinds()).toHaveLength(1);
     expect(await kinds()).toEqual([]);
+  });
+});
+
+describe('webhook escalation dedup (AISDLC-1167)', () => {
+  const input = (since: string) => ({
+    since,
+    class: 'down' as WebhookClass,
+    summary: 's',
+    body: 'b',
+  });
+  const open = () =>
+    listDecisions({ workDir: dir }).decisions.filter((d) => d.status.lifecycle !== 'answered');
+  const prev = process.env.AI_SDLC_DECISIONS_NO_REMOTE;
+  beforeEach(() => {
+    process.env.AI_SDLC_DECISIONS_NO_REMOTE = '1';
+  });
+  afterEach(() => {
+    if (prev === undefined) delete process.env.AI_SDLC_DECISIONS_NO_REMOTE;
+    else process.env.AI_SDLC_DECISIONS_NO_REMOTE = prev;
+  });
+
+  it('opens no second record while one is open, even with a different episode start', () => {
+    const c = catalogWebhookEscalation(dir);
+    const a = c.escalate!(input('2026-11-03T01:00:00Z'));
+    const b = c.escalate!(input('2026-11-03T02:00:00Z'));
+    expect(b).toBe(a);
+    expect(open()).toHaveLength(1);
+  });
+
+  it('recovery answers every open webhook-health record', () => {
+    for (const [id, scope] of [
+      ['DEC-0001', 'webhook-health:2026-11-03T01:00:00Z'],
+      ['DEC-0002', 'webhook-health'],
+    ]) {
+      appendDecisionEvent(
+        makeDecisionOpenedEvent({
+          decisionId: id,
+          source: 'ad-hoc',
+          scope,
+          summary: 's',
+          body: 'b',
+          reversible: true,
+          options: [{ id: 'restart-feed', description: 'x' }],
+          by: 'operator-dispatch',
+        }),
+        { workDir: dir },
+      );
+    }
+    expect(open()).toHaveLength(2);
+    catalogWebhookEscalation(dir).closeEpisode!(undefined, 'recovered');
+    expect(open()).toHaveLength(0);
   });
 });
