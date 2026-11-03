@@ -18,7 +18,6 @@ import {
 } from './00-sweep.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
 import { FakeRunner, ok, fail as fakeRunnerFail } from '../__test-helpers/fake-runner.js';
-import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
 
