@@ -177,6 +177,11 @@ import {
   webhookServe,
   webhookUp,
   webhookStatus,
+  webhookHealth,
+  parseFeed,
+  trackPrActivity,
+  catalogWebhookEscalation,
+  stallChannelNotifier,
   formatWebhookStatus,
   recallTranscript,
   resolveTranscriptSource,
@@ -782,12 +787,24 @@ export async function runHierarchyCli(
       }
       case 'webhook': {
         const action = firstPositional(argv);
-        if (action === 'up') webhookUp(deps, flags.port);
+        let feed: ReturnType<typeof parseFeed>;
+        try {
+          feed = parseFeed(flags.feed, flags['feed-pid']);
+        } catch (e) {
+          process.stderr.write(`cli-hierarchy: ${(e as Error).message}\n`);
+          return 2;
+        }
+        if (action === 'up') webhookUp(deps, flags.port, undefined, feed);
         else if (action === 'down') webhookDown(deps);
         else if (action === 'status') {
           const w = webhookStatus(deps);
-          deps.log(flags.json === 'true' ? JSON.stringify(w) : formatWebhookStatus(w));
-        } else if (action === 'serve') await webhookServe(deps, flags.port);
+          const h = deps.env.AI_SDLC_WEBHOOK_SECRET ? webhookHealth(deps) : undefined;
+          deps.log(
+            flags.json === 'true'
+              ? JSON.stringify({ ...w, ...(h ? { health: h } : {}) })
+              : formatWebhookStatus(w, h),
+          );
+        } else if (action === 'serve') await webhookServe(deps, flags.port, feed);
         else {
           process.stderr.write(`cli-hierarchy: webhook needs up, down or status\n\n${USAGE}`);
           return 2;
@@ -1366,6 +1383,15 @@ export async function runHierarchyCli(
             return id;
           },
           recordTick: (marker) => emit({ type: 'DispatchTick', ...marker }),
+          webhookHealth: {
+            health: () => {
+              if (!deps.env.AI_SDLC_WEBHOOK_SECRET) return undefined;
+              trackPrActivity(deps.boardDir, deps.now());
+              return webhookHealth(deps);
+            },
+            notify: stallChannelNotifier(deps.boardDir, deps.run, deps.now),
+            ...(isDecisionCatalogEnabled() ? catalogWebhookEscalation(repoRoot) : {}),
+          },
           ...(isDecisionCatalogEnabled()
             ? {
                 reviewTurnBudget: () =>

@@ -40,7 +40,13 @@ import {
 } from './reconcile-scheduler.js';
 import { readLoopState } from './dispatch-loop.js';
 import { formatLastTick, lastTickInfo } from './host-liveness.js';
-import { formatWebhookStatus, webhookStatus, type WebhookStatus } from './webhook.js';
+import {
+  formatWebhookStatus,
+  webhookHealth,
+  webhookStatus,
+  type WebhookHealth,
+  type WebhookStatus,
+} from './webhook.js';
 import { listWindows, paneInfo, paneStartCommand, sessionAttached } from './tmux.js';
 import { contextWarning, formatContext, sessionContextTokens } from './context-size.js';
 import { readOpenDrainStall, type DrainStallRecord } from './drain-stall.js';
@@ -90,6 +96,8 @@ export interface StatusResult {
   board: QueueCounts;
   /** The local webhook receiver (AISDLC-880). */
   webhook: WebhookStatus;
+  /** Class and signals of the webhook path (AISDLC-1157); absent when no secret is set. */
+  webhookHealth?: WebhookHealth;
   /** The detached reconcile scheduler (AISDLC-932). */
   scheduler: SchedulerStatus;
   /** Age and author of the last dispatch tick (AISDLC-1096); absent when none was recorded. */
@@ -269,6 +277,12 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     /* gh missing or offline */
   }
   const drainStall = readOpenDrainStall(deps.boardDir);
+  let webhookHealthReading: WebhookHealth | undefined;
+  try {
+    if (deps.env.AI_SDLC_WEBHOOK_SECRET) webhookHealthReading = webhookHealth(deps);
+  } catch {
+    /* an unreadable health reading must not break status */
+  }
   let growth: AttestationGrowth | undefined;
   try {
     growth = attestationGrowth(deps.cwd, deps.run);
@@ -299,6 +313,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     ...(quota ? { quota } : {}),
     board: peekQueue(deps.boardDir),
     webhook: webhookStatus(deps),
+    ...(webhookHealthReading ? { webhookHealth: webhookHealthReading } : {}),
     scheduler: schedulerStatus(deps),
     ...(lastTick ? { lastTick } : {}),
     contextThresholds: thresholdsByRole,
@@ -359,7 +374,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
     return [
       'no sessions in the roster',
       ...dynamicLines,
-      formatWebhookStatus(result.webhook),
+      formatWebhookStatus(result.webhook, result.webhookHealth),
       formatSchedulerStatus(result.scheduler),
       formatLastTick(result.lastTick),
       ...thresholds,
@@ -433,7 +448,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
     ...(dynamicLines.length > 0 ? ['', ...dynamicLines] : []),
     '',
     `board: ${queued} queued, ${inflight} inflight, ${done} done, ${failed} failed`,
-    formatWebhookStatus(result.webhook),
+    formatWebhookStatus(result.webhook, result.webhookHealth),
     formatSchedulerStatus(result.scheduler),
     formatLastTick(result.lastTick),
     ...thresholds,

@@ -1,4 +1,11 @@
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -7,7 +14,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HierarchyDeps } from './types.js';
 import {
   formatWebhookStatus,
+  parseFeed,
+  trackPrActivity,
   webhookDown,
+  webhookHealth,
   webhookServe,
   webhookStatus,
   webhookUp,
@@ -56,6 +66,11 @@ describe('cli-hierarchy webhook (AISDLC-880)', () => {
       '--board-dir',
       dir,
     ]);
+    webhookUp(deps, undefined, spawner, { kind: 'gh-forward', pid: 42 });
+    expect(spawner).toHaveBeenLastCalledWith(
+      process.execPath,
+      expect.arrayContaining(['--feed', 'gh-forward', '--feed-pid', '42']),
+    );
     expect(() => webhookUp(deps, '70000', spawner)).toThrow(/invalid webhook port/);
   });
 
@@ -64,7 +79,7 @@ describe('cli-hierarchy webhook (AISDLC-880)', () => {
     const done = webhookServe(deps, '0');
     await vi.waitFor(() => expect(webhookStatus(deps).state).toBe('up'));
     const st = webhookStatus(deps);
-    expect(formatWebhookStatus(st)).toMatch(/^webhook: up \(port \d+\)$/);
+    expect(formatWebhookStatus(st)).toMatch(/^webhook: running \(port \d+, health not read\)$/);
     const spawner = vi.fn();
     webhookUp(deps, undefined, spawner);
     expect(spawner).not.toHaveBeenCalled();
@@ -83,5 +98,133 @@ describe('cli-hierarchy webhook (AISDLC-880)', () => {
         expect(webhookDown(mk({ AI_SDLC_WEBHOOK_SECRET: 'x' }), kill)).toBe(true);
         expect(kill).toHaveBeenCalledWith(99);
       });
+  });
+});
+
+describe('webhook health (AISDLC-1157)', () => {
+  const NOW = Date.parse('2026-11-02T12:00:00Z');
+  const minsAgo = (m: number): Date => new Date(NOW - m * 60_000);
+  const write = (name: string, o: unknown): void =>
+    writeFileSync(path.join(dir, name), JSON.stringify(o));
+  const event = (pr: number, ageMin: number): void => {
+    mkdirSync(path.join(dir, 'events'), { recursive: true });
+    const f = path.join(
+      dir,
+      'events',
+      encodeURIComponent(`o/r#${pr}@abc:pull_request:d${pr}${ageMin}`) + '.json',
+    );
+    writeFileSync(f, '{}');
+    utimesSync(f, minsAgo(ageMin), minsAgo(ageMin));
+  };
+  const activity = (pr: number, changedMinAgo: number): void =>
+    write('webhook-pr-activity.json', {
+      heads: { [String(pr)]: { head: 'h', changedAt: minsAgo(changedMinAgo).toISOString() } },
+    });
+  const hd = (opts: { alive?: boolean; run?: (f: string, a: readonly string[]) => unknown } = {}) =>
+    ({
+      ...mk({ AI_SDLC_WEBHOOK_SECRET: 'x' }, opts.alive ?? true),
+      now: () => new Date(NOW),
+      run: opts.run ?? (() => ({ status: 1, stdout: '', stderr: '' })),
+    }) as unknown as HierarchyDeps;
+  const receiver = (feed?: unknown): void =>
+    write('webhook.json', { pid: 1, port: 9, ...(feed ? { feed } : {}) });
+  const up = { probePort: () => true };
+
+  it('is down when the receiver is dead, or its port does not answer', () => {
+    expect(webhookHealth(hd(), up).class).toBe('down');
+    receiver();
+    expect(webhookHealth(hd({ alive: false }), up).signals.receiver).toBe(false);
+    const h = webhookHealth(hd(), { probePort: () => false });
+    expect(h.class).toBe('down');
+    expect(h.reasons[0]).toMatch(/port 9/);
+    expect(
+      formatWebhookStatus(
+        { state: 'off', reason: 'not running' },
+        webhookHealth(hd({ alive: false }), up),
+      ),
+    ).toMatch(/^webhook: down/);
+  });
+
+  it('is healthy and quiet with no PR activity, even with no events', () => {
+    receiver({ kind: 'none' });
+    const h = webhookHealth(hd(), up);
+    expect(h.class).toBe('healthy');
+    expect(h.signals).toMatchObject({ quiet: true, lastEventAgeMin: null, forwarder: 'none' });
+  });
+
+  it('is degraded when a PR changed, no event for the stale window', () => {
+    receiver({ kind: 'none' });
+    activity(7, 10);
+    event(8, 45);
+    const h = webhookHealth(hd(), up);
+    expect(h.class).toBe('degraded');
+    expect(h.signals).toMatchObject({
+      prActivityWithoutEvent: true,
+      lastEventAgeMin: 45,
+      quiet: false,
+    });
+    expect(formatWebhookStatus({ state: 'up', port: 9, pid: 1 }, h)).toBe(
+      'webhook: degraded (port 9, last event 45m, feed none)',
+    );
+  });
+
+  it('stays healthy when the event for the changed PR arrived', () => {
+    receiver({ kind: 'none' });
+    activity(7, 10);
+    event(7, 5);
+    expect(webhookHealth(hd(), up).class).toBe('healthy');
+  });
+
+  it('is down after the down window with PR activity inside it', () => {
+    receiver({ kind: 'none' });
+    activity(7, 100);
+    event(7, 200);
+    const h = webhookHealth(hd(), up);
+    expect(h.class).toBe('down');
+    expect(formatWebhookStatus({ state: 'up', port: 9, pid: 1 }, h)).toContain('last event 3h');
+  });
+
+  it('is degraded when the recorded forwarder pid is gone while the receiver is up', () => {
+    receiver({ kind: 'gh-forward', pid: 5 });
+    const deps = hd();
+    (deps as { isAlive: (p: number) => boolean }).isAlive = (p) => p === 1;
+    const h = webhookHealth(deps, up);
+    expect(h.class).toBe('degraded');
+    expect(h.signals.forwarder).toBe('dead');
+  });
+
+  it('falls back to a process match for the forwarder', () => {
+    receiver({ kind: 'gh-forward' });
+    const alive = hd({ run: () => ({ status: 0, stdout: '123\n', stderr: '' }) });
+    expect(webhookHealth(alive, up).signals.forwarder).toBe('alive');
+    expect(webhookHealth(hd(), up).signals.forwarder).toBe('dead');
+    write('webhook.json', { pid: 1, port: 9 });
+    expect(webhookHealth(hd(), up).signals.forwarder).toBe('unknown');
+  });
+
+  it('probes the port through run and tracks PR activity from the snapshot', () => {
+    receiver();
+    const ok = hd({ run: () => ({ status: 0, stdout: '', stderr: '' }) });
+    expect(webhookHealth(ok).signals.port).toBe(true);
+    write('pr-snapshot.json', {
+      prs: [
+        { number: 1, headRefOid: 'a' },
+        { number: 2, headRefOid: 'b' },
+      ],
+    });
+    trackPrActivity(dir, new Date(NOW));
+    write('pr-snapshot.json', { prs: [{ number: 1, headRefOid: 'a2' }] });
+    trackPrActivity(dir, new Date(NOW + 60_000));
+    const st = JSON.parse(readFileSync(path.join(dir, 'webhook-pr-activity.json'), 'utf-8'));
+    expect(st.heads['1'].head).toBe('a2');
+    expect(st.lastClosedAt).toBeUndefined();
+    trackPrActivity(path.join(dir, 'nope'), new Date(NOW));
+  });
+
+  it('parses the feed flag', () => {
+    expect(parseFeed(undefined)).toBeUndefined();
+    expect(parseFeed('tunnel', '9')).toEqual({ kind: 'tunnel', pid: 9 });
+    expect(parseFeed('none')).toEqual({ kind: 'none' });
+    expect(() => parseFeed('carrier-pigeon')).toThrow(/invalid webhook feed/);
   });
 });
