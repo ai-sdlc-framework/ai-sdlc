@@ -1,8 +1,8 @@
 ---
 id: RFC-0061
 title: Review verdict as a head-bound gate outside the branch (successor to RFC-0042)
-status: Under Review
-lifecycle: Ready for Review
+status: Signed Off
+lifecycle: Signed Off
 author: 'Dominique Legault'
 created: 2026-11-03
 updated: 2026-11-03
@@ -15,16 +15,16 @@ requiresDocs: [operator-runbook]
 
 # RFC-0061: Review verdict as a head-bound gate outside the branch (successor to RFC-0042)
 
-**Status:** Under Review (v0.2). All eight Open Questions resolved with the operator on 2026-11-03: error-resistant trust claim (OQ-8); verdict ref pushed atomically by Step 11, CI posts the gate result (OQ-1); clean-replay carry-forward evaluated by the gate (OQ-2); hard v6 cut with names kept (OQ-3); leaves in the verdict ref, derived catch report (OQ-4); merge-queue rule decided, built later (OQ-5); tier derived once at Step 8 (OQ-6); untrusted PRs through a split CI writer (OQ-7).
-**Lifecycle:** Ready for Review
+**Status:** Signed Off (v0.3, Engineering and Operator 2026-11-03). All eight Open Questions resolved with the operator on 2026-11-03: error-resistant trust claim (OQ-8); verdict ref pushed atomically by Step 11, CI posts the gate result (OQ-1); clean-replay carry-forward evaluated by the gate (OQ-2); hard v6 cut with names kept (OQ-3); leaves in the verdict ref, derived catch report (OQ-4); merge-queue rule decided, built later (OQ-5); tier derived once at Step 8 (OQ-6); untrusted PRs through a split CI writer (OQ-7).
+**Lifecycle:** Signed Off
 **Author:** Dominique Legault
 **Created:** 2026-11-03
 **Updated:** 2026-11-03
 **Target Spec Version:** v1alpha1
 
-> Ready for Review. The eight Open Questions were resolved with the operator through the
-> decision rubric on 2026-11-03, one at a time; each carries a Resolution block below. No
-> implementation task is filed until the RFC is Signed Off. When this RFC reaches Implemented, RFC-0042's lifecycle
+> Signed Off (Engineering and Operator, 2026-11-03). The eight Open Questions were resolved with the operator through the
+> decision rubric on 2026-11-03, one at a time; each carries a Resolution block below. The
+> phase tasks are filed after this RFC lands on `main`. When this RFC reaches Implemented, RFC-0042's lifecycle
 > becomes Superseded and RFC-0043, RFC-0046 and RFC-0052 are amended where they assume
 > the v6 substrate (see "Dependents").
 
@@ -609,12 +609,12 @@ against a threat with no recorded instance, and the trigger escalates on evidenc
 
 ## Sign-Off
 
-Eligible: all eight Open Questions resolved on 2026-11-03.
+All eight Open Questions resolved on 2026-11-03.
 
 | Role | Owner | Status | Date |
 |---|---|---|---|
-| Engineering | Dominique Legault | pending | |
-| Operator | Dominique Legault | pending | |
+| Engineering | Dominique Legault | ✅ Signed (all eight OQs walked with the full rubric; error-resistant claim, verdict ref, clean-replay carry-forward) | 2026-11-03 |
+| Operator | Dominique Legault | ✅ Signed (hard v6 cut with names kept; tasks filed after landing, not dispatched) | 2026-11-03 |
 | Product | | pending | |
 | Design | | pending | |
 
@@ -623,6 +623,7 @@ Eligible: all eight Open Questions resolved on 2026-11-03.
 | Version | Date | Change |
 |---|---|---|
 | v0.1 | 2026-11-03 | Draft from the 2026-11-03 attestation design review: four v6 design properties, goals against outcomes, proposal shape, eight unresolved OQs. |
+| v0.3 | 2026-11-03 | Signed Off by Engineering and Operator; Product and Design pending. |
 | v0.2 | 2026-11-03 | All eight OQs resolved with the operator through the decision rubric; Draft to Ready for Review; `requiresDocs: [operator-runbook]`. OQ-8: error-resistant trust claim with a hook fence and an upgrade trigger. OQ-1: `refs/ai-sdlc/verdicts/<headSha>` pushed atomically by Step 11, CI posts the gate result; no GitHub App. OQ-2: clean-replay tree rule in one function, run by the gate; patch-id comparison replaced. OQ-3: hard v6 cut, `cli-attestation verify` and `ai-sdlc/attestation` names kept. OQ-4: leaves in the verdict ref tree; catch ledger derived from status reason codes. OQ-5: merge-queue rule decided, built when the queue returns; direct squash of a behind head covered. OQ-6: tier derived once at Step 8 with shipped values `none / attested / isolated` (sketch corrected). OQ-7: untrusted PRs through an artifact plus a trusted `workflow_run` writer; signing secret deleted. |
 
 ## References
