@@ -373,7 +373,7 @@ No task is filed until Signed Off. Expected tasks after sign-off, by phase:
 
 The operator walked these one at a time through the decision rubric on 2026-11-03, never
 batched. All eight are resolved; the original question text is kept above each Resolution.
-OQ-8 was walked first because it bounds OQ-1 and OQ-4.
+The walkthrough took OQ-8 first because it bounds OQ-1 and OQ-4.
 
 ### OQ-1: Where the verdict record lives and which principal issues it
 
