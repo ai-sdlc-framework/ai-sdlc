@@ -57,6 +57,7 @@ const {
   UNTRUSTED_MARKER_FILE,
 } = require('./lib/governance-resolver');
 const { evaluateLeasePush, hasForcePushOption } = require('./lib/lease-push-guard');
+const { evaluateVerdictFence } = require('./lib/verdict-ref-fence');
 const {
   runGit: gitOut,
   probeRef,
@@ -479,6 +480,12 @@ function enforceBash(command) {
   if (!command || typeof command !== 'string' || !command.trim()) return;
 
   const trimmed = command.trim();
+
+  // RFC-0061 OQ-8: agents never write the review verdict or post a gate status.
+  const fence = evaluateVerdictFence(trimmed);
+  if (fence.decision === 'deny') {
+    deny(`${fence.reason} Next step: run the pipeline through ai-sdlc-pipeline next-step.`);
+  }
 
   // AISDLC-720: untrusted runs may not write governance config / workflows via shell.
   enforceUntrustedShellWrites(trimmed);

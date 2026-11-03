@@ -16,8 +16,10 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { aggregateVerdicts } from '../steps/08-aggregate-verdicts.js';
+import { aggregateVerdicts, buildVerdictRecordDraft } from '../steps/08-aggregate-verdicts.js';
 import type { AggregatedVerdict, ReviewerFinding, ReviewerVerdict, Severity } from '../types.js';
+import type { IndependenceTier } from '../attestation/verdict-record.js';
+import { resolveTargetBranch } from '../steps/02-compute-branch.js';
 import { writeRunFile } from './init.js';
 import type { NextStepContext, NextStepState } from './types.js';
 import { DEFAULT_HARNESS } from '../harness-defaults.js';
@@ -272,6 +274,7 @@ export async function finalizeReview(
   // Blocking verdicts only. The staged verdict (RFC-0052) is advisory per DEC-0149 and is
   // carried beside the aggregate, never in this list.
   const verdicts: ReviewerVerdict[] = [];
+  const tiers: Record<string, IndependenceTier> = {};
   const wtAiSdlc = join(state.worktreePath, '.ai-sdlc');
 
   // Resolve every reviewer's harness agent id BEFORE touching disk, so a reporting slip
@@ -411,6 +414,11 @@ export async function finalizeReview(
       ],
       { cwd: ctx.workDir, allowFailure: true },
     );
+    // RFC-0061 OQ-6: the tier emit-leaf derived (verdict-class.ts, run once) is read, not recomputed.
+    const tierMatch = /independenceTier=(none|attested|isolated)\b/.exec(
+      `${emit.stdout}\n${emit.stderr}`,
+    );
+    if (tierMatch) tiers[actual.agent] = tierMatch[1] as IndependenceTier;
     if (emit.code !== 0) {
       const msg = `Step 7c: emit-leaf for ${sp.agent} exited non-zero (${emit.stderr.trim()})`;
       if (!v5Legacy) return { ok: false, reason: msg };
@@ -419,9 +427,37 @@ export async function finalizeReview(
   }
 
   const verdict = await aggregateRound(verdicts, review.harnessNote);
+  await attachVerdictRecordDraft(ctx, state, verdict, tiers);
   if (review.staged?.verdict) verdict.stagedAdvisory = review.staged.verdict;
   writeRunFile(ctx, 'aggregate.json', JSON.stringify(verdict, null, 2));
   return { ok: true, verdict, warnings };
+}
+
+/**
+ * RFC-0061 Phase 1 (Step 8): on APPROVED, attach the verdict record draft. The reviewer set the
+ * policy requires is computed by the shared coverage rule over the touched paths. Never throws:
+ * the v6 envelope path still gates during the shadow phase.
+ */
+export async function attachVerdictRecordDraft(
+  ctx: NextStepContext,
+  state: NextStepState,
+  verdict: AggregatedVerdict,
+  tiers: Readonly<Record<string, IndependenceTier>> = {},
+): Promise<void> {
+  if (!verdict.approved) return;
+  try {
+    const diff = await ctx.runner(
+      'git',
+      ['diff', '--name-only', `origin/${resolveTargetBranch(ctx.workDir)}...HEAD`],
+      { cwd: state.worktreePath, allowFailure: true },
+    );
+    const changedPaths =
+      diff.code === 0 ? diff.stdout.split('\n').filter((l) => l.length > 0) : null;
+    const draft = buildVerdictRecordDraft(verdict, { changedPaths, tiers });
+    if (draft) verdict.verdictRecordDraft = draft;
+  } catch (err) {
+    ctx.logger.warn(`verdict record draft not built (non-fatal): ${(err as Error).message}`);
+  }
 }
 
 /**

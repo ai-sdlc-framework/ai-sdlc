@@ -14,6 +14,12 @@
  */
 
 import type { AggregatedVerdict, ReviewerFinding, ReviewerVerdict, Severity } from '../types.js';
+import {
+  computeRequiredReviewers,
+  evaluateCoverage,
+  type CoverageInput,
+} from '../attestation/review-coverage.js';
+import type { IndependenceTier, VerdictRecordDraft } from '../attestation/verdict-record.js';
 import { runFindingGrounding, type FindingGroundingHook } from '../judgment/agent-output-checks.js';
 
 export interface AggregateVerdictsOptions {
@@ -75,6 +81,50 @@ export async function aggregateVerdicts(
     summary: summaryLines.join('\n'),
     ...(groundingAnnotations ? { groundingAnnotations } : {}),
   };
+}
+
+export interface BuildVerdictRecordOptions extends CoverageInput {
+  /**
+   * Independence tier per reviewer name, derived ONCE by the existing verdict-class derivation
+   * (`determineVerdictClass`, run by `emit-leaf`; RFC-0061 OQ-6). Missing means `none`.
+   */
+  tiers?: Readonly<Record<string, IndependenceTier>>;
+  /** Model per reviewer name (informational). */
+  models?: Readonly<Record<string, string>>;
+}
+
+/**
+ * RFC-0061 Phase 1: on `approved`, build the verdict record draft (everything but the subject,
+ * the evidence digest and the issuer, which Step 11 adds for the head it pushes). `coverage`
+ * comes from the shared coverage rule, evaluated here once; the checker imports the same rule.
+ * Returns null unless the aggregate is APPROVED.
+ */
+export function buildVerdictRecordDraft(
+  aggregated: AggregatedVerdict,
+  opts: BuildVerdictRecordOptions,
+): VerdictRecordDraft | null {
+  if (!aggregated.approved) return null;
+  const reviewers = aggregated.verdicts.map((v) => ({
+    name: v.agentId,
+    harness: v.harness,
+    model: opts.models?.[v.agentId] ?? '',
+    independenceTier: opts.tiers?.[v.agentId] ?? ('none' as const),
+    verdict: v.approved ? ('approved' as const) : ('changes_requested' as const),
+  }));
+  const coverage = evaluateCoverage(
+    computeRequiredReviewers(opts),
+    reviewers.filter((r) => r.verdict === 'approved').map((r) => r.name),
+  );
+  return {
+    verdict: 'approved',
+    reviewers,
+    coverage,
+    leaves: reviewers.map((r) => ({ ...r, findings: countFindings(aggregated, r.name) })),
+  };
+}
+
+function countFindings(aggregated: AggregatedVerdict, name: string): number {
+  return aggregated.verdicts.find((v) => v.agentId === name)?.findings?.length ?? 0;
 }
 
 /**

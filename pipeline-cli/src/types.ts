@@ -553,6 +553,8 @@ export interface AggregatedVerdict {
    * classic verdicts but never part of `verdicts`, `approved`, `counts` or `decision`.
    */
   stagedAdvisory?: ReviewerVerdict;
+  /** RFC-0061 Phase 1: verdict record draft built by Step 8 on APPROVED; Step 11 completes and pushes it. */
+  verdictRecordDraft?: import('./attestation/verdict-record.js').VerdictRecordDraft;
 }
 
 // ── Step 9 — Iteration loop ──────────────────────────────────────────

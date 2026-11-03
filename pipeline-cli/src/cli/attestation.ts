@@ -27,6 +27,13 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { hostname, userInfo } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
+import { defaultRunner } from '../runtime/exec.js';
+import { repositoryFromRemoteUrl } from '../next-step/verdict-ref-push.js';
+import {
+  DEFAULT_PRUNE_AGE_DAYS,
+  ghPrStateFor,
+  pruneVerdictRefs,
+} from '../attestation/verdict-prune.js';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import {
@@ -1571,9 +1578,43 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           process.exitCode = out.status === 'valid' && outcome.status === 'pass' ? 0 : 1;
         },
       )
+      // ── verdict-prune (RFC-0061 Phase 1) ─────────────────────────────────────
+      .command(
+        'verdict-prune',
+        'Delete refs/ai-sdlc/verdicts/* whose PR is closed or merged and older than --max-age-days (default 30). Not scheduled.',
+        (y: Argv) =>
+          y
+            .option('max-age-days', { type: 'number', default: DEFAULT_PRUNE_AGE_DAYS })
+            .option('remote', { type: 'string', default: 'origin' })
+            .option('dry-run', { type: 'boolean', default: false }),
+        async (args) => {
+          const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
+          const remote = args['remote'] as string;
+          const url = await defaultRunner('git', ['remote', 'get-url', remote], {
+            cwd: repoRoot,
+            allowFailure: true,
+          });
+          const repository = repositoryFromRemoteUrl(url.stdout);
+          if (!repository) {
+            process.stderr.write(`[cli-attestation] verdict-prune: cannot resolve repository\n`);
+            process.exitCode = 1;
+            return;
+          }
+          const out = await pruneVerdictRefs({
+            runner: defaultRunner,
+            cwd: repoRoot,
+            remote,
+            maxAgeDays: args['max-age-days'] as number,
+            dryRun: args['dry-run'] as boolean,
+            prStateFor: ghPrStateFor(defaultRunner, repoRoot, repository),
+          });
+          for (const ref of out.deleted) process.stdout.write(`deleted ${ref}\n`);
+          process.stdout.write(`deleted=${out.deleted.length} kept=${out.kept.length}\n`);
+        },
+      )
       .demandCommand(
         1,
-        'Specify a subcommand (e.g. transcripts list, merkle-root, merkle-proof, sign-v6, finalize, inspect-v6, emit-leaf, generate-nonce, nonce-marker, verify, independence-policy, print-patch-id-exclusions, reset-stack, reviewer-set, reviewer-set-window)',
+        'Specify a subcommand (e.g. transcripts list, verdict-prune, merkle-root, merkle-proof, sign-v6, finalize, inspect-v6, emit-leaf, generate-nonce, nonce-marker, verify, independence-policy, print-patch-id-exclusions, reset-stack, reviewer-set, reviewer-set-window)',
       )
       .help()
       .alias('h', 'help')
