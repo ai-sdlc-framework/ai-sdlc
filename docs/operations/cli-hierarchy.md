@@ -1690,7 +1690,7 @@ to discard the verdict first.
   as `{ file, taskId, state }` and ingests the rest; the exit code is unchanged. A brief whose
   tasks are all on the board is marked ingested with no tasks.
 
-No-CodeQL repositories (AISDLC-896): mark-ready flips any `ai-sdlc/` task draft whose PR checks are all green. `governance.openTaskPrsReady: true` opens task PRs ready from Step 11 and `ship`; the default stays draft.
+Task PRs open draft only where CodeQL runs on pull requests (AISDLC-1149): `codeqlRunsOnPullRequests` is true only when a workflow references `github/codeql-action` and triggers on `pull_request` or `pull_request_target`. Otherwise Step 11 and `ship` open the PR ready, and mark-ready flips any remaining `ai-sdlc/` draft on its repo check rollup (AISDLC-896). With CodeQL on pull requests, mark-ready selects `ai-sdlc/` drafts and waits for `Analyze`. `governance.openTaskPrsReady: true` forces ready regardless.
 
 ### Failed executor work is re-claimed (AISDLC-946)
 

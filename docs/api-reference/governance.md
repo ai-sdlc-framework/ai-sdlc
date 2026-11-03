@@ -87,6 +87,7 @@ spec:
     allowBranchDelete: false
     allowResetHard: false
     allowReleaseMerge: false   # narrow grant: lets agents land the release PR only
+    openTaskPrsReady: false    # true = open task PRs ready, never draft (default false: draft only where CodeQL runs on pull requests, AISDLC-1149)
     mergeAuthors: []           # GitHub logins the merge gate may merge for; empty = nobody
 ```
 

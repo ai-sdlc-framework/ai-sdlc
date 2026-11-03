@@ -21,6 +21,8 @@ spec:
   governance:
     # AISDLC-1005 (DEC-0264): lease push to any non-protected branch from any session.
     allowForcePush: lease
+    # AISDLC-1149 (DEC-0290): codeql.yml is schedule-only here, so a draft never flips; open task PRs ready.
+    openTaskPrsReady: true
     # AISDLC-753: this repository permits agent merges through the gated helper
     # (cli-merge-if-eligible: green + CLEAN + trusted source + author on the list).
     allowMerge: onGreenClean

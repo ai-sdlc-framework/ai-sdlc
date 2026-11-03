@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -24,14 +24,18 @@ import {
 import type { NextStepState } from './types.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
-const policyOverride = vi.hoisted(() => ({ mode: null as null | 'lease' | 'never' }));
+const policyOverride = vi.hoisted(() => ({
+  mode: null as null | 'lease' | 'never',
+  ready: false,
+}));
 vi.mock('../hierarchy/operational.js', async (orig) => {
   const real = await orig<typeof import('../hierarchy/operational.js')>();
   return {
     ...real,
     loadOperationalPolicy: (...a: Parameters<typeof real.loadOperationalPolicy>) => {
       const base = real.loadOperationalPolicy(...a);
-      return policyOverride.mode ? { ...base, forcePushMode: policyOverride.mode } : base;
+      const withMode = policyOverride.mode ? { ...base, forcePushMode: policyOverride.mode } : base;
+      return policyOverride.ready ? { ...withMode, openTaskPrsReady: true } : withMode;
     },
   };
 });
@@ -41,6 +45,7 @@ let state: NextStepState;
 
 beforeEach(() => {
   policyOverride.mode = 'lease';
+  policyOverride.ready = false;
   h = makeHarness();
   state = makeState(h.root, {
     developer: DEV_RETURN,
@@ -552,9 +557,20 @@ describe('preSignRebase against real git and the real ledger writer (AISDLC-1021
   });
 });
 
+/** Give the repo a CodeQL workflow that runs on pull requests (task PRs open draft). */
+function writeCodeqlOnPr(): void {
+  const dir = join(h.ctx.workDir, '.github', 'workflows');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'codeql.yml'),
+    'on: [pull_request]\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/init@v3\n',
+  );
+}
+
 describe('shipTask: approved path', () => {
   beforeEach(() => {
     giveKey();
+    writeCodeqlOnPr();
     writeDemoTaskFile(state.worktreePath);
     writeFileSync(join(state.worktreePath, '.active-task'), 'AISDLC-900\n');
   });
@@ -633,6 +649,22 @@ describe('shipTask: approved path', () => {
     expect(res).toMatchObject({ action: 'done' });
     expect(indexOfCall(/^git commit/)).toBe(-1);
     expect(indexOfCall(/^git push/)).toBeGreaterThan(-1);
+  });
+
+  it('opens the PR ready when no pull-request CodeQL exists (AISDLC-1149)', async () => {
+    rmSync(join(h.ctx.workDir, '.github'), { recursive: true, force: true });
+    scriptShip();
+    await shipTask(h.ctx, state);
+    const create = h.runner.calls.find((c) => c.args[0] === 'pr' && c.args[1] === 'create')!;
+    expect(create.args).not.toContain('--draft');
+  });
+
+  it('opens the PR ready when governance.openTaskPrsReady is set (AISDLC-1149)', async () => {
+    policyOverride.ready = true;
+    scriptShip();
+    await shipTask(h.ctx, state);
+    const create = h.runner.calls.find((c) => c.args[0] === 'pr' && c.args[1] === 'create')!;
+    expect(create.args).not.toContain('--draft');
   });
 
   it('puts the classifier decision line and the draft flag in the PR', async () => {

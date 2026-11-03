@@ -502,6 +502,12 @@ export const agentRoleSchema = {
           description:
             'Narrow grant for `cli-merge-if-eligible --source-kind release`: when true, agents may land the release-please PR even if `allowMerge` is `never`. Never satisfies the backlog or gh-issue kinds, which still need `allowMerge: onGreenClean`. Default false.',
         },
+        openTaskPrsReady: {
+          type: 'boolean',
+          default: false,
+          description:
+            'When true, task PRs are opened ready instead of draft (AISDLC-896). When false (default), they are opened draft only if a workflow runs CodeQL on pull requests; otherwise they are opened ready (AISDLC-1149), since no `Analyze` check would ever flip a draft.',
+        },
         allowResetHard: {
           type: 'boolean',
           description:

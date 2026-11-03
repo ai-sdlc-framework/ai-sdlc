@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1149
 title: 'Task PRs open ready when CodeQL does not run on pull requests: shared detection for step 11, ship and mark-ready, openTaskPrsReady in the schema'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-01'
 labels:
@@ -47,13 +47,51 @@ Velocity impact: positive. Task PRs reach `ai-sdlc/pr-ready` on open; no planner
 
 ## Acceptance Criteria
 
-- [ ] AC-1: `pipeline-cli/src/hierarchy/mark-ready.ts` exports `codeqlRunsOnPullRequests(repoRoot)`: true only when a workflow under `.github/workflows/` references `github/codeql-action` and declares a `pull_request` or `pull_request_target` trigger. `repoHasCodeql` is removed or re-pointed to it. Tests cover: no CodeQL workflow; CodeQL on schedule only (this repository's shape); CodeQL on `pull_request`; the `upload-sarif`-only case (scorecard) counts as no CodeQL.
-- [ ] AC-2: Step 11 (`11-push-and-pr.ts`) and `ship.ts` pass `--draft` only when `codeqlRunsOnPullRequests` is true and `openTaskPrsReady` is false. The pipeline log line names the reason (`draft: codeql runs on pull requests` or `ready: no pull-request codeql` or `ready: governance.openTaskPrsReady`). Tests for all three.
-- [ ] AC-3: `markReadyAfterCodeql` drops the body-phrase match; in the CodeQL case it selects drafts by head branch `^ai-sdlc/` exactly as the no-CodeQL case does. Existing tests updated; the `superseded by` and `DIRTY` skips unchanged.
-- [ ] AC-4: `governance.openTaskPrsReady` (boolean, default false) is added to `spec/schemas/agent-role.schema.json` `$defs/Governance` and `sdk-go/core/schemas/agent-role.schema.json`, with a schema test, and documented in `docs/api-reference/governance.md` next to the other governance keys. The `docs/operations/cli-hierarchy.md` paragraph is updated to describe the new default.
-- [ ] AC-5: `.ai-sdlc/agent-role.yaml` in this repository sets `governance.openTaskPrsReady: true` with a comment citing this task and DEC-0290, so the behaviour holds even before AC-2 is read from the verified main checkout.
-- [ ] AC-6: `backlog/completed/` entry for AISDLC-896: a Notes line records that its acceptance criteria were delivered in code but never ticked, and that the schema and docs gap is closed by this task. No other edit to that file.
+- [x] AC-1: `pipeline-cli/src/hierarchy/mark-ready.ts` exports `codeqlRunsOnPullRequests(repoRoot)`: true only when a workflow under `.github/workflows/` references `github/codeql-action` and declares a `pull_request` or `pull_request_target` trigger. `repoHasCodeql` is removed or re-pointed to it. Tests cover: no CodeQL workflow; CodeQL on schedule only (this repository's shape); CodeQL on `pull_request`; the `upload-sarif`-only case (scorecard) counts as no CodeQL.
+- [x] AC-2: Step 11 (`11-push-and-pr.ts`) and `ship.ts` pass `--draft` only when `codeqlRunsOnPullRequests` is true and `openTaskPrsReady` is false. The pipeline log line names the reason (`draft: codeql runs on pull requests` or `ready: no pull-request codeql` or `ready: governance.openTaskPrsReady`). Tests for all three.
+- [x] AC-3: `markReadyAfterCodeql` drops the body-phrase match; in the CodeQL case it selects drafts by head branch `^ai-sdlc/` exactly as the no-CodeQL case does. Existing tests updated; the `superseded by` and `DIRTY` skips unchanged.
+- [x] AC-4: `governance.openTaskPrsReady` (boolean, default false) is added to `spec/schemas/agent-role.schema.json` `$defs/Governance` and `sdk-go/core/schemas/agent-role.schema.json`, with a schema test, and documented in `docs/api-reference/governance.md` next to the other governance keys. The `docs/operations/cli-hierarchy.md` paragraph is updated to describe the new default.
+- [x] AC-5: `.ai-sdlc/agent-role.yaml` in this repository sets `governance.openTaskPrsReady: true` with a comment citing this task and DEC-0290, so the behaviour holds even before AC-2 is read from the verified main checkout.
+- [x] AC-6: `backlog/completed/` entry for AISDLC-896: a Notes line records that its acceptance criteria were delivered in code but never ticked, and that the schema and docs gap is closed by this task. No other edit to that file.
 
 ## Notes
 
 Origin: operator report 2026-11-01 ~20:45Z, PRs #2251 to #2261 draft with CI skipped. Decision DEC-0290 (planner, class a, operator delegated the choice) records the option taken: fix detection and open ready by default, keep `openTaskPrsReady` as an explicit override; rejected: emitting the body phrase (no effect without Analyze checks) and config-only (leaves every adopter without CodeQL-on-PR stuck). Related, not in scope: the TICK escalation record carries an empty message (`dispatch.ts` runCli has no timeout and captures no exit code), and a failed verdict without `signedAt` makes the reconciler route the PR as unowned rather than reclaimable (AISDLC-1139); both reported to the planner separately.
+
+## Final Summary
+
+## Summary
+Rebased AISDLC-1149 onto origin/main (AISDLC-1153 landed) and force-pushed the branch to existing draft PR #2273. The change adds the shared `codeqlRunsOnPullRequests` helper for step 11, ship and mark-ready. It also adds `openTaskPrsReady` to the schemas and docs, sets it in `.ai-sdlc/agent-role.yaml`, and adds a Notes line to the AISDLC-896 file.
+
+## Changes
+- .ai-sdlc/agent-role.yaml
+- backlog/completed/AISDLC-896 - mark-ready flips task prs ready on the repo check workflow when codeql is absent.md
+- backlog/tasks/AISDLC-1149 - task prs open ready when codeql does not run on pull requests.md
+- docs/api-reference/governance.md
+- docs/operations/cli-hierarchy.md
+- pipeline-cli/src/cli/hierarchy.ts
+- pipeline-cli/src/hierarchy/index.ts
+- pipeline-cli/src/hierarchy/mark-ready.test.ts
+- pipeline-cli/src/hierarchy/mark-ready.ts
+- pipeline-cli/src/hierarchy/operational.test.ts
+- pipeline-cli/src/next-step/ship.test.ts
+- pipeline-cli/src/next-step/ship.ts
+- pipeline-cli/src/steps/11-push-and-pr.test.ts
+- pipeline-cli/src/steps/11-push-and-pr.ts
+- reference/src/core/generated-schemas.ts
+- sdk-go/core/schemas/agent-role.schema.json
+- spec/schemas/agent-role.schema.json
+
+## Design decisions
+The rebase hit one conflict, in vitest.git-env.setup.mjs. AISDLC-1153 now clears the executor session env vars there, which made this branch's own env-clearing commit redundant, so I kept main's version. The branch now holds a single commit on top of main. PR #2273 is still a draft, and the next step in `/ai-sdlc execute` should mark it ready. I ran build, test, lint and format:check before the final rebase. That last rebase only picked up newer commits from main, and I did not re-run the suite afterwards.
+
+## Verification
+- `pnpm build` — passed (ai-sdlc-plugin/mcp-server build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (246 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers; review-full)
+
+## Follow-up
+(none)
+
