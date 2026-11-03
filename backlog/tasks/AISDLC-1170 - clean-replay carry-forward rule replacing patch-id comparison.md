@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1170
 title: 'RFC-0061 Phase 1: clean-replay carry-forward rule in one function, replacing patch-id comparison'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-03'
 labels:
