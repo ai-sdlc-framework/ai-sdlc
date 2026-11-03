@@ -669,6 +669,35 @@ jobs:
             --work-dir . \
             2>&1
 
+      # RFC-0061 OQ-7 (AISDLC-1171): emit the verdict record as an Actions artifact
+      # (issuedBy.principal ci-clean-room, tier isolated). This job gains NO permission;
+      # the trusted verdict-writer workflow_run workflow validates the artifact and is the
+      # only holder of contents: write. The tree sha is public commit data.
+      - name: Emit verdict record (RFC-0061 OQ-7)
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          set -euo pipefail
+          TREE_SHA=$(gh api "repos/${HEAD_REPO}/git/commits/${PR_HEAD_SHA}" --jq .tree.sha)
+          node pipeline-cli/bin/cli-ucvg.mjs emit-verdict \
+            --report-path ".ai-sdlc/ucvg/reports/${PR_NUMBER}.unsigned.json" \
+            --head-sha "$PR_HEAD_SHA" \
+            --tree-sha "$TREE_SHA" \
+            --repository "$REPO" \
+            --out-dir "verdict-artifact"
+
+      - name: Upload verdict record artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ucvg-verdict-record
+          path: verdict-artifact/
+          retention-days: 1
+          if-no-files-found: error
+
       # Defense-in-depth: shred the materialized signing key. No-op on ephemeral
       # GitHub-hosted runners (the VM is destroyed), but prevents a 0600 key from
       # persisting on self-hosted / reused runners. if: always() so it runs even

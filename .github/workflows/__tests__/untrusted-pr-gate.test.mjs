@@ -1163,3 +1163,43 @@ describe('AISDLC-845 — head-moved race guard exits 0 and posts no failure stat
     assert.match(String(publish.run), /OUTCOME" = "success"/);
   });
 });
+
+// ── AISDLC-1171: RFC-0061 OQ-7 verdict record artifact + trusted writer ──────
+
+describe('AISDLC-1171 — clean-room verdict artifact and trusted writer', () => {
+  const writerPath = resolve(WORKFLOWS_DIR, 'verdict-writer.yml');
+  const writerText = readFileSync(writerPath, 'utf-8');
+
+  it('clean-room-sign uploads the verdict record artifact and gains no new permission', () => {
+    const job = wf.jobs['clean-room-sign'];
+    assert.deepEqual(job.permissions, { statuses: 'write' });
+    const steps = job.steps.map((s) => `${s.run ?? ''} ${s.uses ?? ''} ${s.with?.name ?? ''}`);
+    assert.ok(steps.some((s) => s.includes('cli-ucvg.mjs emit-verdict')));
+    assert.ok(steps.some((s) => s.includes('ucvg-verdict-record')));
+  });
+
+  it('the writer is a workflow_run workflow on the UCVG gate', () => {
+    const w = loadYaml(writerPath);
+    assert.deepEqual(getTriggers(w).workflow_run.workflows, [wf.name]);
+  });
+
+  it('only the writer job holds contents: write, and no job in the UCVG gate does', () => {
+    const w = loadYaml(writerPath);
+    assert.equal(w.jobs.write.permissions.contents, 'write');
+    for (const job of Object.values(wf.jobs)) {
+      assert.notEqual(job.permissions?.contents, 'write');
+    }
+  });
+
+  it('AC-3: the writer never checks out a PR ref', () => {
+    const w = loadYaml(writerPath);
+    const checkouts = allSteps(w).filter(({ step }) => step.uses?.startsWith('actions/checkout@'));
+    assert.ok(checkouts.length >= 1);
+    for (const { step } of checkouts) {
+      assert.equal(step.with.ref, '${{ github.event.repository.default_branch }}');
+    }
+    assert.doesNotMatch(writerText, /head_sha\s*}}\s*\n\s*(?:fetch-depth|persist)/);
+    assert.doesNotMatch(writerText, /ref:\s*\$\{\{\s*github\.event\.(?:pull_request|workflow_run)/);
+    assert.doesNotMatch(writerText, /refs\/pull\//);
+  });
+});
