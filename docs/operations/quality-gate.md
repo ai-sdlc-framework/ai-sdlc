@@ -398,3 +398,7 @@ A trusted PR push starts two workflows: the gate and the auto-arm workflow. `unt
 ## Pre-push governance gate (AISDLC-1123)
 
 `.husky/pre-push` runs `scripts/check-governance-on-push.sh` over the push range after the fixups (AISDLC-1143: the range is `merge-base(HEAD, origin/main)..HEAD`, the same range as CI, never the stale remote head, so a rebased lease push is checked over the PR diff only): conflict markers, `reviewers` (only when the range adds an attestation envelope, never on a docs-only push), `backlog-drift` (only when a removed or renamed file is referenced from `backlog/`) and `run-gate-tests.mjs` (only when a gate test directory changed, never on a docs-only push). Attestation verification stays in `check-attestation-sign.sh` (AISDLC-694). Same scripts and arguments as CI; CI remains the merge gate. Skip: `AI_SDLC_SKIP_GOVERNANCE_GATE=1`.
+
+## Review verdict check (shadow, RFC-0061 Phase 1)
+
+The `review-verdict-shadow` job in `ai-sdlc-gate.yml` runs `cli-attestation verdict-check`, which reads `refs/ai-sdlc/verdicts/<head>` and posts a non-required shadow status with one reason code: `ok`, `ok-carried:<sha>`, `no-record`, `subject-mismatch`, `coverage-short`, `replay-dirty` or `tier-short`. It is not in the `ai-sdlc/pr-ready` `needs:` list. The job summary records whether the v6 `ai-sdlc/attestation` result agreed. `cli-attestation catches [--since <date>]` compiles, from GitHub status history, each head where the verdict check failed while `ai-sdlc/pr-ready` passed, plus every v6/verdict disagreement; it writes no file.
