@@ -139,10 +139,11 @@ export function catalogWebhookEscalation(
 ): Pick<WebhookHealthTickDeps, 'escalate' | 'closeEpisode'> {
   return {
     escalate: (input) => {
-      const existing = openWebhookDecisionIds(workDir);
-      if (existing.length > 0) return existing[0];
-      // Allocate and append under one lock so two ticks cannot take the same id.
+      // Look up, allocate and append under one lock so two ticks cannot open two records
+      // or take the same id (listDecisions takes no lock, so this is not reentrant-unsafe).
       const decisionId = withEventLogLock({ workDir }, () => {
+        const existing = openWebhookDecisionIds(workDir);
+        if (existing.length > 0) return existing[0];
         const id = nextDecisionIdDurable({ workDir });
         appendDecisionEvent(
           makeDecisionOpenedEvent({
