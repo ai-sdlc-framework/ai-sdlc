@@ -18,6 +18,8 @@
  * @module cli/decisions
  */
 
+import type { DecisionEvent } from '../decisions/decision-record.js';
+import { fileDecision } from './file.js';
 import { resolveCatalogRoot, resolveWriteRoot } from '../decisions/catalog-root.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { join as joinPath } from 'node:path';
@@ -598,12 +600,41 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
   const chainFor = cliDeps.chain ?? createSystemChainDeps;
   // AISDLC-874: writes resolve from the raw --work-dir, not the read root.
   let rawWorkDir = process.cwd();
-  const writeRoot = (): string => {
+  const writeRoot = (file = false): string => {
     try {
-      return resolveWriteRoot(rawWorkDir);
+      return resolveWriteRoot(rawWorkDir, process.env, { file });
     } catch (e) {
       return fail((e as Error).message);
     }
+  };
+  // AISDLC-1161: one writer for every subcommand; --file hands the in-memory events to cli-file.
+  const recordEvents = (
+    argv: Record<string, unknown>,
+    workDir: string,
+    decisionId: string,
+    events: DecisionEvent[],
+    persist = false,
+  ): { path: string; filed: boolean } => {
+    if (argv.file) {
+      const taskId =
+        (typeof argv['task-id'] === 'string' && argv['task-id'].trim()) ||
+        process.env.AI_SDLC_ACTIVE_TASK_ID?.trim() ||
+        'planner';
+      try {
+        const r = fileDecision(workDir, decisionId, {
+          taskId,
+          pr: Boolean(argv.pr),
+          events: events as unknown as Array<Record<string, unknown>>,
+        });
+        return { path: r.prUrl ?? r.branch, filed: true };
+      } catch (e) {
+        return fail((e as Error).message);
+      }
+    }
+    let path = '';
+    for (const e of events) path = appendDecisionEvent(e, { workDir });
+    if (persist) persistDecisionLog({ workDir });
+    return { path, filed: false };
   };
   return yargs(hideBin(process.argv))
     .scriptName('cli-decisions')
@@ -618,6 +649,17 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
         rawWorkDir = v;
         return resolveCatalogRoot(v);
       },
+    })
+    .option('file', {
+      type: 'boolean',
+      default: false,
+      describe:
+        'AISDLC-1161: file the event through cli-file (own worktree from origin/main, branch ai-sdlc/file-<dec>) instead of writing the local store; works from the Pattern-C parent.',
+    })
+    .option('pr', {
+      type: 'boolean',
+      default: false,
+      describe: 'With --file: open the pull request.',
     })
     .command(
       'list',
@@ -859,7 +901,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             default: 'text' as const,
           }),
       async (argv) => {
-        const workDir = writeRoot();
+        const workDir = writeRoot(Boolean(argv.file));
         if (!isDecisionCatalogEnabled()) {
           // AC#6 — degrade-open is read-only; the mutating path refuses.
           fail(
@@ -959,9 +1001,9 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
           now: eventNow,
         });
 
-        const path = appendDecisionEvent(event, { workDir });
-        persistDecisionLog({ workDir });
-        const decision = projectDecision(decisionId, { workDir });
+        const filed = recordEvents(argv, workDir, decisionId, [event], true);
+        const path = filed.path;
+        const decision = filed.filed ? null : projectDecision(decisionId, { workDir });
 
         if (String(argv.format) === 'json') {
           emit({ ok: true, decisionId, path, decision });
@@ -1064,7 +1106,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             default: 'text' as const,
           }),
       async (argv) => {
-        const workDir = writeRoot();
+        const workDir = writeRoot(Boolean(argv.file));
 
         if (!isDecisionCatalogEnabled()) {
           // When the catalog is off: print to stderr and exit with the
@@ -1151,8 +1193,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
           by: `dispatched-session:${taskId}`,
         });
 
-        const path = appendDecisionEvent(event, { workDir });
-        persistDecisionLog({ workDir });
+        const path = recordEvents(argv, workDir, decisionId, [event], true).path;
 
         let parkedOk = false;
         let notified: { sent: boolean; to?: string; reason?: string } | undefined;
@@ -1252,7 +1293,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             default: 'text' as const,
           }),
       async (argv) => {
-        const workDir = String(argv['work-dir']);
+        const workDir = writeRoot(Boolean(argv.file));
         const id = String(argv.id);
         if (!/^DEC-\d{4,}$/.test(id)) {
           fail(`invalid decision id: ${id} — expected DEC-NNNN`);
@@ -1303,7 +1344,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             decisionId: id,
             stageAOutput: baselineStageA,
           });
-          appendDecisionEvent(event, { workDir });
+          recordEvents(argv, workDir, id, [event]);
         }
 
         if (String(argv.format) === 'json') {
@@ -1475,7 +1516,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             default: 'text' as const,
           }),
       async (argv) => {
-        const workDir = String(argv['work-dir']);
+        const workDir = writeRoot(Boolean(argv.file));
         const id = String(argv.id);
         if (!/^DEC-\d{4,}$/.test(id)) {
           fail(`invalid decision id: ${id} — expected DEC-NNNN`);
@@ -1588,16 +1629,16 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             stageC,
             autoApplied: autoApplyEligible,
           });
-          appendDecisionEvent(stageCEvent, { workDir });
-
+          const stageCEvents: DecisionEvent[] = [stageCEvent];
           if (autoApplyEligible) {
             const answeredEvent = makeStageCAutoApplyAnsweredEvent({
               decisionId: id,
               chosenOptionId: stageC.recommendation.optionId,
               rationale: stageC.recommendation.rationale,
             });
-            appendDecisionEvent(answeredEvent, { workDir });
+            stageCEvents.push(answeredEvent);
           }
+          recordEvents(argv, workDir, id, stageCEvents);
         }
 
         if (String(argv.format) === 'json') {
@@ -1862,7 +1903,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             default: 'text' as const,
           }),
       async (argv) => {
-        const workDir = writeRoot();
+        const workDir = writeRoot(Boolean(argv.file));
         const id = String(argv.id);
         const optionId = String(argv.optionId);
         if (!/^DEC-\d{4,}$/.test(id)) {
@@ -1875,14 +1916,16 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
           );
         }
         const decision = projectDecision(id, { workDir });
-        if (decision === null) fail(`decision not found: ${id}`);
-        if (!decision!.spec.options.some((o) => o.id === optionId)) {
+        // AISDLC-1161 (AC-2): under --file the decision may exist only on origin/main;
+        // fileDecision then validates option and duplicate pair against origin/main.
+        if (decision === null && !argv.file) fail(`decision not found: ${id}`);
+        if (decision && !decision.spec.options.some((o) => o.id === optionId)) {
           fail(
-            `optionId "${optionId}" is not declared on ${id} — valid options: ${decision!.spec.options.map((o) => o.id).join(', ')}`,
+            `optionId "${optionId}" is not declared on ${id} — valid options: ${decision.spec.options.map((o) => o.id).join(', ')}`,
           );
         }
         // RFC-0051: an escalated decision is answered only by the tier that owns it.
-        const tier = decision!.status.escalationTier;
+        const tier = decision?.status.escalationTier;
         const chain = tier !== undefined ? chainFor(workDir) : undefined;
         if (tier !== undefined && chain !== undefined) {
           const who = lookupCaller(chain);
@@ -1895,9 +1938,8 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
           ...(typeof argv.rationale === 'string' ? { rationale: String(argv.rationale) } : {}),
           ...(typeof argv.by === 'string' ? { by: String(argv.by) } : {}),
         });
-        appendDecisionEvent(evt, { workDir });
-        persistDecisionLog({ workDir });
-        const after = chain ? afterAnswer(chain, decision!) : undefined;
+        recordEvents(argv, workDir, id, [evt], true);
+        const after = chain && decision ? afterAnswer(chain, decision) : undefined;
 
         if (String(argv.format) === 'json') {
           emit({
@@ -1995,7 +2037,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             default: 'text' as const,
           }),
       async (argv) => {
-        const workDir = String(argv['work-dir']);
+        const workDir = writeRoot(Boolean(argv.file));
         const id = String(argv.id);
         const optionId = String(argv.option);
         if (!/^DEC-\d{4,}$/.test(id)) {
@@ -2040,7 +2082,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             : {}),
           ...(typeof argv.by === 'string' ? { by: String(argv.by) } : {}),
         });
-        appendDecisionEvent(evt, { workDir });
+        recordEvents(argv, workDir, evt.decisionId, [evt]);
 
         if (String(argv.format) === 'json') {
           emit({
@@ -2082,7 +2124,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             default: 'text' as const,
           }),
       async (argv) => {
-        const workDir = String(argv['work-dir']);
+        const workDir = writeRoot(Boolean(argv.file));
         const dryRun = Boolean(argv['dry-run']);
         if (!isDecisionCatalogEnabled()) {
           fail(
@@ -2137,7 +2179,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
               ...(d.spec.contextRef !== undefined ? { contextRef: d.spec.contextRef } : {}),
               now,
             });
-            appendDecisionEvent(evt, { workDir });
+            recordEvents(argv, workDir, evt.decisionId, [evt]);
           }
         }
 
@@ -2184,7 +2226,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             default: 'text' as const,
           }),
       async (argv) => {
-        const workDir = String(argv['work-dir']);
+        const workDir = writeRoot(Boolean(argv.file));
         const id = String(argv.id);
         const optionId = String(argv.optionId);
         if (!/^DEC-\d{4,}$/.test(id)) {
@@ -2234,7 +2276,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
           ...(typeof argv.rationale === 'string' ? { rationale: String(argv.rationale) } : {}),
           ...(typeof argv.by === 'string' ? { by: String(argv.by) } : {}),
         });
-        appendDecisionEvent(evt, { workDir });
+        recordEvents(argv, workDir, evt.decisionId, [evt]);
 
         // Flip the substrate corpus polarity to negative (AC#6).
         const corpusEntryId = lastStageC!.stageC.corpusEntryId ?? null;
@@ -2315,7 +2357,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             default: 'text' as const,
           }),
       async (argv) => {
-        const workDir = String(argv['work-dir']);
+        const workDir = writeRoot(Boolean(argv.file));
         const id = String(argv.id);
         if (!/^DEC-\d{4,}$/.test(id)) {
           fail(`invalid decision id: ${id} — expected DEC-NNNN`);
@@ -2349,7 +2391,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
           ...(typeof argv.by === 'string' ? { by: String(argv.by) } : {}),
           now: eventNow,
         });
-        appendDecisionEvent(evt, { workDir });
+        recordEvents(argv, workDir, evt.decisionId, [evt]);
 
         if (String(argv.format) === 'json') {
           emit({

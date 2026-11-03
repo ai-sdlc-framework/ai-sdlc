@@ -568,7 +568,14 @@ export function fileTask(
 export function fileDecision(
   repo: string,
   decisionId: string,
-  opts: { taskId: string; answer?: string; rationale?: string; pr: boolean },
+  opts: {
+    taskId: string;
+    answer?: string;
+    rationale?: string;
+    pr: boolean;
+    /** AISDLC-1161: events built in memory by `cli-decisions --file`; never staged in the parent. */
+    events?: Array<Record<string, unknown>>;
+  },
   deps: FileDeps = defaultDeps,
 ) {
   const logPath = join(repo, EVENT_LOG_REL);
@@ -576,6 +583,13 @@ export function fileDecision(
   const legacy = parseLogStrict(hasLegacy ? readFileSync(logPath, 'utf8') : '', 'local log');
   // Per-event store (AISDLC-719), read through the shared event-log module.
   const local = mergeEvents(legacy, readStoreEvents(repo));
+  const inMemory = opts.events ?? [];
+  for (const e of inMemory) {
+    if (e.decisionId !== decisionId) {
+      throw new FileRefusal(`in-memory event is for ${String(e.decisionId)}, not ${decisionId}`);
+    }
+    local.events.push(e);
+  }
   git(deps, repo, 'fetch', 'origin', 'main');
   const mainEvents: Array<Record<string, unknown>> = [];
   const mainShow = deps.exec('git', ['show', `origin/main:${EVENT_LOG_REL}`], repo);
@@ -598,7 +612,22 @@ export function fileDecision(
   const onMainPairs = pairCounts(mainEvents);
   assertNoDuplicatePairs(local.events, 'local log', onMainPairs);
   const own = local.events.filter((e) => e.decisionId === decisionId);
-  const opened = own.find((e) => e.type === 'decision-opened');
+  const opened =
+    own.find((e) => e.type === 'decision-opened') ??
+    mainEvents.find((e) => e.decisionId === decisionId && e.type === 'decision-opened');
+  for (const e of inMemory) {
+    if ((onMainPairs.get(`${decisionId}|${String(e.type)}`) ?? 0) > 0) {
+      throw new FileRefusal(`duplicate (decisionId, type) pair ${decisionId} ${String(e.type)}`);
+    }
+    if (e.type === 'operator-answered' && opened) {
+      const valid = (opened.options as Array<{ id: string }> | undefined) ?? [];
+      if (!valid.some((o) => o.id === e.chosenOptionId)) {
+        throw new FileRefusal(
+          `option ${String(e.chosenOptionId)} is not an option of ${decisionId}`,
+        );
+      }
+    }
+  }
   if (!opened) {
     throw new FileRefusal(`no decision-opened event for ${decisionId} in ${EVENT_LOG_REL}`);
   }
