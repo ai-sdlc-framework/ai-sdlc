@@ -384,6 +384,8 @@ function reviewsSummary(state: NextStepState): DoneInstruction['reviews'] {
 // ── ship ─────────────────────────────────────────────────────────────
 
 const PUSH_ATTEMPTS = 2;
+/** A push that failed for a reason other than a real divergence (hook refusal, auth, network). */
+const PUSH_FAILED_CAUSE = 'push-failed';
 const PUSH_TIMEOUT_MS = 30 * 60_000;
 
 /**
@@ -418,6 +420,7 @@ async function leasePushOwnRebaseShip(
   wt: string,
   branch: string,
   env: NodeJS.ProcessEnv | undefined,
+  seenBeforeFetch?: string,
 ): Promise<Awaited<ReturnType<NextStepContext['runner']>> | null> {
   const policy = loadOperationalPolicy(ctx.workDir, ctx.workDir);
   if (policy.forcePushMode === 'never') return null;
@@ -433,7 +436,7 @@ async function leasePushOwnRebaseShip(
     const r = await runner('git', ['rev-parse', ref], { cwd: wt, allowFailure: true });
     return r.code === 0 ? r.stdout.trim() : '';
   };
-  const recorded = await sha();
+  const recorded = seenBeforeFetch ?? (await sha());
   if (!/^[0-9a-f]{40,64}$/i.test(recorded)) return null;
   const fetched = await runner('git', ['fetch', 'origin', branch], {
     cwd: wt,
@@ -551,6 +554,7 @@ async function shipInner(
   // Step 11a — push. The pre-push hook may sign, commit the envelope and exit 1 once.
   let pushRc = 1;
   let pushErr = '';
+  let diverged = false;
   for (let attempt = 0; attempt < PUSH_ATTEMPTS; attempt += 1) {
     const push = await runner('git', ['push', '-u', 'origin', state.branch], {
       cwd: wt,
@@ -562,27 +566,59 @@ async function shipInner(
     pushErr = (push.stderr || push.stdout).trim();
     if (pushRc === 0) break;
     if (/non-fast-forward/i.test(pushErr)) {
+      // AISDLC-1164: only git's own non-fast-forward line, confirmed by a fetch showing the
+      // remote tip is not an ancestor of HEAD, is a divergence. A remote that is an ancestor
+      // means the refusal came from elsewhere (a hook); push plainly again, no lease.
+      const seenRef = await runner('git', ['rev-parse', `refs/remotes/origin/${state.branch}`], {
+        cwd: wt,
+        allowFailure: true,
+      });
+      const seenBeforeFetch = seenRef.code === 0 ? seenRef.stdout.trim() : undefined;
+      const fetched = await runner('git', ['fetch', 'origin', state.branch], {
+        cwd: wt,
+        allowFailure: true,
+        timeout: 30_000,
+      });
+      const isAncestor =
+        fetched.code === 0 &&
+        (
+          await runner(
+            'git',
+            ['merge-base', '--is-ancestor', `refs/remotes/origin/${state.branch}`, 'HEAD'],
+            { cwd: wt, allowFailure: true },
+          )
+        ).code === 0;
+      if (isAncestor) continue;
+      diverged = true;
       // AISDLC-1098: step 10.5 rebased a branch whose developer pass had already
       // force-pushed, so local and remote diverge. Push what we rebased with one
       // policy-checked lease push pinned to the remote tip this run last saw; a
       // remote that moved since (a foreign push) keeps the abort.
-      const lease = await leasePushOwnRebaseShip(ctx, runner, wt, state.branch, pushEnv);
+      const lease = await leasePushOwnRebaseShip(
+        ctx,
+        runner,
+        wt,
+        state.branch,
+        pushEnv,
+        seenBeforeFetch,
+      );
       if (lease) {
         pushRc = lease.code;
         pushErr = (lease.stderr || lease.stdout).trim();
         if (pushRc === 0) break;
+        diverged = /non-fast-forward|stale info/i.test(pushErr);
       }
     }
   }
   if (pushRc !== 0) {
-    const nonFf = /non-fast-forward|rejected/i.test(pushErr);
+    const lastLines = pushErr.split('\n').slice(-12).join('\n');
     return stop(
       state,
       'aborted',
-      nonFf
+      diverged
         ? `non-fast-forward push to '${state.branch}'; cleanup is to delete the remote branch and rerun, but that is destructive, confirm with the operator first (no force-push is attempted)`
-        : `${PUSH_ATTEMPTS} push attempts failed (last exit ${pushRc}): ${pushErr}`,
-      nonFf ? { cause: PUSH_NON_FAST_FORWARD_CAUSE } : {},
+        : `push to '${state.branch}' failed after ${PUSH_ATTEMPTS} attempts (last exit ${pushRc}); git output:\n${lastLines}`,
+      { cause: diverged ? PUSH_NON_FAST_FORWARD_CAUSE : PUSH_FAILED_CAUSE },
     );
   }
 

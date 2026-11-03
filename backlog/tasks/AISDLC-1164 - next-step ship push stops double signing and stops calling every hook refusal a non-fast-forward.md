@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1164
 title: 'next-step ship: the push after Step 10.6 signing must not be re-signed by the pre-push hook, and a hook refusal must not be reported as push-non-fast-forward'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-03'
 labels:

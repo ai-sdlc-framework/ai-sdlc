@@ -855,7 +855,8 @@ describe('shipTask: failures stop before anything irreversible', () => {
     h.runner.on(/^git push/, fail('network down', 128));
     scriptShip();
     const res = await shipTask(h.ctx, state);
-    expect(res.action === 'stop' && res.reason).toContain('2 push attempts failed');
+    expect(res.action === 'stop' && res.reason).toContain('network down');
+    expect(res.action === 'stop' && res.cause).toBe('push-failed');
     expect(cmds().filter((c) => c.startsWith('git push'))).toHaveLength(2);
     expect(cmds().some((c) => /--force|\s-f(\s|$)/.test(c))).toBe(false);
     expect(indexOfCall(/gh pr create/)).toBe(-1);
@@ -863,6 +864,7 @@ describe('shipTask: failures stop before anything irreversible', () => {
 
   it('stops on a non-fast-forward without deleting or forcing anything', async () => {
     giveKey();
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1)); // remote tip is not an ancestor
     h.runner.on(/^git push/, fail('! [rejected] non-fast-forward', 1));
     scriptShip();
     const res = await shipTask(h.ctx, state);
@@ -878,6 +880,7 @@ describe('shipTask: failures stop before anything irreversible', () => {
     const sha = 'a'.repeat(40);
     h.runner.on(/rev-parse refs\/remotes\/origin\//, ok(`${sha}\n`));
     h.runner.on(/^git push -u --force-with-lease=/, ok(''));
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1)); // remote tip is not an ancestor
     h.runner.on(/^git push -u origin/, fail('! [rejected] non-fast-forward', 1));
     scriptShip();
     const res = await shipTask(h.ctx, state);
@@ -891,6 +894,7 @@ describe('shipTask: failures stop before anything irreversible', () => {
     giveKey();
     policyOverride.mode = 'never';
     h.runner.on(/rev-parse refs\/remotes\/origin\//, ok(`${'a'.repeat(40)}\n`));
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1)); // remote tip is not an ancestor
     h.runner.on(/^git push -u origin/, fail('! [rejected] non-fast-forward', 1));
     scriptShip();
     const res = await shipTask(h.ctx, state);
@@ -906,10 +910,41 @@ describe('shipTask: failures stop before anything irreversible', () => {
       return ok('');
     });
     h.runner.on(/rev-parse refs\/remotes\/origin\//, () => ok(`${String(gen).repeat(40)}\n`));
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1)); // remote tip is not an ancestor
     h.runner.on(/^git push -u origin/, fail('! [rejected] non-fast-forward', 1));
     scriptShip();
     const res = await shipTask(h.ctx, state);
     expect(res.action === 'stop' && res.cause).toBe('push-non-fast-forward');
+    expect(cmds().some((c) => c.includes('--force-with-lease'))).toBe(false);
+  });
+
+  it('reports a hook refusal as push-failed with its stderr, not as a divergence (AISDLC-1164)', async () => {
+    giveKey();
+    h.runner.on(
+      /^git push/,
+      fail(
+        '[attestation-sign] ERROR: envelope rejected\nerror: failed to push some refs (rejected)',
+        1,
+      ),
+    );
+    scriptShip();
+    const res = await shipTask(h.ctx, state);
+    expect(res.action === 'stop' && res.cause).toBe('push-failed');
+    expect(res.action === 'stop' && res.reason).toContain('envelope rejected');
+    expect(res.action === 'stop' && res.reason).not.toContain('destructive');
+  });
+
+  it('pushes plainly again when a non-fast-forward line comes with the remote an ancestor (AISDLC-1164)', async () => {
+    giveKey();
+    let pushes = 0;
+    h.runner.on(/^git push/, () => {
+      pushes += 1;
+      return pushes === 1 ? fail('hook: non-fast-forward text', 1) : ok('');
+    });
+    h.runner.on(/merge-base --is-ancestor/, ok(''));
+    scriptShip();
+    const res = await shipTask(h.ctx, state);
+    expect(res.action).toBe('done');
     expect(cmds().some((c) => c.includes('--force-with-lease'))).toBe(false);
   });
 

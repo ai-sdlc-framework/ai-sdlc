@@ -346,6 +346,73 @@ describe('sign-attestation.mjs', () => {
   // ── AISDLC-274: single-envelope-per-PR invariant ──────────────────────
 });
 
+// ── AISDLC-1164: the signer binds the workflow digest the verifier demands ──
+describe('sign-attestation.mjs — workflow digest (AISDLC-1164)', () => {
+  let tmpHome;
+  let fixture;
+
+  beforeEach(() => {
+    tmpHome = mkdtempSync(join(tmpdir(), 'ai-sdlc-sign-home-'));
+    fixture = setupRepo(tmpHome);
+    writeKey(tmpHome);
+    const dist = join(fixture.root, 'pipeline-cli', 'dist');
+    mkdirSync(join(dist, 'workflow'), { recursive: true });
+    const realDigest = join(repoRoot, 'pipeline-cli', 'dist', 'workflow', 'digest.js');
+    writeFileSync(
+      join(dist, 'workflow', 'digest.js'),
+      `export * from '${realDigest.replace(/\\/g, '\\\\')}';\n`,
+    );
+    // Capture what the signer hands to the envelope builder.
+    writeFileSync(
+      join(dist, 'attestation', 'sign-v6.js'),
+      `import { writeFileSync } from 'node:fs';
+export function signAndWriteV6Envelope(opts) {
+  writeFileSync(process.env.CAPTURE_PATH, JSON.stringify(opts));
+  return 'captured';
+}\n`,
+    );
+  });
+
+  afterEach(() => {
+    rmSync(fixture.root, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  function sign(extraEnv) {
+    const capture = join(fixture.root, 'captured.json');
+    const res = runHelper(fixture.root, ['--task-id', 'AISDLC-1164'], {
+      HOME: tmpHome,
+      CAPTURE_PATH: capture,
+      ...extraEnv,
+    });
+    return { res, opts: existsSync(capture) ? JSON.parse(readFileSync(capture, 'utf-8')) : null };
+  }
+
+  it('passes the digest from AI_SDLC_WORKFLOW_STATE to the envelope builder', () => {
+    const statePath = join(fixture.root, 'state.json');
+    const workflow = {
+      path: 'builtin:execute-task',
+      sha256: 'a'.repeat(64),
+      baseSha: 'b'.repeat(40),
+      records: [{ id: 'x' }],
+    };
+    writeFileSync(statePath, JSON.stringify({ workflow }));
+    const { res, opts } = sign({ AI_SDLC_WORKFLOW_STATE: statePath });
+    assert.equal(res.status, 0, res.stderr);
+    assert.deepEqual(opts.workflowDigest, {
+      path: workflow.path,
+      sha256: workflow.sha256,
+      baseSha: workflow.baseSha,
+    });
+  });
+
+  it('adds no digest when no run state names one', () => {
+    const { res, opts } = sign({});
+    assert.equal(res.status, 0, res.stderr);
+    assert.equal(opts.workflowDigest, undefined);
+  });
+});
+
 // ── AISDLC-554: attestation runtime resolution in ADOPTER repos ──────
 //
 // The signer used to hardcode `<cwd>/orchestrator/dist/runtime/attestations.js`,

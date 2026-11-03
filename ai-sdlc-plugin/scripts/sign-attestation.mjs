@@ -384,6 +384,29 @@ async function tryLoadPipelineCliPatchId(repoRoot) {
   }
 }
 
+// AISDLC-1164: the hook's verifier refuses an envelope with no `workflowDigest` when the run
+// state (AI_SDLC_WORKFLOW_STATE) shows workflow-engine records. This signer used to omit the
+// digest, so the pre-push hook signed, the verifier rejected the result, and the hook signed
+// again on the retry. Read it from the same module `cli-attestation sign-v6` uses.
+async function resolveWorkflowDigest(repoRoot, statePath) {
+  if (!statePath) return undefined;
+  const candidates = runtimeModuleCandidates(repoRoot, 'pipeline-cli', '@ai-sdlc/pipeline-cli', [
+    'dist',
+    'workflow',
+    'digest.js',
+  ]);
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (!found) {
+    if (!existsSync(statePath)) return undefined;
+    fail(
+      `AI_SDLC_WORKFLOW_STATE names ${statePath} but the pipeline-cli workflow digest module is ` +
+        'not built; the envelope would lack workflowDigest. Run: pnpm --filter @ai-sdlc/pipeline-cli build',
+    );
+  }
+  const mod = await import(pathToFileURL(found).href);
+  return mod.workflowDigestFromStateFile(statePath);
+}
+
 function parseArgs(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i++) {
@@ -585,6 +608,12 @@ async function main() {
         // AISDLC-398: pass patch-id so the signer can write the primary
         // content-addressed filename. Falls back to per-SHA when null.
         patchId: v6PatchId ?? undefined,
+        workflowDigest: await resolveWorkflowDigest(
+          repoRoot,
+          typeof args['workflow-state'] === 'string'
+            ? args['workflow-state']
+            : process.env['AI_SDLC_WORKFLOW_STATE'],
+        ),
       });
     } catch (err) {
       fail(err.message ?? String(err));
