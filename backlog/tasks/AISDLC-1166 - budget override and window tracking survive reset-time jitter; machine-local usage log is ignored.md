@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1166
 title: 'Budget override and window tracking survive reset-time jitter; the machine-local usage log is ignored so Step 0.5 stops refusing dispatch'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-03'
 labels:

@@ -174,7 +174,7 @@ export function recordUsage(boardDir: string, result: UsageFetch, nowDate: Date)
     file.samples = [...prev.samples, result.sample].filter((s) => Date.parse(s.at) >= cutoff);
     for (const name of ['fiveHour', 'sevenDay'] as const) {
       const r = result.sample[name];
-      if (r && file.windows[name]?.resetsAt !== r.resetsAt) {
+      if (r && !sameWindow(file.windows[name]?.resetsAt, r.resetsAt)) {
         file.windows[name] = {
           resetsAt: r.resetsAt,
           at: result.sample.at,
@@ -231,10 +231,10 @@ export function paceOf(
   const start = file.windows[name];
   const windowStart = resets - TOTAL_MS[name];
   const t0 =
-    start && start.resetsAt === cur.resetsAt
+    start && sameWindow(start.resetsAt, cur.resetsAt)
       ? Math.max(windowStart, Date.parse(start.at))
       : windowStart;
-  const u0 = start && start.resetsAt === cur.resetsAt ? start.utilization : 0;
+  const u0 = start && sameWindow(start.resetsAt, cur.resetsAt) ? start.utilization : 0;
   const total = resets - t0;
   const elapsed = Math.min(Math.max(nowMs - t0, 0), total);
   const line = total > 0 ? u0 + ((100 - u0) * elapsed) / total : 100;
@@ -246,7 +246,7 @@ export function paceOf(
     margin,
     resetsAt: cur.resetsAt,
   };
-  const oldest = file.samples.find((s) => s[name]?.resetsAt === cur.resetsAt);
+  const oldest = file.samples.find((s) => sameWindow(s[name]?.resetsAt, cur.resetsAt));
   const o = oldest?.[name];
   if (oldest && o) {
     const dt = nowMs - Date.parse(oldest.at);
@@ -277,6 +277,17 @@ function readOverride(boardDir: string): { sevenDay?: string; fiveHour?: string 
 }
 
 /** The pace of both windows from `usage.json`; undefined when no sample exists. */
+/** The usage endpoint jitters a window's reset time between samples (AISDLC-1166). */
+export const RESET_TOLERANCE_MS = 60_000;
+
+/** True when two reset timestamps name the same window, within the tolerance. */
+export function sameWindow(a: string | undefined, b: string | undefined): boolean {
+  if (a === undefined || b === undefined) return false;
+  if (a === b) return true;
+  const d = Math.abs(Date.parse(a) - Date.parse(b));
+  return Number.isFinite(d) && d <= RESET_TOLERANCE_MS;
+}
+
 export function budgetStatus(boardDir: string, nowMs: number): BudgetStatus | undefined {
   const file = readUsage(boardDir);
   if (!file.sample) return undefined;
@@ -289,8 +300,8 @@ export function budgetStatus(boardDir: string, nowMs: number): BudgetStatus | un
     ...(sevenDay ? { sevenDay } : {}),
     ...(fiveHour ? { fiveHour } : {}),
     overridden: Boolean(
-      (sevenDay && ov.sevenDay === sevenDay.resetsAt) ||
-      (fiveHour && ov.fiveHour === fiveHour.resetsAt),
+      (sevenDay && sameWindow(ov.sevenDay, sevenDay.resetsAt)) ||
+      (fiveHour && sameWindow(ov.fiveHour, fiveHour.resetsAt)),
     ),
   };
 }
@@ -343,7 +354,7 @@ export async function runBudgetPacer(boardDir: string, deps: UsageDeps): Promise
   const ov = readOverride(boardDir);
   const paces = (['sevenDay', 'fiveHour'] as const)
     .map((n) => paceOf(n, file, margins[n], nowMs))
-    .filter((p): p is WindowPace => p !== undefined && ov[p.name] !== p.resetsAt);
+    .filter((p): p is WindowPace => p !== undefined && !sameWindow(ov[p.name], p.resetsAt));
   const over = paces.filter((p) => p.ahead > p.margin);
   const held = readHold(boardDir);
   const budgetHeld = held?.reason.startsWith(BUDGET_HOLD_PREFIX) === true;
