@@ -187,4 +187,35 @@ describe('cleanReplayCarriesForward', () => {
       status: 'replay-dirty',
     });
   });
+
+  describe('merge-tree path (fake runner, independent of local git version)', () => {
+    const rev = { headSha: 'r'.repeat(40), baseSha: 'b'.repeat(40) };
+    const cand = { headSha: 'c'.repeat(40), baseSha: 'd'.repeat(40) };
+    const fake =
+      (mergeCode: number, mergeTree: string): Runner =>
+      async (_c, args) => {
+        if (args[0] === '--version') return { stdout: 'git version 2.43.0', stderr: '', code: 0 };
+        if (args[0] === 'rev-parse')
+          return { stdout: args[1].startsWith('r') ? 'T1\n' : 'T2\n', stderr: '', code: 0 };
+        expect(args.slice(0, 3)).toEqual([
+          'merge-tree',
+          '--write-tree',
+          `--merge-base=${rev.baseSha}`,
+        ]);
+        return { stdout: `${mergeTree}\n`, stderr: '', code: mergeCode };
+      };
+
+    it('carries when the clean replay tree equals the candidate tree', async () => {
+      await expect(cleanReplayCarriesForward(fake(0, 'T2'), '/x', rev, cand)).resolves.toBe(true);
+      await expect(findCarriedVerdict(fake(0, 'T2'), '/x', cand, [rev])).resolves.toEqual({
+        status: 'ok-carried',
+        from: rev.headSha,
+      });
+    });
+
+    it('does not carry on conflict or a differing tree', async () => {
+      await expect(cleanReplayCarriesForward(fake(1, 'T2'), '/x', rev, cand)).resolves.toBe(false);
+      await expect(cleanReplayCarriesForward(fake(0, 'T9'), '/x', rev, cand)).resolves.toBe(false);
+    });
+  });
 });
