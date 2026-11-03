@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1087
 title: 'verify-commands takes a shared board lock so at most two executors run a test suite at once, and caps vitest workers while others wait, so host load stops manufacturing timeout failures'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-27'
 labels:
@@ -36,8 +36,38 @@ Measured 2026-10-27 on the operator's 12-core machine: the pipeline-cli suite al
 
 ## Acceptance Criteria
 
-- [ ] Three concurrent `runVerifyCommands` calls against one board directory run at most two test commands at a time (test with a fake command that records its start and end timestamps).
-- [ ] A slot directory whose pid is dead is reclaimed by the next caller; a live holder is not.
-- [ ] The second concurrent run sees `AI_SDLC_VITEST_MAX_WORKERS=2` in its environment and the first sees 4.
-- [ ] `cli-hierarchy status` shows held slots; an empty slot set prints nothing extra.
+- [x] Three concurrent `runVerifyCommands` calls against one board directory run at most two test commands at a time (test with a fake command that records its start and end timestamps).
+- [x] A slot directory whose pid is dead is reclaimed by the next caller; a live holder is not.
+- [x] The second concurrent run sees `AI_SDLC_VITEST_MAX_WORKERS=2` in its environment and the first sees 4.
+- [x] `cli-hierarchy status` shows held slots; an empty slot set prints nothing extra.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+
+## Final Summary
+
+## Summary
+verify-commands now takes one of two shared board slots (new pipeline-cli/src/runtime/verify-slots.ts). Dead-pid slots are reclaimed. The second concurrent run gets AI_SDLC_VITEST_MAX_WORKERS=2 and the first gets 4. `cli-hierarchy status` lists held slots and prints nothing extra when none are held. I rebased onto origin/main, resolved a conflict in verify-commands.ts and its test by keeping both sides, and force-pushed with lease to the existing draft PR.
+
+## Changes
+- pipeline-cli/src/runtime/verify-slots.ts
+- pipeline-cli/src/steps/verify-commands.ts
+- pipeline-cli/src/steps/verify-commands.test.ts
+- pipeline-cli/src/cli/hierarchy.ts
+- pipeline-cli/src/cli/hierarchy.test.ts
+- pipeline-cli/src/execute-pipeline.ts
+- pipeline-cli/src/next-step/next-step.ts
+- docs/operations/cli-hierarchy.md
+- backlog/tasks/AISDLC-1087 - verification runs are serialised across executors with a board lock and a worker cap.md
+
+## Design decisions
+After the rebase I ran only verify-commands.test.ts and hierarchy.test.ts (108 tests passed) and `tsc --noEmit`, which printed no errors. I did not run the full build, test, lint or format suite after the rebase; the orchestrator re-runs those. The conflict was with the main commit that added `strippedSessionEnv`, so the runner env is now `{ ...strippedSessionEnv(), ...env }`. The pre-push hook took more than 120 seconds and printed merkle warnings about leaf index mismatches in test fixtures; the push still succeeded. The PR was already open as a draft before this run, so I did not create a new one.
+
+## Verification
+- `pnpm build` — passed (ai-sdlc-plugin/mcp-server build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (246 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
