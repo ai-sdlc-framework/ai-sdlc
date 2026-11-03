@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ACTIVE_STALE_MS,
   BUSY_SCRIPT,
+  LAST_REPLY_MAX_CHARS,
   RESUME_COMMAND,
   ROTATION_TTL_MS,
   ROTATION_KEY,
@@ -20,9 +21,12 @@ import {
 } from '../../hooks/hierarchy/executor.ts';
 import { recordReceivedSender } from '../../hooks/hierarchy/dispatch.ts';
 import {
+  HANDOFF_PROMPT,
   PLANNER_RESUME_COMMAND,
   PLANNER_ROTATE_AT_TOKENS,
+  TRANSCRIPT_REPLY_SCRIPT,
   lastReplyKey,
+  rotatePendingKey,
 } from '../../hooks/hierarchy/planner.ts';
 import { registerStrict } from './stubs/hierarchy-strict-host.ts';
 
@@ -601,6 +605,13 @@ describe('hierarchy module: planner role (AISDLC-1036)', () => {
       .map((c: any[]) => c[0])
       .filter((a: any) => a?.command === 'ai-sdlc:hierarchy');
 
+  // The module has no fs: the transcript read is a process.run whose stdout is {"reply": text}.
+  const transcriptReply = (s: ReturnType<typeof setup>, reply: string) =>
+    s.$.process.run.mockImplementation(async (a: any) => {
+      if (!Array.isArray(a) || a.length === 0) throw new Error('process.run: takes argv');
+      return { exitCode: 0, stdout: JSON.stringify({ reply }) + '\n' };
+    });
+
   it('registers the planner hooks and nothing for the executor wake', async () => {
     const s = planner();
     await s.start();
@@ -613,7 +624,8 @@ describe('hierarchy module: planner role (AISDLC-1036)', () => {
     const s = planner();
     await s.start();
     await s.handlers.get('turn.start')(s.$, {}, s.next);
-    await s.handlers.get('turn.complete')(s.$, { text: 'ruling recorded' }, s.next);
+    transcriptReply(s, 'ruling recorded');
+    await s.handlers.get('turn.complete')(s.$, {}, s.next);
     expect(s.kv.get(lastReplyKey('proj-planner'))).toBe('ruling recorded');
     expect(ran(s)).toEqual([]);
     await s.handlers.get('session.measure')(s.$, { tokens: PLANNER_ROTATE_AT_TOKENS }, s.next);
@@ -644,6 +656,10 @@ describe('hierarchy module: planner role (AISDLC-1036)', () => {
     await s.handlers.get('turn.complete')(s.$, { agentId: 'a1', text: 'x' }, s.next);
     expect(ran(s)).toEqual([]);
     await s.handlers.get('turn.complete')(s.$, { text: 'final' }, s.next);
+    // two steps: the handoff prompt turn first, the clear when it completes
+    expect(ran(s)).toEqual([]);
+    expect(submits(s)).toHaveLength(1);
+    await s.handlers.get('turn.complete')(s.$, {}, s.next);
     expect(ran(s)).toEqual(['ai-sdlc:hierarchy', 'clear']);
   });
 
@@ -657,6 +673,146 @@ describe('hierarchy module: planner role (AISDLC-1036)', () => {
     vi.setSystemTime(Date.now() + ACTIVE_STALE_MS + 1000);
     await s.handlers.get('session.measure')(s.$, { tokens: 200_000 }, s.next);
     expect(ran(s)).toEqual(['ai-sdlc:hierarchy', 'clear']);
+  });
+
+  it('prints one operator line and flags rotate pending when a mid-turn measure crosses (AC-5)', async () => {
+    const s = planner();
+    await s.start();
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await s.handlers.get('session.measure')(s.$, { tokens: 162_000 }, s.next);
+    await s.handlers.get('session.measure')(s.$, { tokens: 163_000 }, s.next);
+    err.mockRestore();
+    const lines = logOf(s.kv).filter((l) => l.includes('rotating at end of this turn'));
+    expect(lines).toEqual([
+      '[hierarchy] planner: context 162k, rotating at end of this turn; handoff routine runs first',
+    ]);
+    expect(s.kv.get(rotatePendingKey('proj-planner'))).toMatchObject({ pending: true });
+    await s.handlers.get('turn.complete')(s.$, {}, s.next);
+    await s.handlers.get('turn.complete')(s.$, {}, s.next);
+    expect(s.kv.get(rotatePendingKey('proj-planner'))).toBeNull();
+  });
+
+  it('runs the handoff prompt turn at turn end, clears only when it completes, keeps the real last reply (AC-1, AC-3)', async () => {
+    const s = planner();
+    await s.start();
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    transcriptReply(s, 'two drafts await your go');
+    await s.handlers.get('session.measure')(s.$, { tokens: 170_000 }, s.next);
+    await s.handlers.get('turn.complete')(s.$, {}, s.next);
+    expect(submits(s)).toHaveLength(1);
+    expect(submits(s)[0][0].text).toBe(HANDOFF_PROMPT);
+    for (const needle of [
+      'open rulings',
+      'owed items',
+      'absolute path',
+      'decision id',
+      'scheduled jobs',
+      'peer waits',
+    ])
+      expect(HANDOFF_PROMPT).toContain(needle);
+    expect(ran(s)).toEqual([]);
+    // the handoff turn replies with a path only: it must not replace the stored last reply
+    transcriptReply(s, '/memory/handoff.md');
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    await s.handlers.get('turn.complete')(s.$, {}, s.next);
+    expect(ran(s)).toEqual(['ai-sdlc:hierarchy', 'clear']);
+    expect(s.kv.get(lastReplyKey('proj-planner'))).toBe('two drafts await your go');
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    expect(s.$.command.run).toHaveBeenLastCalledWith({
+      command: PLANNER_RESUME_COMMAND,
+      args: 'last-reply: two drafts await your go',
+    });
+  });
+
+  it('truncates the carried last reply to the documented cap', async () => {
+    const s = planner();
+    await s.start();
+    transcriptReply(s, 'x'.repeat(LAST_REPLY_MAX_CHARS + 500));
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    await s.handlers.get('turn.complete')(s.$, {}, s.next);
+    await s.handlers.get('session.measure')(s.$, { tokens: 200_000 }, s.next);
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    const args = s.$.command.run.mock.calls.at(-1)[0].args as string;
+    expect(args.length).toBe('last-reply: '.length + LAST_REPLY_MAX_CHARS);
+  });
+
+  it('falls back to the CLI-only handoff when the prompt turn is refused (AC-1)', async () => {
+    const s = setup({ role: 'planner', name: 'proj-planner', drop: ['submit'] });
+    await s.start();
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    await s.handlers.get('session.measure')(s.$, { tokens: 200_000 }, s.next);
+    await s.handlers.get('turn.complete')(s.$, {}, s.next);
+    expect(logOf(s.kv)).toContain('[hierarchy] handoff turn refused; state block only');
+    expect(ran(s)).toEqual(['ai-sdlc:hierarchy', 'clear']);
+  });
+
+  it('reads no reply when the transcript is unreadable', async () => {
+    const s = planner();
+    await s.start();
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    await s.handlers.get('turn.complete')(s.$, {}, s.next);
+    expect(s.kv.get(lastReplyKey('proj-planner'))).toBeUndefined();
+    s.$.process.run.mockImplementation(async () => {
+      throw new Error('boom');
+    });
+    await s.handlers.get('turn.complete')(s.$, {}, s.next);
+    expect(s.kv.get(lastReplyKey('proj-planner'))).toBeUndefined();
+  });
+
+  it('the transcript script returns the newest assistant text', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'tr-'));
+    const proj = path.join(dir, 'projects', process.cwd().replace(/[^A-Za-z0-9]/g, '-'));
+    mkdirSync(proj, { recursive: true });
+    const rec = (type: string, content: unknown) =>
+      JSON.stringify({ type, message: { role: type, content } });
+    writeFileSync(
+      path.join(proj, 'sess.jsonl'),
+      [
+        rec('assistant', [{ type: 'text', text: 'older' }]),
+        rec('assistant', [{ type: 'text', text: 'last words' }, { type: 'tool_use' }]),
+        rec('assistant', [{ type: 'tool_use' }]),
+        rec('user', 'hello "assistant"'),
+        'not json "assistant"',
+      ].join('\n'),
+    );
+    for (const id of ['sess', '']) {
+      const out = execFileSync('node', ['-e', TRANSCRIPT_REPLY_SCRIPT, id], {
+        env: { ...process.env, CLAUDE_CONFIG_DIR: dir },
+      }).toString();
+      expect(JSON.parse(out)).toEqual({ reply: 'last words' });
+    }
+    const none = execFileSync('node', ['-e', TRANSCRIPT_REPLY_SCRIPT, ''], {
+      env: { ...process.env, CLAUDE_CONFIG_DIR: path.join(dir, 'missing') },
+    }).toString();
+    expect(JSON.parse(none)).toEqual({ reply: '' });
+  });
+
+  it('keeps a planner rotation record when session.start fires after the clear, resuming once (AC-4)', async () => {
+    const s = planner();
+    await s.start();
+    await s.handlers.get('session.measure')(s.$, { tokens: 200_000 }, s.next);
+    expect(s.kv.get(ROTATION_KEY)).toMatchObject({ role: 'planner' });
+    await s.start();
+    const resumes = () => ran(s).filter((c: string) => c === PLANNER_RESUME_COMMAND);
+    expect(resumes()).toHaveLength(1);
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    expect(resumes()).toHaveLength(1);
+  });
+
+  it('a rotate wake mid-turn schedules the rotation and flags it', async () => {
+    const s = planner();
+    await s.start();
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    const out = await s.handlers.get('session.receive')(
+      s.$,
+      { text: env('proj-operator-dispatch', 'rotate') },
+      s.next,
+    );
+    expect(out).toEqual({ consumed: 'hierarchy:rotate' });
+    expect(s.kv.get(rotatePendingKey('proj-planner'))).toMatchObject({ pending: true });
+    await s.handlers.get('turn.complete')(s.$, {}, s.next);
+    expect(submits(s)).toHaveLength(1);
   });
 
   it('ignores a measure under the threshold', async () => {

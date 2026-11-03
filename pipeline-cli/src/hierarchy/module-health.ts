@@ -65,6 +65,13 @@ export function readModuleMeasure(
   return { tokens: hit.tokens, ...(typeof hit.at === 'string' ? { at: hit.at } : {}) };
 }
 
+/** AISDLC-1159: true while the module holds a deferred rotation for this session (`rotate pending`). */
+export function readModuleRotatePending(storeDirs: readonly string[], name: string): boolean {
+  const hit = readStoreKey(storeDirs, `hierarchy/rotate-pending/${name}`) as
+    Record<string, unknown> | undefined;
+  return hit?.pending === true;
+}
+
 function readStoreKey(storeDirs: readonly string[], key: string): unknown {
   for (const dir of storeDirs) {
     let files: string[];

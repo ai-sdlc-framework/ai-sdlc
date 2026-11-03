@@ -10,6 +10,7 @@ import {
   moduleHealthPath,
   readModuleHealth,
   readModuleMeasure,
+  readModuleRotatePending,
 } from './module-health.js';
 import type { HierarchyDeps, RosterEntry } from './types.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
@@ -141,5 +142,22 @@ describe('readModuleMeasure (AISDLC-1100)', () => {
     );
     expect(readModuleMeasure([dir], 'p-exec')).toEqual({ tokens: 154000, at: 'x' });
     expect(readModuleMeasure([dir], 'p-bad')).toBeUndefined();
+  });
+});
+
+describe('readModuleRotatePending (AISDLC-1159)', () => {
+  it('is true only while the module holds a deferred rotation', () => {
+    const dir = board();
+    expect(readModuleRotatePending([dir], 'p-plan')).toBe(false);
+    writeFileSync(
+      path.join(dir, 'a.json'),
+      JSON.stringify({ 'hierarchy/rotate-pending/p-plan': { pending: true, at: 'x' } }),
+    );
+    expect(readModuleRotatePending([dir], 'p-plan')).toBe(true);
+    writeFileSync(
+      path.join(dir, 'a.json'),
+      JSON.stringify({ 'hierarchy/rotate-pending/p-plan': null }),
+    );
+    expect(readModuleRotatePending([dir], 'p-plan')).toBe(false);
   });
 });
