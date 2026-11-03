@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1177
 title: 'retire-landed moves a failed verdict to done when the task''s docs filing PR lands, though its code PR is still open'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-03'
 labels:

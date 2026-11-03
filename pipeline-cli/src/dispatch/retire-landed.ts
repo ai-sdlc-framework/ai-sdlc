@@ -10,6 +10,7 @@
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { TASK_ID_RE } from './board.js';
+import { DOCS_BRANCH_PREFIXES } from '../hierarchy/reconcile.js';
 
 const VERDICT_SUFFIX = '.verdict.json';
 const MANIFEST_SUFFIX = '.manifest.json';
@@ -21,6 +22,10 @@ export interface RetireLandedInput {
   /** Commit that landed, when known. */
   landedSha?: string;
   prNumber?: number;
+  /** Head branch of the landed PR, when known (AISDLC-1177). */
+  headBranch?: string;
+  /** Landing-record kind of the landed PR, when known; anything but `task` is not a code PR. */
+  kind?: string;
 }
 
 /**
@@ -40,6 +45,16 @@ export function retireFailedVerdict(boardDir: string, input: RetireLandedInput):
     return false;
   }
   if (original['outcome'] === 'success') return false;
+  // AISDLC-1177: only the task's own code PR retires its verdict.
+  const verdictPr = original['prNumber'];
+  if (typeof verdictPr === 'number') {
+    if (input.prNumber !== undefined && input.prNumber !== verdictPr) return false;
+  } else if (
+    (input.kind !== undefined && input.kind !== 'task') ||
+    DOCS_BRANCH_PREFIXES.some((p) => (input.headBranch ?? '').startsWith(p))
+  ) {
+    return false;
+  }
   const record: Record<string, unknown> = {
     ...original,
     outcome: 'success',
@@ -75,6 +90,8 @@ export function retireFailedVerdict(boardDir: string, input: RetireLandedInput):
 export interface LandedRecordLike {
   pr: number;
   taskId?: string;
+  kind?: string;
+  headBranch?: string;
   landed?: string;
   landedSha?: string;
   headSha?: string;
@@ -97,6 +114,8 @@ export function retireLandedSweep(
       landedAt: r.landed,
       ...(r.landedSha ? { landedSha: r.landedSha } : r.headSha ? { landedSha: r.headSha } : {}),
       prNumber: r.pr,
+      ...(r.kind ? { kind: r.kind } : {}),
+      ...(r.headBranch ? { headBranch: r.headBranch } : {}),
     });
     if (did) moved.push({ taskId: r.taskId, pr: r.pr });
   }
