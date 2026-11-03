@@ -28,6 +28,7 @@ describe('decision writers use the write root (AISDLC-1161)', () => {
         'extend',
         'override',
         'resolve',
+        'supersede',
         'score-a',
         'score-c',
         'supersede',

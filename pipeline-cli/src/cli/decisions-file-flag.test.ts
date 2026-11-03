@@ -163,6 +163,36 @@ describe('decisions CLI --file from the Pattern-C parent (AISDLC-1161)', () => {
   );
 
   it(
+    'AISDLC-1165: supersede --file routes through cli-file like answer --file',
+    async () => {
+      for (const decisionId of ['DEC-0001', 'DEC-0002']) {
+        appendDecisionEvent(
+          makeDecisionOpenedEvent({
+            decisionId,
+            source: 'ad-hoc',
+            scope: 'workspace',
+            summary: 's',
+            options: [
+              { id: 'opt-a', description: 'a' },
+              { id: 'opt-b', description: 'b' },
+            ],
+          } as Parameters<typeof makeDecisionOpenedEvent>[0]),
+          { workDir: parent },
+        );
+      }
+      git(parent, 'add', '.');
+      git(parent, 'commit', '-m', 'open');
+      git(parent, 'push', 'origin', 'HEAD:main');
+      const before = ids(join(parent, EVENTS)).length;
+      await run('supersede', 'DEC-0001', '--by', 'DEC-0002', '--reason', 'overruled', '--file');
+      expect(ids(join(parent, EVENTS)).length).toBe(before);
+      git(parent, 'fetch', 'origin');
+      expect(remoteFiles('ai-sdlc/file-dec-0001').join('\n')).toContain('superseded');
+    },
+    T,
+  );
+
+  it(
     'answer without --file on a decision absent locally still fails',
     async () => {
       await expect(run('answer', 'DEC-0001', 'opt-a')).rejects.toThrow('process.exit(1)');
