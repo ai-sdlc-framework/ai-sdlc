@@ -178,6 +178,8 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       'independence-policy-gate',
       'dependency-review-gate',
       'dor-readiness-gate',
+      // AISDLC-1169: RFC-0061 shadow verdict check, not in the pr-ready needs list.
+      'review-verdict-shadow',
       // AISDLC-764: changelog, scope-creep, OQ-marker and reviewer-set checks.
       'governance-gate',
       // AISDLC-934: folded in from require-issue-link.yml and rfc-lifecycle-check.yml.
