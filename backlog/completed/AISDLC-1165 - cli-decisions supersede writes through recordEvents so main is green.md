@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1165
 title: 'cli-decisions supersede writes its event through recordEvents; main is red on decisions-write-root.test.ts and every pre-push fails'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-03'
 labels:
@@ -31,9 +31,32 @@ The pre-push hook runs the pipeline-cli tests, so every code push in the repo is
 
 ## Acceptance Criteria
 
-- [ ] AC-1: The supersede handler writes its event through `recordEvents`; `decisions.ts` contains exactly one `appendDecisionEvent(` call, inside `recordEvents`.
-- [ ] AC-2: `decisions-write-root.test.ts` passes and the existing supersede tests still pass; add one test that `supersede --file` routes through `cli-file` like `answer --file`.
+- [x] AC-1: The supersede handler writes its event through `recordEvents`; `decisions.ts` contains exactly one `appendDecisionEvent(` call, inside `recordEvents`.
+- [x] AC-2: `decisions-write-root.test.ts` passes and the existing supersede tests still pass; add one test that `supersede --file` routes through `cli-file` like `answer --file`.
 
 ## Notes
 
 Semantic collision between two sibling PRs that landed on 2026-11-03. Found by the planner's rebase agents for #2308 and #2271.
+
+## Final Summary
+
+## Summary
+Removed the duplicate 'supersede' entry that the earlier commit had added to the expected list in decisions-write-root.test.ts. The file now matches origin/main, so the invariant test passes. The supersede handler already writes through recordEvents, and decisions.ts has exactly one appendDecisionEvent( call. The new test that supersede --file routes through cli-file is in decisions-file-flag.test.ts.
+
+## Changes
+- pipeline-cli/src/cli/decisions-write-root.test.ts
+- pipeline-cli/src/cli/decisions-file-flag.test.ts
+
+## Design decisions
+The branch was already up to date with origin/main when I rebased. I pushed with --force-with-lease and the PR already existed. The full build, test, lint and format:check run passed before the final commit, and the push only added the test fix and the review ledger commit.
+
+## Verification
+- `pnpm build` — passed (ai-sdlc-plugin/mcp-server build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (246 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
