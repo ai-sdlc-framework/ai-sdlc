@@ -1202,4 +1202,17 @@ describe('AISDLC-1171 — clean-room verdict artifact and trusted writer', () =>
     assert.doesNotMatch(writerText, /ref:\s*\$\{\{\s*github\.event\.(?:pull_request|workflow_run)/);
     assert.doesNotMatch(writerText, /refs\/pull\//);
   });
+
+  it('resolves the PR head from the API, not the event sha, and scopes the token', () => {
+    const w = loadYaml(writerPath);
+    const steps = allSteps(w).map(({ step }) => step);
+    const checkout = steps.find((st) => st.uses?.startsWith('actions/checkout@'));
+    assert.equal(checkout.with['persist-credentials'], false);
+    assert.doesNotMatch(writerText, /RUN_HEAD_SHA/);
+    assert.match(writerText, /repos\/\$\{REPO\}\/pulls/);
+    assert.match(writerText, /--ignore-scripts/);
+    const withToken = steps.filter((st) => st.env && 'GH_TOKEN' in st.env);
+    assert.equal(withToken.length, 1);
+    assert.match(String(withToken[0].run), /verdict-write/);
+  });
 });
