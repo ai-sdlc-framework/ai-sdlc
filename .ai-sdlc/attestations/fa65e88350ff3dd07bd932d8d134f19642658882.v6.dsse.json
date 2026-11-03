@@ -2,7 +2,7 @@
   "schemaVersion": "v6",
   "subject": {
     "digest": {
-      "sha1": "08f53e5ed24ef8a591ee9185bd63a1c13f7fbd63"
+      "sha1": "012269ddeb0487707272e912032093f6a99aedaa"
     }
   },
   "transcriptLeaves": [
@@ -56,9 +56,9 @@
   ],
   "rootHash": "2668826c039065e6a6084e50752b81c01e7f325f5371a41d7a8540d9c4694c99",
   "rootSignature": "zFTJb0xf8Wq9TC6tKA1d4NOWA+rYi1oSiCJStinKg7nN4d6WZRAyxXK9dN9FxIw7DKs7Jczh9ZbmGl1iAGT3CQ==",
-  "nonce": "92bd4f271f2c438b5d64a0110c638444a009d55c82ecca48a3faa177c5fa43b0",
+  "nonce": "952ddec43e69714b1c4705e1bd960fe82af5d65c60dd28403db5f9e6778c17ba",
   "leafCount": 3,
-  "signedAt": "2026-11-03T17:26:26.774Z",
+  "signedAt": "2026-11-03T17:48:17.140Z",
   "signerIdentity": "dominique@local:doms-macbook",
   "reviewScope": {
     "classification": "full",
@@ -70,10 +70,5 @@
       "ai-sdlc-plugin/scripts/sign-attestation.test.mjs"
     ],
     "appliedReviewers": ["code-reviewer", "test-reviewer", "security-reviewer"]
-  },
-  "workflowDigest": {
-    "path": "builtin:execute-task",
-    "sha256": "4269004f2ed240b0913ce0902771de95877c3ac9d62dddf5544245febbc51d82",
-    "baseSha": "c3ea4e645d26a935298a2c418d51b7f10914c20b"
   }
 }
